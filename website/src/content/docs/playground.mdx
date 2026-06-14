@@ -1,0 +1,50 @@
+---
+title: Playground
+description: A browser-hosted Cairn compiler powered by cairn-wasm. Coming soon.
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+<Aside type="caution" title="Not implemented yet">
+The reference compiler is a skeleton. This page is a placeholder for the browser-hosted
+playground that will use the [`cairn-wasm`](https://github.com/kage1020/Cairn/tree/main/crates/cairn-wasm)
+bindings once they exist. The editor below is purely cosmetic — there is nothing to compile yet.
+</Aside>
+
+## What this page will eventually be
+
+A two-pane Cairn workbench, all client-side:
+
+- A `.crn` editor on the left, with syntax highlighting and inline diagnostics from the
+  Cairn LSP.
+- A target selector (`--edition java|bedrock`, `--target <version>`) and a compile button.
+- A right-hand pane that flips between:
+  - **Resolved IR** — the block-array IR after phase evaluation.
+  - **Diagnostics** — lint output in the same "what is wrong / valid candidates / suggested
+    fix" shape used by `cairn` and the LSP ([Lint](/spec/lint/)).
+  - **Bytes** — the per-edition NBT / schematic bytes the compiler would emit.
+
+The lift loop ([Ecosystem Interop](/spec/ecosystem-interop/)) will live here too: drop a
+`.litematic` or `.mcstructure` file in and watch the compiler produce a raw-centric `.crn`
+plus a voxel diff against the source.
+
+## A sample to read in the meantime
+
+```text
+@cairn 2026.06
+@requires version>=1.20
+
+theme medieval:
+  slot wall  -> @cobblestone
+  slot roof  -> @spruce_stairs
+
+struct cottage size=9x7
+  floor  mat_slot=floor
+  walls  class=outer mat_slot=wall height=4
+  door   side=front at=center
+  window class=small side=front offset=2 y=2 size=2x2 sym=true
+  roof   kind=gable mat_slot=roof overhang=1
+```
+
+Track progress on the [Cairn GitHub repository](https://github.com/kage1020/Cairn) — the
+playground unlocks the moment `cairn-wasm` exposes a `compile()` binding.

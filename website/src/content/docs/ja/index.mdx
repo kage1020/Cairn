@@ -1,0 +1,89 @@
+---
+title: Cairn — Minecraft 建築物のための記述言語
+description: 壁、屋根、窓、レッドストーン — 意図を宣言すれば、ボクセル解決はコンパイラの仕事。エディション/バージョンごとに、意図的に lossy に。
+template: splash
+hero:
+  tagline: Minecraft 建築のための記述言語。壁、屋根、窓、対称性、レッドストーン — 意図 (intent) を宣言すると、コンパイラがボクセルを解決します。
+  actions:
+    - text: イントロを読む
+      link: /ja/introduction/
+      icon: right-arrow
+      variant: primary
+    - text: チュートリアル
+      link: /ja/tutorial/
+      icon: open-book
+    - text: 仕様書
+      link: /ja/spec/
+      icon: document
+    - text: GitHub
+      link: https://github.com/kage1020/Cairn
+      icon: external
+      variant: minimal
+---
+
+import { Card, CardGrid } from '@astrojs/starlight/components';
+
+## なぜ Cairn か
+
+Minecraft の NBT/SNBT は AI が直接扱うには非効率です (バイナリ、1ブロック1レコード、フラット)。
+人や AI が建築を考える粒度 (壁、屋根、対称性) とも噛み合っていません。Cairn は **建築的意図を Minecraft
+のボクセル世界と対応付ける中間言語** です。AI が「見て」「手を動かす」ための目と手です。
+
+アプローチは **generation-first (lossy)** です。NBT との完全なラウンドトリップ忠実度は捨て、AI が
+正確に生成・編集できることを最優先にします。可搬な成果物は常に Cairn ソースであり、出力された
+NBT/schematic はターゲット固定のビルド成果物です。
+
+<CardGrid stagger>
+  <Card title="ブロックステートではなく意図を宣言する" icon="puzzle">
+    階段の向き、ドアの向き、ガラスペインの接続、ベッドの頭・足は、コンパイラが導出します。値そのもの
+    が意図である場合のみ、ユーザーが上書きします。
+  </Card>
+  <Card title="フェーズ順評価" icon="list-format">
+    コマンドはフラットに順不同で書き、コンパイラが固定のフェーズ (massing → envelope → openings →
+    fixtures → redstone → raw) に振り分けます。
+  </Card>
+  <Card title="CSS 的なテーマ" icon="seti:css">
+    構造体は `mat_slot` を持ち、`theme` がスロットとセレクタにマテリアルを束ねます。「どこ」と
+    「何で」を分離します。
+  </Card>
+  <Card title="Java と Bedrock を 1 ソースから" icon="seti:config">
+    エディションはコンパイル時のターゲット軸。正規語彙とエディション別バックエンドが ID / 状態の
+    差分を吸収します。トランスコードではなく再コンパイル。
+  </Card>
+  <Card title="論理的なレッドストーン" icon="random">
+    信号グラフを記述すると、コンパイラが実際の dust/repeater/torch をエディションごとに合成・配置・
+    配線します。
+  </Card>
+  <Card title="lint をファーストクラスのループに" icon="approve-check-circle">
+    コンパイラは建築 linter でもあります。精度は自己修正ループで獲得するもので、ワンショット生成で
+    得るものではありません。
+  </Card>
+</CardGrid>
+
+## 試食
+
+```
+@requires version>=1.20
+
+theme medieval:
+  slot wall  -> @cobblestone
+  slot roof  -> @spruce_stairs
+  window[class=small] -> frame=@spruce_wood
+
+struct cottage size=9x7
+  floor  mat_slot=floor
+  walls  class=outer mat_slot=wall height=4
+  door   side=front at=center
+  window class=small side=front offset=2 y=2 size=2x2 sym=true
+  roof   kind=gable mat_slot=roof overhang=1
+```
+
+```sh
+cairn compile cottage.crn --edition java --target 1.21.4
+```
+
+## ステータス
+
+Cairn は **設計段階**、ドラフト `2026.06` にあります。言語仕様はオープンに設計中で、リファレンス
+コンパイラはまだスケルトンです。正規ドキュメントは [仕様書](/ja/spec/) を、実装ロードマップは
+[開発者ガイド](/development/) を参照してください。

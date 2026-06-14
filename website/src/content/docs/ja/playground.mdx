@@ -1,0 +1,49 @@
+---
+title: プレイグラウンド
+description: cairn-wasm 上で動くブラウザ内 Cairn コンパイラ。近日公開予定。
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+<Aside type="caution" title="未実装">
+リファレンスコンパイラはまだスケルトンです。このページは
+[`cairn-wasm`](https://github.com/kage1020/Cairn/tree/main/crates/cairn-wasm) バインディングが揃ったら
+ブラウザ内プレイグラウンドになる場所のプレースホルダーです。下の編集枠は装飾用で、いま動かせる
+コンパイラは存在しません。
+</Aside>
+
+## ここに最終的に乗るもの
+
+クライアントサイド完結の二面構成 Cairn 作業台:
+
+- 左に `.crn` エディタ。シンタックスハイライトと Cairn LSP のインライン診断。
+- ターゲット選択 (`--edition java|bedrock`、`--target <version>`) とコンパイルボタン。
+- 右ペインは次のいずれかを切り替え:
+  - **Resolved IR** — フェーズ評価後の block-array IR。
+  - **Diagnostics** — CLI と LSP と同じ「何が間違っているか / 有効な候補 / 推奨される修正」の lint
+    出力 ([Lint](/ja/spec/lint/))。
+  - **Bytes** — エディションごとに吐く NBT / schematic のバイト列。
+
+リフトループ ([エコシステム連携](/ja/spec/ecosystem-interop/)) もここに乗ります。`.litematic` や
+`.mcstructure` をドロップすると、raw 中心 `.crn` と元データに対する voxel diff が出てきます。
+
+## いま読めるサンプル
+
+```text
+@cairn 2026.06
+@requires version>=1.20
+
+theme medieval:
+  slot wall  -> @cobblestone
+  slot roof  -> @spruce_stairs
+
+struct cottage size=9x7
+  floor  mat_slot=floor
+  walls  class=outer mat_slot=wall height=4
+  door   side=front at=center
+  window class=small side=front offset=2 y=2 size=2x2 sym=true
+  roof   kind=gable mat_slot=roof overhang=1
+```
+
+進捗は [Cairn GitHub リポジトリ](https://github.com/kage1020/Cairn) で追跡できます。
+`cairn-wasm` が `compile()` バインディングを露出した瞬間にプレイグラウンドが解禁されます。

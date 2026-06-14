@@ -1,0 +1,26 @@
+@cairn 2026.06
+@requires version>=1.20
+
+# Multiple buildings on one site, joined by topological relations rather than coordinates.
+# Demonstrates: def, theme reuse, site placement, connect with a path slot.
+
+def cottage class=house size=9x7:
+  floor  id=floor mat_slot=floor
+  walls  id=walls class=outer mat_slot=wall height=4
+  door   id=entry class=entry side=front at=center
+  window id=front side=front y=2 offset=2 size=2x2 mat_slot=glass
+  roof   id=roof  kind=gable mat_slot=roof overhang=1
+
+theme medieval:
+  slot floor -> @oak_planks
+  slot wall  -> @cobblestone
+  slot roof  -> @spruce_stairs
+  slot glass -> @glass_pane
+
+site hamlet:
+  place id=home1 use=cottage theme=medieval at=origin
+  place id=home2 use=cottage theme=medieval east_of=home1 gap=4
+  place id=home3 use=cottage theme=medieval north_of=home1 gap=5
+
+  connect home1.entry to home2.entry path=@gravel
+  connect home1.entry to home3.entry path=@gravel

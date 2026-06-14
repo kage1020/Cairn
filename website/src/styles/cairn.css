@@ -1,0 +1,42 @@
+/* Cairn site theme.
+ *
+ * Earthy stone palette to match the project's "stacked stones" thesis.
+ * Overrides Starlight's CSS variables; do not introduce !important. */
+
+:root {
+  --sl-color-accent-low: #f4eee2;
+  --sl-color-accent: #8c6a3c;
+  --sl-color-accent-high: #4a3618;
+  --sl-color-white: #fdfcfa;
+  --sl-color-gray-1: #f1ece1;
+  --sl-color-gray-7: #5a5145;
+  --sl-color-text-accent: #4a3618;
+  --sl-font: "Inter", "Hiragino Sans", "Noto Sans JP", system-ui, sans-serif;
+}
+
+:root[data-theme="dark"] {
+  --sl-color-accent-low: #2a2218;
+  --sl-color-accent: #c19a5e;
+  --sl-color-accent-high: #f0d9a6;
+  --sl-color-bg: #1a1611;
+  --sl-color-bg-nav: #211c14;
+  --sl-color-text-accent: #f0d9a6;
+}
+
+.hero h1 {
+  letter-spacing: -0.02em;
+}
+
+.hero p {
+  max-width: 42rem;
+}
+
+/* Inline code chips look heavier in body prose with a faint stone tint. */
+:not(pre) > code {
+  background: var(--sl-color-gray-1);
+  border-radius: 0.3em;
+}
+
+:root[data-theme="dark"] :not(pre) > code {
+  background: var(--sl-color-accent-low);
+}
