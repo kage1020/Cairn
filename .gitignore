@@ -1,0 +1,33 @@
+# Build outputs / compiled artifacts
+/dist/
+/build/
+/out/
+*.nbt
+*.litematic
+*.schem
+*.mcstructure
+
+# Cairn lockfiles are generated; ignore unless intentionally committed
+*.cairn.lock
+
+# Node
+node_modules/
+npm-debug.log*
+pnpm-debug.log*
+.pnp.*
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Rust
+/target/
+
+# Editor / OS
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
