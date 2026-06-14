@@ -25,6 +25,7 @@ title: "Cairn — Minecraft 建築 DSL 仕様 2026.06 (ドラフト)"
 | 13 | [評価フレームワーク](evaluation) | 評価フレームワーク |
 | 14 | [レッドストーン](redstone) | レッドストーン (論理回路) |
 | 15 | [未決事項](open-issues) | 未決事項 |
+| — | [互換性ティア](compatibility) | 公開面ごとの Stable / Evolving / Internal 契約 |
 | — | [用語集](glossary) | 用語集 |
 
 ## 用語と規約

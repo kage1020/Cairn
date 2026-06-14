@@ -1,0 +1,161 @@
+name: Release
+
+# Opens release PRs and (on merge) publishes.
+#
+# Branch model: `canary` is the trunk, `main` holds only released state.
+# - Monthly minor: cron at 04:17 UTC on the 1st (offset from the hour to avoid
+#   GitHub Actions cron congestion). Computes YYYY.0M.0, pre-sets the workspace
+#   version on canary, then runs release-plz to generate the changelog and PR.
+# - Patch: every push to canary. release-plz decides whether to open a PR based
+#   on the `release_commits` regex in release-plz.toml.
+# - Manual: workflow_dispatch with optional `version` input.
+#
+# When release-plz publishes (a release PR was merged into canary), this workflow
+# detects the newly-created `v*` tag at HEAD and fast-forwards `main` to canary.
+# That `v*` tag then triggers publish.yml for binaries.
+
+on:
+  schedule:
+    - cron: "17 4 1 * *"
+  push:
+    branches: [canary]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Override version (e.g. 2026.07.0). Leave empty to compute from tags."
+        required: false
+        type: string
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  compute-version:
+    name: Compute next CalVer
+    if: github.event_name != 'push'
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.calc.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: canary
+          fetch-depth: 0
+          fetch-tags: true
+
+      - id: calc
+        shell: bash
+        env:
+          OVERRIDE: ${{ github.event.inputs.version }}
+        run: |
+          set -euo pipefail
+          if [ -n "$OVERRIDE" ]; then
+            # Reject anything that is not a CalVer string. This is what makes
+            # the downstream `sed` of Cargo.toml safe in the release-minor job.
+            if [[ ! "$OVERRIDE" =~ ^[0-9]{4}\.[0-9]{2}(\.[0-9]+)?$ ]]; then
+              echo "Refusing invalid override: $OVERRIDE" >&2
+              exit 1
+            fi
+            echo "version=$OVERRIDE" >> "$GITHUB_OUTPUT"
+            echo "Using manual override: $OVERRIDE"
+            exit 0
+          fi
+          year=$(date -u +%Y)
+          month=$(date -u +%m)
+          prefix="v${year}.${month}"
+          patches=$(git tag --list "${prefix}.*" | sed -E "s/^${prefix}\.//" | sort -n)
+          if [ -z "$patches" ]; then
+            version="${year}.${month}.0"
+          else
+            last=$(echo "$patches" | tail -n1)
+            next=$((last + 1))
+            version="${year}.${month}.${next}"
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "Computed: $version"
+
+  release-minor:
+    name: Open monthly minor release PR
+    if: github.event_name != 'push'
+    needs: compute-version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: canary
+          fetch-depth: 0
+          fetch-tags: true
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install Rust toolchain
+        run: rustup show
+
+      - name: Set workspace version
+        env:
+          NEW_VERSION: ${{ needs.compute-version.outputs.version }}
+        run: |
+          set -euo pipefail
+          # workspace.package.version (inside the [workspace.package] section).
+          sed -i -E '/^\[workspace\.package\]/,/^\[/ s/^version = ".*"/version = "'"$NEW_VERSION"'"/' Cargo.toml
+          # workspace.dependencies internal crate versions.
+          sed -i -E 's/^(cairn-[a-z-]+ = \{ version = )"[^"]*"/\1"'"$NEW_VERSION"'"/' Cargo.toml
+          cargo update --workspace
+          echo "--- Cargo.toml [workspace.package] + [workspace.dependencies] ---"
+          awk '/^\[workspace\.(package|dependencies)\]/,/^$/' Cargo.toml
+
+      - name: Run release-plz release-pr
+        uses: release-plz/action@v0.5
+        with:
+          command: release-pr
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+
+  release-patch:
+    name: Open patch PR or publish merged release
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: canary
+          fetch-depth: 0
+          fetch-tags: true
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install Rust toolchain
+        run: rustup show
+
+      # Default command runs both `release-pr` (open patch PR for new commits)
+      # and `release` (publish + tag a merged release PR if present).
+      - name: Run release-plz
+        id: release_plz
+        uses: release-plz/action@v0.5
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+
+      # Fast-forward `main` to canary only when release-plz reports it actually
+      # published in this run. The `releases_created` output is the trust anchor —
+      # gating on "is there a v* tag at HEAD" alone would let any pre-existing tag
+      # at HEAD trigger a promote and bypass main's branch protection.
+      # publish.yml is triggered separately by the tag push.
+      - name: Promote canary to main on release
+        if: steps.release_plz.outputs.releases_created == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin --tags --prune
+          new_tags=$(git tag --points-at HEAD --list 'v*' || true)
+          if [ -z "$new_tags" ]; then
+            echo "release-plz reported a release but no v* tag points at HEAD; refusing to promote." >&2
+            exit 1
+          fi
+          echo "Detected release tag(s) at HEAD: $new_tags"
+          # Fast-forward main to the released commit on canary.
+          git push origin "HEAD:refs/heads/main"

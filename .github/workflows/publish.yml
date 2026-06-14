@@ -1,0 +1,230 @@
+name: Publish
+
+# Tag-triggered binary build and sigstore signing.
+# release.yml (release-plz) publishes crates and creates the GitHub Release and the
+# `v*` tag. This workflow picks up the tag, cross-compiles the `cairn` binary for
+# six OS/arch combinations, signs each archive with keyless sigstore, and uploads
+# everything to the GitHub Release.
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to (re)build (e.g. v2026.07.0)"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+  id-token: write
+
+concurrency:
+  group: publish-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  validate-tag:
+    name: Validate tag
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.v.outputs.tag }}
+      version: ${{ steps.v.outputs.version }}
+    steps:
+      # Bind the untrusted ref / dispatch input to env vars, then reject anything
+      # that does not match the CalVer tag shape. Downstream jobs only ever read
+      # the validated outputs.
+      - id: v
+        shell: bash
+        env:
+          RAW_TAG: ${{ github.event.inputs.tag || github.ref_name }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$RAW_TAG" =~ ^v[0-9]{4}\.[0-9]{2}(\.[0-9]+)?$ ]]; then
+            echo "Refusing to build untrusted tag: $RAW_TAG" >&2
+            exit 1
+          fi
+          echo "tag=$RAW_TAG" >> "$GITHUB_OUTPUT"
+          echo "version=${RAW_TAG#v}" >> "$GITHUB_OUTPUT"
+
+  binaries:
+    name: ${{ matrix.target }}
+    needs: validate-tag
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            runner: ubuntu-latest
+            archive: tar.gz
+            ext: ""
+          - target: aarch64-unknown-linux-gnu
+            runner: ubuntu-24.04-arm
+            archive: tar.gz
+            ext: ""
+          - target: x86_64-apple-darwin
+            runner: macos-13
+            archive: tar.gz
+            ext: ""
+          - target: aarch64-apple-darwin
+            runner: macos-14
+            archive: tar.gz
+            ext: ""
+          - target: x86_64-pc-windows-msvc
+            runner: windows-latest
+            archive: zip
+            ext: ".exe"
+          - target: aarch64-pc-windows-msvc
+            runner: windows-11-arm
+            archive: zip
+            ext: ".exe"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.validate-tag.outputs.tag }}
+
+      - name: Install Rust toolchain
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          rustup show
+          rustup target add "$TARGET"
+
+      - name: Build
+        shell: bash
+        env:
+          CARGO_TERM_COLOR: always
+          TARGET: ${{ matrix.target }}
+        run: cargo build --release --locked --bin cairn --target "$TARGET"
+
+      - name: Stage binary
+        id: stage
+        shell: bash
+        env:
+          VERSION: ${{ needs.validate-tag.outputs.version }}
+          TARGET: ${{ matrix.target }}
+          EXT: ${{ matrix.ext }}
+        run: |
+          set -euo pipefail
+          name="cairn-${VERSION}-${TARGET}"
+          mkdir -p "dist/$name"
+          cp "target/${TARGET}/release/cairn${EXT}" "dist/$name/"
+          cp LICENSE "dist/$name/"
+          cp README.md "dist/$name/"
+          echo "name=$name" >> "$GITHUB_OUTPUT"
+
+      - name: Archive (tar.gz)
+        if: matrix.archive == 'tar.gz'
+        id: tar
+        shell: bash
+        env:
+          NAME: ${{ steps.stage.outputs.name }}
+        run: |
+          set -euo pipefail
+          (cd dist && tar -czf "${NAME}.tar.gz" "$NAME")
+          echo "path=dist/${NAME}.tar.gz" >> "$GITHUB_OUTPUT"
+
+      - name: Archive (zip)
+        if: matrix.archive == 'zip'
+        id: zip
+        shell: pwsh
+        env:
+          NAME: ${{ steps.stage.outputs.name }}
+        run: |
+          $name = $env:NAME
+          Compress-Archive -Path "dist/$name" -DestinationPath "dist/$name.zip"
+          "path=dist/$name.zip" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
+      - name: Resolve archive path
+        id: archive
+        shell: bash
+        env:
+          ARCHIVE_KIND: ${{ matrix.archive }}
+          TAR_PATH: ${{ steps.tar.outputs.path }}
+          ZIP_PATH: ${{ steps.zip.outputs.path }}
+        run: |
+          set -euo pipefail
+          if [ "$ARCHIVE_KIND" = "tar.gz" ]; then
+            echo "path=$TAR_PATH" >> "$GITHUB_OUTPUT"
+          else
+            echo "path=$ZIP_PATH" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
+
+      - name: Sign archive (keyless sigstore)
+        shell: bash
+        env:
+          COSIGN_EXPERIMENTAL: "1"
+          ARCHIVE: ${{ steps.archive.outputs.path }}
+        run: |
+          set -euo pipefail
+          cosign sign-blob --yes --bundle "${ARCHIVE}.sigstore" "$ARCHIVE"
+
+      - name: Compute SHA-256
+        shell: bash
+        env:
+          ARCHIVE: ${{ steps.archive.outputs.path }}
+        run: |
+          set -euo pipefail
+          if command -v sha256sum >/dev/null 2>&1; then
+            sha256sum "$ARCHIVE" | awk '{print $1}' > "$ARCHIVE.sha256"
+          else
+            shasum -a 256 "$ARCHIVE" | awk '{print $1}' > "$ARCHIVE.sha256"
+          fi
+
+      - name: Upload to GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.validate-tag.outputs.tag }}
+          ARCHIVE: ${{ steps.archive.outputs.path }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh release upload "$TAG" \
+            "$ARCHIVE" \
+            "$ARCHIVE.sigstore" \
+            "$ARCHIVE.sha256" \
+            --clobber
+
+  sbom:
+    name: SBOM
+    needs: validate-tag
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.validate-tag.outputs.tag }}
+
+      - name: Install Rust toolchain
+        run: rustup show
+
+      - name: Install cargo-cyclonedx
+        run: cargo install cargo-cyclonedx --locked
+
+      - name: Generate SBOM
+        run: cargo cyclonedx --format json --override-filename cairn-sbom
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
+
+      - name: Sign SBOM
+        env:
+          COSIGN_EXPERIMENTAL: "1"
+        run: cosign sign-blob --yes --bundle cairn-sbom.cdx.json.sigstore cairn-sbom.cdx.json
+
+      - name: Upload SBOM to GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.validate-tag.outputs.tag }}
+        run: |
+          gh release upload "$TAG" \
+            cairn-sbom.cdx.json \
+            cairn-sbom.cdx.json.sigstore \
+            --clobber

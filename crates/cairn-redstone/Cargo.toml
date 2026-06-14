@@ -1,7 +1,7 @@
 [package]
 name = "cairn-redstone"
 description = "Redstone logic synthesis, place-and-route, and a headless tick simulator"
-version = "0.0.0"
+version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
@@ -9,7 +9,7 @@ repository.workspace = true
 authors.workspace = true
 
 [dependencies]
-cairn-core = { path = "../cairn-core" }
+cairn-core = { workspace = true }
 
 [lints]
 workspace = true

@@ -40,3 +40,15 @@ compiler exists yet.
   [`website/src/content/docs/`](website/src/content/docs/); a placeholder playground page is
   wired to the future `cairn-wasm` bindings; Cloudflare's Git integration auto-deploys on every
   push to `main`.
+- Release strategy decided: monthly minor (`YYYY.0M.0`) by GitHub Actions cron at 04:17 UTC on
+  the 1st, plus on-demand patches (`YYYY.0M.N`) triggered by qualifying commits to `main`.
+  Workspace versioning is unified through `[workspace.package].version` and `[workspace.dependencies]`.
+  release-plz drives PR creation and changelog generation; binaries are cross-compiled for
+  Linux/macOS/Windows on `x86_64`/`aarch64`, signed with keyless sigstore, and attached to the
+  GitHub Release.
+- Compatibility tiers documented in
+  [spec/compatibility](https://cairn.kage1020.com/spec/compatibility/): every public surface sits
+  in **Stable**, **Evolving**, or **Internal**, with a milestone-indexed table showing when each
+  surface graduates.
+- [Roadmap](https://cairn.kage1020.com/roadmap/) published, with M1–M6 milestones and a monthly
+  scope plan through `2027.06.0`.

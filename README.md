@@ -86,6 +86,26 @@ This is the version of the language + reference compiler + standard library + re
 packs as a bundle. It is a **separate axis** from the Minecraft target version (`--target`); the two
 are always distinguished by field/flag/keyword, never by format. See the spec for details.
 
+The contract behind a version bump — what is safe to break, when — is set by
+[Compatibility Tiers](https://cairn.kage1020.com/spec/compatibility/): every surface is **Stable**,
+**Evolving**, or **Internal**, with monthly minors as the only window for `Evolving` breaks and
+one release of `W_DEPRECATED` lead time before any `Stable` break.
+
+## Roadmap
+
+[Roadmap](https://cairn.kage1020.com/roadmap/) lists the M1–M6 milestones and the planned monthly
+scope through `2027.06.0`:
+
+- **M1** (`2026.07.0`) — source parses
+- **M2** (`2026.10.0`) — minimal build (single room, Java, lockfile)
+- **M3** (`2027.01.0`) — examples work end-to-end on Java
+- **M4** (`2027.02.0`) — Java/Bedrock parity
+- **M5** (`2027.03.0`) — `cairn-lsp` and VS Code extension
+- **M6** (`2027.05.0`) — redstone logic, place-and-route, and tick simulator
+
+Monthly minor releases are opened automatically by a GitHub Actions cron on the 1st of each month;
+patches are opened on demand from `main` when qualifying commits land.
+
 ## Contributing
 
 Cairn is at the design stage; discussion, critique, and concrete proposals are welcome. See
