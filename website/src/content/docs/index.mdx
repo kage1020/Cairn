@@ -1,0 +1,90 @@
+---
+title: Cairn — a description language for Minecraft builds
+description: Declare intent — walls, roofs, windows, redstone — and the compiler resolves the voxels. Per-edition, per-version, lossy on purpose.
+template: splash
+hero:
+  tagline: A description language for Minecraft builds. Declare intent — walls, roofs, windows, symmetry, redstone — and the compiler resolves the voxels.
+  actions:
+    - text: Read the introduction
+      link: /introduction/
+      icon: right-arrow
+      variant: primary
+    - text: Tutorial
+      link: /tutorial/
+      icon: open-book
+    - text: Specification
+      link: /spec/
+      icon: document
+    - text: GitHub
+      link: https://github.com/kage1020/Cairn
+      icon: external
+      variant: minimal
+---
+
+import { Card, CardGrid } from '@astrojs/starlight/components';
+
+## Why Cairn
+
+Minecraft's NBT/SNBT is inefficient for AI to handle directly — it's binary, one-record-per-block,
+and misaligned with how humans and AI reason about architecture (walls, roofs, symmetry). Cairn is
+an **intermediate language that aligns architectural intent with the voxel world**. It is the
+"eyes and hands" an AI uses to see and build.
+
+The approach is **generation-first (lossy)**: full round-trip fidelity with NBT is given up in
+favor of letting an AI generate and edit builds accurately. The portable artifact is always the
+Cairn source; emitted NBT/schematics are per-target build outputs.
+
+<CardGrid stagger>
+  <Card title="Declare intent, not blockstate" icon="puzzle">
+    Stair facing, door orientation, pane connections, and bed head/foot are derived by the
+    compiler; you only override when the value *is* the intent.
+  </Card>
+  <Card title="Phase-ordered evaluation" icon="list-format">
+    Write commands flat and order-free; the compiler sorts them into fixed phases — massing,
+    envelope, openings, fixtures, redstone, raw.
+  </Card>
+  <Card title="CSS-like themes" icon="seti:css">
+    Structure carries material slots; a theme binds slots and selectors to materials,
+    separating *where* from *what*.
+  </Card>
+  <Card title="Java and Bedrock from one source" icon="seti:config">
+    Edition is a compile-time target axis; the canonical vocabulary and per-edition backends
+    absorb ID/state differences. Recompile, don't transcode.
+  </Card>
+  <Card title="Logical redstone" icon="random">
+    Describe a signal graph; the compiler synthesizes and place-and-routes the actual
+    dust/repeaters/torches per edition.
+  </Card>
+  <Card title="Lint as a first-class loop" icon="approve-check-circle">
+    The compiler is also an architectural linter. Precision is earned through a self-correcting
+    loop, not one-shot generation.
+  </Card>
+</CardGrid>
+
+## A taste
+
+```
+@requires version>=1.20
+
+theme medieval:
+  slot wall  -> @cobblestone
+  slot roof  -> @spruce_stairs
+  window[class=small] -> frame=@spruce_wood
+
+struct cottage size=9x7
+  floor  mat_slot=floor
+  walls  class=outer mat_slot=wall height=4
+  door   side=front at=center
+  window class=small side=front offset=2 y=2 size=2x2 sym=true
+  roof   kind=gable mat_slot=roof overhang=1
+```
+
+```sh
+cairn compile cottage.crn --edition java --target 1.21.4
+```
+
+## Status
+
+Cairn is at the **design stage**, draft `2026.06`. The language is being designed in the open and
+the reference compiler is a skeleton; see the [specification](/spec/) for the normative document
+and [Developer Guide](/development/) for the implementation roadmap.

@@ -1,0 +1,31 @@
+@cairn 2026.06
+@requires version>=1.20
+
+# A pressure-plate-opens-door circuit, described at the logic level.
+# Demonstrates:
+#  - sensor → signal → actuator binding
+#  - the closed-set logic vocabulary (no tick arithmetic in the language core)
+#  - a circuit region for place-and-route
+#  - bounded temporal assertion
+
+theme entry:
+  slot wall -> @oak_planks
+  slot door -> @oak_door
+
+struct gatehouse size=7x5
+  floor mat_slot=wall
+  walls class=outer mat_slot=wall height=3
+  door  id=front side=front at=center mat_slot=door
+
+  pressure_plate id=plate at=front.outside offset=0 y=0 -> sig.step
+  pressure_plate id=inner at=inside.front  offset=0 y=0 -> sig.exit
+
+  # any step opens the door
+  logic sig.open = sig.step or sig.exit
+  door[id=front] opened_by=sig.open
+
+  circuit region=floor void=2
+
+  # spec ([redstone] §14.7): truth + bounded eventually
+  assert truth(sig.step, sig.exit -> sig.open) { 00->0; 01->1; 10->1; 11->1 }
+  assert always(sig.step -> eventually sig.open within 2)

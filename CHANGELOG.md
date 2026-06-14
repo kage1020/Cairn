@@ -1,5 +1,7 @@
 # Changelog
 
+> Language: **English** ([日本語](CHANGELOG.ja.md))
+
 All notable changes to Cairn are documented here. Cairn uses date-based versioning (CalVer)
 `YYYY.0M[.PATCH]`. This is the version of the language + reference compiler + standard library +
 registry/constraint packs as a bundle, and is a separate axis from the Minecraft target version.
@@ -25,3 +27,16 @@ compiler exists yet.
   curated sequential macros; verification by a headless tick simulator.
 - Ecosystem interop: export to common formats; import as faithful transliteration with LLM lift.
 - Evaluation: headless geometry/redstone simulator drives quantitative spec iteration.
+- Documentation: per-crate READMEs, the
+  [Developer Guide](https://cairn.kage1020.com/development/), the
+  [Tutorial](https://cairn.kage1020.com/tutorial/), worked
+  [examples](https://cairn.kage1020.com/examples/), and a cross-cutting
+  [Glossary](https://cairn.kage1020.com/spec/glossary/).
+- Japanese mirror of the user-facing documents (README, CONTRIBUTING, CHANGELOG, spec chapters,
+  glossary, tutorial, examples index). English remains the source of truth.
+- Documentation site under [`website/`](website/README.md) (Astro + Starlight, en + ja),
+  deployed to Cloudflare Pages at <https://cairn.kage1020.com/>. The spec, tutorial, developer
+  guide, and examples index are authored directly in
+  [`website/src/content/docs/`](website/src/content/docs/); a placeholder playground page is
+  wired to the future `cairn-wasm` bindings; Cloudflare's Git integration auto-deploys on every
+  push to `main`.

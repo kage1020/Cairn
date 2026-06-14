@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Cairn</title>
+  <g stroke="currentColor" stroke-width="2" stroke-linejoin="round" fill="none">
+    <ellipse cx="32" cy="14" rx="10" ry="6" />
+    <path d="M16 30c0-4 8-7 16-7s16 3 16 7v3c0 4-8 7-16 7s-16-3-16-7z" />
+    <path d="M10 46c0-5 10-9 22-9s22 4 22 9v4c0 5-10 9-22 9s-22-4-22-9z" />
+  </g>
+  <style>g{color:#1f1f1f}@media(prefers-color-scheme:dark){g{color:#f5f5f5}}</style>
+</svg>

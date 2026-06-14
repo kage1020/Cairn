@@ -16,6 +16,10 @@ npm-debug.log*
 pnpm-debug.log*
 .pnp.*
 
+# Astro / Starlight site
+website/dist/
+website/.astro/
+
 # Python
 __pycache__/
 *.py[cod]

@@ -1,5 +1,7 @@
 # Cairn
 
+> Language: **English** ([日本語](README.ja.md))
+
 **Cairn** is a description language for Minecraft builds. You declare *intent* — walls, roofs,
 windows, symmetry, themes, even redstone logic — and the compiler resolves the voxels: blockstates,
 orientations, coordinate math, signal routing, and per-edition/per-version block IDs.
@@ -8,7 +10,8 @@ A cairn is a deliberately stacked pile of stones that marks a place. That is exa
 build is: intentionally placed blocks. The name is the thesis.
 
 > Status: **design specification, draft `2026.06`.** The language is being designed in the open;
-> a reference compiler is not yet implemented. See [`spec/`](spec/README.md) for the normative spec.
+> a reference compiler is not yet implemented. The normative specification, tutorial, and
+> developer guide live on the [documentation site](https://cairn.kage1020.com/).
 
 ## Why
 
@@ -60,11 +63,21 @@ cairn compile cottage.crn --edition java --target 1.21.4
 - **Ecosystem interop.** Exports to `.nbt`, `.litematic`, `.schem`, `.mcstructure`; imports schematics
   as a faithful low-level transliteration that an LLM can then lift into idiomatic Cairn.
 
-## Specification
+## Documentation
 
-The normative specification lives in [`spec/`](spec/README.md), split into focused chapters
-(architecture, syntax, blockstate, materials & themes, entities, versioning & editions, redstone,
-lint, evaluation, ecosystem interop, and open issues).
+The site at <https://cairn.kage1020.com/> is the canonical home for the project's prose:
+
+- [Specification](https://cairn.kage1020.com/spec/) — fifteen focused chapters plus a
+  cross-cutting [glossary](https://cairn.kage1020.com/spec/glossary/).
+- [Tutorial](https://cairn.kage1020.com/tutorial/) — walks through the worked
+  [`examples/`](examples/) (`cottage`, `themed-tower`, `redstone-door`, `village`).
+- [Developer Guide](https://cairn.kage1020.com/development/) — the Rust workspace layout,
+  crate dependency graph, build/test/lint commands.
+- 日本語版 — every page above is mirrored at `/ja/<path>/`.
+
+The site Markdown source lives in [`website/src/content/docs/`](website/README.md); edits there
+go through the same review flow as code. Cloudflare Pages auto-deploys every push to `main` via
+its Git integration.
 
 ## Versioning
 
