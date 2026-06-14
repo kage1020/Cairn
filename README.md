@@ -80,4 +80,4 @@ Cairn is at the design stage; discussion, critique, and concrete proposals are w
 
 ## License
 
-[MIT](LICENSE) © the Cairn authors.
+[Apache License 2.0](LICENSE) © kage1020 and the Cairn authors.
