@@ -2,17 +2,17 @@
 title: "Cairn チュートリアル"
 ---
 
-[`examples/`](../examples/) ディレクトリの実例を順に辿るガイド付きツアー。各セクションは、例の各行を
+[サンプル](../examples) ディレクトリの実例を順に辿るガイド付きツアー。各セクションは、例の各行を
 背後にある仕様章にマッピングします。チュートリアルがそのまま注釈付き読み順表になります。
 
-このチュートリアルは [`spec/overview.ja.md`](../spec/overview) と
-[`spec/principles.ja.md`](../spec/principles) を先に読んでいる前提です。用語で詰まったら
+このチュートリアルは [目的とスコープ](../spec/overview) と
+[設計原則](../spec/principles) を先に読んでいる前提です。用語で詰まったら
 [用語集](../spec/glossary) が最速のジャンプテーブルです。
 
 > リファレンスコンパイラはまだ実装されていません。`cairn compile` の呼び出しは将来形ですが、仕様
 > 通りなので、CLI の感覚を掴むには読むだけで十分です。
 
-## 1. 最小限の実用ビルド — [`cottage.crn`](../examples/cottage.crn)
+## 1. 最小限の実用ビルド — [`cottage.crn`](https://github.com/kage1020/Cairn/blob/main/examples/cottage.crn)
 
 Cairn の Hello, world。ドア、窓、切妻屋根のあるコテージ。
 
@@ -65,7 +65,7 @@ cairn compile examples/cottage.crn --edition java    --target 1.21.4
 cairn compile examples/cottage.crn --edition bedrock --target 1.21.40
 ```
 
-## 2. テーマ、抽象トークン、上書きによる昇格 — [`themed-tower.crn`](../examples/themed-tower.crn)
+## 2. テーマ、抽象トークン、上書きによる昇格 — [`themed-tower.crn`](https://github.com/kage1020/Cairn/blob/main/examples/themed-tower.crn)
 
 2 階建ての石造り keep。新しい考え方が 3 つ入ります: **抽象マテリアルトークン**、**レベル**、**上書き
 による昇格**。
@@ -102,7 +102,7 @@ struct keep size=11x9
    ので、非矩形のアロースリットでも周囲の壁ブロックステートと綺麗に合成されます
    ([entities §8.2](../spec/entities))。
 
-## 3. 論理的なレッドストーン — [`redstone-door.crn`](../examples/redstone-door.crn)
+## 3. 論理的なレッドストーン — [`redstone-door.crn`](https://github.com/kage1020/Cairn/blob/main/examples/redstone-door.crn)
 
 レッドストーン面は Cairn の中で最も仕様寄りです。dust や repeater を置く代わりに、*信号グラフ* を
 宣言すると、コンパイラが回路を合成・配置・配線します。
@@ -139,7 +139,7 @@ assert always(sig.step -> eventually sig.open within 2)
    に、Bedrock では `TorchAND` セルにコンパイルされます。QC/BUD 依存の回路はサイレントな罠ではなく
    コンパイルエラーになります。 ([redstone §14.6](../spec/redstone))
 
-## 4. 複数建築 — [`village.crn`](../examples/village.crn)
+## 4. 複数建築 — [`village.crn`](https://github.com/kage1020/Cairn/blob/main/examples/village.crn)
 
 1 軒のコテージが動いたら、サイト上で再利用します。サイト側で絶対座標を計算する必要はありません。
 

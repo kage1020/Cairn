@@ -35,7 +35,7 @@ See [Purpose and Scope](/spec/overview/) for the normative wording.
 ## Where to read next
 
 - **Tutorial** ([English](/tutorial/), [日本語](/ja/tutorial/)) — a walk through the worked
-  examples in [`examples/`](https://github.com/kage1020/Cairn/tree/main/examples).
+  [Examples](/examples/) ([source on GitHub](https://github.com/kage1020/Cairn/tree/main/examples)).
 - **Specification** ([English](/spec/), [日本語](/ja/spec/)) — fifteen chapters plus a
   cross-cutting glossary.
 - **Developer Guide** ([English](/development/)) — the Rust workspace, how the crates are split,

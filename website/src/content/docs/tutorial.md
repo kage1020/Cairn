@@ -2,18 +2,18 @@
 title: "Cairn Tutorial"
 ---
 
-A guided walk through the [`examples/`](../examples/) directory. Each section maps every line of
+A guided walk through the [Examples](../examples) directory. Each section maps every line of
 an example to the spec chapter behind it, so the tutorial doubles as an annotated reading list.
 
-This tutorial assumes you have already read [`spec/overview.md`](../spec/overview) and
-[`spec/principles.md`](../spec/principles). If terminology trips you up, the
+This tutorial assumes you have already read [Purpose and Scope](../spec/overview) and
+[Design Principles](../spec/principles). If terminology trips you up, the
 [glossary](../spec/glossary) is the fastest jump table.
 
 > The reference compiler is not implemented yet. The `cairn compile` invocations are aspirational
 > but match the spec exactly, so reading them is still the right way to build intuition for the
 > CLI surface.
 
-## 1. A minimum useful build — [`cottage.crn`](../examples/cottage.crn)
+## 1. A minimum useful build — [`cottage.crn`](https://github.com/kage1020/Cairn/blob/main/examples/cottage.crn)
 
 The "Hello, world!" of Cairn: a cottage with a door, a window, and a gable roof.
 
@@ -68,7 +68,7 @@ cairn compile examples/cottage.crn --edition java    --target 1.21.4
 cairn compile examples/cottage.crn --edition bedrock --target 1.21.40
 ```
 
-## 2. Themes, abstract tokens, override-promotion — [`themed-tower.crn`](../examples/themed-tower.crn)
+## 2. Themes, abstract tokens, override-promotion — [`themed-tower.crn`](https://github.com/kage1020/Cairn/blob/main/examples/themed-tower.crn)
 
 A two-floor stone keep introduces three new ideas: **abstract material tokens**, **levels**, and
 **override-promotion**.
@@ -107,7 +107,7 @@ What to notice:
    face in the IR, so an arrow slit with a non-rectangular shape still composes cleanly with the
    wall blockstate around it. ([entities §8.2](../spec/entities))
 
-## 3. Logical redstone — [`redstone-door.crn`](../examples/redstone-door.crn)
+## 3. Logical redstone — [`redstone-door.crn`](https://github.com/kage1020/Cairn/blob/main/examples/redstone-door.crn)
 
 The redstone surface is the most spec-leaning part of Cairn: instead of placing dust and
 repeaters, you declare a *signal graph* and the compiler synthesizes, places, and routes the
@@ -145,7 +145,7 @@ What to notice:
    `ComparatorAND` cell on Java and a `TorchAND` cell on Bedrock; QC/BUD-dependent circuits are a
    compile error rather than a silent footgun. ([redstone §14.6](../spec/redstone))
 
-## 4. Multi-building — [`village.crn`](../examples/village.crn)
+## 4. Multi-building — [`village.crn`](https://github.com/kage1020/Cairn/blob/main/examples/village.crn)
 
 Once one cottage works, you reuse it on a site. The site never asks you to compute absolute
 coordinates.
