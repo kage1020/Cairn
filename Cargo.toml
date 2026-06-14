@@ -1,0 +1,34 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/cairn-core",
+    "crates/cairn-cli",
+    "crates/cairn-nbt",
+    "crates/cairn-formats",
+    "crates/cairn-redstone",
+    "crates/cairn-lsp",
+    "crates/cairn-wasm",
+]
+
+[workspace.package]
+edition = "2024"
+rust-version = "1.95"
+license = "Apache-2.0"
+repository = "https://github.com/kage1020/Cairn"
+homepage = "https://github.com/kage1020/Cairn"
+authors = ["kage1020 and the Cairn authors"]
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+module_name_repetitions = "allow"
+must_use_candidate = "allow"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = "symbols"
