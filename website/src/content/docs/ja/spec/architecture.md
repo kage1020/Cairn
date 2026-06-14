@@ -17,17 +17,17 @@ block-array IR                    … ボクセル格子 + パレット + block 
   ゼーションはここで起こります**。
 - ボクセル格子 + パレット + block entities + entities を保持し、フォーマット・エディション・バージョン
   に対して中立です。
-- 順方向の出力先であり、逆方向の入力先です ([ecosystem-interop.ja.md](ecosystem-interop))。
+- 順方向の出力先であり、逆方向の入力先です ([エコシステム連携](ecosystem-interop))。
 
 ## 3.2 メンバ / Intent IR は豊かで不変条件を運ぶ
 - 名前付きメンバは `id` / `class` / `role` / `mat_slot` / `intent_state` / `resolved_state` を保持します
-  ([blockstate.ja.md](blockstate))。
+  ([ブロックステート](blockstate))。
 - raw な import (schematic 取り込み) は有効な Intent IR を生成しません。意味的リフトを経てはじめて
   Intent IR に到達します。
 - 成果物の進捗は `semantic_level: raw | grouped | lifted` で表現します。
 
 ## 3.3 レッドストーン論理サブ層 (Logic / Netlist / Placement IR)
-レッドストーンを論理的に記述すると ([redstone.ja.md](redstone))、Intent IR と block-array IR の
+レッドストーンを論理的に記述すると ([レッドストーン](redstone))、Intent IR と block-array IR の
 間に役割の異なる 3 つの IR 層が入ります (HDL では標準的な分離です):
 ```
 Logic IR     論理式 / 依存 DAG (エディション中立、ゼロディレイ)

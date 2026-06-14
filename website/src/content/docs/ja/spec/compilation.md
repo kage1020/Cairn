@@ -20,7 +20,7 @@ massing (shell: floor/walls/volume)
 - ソース内で `roof` の後に書かれた `window` も、壁の開口として適用されます (順序事故が消えます)。
 - **last-wins は同一フェーズ内のローカル上書きにのみ適用されます**。`raw` (fill など) は危険ゾーン
   であり、常に最後に適用されます。
-- レッドストーン論理 ([redstone.ja.md](redstone)) は `fixtures` の直後を 3 フェーズに分割します。
+- レッドストーン論理 ([レッドストーン](redstone)) は `fixtures` の直後を 3 フェーズに分割します。
   センサ/アクチュエータが 3D に配置されて初めて I/O ポートの座標が確定し、配置と配線が可能になり
   ます。
 
@@ -35,7 +35,7 @@ door   id=entry  side=front at=center
 
 ## 4.2 ターゲット軸
 ターゲットは **二軸 `(edition, version)`** です。バージョンとエディションは **DSL ソースには書きません**。
-バージョン/エディションを知るのはバックエンドのみです ([versioning-editions.ja.md](versioning-editions))。
+バージョン/エディションを知るのはバックエンドのみです ([バージョンとエディション](versioning-editions))。
 
 ```sh
 cairn compile build.crn --edition java    --target 1.21.4

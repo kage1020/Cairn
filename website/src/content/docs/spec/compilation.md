@@ -21,7 +21,7 @@ massing (shell: floor/walls/volume)
   accidents are eliminated).
 - **Last-wins applies only to local overrides within the same phase.** `raw` (fill, etc.) is the
   danger zone and is always applied last.
-- Redstone logic ([redstone.md](redstone)) splits the step right after `fixtures` into three
+- Redstone logic ([Redstone](redstone)) splits the step right after `fixtures` into three
   phases: only once sensors/actuators are placed in 3D do their I/O port coordinates become fixed,
   enabling placement and routing.
 
@@ -36,7 +36,7 @@ door   id=entry  side=front at=center
 
 ## 4.2 Target axes
 The target is the **two axes `(edition, version)`**. The version and edition are **not written in the
-DSL source**. The only layer that knows the version/edition is the backend ([versioning-editions.md](versioning-editions)).
+DSL source**. The only layer that knows the version/edition is the backend ([Versioning and Editions](versioning-editions)).
 
 ```sh
 cairn compile build.crn --edition java    --target 1.21.4

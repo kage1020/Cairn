@@ -4,7 +4,7 @@ title: "11. Lint and Constraint Validation"
 
 The compiler returns warnings/errors with line numbers. The form and granularity of error reporting are
 first-class parts of the spec; messages MUST be in a shape that feeds the self-correction loop
-([evaluation.md](evaluation)) — "what is wrong / valid candidates in the target / a suggested fix".
+([Evaluation Framework](evaluation)) — "what is wrong / valid candidates in the target / a suggested fix".
 
 ## 11.1 Categories
 - **Syntax**: parse / types / `key=value` validity.
@@ -17,11 +17,11 @@ first-class parts of the spec; messages MUST be in a shape that feeds the self-c
   gravel.
 - **fluid**: consistency of water source / flow / waterlogged.
 - **version_caps / parity**: whether a state/entity schema is usable in the target
-  ([versioning-editions.md](versioning-editions)).
+  ([Versioning and Editions](versioning-editions)).
 - **edit_stability**: whether an `intent_state` change ripples into an unrelated member's
   `resolved_state`.
 - **redstone**: simulate the synthesized circuit per tick and check it against the declared truth table
-  / temporal assertions; timing conflicts, QC dependence, routing congestion ([redstone.md](redstone)).
+  / temporal assertions; timing conflicts, QC dependence, routing congestion ([Redstone](redstone)).
 - **AABB interference**: on overlap, priority-merge or reject with a lint error. Boundary blockstate
   re-resolution (inner-corner stairs, etc.) is the IR layer's responsibility.
 
@@ -34,5 +34,5 @@ first-class parts of the spec; messages MUST be in a shape that feeds the self-c
 
 ## 11.3 Constraint catalog
 In-game constraints (gravity blocks, attachment conditions, fluid flow, disallowed attachment
-combinations, etc.) are cataloged and managed per version ([versioning-editions.md](versioning-editions)).
+combinations, etc.) are cataloged and managed per version ([Versioning and Editions](versioning-editions)).
 A constraint such as "a frame cannot hang on glass" lives here.

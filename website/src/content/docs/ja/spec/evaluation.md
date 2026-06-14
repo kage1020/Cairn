@@ -19,7 +19,7 @@ title: "13. 評価フレームワーク"
 - **Edit Stability**: 「2 階の窓だけアーチに」のような追加編集後の AST diff / NBT diff の小ささ。
 
 ## 13.2 逆方向の補助メトリクス (decompile_quality)
-逆方向 ([ecosystem-interop.ja.md](ecosystem-interop)) の品質は主要評価から外し、補助メトリク
+逆方向 ([エコシステム連携](ecosystem-interop)) の品質は主要評価から外し、補助メトリク
 スとして扱います (lossy アプローチと整合)。核心は「形を再現したか」ではなく **「編集可能な DSL になっ
 たか」** を測ることです。
 
@@ -46,4 +46,4 @@ title: "13. 評価フレームワーク"
 ## 13.4 レッドストーン検証
 ヘッドレスジオメトリ sim は **tick 単位のレッドストーン論理 simulator** に拡張されます。ターゲット
 エディションごとに合成回路をシミュレートし、宣言された真理値表/時相アサーションと突き合わせます
-(synth→sim→diff→patch)。[redstone.ja.md](redstone) 参照。
+(synth→sim→diff→patch)。[レッドストーン](redstone) 参照。

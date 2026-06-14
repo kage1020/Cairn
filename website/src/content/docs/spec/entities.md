@@ -36,7 +36,7 @@ cross-implementation compatibility all break.
 - **Every primitive carries `anchor` (reference point), declared bbox, actual bbox, and host face in
   the IR.**
 - Fix the resolution rule for overlapping AABBs in the spec: either **priority merge or a lint error**
-  ([lint.md](lint)).
+  ([Lint](lint)).
 - Neighbor-dependent blockstate (stairs, fences) breaks ("an inner-corner stair left as outer, hanging
   in mid-air") if overwritten without interference detection. Boundary blockstate re-resolution is the
   IR layer's responsibility.

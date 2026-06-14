@@ -22,12 +22,12 @@ theme medieval:
 ```
 
 `def`、`theme`、`site` は、同じスロット保持型 Component 機構で統一されています
-([components-editing-sites.ja.md](components-editing-sites))。
+([コンポーネント・編集・複数建築](components-editing-sites))。
 
 ## 7.2 正規語彙 (canonical token)
 テーマ/スロットが束ねる値は **正規トークン** であり、生のブロック ID ではありません。バックエンドが
 `(edition, version)` ごとに ID、状態名、状態値、シリアライゼーションを解決します
-([versioning-editions.ja.md](versioning-editions))。LLM は `pillar_axis` も、リトルエンディアン
+([バージョンとエディション](versioning-editions))。LLM は `pillar_axis` も、リトルエンディアン
 NBT も、Bedrock の weirdo_direction も知る必要がありません。
 
 正規トークンは **二段** です:
@@ -45,7 +45,7 @@ theme exact_oak:
 
 ## 7.3 バージョン・エディション横断のマッピング
 正規トークンは以下の 5 パターンを吸収します (解決テーブルの構造は
-[versioning-editions.ja.md](versioning-editions)):
+[バージョンとエディション](versioning-editions)):
 
 | パターン | 例 | ポリシー |
 |---|---|---|
@@ -56,4 +56,4 @@ theme exact_oak:
 | 削除 | (ターゲットバージョンに存在しない) | ハードエラー + 代替案 |
 
 **ID/状態/シリアライゼーションの差分のみ吸収可能** です。「概念の不在」や「ゲーム挙動の差分」は吸収
-しません ([versioning-editions.ja.md](versioning-editions))。
+しません ([バージョンとエディション](versioning-editions))。

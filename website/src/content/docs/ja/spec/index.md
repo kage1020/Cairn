@@ -8,30 +8,30 @@ title: "Cairn — Minecraft 建築 DSL 仕様 2026.06 (ドラフト)"
 
 ## 読む順番
 
-| # | ファイル | 内容 |
+| # | 章 | 内容 |
 |---|---|---|
-| 1 | [overview.ja.md](overview) | 目的、スコープ、非目標 |
-| 2 | [principles.ja.md](principles) | 設計原則 P1–P5 |
-| 3 | [architecture.ja.md](architecture) | 三層 IR + block-array 普遍ピボット |
-| 4 | [compilation.ja.md](compilation) | フェーズ評価、ターゲット軸 |
-| 5 | [syntax.ja.md](syntax) | 字句、key=value、セレクタ、ヘッダ |
-| 6 | [blockstate.ja.md](blockstate) | 導出 + 上書き、intent/resolved、waterlogged |
-| 7 | [materials-themes.ja.md](materials-themes) | スロット、正規語彙、テーマ |
-| 8 | [entities.ja.md](entities) | 二段モデル、アンカー規約 |
-| 9 | [components-editing-sites.ja.md](components-editing-sites) | def、編集、複数建築 |
-| 10 | [versioning-editions.ja.md](versioning-editions) | バージョン/エディション戦略、ロック |
-| 11 | [lint.ja.md](lint) | Lint と制約検証 |
-| 12 | [ecosystem-interop.ja.md](ecosystem-interop) | エコシステム連携、逆方向変換 |
-| 13 | [evaluation.ja.md](evaluation) | 評価フレームワーク |
-| 14 | [redstone.ja.md](redstone) | レッドストーン (論理回路) |
-| 15 | [open-issues.ja.md](open-issues) | 未決事項 |
-| — | [glossary.ja.md](glossary) | 用語集 |
+| 1 | [目的とスコープ](overview) | 目的、スコープ、非目標 |
+| 2 | [設計原則](principles) | 設計原則 P1–P5 |
+| 3 | [アーキテクチャ](architecture) | 三層 IR + block-array 普遍ピボット |
+| 4 | [コンパイルモデル](compilation) | フェーズ評価、ターゲット軸 |
+| 5 | [構文](syntax) | 字句、key=value、セレクタ、ヘッダ |
+| 6 | [ブロックステート](blockstate) | 導出 + 上書き、intent/resolved、waterlogged |
+| 7 | [マテリアルとテーマ](materials-themes) | スロット、正規語彙、テーマ |
+| 8 | [エンティティ](entities) | 二段モデル、アンカー規約 |
+| 9 | [コンポーネント・編集・複数建築](components-editing-sites) | def、編集、複数建築 |
+| 10 | [バージョンとエディション](versioning-editions) | バージョン/エディション戦略、ロック |
+| 11 | [Lint](lint) | Lint と制約検証 |
+| 12 | [エコシステム連携](ecosystem-interop) | エコシステム連携、逆方向変換 |
+| 13 | [評価フレームワーク](evaluation) | 評価フレームワーク |
+| 14 | [レッドストーン](redstone) | レッドストーン (論理回路) |
+| 15 | [未決事項](open-issues) | 未決事項 |
+| — | [用語集](glossary) | 用語集 |
 
 ## 用語と規約
 
 - 要求水準語: **MUST / SHOULD / MUST NOT / OPTIONAL** (RFC 2119 の意味)。
 - 言語名は **Cairn**、CLI ツールは `cairn`、ソースファイル拡張子は `.crn`。
-- 設計原則は `P1`–`P5` で参照 ([principles.ja.md](principles))。
+- 設計原則は `P1`–`P5` で参照 ([設計原則](principles))。
 
 ## バージョニング
 
@@ -40,12 +40,12 @@ Cairn 自身のリリースは **日付ベースバージョニング (CalVer)**
 - 本ドキュメントは **2026.06 (ドラフト)** で、旧 `v0.2` ラベルを置き換えます。
 - 1 リリースは「言語仕様 + リファレンスコンパイラ + 標準ライブラリ + `(edition,version)`
   レジストリ/制約カタログ」のバンドルです。`cairn --version` とロックの `cairn_version` に現れます
-  ([versioning-editions.ja.md](versioning-editions))。
+  ([バージョンとエディション](versioning-editions))。
 
 **Minecraft のターゲットバージョンとは別軸** (混同しないでください):
 - **Cairn version** `2026.06` — Cairn ツール自身のリリース。
 - **MC target** — 出力先 Minecraft (`--edition java --target <version>`;
-  [versioning-editions.ja.md](versioning-editions))。
+  [バージョンとエディション](versioning-editions))。
 
 **Minecraft 自身も最新リリースから日付ベースバージョンに移行したため、両者をフォーマットで見分ける
 ことはできません**。バージョンは常に **フィールド/フラグ/キーワード** で区別します:
@@ -57,4 +57,4 @@ Cairn 自身のリリースは **日付ベースバージョニング (CalVer)**
 
 `.crn` ファイルは `@cairn 2026.06` (それが書かれた Cairn 言語のバージョン) を宣言してもかまいません。
 これは MC バージョン用ヘッダ `@requires` / `@intended_targets` とは別軸で、将来のコンパイラが正しく
-パース/警告できるようにするための provenance として存在します ([syntax.ja.md](syntax))。
+パース/警告できるようにするための provenance として存在します ([構文](syntax))。

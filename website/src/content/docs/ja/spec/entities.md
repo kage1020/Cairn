@@ -34,7 +34,7 @@ spawn id=cat type=cat at=inside.floor nbt={variant:"black"}
 
 - **すべてのプリミティブが `anchor` (基準点)、宣言 bbox、実 bbox、ホスト面を IR に持つ**。
 - 重なる AABB の解決ルールを仕様で固定する: **優先マージか lint エラー** のいずれか
-  ([lint.ja.md](lint))。
+  ([Lint](lint))。
 - 隣接依存のブロックステート (階段、フェンス) は、干渉検出なしで上書きすると壊れます (「内角階段が
   外角のまま空中に取り残される」)。境界ブロックステートの再解決は IR 層の責務です。
 

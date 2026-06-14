@@ -4,14 +4,14 @@ title: "12. Ecosystem Interop and Reverse Conversion"
 
 ## 12.1 Forward direction
 `block-array IR → serialize` emits `.nbt` / `.litematic` / `.schem` / `.mcstructure`
-([architecture.md](architecture)). Each format is just a serializer; existing formats are additional
+([Architecture](architecture)). Each format is just a serializer; existing formats are additional
 backends around the block-array IR.
 
 ## 12.2 Reverse direction: the compiler only transliterates; an LLM does the lifting
 The compiler does not build voxel→"this is a wall/roof" computer vision (it becomes unmaintainable).
 **The compiler implements a robust faithful transliteration + verification + voxel-diff; the meaning
 lift is done as an LLM refactor of the raw-centric DSL** (dogfooding the language). This is consistent
-with P5's self-correction loop and the evaluation framework ([evaluation.md](evaluation)).
+with P5's self-correction loop and the evaluation framework ([Evaluation Framework](evaluation)).
 
 ```text
 cairn import house.litematic --mode raw    → house.raw.crn     # fill/raw_block centric (faithful transliteration)
@@ -50,7 +50,7 @@ window id=front_windows side=front mat_slot=glass repeat=5 ...
 ## 12.4 Import stamping and pitfalls
 - On import, stamp `(edition, version)` and provenance onto the block-array IR (`.litematic`→java,
   `.mcstructure`→bedrock, `.schem`→java). This connects to reproducibility/version awareness
-  ([versioning-editions.md](versioning-editions)).
+  ([Versioning and Editions](versioning-editions)).
 - **Do not present import as "recovering author intent"** (the biggest pitfall). Only voxels and some
   regularity can be recovered. Make this explicit in CLI/UI: `W_SEMANTIC_LOSS`.
 - Import-origin `raw_fill` is isolated with `origin=imported` / `residual`; it is not treated as
@@ -58,8 +58,8 @@ window id=front_windows side=front mat_slot=glass repeat=5 ...
 - Preserve Litematica's multiple regions / sub-region offsets as provenance rather than flattening, and
   map regions to a `site` / multiple structs.
 - For entity-bearing schematics, do not mark success on block IoU alone; keep a separate entity metric,
-  and extract only first-class entities ([entities.md](entities)) — drop chest contents/command
+  and extract only first-class entities ([Entities](entities)) — drop chest contents/command
   blocks.
 - Huge schematics (over 48³ / whole villages) blow up LLM context if lifted at once. Require an
   orchestration of **chunk split → per-chunk L1 → per-part lift → join with `site`** (streaming parse).
-- Legacy numeric-ID `.schematic` (pre-1.13 flattening) is not supported in v1 ([overview.md](overview)).
+- Legacy numeric-ID `.schematic` (pre-1.13 flattening) is not supported in v1 ([Purpose and Scope](overview)).

@@ -14,7 +14,7 @@ best aligns with P1/P3/P5.
 
 ## 14.1 The two-tier model and the v1 boundary (replaces the old "non-goal")
 - **Tier 0 physical placement**: `repeater facing=north delay=2`, etc. The author places parts and the
-  blockstate is derived. Behavior is not modeled ([blockstate.md](blockstate)).
+  blockstate is derived. Behavior is not modeled ([Blockstate Model](blockstate)).
 - **Tier 1 logic (this chapter)**: declare a signal graph; the compiler turns it into voxels via
   synthesis → placement → routing.
 
@@ -29,7 +29,7 @@ v1 scope (in Verilog terms, only `assign`-equivalent is allowed; clocked assignm
 
 ## 14.2 Signal binding (sensor → signal graph → actuator)
 Sensors emit signals; actuators consume them. Both are physical members
-([components-editing-sites.md](components-editing-sites)) placed in earlier phases.
+([Components, Editing, and Multi-building](components-editing-sites)) placed in earlier phases.
 ```
 # sensor → signal
 lever      id=sw   side=front offset=2 y=1 -> sig.power
@@ -100,7 +100,7 @@ Logical Cell → Edition Cell → Physical Tile
 - **Not absorbed (×)**: QC (quasi-connectivity) / BUD / update order / quasi-connectivity. These depend
   on the implicit semantics of block-update order, for which no portable implementation exists.
 - If the logic requires update-order semantics, it is a **compile error (cannot be synthesized)**. This
-  is consistent with "recompile, don't transcode" (P1 / [versioning-editions.md](versioning-editions)).
+  is consistent with "recompile, don't transcode" (P1 / [Versioning and Editions](versioning-editions)).
 ```text
 E_NO_PORTABLE_IMPL line 15:
   this circuit requires update-order (quasi-connectivity / BUD) semantics.
@@ -111,7 +111,7 @@ E_NO_PORTABLE_IMPL line 15:
   across editions, but with a logic description the compiler can emit an edition-correct circuit — the
   biggest motivation for logic description.
 
-## 14.7 Verification: check three assertion kinds against a tick simulator (extends [evaluation.md](evaluation))
+## 14.7 Verification: check three assertion kinds against a tick simulator (extends [Evaluation Framework](evaluation))
 Declare the intent, then **simulate the synthesized circuit per tick (headless)** and check it. There
 are three assertion kinds:
 ```
@@ -137,7 +137,7 @@ E_SIM_ASSERTION_FAILED edition=bedrock:
 
 ## 14.8 Connection to the IR and phases
 For logic descriptions, **three IR layers** sit between the Intent and the block-array
-([architecture.md](architecture)). They are separated because their roles differ (standard in HDL):
+([Architecture](architecture)). They are separated because their roles differ (standard in HDL):
 ```
 Intent IR        (logic declarations / circuit region / signal binding)
    ↓ logic_synth
@@ -149,7 +149,7 @@ Placement IR     (cell coordinates + actual wire length → delay/tick determine
    ↓ logic_route
 block-array IR   (voxel reality of dust/repeater/torch/comparator)
 ```
-The phase model ([compilation.md](compilation)) splits the step right after `fixtures` into three:
+The phase model ([Compilation Model](compilation)) splits the step right after `fixtures` into three:
 ```
 massing → envelope → openings → fixtures → logic_synth → logic_place → logic_route → raw
 ```
@@ -158,6 +158,6 @@ fixed, enabling placement and routing. **Delay is not carried in the Logic IR / 
 determined for the first time in the Placement IR** (14.4).
 
 ## 14.9 Reverse conversion
-In v1, hand-built redstone imported from a schematic ([ecosystem-interop.md](ecosystem-interop)) is
+In v1, hand-built redstone imported from a schematic ([Ecosystem Interop](ecosystem-interop)) is
 kept as **Tier 0 raw**. Reverse-synthesizing logic from a mass of dust is out of scope for v1
 (consistent with the generation-first, lossy approach).

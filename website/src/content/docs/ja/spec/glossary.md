@@ -124,7 +124,7 @@ title: "用語集"
   [versioning-editions §10.7](versioning-editions)。
 - **Cairn バージョン vs MC ターゲット**。**別軸** の 2 つ。フィールド/フラグ/キーワードで区別し、
   フォーマットでは区別しない。曖昧化を避ける散文では `cairn:2026.06` vs `mc:1.21.4`。
-  [spec/README.md](README)、[versioning-editions](versioning-editions)。
+  [目次](/ja/spec/)、[versioning-editions](versioning-editions)。
 - **Recompile、transcode しない**。言語仕様はバージョン/エディションを跨ぐ NBT 可搬性を保証しない。
   新バージョンを狙うには DSL を再コンパイルする。NBT を変換しない。
   [versioning-editions §10.2](versioning-editions)。

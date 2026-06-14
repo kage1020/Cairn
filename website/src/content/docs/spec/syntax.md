@@ -30,7 +30,7 @@ Metadata MAY be placed in headers rather than in the semantic body:
 - `@cairn` is the **version of the Cairn language itself** (see the README's Versioning). It is a
   **separate axis** from `@requires` / `@intended_targets` (Minecraft versions). It is optional, and
   exists as provenance so a future compiler can parse/warn correctly.
-- See [versioning-editions.md](versioning-editions) for `@requires`.
+- See [Versioning and Editions](versioning-editions) for `@requires`.
 - `@intended_targets` is a hint about "which Minecraft version it was designed for", not a claim of
   being verified. The verified target is recorded only in the lock.
 
@@ -43,4 +43,4 @@ Metadata MAY be placed in headers rather than in the semantic body:
 ## 5.5 IDs, classes, addresses
 - Important members MAY declare `id=`. `class=` groups members.
 - Unspecified members are auto-assigned a stable, meaning-based address by the compiler (editing model
-  in [components-editing-sites.md](components-editing-sites)).
+  in [Components, Editing, and Multi-building](components-editing-sites)).

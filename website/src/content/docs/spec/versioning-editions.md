@@ -4,7 +4,7 @@ title: "10. Versioning and Edition Strategy"
 
 ## 10.1 The target is a compile-time parameter
 The target is the two axes `(edition, version)`. The version/edition is not written in the DSL source
-([compilation.md](compilation)). The only layer that knows the version/edition is the backend.
+([Compilation Model](compilation)). The only layer that knows the version/edition is the backend.
 
 **Version strings are treated as opaque labels.** A Minecraft version may be the legacy semver-ish form
 (`1.21.4`) or, from the latest release onward, **date-based**. Cairn does not parse and compare version
@@ -73,7 +73,7 @@ constraints:
 Unknown IDs, out-of-domain states, and parity gaps are **hard errors**. Silent substitution and
 implicit dropping are **forbidden**. An error returns the **closed set of candidates valid in the
 target** + the minimum version + a suggested DSL fix, sending the model back to registry-derived
-candidates rather than its memory. This feeds the self-correction loop ([evaluation.md](evaluation)).
+candidates rather than its memory. This feeds the self-correction loop ([Evaluation Framework](evaluation)).
 
 ```text
 E_UNKNOWN_ID line 12: "minecraft:pale_oak_planks" not in 1.21.4 registry.

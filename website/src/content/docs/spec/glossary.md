@@ -139,7 +139,7 @@ implementations and authors SHOULD use these exact spellings. The vocabulary is 
   See [versioning-editions §10.7](versioning-editions).
 - **Cairn version vs MC target.** Two **separate axes** distinguished by field/flag/keyword, never
   by format. `cairn:2026.06` vs `mc:1.21.4` in disambiguating prose. See
-  [spec/README.md](README), [versioning-editions](versioning-editions).
+  [Specification overview](/spec/), [versioning-editions](versioning-editions).
 - **Recompile, don't transcode.** The language spec does **not** guarantee NBT portability across
   version or edition. To target a new version, recompile the DSL; do not convert the NBT. See
   [versioning-editions §10.2](versioning-editions).

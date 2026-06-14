@@ -16,17 +16,17 @@ block-array IR                    … voxel grid + palette + block entities + en
 - Every format's frontend/backend meets at this layer. **diff / IoU / serialization happen here.**
 - It holds a voxel grid + palette + block entities + entities, neutral to format, edition, and version.
 - It is the output target of the forward direction and the input destination of the reverse direction
-  ([ecosystem-interop.md](ecosystem-interop)).
+  ([Ecosystem Interop](ecosystem-interop)).
 
 ## 3.2 The member / Intent IR is rich and carries invariants
 - A named member carries `id` / `class` / `role` / `mat_slot` / `intent_state` / `resolved_state`
-  ([blockstate.md](blockstate)).
+  ([Blockstate Model](blockstate)).
 - A raw import (schematic ingestion) does not produce a valid Intent IR; it reaches one only after a
   semantic lift.
 - An artifact's progress is expressed by `semantic_level: raw | grouped | lifted`.
 
 ## 3.3 Redstone logic sub-layers (Logic / Netlist / Placement IR)
-When redstone is described logically ([redstone.md](redstone)), three IR layers with distinct roles
+When redstone is described logically ([Redstone](redstone)), three IR layers with distinct roles
 sit between the Intent IR and the block-array IR (a standard separation in HDL):
 ```
 Logic IR     logical expressions / dependency DAG (edition-neutral, zero delay)

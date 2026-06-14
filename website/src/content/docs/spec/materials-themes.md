@@ -22,12 +22,12 @@ theme medieval:
 ```
 
 `def`, `theme`, and `site` are unified by the same slot-bearing Component mechanism
-([components-editing-sites.md](components-editing-sites)).
+([Components, Editing, and Multi-building](components-editing-sites)).
 
 ## 7.2 Canonical vocabulary (canonical token)
 The values a theme/slot binds are **canonical tokens**, not raw block IDs. The backend resolves the
 ID, state names, state values, and serialization per `(edition, version)`
-([versioning-editions.md](versioning-editions)). An LLM never needs to know `pillar_axis`,
+([Versioning and Editions](versioning-editions)). An LLM never needs to know `pillar_axis`,
 little-endian NBT, or Bedrock's weirdo_direction.
 
 Canonical tokens come in **two tiers**:
@@ -45,7 +45,7 @@ theme exact_oak:
 
 ## 7.3 Mappings across version and edition
 A canonical token absorbs the following five patterns (the resolution table structure is in
-[versioning-editions.md](versioning-editions)):
+[Versioning and Editions](versioning-editions)):
 
 | Pattern | Example | Policy |
 |---|---|---|
@@ -56,4 +56,4 @@ A canonical token absorbs the following five patterns (the resolution table stru
 | deleted | (absent in the target version) | hard error + alternatives |
 
 **Only ID/state/serialization differences may be absorbed.** "Concept absence" and "game-behavior
-differences" are not absorbed ([versioning-editions.md](versioning-editions)).
+differences" are not absorbed ([Versioning and Editions](versioning-editions)).

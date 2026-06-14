@@ -8,7 +8,7 @@ keeps the reference system from fracturing across editing, theming, and multi-bu
 
 - Parameterization (variable size, etc.) is allowed. Recursion is forbidden.
 - A `def` may declare `requires version>=X`; the minimum version of a composite is the max of its
-  parts ([versioning-editions.md](versioning-editions)).
+  parts ([Versioning and Editions](versioning-editions)).
 
 ```
 def cottage class=house size=9x7:
@@ -33,7 +33,7 @@ edit door[id=entry]                   set side=front at=center
 ```
 
 Editing at the level of a concept ("make only the second-floor windows arched") must be possible
-without breaking the whole. Edit diffs look only at `intent_state` ([blockstate.md](blockstate)),
+without breaking the whole. Edit diffs look only at `intent_state` ([Blockstate Model](blockstate)),
 so a change in derived results does not harm edit stability.
 
 ## 9.3 Multi-building (site)

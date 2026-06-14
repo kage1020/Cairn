@@ -8,7 +8,7 @@ title: "9. コンポーネント、編集、複数建築"
 
 - パラメータ化 (可変サイズなど) は許可します。再帰は禁止です。
 - `def` は `requires version>=X` を宣言してかまいません。コンポジットの最小バージョンはその構成要素
-  の最大値です ([versioning-editions.ja.md](versioning-editions))。
+  の最大値です ([バージョンとエディション](versioning-editions))。
 
 ```
 def cottage class=house size=9x7:
@@ -32,7 +32,7 @@ edit door[id=entry]                   set side=front at=center
 ```
 
 「2階の窓だけアーチにする」のような概念レベルの編集が、全体を壊さずに行える必要があります。編集 diff
-は `intent_state` のみを見るため ([blockstate.ja.md](blockstate))、導出結果の変化は編集の安定
+は `intent_state` のみを見るため ([ブロックステート](blockstate))、導出結果の変化は編集の安定
 性を損ないません。
 
 ## 9.3 複数建築 (site)
