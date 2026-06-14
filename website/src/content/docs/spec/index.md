@@ -26,6 +26,7 @@ roofs, symmetry) with the voxel world. The approach is **generation-first (lossy
 | 13 | [Evaluation Framework](evaluation) | Evaluation framework |
 | 14 | [Redstone](redstone) | Redstone (logic circuits) |
 | 15 | [Open Issues](open-issues) | Open issues |
+| — | [Compatibility Tiers](compatibility) | Stable / Evolving / Internal contract for every public surface |
 | — | [Glossary](glossary) | Cross-chapter glossary of defined terms |
 
 ## Terminology and conventions

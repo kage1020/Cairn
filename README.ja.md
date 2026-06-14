@@ -88,6 +88,26 @@ Cairn のリリースは **日付ベースバージョニング (CalVer)** `YYYY
 (`--target`) とは **別軸** です。両者は常にフィールド/フラグ/キーワードで区別され、フォーマットでは
 区別しません。詳細は仕様書を参照してください。
 
+バージョン上げで「何を壊してよいか」の契約は
+[互換性ティア](https://cairn.kage1020.com/ja/spec/compatibility/) が規定します: すべての公開面は
+**Stable**、**Evolving**、**Internal** のいずれかに属し、`Evolving` の breaking は月次 minor のみ、
+`Stable` の breaking は `W_DEPRECATED` で 1 リリースぶんの猶予を経てから入ります。
+
+## ロードマップ
+
+[ロードマップ](https://cairn.kage1020.com/ja/roadmap/) に M1〜M6 のマイルストーンと `2027.06.0`
+までの月別スコープを掲載しています:
+
+- **M1** (`2026.07.0`) — ソースが parse できる
+- **M2** (`2026.10.0`) — 最小ビルド (単室、Java、lockfile)
+- **M3** (`2027.01.0`) — examples が Java で end-to-end 動く
+- **M4** (`2027.02.0`) — Java/Bedrock パリティ
+- **M5** (`2027.03.0`) — `cairn-lsp` と VS Code 拡張
+- **M6** (`2027.05.0`) — レッドストーン論理層、place-and-route、tick simulator
+
+月次 minor は毎月 1 日の GitHub Actions cron が自動で PR を立てます。patch は適格コミットが `main`
+に入ったときに随時開きます。
+
 ## コントリビュート
 
 Cairn は設計段階です。議論、批判、具体的な提案を歓迎します。詳細は

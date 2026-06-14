@@ -186,3 +186,11 @@ theme shop_bedrock: slot floating_text -> sign glowing=true   # Bedrock fallback
   error** (unknown components cause crashes/corruption). **Upgrade (old-version NBT → new-version world)
   = loud warning + DataVersion stamp + DFU dependence** (only with explicit `--allow-cross-version`).
   Not every build needs to be edition-portable; the compiler states what breaks portability.
+
+## 10.8 Compatibility tier of Cairn's own surfaces
+The MC target axis above (`(edition, version)`) covers what Cairn emits. The orthogonal axis is what
+Cairn itself promises about its own evolution: `.crn` syntax, the lockfile, the CLI flags, the Rust
+API, and so on. Those promises are not derivable from the CalVer release number — there is no
+"major" axis to read them off — so they are spelled out in [Compatibility Tiers](compatibility).
+A surface that is `Stable` there gives one release of `W_DEPRECATED` lead time; an `Evolving`
+surface can change in any monthly minor; `Internal` makes no promise.

@@ -11,12 +11,21 @@ members = [
 ]
 
 [workspace.package]
+version = "0.0.0"
 edition = "2024"
 rust-version = "1.95"
 license = "Apache-2.0"
 repository = "https://github.com/kage1020/Cairn"
 homepage = "https://github.com/kage1020/Cairn"
 authors = ["kage1020 and the Cairn authors"]
+
+[workspace.dependencies]
+cairn-core = { version = "0.0.0", path = "crates/cairn-core" }
+cairn-nbt = { version = "0.0.0", path = "crates/cairn-nbt" }
+cairn-formats = { version = "0.0.0", path = "crates/cairn-formats" }
+cairn-redstone = { version = "0.0.0", path = "crates/cairn-redstone" }
+cairn-lsp = { version = "0.0.0", path = "crates/cairn-lsp" }
+cairn-wasm = { version = "0.0.0", path = "crates/cairn-wasm" }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

@@ -1,7 +1,7 @@
 [package]
 name = "cairn-core"
 description = "Core of the Cairn language: parser, IR, compiler"
-version = "0.0.0"
+version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true

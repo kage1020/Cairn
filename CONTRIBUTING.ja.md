@@ -52,10 +52,67 @@ Issue を立ててください:
 4. 評価メトリクスへの影響
    ([評価フレームワーク](https://cairn.kage1020.com/ja/spec/evaluation/))。
 
+## ブランチとプルリクエスト
+
+Cairn は **`canary` トランク + `main` リリースポインタ** 構成を採用します。進行中のすべての作業は
+`canary` に乗り、`main` はリリースが公開された直後にのみ自動で更新されます。`main` の履歴は公開済み
+リリースの列そのものになります。
+
+### ブランチ
+
+| ブランチ | 用途 | 寿命 |
+|---|---|---|
+| `canary` | トランク。機能、修正、ドキュメント、`release-plz-*` ローリング release PR がすべて乗る。保護ブランチ。 | 永続 |
+| `main` | リリース済み状態。リリース成功直後に `canary` に自動で fast-forward される。保護ブランチ。直接 push 不可、PR 受付なし。 | 永続 |
+| `<type>/<short-kebab>` | 単一の変更のための作業ブランチ。`canary` 宛。 | PR マージまで、マージ後削除 |
+| `release-plz-*` | 月次 minor と patch のために `release-plz` が `canary` に対して自動で開く。 | PR マージまで |
+
+`<type>` は、その作業がマージ時に乗ることになる Conventional Commits の type に揃えてください
+(`feat/parser-lexer`、`fix/wall-corner-shape`、`docs/roadmap-2027`、`refactor/ir-pivot`)。
+
+### プルリクエスト
+
+- **すべての PR は `canary` を宛先にする**。`main` 宛の PR は受け付けません。`main` はリリース
+  パイプラインによってのみ更新されます。
+- **PR タイトルは [Conventional Commits](https://www.conventionalcommits.org/) 形式とする (MUST)**。
+  例: `feat(core): add lexer`、`fix(formats): correct big-endian NBT length`、
+  `docs(spec): clarify §6.3`、`feat(redstone)!: rewrite tick simulator`。feature ブランチ内の個別
+  コミットは自由形式で構いません。
+- **マージ方式は squash merge のみ**。PR タイトルが `canary` のコミットメッセージとして残り、
+  `release-plz` がそれを `release-plz.toml` の `release_commits` で解析して patch リリースの要否を
+  判断します。
+- breaking change には `!` 接尾辞 (例: `feat(core)!: replace lexer`) を付けてください。これにより
+  [互換性ティア](https://cairn.kage1020.com/ja/spec/compatibility/) C.3 節の "Breaking changes"
+  扱いになります。
+- メンテナ 1 名の承認を必須とし、CI (fmt + clippy + test の Linux/macOS/Windows 3 OS) はすべて
+  通過してからマージします。
+- リリース PR (`release-plz-*` → `canary`) も同じレビュー規約に従います。月次 minor PR は毎月 1 日
+  に cron が立ち上げ、人間レビュー後にマージされます。マージで publish が走り、同時に `main` が
+  fast-forward されます。
+
+Cairn で使う Conventional Commits の type:
+
+| type | 用途 | patch リリースを誘発するか |
+|---|---|---|
+| `feat` | 新機能、新しい公開 API、新サブコマンド | する |
+| `fix` | spec に挙動を合わせるバグ修正 | する |
+| `perf` | 性能改善 | する |
+| `refactor` | 挙動を変えない内部リファクタリング | する |
+| `build` | ビルド、パッケージング、Cargo 依存 | する |
+| `docs` | ドキュメント、spec 散文、README、サンプル | しない |
+| `test` | テストコードのみ | しない |
+| `ci` | GitHub Actions、release-plz、workflow 設定 | しない |
+| `chore` | 利用者に届かない雑多な変更 | しない |
+| `style` | フォーマット / lint のみ | しない |
+
+括弧内のスコープは影響する crate や spec 領域を示します: `feat(core)`、`fix(nbt)`、`docs(spec)`、
+`build(deps)`。
+
 ## バージョニング
 
 Cairn は日付ベースバージョニング (CalVer) `YYYY.0M[.PATCH]` を採用します。主要な変更は
-[CHANGELOG.md](CHANGELOG.md) に記録されます。
+[CHANGELOG.md](CHANGELOG.md) に記録されます。バージョン番号ではなく
+[互換性ティア](https://cairn.kage1020.com/ja/spec/compatibility/) が各面の互換契約を定めます。
 
 ## Code of Conduct
 

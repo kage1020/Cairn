@@ -1,0 +1,203 @@
+name: Publish
+
+# Tag-triggered binary build and sigstore signing.
+# release.yml (release-plz) publishes crates and creates the GitHub Release and the
+# `v*` tag. This workflow picks up the tag, cross-compiles the `cairn` binary for
+# six OS/arch combinations, signs each archive with keyless sigstore, and uploads
+# everything to the GitHub Release.
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to (re)build (e.g. v2026.07.0)"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+  id-token: write
+
+concurrency:
+  group: publish-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  binaries:
+    name: ${{ matrix.target }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            runner: ubuntu-latest
+            archive: tar.gz
+            ext: ""
+          - target: aarch64-unknown-linux-gnu
+            runner: ubuntu-24.04-arm
+            archive: tar.gz
+            ext: ""
+          - target: x86_64-apple-darwin
+            runner: macos-13
+            archive: tar.gz
+            ext: ""
+          - target: aarch64-apple-darwin
+            runner: macos-14
+            archive: tar.gz
+            ext: ""
+          - target: x86_64-pc-windows-msvc
+            runner: windows-latest
+            archive: zip
+            ext: ".exe"
+          - target: aarch64-pc-windows-msvc
+            runner: windows-11-arm
+            archive: zip
+            ext: ".exe"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+
+      - name: Install Rust toolchain
+        shell: bash
+        run: |
+          rustup show
+          rustup target add ${{ matrix.target }}
+
+      - name: Build
+        shell: bash
+        env:
+          CARGO_TERM_COLOR: always
+        run: cargo build --release --locked --bin cairn --target ${{ matrix.target }}
+
+      - name: Resolve version
+        id: ver
+        shell: bash
+        run: |
+          tag='${{ github.event.inputs.tag || github.ref_name }}'
+          version="${tag#v}"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Stage binary
+        id: stage
+        shell: bash
+        run: |
+          set -euo pipefail
+          name="cairn-${{ steps.ver.outputs.version }}-${{ matrix.target }}"
+          mkdir -p "dist/$name"
+          cp "target/${{ matrix.target }}/release/cairn${{ matrix.ext }}" "dist/$name/"
+          cp LICENSE "dist/$name/"
+          cp README.md "dist/$name/"
+          echo "name=$name" >> "$GITHUB_OUTPUT"
+
+      - name: Archive (tar.gz)
+        if: matrix.archive == 'tar.gz'
+        id: tar
+        shell: bash
+        run: |
+          set -euo pipefail
+          (cd dist && tar -czf "${{ steps.stage.outputs.name }}.tar.gz" "${{ steps.stage.outputs.name }}")
+          echo "path=dist/${{ steps.stage.outputs.name }}.tar.gz" >> "$GITHUB_OUTPUT"
+
+      - name: Archive (zip)
+        if: matrix.archive == 'zip'
+        id: zip
+        shell: pwsh
+        run: |
+          $name = "${{ steps.stage.outputs.name }}"
+          Compress-Archive -Path "dist/$name" -DestinationPath "dist/$name.zip"
+          "path=dist/$name.zip" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
+      - name: Resolve archive path
+        id: archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${{ matrix.archive }}" = "tar.gz" ]; then
+            echo "path=${{ steps.tar.outputs.path }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "path=${{ steps.zip.outputs.path }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
+
+      - name: Sign archive (keyless sigstore)
+        shell: bash
+        env:
+          COSIGN_EXPERIMENTAL: "1"
+        run: |
+          set -euo pipefail
+          cosign sign-blob --yes \
+            --bundle "${{ steps.archive.outputs.path }}.sigstore" \
+            "${{ steps.archive.outputs.path }}"
+
+      - name: Compute SHA-256
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive='${{ steps.archive.outputs.path }}'
+          if command -v sha256sum >/dev/null 2>&1; then
+            sha256sum "$archive" | awk '{print $1}' > "$archive.sha256"
+          else
+            shasum -a 256 "$archive" | awk '{print $1}' > "$archive.sha256"
+          fi
+
+      - name: Upload to GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive='${{ steps.archive.outputs.path }}'
+          gh release upload '${{ steps.ver.outputs.tag }}' \
+            "$archive" \
+            "$archive.sigstore" \
+            "$archive.sha256" \
+            --clobber
+
+  sbom:
+    name: SBOM
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+
+      - name: Install Rust toolchain
+        run: rustup show
+
+      - name: Install cargo-cyclonedx
+        run: cargo install cargo-cyclonedx --locked
+
+      - name: Generate SBOM
+        run: cargo cyclonedx --format json --override-filename cairn-sbom
+
+      - name: Resolve version
+        id: ver
+        shell: bash
+        run: |
+          tag='${{ github.event.inputs.tag || github.ref_name }}'
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
+
+      - name: Sign SBOM
+        env:
+          COSIGN_EXPERIMENTAL: "1"
+        run: cosign sign-blob --yes --bundle cairn-sbom.cdx.json.sigstore cairn-sbom.cdx.json
+
+      - name: Upload SBOM to GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release upload '${{ steps.ver.outputs.tag }}' \
+            cairn-sbom.cdx.json \
+            cairn-sbom.cdx.json.sigstore \
+            --clobber

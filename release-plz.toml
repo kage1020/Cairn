@@ -1,0 +1,88 @@
+# release-plz configuration for Cairn.
+#
+# Cairn uses CalVer `YYYY.0M[.PATCH]` (see CHANGELOG.md and spec/versioning-editions).
+# release-plz does not natively understand CalVer, so the version is forced from CI
+# (workflow `compute-version` job + `release-plz set-version`). This file controls
+# everything *other* than the version number: changelog template, tag/release shape,
+# commit grouping.
+
+[workspace]
+# CalVer has no semver "major" axis, so the API-break detector is meaningless here.
+# Tier-based breakage promises live in spec/compatibility, not in semver_check.
+semver_check = false
+
+# One workspace, one CalVer, one tag. Per-crate tags would pollute the history with
+# seven tags per release.
+git_tag_enable = false
+git_release_enable = false
+
+# Single root changelog for the whole bundle.
+changelog_path = "./CHANGELOG.md"
+changelog_update = true
+
+# The workflow pre-sets the workspace version before invoking release-plz, so the
+# tree is "dirty" by release-plz's reckoning. Allow it.
+allow_dirty = true
+publish_allow_dirty = true
+publish_timeout = "10m"
+
+# Patch path (push trigger) opens a PR only when at least one commit matches.
+# Docs-only / ci-only / test-only changes do not earn a patch release.
+# The monthly cron path bypasses this by pre-setting the workspace version.
+release_commits = "^(feat|fix|perf|refactor|build)(\\(.+\\))?(!)?:"
+
+# PR shape.
+pr_branch_prefix = "release-plz-"
+pr_labels = ["release"]
+
+# Pin one crate as the anchor for the single workspace tag + GitHub Release.
+# `cairn-cli` is the user-facing binary, so the tag rides on it.
+[[package]]
+name = "cairn-cli"
+git_tag_enable = true
+git_release_enable = true
+git_tag_name = "v{{ version }}"
+
+[changelog]
+# Existing CHANGELOG.md content (the 2026.06 draft entry and prose) is preserved by
+# release-plz on insertion. This header is only used when the file is created fresh.
+header = """# Changelog
+
+> Language: **English** ([日本語](CHANGELOG.ja.md))
+
+All notable changes to Cairn are documented here. Cairn uses date-based versioning (CalVer)
+`YYYY.0M[.PATCH]`. This is the version of the language + reference compiler + standard library +
+registry/constraint packs as a bundle, and is a separate axis from the Minecraft target version.
+
+"""
+
+body = """
+## {{ version }} — {{ timestamp | date(format="%Y-%m-%d") }}
+{% for group, commits in commits | group_by(attribute="group") %}
+### {{ group | upper_first }}
+{% for commit in commits %}
+{%- if commit.scope -%}
+- *({{ commit.scope }})* {% if commit.breaking %}[**breaking**] {% endif %}{{ commit.message }}
+{% else -%}
+- {% if commit.breaking %}[**breaking**] {% endif %}{{ commit.message }}
+{% endif -%}
+{% endfor -%}
+{% endfor %}
+"""
+
+protect_breaking_commits = true
+
+commit_parsers = [
+  { message = "^feat", group = "added" },
+  { message = "^fix", group = "fixed" },
+  { message = "^perf", group = "performance" },
+  { message = "^refactor", group = "changed" },
+  { message = "^docs", group = "docs", skip = true },
+  { message = "^build", group = "build" },
+  { message = "^ci", group = "ci", skip = true },
+  { message = "^test", group = "test", skip = true },
+  { message = "^style", group = "style", skip = true },
+  { message = "^chore\\(release\\)", skip = true },
+  { message = "^chore", group = "chore", skip = true },
+  { message = "^.*", group = "other" },
+]
