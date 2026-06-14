@@ -1,0 +1,24 @@
+# Normalize all text files to LF on commit, regardless of OS.
+* text=auto eol=lf
+
+# Explicit overrides for source files: always LF in the index and working tree.
+*.rs        text eol=lf
+*.toml      text eol=lf
+*.md        text eol=lf
+*.yml       text eol=lf
+*.yaml      text eol=lf
+*.json      text eol=lf
+*.sh        text eol=lf
+
+# Binary files: never touch line endings.
+*.png       binary
+*.jpg       binary
+*.jpeg      binary
+*.gif       binary
+*.webp      binary
+*.ico       binary
+*.nbt       binary
+*.litematic binary
+*.schem     binary
+*.mcstructure binary
+*.wasm      binary

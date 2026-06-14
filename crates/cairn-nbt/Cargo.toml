@@ -1,0 +1,12 @@
+[package]
+name = "cairn-nbt"
+description = "NBT codec for the Cairn language (Java big-endian and Bedrock little-endian)"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[lints]
+workspace = true
