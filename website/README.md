@@ -2,7 +2,8 @@
 
 The documentation site for [Cairn](https://github.com/kage1020/Cairn). Built with
 [Astro](https://astro.build/) + [Starlight](https://starlight.astro.build/), in English and
-日本語. Deployed to GitHub Pages at <https://kage1020.github.io/Cairn/>.
+日本語. Deployed to Cloudflare Pages at <https://cairn.kage1020.com/> (project name `cairn`,
+default URL `https://cairn.pages.dev/`).
 
 This is the **canonical home** for the language specification, tutorial, developer guide, and
 examples index. There is no separate Markdown source elsewhere in the repository — edit the files
@@ -73,9 +74,34 @@ pnpm preview        # serves ./dist
 
 ## Deploying
 
-The workflow in [`.github/workflows/website.yml`](../.github/workflows/website.yml) runs
-`pnpm install && pnpm build` on every push that touches `website/**` and publishes `./dist/`
-to GitHub Pages. To deploy from a fork, update `site` and `base` in `astro.config.mjs`.
+The site is hosted on **Cloudflare Pages** (project name `cairn`) with the built-in Git
+integration. Cloudflare watches `main` on GitHub and rebuilds on every push that changes files
+under `website/`.
+
+Cloudflare Pages project settings:
+
+| Setting | Value |
+|---|---|
+| Production branch | `main` |
+| Root directory | `website` |
+| Build command | `pnpm install --frozen-lockfile && pnpm build` |
+| Build output directory | `dist` |
+| Node.js version | `22` (also pinned via [`.nvmrc`](.nvmrc) and [`package.json#engines`](package.json)) |
+| Compatibility date | `2026-06-14` (in [`wrangler.jsonc`](wrangler.jsonc)) |
+
+Custom domain `cairn.kage1020.com` is wired in the Cloudflare dashboard; the default
+`cairn.pages.dev` URL also resolves. There is no GitHub Actions workflow — deletion is
+intentional, as Cloudflare's Git integration owns the build.
+
+To deploy a one-off preview from the CLI:
+
+```sh
+pnpm build
+pnpm dlx wrangler pages deploy ./dist --project-name=cairn --branch=preview
+```
+
+To deploy from a fork, change `site` in `astro.config.mjs`, update `name` in
+`wrangler.jsonc`, and connect the fork's GitHub repo to a new Cloudflare Pages project.
 
 ## License
 

@@ -26,9 +26,9 @@ Java, and the tag-type taxonomy are still to land.
 Out of scope:
 
 - SNBT parsing — Cairn never round-trips through SNBT
-  ([overview §1.1](https://kage1020.github.io/Cairn/spec/overview/)).
+  ([overview §1.1](https://cairn.kage1020.com/spec/overview/)).
 - DataFixerUpper-style version migration. DFU is explicitly kept out of the Cairn language semantics
-  ([versioning-editions §10.2](https://kage1020.github.io/Cairn/spec/versioning-editions/)).
+  ([versioning-editions §10.2](https://cairn.kage1020.com/spec/versioning-editions/)).
 
 ## License
 

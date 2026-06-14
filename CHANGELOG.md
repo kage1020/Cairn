@@ -28,14 +28,15 @@ compiler exists yet.
 - Ecosystem interop: export to common formats; import as faithful transliteration with LLM lift.
 - Evaluation: headless geometry/redstone simulator drives quantitative spec iteration.
 - Documentation: per-crate READMEs, the
-  [Developer Guide](https://kage1020.github.io/Cairn/development/), the
-  [Tutorial](https://kage1020.github.io/Cairn/tutorial/), worked
-  [examples](https://kage1020.github.io/Cairn/examples/), and a cross-cutting
-  [Glossary](https://kage1020.github.io/Cairn/spec/glossary/).
+  [Developer Guide](https://cairn.kage1020.com/development/), the
+  [Tutorial](https://cairn.kage1020.com/tutorial/), worked
+  [examples](https://cairn.kage1020.com/examples/), and a cross-cutting
+  [Glossary](https://cairn.kage1020.com/spec/glossary/).
 - Japanese mirror of the user-facing documents (README, CONTRIBUTING, CHANGELOG, spec chapters,
   glossary, tutorial, examples index). English remains the source of truth.
-- Documentation site under [`website/`](website/README.md) (Astro + Starlight, en + ja).
-  The spec, tutorial, developer guide, and examples index are authored directly in
+- Documentation site under [`website/`](website/README.md) (Astro + Starlight, en + ja),
+  deployed to Cloudflare Pages at <https://cairn.kage1020.com/>. The spec, tutorial, developer
+  guide, and examples index are authored directly in
   [`website/src/content/docs/`](website/src/content/docs/); a placeholder playground page is
-  wired to the future `cairn-wasm` bindings; a GitHub Pages workflow publishes on every push
-  to `main`.
+  wired to the future `cairn-wasm` bindings; Cloudflare's Git integration auto-deploys on every
+  push to `main`.

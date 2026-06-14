@@ -135,8 +135,7 @@ const sidebar = [
 ];
 
 export default defineConfig({
-  site: "https://kage1020.github.io",
-  base: "/Cairn",
+  site: "https://cairn.kage1020.com",
   integrations: [
     starlight({
       title: "Cairn",

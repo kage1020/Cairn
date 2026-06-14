@@ -14,7 +14,7 @@
 
 > ステータス: **設計仕様、ドラフト `2026.06`**。言語仕様はオープンに設計中で、リファレンス実装は
 > まだありません。正規仕様・チュートリアル・開発者ガイドは
-> [ドキュメントサイト](https://kage1020.github.io/Cairn/ja/) にあります。
+> [ドキュメントサイト](https://cairn.kage1020.com/ja/) にあります。
 
 ## なぜ
 
@@ -68,17 +68,17 @@ cairn compile cottage.crn --edition java --target 1.21.4
 
 ## ドキュメント
 
-<https://kage1020.github.io/Cairn/ja/> がプロジェクトの散文ドキュメントの正規ホームです:
+<https://cairn.kage1020.com/ja/> がプロジェクトの散文ドキュメントの正規ホームです:
 
-- [仕様書](https://kage1020.github.io/Cairn/ja/spec/) — 15 章 + 横断
-  [用語集](https://kage1020.github.io/Cairn/ja/spec/glossary/)。
-- [チュートリアル](https://kage1020.github.io/Cairn/ja/tutorial/) — [`examples/`](examples/) の
+- [仕様書](https://cairn.kage1020.com/ja/spec/) — 15 章 + 横断
+  [用語集](https://cairn.kage1020.com/ja/spec/glossary/)。
+- [チュートリアル](https://cairn.kage1020.com/ja/tutorial/) — [`examples/`](examples/) の
   `.crn` (cottage、themed-tower、redstone-door、village) を順に辿ります。
-- [開発者ガイド](https://kage1020.github.io/Cairn/development/) — Rust ワークスペース構造、
+- [開発者ガイド](https://cairn.kage1020.com/development/) — Rust ワークスペース構造、
   クレート依存グラフ、ビルド/テスト/lint コマンド (英語のみ)。
 
 Markdown ソースは [`website/src/content/docs/`](website/README.md) にあり、コードと同じレビュー
-フローで編集します。`main` への push ごとに GitHub Actions が GitHub Pages へ公開します。
+フローで編集します。`main` への push ごとに Cloudflare Pages の Git 連携が自動デプロイします。
 
 ## バージョニング
 

@@ -11,7 +11,7 @@ build is: intentionally placed blocks. The name is the thesis.
 
 > Status: **design specification, draft `2026.06`.** The language is being designed in the open;
 > a reference compiler is not yet implemented. The normative specification, tutorial, and
-> developer guide live on the [documentation site](https://kage1020.github.io/Cairn/).
+> developer guide live on the [documentation site](https://cairn.kage1020.com/).
 
 ## Why
 
@@ -65,19 +65,19 @@ cairn compile cottage.crn --edition java --target 1.21.4
 
 ## Documentation
 
-The site at <https://kage1020.github.io/Cairn/> is the canonical home for the project's prose:
+The site at <https://cairn.kage1020.com/> is the canonical home for the project's prose:
 
-- [Specification](https://kage1020.github.io/Cairn/spec/) — fifteen focused chapters plus a
-  cross-cutting [glossary](https://kage1020.github.io/Cairn/spec/glossary/).
-- [Tutorial](https://kage1020.github.io/Cairn/tutorial/) — walks through the worked
+- [Specification](https://cairn.kage1020.com/spec/) — fifteen focused chapters plus a
+  cross-cutting [glossary](https://cairn.kage1020.com/spec/glossary/).
+- [Tutorial](https://cairn.kage1020.com/tutorial/) — walks through the worked
   [`examples/`](examples/) (`cottage`, `themed-tower`, `redstone-door`, `village`).
-- [Developer Guide](https://kage1020.github.io/Cairn/development/) — the Rust workspace layout,
+- [Developer Guide](https://cairn.kage1020.com/development/) — the Rust workspace layout,
   crate dependency graph, build/test/lint commands.
 - 日本語版 — every page above is mirrored at `/ja/<path>/`.
 
 The site Markdown source lives in [`website/src/content/docs/`](website/README.md); edits there
-go through the same review flow as code. A GitHub Actions workflow publishes every push to
-`main`.
+go through the same review flow as code. Cloudflare Pages auto-deploys every push to `main` via
+its Git integration.
 
 ## Versioning
 

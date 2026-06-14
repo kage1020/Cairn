@@ -3,7 +3,7 @@
 > Language: **English** ([日本語](CONTRIBUTING.ja.md))
 
 Thanks for your interest in Cairn! The project is at the **design stage**: there is a normative
-[specification](https://kage1020.github.io/Cairn/spec/) (source under
+[specification](https://cairn.kage1020.com/spec/) (source under
 [`website/src/content/docs/spec/`](website/src/content/docs/spec/)) and not yet a reference
 implementation. The most valuable contributions right now are design critique, concrete
 proposals, and worked examples.
@@ -31,7 +31,7 @@ are welcome as clearly-labeled secondary copies, but English is the source of tr
 - Use the defined terminology (`intent_state` / `resolved_state`, `mat_slot`, canonical token, etc.)
   consistently. Introduce new terms in the relevant chapter, not ad hoc.
 - Reference design principles as `P1`–`P5` (see
-  [Design Principles](https://kage1020.github.io/Cairn/spec/principles/)).
+  [Design Principles](https://cairn.kage1020.com/spec/principles/)).
 - Keep examples concrete and minimal. Error messages should be in the "what is wrong / valid
   alternatives / suggested fix" shape so they can feed the self-correction loop.
 
@@ -45,7 +45,7 @@ issue that:
 2. Gives the concrete case it fails to handle.
 3. Proposes an alternative with syntax/IR/message examples.
 4. Notes the impact on the evaluation metrics (see
-   [Evaluation Framework](https://kage1020.github.io/Cairn/spec/evaluation/)).
+   [Evaluation Framework](https://cairn.kage1020.com/spec/evaluation/)).
 
 ## Versioning
 
