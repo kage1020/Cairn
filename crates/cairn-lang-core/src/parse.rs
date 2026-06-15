@@ -394,9 +394,12 @@ impl<'a> Parser<'a> {
             });
         }
         let within_lex = self.expect_int_lexeme()?;
-        let within: u32 = within_lex
-            .parse()
-            .map_err(|_| self.syntax_here(&format!("invalid `within` bound `{within_lex}`")))?;
+        let within: u32 = within_lex.parse().map_err(|err: std::num::ParseIntError| {
+            self.syntax_here(&format!(
+                "invalid `within` bound `{within_lex}`: {}",
+                describe_int_err(&err)
+            ))
+        })?;
         self.expect(&TokenKind::RParen)?;
         self.expect_newline()?;
         Ok(Command {
@@ -683,5 +686,17 @@ impl<'a> Parser<'a> {
     fn position(&self) -> Position {
         self.peek()
             .map_or(Position { line: 0, col: 0 }, |t| t.position)
+    }
+}
+
+fn describe_int_err(err: &std::num::ParseIntError) -> &'static str {
+    match err.kind() {
+        std::num::IntErrorKind::Empty => "empty",
+        std::num::IntErrorKind::InvalidDigit => "invalid digit",
+        std::num::IntErrorKind::PosOverflow | std::num::IntErrorKind::NegOverflow => {
+            "value out of range"
+        }
+        std::num::IntErrorKind::Zero => "zero not allowed",
+        _ => "invalid integer",
     }
 }

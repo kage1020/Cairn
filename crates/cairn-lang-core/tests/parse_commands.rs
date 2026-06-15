@@ -355,6 +355,16 @@ fn rejects_assert_always_without_within() {
 }
 
 #[test]
+fn assert_always_overflowing_within_reports_out_of_range() {
+    // 2^32 exceeds u32::MAX, so `within` parsing should fail with the
+    // overflow-specific message rather than a generic "invalid" one.
+    let err = parse("struct s\n  assert always(a -> eventually b within 4294967296)\n")
+        .expect_err("overflow");
+    let msg = err.user_message();
+    assert!(msg.contains("out of range"), "got: {msg}");
+}
+
+#[test]
 fn rejects_logic_without_eq() {
     let err = parse("struct s\n  logic sig.a sig.b\n").expect_err("missing =");
     let msg = err.user_message();
