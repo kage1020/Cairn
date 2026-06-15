@@ -104,5 +104,8 @@ fn debug_format_runs_successfully() {
         String::from_utf8_lossy(&out.stderr)
     );
     let stdout = String::from_utf8(out.stdout).expect("utf-8");
-    assert!(!stdout.trim().is_empty(), "debug stdout should not be empty");
+    assert!(
+        !stdout.trim().is_empty(),
+        "debug stdout should not be empty"
+    );
 }
