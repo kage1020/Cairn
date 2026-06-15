@@ -1,15 +1,19 @@
 [package]
-name = "cairn-lsp"
-description = "Language Server Protocol implementation for the Cairn language"
+name = "cairn-lang-wasm"
+description = "WebAssembly bindings exposing the Cairn compiler in the browser"
 version.workspace = true
+publish.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 authors.workspace = true
 
+[lib]
+crate-type = ["cdylib", "rlib"]
+
 [dependencies]
-cairn-core = { workspace = true }
+cairn-lang-core = { workspace = true }
 
 [lints]
 workspace = true

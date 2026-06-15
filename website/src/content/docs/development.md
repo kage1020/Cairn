@@ -17,13 +17,13 @@ Cairn/
 ├── rust-toolchain.toml     # pinned to stable + rustfmt + clippy
 ├── rustfmt.toml            # edition = 2024, max_width = 100
 ├── crates/
-│   ├── cairn-core/         # parser, IR, resolver, lint    (lib)
-│   ├── cairn-cli/          # `cairn` binary                (bin)
-│   ├── cairn-nbt/          # Java/Bedrock NBT codec        (lib)
-│   ├── cairn-formats/      # .nbt / .litematic / .schem / .mcstructure  (lib)
-│   ├── cairn-redstone/     # logic synth + P&R + tick sim  (lib)
-│   ├── cairn-lsp/          # Language Server Protocol      (lib)
-│   └── cairn-wasm/         # WebAssembly bindings          (cdylib + rlib)
+│   ├── cairn-lang-core/         # parser, IR, resolver, lint    (lib)
+│   ├── cairn-lang-cli/          # `cairn` binary                (bin)
+│   ├── cairn-lang-nbt/          # Java/Bedrock NBT codec        (lib)
+│   ├── cairn-lang-formats/      # .nbt / .litematic / .schem / .mcstructure  (lib)
+│   ├── cairn-lang-redstone/     # logic synth + P&R + tick sim  (lib)
+│   ├── cairn-lang-lsp/          # Language Server Protocol      (lib)
+│   └── cairn-lang-wasm/         # WebAssembly bindings          (cdylib + rlib)
 ├── spec/                   # normative specification (Markdown)
 ├── docs/                   # this guide, tutorial, etc.
 ├── examples/               # worked .crn examples
@@ -32,41 +32,41 @@ Cairn/
 
 Each crate has its own README that maps it back to the spec chapter it implements:
 
-- [`cairn-core`](../crates/cairn-core/README)
-- [`cairn-cli`](../crates/cairn-cli/README)
-- [`cairn-nbt`](../crates/cairn-nbt/README)
-- [`cairn-formats`](../crates/cairn-formats/README)
-- [`cairn-redstone`](../crates/cairn-redstone/README)
-- [`cairn-lsp`](../crates/cairn-lsp/README)
-- [`cairn-wasm`](../crates/cairn-wasm/README)
+- [`cairn-lang-core`](../crates/cairn-lang-core/README)
+- [`cairn-lang-cli`](../crates/cairn-lang-cli/README)
+- [`cairn-lang-nbt`](../crates/cairn-lang-nbt/README)
+- [`cairn-lang-formats`](../crates/cairn-lang-formats/README)
+- [`cairn-lang-redstone`](../crates/cairn-lang-redstone/README)
+- [`cairn-lang-lsp`](../crates/cairn-lang-lsp/README)
+- [`cairn-lang-wasm`](../crates/cairn-lang-wasm/README)
 
 ## Crate dependency graph
 
 ```
                  ┌──────────────┐
-                 │  cairn-core  │  ← parser, IR, resolver, lint
+                 │  cairn-lang-core  │  ← parser, IR, resolver, lint
                  └──────┬───────┘
         ┌───────────────┼──────────────┬──────────────┬─────────────┐
         │               │              │              │             │
 ┌───────▼──────┐ ┌──────▼──────┐ ┌─────▼──────┐ ┌─────▼──────┐ ┌────▼────────┐
-│ cairn-cli    │ │ cairn-       │ │ cairn-     │ │ cairn-lsp  │ │ cairn-wasm  │
+│ cairn-lang-cli    │ │ cairn-       │ │ cairn-     │ │ cairn-lang-lsp  │ │ cairn-lang-wasm  │
 │ (`cairn`)    │ │ formats      │ │ redstone   │ │ (LSP)      │ │ (WASM)      │
 └──────────────┘ └─────┬────────┘ └────────────┘ └────────────┘ └─────────────┘
                        │
                  ┌─────▼──────┐
-                 │ cairn-nbt  │  ← byte-level NBT codec only
+                 │ cairn-lang-nbt  │  ← byte-level NBT codec only
                  └────────────┘
 ```
 
 Rules of thumb:
 
-- **Nothing depends on `cairn-cli`, `cairn-lsp`, or `cairn-wasm`.** They are leaf integrations.
-- **`cairn-core` knows nothing about NBT, file formats, redstone simulation, or editor protocols.**
+- **Nothing depends on `cairn-lang-cli`, `cairn-lang-lsp`, or `cairn-lang-wasm`.** They are leaf integrations.
+- **`cairn-lang-core` knows nothing about NBT, file formats, redstone simulation, or editor protocols.**
   The block-array IR is the universal pivot ([architecture
   §3.1](../spec/architecture)); everything beyond it lives in a sibling crate.
-- **`cairn-nbt` is just the byte codec.** Litematica regions, schematic palettes, and Bedrock's
-  `.mcstructure` quirks live in `cairn-formats`.
-- **`cairn-redstone` reuses `cairn-core` sensor/actuator placement** but owns its own IR layers
+- **`cairn-lang-nbt` is just the byte codec.** Litematica regions, schematic palettes, and Bedrock's
+  `.mcstructure` quirks live in `cairn-lang-formats`.
+- **`cairn-lang-redstone` reuses `cairn-lang-core` sensor/actuator placement** but owns its own IR layers
   (Logic / Netlist / Placement; see [redstone §14.8](../spec/redstone)).
 
 ## Toolchain
@@ -103,11 +103,11 @@ RUSTFLAGS="-D warnings" cargo build --workspace --locked
 
 ### WASM build
 
-`cairn-wasm` builds with [`wasm-pack`](https://rustwasm.github.io/wasm-pack/) and is consumed by
+`cairn-lang-wasm` builds with [`wasm-pack`](https://rustwasm.github.io/wasm-pack/) and is consumed by
 the website:
 
 ```sh
-wasm-pack build crates/cairn-wasm --target web --release
+wasm-pack build crates/cairn-lang-wasm --target web --release
 ```
 
 The website expects the resulting `pkg/` directory to live at
@@ -151,7 +151,7 @@ fits in a few lines.
 
 ## Adding a new format backend
 
-Format support lives in [`cairn-formats`](../crates/cairn-formats/README). To add a new file
+Format support lives in [`cairn-lang-formats`](../crates/cairn-lang-formats/README). To add a new file
 type, you only need to:
 
 1. Add a reader from the bytes to the block-array IR.
@@ -159,7 +159,7 @@ type, you only need to:
 3. Stamp the `(edition, version)` provenance on import
    ([ecosystem-interop §12.4](../spec/ecosystem-interop)).
 
-If you find yourself reaching into `cairn-core` to add format-specific fields, that is a sign the
+If you find yourself reaching into `cairn-lang-core` to add format-specific fields, that is a sign the
 block-array IR is leaking format concerns — push back and discuss before merging.
 
 ## Adding redstone primitives

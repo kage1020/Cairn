@@ -37,7 +37,7 @@ the monthly schedule shifts.
 | **M2 — minimal build** | 2026.10.0 | `cairn compile` writes a Java `.nbt` for a single-room structure with floor and walls, plus a lockfile |
 | **M3 — examples work** | 2027.01.0 | `cottage`, `themed-tower`, `village` all round-trip through `cairn compile --edition java` and load in Minecraft |
 | **M4 — Java/Bedrock parity** | 2027.02.0 | Same DSL source emits valid output for both editions; parity table populated; per-edition theme fallbacks work |
-| **M5 — developer experience** | 2027.03.0 | `cairn-lsp` provides diagnostics and completion in at least one editor (VS Code) |
+| **M5 — developer experience** | 2027.03.0 | `cairn-lang-lsp` provides diagnostics and completion in at least one editor (VS Code) |
 | **M6 — redstone simulates** | 2027.05.0 | Logical redstone synthesis, place-and-route, and tick simulator land together; `redstone-door` example verifies |
 
 ## Monthly scope
@@ -47,7 +47,7 @@ table because monthly minors can ship without crossing a milestone gate.
 
 | Release | Scope added |
 |---|---|
-| **2026.07.0** | `cairn-core` lexer/parser, `cairn parse` subcommand (AST display only). Release automation goes live. |
+| **2026.07.0** | `cairn-lang-core` lexer/parser, `cairn parse` subcommand (AST display only). Release automation goes live. |
 | **2026.08.0** | Intent IR; syntactic validation; `cairn check`. |
 | **2026.09.0** | Semantic layer; materials and themes basics; `cairn info` reports the three version axes. |
 | **2026.10.0** | Block-array pivot; Java backend (walls and floors only); lockfile (`build.cairn.lock`). |
@@ -55,10 +55,10 @@ table because monthly minors can ship without crossing a milestone gate.
 | **2026.12.0** | Registry pack ingest; fail-loud errors with nearest-valid suggestions. |
 | **2027.01.0** | All `examples/` work on Java. **M3.** |
 | **2027.02.0** | Bedrock backend with parity table and per-edition theme fallbacks. **M4.** |
-| **2027.03.0** | `cairn-lsp` minimal (diagnostics + completion); VS Code extension. **M5.** |
+| **2027.03.0** | `cairn-lang-lsp` minimal (diagnostics + completion); VS Code extension. **M5.** |
 | **2027.04.0** | Redstone logical layer; combinational synthesis and place-and-route. |
 | **2027.05.0** | Redstone tick simulator; sequential macros; `redstone-door` verifies. **M6.** |
-| **2027.06.0** | `cairn-wasm` + browser playground (live compile in the docs site). |
+| **2027.06.0** | `cairn-lang-wasm` + browser playground (live compile in the docs site). |
 
 Beyond `2027.06.0` the schedule is intentionally not drawn. Once M6 lands the spec-driven part of
 the project is largely complete and the roadmap will be redrawn around real usage feedback.

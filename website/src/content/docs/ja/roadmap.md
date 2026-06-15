@@ -36,7 +36,7 @@ Cairn は [日付ベースのバージョニング](/ja/spec/versioning-editions
 | **M2 — minimal build** | 2026.10.0 | `cairn compile` が床と壁だけの単室構造に対して Java の `.nbt` と lockfile を書き出す |
 | **M3 — examples work** | 2027.01.0 | `cottage`, `themed-tower`, `village` が `cairn compile --edition java` を通り、Minecraft でロードできる |
 | **M4 — Java/Bedrock parity** | 2027.02.0 | 同じ DSL ソースから両エディションの有効な出力が出る。parity 表が埋まり、エディション別 theme fallback が動く |
-| **M5 — developer experience** | 2027.03.0 | `cairn-lsp` が少なくとも 1 エディタ (VS Code) で diagnostics と completion を提供 |
+| **M5 — developer experience** | 2027.03.0 | `cairn-lang-lsp` が少なくとも 1 エディタ (VS Code) で diagnostics と completion を提供 |
 | **M6 — redstone simulates** | 2027.05.0 | 論理レッドストーンの synthesis、place-and-route、tick simulator が揃う。`redstone-door` が verify される |
 
 ## 月別スコープ
@@ -46,7 +46,7 @@ Cairn は [日付ベースのバージョニング](/ja/spec/versioning-editions
 
 | リリース | 追加スコープ |
 |---|---|
-| **2026.07.0** | `cairn-core` の lexer/parser、`cairn parse` サブコマンド (AST 表示のみ)。リリース自動化が稼働。 |
+| **2026.07.0** | `cairn-lang-core` の lexer/parser、`cairn parse` サブコマンド (AST 表示のみ)。リリース自動化が稼働。 |
 | **2026.08.0** | Intent IR、構文バリデーション、`cairn check`。 |
 | **2026.09.0** | Semantic 層、materials/themes の基礎、`cairn info` が三軸を返す。 |
 | **2026.10.0** | block-array pivot、Java backend (壁と床のみ)、lockfile (`build.cairn.lock`)。 |
@@ -54,10 +54,10 @@ Cairn は [日付ベースのバージョニング](/ja/spec/versioning-editions
 | **2026.12.0** | registry pack 取り込み、fail-loud + nearest-valid 候補。 |
 | **2027.01.0** | `examples/` 全部が Java で動く。**M3**。 |
 | **2027.02.0** | Bedrock backend、parity 表、エディション別 theme fallback。**M4**。 |
-| **2027.03.0** | `cairn-lsp` 最小版 (diagnostics + completion)、VS Code 拡張。**M5**。 |
+| **2027.03.0** | `cairn-lang-lsp` 最小版 (diagnostics + completion)、VS Code 拡張。**M5**。 |
 | **2027.04.0** | レッドストーン論理層、組み合わせ回路の合成と place-and-route。 |
 | **2027.05.0** | レッドストーン tick simulator、sequential macros、`redstone-door` 検証。**M6**。 |
-| **2027.06.0** | `cairn-wasm` + ブラウザ playground (docs サイト上でライブコンパイル)。 |
+| **2027.06.0** | `cairn-lang-wasm` + ブラウザ playground (docs サイト上でライブコンパイル)。 |
 
 `2027.06.0` より先のスケジュールは意図的に描いていません。M6 まで到達すれば仕様駆動の部分はほぼ
 完了し、その先は実利用のフィードバックを元にロードマップを引き直します。

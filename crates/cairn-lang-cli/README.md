@@ -1,9 +1,9 @@
-# cairn-cli
+# cairn-lang-cli
 
 The `cairn` command-line interface. This is the only Cairn crate that ships an executable; it wires
-the [`cairn-core`](../cairn-core/README.md) compiler, the format backends in
-[`cairn-formats`](../cairn-formats/README.md), and (when described logically) the redstone synthesizer
-in [`cairn-redstone`](../cairn-redstone/README.md) into the subcommands an author actually types.
+the [`cairn-lang-core`](../cairn-lang-core/README.md) compiler, the format backends in
+[`cairn-lang-formats`](../cairn-lang-formats/README.md), and (when described logically) the redstone synthesizer
+in [`cairn-lang-redstone`](../cairn-lang-redstone/README.md) into the subcommands an author actually types.
 
 ## Status
 

@@ -6,5 +6,5 @@
 /// The Cairn release version, re-exported for JS callers.
 #[must_use]
 pub fn cairn_version() -> &'static str {
-    cairn_core::CAIRN_VERSION
+    cairn_lang_core::CAIRN_VERSION
 }

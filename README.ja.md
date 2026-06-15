@@ -102,7 +102,7 @@ Cairn のリリースは **日付ベースバージョニング (CalVer)** `YYYY
 - **M2** (`2026.10.0`) — 最小ビルド (単室、Java、lockfile)
 - **M3** (`2027.01.0`) — examples が Java で end-to-end 動く
 - **M4** (`2027.02.0`) — Java/Bedrock パリティ
-- **M5** (`2027.03.0`) — `cairn-lsp` と VS Code 拡張
+- **M5** (`2027.03.0`) — `cairn-lang-lsp` と VS Code 拡張
 - **M6** (`2027.05.0`) — レッドストーン論理層、place-and-route、tick simulator
 
 月次 minor は毎月 1 日の GitHub Actions cron が自動で PR を立てます。patch は適格コミットが `main`

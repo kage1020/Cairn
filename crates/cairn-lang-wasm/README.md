@@ -1,14 +1,14 @@
-# cairn-wasm
+# cairn-lang-wasm
 
 WebAssembly bindings for the Cairn compiler. Lets the [website
 playground](../../website/README.md) (and any other browser-hosted tool) parse, compile, and
 serialize Cairn sources without a server, sharing exactly the same
-[`cairn-core`](../cairn-core/README.md) implementation as the CLI.
+[`cairn-lang-core`](../cairn-lang-core/README.md) implementation as the CLI.
 
 ## Status
 
 Skeleton. The crate currently re-exports [`cairn_version`](src/lib.rs); the parser/compiler
-bindings will come online as `cairn-core` lands them.
+bindings will come online as `cairn-lang-core` lands them.
 
 ## Build
 
@@ -16,7 +16,7 @@ The crate is configured as both `cdylib` and `rlib`, so the standard
 [`wasm-pack`](https://rustwasm.github.io/wasm-pack/) toolchain works:
 
 ```sh
-wasm-pack build crates/cairn-wasm --target web --release
+wasm-pack build crates/cairn-lang-wasm --target web --release
 ```
 
 The artifact is consumed by the website playground; integration is documented in
@@ -39,7 +39,7 @@ and LSP ([lint](https://cairn.kage1020.com/spec/lint/)).
 
 ## Dependencies
 
-- [`cairn-core`](../cairn-core/README.md).
+- [`cairn-lang-core`](../cairn-lang-core/README.md).
 
 ## License
 

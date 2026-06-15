@@ -1,4 +1,4 @@
-# cairn-core
+# cairn-lang-core
 
 Core of the Cairn language: the parser, the three-layer IR, and the compiler that resolves *intent*
 into a block-array IR.
@@ -35,7 +35,7 @@ overview](https://cairn.kage1020.com/development/).
 
 ## Versioning
 
-`cairn-core` exposes [`CAIRN_VERSION`] (`"2026.06"`), the date-based version of the Cairn release
+`cairn-lang-core` exposes [`CAIRN_VERSION`] (`"2026.06"`), the date-based version of the Cairn release
 this build belongs to. This is **not** the Minecraft target version; see
 [versioning-editions](https://cairn.kage1020.com/spec/versioning-editions/) for how the two axes are kept separate.
 

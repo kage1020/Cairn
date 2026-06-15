@@ -55,7 +55,7 @@ Evolving surfaces:
   to).
 - The CLI's human-readable diagnostic format and prose (the *codes* are Stable; the *prose*
   is not).
-- The `--features` set on `cairn-cli` (cargo features) and `[features]` on workspace crates.
+- The `--features` set on `cairn-lang-cli` (cargo features) and `[features]` on workspace crates.
 
 ### Internal
 
@@ -64,8 +64,8 @@ surfaces are responsible for their own pinning.**
 
 Internal surfaces:
 
-- The Rust API of every workspace crate (`cairn-core`, `cairn-nbt`, `cairn-formats`,
-  `cairn-redstone`, `cairn-lsp`, `cairn-wasm`). These crates are published to crates.io from
+- The Rust API of every workspace crate (`cairn-lang-core`, `cairn-lang-nbt`, `cairn-lang-formats`,
+  `cairn-lang-redstone`, `cairn-lang-lsp`, `cairn-lang-wasm`). These crates are published to crates.io from
   the first monthly minor that contains them, but every item that is not the CLI's transitive
   public dependency is marked `#[doc(hidden)]`.
 - The compiler's intermediate representation (Intent IR, Semantic IR, block-array pivot
@@ -73,7 +73,7 @@ Internal surfaces:
 - The on-disk shape of incremental build caches (`target/`-equivalents inside the project
   workspace).
 - The internal protocol of the language server (its on-wire LSP protocol with VS Code etc. is
-  Stable; the way `cairn-lsp` decomposes work internally is not).
+  Stable; the way `cairn-lang-lsp` decomposes work internally is not).
 
 ## C.2 Tier of each surface, by milestone
 

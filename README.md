@@ -100,7 +100,7 @@ scope through `2027.06.0`:
 - **M2** (`2026.10.0`) — minimal build (single room, Java, lockfile)
 - **M3** (`2027.01.0`) — examples work end-to-end on Java
 - **M4** (`2027.02.0`) — Java/Bedrock parity
-- **M5** (`2027.03.0`) — `cairn-lsp` and VS Code extension
+- **M5** (`2027.03.0`) — `cairn-lang-lsp` and VS Code extension
 - **M6** (`2027.05.0`) — redstone logic, place-and-route, and tick simulator
 
 Monthly minor releases are opened automatically by a GitHub Actions cron on the 1st of each month;

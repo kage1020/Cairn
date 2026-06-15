@@ -3,45 +3,45 @@
 version = 4
 
 [[package]]
-name = "cairn-cli"
+name = "cairn-lang-cli"
 version = "0.0.0"
 dependencies = [
- "cairn-core",
+ "cairn-lang-core",
 ]
 
 [[package]]
-name = "cairn-core"
+name = "cairn-lang-core"
 version = "0.0.0"
 
 [[package]]
-name = "cairn-formats"
+name = "cairn-lang-formats"
 version = "0.0.0"
 dependencies = [
- "cairn-core",
- "cairn-nbt",
+ "cairn-lang-core",
+ "cairn-lang-nbt",
 ]
 
 [[package]]
-name = "cairn-lsp"
+name = "cairn-lang-lsp"
 version = "0.0.0"
 dependencies = [
- "cairn-core",
+ "cairn-lang-core",
 ]
 
 [[package]]
-name = "cairn-nbt"
+name = "cairn-lang-nbt"
 version = "0.0.0"
 
 [[package]]
-name = "cairn-redstone"
+name = "cairn-lang-redstone"
 version = "0.0.0"
 dependencies = [
- "cairn-core",
+ "cairn-lang-core",
 ]
 
 [[package]]
-name = "cairn-wasm"
+name = "cairn-lang-wasm"
 version = "0.0.0"
 dependencies = [
- "cairn-core",
+ "cairn-lang-core",
 ]

@@ -1,7 +1,8 @@
 [package]
-name = "cairn-formats"
+name = "cairn-lang-formats"
 description = "Readers and writers for .nbt, .litematic, .schem, and .mcstructure"
 version.workspace = true
+publish.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
@@ -9,8 +10,8 @@ repository.workspace = true
 authors.workspace = true
 
 [dependencies]
-cairn-core = { workspace = true }
-cairn-nbt = { workspace = true }
+cairn-lang-core = { workspace = true }
+cairn-lang-nbt = { workspace = true }
 
 [lints]
 workspace = true

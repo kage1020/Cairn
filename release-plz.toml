@@ -36,23 +36,29 @@ pr_branch_prefix = "release-plz-"
 pr_labels = ["release"]
 
 # Pin one crate as the anchor for the single workspace tag + GitHub Release.
-# `cairn-cli` is the user-facing binary, so the tag rides on it.
+# `cairn-lang-cli` is the user-facing binary (installs the `cairn` command),
+# so the tag rides on it.
 [[package]]
-name = "cairn-cli"
+name = "cairn-lang-cli"
 git_tag_enable = true
 git_release_enable = true
 git_tag_name = "v{{ version }}"
 
 [changelog]
-# Existing CHANGELOG.md content (the 2026.06 draft entry and prose) is preserved by
-# release-plz on insertion. This header is only used when the file is created fresh.
+# Existing CHANGELOG.md content is preserved by release-plz on insertion. This
+# header is only used when the file is created fresh; the live header lives in
+# CHANGELOG.md and follows Keep a Changelog 1.1.0 with an `[Unreleased]` marker.
 header = """# Changelog
 
 > Language: **English** ([日本語](CHANGELOG.ja.md))
 
-All notable changes to Cairn are documented here. Cairn uses date-based versioning (CalVer)
-`YYYY.0M[.PATCH]`. This is the version of the language + reference compiler + standard library +
-registry/constraint packs as a bundle, and is a separate axis from the Minecraft target version.
+All notable changes to Cairn are documented here. The format follows
+[Keep a Changelog](https://keepachangelog.com/en/1.1.0/) so `release-plz` can append release
+entries cleanly. Cairn uses date-based versioning (CalVer) `YYYY.0M[.PATCH]`. This is the version
+of the language + reference compiler + standard library + registry/constraint packs as a bundle,
+and is a separate axis from the Minecraft target version.
+
+## [Unreleased]
 
 """
 
