@@ -38,8 +38,13 @@ pr_labels = ["release"]
 # Pin one crate as the anchor for the single workspace tag + GitHub Release.
 # `cairn-lang-cli` is the user-facing binary (installs the `cairn` command),
 # so the tag rides on it.
+#
+# `publish = false` here must mirror `[workspace.package].publish` in
+# Cargo.toml — release-plz refuses to start when the two disagree. When the
+# first real release PR (2026.07.0) is opened, flip both to true together.
 [[package]]
 name = "cairn-lang-cli"
+publish = false
 git_tag_enable = true
 git_release_enable = true
 git_tag_name = "v{{ version }}"
