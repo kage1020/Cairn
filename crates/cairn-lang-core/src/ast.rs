@@ -55,10 +55,7 @@ pub enum Header {
 #[allow(missing_docs)]
 pub enum Item {
     /// `theme NAME[:]` block — slot/selector bindings.
-    Theme {
-        name: String,
-        body: Vec<ThemeRule>,
-    },
+    Theme { name: String, body: Vec<ThemeRule> },
     /// `def NAME[ ARGS][:]` block — reusable parameterised component.
     Def {
         name: String,
@@ -66,10 +63,7 @@ pub enum Item {
         body: Vec<Command>,
     },
     /// `site NAME[:]` block — multi-building placement.
-    Site {
-        name: String,
-        body: Vec<Command>,
-    },
+    Site { name: String, body: Vec<Command> },
     /// `struct NAME[ ARGS]` block — single building / structural composition.
     Struct {
         name: String,
