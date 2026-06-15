@@ -62,3 +62,39 @@
   昇格するかをマイルストーン別の表で明示する。
 - [ロードマップ](https://cairn.kage1020.com/ja/roadmap/) を公開。M1〜M6 のマイルストーンと
   `2027.06.0` までの月別スコープを掲載。
+
+### Added (M1 — *source parses* の実行可能スライス)
+
+- `cairn-lang-core::lex` — インデントを認識する lexer。トークンにバイトスパンと
+  1 始まりの行/列位置を付与する。タブインデントと奇数スペースのインデントは拒否。
+- `cairn-lang-core::ast` — 表層レベル AST (`Module`, `Header`, `Item`, `ThemeRule`,
+  `Command`, `Arg`, `Value`, `Extra`, `Expr`)。全型に `serde::Serialize` を derive。
+- `cairn-lang-core::parse` — ハンドロールの再帰下降パーサ。ヘッダ (`@cairn`, `@requires`,
+  `@intended_targets`)、`theme` / `def` / `site` / `struct` ブロック、ネストされたコマンド、
+  ブラケットセレクタ、センサーの `-> binding` 末尾、位置引数 (`connect a to b`)、
+  `logic` / `assert truth|always` 特殊形をカバー。
+- `cairn parse <file> [--format json|debug]` — `clap` derive で実装した CLI サブコマンド。
+  エラー出力は `gcc`/`clang` スタイル (`error: file:line:col: メッセージ`) で、エディタの
+  ジャンプ機能から直接エラー位置を開ける。
+- エンドツーエンドのカバレッジ: lexer テスト 17 件、parser ユニットテスト 27 件、
+  `examples/` 配下に対する `insta` スナップショット 4 件、すべての example をバイナリ経由で
+  ラウンドトリップさせる CLI 統合テスト 6 件。
+
+### 堅牢化
+
+- Lexer は `\n` / `\r\n` / 単独 `\r` を等価に 1 つの論理改行として扱う (Windows で
+  `core.autocrlf=true` の checkout でも Linux と同じく字句解析できる)。
+- 列カウンタはバイトではなく Unicode スカラー値 (`char`) で進む。文字列リテラル内の
+  日本語が後続トークンの列番号を破壊しない。
+- `UnexpectedChar` は実際の `char` (マルチバイト UTF-8 含む) を報告する。
+  以前のバイトを単純に `char` キャストしていた挙動を廃止。
+- 1 コマンド行に `-> binding` 末尾は 1 つまで。2 回目の `->` は黙って上書きせず
+  ハードエラー。
+- `@cairn` / `@requires` / `@intended_targets` は空値を拒否、
+  `@intended_targets` はリスト後の末尾トークンも拒否。
+- パーサのエラーメッセージは `TokenKind` の人間向け Display を使用
+  (`expected `=`, got identifier `foo``)。Rust `Debug` の生表記は露出しない。
+- `ast` / `lex` / `error` の公開 enum はすべて `#[non_exhaustive]` 化。後続マイルストーンで
+  variant を追加しても下流クレートの破壊的変更にならない。
+- `LexError` / `ParseError` に `position()` / `user_message()` アクセサを追加。CLI や
+  将来の LSP が Display 文字列を再パースせずに診断を組み立てられる。

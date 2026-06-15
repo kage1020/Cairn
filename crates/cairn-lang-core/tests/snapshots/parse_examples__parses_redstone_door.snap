@@ -1,0 +1,195 @@
+---
+source: crates/cairn-lang-core/tests/parse_examples.rs
+assertion_line: 36
+expression: "parse_example(\"redstone-door.crn\")"
+---
+headers:
+  - kind: Cairn
+    version: "2026.06"
+  - kind: Requires
+    requirement: version>=1.20
+items:
+  - kind: Theme
+    name: entry
+    body:
+      - kind: Slot
+        slot: wall
+        value:
+          kind: Token
+          value: oak_planks
+      - kind: Slot
+        slot: door
+        value:
+          kind: Token
+          value: oak_door
+  - kind: Struct
+    name: gatehouse
+    args:
+      - key: size
+        value:
+          kind: Size
+          value:
+            w: 7
+            h: 5
+    body:
+      - keyword: floor
+        args:
+          - key: mat_slot
+            value:
+              kind: Ident
+              value: wall
+      - keyword: walls
+        args:
+          - key: class
+            value:
+              kind: Ident
+              value: outer
+          - key: mat_slot
+            value:
+              kind: Ident
+              value: wall
+          - key: height
+            value:
+              kind: Int
+              value: 3
+      - keyword: door
+        args:
+          - key: id
+            value:
+              kind: Ident
+              value: front
+          - key: side
+            value:
+              kind: Ident
+              value: front
+          - key: at
+            value:
+              kind: Ident
+              value: center
+          - key: mat_slot
+            value:
+              kind: Ident
+              value: door
+      - keyword: pressure_plate
+        args:
+          - key: id
+            value:
+              kind: Ident
+              value: plate
+          - key: at
+            value:
+              kind: DotRef
+              value:
+                - front
+                - outside
+          - key: offset
+            value:
+              kind: Int
+              value: 0
+          - key: y
+            value:
+              kind: Int
+              value: 0
+        binding:
+          kind: DotRef
+          value:
+            - sig
+            - step
+      - keyword: pressure_plate
+        args:
+          - key: id
+            value:
+              kind: Ident
+              value: inner
+          - key: at
+            value:
+              kind: DotRef
+              value:
+                - inside
+                - front
+          - key: offset
+            value:
+              kind: Int
+              value: 0
+          - key: y
+            value:
+              kind: Int
+              value: 0
+        binding:
+          kind: DotRef
+          value:
+            - sig
+            - exit
+      - keyword: logic
+        args: []
+        extra:
+          kind: LogicEq
+          lhs:
+            - sig
+            - open
+          rhs:
+            kind: Or
+            value:
+              - kind: Ref
+                value:
+                  - sig
+                  - step
+              - kind: Ref
+                value:
+                  - sig
+                  - exit
+      - keyword: door
+        selector:
+          - key: id
+            value:
+              kind: Ident
+              value: front
+        args:
+          - key: opened_by
+            value:
+              kind: DotRef
+              value:
+                - sig
+                - open
+      - keyword: circuit
+        args:
+          - key: region
+            value:
+              kind: Ident
+              value: floor
+          - key: void
+            value:
+              kind: Int
+              value: 2
+      - keyword: assert
+        args: []
+        extra:
+          kind: AssertTruth
+          inputs:
+            - - sig
+              - step
+            - - sig
+              - exit
+          output:
+            - sig
+            - open
+          rows:
+            - inputs: "00"
+              output: 0
+            - inputs: "01"
+              output: 1
+            - inputs: "10"
+              output: 1
+            - inputs: "11"
+              output: 1
+      - keyword: assert
+        args: []
+        extra:
+          kind: AssertAlways
+          antecedent:
+            - sig
+            - step
+          consequent:
+            - sig
+            - open
+          within: 2

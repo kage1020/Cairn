@@ -62,3 +62,39 @@ placeholder cannot leak out. The `2026.07.0` release PR will flip publish to `tr
   surface graduates.
 - [Roadmap](https://cairn.kage1020.com/roadmap/) published, with M1–M6 milestones and a monthly
   scope plan through `2027.06.0`.
+
+### Added (executable slice for M1 — *source parses*)
+
+- `cairn-lang-core::lex` — indent-aware lexer producing tokens with byte spans and 1-based
+  line/column positions; rejects tab indentation and odd-spaced indents.
+- `cairn-lang-core::ast` — surface-level AST (`Module`, `Header`, `Item`, `ThemeRule`,
+  `Command`, `Arg`, `Value`, `Extra`, `Expr`) with `serde::Serialize` derived throughout.
+- `cairn-lang-core::parse` — hand-rolled recursive-descent parser covering headers
+  (`@cairn`, `@requires`, `@intended_targets`), `theme` / `def` / `site` / `struct`
+  blocks, nested commands, bracketed selectors, sensor `-> binding` tails, positional
+  args (for `connect a to b`), and the `logic` / `assert truth|always` special forms.
+- `cairn parse <file> [--format json|debug]` — CLI subcommand backed by `clap` derive.
+  Errors are emitted in `gcc`/`clang` style (`error: file:line:col: message`) so editors
+  can jump straight to the offending location.
+- End-to-end coverage: 17 lexer tests, 27 parser unit tests, 4 `insta` snapshots over the
+  files in `examples/`, and 6 CLI integration tests that round-trip every example through
+  the binary.
+
+### Robustness
+
+- Lexer accepts `\n`, `\r\n`, and lone `\r` as a single logical newline (so files saved on
+  Windows with `core.autocrlf=true` lex the same as on Linux).
+- Column counter tracks Unicode scalar values, not bytes — `日本語` in a string literal no
+  longer poisons the column number of every subsequent token.
+- `UnexpectedChar` reports the actual `char` (multi-byte UTF-8 included) instead of a
+  truncated single byte cast to `char`.
+- A command line may carry at most one `-> binding` tail; the second `->` is now a hard error
+  instead of silently overwriting the first binding.
+- `@cairn` / `@requires` / `@intended_targets` reject an empty value, and
+  `@intended_targets` rejects trailing tokens after the list literal.
+- Parser error messages use a human-friendly `TokenKind` display
+  (`expected `=`, got identifier `foo``) instead of leaking the Rust `Debug` form.
+- All public enums in `ast`, `lex`, and `error` are `#[non_exhaustive]`, reserving room to
+  add variants in later milestones without breaking downstream crates.
+- `LexError` / `ParseError` expose `position()` and `user_message()` accessors so callers
+  (CLI, future LSP) can compose diagnostics without re-parsing the Display string.
