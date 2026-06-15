@@ -1,12 +1,15 @@
 //! Abstract syntax tree for the Cairn surface language.
 //!
-//! M1 carries every example through the parser unchanged: the AST is shaped to
-//! preserve the surface form of each command, not to disambiguate semantics.
-//! Semantic lifting (Intent IR) is the responsibility of M2.
+//! Every node here preserves the surface form of a single `.crn` construct so
+//! that round-tripping, error reporting, and future semantic lifting can all
+//! reason about what the author actually wrote. Disambiguation that would
+//! collapse equivalent surface forms (canonicalising tokens, resolving names,
+//! type-checking) is the responsibility of downstream layers.
 
 use serde::Serialize;
 
-/// A whole `.crn` source file.
+/// A whole `.crn` source file: a sequence of leading directives followed by
+/// top-level items, both kept in source order.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Module {
     /// Leading `@cairn` / `@requires` / `@intended_targets` directives.
@@ -15,7 +18,11 @@ pub struct Module {
     pub items: Vec<Item>,
 }
 
-/// A leading directive line.
+/// A leading directive line introduced by `@`.
+///
+/// Values inside each variant are captured verbatim from the source: parsing
+/// the version string, requirement expression, or target list into structured
+/// data happens in a later layer so this AST stays free of validation policy.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(tag = "kind")]
 #[non_exhaustive]
@@ -38,45 +45,40 @@ pub enum Header {
 }
 
 /// A top-level construct in a `.crn` file.
+///
+/// Each variant stores its identifier name and, where applicable, an `args`
+/// list and a `body`. Bodies are always kept in source order so that semantic
+/// passes can reason about declaration order without re-walking the source.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(tag = "kind")]
 #[non_exhaustive]
+#[allow(missing_docs)]
 pub enum Item {
     /// `theme NAME[:]` block — slot/selector bindings.
     Theme {
-        /// Theme name.
         name: String,
-        /// Body rules in source order.
         body: Vec<ThemeRule>,
     },
     /// `def NAME[ ARGS][:]` block — reusable parameterised component.
     Def {
-        /// Definition name.
         name: String,
-        /// Inline `key=value` arguments on the definition header.
         args: Vec<Arg>,
-        /// Indented body commands in source order.
         body: Vec<Command>,
     },
     /// `site NAME[:]` block — multi-building placement.
     Site {
-        /// Site name.
         name: String,
-        /// Indented body commands in source order.
         body: Vec<Command>,
     },
     /// `struct NAME[ ARGS]` block — single building / structural composition.
     Struct {
-        /// Struct name.
         name: String,
-        /// Inline `key=value` arguments on the struct header.
         args: Vec<Arg>,
-        /// Indented body commands in source order.
         body: Vec<Command>,
     },
 }
 
-/// A line inside a `theme` block.
+/// A line inside a `theme` block: either a slot binding or a selector binding.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(tag = "kind")]
 #[non_exhaustive]
@@ -100,6 +102,11 @@ pub enum ThemeRule {
 }
 
 /// A generic indented command line — the workhorse AST node.
+///
+/// `selector`, `positional`, `binding`, and `extra` are all `Option`/empty in
+/// the common case; they capture the optional grammar pieces that only certain
+/// commands use (`connect <ref> to <ref>`, `pressure_plate ... -> sig.step`,
+/// `logic`, `assert`).
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Command {
     /// Leading command keyword.
@@ -127,7 +134,7 @@ pub struct Command {
     pub children: Vec<Command>,
 }
 
-/// A `key=value` pair.
+/// A `key=value` pair as it appears in an argument list.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Arg {
     /// Argument name on the LHS of `=`.
@@ -141,6 +148,7 @@ pub struct Arg {
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(tag = "kind", content = "value")]
 #[non_exhaustive]
+#[allow(missing_docs)]
 pub enum Value {
     /// Bare identifier (`outer`, `center`, `gable`, ...).
     Ident(String),
@@ -149,12 +157,7 @@ pub enum Value {
     /// Integer literal (`4`, `0`, ...).
     Int(i64),
     /// Size literal `WxH` (`9x7`).
-    Size {
-        /// Width component.
-        w: u32,
-        /// Height component.
-        h: u32,
-    },
+    Size { w: u32, h: u32 },
     /// Canonical or abstract token, stored *without* the leading `@` sigil
     /// (source `@oak_planks` → `Token("oak_planks")`,
     /// `@floor.wood.broadleaf` → `Token("floor.wood.broadleaf")`).
@@ -167,18 +170,17 @@ pub enum Value {
     List(Vec<Value>),
 }
 
-/// Structured extension carried by special-form commands.
+/// Structured extension carried by special-form commands (`logic`, `assert`).
+///
+/// These variants only appear in `Command::extra` for the corresponding
+/// keyword; mismatch is rejected by the parser.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(tag = "kind")]
 #[non_exhaustive]
+#[allow(missing_docs)]
 pub enum Extra {
     /// `logic LHS = EXPR` line.
-    LogicEq {
-        /// LHS reference being defined.
-        lhs: Vec<String>,
-        /// RHS boolean expression.
-        rhs: Expr,
-    },
+    LogicEq { lhs: Vec<String>, rhs: Expr },
     /// `assert truth(INPUTS -> OUTPUT) { ROWS }` line.
     AssertTruth {
         /// Input signal references inside `truth(...)`.
@@ -190,9 +192,7 @@ pub enum Extra {
     },
     /// `assert always(ANTECEDENT -> eventually CONSEQUENT within N)` line.
     AssertAlways {
-        /// Antecedent reference.
         antecedent: Vec<String>,
-        /// Consequent reference.
         consequent: Vec<String>,
         /// `within N` bound in ticks.
         within: u32,
