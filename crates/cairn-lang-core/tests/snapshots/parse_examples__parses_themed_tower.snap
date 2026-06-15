@@ -1,0 +1,230 @@
+---
+source: crates/cairn-lang-core/tests/parse_examples.rs
+assertion_line: 26
+expression: "parse_example(\"themed-tower.crn\")"
+---
+headers:
+  - kind: Cairn
+    version: "2026.06"
+  - kind: Requires
+    requirement: version>=1.20
+items:
+  - kind: Theme
+    name: keep_dark
+    body:
+      - kind: Slot
+        slot: floor
+        value:
+          kind: Token
+          value: floor.wood.broadleaf
+      - kind: Slot
+        slot: wall
+        value:
+          kind: Token
+          value: wall.stone.cobble
+      - kind: Slot
+        slot: trim
+        value:
+          kind: Token
+          value: wood.dark
+      - kind: Slot
+        slot: roof
+        value:
+          kind: Token
+          value: roof.dark_wood
+  - kind: Struct
+    name: keep
+    args:
+      - key: size
+        value:
+          kind: Size
+          value:
+            w: 11
+            h: 9
+    body:
+      - keyword: floor
+        args:
+          - key: id
+            value:
+              kind: Ident
+              value: base
+          - key: mat_slot
+            value:
+              kind: Ident
+              value: floor
+      - keyword: walls
+        args:
+          - key: id
+            value:
+              kind: Ident
+              value: shell
+          - key: mat_slot
+            value:
+              kind: Ident
+              value: wall
+          - key: height
+            value:
+              kind: Int
+              value: 5
+      - keyword: roof
+        args:
+          - key: id
+            value:
+              kind: Ident
+              value: roof
+          - key: kind
+            value:
+              kind: Ident
+              value: gable
+          - key: mat_slot
+            value:
+              kind: Ident
+              value: roof
+          - key: overhang
+            value:
+              kind: Int
+              value: 1
+      - keyword: level
+        args:
+          - key: id
+            value:
+              kind: Ident
+              value: floor1
+          - key: y
+            value:
+              kind: Int
+              value: 0
+        children:
+          - keyword: door
+            args:
+              - key: id
+                value:
+                  kind: Ident
+                  value: entry
+              - key: side
+                value:
+                  kind: Ident
+                  value: front
+              - key: at
+                value:
+                  kind: Ident
+                  value: center
+          - keyword: window
+            args:
+              - key: id
+                value:
+                  kind: Ident
+                  value: front_window
+              - key: side
+                value:
+                  kind: Ident
+                  value: front
+              - key: y
+                value:
+                  kind: Int
+                  value: 2
+              - key: offset
+                value:
+                  kind: Int
+                  value: 2
+              - key: size
+                value:
+                  kind: Size
+                  value:
+                    w: 2
+                    h: 2
+              - key: mat_slot
+                value:
+                  kind: Ident
+                  value: trim
+      - keyword: level
+        args:
+          - key: id
+            value:
+              kind: Ident
+              value: floor2
+          - key: y
+            value:
+              kind: Int
+              value: 5
+        children:
+          - keyword: walls
+            args:
+              - key: id
+                value:
+                  kind: Ident
+                  value: upper
+              - key: class
+                value:
+                  kind: Ident
+                  value: outer
+              - key: mat_slot
+                value:
+                  kind: Ident
+                  value: wall
+              - key: height
+                value:
+                  kind: Int
+                  value: 4
+          - keyword: window
+            args:
+              - key: class
+                value:
+                  kind: Ident
+                  value: arrow_slit
+              - key: side
+                value:
+                  kind: Ident
+                  value: front
+              - key: repeat
+                value:
+                  kind: Int
+                  value: 3
+              - key: step
+                value:
+                  kind: Int
+                  value: 2
+              - key: y
+                value:
+                  kind: Int
+                  value: 2
+              - key: size
+                value:
+                  kind: Size
+                  value:
+                    w: 1
+                    h: 2
+              - key: shape
+                value:
+                  kind: Ident
+                  value: slit
+          - keyword: stair
+            args:
+              - key: id
+                value:
+                  kind: Ident
+                  value: eave
+              - key: kind
+                value:
+                  kind: Ident
+                  value: stairs
+              - key: mat_slot
+                value:
+                  kind: Ident
+                  value: roof
+              - key: side
+                value:
+                  kind: Ident
+                  value: front
+              - key: half
+                value:
+                  kind: Ident
+                  value: top
+              - key: facing
+                value:
+                  kind: Ident
+                  value: out
+              - key: shape
+                value:
+                  kind: Ident
+                  value: outer_left
