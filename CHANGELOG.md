@@ -6,6 +6,27 @@ All notable changes to Cairn are documented here. Cairn uses date-based versioni
 `YYYY.0M[.PATCH]`. This is the version of the language + reference compiler + standard library +
 registry/constraint packs as a bundle, and is a separate axis from the Minecraft target version.
 
+## [Unreleased]
+
+Working toward **2026.07.0** (M1 — *source parses*). The first executable slice of the reference
+compiler lands here: `cairn-core` gains a lexer, parser, and AST, and `cairn parse <file>` emits
+the AST as JSON for every example under `examples/`.
+
+### Added
+
+- `cairn-core::lex` — indent-aware lexer producing tokens with byte spans and 1-based
+  line/column positions; rejects tab indentation and odd-spaced indents.
+- `cairn-core::ast` — surface-level AST (`Module`, `Header`, `Item`, `ThemeRule`, `Command`,
+  `Arg`, `Value`, `Extra`, `Expr`) with `serde::Serialize` derived throughout.
+- `cairn-core::parse` — hand-rolled recursive-descent parser covering headers
+  (`@cairn`, `@requires`, `@intended_targets`), `theme` / `def` / `site` / `struct`
+  blocks, nested commands, bracketed selectors, sensor `-> binding` tails, positional
+  args (for `connect a to b`), and the `logic` / `assert truth|always` special forms.
+- `cairn parse <file> [--format json|debug]` — CLI subcommand backed by `clap` derive.
+- End-to-end coverage: 11 lexer tests, 14 parser unit tests, 4 `insta` snapshots over the
+  files in `examples/`, and 6 CLI integration tests that round-trip every example through
+  the binary.
+
 ## 2026.06 (draft)
 
 Initial public design specification. The language is being designed in the open; no reference
