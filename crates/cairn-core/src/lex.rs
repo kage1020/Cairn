@@ -5,6 +5,15 @@
 //! parser can treat the language as indent-structured without re-walking
 //! whitespace.
 //!
+//! Line endings: `\n`, `\r\n`, and lone `\r` are all accepted as a single
+//! logical newline so files written on Windows (`core.autocrlf=true`) lex the
+//! same as files written on Linux.
+//!
+//! Indent/Dedent asymmetry: only one `Indent` token may be emitted per indent
+//! step (the lexer rejects multi-level jumps as `OddIndent`), but a single
+//! dedented line emits *one `Dedent` per level closed*. Parsers can therefore
+//! rely on `Dedent` counts to know how many scopes ended on that line.
+//!
 //! Comments (`#` to end-of-line), blank lines, and trailing whitespace are
 //! discarded silently; everything else either becomes a token or fails with a
 //! [`LexError`].
@@ -24,6 +33,7 @@ pub struct Token {
 
 /// Kind of a lexical token.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum TokenKind {
     /// Bare identifier: `[A-Za-z_][A-Za-z0-9_]*`.
     Ident(String),
@@ -83,6 +93,38 @@ pub enum TokenKind {
     Dedent,
 }
 
+impl std::fmt::Display for TokenKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Ident(name) => write!(f, "identifier `{name}`"),
+            Self::Int { lexeme, .. } => write!(f, "integer `{lexeme}`"),
+            Self::Bool(b) => write!(f, "`{b}`"),
+            Self::Str(_) => f.write_str("string literal"),
+            Self::Size(w, h) => write!(f, "size `{w}x{h}`"),
+            Self::At => f.write_str("`@`"),
+            Self::Arrow => f.write_str("`->`"),
+            Self::Eq => f.write_str("`=`"),
+            Self::GreaterEq => f.write_str("`>=`"),
+            Self::LessEq => f.write_str("`<=`"),
+            Self::Greater => f.write_str("`>`"),
+            Self::Less => f.write_str("`<`"),
+            Self::Dot => f.write_str("`.`"),
+            Self::Comma => f.write_str("`,`"),
+            Self::Semi => f.write_str("`;`"),
+            Self::Colon => f.write_str("`:`"),
+            Self::LBracket => f.write_str("`[`"),
+            Self::RBracket => f.write_str("`]`"),
+            Self::LParen => f.write_str("`(`"),
+            Self::RParen => f.write_str("`)`"),
+            Self::LBrace => f.write_str("`{`"),
+            Self::RBrace => f.write_str("`}`"),
+            Self::Newline => f.write_str("end of line"),
+            Self::Indent => f.write_str("indent"),
+            Self::Dedent => f.write_str("dedent"),
+        }
+    }
+}
+
 /// Tokenise the entire source string.
 ///
 /// # Errors
@@ -137,19 +179,16 @@ impl<'src> Lexer<'src> {
             let spaces = self.count_leading_spaces()?;
 
             // Skip blank or comment-only lines without changing indent state.
-            if self.peek().is_none_or(|b| b == b'\n' || b == b'#') {
+            if self.peek().is_none_or(is_line_break_or_comment) {
                 if self.peek() == Some(b'#') {
                     while let Some(b) = self.peek() {
-                        if b == b'\n' {
+                        if b == b'\n' || b == b'\r' {
                             break;
                         }
                         self.advance();
                     }
                 }
-                if self.peek() == Some(b'\n') {
-                    self.advance();
-                    self.line += 1;
-                    self.col = 1;
+                if self.consume_line_break() {
                     continue;
                 }
                 // EOF after blanks/comments.
@@ -219,16 +258,14 @@ impl<'src> Lexer<'src> {
                 }
                 return Ok(());
             };
-            if b == b'\n' {
-                self.advance();
-                self.line += 1;
-                self.col = 1;
+            if b == b'\n' || b == b'\r' {
+                self.consume_line_break();
                 self.push_synthetic(TokenKind::Newline);
                 return Ok(());
             }
             if b == b'#' {
                 while let Some(c) = self.peek() {
-                    if c == b'\n' {
+                    if c == b'\n' || c == b'\r' {
                         break;
                     }
                     self.advance();
@@ -317,11 +354,13 @@ impl<'src> Lexer<'src> {
             b'"' => self.scan_string(start, position)?,
             c if c.is_ascii_digit() => self.scan_number(start, position)?,
             c if is_ident_start(c) => self.scan_ident(start, position),
-            other => {
-                return Err(LexError::UnexpectedChar {
-                    position,
-                    ch: other as char,
-                });
+            _ => {
+                // Read the *character* (not the byte) so multi-byte non-ASCII
+                // codepoints are reported faithfully and `pos` advances past
+                // the whole codepoint (avoids landing mid-sequence).
+                let ch = self.peek_char().unwrap_or('\0');
+                self.advance_char();
+                return Err(LexError::UnexpectedChar { position, ch });
             }
         }
         Ok(())
@@ -332,19 +371,20 @@ impl<'src> Lexer<'src> {
         self.advance();
         let content_start = self.pos;
         loop {
-            match self.peek() {
-                None | Some(b'\n') => {
-                    return Err(LexError::UnterminatedString { position });
-                }
-                Some(b'"') => {
-                    let content_end = self.pos;
-                    self.advance();
-                    let lexeme = self.src[content_start..content_end].to_owned();
-                    self.push_at(TokenKind::Str(lexeme), start..self.pos, position);
-                    return Ok(());
-                }
-                Some(_) => self.advance(),
+            let Some(ch) = self.peek_char() else {
+                return Err(LexError::UnterminatedString { position });
+            };
+            if ch == '\n' || ch == '\r' {
+                return Err(LexError::UnterminatedString { position });
             }
+            if ch == '"' {
+                let content_end = self.pos;
+                self.advance();
+                let lexeme = self.src[content_start..content_end].to_owned();
+                self.push_at(TokenKind::Str(lexeme), start..self.pos, position);
+                return Ok(());
+            }
+            self.advance_char();
         }
     }
 
@@ -421,9 +461,47 @@ impl<'src> Lexer<'src> {
         self.bytes.get(self.pos + offset).copied()
     }
 
+    fn peek_char(&self) -> Option<char> {
+        self.src[self.pos..].chars().next()
+    }
+
+    /// Advance by one ASCII byte and one column. Caller asserts that the byte
+    /// at `pos` is ASCII (every existing call site reads via `peek()` first).
     fn advance(&mut self) {
         self.pos += 1;
         self.col += 1;
+    }
+
+    /// Advance by one full Unicode code point — used inside string literals and
+    /// the unexpected-character recovery path, where non-ASCII may appear.
+    fn advance_char(&mut self) {
+        if let Some(ch) = self.peek_char() {
+            self.pos += ch.len_utf8();
+            self.col += 1;
+        }
+    }
+
+    /// Consume one line break (`\n`, `\r\n`, or lone `\r`) if present and bump
+    /// the line counter. Returns `true` if any input was consumed.
+    fn consume_line_break(&mut self) -> bool {
+        match self.peek() {
+            Some(b'\r') => {
+                self.pos += 1;
+                if self.peek() == Some(b'\n') {
+                    self.pos += 1;
+                }
+                self.line += 1;
+                self.col = 1;
+                true
+            }
+            Some(b'\n') => {
+                self.pos += 1;
+                self.line += 1;
+                self.col = 1;
+                true
+            }
+            _ => false,
+        }
     }
 
     fn position(&self) -> Position {
@@ -462,4 +540,8 @@ fn is_ident_start(b: u8) -> bool {
 
 fn is_ident_continue(b: u8) -> bool {
     b.is_ascii_alphanumeric() || b == b'_'
+}
+
+fn is_line_break_or_comment(b: u8) -> bool {
+    b == b'\n' || b == b'\r' || b == b'#'
 }

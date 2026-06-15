@@ -149,3 +149,79 @@ fn tracks_line_and_column() {
         .expect("slot token");
     assert_eq!(slot_token.position, Position { line: 2, col: 3 });
 }
+
+#[test]
+fn accepts_crlf_line_endings() {
+    // Same as the simple-command test but with Windows-style line endings —
+    // must not regress on `core.autocrlf=true` checkouts.
+    let kinds = kinds("walls class=outer height=4\r\nfloor mat_slot=floor\r\n");
+    assert!(
+        kinds
+            .iter()
+            .any(|k| matches!(k, TokenKind::Ident(s) if s == "walls"))
+    );
+    assert!(
+        kinds
+            .iter()
+            .any(|k| matches!(k, TokenKind::Ident(s) if s == "floor"))
+    );
+    let newlines = kinds
+        .iter()
+        .filter(|k| matches!(k, TokenKind::Newline))
+        .count();
+    assert_eq!(newlines, 2);
+}
+
+#[test]
+fn accepts_lone_cr_line_endings() {
+    // Pre-OSX Mac line endings — lenient acceptance.
+    let kinds = kinds("walls height=4\rfloor mat_slot=floor\r");
+    let newlines = kinds
+        .iter()
+        .filter(|k| matches!(k, TokenKind::Newline))
+        .count();
+    assert_eq!(newlines, 2);
+}
+
+#[test]
+fn col_counts_characters_not_bytes_in_strings() {
+    // Multi-byte (3-byte UTF-8) characters inside a string must not throw
+    // off the column counter for the next token.
+    let source = "@intended_targets [\"日本語\"]\n@cairn 2026.06\n";
+    let tokens = lex(source).expect("lex");
+    let cairn = tokens
+        .iter()
+        .find(|t| matches!(&t.kind, TokenKind::Ident(s) if s == "cairn"))
+        .expect("cairn token");
+    assert_eq!(cairn.position, Position { line: 2, col: 2 });
+}
+
+#[test]
+fn non_ascii_outside_string_is_reported_as_character() {
+    // A non-ASCII character not inside a string literal should error with
+    // the actual `char`, not a corrupted single byte.
+    let err = lex("struct あ size=1x1\n").unwrap_err();
+    match err {
+        LexError::UnexpectedChar { ch, .. } => assert_eq!(ch, 'あ'),
+        other => panic!("expected UnexpectedChar, got {other:?}"),
+    }
+}
+
+#[test]
+fn unterminated_string_is_reported() {
+    let err = lex("@intended_targets [\"open\n").unwrap_err();
+    assert!(matches!(err, LexError::UnterminatedString { .. }));
+}
+
+#[test]
+fn dedent_emits_per_level_closed() {
+    // `struct s\n  level y=0\n    door\nstruct t\n` exits two indent levels
+    // on the line `struct t`, so two Dedent tokens are emitted on it.
+    let source = "struct s\n  level y=0\n    door side=front\nstruct t\n";
+    let kinds = kinds(source);
+    let dedents = kinds
+        .iter()
+        .filter(|k| matches!(k, TokenKind::Dedent))
+        .count();
+    assert_eq!(dedents, 2);
+}

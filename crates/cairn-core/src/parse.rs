@@ -71,6 +71,12 @@ impl<'a> Parser<'a> {
             .trim()
             .to_owned();
         self.expect_newline()?;
+        if raw.is_empty() {
+            return Err(ParseError::Syntax {
+                position: value_start_pos,
+                message: format!("@{name} requires a value"),
+            });
+        }
         match name.as_str() {
             "cairn" => Ok(Header::Cairn { version: raw }),
             "requires" => Ok(Header::Requires { requirement: raw }),
@@ -79,6 +85,13 @@ impl<'a> Parser<'a> {
                 let sub_tokens = lex(&raw)?;
                 let mut p = Parser::new(&raw, &sub_tokens);
                 let value = p.parse_value()?;
+                // Reject trailing tokens — `@intended_targets [..] junk` should fail.
+                if !matches!(p.peek().map(|t| &t.kind), None | Some(TokenKind::Newline),) {
+                    return Err(ParseError::Syntax {
+                        position: value_start_pos,
+                        message: "@intended_targets has trailing tokens after the list".into(),
+                    });
+                }
                 let targets = match value {
                     Value::List(items) => items
                         .into_iter()
@@ -245,7 +258,14 @@ impl<'a> Parser<'a> {
                 break;
             }
             if self.peek_is(&TokenKind::Arrow) {
+                let arrow_pos = self.position();
                 self.advance();
+                if binding.is_some() {
+                    return Err(ParseError::Syntax {
+                        position: arrow_pos,
+                        message: "a command may only have one `-> binding` tail".into(),
+                    });
+                }
                 binding = Some(self.parse_value()?);
                 continue;
             }
@@ -358,14 +378,20 @@ impl<'a> Parser<'a> {
         self.expect(&TokenKind::LParen)?;
         let antecedent = self.parse_dotted_ref()?;
         self.expect(&TokenKind::Arrow)?;
-        let eventually = self.expect_ident()?;
-        if eventually != "eventually" {
-            return Err(self.syntax_here("expected `eventually` after `->` in always(...)"));
+        let eventually_pos = self.position();
+        if !self.match_keyword("eventually") {
+            return Err(ParseError::Syntax {
+                position: eventually_pos,
+                message: "expected `eventually` after `->` in always(...)".into(),
+            });
         }
         let consequent = self.parse_dotted_ref()?;
-        let within_kw = self.expect_ident()?;
-        if within_kw != "within" {
-            return Err(self.syntax_here("expected `within` in always(...)"));
+        let within_pos = self.position();
+        if !self.match_keyword("within") {
+            return Err(ParseError::Syntax {
+                position: within_pos,
+                message: "expected `within N` in always(...)".into(),
+            });
         }
         let within_lex = self.expect_int_lexeme()?;
         let within: u32 = within_lex
@@ -530,7 +556,7 @@ impl<'a> Parser<'a> {
             }
             other => Err(ParseError::Syntax {
                 position,
-                message: format!("unexpected token `{other:?}` in value position"),
+                message: format!("unexpected {other} in value position"),
             }),
         }
     }
@@ -570,7 +596,7 @@ impl<'a> Parser<'a> {
         let Some(token) = self.peek() else {
             return Err(ParseError::Syntax {
                 position,
-                message: format!("expected `{kind:?}`, got end of input"),
+                message: format!("expected {kind}, got end of input"),
             });
         };
         if std::mem::discriminant(&token.kind) == std::mem::discriminant(kind) {
@@ -580,7 +606,7 @@ impl<'a> Parser<'a> {
             let found = token.kind.clone();
             Err(ParseError::Syntax {
                 position,
-                message: format!("expected `{kind:?}`, got `{found:?}`"),
+                message: format!("expected {kind}, got {found}"),
             })
         }
     }
@@ -606,7 +632,7 @@ impl<'a> Parser<'a> {
         } else {
             Err(ParseError::Syntax {
                 position,
-                message: format!("expected identifier, got `{:?}`", token.kind),
+                message: format!("expected identifier, got {}", token.kind),
             })
         }
     }
@@ -625,7 +651,7 @@ impl<'a> Parser<'a> {
         } else {
             Err(ParseError::Syntax {
                 position,
-                message: format!("expected integer literal, got `{:?}`", token.kind),
+                message: format!("expected integer literal, got {}", token.kind),
             })
         }
     }

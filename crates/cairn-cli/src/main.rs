@@ -56,13 +56,26 @@ fn run_parse(file: &std::path::Path, format: Format) -> ExitCode {
         Ok(s) => s,
         Err(err) => {
             eprintln!("error: cannot read `{}`: {err}", file.display());
-            return ExitCode::from(2);
+            // `NotFound` is a user-input mistake (wrong path) → exit 2;
+            // everything else (permission denied, non-UTF-8 file contents,
+            // I/O failure) signals a build/system problem → exit 1.
+            return match err.kind() {
+                std::io::ErrorKind::NotFound => ExitCode::from(2),
+                _ => ExitCode::from(1),
+            };
         }
     };
     let module = match parse(&source) {
         Ok(m) => m,
         Err(err) => {
-            eprintln!("error: {}: {err}", file.display());
+            // gcc/clang style `file:line:col:` so editors can jump.
+            let position = err.position();
+            eprintln!(
+                "error: {}:{}: {}",
+                file.display(),
+                position,
+                err.user_message(),
+            );
             return ExitCode::from(1);
         }
     };

@@ -18,6 +18,7 @@ pub struct Module {
 /// A leading directive line.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(tag = "kind")]
+#[non_exhaustive]
 pub enum Header {
     /// `@cairn 2026.06` — Cairn language version this file was written against.
     Cairn {
@@ -39,6 +40,7 @@ pub enum Header {
 /// A top-level construct in a `.crn` file.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(tag = "kind")]
+#[non_exhaustive]
 pub enum Item {
     /// `theme NAME[:]` block — slot/selector bindings.
     Theme {
@@ -77,6 +79,7 @@ pub enum Item {
 /// A line inside a `theme` block.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(tag = "kind")]
+#[non_exhaustive]
 pub enum ThemeRule {
     /// `slot NAME -> VALUE` mapping.
     Slot {
@@ -137,6 +140,7 @@ pub struct Arg {
 /// argument.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(tag = "kind", content = "value")]
+#[non_exhaustive]
 pub enum Value {
     /// Bare identifier (`outer`, `center`, `gable`, ...).
     Ident(String),
@@ -151,7 +155,9 @@ pub enum Value {
         /// Height component.
         h: u32,
     },
-    /// Canonical or abstract token (`@oak_planks`, `@floor.wood.broadleaf`).
+    /// Canonical or abstract token, stored *without* the leading `@` sigil
+    /// (source `@oak_planks` → `Token("oak_planks")`,
+    /// `@floor.wood.broadleaf` → `Token("floor.wood.broadleaf")`).
     Token(String),
     /// Dotted reference (`home1.entry`, `sig.step`, `inside.front`).
     DotRef(Vec<String>),
@@ -164,6 +170,7 @@ pub enum Value {
 /// Structured extension carried by special-form commands.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(tag = "kind")]
+#[non_exhaustive]
 pub enum Extra {
     /// `logic LHS = EXPR` line.
     LogicEq {
@@ -204,6 +211,7 @@ pub struct TruthRow {
 /// A boolean expression used inside `logic` lines.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(tag = "kind", content = "value")]
+#[non_exhaustive]
 pub enum Expr {
     /// Signal reference.
     Ref(Vec<String>),
