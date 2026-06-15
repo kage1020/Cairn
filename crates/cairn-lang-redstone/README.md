@@ -1,4 +1,4 @@
-# cairn-redstone
+# cairn-lang-redstone
 
 Redstone for Cairn: turns a *signal graph* into voxels, then verifies the result with a headless
 per-tick simulator.
@@ -54,7 +54,7 @@ declaration is checked against both Java and Bedrock implementations.
 
 ## Dependencies
 
-- [`cairn-core`](../cairn-core/README.md) for sensor/actuator placement and the block-array IR.
+- [`cairn-lang-core`](../cairn-lang-core/README.md) for sensor/actuator placement and the block-array IR.
 
 ## License
 

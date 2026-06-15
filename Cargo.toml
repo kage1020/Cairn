@@ -1,13 +1,13 @@
 [workspace]
 resolver = "2"
 members = [
-    "crates/cairn-core",
-    "crates/cairn-cli",
-    "crates/cairn-nbt",
-    "crates/cairn-formats",
-    "crates/cairn-redstone",
-    "crates/cairn-lsp",
-    "crates/cairn-wasm",
+    "crates/cairn-lang-core",
+    "crates/cairn-lang-cli",
+    "crates/cairn-lang-nbt",
+    "crates/cairn-lang-formats",
+    "crates/cairn-lang-redstone",
+    "crates/cairn-lang-lsp",
+    "crates/cairn-lang-wasm",
 ]
 
 [workspace.package]
@@ -18,14 +18,18 @@ license = "Apache-2.0"
 repository = "https://github.com/kage1020/Cairn"
 homepage = "https://github.com/kage1020/Cairn"
 authors = ["kage1020 and the Cairn authors"]
+# All crates stay unpublished until the first real release flips this to true
+# (see CHANGELOG `[Unreleased]` and the planned 2026.07.0 cron PR). This keeps
+# release-plz from trying to publish the 0.0.0 placeholder on every push.
+publish = false
 
 [workspace.dependencies]
-cairn-core = { version = "0.0.0", path = "crates/cairn-core" }
-cairn-nbt = { version = "0.0.0", path = "crates/cairn-nbt" }
-cairn-formats = { version = "0.0.0", path = "crates/cairn-formats" }
-cairn-redstone = { version = "0.0.0", path = "crates/cairn-redstone" }
-cairn-lsp = { version = "0.0.0", path = "crates/cairn-lsp" }
-cairn-wasm = { version = "0.0.0", path = "crates/cairn-wasm" }
+cairn-lang-core = { version = "0.0.0", path = "crates/cairn-lang-core" }
+cairn-lang-nbt = { version = "0.0.0", path = "crates/cairn-lang-nbt" }
+cairn-lang-formats = { version = "0.0.0", path = "crates/cairn-lang-formats" }
+cairn-lang-redstone = { version = "0.0.0", path = "crates/cairn-lang-redstone" }
+cairn-lang-lsp = { version = "0.0.0", path = "crates/cairn-lang-lsp" }
+cairn-lang-wasm = { version = "0.0.0", path = "crates/cairn-lang-wasm" }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

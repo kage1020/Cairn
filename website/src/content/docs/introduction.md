@@ -41,7 +41,7 @@ See [Purpose and Scope](/spec/overview/) for the normative wording.
 - **Developer Guide** ([English](/development/)) — the Rust workspace, how the crates are split,
   and how to land changes.
 - **Playground** ([English](/playground/), [日本語](/ja/playground/)) — a placeholder for the
-  browser-hosted compiler. Tracks `cairn-wasm`.
+  browser-hosted compiler. Tracks `cairn-lang-wasm`.
 
 ## Status
 

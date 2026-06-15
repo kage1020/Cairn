@@ -1,4 +1,4 @@
-# cairn-nbt
+# cairn-lang-nbt
 
 NBT codec for the Cairn language. Encodes and decodes Minecraft NBT in both flavors:
 
@@ -8,7 +8,7 @@ NBT codec for the Cairn language. Encodes and decodes Minecraft NBT in both flav
 
 This crate is deliberately *just* the codec. It does not know anything about Litematica regions,
 schematic palettes, or Cairn's block-array IR — those live in
-[`cairn-formats`](../cairn-formats/README.md). Keeping the byte layer separate means the codec can be
+[`cairn-lang-formats`](../cairn-lang-formats/README.md). Keeping the byte layer separate means the codec can be
 fuzzed and benchmarked without dragging in the higher-level format machinery.
 
 ## Status

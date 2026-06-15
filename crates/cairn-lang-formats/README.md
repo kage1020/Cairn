@@ -1,11 +1,11 @@
-# cairn-formats
+# cairn-lang-formats
 
 Readers and writers around the Cairn block-array IR for existing schematic / structure formats.
 
 Each format is just a serializer or de-serializer around the **block-array IR**, which the
 specification names as the universal pivot
 ([architecture §3.1](https://cairn.kage1020.com/spec/architecture/)). Adding a new format means adding a backend here —
-the parser, lint, and theme machinery in [`cairn-core`](../cairn-core/README.md) are untouched.
+the parser, lint, and theme machinery in [`cairn-lang-core`](../cairn-lang-core/README.md) are untouched.
 
 ## Status
 
@@ -38,8 +38,8 @@ Skeleton. The crate compiles, but no format backends are implemented yet.
 
 ## Dependencies
 
-- [`cairn-core`](../cairn-core/README.md) for the block-array IR types.
-- [`cairn-nbt`](../cairn-nbt/README.md) for the byte-level codec.
+- [`cairn-lang-core`](../cairn-lang-core/README.md) for the block-array IR types.
+- [`cairn-lang-nbt`](../cairn-lang-nbt/README.md) for the byte-level codec.
 
 ## License
 

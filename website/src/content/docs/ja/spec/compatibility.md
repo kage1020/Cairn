@@ -53,7 +53,7 @@ Evolving な面:
   lock 意味論に入るが、*内部構造* は Evolving)。
 - 正規語彙の tier-2 トークン (tier-1 が解決される実装レベル名)。
 - CLI の人間可読な diagnostic フォーマットと文言 (*コード*は Stable、*文言*は違う)。
-- `cairn-cli` の `--features` セット (cargo features) とワークスペース crate 群の `[features]`。
+- `cairn-lang-cli` の `--features` セット (cargo features) とワークスペース crate 群の `[features]`。
 
 ### Internal
 
@@ -62,12 +62,12 @@ Evolving な面:
 
 Internal な面:
 
-- ワークスペース全 crate の Rust API (`cairn-core`、`cairn-nbt`、`cairn-formats`、
-  `cairn-redstone`、`cairn-lsp`、`cairn-wasm`)。これらは含まれる最初の月次 minor から crates.io
+- ワークスペース全 crate の Rust API (`cairn-lang-core`、`cairn-lang-nbt`、`cairn-lang-formats`、
+  `cairn-lang-redstone`、`cairn-lang-lsp`、`cairn-lang-wasm`)。これらは含まれる最初の月次 minor から crates.io
   に publish するが、CLI の推移的公開依存ではない項目はすべて `#[doc(hidden)]` を付ける。
 - コンパイラの中間表現 (Intent IR、Semantic IR、block-array pivot のレイアウト)。
 - 増分ビルドキャッシュのオンディスク形状 (ワークスペース内の `target/` 相当)。
-- 言語サーバーの内部プロトコル (VS Code 等との LSP オンワイヤ仕様は Stable; `cairn-lsp` の
+- 言語サーバーの内部プロトコル (VS Code 等との LSP オンワイヤ仕様は Stable; `cairn-lang-lsp` の
   内部分割の仕方は Stable ではない)。
 
 ## C.2 マイルストーンごとのティア表

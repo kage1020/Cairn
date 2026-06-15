@@ -2,14 +2,20 @@
 
 > Language: **English** ([日本語](CHANGELOG.ja.md))
 
-All notable changes to Cairn are documented here. Cairn uses date-based versioning (CalVer)
-`YYYY.0M[.PATCH]`. This is the version of the language + reference compiler + standard library +
-registry/constraint packs as a bundle, and is a separate axis from the Minecraft target version.
+All notable changes to Cairn are documented here. The format follows
+[Keep a Changelog](https://keepachangelog.com/en/1.1.0/) so `release-plz` can append release
+entries cleanly. Cairn uses date-based versioning (CalVer) `YYYY.0M[.PATCH]`. This is the version
+of the language + reference compiler + standard library + registry/constraint packs as a bundle,
+and is a separate axis from the Minecraft target version.
 
-## 2026.06 (draft)
+## [Unreleased]
 
-Initial public design specification. The language is being designed in the open; no reference
-compiler exists yet.
+The first publicly-numbered release will be **`2026.07.0`** (planned). Until then this section
+records what has been built into the repository in preparation for that release. No `cairn-lang-*`
+crate has been published to crates.io yet; `[workspace.package].publish` is `false` so the `0.0.0`
+placeholder cannot leak out. The `2026.07.0` release PR will flip publish to `true`.
+
+### Added
 
 - Core model: declare intent, the compiler resolves blockstate, coordinates, and physics.
 - Three-layer IR (Intent → Semantic/Theme → block-array pivot), phase-ordered evaluation.
@@ -38,14 +44,18 @@ compiler exists yet.
   deployed to Cloudflare Pages at <https://cairn.kage1020.com/>. The spec, tutorial, developer
   guide, and examples index are authored directly in
   [`website/src/content/docs/`](website/src/content/docs/); a placeholder playground page is
-  wired to the future `cairn-wasm` bindings; Cloudflare's Git integration auto-deploys on every
-  push to `main`.
-- Release strategy decided: monthly minor (`YYYY.0M.0`) by GitHub Actions cron at 04:17 UTC on
-  the 1st, plus on-demand patches (`YYYY.0M.N`) triggered by qualifying commits to `main`.
-  Workspace versioning is unified through `[workspace.package].version` and `[workspace.dependencies]`.
-  release-plz drives PR creation and changelog generation; binaries are cross-compiled for
-  Linux/macOS/Windows on `x86_64`/`aarch64`, signed with keyless sigstore, and attached to the
-  GitHub Release.
+  wired to the future `cairn-lang-wasm` bindings; Cloudflare's Git integration auto-deploys on
+  every push to `main`.
+- Release strategy: monthly minor (`YYYY.0M.0`) by GitHub Actions cron at 04:17 UTC on the 1st,
+  plus on-demand patches (`YYYY.0M.N`) triggered by qualifying commits on `canary`. The release
+  PR (`release-plz-*` → `canary`) is merged after human review; release-plz publishes and the
+  workflow fast-forwards `main` to `canary` so `main` mirrors only released state.
+- Workspace versioning unified through `[workspace.package].version` and
+  `[workspace.dependencies]`. Binaries are cross-compiled for Linux/macOS/Windows on
+  `x86_64`/`aarch64`, signed with keyless sigstore, and attached to the GitHub Release.
+- Crate prefix: `cairn-lang-*` (`cairn-lang-core`, `cairn-lang-cli`, `cairn-lang-nbt`,
+  `cairn-lang-formats`, `cairn-lang-redstone`, `cairn-lang-lsp`, `cairn-lang-wasm`). The
+  user-facing binary installed by `cargo install cairn-lang-cli` is still named `cairn`.
 - Compatibility tiers documented in
   [spec/compatibility](https://cairn.kage1020.com/spec/compatibility/): every public surface sits
   in **Stable**, **Evolving**, or **Internal**, with a milestone-indexed table showing when each

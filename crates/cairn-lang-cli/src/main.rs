@@ -11,7 +11,7 @@ fn main() -> ExitCode {
 
     match cmd.as_str() {
         "--version" | "-V" => {
-            println!("cairn {}", cairn_core::CAIRN_VERSION);
+            println!("cairn {}", cairn_lang_core::CAIRN_VERSION);
             ExitCode::SUCCESS
         }
         "--help" | "-h" => {
@@ -39,6 +39,6 @@ fn print_usage() {
          OPTIONS:\n  \
              -V, --version  Print the Cairn release version\n  \
              -h, --help     Print this help",
-        cairn_core::CAIRN_VERSION
+        cairn_lang_core::CAIRN_VERSION
     );
 }

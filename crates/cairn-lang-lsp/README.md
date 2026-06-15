@@ -1,7 +1,7 @@
-# cairn-lsp
+# cairn-lang-lsp
 
 Language Server Protocol implementation for Cairn editors. Surfaces parser and lint diagnostics from
-[`cairn-core`](../cairn-core/README.md), autocompletes canonical material tokens, and exposes the
+[`cairn-lang-core`](../cairn-lang-core/README.md), autocompletes canonical material tokens, and exposes the
 self-correction loop described in [lint](https://cairn.kage1020.com/spec/lint/) and
 [evaluation](https://cairn.kage1020.com/spec/evaluation/) in a form an editor (or an LLM acting through an editor) can
 consume incrementally.
@@ -32,7 +32,7 @@ Skeleton. The server binary, transports, and capability negotiation are not yet 
 
 ## Dependencies
 
-- [`cairn-core`](../cairn-core/README.md) for the parser, IR, and lint engine.
+- [`cairn-lang-core`](../cairn-lang-core/README.md) for the parser, IR, and lint engine.
 
 ## License
 
