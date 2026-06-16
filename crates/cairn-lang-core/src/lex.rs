@@ -48,7 +48,7 @@ pub enum TokenKind {
     /// Boolean literal `true` / `false`.
     Bool(bool),
     /// Double-quoted string literal. Escape sequences are preserved verbatim
-    /// at this layer; interpretation is the responsibility of semantic lifting.
+    /// at this layer; interpretation is left to a later layer.
     Str(String),
     /// Size literal `WxH`, e.g. `9x7`.
     Size(u32, u32),

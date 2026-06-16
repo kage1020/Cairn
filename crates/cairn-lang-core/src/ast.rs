@@ -52,19 +52,22 @@ pub enum Header {
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(tag = "kind")]
 #[non_exhaustive]
-#[allow(missing_docs)]
 pub enum Item {
     /// `theme NAME[:]` block — slot/selector bindings.
+    #[allow(missing_docs)]
     Theme { name: String, body: Vec<ThemeRule> },
     /// `def NAME[ ARGS][:]` block — reusable parameterised component.
+    #[allow(missing_docs)]
     Def {
         name: String,
         args: Vec<Arg>,
         body: Vec<Command>,
     },
     /// `site NAME[:]` block — multi-building placement.
+    #[allow(missing_docs)]
     Site { name: String, body: Vec<Command> },
     /// `struct NAME[ ARGS]` block — single building / structural composition.
+    #[allow(missing_docs)]
     Struct {
         name: String,
         args: Vec<Arg>,
@@ -142,7 +145,6 @@ pub struct Arg {
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(tag = "kind", content = "value")]
 #[non_exhaustive]
-#[allow(missing_docs)]
 pub enum Value {
     /// Bare identifier (`outer`, `center`, `gable`, ...).
     Ident(String),
@@ -151,6 +153,7 @@ pub enum Value {
     /// Integer literal (`4`, `0`, ...).
     Int(i64),
     /// Size literal `WxH` (`9x7`).
+    #[allow(missing_docs)]
     Size { w: u32, h: u32 },
     /// Canonical or abstract token, stored *without* the leading `@` sigil
     /// (source `@oak_planks` → `Token("oak_planks")`,
@@ -171,9 +174,9 @@ pub enum Value {
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(tag = "kind")]
 #[non_exhaustive]
-#[allow(missing_docs)]
 pub enum Extra {
     /// `logic LHS = EXPR` line.
+    #[allow(missing_docs)]
     LogicEq { lhs: Vec<String>, rhs: Expr },
     /// `assert truth(INPUTS -> OUTPUT) { ROWS }` line.
     AssertTruth {
@@ -185,6 +188,12 @@ pub enum Extra {
         rows: Vec<TruthRow>,
     },
     /// `assert always(ANTECEDENT -> eventually CONSEQUENT within N)` line.
+    ///
+    /// `antecedent` and `consequent` map straight to the named references in
+    /// the grammar above and need no further commentary; only `within`
+    /// carries a non-obvious unit (ticks), which is why it is the one field
+    /// that keeps an explicit doc line.
+    #[allow(missing_docs)]
     AssertAlways {
         antecedent: Vec<String>,
         consequent: Vec<String>,
