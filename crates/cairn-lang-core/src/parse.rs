@@ -690,13 +690,17 @@ impl<'a> Parser<'a> {
 }
 
 fn describe_int_err(err: &std::num::ParseIntError) -> &'static str {
+    // `IntErrorKind::Zero` is only produced by `NonZero*` parses, so it cannot
+    // arise from the `u32::parse` call this helper currently serves. We do not
+    // list it explicitly; `IntErrorKind` is `#[non_exhaustive]` and the `_`
+    // arm covers it (and any future variants) without misleading the reader
+    // into thinking we expect to see it here.
     match err.kind() {
         std::num::IntErrorKind::Empty => "empty",
         std::num::IntErrorKind::InvalidDigit => "invalid digit",
         std::num::IntErrorKind::PosOverflow | std::num::IntErrorKind::NegOverflow => {
             "value out of range"
         }
-        std::num::IntErrorKind::Zero => "zero not allowed",
         _ => "invalid integer",
     }
 }
