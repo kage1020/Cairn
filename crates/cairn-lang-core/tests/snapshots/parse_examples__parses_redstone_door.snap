@@ -175,13 +175,13 @@ items:
           - open
         rows:
           - inputs: "00"
-            output: 0
+            output: false
           - inputs: "01"
-            output: 1
+            output: true
           - inputs: "10"
-            output: 1
+            output: true
           - inputs: "11"
-            output: 1
+            output: true
       - kind: AssertAlways
         antecedent:
           - sig

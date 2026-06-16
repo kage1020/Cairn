@@ -512,9 +512,12 @@ impl<'src> Lexer<'src> {
     }
 
     fn position(&self) -> Position {
+        // `self.line` and `self.col` are seeded with 1 in `Lexer::new` and only
+        // ever advance (line via newline, col via byte/char). They never hit
+        // zero, so the `NonZeroU32::new` calls below are total.
         Position {
-            line: self.line,
-            col: self.col,
+            line: std::num::NonZeroU32::new(self.line).expect("lex line is 1-based"),
+            col: std::num::NonZeroU32::new(self.col).expect("lex col is 1-based"),
         }
     }
 

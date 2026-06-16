@@ -98,3 +98,15 @@ placeholder cannot leak out. The `2026.07.0` release PR will flip publish to `tr
   add variants in later milestones without breaking downstream crates.
 - `LexError` / `ParseError` expose `position()` and `user_message()` accessors so callers
   (CLI, future LSP) can compose diagnostics without re-parsing the Display string.
+
+### Changed (AST surface — affects `cairn parse` JSON / YAML output)
+
+- `TruthRow.output` is now serialised as a JSON boolean (`true` / `false`) instead of the
+  numeric `0` / `1` it shipped with. Any external tool reading `cairn parse --format json`
+  output and treating that field as an integer must be updated.
+- `Position.line` / `Position.col`, `Value::Size.w` / `Value::Size.h`, and the `within` bound
+  of `assert always(...)` carry stricter Rust types (`NonZeroU32`); on the wire the
+  serialisation is still a plain integer, so consumers should see no change to the JSON shape.
+- `@cairn` and `@requires` header values are wrapped in `RawVersion` / `RawRequirement`
+  newtypes on the Rust side; they serialise transparently as the raw string, so external
+  consumers see no shape change.

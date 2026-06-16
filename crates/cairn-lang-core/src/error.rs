@@ -1,5 +1,6 @@
 //! Error and source-position types used throughout `cairn-lang-core`.
 
+use std::num::NonZeroU32;
 use std::ops::Range;
 
 use thiserror::Error;
@@ -9,15 +10,33 @@ pub type Span = Range<usize>;
 
 /// 1-based line/column position used in human-readable diagnostics.
 ///
-/// `col` counts Unicode scalar values (`char`), not bytes, so the value matches
-/// what editors and `gcc`/`clang`-style tools display for the same source.
+/// Both components are `NonZeroU32` because every source location is at line
+/// 1, column 1 or later; the type rules out an accidental `(0, 0)` sentinel
+/// that downstream code would have to special-case. `col` counts Unicode
+/// scalar values (`char`), not bytes, so the value matches what editors and
+/// `gcc`/`clang`-style tools display for the same source.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Position {
     /// 1-based line number.
-    pub line: u32,
+    pub line: NonZeroU32,
     /// 1-based column number, counted in Unicode scalar values from the start
     /// of the line.
-    pub col: u32,
+    pub col: NonZeroU32,
+}
+
+impl Position {
+    /// First byte of any source: line 1, column 1.
+    ///
+    /// Used as the fallback anchor when an error refers to an empty source —
+    /// there is no last token to point at. This means an empty-source EOF
+    /// error and a genuine error at `1:1` are indistinguishable by position
+    /// alone; a future diagnostics layer (LSP) that needs to tell them apart
+    /// should carry the distinction in the error variant rather than in the
+    /// `Position`.
+    pub const START: Position = Position {
+        line: NonZeroU32::MIN,
+        col: NonZeroU32::MIN,
+    };
 }
 
 impl std::fmt::Display for Position {
