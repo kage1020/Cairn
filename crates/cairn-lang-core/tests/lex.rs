@@ -1,7 +1,16 @@
 //! Lexer acceptance tests.
 
+use std::num::NonZeroU32;
+
 use cairn_lang_core::error::{LexError, Position};
 use cairn_lang_core::lex::{TokenKind, lex};
+
+fn pos(line: u32, col: u32) -> Position {
+    Position {
+        line: NonZeroU32::new(line).expect("line"),
+        col: NonZeroU32::new(col).expect("col"),
+    }
+}
 
 fn kinds(source: &str) -> Vec<TokenKind> {
     lex(source)
@@ -147,7 +156,7 @@ fn tracks_line_and_column() {
         .iter()
         .find(|t| matches!(&t.kind, TokenKind::Ident(s) if s == "slot"))
         .expect("slot token");
-    assert_eq!(slot_token.position, Position { line: 2, col: 3 });
+    assert_eq!(slot_token.position, pos(2, 3));
 }
 
 #[test]
@@ -193,7 +202,7 @@ fn col_counts_characters_not_bytes_in_strings() {
         .iter()
         .find(|t| matches!(&t.kind, TokenKind::Ident(s) if s == "cairn"))
         .expect("cairn token");
-    assert_eq!(cairn.position, Position { line: 2, col: 2 });
+    assert_eq!(cairn.position, pos(2, 2));
 }
 
 #[test]

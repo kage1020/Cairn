@@ -1,6 +1,11 @@
 //! Acceptance tests for individual parser building blocks.
 
-use cairn_lang_core::ast::{Arg, DottedRef, Header, Item, Statement, ThemeRule, Value};
+use std::num::NonZeroU32;
+
+use cairn_lang_core::ast::{
+    Arg, DottedRef, Header, Item, RawRequirement, RawVersion, Statement, ThemeRule, Value,
+};
+use cairn_lang_core::error::Position;
 use cairn_lang_core::parse;
 
 fn dr(segments: &[&str]) -> DottedRef {
@@ -13,13 +18,24 @@ fn dr(segments: &[&str]) -> DottedRef {
     )
 }
 
+fn nz(n: u32) -> NonZeroU32 {
+    NonZeroU32::new(n).expect("test value must be non-zero")
+}
+
+fn pos(line: u32, col: u32) -> Position {
+    Position {
+        line: nz(line),
+        col: nz(col),
+    }
+}
+
 #[test]
 fn parses_cairn_header() {
     let module = parse("@cairn 2026.06\n").expect("parse");
     assert_eq!(
         module.headers,
         vec![Header::Cairn {
-            version: "2026.06".into()
+            version: RawVersion::new("2026.06")
         }]
     );
 }
@@ -30,7 +46,7 @@ fn parses_requires_header() {
     assert_eq!(
         module.headers,
         vec![Header::Requires {
-            requirement: "version>=1.20".into()
+            requirement: RawRequirement::new("version>=1.20")
         }]
     );
 }
@@ -107,7 +123,7 @@ fn parses_struct_with_size_and_one_child() {
         args,
         &vec![Arg {
             key: "size".into(),
-            value: Value::Size { w: 9, h: 7 }
+            value: Value::Size { w: nz(9), h: nz(7) }
         }]
     );
     assert_eq!(body.len(), 1);
@@ -208,9 +224,9 @@ fn parses_assert_truth() {
     assert_eq!(output, &dr(&["sig", "open"]));
     assert_eq!(rows.len(), 4);
     assert_eq!(rows[0].inputs, "00");
-    assert_eq!(rows[0].output, 0);
+    assert!(!rows[0].output);
     assert_eq!(rows[3].inputs, "11");
-    assert_eq!(rows[3].output, 1);
+    assert!(rows[3].output);
 }
 
 #[test]
@@ -411,10 +427,22 @@ fn rejects_logic_without_eq() {
 #[test]
 fn carries_position_through_to_parse_error() {
     let err = parse("\n\n@unknown foo\n").expect_err("should fail");
-    let pos = err.position();
     // The `@unknown` token sits on line 3, column 1.
-    assert_eq!(pos.line, 3);
-    assert_eq!(pos.col, 1);
+    assert_eq!(err.position(), pos(3, 1));
+}
+
+#[test]
+fn rejects_zero_size_width() {
+    let err = parse("struct s size=0x4\n").expect_err("0x4 should fail");
+    let msg = err.user_message();
+    assert!(msg.contains("non-zero"), "got: {msg}");
+}
+
+#[test]
+fn rejects_zero_size_height() {
+    let err = parse("struct s size=4x0\n").expect_err("4x0 should fail");
+    let msg = err.user_message();
+    assert!(msg.contains("non-zero"), "got: {msg}");
 }
 
 #[test]

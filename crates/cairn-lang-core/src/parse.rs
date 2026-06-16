@@ -10,7 +10,8 @@
 //! [`crate::ast::Statement`] variants rather than the generic command shape.
 
 use crate::ast::{
-    Arg, DottedRef, Expr, Header, Item, Module, Statement, ThemeRule, TruthRow, Value,
+    Arg, DottedRef, Expr, Header, Item, Module, RawRequirement, RawVersion, Statement, ThemeRule,
+    TruthRow, Value,
 };
 use crate::error::{ParseError, Position};
 use crate::lex::{Token, TokenKind, lex};
@@ -80,8 +81,12 @@ impl<'a> Parser<'a> {
             });
         }
         match name.as_str() {
-            "cairn" => Ok(Header::Cairn { version: raw }),
-            "requires" => Ok(Header::Requires { requirement: raw }),
+            "cairn" => Ok(Header::Cairn {
+                version: RawVersion::new(raw),
+            }),
+            "requires" => Ok(Header::Requires {
+                requirement: RawRequirement::new(raw),
+            }),
             "intended_targets" => {
                 // Re-parse the raw value as a list of strings.
                 let sub_tokens = lex(&raw)?;
@@ -334,8 +339,8 @@ impl<'a> Parser<'a> {
             self.expect(&TokenKind::Arrow)?;
             let out_lex = self.expect_int_lexeme()?;
             let output = match out_lex.as_str() {
-                "0" => 0u8,
-                "1" => 1u8,
+                "0" => false,
+                "1" => true,
                 other => {
                     return Err(self.syntax_here(&format!(
                         "truth-table output must be `0` or `1`, got `{other}`"
@@ -497,8 +502,17 @@ impl<'a> Parser<'a> {
                 self.advance();
                 Ok(Value::Bool(b))
             }
-            TokenKind::Size(w, h) => {
+            TokenKind::Size(raw_w, raw_h) => {
+                let size_pos = position;
                 self.advance();
+                let w = std::num::NonZeroU32::new(raw_w).ok_or_else(|| ParseError::Syntax {
+                    position: size_pos,
+                    message: format!("size literal width must be non-zero, got `{raw_w}x{raw_h}`"),
+                })?;
+                let h = std::num::NonZeroU32::new(raw_h).ok_or_else(|| ParseError::Syntax {
+                    position: size_pos,
+                    message: format!("size literal height must be non-zero, got `{raw_w}x{raw_h}`"),
+                })?;
                 Ok(Value::Size { w, h })
             }
             TokenKind::Int { value, .. } => {
@@ -661,8 +675,14 @@ impl<'a> Parser<'a> {
     }
 
     fn position(&self) -> Position {
+        // Prefer the next token's position; if exhausted, fall back to the
+        // last token actually seen so that EOF errors still point at where
+        // the source ended rather than a meaningless sentinel. An empty
+        // source has neither, so `Position::START` is the only sensible
+        // anchor.
         self.peek()
-            .map_or(Position { line: 0, col: 0 }, |t| t.position)
+            .or_else(|| self.tokens.last())
+            .map_or(Position::START, |t| t.position)
     }
 }
 

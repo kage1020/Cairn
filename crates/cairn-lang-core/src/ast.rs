@@ -6,7 +6,65 @@
 //! collapse equivalent surface forms (canonicalising tokens, resolving names,
 //! type-checking) is the responsibility of downstream layers.
 
+use std::num::NonZeroU32;
+
 use serde::Serialize;
+
+/// A `CalVer` language version string captured verbatim from `@cairn`.
+///
+/// Wrapping the raw string in a newtype prevents callers from confusing it
+/// with arbitrary identifiers, requirement expressions, or other free-form
+/// labels. Validation of the `YYYY.0M[.PATCH]` shape is the responsibility of
+/// the semantic layer; this type only fixes the source provenance.
+///
+/// The semantic layer is expected to introduce a distinct `Version` type that
+/// wraps a *parsed* `CalVer`, leaving `RawVersion` to mean "verbatim from
+/// source" only. `#[non_exhaustive]` keeps room to add validated constructors
+/// (e.g. `RawVersion::from_validated`) without a breaking change, and forces
+/// external callers to go through [`RawVersion::new`] rather than depending
+/// on the tuple-struct shape.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
+#[serde(transparent)]
+#[non_exhaustive]
+pub struct RawVersion(pub String);
+
+impl RawVersion {
+    /// Wrap a raw source string as a [`RawVersion`].
+    pub fn new(version: impl Into<String>) -> Self {
+        Self(version.into())
+    }
+
+    /// Borrow the underlying raw string.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+/// A Minecraft-side requirement expression captured verbatim from
+/// `@requires`. Same role as [`RawVersion`]: keep the raw form distinct from
+/// other strings so downstream layers know it is meant to be parsed as a
+/// constraint, not displayed as-is.
+///
+/// `#[non_exhaustive]` plays the same role as on [`RawVersion`] — see that
+/// type's documentation for the rationale.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
+#[serde(transparent)]
+#[non_exhaustive]
+pub struct RawRequirement(pub String);
+
+impl RawRequirement {
+    /// Wrap a raw source string as a [`RawRequirement`].
+    pub fn new(requirement: impl Into<String>) -> Self {
+        Self(requirement.into())
+    }
+
+    /// Borrow the underlying raw string.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
 
 /// A whole `.crn` source file: a sequence of leading directives followed by
 /// top-level items, both kept in source order.
@@ -30,12 +88,12 @@ pub enum Header {
     /// `@cairn 2026.06` — Cairn language version this file was written against.
     Cairn {
         /// `CalVer` string captured verbatim from the source.
-        version: String,
+        version: RawVersion,
     },
     /// `@requires version>=1.20` — Minecraft version capability floor.
     Requires {
         /// Requirement expression captured verbatim from the source.
-        requirement: String,
+        requirement: RawRequirement,
     },
     /// `@intended_targets ["1.20.4","1.21.4"]` — author hints about Minecraft target version.
     IntendedTargets {
@@ -190,12 +248,14 @@ pub enum Value {
     Bool(bool),
     /// Integer literal (`4`, `0`, ...).
     Int(i64),
-    /// Size literal `WxH` (`9x7`).
+    /// Size literal `WxH` (`9x7`). Both dimensions are blocks, and `0xN`
+    /// or `Nx0` is not meaningful as a building footprint — the type rules
+    /// it out without per-field validation downstream.
     Size {
         /// Width in blocks.
-        w: u32,
+        w: NonZeroU32,
         /// Height in blocks.
-        h: u32,
+        h: NonZeroU32,
     },
     /// Canonical or abstract token, stored *without* the leading `@` sigil
     /// (source `@oak_planks` → `Token("oak_planks")`,
@@ -214,8 +274,10 @@ pub enum Value {
 pub struct TruthRow {
     /// Input bit pattern, e.g. `01` (preserved with its leading zeros).
     pub inputs: String,
-    /// Output bit, `0` or `1`.
-    pub output: u8,
+    /// Output bit. The truth-table grammar permits only `0` or `1`, so the
+    /// AST stores the value as a plain `bool` rather than a `u8` that could
+    /// also represent illegal values like `7`.
+    pub output: bool,
 }
 
 /// A boolean expression used inside `logic` lines.

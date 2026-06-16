@@ -98,3 +98,14 @@
   variant を追加しても下流クレートの破壊的変更にならない。
 - `LexError` / `ParseError` に `position()` / `user_message()` アクセサを追加。CLI や
   将来の LSP が Display 文字列を再パースせずに診断を組み立てられる。
+
+### Changed（AST 表面 — `cairn parse` の JSON / YAML 出力に影響）
+
+- `TruthRow.output` の JSON シリアライゼーションが整数 `0` / `1` から論理値 `true` / `false`
+  に変更。`cairn parse --format json` の出力をツールから読み込み、当該フィールドを整数前提で
+  扱っているコードは更新が必要。
+- `Position.line` / `Position.col`、`Value::Size.w` / `Value::Size.h`、`assert always(...)`
+  の `within` バウンドは Rust 側で `NonZeroU32` 化。ワイヤ上の表現は引き続き素の整数なので
+  JSON / YAML 形状は変わらない。
+- `@cairn` / `@requires` ヘッダの値は Rust 側で `RawVersion` / `RawRequirement` ニュータイプに
+  ラップ。`serde(transparent)` なので外部消費側から見ると素の文字列のままで形状変化なし。
