@@ -1,8 +1,9 @@
 //! Core of the Cairn language.
 //!
 //! Hosts the surface-syntax lexer, parser, and AST used by every other Cairn
-//! crate. M1 ships only up to and including the AST; semantic analysis and IR
-//! lifting land in later milestones.
+//! crate. The responsibility of this crate ends at producing an AST that
+//! preserves the surface form; semantic analysis and IR lifting live in
+//! downstream layers.
 
 pub mod ast;
 pub mod error;
