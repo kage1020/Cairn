@@ -45,33 +45,41 @@ pub enum Header {
 }
 
 /// A top-level construct in a `.crn` file.
-///
-/// Each variant stores its identifier name and, where applicable, an `args`
-/// list and a `body`. Bodies are always kept in source order so that semantic
-/// passes can reason about declaration order without re-walking the source.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(tag = "kind")]
 #[non_exhaustive]
 pub enum Item {
     /// `theme NAME[:]` block — slot/selector bindings.
-    #[allow(missing_docs)]
-    Theme { name: String, body: Vec<ThemeRule> },
-    /// `def NAME[ ARGS][:]` block — reusable parameterised component.
-    #[allow(missing_docs)]
-    Def {
+    Theme {
+        /// Theme name following the `theme` keyword.
         name: String,
+        /// Body rules in source order.
+        body: Vec<ThemeRule>,
+    },
+    /// `def NAME[ ARGS][:]` block — reusable parameterised component.
+    Def {
+        /// Definition name following the `def` keyword.
+        name: String,
+        /// Inline `key=value` arguments on the definition header.
         args: Vec<Arg>,
-        body: Vec<Command>,
+        /// Indented body statements in source order.
+        body: Vec<Statement>,
     },
     /// `site NAME[:]` block — multi-building placement.
-    #[allow(missing_docs)]
-    Site { name: String, body: Vec<Command> },
-    /// `struct NAME[ ARGS]` block — single building / structural composition.
-    #[allow(missing_docs)]
-    Struct {
+    Site {
+        /// Site name following the `site` keyword.
         name: String,
+        /// Indented body statements in source order.
+        body: Vec<Statement>,
+    },
+    /// `struct NAME[ ARGS]` block — single building / structural composition.
+    Struct {
+        /// Struct name following the `struct` keyword.
+        name: String,
+        /// Inline `key=value` arguments on the struct header.
         args: Vec<Arg>,
-        body: Vec<Command>,
+        /// Indented body statements in source order.
+        body: Vec<Statement>,
     },
 }
 
@@ -98,37 +106,67 @@ pub enum ThemeRule {
     },
 }
 
-/// A generic indented command line — the workhorse AST node.
+/// One line of a struct / site / def body.
 ///
-/// `selector`, `positional`, `binding`, and `extra` are all `Option`/empty in
-/// the common case; they capture the optional grammar pieces that only certain
-/// commands use (`connect <ref> to <ref>`, `pressure_plate ... -> sig.step`,
-/// `logic`, `assert`).
+/// Most lines are `Generic` and follow the standard
+/// `keyword[selector] positional... key=value... -> binding` grammar. The
+/// special forms `logic` and `assert` have their own surface grammar and
+/// therefore appear as dedicated variants — making the discriminant a type
+/// invariant rather than an `Option<Extra>` carried by every generic line.
 #[derive(Debug, Clone, PartialEq, Serialize)]
-pub struct Command {
-    /// Leading command keyword.
-    pub keyword: String,
-    /// Optional bracketed selector immediately after the keyword.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub selector: Option<Vec<Arg>>,
-    /// Bare positional values consumed before any `key=value` argument.
-    /// Empty for the overwhelming majority of commands; non-empty only for
-    /// special forms such as `connect <ref> to <ref>`.
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub positional: Vec<Value>,
-    /// `key=value` arguments in source order.
-    pub args: Vec<Arg>,
-    /// Optional `-> VALUE` binding at the end of the line, e.g.
-    /// `pressure_plate ... -> sig.step`.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub binding: Option<Value>,
-    /// Optional structured extension for commands with custom grammar
-    /// (`logic`, `assert`).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub extra: Option<Extra>,
-    /// Child commands indented under this one.
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub children: Vec<Command>,
+#[serde(tag = "kind")]
+#[non_exhaustive]
+pub enum Statement {
+    /// Standard command line with optional selector, positional values,
+    /// `key=value` arguments, an optional `-> binding`, and indented children.
+    Generic {
+        /// Leading command keyword (`floor`, `walls`, `door`, ...).
+        keyword: String,
+        /// Optional bracketed selector immediately after the keyword.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        selector: Option<Vec<Arg>>,
+        /// Bare positional values consumed before any `key=value` argument.
+        /// Empty for the overwhelming majority of commands; non-empty only for
+        /// special forms such as `connect <ref> to <ref>`.
+        #[serde(skip_serializing_if = "Vec::is_empty")]
+        positional: Vec<Value>,
+        /// `key=value` arguments in source order.
+        args: Vec<Arg>,
+        /// Optional `-> VALUE` binding at the end of the line, e.g.
+        /// `pressure_plate ... -> sig.step`.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        binding: Option<Value>,
+        /// Child statements indented under this one.
+        #[serde(skip_serializing_if = "Vec::is_empty")]
+        children: Vec<Statement>,
+    },
+    /// `logic LHS = EXPR` line — binds a boolean signal.
+    Logic {
+        /// LHS reference being defined.
+        lhs: DottedRef,
+        /// RHS boolean expression.
+        rhs: Expr,
+    },
+    /// `assert truth(INPUTS -> OUTPUT) { ROWS }` line — declarative truth
+    /// table over input signals.
+    AssertTruth {
+        /// Input signal references inside `truth(...)`.
+        inputs: Vec<DottedRef>,
+        /// Output signal reference after `->`.
+        output: DottedRef,
+        /// One `bits -> result` per row.
+        rows: Vec<TruthRow>,
+    },
+    /// `assert always(ANTECEDENT -> eventually CONSEQUENT within N)` line —
+    /// liveness property bounded by `within N` ticks.
+    AssertAlways {
+        /// Antecedent reference on the LHS of `->`.
+        antecedent: DottedRef,
+        /// Consequent reference after `eventually`.
+        consequent: DottedRef,
+        /// `within N` bound in ticks.
+        within: u32,
+    },
 }
 
 /// A `key=value` pair as it appears in an argument list.
@@ -153,53 +191,22 @@ pub enum Value {
     /// Integer literal (`4`, `0`, ...).
     Int(i64),
     /// Size literal `WxH` (`9x7`).
-    #[allow(missing_docs)]
-    Size { w: u32, h: u32 },
+    Size {
+        /// Width in blocks.
+        w: u32,
+        /// Height in blocks.
+        h: u32,
+    },
     /// Canonical or abstract token, stored *without* the leading `@` sigil
     /// (source `@oak_planks` → `Token("oak_planks")`,
     /// `@floor.wood.broadleaf` → `Token("floor.wood.broadleaf")`).
     Token(String),
     /// Dotted reference (`home1.entry`, `sig.step`, `inside.front`).
-    DotRef(Vec<String>),
+    DotRef(DottedRef),
     /// Double-quoted string literal.
     Str(String),
     /// List literal of values.
     List(Vec<Value>),
-}
-
-/// Structured extension carried by special-form commands (`logic`, `assert`).
-///
-/// These variants only appear in `Command::extra` for the corresponding
-/// keyword; mismatch is rejected by the parser.
-#[derive(Debug, Clone, PartialEq, Serialize)]
-#[serde(tag = "kind")]
-#[non_exhaustive]
-pub enum Extra {
-    /// `logic LHS = EXPR` line.
-    #[allow(missing_docs)]
-    LogicEq { lhs: Vec<String>, rhs: Expr },
-    /// `assert truth(INPUTS -> OUTPUT) { ROWS }` line.
-    AssertTruth {
-        /// Input signal references inside `truth(...)`.
-        inputs: Vec<Vec<String>>,
-        /// Output signal reference after `->`.
-        output: Vec<String>,
-        /// One `bits -> result` per row.
-        rows: Vec<TruthRow>,
-    },
-    /// `assert always(ANTECEDENT -> eventually CONSEQUENT within N)` line.
-    ///
-    /// `antecedent` and `consequent` map straight to the named references in
-    /// the grammar above and need no further commentary; only `within`
-    /// carries a non-obvious unit (ticks), which is why it is the one field
-    /// that keeps an explicit doc line.
-    #[allow(missing_docs)]
-    AssertAlways {
-        antecedent: Vec<String>,
-        consequent: Vec<String>,
-        /// `within N` bound in ticks.
-        within: u32,
-    },
 }
 
 /// One row of an `assert truth(...)` table.
@@ -217,11 +224,109 @@ pub struct TruthRow {
 #[non_exhaustive]
 pub enum Expr {
     /// Signal reference.
-    Ref(Vec<String>),
+    Ref(DottedRef),
     /// `a and b`.
     And(Box<Expr>, Box<Expr>),
     /// `a or b`.
     Or(Box<Expr>, Box<Expr>),
     /// `not a`.
     Not(Box<Expr>),
+}
+
+/// A non-empty dotted name path such as `home1.entry`, `sig.step`, or a bare
+/// `outer` (single segment).
+///
+/// Non-emptiness is encoded in the [`DottedRef::new`] constructor signature
+/// — a head segment is mandatory, the tail may be empty — so downstream code
+/// never has to special-case an empty path. Serialises as the bare segment
+/// list so wire consumers see `["sig", "step"]`, not a wrapped object.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
+#[serde(transparent)]
+pub struct DottedRef {
+    segments: Vec<String>,
+}
+
+impl DottedRef {
+    /// Build a non-empty [`DottedRef`] from a mandatory `head` segment and a
+    /// (possibly empty) `tail` of additional segments. The two-arg signature
+    /// makes the non-empty invariant a structural property of the call rather
+    /// than something the caller has to remember to satisfy.
+    #[must_use]
+    pub fn new(head: String, tail: Vec<String>) -> Self {
+        let mut segments = Vec::with_capacity(tail.len() + 1);
+        segments.push(head);
+        segments.extend(tail);
+        Self { segments }
+    }
+
+    /// Try to build a [`DottedRef`] from an arbitrary segment vector,
+    /// returning `None` if the vector is empty. Use this when the caller
+    /// already has a `Vec<String>` and would prefer to push the emptiness
+    /// check to the type rather than the call site.
+    #[must_use]
+    pub fn try_from_segments(segments: Vec<String>) -> Option<Self> {
+        if segments.is_empty() {
+            None
+        } else {
+            Some(Self { segments })
+        }
+    }
+
+    /// Borrow the full segment list in source order.
+    #[must_use]
+    pub fn segments(&self) -> &[String] {
+        &self.segments
+    }
+
+    /// First segment — always present.
+    #[must_use]
+    pub fn head(&self) -> &str {
+        &self.segments[0]
+    }
+
+    /// All segments after the head; may be empty for a single-segment path.
+    #[must_use]
+    pub fn tail(&self) -> &[String] {
+        &self.segments[1..]
+    }
+
+    /// Number of segments. Always ≥ 1, hence the `NonZeroUsize` return —
+    /// callers never need a separate "is empty" check.
+    ///
+    /// # Panics
+    /// Never: the non-empty invariant is enforced by every constructor, so
+    /// the inner `NonZeroUsize::new` call always succeeds.
+    #[must_use]
+    pub fn len(&self) -> std::num::NonZeroUsize {
+        std::num::NonZeroUsize::new(self.segments.len()).expect("DottedRef is non-empty")
+    }
+
+    /// Iterate over the segments in source order. Equivalent to
+    /// `(&dr).into_iter()` but discoverable as a method.
+    pub fn iter(&self) -> std::slice::Iter<'_, String> {
+        self.segments.iter()
+    }
+}
+
+impl std::fmt::Display for DottedRef {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut first = true;
+        for segment in &self.segments {
+            if !first {
+                f.write_str(".")?;
+            }
+            f.write_str(segment)?;
+            first = false;
+        }
+        Ok(())
+    }
+}
+
+impl<'a> IntoIterator for &'a DottedRef {
+    type Item = &'a String;
+    type IntoIter = std::slice::Iter<'a, String>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.segments.iter()
+    }
 }

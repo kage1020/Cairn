@@ -6,10 +6,12 @@
 //! positional values (for forms like `connect a to b path=@gravel`), and an
 //! optional `-> binding` tail.
 //!
-//! Special forms `logic` and `assert` flow into [`crate::ast::Extra`] rather
-//! than the generic command shape.
+//! Special forms `logic` and `assert` flow into dedicated
+//! [`crate::ast::Statement`] variants rather than the generic command shape.
 
-use crate::ast::{Arg, Command, Expr, Extra, Header, Item, Module, ThemeRule, TruthRow, Value};
+use crate::ast::{
+    Arg, DottedRef, Expr, Header, Item, Module, Statement, ThemeRule, TruthRow, Value,
+};
 use crate::error::{ParseError, Position};
 use crate::lex::{Token, TokenKind, lex};
 
@@ -219,7 +221,7 @@ impl<'a> Parser<'a> {
         Ok(Item::Struct { name, args, body })
     }
 
-    fn parse_optional_command_body(&mut self) -> Result<Vec<Command>, ParseError> {
+    fn parse_optional_command_body(&mut self) -> Result<Vec<Statement>, ParseError> {
         if !self.peek_is(&TokenKind::Indent) {
             return Ok(Vec::new());
         }
@@ -234,11 +236,11 @@ impl<'a> Parser<'a> {
         Ok(commands)
     }
 
-    fn parse_command(&mut self) -> Result<Command, ParseError> {
+    fn parse_command(&mut self) -> Result<Statement, ParseError> {
         let position = self.position();
         let keyword = self.expect_ident()?;
         match keyword.as_str() {
-            "logic" => return self.parse_logic_command(position),
+            "logic" => return self.parse_logic_command(),
             "assert" => return self.parse_assert_command(position),
             _ => {}
         }
@@ -277,34 +279,25 @@ impl<'a> Parser<'a> {
         }
         self.expect_newline()?;
         let children = self.parse_optional_command_body()?;
-        Ok(Command {
+        Ok(Statement::Generic {
             keyword,
             selector,
             positional,
             args,
             binding,
-            extra: None,
             children,
         })
     }
 
-    fn parse_logic_command(&mut self, _position: Position) -> Result<Command, ParseError> {
+    fn parse_logic_command(&mut self) -> Result<Statement, ParseError> {
         let lhs = self.parse_dotted_ref()?;
         self.expect(&TokenKind::Eq)?;
         let rhs = self.parse_expr()?;
         self.expect_newline()?;
-        Ok(Command {
-            keyword: "logic".to_owned(),
-            selector: None,
-            positional: Vec::new(),
-            args: Vec::new(),
-            binding: None,
-            extra: Some(Extra::LogicEq { lhs, rhs }),
-            children: Vec::new(),
-        })
+        Ok(Statement::Logic { lhs, rhs })
     }
 
-    fn parse_assert_command(&mut self, position: Position) -> Result<Command, ParseError> {
+    fn parse_assert_command(&mut self, position: Position) -> Result<Statement, ParseError> {
         let head = self.expect_ident()?;
         match head.as_str() {
             "truth" => self.parse_assert_truth(),
@@ -316,7 +309,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn parse_assert_truth(&mut self) -> Result<Command, ParseError> {
+    fn parse_assert_truth(&mut self) -> Result<Statement, ParseError> {
         self.expect(&TokenKind::LParen)?;
         let mut inputs = Vec::new();
         loop {
@@ -359,22 +352,14 @@ impl<'a> Parser<'a> {
         }
         self.expect(&TokenKind::RBrace)?;
         self.expect_newline()?;
-        Ok(Command {
-            keyword: "assert".to_owned(),
-            selector: None,
-            positional: Vec::new(),
-            args: Vec::new(),
-            binding: None,
-            extra: Some(Extra::AssertTruth {
-                inputs,
-                output,
-                rows,
-            }),
-            children: Vec::new(),
+        Ok(Statement::AssertTruth {
+            inputs,
+            output,
+            rows,
         })
     }
 
-    fn parse_assert_always(&mut self) -> Result<Command, ParseError> {
+    fn parse_assert_always(&mut self) -> Result<Statement, ParseError> {
         self.expect(&TokenKind::LParen)?;
         let antecedent = self.parse_dotted_ref()?;
         self.expect(&TokenKind::Arrow)?;
@@ -402,18 +387,10 @@ impl<'a> Parser<'a> {
         })?;
         self.expect(&TokenKind::RParen)?;
         self.expect_newline()?;
-        Ok(Command {
-            keyword: "assert".to_owned(),
-            selector: None,
-            positional: Vec::new(),
-            args: Vec::new(),
-            binding: None,
-            extra: Some(Extra::AssertAlways {
-                antecedent,
-                consequent,
-                within,
-            }),
-            children: Vec::new(),
+        Ok(Statement::AssertAlways {
+            antecedent,
+            consequent,
+            within,
         })
     }
 
@@ -535,12 +512,12 @@ impl<'a> Parser<'a> {
             TokenKind::Ident(first) => {
                 self.advance();
                 if self.peek_is(&TokenKind::Dot) {
-                    let mut parts = vec![first];
+                    let mut tail = Vec::new();
                     while self.peek_is(&TokenKind::Dot) {
                         self.advance();
-                        parts.push(self.expect_ident()?);
+                        tail.push(self.expect_ident()?);
                     }
-                    Ok(Value::DotRef(parts))
+                    Ok(Value::DotRef(DottedRef::new(first, tail)))
                 } else {
                     Ok(Value::Ident(first))
                 }
@@ -564,14 +541,14 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn parse_dotted_ref(&mut self) -> Result<Vec<String>, ParseError> {
-        let first = self.expect_ident()?;
-        let mut parts = vec![first];
+    fn parse_dotted_ref(&mut self) -> Result<DottedRef, ParseError> {
+        let head = self.expect_ident()?;
+        let mut tail = Vec::new();
         while self.peek_is(&TokenKind::Dot) {
             self.advance();
-            parts.push(self.expect_ident()?);
+            tail.push(self.expect_ident()?);
         }
-        Ok(parts)
+        Ok(DottedRef::new(head, tail))
     }
 
     fn is_at_key_eq(&self) -> bool {

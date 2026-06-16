@@ -1,7 +1,17 @@
 //! Acceptance tests for individual parser building blocks.
 
-use cairn_lang_core::ast::{Arg, Header, Item, ThemeRule, Value};
+use cairn_lang_core::ast::{Arg, DottedRef, Header, Item, Statement, ThemeRule, Value};
 use cairn_lang_core::parse;
+
+fn dr(segments: &[&str]) -> DottedRef {
+    let (head, tail) = segments
+        .split_first()
+        .expect("DottedRef must be non-empty in tests");
+    DottedRef::new(
+        (*head).to_owned(),
+        tail.iter().map(|s| (*s).to_owned()).collect(),
+    )
+}
 
 #[test]
 fn parses_cairn_header() {
@@ -101,10 +111,13 @@ fn parses_struct_with_size_and_one_child() {
         }]
     );
     assert_eq!(body.len(), 1);
-    assert_eq!(body[0].keyword, "floor");
+    let Statement::Generic { keyword, args, .. } = &body[0] else {
+        panic!("expected Generic, got {:?}", body[0]);
+    };
+    assert_eq!(keyword, "floor");
     assert_eq!(
-        body[0].args,
-        vec![Arg {
+        args,
+        &vec![Arg {
             key: "mat_slot".into(),
             value: Value::Ident("floor".into())
         }]
@@ -117,19 +130,28 @@ fn parses_command_with_selector_head() {
     let Item::Struct { body, .. } = &module.items[0] else {
         panic!("not a struct");
     };
-    assert_eq!(body[0].keyword, "door");
+    let Statement::Generic {
+        keyword,
+        selector,
+        args,
+        ..
+    } = &body[0]
+    else {
+        panic!("expected Generic, got {:?}", body[0]);
+    };
+    assert_eq!(keyword, "door");
     assert_eq!(
-        body[0].selector,
-        Some(vec![Arg {
+        selector,
+        &Some(vec![Arg {
             key: "id".into(),
             value: Value::Ident("front".into())
         }])
     );
     assert_eq!(
-        body[0].args,
-        vec![Arg {
+        args,
+        &vec![Arg {
             key: "opened_by".into(),
-            value: Value::DotRef(vec!["sig".into(), "open".into()])
+            value: Value::DotRef(dr(&["sig", "open"]))
         }]
     );
 }
@@ -141,11 +163,14 @@ fn parses_sensor_binding() {
     let Item::Struct { body, .. } = &module.items[0] else {
         panic!("not a struct");
     };
-    assert_eq!(body[0].keyword, "pressure_plate");
-    assert_eq!(
-        body[0].binding,
-        Some(Value::DotRef(vec!["sig".into(), "step".into()]))
-    );
+    let Statement::Generic {
+        keyword, binding, ..
+    } = &body[0]
+    else {
+        panic!("expected Generic, got {:?}", body[0]);
+    };
+    assert_eq!(keyword, "pressure_plate");
+    assert_eq!(binding, &Some(Value::DotRef(dr(&["sig", "step"]))));
 }
 
 #[test]
@@ -155,13 +180,11 @@ fn parses_logic_expression() {
     let Item::Struct { body, .. } = &module.items[0] else {
         panic!("not a struct");
     };
-    let extra = body[0].extra.as_ref().expect("logic extra");
-    if let cairn_lang_core::ast::Extra::LogicEq { lhs, rhs } = extra {
-        assert_eq!(lhs, &vec!["sig".to_string(), "open".to_string()]);
-        assert!(matches!(rhs, Expr::Or(_, _)));
-    } else {
-        panic!("expected LogicEq");
-    }
+    let Statement::Logic { lhs, rhs } = &body[0] else {
+        panic!("expected Logic, got {:?}", body[0]);
+    };
+    assert_eq!(lhs, &dr(&["sig", "open"]));
+    assert!(matches!(rhs, Expr::Or(_, _)));
 }
 
 #[test]
@@ -173,16 +196,16 @@ fn parses_assert_truth() {
     let Item::Struct { body, .. } = &module.items[0] else {
         panic!("not a struct");
     };
-    let cairn_lang_core::ast::Extra::AssertTruth {
+    let Statement::AssertTruth {
         inputs,
         output,
         rows,
-    } = body[0].extra.as_ref().expect("extra")
+    } = &body[0]
     else {
-        panic!("expected AssertTruth");
+        panic!("expected AssertTruth, got {:?}", body[0]);
     };
     assert_eq!(inputs.len(), 2);
-    assert_eq!(output, &vec!["sig".to_string(), "open".to_string()]);
+    assert_eq!(output, &dr(&["sig", "open"]));
     assert_eq!(rows.len(), 4);
     assert_eq!(rows[0].inputs, "00");
     assert_eq!(rows[0].output, 0);
@@ -197,16 +220,16 @@ fn parses_assert_always() {
     let Item::Struct { body, .. } = &module.items[0] else {
         panic!("not a struct");
     };
-    let cairn_lang_core::ast::Extra::AssertAlways {
+    let Statement::AssertAlways {
         antecedent,
         consequent,
         within,
-    } = body[0].extra.as_ref().expect("extra")
+    } = &body[0]
     else {
-        panic!("expected AssertAlways");
+        panic!("expected AssertAlways, got {:?}", body[0]);
     };
-    assert_eq!(antecedent, &vec!["sig".to_string(), "step".to_string()]);
-    assert_eq!(consequent, &vec!["sig".to_string(), "open".to_string()]);
+    assert_eq!(antecedent, &dr(&["sig", "step"]));
+    assert_eq!(consequent, &dr(&["sig", "open"]));
     assert_eq!(*within, 2);
 }
 
@@ -217,21 +240,23 @@ fn parses_connect_with_positional_to() {
     let Item::Site { body, .. } = &module.items[0] else {
         panic!("not a site");
     };
-    let cmd = &body[0];
-    assert_eq!(cmd.keyword, "connect");
-    assert_eq!(cmd.positional.len(), 3);
+    let Statement::Generic {
+        keyword,
+        positional,
+        args,
+        ..
+    } = &body[0]
+    else {
+        panic!("expected Generic, got {:?}", body[0]);
+    };
+    assert_eq!(keyword, "connect");
+    assert_eq!(positional.len(), 3);
+    assert_eq!(positional[0], Value::DotRef(dr(&["home1", "entry"])));
+    assert_eq!(positional[1], Value::Ident("to".into()));
+    assert_eq!(positional[2], Value::DotRef(dr(&["home2", "entry"])));
     assert_eq!(
-        cmd.positional[0],
-        Value::DotRef(vec!["home1".into(), "entry".into()])
-    );
-    assert_eq!(cmd.positional[1], Value::Ident("to".into()));
-    assert_eq!(
-        cmd.positional[2],
-        Value::DotRef(vec!["home2".into(), "entry".into()])
-    );
-    assert_eq!(
-        cmd.args,
-        vec![Arg {
+        args,
+        &vec![Arg {
             key: "path".into(),
             value: Value::Token("gravel".into())
         }]
@@ -249,21 +274,33 @@ struct keep size=11x9
     let Item::Struct { body, .. } = &module.items[0] else {
         panic!("not a struct");
     };
-    assert_eq!(body[0].keyword, "level");
-    assert_eq!(body[0].children.len(), 1);
-    assert_eq!(body[0].children[0].keyword, "door");
+    let Statement::Generic {
+        keyword, children, ..
+    } = &body[0]
+    else {
+        panic!("expected Generic, got {:?}", body[0]);
+    };
+    assert_eq!(keyword, "level");
+    assert_eq!(children.len(), 1);
+    let Statement::Generic {
+        keyword: child_kw, ..
+    } = &children[0]
+    else {
+        panic!("expected Generic child, got {:?}", children[0]);
+    };
+    assert_eq!(child_kw, "door");
 }
 
 #[test]
 fn logic_precedence_and_binds_tighter_than_or() {
-    use cairn_lang_core::ast::{Expr, Extra};
+    use cairn_lang_core::ast::Expr;
     // `a and b or c` must parse as `Or(And(a, b), c)`, not `And(a, Or(b, c))`.
     let module = parse("struct s\n  logic sig.x = a and b or c\n").expect("parse");
     let Item::Struct { body, .. } = &module.items[0] else {
         panic!("not a struct");
     };
-    let Some(Extra::LogicEq { rhs, .. }) = body[0].extra.as_ref() else {
-        panic!("expected LogicEq");
+    let Statement::Logic { rhs, .. } = &body[0] else {
+        panic!("expected Logic, got {:?}", body[0]);
     };
     match rhs {
         Expr::Or(lhs, rhs_c) => {
@@ -279,14 +316,14 @@ fn logic_precedence_and_binds_tighter_than_or() {
 
 #[test]
 fn logic_not_higher_than_and() {
-    use cairn_lang_core::ast::{Expr, Extra};
+    use cairn_lang_core::ast::Expr;
     // `not a and b` must parse as `And(Not(a), b)`.
     let module = parse("struct s\n  logic sig.x = not a and b\n").expect("parse");
     let Item::Struct { body, .. } = &module.items[0] else {
         panic!("not a struct");
     };
-    let Some(Extra::LogicEq { rhs, .. }) = body[0].extra.as_ref() else {
-        panic!("expected LogicEq");
+    let Statement::Logic { rhs, .. } = &body[0] else {
+        panic!("expected Logic, got {:?}", body[0]);
     };
     match rhs {
         Expr::And(lhs, _) => assert!(matches!(**lhs, Expr::Not(_))),
@@ -378,4 +415,39 @@ fn carries_position_through_to_parse_error() {
     // The `@unknown` token sits on line 3, column 1.
     assert_eq!(pos.line, 3);
     assert_eq!(pos.col, 1);
+}
+
+#[test]
+fn dotted_ref_constructor_pins_non_empty_shape() {
+    // `DottedRef::new(head, tail)` makes the non-empty invariant a structural
+    // property of the call: the head is mandatory, the tail may be empty.
+    let single = DottedRef::new("sig".into(), Vec::new());
+    assert_eq!(single.head(), "sig");
+    assert!(single.tail().is_empty());
+    assert_eq!(single.len().get(), 1);
+
+    let multi = DottedRef::new("sig".into(), vec!["step".into(), "edge".into()]);
+    assert_eq!(multi.head(), "sig");
+    assert_eq!(multi.tail(), &["step".to_owned(), "edge".to_owned()]);
+    assert_eq!(multi.len().get(), 3);
+
+    // The fallback `try_from_segments` still rejects empty input.
+    assert!(DottedRef::try_from_segments(Vec::new()).is_none());
+    assert!(DottedRef::try_from_segments(vec!["a".into()]).is_some());
+}
+
+#[test]
+fn dotted_ref_display_joins_with_dots() {
+    let dr = DottedRef::new("home1".into(), vec!["entry".into()]);
+    assert_eq!(dr.to_string(), "home1.entry");
+
+    let single = DottedRef::new("outer".into(), Vec::new());
+    assert_eq!(single.to_string(), "outer");
+}
+
+#[test]
+fn dotted_ref_iterates_segments_in_order() {
+    let dr = DottedRef::new("sig".into(), vec!["step".into(), "edge".into()]);
+    let collected: Vec<&str> = (&dr).into_iter().map(String::as_str).collect();
+    assert_eq!(collected, vec!["sig", "step", "edge"]);
 }

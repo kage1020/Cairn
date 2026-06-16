@@ -10,7 +10,7 @@ pub mod error;
 pub mod lex;
 pub mod parse;
 
-pub use ast::Module;
+pub use ast::{DottedRef, Module, Statement};
 pub use error::{LexError, ParseError, Position, Span};
 pub use lex::{Token, TokenKind, lex};
 pub use parse::parse;
