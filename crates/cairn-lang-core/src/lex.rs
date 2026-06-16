@@ -20,6 +20,12 @@
 
 use crate::error::{LexError, Position, Span};
 
+/// `indent_stack` is seeded with `0` in `Lexer::new` and we only pop while
+/// the top is strictly greater than the current level, so the bottom-of-stack
+/// zero sentinel is never popped. The `expect` calls below document that
+/// invariant rather than hiding it behind an `unwrap_or(&0)` default.
+const INDENT_STACK_NONEMPTY: &str = "indent_stack invariant: bottom 0 sentinel is never popped";
+
 /// One lexical token.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Token {
@@ -203,7 +209,7 @@ impl<'src> Lexer<'src> {
                 });
             }
             let level = spaces / 2;
-            let current = *self.indent_stack.last().unwrap_or(&0);
+            let current = *self.indent_stack.last().expect(INDENT_STACK_NONEMPTY);
             if level > current {
                 // Only allow one level of indent increase at a time.
                 if level != current + 1 {
@@ -215,11 +221,11 @@ impl<'src> Lexer<'src> {
                 self.indent_stack.push(level);
                 self.push_at(TokenKind::Indent, line_start..self.pos, start_position);
             } else {
-                while *self.indent_stack.last().unwrap_or(&0) > level {
+                while *self.indent_stack.last().expect(INDENT_STACK_NONEMPTY) > level {
                     self.indent_stack.pop();
                     self.push_at(TokenKind::Dedent, line_start..self.pos, start_position);
                 }
-                if *self.indent_stack.last().unwrap_or(&0) != level {
+                if *self.indent_stack.last().expect(INDENT_STACK_NONEMPTY) != level {
                     return Err(LexError::UnmatchedDedent {
                         position: start_position,
                     });
