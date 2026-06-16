@@ -1,6 +1,5 @@
 ---
 source: crates/cairn-lang-core/tests/parse_examples.rs
-assertion_line: 26
 expression: "parse_example(\"themed-tower.crn\")"
 ---
 headers:
@@ -42,7 +41,8 @@ items:
             w: 11
             h: 9
     body:
-      - keyword: floor
+      - kind: Generic
+        keyword: floor
         args:
           - key: id
             value:
@@ -52,7 +52,8 @@ items:
             value:
               kind: Ident
               value: floor
-      - keyword: walls
+      - kind: Generic
+        keyword: walls
         args:
           - key: id
             value:
@@ -66,7 +67,8 @@ items:
             value:
               kind: Int
               value: 5
-      - keyword: roof
+      - kind: Generic
+        keyword: roof
         args:
           - key: id
             value:
@@ -84,7 +86,8 @@ items:
             value:
               kind: Int
               value: 1
-      - keyword: level
+      - kind: Generic
+        keyword: level
         args:
           - key: id
             value:
@@ -95,7 +98,8 @@ items:
               kind: Int
               value: 0
         children:
-          - keyword: door
+          - kind: Generic
+            keyword: door
             args:
               - key: id
                 value:
@@ -109,7 +113,8 @@ items:
                 value:
                   kind: Ident
                   value: center
-          - keyword: window
+          - kind: Generic
+            keyword: window
             args:
               - key: id
                 value:
@@ -137,7 +142,8 @@ items:
                 value:
                   kind: Ident
                   value: trim
-      - keyword: level
+      - kind: Generic
+        keyword: level
         args:
           - key: id
             value:
@@ -148,7 +154,8 @@ items:
               kind: Int
               value: 5
         children:
-          - keyword: walls
+          - kind: Generic
+            keyword: walls
             args:
               - key: id
                 value:
@@ -166,7 +173,8 @@ items:
                 value:
                   kind: Int
                   value: 4
-          - keyword: window
+          - kind: Generic
+            keyword: window
             args:
               - key: class
                 value:
@@ -198,7 +206,8 @@ items:
                 value:
                   kind: Ident
                   value: slit
-          - keyword: stair
+          - kind: Generic
+            keyword: stair
             args:
               - key: id
                 value:

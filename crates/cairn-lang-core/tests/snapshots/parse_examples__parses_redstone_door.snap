@@ -1,6 +1,5 @@
 ---
 source: crates/cairn-lang-core/tests/parse_examples.rs
-assertion_line: 36
 expression: "parse_example(\"redstone-door.crn\")"
 ---
 headers:
@@ -32,13 +31,15 @@ items:
             w: 7
             h: 5
     body:
-      - keyword: floor
+      - kind: Generic
+        keyword: floor
         args:
           - key: mat_slot
             value:
               kind: Ident
               value: wall
-      - keyword: walls
+      - kind: Generic
+        keyword: walls
         args:
           - key: class
             value:
@@ -52,7 +53,8 @@ items:
             value:
               kind: Int
               value: 3
-      - keyword: door
+      - kind: Generic
+        keyword: door
         args:
           - key: id
             value:
@@ -70,7 +72,8 @@ items:
             value:
               kind: Ident
               value: door
-      - keyword: pressure_plate
+      - kind: Generic
+        keyword: pressure_plate
         args:
           - key: id
             value:
@@ -95,7 +98,8 @@ items:
           value:
             - sig
             - step
-      - keyword: pressure_plate
+      - kind: Generic
+        keyword: pressure_plate
         args:
           - key: id
             value:
@@ -120,25 +124,23 @@ items:
           value:
             - sig
             - exit
-      - keyword: logic
-        args: []
-        extra:
-          kind: LogicEq
-          lhs:
-            - sig
-            - open
-          rhs:
-            kind: Or
-            value:
-              - kind: Ref
-                value:
-                  - sig
-                  - step
-              - kind: Ref
-                value:
-                  - sig
-                  - exit
-      - keyword: door
+      - kind: Logic
+        lhs:
+          - sig
+          - open
+        rhs:
+          kind: Or
+          value:
+            - kind: Ref
+              value:
+                - sig
+                - step
+            - kind: Ref
+              value:
+                - sig
+                - exit
+      - kind: Generic
+        keyword: door
         selector:
           - key: id
             value:
@@ -151,7 +153,8 @@ items:
               value:
                 - sig
                 - open
-      - keyword: circuit
+      - kind: Generic
+        keyword: circuit
         args:
           - key: region
             value:
@@ -161,35 +164,29 @@ items:
             value:
               kind: Int
               value: 2
-      - keyword: assert
-        args: []
-        extra:
-          kind: AssertTruth
-          inputs:
-            - - sig
-              - step
-            - - sig
-              - exit
-          output:
-            - sig
-            - open
-          rows:
-            - inputs: "00"
-              output: 0
-            - inputs: "01"
-              output: 1
-            - inputs: "10"
-              output: 1
-            - inputs: "11"
-              output: 1
-      - keyword: assert
-        args: []
-        extra:
-          kind: AssertAlways
-          antecedent:
-            - sig
+      - kind: AssertTruth
+        inputs:
+          - - sig
             - step
-          consequent:
-            - sig
-            - open
-          within: 2
+          - - sig
+            - exit
+        output:
+          - sig
+          - open
+        rows:
+          - inputs: "00"
+            output: 0
+          - inputs: "01"
+            output: 1
+          - inputs: "10"
+            output: 1
+          - inputs: "11"
+            output: 1
+      - kind: AssertAlways
+        antecedent:
+          - sig
+          - step
+        consequent:
+          - sig
+          - open
+        within: 2

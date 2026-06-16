@@ -1,6 +1,5 @@
 ---
 source: crates/cairn-lang-core/tests/parse_examples.rs
-assertion_line: 21
 expression: "parse_example(\"cottage.crn\")"
 ---
 headers:
@@ -54,13 +53,15 @@ items:
             w: 9
             h: 7
     body:
-      - keyword: floor
+      - kind: Generic
+        keyword: floor
         args:
           - key: mat_slot
             value:
               kind: Ident
               value: floor
-      - keyword: walls
+      - kind: Generic
+        keyword: walls
         args:
           - key: class
             value:
@@ -74,7 +75,8 @@ items:
             value:
               kind: Int
               value: 4
-      - keyword: door
+      - kind: Generic
+        keyword: door
         args:
           - key: side
             value:
@@ -84,7 +86,8 @@ items:
             value:
               kind: Ident
               value: center
-      - keyword: window
+      - kind: Generic
+        keyword: window
         args:
           - key: class
             value:
@@ -116,7 +119,8 @@ items:
             value:
               kind: Ident
               value: glass
-      - keyword: roof
+      - kind: Generic
+        keyword: roof
         args:
           - key: kind
             value:
