@@ -18,7 +18,7 @@
 //! discarded silently; everything else either becomes a token or fails with a
 //! [`LexError`].
 
-use crate::error::{LexError, Position, Span};
+use crate::error::{IntContext, LexError, Position, Span};
 
 /// `indent_stack` is seeded with `0` in `Lexer::new` and we only pop while
 /// the top is strictly greater than the current level, so the bottom-of-stack
@@ -417,21 +417,27 @@ impl<'src> Lexer<'src> {
             }
             let w_str = &self.src[start..lexeme_end];
             let h_str = &self.src[h_start..self.pos];
-            let w = w_str.parse::<u32>().map_err(|_| LexError::InvalidInt {
+            let w = w_str.parse::<u32>().map_err(|err| LexError::InvalidInt {
                 position,
+                context: IntContext::SizeWidth,
                 lexeme: w_str.to_owned(),
+                kind: *err.kind(),
             })?;
-            let h = h_str.parse::<u32>().map_err(|_| LexError::InvalidInt {
+            let h = h_str.parse::<u32>().map_err(|err| LexError::InvalidInt {
                 position,
+                context: IntContext::SizeHeight,
                 lexeme: h_str.to_owned(),
+                kind: *err.kind(),
             })?;
             self.push_at(TokenKind::Size(w, h), start..self.pos, position);
             return Ok(());
         }
         let lexeme = self.src[start..lexeme_end].to_owned();
-        let value = lexeme.parse::<i64>().map_err(|_| LexError::InvalidInt {
+        let value = lexeme.parse::<i64>().map_err(|err| LexError::InvalidInt {
             position,
+            context: IntContext::IntLiteral,
             lexeme: lexeme.clone(),
+            kind: *err.kind(),
         })?;
         self.push_at(TokenKind::Int { value, lexeme }, start..self.pos, position);
         Ok(())

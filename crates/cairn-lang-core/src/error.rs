@@ -1,6 +1,6 @@
 //! Error and source-position types used throughout `cairn-lang-core`.
 
-use std::num::NonZeroU32;
+use std::num::{IntErrorKind, NonZeroU32};
 use std::ops::Range;
 
 use thiserror::Error;
@@ -45,6 +45,57 @@ impl std::fmt::Display for Position {
     }
 }
 
+/// Grammatical position in which an integer literal was being parsed when it
+/// failed. Surface-level diagnostics use this to phrase a message, and LSP
+/// quick-fix logic uses it to dispatch on the offending site without resorting
+/// to substring matches on the rendered text.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum IntContext {
+    /// Width component of a `WxH` size literal (e.g. the `9` in `9x7`).
+    SizeWidth,
+    /// Height component of a `WxH` size literal (e.g. the `7` in `9x7`).
+    SizeHeight,
+    /// Free-standing integer literal in argument or value position.
+    IntLiteral,
+    /// Bound of `assert always(... within N)`.
+    WithinBound,
+}
+
+impl IntContext {
+    /// Phrasing used as the leading clause of a human-readable diagnostic.
+    /// Kept in sync with the legacy messages so substring matchers in
+    /// downstream tooling continue to work.
+    fn describe(self) -> &'static str {
+        match self {
+            Self::SizeWidth | Self::SizeHeight | Self::IntLiteral => "invalid integer literal",
+            Self::WithinBound => "invalid `within` bound",
+        }
+    }
+}
+
+/// One-word rendering of [`IntErrorKind`] suitable for embedding in a
+/// diagnostic. `IntErrorKind` is `#[non_exhaustive]`, so the catch-all arm
+/// guards against future variants without misleading the reader.
+#[must_use]
+pub fn describe_int_kind(kind: IntErrorKind) -> &'static str {
+    match kind {
+        IntErrorKind::Empty => "empty",
+        IntErrorKind::InvalidDigit => "invalid digit",
+        IntErrorKind::PosOverflow | IntErrorKind::NegOverflow => "value out of range",
+        _ => "invalid integer",
+    }
+}
+
+fn render_invalid_int(context: IntContext, lexeme: &str, kind: IntErrorKind) -> String {
+    format!(
+        "{} `{}`: {}",
+        context.describe(),
+        lexeme,
+        describe_int_kind(kind),
+    )
+}
+
 /// Errors raised during lexical analysis.
 #[derive(Debug, Error, PartialEq, Eq)]
 #[non_exhaustive]
@@ -83,13 +134,19 @@ pub enum LexError {
         /// The offending character.
         ch: char,
     },
-    /// An integer literal could not be parsed.
-    #[error("{position}: invalid integer literal `{lexeme}`")]
+    /// An integer literal could not be parsed. Carries the failure `kind` so
+    /// downstream tooling (e.g. LSP quick-fix) can dispatch without parsing
+    /// the rendered message.
+    #[error("{position}: {}", render_invalid_int(*context, lexeme, *kind))]
     InvalidInt {
         /// Where the literal starts.
         position: Position,
+        /// Grammatical site of the failed parse.
+        context: IntContext,
         /// The raw lexeme.
         lexeme: String,
+        /// Why the parse failed.
+        kind: IntErrorKind,
     },
 }
 
@@ -97,9 +154,12 @@ pub enum LexError {
 #[derive(Debug, Error)]
 #[non_exhaustive]
 pub enum ParseError {
-    /// A lexer error surfaced from token production.
+    /// A lexer error surfaced from token production. Lexer integer-parse
+    /// failures are *not* wrapped here; they bubble up directly as
+    /// [`ParseError::InvalidInt`] so callers have a single match arm to
+    /// handle for any integer-parse failure regardless of layer.
     #[error(transparent)]
-    Lex(#[from] LexError),
+    Lex(LexError),
     /// A syntactic mismatch with a human-readable message.
     #[error("{position}: {message}")]
     Syntax {
@@ -108,6 +168,37 @@ pub enum ParseError {
         /// What was expected vs found.
         message: String,
     },
+    /// An integer literal could not be parsed.
+    #[error("{position}: {}", render_invalid_int(*context, lexeme, *kind))]
+    InvalidInt {
+        /// Where the literal starts.
+        position: Position,
+        /// Grammatical site of the failed parse.
+        context: IntContext,
+        /// The raw lexeme.
+        lexeme: String,
+        /// Why the parse failed.
+        kind: IntErrorKind,
+    },
+}
+
+impl From<LexError> for ParseError {
+    fn from(err: LexError) -> Self {
+        match err {
+            LexError::InvalidInt {
+                position,
+                context,
+                lexeme,
+                kind,
+            } => Self::InvalidInt {
+                position,
+                context,
+                lexeme,
+                kind,
+            },
+            other => Self::Lex(other),
+        }
+    }
 }
 
 impl LexError {
@@ -139,7 +230,7 @@ impl ParseError {
     pub fn position(&self) -> Position {
         match self {
             Self::Lex(err) => err.position(),
-            Self::Syntax { position, .. } => *position,
+            Self::Syntax { position, .. } | Self::InvalidInt { position, .. } => *position,
         }
     }
 
@@ -149,6 +240,12 @@ impl ParseError {
         match self {
             Self::Lex(err) => err.user_message(),
             Self::Syntax { message, .. } => message.clone(),
+            Self::InvalidInt {
+                context,
+                lexeme,
+                kind,
+                ..
+            } => render_invalid_int(*context, lexeme, *kind),
         }
     }
 }

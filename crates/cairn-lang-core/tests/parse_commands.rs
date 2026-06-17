@@ -1,12 +1,12 @@
 //! Acceptance tests for individual parser building blocks.
 
-use std::num::NonZeroU32;
+use std::num::{IntErrorKind, NonZeroU32};
 
 use cairn_lang_core::ast::{
     Arg, DottedRef, Header, Item, RawRequirement, RawVersion, Statement, ThemeRule, Value,
 };
-use cairn_lang_core::error::Position;
-use cairn_lang_core::parse;
+use cairn_lang_core::error::{IntContext, Position};
+use cairn_lang_core::{ParseError, parse};
 
 fn dr(segments: &[&str]) -> DottedRef {
     let (head, tail) = segments
@@ -443,6 +443,81 @@ fn rejects_zero_size_height() {
     let err = parse("struct s size=4x0\n").expect_err("4x0 should fail");
     let msg = err.user_message();
     assert!(msg.contains("non-zero"), "got: {msg}");
+}
+
+// ---------- structured InvalidInt diagnostics ----------
+
+#[test]
+fn within_overflow_surfaces_invalid_int_variant() {
+    let err = parse("struct s\n  assert always(a -> eventually b within 4294967296)\n")
+        .expect_err("overflow");
+    let ParseError::InvalidInt {
+        context,
+        lexeme,
+        kind,
+        ..
+    } = err
+    else {
+        panic!("expected ParseError::InvalidInt, got {err:?}");
+    };
+    assert_eq!(context, IntContext::WithinBound);
+    assert_eq!(lexeme, "4294967296");
+    assert_eq!(kind, IntErrorKind::PosOverflow);
+}
+
+#[test]
+fn size_width_overflow_surfaces_invalid_int_variant() {
+    let err = parse("struct s size=99999999999999999999x9\n").expect_err("overflow");
+    let ParseError::InvalidInt { context, kind, .. } = err else {
+        panic!("expected ParseError::InvalidInt, got {err:?}");
+    };
+    assert_eq!(context, IntContext::SizeWidth);
+    assert_eq!(kind, IntErrorKind::PosOverflow);
+}
+
+#[test]
+fn size_height_overflow_surfaces_invalid_int_variant() {
+    let err = parse("struct s size=9x99999999999999999999\n").expect_err("overflow");
+    let ParseError::InvalidInt { context, kind, .. } = err else {
+        panic!("expected ParseError::InvalidInt, got {err:?}");
+    };
+    assert_eq!(context, IntContext::SizeHeight);
+    assert_eq!(kind, IntErrorKind::PosOverflow);
+}
+
+#[test]
+fn int_literal_overflow_surfaces_invalid_int_variant() {
+    let err = parse("struct s\n  walls height=99999999999999999999\n").expect_err("overflow");
+    let ParseError::InvalidInt { context, kind, .. } = err else {
+        panic!("expected ParseError::InvalidInt, got {err:?}");
+    };
+    assert_eq!(context, IntContext::IntLiteral);
+    assert_eq!(kind, IntErrorKind::PosOverflow);
+}
+
+#[test]
+fn invalid_int_carries_position() {
+    let err = parse("struct s\n  assert always(a -> eventually b within 4294967296)\n")
+        .expect_err("overflow");
+    // The bound `4294967296` starts at column 42; the structured error
+    // points at the offending lexeme itself, not at the next token.
+    assert_eq!(err.position(), pos(2, 42));
+}
+
+#[test]
+fn invalid_int_user_message_is_string_compatible() {
+    // The `cairn parse` CLI renders `user_message()`; legacy substring
+    // matchers in downstream tooling must still see the same phrasing.
+    let err = parse("struct s\n  assert always(a -> eventually b within 4294967296)\n")
+        .expect_err("overflow");
+    let msg = err.user_message();
+    assert!(msg.contains("within"), "got: {msg}");
+    assert!(msg.contains("out of range"), "got: {msg}");
+
+    let err = parse("struct s size=99999999999999999999x9\n").expect_err("overflow");
+    let msg = err.user_message();
+    assert!(msg.contains("invalid integer literal"), "got: {msg}");
+    assert!(msg.contains("out of range"), "got: {msg}");
 }
 
 #[test]

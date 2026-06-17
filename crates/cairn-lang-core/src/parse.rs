@@ -13,7 +13,7 @@ use crate::ast::{
     Arg, DottedRef, Expr, Header, Item, Module, RawRequirement, RawVersion, Statement, ThemeRule,
     TruthRow, Value,
 };
-use crate::error::{ParseError, Position};
+use crate::error::{IntContext, ParseError, Position};
 use crate::lex::{Token, TokenKind, lex};
 
 /// Parse a `.crn` source string into a [`Module`].
@@ -383,13 +383,17 @@ impl<'a> Parser<'a> {
                 message: "expected `within N` in always(...)".into(),
             });
         }
+        let within_bound_pos = self.position();
         let within_lex = self.expect_int_lexeme()?;
-        let within: u32 = within_lex.parse().map_err(|err: std::num::ParseIntError| {
-            self.syntax_here(&format!(
-                "invalid `within` bound `{within_lex}`: {}",
-                describe_int_err(&err)
-            ))
-        })?;
+        let within: u32 =
+            within_lex
+                .parse()
+                .map_err(|err: std::num::ParseIntError| ParseError::InvalidInt {
+                    position: within_bound_pos,
+                    context: IntContext::WithinBound,
+                    lexeme: within_lex.clone(),
+                    kind: *err.kind(),
+                })?;
         self.expect(&TokenKind::RParen)?;
         self.expect_newline()?;
         Ok(Statement::AssertAlways {
@@ -683,21 +687,5 @@ impl<'a> Parser<'a> {
         self.peek()
             .or_else(|| self.tokens.last())
             .map_or(Position::START, |t| t.position)
-    }
-}
-
-fn describe_int_err(err: &std::num::ParseIntError) -> &'static str {
-    // `IntErrorKind::Zero` is only produced by `NonZero*` parses, so it cannot
-    // arise from the `u32::parse` call this helper currently serves. We do not
-    // list it explicitly; `IntErrorKind` is `#[non_exhaustive]` and the `_`
-    // arm covers it (and any future variants) without misleading the reader
-    // into thinking we expect to see it here.
-    match err.kind() {
-        std::num::IntErrorKind::Empty => "empty",
-        std::num::IntErrorKind::InvalidDigit => "invalid digit",
-        std::num::IntErrorKind::PosOverflow | std::num::IntErrorKind::NegOverflow => {
-            "value out of range"
-        }
-        _ => "invalid integer",
     }
 }
