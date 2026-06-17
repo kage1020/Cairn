@@ -511,12 +511,18 @@ fn invalid_int_user_message_is_string_compatible() {
     let err = parse("struct s\n  assert always(a -> eventually b within 4294967296)\n")
         .expect_err("overflow");
     let msg = err.user_message();
-    assert!(msg.contains("within"), "got: {msg}");
+    assert!(
+        msg.contains("invalid `within` bound `4294967296`"),
+        "got: {msg}"
+    );
     assert!(msg.contains("out of range"), "got: {msg}");
 
     let err = parse("struct s size=99999999999999999999x9\n").expect_err("overflow");
     let msg = err.user_message();
-    assert!(msg.contains("invalid integer literal"), "got: {msg}");
+    assert!(
+        msg.contains("invalid integer literal `99999999999999999999`"),
+        "got: {msg}"
+    );
     assert!(msg.contains("out of range"), "got: {msg}");
 }
 

@@ -77,6 +77,11 @@ impl IntContext {
 /// One-word rendering of [`IntErrorKind`] suitable for embedding in a
 /// diagnostic. `IntErrorKind` is `#[non_exhaustive]`, so the catch-all arm
 /// guards against future variants without misleading the reader.
+///
+/// `IntErrorKind::Zero` is only produced by `NonZero*::from_str` and never
+/// by the `u32` / `i64` parses this crate currently performs. It is not
+/// listed explicitly and falls through to `"invalid integer"`; callers
+/// parsing `NonZero*` types should phrase Zero themselves.
 #[must_use]
 pub fn describe_int_kind(kind: IntErrorKind) -> &'static str {
     match kind {
