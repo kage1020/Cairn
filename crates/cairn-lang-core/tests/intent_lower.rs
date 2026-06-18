@@ -132,9 +132,8 @@ fn site_place_use_is_preserved_in_intent_state() {
 
 #[test]
 fn level_block_recursively_lowers_its_children() {
-    let ir = lower_source(
-        "struct tower size=5x5\n  level y=0\n    floor\n    walls mat_slot=stone\n",
-    );
+    let ir =
+        lower_source("struct tower size=5x5\n  level y=0\n    floor\n    walls mat_slot=stone\n");
     let level = &ir.structs[0].members[0];
     assert!(matches!(level.role, MemberRole::Level));
     assert_eq!(
