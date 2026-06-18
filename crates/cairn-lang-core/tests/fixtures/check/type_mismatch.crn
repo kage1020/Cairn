@@ -1,0 +1,2 @@
+struct s size=5
+  walls id=@oak class=foo.bar mat_slot=wall

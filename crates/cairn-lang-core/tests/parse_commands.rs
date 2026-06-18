@@ -3,7 +3,7 @@
 use std::num::{IntErrorKind, NonZeroU32};
 
 use cairn_lang_core::ast::{
-    Arg, DottedRef, Header, Item, RawRequirement, RawVersion, Statement, ThemeRule, Value,
+    DottedRef, Header, Item, RawRequirement, RawVersion, Statement, ThemeRule, Value, ValueKind,
 };
 use cairn_lang_core::error::{IntContext, Position};
 use cairn_lang_core::{ParseError, parse};
@@ -32,46 +32,42 @@ fn pos(line: u32, col: u32) -> Position {
 #[test]
 fn parses_cairn_header() {
     let module = parse("@cairn 2026.06\n").expect("parse");
-    assert_eq!(
-        module.headers,
-        vec![Header::Cairn {
-            version: RawVersion::new("2026.06")
-        }]
-    );
+    assert_eq!(module.headers.len(), 1);
+    let Header::Cairn { version, .. } = &module.headers[0] else {
+        panic!("expected Cairn header, got {:?}", module.headers[0]);
+    };
+    assert_eq!(version, &RawVersion::new("2026.06"));
 }
 
 #[test]
 fn parses_requires_header() {
     let module = parse("@requires version>=1.20\n").expect("parse");
-    assert_eq!(
-        module.headers,
-        vec![Header::Requires {
-            requirement: RawRequirement::new("version>=1.20")
-        }]
-    );
+    assert_eq!(module.headers.len(), 1);
+    let Header::Requires { requirement, .. } = &module.headers[0] else {
+        panic!("expected Requires header, got {:?}", module.headers[0]);
+    };
+    assert_eq!(requirement, &RawRequirement::new("version>=1.20"));
 }
 
 #[test]
 fn parses_intended_targets_header() {
     let module = parse("@intended_targets [\"1.20.4\",\"1.21.4\"]\n").expect("parse");
-    assert_eq!(
-        module.headers,
-        vec![Header::IntendedTargets {
-            targets: vec!["1.20.4".into(), "1.21.4".into()]
-        }]
-    );
+    assert_eq!(module.headers.len(), 1);
+    let Header::IntendedTargets { targets, .. } = &module.headers[0] else {
+        panic!("expected IntendedTargets, got {:?}", module.headers[0]);
+    };
+    assert_eq!(targets, &vec!["1.20.4".to_owned(), "1.21.4".to_owned()]);
 }
 
 #[test]
 fn parses_empty_theme_block() {
     let module = parse("theme medieval:\n").expect("parse");
-    assert_eq!(
-        module.items,
-        vec![Item::Theme {
-            name: "medieval".into(),
-            body: Vec::new()
-        }]
-    );
+    assert_eq!(module.items.len(), 1);
+    let Item::Theme { name, body, .. } = &module.items[0] else {
+        panic!("expected Theme item, got {:?}", module.items[0]);
+    };
+    assert_eq!(name, "medieval");
+    assert!(body.is_empty());
 }
 
 #[test]
@@ -80,13 +76,11 @@ fn parses_theme_with_slot() {
     let Item::Theme { body, .. } = &module.items[0] else {
         panic!("not a theme");
     };
-    assert_eq!(
-        body[0],
-        ThemeRule::Slot {
-            slot: "floor".into(),
-            value: Value::Token("oak_planks".into())
-        }
-    );
+    let ThemeRule::Slot { slot, value, .. } = &body[0] else {
+        panic!("expected Slot rule, got {:?}", body[0]);
+    };
+    assert_eq!(slot, "floor");
+    assert!(matches!(value, Value { kind: ValueKind::Token(s), .. } if s == "oak_planks"));
 }
 
 #[test]
@@ -96,48 +90,47 @@ fn parses_theme_with_selector() {
     let Item::Theme { body, .. } = &module.items[0] else {
         panic!("not a theme");
     };
-    assert_eq!(
-        body[0],
-        ThemeRule::Selector {
-            keyword: "window".into(),
-            attrs: vec![Arg {
-                key: "class".into(),
-                value: Value::Ident("small".into())
-            }],
-            bindings: vec![Arg {
-                key: "frame".into(),
-                value: Value::Token("spruce_wood".into())
-            }],
-        }
+    let ThemeRule::Selector {
+        keyword,
+        attrs,
+        bindings,
+        ..
+    } = &body[0]
+    else {
+        panic!("expected Selector rule, got {:?}", body[0]);
+    };
+    assert_eq!(keyword, "window");
+    assert_eq!(attrs.len(), 1);
+    assert_eq!(attrs[0].key, "class");
+    assert!(matches!(&attrs[0].value, Value { kind: ValueKind::Ident(s), .. } if s == "small"));
+    assert_eq!(bindings.len(), 1);
+    assert_eq!(bindings[0].key, "frame");
+    assert!(
+        matches!(&bindings[0].value, Value { kind: ValueKind::Token(s), .. } if s == "spruce_wood")
     );
 }
 
 #[test]
 fn parses_struct_with_size_and_one_child() {
     let module = parse("struct cottage size=9x7\n  floor mat_slot=floor\n").expect("parse");
-    let Item::Struct { name, args, body } = &module.items[0] else {
+    let Item::Struct {
+        name, args, body, ..
+    } = &module.items[0]
+    else {
         panic!("not a struct");
     };
     assert_eq!(name, "cottage");
-    assert_eq!(
-        args,
-        &vec![Arg {
-            key: "size".into(),
-            value: Value::Size { w: nz(9), h: nz(7) }
-        }]
-    );
+    assert_eq!(args.len(), 1);
+    assert_eq!(args[0].key, "size");
+    assert!(matches!(args[0].value.kind, ValueKind::Size { w, h } if w == nz(9) && h == nz(7)));
     assert_eq!(body.len(), 1);
     let Statement::Generic { keyword, args, .. } = &body[0] else {
         panic!("expected Generic, got {:?}", body[0]);
     };
     assert_eq!(keyword, "floor");
-    assert_eq!(
-        args,
-        &vec![Arg {
-            key: "mat_slot".into(),
-            value: Value::Ident("floor".into())
-        }]
-    );
+    assert_eq!(args.len(), 1);
+    assert_eq!(args[0].key, "mat_slot");
+    assert!(matches!(&args[0].value, Value { kind: ValueKind::Ident(s), .. } if s == "floor"));
 }
 
 #[test]
@@ -156,19 +149,14 @@ fn parses_command_with_selector_head() {
         panic!("expected Generic, got {:?}", body[0]);
     };
     assert_eq!(keyword, "door");
-    assert_eq!(
-        selector,
-        &Some(vec![Arg {
-            key: "id".into(),
-            value: Value::Ident("front".into())
-        }])
-    );
-    assert_eq!(
-        args,
-        &vec![Arg {
-            key: "opened_by".into(),
-            value: Value::DotRef(dr(&["sig", "open"]))
-        }]
+    let attrs = selector.as_ref().expect("selector must be present");
+    assert_eq!(attrs.len(), 1);
+    assert_eq!(attrs[0].key, "id");
+    assert!(matches!(&attrs[0].value, Value { kind: ValueKind::Ident(s), .. } if s == "front"));
+    assert_eq!(args.len(), 1);
+    assert_eq!(args[0].key, "opened_by");
+    assert!(
+        matches!(&args[0].value, Value { kind: ValueKind::DotRef(r), .. } if r == &dr(&["sig", "open"]))
     );
 }
 
@@ -186,7 +174,10 @@ fn parses_sensor_binding() {
         panic!("expected Generic, got {:?}", body[0]);
     };
     assert_eq!(keyword, "pressure_plate");
-    assert_eq!(binding, &Some(Value::DotRef(dr(&["sig", "step"]))));
+    let binding = binding.as_ref().expect("binding must be present");
+    assert!(
+        matches!(binding, Value { kind: ValueKind::DotRef(r), .. } if r == &dr(&["sig", "step"]))
+    );
 }
 
 #[test]
@@ -196,7 +187,7 @@ fn parses_logic_expression() {
     let Item::Struct { body, .. } = &module.items[0] else {
         panic!("not a struct");
     };
-    let Statement::Logic { lhs, rhs } = &body[0] else {
+    let Statement::Logic { lhs, rhs, .. } = &body[0] else {
         panic!("expected Logic, got {:?}", body[0]);
     };
     assert_eq!(lhs, &dr(&["sig", "open"]));
@@ -216,6 +207,7 @@ fn parses_assert_truth() {
         inputs,
         output,
         rows,
+        ..
     } = &body[0]
     else {
         panic!("expected AssertTruth, got {:?}", body[0]);
@@ -240,6 +232,7 @@ fn parses_assert_always() {
         antecedent,
         consequent,
         within,
+        ..
     } = &body[0]
     else {
         panic!("expected AssertAlways, got {:?}", body[0]);
@@ -267,16 +260,16 @@ fn parses_connect_with_positional_to() {
     };
     assert_eq!(keyword, "connect");
     assert_eq!(positional.len(), 3);
-    assert_eq!(positional[0], Value::DotRef(dr(&["home1", "entry"])));
-    assert_eq!(positional[1], Value::Ident("to".into()));
-    assert_eq!(positional[2], Value::DotRef(dr(&["home2", "entry"])));
-    assert_eq!(
-        args,
-        &vec![Arg {
-            key: "path".into(),
-            value: Value::Token("gravel".into())
-        }]
+    assert!(
+        matches!(&positional[0], Value { kind: ValueKind::DotRef(r), .. } if r == &dr(&["home1", "entry"]))
     );
+    assert!(matches!(&positional[1], Value { kind: ValueKind::Ident(s), .. } if s == "to"));
+    assert!(
+        matches!(&positional[2], Value { kind: ValueKind::DotRef(r), .. } if r == &dr(&["home2", "entry"]))
+    );
+    assert_eq!(args.len(), 1);
+    assert_eq!(args[0].key, "path");
+    assert!(matches!(&args[0].value, Value { kind: ValueKind::Token(s), .. } if s == "gravel"));
 }
 
 #[test]
@@ -322,7 +315,7 @@ fn logic_precedence_and_binds_tighter_than_or() {
         Expr::Or(lhs, rhs_c) => {
             assert!(
                 matches!(**lhs, Expr::And(_, _)),
-                "lhs should be And, got {lhs:?}"
+                "lhs should be And, got {lhs:?}",
             );
             assert!(matches!(**rhs_c, Expr::Ref(_)), "rhs should be Ref(c)");
         }

@@ -1,10 +1,10 @@
 //! Cairn command-line entry point.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use cairn_lang_core::CAIRN_VERSION;
-use cairn_lang_core::parse;
+use cairn_lang_core::{Severity, check, lower, parse};
 use clap::{Parser, Subcommand, ValueEnum};
 
 /// `cairn` — Minecraft build DSL command-line interface.
@@ -30,6 +30,17 @@ enum Command {
         #[arg(long, value_enum, default_value_t = Format::Json)]
         format: Format,
     },
+    /// Run syntactic validation passes against a .crn source file. Exits 0
+    /// when nothing is reported, 1 when any `Error`-severity diagnostic is
+    /// emitted (or the file fails to parse), 2 when the file cannot be
+    /// located.
+    Check {
+        /// Path to the .crn file to check.
+        file: PathBuf,
+        /// Output format for the diagnostics.
+        #[arg(long, value_enum, default_value_t = CheckFormat::Text)]
+        format: CheckFormat,
+    },
 }
 
 #[derive(Copy, Clone, ValueEnum)]
@@ -40,10 +51,19 @@ enum Format {
     Debug,
 }
 
+#[derive(Copy, Clone, ValueEnum)]
+enum CheckFormat {
+    /// gcc-style one-diagnostic-per-line for humans (default).
+    Text,
+    /// Pretty JSON list, for tools.
+    Json,
+}
+
 fn main() -> ExitCode {
     let cli = Cli::parse();
     match cli.command {
         Some(Command::Parse { file, format }) => run_parse(&file, format),
+        Some(Command::Check { file, format }) => run_check(&file, format),
         None => {
             eprintln!("error: a subcommand is required (try `cairn --help`)");
             ExitCode::from(2)
@@ -51,7 +71,7 @@ fn main() -> ExitCode {
     }
 }
 
-fn run_parse(file: &std::path::Path, format: Format) -> ExitCode {
+fn run_parse(file: &Path, format: Format) -> ExitCode {
     let source = match std::fs::read_to_string(file) {
         Ok(s) => s,
         Err(err) => {
@@ -94,5 +114,77 @@ fn run_parse(file: &std::path::Path, format: Format) -> ExitCode {
             println!("{module:#?}");
             ExitCode::SUCCESS
         }
+    }
+}
+
+fn run_check(file: &Path, format: CheckFormat) -> ExitCode {
+    let source = match std::fs::read_to_string(file) {
+        Ok(s) => s,
+        Err(err) => {
+            eprintln!("error: cannot read `{}`: {err}", file.display());
+            return match err.kind() {
+                std::io::ErrorKind::NotFound => ExitCode::from(2),
+                _ => ExitCode::from(1),
+            };
+        }
+    };
+    // A parse failure pre-empts any check pass — the AST/IR has to be
+    // well-formed before invariant-collecting can run. Surface it under the
+    // same exit code as a check-level error so a CI pipeline gating on
+    // `cairn check` does not silently pass a file that the parser rejected.
+    let module = match parse(&source) {
+        Ok(m) => m,
+        Err(err) => {
+            eprintln!(
+                "error: {}:{}: {}",
+                file.display(),
+                err.position(),
+                err.user_message(),
+            );
+            return ExitCode::from(1);
+        }
+    };
+    let ir = lower(&module);
+    let diagnostics = check(&module, &ir);
+    let has_error = diagnostics.iter().any(|d| d.severity == Severity::Error);
+
+    match format {
+        CheckFormat::Text => {
+            for d in &diagnostics {
+                let pos = d.position(&source);
+                println!(
+                    "{}:{}: {}[{}]: {}",
+                    file.display(),
+                    pos,
+                    d.severity.as_str(),
+                    d.code.as_str(),
+                    d.primary,
+                );
+                for note in &d.notes {
+                    let note_pos = cairn_lang_core::check::Diagnostic {
+                        code: d.code,
+                        severity: d.severity,
+                        span: note.span.clone(),
+                        primary: String::new(),
+                        notes: Vec::new(),
+                    }
+                    .position(&source);
+                    println!("{}:{}:   note: {}", file.display(), note_pos, note.message);
+                }
+            }
+        }
+        CheckFormat::Json => match serde_json::to_string_pretty(&diagnostics) {
+            Ok(json) => println!("{json}"),
+            Err(err) => {
+                eprintln!("error: failed to serialise diagnostics as JSON: {err}");
+                return ExitCode::from(1);
+            }
+        },
+    }
+
+    if has_error {
+        ExitCode::from(1)
+    } else {
+        ExitCode::SUCCESS
     }
 }

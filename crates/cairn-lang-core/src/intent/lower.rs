@@ -1,17 +1,18 @@
 //! AST → Intent IR lowering.
 //!
 //! Intentionally total: every AST that survives [`crate::parse`] lowers to a
-//! well-formed [`IntentModule`]. Validation lives elsewhere (M2-PR2's
-//! `check` module) so that diagnostic collection can run to completion
-//! instead of being short-circuited by the first structural surprise here.
+//! well-formed [`IntentModule`]. Validation lives elsewhere (the diagnostic
+//! passes in `crate::check`) so that diagnostic collection can run to
+//! completion instead of being short-circuited by the first structural
+//! surprise here.
 
 use indexmap::IndexMap;
 
-use crate::ast::{Arg, Item, Module, Statement, ThemeRule, Value};
+use crate::ast::{Arg, Item, Module, Statement, ThemeRule, Value, ValueKind};
 
 use super::{
     AssertIr, DefIr, IntentModule, IntentState, LogicBinding, Member, MemberBody, SelectorRule,
-    SemanticLevel, SiteIr, Size, StructIr, ThemeIr, role_of,
+    SemanticLevel, SiteIr, Size, StructIr, ThemeIr, ValueWithSpan, role_of,
 };
 
 /// Lower a parsed [`Module`] into its [`IntentModule`] form.
@@ -32,10 +33,20 @@ pub fn lower(module: &Module) -> IntentModule {
 
     for item in &module.items {
         match item {
-            Item::Theme { name, body } => themes.push(lower_theme(name, body)),
-            Item::Def { name, args, body } => defs.push(lower_def(name, args, body)),
-            Item::Site { name, body } => sites.push(lower_site(name, body)),
-            Item::Struct { name, args, body } => structs.push(lower_struct(name, args, body)),
+            Item::Theme { name, body, span } => themes.push(lower_theme(name, body, span.clone())),
+            Item::Def {
+                name,
+                args,
+                body,
+                span,
+            } => defs.push(lower_def(name, args, body, span.clone())),
+            Item::Site { name, body, span } => sites.push(lower_site(name, body, span.clone())),
+            Item::Struct {
+                name,
+                args,
+                body,
+                span,
+            } => structs.push(lower_struct(name, args, body, span.clone())),
         }
     }
 
@@ -49,27 +60,29 @@ pub fn lower(module: &Module) -> IntentModule {
     }
 }
 
-fn lower_theme(name: &str, body: &[ThemeRule]) -> ThemeIr {
-    let mut slots: IndexMap<String, Value> = IndexMap::new();
+fn lower_theme(name: &str, body: &[ThemeRule], span: crate::error::Span) -> ThemeIr {
+    let mut slots: IndexMap<String, ValueWithSpan> = IndexMap::new();
     let mut selectors = Vec::new();
 
     for rule in body {
         match rule {
-            ThemeRule::Slot { slot, value } => {
-                // Last-write-wins on duplicate slot names. The M2-PR2
-                // `duplicate` pass walks `&Module` directly, so the IR not
-                // remembering the earlier value is fine.
-                slots.insert(slot.clone(), value.clone());
+            ThemeRule::Slot { slot, value, .. } => {
+                // Last-write-wins on duplicate slot names. The `duplicate`
+                // pass walks `&Module` directly, so the IR not remembering
+                // the earlier value is fine.
+                slots.insert(slot.clone(), ValueWithSpan::from_value(value.clone()));
             }
             ThemeRule::Selector {
                 keyword,
                 attrs,
                 bindings,
+                span: rule_span,
             } => {
                 selectors.push(SelectorRule {
                     keyword: keyword.clone(),
                     attrs: args_to_map(attrs),
                     bindings: args_to_map(bindings),
+                    span: rule_span.clone(),
                 });
             }
         }
@@ -79,10 +92,16 @@ fn lower_theme(name: &str, body: &[ThemeRule]) -> ThemeIr {
         name: name.to_owned(),
         slots,
         selectors,
+        span,
     }
 }
 
-fn lower_struct(name: &str, header_args: &[Arg], body: &[Statement]) -> StructIr {
+fn lower_struct(
+    name: &str,
+    header_args: &[Arg],
+    body: &[Statement],
+    span: crate::error::Span,
+) -> StructIr {
     let HeaderBreakdown { size, args } = split_size(header_args);
     let MemberBody {
         members,
@@ -96,10 +115,16 @@ fn lower_struct(name: &str, header_args: &[Arg], body: &[Statement]) -> StructIr
         members,
         logic,
         asserts,
+        span,
     }
 }
 
-fn lower_def(name: &str, header_args: &[Arg], body: &[Statement]) -> DefIr {
+fn lower_def(
+    name: &str,
+    header_args: &[Arg],
+    body: &[Statement],
+    span: crate::error::Span,
+) -> DefIr {
     let HeaderBreakdown { size, args } = split_size(header_args);
     let MemberBody {
         members,
@@ -113,10 +138,11 @@ fn lower_def(name: &str, header_args: &[Arg], body: &[Statement]) -> DefIr {
         members,
         logic,
         asserts,
+        span,
     }
 }
 
-fn lower_site(name: &str, body: &[Statement]) -> SiteIr {
+fn lower_site(name: &str, body: &[Statement], span: crate::error::Span) -> SiteIr {
     let MemberBody {
         members,
         logic,
@@ -127,35 +153,43 @@ fn lower_site(name: &str, body: &[Statement]) -> SiteIr {
         placements: members,
         logic,
         asserts,
+        span,
     }
 }
 
 struct HeaderBreakdown {
     size: Option<Size>,
-    args: IndexMap<String, Value>,
+    args: IndexMap<String, ValueWithSpan>,
 }
 
 fn split_size(header_args: &[Arg]) -> HeaderBreakdown {
     let mut size = None;
-    let mut args: IndexMap<String, Value> = IndexMap::new();
+    let mut args: IndexMap<String, ValueWithSpan> = IndexMap::new();
     for arg in header_args {
         // The first well-typed `size=WxH` hoists into `StructIr::size`; any
         // additional `size=` occurrences are dropped from the IR. A repeated
-        // declaration is still visible to the M2-PR2 `duplicate` pass via
+        // declaration is still visible to the `duplicate` pass via
         // `&Module`, so it isn't lost — it just doesn't leak into the
         // residual `args` map and contradict that field's documented
         // contract ("everything except size"). Non-`Size` values for `size=`
         // do fall through and end up in `args` so the type-mismatch pass
         // can flag them.
         if arg.key == "size"
-            && let Value::Size { w, h } = arg.value
+            && let ValueKind::Size { w, h } = &arg.value.kind
         {
             if size.is_none() {
-                size = Some(Size { w, h });
+                size = Some(Size {
+                    w: *w,
+                    h: *h,
+                    span: arg.value.span.clone(),
+                });
             }
             continue;
         }
-        args.insert(arg.key.clone(), arg.value.clone());
+        args.insert(
+            arg.key.clone(),
+            ValueWithSpan::from_value(arg.value.clone()),
+        );
     }
     HeaderBreakdown { size, args }
 }
@@ -175,27 +209,32 @@ fn lower_body(body: &[Statement]) -> MemberBody {
 fn push_statement(stmt: &Statement, out: &mut MemberBody) {
     match stmt {
         Statement::Generic { .. } => out.members.push(lower_member(stmt)),
-        Statement::Logic { lhs, rhs } => out.logic.push(LogicBinding {
+        Statement::Logic { lhs, rhs, span } => out.logic.push(LogicBinding {
             lhs: lhs.clone(),
             rhs: rhs.clone(),
+            span: span.clone(),
         }),
         Statement::AssertTruth {
             inputs,
             output,
             rows,
+            span,
         } => out.asserts.push(AssertIr::Truth {
             inputs: inputs.clone(),
             output: output.clone(),
             rows: rows.clone(),
+            span: span.clone(),
         }),
         Statement::AssertAlways {
             antecedent,
             consequent,
             within,
+            span,
         } => out.asserts.push(AssertIr::Always {
             antecedent: antecedent.clone(),
             consequent: consequent.clone(),
             within: *within,
+            span: span.clone(),
         }),
     }
 }
@@ -208,6 +247,7 @@ fn lower_member(stmt: &Statement) -> Member {
         args,
         binding,
         children,
+        span,
     } = stmt
     else {
         // push_statement is the only caller and dispatches on the variant
@@ -216,7 +256,7 @@ fn lower_member(stmt: &Statement) -> Member {
         // the body grouping instead of relying on a panic.
         let mut body = MemberBody::default();
         push_statement(stmt, &mut body);
-        return placeholder_member_carrying(body);
+        return placeholder_member_carrying(body, stmt.span().clone());
     };
 
     let role = role_of(keyword);
@@ -229,7 +269,7 @@ fn lower_member(stmt: &Statement) -> Member {
         // `id` / `class` / `mat_slot` are hoisted into dedicated `Member`
         // fields when the value is a plain label; anything that is not
         // label-shaped, or a second occurrence of the same key, stays in
-        // `intent_state` for the M2-PR2 passes to diagnose.
+        // `intent_state` for the `check` passes to diagnose.
         let hoisted = match arg.key.as_str() {
             "id" => hoist_label(&arg.value, &mut id),
             "class" => hoist_label(&arg.value, &mut class),
@@ -237,7 +277,10 @@ fn lower_member(stmt: &Statement) -> Member {
             _ => false,
         };
         if !hoisted {
-            intent_state.insert(arg.key.clone(), arg.value.clone());
+            intent_state.insert(
+                arg.key.clone(),
+                ValueWithSpan::from_value(arg.value.clone()),
+            );
         }
     }
 
@@ -255,6 +298,7 @@ fn lower_member(stmt: &Statement) -> Member {
         intent_state,
         resolved_state: None,
         children: lowered_children,
+        span: span.clone(),
     }
 }
 
@@ -264,7 +308,7 @@ fn lower_member(stmt: &Statement) -> Member {
 /// caller that ignores the dispatch contract still produces an inspectable
 /// IR rather than panicking, in line with the "lowering is total"
 /// invariant.
-fn placeholder_member_carrying(body: MemberBody) -> Member {
+fn placeholder_member_carrying(body: MemberBody, span: crate::error::Span) -> Member {
     Member {
         id: None,
         class: None,
@@ -276,16 +320,20 @@ fn placeholder_member_carrying(body: MemberBody) -> Member {
         intent_state: IntentState::new(),
         resolved_state: None,
         children: body,
+        span,
     }
 }
 
-fn args_to_map(args: &[Arg]) -> IndexMap<String, Value> {
+fn args_to_map(args: &[Arg]) -> IndexMap<String, ValueWithSpan> {
     let mut map = IndexMap::with_capacity(args.len());
     for arg in args {
-        // Last-write-wins on duplicate keys. The M2-PR2 `duplicate` pass
-        // walks the surface AST to detect repeats, so the IR's compacted
-        // shape here is intentional rather than load-bearing.
-        map.insert(arg.key.clone(), arg.value.clone());
+        // Last-write-wins on duplicate keys. The `duplicate` pass walks the
+        // surface AST to detect repeats, so the IR's compacted shape here is
+        // intentional rather than load-bearing.
+        map.insert(
+            arg.key.clone(),
+            ValueWithSpan::from_value(arg.value.clone()),
+        );
     }
     map
 }
@@ -303,8 +351,8 @@ fn hoist_label(value: &Value, slot: &mut Option<String>) -> bool {
     if slot.is_some() {
         return false;
     }
-    let label = match value {
-        Value::Ident(s) | Value::Str(s) => s.clone(),
+    let label = match &value.kind {
+        ValueKind::Ident(s) | ValueKind::Str(s) => s.clone(),
         _ => return false,
     };
     *slot = Some(label);
