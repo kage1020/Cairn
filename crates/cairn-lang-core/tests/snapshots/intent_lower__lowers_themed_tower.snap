@@ -1,0 +1,159 @@
+---
+source: crates/cairn-lang-core/tests/intent_lower.rs
+expression: "lower_example(\"themed-tower.crn\")"
+---
+semantic_level: grouped
+headers:
+  - kind: Cairn
+    version: "2026.06"
+  - kind: Requires
+    requirement: version>=1.20
+themes:
+  - name: keep_dark
+    slots:
+      floor:
+        kind: Token
+        value: floor.wood.broadleaf
+      wall:
+        kind: Token
+        value: wall.stone.cobble
+      trim:
+        kind: Token
+        value: wood.dark
+      roof:
+        kind: Token
+        value: roof.dark_wood
+    selectors: []
+defs: []
+sites: []
+structs:
+  - name: keep
+    size:
+      w: 11
+      h: 9
+    args: {}
+    members:
+      - id: base
+        role:
+          kind: Floor
+        mat_slot: floor
+        intent_state: {}
+      - id: shell
+        role:
+          kind: Walls
+        mat_slot: wall
+        intent_state:
+          height:
+            kind: Int
+            value: 5
+      - id: roof
+        role:
+          kind: Roof
+        mat_slot: roof
+        intent_state:
+          kind:
+            kind: Ident
+            value: gable
+          overhang:
+            kind: Int
+            value: 1
+      - id: floor1
+        role:
+          kind: Level
+        intent_state:
+          y:
+            kind: Int
+            value: 0
+        children:
+          members:
+            - id: entry
+              role:
+                kind: Door
+              intent_state:
+                side:
+                  kind: Ident
+                  value: front
+                at:
+                  kind: Ident
+                  value: center
+            - id: front_window
+              role:
+                kind: Window
+              mat_slot: trim
+              intent_state:
+                side:
+                  kind: Ident
+                  value: front
+                y:
+                  kind: Int
+                  value: 2
+                offset:
+                  kind: Int
+                  value: 2
+                size:
+                  kind: Size
+                  value:
+                    w: 2
+                    h: 2
+      - id: floor2
+        role:
+          kind: Level
+        intent_state:
+          y:
+            kind: Int
+            value: 5
+        children:
+          members:
+            - id: upper
+              class: outer
+              role:
+                kind: Walls
+              mat_slot: wall
+              intent_state:
+                height:
+                  kind: Int
+                  value: 4
+            - class: arrow_slit
+              role:
+                kind: Window
+              intent_state:
+                side:
+                  kind: Ident
+                  value: front
+                repeat:
+                  kind: Int
+                  value: 3
+                step:
+                  kind: Int
+                  value: 2
+                y:
+                  kind: Int
+                  value: 2
+                size:
+                  kind: Size
+                  value:
+                    w: 1
+                    h: 2
+                shape:
+                  kind: Ident
+                  value: slit
+            - id: eave
+              role:
+                kind: Stair
+              mat_slot: roof
+              intent_state:
+                kind:
+                  kind: Ident
+                  value: stairs
+                side:
+                  kind: Ident
+                  value: front
+                half:
+                  kind: Ident
+                  value: top
+                facing:
+                  kind: Ident
+                  value: out
+                shape:
+                  kind: Ident
+                  value: outer_left

@@ -1,0 +1,174 @@
+---
+source: crates/cairn-lang-core/tests/intent_lower.rs
+expression: "lower_example(\"village.crn\")"
+---
+semantic_level: grouped
+headers:
+  - kind: Cairn
+    version: "2026.06"
+  - kind: Requires
+    requirement: version>=1.20
+themes:
+  - name: medieval
+    slots:
+      floor:
+        kind: Token
+        value: oak_planks
+      wall:
+        kind: Token
+        value: cobblestone
+      roof:
+        kind: Token
+        value: spruce_stairs
+      glass:
+        kind: Token
+        value: glass_pane
+    selectors: []
+defs:
+  - name: cottage
+    size:
+      w: 9
+      h: 7
+    args:
+      class:
+        kind: Ident
+        value: house
+    members:
+      - id: floor
+        role:
+          kind: Floor
+        mat_slot: floor
+        intent_state: {}
+      - id: walls
+        class: outer
+        role:
+          kind: Walls
+        mat_slot: wall
+        intent_state:
+          height:
+            kind: Int
+            value: 4
+      - id: entry
+        class: entry
+        role:
+          kind: Door
+        intent_state:
+          side:
+            kind: Ident
+            value: front
+          at:
+            kind: Ident
+            value: center
+      - id: front
+        role:
+          kind: Window
+        mat_slot: glass
+        intent_state:
+          side:
+            kind: Ident
+            value: front
+          y:
+            kind: Int
+            value: 2
+          offset:
+            kind: Int
+            value: 2
+          size:
+            kind: Size
+            value:
+              w: 2
+              h: 2
+      - id: roof
+        role:
+          kind: Roof
+        mat_slot: roof
+        intent_state:
+          kind:
+            kind: Ident
+            value: gable
+          overhang:
+            kind: Int
+            value: 1
+sites:
+  - name: hamlet
+    placements:
+      - id: home1
+        role:
+          kind: Place
+        intent_state:
+          use:
+            kind: Ident
+            value: cottage
+          theme:
+            kind: Ident
+            value: medieval
+          at:
+            kind: Ident
+            value: origin
+      - id: home2
+        role:
+          kind: Place
+        intent_state:
+          use:
+            kind: Ident
+            value: cottage
+          theme:
+            kind: Ident
+            value: medieval
+          east_of:
+            kind: Ident
+            value: home1
+          gap:
+            kind: Int
+            value: 4
+      - id: home3
+        role:
+          kind: Place
+        intent_state:
+          use:
+            kind: Ident
+            value: cottage
+          theme:
+            kind: Ident
+            value: medieval
+          north_of:
+            kind: Ident
+            value: home1
+          gap:
+            kind: Int
+            value: 5
+      - role:
+          kind: Connect
+        positional:
+          - kind: DotRef
+            value:
+              - home1
+              - entry
+          - kind: Ident
+            value: to
+          - kind: DotRef
+            value:
+              - home2
+              - entry
+        intent_state:
+          path:
+            kind: Token
+            value: gravel
+      - role:
+          kind: Connect
+        positional:
+          - kind: DotRef
+            value:
+              - home1
+              - entry
+          - kind: Ident
+            value: to
+          - kind: DotRef
+            value:
+              - home3
+              - entry
+        intent_state:
+          path:
+            kind: Token
+            value: gravel
+structs: []

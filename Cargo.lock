@@ -77,6 +77,7 @@ dependencies = [
 name = "cairn-lang-core"
 version = "0.0.0"
 dependencies = [
+ "indexmap",
  "insta",
  "serde",
  "thiserror",
