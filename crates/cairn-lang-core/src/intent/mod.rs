@@ -29,7 +29,7 @@ use crate::ast::{DottedRef, Expr, Header, TruthRow, Value};
 
 pub use self::keyword_table::role_of;
 pub use self::lower::lower;
-pub use self::member::{IntentState, Member, MemberRole, ResolvedState};
+pub use self::member::{IntentState, Member, MemberBody, MemberRole, ResolvedState};
 pub use self::semantic_level::SemanticLevel;
 
 /// Intent IR for a whole `.crn` module.

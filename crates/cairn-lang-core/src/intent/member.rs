@@ -6,10 +6,14 @@
 //! reserves a [`ResolvedState`] slot that M3 fills in once materials and
 //! themes resolve.
 
+use std::ops::{Deref, DerefMut};
+
 use indexmap::IndexMap;
 use serde::Serialize;
 
 use crate::ast::Value;
+
+use super::{AssertIr, LogicBinding};
 
 /// One named member produced by lowering a body statement.
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -51,16 +55,29 @@ pub struct Member {
     /// `Grouped`; populated by the M3 lift pass.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub resolved_state: Option<ResolvedState>,
-    /// Nested members from indented child statements (e.g. members declared
-    /// under a `level y=...` block).
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub children: Vec<Member>,
+    /// Nested body indented under this member.
+    ///
+    /// A `level y=...` (or any other grouping keyword) may declare further
+    /// members, `logic` bindings, and `assert` properties beneath it. Holding
+    /// the children as a [`MemberBody`] — the same triple the top-level IR
+    /// uses — keeps each of those three statement flavours addressable
+    /// instead of forcing the caller to either reject or silently drop the
+    /// non-member ones. M2's `lower` is total, so the only structural
+    /// invariant maintained here is "children sit in their declaration
+    /// order, grouped by kind".
+    #[serde(default, skip_serializing_if = "MemberBody::is_empty")]
+    pub children: MemberBody,
 }
 
 /// Coarse classification of a member, derived from its source keyword.
+///
+/// Not marked `#[non_exhaustive]` on purpose: the [`MemberRole::Other`]
+/// variant already forces every external `match` to handle the "any keyword
+/// we don't know" case, so a non-exhaustive marker would only suppress the
+/// internal exhaustiveness check we rely on to catch missed updates when a
+/// new keyword is added to the M2 roster.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(tag = "kind", content = "value")]
-#[non_exhaustive]
 pub enum MemberRole {
     /// `floor` command.
     Floor,
@@ -89,11 +106,42 @@ pub enum MemberRole {
     Other(String),
 }
 
+/// Sub-body indented under a [`Member`] (typically a `level y=...` block).
+///
+/// Mirrors the three statement flavours [`super::StructIr`] groups at the
+/// top level: ordinary member commands, `logic` bindings, and `assert`
+/// properties. Defined as a struct rather than a `Vec` of one big sum so a
+/// `level` block whose body mixes all three flavours lowers without losing
+/// any of them (spec lint.md §11.2 forbids silent dropping).
+#[derive(Debug, Clone, Default, PartialEq, Serialize)]
+pub struct MemberBody {
+    /// Nested members in declaration order.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub members: Vec<Member>,
+    /// `logic` bindings declared inside the sub-body.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub logic: Vec<LogicBinding>,
+    /// `assert` properties declared inside the sub-body.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub asserts: Vec<AssertIr>,
+}
+
+impl MemberBody {
+    /// `true` when no members, logic bindings, or asserts have been added.
+    /// Used to elide empty bodies from snapshot output.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.members.is_empty() && self.logic.is_empty() && self.asserts.is_empty()
+    }
+}
+
 /// Raw `key=value` attributes attached to a [`Member`].
 ///
 /// Stored as an [`IndexMap`] so source order is preserved — diagnostic
 /// messages emitted in later M2 PRs need stable positions, and any
-/// snapshot-based test would otherwise flake.
+/// snapshot-based test would otherwise flake. `Deref` / `DerefMut` against
+/// the underlying map let callers write `state.insert(...)` /
+/// `state.contains_key(...)` without threading through a `.fields` accessor.
 #[derive(Debug, Clone, Default, PartialEq, Serialize)]
 #[serde(transparent)]
 pub struct IntentState {
@@ -110,13 +158,42 @@ impl IntentState {
     }
 }
 
+impl Deref for IntentState {
+    type Target = IndexMap<String, Value>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.fields
+    }
+}
+
+impl DerefMut for IntentState {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.fields
+    }
+}
+
 /// Resolved, per-edition blockstate for a [`Member`].
 ///
 /// Empty in M2 — only the shape is fixed so M3's lift pass can populate
-/// concrete state without a breaking change.
+/// concrete state without a breaking change. Uses the same `Deref` /
+/// `DerefMut` ergonomics as [`IntentState`].
 #[derive(Debug, Clone, Default, PartialEq, Serialize)]
 #[serde(transparent)]
 pub struct ResolvedState {
     /// Resolved state fields in source-stable order.
     pub fields: IndexMap<String, Value>,
+}
+
+impl Deref for ResolvedState {
+    type Target = IndexMap<String, Value>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.fields
+    }
+}
+
+impl DerefMut for ResolvedState {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.fields
+    }
 }

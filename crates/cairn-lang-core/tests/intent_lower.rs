@@ -137,9 +137,80 @@ fn level_block_recursively_lowers_its_children() {
     );
     let level = &ir.structs[0].members[0];
     assert!(matches!(level.role, MemberRole::Level));
-    assert_eq!(level.children.len(), 2, "two child members expected");
-    assert!(matches!(level.children[0].role, MemberRole::Floor));
-    assert!(matches!(level.children[1].role, MemberRole::Walls));
+    assert_eq!(
+        level.children.members.len(),
+        2,
+        "two nested members expected"
+    );
+    assert!(matches!(level.children.members[0].role, MemberRole::Floor));
+    assert!(matches!(level.children.members[1].role, MemberRole::Walls));
+    assert!(
+        level.children.logic.is_empty() && level.children.asserts.is_empty(),
+        "no logic / assert in this fixture"
+    );
+}
+
+#[test]
+fn level_block_keeps_nested_logic_and_asserts() {
+    // Regression for the PR #20 review: a nested `logic` or `assert` used
+    // to either panic via `unreachable!()` or be silently dropped because
+    // `Member.children` was `Vec<Member>`. The MemberBody shape preserves
+    // all three statement flavours.
+    let src = "\
+struct gate size=3x3
+  level y=0
+    pressure_plate id=plate at=front.outside -> sig.step
+    logic sig.open = sig.step
+    assert always(sig.step -> eventually sig.open within 2)
+";
+    let ir = lower_source(src);
+    let level = &ir.structs[0].members[0];
+    assert!(matches!(level.role, MemberRole::Level));
+    assert_eq!(level.children.members.len(), 1);
+    assert_eq!(level.children.logic.len(), 1);
+    assert_eq!(level.children.asserts.len(), 1);
+}
+
+#[test]
+fn duplicate_size_does_not_leak_into_residual_args() {
+    // Regression for the PR #20 review: a repeated `size=` used to land in
+    // `StructIr::args`, contradicting that field's documented "everything
+    // except size" contract.
+    let ir = lower_source("struct s size=4x4 size=5x5\n  floor\n");
+    let s = &ir.structs[0];
+    let size = s.size.expect("first size= still hoists");
+    assert_eq!(size.w.get(), 4);
+    assert_eq!(size.h.get(), 4);
+    assert!(
+        !s.args.contains_key("size"),
+        "duplicate size= must not leak into residual args"
+    );
+}
+
+#[test]
+fn token_and_dotref_are_not_hoisted_into_label_fields() {
+    // Regression for the PR #20 review: hoist_label used to accept Token
+    // and DotRef silently, swallowing diagnostics the M2-PR2 type-mismatch
+    // pass needs to report.
+    let ir = lower_source("struct s size=1x1\n  walls id=@oak class=foo.bar mat_slot=wall\n");
+    let member = &ir.structs[0].members[0];
+    assert!(
+        member.id.is_none(),
+        "@token must not coerce into a string id"
+    );
+    assert!(
+        member.class.is_none(),
+        "dotted refs must not coerce into a string class"
+    );
+    assert_eq!(
+        member.mat_slot.as_deref(),
+        Some("wall"),
+        "plain idents still hoist"
+    );
+    assert!(
+        member.intent_state.contains_key("id") && member.intent_state.contains_key("class"),
+        "unhoisted id/class values must stay in intent_state for the PR2 mismatch pass"
+    );
 }
 
 #[test]

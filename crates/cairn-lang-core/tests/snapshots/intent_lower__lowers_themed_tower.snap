@@ -65,35 +65,36 @@ structs:
             kind: Int
             value: 0
         children:
-          - id: entry
-            role:
-              kind: Door
-            intent_state:
-              side:
-                kind: Ident
-                value: front
-              at:
-                kind: Ident
-                value: center
-          - id: front_window
-            role:
-              kind: Window
-            mat_slot: trim
-            intent_state:
-              side:
-                kind: Ident
-                value: front
-              y:
-                kind: Int
-                value: 2
-              offset:
-                kind: Int
-                value: 2
-              size:
-                kind: Size
-                value:
-                  w: 2
-                  h: 2
+          members:
+            - id: entry
+              role:
+                kind: Door
+              intent_state:
+                side:
+                  kind: Ident
+                  value: front
+                at:
+                  kind: Ident
+                  value: center
+            - id: front_window
+              role:
+                kind: Window
+              mat_slot: trim
+              intent_state:
+                side:
+                  kind: Ident
+                  value: front
+                y:
+                  kind: Int
+                  value: 2
+                offset:
+                  kind: Int
+                  value: 2
+                size:
+                  kind: Size
+                  value:
+                    w: 2
+                    h: 2
       - id: floor2
         role:
           kind: Level
@@ -102,56 +103,57 @@ structs:
             kind: Int
             value: 5
         children:
-          - id: upper
-            class: outer
-            role:
-              kind: Walls
-            mat_slot: wall
-            intent_state:
-              height:
-                kind: Int
-                value: 4
-          - class: arrow_slit
-            role:
-              kind: Window
-            intent_state:
-              side:
-                kind: Ident
-                value: front
-              repeat:
-                kind: Int
-                value: 3
-              step:
-                kind: Int
-                value: 2
-              y:
-                kind: Int
-                value: 2
-              size:
-                kind: Size
-                value:
-                  w: 1
-                  h: 2
-              shape:
-                kind: Ident
-                value: slit
-          - id: eave
-            role:
-              kind: Stair
-            mat_slot: roof
-            intent_state:
-              kind:
-                kind: Ident
-                value: stairs
-              side:
-                kind: Ident
-                value: front
-              half:
-                kind: Ident
-                value: top
-              facing:
-                kind: Ident
-                value: out
-              shape:
-                kind: Ident
-                value: outer_left
+          members:
+            - id: upper
+              class: outer
+              role:
+                kind: Walls
+              mat_slot: wall
+              intent_state:
+                height:
+                  kind: Int
+                  value: 4
+            - class: arrow_slit
+              role:
+                kind: Window
+              intent_state:
+                side:
+                  kind: Ident
+                  value: front
+                repeat:
+                  kind: Int
+                  value: 3
+                step:
+                  kind: Int
+                  value: 2
+                y:
+                  kind: Int
+                  value: 2
+                size:
+                  kind: Size
+                  value:
+                    w: 1
+                    h: 2
+                shape:
+                  kind: Ident
+                  value: slit
+            - id: eave
+              role:
+                kind: Stair
+              mat_slot: roof
+              intent_state:
+                kind:
+                  kind: Ident
+                  value: stairs
+                side:
+                  kind: Ident
+                  value: front
+                half:
+                  kind: Ident
+                  value: top
+                facing:
+                  kind: Ident
+                  value: out
+                shape:
+                  kind: Ident
+                  value: outer_left
