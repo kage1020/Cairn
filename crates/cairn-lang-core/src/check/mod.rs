@@ -30,17 +30,25 @@ pub use sink::DiagnosticSink;
 use crate::ast::Module;
 use crate::intent::IntentModule;
 
-/// Run every M2-PR2 validation pass over the given module + IR and collect
-/// all findings.
+/// Run every validation pass over the given module + IR and collect all
+/// findings.
 ///
 /// Passes run unconditionally; none short-circuit, none depend on another's
 /// findings being empty. The returned list is sorted by `(span.start,
 /// span.end)` so consumers can stream it line-by-line.
+///
+/// M2-PR3 adds a final theme-binding pass via [`crate::resolve::resolve`];
+/// its diagnostics (`E_UNRESOLVED_SLOT`, `E_UNKNOWN_SLOT_TARGET`,
+/// `E_THEME_SELECTOR_UNMATCHED`) are merged with the syntactic findings so a
+/// single `cairn check` invocation reports both kinds together.
 #[must_use]
 pub fn check(module: &Module, ir: &IntentModule) -> Vec<Diagnostic> {
     let mut sink = DiagnosticSink::new();
     duplicate::run(module, &mut sink);
     keyword_allowlist::run(ir, &mut sink);
     type_mismatch::run(module, &mut sink);
+    for d in crate::resolve::resolve(ir).diagnostics {
+        sink.push(d);
+    }
     sink.into_sorted()
 }

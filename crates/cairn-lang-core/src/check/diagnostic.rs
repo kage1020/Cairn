@@ -59,6 +59,13 @@ pub enum DiagnosticCode {
     TypeMismatchLabel,
     /// `size=` whose value is not a `WxH` literal.
     TypeMismatchSize,
+    /// `mat_slot=NAME` references a slot the applied theme does not declare.
+    UnresolvedSlot,
+    /// `slot NAME -> VALUE` whose VALUE is neither a canonical nor an
+    /// abstract material token (see `spec/materials-themes.md` §7.2).
+    UnknownSlotTarget,
+    /// `theme` selector rule that does not match any member in the file.
+    ThemeSelectorUnmatched,
 }
 
 impl DiagnosticCode {
@@ -75,15 +82,32 @@ impl DiagnosticCode {
             Self::UnknownKeyword => "E_UNKNOWN_KEYWORD",
             Self::TypeMismatchLabel => "E_TYPE_MISMATCH_LABEL",
             Self::TypeMismatchSize => "E_TYPE_MISMATCH_SIZE",
+            Self::UnresolvedSlot => "E_UNRESOLVED_SLOT",
+            Self::UnknownSlotTarget => "E_UNKNOWN_SLOT_TARGET",
+            Self::ThemeSelectorUnmatched => "E_THEME_SELECTOR_UNMATCHED",
         }
     }
 
-    /// Severity assigned to this code. Every M2-PR2 code is an error; the
-    /// method exists so future warning-severity codes can attach without a
-    /// separate lookup table.
+    /// Severity assigned to this code.
+    ///
+    /// M2-PR2 codes are all `Error` (silent-substitution-style problems that
+    /// would otherwise feed bad data into later passes). M2-PR3 adds two
+    /// `Warning` codes for theme-binding hygiene that does not block a build
+    /// (`E_UNKNOWN_SLOT_TARGET`, `E_THEME_SELECTOR_UNMATCHED`); see
+    /// `spec/lint.md` §11.2 for the error-vs-warning rule.
     #[must_use]
     pub fn severity(self) -> Severity {
-        Severity::Error
+        match self {
+            Self::DuplicateSize
+            | Self::DuplicateSlot
+            | Self::DuplicateArg
+            | Self::DuplicateId
+            | Self::UnknownKeyword
+            | Self::TypeMismatchLabel
+            | Self::TypeMismatchSize
+            | Self::UnresolvedSlot => Severity::Error,
+            Self::UnknownSlotTarget | Self::ThemeSelectorUnmatched => Severity::Warning,
+        }
     }
 }
 
@@ -306,6 +330,9 @@ mod tests {
 
     #[test]
     fn code_as_str_round_trips_for_every_variant() {
+        // Every code's string form starts with `E_`; the prefix is part of
+        // the diagnostic contract surface and downstream matchers depend on
+        // it. Severity expectations live in `code_severity_matches_spec`.
         for code in [
             DiagnosticCode::DuplicateSize,
             DiagnosticCode::DuplicateSlot,
@@ -314,13 +341,39 @@ mod tests {
             DiagnosticCode::UnknownKeyword,
             DiagnosticCode::TypeMismatchLabel,
             DiagnosticCode::TypeMismatchSize,
+            DiagnosticCode::UnresolvedSlot,
+            DiagnosticCode::UnknownSlotTarget,
+            DiagnosticCode::ThemeSelectorUnmatched,
         ] {
             let s = code.as_str();
             assert!(
                 s.starts_with("E_"),
                 "code {code:?} should render to an E_-prefixed string, got {s}",
             );
-            assert_eq!(code.severity(), Severity::Error, "M2-PR2 codes are errors");
+        }
+    }
+
+    #[test]
+    fn code_severity_matches_spec() {
+        // Errors block a build; warnings are advisory. The split here mirrors
+        // `spec/lint.md` §11.2.
+        for code in [
+            DiagnosticCode::DuplicateSize,
+            DiagnosticCode::DuplicateSlot,
+            DiagnosticCode::DuplicateArg,
+            DiagnosticCode::DuplicateId,
+            DiagnosticCode::UnknownKeyword,
+            DiagnosticCode::TypeMismatchLabel,
+            DiagnosticCode::TypeMismatchSize,
+            DiagnosticCode::UnresolvedSlot,
+        ] {
+            assert_eq!(code.severity(), Severity::Error, "{code:?}");
+        }
+        for code in [
+            DiagnosticCode::UnknownSlotTarget,
+            DiagnosticCode::ThemeSelectorUnmatched,
+        ] {
+            assert_eq!(code.severity(), Severity::Warning, "{code:?}");
         }
     }
 

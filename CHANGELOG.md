@@ -17,6 +17,29 @@ placeholder cannot leak out. The `2026.07.0` release PR will flip publish to `tr
 
 ### Added
 
+- `cairn info <file>` CLI subcommand reports the three version axes for a
+  `.crn` source — registry-compatible range, per-edition portability, and
+  semantic-sensitive members — as defined in `spec/versioning-editions.md`
+  §10.5. `--editions java,bedrock` controls which editions appear (default
+  `java,bedrock`); `--format text|json` switches between the human report
+  and a `VersionAxes` JSON payload. M2-PR3 derives the registry range from
+  `@requires version>=X` headers; portability and semantic-sensitivity
+  catalog data land with the registry pack (2026.12.0).
+- `cairn_lang_core::resolve` module — semantic layer over the Intent IR.
+  Walks every `theme`, `def`, `struct`, and `site` to produce a
+  `Resolution` that pairs each `mat_slot=NAME` with its theme's
+  `slot NAME -> VALUE`, matches theme selectors against members, and
+  classifies slot targets as canonical or abstract material tokens
+  (`spec/materials-themes.md` §7.2). `cairn check` now runs `resolve()`
+  as part of its pipeline so theme-binding hygiene shows up alongside
+  syntactic findings.
+- Three new diagnostic codes: `E_UNRESOLVED_SLOT` (Error; `mat_slot=`
+  references a slot the applied theme does not declare),
+  `E_UNKNOWN_SLOT_TARGET` (Warning; `slot X -> VALUE` where `VALUE` is
+  neither a canonical nor an abstract token), and
+  `E_THEME_SELECTOR_UNMATCHED` (Warning; selector binds to no member).
+  `DiagnosticCode::severity()` now matches per variant rather than
+  returning `Error` unconditionally.
 - `cairn check` CLI subcommand and `cairn_lang_core::check` module collect
   syntactic validation findings without short-circuiting and emit them in
   gcc-style `file:line:col: error[CODE]: message` form (or pretty JSON via
