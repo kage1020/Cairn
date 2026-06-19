@@ -5,6 +5,7 @@ use std::process::ExitCode;
 
 use cairn_lang_core::CAIRN_VERSION;
 use cairn_lang_core::check::LineStarts;
+use cairn_lang_core::resolve::{VersionAxes, compute_axes, resolve};
 use cairn_lang_core::{Severity, check, lower, parse};
 use clap::{Parser, Subcommand, ValueEnum};
 
@@ -42,6 +43,22 @@ enum Command {
         #[arg(long, value_enum, default_value_t = CheckFormat::Text)]
         format: CheckFormat,
     },
+    /// Report the three version axes (registry-compatible range, edition
+    /// portability, semantic-sensitive members) for a .crn source file.
+    /// Exits 0 on success, 1 on parse failure, 2 when the file cannot be
+    /// located.
+    Info {
+        /// Path to the .crn file to inspect.
+        file: PathBuf,
+        /// Comma-separated editions to evaluate portability against. Each
+        /// edition produces one entry in the output's `edition portability`
+        /// section.
+        #[arg(long, value_delimiter = ',', default_values_t = vec!["java".to_owned(), "bedrock".to_owned()])]
+        editions: Vec<String>,
+        /// Output format for the report.
+        #[arg(long, value_enum, default_value_t = InfoFormat::Text)]
+        format: InfoFormat,
+    },
 }
 
 #[derive(Copy, Clone, ValueEnum)]
@@ -60,11 +77,24 @@ enum CheckFormat {
     Json,
 }
 
+#[derive(Copy, Clone, ValueEnum)]
+enum InfoFormat {
+    /// Multi-line human report mirroring `spec/versioning-editions.md` §10.5.
+    Text,
+    /// Pretty JSON serialisation of `VersionAxes`, for tools.
+    Json,
+}
+
 fn main() -> ExitCode {
     let cli = Cli::parse();
     match cli.command {
         Some(Command::Parse { file, format }) => run_parse(&file, format),
         Some(Command::Check { file, format }) => run_check(&file, format),
+        Some(Command::Info {
+            file,
+            editions,
+            format,
+        }) => run_info(&file, &editions, format),
         None => {
             eprintln!("error: a subcommand is required (try `cairn --help`)");
             ExitCode::from(2)
@@ -204,5 +234,113 @@ fn run_check(file: &Path, format: CheckFormat) -> ExitCode {
         ExitCode::from(1)
     } else {
         ExitCode::SUCCESS
+    }
+}
+
+fn run_info(file: &Path, editions: &[String], format: InfoFormat) -> ExitCode {
+    let source = match std::fs::read_to_string(file) {
+        Ok(s) => s,
+        Err(err) => {
+            eprintln!("error: cannot read `{}`: {err}", file.display());
+            return match err.kind() {
+                std::io::ErrorKind::NotFound => ExitCode::from(2),
+                _ => ExitCode::from(1),
+            };
+        }
+    };
+    let module = match parse(&source) {
+        Ok(m) => m,
+        Err(err) => {
+            eprintln!(
+                "error: {}:{}: {}",
+                file.display(),
+                err.position(),
+                err.user_message(),
+            );
+            return ExitCode::from(1);
+        }
+    };
+    let ir = lower(&module);
+    let resolution = resolve(&ir);
+    let axes = compute_axes(&module, &ir, &resolution, editions);
+
+    match format {
+        InfoFormat::Text => {
+            print_text(&axes);
+            ExitCode::SUCCESS
+        }
+        InfoFormat::Json => match serde_json::to_string_pretty(&axes) {
+            Ok(json) => {
+                println!("{json}");
+                ExitCode::SUCCESS
+            }
+            Err(err) => {
+                eprintln!("error: failed to serialise version axes as JSON: {err}");
+                ExitCode::from(1)
+            }
+        },
+    }
+}
+
+fn print_text(axes: &VersionAxes) {
+    // Axis 1: registry-compatible range, with one entry per requested
+    // edition so the human eye can match it against the portability table
+    // below — the underlying min/max is currently identical across
+    // editions (registry pack arrives in 2026.12.0), but the format is
+    // ready for per-edition divergence without a parsing change.
+    let editions_line = if axes.edition_portability.is_empty() {
+        String::from("(no editions requested)")
+    } else {
+        axes.edition_portability
+            .iter()
+            .map(|ep| {
+                format!(
+                    "{}: {} .. {}",
+                    capitalise(&ep.edition),
+                    axes.registry_compat.min,
+                    axes.registry_compat.max,
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("   ")
+    };
+    println!("registry compatibility:  {editions_line}");
+
+    let portability_line = if axes.edition_portability.is_empty() {
+        String::from("(no editions requested)")
+    } else {
+        axes.edition_portability
+            .iter()
+            .map(|ep| {
+                format!(
+                    "{}: portable: {}  degraded: {}  unsupported: {}",
+                    capitalise(&ep.edition),
+                    ep.portable,
+                    ep.degraded,
+                    ep.unsupported,
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("   ")
+    };
+    println!("edition portability:     {portability_line}");
+
+    let semantic_line = if axes.semantic_sensitive.is_empty() {
+        String::from("(none)")
+    } else {
+        axes.semantic_sensitive
+            .iter()
+            .map(|f| format!("{}({} @{})", f.member, f.reason, f.boundary_version))
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+    println!("semantic-sensitive:      {semantic_line}");
+}
+
+fn capitalise(s: &str) -> String {
+    let mut chars = s.chars();
+    match chars.next() {
+        Some(c) => c.to_uppercase().collect::<String>() + chars.as_str(),
+        None => String::new(),
     }
 }

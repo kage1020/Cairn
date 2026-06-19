@@ -19,6 +19,23 @@
 
 ### Added
 
+- `cairn info <file>` CLI サブコマンドが `.crn` ソースに対する 3 軸のバージョン情報
+  (registry-compatible range、edition 間ポータビリティ、semantic-sensitive members) を
+  出力する。`spec/versioning-editions.md` §10.5 のサンプル形式に準拠。
+  `--editions java,bedrock` で対象エディションを制御 (デフォルト `java,bedrock`)、
+  `--format text|json` で人間向けレポートと `VersionAxes` JSON を切り替え。M2-PR3 では
+  registry range を `@requires version>=X` ヘッダから導出。ポータビリティと
+  semantic-sensitivity catalog のデータは registry pack (2026.12.0) と同時に投入予定。
+- `cairn_lang_core::resolve` モジュール — Intent IR 上のセマンティックレイヤ。
+  `theme` / `def` / `struct` / `site` を走査し、各 `mat_slot=NAME` を theme の
+  `slot NAME -> VALUE` と束ね、theme セレクタとメンバを照合し、slot ターゲットを
+  canonical / abstract material token として分類する (`spec/materials-themes.md` §7.2)。
+  `cairn check` はこの `resolve()` をパイプライン末尾で実行し、theme 束縛の問題を
+  構文 diagnostic と並べて報告する。
+- 新規 diagnostic コード 3 種: `E_UNRESOLVED_SLOT` (Error; 適用 theme に存在しないスロット
+  への `mat_slot=` 参照)、`E_UNKNOWN_SLOT_TARGET` (Warning; `slot X -> VALUE` の VALUE が
+  canonical でも abstract でもない)、`E_THEME_SELECTOR_UNMATCHED` (Warning; どのメンバとも
+  マッチしないセレクタ)。`DiagnosticCode::severity()` は variant 毎の判定に変更。
 - コアモデル: 意図を宣言し、コンパイラがブロックステート、座標、物理を解決する。
 - 三層 IR (Intent → Semantic/Theme → block-array pivot)、フェーズ順評価。
 - 構文: 先頭キーワード + 必須の `key=value`、セレクタ、任意ヘッダ (`@cairn`, `@requires`,
