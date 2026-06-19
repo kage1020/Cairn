@@ -1,0 +1,4 @@
+struct s size=4x4 size=5x5
+  walls height=4 height=5
+  door id=front
+  door id=front

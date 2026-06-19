@@ -11,7 +11,7 @@
 
 use crate::ast::{
     Arg, DottedRef, Expr, Header, Item, Module, RawRequirement, RawVersion, Statement, ThemeRule,
-    TruthRow, Value,
+    TruthRow, Value, ValueKind,
 };
 use crate::error::{IntContext, ParseError, Position};
 use crate::lex::{Token, TokenKind, lex};
@@ -58,6 +58,7 @@ impl<'a> Parser<'a> {
 
     fn parse_header(&mut self) -> Result<Header, ParseError> {
         let position = self.position();
+        let start_byte = self.current_byte();
         self.expect(&TokenKind::At)?;
         let name = self.expect_ident()?;
         let value_start_pos = self.position();
@@ -73,6 +74,7 @@ impl<'a> Parser<'a> {
         let raw = self.source[value_start_byte..value_end_byte]
             .trim()
             .to_owned();
+        let span = start_byte..value_end_byte;
         self.expect_newline()?;
         if raw.is_empty() {
             return Err(ParseError::Syntax {
@@ -83,9 +85,11 @@ impl<'a> Parser<'a> {
         match name.as_str() {
             "cairn" => Ok(Header::Cairn {
                 version: RawVersion::new(raw),
+                span,
             }),
             "requires" => Ok(Header::Requires {
                 requirement: RawRequirement::new(raw),
+                span,
             }),
             "intended_targets" => {
                 // Re-parse the raw value as a list of strings.
@@ -99,11 +103,11 @@ impl<'a> Parser<'a> {
                         message: "@intended_targets has trailing tokens after the list".into(),
                     });
                 }
-                let targets = match value {
-                    Value::List(items) => items
+                let targets = match value.kind {
+                    ValueKind::List(items) => items
                         .into_iter()
-                        .map(|v| match v {
-                            Value::Str(s) => Ok(s),
+                        .map(|v| match v.kind {
+                            ValueKind::Str(s) => Ok(s),
                             other => Err(ParseError::Syntax {
                                 position: value_start_pos,
                                 message: format!(
@@ -119,7 +123,7 @@ impl<'a> Parser<'a> {
                         });
                     }
                 };
-                Ok(Header::IntendedTargets { targets })
+                Ok(Header::IntendedTargets { targets, span })
             }
             other => Err(ParseError::Syntax {
                 position,
@@ -130,12 +134,13 @@ impl<'a> Parser<'a> {
 
     fn parse_item(&mut self) -> Result<Item, ParseError> {
         let position = self.position();
+        let start_byte = self.current_byte();
         let kw = self.expect_ident()?;
         match kw.as_str() {
-            "theme" => self.parse_theme_item(),
-            "def" => self.parse_def_item(),
-            "site" => self.parse_site_item(),
-            "struct" => self.parse_struct_item(),
+            "theme" => self.parse_theme_item(start_byte),
+            "def" => self.parse_def_item(start_byte),
+            "site" => self.parse_site_item(start_byte),
+            "struct" => self.parse_struct_item(start_byte),
             other => Err(ParseError::Syntax {
                 position,
                 message: format!(
@@ -145,7 +150,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn parse_theme_item(&mut self) -> Result<Item, ParseError> {
+    fn parse_theme_item(&mut self, start_byte: usize) -> Result<Item, ParseError> {
         let name = self.expect_ident()?;
         self.consume_optional_colon();
         self.expect_newline()?;
@@ -162,18 +167,21 @@ impl<'a> Parser<'a> {
         } else {
             Vec::new()
         };
-        Ok(Item::Theme { name, body })
+        let span = start_byte..self.last_content_byte();
+        Ok(Item::Theme { name, body, span })
     }
 
     fn parse_theme_rule(&mut self) -> Result<ThemeRule, ParseError> {
         let position = self.position();
+        let start_byte = self.current_byte();
         let kw = self.expect_ident()?;
         if kw == "slot" {
             let slot = self.expect_ident()?;
             self.expect(&TokenKind::Arrow)?;
             let value = self.parse_value()?;
+            let span = start_byte..self.last_byte();
             self.expect_newline()?;
-            return Ok(ThemeRule::Slot { slot, value });
+            return Ok(ThemeRule::Slot { slot, value, span });
         }
         // Selector form: KEYWORD '[' attrs ']' '->' key=value (key=value)*
         let attrs = if self.peek_is(&TokenKind::LBracket) {
@@ -192,38 +200,53 @@ impl<'a> Parser<'a> {
         while !self.peek_is(&TokenKind::Newline) && !self.at_eof() {
             bindings.push(self.parse_arg()?);
         }
+        let span = start_byte..self.last_byte();
         self.expect_newline()?;
         Ok(ThemeRule::Selector {
             keyword: kw,
             attrs,
             bindings,
+            span,
         })
     }
 
-    fn parse_def_item(&mut self) -> Result<Item, ParseError> {
+    fn parse_def_item(&mut self, start_byte: usize) -> Result<Item, ParseError> {
         let name = self.expect_ident()?;
         let args = self.parse_header_args_until_eol()?;
         self.consume_optional_colon();
         self.expect_newline()?;
         let body = self.parse_optional_command_body()?;
-        Ok(Item::Def { name, args, body })
+        let span = start_byte..self.last_content_byte();
+        Ok(Item::Def {
+            name,
+            args,
+            body,
+            span,
+        })
     }
 
-    fn parse_site_item(&mut self) -> Result<Item, ParseError> {
+    fn parse_site_item(&mut self, start_byte: usize) -> Result<Item, ParseError> {
         let name = self.expect_ident()?;
         self.consume_optional_colon();
         self.expect_newline()?;
         let body = self.parse_optional_command_body()?;
-        Ok(Item::Site { name, body })
+        let span = start_byte..self.last_content_byte();
+        Ok(Item::Site { name, body, span })
     }
 
-    fn parse_struct_item(&mut self) -> Result<Item, ParseError> {
+    fn parse_struct_item(&mut self, start_byte: usize) -> Result<Item, ParseError> {
         let name = self.expect_ident()?;
         let args = self.parse_header_args_until_eol()?;
         self.consume_optional_colon();
         self.expect_newline()?;
         let body = self.parse_optional_command_body()?;
-        Ok(Item::Struct { name, args, body })
+        let span = start_byte..self.last_content_byte();
+        Ok(Item::Struct {
+            name,
+            args,
+            body,
+            span,
+        })
     }
 
     fn parse_optional_command_body(&mut self) -> Result<Vec<Statement>, ParseError> {
@@ -243,10 +266,11 @@ impl<'a> Parser<'a> {
 
     fn parse_command(&mut self) -> Result<Statement, ParseError> {
         let position = self.position();
+        let start_byte = self.current_byte();
         let keyword = self.expect_ident()?;
         match keyword.as_str() {
-            "logic" => return self.parse_logic_command(),
-            "assert" => return self.parse_assert_command(position),
+            "logic" => return self.parse_logic_command(start_byte),
+            "assert" => return self.parse_assert_command(position, start_byte),
             _ => {}
         }
         let selector = if self.peek_is(&TokenKind::LBracket) {
@@ -282,6 +306,7 @@ impl<'a> Parser<'a> {
                 positional.push(self.parse_value()?);
             }
         }
+        let span = start_byte..self.last_byte();
         self.expect_newline()?;
         let children = self.parse_optional_command_body()?;
         Ok(Statement::Generic {
@@ -291,22 +316,28 @@ impl<'a> Parser<'a> {
             args,
             binding,
             children,
+            span,
         })
     }
 
-    fn parse_logic_command(&mut self) -> Result<Statement, ParseError> {
+    fn parse_logic_command(&mut self, start_byte: usize) -> Result<Statement, ParseError> {
         let lhs = self.parse_dotted_ref()?;
         self.expect(&TokenKind::Eq)?;
         let rhs = self.parse_expr()?;
+        let span = start_byte..self.last_byte();
         self.expect_newline()?;
-        Ok(Statement::Logic { lhs, rhs })
+        Ok(Statement::Logic { lhs, rhs, span })
     }
 
-    fn parse_assert_command(&mut self, position: Position) -> Result<Statement, ParseError> {
+    fn parse_assert_command(
+        &mut self,
+        position: Position,
+        start_byte: usize,
+    ) -> Result<Statement, ParseError> {
         let head = self.expect_ident()?;
         match head.as_str() {
-            "truth" => self.parse_assert_truth(),
-            "always" => self.parse_assert_always(),
+            "truth" => self.parse_assert_truth(start_byte),
+            "always" => self.parse_assert_always(start_byte),
             other => Err(ParseError::Syntax {
                 position,
                 message: format!("expected `truth` or `always` after `assert`, got `{other}`"),
@@ -314,7 +345,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn parse_assert_truth(&mut self) -> Result<Statement, ParseError> {
+    fn parse_assert_truth(&mut self, start_byte: usize) -> Result<Statement, ParseError> {
         self.expect(&TokenKind::LParen)?;
         let mut inputs = Vec::new();
         loop {
@@ -356,15 +387,17 @@ impl<'a> Parser<'a> {
             }
         }
         self.expect(&TokenKind::RBrace)?;
+        let span = start_byte..self.last_byte();
         self.expect_newline()?;
         Ok(Statement::AssertTruth {
             inputs,
             output,
             rows,
+            span,
         })
     }
 
-    fn parse_assert_always(&mut self) -> Result<Statement, ParseError> {
+    fn parse_assert_always(&mut self, start_byte: usize) -> Result<Statement, ParseError> {
         self.expect(&TokenKind::LParen)?;
         let antecedent = self.parse_dotted_ref()?;
         self.expect(&TokenKind::Arrow)?;
@@ -395,11 +428,13 @@ impl<'a> Parser<'a> {
                     kind: *err.kind(),
                 })?;
         self.expect(&TokenKind::RParen)?;
+        let span = start_byte..self.last_byte();
         self.expect_newline()?;
         Ok(Statement::AssertAlways {
             antecedent,
             consequent,
             within,
+            span,
         })
     }
 
@@ -478,14 +513,17 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_arg(&mut self) -> Result<Arg, ParseError> {
+        let start_byte = self.current_byte();
         let key = self.expect_ident()?;
         self.expect(&TokenKind::Eq)?;
         let value = self.parse_value()?;
-        Ok(Arg { key, value })
+        let span = start_byte..self.last_byte();
+        Ok(Arg { key, value, span })
     }
 
     fn parse_value(&mut self) -> Result<Value, ParseError> {
         let position = self.position();
+        let start_byte = self.current_byte();
         let Some(token) = self.peek().cloned() else {
             return Err(ParseError::Syntax {
                 position,
@@ -500,14 +538,18 @@ impl<'a> Parser<'a> {
                     self.advance();
                     parts.push(self.expect_ident()?);
                 }
-                Ok(Value::Token(parts.join(".")))
+                Ok(Value::new(
+                    ValueKind::Token(parts.join(".")),
+                    start_byte..self.last_byte(),
+                ))
             }
             TokenKind::Bool(b) => {
                 self.advance();
-                Ok(Value::Bool(b))
+                Ok(Value::new(ValueKind::Bool(b), token.span))
             }
             TokenKind::Size(raw_w, raw_h) => {
                 let size_pos = position;
+                let size_span = token.span.clone();
                 self.advance();
                 let w = std::num::NonZeroU32::new(raw_w).ok_or_else(|| ParseError::Syntax {
                     position: size_pos,
@@ -517,15 +559,15 @@ impl<'a> Parser<'a> {
                     position: size_pos,
                     message: format!("size literal height must be non-zero, got `{raw_w}x{raw_h}`"),
                 })?;
-                Ok(Value::Size { w, h })
+                Ok(Value::new(ValueKind::Size { w, h }, size_span))
             }
             TokenKind::Int { value, .. } => {
                 self.advance();
-                Ok(Value::Int(value))
+                Ok(Value::new(ValueKind::Int(value), token.span))
             }
             TokenKind::Str(s) => {
                 self.advance();
-                Ok(Value::Str(s))
+                Ok(Value::new(ValueKind::Str(s), token.span))
             }
             TokenKind::Ident(first) => {
                 self.advance();
@@ -535,9 +577,12 @@ impl<'a> Parser<'a> {
                         self.advance();
                         tail.push(self.expect_ident()?);
                     }
-                    Ok(Value::DotRef(DottedRef::new(first, tail)))
+                    Ok(Value::new(
+                        ValueKind::DotRef(DottedRef::new(first, tail)),
+                        start_byte..self.last_byte(),
+                    ))
                 } else {
-                    Ok(Value::Ident(first))
+                    Ok(Value::new(ValueKind::Ident(first), token.span))
                 }
             }
             TokenKind::LBracket => {
@@ -550,7 +595,10 @@ impl<'a> Parser<'a> {
                     }
                 }
                 self.expect(&TokenKind::RBracket)?;
-                Ok(Value::List(items))
+                Ok(Value::new(
+                    ValueKind::List(items),
+                    start_byte..self.last_byte(),
+                ))
             }
             other => Err(ParseError::Syntax {
                 position,
@@ -687,5 +735,42 @@ impl<'a> Parser<'a> {
         self.peek()
             .or_else(|| self.tokens.last())
             .map_or(Position::START, |t| t.position)
+    }
+
+    /// Byte offset where the next un-consumed token begins, or `source.len()`
+    /// at EOF. Anchors the start of a node's [`Span`] before any token is
+    /// consumed in its parser arm.
+    fn current_byte(&self) -> usize {
+        self.peek().map_or(self.source.len(), |t| t.span.start)
+    }
+
+    /// Byte offset where the most-recently-consumed token ended. Used to
+    /// close a [`Span`] right after the last meaningful token for a node;
+    /// callers capture this *before* `expect_newline()` so trailing layout
+    /// tokens stay outside the node's span.
+    fn last_byte(&self) -> usize {
+        self.tokens
+            .get(self.pos.wrapping_sub(1))
+            .map_or(0, |t| t.span.end)
+    }
+
+    /// Byte offset of the end of the last *content* token consumed, ignoring
+    /// trailing `Newline`/`Indent`/`Dedent` layout tokens. Used for
+    /// container-level spans ([`Item::Theme`] etc.) whose body may have just
+    /// closed with a `Dedent`.
+    fn last_content_byte(&self) -> usize {
+        let mut i = self.pos;
+        while i > 0 {
+            let prev = &self.tokens[i - 1];
+            if matches!(
+                prev.kind,
+                TokenKind::Newline | TokenKind::Indent | TokenKind::Dedent
+            ) {
+                i -= 1;
+                continue;
+            }
+            return prev.span.end;
+        }
+        0
     }
 }

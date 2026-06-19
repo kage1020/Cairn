@@ -1,10 +1,11 @@
 //! Cairn command-line entry point.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use cairn_lang_core::CAIRN_VERSION;
-use cairn_lang_core::parse;
+use cairn_lang_core::check::LineStarts;
+use cairn_lang_core::{Severity, check, lower, parse};
 use clap::{Parser, Subcommand, ValueEnum};
 
 /// `cairn` — Minecraft build DSL command-line interface.
@@ -30,6 +31,17 @@ enum Command {
         #[arg(long, value_enum, default_value_t = Format::Json)]
         format: Format,
     },
+    /// Run syntactic validation passes against a .crn source file. Exits 0
+    /// when nothing is reported, 1 when any `Error`-severity diagnostic is
+    /// emitted (or the file fails to parse), 2 when the file cannot be
+    /// located.
+    Check {
+        /// Path to the .crn file to check.
+        file: PathBuf,
+        /// Output format for the diagnostics.
+        #[arg(long, value_enum, default_value_t = CheckFormat::Text)]
+        format: CheckFormat,
+    },
 }
 
 #[derive(Copy, Clone, ValueEnum)]
@@ -40,10 +52,19 @@ enum Format {
     Debug,
 }
 
+#[derive(Copy, Clone, ValueEnum)]
+enum CheckFormat {
+    /// gcc-style one-diagnostic-per-line for humans (default).
+    Text,
+    /// Pretty JSON list, for tools.
+    Json,
+}
+
 fn main() -> ExitCode {
     let cli = Cli::parse();
     match cli.command {
         Some(Command::Parse { file, format }) => run_parse(&file, format),
+        Some(Command::Check { file, format }) => run_check(&file, format),
         None => {
             eprintln!("error: a subcommand is required (try `cairn --help`)");
             ExitCode::from(2)
@@ -51,7 +72,7 @@ fn main() -> ExitCode {
     }
 }
 
-fn run_parse(file: &std::path::Path, format: Format) -> ExitCode {
+fn run_parse(file: &Path, format: Format) -> ExitCode {
     let source = match std::fs::read_to_string(file) {
         Ok(s) => s,
         Err(err) => {
@@ -94,5 +115,94 @@ fn run_parse(file: &std::path::Path, format: Format) -> ExitCode {
             println!("{module:#?}");
             ExitCode::SUCCESS
         }
+    }
+}
+
+fn run_check(file: &Path, format: CheckFormat) -> ExitCode {
+    let source = match std::fs::read_to_string(file) {
+        Ok(s) => s,
+        Err(err) => {
+            eprintln!("error: cannot read `{}`: {err}", file.display());
+            return match err.kind() {
+                std::io::ErrorKind::NotFound => ExitCode::from(2),
+                _ => ExitCode::from(1),
+            };
+        }
+    };
+    // A parse failure pre-empts any check pass — the AST/IR has to be
+    // well-formed before invariant-collecting can run. Surface it under the
+    // same exit code as a check-level error so a CI pipeline gating on
+    // `cairn check` does not silently pass a file that the parser rejected.
+    let module = match parse(&source) {
+        Ok(m) => m,
+        Err(err) => {
+            eprintln!(
+                "error: {}:{}: {}",
+                file.display(),
+                err.position(),
+                err.user_message(),
+            );
+            return ExitCode::from(1);
+        }
+    };
+    let ir = lower(&module);
+    let diagnostics = check(&module, &ir);
+    let has_error = diagnostics.iter().any(|d| d.severity == Severity::Error);
+    // Build the line-start index once and reuse it for every diagnostic /
+    // note position lookup. Without this we'd re-walk the entire source for
+    // each position computation, which gets expensive when a single file
+    // produces many diagnostics (e.g. a registry pack ingest run).
+    let lines = LineStarts::new(&source);
+
+    match format {
+        CheckFormat::Text => {
+            for d in &diagnostics {
+                let pos = lines.position(&source, d.span.start);
+                println!(
+                    "{}:{}: {}[{}]: {}",
+                    file.display(),
+                    pos,
+                    d.severity.as_str(),
+                    d.code.as_str(),
+                    d.primary,
+                );
+                for note in &d.notes {
+                    if let Some(span) = note.span.as_ref() {
+                        let note_pos = lines.position(&source, span.start);
+                        println!("{}:{}:   note: {}", file.display(), note_pos, note.message);
+                    } else {
+                        // Informational note with no distinct secondary
+                        // location — indent without a file:L:C prefix so the
+                        // output doesn't read as a second pointer at the
+                        // primary span.
+                        println!("  note: {}", note.message);
+                    }
+                }
+            }
+        }
+        CheckFormat::Json => {
+            // Render to the `RenderedDiagnostic` form so the JSON output
+            // carries `line` / `col` / `end_line` / `end_col` — without
+            // this the `--format json` contract for downstream tooling
+            // would ship only `code` / `severity` / `primary` / `notes`,
+            // with no source position at all.
+            let rendered: Vec<_> = diagnostics
+                .iter()
+                .map(|d| d.render(&source, &lines))
+                .collect();
+            match serde_json::to_string_pretty(&rendered) {
+                Ok(json) => println!("{json}"),
+                Err(err) => {
+                    eprintln!("error: failed to serialise diagnostics as JSON: {err}");
+                    return ExitCode::from(1);
+                }
+            }
+        }
+    }
+
+    if has_error {
+        ExitCode::from(1)
+    } else {
+        ExitCode::SUCCESS
     }
 }

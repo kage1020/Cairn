@@ -5,10 +5,24 @@
 //! reason about what the author actually wrote. Disambiguation that would
 //! collapse equivalent surface forms (canonicalising tokens, resolving names,
 //! type-checking) is the responsibility of downstream layers.
+//!
+//! Source-position propagation: [`Header`], [`Item`], [`Statement`],
+//! [`ThemeRule`], [`Arg`], and [`Value`] each carry a `span` field pointing at
+//! the byte range of the originating source. Diagnostic-collecting passes in
+//! `crate::check` rely on those spans to point a user at a specific spot in
+//! their `.crn` file. The `span` fields are tagged `#[serde(skip)]` so the
+//! externally-visible wire shape is unchanged from before spans were threaded
+//! through. The boolean-expression family ([`Expr`], [`TruthRow`],
+//! [`DottedRef`]) is intentionally span-free for now; those nodes only appear
+//! inside `logic`/`assert` lines that the reference-resolution pass (M2-PR3)
+//! will revisit, and spending the bytes here today would not buy any
+//! diagnostic the current passes need.
 
 use std::num::NonZeroU32;
 
 use serde::Serialize;
+
+use crate::error::Span;
 
 /// A `CalVer` language version string captured verbatim from `@cairn`.
 ///
@@ -89,17 +103,38 @@ pub enum Header {
     Cairn {
         /// `CalVer` string captured verbatim from the source.
         version: RawVersion,
+        /// Byte range of the whole directive in the original source.
+        #[serde(skip)]
+        span: Span,
     },
     /// `@requires version>=1.20` — Minecraft version capability floor.
     Requires {
         /// Requirement expression captured verbatim from the source.
         requirement: RawRequirement,
+        /// Byte range of the whole directive in the original source.
+        #[serde(skip)]
+        span: Span,
     },
     /// `@intended_targets ["1.20.4","1.21.4"]` — author hints about Minecraft target version.
     IntendedTargets {
         /// One element per target string in the original list literal.
         targets: Vec<String>,
+        /// Byte range of the whole directive in the original source.
+        #[serde(skip)]
+        span: Span,
     },
+}
+
+impl Header {
+    /// Byte range covered by this header in the original source.
+    #[must_use]
+    pub fn span(&self) -> &Span {
+        match self {
+            Self::Cairn { span, .. }
+            | Self::Requires { span, .. }
+            | Self::IntendedTargets { span, .. } => span,
+        }
+    }
 }
 
 /// A top-level construct in a `.crn` file.
@@ -113,6 +148,10 @@ pub enum Item {
         name: String,
         /// Body rules in source order.
         body: Vec<ThemeRule>,
+        /// Byte range covering the whole `theme ...` block including its
+        /// indented body.
+        #[serde(skip)]
+        span: Span,
     },
     /// `def NAME[ ARGS][:]` block — reusable parameterised component.
     Def {
@@ -122,6 +161,10 @@ pub enum Item {
         args: Vec<Arg>,
         /// Indented body statements in source order.
         body: Vec<Statement>,
+        /// Byte range covering the whole `def ...` block including its
+        /// indented body.
+        #[serde(skip)]
+        span: Span,
     },
     /// `site NAME[:]` block — multi-building placement.
     Site {
@@ -129,6 +172,10 @@ pub enum Item {
         name: String,
         /// Indented body statements in source order.
         body: Vec<Statement>,
+        /// Byte range covering the whole `site ...` block including its
+        /// indented body.
+        #[serde(skip)]
+        span: Span,
     },
     /// `struct NAME[ ARGS]` block — single building / structural composition.
     Struct {
@@ -138,7 +185,24 @@ pub enum Item {
         args: Vec<Arg>,
         /// Indented body statements in source order.
         body: Vec<Statement>,
+        /// Byte range covering the whole `struct ...` block including its
+        /// indented body.
+        #[serde(skip)]
+        span: Span,
     },
+}
+
+impl Item {
+    /// Byte range covered by this item in the original source.
+    #[must_use]
+    pub fn span(&self) -> &Span {
+        match self {
+            Self::Theme { span, .. }
+            | Self::Def { span, .. }
+            | Self::Site { span, .. }
+            | Self::Struct { span, .. } => span,
+        }
+    }
 }
 
 /// A line inside a `theme` block: either a slot binding or a selector binding.
@@ -152,6 +216,9 @@ pub enum ThemeRule {
         slot: String,
         /// Token or value bound to the slot.
         value: Value,
+        /// Byte range of the entire `slot NAME -> VALUE` line.
+        #[serde(skip)]
+        span: Span,
     },
     /// `KEYWORD[ATTRS] -> KEY=VALUE [KEY=VALUE...]` selector binding.
     Selector {
@@ -161,7 +228,20 @@ pub enum ThemeRule {
         attrs: Vec<Arg>,
         /// `key=value` bindings on the RHS of the arrow.
         bindings: Vec<Arg>,
+        /// Byte range of the entire selector rule line.
+        #[serde(skip)]
+        span: Span,
     },
+}
+
+impl ThemeRule {
+    /// Byte range covered by this rule in the original source.
+    #[must_use]
+    pub fn span(&self) -> &Span {
+        match self {
+            Self::Slot { span, .. } | Self::Selector { span, .. } => span,
+        }
+    }
 }
 
 /// One line of a struct / site / def body.
@@ -197,6 +277,11 @@ pub enum Statement {
         /// Child statements indented under this one.
         #[serde(skip_serializing_if = "Vec::is_empty")]
         children: Vec<Statement>,
+        /// Byte range of the keyword line itself (excluding children). Used by
+        /// the `keyword_allowlist` and `type_mismatch` passes to point at a
+        /// whole statement.
+        #[serde(skip)]
+        span: Span,
     },
     /// `logic LHS = EXPR` line — binds a boolean signal.
     Logic {
@@ -204,6 +289,9 @@ pub enum Statement {
         lhs: DottedRef,
         /// RHS boolean expression.
         rhs: Expr,
+        /// Byte range of the whole `logic ...` line.
+        #[serde(skip)]
+        span: Span,
     },
     /// `assert truth(INPUTS -> OUTPUT) { ROWS }` line — declarative truth
     /// table over input signals.
@@ -214,6 +302,9 @@ pub enum Statement {
         output: DottedRef,
         /// One `bits -> result` per row.
         rows: Vec<TruthRow>,
+        /// Byte range of the whole `assert truth(...) { ... }` form.
+        #[serde(skip)]
+        span: Span,
     },
     /// `assert always(ANTECEDENT -> eventually CONSEQUENT within N)` line —
     /// liveness property bounded by `within N` ticks.
@@ -224,7 +315,25 @@ pub enum Statement {
         consequent: DottedRef,
         /// `within N` bound in ticks.
         within: u32,
+        /// Byte range of the whole `assert always(...)` form.
+        #[serde(skip)]
+        span: Span,
     },
+}
+
+impl Statement {
+    /// Byte range covered by this statement in the original source. For
+    /// `Generic`, this is the keyword line only — child statements have their
+    /// own spans.
+    #[must_use]
+    pub fn span(&self) -> &Span {
+        match self {
+            Self::Generic { span, .. }
+            | Self::Logic { span, .. }
+            | Self::AssertTruth { span, .. }
+            | Self::AssertAlways { span, .. } => span,
+        }
+    }
 }
 
 /// A `key=value` pair as it appears in an argument list.
@@ -234,14 +343,23 @@ pub struct Arg {
     pub key: String,
     /// Value on the RHS of `=`.
     pub value: Value,
+    /// Byte range covering the whole `key=value` pair. Used by the
+    /// `duplicate` pass to point at a repeated argument and by
+    /// `keyword_allowlist` notes that fold an argument span into the
+    /// surrounding diagnostic.
+    #[serde(skip)]
+    pub span: Span,
 }
 
-/// A value occurring on the RHS of `key=`, inside a list, or as a positional
-/// argument.
+/// Discriminant of a [`Value`].
+///
+/// Keeps the original surface-form variants. The wrapper [`Value`] then
+/// attaches a `span` next to the kind, so internally-tagged enum
+/// serialisation (`{kind, value}`) stays byte-identical to the pre-span form.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(tag = "kind", content = "value")]
 #[non_exhaustive]
-pub enum Value {
+pub enum ValueKind {
     /// Bare identifier (`outer`, `center`, `gable`, ...).
     Ident(String),
     /// Boolean literal.
@@ -267,6 +385,54 @@ pub enum Value {
     Str(String),
     /// List literal of values.
     List(Vec<Value>),
+}
+
+/// A value occurring on the RHS of `key=`, inside a list, or as a positional
+/// argument.
+///
+/// Carries the underlying [`ValueKind`] together with the byte range of the
+/// originating literal in source. The wrapper is `#[serde(transparent)]` over
+/// the kind so the wire shape is identical to serialising the bare
+/// `ValueKind` — `span` does not appear in JSON/YAML output.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(transparent)]
+pub struct Value {
+    /// What kind of value this is.
+    pub kind: ValueKind,
+    /// Byte range covered by this value in the original source.
+    #[serde(skip)]
+    pub span: Span,
+}
+
+impl Value {
+    /// Build a [`Value`] from a kind and span.
+    #[must_use]
+    pub fn new(kind: ValueKind, span: Span) -> Self {
+        Self { kind, span }
+    }
+
+    /// Byte range covered by this value in the original source.
+    #[must_use]
+    pub fn span(&self) -> &Span {
+        &self.span
+    }
+
+    /// One-word rendering of the kind. Used in diagnostic messages such as
+    /// "expected a label (identifier or string), got `token`" so callers do
+    /// not have to match on the kind themselves.
+    #[must_use]
+    pub fn kind_name(&self) -> &'static str {
+        match &self.kind {
+            ValueKind::Ident(..) => "identifier",
+            ValueKind::Bool(..) => "boolean",
+            ValueKind::Int(..) => "integer",
+            ValueKind::Size { .. } => "size",
+            ValueKind::Token(..) => "token",
+            ValueKind::DotRef(..) => "reference",
+            ValueKind::Str(..) => "string",
+            ValueKind::List(..) => "list",
+        }
+    }
 }
 
 /// One row of an `assert truth(...)` table.

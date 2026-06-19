@@ -1,0 +1,3 @@
+struct s size=2x2
+  floor mat_slot=wall
+  walls height=4 mat_slot=wall

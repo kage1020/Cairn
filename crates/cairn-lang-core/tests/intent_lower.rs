@@ -9,7 +9,7 @@
 
 use std::num::NonZeroU32;
 
-use cairn_lang_core::ast::Value;
+use cairn_lang_core::ast::ValueKind;
 use cairn_lang_core::intent::{MemberRole, SemanticLevel};
 use cairn_lang_core::{lower, parse};
 
@@ -62,7 +62,10 @@ fn struct_size_hoists_out_of_header_args() {
         .structs
         .first()
         .expect("one struct expected after lowering");
-    let size = s.size.expect("size header should hoist to StructIr.size");
+    let size = s
+        .size
+        .as_ref()
+        .expect("size header should hoist to StructIr.size");
     assert_eq!(size.w, NonZeroU32::new(9).unwrap());
     assert_eq!(size.h, NonZeroU32::new(7).unwrap());
     assert!(
@@ -127,7 +130,10 @@ fn site_place_use_is_preserved_in_intent_state() {
         .fields
         .get("use")
         .expect("use= must survive lowering");
-    assert_eq!(use_value, &Value::Ident("cottage".to_owned()));
+    assert!(
+        matches!(&use_value.value.kind, ValueKind::Ident(s) if s == "cottage"),
+        "use= should preserve its identifier payload, got {use_value:?}",
+    );
 }
 
 #[test]
@@ -177,7 +183,7 @@ fn duplicate_size_does_not_leak_into_residual_args() {
     // except size" contract.
     let ir = lower_source("struct s size=4x4 size=5x5\n  floor\n");
     let s = &ir.structs[0];
-    let size = s.size.expect("first size= still hoists");
+    let size = s.size.as_ref().expect("first size= still hoists");
     assert_eq!(size.w.get(), 4);
     assert_eq!(size.h.get(), 4);
     assert!(

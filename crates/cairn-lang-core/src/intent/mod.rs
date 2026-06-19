@@ -11,9 +11,10 @@
 //! [`SemanticLevel::Grouped`] — registry-backed resolution (materials, themes,
 //! per-edition blockstate) is M3's job.
 //!
-//! Source position information is not propagated yet; the AST does not carry
-//! per-node spans, and rather than back-fill them here a follow-up PR (M2-PR2
-//! diagnostic) will add positions to both layers in one coordinated change.
+//! Each IR node carries a `span: Span` pointing at the originating byte range
+//! in the source. The `check` module relies on those spans to emit gcc-style
+//! diagnostics; spans are tagged `#[serde(skip)]` so the on-the-wire form is
+//! unchanged from the pre-span IR.
 
 mod keyword_table;
 mod lower;
@@ -25,11 +26,12 @@ use std::num::NonZeroU32;
 use indexmap::IndexMap;
 use serde::Serialize;
 
-use crate::ast::{DottedRef, Expr, Header, TruthRow, Value};
+use crate::ast::{DottedRef, Expr, Header, TruthRow};
+use crate::error::Span;
 
-pub use self::keyword_table::role_of;
+pub use self::keyword_table::{known_keywords, role_of};
 pub use self::lower::lower;
-pub use self::member::{IntentState, Member, MemberBody, MemberRole, ResolvedState};
+pub use self::member::{IntentState, Member, MemberBody, MemberRole, ResolvedState, ValueWithSpan};
 pub use self::semantic_level::SemanticLevel;
 
 /// Intent IR for a whole `.crn` module.
@@ -58,10 +60,13 @@ pub struct ThemeIr {
     pub name: String,
     /// `slot NAME -> VALUE` bindings. Source order is preserved; if a slot is
     /// declared twice the last wins here and the duplicate is flagged by the
-    /// M2-PR2 `duplicate` pass.
-    pub slots: IndexMap<String, Value>,
+    /// `duplicate` pass in `crate::check`.
+    pub slots: IndexMap<String, ValueWithSpan>,
     /// `KEYWORD[...] -> ...` selector bindings, in source order.
     pub selectors: Vec<SelectorRule>,
+    /// Byte range of the originating `theme NAME ...` block.
+    #[serde(skip)]
+    pub span: Span,
 }
 
 /// Lifted form of one `ThemeRule::Selector` row.
@@ -70,9 +75,12 @@ pub struct SelectorRule {
     /// Member keyword on the LHS (`window`, `door`, ...).
     pub keyword: String,
     /// `[attr=...]` selector attributes in source order.
-    pub attrs: IndexMap<String, Value>,
+    pub attrs: IndexMap<String, ValueWithSpan>,
     /// `key=value` bindings on the RHS of the arrow.
-    pub bindings: IndexMap<String, Value>,
+    pub bindings: IndexMap<String, ValueWithSpan>,
+    /// Byte range of the originating selector rule line.
+    #[serde(skip)]
+    pub span: Span,
 }
 
 /// Lifted form of `def NAME[ ARGS] [:]` (reusable parameterised component).
@@ -84,7 +92,7 @@ pub struct DefIr {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub size: Option<Size>,
     /// Remaining header `key=value` arguments (excluding `size`).
-    pub args: IndexMap<String, Value>,
+    pub args: IndexMap<String, ValueWithSpan>,
     /// Member lines from the def body.
     pub members: Vec<Member>,
     /// `logic` bindings from the def body.
@@ -93,6 +101,9 @@ pub struct DefIr {
     /// `assert` properties from the def body.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub asserts: Vec<AssertIr>,
+    /// Byte range of the originating `def NAME ...` block.
+    #[serde(skip)]
+    pub span: Span,
 }
 
 /// Lifted form of `struct NAME[ ARGS]` (single-building structural
@@ -106,7 +117,7 @@ pub struct StructIr {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub size: Option<Size>,
     /// Remaining header `key=value` arguments (excluding `size`).
-    pub args: IndexMap<String, Value>,
+    pub args: IndexMap<String, ValueWithSpan>,
     /// Member lines from the struct body.
     pub members: Vec<Member>,
     /// `logic` bindings from the struct body.
@@ -115,6 +126,9 @@ pub struct StructIr {
     /// `assert` properties from the struct body.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub asserts: Vec<AssertIr>,
+    /// Byte range of the originating `struct NAME ...` block.
+    #[serde(skip)]
+    pub span: Span,
 }
 
 /// Lifted form of `site NAME[:]` (multi-building placement).
@@ -133,15 +147,21 @@ pub struct SiteIr {
     /// `assert` properties from the site body.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub asserts: Vec<AssertIr>,
+    /// Byte range of the originating `site NAME ...` block.
+    #[serde(skip)]
+    pub span: Span,
 }
 
 /// `width × height` footprint hoisted out of a struct/def header.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Size {
     /// Width in blocks.
     pub w: NonZeroU32,
     /// Height in blocks.
     pub h: NonZeroU32,
+    /// Byte range of the originating `WxH` literal in source.
+    #[serde(skip)]
+    pub span: Span,
 }
 
 /// `logic LHS = EXPR` line lifted out of a body.
@@ -151,6 +171,9 @@ pub struct LogicBinding {
     pub lhs: DottedRef,
     /// RHS boolean expression.
     pub rhs: Expr,
+    /// Byte range of the originating `logic ...` line in source.
+    #[serde(skip)]
+    pub span: Span,
 }
 
 /// `assert ...` line lifted out of a body.
@@ -166,6 +189,9 @@ pub enum AssertIr {
         output: DottedRef,
         /// One `bits -> result` per row.
         rows: Vec<TruthRow>,
+        /// Byte range of the originating `assert truth(...) { ... }`.
+        #[serde(skip)]
+        span: Span,
     },
     /// `assert always(ANTECEDENT -> eventually CONSEQUENT within N)`.
     Always {
@@ -175,5 +201,18 @@ pub enum AssertIr {
         consequent: DottedRef,
         /// `within N` bound in ticks.
         within: u32,
+        /// Byte range of the originating `assert always(...)`.
+        #[serde(skip)]
+        span: Span,
     },
+}
+
+impl AssertIr {
+    /// Byte range of the originating `assert ...` line in source.
+    #[must_use]
+    pub fn span(&self) -> &Span {
+        match self {
+            Self::Truth { span, .. } | Self::Always { span, .. } => span,
+        }
+    }
 }

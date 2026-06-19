@@ -7,7 +7,17 @@ first-class parts of the spec; messages MUST be in a shape that feeds the self-c
 ([Evaluation Framework](evaluation)) — "what is wrong / valid candidates in the target / a suggested fix".
 
 ## 11.1 Categories
-- **Syntax**: parse / types / `key=value` validity.
+- **Syntax**: parse / types / `key=value` validity. Concrete codes shipped
+  in `cairn check` today:
+  - `E_DUPLICATE_SIZE` — header has more than one `size=`.
+  - `E_DUPLICATE_SLOT` — `theme` body declares the same slot twice.
+  - `E_DUPLICATE_ARG`  — repeated `key=` in the same argument list.
+  - `E_DUPLICATE_ID`   — two members share an `id=` within the same
+    immediate body scope.
+  - `E_UNKNOWN_KEYWORD` — statement keyword is not in the M2 table.
+  - `E_TYPE_MISMATCH_LABEL` — `id=` / `class=` / `mat_slot=` value is not
+    a label (identifier or string).
+  - `E_TYPE_MISMATCH_SIZE`  — `size=` value is not a `WxH` literal.
 - **Geometry**: AABB expansion detecting "window outside the wall", "door hanging in mid-air".
 - **attachment**: whether a frame/painting/sign/button/lever/torch is on a valid attachment face
   (detect attachment to air).
