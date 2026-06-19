@@ -17,9 +17,26 @@
 //! - **multiple themes** → struct/def scopes do not auto-pick (which one
 //!   applies is decided at the `place ... theme=X` boundary in M3).
 //!
+//! Selectors are scoped to their **bound theme only**: a scope with
+//! `bound_theme = None` gets no `selector_extras` (even if some theme in
+//! the file has a selector that would syntactically match), and
+//! `E_THEME_SELECTOR_UNMATCHED` is only reported for themes that bound to
+//! at least one scope. This honours the per-theme DI contract from
+//! `spec/materials-themes.md` §7 — a selector belongs to one theme, not
+//! the union of all themes in the file.
+//!
 //! Site `place` lines are surfaced as their own [`ScopeResolution`] entry
 //! but the resolver does not follow `use=NAME theme=...` cross-scope
 //! references in this PR — that wiring lands with the lifted IR in M3.
+//! `mat_slot=` on a `place` member is therefore neither resolved nor
+//! diagnosed by M2-PR3; M3's site lowering owns that check.
+//!
+//! The returned [`Resolution::diagnostics`] is in **resolver-emission
+//! order**, not sorted by source span. The `check::check` pipeline runs
+//! its findings through `DiagnosticSink::into_sorted` after merging, so
+//! sorting here too would be redundant work.
+
+use std::collections::HashSet;
 
 use indexmap::IndexMap;
 use serde::Serialize;
@@ -101,53 +118,46 @@ pub fn resolve(ir: &IntentModule) -> Resolution {
 
     let single_theme_name = single_theme(&themes);
     let mut scopes: IndexMap<String, ScopeResolution> = IndexMap::new();
+    let mut applied_themes: HashSet<String> = HashSet::new();
 
     for s in &ir.structs {
         let resolution = resolve_struct_or_def(
-            &s.name,
             &s.members,
             single_theme_name.as_deref(),
             &mut themes,
+            &mut applied_themes,
             &mut diagnostics,
         );
         scopes.insert(struct_key(s), resolution);
     }
     for d in &ir.defs {
         let resolution = resolve_struct_or_def(
-            &d.name,
             &d.members,
             single_theme_name.as_deref(),
             &mut themes,
+            &mut applied_themes,
             &mut diagnostics,
         );
         scopes.insert(def_key(d), resolution);
     }
     for site in &ir.sites {
-        // Site `place` lines do not consume slots from a parent theme
-        // directly — each placement carries its own `theme=` argument that
-        // refers to a struct/def. The cross-scope wiring is M3 work; here
-        // we register the site with an empty member map so callers see
-        // every scope, but selectors still get a chance to match against
-        // the site's own members (`place`, `connect`).
-        let mut placement_scope = ScopeResolution {
-            bound_theme: None,
-            members: IndexMap::new(),
-        };
-        resolve_members(
-            &site.placements,
-            None,
-            None,
-            &mut themes,
-            &mut placement_scope,
-            &mut diagnostics,
+        // Site `place` lines carry their own `theme=` argument that points
+        // at a struct/def; resolving that cross-scope reference is M3
+        // work. For M2-PR3 the site scope is registered with an empty
+        // member map and *no* theme is applied, so selectors do not
+        // accidentally bind to `place` / `connect` rows whose styling
+        // belongs to the referenced struct.
+        scopes.insert(
+            site_key(site),
+            ScopeResolution {
+                bound_theme: None,
+                members: IndexMap::new(),
+            },
         );
-        scopes.insert(site_key(site), placement_scope);
     }
 
     check_slot_targets(&themes, &mut diagnostics);
-    check_unmatched_selectors(&themes, &mut diagnostics);
-
-    diagnostics.sort_by_key(|d| (d.span.start, d.span.end));
+    check_unmatched_selectors(&themes, &applied_themes, &mut diagnostics);
 
     Resolution {
         themes,
@@ -197,10 +207,10 @@ fn site_key(site: &SiteIr) -> String {
 }
 
 fn resolve_struct_or_def(
-    _scope_name: &str,
     members: &[Member],
     single_theme_name: Option<&str>,
     themes: &mut IndexMap<String, ThemeBinding>,
+    applied_themes: &mut HashSet<String>,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> ScopeResolution {
     let (theme_name, theme_slots) = match single_theme_name {
@@ -209,6 +219,10 @@ fn resolve_struct_or_def(
         }),
         None => (None, None),
     };
+
+    if let Some(name) = &theme_name {
+        applied_themes.insert(name.clone());
+    }
 
     let mut resolution = ScopeResolution {
         bound_theme: theme_name.clone(),
@@ -246,8 +260,12 @@ fn resolve_members(
             }
         }
 
-        // 2. Selector matching across every theme.
-        for theme_binding in themes.values_mut() {
+        // 2. Selector matching — scoped to the bound theme only. A scope
+        //    with `bound_theme=None` (multi-theme file, no auto-pick)
+        //    gets no selector_extras, matching the per-theme DI contract.
+        if let Some(tname) = theme_name
+            && let Some(theme_binding) = themes.get_mut(tname)
+        {
             for sel in &mut theme_binding.selectors {
                 if selector_matches(sel, member) {
                     sel.matched_member_spans.push(member.span.clone());
@@ -369,9 +387,18 @@ fn check_slot_targets(themes: &IndexMap<String, ThemeBinding>, diagnostics: &mut
 
 fn check_unmatched_selectors(
     themes: &IndexMap<String, ThemeBinding>,
+    applied_themes: &HashSet<String>,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     for theme in themes.values() {
+        // Skip themes that were never bound to a scope — their selectors
+        // are vacuously unmatched in M2-PR3 because the resolver can't
+        // pick which struct/def they apply to (multi-theme files defer
+        // the decision to M3's `place ... theme=X` boundary). Warning
+        // about every selector in such a theme would be noise.
+        if !applied_themes.contains(&theme.name) {
+            continue;
+        }
         for sel in &theme.selectors {
             // Skip selectors whose keyword is itself unknown — the
             // `keyword_allowlist` pass already flagged that with
@@ -449,6 +476,41 @@ mod tests {
             !r.diagnostics
                 .iter()
                 .any(|d| d.code == DiagnosticCode::UnresolvedSlot),
+        );
+    }
+
+    #[test]
+    fn multi_theme_unbound_scope_gets_no_selector_extras() {
+        // Regression: an earlier version walked `themes.values_mut()`
+        // unconditionally and wrote every matching selector into
+        // `selector_extras`, even when the scope's `bound_theme` was None.
+        // That violated the per-theme DI contract from §7.
+        let src = "theme a:\n  walls[class=outer] -> trim=@a_trim\ntheme b:\n  walls[class=outer] -> trim=@b_trim\n\nstruct s size=4x4\n  walls class=outer height=3\n";
+        let r = resolve(&ir(src));
+        let scope = r.scopes.get("struct::s").unwrap();
+        assert!(scope.bound_theme.is_none());
+        let bound = scope.members.values().next().unwrap();
+        assert!(
+            bound.selector_extras.is_empty(),
+            "unbound scope must not absorb selectors from any theme, got {:?}",
+            bound.selector_extras,
+        );
+    }
+
+    #[test]
+    fn unmatched_selector_warning_is_suppressed_for_unapplied_themes() {
+        // Regression: in a multi-theme file, no theme is applied to the
+        // struct/def, so warning on every theme selector would be noise.
+        // M3 will pick the theme via `place ... theme=X`; until then the
+        // selectors are not "unmatched", they're "not yet bound".
+        let src = "theme a:\n  walls[class=outer] -> trim=@a\ntheme b:\n  walls[class=outer] -> trim=@b\n\nstruct s size=4x4\n  walls class=outer height=3\n";
+        let r = resolve(&ir(src));
+        assert!(
+            !r.diagnostics
+                .iter()
+                .any(|d| d.code == DiagnosticCode::ThemeSelectorUnmatched),
+            "no warnings expected, got {:?}",
+            r.diagnostics,
         );
     }
 

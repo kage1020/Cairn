@@ -45,8 +45,9 @@ enum Command {
     },
     /// Report the three version axes (registry-compatible range, edition
     /// portability, semantic-sensitive members) for a .crn source file.
-    /// Exits 0 on success, 1 on parse failure, 2 when the file cannot be
-    /// located.
+    /// Exits 0 on success, 1 on parse failure or any other I/O error
+    /// (permission denied, non-UTF-8 contents), 2 when the file cannot be
+    /// located, and rejects an empty `--editions` value with exit 2.
     Info {
         /// Path to the .crn file to inspect.
         file: PathBuf,
@@ -238,6 +239,15 @@ fn run_check(file: &Path, format: CheckFormat) -> ExitCode {
 }
 
 fn run_info(file: &Path, editions: &[String], format: InfoFormat) -> ExitCode {
+    // Reject empty edition entries early so they cannot leak into the
+    // output. `--editions ""` and `--editions java,,bedrock` both produce
+    // empty strings under the comma value-delimiter, which would render
+    // as `: 1.20 .. latest` rows or `"edition":""` JSON.
+    if editions.iter().any(|e| e.trim().is_empty()) {
+        eprintln!("error: --editions value must not contain empty entries");
+        return ExitCode::from(2);
+    }
+
     let source = match std::fs::read_to_string(file) {
         Ok(s) => s,
         Err(err) => {
@@ -283,28 +293,15 @@ fn run_info(file: &Path, editions: &[String], format: InfoFormat) -> ExitCode {
 }
 
 fn print_text(axes: &VersionAxes) {
-    // Axis 1: registry-compatible range, with one entry per requested
-    // edition so the human eye can match it against the portability table
-    // below — the underlying min/max is currently identical across
-    // editions (registry pack arrives in 2026.12.0), but the format is
-    // ready for per-edition divergence without a parsing change.
-    let editions_line = if axes.edition_portability.is_empty() {
-        String::from("(no editions requested)")
-    } else {
-        axes.edition_portability
-            .iter()
-            .map(|ep| {
-                format!(
-                    "{}: {} .. {}",
-                    capitalise(&ep.edition),
-                    axes.registry_compat.min,
-                    axes.registry_compat.max,
-                )
-            })
-            .collect::<Vec<_>>()
-            .join("   ")
-    };
-    println!("registry compatibility:  {editions_line}");
+    // Axis 1: the registry-compatible range is currently edition-agnostic
+    // — `RegistryRange` holds a single `min/max` pair. The output renders
+    // it as one entry to match. When the registry pack lands (2026.12.0)
+    // and the range becomes per-edition, this is the line that grows a
+    // per-edition list to mirror axis 2.
+    println!(
+        "registry compatibility:  {} .. {}",
+        axes.registry_compat.min, axes.registry_compat.max,
+    );
 
     let portability_line = if axes.edition_portability.is_empty() {
         String::from("(no editions requested)")

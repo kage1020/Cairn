@@ -92,6 +92,10 @@ pub fn compute_axes(
     _resolution: &Resolution,
     editions: &[String],
 ) -> VersionAxes {
+    // Hoisted out of the per-edition loop: the count is edition-agnostic
+    // in M2-PR3 (registry pack arrives in 2026.12.0, at which point per-
+    // edition counts diverge and the call moves back inside the map).
+    let portable_total = count_members(ir);
     VersionAxes {
         registry_compat: RegistryRange {
             min: derive_min_version(module),
@@ -101,7 +105,7 @@ pub fn compute_axes(
             .iter()
             .map(|edition| EditionPortability {
                 edition: edition.clone(),
-                portable: count_members(ir),
+                portable: portable_total,
                 degraded: 0,
                 unsupported: 0,
             })

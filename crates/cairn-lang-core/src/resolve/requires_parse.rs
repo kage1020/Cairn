@@ -19,14 +19,31 @@ use std::cmp::Ordering;
 /// Strip the `version>=` prefix from a raw `@requires` expression and return
 /// the remaining version string, trimmed of whitespace.
 ///
-/// Returns `None` when the requirement does not begin with `version>=` —
-/// future requirement shapes (`version<=`, range syntax) will need their
-/// own parser, so the function is intentionally narrow rather than
-/// best-effort.
+/// Returns `None` when the requirement:
+///
+/// - does not begin with `version>=` (future requirement shapes like
+///   `version<=` or range syntax will need their own parser, so the
+///   function is intentionally narrow rather than best-effort),
+/// - is empty after stripping the prefix (`@requires version>=` with no
+///   payload), or
+/// - is not a dotted-decimal sequence of unsigned integers
+///   (`version>=1.a` is not a version Cairn knows how to compare against,
+///   and feeding malformed strings to [`compare_versions`] would let
+///   lexicographic fallbacks produce nonsense orderings such as
+///   `1.a > 1.20`).
 #[must_use]
 pub fn parse_min_version(raw: &str) -> Option<&str> {
-    let stripped = raw.trim().strip_prefix("version>=")?;
-    Some(stripped.trim())
+    let stripped = raw.trim().strip_prefix("version>=")?.trim();
+    if stripped.is_empty() {
+        return None;
+    }
+    if !stripped
+        .split('.')
+        .all(|segment| !segment.is_empty() && segment.chars().all(|c| c.is_ascii_digit()))
+    {
+        return None;
+    }
+    Some(stripped)
 }
 
 /// Compare two dotted-decimal version strings component-wise.
@@ -91,6 +108,25 @@ mod tests {
     fn parse_min_version_returns_none_for_other_shapes() {
         assert_eq!(parse_min_version("version<=1.21"), None);
         assert_eq!(parse_min_version("1.20"), None);
+    }
+
+    #[test]
+    fn parse_min_version_rejects_empty_payload() {
+        // Regression: `version>=` with no body used to return `Some("")`,
+        // which `derive_min_version` then propagated to `min` and produced
+        // a malformed `{"min":""}` in `cairn info --format json`.
+        assert_eq!(parse_min_version("version>="), None);
+        assert_eq!(parse_min_version("version>=  "), None);
+    }
+
+    #[test]
+    fn parse_min_version_rejects_non_numeric_segments() {
+        // Regression: a non-numeric segment used to slip through and
+        // `compare_versions` would fall back to ASCII compare, where
+        // `'a' (0x61) > '2' (0x32)` made `1.a > 1.20`.
+        assert_eq!(parse_min_version("version>=1.a"), None);
+        assert_eq!(parse_min_version("version>=1.20.4-rc1"), None);
+        assert_eq!(parse_min_version("version>=1..2"), None);
     }
 
     #[test]

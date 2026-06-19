@@ -135,7 +135,43 @@ fn info_5_all_examples_exit_zero() {
 }
 
 #[test]
-fn info_6_file_without_requires_defaults_min_to_zero_zero() {
+fn info_6_registry_compatibility_renders_as_single_range_line() {
+    // The registry-compatible range is currently edition-agnostic
+    // (single `min/max` pair in `RegistryRange`). The text output must
+    // not duplicate it per edition — that misled reviewers into reading
+    // a per-edition divergence that the data does not carry.
+    let path = examples_dir().join("cottage.crn");
+    let out = run_info(&[path.to_str().unwrap()]);
+    assert!(out.status.success());
+    let stdout = String::from_utf8(out.stdout).expect("utf-8");
+    let line = stdout
+        .lines()
+        .find(|l| l.starts_with("registry compatibility:"))
+        .expect("registry compatibility line");
+    // One range, no `Java:` / `Bedrock:` prefix here — those belong on
+    // axis 2 (edition portability) only.
+    assert!(line.contains("1.20 .. latest"), "got: {line}");
+    assert!(
+        !line.contains("Java:"),
+        "axis 1 should not repeat editions: {line}"
+    );
+    assert!(
+        !line.contains("Bedrock:"),
+        "axis 1 should not repeat editions: {line}"
+    );
+}
+
+#[test]
+fn info_7_empty_editions_value_is_rejected_with_exit_two() {
+    let path = examples_dir().join("cottage.crn");
+    let out = run_info(&[path.to_str().unwrap(), "--editions", ""]);
+    assert_eq!(out.status.code(), Some(2));
+    let out = run_info(&[path.to_str().unwrap(), "--editions", "java,,bedrock"]);
+    assert_eq!(out.status.code(), Some(2));
+}
+
+#[test]
+fn info_8_file_without_requires_defaults_min_to_zero_zero() {
     let path = tempfile_with_contents("struct s size=4x4\n  walls height=3\n");
     let out = run_info(&[path.to_str().unwrap(), "--format", "json"]);
     assert!(out.status.success());
