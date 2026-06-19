@@ -21,7 +21,10 @@ mod keyword_allowlist;
 mod sink;
 mod type_mismatch;
 
-pub use diagnostic::{Diagnostic, DiagnosticCode, DiagnosticNote, Severity};
+pub use diagnostic::{
+    Diagnostic, DiagnosticCode, DiagnosticNote, LineStarts, RenderedDiagnostic, RenderedNote,
+    Severity, position_at,
+};
 pub use sink::DiagnosticSink;
 
 use crate::ast::Module;

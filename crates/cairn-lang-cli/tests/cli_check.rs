@@ -124,6 +124,56 @@ fn cli_unknown_keyword_fixture_lists_known_keywords_in_a_note() {
         stdout.contains("note:") && stdout.contains("floor"),
         "expected a known-keywords note, got: {stdout}",
     );
+    // The informational note must not re-print the same `file:L:C:`
+    // prefix as the primary diagnostic — that was the bug fixed when
+    // `DiagnosticNote.span` became `Option<Span>`.
+    let primary_prefix = stdout
+        .lines()
+        .find(|l| l.contains("E_UNKNOWN_KEYWORD"))
+        .expect("expected a primary line")
+        .split_once(':')
+        .map(|(_, rest)| {
+            let (line_col, _) = rest.split_once(": error").unwrap_or((rest, ""));
+            line_col
+        })
+        .expect("expected gcc-style prefix");
+    assert!(
+        !stdout.contains(&format!(":{primary_prefix}:   note:")),
+        "informational note must not duplicate the primary's file:L:C prefix, got: {stdout}",
+    );
+}
+
+#[test]
+fn cli_json_output_carries_line_and_col_for_every_diagnostic() {
+    // The `--format json` contract is that downstream tooling (LSP, CI
+    // gates) receives the same position information as the text format.
+    // Without `line` / `col` the JSON form would be useless to anything
+    // that wants to underline the offending range.
+    let path = fixtures_dir().join("duplicate.crn");
+    let out = run_check(&[path.to_str().unwrap(), "--format", "json"]);
+    assert_eq!(out.status.code(), Some(1));
+    let stdout = String::from_utf8(out.stdout).expect("utf-8");
+    let parsed: serde_json::Value = serde_json::from_str(&stdout).expect("valid JSON");
+    let arr = parsed.as_array().expect("expected an array");
+    assert!(!arr.is_empty());
+    for entry in arr {
+        for field in [
+            "code", "severity", "line", "col", "end_line", "end_col", "primary",
+        ] {
+            assert!(
+                entry.get(field).is_some(),
+                "JSON diagnostic missing `{field}`: {entry}",
+            );
+        }
+        let line = entry["line"].as_u64().expect("line should be a number");
+        let col = entry["col"].as_u64().expect("col should be a number");
+        assert!(line >= 1 && col >= 1, "1-based positions, got {line}:{col}");
+        assert!(
+            entry["code"].as_str().is_some_and(|s| s.starts_with("E_")),
+            "code should be the E_-prefixed string, got: {}",
+            entry["code"],
+        );
+    }
 }
 
 #[test]

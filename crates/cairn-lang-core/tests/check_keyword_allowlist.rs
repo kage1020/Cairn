@@ -43,7 +43,38 @@ fn kw_2_unknown_keyword_inside_nested_level_is_still_flagged() {
 }
 
 #[test]
-fn kw_3_every_m2_known_keyword_is_silent() {
+fn kw_3_unknown_keyword_note_carries_no_secondary_span() {
+    // `expected one of: ...` is informational, not locational — its span
+    // is `None` so renderers do not print a second `file:L:C` pointer at
+    // the primary span.
+    let src = "struct s size=1x1\n  mystery foo=1\n";
+    let diags = diagnose(src);
+    assert_eq!(diags.len(), 1);
+    assert!(
+        diags[0].notes[0].span.is_none(),
+        "the known-keywords note should be informational, got span: {:?}",
+        diags[0].notes[0].span,
+    );
+}
+
+#[test]
+fn kw_4_theme_selector_with_unknown_keyword_is_flagged() {
+    // A typo in the leading keyword of a `theme` selector is just as
+    // wrong as a typo in a struct body — the lowering step keeps the raw
+    // string and the keyword_allowlist pass must re-check it.
+    let src = "theme medieval:\n  windoe[class=small] -> frame=@spruce_wood\n";
+    let diags = diagnose(src);
+    assert_eq!(diags.len(), 1, "got {diags:#?}");
+    assert_eq!(diags[0].code, DiagnosticCode::UnknownKeyword);
+    assert!(
+        diags[0].primary.contains("windoe"),
+        "primary should name the typo, got: {}",
+        diags[0].primary,
+    );
+}
+
+#[test]
+fn kw_5_every_m2_known_keyword_is_silent() {
     // Build a source that uses every keyword in the M2 table. None should
     // trigger `E_UNKNOWN_KEYWORD`. `place` and `connect` live in a site;
     // everything else lives in a struct.

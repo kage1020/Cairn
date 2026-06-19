@@ -98,11 +98,18 @@ impl Serialize for DiagnosticCode {
 
 /// Secondary location for a [`Diagnostic`] (the "first declared here"
 /// pointer attached to a duplicate-key error, etc.).
+///
+/// `span` is optional because some notes are *informational* rather than
+/// locational — the "expected one of: ..." footer on
+/// `E_UNKNOWN_KEYWORD`, for example, has no byte range distinct from the
+/// primary finding's span. Renderers should suppress the `file:L:C:`
+/// prefix for `span == None`.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct DiagnosticNote {
-    /// Byte range the note refers to.
+    /// Byte range the note refers to, when the note points at a distinct
+    /// secondary location.
     #[serde(skip)]
-    pub span: Span,
+    pub span: Option<Span>,
     /// Human-readable note text.
     pub message: String,
 }
@@ -134,9 +141,140 @@ impl Diagnostic {
     /// `\r` adds one column the user sees an extra column for, but the
     /// behaviour matches what `cairn parse` reports today). Column counts
     /// Unicode scalar values, mirroring the `Position` documentation.
+    ///
+    /// O(`source.len()`) per call. When converting many diagnostics from
+    /// the same source, build a [`LineStarts`] index once and call
+    /// [`LineStarts::position`] instead.
     #[must_use]
     pub fn position(&self, source: &str) -> Position {
         position_at(source, self.span.start)
+    }
+
+    /// Build a [`RenderedDiagnostic`] suitable for JSON/structured output
+    /// against the given source. Populates 1-based `line` / `col` /
+    /// `end_line` / `end_col` for both the primary span and each note that
+    /// carries a span — without these the JSON form would carry zero
+    /// position information, defeating the `--format json` contract for
+    /// downstream tooling.
+    #[must_use]
+    pub fn render(&self, source: &str, lines: &LineStarts) -> RenderedDiagnostic {
+        let start = lines.position(source, self.span.start);
+        let end = lines.position(source, self.span.end);
+        RenderedDiagnostic {
+            code: self.code,
+            severity: self.severity,
+            line: start.line.get(),
+            col: start.col.get(),
+            end_line: end.line.get(),
+            end_col: end.col.get(),
+            primary: self.primary.clone(),
+            notes: self
+                .notes
+                .iter()
+                .map(|n| RenderedNote {
+                    line: n
+                        .span
+                        .as_ref()
+                        .map(|s| lines.position(source, s.start).line.get()),
+                    col: n
+                        .span
+                        .as_ref()
+                        .map(|s| lines.position(source, s.start).col.get()),
+                    message: n.message.clone(),
+                })
+                .collect(),
+        }
+    }
+}
+
+/// JSON-friendly rendering of a [`Diagnostic`] with line/col populated.
+///
+/// Built via [`Diagnostic::render`]. The `code` field serialises to the same
+/// `E_*` string as the text format (see [`DiagnosticCode::as_str`]) so
+/// downstream tooling matches a single contract regardless of `--format`.
+#[derive(Debug, Clone, Serialize)]
+pub struct RenderedDiagnostic {
+    /// Stable code identifying the kind of finding.
+    pub code: DiagnosticCode,
+    /// Severity of the finding.
+    pub severity: Severity,
+    /// 1-based line of the primary span's first byte.
+    pub line: u32,
+    /// 1-based column of the primary span's first byte, in Unicode scalar
+    /// values.
+    pub col: u32,
+    /// 1-based line of the primary span's last-byte-exclusive boundary.
+    pub end_line: u32,
+    /// 1-based column of the primary span's last-byte-exclusive boundary.
+    pub end_col: u32,
+    /// Primary message string.
+    pub primary: String,
+    /// Notes, each with optional line/col if they pointed at a distinct
+    /// secondary location.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub notes: Vec<RenderedNote>,
+}
+
+/// JSON-friendly rendering of a [`DiagnosticNote`].
+#[derive(Debug, Clone, Serialize)]
+pub struct RenderedNote {
+    /// 1-based line of the note's source position, when the note has a
+    /// distinct secondary location. Omitted for informational notes.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub line: Option<u32>,
+    /// 1-based column of the note's source position.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub col: Option<u32>,
+    /// Note message text.
+    pub message: String,
+}
+
+/// Precomputed line-start byte offsets for a source string.
+///
+/// Construct once with [`LineStarts::new`], then look up many byte offsets
+/// via [`LineStarts::position`]. Reduces an N-diagnostic conversion from
+/// `O(N * file_len)` (re-walking the source per call) to
+/// `O(file_len + N * log L)` where `L` is the line count.
+#[derive(Debug, Clone)]
+pub struct LineStarts {
+    /// Byte offset of the first character of each line (line 1 starts at
+    /// offset 0; subsequent entries are the byte after each `\n`).
+    starts: Vec<usize>,
+}
+
+impl LineStarts {
+    /// Build the index by walking the source exactly once.
+    #[must_use]
+    pub fn new(source: &str) -> Self {
+        let mut starts = vec![0];
+        for (i, byte) in source.bytes().enumerate() {
+            if byte == b'\n' {
+                starts.push(i + 1);
+            }
+        }
+        Self { starts }
+    }
+
+    /// Resolve a byte offset into a 1-based `line:column` [`Position`].
+    ///
+    /// Identical semantics to [`position_at`]; this method does the
+    /// expensive part (counting newlines) up front, then runs a binary
+    /// search per query.
+    #[must_use]
+    pub fn position(&self, source: &str, byte_offset: usize) -> Position {
+        let clamped = byte_offset.min(source.len());
+        // partition_point returns the first index whose start > clamped;
+        // line numbers are 1-based and the starts vector is 1-aligned with
+        // them, so the returned index *is* the line number.
+        let line_idx = self.starts.partition_point(|&s| s <= clamped);
+        let line_number = line_idx.max(1);
+        let line_start = self.starts[line_idx - 1];
+        let column_chars = source[line_start..clamped].chars().count() + 1;
+        let line = NonZeroU32::new(u32::try_from(line_number).unwrap_or(u32::MAX))
+            .unwrap_or(NonZeroU32::MIN);
+        let col = NonZeroU32::new(u32::try_from(column_chars).unwrap_or(u32::MAX))
+            .unwrap_or(NonZeroU32::MIN);
+        Position { line, col }
     }
 }
 
@@ -145,7 +283,11 @@ impl Diagnostic {
 /// `usize → u32` overflow saturates to `u32::MAX` rather than wrapping: any
 /// source large enough to exceed 4 billion lines is also large enough that
 /// "we lost track of the exact column" is the user's last concern.
-pub(super) fn position_at(source: &str, byte_offset: usize) -> Position {
+///
+/// O(`source.len()`) per call. Prefer [`LineStarts`] when converting many
+/// offsets from the same source.
+#[must_use]
+pub fn position_at(source: &str, byte_offset: usize) -> Position {
     let clamped = byte_offset.min(source.len());
     let prefix = &source[..clamped];
     let line_count = prefix.bytes().filter(|b| *b == b'\n').count() + 1;
@@ -202,5 +344,29 @@ mod tests {
         let pos = position_at(source, 99);
         assert_eq!(pos.line.get(), 2);
         assert_eq!(pos.col.get(), 1);
+    }
+
+    #[test]
+    fn line_starts_returns_identical_positions_to_position_at() {
+        // Soak the equivalence — for any char-boundary offset, the cached
+        // and linear implementations agree. Locks the optimisation in step
+        // with the (already-tested) reference.
+        let source = "α\nfoo\nbar\nβaz\n";
+        let lines = LineStarts::new(source);
+        // Only char-boundary offsets: byte 0 (start of α), 2 (after α =
+        // start of \n), 3 (start of 'f'), 6 (start of \n), 7 (start of 'b'),
+        // 10 (start of \n), 11 (start of β), 13 (after β), and EOF.
+        for offset in [0_usize, 2, 3, 6, 7, 10, 11, 13, source.len()] {
+            assert!(
+                source.is_char_boundary(offset),
+                "test bug: offset {offset} is not a char boundary",
+            );
+            let cached = lines.position(source, offset);
+            let linear = position_at(source, offset);
+            assert_eq!(
+                cached, linear,
+                "offset {offset} disagrees: cached={cached:?} linear={linear:?}",
+            );
+        }
     }
 }

@@ -30,7 +30,11 @@ fn dup_1_duplicate_size_flags_second_occurrence_only() {
         1,
         "note pointing at first declaration"
     );
-    assert_eq!(&src[diags[0].notes[0].span.clone()], "size=4x4");
+    let first_span = diags[0].notes[0]
+        .span
+        .as_ref()
+        .expect("duplicate notes carry the first-occurrence span");
+    assert_eq!(&src[first_span.clone()], "size=4x4");
 }
 
 #[test]
@@ -66,8 +70,12 @@ fn dup_4_duplicate_id_in_same_body_scope() {
     assert_eq!(diags[0].code, DiagnosticCode::DuplicateId);
     assert_eq!(slice(src, &diags[0]), "id=front", "second declaration");
     assert_eq!(diags[0].notes.len(), 1);
+    let first_span = diags[0].notes[0]
+        .span
+        .as_ref()
+        .expect("DuplicateId notes carry the first-occurrence span");
     assert_eq!(
-        &src[diags[0].notes[0].span.clone()],
+        &src[first_span.clone()],
         "id=front",
         "note points at first occurrence",
     );

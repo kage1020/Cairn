@@ -49,7 +49,7 @@ fn check_theme_body(body: &[ThemeRule], sink: &mut DiagnosticSink) {
                         span: span.clone(),
                         primary: format!("`slot {slot}` is declared more than once"),
                         notes: vec![DiagnosticNote {
-                            span: first_span.clone(),
+                            span: Some(first_span.clone()),
                             message: "first declaration here".into(),
                         }],
                     });
@@ -84,7 +84,7 @@ fn check_header_args(args: &[Arg], sink: &mut DiagnosticSink) {
                 span: arg.span.clone(),
                 primary: format!("`{}=` is declared more than once in this header", arg.key),
                 notes: vec![DiagnosticNote {
-                    span: first_span.clone(),
+                    span: Some(first_span.clone()),
                     message: "first declaration here".into(),
                 }],
             });
@@ -105,7 +105,7 @@ fn check_arg_list(args: &[Arg], sink: &mut DiagnosticSink) {
                 span: arg.span.clone(),
                 primary: format!("`{}=` is declared more than once", arg.key),
                 notes: vec![DiagnosticNote {
-                    span: first_span.clone(),
+                    span: Some(first_span.clone()),
                     message: "first declaration here".into(),
                 }],
             });
@@ -143,7 +143,7 @@ fn check_body(body: &[Statement], sink: &mut DiagnosticSink) {
                         span: id_span,
                         primary: format!("`id={id}` is declared more than once in this scope"),
                         notes: vec![DiagnosticNote {
-                            span: first_span.clone(),
+                            span: Some(first_span.clone()),
                             message: "first declaration here".into(),
                         }],
                     });

@@ -20,10 +20,14 @@ placeholder cannot leak out. The `2026.07.0` release PR will flip publish to `tr
 - `cairn check` CLI subcommand and `cairn_lang_core::check` module collect
   syntactic validation findings without short-circuiting and emit them in
   gcc-style `file:line:col: error[CODE]: message` form (or pretty JSON via
-  `--format json`). Initial M2 codes: `E_DUPLICATE_SIZE`, `E_DUPLICATE_SLOT`,
+  `--format json`, with `line` / `col` / `end_line` / `end_col` populated
+  so downstream tooling consumes the same contract as the text format).
+  Initial M2 codes: `E_DUPLICATE_SIZE`, `E_DUPLICATE_SLOT`,
   `E_DUPLICATE_ARG`, `E_DUPLICATE_ID`, `E_UNKNOWN_KEYWORD`,
   `E_TYPE_MISMATCH_LABEL`, `E_TYPE_MISMATCH_SIZE`. `E_DUPLICATE_ID` is scoped
   per immediate body, so `level y=0` blocks have their own namespace.
+  `E_UNKNOWN_KEYWORD` covers both struct/def/site bodies (via
+  `MemberRole::Other`) and the leading keyword of `theme` selector rules.
 - `span: Span` on every AST node visible at parse time (`Header`, `Item`,
   `Statement`, `ThemeRule`, `Arg`, `Value`) and on the corresponding Intent
   IR types (`StructIr`, `DefIr`, `SiteIr`, `ThemeIr`, `Member`, `Size`,

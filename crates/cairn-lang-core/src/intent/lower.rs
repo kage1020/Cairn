@@ -340,10 +340,11 @@ fn args_to_map(args: &[Arg]) -> IndexMap<String, ValueWithSpan> {
 
 /// Try to move a label-valued `id` / `class` / `mat_slot` argument into a
 /// dedicated [`Member`] field. Accepts only the *textual* shapes
-/// ([`Value::Ident`] and [`Value::Str`]) — `@oak_planks` or `foo.bar` are
-/// canonical-token / reference values that may not stand in as a label, so
-/// they are left in [`IntentState`] for the M2-PR2 type-mismatch pass to
-/// flag rather than silently coerced.
+/// ([`ValueKind::Ident`] and [`ValueKind::Str`]) — `@oak_planks` or
+/// `foo.bar` are canonical-token / reference values that may not stand in
+/// as a label, so they are left in [`IntentState`] for the
+/// `type_mismatch` pass (`crate::check`) to flag rather than silently
+/// coerced.
 ///
 /// Returns `true` when the value was consumed; `false` keeps the argument
 /// in [`IntentState`] (non-label value, or a duplicate key).
