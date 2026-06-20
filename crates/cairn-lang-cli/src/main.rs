@@ -6,8 +6,11 @@ use std::process::ExitCode;
 use cairn_lang_core::CAIRN_VERSION;
 use cairn_lang_core::block_array::{BlockArray, BlockArrayIr, lower_to_block_array};
 use cairn_lang_core::check::LineStarts;
+use cairn_lang_core::lock::{LockInputs, LockTarget, Lockfile, hash_resolved_ir, hash_source};
 use cairn_lang_core::resolve::{VersionAxes, compute_axes, resolve};
 use cairn_lang_core::{Severity, check, lower, parse};
+use cairn_lang_formats::data_version::resolve_java_target;
+use cairn_lang_formats::java_structure::{output_filename, write_structure_gzip};
 use clap::{Parser, Subcommand, ValueEnum};
 
 /// `cairn` — Minecraft build DSL command-line interface.
@@ -62,8 +65,8 @@ enum Command {
         format: InfoFormat,
     },
     /// Lower a .crn source file all the way to the block-array IR and print
-    /// the result. A debugging surface for the universal voxel pivot; the
-    /// user-facing `cairn compile` lands once the format backends do.
+    /// the result. A debugging surface for the universal voxel pivot;
+    /// `cairn compile` writes the same IR out as a Java `.nbt` artifact.
     /// Lowering warnings (deferred members, themeless scopes, abstract
     /// tokens) print to stderr but do not affect the exit code. Exits 0 on
     /// success, 1 on parse failure or I/O error, 2 when the file cannot be
@@ -74,6 +77,36 @@ enum Command {
         /// Output format for the lowered block-array IR.
         #[arg(long, value_enum, default_value_t = LowerFormat::Ascii)]
         format: LowerFormat,
+    },
+    /// Compile a .crn source file to its edition+version-pinned NBT artifact
+    /// set and write a lockfile next to the source. The Java backend in
+    /// this release supports `floor` and `walls` only; other roles degrade
+    /// to air with a `W_DEFERRED_MEMBER` warning and the build still
+    /// succeeds, matching `cairn lower`. Exits 0 on success, 1 on parse,
+    /// lowering, or I/O failure (including an unsupported `--target`),
+    /// and 2 when the source file cannot be located.
+    Compile {
+        /// Path to the .crn file to compile.
+        file: PathBuf,
+        /// Target edition. Required by spec §4.2 (`--target` alone is
+        /// forbidden).
+        #[arg(long, value_enum)]
+        edition: EditionArg,
+        /// Minecraft version string. Resolved against the backend's data
+        /// table; opaque label per spec §10.1. `latest` aliases the newest
+        /// version this release knows.
+        #[arg(long, default_value = "latest")]
+        target: String,
+        /// Output directory for the generated `.nbt` files. Created if
+        /// missing. Defaults to the source file's parent directory.
+        #[arg(long)]
+        out: Option<PathBuf>,
+        /// Lockfile path. Defaults to `<source>.lock` next to the source
+        /// (so `cottage.crn` → `cottage.crn.lock`), keeping per-source
+        /// locks unambiguous when several `.crn` files share an output
+        /// directory.
+        #[arg(long)]
+        lock: Option<PathBuf>,
     },
 }
 
@@ -102,6 +135,24 @@ enum InfoFormat {
 }
 
 #[derive(Copy, Clone, ValueEnum)]
+enum EditionArg {
+    /// Java Edition. The only fully implemented backend in this release.
+    Java,
+    /// Bedrock Edition. Reserved for M4; passing it here exits with a
+    /// dedicated error so the CLI surface is stable now.
+    Bedrock,
+}
+
+impl EditionArg {
+    fn as_str(self) -> &'static str {
+        match self {
+            EditionArg::Java => "java",
+            EditionArg::Bedrock => "bedrock",
+        }
+    }
+}
+
+#[derive(Copy, Clone, ValueEnum)]
 enum LowerFormat {
     /// Per-structure ASCII Y-slice plus a palette listing (default;
     /// easiest way to eyeball whether the walls came out right).
@@ -123,6 +174,13 @@ fn main() -> ExitCode {
             format,
         }) => run_info(&file, &editions, format),
         Some(Command::Lower { file, format }) => run_lower(&file, format),
+        Some(Command::Compile {
+            file,
+            edition,
+            target,
+            out,
+            lock,
+        }) => run_compile(&file, edition, &target, out.as_deref(), lock.as_deref()),
         None => {
             eprintln!("error: a subcommand is required (try `cairn --help`)");
             ExitCode::from(2)
@@ -486,5 +544,141 @@ fn print_y_slice(ba: &BlockArray, y: u32) {
             row.push(ascii_glyph(usize::from(ba.voxels[i].0)));
         }
         println!("    {row}");
+    }
+}
+
+fn run_compile(
+    file: &Path,
+    edition: EditionArg,
+    target: &str,
+    out: Option<&Path>,
+    lock: Option<&Path>,
+) -> ExitCode {
+    let source = match std::fs::read_to_string(file) {
+        Ok(s) => s,
+        Err(err) => {
+            eprintln!("error: cannot read `{}`: {err}", file.display());
+            return match err.kind() {
+                std::io::ErrorKind::NotFound => ExitCode::from(2),
+                _ => ExitCode::from(1),
+            };
+        }
+    };
+    let module = match parse(&source) {
+        Ok(m) => m,
+        Err(err) => {
+            eprintln!(
+                "error: {}:{}: {}",
+                file.display(),
+                err.position(),
+                err.user_message(),
+            );
+            return ExitCode::from(1);
+        }
+    };
+    let ir = lower(&module);
+    let resolution = resolve(&ir);
+    let block_ir = lower_to_block_array(&ir, &resolution);
+
+    // Surface lowering warnings on stderr (deferred members etc.) before any
+    // backend action — matches `cairn lower` so a CI log shows the same set
+    // regardless of which subcommand was run.
+    let lines = LineStarts::new(&source);
+    for d in &block_ir.diagnostics {
+        let pos = lines.position(&source, d.span.start);
+        eprintln!(
+            "{}:{}: {}[{}]: {}",
+            file.display(),
+            pos,
+            d.severity.as_str(),
+            d.code.as_str(),
+            d.primary,
+        );
+    }
+
+    let target = match edition {
+        EditionArg::Bedrock => {
+            eprintln!("error: --edition bedrock is not implemented in this release; Java only");
+            return ExitCode::from(1);
+        }
+        EditionArg::Java => match resolve_java_target(target) {
+            Ok(t) => t,
+            Err(err) => {
+                eprintln!("error: {err}");
+                return ExitCode::from(1);
+            }
+        },
+    };
+
+    let out_dir: PathBuf = match out {
+        Some(p) => p.to_path_buf(),
+        None => file
+            .parent()
+            .map_or_else(|| PathBuf::from("."), Path::to_path_buf),
+    };
+    if let Err(err) = std::fs::create_dir_all(&out_dir) {
+        eprintln!(
+            "error: cannot create output directory `{}`: {err}",
+            out_dir.display(),
+        );
+        return ExitCode::from(1);
+    }
+
+    for (scope, ba) in &block_ir.structures {
+        let name = output_filename(scope);
+        let path = out_dir.join(&name);
+        let mut f = match std::fs::File::create(&path) {
+            Ok(f) => f,
+            Err(err) => {
+                eprintln!("error: cannot open `{}` for write: {err}", path.display());
+                return ExitCode::from(1);
+            }
+        };
+        if let Err(err) = write_structure_gzip(&mut f, ba, target) {
+            eprintln!("error: writing `{}`: {err}", path.display());
+            return ExitCode::from(1);
+        }
+        println!("wrote {}", path.display());
+    }
+
+    let lock_path = lock.map_or_else(|| default_lock_path(file), Path::to_path_buf);
+    let lockfile = build_lockfile(&source, &block_ir, edition, target);
+    if let Err(err) = lockfile.write_to_path(&lock_path) {
+        eprintln!("error: writing lockfile `{}`: {err}", lock_path.display());
+        return ExitCode::from(1);
+    }
+    println!("wrote {}", lock_path.display());
+
+    ExitCode::SUCCESS
+}
+
+/// Append a `.lock` suffix to the source file name so multiple `.crn`
+/// files in the same directory get distinct locks. `Path::with_extension`
+/// would drop `.crn`, fusing `cottage.crn`'s lock with any other
+/// `cottage.*` source's lock.
+fn default_lock_path(source: &Path) -> PathBuf {
+    let mut p = source.as_os_str().to_owned();
+    p.push(".lock");
+    PathBuf::from(p)
+}
+
+fn build_lockfile(
+    source: &str,
+    block_ir: &BlockArrayIr,
+    edition: EditionArg,
+    target: cairn_lang_formats::data_version::JavaTarget,
+) -> Lockfile {
+    Lockfile {
+        source_hash: hash_source(source),
+        cairn_version: CAIRN_VERSION.to_owned(),
+        target: LockTarget {
+            edition: edition.as_str().to_owned(),
+            mc_version: target.mc_version.to_owned(),
+            data_version: target.data_version,
+        },
+        inputs: LockInputs::zero(),
+        resolved_ir_hash: hash_resolved_ir(block_ir),
+        verified: true,
+        member_version_sensitivity: vec![],
     }
 }

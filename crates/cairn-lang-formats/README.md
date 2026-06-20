@@ -9,13 +9,25 @@ the parser, lint, and theme machinery in [`cairn-lang-core`](../cairn-lang-core/
 
 ## Status
 
-Skeleton. The crate compiles, but no format backends are implemented yet.
+Java vanilla `.nbt` writer landed in M2-PR5. Litematica `.litematic`,
+WorldEdit `.schem`, and Bedrock `.mcstructure` are still to land. No
+reverse-direction (file → IR) backends ship yet.
+
+## Public API
+
+| Item | Role |
+|---|---|
+| `java_structure::build_structure_tag` | `BlockArray` → `Compound` (Java vanilla shape). |
+| `java_structure::write_structure_gzip` | Build + gzip-write in one call. |
+| `java_structure::output_filename` | `struct::cottage` → `cottage.nbt`. |
+| `java_structure::JavaStructureError` | `Nbt`, `AbstractPaletteEntry`, `DimensionOverflow`. |
+| `data_version::JavaTarget` / `resolve_java_target` | `--target <mc_version>` → `(mc_version, DataVersion)`. |
 
 ## Planned backends
 
 | Format | Edition | Direction | Spec reference |
 |---|---|---|---|
-| `.nbt` (vanilla structure block) | Java | read / write | [ecosystem-interop §12.1](https://cairn.kage1020.com/spec/ecosystem-interop/) |
+| `.nbt` (vanilla structure block) | Java | **write (done)**, read | [ecosystem-interop §12.1](https://cairn.kage1020.com/spec/ecosystem-interop/) |
 | `.litematic` (Litematica) | Java | read / write | [ecosystem-interop §12.1](https://cairn.kage1020.com/spec/ecosystem-interop/), [§12.4](https://cairn.kage1020.com/spec/ecosystem-interop/) |
 | `.schem` (WorldEdit / Sponge) | Java | read / write | [ecosystem-interop §12.1](https://cairn.kage1020.com/spec/ecosystem-interop/) |
 | `.mcstructure` | Bedrock | read / write | [ecosystem-interop §12.1](https://cairn.kage1020.com/spec/ecosystem-interop/) |

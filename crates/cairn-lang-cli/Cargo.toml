@@ -15,6 +15,7 @@ path = "src/main.rs"
 
 [dependencies]
 cairn-lang-core = { workspace = true }
+cairn-lang-formats.workspace = true
 clap = { version = "4.6.1", features = ["derive"] }
 serde_json = "1.0.150"
 
@@ -23,3 +24,4 @@ workspace = true
 
 [dev-dependencies]
 serde_json = "1.0.150"
+tempfile = "3.27.0"
