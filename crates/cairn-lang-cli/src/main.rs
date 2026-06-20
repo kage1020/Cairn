@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use cairn_lang_core::CAIRN_VERSION;
+use cairn_lang_core::block_array::{BlockArray, BlockArrayIr, lower_to_block_array};
 use cairn_lang_core::check::LineStarts;
 use cairn_lang_core::resolve::{VersionAxes, compute_axes, resolve};
 use cairn_lang_core::{Severity, check, lower, parse};
@@ -60,6 +61,20 @@ enum Command {
         #[arg(long, value_enum, default_value_t = InfoFormat::Text)]
         format: InfoFormat,
     },
+    /// Lower a .crn source file all the way to the block-array IR and print
+    /// the result. A debugging surface for the universal voxel pivot; the
+    /// user-facing `cairn compile` lands once the format backends do.
+    /// Lowering warnings (deferred members, themeless scopes, abstract
+    /// tokens) print to stderr but do not affect the exit code. Exits 0 on
+    /// success, 1 on parse failure or I/O error, 2 when the file cannot be
+    /// located.
+    Lower {
+        /// Path to the .crn file to lower.
+        file: PathBuf,
+        /// Output format for the lowered block-array IR.
+        #[arg(long, value_enum, default_value_t = LowerFormat::Ascii)]
+        format: LowerFormat,
+    },
 }
 
 #[derive(Copy, Clone, ValueEnum)]
@@ -86,6 +101,17 @@ enum InfoFormat {
     Json,
 }
 
+#[derive(Copy, Clone, ValueEnum)]
+enum LowerFormat {
+    /// Per-structure ASCII Y-slice plus a palette listing (default;
+    /// easiest way to eyeball whether the walls came out right).
+    Ascii,
+    /// Pretty JSON serialisation of `BlockArrayIr`, for tools.
+    Json,
+    /// Rust `{:#?}` debug formatting (developer-facing).
+    Debug,
+}
+
 fn main() -> ExitCode {
     let cli = Cli::parse();
     match cli.command {
@@ -96,6 +122,7 @@ fn main() -> ExitCode {
             editions,
             format,
         }) => run_info(&file, &editions, format),
+        Some(Command::Lower { file, format }) => run_lower(&file, format),
         None => {
             eprintln!("error: a subcommand is required (try `cairn --help`)");
             ExitCode::from(2)
@@ -339,5 +366,125 @@ fn capitalise(s: &str) -> String {
     match chars.next() {
         Some(c) => c.to_uppercase().collect::<String>() + chars.as_str(),
         None => String::new(),
+    }
+}
+
+fn run_lower(file: &Path, format: LowerFormat) -> ExitCode {
+    let source = match std::fs::read_to_string(file) {
+        Ok(s) => s,
+        Err(err) => {
+            eprintln!("error: cannot read `{}`: {err}", file.display());
+            return match err.kind() {
+                std::io::ErrorKind::NotFound => ExitCode::from(2),
+                _ => ExitCode::from(1),
+            };
+        }
+    };
+    let module = match parse(&source) {
+        Ok(m) => m,
+        Err(err) => {
+            eprintln!(
+                "error: {}:{}: {}",
+                file.display(),
+                err.position(),
+                err.user_message(),
+            );
+            return ExitCode::from(1);
+        }
+    };
+    let ir = lower(&module);
+    let resolution = resolve(&ir);
+    let block_ir = lower_to_block_array(&ir, &resolution);
+
+    let lines = LineStarts::new(&source);
+    for d in &block_ir.diagnostics {
+        let pos = lines.position(&source, d.span.start);
+        eprintln!(
+            "{}:{}: {}[{}]: {}",
+            file.display(),
+            pos,
+            d.severity.as_str(),
+            d.code.as_str(),
+            d.primary,
+        );
+    }
+
+    match format {
+        LowerFormat::Ascii => {
+            print_block_ir_ascii(&block_ir);
+            ExitCode::SUCCESS
+        }
+        LowerFormat::Json => match serde_json::to_string_pretty(&block_ir) {
+            Ok(json) => {
+                println!("{json}");
+                ExitCode::SUCCESS
+            }
+            Err(err) => {
+                eprintln!("error: failed to serialise block-array IR as JSON: {err}");
+                ExitCode::from(1)
+            }
+        },
+        LowerFormat::Debug => {
+            println!("{block_ir:#?}");
+            ExitCode::SUCCESS
+        }
+    }
+}
+
+fn print_block_ir_ascii(block_ir: &BlockArrayIr) {
+    if block_ir.structures.is_empty() {
+        println!("(no structures lowered)");
+        return;
+    }
+    for (key, ba) in &block_ir.structures {
+        println!("{key}  dims={}x{}x{}", ba.dims.x, ba.dims.y, ba.dims.z);
+        println!("  palette:");
+        for (i, state) in ba.palette.entries.iter().enumerate() {
+            let glyph = ascii_glyph(i);
+            if state.properties.is_empty() {
+                println!("    [{i:>3}] {glyph}  {}", state.id);
+            } else {
+                let props = state
+                    .properties
+                    .iter()
+                    .map(|(k, v)| format!("{k}={v}"))
+                    .collect::<Vec<_>>()
+                    .join(",");
+                println!("    [{i:>3}] {glyph}  {}[{props}]", state.id);
+            }
+        }
+        for y in 0..ba.dims.y {
+            println!("  y={y}");
+            print_y_slice(ba, y);
+        }
+    }
+}
+
+const ASCII_ALPHABET: &[u8] = b"#abcdefghijklmnopqrstuvwxyz0123456789";
+
+/// Glyph for a palette index in ASCII slice output: air → `.`, anything
+/// else → `#` for the first non-air, then digits/letters so a slice with
+/// many distinct materials still reads. Any palette entry past index 36
+/// renders as `?` — debug-format only, and well above M2's expected
+/// per-structure palette size (cottage uses 3 entries), but worth a glance
+/// before reading a `?`-heavy slice as evidence of broken lowering.
+fn ascii_glyph(palette_index: usize) -> char {
+    if palette_index == 0 {
+        return '.';
+    }
+    ASCII_ALPHABET
+        .get(palette_index - 1)
+        .copied()
+        .map_or('?', char::from)
+}
+
+fn print_y_slice(ba: &BlockArray, y: u32) {
+    for z in 0..ba.dims.z {
+        let mut row = String::with_capacity(ba.dims.x as usize);
+        for x in 0..ba.dims.x {
+            let i = ba.dims.index(x, y, z).expect("in-range coordinate");
+            row.push(ascii_glyph(usize::from(ba.voxels[i].0)));
+        }
+        println!("    {row}");
     }
 }

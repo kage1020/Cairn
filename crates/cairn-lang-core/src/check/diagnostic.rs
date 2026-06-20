@@ -66,6 +66,20 @@ pub enum DiagnosticCode {
     UnknownSlotTarget,
     /// `theme` selector rule that does not match any member in the file.
     ThemeSelectorUnmatched,
+    /// A member role the block-array lowering pass does not yet handle
+    /// (door/window/roof/...). Surfaces during `cairn lower` so a partial
+    /// build is still inspectable, rather than failing the whole module.
+    DeferredMember,
+    /// A struct/def scope has no theme bound to it, so every `mat_slot=`
+    /// member silently degrades to air during block-array lowering.
+    NoThemeBound,
+    /// A `mat_slot=` resolved to an abstract material token
+    /// (`@floor.wood.broadleaf`). The block-array lowering needs a canonical
+    /// id; abstract resolution arrives with the registry pack.
+    AbstractTokenDeferred,
+    /// A `struct` has no `size=WxH` header, so block-array lowering cannot
+    /// derive a voxel extent and skips it.
+    StructNoSize,
 }
 
 impl DiagnosticCode {
@@ -85,16 +99,22 @@ impl DiagnosticCode {
             Self::UnresolvedSlot => "E_UNRESOLVED_SLOT",
             Self::UnknownSlotTarget => "E_UNKNOWN_SLOT_TARGET",
             Self::ThemeSelectorUnmatched => "E_THEME_SELECTOR_UNMATCHED",
+            Self::DeferredMember => "W_DEFERRED_MEMBER",
+            Self::NoThemeBound => "W_NO_THEME_BOUND",
+            Self::AbstractTokenDeferred => "W_ABSTRACT_TOKEN_DEFERRED",
+            Self::StructNoSize => "W_STRUCT_NO_SIZE",
         }
     }
 
     /// Severity assigned to this code.
     ///
-    /// M2-PR2 codes are all `Error` (silent-substitution-style problems that
-    /// would otherwise feed bad data into later passes). M2-PR3 adds two
-    /// `Warning` codes for theme-binding hygiene that does not block a build
-    /// (`E_UNKNOWN_SLOT_TARGET`, `E_THEME_SELECTOR_UNMATCHED`); see
-    /// `spec/lint.md` §11.2 for the error-vs-warning rule.
+    /// Errors are silent-substitution-style problems that would otherwise
+    /// feed bad data into later passes; warnings are advisory drift that
+    /// does not block a build. See `spec/lint.md` §11.2 for the rule.
+    /// The block-array lowering codes (`W_DEFERRED_MEMBER`,
+    /// `W_NO_THEME_BOUND`, `W_ABSTRACT_TOKEN_DEFERRED`, `W_STRUCT_NO_SIZE`)
+    /// are all warnings: each marks a partial-build degradation rather
+    /// than an unsalvageable input.
     #[must_use]
     pub fn severity(self) -> Severity {
         match self {
@@ -106,7 +126,12 @@ impl DiagnosticCode {
             | Self::TypeMismatchLabel
             | Self::TypeMismatchSize
             | Self::UnresolvedSlot => Severity::Error,
-            Self::UnknownSlotTarget | Self::ThemeSelectorUnmatched => Severity::Warning,
+            Self::UnknownSlotTarget
+            | Self::ThemeSelectorUnmatched
+            | Self::DeferredMember
+            | Self::NoThemeBound
+            | Self::AbstractTokenDeferred
+            | Self::StructNoSize => Severity::Warning,
         }
     }
 }
@@ -332,7 +357,9 @@ mod tests {
     fn code_as_str_round_trips_for_every_variant() {
         // Every code's string form starts with `E_`; the prefix is part of
         // the diagnostic contract surface and downstream matchers depend on
-        // it. Severity expectations live in `code_severity_matches_spec`.
+        // it. The block-array lowering codes use the `W_` prefix instead
+        // and are covered by `block_array_codes_use_w_prefix`. Severity
+        // expectations live in `code_severity_matches_spec`.
         for code in [
             DiagnosticCode::DuplicateSize,
             DiagnosticCode::DuplicateSlot,
@@ -350,6 +377,26 @@ mod tests {
                 s.starts_with("E_"),
                 "code {code:?} should render to an E_-prefixed string, got {s}",
             );
+        }
+    }
+
+    #[test]
+    fn block_array_codes_use_w_prefix() {
+        // The block-array lowering warnings opt into a distinct `W_` prefix
+        // so LSP quick-fixes and CI annotators can tell partial-build
+        // degradations apart from the older `E_` warnings without having to
+        // re-decide severity. Locking the stable string form here makes the
+        // next addition fail loud if it lands with the wrong name.
+        for (code, expected) in [
+            (DiagnosticCode::DeferredMember, "W_DEFERRED_MEMBER"),
+            (DiagnosticCode::NoThemeBound, "W_NO_THEME_BOUND"),
+            (
+                DiagnosticCode::AbstractTokenDeferred,
+                "W_ABSTRACT_TOKEN_DEFERRED",
+            ),
+            (DiagnosticCode::StructNoSize, "W_STRUCT_NO_SIZE"),
+        ] {
+            assert_eq!(code.as_str(), expected, "{code:?}");
         }
     }
 
@@ -372,6 +419,10 @@ mod tests {
         for code in [
             DiagnosticCode::UnknownSlotTarget,
             DiagnosticCode::ThemeSelectorUnmatched,
+            DiagnosticCode::DeferredMember,
+            DiagnosticCode::NoThemeBound,
+            DiagnosticCode::AbstractTokenDeferred,
+            DiagnosticCode::StructNoSize,
         ] {
             assert_eq!(code.severity(), Severity::Warning, "{code:?}");
         }

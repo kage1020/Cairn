@@ -1,0 +1,282 @@
+//! Block-array IR — the universal voxel pivot below the semantic layer.
+//!
+//! Every format frontend and backend meets at this layer: it holds a voxel
+//! grid, a palette of [`BlockState`]s, and (eventually) block entities and
+//! entities, all neutral to file format, edition, and version. Compile diffs,
+//! `IoU` comparisons, and serialisation hang off this single shape (see
+//! `spec/architecture.md` §3.1).
+//!
+//! The current [`lower::lower_to_block_array`] pass handles the `floor` and
+//! `walls` member roles only. Other roles, abstract material tokens, and
+//! themeless scopes degrade to air with a warning rather than failing, so a
+//! partial build is still inspectable.
+
+mod lower;
+mod material;
+
+use indexmap::IndexMap;
+use serde::Serialize;
+
+pub use lower::lower_to_block_array;
+pub use material::{MaterialDeferred, resolve_block_state};
+
+use crate::check::Diagnostic;
+
+/// Lowered block-array IR for a whole [`crate::intent::IntentModule`].
+///
+/// Mirrors the total-plus-diagnostics shape of [`crate::resolve::Resolution`]
+/// so a caller can pipeline `parse → lower → resolve → lower_to_block_array`
+/// and surface every finding in one pass, even when some structures produced
+/// no voxels.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct BlockArrayIr {
+    /// One entry per concretised structure, keyed by `kind::name`
+    /// (`struct::cottage`). The key shape matches
+    /// [`crate::resolve::Resolution::scopes`] so the two maps line up
+    /// without an extra translation step.
+    pub structures: IndexMap<String, BlockArray>,
+    /// Diagnostics emitted during lowering. Kept separate from
+    /// [`crate::resolve::Resolution::diagnostics`]: the resolver owns
+    /// theme-binding hygiene, this list owns voxel-lowering deferrals.
+    #[serde(skip)]
+    pub diagnostics: Vec<Diagnostic>,
+}
+
+/// One concretised structure as a voxel volume.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct BlockArray {
+    /// Voxel extents along X (east), Y (up), Z (south). Front of a struct is
+    /// `+z` (`spec/components-editing-sites.md` §5.4) so the source
+    /// `size=WxH` literal becomes `(W, _, H)` here; the Y extent is derived
+    /// from member contributions.
+    pub dims: Dims,
+    /// Block states referenced by the [`voxels`] grid. Index `0` is always
+    /// [`BlockState::AIR`]; [`Palette::intern`] preserves that invariant.
+    pub palette: Palette,
+    /// Palette indices in `(y, z, x)` order: `voxels[((y * dims.z) + z) *
+    /// dims.x + x]`. Y-major lets ASCII renderers walk one slice at a time
+    /// without re-striding.
+    pub voxels: Vec<PaletteIndex>,
+    /// Block entities (chests, signs, ...) that sit on the grid. Empty in
+    /// M2 — the IR shape is reserved for the M3+ fixtures phase.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub block_entities: Vec<BlockEntity>,
+    /// Free entities (frames, paintings, ...). Empty in M2 for the same
+    /// reason as [`block_entities`].
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub entities: Vec<Entity>,
+    /// Source scope this volume was lowered from, mirroring the
+    /// [`crate::resolve::Resolution`] key (`struct::cottage`). Carried in
+    /// the IR so a downstream serialiser can stamp it into the output
+    /// filename without re-threading the originating [`IntentModule`].
+    pub source_scope: String,
+}
+
+/// Voxel extents of a [`BlockArray`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub struct Dims {
+    /// East/west extent (the source `size=WxH` `W`).
+    pub x: u32,
+    /// Up/down extent (derived from member contributions).
+    pub y: u32,
+    /// North/south extent (the source `size=WxH` `H`).
+    pub z: u32,
+}
+
+impl Dims {
+    /// Total voxel count. Returns `usize` rather than `u32` because
+    /// downstream allocations index a `Vec`.
+    #[must_use]
+    pub fn volume(self) -> usize {
+        (self.x as usize) * (self.y as usize) * (self.z as usize)
+    }
+
+    /// Linear offset of `(x, y, z)` into a `(y, z, x)`-ordered flat array.
+    /// Returns `None` when the coordinate falls outside [`Self`] so callers
+    /// can fail loud instead of indexing into the wrong cell.
+    #[must_use]
+    pub fn index(self, x: u32, y: u32, z: u32) -> Option<usize> {
+        if x >= self.x || y >= self.y || z >= self.z {
+            return None;
+        }
+        let row = (y as usize) * (self.z as usize) + (z as usize);
+        Some(row * (self.x as usize) + (x as usize))
+    }
+}
+
+/// Index into a [`Palette`]. `0` is reserved for [`BlockState::AIR`].
+///
+/// A newtype rather than a bare `u16` so a future change of the underlying
+/// width (e.g. `u32` for very large palettes) does not ripple through every
+/// call site, and so `palette.entries[i.0]` reads as "the entry the index
+/// names" instead of an arbitrary number.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
+#[serde(transparent)]
+pub struct PaletteIndex(pub u16);
+
+impl PaletteIndex {
+    /// Index reserved for air. Used by [`Palette::new_with_air`] and by the
+    /// lowering pass to leave a cell empty.
+    pub const AIR: Self = Self(0);
+}
+
+/// Append-only palette with deduplication on insertion. Insertion order is
+/// preserved so the slot at index `0` is always [`BlockState::AIR`].
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(transparent)]
+pub struct Palette {
+    /// Block states in insertion order.
+    pub entries: Vec<BlockState>,
+}
+
+impl Palette {
+    /// Construct a palette pre-seeded with [`BlockState::AIR`] at index `0`.
+    /// This is the only constructor lowering should use so the AIR invariant
+    /// holds for every [`BlockArray`].
+    #[must_use]
+    pub fn new_with_air() -> Self {
+        Self {
+            entries: vec![BlockState::air()],
+        }
+    }
+
+    /// Look up or append a block state and return its index. O(n) over the
+    /// current palette; M2 builds are small enough (cottage = 3 distinct
+    /// states) that a hash side-table would cost more than it saves.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the palette would exceed `u16::MAX` entries. That cap
+    /// matches [`PaletteIndex`]'s width and is far beyond any vanilla
+    /// block-state count (~20k) intentionally lowered into one volume.
+    pub fn intern(&mut self, state: BlockState) -> PaletteIndex {
+        if let Some(i) = self.entries.iter().position(|s| s == &state) {
+            return PaletteIndex(
+                u16::try_from(i).expect("palette index fits in u16 by construction"),
+            );
+        }
+        let idx = u16::try_from(self.entries.len())
+            .expect("palette grew past u16::MAX entries; widen PaletteIndex first");
+        self.entries.push(state);
+        PaletteIndex(idx)
+    }
+}
+
+impl Default for Palette {
+    fn default() -> Self {
+        Self::new_with_air()
+    }
+}
+
+/// A resolved Minecraft block state: canonical id plus stringly-typed
+/// properties.
+///
+/// The properties map is `String -> String` rather than a typed sum because
+/// the block-array IR sits below the materials/registry layer and treats
+/// state values as opaque payload — typing happens against the registry
+/// pack, which lands later in M2's roadmap month.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct BlockState {
+    /// Canonical id, e.g. `minecraft:cobblestone`.
+    pub id: String,
+    /// State properties in source-stable order.
+    #[serde(skip_serializing_if = "IndexMap::is_empty")]
+    pub properties: IndexMap<String, String>,
+}
+
+impl BlockState {
+    /// Canonical Minecraft id for the air block.
+    pub const AIR_ID: &'static str = "minecraft:air";
+
+    /// Construct the [`Self::AIR_ID`] state with no properties. Stays a
+    /// function rather than an `AIR: BlockState` const so callers do not
+    /// share an [`IndexMap`] allocation across palettes.
+    #[must_use]
+    pub fn air() -> Self {
+        Self {
+            id: Self::AIR_ID.to_owned(),
+            properties: IndexMap::new(),
+        }
+    }
+
+    /// Construct a property-free state. Shorthand for the common case where
+    /// a slot binds to a bare `@cobblestone` with no state literal.
+    #[must_use]
+    pub fn bare(id: impl Into<String>) -> Self {
+        Self {
+            id: id.into(),
+            properties: IndexMap::new(),
+        }
+    }
+}
+
+/// Placeholder for an inhabited block entity slot.
+///
+/// The NBT payload is intentionally off this struct: no member role
+/// currently lowers to a block entity, so committing to a concrete payload
+/// shape now would lock in a representation before the format backends and
+/// the `cairn-lang-nbt` crate exist to inform that choice.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct BlockEntity {
+    /// Voxel coordinate the block entity sits at.
+    pub pos: (u32, u32, u32),
+    /// Block entity id, e.g. `minecraft:chest`.
+    pub id: String,
+}
+
+/// Placeholder for an entity (frames, paintings, item displays, ...).
+///
+/// Same deferral story as [`BlockEntity`]: the entity payload shape is the
+/// format backend's choice and is intentionally absent for now.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct Entity {
+    /// World-space coordinate the entity sits at.
+    pub pos: (f64, f64, f64),
+    /// Entity id, e.g. `minecraft:item_frame`.
+    pub id: String,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn dims_index_round_trips() {
+        let d = Dims { x: 3, y: 2, z: 4 };
+        // (1, 1, 2) → ((1 * 4) + 2) * 3 + 1 = 19
+        assert_eq!(d.index(1, 1, 2), Some(19));
+    }
+
+    #[test]
+    fn dims_index_rejects_out_of_bounds() {
+        let d = Dims { x: 3, y: 2, z: 4 };
+        assert!(d.index(3, 0, 0).is_none());
+        assert!(d.index(0, 2, 0).is_none());
+        assert!(d.index(0, 0, 4).is_none());
+    }
+
+    #[test]
+    fn palette_seeds_air_at_index_zero() {
+        let p = Palette::new_with_air();
+        assert_eq!(p.entries.len(), 1);
+        assert_eq!(p.entries[0].id, BlockState::AIR_ID);
+    }
+
+    #[test]
+    fn palette_intern_dedupes() {
+        let mut p = Palette::new_with_air();
+        let a = p.intern(BlockState::bare("minecraft:cobblestone"));
+        let b = p.intern(BlockState::bare("minecraft:cobblestone"));
+        assert_eq!(a, b);
+        assert_eq!(p.entries.len(), 2, "palette grew despite duplicate insert");
+    }
+
+    #[test]
+    fn palette_intern_appends_distinct_states() {
+        let mut p = Palette::new_with_air();
+        let cobble = p.intern(BlockState::bare("minecraft:cobblestone"));
+        let planks = p.intern(BlockState::bare("minecraft:oak_planks"));
+        assert_ne!(cobble, planks);
+        assert_eq!(p.entries.len(), 3);
+    }
+}
