@@ -229,9 +229,7 @@ fn fill_walls(dims: Dims, height: u32, idx: PaletteIndex, voxels: &mut [PaletteI
         for z in 0..dims.z {
             for x in 0..dims.x {
                 let on_edge = x == 0 || x + 1 == dims.x || z == 0 || z + 1 == dims.z;
-                if on_edge
-                    && let Some(i) = dims.index(x, y, z)
-                {
+                if on_edge && let Some(i) = dims.index(x, y, z) {
                     voxels[i] = idx;
                 }
             }

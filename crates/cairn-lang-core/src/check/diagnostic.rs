@@ -357,7 +357,9 @@ mod tests {
     fn code_as_str_round_trips_for_every_variant() {
         // Every code's string form starts with `E_`; the prefix is part of
         // the diagnostic contract surface and downstream matchers depend on
-        // it. Severity expectations live in `code_severity_matches_spec`.
+        // it. The block-array lowering codes use the `W_` prefix instead
+        // and are covered by `block_array_codes_use_w_prefix`. Severity
+        // expectations live in `code_severity_matches_spec`.
         for code in [
             DiagnosticCode::DuplicateSize,
             DiagnosticCode::DuplicateSlot,
@@ -375,6 +377,26 @@ mod tests {
                 s.starts_with("E_"),
                 "code {code:?} should render to an E_-prefixed string, got {s}",
             );
+        }
+    }
+
+    #[test]
+    fn block_array_codes_use_w_prefix() {
+        // The block-array lowering warnings opt into a distinct `W_` prefix
+        // so LSP quick-fixes and CI annotators can tell partial-build
+        // degradations apart from the older `E_` warnings without having to
+        // re-decide severity. Locking the stable string form here makes the
+        // next addition fail loud if it lands with the wrong name.
+        for (code, expected) in [
+            (DiagnosticCode::DeferredMember, "W_DEFERRED_MEMBER"),
+            (DiagnosticCode::NoThemeBound, "W_NO_THEME_BOUND"),
+            (
+                DiagnosticCode::AbstractTokenDeferred,
+                "W_ABSTRACT_TOKEN_DEFERRED",
+            ),
+            (DiagnosticCode::StructNoSize, "W_STRUCT_NO_SIZE"),
+        ] {
+            assert_eq!(code.as_str(), expected, "{code:?}");
         }
     }
 
@@ -397,6 +419,10 @@ mod tests {
         for code in [
             DiagnosticCode::UnknownSlotTarget,
             DiagnosticCode::ThemeSelectorUnmatched,
+            DiagnosticCode::DeferredMember,
+            DiagnosticCode::NoThemeBound,
+            DiagnosticCode::AbstractTokenDeferred,
+            DiagnosticCode::StructNoSize,
         ] {
             assert_eq!(code.severity(), Severity::Warning, "{code:?}");
         }

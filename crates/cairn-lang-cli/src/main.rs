@@ -464,8 +464,10 @@ const ASCII_ALPHABET: &[u8] = b"#abcdefghijklmnopqrstuvwxyz0123456789";
 
 /// Glyph for a palette index in ASCII slice output: air → `.`, anything
 /// else → `#` for the first non-air, then digits/letters so a slice with
-/// many distinct materials still reads. Falls back to `?` past the printable
-/// alphanumeric range.
+/// many distinct materials still reads. Any palette entry past index 36
+/// renders as `?` — debug-format only, and well above M2's expected
+/// per-structure palette size (cottage uses 3 entries), but worth a glance
+/// before reading a `?`-heavy slice as evidence of broken lowering.
 fn ascii_glyph(palette_index: usize) -> char {
     if palette_index == 0 {
         return '.';
