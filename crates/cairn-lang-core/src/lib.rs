@@ -8,6 +8,7 @@
 //! (materials, themes, per-edition blockstate) lives in downstream layers.
 
 pub mod ast;
+pub mod block_array;
 pub mod check;
 pub mod error;
 pub mod intent;
@@ -16,6 +17,10 @@ pub mod parse;
 pub mod resolve;
 
 pub use ast::{DottedRef, Module, Statement};
+pub use block_array::{
+    BlockArray, BlockArrayIr, BlockEntity, BlockState, Dims, Entity, Palette, PaletteIndex,
+    lower_to_block_array,
+};
 pub use check::{Diagnostic, DiagnosticCode, Severity, check};
 pub use error::{LexError, ParseError, Position, Span};
 pub use intent::{IntentModule, Member, MemberRole, SemanticLevel, lower};
