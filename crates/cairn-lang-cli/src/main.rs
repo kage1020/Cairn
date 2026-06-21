@@ -7,7 +7,7 @@ use cairn_lang_core::CAIRN_VERSION;
 use cairn_lang_core::block_array::{BlockArray, BlockArrayIr, lower_to_block_array};
 use cairn_lang_core::check::LineStarts;
 use cairn_lang_core::lock::{
-    LockEdition, LockInputs, LockTarget, Lockfile, hash_resolved_ir, hash_source,
+    HashHex, LockEdition, LockInputs, LockTarget, Lockfile, hash_resolved_ir, hash_source,
 };
 use cairn_lang_core::resolve::{VersionAxes, compute_axes, resolve};
 use cairn_lang_core::{Severity, check, lower, parse};
@@ -15,6 +15,7 @@ use cairn_lang_formats::data_version::resolve_java_target;
 use cairn_lang_formats::java_structure::{
     Compound, build_structure_tag, output_filename, write_compound_gzip,
 };
+use cairn_lang_formats::registry::builtin_java;
 use clap::{Parser, Subcommand, ValueEnum};
 
 /// `cairn` — Minecraft build DSL command-line interface.
@@ -576,13 +577,13 @@ fn run_compile(
         Err(code) => return code,
     };
 
-    let prepared = match prepare_artifacts(&block_ir, target, &out_dir) {
+    let prepared = match prepare_artifacts(&block_ir, &target, &out_dir) {
         Ok(p) => p,
         Err(code) => return code,
     };
 
     let lock_path = lock.map_or_else(|| default_lock_path(file), Path::to_path_buf);
-    write_artifacts_and_lock(&prepared, &source, &block_ir, edition, target, &lock_path)
+    write_artifacts_and_lock(&prepared, &source, &block_ir, edition, &target, &lock_path)
 }
 
 fn load_and_lower(file: &Path) -> Result<(String, BlockArrayIr), ExitCode> {
@@ -668,7 +669,7 @@ fn prepare_out_dir(file: &Path, requested: Option<&Path>) -> Result<PathBuf, Exi
 /// is serialisable.
 fn prepare_artifacts(
     block_ir: &BlockArrayIr,
-    target: cairn_lang_formats::data_version::JavaTarget,
+    target: &cairn_lang_formats::data_version::JavaTarget,
     out_dir: &Path,
 ) -> Result<Vec<(PathBuf, Compound)>, ExitCode> {
     let mut prepared = Vec::with_capacity(block_ir.structures.len());
@@ -690,7 +691,7 @@ fn write_artifacts_and_lock(
     source: &str,
     block_ir: &BlockArrayIr,
     edition: EditionArg,
-    target: cairn_lang_formats::data_version::JavaTarget,
+    target: &cairn_lang_formats::data_version::JavaTarget,
     lock_path: &Path,
 ) -> ExitCode {
     let mut written: Vec<PathBuf> = Vec::with_capacity(prepared.len());
@@ -782,17 +783,26 @@ fn build_lockfile(
     source: &str,
     block_ir: &BlockArrayIr,
     edition: EditionArg,
-    target: cairn_lang_formats::data_version::JavaTarget,
+    target: &cairn_lang_formats::data_version::JavaTarget,
 ) -> Result<Lockfile, cairn_lang_core::lock::HashError> {
     Ok(Lockfile {
         source_hash: hash_source(source),
         cairn_version: CAIRN_VERSION.to_owned(),
         target: LockTarget {
             edition: edition.as_lock_edition(),
-            mc_version: target.mc_version.to_owned(),
+            mc_version: target.mc_version.clone(),
             data_version: target.data_version,
         },
-        inputs: LockInputs::zero(),
+        inputs: LockInputs {
+            // The registry pack ingest replaces the hardcoded `data_version`
+            // table; its bytes hash pins the exact (mc_version, DataVersion)
+            // resolution rules a downstream re-compile must match. The
+            // constraint catalog ingest in a later PR fills the second
+            // field; until then it stays zero (per `LockInputs::zero`'s
+            // contract).
+            registry_pack_hash: builtin_java().bytes_hash.clone(),
+            constraint_catalog_hash: HashHex::zero(),
+        },
         resolved_ir_hash: hash_resolved_ir(block_ir)?,
         verified: true,
         member_version_sensitivity: vec![],

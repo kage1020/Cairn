@@ -1,0 +1,9 @@
+{
+  "schema_version": 1,
+  "edition": "java",
+  "name": "cairn-builtin-java",
+  "description": "Built-in Java registry pack bundled with the Cairn reference compiler. Sourced from Mojang release notes (no `--reports` extraction yet).",
+  "files": {
+    "data_versions": "data_versions.json"
+  }
+}

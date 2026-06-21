@@ -6,9 +6,14 @@
 
 pub mod data_version;
 pub mod java_structure;
+pub mod registry;
 
 pub use data_version::{JavaTarget, UnsupportedTarget, resolve_java_target, supported_list};
 pub use java_structure::{
     Compound, JavaStructureError, build_structure_tag, output_filename, write_compound_gzip,
     write_structure_gzip,
+};
+pub use registry::{
+    PackEdition, PackFiles, PackManifest, PackSource, RegistryError, RegistryPack, builtin_java,
+    load_builtin_java, load_from_dir,
 };

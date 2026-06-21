@@ -17,6 +17,20 @@ placeholder cannot leak out. The `2026.07.0` release PR will flip publish to `tr
 
 ### Added
 
+- `cairn-lang-formats::registry` — registry pack loader covering the
+  manifest (`pack.json`) and the `(mc_version, DataVersion)` table
+  (`data_versions.json`). The built-in Java pack lives under
+  `data/registry/java/` and is embedded into the binary via
+  `include_str!`; `load_from_dir` is the seam a later
+  `--registry-pack <dir>` flag will use. Subsequent 2026.12.0 PRs extend
+  `PackFiles` with `Option`-typed entries for blocks, items, tags, and the
+  semantic-sensitivity catalog without breaking older packs. Validation at
+  load time catches schema_version drift, empty version tables, a
+  `latest` value that does not appear in `versions`, and an edition
+  mismatch between manifest and loader. The pack's bytes hash
+  (`sha256` over manifest + each named component) is exposed as
+  `RegistryPack::bytes_hash` and lands in the lockfile under
+  `inputs.registry_pack_hash`.
 - `cairn compile examples/cottage.crn --edition java` now produces a
   complete cottage: floor, walls, gable roof with overhang, front door
   opening, and a symmetric pair of front windows. The block-array
@@ -70,18 +84,22 @@ placeholder cannot leak out. The `2026.07.0` release PR will flip publish to `tr
   palette tokens that survive lowering raise
   `JavaStructureError::AbstractPaletteEntry` rather than silently
   emitting an air block.
-- `cairn-lang-formats::data_version` — hardcoded
-  (`mc_version`, `DataVersion`) table covering 1.20.4, 1.21, and 1.21.4
-  plus the `latest` alias. The 2026.12.0 registry pack ingest replaces
-  this table with values pulled from a versioned data file.
+- `cairn-lang-formats::data_version` — `(mc_version, DataVersion)`
+  resolution. Initially covered 1.20.4, 1.21, and 1.21.4 plus the
+  `latest` alias from a hardcoded array; the registry pack ingest above
+  is now the source of truth, and `resolve_java_target` / `supported_list`
+  delegate to the built-in pack via a `OnceLock`. The CLI surface is
+  unchanged.
 - `cairn_lang_core::lock` — `build.cairn.lock` reader/writer matching
   `spec/versioning-editions.md` §10.6. Keys appear in the spec-printed
   order (`source_hash, cairn_version, target, inputs,
   resolved_ir_hash, verified, member_version_sensitivity`).
   `hash_source` and `hash_resolved_ir` (sha256 over UTF-8 source bytes
   and over the IR's JSON serialisation, respectively) give the lockfile
-  its reproducibility anchor. `LockInputs::zero()` ships zero hashes
-  until the registry pack and constraint catalog land.
+  its reproducibility anchor. `inputs.registry_pack_hash` is now filled
+  by the registry pack ingest above; `inputs.constraint_catalog_hash`
+  stays zero until that catalog lands, and `LockInputs::zero()` remains
+  available for fixtures and tests that need a known empty shape.
 - `cairn info <file>` CLI subcommand reports the three version axes for a
   `.crn` source — registry-compatible range, per-edition portability, and
   semantic-sensitive members — as defined in `spec/versioning-editions.md`
@@ -168,6 +186,15 @@ placeholder cannot leak out. The `2026.07.0` release PR will flip publish to `tr
   surface graduates.
 - [Roadmap](https://cairn.kage1020.com/roadmap/) published, with M1–M6 milestones and a monthly
   scope plan through `2027.06.0`.
+
+### Changed (Java backend Rust API — affects `cairn-lang-formats` consumers)
+
+- `cairn_lang_formats::JavaTarget` is no longer `Copy`. The struct now
+  owns its `mc_version: String` (sourced from a registry pack at runtime
+  rather than the previous `&'static str` table), so the type implements
+  `Clone` only. Direct callers of `build_structure_tag` /
+  `write_structure_gzip` must pass `&JavaTarget` instead of moving the
+  value. The CLI surface is unchanged.
 
 ### Added (executable slice for M1 — *source parses*)
 
