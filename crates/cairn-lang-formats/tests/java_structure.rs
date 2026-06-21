@@ -324,3 +324,90 @@ fn f11_unit_air_debug_snapshot_is_stable() {
     let root = build_structure_tag(&unit_air(), target_1_21_4()).expect("build");
     insta::assert_debug_snapshot!(root);
 }
+
+/// Run the full pipeline (parse → lower → resolve → block-array →
+/// structure tag) so the cottage example reaches the Java backend through
+/// the same code path the CLI uses. Built locally rather than imported
+/// because the formats crate intentionally only depends on the IR + NBT
+/// codec; the test layer is the right place to reach across into the parser.
+fn cottage_structure_tag() -> cairn_lang_formats::java_structure::Compound {
+    use cairn_lang_core::block_array::lower_to_block_array;
+    use cairn_lang_core::{lower, parse, resolve};
+
+    let source = std::fs::read_to_string(
+        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join("..")
+            .join("examples")
+            .join("cottage.crn"),
+    )
+    .expect("read cottage.crn");
+    let module = parse(&source).expect("parse");
+    let ir = lower(&module);
+    let resolution = resolve(&ir);
+    let block_array = lower_to_block_array(&ir, &resolution);
+    let ba = block_array
+        .structures
+        .get("struct::cottage")
+        .expect("cottage struct lowered");
+    build_structure_tag(ba, target_1_21_4()).expect("build")
+}
+
+#[test]
+fn f12_cottage_end_to_end_palette_carries_spruce_stairs_properties() {
+    // M2-PR6: lowering the cottage example must produce a Java palette
+    // where spruce_stairs appears with `facing` and `half` properties on
+    // every entry. The Properties compound is the contract the Minecraft
+    // structure block reads — losing it would silently strip the roof
+    // orientation and render the gable as flat slabs.
+    let root = cottage_structure_tag();
+    let Tag::List(palette) = &root.entries["palette"] else {
+        panic!("palette must be a list")
+    };
+    let mut stair_entries = 0;
+    for item in &palette.items {
+        let Tag::Compound(c) = item else {
+            panic!("palette entry must be a compound")
+        };
+        let Some(Tag::String(name)) = c.entries.get("Name") else {
+            panic!("palette Name must be a string")
+        };
+        if name != "minecraft:spruce_stairs" {
+            continue;
+        }
+        stair_entries += 1;
+        let Some(Tag::Compound(props)) = c.entries.get("Properties") else {
+            panic!("spruce_stairs palette entry must carry Properties")
+        };
+        assert!(
+            matches!(props.entries.get("facing"), Some(Tag::String(_))),
+            "spruce_stairs entry must carry `facing`",
+        );
+        assert!(
+            matches!(props.entries.get("half"), Some(Tag::String(_))),
+            "spruce_stairs entry must carry `half`",
+        );
+    }
+    assert!(
+        stair_entries >= 3,
+        "expected at least 3 spruce_stairs blockstates, got {stair_entries}",
+    );
+}
+
+#[test]
+fn f13_cottage_end_to_end_size_matches_overhang_inflated_dims() {
+    // M2-PR6: cottage.crn declares size=9x7 walls height=4 roof overhang=1.
+    // The Java structure root must mirror the lowering pass:
+    //   x = 9 + 2 = 11
+    //   z = 7 + 2 = 9
+    //   y = 1 (floor) + 4 (walls) + ceil(9/2) (gable) = 10
+    let root = cottage_structure_tag();
+    match &root.entries["size"] {
+        Tag::List(l) => assert_eq!(
+            l.items,
+            vec![Tag::Int(11), Tag::Int(10), Tag::Int(9)],
+            "size should be [11, 10, 9] after overhang inflation",
+        ),
+        _ => panic!("size is not a List"),
+    }
+}

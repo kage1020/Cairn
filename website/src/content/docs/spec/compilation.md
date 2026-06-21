@@ -46,3 +46,30 @@ cairn compile build.crn --edition bedrock --target 1.21.40
 - `--target` alone is **forbidden**; `--edition` is **required**.
 - The same "1.21" means different things on Java and Bedrock, and Java's DataVersion is unrelated to
   Bedrock's block_version.
+
+## 4.3 Gable roof voxel rules
+
+`roof kind=gable [overhang=N] mat_slot=...` lowers to a pair of opposite
+stair slopes meeting at a ridge. The voxelisation rules are deliberately
+minimal so the cottage example renders cleanly without committing to the
+broader roof taxonomy (`shed`, `hip`, `flat`, ...) before evaluation data
+arrives.
+
+- **Ridge axis.** The ridge runs along the *long* horizontal axis of the
+  struct footprint. When the footprint is square (`size=WxW`) the tie
+  breaks in favour of `x` (east-west ridge).
+- **Ridge height.** A gable rises `ceil(short_span / 2)` voxels above the
+  wall top, where `short_span` is the *roof bounding box* extent along the
+  short axis (= `min(dims.x, dims.z)` after the overhang inflation below).
+  One layer is the apex.
+- **Overhang.** `overhang=N` inflates the voxel grid by `N` on every
+  horizontal axis (`Dims.x = size.w + 2N`, `Dims.z = size.h + 2N`). Floors,
+  walls, doors, and windows keep their authored coordinates and are
+  shifted inward by `+N` along x and z. The roof spans the full inflated
+  bounding box so the eaves and gable ends extend past the wall ring.
+- **Stair orientation.** Each slope row uses `minecraft:spruce_stairs`
+  (M2; per-theme roof materials land with the registry pack) with
+  `half=bottom, shape=straight`, `facing` pointed toward the ridge:
+  `south` on the `-z` slope and `north` on the `+z` slope for an x-axis
+  ridge; `east` / `west` mirrored for a z-axis ridge. The apex caps with a
+  single stair at `half=top` using the low-slope facing.

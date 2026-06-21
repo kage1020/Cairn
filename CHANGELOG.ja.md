@@ -19,6 +19,18 @@
 
 ### Added
 
+- `cairn compile examples/cottage.crn --edition java` が cottage 一式
+  (床、壁、overhang 付き gable 屋根、正面のドア開口、左右対称な正面窓 2 枚)
+  を出力するようになった。block-array lowering pass が
+  `spec/compilation.md` §4.1 のフェーズ順評価 (massing → envelope → openings)
+  を実装し、ソースで `door` を `walls` より前に書いても実際の開口が壁に穿たれる。
+  `Dims` は x/z 軸を `2 * overhang` 拡張し、床・壁・開口を `+overhang` シフトする
+  ことで、ソース上の `size=WxH` の意味を保ったまま屋根の張り出しを表現する。
+  gable 屋根は `minecraft:spruce_stairs` をハードコードし、`facing` を傾斜方向から
+  導出 (`-z` 面は `south`、`+z` 面は `north`)、棟頂点は `half=top` の階段 1 ブロックで
+  閉じる。cottage example は `W_DEFERRED_MEMBER` 警告ゼロで lowering 完了。
+  他の屋根 kind (`shed`, `hip`, `flat`) と door ブロック自体の配置は後続 PR に残る。
+  M2 の cottage end-to-end マイルストーン (2026.11.0) を達成。
 - `cairn info <file>` CLI サブコマンドが `.crn` ソースに対する 3 軸のバージョン情報
   (registry-compatible range、edition 間ポータビリティ、semantic-sensitive members) を
   出力する。`spec/versioning-editions.md` §10.5 のサンプル形式に準拠。

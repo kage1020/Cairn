@@ -17,6 +17,20 @@ placeholder cannot leak out. The `2026.07.0` release PR will flip publish to `tr
 
 ### Added
 
+- `cairn compile examples/cottage.crn --edition java` now produces a
+  complete cottage: floor, walls, gable roof with overhang, front door
+  opening, and a symmetric pair of front windows. The block-array
+  lowering pass implements `spec/compilation.md` §4.1 phase ordering
+  (massing → envelope → openings) so a `door` written before `walls`
+  still cuts a real opening, and inflates `Dims` by `2 * overhang` on
+  the x/z axes while shifting floor/walls/openings inward so the
+  authored `size=WxH` keeps its meaning. Gable roofs hard-code
+  `minecraft:spruce_stairs` with `facing` derived from the slope side
+  (`south` on `-z`, `north` on `+z`) and cap the ridge with one
+  `half=top` stair. The cottage example now lowers without
+  `W_DEFERRED_MEMBER` warnings; other roof kinds (`shed`, `hip`,
+  `flat`) and door blockstate placement remain deferred for later PRs.
+  Closes M2 cottage end-to-end milestone (2026.11.0).
 - `cairn compile <file> --edition java [--target <mc_version>] [--out <dir>]
   [--lock <path>]` CLI subcommand closes M2 — it lowers a `.crn` source
   through the existing pipeline (`parse → lower → resolve →
