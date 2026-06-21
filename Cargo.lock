@@ -110,6 +110,8 @@ dependencies = [
  "cairn-lang-core",
  "cairn-lang-nbt",
  "insta",
+ "serde",
+ "serde_json",
  "thiserror",
 ]
 

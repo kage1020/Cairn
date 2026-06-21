@@ -54,7 +54,7 @@ fn synthetic_cottage() -> BlockArray {
 fn f1_unit_air_root_has_size_palette_blocks_entities_dataversion() {
     // AC F1: 1×1×1 all-air structure produces the canonical empty room.
     let target = target_1_21_4();
-    let root = build_structure_tag(&unit_air(), target).expect("build");
+    let root = build_structure_tag(&unit_air(), &target).expect("build");
     let keys: Vec<&String> = root.entries.keys().collect();
     assert_eq!(
         keys,
@@ -117,7 +117,7 @@ fn f1_unit_air_root_has_size_palette_blocks_entities_dataversion() {
 #[test]
 fn f2_cottage_palette_contains_three_concrete_entries() {
     // AC F2: synthetic cottage IR exposes air / cobblestone / oak_planks.
-    let root = build_structure_tag(&synthetic_cottage(), target_1_21_4()).expect("build");
+    let root = build_structure_tag(&synthetic_cottage(), &target_1_21_4()).expect("build");
     let Tag::List(palette) = &root.entries["palette"] else {
         unreachable!()
     };
@@ -146,7 +146,7 @@ fn f2_cottage_palette_contains_three_concrete_entries() {
 #[test]
 fn f3_palette_entry_without_properties_omits_properties_compound() {
     // AC F3: property-less states leave Properties out entirely.
-    let root = build_structure_tag(&unit_air(), target_1_21_4()).expect("build");
+    let root = build_structure_tag(&unit_air(), &target_1_21_4()).expect("build");
     let Tag::List(palette) = &root.entries["palette"] else {
         unreachable!()
     };
@@ -179,7 +179,7 @@ fn f4_palette_entry_with_properties_keeps_them() {
         entities: vec![],
         source_scope: "struct::stairs".to_owned(),
     };
-    let root = build_structure_tag(&ba, target_1_21_4()).expect("build");
+    let root = build_structure_tag(&ba, &target_1_21_4()).expect("build");
     let Tag::List(palette) = &root.entries["palette"] else {
         unreachable!()
     };
@@ -202,7 +202,7 @@ fn f4_palette_entry_with_properties_keeps_them() {
 #[test]
 fn f5_blocks_entries_count_equals_dims_volume() {
     // AC F5: every voxel — including air — has an entry.
-    let root = build_structure_tag(&synthetic_cottage(), target_1_21_4()).expect("build");
+    let root = build_structure_tag(&synthetic_cottage(), &target_1_21_4()).expect("build");
     let Tag::List(blocks) = &root.entries["blocks"] else {
         unreachable!()
     };
@@ -212,7 +212,7 @@ fn f5_blocks_entries_count_equals_dims_volume() {
 #[test]
 fn f6_blocks_entries_walk_yzx_order() {
     // AC F6: block list traversal matches voxel storage order.
-    let root = build_structure_tag(&synthetic_cottage(), target_1_21_4()).expect("build");
+    let root = build_structure_tag(&synthetic_cottage(), &target_1_21_4()).expect("build");
     let Tag::List(blocks) = &root.entries["blocks"] else {
         unreachable!()
     };
@@ -255,7 +255,7 @@ fn int_at(items: &[Tag], i: usize) -> i32 {
 fn f7_dataversion_matches_target() {
     // AC F7: the integer in the root reflects the target table.
     let t = resolve_java_target("1.20.4").expect("known");
-    let root = build_structure_tag(&unit_air(), t).expect("build");
+    let root = build_structure_tag(&unit_air(), &t).expect("build");
     assert_eq!(root.entries.get("DataVersion"), Some(&Tag::Int(3700)));
 }
 
@@ -273,7 +273,7 @@ fn f8_abstract_palette_id_rejected() {
         entities: vec![],
         source_scope: "struct::abs".to_owned(),
     };
-    let err = build_structure_tag(&ba, target_1_21_4()).expect_err("abstract");
+    let err = build_structure_tag(&ba, &target_1_21_4()).expect_err("abstract");
     match err {
         JavaStructureError::AbstractPaletteEntry { id } => assert_eq!(id, "@cobblestone"),
         other => panic!("expected AbstractPaletteEntry, got {other:?}"),
@@ -312,7 +312,7 @@ fn output_filename_handles_empty_input() {
 fn f10_gzip_output_begins_with_magic_bytes() {
     // AC F10: write_structure_gzip produces a gzip stream.
     let mut buf = Vec::new();
-    write_structure_gzip(&mut buf, &unit_air(), target_1_21_4()).expect("write");
+    write_structure_gzip(&mut buf, &unit_air(), &target_1_21_4()).expect("write");
     assert!(buf.len() >= 2);
     assert_eq!(&buf[..2], &[0x1f, 0x8b], "gzip magic prefix");
 }
@@ -321,7 +321,7 @@ fn f10_gzip_output_begins_with_magic_bytes() {
 fn f11_unit_air_debug_snapshot_is_stable() {
     // AC F11: stable debug snapshot of the tag tree so a future refactor
     // that accidentally changes Tag construction order is caught.
-    let root = build_structure_tag(&unit_air(), target_1_21_4()).expect("build");
+    let root = build_structure_tag(&unit_air(), &target_1_21_4()).expect("build");
     insta::assert_debug_snapshot!(root);
 }
 
@@ -350,7 +350,7 @@ fn cottage_structure_tag() -> cairn_lang_formats::java_structure::Compound {
         .structures
         .get("struct::cottage")
         .expect("cottage struct lowered");
-    build_structure_tag(ba, target_1_21_4()).expect("build")
+    build_structure_tag(ba, &target_1_21_4()).expect("build")
 }
 
 #[test]

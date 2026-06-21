@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use std::process::Command;
 
 use cairn_lang_core::CAIRN_VERSION;
-use cairn_lang_core::lock::{LockEdition, Lockfile};
+use cairn_lang_core::lock::{HashHex, LockEdition, Lockfile};
 use tempfile::TempDir;
 
 fn cargo_bin() -> PathBuf {
@@ -401,6 +401,37 @@ fn compile_all_examples_exit_zero() {
             String::from_utf8_lossy(&result.stderr),
         );
     }
+}
+
+#[test]
+fn c15_lockfile_registry_pack_hash_is_populated() {
+    // The registry pack ingest replaces the hardcoded data_version table,
+    // and the lockfile must pin the bytes the compile resolved against.
+    // The `constraint_catalog_hash` stays zero until that catalog lands.
+    let (_tmp_src, src) = cottage_in_tempdir();
+    let out_dir = TempDir::new().expect("out tempdir");
+    let lock_path = out_dir.path().join("c15.lock");
+    let result = run_compile(&[
+        src.to_str().unwrap(),
+        "--edition",
+        "java",
+        "--out",
+        out_dir.path().to_str().unwrap(),
+        "--lock",
+        lock_path.to_str().unwrap(),
+    ]);
+    assert!(result.status.success());
+    let lf = Lockfile::read_from_path(&lock_path).expect("read lock");
+    assert_ne!(
+        lf.inputs.registry_pack_hash.as_str(),
+        HashHex::ZERO_STR,
+        "registry_pack_hash must be filled in by the registry pack ingest",
+    );
+    assert_eq!(
+        lf.inputs.constraint_catalog_hash.as_str(),
+        HashHex::ZERO_STR,
+        "constraint_catalog_hash stays zero until its own ingest lands",
+    );
 }
 
 #[test]

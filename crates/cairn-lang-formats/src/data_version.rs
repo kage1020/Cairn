@@ -1,26 +1,30 @@
-//! `--target <mc_version>` → Minecraft `DataVersion` resolution table.
+//! `--target <mc_version>` → Minecraft `DataVersion` resolution.
 //!
 //! Java structure NBT carries a `DataVersion` integer that the loading
 //! client uses to know whether and how to run DFU upgrades. The mapping
-//! between human-facing `1.21.4` and the integer `4189` is owned by
-//! Mojang's source; we hardcode the subset the bundled `examples/` target.
-//! The registry pack ingest planned alongside `cairn info`'s
-//! semantic-sensitivity catalog replaces this constant table with values
-//! pulled from a versioned data file.
+//! between human-facing `1.21.4` and the integer `4189` is sourced from
+//! the built-in registry pack at `data/registry/java/data_versions.json`
+//! (see [`crate::registry`]). The hardcoded table that used to live in
+//! this module was removed when the registry pack ingest landed.
 
 use thiserror::Error;
 
-/// Resolved Minecraft target. Held by value (no `String`) so passing a
-/// target around the backend is cheap.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+use crate::registry::builtin_java;
+
+/// Resolved Minecraft target. `mc_version` is owned (cloned from the
+/// registry pack) so a future `--registry-pack <dir>` flow can drop
+/// runtime-loaded strings in here. `Clone` instead of `Copy` because the
+/// owned `mc_version` cannot be byte-copied; callers that previously
+/// relied on `Copy` now pass `&JavaTarget` instead.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct JavaTarget {
     /// Human-facing version string, e.g. `"1.21.4"`.
-    pub mc_version: &'static str,
+    pub mc_version: String,
     /// `DataVersion` integer written into the structure NBT root.
     pub data_version: i32,
 }
 
-/// `--target` value did not match any supported version.
+/// `--target` value did not match any version in the registry pack.
 #[derive(Debug, Error)]
 #[error("unsupported java target `{requested}`. supported targets: {supported}")]
 pub struct UnsupportedTarget {
@@ -30,69 +34,25 @@ pub struct UnsupportedTarget {
     pub supported: String,
 }
 
-/// Supported Java targets, in ascending version order. Add a row when a new
-/// `DataVersion` is published; remove a row only at a `CalVer` major.
-///
-/// Sources:
-/// - 1.20.4 → `3700` (Mojang release thread, Dec 2023)
-/// - 1.21.0 → `3953` (release notes, June 2024)
-/// - 1.21.4 → `4189` (release notes, Dec 2024)
-const JAVA_TARGETS: &[JavaTarget] = &[
-    JavaTarget {
-        mc_version: "1.20.4",
-        data_version: 3700,
-    },
-    JavaTarget {
-        mc_version: "1.21",
-        data_version: 3953,
-    },
-    JavaTarget {
-        mc_version: "1.21.4",
-        data_version: 4189,
-    },
-];
-
-/// `"latest"` alias resolves to this row. Held as a separate const so the
-/// resolver does not have to take `.last()` of a slice at runtime — that
-/// expression would have to defend against an empty table at every call,
-/// even though `JAVA_TARGETS` is statically guaranteed non-empty.
-const LATEST_TARGET: JavaTarget = JAVA_TARGETS[JAVA_TARGETS.len() - 1];
-
-/// Alias accepted in addition to the exact `mc_version` strings.
-const LATEST: &str = "latest";
-
-/// Resolve a `--target` string against the hardcoded table. The literal
-/// `"latest"` aliases the last entry, matching the working assumption that
-/// "no explicit `--target`" means "the newest supported".
+/// Resolve a `--target` string against the built-in registry pack. The
+/// literal `"latest"` aliases the row named by `data_versions.latest`,
+/// matching the working assumption that "no explicit `--target`" means
+/// "the newest supported".
 ///
 /// # Errors
 ///
 /// Returns [`UnsupportedTarget`] when the requested string is neither an
 /// exact `mc_version` match nor the `"latest"` alias.
 pub fn resolve_java_target(requested: &str) -> Result<JavaTarget, UnsupportedTarget> {
-    if requested == LATEST {
-        return Ok(LATEST_TARGET);
-    }
-    if let Some(t) = JAVA_TARGETS.iter().find(|t| t.mc_version == requested) {
-        return Ok(*t);
-    }
-    Err(UnsupportedTarget {
-        requested: requested.to_owned(),
-        supported: supported_list(),
-    })
+    builtin_java().resolve_java_target(requested)
 }
 
-/// Human-readable list of supported `mc_version` strings, joined for error
-/// messages. Public so the CLI can print the same list in `--help`-style
-/// contexts without re-deriving it.
+/// Human-readable list of supported `mc_version` strings (built-in pack),
+/// joined for error messages. Public so the CLI can print the same list
+/// in `--help`-style contexts without re-deriving it.
 #[must_use]
 pub fn supported_list() -> String {
-    let mut entries: Vec<String> = JAVA_TARGETS
-        .iter()
-        .map(|t| t.mc_version.to_owned())
-        .collect();
-    entries.push(LATEST.to_owned());
-    entries.join(", ")
+    builtin_java().supported_list()
 }
 
 #[cfg(test)]
@@ -107,10 +67,14 @@ mod tests {
     }
 
     #[test]
-    fn resolves_latest_alias_to_last_entry() {
+    fn resolves_latest_alias() {
         let latest = resolve_java_target("latest").expect("latest");
-        let last = *JAVA_TARGETS.last().expect("table non-empty");
-        assert_eq!(latest, last);
+        // `latest` must resolve to a real row that itself resolves to the
+        // same target. Comparing against a recomputed lookup avoids
+        // hardcoding the answer here so a registry-pack update doesn't
+        // need a parallel edit in this test.
+        let echoed = resolve_java_target(&latest.mc_version).expect("echo");
+        assert_eq!(latest, echoed);
     }
 
     #[test]

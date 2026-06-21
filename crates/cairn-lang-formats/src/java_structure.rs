@@ -69,7 +69,7 @@ pub enum JavaStructureError {
 /// structure rather than emit one Minecraft will silently treat as air.
 pub fn build_structure_tag(
     ba: &BlockArray,
-    target: JavaTarget,
+    target: &JavaTarget,
 ) -> Result<Compound, JavaStructureError> {
     for entry in &ba.palette.entries {
         if !is_concrete_id(&entry.id) {
@@ -105,7 +105,7 @@ fn dim_to_i32(value: u32, axis: &'static str) -> Result<i32, JavaStructureError>
 pub fn write_structure_gzip<W: std::io::Write>(
     writer: &mut W,
     ba: &BlockArray,
-    target: JavaTarget,
+    target: &JavaTarget,
 ) -> Result<(), JavaStructureError> {
     let root = build_structure_tag(ba, target)?;
     write_compound_gzip(writer, &root)?;

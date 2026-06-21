@@ -19,6 +19,18 @@
 
 ### Added
 
+- `cairn-lang-formats::registry` — registry pack ローダ。マニフェスト
+  (`pack.json`) と `(mc_version, DataVersion)` テーブル
+  (`data_versions.json`) を読み込む。ビルトインの Java パックは
+  `data/registry/java/` 配下に置き、`include_str!` でバイナリに埋め込む。
+  `load_from_dir` は後続 PR で導入予定の `--registry-pack <dir>` フラグの
+  接続点。`PackFiles` は将来 blocks / items / tags / semantic-sensitivity
+  カタログを `Option` で受け入れる拡張余地を持ち、古いパックも読み続けら
+  れる。ロード時に schema_version の上限、空の versions、`versions` に
+  含まれない `latest`、エディション不一致をすべて拒否する。パックの
+  バイト列ハッシュ (`sha256` over manifest + 各コンポーネント) は
+  `RegistryPack::bytes_hash` で取得でき、lockfile の
+  `inputs.registry_pack_hash` に格納される。
 - `cairn compile examples/cottage.crn --edition java` が cottage 一式
   (床、壁、overhang 付き gable 屋根、正面のドア開口、左右対称な正面窓 2 枚)
   を出力するようになった。block-array lowering pass が
@@ -99,6 +111,15 @@
   昇格するかをマイルストーン別の表で明示する。
 - [ロードマップ](https://cairn.kage1020.com/ja/roadmap/) を公開。M1〜M6 のマイルストーンと
   `2027.06.0` までの月別スコープを掲載。
+
+### Changed (Java バックエンド Rust API — `cairn-lang-formats` 利用者へ影響)
+
+- `cairn_lang_formats::JavaTarget` は `Copy` を実装しなくなった。
+  `mc_version` を `&'static str` から `String` に変更し、registry pack
+  から実行時に取り出した文字列を所有する形になったため、型は `Clone`
+  のみ。`build_structure_tag` / `write_structure_gzip` を直接呼ぶ
+  コードは値ではなく `&JavaTarget` を渡すこと。CLI のサーフェスは変更
+  なし。
 
 ### Added (M1 — *source parses* の実行可能スライス)
 
