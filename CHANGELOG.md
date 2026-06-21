@@ -26,11 +26,21 @@ placeholder cannot leak out. The `2026.07.0` release PR will flip publish to `tr
   the x/z axes while shifting floor/walls/openings inward so the
   authored `size=WxH` keeps its meaning. Gable roofs hard-code
   `minecraft:spruce_stairs` with `facing` derived from the slope side
-  (`south` on `-z`, `north` on `+z`) and cap the ridge with one
-  `half=top` stair. The cottage example now lowers without
-  `W_DEFERRED_MEMBER` warnings; other roof kinds (`shed`, `hip`,
-  `flat`) and door blockstate placement remain deferred for later PRs.
-  Closes M2 cottage end-to-end milestone (2026.11.0).
+  (`south` on `-z`, `north` on `+z`) and cap the ridge with a `half=top`
+  stair on odd spans or a pair of opposing `half=top` stairs on even
+  spans (so even-span apex rows do not leave an open V). Doors carve at
+  most up to the wall top so a short-walled struct cannot punch through
+  roof voxels, and refuse to carve at all without a `walls` member.
+  `at=center` rounds half-up on even-width walls. `sym=true` windows
+  emit a `W_DEFERRED_MEMBER` when the mirror would overlap the primary.
+  Missing or mistyped `side=` on a door or window now produces an
+  explicit diagnostic instead of dropping the member silently, and a
+  `roof kind=gable` whose `mat_slot=` resolves to anything other than
+  `minecraft:spruce_stairs` warns that the binding was not applied.
+  The cottage example lowers without `W_DEFERRED_MEMBER` warnings;
+  other roof kinds (`shed`, `hip`, `flat`) and door blockstate
+  placement remain deferred for later PRs. Closes M2 cottage
+  end-to-end milestone (2026.11.0).
 - `cairn compile <file> --edition java [--target <mc_version>] [--out <dir>]
   [--lock <path>]` CLI subcommand closes M2 — it lowers a `.crn` source
   through the existing pipeline (`parse → lower → resolve →

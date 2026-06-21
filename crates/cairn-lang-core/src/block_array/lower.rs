@@ -1,4 +1,4 @@
-//! Intent IR → block-array IR lowering for M2.
+//! Intent IR → block-array IR lowering.
 //!
 //! The pass is total: every struct ends up in
 //! [`BlockArrayIr::structures`], every issue surfaces as a warning on
@@ -18,14 +18,16 @@
 //!   → fixtures, logic_*, raw
 //! ```
 //!
-//! M2-PR6 implements the first three. Members are bucketed by role and
-//! processed phase-by-phase; within a phase source order wins (the
-//! last-wins rule for local overrides). Roles outside the three phases
-//! emit `W_DEFERRED_MEMBER` and skip.
+//! The current pass implements the first three (massing, envelope,
+//! openings). Members are bucketed by role and processed phase-by-phase;
+//! within a phase source order wins (the last-wins rule for local
+//! overrides). Roles outside the three implemented phases emit
+//! `W_DEFERRED_MEMBER` and skip.
 //!
 //! Defs are skipped at this layer: they only concretise via a `site`
-//! `place ... use=def_name` reference, and site lowering is M3 work. Sites
-//! themselves are also skipped for the same reason.
+//! `place ... use=def_name` reference, and site lowering arrives with the
+//! multi-building pass. Sites themselves are also skipped for the same
+//! reason.
 
 use indexmap::IndexMap;
 
@@ -37,8 +39,11 @@ use crate::resolve::{Resolution, ScopeResolution};
 
 use super::material::{MaterialDeferred, resolve_block_state};
 use super::openings::{WallSide, wall_length, wall_local_to_grid};
-use super::roof::{RoofVoxel, gable_extra_height, gable_voxels};
-use super::{BlockArray, BlockArrayIr, Dims, Palette, PaletteIndex};
+use super::roof::{
+    GableVoxel, STAIR_BASE_ID, StairFace, gable_extra_height, gable_ridge_axis, gable_voxels,
+    stair_state_for,
+};
+use super::{BlockArray, BlockArrayIr, BlockState, Dims, Palette, PaletteIndex};
 
 /// Lower every `struct` in `intent` into a [`BlockArray`].
 ///
@@ -250,9 +255,10 @@ fn lower_opening_member(
     }
 }
 
-/// Resolve a member's `mat_slot=` binding into a palette index.
+/// Resolve a member's `mat_slot=` binding into a concrete [`BlockState`]
+/// without touching the palette.
 ///
-/// Returns `None` (and writes nothing into the palette) when:
+/// Returns `None` (and emits at most one diagnostic) when:
 /// - the scope had no theme bound (`theme_missing` short-circuits silently;
 ///   the `W_NO_THEME_BOUND` warning was already emitted once per struct),
 /// - the member never carried a `mat_slot=`,
@@ -262,13 +268,18 @@ fn lower_opening_member(
 ///   warning is emitted in that branch),
 /// - the value was not a token at all (`E_UNKNOWN_SLOT_TARGET` already
 ///   fired during resolve, so no second diagnostic here).
-fn palette_index_for(
+///
+/// Split out from [`palette_index_for`] so members that hard-code their
+/// material (gable roof → `spruce_stairs`) can still resolve the user's
+/// `mat_slot=` to check whether it agrees with the hard-coded id and emit
+/// a warning when it does not — without polluting the palette with an
+/// unreferenced entry.
+fn resolve_member_state(
     member: &Member,
     scope: Option<&ScopeResolution>,
-    palette: &mut Palette,
     diagnostics: &mut Vec<Diagnostic>,
     theme_missing: bool,
-) -> Option<PaletteIndex> {
+) -> Option<BlockState> {
     if theme_missing {
         return None;
     }
@@ -276,13 +287,28 @@ fn palette_index_for(
     let binding = scope.members.get(&member.span.start)?;
     let slot_value: &ValueWithSpan = binding.slot_value.as_ref()?;
     match resolve_block_state(slot_value) {
-        Ok(state) => Some(palette.intern(state)),
+        Ok(state) => Some(state),
         Err(MaterialDeferred::Abstract(token)) => {
             diagnostics.push(diag_abstract_token(member, &token, slot_value));
             None
         }
         Err(MaterialDeferred::AlreadyDiagnosed) => None,
     }
+}
+
+/// Resolve a member's `mat_slot=` binding and intern the resulting state.
+///
+/// Thin shim over [`resolve_member_state`] for callers that always want to
+/// store the material in the palette (floors, walls, windows).
+fn palette_index_for(
+    member: &Member,
+    scope: Option<&ScopeResolution>,
+    palette: &mut Palette,
+    diagnostics: &mut Vec<Diagnostic>,
+    theme_missing: bool,
+) -> Option<PaletteIndex> {
+    resolve_member_state(member, scope, diagnostics, theme_missing)
+        .map(|state| palette.intern(state))
 }
 
 fn max_wall_height(members: &[Member]) -> u32 {
@@ -437,22 +463,55 @@ fn fill_roof(
         let reason = if kind.is_empty() {
             "roof without `kind=gable` is not yet voxelised".to_owned()
         } else {
-            format!("roof kind `{kind}` is not yet voxelised (M2-PR6 supports `gable` only)")
+            format!("roof kind `{kind}` is not yet voxelised (only `gable` is supported)")
         };
         diagnostics.push(diag_deferred_member_reason(member, &reason));
         return;
     }
-    // `mat_slot=` is advisory for gable roofs in M2-PR6: the generator
-    // always emits spruce_stairs. Skipping `palette_index_for` here keeps
-    // the palette free of an unreferenced bare entry that would otherwise
-    // bloat the on-disk NBT. Per-theme roof materials land with the
-    // registry-pack work in 2026.12.0.
-    let _ = member;
+    // `mat_slot=` is currently advisory for gable roofs — the generator
+    // always emits spruce_stairs because per-theme roof materials are not
+    // wired through yet. We still resolve the slot so a binding that
+    // points anywhere else fires a deferred-member warning (otherwise the
+    // user's intent would silently be replaced by spruce_stairs). The
+    // resolved state itself is never interned: leaving the palette free
+    // of an unreferenced entry keeps the on-disk NBT tight.
+    if let Some(state) = resolve_member_state(member, ctx.scope, diagnostics, ctx.theme_missing)
+        && state.id != STAIR_BASE_ID
+    {
+        diagnostics.push(diag_deferred_member_reason(
+            member,
+            &format!(
+                "gable roofs currently emit `{STAIR_BASE_ID}`; the `mat_slot=` binding to `{}` was not applied",
+                state.id,
+            ),
+        ));
+    }
 
     let roof_w = ctx.dims.x;
     let roof_h = ctx.dims.z;
-    for RoofVoxel { pos, state } in gable_voxels(roof_w, roof_h, ctx.wall_top) {
-        let idx = palette.intern(state);
+    let ridge_axis = gable_ridge_axis(roof_w, roof_h);
+    // Intern each face's state once so a 99-voxel cottage roof costs four
+    // `palette.intern` calls instead of one per voxel. The face → palette
+    // index table is a small array because [`StairFace`] has four
+    // variants; iteration order pins the palette layout for the lockfile
+    // hash.
+    let face_table = [
+        StairFace::LowSlope,
+        StairFace::HighSlope,
+        StairFace::ApexLow,
+        StairFace::ApexHigh,
+    ];
+    let mut face_indices = [PaletteIndex::AIR; 4];
+    for (slot, face) in face_indices.iter_mut().zip(face_table.iter().copied()) {
+        *slot = palette.intern(stair_state_for(ridge_axis, face));
+    }
+    for GableVoxel { pos, face } in gable_voxels(roof_w, roof_h, ctx.wall_top) {
+        let idx = match face {
+            StairFace::LowSlope => face_indices[0],
+            StairFace::HighSlope => face_indices[1],
+            StairFace::ApexLow => face_indices[2],
+            StairFace::ApexHigh => face_indices[3],
+        };
         if let Some(i) = ctx.dims.index(pos.0, pos.1, pos.2) {
             voxels[i] = idx;
         }
@@ -468,9 +527,23 @@ fn carve_door(
     let Some(side) = side_of(member, diagnostics) else {
         return;
     };
+    // A door needs at least one wall row to carve into. Without a positive
+    // wall height there is nothing above the floor to open up; the
+    // envelope phase has already written roof voxels at y=1, and carving
+    // them would punch a gap into the roof.
+    if ctx.wall_top < 1 {
+        diagnostics.push(diag_deferred_member_reason(
+            member,
+            "door requires a `walls` member with positive `height=` to carve into",
+        ));
+        return;
+    }
     let len = wall_length(side, ctx.interior_w, ctx.interior_h);
     let at = match ident_value(member, "at") {
-        Some("center") => len.saturating_sub(1) / 2,
+        // `at=center`: round half-up so an even-width wall picks the
+        // column at `len/2`. Documented in spec/syntax.md §5.4. For odd
+        // widths the two formulas coincide.
+        Some("center") => len / 2,
         Some(other) => {
             diagnostics.push(diag_deferred_member_reason(
                 member,
@@ -486,11 +559,13 @@ fn carve_door(
             return;
         }
     };
-    // Doors carve a 1-wide × 2-high opening starting at y=1 (the row just
-    // above the floor). The door block itself (oak_door, etc.) is not
-    // placed in M2-PR6 — its blockstate dance (hinge/half/facing/open) is
-    // scheduled for M2-PR7.
-    for v in 1..=2 {
+    // Doors carve a 1-wide opening starting at y=1 (the row just above
+    // the floor), capped at the wall top so a short-wall door cannot
+    // overwrite roof voxels written in the envelope phase. The door block
+    // itself (`oak_door`, hinge/half/facing/open) is not yet placed; that
+    // landed deferred along with per-theme door materials.
+    let top = ctx.wall_top.min(2);
+    for v in 1..=top {
         let Some((x, y, z)) = wall_local_to_grid(
             side,
             at,
@@ -577,16 +652,37 @@ fn fill_window(
     paint_window_rect(ctx, rect, voxels);
     if sym {
         let mirror_offset = len.saturating_sub(offset).saturating_sub(sw);
-        if mirror_offset != offset {
-            paint_window_rect(
-                ctx,
-                WindowRect {
-                    offset: mirror_offset,
-                    ..rect
-                },
-                voxels,
-            );
+        if mirror_offset == offset {
+            // The mirror sits exactly on top of the primary; emitting it
+            // again would be a no-op so we silently coalesce.
+            return;
         }
+        // Reject overlapping mirrors: a `sym=true` window asks for a
+        // *pair*, not one wide span. If the two rectangles intersect the
+        // user almost certainly wrote a window that is more than half as
+        // wide as the wall — diagnose and skip the mirror so the primary
+        // is still emitted cleanly.
+        let primary_end = offset.saturating_add(sw);
+        let mirror_end = mirror_offset.saturating_add(sw);
+        let overlap = offset < mirror_end && mirror_offset < primary_end;
+        if overlap {
+            diagnostics.push(diag_deferred_member_reason(
+                member,
+                &format!(
+                    "`sym=true` window at offset={offset} size={sw}x{sh} on the `{}` wall would overlap its mirror (wall length={len}); the mirror was skipped",
+                    side_name(side),
+                ),
+            ));
+            return;
+        }
+        paint_window_rect(
+            ctx,
+            WindowRect {
+                offset: mirror_offset,
+                ..rect
+            },
+            voxels,
+        );
     }
 }
 
@@ -622,7 +718,21 @@ fn paint_window_rect(ctx: &StructCtx<'_>, rect: WindowRect, voxels: &mut [Palett
 }
 
 fn side_of(member: &Member, diagnostics: &mut Vec<Diagnostic>) -> Option<WallSide> {
-    let raw = ident_value(member, "side")?;
+    let Some(raw) = ident_value(member, "side") else {
+        // Distinguish "missing entirely" (no `side=` key) from "wrong
+        // type" (`side=` present but its value is not an identifier). A
+        // silent return on the missing case would let a `door at=center`
+        // line lower to nothing without telling the author, which breaks
+        // the module-level promise that every dropped member surfaces a
+        // diagnostic.
+        let reason = if member.intent_state.contains_key("side") {
+            "`side=` must be one of front, back, left, right"
+        } else {
+            "missing `side=` (expected one of front, back, left, right)"
+        };
+        diagnostics.push(diag_deferred_member_reason(member, reason));
+        return None;
+    };
     if let Some(side) = WallSide::from_ident(raw) {
         return Some(side);
     }
@@ -922,7 +1032,7 @@ mod tests {
         );
     }
 
-    // --- M2-PR6 new tests ---------------------------------------------------
+    // --- door / window / roof voxelisation ----------------------------------
 
     #[test]
     fn phase_order_independent_of_source_order() {
@@ -1060,5 +1170,151 @@ mod tests {
         let i = ba.dims.index(x, y, z).expect("in-range coord");
         let pi = ba.voxels[i];
         &ba.palette.entries[usize::from(pi.0)]
+    }
+
+    // --- regression coverage for review feedback ----------------------------
+
+    #[test]
+    fn door_without_side_emits_deferred_warning() {
+        // A `door at=center` line with no `side=` used to drop silently
+        // because `side_of` short-circuited on the missing key. Every
+        // dropped member must surface a diagnostic.
+        let src = "theme t:\n  slot w -> @cobblestone\n\nstruct s size=5x5\n  walls mat_slot=w height=3\n  door at=center\n";
+        let out = lowered(src);
+        assert_eq!(deferred_count(&out), 1);
+        let primary = &out.diagnostics[0].primary;
+        assert!(
+            primary.contains("missing `side="),
+            "expected missing-side reason, got {primary}",
+        );
+    }
+
+    #[test]
+    fn window_with_non_ident_side_emits_deferred_warning() {
+        // `side=` present but typed wrong (here as an integer literal).
+        // The `wrong type` branch in `side_of` must fire so the user
+        // hears about it.
+        let src = "theme t:\n  slot w -> @cobblestone\n  slot g -> @glass_pane\n\nstruct s size=5x5\n  walls mat_slot=w height=3\n  window side=3 offset=1 y=1 size=1x1 mat_slot=g\n";
+        let out = lowered(src);
+        let deferred = deferred_count(&out);
+        assert!(deferred >= 1, "expected a side= diagnostic, got {deferred}");
+        assert!(
+            out.diagnostics
+                .iter()
+                .any(|d| d.primary.contains("`side=`")),
+            "expected a `side=` mention in diagnostics: {:?}",
+            out.diagnostics,
+        );
+    }
+
+    #[test]
+    fn sym_window_overlap_skips_mirror_with_warning() {
+        // wall length=6, offset=2, size=3 → mirror_offset = 6-2-3 = 1.
+        // [2..5) and [1..4) overlap — the mirror would fuse with the
+        // primary into one wide span. We diagnose and keep only the
+        // primary so the user notices.
+        let src = "theme t:\n  slot w -> @cobblestone\n  slot g -> @glass_pane\n\nstruct s size=6x5\n  walls mat_slot=w height=4\n  window side=front offset=2 y=2 size=3x1 sym=true mat_slot=g\n";
+        let out = lowered(src);
+        let ba = out.structures.get("struct::s").unwrap();
+        assert!(
+            out.diagnostics
+                .iter()
+                .any(|d| d.primary.contains("overlap")),
+            "expected overlap diagnostic, got {:?}",
+            out.diagnostics,
+        );
+        // Primary rectangle [x=2..5, y=2] painted.
+        for x in 2..5 {
+            assert_eq!(block_id(ba, x, 2, 4), "minecraft:glass_pane");
+        }
+        // Mirror cells outside the primary stay cobblestone (x=1).
+        assert_eq!(block_id(ba, 1, 2, 4), "minecraft:cobblestone");
+    }
+
+    #[test]
+    fn door_capped_at_wall_top_does_not_punch_through_roof() {
+        // walls height=1 → wall_top=1. Door y=1..=2 would carve a hole at
+        // y=2 which the roof's south-eave layer occupies. Capping at
+        // wall_top keeps the roof intact.
+        let src = "theme t:\n  slot w -> @cobblestone\n  slot r -> @spruce_stairs\n\nstruct s size=5x5\n  walls mat_slot=w height=1\n  roof kind=gable mat_slot=r\n  door side=front at=center\n";
+        let out = lowered(src);
+        let ba = out.structures.get("struct::s").unwrap();
+        // Door carves only y=1 of the front wall.
+        assert_eq!(block_id(ba, 2, 1, 4), BlockState::AIR_ID);
+        // y=2 on the front-eave row of the roof must still be stairs.
+        // span = min(5,5) = 5, ridge axis = x, low slope at z=0 layer 0,
+        // high slope at z=4 layer 0, y = wall_top+1 = 2.
+        let south_eave = block_state_at(ba, 2, 2, 4);
+        assert_eq!(south_eave.id, "minecraft:spruce_stairs");
+    }
+
+    #[test]
+    fn door_without_walls_emits_deferred_warning() {
+        // No walls member → wall_top=0. The door cannot carve anything
+        // and must complain instead of doing nothing silently.
+        let src = "theme t:\n  slot f -> @oak_planks\n\nstruct s size=5x5\n  floor mat_slot=f\n  door side=front at=center\n";
+        let out = lowered(src);
+        assert!(
+            out.diagnostics.iter().any(|d| d.primary.contains("walls")),
+            "expected walls-required diagnostic, got {:?}",
+            out.diagnostics,
+        );
+    }
+
+    #[test]
+    fn at_center_picks_right_of_centre_on_even_width_walls() {
+        // size=8x5 → wall length 8. `at=center` should pick column 4 (the
+        // right half-block of the geometric centre), not column 3, so the
+        // door is consistent with round-half-up semantics.
+        let src = "theme t:\n  slot w -> @cobblestone\n\nstruct s size=8x5\n  walls mat_slot=w height=3\n  door side=front at=center\n";
+        let out = lowered(src);
+        let ba = out.structures.get("struct::s").unwrap();
+        // Front wall z=4. y=1 air at x=4, cobblestone at x=3.
+        assert_eq!(block_id(ba, 4, 1, 4), BlockState::AIR_ID);
+        assert_eq!(block_id(ba, 3, 1, 4), "minecraft:cobblestone");
+    }
+
+    #[test]
+    fn gable_with_mismatched_mat_slot_emits_warning() {
+        // The roof generator hardcodes spruce_stairs; a theme that binds
+        // `slot roof -> @oak_stairs` must hear that its choice was not
+        // applied rather than silently getting the wrong species.
+        let src = "theme t:\n  slot w -> @cobblestone\n  slot r -> @oak_stairs\n\nstruct s size=5x5\n  walls mat_slot=w height=3\n  roof kind=gable mat_slot=r\n";
+        let out = lowered(src);
+        assert!(
+            out.diagnostics
+                .iter()
+                .any(|d| d.primary.contains("oak_stairs") && d.primary.contains("spruce_stairs")),
+            "expected mat_slot mismatch diagnostic, got {:?}",
+            out.diagnostics,
+        );
+    }
+
+    #[test]
+    fn gable_with_matching_mat_slot_stays_silent() {
+        // The cottage case: theme binds the slot to spruce_stairs, the
+        // generator emits spruce_stairs — no warning.
+        let src = "theme t:\n  slot w -> @cobblestone\n  slot r -> @spruce_stairs\n\nstruct s size=5x5\n  walls mat_slot=w height=3\n  roof kind=gable mat_slot=r\n";
+        let out = lowered(src);
+        assert_eq!(
+            deferred_count(&out),
+            0,
+            "expected silence on matching mat_slot, got {:?}",
+            out.diagnostics,
+        );
+    }
+
+    #[test]
+    fn even_span_gable_apex_uses_half_top() {
+        // size=8x4 → roof span (short axis) = 4 (even). The apex layer
+        // must cap with two half=top rows or the ridge has an open V.
+        let src = "theme t:\n  slot w -> @cobblestone\n  slot r -> @spruce_stairs\n\nstruct s size=8x4\n  walls mat_slot=w height=4\n  roof kind=gable mat_slot=r\n";
+        let out = lowered(src);
+        let ba = out.structures.get("struct::s").unwrap();
+        // gable_extra_height(4) = 2 layers. Apex layer at y = 4+2 = 6.
+        let apex_low = block_state_at(ba, 0, 6, 1);
+        let apex_high = block_state_at(ba, 0, 6, 2);
+        assert_eq!(apex_low.properties.get("half").unwrap(), "top");
+        assert_eq!(apex_high.properties.get("half").unwrap(), "top");
     }
 }

@@ -36,9 +36,9 @@ fn lower_1_cottage_exits_zero_and_names_the_struct() {
         stdout.contains("struct::cottage"),
         "expected scope key in stdout, got: {stdout}",
     );
-    // M2-PR6: overhang=1 inflates the bounding box to 11×?×9; the y axis
-    // grows by the gable extra height (ceil(min(11,9)/2) = 5) above the
-    // floor + walls, so dims=11x10x9.
+    // overhang=1 inflates the bounding box to 11×?×9; the y axis grows by
+    // the gable extra height (ceil(min(11,9)/2) = 5) above the floor +
+    // walls, so dims=11x10x9.
     assert!(
         stdout.contains("dims=11x10x9"),
         "expected dims line, got: {stdout}",
@@ -70,9 +70,9 @@ fn lower_2_json_format_round_trips_as_block_array_ir() {
 
 #[test]
 fn lower_3_deferred_member_warnings_print_to_stderr() {
-    // M2-PR6 voxelises every member of cottage.crn; for the deferred-
-    // member regression we use themed-tower.crn, whose top-level
-    // `level` blocks remain outside the implemented phases.
+    // cottage.crn voxelises clean now; for the deferred-member regression
+    // we use themed-tower.crn, whose top-level `level` blocks remain
+    // outside the implemented phases.
     let path = examples_dir().join("themed-tower.crn");
     let out = run_lower(&[path.to_str().unwrap()]);
     let stderr = String::from_utf8(out.stderr).expect("utf-8");

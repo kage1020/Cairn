@@ -7,11 +7,11 @@
 //! `spec/architecture.md` §3.1).
 //!
 //! The [`lower::lower_to_block_array`] pass handles the cottage example's
-//! roster end-to-end as of M2-PR6: `floor`, `walls`, `door`, `window`, and
+//! roster end-to-end: `floor`, `walls`, `door`, `window`, and
 //! `roof kind=gable`. Other roles (`stair`, `level`, `pressure_plate`, ...),
-//! roof kinds (`hip`, `shed`, ...), and abstract material tokens degrade to
-//! air with a `W_DEFERRED_MEMBER` warning rather than failing, so a partial
-//! build is still inspectable.
+//! roof kinds (`hip`, `shed`, ...), and abstract material tokens degrade
+//! to air with a `W_DEFERRED_MEMBER` warning rather than failing, so a
+//! partial build is still inspectable.
 //!
 //! ## Overhang convention
 //!

@@ -405,7 +405,7 @@ fn compile_all_examples_exit_zero() {
 
 #[test]
 fn c14_cottage_compiles_without_deferred_warnings() {
-    // M2-PR6 brings cottage.crn under full block-array lowering (floor,
+    // The current voxel lowering covers cottage.crn end-to-end (floor,
     // walls, door, window, gable roof with overhang), so the per-member
     // W_DEFERRED_MEMBER stream that earlier milestones emitted is now
     // empty. The CLI must still exit 0 and produce nothing on stderr.

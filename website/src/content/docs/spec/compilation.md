@@ -61,7 +61,9 @@ arrives.
 - **Ridge height.** A gable rises `ceil(short_span / 2)` voxels above the
   wall top, where `short_span` is the *roof bounding box* extent along the
   short axis (= `min(dims.x, dims.z)` after the overhang inflation below).
-  One layer is the apex.
+  The top layer is the apex: odd-span apexes cap with a single `half=top`
+  stair on the centre row, even-span apexes cap with two `half=top` stairs
+  on the adjacent meeting rows so the ridge does not leave an open V.
 - **Overhang.** `overhang=N` inflates the voxel grid by `N` on every
   horizontal axis (`Dims.x = size.w + 2N`, `Dims.z = size.h + 2N`). Floors,
   walls, doors, and windows keep their authored coordinates and are

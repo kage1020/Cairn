@@ -27,8 +27,16 @@
   `Dims` は x/z 軸を `2 * overhang` 拡張し、床・壁・開口を `+overhang` シフトする
   ことで、ソース上の `size=WxH` の意味を保ったまま屋根の張り出しを表現する。
   gable 屋根は `minecraft:spruce_stairs` をハードコードし、`facing` を傾斜方向から
-  導出 (`-z` 面は `south`、`+z` 面は `north`)、棟頂点は `half=top` の階段 1 ブロックで
-  閉じる。cottage example は `W_DEFERRED_MEMBER` 警告ゼロで lowering 完了。
+  導出 (`-z` 面は `south`、`+z` 面は `north`)、棟頂点は奇数 span なら `half=top`
+  1 ブロック、偶数 span なら左右対称の `half=top` 2 ブロックで閉じる (旧実装は
+  偶数 span 時に棟が開いた V 字になっていた)。ドアは壁高を超えて掘らないように
+  キャップされ、壁を持たない struct では deferred 警告を出して掘らない。
+  `at=center` は偶数幅の壁で round-half-up に変更。`sym=true` の窓ミラーが
+  主矩形と重なる場合は `W_DEFERRED_MEMBER` を出してミラーをスキップ。
+  door/window で `side=` が欠落・型違反の場合は黙って drop せず明示的に診断する。
+  `roof kind=gable` の `mat_slot=` が `minecraft:spruce_stairs` 以外に解決される
+  場合、ハードコード材との不一致を deferred 警告として通知する。
+  cottage example は `W_DEFERRED_MEMBER` 警告ゼロで lowering 完了。
   他の屋根 kind (`shed`, `hip`, `flat`) と door ブロック自体の配置は後続 PR に残る。
   M2 の cottage end-to-end マイルストーン (2026.11.0) を達成。
 - `cairn info <file>` CLI サブコマンドが `.crn` ソースに対する 3 軸のバージョン情報
