@@ -404,10 +404,11 @@ fn compile_all_examples_exit_zero() {
 }
 
 #[test]
-fn c14_deferred_member_warning_does_not_fail_compile() {
-    // cottage.crn already exercises floor + walls + non-lowered roles, so
-    // the lowering pass writes W_DEFERRED_MEMBER warnings — `cairn compile`
-    // must still exit 0 in that case (matching `cairn lower`).
+fn c14_cottage_compiles_without_deferred_warnings() {
+    // The current voxel lowering covers cottage.crn end-to-end (floor,
+    // walls, door, window, gable roof with overhang), so the per-member
+    // W_DEFERRED_MEMBER stream that earlier milestones emitted is now
+    // empty. The CLI must still exit 0 and produce nothing on stderr.
     let (_tmp_src, src) = cottage_in_tempdir();
     let out_dir = TempDir::new().expect("out tempdir");
     let result = run_compile(&[
@@ -419,11 +420,41 @@ fn c14_deferred_member_warning_does_not_fail_compile() {
     ]);
     assert!(result.status.success());
     let stderr = String::from_utf8(result.stderr).expect("utf-8");
-    let count = stderr.matches("W_DEFERRED_MEMBER").count();
-    // cottage.crn has door / window / roof = 3 deferred members.
     assert_eq!(
-        count, 3,
-        "expected 3 W_DEFERRED_MEMBER warnings, got {count}, stderr={stderr}",
+        stderr.matches("W_DEFERRED_MEMBER").count(),
+        0,
+        "cottage should lower clean, stderr={stderr}",
+    );
+}
+
+#[test]
+fn c14b_deferred_member_warning_still_exits_zero_on_other_examples() {
+    // The `cairn compile` exit-code contract is "warnings do not fail the
+    // build". We pin it against `themed-tower.crn`, which still exercises
+    // roles outside the implemented phases (`level` blocks contain doors
+    // and windows that lowering cannot reach yet). The exact warning
+    // count is intentionally not asserted — what matters is that at least
+    // one `W_DEFERRED_MEMBER` fires and the exit code stays 0.
+    let tmp = TempDir::new().expect("tempdir");
+    let dst = tmp.path().join("themed-tower.crn");
+    fs::copy(examples_dir().join("themed-tower.crn"), &dst).expect("copy themed-tower");
+    let out_dir = TempDir::new().expect("out tempdir");
+    let result = run_compile(&[
+        dst.to_str().unwrap(),
+        "--edition",
+        "java",
+        "--out",
+        out_dir.path().to_str().unwrap(),
+    ]);
+    assert!(
+        result.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&result.stderr),
+    );
+    let stderr = String::from_utf8(result.stderr).expect("utf-8");
+    assert!(
+        stderr.contains("W_DEFERRED_MEMBER"),
+        "expected at least one deferred-member warning on themed-tower, stderr={stderr}",
     );
 }
 

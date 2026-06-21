@@ -6,13 +6,25 @@
 //! `IoU` comparisons, and serialisation hang off this single shape (see
 //! `spec/architecture.md` §3.1).
 //!
-//! The current [`lower::lower_to_block_array`] pass handles the `floor` and
-//! `walls` member roles only. Other roles, abstract material tokens, and
-//! themeless scopes degrade to air with a warning rather than failing, so a
+//! The [`lower::lower_to_block_array`] pass handles the cottage example's
+//! roster end-to-end: `floor`, `walls`, `door`, `window`, and
+//! `roof kind=gable`. Other roles (`stair`, `level`, `pressure_plate`, ...),
+//! roof kinds (`hip`, `shed`, ...), and abstract material tokens degrade
+//! to air with a `W_DEFERRED_MEMBER` warning rather than failing, so a
 //! partial build is still inspectable.
+//!
+//! ## Overhang convention
+//!
+//! A `roof overhang=N` member inflates the struct's bounding box by `N`
+//! blocks on each horizontal axis (so `size=9x7 overhang=1` produces a
+//! `Dims { x: 11, y: …, z: 9 }`). Floors, walls, doors, and windows are
+//! authored against the *interior* `size`; lowering shifts them inward by
+//! `+N` along x and z so the overhang shows up only at the roof level.
 
 mod lower;
 mod material;
+mod openings;
+mod roof;
 
 use indexmap::IndexMap;
 use serde::Serialize;

@@ -37,6 +37,16 @@ Metadata MAY be placed in headers rather than in the semantic body:
 ## 5.4 Selectors (P4)
 - Wall selectors: `front` (+z) / `back` / `left` / `right`. `offset` runs along the wall; `y` is
   measured from the floor (= 0).
+- **`offset` origin.** `offset=0` sits at the wall's *left end* viewed from outside that wall.
+  Concretely: `front` and `back` walls anchor at low `x` (front from the +z viewpoint, back
+  mirrored along x so a `sym=true` opening looks symmetric from either side of the building);
+  `left` and `right` walls anchor at low `z` and mirror analogously. `sym=true` mirrors the
+  opening across the wall's midpoint (`mirror_offset = wall_length - offset - size_w`); a
+  mirror that overlaps the primary rectangle is rejected with a `W_DEFERRED_MEMBER` and only
+  the primary is painted.
+- **`at=center` rounding.** Doors written `at=center` pick the column at `wall_length / 2`
+  (round-half-up). Odd-length walls have a unique geometric centre; even-length walls pick
+  the column to the right of the midpoint so the choice is deterministic.
 - Inside reference: prefixed, e.g. `inside.front`.
 - Blocks, block entities, and entities all use the same selector grammar.
 

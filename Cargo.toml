@@ -27,9 +27,6 @@ publish = false
 cairn-lang-core = { version = "0.0.0", path = "crates/cairn-lang-core" }
 cairn-lang-nbt = { version = "0.0.0", path = "crates/cairn-lang-nbt" }
 cairn-lang-formats = { version = "0.0.0", path = "crates/cairn-lang-formats" }
-cairn-lang-redstone = { version = "0.0.0", path = "crates/cairn-lang-redstone" }
-cairn-lang-lsp = { version = "0.0.0", path = "crates/cairn-lang-lsp" }
-cairn-lang-wasm = { version = "0.0.0", path = "crates/cairn-lang-wasm" }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
