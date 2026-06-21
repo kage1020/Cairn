@@ -17,6 +17,47 @@ placeholder cannot leak out. The `2026.07.0` release PR will flip publish to `tr
 
 ### Added
 
+- `cairn compile <file> --edition java [--target <mc_version>] [--out <dir>]
+  [--lock <path>]` CLI subcommand closes M2 — it lowers a `.crn` source
+  through the existing pipeline (`parse → lower → resolve →
+  lower_to_block_array`) and writes one Java vanilla structure `.nbt`
+  file per `struct` along with a `build.cairn.lock` next to the source.
+  `--edition` is required by spec §4.2 (`--target` alone is forbidden);
+  `--target` accepts the literal versions named in the M2 backend table
+  plus the `latest` alias. `--edition bedrock` exits 1 with an explicit
+  "not implemented" message so the surface is stable now and the
+  Bedrock backend can grow into it. Lowering warnings
+  (`W_DEFERRED_MEMBER`, `W_ABSTRACT_TOKEN_DEFERRED`) surface on stderr
+  but do not affect the exit code, matching `cairn lower`.
+- `cairn-lang-nbt` Java writer — owned tag tree
+  (`Tag`/`Compound`/`List`) plus `write_java_uncompressed` and
+  `write_java_gzip` entrypoints. Strings, numerics, and list element
+  ids follow the Java big-endian wire format; the gzip variant uses
+  `flate2`'s default compression level (matches Mojang's output, so
+  byte-identical snapshots against samples extracted from the game
+  remain possible). Bedrock little-endian and the streaming reader are
+  follow-up work.
+- `cairn-lang-formats::java_structure` — `BlockArray → Java vanilla
+  structure NBT` lowering. Emits the `size` / `palette` / `blocks` /
+  `entities` / `DataVersion` root keyed compound in the order
+  `spec/architecture.md` §3.1 names. AIR cells are included in the
+  `blocks` list (matches the Mojang structure block; keeps "void" vs
+  "explicit air" distinguishable for M3 site placement). Abstract
+  palette tokens that survive lowering raise
+  `JavaStructureError::AbstractPaletteEntry` rather than silently
+  emitting an air block.
+- `cairn-lang-formats::data_version` — hardcoded
+  (`mc_version`, `DataVersion`) table covering 1.20.4, 1.21, and 1.21.4
+  plus the `latest` alias. The 2026.12.0 registry pack ingest replaces
+  this table with values pulled from a versioned data file.
+- `cairn_lang_core::lock` — `build.cairn.lock` reader/writer matching
+  `spec/versioning-editions.md` §10.6. Keys appear in the spec-printed
+  order (`source_hash, cairn_version, target, inputs,
+  resolved_ir_hash, verified, member_version_sensitivity`).
+  `hash_source` and `hash_resolved_ir` (sha256 over UTF-8 source bytes
+  and over the IR's JSON serialisation, respectively) give the lockfile
+  its reproducibility anchor. `LockInputs::zero()` ships zero hashes
+  until the registry pack and constraint catalog land.
 - `cairn info <file>` CLI subcommand reports the three version axes for a
   `.crn` source — registry-compatible range, per-edition portability, and
   semantic-sensitive members — as defined in `spec/versioning-editions.md`

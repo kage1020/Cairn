@@ -13,6 +13,7 @@ pub mod check;
 pub mod error;
 pub mod intent;
 pub mod lex;
+pub mod lock;
 pub mod parse;
 pub mod resolve;
 

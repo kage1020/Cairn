@@ -6,8 +6,15 @@ use std::process::ExitCode;
 use cairn_lang_core::CAIRN_VERSION;
 use cairn_lang_core::block_array::{BlockArray, BlockArrayIr, lower_to_block_array};
 use cairn_lang_core::check::LineStarts;
+use cairn_lang_core::lock::{
+    LockEdition, LockInputs, LockTarget, Lockfile, hash_resolved_ir, hash_source,
+};
 use cairn_lang_core::resolve::{VersionAxes, compute_axes, resolve};
 use cairn_lang_core::{Severity, check, lower, parse};
+use cairn_lang_formats::data_version::resolve_java_target;
+use cairn_lang_formats::java_structure::{
+    Compound, build_structure_tag, output_filename, write_compound_gzip,
+};
 use clap::{Parser, Subcommand, ValueEnum};
 
 /// `cairn` — Minecraft build DSL command-line interface.
@@ -62,8 +69,8 @@ enum Command {
         format: InfoFormat,
     },
     /// Lower a .crn source file all the way to the block-array IR and print
-    /// the result. A debugging surface for the universal voxel pivot; the
-    /// user-facing `cairn compile` lands once the format backends do.
+    /// the result. A debugging surface for the universal voxel pivot;
+    /// `cairn compile` writes the same IR out as a Java `.nbt` artifact.
     /// Lowering warnings (deferred members, themeless scopes, abstract
     /// tokens) print to stderr but do not affect the exit code. Exits 0 on
     /// success, 1 on parse failure or I/O error, 2 when the file cannot be
@@ -74,6 +81,36 @@ enum Command {
         /// Output format for the lowered block-array IR.
         #[arg(long, value_enum, default_value_t = LowerFormat::Ascii)]
         format: LowerFormat,
+    },
+    /// Compile a .crn source file to its edition+version-pinned NBT artifact
+    /// set and write a lockfile next to the source. The Java backend
+    /// currently voxelises `floor` and `walls` only; other roles degrade
+    /// to air with a `W_DEFERRED_MEMBER` warning and the build still
+    /// succeeds, matching `cairn lower`. Exits 0 on success, 1 on parse,
+    /// lowering, or I/O failure (including an unsupported `--target`),
+    /// and 2 when the source file cannot be located.
+    Compile {
+        /// Path to the .crn file to compile.
+        file: PathBuf,
+        /// Target edition. Required by spec §4.2 (`--target` alone is
+        /// forbidden).
+        #[arg(long, value_enum)]
+        edition: EditionArg,
+        /// Minecraft version string. Resolved against the backend's data
+        /// table; opaque label per spec §10.1. `latest` aliases the newest
+        /// version the backend knows about.
+        #[arg(long, default_value = "latest")]
+        target: String,
+        /// Output directory for the generated `.nbt` files. Created if
+        /// missing. Defaults to the source file's parent directory.
+        #[arg(long)]
+        out: Option<PathBuf>,
+        /// Lockfile path. Defaults to `<source>.lock` next to the source
+        /// (so `cottage.crn` → `cottage.crn.lock`), keeping per-source
+        /// locks unambiguous when several `.crn` files share an output
+        /// directory.
+        #[arg(long)]
+        lock: Option<PathBuf>,
     },
 }
 
@@ -102,6 +139,24 @@ enum InfoFormat {
 }
 
 #[derive(Copy, Clone, ValueEnum)]
+enum EditionArg {
+    /// Java Edition. The only fully implemented backend so far.
+    Java,
+    /// Bedrock Edition. Reserved for a future backend; passing it here
+    /// exits with a dedicated error so the CLI surface stays stable.
+    Bedrock,
+}
+
+impl EditionArg {
+    fn as_lock_edition(self) -> LockEdition {
+        match self {
+            EditionArg::Java => LockEdition::Java,
+            EditionArg::Bedrock => LockEdition::Bedrock,
+        }
+    }
+}
+
+#[derive(Copy, Clone, ValueEnum)]
 enum LowerFormat {
     /// Per-structure ASCII Y-slice plus a palette listing (default;
     /// easiest way to eyeball whether the walls came out right).
@@ -123,6 +178,13 @@ fn main() -> ExitCode {
             format,
         }) => run_info(&file, &editions, format),
         Some(Command::Lower { file, format }) => run_lower(&file, format),
+        Some(Command::Compile {
+            file,
+            edition,
+            target,
+            out,
+            lock,
+        }) => run_compile(&file, edition, &target, out.as_deref(), lock.as_deref()),
         None => {
             eprintln!("error: a subcommand is required (try `cairn --help`)");
             ExitCode::from(2)
@@ -487,4 +549,252 @@ fn print_y_slice(ba: &BlockArray, y: u32) {
         }
         println!("    {row}");
     }
+}
+
+fn run_compile(
+    file: &Path,
+    edition: EditionArg,
+    target: &str,
+    out: Option<&Path>,
+    lock: Option<&Path>,
+) -> ExitCode {
+    let (source, block_ir) = match load_and_lower(file) {
+        Ok(pair) => pair,
+        Err(code) => return code,
+    };
+    if report_lowering_diagnostics(file, &source, &block_ir) {
+        return ExitCode::from(1);
+    }
+
+    let target = match resolve_target(edition, target) {
+        Ok(t) => t,
+        Err(code) => return code,
+    };
+
+    let out_dir = match prepare_out_dir(file, out) {
+        Ok(d) => d,
+        Err(code) => return code,
+    };
+
+    let prepared = match prepare_artifacts(&block_ir, target, &out_dir) {
+        Ok(p) => p,
+        Err(code) => return code,
+    };
+
+    let lock_path = lock.map_or_else(|| default_lock_path(file), Path::to_path_buf);
+    write_artifacts_and_lock(&prepared, &source, &block_ir, edition, target, &lock_path)
+}
+
+fn load_and_lower(file: &Path) -> Result<(String, BlockArrayIr), ExitCode> {
+    let source = std::fs::read_to_string(file).map_err(|err| {
+        eprintln!("error: cannot read `{}`: {err}", file.display());
+        match err.kind() {
+            std::io::ErrorKind::NotFound => ExitCode::from(2),
+            _ => ExitCode::from(1),
+        }
+    })?;
+    let module = parse(&source).map_err(|err| {
+        eprintln!(
+            "error: {}:{}: {}",
+            file.display(),
+            err.position(),
+            err.user_message(),
+        );
+        ExitCode::from(1)
+    })?;
+    let ir = lower(&module);
+    let resolution = resolve(&ir);
+    let block_ir = lower_to_block_array(&ir, &resolution);
+    Ok((source, block_ir))
+}
+
+fn report_lowering_diagnostics(file: &Path, source: &str, block_ir: &BlockArrayIr) -> bool {
+    let lines = LineStarts::new(source);
+    let mut has_error = false;
+    for d in &block_ir.diagnostics {
+        let pos = lines.position(source, d.span.start);
+        eprintln!(
+            "{}:{}: {}[{}]: {}",
+            file.display(),
+            pos,
+            d.severity.as_str(),
+            d.code.as_str(),
+            d.primary,
+        );
+        if d.severity == Severity::Error {
+            has_error = true;
+        }
+    }
+    has_error
+}
+
+fn resolve_target(
+    edition: EditionArg,
+    target: &str,
+) -> Result<cairn_lang_formats::data_version::JavaTarget, ExitCode> {
+    match edition {
+        EditionArg::Bedrock => {
+            eprintln!("error: --edition bedrock is not implemented; Java only");
+            Err(ExitCode::from(1))
+        }
+        EditionArg::Java => resolve_java_target(target).map_err(|err| {
+            eprintln!("error: {err}");
+            ExitCode::from(1)
+        }),
+    }
+}
+
+fn prepare_out_dir(file: &Path, requested: Option<&Path>) -> Result<PathBuf, ExitCode> {
+    let Some(out_dir) = resolve_out_dir(file, requested) else {
+        eprintln!(
+            "error: source `{}` has no parent directory and --out was not given",
+            file.display(),
+        );
+        return Err(ExitCode::from(1));
+    };
+    std::fs::create_dir_all(&out_dir).map_err(|err| {
+        eprintln!(
+            "error: cannot create output directory `{}`: {err}",
+            out_dir.display(),
+        );
+        ExitCode::from(1)
+    })?;
+    Ok(out_dir)
+}
+
+/// Build every structure tag tree up front. A backend error here (abstract
+/// palette entry, dimension overflow) must not leave half-written `.nbt`
+/// files behind, so the function holds off all I/O until it knows the IR
+/// is serialisable.
+fn prepare_artifacts(
+    block_ir: &BlockArrayIr,
+    target: cairn_lang_formats::data_version::JavaTarget,
+    out_dir: &Path,
+) -> Result<Vec<(PathBuf, Compound)>, ExitCode> {
+    let mut prepared = Vec::with_capacity(block_ir.structures.len());
+    for (scope, ba) in &block_ir.structures {
+        let tag = build_structure_tag(ba, target).map_err(|err| {
+            eprintln!("error: building `{scope}`: {err}");
+            ExitCode::from(1)
+        })?;
+        prepared.push((out_dir.join(output_filename(scope)), tag));
+    }
+    Ok(prepared)
+}
+
+/// Write the prepared `.nbt` files and the lockfile, rolling back every
+/// already-written file (and the lockfile) on any failure so the on-disk
+/// state stays consistent — either every artifact + the lock, or none.
+fn write_artifacts_and_lock(
+    prepared: &[(PathBuf, Compound)],
+    source: &str,
+    block_ir: &BlockArrayIr,
+    edition: EditionArg,
+    target: cairn_lang_formats::data_version::JavaTarget,
+    lock_path: &Path,
+) -> ExitCode {
+    let mut written: Vec<PathBuf> = Vec::with_capacity(prepared.len());
+    for (path, tag) in prepared {
+        if let Err(err) = write_tag_atomically(path, tag) {
+            rollback(&written, None);
+            eprintln!("error: writing `{}`: {err}", path.display());
+            return ExitCode::from(1);
+        }
+        written.push(path.clone());
+    }
+
+    let lockfile = match build_lockfile(source, block_ir, edition, target) {
+        Ok(lf) => lf,
+        Err(err) => {
+            rollback(&written, None);
+            eprintln!("error: {err}");
+            return ExitCode::from(1);
+        }
+    };
+    if let Err(err) = lockfile.write_to_path(lock_path) {
+        rollback(&written, None);
+        eprintln!("error: writing lockfile `{}`: {err}", lock_path.display());
+        return ExitCode::from(1);
+    }
+
+    for path in &written {
+        println!("wrote {}", path.display());
+    }
+    println!("wrote {}", lock_path.display());
+    ExitCode::SUCCESS
+}
+
+fn resolve_out_dir(source: &Path, requested: Option<&Path>) -> Option<PathBuf> {
+    if let Some(p) = requested {
+        return Some(p.to_path_buf());
+    }
+    let parent = source.parent()?;
+    // `Path::parent` returns `Some("")` for a bare filename like `foo.crn`;
+    // treat that as "current directory" so the obvious one-file invocation
+    // still works.
+    Some(if parent.as_os_str().is_empty() {
+        PathBuf::from(".")
+    } else {
+        parent.to_path_buf()
+    })
+}
+
+fn write_tag_atomically(final_path: &Path, tag: &Compound) -> Result<(), std::io::Error> {
+    use std::io::Write as _;
+
+    // Write to a sibling `.tmp` file then rename so an interrupted write
+    // (process kill, disk full mid-stream) never leaves a half-encoded
+    // `.nbt` at the real path.
+    let mut tmp_path = final_path.as_os_str().to_owned();
+    tmp_path.push(".tmp");
+    let tmp_path = PathBuf::from(tmp_path);
+
+    let mut f = std::fs::File::create(&tmp_path)?;
+    write_compound_gzip(&mut f, tag)
+        .map_err(|e| std::io::Error::other(format!("nbt encode: {e}")))?;
+    f.flush()?;
+    f.sync_all()?;
+    drop(f);
+    std::fs::rename(&tmp_path, final_path)?;
+    Ok(())
+}
+
+fn rollback(written: &[PathBuf], lock_path: Option<&Path>) {
+    for path in written {
+        let _ = std::fs::remove_file(path);
+    }
+    if let Some(p) = lock_path {
+        let _ = std::fs::remove_file(p);
+    }
+}
+
+/// Append a `.lock` suffix to the source file name so multiple `.crn`
+/// files in the same directory get distinct locks. `Path::with_extension`
+/// would drop `.crn`, fusing `cottage.crn`'s lock with any other
+/// `cottage.*` source's lock.
+fn default_lock_path(source: &Path) -> PathBuf {
+    let mut p = source.as_os_str().to_owned();
+    p.push(".lock");
+    PathBuf::from(p)
+}
+
+fn build_lockfile(
+    source: &str,
+    block_ir: &BlockArrayIr,
+    edition: EditionArg,
+    target: cairn_lang_formats::data_version::JavaTarget,
+) -> Result<Lockfile, cairn_lang_core::lock::HashError> {
+    Ok(Lockfile {
+        source_hash: hash_source(source),
+        cairn_version: CAIRN_VERSION.to_owned(),
+        target: LockTarget {
+            edition: edition.as_lock_edition(),
+            mc_version: target.mc_version.to_owned(),
+            data_version: target.data_version,
+        },
+        inputs: LockInputs::zero(),
+        resolved_ir_hash: hash_resolved_ir(block_ir)?,
+        verified: true,
+        member_version_sensitivity: vec![],
+    })
 }

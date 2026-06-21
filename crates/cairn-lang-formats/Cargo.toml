@@ -12,6 +12,10 @@ authors.workspace = true
 [dependencies]
 cairn-lang-core = { workspace = true }
 cairn-lang-nbt = { workspace = true }
+thiserror = "2.0.18"
 
 [lints]
 workspace = true
+
+[dev-dependencies]
+insta = { version = "1.48.0", features = ["yaml"] }
