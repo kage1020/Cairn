@@ -16,8 +16,7 @@ use super::hash::pack_hash;
 use super::manifest::{PackEdition, PackManifest};
 
 /// Built-in `pack.json` bytes, statically embedded at compile time.
-const BUILTIN_JAVA_MANIFEST: &str =
-    include_str!("../../../../data/registry/java/pack.json");
+const BUILTIN_JAVA_MANIFEST: &str = include_str!("../../../../data/registry/java/pack.json");
 /// Built-in `data_versions.json` bytes, statically embedded at compile time.
 const BUILTIN_JAVA_DATA_VERSIONS: &str =
     include_str!("../../../../data/registry/java/data_versions.json");
@@ -127,7 +126,10 @@ pub enum RegistryError {
 /// Held by [`crate::data_version::JavaTarget`] for backwards compatibility
 /// with existing callers; this module just provides the function that
 /// builds one from a [`DataVersionTable`].
-fn entry_for(table: &DataVersionTable, mc_version: &str) -> Option<crate::data_version::JavaTarget> {
+fn entry_for(
+    table: &DataVersionTable,
+    mc_version: &str,
+) -> Option<crate::data_version::JavaTarget> {
     table
         .versions
         .iter()
@@ -204,7 +206,8 @@ impl RegistryPack {
 pub fn builtin_java() -> &'static RegistryPack {
     static PACK: OnceLock<RegistryPack> = OnceLock::new();
     PACK.get_or_init(|| {
-        load_builtin_java().expect("built-in registry pack failed to load — this is a build invariant")
+        load_builtin_java()
+            .expect("built-in registry pack failed to load — this is a build invariant")
     })
 }
 
@@ -247,25 +250,28 @@ pub fn load_from_dir(dir: &Path) -> Result<RegistryPack, RegistryError> {
     load_from_dir_inner(dir, PackEdition::Java)
 }
 
-fn load_from_dir_inner(dir: &Path, expected_edition: PackEdition) -> Result<RegistryPack, RegistryError> {
+fn load_from_dir_inner(
+    dir: &Path,
+    expected_edition: PackEdition,
+) -> Result<RegistryPack, RegistryError> {
     let manifest_path = dir.join("pack.json");
     let manifest_bytes = std::fs::read(&manifest_path).map_err(|source| RegistryError::Io {
         path: manifest_path.clone(),
         source,
     })?;
-    let manifest_text =
-        std::str::from_utf8(&manifest_bytes).map_err(|err| RegistryError::Io {
-            path: manifest_path.clone(),
-            source: std::io::Error::new(std::io::ErrorKind::InvalidData, err),
-        })?;
+    let manifest_text = std::str::from_utf8(&manifest_bytes).map_err(|err| RegistryError::Io {
+        path: manifest_path.clone(),
+        source: std::io::Error::new(std::io::ErrorKind::InvalidData, err),
+    })?;
     let manifest = parse_manifest(manifest_text)?;
     validate_manifest(&manifest, expected_edition)?;
 
     let data_versions_path = dir.join(&manifest.files.data_versions);
-    let data_versions_bytes = std::fs::read(&data_versions_path).map_err(|source| RegistryError::Io {
-        path: data_versions_path.clone(),
-        source,
-    })?;
+    let data_versions_bytes =
+        std::fs::read(&data_versions_path).map_err(|source| RegistryError::Io {
+            path: data_versions_path.clone(),
+            source,
+        })?;
     let data_versions_text =
         std::str::from_utf8(&data_versions_bytes).map_err(|err| RegistryError::Io {
             path: data_versions_path.clone(),
@@ -297,10 +303,7 @@ fn parse_data_versions(s: &str) -> Result<DataVersionTable, RegistryError> {
     })
 }
 
-fn validate_manifest(
-    manifest: &PackManifest,
-    expected: PackEdition,
-) -> Result<(), RegistryError> {
+fn validate_manifest(manifest: &PackManifest, expected: PackEdition) -> Result<(), RegistryError> {
     if manifest.schema_version > SUPPORTED_MANIFEST_SCHEMA {
         return Err(RegistryError::UnsupportedSchemaVersion {
             kind: "manifest",
@@ -328,11 +331,7 @@ fn validate_data_versions(table: &DataVersionTable) -> Result<(), RegistryError>
     if table.versions.is_empty() {
         return Err(RegistryError::EmptyVersionTable);
     }
-    if !table
-        .versions
-        .iter()
-        .any(|e| e.mc_version == table.latest)
-    {
+    if !table.versions.iter().any(|e| e.mc_version == table.latest) {
         return Err(RegistryError::LatestNotInTable {
             latest: table.latest.clone(),
         });
@@ -344,14 +343,11 @@ fn validate_data_versions(table: &DataVersionTable) -> Result<(), RegistryError>
 mod tests {
     use super::*;
 
-    fn write_pack(
-        tmp: &Path,
-        manifest_json: &str,
-        data_versions_json: &str,
-    ) {
+    fn write_pack(tmp: &Path, manifest_json: &str, data_versions_json: &str) {
         std::fs::create_dir_all(tmp).expect("mkdir");
         std::fs::write(tmp.join("pack.json"), manifest_json).expect("write manifest");
-        std::fs::write(tmp.join("data_versions.json"), data_versions_json).expect("write data_versions");
+        std::fs::write(tmp.join("data_versions.json"), data_versions_json)
+            .expect("write data_versions");
     }
 
     fn good_manifest() -> &'static str {
@@ -458,7 +454,11 @@ mod tests {
         let err = load_from_dir(&tmp).expect_err("bad schema");
         assert!(matches!(
             err,
-            RegistryError::UnsupportedSchemaVersion { kind: "manifest", got: 999, .. }
+            RegistryError::UnsupportedSchemaVersion {
+                kind: "manifest",
+                got: 999,
+                ..
+            }
         ));
         let _ = std::fs::remove_dir_all(&tmp);
     }
@@ -476,7 +476,11 @@ mod tests {
         let err = load_from_dir(&tmp).expect_err("bad schema");
         assert!(matches!(
             err,
-            RegistryError::UnsupportedSchemaVersion { kind: "data_versions", got: 999, .. }
+            RegistryError::UnsupportedSchemaVersion {
+                kind: "data_versions",
+                got: 999,
+                ..
+            }
         ));
         let _ = std::fs::remove_dir_all(&tmp);
     }

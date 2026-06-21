@@ -12,10 +12,10 @@ use cairn_lang_core::lock::{
 use cairn_lang_core::resolve::{VersionAxes, compute_axes, resolve};
 use cairn_lang_core::{Severity, check, lower, parse};
 use cairn_lang_formats::data_version::resolve_java_target;
-use cairn_lang_formats::registry::builtin_java;
 use cairn_lang_formats::java_structure::{
     Compound, build_structure_tag, output_filename, write_compound_gzip,
 };
+use cairn_lang_formats::registry::builtin_java;
 use clap::{Parser, Subcommand, ValueEnum};
 
 /// `cairn` — Minecraft build DSL command-line interface.

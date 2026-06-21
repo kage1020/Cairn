@@ -14,6 +14,6 @@ pub use java_structure::{
     write_structure_gzip,
 };
 pub use registry::{
-    PackEdition, PackFiles, PackManifest, PackSource, RegistryError, RegistryPack,
-    builtin_java, load_builtin_java, load_from_dir,
+    PackEdition, PackFiles, PackManifest, PackSource, RegistryError, RegistryPack, builtin_java,
+    load_builtin_java, load_from_dir,
 };
