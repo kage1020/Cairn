@@ -7,11 +7,12 @@
 //! lockfile's `inputs.registry_pack_hash` field so a build is reproducible
 //! against a pinned set of bytes.
 //!
-//! The 2026.12.0 cut introduced here ships only the `data_versions`
-//! component — the smallest piece that lets `data_version.rs` stop carrying
-//! a hardcoded `(mc_version, DataVersion)` array. Subsequent PRs slot in
-//! block/item/tag tables and the semantic-sensitivity catalog by extending
-//! `PackFiles` with new `Option` fields, so an older pack stays loadable.
+//! The initial cut ships only the `data_versions` component — the
+//! smallest piece that lets `data_version.rs` stop carrying a hardcoded
+//! `(mc_version, DataVersion)` array. Later additions slot in
+//! block/item/tag tables and the semantic-sensitivity catalog by
+//! extending [`PackFiles`] with new `Option` fields, so an older pack
+//! stays loadable.
 
 pub mod data_versions;
 pub mod hash;

@@ -36,9 +36,10 @@ pub enum PackEdition {
 
 /// Component file references inside a registry pack.
 ///
-/// `data_versions` is the only required component in the 2026.12.0 PR1
-/// cut. Subsequent PRs add `Option`-typed entries for blocks, items, tags,
-/// and the semantic-sensitivity catalog so older packs stay loadable.
+/// `data_versions` is the only required component in the initial cut.
+/// Later additions slot in `Option`-typed entries for blocks, items,
+/// tags, and the semantic-sensitivity catalog so older packs stay
+/// loadable.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct PackFiles {
     /// Relative filename of the `DataVersionTable` JSON.
