@@ -3,7 +3,8 @@
 use cairn_lang_core::block_array::BlockArrayIr;
 use cairn_lang_core::block_array::{BlockArray, BlockState, Dims, Palette, PaletteIndex};
 use cairn_lang_core::lock::{
-    HashHex, LockInputs, LockTarget, Lockfile, MemberSensitivity, hash_resolved_ir, hash_source,
+    HashHex, HashParseError, LockEdition, LockInputs, LockTarget, Lockfile, MemberSensitivity,
+    hash_resolved_ir, hash_source,
 };
 use indexmap::IndexMap;
 
@@ -32,7 +33,7 @@ fn l1_hash_source_empty_input_matches_known_sha256() {
     // AC L1: well-known sha256 of the empty input.
     let h = hash_source("");
     assert_eq!(
-        h.0,
+        h.as_str(),
         "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
     );
 }
@@ -51,8 +52,8 @@ fn l2_hash_source_is_deterministic() {
 fn l3_hash_resolved_ir_is_deterministic() {
     // AC L3: same IR → same hash, across calls.
     let ir = unit_ir(Palette::new_with_air());
-    let h1 = hash_resolved_ir(&ir);
-    let h2 = hash_resolved_ir(&ir);
+    let h1 = hash_resolved_ir(&ir).expect("hash");
+    let h2 = hash_resolved_ir(&ir).expect("hash");
     assert_eq!(h1, h2);
 }
 
@@ -67,8 +68,8 @@ fn l4_hash_resolved_ir_reflects_palette_order() {
     p2.intern(BlockState::bare("minecraft:oak_planks"));
     p2.intern(BlockState::bare("minecraft:cobblestone"));
 
-    let h1 = hash_resolved_ir(&unit_ir(p1));
-    let h2 = hash_resolved_ir(&unit_ir(p2));
+    let h1 = hash_resolved_ir(&unit_ir(p1)).expect("hash");
+    let h2 = hash_resolved_ir(&unit_ir(p2)).expect("hash");
     assert_ne!(h1, h2);
 }
 
@@ -77,7 +78,7 @@ fn sample_lockfile() -> Lockfile {
         source_hash: HashHex::from_bytes(b"cottage"),
         cairn_version: "2026.09".to_owned(),
         target: LockTarget {
-            edition: "java".to_owned(),
+            edition: LockEdition::Java,
             mc_version: "1.21.4".to_owned(),
             data_version: 4189,
         },
@@ -129,7 +130,64 @@ fn l6_lockfile_yaml_key_order_matches_spec() {
 #[test]
 fn l7_hash_zero_matches_canonical_string() {
     // AC L7: zero hash is the spec-defined sentinel.
-    assert_eq!(HashHex::zero().0, HashHex::ZERO_STR);
+    assert_eq!(HashHex::zero().as_str(), HashHex::ZERO_STR);
+}
+
+#[test]
+fn hash_parse_rejects_missing_prefix() {
+    let err = HashHex::parse("deadbeef").expect_err("missing prefix");
+    assert_eq!(err, HashParseError::MissingPrefix);
+}
+
+#[test]
+fn hash_parse_rejects_wrong_length() {
+    let err = HashHex::parse("sha256:dead").expect_err("short body");
+    assert!(matches!(err, HashParseError::WrongLength { got: 4 }));
+}
+
+#[test]
+fn hash_parse_rejects_non_hex_char() {
+    let mut body = "0".repeat(64);
+    body.replace_range(3..4, "z");
+    let err = HashHex::parse(&format!("sha256:{body}")).expect_err("non hex");
+    assert!(matches!(err, HashParseError::NonHexChar { index: 3 }));
+}
+
+#[test]
+fn hash_parse_accepts_uppercase_hex() {
+    // Lockfiles written by hand may use uppercase. We round-trip the
+    // exact bytes given so the user's choice survives `read → write`.
+    let body = "A".repeat(64);
+    let parsed = HashHex::parse(&format!("sha256:{body}")).expect("uppercase ok");
+    assert_eq!(parsed.as_str(), format!("sha256:{body}"));
+}
+
+#[test]
+fn lockfile_yaml_with_bad_edition_is_rejected() {
+    // `LockEdition` is a closed enum on the wire too, so a typo in the
+    // edition cannot ride along as a valid lockfile.
+    let body = format!(
+        "source_hash: {zero}\ncairn_version: '2026.09'\ntarget:\n  edition: jav\n  mc_version: '1.21.4'\n  data_version: 4189\ninputs:\n  registry_pack_hash: {zero}\n  constraint_catalog_hash: {zero}\nresolved_ir_hash: {zero}\nverified: true\nmember_version_sensitivity: []\n",
+        zero = HashHex::ZERO_STR,
+    );
+    let err = serde_yml::from_str::<Lockfile>(&body).expect_err("typo edition");
+    assert!(
+        err.to_string().contains("jav") || err.to_string().contains("variant"),
+        "expected variant error, got {err}",
+    );
+}
+
+#[test]
+fn lockfile_yaml_with_bad_hash_is_rejected() {
+    let body = format!(
+        "source_hash: not-a-hash\ncairn_version: '2026.09'\ntarget:\n  edition: java\n  mc_version: '1.21.4'\n  data_version: 4189\ninputs:\n  registry_pack_hash: {zero}\n  constraint_catalog_hash: {zero}\nresolved_ir_hash: {zero}\nverified: true\nmember_version_sensitivity: []\n",
+        zero = HashHex::ZERO_STR,
+    );
+    let err = serde_yml::from_str::<Lockfile>(&body).expect_err("bad hash");
+    assert!(
+        err.to_string().contains("prefix"),
+        "expected hash prefix error, got {err}",
+    );
 }
 
 #[test]

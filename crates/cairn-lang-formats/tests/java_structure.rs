@@ -35,13 +35,11 @@ fn synthetic_cottage() -> BlockArray {
     // y=0 (floor): all cobblestone.
     for z in 0..2 {
         for x in 0..2 {
-            let i = dims.index(x, y_const(0), z).unwrap();
-            voxels[i] = cobble;
+            voxels[dims.index(x, 0, z).unwrap()] = cobble;
         }
     }
     // y=1: corner walls (z=0,x=0), rest air.
-    let wall_at = dims.index(0, y_const(1), 0).unwrap();
-    voxels[wall_at] = planks;
+    voxels[dims.index(0, 1, 0).unwrap()] = planks;
     BlockArray {
         dims,
         palette,
@@ -50,10 +48,6 @@ fn synthetic_cottage() -> BlockArray {
         entities: vec![],
         source_scope: "struct::cottage".to_owned(),
     }
-}
-
-fn y_const(y: u32) -> u32 {
-    y
 }
 
 #[test]
@@ -98,7 +92,7 @@ fn f1_unit_air_root_has_size_palette_blocks_entities_dataversion() {
                     assert_eq!(c.entries.get("state"), Some(&Tag::Int(0)));
                     match c.entries.get("pos") {
                         Some(Tag::List(ps)) => {
-                            assert_eq!(ps.items, vec![Tag::Int(0), Tag::Int(0), Tag::Int(0)])
+                            assert_eq!(ps.items, vec![Tag::Int(0), Tag::Int(0), Tag::Int(0)]);
                         }
                         _ => panic!("pos not a list"),
                     }
@@ -294,6 +288,27 @@ fn f9_output_filename_strips_struct_prefix() {
 }
 
 #[test]
+fn output_filename_preserves_inner_colons_and_unicode() {
+    // Scope keys that the IR could legitimately produce (a nested-namespace
+    // notation in M3) should not be silently rewritten. We strip only the
+    // exact `struct::` prefix and leave the rest verbatim, including any
+    // subsequent `::`; downstream filename sanitisation is the OS layer's
+    // responsibility on Windows.
+    assert_eq!(output_filename("struct::deep::room"), "deep::room.nbt");
+    // No prefix, no transformation: the scope key carries through verbatim.
+    assert_eq!(output_filename("塔"), "塔.nbt");
+}
+
+#[test]
+fn output_filename_handles_empty_input() {
+    // Degenerate: an empty scope key produces a file named `.nbt`, which
+    // is malformed on every OS we target. We don't try to fix it — IR
+    // callers control the scope key, and a silent rename would mask the
+    // bug.
+    assert_eq!(output_filename(""), ".nbt");
+}
+
+#[test]
 fn f10_gzip_output_begins_with_magic_bytes() {
     // AC F10: write_structure_gzip produces a gzip stream.
     let mut buf = Vec::new();
@@ -303,9 +318,9 @@ fn f10_gzip_output_begins_with_magic_bytes() {
 }
 
 #[test]
-fn f11_unit_air_yaml_snapshot_is_stable() {
-    // AC F11: stable snapshot of the tag tree so a future refactor that
-    // accidentally changes Tag construction order is caught.
+fn f11_unit_air_debug_snapshot_is_stable() {
+    // AC F11: stable debug snapshot of the tag tree so a future refactor
+    // that accidentally changes Tag construction order is caught.
     let root = build_structure_tag(&unit_air(), target_1_21_4()).expect("build");
     insta::assert_debug_snapshot!(root);
 }

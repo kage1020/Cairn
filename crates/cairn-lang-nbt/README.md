@@ -1,10 +1,11 @@
 # cairn-lang-nbt
 
-NBT codec for the Cairn language. Encodes and decodes Minecraft NBT in both flavors:
+NBT codec for the Cairn language. The Java writer ships today; the Bedrock
+codec and the streaming reader follow.
 
-- **Java**: big-endian, gzipped, root compound tags.
-- **Bedrock**: little-endian (and varint little-endian for network payloads), nameless lists of
-  records.
+- **Java**: big-endian, gzipped, root compound tags. **Writer is public.**
+- **Bedrock**: little-endian (and varint little-endian for network payloads),
+  nameless lists of records. *Not yet implemented.*
 
 This crate is deliberately *just* the codec. It does not know anything about Litematica regions,
 schematic palettes, or Cairn's block-array IR — those live in
@@ -13,10 +14,10 @@ fuzzed and benchmarked without dragging in the higher-level format machinery.
 
 ## Status
 
-Java writer landed in M2-PR5. The full Java NBT tag taxonomy
-(`Byte` through `LongArray`), an `IndexMap`-ordered `Compound`, and the
-two writer entrypoints (`write_java_uncompressed` for tests,
-`write_java_gzip` for the on-disk `.nbt` Minecraft expects) are public.
+Java writer ships. The full Java NBT tag taxonomy (`Byte` through
+`LongArray`), an `IndexMap`-ordered `Compound`, and the two writer
+entrypoints (`write_java_uncompressed` for tests, `write_java_gzip` for
+the on-disk `.nbt` Minecraft expects) are public.
 
 Bedrock little-endian and the streaming reader are still to land.
 

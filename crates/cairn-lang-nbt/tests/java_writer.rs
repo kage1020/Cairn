@@ -169,3 +169,67 @@ fn find_subsequence(haystack: &[u8], needle: &[u8]) -> Option<usize> {
         .windows(needle.len())
         .position(|window| window == needle)
 }
+
+#[test]
+fn heterogeneous_list_rejected_with_index_and_actual_type() {
+    // A list declares Int but carries a String element: the writer must
+    // pinpoint the offending index and the wrong type id.
+    let mut root = Compound::new();
+    root.insert(
+        "xs",
+        Tag::List(List {
+            element_type_id: 3, // Int
+            items: vec![Tag::Int(1), Tag::String("oops".to_owned())],
+        }),
+    );
+    let mut buf = Vec::new();
+    let err = write_java_uncompressed(&mut buf, "", &root).expect_err("heterogeneous");
+    match err {
+        NbtIoError::HeterogeneousList {
+            declared,
+            index,
+            actual,
+        } => {
+            assert_eq!(declared, 3);
+            assert_eq!(index, 1);
+            assert_eq!(actual, 8);
+        }
+        other => panic!("expected HeterogeneousList, got {other:?}"),
+    }
+}
+
+#[test]
+fn length_overflow_message_names_the_context() {
+    // We can't actually allocate a `Vec<i32>` of `i32::MAX + 1` to trigger
+    // the overflow path, so this test only locks down the error's `context`
+    // field via Display so a debug log meaningfully points at the offending
+    // tag.
+    let err = NbtIoError::LengthOverflow {
+        context: "string",
+        len: 1 << 17,
+        limit: u16::MAX as usize,
+    };
+    let msg = err.to_string();
+    assert!(msg.contains("string"), "context should appear, got: {msg}");
+    assert!(msg.contains(&(u16::MAX as usize).to_string()));
+}
+
+#[test]
+fn non_ascii_string_rejected_with_offending_byte_index() {
+    // The Modified UTF-8 encoder for supplementary chars has not landed
+    // yet, so the writer rejects any non-ASCII byte rather than silently
+    // emitting invalid bytes.
+    let mut root = Compound::new();
+    root.insert("u8", Tag::String("café".to_owned()));
+    let mut buf = Vec::new();
+    let err = write_java_uncompressed(&mut buf, "", &root).expect_err("non ascii");
+    match err {
+        NbtIoError::InvalidString { byte, index } => {
+            assert!(byte >= 0x80);
+            // "café" → bytes are [0x63, 0x61, 0x66, 0xC3, 0xA9]; first
+            // non-ASCII byte is at index 3.
+            assert_eq!(index, 3);
+        }
+        other => panic!("expected InvalidString, got {other:?}"),
+    }
+}

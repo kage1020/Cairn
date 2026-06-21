@@ -37,8 +37,11 @@ pub enum NbtIoError {
         actual: u8,
     },
     /// An NBT length prefix (i32 / u16) overflowed the on-wire width.
-    #[error("nbt: length {len} exceeds wire limit {limit}")]
+    #[error("nbt: {context} length {len} exceeds wire limit {limit}")]
     LengthOverflow {
+        /// Which tag's length overflowed (`"string"`, `"byte_array"`,
+        /// `"int_array"`, `"long_array"`, `"list"`).
+        context: &'static str,
         /// Requested length.
         len: usize,
         /// Hard wire-level limit (`i32::MAX` or `u16::MAX`).
@@ -103,6 +106,7 @@ fn write_string<W: Write>(w: &mut W, s: &str) -> Result<(), NbtIoError> {
     }
     let bytes = s.as_bytes();
     let len = u16::try_from(bytes.len()).map_err(|_| NbtIoError::LengthOverflow {
+        context: "string",
         len: bytes.len(),
         limit: u16::MAX as usize,
     })?;
@@ -120,24 +124,25 @@ fn write_payload<W: Write>(w: &mut W, tag: &Tag) -> Result<(), NbtIoError> {
         Tag::Float(v) => w.write_all(&v.to_be_bytes())?,
         Tag::Double(v) => w.write_all(&v.to_be_bytes())?,
         Tag::ByteArray(bytes) => {
-            write_array_len(w, bytes.len())?;
-            // i8 → u8 with the same bit pattern; the NBT wire treats both
-            // as raw bytes so this conversion is canonical.
-            #[allow(clippy::cast_sign_loss)]
-            let raw: Vec<u8> = bytes.iter().map(|&b| b as u8).collect();
-            w.write_all(&raw)?;
+            write_array_len(w, "byte_array", bytes.len())?;
+            // i8 → u8 with the same bit pattern via `to_ne_bytes`; the NBT
+            // wire treats both as raw bytes so the in-memory sign tag is
+            // not part of the payload.
+            for &b in bytes {
+                w.write_all(&b.to_ne_bytes())?;
+            }
         }
         Tag::String(s) => write_string(w, s)?,
         Tag::List(list) => write_list(w, list)?,
         Tag::Compound(c) => write_compound_body(w, c)?,
         Tag::IntArray(values) => {
-            write_array_len(w, values.len())?;
+            write_array_len(w, "int_array", values.len())?;
             for v in values {
                 w.write_all(&v.to_be_bytes())?;
             }
         }
         Tag::LongArray(values) => {
-            write_array_len(w, values.len())?;
+            write_array_len(w, "long_array", values.len())?;
             for v in values {
                 w.write_all(&v.to_be_bytes())?;
             }
@@ -146,8 +151,13 @@ fn write_payload<W: Write>(w: &mut W, tag: &Tag) -> Result<(), NbtIoError> {
     Ok(())
 }
 
-fn write_array_len<W: Write>(w: &mut W, len: usize) -> Result<(), NbtIoError> {
+fn write_array_len<W: Write>(
+    w: &mut W,
+    context: &'static str,
+    len: usize,
+) -> Result<(), NbtIoError> {
     let len = i32::try_from(len).map_err(|_| NbtIoError::LengthOverflow {
+        context,
         len,
         limit: i32::MAX as usize,
     })?;
@@ -157,7 +167,7 @@ fn write_array_len<W: Write>(w: &mut W, len: usize) -> Result<(), NbtIoError> {
 
 fn write_list<W: Write>(w: &mut W, list: &List) -> Result<(), NbtIoError> {
     w.write_all(&[list.element_type_id])?;
-    write_array_len(w, list.items.len())?;
+    write_array_len(w, "list", list.items.len())?;
     for (index, item) in list.items.iter().enumerate() {
         let actual = item.type_id();
         if actual != list.element_type_id {

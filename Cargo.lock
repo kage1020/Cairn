@@ -109,7 +109,6 @@ version = "0.0.0"
 dependencies = [
  "cairn-lang-core",
  "cairn-lang-nbt",
- "indexmap",
  "insta",
  "thiserror",
 ]

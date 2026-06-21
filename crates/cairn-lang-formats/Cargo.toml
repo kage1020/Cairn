@@ -12,7 +12,6 @@ authors.workspace = true
 [dependencies]
 cairn-lang-core = { workspace = true }
 cairn-lang-nbt = { workspace = true }
-indexmap = "2.14.0"
 thiserror = "2.0.18"
 
 [lints]

@@ -9,5 +9,6 @@ pub mod java_structure;
 
 pub use data_version::{JavaTarget, UnsupportedTarget, resolve_java_target, supported_list};
 pub use java_structure::{
-    JavaStructureError, build_structure_tag, output_filename, write_structure_gzip,
+    Compound, JavaStructureError, build_structure_tag, output_filename, write_compound_gzip,
+    write_structure_gzip,
 };

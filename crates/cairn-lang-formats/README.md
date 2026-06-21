@@ -9,9 +9,9 @@ the parser, lint, and theme machinery in [`cairn-lang-core`](../cairn-lang-core/
 
 ## Status
 
-Java vanilla `.nbt` writer landed in M2-PR5. Litematica `.litematic`,
-WorldEdit `.schem`, and Bedrock `.mcstructure` are still to land. No
-reverse-direction (file → IR) backends ship yet.
+Java vanilla `.nbt` writer ships. Litematica `.litematic`, WorldEdit
+`.schem`, and Bedrock `.mcstructure` are still to land. No reverse-direction
+(file → IR) backends ship yet.
 
 ## Public API
 

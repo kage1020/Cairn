@@ -17,7 +17,8 @@
 //! aren't empty) leaves the door open for M3 fixtures lowering.
 
 use cairn_lang_core::block_array::{BlockArray, BlockState};
-use cairn_lang_nbt::tag::{Compound, List, Tag};
+pub use cairn_lang_nbt::Compound;
+use cairn_lang_nbt::tag::{List, Tag};
 use cairn_lang_nbt::{NbtIoError, write_java_gzip};
 use thiserror::Error;
 
@@ -107,8 +108,25 @@ pub fn write_structure_gzip<W: std::io::Write>(
     target: JavaTarget,
 ) -> Result<(), JavaStructureError> {
     let root = build_structure_tag(ba, target)?;
-    write_java_gzip(writer, "", &root)?;
+    write_compound_gzip(writer, &root)?;
     Ok(())
+}
+
+/// Gzip-write an already-built structure [`Compound`] under the empty root
+/// name vanilla expects. Split out from [`write_structure_gzip`] so a
+/// caller can build every tree first and only then start touching the
+/// filesystem (the CLI relies on this to validate the IR before writing
+/// any `.nbt`).
+///
+/// # Errors
+///
+/// Propagates I/O failure from `writer` and any encoding error raised by
+/// the tag tree.
+pub fn write_compound_gzip<W: std::io::Write>(
+    writer: &mut W,
+    root: &Compound,
+) -> Result<(), NbtIoError> {
+    write_java_gzip(writer, "", root)
 }
 
 /// Filename for a single [`BlockArray`] within a multi-structure IR.

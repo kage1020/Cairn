@@ -75,8 +75,7 @@ pub struct Compound {
 }
 
 impl Compound {
-    /// Empty compound. Equivalent to [`Compound::default`] but reads better
-    /// at call sites that chain `.insert`.
+    /// Empty compound.
     #[must_use]
     pub fn new() -> Self {
         Self::default()
@@ -126,8 +125,9 @@ impl List {
         }
     }
 
-    /// Build a `List<TAG_Compound>` from a vector of [`Compound`]s. Used for
-    /// `palette`, `blocks`, and `entities` in Java vanilla structure NBT.
+    /// Build a `List<TAG_Compound>` from a vector of [`Compound`]s. Used
+    /// for `palette` and `blocks` in Java vanilla structure NBT (and for
+    /// `entities` once entity lowering lands).
     #[must_use]
     pub fn of_compounds(items: Vec<Compound>) -> Self {
         Self {

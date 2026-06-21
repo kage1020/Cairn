@@ -2,10 +2,11 @@
 //!
 //! Java structure NBT carries a `DataVersion` integer that the loading
 //! client uses to know whether and how to run DFU upgrades. The mapping
-//! between human-facing `1.21.4` and the integer `3955` is owned by
-//! Mojang's source; we hardcode the subset the M2 examples target. The
-//! registry pack ingest in 2026.12.0 replaces this constant table with
-//! values pulled from a versioned data file.
+//! between human-facing `1.21.4` and the integer `4189` is owned by
+//! Mojang's source; we hardcode the subset the bundled `examples/` target.
+//! The registry pack ingest planned alongside `cairn info`'s
+//! semantic-sensitivity catalog replaces this constant table with values
+//! pulled from a versioned data file.
 
 use thiserror::Error;
 
@@ -21,7 +22,7 @@ pub struct JavaTarget {
 
 /// `--target` value did not match any supported version.
 #[derive(Debug, Error)]
-#[error("unsupported java target `{requested}`. supported in this release: {supported}")]
+#[error("unsupported java target `{requested}`. supported targets: {supported}")]
 pub struct UnsupportedTarget {
     /// Verbatim value passed via `--target`.
     pub requested: String,
@@ -30,8 +31,7 @@ pub struct UnsupportedTarget {
 }
 
 /// Supported Java targets, in ascending version order. Add a row when a new
-/// `DataVersion` is published; remove a row only at a `CalVer` major (none
-/// planned yet).
+/// `DataVersion` is published; remove a row only at a `CalVer` major.
 ///
 /// Sources:
 /// - 1.20.4 → `3700` (Mojang release thread, Dec 2023)

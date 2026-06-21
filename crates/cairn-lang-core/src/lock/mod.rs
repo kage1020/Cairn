@@ -5,7 +5,10 @@
 //! `DataVersion`), and the resolved IR. Re-running `cairn compile` against
 //! a different target prints the divergence by comparing fields.
 //!
-//! See `spec/versioning-editions.md` §10.6 for the canonical schema.
+//! Note that the canonical filename for a single-source build is
+//! `build.cairn.lock` (per `spec/versioning-editions.md` §10.6), but the
+//! CLI defaults to `<source>.lock` so multi-source workspaces stay
+//! unambiguous; the lockfile schema does not care which path it lives at.
 
 mod hash;
 mod schema;
@@ -13,8 +16,8 @@ mod schema;
 use std::fs;
 use std::path::Path;
 
-pub use hash::{HashHex, hash_resolved_ir, hash_source};
-pub use schema::{LockInputs, LockTarget, Lockfile, MemberSensitivity};
+pub use hash::{HashError, HashHex, HashParseError, hash_resolved_ir, hash_source};
+pub use schema::{LockEdition, LockInputs, LockTarget, Lockfile, MemberSensitivity};
 
 use thiserror::Error;
 
