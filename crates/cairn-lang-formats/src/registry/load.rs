@@ -178,26 +178,19 @@ impl RegistryPack {
         })
     }
 
-    /// Render the suggestion prefix (`did you mean ...?` plus trailing
-    /// space) for the matching field of
-    /// [`crate::data_version::UnsupportedTarget`], or an empty string when
-    /// no version is close enough. Candidate pool is every `mc_version`
-    /// plus the `"latest"` alias, since the alias is just as legitimate a
-    /// `--target` value as any version string.
-    fn suggestion_for(&self, requested: &str) -> String {
-        // Collect once because `nearest_match` takes an iterator and the
-        // chain is borrowed cheaply but not Clone-able through the by-ref
-        // iteration.
-        let mut pool: Vec<&str> = self
+    /// Closest supported version for the matching field of
+    /// [`crate::data_version::UnsupportedTarget`], or `None` when no version
+    /// is close enough. Candidate pool is every `mc_version` plus the
+    /// `"latest"` alias, since the alias is just as legitimate a `--target`
+    /// value as any version string.
+    fn suggestion_for(&self, requested: &str) -> Option<String> {
+        let pool = self
             .data_versions
             .versions
             .iter()
             .map(|e| e.mc_version.as_str())
-            .collect();
-        pool.push("latest");
-        nearest_match(requested, pool.iter().copied())
-            .map(|s| format!("did you mean `{s}`? "))
-            .unwrap_or_default()
+            .chain(std::iter::once("latest"));
+        nearest_match(requested, pool).map(str::to_owned)
     }
 
     /// Human-readable list of `mc_version` strings the pack supports,
@@ -433,8 +426,8 @@ mod tests {
         assert!(err.supported.contains("1.20.4"));
         assert!(err.supported.contains("latest"));
         // `0.0.0` is far from every supported version; the suggestion
-        // prefix must stay empty so the error reads as a plain "no match".
-        assert!(err.suggestion.is_empty());
+        // field must stay None so the error reads as a plain "no match".
+        assert!(err.suggestion.is_none());
     }
 
     #[test]
@@ -445,11 +438,7 @@ mod tests {
         let err = pack
             .resolve_java_target("1.21.5")
             .expect_err("unknown target");
-        assert!(
-            err.suggestion.contains("1.21.4"),
-            "suggestion should point at the closest version, got: {}",
-            err.suggestion,
-        );
+        assert_eq!(err.suggestion.as_deref(), Some("1.21.4"));
     }
 
     #[test]

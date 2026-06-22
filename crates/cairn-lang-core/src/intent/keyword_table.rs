@@ -18,6 +18,12 @@ use super::member::MemberRole;
 /// "expected one of ..." note attached to `E_UNKNOWN_KEYWORD`. Kept in
 /// lock-step with [`role_of`] — the unit test below trips if the two
 /// drift apart.
+///
+/// The declaration order doubles as the tie-break order for
+/// `cairn-lang-core::suggest`'s `did you mean ...?` note: when two keywords
+/// sit at the same Damerau-Levenshtein distance from the user's typo, the
+/// one appearing earlier in this array wins. Re-sorting the array changes
+/// which keyword surfaces on ambiguous near-misses.
 pub const KNOWN_KEYWORDS: &[&str] = &[
     "floor",
     "walls",

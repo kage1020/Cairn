@@ -24,8 +24,10 @@ use strsim::damerau_levenshtein;
 /// and longer ones three — past which the suggestion reads as a different
 /// word entirely.
 fn max_distance(input_len: usize) -> usize {
+    // [`nearest_match`] returns early on an empty input, so 0 never reaches
+    // here; the lower bound is 1.
     match input_len {
-        0..=3 => 1,
+        1..=3 => 1,
         4..=6 => 2,
         _ => 3,
     }

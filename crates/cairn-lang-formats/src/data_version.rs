@@ -7,7 +7,7 @@
 //! (see [`crate::registry`]). The hardcoded table that used to live in
 //! this module was removed when the registry pack ingest landed.
 
-use thiserror::Error;
+use std::fmt;
 
 use crate::registry::builtin_java;
 
@@ -25,20 +25,31 @@ pub struct JavaTarget {
 }
 
 /// `--target` value did not match any version in the registry pack.
-#[derive(Debug, Error)]
-#[error("unsupported java target `{requested}`. {suggestion}supported targets: {supported}")]
+#[derive(Debug)]
 pub struct UnsupportedTarget {
     /// Verbatim value passed via `--target`.
     pub requested: String,
-    /// Pre-formatted "did you mean ...?" prefix (including the trailing
-    /// space) when the requested value is close (Damerau-Levenshtein
-    /// distance bounded by [`crate::registry`]'s suggestion threshold) to a
-    /// supported version. Empty string when no candidate was close enough,
-    /// so the error template stays one format string in both cases.
-    pub suggestion: String,
+    /// Closest supported version when one sits within the suggestion pass's
+    /// length-scaled Damerau-Levenshtein cap (see `cairn-lang-core::suggest`),
+    /// or `None` when the input is too far from any candidate. Holds the
+    /// bare candidate name; the surrounding `did you mean ...?` phrasing is
+    /// the [`fmt::Display`] impl's responsibility.
+    pub suggestion: Option<String>,
     /// Pre-formatted list of supported versions, ready to print.
     pub supported: String,
 }
+
+impl fmt::Display for UnsupportedTarget {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "unsupported java target `{}`. ", self.requested)?;
+        if let Some(s) = &self.suggestion {
+            write!(f, "did you mean `{s}`? ")?;
+        }
+        write!(f, "supported targets: {}", self.supported)
+    }
+}
+
+impl std::error::Error for UnsupportedTarget {}
 
 /// Resolve a `--target` string against the built-in registry pack. The
 /// literal `"latest"` aliases the row named by `data_versions.latest`,
@@ -94,15 +105,11 @@ mod tests {
     #[test]
     fn unknown_version_near_known_one_suggests_it() {
         // `1.21.5` is one substitution away from `1.21.4`; the suggestion
-        // prefix must point at the real version so a user re-running
+        // field must point at the real version so a user re-running
         // `cairn compile --target 1.21.5` sees the typo immediately.
         let err = resolve_java_target("1.21.5").expect_err("unknown");
-        assert!(
-            err.suggestion.contains("1.21.4"),
-            "suggestion should name the close version, got: {}",
-            err.suggestion,
-        );
-        // The Display impl interleaves the suggestion into the wider error.
+        assert_eq!(err.suggestion.as_deref(), Some("1.21.4"));
+        // The Display impl wraps the bare suggestion into the wider error.
         let rendered = err.to_string();
         assert!(
             rendered.contains("did you mean `1.21.4`?"),
@@ -114,8 +121,8 @@ mod tests {
     fn distant_unknown_version_skips_suggestion() {
         let err = resolve_java_target("0.0.0").expect_err("unknown");
         assert!(
-            err.suggestion.is_empty(),
-            "no suggestion expected for a distant input, got: {}",
+            err.suggestion.is_none(),
+            "no suggestion expected for a distant input, got: {:?}",
             err.suggestion,
         );
     }
