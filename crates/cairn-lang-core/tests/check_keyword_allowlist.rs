@@ -74,6 +74,55 @@ fn kw_4_theme_selector_with_unknown_keyword_is_flagged() {
 }
 
 #[test]
+fn kw_6_close_typo_attaches_did_you_mean_note() {
+    // `wals` is one deletion away from `walls`; the suggest pass must lead
+    // the notes with a targeted "did you mean" line, keeping the broader
+    // candidate listing as a fallback.
+    let src = "struct s size=4x4\n  wals mat_slot=wall height=3\n";
+    let diags = diagnose(src);
+    let kw = diags
+        .iter()
+        .find(|d| d.code == DiagnosticCode::UnknownKeyword)
+        .unwrap_or_else(|| panic!("no E_UNKNOWN_KEYWORD, got {diags:#?}"));
+    assert_eq!(
+        kw.notes.len(),
+        2,
+        "expected a suggestion note plus the candidate list, got: {:#?}",
+        kw.notes,
+    );
+    assert!(
+        kw.notes[0].message.contains("did you mean `walls`"),
+        "first note should be the targeted suggestion, got: {}",
+        kw.notes[0].message,
+    );
+    assert!(
+        kw.notes[1].message.contains("expected one of"),
+        "second note should remain the candidate listing, got: {}",
+        kw.notes[1].message,
+    );
+}
+
+#[test]
+fn kw_7_distant_typo_skips_the_suggestion() {
+    // `mystery` is 4+ edits away from every M2 keyword, so the suggest pass
+    // must not invent a guess — the candidate listing alone is the right
+    // surface for the user to scan.
+    let src = "struct s size=1x1\n  mystery foo=1\n";
+    let diags = diagnose(src);
+    let kw = diags
+        .iter()
+        .find(|d| d.code == DiagnosticCode::UnknownKeyword)
+        .unwrap_or_else(|| panic!("no E_UNKNOWN_KEYWORD, got {diags:#?}"));
+    assert_eq!(
+        kw.notes.len(),
+        1,
+        "no suggestion expected, got: {:#?}",
+        kw.notes
+    );
+    assert!(kw.notes[0].message.contains("expected one of"));
+}
+
+#[test]
 fn kw_5_every_m2_known_keyword_is_silent() {
     // Build a source that uses every keyword in the M2 table. None should
     // trigger `E_UNKNOWN_KEYWORD`. `place` and `connect` live in a site;

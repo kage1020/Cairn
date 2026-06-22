@@ -9,6 +9,7 @@ use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
 use cairn_lang_core::lock::HashHex;
+use cairn_lang_core::suggest::nearest_match;
 use thiserror::Error;
 
 use super::data_versions::DataVersionTable;
@@ -171,9 +172,25 @@ impl RegistryPack {
         entry_for(&self.data_versions, requested).ok_or_else(|| {
             crate::data_version::UnsupportedTarget {
                 requested: requested.to_owned(),
+                suggestion: self.suggestion_for(requested),
                 supported: self.supported_list(),
             }
         })
+    }
+
+    /// Closest supported version for the matching field of
+    /// [`crate::data_version::UnsupportedTarget`], or `None` when no version
+    /// is close enough. Candidate pool is every `mc_version` plus the
+    /// `"latest"` alias, since the alias is just as legitimate a `--target`
+    /// value as any version string.
+    fn suggestion_for(&self, requested: &str) -> Option<String> {
+        let pool = self
+            .data_versions
+            .versions
+            .iter()
+            .map(|e| e.mc_version.as_str())
+            .chain(std::iter::once("latest"));
+        nearest_match(requested, pool).map(str::to_owned)
     }
 
     /// Human-readable list of `mc_version` strings the pack supports,
@@ -408,6 +425,20 @@ mod tests {
         assert_eq!(err.requested, "0.0.0");
         assert!(err.supported.contains("1.20.4"));
         assert!(err.supported.contains("latest"));
+        // `0.0.0` is far from every supported version; the suggestion
+        // field must stay None so the error reads as a plain "no match".
+        assert!(err.suggestion.is_none());
+    }
+
+    #[test]
+    fn builtin_pack_suggests_near_target() {
+        // `1.21.5` is one substitution away from `1.21.4` — exactly the
+        // kind of typo the suggest pass is here to catch.
+        let pack = load_builtin_java().expect("builtin pack");
+        let err = pack
+            .resolve_java_target("1.21.5")
+            .expect_err("unknown target");
+        assert_eq!(err.suggestion.as_deref(), Some("1.21.4"));
     }
 
     #[test]

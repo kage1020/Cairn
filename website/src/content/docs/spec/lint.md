@@ -35,6 +35,12 @@ first-class parts of the spec; messages MUST be in a shape that feeds the self-c
 - **AABB interference**: on overlap, priority-merge or reject with a lint error. Boundary blockstate
   re-resolution (inner-corner stairs, etc.) is the IR layer's responsibility.
 
+Diagnostics that reject an identifier against a closed vocabulary (unknown statement keyword,
+unknown `mat_slot=` name, unknown `--target` version) attach a `did you mean \`X\`?` note when a
+candidate sits within a length-scaled Damerau-Levenshtein cap (≤ 1 edit for 1–3 char inputs, ≤ 2
+for 4–6, ≤ 3 beyond). The closed-set listing (`expected one of: ...`) stays as the fallback so the
+output covers both the targeted fix and the full set of valid candidates.
+
 ## 11.2 Error vs warning
 - Things that, left alone, cause unintended results — concept absence, unknown IDs, out-of-domain
   states — are **errors** (silent substitution and implicit dropping are forbidden).

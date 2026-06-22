@@ -10,6 +10,7 @@
 //! [`role_of`](crate::intent::role_of).
 
 use crate::intent::{IntentModule, Member, MemberRole, known_keywords, role_of};
+use crate::suggest::nearest_match;
 
 use super::{Diagnostic, DiagnosticCode, DiagnosticNote, DiagnosticSink};
 
@@ -49,16 +50,27 @@ fn walk(members: &[Member], sink: &mut DiagnosticSink) {
 }
 
 fn push_unknown_keyword(keyword: &str, span: &crate::error::Span, sink: &mut DiagnosticSink) {
+    // Suggestion goes *before* the candidate list so a user reading top-down
+    // sees the targeted fix first; the closed-set listing stays as the
+    // fallback when the typo is too far from any keyword to suggest.
+    // Informational notes — no distinct secondary location, so renderers
+    // skip the `file:L:C:` prefix and just print `note: ...`.
+    let mut notes = Vec::with_capacity(2);
+    if let Some(suggested) = nearest_match(keyword, known_keywords().iter().copied()) {
+        notes.push(DiagnosticNote {
+            span: None,
+            message: format!("did you mean `{suggested}`?"),
+        });
+    }
+    notes.push(DiagnosticNote {
+        span: None,
+        message: format!("expected one of: {}", known_keywords().join(", ")),
+    });
     sink.push(Diagnostic {
         code: DiagnosticCode::UnknownKeyword,
         severity: DiagnosticCode::UnknownKeyword.severity(),
         span: span.clone(),
         primary: format!("unknown keyword `{keyword}`"),
-        // Informational note — no distinct secondary location, so renderers
-        // skip the `file:L:C:` prefix and just print `note: ...`.
-        notes: vec![DiagnosticNote {
-            span: None,
-            message: format!("expected one of: {}", known_keywords().join(", ")),
-        }],
+        notes,
     });
 }

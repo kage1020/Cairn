@@ -17,6 +17,28 @@ placeholder cannot leak out. The `2026.07.0` release PR will flip publish to `tr
 
 ### Added
 
+- `cairn-lang-core::suggest` — `nearest_match(input, candidates)` finds the
+  closest entry in a closed vocabulary under Damerau-Levenshtein distance
+  with a length-scaled cap (≤ 1 edit for 1–3 char inputs, ≤ 2 for 4–6, ≤ 3
+  beyond), case-sensitive comparison (DSL identifiers are case-sensitive),
+  first-in-iteration tie-break. Three diagnostic surfaces now lead their
+  notes with `did you mean \`X\`?` when a candidate sits inside the cap,
+  while keeping the existing closed-set listing as the fallback for typos
+  too far from any candidate (the `expected one of: ...` line on
+  `E_UNKNOWN_KEYWORD`, the slot-remediation line on `E_UNRESOLVED_SLOT`).
+  `E_UNKNOWN_KEYWORD` pulls candidates from `known_keywords()`; the
+  `mat_slot=` resolver pulls from the applied theme's declared slots only
+  (proposing a slot from another theme would point the user at code that
+  cannot bind across themes). `cairn-lang-formats::data_version`'s
+  `UnsupportedTarget` grows a `suggestion: String` field carrying a
+  pre-formatted `"did you mean \`1.21.4\`? "` prefix that the `thiserror`
+  `Display` template interleaves into the wider error so the CLI's
+  `cairn compile --target 1.21.5` exits with a targeted fix rather than
+  the bare supported-list dump. Pool is every `mc_version` plus the
+  `"latest"` alias because both are equally legitimate `--target` inputs.
+  Closes the second half of `spec/glossary.md` "Fail-loud" — errors now
+  return both the closed set of valid candidates *and* a suggested DSL
+  fix when one is within reach (2026.12.0).
 - `cairn-lang-formats::registry` — registry pack loader covering the
   manifest (`pack.json`) and the `(mc_version, DataVersion)` table
   (`data_versions.json`). The built-in Java pack lives under
