@@ -16,6 +16,7 @@ pub mod lex;
 pub mod lock;
 pub mod parse;
 pub mod resolve;
+pub mod suggest;
 
 pub use ast::{DottedRef, Module, Statement};
 pub use block_array::{

@@ -26,10 +26,16 @@ pub struct JavaTarget {
 
 /// `--target` value did not match any version in the registry pack.
 #[derive(Debug, Error)]
-#[error("unsupported java target `{requested}`. supported targets: {supported}")]
+#[error("unsupported java target `{requested}`. {suggestion}supported targets: {supported}")]
 pub struct UnsupportedTarget {
     /// Verbatim value passed via `--target`.
     pub requested: String,
+    /// Pre-formatted "did you mean ...?" prefix (including the trailing
+    /// space) when the requested value is close (Damerau-Levenshtein
+    /// distance bounded by [`crate::registry`]'s suggestion threshold) to a
+    /// supported version. Empty string when no candidate was close enough,
+    /// so the error template stays one format string in both cases.
+    pub suggestion: String,
     /// Pre-formatted list of supported versions, ready to print.
     pub supported: String,
 }
@@ -83,5 +89,34 @@ mod tests {
         assert_eq!(err.requested, "0.0.0");
         assert!(err.supported.contains("1.20.4"));
         assert!(err.supported.contains("latest"));
+    }
+
+    #[test]
+    fn unknown_version_near_known_one_suggests_it() {
+        // `1.21.5` is one substitution away from `1.21.4`; the suggestion
+        // prefix must point at the real version so a user re-running
+        // `cairn compile --target 1.21.5` sees the typo immediately.
+        let err = resolve_java_target("1.21.5").expect_err("unknown");
+        assert!(
+            err.suggestion.contains("1.21.4"),
+            "suggestion should name the close version, got: {}",
+            err.suggestion,
+        );
+        // The Display impl interleaves the suggestion into the wider error.
+        let rendered = err.to_string();
+        assert!(
+            rendered.contains("did you mean `1.21.4`?"),
+            "Display should embed the suggestion, got: {rendered}",
+        );
+    }
+
+    #[test]
+    fn distant_unknown_version_skips_suggestion() {
+        let err = resolve_java_target("0.0.0").expect_err("unknown");
+        assert!(
+            err.suggestion.is_empty(),
+            "no suggestion expected for a distant input, got: {}",
+            err.suggestion,
+        );
     }
 }

@@ -19,6 +19,25 @@
 
 ### Added
 
+- `cairn-lang-core::suggest` — `nearest_match(input, candidates)` は
+  Damerau-Levenshtein 距離でクローズドな語彙から最近接候補を返す
+  ユーティリティ。閾値は入力長スケール (1〜3 文字なら 1 編集以下、4〜6 文字
+  なら 2、それ以上は 3)、DSL 識別子は case-sensitive なので大文字小文字も 1
+  編集として扱い、距離同点なら候補列挙の先頭が勝つ。これを 3 つの診断面で
+  利用するようにし、閾値内に候補があれば notes 先頭に
+  `did you mean \`X\`?` を付与する。閾値外なら既存のクローズドセット列挙
+  (`E_UNKNOWN_KEYWORD` の `expected one of: ...` 行、`E_UNRESOLVED_SLOT`
+  の slot 修正提案行) だけが残り、ノイズになる推測は出さない。
+  `E_UNKNOWN_KEYWORD` の候補プールは `known_keywords()` 全件、`mat_slot=`
+  リゾルバの候補プールは適用された theme が宣言する slot のみ (別 theme の
+  slot は `mat_slot=` で結べないため、提案しても直しようがない)。
+  `cairn-lang-formats::data_version` の `UnsupportedTarget` には
+  `suggestion: String` フィールドを追加し、`thiserror` の `Display` テンプ
+  レートに `"did you mean \`1.21.4\`? "` 前置を埋め込むので、CLI で
+  `cairn compile --target 1.21.5` が targeted な修正案つきで終了するように
+  なる。候補プールは登録 `mc_version` 全件 + `"latest"` エイリアス。
+  `spec/glossary.md` "Fail-loud" の後半 — 「エラーは候補集合と修正案の両方
+  を返さねばならない」 — を満たす (2026.12.0)。
 - `cairn-lang-formats::registry` — registry pack ローダ。マニフェスト
   (`pack.json`) と `(mc_version, DataVersion)` テーブル
   (`data_versions.json`) を読み込む。ビルトインの Java パックは

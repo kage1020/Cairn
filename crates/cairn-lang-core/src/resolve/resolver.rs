@@ -47,6 +47,7 @@ use crate::intent::{
     DefIr, IntentModule, Member, MemberBody, MemberRole, SiteIr, StructIr, ThemeIr, ValueWithSpan,
     role_of,
 };
+use crate::suggest::nearest_match;
 
 use super::binding::{SelectorMatch, ThemeBinding, TokenKind, classify_token};
 
@@ -256,7 +257,7 @@ fn resolve_members(
         {
             match slots.get(slot_name) {
                 Some(v) => binding.slot_value = Some(v.clone()),
-                None => diagnostics.push(unresolved_slot_diag(slot_name, tname, member)),
+                None => diagnostics.push(unresolved_slot_diag(slot_name, tname, member, slots)),
             }
         }
 
@@ -346,18 +347,36 @@ fn value_eq_label(expected: &Value, raw: &str) -> bool {
     )
 }
 
-fn unresolved_slot_diag(slot: &str, theme_name: &str, member: &Member) -> Diagnostic {
+fn unresolved_slot_diag(
+    slot: &str,
+    theme_name: &str,
+    member: &Member,
+    available_slots: &IndexMap<String, ValueWithSpan>,
+) -> Diagnostic {
+    // Suggestion goes ahead of the generic remediation so a top-down reader
+    // sees the targeted fix first. The suggestion pool is the *applied
+    // theme's* declared slots only — a `mat_slot=` cannot bind across
+    // themes, and proposing a slot from a different theme would point the
+    // user at code that wouldn't help.
+    let mut notes = Vec::with_capacity(2);
+    if let Some(suggested) = nearest_match(slot, available_slots.keys().map(String::as_str)) {
+        notes.push(DiagnosticNote {
+            span: None,
+            message: format!("did you mean `{suggested}`?"),
+        });
+    }
+    notes.push(DiagnosticNote {
+        span: None,
+        message: format!(
+            "add `slot {slot} -> @...` to theme `{theme_name}` or correct the slot name",
+        ),
+    });
     Diagnostic {
         code: DiagnosticCode::UnresolvedSlot,
         severity: Severity::Error,
         span: member.span.clone(),
         primary: format!("`mat_slot={slot}` is not declared in theme `{theme_name}`"),
-        notes: vec![DiagnosticNote {
-            span: None,
-            message: format!(
-                "add `slot {slot} -> @...` to theme `{theme_name}` or correct the slot name",
-            ),
-        }],
+        notes,
     }
 }
 
@@ -541,6 +560,48 @@ mod tests {
                 .iter()
                 .any(|d| d.code == DiagnosticCode::ThemeSelectorUnmatched
                     && d.severity == Severity::Warning),
+        );
+    }
+
+    #[test]
+    fn unresolved_slot_attaches_did_you_mean_note() {
+        // `mat_slot=wal` is one deletion away from the declared `wall` slot;
+        // the resolver must surface that as a targeted suggestion so the
+        // fix is unambiguous.
+        let src = "theme t:\n  slot wall -> @cobblestone\n\nstruct s size=4x4\n  walls mat_slot=wal height=3\n";
+        let r = resolve(&ir(src));
+        let diag = r
+            .diagnostics
+            .iter()
+            .find(|d| d.code == DiagnosticCode::UnresolvedSlot)
+            .unwrap_or_else(|| panic!("no E_UNRESOLVED_SLOT, got {:?}", r.diagnostics));
+        assert!(
+            diag.notes
+                .iter()
+                .any(|n| n.message.contains("did you mean `wall`")),
+            "expected `did you mean` note, got {:#?}",
+            diag.notes,
+        );
+    }
+
+    #[test]
+    fn unresolved_slot_skips_suggestion_when_pool_is_far_away() {
+        // No theme slot is close to `quartz` — the resolver must not invent
+        // a guess. The remediation note stays as the lone follow-up.
+        let src = "theme t:\n  slot wall -> @cobblestone\n\nstruct s size=4x4\n  walls mat_slot=quartz height=3\n";
+        let r = resolve(&ir(src));
+        let diag = r
+            .diagnostics
+            .iter()
+            .find(|d| d.code == DiagnosticCode::UnresolvedSlot)
+            .unwrap_or_else(|| panic!("no E_UNRESOLVED_SLOT, got {:?}", r.diagnostics));
+        assert!(
+            !diag
+                .notes
+                .iter()
+                .any(|n| n.message.contains("did you mean")),
+            "no suggestion expected, got {:#?}",
+            diag.notes,
         );
     }
 
