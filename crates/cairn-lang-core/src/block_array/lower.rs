@@ -40,8 +40,10 @@ use crate::resolve::{Resolution, ScopeResolution};
 use super::material::{MaterialDeferred, resolve_block_state};
 use super::openings::{WallSide, wall_length, wall_local_to_grid};
 use super::roof::{
-    GableVoxel, STAIR_BASE_ID, StairFace, gable_extra_height, gable_ridge_axis, gable_voxels,
-    stair_state_for,
+    Axis, GableVoxel, HipFace, HipVoxel, RoofKind, ShedFace, ShedVoxel, StairFace,
+    flat_block_state, flat_extra_height, flat_voxels, gable_extra_height, gable_ridge_axis,
+    gable_stair_state, gable_voxels, hip_extra_height, hip_stair_state, hip_voxels,
+    shed_extra_height, shed_stair_state, shed_voxels,
 };
 use super::{BlockArray, BlockArrayIr, BlockState, Dims, Palette, PaletteIndex};
 
@@ -329,12 +331,13 @@ fn max_roof_overhang(members: &[Member]) -> u32 {
         .unwrap_or(0)
 }
 
-/// Maximum vertical contribution from any gable roof member. Roof kinds
-/// other than `gable` (and roofs without a recognisable kind) contribute
-/// `0` here; their `W_DEFERRED_MEMBER` warning fires later, during the
-/// envelope phase, against the actual member span. Computing the dim from
-/// the inflated roof bounding box (interior + 2 * overhang on the short
-/// axis) keeps the math consistent with [`gable_voxels`].
+/// Maximum vertical contribution from any roof member with a
+/// recognisable [`RoofKind`]. Roofs without a recognised kind (missing
+/// `kind=` or a kind outside the supported set) contribute `0` here;
+/// their `W_DEFERRED_MEMBER` warning fires later, during the envelope
+/// phase, against the actual member span. Computing the dim from the
+/// inflated roof bounding box (interior + 2 * overhang on each axis)
+/// keeps the math consistent with each per-kind generator.
 fn max_roof_extra_height(
     members: &[Member],
     interior_w: u32,
@@ -343,20 +346,41 @@ fn max_roof_extra_height(
 ) -> u32 {
     let roof_w = interior_w.saturating_add(overhang.saturating_mul(2));
     let roof_h = interior_h.saturating_add(overhang.saturating_mul(2));
-    let short = roof_w.min(roof_h);
     members
         .iter()
-        .filter(|m| matches!(m.role, MemberRole::Roof) && is_gable(m))
-        .map(|_| gable_extra_height(short))
+        .filter(|m| matches!(m.role, MemberRole::Roof))
+        .filter_map(|m| roof_kind_of(m).map(|k| roof_extra_height(k, m, roof_w, roof_h)))
         .max()
         .unwrap_or(0)
 }
 
-fn is_gable(member: &Member) -> bool {
-    let Some(raw) = member.intent_state.get("kind") else {
-        return false;
+fn roof_extra_height(kind: RoofKind, member: &Member, roof_w: u32, roof_h: u32) -> u32 {
+    match kind {
+        RoofKind::Gable => gable_extra_height(roof_w.min(roof_h)),
+        RoofKind::Shed => {
+            // Shed's slope axis depends on `slope_to=`. We do not have
+            // diagnostics here (the dim pass runs before envelope-phase
+            // diagnostics), so an unrecognised or missing `slope_to=`
+            // contributes `0`; the same member will surface a
+            // `W_DEFERRED_MEMBER` in `fill_roof_shed` and lower to no
+            // voxels, keeping the dim math conservative.
+            match ident_value(member, "slope_to").and_then(WallSide::from_ident) {
+                Some(WallSide::Front | WallSide::Back) => shed_extra_height(roof_h),
+                Some(WallSide::Left | WallSide::Right) => shed_extra_height(roof_w),
+                None => 0,
+            }
+        }
+        RoofKind::Hip => hip_extra_height(roof_w, roof_h),
+        RoofKind::Flat => flat_extra_height(),
+    }
+}
+
+fn roof_kind_of(member: &Member) -> Option<RoofKind> {
+    let raw = member.intent_state.get("kind")?;
+    let ValueKind::Ident(name) = &raw.value.kind else {
+        return None;
     };
-    matches!(&raw.value.kind, ValueKind::Ident(name) if name == "gable")
+    RoofKind::from_ident(name)
 }
 
 fn wall_height(member: &Member, diagnostics: &mut Vec<Diagnostic>) -> Option<u32> {
@@ -458,35 +482,40 @@ fn fill_roof(
     voxels: &mut [PaletteIndex],
     diagnostics: &mut Vec<Diagnostic>,
 ) {
-    let kind = ident_value(member, "kind").unwrap_or("");
-    if kind != "gable" {
-        let reason = if kind.is_empty() {
-            "roof without `kind=gable` is not yet voxelised".to_owned()
-        } else {
-            format!("roof kind `{kind}` is not yet voxelised (only `gable` is supported)")
-        };
-        diagnostics.push(diag_deferred_member_reason(member, &reason));
+    let Some(kind) = parse_roof_kind(member, diagnostics) else {
         return;
-    }
-    // `mat_slot=` is currently advisory for gable roofs — the generator
-    // always emits spruce_stairs because per-theme roof materials are not
+    };
+    // `mat_slot=` is advisory for every roof kind today — the generator
+    // hardcodes the per-kind base block (spruce_stairs for sloped roofs,
+    // spruce_planks for flat) because per-theme roof species are not
     // wired through yet. We still resolve the slot so a binding that
     // points anywhere else fires a deferred-member warning (otherwise the
-    // user's intent would silently be replaced by spruce_stairs). The
-    // resolved state itself is never interned: leaving the palette free
-    // of an unreferenced entry keeps the on-disk NBT tight.
+    // user's intent would silently be replaced). The resolved state
+    // itself is never interned: leaving the palette free of an
+    // unreferenced entry keeps the on-disk NBT tight.
     if let Some(state) = resolve_member_state(member, ctx.scope, diagnostics, ctx.theme_missing)
-        && state.id != STAIR_BASE_ID
+        && state.id != kind.base_block_id()
     {
         diagnostics.push(diag_deferred_member_reason(
             member,
             &format!(
-                "gable roofs currently emit `{STAIR_BASE_ID}`; the `mat_slot=` binding to `{}` was not applied",
+                "`{}` roofs currently emit `{}`; the `mat_slot=` binding to `{}` was not applied",
+                kind.name(),
+                kind.base_block_id(),
                 state.id,
             ),
         ));
     }
 
+    match kind {
+        RoofKind::Gable => fill_roof_gable(ctx, palette, voxels),
+        RoofKind::Shed => fill_roof_shed(member, ctx, palette, voxels, diagnostics),
+        RoofKind::Hip => fill_roof_hip(ctx, palette, voxels),
+        RoofKind::Flat => fill_roof_flat(ctx, palette, voxels),
+    }
+}
+
+fn fill_roof_gable(ctx: &StructCtx<'_>, palette: &mut Palette, voxels: &mut [PaletteIndex]) {
     let roof_w = ctx.dims.x;
     let roof_h = ctx.dims.z;
     let ridge_axis = gable_ridge_axis(roof_w, roof_h);
@@ -503,7 +532,7 @@ fn fill_roof(
     ];
     let mut face_indices = [PaletteIndex::AIR; 4];
     for (slot, face) in face_indices.iter_mut().zip(face_table.iter().copied()) {
-        *slot = palette.intern(stair_state_for(ridge_axis, face));
+        *slot = palette.intern(gable_stair_state(ridge_axis, face));
     }
     for GableVoxel { pos, face } in gable_voxels(roof_w, roof_h, ctx.wall_top) {
         let idx = match face {
@@ -516,6 +545,129 @@ fn fill_roof(
             voxels[i] = idx;
         }
     }
+}
+
+fn fill_roof_shed(
+    member: &Member,
+    ctx: &StructCtx<'_>,
+    palette: &mut Palette,
+    voxels: &mut [PaletteIndex],
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    let Some(slope_to) = shed_slope_to(member, diagnostics) else {
+        return;
+    };
+    let slope_idx = palette.intern(shed_stair_state(slope_to, ShedFace::Slope));
+    let apex_idx = palette.intern(shed_stair_state(slope_to, ShedFace::Apex));
+    for ShedVoxel { pos, face } in shed_voxels(ctx.dims.x, ctx.dims.z, ctx.wall_top, slope_to) {
+        let idx = match face {
+            ShedFace::Slope => slope_idx,
+            ShedFace::Apex => apex_idx,
+        };
+        if let Some(i) = ctx.dims.index(pos.0, pos.1, pos.2) {
+            voxels[i] = idx;
+        }
+    }
+}
+
+fn fill_roof_hip(ctx: &StructCtx<'_>, palette: &mut Palette, voxels: &mut [PaletteIndex]) {
+    let roof_w = ctx.dims.x;
+    let roof_h = ctx.dims.z;
+    let ridge_axis = if roof_w >= roof_h { Axis::X } else { Axis::Z };
+    let face_table = [
+        HipFace::SlopeNorth,
+        HipFace::SlopeSouth,
+        HipFace::SlopeWest,
+        HipFace::SlopeEast,
+        HipFace::CornerNorthWest,
+        HipFace::CornerNorthEast,
+        HipFace::CornerSouthWest,
+        HipFace::CornerSouthEast,
+        HipFace::ApexRidge,
+        HipFace::ApexCap,
+    ];
+    let mut face_indices = [PaletteIndex::AIR; 10];
+    for (slot, face) in face_indices.iter_mut().zip(face_table.iter().copied()) {
+        *slot = palette.intern(hip_stair_state(ridge_axis, face));
+    }
+    for HipVoxel { pos, face } in hip_voxels(roof_w, roof_h, ctx.wall_top) {
+        let idx = match face {
+            HipFace::SlopeNorth => face_indices[0],
+            HipFace::SlopeSouth => face_indices[1],
+            HipFace::SlopeWest => face_indices[2],
+            HipFace::SlopeEast => face_indices[3],
+            HipFace::CornerNorthWest => face_indices[4],
+            HipFace::CornerNorthEast => face_indices[5],
+            HipFace::CornerSouthWest => face_indices[6],
+            HipFace::CornerSouthEast => face_indices[7],
+            HipFace::ApexRidge => face_indices[8],
+            HipFace::ApexCap => face_indices[9],
+        };
+        if let Some(i) = ctx.dims.index(pos.0, pos.1, pos.2) {
+            voxels[i] = idx;
+        }
+    }
+}
+
+fn fill_roof_flat(ctx: &StructCtx<'_>, palette: &mut Palette, voxels: &mut [PaletteIndex]) {
+    let deck_idx = palette.intern(flat_block_state());
+    for (x, y, z) in flat_voxels(ctx.dims.x, ctx.dims.z, ctx.wall_top) {
+        if let Some(i) = ctx.dims.index(x, y, z) {
+            voxels[i] = deck_idx;
+        }
+    }
+}
+
+/// Resolve a `roof` member's `kind=` to a [`RoofKind`].
+///
+/// Pushes a `W_DEFERRED_MEMBER` warning and returns `None` when the
+/// `kind=` is missing, typed wrong, or names a kind outside the supported
+/// set. Keeping the dispatch table in [`RoofKind::from_ident`] and the
+/// diagnostic phrasing here lets each side stay self-contained.
+fn parse_roof_kind(member: &Member, diagnostics: &mut Vec<Diagnostic>) -> Option<RoofKind> {
+    let Some(raw) = ident_value(member, "kind") else {
+        let reason = if member.intent_state.contains_key("kind") {
+            "roof `kind=` must be one of gable, shed, hip, flat"
+        } else {
+            "missing `kind=` (expected one of gable, shed, hip, flat)"
+        };
+        diagnostics.push(diag_deferred_member_reason(member, reason));
+        return None;
+    };
+    if let Some(k) = RoofKind::from_ident(raw) {
+        return Some(k);
+    }
+    diagnostics.push(diag_deferred_member_reason(
+        member,
+        &format!("unknown roof `kind={raw}` (expected one of gable, shed, hip, flat)"),
+    ));
+    None
+}
+
+/// Resolve a shed roof's `slope_to=` argument.
+///
+/// Required for `kind=shed` because the slope direction has no sensible
+/// default — picking one silently would let a typo emit a roof that
+/// peaks on the wrong wall. Missing or mis-typed `slope_to=` therefore
+/// surfaces a `W_DEFERRED_MEMBER` warning.
+fn shed_slope_to(member: &Member, diagnostics: &mut Vec<Diagnostic>) -> Option<WallSide> {
+    let Some(raw) = ident_value(member, "slope_to") else {
+        let reason = if member.intent_state.contains_key("slope_to") {
+            "shed `slope_to=` must be one of front, back, left, right"
+        } else {
+            "shed roof requires `slope_to=` (one of front, back, left, right)"
+        };
+        diagnostics.push(diag_deferred_member_reason(member, reason));
+        return None;
+    };
+    if let Some(side) = WallSide::from_ident(raw) {
+        return Some(side);
+    }
+    diagnostics.push(diag_deferred_member_reason(
+        member,
+        &format!("unknown shed `slope_to={raw}` (expected one of front, back, left, right)"),
+    ));
+    None
 }
 
 fn carve_door(
@@ -803,7 +955,7 @@ fn diag_deferred_member_reason(member: &Member, reason: &str) -> Diagnostic {
         notes: vec![DiagnosticNote {
             span: None,
             message: "block-array lowering currently voxelises floor, walls, door, window, \
-                      and roof (kind=gable); other roles and kinds will be added as their \
+                      and roof (kind=gable|shed|hip|flat); other roles will be added as their \
                       lowering rules are spec'd"
                 .to_owned(),
         }],
@@ -1157,13 +1309,96 @@ mod tests {
 
     #[test]
     fn unknown_roof_kind_warns_and_skips() {
-        let src = "theme t:\n  slot w -> @cobblestone\n  slot r -> @spruce_stairs\n\nstruct s size=5x5\n  walls mat_slot=w height=4\n  roof kind=hip mat_slot=r\n";
+        // `pyramid` sits outside the supported gable|shed|hip|flat set,
+        // so lowering must surface a deferred-member warning and emit no
+        // roof voxels (dims.y stays at `1 + wall_height` because the
+        // unknown kind contributes 0 to `max_roof_extra_height`).
+        let src = "theme t:\n  slot w -> @cobblestone\n  slot r -> @spruce_stairs\n\nstruct s size=5x5\n  walls mat_slot=w height=4\n  roof kind=pyramid mat_slot=r\n";
         let out = lowered(src);
         let ba = out.structures.get("struct::s").unwrap();
         assert_eq!(deferred_count(&out), 1);
-        // No roof voxels emitted — top half above wall_top is all air.
-        // dims.y = 1 + 4 + 0 (unknown kind contributes 0) = 5.
         assert_eq!(ba.dims.y, 5);
+    }
+
+    #[test]
+    fn shed_roof_voxelises_with_slope_to_front() {
+        // size=5x5, walls height=3, shed slope_to=front, no overhang.
+        // slope_span = roof_h = 5 → extra_height = 5 → dims.y = 1 + 3 + 5 = 9.
+        // Slope axis is z (Front=+z). Layer 0 (y=4) sits at z=0; apex
+        // (y=8) sits at z=4. Stairs facing south.
+        let src = "theme t:\n  slot w -> @cobblestone\n  slot r -> @spruce_stairs\n\nstruct s size=5x5\n  walls mat_slot=w height=3\n  roof kind=shed slope_to=front mat_slot=r\n";
+        let out = lowered(src);
+        let ba = out.structures.get("struct::s").unwrap();
+        assert_eq!(ba.dims.y, 9);
+        let layer0 = block_state_at(ba, 0, 4, 0);
+        assert_eq!(layer0.id, "minecraft:spruce_stairs");
+        assert_eq!(layer0.properties.get("facing").unwrap(), "south");
+        assert_eq!(layer0.properties.get("half").unwrap(), "bottom");
+        let apex = block_state_at(ba, 0, 8, 4);
+        assert_eq!(apex.properties.get("half").unwrap(), "top");
+    }
+
+    #[test]
+    fn shed_roof_without_slope_to_emits_deferred_warning() {
+        let src = "theme t:\n  slot w -> @cobblestone\n  slot r -> @spruce_stairs\n\nstruct s size=5x5\n  walls mat_slot=w height=3\n  roof kind=shed mat_slot=r\n";
+        let out = lowered(src);
+        assert_eq!(deferred_count(&out), 1);
+        let primary = &out.diagnostics[0].primary;
+        assert!(
+            primary.contains("slope_to"),
+            "expected slope_to mention, got {primary}",
+        );
+    }
+
+    #[test]
+    fn hip_roof_voxelises_square_footprint() {
+        // size=5x5, walls height=3. hip_extra_height = ceil(5/2) = 3.
+        // dims.y = 1 + 3 + 3 = 7 (so highest valid y is 6). Apex sits at
+        // y = wall_top + extra_height = 6, single cell at (2, 6, 2).
+        let src = "theme t:\n  slot w -> @cobblestone\n  slot r -> @spruce_stairs\n\nstruct s size=5x5\n  walls mat_slot=w height=3\n  roof kind=hip mat_slot=r\n";
+        let out = lowered(src);
+        let ba = out.structures.get("struct::s").unwrap();
+        assert_eq!(ba.dims.y, 7);
+        let apex = block_state_at(ba, 2, 6, 2);
+        assert_eq!(apex.id, "minecraft:spruce_stairs");
+        assert_eq!(apex.properties.get("half").unwrap(), "top");
+        // North-west corner of layer 0 uses `shape=outer_left`.
+        let nw_corner = block_state_at(ba, 0, 4, 0);
+        assert_eq!(nw_corner.properties.get("shape").unwrap(), "outer_left");
+        assert_eq!(nw_corner.properties.get("facing").unwrap(), "south");
+    }
+
+    #[test]
+    fn flat_roof_voxelises_single_layer_of_planks() {
+        // size=5x5, walls height=3, flat → extra_height=1, dims.y = 5.
+        // Every cell at y=4 is spruce_planks.
+        let src = "theme t:\n  slot w -> @cobblestone\n  slot r -> @spruce_planks\n\nstruct s size=5x5\n  walls mat_slot=w height=3\n  roof kind=flat mat_slot=r\n";
+        let out = lowered(src);
+        let ba = out.structures.get("struct::s").unwrap();
+        assert_eq!(ba.dims.y, 5);
+        for z in 0..5 {
+            for x in 0..5 {
+                assert_eq!(block_id(ba, x, 4, z), "minecraft:spruce_planks");
+            }
+        }
+        assert_eq!(deferred_count(&out), 0);
+    }
+
+    #[test]
+    fn flat_roof_with_mismatched_mat_slot_emits_warning() {
+        // Flat hardcodes spruce_planks; binding to anything else (e.g.
+        // spruce_stairs which is the sloped-roof default) must warn so
+        // the user notices the binding was dropped.
+        let src = "theme t:\n  slot w -> @cobblestone\n  slot r -> @spruce_stairs\n\nstruct s size=5x5\n  walls mat_slot=w height=3\n  roof kind=flat mat_slot=r\n";
+        let out = lowered(src);
+        assert!(
+            out.diagnostics
+                .iter()
+                .any(|d| d.primary.contains("spruce_planks")
+                    && d.primary.contains("spruce_stairs")),
+            "expected mat_slot mismatch diagnostic, got {:?}",
+            out.diagnostics,
+        );
     }
 
     fn block_state_at(ba: &BlockArray, x: u32, y: u32, z: u32) -> &BlockState {

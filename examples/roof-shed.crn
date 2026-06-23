@@ -1,0 +1,16 @@
+@cairn 2026.06
+@requires version>=1.20
+
+# Minimum shed-roof example.
+# Demonstrates: kind=shed slope_to=front, single slope rising toward the
+# front (+z) wall.
+
+theme cabin:
+  slot floor -> @oak_planks
+  slot wall  -> @cobblestone
+  slot roof  -> @spruce_stairs
+
+struct roof_shed size=5x4
+  floor mat_slot=floor
+  walls mat_slot=wall height=3
+  roof  kind=shed slope_to=front mat_slot=roof overhang=1

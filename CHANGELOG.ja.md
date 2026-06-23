@@ -19,6 +19,25 @@
 
 ### Added
 
+- `cairn-lang-core::block_array::roof` — 既存の `gable` ジェネレータに加え
+  `shed` / `hip` / `flat` 屋根ボクセライザを追加し、`spec/compilation.md`
+  §4.3 で保留扱いだった「より広い屋根タクソノミ」のカーブアウトを解消した。
+  `RoofKind::from_ident` が `kind=gable|shed|hip|flat` をパースし、
+  `block_array::lower` の `fill_roof` ディスパッチャが各 kind を専用の
+  ジェネレータと intern テーブルへルーティングする。`kind=shed` は
+  新しい `slope_to=front|back|left|right` 引数（屋根の高い側）を要求し、
+  壁の頂上から `slope_span` ボクセル積み上がり、stair は高い側を向く。
+  `kind=hip` は `ceil(short_span / 2)` ボクセル昇り、各層は inset
+  された矩形枠で四隅は `shape=outer_left|outer_right`、長方形 footprint
+  ではリッジ層が長軸方向の行になる。`kind=flat` は `wall_top + 1` の
+  単一層で、inflate された roof bounding box 全域を
+  `minecraft:spruce_planks` で埋める。すべての kind は既存の overhang
+  ルールを共有し、ハードコード ID と `mat_slot=` のミスマッチ検知も
+  踏襲する（斜め屋根は `minecraft:spruce_stairs`、flat は
+  `minecraft:spruce_planks` を出力。per-theme 屋根樹種は registry pack
+  で後追い）。新しい `examples/roof-shed.crn`, `examples/roof-hip.crn`,
+  `examples/roof-flat.crn` fixtures が CLI 経由で新 kind を pin する
+  (2027.01.0)。
 - `cairn-lang-core::suggest` — `nearest_match(input, candidates)` は
   Damerau-Levenshtein 距離でクローズドな語彙から最近接候補を返す
   ユーティリティ。閾値は入力長スケール (1〜3 文字なら 1 編集以下、4〜6 文字
