@@ -405,6 +405,23 @@ pub fn shed_high_side(slope_to: WallSide) -> Cardinal {
     }
 }
 
+/// Span of a shed roof along its slope axis.
+///
+/// The slope rises by 1 voxel per step along this span. Front/Back point
+/// the high edge in the `±z` direction, so the slope axis is `z` and the
+/// span is `roof_h`; Left/Right point in the `±x` direction, so the
+/// slope axis is `x` and the span is `roof_w`. Centralising the
+/// `slope_to → axis` choice here keeps the dim-computation pass in
+/// `block_array::lower` and the voxel generator below from drifting on
+/// the rule.
+#[must_use]
+pub fn shed_slope_span(roof_w: u32, roof_h: u32, slope_to: WallSide) -> u32 {
+    match slope_to {
+        WallSide::Front | WallSide::Back => roof_h,
+        WallSide::Left | WallSide::Right => roof_w,
+    }
+}
+
 /// Build the [`BlockState`] for one face of a shed roof.
 #[must_use]
 pub fn shed_stair_state(slope_to: WallSide, face: ShedFace) -> BlockState {
@@ -428,11 +445,14 @@ pub fn shed_stair_state(slope_to: WallSide, face: ShedFace) -> BlockState {
 #[must_use]
 pub fn shed_voxels(roof_w: u32, roof_h: u32, wall_top: u32, slope_to: WallSide) -> Vec<ShedVoxel> {
     let mut out: Vec<ShedVoxel> = Vec::new();
-    // The slope axis is the one the high edge sits on. For Front/Back
-    // (front=+z) the slope runs along z; for Left/Right along x.
-    let (slope_span, perp_span, axis_is_z) = match slope_to {
-        WallSide::Front | WallSide::Back => (roof_h, roof_w, true),
-        WallSide::Left | WallSide::Right => (roof_w, roof_h, false),
+    // The slope axis is the one the high edge sits on. `shed_slope_span`
+    // is the single source of truth for the axis choice — the dim pass
+    // in `block_array::lower` calls the same helper, so the dim and the
+    // generator cannot drift on which axis the slope runs along.
+    let slope_span = shed_slope_span(roof_w, roof_h, slope_to);
+    let (perp_span, axis_is_z) = match slope_to {
+        WallSide::Front | WallSide::Back => (roof_w, true),
+        WallSide::Left | WallSide::Right => (roof_h, false),
     };
     let layers = shed_extra_height(slope_span);
     let high_on_max = matches!(slope_to, WallSide::Front | WallSide::Right);
@@ -906,45 +926,24 @@ mod tests {
 
     #[test]
     fn shed_voxels_climb_one_layer_per_step_toward_high_side() {
-        // roof_w=5, roof_h=4, slope_to=Front (+z) → slope along z, perp
-        // along x. extra_height = 4 (slope_span = roof_h = 4).
-        // Layer 0 at z = roof_h - 1 - 0 = 3 (the FRONT, high side), y=5.
-        // Wait — the high side IS at +z (front). So layer 0 (lowest) is
-        // at the low side, which is z=0 (back). With high_on_max=true,
-        // `slope_index = slope_span - 1 - layer`, so layer 0 → z=3? That
-        // would place layer 0 on the high side. Re-read shed_voxels:
-        //   high_on_max = Front || Right. slope_index = span-1-layer when
-        //   high_on_max, else layer.
-        // For Front (high at +z, slope_span on z): layer 0 → slope_index =
-        // 3 (z=3) → that's the +z side which is the HIGH side. layer 3 →
-        // slope_index = 0 (z=0) → the LOW side. That's inverted.
-        //
-        // Test asserts the actual implementation: the layer count grows
-        // as we move from low to high in geometric space. Layer 0 has the
-        // lowest y AND sits on the low side; the slope rises toward the
-        // high side. So for slope_to=Front:
-        //   layer 0 → low side (back, z=0), y=wall_top+1
-        //   layer 3 → high side (front, z=3), y=wall_top+4
-        // The current code flips this (sets high_on_max for Front). Pin
-        // the corrected behaviour: layer L sits at z = L for slope_to=
-        // Front so the lowest stair row sits at the back and the highest
-        // at the front, matching `slope_to=front` reading as "the roof
-        // peaks at the front".
+        // Invariant: layer L sits at distance L from the low edge along
+        // the slope axis. For `slope_to=front` the low edge is the back
+        // wall (z=0) and the high edge is the front wall (z=slope_span-1).
+        // So layer 0 sits at z=0 with the lowest y, and the apex sits at
+        // z=slope_span-1 with the highest y. `roof_w=5, roof_h=4,
+        // slope_to=front` → 4 layers × 5 perpendicular cells.
         let voxels = shed_voxels(5, 4, 4, WallSide::Front);
         assert_eq!(voxels.len(), 4 * 5);
-        // Find the layer-0 voxels (lowest y = 5) — they must sit at the
-        // BACK wall (z=0), since the slope descends toward the back.
         let l0: Vec<&ShedVoxel> = voxels.iter().filter(|v| v.pos.1 == 5).collect();
         assert_eq!(l0.len(), 5);
         for v in &l0 {
-            assert_eq!(v.pos.2, 0, "layer 0 should sit at z=0 for slope_to=front");
+            assert_eq!(v.pos.2, 0, "layer 0 sits at the low edge (z=0)");
             assert_eq!(v.face, ShedFace::Slope);
         }
-        // Apex layer at y = 5 + 3 = 8 sits at the FRONT wall (z=3).
         let apex: Vec<&ShedVoxel> = voxels.iter().filter(|v| v.pos.1 == 8).collect();
         assert_eq!(apex.len(), 5);
         for v in &apex {
-            assert_eq!(v.pos.2, 3);
+            assert_eq!(v.pos.2, 3, "apex sits at the high edge (z=slope_span-1)");
             assert_eq!(v.face, ShedFace::Apex);
         }
         // Stairs face the high side: slope_to=front → facing=south.
@@ -999,6 +998,31 @@ mod tests {
         for v in apex {
             assert_eq!(v.face, HipFace::ApexCap);
         }
+    }
+
+    #[test]
+    fn hip_rectangular_even_short_span_emits_two_row_ridge_band_single_facing() {
+        // roof_w=8, roof_h=4 → short=4 (even), extra_height=2. Apex layer
+        // L=1 leaves the inset rectangle `lo_x=1..=hi_x=6` (6 cells along
+        // x) × `lo_z=1..=hi_z=2` (2 cells along z). The two-row ridge
+        // band must all carry `HipFace::ApexRidge` and `hip_stair_state`
+        // must give every cell `facing=south, half=top`, matching the
+        // spec §4.5 single-facing rule (no opposite-facing close-up like
+        // gable's even-span apex). This pins the "open V on even short
+        // span" behaviour as deliberate.
+        let voxels = hip_voxels(8, 4, 4);
+        let apex_y = 4 + hip_extra_height(8, 4);
+        assert_eq!(apex_y, 6);
+        let apex: Vec<&HipVoxel> = voxels.iter().filter(|v| v.pos.1 == apex_y).collect();
+        assert_eq!(apex.len(), 6 * 2);
+        let z_vals: std::collections::BTreeSet<u32> = apex.iter().map(|v| v.pos.2).collect();
+        assert_eq!(z_vals, std::collections::BTreeSet::from([1, 2]));
+        for v in &apex {
+            assert_eq!(v.face, HipFace::ApexRidge);
+        }
+        let state = hip_stair_state(Axis::X, HipFace::ApexRidge);
+        assert_eq!(state.properties.get("facing").unwrap(), "south");
+        assert_eq!(state.properties.get("half").unwrap(), "top");
     }
 
     #[test]

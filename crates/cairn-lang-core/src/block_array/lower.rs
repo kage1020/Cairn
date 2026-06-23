@@ -40,10 +40,10 @@ use crate::resolve::{Resolution, ScopeResolution};
 use super::material::{MaterialDeferred, resolve_block_state};
 use super::openings::{WallSide, wall_length, wall_local_to_grid};
 use super::roof::{
-    Axis, GableVoxel, HipFace, HipVoxel, RoofKind, ShedFace, ShedVoxel, StairFace,
-    flat_block_state, flat_extra_height, flat_voxels, gable_extra_height, gable_ridge_axis,
-    gable_stair_state, gable_voxels, hip_extra_height, hip_stair_state, hip_voxels,
-    shed_extra_height, shed_stair_state, shed_voxels,
+    GableVoxel, HipVoxel, RoofKind, ShedFace, ShedVoxel, StairFace, flat_block_state,
+    flat_extra_height, flat_voxels, gable_extra_height, gable_ridge_axis, gable_stair_state,
+    gable_voxels, hip_extra_height, hip_stair_state, hip_voxels, shed_extra_height,
+    shed_slope_span, shed_stair_state, shed_voxels,
 };
 use super::{BlockArray, BlockArrayIr, BlockState, Dims, Palette, PaletteIndex};
 
@@ -363,10 +363,12 @@ fn roof_extra_height(kind: RoofKind, member: &Member, roof_w: u32, roof_h: u32) 
             // diagnostics), so an unrecognised or missing `slope_to=`
             // contributes `0`; the same member will surface a
             // `W_DEFERRED_MEMBER` in `fill_roof_shed` and lower to no
-            // voxels, keeping the dim math conservative.
+            // voxels, keeping the dim math conservative. The axis
+            // choice goes through `shed_slope_span` — the same helper
+            // `shed_voxels` uses — so the dim and the generator cannot
+            // disagree on which axis the slope runs along.
             match ident_value(member, "slope_to").and_then(WallSide::from_ident) {
-                Some(WallSide::Front | WallSide::Back) => shed_extra_height(roof_h),
-                Some(WallSide::Left | WallSide::Right) => shed_extra_height(roof_w),
+                Some(slope_to) => shed_extra_height(shed_slope_span(roof_w, roof_h, slope_to)),
                 None => 0,
             }
         }
@@ -573,36 +575,21 @@ fn fill_roof_shed(
 fn fill_roof_hip(ctx: &StructCtx<'_>, palette: &mut Palette, voxels: &mut [PaletteIndex]) {
     let roof_w = ctx.dims.x;
     let roof_h = ctx.dims.z;
-    let ridge_axis = if roof_w >= roof_h { Axis::X } else { Axis::Z };
-    let face_table = [
-        HipFace::SlopeNorth,
-        HipFace::SlopeSouth,
-        HipFace::SlopeWest,
-        HipFace::SlopeEast,
-        HipFace::CornerNorthWest,
-        HipFace::CornerNorthEast,
-        HipFace::CornerSouthWest,
-        HipFace::CornerSouthEast,
-        HipFace::ApexRidge,
-        HipFace::ApexCap,
-    ];
-    let mut face_indices = [PaletteIndex::AIR; 10];
-    for (slot, face) in face_indices.iter_mut().zip(face_table.iter().copied()) {
-        *slot = palette.intern(hip_stair_state(ridge_axis, face));
-    }
+    // Hip and gable share the same long-axis-wins-with-x-tiebreak ridge
+    // rule (`spec/compilation.md` §4.5 falls through to §4.3). Reusing
+    // `gable_ridge_axis` keeps the two paths from drifting if the
+    // tiebreak rule ever changes.
+    let ridge_axis = gable_ridge_axis(roof_w, roof_h);
+    // Intern per voxel: `palette.intern` dedupes, so each face's state
+    // lands at exactly one slot, in the order [`hip_voxels`] visits the
+    // face for the first time. That order is fixed by the generator's
+    // layer iteration, so the palette layout is deterministic without
+    // a separate face → slot table. The match-on-face indirection a
+    // pre-intern table requires is what made a slot mis-mapping
+    // possible the moment `HipFace` grew or reordered; folding the
+    // intern call into the voxel loop closes that gap.
     for HipVoxel { pos, face } in hip_voxels(roof_w, roof_h, ctx.wall_top) {
-        let idx = match face {
-            HipFace::SlopeNorth => face_indices[0],
-            HipFace::SlopeSouth => face_indices[1],
-            HipFace::SlopeWest => face_indices[2],
-            HipFace::SlopeEast => face_indices[3],
-            HipFace::CornerNorthWest => face_indices[4],
-            HipFace::CornerNorthEast => face_indices[5],
-            HipFace::CornerSouthWest => face_indices[6],
-            HipFace::CornerSouthEast => face_indices[7],
-            HipFace::ApexRidge => face_indices[8],
-            HipFace::ApexCap => face_indices[9],
-        };
+        let idx = palette.intern(hip_stair_state(ridge_axis, face));
         if let Some(i) = ctx.dims.index(pos.0, pos.1, pos.2) {
             voxels[i] = idx;
         }
