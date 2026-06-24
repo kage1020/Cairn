@@ -382,6 +382,9 @@ fn compile_all_examples_exit_zero() {
         "themed-tower.crn",
         "village.crn",
         "redstone-door.crn",
+        "roof-shed.crn",
+        "roof-hip.crn",
+        "roof-flat.crn",
     ] {
         let path = examples_dir().join(name);
         let out_dir = TempDir::new().expect("out tempdir");
@@ -400,6 +403,43 @@ fn compile_all_examples_exit_zero() {
             "{name} should compile, stderr={}",
             String::from_utf8_lossy(&result.stderr),
         );
+    }
+}
+
+#[test]
+fn c14c_roof_kind_examples_lower_without_deferred_warnings() {
+    // The shed/hip/flat fixtures exist to pin the new roof voxelisers in
+    // §4.4–§4.6 of the compilation spec: each lowers end-to-end without
+    // a single `W_DEFERRED_MEMBER`, the same contract `c14_cottage_*` pins
+    // for the gable kind.
+    for name in ["roof-shed.crn", "roof-hip.crn", "roof-flat.crn"] {
+        let path = examples_dir().join(name);
+        let out_dir = TempDir::new().expect("out tempdir");
+        let lock_path = out_dir.path().join(format!("{name}.lock"));
+        let result = run_compile(&[
+            path.to_str().unwrap(),
+            "--edition",
+            "java",
+            "--out",
+            out_dir.path().to_str().unwrap(),
+            "--lock",
+            lock_path.to_str().unwrap(),
+        ]);
+        assert!(
+            result.status.success(),
+            "{name} should compile, stderr={}",
+            String::from_utf8_lossy(&result.stderr),
+        );
+        let stderr = String::from_utf8(result.stderr).expect("utf-8");
+        assert_eq!(
+            stderr.matches("W_DEFERRED_MEMBER").count(),
+            0,
+            "{name} should lower clean, stderr={stderr}",
+        );
+        let nbt = out_dir
+            .path()
+            .join(name.replace('-', "_").replace(".crn", ".nbt"));
+        assert!(nbt.exists(), "expected {} to exist", nbt.display());
     }
 }
 
