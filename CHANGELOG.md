@@ -17,6 +17,27 @@ placeholder cannot leak out. The `2026.07.0` release PR will flip publish to `tr
 
 ### Added
 
+- `cairn-lang-core::block_array::roof` — `shed`, `hip`, and `flat` roof
+  voxelisers join the existing `gable` generator, closing the
+  `spec/compilation.md` §4.3 carve-out that previously deferred
+  "the broader roof taxonomy". `RoofKind::from_ident` parses
+  `kind=gable|shed|hip|flat`; the `fill_roof` dispatcher in
+  `block_array::lower` routes each kind through its dedicated generator
+  and intern table. `shed kind=shed` requires a new `slope_to=front|
+  back|left|right` argument (the high edge of the slope) and rises
+  `slope_span` voxels above the wall top with stairs facing the high
+  side; `hip` rises `ceil(short_span / 2)` voxels and emits an inset
+  rectangle frame per layer with `shape=outer_left|outer_right`
+  corners and a long-axis ridge row on rectangular footprints; `flat`
+  is a single solid layer of `minecraft:spruce_planks` at
+  `wall_top + 1` covering the full inflated bounding box. Every kind
+  carries the existing overhang convention and the
+  hardcoded-material → `mat_slot=` mismatch warning (sloped roofs emit
+  `minecraft:spruce_stairs`, flat emits `minecraft:spruce_planks`;
+  per-theme roof species follow with the registry pack). New
+  `examples/roof-shed.crn`, `examples/roof-hip.crn`, and
+  `examples/roof-flat.crn` fixtures pin the new kinds against the CLI
+  (2027.01.0).
 - `cairn-lang-core::suggest` — `nearest_match(input, candidates)` finds the
   closest entry in a closed vocabulary under Damerau-Levenshtein distance
   with a length-scaled cap (≤ 1 edit for 1–3 char inputs, ≤ 2 for 4–6, ≤ 3
