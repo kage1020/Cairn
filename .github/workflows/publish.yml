@@ -95,6 +95,12 @@ jobs:
           rustup show
           rustup target add "$TARGET"
 
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: publish-${{ matrix.target }}
+          key: ${{ needs.validate-tag.outputs.tag }}
+
       - name: Build
         shell: bash
         env:
@@ -204,6 +210,12 @@ jobs:
 
       - name: Install Rust toolchain
         run: rustup show
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: sbom
+          cache-bin: true
 
       - name: Install cargo-cyclonedx
         run: cargo install cargo-cyclonedx --locked

@@ -95,6 +95,12 @@ jobs:
       - name: Install Rust toolchain
         run: rustup show
 
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: release-minor
+          save-if: ${{ github.ref == 'refs/heads/canary' }}
+
       - name: Set workspace version
         env:
           NEW_VERSION: ${{ needs.compute-version.outputs.version }}
@@ -130,6 +136,12 @@ jobs:
 
       - name: Install Rust toolchain
         run: rustup show
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: release-patch
+          save-if: ${{ github.ref == 'refs/heads/canary' }}
 
       # Default command runs both `release-pr` (open patch PR for new commits)
       # and `release` (publish + tag a merged release PR if present).
