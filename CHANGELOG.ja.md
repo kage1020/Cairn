@@ -36,9 +36,15 @@
   トップレベル `placements` セクションに記録され、下流の consumer は
   ソルバを再実行せずに村のレイアウトを再構築できる。`connect` 行は
   パースされるが各 1 件の `W_DEFERRED_MEMBER` を発火するのみ — 歩道
-  voxelization とポートモデル (`E_UNRESOLVED_PORT`) は M3-PR4 へ持ち越し
-  (2027.01.0)。
-- site 表面をカバーする 5 つの診断コードを追加:
+  voxelization とポートモデル (`E_UNRESOLVED_PORT`) は未実装 (2027.01.0)。
+- `cairn lower` と `cairn compile` が resolver 由来の診断
+  (`E_UNRESOLVED_PLACE_REF`、`E_UNRESOLVED_THEME_REF`、
+  `E_DUPLICATE_PLACE_ID`、`E_INVALID_PLACE_ORIGIN`、`W_UNUSED_DEF`、
+  `E_UNRESOLVED_SLOT` 等) を lowering の deferrals と並んで stderr に
+  surface するようになった。resolver の `Error` 重大度は compile の
+  exit code を非 0 にするため、`place use=cottag` タイポが `.nbt` ゼロ
+  exit 0 で素通りすることはなくなる。
+- site 表面をカバーする 6 つの診断コードを追加:
   `E_UNRESOLVED_PLACE_REF` (Error) は `place use=X` の `X` が未宣言の def
   である場合、または `east_of=Y` / `north_of=Y` の `Y` が同一 site の先行
   place id でない場合に発火し、既存の `suggest::nearest_match` による
@@ -50,8 +56,12 @@
   `at` / `east_of` / `north_of` を 2 つ以上併用、または `at=` が `origin`
   以外を取った場合に発火する; `W_UNUSED_DEF` (Warning) はどの
   `place use=NAME` からも参照されない `def` に対して発火し、`use=` 側の
-  タイポが空ビルドを密かに生む事故を防ぐ。spec §9.3.2 / §9.3.3 が
-  これらコードの守る規約を列挙する。
+  タイポが空ビルドを密かに生む事故を防ぐ; `W_DEF_NO_SIZE` (Warning) は
+  `place` から参照された `def` に `size=WxH` ヘッダがない場合に発火する
+  (voxel footprint を導出できないため当該配置はスキップ)。原点検査は
+  `return false` するため、構造的に不正な placement は `.nbt` を残さず
+  exit 非 0 で完全にスキップされる。spec §9.3.2 / §9.3.3 が これらコードの
+  守る規約を列挙する。
 - `cairn-lang-core::lock::LockPlacement` と
   `Lockfile.placements: Vec<LockPlacement>` — トポロジカル制約チェインから
   解いた per-`place` ワールド座標を `member_version_sensitivity` の隣に

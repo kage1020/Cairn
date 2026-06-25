@@ -90,6 +90,13 @@ pub enum DiagnosticCode {
     /// A `struct` has no `size=WxH` header, so block-array lowering cannot
     /// derive a voxel extent and skips it.
     StructNoSize,
+    /// A `def` (referenced by a `place use=NAME`) has no `size=WxH` header.
+    /// Without an interior footprint the place cannot lower into a voxel
+    /// volume, so the placement is skipped. Distinct from `StructNoSize`
+    /// so a CI / LSP filter that matches on `code` can tell whether the
+    /// missing size sits on a struct or on a template the user meant to
+    /// instantiate.
+    DefNoSize,
     /// A `place use=NAME` references an unknown def, an `east_of=ID` /
     /// `north_of=ID` references an unknown prior place in the same site, or
     /// a `connect a.port to b.port` refers to a missing place id. Carries a
@@ -138,6 +145,7 @@ impl DiagnosticCode {
             Self::AbstractTokenDeferred => "W_ABSTRACT_TOKEN_DEFERRED",
             Self::UnknownAbstractToken => "E_UNKNOWN_ABSTRACT_TOKEN",
             Self::StructNoSize => "W_STRUCT_NO_SIZE",
+            Self::DefNoSize => "W_DEF_NO_SIZE",
             Self::UnresolvedPlaceRef => "E_UNRESOLVED_PLACE_REF",
             Self::UnresolvedThemeRef => "E_UNRESOLVED_THEME_REF",
             Self::DuplicatePlaceId => "E_DUPLICATE_PLACE_ID",
@@ -180,6 +188,7 @@ impl DiagnosticCode {
             | Self::NoThemeBound
             | Self::AbstractTokenDeferred
             | Self::StructNoSize
+            | Self::DefNoSize
             | Self::UnusedDef => Severity::Warning,
         }
     }
@@ -449,6 +458,7 @@ mod tests {
                 "W_ABSTRACT_TOKEN_DEFERRED",
             ),
             (DiagnosticCode::StructNoSize, "W_STRUCT_NO_SIZE"),
+            (DiagnosticCode::DefNoSize, "W_DEF_NO_SIZE"),
             (DiagnosticCode::UnusedDef, "W_UNUSED_DEF"),
         ] {
             assert_eq!(code.as_str(), expected, "{code:?}");
@@ -483,6 +493,7 @@ mod tests {
             DiagnosticCode::NoThemeBound,
             DiagnosticCode::AbstractTokenDeferred,
             DiagnosticCode::StructNoSize,
+            DiagnosticCode::DefNoSize,
             DiagnosticCode::UnusedDef,
         ] {
             assert_eq!(code.severity(), Severity::Warning, "{code:?}");

@@ -133,9 +133,9 @@ pub fn write_compound_gzip<W: std::io::Write>(
 ///
 /// Strips the source-scope prefix:
 /// - `"struct::cottage"` → `"cottage.nbt"`
-/// - `"site::hamlet::home1"` → `"home1.nbt"` (M3-PR3: per-`place`
-///   placements share an output directory with sibling structs; the site
-///   name is collision-avoided inside the IR key, not on disk)
+/// - `"site::hamlet::home1"` → `"home1.nbt"` — per-`place` placements
+///   share an output directory with sibling structs; the site name is
+///   collision-avoided inside the IR key, not on disk.
 ///
 /// Kept here (not in the CLI) so the wasm playground and any other consumer
 /// agree on naming when they land.

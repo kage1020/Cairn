@@ -289,10 +289,10 @@ fn f9_output_filename_strips_struct_prefix() {
 
 #[test]
 fn output_filename_strips_site_and_name_prefixes_to_place_id() {
-    // M3-PR3: `site::hamlet::home1` keys per-place placements; the on-disk
-    // name uses only the `place id=` so siblings share a flat output dir
-    // with structs. Multi-site flat-namespace collisions are out of scope
-    // for M3.
+    // Site keys take the form `site::SITE::PLACE_ID`; the on-disk name
+    // uses only the `place id=` so siblings share a flat output dir with
+    // structs. Multi-site flat-namespace collisions are deliberately out
+    // of scope for the initial site lowering.
     assert_eq!(output_filename("site::hamlet::home1"), "home1.nbt");
     assert_eq!(output_filename("site::village::cottage_2"), "cottage_2.nbt");
 }

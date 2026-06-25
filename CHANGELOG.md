@@ -35,8 +35,14 @@ placeholder cannot leak out. The `2026.07.0` release PR will flip publish to `tr
   section so a downstream consumer can rebuild the village layout without
   re-running the solver. `connect` rows still parse but emit a single
   `W_DEFERRED_MEMBER` apiece — walkway voxelisation and the port model
-  (`E_UNRESOLVED_PORT`) land in M3-PR4 (2027.01.0).
-- Five new diagnostic codes covering the site surface:
+  (`E_UNRESOLVED_PORT`) are not yet implemented (2027.01.0).
+- `cairn lower` and `cairn compile` now surface resolver-emitted
+  diagnostics (`E_UNRESOLVED_PLACE_REF`, `E_UNRESOLVED_THEME_REF`,
+  `E_DUPLICATE_PLACE_ID`, `E_INVALID_PLACE_ORIGIN`, `W_UNUSED_DEF`,
+  `E_UNRESOLVED_SLOT`, ...) on stderr alongside the lowering deferrals.
+  Resolver `Error`-severity findings now fail the compile exit code, so a
+  `place use=cottag` typo no longer produces zero `.nbt` files at exit 0.
+- Six new diagnostic codes covering the site surface:
   `E_UNRESOLVED_PLACE_REF` (Error) on a `place use=X` whose `X` is not a
   declared def, on `east_of=Y` / `north_of=Y` whose `Y` is not a prior
   place id in the same site, with a nearest-match note via the existing
@@ -48,8 +54,13 @@ placeholder cannot leak out. The `2026.07.0` release PR will flip publish to `tr
   carries no origin selector, more than one of `at` / `east_of` /
   `north_of`, or an `at=` value other than `origin`; `W_UNUSED_DEF`
   (Warning) on a `def` that no `place use=NAME` ever references, so a
-  typo on the `use=` side does not silently produce an empty build.
-  Spec §9.3.2 / §9.3.3 enumerate the rules these codes guard.
+  typo on the `use=` side does not silently produce an empty build;
+  `W_DEF_NO_SIZE` (Warning) on a `def` referenced by a `place` without
+  a `size=WxH` header (the placement is skipped because the voxel
+  footprint is underivable). Origin checks `return false` so a placement
+  with a structural mistake is skipped entirely rather than landing a
+  `.nbt` at exit non-zero. Spec §9.3.2 / §9.3.3 enumerate the rules these
+  codes guard.
 - `cairn-lang-core::lock::LockPlacement` and
   `Lockfile.placements: Vec<LockPlacement>` — per-`place` site coordinates
   resolved from the topological constraint chain land in the lockfile

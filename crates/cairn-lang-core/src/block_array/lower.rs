@@ -31,7 +31,7 @@
 
 use indexmap::IndexMap;
 
-use crate::ast::{Value, ValueKind};
+use crate::ast::ValueKind;
 use crate::check::{Diagnostic, DiagnosticCode, DiagnosticNote, Severity};
 use crate::error::Span;
 use crate::intent::{DefIr, IntentModule, Member, MemberRole, SiteIr, Size, StructIr, ValueWithSpan};
@@ -140,8 +140,8 @@ fn lower_struct<'a>(
 /// `E_UNRESOLVED_THEME_REF`, `E_DUPLICATE_PLACE_ID`,
 /// `E_INVALID_PLACE_ORIGIN`); this pass owns:
 ///
-/// - `W_DEFERRED_MEMBER` on every `connect` row (port model + walkway
-///   voxelisation land with M3-PR4),
+/// - `W_DEFERRED_MEMBER` on every `connect` row (port model and walkway
+///   voxelisation are not yet implemented),
 /// - the topological → absolute coordinate solver
 ///   (`at=origin`, `east_of=ID gap=N`, `north_of=ID gap=N`),
 /// - the per-place IR emission into `structures` / `placements` under the
@@ -159,7 +159,7 @@ fn lower_site<'a>(
         if matches!(member.role, MemberRole::Connect) {
             diagnostics.push(diag_deferred_member_reason(
                 member,
-                "`connect` walkways are deferred to M3-PR4 (port model + voxelisation)",
+                "`connect` walkways are deferred until the port model and walkway voxeliser ship",
             ));
             continue;
         }
@@ -182,11 +182,11 @@ fn lower_site<'a>(
         let use_name = member
             .intent_state
             .get("use")
-            .and_then(|v| label_value(&v.value));
+            .and_then(|v| v.value.as_label_str());
         let theme_name = member
             .intent_state
             .get("theme")
-            .and_then(|v| label_value(&v.value));
+            .and_then(|v| v.value.as_label_str());
         let (Some(use_name), Some(theme_name)) = (use_name, theme_name) else {
             continue;
         };
@@ -202,6 +202,11 @@ fn lower_site<'a>(
             continue;
         };
 
+        // The origin solver reads `placements` for prior-place lookups, so
+        // the lookup has to happen before *this* placement is inserted.
+        let origin =
+            resolve_place_origin(member, placements, &site.name).unwrap_or((0, 0, 0));
+
         let ba = lower_body_to_block_array(
             BodyDescriptor {
                 kind: BodyKind::Place,
@@ -209,18 +214,18 @@ fn lower_site<'a>(
                 size: def_size,
                 members: &def.members,
                 header_span: &member.span,
-                source_scope: key.clone(),
+                source_scope: key,
             },
             Some(scope),
             materials,
             diagnostics,
         );
-
-        let origin =
-            resolve_place_origin(member, placements, &site.name).unwrap_or((0, 0, 0));
+        // `ba.source_scope` now owns the IR key — read it back so the two
+        // map inserts share that one allocation as their canonical key
+        // (one extra clone for `placements`, one move into `structures`).
         let dims = ba.dims;
         placements.insert(
-            key.clone(),
+            ba.source_scope.clone(),
             Placement {
                 site: site.name.clone(),
                 place_id: place_id.to_owned(),
@@ -230,7 +235,7 @@ fn lower_site<'a>(
                 dims,
             },
         );
-        structures.insert(key, ba);
+        structures.insert(ba.source_scope.clone(), ba);
     }
 }
 
@@ -372,7 +377,7 @@ fn resolve_place_origin(
     if let Some(target) = member
         .intent_state
         .get("east_of")
-        .and_then(|v| label_value(&v.value))
+        .and_then(|v| v.value.as_label_str())
         && let Some(prev) = placements.get(&place_scope_key(site_name, target))
     {
         let next_x = prev
@@ -385,7 +390,7 @@ fn resolve_place_origin(
     if let Some(target) = member
         .intent_state
         .get("north_of")
-        .and_then(|v| label_value(&v.value))
+        .and_then(|v| v.value.as_label_str())
         && let Some(prev) = placements.get(&place_scope_key(site_name, target))
     {
         let next_z = prev
@@ -396,13 +401,6 @@ fn resolve_place_origin(
         return Some((prev.origin.0, prev.origin.1, next_z));
     }
     None
-}
-
-fn label_value(v: &Value) -> Option<&str> {
-    match &v.kind {
-        ValueKind::Ident(s) | ValueKind::Str(s) => Some(s),
-        _ => None,
-    }
 }
 
 /// Bundle of per-struct context shared by every member-lowering helper.
@@ -1211,7 +1209,7 @@ fn diag_no_theme_bound_generic(kind: BodyKind, label: &str, header_span: &Span) 
 
 fn diag_def_no_size(def: &DefIr) -> Diagnostic {
     Diagnostic {
-        code: DiagnosticCode::StructNoSize,
+        code: DiagnosticCode::DefNoSize,
         severity: Severity::Warning,
         span: def.span.clone(),
         primary: format!(
@@ -1958,7 +1956,7 @@ mod tests {
         assert_eq!(apex_high.properties.get("half").unwrap(), "top");
     }
 
-    // ---- M3-PR3: site lowering unit ACs ----
+    // ---- site lowering: per-place IR emission and the coord solver ----
 
     #[test]
     fn place_lowers_def_with_referenced_theme() {

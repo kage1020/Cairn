@@ -35,7 +35,7 @@ pub struct Lockfile {
     /// Per-`place` site coordinates resolved from the `at=` / `east_of=` /
     /// `north_of=` constraint chain. Empty for sources that declare no
     /// `site` block, which keeps the lockfile shape byte-identical to
-    /// pre-M3-PR3 cottage / themed-tower builds.
+    /// cottage / themed-tower builds that pre-date the site surface.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub placements: Vec<LockPlacement>,
 }

@@ -25,15 +25,15 @@
 //! `spec/materials-themes.md` §7 — a selector belongs to one theme, not
 //! the union of all themes in the file.
 //!
-//! Site `place` lines are followed cross-scope (M3-PR3): each `place` is
-//! resolved against the referenced `def`'s members with the place's own
-//! `theme=` argument applied, and lands under a dedicated `site::SITE::ID`
-//! scope key. Missing or duplicate references fail loud with
+//! Site `place` lines are followed cross-scope: each `place` is resolved
+//! against the referenced `def`'s members with the place's own `theme=`
+//! argument applied, and lands under a dedicated `site::SITE::ID` scope
+//! key. Missing or duplicate references fail loud with
 //! `E_UNRESOLVED_PLACE_REF` / `E_UNRESOLVED_THEME_REF` /
 //! `E_DUPLICATE_PLACE_ID` / `E_INVALID_PLACE_ORIGIN`; defs that no site
 //! ever references surface as `W_UNUSED_DEF`. Walkway (`connect`) bodies
-//! are passed through to the lowering pass without port validation — port
-//! model and `E_UNRESOLVED_PORT` land with M3-PR4.
+//! are passed through to the lowering pass without port validation — the
+//! port model and `E_UNRESOLVED_PORT` are not yet defined.
 //!
 //! The returned [`Resolution::diagnostics`] is in **resolver-emission
 //! order**, not sorted by source span. The `check::check` pipeline runs
@@ -266,17 +266,22 @@ fn resolve_site_placements(
         seen_place_ids.insert(place_id.to_owned(), member.span.clone());
 
         // Validate origin selectors before any cross-scope lookup so the
-        // user sees the structural problem first.
-        validate_place_origin(member, &site.name, place_id, &seen_place_ids, diagnostics);
+        // user sees the structural problem first. An invalid origin makes
+        // the rest of the placement unsalvageable — skip the def/theme
+        // resolution and the scope insert so the lowering pass does not
+        // emit a `.nbt` for a structurally rejected placement.
+        if !validate_place_origin(member, &site.name, place_id, &seen_place_ids, diagnostics) {
+            continue;
+        }
 
         let use_target = member
             .intent_state
             .get("use")
-            .and_then(|v| label_value(&v.value));
+            .and_then(|v| v.value.as_label_str());
         let theme_target = member
             .intent_state
             .get("theme")
-            .and_then(|v| label_value(&v.value));
+            .and_then(|v| v.value.as_label_str());
 
         let Some(use_name) = use_target else {
             continue;
@@ -320,13 +325,19 @@ fn resolve_site_placements(
     }
 }
 
+/// Returns `true` when the placement passes every origin-selector check, in
+/// which case `resolve_site_placements` may proceed with the cross-scope
+/// def / theme resolution and register a scope. `false` means at least one
+/// `E_INVALID_PLACE_ORIGIN` or `E_UNRESOLVED_PLACE_REF` (target reference)
+/// was emitted — the caller must skip the rest of the placement so the
+/// lowering pass does not voxelise a structurally rejected `place`.
 fn validate_place_origin(
     member: &Member,
     site_name: &str,
     place_id: &str,
     seen_place_ids: &IndexMap<String, Span>,
     diagnostics: &mut Vec<Diagnostic>,
-) {
+) -> bool {
     let at = member.intent_state.get("at");
     let east_of = member.intent_state.get("east_of");
     let north_of = member.intent_state.get("north_of");
@@ -339,7 +350,7 @@ fn validate_place_origin(
             member.span.clone(),
             "`place` is missing an origin selector; add `at=origin`, `east_of=ID`, or `north_of=ID`",
         ));
-        return;
+        return false;
     }
     if selector_count > 1 {
         diagnostics.push(invalid_place_origin_diag(
@@ -347,7 +358,7 @@ fn validate_place_origin(
             member.span.clone(),
             "`place` carries more than one origin selector; keep exactly one of `at`, `east_of`, `north_of`",
         ));
-        return;
+        return false;
     }
     if let Some(value) = at
         && !matches!(&value.value.kind, ValueKind::Ident(s) if s == "origin")
@@ -357,21 +368,23 @@ fn validate_place_origin(
             value.span.clone(),
             "`at=` only accepts `origin`; use `east_of=ID` or `north_of=ID` for relative placement",
         ));
-        return;
+        return false;
     }
 
     // Cross-place reference validation: the target must appear before this
     // place in source order so cycles cannot form.
+    let mut ok = true;
     for (key, value) in [("east_of", east_of), ("north_of", north_of)] {
         let Some(value) = value else {
             continue;
         };
-        let Some(target) = label_value(&value.value) else {
+        let Some(target) = value.value.as_label_str() else {
             diagnostics.push(invalid_place_origin_diag(
                 place_id,
                 value.span.clone(),
                 &format!("`{key}=` expects a place id label"),
             ));
+            ok = false;
             continue;
         };
         if !seen_place_ids.contains_key(target) || target == place_id {
@@ -383,7 +396,7 @@ fn validate_place_origin(
                 .filter(|id| id.as_str() != place_id)
                 .map(String::as_str)
                 .collect();
-            diagnostics.push(unresolved_place_ref_diag(
+            diagnostics.push(unresolved_place_ref_diag_with_ordering_note(
                 &format!(
                     "`{key}={target}` in site `{site_name}` does not name a prior place id",
                 ),
@@ -391,15 +404,10 @@ fn validate_place_origin(
                 target,
                 prior.iter().copied(),
             ));
+            ok = false;
         }
     }
-}
-
-fn label_value(v: &Value) -> Option<&str> {
-    match &v.kind {
-        ValueKind::Ident(s) | ValueKind::Str(s) => Some(s),
-        _ => None,
-    }
+    ok
 }
 
 fn check_unused_defs(
@@ -448,6 +456,27 @@ fn unresolved_place_ref_diag<'a>(
         primary: primary.to_owned(),
         notes,
     }
+}
+
+/// Same as [`unresolved_place_ref_diag`] but appends an ordering-only note
+/// for `east_of=` / `north_of=` failures. The nearest-match candidate pool
+/// is restricted to *earlier* place ids in the same site so cycles cannot
+/// form; without the note an ordering miss looks like the suggestion engine
+/// just gave up.
+fn unresolved_place_ref_diag_with_ordering_note<'a>(
+    primary: &str,
+    span: Span,
+    typo: &str,
+    candidates: impl IntoIterator<Item = &'a str>,
+) -> Diagnostic {
+    let mut diag = unresolved_place_ref_diag(primary, span, typo, candidates);
+    diag.notes.push(DiagnosticNote {
+        span: None,
+        message:
+            "later places in the same site cannot be referenced; declare the target above this line"
+                .to_owned(),
+    });
+    diag
 }
 
 fn unresolved_theme_ref_diag<'a>(

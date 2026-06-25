@@ -623,11 +623,11 @@ fn example_in_tempdir(name: &str) -> (TempDir, PathBuf) {
 
 #[test]
 fn c18_compile_village_emits_three_nbt() {
-    // M3-PR3: village.crn used to compile to zero `.nbt` files because the
-    // lowering pass skipped sites entirely. With per-`place` lowering wired
-    // through, the three placements each produce a sibling `.nbt` and the
-    // build still exits 0 despite the two `W_DEFERRED_MEMBER` warnings the
-    // deferred `connect` rows emit.
+    // village.crn used to compile to zero `.nbt` files because the lowering
+    // pass skipped sites entirely. With per-`place` lowering wired through,
+    // the three placements each produce a sibling `.nbt` and the build still
+    // exits 0 despite the two `W_DEFERRED_MEMBER` warnings the deferred
+    // `connect` rows emit.
     let (_tmp_src, src) = example_in_tempdir("village.crn");
     let out_dir = TempDir::new().expect("out tempdir");
     let result = run_compile(&[
@@ -722,8 +722,8 @@ fn c20_village_lockfile_round_trips_through_yaml() {
 fn c21_village_emits_two_w_deferred_member_for_connect() {
     // The connect rows must surface as deferred warnings (one per row) and
     // the exit must stay 0 — the "warnings do not fail the build" rule
-    // c14b pins for themed-tower applies here too. Walkway voxelisation +
-    // port model land in M3-PR4.
+    // c14b pins for themed-tower applies here too. Walkway voxelisation
+    // and the port model are not yet implemented.
     let (_tmp_src, src) = example_in_tempdir("village.crn");
     let out_dir = TempDir::new().expect("out tempdir");
     let result = run_compile(&[
@@ -899,9 +899,9 @@ fn c26_bare_def_without_place_emits_w_unused_def_and_no_nbt() {
     // A def that no site references is a noop (templates compile to no
     // voxels). The resolver flags it as `W_UNUSED_DEF` so a typo on the
     // `place use=` side does not silently produce an empty build. The
-    // warning travels through `cairn compile` via the same resolver-merge
-    // path as `W_DEFERRED_MEMBER`, so it surfaces on stderr (lowering-time
-    // diagnostic stream).
+    // warning rides the same diagnostic stream as `W_DEFERRED_MEMBER` —
+    // resolver diagnostics merge into the lowering output so `cairn compile`
+    // surfaces them too.
     let tmp = TempDir::new().expect("tempdir");
     let src = tmp.path().join("orphan_def.crn");
     fs::write(
@@ -925,23 +925,14 @@ fn c26_bare_def_without_place_emits_w_unused_def_and_no_nbt() {
         "--out",
         out_dir.path().to_str().unwrap(),
     ]);
-    let combined = format!(
-        "stderr={}\nstdout={}",
-        String::from_utf8_lossy(&result.stderr),
-        String::from_utf8_lossy(&result.stdout),
-    );
+    let stderr = String::from_utf8(result.stderr.clone()).expect("utf-8");
     assert!(
         result.status.success(),
-        "W_UNUSED_DEF is a warning, not an error; {combined}",
+        "W_UNUSED_DEF is a warning, not an error; stderr={stderr}",
     );
-    // The lowering pass does not re-run resolution, so resolver-only
-    // warnings like W_UNUSED_DEF surface via `cairn check`; verify the
-    // warning code is reachable from there.
-    let check_result = run_check(&[src.to_str().unwrap()]);
-    let check_stdout = String::from_utf8(check_result.stdout).expect("utf-8");
     assert!(
-        check_stdout.contains("W_UNUSED_DEF"),
-        "`cairn check` should surface W_UNUSED_DEF; got: {check_stdout}",
+        stderr.contains("W_UNUSED_DEF"),
+        "`cairn compile` should surface W_UNUSED_DEF on stderr; got: {stderr}",
     );
     let entries: Vec<_> = fs::read_dir(out_dir.path())
         .expect("read out dir")
@@ -959,9 +950,55 @@ fn c26_bare_def_without_place_emits_w_unused_def_and_no_nbt() {
 }
 
 #[test]
+fn c26b_unknown_def_in_place_compile_exits_nonzero() {
+    // `cairn compile` must propagate resolver Error-severity diagnostics
+    // through to the exit code — without the resolver→lowering diagnostic
+    // merge, this would silently succeed with zero `.nbt` files.
+    let tmp = TempDir::new().expect("tempdir");
+    let src = tmp.path().join("typo_use_compile.crn");
+    fs::write(
+        &src,
+        concat!(
+            "@cairn 2026.06\n",
+            "\n",
+            "def cottage size=4x4:\n",
+            "  walls mat_slot=wall height=3\n",
+            "\n",
+            "theme t:\n",
+            "  slot wall -> @cobblestone\n",
+            "\n",
+            "site s:\n",
+            "  place id=home1 use=cottag theme=t at=origin\n",
+        ),
+    )
+    .expect("write tmp .crn");
+    let out_dir = TempDir::new().expect("out tempdir");
+    let result = run_compile(&[
+        src.to_str().unwrap(),
+        "--edition",
+        "java",
+        "--out",
+        out_dir.path().to_str().unwrap(),
+    ]);
+    let stderr = String::from_utf8(result.stderr).expect("utf-8");
+    assert!(
+        !result.status.success(),
+        "compile should fail on E_UNRESOLVED_PLACE_REF; stderr={stderr}",
+    );
+    assert!(
+        stderr.contains("E_UNRESOLVED_PLACE_REF"),
+        "stderr should carry E_UNRESOLVED_PLACE_REF; got: {stderr}",
+    );
+    assert!(
+        stderr.contains("did you mean `cottage`?"),
+        "stderr should propagate the nearest-match note; got: {stderr}",
+    );
+}
+
+#[test]
 fn c27_home2_nbt_uses_resolved_theme_palette() {
-    // M3-PR3 cross-scope theme resolution proof: home2's palette must
-    // contain the canonical id `medieval` binds to (`@cobblestone` →
+    // Cross-scope theme resolution proof: home2's palette must contain
+    // the canonical id `medieval` binds to (`@cobblestone` →
     // `minecraft:cobblestone`). Reading the gzip-decoded NBT and grepping
     // the palette is heavier than this test wants; the lockfile-equivalent
     // check is to assert the build wrote a non-trivial gzip stream and that

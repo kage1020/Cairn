@@ -417,6 +417,22 @@ impl Value {
         &self.span
     }
 
+    /// Borrow the inner string when this value lowers as a *label* — an
+    /// identifier or a string literal. Used by passes that consume
+    /// `key=label` arguments (`use=cottage`, `theme=medieval`,
+    /// `east_of=home1`, ...) so the same coercion does not have to be
+    /// re-implemented at every call site, and so a future relaxation of
+    /// what counts as a label (e.g. accepting bare tokens) lands in one
+    /// place. Returns `None` for non-label kinds; callers raise a
+    /// targeted diagnostic in that case.
+    #[must_use]
+    pub fn as_label_str(&self) -> Option<&str> {
+        match &self.kind {
+            ValueKind::Ident(s) | ValueKind::Str(s) => Some(s),
+            _ => None,
+        }
+    }
+
     /// One-word rendering of the kind. Used in diagnostic messages such as
     /// "expected a label (identifier or string), got `token`" so callers do
     /// not have to match on the kind themselves.
