@@ -129,9 +129,15 @@ fn lower_7_unknown_abstract_token_exits_nonzero() {
     // mean ...?` note and the process must exit non-zero. The closest
     // declared token (`floor.wood.broadleaf`) is one substitution away from
     // the typo, so `nearest_match` should propose it.
-    let tmp = std::env::temp_dir().join("cairn-cli-unknown-abstract.crn");
+    //
+    // A fresh per-test directory (via `tempfile::TempDir`) avoids racing
+    // concurrent test runs and leaks nothing if the assertion below panics
+    // before the cleanup line — matching how `c17_unknown_abstract_token_*`
+    // on the compile side already scopes its source file.
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    let src = tmp.path().join("typo.crn");
     std::fs::write(
-        &tmp,
+        &src,
         concat!(
             "@cairn 2026.06\n",
             "\n",
@@ -143,7 +149,7 @@ fn lower_7_unknown_abstract_token_exits_nonzero() {
         ),
     )
     .expect("write tmp .crn");
-    let out = run_lower(&[tmp.to_str().unwrap()]);
+    let out = run_lower(&[src.to_str().unwrap()]);
     let stderr = String::from_utf8(out.stderr).expect("utf-8");
     assert!(
         !out.status.success(),
@@ -157,7 +163,6 @@ fn lower_7_unknown_abstract_token_exits_nonzero() {
         stderr.contains("floor.wood.broadleaf"),
         "stderr should surface the nearest declared token; got: {stderr}",
     );
-    let _ = std::fs::remove_file(&tmp);
 }
 
 #[test]

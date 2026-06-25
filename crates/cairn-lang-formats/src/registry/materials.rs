@@ -83,14 +83,19 @@ impl MaterialsIndex {
         }
         let mut by_token: IndexMap<String, String> = IndexMap::with_capacity(catalog.entries.len());
         for entry in catalog.entries {
+            // Reject the duplicate *before* mutating the map so a rejected
+            // pack never observes an inconsistent intermediate state; the
+            // resulting error reads as "the second declaration of token X
+            // was refused", which is what the pack author needs to fix.
+            if by_token.contains_key(&entry.token) {
+                return Err(MaterialsError::DuplicateMaterialEntry { token: entry.token });
+            }
             let id = if entry.block.contains(':') {
                 entry.block
             } else {
                 format!("{}:{}", catalog.namespace, entry.block)
             };
-            if by_token.insert(entry.token.clone(), id).is_some() {
-                return Err(MaterialsError::DuplicateMaterialEntry { token: entry.token });
-            }
+            by_token.insert(entry.token, id);
         }
         Ok(Self { by_token })
     }
@@ -102,8 +107,14 @@ impl MaterialsIndex {
         self.by_token.get(token).map(String::as_str)
     }
 
-    /// Iterate every declared token in insertion order.
-    pub fn known_tokens(&self) -> impl Iterator<Item = &str> {
+    /// Iterate every declared token in insertion order without allocating.
+    ///
+    /// Named distinctly from [`AbstractMaterialResolver::known_tokens`] so
+    /// callers holding a concrete [`MaterialsIndex`] do not accidentally
+    /// pay for a `Vec<String>` clone when an iterator is enough. The trait
+    /// method exists for `&dyn` dispatch where a borrowing iterator cannot
+    /// cross the dyn boundary.
+    pub fn tokens(&self) -> impl Iterator<Item = &str> {
         self.by_token.keys().map(String::as_str)
     }
 
@@ -272,7 +283,7 @@ mod tests {
     }
 
     #[test]
-    fn known_tokens_preserves_insertion_order() {
+    fn tokens_preserves_insertion_order() {
         let src = r#"{
             "schema_version": 1,
             "namespace": "minecraft",
@@ -282,7 +293,7 @@ mod tests {
             ]
         }"#;
         let index = parse(src).unwrap();
-        let order: Vec<&str> = index.known_tokens().collect();
+        let order: Vec<&str> = index.tokens().collect();
         assert_eq!(order, vec!["a.b.c", "x.y.z"]);
     }
 }
