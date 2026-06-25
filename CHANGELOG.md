@@ -17,6 +17,54 @@ placeholder cannot leak out. The `2026.07.0` release PR will flip publish to `tr
 
 ### Added
 
+- `cairn-lang-formats::registry::materials` — abstract material catalog
+  component of a Java registry pack. A flat list of
+  `(token, block)` rows mapping every `@KIND.FAMILY.SPECIES` abstract
+  token from `spec/materials-themes.md` §7.2 to a canonical Minecraft
+  block id. The built-in catalog lives at
+  `data/registry/java/materials.json` and is embedded via `include_str!`
+  alongside `data_versions.json`; `pack.json::files.materials` references
+  it as an `Option<String>` component, so a `--registry-pack <dir>`
+  without a `materials` entry still loads (older packs ride on
+  `MaterialsIndex::empty`). `MaterialsIndex::from_catalog` rejects a
+  duplicate `token` with `RegistryError::Materials` /
+  `MaterialsError::DuplicateMaterialEntry` at load time and ignores
+  silent overwrites. Entries that name an explicit `namespace:` keep
+  their override; bare ids inherit the catalog's top-level `namespace`
+  (matching `BlockState` resolution for canonical tokens). The catalog
+  bytes feed into `RegistryPack::bytes_hash` via `pack_hash`'s
+  multi-component path, so the lockfile's `inputs.registry_pack_hash`
+  shifts when a pack swaps its materials catalog.
+- `cairn-lang-core::block_array::AbstractMaterialResolver` — trait the
+  block-array lowering pass calls through to lift abstract material
+  tokens (`@floor.wood.broadleaf`) into canonical [`BlockState`]s.
+  `cairn-lang-formats::registry::MaterialsIndex` implements it, keeping
+  `core → formats` free of a reverse import while letting the CLI hand
+  the built-in pack into lowering. `MaterialDeferred` gains an
+  `UnknownAbstract { token, suggestion }` variant for the
+  pack-was-offered-but-the-token-is-missing path; `Abstract` survives
+  for library callers (LSP highlight, `cairn check` without a pack)
+  that intentionally do not pass a resolver. `lower_to_block_array`
+  takes `materials: Option<&dyn AbstractMaterialResolver>` so the CLI
+  surface can wire `builtin_java().materials` through without forcing
+  every internal caller to construct one.
+- `E_UNKNOWN_ABSTRACT_TOKEN` (Error) — fires when a `mat_slot=`
+  resolves to an abstract token the registry pack's materials catalog
+  does not declare. The diagnostic carries a `did you mean \`@X\`?`
+  note populated by `nearest_match`'s Damerau-Levenshtein candidate
+  (same edit cap and tie-break rules `2026.12-PR2` uses for `--target`
+  versions and slot names), plus a static pointer to
+  `spec/materials-themes.md` §7.2. `cairn lower` and `cairn compile`
+  both exit `1` on any `Severity::Error` lowering diagnostic so the
+  fail-loud expectation now applies to the lowering pass, not just to
+  resolver/parse failures. `examples/themed-tower.crn` now lowers
+  without any `W_ABSTRACT_TOKEN_DEFERRED` because the built-in catalog
+  covers every token it binds (`floor.wood.broadleaf` →
+  `oak_planks`, `wall.stone.cobble` → `cobblestone`, `wood.dark` →
+  `dark_oak_planks`, `roof.dark_wood` → `dark_oak_stairs`); roof
+  hardcoding still emits a `W_DEFERRED_MEMBER` against the gable
+  generator and `level` blocks remain deferred, but the abstract
+  resolution itself is now clean (2027.01.0).
 - `cairn-lang-core::block_array::roof` — `shed`, `hip`, and `flat` roof
   voxelisers join the existing `gable` generator, closing the
   `spec/compilation.md` §4.3 carve-out that previously deferred

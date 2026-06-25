@@ -89,13 +89,80 @@ fn lower_4_missing_file_exits_with_code_two() {
 }
 
 #[test]
-fn lower_5_themed_tower_emits_abstract_token_warnings_but_succeeds() {
+fn lower_5_themed_tower_lifts_abstract_tokens_through_builtin_materials() {
+    // M3-PR2: the built-in registry pack ships a materials catalog covering
+    // every abstract token themed-tower.crn binds, so `W_ABSTRACT_TOKEN_DEFERRED`
+    // must NOT appear. `W_DEFERRED_MEMBER` is still expected on its top-level
+    // `level` blocks (level lowering arrives later), so exit stays 0.
     let path = examples_dir().join("themed-tower.crn");
     let out = run_lower(&[path.to_str().unwrap()]);
-    // Abstract tokens and deferred members are warnings only; exit 0.
-    assert!(out.status.success());
+    assert!(
+        out.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&out.stderr),
+    );
     let stderr = String::from_utf8(out.stderr).expect("utf-8");
-    assert!(stderr.contains("W_ABSTRACT_TOKEN_DEFERRED"));
+    assert!(
+        !stderr.contains("W_ABSTRACT_TOKEN_DEFERRED"),
+        "abstract tokens must lift via the built-in materials catalog; stderr={stderr}",
+    );
+    assert!(
+        !stderr.contains("E_UNKNOWN_ABSTRACT_TOKEN"),
+        "every token themed-tower binds must be declared by the catalog; stderr={stderr}",
+    );
+    let stdout = String::from_utf8(out.stdout).expect("utf-8");
+    // The lifted ids must surface in the lowered palette.
+    assert!(
+        stdout.contains("minecraft:oak_planks"),
+        "expected oak_planks from @floor.wood.broadleaf lift, stdout={stdout}",
+    );
+    assert!(
+        stdout.contains("minecraft:cobblestone"),
+        "expected cobblestone from @wall.stone.cobble lift, stdout={stdout}",
+    );
+}
+
+#[test]
+fn lower_7_unknown_abstract_token_exits_nonzero() {
+    // Source rigs an abstract token the built-in catalog does NOT declare,
+    // so resolution must surface E_UNKNOWN_ABSTRACT_TOKEN with a `did you
+    // mean ...?` note and the process must exit non-zero. The closest
+    // declared token (`floor.wood.broadleaf`) is one substitution away from
+    // the typo, so `nearest_match` should propose it.
+    //
+    // A fresh per-test directory (via `tempfile::TempDir`) avoids racing
+    // concurrent test runs and leaks nothing if the assertion below panics
+    // before the cleanup line — matching how `c17_unknown_abstract_token_*`
+    // on the compile side already scopes its source file.
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    let src = tmp.path().join("typo.crn");
+    std::fs::write(
+        &src,
+        concat!(
+            "@cairn 2026.06\n",
+            "\n",
+            "theme t:\n",
+            "  slot floor -> @floor.wood.broadlef\n",
+            "\n",
+            "struct s size=3x3\n",
+            "  floor mat_slot=floor\n",
+        ),
+    )
+    .expect("write tmp .crn");
+    let out = run_lower(&[src.to_str().unwrap()]);
+    let stderr = String::from_utf8(out.stderr).expect("utf-8");
+    assert!(
+        !out.status.success(),
+        "exit should be non-zero; stderr={stderr}",
+    );
+    assert!(
+        stderr.contains("E_UNKNOWN_ABSTRACT_TOKEN"),
+        "stderr should carry the new diagnostic code; got: {stderr}",
+    );
+    assert!(
+        stderr.contains("floor.wood.broadleaf"),
+        "stderr should surface the nearest declared token; got: {stderr}",
+    );
 }
 
 #[test]

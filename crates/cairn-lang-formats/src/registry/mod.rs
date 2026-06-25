@@ -18,6 +18,7 @@ pub mod data_versions;
 pub mod hash;
 pub mod load;
 pub mod manifest;
+pub mod materials;
 
 pub use data_versions::{DataVersionEntry, DataVersionTable};
 pub use hash::pack_hash;
@@ -26,3 +27,6 @@ pub use load::{
     SUPPORTED_MANIFEST_SCHEMA, builtin_java, load_builtin_java, load_from_dir,
 };
 pub use manifest::{PackEdition, PackFiles, PackManifest};
+pub use materials::{
+    MaterialEntry, MaterialsCatalog, MaterialsError, MaterialsIndex, SUPPORTED_MATERIALS_SCHEMA,
+};

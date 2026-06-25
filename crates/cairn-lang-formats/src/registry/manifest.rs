@@ -44,6 +44,12 @@ pub enum PackEdition {
 pub struct PackFiles {
     /// Relative filename of the `DataVersionTable` JSON.
     pub data_versions: String,
+    /// Relative filename of the abstract `materials` catalog JSON. Optional
+    /// for backwards compatibility: a pack written before PR2 lacks this
+    /// component, and the loader fills [`crate::registry::MaterialsIndex::empty`]
+    /// in its place.
+    #[serde(default)]
+    pub materials: Option<String>,
 }
 
 #[cfg(test)]
@@ -64,6 +70,23 @@ mod tests {
         assert_eq!(m.edition, PackEdition::Java);
         assert_eq!(m.name, "cairn-builtin-java");
         assert_eq!(m.files.data_versions, "data_versions.json");
+        assert!(m.files.materials.is_none(), "materials defaults to None");
+    }
+
+    #[test]
+    fn manifest_with_materials_component_roundtrips() {
+        let src = r#"{
+            "schema_version": 1,
+            "edition": "java",
+            "name": "cairn-builtin-java",
+            "description": "test",
+            "files": {
+                "data_versions": "data_versions.json",
+                "materials": "materials.json"
+            }
+        }"#;
+        let m: PackManifest = serde_json::from_str(src).expect("deserialise manifest");
+        assert_eq!(m.files.materials.as_deref(), Some("materials.json"));
     }
 
     #[test]

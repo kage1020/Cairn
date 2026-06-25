@@ -19,6 +19,49 @@
 
 ### Added
 
+- `cairn-lang-formats::registry::materials` — Java registry pack に抽象
+  マテリアルカタログコンポーネントを追加。`spec/materials-themes.md` §7.2
+  の `@KIND.FAMILY.SPECIES` 抽象トークンを正規の Minecraft ブロック ID に
+  マッピングするフラットな `(token, block)` テーブル。組み込みカタログは
+  `data/registry/java/materials.json` に置かれ、`data_versions.json` と
+  並んで `include_str!` で埋め込まれる。`pack.json::files.materials` は
+  `Option<String>` コンポーネントなので、`--registry-pack <dir>` が
+  `materials` エントリを持たない場合でも依然として読み込める (古い pack は
+  `MaterialsIndex::empty` に乗る)。`MaterialsIndex::from_catalog` は
+  `token` 重複を `RegistryError::Materials` / `MaterialsError::DuplicateMaterialEntry`
+  で load 時に拒否し、サイレント上書きを許さない。エントリが明示的に
+  `namespace:` を含めばオーバーライドし、bare ID ならカタログのトップ
+  レベル `namespace` を継承する (正規トークンの `BlockState` 解決と同じ
+  ルール)。カタログのバイト列は `pack_hash` のマルチコンポーネント経路で
+  `RegistryPack::bytes_hash` に流れ込むため、materials catalog を差し
+  替えればロックファイルの `inputs.registry_pack_hash` が動く。
+- `cairn-lang-core::block_array::AbstractMaterialResolver` — block-array
+  lowering pass が抽象マテリアルトークン (`@floor.wood.broadleaf`) を
+  canonical `BlockState` に lift するために呼び出す trait。
+  `cairn-lang-formats::registry::MaterialsIndex` が実装し、
+  `core → formats` の逆方向 import を避けつつ CLI が組み込み pack を
+  lowering に渡せるようにする。`MaterialDeferred` に
+  `UnknownAbstract { token, suggestion }` variant を追加 (pack は
+  あるがそのトークンが無い場合)。`Abstract` variant は維持し、
+  library 経路 (LSP highlight、resolver 未渡しの `cairn check`) で
+  従来通り deferred 扱いできるようにする。`lower_to_block_array` は
+  `materials: Option<&dyn AbstractMaterialResolver>` を取るため、CLI 面
+  で `builtin_java().materials` を一発で配線できる。
+- `E_UNKNOWN_ABSTRACT_TOKEN` (Error) — `mat_slot=` が registry pack の
+  materials catalog に無い抽象トークンに解決された時に発火。診断には
+  `nearest_match` (`2026.12-PR2` で `--target` バージョンや slot 名と
+  同じ Damerau-Levenshtein 閾値・タイブレークルール) が拾った
+  `did you mean \`@X\`?` note と `spec/materials-themes.md` §7.2 への
+  ポインタが付く。`cairn lower` および `cairn compile` は lowering 段階で
+  `Severity::Error` の診断が 1 件でも出れば exit `1` で終了するように
+  なり、fail-loud の期待が parse/resolve だけでなく lowering にも適用
+  される。組み込みカタログは `examples/themed-tower.crn` が bind する
+  全トークン (`floor.wood.broadleaf` → `oak_planks`、`wall.stone.cobble`
+  → `cobblestone`、`wood.dark` → `dark_oak_planks`、`roof.dark_wood`
+  → `dark_oak_stairs`) を網羅するため、themed-tower は今や
+  `W_ABSTRACT_TOKEN_DEFERRED` ゼロで lowering を通過する。屋根の
+  ハードコードによる `W_DEFERRED_MEMBER` と `level` ブロックの保留は
+  残るが、抽象トークン解決自体はクリーンになった (2027.01.0)。
 - `cairn-lang-core::block_array::roof` — 既存の `gable` ジェネレータに加え
   `shed` / `hip` / `flat` 屋根ボクセライザを追加し、`spec/compilation.md`
   §4.3 で保留扱いだった「より広い屋根タクソノミ」のカーブアウトを解消した。

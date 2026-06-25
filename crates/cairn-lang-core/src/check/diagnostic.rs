@@ -74,9 +74,19 @@ pub enum DiagnosticCode {
     /// member silently degrades to air during block-array lowering.
     NoThemeBound,
     /// A `mat_slot=` resolved to an abstract material token
-    /// (`@floor.wood.broadleaf`). The block-array lowering needs a canonical
-    /// id; abstract resolution arrives with the registry pack.
+    /// (`@floor.wood.broadleaf`) and no registry pack materials catalog was
+    /// available to lift it. The block-array lowering needs a canonical id;
+    /// the cell degrades to air. Distinct from `UnknownAbstractToken`, which
+    /// fires when a catalog *is* present but does not declare the token —
+    /// this variant covers the older "no pack at all" path that survives for
+    /// library callers (LSP highlighting, `cairn check` without a pack).
     AbstractTokenDeferred,
+    /// A `mat_slot=` resolved to an abstract material token that the registry
+    /// pack's materials catalog does not declare. Fail-loud per spec §7.2:
+    /// the cell cannot lower silently to air when a pack was offered, so the
+    /// build stops with a structured suggestion towards the closest known
+    /// token.
+    UnknownAbstractToken,
     /// A `struct` has no `size=WxH` header, so block-array lowering cannot
     /// derive a voxel extent and skips it.
     StructNoSize,
@@ -102,6 +112,7 @@ impl DiagnosticCode {
             Self::DeferredMember => "W_DEFERRED_MEMBER",
             Self::NoThemeBound => "W_NO_THEME_BOUND",
             Self::AbstractTokenDeferred => "W_ABSTRACT_TOKEN_DEFERRED",
+            Self::UnknownAbstractToken => "E_UNKNOWN_ABSTRACT_TOKEN",
             Self::StructNoSize => "W_STRUCT_NO_SIZE",
         }
     }
@@ -111,10 +122,13 @@ impl DiagnosticCode {
     /// Errors are silent-substitution-style problems that would otherwise
     /// feed bad data into later passes; warnings are advisory drift that
     /// does not block a build. See `spec/lint.md` §11.2 for the rule.
-    /// The block-array lowering codes (`W_DEFERRED_MEMBER`,
+    /// The block-array lowering warnings (`W_DEFERRED_MEMBER`,
     /// `W_NO_THEME_BOUND`, `W_ABSTRACT_TOKEN_DEFERRED`, `W_STRUCT_NO_SIZE`)
-    /// are all warnings: each marks a partial-build degradation rather
-    /// than an unsalvageable input.
+    /// each mark a partial-build degradation rather than an unsalvageable
+    /// input. `E_UNKNOWN_ABSTRACT_TOKEN` is the one lowering code that is
+    /// an `Error`: when a registry pack *was* offered but does not declare
+    /// the bound token, silently falling back to air would hide a typo
+    /// the pack author needs to fix (spec §7.2's fail-loud rule).
     #[must_use]
     pub fn severity(self) -> Severity {
         match self {
@@ -125,7 +139,8 @@ impl DiagnosticCode {
             | Self::UnknownKeyword
             | Self::TypeMismatchLabel
             | Self::TypeMismatchSize
-            | Self::UnresolvedSlot => Severity::Error,
+            | Self::UnresolvedSlot
+            | Self::UnknownAbstractToken => Severity::Error,
             Self::UnknownSlotTarget
             | Self::ThemeSelectorUnmatched
             | Self::DeferredMember
@@ -371,6 +386,7 @@ mod tests {
             DiagnosticCode::UnresolvedSlot,
             DiagnosticCode::UnknownSlotTarget,
             DiagnosticCode::ThemeSelectorUnmatched,
+            DiagnosticCode::UnknownAbstractToken,
         ] {
             let s = code.as_str();
             assert!(
@@ -413,6 +429,7 @@ mod tests {
             DiagnosticCode::TypeMismatchLabel,
             DiagnosticCode::TypeMismatchSize,
             DiagnosticCode::UnresolvedSlot,
+            DiagnosticCode::UnknownAbstractToken,
         ] {
             assert_eq!(code.severity(), Severity::Error, "{code:?}");
         }
