@@ -30,7 +30,7 @@ use indexmap::IndexMap;
 use serde::Serialize;
 
 pub use lower::lower_to_block_array;
-pub use material::{MaterialDeferred, resolve_block_state};
+pub use material::{AbstractMaterialResolver, MaterialDeferred, resolve_block_state};
 
 use crate::check::Diagnostic;
 

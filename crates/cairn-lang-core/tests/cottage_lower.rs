@@ -27,7 +27,7 @@ fn lower_example(name: &str) -> BlockArrayIr {
     let module = parse(&source).expect("parse");
     let ir = lower(&module);
     let resolution = resolve(&ir);
-    lower_to_block_array(&ir, &resolution)
+    lower_to_block_array(&ir, &resolution, None)
 }
 
 #[test]

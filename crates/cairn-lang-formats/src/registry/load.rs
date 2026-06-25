@@ -15,12 +15,15 @@ use thiserror::Error;
 use super::data_versions::DataVersionTable;
 use super::hash::pack_hash;
 use super::manifest::{PackEdition, PackManifest};
+use super::materials::{MaterialsCatalog, MaterialsError, MaterialsIndex};
 
 /// Built-in `pack.json` bytes, statically embedded at compile time.
 const BUILTIN_JAVA_MANIFEST: &str = include_str!("../../../../data/registry/java/pack.json");
 /// Built-in `data_versions.json` bytes, statically embedded at compile time.
 const BUILTIN_JAVA_DATA_VERSIONS: &str =
     include_str!("../../../../data/registry/java/data_versions.json");
+/// Built-in `materials.json` bytes, statically embedded at compile time.
+const BUILTIN_JAVA_MATERIALS: &str = include_str!("../../../../data/registry/java/materials.json");
 
 /// Highest manifest `schema_version` this Cairn build understands.
 pub const SUPPORTED_MANIFEST_SCHEMA: u32 = 1;
@@ -45,6 +48,10 @@ pub struct RegistryPack {
     pub manifest: PackManifest,
     /// `(mc_version, data_version)` table.
     pub data_versions: DataVersionTable,
+    /// Abstract material catalog. Empty when the pack omits the component
+    /// (older packs, or a `--registry-pack` directory that has not been
+    /// ported to PR2's schema).
+    pub materials: MaterialsIndex,
     /// `sha256:<hex>` over the manifest + component bytes in declared order.
     /// Lands in the lockfile under `inputs.registry_pack_hash`.
     pub bytes_hash: HashHex,
@@ -120,6 +127,19 @@ pub enum RegistryError {
         /// Edition the manifest declared.
         got: PackEdition,
     },
+    /// The pack's `materials` catalog failed to validate.
+    #[error("registry pack `materials`: {source}")]
+    Materials {
+        /// Underlying validation error from the materials catalog.
+        #[source]
+        source: MaterialsError,
+    },
+}
+
+impl From<MaterialsError> for RegistryError {
+    fn from(source: MaterialsError) -> Self {
+        Self::Materials { source }
+    }
 }
 
 /// Resolved Minecraft target used by the Java backend.
@@ -241,16 +261,24 @@ pub fn load_builtin_java() -> Result<RegistryPack, RegistryError> {
     validate_manifest(&manifest, PackEdition::Java)?;
     let data_versions = parse_data_versions(BUILTIN_JAVA_DATA_VERSIONS)?;
     validate_data_versions(&data_versions)?;
-    let bytes_hash = pack_hash(
-        BUILTIN_JAVA_MANIFEST.as_bytes(),
-        &[(
-            manifest.files.data_versions.as_str(),
-            BUILTIN_JAVA_DATA_VERSIONS.as_bytes(),
-        )],
-    );
+    let materials = if manifest.files.materials.is_some() {
+        let catalog = parse_materials(BUILTIN_JAVA_MATERIALS)?;
+        MaterialsIndex::from_catalog(catalog)?
+    } else {
+        MaterialsIndex::empty()
+    };
+    let mut components: Vec<(&str, &[u8])> = vec![(
+        manifest.files.data_versions.as_str(),
+        BUILTIN_JAVA_DATA_VERSIONS.as_bytes(),
+    )];
+    if let Some(name) = manifest.files.materials.as_deref() {
+        components.push((name, BUILTIN_JAVA_MATERIALS.as_bytes()));
+    }
+    let bytes_hash = pack_hash(BUILTIN_JAVA_MANIFEST.as_bytes(), &components);
     Ok(RegistryPack {
         manifest,
         data_versions,
+        materials,
         bytes_hash,
         source: PackSource::Builtin,
     })
@@ -297,13 +325,38 @@ fn load_from_dir_inner(
     let data_versions = parse_data_versions(data_versions_text)?;
     validate_data_versions(&data_versions)?;
 
-    let bytes_hash = pack_hash(
-        &manifest_bytes,
-        &[(manifest.files.data_versions.as_str(), &data_versions_bytes)],
-    );
+    let (materials, materials_bytes) = match manifest.files.materials.as_deref() {
+        Some(name) => {
+            let path = dir.join(name);
+            let bytes = std::fs::read(&path).map_err(|source| RegistryError::Io {
+                path: path.clone(),
+                source,
+            })?;
+            let text = std::str::from_utf8(&bytes).map_err(|err| RegistryError::Io {
+                path: path.clone(),
+                source: std::io::Error::new(std::io::ErrorKind::InvalidData, err),
+            })?;
+            let catalog = parse_materials(text)?;
+            (MaterialsIndex::from_catalog(catalog)?, Some(bytes))
+        }
+        None => (MaterialsIndex::empty(), None),
+    };
+
+    let mut components: Vec<(&str, &[u8])> = vec![(
+        manifest.files.data_versions.as_str(),
+        data_versions_bytes.as_slice(),
+    )];
+    if let (Some(name), Some(bytes)) = (
+        manifest.files.materials.as_deref(),
+        materials_bytes.as_deref(),
+    ) {
+        components.push((name, bytes));
+    }
+    let bytes_hash = pack_hash(&manifest_bytes, &components);
     Ok(RegistryPack {
         manifest,
         data_versions,
+        materials,
         bytes_hash,
         source: PackSource::Path(dir.to_path_buf()),
     })
@@ -316,6 +369,13 @@ fn parse_manifest(s: &str) -> Result<PackManifest, RegistryError> {
 fn parse_data_versions(s: &str) -> Result<DataVersionTable, RegistryError> {
     serde_json::from_str(s).map_err(|source| RegistryError::File {
         file: "data_versions".to_owned(),
+        source,
+    })
+}
+
+fn parse_materials(s: &str) -> Result<MaterialsCatalog, RegistryError> {
+    serde_json::from_str(s).map_err(|source| RegistryError::File {
+        file: "materials".to_owned(),
         source,
     })
 }
@@ -367,6 +427,16 @@ mod tests {
             .expect("write data_versions");
     }
 
+    fn write_pack_with_materials(
+        tmp: &Path,
+        manifest_json: &str,
+        data_versions_json: &str,
+        materials_json: &str,
+    ) {
+        write_pack(tmp, manifest_json, data_versions_json);
+        std::fs::write(tmp.join("materials.json"), materials_json).expect("write materials");
+    }
+
     fn good_manifest() -> &'static str {
         r#"{
             "schema_version": 1,
@@ -395,6 +465,106 @@ mod tests {
         assert_eq!(pack.manifest.name, "cairn-builtin-java");
         assert_eq!(pack.source, PackSource::Builtin);
         assert!(!pack.data_versions.versions.is_empty());
+    }
+
+    #[test]
+    fn builtin_pack_includes_materials_catalog() {
+        let pack = load_builtin_java().expect("builtin pack");
+        assert!(
+            !pack.materials.is_empty(),
+            "built-in pack ships a non-empty materials catalog",
+        );
+        assert_eq!(
+            pack.materials.lookup_id("floor.wood.broadleaf"),
+            Some("minecraft:oak_planks"),
+        );
+        assert_eq!(
+            pack.materials.lookup_id("wall.stone.cobble"),
+            Some("minecraft:cobblestone"),
+        );
+        assert_eq!(
+            pack.materials.lookup_id("wood.dark"),
+            Some("minecraft:dark_oak_planks"),
+        );
+        assert_eq!(
+            pack.materials.lookup_id("roof.dark_wood"),
+            Some("minecraft:dark_oak_stairs"),
+        );
+    }
+
+    #[test]
+    fn pack_without_materials_component_loads_with_empty_index() {
+        let tmp = std::env::temp_dir().join("cairn-registry-no-materials");
+        let _ = std::fs::remove_dir_all(&tmp);
+        // `good_manifest()` already omits the `materials` key, so this
+        // exercises the backwards-compatible path that older packs ride on.
+        write_pack(&tmp, good_manifest(), good_data_versions());
+        let pack = load_from_dir(&tmp).expect("load");
+        assert!(pack.materials.is_empty());
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn pack_with_materials_component_lifts_tokens() {
+        let tmp = std::env::temp_dir().join("cairn-registry-materials");
+        let _ = std::fs::remove_dir_all(&tmp);
+        let manifest = r#"{
+            "schema_version": 1,
+            "edition": "java",
+            "name": "test",
+            "description": "test",
+            "files": {
+                "data_versions": "data_versions.json",
+                "materials": "materials.json"
+            }
+        }"#;
+        let materials = r#"{
+            "schema_version": 1,
+            "namespace": "minecraft",
+            "entries": [
+                { "token": "wall.stone.cobble", "block": "cobblestone" }
+            ]
+        }"#;
+        write_pack_with_materials(&tmp, manifest, good_data_versions(), materials);
+        let pack = load_from_dir(&tmp).expect("load");
+        assert_eq!(
+            pack.materials.lookup_id("wall.stone.cobble"),
+            Some("minecraft:cobblestone"),
+        );
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn pack_with_duplicate_materials_token_is_error() {
+        let tmp = std::env::temp_dir().join("cairn-registry-dup-materials");
+        let _ = std::fs::remove_dir_all(&tmp);
+        let manifest = r#"{
+            "schema_version": 1,
+            "edition": "java",
+            "name": "test",
+            "description": "test",
+            "files": {
+                "data_versions": "data_versions.json",
+                "materials": "materials.json"
+            }
+        }"#;
+        let materials = r#"{
+            "schema_version": 1,
+            "namespace": "minecraft",
+            "entries": [
+                { "token": "x.y", "block": "stone" },
+                { "token": "x.y", "block": "dirt" }
+            ]
+        }"#;
+        write_pack_with_materials(&tmp, manifest, good_data_versions(), materials);
+        let err = load_from_dir(&tmp).expect_err("duplicate token");
+        assert!(matches!(
+            err,
+            RegistryError::Materials {
+                source: MaterialsError::DuplicateMaterialEntry { ref token },
+            } if token == "x.y"
+        ));
+        let _ = std::fs::remove_dir_all(&tmp);
     }
 
     #[test]

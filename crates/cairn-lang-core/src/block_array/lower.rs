@@ -37,7 +37,7 @@ use crate::error::Span;
 use crate::intent::{IntentModule, Member, MemberRole, StructIr, ValueWithSpan};
 use crate::resolve::{Resolution, ScopeResolution};
 
-use super::material::{MaterialDeferred, resolve_block_state};
+use super::material::{AbstractMaterialResolver, MaterialDeferred, resolve_block_state};
 use super::openings::{WallSide, wall_length, wall_local_to_grid};
 use super::roof::{
     GableVoxel, HipVoxel, RoofKind, ShedFace, ShedVoxel, StairFace, flat_block_state,
@@ -56,8 +56,18 @@ use super::{BlockArray, BlockArrayIr, BlockState, Dims, Palette, PaletteIndex};
 /// the source still cuts an opening through the resulting wall. Roles
 /// outside the three implemented phases are reported via
 /// `W_DEFERRED_MEMBER` and skipped.
+///
+/// `materials` is the registry-pack-backed abstract-token lifter. `Some`
+/// turns `@floor.wood.broadleaf`-style tokens into concrete Java ids and
+/// fail-loud on misses; `None` keeps the pre-PR2 behaviour where every
+/// abstract token degrades to a `W_ABSTRACT_TOKEN_DEFERRED` warning so
+/// library callers without a pack still get a partial build.
 #[must_use]
-pub fn lower_to_block_array(intent: &IntentModule, resolution: &Resolution) -> BlockArrayIr {
+pub fn lower_to_block_array(
+    intent: &IntentModule,
+    resolution: &Resolution,
+    materials: Option<&dyn AbstractMaterialResolver>,
+) -> BlockArrayIr {
     let mut structures: IndexMap<String, BlockArray> = IndexMap::new();
     let mut diagnostics: Vec<Diagnostic> = Vec::new();
 
@@ -68,7 +78,7 @@ pub fn lower_to_block_array(intent: &IntentModule, resolution: &Resolution) -> B
         // diagnostic (no `size=`, etc.), so the skip here is silent on
         // purpose — diagnosing twice would teach a reader the struct had
         // two unrelated problems instead of one.
-        if let Some(ba) = lower_struct(s, scope, &mut diagnostics) {
+        if let Some(ba) = lower_struct(s, scope, materials, &mut diagnostics) {
             structures.insert(key, ba);
         }
     }
@@ -79,9 +89,10 @@ pub fn lower_to_block_array(intent: &IntentModule, resolution: &Resolution) -> B
     }
 }
 
-fn lower_struct(
+fn lower_struct<'a>(
     s: &StructIr,
-    scope: Option<&ScopeResolution>,
+    scope: Option<&'a ScopeResolution>,
+    materials: Option<&'a dyn AbstractMaterialResolver>,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Option<BlockArray> {
     let Some(size) = s.size.as_ref() else {
@@ -117,6 +128,7 @@ fn lower_struct(
 
     let ctx = StructCtx {
         scope,
+        materials,
         theme_missing,
         dims,
         overhang,
@@ -167,6 +179,7 @@ fn lower_struct(
 /// one field change instead of touching every helper signature.
 struct StructCtx<'a> {
     scope: Option<&'a ScopeResolution>,
+    materials: Option<&'a dyn AbstractMaterialResolver>,
     theme_missing: bool,
     dims: Dims,
     overhang: u32,
@@ -208,9 +221,14 @@ fn lower_massing_member(
 ) {
     match &member.role {
         MemberRole::Floor => {
-            let Some(idx) =
-                palette_index_for(member, ctx.scope, palette, diagnostics, ctx.theme_missing)
-            else {
+            let Some(idx) = palette_index_for(
+                member,
+                ctx.scope,
+                ctx.materials,
+                palette,
+                diagnostics,
+                ctx.theme_missing,
+            ) else {
                 return;
             };
             fill_floor(ctx, idx, voxels);
@@ -219,9 +237,14 @@ fn lower_massing_member(
             let Some(height) = wall_height(member, diagnostics) else {
                 return;
             };
-            let Some(idx) =
-                palette_index_for(member, ctx.scope, palette, diagnostics, ctx.theme_missing)
-            else {
+            let Some(idx) = palette_index_for(
+                member,
+                ctx.scope,
+                ctx.materials,
+                palette,
+                diagnostics,
+                ctx.theme_missing,
+            ) else {
                 return;
             };
             fill_walls(ctx, height, idx, voxels);
@@ -266,8 +289,11 @@ fn lower_opening_member(
 /// - the member never carried a `mat_slot=`,
 /// - the resolver already flagged the slot via `E_UNRESOLVED_SLOT` (the
 ///   binding has `slot_value == None`),
-/// - the value lowered as an abstract token (a `W_ABSTRACT_TOKEN_DEFERRED`
-///   warning is emitted in that branch),
+/// - the value lowered as an abstract token and no `materials` resolver was
+///   offered (a `W_ABSTRACT_TOKEN_DEFERRED` warning is emitted),
+/// - the value lowered as an abstract token the offered `materials` resolver
+///   does not declare (an `E_UNKNOWN_ABSTRACT_TOKEN` error is emitted with
+///   the nearest declared candidate, when one exists),
 /// - the value was not a token at all (`E_UNKNOWN_SLOT_TARGET` already
 ///   fired during resolve, so no second diagnostic here).
 ///
@@ -279,6 +305,7 @@ fn lower_opening_member(
 fn resolve_member_state(
     member: &Member,
     scope: Option<&ScopeResolution>,
+    materials: Option<&dyn AbstractMaterialResolver>,
     diagnostics: &mut Vec<Diagnostic>,
     theme_missing: bool,
 ) -> Option<BlockState> {
@@ -288,10 +315,19 @@ fn resolve_member_state(
     let scope = scope?;
     let binding = scope.members.get(&member.span.start)?;
     let slot_value: &ValueWithSpan = binding.slot_value.as_ref()?;
-    match resolve_block_state(slot_value) {
+    match resolve_block_state(slot_value, materials) {
         Ok(state) => Some(state),
         Err(MaterialDeferred::Abstract(token)) => {
             diagnostics.push(diag_abstract_token(member, &token, slot_value));
+            None
+        }
+        Err(MaterialDeferred::UnknownAbstract { token, suggestion }) => {
+            diagnostics.push(diag_unknown_abstract_token(
+                member,
+                &token,
+                suggestion.as_deref(),
+                slot_value,
+            ));
             None
         }
         Err(MaterialDeferred::AlreadyDiagnosed) => None,
@@ -305,11 +341,12 @@ fn resolve_member_state(
 fn palette_index_for(
     member: &Member,
     scope: Option<&ScopeResolution>,
+    materials: Option<&dyn AbstractMaterialResolver>,
     palette: &mut Palette,
     diagnostics: &mut Vec<Diagnostic>,
     theme_missing: bool,
 ) -> Option<PaletteIndex> {
-    resolve_member_state(member, scope, diagnostics, theme_missing)
+    resolve_member_state(member, scope, materials, diagnostics, theme_missing)
         .map(|state| palette.intern(state))
 }
 
@@ -495,8 +532,13 @@ fn fill_roof(
     // user's intent would silently be replaced). The resolved state
     // itself is never interned: leaving the palette free of an
     // unreferenced entry keeps the on-disk NBT tight.
-    if let Some(state) = resolve_member_state(member, ctx.scope, diagnostics, ctx.theme_missing)
-        && state.id != kind.base_block_id()
+    if let Some(state) = resolve_member_state(
+        member,
+        ctx.scope,
+        ctx.materials,
+        diagnostics,
+        ctx.theme_missing,
+    ) && state.id != kind.base_block_id()
     {
         diagnostics.push(diag_deferred_member_reason(
             member,
@@ -754,8 +796,14 @@ fn fill_window(
         return;
     };
     let sym = bool_value(member, "sym").unwrap_or(false);
-    let Some(idx) = palette_index_for(member, ctx.scope, palette, diagnostics, ctx.theme_missing)
-    else {
+    let Some(idx) = palette_index_for(
+        member,
+        ctx.scope,
+        ctx.materials,
+        palette,
+        diagnostics,
+        ctx.theme_missing,
+    ) else {
         return;
     };
 
@@ -966,6 +1014,37 @@ fn diag_abstract_token(member: &Member, token: &str, slot: &ValueWithSpan) -> Di
     }
 }
 
+fn diag_unknown_abstract_token(
+    member: &Member,
+    token: &str,
+    suggestion: Option<&str>,
+    slot: &ValueWithSpan,
+) -> Diagnostic {
+    let primary = format!(
+        "abstract token `@{token}` is not declared by the registry pack's materials catalog",
+    );
+    let mut notes = Vec::with_capacity(2);
+    if let Some(s) = suggestion {
+        notes.push(DiagnosticNote {
+            span: None,
+            message: format!("did you mean `@{s}`?"),
+        });
+    }
+    notes.push(DiagnosticNote {
+        span: None,
+        message: "abstract material tokens must be declared in the pack's `materials` catalog \
+                  (see `spec/materials-themes.md` §7.2)"
+            .to_owned(),
+    });
+    Diagnostic {
+        code: DiagnosticCode::UnknownAbstractToken,
+        severity: Severity::Error,
+        span: member_or_slot_span(member, slot),
+        primary,
+        notes,
+    }
+}
+
 /// Prefer the slot-binding span (which points at the `@token`) over the
 /// member line so the warning underlines the exact value that could not be
 /// lowered.
@@ -1004,7 +1083,34 @@ mod tests {
         let module = parse(source).expect("parse");
         let ir = lower(&module);
         let resolution = resolve(&ir);
-        lower_to_block_array(&ir, &resolution)
+        lower_to_block_array(&ir, &resolution, None)
+    }
+
+    fn lowered_with_resolver(
+        source: &str,
+        resolver: &dyn AbstractMaterialResolver,
+    ) -> BlockArrayIr {
+        let module = parse(source).expect("parse");
+        let ir = lower(&module);
+        let resolution = resolve(&ir);
+        lower_to_block_array(&ir, &resolution, Some(resolver))
+    }
+
+    struct FakeResolver {
+        entries: Vec<(&'static str, &'static str)>,
+    }
+
+    impl AbstractMaterialResolver for FakeResolver {
+        fn lookup(&self, token: &str) -> Option<BlockState> {
+            self.entries
+                .iter()
+                .find(|(t, _)| *t == token)
+                .map(|(_, id)| BlockState::bare(format!("minecraft:{id}")))
+        }
+
+        fn known_tokens(&self) -> Vec<String> {
+            self.entries.iter().map(|(t, _)| (*t).to_owned()).collect()
+        }
     }
 
     fn block_id(ba: &BlockArray, x: u32, y: u32, z: u32) -> &str {
@@ -1137,6 +1243,66 @@ mod tests {
     }
 
     #[test]
+    fn abstract_token_lifts_through_supplied_resolver() {
+        // When `lower_to_block_array` is given a resolver that knows the
+        // bound abstract token, the cell must lower to the catalog's
+        // canonical id instead of staying air with W_ABSTRACT_TOKEN_DEFERRED.
+        let resolver = FakeResolver {
+            entries: vec![
+                ("floor.wood.broadleaf", "oak_planks"),
+                ("wall.stone.cobble", "cobblestone"),
+            ],
+        };
+        let src = "theme t:\n  \
+                   slot f -> @floor.wood.broadleaf\n  \
+                   slot w -> @wall.stone.cobble\n\n\
+                   struct s size=3x3\n  \
+                   floor mat_slot=f\n  \
+                   walls mat_slot=w height=2\n";
+        let out = lowered_with_resolver(src, &resolver);
+        assert!(
+            out.diagnostics
+                .iter()
+                .all(|d| d.code != DiagnosticCode::AbstractTokenDeferred),
+            "no abstract-token deferral expected when the resolver covers every token, got {:?}",
+            out.diagnostics,
+        );
+        let ba = out.structures.get("struct::s").unwrap();
+        assert_eq!(block_id(ba, 1, 0, 1), "minecraft:oak_planks");
+        assert_eq!(block_id(ba, 0, 1, 0), "minecraft:cobblestone");
+    }
+
+    #[test]
+    fn unknown_abstract_token_emits_e_unknown_abstract_token() {
+        // When the resolver does not declare the bound token, lowering must
+        // surface E_UNKNOWN_ABSTRACT_TOKEN with the nearest-declared
+        // candidate as a note. Cell falls back to air.
+        let resolver = FakeResolver {
+            entries: vec![("floor.wood.broadleaf", "oak_planks")],
+        };
+        let src = "theme t:\n  \
+                   slot f -> @floor.wood.broadlef\n\n\
+                   struct s size=3x3\n  \
+                   floor mat_slot=f\n";
+        let out = lowered_with_resolver(src, &resolver);
+        let diag = out
+            .diagnostics
+            .iter()
+            .find(|d| d.code == DiagnosticCode::UnknownAbstractToken)
+            .expect("expected E_UNKNOWN_ABSTRACT_TOKEN, got {:?}");
+        assert_eq!(diag.severity, Severity::Error);
+        assert!(
+            diag.notes
+                .iter()
+                .any(|n| n.message.contains("floor.wood.broadleaf")),
+            "expected suggestion note in {:?}",
+            diag.notes,
+        );
+        let ba = out.structures.get("struct::s").unwrap();
+        assert_eq!(block_id(ba, 1, 0, 1), BlockState::AIR_ID);
+    }
+
+    #[test]
     fn struct_without_size_is_skipped_with_warning() {
         let src = "theme t:\n  slot f -> @cobblestone\n\nstruct s\n  floor mat_slot=f\n";
         let out = lowered(src);
@@ -1159,7 +1325,7 @@ mod tests {
             ValueKind::Token("oak_log[axis=x]".to_owned()),
             0..16,
         ));
-        let bs = resolve_block_state(&token).unwrap();
+        let bs = resolve_block_state(&token, None).unwrap();
         let idx = palette.intern(bs);
         assert_eq!(palette.entries[usize::from(idx.0)].id, "minecraft:oak_log");
         assert_eq!(

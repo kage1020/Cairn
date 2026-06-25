@@ -457,9 +457,10 @@ fn run_lower(file: &Path, format: LowerFormat) -> ExitCode {
     };
     let ir = lower(&module);
     let resolution = resolve(&ir);
-    let block_ir = lower_to_block_array(&ir, &resolution);
+    let block_ir = lower_to_block_array(&ir, &resolution, Some(&builtin_java().materials));
 
     let lines = LineStarts::new(&source);
+    let mut has_error = false;
     for d in &block_ir.diagnostics {
         let pos = lines.position(&source, d.span.start);
         eprintln!(
@@ -470,17 +471,29 @@ fn run_lower(file: &Path, format: LowerFormat) -> ExitCode {
             d.code.as_str(),
             d.primary,
         );
+        for note in &d.notes {
+            eprintln!("  note: {}", note.message);
+        }
+        if d.severity == Severity::Error {
+            has_error = true;
+        }
     }
+
+    let success_exit = if has_error {
+        ExitCode::from(1)
+    } else {
+        ExitCode::SUCCESS
+    };
 
     match format {
         LowerFormat::Ascii => {
             print_block_ir_ascii(&block_ir);
-            ExitCode::SUCCESS
+            success_exit
         }
         LowerFormat::Json => match serde_json::to_string_pretty(&block_ir) {
             Ok(json) => {
                 println!("{json}");
-                ExitCode::SUCCESS
+                success_exit
             }
             Err(err) => {
                 eprintln!("error: failed to serialise block-array IR as JSON: {err}");
@@ -489,7 +502,7 @@ fn run_lower(file: &Path, format: LowerFormat) -> ExitCode {
         },
         LowerFormat::Debug => {
             println!("{block_ir:#?}");
-            ExitCode::SUCCESS
+            success_exit
         }
     }
 }
@@ -605,7 +618,7 @@ fn load_and_lower(file: &Path) -> Result<(String, BlockArrayIr), ExitCode> {
     })?;
     let ir = lower(&module);
     let resolution = resolve(&ir);
-    let block_ir = lower_to_block_array(&ir, &resolution);
+    let block_ir = lower_to_block_array(&ir, &resolution, Some(&builtin_java().materials));
     Ok((source, block_ir))
 }
 
@@ -622,6 +635,9 @@ fn report_lowering_diagnostics(file: &Path, source: &str, block_ir: &BlockArrayI
             d.code.as_str(),
             d.primary,
         );
+        for note in &d.notes {
+            eprintln!("  note: {}", note.message);
+        }
         if d.severity == Severity::Error {
             has_error = true;
         }

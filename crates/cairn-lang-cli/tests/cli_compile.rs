@@ -530,6 +530,86 @@ fn c14b_deferred_member_warning_still_exits_zero_on_other_examples() {
 }
 
 #[test]
+fn c16_themed_tower_compiles_with_lifted_abstract_tokens() {
+    // M3-PR2: the built-in materials catalog covers every abstract token
+    // themed-tower binds, so compile must finish without
+    // `W_ABSTRACT_TOKEN_DEFERRED` or `E_UNKNOWN_ABSTRACT_TOKEN`, write a
+    // `keep.nbt`, and the lockfile records the same registry pack hash that
+    // other examples do (materials catalog is part of the pack bytes).
+    let tmp = TempDir::new().expect("tempdir");
+    let dst = tmp.path().join("themed-tower.crn");
+    fs::copy(examples_dir().join("themed-tower.crn"), &dst).expect("copy themed-tower");
+    let out_dir = TempDir::new().expect("out tempdir");
+    let result = run_compile(&[
+        dst.to_str().unwrap(),
+        "--edition",
+        "java",
+        "--out",
+        out_dir.path().to_str().unwrap(),
+    ]);
+    let stderr = String::from_utf8(result.stderr).expect("utf-8");
+    assert!(
+        result.status.success(),
+        "themed-tower should compile clean; stderr={stderr}",
+    );
+    assert_eq!(
+        stderr.matches("W_ABSTRACT_TOKEN_DEFERRED").count(),
+        0,
+        "abstract tokens must lift via the catalog; stderr={stderr}",
+    );
+    assert_eq!(
+        stderr.matches("E_UNKNOWN_ABSTRACT_TOKEN").count(),
+        0,
+        "every token themed-tower binds must be in the catalog; stderr={stderr}",
+    );
+    let written = out_dir.path().join("keep.nbt");
+    assert!(written.exists(), "expected {} to exist", written.display());
+}
+
+#[test]
+fn c17_unknown_abstract_token_compile_exits_nonzero() {
+    // Compile must propagate the new E_UNKNOWN_ABSTRACT_TOKEN as a hard
+    // failure — a build that silently fell back to air on a typo would
+    // hide the bug downstream.
+    let tmp = TempDir::new().expect("tempdir");
+    let src = tmp.path().join("typo.crn");
+    fs::write(
+        &src,
+        concat!(
+            "@cairn 2026.06\n",
+            "\n",
+            "theme t:\n",
+            "  slot floor -> @floor.wood.broadlef\n",
+            "\n",
+            "struct s size=3x3\n",
+            "  floor mat_slot=floor\n",
+        ),
+    )
+    .expect("write tmp .crn");
+    let out_dir = TempDir::new().expect("out tempdir");
+    let result = run_compile(&[
+        src.to_str().unwrap(),
+        "--edition",
+        "java",
+        "--out",
+        out_dir.path().to_str().unwrap(),
+    ]);
+    let stderr = String::from_utf8(result.stderr).expect("utf-8");
+    assert!(
+        !result.status.success(),
+        "exit should be non-zero; stderr={stderr}",
+    );
+    assert!(
+        stderr.contains("E_UNKNOWN_ABSTRACT_TOKEN"),
+        "stderr should carry the new diagnostic code; got: {stderr}",
+    );
+    assert!(
+        stderr.contains("floor.wood.broadleaf"),
+        "stderr should surface the nearest declared token; got: {stderr}",
+    );
+}
+
+#[test]
 fn compile_overwrites_existing_output() {
     // A second compile into the same directory must overwrite the .nbt
     // and the lockfile rather than refusing or appending. Without this,
