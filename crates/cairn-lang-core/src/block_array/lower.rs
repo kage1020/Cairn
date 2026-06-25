@@ -34,7 +34,9 @@ use indexmap::IndexMap;
 use crate::ast::ValueKind;
 use crate::check::{Diagnostic, DiagnosticCode, DiagnosticNote, Severity};
 use crate::error::Span;
-use crate::intent::{DefIr, IntentModule, Member, MemberRole, SiteIr, Size, StructIr, ValueWithSpan};
+use crate::intent::{
+    DefIr, IntentModule, Member, MemberRole, SiteIr, Size, StructIr, ValueWithSpan,
+};
 use crate::resolve::{Resolution, ScopeResolution, place_scope_key};
 
 use super::Placement;
@@ -204,8 +206,7 @@ fn lower_site<'a>(
 
         // The origin solver reads `placements` for prior-place lookups, so
         // the lookup has to happen before *this* placement is inserted.
-        let origin =
-            resolve_place_origin(member, placements, &site.name).unwrap_or((0, 0, 0));
+        let origin = resolve_place_origin(member, placements, &site.name).unwrap_or((0, 0, 0));
 
         let ba = lower_body_to_block_array(
             BodyDescriptor {
@@ -2020,7 +2021,11 @@ mod tests {
             .placements
             .get("site::s::b")
             .expect("placement b present");
-        assert_eq!(b.origin, (5, 0, 0), "x = prev.x(0) + prev.dims.x(3) + gap(2)");
+        assert_eq!(
+            b.origin,
+            (5, 0, 0),
+            "x = prev.x(0) + prev.dims.x(3) + gap(2)"
+        );
         assert_eq!(b.origin.2, 0, "east_of does not move along z");
     }
 
@@ -2045,6 +2050,10 @@ mod tests {
             .placements
             .get("site::s::b")
             .expect("placement b present");
-        assert_eq!(b.origin, (0, 0, -7), "z = prev.z(0) - prev.dims.z(3) - gap(4)");
+        assert_eq!(
+            b.origin,
+            (0, 0, -7),
+            "z = prev.z(0) - prev.dims.z(3) - gap(4)"
+        );
     }
 }

@@ -341,8 +341,9 @@ fn validate_place_origin(
     let at = member.intent_state.get("at");
     let east_of = member.intent_state.get("east_of");
     let north_of = member.intent_state.get("north_of");
-    let selector_count =
-        usize::from(at.is_some()) + usize::from(east_of.is_some()) + usize::from(north_of.is_some());
+    let selector_count = usize::from(at.is_some())
+        + usize::from(east_of.is_some())
+        + usize::from(north_of.is_some());
 
     if selector_count == 0 {
         diagnostics.push(invalid_place_origin_diag(
@@ -397,9 +398,7 @@ fn validate_place_origin(
                 .map(String::as_str)
                 .collect();
             diagnostics.push(unresolved_place_ref_diag_with_ordering_note(
-                &format!(
-                    "`{key}={target}` in site `{site_name}` does not name a prior place id",
-                ),
+                &format!("`{key}={target}` in site `{site_name}` does not name a prior place id"),
                 value.span.clone(),
                 target,
                 prior.iter().copied(),
@@ -410,11 +409,7 @@ fn validate_place_origin(
     ok
 }
 
-fn check_unused_defs(
-    defs: &[DefIr],
-    used: &HashSet<String>,
-    diagnostics: &mut Vec<Diagnostic>,
-) {
+fn check_unused_defs(defs: &[DefIr], used: &HashSet<String>, diagnostics: &mut Vec<Diagnostic>) {
     for def in defs {
         if used.contains(&def.name) {
             continue;

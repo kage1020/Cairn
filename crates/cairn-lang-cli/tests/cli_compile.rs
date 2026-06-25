@@ -646,7 +646,10 @@ fn c18_compile_village_emits_three_nbt() {
         let written = out_dir.path().join(name);
         assert!(written.exists(), "expected {} to exist", written.display());
         let bytes = fs::read(&written).expect("read nbt");
-        assert!(bytes.len() >= 2 && bytes[..2] == [0x1f, 0x8b], "{name} must be gzip");
+        assert!(
+            bytes.len() >= 2 && bytes[..2] == [0x1f, 0x8b],
+            "{name} must be gzip"
+        );
     }
 }
 
