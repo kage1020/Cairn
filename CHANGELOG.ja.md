@@ -19,6 +19,56 @@
 
 ### Added
 
+- `cairn-lang-core::block_array::lower` — site lowering により
+  `village.crn` の往復が完成。`lower_to_block_array` は既存の struct ループ
+  の後に `intent.sites` を走査し、各 `place` について `use=DEF` を
+  モジュールの defs から引き、place ローカルの `theme=` を def の body に
+  適用 (スコープ跨ぎテーマ解決) し、`site::SITE::PLACE_ID` という新キーで
+  per-place `BlockArray` を発行する。既存の `prepare_artifacts` →
+  `write_compound_gzip` 経路がそのまま 1 配置 = 1 `.nbt` を書き出す
+  (`home1.nbt`、`home2.nbt`、`home3.nbt`)。トポロジカル座標ソルバは
+  `front` が `+z` 規約 (`spec/components-editing-sites.md` §9.3.1) に従い、
+  `at=origin` / `east_of=ID gap=N` / `north_of=ID gap=N` を絶対座標
+  `(x, y, z)` に変換する: `east` は直前配置の inflated `dims.x` プラス
+  gap だけ `+x` 方向に進み、`north` は `dims.z` プラス gap だけ `-z`
+  方向に後退する。解いた per-place origin は新規
+  `BlockArrayIr.placements: IndexMap<…, Placement>` とロックファイル新設
+  トップレベル `placements` セクションに記録され、下流の consumer は
+  ソルバを再実行せずに村のレイアウトを再構築できる。`connect` 行は
+  パースされるが各 1 件の `W_DEFERRED_MEMBER` を発火するのみ — 歩道
+  voxelization とポートモデル (`E_UNRESOLVED_PORT`) は M3-PR4 へ持ち越し
+  (2027.01.0)。
+- site 表面をカバーする 5 つの診断コードを追加:
+  `E_UNRESOLVED_PLACE_REF` (Error) は `place use=X` の `X` が未宣言の def
+  である場合、または `east_of=Y` / `north_of=Y` の `Y` が同一 site の先行
+  place id でない場合に発火し、既存の `suggest::nearest_match` による
+  近接マッチ note を伴う; `E_UNRESOLVED_THEME_REF` (Error) は
+  `place theme=X` の `X` が未宣言の場合に発火し、同様に候補 note 付き;
+  `E_DUPLICATE_PLACE_ID` (Error) は同一 site 内で 2 つの `place` が `id=`
+  を共有した場合に発火し、最初の宣言へのスパンポインタを note で示す;
+  `E_INVALID_PLACE_ORIGIN` (Error) は `place` 行に原点セレクタがない、
+  `at` / `east_of` / `north_of` を 2 つ以上併用、または `at=` が `origin`
+  以外を取った場合に発火する; `W_UNUSED_DEF` (Warning) はどの
+  `place use=NAME` からも参照されない `def` に対して発火し、`use=` 側の
+  タイポが空ビルドを密かに生む事故を防ぐ。spec §9.3.2 / §9.3.3 が
+  これらコードの守る規約を列挙する。
+- `cairn-lang-core::lock::LockPlacement` と
+  `Lockfile.placements: Vec<LockPlacement>` — トポロジカル制約チェインから
+  解いた per-`place` ワールド座標を `member_version_sensitivity` の隣に
+  ロックファイルへ記録する。各エントリは `site`、`id`、`def`、`theme`、
+  `origin: [i32; 3]` (`north_of` 配置で負の `z` をとる)、
+  `dims: [u32; 3]` を pin する。フィールドは
+  `skip_serializing_if = "Vec::is_empty"` で、cottage / themed-tower の
+  ロックファイルは PR3 以前とバイト一致する。既存の `hash_resolved_ir` は
+  serde-json の構造走査で新フィールドを自動的にハッシュへ取り込む。
+  spec §9.3.4 が「再解決不要な site レイアウトの単一情報源」として
+  この section を文書化している (2027.01.0)。
+- `cairn-lang-formats::java_structure::output_filename` が
+  `site::HAMLET::home1` → `home1.nbt` のマッピングを既存の
+  `struct::cottage` → `cottage.nbt` 規則と並んで習得した。per-place 配置は
+  兄弟 struct と同じ出力ディレクトリを共有する。複数 site の
+  フラット名前空間衝突は M3 の対象外で、spec でも明示的に carve-out
+  されている。
 - `cairn-lang-formats::registry::materials` — Java registry pack に抽象
   マテリアルカタログコンポーネントを追加。`spec/materials-themes.md` §7.2
   の `@KIND.FAMILY.SPECIES` 抽象トークンを正規の Minecraft ブロック ID に

@@ -7,7 +7,8 @@ use cairn_lang_core::CAIRN_VERSION;
 use cairn_lang_core::block_array::{BlockArray, BlockArrayIr, lower_to_block_array};
 use cairn_lang_core::check::LineStarts;
 use cairn_lang_core::lock::{
-    HashHex, LockEdition, LockInputs, LockTarget, Lockfile, hash_resolved_ir, hash_source,
+    HashHex, LockEdition, LockInputs, LockPlacement, LockTarget, Lockfile, hash_resolved_ir,
+    hash_source,
 };
 use cairn_lang_core::resolve::{VersionAxes, compute_axes, resolve};
 use cairn_lang_core::{Severity, check, lower, parse};
@@ -822,5 +823,17 @@ fn build_lockfile(
         resolved_ir_hash: hash_resolved_ir(block_ir)?,
         verified: true,
         member_version_sensitivity: vec![],
+        placements: block_ir
+            .placements
+            .values()
+            .map(|p| LockPlacement {
+                site: p.site.clone(),
+                id: p.place_id.clone(),
+                def: p.source_def.clone(),
+                theme: p.theme.clone(),
+                origin: [p.origin.0, p.origin.1, p.origin.2],
+                dims: [p.dims.x, p.dims.y, p.dims.z],
+            })
+            .collect(),
     })
 }

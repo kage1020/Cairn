@@ -24,6 +24,7 @@ fn unit_ir(palette: Palette) -> BlockArrayIr {
     );
     BlockArrayIr {
         structures,
+        placements: IndexMap::new(),
         diagnostics: vec![],
     }
 }
@@ -89,6 +90,7 @@ fn sample_lockfile() -> Lockfile {
             id: "yard_water".to_owned(),
             reason: "cauldron split at 1.17".to_owned(),
         }],
+        placements: vec![],
     }
 }
 

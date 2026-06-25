@@ -31,11 +31,13 @@
 
 use indexmap::IndexMap;
 
-use crate::ast::ValueKind;
+use crate::ast::{Value, ValueKind};
 use crate::check::{Diagnostic, DiagnosticCode, DiagnosticNote, Severity};
 use crate::error::Span;
-use crate::intent::{IntentModule, Member, MemberRole, StructIr, ValueWithSpan};
-use crate::resolve::{Resolution, ScopeResolution};
+use crate::intent::{DefIr, IntentModule, Member, MemberRole, SiteIr, Size, StructIr, ValueWithSpan};
+use crate::resolve::{Resolution, ScopeResolution, place_scope_key};
+
+use super::Placement;
 
 use super::material::{AbstractMaterialResolver, MaterialDeferred, resolve_block_state};
 use super::openings::{WallSide, wall_length, wall_local_to_grid};
@@ -83,8 +85,22 @@ pub fn lower_to_block_array(
         }
     }
 
+    let mut placements: IndexMap<String, Placement> = IndexMap::new();
+    for site in &intent.sites {
+        lower_site(
+            site,
+            &intent.defs,
+            resolution,
+            materials,
+            &mut structures,
+            &mut placements,
+            &mut diagnostics,
+        );
+    }
+
     BlockArrayIr {
         structures,
+        placements,
         diagnostics,
     }
 }
@@ -99,12 +115,165 @@ fn lower_struct<'a>(
         diagnostics.push(diag_struct_no_size(s));
         return None;
     };
-    let interior_w = size.w.get();
-    let interior_h = size.h.get();
+    Some(lower_body_to_block_array(
+        BodyDescriptor {
+            kind: BodyKind::Struct,
+            scope_label: &s.name,
+            size,
+            members: &s.members,
+            header_span: &s.span,
+            source_scope: format!("struct::{}", s.name),
+        },
+        scope,
+        materials,
+        diagnostics,
+    ))
+}
+
+/// Lower every `place` in `site` into its own per-place [`BlockArray`] and a
+/// matching [`Placement`] record carrying the resolved world-space origin.
+///
+/// Cross-scope semantics: a place's `theme=` argument has already been
+/// applied by the resolver (`place_scope_key` lookup), so the lowering pass
+/// just walks the def's members under the prepared [`ScopeResolution`]. The
+/// resolver emits every fail-loud diagnostic (`E_UNRESOLVED_PLACE_REF`,
+/// `E_UNRESOLVED_THEME_REF`, `E_DUPLICATE_PLACE_ID`,
+/// `E_INVALID_PLACE_ORIGIN`); this pass owns:
+///
+/// - `W_DEFERRED_MEMBER` on every `connect` row (port model + walkway
+///   voxelisation land with M3-PR4),
+/// - the topological → absolute coordinate solver
+///   (`at=origin`, `east_of=ID gap=N`, `north_of=ID gap=N`),
+/// - the per-place IR emission into `structures` / `placements` under the
+///   `site::SITE::PLACE_ID` key.
+fn lower_site<'a>(
+    site: &SiteIr,
+    defs: &[DefIr],
+    resolution: &'a Resolution,
+    materials: Option<&'a dyn AbstractMaterialResolver>,
+    structures: &mut IndexMap<String, BlockArray>,
+    placements: &mut IndexMap<String, Placement>,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    for member in &site.placements {
+        if matches!(member.role, MemberRole::Connect) {
+            diagnostics.push(diag_deferred_member_reason(
+                member,
+                "`connect` walkways are deferred to M3-PR4 (port model + voxelisation)",
+            ));
+            continue;
+        }
+        if !matches!(member.role, MemberRole::Place) {
+            continue;
+        }
+        let Some(place_id) = member.id.as_deref() else {
+            continue;
+        };
+
+        let key = place_scope_key(&site.name, place_id);
+        let Some(scope) = resolution.scopes.get(&key) else {
+            // The resolver emitted `E_UNRESOLVED_PLACE_REF` /
+            // `E_UNRESOLVED_THEME_REF` / `E_INVALID_PLACE_ORIGIN`; lowering
+            // skips this place silently so the diagnostic count stays
+            // honest.
+            continue;
+        };
+
+        let use_name = member
+            .intent_state
+            .get("use")
+            .and_then(|v| label_value(&v.value));
+        let theme_name = member
+            .intent_state
+            .get("theme")
+            .and_then(|v| label_value(&v.value));
+        let (Some(use_name), Some(theme_name)) = (use_name, theme_name) else {
+            continue;
+        };
+        let Some(def) = defs.iter().find(|d| d.name == use_name) else {
+            continue;
+        };
+        let Some(def_size) = def.size.as_ref() else {
+            // The spec keeps `def NAME size=WxH` mandatory because a sized
+            // template is what `place` instantiates; a sizeless def cannot
+            // produce a voxel volume. Surface the same warning lib code
+            // uses for sizeless structs so the failure mode is consistent.
+            diagnostics.push(diag_def_no_size(def));
+            continue;
+        };
+
+        let ba = lower_body_to_block_array(
+            BodyDescriptor {
+                kind: BodyKind::Place,
+                scope_label: place_id,
+                size: def_size,
+                members: &def.members,
+                header_span: &member.span,
+                source_scope: key.clone(),
+            },
+            Some(scope),
+            materials,
+            diagnostics,
+        );
+
+        let origin =
+            resolve_place_origin(member, placements, &site.name).unwrap_or((0, 0, 0));
+        let dims = ba.dims;
+        placements.insert(
+            key.clone(),
+            Placement {
+                site: site.name.clone(),
+                place_id: place_id.to_owned(),
+                source_def: use_name.to_owned(),
+                theme: theme_name.to_owned(),
+                origin,
+                dims,
+            },
+        );
+        structures.insert(key, ba);
+    }
+}
+
+/// What kind of body the lowering is processing. Lets diagnostic messages
+/// distinguish a sizeless struct from a sizeless def without adding two
+/// near-identical helpers, and lets a future fixtures pass switch on the
+/// host when origin conventions differ.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BodyKind {
+    Struct,
+    Place,
+}
+
+/// Inputs shared by the struct and place lowering paths.
+struct BodyDescriptor<'a> {
+    kind: BodyKind,
+    /// Display name for diagnostics (`cottage`, `home1`).
+    scope_label: &'a str,
+    size: &'a Size,
+    members: &'a [Member],
+    /// Span the `W_NO_THEME_BOUND` warning anchors at (struct/def header
+    /// for a struct, `place` line for a place).
+    header_span: &'a Span,
+    /// IR key written into the resulting [`BlockArray::source_scope`].
+    source_scope: String,
+}
+
+fn lower_body_to_block_array<'a>(
+    body: BodyDescriptor<'a>,
+    scope: Option<&'a ScopeResolution>,
+    materials: Option<&'a dyn AbstractMaterialResolver>,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> BlockArray {
+    let interior_w = body.size.w.get();
+    let interior_h = body.size.h.get();
 
     let theme_missing = scope.is_none_or(|sc| sc.bound_theme.is_none());
     if theme_missing {
-        diagnostics.push(diag_no_theme_bound(s));
+        diagnostics.push(diag_no_theme_bound_generic(
+            body.kind,
+            body.scope_label,
+            body.header_span,
+        ));
     }
 
     // Inflate the struct's footprint by the maximum `overhang=` across all
@@ -112,9 +281,9 @@ fn lower_struct<'a>(
     // room outside the wall ring. Floors, walls, doors, and windows are
     // authored against the *interior* size and shifted inward by this
     // amount in their respective fill helpers.
-    let overhang = max_roof_overhang(&s.members);
-    let max_wall_height = max_wall_height(&s.members);
-    let roof_extra = max_roof_extra_height(&s.members, interior_w, interior_h, overhang);
+    let overhang = max_roof_overhang(body.members);
+    let max_wall_height = max_wall_height(body.members);
+    let roof_extra = max_roof_extra_height(body.members, interior_w, interior_h, overhang);
 
     let dims = Dims {
         x: interior_w.saturating_add(overhang.saturating_mul(2)),
@@ -143,7 +312,7 @@ fn lower_struct<'a>(
     let mut massing: Vec<&Member> = Vec::new();
     let mut envelope: Vec<&Member> = Vec::new();
     let mut openings: Vec<&Member> = Vec::new();
-    for member in &s.members {
+    for member in body.members {
         match member_phase(&member.role) {
             Some(Phase::Massing) => massing.push(member),
             Some(Phase::Envelope) => envelope.push(member),
@@ -162,14 +331,78 @@ fn lower_struct<'a>(
         lower_opening_member(member, &ctx, &mut palette, &mut voxels, diagnostics);
     }
 
-    Some(BlockArray {
+    BlockArray {
         dims,
         palette,
         voxels,
         block_entities: Vec::new(),
         entities: Vec::new(),
-        source_scope: format!("struct::{}", s.name),
-    })
+        source_scope: body.source_scope,
+    }
+}
+
+/// Solve the `at=origin` / `east_of=ID gap=N` / `north_of=ID gap=N` chain
+/// for one `place` line.
+///
+/// Returns `None` when none of the three selectors is present in a usable
+/// shape (the resolver already emitted `E_INVALID_PLACE_ORIGIN`); callers
+/// fall back to `(0, 0, 0)` so the per-place [`BlockArray`] still lands.
+/// `east_of` advances along `+x` past the prior placement's full inflated
+/// `dims.x` (overhang already baked in); `north_of` retreats along `-z`
+/// per the `spec/components-editing-sites.md` §9.3 front-is-`+z`
+/// convention.
+fn resolve_place_origin(
+    member: &Member,
+    placements: &IndexMap<String, Placement>,
+    site_name: &str,
+) -> Option<(i32, i32, i32)> {
+    if let Some(value) = member.intent_state.get("at")
+        && matches!(&value.value.kind, ValueKind::Ident(s) if s == "origin")
+    {
+        return Some((0, 0, 0));
+    }
+    let gap = member
+        .intent_state
+        .get("gap")
+        .and_then(|v| match &v.value.kind {
+            ValueKind::Int(n) => i32::try_from(*n).ok(),
+            _ => None,
+        })
+        .unwrap_or(0);
+    if let Some(target) = member
+        .intent_state
+        .get("east_of")
+        .and_then(|v| label_value(&v.value))
+        && let Some(prev) = placements.get(&place_scope_key(site_name, target))
+    {
+        let next_x = prev
+            .origin
+            .0
+            .saturating_add(i32::try_from(prev.dims.x).unwrap_or(i32::MAX))
+            .saturating_add(gap);
+        return Some((next_x, prev.origin.1, prev.origin.2));
+    }
+    if let Some(target) = member
+        .intent_state
+        .get("north_of")
+        .and_then(|v| label_value(&v.value))
+        && let Some(prev) = placements.get(&place_scope_key(site_name, target))
+    {
+        let next_z = prev
+            .origin
+            .2
+            .saturating_sub(i32::try_from(prev.dims.z).unwrap_or(i32::MAX))
+            .saturating_sub(gap);
+        return Some((prev.origin.0, prev.origin.1, next_z));
+    }
+    None
+}
+
+fn label_value(v: &Value) -> Option<&str> {
+    match &v.kind {
+        ValueKind::Ident(s) | ValueKind::Str(s) => Some(s),
+        _ => None,
+    }
 }
 
 /// Bundle of per-struct context shared by every member-lowering helper.
@@ -955,20 +1188,39 @@ fn diag_struct_no_size(s: &StructIr) -> Diagnostic {
     }
 }
 
-fn diag_no_theme_bound(s: &StructIr) -> Diagnostic {
+fn diag_no_theme_bound_generic(kind: BodyKind, label: &str, header_span: &Span) -> Diagnostic {
+    let host = match kind {
+        BodyKind::Struct => "struct",
+        BodyKind::Place => "place",
+    };
     Diagnostic {
         code: DiagnosticCode::NoThemeBound,
         severity: Severity::Warning,
-        span: s.span.clone(),
+        span: header_span.clone(),
         primary: format!(
-            "struct `{}` has no theme bound; every `mat_slot=` will lower to air",
-            s.name,
+            "{host} `{label}` has no theme bound; every `mat_slot=` will lower to air",
         ),
         notes: vec![DiagnosticNote {
             span: None,
-            message: "declare exactly one `theme NAME:` in the module, or wait until M3 \
-                      site-level `place ... theme=` resolves multi-theme files"
+            message: "declare exactly one `theme NAME:` in the module, or set `theme=` on the \
+                      `place` for multi-theme files"
                 .to_owned(),
+        }],
+    }
+}
+
+fn diag_def_no_size(def: &DefIr) -> Diagnostic {
+    Diagnostic {
+        code: DiagnosticCode::StructNoSize,
+        severity: Severity::Warning,
+        span: def.span.clone(),
+        primary: format!(
+            "def `{}` has no `size=WxH`; placements that `use={}` cannot derive a voxel footprint",
+            def.name, def.name,
+        ),
+        notes: vec![DiagnosticNote {
+            span: None,
+            message: "add a `size=WxH` header to give the def a voxel footprint".to_owned(),
         }],
     }
 }
@@ -1704,5 +1956,97 @@ mod tests {
         let apex_high = block_state_at(ba, 0, 6, 2);
         assert_eq!(apex_low.properties.get("half").unwrap(), "top");
         assert_eq!(apex_high.properties.get("half").unwrap(), "top");
+    }
+
+    // ---- M3-PR3: site lowering unit ACs ----
+
+    #[test]
+    fn place_lowers_def_with_referenced_theme() {
+        // Cross-scope theme resolution proof: the def `cottage` has no
+        // theme of its own, but `place ... theme=t` makes `t`'s slot
+        // bindings flow into the place's lowering. The result lands
+        // under `site::s::home1`, not `struct::cottage`.
+        let src = concat!(
+            "theme t:\n",
+            "  slot wall -> @cobblestone\n",
+            "\n",
+            "def cottage size=3x3:\n",
+            "  walls mat_slot=wall height=2\n",
+            "\n",
+            "site s:\n",
+            "  place id=home1 use=cottage theme=t at=origin\n",
+        );
+        let out = lowered(src);
+        let ba = out
+            .structures
+            .get("site::s::home1")
+            .expect("place lowered under site::s::home1 key");
+        assert_eq!(
+            ba.dims,
+            Dims { x: 3, y: 3, z: 3 },
+            "place inherits the def's interior size, no overhang",
+        );
+        // Wall voxel at the corner should be cobblestone (theme slot
+        // resolved across scopes).
+        assert_eq!(block_id(ba, 0, 1, 0), "minecraft:cobblestone");
+
+        let placement = out
+            .placements
+            .get("site::s::home1")
+            .expect("placement record present");
+        assert_eq!(placement.site, "s");
+        assert_eq!(placement.place_id, "home1");
+        assert_eq!(placement.source_def, "cottage");
+        assert_eq!(placement.theme, "t");
+        assert_eq!(placement.origin, (0, 0, 0));
+        assert_eq!(placement.dims, ba.dims);
+    }
+
+    #[test]
+    fn east_of_offset_sums_prior_dims_and_gap() {
+        // east_of advances along +x past the prior placement's full inflated
+        // dims.x (no overhang here, so just the interior 3) plus gap=2.
+        let src = concat!(
+            "theme t:\n",
+            "  slot wall -> @cobblestone\n",
+            "\n",
+            "def cottage size=3x3:\n",
+            "  walls mat_slot=wall height=2\n",
+            "\n",
+            "site s:\n",
+            "  place id=a use=cottage theme=t at=origin\n",
+            "  place id=b use=cottage theme=t east_of=a gap=2\n",
+        );
+        let out = lowered(src);
+        let b = out
+            .placements
+            .get("site::s::b")
+            .expect("placement b present");
+        assert_eq!(b.origin, (5, 0, 0), "x = prev.x(0) + prev.dims.x(3) + gap(2)");
+        assert_eq!(b.origin.2, 0, "east_of does not move along z");
+    }
+
+    #[test]
+    fn north_of_subtracts_dims_and_gap_on_z_axis() {
+        // north_of retreats along -z by the prior placement's full inflated
+        // dims.z plus gap. Front-is-+z (`spec/components-editing-sites.md`
+        // §5.4 / §9.3) means north sits at the negative-z half-space.
+        let src = concat!(
+            "theme t:\n",
+            "  slot wall -> @cobblestone\n",
+            "\n",
+            "def cottage size=3x3:\n",
+            "  walls mat_slot=wall height=2\n",
+            "\n",
+            "site s:\n",
+            "  place id=a use=cottage theme=t at=origin\n",
+            "  place id=b use=cottage theme=t north_of=a gap=4\n",
+        );
+        let out = lowered(src);
+        let b = out
+            .placements
+            .get("site::s::b")
+            .expect("placement b present");
+        assert_eq!(b.origin, (0, 0, -7), "z = prev.z(0) - prev.dims.z(3) - gap(4)");
     }
 }

@@ -131,14 +131,23 @@ pub fn write_compound_gzip<W: std::io::Write>(
 
 /// Filename for a single [`BlockArray`] within a multi-structure IR.
 ///
-/// Strips the `struct::` prefix from `source_scope` so
-/// `"struct::cottage"` becomes `"cottage.nbt"`. Kept here (not in the CLI)
-/// so the wasm playground and any other consumer agree on naming when they
-/// land.
+/// Strips the source-scope prefix:
+/// - `"struct::cottage"` → `"cottage.nbt"`
+/// - `"site::hamlet::home1"` → `"home1.nbt"` (M3-PR3: per-`place`
+///   placements share an output directory with sibling structs; the site
+///   name is collision-avoided inside the IR key, not on disk)
+///
+/// Kept here (not in the CLI) so the wasm playground and any other consumer
+/// agree on naming when they land.
 #[must_use]
 pub fn output_filename(source_scope: &str) -> String {
     let bare = source_scope
         .strip_prefix("struct::")
+        .or_else(|| {
+            source_scope
+                .strip_prefix("site::")
+                .and_then(|rest| rest.split_once("::").map(|(_, id)| id))
+        })
         .unwrap_or(source_scope);
     format!("{bare}.nbt")
 }

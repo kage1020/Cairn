@@ -25,11 +25,15 @@
 //! `spec/materials-themes.md` §7 — a selector belongs to one theme, not
 //! the union of all themes in the file.
 //!
-//! Site `place` lines are surfaced as their own [`ScopeResolution`] entry
-//! but the resolver does not follow `use=NAME theme=...` cross-scope
-//! references in this PR — that wiring lands with the lifted IR in M3.
-//! `mat_slot=` on a `place` member is therefore neither resolved nor
-//! diagnosed by M2-PR3; M3's site lowering owns that check.
+//! Site `place` lines are followed cross-scope (M3-PR3): each `place` is
+//! resolved against the referenced `def`'s members with the place's own
+//! `theme=` argument applied, and lands under a dedicated `site::SITE::ID`
+//! scope key. Missing or duplicate references fail loud with
+//! `E_UNRESOLVED_PLACE_REF` / `E_UNRESOLVED_THEME_REF` /
+//! `E_DUPLICATE_PLACE_ID` / `E_INVALID_PLACE_ORIGIN`; defs that no site
+//! ever references surface as `W_UNUSED_DEF`. Walkway (`connect`) bodies
+//! are passed through to the lowering pass without port validation — port
+//! model and `E_UNRESOLVED_PORT` land with M3-PR4.
 //!
 //! The returned [`Resolution::diagnostics`] is in **resolver-emission
 //! order**, not sorted by source span. The `check::check` pipeline runs
@@ -43,6 +47,7 @@ use serde::Serialize;
 
 use crate::ast::{Value, ValueKind};
 use crate::check::{Diagnostic, DiagnosticCode, DiagnosticNote, Severity};
+use crate::error::Span;
 use crate::intent::{
     DefIr, IntentModule, Member, MemberBody, MemberRole, SiteIr, StructIr, ThemeIr, ValueWithSpan,
     role_of,
@@ -141,21 +146,19 @@ pub fn resolve(ir: &IntentModule) -> Resolution {
         );
         scopes.insert(def_key(d), resolution);
     }
+    let mut used_defs: HashSet<String> = HashSet::new();
     for site in &ir.sites {
-        // Site `place` lines carry their own `theme=` argument that points
-        // at a struct/def; resolving that cross-scope reference is M3
-        // work. For M2-PR3 the site scope is registered with an empty
-        // member map and *no* theme is applied, so selectors do not
-        // accidentally bind to `place` / `connect` rows whose styling
-        // belongs to the referenced struct.
-        scopes.insert(
-            site_key(site),
-            ScopeResolution {
-                bound_theme: None,
-                members: IndexMap::new(),
-            },
+        resolve_site_placements(
+            site,
+            &ir.defs,
+            &mut themes,
+            &mut applied_themes,
+            &mut scopes,
+            &mut used_defs,
+            &mut diagnostics,
         );
     }
+    check_unused_defs(&ir.defs, &used_defs, &mut diagnostics);
 
     check_slot_targets(&themes, &mut diagnostics);
     check_unmatched_selectors(&themes, &applied_themes, &mut diagnostics);
@@ -203,8 +206,297 @@ fn def_key(d: &DefIr) -> String {
     format!("def::{}", d.name)
 }
 
-fn site_key(site: &SiteIr) -> String {
-    format!("site::{}", site.name)
+/// IR-side key for a single `place` inside a `site`.
+///
+/// Embedding the site name (`site::hamlet::home1` rather than
+/// `place::home1`) lets multiple sites in one module own non-clashing place
+/// ids — the IR key shape stays unambiguous even before
+/// [`crate::block_array::output_filename`] flattens the leaf for the
+/// per-file `.nbt` name.
+#[must_use]
+pub fn place_scope_key(site_name: &str, place_id: &str) -> String {
+    format!("site::{site_name}::{place_id}")
+}
+
+fn resolve_site_placements(
+    site: &SiteIr,
+    defs: &[DefIr],
+    themes: &mut IndexMap<String, ThemeBinding>,
+    applied_themes: &mut HashSet<String>,
+    scopes: &mut IndexMap<String, ScopeResolution>,
+    used_defs: &mut HashSet<String>,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    // Local index lets each `east_of=ID` / `north_of=ID` lookup name a
+    // *prior* place in source order — re-walking `site.placements` per
+    // lookup would be quadratic and would also let a later place forward-
+    // reference an earlier one's mistakes.
+    let mut seen_place_ids: IndexMap<String, Span> = IndexMap::new();
+
+    // Pre-built name lists so `nearest_match` candidates are stable per site
+    // rather than re-allocated per place.
+    let def_names: Vec<&str> = defs.iter().map(|d| d.name.as_str()).collect();
+    let theme_names: Vec<String> = themes.keys().cloned().collect();
+
+    for member in &site.placements {
+        if !matches!(member.role, MemberRole::Place) {
+            // `connect` lines do not register a scope and are left for the
+            // lowering pass to surface as `W_DEFERRED_MEMBER`. Other site-
+            // local members (logic, assert) are also out of scope here.
+            continue;
+        }
+
+        // Unnamed place lines (no `id=`) cannot be referenced by `east_of` /
+        // `north_of` and have no scope key to register, so they are skipped
+        // silently here; the upstream syntactic check will surface a
+        // distinct error if id absence becomes a structural failure.
+        let Some(place_id) = member.id.as_deref() else {
+            continue;
+        };
+
+        if let Some(first) = seen_place_ids.get(place_id) {
+            diagnostics.push(duplicate_place_id_diag(
+                &site.name,
+                place_id,
+                first,
+                &member.span,
+            ));
+            continue;
+        }
+        seen_place_ids.insert(place_id.to_owned(), member.span.clone());
+
+        // Validate origin selectors before any cross-scope lookup so the
+        // user sees the structural problem first.
+        validate_place_origin(member, &site.name, place_id, &seen_place_ids, diagnostics);
+
+        let use_target = member
+            .intent_state
+            .get("use")
+            .and_then(|v| label_value(&v.value));
+        let theme_target = member
+            .intent_state
+            .get("theme")
+            .and_then(|v| label_value(&v.value));
+
+        let Some(use_name) = use_target else {
+            continue;
+        };
+        let def = defs.iter().find(|d| d.name == use_name);
+        if def.is_none() {
+            diagnostics.push(unresolved_place_ref_diag(
+                &format!("`use={use_name}` references an unknown def"),
+                member.span.clone(),
+                use_name,
+                def_names.iter().copied(),
+            ));
+            continue;
+        }
+        let def = def.expect("checked is_none above");
+        used_defs.insert(def.name.clone());
+
+        let Some(theme_name) = theme_target else {
+            continue;
+        };
+        if !themes.contains_key(theme_name) {
+            diagnostics.push(unresolved_theme_ref_diag(
+                theme_name,
+                member.span.clone(),
+                theme_names.iter().map(String::as_str),
+            ));
+            continue;
+        }
+
+        // Cross-scope resolve: run the def's members under the picked theme,
+        // even when the file has multiple themes (the per-place `theme=`
+        // wins over the single-theme heuristic).
+        let resolution = resolve_struct_or_def(
+            &def.members,
+            Some(theme_name),
+            themes,
+            applied_themes,
+            diagnostics,
+        );
+        scopes.insert(place_scope_key(&site.name, place_id), resolution);
+    }
+}
+
+fn validate_place_origin(
+    member: &Member,
+    site_name: &str,
+    place_id: &str,
+    seen_place_ids: &IndexMap<String, Span>,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    let at = member.intent_state.get("at");
+    let east_of = member.intent_state.get("east_of");
+    let north_of = member.intent_state.get("north_of");
+    let selector_count =
+        usize::from(at.is_some()) + usize::from(east_of.is_some()) + usize::from(north_of.is_some());
+
+    if selector_count == 0 {
+        diagnostics.push(invalid_place_origin_diag(
+            place_id,
+            member.span.clone(),
+            "`place` is missing an origin selector; add `at=origin`, `east_of=ID`, or `north_of=ID`",
+        ));
+        return;
+    }
+    if selector_count > 1 {
+        diagnostics.push(invalid_place_origin_diag(
+            place_id,
+            member.span.clone(),
+            "`place` carries more than one origin selector; keep exactly one of `at`, `east_of`, `north_of`",
+        ));
+        return;
+    }
+    if let Some(value) = at
+        && !matches!(&value.value.kind, ValueKind::Ident(s) if s == "origin")
+    {
+        diagnostics.push(invalid_place_origin_diag(
+            place_id,
+            value.span.clone(),
+            "`at=` only accepts `origin`; use `east_of=ID` or `north_of=ID` for relative placement",
+        ));
+        return;
+    }
+
+    // Cross-place reference validation: the target must appear before this
+    // place in source order so cycles cannot form.
+    for (key, value) in [("east_of", east_of), ("north_of", north_of)] {
+        let Some(value) = value else {
+            continue;
+        };
+        let Some(target) = label_value(&value.value) else {
+            diagnostics.push(invalid_place_origin_diag(
+                place_id,
+                value.span.clone(),
+                &format!("`{key}=` expects a place id label"),
+            ));
+            continue;
+        };
+        if !seen_place_ids.contains_key(target) || target == place_id {
+            // Suggestion pool is *prior* place ids only — pointing at a
+            // later place would let cycles slip in. The same-site exclusion
+            // keeps `east_of=self` from showing up as a viable suggestion.
+            let prior: Vec<&str> = seen_place_ids
+                .keys()
+                .filter(|id| id.as_str() != place_id)
+                .map(String::as_str)
+                .collect();
+            diagnostics.push(unresolved_place_ref_diag(
+                &format!(
+                    "`{key}={target}` in site `{site_name}` does not name a prior place id",
+                ),
+                value.span.clone(),
+                target,
+                prior.iter().copied(),
+            ));
+        }
+    }
+}
+
+fn label_value(v: &Value) -> Option<&str> {
+    match &v.kind {
+        ValueKind::Ident(s) | ValueKind::Str(s) => Some(s),
+        _ => None,
+    }
+}
+
+fn check_unused_defs(
+    defs: &[DefIr],
+    used: &HashSet<String>,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    for def in defs {
+        if used.contains(&def.name) {
+            continue;
+        }
+        diagnostics.push(Diagnostic {
+            code: DiagnosticCode::UnusedDef,
+            severity: Severity::Warning,
+            span: def.span.clone(),
+            primary: format!(
+                "def `{name}` is never referenced by a `place use={name}`",
+                name = def.name,
+            ),
+            notes: vec![DiagnosticNote {
+                span: None,
+                message: "remove the def, or place an instance via `site ... place use=...`"
+                    .to_owned(),
+            }],
+        });
+    }
+}
+
+fn unresolved_place_ref_diag<'a>(
+    primary: &str,
+    span: Span,
+    typo: &str,
+    candidates: impl IntoIterator<Item = &'a str>,
+) -> Diagnostic {
+    let mut notes = Vec::new();
+    if let Some(suggested) = nearest_match(typo, candidates) {
+        notes.push(DiagnosticNote {
+            span: None,
+            message: format!("did you mean `{suggested}`?"),
+        });
+    }
+    Diagnostic {
+        code: DiagnosticCode::UnresolvedPlaceRef,
+        severity: Severity::Error,
+        span,
+        primary: primary.to_owned(),
+        notes,
+    }
+}
+
+fn unresolved_theme_ref_diag<'a>(
+    theme: &str,
+    span: Span,
+    candidates: impl IntoIterator<Item = &'a str>,
+) -> Diagnostic {
+    let mut notes = Vec::new();
+    if let Some(suggested) = nearest_match(theme, candidates) {
+        notes.push(DiagnosticNote {
+            span: None,
+            message: format!("did you mean `{suggested}`?"),
+        });
+    }
+    Diagnostic {
+        code: DiagnosticCode::UnresolvedThemeRef,
+        severity: Severity::Error,
+        span,
+        primary: format!("`theme={theme}` is not a declared theme"),
+        notes,
+    }
+}
+
+fn duplicate_place_id_diag(
+    site_name: &str,
+    place_id: &str,
+    first: &Span,
+    second: &Span,
+) -> Diagnostic {
+    Diagnostic {
+        code: DiagnosticCode::DuplicatePlaceId,
+        severity: Severity::Error,
+        span: second.clone(),
+        primary: format!("duplicate `id={place_id}` in site `{site_name}`"),
+        notes: vec![DiagnosticNote {
+            span: Some(first.clone()),
+            message: "first declared here".to_owned(),
+        }],
+    }
+}
+
+fn invalid_place_origin_diag(place_id: &str, span: Span, message: &str) -> Diagnostic {
+    Diagnostic {
+        code: DiagnosticCode::InvalidPlaceOrigin,
+        severity: Severity::Error,
+        span,
+        primary: format!("invalid origin selector on `place id={place_id}`: {message}"),
+        notes: vec![],
+    }
 }
 
 fn resolve_struct_or_def(
