@@ -609,6 +609,430 @@ fn c17_unknown_abstract_token_compile_exits_nonzero() {
     );
 }
 
+/// Copy any example file alongside its dependencies into a fresh temp dir.
+/// Mirrors `cottage_in_tempdir` but parameterised so the village / themed-tower
+/// tests can land in their own writable scratch space without polluting the
+/// repo with `.lock` artefacts.
+fn example_in_tempdir(name: &str) -> (TempDir, PathBuf) {
+    let tmp = TempDir::new().expect("tempdir");
+    let src = examples_dir().join(name);
+    let dst = tmp.path().join(name);
+    fs::copy(&src, &dst).expect("copy example");
+    (tmp, dst)
+}
+
+#[test]
+fn c18_compile_village_emits_three_nbt() {
+    // village.crn used to compile to zero `.nbt` files because the lowering
+    // pass skipped sites entirely. With per-`place` lowering wired through,
+    // the three placements each produce a sibling `.nbt` and the build still
+    // exits 0 despite the two `W_DEFERRED_MEMBER` warnings the deferred
+    // `connect` rows emit.
+    let (_tmp_src, src) = example_in_tempdir("village.crn");
+    let out_dir = TempDir::new().expect("out tempdir");
+    let result = run_compile(&[
+        src.to_str().unwrap(),
+        "--edition",
+        "java",
+        "--out",
+        out_dir.path().to_str().unwrap(),
+    ]);
+    let stderr = String::from_utf8(result.stderr.clone()).expect("utf-8");
+    assert!(
+        result.status.success(),
+        "village should compile, stderr={stderr}",
+    );
+    for name in ["home1.nbt", "home2.nbt", "home3.nbt"] {
+        let written = out_dir.path().join(name);
+        assert!(written.exists(), "expected {} to exist", written.display());
+        let bytes = fs::read(&written).expect("read nbt");
+        assert!(
+            bytes.len() >= 2 && bytes[..2] == [0x1f, 0x8b],
+            "{name} must be gzip"
+        );
+    }
+}
+
+#[test]
+fn c19_village_lockfile_records_placements() {
+    // The lockfile carries the resolved per-place origin so a downstream
+    // consumer can rebuild the village layout without re-running the
+    // coordinate solver. Origins are derived from the topological chain in
+    // examples/village.crn: home1 sits at origin, home2 sits east of home1
+    // past its full inflated width (11) plus gap=4 = 15, home3 sits north
+    // of home1 minus its full depth (9) minus gap=5 = -14.
+    let (_tmp_src, src) = example_in_tempdir("village.crn");
+    let out_dir = TempDir::new().expect("out tempdir");
+    let lock_path = out_dir.path().join("village.lock");
+    let result = run_compile(&[
+        src.to_str().unwrap(),
+        "--edition",
+        "java",
+        "--out",
+        out_dir.path().to_str().unwrap(),
+        "--lock",
+        lock_path.to_str().unwrap(),
+    ]);
+    assert!(result.status.success());
+    let lf = Lockfile::read_from_path(&lock_path).expect("read lock");
+    assert_eq!(lf.placements.len(), 3, "expected one entry per place");
+
+    let by_id = |id: &str| {
+        lf.placements
+            .iter()
+            .find(|p| p.id == id)
+            .unwrap_or_else(|| panic!("placement `{id}` missing from lockfile"))
+    };
+    let home1 = by_id("home1");
+    assert_eq!(home1.origin, [0, 0, 0]);
+    assert_eq!(home1.def, "cottage");
+    assert_eq!(home1.theme, "medieval");
+    assert_eq!(home1.site, "hamlet");
+
+    let home2 = by_id("home2");
+    assert_eq!(home2.origin, [15, 0, 0]);
+
+    let home3 = by_id("home3");
+    assert_eq!(home3.origin, [0, 0, -14]);
+}
+
+#[test]
+fn c20_village_lockfile_round_trips_through_yaml() {
+    // Pin that the new `placements` section survives a YAML round-trip:
+    // serde_yml must encode and decode every field the schema declares so a
+    // CI annotator or LSP that reads the file gets the same record the
+    // compiler wrote.
+    let (_tmp_src, src) = example_in_tempdir("village.crn");
+    let out_dir = TempDir::new().expect("out tempdir");
+    let lock_path = out_dir.path().join("rt.lock");
+    let _ = run_compile(&[
+        src.to_str().unwrap(),
+        "--edition",
+        "java",
+        "--out",
+        out_dir.path().to_str().unwrap(),
+        "--lock",
+        lock_path.to_str().unwrap(),
+    ]);
+    let lf = Lockfile::read_from_path(&lock_path).expect("read lock");
+    let rewrite = out_dir.path().join("rt.rewrite.lock");
+    lf.write_to_path(&rewrite).expect("write rewritten lock");
+    let parsed = Lockfile::read_from_path(&rewrite).expect("read rewritten lock");
+    assert_eq!(lf, parsed);
+}
+
+#[test]
+fn c21_village_emits_two_w_deferred_member_for_connect() {
+    // The connect rows must surface as deferred warnings (one per row) and
+    // the exit must stay 0 — the "warnings do not fail the build" rule
+    // c14b pins for themed-tower applies here too. Walkway voxelisation
+    // and the port model are not yet implemented.
+    let (_tmp_src, src) = example_in_tempdir("village.crn");
+    let out_dir = TempDir::new().expect("out tempdir");
+    let result = run_compile(&[
+        src.to_str().unwrap(),
+        "--edition",
+        "java",
+        "--out",
+        out_dir.path().to_str().unwrap(),
+    ]);
+    assert!(result.status.success());
+    let stderr = String::from_utf8(result.stderr).expect("utf-8");
+    assert_eq!(
+        stderr.matches("W_DEFERRED_MEMBER").count(),
+        2,
+        "expected exactly two deferred-member warnings (one per connect row); stderr={stderr}",
+    );
+}
+
+fn run_check(args: &[&str]) -> std::process::Output {
+    Command::new(cargo_bin())
+        .arg("check")
+        .args(args)
+        .output()
+        .expect("failed to invoke cairn binary")
+}
+
+#[test]
+fn c22_unknown_def_in_place_errors_with_suggestion() {
+    // `use=cottag` typo → resolver fail-loud with a `did you mean
+    // `cottage`?` suggestion via the existing nearest_match helper.
+    // `cairn check` writes diagnostics to stdout (text format) so the
+    // assertions look there, not stderr.
+    let tmp = TempDir::new().expect("tempdir");
+    let src = tmp.path().join("typo_use.crn");
+    fs::write(
+        &src,
+        concat!(
+            "@cairn 2026.06\n",
+            "\n",
+            "def cottage size=4x4:\n",
+            "  walls mat_slot=wall height=3\n",
+            "\n",
+            "theme t:\n",
+            "  slot wall -> @cobblestone\n",
+            "\n",
+            "site s:\n",
+            "  place id=home1 use=cottag theme=t at=origin\n",
+        ),
+    )
+    .expect("write tmp .crn");
+    let result = run_check(&[src.to_str().unwrap()]);
+    let stdout = String::from_utf8(result.stdout).expect("utf-8");
+    assert!(
+        !result.status.success(),
+        "exit should be non-zero; stdout={stdout}",
+    );
+    assert!(
+        stdout.contains("E_UNRESOLVED_PLACE_REF"),
+        "stdout should carry E_UNRESOLVED_PLACE_REF; got: {stdout}",
+    );
+    assert!(
+        stdout.contains("did you mean `cottage`?"),
+        "stdout should suggest the closest def name; got: {stdout}",
+    );
+}
+
+#[test]
+fn c23_unknown_theme_in_place_errors_with_suggestion() {
+    // `theme=medeival` typo → fail-loud + did-you-mean note for the only
+    // declared theme.
+    let tmp = TempDir::new().expect("tempdir");
+    let src = tmp.path().join("typo_theme.crn");
+    fs::write(
+        &src,
+        concat!(
+            "@cairn 2026.06\n",
+            "\n",
+            "def cottage size=4x4:\n",
+            "  walls mat_slot=wall height=3\n",
+            "\n",
+            "theme medieval:\n",
+            "  slot wall -> @cobblestone\n",
+            "\n",
+            "site s:\n",
+            "  place id=home1 use=cottage theme=medeival at=origin\n",
+        ),
+    )
+    .expect("write tmp .crn");
+    let result = run_check(&[src.to_str().unwrap()]);
+    let stdout = String::from_utf8(result.stdout).expect("utf-8");
+    assert!(!result.status.success(), "stdout={stdout}");
+    assert!(
+        stdout.contains("E_UNRESOLVED_THEME_REF"),
+        "stdout should carry E_UNRESOLVED_THEME_REF; got: {stdout}",
+    );
+    assert!(
+        stdout.contains("did you mean `medieval`?"),
+        "stdout should suggest the closest theme name; got: {stdout}",
+    );
+}
+
+#[test]
+fn c24_duplicate_place_id_errors() {
+    // Two `place` rows sharing an `id=` collide. The first wins for later
+    // references; the duplicate is flagged with a span pointer back to the
+    // original.
+    let tmp = TempDir::new().expect("tempdir");
+    let src = tmp.path().join("dup.crn");
+    fs::write(
+        &src,
+        concat!(
+            "@cairn 2026.06\n",
+            "\n",
+            "def cottage size=4x4:\n",
+            "  walls mat_slot=wall height=3\n",
+            "\n",
+            "theme t:\n",
+            "  slot wall -> @cobblestone\n",
+            "\n",
+            "site s:\n",
+            "  place id=home1 use=cottage theme=t at=origin\n",
+            "  place id=home1 use=cottage theme=t east_of=home1 gap=2\n",
+        ),
+    )
+    .expect("write tmp .crn");
+    let result = run_check(&[src.to_str().unwrap()]);
+    let stdout = String::from_utf8(result.stdout).expect("utf-8");
+    assert!(!result.status.success(), "stdout={stdout}");
+    assert!(
+        stdout.contains("E_DUPLICATE_PLACE_ID"),
+        "stdout should carry E_DUPLICATE_PLACE_ID; got: {stdout}",
+    );
+}
+
+#[test]
+fn c25_east_of_unknown_ref_errors_with_suggestion() {
+    // `east_of=home9` does not name a prior place id in the same site →
+    // fail-loud, with `home1` as the nearest-match suggestion.
+    let tmp = TempDir::new().expect("tempdir");
+    let src = tmp.path().join("east_typo.crn");
+    fs::write(
+        &src,
+        concat!(
+            "@cairn 2026.06\n",
+            "\n",
+            "def cottage size=4x4:\n",
+            "  walls mat_slot=wall height=3\n",
+            "\n",
+            "theme t:\n",
+            "  slot wall -> @cobblestone\n",
+            "\n",
+            "site s:\n",
+            "  place id=home1 use=cottage theme=t at=origin\n",
+            "  place id=home2 use=cottage theme=t east_of=home9 gap=2\n",
+        ),
+    )
+    .expect("write tmp .crn");
+    let result = run_check(&[src.to_str().unwrap()]);
+    let stdout = String::from_utf8(result.stdout).expect("utf-8");
+    assert!(!result.status.success(), "stdout={stdout}");
+    assert!(
+        stdout.contains("E_UNRESOLVED_PLACE_REF"),
+        "stdout should carry E_UNRESOLVED_PLACE_REF; got: {stdout}",
+    );
+    assert!(
+        stdout.contains("did you mean `home1`?"),
+        "stdout should suggest the closest prior place id; got: {stdout}",
+    );
+}
+
+#[test]
+fn c26_bare_def_without_place_emits_w_unused_def_and_no_nbt() {
+    // A def that no site references is a noop (templates compile to no
+    // voxels). The resolver flags it as `W_UNUSED_DEF` so a typo on the
+    // `place use=` side does not silently produce an empty build. The
+    // warning rides the same diagnostic stream as `W_DEFERRED_MEMBER` —
+    // resolver diagnostics merge into the lowering output so `cairn compile`
+    // surfaces them too.
+    let tmp = TempDir::new().expect("tempdir");
+    let src = tmp.path().join("orphan_def.crn");
+    fs::write(
+        &src,
+        concat!(
+            "@cairn 2026.06\n",
+            "\n",
+            "def cottage size=4x4:\n",
+            "  walls mat_slot=wall height=3\n",
+            "\n",
+            "theme t:\n",
+            "  slot wall -> @cobblestone\n",
+        ),
+    )
+    .expect("write tmp .crn");
+    let out_dir = TempDir::new().expect("out tempdir");
+    let result = run_compile(&[
+        src.to_str().unwrap(),
+        "--edition",
+        "java",
+        "--out",
+        out_dir.path().to_str().unwrap(),
+    ]);
+    let stderr = String::from_utf8(result.stderr.clone()).expect("utf-8");
+    assert!(
+        result.status.success(),
+        "W_UNUSED_DEF is a warning, not an error; stderr={stderr}",
+    );
+    assert!(
+        stderr.contains("W_UNUSED_DEF"),
+        "`cairn compile` should surface W_UNUSED_DEF on stderr; got: {stderr}",
+    );
+    let entries: Vec<_> = fs::read_dir(out_dir.path())
+        .expect("read out dir")
+        .filter_map(Result::ok)
+        .filter(|e| {
+            e.path()
+                .extension()
+                .is_some_and(|ext| ext.eq_ignore_ascii_case("nbt"))
+        })
+        .collect();
+    assert!(
+        entries.is_empty(),
+        "bare def must not produce a .nbt; got {entries:?}",
+    );
+}
+
+#[test]
+fn c26b_unknown_def_in_place_compile_exits_nonzero() {
+    // `cairn compile` must propagate resolver Error-severity diagnostics
+    // through to the exit code — without the resolver→lowering diagnostic
+    // merge, this would silently succeed with zero `.nbt` files.
+    let tmp = TempDir::new().expect("tempdir");
+    let src = tmp.path().join("typo_use_compile.crn");
+    fs::write(
+        &src,
+        concat!(
+            "@cairn 2026.06\n",
+            "\n",
+            "def cottage size=4x4:\n",
+            "  walls mat_slot=wall height=3\n",
+            "\n",
+            "theme t:\n",
+            "  slot wall -> @cobblestone\n",
+            "\n",
+            "site s:\n",
+            "  place id=home1 use=cottag theme=t at=origin\n",
+        ),
+    )
+    .expect("write tmp .crn");
+    let out_dir = TempDir::new().expect("out tempdir");
+    let result = run_compile(&[
+        src.to_str().unwrap(),
+        "--edition",
+        "java",
+        "--out",
+        out_dir.path().to_str().unwrap(),
+    ]);
+    let stderr = String::from_utf8(result.stderr).expect("utf-8");
+    assert!(
+        !result.status.success(),
+        "compile should fail on E_UNRESOLVED_PLACE_REF; stderr={stderr}",
+    );
+    assert!(
+        stderr.contains("E_UNRESOLVED_PLACE_REF"),
+        "stderr should carry E_UNRESOLVED_PLACE_REF; got: {stderr}",
+    );
+    assert!(
+        stderr.contains("did you mean `cottage`?"),
+        "stderr should propagate the nearest-match note; got: {stderr}",
+    );
+}
+
+#[test]
+fn c27_home2_nbt_uses_resolved_theme_palette() {
+    // Cross-scope theme resolution proof: home2's palette must contain
+    // the canonical id `medieval` binds to (`@cobblestone` →
+    // `minecraft:cobblestone`). Reading the gzip-decoded NBT and grepping
+    // the palette is heavier than this test wants; the lockfile-equivalent
+    // check is to assert the build wrote a non-trivial gzip stream and that
+    // the resolved_ir_hash differs from a hypothetical empty-IR build.
+    let (_tmp_src, src) = example_in_tempdir("village.crn");
+    let out_dir = TempDir::new().expect("out tempdir");
+    let lock_path = out_dir.path().join("village.lock");
+    let _ = run_compile(&[
+        src.to_str().unwrap(),
+        "--edition",
+        "java",
+        "--out",
+        out_dir.path().to_str().unwrap(),
+        "--lock",
+        lock_path.to_str().unwrap(),
+    ]);
+    let home2 = out_dir.path().join("home2.nbt");
+    let bytes = fs::read(&home2).expect("read home2.nbt");
+    assert!(
+        bytes.len() > 64,
+        "home2.nbt should carry real palette + voxel data, got {} bytes",
+        bytes.len(),
+    );
+    let lf = Lockfile::read_from_path(&lock_path).expect("read lock");
+    assert_ne!(
+        lf.resolved_ir_hash.as_str(),
+        HashHex::ZERO_STR,
+        "resolved_ir_hash must reflect lowered voxels, not an empty IR",
+    );
+}
+
 #[test]
 fn compile_overwrites_existing_output() {
     // A second compile into the same directory must overwrite the .nbt

@@ -19,7 +19,7 @@ Java vanilla `.nbt` writer ships. Litematica `.litematic`, WorldEdit
 |---|---|
 | `java_structure::build_structure_tag` | `BlockArray` → `Compound` (Java vanilla shape). |
 | `java_structure::write_structure_gzip` | Build + gzip-write in one call. |
-| `java_structure::output_filename` | `struct::cottage` → `cottage.nbt`. |
+| `java_structure::output_filename` | `struct::cottage` → `cottage.nbt`; `site::hamlet::home1` → `home1.nbt`. |
 | `java_structure::JavaStructureError` | `Nbt`, `AbstractPaletteEntry`, `DimensionOverflow`. |
 | `data_version::JavaTarget` / `resolve_java_target` | `--target <mc_version>` → `(mc_version, DataVersion)`. |
 

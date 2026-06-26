@@ -288,6 +288,16 @@ fn f9_output_filename_strips_struct_prefix() {
 }
 
 #[test]
+fn output_filename_strips_site_and_name_prefixes_to_place_id() {
+    // Site keys take the form `site::SITE::PLACE_ID`; the on-disk name
+    // uses only the `place id=` so siblings share a flat output dir with
+    // structs. Multi-site flat-namespace collisions are deliberately out
+    // of scope for the initial site lowering.
+    assert_eq!(output_filename("site::hamlet::home1"), "home1.nbt");
+    assert_eq!(output_filename("site::village::cottage_2"), "cottage_2.nbt");
+}
+
+#[test]
 fn output_filename_preserves_inner_colons_and_unicode() {
     // Scope keys that the IR could legitimately produce (a nested-namespace
     // notation in M3) should not be silently rewritten. We strip only the

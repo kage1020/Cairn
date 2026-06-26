@@ -17,6 +17,67 @@ placeholder cannot leak out. The `2026.07.0` release PR will flip publish to `tr
 
 ### Added
 
+- `cairn-lang-core::block_array::lower` — site lowering closes the
+  `village.crn` round-trip. `lower_to_block_array` now iterates
+  `intent.sites` after the existing struct loop: each `place` resolves its
+  `use=DEF` against the module's defs, applies the place-local `theme=` to
+  the def's body (cross-scope theme resolution), and emits a per-place
+  `BlockArray` under the new `site::SITE::PLACE_ID` key so the existing
+  `prepare_artifacts` → `write_compound_gzip` path writes one `.nbt` per
+  placement (`home1.nbt`, `home2.nbt`, `home3.nbt`). The topological
+  coordinate solver turns `at=origin` / `east_of=ID gap=N` /
+  `north_of=ID gap=N` into absolute `(x, y, z)` origins under the
+  `front`-is-`+z` convention (`spec/components-editing-sites.md` §9.3.1):
+  `east` advances along `+x` past the prior placement's full inflated
+  `dims.x` plus gap, `north` retreats along `-z` by `dims.z` plus gap. The
+  resolved per-place origin lands in `BlockArrayIr.placements: IndexMap<…,
+  Placement>` and in the lockfile under a new top-level `placements`
+  section so a downstream consumer can rebuild the village layout without
+  re-running the solver. `connect` rows still parse but emit a single
+  `W_DEFERRED_MEMBER` apiece — walkway voxelisation and the port model
+  (`E_UNRESOLVED_PORT`) are not yet implemented (2027.01.0).
+- `cairn lower` and `cairn compile` now surface resolver-emitted
+  diagnostics (`E_UNRESOLVED_PLACE_REF`, `E_UNRESOLVED_THEME_REF`,
+  `E_DUPLICATE_PLACE_ID`, `E_INVALID_PLACE_ORIGIN`, `W_UNUSED_DEF`,
+  `E_UNRESOLVED_SLOT`, ...) on stderr alongside the lowering deferrals.
+  Resolver `Error`-severity findings now fail the compile exit code, so a
+  `place use=cottag` typo no longer produces zero `.nbt` files at exit 0.
+- Six new diagnostic codes covering the site surface:
+  `E_UNRESOLVED_PLACE_REF` (Error) on a `place use=X` whose `X` is not a
+  declared def, on `east_of=Y` / `north_of=Y` whose `Y` is not a prior
+  place id in the same site, with a nearest-match note via the existing
+  `suggest::nearest_match`; `E_UNRESOLVED_THEME_REF` (Error) on
+  `place theme=X` whose `X` is not declared, also with a nearest-match
+  note; `E_DUPLICATE_PLACE_ID` (Error) on two `place` rows sharing an
+  `id=` inside one site, with a span pointer back to the first
+  declaration; `E_INVALID_PLACE_ORIGIN` (Error) on a `place` line that
+  carries no origin selector, more than one of `at` / `east_of` /
+  `north_of`, or an `at=` value other than `origin`; `W_UNUSED_DEF`
+  (Warning) on a `def` that no `place use=NAME` ever references, so a
+  typo on the `use=` side does not silently produce an empty build;
+  `W_DEF_NO_SIZE` (Warning) on a `def` referenced by a `place` without
+  a `size=WxH` header (the placement is skipped because the voxel
+  footprint is underivable). Origin checks `return false` so a placement
+  with a structural mistake is skipped entirely rather than landing a
+  `.nbt` at exit non-zero. Spec §9.3.2 / §9.3.3 enumerate the rules these
+  codes guard.
+- `cairn-lang-core::lock::LockPlacement` and
+  `Lockfile.placements: Vec<LockPlacement>` — per-`place` site coordinates
+  resolved from the topological constraint chain land in the lockfile
+  alongside `member_version_sensitivity`. Each entry pins `site`, `id`,
+  `def`, `theme`, `origin: [i32; 3]` (negative `z` for `north_of`
+  placements), and `dims: [u32; 3]`. The field is
+  `skip_serializing_if = "Vec::is_empty"` so cottage / themed-tower locks
+  remain byte-identical to pre-PR3 builds, and the existing
+  `hash_resolved_ir` automatically picks up the new IR field via
+  serde-json's structural walk. Spec §9.3.4 documents this as the
+  re-resolution-free source of truth for site layouts (2027.01.0).
+- `cairn-lang-formats::java_structure::output_filename` learns the
+  `site::HAMLET::home1` → `home1.nbt` mapping alongside its existing
+  `struct::cottage` → `cottage.nbt` rule. Per-place placements share an
+  output directory with sibling structs; multi-site flat-namespace
+  collisions are out of scope for M3 and the spec carves them out
+  explicitly.
 - `cairn-lang-formats::registry::materials` — abstract material catalog
   component of a Java registry pack. A flat list of
   `(token, block)` rows mapping every `@KIND.FAMILY.SPECIES` abstract

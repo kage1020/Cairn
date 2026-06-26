@@ -90,6 +90,37 @@ pub enum DiagnosticCode {
     /// A `struct` has no `size=WxH` header, so block-array lowering cannot
     /// derive a voxel extent and skips it.
     StructNoSize,
+    /// A `def` (referenced by a `place use=NAME`) has no `size=WxH` header.
+    /// Without an interior footprint the place cannot lower into a voxel
+    /// volume, so the placement is skipped. Distinct from `StructNoSize`
+    /// so a CI / LSP filter that matches on `code` can tell whether the
+    /// missing size sits on a struct or on a template the user meant to
+    /// instantiate.
+    DefNoSize,
+    /// A `place use=NAME` references an unknown def, an `east_of=ID` /
+    /// `north_of=ID` references an unknown prior place in the same site, or
+    /// a `connect a.port to b.port` refers to a missing place id. Carries a
+    /// nearest-match suggestion when one fits within the spell cap. The
+    /// referenced symbol cannot be substituted silently, so the build stops.
+    UnresolvedPlaceRef,
+    /// A `place theme=NAME` references a theme the module does not declare.
+    /// Fail-loud because the per-place colour scheme would otherwise vanish
+    /// silently; carries a nearest-match suggestion when one fits.
+    UnresolvedThemeRef,
+    /// Two `place` rows in the same site share an `id=`. The first definition
+    /// wins for downstream references; the duplicate is dropped and the
+    /// error names both spans.
+    DuplicatePlaceId,
+    /// A `place` line carries either an `at=` value other than `origin` or
+    /// combines `at=` with `east_of=` / `north_of=`. Origin selectors are
+    /// mutually exclusive per spec §9.3 so the placement coordinate is
+    /// unambiguous.
+    InvalidPlaceOrigin,
+    /// A `def NAME` is never referenced by any `place use=NAME`. The def
+    /// itself lowers to no voxels (defs are templates), so this is advisory
+    /// rather than fatal — but worth surfacing because an unused def is
+    /// usually a typo on the `place use=` side.
+    UnusedDef,
 }
 
 impl DiagnosticCode {
@@ -114,6 +145,12 @@ impl DiagnosticCode {
             Self::AbstractTokenDeferred => "W_ABSTRACT_TOKEN_DEFERRED",
             Self::UnknownAbstractToken => "E_UNKNOWN_ABSTRACT_TOKEN",
             Self::StructNoSize => "W_STRUCT_NO_SIZE",
+            Self::DefNoSize => "W_DEF_NO_SIZE",
+            Self::UnresolvedPlaceRef => "E_UNRESOLVED_PLACE_REF",
+            Self::UnresolvedThemeRef => "E_UNRESOLVED_THEME_REF",
+            Self::DuplicatePlaceId => "E_DUPLICATE_PLACE_ID",
+            Self::InvalidPlaceOrigin => "E_INVALID_PLACE_ORIGIN",
+            Self::UnusedDef => "W_UNUSED_DEF",
         }
     }
 
@@ -140,13 +177,19 @@ impl DiagnosticCode {
             | Self::TypeMismatchLabel
             | Self::TypeMismatchSize
             | Self::UnresolvedSlot
-            | Self::UnknownAbstractToken => Severity::Error,
+            | Self::UnknownAbstractToken
+            | Self::UnresolvedPlaceRef
+            | Self::UnresolvedThemeRef
+            | Self::DuplicatePlaceId
+            | Self::InvalidPlaceOrigin => Severity::Error,
             Self::UnknownSlotTarget
             | Self::ThemeSelectorUnmatched
             | Self::DeferredMember
             | Self::NoThemeBound
             | Self::AbstractTokenDeferred
-            | Self::StructNoSize => Severity::Warning,
+            | Self::StructNoSize
+            | Self::DefNoSize
+            | Self::UnusedDef => Severity::Warning,
         }
     }
 }
@@ -387,6 +430,10 @@ mod tests {
             DiagnosticCode::UnknownSlotTarget,
             DiagnosticCode::ThemeSelectorUnmatched,
             DiagnosticCode::UnknownAbstractToken,
+            DiagnosticCode::UnresolvedPlaceRef,
+            DiagnosticCode::UnresolvedThemeRef,
+            DiagnosticCode::DuplicatePlaceId,
+            DiagnosticCode::InvalidPlaceOrigin,
         ] {
             let s = code.as_str();
             assert!(
@@ -411,6 +458,8 @@ mod tests {
                 "W_ABSTRACT_TOKEN_DEFERRED",
             ),
             (DiagnosticCode::StructNoSize, "W_STRUCT_NO_SIZE"),
+            (DiagnosticCode::DefNoSize, "W_DEF_NO_SIZE"),
+            (DiagnosticCode::UnusedDef, "W_UNUSED_DEF"),
         ] {
             assert_eq!(code.as_str(), expected, "{code:?}");
         }
@@ -430,6 +479,10 @@ mod tests {
             DiagnosticCode::TypeMismatchSize,
             DiagnosticCode::UnresolvedSlot,
             DiagnosticCode::UnknownAbstractToken,
+            DiagnosticCode::UnresolvedPlaceRef,
+            DiagnosticCode::UnresolvedThemeRef,
+            DiagnosticCode::DuplicatePlaceId,
+            DiagnosticCode::InvalidPlaceOrigin,
         ] {
             assert_eq!(code.severity(), Severity::Error, "{code:?}");
         }
@@ -440,6 +493,8 @@ mod tests {
             DiagnosticCode::NoThemeBound,
             DiagnosticCode::AbstractTokenDeferred,
             DiagnosticCode::StructNoSize,
+            DiagnosticCode::DefNoSize,
+            DiagnosticCode::UnusedDef,
         ] {
             assert_eq!(code.severity(), Severity::Warning, "{code:?}");
         }

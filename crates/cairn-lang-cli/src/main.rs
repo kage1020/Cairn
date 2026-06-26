@@ -7,7 +7,8 @@ use cairn_lang_core::CAIRN_VERSION;
 use cairn_lang_core::block_array::{BlockArray, BlockArrayIr, lower_to_block_array};
 use cairn_lang_core::check::LineStarts;
 use cairn_lang_core::lock::{
-    HashHex, LockEdition, LockInputs, LockTarget, Lockfile, hash_resolved_ir, hash_source,
+    HashHex, LockEdition, LockInputs, LockPlacement, LockTarget, Lockfile, hash_resolved_ir,
+    hash_source,
 };
 use cairn_lang_core::resolve::{VersionAxes, compute_axes, resolve};
 use cairn_lang_core::{Severity, check, lower, parse};
@@ -457,7 +458,13 @@ fn run_lower(file: &Path, format: LowerFormat) -> ExitCode {
     };
     let ir = lower(&module);
     let resolution = resolve(&ir);
-    let block_ir = lower_to_block_array(&ir, &resolution, Some(&builtin_java().materials));
+    let mut block_ir = lower_to_block_array(&ir, &resolution, Some(&builtin_java().materials));
+    // Mirror `load_and_lower`: semantic findings produced by the resolver
+    // belong on the same diagnostic stream as the lowering deferrals they
+    // tend to cascade into.
+    let mut combined = resolution.diagnostics;
+    combined.append(&mut block_ir.diagnostics);
+    block_ir.diagnostics = combined;
 
     let lines = LineStarts::new(&source);
     let mut has_error = false;
@@ -618,7 +625,16 @@ fn load_and_lower(file: &Path) -> Result<(String, BlockArrayIr), ExitCode> {
     })?;
     let ir = lower(&module);
     let resolution = resolve(&ir);
-    let block_ir = lower_to_block_array(&ir, &resolution, Some(&builtin_java().materials));
+    let mut block_ir = lower_to_block_array(&ir, &resolution, Some(&builtin_java().materials));
+    // Resolver diagnostics (`E_UNRESOLVED_PLACE_REF`, `E_UNRESOLVED_SLOT`,
+    // `W_UNUSED_DEF`, ...) are produced before lowering and must still reach
+    // the CLI's diagnostic stream — otherwise a `place use=cottag` typo
+    // (which the resolver flags as an Error) would silently produce zero
+    // `.nbt` files at exit 0. Prepend so semantic problems read above the
+    // lowering deferrals that may have cascaded from them.
+    let mut combined = resolution.diagnostics;
+    combined.append(&mut block_ir.diagnostics);
+    block_ir.diagnostics = combined;
     Ok((source, block_ir))
 }
 
@@ -822,5 +838,17 @@ fn build_lockfile(
         resolved_ir_hash: hash_resolved_ir(block_ir)?,
         verified: true,
         member_version_sensitivity: vec![],
+        placements: block_ir
+            .placements
+            .values()
+            .map(|p| LockPlacement {
+                site: p.site.clone(),
+                id: p.place_id.clone(),
+                def: p.source_def.clone(),
+                theme: p.theme.clone(),
+                origin: [p.origin.0, p.origin.1, p.origin.2],
+                dims: [p.dims.x, p.dims.y, p.dims.z],
+            })
+            .collect(),
     })
 }

@@ -32,6 +32,38 @@ pub struct Lockfile {
     /// Members whose meaning may drift across a Minecraft version bump.
     /// Empty until the constraint catalog ingest lands.
     pub member_version_sensitivity: Vec<MemberSensitivity>,
+    /// Per-`place` site coordinates resolved from the `at=` / `east_of=` /
+    /// `north_of=` constraint chain. Empty for sources that declare no
+    /// `site` block, which keeps the lockfile shape byte-identical to
+    /// cottage / themed-tower builds that pre-date the site surface.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub placements: Vec<LockPlacement>,
+}
+
+/// One `place` line resolved into absolute world-space coordinates.
+///
+/// Carries enough provenance (site / def / theme) to reproduce the
+/// coordinate chain without re-walking the source: a downstream consumer can
+/// rebuild the village layout straight from the lockfile.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct LockPlacement {
+    /// `site` name the placement belongs to (bare, without the `site::`
+    /// IR-key prefix).
+    pub site: String,
+    /// `place id=` value.
+    pub id: String,
+    /// `place use=` target.
+    pub def: String,
+    /// `place theme=` target.
+    pub theme: String,
+    /// Absolute `(x, y, z)` origin in world voxels. Stored as `[i32; 3]` so
+    /// `north_of` placements (negative `z`) round-trip without saturation.
+    pub origin: [i32; 3],
+    /// Voxel extents of the per-place [`super::super::block_array::BlockArray`]
+    /// at the time of the build. Captured here so the lockfile alone is
+    /// enough to compute the next-placement offset for an incremental
+    /// re-resolve, without rehydrating every block array.
+    pub dims: [u32; 3],
 }
 
 /// Backend edition the lockfile pins to.

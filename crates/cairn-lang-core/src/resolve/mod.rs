@@ -36,7 +36,7 @@ mod version_axes;
 
 pub use binding::{SelectorMatch, ThemeBinding, TokenKind, classify_token};
 pub use requires_parse::{compare_versions, parse_min_version};
-pub use resolver::{Resolution, ResolvedMemberBinding, ScopeResolution, resolve};
+pub use resolver::{Resolution, ResolvedMemberBinding, ScopeResolution, place_scope_key, resolve};
 pub use version_axes::{
     EditionPortability, RegistryRange, SemanticSensitiveFinding, VersionAxes, compute_axes,
 };

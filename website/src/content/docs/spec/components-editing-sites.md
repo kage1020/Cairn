@@ -49,3 +49,44 @@ site village:
 
 Each struct exposes ports (position / normal / width), and `connect` joins them. Villages and castles
 that exceed the structure block's 48³ limit are expressed as the composition of multiple structs.
+
+### 9.3.1 Coordinate convention
+- `east` advances along `+x`; `north` retreats along `-z`. This matches the `front` is `+z`
+  convention from §5.4 — a building whose `front` faces south sits with its facade on `+z`, and
+  `north_of=X` puts the next placement behind it.
+- The Y axis is unaffected by topological selectors; every placement currently lands at `y = 0`.
+
+### 9.3.2 Origin selectors
+Each `place` carries **exactly one** of `at`, `east_of`, `north_of`:
+
+| Selector | Effect | Notes |
+|---|---|---|
+| `at=origin` | Anchors the placement at world `(0, 0, 0)`. | The only legal `at=` value. The first `place` in a site must use this anchor — there is no implicit `at=origin` default. |
+| `east_of=ID gap=N` | New origin = prior `(x + dims.x + N, y, z)`. | `ID` must name a place declared earlier in the same `site` body. `gap` is in blocks and is edge-to-edge (0 → walls touch). Defaults to `0` when omitted. |
+| `north_of=ID gap=N` | New origin = prior `(x, y, z − dims.z − N)`. | Same `ID` and `gap` rules as `east_of`. |
+
+Combining selectors (`at` + `east_of`, or `east_of` + `north_of`) is rejected with
+`E_INVALID_PLACE_ORIGIN`; using `at=` with anything other than `origin` is the same error.
+
+### 9.3.3 Cross-scope references
+- `use=NAME` must name a top-level `def`. Unknown names fail with `E_UNRESOLVED_PLACE_REF`, with a
+  nearest-match suggestion when one fits the standard spell cap (§10.6 of `versioning-editions.md`).
+- `theme=NAME` must name a `theme` declared in the same file. Unknown themes fail with
+  `E_UNRESOLVED_THEME_REF`, again carrying a nearest-match note.
+- A `def` that no `place use=NAME` references is reported as `W_UNUSED_DEF` (advisory) so a typo on
+  the `use=` side does not silently produce an empty build.
+- Two `place` rows in one site cannot share an `id=`; the duplicate is flagged with
+  `E_DUPLICATE_PLACE_ID` and the diagnostic carries a span pointer back to the first declaration.
+
+### 9.3.4 Output naming
+The compiler writes one `.nbt` per `place`, named after the `id=` (e.g. `home1.nbt`,
+`home2.nbt`). The world-space origin and the `(site, def, theme)` provenance for every placement is
+recorded in `build.cairn.lock` under `placements`, so a downstream consumer can rebuild the layout
+without re-running the coordinate solver.
+
+### 9.3.5 Ports and `connect` (deferred to M3-PR4)
+`connect` lines parse and validate as `place` siblings, but the **port model** (the
+`position / normal / width` triple a structure exposes through a named anchor like `door.entry`) is
+not yet specified in detail, and walkway voxelisation is intentionally deferred so the port surface
+can land in one piece. Until then `connect` rows emit `W_DEFERRED_MEMBER` and are otherwise inert;
+the cross-port reference validation (`E_UNRESOLVED_PORT`) lands with the port model.

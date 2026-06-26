@@ -43,15 +43,49 @@ use crate::check::Diagnostic;
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct BlockArrayIr {
     /// One entry per concretised structure, keyed by `kind::name`
-    /// (`struct::cottage`). The key shape matches
+    /// (`struct::cottage`, `site::hamlet::home1`). The key shape matches
     /// [`crate::resolve::Resolution::scopes`] so the two maps line up
     /// without an extra translation step.
     pub structures: IndexMap<String, BlockArray>,
+    /// Per-`place` site coordinates. Keyed identically to [`structures`]
+    /// (`site::HAMLET::PLACE_ID`) so a consumer can join the two without an
+    /// extra index. Empty for any source with no `site` blocks, which keeps
+    /// the JSON shape stable for cottage/themed-tower fixtures pre-dating
+    /// site lowering.
+    #[serde(skip_serializing_if = "IndexMap::is_empty")]
+    pub placements: IndexMap<String, Placement>,
     /// Diagnostics emitted during lowering. Kept separate from
     /// [`crate::resolve::Resolution::diagnostics`]: the resolver owns
     /// theme-binding hygiene, this list owns voxel-lowering deferrals.
     #[serde(skip)]
     pub diagnostics: Vec<Diagnostic>,
+}
+
+/// One resolved `place` line from a `site` block.
+///
+/// Carries the world-space origin the per-place [`BlockArray`] (stored under
+/// the same key in [`BlockArrayIr::structures`]) lives at, plus the
+/// def/theme provenance pair so the lockfile can record the inputs that
+/// produced the absolute coordinates without re-walking the AST. `origin` is
+/// `i32` because `north_of` placements grow into negative `z`.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct Placement {
+    /// Site this placement belongs to (the bare `site` name, not the IR key).
+    pub site: String,
+    /// `place id=` value.
+    pub place_id: String,
+    /// `place use=` target — the `def` whose body lowered into the per-place
+    /// volume.
+    pub source_def: String,
+    /// `place theme=` value applied during cross-scope theme resolution.
+    pub theme: String,
+    /// Absolute world-space origin `(x, y, z)` resolved from the topological
+    /// constraint chain (`at=origin`, `east_of=`, `north_of=`).
+    pub origin: (i32, i32, i32),
+    /// Voxel extents of the lowered per-place [`BlockArray`]. Mirrored here
+    /// so the lockfile can pin the dims without rehydrating every
+    /// [`BlockArray`] to compare against.
+    pub dims: Dims,
 }
 
 /// One concretised structure as a voxel volume.
