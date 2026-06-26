@@ -31,9 +31,17 @@
 //! key. Missing or duplicate references fail loud with
 //! `E_UNRESOLVED_PLACE_REF` / `E_UNRESOLVED_THEME_REF` /
 //! `E_DUPLICATE_PLACE_ID` / `E_INVALID_PLACE_ORIGIN`; defs that no site
-//! ever references surface as `W_UNUSED_DEF`. Walkway (`connect`) bodies
-//! are passed through to the lowering pass without port validation — the
-//! port model and `E_UNRESOLVED_PORT` are not yet defined.
+//! ever references surface as `W_UNUSED_DEF`.
+//!
+//! `connect` rows resolve at the same layer: the `from.port` / `to.port`
+//! `DotRef`s on either side of the `to` keyword are matched against the
+//! referenced placement's `def` body, producing one [`ResolvedConnect`]
+//! per row. Missing port ids fail loud with `E_UNRESOLVED_PORT` (with a
+//! nearest-match note); a `def` exposing the same `id=` on more than one
+//! member raises `E_AMBIGUOUS_PORT`; an absent `path=` triggers
+//! `E_MISSING_PATH_MATERIAL`. The walkway voxeliser (under
+//! `block_array`) consumes the resolved connects without re-walking the
+//! `DotRef`s.
 //!
 //! The returned [`Resolution::diagnostics`] is in **resolver-emission
 //! order**, not sorted by source span. The `check::check` pipeline runs
@@ -70,10 +78,64 @@ pub struct Resolution {
     /// `struct::cottage`, `def::cottage`, `site::hamlet`) so a file with a
     /// struct and a def of the same name still produces two distinct keys.
     pub scopes: IndexMap<String, ScopeResolution>,
+    /// One entry per successfully-resolved `connect` row, in source order.
+    /// Rows that failed validation (`E_UNRESOLVED_PORT`,
+    /// `E_AMBIGUOUS_PORT`, `E_MISSING_PATH_MATERIAL`,
+    /// `E_UNRESOLVED_PLACE_REF` on the place half) are dropped here so the
+    /// walkway voxeliser does not lay a strip against a broken reference.
+    /// Empty for any file that declares no `connect` lines, matching the
+    /// `placements` shape on [`crate::block_array::BlockArrayIr`].
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub connects: Vec<ResolvedConnect>,
     /// Diagnostics gathered during resolution. The `check` pipeline merges
     /// these with the rest of `cairn check`'s output.
     #[serde(skip)]
     pub diagnostics: Vec<Diagnostic>,
+}
+
+/// One end of a `connect a.PORT to b.PORT` row, resolved into a
+/// `(place_id, port_id)` pair the block-array lowering can look up
+/// directly.
+///
+/// `place_id` is the `id=` of the named place; `port_id` is the `id=`
+/// of the matching member inside that place's `def`. The span points at
+/// the originating `DotRef` value in source so the walkway-side
+/// diagnostic (collision warning, lay failure) can anchor against the
+/// exact token the user wrote, not the whole `connect` line.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct PortRef {
+    /// `place id=` value the port belongs to.
+    pub place_id: String,
+    /// Member `id=` exposed by the place's def.
+    pub port_id: String,
+    /// Byte range of the `place.port` token in source.
+    #[serde(skip)]
+    pub span: Span,
+}
+
+/// One `connect from.port to to.port path=@MATERIAL` row, validated.
+///
+/// Carries everything the walkway voxeliser needs (both port refs, the
+/// path material as a `ValueWithSpan` so `resolve_block_state` can
+/// process it uniformly with `mat_slot=` values, the originating site
+/// name, and the row's span for follow-up diagnostics).
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct ResolvedConnect {
+    /// Bare site name (no `site::` IR-key prefix).
+    pub site: String,
+    /// First port — `from.port`.
+    pub from: PortRef,
+    /// Second port — `to.port`.
+    pub to: PortRef,
+    /// `path=@MATERIAL` value. Carried as [`ValueWithSpan`] so the
+    /// walkway lowering can run it through the same
+    /// `resolve_block_state` pipeline `mat_slot=` uses, lifting both
+    /// canonical and abstract tokens through the registry pack with one
+    /// code path.
+    pub path: ValueWithSpan,
+    /// Byte range of the originating `connect ...` line.
+    #[serde(skip)]
+    pub span: Span,
 }
 
 /// Resolution outcome for a single struct/def/site body.
@@ -147,6 +209,7 @@ pub fn resolve(ir: &IntentModule) -> Resolution {
         scopes.insert(def_key(d), resolution);
     }
     let mut used_defs: HashSet<String> = HashSet::new();
+    let mut connects: Vec<ResolvedConnect> = Vec::new();
     for site in &ir.sites {
         resolve_site_placements(
             site,
@@ -155,6 +218,7 @@ pub fn resolve(ir: &IntentModule) -> Resolution {
             &mut applied_themes,
             &mut scopes,
             &mut used_defs,
+            &mut connects,
             &mut diagnostics,
         );
     }
@@ -166,6 +230,7 @@ pub fn resolve(ir: &IntentModule) -> Resolution {
     Resolution {
         themes,
         scopes,
+        connects,
         diagnostics,
     }
 }
@@ -218,6 +283,7 @@ pub fn place_scope_key(site_name: &str, place_id: &str) -> String {
     format!("site::{site_name}::{place_id}")
 }
 
+#[allow(clippy::too_many_arguments)]
 fn resolve_site_placements(
     site: &SiteIr,
     defs: &[DefIr],
@@ -225,6 +291,7 @@ fn resolve_site_placements(
     applied_themes: &mut HashSet<String>,
     scopes: &mut IndexMap<String, ScopeResolution>,
     used_defs: &mut HashSet<String>,
+    connects: &mut Vec<ResolvedConnect>,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     // Local index lets each `east_of=ID` / `north_of=ID` lookup name a
@@ -232,6 +299,9 @@ fn resolve_site_placements(
     // lookup would be quadratic and would also let a later place forward-
     // reference an earlier one's mistakes.
     let mut seen_place_ids: IndexMap<String, Span> = IndexMap::new();
+    // `place_id` → `use=DEF_NAME` so `connect` rows can find the def whose
+    // body exposes the named port without re-walking the placement list.
+    let mut place_def: IndexMap<String, String> = IndexMap::new();
 
     // Pre-built name lists so `nearest_match` candidates are stable per site
     // rather than re-allocated per place.
@@ -239,10 +309,20 @@ fn resolve_site_placements(
     let theme_names: Vec<String> = themes.keys().cloned().collect();
 
     for member in &site.placements {
+        if matches!(member.role, MemberRole::Connect) {
+            resolve_connect_row(
+                member,
+                &site.name,
+                defs,
+                &seen_place_ids,
+                &place_def,
+                connects,
+                diagnostics,
+            );
+            continue;
+        }
         if !matches!(member.role, MemberRole::Place) {
-            // `connect` lines do not register a scope and are left for the
-            // lowering pass to surface as `W_DEFERRED_MEMBER`. Other site-
-            // local members (logic, assert) are also out of scope here.
+            // Other site-local members (logic, assert) are out of scope here.
             continue;
         }
 
@@ -322,6 +402,256 @@ fn resolve_site_placements(
             diagnostics,
         );
         scopes.insert(place_scope_key(&site.name, place_id), resolution);
+        // Record this place's def so a later `connect` row can look up
+        // the def's members without re-walking the site body.
+        place_def.insert(place_id.to_owned(), use_name.to_owned());
+    }
+}
+
+/// Validate one `connect from.port to to.port path=@MAT` row and push a
+/// matching [`ResolvedConnect`] when both ends and the path material
+/// pass every check.
+///
+/// Failures all skip the push so the walkway voxeliser only sees rows it
+/// can lay safely. Each diagnostic kind is emitted at most once per
+/// failure mode so a single broken row never reads as multiple unrelated
+/// problems:
+///
+/// - `E_UNRESOLVED_PLACE_REF` — `from.place_id` or `to.place_id` does
+///   not name a prior `place` in the same site;
+/// - `E_UNRESOLVED_PORT` — the `port_id` half is not declared by any
+///   member of the referenced def, with a nearest-match note when one
+///   sits within the spell cap;
+/// - `E_AMBIGUOUS_PORT` — multiple members of the referenced def share
+///   that `id=`; downstream lowering would have to pick one arbitrarily;
+/// - `E_MISSING_PATH_MATERIAL` — the row has no `path=` argument so
+///   walkway lowering has no material to lay.
+fn resolve_connect_row(
+    member: &Member,
+    site_name: &str,
+    defs: &[DefIr],
+    seen_place_ids: &IndexMap<String, Span>,
+    place_def: &IndexMap<String, String>,
+    connects: &mut Vec<ResolvedConnect>,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    // Surface positional shape from the snapshot:
+    //   positional[0] = DotRef(from.port)
+    //   positional[1] = Ident("to")
+    //   positional[2] = DotRef(to.port)
+    let from_value = member.positional.first();
+    let to_value = member.positional.get(2);
+    let (Some(from_value), Some(to_value)) = (from_value, to_value) else {
+        // A malformed surface (`connect X` or `connect X to`) skips
+        // silently here — the parser already laid down a structural
+        // problem for the missing positional, and re-issuing it as a
+        // resolver code would teach the user there are two problems
+        // where there is one.
+        return;
+    };
+    let Some(from) = port_ref_from_value(from_value, "from", seen_place_ids, diagnostics) else {
+        return;
+    };
+    let Some(to) = port_ref_from_value(to_value, "to", seen_place_ids, diagnostics) else {
+        return;
+    };
+
+    let mut ok = true;
+    if !validate_port(&from, defs, place_def, diagnostics) {
+        ok = false;
+    }
+    if !validate_port(&to, defs, place_def, diagnostics) {
+        ok = false;
+    }
+
+    let path = member.intent_state.get("path").cloned();
+    let Some(path) = path else {
+        diagnostics.push(Diagnostic {
+            code: DiagnosticCode::MissingPathMaterial,
+            severity: Severity::Error,
+            span: member.span.clone(),
+            primary: "`connect` requires a `path=` material to lay the walkway".to_owned(),
+            notes: vec![DiagnosticNote {
+                span: None,
+                message:
+                    "add `path=@gravel` (or another `@token`) to the end of the `connect` line"
+                        .to_owned(),
+            }],
+        });
+        return;
+    };
+    // A bare label (`path=gravel`) or any other non-token kind would slip
+    // through `resolve_block_state` as `MaterialDeferred::AlreadyDiagnosed`
+    // — that arm is wired for theme slot values which the
+    // `E_UNKNOWN_SLOT_TARGET` pass already flags. `connect.path` is not in
+    // that pass's scope, so we fail loud here instead of letting the row
+    // drop silently in the walkway voxeliser.
+    if !matches!(path.value.kind, ValueKind::Token(_)) {
+        diagnostics.push(Diagnostic {
+            code: DiagnosticCode::MissingPathMaterial,
+            severity: Severity::Error,
+            span: path.span.clone(),
+            primary: format!(
+                "`connect path=` must be a material token like `@gravel`, got {}",
+                path.value.kind_name(),
+            ),
+            notes: vec![DiagnosticNote {
+                span: None,
+                message: "use `@TOKEN` (e.g. `path=@gravel`); bare labels and string literals are not material references"
+                    .to_owned(),
+            }],
+        });
+        return;
+    }
+    if !ok {
+        return;
+    }
+
+    connects.push(ResolvedConnect {
+        site: site_name.to_owned(),
+        from,
+        to,
+        path,
+        span: member.span.clone(),
+    });
+}
+
+/// Lift one positional [`Value`] into a [`PortRef`], emitting
+/// `E_UNRESOLVED_PLACE_REF` if the head segment does not name a prior
+/// place in the same site and returning `None` on any non-`DotRef`
+/// shape. `side` ("from" / "to") goes into the primary diagnostic so
+/// the user can tell the two ends apart at a glance.
+fn port_ref_from_value(
+    raw: &Value,
+    side: &str,
+    seen_place_ids: &IndexMap<String, Span>,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Option<PortRef> {
+    let ValueKind::DotRef(dot) = &raw.kind else {
+        // Surface parser quirks (`connect` with a non-dotted positional)
+        // are caught upstream; staying silent here avoids double-counting
+        // a malformed row as a resolver-side failure.
+        return None;
+    };
+    if dot.tail().is_empty() {
+        // `connect home1 to ...` — the user named a place but no port.
+        // Treat it as an unresolved port so the diagnostic carries the
+        // same `did you mean` shape a typo would have on the right side
+        // of the dot. Suggestion pool is empty because we have no def
+        // yet (the head place itself may still be unknown), so the user
+        // just gets the missing-port message.
+        diagnostics.push(Diagnostic {
+            code: DiagnosticCode::UnresolvedPort,
+            severity: Severity::Error,
+            span: raw.span.clone(),
+            primary: format!(
+                "`{side}` is missing a port id: write `{place}.PORT` to name a member of the placed def",
+                place = dot.head(),
+            ),
+            notes: vec![],
+        });
+        return None;
+    }
+    let place_id = dot.head().to_owned();
+    let port_id = dot.tail()[0].clone();
+    if !seen_place_ids.contains_key(&place_id) {
+        let prior: Vec<&str> = seen_place_ids.keys().map(String::as_str).collect();
+        diagnostics.push(unresolved_place_ref_diag(
+            &format!("`{side}={place_id}.{port_id}` does not name a prior place in this site"),
+            raw.span.clone(),
+            &place_id,
+            prior.iter().copied(),
+        ));
+        return None;
+    }
+    Some(PortRef {
+        place_id,
+        port_id,
+        span: raw.span.clone(),
+    })
+}
+
+/// Walk the referenced def's members and decide whether `port.port_id`
+/// is a valid port id, emitting the matching `E_UNRESOLVED_PORT` /
+/// `E_AMBIGUOUS_PORT` diagnostic when not. The port-id ambient pool for
+/// the suggestion is the def's set of member ids — pointing the user at
+/// an id from a sibling def would just send them down a different broken
+/// path.
+fn validate_port(
+    port: &PortRef,
+    defs: &[DefIr],
+    place_def: &IndexMap<String, String>,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> bool {
+    let Some(def_name) = place_def.get(&port.place_id) else {
+        // The corresponding `place` line failed validation upstream
+        // (unknown def, malformed origin, ...). The error has already
+        // been reported; treat the port as silently invalid so the
+        // walkway is not laid against a broken placement.
+        return false;
+    };
+    let Some(def) = defs.iter().find(|d| d.name == *def_name) else {
+        // `use=NAME` referenced an unknown def — `E_UNRESOLVED_PLACE_REF`
+        // already fired. Same silence-rule as above.
+        return false;
+    };
+
+    let matches: Vec<&Member> = def
+        .members
+        .iter()
+        .filter(|m| m.id.as_deref() == Some(port.port_id.as_str()))
+        .collect();
+    match matches.len() {
+        0 => {
+            let pool: Vec<&str> = def.members.iter().filter_map(|m| m.id.as_deref()).collect();
+            let mut notes = Vec::with_capacity(2);
+            if let Some(suggested) = nearest_match(&port.port_id, pool.iter().copied()) {
+                notes.push(DiagnosticNote {
+                    span: None,
+                    message: format!("did you mean `{}.{suggested}`?", port.place_id),
+                });
+            }
+            notes.push(DiagnosticNote {
+                span: None,
+                message: format!(
+                    "add `id={port_id}` to a member of `def {def_name}` (e.g. `door id={port_id} ...`)",
+                    port_id = port.port_id,
+                    def_name = def_name,
+                ),
+            });
+            diagnostics.push(Diagnostic {
+                code: DiagnosticCode::UnresolvedPort,
+                severity: Severity::Error,
+                span: port.span.clone(),
+                primary: format!(
+                    "port `{port_id}` is not declared by `def {def_name}` (used by `place {place_id}`)",
+                    port_id = port.port_id,
+                    def_name = def_name,
+                    place_id = port.place_id,
+                ),
+                notes,
+            });
+            false
+        }
+        1 => true,
+        n => {
+            diagnostics.push(Diagnostic {
+                code: DiagnosticCode::AmbiguousPort,
+                severity: Severity::Error,
+                span: port.span.clone(),
+                primary: format!(
+                    "port `{port_id}` matches {n} members of `def {def_name}`; the reference is ambiguous",
+                    port_id = port.port_id,
+                    def_name = def_name,
+                ),
+                notes: vec![DiagnosticNote {
+                    span: None,
+                    message: "rename the duplicate `id=` so each port is uniquely addressable"
+                        .to_owned(),
+                }],
+            });
+            false
+        }
     }
 }
 
@@ -918,6 +1248,193 @@ mod tests {
                 .any(|n| n.message.contains("did you mean")),
             "no suggestion expected, got {:#?}",
             diag.notes,
+        );
+    }
+
+    #[test]
+    fn connect_resolves_to_port_refs_with_path_material() {
+        // Two cottages connected by gravel — the canonical village shape.
+        // The resolver must build one `ResolvedConnect` carrying both
+        // `(place_id, port_id)` pairs plus the `path=@gravel` value, with
+        // no diagnostics.
+        let src = concat!(
+            "theme t:\n",
+            "  slot wall -> @cobblestone\n",
+            "\n",
+            "def cottage size=3x3:\n",
+            "  walls mat_slot=wall height=2\n",
+            "  door id=entry side=front at=center\n",
+            "\n",
+            "site s:\n",
+            "  place id=a use=cottage theme=t at=origin\n",
+            "  place id=b use=cottage theme=t east_of=a gap=2\n",
+            "  connect a.entry to b.entry path=@gravel\n",
+        );
+        let r = resolve(&ir(src));
+        assert!(
+            !r.diagnostics.iter().any(|d| d.severity == Severity::Error),
+            "no errors expected, got {:?}",
+            r.diagnostics,
+        );
+        assert_eq!(r.connects.len(), 1, "exactly one connect resolved");
+        let c = &r.connects[0];
+        assert_eq!(c.site, "s");
+        assert_eq!(c.from.place_id, "a");
+        assert_eq!(c.from.port_id, "entry");
+        assert_eq!(c.to.place_id, "b");
+        assert_eq!(c.to.port_id, "entry");
+    }
+
+    #[test]
+    fn connect_unknown_port_emits_e_unresolved_port() {
+        // Port `entry` is exposed by the def, but the user mistyped it.
+        // The resolver must surface E_UNRESOLVED_PORT with a nearest-
+        // match note pointing at the correct `place.port` shape.
+        let src = concat!(
+            "theme t:\n",
+            "  slot wall -> @cobblestone\n",
+            "\n",
+            "def cottage size=3x3:\n",
+            "  walls mat_slot=wall height=2\n",
+            "  door id=entry side=front at=center\n",
+            "\n",
+            "site s:\n",
+            "  place id=a use=cottage theme=t at=origin\n",
+            "  place id=b use=cottage theme=t east_of=a gap=2\n",
+            "  connect a.entr to b.entry path=@gravel\n",
+        );
+        let r = resolve(&ir(src));
+        let diag = r
+            .diagnostics
+            .iter()
+            .find(|d| d.code == DiagnosticCode::UnresolvedPort)
+            .unwrap_or_else(|| panic!("expected E_UNRESOLVED_PORT, got {:?}", r.diagnostics));
+        assert_eq!(diag.severity, Severity::Error);
+        assert!(
+            diag.notes.iter().any(|n| n.message.contains("a.entry")),
+            "expected nearest-match note pointing at a.entry, got {:?}",
+            diag.notes,
+        );
+        // The failed connect must not surface as resolved — walkway
+        // voxelisation only sees rows it can lay safely.
+        assert!(r.connects.is_empty(), "broken connect must not resolve");
+    }
+
+    #[test]
+    fn connect_ambiguous_port_emits_e_ambiguous_port() {
+        // Two members of the def carry `id=entry`. The reference is
+        // ambiguous; the resolver must say so loudly rather than picking
+        // one silently.
+        let src = concat!(
+            "theme t:\n",
+            "  slot wall -> @cobblestone\n",
+            "\n",
+            "def cottage size=5x5:\n",
+            "  walls mat_slot=wall height=2\n",
+            "  door id=entry side=front at=center\n",
+            "  window id=entry side=back y=1 offset=1 size=1x1 mat_slot=wall\n",
+            "\n",
+            "site s:\n",
+            "  place id=a use=cottage theme=t at=origin\n",
+            "  place id=b use=cottage theme=t east_of=a gap=2\n",
+            "  connect a.entry to b.entry path=@gravel\n",
+        );
+        let r = resolve(&ir(src));
+        assert!(
+            r.diagnostics
+                .iter()
+                .any(|d| d.code == DiagnosticCode::AmbiguousPort),
+            "expected E_AMBIGUOUS_PORT, got {:?}",
+            r.diagnostics,
+        );
+    }
+
+    #[test]
+    fn connect_missing_path_emits_e_missing_path_material() {
+        let src = concat!(
+            "theme t:\n",
+            "  slot wall -> @cobblestone\n",
+            "\n",
+            "def cottage size=3x3:\n",
+            "  walls mat_slot=wall height=2\n",
+            "  door id=entry side=front at=center\n",
+            "\n",
+            "site s:\n",
+            "  place id=a use=cottage theme=t at=origin\n",
+            "  place id=b use=cottage theme=t east_of=a gap=2\n",
+            "  connect a.entry to b.entry\n",
+        );
+        let r = resolve(&ir(src));
+        assert!(
+            r.diagnostics
+                .iter()
+                .any(|d| d.code == DiagnosticCode::MissingPathMaterial),
+            "expected E_MISSING_PATH_MATERIAL, got {:?}",
+            r.diagnostics,
+        );
+        assert!(r.connects.is_empty());
+    }
+
+    #[test]
+    fn connect_non_token_path_emits_e_missing_path_material() {
+        // `path=plain_ident` and `path="gravel"` slip through the
+        // material resolver as `MaterialDeferred::AlreadyDiagnosed` (the
+        // theme-slot path). The resolver must surface that as
+        // E_MISSING_PATH_MATERIAL with a "must be an @ token" note,
+        // otherwise the row drops silently in the walkway voxeliser.
+        let src = concat!(
+            "theme t:\n",
+            "  slot wall -> @cobblestone\n",
+            "\n",
+            "def cottage size=3x3:\n",
+            "  walls mat_slot=wall height=2\n",
+            "  door id=entry side=front at=center\n",
+            "\n",
+            "site s:\n",
+            "  place id=a use=cottage theme=t at=origin\n",
+            "  place id=b use=cottage theme=t east_of=a gap=2\n",
+            "  connect a.entry to b.entry path=plain_ident\n",
+        );
+        let r = resolve(&ir(src));
+        let diag = r
+            .diagnostics
+            .iter()
+            .find(|d| d.code == DiagnosticCode::MissingPathMaterial)
+            .unwrap_or_else(|| panic!("expected E_MISSING_PATH_MATERIAL, got {:?}", r.diagnostics));
+        assert_eq!(diag.severity, Severity::Error);
+        assert!(
+            diag.primary.contains("token") && diag.primary.contains("identifier"),
+            "expected the message to call out the kind mismatch, got: {}",
+            diag.primary,
+        );
+        assert!(r.connects.is_empty(), "non-token path must not resolve");
+    }
+
+    #[test]
+    fn connect_unknown_place_emits_e_unresolved_place_ref() {
+        // `ghost` is not a known place id. Re-uses the existing
+        // E_UNRESOLVED_PLACE_REF code so a single diagnostic family
+        // covers every "unknown place" path (origin selectors and now
+        // connect refs).
+        let src = concat!(
+            "theme t:\n",
+            "  slot wall -> @cobblestone\n",
+            "\n",
+            "def cottage size=3x3:\n",
+            "  walls mat_slot=wall height=2\n",
+            "  door id=entry side=front at=center\n",
+            "\n",
+            "site s:\n",
+            "  place id=a use=cottage theme=t at=origin\n",
+            "  connect a.entry to ghost.entry path=@gravel\n",
+        );
+        let r = resolve(&ir(src));
+        assert!(
+            r.diagnostics.iter().any(
+                |d| d.code == DiagnosticCode::UnresolvedPlaceRef && d.primary.contains("ghost")
+            ),
+            "expected E_UNRESOLVED_PLACE_REF mentioning ghost, got {:?}",
+            r.diagnostics,
         );
     }
 

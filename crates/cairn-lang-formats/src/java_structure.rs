@@ -136,11 +136,23 @@ pub fn write_compound_gzip<W: std::io::Write>(
 /// - `"site::hamlet::home1"` → `"home1.nbt"` — per-`place` placements
 ///   share an output directory with sibling structs; the site name is
 ///   collision-avoided inside the IR key, not on disk.
+/// - `"walkway::hamlet::home1.entry__home2.entry"` →
+///   `"hamlet_walkway_home1_entry__home2_entry.nbt"` — the site name
+///   is preserved so a multi-site file's walkways do not collide on
+///   disk, and the `.` separators between place and port id are
+///   flattened to `_` so the on-disk name stays a single identifier
+///   token across operating systems.
 ///
 /// Kept here (not in the CLI) so the wasm playground and any other consumer
 /// agree on naming when they land.
 #[must_use]
 pub fn output_filename(source_scope: &str) -> String {
+    if let Some(rest) = source_scope.strip_prefix("walkway::")
+        && let Some((site, ports)) = rest.split_once("::")
+    {
+        let flattened = ports.replace('.', "_");
+        return format!("{site}_walkway_{flattened}.nbt");
+    }
     let bare = source_scope
         .strip_prefix("struct::")
         .or_else(|| {

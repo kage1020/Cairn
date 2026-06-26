@@ -83,9 +83,41 @@ site village:
 `placements` セクションに記録され、下流の consumer は座標ソルバを再実行せずにレイアウトを
 再構築できます。
 
-### 9.3.5 ポートと `connect` (M3-PR4 に持ち越し)
-`connect` 行は `place` の兄弟としてパース・検証されますが、構造が `door.entry` 等の名前付きアンカー
-を通じて公開する **ポートモデル** (`position / normal / width` の三つ組) は詳細仕様が未確定で、歩道
-voxelization も一体で固めるため意図的に遅延しています。それまで `connect` 行は
-`W_DEFERRED_MEMBER` を発火するだけのno-op として扱われます。ポート参照の検証
-(`E_UNRESOLVED_PORT`) もポートモデル確定と同時に登場します。
+### 9.3.5 ポートと `connect`
+`connect FROM.PORT to TO.PORT path=@MATERIAL` 行は、同一 `site` 内の 2 つの placement が公開する
+ポート間に幅 1 ブロックの歩道を敷設します。
+
+**ポート**: `PLACE.PORT` は `(place, member_id)` の組に解決されます。M3-PR4 ではポートを公開できる
+のは参照先 `def` の `door` メンバーのみで、window / stair / roof のポートは後続 PR に持ち越しと
+します。ポートのワールド座標は「ドアの `side=` 壁の外側 1 ブロック、地面段」とし、
+`front`/`back`/`left`/`right` はそれぞれ `+z`/`-z`/`-x`/`+x` に対応します (§9.3.1)。ドアの
+`at=center` という壁ローカル オフセットと placement の overhang を合成して、ポートは構造の外面
+を超えた overhang リング上に着地します。
+
+**経路**: 歩道は 2 つのポートで一致する Y で Manhattan L (先に x 軸、次に z 軸) を走ります。
+階段や複数階層をまたぐ 3D 経路探索はポート面を一度に着地させるため M3-PR4 のスコープから意図的に
+外しています。既存の構造床と重なるセルはスキップし、行ごとに `W_WALKWAY_BLOCKED` を 1 件だけ警告
+として発します。
+
+**マテリアル**: `path=@TOKEN` の値はメンバーマテリアルと同じ `mat_slot=` パイプラインを通って解決
+されます。`@gravel` のような canonical token はレジストリパック無しで利用でき、`@path.gravel` の
+ような abstract token はパックのマテリアルカタログを要求し、ヒットしないときは
+`W_ABSTRACT_TOKEN_DEFERRED` / `E_UNKNOWN_ABSTRACT_TOKEN` を発火します。
+
+**出力**: 各 `connect` 行は site とポート名を組み合わせた 1 つの `.nbt` を書き出し
+(例: `hamlet_walkway_home1_entry__home2_entry.nbt`)、`walkways:` セクションとして lockfile に
+ワールド原点 / 寸法 / 解決済みパスマテリアルを記録します。
+
+**Diagnostics**:
+
+- `E_UNRESOLVED_PORT` — ドット右側のポート ID が参照先 def のメンバーに存在しない (近接候補が
+  あれば `did you mean` ノートを付与)。
+- `E_AMBIGUOUS_PORT` — def が同名 `id=` を複数のメンバーで公開している。重複を解消して参照を
+  一意にする必要があります。
+- `E_MISSING_PATH_MATERIAL` — `path=` が欠落しており歩道に敷くマテリアルが無い。
+- `E_UNRESOLVED_PLACE_REF` — ドット左側の place ID が同一 site の先行 place を指していない。
+  §9.3.3 と共有のコードです。
+- `W_WALKWAY_BLOCKED` — L 字経路が既存の構造床を貫通した。衝突セルはスキップされ、残りの経路は
+  そのまま敷設されます。
+- `W_DUPLICATE_WALKWAY` — 同じ `(from, to)` ポート組が同一 site で既に敷設済み。重複行は破棄
+  されます。

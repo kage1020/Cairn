@@ -39,7 +39,7 @@ use crate::intent::{
 };
 use crate::resolve::{Resolution, ScopeResolution, place_scope_key};
 
-use super::Placement;
+use super::{Placement, Walkway};
 
 use super::material::{AbstractMaterialResolver, MaterialDeferred, resolve_block_state};
 use super::openings::{WallSide, wall_length, wall_local_to_grid};
@@ -49,6 +49,7 @@ use super::roof::{
     gable_voxels, hip_extra_height, hip_stair_state, hip_voxels, shed_extra_height,
     shed_slope_span, shed_stair_state, shed_voxels,
 };
+use super::walkway::{build_walkway_array, l_path, port_world_position};
 use super::{BlockArray, BlockArrayIr, BlockState, Dims, Palette, PaletteIndex};
 
 /// Lower every `struct` in `intent` into a [`BlockArray`].
@@ -88,6 +89,7 @@ pub fn lower_to_block_array(
     }
 
     let mut placements: IndexMap<String, Placement> = IndexMap::new();
+    let mut walkways: IndexMap<String, Walkway> = IndexMap::new();
     for site in &intent.sites {
         lower_site(
             site,
@@ -99,11 +101,299 @@ pub fn lower_to_block_array(
             &mut diagnostics,
         );
     }
+    // Walkways are laid after every site has emitted its per-place
+    // BlockArrays so the collision set already covers every floor tile
+    // the strip might cross. Connects survive site boundaries — the
+    // resolver tags each `ResolvedConnect` with the `site` name so we
+    // can pair it back to the right `placements` lookup here.
+    let blocked = collect_floor_cells(&structures, &placements);
+    lower_connects(
+        resolution,
+        &intent.defs,
+        materials,
+        &placements,
+        &blocked,
+        &mut structures,
+        &mut walkways,
+        &mut diagnostics,
+    );
 
     BlockArrayIr {
         structures,
         placements,
+        walkways,
         diagnostics,
+    }
+}
+
+/// World-space `(x, y, z)` of every non-air voxel on the y=0 plane of
+/// every placement. The walkway voxeliser uses this set to skip cells
+/// that would overwrite an existing floor tile — a strip ducking under
+/// a corner of a building still completes, but the colliding cell stays
+/// air and the row earns a `W_WALKWAY_BLOCKED` warning.
+fn collect_floor_cells(
+    structures: &IndexMap<String, BlockArray>,
+    placements: &IndexMap<String, Placement>,
+) -> std::collections::HashSet<(i32, i32, i32)> {
+    let mut out: std::collections::HashSet<(i32, i32, i32)> = std::collections::HashSet::new();
+    for (key, placement) in placements {
+        let Some(ba) = structures.get(key) else {
+            continue;
+        };
+        // Only the y=0 plane matters: M3-PR4 walkways always sit at
+        // the ports' shared Y (=0 for every example) and a 3D path
+        // search lands in a later milestone.
+        for z in 0..ba.dims.z {
+            for x in 0..ba.dims.x {
+                let Some(i) = ba.dims.index(x, 0, z) else {
+                    continue;
+                };
+                if ba.voxels[i] == PaletteIndex::AIR {
+                    continue;
+                }
+                let wx = placement
+                    .origin
+                    .0
+                    .saturating_add(i32::try_from(x).unwrap_or(i32::MAX));
+                let wz = placement
+                    .origin
+                    .2
+                    .saturating_add(i32::try_from(z).unwrap_or(i32::MAX));
+                out.insert((wx, placement.origin.1, wz));
+            }
+        }
+    }
+    out
+}
+
+/// Lower every resolved `connect` row into a walkway `BlockArray` and
+/// a matching [`Walkway`] metadata record. Skips rows whose ports do
+/// not resolve to a [`MemberRole::Door`] (other roles are out of scope
+/// for M3-PR4) and emits a `W_DUPLICATE_WALKWAY` when the same
+/// `(from, to)` pair has already been laid in the same site.
+#[allow(clippy::too_many_arguments, clippy::too_many_lines)]
+fn lower_connects(
+    resolution: &Resolution,
+    defs: &[DefIr],
+    materials: Option<&dyn AbstractMaterialResolver>,
+    placements: &IndexMap<String, Placement>,
+    blocked: &std::collections::HashSet<(i32, i32, i32)>,
+    structures: &mut IndexMap<String, BlockArray>,
+    walkways: &mut IndexMap<String, Walkway>,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    use std::collections::HashSet;
+    let mut seen_pairs: HashSet<(String, String, String, String, String)> = HashSet::new();
+
+    for connect in &resolution.connects {
+        let from_key = place_scope_key(&connect.site, &connect.from.place_id);
+        let to_key = place_scope_key(&connect.site, &connect.to.place_id);
+        let (Some(from_placement), Some(to_placement)) =
+            (placements.get(&from_key), placements.get(&to_key))
+        else {
+            // Place lookup failure means the place itself was rejected
+            // upstream; nothing to lay against, so move on.
+            continue;
+        };
+        let from_def = defs.iter().find(|d| d.name == from_placement.source_def);
+        let to_def = defs.iter().find(|d| d.name == to_placement.source_def);
+        let (Some(from_def), Some(to_def)) = (from_def, to_def) else {
+            continue;
+        };
+
+        let from_pos = port_world_position(
+            from_placement.origin,
+            from_placement.dims,
+            from_def,
+            &connect.from.port_id,
+        );
+        let to_pos = port_world_position(
+            to_placement.origin,
+            to_placement.dims,
+            to_def,
+            &connect.to.port_id,
+        );
+        let (Some(from_pos), Some(to_pos)) = (from_pos, to_pos) else {
+            // The resolver already validated the port id, so this miss
+            // means `port_world_position` rejected one of the door's
+            // own properties: a missing / non-cardinal `side=`, an
+            // `at=` value other than `center`, or a window / stair role
+            // that the door-only port surface refuses. The diagnostic
+            // names all three so the user is not pointed at the wrong
+            // fix.
+            diagnostics.push(Diagnostic {
+                code: DiagnosticCode::DeferredMember,
+                severity: Severity::Warning,
+                span: connect.span.clone(),
+                primary: format!(
+                    "walkway `{from} ↔ {to}` was skipped because the port could not be placed",
+                    from = port_label(&connect.from.place_id, &connect.from.port_id),
+                    to = port_label(&connect.to.place_id, &connect.to.port_id),
+                ),
+                notes: vec![DiagnosticNote {
+                    span: None,
+                    message:
+                        "ports currently require a `door` member with `side=front|back|left|right` and `at=center`"
+                            .to_owned(),
+                }],
+            });
+            continue;
+        };
+
+        // Duplicate guard: pin on (site, from_place, from_port,
+        // to_place, to_port). Normalise the pair (sort the two ends)
+        // so `a.entry → b.entry` and `b.entry → a.entry` count as the
+        // same walkway — laying the strip both ways would be a silent
+        // double-write.
+        let mut endpoints = [
+            (
+                connect.from.place_id.as_str(),
+                connect.from.port_id.as_str(),
+            ),
+            (connect.to.place_id.as_str(), connect.to.port_id.as_str()),
+        ];
+        endpoints.sort_unstable();
+        let dedup_key = (
+            connect.site.clone(),
+            endpoints[0].0.to_owned(),
+            endpoints[0].1.to_owned(),
+            endpoints[1].0.to_owned(),
+            endpoints[1].1.to_owned(),
+        );
+        if !seen_pairs.insert(dedup_key) {
+            diagnostics.push(Diagnostic {
+                code: DiagnosticCode::DuplicateWalkway,
+                severity: Severity::Warning,
+                span: connect.span.clone(),
+                primary: format!(
+                    "duplicate walkway `{from} ↔ {to}` in site `{site}`; the second row was dropped",
+                    from = port_label(&connect.from.place_id, &connect.from.port_id),
+                    to = port_label(&connect.to.place_id, &connect.to.port_id),
+                    site = connect.site,
+                ),
+                notes: vec![DiagnosticNote {
+                    span: None,
+                    message: "remove the duplicate or rewrite it to connect a different port pair"
+                        .to_owned(),
+                }],
+            });
+            continue;
+        }
+
+        let material = match resolve_block_state(&connect.path, materials) {
+            Ok(state) => state,
+            Err(MaterialDeferred::Abstract(token)) => {
+                diagnostics.push(diag_walkway_abstract_token(connect, &token));
+                continue;
+            }
+            Err(MaterialDeferred::UnknownAbstract { token, suggestion }) => {
+                diagnostics.push(diag_walkway_unknown_token(
+                    connect,
+                    &token,
+                    suggestion.as_deref(),
+                ));
+                continue;
+            }
+            Err(MaterialDeferred::AlreadyDiagnosed) => continue,
+        };
+        let material_id = material.id.clone();
+
+        let path = l_path(from_pos, to_pos);
+        let scope_key = format!(
+            "walkway::{site}::{from_place}.{from_port}__{to_place}.{to_port}",
+            site = connect.site,
+            from_place = connect.from.place_id,
+            from_port = connect.from.port_id,
+            to_place = connect.to.place_id,
+            to_port = connect.to.port_id,
+        );
+        let (array, origin, skipped) =
+            build_walkway_array(&path, material, blocked, scope_key.clone());
+        if skipped > 0 {
+            diagnostics.push(Diagnostic {
+                code: DiagnosticCode::WalkwayBlocked,
+                severity: Severity::Warning,
+                span: connect.span.clone(),
+                primary: format!(
+                    "walkway `{from} ↔ {to}` skipped {skipped} cells that overlapped an existing structure",
+                    from = port_label(&connect.from.place_id, &connect.from.port_id),
+                    to = port_label(&connect.to.place_id, &connect.to.port_id),
+                ),
+                notes: vec![DiagnosticNote {
+                    span: None,
+                    message:
+                        "widen the placement gap so the walkway can route around the obstacle"
+                            .to_owned(),
+                }],
+            });
+        }
+        let dims = array.dims;
+        structures.insert(scope_key.clone(), array);
+        walkways.insert(
+            scope_key,
+            Walkway {
+                site: connect.site.clone(),
+                from_place: connect.from.place_id.clone(),
+                from_port: connect.from.port_id.clone(),
+                to_place: connect.to.place_id.clone(),
+                to_port: connect.to.port_id.clone(),
+                origin,
+                dims,
+                path_material: material_id,
+            },
+        );
+    }
+}
+
+fn port_label(place: &str, port: &str) -> String {
+    format!("{place}.{port}")
+}
+
+fn diag_walkway_abstract_token(
+    connect: &crate::resolve::ResolvedConnect,
+    token: &str,
+) -> Diagnostic {
+    Diagnostic {
+        code: DiagnosticCode::AbstractTokenDeferred,
+        severity: Severity::Warning,
+        span: connect.path.span.clone(),
+        primary: format!(
+            "abstract path token `@{token}` cannot be lowered without the registry pack; the walkway falls back to air",
+        ),
+        notes: vec![DiagnosticNote {
+            span: None,
+            message:
+                "use a canonical block token (e.g. `path=@gravel`) until the registry pack ships"
+                    .to_owned(),
+        }],
+    }
+}
+
+fn diag_walkway_unknown_token(
+    connect: &crate::resolve::ResolvedConnect,
+    token: &str,
+    suggestion: Option<&str>,
+) -> Diagnostic {
+    let mut notes = Vec::with_capacity(2);
+    if let Some(s) = suggestion {
+        notes.push(DiagnosticNote {
+            span: None,
+            message: format!("did you mean `@{s}`?"),
+        });
+    }
+    notes.push(DiagnosticNote {
+        span: None,
+        message: "abstract path tokens must be declared in the pack's `materials` catalog"
+            .to_owned(),
+    });
+    Diagnostic {
+        code: DiagnosticCode::UnknownAbstractToken,
+        severity: Severity::Error,
+        span: connect.path.span.clone(),
+        primary: format!(
+            "abstract path token `@{token}` is not declared by the registry pack's materials catalog",
+        ),
+        notes,
     }
 }
 
@@ -159,10 +449,10 @@ fn lower_site<'a>(
 ) {
     for member in &site.placements {
         if matches!(member.role, MemberRole::Connect) {
-            diagnostics.push(diag_deferred_member_reason(
-                member,
-                "`connect` walkways are deferred until the port model and walkway voxeliser ship",
-            ));
+            // `connect` rows are lowered after every placement lands so
+            // walkway voxelisation can collide-check against the
+            // finished floor plan. See `lower_connects` for the second
+            // pass; nothing to do per-row here.
             continue;
         }
         if !matches!(member.role, MemberRole::Place) {
@@ -206,7 +496,18 @@ fn lower_site<'a>(
 
         // The origin solver reads `placements` for prior-place lookups, so
         // the lookup has to happen before *this* placement is inserted.
-        let origin = resolve_place_origin(member, placements, &site.name).unwrap_or((0, 0, 0));
+        // Lookup misses only happen when the prior place was skipped at
+        // lowering time (cascade from `W_DEF_NO_SIZE` /
+        // `E_UNRESOLVED_PLACE_REF`); falling back to `(0, 0, 0)` would
+        // silently stack the placement on top of `home1`, so we surface a
+        // deferred warning and skip the row instead.
+        let Some(origin) = resolve_place_origin(member, placements, &site.name) else {
+            diagnostics.push(diag_deferred_member_reason(
+                member,
+                "the prior place referenced by `east_of=`/`north_of=` did not lower, so this placement's origin cannot be resolved",
+            ));
+            continue;
+        };
 
         let ba = lower_body_to_block_array(
             BodyDescriptor {
@@ -2054,6 +2355,110 @@ mod tests {
             b.origin,
             (0, 0, -7),
             "z = prev.z(0) - prev.dims.z(3) - gap(4)"
+        );
+    }
+
+    fn village_pair_source(extra_connects: &str) -> String {
+        // Tiny two-place village shared by the connect-dedup tests so
+        // each test only spells out the extra rows under exercise.
+        format!(
+            concat!(
+                "theme t:\n",
+                "  slot wall -> @cobblestone\n",
+                "\n",
+                "def cottage size=3x3:\n",
+                "  walls mat_slot=wall height=2\n",
+                "  door id=entry side=front at=center\n",
+                "\n",
+                "site s:\n",
+                "  place id=a use=cottage theme=t at=origin\n",
+                "  place id=b use=cottage theme=t east_of=a gap=4\n",
+                "{}",
+            ),
+            extra_connects,
+        )
+    }
+
+    #[test]
+    fn duplicate_connect_emits_w_duplicate_walkway_and_lays_one_strip() {
+        // The same `(a.entry, b.entry)` written twice in source order
+        // must land exactly one walkway and exactly one
+        // W_DUPLICATE_WALKWAY warning on the second row.
+        let src = village_pair_source(
+            "  connect a.entry to b.entry path=@gravel\n  connect a.entry to b.entry path=@gravel\n",
+        );
+        let out = lowered(&src);
+        let dup_count = out
+            .diagnostics
+            .iter()
+            .filter(|d| d.code == DiagnosticCode::DuplicateWalkway)
+            .count();
+        assert_eq!(dup_count, 1, "expected exactly one W_DUPLICATE_WALKWAY");
+        assert_eq!(out.walkways.len(), 1, "second row must not lay a strip");
+    }
+
+    #[test]
+    fn reverse_connect_dedupes_against_first_row() {
+        // `a.entry → b.entry` and `b.entry → a.entry` are the same
+        // walkway. The endpoint sort in `lower_connects` must collapse
+        // the pair so the second row earns a duplicate warning and the
+        // strip is laid once.
+        let src = village_pair_source(
+            "  connect a.entry to b.entry path=@gravel\n  connect b.entry to a.entry path=@gravel\n",
+        );
+        let out = lowered(&src);
+        let dup_count = out
+            .diagnostics
+            .iter()
+            .filter(|d| d.code == DiagnosticCode::DuplicateWalkway)
+            .count();
+        assert_eq!(
+            dup_count, 1,
+            "expected exactly one W_DUPLICATE_WALKWAY on the reversed row",
+        );
+        assert_eq!(
+            out.walkways.len(),
+            1,
+            "reversed row must not lay a second strip"
+        );
+    }
+
+    #[test]
+    fn east_of_skipped_prior_does_not_silently_stack_at_origin() {
+        // Prior place `a` references a sizeless def, so it earns
+        // `W_DEF_NO_SIZE` and never lands in `placements`. The
+        // `east_of=a` lookup on `b` would silently fall back to `(0, 0,
+        // 0)` under the old code path, stacking both buildings on top
+        // of each other. The new path emits W_DEFERRED_MEMBER and skips
+        // the placement instead.
+        let src = concat!(
+            "theme t:\n",
+            "  slot wall -> @cobblestone\n",
+            "\n",
+            "def sized size=3x3:\n",
+            "  walls mat_slot=wall height=2\n",
+            "\n",
+            "def sizeless:\n",
+            "  walls mat_slot=wall height=2\n",
+            "\n",
+            "site s:\n",
+            "  place id=a use=sizeless theme=t at=origin\n",
+            "  place id=b use=sized theme=t east_of=a gap=2\n",
+        );
+        let out = lowered(src);
+        assert!(
+            !out.placements.contains_key("site::s::b"),
+            "placement b must be skipped, not silently stacked at origin",
+        );
+        let cascade = out.diagnostics.iter().any(|d| {
+            d.code == DiagnosticCode::DeferredMember
+                && d.primary.contains("east_of")
+                && d.primary.contains("origin cannot be resolved")
+        });
+        assert!(
+            cascade,
+            "expected a cascade W_DEFERRED_MEMBER mentioning the unresolvable origin, got {:?}",
+            out.diagnostics,
         );
     }
 }

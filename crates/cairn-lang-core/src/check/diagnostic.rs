@@ -121,6 +121,32 @@ pub enum DiagnosticCode {
     /// rather than fatal — but worth surfacing because an unused def is
     /// usually a typo on the `place use=` side.
     UnusedDef,
+    /// A `connect A.PORT to B.PORT` row names a port id (`PORT`) that the
+    /// referenced def does not expose. The place id sides are reported by
+    /// `E_UNRESOLVED_PLACE_REF` instead — this code is specifically for the
+    /// port half of the `place.port` shape. Carries a nearest-match
+    /// suggestion when one fits the standard spell cap.
+    UnresolvedPort,
+    /// A `connect A.PORT to B.PORT` row whose port id matches more than one
+    /// member of the referenced def. The first match is taken for downstream
+    /// lowering; the duplicate is flagged so the author can disambiguate by
+    /// renaming the colliding member.
+    AmbiguousPort,
+    /// A `connect` row carries no `path=` argument. Walkway lowering has no
+    /// material to lay the path with — silently degrading to air would leave
+    /// the buildings invisibly unconnected, so the build fails.
+    MissingPathMaterial,
+    /// Walkway voxelisation hit an existing building cell along the L-shaped
+    /// path between two ports. The blocked cell is skipped (the rest of the
+    /// walkway still lays), so the connection still reaches both ends visibly
+    /// even when an obstacle steals one or two cells in between.
+    WalkwayBlocked,
+    /// A `connect` row repeats a `(from, to)` port pair already laid by an
+    /// earlier row in the same site. The second walkway is dropped silently
+    /// at the voxel level — re-laying the same gravel strip is a no-op — and
+    /// the row is flagged so the author can tell the duplicate from a missed
+    /// new connection.
+    DuplicateWalkway,
 }
 
 impl DiagnosticCode {
@@ -151,6 +177,11 @@ impl DiagnosticCode {
             Self::DuplicatePlaceId => "E_DUPLICATE_PLACE_ID",
             Self::InvalidPlaceOrigin => "E_INVALID_PLACE_ORIGIN",
             Self::UnusedDef => "W_UNUSED_DEF",
+            Self::UnresolvedPort => "E_UNRESOLVED_PORT",
+            Self::AmbiguousPort => "E_AMBIGUOUS_PORT",
+            Self::MissingPathMaterial => "E_MISSING_PATH_MATERIAL",
+            Self::WalkwayBlocked => "W_WALKWAY_BLOCKED",
+            Self::DuplicateWalkway => "W_DUPLICATE_WALKWAY",
         }
     }
 
@@ -181,7 +212,10 @@ impl DiagnosticCode {
             | Self::UnresolvedPlaceRef
             | Self::UnresolvedThemeRef
             | Self::DuplicatePlaceId
-            | Self::InvalidPlaceOrigin => Severity::Error,
+            | Self::InvalidPlaceOrigin
+            | Self::UnresolvedPort
+            | Self::AmbiguousPort
+            | Self::MissingPathMaterial => Severity::Error,
             Self::UnknownSlotTarget
             | Self::ThemeSelectorUnmatched
             | Self::DeferredMember
@@ -189,7 +223,9 @@ impl DiagnosticCode {
             | Self::AbstractTokenDeferred
             | Self::StructNoSize
             | Self::DefNoSize
-            | Self::UnusedDef => Severity::Warning,
+            | Self::UnusedDef
+            | Self::WalkwayBlocked
+            | Self::DuplicateWalkway => Severity::Warning,
         }
     }
 }
@@ -434,6 +470,9 @@ mod tests {
             DiagnosticCode::UnresolvedThemeRef,
             DiagnosticCode::DuplicatePlaceId,
             DiagnosticCode::InvalidPlaceOrigin,
+            DiagnosticCode::UnresolvedPort,
+            DiagnosticCode::AmbiguousPort,
+            DiagnosticCode::MissingPathMaterial,
         ] {
             let s = code.as_str();
             assert!(
@@ -460,6 +499,8 @@ mod tests {
             (DiagnosticCode::StructNoSize, "W_STRUCT_NO_SIZE"),
             (DiagnosticCode::DefNoSize, "W_DEF_NO_SIZE"),
             (DiagnosticCode::UnusedDef, "W_UNUSED_DEF"),
+            (DiagnosticCode::WalkwayBlocked, "W_WALKWAY_BLOCKED"),
+            (DiagnosticCode::DuplicateWalkway, "W_DUPLICATE_WALKWAY"),
         ] {
             assert_eq!(code.as_str(), expected, "{code:?}");
         }
@@ -483,6 +524,9 @@ mod tests {
             DiagnosticCode::UnresolvedThemeRef,
             DiagnosticCode::DuplicatePlaceId,
             DiagnosticCode::InvalidPlaceOrigin,
+            DiagnosticCode::UnresolvedPort,
+            DiagnosticCode::AmbiguousPort,
+            DiagnosticCode::MissingPathMaterial,
         ] {
             assert_eq!(code.severity(), Severity::Error, "{code:?}");
         }
@@ -495,6 +539,8 @@ mod tests {
             DiagnosticCode::StructNoSize,
             DiagnosticCode::DefNoSize,
             DiagnosticCode::UnusedDef,
+            DiagnosticCode::WalkwayBlocked,
+            DiagnosticCode::DuplicateWalkway,
         ] {
             assert_eq!(code.severity(), Severity::Warning, "{code:?}");
         }

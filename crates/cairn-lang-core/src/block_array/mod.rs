@@ -25,12 +25,14 @@ mod lower;
 mod material;
 mod openings;
 mod roof;
+mod walkway;
 
 use indexmap::IndexMap;
 use serde::Serialize;
 
 pub use lower::lower_to_block_array;
 pub use material::{AbstractMaterialResolver, MaterialDeferred, resolve_block_state};
+pub use walkway::{build_walkway_array, l_path, port_world_position};
 
 use crate::check::Diagnostic;
 
@@ -54,11 +56,50 @@ pub struct BlockArrayIr {
     /// site lowering.
     #[serde(skip_serializing_if = "IndexMap::is_empty")]
     pub placements: IndexMap<String, Placement>,
+    /// Per-`connect` walkway metadata, keyed by
+    /// `walkway::SITE::FROM_PLACE.FROM_PORT__TO_PLACE.TO_PORT`. The
+    /// matching [`BlockArray`] sits under the same key in
+    /// [`structures`], so a consumer can join the two against the same
+    /// key the way `placements` does. Empty for any source with no
+    /// `connect` rows, keeping the JSON shape stable for cottage /
+    /// themed-tower fixtures.
+    #[serde(skip_serializing_if = "IndexMap::is_empty")]
+    pub walkways: IndexMap<String, Walkway>,
     /// Diagnostics emitted during lowering. Kept separate from
     /// [`crate::resolve::Resolution::diagnostics`]: the resolver owns
     /// theme-binding hygiene, this list owns voxel-lowering deferrals.
     #[serde(skip)]
     pub diagnostics: Vec<Diagnostic>,
+}
+
+/// One resolved `connect` row laid as a walkway between two ports.
+///
+/// Mirrors the shape of [`Placement`]: site / port-id provenance plus
+/// the world origin and dims of the [`BlockArray`] this walkway lowers
+/// to. The path material is recorded as the canonical Minecraft id so
+/// the lockfile can round-trip the walkway palette without rehydrating
+/// the per-walkway [`BlockArray`].
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct Walkway {
+    /// Bare site name (no `site::` IR-key prefix).
+    pub site: String,
+    /// `place id=` value of the `from` end.
+    pub from_place: String,
+    /// Member `id=` exposed by the `from` end's def.
+    pub from_port: String,
+    /// `place id=` value of the `to` end.
+    pub to_place: String,
+    /// Member `id=` exposed by the `to` end's def.
+    pub to_port: String,
+    /// Absolute world-space origin `(x, y, z)` of the walkway
+    /// [`BlockArray`]. `i32` because `north_of` placements grow the
+    /// walkway into negative `z` just like the buildings themselves.
+    pub origin: (i32, i32, i32),
+    /// Voxel extents of the walkway [`BlockArray`].
+    pub dims: Dims,
+    /// Canonical Minecraft id of the path material laid into the
+    /// walkway (e.g. `minecraft:gravel`).
+    pub path_material: String,
 }
 
 /// One resolved `place` line from a `site` block.

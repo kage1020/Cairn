@@ -310,6 +310,30 @@ fn output_filename_preserves_inner_colons_and_unicode() {
 }
 
 #[test]
+fn output_filename_flattens_walkway_scope_to_site_prefixed_name() {
+    // `walkway::SITE::FROM_PLACE.FROM_PORT__TO_PLACE.TO_PORT` →
+    // `SITE_walkway_FROM_PLACE_FROM_PORT__TO_PLACE_TO_PORT.nbt`. The
+    // site name is preserved (so a multi-site file's walkways do not
+    // collide on disk) and `.` separators between place and port are
+    // flattened to `_` so the on-disk name stays a single identifier
+    // token across operating systems.
+    assert_eq!(
+        output_filename("walkway::hamlet::home1.entry__home2.entry"),
+        "hamlet_walkway_home1_entry__home2_entry.nbt",
+    );
+    // Different site → different filename prefix.
+    assert_eq!(
+        output_filename("walkway::village::a.door__b.door"),
+        "village_walkway_a_door__b_door.nbt",
+    );
+    // A walkway-prefixed key without the `::` site separator falls
+    // through to the generic branch rather than panicking — the IR
+    // contract guarantees the full shape, but the fallback keeps the
+    // helper total against hand-built keys.
+    assert_eq!(output_filename("walkway::no_site"), "walkway::no_site.nbt");
+}
+
+#[test]
 fn output_filename_handles_empty_input() {
     // Degenerate: an empty scope key produces a file named `.nbt`, which
     // is malformed on every OS we target. We don't try to fix it — IR
