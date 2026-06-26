@@ -84,9 +84,42 @@ The compiler writes one `.nbt` per `place`, named after the `id=` (e.g. `home1.n
 recorded in `build.cairn.lock` under `placements`, so a downstream consumer can rebuild the layout
 without re-running the coordinate solver.
 
-### 9.3.5 Ports and `connect` (deferred to M3-PR4)
-`connect` lines parse and validate as `place` siblings, but the **port model** (the
-`position / normal / width` triple a structure exposes through a named anchor like `door.entry`) is
-not yet specified in detail, and walkway voxelisation is intentionally deferred so the port surface
-can land in one piece. Until then `connect` rows emit `W_DEFERRED_MEMBER` and are otherwise inert;
-the cross-port reference validation (`E_UNRESOLVED_PORT`) lands with the port model.
+### 9.3.5 Ports and `connect`
+A `connect FROM.PORT to TO.PORT path=@MATERIAL` row lays a 1-block-wide walkway between two named
+ports on placements within the same `site`.
+
+**Ports.** A port is the `(place, member_id)` pair `PLACE.PORT` resolves to. M3-PR4 only exposes
+ports on `door` members of the referenced `def`; window / stair / roof ports are reserved for a
+later PR. The port's world position is "one block outside the door's `side=` wall, at the ground
+row" — `front`/`back`/`left`/`right` map to `+z`/`-z`/`-x`/`+x` (§9.3.1), and the door's
+`at=center` wall-local offset combines with the placement's overhang to land the port in the
+overhang ring beyond the structure's outer face.
+
+**Path.** The walkway runs as a Manhattan L (x-axis leg, then z-axis leg) at the two ports' shared
+Y — 3D path search (staircases, multi-level walkways) is intentionally out of scope for M3-PR4 so
+the port surface can land in one piece. Cells that overlap an existing structure floor are skipped
+and the row earns one `W_WALKWAY_BLOCKED` warning so the author can widen the placement gap.
+
+**Material.** The `path=@TOKEN` value lifts through the same `mat_slot=` pipeline used for member
+materials — concrete tokens like `@gravel` work without a registry pack; abstract tokens like
+`@path.gravel` require the pack's materials catalog and surface `W_ABSTRACT_TOKEN_DEFERRED` /
+`E_UNKNOWN_ABSTRACT_TOKEN` on a miss.
+
+**Output.** Each `connect` row writes one `.nbt` named after its site and ports (e.g.
+`hamlet_walkway_home1_entry__home2_entry.nbt`) and records a `walkways:` entry in the lockfile
+carrying the world origin, dims, and resolved path material — enough to rebuild the strip without
+re-running the resolver.
+
+**Diagnostics.**
+
+- `E_UNRESOLVED_PORT` — the right-of-dot port id does not name a member of the referenced def
+  (with a nearest-match `did you mean` note when one fits the standard spell cap).
+- `E_AMBIGUOUS_PORT` — the def exposes the same `id=` on more than one member; rename the
+  collision so the reference is unique.
+- `E_MISSING_PATH_MATERIAL` — the row omits `path=`; walkway lowering has nothing to lay.
+- `E_UNRESOLVED_PLACE_REF` — the head place id (left of the dot) does not name a prior place in
+  this site, shared with §9.3.3.
+- `W_WALKWAY_BLOCKED` — the L-shaped path crossed an existing structure floor; the colliding
+  cells are skipped and the rest of the strip still lays.
+- `W_DUPLICATE_WALKWAY` — the same `(from, to)` port pair has already been laid in this site;
+  the duplicate row is dropped.

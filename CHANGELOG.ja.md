@@ -19,6 +19,50 @@
 
 ### Added
 
+- `cairn-lang-core::block_array::walkway` — `connect a.PORT to b.PORT
+  path=@MATERIAL` 行を walkway BlockArray に lowering する。新規 IR キー
+  `walkway::SITE::FROM_PLACE.FROM_PORT__TO_PLACE.TO_PORT` のもとで
+  `village.crn` が `cairn compile --edition java` を end-to-end で
+  通過するようになった (placement 1 配置 = 1 `.nbt`、`connect` 行 1 行
+  = walkway 1 本 = 1 `.nbt`)。ポートモデルは「`door` の `side=` 壁の
+  外側 1 ブロック、地面段」とし、M3-PR4 ではポート公開を `door`
+  メンバーに限定 (window / stair / roof のポートは後続 PR)、
+  `at=center` のみをサポート、`front`/`back`/`left`/`right` は
+  `+z`/`-z`/`-x`/`+x` (`spec/components-editing-sites.md` §9.3.1) に
+  対応する。歩道は両ポートで一致する Y で Manhattan L 字経路 (先に
+  x 軸、次に z 軸) を辿る — 3D 経路探索や階段アプローチはポート面を
+  一度に着地させるため意図的に範囲外とした。既存構造の床と重なる
+  セルはスキップし、行ごとに `W_WALKWAY_BLOCKED` 警告を 1 件出す。
+  `BlockArrayIr` には並列の `walkways: IndexMap<…, Walkway>` を追加
+  し、ワールド原点・寸法・canonical パスマテリアル (`mat_slot=` と
+  同じ `resolve_block_state` パイプラインで lift、`@gravel` のような
+  concrete token と `@path.gravel` のような registry-backed abstract
+  token の両方に対応) を記録する。Lockfile には既存 `placements:`
+  セクションに対応する `walkways:` セクションを追加した。
+- `cairn-lang-core::resolve` — site スコープ解決が、検証済みの
+  `connect` 行ごとに `ResolvedConnect` を生成する (`Resolution.connects`)。
+  両端の `PortRef` と `path=` 値を `ValueWithSpan` として保持する。
+  解決パスは右側のポート ID が def に存在しない場合に
+  `E_UNRESOLVED_PORT` (Error、近接候補ノート付き)、同名 `id=` が def
+  内に複数あれば `E_AMBIGUOUS_PORT` (Error)、`path=` が欠落していれば
+  `E_MISSING_PATH_MATERIAL` (Error) を発火する。左側の place ID は
+  既存の `E_UNRESOLVED_PLACE_REF` を再利用するため、未知の place
+  コード系列の単一発生源を保つ。失敗した connect は `connects` から
+  除外され、walkway voxeliser は安全に敷ける行のみを処理する。
+- lowering 側に 2 つの advisory コードを追加。
+  `W_WALKWAY_BLOCKED` (Warning) は L 字経路が既存構造の床を貫通した
+  ときに発火する。衝突セルは air のままで、残りの strip はそのまま
+  敷設される。`W_DUPLICATE_WALKWAY` (Warning) は同じ `(from, to)`
+  ポート組が同一 site で既に敷設済みのときに発火し、重複行は静かに
+  破棄される。重複ガードは両端を sort してから保持するため、
+  `a.entry → b.entry` と `b.entry → a.entry` は同じ walkway として
+  集約される。
+- `cairn-lang-formats::java_structure::output_filename` が
+  `walkway::SITE::FROM_PLACE.FROM_PORT__TO_PLACE.TO_PORT` という IR
+  キー形を解釈し、ファイル名 `SITE_walkway_FROM_PLACE_FROM_PORT__TO_PLACE_TO_PORT.nbt`
+  を返すようになった。`.` 区切りをフラットにし、ディスク上の名前を OS
+  間で単一の識別子トークンに保つ。
+
 - `cairn-lang-core::block_array::lower` — site lowering により
   `village.crn` の往復が完成。`lower_to_block_array` は既存の struct ループ
   の後に `intent.sites` を走査し、各 `place` について `use=DEF` を

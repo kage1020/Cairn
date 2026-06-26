@@ -17,7 +17,9 @@ use std::fs;
 use std::path::Path;
 
 pub use hash::{HashError, HashHex, HashParseError, hash_resolved_ir, hash_source};
-pub use schema::{LockEdition, LockInputs, LockPlacement, LockTarget, Lockfile, MemberSensitivity};
+pub use schema::{
+    LockEdition, LockInputs, LockPlacement, LockTarget, LockWalkway, Lockfile, MemberSensitivity,
+};
 
 use thiserror::Error;
 

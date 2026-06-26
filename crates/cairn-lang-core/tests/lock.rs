@@ -25,6 +25,7 @@ fn unit_ir(palette: Palette) -> BlockArrayIr {
     BlockArrayIr {
         structures,
         placements: IndexMap::new(),
+        walkways: IndexMap::new(),
         diagnostics: vec![],
     }
 }
@@ -91,6 +92,7 @@ fn sample_lockfile() -> Lockfile {
             reason: "cauldron split at 1.17".to_owned(),
         }],
         placements: vec![],
+        walkways: vec![],
     }
 }
 

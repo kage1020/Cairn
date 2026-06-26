@@ -38,6 +38,14 @@ pub struct Lockfile {
     /// cottage / themed-tower builds that pre-date the site surface.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub placements: Vec<LockPlacement>,
+    /// Per-`connect` walkway records. Each entry pins both ports, the
+    /// world-space origin / dims of the walkway block array, and the
+    /// canonical path material so the lockfile alone is enough to
+    /// reproduce the strip without re-running the resolver. Empty for
+    /// sources that declare no `connect` lines, preserving lockfile
+    /// shape parity with cottage / themed-tower builds.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub walkways: Vec<LockWalkway>,
 }
 
 /// One `place` line resolved into absolute world-space coordinates.
@@ -63,6 +71,30 @@ pub struct LockPlacement {
     /// at the time of the build. Captured here so the lockfile alone is
     /// enough to compute the next-placement offset for an incremental
     /// re-resolve, without rehydrating every block array.
+    pub dims: [u32; 3],
+}
+
+/// One `connect from.port to to.port` row resolved into a walkway
+/// strip's world-space origin, dims, and path material.
+///
+/// Mirrors [`LockPlacement`]'s shape so `(site, id, def, theme,
+/// origin, dims)` becomes `(site, from, to, path_material, origin,
+/// dims)` — same five disk axes, just oriented around the two ports
+/// the row connects.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct LockWalkway {
+    /// `site` name the walkway belongs to (bare, no `site::` prefix).
+    pub site: String,
+    /// `from` port as `PLACE.PORT` (e.g. `home1.entry`).
+    pub from: String,
+    /// `to` port as `PLACE.PORT`.
+    pub to: String,
+    /// Canonical Minecraft id of the path material laid into the
+    /// walkway (e.g. `minecraft:gravel`).
+    pub path_material: String,
+    /// Absolute `(x, y, z)` origin in world voxels.
+    pub origin: [i32; 3],
+    /// Voxel extents of the walkway block array.
     pub dims: [u32; 3],
 }
 

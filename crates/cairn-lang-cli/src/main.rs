@@ -7,8 +7,8 @@ use cairn_lang_core::CAIRN_VERSION;
 use cairn_lang_core::block_array::{BlockArray, BlockArrayIr, lower_to_block_array};
 use cairn_lang_core::check::LineStarts;
 use cairn_lang_core::lock::{
-    HashHex, LockEdition, LockInputs, LockPlacement, LockTarget, Lockfile, hash_resolved_ir,
-    hash_source,
+    HashHex, LockEdition, LockInputs, LockPlacement, LockTarget, LockWalkway, Lockfile,
+    hash_resolved_ir, hash_source,
 };
 use cairn_lang_core::resolve::{VersionAxes, compute_axes, resolve};
 use cairn_lang_core::{Severity, check, lower, parse};
@@ -848,6 +848,18 @@ fn build_lockfile(
                 theme: p.theme.clone(),
                 origin: [p.origin.0, p.origin.1, p.origin.2],
                 dims: [p.dims.x, p.dims.y, p.dims.z],
+            })
+            .collect(),
+        walkways: block_ir
+            .walkways
+            .values()
+            .map(|w| LockWalkway {
+                site: w.site.clone(),
+                from: format!("{}.{}", w.from_place, w.from_port),
+                to: format!("{}.{}", w.to_place, w.to_port),
+                path_material: w.path_material.clone(),
+                origin: [w.origin.0, w.origin.1, w.origin.2],
+                dims: [w.dims.x, w.dims.y, w.dims.z],
             })
             .collect(),
     })

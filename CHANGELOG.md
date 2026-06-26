@@ -17,6 +17,54 @@ placeholder cannot leak out. The `2026.07.0` release PR will flip publish to `tr
 
 ### Added
 
+- `cairn-lang-core::block_array::walkway` — `connect a.PORT to b.PORT
+  path=@MATERIAL` rows now lower into per-walkway `BlockArray`s under a
+  new `walkway::SITE::FROM_PLACE.FROM_PORT__TO_PLACE.TO_PORT` IR key, so
+  `village.crn` round-trips end-to-end through `cairn compile --edition
+  java` (one `.nbt` per placement plus one per `connect` row). The port
+  model is "one block outside the door's `side=` wall, at the ground
+  row": M3-PR4 only exposes ports on `door` members (window / stair /
+  roof ports land in a later PR), `at=center` is the only supported
+  wall-local offset, and `front` / `back` / `left` / `right` map to
+  `+z` / `-z` / `-x` / `+x` per `spec/components-editing-sites.md`
+  §9.3.1. Walkways follow a Manhattan L at the two ports' shared Y
+  (x-axis leg first, then z-axis leg) — 3D path search and stair
+  approaches are intentionally out of scope so the port surface lands
+  in one piece. Cells that overlap an existing structure floor are
+  skipped and the row earns one `W_WALKWAY_BLOCKED` warning per
+  collision so the author can widen the placement gap. The
+  `BlockArrayIr` gains a parallel `walkways: IndexMap<…, Walkway>` map
+  pinning the world origin, dims, and canonical path material (lifted
+  through the same `resolve_block_state` pipeline `mat_slot=` uses, so
+  both concrete `@gravel` and registry-backed `@path.gravel` work). The
+  lockfile gains a matching `walkways:` section under the existing
+  `placements:` block.
+- `cairn-lang-core::resolve` — site-scope resolution now produces one
+  `ResolvedConnect` per validated `connect` row (`Resolution.connects`)
+  carrying both `PortRef`s and the `path=` value as a `ValueWithSpan`.
+  The pass emits `E_UNRESOLVED_PORT` (Error, with a nearest-match note)
+  when the right-of-dot port id is not declared by the referenced def,
+  `E_AMBIGUOUS_PORT` (Error) when the def exposes the same `id=` on
+  more than one member, and `E_MISSING_PATH_MATERIAL` (Error) when the
+  row omits `path=`. The left-of-dot place id reuses the existing
+  `E_UNRESOLVED_PLACE_REF` so the unknown-place code family stays
+  single-sourced. Failed connects are dropped from `connects` so the
+  walkway voxeliser only ever sees rows it can lay safely.
+- Two advisory diagnostic codes on the lowering side:
+  `W_WALKWAY_BLOCKED` (Warning) when the L-shaped path crosses an
+  existing structure floor; the colliding cells stay air and the rest
+  of the strip still lays. `W_DUPLICATE_WALKWAY` (Warning) when the
+  same `(from, to)` port pair has already been laid in this site; the
+  duplicate row is dropped silently so re-laying the same gravel strip
+  cannot double-write voxels. The duplicate guard sorts the two
+  endpoints so `a.entry → b.entry` and `b.entry → a.entry` collapse to
+  one walkway.
+- `cairn-lang-formats::java_structure::output_filename` now recognises
+  the `walkway::SITE::FROM_PLACE.FROM_PORT__TO_PLACE.TO_PORT` IR key
+  shape and writes it as `SITE_walkway_FROM_PLACE_FROM_PORT__TO_PLACE_TO_PORT.nbt`,
+  flattening the `.` separator so the on-disk name stays a single
+  identifier token across operating systems.
+
 - `cairn-lang-core::block_array::lower` — site lowering closes the
   `village.crn` round-trip. `lower_to_block_array` now iterates
   `intent.sites` after the existing struct loop: each `place` resolves its

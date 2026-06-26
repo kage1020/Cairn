@@ -722,11 +722,13 @@ fn c20_village_lockfile_round_trips_through_yaml() {
 }
 
 #[test]
-fn c21_village_emits_two_w_deferred_member_for_connect() {
-    // The connect rows must surface as deferred warnings (one per row) and
-    // the exit must stay 0 — the "warnings do not fail the build" rule
-    // c14b pins for themed-tower applies here too. Walkway voxelisation
-    // and the port model are not yet implemented.
+fn c21_village_lowers_connect_rows_into_walkway_artifacts() {
+    // M3-PR4 lands the port model and walkway voxelisation, so the two
+    // `connect` rows in village.crn must lower into per-walkway `.nbt`
+    // artifacts (one per row) instead of degrading to W_DEFERRED_MEMBER.
+    // The exit must stay 0 — any W_WALKWAY_BLOCKED warnings that fall out
+    // of the cottage overlap are advisory, mirroring c14b's
+    // warnings-do-not-fail-the-build rule.
     let (_tmp_src, src) = example_in_tempdir("village.crn");
     let out_dir = TempDir::new().expect("out tempdir");
     let result = run_compile(&[
@@ -740,8 +742,28 @@ fn c21_village_emits_two_w_deferred_member_for_connect() {
     let stderr = String::from_utf8(result.stderr).expect("utf-8");
     assert_eq!(
         stderr.matches("W_DEFERRED_MEMBER").count(),
-        2,
-        "expected exactly two deferred-member warnings (one per connect row); stderr={stderr}",
+        0,
+        "connect rows must no longer emit W_DEFERRED_MEMBER; stderr={stderr}",
+    );
+    // The two `connect` rows land as `hamlet_walkway_*.nbt` files
+    // alongside the three placement files.
+    let written: Vec<_> = std::fs::read_dir(out_dir.path())
+        .expect("read out_dir")
+        .filter_map(Result::ok)
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .collect();
+    let walkway_count = written
+        .iter()
+        .filter(|name| {
+            name.starts_with("hamlet_walkway_")
+                && std::path::Path::new(name.as_str())
+                    .extension()
+                    .is_some_and(|ext| ext.eq_ignore_ascii_case("nbt"))
+        })
+        .count();
+    assert_eq!(
+        walkway_count, 2,
+        "expected two walkway artifacts (one per `connect` row), got {written:?}",
     );
 }
 
