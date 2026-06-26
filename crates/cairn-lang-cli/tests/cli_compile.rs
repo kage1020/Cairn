@@ -531,7 +531,7 @@ fn c14b_deferred_member_warning_still_exits_zero_on_other_examples() {
 
 #[test]
 fn c16_themed_tower_compiles_with_lifted_abstract_tokens() {
-    // M3-PR2: the built-in materials catalog covers every abstract token
+    // The built-in materials catalog covers every abstract token
     // themed-tower binds, so compile must finish without
     // `W_ABSTRACT_TOKEN_DEFERRED` or `E_UNKNOWN_ABSTRACT_TOKEN`, write a
     // `keep.nbt`, and the lockfile records the same registry pack hash that
@@ -723,12 +723,12 @@ fn c20_village_lockfile_round_trips_through_yaml() {
 
 #[test]
 fn c21_village_lowers_connect_rows_into_walkway_artifacts() {
-    // M3-PR4 lands the port model and walkway voxelisation, so the two
-    // `connect` rows in village.crn must lower into per-walkway `.nbt`
-    // artifacts (one per row) instead of degrading to W_DEFERRED_MEMBER.
-    // The exit must stay 0 — any W_WALKWAY_BLOCKED warnings that fall out
-    // of the cottage overlap are advisory, mirroring c14b's
-    // warnings-do-not-fail-the-build rule.
+    // Port model and walkway voxelisation are wired through end-to-end, so
+    // the two `connect` rows in village.crn must lower into per-walkway
+    // `.nbt` artifacts (one per row) instead of degrading to
+    // W_DEFERRED_MEMBER. The exit must stay 0 — any W_WALKWAY_BLOCKED
+    // warnings that fall out of the cottage overlap are advisory,
+    // mirroring c14b's warnings-do-not-fail-the-build rule.
     let (_tmp_src, src) = example_in_tempdir("village.crn");
     let out_dir = TempDir::new().expect("out tempdir");
     let result = run_compile(&[

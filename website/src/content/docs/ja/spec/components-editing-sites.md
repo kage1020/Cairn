@@ -87,17 +87,17 @@ site village:
 `connect FROM.PORT to TO.PORT path=@MATERIAL` 行は、同一 `site` 内の 2 つの placement が公開する
 ポート間に幅 1 ブロックの歩道を敷設します。
 
-**ポート**: `PLACE.PORT` は `(place, member_id)` の組に解決されます。M3-PR4 ではポートを公開できる
-のは参照先 `def` の `door` メンバーのみで、window / stair / roof のポートは後続 PR に持ち越しと
-します。ポートのワールド座標は「ドアの `side=` 壁の外側 1 ブロック、地面段」とし、
+**ポート**: `PLACE.PORT` は `(place, member_id)` の組に解決されます。現状ポートを公開できるのは
+参照先 `def` の `door` メンバーのみで、window / stair / roof のポートは将来拡張用に予約されて
+います。ポートのワールド座標は「ドアの `side=` 壁の外側 1 ブロック、地面段」とし、
 `front`/`back`/`left`/`right` はそれぞれ `+z`/`-z`/`-x`/`+x` に対応します (§9.3.1)。ドアの
 `at=center` という壁ローカル オフセットと placement の overhang を合成して、ポートは構造の外面
 を超えた overhang リング上に着地します。
 
 **経路**: 歩道は 2 つのポートで一致する Y で Manhattan L (先に x 軸、次に z 軸) を走ります。
-階段や複数階層をまたぐ 3D 経路探索はポート面を一度に着地させるため M3-PR4 のスコープから意図的に
-外しています。既存の構造床と重なるセルはスキップし、行ごとに `W_WALKWAY_BLOCKED` を 1 件だけ警告
-として発します。
+階段や複数階層をまたぐ 3D 経路探索はポート面を一度に着地させるため意図的にスコープから外して
+います。既存の構造床と重なるセルはスキップし、行ごとに `W_WALKWAY_BLOCKED` を 1 件だけ警告として
+発します。
 
 **マテリアル**: `path=@TOKEN` の値はメンバーマテリアルと同じ `mat_slot=` パイプラインを通って解決
 されます。`@gravel` のような canonical token はレジストリパック無しで利用でき、`@path.gravel` の

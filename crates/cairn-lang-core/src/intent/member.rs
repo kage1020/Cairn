@@ -45,8 +45,8 @@ pub struct Member {
     pub positional: Vec<Value>,
     /// `-> VALUE` tail at the end of a line, e.g.
     /// `pressure_plate ... -> sig.step`. Always carried separately from
-    /// [`Self::intent_state`] so the M2-PR3 `reference` pass can resolve it
-    /// without round-tripping through a string key.
+    /// [`Self::intent_state`] so the resolver's reference pass can match
+    /// it without round-tripping through a string key.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub binding: Option<Value>,
     /// `key=value` attributes that were not consumed by the dedicated fields

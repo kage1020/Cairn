@@ -1,17 +1,17 @@
 //! End-to-end check that `village.crn` lowers to the expected site shape.
 //!
-//! The village example is the M3-PR4 gate: three placements connected by
-//! two gravel walkways. The assertions pin the per-place block-array
-//! emission (one `BlockArray` per place under the matching
-//! `site::SITE::PLACE_ID` key), the walkway emission (one entry per
-//! `connect` row, with the `walkway::SITE::FROM_PLACE.FROM_PORT__TO_PLACE.TO_PORT`
-//! key shape), and the absence of `W_DEFERRED_MEMBER` warnings — a
-//! regression in any of those would mean a future change quietly
-//! re-broke either site lowering or walkway voxelisation.
+//! Three placements connected by two gravel walkways. The assertions pin
+//! the per-place block-array emission (one `BlockArray` per place under
+//! the matching `site::SITE::PLACE_ID` key), the walkway emission (one
+//! entry per `connect` row, with the
+//! `walkway::SITE::FROM_PLACE.FROM_PORT__TO_PLACE.TO_PORT` key shape),
+//! and the absence of `W_DEFERRED_MEMBER` warnings — a regression in any
+//! of those would mean a future change quietly re-broke either site
+//! lowering or walkway voxelisation.
 
 use std::path::PathBuf;
 
-use cairn_lang_core::block_array::{BlockArrayIr, lower_to_block_array};
+use cairn_lang_core::block_array::{BlockArrayIr, Dims, lower_to_block_array};
 use cairn_lang_core::check::{DiagnosticCode, Severity};
 use cairn_lang_core::{lower, parse, resolve};
 
@@ -72,6 +72,39 @@ fn village_emits_three_placements_and_two_walkways() {
         assert_eq!(walkway.from_port, "entry");
         assert_eq!(walkway.to_port, "entry");
         assert_eq!(walkway.path_material, "minecraft:gravel");
+        // Pin origin/dims so an axis swap (x↔z) or off-by-one in the
+        // overhang shift fails loud here. home1 sits at (0,0,0) with
+        // overhang=1, so its front port resolves to (5, 0, 8);
+        // home2 east_of home1 gap=4 → origin (15, 0, 0), front port
+        // (20, 0, 8); home3 north_of home1 gap=5 → origin (0, 0, -14),
+        // front port (5, 0, -6).
+        match (walkway.from_place.as_str(), walkway.to_place.as_str()) {
+            ("home1", "home2") => {
+                assert_eq!(
+                    walkway.origin,
+                    (5, 0, 8),
+                    "home1↔home2 walkway should start at home1's front port",
+                );
+                assert_eq!(
+                    walkway.dims,
+                    Dims { x: 16, y: 1, z: 1 },
+                    "home1↔home2 walkway runs purely along +x",
+                );
+            }
+            ("home1", "home3") => {
+                assert_eq!(
+                    walkway.origin,
+                    (5, 0, -6),
+                    "home1↔home3 walkway bounding box starts at home3's front port",
+                );
+                assert_eq!(
+                    walkway.dims,
+                    Dims { x: 1, y: 1, z: 15 },
+                    "home1↔home3 walkway runs purely along z",
+                );
+            }
+            (from, to) => panic!("unexpected walkway pair {from}↔{to}"),
+        }
     }
 }
 

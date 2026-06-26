@@ -10,9 +10,9 @@
 //! Version strings are compared component-wise as a tuple of `u32` (dot
 //! separated). This matches the spec note that version strings should be
 //! treated as opaque labels backed by `DataVersion`-as-ordering-key, but
-//! degrades gracefully to dotted-decimal ordering when `DataVersion` is not
-//! available (it isn't yet — that table arrives with the registry pack in
-//! 2026.12.0).
+//! degrades gracefully to dotted-decimal ordering when `DataVersion` is
+//! not available (it is not wired through yet — the table arrives with
+//! the registry pack's data-version catalog).
 
 use std::cmp::Ordering;
 

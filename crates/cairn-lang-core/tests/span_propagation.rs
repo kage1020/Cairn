@@ -1,6 +1,6 @@
 //! Span propagation acceptance tests.
 //!
-//! Locks down the M2-PR2 invariant that every parser-visible AST node carries
+//! Locks down the invariant that every parser-visible AST node carries
 //! a `span` whose byte range round-trips through `&source[span]` to the
 //! surface form, and that the IR's [`Member`] mirrors the originating
 //! [`Statement::Generic`] span exactly.

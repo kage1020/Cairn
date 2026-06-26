@@ -63,9 +63,9 @@ pub enum JavaStructureError {
 /// # Errors
 ///
 /// Returns [`JavaStructureError::AbstractPaletteEntry`] when a palette
-/// entry's id has no `:` separator — the registry pack ingest in 2026.12.0
-/// will resolve abstract tokens before they reach this point, but until
-/// then `cairn lower` can leak them in and we refuse to write a malformed
+/// entry's id has no `:` separator — the registry pack normally resolves
+/// abstract tokens before they reach this point, but a `cairn lower` run
+/// without a pack can leak them in and we refuse to write a malformed
 /// structure rather than emit one Minecraft will silently treat as air.
 pub fn build_structure_tag(
     ba: &BlockArray,
@@ -150,6 +150,13 @@ pub fn output_filename(source_scope: &str) -> String {
     if let Some(rest) = source_scope.strip_prefix("walkway::")
         && let Some((site, ports)) = rest.split_once("::")
     {
+        // Flatten `place.port` separators to `_` for portable filenames.
+        // Cairn ids reject `.`, so the only path that could fold two
+        // distinct scopes into one filename — `a.b__c.d` colliding with
+        // `a_b__c_d` — cannot be produced by a syntactically valid
+        // module. If id grammar later allows `.` (or `_` becomes a
+        // separator), revisit this flatten before the on-disk shape
+        // becomes ambiguous.
         let flattened = ports.replace('.', "_");
         return format!("{site}_walkway_{flattened}.nbt");
     }

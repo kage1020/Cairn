@@ -194,9 +194,9 @@ fn duplicate_size_does_not_leak_into_residual_args() {
 
 #[test]
 fn token_and_dotref_are_not_hoisted_into_label_fields() {
-    // Regression for the PR #20 review: hoist_label used to accept Token
-    // and DotRef silently, swallowing diagnostics the M2-PR2 type-mismatch
-    // pass needs to report.
+    // Regression: hoist_label used to accept Token and DotRef silently,
+    // swallowing diagnostics the `check::type_mismatch` pass needs to
+    // report.
     let ir = lower_source("struct s size=1x1\n  walls id=@oak class=foo.bar mat_slot=wall\n");
     let member = &ir.structs[0].members[0];
     assert!(

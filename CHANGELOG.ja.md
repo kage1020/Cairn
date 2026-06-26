@@ -19,6 +19,22 @@
 
 ### Added
 
+- `cairn-lang-core::block_array::lower` — walkway 端点 skip のカスケード
+  警告を追加。`connect` 行が指す placement が lowering されなかった
+  (def に `size=` が無い、theme 参照が上流で失敗、など) 場合、
+  `lower_connects` は静かに strip を落とすのではなく、欠落側を名指しした
+  `W_DEFERRED_MEMBER` を発するようになった。修正ヒントとして元の
+  `W_DEF_NO_SIZE` / `W_DEFERRED_MEMBER` / `E_UNRESOLVED_PLACE_REF` を
+  追跡するよう note 化した。健全な入力に対する walkway IR / lockfile
+  出力は変わらない。
+- `crates/cairn-lang-core` の回帰テストを拡充し、walkway 表面を end-to-end
+  でピン留めした: `W_WALKWAY_BLOCKED` の skip 数契約、abstract token を
+  walkway パスとして lift / deferred / 未知 token の 3 経路
+  (`walkway_abstract_path_*`)、端点カスケード警告、`from`/`to` 対称の
+  `E_UNRESOLVED_PORT` / `E_UNRESOLVED_PLACE_REF` (span anchor アサート
+  込み)。`village.crn` のテストでは walkway の `origin`/`dims` も
+  ピンしたので、overhang シフトの軸スワップや off-by-one が
+  ペル walkway 単位で fail loud になる。
 - `cairn-lang-core::block_array::walkway` — `connect a.PORT to b.PORT
   path=@MATERIAL` 行を walkway BlockArray に lowering する。新規 IR キー
   `walkway::SITE::FROM_PLACE.FROM_PORT__TO_PLACE.TO_PORT` のもとで

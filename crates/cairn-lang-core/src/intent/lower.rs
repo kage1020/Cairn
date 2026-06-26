@@ -21,7 +21,7 @@ use super::{
 /// successfully-parsed input. Unknown keywords are preserved via
 /// [`super::MemberRole::Other`] rather than rejected, and any duplication
 /// (repeated `size=`, duplicate slot, etc.) is *silently* normalised here
-/// on the IR side — the M2-PR2 `duplicate` pass detects those by walking
+/// on the IR side — the `check::duplicate` pass detects those by walking
 /// the surface [`Module`] directly, so the IR's last-write-wins shape is
 /// not load-bearing for diagnostics.
 #[must_use]

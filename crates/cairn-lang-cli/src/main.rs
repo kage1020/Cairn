@@ -386,9 +386,9 @@ fn run_info(file: &Path, editions: &[String], format: InfoFormat) -> ExitCode {
 fn print_text(axes: &VersionAxes) {
     // Axis 1: the registry-compatible range is currently edition-agnostic
     // — `RegistryRange` holds a single `min/max` pair. The output renders
-    // it as one entry to match. When the registry pack lands (2026.12.0)
-    // and the range becomes per-edition, this is the line that grows a
-    // per-edition list to mirror axis 2.
+    // it as one entry to match. Once registry-pack data makes the range
+    // per-edition, this is the line that grows a per-edition list to
+    // mirror axis 2.
     println!(
         "registry compatibility:  {} .. {}",
         axes.registry_compat.min, axes.registry_compat.max,
@@ -829,9 +829,9 @@ fn build_lockfile(
             // The registry pack ingest replaces the hardcoded `data_version`
             // table; its bytes hash pins the exact (mc_version, DataVersion)
             // resolution rules a downstream re-compile must match. The
-            // constraint catalog ingest in a later PR fills the second
-            // field; until then it stays zero (per `LockInputs::zero`'s
-            // contract).
+            // constraint catalog ingest will fill the second field once
+            // catalogs ship; until then it stays zero (per
+            // `LockInputs::zero`'s contract).
             registry_pack_hash: builtin_java().bytes_hash.clone(),
             constraint_catalog_hash: HashHex::zero(),
         },

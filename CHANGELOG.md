@@ -17,6 +17,24 @@ placeholder cannot leak out. The `2026.07.0` release PR will flip publish to `tr
 
 ### Added
 
+- `cairn-lang-core::block_array::lower` — endpoint-skip cascade for
+  walkways. When a `connect` row points at a placement that did not
+  lower (e.g. its def has no `size=`, or a theme reference failed
+  upstream), `lower_connects` now emits a `W_DEFERRED_MEMBER` whose
+  message names the offending side instead of dropping the strip
+  silently. The remediation note points back at the original
+  `W_DEF_NO_SIZE` / `W_DEFERRED_MEMBER` / `E_UNRESOLVED_PLACE_REF` so
+  the chain is easy to follow. Walkway IR / lockfile output is
+  unchanged for healthy inputs.
+- New regression tests under `crates/cairn-lang-core` pin the walkway
+  surface end-to-end: `W_WALKWAY_BLOCKED` skip-count contract,
+  abstract-token walkway lift / deferred / unknown-token paths
+  (`walkway_abstract_path_*`), endpoint-cascade warning, and
+  symmetric `from`/`to` sad-path coverage for `E_UNRESOLVED_PORT` and
+  `E_UNRESOLVED_PLACE_REF` with span-anchor assertions. Tests for
+  `village.crn` additionally pin walkway `origin`/`dims` so an axis
+  swap or off-by-one in the overhang shift fails loud at the
+  per-walkway entry.
 - `cairn-lang-core::block_array::walkway` — `connect a.PORT to b.PORT
   path=@MATERIAL` rows now lower into per-walkway `BlockArray`s under a
   new `walkway::SITE::FROM_PLACE.FROM_PORT__TO_PLACE.TO_PORT` IR key, so

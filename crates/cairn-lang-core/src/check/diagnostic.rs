@@ -11,8 +11,8 @@ use crate::error::{Position, Span};
 /// `Error` participates in the `cairn check` exit code (any error → exit 1);
 /// `Warning` does not. Stable per `spec/lint.md` §11.2: errors are things
 /// that, left alone, cause unintended results; warnings are advisory drift.
-/// Every M2-PR2 code is `Error`; `Warning` is defined now so the discriminant
-/// is locked before the first warning ships.
+/// Both variants ship in the public enum so a new `Warning` code can land
+/// without changing the discriminant a downstream matcher already pinned.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Severity {
@@ -38,8 +38,8 @@ impl Severity {
 /// The string form (`E_DUPLICATE_SIZE`, `E_UNKNOWN_KEYWORD`, ...) is the
 /// contract surface: downstream tooling matches on it without inspecting
 /// the prose `primary` message. Marked `#[non_exhaustive]` so adding new
-/// codes during the Evolving phase (pre-M3) does not break callers' exhaust
-/// matches.
+/// codes while the diagnostic surface is still **Evolving** does not break
+/// callers' exhaust matches.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum DiagnosticCode {

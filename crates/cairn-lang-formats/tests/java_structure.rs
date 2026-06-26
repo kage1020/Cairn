@@ -389,9 +389,9 @@ fn cottage_structure_tag() -> cairn_lang_formats::java_structure::Compound {
 
 #[test]
 fn f12_cottage_end_to_end_palette_carries_spruce_stairs_properties() {
-    // M2-PR6: lowering the cottage example must produce a Java palette
-    // where spruce_stairs appears with `facing` and `half` properties on
-    // every entry. The Properties compound is the contract the Minecraft
+    // Lowering the cottage example must produce a Java palette where
+    // spruce_stairs appears with `facing` and `half` properties on every
+    // entry. The Properties compound is the contract the Minecraft
     // structure block reads — losing it would silently strip the roof
     // orientation and render the gable as flat slabs.
     let root = cottage_structure_tag();
@@ -430,7 +430,7 @@ fn f12_cottage_end_to_end_palette_carries_spruce_stairs_properties() {
 
 #[test]
 fn f13_cottage_end_to_end_size_matches_overhang_inflated_dims() {
-    // M2-PR6: cottage.crn declares size=9x7 walls height=4 roof overhang=1.
+    // cottage.crn declares size=9x7 walls height=4 roof overhang=1.
     // The Java structure root must mirror the lowering pass:
     //   x = 9 + 2 = 11
     //   z = 7 + 2 = 9

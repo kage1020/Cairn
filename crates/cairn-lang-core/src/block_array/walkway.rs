@@ -8,9 +8,9 @@
 //!
 //! 1. [`port_world_position`] turns a `(place_origin, def, port_id)`
 //!    triple into the world-voxel coordinate one block outside the
-//!    door's `side=` face. M3-PR4 only exposes ports on `door` members
-//!    — other roles (windows etc.) lower silently to `None` so the
-//!    caller can decide whether to fail with `E_UNRESOLVED_PORT`.
+//!    door's `side=` face. Ports are currently exposed only on `door`
+//!    members — other roles (windows etc.) lower silently to `None` so
+//!    the caller can decide whether to fail with `E_UNRESOLVED_PORT`.
 //! 2. [`l_path`] walks a Manhattan L (x-axis first, then z-axis) between
 //!    two world voxels at a constant Y, deduplicating the corner cell so
 //!    every coordinate appears once.
@@ -21,10 +21,9 @@
 //!    are skipped and counted so the caller can emit one
 //!    `W_WALKWAY_BLOCKED` warning per row.
 //!
-//! The walkway always sits at the two ports' shared Y. The 3D path
-//! search (staircases, multi-level walkways) is intentionally out of
-//! scope for M3-PR4; the rest of the M3 examples land flat against
-//! `y = 0`.
+//! The walkway always sits at the two ports' shared Y. 3D path search
+//! (staircases, multi-level walkways) is intentionally out of scope for
+//! now; every shipping example lays its walkways flat against `y = 0`.
 
 use std::collections::HashSet;
 use std::hash::BuildHasher;
@@ -65,7 +64,7 @@ pub fn port_world_position(
         .iter()
         .find(|m| m.id.as_deref() == Some(port_id))?;
     if !matches!(member.role, MemberRole::Door) {
-        // Window / stair / roof ports land in a later PR. Returning
+        // Window / stair / roof ports are not yet modelled. Returning
         // `None` here keeps the door-only contract enforced at the type
         // level without growing the diagnostic surface yet.
         return None;
@@ -149,6 +148,14 @@ pub fn l_path(from: (i32, i32, i32), to: (i32, i32, i32)) -> Vec<(i32, i32, i32)
 /// returned `BlockArray`'s `voxels` grid is dimensioned to the bounding
 /// box of `voxel_world`; collided cells stay air so the lockfile sees a
 /// truthful palette.
+///
+/// # Panics
+///
+/// Panics if any voxel in `voxel_world` falls outside the min/max sweep
+/// taken across the list itself, i.e. if a caller hand-builds a path
+/// whose coordinates wrap or violate the invariant
+/// `min_x ≤ wx ≤ max_x` (likewise for `z`). [`l_path`] always satisfies
+/// the invariant, so only direct callers need to worry about it.
 #[must_use]
 pub fn build_walkway_array<S: BuildHasher>(
     voxel_world: &[(i32, i32, i32)],
@@ -167,8 +174,17 @@ pub fn build_walkway_array<S: BuildHasher>(
         min_z = min_z.min(z);
         max_z = max_z.max(z);
     }
-    let dx = u32::try_from(max_x - min_x + 1).unwrap_or(1);
-    let dz = u32::try_from(max_z - min_z + 1).unwrap_or(1);
+    // Both spans are positive by construction: the min/max sweep above
+    // gives `min_x ≤ max_x` and `min_z ≤ max_z`, so the `+1` is in
+    // `[1, u32::MAX as i32 + 1]`. The `u32::try_from` cannot fail under
+    // those invariants — encode that as a `debug_assert!` so a future
+    // change that breaks the bound (an empty `voxel_world`, a wrap-around
+    // overflow) panics in tests rather than silently producing a 1×1
+    // walkway whose later `lx`/`lz` arithmetic would underflow.
+    debug_assert!(max_x >= min_x, "walkway bounding box collapsed on x");
+    debug_assert!(max_z >= min_z, "walkway bounding box collapsed on z");
+    let dx = u32::try_from(max_x - min_x + 1).expect("walkway x span fits in u32");
+    let dz = u32::try_from(max_z - min_z + 1).expect("walkway z span fits in u32");
     let dims = Dims { x: dx, y: 1, z: dz };
     let origin = (min_x, first.1, min_z);
 
@@ -181,8 +197,15 @@ pub fn build_walkway_array<S: BuildHasher>(
             blocked_count += 1;
             continue;
         }
-        let lx = u32::try_from(wx - min_x).unwrap_or(0);
-        let lz = u32::try_from(wz - min_z).unwrap_or(0);
+        // `wx`/`wz` are members of the same min/max sweep above, so
+        // `wx ≥ min_x` and `wz ≥ min_z` by construction. A
+        // `debug_assert!` here would fire if a caller hand-builds a
+        // `voxel_world` that violates the invariant before the cast
+        // wraps to a wildly out-of-range local coordinate.
+        debug_assert!(wx >= min_x, "voxel world x outside swept min");
+        debug_assert!(wz >= min_z, "voxel world z outside swept min");
+        let lx = u32::try_from(wx - min_x).expect("voxel x offset fits in u32");
+        let lz = u32::try_from(wz - min_z).expect("voxel z offset fits in u32");
         if let Some(i) = dims.index(lx, 0, lz) {
             voxels[i] = mat_idx;
         }

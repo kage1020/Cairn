@@ -10,11 +10,11 @@
 //!    behavior shifts at a known boundary version (the catalog half of
 //!    `spec/versioning-editions.md` §10.3).
 //!
-//! M2-PR3 implements axis (1) from `@requires` alone and leaves axes (2)
-//! and (3) as **structurally present but empty**: the registry pack and
-//! semantic-sensitivity catalog arrive in 2026.12.0, at which point the
-//! same `VersionAxes` shape gains real data without a contract break for
-//! downstream tooling.
+//! Axis (1) is computed from `@requires` headers. Axes (2) and (3) are
+//! **structurally present but empty** until the registry pack and the
+//! semantic-sensitivity catalog land — keeping the `VersionAxes` shape
+//! stable now means downstream tooling will not see a contract break
+//! when those catalogs do start populating real findings.
 
 use serde::Serialize;
 
@@ -33,8 +33,7 @@ pub struct VersionAxes {
     /// the caller (CLI honours `--editions`).
     pub edition_portability: Vec<EditionPortability>,
     /// Axis 3: members whose meaning shifts at a known boundary version.
-    /// Empty in M2-PR3 — populated once the semantic-sensitivity catalog
-    /// lands.
+    /// Empty until the semantic-sensitivity catalog lands.
     pub semantic_sensitive: Vec<SemanticSensitiveFinding>,
 }
 
@@ -43,12 +42,13 @@ pub struct VersionAxes {
 /// `min` is derived from `@requires version>=X` (the max across all such
 /// headers; `"0.0"` when no `@requires` line is present). `max` is the
 /// literal string `"latest"` until the registry pack provides a real upper
-/// bound in 2026.12.0.
+/// bound.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct RegistryRange {
     /// Lower bound (inclusive).
     pub min: String,
-    /// Upper bound (inclusive). Always `"latest"` in M2-PR3.
+    /// Upper bound (inclusive). Always `"latest"` until the registry pack
+    /// catalog supplies an explicit upper edition for the file.
     pub max: String,
 }
 
@@ -67,7 +67,7 @@ pub struct EditionPortability {
 
 /// One semantic-sensitivity finding.
 ///
-/// Always empty in M2-PR3; the type exists so the JSON shape is stable from
+/// Always empty for now; the type exists so the JSON shape is stable from
 /// the first `cairn info` release.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct SemanticSensitiveFinding {
@@ -84,7 +84,7 @@ pub struct SemanticSensitiveFinding {
 ///
 /// `_resolution` is accepted so future work that needs the resolved binding
 /// (semantic-sensitivity checks per concrete token) can land without an API
-/// change. M2-PR3 only consumes `module.headers` and `ir`.
+/// change. Currently only `module.headers` and `ir` are consumed.
 #[must_use]
 pub fn compute_axes(
     module: &Module,
@@ -93,8 +93,9 @@ pub fn compute_axes(
     editions: &[String],
 ) -> VersionAxes {
     // Hoisted out of the per-edition loop: the count is edition-agnostic
-    // in M2-PR3 (registry pack arrives in 2026.12.0, at which point per-
-    // edition counts diverge and the call moves back inside the map).
+    // until the registry pack supplies per-edition support data, at
+    // which point per-edition counts diverge and the call moves back
+    // inside the map.
     let portable_total = count_members(ir);
     VersionAxes {
         registry_compat: RegistryRange {
@@ -222,7 +223,7 @@ mod tests {
     }
 
     #[test]
-    fn semantic_sensitive_is_empty_in_m2_pr3() {
+    fn semantic_sensitive_is_empty_without_catalog() {
         let src = "struct s size=4x4\n  walls height=3\n";
         let (m, i, r) = module_with(src);
         let axes = compute_axes(&m, &i, &r, &["java".to_owned()]);

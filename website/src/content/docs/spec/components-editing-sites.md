@@ -88,17 +88,17 @@ without re-running the coordinate solver.
 A `connect FROM.PORT to TO.PORT path=@MATERIAL` row lays a 1-block-wide walkway between two named
 ports on placements within the same `site`.
 
-**Ports.** A port is the `(place, member_id)` pair `PLACE.PORT` resolves to. M3-PR4 only exposes
-ports on `door` members of the referenced `def`; window / stair / roof ports are reserved for a
-later PR. The port's world position is "one block outside the door's `side=` wall, at the ground
-row" — `front`/`back`/`left`/`right` map to `+z`/`-z`/`-x`/`+x` (§9.3.1), and the door's
-`at=center` wall-local offset combines with the placement's overhang to land the port in the
-overhang ring beyond the structure's outer face.
+**Ports.** A port is the `(place, member_id)` pair `PLACE.PORT` resolves to. Ports are currently
+exposed only on `door` members of the referenced `def`; window / stair / roof ports are reserved
+for a future extension. The port's world position is "one block outside the door's `side=` wall,
+at the ground row" — `front`/`back`/`left`/`right` map to `+z`/`-z`/`-x`/`+x` (§9.3.1), and the
+door's `at=center` wall-local offset combines with the placement's overhang to land the port in
+the overhang ring beyond the structure's outer face.
 
 **Path.** The walkway runs as a Manhattan L (x-axis leg, then z-axis leg) at the two ports' shared
-Y — 3D path search (staircases, multi-level walkways) is intentionally out of scope for M3-PR4 so
-the port surface can land in one piece. Cells that overlap an existing structure floor are skipped
-and the row earns one `W_WALKWAY_BLOCKED` warning so the author can widen the placement gap.
+Y — 3D path search (staircases, multi-level walkways) is intentionally out of scope so the port
+surface can land in one piece. Cells that overlap an existing structure floor are skipped and the
+row earns one `W_WALKWAY_BLOCKED` warning so the author can widen the placement gap.
 
 **Material.** The `path=@TOKEN` value lifts through the same `mat_slot=` pipeline used for member
 materials — concrete tokens like `@gravel` work without a registry pack; abstract tokens like
