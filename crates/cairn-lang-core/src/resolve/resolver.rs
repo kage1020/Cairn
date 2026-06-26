@@ -480,6 +480,29 @@ fn resolve_connect_row(
         });
         return;
     };
+    // A bare label (`path=gravel`) or any other non-token kind would slip
+    // through `resolve_block_state` as `MaterialDeferred::AlreadyDiagnosed`
+    // — that arm is wired for theme slot values which the
+    // `E_UNKNOWN_SLOT_TARGET` pass already flags. `connect.path` is not in
+    // that pass's scope, so we fail loud here instead of letting the row
+    // drop silently in the walkway voxeliser.
+    if !matches!(path.value.kind, ValueKind::Token(_)) {
+        diagnostics.push(Diagnostic {
+            code: DiagnosticCode::MissingPathMaterial,
+            severity: Severity::Error,
+            span: path.span.clone(),
+            primary: format!(
+                "`connect path=` must be a material token like `@gravel`, got {}",
+                path.value.kind_name(),
+            ),
+            notes: vec![DiagnosticNote {
+                span: None,
+                message: "use `@TOKEN` (e.g. `path=@gravel`); bare labels and string literals are not material references"
+                    .to_owned(),
+            }],
+        });
+        return;
+    }
     if !ok {
         return;
     }
@@ -1350,6 +1373,41 @@ mod tests {
             r.diagnostics,
         );
         assert!(r.connects.is_empty());
+    }
+
+    #[test]
+    fn connect_non_token_path_emits_e_missing_path_material() {
+        // `path=plain_ident` and `path="gravel"` slip through the
+        // material resolver as `MaterialDeferred::AlreadyDiagnosed` (the
+        // theme-slot path). The resolver must surface that as
+        // E_MISSING_PATH_MATERIAL with a "must be an @ token" note,
+        // otherwise the row drops silently in the walkway voxeliser.
+        let src = concat!(
+            "theme t:\n",
+            "  slot wall -> @cobblestone\n",
+            "\n",
+            "def cottage size=3x3:\n",
+            "  walls mat_slot=wall height=2\n",
+            "  door id=entry side=front at=center\n",
+            "\n",
+            "site s:\n",
+            "  place id=a use=cottage theme=t at=origin\n",
+            "  place id=b use=cottage theme=t east_of=a gap=2\n",
+            "  connect a.entry to b.entry path=plain_ident\n",
+        );
+        let r = resolve(&ir(src));
+        let diag = r
+            .diagnostics
+            .iter()
+            .find(|d| d.code == DiagnosticCode::MissingPathMaterial)
+            .unwrap_or_else(|| panic!("expected E_MISSING_PATH_MATERIAL, got {:?}", r.diagnostics));
+        assert_eq!(diag.severity, Severity::Error);
+        assert!(
+            diag.primary.contains("token") && diag.primary.contains("identifier"),
+            "expected the message to call out the kind mismatch, got: {}",
+            diag.primary,
+        );
+        assert!(r.connects.is_empty(), "non-token path must not resolve");
     }
 
     #[test]

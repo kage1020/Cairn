@@ -81,9 +81,8 @@ placeholder cannot leak out. The `2026.07.0` release PR will flip publish to `tr
   resolved per-place origin lands in `BlockArrayIr.placements: IndexMap<…,
   Placement>` and in the lockfile under a new top-level `placements`
   section so a downstream consumer can rebuild the village layout without
-  re-running the solver. `connect` rows still parse but emit a single
-  `W_DEFERRED_MEMBER` apiece — walkway voxelisation and the port model
-  (`E_UNRESOLVED_PORT`) are not yet implemented (2027.01.0).
+  re-running the solver. (`connect` rows resolve and voxelise in the
+  M3-PR4 walkway entry above.)
 - `cairn lower` and `cairn compile` now surface resolver-emitted
   diagnostics (`E_UNRESOLVED_PLACE_REF`, `E_UNRESOLVED_THEME_REF`,
   `E_DUPLICATE_PLACE_ID`, `E_INVALID_PLACE_ORIGIN`, `W_UNUSED_DEF`,

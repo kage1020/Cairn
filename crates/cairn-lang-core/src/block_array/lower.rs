@@ -214,24 +214,26 @@ fn lower_connects(
             &connect.to.port_id,
         );
         let (Some(from_pos), Some(to_pos)) = (from_pos, to_pos) else {
-            // Port resolution failure here means the role gate caught
-            // a window / stair / etc. port. The resolver does not yet
-            // distinguish role-rejected ports from id-missing ports;
-            // surface a deferred warning so the row is not silently
-            // dropped.
+            // The resolver already validated the port id, so this miss
+            // means `port_world_position` rejected one of the door's
+            // own properties: a missing / non-cardinal `side=`, an
+            // `at=` value other than `center`, or a window / stair role
+            // that the door-only port surface refuses. The diagnostic
+            // names all three so the user is not pointed at the wrong
+            // fix.
             diagnostics.push(Diagnostic {
                 code: DiagnosticCode::DeferredMember,
                 severity: Severity::Warning,
                 span: connect.span.clone(),
                 primary: format!(
-                    "`connect` ports must currently reference `door` members; `{from}` → `{to}` was skipped",
+                    "walkway `{from} ↔ {to}` was skipped because the port could not be placed",
                     from = port_label(&connect.from.place_id, &connect.from.port_id),
                     to = port_label(&connect.to.place_id, &connect.to.port_id),
                 ),
                 notes: vec![DiagnosticNote {
                     span: None,
                     message:
-                        "wire walkways to `door` members until window/stair port surfaces land"
+                        "ports currently require a `door` member with `side=front|back|left|right` and `at=center`"
                             .to_owned(),
                 }],
             });
@@ -494,7 +496,18 @@ fn lower_site<'a>(
 
         // The origin solver reads `placements` for prior-place lookups, so
         // the lookup has to happen before *this* placement is inserted.
-        let origin = resolve_place_origin(member, placements, &site.name).unwrap_or((0, 0, 0));
+        // Lookup misses only happen when the prior place was skipped at
+        // lowering time (cascade from `W_DEF_NO_SIZE` /
+        // `E_UNRESOLVED_PLACE_REF`); falling back to `(0, 0, 0)` would
+        // silently stack the placement on top of `home1`, so we surface a
+        // deferred warning and skip the row instead.
+        let Some(origin) = resolve_place_origin(member, placements, &site.name) else {
+            diagnostics.push(diag_deferred_member_reason(
+                member,
+                "the prior place referenced by `east_of=`/`north_of=` did not lower, so this placement's origin cannot be resolved",
+            ));
+            continue;
+        };
 
         let ba = lower_body_to_block_array(
             BodyDescriptor {
@@ -2342,6 +2355,110 @@ mod tests {
             b.origin,
             (0, 0, -7),
             "z = prev.z(0) - prev.dims.z(3) - gap(4)"
+        );
+    }
+
+    fn village_pair_source(extra_connects: &str) -> String {
+        // Tiny two-place village shared by the connect-dedup tests so
+        // each test only spells out the extra rows under exercise.
+        format!(
+            concat!(
+                "theme t:\n",
+                "  slot wall -> @cobblestone\n",
+                "\n",
+                "def cottage size=3x3:\n",
+                "  walls mat_slot=wall height=2\n",
+                "  door id=entry side=front at=center\n",
+                "\n",
+                "site s:\n",
+                "  place id=a use=cottage theme=t at=origin\n",
+                "  place id=b use=cottage theme=t east_of=a gap=4\n",
+                "{}",
+            ),
+            extra_connects,
+        )
+    }
+
+    #[test]
+    fn duplicate_connect_emits_w_duplicate_walkway_and_lays_one_strip() {
+        // The same `(a.entry, b.entry)` written twice in source order
+        // must land exactly one walkway and exactly one
+        // W_DUPLICATE_WALKWAY warning on the second row.
+        let src = village_pair_source(
+            "  connect a.entry to b.entry path=@gravel\n  connect a.entry to b.entry path=@gravel\n",
+        );
+        let out = lowered(&src);
+        let dup_count = out
+            .diagnostics
+            .iter()
+            .filter(|d| d.code == DiagnosticCode::DuplicateWalkway)
+            .count();
+        assert_eq!(dup_count, 1, "expected exactly one W_DUPLICATE_WALKWAY");
+        assert_eq!(out.walkways.len(), 1, "second row must not lay a strip");
+    }
+
+    #[test]
+    fn reverse_connect_dedupes_against_first_row() {
+        // `a.entry → b.entry` and `b.entry → a.entry` are the same
+        // walkway. The endpoint sort in `lower_connects` must collapse
+        // the pair so the second row earns a duplicate warning and the
+        // strip is laid once.
+        let src = village_pair_source(
+            "  connect a.entry to b.entry path=@gravel\n  connect b.entry to a.entry path=@gravel\n",
+        );
+        let out = lowered(&src);
+        let dup_count = out
+            .diagnostics
+            .iter()
+            .filter(|d| d.code == DiagnosticCode::DuplicateWalkway)
+            .count();
+        assert_eq!(
+            dup_count, 1,
+            "expected exactly one W_DUPLICATE_WALKWAY on the reversed row",
+        );
+        assert_eq!(
+            out.walkways.len(),
+            1,
+            "reversed row must not lay a second strip"
+        );
+    }
+
+    #[test]
+    fn east_of_skipped_prior_does_not_silently_stack_at_origin() {
+        // Prior place `a` references a sizeless def, so it earns
+        // `W_DEF_NO_SIZE` and never lands in `placements`. The
+        // `east_of=a` lookup on `b` would silently fall back to `(0, 0,
+        // 0)` under the old code path, stacking both buildings on top
+        // of each other. The new path emits W_DEFERRED_MEMBER and skips
+        // the placement instead.
+        let src = concat!(
+            "theme t:\n",
+            "  slot wall -> @cobblestone\n",
+            "\n",
+            "def sized size=3x3:\n",
+            "  walls mat_slot=wall height=2\n",
+            "\n",
+            "def sizeless:\n",
+            "  walls mat_slot=wall height=2\n",
+            "\n",
+            "site s:\n",
+            "  place id=a use=sizeless theme=t at=origin\n",
+            "  place id=b use=sized theme=t east_of=a gap=2\n",
+        );
+        let out = lowered(src);
+        assert!(
+            !out.placements.contains_key("site::s::b"),
+            "placement b must be skipped, not silently stacked at origin",
+        );
+        let cascade = out.diagnostics.iter().any(|d| {
+            d.code == DiagnosticCode::DeferredMember
+                && d.primary.contains("east_of")
+                && d.primary.contains("origin cannot be resolved")
+        });
+        assert!(
+            cascade,
+            "expected a cascade W_DEFERRED_MEMBER mentioning the unresolvable origin, got {:?}",
+            out.diagnostics,
         );
     }
 }

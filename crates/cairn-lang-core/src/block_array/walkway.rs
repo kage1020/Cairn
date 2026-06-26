@@ -75,8 +75,9 @@ pub fn port_world_position(
     let interior_w = def_size.w.get();
     let interior_h = def_size.h.get();
     // Overhang inflates symmetrically on each horizontal axis, so x and
-    // z agree; take the average defensively in case a future divergence
-    // sneaks in.
+    // z agree; `.max()` is the conservative pick if a future divergence
+    // sneaks in — it keeps the port outside the larger eave rather than
+    // averaging into a half-inside coordinate.
     let overhang_x = place_dims.x.saturating_sub(interior_w) / 2;
     let overhang_z = place_dims.z.saturating_sub(interior_h) / 2;
     let overhang = overhang_x.max(overhang_z);
@@ -115,9 +116,12 @@ pub fn l_path(from: (i32, i32, i32), to: (i32, i32, i32)) -> Vec<(i32, i32, i32)
         voxels.push((x, y, z0));
     }
 
-    // z-axis leg: walk from (x1, z0) to (x1, z1). The first cell of
-    // this leg is the corner already laid down above, so skip it via
-    // `contains` rather than special-casing on `z0 == z1`.
+    // z-axis leg: walk from (x1, z0) toward (x1, z1). The cell at
+    // (x1, z0) is the corner already laid down at the end of the
+    // x-leg, so the loop steps z BEFORE pushing — every cell here
+    // is fresh and the `contains` guard is a structural safety net
+    // for callers that pass overlapping legs (e.g. a single-axis
+    // path constructed by hand) rather than a load-bearing dedup.
     let mut z = z0;
     let step_z: i32 = match z1.cmp(&z0) {
         std::cmp::Ordering::Equal => 0,
@@ -361,6 +365,57 @@ mod tests {
         let dims = Dims { x: 5, y: 1, z: 5 };
         let pos = port_world_position((10, 0, 20), dims, def, "entry").expect("port resolves");
         assert_eq!(pos, (12, 0, 24));
+    }
+
+    #[test]
+    fn port_world_position_back_side_steps_into_negative_z() {
+        // size=3x3, overhang=0, center u=1. Back wall world:
+        // x = origin.x + (w-1-u) = 10 + (3-1-1) = 11, z = origin.z = 20.
+        // Normal step is (0, -1) → port (11, 0, 19).
+        let src = concat!(
+            "def cottage size=3x3:\n",
+            "  door id=entry side=back at=center\n",
+        );
+        let module = crate::parse(src).expect("parse");
+        let ir = crate::lower(&module);
+        let def = ir.defs.first().expect("def lowered");
+        let dims = Dims { x: 3, y: 1, z: 3 };
+        let pos = port_world_position((10, 0, 20), dims, def, "entry").expect("port resolves");
+        assert_eq!(pos, (11, 0, 19));
+    }
+
+    #[test]
+    fn port_world_position_left_side_steps_into_negative_x() {
+        // size=3x3, overhang=0, center u=1. Left wall world:
+        // x = origin.x = 10, z = origin.z + u = 20 + 1 = 21.
+        // Normal step is (-1, 0) → port (9, 0, 21).
+        let src = concat!(
+            "def cottage size=3x3:\n",
+            "  door id=entry side=left at=center\n",
+        );
+        let module = crate::parse(src).expect("parse");
+        let ir = crate::lower(&module);
+        let def = ir.defs.first().expect("def lowered");
+        let dims = Dims { x: 3, y: 1, z: 3 };
+        let pos = port_world_position((10, 0, 20), dims, def, "entry").expect("port resolves");
+        assert_eq!(pos, (9, 0, 21));
+    }
+
+    #[test]
+    fn port_world_position_right_side_steps_into_positive_x() {
+        // size=3x3, overhang=0, center u=1. Right wall world:
+        // x = origin.x + (w-1) = 12, z = origin.z + (h-1-u) = 20 + 1 = 21.
+        // Normal step is (+1, 0) → port (13, 0, 21).
+        let src = concat!(
+            "def cottage size=3x3:\n",
+            "  door id=entry side=right at=center\n",
+        );
+        let module = crate::parse(src).expect("parse");
+        let ir = crate::lower(&module);
+        let def = ir.defs.first().expect("def lowered");
+        let dims = Dims { x: 3, y: 1, z: 3 };
+        let pos = port_world_position((10, 0, 20), dims, def, "entry").expect("port resolves");
+        assert_eq!(pos, (13, 0, 21));
     }
 
     #[test]

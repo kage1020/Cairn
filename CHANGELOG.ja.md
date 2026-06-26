@@ -78,9 +78,8 @@
   方向に後退する。解いた per-place origin は新規
   `BlockArrayIr.placements: IndexMap<…, Placement>` とロックファイル新設
   トップレベル `placements` セクションに記録され、下流の consumer は
-  ソルバを再実行せずに村のレイアウトを再構築できる。`connect` 行は
-  パースされるが各 1 件の `W_DEFERRED_MEMBER` を発火するのみ — 歩道
-  voxelization とポートモデル (`E_UNRESOLVED_PORT`) は未実装 (2027.01.0)。
+  ソルバを再実行せずに村のレイアウトを再構築できる。(`connect` 行の
+  解決と voxelization は上の M3-PR4 walkway エントリでカバーされる)
 - `cairn lower` と `cairn compile` が resolver 由来の診断
   (`E_UNRESOLVED_PLACE_REF`、`E_UNRESOLVED_THEME_REF`、
   `E_DUPLICATE_PLACE_ID`、`E_INVALID_PLACE_ORIGIN`、`W_UNUSED_DEF`、

@@ -3,8 +3,8 @@
 use cairn_lang_core::block_array::BlockArrayIr;
 use cairn_lang_core::block_array::{BlockArray, BlockState, Dims, Palette, PaletteIndex};
 use cairn_lang_core::lock::{
-    HashHex, HashParseError, LockEdition, LockInputs, LockTarget, Lockfile, MemberSensitivity,
-    hash_resolved_ir, hash_source,
+    HashHex, HashParseError, LockEdition, LockInputs, LockTarget, LockWalkway, Lockfile,
+    MemberSensitivity, hash_resolved_ir, hash_source,
 };
 use indexmap::IndexMap;
 
@@ -129,6 +129,34 @@ fn l6_lockfile_yaml_key_order_matches_spec() {
         "member_version_sensitivity",
     ];
     assert_eq!(keys, expected);
+}
+
+#[test]
+fn lockfile_with_walkways_roundtrips_through_yaml() {
+    // A lockfile carrying a non-empty `walkways:` section must
+    // serialise and deserialise back to the same value — without this
+    // the new section could silently lose fields under a future struct
+    // rename and the `sample_lockfile()` round-trip (which leaves
+    // `walkways: vec![]` and so skips the section entirely) would not
+    // catch it.
+    let lf = Lockfile {
+        walkways: vec![LockWalkway {
+            site: "hamlet".to_owned(),
+            from: "home1.entry".to_owned(),
+            to: "home2.entry".to_owned(),
+            path_material: "minecraft:gravel".to_owned(),
+            origin: [5, 0, 8],
+            dims: [16, 1, 1],
+        }],
+        ..sample_lockfile()
+    };
+    let body = serde_yml::to_string(&lf).expect("encode");
+    let parsed: Lockfile = serde_yml::from_str(&body).expect("decode");
+    assert_eq!(lf, parsed);
+    assert!(
+        body.contains("walkways:"),
+        "non-empty walkways must reach the YAML body, got:\n{body}",
+    );
 }
 
 #[test]
