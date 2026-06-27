@@ -35,6 +35,56 @@ are welcome as clearly-labeled secondary copies, but English is the source of tr
 - Keep examples concrete and minimal. Error messages should be in the "what is wrong / valid
   alternatives / suggested fix" shape so they can feed the self-correction loop.
 
+### Milestone and PR tag scope
+
+The session-specific identifier ban above has a small set of deliberate exceptions, listed here so
+the call does not get re-invented per review. The split follows the role each surface plays:
+[CHANGELOG.md](CHANGELOG.md) and the
+[Compatibility Tiers](https://cairn.kage1020.com/spec/compatibility/) §C.2 table hold the project's
+historical and roadmap-aligned vocabulary, while Rust source and spec prose describe the
+*implemented* behaviour and so must read independently of any one PR.
+
+**Allowed to carry `MN-PRk`, `pre-MN`, `later PR`, or specific `YYYY.MM.0` references:**
+
+- [CHANGELOG.md](CHANGELOG.md) / [CHANGELOG.ja.md](CHANGELOG.ja.md), including the `[Unreleased]`
+  section. `release-plz` only appends to these files; existing tags stay untouched.
+- The [Roadmap](https://cairn.kage1020.com/roadmap/) (`website/src/content/docs/roadmap.md` and
+  the `ja/` mirror) — the roadmap is the milestone vocabulary.
+- The C.2 milestone columns of
+  [`spec/compatibility.md`](website/src/content/docs/spec/compatibility.md)
+  (`Today (pre-M1) | At M2 (minimal build) | At M3 (examples work) | At M5 (DX) | At M6 (redstone)`)
+  and the matching `ja/spec/compatibility.md` header. These are the table's axis labels.
+- Git release tags (`v2026.MM.0`) and `release-plz.toml`.
+
+**Must not carry these tags:**
+
+- Rust source under `crates/**/*.rs` (comments and docstrings).
+- Spec body under `website/src/content/docs/spec/**/*.md` and the `ja/` mirror, with the single
+  C.2 header exception above.
+- [`examples/`](examples/) `.crn` files.
+- README, this file, and any other docs body.
+
+**Rewriting guide.** Replace the PR coordinate with the implementation fact it stood in for:
+
+- Before: `// M3-PR4 only exposes ports on door members (window / stair / roof ports land in a later PR).`
+- After: `// Ports are currently exposed only on door members. Window / stair / roof ports are reserved for a future extension.`
+
+The rule of thumb is "describe what the code does now, plus what is intentionally not yet covered,"
+not "name the PR that delivered it." When a comment turns stale (the deferred feature has since
+landed), update the comment in the same PR that lands the feature.
+
+**Enforcement.** Reviewers (human or otherwise) should run
+
+```sh
+rg 'M[0-9]-PR[0-9]+|pre-M[0-9]|\blater PR\b|\bfuture PR\b' \
+  --glob '!CHANGELOG*' \
+  --glob '!**/compatibility.md' \
+  --glob '!target/**'
+```
+
+before approving. An empty result is the contract. This is not wired into CI yet; the repository is
+small enough that human review is sufficient.
+
 ## Proposing a change to a settled decision
 
 Several decisions are deliberately settled (e.g. key=value over positional args, phase-ordered
