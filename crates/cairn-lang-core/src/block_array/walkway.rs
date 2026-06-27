@@ -151,11 +151,12 @@ pub fn l_path(from: (i32, i32, i32), to: (i32, i32, i32)) -> Vec<(i32, i32, i32)
 ///
 /// # Panics
 ///
-/// Panics if any voxel in `voxel_world` falls outside the min/max sweep
-/// taken across the list itself, i.e. if a caller hand-builds a path
-/// whose coordinates wrap or violate the invariant
-/// `min_x ≤ wx ≤ max_x` (likewise for `z`). [`l_path`] always satisfies
-/// the invariant, so only direct callers need to worry about it.
+/// Panics when `voxel_world` is empty: a zero-cell walkway has no
+/// meaningful bounding box, and silently producing a 1×1 placeholder at
+/// `(0, 0, 0)` would let an upstream bug pin walkway IR at the wrong
+/// origin. Also panics if the bounding-box span on either axis exceeds
+/// `u32::MAX` (i.e. an `i32` subtraction that overflows the cast); paths
+/// produced by [`l_path`] cannot exercise either condition.
 #[must_use]
 pub fn build_walkway_array<S: BuildHasher>(
     voxel_world: &[(i32, i32, i32)],
@@ -163,7 +164,10 @@ pub fn build_walkway_array<S: BuildHasher>(
     blocked: &HashSet<(i32, i32, i32), S>,
     scope_key: String,
 ) -> (BlockArray, (i32, i32, i32), usize) {
-    let first = voxel_world.first().copied().unwrap_or((0, 0, 0));
+    let first = voxel_world
+        .first()
+        .copied()
+        .unwrap_or_else(|| panic!("walkway voxel_world is empty for scope `{scope_key}`"));
     let mut min_x = first.0;
     let mut max_x = first.0;
     let mut min_z = first.2;
@@ -175,16 +179,15 @@ pub fn build_walkway_array<S: BuildHasher>(
         max_z = max_z.max(z);
     }
     // Both spans are positive by construction: the min/max sweep above
-    // gives `min_x ≤ max_x` and `min_z ≤ max_z`, so the `+1` is in
-    // `[1, u32::MAX as i32 + 1]`. The `u32::try_from` cannot fail under
-    // those invariants — encode that as a `debug_assert!` so a future
-    // change that breaks the bound (an empty `voxel_world`, a wrap-around
-    // overflow) panics in tests rather than silently producing a 1×1
-    // walkway whose later `lx`/`lz` arithmetic would underflow.
-    debug_assert!(max_x >= min_x, "walkway bounding box collapsed on x");
-    debug_assert!(max_z >= min_z, "walkway bounding box collapsed on z");
-    let dx = u32::try_from(max_x - min_x + 1).expect("walkway x span fits in u32");
-    let dz = u32::try_from(max_z - min_z + 1).expect("walkway z span fits in u32");
+    // gives `min_x ≤ max_x` and `min_z ≤ max_z`. The `u32::try_from` can
+    // only fail if `max - min + 1` overflows `i32` (a span wider than
+    // `i32::MAX`), which is unreachable from [`l_path`] for any realistic
+    // world; surface that as a panic with the scope so a future caller
+    // gets a locatable failure rather than a silent 1×1 strip.
+    let dx = u32::try_from(max_x - min_x + 1)
+        .unwrap_or_else(|_| panic!("walkway `{scope_key}` x span exceeds u32 ({min_x}..={max_x})"));
+    let dz = u32::try_from(max_z - min_z + 1)
+        .unwrap_or_else(|_| panic!("walkway `{scope_key}` z span exceeds u32 ({min_z}..={max_z})"));
     let dims = Dims { x: dx, y: 1, z: dz };
     let origin = (min_x, first.1, min_z);
 
@@ -198,14 +201,13 @@ pub fn build_walkway_array<S: BuildHasher>(
             continue;
         }
         // `wx`/`wz` are members of the same min/max sweep above, so
-        // `wx ≥ min_x` and `wz ≥ min_z` by construction. A
-        // `debug_assert!` here would fire if a caller hand-builds a
-        // `voxel_world` that violates the invariant before the cast
-        // wraps to a wildly out-of-range local coordinate.
-        debug_assert!(wx >= min_x, "voxel world x outside swept min");
-        debug_assert!(wz >= min_z, "voxel world z outside swept min");
-        let lx = u32::try_from(wx - min_x).expect("voxel x offset fits in u32");
-        let lz = u32::try_from(wz - min_z).expect("voxel z offset fits in u32");
+        // `wx ≥ min_x` and `wz ≥ min_z` by construction. The same
+        // overflow story as `dx`/`dz` applies — surface the cast with
+        // the scope so an unreachable failure stays locatable.
+        let lx = u32::try_from(wx - min_x)
+            .unwrap_or_else(|_| panic!("walkway `{scope_key}` cell x={wx} below min={min_x}"));
+        let lz = u32::try_from(wz - min_z)
+            .unwrap_or_else(|_| panic!("walkway `{scope_key}` cell z={wz} below min={min_z}"));
         if let Some(i) = dims.index(lx, 0, lz) {
             voxels[i] = mat_idx;
         }

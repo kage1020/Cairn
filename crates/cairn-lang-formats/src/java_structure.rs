@@ -151,12 +151,15 @@ pub fn output_filename(source_scope: &str) -> String {
         && let Some((site, ports)) = rest.split_once("::")
     {
         // Flatten `place.port` separators to `_` for portable filenames.
-        // Cairn ids reject `.`, so the only path that could fold two
-        // distinct scopes into one filename — `a.b__c.d` colliding with
-        // `a_b__c_d` — cannot be produced by a syntactically valid
-        // module. If id grammar later allows `.` (or `_` becomes a
-        // separator), revisit this flatten before the on-disk shape
-        // becomes ambiguous.
+        // Known hazard: Cairn ids allow `_`, so two distinct scopes can
+        // collapse to the same on-disk name — `a.b_c__d.e_f` and
+        // `a_b.c__d_e.f` both flatten to `a_b_c__d_e_f.nbt`. Walkway
+        // dedup at the IR layer (`lower_connects` `seen_pairs`) only
+        // catches reversed-endpoint duplicates, not this collision.
+        // Detecting it requires a write-time pass over all emitted
+        // filenames; that lives in the CLI's compile pipeline. The
+        // flatten itself stays here because every backend (Java now,
+        // Bedrock later) shares the same naming contract.
         let flattened = ports.replace('.', "_");
         return format!("{site}_walkway_{flattened}.nbt");
     }

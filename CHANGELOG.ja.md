@@ -34,7 +34,7 @@
   `E_UNRESOLVED_PORT` / `E_UNRESOLVED_PLACE_REF` (span anchor アサート
   込み)。`village.crn` のテストでは walkway の `origin`/`dims` も
   ピンしたので、overhang シフトの軸スワップや off-by-one が
-  ペル walkway 単位で fail loud になる。
+  per walkway 単位で fail loud になる。
 - `cairn-lang-core::block_array::walkway` — `connect a.PORT to b.PORT
   path=@MATERIAL` 行を walkway BlockArray に lowering する。新規 IR キー
   `walkway::SITE::FROM_PLACE.FROM_PORT__TO_PLACE.TO_PORT` のもとで

@@ -300,10 +300,10 @@ fn output_filename_strips_site_and_name_prefixes_to_place_id() {
 #[test]
 fn output_filename_preserves_inner_colons_and_unicode() {
     // Scope keys that the IR could legitimately produce (a nested-namespace
-    // notation in M3) should not be silently rewritten. We strip only the
-    // exact `struct::` prefix and leave the rest verbatim, including any
-    // subsequent `::`; downstream filename sanitisation is the OS layer's
-    // responsibility on Windows.
+    // notation once nested scopes land) should not be silently rewritten.
+    // We strip only the exact `struct::` prefix and leave the rest
+    // verbatim, including any subsequent `::`; downstream filename
+    // sanitisation is the OS layer's responsibility on Windows.
     assert_eq!(output_filename("struct::deep::room"), "deep::room.nbt");
     // No prefix, no transformation: the scope key carries through verbatim.
     assert_eq!(output_filename("塔"), "塔.nbt");

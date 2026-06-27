@@ -22,8 +22,9 @@
 //! - `cairn info` — re-uses the same [`Resolution`] when computing the three
 //!   version axes (`compute_axes`).
 //!
-//! Per-edition resolved blockstate (the `Lifted` semantic level) is M3's
-//! job — `Member.resolved_state` is left untouched here.
+//! Per-edition resolved blockstate (the `Lifted` semantic level) is the
+//! next maturity tier's responsibility — `Member.resolved_state` is left
+//! untouched here.
 //!
 //! See `spec/materials-themes.md` §7 (slots, selectors, canonical vs.
 //! abstract tokens) and `spec/versioning-editions.md` §10.5 (the three info

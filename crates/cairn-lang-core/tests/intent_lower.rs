@@ -157,10 +157,10 @@ fn level_block_recursively_lowers_its_children() {
 
 #[test]
 fn level_block_keeps_nested_logic_and_asserts() {
-    // Regression for the PR #20 review: a nested `logic` or `assert` used
-    // to either panic via `unreachable!()` or be silently dropped because
-    // `Member.children` was `Vec<Member>`. The MemberBody shape preserves
-    // all three statement flavours.
+    // Regression: a nested `logic` or `assert` used to either panic via
+    // `unreachable!()` or be silently dropped because `Member.children`
+    // was `Vec<Member>`. The MemberBody shape preserves all three
+    // statement flavours.
     let src = "\
 struct gate size=3x3
   level y=0
@@ -178,9 +178,9 @@ struct gate size=3x3
 
 #[test]
 fn duplicate_size_does_not_leak_into_residual_args() {
-    // Regression for the PR #20 review: a repeated `size=` used to land in
-    // `StructIr::args`, contradicting that field's documented "everything
-    // except size" contract.
+    // Regression: a repeated `size=` used to land in `StructIr::args`,
+    // contradicting that field's documented "everything except size"
+    // contract.
     let ir = lower_source("struct s size=4x4 size=5x5\n  floor\n");
     let s = &ir.structs[0];
     let size = s.size.as_ref().expect("first size= still hoists");

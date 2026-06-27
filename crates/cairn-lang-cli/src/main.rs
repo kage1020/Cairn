@@ -548,9 +548,10 @@ const ASCII_ALPHABET: &[u8] = b"#abcdefghijklmnopqrstuvwxyz0123456789";
 /// Glyph for a palette index in ASCII slice output: air → `.`, anything
 /// else → `#` for the first non-air, then digits/letters so a slice with
 /// many distinct materials still reads. Any palette entry past index 36
-/// renders as `?` — debug-format only, and well above M2's expected
-/// per-structure palette size (cottage uses 3 entries), but worth a glance
-/// before reading a `?`-heavy slice as evidence of broken lowering.
+/// renders as `?` — debug-format only, and well above the per-structure
+/// palette size the current examples use (cottage uses 3 entries), but
+/// worth a glance before reading a `?`-heavy slice as evidence of broken
+/// lowering.
 fn ascii_glyph(palette_index: usize) -> char {
     if palette_index == 0 {
         return '.';
@@ -705,12 +706,28 @@ fn prepare_artifacts(
     out_dir: &Path,
 ) -> Result<Vec<(PathBuf, Compound)>, ExitCode> {
     let mut prepared = Vec::with_capacity(block_ir.structures.len());
+    let mut seen_paths: std::collections::HashMap<PathBuf, String> =
+        std::collections::HashMap::with_capacity(block_ir.structures.len());
     for (scope, ba) in &block_ir.structures {
         let tag = build_structure_tag(ba, target).map_err(|err| {
             eprintln!("error: building `{scope}`: {err}");
             ExitCode::from(1)
         })?;
-        prepared.push((out_dir.join(output_filename(scope)), tag));
+        let path = out_dir.join(output_filename(scope));
+        // Walkway IR keys allow `.` / `_` in place and port ids; the
+        // `output_filename` flatten of `.` → `_` can fold two distinct
+        // walkways into the same on-disk name (e.g. `a.b_c__d.e_f` vs
+        // `a_b.c__d_e.f` both → `..._a_b_c__d_e_f.nbt`). Detecting that
+        // here keeps the second walkway from silently overwriting the
+        // first.
+        if let Some(first) = seen_paths.insert(path.clone(), scope.clone()) {
+            eprintln!(
+                "error: output filename `{}` collides between scopes `{first}` and `{scope}`",
+                path.display(),
+            );
+            return Err(ExitCode::from(1));
+        }
+        prepared.push((path, tag));
     }
     Ok(prepared)
 }

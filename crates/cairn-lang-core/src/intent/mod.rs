@@ -7,9 +7,10 @@
 //! and the size header on a struct is hoisted into a dedicated field.
 //!
 //! This is what the spec calls the "rich member with invariants" layer
-//! (`architecture.md` §3.2). M2 produces it at semantic level
-//! [`SemanticLevel::Grouped`] — registry-backed resolution (materials, themes,
-//! per-edition blockstate) is M3's job.
+//! (`architecture.md` §3.2). The current lowering produces it at semantic
+//! level [`SemanticLevel::Grouped`]; registry-backed resolution
+//! (materials, themes, per-edition blockstate) belongs to the later
+//! [`SemanticLevel::Lifted`] tier.
 //!
 //! Each IR node carries a `span: Span` pointing at the originating byte range
 //! in the source. The `check` module relies on those spans to emit gcc-style
@@ -37,7 +38,7 @@ pub use self::semantic_level::SemanticLevel;
 /// Intent IR for a whole `.crn` module.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct IntentModule {
-    /// Maturity of this IR. M2's [`lower`] always returns
+    /// Maturity of this IR. The current [`lower`] always returns
     /// [`SemanticLevel::Grouped`].
     pub semantic_level: SemanticLevel,
     /// Headers carried through verbatim from the AST.

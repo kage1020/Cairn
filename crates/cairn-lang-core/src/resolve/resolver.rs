@@ -453,10 +453,12 @@ fn resolve_connect_row(
         // where there is one.
         return;
     };
-    let Some(from) = port_ref_from_value(from_value, "from", seen_place_ids, diagnostics) else {
-        return;
-    };
-    let Some(to) = port_ref_from_value(to_value, "to", seen_place_ids, diagnostics) else {
+    // Lift both ends before short-circuiting so a row with two broken
+    // halves earns two diagnostics, not just the first. `validate_port`
+    // already follows the same accumulate-then-decide pattern below.
+    let from = port_ref_from_value(from_value, "from", seen_place_ids, diagnostics);
+    let to = port_ref_from_value(to_value, "to", seen_place_ids, diagnostics);
+    let (Some(from), Some(to)) = (from, to) else {
         return;
     };
 
@@ -1319,6 +1321,13 @@ mod tests {
             "expected nearest-match note pointing at a.entry, got {:?}",
             diag.notes,
         );
+        // Anchor: the span must point at the `a.entr` DotRef, not at
+        // the whole `connect` row. Mirrors the to-side assertion in
+        // `connect_unknown_port_on_to_side_emits_e_unresolved_port`.
+        let typo_start = src.find("a.entr").expect("typo present");
+        let typo_end = typo_start + "a.entr".len();
+        assert_eq!(diag.span.start, typo_start);
+        assert_eq!(diag.span.end, typo_end);
         // The failed connect must not surface as resolved — walkway
         // voxelisation only sees rows it can lay safely.
         assert!(r.connects.is_empty(), "broken connect must not resolve");
@@ -1433,13 +1442,57 @@ mod tests {
             "  connect a.entry to ghost.entry path=@gravel\n",
         );
         let r = resolve(&ir(src));
+        let diag = r
+            .diagnostics
+            .iter()
+            .find(|d| d.code == DiagnosticCode::UnresolvedPlaceRef && d.primary.contains("ghost"))
+            .unwrap_or_else(|| {
+                panic!(
+                    "expected E_UNRESOLVED_PLACE_REF mentioning ghost, got {:?}",
+                    r.diagnostics,
+                )
+            });
+        // Anchor: span underlines the `ghost.entry` reference itself.
+        let bad_start = src.find("ghost.entry").expect("bad ref present");
+        let bad_end = bad_start + "ghost.entry".len();
+        assert_eq!(diag.span.start, bad_start);
+        assert_eq!(diag.span.end, bad_end);
+    }
+
+    #[test]
+    fn connect_with_both_endpoints_unknown_emits_both_e_unresolved_place_ref() {
+        // Pin the "fail both halves" contract: a row whose `from` and
+        // `to` both name absent places must surface *two* diagnostics
+        // (one per offending DotRef), not just the first one. Catches a
+        // regression where short-circuit on the `from` half would let
+        // the `to` typo slip through silently.
+        let src = concat!(
+            "theme t:\n",
+            "  slot wall -> @cobblestone\n",
+            "\n",
+            "def cottage size=3x3:\n",
+            "  walls mat_slot=wall height=2\n",
+            "  door id=entry side=front at=center\n",
+            "\n",
+            "site s:\n",
+            "  place id=a use=cottage theme=t at=origin\n",
+            "  connect ghost.entry to phantom.entry path=@gravel\n",
+        );
+        let r = resolve(&ir(src));
+        let ghost_hit = r
+            .diagnostics
+            .iter()
+            .any(|d| d.code == DiagnosticCode::UnresolvedPlaceRef && d.primary.contains("ghost"));
+        let phantom_hit = r
+            .diagnostics
+            .iter()
+            .any(|d| d.code == DiagnosticCode::UnresolvedPlaceRef && d.primary.contains("phantom"));
         assert!(
-            r.diagnostics.iter().any(
-                |d| d.code == DiagnosticCode::UnresolvedPlaceRef && d.primary.contains("ghost")
-            ),
-            "expected E_UNRESOLVED_PLACE_REF mentioning ghost, got {:?}",
+            ghost_hit && phantom_hit,
+            "expected E_UNRESOLVED_PLACE_REF for both `ghost` and `phantom`, got {:?}",
             r.diagnostics,
         );
+        assert!(r.connects.is_empty(), "broken connect must not resolve");
     }
 
     #[test]
