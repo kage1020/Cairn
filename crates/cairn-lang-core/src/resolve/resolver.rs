@@ -330,10 +330,16 @@ fn resolve_site_placements(
             continue;
         }
 
-        // Unnamed place lines (no `id=`) cannot be referenced by `east_of` /
-        // `north_of` and have no scope key to register, so they are skipped
-        // silently here; the upstream syntactic check will surface a
-        // distinct error if id absence becomes a structural failure.
+        // INVARIANT(structural): `id=` is intentionally optional on `place`.
+        // An unnamed placement has no scope key to register, cannot be
+        // referenced by `east_of` / `north_of`, and is unreachable from
+        // any `connect` row (dot-ref needs a name on the left side). No
+        // `check` pass — `keyword_allowlist`, `duplicate`, or
+        // `type_mismatch` — currently treats a missing `id=` as a
+        // structural failure, so the silent skip is by design rather
+        // than a missing upstream diagnostic. If `id=` ever becomes
+        // mandatory the new `check` pass owns the error and this arm
+        // becomes unreachable.
         let Some(place_id) = member.id.as_deref() else {
             continue;
         };
@@ -367,6 +373,19 @@ fn resolve_site_placements(
             .get("theme")
             .and_then(|v| v.value.as_label_str());
 
+        // INVARIANT(structural): `use=` is intentionally optional in the
+        // surface grammar — a `place` row may declare just an `id=`
+        // without committing to a def (e.g. as a deliberate
+        // work-in-progress marker). No `check` pass currently requires
+        // `use=`, so emitting a resolver-level error here would tighten
+        // the language without an M3 motivation. Skipping the rest of
+        // the pipeline prevents `place_def` and the scope map from
+        // carrying a half-built entry, so the lowering pass below does
+        // not emit a `.nbt` for a placement with no def. Downstream
+        // `connect` rows that target this place surface the gap via
+        // `validate_port`'s `place_def` miss arm, which emits
+        // `W_DEFERRED_CONNECT` so the user sees *why* the walkway was
+        // not laid instead of watching it vanish silently.
         let Some(use_name) = use_target else {
             continue;
         };
@@ -383,6 +402,19 @@ fn resolve_site_placements(
         let def = def.expect("checked is_none above");
         used_defs.insert(def.name.clone());
 
+        // INVARIANT(structural): `theme=` is intentionally optional on a
+        // per-place basis only for single-theme files — the site-wide
+        // heuristic in `resolve_struct_or_def` defaults to the lone
+        // theme there, so the user can omit `theme=` without losing
+        // coverage. On multi-theme files an omitted `theme=` is a known
+        // silent gap: no `check` pass requires it and no targeted
+        // diagnostic exists yet (an `E_PLACE_THEME_REQUIRED` pass would
+        // be the correct long-term home and is tracked separately).
+        // Skipping the rest of the pipeline here leaves `place_def`
+        // unset for this place; downstream `connect` rows targeting it
+        // surface the gap via the `W_DEFERRED_CONNECT` cascade in
+        // `validate_port`, which keeps the multi-theme silent skip
+        // visible until the dedicated check pass lands.
         let Some(theme_name) = theme_target else {
             continue;
         };
@@ -446,11 +478,19 @@ fn resolve_connect_row(
     let from_value = member.positional.first();
     let to_value = member.positional.get(2);
     let (Some(from_value), Some(to_value)) = (from_value, to_value) else {
-        // A malformed surface (`connect X` or `connect X to`) skips
-        // silently here — the parser already laid down a structural
-        // problem for the missing positional, and re-issuing it as a
-        // resolver code would teach the user there are two problems
-        // where there is one.
+        // TODO(structural): the line-based parser
+        // (`parse::Parser::parse_command`) accepts an arbitrary number
+        // of positionals up to the next newline without enforcing
+        // arity, and `intent::lower` clones `positional` through
+        // verbatim. So `connect X` / `connect X to` survive both
+        // upstream passes today; no diagnostic exists to lean on here.
+        // The silent return keeps walkway voxelisation from picking up
+        // a half-formed row — the eventual home for arity enforcement
+        // is a check-layer pass that can anchor a diagnostic at the
+        // missing positional's parse position. Until that pass lands
+        // the user sees no signal that the `connect` did nothing; that
+        // gap is tracked separately rather than papered over with a
+        // resolver-side push that would lose the right span.
         return;
     };
     // Lift both ends before short-circuiting so a row with two broken
@@ -545,7 +585,8 @@ fn port_ref_from_value(
         // `Vec<Diagnostic>`-scoped pass, so the contract is enforced by
         // the doc comment plus the grammar tests in `tests/parse_*.rs`
         // (a debug_assert here would tangle the resolver's API with the
-        // parser's diagnostic timing, which is out of scope for #38).
+        // parser's diagnostic timing, which is intentionally kept
+        // outside this pass's responsibility).
         return None;
     };
     if dot.tail().is_empty() {
@@ -599,40 +640,53 @@ fn validate_port(
     diagnostics: &mut Vec<Diagnostic>,
 ) -> bool {
     let Some(def_name) = place_def.get(&port.place_id) else {
-        // INVARIANT(upstream-diagnosed): `place_def` is populated by
-        // `resolve_site_placements` only for places that survived every
-        // pre-`connect` check. A miss here implies that `place_id`'s row
-        // hit one of the `continue` arms in `resolve_site_placements`
-        // (L341 / L357 / L373 / L389) — all of which push exactly one of
-        // the place-related diagnostic codes filtered for below.
-        // Filtering by code (rather than the looser `!is_empty()`) keeps
-        // the assert load-bearing: unrelated prior errors from other
-        // sites cannot mask a future refactor that drops the upstream
-        // emission for this specific place. The two silent-continue arms
-        // for missing `use=` / `theme=` (L370-372, L386-388) are tracked
-        // as out-of-scope for issue #38 and would currently let this
-        // assert fire — that surfaces a real gap rather than hiding it.
-        debug_assert!(
-            diagnostics.iter().any(|d| matches!(
-                d.code,
-                DiagnosticCode::UnresolvedPlaceRef
-                    | DiagnosticCode::UnresolvedThemeRef
-                    | DiagnosticCode::DuplicatePlaceId
-                    | DiagnosticCode::InvalidPlaceOrigin
-            )),
-            "validate_port: place `{place_id}` is missing from `place_def` but no place-related \
-             diagnostic was emitted (expected E_UNRESOLVED_PLACE_REF / E_UNRESOLVED_THEME_REF / \
-             E_DUPLICATE_PLACE_ID / E_INVALID_PLACE_ORIGIN); diagnostics so far: {n}",
-            place_id = port.place_id,
-            n = diagnostics.len(),
-        );
+        // `port_ref_from_value` already gates the lift on
+        // `seen_place_ids`, so reaching here means `port.place_id` is
+        // registered but its `place_def` entry never landed. The arms
+        // in `resolve_site_placements` that skip the insert split into
+        // two camps:
+        //
+        // - upstream-diagnosed: `validate_place_origin` failure
+        //   (`E_INVALID_PLACE_ORIGIN`), duplicate id
+        //   (`E_DUPLICATE_PLACE_ID`), `use=` naming an unknown def
+        //   (`E_UNRESOLVED_PLACE_REF`), `theme=` naming an unknown
+        //   theme (`E_UNRESOLVED_THEME_REF`). The user already sees a
+        //   targeted error for these.
+        // - intentionally silent: missing `use=` / missing `theme=`
+        //   (multi-theme files). The surface grammar accepts both and
+        //   no `check` pass requires either today.
+        //
+        // Either way the walkway would vanish from the build. Emit a
+        // cascade `W_DEFERRED_CONNECT` so the silent arms surface as
+        // an explicit signal — mirroring the `W_DEFERRED_MEMBER` cascade
+        // used for walkway endpoint cascades in `block_array::lower` —
+        // and so a future refactor that drops a normal-path
+        // `place_def.insert` cannot silently break every walkway.
+        diagnostics.push(Diagnostic {
+            code: DiagnosticCode::DeferredConnect,
+            severity: DiagnosticCode::DeferredConnect.severity(),
+            span: port.span.clone(),
+            primary: format!(
+                "`connect` target `{place_id}.{port_id}` references a place with no resolved \
+                 def/theme; no walkway laid",
+                place_id = port.place_id,
+                port_id = port.port_id,
+            ),
+            notes: vec![DiagnosticNote {
+                span: None,
+                message: "add `use=DEF` and `theme=NAME` to the referenced `place`, or remove \
+                          this `connect` row"
+                    .to_owned(),
+            }],
+        });
         return false;
     };
     let Some(def) = defs.iter().find(|d| d.name == *def_name) else {
-        // INVARIANT(structural): `resolve_site_placements` (L373-382)
-        // only inserts a `use_name` into `place_def` after `defs.iter()
-        // .find(|d| d.name == use_name)` already returned `Some`. By
-        // construction, every `def_name` reachable here is therefore
+        // INVARIANT(structural): `resolve_site_placements` only inserts
+        // a `use_name` into `place_def` *after* `defs.iter().find(|d|
+        // d.name == use_name)` already returned `Some` in its
+        // `unresolved_place_ref_diag` arm (which `continue`s on miss).
+        // By construction, every `def_name` reachable here is therefore
         // present in `defs`. A miss is a contract break in
         // `resolve_site_placements`, not an upstream-diagnosed input —
         // fail loud in debug builds so a future refactor that violates

@@ -147,6 +147,15 @@ pub enum DiagnosticCode {
     /// the row is flagged so the author can tell the duplicate from a missed
     /// new connection.
     DuplicateWalkway,
+    /// A `connect` row targets a `place` that the resolver registered in
+    /// `seen_place_ids` but never finished lifting into `place_def` (the
+    /// `place` row was silently skipped by `resolve_site_placements` for a
+    /// missing `use=` or `theme=`, neither of which currently has its own
+    /// upstream diagnostic). Without this cascade warning the walkway would
+    /// vanish from the build and the user would see no signal that the
+    /// `connect` did nothing; mirrors the `W_DEFERRED_MEMBER` pattern used
+    /// by walkway endpoint cascades in `block_array::lower`.
+    DeferredConnect,
 }
 
 impl DiagnosticCode {
@@ -182,6 +191,7 @@ impl DiagnosticCode {
             Self::MissingPathMaterial => "E_MISSING_PATH_MATERIAL",
             Self::WalkwayBlocked => "W_WALKWAY_BLOCKED",
             Self::DuplicateWalkway => "W_DUPLICATE_WALKWAY",
+            Self::DeferredConnect => "W_DEFERRED_CONNECT",
         }
     }
 
@@ -225,7 +235,8 @@ impl DiagnosticCode {
             | Self::DefNoSize
             | Self::UnusedDef
             | Self::WalkwayBlocked
-            | Self::DuplicateWalkway => Severity::Warning,
+            | Self::DuplicateWalkway
+            | Self::DeferredConnect => Severity::Warning,
         }
     }
 }
@@ -501,6 +512,7 @@ mod tests {
             (DiagnosticCode::UnusedDef, "W_UNUSED_DEF"),
             (DiagnosticCode::WalkwayBlocked, "W_WALKWAY_BLOCKED"),
             (DiagnosticCode::DuplicateWalkway, "W_DUPLICATE_WALKWAY"),
+            (DiagnosticCode::DeferredConnect, "W_DEFERRED_CONNECT"),
         ] {
             assert_eq!(code.as_str(), expected, "{code:?}");
         }
@@ -541,6 +553,7 @@ mod tests {
             DiagnosticCode::UnusedDef,
             DiagnosticCode::WalkwayBlocked,
             DiagnosticCode::DuplicateWalkway,
+            DiagnosticCode::DeferredConnect,
         ] {
             assert_eq!(code.severity(), Severity::Warning, "{code:?}");
         }
