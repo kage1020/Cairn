@@ -321,7 +321,28 @@ fn lower_connects(
                 ));
                 continue;
             }
-            Err(MaterialDeferred::AlreadyDiagnosed) => continue,
+            Err(MaterialDeferred::AlreadyDiagnosed) => {
+                // INVARIANT(upstream-diagnosed): `resolve_block_state`
+                // returns `AlreadyDiagnosed` only when the input value's
+                // `ValueKind` is not a token (see
+                // `material::resolve_block_state` /
+                // `TokenKind::NotAToken`). The resolver's connect-row pass
+                // (`resolve::resolver::resolve_connect_row`) rejects every
+                // non-token `path=` shape with `E_MISSING_PATH_MATERIAL`
+                // before the row enters `resolution.connects`, so we
+                // cannot legitimately reach this arm. A future change that
+                // bypasses that check would otherwise drop the strip
+                // silently — fail loud in debug builds instead.
+                debug_assert!(
+                    false,
+                    "connect `{from}` to `{to}` in site `{site}` returned AlreadyDiagnosed for path; \
+                     expected E_MISSING_PATH_MATERIAL upstream",
+                    from = port_label(&connect.from.place_id, &connect.from.port_id),
+                    to = port_label(&connect.to.place_id, &connect.to.port_id),
+                    site = connect.site,
+                );
+                continue;
+            }
         };
         let material_id = material.id.clone();
 
@@ -929,7 +950,26 @@ fn resolve_member_state(
             ));
             None
         }
-        Err(MaterialDeferred::AlreadyDiagnosed) => None,
+        Err(MaterialDeferred::AlreadyDiagnosed) => {
+            // INVARIANT(upstream-diagnosed): `AlreadyDiagnosed` is returned
+            // only when `slot_value.value.kind` is not `Token` (see
+            // `material::resolve_block_state` /
+            // `TokenKind::NotAToken`). For theme slot values the
+            // `check_slot_targets` pass in
+            // `resolve::resolver` (`resolver.rs` around the
+            // `DiagnosticCode::UnknownSlotTarget` push) emits
+            // `E_UNKNOWN_SLOT_TARGET` for exactly that shape during the
+            // `resolve()` invocation that produced the `scope` we read
+            // above; staying silent here avoids a duplicate diagnostic.
+            // A local `debug_assert` would require threading the
+            // resolver's `Resolution` into every caller of
+            // `resolve_member_state` (palette helpers, opening carvers,
+            // …). That blast radius is out of scope for #38, so the
+            // invariant is enforced by the resolver-pass unit tests
+            // around `DiagnosticCode::UnknownSlotTarget` rather than a
+            // local assert.
+            None
+        }
     }
 }
 
