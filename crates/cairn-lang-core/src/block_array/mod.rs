@@ -228,8 +228,9 @@ impl Palette {
     }
 
     /// Look up or append a block state and return its index. O(n) over the
-    /// current palette; M2 builds are small enough (cottage = 3 distinct
-    /// states) that a hash side-table would cost more than it saves.
+    /// current palette; the builds the compiler emits today are small enough
+    /// (cottage = 3 distinct states) that a hash side-table would cost more
+    /// than it saves.
     ///
     /// # Panics
     ///

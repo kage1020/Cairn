@@ -2,7 +2,8 @@
 //!
 //! The tree owns its data — callers construct a [`Tag`] / [`Compound`] /
 //! [`List`] in memory and hand it to a writer. A borrow-based zero-copy form
-//! is deferred until profiling shows it matters; M2 structures are KB-scale.
+//! is deferred until profiling shows it matters; the structures lowered today
+//! are KB-scale.
 
 use indexmap::IndexMap;
 

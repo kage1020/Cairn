@@ -1,7 +1,8 @@
 //! Insta snapshots for every file under `examples/`.
 //!
-//! The four examples are the M1 acceptance gate (`source parses`): if any one
-//! of them stops parsing, the milestone regresses.
+//! The shipped examples are the "source parses" acceptance surface: if any
+//! one of them stops parsing, the parser has lost coverage of input the
+//! project promises to support.
 
 use cairn_lang_core::parse;
 

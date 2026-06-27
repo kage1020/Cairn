@@ -22,8 +22,9 @@
 //!    `W_WALKWAY_BLOCKED` warning per row.
 //!
 //! The walkway always sits at the two ports' shared Y. 3D path search
-//! (staircases, multi-level walkways) is intentionally out of scope for
-//! now; every shipping example lays its walkways flat against `y = 0`.
+//! (staircases, multi-level walkways) is intentionally out of scope so
+//! the port surface lands in one piece; every shipping example lays its
+//! walkways flat against `y = 0`.
 
 use std::collections::HashSet;
 use std::hash::BuildHasher;
@@ -64,9 +65,9 @@ pub fn port_world_position(
         .iter()
         .find(|m| m.id.as_deref() == Some(port_id))?;
     if !matches!(member.role, MemberRole::Door) {
-        // Window / stair / roof ports are not yet modelled. Returning
-        // `None` here keeps the door-only contract enforced at the type
-        // level without growing the diagnostic surface yet.
+        // Window / stair / roof ports are reserved for a future extension.
+        // Returning `None` here keeps the door-only contract enforced at
+        // the type level without growing the diagnostic surface.
         return None;
     }
     let side = ident_value(member, "side").and_then(WallSide::from_ident)?;

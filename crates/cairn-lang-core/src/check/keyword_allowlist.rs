@@ -1,10 +1,10 @@
 //! `keyword_allowlist` pass — flags every member whose role lowered to
 //! [`MemberRole::Other`], and every theme selector whose leading keyword
-//! is outside the M2 table.
+//! is outside the known-keyword table.
 //!
 //! Walks the Intent IR rather than the AST because the role classification
 //! already happened during lowering; `MemberRole::Other(kw)` is the single
-//! source of truth for "this keyword wasn't in the M2 table" on
+//! source of truth for "this keyword is not in the known-keyword table" on
 //! struct/def/site bodies. For theme selectors the lowering step keeps
 //! the raw keyword string, so this pass re-checks it directly via
 //! [`role_of`](crate::intent::role_of).

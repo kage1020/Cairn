@@ -1,12 +1,11 @@
 //! End-to-end check that `cottage.crn` lowers to the expected voxel volume.
 //!
-//! This is the example the M2 milestone gates on. cottage.crn exercises
-//! every voxel role the current pass ships (floor, walls, door, window,
-//! gable roof with overhang), so the integration test pins the inflated
-//! dims, the door/window/roof voxel placements, the full palette, and the
-//! *zero* deferred-warning bar. A regression in any of those — lowering
-//! arithmetic, phase ordering, overhang shift, or roof orientation —
-//! fails immediately.
+//! cottage.crn exercises every voxel role the current pass ships (floor,
+//! walls, door, window, gable roof with overhang), so this integration test
+//! pins the inflated dims, the door/window/roof voxel placements, the full
+//! palette, and the *zero* deferred-warning bar. A regression in any of
+//! those — lowering arithmetic, phase ordering, overhang shift, or roof
+//! orientation — fails immediately.
 
 use std::path::PathBuf;
 

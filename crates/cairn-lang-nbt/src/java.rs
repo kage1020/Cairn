@@ -16,9 +16,11 @@ use crate::tag::{Compound, List, Tag};
 #[derive(Debug, Error)]
 pub enum NbtIoError {
     /// A [`Tag::String`] contained a byte that cannot be carried by Java
-    /// Modified UTF-8. M2 declines the NUL byte and non-ASCII (the
-    /// supplementary-pair encoder lands later). The position is the byte
-    /// offset within the offending string so a caller can point at it.
+    /// Modified UTF-8. The encoder currently declines the NUL byte and
+    /// non-ASCII (a supplementary-pair encoder is reserved for a future
+    /// extension once a registry-pack id is observed outside that range).
+    /// The position is the byte offset within the offending string so a
+    /// caller can point at it.
     #[error("nbt: string contains byte 0x{byte:02x} at index {index}, not encodable here")]
     InvalidString {
         /// Offending byte.
@@ -95,10 +97,9 @@ fn write_tag_id<W: Write>(w: &mut W, id: u8) -> Result<(), NbtIoError> {
 }
 
 fn write_string<W: Write>(w: &mut W, s: &str) -> Result<(), NbtIoError> {
-    // Java NBT String uses Modified UTF-8 with a u16 length prefix. M2 ships
-    // an ASCII-only encoder: every byte must be ASCII and non-NUL. The
-    // supplementary-pair encoder lands once a registry-pack id is observed
-    // outside that range.
+    // Java NBT String uses Modified UTF-8 with a u16 length prefix. The
+    // accepted byte set matches what `NbtIoError::InvalidString` documents:
+    // ASCII and non-NUL only.
     for (index, &byte) in s.as_bytes().iter().enumerate() {
         if byte == 0 || byte >= 0x80 {
             return Err(NbtIoError::InvalidString { byte, index });

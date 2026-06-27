@@ -142,9 +142,10 @@ fn collect_floor_cells(
         let Some(ba) = structures.get(key) else {
             continue;
         };
-        // Only the y=0 plane matters: walkways currently sit at the
-        // ports' shared Y (=0 for every example) since 3D path search
-        // is not yet modelled.
+        // Only the y=0 plane matters: walkways sit at the ports' shared
+        // Y (=0 for every example). 3D path search (staircases, multi-level
+        // walkways) is intentionally out of scope so the port surface lands
+        // in one piece.
         for z in 0..ba.dims.z {
             for x in 0..ba.dims.x {
                 let Some(i) = ba.dims.index(x, 0, z) else {
@@ -494,12 +495,15 @@ fn lower_struct<'a>(
 /// `E_UNRESOLVED_THEME_REF`, `E_DUPLICATE_PLACE_ID`,
 /// `E_INVALID_PLACE_ORIGIN`); this pass owns:
 ///
-/// - `W_DEFERRED_MEMBER` on every `connect` row (port model and walkway
-///   voxelisation are not yet implemented),
 /// - the topological → absolute coordinate solver
 ///   (`at=origin`, `east_of=ID gap=N`, `north_of=ID gap=N`),
 /// - the per-place IR emission into `structures` / `placements` under the
 ///   `site::SITE::PLACE_ID` key.
+///
+/// `connect` rows on the site body are handled by [`lower_connects`] (one
+/// walkway `BlockArray` per row); members on a placed `def` whose role the
+/// block-array lowering pass does not yet support surface as
+/// `W_DEFERRED_MEMBER` from the def-walking step instead.
 fn lower_site<'a>(
     site: &SiteIr,
     defs: &[DefIr],

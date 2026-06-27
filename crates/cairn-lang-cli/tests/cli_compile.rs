@@ -372,7 +372,7 @@ fn compile_does_not_print_wrote_before_lockfile_success() {
 #[test]
 fn compile_all_examples_exit_zero() {
     // Every example must compile clean even when its source uses members
-    // or material tokens the M2 backend can't fully realise — abstract
+    // or material tokens the Java backend can't fully realise — abstract
     // tokens and unsupported roles degrade to air with a warning at the
     // lowering step, so the palette that reaches the Java backend is
     // already concrete. A non-zero exit here means a regression in either

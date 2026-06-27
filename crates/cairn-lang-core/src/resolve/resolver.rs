@@ -1172,8 +1172,9 @@ mod tests {
     fn unmatched_selector_warning_is_suppressed_for_unapplied_themes() {
         // Regression: in a multi-theme file, no theme is applied to the
         // struct/def, so warning on every theme selector would be noise.
-        // M3 will pick the theme via `place ... theme=X`; until then the
-        // selectors are not "unmatched", they're "not yet bound".
+        // A theme is picked at the `place ... theme=X` boundary; until
+        // that binding runs, the selectors are not "unmatched", they're
+        // "not yet bound".
         let src = "theme a:\n  walls[class=outer] -> trim=@a\ntheme b:\n  walls[class=outer] -> trim=@b\n\nstruct s size=4x4\n  walls class=outer height=3\n";
         let r = resolve(&ir(src));
         assert!(

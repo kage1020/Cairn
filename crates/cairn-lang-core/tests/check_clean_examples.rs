@@ -2,9 +2,9 @@
 //!
 //! If a future change introduces a diagnostic against `cottage.crn` (or any
 //! other example) without also updating the example to match the new rule,
-//! one of these assertions catches it before release. The four examples are
-//! also the `M3 — examples work` gate, so they double as the "what shape of
-//! input do we promise to support" surface.
+//! one of these assertions catches it before release. The shipped examples
+//! also define the "what shape of input do we promise to support" surface,
+//! so this suite doubles as the contract for that promise.
 
 use cairn_lang_core::{check, lower, parse};
 

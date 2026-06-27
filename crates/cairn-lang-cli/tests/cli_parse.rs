@@ -1,7 +1,7 @@
 //! End-to-end tests for `cairn parse <file>`.
 //!
 //! These tests invoke the freshly compiled binary against every example so the
-//! M1 gate ("source parses") is enforced from the CLI surface, not just from
+//! "source parses" contract is enforced from the CLI surface, not just from
 //! the library API.
 
 use std::path::PathBuf;

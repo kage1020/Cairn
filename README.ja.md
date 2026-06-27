@@ -95,15 +95,15 @@ Cairn のリリースは **日付ベースバージョニング (CalVer)** `YYYY
 
 ## ロードマップ
 
-[ロードマップ](https://cairn.kage1020.com/ja/roadmap/) に M1〜M6 のマイルストーンと `2027.06.0`
-までの月別スコープを掲載しています:
+[ロードマップ](https://cairn.kage1020.com/ja/roadmap/) には 6 つの名前付きマイルストーンと
+`2027.06.0` までの月別スコープを掲載しています。リリース別の主要スコープ:
 
-- **M1** (`2026.07.0`) — ソースが parse できる
-- **M2** (`2026.10.0`) — 最小ビルド (単室、Java、lockfile)
-- **M3** (`2027.01.0`) — examples が Java で end-to-end 動く
-- **M4** (`2027.02.0`) — Java/Bedrock パリティ
-- **M5** (`2027.03.0`) — `cairn-lang-lsp` と VS Code 拡張
-- **M6** (`2027.05.0`) — レッドストーン論理層、place-and-route、tick simulator
+- `2026.07.0` — ソースが parse できる
+- `2026.10.0` — 最小ビルド (単室、Java、lockfile)
+- `2027.01.0` — examples が Java で end-to-end 動く
+- `2027.02.0` — Java/Bedrock パリティ
+- `2027.03.0` — `cairn-lang-lsp` と VS Code 拡張
+- `2027.05.0` — レッドストーン論理層、place-and-route、tick simulator
 
 月次 minor は毎月 1 日の GitHub Actions cron が自動で PR を立てます。patch は適格コミットが `main`
 に入ったときに随時開きます。

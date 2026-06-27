@@ -3,8 +3,8 @@
 //! Mirrors the spec's "rich member with invariants" (see `architecture.md`
 //! §3.2): every member knows its [`MemberRole`], may carry an `id` / `class` /
 //! `mat_slot`, holds an [`IntentState`] of raw `key=value` attributes, and
-//! reserves a [`ResolvedState`] slot that M3 fills in once materials and
-//! themes resolve.
+//! reserves a [`ResolvedState`] slot that the lift pass fills in once
+//! materials and themes resolve.
 
 use std::ops::{Deref, DerefMut};
 
@@ -19,7 +19,8 @@ use super::{AssertIr, LogicBinding};
 /// One named member produced by lowering a body statement.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Member {
-    /// Explicit `id=` value, if any. M2 does not auto-assign addresses.
+    /// Explicit `id=` value, if any. The lowering pass does not auto-assign
+    /// addresses; an unset `id` stays unset all the way through.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub id: Option<String>,
     /// Explicit `class=` grouping, if any.
@@ -50,10 +51,12 @@ pub struct Member {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub binding: Option<Value>,
     /// `key=value` attributes that were not consumed by the dedicated fields
-    /// above. M3 will type these against the per-keyword schema.
+    /// above. These remain untyped today; a per-keyword schema pass is
+    /// reserved for a future extension.
     pub intent_state: IntentState,
     /// Per-edition resolved blockstate. Always `None` at semantic level
-    /// `Grouped`; populated by the M3 lift pass.
+    /// `Grouped`; populated when the lift pass advances the member to
+    /// `Lifted`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub resolved_state: Option<ResolvedState>,
     /// Nested body indented under this member.
@@ -81,7 +84,7 @@ pub struct Member {
 /// variant already forces every external `match` to handle the "any keyword
 /// we don't know" case, so a non-exhaustive marker would only suppress the
 /// internal exhaustiveness check we rely on to catch missed updates when a
-/// new keyword is added to the M2 roster.
+/// new keyword is added to the roster.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(tag = "kind", content = "value")]
 pub enum MemberRole {
@@ -107,8 +110,9 @@ pub enum MemberRole {
     Place,
     /// `connect` site topology edge.
     Connect,
-    /// Any keyword the M2 table does not know about. Validation passes (M2
-    /// PR2+) report these via `E_UNKNOWN_KEYWORD`; lower itself never fails.
+    /// Any keyword the role table does not know about. The keyword-allowlist
+    /// validation pass reports these via `E_UNKNOWN_KEYWORD`; lower itself
+    /// never fails.
     Other(String),
 }
 
@@ -144,8 +148,8 @@ impl MemberBody {
 /// Raw `key=value` attributes attached to a [`Member`].
 ///
 /// Stored as an [`IndexMap`] so source order is preserved — diagnostic
-/// messages emitted in later M2 PRs need stable positions, and any
-/// snapshot-based test would otherwise flake. Each entry is wrapped in
+/// messages need stable positions, and any snapshot-based test would
+/// otherwise flake. Each entry is wrapped in
 /// [`ValueWithSpan`] so the diagnostic-collecting `check` passes can point at
 /// the offending byte range without re-walking the AST to recover positions.
 /// `Deref` / `DerefMut` against the underlying map let callers write

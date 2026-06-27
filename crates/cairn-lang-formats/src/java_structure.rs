@@ -11,10 +11,10 @@
 //! ```
 //!
 //! `block_entities` and `entities` from the IR are intentionally not wired
-//! through — the M2 lowering passes never populate them, and the Java
+//! through — the lowering passes never populate them today, and the Java
 //! vanilla structure format expects them either absent or empty. Keeping
 //! that decision local to this module (rather than failing if the lists
-//! aren't empty) leaves the door open for M3 fixtures lowering.
+//! aren't empty) leaves the door open for future fixture / entity lowering.
 
 use cairn_lang_core::block_array::{BlockArray, BlockState};
 pub use cairn_lang_nbt::Compound;
@@ -208,8 +208,8 @@ fn blocks_list(ba: &BlockArray) -> Result<List, JavaStructureError> {
     // The IR stores voxels in (y, z, x) order; emit blocks in the same
     // order so successive compiles produce byte-identical output. AIR cells
     // are included — vanilla mojang structure block output keeps them, and
-    // M3 site placement needs them to distinguish "void" from "explicit
-    // air" cells.
+    // site placement needs them to distinguish "void" from "explicit air"
+    // cells.
     //
     // The per-axis bounds were already validated by `dim_to_i32` in the
     // caller, so the per-voxel `try_from` here only re-fires when `dims`
