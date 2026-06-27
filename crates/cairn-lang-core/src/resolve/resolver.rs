@@ -534,9 +534,16 @@ fn port_ref_from_value(
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Option<PortRef> {
     let ValueKind::DotRef(dot) = &raw.kind else {
-        // Surface parser quirks (`connect` with a non-dotted positional)
-        // are caught upstream; staying silent here avoids double-counting
-        // a malformed row as a resolver-side failure.
+        // INVARIANT(upstream-diagnosed): `connect from to to to` only takes
+        // a `Value` whose `ValueKind` is `DotRef`. Any other shape — bare
+        // literal, token, call — fails the surface grammar at parse time
+        // or the connect-member discriminator in `intent::lower`, which
+        // emits its own structural diagnostic before this row reaches the
+        // resolver. Re-pushing here would double-count a single malformed
+        // row. The verification of that upstream emission is parser-level
+        // and cannot be checked from inside this `Vec<Diagnostic>`-scoped
+        // pass, so the contract is enforced by the doc comment plus the
+        // grammar tests in `tests/parse_*.rs`.
         return None;
     };
     if dot.tail().is_empty() {
@@ -590,15 +597,37 @@ fn validate_port(
     diagnostics: &mut Vec<Diagnostic>,
 ) -> bool {
     let Some(def_name) = place_def.get(&port.place_id) else {
-        // The corresponding `place` line failed validation upstream
-        // (unknown def, malformed origin, ...). The error has already
-        // been reported; treat the port as silently invalid so the
-        // walkway is not laid against a broken placement.
+        // INVARIANT(upstream-diagnosed): `place_def` is populated only with
+        // places that survived `resolve_site_places`. A miss here means the
+        // corresponding `place` row already pushed `E_UNRESOLVED_PLACE_REF`
+        // / `E_DUPLICATE_PLACE_ID` / `E_INVALID_PLACE_ORIGIN` into the
+        // shared `diagnostics` sink before connect rows ran. Staying silent
+        // avoids a second diagnostic for the same broken placement; the
+        // debug_assert below is a release-build-free safety net catching a
+        // future refactor that would let a port reach validate_port without
+        // the upstream emission.
+        debug_assert!(
+            !diagnostics.is_empty(),
+            "validate_port: place `{place_id}` is missing from `place_def` \
+             but no upstream diagnostic was emitted (expected E_UNRESOLVED_PLACE_REF or similar)",
+            place_id = port.place_id,
+        );
         return false;
     };
     let Some(def) = defs.iter().find(|d| d.name == *def_name) else {
-        // `use=NAME` referenced an unknown def — `E_UNRESOLVED_PLACE_REF`
-        // already fired. Same silence-rule as above.
+        // INVARIANT(upstream-diagnosed): `use=NAME` is recorded in
+        // `place_def` only after `resolve_site_places` either confirmed a
+        // matching def exists or pushed `E_UNRESOLVED_PLACE_REF`. A miss
+        // here therefore implies the upstream diagnostic already fired.
+        // Same silence-rule as the `place_def` miss above; the
+        // `debug_assert!` is the equivalent regression guard.
+        debug_assert!(
+            !diagnostics.is_empty(),
+            "validate_port: def `{def_name}` (used by `place {place_id}`) is missing from `defs` \
+             but no upstream diagnostic was emitted (expected E_UNRESOLVED_PLACE_REF)",
+            def_name = def_name,
+            place_id = port.place_id,
+        );
         return false;
     };
 
