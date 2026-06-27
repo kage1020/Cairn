@@ -45,8 +45,8 @@ pub struct Member {
     pub positional: Vec<Value>,
     /// `-> VALUE` tail at the end of a line, e.g.
     /// `pressure_plate ... -> sig.step`. Always carried separately from
-    /// [`Self::intent_state`] so the M2-PR3 `reference` pass can resolve it
-    /// without round-tripping through a string key.
+    /// [`Self::intent_state`] so the resolver's reference pass can match
+    /// it without round-tripping through a string key.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub binding: Option<Value>,
     /// `key=value` attributes that were not consumed by the dedicated fields
@@ -63,9 +63,9 @@ pub struct Member {
     /// the children as a [`MemberBody`] — the same triple the top-level IR
     /// uses — keeps each of those three statement flavours addressable
     /// instead of forcing the caller to either reject or silently drop the
-    /// non-member ones. M2's `lower` is total, so the only structural
-    /// invariant maintained here is "children sit in their declaration
-    /// order, grouped by kind".
+    /// non-member ones. The current `lower` is total, so the only
+    /// structural invariant maintained here is "children sit in their
+    /// declaration order, grouped by kind".
     #[serde(default, skip_serializing_if = "MemberBody::is_empty")]
     pub children: MemberBody,
     /// Byte range of the originating `Statement::Generic` line in the source
@@ -215,9 +215,9 @@ impl ValueWithSpan {
 
 /// Resolved, per-edition blockstate for a [`Member`].
 ///
-/// Empty in M2 — only the shape is fixed so M3's lift pass can populate
-/// concrete state without a breaking change. Uses the same `Deref` /
-/// `DerefMut` ergonomics as [`IntentState`].
+/// Empty for now — only the shape is fixed so the future `Lifted` pass
+/// can populate concrete state without a breaking change. Uses the same
+/// `Deref` / `DerefMut` ergonomics as [`IntentState`].
 #[derive(Debug, Clone, Default, PartialEq, Serialize)]
 #[serde(transparent)]
 pub struct ResolvedState {

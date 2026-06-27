@@ -10,12 +10,12 @@
 //! - and the diagnostics emitted along the way (`E_UNRESOLVED_SLOT`,
 //!   `E_UNKNOWN_SLOT_TARGET`, `E_THEME_SELECTOR_UNMATCHED`).
 //!
-//! Theme selection rule (kept deliberately narrow for M2-PR3):
+//! Theme selection rule (kept deliberately narrow):
 //! - **0 themes in file** → no scope has a theme; every `mat_slot=` is left
 //!   unresolved silently (the file may be intended as a library).
 //! - **1 theme in file** → every scope picks that theme.
-//! - **multiple themes** → struct/def scopes do not auto-pick (which one
-//!   applies is decided at the `place ... theme=X` boundary in M3).
+//! - **multiple themes** → struct/def scopes do not auto-pick; the choice
+//!   is deferred to the `place ... theme=X` boundary on the site side.
 //!
 //! Selectors are scoped to their **bound theme only**: a scope with
 //! `bound_theme = None` gets no `selector_extras` (even if some theme in
@@ -99,9 +99,13 @@ pub struct Resolution {
 ///
 /// `place_id` is the `id=` of the named place; `port_id` is the `id=`
 /// of the matching member inside that place's `def`. The span points at
-/// the originating `DotRef` value in source so the walkway-side
-/// diagnostic (collision warning, lay failure) can anchor against the
-/// exact token the user wrote, not the whole `connect` line.
+/// the originating `DotRef` value in source so the resolver-side
+/// diagnostics (`E_UNRESOLVED_PORT`, `E_AMBIGUOUS_PORT`,
+/// `E_UNRESOLVED_PLACE_REF` from the connect path) can underline the
+/// exact token the user wrote, not the whole `connect` line. Block-array
+/// side diagnostics (`W_WALKWAY_BLOCKED`, `W_DUPLICATE_WALKWAY`, the
+/// endpoint-cascade `W_DEFERRED_MEMBER`) describe the whole walkway and
+/// therefore anchor at `ResolvedConnect::span` instead.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct PortRef {
     /// `place id=` value the port belongs to.
@@ -449,10 +453,12 @@ fn resolve_connect_row(
         // where there is one.
         return;
     };
-    let Some(from) = port_ref_from_value(from_value, "from", seen_place_ids, diagnostics) else {
-        return;
-    };
-    let Some(to) = port_ref_from_value(to_value, "to", seen_place_ids, diagnostics) else {
+    // Lift both ends before short-circuiting so a row with two broken
+    // halves earns two diagnostics, not just the first. `validate_port`
+    // already follows the same accumulate-then-decide pattern below.
+    let from = port_ref_from_value(from_value, "from", seen_place_ids, diagnostics);
+    let to = port_ref_from_value(to_value, "to", seen_place_ids, diagnostics);
+    let (Some(from), Some(to)) = (from, to) else {
         return;
     };
 
@@ -1057,9 +1063,9 @@ fn check_unmatched_selectors(
 ) {
     for theme in themes.values() {
         // Skip themes that were never bound to a scope — their selectors
-        // are vacuously unmatched in M2-PR3 because the resolver can't
-        // pick which struct/def they apply to (multi-theme files defer
-        // the decision to M3's `place ... theme=X` boundary). Warning
+        // are vacuously unmatched because the resolver can't pick which
+        // struct/def they apply to (multi-theme files defer the decision
+        // to the `place ... theme=X` boundary on the site side). Warning
         // about every selector in such a theme would be noise.
         if !applied_themes.contains(&theme.name) {
             continue;
@@ -1315,6 +1321,13 @@ mod tests {
             "expected nearest-match note pointing at a.entry, got {:?}",
             diag.notes,
         );
+        // Anchor: the span must point at the `a.entr` DotRef, not at
+        // the whole `connect` row. Mirrors the to-side assertion in
+        // `connect_unknown_port_on_to_side_emits_e_unresolved_port`.
+        let typo_start = src.find("a.entr").expect("typo present");
+        let typo_end = typo_start + "a.entr".len();
+        assert_eq!(diag.span.start, typo_start);
+        assert_eq!(diag.span.end, typo_end);
         // The failed connect must not surface as resolved — walkway
         // voxelisation only sees rows it can lay safely.
         assert!(r.connects.is_empty(), "broken connect must not resolve");
@@ -1429,13 +1442,151 @@ mod tests {
             "  connect a.entry to ghost.entry path=@gravel\n",
         );
         let r = resolve(&ir(src));
+        let diag = r
+            .diagnostics
+            .iter()
+            .find(|d| d.code == DiagnosticCode::UnresolvedPlaceRef && d.primary.contains("ghost"))
+            .unwrap_or_else(|| {
+                panic!(
+                    "expected E_UNRESOLVED_PLACE_REF mentioning ghost, got {:?}",
+                    r.diagnostics,
+                )
+            });
+        // Anchor: span underlines the `ghost.entry` reference itself.
+        let bad_start = src.find("ghost.entry").expect("bad ref present");
+        let bad_end = bad_start + "ghost.entry".len();
+        assert_eq!(diag.span.start, bad_start);
+        assert_eq!(diag.span.end, bad_end);
+    }
+
+    #[test]
+    fn connect_with_both_endpoints_unknown_emits_both_e_unresolved_place_ref() {
+        // Pin the "fail both halves" contract: a row whose `from` and
+        // `to` both name absent places must surface *two* diagnostics
+        // (one per offending DotRef), not just the first one. Catches a
+        // regression where short-circuit on the `from` half would let
+        // the `to` typo slip through silently.
+        let src = concat!(
+            "theme t:\n",
+            "  slot wall -> @cobblestone\n",
+            "\n",
+            "def cottage size=3x3:\n",
+            "  walls mat_slot=wall height=2\n",
+            "  door id=entry side=front at=center\n",
+            "\n",
+            "site s:\n",
+            "  place id=a use=cottage theme=t at=origin\n",
+            "  connect ghost.entry to phantom.entry path=@gravel\n",
+        );
+        let r = resolve(&ir(src));
+        let ghost_hit = r
+            .diagnostics
+            .iter()
+            .any(|d| d.code == DiagnosticCode::UnresolvedPlaceRef && d.primary.contains("ghost"));
+        let phantom_hit = r
+            .diagnostics
+            .iter()
+            .any(|d| d.code == DiagnosticCode::UnresolvedPlaceRef && d.primary.contains("phantom"));
         assert!(
-            r.diagnostics.iter().any(
-                |d| d.code == DiagnosticCode::UnresolvedPlaceRef && d.primary.contains("ghost")
-            ),
-            "expected E_UNRESOLVED_PLACE_REF mentioning ghost, got {:?}",
+            ghost_hit && phantom_hit,
+            "expected E_UNRESOLVED_PLACE_REF for both `ghost` and `phantom`, got {:?}",
             r.diagnostics,
         );
+        assert!(r.connects.is_empty(), "broken connect must not resolve");
+    }
+
+    #[test]
+    fn connect_unknown_port_on_to_side_emits_e_unresolved_port() {
+        // Symmetric to `connect_unknown_port_emits_e_unresolved_port`: the
+        // bad port is on the `to` half (`b.entr`) instead of the `from`
+        // half. The diagnostic must anchor at the offending token, not at
+        // the whole `connect` line.
+        let src = concat!(
+            "theme t:\n",
+            "  slot wall -> @cobblestone\n",
+            "\n",
+            "def cottage size=3x3:\n",
+            "  walls mat_slot=wall height=2\n",
+            "  door id=entry side=front at=center\n",
+            "\n",
+            "site s:\n",
+            "  place id=a use=cottage theme=t at=origin\n",
+            "  place id=b use=cottage theme=t east_of=a gap=2\n",
+            "  connect a.entry to b.entr path=@gravel\n",
+        );
+        let r = resolve(&ir(src));
+        let diag = r
+            .diagnostics
+            .iter()
+            .find(|d| d.code == DiagnosticCode::UnresolvedPort)
+            .unwrap_or_else(|| panic!("expected E_UNRESOLVED_PORT, got {:?}", r.diagnostics));
+        assert_eq!(diag.severity, Severity::Error);
+        assert!(
+            diag.notes.iter().any(|n| n.message.contains("b.entry")),
+            "expected nearest-match note pointing at b.entry, got {:?}",
+            diag.notes,
+        );
+        // The span must point at the `b.entr` token itself so a renderer
+        // can underline the typo rather than the whole `connect` row.
+        let typo_start = src.find("b.entr").expect("typo present");
+        let typo_end = typo_start + "b.entr".len();
+        assert_eq!(
+            diag.span.start, typo_start,
+            "span should anchor at the `b.entr` DotRef, got {:?}",
+            diag.span,
+        );
+        assert_eq!(
+            diag.span.end, typo_end,
+            "span should end at the `b.entr` DotRef, got {:?}",
+            diag.span,
+        );
+        assert!(r.connects.is_empty(), "broken connect must not resolve");
+    }
+
+    #[test]
+    fn connect_unknown_place_on_from_side_emits_e_unresolved_place_ref() {
+        // Symmetric to `connect_unknown_place_emits_e_unresolved_place_ref`:
+        // the unknown place id is on the `from` half instead of the `to`
+        // half. A single E_UNRESOLVED_PLACE_REF code must continue to
+        // cover both directions.
+        let src = concat!(
+            "theme t:\n",
+            "  slot wall -> @cobblestone\n",
+            "\n",
+            "def cottage size=3x3:\n",
+            "  walls mat_slot=wall height=2\n",
+            "  door id=entry side=front at=center\n",
+            "\n",
+            "site s:\n",
+            "  place id=a use=cottage theme=t at=origin\n",
+            "  connect ghost.entry to a.entry path=@gravel\n",
+        );
+        let r = resolve(&ir(src));
+        let diag = r
+            .diagnostics
+            .iter()
+            .find(|d| d.code == DiagnosticCode::UnresolvedPlaceRef && d.primary.contains("ghost"))
+            .unwrap_or_else(|| {
+                panic!(
+                    "expected E_UNRESOLVED_PLACE_REF mentioning ghost, got {:?}",
+                    r.diagnostics,
+                )
+            });
+        // The span must underline the `ghost.entry` reference so the
+        // renderer points at the bad token rather than the whole row.
+        let bad_start = src.find("ghost.entry").expect("bad ref present");
+        let bad_end = bad_start + "ghost.entry".len();
+        assert_eq!(
+            diag.span.start, bad_start,
+            "span should anchor at the `ghost.entry` DotRef, got {:?}",
+            diag.span,
+        );
+        assert_eq!(
+            diag.span.end, bad_end,
+            "span should end at the `ghost.entry` DotRef, got {:?}",
+            diag.span,
+        );
+        assert!(r.connects.is_empty(), "broken connect must not resolve");
     }
 
     #[test]

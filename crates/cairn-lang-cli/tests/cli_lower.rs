@@ -90,7 +90,7 @@ fn lower_4_missing_file_exits_with_code_two() {
 
 #[test]
 fn lower_5_themed_tower_lifts_abstract_tokens_through_builtin_materials() {
-    // M3-PR2: the built-in registry pack ships a materials catalog covering
+    // The built-in registry pack ships a materials catalog covering
     // every abstract token themed-tower.crn binds, so `W_ABSTRACT_TOKEN_DEFERRED`
     // must NOT appear. `W_DEFERRED_MEMBER` is still expected on its top-level
     // `level` blocks (level lowering arrives later), so exit stays 0.

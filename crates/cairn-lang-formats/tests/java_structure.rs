@@ -300,10 +300,10 @@ fn output_filename_strips_site_and_name_prefixes_to_place_id() {
 #[test]
 fn output_filename_preserves_inner_colons_and_unicode() {
     // Scope keys that the IR could legitimately produce (a nested-namespace
-    // notation in M3) should not be silently rewritten. We strip only the
-    // exact `struct::` prefix and leave the rest verbatim, including any
-    // subsequent `::`; downstream filename sanitisation is the OS layer's
-    // responsibility on Windows.
+    // notation once nested scopes land) should not be silently rewritten.
+    // We strip only the exact `struct::` prefix and leave the rest
+    // verbatim, including any subsequent `::`; downstream filename
+    // sanitisation is the OS layer's responsibility on Windows.
     assert_eq!(output_filename("struct::deep::room"), "deep::room.nbt");
     // No prefix, no transformation: the scope key carries through verbatim.
     assert_eq!(output_filename("塔"), "塔.nbt");
@@ -389,9 +389,9 @@ fn cottage_structure_tag() -> cairn_lang_formats::java_structure::Compound {
 
 #[test]
 fn f12_cottage_end_to_end_palette_carries_spruce_stairs_properties() {
-    // M2-PR6: lowering the cottage example must produce a Java palette
-    // where spruce_stairs appears with `facing` and `half` properties on
-    // every entry. The Properties compound is the contract the Minecraft
+    // Lowering the cottage example must produce a Java palette where
+    // spruce_stairs appears with `facing` and `half` properties on every
+    // entry. The Properties compound is the contract the Minecraft
     // structure block reads — losing it would silently strip the roof
     // orientation and render the gable as flat slabs.
     let root = cottage_structure_tag();
@@ -430,7 +430,7 @@ fn f12_cottage_end_to_end_palette_carries_spruce_stairs_properties() {
 
 #[test]
 fn f13_cottage_end_to_end_size_matches_overhang_inflated_dims() {
-    // M2-PR6: cottage.crn declares size=9x7 walls height=4 roof overhang=1.
+    // cottage.crn declares size=9x7 walls height=4 roof overhang=1.
     // The Java structure root must mirror the lowering pass:
     //   x = 9 + 2 = 11
     //   z = 7 + 2 = 9

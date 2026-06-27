@@ -86,7 +86,8 @@ fn info_2_json_format_is_valid_version_axes() {
     let sensitive = parsed["semantic_sensitive"]
         .as_array()
         .expect("semantic_sensitive is an array");
-    // M2-PR3 leaves the catalog empty; populated in 2026.12.0.
+    // The semantic-sensitivity catalog has not landed yet, so this list
+    // stays empty.
     assert!(sensitive.is_empty());
 }
 

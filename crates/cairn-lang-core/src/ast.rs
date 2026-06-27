@@ -14,9 +14,9 @@
 //! externally-visible wire shape is unchanged from before spans were threaded
 //! through. The boolean-expression family ([`Expr`], [`TruthRow`],
 //! [`DottedRef`]) is intentionally span-free for now; those nodes only appear
-//! inside `logic`/`assert` lines that the reference-resolution pass (M2-PR3)
-//! will revisit, and spending the bytes here today would not buy any
-//! diagnostic the current passes need.
+//! inside `logic`/`assert` lines that the reference-resolution pass will
+//! revisit, and spending the bytes here today would not buy any diagnostic
+//! the current passes need.
 
 use std::num::NonZeroU32;
 

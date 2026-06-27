@@ -63,9 +63,9 @@ pub enum JavaStructureError {
 /// # Errors
 ///
 /// Returns [`JavaStructureError::AbstractPaletteEntry`] when a palette
-/// entry's id has no `:` separator — the registry pack ingest in 2026.12.0
-/// will resolve abstract tokens before they reach this point, but until
-/// then `cairn lower` can leak them in and we refuse to write a malformed
+/// entry's id has no `:` separator — the registry pack normally resolves
+/// abstract tokens before they reach this point, but a `cairn lower` run
+/// without a pack can leak them in and we refuse to write a malformed
 /// structure rather than emit one Minecraft will silently treat as air.
 pub fn build_structure_tag(
     ba: &BlockArray,
@@ -150,6 +150,16 @@ pub fn output_filename(source_scope: &str) -> String {
     if let Some(rest) = source_scope.strip_prefix("walkway::")
         && let Some((site, ports)) = rest.split_once("::")
     {
+        // Flatten `place.port` separators to `_` for portable filenames.
+        // Known hazard: Cairn ids allow `_`, so two distinct scopes can
+        // collapse to the same on-disk name — `a.b_c__d.e_f` and
+        // `a_b.c__d_e.f` both flatten to `a_b_c__d_e_f.nbt`. Walkway
+        // dedup at the IR layer (`lower_connects` `seen_pairs`) only
+        // catches reversed-endpoint duplicates, not this collision.
+        // Detecting it requires a write-time pass over all emitted
+        // filenames; that lives in the CLI's compile pipeline. The
+        // flatten itself stays here because every backend (Java now,
+        // Bedrock later) shares the same naming contract.
         let flattened = ports.replace('.', "_");
         return format!("{site}_walkway_{flattened}.nbt");
     }

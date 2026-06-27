@@ -144,12 +144,12 @@ pub struct BlockArray {
     /// dims.x + x]`. Y-major lets ASCII renderers walk one slice at a time
     /// without re-striding.
     pub voxels: Vec<PaletteIndex>,
-    /// Block entities (chests, signs, ...) that sit on the grid. Empty in
-    /// M2 — the IR shape is reserved for the M3+ fixtures phase.
+    /// Block entities (chests, signs, ...) that sit on the grid. Empty
+    /// for now — the IR shape is reserved for the fixtures phase.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub block_entities: Vec<BlockEntity>,
-    /// Free entities (frames, paintings, ...). Empty in M2 for the same
-    /// reason as [`block_entities`].
+    /// Free entities (frames, paintings, ...). Empty for the same reason
+    /// as [`block_entities`].
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub entities: Vec<Entity>,
     /// Source scope this volume was lowered from, mirroring the
@@ -261,7 +261,7 @@ impl Default for Palette {
 /// The properties map is `String -> String` rather than a typed sum because
 /// the block-array IR sits below the materials/registry layer and treats
 /// state values as opaque payload — typing happens against the registry
-/// pack, which lands later in M2's roadmap month.
+/// pack one layer up.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct BlockState {
     /// Canonical id, e.g. `minecraft:cobblestone`.

@@ -73,7 +73,7 @@ fn cli_2_broken_fixture_exits_one_with_position_anchored_output() {
         );
         assert!(
             line.contains("error["),
-            "every M2-PR2 diagnostic is `error[CODE]`, got: {line}",
+            "every error-severity diagnostic renders as `error[CODE]`, got: {line}",
         );
     }
 }

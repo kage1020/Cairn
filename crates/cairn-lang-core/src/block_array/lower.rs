@@ -29,6 +29,8 @@
 //! multi-building pass. Sites themselves are also skipped for the same
 //! reason.
 
+use std::collections::HashSet;
+
 use indexmap::IndexMap;
 
 use crate::ast::ValueKind;
@@ -134,15 +136,15 @@ pub fn lower_to_block_array(
 fn collect_floor_cells(
     structures: &IndexMap<String, BlockArray>,
     placements: &IndexMap<String, Placement>,
-) -> std::collections::HashSet<(i32, i32, i32)> {
-    let mut out: std::collections::HashSet<(i32, i32, i32)> = std::collections::HashSet::new();
+) -> HashSet<(i32, i32, i32)> {
+    let mut out: HashSet<(i32, i32, i32)> = HashSet::new();
     for (key, placement) in placements {
         let Some(ba) = structures.get(key) else {
             continue;
         };
-        // Only the y=0 plane matters: M3-PR4 walkways always sit at
-        // the ports' shared Y (=0 for every example) and a 3D path
-        // search lands in a later milestone.
+        // Only the y=0 plane matters: walkways currently sit at the
+        // ports' shared Y (=0 for every example) since 3D path search
+        // is not yet modelled.
         for z in 0..ba.dims.z {
             for x in 0..ba.dims.x {
                 let Some(i) = ba.dims.index(x, 0, z) else {
@@ -168,8 +170,8 @@ fn collect_floor_cells(
 
 /// Lower every resolved `connect` row into a walkway `BlockArray` and
 /// a matching [`Walkway`] metadata record. Skips rows whose ports do
-/// not resolve to a [`MemberRole::Door`] (other roles are out of scope
-/// for M3-PR4) and emits a `W_DUPLICATE_WALKWAY` when the same
+/// not resolve to a [`MemberRole::Door`] (other roles are not yet
+/// modelled as ports) and emits a `W_DUPLICATE_WALKWAY` when the same
 /// `(from, to)` pair has already been laid in the same site.
 #[allow(clippy::too_many_arguments, clippy::too_many_lines)]
 fn lower_connects(
@@ -177,27 +179,45 @@ fn lower_connects(
     defs: &[DefIr],
     materials: Option<&dyn AbstractMaterialResolver>,
     placements: &IndexMap<String, Placement>,
-    blocked: &std::collections::HashSet<(i32, i32, i32)>,
+    blocked: &HashSet<(i32, i32, i32)>,
     structures: &mut IndexMap<String, BlockArray>,
     walkways: &mut IndexMap<String, Walkway>,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
-    use std::collections::HashSet;
     let mut seen_pairs: HashSet<(String, String, String, String, String)> = HashSet::new();
 
     for connect in &resolution.connects {
         let from_key = place_scope_key(&connect.site, &connect.from.place_id);
         let to_key = place_scope_key(&connect.site, &connect.to.place_id);
-        let (Some(from_placement), Some(to_placement)) =
-            (placements.get(&from_key), placements.get(&to_key))
-        else {
-            // Place lookup failure means the place itself was rejected
-            // upstream; nothing to lay against, so move on.
+        let from_placement = placements.get(&from_key);
+        let to_placement = placements.get(&to_key);
+        let (Some(from_placement), Some(to_placement)) = (from_placement, to_placement) else {
+            // At least one placement was rejected upstream (sizeless def,
+            // unresolved theme, broken origin chain). The connect itself
+            // resolved, so without a follow-up warning the walkway would
+            // vanish silently — emit a cascade `W_DEFERRED_MEMBER` that
+            // names the offending side so the user can see *why* the
+            // strip was not laid.
+            diagnostics.push(diag_walkway_endpoint_skipped(
+                connect,
+                from_placement.is_none(),
+                to_placement.is_none(),
+            ));
             continue;
         };
         let from_def = defs.iter().find(|d| d.name == from_placement.source_def);
         let to_def = defs.iter().find(|d| d.name == to_placement.source_def);
         let (Some(from_def), Some(to_def)) = (from_def, to_def) else {
+            // Invariant: `lower_site` only inserts a `Placement` after
+            // resolving its `use=DEF` against `defs`, so a placement
+            // pointing at an absent def cannot exist here. Encode that
+            // as a `debug_assert!` so a future refactor that breaks the
+            // chain fails loud in tests instead of dropping the strip.
+            debug_assert!(
+                false,
+                "connect `{}` to `{}` references placements whose source def is missing from `defs`",
+                connect.from.place_id, connect.to.place_id,
+            );
             continue;
         };
 
@@ -218,17 +238,23 @@ fn lower_connects(
             // means `port_world_position` rejected one of the door's
             // own properties: a missing / non-cardinal `side=`, an
             // `at=` value other than `center`, or a window / stair role
-            // that the door-only port surface refuses. The diagnostic
-            // names all three so the user is not pointed at the wrong
-            // fix.
+            // that the door-only port surface refuses. Name the
+            // offending side so the user is not pointed at the wrong
+            // half of the row.
+            let from_label = port_label(&connect.from.place_id, &connect.from.port_id);
+            let to_label = port_label(&connect.to.place_id, &connect.to.port_id);
+            let unplaceable = match (from_pos.is_none(), to_pos.is_none()) {
+                (true, true) => format!("`{from_label}` and `{to_label}`"),
+                (true, false) => format!("`{from_label}`"),
+                (false, true) => format!("`{to_label}`"),
+                (false, false) => unreachable!("else arm requires at least one None"),
+            };
             diagnostics.push(Diagnostic {
                 code: DiagnosticCode::DeferredMember,
                 severity: Severity::Warning,
                 span: connect.span.clone(),
                 primary: format!(
-                    "walkway `{from} ↔ {to}` was skipped because the port could not be placed",
-                    from = port_label(&connect.from.place_id, &connect.from.port_id),
-                    to = port_label(&connect.to.place_id, &connect.to.port_id),
+                    "walkway `{from_label} ↔ {to_label}` was skipped because port {unplaceable} could not be placed",
                 ),
                 notes: vec![DiagnosticNote {
                     span: None,
@@ -347,6 +373,42 @@ fn lower_connects(
 
 fn port_label(place: &str, port: &str) -> String {
     format!("{place}.{port}")
+}
+
+fn diag_walkway_endpoint_skipped(
+    connect: &crate::resolve::ResolvedConnect,
+    from_missing: bool,
+    to_missing: bool,
+) -> Diagnostic {
+    let from_label = port_label(&connect.from.place_id, &connect.from.port_id);
+    let to_label = port_label(&connect.to.place_id, &connect.to.port_id);
+    let missing = match (from_missing, to_missing) {
+        (true, true) => format!("`{from_label}` and `{to_label}` placements"),
+        (true, false) => format!("`{from_label}` placement"),
+        (false, true) => format!("`{to_label}` placement"),
+        // Caller only invokes this helper when at least one side is
+        // missing; the unreachable arm fails loud in tests if a future
+        // refactor breaks that contract instead of emitting an empty
+        // message at runtime.
+        (false, false) => {
+            unreachable!("diag_walkway_endpoint_skipped requires at least one side missing")
+        }
+    };
+    Diagnostic {
+        code: DiagnosticCode::DeferredMember,
+        severity: Severity::Warning,
+        span: connect.span.clone(),
+        primary: format!(
+            "walkway `{from_label} ↔ {to_label}` was skipped because the {missing} did not lower",
+        ),
+        notes: vec![DiagnosticNote {
+            span: None,
+            message: "fix the upstream W_DEF_NO_SIZE / W_DEFERRED_MEMBER on the endpoint to \
+                 bring the walkway back (the resolver drops the connect itself when \
+                 E_UNRESOLVED_PLACE_REF fires, so the cascade never points there)"
+                .to_owned(),
+        }],
+    }
 }
 
 fn diag_walkway_abstract_token(
@@ -2420,6 +2482,340 @@ mod tests {
             out.walkways.len(),
             1,
             "reversed row must not lay a second strip"
+        );
+    }
+
+    fn walkway_with_blocked_path_source() -> &'static str {
+        // Two `home` placements wired back-to-back so the L-path between
+        // their ports threads through `b`'s floor. `a` exposes a
+        // `side=back` door (port sits at world z = -1), `b` exposes
+        // `side=front` (port sits at world z = 3). With `east_of=a gap=2`
+        // `b` lands at origin (5, 0, 0) with interior 3x3, so the L-path
+        // `(1, -1) -> (6, -1) -> (6, 3)` passes through (6, 0), (6, 1),
+        // (6, 2) — exactly `b`'s floor cells on the right edge.
+        concat!(
+            "theme t:\n",
+            "  slot wall -> @cobblestone\n",
+            "\n",
+            "def back_home size=3x3:\n",
+            "  floor mat_slot=wall\n",
+            "  walls mat_slot=wall height=2\n",
+            "  door id=back side=back at=center\n",
+            "\n",
+            "def front_home size=3x3:\n",
+            "  floor mat_slot=wall\n",
+            "  walls mat_slot=wall height=2\n",
+            "  door id=front side=front at=center\n",
+            "\n",
+            "site s:\n",
+            "  place id=a use=back_home theme=t at=origin\n",
+            "  place id=b use=front_home theme=t east_of=a gap=2\n",
+            "  connect a.back to b.front path=@gravel\n",
+        )
+    }
+
+    #[test]
+    fn walkway_blocked_cells_skip_with_w_walkway_blocked_count() {
+        // `lower_connects` must emit exactly one `W_WALKWAY_BLOCKED` per
+        // connect row and the warning's primary must name how many cells
+        // were skipped. The collision count is load-bearing: a regression
+        // that swallows obstructions silently would leave the lockfile
+        // claiming voxels the on-disk NBT does not actually carry.
+        let out = lowered(walkway_with_blocked_path_source());
+        let blocked: Vec<_> = out
+            .diagnostics
+            .iter()
+            .filter(|d| d.code == DiagnosticCode::WalkwayBlocked)
+            .collect();
+        assert_eq!(
+            blocked.len(),
+            1,
+            "expected one W_WALKWAY_BLOCKED, got {:?}",
+            out.diagnostics,
+        );
+        assert!(
+            blocked[0].primary.contains("skipped 3 cells"),
+            "expected the primary to name three skipped cells, got {}",
+            blocked[0].primary,
+        );
+        // Walkway IR still emitted — the row survives, only the colliding
+        // cells stay air. Bounding box covers x∈[1,6], z∈[-1,3].
+        let walkway = out
+            .walkways
+            .get("walkway::s::a.back__b.front")
+            .expect("walkway IR present despite collisions");
+        assert_eq!(walkway.origin, (1, 0, -1));
+        assert_eq!(walkway.dims, Dims { x: 6, y: 1, z: 5 });
+        let ba = out
+            .structures
+            .get("walkway::s::a.back__b.front")
+            .expect("walkway block array present despite collisions");
+        // Path corner at (6, -1) is still gravel.
+        assert_eq!(block_id(ba, 5, 0, 0), "minecraft:gravel");
+        // Cells colliding with `b`'s floor (world (6,0), (6,1), (6,2))
+        // map to local (5, 1), (5, 2), (5, 3) — they must stay air.
+        for dz in 1..=3 {
+            assert_eq!(
+                block_id(ba, 5, 0, dz),
+                BlockState::AIR_ID,
+                "blocked cell at local (5, 0, {dz}) should stay air",
+            );
+        }
+        // Endpoint at b's port (world (6, 3) → local (5, 4)) remains
+        // gravel — the port itself sits outside `b`'s floor.
+        assert_eq!(block_id(ba, 5, 0, 4), "minecraft:gravel");
+    }
+
+    fn walkway_pair_source(path_token: &str) -> String {
+        // The walkway-side abstract-token tests reuse the same two-place
+        // fixture but vary the `path=` value. Floors are omitted so the
+        // path never collides.
+        format!(
+            concat!(
+                "theme t:\n",
+                "  slot wall -> @cobblestone\n",
+                "\n",
+                "def cottage size=3x3:\n",
+                "  walls mat_slot=wall height=2\n",
+                "  door id=entry side=front at=center\n",
+                "\n",
+                "site s:\n",
+                "  place id=a use=cottage theme=t at=origin\n",
+                "  place id=b use=cottage theme=t east_of=a gap=2\n",
+                "  connect a.entry to b.entry path={token}\n",
+            ),
+            token = path_token,
+        )
+    }
+
+    #[test]
+    fn walkway_abstract_path_lifts_through_registry_pack() {
+        // `path=@walkway.gravel` is an abstract token; with a pack that
+        // declares it, lowering must emit a `gravel` walkway with no
+        // deferred / unknown-token diagnostic on the row.
+        let resolver = FakeResolver {
+            entries: vec![("walkway.gravel", "gravel")],
+        };
+        let src = walkway_pair_source("@walkway.gravel");
+        let out = lowered_with_resolver(&src, &resolver);
+        assert!(
+            out.diagnostics
+                .iter()
+                .all(|d| d.code != DiagnosticCode::AbstractTokenDeferred
+                    && d.code != DiagnosticCode::UnknownAbstractToken),
+            "no abstract-token diagnostics expected, got {:?}",
+            out.diagnostics,
+        );
+        let walkway = out
+            .walkways
+            .get("walkway::s::a.entry__b.entry")
+            .expect("walkway lowered");
+        assert_eq!(walkway.path_material, "minecraft:gravel");
+        // Pin origin/dims so a coordinate swap in the abstract-token
+        // lift path fails loud independently of the concrete-token
+        // village test. a's front port is at (1, 0, 3); b east_of=a
+        // gap=2 with cottage dims 3×3 → origin (5, 0, 0), front port
+        // (6, 0, 3). The L-path collapses to a pure x-axis run.
+        assert_eq!(walkway.origin, (1, 0, 3));
+        assert_eq!(walkway.dims, Dims { x: 6, y: 1, z: 1 });
+    }
+
+    #[test]
+    fn walkway_abstract_path_without_pack_emits_w_abstract_token_deferred() {
+        // No resolver supplied → the connect row earns
+        // `W_ABSTRACT_TOKEN_DEFERRED` and is dropped from the walkway map
+        // so the lockfile does not pin a strip that has no material.
+        let src = walkway_pair_source("@walkway.gravel");
+        let out = lowered(&src);
+        let diag = out
+            .diagnostics
+            .iter()
+            .find(|d| d.code == DiagnosticCode::AbstractTokenDeferred)
+            .unwrap_or_else(|| {
+                panic!(
+                    "expected W_ABSTRACT_TOKEN_DEFERRED on the connect row, got {:?}",
+                    out.diagnostics,
+                )
+            });
+        assert_eq!(diag.severity, Severity::Warning);
+        assert!(
+            diag.primary.contains("@walkway.gravel"),
+            "expected the abstract token to be named, got {}",
+            diag.primary,
+        );
+        assert!(
+            !out.walkways.contains_key("walkway::s::a.entry__b.entry"),
+            "no walkway should land without a material",
+        );
+    }
+
+    #[test]
+    fn walkway_unknown_abstract_path_emits_e_unknown_abstract_token() {
+        // Pack supplied but does not declare `@walkway.grvl`; spec §7.2
+        // requires fail-loud here — the typo must surface as
+        // `E_UNKNOWN_ABSTRACT_TOKEN` with the nearest declared token as a
+        // suggestion note.
+        let resolver = FakeResolver {
+            entries: vec![("walkway.gravel", "gravel")],
+        };
+        let src = walkway_pair_source("@walkway.grvl");
+        let out = lowered_with_resolver(&src, &resolver);
+        let diag = out
+            .diagnostics
+            .iter()
+            .find(|d| d.code == DiagnosticCode::UnknownAbstractToken)
+            .unwrap_or_else(|| {
+                panic!(
+                    "expected E_UNKNOWN_ABSTRACT_TOKEN on the connect row, got {:?}",
+                    out.diagnostics,
+                )
+            });
+        assert_eq!(diag.severity, Severity::Error);
+        assert!(
+            diag.notes
+                .iter()
+                .any(|n| n.message.contains("walkway.gravel")),
+            "expected nearest-match note pointing at walkway.gravel, got {:?}",
+            diag.notes,
+        );
+        assert!(
+            !out.walkways.contains_key("walkway::s::a.entry__b.entry"),
+            "no walkway should land for an unknown abstract token",
+        );
+    }
+
+    fn endpoint_cascade_source(a_def: &str, b_def: &str, defs: &str, connect_line: &str) -> String {
+        // Endpoint-cascade fixture: caller supplies the two def names a
+        // and b reference, the def declarations themselves, and the
+        // connect row. Lets each side combination drop in without
+        // re-spelling the boilerplate.
+        format!(
+            concat!(
+                "theme t:\n",
+                "  slot wall -> @cobblestone\n",
+                "\n",
+                "{defs}",
+                "\n",
+                "site s:\n",
+                "  place id=a use={a_def} theme=t at=origin\n",
+                "  place id=b use={b_def} theme=t at=origin\n",
+                "  {connect_line}\n",
+            ),
+            defs = defs,
+            a_def = a_def,
+            b_def = b_def,
+            connect_line = connect_line,
+        )
+    }
+
+    fn sized_then_sizeless_defs() -> &'static str {
+        concat!(
+            "def sized size=3x3:\n",
+            "  walls mat_slot=wall height=2\n",
+            "  door id=entry side=front at=center\n",
+            "\n",
+            "def sizeless:\n",
+            "  walls mat_slot=wall height=2\n",
+            "  door id=entry side=front at=center\n",
+            "\n",
+        )
+    }
+
+    fn cascade_warning(out: &BlockArrayIr) -> &Diagnostic {
+        out.diagnostics
+            .iter()
+            .find(|d| {
+                d.code == DiagnosticCode::DeferredMember
+                    && d.primary.contains("walkway")
+                    && d.primary.contains("did not lower")
+            })
+            .unwrap_or_else(|| {
+                panic!(
+                    "expected a cascade W_DEFERRED_MEMBER, got {:?}",
+                    out.diagnostics,
+                )
+            })
+    }
+
+    #[test]
+    fn walkway_endpoint_skipped_to_side_cascades_w_deferred_member() {
+        // `b` is sizeless → `to` placement missing. The cascade warning
+        // must name `b.entry` only.
+        let src = endpoint_cascade_source(
+            "sized",
+            "sizeless",
+            sized_then_sizeless_defs(),
+            "connect a.entry to b.entry path=@gravel",
+        );
+        let out = lowered(&src);
+        let cascade = cascade_warning(&out);
+        assert!(
+            cascade.primary.contains("`b.entry` placement")
+                && !cascade.primary.contains("`a.entry`"),
+            "expected the cascade to single out `b.entry`, got {}",
+            cascade.primary,
+        );
+        assert!(
+            !out.walkways.contains_key("walkway::s::a.entry__b.entry"),
+            "walkway must not lay against a placement that did not lower",
+        );
+    }
+
+    #[test]
+    fn walkway_endpoint_skipped_from_side_cascades_w_deferred_member() {
+        // Swap the roles: `a` references the sizeless def, so the
+        // `from` half is the missing one. The cascade must mention
+        // `a.entry` and stay silent about `b.entry`.
+        let src = endpoint_cascade_source(
+            "sizeless",
+            "sized",
+            sized_then_sizeless_defs(),
+            "connect a.entry to b.entry path=@gravel",
+        );
+        let out = lowered(&src);
+        let cascade = cascade_warning(&out);
+        assert!(
+            cascade.primary.contains("`a.entry` placement")
+                && !cascade.primary.contains("`b.entry`"),
+            "expected the cascade to single out `a.entry`, got {}",
+            cascade.primary,
+        );
+        assert!(
+            !out.walkways.contains_key("walkway::s::a.entry__b.entry"),
+            "walkway must not lay against a placement that did not lower",
+        );
+    }
+
+    #[test]
+    fn walkway_endpoint_skipped_both_sides_cascades_w_deferred_member() {
+        // Both placements reference sizeless defs → the cascade arm for
+        // `(true, true)` triggers and the message must list both sides.
+        let defs = concat!(
+            "def sizeless_a:\n",
+            "  walls mat_slot=wall height=2\n",
+            "  door id=entry side=front at=center\n",
+            "\n",
+            "def sizeless_b:\n",
+            "  walls mat_slot=wall height=2\n",
+            "  door id=entry side=front at=center\n",
+            "\n",
+        );
+        let src = endpoint_cascade_source(
+            "sizeless_a",
+            "sizeless_b",
+            defs,
+            "connect a.entry to b.entry path=@gravel",
+        );
+        let out = lowered(&src);
+        let cascade = cascade_warning(&out);
+        assert!(
+            cascade.primary.contains("`a.entry`") && cascade.primary.contains("`b.entry`"),
+            "expected the cascade to name both endpoints, got {}",
+            cascade.primary,
+        );
+        assert!(
+            !out.walkways.contains_key("walkway::s::a.entry__b.entry"),
+            "walkway must not lay against a pair of skipped placements",
         );
     }
 

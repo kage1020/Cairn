@@ -37,8 +37,8 @@ use crate::intent::IntentModule;
 /// findings being empty. The returned list is sorted by `(span.start,
 /// span.end)` so consumers can stream it line-by-line.
 ///
-/// M2-PR3 adds a final theme-binding pass via [`crate::resolve::resolve`];
-/// its diagnostics (`E_UNRESOLVED_SLOT`, `E_UNKNOWN_SLOT_TARGET`,
+/// A final theme-binding pass runs via [`crate::resolve::resolve`]; its
+/// diagnostics (`E_UNRESOLVED_SLOT`, `E_UNKNOWN_SLOT_TARGET`,
 /// `E_THEME_SELECTOR_UNMATCHED`) are merged with the syntactic findings so a
 /// single `cairn check` invocation reports both kinds together.
 #[must_use]

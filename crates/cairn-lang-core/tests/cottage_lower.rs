@@ -186,7 +186,7 @@ fn cottage_emits_zero_deferred_warnings() {
         .count();
     assert_eq!(
         deferred, 0,
-        "M2-PR6 cottage.crn should voxelise without W_DEFERRED_MEMBER warnings, diagnostics: {:?}",
+        "cottage.crn should voxelise without W_DEFERRED_MEMBER warnings, diagnostics: {:?}",
         out.diagnostics,
     );
 }
