@@ -26,8 +26,10 @@ placeholder cannot leak out. The `2026.07.0` release PR will flip publish to `tr
   `"skipped N cells"` substring out of the human-readable `primary`
   message. The `data` key is omitted entirely when a diagnostic
   carries no payload, keeping the JSON contract additive for
-  existing consumers. `spec/lint.md` §11.1 documents the full JSON
-  shape.
+  existing consumers. `spec/lint.md` §11.2 documents the full JSON
+  shape. `Diagnostic` itself also gains `#[non_exhaustive]` so
+  future field additions are no longer breaking for external
+  callers — in-crate sites continue to build the struct directly.
 - `cairn-lang-core::block_array::lower` — endpoint-skip cascade for
   walkways. When a `connect` row points at a placement that did not
   lower (e.g. its def has no `size=`, or a theme reference failed

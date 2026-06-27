@@ -122,7 +122,7 @@ pub enum MemberRole {
 /// top level: ordinary member commands, `logic` bindings, and `assert`
 /// properties. Defined as a struct rather than a `Vec` of one big sum so a
 /// `level` block whose body mixes all three flavours lowers without losing
-/// any of them (spec lint.md §11.2 forbids silent dropping).
+/// any of them (spec lint.md §11.3 forbids silent dropping).
 #[derive(Debug, Clone, Default, PartialEq, Serialize)]
 pub struct MemberBody {
     /// Nested members in declaration order.

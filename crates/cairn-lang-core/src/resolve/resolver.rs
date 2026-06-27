@@ -547,8 +547,8 @@ fn resolve_connect_row(
                 message: "use `@TOKEN` (e.g. `path=@gravel`); bare labels and string literals are not material references"
                     .to_owned(),
             }],
-                    data: None,
-});
+            data: None,
+        });
         return;
     }
     if !ok {
@@ -607,8 +607,8 @@ fn port_ref_from_value(
                 place = dot.head(),
             ),
             notes: vec![],
-                    data: None,
-});
+            data: None,
+        });
         return None;
     }
     let place_id = dot.head().to_owned();
@@ -740,8 +740,8 @@ fn validate_port(
                     place_id = port.place_id,
                 ),
                 notes,
-                            data: None,
-});
+                data: None,
+            });
             false
         }
         1 => true,
@@ -760,8 +760,8 @@ fn validate_port(
                     message: "rename the duplicate `id=` so each port is uniquely addressable"
                         .to_owned(),
                 }],
-                            data: None,
-});
+                data: None,
+            });
             false
         }
     }
@@ -1162,8 +1162,8 @@ fn check_slot_targets(themes: &IndexMap<String, ThemeBinding>, diagnostics: &mut
                         message: "expected a `@canonical_block` or `@abstract.material` value"
                             .to_owned(),
                     }],
-                                    data: None,
-});
+                    data: None,
+                });
             }
         }
     }

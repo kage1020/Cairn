@@ -41,7 +41,7 @@ candidate sits within a length-scaled Damerau-Levenshtein cap (≤ 1 edit for 1�
 for 4–6, ≤ 3 beyond). The closed-set listing (`expected one of: ...`) stays as the fallback so the
 output covers both the targeted fix and the full set of valid candidates.
 
-### Machine-readable payload
+## 11.2 Machine-readable payload
 
 The `--format json` output renders one object per finding with the following shape:
 
@@ -54,8 +54,8 @@ The `--format json` output renders one object per finding with the following sha
 | `end_line` | integer  | 1-based line of the span's last-byte-exclusive boundary.              |
 | `end_col`  | integer  | 1-based column of the same boundary.                                  |
 | `primary`  | string   | Human-readable message printed after the code in the text format.    |
-| `notes`    | array    | Optional `[{line?, col?, message}]`; omitted entirely when empty.     |
-| `data`     | object?  | Optional structured payload — see below. Omitted when absent.         |
+| `notes`    | array    | `[{line?, col?, message}]`. Optional — omitted entirely when empty.   |
+| `data`     | object   | Structured payload — see below. Optional — omitted when absent.       |
 
 `data` is an open, code-specific object tagged with `kind`. Consumers that depend on a particular
 key set should match on `(code, data.kind)` rather than inspecting `primary`. The shape is
@@ -64,20 +64,20 @@ evolving — additions for new codes are strictly additive, so consumers should 
 
 | Code                 | `data` payload                                                   |
 | -------------------- | ---------------------------------------------------------------- |
-| `W_WALKWAY_BLOCKED`  | `{ "kind": "walkway_blocked", "skipped": <u32> }` — number of voxels along the L-shaped path that overlapped an existing structure and were dropped from the lay. |
+| `W_WALKWAY_BLOCKED`  | `{ "kind": "walkway_blocked", "skipped": <u64> }` — number of cells along the L-shaped path that overlapped an existing structure and were dropped from the lay. |
 
 Codes not listed above omit `data` entirely; reading `entry.data` returns `undefined` and the JSON
 key is absent (it does not serialise as `null`). New `data` entries land alongside the code that
 needs them as the diagnostic surface stabilises.
 
-## 11.2 Error vs warning
+## 11.3 Error vs warning
 - Things that, left alone, cause unintended results — concept absence, unknown IDs, out-of-domain
   states — are **errors** (silent substitution and implicit dropping are forbidden).
 - Semantic drift across versions/editions, the non-guarantee of redstone behavior, etc. are
   **warnings**.
 - Whether autofix is offered is defined by the implementation.
 
-## 11.3 Constraint catalog
+## 11.4 Constraint catalog
 In-game constraints (gravity blocks, attachment conditions, fluid flow, disallowed attachment
 combinations, etc.) are cataloged and managed per version ([Versioning and Editions](versioning-editions)).
 A constraint such as "a frame cannot hang on glass" lives here.

@@ -100,7 +100,7 @@ site village:
 発します。警告には `--format json` 出力で機械可読ペイロード
 (`data: { kind: "walkway_blocked", skipped: N }`) が付与され、LSP のクイックフィックスや CI
 アノテーターが人間向けメッセージを再パースせずにスキップ件数を読み取れます — 詳細は
-`spec/lint.md` §11.1 を参照。
+`spec/lint.md` §11.2 を参照。
 
 **マテリアル**: `path=@TOKEN` の値はメンバーマテリアルと同じ `mat_slot=` パイプラインを通って解決
 されます。`@gravel` のような canonical token はレジストリパック無しで利用でき、`@path.gravel` の

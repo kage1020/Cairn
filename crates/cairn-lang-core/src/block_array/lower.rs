@@ -263,8 +263,8 @@ fn lower_connects(
                         "ports currently require a `door` member with `side=front|back|left|right` and `at=center`"
                             .to_owned(),
                 }],
-                            data: None,
-});
+                data: None,
+            });
             continue;
         };
 
@@ -304,8 +304,8 @@ fn lower_connects(
                     message: "remove the duplicate or rewrite it to connect a different port pair"
                         .to_owned(),
                 }],
-                            data: None,
-});
+                data: None,
+            });
             continue;
         }
 
@@ -376,7 +376,7 @@ fn lower_connects(
                             .to_owned(),
                 }],
                 data: Some(DiagnosticData::WalkwayBlocked {
-                    skipped: u32::try_from(skipped).unwrap_or(u32::MAX),
+                    skipped: skipped as u64,
                 }),
             });
         }
@@ -2598,6 +2598,17 @@ mod tests {
             blocked[0].data,
             blocked[0].primary,
         );
+        // AC4 from issue #40: the `primary` string is part of the gcc-style
+        // text-format contract that humans (and existing pre-payload test
+        // harnesses) read; the structured `data` is meant to *augment* it,
+        // not replace it. Asserting both keeps a regression that drops
+        // `{skipped}` from the format string — or changes the
+        // `port_label` shape — from sliding past CI.
+        assert!(
+            blocked[0].primary.contains("skipped 3 cells"),
+            "primary text contract must still name the skip count, got {}",
+            blocked[0].primary,
+        );
         // The render → JSON path is the contract surface for downstream
         // tooling (LSP quick-fix, CI annotator). Locking the serialised
         // shape here keeps the `cairn check --format json` payload stable
@@ -2613,6 +2624,22 @@ mod tests {
             serde_json::json!({"kind": "walkway_blocked", "skipped": 3}),
             "JSON `data` payload must match the structured contract, got {value}",
         );
+        // AC3 negative-case ride-along: every *other* diagnostic emitted by
+        // this fixture must leave `data` unset. A regression where some
+        // code starts attaching a payload it should not — say, copying
+        // the WalkwayBlocked shape into an unrelated cascade — would
+        // otherwise slip past CI because the positive assertion only
+        // looks at the WalkwayBlocked entry.
+        for d in &out.diagnostics {
+            if d.code != DiagnosticCode::WalkwayBlocked {
+                assert!(
+                    d.data.is_none(),
+                    "code {:?} unexpectedly carries a payload: {:?}",
+                    d.code,
+                    d.data,
+                );
+            }
+        }
         // Walkway IR still emitted — the row survives, only the colliding
         // cells stay air. Bounding box covers x∈[1,6], z∈[-1,3].
         let walkway = out

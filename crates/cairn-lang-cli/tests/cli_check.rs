@@ -176,14 +176,35 @@ fn cli_json_output_carries_line_and_col_for_every_diagnostic() {
         // AC3 from issue #40: codes without a structured payload must
         // omit the `data` key entirely so the JSON contract stays
         // additive for consumers that pin a fixed key set. The
-        // `duplicate.crn` fixture only triggers `E_DUPLICATE_*`, none of
-        // which carry a payload today, so any `data` here would mean a
-        // bug in the `serde(skip_serializing_if = "Option::is_none")`
-        // wiring.
+        // `duplicate.crn` fixture only triggers `E_DUPLICATE_*` codes,
+        // none of which carry a payload today, so any `data` here would
+        // mean one of two regressions:
+        //   (a) the `serde(skip_serializing_if = "Option::is_none")`
+        //       wiring on `Diagnostic::data` was dropped or inverted, or
+        //   (b) a future change attached a payload to one of the
+        //       `E_DUPLICATE_*` codes without updating this fixture and
+        //       its assertion in step.
+        // Either case should fail loud here rather than ship a
+        // silently-changed JSON contract.
         assert!(
             entry.get("data").is_none(),
             "diagnostic without a payload must omit the `data` key, got: {entry}",
         );
+        // Forward-compatibility guard: when a future code lands with a
+        // documented payload, the fixture-and-fixture-only matcher above
+        // is not enough — the JSON has to carry the matching `data.kind`.
+        // `W_WALKWAY_BLOCKED` is the first such code, and currently
+        // `cairn check` does not drive walkway lowering so this branch
+        // never fires on the `duplicate.crn` fixture. If a future wiring
+        // pipes walkway diagnostics through `check`, this assertion
+        // catches a payload-stripped regression at the CLI surface.
+        if entry["code"].as_str() == Some("W_WALKWAY_BLOCKED") {
+            assert_eq!(
+                entry["data"]["kind"].as_str(),
+                Some("walkway_blocked"),
+                "W_WALKWAY_BLOCKED must carry data.kind=\"walkway_blocked\", got: {entry}",
+            );
+        }
     }
 }
 

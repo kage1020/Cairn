@@ -27,8 +27,11 @@
   アノテーターは人間向け `primary` メッセージから `"skipped N cells"`
   部分文字列を抽出する必要が無くなる。ペイロードを持たない診断では
   `data` キーごと省略されるため、既存の JSON 消費者に対しては
-  完全に additive な変更となる。`spec/lint.md` §11.1 に JSON
-  シェイプ全体を記載。
+  完全に additive な変更となる。`spec/lint.md` §11.2 に JSON
+  シェイプ全体を記載。`Diagnostic` 本体にも `#[non_exhaustive]`
+  を付与したため、今後フィールドを追加してもクレート外利用者に
+  対する破壊的変更にならない (クレート内構築箇所は従来どおり
+  struct literal で更新)。
 - `cairn-lang-core::block_array::lower` — walkway 端点 skip のカスケード
   警告を追加。`connect` 行が指す placement が lowering されなかった
   (def に `size=` が無い、theme 参照が上流で失敗、など) 場合、

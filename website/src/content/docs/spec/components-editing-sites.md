@@ -101,7 +101,7 @@ surface can land in one piece. Cells that overlap an existing structure floor ar
 row earns one `W_WALKWAY_BLOCKED` warning so the author can widen the placement gap. The warning
 also carries a machine-readable payload (`data: { kind: "walkway_blocked", skipped: N }`) in the
 `--format json` output so LSP quick-fixes and CI annotators can read the skip count without
-re-parsing the human-readable message — see §11.1 of `spec/lint.md`.
+re-parsing the human-readable message — see §11.2 of `spec/lint.md`.
 
 **Material.** The `path=@TOKEN` value lifts through the same `mat_slot=` pipeline used for member
 materials — concrete tokens like `@gravel` work without a registry pack; abstract tokens like

@@ -9,7 +9,7 @@ use crate::error::{Position, Span};
 /// Severity of a single [`Diagnostic`].
 ///
 /// `Error` participates in the `cairn check` exit code (any error → exit 1);
-/// `Warning` does not. Stable per `spec/lint.md` §11.2: errors are things
+/// `Warning` does not. Stable per `spec/lint.md` §11.3: errors are things
 /// that, left alone, cause unintended results; warnings are advisory drift.
 /// Both variants ship in the public enum so a new `Warning` code can land
 /// without changing the discriminant a downstream matcher already pinned.
@@ -199,7 +199,7 @@ impl DiagnosticCode {
     ///
     /// Errors are silent-substitution-style problems that would otherwise
     /// feed bad data into later passes; warnings are advisory drift that
-    /// does not block a build. See `spec/lint.md` §11.2 for the rule.
+    /// does not block a build. See `spec/lint.md` §11.3 for the rule.
     /// The block-array lowering warnings (`W_DEFERRED_MEMBER`,
     /// `W_NO_THEME_BOUND`, `W_ABSTRACT_TOKEN_DEFERRED`, `W_STRUCT_NO_SIZE`)
     /// each mark a partial-build degradation rather than an unsalvageable
@@ -258,20 +258,25 @@ impl Serialize for DiagnosticCode {
 /// form (`{"kind":"walkway_blocked","skipped":3}`) carries a stable
 /// discriminator that downstream matchers pin on.
 ///
-/// `#[non_exhaustive]` so adding a new payload variant for an existing
-/// code (e.g. `AmbiguousPort { match_count }`, `WalkwayBlocked` gaining
-/// `cells: Vec<(i32,i32,i32)>`) does not break consumer exhaust matches
-/// while the diagnostic surface is still **Evolving**.
+/// `#[non_exhaustive]` on the enum protects consumer exhaust matches
+/// against **new variants** landing for additional codes as the
+/// diagnostic surface is still **Evolving**. Adding a new field to an
+/// existing variant is still breaking by itself; per-variant
+/// `#[non_exhaustive]` is added on a per-case basis when a follow-up
+/// expansion is anticipated.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum DiagnosticData {
     /// Companion payload for [`DiagnosticCode::WalkwayBlocked`]. `skipped`
-    /// is the number of voxels along the L-shaped path that overlapped an
+    /// is the number of cells along the L-shaped path that overlapped an
     /// existing structure and were dropped from the walkway lay.
     WalkwayBlocked {
-        /// Count of voxels the walkway lowering had to skip.
-        skipped: u32,
+        /// Count of cells the walkway lowering had to skip. Invariant:
+        /// `>= 1` — `lower_connects` only emits `W_WALKWAY_BLOCKED` when
+        /// the underlying `skipped > 0`. Typed as `u64` so `usize` lifts
+        /// without lossy truncation on any platform Cairn supports.
+        skipped: u64,
     },
 }
 
@@ -294,7 +299,16 @@ pub struct DiagnosticNote {
 }
 
 /// One finding emitted by a `check` pass.
+///
+/// `#[non_exhaustive]` so external crates cannot construct a
+/// [`Diagnostic`] by struct literal — when a future field arrives
+/// (another structured payload slot, a `source` pointer, etc.) the
+/// addition is no longer a breaking change for downstream callers.
+/// In-crate sites still build the struct directly and update in step
+/// when new fields land; cross-crate consumers must route through a
+/// future builder rather than depending on the field set being frozen.
 #[derive(Debug, Clone, PartialEq, Serialize)]
+#[non_exhaustive]
 pub struct Diagnostic {
     /// Stable code identifying the kind of finding.
     pub code: DiagnosticCode,
@@ -399,10 +413,9 @@ pub struct RenderedDiagnostic {
     /// secondary location.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub notes: Vec<RenderedNote>,
-    /// Structured payload mirrored from the source [`Diagnostic`].
-    /// Omitted from JSON output when absent, mirroring the `Diagnostic`
-    /// contract so adding a payload for a future code is a strictly
-    /// additive change for downstream consumers.
+    /// Mirror of [`Diagnostic::data`] — see that field for the full
+    /// contract. Carried separately so the rendered form can be
+    /// serialised without re-walking the source `Diagnostic`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub data: Option<DiagnosticData>,
 }
@@ -559,7 +572,7 @@ mod tests {
     #[test]
     fn code_severity_matches_spec() {
         // Errors block a build; warnings are advisory. The split here mirrors
-        // `spec/lint.md` §11.2.
+        // `spec/lint.md` §11.3.
         for code in [
             DiagnosticCode::DuplicateSize,
             DiagnosticCode::DuplicateSlot,
