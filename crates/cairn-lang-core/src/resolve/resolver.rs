@@ -523,6 +523,7 @@ fn resolve_connect_row(
                     "add `path=@gravel` (or another `@token`) to the end of the `connect` line"
                         .to_owned(),
             }],
+            data: None,
         });
         return;
     };
@@ -546,7 +547,8 @@ fn resolve_connect_row(
                 message: "use `@TOKEN` (e.g. `path=@gravel`); bare labels and string literals are not material references"
                     .to_owned(),
             }],
-        });
+                    data: None,
+});
         return;
     }
     if !ok {
@@ -605,7 +607,8 @@ fn port_ref_from_value(
                 place = dot.head(),
             ),
             notes: vec![],
-        });
+                    data: None,
+});
         return None;
     }
     let place_id = dot.head().to_owned();
@@ -678,6 +681,7 @@ fn validate_port(
                           this `connect` row"
                     .to_owned(),
             }],
+            data: None,
         });
         return false;
     };
@@ -736,7 +740,8 @@ fn validate_port(
                     place_id = port.place_id,
                 ),
                 notes,
-            });
+                            data: None,
+});
             false
         }
         1 => true,
@@ -755,7 +760,8 @@ fn validate_port(
                     message: "rename the duplicate `id=` so each port is uniquely addressable"
                         .to_owned(),
                 }],
-            });
+                            data: None,
+});
             false
         }
     }
@@ -863,6 +869,7 @@ fn check_unused_defs(defs: &[DefIr], used: &HashSet<String>, diagnostics: &mut V
                 message: "remove the def, or place an instance via `site ... place use=...`"
                     .to_owned(),
             }],
+            data: None,
         });
     }
 }
@@ -886,6 +893,7 @@ fn unresolved_place_ref_diag<'a>(
         span,
         primary: primary.to_owned(),
         notes,
+        data: None,
     }
 }
 
@@ -928,6 +936,7 @@ fn unresolved_theme_ref_diag<'a>(
         span,
         primary: format!("`theme={theme}` is not a declared theme"),
         notes,
+        data: None,
     }
 }
 
@@ -946,6 +955,7 @@ fn duplicate_place_id_diag(
             span: Some(first.clone()),
             message: "first declared here".to_owned(),
         }],
+        data: None,
     }
 }
 
@@ -956,6 +966,7 @@ fn invalid_place_origin_diag(place_id: &str, span: Span, message: &str) -> Diagn
         span,
         primary: format!("invalid origin selector on `place id={place_id}`: {message}"),
         notes: vec![],
+        data: None,
     }
 }
 
@@ -1129,6 +1140,7 @@ fn unresolved_slot_diag(
         span: member.span.clone(),
         primary: format!("`mat_slot={slot}` is not declared in theme `{theme_name}`"),
         notes,
+        data: None,
     }
 }
 
@@ -1150,7 +1162,8 @@ fn check_slot_targets(themes: &IndexMap<String, ThemeBinding>, diagnostics: &mut
                         message: "expected a `@canonical_block` or `@abstract.material` value"
                             .to_owned(),
                     }],
-                });
+                                    data: None,
+});
             }
         }
     }
@@ -1192,6 +1205,7 @@ fn check_unmatched_selectors(
                         span: None,
                         message: "remove the selector or relax its attribute filters".to_owned(),
                     }],
+                    data: None,
                 });
             }
         }

@@ -98,7 +98,10 @@ the overhang ring beyond the structure's outer face.
 **Path.** The walkway runs as a Manhattan L (x-axis leg, then z-axis leg) at the two ports' shared
 Y — 3D path search (staircases, multi-level walkways) is intentionally out of scope so the port
 surface can land in one piece. Cells that overlap an existing structure floor are skipped and the
-row earns one `W_WALKWAY_BLOCKED` warning so the author can widen the placement gap.
+row earns one `W_WALKWAY_BLOCKED` warning so the author can widen the placement gap. The warning
+also carries a machine-readable payload (`data: { kind: "walkway_blocked", skipped: N }`) in the
+`--format json` output so LSP quick-fixes and CI annotators can read the skip count without
+re-parsing the human-readable message — see §11.1 of `spec/lint.md`.
 
 **Material.** The `path=@TOKEN` value lifts through the same `mat_slot=` pipeline used for member
 materials — concrete tokens like `@gravel` work without a registry pack; abstract tokens like
@@ -120,6 +123,7 @@ re-running the resolver.
 - `E_UNRESOLVED_PLACE_REF` — the head place id (left of the dot) does not name a prior place in
   this site, shared with §9.3.3.
 - `W_WALKWAY_BLOCKED` — the L-shaped path crossed an existing structure floor; the colliding
-  cells are skipped and the rest of the strip still lays.
+  cells are skipped and the rest of the strip still lays. JSON payload exposes the skip count as
+  `data.skipped` so tooling does not need to re-parse the message text.
 - `W_DUPLICATE_WALKWAY` — the same `(from, to)` port pair has already been laid in this site;
   the duplicate row is dropped.

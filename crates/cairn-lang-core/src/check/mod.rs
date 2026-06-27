@@ -22,8 +22,8 @@ mod sink;
 mod type_mismatch;
 
 pub use diagnostic::{
-    Diagnostic, DiagnosticCode, DiagnosticNote, LineStarts, RenderedDiagnostic, RenderedNote,
-    Severity, position_at,
+    Diagnostic, DiagnosticCode, DiagnosticData, DiagnosticNote, LineStarts, RenderedDiagnostic,
+    RenderedNote, Severity, position_at,
 };
 pub use sink::DiagnosticSink;
 

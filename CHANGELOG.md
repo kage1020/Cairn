@@ -17,6 +17,17 @@ placeholder cannot leak out. The `2026.07.0` release PR will flip publish to `tr
 
 ### Added
 
+- `cairn-lang-core::check::DiagnosticData` — new public enum that
+  carries the machine-readable payload for a `Diagnostic`. The first
+  variant (`WalkwayBlocked { skipped }`) ships alongside
+  `W_WALKWAY_BLOCKED`, exposing the skip count as
+  `data.skipped` in the `cairn check --format json` output so LSP
+  quick-fixes and CI annotators no longer need to re-parse the
+  `"skipped N cells"` substring out of the human-readable `primary`
+  message. The `data` key is omitted entirely when a diagnostic
+  carries no payload, keeping the JSON contract additive for
+  existing consumers. `spec/lint.md` §11.1 documents the full JSON
+  shape.
 - `cairn-lang-core::block_array::lower` — endpoint-skip cascade for
   walkways. When a `connect` row points at a placement that did not
   lower (e.g. its def has no `size=`, or a theme reference failed

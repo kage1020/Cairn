@@ -173,6 +173,17 @@ fn cli_json_output_carries_line_and_col_for_every_diagnostic() {
             "code should be the E_-prefixed string, got: {}",
             entry["code"],
         );
+        // AC3 from issue #40: codes without a structured payload must
+        // omit the `data` key entirely so the JSON contract stays
+        // additive for consumers that pin a fixed key set. The
+        // `duplicate.crn` fixture only triggers `E_DUPLICATE_*`, none of
+        // which carry a payload today, so any `data` here would mean a
+        // bug in the `serde(skip_serializing_if = "Option::is_none")`
+        // wiring.
+        assert!(
+            entry.get("data").is_none(),
+            "diagnostic without a payload must omit the `data` key, got: {entry}",
+        );
     }
 }
 
