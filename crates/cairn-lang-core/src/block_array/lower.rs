@@ -964,10 +964,10 @@ fn resolve_member_state(
             // A local `debug_assert` would require threading the
             // resolver's `Resolution` into every caller of
             // `resolve_member_state` (palette helpers, opening carvers,
-            // …). That blast radius is out of scope for #38, so the
-            // invariant is enforced by the resolver-pass unit tests
-            // around `DiagnosticCode::UnknownSlotTarget` rather than a
-            // local assert.
+            // …). That blast radius is intentionally avoided here, so
+            // the invariant is enforced by the resolver-pass unit
+            // tests around `DiagnosticCode::UnknownSlotTarget` rather
+            // than a local assert.
             None
         }
     }
