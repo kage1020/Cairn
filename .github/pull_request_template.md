@@ -22,7 +22,7 @@ See CONTRIBUTING.md for the full convention.
 
 ## Linked issues / spec sections
 
-<!-- e.g. closes #123, refs spec §6.3, refs roadmap -->
+<!-- e.g. closes #123, refs spec §6.3, refs roadmap 2026.10.0 -->
 
 ## Test plan
 

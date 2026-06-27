@@ -22,8 +22,9 @@
 //!    `W_WALKWAY_BLOCKED` warning per row.
 //!
 //! The walkway always sits at the two ports' shared Y. 3D path search
-//! (staircases, multi-level walkways) is intentionally out of scope for
-//! now; every shipping example lays its walkways flat against `y = 0`.
+//! (staircases, multi-level walkways) is intentionally out of scope so
+//! the port surface lands in one piece; every shipping example lays its
+//! walkways flat against `y = 0`.
 
 use std::collections::HashSet;
 use std::hash::BuildHasher;

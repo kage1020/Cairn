@@ -144,7 +144,8 @@ fn collect_floor_cells(
         };
         // Only the y=0 plane matters: walkways sit at the ports' shared
         // Y (=0 for every example). 3D path search (staircases, multi-level
-        // walkways) is intentionally out of scope.
+        // walkways) is intentionally out of scope so the port surface lands
+        // in one piece.
         for z in 0..ba.dims.z {
             for x in 0..ba.dims.x {
                 let Some(i) = ba.dims.index(x, 0, z) else {

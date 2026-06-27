@@ -98,9 +98,8 @@ fn write_tag_id<W: Write>(w: &mut W, id: u8) -> Result<(), NbtIoError> {
 
 fn write_string<W: Write>(w: &mut W, s: &str) -> Result<(), NbtIoError> {
     // Java NBT String uses Modified UTF-8 with a u16 length prefix. The
-    // encoder currently accepts ASCII only: every byte must be ASCII and
-    // non-NUL. A supplementary-pair encoder is reserved for a future
-    // extension once a registry-pack id is observed outside that range.
+    // accepted byte set matches what `NbtIoError::InvalidString` documents:
+    // ASCII and non-NUL only.
     for (index, &byte) in s.as_bytes().iter().enumerate() {
         if byte == 0 || byte >= 0x80 {
             return Err(NbtIoError::InvalidString { byte, index });

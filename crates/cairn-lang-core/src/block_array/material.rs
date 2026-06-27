@@ -48,7 +48,7 @@ pub trait AbstractMaterialResolver {
 }
 
 /// Default Minecraft id namespace for bare `@name` tokens. A future mod-aware
-/// registry pack will let theme slots opt into other namespaces; the resolver
+/// registry pack will let theme slots opt into other namespaces; this module
 /// hardcodes vanilla so the cottage example lowers without registry data.
 const VANILLA_NAMESPACE: &str = "minecraft";
 
