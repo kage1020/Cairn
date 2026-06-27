@@ -534,16 +534,18 @@ fn port_ref_from_value(
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Option<PortRef> {
     let ValueKind::DotRef(dot) = &raw.kind else {
-        // INVARIANT(upstream-diagnosed): `connect from to to to` only takes
-        // a `Value` whose `ValueKind` is `DotRef`. Any other shape — bare
-        // literal, token, call — fails the surface grammar at parse time
-        // or the connect-member discriminator in `intent::lower`, which
-        // emits its own structural diagnostic before this row reaches the
-        // resolver. Re-pushing here would double-count a single malformed
-        // row. The verification of that upstream emission is parser-level
-        // and cannot be checked from inside this `Vec<Diagnostic>`-scoped
-        // pass, so the contract is enforced by the doc comment plus the
-        // grammar tests in `tests/parse_*.rs`.
+        // INVARIANT(upstream-diagnosed): `connect <from> to <to>` only
+        // accepts a `Value` whose `ValueKind` is `DotRef`. Any other shape
+        // — bare literal, token, call — fails the surface grammar at parse
+        // time or the connect-member discriminator in `intent::lower`,
+        // which emits its own structural diagnostic before this row
+        // reaches the resolver. Re-pushing here would double-count a
+        // single malformed row. Verification of the upstream emission is
+        // parser-level and cannot be checked from inside this
+        // `Vec<Diagnostic>`-scoped pass, so the contract is enforced by
+        // the doc comment plus the grammar tests in `tests/parse_*.rs`
+        // (a debug_assert here would tangle the resolver's API with the
+        // parser's diagnostic timing, which is out of scope for #38).
         return None;
     };
     if dot.tail().is_empty() {
@@ -597,34 +599,49 @@ fn validate_port(
     diagnostics: &mut Vec<Diagnostic>,
 ) -> bool {
     let Some(def_name) = place_def.get(&port.place_id) else {
-        // INVARIANT(upstream-diagnosed): `place_def` is populated only with
-        // places that survived `resolve_site_places`. A miss here means the
-        // corresponding `place` row already pushed `E_UNRESOLVED_PLACE_REF`
-        // / `E_DUPLICATE_PLACE_ID` / `E_INVALID_PLACE_ORIGIN` into the
-        // shared `diagnostics` sink before connect rows ran. Staying silent
-        // avoids a second diagnostic for the same broken placement; the
-        // debug_assert below is a release-build-free safety net catching a
-        // future refactor that would let a port reach validate_port without
-        // the upstream emission.
+        // INVARIANT(upstream-diagnosed): `place_def` is populated by
+        // `resolve_site_placements` only for places that survived every
+        // pre-`connect` check. A miss here implies that `place_id`'s row
+        // hit one of the `continue` arms in `resolve_site_placements`
+        // (L341 / L357 / L373 / L389) — all of which push exactly one of
+        // the place-related diagnostic codes filtered for below.
+        // Filtering by code (rather than the looser `!is_empty()`) keeps
+        // the assert load-bearing: unrelated prior errors from other
+        // sites cannot mask a future refactor that drops the upstream
+        // emission for this specific place. The two silent-continue arms
+        // for missing `use=` / `theme=` (L370-372, L386-388) are tracked
+        // as out-of-scope for issue #38 and would currently let this
+        // assert fire — that surfaces a real gap rather than hiding it.
         debug_assert!(
-            !diagnostics.is_empty(),
-            "validate_port: place `{place_id}` is missing from `place_def` \
-             but no upstream diagnostic was emitted (expected E_UNRESOLVED_PLACE_REF or similar)",
+            diagnostics.iter().any(|d| matches!(
+                d.code,
+                DiagnosticCode::UnresolvedPlaceRef
+                    | DiagnosticCode::UnresolvedThemeRef
+                    | DiagnosticCode::DuplicatePlaceId
+                    | DiagnosticCode::InvalidPlaceOrigin
+            )),
+            "validate_port: place `{place_id}` is missing from `place_def` but no place-related \
+             diagnostic was emitted (expected E_UNRESOLVED_PLACE_REF / E_UNRESOLVED_THEME_REF / \
+             E_DUPLICATE_PLACE_ID / E_INVALID_PLACE_ORIGIN); diagnostics so far: {n}",
             place_id = port.place_id,
+            n = diagnostics.len(),
         );
         return false;
     };
     let Some(def) = defs.iter().find(|d| d.name == *def_name) else {
-        // INVARIANT(upstream-diagnosed): `use=NAME` is recorded in
-        // `place_def` only after `resolve_site_places` either confirmed a
-        // matching def exists or pushed `E_UNRESOLVED_PLACE_REF`. A miss
-        // here therefore implies the upstream diagnostic already fired.
-        // Same silence-rule as the `place_def` miss above; the
-        // `debug_assert!` is the equivalent regression guard.
+        // INVARIANT(structural): `resolve_site_placements` (L373-382)
+        // only inserts a `use_name` into `place_def` after `defs.iter()
+        // .find(|d| d.name == use_name)` already returned `Some`. By
+        // construction, every `def_name` reachable here is therefore
+        // present in `defs`. A miss is a contract break in
+        // `resolve_site_placements`, not an upstream-diagnosed input —
+        // fail loud in debug builds so a future refactor that violates
+        // the construction invariant surfaces immediately.
         debug_assert!(
-            !diagnostics.is_empty(),
-            "validate_port: def `{def_name}` (used by `place {place_id}`) is missing from `defs` \
-             but no upstream diagnostic was emitted (expected E_UNRESOLVED_PLACE_REF)",
+            false,
+            "validate_port: def `{def_name}` (used by `place {place_id}`) is in `place_def` but \
+             absent from `defs` — `resolve_site_placements` was supposed to gate `place_def` \
+             insertion on def presence",
             def_name = def_name,
             place_id = port.place_id,
         );

@@ -954,15 +954,20 @@ fn resolve_member_state(
             // INVARIANT(upstream-diagnosed): `AlreadyDiagnosed` is returned
             // only when `slot_value.value.kind` is not `Token` (see
             // `material::resolve_block_state` /
-            // `TokenKind::NotAToken`). For theme slot values, the
-            // `resolve::theme_slots` pass emits `E_UNKNOWN_SLOT_TARGET` for
-            // that exact shape during the `resolve()` invocation that
-            // produced the `scope` we read above; staying silent here
-            // avoids a duplicate diagnostic. Verification lives in the
-            // resolver-pass tests
-            // (`check_unknown_slot_target.rs` et al.) rather than a local
-            // assert because `resolve_member_state` does not see the
-            // resolver's `Resolution` directly.
+            // `TokenKind::NotAToken`). For theme slot values the
+            // `check_slot_targets` pass in
+            // `resolve::resolver` (`resolver.rs` around the
+            // `DiagnosticCode::UnknownSlotTarget` push) emits
+            // `E_UNKNOWN_SLOT_TARGET` for exactly that shape during the
+            // `resolve()` invocation that produced the `scope` we read
+            // above; staying silent here avoids a duplicate diagnostic.
+            // A local `debug_assert` would require threading the
+            // resolver's `Resolution` into every caller of
+            // `resolve_member_state` (palette helpers, opening carvers,
+            // …). That blast radius is out of scope for #38, so the
+            // invariant is enforced by the resolver-pass unit tests
+            // around `DiagnosticCode::UnknownSlotTarget` rather than a
+            // local assert.
             None
         }
     }
