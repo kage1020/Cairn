@@ -160,8 +160,8 @@ pub fn hash_source(src: &str) -> HashHex {
 /// # Errors
 ///
 /// Returns [`HashError::SerialiseIr`] if `serde_json` cannot encode the
-/// IR. In M2 this cannot fire — the IR is integer-only — but the result
-/// surface is here so a later entity coordinate that turns out to be
+/// IR. This cannot fire today — the IR is integer-only — but the result
+/// surface is here so a future entity coordinate that turns out to be
 /// `NaN` fails the build cleanly instead of panicking inside the CLI.
 pub fn hash_resolved_ir(ir: &BlockArrayIr) -> Result<HashHex, HashError> {
     let bytes = serde_json::to_vec(ir)?;

@@ -12,7 +12,7 @@
 
 use super::member::MemberRole;
 
-/// All M2 keywords known to the role table, in their declaration order.
+/// All keywords known to the role table, in their declaration order.
 ///
 /// Used by the `keyword_allowlist` diagnostic pass to render the
 /// "expected one of ..." note attached to `E_UNKNOWN_KEYWORD`. Kept in
@@ -38,7 +38,7 @@ pub const KNOWN_KEYWORDS: &[&str] = &[
     "connect",
 ];
 
-/// Return the M2 known-keyword table.
+/// Return the known-keyword table.
 ///
 /// Public-facing helper so external passes can render the same list this
 /// module uses for classification, without duplicating the constant.
@@ -47,7 +47,7 @@ pub fn known_keywords() -> &'static [&'static str] {
     KNOWN_KEYWORDS
 }
 
-/// Look up a command keyword in the M2 known-keyword table.
+/// Look up a command keyword in the known-keyword table.
 ///
 /// Returns the corresponding [`MemberRole`] for known keywords and
 /// [`MemberRole::Other`] (wrapping the original keyword string) for

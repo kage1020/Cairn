@@ -372,10 +372,10 @@ fn compile_does_not_print_wrote_before_lockfile_success() {
 #[test]
 fn compile_all_examples_exit_zero() {
     // Every example must compile clean even when its source uses members
-    // or material tokens the M2 backend can't fully realise — abstract
-    // tokens and unsupported roles degrade to air with a warning at the
-    // lowering step, so the palette that reaches the Java backend is
-    // already concrete. A non-zero exit here means a regression in either
+    // or material tokens the backend can't fully realise — abstract tokens
+    // and unsupported roles degrade to air with a warning at the lowering
+    // step, so the palette that reaches the Java backend is already
+    // concrete. A non-zero exit here means a regression in either
     // the lowering pass or the abstract-id guard at the backend.
     for name in [
         "cottage.crn",

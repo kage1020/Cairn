@@ -48,8 +48,8 @@ pub trait AbstractMaterialResolver {
 }
 
 /// Default Minecraft id namespace for bare `@name` tokens. A future mod-aware
-/// registry pack will let theme slots opt into other namespaces; M2 hardcodes
-/// vanilla so the cottage example lowers without registry data.
+/// registry pack will let theme slots opt into other namespaces; the resolver
+/// hardcodes vanilla so the cottage example lowers without registry data.
 const VANILLA_NAMESPACE: &str = "minecraft";
 
 /// Reason a slot value could not be lowered to a [`BlockState`].
@@ -145,8 +145,8 @@ pub fn resolve_block_state(
 /// `minecraft:cobblestone`) into a [`BlockState`].
 ///
 /// Recognises an optional `namespace:` prefix and a trailing `[k=v,...]`
-/// state literal. The state literal is parsed defensively because the M2
-/// parser does not currently mint bracketed tokens directly — but
+/// state literal. The state literal is parsed defensively because the
+/// surface parser does not currently mint bracketed tokens directly — but
 /// [`crate::resolve::classify_token`] documents the shape and other code
 /// paths (registry-pack lookups, future schematic ingestion) may.
 fn canonical_to_block_state(inner: &str) -> BlockState {

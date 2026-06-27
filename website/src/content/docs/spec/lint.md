@@ -14,7 +14,7 @@ first-class parts of the spec; messages MUST be in a shape that feeds the self-c
   - `E_DUPLICATE_ARG`  — repeated `key=` in the same argument list.
   - `E_DUPLICATE_ID`   — two members share an `id=` within the same
     immediate body scope.
-  - `E_UNKNOWN_KEYWORD` — statement keyword is not in the M2 table.
+  - `E_UNKNOWN_KEYWORD` — statement keyword is not in the known-keyword table.
   - `E_TYPE_MISMATCH_LABEL` — `id=` / `class=` / `mat_slot=` value is not
     a label (identifier or string).
   - `E_TYPE_MISMATCH_SIZE`  — `size=` value is not a `WxH` literal.

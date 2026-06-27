@@ -104,9 +104,9 @@ fn kw_6_close_typo_attaches_did_you_mean_note() {
 
 #[test]
 fn kw_7_distant_typo_skips_the_suggestion() {
-    // `mystery` is 4+ edits away from every M2 keyword, so the suggest pass
-    // must not invent a guess — the candidate listing alone is the right
-    // surface for the user to scan.
+    // `mystery` is 4+ edits away from every known keyword, so the suggest
+    // pass must not invent a guess — the candidate listing alone is the
+    // right surface for the user to scan.
     let src = "struct s size=1x1\n  mystery foo=1\n";
     let diags = diagnose(src);
     let kw = diags
@@ -123,10 +123,10 @@ fn kw_7_distant_typo_skips_the_suggestion() {
 }
 
 #[test]
-fn kw_5_every_m2_known_keyword_is_silent() {
-    // Build a source that uses every keyword in the M2 table. None should
-    // trigger `E_UNKNOWN_KEYWORD`. `place` and `connect` live in a site;
-    // everything else lives in a struct.
+fn kw_5_every_known_keyword_is_silent() {
+    // Build a source that uses every keyword in the known-keyword table.
+    // None should trigger `E_UNKNOWN_KEYWORD`. `place` and `connect` live
+    // in a site; everything else lives in a struct.
     let src = "\
 struct s size=4x4
   floor
@@ -150,6 +150,6 @@ site h:
         .collect();
     assert!(
         kw_diags.is_empty(),
-        "every M2 known keyword should be silent, got: {kw_diags:#?}",
+        "every known keyword should be silent, got: {kw_diags:#?}",
     );
 }

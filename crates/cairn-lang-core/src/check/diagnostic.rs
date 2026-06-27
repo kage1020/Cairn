@@ -52,7 +52,7 @@ pub enum DiagnosticCode {
     DuplicateArg,
     /// Two or more members in the same immediate body share an `id=`.
     DuplicateId,
-    /// A statement keyword not in the M2 keyword table.
+    /// A statement keyword not in the known-keyword table.
     UnknownKeyword,
     /// `id=`, `class=`, or `mat_slot=` whose value is not a label
     /// (identifier or string).

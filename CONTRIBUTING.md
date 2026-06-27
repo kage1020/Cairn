@@ -76,14 +76,19 @@ landed), update the comment in the same PR that lands the feature.
 **Enforcement.** Reviewers (human or otherwise) should run
 
 ```sh
-rg 'M[0-9]-PR[0-9]+|pre-M[0-9]|\blater PR\b|\bfuture PR\b' \
+rg '\bM[1-6]\b|M[0-9]-PR[0-9]+|pre-M[0-9]|\blater PR\b|\bfuture PR\b' \
   --glob '!CHANGELOG*' \
+  --glob '!CONTRIBUTING*' \
   --glob '!**/compatibility.md' \
+  --glob '!**/roadmap.md' \
   --glob '!target/**'
 ```
 
-before approving. An empty result is the contract. This is not wired into CI yet; the repository is
-small enough that human review is sufficient.
+before approving. An empty result is the contract. The `\bM[1-6]\b` arm catches bare milestone
+labels (`M2`, `M3`, ...) — these belong to the roadmap and compatibility table only; in Rust source
+and spec body, replace them with the implementation fact they stood in for ("the keyword table",
+"the lowering pass", "reserved for a future extension"). This is not wired into CI yet; the
+repository is small enough that human review is sufficient.
 
 ## Proposing a change to a settled decision
 
