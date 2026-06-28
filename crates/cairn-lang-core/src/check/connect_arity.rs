@@ -120,16 +120,8 @@ fn validate(member: &Member, sink: &mut DiagnosticSink) {
             // surface is the whole offending suffix rather than each
             // token in isolation.
             let span = Span {
-                start: extras
-                    .first()
-                    .expect("checked non-empty above")
-                    .span
-                    .start,
-                end: extras
-                    .last()
-                    .expect("checked non-empty above")
-                    .span
-                    .end,
+                start: extras.first().expect("checked non-empty above").span.start,
+                end: extras.last().expect("checked non-empty above").span.end,
             };
             push(
                 sink,

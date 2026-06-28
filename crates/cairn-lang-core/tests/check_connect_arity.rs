@@ -73,8 +73,9 @@ fn ca_2_bare_connect_emits_arity_with_keyword_span() {
         d.primary,
     );
     assert!(
-        d.notes.iter().any(|n| n.message.contains("connect")
-            && n.message.contains("to")),
+        d.notes
+            .iter()
+            .any(|n| n.message.contains("connect") && n.message.contains("to")),
         "should include an example shape note, got: {:#?}",
         d.notes,
     );
