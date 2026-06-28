@@ -61,13 +61,20 @@
 
 - `cairn-lang-core::block_array::walkway::port_world_position` — walkway
   のポート端点を `door` メンバーに加えて `window` メンバーでも宣言
-  できるようになった。壁ローカルのアンカーは矩形の幾何中心
-  (`offset + size.w / 2`) を採用し、ポート位置は地面段に固定したまま
-  なので、歩道の 1 voxel 厚平坦 strip 不変 (`from.y == to.y`) は
-  window の宣言済み `y=` に依らず保持される。`sym=true` の window は
-  プライマリ `offset` 側の 1 点だけがポートとなる。stair / roof の
-  ポートは将来拡張用に予約されたまま。詳細は
-  `spec/components-editing-sites.md` §9.3.5 を参照。
+  できるようになった (door の挙動は変更なし)。`window` の壁ローカル
+  アンカーは矩形の幾何中心 (`offset + size.w / 2`) を採用し、ポート
+  位置は placement の地面段 (`place_origin.1`) に固定したままなので、
+  歩道の 1 voxel 厚平坦 strip 不変 (`from.y == to.y`) は window の
+  宣言済み `y=` に依らず保持される。window は水平方向
+  (`offset + size.w ≤ wall_length`) と垂直方向
+  (`y + size.h ≤ walls.height`) の両方で壁内に収まる必要がある。
+  openings パスがカットできない window はポートも構築できず、行は
+  `W_DEFERRED_MEMBER` で破棄され、ノートには door / window / 予約
+  ロールの契約が順番に列挙される。`sym=true` の window はプライマリ
+  `offset` 側の 1 点だけがポートとなる。stair / roof のポートは将来
+  拡張用に予約されたまま。詳細は `spec/components-editing-sites.md`
+  §9.3.5 を参照。引数 `port_id` は `&str` から `&PortId` に切り替わり、
+  #34 の newtype 移行で残っていた最後の `String`-primitive 穴を塞いだ。
 - `cairn-lang-core::check::DiagnosticData` — `Diagnostic` に機械可読
   ペイロードを載せる新しい公開 enum を追加。最初のバリアント
   (`WalkwayBlocked { skipped }`) は `W_WALKWAY_BLOCKED` と同時に

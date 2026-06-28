@@ -2,10 +2,16 @@
 @requires version>=1.20
 
 # Walkway anchored to a window port on one end and a door port on the
-# other. Window ports lift from `offset + size.w / 2` on the named wall,
-# pinned to the ground row so the Manhattan strip stays flat. The two
-# placements sit side-by-side along +x so a single x-leg clears both
-# footprints with zero `W_WALKWAY_BLOCKED` skips.
+# other. Window ports anchor at `offset + size.w / 2` on the named wall
+# and pin to the ground row so the Manhattan strip stays flat — the
+# window's authored `y=` does not lift the port. The two placements
+# sit side-by-side along +x so a single x-leg clears both footprints
+# with zero `W_WALKWAY_BLOCKED` skips.
+#
+# `y=2` on the window below is load-bearing for the Y-pin integration
+# assertion in `tests/window_walkway_lower.rs`: the test pins the
+# walkway origin at `(_, 0, _)`, so a regression that honours
+# `window.y` would lift the strip to `y = 2` and fail loud there.
 
 def cottage size=5x5:
   floor  id=floor mat_slot=floor

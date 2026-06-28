@@ -227,23 +227,24 @@ fn lower_connects(
             from_placement.origin,
             from_placement.dims,
             from_def,
-            connect.from.port.as_str(),
+            &connect.from.port,
         );
         let to_pos = port_world_position(
             to_placement.origin,
             to_placement.dims,
             to_def,
-            connect.to.port.as_str(),
+            &connect.to.port,
         );
         let (Some(from_pos), Some(to_pos)) = (from_pos, to_pos) else {
             // The resolver already validated the port id, so this miss
             // means `port_world_position` rejected one of the member's
             // own properties: a missing / non-cardinal `side=`, a door
-            // `at=` value other than `center`, a window with
-            // `offset + size.w` past the wall, or a stair / roof role
-            // for which port support is reserved. Name the offending
-            // side so the user is not pointed at the wrong half of the
-            // row.
+            // `at=` value other than `center`, a window whose
+            // `offset + size.w` overflows the wall or whose
+            // `y + size.h` overflows the walls `height=`, or a
+            // stair / roof role for which port support is reserved.
+            // Name the offending side so the user is not pointed at
+            // the wrong half of the row.
             let from_label = connect.from.to_string();
             let to_label = connect.to.to_string();
             let unplaceable = match (from_pos.is_none(), to_pos.is_none()) {
@@ -259,12 +260,26 @@ fn lower_connects(
                 primary: format!(
                     "walkway `{from_label} ↔ {to_label}` was skipped because port {unplaceable} could not be placed",
                 ),
-                notes: vec![DiagnosticNote {
-                    span: None,
-                    message:
-                        "ports require either a `door` member with `side=front|back|left|right` and `at=center`, or a `window` member with `side=` plus `offset=` and `size=WxH` fitting within the wall"
-                            .to_owned(),
-                }],
+                notes: vec![
+                    DiagnosticNote {
+                        span: None,
+                        message:
+                            "a `door` port requires `side=front|back|left|right` and `at=center`"
+                                .to_owned(),
+                    },
+                    DiagnosticNote {
+                        span: None,
+                        message:
+                            "a `window` port requires `side=front|back|left|right`, plus `offset=` / `y=` / `size=WxH` that fit inside the wall (`offset + size.w ≤ wall_length` and `y + size.h ≤ walls.height`)"
+                                .to_owned(),
+                    },
+                    DiagnosticNote {
+                        span: None,
+                        message:
+                            "stair / roof / other member roles cannot anchor a port yet — declare the port on a door or window instead"
+                                .to_owned(),
+                    },
+                ],
                 data: None,
             });
             continue;

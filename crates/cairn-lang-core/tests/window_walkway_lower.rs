@@ -148,3 +148,87 @@ fn window_walkway_emits_no_resolver_errors() {
         "window-walkway must not produce error-severity diagnostics, got {errors:#?}",
     );
 }
+
+/// Walkway anchored to a window whose `offset + size.w` overflows the
+/// wall must cascade exactly one `W_DEFERRED_MEMBER`, with the door
+/// half of the row identified as the side that *did* place. Pins the
+/// `port_world_position` → `W_DEFERRED_MEMBER` cascade across the
+/// resolver / lower boundary: a regression that returns early from
+/// `lower_connects` on the first `None` (skipping the diagnostic
+/// push) would silently drop the walkway and only fail this
+/// integration test.
+#[test]
+fn window_walkway_overflowing_window_cascades_one_deferred_member() {
+    // size=3x3 → wall_length(Front) = 3. The overflow window declares
+    // `offset=2 size=2x2`, so `offset + size.w = 4 > 3` and
+    // `window_center_offset` returns `None`. The peer's door port still
+    // resolves cleanly, so the cascade names the window side.
+    let src = "@cairn 2026.06\n\n\
+def hut size=3x3:\n  \
+floor mat_slot=floor\n  \
+walls mat_slot=wall height=3\n  \
+door   id=entry    side=front at=center\n  \
+window id=overflow side=front y=1 offset=2 size=2x2 mat_slot=glass\n\n\
+theme plain:\n  \
+slot floor -> @oak_planks\n  \
+slot wall  -> @cobblestone\n  \
+slot glass -> @glass_pane\n\n\
+site duo:\n  \
+place id=anchor use=hut theme=plain at=origin\n  \
+place id=peer   use=hut theme=plain east_of=anchor gap=4\n  \
+connect anchor.entry to peer.overflow path=@gravel\n";
+    let module = parse(src).expect("parse");
+    let ir = lower(&module);
+    let resolution = resolve(&ir);
+    let mut out = lower_to_block_array(&ir, &resolution, None);
+    let mut combined = resolution.diagnostics;
+    combined.append(&mut out.diagnostics);
+    // Two `W_DEFERRED_MEMBER` warnings come from the def-side openings
+    // pass dropping the overflow window itself (one per placement —
+    // `anchor` and `peer` both reuse `def hut`); the cascade we are
+    // pinning fires from `lower_connects` and is the one whose
+    // `primary` mentions "walkway". Filtering by message keeps the
+    // assertion robust against the unrelated def-side count.
+    let walkway_cascades: Vec<_> = combined
+        .iter()
+        .filter(|d| d.code == DiagnosticCode::DeferredMember)
+        .filter(|d| d.primary.contains("walkway"))
+        .collect();
+    assert_eq!(
+        walkway_cascades.len(),
+        1,
+        "overflowing window must surface exactly one walkway-cascade W_DEFERRED_MEMBER, got {combined:#?}",
+    );
+    let primary = &walkway_cascades[0].primary;
+    assert!(
+        primary.contains("peer.overflow"),
+        "diagnostic should name the unplaceable port `peer.overflow`, got: {primary}",
+    );
+    assert!(
+        !primary.contains("`anchor.entry` and `peer.overflow`"),
+        "the door side resolves; only the window side should be reported, got: {primary}",
+    );
+    // The expanded `notes` carry the door / window / reserved-role
+    // breakdown so the user sees every contract they could have hit.
+    let note_messages: Vec<_> = walkway_cascades[0]
+        .notes
+        .iter()
+        .map(|n| n.message.as_str())
+        .collect();
+    assert!(
+        note_messages.iter().any(|m| m.contains("`door` port")),
+        "notes should describe the door contract, got {note_messages:#?}",
+    );
+    assert!(
+        note_messages
+            .iter()
+            .any(|m| m.contains("`window` port") && m.contains("y + size.h")),
+        "notes should describe the window contract including the vertical bound, got {note_messages:#?}",
+    );
+    // The walkway IR must drop the row rather than lay a partial strip.
+    assert!(
+        out.walkways.is_empty(),
+        "overflowing-window row must drop its walkway, got {:?}",
+        out.walkways.keys().collect::<Vec<_>>(),
+    );
+}

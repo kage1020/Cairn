@@ -62,13 +62,22 @@ placeholder cannot leak out. The `2026.07.0` release PR will flip publish to `tr
 
 - `cairn-lang-core::block_array::walkway::port_world_position` — walkway
   port endpoints can now be declared on `window` members in addition to
-  `door` members. The wall-local anchor is the rectangle's geometric
-  centre (`offset + size.w / 2`), and the port stays pinned at the
-  ground row so the walkway's 1-voxel-thick flat-strip invariant
-  (`from.y == to.y`) is preserved regardless of the window's authored
-  `y=`. A `sym=true` window contributes a single port at the primary
-  `offset` side. Stair / roof ports remain reserved for a future
-  extension. See `spec/components-editing-sites.md` §9.3.5.
+  `door` members (door behaviour is unchanged). For a `window` the
+  wall-local anchor is the rectangle's geometric centre
+  (`offset + size.w / 2`), and the port stays pinned at the placement's
+  ground row (`place_origin.1`) so the walkway's 1-voxel-thick
+  flat-strip invariant (`from.y == to.y`) is preserved regardless of
+  the window's authored `y=`. The window must fit both horizontally
+  (`offset + size.w ≤ wall_length`) and vertically
+  (`y + size.h ≤ walls.height`); a window that would not even be
+  carved by the openings pass cannot anchor a walkway either, and the
+  row drops with a `W_DEFERRED_MEMBER` whose notes list the
+  door / window / reserved-role contracts in turn. A `sym=true` window
+  contributes a single port at the primary `offset` side. Stair / roof
+  ports remain reserved for a future extension. See
+  `spec/components-editing-sites.md` §9.3.5. The function's `port_id`
+  argument is now `&PortId` instead of `&str`, closing the last
+  `String`-primitive hole from the #34 newtype migration.
 - `cairn-lang-core::check::DiagnosticData` — new public enum that
   carries the machine-readable payload for a `Diagnostic`. The first
   variant (`WalkwayBlocked { skipped }`) ships alongside
