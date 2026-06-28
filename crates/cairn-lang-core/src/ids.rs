@@ -523,9 +523,12 @@ mod tests {
     #[test]
     fn walkway_scope_key_round_trips() {
         let site = SiteName::new("hamlet").expect("site");
-        let key =
-            WalkwayScopeKey::from_parts(&site, &endpoint("home1", "entry"), &endpoint("home2", "entry"))
-                .expect("from_parts");
+        let key = WalkwayScopeKey::from_parts(
+            &site,
+            &endpoint("home1", "entry"),
+            &endpoint("home2", "entry"),
+        )
+        .expect("from_parts");
         assert_eq!(key.as_str(), "walkway::hamlet::home1.entry__home2.entry");
         let parsed = WalkwayScopeKey::parse(key.as_str()).expect("parse");
         assert_eq!(parsed, key);
@@ -587,11 +590,7 @@ mod tests {
             Err(KeyConstructError::ConsecutiveUnderscore { role: "site", .. })
         ));
         assert!(matches!(
-            WalkwayScopeKey::from_parts(
-                &site,
-                &endpoint("a__b", "x"),
-                &endpoint("c", "y"),
-            ),
+            WalkwayScopeKey::from_parts(&site, &endpoint("a__b", "x"), &endpoint("c", "y"),),
             Err(KeyConstructError::ConsecutiveUnderscore { role: "place", .. })
         ));
     }
