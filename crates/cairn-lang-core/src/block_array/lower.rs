@@ -342,13 +342,22 @@ fn lower_connects(
         let material_id = material.id.clone();
 
         let path = l_path(from_pos, to_pos);
-        let scope_key = WalkwayScopeKey::from_parts(
-            &connect.site,
-            &connect.from.place,
-            &connect.from.port,
-            &connect.to.place,
-            &connect.to.port,
-        );
+        let from_endpoint = WalkwayEndpoint {
+            place: connect.from.place.clone(),
+            port: connect.from.port.clone(),
+        };
+        let to_endpoint = WalkwayEndpoint {
+            place: connect.to.place.clone(),
+            port: connect.to.port.clone(),
+        };
+        let scope_key =
+            match WalkwayScopeKey::from_parts(&connect.site, &from_endpoint, &to_endpoint) {
+                Ok(k) => k,
+                Err(e) => {
+                    diagnostics.push(diag_walkway_invalid_ident(connect, &e));
+                    continue;
+                }
+            };
         let WalkwayLayout {
             array,
             origin,
@@ -376,6 +385,12 @@ fn lower_connects(
             });
         }
         let dims = array.dims;
+        debug_assert_eq!(
+            dims.y, 1,
+            "walkway block array must be 1 block thick; build_walkway_array's contract \
+             pins y = 1 and the lockfile relies on this when re-attaching the implicit y \
+             via Footprint::to_dims_y1",
+        );
         let footprint = Footprint {
             x: dims.x,
             z: dims.z,
@@ -385,19 +400,39 @@ fn lower_connects(
             scope_key,
             Walkway {
                 site: connect.site.clone(),
-                from: WalkwayEndpoint {
-                    place: connect.from.place.clone(),
-                    port: connect.from.port.clone(),
-                },
-                to: WalkwayEndpoint {
-                    place: connect.to.place.clone(),
-                    port: connect.to.port.clone(),
-                },
+                from: from_endpoint,
+                to: to_endpoint,
                 origin,
                 footprint,
                 path_material: material_id,
             },
         );
+    }
+}
+
+fn diag_walkway_invalid_ident(
+    connect: &crate::resolve::ValidatedConnect,
+    err: &crate::ids::KeyConstructError,
+) -> Diagnostic {
+    let crate::ids::KeyConstructError::ConsecutiveUnderscore { role, segment } = err;
+    Diagnostic {
+        code: DiagnosticCode::InvalidWalkwayIdent,
+        severity: Severity::Warning,
+        span: connect.span.clone(),
+        primary: format!(
+            "walkway `{from} ↔ {to}` was dropped because the {role} id `{segment}` \
+             contains `__`, which collides with the walkway scope key's \
+             `from`/`to` separator",
+            from = connect.from,
+            to = connect.to,
+        ),
+        notes: vec![DiagnosticNote {
+            span: None,
+            message: "rename the offending id (e.g. replace `__` with `_`) so the \
+                      lowered walkway scope key is unambiguous"
+                .to_owned(),
+        }],
+        data: None,
     }
 }
 

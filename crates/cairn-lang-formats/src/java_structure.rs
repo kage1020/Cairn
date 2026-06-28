@@ -147,31 +147,63 @@ pub fn write_compound_gzip<W: std::io::Write>(
 /// agree on naming when they land.
 #[must_use]
 pub fn output_filename(source_scope: &str) -> String {
-    if let Ok(key) = cairn_lang_core::WalkwayScopeKey::parse(source_scope) {
-        // Flatten `place.port` separators to `_` for portable filenames.
-        // Going through `WalkwayScopeKey::parts` rather than a raw
-        // `split_once('.')` means the segments come from the same
-        // validated source the lowering pass uses to construct the key,
-        // closing the `port_id` containing `.` ambiguity at the type
-        // boundary. Known hazard: Cairn ids allow `_`, so two distinct
-        // scopes can collapse to the same on-disk name —
-        // `a_b.c__d_e.f` and `a.b_c__d.e_f` both flatten to
-        // `a_b_c__d_e_f.nbt`. Walkway dedup at the IR layer
-        // (`lower_connects` `seen_pairs`) only catches reversed-endpoint
-        // duplicates, not this collision. Detecting it requires a
-        // write-time pass over all emitted filenames; that lives in the
-        // CLI's compile pipeline. The flatten itself stays here because
-        // every backend (Java now, Bedrock later) shares the same
-        // naming contract.
-        let p = key.parts();
-        return format!(
-            "{site}_walkway_{from_place}_{from_port}__{to_place}_{to_port}.nbt",
-            site = p.site,
-            from_place = p.from_place,
-            from_port = p.from_port,
-            to_place = p.to_place,
-            to_port = p.to_port,
-        );
+    // A canonical walkway scope key carries the full
+    // `walkway::SITE::PLACE.PORT__PLACE.PORT` shape. Detect that here so
+    // we can tell two cases apart:
+    //
+    // - a wire-validated key constructed by `WalkwayScopeKey::from_parts`,
+    //   which must always parse — a parse failure on a `walkway::SITE::...`
+    //   prefix is a contract break in the lowering pass and is surfaced as
+    //   a debug-time panic so the breakage cannot reach `.nbt` filenames
+    //   silently;
+    // - a non-canonical synthetic prefix such as the test fixture
+    //   `walkway::no_site` (no `::SITE::` segment, used to pin the
+    //   generic fallback shape), which falls through to the `.nbt`
+    //   default below alongside any other unrecognised scope.
+    if let Some(rest) = source_scope.strip_prefix("walkway::")
+        && rest.contains("::")
+    {
+        match cairn_lang_core::WalkwayScopeKey::parse(source_scope) {
+            Ok(key) => {
+                // Flatten `place.port` separators to `_` for portable
+                // filenames. Going through `WalkwayScopeKey::parts`
+                // rather than a raw `split_once('.')` means the segments
+                // come from the same validated source the lowering pass
+                // uses to construct the key, closing the `port_id`
+                // containing `.` (and `__`) ambiguity at the type
+                // boundary. Known hazard: Cairn ids allow `_`, so two
+                // distinct scopes can still collapse to the same
+                // on-disk name once the `.` separator is replaced with
+                // `_` — `a_b.c__d_e.f` and `a.b_c__d.e_f` both flatten
+                // to `a_b_c__d_e_f.nbt`. Walkway dedup at the IR layer
+                // (`lower_connects` `seen_pairs`) only catches
+                // reversed-endpoint duplicates, not this collision.
+                // Detecting it requires a write-time pass over all
+                // emitted filenames; that lives in the CLI's compile
+                // pipeline. The flatten itself stays here because every
+                // backend (Java now, Bedrock later) shares the same
+                // naming contract.
+                let p = key.parts();
+                return format!(
+                    "{site}_walkway_{from_place}_{from_port}__{to_place}_{to_port}.nbt",
+                    site = p.site,
+                    from_place = p.from_place,
+                    from_port = p.from_port,
+                    to_place = p.to_place,
+                    to_port = p.to_port,
+                );
+            }
+            Err(e) => {
+                debug_assert!(
+                    false,
+                    "output_filename received a `walkway::SITE::*` key that failed to parse \
+                     ({source_scope:?}): {e}",
+                );
+                // Release builds: fall through to the generic
+                // `{source_scope}.nbt` below so we never panic in the
+                // wild; the IR contract is a debug-time invariant.
+            }
+        }
     }
     let bare = source_scope
         .strip_prefix("struct::")

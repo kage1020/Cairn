@@ -339,13 +339,17 @@ mod tests {
     }
 
     fn sample_key() -> WalkwayScopeKey {
-        use crate::ids::{PlaceId, PortId, SiteName};
+        use crate::ids::{PlaceId, PortId, SiteName, WalkwayEndpoint};
         let site = SiteName::new("s").expect("site");
-        let a_place = PlaceId::new("a").expect("place");
-        let a_port = PortId::new("entry").expect("port");
-        let b_place = PlaceId::new("b").expect("place");
-        let b_port = PortId::new("entry").expect("port");
-        WalkwayScopeKey::from_parts(&site, &a_place, &a_port, &b_place, &b_port)
+        let a = WalkwayEndpoint {
+            place: PlaceId::new("a").expect("place"),
+            port: PortId::new("entry").expect("port"),
+        };
+        let b = WalkwayEndpoint {
+            place: PlaceId::new("b").expect("place"),
+            port: PortId::new("entry").expect("port"),
+        };
+        WalkwayScopeKey::from_parts(&site, &a, &b).expect("from_parts")
     }
 
     #[test]

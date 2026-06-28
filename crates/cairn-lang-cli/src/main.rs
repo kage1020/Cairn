@@ -870,13 +870,21 @@ fn build_lockfile(
         walkways: block_ir
             .walkways
             .values()
-            .map(|w| LockWalkway {
-                site: w.site.clone(),
-                from: w.from.clone(),
-                to: w.to.clone(),
-                path_material: w.path_material.clone(),
-                origin: [w.origin.0, w.origin.1, w.origin.2],
-                dims: [w.footprint.x, 1, w.footprint.z],
+            .map(|w| {
+                // `Footprint::to_dims_y1` is the single place that
+                // re-attaches the implicit `y = 1` for the lockfile's
+                // `dims: [u32; 3]` wire format; the block-array IR's
+                // own `dims.y` invariant is asserted at
+                // `lower_connects`'s Footprint construction site.
+                let d = w.footprint.to_dims_y1();
+                LockWalkway {
+                    site: w.site.clone(),
+                    from: w.from.clone(),
+                    to: w.to.clone(),
+                    path_material: w.path_material.clone(),
+                    origin: [w.origin.0, w.origin.1, w.origin.2],
+                    dims: [d.x, d.y, d.z],
+                }
             })
             .collect(),
     })

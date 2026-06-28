@@ -54,6 +54,16 @@ fn validate_ident(s: &str) -> Result<(), IdError> {
     Ok(())
 }
 
+fn check_no_dunder(role: &'static str, s: &str) -> Result<(), KeyConstructError> {
+    if s.contains("__") {
+        return Err(KeyConstructError::ConsecutiveUnderscore {
+            role,
+            segment: s.to_owned(),
+        });
+    }
+    Ok(())
+}
+
 macro_rules! ident_newtype {
     ($(#[$meta:meta])* $Name:ident) => {
         $(#[$meta])*
@@ -168,8 +178,13 @@ pub enum KeyParseError {
     #[error("missing `__` separator between from and to endpoints in scope key `{0}`")]
     MissingFromToSeparator(String),
     /// One endpoint is not in `PLACE.PORT` form (missing `.`).
-    #[error("endpoint `{0}` is not in `PLACE.PORT` form")]
-    MalformedEndpoint(String),
+    #[error("endpoint `{endpoint}` in scope key `{key}` is not in `PLACE.PORT` form")]
+    MalformedEndpoint {
+        /// The whole scope key that was being parsed.
+        key: String,
+        /// The endpoint substring that failed to split on `.`.
+        endpoint: String,
+    },
     /// A segment failed identifier validation.
     #[error("invalid segment `{segment}` in scope key `{key}`: {source}")]
     InvalidSegment {
@@ -180,6 +195,45 @@ pub enum KeyParseError {
         /// The underlying validation error.
         #[source]
         source: IdError,
+    },
+    /// A segment contains the `__` substring, which collides with the
+    /// `from`/`to` separator and would let the canonical encoding
+    /// alias two distinct endpoint pairs. See
+    /// [`WalkwayScopeKey::from_parts`] for the round-trip story.
+    #[error(
+        "segment `{segment}` in scope key `{key}` contains `__`, which collides with the \
+         `from`/`to` separator"
+    )]
+    ConsecutiveUnderscore {
+        /// The whole scope key that was being parsed.
+        key: String,
+        /// The offending segment.
+        segment: String,
+    },
+}
+
+/// Failure modes for [`WalkwayScopeKey::from_parts`].
+///
+/// The only reason a typed construction can fail is that one of the
+/// segments contains the `__` separator substring. Surface lexer rules
+/// allow `_` in identifiers, so a place / port id can legally be e.g.
+/// `home__1`; lowering must convert that into a diagnostic on the
+/// originating `connect` row rather than emit a wire-ambiguous scope
+/// key (the `parse`/`from_parts` round-trip would otherwise rebind
+/// `(home, __1__home2, entry)` to `(home, _, _1_home2.entry)` style
+/// pairs).
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
+pub enum KeyConstructError {
+    /// A segment contains the `__` substring.
+    #[error(
+        "walkway scope key segment `{segment}` contains `__`, which collides with the \
+         `from`/`to` separator; rename the {role} so the lowered key is unambiguous"
+    )]
+    ConsecutiveUnderscore {
+        /// Which role the offending segment plays (`"site"`, `"place"`, `"port"`).
+        role: &'static str,
+        /// The offending segment.
+        segment: String,
     },
 }
 
@@ -196,18 +250,41 @@ pub enum KeyParseError {
 pub struct WalkwayScopeKey(String);
 
 impl WalkwayScopeKey {
-    /// Build a walkway scope key from already-validated segments.
-    #[must_use]
+    /// Build a walkway scope key from a `(site, from, to)` triple.
+    ///
+    /// Taking `&WalkwayEndpoint` for both ends (rather than four bare
+    /// `&PlaceId` / `&PortId` arguments) means the call site cannot
+    /// accidentally swap `from_port` for `to_place`: each endpoint is
+    /// carried as a single typed value.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`KeyConstructError::ConsecutiveUnderscore`] when any
+    /// segment contains the `__` substring. The surface lexer allows
+    /// `_` freely in identifiers, so a user-typed place / port id may
+    /// validly contain `__` — but the canonical scope key uses `__` as
+    /// the `from`/`to` separator, so `(home, b__c, home2, entry)` and
+    /// `(home, b, c__home2, entry)` would both encode to the same
+    /// string. Lowering must surface this back to the user as a
+    /// diagnostic on the originating `connect` row rather than emit a
+    /// silent alias.
     pub fn from_parts(
         site: &SiteName,
-        from_place: &PlaceId,
-        from_port: &PortId,
-        to_place: &PlaceId,
-        to_port: &PortId,
-    ) -> Self {
-        Self(format!(
-            "walkway::{site}::{from_place}.{from_port}__{to_place}.{to_port}"
-        ))
+        from: &WalkwayEndpoint,
+        to: &WalkwayEndpoint,
+    ) -> Result<Self, KeyConstructError> {
+        check_no_dunder("site", site.as_str())?;
+        check_no_dunder("place", from.place.as_str())?;
+        check_no_dunder("port", from.port.as_str())?;
+        check_no_dunder("place", to.place.as_str())?;
+        check_no_dunder("port", to.port.as_str())?;
+        Ok(Self(format!(
+            "walkway::{site}::{from_place}.{from_port}__{to_place}.{to_port}",
+            from_place = from.place,
+            from_port = from.port,
+            to_place = to.place,
+            to_port = to.port,
+        )))
     }
 
     /// Parse and validate a wire-format scope key.
@@ -217,7 +294,7 @@ impl WalkwayScopeKey {
     /// Returns a [`KeyParseError`] variant when the input does not
     /// follow the `walkway::SITE::PLACE.PORT__PLACE.PORT` shape, or
     /// when any of the five segments fails identifier validation
-    /// (e.g. a port id containing `.`).
+    /// (e.g. a port id containing `.` or `__`).
     pub fn parse(s: &str) -> Result<Self, KeyParseError> {
         let rest = s
             .strip_prefix("walkway::")
@@ -228,30 +305,51 @@ impl WalkwayScopeKey {
         let (from, to) = endpoints
             .split_once("__")
             .ok_or_else(|| KeyParseError::MissingFromToSeparator(s.to_owned()))?;
-        let (from_place, from_port) = from
-            .split_once('.')
-            .ok_or_else(|| KeyParseError::MalformedEndpoint(from.to_owned()))?;
-        let (to_place, to_port) = to
-            .split_once('.')
-            .ok_or_else(|| KeyParseError::MalformedEndpoint(to.to_owned()))?;
+        let malformed = |endpoint: &str| KeyParseError::MalformedEndpoint {
+            key: s.to_owned(),
+            endpoint: endpoint.to_owned(),
+        };
+        let (from_place, from_port) = from.split_once('.').ok_or_else(|| malformed(from))?;
+        let (to_place, to_port) = to.split_once('.').ok_or_else(|| malformed(to))?;
 
         let invalid = |segment: &str, source: IdError| KeyParseError::InvalidSegment {
             key: s.to_owned(),
             segment: segment.to_owned(),
             source,
         };
+        let dunder = |segment: &str| KeyParseError::ConsecutiveUnderscore {
+            key: s.to_owned(),
+            segment: segment.to_owned(),
+        };
+        // Reject `__` per segment before delegating to identifier
+        // validation so the user sees the structural problem
+        // (separator collision) rather than a generic "forbidden char"
+        // message from `IdError`.
+        for seg in [site, from_place, from_port, to_place, to_port] {
+            if seg.contains("__") {
+                return Err(dunder(seg));
+            }
+        }
         let site_id = SiteName::new(site).map_err(|e| invalid(site, e))?;
         let from_place_id = PlaceId::new(from_place).map_err(|e| invalid(from_place, e))?;
         let from_port_id = PortId::new(from_port).map_err(|e| invalid(from_port, e))?;
         let to_place_id = PlaceId::new(to_place).map_err(|e| invalid(to_place, e))?;
         let to_port_id = PortId::new(to_port).map_err(|e| invalid(to_port, e))?;
-        Ok(Self::from_parts(
+        // `check_no_dunder` is satisfied above; map the
+        // construct-error variant onto the parse-error variant rather
+        // than panic, even though it cannot fire here.
+        Self::from_parts(
             &site_id,
-            &from_place_id,
-            &from_port_id,
-            &to_place_id,
-            &to_port_id,
-        ))
+            &WalkwayEndpoint {
+                place: from_place_id,
+                port: from_port_id,
+            },
+            &WalkwayEndpoint {
+                place: to_place_id,
+                port: to_port_id,
+            },
+        )
+        .map_err(|KeyConstructError::ConsecutiveUnderscore { segment, .. }| dunder(&segment))
     }
 
     /// Borrow the wire-format string.
@@ -415,25 +513,21 @@ mod tests {
         assert!(err.to_string().contains("forbidden character"));
     }
 
+    fn endpoint(place: &str, port: &str) -> WalkwayEndpoint {
+        WalkwayEndpoint {
+            place: PlaceId::new(place).expect("place"),
+            port: PortId::new(port).expect("port"),
+        }
+    }
+
     #[test]
     fn walkway_scope_key_round_trips() {
-        let site = SiteName::new("hamlet").unwrap();
-        let from_place = PlaceId::new("home1").unwrap();
-        let from_port = PortId::new("entry").unwrap();
-        let to_place = PlaceId::new("home2").unwrap();
-        let to_port = PortId::new("entry").unwrap();
-        let key = WalkwayScopeKey::from_parts(
-            &site,
-            &from_place,
-            &from_port,
-            &to_place,
-            &to_port,
-        );
-        assert_eq!(
-            key.as_str(),
-            "walkway::hamlet::home1.entry__home2.entry"
-        );
-        let parsed = WalkwayScopeKey::parse(key.as_str()).unwrap();
+        let site = SiteName::new("hamlet").expect("site");
+        let key =
+            WalkwayScopeKey::from_parts(&site, &endpoint("home1", "entry"), &endpoint("home2", "entry"))
+                .expect("from_parts");
+        assert_eq!(key.as_str(), "walkway::hamlet::home1.entry__home2.entry");
+        let parsed = WalkwayScopeKey::parse(key.as_str()).expect("parse");
         assert_eq!(parsed, key);
         let parts = parsed.parts();
         assert_eq!(parts.site, "hamlet");
@@ -461,6 +555,66 @@ mod tests {
     }
 
     #[test]
+    fn walkway_scope_key_from_parts_rejects_dunder_in_segment() {
+        // The lexer permits `__` in identifiers, but the canonical
+        // scope key uses `__` as the `from`/`to` separator — so
+        // `from_parts((home, b__c), (home2, entry))` and
+        // `from_parts((home, b), (c__home2, entry))` would otherwise
+        // both encode to `walkway::s::home.b__c__home2.entry`. The
+        // validator surfaces this as a typed error so lowering can
+        // emit a diagnostic on the originating `connect` row instead.
+        let site = SiteName::new("s").expect("site");
+        let err = WalkwayScopeKey::from_parts(
+            &site,
+            &endpoint("home", "b__c"),
+            &endpoint("home2", "entry"),
+        )
+        .expect_err("port id with `__` must be rejected");
+        match err {
+            KeyConstructError::ConsecutiveUnderscore { role, segment } => {
+                assert_eq!(role, "port");
+                assert_eq!(segment, "b__c");
+            }
+        }
+        // Symmetric: the same protection applies to place ids and the
+        // site name.
+        assert!(matches!(
+            WalkwayScopeKey::from_parts(
+                &SiteName::new("dunder__site").expect("site"),
+                &endpoint("a", "x"),
+                &endpoint("b", "y"),
+            ),
+            Err(KeyConstructError::ConsecutiveUnderscore { role: "site", .. })
+        ));
+        assert!(matches!(
+            WalkwayScopeKey::from_parts(
+                &site,
+                &endpoint("a__b", "x"),
+                &endpoint("c", "y"),
+            ),
+            Err(KeyConstructError::ConsecutiveUnderscore { role: "place", .. })
+        ));
+    }
+
+    #[test]
+    fn walkway_scope_key_parse_rejects_dunder_in_segment() {
+        // Symmetric to the `from_parts` test: a hand-crafted wire
+        // string carrying `__` inside a segment fails parsing with the
+        // typed `ConsecutiveUnderscore` variant. Without this guard,
+        // the canonical encoding would alias two distinct typed
+        // endpoint pairs.
+        let err = WalkwayScopeKey::parse("walkway::s::a.b__c__d.e").unwrap_err();
+        match err {
+            KeyParseError::ConsecutiveUnderscore { segment, .. } => {
+                // `endpoints.split_once("__")` consumes the first
+                // `__`, so the parsed `to_place` is `c__d`.
+                assert_eq!(segment, "c__d");
+            }
+            other => panic!("expected ConsecutiveUnderscore, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn walkway_scope_key_parse_rejects_missing_prefix() {
         assert!(matches!(
             WalkwayScopeKey::parse("struct::cottage"),
@@ -470,9 +624,13 @@ mod tests {
 
     #[test]
     fn walkway_scope_key_parse_rejects_missing_site() {
+        // `walkway::` followed by an `__`-separated endpoint pair with
+        // no `::SITE::` in between hits the structural `MissingSite`
+        // arm (the `split_once("__")` later picks up the joined
+        // identifier-only form).
         assert!(matches!(
             WalkwayScopeKey::parse("walkway::home1.entry__home2.entry"),
-            Err(KeyParseError::MissingFromToSeparator(_) | KeyParseError::MissingSite(_))
+            Err(KeyParseError::MissingSite(_))
         ));
     }
 
@@ -485,11 +643,22 @@ mod tests {
     }
 
     #[test]
+    fn walkway_scope_key_parse_malformed_endpoint_carries_full_key() {
+        let err = WalkwayScopeKey::parse("walkway::s::abc__d.e").unwrap_err();
+        match err {
+            KeyParseError::MalformedEndpoint { key, endpoint } => {
+                assert_eq!(endpoint, "abc");
+                assert_eq!(key, "walkway::s::abc__d.e");
+            }
+            other => panic!("expected MalformedEndpoint, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn walkway_scope_key_serde_round_trip() {
-        let site = SiteName::new("hamlet").unwrap();
-        let place = PlaceId::new("home1").unwrap();
-        let port = PortId::new("entry").unwrap();
-        let key = WalkwayScopeKey::from_parts(&site, &place, &port, &place, &port);
+        let site = SiteName::new("hamlet").expect("site");
+        let ep = endpoint("home1", "entry");
+        let key = WalkwayScopeKey::from_parts(&site, &ep, &ep).expect("from_parts");
         let json = serde_json::to_string(&key).unwrap();
         assert_eq!(json, "\"walkway::hamlet::home1.entry__home1.entry\"");
         let parsed: WalkwayScopeKey = serde_json::from_str(&json).unwrap();
