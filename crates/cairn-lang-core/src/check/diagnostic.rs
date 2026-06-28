@@ -164,6 +164,15 @@ pub enum DiagnosticCode {
     /// wire string. Lowering drops the row and asks the user to rename
     /// the offending segment so the encoding stays unambiguous.
     InvalidWalkwayIdent,
+    /// A `connect` row whose positional shape is not
+    /// `FROM.PORT to TO.PORT`. The line-based parser accepts any number
+    /// of positionals up to the next newline and `intent::lower` carries
+    /// them through verbatim, so `connect a.entry` / `connect a.entry to`
+    /// / `connect a.entry xxx b.entry` would otherwise reach the
+    /// resolver, which silently short-circuits the row. Fail-loud here
+    /// so the user gets a position-anchored signal at the offending span
+    /// instead of a vanished walkway.
+    ConnectArity,
 }
 
 impl DiagnosticCode {
@@ -201,6 +210,7 @@ impl DiagnosticCode {
             Self::DuplicateWalkway => "W_DUPLICATE_WALKWAY",
             Self::DeferredConnect => "W_DEFERRED_CONNECT",
             Self::InvalidWalkwayIdent => "W_INVALID_WALKWAY_IDENT",
+            Self::ConnectArity => "E_CONNECT_ARITY",
         }
     }
 
@@ -234,7 +244,8 @@ impl DiagnosticCode {
             | Self::InvalidPlaceOrigin
             | Self::UnresolvedPort
             | Self::AmbiguousPort
-            | Self::MissingPathMaterial => Severity::Error,
+            | Self::MissingPathMaterial
+            | Self::ConnectArity => Severity::Error,
             Self::UnknownSlotTarget
             | Self::ThemeSelectorUnmatched
             | Self::DeferredMember
@@ -545,6 +556,7 @@ mod tests {
             DiagnosticCode::UnresolvedPort,
             DiagnosticCode::AmbiguousPort,
             DiagnosticCode::MissingPathMaterial,
+            DiagnosticCode::ConnectArity,
         ] {
             let s = code.as_str();
             assert!(
@@ -604,6 +616,7 @@ mod tests {
             DiagnosticCode::UnresolvedPort,
             DiagnosticCode::AmbiguousPort,
             DiagnosticCode::MissingPathMaterial,
+            DiagnosticCode::ConnectArity,
         ] {
             assert_eq!(code.severity(), Severity::Error, "{code:?}");
         }

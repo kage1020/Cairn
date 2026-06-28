@@ -115,6 +115,9 @@ re-running the resolver.
 
 **Diagnostics.**
 
+- `E_CONNECT_ARITY` — the row's positional shape is not `FROM.PORT to TO.PORT` (a half is missing
+  or the literal `to` keyword is misspelt). Anchored at the missing-positional cursor or the
+  offending separator so the `file:L:C` pointer lands where the fix goes.
 - `E_UNRESOLVED_PORT` — the right-of-dot port id does not name a member of the referenced def
   (with a nearest-match `did you mean` note when one fits the standard spell cap).
 - `E_AMBIGUOUS_PORT` — the def exposes the same `id=` on more than one member; rename the

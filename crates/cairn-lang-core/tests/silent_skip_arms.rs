@@ -28,10 +28,13 @@
 //!    construction (no name to dot-ref), so the only contract worth
 //!    pinning is "no spurious diagnostics from the silent arm itself".
 //! 5. **Missing `to` positional on `connect`** — pure silent return at
-//!    the resolver. No walkway and no diagnostic; this case is the one
-//!    silent shape still without a cascade because the matching
-//!    diagnostic belongs to a check-layer arity pass that has not
-//!    landed.
+//!    the resolver. No walkway and no diagnostic when `resolve(ir)` is
+//!    invoked directly. The cross-layer signal is owned by the
+//!    `check::connect_arity` pass (`E_CONNECT_ARITY`), which runs ahead
+//!    of `resolve` inside `check`; this test pins the resolver-only
+//!    contract so library callers that bypass `check` keep the
+//!    defensive behaviour, while `tests/check_connect_arity.rs` pins
+//!    the user-facing diagnostic on the full pipeline.
 
 use cairn_lang_core::block_array::{BlockArrayIr, lower_to_block_array};
 use cairn_lang_core::check::{Diagnostic, DiagnosticCode, Severity};
@@ -200,11 +203,14 @@ place           use=hut theme=plain east_of=anchor gap=4\n"
     );
 }
 
-/// A `connect` row missing its `to` half is the one silent arm without
-/// a cascade — the matching diagnostic belongs to a check-layer arity
-/// pass that has not landed. Pin the current behaviour so the future
-/// pass surfaces as a deliberate change rather than a regression in
-/// either direction.
+/// A `connect` row missing its `to` half short-circuits silently at the
+/// resolver: the cross-layer diagnostic (`E_CONNECT_ARITY`) is owned by
+/// `check::connect_arity`, which runs ahead of `resolve` inside the
+/// top-level `check` pipeline. This test exercises `resolve(ir)`
+/// directly, so it pins the resolver-only contract that library
+/// callers bypassing `check` continue to see the defensive return
+/// rather than a panic. The user-facing diagnostic is covered in
+/// `tests/check_connect_arity.rs`.
 #[test]
 fn connect_with_missing_positional_silently_returns_without_diagnostics() {
     let src = format!(
@@ -221,7 +227,7 @@ connect anchor.entry\n"
     assert_eq!(
         errors(&outcome.diagnostics),
         0,
-        "arity enforcement belongs to a future check pass; no resolver error expected, got: {:#?}",
+        "arity enforcement is owned by `check::connect_arity`; the resolver-only path stays silent, got: {:#?}",
         outcome.diagnostics,
     );
     assert_eq!(

@@ -490,19 +490,16 @@ fn resolve_connect_row(
     let from_value = member.positional.first();
     let to_value = member.positional.get(2);
     let (Some(from_value), Some(to_value)) = (from_value, to_value) else {
-        // TODO(structural): the line-based parser
-        // (`parse::Parser::parse_command`) accepts an arbitrary number
-        // of positionals up to the next newline without enforcing
-        // arity, and `intent::lower` clones `positional` through
-        // verbatim. So `connect X` / `connect X to` survive both
-        // upstream passes today; no diagnostic exists to lean on here.
-        // The silent return keeps walkway voxelisation from picking up
-        // a half-formed row — the eventual home for arity enforcement
-        // is a check-layer pass that can anchor a diagnostic at the
-        // missing positional's parse position. Until that pass lands
-        // the user sees no signal that the `connect` did nothing; that
-        // gap is tracked separately rather than papered over with a
-        // resolver-side push that would lose the right span.
+        // INVARIANT(upstream-diagnosed): `check::connect_arity` emits
+        // `E_CONNECT_ARITY` for any `connect` row whose positional
+        // shape is not `FROM.PORT to TO.PORT`, so the top-level
+        // `check` pipeline never reaches this arm with a well-formed
+        // module. Library callers that invoke `resolve(ir)` directly
+        // (LSP fast paths, ad-hoc tooling) still benefit from the
+        // silent return: it keeps walkway voxelisation from picking up
+        // a half-formed row instead of panicking on a partial parse.
+        // Pinned by `tests/silent_skip_arms.rs` (resolver-only) and
+        // `tests/check_connect_arity.rs` (full pipeline).
         return;
     };
     // Lift both ends before short-circuiting so a row with two broken
