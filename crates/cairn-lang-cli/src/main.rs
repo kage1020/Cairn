@@ -872,8 +872,8 @@ fn build_lockfile(
             .values()
             .map(|w| LockWalkway {
                 site: w.site.clone(),
-                from: w.from.to_string(),
-                to: w.to.to_string(),
+                from: w.from.clone(),
+                to: w.to.clone(),
                 path_material: w.path_material.clone(),
                 origin: [w.origin.0, w.origin.1, w.origin.2],
                 dims: [w.footprint.x, 1, w.footprint.z],

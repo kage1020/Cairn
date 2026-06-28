@@ -1,12 +1,12 @@
 //! AC L1–L8 for the lockfile module.
 
-use cairn_lang_core::SiteName;
 use cairn_lang_core::block_array::BlockArrayIr;
 use cairn_lang_core::block_array::{BlockArray, BlockState, Dims, Palette, PaletteIndex};
 use cairn_lang_core::lock::{
     HashHex, HashParseError, LockEdition, LockInputs, LockTarget, LockWalkway, Lockfile,
     MemberSensitivity, hash_resolved_ir, hash_source,
 };
+use cairn_lang_core::{PlaceId, PortId, SiteName, WalkwayEndpoint};
 use indexmap::IndexMap;
 
 fn unit_ir(palette: Palette) -> BlockArrayIr {
@@ -143,8 +143,14 @@ fn lockfile_with_walkways_roundtrips_through_yaml() {
     let lf = Lockfile {
         walkways: vec![LockWalkway {
             site: SiteName::new("hamlet").expect("site"),
-            from: "home1.entry".to_owned(),
-            to: "home2.entry".to_owned(),
+            from: WalkwayEndpoint {
+                place: PlaceId::new("home1").expect("place"),
+                port: PortId::new("entry").expect("port"),
+            },
+            to: WalkwayEndpoint {
+                place: PlaceId::new("home2").expect("place"),
+                port: PortId::new("entry").expect("port"),
+            },
             path_material: "minecraft:gravel".to_owned(),
             origin: [5, 0, 8],
             dims: [16, 1, 1],
@@ -157,6 +163,14 @@ fn lockfile_with_walkways_roundtrips_through_yaml() {
     assert!(
         body.contains("walkways:"),
         "non-empty walkways must reach the YAML body, got:\n{body}",
+    );
+    // The wire format now nests `place`/`port` under each endpoint so a
+    // future regression to the `"PLACE.PORT"` string form fails loud at
+    // this round-trip rather than only when a downstream consumer
+    // mis-splits the joined token.
+    assert!(
+        body.contains("    place: home1"),
+        "from endpoint must serialise as a nested object, got:\n{body}",
     );
 }
 
