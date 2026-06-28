@@ -172,11 +172,53 @@ fn ca_6_wrong_separator_with_missing_target_prefers_separator_message() {
     );
 }
 
+/// `connect FROM.PORT to TO.PORT EXTRA` carries an extra positional
+/// past the `to TO.PORT` shape. The grammar caps at three positionals
+/// (anything else belongs in `key=value` arguments), so this is a
+/// silent-failure shape: without the diagnostic the resolver would
+/// read `positional[0..3]` and drop `EXTRA` on the floor, leaving the
+/// author with one less walkway than they wrote. The pass underlines
+/// the run of extras as a single span so the fix surface is the whole
+/// offending suffix.
+#[test]
+fn ca_7_over_arity_emits_arity_anchored_at_extras() {
+    let src = format!("{PROLOGUE}connect a.entry to b.entry c.exit path=@gravel\n");
+    let arity = arity_only(diagnose(&src));
+    assert_eq!(arity.len(), 1, "got: {arity:#?}");
+    let d = &arity[0];
+    assert_eq!(
+        slice(&src, d),
+        "c.exit",
+        "primary span should cover the trailing extra(s)",
+    );
+    assert!(
+        d.primary.contains("extra"),
+        "primary message should call out the over-arity, got: {}",
+        d.primary,
+    );
+}
+
+/// Two trailing extras land in one diagnostic spanning the whole
+/// suffix. Surfacing one diagnostic per extra would noise up a row
+/// that reads as a single mistake.
+#[test]
+fn ca_8_over_arity_with_two_extras_underlines_the_full_run() {
+    let src = format!("{PROLOGUE}connect a.entry to b.entry c.exit d.exit path=@gravel\n");
+    let arity = arity_only(diagnose(&src));
+    assert_eq!(arity.len(), 1, "got: {arity:#?}");
+    let d = &arity[0];
+    assert_eq!(
+        slice(&src, d),
+        "c.exit d.exit",
+        "primary span should cover both extras as one run",
+    );
+}
+
 /// Existing examples must continue to pass the arity check. Pins the
 /// regression surface — a future change to the pass that over-fires
 /// would break `cargo run -p cairn-lang-cli -- check examples/...`.
 #[test]
-fn ca_7_examples_village_and_l_walkway_are_arity_clean() {
+fn ca_9_examples_village_and_l_walkway_are_arity_clean() {
     for path in ["examples/village.crn", "examples/l-walkway.crn"] {
         let src = std::fs::read_to_string(
             std::path::Path::new(env!("CARGO_MANIFEST_DIR"))

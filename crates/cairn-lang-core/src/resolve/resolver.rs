@@ -489,16 +489,27 @@ fn resolve_connect_row(
     //   positional[2] = DotRef(to.port)
     let from_value = member.positional.first();
     let to_value = member.positional.get(2);
-    let (Some(from_value), Some(to_value)) = (from_value, to_value) else {
-        // INVARIANT(upstream-diagnosed): `check::connect_arity` emits
-        // `E_CONNECT_ARITY` for any `connect` row whose positional
-        // shape is not `FROM.PORT to TO.PORT`, so the top-level
-        // `check` pipeline never reaches this arm with a well-formed
-        // module. Library callers that invoke `resolve(ir)` directly
-        // (LSP fast paths, ad-hoc tooling) still benefit from the
-        // silent return: it keeps walkway voxelisation from picking up
-        // a half-formed row instead of panicking on a partial parse.
-        // Pinned by `tests/silent_skip_arms.rs` (resolver-only) and
+    let middle_is_to = matches!(
+        member.positional.get(1),
+        Some(v) if matches!(&v.kind, ValueKind::Ident(s) if s == "to"),
+    );
+    let (Some(from_value), Some(to_value), true) = (from_value, to_value, middle_is_to) else {
+        // INVARIANT(upstream-diagnosed): inside the top-level `check`
+        // pipeline, `check::connect_arity` has already pushed
+        // `E_CONNECT_ARITY` into the same sink for any row whose
+        // positional shape is not `FROM.PORT to TO.PORT`, so a user
+        // running `cairn check` always sees a position-anchored
+        // signal even when this arm fires. The arm survives for
+        // library callers that invoke `resolve(ir)` directly (LSP
+        // fast paths, ad-hoc tooling): the silent return keeps
+        // walkway voxelisation from picking up a half-formed or
+        // misshapen row instead of panicking on a partial parse.
+        //
+        // The guard rejects both the missing-half cases
+        // (`positional.len() < 3`) and the wrong-separator case
+        // (`positional[1] != Ident("to")`), so `connect a.entry xxx
+        // b.entry` does not slip through to validation either. Pinned
+        // by `tests/silent_skip_arms.rs` (resolver-only) and
         // `tests/check_connect_arity.rs` (full pipeline).
         return;
     };

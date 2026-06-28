@@ -27,14 +27,19 @@
 //! 4. **Missing `id=`** — unreachable from any `connect` by
 //!    construction (no name to dot-ref), so the only contract worth
 //!    pinning is "no spurious diagnostics from the silent arm itself".
-//! 5. **Missing `to` positional on `connect`** — pure silent return at
-//!    the resolver. No walkway and no diagnostic when `resolve(ir)` is
-//!    invoked directly. The cross-layer signal is owned by the
-//!    `check::connect_arity` pass (`E_CONNECT_ARITY`), which runs ahead
-//!    of `resolve` inside `check`; this test pins the resolver-only
-//!    contract so library callers that bypass `check` keep the
-//!    defensive behaviour, while `tests/check_connect_arity.rs` pins
-//!    the user-facing diagnostic on the full pipeline.
+//! 5. **`connect` rows with a non-`FROM.PORT to TO.PORT` shape** —
+//!    three entries to the same silent return at the resolver, all
+//!    pinned together so a future guard refactor cannot split their
+//!    behaviour without showing up here: the missing-`to`-half case
+//!    (`connect anchor.entry`), the missing-target case
+//!    (`connect anchor.entry to`), and the wrong-separator case
+//!    (`connect anchor.entry xxx peer.entry`). The cross-layer signal
+//!    is owned by `check::connect_arity` (`E_CONNECT_ARITY`), which
+//!    runs ahead of `resolve` inside `check`; these tests pin the
+//!    resolver-only contract so library callers that bypass `check`
+//!    keep the defensive behaviour, while
+//!    `tests/check_connect_arity.rs` pins the user-facing diagnostic
+//!    on the full pipeline.
 
 use cairn_lang_core::block_array::{BlockArrayIr, lower_to_block_array};
 use cairn_lang_core::check::{Diagnostic, DiagnosticCode, Severity};
@@ -234,5 +239,71 @@ connect anchor.entry\n"
         count(&outcome.diagnostics, DiagnosticCode::DeferredConnect),
         0,
         "the cascade fires from `validate_port`, which is never reached when the `to` half is absent",
+    );
+}
+
+/// `connect FROM.PORT to` (2 positionals: the `to` keyword present but
+/// no target port) is the other entry to the same INVARIANT'd silent
+/// arm. The resolver's guard inspects `positional.get(2)` — `None`
+/// here — so it returns silently identically to the 1-positional
+/// case. Pin both shapes so a future resolver refactor that splits
+/// them (e.g. panic when `to` is present but target is missing) shows
+/// up as a deliberate test change.
+#[test]
+fn connect_with_to_keyword_only_silently_returns_without_diagnostics() {
+    let src = format!(
+        "{PROLOGUE}\
+site duo:\n  \
+place id=anchor use=hut theme=plain at=origin\n  \
+connect anchor.entry to\n"
+    );
+    let outcome = run(&src);
+    assert_eq!(
+        outcome.walkways, 0,
+        "a `connect` row missing the target port must not lay a walkway",
+    );
+    assert_eq!(
+        errors(&outcome.diagnostics),
+        0,
+        "arity enforcement is owned by `check::connect_arity`; the resolver-only path stays silent, got: {:#?}",
+        outcome.diagnostics,
+    );
+    assert_eq!(
+        count(&outcome.diagnostics, DiagnosticCode::DeferredConnect),
+        0,
+        "the cascade fires from `validate_port`, which is never reached when the target port is absent",
+    );
+}
+
+/// `connect FROM.PORT xxx TO.PORT` (3 positionals but the middle slot
+/// is not the literal `to` keyword) used to slip through the resolver
+/// guard because `positional.get(2)` is `Some`. The strengthened
+/// guard now rejects it on shape-mismatch; this test pins that
+/// behaviour so a regression that softens the guard re-introduces
+/// the silent-misinterpretation hole the C1 review caught.
+#[test]
+fn connect_with_wrong_separator_silently_returns_without_diagnostics() {
+    let src = format!(
+        "{PROLOGUE}\
+site duo:\n  \
+place id=anchor use=hut theme=plain at=origin\n  \
+place id=peer   use=hut theme=plain east_of=anchor gap=4\n  \
+connect anchor.entry xxx peer.entry path=@gravel\n"
+    );
+    let outcome = run(&src);
+    assert_eq!(
+        outcome.walkways, 0,
+        "a `connect` row with a non-`to` separator must not lay a walkway through the resolver-only path",
+    );
+    assert_eq!(
+        errors(&outcome.diagnostics),
+        0,
+        "arity enforcement is owned by `check::connect_arity`; the resolver-only path stays silent, got: {:#?}",
+        outcome.diagnostics,
+    );
+    assert_eq!(
+        count(&outcome.diagnostics, DiagnosticCode::DeferredConnect),
+        0,
+        "the cascade fires from `validate_port`, which is never reached when the guard rejects the shape upstream",
     );
 }

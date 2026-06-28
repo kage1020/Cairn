@@ -22,11 +22,13 @@
 //!     before the trailing target slot is interpretable, so surfacing
 //!     two findings for one row would be noise.
 //!
-//! Resolver-side TODO: the silent return arms in
-//! [`crate::resolve::resolver`] stay in place so library callers that
-//! invoke `resolve(ir)` directly without going through `check` still
-//! see the same defensive behaviour, but their comments reference this
-//! pass as the upstream signal source.
+//! Resolver-side note: the silent return arm in
+//! [`crate::resolve::resolver::resolve_connect_row`] stays in place so
+//! library callers that invoke `resolve(ir)` directly without going
+//! through `check` still see the same defensive behaviour. Its guard
+//! mirrors this pass's accepted shape — it rejects both the
+//! missing-half cases and the wrong-separator case so the two layers
+//! cannot disagree on which rows are well-formed.
 
 use crate::ast::{Value, ValueKind};
 use crate::error::Span;
@@ -35,13 +37,18 @@ use crate::intent::{IntentModule, Member, MemberRole};
 use super::{Diagnostic, DiagnosticCode, DiagnosticNote, DiagnosticSink};
 
 pub(super) fn run(ir: &IntentModule, sink: &mut DiagnosticSink) {
-    // `connect` only carries semantic meaning at site placement scope —
-    // the keyword_allowlist pass already flags `connect` rows that
-    // appear under a `struct` or `def` body (their role would have
-    // lowered to `Other("connect")` if the keyword table excluded them
-    // there). The role table currently treats `connect` as global, so
-    // the walk has to cover struct/def/site bodies and their nested
-    // sub-members to stay consistent if a stray `connect` slips through.
+    // `connect` carries semantic meaning only at site placement scope,
+    // but `intent::keyword_table::role_of` treats `connect` as global
+    // and lowers any occurrence to [`MemberRole::Connect`] regardless
+    // of the surrounding body. `keyword_allowlist` matches on
+    // [`MemberRole::Other`] only, so a stray `connect` inside a
+    // `struct` or `def` body would otherwise pass every check and
+    // reach the resolver, which simply ignores it (sites are the only
+    // collection the resolver iterates for connects). Walk every
+    // scope here so the arity diagnostic still fires on those stray
+    // rows — they are no more useful than a malformed `connect`
+    // inside a site, and surfacing them at parse position is cheaper
+    // than tracking down "why did my connect do nothing" later.
     for s in &ir.structs {
         walk(&s.members, sink);
     }
@@ -100,12 +107,50 @@ fn validate(member: &Member, sink: &mut DiagnosticSink) {
             ),
             vec![example_note()],
         ),
+        [_from, _to_kw, _to_port, extras @ ..] if !extras.is_empty() => {
+            // Over-arity. The grammar caps `connect` at three
+            // positionals; everything beyond `to TO.PORT` is `args=`
+            // territory (notably `path=@MATERIAL`). Without this arm
+            // the resolver would read `positional[0..3]` and drop
+            // every trailing slot on the floor — a user who wrote
+            // `connect a.entry to b.entry c.exit path=@gravel`
+            // thinking the row could carry two destinations would
+            // see one walkway lay and the other vanish silently.
+            // Underline the run of extras together so the fix
+            // surface is the whole offending suffix rather than each
+            // token in isolation.
+            let span = Span {
+                start: extras
+                    .first()
+                    .expect("checked non-empty above")
+                    .span
+                    .start,
+                end: extras
+                    .last()
+                    .expect("checked non-empty above")
+                    .span
+                    .end,
+            };
+            push(
+                sink,
+                span,
+                format!(
+                    "`connect` accepts exactly `<from>.<port> to <to>.<port>`; {} extra positional{} after `to`",
+                    extras.len(),
+                    if extras.len() == 1 { "" } else { "s" },
+                ),
+                vec![example_note(), DiagnosticNote {
+                    span: None,
+                    message: "additional inputs belong in `key=value` arguments (e.g. `path=@gravel`)".to_string(),
+                }],
+            );
+        }
         _ => {
-            // 3+ positionals with `to` in the middle slot is the
-            // well-formed shape. The downstream resolver still verifies
-            // each side is a dotted reference and that the place/port
-            // ids resolve, so port-shape and resolution errors keep
-            // their own dedicated codes.
+            // Exactly three positionals with `to` in the middle slot
+            // is the well-formed shape. The downstream resolver
+            // still verifies each side is a dotted reference and
+            // that the place/port ids resolve, so port-shape and
+            // resolution errors keep their own dedicated codes.
         }
     }
 }
