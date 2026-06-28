@@ -11,6 +11,7 @@ pub mod ast;
 pub mod block_array;
 pub mod check;
 pub mod error;
+pub mod ids;
 pub mod intent;
 pub mod lex;
 pub mod lock;
@@ -25,6 +26,7 @@ pub use block_array::{
 };
 pub use check::{Diagnostic, DiagnosticCode, Severity, check};
 pub use error::{LexError, ParseError, Position, Span};
+pub use ids::{IdError, KeyParseError, PlaceId, PortId, SiteName, WalkwayScopeKey};
 pub use intent::{IntentModule, Member, MemberRole, SemanticLevel, lower};
 pub use lex::{Token, TokenKind, lex};
 pub use parse::parse;
