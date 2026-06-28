@@ -18,6 +18,11 @@ first-class parts of the spec; messages MUST be in a shape that feeds the self-c
   - `E_TYPE_MISMATCH_LABEL` — `id=` / `class=` / `mat_slot=` value is not
     a label (identifier or string).
   - `E_TYPE_MISMATCH_SIZE`  — `size=` value is not a `WxH` literal.
+  - `E_CONNECT_ARITY` — `connect` row whose positional shape is not
+    `FROM.PORT to TO.PORT`: a half is missing, the literal `to`
+    keyword is missing or replaced by another token, or extra
+    positionals trail `TO.PORT`. Anchored at the missing-positional
+    cursor, the offending separator, or the run of trailing extras.
 - **Geometry**: AABB expansion detecting "window outside the wall", "door hanging in mid-air".
 - **attachment**: whether a frame/painting/sign/button/lever/torch is on a valid attachment face
   (detect attachment to air).

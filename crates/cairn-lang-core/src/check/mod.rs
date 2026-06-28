@@ -3,10 +3,10 @@
 //!
 //! Each pass is non-fatal: passes accumulate findings into a
 //! [`DiagnosticSink`] and the top-level [`check`] runs every pass before
-//! returning. The order `duplicate` → `keyword_allowlist` → `type_mismatch`
-//! is fixed so the emitted list is stable across runs, but the diagnostics
-//! themselves are sorted by source position once everything has finished
-//! collecting.
+//! returning. The order `duplicate` → `keyword_allowlist` →
+//! `connect_arity` → `type_mismatch` is fixed so the emitted list is
+//! stable across runs, but the diagnostics themselves are sorted by
+//! source position once everything has finished collecting.
 //!
 //! The boundary with lowering is intentional: `crate::intent::lower` is a
 //! total function (see its module doc) and never rejects input. Any
@@ -15,6 +15,7 @@
 //! a hard parse error, so a single `cairn check` invocation reports every
 //! problem in a file rather than only the first one.
 
+mod connect_arity;
 mod diagnostic;
 mod duplicate;
 mod keyword_allowlist;
@@ -46,6 +47,7 @@ pub fn check(module: &Module, ir: &IntentModule) -> Vec<Diagnostic> {
     let mut sink = DiagnosticSink::new();
     duplicate::run(module, &mut sink);
     keyword_allowlist::run(ir, &mut sink);
+    connect_arity::run(ir, &mut sink);
     type_mismatch::run(module, &mut sink);
     for d in crate::resolve::resolve(ir).diagnostics {
         sink.push(d);
