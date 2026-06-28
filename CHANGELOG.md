@@ -60,6 +60,15 @@ placeholder cannot leak out. The `2026.07.0` release PR will flip publish to `tr
 
 ### Added
 
+- `cairn-lang-core::block_array::walkway::port_world_position` — walkway
+  port endpoints can now be declared on `window` members in addition to
+  `door` members. The wall-local anchor is the rectangle's geometric
+  centre (`offset + size.w / 2`), and the port stays pinned at the
+  ground row so the walkway's 1-voxel-thick flat-strip invariant
+  (`from.y == to.y`) is preserved regardless of the window's authored
+  `y=`. A `sym=true` window contributes a single port at the primary
+  `offset` side. Stair / roof ports remain reserved for a future
+  extension. See `spec/components-editing-sites.md` §9.3.5.
 - `cairn-lang-core::check::DiagnosticData` — new public enum that
   carries the machine-readable payload for a `Diagnostic`. The first
   variant (`WalkwayBlocked { skipped }`) ships alongside

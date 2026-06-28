@@ -59,6 +59,15 @@
 
 ### Added
 
+- `cairn-lang-core::block_array::walkway::port_world_position` — walkway
+  のポート端点を `door` メンバーに加えて `window` メンバーでも宣言
+  できるようになった。壁ローカルのアンカーは矩形の幾何中心
+  (`offset + size.w / 2`) を採用し、ポート位置は地面段に固定したまま
+  なので、歩道の 1 voxel 厚平坦 strip 不変 (`from.y == to.y`) は
+  window の宣言済み `y=` に依らず保持される。`sym=true` の window は
+  プライマリ `offset` 側の 1 点だけがポートとなる。stair / roof の
+  ポートは将来拡張用に予約されたまま。詳細は
+  `spec/components-editing-sites.md` §9.3.5 を参照。
 - `cairn-lang-core::check::DiagnosticData` — `Diagnostic` に機械可読
   ペイロードを載せる新しい公開 enum を追加。最初のバリアント
   (`WalkwayBlocked { skipped }`) は `W_WALKWAY_BLOCKED` と同時に

@@ -1,0 +1,25 @@
+@cairn 2026.06
+@requires version>=1.20
+
+# Walkway anchored to a window port on one end and a door port on the
+# other. Window ports lift from `offset + size.w / 2` on the named wall,
+# pinned to the ground row so the Manhattan strip stays flat. The two
+# placements sit side-by-side along +x so a single x-leg clears both
+# footprints with zero `W_WALKWAY_BLOCKED` skips.
+
+def cottage size=5x5:
+  floor  id=floor mat_slot=floor
+  walls  id=walls class=outer mat_slot=wall height=3
+  door   id=entry side=front at=center
+  window id=front side=front offset=2 y=2 size=1x1 mat_slot=glass
+
+theme medieval:
+  slot floor -> @oak_planks
+  slot wall  -> @cobblestone
+  slot glass -> @glass_pane
+
+site pair:
+  place id=home1 use=cottage theme=medieval at=origin
+  place id=home2 use=cottage theme=medieval east_of=home1 gap=4
+
+  connect home1.entry to home2.front path=@gravel

@@ -8,9 +8,11 @@
 //!
 //! 1. [`port_world_position`] turns a `(place_origin, def, port_id)`
 //!    triple into the world-voxel coordinate one block outside the
-//!    door's `side=` face. Ports are currently exposed only on `door`
-//!    members — other roles (windows etc.) lower silently to `None` so
-//!    the caller can decide whether to fail with `E_UNRESOLVED_PORT`.
+//!    member's `side=` face. Ports are exposed on `door` and `window`
+//!    members; doors anchor at the wall-local `at=center`, windows at
+//!    the rectangle's geometric centre (`offset + size.w / 2`). Other
+//!    roles (stair, roof, …) lower silently to `None` so the caller
+//!    can decide whether to fail with `W_DEFERRED_MEMBER`.
 //! 2. [`l_path`] walks a Manhattan L (x-axis first, then z-axis) between
 //!    two world voxels at a constant Y, deduplicating the corner cell so
 //!    every coordinate appears once.
@@ -33,7 +35,7 @@ use crate::ast::ValueKind;
 use crate::ids::WalkwayScopeKey;
 use crate::intent::{DefIr, Member, MemberRole};
 
-use super::openings::{WallSide, wall_length};
+use super::openings::{WallSide, wall_length, wall_local_to_grid};
 use super::{BlockArray, BlockState, Dims, Palette, PaletteIndex};
 
 /// Output of [`build_walkway_array`].
@@ -60,20 +62,33 @@ pub struct WalkwayLayout {
 /// port's wall, at the ground row.
 ///
 /// `place_dims` carries the full inflated placement extents (interior
-/// plus roof overhang on each side) so the helper can shift the door's
-/// wall-local coordinate into the right world cell — the building
-/// walls sit at `origin + overhang`, not at `origin`, when a roof
-/// `overhang=` inflates the bounding box. The `(dims.x - interior_w) /
-/// 2` derivation is the inverse of the inflation [`super::lower`] does
-/// up front.
+/// plus roof overhang on each side) so the helper can shift the
+/// member's wall-local coordinate into the right world cell — the
+/// building walls sit at `origin + overhang`, not at `origin`, when a
+/// roof `overhang=` inflates the bounding box. The
+/// `(dims.x - interior_w) / 2` derivation is the inverse of the
+/// inflation [`super::lower`] does up front.
 ///
-/// Returns `None` when the port id does not name a [`MemberRole::Door`]
-/// member of the def, when the door is missing a `side=` argument, or
-/// when the def has no `size=` to bound the wall against. The caller is
-/// expected to map those into the same `E_UNRESOLVED_PORT` family the
-/// resolver already produces for missing port ids — surfacing them only
-/// at the lowering boundary would lose the resolver's nearest-match
-/// suggestion machinery.
+/// Ports anchor on two member roles:
+///
+/// * [`MemberRole::Door`] — wall-local `u` taken from `at=center`
+///   (`wall_length / 2`).
+/// * [`MemberRole::Window`] — wall-local `u` is the rectangle's
+///   geometric centre (`offset + size.w / 2`). `sym=true` does not
+///   move the port: it is taken from the primary `offset` side, which
+///   is the only one whose `id=` is referenced from a `connect` row.
+///   `y=` does not lift the port off the ground row either, because
+///   the walkway is a 1-voxel-thick flat strip whose Y must match the
+///   other endpoint (3D path search is out of scope, see module
+///   doc-comment).
+///
+/// Returns `None` when the port id does not name a door / window
+/// member of the def, when the member is missing a `side=` argument,
+/// when the window's `offset + size.w` exceeds the wall length, or
+/// when the def has no `size=` to bound the wall against. The caller
+/// is expected to map those into a `W_DEFERRED_MEMBER` warning —
+/// surfacing them as resolver errors would lose the resolver's
+/// nearest-match suggestion machinery.
 #[must_use]
 pub fn port_world_position(
     place_origin: (i32, i32, i32),
@@ -85,12 +100,6 @@ pub fn port_world_position(
         .members
         .iter()
         .find(|m| m.id.as_deref() == Some(port_id))?;
-    if !matches!(member.role, MemberRole::Door) {
-        // Window / stair / roof ports are reserved for a future extension.
-        // Returning `None` here keeps the door-only contract enforced at
-        // the type level without growing the diagnostic surface.
-        return None;
-    }
     let side = ident_value(member, "side").and_then(WallSide::from_ident)?;
     let def_size = def.size.as_ref()?;
     let interior_w = def_size.w.get();
@@ -103,10 +112,30 @@ pub fn port_world_position(
     let overhang_z = place_dims.z.saturating_sub(interior_h) / 2;
     let overhang = overhang_x.max(overhang_z);
     let len = wall_length(side, interior_w, interior_h);
-    let u = door_at_center_offset(member, len)?;
-    let (door_x, door_z) = door_world_xz(side, u, overhang, interior_w, interior_h, place_origin)?;
+    let (wall_x, wall_z) = match member.role {
+        MemberRole::Door => {
+            let u = door_at_center_offset(member, len)?;
+            door_world_xz(side, u, overhang, interior_w, interior_h, place_origin)?
+        }
+        MemberRole::Window => {
+            let u = window_center_offset(member, len)?;
+            window_world_xz(
+                side,
+                u,
+                overhang,
+                interior_w,
+                interior_h,
+                place_dims,
+                place_origin,
+            )?
+        }
+        // Stair / roof ports are reserved for a future extension.
+        // Returning `None` here keeps the door/window contract enforced
+        // without growing the diagnostic surface.
+        _ => return None,
+    };
     let (nx, nz) = normal_step(side);
-    Some((door_x + nx, place_origin.1, door_z + nz))
+    Some((wall_x + nx, place_origin.1, wall_z + nz))
 }
 
 /// Walk a Manhattan L between two world voxels at a fixed Y, x-axis
@@ -283,6 +312,57 @@ fn door_world_xz(
         WallSide::Left => (origin.0 + o, origin.2 + o + u_i),
         WallSide::Right => (origin.0 + o + w_i - 1, origin.2 + o + (h_i - 1 - u_i)),
     })
+}
+
+/// Window port wall-local centre offset: `offset + size.w / 2`, with an
+/// `offset + size.w ≤ wall_length` bounds check so a window written past
+/// the wall returns `None` and cascades to `W_DEFERRED_MEMBER` rather
+/// than producing an out-of-range world coordinate.
+fn window_center_offset(member: &Member, len: u32) -> Option<u32> {
+    let offset = nonneg_int_value(member, "offset")?;
+    let (sw, _) = size_member(member, "size")?;
+    let end = offset.checked_add(sw)?;
+    if end > len {
+        return None;
+    }
+    Some(offset + sw / 2)
+}
+
+/// Window-side variant of [`door_world_xz`]. Delegates to
+/// [`wall_local_to_grid`] so the wall-local → grid mapping is shared
+/// with the openings carved into the wall itself (`block_array::lower`
+/// uses the same helper for the window cut). `v = 0` pins the port to
+/// the ground row regardless of the window's authored `y=`.
+fn window_world_xz(
+    side: WallSide,
+    u: u32,
+    overhang: u32,
+    interior_w: u32,
+    interior_h: u32,
+    place_dims: Dims,
+    origin: (i32, i32, i32),
+) -> Option<(i32, i32)> {
+    let (grid_x, _, grid_z) =
+        wall_local_to_grid(side, u, 0, overhang, interior_w, interior_h, place_dims)?;
+    let grid_x = i32::try_from(grid_x).ok()?;
+    let grid_z = i32::try_from(grid_z).ok()?;
+    Some((origin.0.checked_add(grid_x)?, origin.2.checked_add(grid_z)?))
+}
+
+fn nonneg_int_value(member: &Member, key: &str) -> Option<u32> {
+    let raw = member.intent_state.get(key)?;
+    match &raw.value.kind {
+        ValueKind::Int(v) if *v >= 0 => Some(u32::try_from(*v).unwrap_or(u32::MAX)),
+        _ => None,
+    }
+}
+
+fn size_member(member: &Member, key: &str) -> Option<(u32, u32)> {
+    let raw = member.intent_state.get(key)?;
+    match &raw.value.kind {
+        ValueKind::Size { w, h } => Some((w.get(), h.get())),
+        _ => None,
+    }
 }
 
 fn normal_step(side: WallSide) -> (i32, i32) {
@@ -484,16 +564,191 @@ mod tests {
     }
 
     #[test]
-    fn port_world_position_returns_none_for_window_role() {
+    fn port_world_position_window_front_resolves_to_offset_center() {
+        // size=3x3, no overhang, window offset=0 size=1x1 on front wall.
+        // wall_length(Front, 3, 3) = 3; u = 0 + 1/2 = 0. Wall world via
+        // wall_local_to_grid: (origin.x + 0, origin.z + 3 - 1) = (10, 22);
+        // +1 in the +z normal step → port (10, 0, 23).
         let src = concat!(
             "def cottage size=3x3:\n",
-            "  window id=light side=front y=1 offset=1 size=1x1 mat_slot=g\n",
+            "  window id=light side=front y=1 offset=0 size=1x1 mat_slot=g\n",
+        );
+        let module = crate::parse(src).expect("parse");
+        let ir = crate::lower(&module);
+        let def = ir.defs.first().expect("def lowered");
+        let dims = Dims { x: 3, y: 1, z: 3 };
+        let pos = port_world_position((10, 0, 20), dims, def, "light").expect("port resolves");
+        assert_eq!(pos, (10, 0, 23));
+    }
+
+    #[test]
+    fn port_world_position_window_back_resolves_to_mirrored_center() {
+        // size=3x3, window offset=1 size=1x1 on back wall. wall_length = 3;
+        // u = 1 + 0 = 1. Back wall world: mirrored = 3 - 1 - 1 = 1,
+        // (origin.x + 1, origin.z + 0) = (11, 20); -1 in the -z normal
+        // step → port (11, 0, 19).
+        let src = concat!(
+            "def cottage size=3x3:\n",
+            "  window id=light side=back y=1 offset=1 size=1x1 mat_slot=g\n",
+        );
+        let module = crate::parse(src).expect("parse");
+        let ir = crate::lower(&module);
+        let def = ir.defs.first().expect("def lowered");
+        let dims = Dims { x: 3, y: 1, z: 3 };
+        let pos = port_world_position((10, 0, 20), dims, def, "light").expect("port resolves");
+        assert_eq!(pos, (11, 0, 19));
+    }
+
+    #[test]
+    fn port_world_position_window_left_resolves_to_offset_center() {
+        // size=3x3, window offset=1 size=1x1 on left wall. wall_length
+        // (Left, 3, 3) = 3; u = 1. Left wall world: (origin.x + 0,
+        // origin.z + 1) = (10, 21); -1 in the -x normal step → port
+        // (9, 0, 21).
+        let src = concat!(
+            "def cottage size=3x3:\n",
+            "  window id=light side=left y=1 offset=1 size=1x1 mat_slot=g\n",
+        );
+        let module = crate::parse(src).expect("parse");
+        let ir = crate::lower(&module);
+        let def = ir.defs.first().expect("def lowered");
+        let dims = Dims { x: 3, y: 1, z: 3 };
+        let pos = port_world_position((10, 0, 20), dims, def, "light").expect("port resolves");
+        assert_eq!(pos, (9, 0, 21));
+    }
+
+    #[test]
+    fn port_world_position_window_right_resolves_to_mirrored_center() {
+        // size=3x3, window offset=1 size=1x1 on right wall. wall_length
+        // (Right, 3, 3) = 3; u = 1. Right wall world: mirrored = 1,
+        // x = origin.x + 3 - 1 = 12, z = origin.z + 1 = 21; +1 in the +x
+        // normal step → port (13, 0, 21).
+        let src = concat!(
+            "def cottage size=3x3:\n",
+            "  window id=light side=right y=1 offset=1 size=1x1 mat_slot=g\n",
+        );
+        let module = crate::parse(src).expect("parse");
+        let ir = crate::lower(&module);
+        let def = ir.defs.first().expect("def lowered");
+        let dims = Dims { x: 3, y: 1, z: 3 };
+        let pos = port_world_position((10, 0, 20), dims, def, "light").expect("port resolves");
+        assert_eq!(pos, (13, 0, 21));
+    }
+
+    #[test]
+    fn port_world_position_window_shifts_outward_past_roof_overhang() {
+        // size=3x3 interior, place_dims=(5,_,5) for overhang=1. Window
+        // offset=0 size=1x1 on front. u = 0. Wall world via
+        // wall_local_to_grid with overhang=1: (origin.x + 1, origin.z +
+        // 1 + 3 - 1) = (11, 23); +1 in the +z normal step → port
+        // (11, 0, 24).
+        let src = concat!(
+            "def cottage size=3x3:\n",
+            "  window id=light side=front y=1 offset=0 size=1x1 mat_slot=g\n",
+        );
+        let module = crate::parse(src).expect("parse");
+        let ir = crate::lower(&module);
+        let def = ir.defs.first().expect("def lowered");
+        let dims = Dims { x: 5, y: 1, z: 5 };
+        let pos = port_world_position((10, 0, 20), dims, def, "light").expect("port resolves");
+        assert_eq!(pos, (11, 0, 24));
+    }
+
+    #[test]
+    fn port_world_position_window_centres_on_2x2_offset() {
+        // village.crn shape: size=9x7, place_dims (11,_,9) for
+        // overhang=1, window id=front side=front y=2 offset=2 size=2x2.
+        // wall_length(Front, 9, 7) = 9; u = 2 + 2/2 = 3. Wall world:
+        // (origin.x + 1 + 3, origin.z + 1 + 7 - 1) = (origin.x + 4,
+        // origin.z + 7); +1 in the +z normal step → port shifts to z+8.
+        // With origin (0,0,0): port (4, 0, 8).
+        let src = concat!(
+            "def cottage size=9x7:\n",
+            "  window id=front side=front y=2 offset=2 size=2x2 mat_slot=g\n",
+        );
+        let module = crate::parse(src).expect("parse");
+        let ir = crate::lower(&module);
+        let def = ir.defs.first().expect("def lowered");
+        let dims = Dims { x: 11, y: 1, z: 9 };
+        let pos = port_world_position((0, 0, 0), dims, def, "front").expect("port resolves");
+        assert_eq!(pos, (4, 0, 8));
+    }
+
+    #[test]
+    fn port_world_position_window_returns_none_when_offset_size_overflows_wall() {
+        // size=3x3 → wall_length(Front) = 3. offset=2 + size.w=2 = 4 > 3.
+        let src = concat!(
+            "def cottage size=3x3:\n",
+            "  window id=light side=front y=1 offset=2 size=2x2 mat_slot=g\n",
         );
         let module = crate::parse(src).expect("parse");
         let ir = crate::lower(&module);
         let def = ir.defs.first().expect("def lowered");
         let dims = Dims { x: 3, y: 1, z: 3 };
         assert!(port_world_position((0, 0, 0), dims, def, "light").is_none());
+    }
+
+    #[test]
+    fn port_world_position_window_sym_true_uses_primary_offset() {
+        // `sym=true` mirrors the cut at lowering time but the port is
+        // taken from the primary `offset` side only (the rule the spec
+        // calls out so a single `id=` always maps to one coordinate).
+        // Same geometry as the front-resolves test, just with `sym=true`
+        // tacked on; the world position must not move.
+        let src = concat!(
+            "def cottage size=3x3:\n",
+            "  window id=light side=front y=1 offset=0 size=1x1 sym=true mat_slot=g\n",
+        );
+        let module = crate::parse(src).expect("parse");
+        let ir = crate::lower(&module);
+        let def = ir.defs.first().expect("def lowered");
+        let dims = Dims { x: 3, y: 1, z: 3 };
+        let pos = port_world_position((10, 0, 20), dims, def, "light").expect("port resolves");
+        assert_eq!(pos, (10, 0, 23));
+    }
+
+    #[test]
+    fn port_world_position_window_pins_y_to_ground_row_regardless_of_authored_y() {
+        // `y=4` on the window must not lift the port off the ground row
+        // — walkways are flat 1-voxel strips and the port Y must agree
+        // with the other endpoint (door y=0). The port stays at
+        // `place_origin.1`.
+        let src = concat!(
+            "def cottage size=3x3:\n",
+            "  window id=light side=front y=4 offset=0 size=1x1 mat_slot=g\n",
+        );
+        let module = crate::parse(src).expect("parse");
+        let ir = crate::lower(&module);
+        let def = ir.defs.first().expect("def lowered");
+        let dims = Dims { x: 3, y: 1, z: 3 };
+        let pos = port_world_position((10, 7, 20), dims, def, "light").expect("port resolves");
+        assert_eq!(pos.1, 7, "port Y should equal place_origin.1, not window.y");
+    }
+
+    #[test]
+    fn port_world_position_returns_none_for_roof_role() {
+        // Roof ports are reserved; the role guard must short-circuit
+        // even when `id=` matches.
+        let src = concat!(
+            "def cottage size=3x3:\n",
+            "  roof id=top kind=gable mat_slot=r\n",
+        );
+        let module = crate::parse(src).expect("parse");
+        let ir = crate::lower(&module);
+        let def = ir.defs.first().expect("def lowered");
+        let dims = Dims { x: 3, y: 1, z: 3 };
+        assert!(port_world_position((0, 0, 0), dims, def, "top").is_none());
+    }
+
+    #[test]
+    fn port_world_position_returns_none_for_stair_role() {
+        // Stair ports are reserved; same short-circuit as roof.
+        let src = concat!("def cottage size=3x3:\n", "  stair id=up at=corner\n");
+        let module = crate::parse(src).expect("parse");
+        let ir = crate::lower(&module);
+        let def = ir.defs.first().expect("def lowered");
+        let dims = Dims { x: 3, y: 1, z: 3 };
+        assert!(port_world_position((0, 0, 0), dims, def, "up").is_none());
     }
 
     #[test]

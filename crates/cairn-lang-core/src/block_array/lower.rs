@@ -237,12 +237,13 @@ fn lower_connects(
         );
         let (Some(from_pos), Some(to_pos)) = (from_pos, to_pos) else {
             // The resolver already validated the port id, so this miss
-            // means `port_world_position` rejected one of the door's
-            // own properties: a missing / non-cardinal `side=`, an
-            // `at=` value other than `center`, or a window / stair role
-            // that the door-only port surface refuses. Name the
-            // offending side so the user is not pointed at the wrong
-            // half of the row.
+            // means `port_world_position` rejected one of the member's
+            // own properties: a missing / non-cardinal `side=`, a door
+            // `at=` value other than `center`, a window with
+            // `offset + size.w` past the wall, or a stair / roof role
+            // for which port support is reserved. Name the offending
+            // side so the user is not pointed at the wrong half of the
+            // row.
             let from_label = connect.from.to_string();
             let to_label = connect.to.to_string();
             let unplaceable = match (from_pos.is_none(), to_pos.is_none()) {
@@ -261,7 +262,7 @@ fn lower_connects(
                 notes: vec![DiagnosticNote {
                     span: None,
                     message:
-                        "ports currently require a `door` member with `side=front|back|left|right` and `at=center`"
+                        "ports require either a `door` member with `side=front|back|left|right` and `at=center`, or a `window` member with `side=` plus `offset=` and `size=WxH` fitting within the wall"
                             .to_owned(),
                 }],
                 data: None,
