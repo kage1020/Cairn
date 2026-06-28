@@ -36,12 +36,13 @@ use indexmap::IndexMap;
 use crate::ast::ValueKind;
 use crate::check::{Diagnostic, DiagnosticCode, DiagnosticData, DiagnosticNote, Severity};
 use crate::error::Span;
+use crate::ids::{PlaceId, PortId, SiteName, WalkwayEndpoint, WalkwayScopeKey};
 use crate::intent::{
     DefIr, IntentModule, Member, MemberRole, SiteIr, Size, StructIr, ValueWithSpan,
 };
 use crate::resolve::{Resolution, ScopeResolution, place_scope_key};
 
-use super::{Placement, Walkway};
+use super::{Footprint, Placement, Walkway};
 
 use super::material::{AbstractMaterialResolver, MaterialDeferred, resolve_block_state};
 use super::openings::{WallSide, wall_length, wall_local_to_grid};
@@ -51,7 +52,7 @@ use super::roof::{
     gable_voxels, hip_extra_height, hip_stair_state, hip_voxels, shed_extra_height,
     shed_slope_span, shed_stair_state, shed_voxels,
 };
-use super::walkway::{build_walkway_array, l_path, port_world_position};
+use super::walkway::{WalkwayLayout, build_walkway_array, l_path, port_world_position};
 use super::{BlockArray, BlockArrayIr, BlockState, Dims, Palette, PaletteIndex};
 
 /// Lower every `struct` in `intent` into a [`BlockArray`].
@@ -91,7 +92,7 @@ pub fn lower_to_block_array(
     }
 
     let mut placements: IndexMap<String, Placement> = IndexMap::new();
-    let mut walkways: IndexMap<String, Walkway> = IndexMap::new();
+    let mut walkways: IndexMap<WalkwayScopeKey, Walkway> = IndexMap::new();
     for site in &intent.sites {
         lower_site(
             site,
@@ -106,7 +107,7 @@ pub fn lower_to_block_array(
     // Walkways are laid after every site has emitted its per-place
     // BlockArrays so the collision set already covers every floor tile
     // the strip might cross. Connects survive site boundaries — the
-    // resolver tags each `ResolvedConnect` with the `site` name so we
+    // resolver tags each `ValidatedConnect` with the `site` name so we
     // can pair it back to the right `placements` lookup here.
     let blocked = collect_floor_cells(&structures, &placements);
     lower_connects(
@@ -182,14 +183,14 @@ fn lower_connects(
     placements: &IndexMap<String, Placement>,
     blocked: &HashSet<(i32, i32, i32)>,
     structures: &mut IndexMap<String, BlockArray>,
-    walkways: &mut IndexMap<String, Walkway>,
+    walkways: &mut IndexMap<WalkwayScopeKey, Walkway>,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
-    let mut seen_pairs: HashSet<(String, String, String, String, String)> = HashSet::new();
+    let mut seen_pairs: HashSet<(SiteName, PlaceId, PortId, PlaceId, PortId)> = HashSet::new();
 
     for connect in &resolution.connects {
-        let from_key = place_scope_key(&connect.site, &connect.from.place_id);
-        let to_key = place_scope_key(&connect.site, &connect.to.place_id);
+        let from_key = place_scope_key(connect.site.as_str(), connect.from.place.as_str());
+        let to_key = place_scope_key(connect.site.as_str(), connect.to.place.as_str());
         let from_placement = placements.get(&from_key);
         let to_placement = placements.get(&to_key);
         let (Some(from_placement), Some(to_placement)) = (from_placement, to_placement) else {
@@ -217,7 +218,7 @@ fn lower_connects(
             debug_assert!(
                 false,
                 "connect `{}` to `{}` references placements whose source def is missing from `defs`",
-                connect.from.place_id, connect.to.place_id,
+                connect.from.place, connect.to.place,
             );
             continue;
         };
@@ -226,13 +227,13 @@ fn lower_connects(
             from_placement.origin,
             from_placement.dims,
             from_def,
-            &connect.from.port_id,
+            connect.from.port.as_str(),
         );
         let to_pos = port_world_position(
             to_placement.origin,
             to_placement.dims,
             to_def,
-            &connect.to.port_id,
+            connect.to.port.as_str(),
         );
         let (Some(from_pos), Some(to_pos)) = (from_pos, to_pos) else {
             // The resolver already validated the port id, so this miss
@@ -242,8 +243,8 @@ fn lower_connects(
             // that the door-only port surface refuses. Name the
             // offending side so the user is not pointed at the wrong
             // half of the row.
-            let from_label = port_label(&connect.from.place_id, &connect.from.port_id);
-            let to_label = port_label(&connect.to.place_id, &connect.to.port_id);
+            let from_label = connect.from.to_string();
+            let to_label = connect.to.to_string();
             let unplaceable = match (from_pos.is_none(), to_pos.is_none()) {
                 (true, true) => format!("`{from_label}` and `{to_label}`"),
                 (true, false) => format!("`{from_label}`"),
@@ -274,20 +275,12 @@ fn lower_connects(
         // same walkway — laying the strip both ways would be a silent
         // double-write.
         let mut endpoints = [
-            (
-                connect.from.place_id.as_str(),
-                connect.from.port_id.as_str(),
-            ),
-            (connect.to.place_id.as_str(), connect.to.port_id.as_str()),
+            (connect.from.place.clone(), connect.from.port.clone()),
+            (connect.to.place.clone(), connect.to.port.clone()),
         ];
         endpoints.sort_unstable();
-        let dedup_key = (
-            connect.site.clone(),
-            endpoints[0].0.to_owned(),
-            endpoints[0].1.to_owned(),
-            endpoints[1].0.to_owned(),
-            endpoints[1].1.to_owned(),
-        );
+        let [(a_place, a_port), (b_place, b_port)] = endpoints;
+        let dedup_key = (connect.site.clone(), a_place, a_port, b_place, b_port);
         if !seen_pairs.insert(dedup_key) {
             diagnostics.push(Diagnostic {
                 code: DiagnosticCode::DuplicateWalkway,
@@ -295,8 +288,8 @@ fn lower_connects(
                 span: connect.span.clone(),
                 primary: format!(
                     "duplicate walkway `{from} ↔ {to}` in site `{site}`; the second row was dropped",
-                    from = port_label(&connect.from.place_id, &connect.from.port_id),
-                    to = port_label(&connect.to.place_id, &connect.to.port_id),
+                    from = connect.from,
+                    to = connect.to,
                     site = connect.site,
                 ),
                 notes: vec![DiagnosticNote {
@@ -339,8 +332,8 @@ fn lower_connects(
                     false,
                     "connect `{from}` to `{to}` in site `{site}` returned AlreadyDiagnosed for path; \
                      expected E_MISSING_PATH_MATERIAL upstream",
-                    from = port_label(&connect.from.place_id, &connect.from.port_id),
-                    to = port_label(&connect.to.place_id, &connect.to.port_id),
+                    from = connect.from,
+                    to = connect.to,
                     site = connect.site,
                 );
                 continue;
@@ -349,16 +342,18 @@ fn lower_connects(
         let material_id = material.id.clone();
 
         let path = l_path(from_pos, to_pos);
-        let scope_key = format!(
-            "walkway::{site}::{from_place}.{from_port}__{to_place}.{to_port}",
-            site = connect.site,
-            from_place = connect.from.place_id,
-            from_port = connect.from.port_id,
-            to_place = connect.to.place_id,
-            to_port = connect.to.port_id,
+        let scope_key = WalkwayScopeKey::from_parts(
+            &connect.site,
+            &connect.from.place,
+            &connect.from.port,
+            &connect.to.place,
+            &connect.to.port,
         );
-        let (array, origin, skipped) =
-            build_walkway_array(&path, material, blocked, scope_key.clone());
+        let WalkwayLayout {
+            array,
+            origin,
+            blocked_count: skipped,
+        } = build_walkway_array(&path, material, blocked, &scope_key);
         if skipped > 0 {
             diagnostics.push(Diagnostic {
                 code: DiagnosticCode::WalkwayBlocked,
@@ -366,8 +361,8 @@ fn lower_connects(
                 span: connect.span.clone(),
                 primary: format!(
                     "walkway `{from} ↔ {to}` skipped {skipped} cells that overlapped an existing structure",
-                    from = port_label(&connect.from.place_id, &connect.from.port_id),
-                    to = port_label(&connect.to.place_id, &connect.to.port_id),
+                    from = connect.from,
+                    to = connect.to,
                 ),
                 notes: vec![DiagnosticNote {
                     span: None,
@@ -381,34 +376,38 @@ fn lower_connects(
             });
         }
         let dims = array.dims;
-        structures.insert(scope_key.clone(), array);
+        let footprint = Footprint {
+            x: dims.x,
+            z: dims.z,
+        };
+        structures.insert(scope_key.as_str().to_owned(), array);
         walkways.insert(
             scope_key,
             Walkway {
                 site: connect.site.clone(),
-                from_place: connect.from.place_id.clone(),
-                from_port: connect.from.port_id.clone(),
-                to_place: connect.to.place_id.clone(),
-                to_port: connect.to.port_id.clone(),
+                from: WalkwayEndpoint {
+                    place: connect.from.place.clone(),
+                    port: connect.from.port.clone(),
+                },
+                to: WalkwayEndpoint {
+                    place: connect.to.place.clone(),
+                    port: connect.to.port.clone(),
+                },
                 origin,
-                dims,
+                footprint,
                 path_material: material_id,
             },
         );
     }
 }
 
-fn port_label(place: &str, port: &str) -> String {
-    format!("{place}.{port}")
-}
-
 fn diag_walkway_endpoint_skipped(
-    connect: &crate::resolve::ResolvedConnect,
+    connect: &crate::resolve::ValidatedConnect,
     from_missing: bool,
     to_missing: bool,
 ) -> Diagnostic {
-    let from_label = port_label(&connect.from.place_id, &connect.from.port_id);
-    let to_label = port_label(&connect.to.place_id, &connect.to.port_id);
+    let from_label = connect.from.to_string();
+    let to_label = connect.to.to_string();
     let missing = match (from_missing, to_missing) {
         (true, true) => format!("`{from_label}` and `{to_label}` placements"),
         (true, false) => format!("`{from_label}` placement"),
@@ -440,7 +439,7 @@ fn diag_walkway_endpoint_skipped(
 }
 
 fn diag_walkway_abstract_token(
-    connect: &crate::resolve::ResolvedConnect,
+    connect: &crate::resolve::ValidatedConnect,
     token: &str,
 ) -> Diagnostic {
     Diagnostic {
@@ -461,7 +460,7 @@ fn diag_walkway_abstract_token(
 }
 
 fn diag_walkway_unknown_token(
-    connect: &crate::resolve::ResolvedConnect,
+    connect: &crate::resolve::ValidatedConnect,
     token: &str,
     suggestion: Option<&str>,
 ) -> Diagnostic {
@@ -624,8 +623,10 @@ fn lower_site<'a>(
         placements.insert(
             ba.source_scope.clone(),
             Placement {
-                site: site.name.clone(),
-                place_id: place_id.to_owned(),
+                site: SiteName::new(site.name.as_str())
+                    .expect("surface lexer enforces SiteName invariants"),
+                place_id: PlaceId::new(place_id)
+                    .expect("surface lexer enforces PlaceId invariants"),
                 source_def: use_name.to_owned(),
                 theme: theme_name.to_owned(),
                 origin,
@@ -2647,7 +2648,7 @@ mod tests {
             .get("walkway::s::a.back__b.front")
             .expect("walkway IR present despite collisions");
         assert_eq!(walkway.origin, (1, 0, -1));
-        assert_eq!(walkway.dims, Dims { x: 6, y: 1, z: 5 });
+        assert_eq!(walkway.footprint, Footprint { x: 6, z: 5 });
         let ba = out
             .structures
             .get("walkway::s::a.back__b.front")
@@ -2719,7 +2720,7 @@ mod tests {
         // gap=2 with cottage dims 3×3 → origin (5, 0, 0), front port
         // (6, 0, 3). The L-path collapses to a pure x-axis run.
         assert_eq!(walkway.origin, (1, 0, 3));
-        assert_eq!(walkway.dims, Dims { x: 6, y: 1, z: 1 });
+        assert_eq!(walkway.footprint, Footprint { x: 6, z: 1 });
     }
 
     #[test]

@@ -11,7 +11,7 @@
 
 use std::path::PathBuf;
 
-use cairn_lang_core::block_array::{BlockArrayIr, Dims, lower_to_block_array};
+use cairn_lang_core::block_array::{BlockArrayIr, Footprint, lower_to_block_array};
 use cairn_lang_core::check::{DiagnosticCode, Severity};
 use cairn_lang_core::{lower, parse, resolve};
 
@@ -65,12 +65,12 @@ fn village_emits_three_placements_and_two_walkways() {
     );
     for (key, walkway) in &out.walkways {
         assert!(
-            key.starts_with("walkway::hamlet::"),
+            key.as_str().starts_with("walkway::hamlet::"),
             "walkway key `{key}` should start with `walkway::hamlet::`",
         );
         assert_eq!(walkway.site, "hamlet");
-        assert_eq!(walkway.from_port, "entry");
-        assert_eq!(walkway.to_port, "entry");
+        assert_eq!(walkway.from.port, "entry");
+        assert_eq!(walkway.to.port, "entry");
         assert_eq!(walkway.path_material, "minecraft:gravel");
         // Pin origin/dims so an axis swap (x↔z) or off-by-one in the
         // overhang shift fails loud here. home1 sits at (0,0,0) with
@@ -78,7 +78,7 @@ fn village_emits_three_placements_and_two_walkways() {
         // home2 east_of home1 gap=4 → origin (15, 0, 0), front port
         // (20, 0, 8); home3 north_of home1 gap=5 → origin (0, 0, -14),
         // front port (5, 0, -6).
-        match (walkway.from_place.as_str(), walkway.to_place.as_str()) {
+        match (walkway.from.place.as_str(), walkway.to.place.as_str()) {
             ("home1", "home2") => {
                 assert_eq!(
                     walkway.origin,
@@ -86,8 +86,8 @@ fn village_emits_three_placements_and_two_walkways() {
                     "home1↔home2 walkway should start at home1's front port",
                 );
                 assert_eq!(
-                    walkway.dims,
-                    Dims { x: 16, y: 1, z: 1 },
+                    walkway.footprint,
+                    Footprint { x: 16, z: 1 },
                     "home1↔home2 walkway runs purely along +x",
                 );
             }
@@ -98,8 +98,8 @@ fn village_emits_three_placements_and_two_walkways() {
                     "home1↔home3 walkway bounding box starts at home3's front port",
                 );
                 assert_eq!(
-                    walkway.dims,
-                    Dims { x: 1, y: 1, z: 15 },
+                    walkway.footprint,
+                    Footprint { x: 1, z: 15 },
                     "home1↔home3 walkway runs purely along z",
                 );
             }
@@ -117,7 +117,7 @@ fn village_walkway_block_arrays_share_keys_with_walkways_map() {
     for key in out.walkways.keys() {
         let ba = out
             .structures
-            .get(key)
+            .get(key.as_str())
             .unwrap_or_else(|| panic!("structures missing entry for walkway key {key}"));
         // Walkways are flat strips: dims.y == 1 by construction.
         assert_eq!(

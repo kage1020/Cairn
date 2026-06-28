@@ -15,6 +15,7 @@
 //! (typed) or [`WalkwayScopeKey::parse`] (validating), and decomposition
 //! returns borrowed segments via [`WalkwayScopeKey::parts`].
 
+use std::borrow::Borrow;
 use std::fmt;
 
 use serde::{Deserialize, Deserializer, Serialize};
@@ -62,6 +63,13 @@ macro_rules! ident_newtype {
 
         impl $Name {
             /// Build a new identifier, validating the surface invariants.
+            ///
+            /// # Errors
+            ///
+            /// Returns [`IdError::Empty`] for the empty string, or
+            /// [`IdError::ForbiddenChar`] if the input contains a `.`,
+            /// `:`, or whitespace character (any of which would break
+            /// the structural separators downstream lookups rely on).
             pub fn new<S: Into<String>>(s: S) -> Result<Self, IdError> {
                 let s = s.into();
                 validate_ident(&s)?;
@@ -90,6 +98,36 @@ macro_rules! ident_newtype {
         impl AsRef<str> for $Name {
             fn as_ref(&self) -> &str {
                 &self.0
+            }
+        }
+
+        impl Borrow<str> for $Name {
+            fn borrow(&self) -> &str {
+                &self.0
+            }
+        }
+
+        impl PartialEq<str> for $Name {
+            fn eq(&self, other: &str) -> bool {
+                self.0 == other
+            }
+        }
+
+        impl PartialEq<&str> for $Name {
+            fn eq(&self, other: &&str) -> bool {
+                self.0 == *other
+            }
+        }
+
+        impl PartialEq<$Name> for str {
+            fn eq(&self, other: &$Name) -> bool {
+                self == other.0
+            }
+        }
+
+        impl PartialEq<$Name> for &str {
+            fn eq(&self, other: &$Name) -> bool {
+                *self == other.0
             }
         }
 
@@ -173,6 +211,13 @@ impl WalkwayScopeKey {
     }
 
     /// Parse and validate a wire-format scope key.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`KeyParseError`] variant when the input does not
+    /// follow the `walkway::SITE::PLACE.PORT__PLACE.PORT` shape, or
+    /// when any of the five segments fails identifier validation
+    /// (e.g. a port id containing `.`).
     pub fn parse(s: &str) -> Result<Self, KeyParseError> {
         let rest = s
             .strip_prefix("walkway::")
@@ -217,6 +262,13 @@ impl WalkwayScopeKey {
 
     /// Decompose the key into its five segments, borrowing into the
     /// internal representation.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the internal representation is not in canonical form.
+    /// Both [`Self::from_parts`] and [`Self::parse`] guarantee that
+    /// form, so a panic here means the invariant was broken by a
+    /// reflection-style construction.
     #[must_use]
     pub fn parts(&self) -> WalkwayScopeKeyParts<'_> {
         let rest = self
@@ -257,6 +309,12 @@ impl AsRef<str> for WalkwayScopeKey {
     }
 }
 
+impl Borrow<str> for WalkwayScopeKey {
+    fn borrow(&self) -> &str {
+        &self.0
+    }
+}
+
 impl<'de> Deserialize<'de> for WalkwayScopeKey {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let s = String::deserialize(deserializer)?;
@@ -277,6 +335,26 @@ pub struct WalkwayScopeKeyParts<'a> {
     pub to_place: &'a str,
     /// `to` port id.
     pub to_port: &'a str,
+}
+
+/// `(place, port)` pair the block-array IR and the lockfile DTOs share.
+///
+/// Spanned references live on [`crate::resolve::PortRef`]; this is the
+/// span-less wire DTO so [`crate::block_array::Walkway`] and
+/// [`crate::lock::LockWalkway`] can both spell the endpoint with the
+/// same type instead of one re-encoding the other as `"PLACE.PORT"`.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct WalkwayEndpoint {
+    /// `place id=` value.
+    pub place: PlaceId,
+    /// Member `id=` exposed by the place's def.
+    pub port: PortId,
+}
+
+impl fmt::Display for WalkwayEndpoint {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}.{}", self.place, self.port)
+    }
 }
 
 #[cfg(test)]
@@ -394,8 +472,7 @@ mod tests {
     fn walkway_scope_key_parse_rejects_missing_site() {
         assert!(matches!(
             WalkwayScopeKey::parse("walkway::home1.entry__home2.entry"),
-            Err(KeyParseError::MissingFromToSeparator(_))
-                | Err(KeyParseError::MissingSite(_))
+            Err(KeyParseError::MissingFromToSeparator(_) | KeyParseError::MissingSite(_))
         ));
     }
 

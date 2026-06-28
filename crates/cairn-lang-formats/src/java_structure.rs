@@ -147,21 +147,31 @@ pub fn write_compound_gzip<W: std::io::Write>(
 /// agree on naming when they land.
 #[must_use]
 pub fn output_filename(source_scope: &str) -> String {
-    if let Some(rest) = source_scope.strip_prefix("walkway::")
-        && let Some((site, ports)) = rest.split_once("::")
-    {
+    if let Ok(key) = cairn_lang_core::WalkwayScopeKey::parse(source_scope) {
         // Flatten `place.port` separators to `_` for portable filenames.
-        // Known hazard: Cairn ids allow `_`, so two distinct scopes can
-        // collapse to the same on-disk name — `a.b_c__d.e_f` and
-        // `a_b.c__d_e.f` both flatten to `a_b_c__d_e_f.nbt`. Walkway
-        // dedup at the IR layer (`lower_connects` `seen_pairs`) only
-        // catches reversed-endpoint duplicates, not this collision.
-        // Detecting it requires a write-time pass over all emitted
-        // filenames; that lives in the CLI's compile pipeline. The
-        // flatten itself stays here because every backend (Java now,
-        // Bedrock later) shares the same naming contract.
-        let flattened = ports.replace('.', "_");
-        return format!("{site}_walkway_{flattened}.nbt");
+        // Going through `WalkwayScopeKey::parts` rather than a raw
+        // `split_once('.')` means the segments come from the same
+        // validated source the lowering pass uses to construct the key,
+        // closing the `port_id` containing `.` ambiguity at the type
+        // boundary. Known hazard: Cairn ids allow `_`, so two distinct
+        // scopes can collapse to the same on-disk name —
+        // `a_b.c__d_e.f` and `a.b_c__d.e_f` both flatten to
+        // `a_b_c__d_e_f.nbt`. Walkway dedup at the IR layer
+        // (`lower_connects` `seen_pairs`) only catches reversed-endpoint
+        // duplicates, not this collision. Detecting it requires a
+        // write-time pass over all emitted filenames; that lives in the
+        // CLI's compile pipeline. The flatten itself stays here because
+        // every backend (Java now, Bedrock later) shares the same
+        // naming contract.
+        let p = key.parts();
+        return format!(
+            "{site}_walkway_{from_place}_{from_port}__{to_place}_{to_port}.nbt",
+            site = p.site,
+            from_place = p.from_place,
+            from_port = p.from_port,
+            to_place = p.to_place,
+            to_port = p.to_port,
+        );
     }
     let bare = source_scope
         .strip_prefix("struct::")

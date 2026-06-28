@@ -32,9 +32,10 @@ use serde::Serialize;
 
 pub use lower::lower_to_block_array;
 pub use material::{AbstractMaterialResolver, MaterialDeferred, resolve_block_state};
-pub use walkway::{build_walkway_array, l_path, port_world_position};
+pub use walkway::{WalkwayLayout, build_walkway_array, l_path, port_world_position};
 
 use crate::check::Diagnostic;
+use crate::ids::{PlaceId, SiteName, WalkwayEndpoint, WalkwayScopeKey};
 
 /// Lowered block-array IR for a whole [`crate::intent::IntentModule`].
 ///
@@ -56,15 +57,14 @@ pub struct BlockArrayIr {
     /// site lowering.
     #[serde(skip_serializing_if = "IndexMap::is_empty")]
     pub placements: IndexMap<String, Placement>,
-    /// Per-`connect` walkway metadata, keyed by
-    /// `walkway::SITE::FROM_PLACE.FROM_PORT__TO_PLACE.TO_PORT`. The
-    /// matching [`BlockArray`] sits under the same key in
+    /// Per-`connect` walkway metadata, keyed by [`WalkwayScopeKey`]. The
+    /// matching [`BlockArray`] sits under the same wire-format key in
     /// [`structures`], so a consumer can join the two against the same
     /// key the way `placements` does. Empty for any source with no
     /// `connect` rows, keeping the JSON shape stable for cottage /
     /// themed-tower fixtures.
     #[serde(skip_serializing_if = "IndexMap::is_empty")]
-    pub walkways: IndexMap<String, Walkway>,
+    pub walkways: IndexMap<WalkwayScopeKey, Walkway>,
     /// Diagnostics emitted during lowering. Kept separate from
     /// [`crate::resolve::Resolution::diagnostics`]: the resolver owns
     /// theme-binding hygiene, this list owns voxel-lowering deferrals.
@@ -74,29 +74,29 @@ pub struct BlockArrayIr {
 
 /// One resolved `connect` row laid as a walkway between two ports.
 ///
-/// Mirrors the shape of [`Placement`]: site / port-id provenance plus
-/// the world origin and dims of the [`BlockArray`] this walkway lowers
-/// to. The path material is recorded as the canonical Minecraft id so
-/// the lockfile can round-trip the walkway palette without rehydrating
-/// the per-walkway [`BlockArray`].
+/// Mirrors the shape of [`Placement`]: site / endpoint provenance plus
+/// the world origin and footprint of the [`BlockArray`] this walkway
+/// lowers to. The path material is recorded as the canonical Minecraft
+/// id so the lockfile can round-trip the walkway palette without
+/// rehydrating the per-walkway [`BlockArray`].
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Walkway {
     /// Bare site name (no `site::` IR-key prefix).
-    pub site: String,
-    /// `place id=` value of the `from` end.
-    pub from_place: String,
-    /// Member `id=` exposed by the `from` end's def.
-    pub from_port: String,
-    /// `place id=` value of the `to` end.
-    pub to_place: String,
-    /// Member `id=` exposed by the `to` end's def.
-    pub to_port: String,
+    pub site: SiteName,
+    /// `from` endpoint — `(place, port)` of the walkway's first end.
+    pub from: WalkwayEndpoint,
+    /// `to` endpoint — `(place, port)` of the walkway's second end.
+    pub to: WalkwayEndpoint,
     /// Absolute world-space origin `(x, y, z)` of the walkway
     /// [`BlockArray`]. `i32` because `north_of` placements grow the
     /// walkway into negative `z` just like the buildings themselves.
     pub origin: (i32, i32, i32),
-    /// Voxel extents of the walkway [`BlockArray`].
-    pub dims: Dims,
+    /// Horizontal extents of the walkway [`BlockArray`]. Walkways are
+    /// always a single block thick, so the Y axis is fixed at `1` and
+    /// elided from this field; lowering into the full
+    /// [`BlockArray::dims`] re-attaches `y = 1` via
+    /// [`Footprint::to_dims_y1`].
+    pub footprint: Footprint,
     /// Canonical Minecraft id of the path material laid into the
     /// walkway (e.g. `minecraft:gravel`).
     pub path_material: String,
@@ -112,9 +112,9 @@ pub struct Walkway {
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Placement {
     /// Site this placement belongs to (the bare `site` name, not the IR key).
-    pub site: String,
+    pub site: SiteName,
     /// `place id=` value.
-    pub place_id: String,
+    pub place_id: PlaceId,
     /// `place use=` target — the `def` whose body lowered into the per-place
     /// volume.
     pub source_def: String,
@@ -168,6 +168,32 @@ pub struct Dims {
     pub y: u32,
     /// North/south extent (the source `size=WxH` `H`).
     pub z: u32,
+}
+
+/// Horizontal extents of a 1-block-thick volume.
+///
+/// Used by [`Walkway`] because walkways are always laid at a single Y;
+/// having only `x` and `z` keeps the invariant in the type rather than
+/// in an implicit `y == 1` convention spread across the codebase.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub struct Footprint {
+    /// East/west extent.
+    pub x: u32,
+    /// North/south extent.
+    pub z: u32,
+}
+
+impl Footprint {
+    /// Inflate to a full [`Dims`] with `y = 1`. The single place that
+    /// re-hydrates `y` for the lockfile / NBT path.
+    #[must_use]
+    pub fn to_dims_y1(self) -> Dims {
+        Dims {
+            x: self.x,
+            y: 1,
+            z: self.z,
+        }
+    }
 }
 
 impl Dims {

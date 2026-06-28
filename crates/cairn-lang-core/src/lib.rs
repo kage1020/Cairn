@@ -26,7 +26,9 @@ pub use block_array::{
 };
 pub use check::{Diagnostic, DiagnosticCode, Severity, check};
 pub use error::{LexError, ParseError, Position, Span};
-pub use ids::{IdError, KeyParseError, PlaceId, PortId, SiteName, WalkwayScopeKey};
+pub use ids::{
+    IdError, KeyParseError, PlaceId, PortId, SiteName, WalkwayEndpoint, WalkwayScopeKey,
+};
 pub use intent::{IntentModule, Member, MemberRole, SemanticLevel, lower};
 pub use lex::{Token, TokenKind, lex};
 pub use parse::parse;

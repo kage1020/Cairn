@@ -1,5 +1,6 @@
 //! AC L1–L8 for the lockfile module.
 
+use cairn_lang_core::SiteName;
 use cairn_lang_core::block_array::BlockArrayIr;
 use cairn_lang_core::block_array::{BlockArray, BlockState, Dims, Palette, PaletteIndex};
 use cairn_lang_core::lock::{
@@ -141,7 +142,7 @@ fn lockfile_with_walkways_roundtrips_through_yaml() {
     // catch it.
     let lf = Lockfile {
         walkways: vec![LockWalkway {
-            site: "hamlet".to_owned(),
+            site: SiteName::new("hamlet").expect("site"),
             from: "home1.entry".to_owned(),
             to: "home2.entry".to_owned(),
             path_material: "minecraft:gravel".to_owned(),

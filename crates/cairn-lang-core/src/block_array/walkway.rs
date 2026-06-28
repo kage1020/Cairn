@@ -30,10 +30,31 @@ use std::collections::HashSet;
 use std::hash::BuildHasher;
 
 use crate::ast::ValueKind;
+use crate::ids::WalkwayScopeKey;
 use crate::intent::{DefIr, Member, MemberRole};
 
 use super::openings::{WallSide, wall_length};
 use super::{BlockArray, BlockState, Dims, Palette, PaletteIndex};
+
+/// Output of [`build_walkway_array`].
+///
+/// Bundles the lowered [`BlockArray`], the world-space origin the array
+/// pins to, and the number of cells the lay-pass skipped because they
+/// collided with an existing structure. Named struct rather than a
+/// bare `(BlockArray, (i32, i32, i32), usize)` so a future axis-order
+/// shuffle or extra return value (e.g. per-cell skip mask) cannot
+/// silently re-bind callers to the wrong slot.
+#[derive(Debug, Clone, PartialEq)]
+pub struct WalkwayLayout {
+    /// The voxelised walkway.
+    pub array: BlockArray,
+    /// Absolute `(x, y, z)` origin the [`BlockArray`] lives at — the
+    /// `(min_x, port_y, min_z)` corner of the bounding box.
+    pub origin: (i32, i32, i32),
+    /// Number of cells dropped because they overlapped a placement
+    /// floor (one per `W_WALKWAY_BLOCKED` collision).
+    pub blocked_count: usize,
+}
 
 /// World-space `(x, y, z)` coordinate one block outside the named
 /// port's wall, at the ground row.
@@ -163,8 +184,8 @@ pub fn build_walkway_array<S: BuildHasher>(
     voxel_world: &[(i32, i32, i32)],
     material: BlockState,
     blocked: &HashSet<(i32, i32, i32), S>,
-    scope_key: String,
-) -> (BlockArray, (i32, i32, i32), usize) {
+    scope_key: &WalkwayScopeKey,
+) -> WalkwayLayout {
     let first = voxel_world
         .first()
         .copied()
@@ -219,9 +240,13 @@ pub fn build_walkway_array<S: BuildHasher>(
         voxels,
         block_entities: Vec::new(),
         entities: Vec::new(),
-        source_scope: scope_key,
+        source_scope: scope_key.as_str().to_owned(),
     };
-    (array, origin, blocked_count)
+    WalkwayLayout {
+        array,
+        origin,
+        blocked_count,
+    }
 }
 
 fn ident_value<'a>(member: &'a Member, key: &str) -> Option<&'a str> {
@@ -313,25 +338,35 @@ mod tests {
         assert_eq!(path, vec![(5, 0, 5)]);
     }
 
+    fn sample_key() -> WalkwayScopeKey {
+        use crate::ids::{PlaceId, PortId, SiteName};
+        let site = SiteName::new("s").expect("site");
+        let a_place = PlaceId::new("a").expect("place");
+        let a_port = PortId::new("entry").expect("port");
+        let b_place = PlaceId::new("b").expect("place");
+        let b_port = PortId::new("entry").expect("port");
+        WalkwayScopeKey::from_parts(&site, &a_place, &a_port, &b_place, &b_port)
+    }
+
     #[test]
     fn build_walkway_array_fills_unblocked_cells() {
         let path = vec![(0, 0, 0), (1, 0, 0), (1, 0, 1)];
         let blocked: HashSet<(i32, i32, i32)> = HashSet::new();
-        let (ba, origin, skipped) = build_walkway_array(
+        let layout = build_walkway_array(
             &path,
             BlockState::bare("minecraft:gravel"),
             &blocked,
-            "walkway::s::a__b".to_owned(),
+            &sample_key(),
         );
-        assert_eq!(skipped, 0);
-        assert_eq!(origin, (0, 0, 0));
-        assert_eq!(ba.dims, Dims { x: 2, y: 1, z: 2 });
+        assert_eq!(layout.blocked_count, 0);
+        assert_eq!(layout.origin, (0, 0, 0));
+        assert_eq!(layout.array.dims, Dims { x: 2, y: 1, z: 2 });
         // Three of the four cells should hold gravel; (0,0,1) was never
         // in the path, so it stays air.
         let palette_id_at = |x: u32, z: u32| -> &str {
-            let i = ba.dims.index(x, 0, z).expect("in-range");
-            let pi = ba.voxels[i];
-            ba.palette.entries[usize::from(pi.0)].id.as_str()
+            let i = layout.array.dims.index(x, 0, z).expect("in-range");
+            let pi = layout.array.voxels[i];
+            layout.array.palette.entries[usize::from(pi.0)].id.as_str()
         };
         assert_eq!(palette_id_at(0, 0), "minecraft:gravel");
         assert_eq!(palette_id_at(1, 0), "minecraft:gravel");
@@ -344,16 +379,16 @@ mod tests {
         let path = vec![(0, 0, 0), (1, 0, 0), (2, 0, 0)];
         let mut blocked: HashSet<(i32, i32, i32)> = HashSet::new();
         blocked.insert((1, 0, 0));
-        let (ba, _origin, skipped) = build_walkway_array(
+        let layout = build_walkway_array(
             &path,
             BlockState::bare("minecraft:gravel"),
             &blocked,
-            "walkway::s::a__b".to_owned(),
+            &sample_key(),
         );
-        assert_eq!(skipped, 1);
+        assert_eq!(layout.blocked_count, 1);
         // Middle cell stays air despite being on the path.
-        let mid = ba.dims.index(1, 0, 0).unwrap();
-        assert_eq!(ba.voxels[mid], PaletteIndex::AIR);
+        let mid = layout.array.dims.index(1, 0, 0).unwrap();
+        assert_eq!(layout.array.voxels[mid], PaletteIndex::AIR);
     }
 
     #[test]

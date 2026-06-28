@@ -11,7 +11,7 @@
 
 use std::path::PathBuf;
 
-use cairn_lang_core::block_array::{BlockArrayIr, Dims, PaletteIndex, lower_to_block_array};
+use cairn_lang_core::block_array::{BlockArrayIr, Footprint, PaletteIndex, lower_to_block_array};
 use cairn_lang_core::check::DiagnosticCode;
 use cairn_lang_core::{lower, parse, resolve};
 
@@ -64,10 +64,10 @@ fn l_walkway_spans_both_axes_with_pinned_bounding_box() {
     let out = lower_l_walkway();
     let walkway = out.walkways.get(WALKWAY_KEY).expect("walkway present");
     assert_eq!(walkway.site, "duo");
-    assert_eq!(walkway.from_place, "home1");
-    assert_eq!(walkway.from_port, "entry");
-    assert_eq!(walkway.to_place, "home3");
-    assert_eq!(walkway.to_port, "side_entry");
+    assert_eq!(walkway.from.place, "home1");
+    assert_eq!(walkway.from.port, "entry");
+    assert_eq!(walkway.to.place, "home3");
+    assert_eq!(walkway.to.port, "side_entry");
     assert_eq!(walkway.path_material, "minecraft:gravel");
     assert_eq!(
         walkway.origin,
@@ -75,8 +75,8 @@ fn l_walkway_spans_both_axes_with_pinned_bounding_box() {
         "L-walkway origin pins the (min_x, _, min_z) corner of the bounding box",
     );
     assert_eq!(
-        walkway.dims,
-        Dims { x: 12, y: 1, z: 16 },
+        walkway.footprint,
+        Footprint { x: 12, z: 16 },
         "L-walkway spans both axes; pure-x or pure-z geometry cannot reproduce these dims",
     );
 }
