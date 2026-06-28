@@ -17,6 +17,46 @@
 おらず、`[workspace.package].publish` は `false` のため `0.0.0` プレースホルダが外部に漏れる
 ことはありません。`2026.07.0` のリリース PR で publish を `true` にフリップします。
 
+### Changed
+
+- **BREAKING (lockfile schema):** `build.cairn.lock` の `LockWalkway.from`
+  / `LockWalkway.to` が `"PLACE.PORT"` 連結文字列ではなく
+  `{ place, port }` オブジェクトになりました。1 エンドポイントの wire 形式は
+  ```yaml
+  - site: hamlet
+    from:
+      place: home1
+      port: entry
+    to:
+      place: home2
+      port: entry
+  ```
+  になります。`[Unreleased]` 期間中に walkway lowering と同時に導入された
+  セクションのため、外部に出回っている lockfile はまだなく、互換シムは提供
+  していません。
+- `cairn-lang-core::ids` — `PlaceId` / `PortId` / `SiteName` /
+  `WalkwayEndpoint` / `WalkwayScopeKey` の newtype 群を新設し、resolver
+  (`PortRef` / `ValidatedConnect`)、block-array IR (`Walkway` / `Placement`
+  / `BlockArrayIr.walkways` のキー)、lockfile DTO (`LockPlacement` /
+  `LockWalkway`) の 3 層が同じ語彙を共有するようにしました。各識別子
+  newtype は構築時に `.` / `:` / 空白を拒否するので、port id に `.` が混入
+  したときに `walkway::SITE::a.b.c__...` が暗黙に別の `(place, port)` 対へ
+  曖昧化する旧来の silent disaster が型境界で塞がります。識別子スカラの
+  wire 形式は `#[serde(transparent)]` のおかげで変わりません。
+- `cairn-lang-core::resolve::ResolvedConnect` を `ValidatedConnect` に改名
+  しました。`path` は `ValueWithSpan` のまま据え置きで、per-edition の
+  `BlockState` への lift は registry pack resolver を持つ `cairn-lang-formats`
+  クレートが下流に位置する以上、`resolve` 層では行いません。
+- `cairn-lang-core::block_array::Walkway` の `dims: Dims` を
+  `footprint: Footprint { x, z }` に置換しました。walkway は常に 1 ブロック
+  厚なので、`y = 1` の invariant が型に出るようになり、`Footprint::to_dims_y1`
+  が lockfile 書き出し時 1 箇所だけで暗黙の `y` を補います。
+- `cairn-lang-core::block_array::build_walkway_array` の戻り値を
+  `(BlockArray, (i32, i32, i32), usize)` の生 3-tuple から
+  `WalkwayLayout { array, origin, blocked_count }` の named struct に
+  変更しました。呼び出し側が origin と blocked_count を暗黙にスワップする
+  事故を型レベルで防ぎます。
+
 ### Added
 
 - `cairn-lang-core::check::DiagnosticData` — `Diagnostic` に機械可読

@@ -1,0 +1,36 @@
+---
+source: crates/cairn-lang-core/tests/lock.rs
+assertion_line: 186
+expression: body
+---
+source_hash: "sha256:11102e6ea692987aa6358753f9d02cae6e853a53df3202b0bfdac11ecdcb6a31"
+cairn_version: "2026.09"
+target:
+  edition: java
+  mc_version: "1.21.4"
+  data_version: 4189
+inputs:
+  registry_pack_hash: "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+  constraint_catalog_hash: "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+resolved_ir_hash: "sha256:08c85bd37cdd0ffce8c39ecd7c7f0ff94e6f45af2aa986673b0c9f1a8a2fffea"
+verified: true
+member_version_sensitivity:
+  - id: yard_water
+    reason: cauldron split at 1.17
+walkways:
+  - site: hamlet
+    from: 
+      place: home1
+      port: entry
+    to: 
+      place: home2
+      port: entry
+    path_material: "minecraft:gravel"
+    origin: 
+      - 5
+      - 0
+      - 8
+    dims: 
+      - 16
+      - 1
+      - 1

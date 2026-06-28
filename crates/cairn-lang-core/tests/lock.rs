@@ -6,6 +6,7 @@ use cairn_lang_core::lock::{
     HashHex, HashParseError, LockEdition, LockInputs, LockTarget, LockWalkway, Lockfile,
     MemberSensitivity, hash_resolved_ir, hash_source,
 };
+use cairn_lang_core::{PlaceId, PortId, SiteName, WalkwayEndpoint};
 use indexmap::IndexMap;
 
 fn unit_ir(palette: Palette) -> BlockArrayIr {
@@ -131,6 +132,26 @@ fn l6_lockfile_yaml_key_order_matches_spec() {
     assert_eq!(keys, expected);
 }
 
+fn sample_lockfile_with_walkways() -> Lockfile {
+    Lockfile {
+        walkways: vec![LockWalkway {
+            site: SiteName::new("hamlet").expect("site"),
+            from: WalkwayEndpoint {
+                place: PlaceId::new("home1").expect("place"),
+                port: PortId::new("entry").expect("port"),
+            },
+            to: WalkwayEndpoint {
+                place: PlaceId::new("home2").expect("place"),
+                port: PortId::new("entry").expect("port"),
+            },
+            path_material: "minecraft:gravel".to_owned(),
+            origin: [5, 0, 8],
+            dims: [16, 1, 1],
+        }],
+        ..sample_lockfile()
+    }
+}
+
 #[test]
 fn lockfile_with_walkways_roundtrips_through_yaml() {
     // A lockfile carrying a non-empty `walkways:` section must
@@ -139,23 +160,62 @@ fn lockfile_with_walkways_roundtrips_through_yaml() {
     // rename and the `sample_lockfile()` round-trip (which leaves
     // `walkways: vec![]` and so skips the section entirely) would not
     // catch it.
-    let lf = Lockfile {
-        walkways: vec![LockWalkway {
-            site: "hamlet".to_owned(),
-            from: "home1.entry".to_owned(),
-            to: "home2.entry".to_owned(),
-            path_material: "minecraft:gravel".to_owned(),
-            origin: [5, 0, 8],
-            dims: [16, 1, 1],
-        }],
-        ..sample_lockfile()
-    };
+    let lf = sample_lockfile_with_walkways();
     let body = serde_yml::to_string(&lf).expect("encode");
     let parsed: Lockfile = serde_yml::from_str(&body).expect("decode");
     assert_eq!(lf, parsed);
+    assert_eq!(parsed.walkways.len(), 1);
+    // Assert through the typed structure rather than a substring of the
+    // YAML body so an indentation tweak in `serde_yml` cannot turn a
+    // green test into a silent regression on the wire shape.
+    let w = &parsed.walkways[0];
+    assert_eq!(w.from.place.as_str(), "home1");
+    assert_eq!(w.from.port.as_str(), "entry");
+    assert_eq!(w.to.place.as_str(), "home2");
+    assert_eq!(w.to.port.as_str(), "entry");
+}
+
+#[test]
+fn lockfile_walkways_yaml_snapshot() {
+    // Pin the full wire shape of a walkway-bearing lockfile (key order,
+    // nested `from`/`to` objects, `dims` as a 3-element list) so a
+    // future struct reshuffle is caught here before downstream tooling
+    // that greps the lockfile breaks. The `sample_lockfile()` snapshot
+    // (`l8_*`) covers the walkway-less case; this is its companion.
+    let body = serde_yml::to_string(&sample_lockfile_with_walkways()).expect("encode");
+    insta::assert_snapshot!(body);
+}
+
+#[test]
+fn lockfile_yaml_rejects_legacy_string_walkway_endpoint() {
+    // Pre-newtype lockfiles encoded `from`/`to` as a single
+    // `"PLACE.PORT"` joined string. A `#[serde(untagged)]` fallback
+    // that quietly accepted the legacy form would re-open the
+    // silent-disaster the newtype split was meant to close, so the
+    // reject must stay loud. Construct the offending YAML by hand so
+    // the test does not depend on whatever the current encoder emits.
+    let body = format!(
+        concat!(
+            "source_hash: {zero}\ncairn_version: '2026.09'\n",
+            "target:\n  edition: java\n  mc_version: '1.21.4'\n  data_version: 4189\n",
+            "inputs:\n  registry_pack_hash: {zero}\n  constraint_catalog_hash: {zero}\n",
+            "resolved_ir_hash: {zero}\nverified: true\nmember_version_sensitivity: []\n",
+            "walkways:\n",
+            "  - site: hamlet\n",
+            "    from: home1.entry\n",
+            "    to: home2.entry\n",
+            "    path_material: 'minecraft:gravel'\n",
+            "    origin: [5, 0, 8]\n",
+            "    dims: [16, 1, 1]\n",
+        ),
+        zero = HashHex::ZERO_STR,
+    );
+    let err = serde_yml::from_str::<Lockfile>(&body).expect_err("legacy string walkway endpoint");
+    let msg = err.to_string();
     assert!(
-        body.contains("walkways:"),
-        "non-empty walkways must reach the YAML body, got:\n{body}",
+        msg.contains("place") || msg.contains("expected") || msg.contains("invalid"),
+        "expected a structural deserialise error pointing at the missing `place`/`port` \
+         fields, got: {msg}",
     );
 }
 

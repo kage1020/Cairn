@@ -9,6 +9,7 @@
 use serde::{Deserialize, Serialize};
 
 use super::hash::HashHex;
+use crate::ids::{PlaceId, SiteName, WalkwayEndpoint};
 
 /// The whole lockfile, as written to `build.cairn.lock`.
 ///
@@ -57,9 +58,9 @@ pub struct Lockfile {
 pub struct LockPlacement {
     /// `site` name the placement belongs to (bare, without the `site::`
     /// IR-key prefix).
-    pub site: String,
+    pub site: SiteName,
     /// `place id=` value.
-    pub id: String,
+    pub id: PlaceId,
     /// `place use=` target.
     pub def: String,
     /// `place theme=` target.
@@ -84,11 +85,14 @@ pub struct LockPlacement {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct LockWalkway {
     /// `site` name the walkway belongs to (bare, no `site::` prefix).
-    pub site: String,
-    /// `from` port as `PLACE.PORT` (e.g. `home1.entry`).
-    pub from: String,
-    /// `to` port as `PLACE.PORT`.
-    pub to: String,
+    pub site: SiteName,
+    /// `from` endpoint as a `{ place, port }` pair. Stored as a
+    /// structured object rather than a `"PLACE.PORT"` string so a port
+    /// id is never re-parsed from a `.`-separated token — the type
+    /// boundary catches the silent disaster the string form risked.
+    pub from: WalkwayEndpoint,
+    /// `to` endpoint, same shape as [`Self::from`].
+    pub to: WalkwayEndpoint,
     /// Canonical Minecraft id of the path material laid into the
     /// walkway (e.g. `minecraft:gravel`).
     pub path_material: String,

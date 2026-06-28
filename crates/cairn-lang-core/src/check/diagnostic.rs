@@ -156,6 +156,14 @@ pub enum DiagnosticCode {
     /// `connect` did nothing; mirrors the `W_DEFERRED_MEMBER` pattern used
     /// by walkway endpoint cascades in `block_array::lower`.
     DeferredConnect,
+    /// A `connect` row whose site / place / port identifier contains the
+    /// `__` substring. The surface lexer permits `_` in identifiers, but
+    /// the canonical walkway scope key uses `__` as the `from`/`to`
+    /// separator — so `(home, b__c, home2, entry)` and
+    /// `(home, b, c__home2, entry)` would otherwise encode to the same
+    /// wire string. Lowering drops the row and asks the user to rename
+    /// the offending segment so the encoding stays unambiguous.
+    InvalidWalkwayIdent,
 }
 
 impl DiagnosticCode {
@@ -192,6 +200,7 @@ impl DiagnosticCode {
             Self::WalkwayBlocked => "W_WALKWAY_BLOCKED",
             Self::DuplicateWalkway => "W_DUPLICATE_WALKWAY",
             Self::DeferredConnect => "W_DEFERRED_CONNECT",
+            Self::InvalidWalkwayIdent => "W_INVALID_WALKWAY_IDENT",
         }
     }
 
@@ -236,7 +245,8 @@ impl DiagnosticCode {
             | Self::UnusedDef
             | Self::WalkwayBlocked
             | Self::DuplicateWalkway
-            | Self::DeferredConnect => Severity::Warning,
+            | Self::DeferredConnect
+            | Self::InvalidWalkwayIdent => Severity::Warning,
         }
     }
 }
@@ -564,6 +574,10 @@ mod tests {
             (DiagnosticCode::WalkwayBlocked, "W_WALKWAY_BLOCKED"),
             (DiagnosticCode::DuplicateWalkway, "W_DUPLICATE_WALKWAY"),
             (DiagnosticCode::DeferredConnect, "W_DEFERRED_CONNECT"),
+            (
+                DiagnosticCode::InvalidWalkwayIdent,
+                "W_INVALID_WALKWAY_IDENT",
+            ),
         ] {
             assert_eq!(code.as_str(), expected, "{code:?}");
         }
@@ -605,6 +619,7 @@ mod tests {
             DiagnosticCode::WalkwayBlocked,
             DiagnosticCode::DuplicateWalkway,
             DiagnosticCode::DeferredConnect,
+            DiagnosticCode::InvalidWalkwayIdent,
         ] {
             assert_eq!(code.severity(), Severity::Warning, "{code:?}");
         }

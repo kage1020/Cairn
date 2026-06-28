@@ -35,7 +35,7 @@
 //!
 //! `connect` rows resolve at the same layer: the `from.port` / `to.port`
 //! `DotRef`s on either side of the `to` keyword are matched against the
-//! referenced placement's `def` body, producing one [`ResolvedConnect`]
+//! referenced placement's `def` body, producing one [`ValidatedConnect`]
 //! per row. Missing port ids fail loud with `E_UNRESOLVED_PORT` (with a
 //! nearest-match note); a `def` exposing the same `id=` on more than one
 //! member raises `E_AMBIGUOUS_PORT`; an absent `path=` triggers
@@ -56,6 +56,7 @@ use serde::Serialize;
 use crate::ast::{Value, ValueKind};
 use crate::check::{Diagnostic, DiagnosticCode, DiagnosticNote, Severity};
 use crate::error::Span;
+use crate::ids::{PlaceId, PortId, SiteName};
 use crate::intent::{
     DefIr, IntentModule, Member, MemberBody, MemberRole, SiteIr, StructIr, ThemeIr, ValueWithSpan,
     role_of,
@@ -86,7 +87,7 @@ pub struct Resolution {
     /// Empty for any file that declares no `connect` lines, matching the
     /// `placements` shape on [`crate::block_array::BlockArrayIr`].
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub connects: Vec<ResolvedConnect>,
+    pub connects: Vec<ValidatedConnect>,
     /// Diagnostics gathered during resolution. The `check` pipeline merges
     /// these with the rest of `cairn check`'s output.
     #[serde(skip)]
@@ -94,27 +95,32 @@ pub struct Resolution {
 }
 
 /// One end of a `connect a.PORT to b.PORT` row, resolved into a
-/// `(place_id, port_id)` pair the block-array lowering can look up
-/// directly.
+/// `(place, port)` pair the block-array lowering can look up directly.
 ///
-/// `place_id` is the `id=` of the named place; `port_id` is the `id=`
-/// of the matching member inside that place's `def`. The span points at
-/// the originating `DotRef` value in source so the resolver-side
+/// `place` is the `id=` of the named place; `port` is the `id=` of the
+/// matching member inside that place's `def`. The span points at the
+/// originating `DotRef` value in source so the resolver-side
 /// diagnostics (`E_UNRESOLVED_PORT`, `E_AMBIGUOUS_PORT`,
 /// `E_UNRESOLVED_PLACE_REF` from the connect path) can underline the
 /// exact token the user wrote, not the whole `connect` line. Block-array
 /// side diagnostics (`W_WALKWAY_BLOCKED`, `W_DUPLICATE_WALKWAY`, the
 /// endpoint-cascade `W_DEFERRED_MEMBER`) describe the whole walkway and
-/// therefore anchor at `ResolvedConnect::span` instead.
+/// therefore anchor at `ValidatedConnect::span` instead.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct PortRef {
     /// `place id=` value the port belongs to.
-    pub place_id: String,
+    pub place: PlaceId,
     /// Member `id=` exposed by the place's def.
-    pub port_id: String,
+    pub port: PortId,
     /// Byte range of the `place.port` token in source.
     #[serde(skip)]
     pub span: Span,
+}
+
+impl std::fmt::Display for PortRef {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}.{}", self.place, self.port)
+    }
 }
 
 /// One `connect from.port to to.port path=@MATERIAL` row, validated.
@@ -123,10 +129,16 @@ pub struct PortRef {
 /// path material as a `ValueWithSpan` so `resolve_block_state` can
 /// process it uniformly with `mat_slot=` values, the originating site
 /// name, and the row's span for follow-up diagnostics).
+///
+/// The `path` is intentionally still a [`ValueWithSpan`] (and not a
+/// lifted `BlockState`) at this layer: per-edition material resolution
+/// is the responsibility of the next maturity tier (see
+/// [`crate::resolve`] module docs), and lifting here would invert the
+/// `core` → `formats` dependency edge that owns the registry pack.
 #[derive(Debug, Clone, PartialEq, Serialize)]
-pub struct ResolvedConnect {
+pub struct ValidatedConnect {
     /// Bare site name (no `site::` IR-key prefix).
-    pub site: String,
+    pub site: SiteName,
     /// First port — `from.port`.
     pub from: PortRef,
     /// Second port — `to.port`.
@@ -213,7 +225,7 @@ pub fn resolve(ir: &IntentModule) -> Resolution {
         scopes.insert(def_key(d), resolution);
     }
     let mut used_defs: HashSet<String> = HashSet::new();
-    let mut connects: Vec<ResolvedConnect> = Vec::new();
+    let mut connects: Vec<ValidatedConnect> = Vec::new();
     for site in &ir.sites {
         resolve_site_placements(
             site,
@@ -295,7 +307,7 @@ fn resolve_site_placements(
     applied_themes: &mut HashSet<String>,
     scopes: &mut IndexMap<String, ScopeResolution>,
     used_defs: &mut HashSet<String>,
-    connects: &mut Vec<ResolvedConnect>,
+    connects: &mut Vec<ValidatedConnect>,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     // Local index lets each `east_of=ID` / `north_of=ID` lookup name a
@@ -468,7 +480,7 @@ fn resolve_connect_row(
     defs: &[DefIr],
     seen_place_ids: &IndexMap<String, Span>,
     place_def: &IndexMap<String, String>,
-    connects: &mut Vec<ResolvedConnect>,
+    connects: &mut Vec<ValidatedConnect>,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     // Surface positional shape from the snapshot:
@@ -555,8 +567,8 @@ fn resolve_connect_row(
         return;
     }
 
-    connects.push(ResolvedConnect {
-        site: site_name.to_owned(),
+    connects.push(ValidatedConnect {
+        site: SiteName::new(site_name).expect("surface lexer enforces SiteName invariants"),
         from,
         to,
         path,
@@ -611,21 +623,28 @@ fn port_ref_from_value(
         });
         return None;
     }
-    let place_id = dot.head().to_owned();
-    let port_id = dot.tail()[0].clone();
-    if !seen_place_ids.contains_key(&place_id) {
+    let place_str = dot.head();
+    let port_str = dot.tail()[0].as_str();
+    if !seen_place_ids.contains_key(place_str) {
         let prior: Vec<&str> = seen_place_ids.keys().map(String::as_str).collect();
         diagnostics.push(unresolved_place_ref_diag(
-            &format!("`{side}={place_id}.{port_id}` does not name a prior place in this site"),
+            &format!("`{side}={place_str}.{port_str}` does not name a prior place in this site"),
             raw.span.clone(),
-            &place_id,
+            place_str,
             prior.iter().copied(),
         ));
         return None;
     }
+    // INVARIANT(upstream-diagnosed): the surface lexer's `Ident` rule
+    // forbids `.`, `:`, and whitespace, so any `DotRef` segment that
+    // reached this point is already a valid newtype payload — the
+    // `.expect` failure mode would mean the lexer accepted a token the
+    // surface grammar forbids. Cheaper than re-validating per row.
+    let place = PlaceId::new(place_str).expect("surface lexer enforces PlaceId invariants");
+    let port = PortId::new(port_str).expect("surface lexer enforces PortId invariants");
     Some(PortRef {
-        place_id,
-        port_id,
+        place,
+        port,
         span: raw.span.clone(),
     })
 }
@@ -642,7 +661,7 @@ fn validate_port(
     place_def: &IndexMap<String, String>,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> bool {
-    let Some(def_name) = place_def.get(&port.place_id) else {
+    let Some(def_name) = place_def.get(port.place.as_str()) else {
         // `port_ref_from_value` already gates the lift on
         // `seen_place_ids`, so reaching here means `port.place_id` is
         // registered but its `place_def` entry never landed. The arms
@@ -672,8 +691,8 @@ fn validate_port(
             primary: format!(
                 "`connect` target `{place_id}.{port_id}` references a place with no resolved \
                  def/theme; no walkway laid",
-                place_id = port.place_id,
-                port_id = port.port_id,
+                place_id = port.place,
+                port_id = port.port,
             ),
             notes: vec![DiagnosticNote {
                 span: None,
@@ -701,7 +720,7 @@ fn validate_port(
              absent from `defs` — `resolve_site_placements` was supposed to gate `place_def` \
              insertion on def presence",
             def_name = def_name,
-            place_id = port.place_id,
+            place_id = port.place,
         );
         return false;
     };
@@ -709,23 +728,23 @@ fn validate_port(
     let matches: Vec<&Member> = def
         .members
         .iter()
-        .filter(|m| m.id.as_deref() == Some(port.port_id.as_str()))
+        .filter(|m| m.id.as_deref() == Some(port.port.as_str()))
         .collect();
     match matches.len() {
         0 => {
             let pool: Vec<&str> = def.members.iter().filter_map(|m| m.id.as_deref()).collect();
             let mut notes = Vec::with_capacity(2);
-            if let Some(suggested) = nearest_match(&port.port_id, pool.iter().copied()) {
+            if let Some(suggested) = nearest_match(port.port.as_str(), pool.iter().copied()) {
                 notes.push(DiagnosticNote {
                     span: None,
-                    message: format!("did you mean `{}.{suggested}`?", port.place_id),
+                    message: format!("did you mean `{}.{suggested}`?", port.place),
                 });
             }
             notes.push(DiagnosticNote {
                 span: None,
                 message: format!(
                     "add `id={port_id}` to a member of `def {def_name}` (e.g. `door id={port_id} ...`)",
-                    port_id = port.port_id,
+                    port_id = port.port,
                     def_name = def_name,
                 ),
             });
@@ -735,9 +754,9 @@ fn validate_port(
                 span: port.span.clone(),
                 primary: format!(
                     "port `{port_id}` is not declared by `def {def_name}` (used by `place {place_id}`)",
-                    port_id = port.port_id,
+                    port_id = port.port,
                     def_name = def_name,
-                    place_id = port.place_id,
+                    place_id = port.place,
                 ),
                 notes,
                 data: None,
@@ -752,7 +771,7 @@ fn validate_port(
                 span: port.span.clone(),
                 primary: format!(
                     "port `{port_id}` matches {n} members of `def {def_name}`; the reference is ambiguous",
-                    port_id = port.port_id,
+                    port_id = port.port,
                     def_name = def_name,
                 ),
                 notes: vec![DiagnosticNote {
@@ -1375,8 +1394,8 @@ mod tests {
     #[test]
     fn connect_resolves_to_port_refs_with_path_material() {
         // Two cottages connected by gravel — the canonical village shape.
-        // The resolver must build one `ResolvedConnect` carrying both
-        // `(place_id, port_id)` pairs plus the `path=@gravel` value, with
+        // The resolver must build one `ValidatedConnect` carrying both
+        // `(place, port)` pairs plus the `path=@gravel` value, with
         // no diagnostics.
         let src = concat!(
             "theme t:\n",
@@ -1400,10 +1419,10 @@ mod tests {
         assert_eq!(r.connects.len(), 1, "exactly one connect resolved");
         let c = &r.connects[0];
         assert_eq!(c.site, "s");
-        assert_eq!(c.from.place_id, "a");
-        assert_eq!(c.from.port_id, "entry");
-        assert_eq!(c.to.place_id, "b");
-        assert_eq!(c.to.port_id, "entry");
+        assert_eq!(c.from.place, "a");
+        assert_eq!(c.from.port, "entry");
+        assert_eq!(c.to.place, "b");
+        assert_eq!(c.to.port, "entry");
     }
 
     #[test]

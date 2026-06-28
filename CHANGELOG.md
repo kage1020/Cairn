@@ -15,6 +15,49 @@ records what has been built into the repository in preparation for that release.
 crate has been published to crates.io yet; `[workspace.package].publish` is `false` so the `0.0.0`
 placeholder cannot leak out. The `2026.07.0` release PR will flip publish to `true`.
 
+### Changed
+
+- **BREAKING (lockfile schema):** `LockWalkway.from` and `LockWalkway.to`
+  in `build.cairn.lock` are now `{ place, port }` objects rather than
+  `"PLACE.PORT"` joined strings. The wire format for a single endpoint
+  becomes
+  ```yaml
+  - site: hamlet
+    from:
+      place: home1
+      port: entry
+    to:
+      place: home2
+      port: entry
+  ```
+  No on-disk lockfiles exist in the wild yet (the lockfile section
+  landed alongside walkway lowering in the same `[Unreleased]` window),
+  so no compatibility shim is provided.
+- `cairn-lang-core::ids` — new `PlaceId` / `PortId` / `SiteName` /
+  `WalkwayEndpoint` / `WalkwayScopeKey` newtypes the resolver
+  (`PortRef`, `ValidatedConnect`), block-array IR (`Walkway`,
+  `Placement`, `BlockArrayIr.walkways` key), and lockfile DTOs
+  (`LockPlacement`, `LockWalkway`) all share. Each identifier newtype
+  rejects `.`, `:`, and whitespace at construction so a port id
+  containing `.` (which would otherwise make
+  `walkway::SITE::a.b.c__...` silently ambiguous) is caught at the
+  type boundary rather than re-parsed later. Wire format for
+  identifier scalars is unchanged thanks to `#[serde(transparent)]`.
+- `cairn-lang-core::resolve::ResolvedConnect` was renamed to
+  `ValidatedConnect`. `path` is still a `ValueWithSpan` — per-edition
+  lifting to a `BlockState` stays in the lowering layer because the
+  registry pack resolver lives in `cairn-lang-formats`, downstream of
+  `resolve`.
+- `cairn-lang-core::block_array::Walkway` replaces `dims: Dims` with
+  `footprint: Footprint { x, z }`. Walkways are always one block
+  thick, so the `y = 1` invariant is now visible in the type;
+  `Footprint::to_dims_y1` re-attaches the implicit `y` at the single
+  CLI site that emits a lockfile entry.
+- `cairn-lang-core::block_array::build_walkway_array` returns a named
+  `WalkwayLayout { array, origin, blocked_count }` instead of a bare
+  `(BlockArray, (i32, i32, i32), usize)` tuple, so callers cannot
+  silently rebind the origin and the blocked count.
+
 ### Added
 
 - `cairn-lang-core::check::DiagnosticData` — new public enum that
