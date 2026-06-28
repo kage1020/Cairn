@@ -9,7 +9,7 @@ use crate::error::{Position, Span};
 /// Severity of a single [`Diagnostic`].
 ///
 /// `Error` participates in the `cairn check` exit code (any error → exit 1);
-/// `Warning` does not. Stable per `spec/lint.md` §11.2: errors are things
+/// `Warning` does not. Stable per `spec/lint.md` §11.3: errors are things
 /// that, left alone, cause unintended results; warnings are advisory drift.
 /// Both variants ship in the public enum so a new `Warning` code can land
 /// without changing the discriminant a downstream matcher already pinned.
@@ -199,7 +199,7 @@ impl DiagnosticCode {
     ///
     /// Errors are silent-substitution-style problems that would otherwise
     /// feed bad data into later passes; warnings are advisory drift that
-    /// does not block a build. See `spec/lint.md` §11.2 for the rule.
+    /// does not block a build. See `spec/lint.md` §11.3 for the rule.
     /// The block-array lowering warnings (`W_DEFERRED_MEMBER`,
     /// `W_NO_THEME_BOUND`, `W_ABSTRACT_TOKEN_DEFERRED`, `W_STRUCT_NO_SIZE`)
     /// each mark a partial-build degradation rather than an unsalvageable
@@ -250,6 +250,36 @@ impl Serialize for DiagnosticCode {
     }
 }
 
+/// Machine-readable payload attached to a [`Diagnostic`].
+///
+/// Lets downstream tooling (LSP quick-fix, CI annotator, test asserts)
+/// inspect structured numeric / categorical fields without re-parsing the
+/// human-readable `primary` string. `tag = "kind"` is used so the JSON
+/// form (`{"kind":"walkway_blocked","skipped":3}`) carries a stable
+/// discriminator that downstream matchers pin on.
+///
+/// `#[non_exhaustive]` on the enum protects consumer exhaust matches
+/// against **new variants** landing for additional codes as the
+/// diagnostic surface is still **Evolving**. Adding a new field to an
+/// existing variant is still breaking by itself; per-variant
+/// `#[non_exhaustive]` is added on a per-case basis when a follow-up
+/// expansion is anticipated.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum DiagnosticData {
+    /// Companion payload for [`DiagnosticCode::WalkwayBlocked`]. `skipped`
+    /// is the number of cells along the L-shaped path that overlapped an
+    /// existing structure and were dropped from the walkway lay.
+    WalkwayBlocked {
+        /// Count of cells the walkway lowering had to skip. Invariant:
+        /// `>= 1` — `lower_connects` only emits `W_WALKWAY_BLOCKED` when
+        /// the underlying `skipped > 0`. Typed as `u64` so `usize` lifts
+        /// without lossy truncation on any platform Cairn supports.
+        skipped: u64,
+    },
+}
+
 /// Secondary location for a [`Diagnostic`] (the "first declared here"
 /// pointer attached to a duplicate-key error, etc.).
 ///
@@ -269,7 +299,16 @@ pub struct DiagnosticNote {
 }
 
 /// One finding emitted by a `check` pass.
+///
+/// `#[non_exhaustive]` so external crates cannot construct a
+/// [`Diagnostic`] by struct literal — when a future field arrives
+/// (another structured payload slot, a `source` pointer, etc.) the
+/// addition is no longer a breaking change for downstream callers.
+/// In-crate sites still build the struct directly and update in step
+/// when new fields land; cross-crate consumers must route through a
+/// future builder rather than depending on the field set being frozen.
 #[derive(Debug, Clone, PartialEq, Serialize)]
+#[non_exhaustive]
 pub struct Diagnostic {
     /// Stable code identifying the kind of finding.
     pub code: DiagnosticCode,
@@ -285,6 +324,12 @@ pub struct Diagnostic {
     /// `note: ...` lines in the text format.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub notes: Vec<DiagnosticNote>,
+    /// Optional structured payload for machine-readable consumers. `None`
+    /// for codes that have no companion data yet. Serialised as a `data`
+    /// key only when present, keeping the JSON contract additive for
+    /// existing downstream tooling.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub data: Option<DiagnosticData>,
 }
 
 impl Diagnostic {
@@ -337,6 +382,7 @@ impl Diagnostic {
                     message: n.message.clone(),
                 })
                 .collect(),
+            data: self.data.clone(),
         }
     }
 }
@@ -367,6 +413,11 @@ pub struct RenderedDiagnostic {
     /// secondary location.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub notes: Vec<RenderedNote>,
+    /// Mirror of [`Diagnostic::data`] — see that field for the full
+    /// contract. Carried separately so the rendered form can be
+    /// serialised without re-walking the source `Diagnostic`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub data: Option<DiagnosticData>,
 }
 
 /// JSON-friendly rendering of a [`DiagnosticNote`].
@@ -521,7 +572,7 @@ mod tests {
     #[test]
     fn code_severity_matches_spec() {
         // Errors block a build; warnings are advisory. The split here mirrors
-        // `spec/lint.md` §11.2.
+        // `spec/lint.md` §11.3.
         for code in [
             DiagnosticCode::DuplicateSize,
             DiagnosticCode::DuplicateSlot,
@@ -579,6 +630,64 @@ mod tests {
         let pos = position_at(source, 99);
         assert_eq!(pos.line.get(), 2);
         assert_eq!(pos.col.get(), 1);
+    }
+
+    #[test]
+    fn diagnostic_data_walkway_blocked_serialises_with_kind_tag() {
+        // AC1 from issue #40: the structured payload must surface as
+        // `{"kind":"walkway_blocked","skipped":N}` so downstream tooling
+        // can match on a stable discriminator instead of re-parsing the
+        // human-readable `primary` string.
+        let value = serde_json::to_value(DiagnosticData::WalkwayBlocked { skipped: 3 })
+            .expect("serialise payload");
+        assert_eq!(
+            value,
+            serde_json::json!({"kind": "walkway_blocked", "skipped": 3}),
+        );
+    }
+
+    #[test]
+    fn rendered_diagnostic_omits_data_key_when_payload_absent() {
+        // AC3: `data: None` must serialise to *no key at all* so existing
+        // JSON consumers that did not opt into the new field keep working.
+        let lines = LineStarts::new("abc\n");
+        let diag = Diagnostic {
+            code: DiagnosticCode::DuplicateSize,
+            severity: Severity::Error,
+            span: Span { start: 0, end: 3 },
+            primary: "duplicate size".to_owned(),
+            notes: vec![],
+            data: None,
+        };
+        let rendered = diag.render("abc\n", &lines);
+        let value = serde_json::to_value(&rendered).expect("serialise rendered");
+        let object = value.as_object().expect("rendered as object");
+        assert!(
+            !object.contains_key("data"),
+            "data key should be omitted when payload is None, got {value}",
+        );
+    }
+
+    #[test]
+    fn rendered_diagnostic_propagates_data_payload_when_present() {
+        // AC2 boundary at the render layer: a `Diagnostic` carrying a
+        // payload must lift it into `RenderedDiagnostic` so the JSON
+        // formatter (and any other consumer of `render`) sees the same
+        // structured data the in-memory finding holds.
+        let lines = LineStarts::new("abc\n");
+        let diag = Diagnostic {
+            code: DiagnosticCode::WalkwayBlocked,
+            severity: Severity::Warning,
+            span: Span { start: 0, end: 3 },
+            primary: "walkway skipped 3 cells".to_owned(),
+            notes: vec![],
+            data: Some(DiagnosticData::WalkwayBlocked { skipped: 3 }),
+        };
+        let rendered = diag.render("abc\n", &lines);
+        assert_eq!(
+            rendered.data,
+            Some(DiagnosticData::WalkwayBlocked { skipped: 3 }),
+        );
     }
 
     #[test]

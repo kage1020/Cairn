@@ -34,7 +34,7 @@ use std::collections::HashSet;
 use indexmap::IndexMap;
 
 use crate::ast::ValueKind;
-use crate::check::{Diagnostic, DiagnosticCode, DiagnosticNote, Severity};
+use crate::check::{Diagnostic, DiagnosticCode, DiagnosticData, DiagnosticNote, Severity};
 use crate::error::Span;
 use crate::intent::{
     DefIr, IntentModule, Member, MemberRole, SiteIr, Size, StructIr, ValueWithSpan,
@@ -263,6 +263,7 @@ fn lower_connects(
                         "ports currently require a `door` member with `side=front|back|left|right` and `at=center`"
                             .to_owned(),
                 }],
+                data: None,
             });
             continue;
         };
@@ -303,6 +304,7 @@ fn lower_connects(
                     message: "remove the duplicate or rewrite it to connect a different port pair"
                         .to_owned(),
                 }],
+                data: None,
             });
             continue;
         }
@@ -373,6 +375,9 @@ fn lower_connects(
                         "widen the placement gap so the walkway can route around the obstacle"
                             .to_owned(),
                 }],
+                data: Some(DiagnosticData::WalkwayBlocked {
+                    skipped: skipped as u64,
+                }),
             });
         }
         let dims = array.dims;
@@ -430,6 +435,7 @@ fn diag_walkway_endpoint_skipped(
                  E_UNRESOLVED_PLACE_REF fires, so the cascade never points there)"
                 .to_owned(),
         }],
+        data: None,
     }
 }
 
@@ -450,6 +456,7 @@ fn diag_walkway_abstract_token(
                 "use a canonical block token (e.g. `path=@gravel`) until the registry pack ships"
                     .to_owned(),
         }],
+        data: None,
     }
 }
 
@@ -478,6 +485,7 @@ fn diag_walkway_unknown_token(
             "abstract path token `@{token}` is not declared by the registry pack's materials catalog",
         ),
         notes,
+        data: None,
     }
 }
 
@@ -1591,6 +1599,7 @@ fn diag_struct_no_size(s: &StructIr) -> Diagnostic {
             span: None,
             message: "add a `size=WxH` header to give the struct a voxel footprint".to_owned(),
         }],
+        data: None,
     }
 }
 
@@ -1612,6 +1621,7 @@ fn diag_no_theme_bound_generic(kind: BodyKind, label: &str, header_span: &Span) 
                       `place` for multi-theme files"
                 .to_owned(),
         }],
+        data: None,
     }
 }
 
@@ -1628,6 +1638,7 @@ fn diag_def_no_size(def: &DefIr) -> Diagnostic {
             span: None,
             message: "add a `size=WxH` header to give the def a voxel footprint".to_owned(),
         }],
+        data: None,
     }
 }
 
@@ -1652,6 +1663,7 @@ fn diag_deferred_member_reason(member: &Member, reason: &str) -> Diagnostic {
                       lowering rules are spec'd"
                 .to_owned(),
         }],
+        data: None,
     }
 }
 
@@ -1669,6 +1681,7 @@ fn diag_abstract_token(member: &Member, token: &str, slot: &ValueWithSpan) -> Di
                 "use a canonical block token (e.g. `@oak_planks`) until the registry pack ships"
                     .to_owned(),
         }],
+        data: None,
     }
 }
 
@@ -1700,6 +1713,7 @@ fn diag_unknown_abstract_token(
         span: member_or_slot_span(member, slot),
         primary,
         notes,
+        data: None,
     }
 }
 
@@ -2577,11 +2591,55 @@ mod tests {
             "expected one W_WALKWAY_BLOCKED, got {:?}",
             out.diagnostics,
         );
-        assert!(
-            blocked[0].primary.contains("skipped 3 cells"),
-            "expected the primary to name three skipped cells, got {}",
+        assert_eq!(
+            blocked[0].data,
+            Some(DiagnosticData::WalkwayBlocked { skipped: 3 }),
+            "expected the structured payload to report three skipped cells, got data={:?} primary={}",
+            blocked[0].data,
             blocked[0].primary,
         );
+        // AC4 from issue #40: the `primary` string is part of the gcc-style
+        // text-format contract that humans (and existing pre-payload test
+        // harnesses) read; the structured `data` is meant to *augment* it,
+        // not replace it. Asserting both keeps a regression that drops
+        // `{skipped}` from the format string — or changes the
+        // `port_label` shape — from sliding past CI.
+        assert!(
+            blocked[0].primary.contains("skipped 3 cells"),
+            "primary text contract must still name the skip count, got {}",
+            blocked[0].primary,
+        );
+        // The render → JSON path is the contract surface for downstream
+        // tooling (LSP quick-fix, CI annotator). Locking the serialised
+        // shape here keeps the `cairn check --format json` payload stable
+        // even though the `check` CLI does not itself drive walkway
+        // lowering — any future caller that wires the JSON formatter
+        // around `lower_to_block_array` inherits the same contract.
+        let source = walkway_with_blocked_path_source();
+        let lines = crate::check::LineStarts::new(source);
+        let rendered = blocked[0].render(source, &lines);
+        let value = serde_json::to_value(&rendered).expect("rendered serialises");
+        assert_eq!(
+            value["data"],
+            serde_json::json!({"kind": "walkway_blocked", "skipped": 3}),
+            "JSON `data` payload must match the structured contract, got {value}",
+        );
+        // AC3 negative-case ride-along: every *other* diagnostic emitted by
+        // this fixture must leave `data` unset. A regression where some
+        // code starts attaching a payload it should not — say, copying
+        // the WalkwayBlocked shape into an unrelated cascade — would
+        // otherwise slip past CI because the positive assertion only
+        // looks at the WalkwayBlocked entry.
+        for d in &out.diagnostics {
+            if d.code != DiagnosticCode::WalkwayBlocked {
+                assert!(
+                    d.data.is_none(),
+                    "code {:?} unexpectedly carries a payload: {:?}",
+                    d.code,
+                    d.data,
+                );
+            }
+        }
         // Walkway IR still emitted — the row survives, only the colliding
         // cells stay air. Bounding box covers x∈[1,6], z∈[-1,3].
         let walkway = out

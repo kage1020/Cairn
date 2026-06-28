@@ -77,6 +77,7 @@ fn check_size(value: &Value, sink: &mut DiagnosticSink) {
         span: value.span.clone(),
         primary: format!("`size=` expects a `WxH` literal, got {}", value.kind_name()),
         notes: Vec::new(),
+        data: None,
     });
 }
 
@@ -93,5 +94,6 @@ fn check_label(key: &str, value: &Value, sink: &mut DiagnosticSink) {
             value.kind_name()
         ),
         notes: Vec::new(),
+        data: None,
     });
 }

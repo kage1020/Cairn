@@ -72,5 +72,6 @@ fn push_unknown_keyword(keyword: &str, span: &crate::error::Span, sink: &mut Dia
         span: span.clone(),
         primary: format!("unknown keyword `{keyword}`"),
         notes,
+        data: None,
     });
 }

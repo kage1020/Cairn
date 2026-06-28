@@ -97,7 +97,10 @@ site village:
 **経路**: 歩道は 2 つのポートで一致する Y で Manhattan L (先に x 軸、次に z 軸) を走ります。
 階段や複数階層をまたぐ 3D 経路探索はポート面を一度に着地させるため意図的にスコープから外して
 います。既存の構造床と重なるセルはスキップし、行ごとに `W_WALKWAY_BLOCKED` を 1 件だけ警告として
-発します。
+発します。警告には `--format json` 出力で機械可読ペイロード
+(`data: { kind: "walkway_blocked", skipped: N }`) が付与され、LSP のクイックフィックスや CI
+アノテーターが人間向けメッセージを再パースせずにスキップ件数を読み取れます — 詳細は
+`spec/lint.md` §11.2 を参照。
 
 **マテリアル**: `path=@TOKEN` の値はメンバーマテリアルと同じ `mat_slot=` パイプラインを通って解決
 されます。`@gravel` のような canonical token はレジストリパック無しで利用でき、`@path.gravel` の
@@ -118,6 +121,7 @@ site village:
 - `E_UNRESOLVED_PLACE_REF` — ドット左側の place ID が同一 site の先行 place を指していない。
   §9.3.3 と共有のコードです。
 - `W_WALKWAY_BLOCKED` — L 字経路が既存の構造床を貫通した。衝突セルはスキップされ、残りの経路は
-  そのまま敷設されます。
+  そのまま敷設されます。JSON ペイロードはスキップ件数を `data.skipped` として公開するため、
+  ツール側はメッセージ本文を再パースする必要がありません。
 - `W_DUPLICATE_WALKWAY` — 同じ `(from, to)` ポート組が同一 site で既に敷設済み。重複行は破棄
   されます。

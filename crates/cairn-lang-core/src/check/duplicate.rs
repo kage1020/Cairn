@@ -52,6 +52,7 @@ fn check_theme_body(body: &[ThemeRule], sink: &mut DiagnosticSink) {
                             span: Some(first_span.clone()),
                             message: "first declaration here".into(),
                         }],
+                        data: None,
                     });
                 } else {
                     seen.insert(slot.clone(), span.clone());
@@ -87,6 +88,7 @@ fn check_header_args(args: &[Arg], sink: &mut DiagnosticSink) {
                     span: Some(first_span.clone()),
                     message: "first declaration here".into(),
                 }],
+                data: None,
             });
         } else {
             seen.insert(arg.key.clone(), arg.span.clone());
@@ -108,6 +110,7 @@ fn check_arg_list(args: &[Arg], sink: &mut DiagnosticSink) {
                     span: Some(first_span.clone()),
                     message: "first declaration here".into(),
                 }],
+                data: None,
             });
         } else {
             seen.insert(arg.key.clone(), arg.span.clone());
@@ -146,6 +149,7 @@ fn check_body(body: &[Statement], sink: &mut DiagnosticSink) {
                             span: Some(first_span.clone()),
                             message: "first declaration here".into(),
                         }],
+                        data: None,
                     });
                 } else {
                     seen_ids.insert(id, id_span);

@@ -65,6 +65,7 @@ mod tests {
             span: start..end,
             primary: msg.into(),
             notes: Vec::new(),
+            data: None,
         }
     }
 
