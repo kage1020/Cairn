@@ -88,12 +88,20 @@ without re-running the coordinate solver.
 A `connect FROM.PORT to TO.PORT path=@MATERIAL` row lays a 1-block-wide walkway between two named
 ports on placements within the same `site`.
 
-**Ports.** A port is the `(place, member_id)` pair `PLACE.PORT` resolves to. Ports are currently
-exposed only on `door` members of the referenced `def`; window / stair / roof ports are reserved
-for a future extension. The port's world position is "one block outside the door's `side=` wall,
-at the ground row" — `front`/`back`/`left`/`right` map to `+z`/`-z`/`-x`/`+x` (§9.3.1), and the
-door's `at=center` wall-local offset combines with the placement's overhang to land the port in
-the overhang ring beyond the structure's outer face.
+**Ports.** A port is the `(place, member_id)` pair `PLACE.PORT` resolves to. Ports are exposed on
+`door` and `window` members of the referenced `def`; stair / roof ports are reserved for a future
+extension. The port's world position is "one block outside the member's `side=` wall, at the
+placement's ground row (`place_origin.1`)" — `front`/`back`/`left`/`right` map to `+z`/`-z`/`-x`/`+x`
+(§9.3.1). The wall-local offset is taken from `at=center` for a `door` and from the rectangle's
+geometric centre (`offset + size.w / 2`) for a `window`; either way, the placement's overhang
+shifts the port out into the overhang ring beyond the structure's outer face. A `window` must
+fit both horizontally (`offset + size.w ≤ wall_length`) and vertically (`y + size.h ≤
+walls.height`) — a window that the openings pass would defer cannot anchor a walkway either,
+and the row drops with a `W_DEFERRED_MEMBER` whose notes list the door / window / reserved-role
+contracts in turn. A `window`'s authored `y=` does not lift the port off the ground row — the
+walkway is a 1-voxel-thick flat strip whose Y must agree with the other endpoint — and a
+`sym=true` window contributes a single port at the primary `offset` side (the mirrored cut still
+appears in the wall, but the `id=` resolves to one coordinate).
 
 **Path.** The walkway runs as a Manhattan L (x-axis leg, then z-axis leg) at the two ports' shared
 Y — 3D path search (staircases, multi-level walkways) is intentionally out of scope so the port
