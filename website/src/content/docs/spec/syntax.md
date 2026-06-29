@@ -44,9 +44,13 @@ Metadata MAY be placed in headers rather than in the semantic body:
   opening across the wall's midpoint (`mirror_offset = wall_length - offset - size_w`); a
   mirror that overlaps the primary rectangle is rejected with a `W_DEFERRED_MEMBER` and only
   the primary is painted.
-- **`at=center` rounding.** Doors written `at=center` pick the column at `wall_length / 2`
-  (round-half-up). Odd-length walls have a unique geometric centre; even-length walls pick
-  the column to the right of the midpoint so the choice is deterministic.
+- **`at=` door anchors.** A door's wall-local column is taken from one of three named anchors:
+  `at=center` picks the column at `wall_length / 2` (round-half-up — odd-length walls have a unique
+  geometric centre; even-length walls pick the column to the right of the midpoint so the choice is
+  deterministic), `at=left` picks the wall-local axis origin (`u = 0`), and `at=right` picks the
+  far corner (`u = wall_length - 1`). The same column resolves both the openings cut and any
+  `connect` walkway anchored to this door (§9.3.5). Numeric offsets (`at=N`) are reserved for a
+  future extension.
 - Inside reference: prefixed, e.g. `inside.front`.
 - Blocks, block entities, and entities all use the same selector grammar.
 
