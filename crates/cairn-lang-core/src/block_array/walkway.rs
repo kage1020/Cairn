@@ -81,17 +81,18 @@ pub struct WalkwayLayout {
 /// Ports anchor on two member roles:
 ///
 /// * [`MemberRole::Door`] — wall-local `u` taken from `at=`. Three
-///   named anchors are accepted: `center` (`wall_length / 2`,
-///   round-down on even widths so the centre sits one cell `-u` of
-///   the geometric midpoint, matching the same convention
+///   named anchors are accepted: `center` (`wall_length / 2` — odd
+///   widths have a unique geometric centre; even widths land at the
+///   column one cell `+u` of the midpoint, the convention spec
+///   `syntax.md` §5.4 names "round-half-up" and that
 ///   `super::lower::carve_door` uses when cutting the opening),
 ///   `left` (`0`, the wall-local axis origin), and `right`
 ///   (`wall_length - 1`, the far corner). Numeric offsets are
 ///   reserved for a future extension.
 /// * [`MemberRole::Window`] — wall-local `u` is the rectangle's
 ///   geometric centre (`offset + size.w / 2`). Even-width windows
-///   round-down for the same reason doors do, so the port lands at
-///   one cell `-u` of the geometric midpoint. `sym=true` does not
+///   take the column one cell `+u` of the midpoint by the same
+///   integer-division convention doors use. `sym=true` does not
 ///   move the port: it is taken from the primary `offset` side, which
 ///   is the only one whose `id=` is referenced from a `connect` row.
 ///   `y=` does not lift the port off the ground row either, because
@@ -342,14 +343,17 @@ fn ident_value<'a>(member: &'a Member, key: &str) -> Option<&'a str> {
 /// Wall-local `u` anchor for a door port. Accepts the three named
 /// anchors the spec defines for `at=`:
 ///
-/// * `center` — `len / 2` (round-down on even widths, matching the
-///   same convention `super::lower::carve_door` uses when cutting the
-///   opening).
+/// * `center` — `len / 2` (integer division, so even widths land at
+///   the column one cell `+u` of the midpoint, matching the
+///   convention `super::lower::carve_door` uses when cutting the
+///   opening; spec `syntax.md` §5.4 calls this "round-half-up").
 /// * `left`   — `0`, the wall-local axis origin.
-/// * `right`  — `len - 1`, the far corner. A degenerate `len == 0`
-///   wall reports `0` here, but the subsequent
-///   [`wall_local_to_grid`] bounds check still returns `None`, so the
-///   port defers cleanly instead of pointing at a non-existent cell.
+/// * `right`  — `len - 1`, the far corner. The `len.saturating_sub(1)`
+///   guard returns `0` for a hypothetical `len == 0` rather than
+///   underflowing `u32`, but `len == 0` is unreachable in practice:
+///   `DefIr.size.w` / `.h` are `NonZeroU32`, and `wall_length` is one
+///   of them — so every shipping caller has `len ≥ 1` and the
+///   `right` anchor lands on a valid column.
 ///
 /// Numeric offsets (`at=N`) are reserved for a future extension and
 /// fall through to `None` so the caller cascades a
