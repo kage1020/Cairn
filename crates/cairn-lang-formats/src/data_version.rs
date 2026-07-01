@@ -3,7 +3,7 @@
 //! Java structure NBT carries a `DataVersion` integer that the loading
 //! client uses to know whether and how to run DFU upgrades. The mapping
 //! between human-facing `1.21.4` and the integer `4189` is sourced from
-//! the built-in registry pack at `data/registry/java/data_versions.json`
+//! the built-in registry pack at `registry-data/java/data_versions.json`
 //! (see [`crate::registry`]). The hardcoded table that used to live in
 //! this module was removed when the registry pack ingest landed.
 
