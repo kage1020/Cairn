@@ -19,7 +19,7 @@ repository = "https://github.com/kage1020/Cairn"
 homepage = "https://github.com/kage1020/Cairn"
 authors = ["kage1020 and the Cairn authors"]
 # All crates stay unpublished until the first real release flips this to true
-# (see CHANGELOG `[Unreleased]` and the planned 2026.07.0 cron PR). This keeps
+# (see CHANGELOG `[Unreleased]` and the planned 2026.7.0 cron PR). This keeps
 # release-plz from trying to publish the 0.0.0 placeholder on every push.
 publish = false
 

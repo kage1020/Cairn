@@ -35,5 +35,5 @@ pub use lex::{Token, TokenKind, lex};
 pub use parse::parse;
 pub use resolve::{Resolution, ThemeBinding, VersionAxes, compute_axes, resolve};
 
-/// The Cairn release version, in date-based versioning (`YYYY.0M[.PATCH]`).
+/// The Cairn release version, in date-based versioning (`YYYY.M[.PATCH]`).
 pub const CAIRN_VERSION: &str = "2026.09";

@@ -35,9 +35,9 @@ roofs, symmetry) with the voxel world. The approach is **generation-first (lossy
 - Design principles are referenced as `P1`–`P5` (see [Design Principles](principles)).
 
 ## Versioning
-Cairn's own releases use **date-based versioning (CalVer)** `YYYY.0M[.PATCH]`.
-- Examples: `2026.06` (monthly release), `2026.06.1` (in-month patch). Sorts chronologically as a string.
-- This document is **2026.06 (draft)**, superseding the former `v0.2` label.
+Cairn's own releases use **date-based versioning (CalVer)** `YYYY.M[.PATCH]`.
+- Examples: `2026.7` (monthly release), `2026.7.1` (in-month patch). Sorts chronologically as a string.
+- This document is **2026.6 (draft)**, superseding the former `v0.2` label.
 - A release bundles "language spec + reference compiler + standard library + `(edition,version)`
   registry/constraint catalogs". It appears in `cairn --version` and the lock's `cairn_version`
   (see [Versioning and Editions](versioning-editions)).

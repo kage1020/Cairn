@@ -4,7 +4,7 @@ description: Date-driven, small-and-frequent releases. Monthly minor with patche
 ---
 
 Cairn ships **monthly minor releases** under [date-based versioning](spec/versioning-editions#101-the-target-is-a-compile-time-parameter)
-`YYYY.0M[.PATCH]`. Each month delivers what is ready; nothing is held back for an arbitrary "1.0".
+`YYYY.M[.PATCH]`. Each month delivers what is ready; nothing is held back for an arbitrary "1.0".
 Six named milestones cross-cut the monthly schedule so contributors and consumers can plan against
 something more durable than a calendar tick.
 
@@ -14,15 +14,15 @@ something more durable than a calendar tick.
 
 ## Release cadence
 
-- **Monthly minor** (`2026.MM.0`) on the first of the month. The release PR is opened by a cron
+- **Monthly minor** (`YYYY.M.0`) on the first of the month. The release PR is opened by a cron
   job and merged after human review.
-- **Patches** (`2026.MM.N`, `N ≥ 1`) are cut on demand from `main` whenever a relevant commit
+- **Patches** (`YYYY.M.N`, `N ≥ 1`) are cut on demand from `main` whenever a relevant commit
   lands. Typical triggers: registry/constraint pack updates, regressions, and security fixes.
   No upper bound on patches per month.
 - **Channel:** there is only one — `stable`. Cairn does not run a separate nightly or beta train.
   Behaviour that is not yet stable is gated by [compatibility tier](spec/compatibility), not by
   release channel.
-- **Backports:** none. The latest release is the supported release. Older `2026.MM.*` lines do
+- **Backports:** none. The latest release is the supported release. Older `YYYY.M.*` lines do
   not receive further patches.
 
 ## Milestones
@@ -33,12 +33,12 @@ the monthly schedule shifts.
 
 | Milestone | Lands by | The thing it earns |
 |---|---|---|
-| **M1 — source parses** | 2026.07.0 | `cairn parse` produces an AST for every example in `examples/` |
+| **M1 — source parses** | 2026.7.0 | `cairn parse` produces an AST for every example in `examples/` |
 | **M2 — minimal build** | 2026.10.0 | `cairn compile` writes a Java `.nbt` for a single-room structure with floor and walls, plus a lockfile |
-| **M3 — examples work** | 2027.01.0 | `cottage`, `themed-tower`, `village` all round-trip through `cairn compile --edition java` and load in Minecraft |
-| **M4 — Java/Bedrock parity** | 2027.02.0 | Same DSL source emits valid output for both editions; parity table populated; per-edition theme fallbacks work |
-| **M5 — developer experience** | 2027.03.0 | `cairn-lang-lsp` provides diagnostics and completion in at least one editor (VS Code) |
-| **M6 — redstone simulates** | 2027.05.0 | Logical redstone synthesis, place-and-route, and tick simulator land together; `redstone-door` example verifies |
+| **M3 — examples work** | 2027.1.0 | `cottage`, `themed-tower`, `village` all round-trip through `cairn compile --edition java` and load in Minecraft |
+| **M4 — Java/Bedrock parity** | 2027.2.0 | Same DSL source emits valid output for both editions; parity table populated; per-edition theme fallbacks work |
+| **M5 — developer experience** | 2027.3.0 | `cairn-lang-lsp` provides diagnostics and completion in at least one editor (VS Code) |
+| **M6 — redstone simulates** | 2027.5.0 | Logical redstone synthesis, place-and-route, and tick simulator land together; `redstone-door` example verifies |
 
 ## Monthly scope
 
@@ -47,20 +47,20 @@ table because monthly minors can ship without crossing a milestone gate.
 
 | Release | Scope added |
 |---|---|
-| **2026.07.0** | `cairn-lang-core` lexer/parser, `cairn parse` subcommand (AST display only). Release automation goes live. |
-| **2026.08.0** | Intent IR; syntactic validation; `cairn check`. |
-| **2026.09.0** | Semantic layer; materials and themes basics; `cairn info` reports the three version axes. |
+| **2026.7.0** | `cairn-lang-core` lexer/parser, `cairn parse` subcommand (AST display only). Release automation goes live. |
+| **2026.8.0** | Intent IR; syntactic validation; `cairn check`. |
+| **2026.9.0** | Semantic layer; materials and themes basics; `cairn info` reports the three version axes. |
 | **2026.10.0** | Block-array pivot; Java backend (walls and floors only); lockfile (`build.cairn.lock`). |
 | **2026.11.0** | `cottage.crn` compiles end-to-end for `--edition java`. |
 | **2026.12.0** | Registry pack ingest; fail-loud errors with nearest-valid suggestions. |
-| **2027.01.0** | All `examples/` work on Java. **M3.** |
-| **2027.02.0** | Bedrock backend with parity table and per-edition theme fallbacks. **M4.** |
-| **2027.03.0** | `cairn-lang-lsp` minimal (diagnostics + completion); VS Code extension. **M5.** |
-| **2027.04.0** | Redstone logical layer; combinational synthesis and place-and-route. |
-| **2027.05.0** | Redstone tick simulator; sequential macros; `redstone-door` verifies. **M6.** |
-| **2027.06.0** | `cairn-lang-wasm` + browser playground (live compile in the docs site). |
+| **2027.1.0** | All `examples/` work on Java. **M3.** |
+| **2027.2.0** | Bedrock backend with parity table and per-edition theme fallbacks. **M4.** |
+| **2027.3.0** | `cairn-lang-lsp` minimal (diagnostics + completion); VS Code extension. **M5.** |
+| **2027.4.0** | Redstone logical layer; combinational synthesis and place-and-route. |
+| **2027.5.0** | Redstone tick simulator; sequential macros; `redstone-door` verifies. **M6.** |
+| **2027.6.0** | `cairn-lang-wasm` + browser playground (live compile in the docs site). |
 
-Beyond `2027.06.0` the schedule is intentionally not drawn. Once M6 lands the spec-driven part of
+Beyond `2027.6.0` the schedule is intentionally not drawn. Once M6 lands the spec-driven part of
 the project is largely complete and the roadmap will be redrawn around real usage feedback.
 
 ## How the schedule is enforced
@@ -70,7 +70,7 @@ The release strategy itself is automated:
 1. **Monthly minor PR** is opened by a GitHub Actions cron at `17:04 UTC` on the first of each
    month (deliberately offset from the hour boundary, where GHA crons are most likely to be
    delayed or skipped).
-2. **Version is computed** from existing tags: no `v2026.MM.*` tag yet → next is `2026.MM.0`,
+2. **Version is computed** from existing tags: no `vYYYY.M.*` tag yet → next is `YYYY.M.0`,
    otherwise the next in-month patch.
 3. **release-plz** generates the version bump and changelog, applies the computed version via
    `--version-overrides`, and opens a PR.

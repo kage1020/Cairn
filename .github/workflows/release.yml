@@ -4,7 +4,7 @@ name: Release
 #
 # Branch model: `canary` is the trunk, `main` holds only released state.
 # - Monthly minor: cron at 04:17 UTC on the 1st (offset from the hour to avoid
-#   GitHub Actions cron congestion). Computes YYYY.0M.0, pre-sets the workspace
+#   GitHub Actions cron congestion). Computes YYYY.M.0, pre-sets the workspace
 #   version on canary, then runs release-plz to generate the changelog and PR.
 # - Patch: every push to canary. release-plz decides whether to open a PR based
 #   on the `release_commits` regex in release-plz.toml.
@@ -22,7 +22,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Override version (e.g. 2026.07.0). Leave empty to compute from tags."
+        description: "Override version (e.g. 2026.7.0). Leave empty to compute from tags."
         required: false
         type: string
 
@@ -57,7 +57,7 @@ jobs:
           if [ -n "$OVERRIDE" ]; then
             # Reject anything that is not a CalVer string. This is what makes
             # the downstream `sed` of Cargo.toml safe in the release-minor job.
-            if [[ ! "$OVERRIDE" =~ ^[0-9]{4}\.[0-9]{2}(\.[0-9]+)?$ ]]; then
+            if [[ ! "$OVERRIDE" =~ ^[0-9]{4}\.(0|[1-9][0-9]*)(\.[0-9]+)?$ ]]; then
               echo "Refusing invalid override: $OVERRIDE" >&2
               exit 1
             fi
@@ -66,7 +66,9 @@ jobs:
             exit 0
           fi
           year=$(date -u +%Y)
-          month=$(date -u +%m)
+          # Unpadded month so the version is SemVer-valid (Cargo rejects a
+          # leading zero in the minor position — e.g. "2026.07.0" fails to parse).
+          month=$(date -u +%-m)
           prefix="v${year}.${month}"
           patches=$(git tag --list "${prefix}.*" | sed -E "s/^${prefix}\.//" | sort -n)
           if [ -z "$patches" ]; then

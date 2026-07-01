@@ -3,7 +3,7 @@ title: "互換性ティア"
 ---
 
 Cairn は [日付ベースのバージョニング](/ja/spec/versioning-editions#101-ターゲットはコンパイル時パラメータ)
-(`YYYY.0M[.PATCH]`) の下で単一のリリーストレインを出します。CalVer には semver の「メジャー」軸が
+(`YYYY.M[.PATCH]`) の下で単一のリリーストレインを出します。CalVer には semver の「メジャー」軸が
 ないため、**何を壊してよくて何を壊してはいけないかの範囲**はバージョン番号ではなくこの文書で規定
 します。
 
@@ -20,7 +20,7 @@ Cairn は [日付ベースのバージョニング](/ja/spec/versioning-editions
 - Stable に到達した breaking change は次月の CHANGELOG から参照しなければならない (MUST)。
 - リネームは deprecation 期間中、旧名が機能し続けなければならない (MUST)。
 - デフォルト値は warning 付きで変更してよい (MAY); 意味論は変更してはならない (MUST NOT)。
-- 下流の利用者は minor で pin (`cairn ~= 2026.07`) でき、少なくとも次の月次 minor までは入力
+- 下流の利用者は minor で pin (`cairn ~= 2026.7`) でき、少なくとも次の月次 minor までは入力
   が変わらずコンパイルできることを期待してよい。
 
 Stable な面:
