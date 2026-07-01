@@ -154,13 +154,22 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
 
-      # Fast-forward `main` to canary only when release-plz reports it actually
-      # published in this run. The `releases_created` output is the trust anchor —
-      # gating on "is there a v* tag at HEAD" alone would let any pre-existing tag
-      # at HEAD trigger a promote and bypass main's branch protection.
+      # Open a canary → main promote PR only when release-plz reports it
+      # actually published in this run. The `releases_created` output is the
+      # trust anchor — gating on "is there a v* tag at HEAD" alone would let
+      # any pre-existing tag at HEAD trigger a promote.
+      #
+      # Direct `git push origin HEAD:refs/heads/main` is blocked by the
+      # `main protection` ruleset: the GitHub Actions bot cannot be added as a
+      # bypass actor on a personal (non-org) repository, so promotion has to
+      # go through a PR. Auto-merge is enabled here so once the reviewer
+      # approves in the UI the merge fires without further manual action;
+      # required status checks are the ones canary already passed.
       # publish.yml is triggered separately by the tag push.
-      - name: Promote canary to main on release
+      - name: Open promote-to-main PR on release
         if: steps.release_plz.outputs.releases_created == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         shell: bash
         run: |
           set -euo pipefail
@@ -171,5 +180,23 @@ jobs:
             exit 1
           fi
           echo "Detected release tag(s) at HEAD: $new_tags"
-          # Fast-forward main to the released commit on canary.
-          git push origin "HEAD:refs/heads/main"
+          release_tag=$(echo "$new_tags" | head -n1)
+          # Reuse an already-open promote PR if the previous run left one
+          # behind; `gh pr create` would otherwise error on the duplicate.
+          existing=$(gh pr list --base main --head canary --state open --json number --jq '.[0].number' 2>/dev/null || true)
+          if [ -n "$existing" ]; then
+            pr_number="$existing"
+            echo "Reusing existing promote PR #$pr_number"
+          else
+            pr_number=$(gh pr create \
+              --base main \
+              --head canary \
+              --title "chore: promote canary to main for $release_tag" \
+              --body "Fast-forward promote created by release.yml after release-plz published $release_tag. Approve to fire auto-merge; required status checks were already satisfied on canary." \
+              | grep -oE '[0-9]+$')
+            echo "Opened promote PR #$pr_number"
+          fi
+          # Best-effort auto-merge. Fails harmlessly if the PR already has
+          # auto-merge on or if the repo has auto-merge disabled at the
+          # settings level; the reviewer can still merge manually from the UI.
+          gh pr merge "$pr_number" --auto --merge || echo "auto-merge could not be enabled; reviewer can merge manually"
