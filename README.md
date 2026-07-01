@@ -9,7 +9,7 @@ orientations, coordinate math, signal routing, and per-edition/per-version block
 A cairn is a deliberately stacked pile of stones that marks a place. That is exactly what a Minecraft
 build is: intentionally placed blocks. The name is the thesis.
 
-> Status: **design specification, draft `2026.06`.** The language is being designed in the open;
+> Status: **design specification, draft `2026.6`.** The language is being designed in the open;
 > a reference compiler is not yet implemented. The normative specification, tutorial, and
 > developer guide live on the [documentation site](https://cairn.kage1020.com/).
 
@@ -81,10 +81,30 @@ its Git integration.
 
 ## Versioning
 
-Cairn releases use **date-based versioning (CalVer)** `YYYY.0M[.PATCH]` (e.g. `2026.06`, `2026.06.1`).
+Cairn releases use **date-based versioning (CalVer)** `YYYY.M[.PATCH]` (e.g. `2026.7`, `2026.7.1`).
 This is the version of the language + reference compiler + standard library + registry/constraint
 packs as a bundle. It is a **separate axis** from the Minecraft target version (`--target`); the two
 are always distinguished by field/flag/keyword, never by format. See the spec for details.
+
+The contract behind a version bump — what is safe to break, when — is set by
+[Compatibility Tiers](https://cairn.kage1020.com/spec/compatibility/): every surface is **Stable**,
+**Evolving**, or **Internal**, with monthly minors as the only window for `Evolving` breaks and
+one release of `W_DEPRECATED` lead time before any `Stable` break.
+
+## Roadmap
+
+[Roadmap](https://cairn.kage1020.com/roadmap/) describes six named milestones and the planned
+monthly scope through `2027.6.0`. The headline scope per planned release:
+
+- `2026.7.0` — source parses
+- `2026.10.0` — minimal build (single room, Java, lockfile)
+- `2027.1.0` — examples work end-to-end on Java
+- `2027.2.0` — Java/Bedrock parity
+- `2027.3.0` — `cairn-lang-lsp` and VS Code extension
+- `2027.5.0` — redstone logic, place-and-route, and tick simulator
+
+Monthly minor releases are opened automatically by a GitHub Actions cron on the 1st of each month;
+patches are opened on demand from `main` when qualifying commits land.
 
 ## Contributing
 

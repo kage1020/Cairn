@@ -25,6 +25,11 @@ const sidebar = [
         translations: { ja: "サンプル" },
         slug: "examples",
       },
+      {
+        label: "Roadmap",
+        translations: { ja: "ロードマップ" },
+        slug: "roadmap",
+      },
     ],
   },
   {
@@ -102,6 +107,11 @@ const sidebar = [
         label: "15. Open Issues",
         translations: { ja: "15. 未決事項" },
         slug: "spec/open-issues",
+      },
+      {
+        label: "Compatibility Tiers",
+        translations: { ja: "互換性ティア" },
+        slug: "spec/compatibility",
       },
       {
         label: "Glossary",

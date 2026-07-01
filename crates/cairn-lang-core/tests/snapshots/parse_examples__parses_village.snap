@@ -1,0 +1,248 @@
+---
+source: crates/cairn-lang-core/tests/parse_examples.rs
+expression: "parse_example(\"village.crn\")"
+---
+headers:
+  - kind: Cairn
+    version: "2026.06"
+  - kind: Requires
+    requirement: version>=1.20
+items:
+  - kind: Def
+    name: cottage
+    args:
+      - key: class
+        value:
+          kind: Ident
+          value: house
+      - key: size
+        value:
+          kind: Size
+          value:
+            w: 9
+            h: 7
+    body:
+      - kind: Generic
+        keyword: floor
+        args:
+          - key: id
+            value:
+              kind: Ident
+              value: floor
+          - key: mat_slot
+            value:
+              kind: Ident
+              value: floor
+      - kind: Generic
+        keyword: walls
+        args:
+          - key: id
+            value:
+              kind: Ident
+              value: walls
+          - key: class
+            value:
+              kind: Ident
+              value: outer
+          - key: mat_slot
+            value:
+              kind: Ident
+              value: wall
+          - key: height
+            value:
+              kind: Int
+              value: 4
+      - kind: Generic
+        keyword: door
+        args:
+          - key: id
+            value:
+              kind: Ident
+              value: entry
+          - key: class
+            value:
+              kind: Ident
+              value: entry
+          - key: side
+            value:
+              kind: Ident
+              value: front
+          - key: at
+            value:
+              kind: Ident
+              value: center
+      - kind: Generic
+        keyword: window
+        args:
+          - key: id
+            value:
+              kind: Ident
+              value: front
+          - key: side
+            value:
+              kind: Ident
+              value: front
+          - key: y
+            value:
+              kind: Int
+              value: 2
+          - key: offset
+            value:
+              kind: Int
+              value: 2
+          - key: size
+            value:
+              kind: Size
+              value:
+                w: 2
+                h: 2
+          - key: mat_slot
+            value:
+              kind: Ident
+              value: glass
+      - kind: Generic
+        keyword: roof
+        args:
+          - key: id
+            value:
+              kind: Ident
+              value: roof
+          - key: kind
+            value:
+              kind: Ident
+              value: gable
+          - key: mat_slot
+            value:
+              kind: Ident
+              value: roof
+          - key: overhang
+            value:
+              kind: Int
+              value: 1
+  - kind: Theme
+    name: medieval
+    body:
+      - kind: Slot
+        slot: floor
+        value:
+          kind: Token
+          value: oak_planks
+      - kind: Slot
+        slot: wall
+        value:
+          kind: Token
+          value: cobblestone
+      - kind: Slot
+        slot: roof
+        value:
+          kind: Token
+          value: spruce_stairs
+      - kind: Slot
+        slot: glass
+        value:
+          kind: Token
+          value: glass_pane
+  - kind: Site
+    name: hamlet
+    body:
+      - kind: Generic
+        keyword: place
+        args:
+          - key: id
+            value:
+              kind: Ident
+              value: home1
+          - key: use
+            value:
+              kind: Ident
+              value: cottage
+          - key: theme
+            value:
+              kind: Ident
+              value: medieval
+          - key: at
+            value:
+              kind: Ident
+              value: origin
+      - kind: Generic
+        keyword: place
+        args:
+          - key: id
+            value:
+              kind: Ident
+              value: home2
+          - key: use
+            value:
+              kind: Ident
+              value: cottage
+          - key: theme
+            value:
+              kind: Ident
+              value: medieval
+          - key: east_of
+            value:
+              kind: Ident
+              value: home1
+          - key: gap
+            value:
+              kind: Int
+              value: 4
+      - kind: Generic
+        keyword: place
+        args:
+          - key: id
+            value:
+              kind: Ident
+              value: home3
+          - key: use
+            value:
+              kind: Ident
+              value: cottage
+          - key: theme
+            value:
+              kind: Ident
+              value: medieval
+          - key: north_of
+            value:
+              kind: Ident
+              value: home1
+          - key: gap
+            value:
+              kind: Int
+              value: 5
+      - kind: Generic
+        keyword: connect
+        positional:
+          - kind: DotRef
+            value:
+              - home1
+              - entry
+          - kind: Ident
+            value: to
+          - kind: DotRef
+            value:
+              - home2
+              - entry
+        args:
+          - key: path
+            value:
+              kind: Token
+              value: gravel
+      - kind: Generic
+        keyword: connect
+        positional:
+          - kind: DotRef
+            value:
+              - home1
+              - entry
+          - kind: Ident
+            value: to
+          - kind: DotRef
+            value:
+              - home3
+              - entry
+        args:
+          - key: path
+            value:
+              kind: Token
+              value: gravel

@@ -49,3 +49,95 @@ site village:
 
 Each struct exposes ports (position / normal / width), and `connect` joins them. Villages and castles
 that exceed the structure block's 48³ limit are expressed as the composition of multiple structs.
+
+### 9.3.1 Coordinate convention
+- `east` advances along `+x`; `north` retreats along `-z`. This matches the `front` is `+z`
+  convention from §5.4 — a building whose `front` faces south sits with its facade on `+z`, and
+  `north_of=X` puts the next placement behind it.
+- The Y axis is unaffected by topological selectors; every placement currently lands at `y = 0`.
+
+### 9.3.2 Origin selectors
+Each `place` carries **exactly one** of `at`, `east_of`, `north_of`:
+
+| Selector | Effect | Notes |
+|---|---|---|
+| `at=origin` | Anchors the placement at world `(0, 0, 0)`. | The only legal `at=` value. The first `place` in a site must use this anchor — there is no implicit `at=origin` default. |
+| `east_of=ID gap=N` | New origin = prior `(x + dims.x + N, y, z)`. | `ID` must name a place declared earlier in the same `site` body. `gap` is in blocks and is edge-to-edge (0 → walls touch). Defaults to `0` when omitted. |
+| `north_of=ID gap=N` | New origin = prior `(x, y, z − dims.z − N)`. | Same `ID` and `gap` rules as `east_of`. |
+
+Combining selectors (`at` + `east_of`, or `east_of` + `north_of`) is rejected with
+`E_INVALID_PLACE_ORIGIN`; using `at=` with anything other than `origin` is the same error.
+
+### 9.3.3 Cross-scope references
+- `use=NAME` must name a top-level `def`. Unknown names fail with `E_UNRESOLVED_PLACE_REF`, with a
+  nearest-match suggestion when one fits the standard spell cap (§10.6 of `versioning-editions.md`).
+- `theme=NAME` must name a `theme` declared in the same file. Unknown themes fail with
+  `E_UNRESOLVED_THEME_REF`, again carrying a nearest-match note.
+- A `def` that no `place use=NAME` references is reported as `W_UNUSED_DEF` (advisory) so a typo on
+  the `use=` side does not silently produce an empty build.
+- Two `place` rows in one site cannot share an `id=`; the duplicate is flagged with
+  `E_DUPLICATE_PLACE_ID` and the diagnostic carries a span pointer back to the first declaration.
+
+### 9.3.4 Output naming
+The compiler writes one `.nbt` per `place`, named after the `id=` (e.g. `home1.nbt`,
+`home2.nbt`). The world-space origin and the `(site, def, theme)` provenance for every placement is
+recorded in `build.cairn.lock` under `placements`, so a downstream consumer can rebuild the layout
+without re-running the coordinate solver.
+
+### 9.3.5 Ports and `connect`
+A `connect FROM.PORT to TO.PORT path=@MATERIAL` row lays a 1-block-wide walkway between two named
+ports on placements within the same `site`.
+
+**Ports.** A port is the `(place, member_id)` pair `PLACE.PORT` resolves to. Ports are exposed on
+`door` and `window` members of the referenced `def`; stair / roof ports are reserved for a future
+extension. The port's world position is "one block outside the member's `side=` wall, at the
+placement's ground row (`place_origin.1`)" — `front`/`back`/`left`/`right` map to `+z`/`-z`/`-x`/`+x`
+(§9.3.1). The wall-local offset is taken from the door's `at=` value (one of `center`, `left`, or
+`right` — see §5.4) for a `door` and from the rectangle's geometric centre
+(`offset + size.w / 2`) for a `window`; either way, the placement's overhang
+shifts the port out into the overhang ring beyond the structure's outer face. Numeric door
+offsets (`at=N`) are reserved for a future extension. A `window` must fit both horizontally
+(`offset + size.w ≤ wall_length`) and vertically (`y + size.h ≤ walls.height`) — a window that
+the openings pass would defer cannot anchor a walkway either, and the row drops with a
+`W_DEFERRED_MEMBER` whose notes list the door / window / reserved-role contracts in turn. A
+`window`'s authored `y=` does not lift the port off the ground row — the walkway is a 1-voxel-thick
+flat strip whose Y must agree with the other endpoint — and a `sym=true` window contributes a
+single port at the primary `offset` side (the mirrored cut still appears in the wall, but the
+`id=` resolves to one coordinate).
+
+**Path.** The walkway runs as a Manhattan L (x-axis leg, then z-axis leg) at the two ports' shared
+Y — 3D path search (staircases, multi-level walkways) is intentionally out of scope so the port
+surface can land in one piece. Cells that overlap an existing structure floor are skipped and the
+row earns one `W_WALKWAY_BLOCKED` warning so the author can widen the placement gap. The warning
+also carries a machine-readable payload (`data: { kind: "walkway_blocked", skipped: N }`) in the
+`--format json` output so LSP quick-fixes and CI annotators can read the skip count without
+re-parsing the human-readable message — see §11.2 of `spec/lint.md`.
+
+**Material.** The `path=@TOKEN` value lifts through the same `mat_slot=` pipeline used for member
+materials — concrete tokens like `@gravel` work without a registry pack; abstract tokens like
+`@path.gravel` require the pack's materials catalog and surface `W_ABSTRACT_TOKEN_DEFERRED` /
+`E_UNKNOWN_ABSTRACT_TOKEN` on a miss.
+
+**Output.** Each `connect` row writes one `.nbt` named after its site and ports (e.g.
+`hamlet_walkway_home1_entry__home2_entry.nbt`) and records a `walkways:` entry in the lockfile
+carrying the world origin, dims, and resolved path material — enough to rebuild the strip without
+re-running the resolver.
+
+**Diagnostics.**
+
+- `E_CONNECT_ARITY` — the row's positional shape is not `FROM.PORT to TO.PORT` (a half is missing,
+  the literal `to` keyword is missing or replaced by another token, or extra positionals trail
+  the row past `TO.PORT`). Anchored at the missing-positional cursor, the offending separator, or
+  the run of trailing extras so the `file:L:C` pointer lands where the fix goes.
+- `E_UNRESOLVED_PORT` — the right-of-dot port id does not name a member of the referenced def
+  (with a nearest-match `did you mean` note when one fits the standard spell cap).
+- `E_AMBIGUOUS_PORT` — the def exposes the same `id=` on more than one member; rename the
+  collision so the reference is unique.
+- `E_MISSING_PATH_MATERIAL` — the row omits `path=`; walkway lowering has nothing to lay.
+- `E_UNRESOLVED_PLACE_REF` — the head place id (left of the dot) does not name a prior place in
+  this site, shared with §9.3.3.
+- `W_WALKWAY_BLOCKED` — the L-shaped path crossed an existing structure floor; the colliding
+  cells are skipped and the rest of the strip still lays. JSON payload exposes the skip count as
+  `data.skipped` so tooling does not need to re-parse the message text.
+- `W_DUPLICATE_WALKWAY` — the same `(from, to)` port pair has already been laid in this site;
+  the duplicate row is dropped.

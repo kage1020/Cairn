@@ -1,0 +1,9 @@
+{
+  "schema_version": 1,
+  "latest": "1.21.4",
+  "versions": [
+    { "mc_version": "1.20.4", "data_version": 3700, "released": "2023-12-07" },
+    { "mc_version": "1.21",   "data_version": 3953, "released": "2024-06-13" },
+    { "mc_version": "1.21.4", "data_version": 4189, "released": "2024-12-03" }
+  ]
+}

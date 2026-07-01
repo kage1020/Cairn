@@ -1,0 +1,155 @@
+---
+source: crates/cairn-lang-core/tests/intent_lower.rs
+expression: "lower_example(\"redstone-door.crn\")"
+---
+semantic_level: grouped
+headers:
+  - kind: Cairn
+    version: "2026.06"
+  - kind: Requires
+    requirement: version>=1.20
+themes:
+  - name: entry
+    slots:
+      wall:
+        kind: Token
+        value: oak_planks
+      door:
+        kind: Token
+        value: oak_door
+    selectors: []
+defs: []
+sites: []
+structs:
+  - name: gatehouse
+    size:
+      w: 7
+      h: 5
+    args: {}
+    members:
+      - role:
+          kind: Floor
+        mat_slot: wall
+        intent_state: {}
+      - class: outer
+        role:
+          kind: Walls
+        mat_slot: wall
+        intent_state:
+          height:
+            kind: Int
+            value: 3
+      - id: front
+        role:
+          kind: Door
+        mat_slot: door
+        intent_state:
+          side:
+            kind: Ident
+            value: front
+          at:
+            kind: Ident
+            value: center
+      - id: plate
+        role:
+          kind: PressurePlate
+        binding:
+          kind: DotRef
+          value:
+            - sig
+            - step
+        intent_state:
+          at:
+            kind: DotRef
+            value:
+              - front
+              - outside
+          offset:
+            kind: Int
+            value: 0
+          y:
+            kind: Int
+            value: 0
+      - id: inner
+        role:
+          kind: PressurePlate
+        binding:
+          kind: DotRef
+          value:
+            - sig
+            - exit
+        intent_state:
+          at:
+            kind: DotRef
+            value:
+              - inside
+              - front
+          offset:
+            kind: Int
+            value: 0
+          y:
+            kind: Int
+            value: 0
+      - role:
+          kind: Door
+        selector:
+          id:
+            kind: Ident
+            value: front
+        intent_state:
+          opened_by:
+            kind: DotRef
+            value:
+              - sig
+              - open
+      - role:
+          kind: Circuit
+        intent_state:
+          region:
+            kind: Ident
+            value: floor
+          void:
+            kind: Int
+            value: 2
+    logic:
+      - lhs:
+          - sig
+          - open
+        rhs:
+          kind: Or
+          value:
+            - kind: Ref
+              value:
+                - sig
+                - step
+            - kind: Ref
+              value:
+                - sig
+                - exit
+    asserts:
+      - kind: Truth
+        inputs:
+          - - sig
+            - step
+          - - sig
+            - exit
+        output:
+          - sig
+          - open
+        rows:
+          - inputs: "00"
+            output: false
+          - inputs: "01"
+            output: true
+          - inputs: "10"
+            output: true
+          - inputs: "11"
+            output: true
+      - kind: Always
+        antecedent:
+          - sig
+          - step
+        consequent:
+          - sig
+          - open
+        within: 2

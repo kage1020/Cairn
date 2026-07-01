@@ -1,22 +1,35 @@
 [workspace]
 resolver = "2"
 members = [
-    "crates/cairn-core",
-    "crates/cairn-cli",
-    "crates/cairn-nbt",
-    "crates/cairn-formats",
-    "crates/cairn-redstone",
-    "crates/cairn-lsp",
-    "crates/cairn-wasm",
+    "crates/cairn-lang-core",
+    "crates/cairn-lang-cli",
+    "crates/cairn-lang-nbt",
+    "crates/cairn-lang-formats",
+    "crates/cairn-lang-redstone",
+    "crates/cairn-lang-lsp",
+    "crates/cairn-lang-wasm",
 ]
 
 [workspace.package]
+version = "2026.7.0"
 edition = "2024"
 rust-version = "1.95"
 license = "Apache-2.0"
 repository = "https://github.com/kage1020/Cairn"
 homepage = "https://github.com/kage1020/Cairn"
 authors = ["kage1020 and the Cairn authors"]
+# Publish is enabled so release-plz's monthly minor path can open a release PR;
+# without this it silently no-ops (`prs:[]`) because it treats `publish = false`
+# crates as intentionally excluded from crates.io release automation. The
+# workflow's pre-set version step is what actually decides the CalVer number, so
+# this flag being on does not cause a spurious 0.0.0 push — release-plz only
+# reaches `cargo publish` when a release PR is merged with a real bumped version.
+publish = true
+
+[workspace.dependencies]
+cairn-lang-core = { version = "2026.7.0", path = "crates/cairn-lang-core" }
+cairn-lang-nbt = { version = "2026.7.0", path = "crates/cairn-lang-nbt" }
+cairn-lang-formats = { version = "2026.7.0", path = "crates/cairn-lang-formats" }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

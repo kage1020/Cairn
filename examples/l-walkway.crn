@@ -1,0 +1,25 @@
+@cairn 2026.06
+@requires version>=1.20
+
+# Pin walkway L-corner-dedup at the integration boundary.
+# home1.entry (front, +z) ↔ home3.side_entry (left, -x) forces a Manhattan
+# L between two world voxels that differ in both x and z. home2 sits in
+# the L's elbow column on +x; home3.side_entry sidesteps into -x so the
+# z-leg clears home2's footprint and skip-count stays 0.
+
+def cottage size=3x3:
+  floor id=floor mat_slot=floor
+  walls id=walls class=outer mat_slot=wall height=3
+  door  id=entry      side=front at=center
+  door  id=side_entry side=left  at=center
+
+theme medieval:
+  slot floor -> @oak_planks
+  slot wall  -> @cobblestone
+
+site duo:
+  place id=home1 use=cottage theme=medieval at=origin
+  place id=home2 use=cottage theme=medieval east_of=home1 gap=10
+  place id=home3 use=cottage theme=medieval north_of=home2 gap=10
+
+  connect home1.entry to home3.side_entry path=@gravel

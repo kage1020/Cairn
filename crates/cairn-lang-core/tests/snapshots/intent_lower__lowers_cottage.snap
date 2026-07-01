@@ -1,0 +1,97 @@
+---
+source: crates/cairn-lang-core/tests/intent_lower.rs
+expression: "lower_example(\"cottage.crn\")"
+---
+semantic_level: grouped
+headers:
+  - kind: Cairn
+    version: "2026.06"
+  - kind: Requires
+    requirement: version>=1.20
+themes:
+  - name: medieval
+    slots:
+      floor:
+        kind: Token
+        value: oak_planks
+      wall:
+        kind: Token
+        value: cobblestone
+      roof:
+        kind: Token
+        value: spruce_stairs
+      glass:
+        kind: Token
+        value: glass_pane
+    selectors:
+      - keyword: window
+        attrs:
+          class:
+            kind: Ident
+            value: small
+        bindings:
+          frame:
+            kind: Token
+            value: spruce_wood
+defs: []
+sites: []
+structs:
+  - name: cottage
+    size:
+      w: 9
+      h: 7
+    args: {}
+    members:
+      - role:
+          kind: Floor
+        mat_slot: floor
+        intent_state: {}
+      - class: outer
+        role:
+          kind: Walls
+        mat_slot: wall
+        intent_state:
+          height:
+            kind: Int
+            value: 4
+      - role:
+          kind: Door
+        intent_state:
+          side:
+            kind: Ident
+            value: front
+          at:
+            kind: Ident
+            value: center
+      - class: small
+        role:
+          kind: Window
+        mat_slot: glass
+        intent_state:
+          side:
+            kind: Ident
+            value: front
+          offset:
+            kind: Int
+            value: 2
+          y:
+            kind: Int
+            value: 2
+          size:
+            kind: Size
+            value:
+              w: 2
+              h: 2
+          sym:
+            kind: Bool
+            value: true
+      - role:
+          kind: Roof
+        mat_slot: roof
+        intent_state:
+          kind:
+            kind: Ident
+            value: gable
+          overhang:
+            kind: Int
+            value: 1

@@ -78,7 +78,7 @@ title: "用語集"
 ## ヘッダと provenance
 
 - **`@cairn`**。ファイルが書かれた **Cairn 言語のバージョン** を宣言するヘッダ (CalVer
-  `YYYY.0M[.PATCH]`)。provenance のみ、オプション。
+  `YYYY.M[.PATCH]`)。provenance のみ、オプション。
 - **`@requires`**。Minecraft ターゲットへの capability の下限 (例: `version>=1.20`)。推定値との衝突で
   ハードエラー。
 - **`@intended_targets`**。どの Minecraft バージョン向けに設計したかのヒント。検証記録ではない (検証

@@ -1,0 +1,136 @@
+---
+source: crates/cairn-lang-core/tests/parse_examples.rs
+expression: "parse_example(\"cottage.crn\")"
+---
+headers:
+  - kind: Cairn
+    version: "2026.06"
+  - kind: Requires
+    requirement: version>=1.20
+items:
+  - kind: Theme
+    name: medieval
+    body:
+      - kind: Slot
+        slot: floor
+        value:
+          kind: Token
+          value: oak_planks
+      - kind: Slot
+        slot: wall
+        value:
+          kind: Token
+          value: cobblestone
+      - kind: Slot
+        slot: roof
+        value:
+          kind: Token
+          value: spruce_stairs
+      - kind: Slot
+        slot: glass
+        value:
+          kind: Token
+          value: glass_pane
+      - kind: Selector
+        keyword: window
+        attrs:
+          - key: class
+            value:
+              kind: Ident
+              value: small
+        bindings:
+          - key: frame
+            value:
+              kind: Token
+              value: spruce_wood
+  - kind: Struct
+    name: cottage
+    args:
+      - key: size
+        value:
+          kind: Size
+          value:
+            w: 9
+            h: 7
+    body:
+      - kind: Generic
+        keyword: floor
+        args:
+          - key: mat_slot
+            value:
+              kind: Ident
+              value: floor
+      - kind: Generic
+        keyword: walls
+        args:
+          - key: class
+            value:
+              kind: Ident
+              value: outer
+          - key: mat_slot
+            value:
+              kind: Ident
+              value: wall
+          - key: height
+            value:
+              kind: Int
+              value: 4
+      - kind: Generic
+        keyword: door
+        args:
+          - key: side
+            value:
+              kind: Ident
+              value: front
+          - key: at
+            value:
+              kind: Ident
+              value: center
+      - kind: Generic
+        keyword: window
+        args:
+          - key: class
+            value:
+              kind: Ident
+              value: small
+          - key: side
+            value:
+              kind: Ident
+              value: front
+          - key: offset
+            value:
+              kind: Int
+              value: 2
+          - key: y
+            value:
+              kind: Int
+              value: 2
+          - key: size
+            value:
+              kind: Size
+              value:
+                w: 2
+                h: 2
+          - key: sym
+            value:
+              kind: Bool
+              value: true
+          - key: mat_slot
+            value:
+              kind: Ident
+              value: glass
+      - kind: Generic
+        keyword: roof
+        args:
+          - key: kind
+            value:
+              kind: Ident
+              value: gable
+          - key: mat_slot
+            value:
+              kind: Ident
+              value: roof
+          - key: overhang
+            value:
+              kind: Int
+              value: 1

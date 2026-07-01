@@ -1,0 +1,26 @@
+[package]
+name = "cairn-lang-cli"
+description = "Command-line interface for the Cairn language"
+version.workspace = true
+publish.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[[bin]]
+name = "cairn"
+path = "src/main.rs"
+
+[dependencies]
+cairn-lang-core = { workspace = true }
+cairn-lang-formats.workspace = true
+clap = { version = "4.6.1", features = ["derive"] }
+serde_json = "1.0.150"
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+tempfile = "3.27.0"
