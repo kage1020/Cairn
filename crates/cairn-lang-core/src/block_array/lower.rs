@@ -239,8 +239,8 @@ fn lower_connects(
             // The resolver already validated the port id, so this miss
             // means `port_world_position` rejected one of the member's
             // own properties: a missing / non-cardinal `side=`, a door
-            // `at=` value other than `center`, a window whose
-            // `offset + size.w` overflows the wall or whose
+            // `at=` value outside `center | left | right`, a window
+            // whose `offset + size.w` overflows the wall or whose
             // `y + size.h` overflows the walls `height=`, or a
             // stair / roof role for which port support is reserved.
             // Name the offending side so the user is not pointed at
@@ -264,7 +264,7 @@ fn lower_connects(
                     DiagnosticNote {
                         span: None,
                         message:
-                            "a `door` port requires `side=front|back|left|right` and `at=center`"
+                            "a `door` port requires `side=front|back|left|right` and `at=center|left|right`"
                                 .to_owned(),
                     },
                     DiagnosticNote {
@@ -1419,22 +1419,33 @@ fn carve_door(
         return;
     }
     let len = wall_length(side, ctx.interior_w, ctx.interior_h);
+    // Three named anchors are accepted: `center` (`len / 2`, round-down
+    // on even widths — documented in spec/syntax.md §5.4), `left` (`0`,
+    // the wall-local axis origin), and `right` (`len - 1`, the far
+    // corner). The same vocabulary is recognised by
+    // `super::walkway::door_anchor_offset` for port resolution, so the
+    // openings cut and any walkway that connects to this door land at
+    // the same column. Numeric offsets are reserved for a future
+    // extension. `len.saturating_sub(1)` returns 0 for the degenerate
+    // `len == 0` case; `wall_local_to_grid` then rejects the bounds and
+    // the door defers cleanly, so no out-of-range carve sneaks through.
     let at = match ident_value(member, "at") {
-        // `at=center`: round half-up so an even-width wall picks the
-        // column at `len/2`. Documented in spec/syntax.md §5.4. For odd
-        // widths the two formulas coincide.
         Some("center") => len / 2,
+        Some("left") => 0,
+        Some("right") => len.saturating_sub(1),
         Some(other) => {
             diagnostics.push(diag_deferred_member_reason(
                 member,
-                &format!("door `at={other}` is not yet supported (use `at=center`)"),
+                &format!(
+                    "door `at={other}` is not yet supported (use `at=center | left | right`)",
+                ),
             ));
             return;
         }
         None => {
             diagnostics.push(diag_deferred_member_reason(
                 member,
-                "door without `at=` is not yet supported (use `at=center`)",
+                "door without `at=` is not yet supported (use `at=center | left | right`)",
             ));
             return;
         }
@@ -2138,6 +2149,57 @@ mod tests {
         // Surrounding wall cells still cobblestone.
         assert_eq!(block_id(ba, 3, 1, 6), "minecraft:cobblestone");
         assert_eq!(block_id(ba, 4, 3, 6), "minecraft:cobblestone");
+    }
+
+    #[test]
+    fn door_at_left_carves_first_column_of_front_wall() {
+        // `at=left` pins the carve column to the wall-local origin
+        // (u = 0). Front wall sits at z=6 (no overhang); the door
+        // should AIR x=0 at y=1,2 while the rest of the row remains
+        // wall material.
+        let src = "theme t:\n  slot w -> @cobblestone\n\nstruct s size=9x7\n  walls mat_slot=w height=4\n  door side=front at=left\n";
+        let out = lowered(src);
+        let ba = out.structures.get("struct::s").unwrap();
+        assert_eq!(block_id(ba, 0, 1, 6), BlockState::AIR_ID);
+        assert_eq!(block_id(ba, 0, 2, 6), BlockState::AIR_ID);
+        // Centre column stays solid (the previous default position).
+        assert_eq!(block_id(ba, 4, 1, 6), "minecraft:cobblestone");
+        assert_eq!(deferred_count(&out), 0);
+    }
+
+    #[test]
+    fn door_at_right_carves_last_column_of_front_wall() {
+        // `at=right` pins the carve column to `wall_length - 1`.
+        // Front wall length = 9 → x = 8. Same vertical band as the
+        // centred door.
+        let src = "theme t:\n  slot w -> @cobblestone\n\nstruct s size=9x7\n  walls mat_slot=w height=4\n  door side=front at=right\n";
+        let out = lowered(src);
+        let ba = out.structures.get("struct::s").unwrap();
+        assert_eq!(block_id(ba, 8, 1, 6), BlockState::AIR_ID);
+        assert_eq!(block_id(ba, 8, 2, 6), BlockState::AIR_ID);
+        // Centre column stays solid.
+        assert_eq!(block_id(ba, 4, 1, 6), "minecraft:cobblestone");
+        assert_eq!(deferred_count(&out), 0);
+    }
+
+    #[test]
+    fn door_at_unknown_value_defers_with_named_anchors_in_note() {
+        // `at=middle` is not one of `center | left | right`. Lowering
+        // must defer (no AIR carved) and the defer message must list
+        // the accepted anchors so the user can self-correct.
+        let src = "theme t:\n  slot w -> @cobblestone\n\nstruct s size=9x7\n  walls mat_slot=w height=4\n  door side=front at=middle\n";
+        let out = lowered(src);
+        let ba = out.structures.get("struct::s").unwrap();
+        assert_eq!(deferred_count(&out), 1);
+        // Front wall row remains intact.
+        for x in 0..9 {
+            assert_eq!(block_id(ba, x, 1, 6), "minecraft:cobblestone");
+        }
+        let primary = &out.diagnostics[0].primary;
+        assert!(
+            primary.contains("at=center | left | right"),
+            "expected anchor list in defer message, got {primary}",
+        );
     }
 
     #[test]

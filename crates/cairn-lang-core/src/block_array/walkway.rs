@@ -9,10 +9,11 @@
 //! 1. [`port_world_position`] turns a `(place_origin, def, port_id)`
 //!    triple into the world-voxel coordinate one block outside the
 //!    member's `side=` face. Ports are exposed on `door` and `window`
-//!    members; doors anchor at the wall-local `at=center`, windows at
-//!    the rectangle's geometric centre (`offset + size.w / 2`). Other
-//!    roles (stair, roof, …) lower silently to `None` so the caller
-//!    can decide whether to fail with `W_DEFERRED_MEMBER`.
+//!    members; doors anchor at one of the wall-local
+//!    `at=center | left | right` positions, windows at the rectangle's
+//!    geometric centre (`offset + size.w / 2`). Other roles (stair,
+//!    roof, …) lower silently to `None` so the caller can decide
+//!    whether to fail with `W_DEFERRED_MEMBER`.
 //! 2. [`l_path`] walks a Manhattan L (x-axis first, then z-axis) between
 //!    two world voxels at a constant Y, deduplicating the corner cell so
 //!    every coordinate appears once.
@@ -79,15 +80,19 @@ pub struct WalkwayLayout {
 ///
 /// Ports anchor on two member roles:
 ///
-/// * [`MemberRole::Door`] — wall-local `u` taken from `at=center`
-///   (`wall_length / 2`). Even-width walls round-down so the centre
-///   sits one cell to the `-u` side of the geometric midpoint, which
-///   is the same convention [`super::lower::door_at_center_offset`]
-///   uses when carving the door itself.
+/// * [`MemberRole::Door`] — wall-local `u` taken from `at=`. Three
+///   named anchors are accepted: `center` (`wall_length / 2` — odd
+///   widths have a unique geometric centre; even widths land at the
+///   column one cell `+u` of the midpoint, the convention spec
+///   `syntax.md` §5.4 names "round-half-up" and that
+///   `super::lower::carve_door` uses when cutting the opening),
+///   `left` (`0`, the wall-local axis origin), and `right`
+///   (`wall_length - 1`, the far corner). Numeric offsets are
+///   reserved for a future extension.
 /// * [`MemberRole::Window`] — wall-local `u` is the rectangle's
 ///   geometric centre (`offset + size.w / 2`). Even-width windows
-///   round-down for the same reason doors do, so the port lands at
-///   one cell `-u` of the geometric midpoint. `sym=true` does not
+///   take the column one cell `+u` of the midpoint by the same
+///   integer-division convention doors use. `sym=true` does not
 ///   move the port: it is taken from the primary `offset` side, which
 ///   is the only one whose `id=` is referenced from a `connect` row.
 ///   `y=` does not lift the port off the ground row either, because
@@ -103,8 +108,8 @@ pub struct WalkwayLayout {
 ///   silently — port support is reserved for a future extension),
 /// * the member is missing a `side=` argument or its value is not one
 ///   of `front` / `back` / `left` / `right`,
-/// * the door is missing `at=center` or carries any other `at=`
-///   value,
+/// * the door is missing `at=` or carries a value other than
+///   `center` / `left` / `right`,
 /// * the window is missing `offset=` / `size=WxH`, or its
 ///   `offset + size.w` exceeds the wall length, or its
 ///   `y + size.h` exceeds the def's walls `height=` (so a window
@@ -144,7 +149,7 @@ pub fn port_world_position(
     let len = wall_length(side, interior_w, interior_h);
     let (wall_x, wall_z) = match member.role {
         MemberRole::Door => {
-            let u = door_at_center_offset(member, len)?;
+            let u = door_anchor_offset(member, len)?;
             door_world_xz(side, u, overhang, interior_w, interior_h, place_origin)?
         }
         MemberRole::Window => {
@@ -335,10 +340,35 @@ fn ident_value<'a>(member: &'a Member, key: &str) -> Option<&'a str> {
     }
 }
 
-fn door_at_center_offset(member: &Member, len: u32) -> Option<u32> {
+/// Wall-local `u` anchor for a door port. Accepts the three named
+/// anchors the spec defines for `at=`:
+///
+/// * `center` — `len / 2` (integer division, so even widths land at
+///   the column one cell `+u` of the midpoint, matching the
+///   convention `super::lower::carve_door` uses when cutting the
+///   opening; spec `syntax.md` §5.4 calls this "round-half-up").
+/// * `left`   — `0`, the wall-local axis origin.
+/// * `right`  — `len - 1`, the far corner. The `len.saturating_sub(1)`
+///   guard returns `0` for a hypothetical `len == 0` rather than
+///   underflowing `u32`, but `len == 0` is unreachable in practice:
+///   `DefIr.size.w` / `.h` are `NonZeroU32`, and `wall_length` is one
+///   of them — so every shipping caller has `len ≥ 1` and the
+///   `right` anchor lands on a valid column.
+///
+/// Numeric offsets (`at=N`) are reserved for a future extension and
+/// fall through to `None` so the caller cascades a
+/// `W_DEFERRED_MEMBER` warning rather than silently rounding to
+/// centre. Returns `None` when the member is missing `at=` or carries
+/// any other value.
+pub(super) fn door_anchor_offset(member: &Member, len: u32) -> Option<u32> {
     let raw = member.intent_state.get("at")?;
     match &raw.value.kind {
-        ValueKind::Ident(s) if s == "center" => Some(len / 2),
+        ValueKind::Ident(s) => match s.as_str() {
+            "center" => Some(len / 2),
+            "left" => Some(0),
+            "right" => Some(len.saturating_sub(1)),
+            _ => None,
+        },
         _ => None,
     }
 }
@@ -1013,5 +1043,135 @@ mod tests {
         let def = ir.defs.first().expect("def lowered");
         let dims = Dims { x: 3, y: 1, z: 3 };
         assert!(port_world_position((0, 0, 0), dims, def, &pid("nope")).is_none());
+    }
+
+    #[test]
+    fn port_world_position_door_at_left_resolves_to_origin_corner_on_front() {
+        // size=3x3, no overhang. `at=left` pins u = 0 (the wall-local axis
+        // origin). Front wall world: (origin.x + 0, _, origin.z + 3 - 1)
+        // = (10, _, 22); +1 in the +z normal step → port (10, 0, 23).
+        let src = concat!(
+            "def cottage size=3x3:\n",
+            "  door id=entry side=front at=left\n",
+        );
+        let module = crate::parse(src).expect("parse");
+        let ir = crate::lower(&module);
+        let def = ir.defs.first().expect("def lowered");
+        let dims = Dims { x: 3, y: 1, z: 3 };
+        let pos =
+            port_world_position((10, 0, 20), dims, def, &pid("entry")).expect("port resolves");
+        assert_eq!(pos, (10, 0, 23));
+    }
+
+    #[test]
+    fn port_world_position_door_at_right_resolves_to_far_corner_on_front() {
+        // size=3x3, no overhang. `at=right` pins u = wall_length - 1 = 2.
+        // Front wall world: (origin.x + 2, _, origin.z + 3 - 1) = (12, _,
+        // 22); +1 in the +z normal step → port (12, 0, 23).
+        let src = concat!(
+            "def cottage size=3x3:\n",
+            "  door id=entry side=front at=right\n",
+        );
+        let module = crate::parse(src).expect("parse");
+        let ir = crate::lower(&module);
+        let def = ir.defs.first().expect("def lowered");
+        let dims = Dims { x: 3, y: 1, z: 3 };
+        let pos =
+            port_world_position((10, 0, 20), dims, def, &pid("entry")).expect("port resolves");
+        assert_eq!(pos, (12, 0, 23));
+    }
+
+    #[test]
+    fn port_world_position_door_back_at_left_uses_mirrored_axis() {
+        // Back wall mirrors u along x (`x = w - 1 - u`), so `at=left`
+        // (u = 0) lands at the far x corner: (origin.x + (3 - 1 - 0),
+        // origin.z + 0) = (12, _, 20); -1 in the -z normal step → port
+        // (12, 0, 19). A regression that forgets the mirror would land at
+        // (10, 0, 19).
+        let src = concat!(
+            "def cottage size=3x3:\n",
+            "  door id=entry side=back at=left\n",
+        );
+        let module = crate::parse(src).expect("parse");
+        let ir = crate::lower(&module);
+        let def = ir.defs.first().expect("def lowered");
+        let dims = Dims { x: 3, y: 1, z: 3 };
+        let pos =
+            port_world_position((10, 0, 20), dims, def, &pid("entry")).expect("port resolves");
+        assert_eq!(pos, (12, 0, 19));
+    }
+
+    #[test]
+    fn port_world_position_door_left_at_right_uses_far_z_corner() {
+        // Left wall maps u to z without mirroring, so `at=right`
+        // (u = interior_h - 1 = 2) lands at z = origin.z + 2 = 22.
+        // x = origin.x; -1 in the -x normal step → port (9, 0, 22).
+        let src = concat!(
+            "def cottage size=3x3:\n",
+            "  door id=entry side=left at=right\n",
+        );
+        let module = crate::parse(src).expect("parse");
+        let ir = crate::lower(&module);
+        let def = ir.defs.first().expect("def lowered");
+        let dims = Dims { x: 3, y: 1, z: 3 };
+        let pos =
+            port_world_position((10, 0, 20), dims, def, &pid("entry")).expect("port resolves");
+        assert_eq!(pos, (9, 0, 22));
+    }
+
+    #[test]
+    fn port_world_position_door_right_at_left_mirrors_along_z() {
+        // Right wall mirrors u along z (`z = h - 1 - u`), so `at=left`
+        // (u = 0) lands at the far z corner: z = origin.z + 2 = 22.
+        // x = origin.x + interior_w - 1 = 12; +1 in the +x normal step →
+        // port (13, 0, 22). A regression that forgets the mirror would
+        // land at z = 20 instead.
+        let src = concat!(
+            "def cottage size=3x3:\n",
+            "  door id=entry side=right at=left\n",
+        );
+        let module = crate::parse(src).expect("parse");
+        let ir = crate::lower(&module);
+        let def = ir.defs.first().expect("def lowered");
+        let dims = Dims { x: 3, y: 1, z: 3 };
+        let pos =
+            port_world_position((10, 0, 20), dims, def, &pid("entry")).expect("port resolves");
+        assert_eq!(pos, (13, 0, 22));
+    }
+
+    #[test]
+    fn port_world_position_door_at_left_shifts_outward_past_roof_overhang() {
+        // size=3x3 interior, place_dims=(5,_,5) for overhang=1.
+        // `at=left` pins u = 0. Front wall world: (origin.x + overhang +
+        // 0, _, origin.z + overhang + 3 - 1) = (11, _, 23); +1 in the +z
+        // normal step → port (11, 0, 24). A regression that drops the
+        // overhang shift would land inside the eave at z = 23.
+        let src = concat!(
+            "def cottage size=3x3:\n",
+            "  door id=entry side=front at=left\n",
+        );
+        let module = crate::parse(src).expect("parse");
+        let ir = crate::lower(&module);
+        let def = ir.defs.first().expect("def lowered");
+        let dims = Dims { x: 5, y: 1, z: 5 };
+        let pos =
+            port_world_position((10, 0, 20), dims, def, &pid("entry")).expect("port resolves");
+        assert_eq!(pos, (11, 0, 24));
+    }
+
+    #[test]
+    fn port_world_position_door_returns_none_for_unknown_at_value() {
+        // `at=middle` is not one of `center | left | right` and must
+        // cascade to `W_DEFERRED_MEMBER` via `None` rather than being
+        // silently rounded to a centre value.
+        let src = concat!(
+            "def cottage size=3x3:\n",
+            "  door id=entry side=front at=middle\n",
+        );
+        let module = crate::parse(src).expect("parse");
+        let ir = crate::lower(&module);
+        let def = ir.defs.first().expect("def lowered");
+        let dims = Dims { x: 3, y: 1, z: 3 };
+        assert!(port_world_position((0, 0, 0), dims, def, &pid("entry")).is_none());
     }
 }

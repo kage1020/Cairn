@@ -1,0 +1,27 @@
+@cairn 2026.06
+@requires version>=1.20
+
+# Pin the `at=left` and `at=right` door anchors at the integration
+# boundary. Two cottages sit side by side; each pulls its `front` door
+# toward the corner that faces the gap, so a single straight walkway
+# runs along z=3 from `west.east_corner` (front `at=right`, u=2) to
+# `east.west_corner` (front `at=left`, u=0). A regression that
+# silently rounds `at=left|right` back to `at=center` would shift one
+# of the ports by one cell and break the bounding-box assertions in
+# `tests/at_side_walkway_lower.rs`.
+
+def cottage size=3x3:
+  floor id=floor mat_slot=floor
+  walls id=walls class=outer mat_slot=wall height=3
+  door  id=east_corner side=front at=right
+  door  id=west_corner side=front at=left
+
+theme medieval:
+  slot floor -> @oak_planks
+  slot wall  -> @cobblestone
+
+site duo:
+  place id=west use=cottage theme=medieval at=origin
+  place id=east use=cottage theme=medieval east_of=west gap=5
+
+  connect west.east_corner to east.west_corner path=@gravel

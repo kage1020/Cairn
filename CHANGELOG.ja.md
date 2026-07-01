@@ -59,6 +59,20 @@
 
 ### Added
 
+- `door at=` で `center` に加えて `left` と `right` の名前付きアンカーを
+  受け付けるようになった。`left` は openings カットと walkway ポートの
+  両方を壁ローカル軸の原点 (`u = 0`) に、`right` は遠端
+  (`u = wall_length - 1`) に固定する。`center` の挙動は不変
+  (`u = wall_length / 2`, 偶数長は round-down) なので、既存の example
+  やロックファイルは影響を受けない。`super::walkway::door_anchor_offset`
+  と `super::lower::carve_door` が同じ語彙を共有するため、walkway ポート
+  と openings カットは常に同じ列に解決される。数値オフセット (`at=N`)
+  は将来拡張用に予約されたままで、`W_DEFERRED_MEMBER` を介して deferred
+  になる。その defer メッセージは 3 つの許容アンカーを列挙するように
+  更新された。新規 `examples/at-side-walkway.crn` と
+  `crates/cairn-lang-core/tests/at_side_walkway_lower.rs` が両端アンカー
+  を統合境界で固定する。詳細は `spec/components-editing-sites.md`
+  §9.3.5 と `spec/syntax.md` §5.4 を参照。
 - `cairn-lang-core::block_array::walkway::port_world_position` — walkway
   のポート端点を `door` メンバーに加えて `window` メンバーでも宣言
   できるようになった (door の挙動は変更なし)。`window` の壁ローカル

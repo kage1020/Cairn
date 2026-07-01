@@ -91,16 +91,17 @@ site village:
 参照先 `def` の `door` メンバーと `window` メンバーで、stair / roof のポートは将来拡張用に
 予約されています。ポートのワールド座標は「メンバーの `side=` 壁の外側 1 ブロック、placement の
 地面段 (`place_origin.1`)」とし、`front`/`back`/`left`/`right` はそれぞれ `+z`/`-z`/`-x`/`+x`
-に対応します (§9.3.1)。壁ローカル オフセットは `door` では `at=center`、`window` では矩形の
-幾何中心 (`offset + size.w / 2`) を採用し、いずれの場合も placement の overhang ぶんだけ
-外側にシフトして、ポートは構造外面を超えた overhang リング上に着地します。`window` は水平方向
-(`offset + size.w ≤ wall_length`) と垂直方向 (`y + size.h ≤ walls.height`) の両方で壁内に
-収まる必要があり、openings パスがカットを deferred 化する window はポートも構築されず、行は
-`W_DEFERRED_MEMBER` で破棄され、ノートには door / window / 予約ロールの契約が順番に列挙
-されます。`window` の `y=` はポートを地面段から持ち上げません — 歩道は 1 voxel 厚の平坦な
-strip であり、相手側エンドポイントと Y が一致している必要があるためです。`sym=true` の window
-はプライマリ `offset` 側の中央 1 点だけがポートとして参照されます (壁面上の鏡像カットは描画
-されますが、`id=` は単一の座標に解決されます)。
+に対応します (§9.3.1)。壁ローカル オフセットは `door` ではその `at=` 値 (`center` / `left` /
+`right` のいずれか — §5.4 参照)、`window` では矩形の幾何中心 (`offset + size.w / 2`) を採用し、
+いずれの場合も placement の overhang ぶんだけ外側にシフトして、ポートは構造外面を超えた overhang
+リング上に着地します。`door` の数値オフセット (`at=N`) は将来拡張用に予約されています。
+`window` は水平方向 (`offset + size.w ≤ wall_length`) と垂直方向
+(`y + size.h ≤ walls.height`) の両方で壁内に収まる必要があり、openings パスがカットを
+deferred 化する window はポートも構築されず、行は `W_DEFERRED_MEMBER` で破棄され、ノートには
+door / window / 予約ロールの契約が順番に列挙されます。`window` の `y=` はポートを地面段から
+持ち上げません — 歩道は 1 voxel 厚の平坦な strip であり、相手側エンドポイントと Y が一致して
+いる必要があるためです。`sym=true` の window はプライマリ `offset` 側の中央 1 点だけがポート
+として参照されます (壁面上の鏡像カットは描画されますが、`id=` は単一の座標に解決されます)。
 
 **経路**: 歩道は 2 つのポートで一致する Y で Manhattan L (先に x 軸、次に z 軸) を走ります。
 階段や複数階層をまたぐ 3D 経路探索はポート面を一度に着地させるため意図的にスコープから外して

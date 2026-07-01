@@ -60,6 +60,22 @@ placeholder cannot leak out. The `2026.07.0` release PR will flip publish to `tr
 
 ### Added
 
+- `door at=` now accepts the named anchors `center`, `left`, and
+  `right` in addition to the previously-supported `center`. The new
+  `left` anchor pins the openings cut and any walkway port to the
+  wall-local axis origin (`u = 0`); `right` pins them to the far
+  corner (`u = wall_length - 1`). `center` behaviour is unchanged
+  (`u = wall_length / 2`, round-down on even widths), so existing
+  examples and lockfiles are unaffected. `super::walkway::door_anchor_offset`
+  and `super::lower::carve_door` share the same vocabulary, so the
+  walkway port and the carved opening always resolve to the same
+  column. Numeric offsets (`at=N`) remain reserved for a future
+  extension and continue to cascade through `W_DEFERRED_MEMBER` whose
+  defer message now lists the three accepted anchors. New
+  `examples/at-side-walkway.crn` plus
+  `crates/cairn-lang-core/tests/at_side_walkway_lower.rs` pin both
+  corner anchors at the integration boundary. See
+  `spec/components-editing-sites.md` §9.3.5 and `spec/syntax.md` §5.4.
 - `cairn-lang-core::block_array::walkway::port_world_position` — walkway
   port endpoints can now be declared on `window` members in addition to
   `door` members (door behaviour is unchanged). For a `window` the
