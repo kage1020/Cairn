@@ -29,6 +29,12 @@ on:
 permissions:
   contents: write
   pull-requests: write
+  # OIDC token for crates.io Trusted Publishing. `rust-lang/crates-io-auth-action`
+  # exchanges this for a scoped, short-lived crates.io token, so no long-lived
+  # `CARGO_REGISTRY_TOKEN` secret is ever read. Each cairn-lang-* crate must have
+  # this repository + workflow registered as a Trusted Publisher on crates.io
+  # (or as a Pending Trusted Publisher before the very first publish).
+  id-token: write
 
 concurrency:
   group: release-${{ github.ref }}
@@ -116,13 +122,15 @@ jobs:
           echo "--- Cargo.toml [workspace.package] + [workspace.dependencies] ---"
           awk '/^\[workspace\.(package|dependencies)\]/,/^$/' Cargo.toml
 
+      # release-pr never publishes, so no crates.io token is needed here.
+      # The OIDC flow lives in release-patch, where the `release` sub-command
+      # is what actually spends a token.
       - name: Run release-plz release-pr
         uses: release-plz/action@v0.5
         with:
           command: release-pr
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
 
   release-patch:
     name: Open patch PR or publish merged release
@@ -145,6 +153,15 @@ jobs:
           shared-key: release-patch
           save-if: ${{ github.ref == 'refs/heads/canary' }}
 
+      # Exchange the workflow's OIDC token for a short-lived, crate-scoped
+      # crates.io token. This is the crates.io Trusted Publishing flow —
+      # see release-plz.toml comments for the pending-publisher setup on
+      # crates.io. Runs on every push, but the token is only actually spent
+      # when release-plz's `release` sub-command has something to publish.
+      - name: Authenticate to crates.io via OIDC
+        id: cratesio-auth
+        uses: rust-lang/crates-io-auth-action@v1
+
       # Default command runs both `release-pr` (open patch PR for new commits)
       # and `release` (publish + tag a merged release PR if present).
       - name: Run release-plz
@@ -152,7 +169,7 @@ jobs:
         uses: release-plz/action@v0.5
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+          CARGO_REGISTRY_TOKEN: ${{ steps.cratesio-auth.outputs.token }}
 
       # Fast-forward `main` to canary only when release-plz reports it actually
       # published in this run. The `releases_created` output is the trust anchor —
