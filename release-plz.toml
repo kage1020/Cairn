@@ -1,6 +1,6 @@
 # release-plz configuration for Cairn.
 #
-# Cairn uses CalVer `YYYY.0M[.PATCH]` (see CHANGELOG.md and spec/versioning-editions).
+# Cairn uses CalVer `YYYY.M[.PATCH]` (see CHANGELOG.md and spec/versioning-editions).
 # release-plz does not natively understand CalVer, so the version is forced from CI
 # (workflow `compute-version` job + `release-plz set-version`). This file controls
 # everything *other* than the version number: changelog template, tag/release shape,
@@ -41,7 +41,7 @@ pr_labels = ["release"]
 #
 # `publish = false` here must mirror `[workspace.package].publish` in
 # Cargo.toml — release-plz refuses to start when the two disagree. When the
-# first real release PR (2026.07.0) is opened, flip both to true together.
+# first real release PR (2026.7.0) is opened, flip both to true together.
 [[package]]
 name = "cairn-lang-cli"
 publish = false
@@ -59,7 +59,7 @@ header = """# Changelog
 
 All notable changes to Cairn are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) so `release-plz` can append release
-entries cleanly. Cairn uses date-based versioning (CalVer) `YYYY.0M[.PATCH]`. This is the version
+entries cleanly. Cairn uses date-based versioning (CalVer) `YYYY.M[.PATCH]`. This is the version
 of the language + reference compiler + standard library + registry/constraint packs as a bundle,
 and is a separate axis from the Minecraft target version.
 

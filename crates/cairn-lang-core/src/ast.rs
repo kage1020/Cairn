@@ -28,7 +28,7 @@ use crate::error::Span;
 ///
 /// Wrapping the raw string in a newtype prevents callers from confusing it
 /// with arbitrary identifiers, requirement expressions, or other free-form
-/// labels. Validation of the `YYYY.0M[.PATCH]` shape is the responsibility of
+/// labels. Validation of the `YYYY.M[.PATCH]` shape is the responsibility of
 /// the semantic layer; this type only fixes the source provenance.
 ///
 /// The semantic layer is expected to introduce a distinct `Version` type that

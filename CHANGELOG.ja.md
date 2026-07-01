@@ -6,16 +6,16 @@
 
 書式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に従います (release-plz が
 リリースエントリを綺麗に追記できるようにするため)。Cairn は日付ベースバージョニング (CalVer)
-`YYYY.0M[.PATCH]` を採用します。これは「言語仕様 + リファレンスコンパイラ + 標準ライブラリ +
+`YYYY.M[.PATCH]` を採用します。これは「言語仕様 + リファレンスコンパイラ + 標準ライブラリ +
 レジストリ/制約パック」をまとめたバンドルのバージョンであり、Minecraft のターゲットバージョンとは
 別軸です。
 
 ## [Unreleased]
 
-最初の公開ナンバー付きリリースは **`2026.07.0`** (予定) です。それまでの間、本節はそのリリースに
+最初の公開ナンバー付きリリースは **`2026.7.0`** (予定) です。それまでの間、本節はそのリリースに
 向けてリポジトリに積まれた内容を記録します。`cairn-lang-*` クレートはまだ crates.io に公開されて
 おらず、`[workspace.package].publish` は `false` のため `0.0.0` プレースホルダが外部に漏れる
-ことはありません。`2026.07.0` のリリース PR で publish を `true` にフリップします。
+ことはありません。`2026.7.0` のリリース PR で publish を `true` にフリップします。
 
 ### Changed
 
@@ -214,7 +214,7 @@
   ロックファイルは PR3 以前とバイト一致する。既存の `hash_resolved_ir` は
   serde-json の構造走査で新フィールドを自動的にハッシュへ取り込む。
   spec §9.3.4 が「再解決不要な site レイアウトの単一情報源」として
-  この section を文書化している (2027.01.0)。
+  この section を文書化している (2027.1.0)。
 - `cairn-lang-formats::java_structure::output_filename` が
   `site::HAMLET::home1` → `home1.nbt` のマッピングを既存の
   `struct::cottage` → `cottage.nbt` 規則と並んで習得した。per-place 配置は
@@ -263,7 +263,7 @@
   → `dark_oak_stairs`) を網羅するため、themed-tower は今や
   `W_ABSTRACT_TOKEN_DEFERRED` ゼロで lowering を通過する。屋根の
   ハードコードによる `W_DEFERRED_MEMBER` と `level` ブロックの保留は
-  残るが、抽象トークン解決自体はクリーンになった (2027.01.0)。
+  残るが、抽象トークン解決自体はクリーンになった (2027.1.0)。
 - `cairn-lang-core::block_array::roof` — 既存の `gable` ジェネレータに加え
   `shed` / `hip` / `flat` 屋根ボクセライザを追加し、`spec/compilation.md`
   §4.3 で保留扱いだった「より広い屋根タクソノミ」のカーブアウトを解消した。
@@ -282,7 +282,7 @@
   `minecraft:spruce_planks` を出力。per-theme 屋根樹種は registry pack
   で後追い）。新しい `examples/roof-shed.crn`, `examples/roof-hip.crn`,
   `examples/roof-flat.crn` fixtures が CLI 経由で新 kind を pin する
-  (2027.01.0)。
+  (2027.1.0)。
 - `cairn-lang-core::suggest` — `nearest_match(input, candidates)` は
   Damerau-Levenshtein 距離でクローズドな語彙から最近接候補を返す
   ユーティリティ。閾値は入力長スケール (1〜3 文字なら 1 編集以下、4〜6 文字
@@ -379,8 +379,8 @@
   ガイド、サンプル目次は [`website/src/content/docs/`](website/src/content/docs/) で直接編集
   します。`cairn-lang-wasm` バインディングを将来取り込むためのプレイグラウンドプレースホルダ、
   `main` への push で自動デプロイする Cloudflare Git 連携付き。
-- リリース戦略: 月次 minor (`YYYY.0M.0`) は毎月 1 日 04:17 UTC の GitHub Actions cron、
-  patch (`YYYY.0M.N`) は適格コミットの `canary` push で随時。リリース PR
+- リリース戦略: 月次 minor (`YYYY.M.0`) は毎月 1 日 04:17 UTC の GitHub Actions cron、
+  patch (`YYYY.M.N`) は適格コミットの `canary` push で随時。リリース PR
   (`release-plz-*` → `canary`) は人間レビューを経てマージされ、release-plz が publish を行い、
   workflow が `main` を `canary` に fast-forward することで `main` は公開済み状態のみを映す。
 - ワークスペースのバージョンは `[workspace.package].version` と `[workspace.dependencies]` で
@@ -393,7 +393,7 @@
   公開面はすべて **Stable**、**Evolving**、**Internal** のいずれかに属し、各面がいつ Stable に
   昇格するかをマイルストーン別の表で明示する。
 - [ロードマップ](https://cairn.kage1020.com/ja/roadmap/) を公開。M1〜M6 のマイルストーンと
-  `2027.06.0` までの月別スコープを掲載。
+  `2027.6.0` までの月別スコープを掲載。
 
 ### Changed (Java バックエンド Rust API — `cairn-lang-formats` 利用者へ影響)
 

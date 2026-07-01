@@ -87,7 +87,7 @@ implementations and authors SHOULD use these exact spellings. The vocabulary is 
 ## Headers and provenance
 
 - **`@cairn`.** Header declaring the **Cairn language version** the file was written against
-  (CalVer `YYYY.0M[.PATCH]`). Provenance only; optional.
+  (CalVer `YYYY.M[.PATCH]`). Provenance only; optional.
 - **`@requires`.** A capability floor on the Minecraft target (e.g. `version>=1.20`). Hard error
   on conflict with the inferred value.
 - **`@intended_targets`.** A hint about which Minecraft versions the file was designed for. Not a

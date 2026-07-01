@@ -164,7 +164,7 @@ Cairn で使う Conventional Commits の type:
 
 ## バージョニング
 
-Cairn は日付ベースバージョニング (CalVer) `YYYY.0M[.PATCH]` を採用します。主要な変更は
+Cairn は日付ベースバージョニング (CalVer) `YYYY.M[.PATCH]` を採用します。主要な変更は
 [CHANGELOG.md](CHANGELOG.md) に記録されます。バージョン番号ではなく
 [互換性ティア](https://cairn.kage1020.com/ja/spec/compatibility/) が各面の互換契約を定めます。
 

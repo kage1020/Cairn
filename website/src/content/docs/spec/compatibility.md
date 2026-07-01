@@ -3,7 +3,7 @@ title: "Compatibility Tiers"
 ---
 
 Cairn ships a single release train under [date-based versioning](versioning-editions#101-the-target-is-a-compile-time-parameter)
-(`YYYY.0M[.PATCH]`). Because CalVer has no semver-style "major" axis, the **scope of what is and
+(`YYYY.M[.PATCH]`). Because CalVer has no semver-style "major" axis, the **scope of what is and
 is not safe to break in a release** is set by this document rather than by version numbers.
 
 Every public surface area of the project sits in exactly one of three tiers: **Stable**,
@@ -20,7 +20,7 @@ warning, and removed in the following monthly minor at the earliest.**
 - A breaking change reaching `Stable` MUST be referenced from the next month's CHANGELOG.
 - Renames MUST keep the old name working for the deprecation window.
 - Default values MAY change with a warning; semantic meaning MUST NOT.
-- Downstream consumers can pin a minor version (`cairn ~= 2026.07`) and expect at least the
+- Downstream consumers can pin a minor version (`cairn ~= 2026.7`) and expect at least the
   next monthly minor to compile their inputs unchanged.
 
 Stable surfaces:

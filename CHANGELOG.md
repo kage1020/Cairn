@@ -4,16 +4,16 @@
 
 All notable changes to Cairn are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) so `release-plz` can append release
-entries cleanly. Cairn uses date-based versioning (CalVer) `YYYY.0M[.PATCH]`. This is the version
+entries cleanly. Cairn uses date-based versioning (CalVer) `YYYY.M[.PATCH]`. This is the version
 of the language + reference compiler + standard library + registry/constraint packs as a bundle,
 and is a separate axis from the Minecraft target version.
 
 ## [Unreleased]
 
-The first publicly-numbered release will be **`2026.07.0`** (planned). Until then this section
+The first publicly-numbered release will be **`2026.7.0`** (planned). Until then this section
 records what has been built into the repository in preparation for that release. No `cairn-lang-*`
 crate has been published to crates.io yet; `[workspace.package].publish` is `false` so the `0.0.0`
-placeholder cannot leak out. The `2026.07.0` release PR will flip publish to `true`.
+placeholder cannot leak out. The `2026.7.0` release PR will flip publish to `true`.
 
 ### Changed
 
@@ -226,7 +226,7 @@ placeholder cannot leak out. The `2026.07.0` release PR will flip publish to `tr
   remain byte-identical to pre-PR3 builds, and the existing
   `hash_resolved_ir` automatically picks up the new IR field via
   serde-json's structural walk. Spec §9.3.4 documents this as the
-  re-resolution-free source of truth for site layouts (2027.01.0).
+  re-resolution-free source of truth for site layouts (2027.1.0).
 - `cairn-lang-formats::java_structure::output_filename` learns the
   `site::HAMLET::home1` → `home1.nbt` mapping alongside its existing
   `struct::cottage` → `cottage.nbt` rule. Per-place placements share an
@@ -280,7 +280,7 @@ placeholder cannot leak out. The `2026.07.0` release PR will flip publish to `tr
   `dark_oak_planks`, `roof.dark_wood` → `dark_oak_stairs`); roof
   hardcoding still emits a `W_DEFERRED_MEMBER` against the gable
   generator and `level` blocks remain deferred, but the abstract
-  resolution itself is now clean (2027.01.0).
+  resolution itself is now clean (2027.1.0).
 - `cairn-lang-core::block_array::roof` — `shed`, `hip`, and `flat` roof
   voxelisers join the existing `gable` generator, closing the
   `spec/compilation.md` §4.3 carve-out that previously deferred
@@ -301,7 +301,7 @@ placeholder cannot leak out. The `2026.07.0` release PR will flip publish to `tr
   per-theme roof species follow with the registry pack). New
   `examples/roof-shed.crn`, `examples/roof-hip.crn`, and
   `examples/roof-flat.crn` fixtures pin the new kinds against the CLI
-  (2027.01.0).
+  (2027.1.0).
 - `cairn-lang-core::suggest` — `nearest_match(input, candidates)` finds the
   closest entry in a closed vocabulary under Damerau-Levenshtein distance
   with a length-scaled cap (≤ 1 edit for 1–3 char inputs, ≤ 2 for 4–6, ≤ 3
@@ -477,8 +477,8 @@ placeholder cannot leak out. The `2026.07.0` release PR will flip publish to `tr
   [`website/src/content/docs/`](website/src/content/docs/); a placeholder playground page is
   wired to the future `cairn-lang-wasm` bindings; Cloudflare's Git integration auto-deploys on
   every push to `main`.
-- Release strategy: monthly minor (`YYYY.0M.0`) by GitHub Actions cron at 04:17 UTC on the 1st,
-  plus on-demand patches (`YYYY.0M.N`) triggered by qualifying commits on `canary`. The release
+- Release strategy: monthly minor (`YYYY.M.0`) by GitHub Actions cron at 04:17 UTC on the 1st,
+  plus on-demand patches (`YYYY.M.N`) triggered by qualifying commits on `canary`. The release
   PR (`release-plz-*` → `canary`) is merged after human review; release-plz publishes and the
   workflow fast-forwards `main` to `canary` so `main` mirrors only released state.
 - Workspace versioning unified through `[workspace.package].version` and
@@ -492,7 +492,7 @@ placeholder cannot leak out. The `2026.07.0` release PR will flip publish to `tr
   in **Stable**, **Evolving**, or **Internal**, with a milestone-indexed table showing when each
   surface graduates.
 - [Roadmap](https://cairn.kage1020.com/roadmap/) published, with M1–M6 milestones and a monthly
-  scope plan through `2027.06.0`.
+  scope plan through `2027.6.0`.
 
 ### Changed (Java backend Rust API — affects `cairn-lang-formats` consumers)
 

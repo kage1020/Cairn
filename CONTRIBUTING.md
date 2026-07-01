@@ -160,7 +160,7 @@ A scope in parentheses identifies the affected crate or spec area: `feat(core)`,
 
 ## Versioning
 
-Cairn uses date-based versioning (CalVer) `YYYY.0M[.PATCH]`. Notable changes are recorded in
+Cairn uses date-based versioning (CalVer) `YYYY.M[.PATCH]`. Notable changes are recorded in
 [CHANGELOG.md](CHANGELOG.md). The compatibility contract behind each surface is set by
 [Compatibility Tiers](https://cairn.kage1020.com/spec/compatibility/), not by the version number.
 
