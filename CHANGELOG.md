@@ -12,8 +12,9 @@ and is a separate axis from the Minecraft target version.
 
 The first publicly-numbered release will be **`2026.7.0`** (planned). Until then this section
 records what has been built into the repository in preparation for that release. No `cairn-lang-*`
-crate has been published to crates.io yet; `[workspace.package].publish` is `false` so the `0.0.0`
-placeholder cannot leak out. The `2026.7.0` release PR will flip publish to `true`.
+crate has been published to crates.io yet; the workspace version stays at the `0.0.0` placeholder
+on `canary`, and `cargo publish` only fires when the monthly-minor release PR — the one that
+carries the real CalVer version — is merged.
 
 ### Changed
 
