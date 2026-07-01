@@ -18,12 +18,12 @@ use super::manifest::{PackEdition, PackManifest};
 use super::materials::{MaterialsCatalog, MaterialsError, MaterialsIndex};
 
 /// Built-in `pack.json` bytes, statically embedded at compile time.
-const BUILTIN_JAVA_MANIFEST: &str = include_str!("../../../../data/registry/java/pack.json");
+const BUILTIN_JAVA_MANIFEST: &str = include_str!("../../registry-data/java/pack.json");
 /// Built-in `data_versions.json` bytes, statically embedded at compile time.
 const BUILTIN_JAVA_DATA_VERSIONS: &str =
-    include_str!("../../../../data/registry/java/data_versions.json");
+    include_str!("../../registry-data/java/data_versions.json");
 /// Built-in `materials.json` bytes, statically embedded at compile time.
-const BUILTIN_JAVA_MATERIALS: &str = include_str!("../../../../data/registry/java/materials.json");
+const BUILTIN_JAVA_MATERIALS: &str = include_str!("../../registry-data/java/materials.json");
 
 /// Highest manifest `schema_version` this Cairn build understands.
 pub const SUPPORTED_MANIFEST_SCHEMA: u32 = 1;
