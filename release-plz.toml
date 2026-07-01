@@ -39,12 +39,14 @@ pr_labels = ["release"]
 # `cairn-lang-cli` is the user-facing binary (installs the `cairn` command),
 # so the tag rides on it.
 #
-# `publish = false` here must mirror `[workspace.package].publish` in
-# Cargo.toml — release-plz refuses to start when the two disagree. When the
-# first real release PR (2026.7.0) is opened, flip both to true together.
+# `publish` here must mirror `[workspace.package].publish` in Cargo.toml —
+# release-plz refuses to start when the two disagree. Both are `true` so the
+# monthly cron path can open a release PR; `cargo publish` only fires when a
+# release PR is merged, and the version at that point is decided by the
+# workflow's pre-set step, not by release-plz's own bump logic.
 [[package]]
 name = "cairn-lang-cli"
-publish = false
+publish = true
 git_tag_enable = true
 git_release_enable = true
 git_tag_name = "v{{ version }}"
