@@ -191,8 +191,21 @@ jobs:
           TAG: ${{ needs.validate-tag.outputs.tag }}
           ARCHIVE: ${{ steps.archive.outputs.path }}
         shell: bash
+        # Create the release on demand if it doesn't already exist. release-plz
+        # creates one at publish time via the `cairn-lang-cli` git_release_enable
+        # setting, but under recovery paths (manual workflow_dispatch, one crate
+        # publish failing mid-batch) the release may be missing. Creating it here
+        # avoids "release not found" upload failures and lets the six binary
+        # matrix jobs race to `gh release create` — the first wins, the rest see
+        # the release already exists and fall through to upload.
         run: |
           set -euo pipefail
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            gh release create "$TAG" \
+              --title "cairn-lang-cli-$TAG" \
+              --notes "Release binaries and SBOM are attached by the Publish workflow." \
+              || gh release view "$TAG" >/dev/null 2>&1
+          fi
           gh release upload "$TAG" \
             "$ARCHIVE" \
             "$ARCHIVE.sigstore" \
@@ -235,7 +248,16 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ needs.validate-tag.outputs.tag }}
+        # Same on-demand release creation as the binaries job — SBOM must not
+        # fail just because it ran ahead of the first binary matrix leg.
         run: |
+          set -euo pipefail
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            gh release create "$TAG" \
+              --title "cairn-lang-cli-$TAG" \
+              --notes "Release binaries and SBOM are attached by the Publish workflow." \
+              || gh release view "$TAG" >/dev/null 2>&1
+          fi
           gh release upload "$TAG" \
             cairn-sbom.cdx.json \
             cairn-sbom.cdx.json.sigstore \
