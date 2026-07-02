@@ -11,7 +11,7 @@ members = [
 ]
 
 [workspace.package]
-version = "2026.7.2"
+version = "2026.7.3"
 edition = "2024"
 rust-version = "1.95"
 license = "Apache-2.0"
@@ -27,9 +27,9 @@ authors = ["kage1020 and the Cairn authors"]
 publish = true
 
 [workspace.dependencies]
-cairn-lang-core = { version = "2026.7.2", path = "crates/cairn-lang-core" }
+cairn-lang-core = { version = "2026.7.3", path = "crates/cairn-lang-core" }
 cairn-lang-nbt = { version = "2026.7.0", path = "crates/cairn-lang-nbt" }
-cairn-lang-formats = { version = "2026.7.2", path = "crates/cairn-lang-formats" }
+cairn-lang-formats = { version = "2026.7.3", path = "crates/cairn-lang-formats" }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
