@@ -161,10 +161,16 @@ jobs:
             echo "path=$ZIP_PATH" >> "$GITHUB_OUTPUT"
           fi
 
+      # sigstore/cosign-installer@v3 has no Windows/ARM64 build, so skip signing
+      # on that leg. The .zip and .sha256 still upload; the missing .sigstore
+      # is documented in the release notes and downstream verifiers should fall
+      # back to SHA-256 for this platform until cosign ships an ARM64 binary.
       - name: Install cosign
+        if: matrix.target != 'aarch64-pc-windows-msvc'
         uses: sigstore/cosign-installer@v3
 
       - name: Sign archive (keyless sigstore)
+        if: matrix.target != 'aarch64-pc-windows-msvc'
         shell: bash
         env:
           COSIGN_EXPERIMENTAL: "1"
@@ -206,11 +212,12 @@ jobs:
               --notes "Release binaries and SBOM are attached by the Publish workflow." \
               || gh release view "$TAG" >/dev/null 2>&1
           fi
-          gh release upload "$TAG" \
-            "$ARCHIVE" \
-            "$ARCHIVE.sigstore" \
-            "$ARCHIVE.sha256" \
-            --clobber
+          uploads=("$ARCHIVE" "$ARCHIVE.sha256")
+          # No .sigstore on aarch64-pc-windows-msvc — cosign install skipped.
+          if [ -f "$ARCHIVE.sigstore" ]; then
+            uploads+=("$ARCHIVE.sigstore")
+          fi
+          gh release upload "$TAG" "${uploads[@]}" --clobber
 
   sbom:
     name: SBOM
@@ -233,8 +240,25 @@ jobs:
       - name: Install cargo-cyclonedx
         run: cargo install cargo-cyclonedx --locked
 
+      # cargo-cyclonedx writes per-crate SBOMs into each crate directory (or
+      # target/) rather than a single workspace-root file, so
+      # `--override-filename cairn-sbom` alone leaves cosign with nothing to
+      # sign. Generate the per-crate files, then aggregate the newest one at
+      # the workspace root. We pick `cairn-lang-cli` — it transitively depends
+      # on every workspace crate, so its SBOM covers the full graph.
       - name: Generate SBOM
-        run: cargo cyclonedx --format json --override-filename cairn-sbom
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo cyclonedx --format json --override-filename cairn-sbom
+          cli_sbom=$(find crates/cairn-lang-cli -maxdepth 3 -name 'cairn-sbom*.cdx.json' -type f | head -n1)
+          if [ -z "$cli_sbom" ]; then
+            echo "cargo-cyclonedx did not produce a cairn-lang-cli SBOM; dumping what it did produce:" >&2
+            find . -name '*.cdx.json' -type f
+            exit 1
+          fi
+          cp "$cli_sbom" cairn-sbom.cdx.json
+          echo "Aggregated SBOM copied from $cli_sbom"
 
       - name: Install cosign
         uses: sigstore/cosign-installer@v3
