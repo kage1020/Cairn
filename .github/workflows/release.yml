@@ -29,6 +29,9 @@ on:
 permissions:
   contents: write
   pull-requests: write
+  # Needed by the "Dispatch Publish workflow" step (`gh workflow run publish.yml`);
+  # `gh` calls the workflow-dispatches REST endpoint which is gated on this scope.
+  actions: write
 
 concurrency:
   group: release-${{ github.ref }}
@@ -145,11 +148,33 @@ jobs:
           shared-key: release-patch
           save-if: ${{ github.ref == 'refs/heads/canary' }}
 
-      # Default command runs both `release-pr` (open patch PR for new commits)
-      # and `release` (publish + tag a merged release PR if present).
-      - name: Run release-plz
+      # Split into two calls: `release` first (publish + tag any merged
+      # release PR), then `release-pr` (open a patch PR only for new commits
+      # since the release). Running the default command combines both, but
+      # release-pr runs BEFORE release inside that combo — so on the very push
+      # that merges a release PR, release-pr sees Cargo.toml ahead of
+      # crates.io and opens a phantom v(patch+1) PR for the downstream crates
+      # whose Cargo.lock dep on the just-bumped anchor shifted. Running
+      # release first closes that window: by the time release-pr looks,
+      # crates.io matches Cargo.toml and no cascade PR is proposed.
+      - name: Run release-plz release
         id: release_plz
         uses: release-plz/action@v0.5
+        with:
+          command: release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+
+      - name: Run release-plz release-pr
+        # Only when the preceding `release` didn't itself produce a release —
+        # avoids opening a patch PR immediately after a full release just
+        # landed, and matches the intent that release-pr is the "propose the
+        # next patch" step, not the "propose alongside the current release" one.
+        if: steps.release_plz.outputs.releases_created != 'true'
+        uses: release-plz/action@v0.5
+        with:
+          command: release-pr
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
