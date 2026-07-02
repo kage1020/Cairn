@@ -174,13 +174,18 @@ jobs:
         run: |
           set -euo pipefail
           git fetch origin --tags --prune
-          new_tags=$(git tag --points-at HEAD --list 'v*' || true)
+          # `--merged HEAD` covers the release-plz merge-commit shape: the tag
+          # points at the "chore: release" commit that lives on the merged-in
+          # branch, and HEAD is the merge commit that pulled that branch in.
+          # `--points-at HEAD` only matches tags at the exact commit and misses
+          # this case, leading to a false "no v* tag points at HEAD" abort.
+          new_tags=$(git tag --merged HEAD --list 'v*' --sort=-version:refname | head -n1 || true)
           if [ -z "$new_tags" ]; then
-            echo "release-plz reported a release but no v* tag points at HEAD; refusing to promote." >&2
+            echo "release-plz reported a release but no v* tag is reachable from HEAD; refusing to promote." >&2
             exit 1
           fi
-          echo "Detected release tag(s) at HEAD: $new_tags"
-          release_tag=$(echo "$new_tags" | head -n1)
+          release_tag="$new_tags"
+          echo "Detected release tag reachable from HEAD: $release_tag"
           # Reuse an already-open promote PR if the previous run left one
           # behind; `gh pr create` would otherwise error on the duplicate.
           existing=$(gh pr list --base main --head canary --state open --json number --jq '.[0].number' 2>/dev/null || true)
