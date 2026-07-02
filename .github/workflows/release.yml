@@ -154,6 +154,28 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
 
+      # Auto-dispatch the Publish workflow for the just-released tag. Tag pushes
+      # made with GITHUB_TOKEN don't trigger `on: push: tags:` in other workflows
+      # (GitHub's recursion guard), so without this step publish.yml sits idle
+      # until someone runs it manually. `workflow_dispatch` explicitly bypasses
+      # the recursion guard, so `gh workflow run` from inside this job fires
+      # publish.yml cleanly. Same tag-detection shape as the promote step below.
+      - name: Dispatch Publish workflow for the new tag
+        if: steps.release_plz.outputs.releases_created == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin --tags --prune
+          release_tag=$(git tag --merged HEAD --list 'v*' --sort=-version:refname | head -n1 || true)
+          if [ -z "$release_tag" ]; then
+            echo "release-plz reported a release but no v* tag is reachable from HEAD; skipping publish dispatch." >&2
+            exit 1
+          fi
+          echo "Dispatching publish.yml for $release_tag"
+          gh workflow run publish.yml -f tag="$release_tag"
+
       # Open a canary → main promote PR only when release-plz reports it
       # actually published in this run. The `releases_created` output is the
       # trust anchor — gating on "is there a v* tag at HEAD" alone would let
@@ -165,7 +187,6 @@ jobs:
       # go through a PR. Auto-merge is enabled here so once the reviewer
       # approves in the UI the merge fires without further manual action;
       # required status checks are the ones canary already passed.
-      # publish.yml is triggered separately by the tag push.
       - name: Open promote-to-main PR on release
         if: steps.release_plz.outputs.releases_created == 'true'
         env:
