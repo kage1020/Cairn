@@ -756,7 +756,11 @@ pub fn flat_voxels(roof_w: u32, roof_h: u32, wall_top: u32) -> Vec<(u32, u32, u3
 
 // --------------------------------------------------------------- shared
 
-fn stair_state(id: &str, facing: Cardinal, half: &str, shape: StairShape) -> BlockState {
+/// Build a stair [`BlockState`] with the given base id, facing, half, and
+/// shape properties. Exposed at `pub(super)` so the block-array lowering
+/// module can build eave stair states without duplicating the property
+/// layout (which pinned the on-disk NBT palette).
+pub(super) fn stair_state(id: &str, facing: Cardinal, half: &str, shape: StairShape) -> BlockState {
     let mut properties: IndexMap<String, String> = IndexMap::new();
     properties.insert("facing".to_owned(), facing.as_str().to_owned());
     properties.insert("half".to_owned(), half.to_owned());

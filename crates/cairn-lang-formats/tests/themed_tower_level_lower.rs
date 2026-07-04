@@ -82,8 +82,9 @@ fn themed_tower_palette_carries_every_resolved_theme_slot() {
 fn themed_tower_upper_walls_paint_at_second_floor_height() {
     // level y=5 walls id=upper height=4 → the upper wall ring lives at
     // y=6..=9. Pick a corner along the ring that must be cobblestone
-    // (@wall.stone.cobble). Interior x∈[1, 11], z∈[1, 9] (overhang=1),
-    // so the south-west corner is (1, y, 1).
+    // (@wall.stone.cobble). Interior x∈[1, 11], z∈[1, 9] (overhang=1).
+    // `front=+z` and `left=-x` (see WallSide docs), so the low-x /
+    // low-z corner (1, y, 1) is the *back-left* corner of the tower.
     let out = lower_themed_tower();
     let ba = out.structures.get("struct::keep").unwrap();
     let cobble_idx = ba
@@ -96,7 +97,7 @@ fn themed_tower_upper_walls_paint_at_second_floor_height() {
         let i = ba.dims.index(1, y, 1).expect("index within bounds");
         assert_eq!(
             ba.voxels[i].0, cobble_idx,
-            "second-floor SW corner at y={y} should be cobblestone",
+            "second-floor back-left corner at y={y} should be cobblestone",
         );
     }
 }

@@ -453,10 +453,16 @@ fn window_world_xz(
 }
 
 /// Largest `height=` declared on a `walls` member of the def, mirroring
-/// the convention `super::lower::max_wall_height` uses to size the
-/// placement's Y extent. Returns `None` when no `walls` member declares
-/// a positive `height=` (the same condition that prevents the openings
-/// pass from carving any door or window).
+/// the intent behind `super::lower::max_wall_top` — the port needs to
+/// know how tall the wall is so a window port can fit vertically.
+/// Returns `None` when no `walls` member declares a positive `height=`
+/// (the same condition that prevents the openings pass from carving any
+/// door or window). Only top-level `walls` members are considered:
+/// `level y=N` flattening lives in `lower.rs` and is not integrated
+/// with walkway port resolution yet (walkways currently only match
+/// door / window ports declared directly under the def body). When a
+/// port on a level-scoped door / window lands, this helper will need
+/// to walk `member.children` too.
 fn wall_height_of(def: &DefIr) -> Option<u32> {
     def.members
         .iter()
