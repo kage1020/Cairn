@@ -250,11 +250,17 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          cargo cyclonedx --format json --override-filename cairn-sbom
-          cli_sbom=$(find crates/cairn-lang-cli -maxdepth 3 -name 'cairn-sbom*.cdx.json' -type f | head -n1)
+          # cargo-cyclonedx v0.5.x needs `-p <package>` in a workspace root —
+          # without it the command silently no-ops and writes nothing. Target
+          # `cairn-lang-cli` because it transitively depends on every other
+          # workspace crate, so its SBOM covers the full dependency graph.
+          cargo cyclonedx --format json -p cairn-lang-cli --override-filename cairn-sbom
+          # File lands inside the CLI crate directory; move it to workspace
+          # root where cosign expects to sign it.
+          cli_sbom=$(find crates/cairn-lang-cli -maxdepth 3 \( -name 'cairn-sbom*.cdx.json' -o -name 'cairn-sbom*.json' \) -type f 2>/dev/null | head -n1)
           if [ -z "$cli_sbom" ]; then
-            echo "cargo-cyclonedx did not produce a cairn-lang-cli SBOM; dumping what it did produce:" >&2
-            find . -name '*.cdx.json' -type f
+            echo "cargo-cyclonedx did not produce a cairn-lang-cli SBOM; dumping what it did produce anywhere:" >&2
+            find . \( -name '*.cdx.json' -o -name 'cairn-sbom*.json' \) -type f 2>/dev/null || true
             exit 1
           fi
           cp "$cli_sbom" cairn-sbom.cdx.json
