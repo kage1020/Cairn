@@ -119,13 +119,13 @@ jobs:
           echo "--- Cargo.toml [workspace.package] + [workspace.dependencies] ---"
           awk '/^\[workspace\.(package|dependencies)\]/,/^$/' Cargo.toml
 
+      # release-pr never publishes, so no crates.io token is needed here.
       - name: Run release-plz release-pr
         uses: release-plz/action@v0.5
         with:
           command: release-pr
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
 
   release-patch:
     name: Open patch PR or publish merged release
@@ -157,6 +157,16 @@ jobs:
       # whose Cargo.lock dep on the just-bumped anchor shifted. Running
       # release first closes that window: by the time release-pr looks,
       # crates.io matches Cargo.toml and no cascade PR is proposed.
+      # Exchange the workflow's OIDC token for a short-lived, crate-scoped
+      # crates.io token. This is the crates.io Trusted Publishing flow: each
+      # cairn-lang-* crate has this repo + this workflow file registered as a
+      # Trusted Publisher on crates.io, so no static `CARGO_REGISTRY_TOKEN`
+      # secret is read. The token only actually gets spent by the `release`
+      # sub-command below when there's something to publish.
+      - name: Authenticate to crates.io via OIDC
+        id: cratesio-auth
+        uses: rust-lang/crates-io-auth-action@v1
+
       - name: Run release-plz release
         id: release_plz
         uses: release-plz/action@v0.5
@@ -164,20 +174,20 @@ jobs:
           command: release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+          CARGO_REGISTRY_TOKEN: ${{ steps.cratesio-auth.outputs.token }}
 
       - name: Run release-plz release-pr
         # Only when the preceding `release` didn't itself produce a release —
         # avoids opening a patch PR immediately after a full release just
         # landed, and matches the intent that release-pr is the "propose the
         # next patch" step, not the "propose alongside the current release" one.
+        # release-pr never publishes, so no crates.io token needed here.
         if: steps.release_plz.outputs.releases_created != 'true'
         uses: release-plz/action@v0.5
         with:
           command: release-pr
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
 
       # Auto-dispatch the Publish workflow for the just-released tag. Tag pushes
       # made with GITHUB_TOKEN don't trigger `on: push: tags:` in other workflows
