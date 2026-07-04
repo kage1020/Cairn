@@ -1,7 +1,10 @@
 //! End-to-end tests for `cairn lower <file>`.
 
+use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
+
+use tempfile::TempDir;
 
 fn cargo_bin() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_cairn"))
@@ -70,15 +73,30 @@ fn lower_2_json_format_round_trips_as_block_array_ir() {
 
 #[test]
 fn lower_3_deferred_member_warnings_print_to_stderr() {
-    // cottage.crn voxelises clean now; for the deferred-member regression
-    // we use themed-tower.crn, whose top-level `level` blocks remain
-    // outside the implemented phases.
-    let path = examples_dir().join("themed-tower.crn");
-    let out = run_lower(&[path.to_str().unwrap()]);
+    // themed-tower.crn voxelises clean once level-block lowering and
+    // roof/stair `mat_slot=` honouring land together, so the deferred
+    // regression uses a hand-written source that still exercises an
+    // unimplemented role. A bare `pressure_plate` is convenient — the
+    // redstone lowering pass is not yet in this milestone — and produces
+    // exactly the same `W_DEFERRED_MEMBER` shape the old themed-tower
+    // check was reading. Kept in-line rather than as an example so we do
+    // not commit an example the docs would then need to describe.
+    let source = concat!(
+        "theme t:\n",
+        "  slot floor -> spruce_planks\n",
+        "\n",
+        "struct s size=2x2\n",
+        "  floor mat_slot=floor\n",
+        "  pressure_plate side=front at=center\n",
+    );
+    let tmp = TempDir::new().expect("tempdir");
+    let src_path = tmp.path().join("pressure-plate.crn");
+    fs::write(&src_path, source).expect("write source");
+    let out = run_lower(&[src_path.to_str().unwrap()]);
     let stderr = String::from_utf8(out.stderr).expect("utf-8");
     assert!(
         stderr.contains("W_DEFERRED_MEMBER"),
-        "expected at least one W_DEFERRED_MEMBER on themed-tower, stderr={stderr}",
+        "expected at least one W_DEFERRED_MEMBER on a `pressure_plate` role, stderr={stderr}",
     );
 }
 
@@ -92,8 +110,8 @@ fn lower_4_missing_file_exits_with_code_two() {
 fn lower_5_themed_tower_lifts_abstract_tokens_through_builtin_materials() {
     // The built-in registry pack ships a materials catalog covering
     // every abstract token themed-tower.crn binds, so `W_ABSTRACT_TOKEN_DEFERRED`
-    // must NOT appear. `W_DEFERRED_MEMBER` is still expected on its top-level
-    // `level` blocks (level lowering arrives later), so exit stays 0.
+    // must NOT appear. Level flattening and stair voxelisation now cover
+    // the whole tower, so `W_DEFERRED_MEMBER` must not appear either.
     let path = examples_dir().join("themed-tower.crn");
     let out = run_lower(&[path.to_str().unwrap()]);
     assert!(

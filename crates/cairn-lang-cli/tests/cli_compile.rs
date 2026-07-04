@@ -499,13 +499,14 @@ fn c14_cottage_compiles_without_deferred_warnings() {
 }
 
 #[test]
-fn c14b_deferred_member_warning_still_exits_zero_on_other_examples() {
-    // The `cairn compile` exit-code contract is "warnings do not fail the
-    // build". We pin it against `themed-tower.crn`, which still exercises
-    // roles outside the implemented phases (`level` blocks contain doors
-    // and windows that lowering cannot reach yet). The exact warning
-    // count is intentionally not asserted — what matters is that at least
-    // one `W_DEFERRED_MEMBER` fires and the exit code stays 0.
+fn c14e_themed_tower_compiles_without_deferred_warnings() {
+    // themed-tower exercises `level y=N` grouping, per-level walls, an eave
+    // `stair`, and a `repeat=/step=` window pattern. Once level flattening
+    // and stair voxelisation landed together with roof/stair honouring
+    // resolved `mat_slot=` ids, every `level` child paints into the block
+    // array and no `W_DEFERRED_MEMBER` should fire on this example. This
+    // test replaces the earlier `c14b`, which pinned "at least one deferred
+    // warning" while level lowering was still absent.
     let tmp = TempDir::new().expect("tempdir");
     let dst = tmp.path().join("themed-tower.crn");
     fs::copy(examples_dir().join("themed-tower.crn"), &dst).expect("copy themed-tower");
@@ -517,15 +518,19 @@ fn c14b_deferred_member_warning_still_exits_zero_on_other_examples() {
         "--out",
         out_dir.path().to_str().unwrap(),
     ]);
-    assert!(
-        result.status.success(),
-        "stderr={}",
-        String::from_utf8_lossy(&result.stderr),
-    );
     let stderr = String::from_utf8(result.stderr).expect("utf-8");
     assert!(
-        stderr.contains("W_DEFERRED_MEMBER"),
-        "expected at least one deferred-member warning on themed-tower, stderr={stderr}",
+        result.status.success(),
+        "themed-tower should compile clean; stderr={stderr}",
+    );
+    assert_eq!(
+        stderr.matches("W_DEFERRED_MEMBER").count(),
+        0,
+        "themed-tower should lower without deferred-member warnings, stderr={stderr}",
+    );
+    assert!(
+        out_dir.path().join("keep.nbt").exists(),
+        "themed-tower should still write keep.nbt, stderr={stderr}",
     );
 }
 
