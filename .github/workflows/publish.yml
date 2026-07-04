@@ -250,21 +250,27 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          # cargo-cyclonedx v0.5.x needs `-p <package>` in a workspace root —
-          # without it the command silently no-ops and writes nothing. Target
-          # `cairn-lang-cli` because it transitively depends on every other
-          # workspace crate, so its SBOM covers the full dependency graph.
-          cargo cyclonedx --format json -p cairn-lang-cli --override-filename cairn-sbom
-          # File lands inside the CLI crate directory; move it to workspace
-          # root where cosign expects to sign it.
-          cli_sbom=$(find crates/cairn-lang-cli -maxdepth 3 \( -name 'cairn-sbom*.cdx.json' -o -name 'cairn-sbom*.json' \) -type f 2>/dev/null | head -n1)
-          if [ -z "$cli_sbom" ]; then
-            echo "cargo-cyclonedx did not produce a cairn-lang-cli SBOM; dumping what it did produce anywhere:" >&2
+          # cargo-cyclonedx v0.5.x has no `-p <package>` flag — it selects the
+          # crate via `--manifest-path`. Without one, running bare in a
+          # workspace root is a silent no-op. Point it at `cairn-lang-cli`
+          # because it transitively depends on every other workspace crate,
+          # so its SBOM covers the full dependency graph. Output lands next
+          # to that Cargo.toml as `cairn-sbom.json` (v0.5.x uses a `.json`
+          # extension, not `.cdx.json`); copy it to workspace root under the
+          # `.cdx.json` name that cosign and the release upload step expect.
+          cargo cyclonedx \
+            --format json \
+            --manifest-path crates/cairn-lang-cli/Cargo.toml \
+            --override-filename cairn-sbom
+          cli_sbom=crates/cairn-lang-cli/cairn-sbom.json
+          if [ ! -f "$cli_sbom" ]; then
+            echo "cargo-cyclonedx did not produce $cli_sbom; dumping what it did produce anywhere:" >&2
             find . \( -name '*.cdx.json' -o -name 'cairn-sbom*.json' \) -type f 2>/dev/null || true
             exit 1
           fi
           cp "$cli_sbom" cairn-sbom.cdx.json
           echo "Aggregated SBOM copied from $cli_sbom"
+          ls -la cairn-sbom.cdx.json
 
       - name: Install cosign
         uses: sigstore/cosign-installer@v3
