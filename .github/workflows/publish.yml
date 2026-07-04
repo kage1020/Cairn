@@ -65,8 +65,13 @@ jobs:
             runner: ubuntu-24.04-arm
             archive: tar.gz
             ext: ""
+          # macos-latest (= macos-14, Apple Silicon) cross-compiles cleanly to
+          # x86_64-apple-darwin via the x86_64 slice Xcode ships. Using
+          # macos-13 (Intel) instead sits in GitHub's queue for hours: Intel
+          # macOS runners are scarce compared to the M-series pool and get
+          # serialized on any account that isn't running its own runner farm.
           - target: x86_64-apple-darwin
-            runner: macos-13
+            runner: macos-latest
             archive: tar.gz
             ext: ""
           - target: aarch64-apple-darwin
@@ -161,10 +166,16 @@ jobs:
             echo "path=$ZIP_PATH" >> "$GITHUB_OUTPUT"
           fi
 
+      # sigstore/cosign-installer@v3 has no Windows/ARM64 build, so skip signing
+      # on that leg. The .zip and .sha256 still upload; the missing .sigstore
+      # is documented in the release notes and downstream verifiers should fall
+      # back to SHA-256 for this platform until cosign ships an ARM64 binary.
       - name: Install cosign
+        if: matrix.target != 'aarch64-pc-windows-msvc'
         uses: sigstore/cosign-installer@v3
 
       - name: Sign archive (keyless sigstore)
+        if: matrix.target != 'aarch64-pc-windows-msvc'
         shell: bash
         env:
           COSIGN_EXPERIMENTAL: "1"
@@ -206,11 +217,12 @@ jobs:
               --notes "Release binaries and SBOM are attached by the Publish workflow." \
               || gh release view "$TAG" >/dev/null 2>&1
           fi
-          gh release upload "$TAG" \
-            "$ARCHIVE" \
-            "$ARCHIVE.sigstore" \
-            "$ARCHIVE.sha256" \
-            --clobber
+          uploads=("$ARCHIVE" "$ARCHIVE.sha256")
+          # No .sigstore on aarch64-pc-windows-msvc — cosign install skipped.
+          if [ -f "$ARCHIVE.sigstore" ]; then
+            uploads+=("$ARCHIVE.sigstore")
+          fi
+          gh release upload "$TAG" "${uploads[@]}" --clobber
 
   sbom:
     name: SBOM
@@ -233,8 +245,37 @@ jobs:
       - name: Install cargo-cyclonedx
         run: cargo install cargo-cyclonedx --locked
 
+      # cargo-cyclonedx writes per-crate SBOMs into each crate directory (or
+      # target/) rather than a single workspace-root file, so
+      # `--override-filename cairn-sbom` alone leaves cosign with nothing to
+      # sign. Generate the per-crate files, then aggregate the newest one at
+      # the workspace root. We pick `cairn-lang-cli` — it transitively depends
+      # on every workspace crate, so its SBOM covers the full graph.
       - name: Generate SBOM
-        run: cargo cyclonedx --format json --override-filename cairn-sbom
+        shell: bash
+        run: |
+          set -euo pipefail
+          # cargo-cyclonedx v0.5.x has no `-p <package>` flag — it selects the
+          # crate via `--manifest-path`. Without one, running bare in a
+          # workspace root is a silent no-op. Point it at `cairn-lang-cli`
+          # because it transitively depends on every other workspace crate,
+          # so its SBOM covers the full dependency graph. Output lands next
+          # to that Cargo.toml as `cairn-sbom.json` (v0.5.x uses a `.json`
+          # extension, not `.cdx.json`); copy it to workspace root under the
+          # `.cdx.json` name that cosign and the release upload step expect.
+          cargo cyclonedx \
+            --format json \
+            --manifest-path crates/cairn-lang-cli/Cargo.toml \
+            --override-filename cairn-sbom
+          cli_sbom=crates/cairn-lang-cli/cairn-sbom.json
+          if [ ! -f "$cli_sbom" ]; then
+            echo "cargo-cyclonedx did not produce $cli_sbom; dumping what it did produce anywhere:" >&2
+            find . \( -name '*.cdx.json' -o -name 'cairn-sbom*.json' \) -type f 2>/dev/null || true
+            exit 1
+          fi
+          cp "$cli_sbom" cairn-sbom.cdx.json
+          echo "Aggregated SBOM copied from $cli_sbom"
+          ls -la cairn-sbom.cdx.json
 
       - name: Install cosign
         uses: sigstore/cosign-installer@v3

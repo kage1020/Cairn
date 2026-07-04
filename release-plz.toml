@@ -95,6 +95,11 @@ commit_parsers = [
   { message = "^ci", group = "ci", skip = true },
   { message = "^test", group = "test", skip = true },
   { message = "^style", group = "style", skip = true },
+  # release-plz's own release commit is `chore: release vX.Y.Z` — no
+  # `(release)` scope — so match both shapes to stop the merge of a release
+  # PR from being re-classified as a fresh patch-worthy commit and cascading
+  # into a v(patch+1) PR on the very next canary push.
+  { message = "^chore(\\(release\\))?: release", skip = true },
   { message = "^chore\\(release\\)", skip = true },
   { message = "^chore", group = "chore", skip = true },
   { message = "^.*", group = "other" },

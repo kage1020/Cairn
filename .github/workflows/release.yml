@@ -29,6 +29,9 @@ on:
 permissions:
   contents: write
   pull-requests: write
+  # Needed by the "Dispatch Publish workflow" step (`gh workflow run publish.yml`);
+  # `gh` calls the workflow-dispatches REST endpoint which is gated on this scope.
+  actions: write
 
 concurrency:
   group: release-${{ github.ref }}
@@ -145,14 +148,58 @@ jobs:
           shared-key: release-patch
           save-if: ${{ github.ref == 'refs/heads/canary' }}
 
-      # Default command runs both `release-pr` (open patch PR for new commits)
-      # and `release` (publish + tag a merged release PR if present).
-      - name: Run release-plz
+      # Split into two calls: `release` first (publish + tag any merged
+      # release PR), then `release-pr` (open a patch PR only for new commits
+      # since the release). Running the default command combines both, but
+      # release-pr runs BEFORE release inside that combo — so on the very push
+      # that merges a release PR, release-pr sees Cargo.toml ahead of
+      # crates.io and opens a phantom v(patch+1) PR for the downstream crates
+      # whose Cargo.lock dep on the just-bumped anchor shifted. Running
+      # release first closes that window: by the time release-pr looks,
+      # crates.io matches Cargo.toml and no cascade PR is proposed.
+      - name: Run release-plz release
         id: release_plz
         uses: release-plz/action@v0.5
+        with:
+          command: release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+
+      - name: Run release-plz release-pr
+        # Only when the preceding `release` didn't itself produce a release —
+        # avoids opening a patch PR immediately after a full release just
+        # landed, and matches the intent that release-pr is the "propose the
+        # next patch" step, not the "propose alongside the current release" one.
+        if: steps.release_plz.outputs.releases_created != 'true'
+        uses: release-plz/action@v0.5
+        with:
+          command: release-pr
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+
+      # Auto-dispatch the Publish workflow for the just-released tag. Tag pushes
+      # made with GITHUB_TOKEN don't trigger `on: push: tags:` in other workflows
+      # (GitHub's recursion guard), so without this step publish.yml sits idle
+      # until someone runs it manually. `workflow_dispatch` explicitly bypasses
+      # the recursion guard, so `gh workflow run` from inside this job fires
+      # publish.yml cleanly. Same tag-detection shape as the promote step below.
+      - name: Dispatch Publish workflow for the new tag
+        if: steps.release_plz.outputs.releases_created == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin --tags --prune
+          release_tag=$(git tag --merged HEAD --list 'v*' --sort=-version:refname | head -n1 || true)
+          if [ -z "$release_tag" ]; then
+            echo "release-plz reported a release but no v* tag is reachable from HEAD; skipping publish dispatch." >&2
+            exit 1
+          fi
+          echo "Dispatching publish.yml for $release_tag"
+          gh workflow run publish.yml -f tag="$release_tag"
 
       # Open a canary → main promote PR only when release-plz reports it
       # actually published in this run. The `releases_created` output is the
@@ -165,7 +212,6 @@ jobs:
       # go through a PR. Auto-merge is enabled here so once the reviewer
       # approves in the UI the merge fires without further manual action;
       # required status checks are the ones canary already passed.
-      # publish.yml is triggered separately by the tag push.
       - name: Open promote-to-main PR on release
         if: steps.release_plz.outputs.releases_created == 'true'
         env:
@@ -174,13 +220,18 @@ jobs:
         run: |
           set -euo pipefail
           git fetch origin --tags --prune
-          new_tags=$(git tag --points-at HEAD --list 'v*' || true)
+          # `--merged HEAD` covers the release-plz merge-commit shape: the tag
+          # points at the "chore: release" commit that lives on the merged-in
+          # branch, and HEAD is the merge commit that pulled that branch in.
+          # `--points-at HEAD` only matches tags at the exact commit and misses
+          # this case, leading to a false "no v* tag points at HEAD" abort.
+          new_tags=$(git tag --merged HEAD --list 'v*' --sort=-version:refname | head -n1 || true)
           if [ -z "$new_tags" ]; then
-            echo "release-plz reported a release but no v* tag points at HEAD; refusing to promote." >&2
+            echo "release-plz reported a release but no v* tag is reachable from HEAD; refusing to promote." >&2
             exit 1
           fi
-          echo "Detected release tag(s) at HEAD: $new_tags"
-          release_tag=$(echo "$new_tags" | head -n1)
+          release_tag="$new_tags"
+          echo "Detected release tag reachable from HEAD: $release_tag"
           # Reuse an already-open promote PR if the previous run left one
           # behind; `gh pr create` would otherwise error on the duplicate.
           existing=$(gh pr list --base main --head canary --state open --json number --jq '.[0].number' 2>/dev/null || true)

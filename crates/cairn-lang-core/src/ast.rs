@@ -99,7 +99,7 @@ pub struct Module {
 #[serde(tag = "kind")]
 #[non_exhaustive]
 pub enum Header {
-    /// `@cairn 2026.06` — Cairn language version this file was written against.
+    /// `@cairn 2026.7` — Cairn language version this file was written against.
     Cairn {
         /// `CalVer` string captured verbatim from the source.
         version: RawVersion,
