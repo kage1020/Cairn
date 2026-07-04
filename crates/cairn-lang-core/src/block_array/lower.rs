@@ -13,7 +13,7 @@
 //!
 //! ```text
 //! massing  (floor, walls)
-//!   → envelope (roof)
+//!   → envelope (roof, stair)
 //!   → openings (door, window)
 //!   → fixtures, logic_*, raw
 //! ```
@@ -22,7 +22,10 @@
 //! openings). Members are bucketed by role and processed phase-by-phase;
 //! within a phase source order wins (the last-wins rule for local
 //! overrides). Roles outside the three implemented phases emit
-//! `W_DEFERRED_MEMBER` and skip.
+//! `W_DEFERRED_MEMBER` and skip. `level y=N` blocks are flattened into
+//! their children before bucketing so a nested `walls` / `door` /
+//! `window` / `stair` reaches its phase with the level's `y=` applied
+//! as an authored offset (see [`flatten_members`]).
 //!
 //! Defs are skipped at this layer: they only concretise via a `site`
 //! `place ... use=def_name` reference, and site lowering arrives with the
@@ -47,10 +50,11 @@ use super::{Footprint, Placement, Walkway};
 use super::material::{AbstractMaterialResolver, MaterialDeferred, resolve_block_state};
 use super::openings::{WallSide, wall_length, wall_local_to_grid};
 use super::roof::{
-    GableVoxel, HipVoxel, RoofKind, ShedFace, ShedVoxel, StairFace, flat_block_state,
-    flat_extra_height, flat_voxels, gable_extra_height, gable_ridge_axis, gable_stair_state,
-    gable_voxels, hip_extra_height, hip_stair_state, hip_voxels, shed_extra_height,
-    shed_slope_span, shed_stair_state, shed_voxels,
+    Cardinal, GableVoxel, HipVoxel, RoofKind, STAIR_BASE_ID, ShedFace, ShedVoxel, StairFace,
+    StairShape, flat_block_state, flat_extra_height, flat_voxels, gable_extra_height,
+    gable_ridge_axis, gable_stair_state, gable_voxels, hip_extra_height, hip_stair_state,
+    hip_voxels, shed_extra_height, shed_high_side, shed_slope_span, shed_stair_state, shed_voxels,
+    stair_state,
 };
 use super::walkway::{WalkwayLayout, build_walkway_array, l_path, port_world_position};
 use super::{BlockArray, BlockArrayIr, BlockState, Dims, Palette, PaletteIndex};
@@ -736,14 +740,20 @@ fn lower_body_to_block_array<'a>(
     // authored against the *interior* size and shifted inward by this
     // amount in their respective fill helpers.
     let overhang = max_roof_overhang(body.members);
-    let max_wall_height = max_wall_height(body.members);
+    // Level blocks contribute their own walls to the struct's tallest wall
+    // voxel and their own roles to every phase. Flatten them once here so
+    // the dim math (which needs the true wall-top including level walls)
+    // and the phase buckets (which need the per-member y-offset) both work
+    // off the same flattened view. `flatten_members` also emits the
+    // `W_DEFERRED_MEMBER` diagnostics for malformed level blocks, so its
+    // side effects need to happen exactly once per call.
+    let flattened = flatten_members(body.members, diagnostics);
+    let max_wall_top = max_wall_top(&flattened);
     let roof_extra = max_roof_extra_height(body.members, interior_w, interior_h, overhang);
 
     let dims = Dims {
         x: interior_w.saturating_add(overhang.saturating_mul(2)),
-        y: 1u32
-            .saturating_add(max_wall_height)
-            .saturating_add(roof_extra),
+        y: 1u32.saturating_add(max_wall_top).saturating_add(roof_extra),
         z: interior_h.saturating_add(overhang.saturating_mul(2)),
     };
     let mut palette = Palette::new_with_air();
@@ -757,32 +767,55 @@ fn lower_body_to_block_array<'a>(
         overhang,
         interior_w,
         interior_h,
-        wall_top: max_wall_height,
+        wall_top: max_wall_top,
     };
 
     // Phase ordering: collect members per phase, then process the buckets
     // in massing → envelope → openings order. Within a phase source order
-    // wins (the IndexMap is filled in source order via push).
-    let mut massing: Vec<&Member> = Vec::new();
-    let mut envelope: Vec<&Member> = Vec::new();
-    let mut openings: Vec<&Member> = Vec::new();
-    for member in body.members {
+    // wins (the IndexMap is filled in source order via push). Each entry
+    // carries the y-offset the flatten pass derived from any enclosing
+    // `level y=N` block (0 for members that sit directly under the body).
+    let mut massing: Vec<(u32, &Member)> = Vec::new();
+    let mut envelope: Vec<(u32, &Member)> = Vec::new();
+    let mut openings: Vec<(u32, &Member)> = Vec::new();
+    for (y_offset, member) in flattened {
         match member_phase(&member.role) {
-            Some(Phase::Massing) => massing.push(member),
-            Some(Phase::Envelope) => envelope.push(member),
-            Some(Phase::Openings) => openings.push(member),
+            Some(Phase::Massing) => massing.push((y_offset, member)),
+            Some(Phase::Envelope) => envelope.push((y_offset, member)),
+            Some(Phase::Openings) => openings.push((y_offset, member)),
             None => diagnostics.push(diag_deferred_member(member)),
         }
     }
 
-    for member in massing {
-        lower_massing_member(member, &ctx, &mut palette, &mut voxels, diagnostics);
+    for (y_offset, member) in massing {
+        lower_massing_member(
+            member,
+            y_offset,
+            &ctx,
+            &mut palette,
+            &mut voxels,
+            diagnostics,
+        );
     }
-    for member in envelope {
-        lower_envelope_member(member, &ctx, &mut palette, &mut voxels, diagnostics);
+    for (y_offset, member) in envelope {
+        lower_envelope_member(
+            member,
+            y_offset,
+            &ctx,
+            &mut palette,
+            &mut voxels,
+            diagnostics,
+        );
     }
-    for member in openings {
-        lower_opening_member(member, &ctx, &mut palette, &mut voxels, diagnostics);
+    for (y_offset, member) in openings {
+        lower_opening_member(
+            member,
+            y_offset,
+            &ctx,
+            &mut palette,
+            &mut voxels,
+            diagnostics,
+        );
     }
 
     BlockArray {
@@ -880,20 +913,78 @@ enum Phase {
 fn member_phase(role: &MemberRole) -> Option<Phase> {
     match role {
         MemberRole::Floor | MemberRole::Walls => Some(Phase::Massing),
-        MemberRole::Roof => Some(Phase::Envelope),
+        MemberRole::Roof | MemberRole::Stair => Some(Phase::Envelope),
         MemberRole::Door | MemberRole::Window => Some(Phase::Openings),
-        MemberRole::Stair
-        | MemberRole::Level
-        | MemberRole::PressurePlate
+        // `Level` is consumed by `flatten_members` and never reaches
+        // this function; the arm is exhaustive for the enum but omits
+        // `Level` on purpose so a future call site that forgets to
+        // flatten first fails the compile.
+        MemberRole::PressurePlate
         | MemberRole::Circuit
         | MemberRole::Place
         | MemberRole::Connect
         | MemberRole::Other(_) => None,
+        MemberRole::Level => unreachable!(
+            "`Level` members must be flattened before phase-bucketing (see `flatten_members`)"
+        ),
     }
+}
+
+/// Flatten level blocks so their children participate in phase-bucketing.
+///
+/// Returns each contributing member paired with the `y_offset` derived from
+/// its enclosing `level y=N` (`0` for members that sit directly under the
+/// struct/def/place body). `level` blocks themselves are consumed and never
+/// reach the returned list; a `level` whose `y=` is missing or non-integer
+/// earns a `W_DEFERRED_MEMBER` diagnostic and its entire body is dropped.
+/// Nested `level` blocks are not yet supported — an inner `level` becomes a
+/// per-child `W_DEFERRED_MEMBER` so the surrounding phase-bucket loop stays
+/// simple. `logic` and `assert` items inside a level body are intentionally
+/// not returned here — they live on the intent IR for the resolver and
+/// redstone passes to consume, unaffected by block-array lowering.
+fn flatten_members<'a>(
+    members: &'a [Member],
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Vec<(u32, &'a Member)> {
+    let mut out: Vec<(u32, &'a Member)> = Vec::new();
+    for member in members {
+        if matches!(member.role, MemberRole::Level) {
+            let y_offset = match nonneg_int_or_defer(member, "y", diagnostics) {
+                NonNegRead::Valid(v) => v,
+                NonNegRead::Absent => {
+                    diagnostics.push(diag_deferred_member_reason(
+                        member,
+                        "level requires `y=N` (non-negative integer) to place its children",
+                    ));
+                    continue;
+                }
+                NonNegRead::Deferred => continue,
+            };
+            for child in &member.children.members {
+                if matches!(child.role, MemberRole::Level) {
+                    // Nested `level` blocks are not yet supported. Emit
+                    // one warning per direct grandchild-defer so an
+                    // author who wrote deep nesting sees each dropped
+                    // subtree instead of a single top-level defer that
+                    // hides how many members were skipped.
+                    diagnostics.push(diag_deferred_member_reason(
+                        child,
+                        "nested `level` blocks are not yet supported; this level and every member declared under it were dropped",
+                    ));
+                    continue;
+                }
+                out.push((y_offset, child));
+            }
+        } else {
+            out.push((0, member));
+        }
+    }
+    out
 }
 
 fn lower_massing_member(
     member: &Member,
+    y_offset: u32,
     ctx: &StructCtx<'_>,
     palette: &mut Palette,
     voxels: &mut [PaletteIndex],
@@ -901,6 +992,18 @@ fn lower_massing_member(
 ) {
     match &member.role {
         MemberRole::Floor => {
+            if y_offset > 0 {
+                // A `floor` inside a `level y=N` block would drop a second
+                // slab in mid-air. The current lowering has no story for
+                // per-level floors (the struct's ground-plane floor is the
+                // only slab that goes down), so defer explicitly instead of
+                // silently painting cells at an unexpected height.
+                diagnostics.push(diag_deferred_member_reason(
+                    member,
+                    "level-scoped `floor` is not yet supported",
+                ));
+                return;
+            }
             let Some(idx) = palette_index_for(
                 member,
                 ctx.scope,
@@ -927,7 +1030,7 @@ fn lower_massing_member(
             ) else {
                 return;
             };
-            fill_walls(ctx, height, idx, voxels);
+            fill_walls(ctx, height, y_offset, idx, voxels);
         }
         _ => unreachable!("massing phase only contains floor/walls"),
     }
@@ -935,27 +1038,43 @@ fn lower_massing_member(
 
 fn lower_envelope_member(
     member: &Member,
+    y_offset: u32,
     ctx: &StructCtx<'_>,
     palette: &mut Palette,
     voxels: &mut [PaletteIndex],
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     match &member.role {
-        MemberRole::Roof => fill_roof(member, ctx, palette, voxels, diagnostics),
-        _ => unreachable!("envelope phase only contains roof"),
+        MemberRole::Roof => {
+            if y_offset > 0 {
+                // A `roof` inside a `level` block would paint a second cap
+                // below the struct's roof plane. The current lowering
+                // assumes exactly one roof per struct, so a level-scoped
+                // roof defers explicitly rather than corrupt the envelope.
+                diagnostics.push(diag_deferred_member_reason(
+                    member,
+                    "level-scoped `roof` is not yet supported",
+                ));
+                return;
+            }
+            fill_roof(member, ctx, palette, voxels, diagnostics);
+        }
+        MemberRole::Stair => fill_stair(member, y_offset, ctx, palette, voxels, diagnostics),
+        _ => unreachable!("envelope phase only contains roof/stair"),
     }
 }
 
 fn lower_opening_member(
     member: &Member,
+    y_offset: u32,
     ctx: &StructCtx<'_>,
     palette: &mut Palette,
     voxels: &mut [PaletteIndex],
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     match &member.role {
-        MemberRole::Door => carve_door(member, ctx, voxels, diagnostics),
-        MemberRole::Window => fill_window(member, ctx, palette, voxels, diagnostics),
+        MemberRole::Door => carve_door(member, y_offset, ctx, voxels, diagnostics),
+        MemberRole::Window => fill_window(member, y_offset, ctx, palette, voxels, diagnostics),
         _ => unreachable!("openings phase only contains door/window"),
     }
 }
@@ -1049,11 +1168,21 @@ fn palette_index_for(
         .map(|state| palette.intern(state))
 }
 
-fn max_wall_height(members: &[Member]) -> u32 {
-    members
+/// Highest wall voxel Y across every walls member the flatten pass surfaced.
+///
+/// The struct's roof plane must sit above the tallest wall column, and a
+/// level-scoped `walls id=upper height=H` inside a `level y=N` block extends
+/// the wall column up to `y = N + H`. Returning the maximum over the
+/// `(y_offset, height)` pairs from the flattened member list keeps the
+/// dim math correct when a struct mixes struct-scoped and level-scoped
+/// walls. Members without a positive `height=` contribute `0`; the
+/// `W_DEFERRED_MEMBER` for that member fires later in the massing phase
+/// so a hand-built sizeless `walls` still surfaces its own diagnostic.
+fn max_wall_top(flattened: &[(u32, &Member)]) -> u32 {
+    flattened
         .iter()
-        .filter(|m| matches!(m.role, MemberRole::Walls))
-        .filter_map(height_value)
+        .filter(|(_, m)| matches!(m.role, MemberRole::Walls))
+        .filter_map(|(y_offset, m)| height_value(m).map(|h| y_offset.saturating_add(h)))
         .max()
         .unwrap_or(0)
 }
@@ -1145,8 +1274,52 @@ fn height_value(member: &Member) -> Option<u32> {
 fn nonneg_int(member: &Member, key: &str) -> Option<u32> {
     let raw = member.intent_state.get(key)?;
     match &raw.value.kind {
-        ValueKind::Int(v) if *v >= 0 => Some(u32::try_from(*v).unwrap_or(u32::MAX)),
+        // `u32::try_from` fails on values that would silently truncate to
+        // `u32::MAX`. Returning `None` on overflow lets the caller decide
+        // between "absent" and "present but invalid" via the same defer
+        // path they already use for non-integer values — no cell should
+        // ever land at `u32::MAX` because the author asked for `2^33`.
+        ValueKind::Int(v) if *v >= 0 => u32::try_from(*v).ok(),
         _ => None,
+    }
+}
+
+/// Result of reading a non-negative integer `key=` with defer semantics.
+///
+/// The block-array pass distinguishes three outcomes on a `key=`:
+/// - `Valid(v)`: the key is present and parsed to a `u32`.
+/// - `Absent`: the key was not written; the caller applies its own
+///   default.
+/// - `Deferred`: the key was present but did not parse to a
+///   non-negative `u32`. A `W_DEFERRED_MEMBER` has already been pushed
+///   and the caller must return.
+///
+/// Using a named tri-state keeps callers explicit about which case they
+/// treat as a default vs which case aborts, and closes the
+/// `y="top"`-silently-becomes-`0` gap that the plain [`nonneg_int`]
+/// return type could not.
+enum NonNegRead {
+    Valid(u32),
+    Absent,
+    Deferred,
+}
+
+fn nonneg_int_or_defer(
+    member: &Member,
+    key: &str,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> NonNegRead {
+    if !member.intent_state.contains_key(key) {
+        return NonNegRead::Absent;
+    }
+    if let Some(v) = nonneg_int(member, key) {
+        NonNegRead::Valid(v)
+    } else {
+        diagnostics.push(diag_deferred_member_reason(
+            member,
+            &format!("`{key}=` must be a non-negative integer that fits in u32"),
+        ));
+        NonNegRead::Deferred
     }
 }
 
@@ -1187,13 +1360,26 @@ fn fill_floor(ctx: &StructCtx<'_>, idx: PaletteIndex, voxels: &mut [PaletteIndex
     }
 }
 
-fn fill_walls(ctx: &StructCtx<'_>, height: u32, idx: PaletteIndex, voxels: &mut [PaletteIndex]) {
-    // Cap the requested height at the volume's actual Y extent so a stray
-    // out-of-range `height=` does not panic. `dims.y` is derived from the
-    // module's own `max_wall_height + roof_extra + 1`, so under normal
-    // lowering this never trims; defensive against a hand-built `BlockArray`.
-    let top = height.min(ctx.dims.y.saturating_sub(1));
-    for y in 1..=top {
+fn fill_walls(
+    ctx: &StructCtx<'_>,
+    height: u32,
+    y_offset: u32,
+    idx: PaletteIndex,
+    voxels: &mut [PaletteIndex],
+) {
+    // Walls fill y = y_offset+1 .. y_offset+height. Struct-scoped walls run
+    // at y_offset=0 (the historical `1..=height` range). A `walls` inside a
+    // `level y=N` block starts one voxel above the level's base plane, so
+    // the range shifts up by N. The upper bound is capped at the volume's
+    // Y extent so a stray out-of-range `height=` cannot panic — `dims.y`
+    // already covers `max_wall_top + roof_extra + 1`, so under normal
+    // lowering this never trims; the min is defensive against a hand-built
+    // `BlockArray`.
+    let start = 1u32.saturating_add(y_offset);
+    let end = height
+        .saturating_add(y_offset)
+        .min(ctx.dims.y.saturating_sub(1));
+    for y in start..=end {
         for z_local in 0..ctx.interior_h {
             for x_local in 0..ctx.interior_w {
                 let on_edge = x_local == 0
@@ -1223,42 +1409,67 @@ fn fill_roof(
     let Some(kind) = parse_roof_kind(member, diagnostics) else {
         return;
     };
-    // `mat_slot=` is advisory for every roof kind today — the generator
-    // hardcodes the per-kind base block (spruce_stairs for sloped roofs,
-    // spruce_planks for flat) because per-theme roof species are not
-    // wired through yet. We still resolve the slot so a binding that
-    // points anywhere else fires a deferred-member warning (otherwise the
-    // user's intent would silently be replaced). The resolved state
-    // itself is never interned: leaving the palette free of an
-    // unreferenced entry keeps the on-disk NBT tight.
-    if let Some(state) = resolve_member_state(
+    // Resolve the `mat_slot=` binding and use its id as the block id for
+    // every voxel this roof paints. A missing `mat_slot=` falls back to
+    // the kind's canonical hardcoded id (spruce_stairs / spruce_planks)
+    // so a mat_slot-less roof keeps the pre-2027.1 behaviour. When the
+    // author *did* write `mat_slot=` but resolution returned nothing,
+    // defer — either the theme is missing (W_NO_THEME_BOUND already
+    // fired against the struct) or the resolver emitted its own
+    // diagnostic (E_UNRESOLVED_SLOT, E_UNKNOWN_ABSTRACT_TOKEN, …). The
+    // extra `W_DEFERRED_MEMBER` here anchors the failure to *this*
+    // roof so the author sees which member wound up painted with the
+    // fallback species, in case they missed the resolver's own hit. A
+    // resolved state with non-empty `properties` also defers: the
+    // theme asked for a specific facing / half / shape and the
+    // geometry generator has its own.
+    let resolved = resolve_member_state(
         member,
         ctx.scope,
         ctx.materials,
         diagnostics,
         ctx.theme_missing,
-    ) && state.id != kind.base_block_id()
+    );
+    if member.mat_slot.is_some() && resolved.is_none() {
+        diagnostics.push(diag_deferred_member_reason(
+            member,
+            &format!(
+                "`{}` roof's `mat_slot=` did not resolve to a block id; the roof falls back to `{}`",
+                kind.name(),
+                kind.base_block_id(),
+            ),
+        ));
+    }
+    if let Some(state) = &resolved
+        && !state.properties.is_empty()
     {
         diagnostics.push(diag_deferred_member_reason(
             member,
             &format!(
-                "`{}` roofs currently emit `{}`; the `mat_slot=` binding to `{}` was not applied",
+                "`{}` roofs derive their stair `facing` / `half` / `shape` from the geometry; the `mat_slot=` binding to `{}[...]` also carried properties and was not applied verbatim",
                 kind.name(),
-                kind.base_block_id(),
                 state.id,
             ),
         ));
     }
+    let base_id = resolved
+        .as_ref()
+        .map_or(kind.base_block_id(), |s| s.id.as_str());
 
     match kind {
-        RoofKind::Gable => fill_roof_gable(ctx, palette, voxels),
-        RoofKind::Shed => fill_roof_shed(member, ctx, palette, voxels, diagnostics),
-        RoofKind::Hip => fill_roof_hip(ctx, palette, voxels),
-        RoofKind::Flat => fill_roof_flat(ctx, palette, voxels),
+        RoofKind::Gable => fill_roof_gable(ctx, palette, voxels, base_id),
+        RoofKind::Shed => fill_roof_shed(member, ctx, palette, voxels, diagnostics, base_id),
+        RoofKind::Hip => fill_roof_hip(ctx, palette, voxels, base_id),
+        RoofKind::Flat => fill_roof_flat(ctx, palette, voxels, base_id),
     }
 }
 
-fn fill_roof_gable(ctx: &StructCtx<'_>, palette: &mut Palette, voxels: &mut [PaletteIndex]) {
+fn fill_roof_gable(
+    ctx: &StructCtx<'_>,
+    palette: &mut Palette,
+    voxels: &mut [PaletteIndex],
+    base_id: &str,
+) {
     let roof_w = ctx.dims.x;
     let roof_h = ctx.dims.z;
     let ridge_axis = gable_ridge_axis(roof_w, roof_h);
@@ -1275,7 +1486,9 @@ fn fill_roof_gable(ctx: &StructCtx<'_>, palette: &mut Palette, voxels: &mut [Pal
     ];
     let mut face_indices = [PaletteIndex::AIR; 4];
     for (slot, face) in face_indices.iter_mut().zip(face_table.iter().copied()) {
-        *slot = palette.intern(gable_stair_state(ridge_axis, face));
+        let mut state = gable_stair_state(ridge_axis, face);
+        base_id.clone_into(&mut state.id);
+        *slot = palette.intern(state);
     }
     for GableVoxel { pos, face } in gable_voxels(roof_w, roof_h, ctx.wall_top) {
         let idx = match face {
@@ -1296,12 +1509,17 @@ fn fill_roof_shed(
     palette: &mut Palette,
     voxels: &mut [PaletteIndex],
     diagnostics: &mut Vec<Diagnostic>,
+    base_id: &str,
 ) {
     let Some(slope_to) = shed_slope_to(member, diagnostics) else {
         return;
     };
-    let slope_idx = palette.intern(shed_stair_state(slope_to, ShedFace::Slope));
-    let apex_idx = palette.intern(shed_stair_state(slope_to, ShedFace::Apex));
+    let mut slope_state = shed_stair_state(slope_to, ShedFace::Slope);
+    base_id.clone_into(&mut slope_state.id);
+    let slope_idx = palette.intern(slope_state);
+    let mut apex_state = shed_stair_state(slope_to, ShedFace::Apex);
+    base_id.clone_into(&mut apex_state.id);
+    let apex_idx = palette.intern(apex_state);
     for ShedVoxel { pos, face } in shed_voxels(ctx.dims.x, ctx.dims.z, ctx.wall_top, slope_to) {
         let idx = match face {
             ShedFace::Slope => slope_idx,
@@ -1313,7 +1531,12 @@ fn fill_roof_shed(
     }
 }
 
-fn fill_roof_hip(ctx: &StructCtx<'_>, palette: &mut Palette, voxels: &mut [PaletteIndex]) {
+fn fill_roof_hip(
+    ctx: &StructCtx<'_>,
+    palette: &mut Palette,
+    voxels: &mut [PaletteIndex],
+    base_id: &str,
+) {
     let roof_w = ctx.dims.x;
     let roof_h = ctx.dims.z;
     // Hip and gable share the same long-axis-wins-with-x-tiebreak ridge
@@ -1330,15 +1553,24 @@ fn fill_roof_hip(ctx: &StructCtx<'_>, palette: &mut Palette, voxels: &mut [Palet
     // possible the moment `HipFace` grew or reordered; folding the
     // intern call into the voxel loop closes that gap.
     for HipVoxel { pos, face } in hip_voxels(roof_w, roof_h, ctx.wall_top) {
-        let idx = palette.intern(hip_stair_state(ridge_axis, face));
+        let mut state = hip_stair_state(ridge_axis, face);
+        base_id.clone_into(&mut state.id);
+        let idx = palette.intern(state);
         if let Some(i) = ctx.dims.index(pos.0, pos.1, pos.2) {
             voxels[i] = idx;
         }
     }
 }
 
-fn fill_roof_flat(ctx: &StructCtx<'_>, palette: &mut Palette, voxels: &mut [PaletteIndex]) {
-    let deck_idx = palette.intern(flat_block_state());
+fn fill_roof_flat(
+    ctx: &StructCtx<'_>,
+    palette: &mut Palette,
+    voxels: &mut [PaletteIndex],
+    base_id: &str,
+) {
+    let mut deck_state = flat_block_state();
+    base_id.clone_into(&mut deck_state.id);
+    let deck_idx = palette.intern(deck_state);
     for (x, y, z) in flat_voxels(ctx.dims.x, ctx.dims.z, ctx.wall_top) {
         if let Some(i) = ctx.dims.index(x, y, z) {
             voxels[i] = deck_idx;
@@ -1400,6 +1632,7 @@ fn shed_slope_to(member: &Member, diagnostics: &mut Vec<Diagnostic>) -> Option<W
 
 fn carve_door(
     member: &Member,
+    y_offset: u32,
     ctx: &StructCtx<'_>,
     voxels: &mut [PaletteIndex],
     diagnostics: &mut Vec<Diagnostic>,
@@ -1450,13 +1683,31 @@ fn carve_door(
             return;
         }
     };
-    // Doors carve a 1-wide opening starting at y=1 (the row just above
-    // the floor), capped at the wall top so a short-wall door cannot
-    // overwrite roof voxels written in the envelope phase. The door block
-    // itself (`oak_door`, hinge/half/facing/open) is not yet placed; that
-    // landed deferred along with per-theme door materials.
-    let top = ctx.wall_top.min(2);
-    for v in 1..=top {
+    // Doors carve a 1-wide opening starting at v_local=1 (the row just
+    // above the floor of whichever level this door belongs to), capped
+    // at the wall column above this door so a short-wall door cannot
+    // overwrite roof voxels written in the envelope phase. The cap
+    // subtracts the level's `y_offset` from the struct's `wall_top` so a
+    // level-scoped door never punches past its own wall column — using
+    // `wall_top` directly (which now aggregates every level's walls)
+    // would let a `level y=8 door` carve at world y=9, 10 when the wall
+    // above only reaches y=9. Deferring instead of clamping to 0 when
+    // the level sits at or above `wall_top` keeps the failure loud: the
+    // author almost certainly wrote the door against a missing wall.
+    // The door block itself (`oak_door`, hinge / half / facing / open)
+    // is not yet placed; that landed deferred along with per-theme door
+    // materials.
+    let effective_top = ctx.wall_top.saturating_sub(y_offset);
+    if effective_top < 1 {
+        diagnostics.push(diag_deferred_member_reason(
+            member,
+            "door needs at least one wall voxel above its level to carve into",
+        ));
+        return;
+    }
+    let door_height = effective_top.min(2);
+    for v_local in 1..=door_height {
+        let v = v_local.saturating_add(y_offset);
         let Some((x, y, z)) = wall_local_to_grid(
             side,
             at,
@@ -1474,8 +1725,197 @@ fn carve_door(
     }
 }
 
+/// Voxelise a `stair` member as a horizontal band of stair blocks along one
+/// wall — the eave pattern the `themed-tower` example uses to trim the
+/// transition between floors.
+///
+/// Only the subset the example exercises is implemented: `kind=stairs`, a
+/// `side=` naming one of the four cardinal walls, an optional
+/// `half=top|bottom` (defaults to `top` so a plain `stair` reads as an
+/// inverted eave), an optional `facing=out|in` (defaults to `out`) that
+/// rotates the stair so its riser points away from the interior, and an
+/// optional `shape=straight|outer_left|outer_right` (defaults to
+/// `straight`). Any other `kind=` / `facing=` / `shape=` fires
+/// `W_DEFERRED_MEMBER`. The row lands at `y = y_offset + (local y | 0)`
+/// in the overhang column one voxel outside the wall (so it does not
+/// overwrite the wall itself). Overhang has to be at least 1 for the
+/// eave to sit outside the wall; without one the stair collapses onto
+/// the wall row and a `W_DEFERRED_MEMBER` fires instead.
+#[allow(clippy::too_many_lines)] // one linear defer-and-paint chain reads better than 6 tiny helpers
+fn fill_stair(
+    member: &Member,
+    y_offset: u32,
+    ctx: &StructCtx<'_>,
+    palette: &mut Palette,
+    voxels: &mut [PaletteIndex],
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    let Some(raw_kind) = ident_value(member, "kind") else {
+        let reason = if member.intent_state.contains_key("kind") {
+            "stair `kind=` must be `stairs`"
+        } else {
+            "stair without `kind=` is not yet supported (currently only `kind=stairs`)"
+        };
+        diagnostics.push(diag_deferred_member_reason(member, reason));
+        return;
+    };
+    if raw_kind != "stairs" {
+        diagnostics.push(diag_deferred_member_reason(
+            member,
+            &format!("stair `kind={raw_kind}` is not yet supported (currently only `kind=stairs`)"),
+        ));
+        return;
+    }
+    let Some(side) = side_of(member, diagnostics) else {
+        return;
+    };
+    let half = match ident_value(member, "half") {
+        Some("top") | None => "top",
+        Some("bottom") => "bottom",
+        Some(other) => {
+            diagnostics.push(diag_deferred_member_reason(
+                member,
+                &format!("stair `half={other}` is not yet supported (use `top` or `bottom`)"),
+            ));
+            return;
+        }
+    };
+    let facing = match ident_value(member, "facing") {
+        Some("out") | None => shed_high_side(side),
+        Some("in") => inward_cardinal(side),
+        Some(other) => {
+            diagnostics.push(diag_deferred_member_reason(
+                member,
+                &format!("stair `facing={other}` is not yet supported (use `out` or `in`)"),
+            ));
+            return;
+        }
+    };
+    let shape = match ident_value(member, "shape") {
+        Some("straight") | None => StairShape::Straight,
+        Some("outer_left") => StairShape::OuterLeft,
+        Some("outer_right") => StairShape::OuterRight,
+        Some(other) => {
+            diagnostics.push(diag_deferred_member_reason(
+                member,
+                &format!(
+                    "stair `shape={other}` is not yet supported (use `straight`, `outer_left`, or `outer_right`)",
+                ),
+            ));
+            return;
+        }
+    };
+    if ctx.overhang == 0 {
+        diagnostics.push(diag_deferred_member_reason(
+            member,
+            "eave `stair` requires a roof `overhang=` of at least 1 so the band can sit outside the wall",
+        ));
+        return;
+    }
+    let y_local = match nonneg_int_or_defer(member, "y", diagnostics) {
+        NonNegRead::Valid(v) => v,
+        NonNegRead::Absent => 0,
+        NonNegRead::Deferred => return,
+    };
+    let y_world = y_local.saturating_add(y_offset);
+    if y_world >= ctx.dims.y {
+        diagnostics.push(diag_deferred_member_reason(
+            member,
+            &format!(
+                "stair y={y_world} does not fit in the struct (dims.y={})",
+                ctx.dims.y,
+            ),
+        ));
+        return;
+    }
+    // Resolve the `mat_slot=` binding to a base block id. A missing
+    // `mat_slot=` falls back to the vanilla roof-stair id so a
+    // decorative stair without a theme still lowers. When `mat_slot=`
+    // was written but resolution returned nothing, defer for the same
+    // reason `fill_roof` does — silent fallback to the vanilla id
+    // hides that the theme did not take effect. A binding whose
+    // resolved state carries `properties` fires the same defer as
+    // roofs — the shape/facing/half here are geometry-derived, not
+    // theme-derived.
+    let resolved = resolve_member_state(
+        member,
+        ctx.scope,
+        ctx.materials,
+        diagnostics,
+        ctx.theme_missing,
+    );
+    if member.mat_slot.is_some() && resolved.is_none() {
+        diagnostics.push(diag_deferred_member_reason(
+            member,
+            &format!(
+                "eave `stair`'s `mat_slot=` did not resolve to a block id; the band falls back to `{STAIR_BASE_ID}`",
+            ),
+        ));
+    }
+    if let Some(state) = &resolved
+        && !state.properties.is_empty()
+    {
+        diagnostics.push(diag_deferred_member_reason(
+            member,
+            &format!(
+                "eave `stair` derives its `facing` / `half` / `shape` from the member arguments; the `mat_slot=` binding to `{}[...]` also carried properties and was not applied verbatim",
+                state.id,
+            ),
+        ));
+    }
+    let base_id = resolved.as_ref().map_or(STAIR_BASE_ID, |s| s.id.as_str());
+    let idx = palette.intern(stair_state(base_id, facing, half, shape));
+    let length = wall_length(side, ctx.interior_w, ctx.interior_h);
+    for u in 0..length {
+        let Some((wx, _wy, wz)) = wall_local_to_grid(
+            side,
+            u,
+            y_world,
+            ctx.overhang,
+            ctx.interior_w,
+            ctx.interior_h,
+            ctx.dims,
+        ) else {
+            continue;
+        };
+        let (x, z) = shift_outward(side, wx, wz);
+        if let Some(i) = ctx.dims.index(x, y_world, z) {
+            voxels[i] = idx;
+        }
+    }
+}
+
+/// Opposite of the wall's outward normal — used for `facing=in`.
+///
+/// The `facing=out` case reuses [`shed_high_side`] because a shed roof's
+/// high edge points in the same cardinal as a wall's outward normal
+/// (both are "the direction the wall or slope faces the sky").
+/// Duplicating the mapping in a second helper would let the two drift.
+fn inward_cardinal(side: WallSide) -> Cardinal {
+    match side {
+        WallSide::Front => Cardinal::North,
+        WallSide::Back => Cardinal::South,
+        WallSide::Left => Cardinal::East,
+        WallSide::Right => Cardinal::West,
+    }
+}
+
+/// Shift a wall voxel's `(x, z)` by one voxel toward the wall's outward
+/// normal so an eave lands in the overhang row instead of overwriting the
+/// wall itself.
+fn shift_outward(side: WallSide, x: u32, z: u32) -> (u32, u32) {
+    match side {
+        WallSide::Front => (x, z.saturating_add(1)),
+        WallSide::Back => (x, z.saturating_sub(1)),
+        WallSide::Left => (x.saturating_sub(1), z),
+        WallSide::Right => (x.saturating_add(1), z),
+    }
+}
+
+#[allow(clippy::too_many_lines)] // one linear parse-and-paint chain reads better than 6 tiny helpers
 fn fill_window(
     member: &Member,
+    y_offset: u32,
     ctx: &StructCtx<'_>,
     palette: &mut Palette,
     voxels: &mut [PaletteIndex],
@@ -1484,20 +1924,25 @@ fn fill_window(
     let Some(side) = side_of(member, diagnostics) else {
         return;
     };
-    let Some(offset) = nonneg_int(member, "offset") else {
-        diagnostics.push(diag_deferred_member_reason(
-            member,
-            "window without `offset=` is not yet supported",
-        ));
-        return;
+    // `offset=` defaults to 0 (the wall-local axis origin) when absent, so a
+    // decorative repeat=N series can be authored as `window ... repeat=N
+    // step=M size=WxH` without a redundant `offset=0`. A key that is
+    // present but not a non-negative integer still defers — validation is
+    // stricter than "missing" and matches how `repeat=` and `step=` treat
+    // the same shape below.
+    let offset = match nonneg_int_or_defer(member, "offset", diagnostics) {
+        NonNegRead::Valid(v) => v,
+        NonNegRead::Absent => 0,
+        NonNegRead::Deferred => return,
     };
-    let Some(y_start) = nonneg_int(member, "y") else {
+    let Some(y_start_local) = nonneg_int(member, "y") else {
         diagnostics.push(diag_deferred_member_reason(
             member,
             "window without `y=` is not yet supported",
         ));
         return;
     };
+    let y_start = y_start_local.saturating_add(y_offset);
     let Some((sw, sh)) = size_value(member, "size") else {
         diagnostics.push(diag_deferred_member_reason(
             member,
@@ -1506,39 +1951,106 @@ fn fill_window(
         return;
     };
     let sym = bool_value(member, "sym").unwrap_or(false);
-    let Some(idx) = palette_index_for(
-        member,
-        ctx.scope,
-        ctx.materials,
-        palette,
-        diagnostics,
-        ctx.theme_missing,
-    ) else {
+    // `repeat=` stamps the same rectangle multiple times along the wall,
+    // separated by `step=` voxels. Both keys are optional: an absent
+    // `repeat` collapses to a single instance (the pre-repeat
+    // behaviour). Present-but-invalid keys defer via
+    // `nonneg_int_or_defer` so a typo like `repeat=abc` earns a
+    // diagnostic instead of silently rounding to 1. `repeat=0` also
+    // defers because "stamp zero times" is almost always a bug (an
+    // author who wants no window just deletes the line). `step=0
+    // repeat>=2` would stamp on top of itself, which is caught below.
+    // The `shape=` key (used by `class=arrow_slit` as `shape=slit`) is
+    // read only for source-level acceptance — the block-array pass
+    // doesn't alter the palette based on it yet, so it neither defers
+    // nor changes the voxel output. The slit look-and-feel is a
+    // follow-up.
+    let repeat = match nonneg_int_or_defer(member, "repeat", diagnostics) {
+        NonNegRead::Valid(0) => {
+            diagnostics.push(diag_deferred_member_reason(
+                member,
+                "window `repeat=0` would stamp no instances; drop the window instead",
+            ));
+            return;
+        }
+        NonNegRead::Valid(v) => v,
+        NonNegRead::Absent => 1,
+        NonNegRead::Deferred => return,
+    };
+    let step = match nonneg_int_or_defer(member, "step", diagnostics) {
+        NonNegRead::Valid(v) => v,
+        NonNegRead::Absent => 0,
+        NonNegRead::Deferred => return,
+    };
+    if repeat > 1 && sym {
+        diagnostics.push(diag_deferred_member_reason(
+            member,
+            "window with both `repeat=` and `sym=true` is not yet supported",
+        ));
         return;
+    }
+    if repeat > 1 && step == 0 {
+        diagnostics.push(diag_deferred_member_reason(
+            member,
+            "window `repeat=` requires a positive `step=` so instances do not overlap",
+        ));
+        return;
+    }
+    // A window without a `mat_slot=` is an *opening* rather than a fill:
+    // the rectangle is carved to air, giving the `class=arrow_slit`
+    // pattern themed-tower uses a way to punch narrow slits through a
+    // stone wall without also picking a decorative species. Windows with
+    // an explicit `mat_slot=` continue to resolve through the palette;
+    // resolution failure still short-circuits so the resolver's own
+    // diagnostic isn't shadowed here.
+    let idx = if member.mat_slot.is_some() {
+        let Some(idx) = palette_index_for(
+            member,
+            ctx.scope,
+            ctx.materials,
+            palette,
+            diagnostics,
+            ctx.theme_missing,
+        ) else {
+            return;
+        };
+        idx
+    } else {
+        PaletteIndex::AIR
     };
 
     let len = wall_length(side, ctx.interior_w, ctx.interior_h);
-    if offset.saturating_add(sw) > len {
+    let span_end = offset
+        .saturating_add(step.saturating_mul(repeat.saturating_sub(1)))
+        .saturating_add(sw);
+    if span_end > len {
         diagnostics.push(diag_deferred_member_reason(
             member,
             &format!(
-                "window extends beyond the `{}` wall (offset={offset} size={sw}x{sh}, wall length={len})",
+                "window extends beyond the `{}` wall (offset={offset} size={sw}x{sh} repeat={repeat} step={step}, wall length={len})",
                 side_name(side),
             ),
         ));
         return;
     }
-    if y_start.saturating_add(sh) > ctx.dims.y {
+    // Windows have to fit *inside the wall column*, not just inside the
+    // struct's inflated volume. Gating on `dims.y` alone would let a
+    // mat_slot-less `class=arrow_slit` window carve air past the wall
+    // top and punch a hole through roof voxels the envelope phase
+    // wrote at `y = wall_top + 1` and above. Cap at `wall_top` (the
+    // highest wall voxel) — inclusive, because the top wall row is a
+    // legal window cell.
+    let wall_ceiling = ctx.wall_top;
+    if y_start.saturating_add(sh) > wall_ceiling.saturating_add(1) {
         diagnostics.push(diag_deferred_member_reason(
             member,
             &format!(
-                "window extends above the struct (y={y_start} size={sw}x{sh}, dims.y={})",
-                ctx.dims.y,
+                "window extends above the wall column (y={y_start} size={sw}x{sh}, wall_top={wall_ceiling})",
             ),
         ));
         return;
     }
-    let rect = WindowRect {
+    let base_rect = WindowRect {
         side,
         offset,
         y_start,
@@ -1546,7 +2058,17 @@ fn fill_window(
         height: sh,
         palette_index: idx,
     };
-    paint_window_rect(ctx, rect, voxels);
+    for i in 0..repeat {
+        let stamped_offset = offset.saturating_add(step.saturating_mul(i));
+        paint_window_rect(
+            ctx,
+            WindowRect {
+                offset: stamped_offset,
+                ..base_rect
+            },
+            voxels,
+        );
+    }
     if sym {
         let mirror_offset = len.saturating_sub(offset).saturating_sub(sw);
         if mirror_offset == offset {
@@ -1576,7 +2098,7 @@ fn fill_window(
             ctx,
             WindowRect {
                 offset: mirror_offset,
-                ..rect
+                ..base_rect
             },
             voxels,
         );
@@ -1722,8 +2244,8 @@ fn diag_deferred_member_reason(member: &Member, reason: &str) -> Diagnostic {
         notes: vec![DiagnosticNote {
             span: None,
             message: "block-array lowering currently voxelises floor, walls, door, window, \
-                      and roof (kind=gable|shed|hip|flat); other roles will be added as their \
-                      lowering rules are spec'd"
+                      roof (kind=gable|shed|hip|flat), stair (kind=stairs), and level y=N \
+                      grouping; other roles will be added as their lowering rules are spec'd"
                 .to_owned(),
         }],
         data: None,
@@ -2324,20 +2846,22 @@ mod tests {
     }
 
     #[test]
-    fn flat_roof_with_mismatched_mat_slot_emits_warning() {
-        // Flat hardcodes spruce_planks; binding to anything else (e.g.
-        // spruce_stairs which is the sloped-roof default) must warn so
-        // the user notices the binding was dropped.
+    fn flat_roof_honours_bound_mat_slot_id() {
+        // A theme binding to something other than the flat kind's canonical
+        // spruce_planks id now lands in the palette verbatim (per-theme
+        // roof species landed alongside level lowering). No warning; the
+        // deck voxel at the roof plane uses the resolved id.
         let src = "theme t:\n  slot w -> @cobblestone\n  slot r -> @spruce_stairs\n\nstruct s size=5x5\n  walls mat_slot=w height=3\n  roof kind=flat mat_slot=r\n";
         let out = lowered(src);
-        assert!(
+        assert_eq!(
+            deferred_count(&out),
+            0,
+            "unexpected diagnostics: {:?}",
             out.diagnostics
-                .iter()
-                .any(|d| d.primary.contains("spruce_planks")
-                    && d.primary.contains("spruce_stairs")),
-            "expected mat_slot mismatch diagnostic, got {:?}",
-            out.diagnostics,
         );
+        let ba = out.structures.get("struct::s").unwrap();
+        // Flat deck sits at wall_top + 1 = 4. Interior x∈[0, 4], z∈[0, 4].
+        assert_eq!(block_id(ba, 2, 4, 2), "minecraft:spruce_stairs");
     }
 
     fn block_state_at(ba: &BlockArray, x: u32, y: u32, z: u32) -> &BlockState {
@@ -2449,18 +2973,31 @@ mod tests {
     }
 
     #[test]
-    fn gable_with_mismatched_mat_slot_emits_warning() {
-        // The roof generator hardcodes spruce_stairs; a theme that binds
-        // `slot roof -> @oak_stairs` must hear that its choice was not
-        // applied rather than silently getting the wrong species.
+    fn gable_honours_bound_mat_slot_id() {
+        // A theme that binds `slot roof -> @oak_stairs` now lands
+        // oak_stairs on every gable voxel instead of silently getting the
+        // hardcoded spruce_stairs. No deferred warning fires because the
+        // resolved id is used verbatim.
         let src = "theme t:\n  slot w -> @cobblestone\n  slot r -> @oak_stairs\n\nstruct s size=5x5\n  walls mat_slot=w height=3\n  roof kind=gable mat_slot=r\n";
         let out = lowered(src);
-        assert!(
+        assert_eq!(
+            deferred_count(&out),
+            0,
+            "unexpected diagnostics: {:?}",
             out.diagnostics
+        );
+        let ba = out.structures.get("struct::s").unwrap();
+        assert!(
+            ba.palette
+                .entries
                 .iter()
-                .any(|d| d.primary.contains("oak_stairs") && d.primary.contains("spruce_stairs")),
-            "expected mat_slot mismatch diagnostic, got {:?}",
-            out.diagnostics,
+                .any(|s| s.id == "minecraft:oak_stairs"),
+            "expected oak_stairs in palette, got {:?}",
+            ba.palette
+                .entries
+                .iter()
+                .map(|s| s.id.as_str())
+                .collect::<Vec<_>>(),
         );
     }
 
@@ -3070,6 +3607,357 @@ mod tests {
         assert!(
             cascade,
             "expected a cascade W_DEFERRED_MEMBER mentioning the unresolvable origin, got {:?}",
+            out.diagnostics,
+        );
+    }
+
+    // --- level flattening / y_offset coverage (CG-1, IG-1) ------------------
+
+    #[test]
+    fn level_without_y_defers_and_drops_its_children() {
+        // `level` without `y=` cannot place its children, so the whole
+        // subtree drops with a single defer at the level's span.
+        let src = "theme t:\n  slot w -> @cobblestone\n\nstruct s size=5x5\n  walls mat_slot=w height=3\n  level id=floor2\n    walls id=upper mat_slot=w height=2\n";
+        let out = lowered(src);
+        let defers: Vec<&str> = out
+            .diagnostics
+            .iter()
+            .filter(|d| d.code == DiagnosticCode::DeferredMember)
+            .map(|d| d.primary.as_str())
+            .collect();
+        assert_eq!(
+            defers.len(),
+            1,
+            "level with missing y= should defer once, got {defers:?}",
+        );
+        assert!(
+            defers[0].contains("level requires `y="),
+            "defer reason should mention required y=; got {}",
+            defers[0],
+        );
+    }
+
+    #[test]
+    fn level_with_non_integer_y_defers_with_generic_reason() {
+        let src = "theme t:\n  slot w -> @cobblestone\n\nstruct s size=5x5\n  walls mat_slot=w height=3\n  level id=floor2 y=top\n    walls id=upper mat_slot=w height=2\n";
+        let out = lowered(src);
+        let defers: Vec<&str> = out
+            .diagnostics
+            .iter()
+            .filter(|d| d.code == DiagnosticCode::DeferredMember)
+            .map(|d| d.primary.as_str())
+            .collect();
+        assert!(
+            defers.iter().any(|d| d.contains("`y=`")),
+            "expected a defer mentioning `y=` on a non-integer value, got {defers:?}",
+        );
+    }
+
+    #[test]
+    fn nested_level_defers_per_inner_level_child() {
+        // Two inner `level` children → two defers, so the count reflects
+        // how many subtrees were skipped.
+        let src = "theme t:\n  slot w -> @cobblestone\n\nstruct s size=5x5\n  walls mat_slot=w height=3\n  level id=outer y=0\n    level id=inner1 y=1\n      walls id=a mat_slot=w height=1\n    level id=inner2 y=2\n      walls id=b mat_slot=w height=1\n";
+        let out = lowered(src);
+        let nested: Vec<&str> = out
+            .diagnostics
+            .iter()
+            .filter(|d| d.code == DiagnosticCode::DeferredMember && d.primary.contains("nested"))
+            .map(|d| d.primary.as_str())
+            .collect();
+        assert_eq!(
+            nested.len(),
+            2,
+            "one defer per inner level expected, got {nested:?}",
+        );
+    }
+
+    #[test]
+    fn max_wall_top_aggregates_across_level_walls() {
+        // struct walls height=5 + level y=5 walls height=4 → tower top
+        // at y=9. `dims.y = 1 + 9 + gable_extra` with roof_w=5, roof_h=5
+        // (no overhang) so ridge span=5 and gable_extra = ceil(5/2) = 3.
+        // dims.y = 1 + 9 + 3 = 13.
+        let src = "theme t:\n  slot w -> @cobblestone\n  slot r -> @spruce_stairs\n\nstruct s size=5x5\n  walls mat_slot=w height=5\n  roof kind=gable mat_slot=r\n  level id=floor2 y=5\n    walls id=upper mat_slot=w height=4\n";
+        let out = lowered(src);
+        let ba = out.structures.get("struct::s").expect("structure lowered");
+        assert_eq!(ba.dims.y, 13);
+        assert_eq!(
+            deferred_count(&out),
+            0,
+            "unexpected defers: {:?}",
+            out.diagnostics
+        );
+        // Second-floor SW-most (low-x, low-z) corner at y=6..=9 is
+        // cobblestone from the level walls, not air.
+        for y in 6..=9 {
+            assert_eq!(block_id(ba, 0, y, 0), "minecraft:cobblestone");
+        }
+    }
+
+    // --- fill_stair unhappy path coverage (CG-2, CG-3) ----------------------
+
+    #[test]
+    fn stair_without_kind_defers() {
+        let src = "theme t:\n  slot w -> @cobblestone\n  slot r -> @spruce_stairs\n\nstruct s size=5x5\n  walls mat_slot=w height=3\n  roof kind=gable mat_slot=r overhang=1\n  stair id=e mat_slot=r side=front half=top facing=out\n";
+        let out = lowered(src);
+        let defers: Vec<&str> = out
+            .diagnostics
+            .iter()
+            .filter(|d| d.code == DiagnosticCode::DeferredMember)
+            .map(|d| d.primary.as_str())
+            .collect();
+        assert!(
+            defers.iter().any(|d| d.contains("stair without `kind=`")),
+            "expected `stair without kind=` defer, got {defers:?}",
+        );
+    }
+
+    #[test]
+    fn stair_with_unknown_kind_defers() {
+        let src = "theme t:\n  slot w -> @cobblestone\n  slot r -> @spruce_stairs\n\nstruct s size=5x5\n  walls mat_slot=w height=3\n  roof kind=gable mat_slot=r overhang=1\n  stair id=e kind=spiral mat_slot=r side=front half=top\n";
+        let out = lowered(src);
+        assert!(
+            out.diagnostics
+                .iter()
+                .any(|d| d.primary.contains("stair `kind=spiral`")),
+            "expected defer for kind=spiral, got {:?}",
+            out.diagnostics,
+        );
+    }
+
+    #[test]
+    fn stair_with_unknown_half_defers() {
+        let src = "theme t:\n  slot w -> @cobblestone\n  slot r -> @spruce_stairs\n\nstruct s size=5x5\n  walls mat_slot=w height=3\n  roof kind=gable mat_slot=r overhang=1\n  stair id=e kind=stairs mat_slot=r side=front half=middle\n";
+        let out = lowered(src);
+        assert!(
+            out.diagnostics
+                .iter()
+                .any(|d| d.primary.contains("stair `half=middle`")),
+            "expected defer for half=middle, got {:?}",
+            out.diagnostics,
+        );
+    }
+
+    #[test]
+    fn stair_with_unknown_facing_defers() {
+        let src = "theme t:\n  slot w -> @cobblestone\n  slot r -> @spruce_stairs\n\nstruct s size=5x5\n  walls mat_slot=w height=3\n  roof kind=gable mat_slot=r overhang=1\n  stair id=e kind=stairs mat_slot=r side=front half=top facing=north\n";
+        let out = lowered(src);
+        assert!(
+            out.diagnostics
+                .iter()
+                .any(|d| d.primary.contains("stair `facing=north`")),
+            "expected defer for facing=north, got {:?}",
+            out.diagnostics,
+        );
+    }
+
+    #[test]
+    fn stair_with_unknown_shape_defers() {
+        let src = "theme t:\n  slot w -> @cobblestone\n  slot r -> @spruce_stairs\n\nstruct s size=5x5\n  walls mat_slot=w height=3\n  roof kind=gable mat_slot=r overhang=1\n  stair id=e kind=stairs mat_slot=r side=front half=top facing=out shape=inner_left\n";
+        let out = lowered(src);
+        assert!(
+            out.diagnostics
+                .iter()
+                .any(|d| d.primary.contains("stair `shape=inner_left`")),
+            "expected defer for shape=inner_left, got {:?}",
+            out.diagnostics,
+        );
+    }
+
+    #[test]
+    fn stair_without_overhang_defers() {
+        // A roof with `overhang=0` (or missing overhang) leaves no room
+        // for the eave to sit outside the wall; the defer explains why.
+        let src = "theme t:\n  slot w -> @cobblestone\n  slot r -> @spruce_stairs\n\nstruct s size=5x5\n  walls mat_slot=w height=3\n  roof kind=flat mat_slot=r\n  stair id=e kind=stairs mat_slot=r side=front half=top facing=out\n";
+        let out = lowered(src);
+        assert!(
+            out.diagnostics
+                .iter()
+                .any(|d| d.primary.contains("overhang=")),
+            "expected defer for overhang=0, got {:?}",
+            out.diagnostics,
+        );
+    }
+
+    #[test]
+    fn stair_with_y_out_of_bounds_defers() {
+        // struct walls height=3, roof kind=flat → dims.y = 1 + 3 + 1 = 5.
+        // A stair at y=99 (well past dims.y) must defer instead of
+        // silently painting into thin air.
+        let src = "theme t:\n  slot w -> @cobblestone\n  slot r -> @spruce_stairs\n\nstruct s size=5x5\n  walls mat_slot=w height=3\n  roof kind=flat mat_slot=r overhang=1\n  stair id=e kind=stairs mat_slot=r side=front half=top facing=out y=99\n";
+        let out = lowered(src);
+        assert!(
+            out.diagnostics.iter().any(|d| d.primary.contains("y=99")),
+            "expected defer mentioning y=99, got {:?}",
+            out.diagnostics,
+        );
+    }
+
+    #[test]
+    fn stair_facing_in_paints_the_inward_cardinal() {
+        // side=front + facing=in → the stair riser points -z (north).
+        let src = "theme t:\n  slot w -> @cobblestone\n  slot r -> @spruce_stairs\n\nstruct s size=5x5\n  walls mat_slot=w height=3\n  roof kind=gable mat_slot=r overhang=1\n  stair id=e kind=stairs mat_slot=r side=front half=top facing=in\n";
+        let out = lowered(src);
+        assert_eq!(
+            deferred_count(&out),
+            0,
+            "unexpected defers: {:?}",
+            out.diagnostics
+        );
+        let ba = out.structures.get("struct::s").unwrap();
+        // Overhang row outside front wall is z = overhang + interior_h = 6.
+        // Local y=0 → world y=0. Interior x∈[1, 5]. Grab column x=3.
+        let state = &ba.palette.entries[usize::from(ba.voxels[ba.dims.index(3, 0, 6).unwrap()].0)];
+        assert_eq!(
+            state.properties.get("facing").map(String::as_str),
+            Some("north")
+        );
+    }
+
+    // --- fill_window unhappy path coverage (CG-4) ---------------------------
+
+    #[test]
+    fn window_repeat_zero_defers() {
+        let src = "theme t:\n  slot w -> @cobblestone\n\nstruct s size=6x5\n  walls mat_slot=w height=3\n  window side=front y=1 size=1x1 repeat=0\n";
+        let out = lowered(src);
+        assert!(
+            out.diagnostics
+                .iter()
+                .any(|d| d.primary.contains("repeat=0")),
+            "expected defer for repeat=0, got {:?}",
+            out.diagnostics,
+        );
+    }
+
+    #[test]
+    fn window_repeat_without_step_defers() {
+        let src = "theme t:\n  slot w -> @cobblestone\n\nstruct s size=6x5\n  walls mat_slot=w height=3\n  window side=front y=1 size=1x1 repeat=3\n";
+        let out = lowered(src);
+        assert!(
+            out.diagnostics
+                .iter()
+                .any(|d| d.primary.contains("requires a positive `step=`")),
+            "expected defer for repeat without step, got {:?}",
+            out.diagnostics,
+        );
+    }
+
+    #[test]
+    fn window_repeat_with_sym_defers() {
+        let src = "theme t:\n  slot w -> @cobblestone\n\nstruct s size=6x5\n  walls mat_slot=w height=3\n  window side=front y=1 size=1x1 repeat=2 step=2 sym=true\n";
+        let out = lowered(src);
+        assert!(
+            out.diagnostics
+                .iter()
+                .any(|d| d.primary.contains("`repeat=` and `sym=true`")),
+            "expected defer for repeat+sym, got {:?}",
+            out.diagnostics,
+        );
+    }
+
+    #[test]
+    fn window_span_beyond_wall_defers() {
+        // wall length 6, size=2, repeat=4 step=2 → span_end = 0 + 3*2 + 2 = 8 > 6.
+        let src = "theme t:\n  slot w -> @cobblestone\n\nstruct s size=6x5\n  walls mat_slot=w height=3\n  window side=front y=1 size=2x1 repeat=4 step=2\n";
+        let out = lowered(src);
+        assert!(
+            out.diagnostics
+                .iter()
+                .any(|d| d.primary.contains("extends beyond")),
+            "expected span-overrun defer, got {:?}",
+            out.diagnostics,
+        );
+    }
+
+    #[test]
+    fn window_repeat_step_leaves_columns_between_stamps_alone() {
+        // repeat=2 step=3 size=1x1 offset=0 on a 6-wide front wall:
+        // stamps at u=0 and u=3. Wall x mapping: overhang=0, interior_w=6,
+        // z=interior_h - 1 = 4. Column at u=1 must remain cobblestone.
+        let src = "theme t:\n  slot w -> @cobblestone\n\nstruct s size=6x5\n  walls mat_slot=w height=3\n  window side=front y=1 size=1x1 repeat=2 step=3\n";
+        let out = lowered(src);
+        assert_eq!(
+            deferred_count(&out),
+            0,
+            "unexpected defers: {:?}",
+            out.diagnostics
+        );
+        let ba = out.structures.get("struct::s").unwrap();
+        // Air carve (no mat_slot=) → voxel is air (palette index 0).
+        assert_eq!(block_id(ba, 0, 1, 4), BlockState::AIR_ID);
+        assert_eq!(block_id(ba, 3, 1, 4), BlockState::AIR_ID);
+        // Between stamps at u=1 and u=2 the wall stays.
+        assert_eq!(block_id(ba, 1, 1, 4), "minecraft:cobblestone");
+        assert_eq!(block_id(ba, 2, 1, 4), "minecraft:cobblestone");
+    }
+
+    #[test]
+    fn window_without_mat_slot_carves_air_regression() {
+        // A single-stamp mat_slot-less window should carve air (not
+        // silently drop). Independent of the arrow-slit repeat pattern.
+        let src = "theme t:\n  slot w -> @cobblestone\n\nstruct s size=5x5\n  walls mat_slot=w height=3\n  window side=front y=1 offset=2 size=1x1\n";
+        let out = lowered(src);
+        assert_eq!(
+            deferred_count(&out),
+            0,
+            "unexpected defers: {:?}",
+            out.diagnostics
+        );
+        let ba = out.structures.get("struct::s").unwrap();
+        // The cell that used to be a wall voxel is now air.
+        assert_eq!(block_id(ba, 2, 1, 4), BlockState::AIR_ID);
+    }
+
+    #[test]
+    fn window_carve_cannot_exceed_wall_top() {
+        // walls height=3 → wall_top=3, roof kind=flat → dims.y=5. A mat_slot-less
+        // window at y=3 size=1x2 would reach y=4 (roof deck) without a defer
+        // if the check only gated on dims.y. It must defer.
+        let src = "theme t:\n  slot w -> @cobblestone\n  slot r -> @spruce_stairs\n\nstruct s size=5x5\n  walls mat_slot=w height=3\n  roof kind=flat mat_slot=r\n  window side=front y=3 size=1x2\n";
+        let out = lowered(src);
+        assert!(
+            out.diagnostics
+                .iter()
+                .any(|d| d.primary.contains("extends above the wall column")),
+            "expected wall_top-gate defer, got {:?}",
+            out.diagnostics,
+        );
+    }
+
+    // --- carve_door level cap regression (C2) -------------------------------
+
+    #[test]
+    fn door_defers_when_level_sits_at_or_above_wall_top() {
+        // struct walls height=3 (top=3) with a door inside `level y=3`:
+        // the door would try to carve at world y=4, 5 which are outside
+        // any wall column. The cap `wall_top - y_offset < 1` fires the
+        // "no wall above this level" defer instead of silently painting.
+        let src = "theme t:\n  slot w -> @cobblestone\n\nstruct s size=5x5\n  walls mat_slot=w height=3\n  level id=roofline y=3\n    door id=hole side=front at=center\n";
+        let out = lowered(src);
+        assert!(
+            out.diagnostics
+                .iter()
+                .any(|d| d.primary.contains("at least one wall voxel above")),
+            "expected level-cap defer, got {:?}",
+            out.diagnostics,
+        );
+    }
+
+    // --- nonneg_int overflow guard (I5) -------------------------------------
+
+    #[test]
+    fn nonneg_int_rejects_values_that_do_not_fit_in_u32() {
+        // 5_000_000_000 exceeds u32::MAX (~4.29 * 10^9). The overflow
+        // used to clamp to u32::MAX silently; it now defers via
+        // `nonneg_int_or_defer` at the level's `y=`.
+        let src = "theme t:\n  slot w -> @cobblestone\n\nstruct s size=5x5\n  walls mat_slot=w height=3\n  level id=huge y=5000000000\n    walls id=upper mat_slot=w height=1\n";
+        let out = lowered(src);
+        assert!(
+            out.diagnostics
+                .iter()
+                .any(|d| d.primary.contains("fits in u32")),
+            "expected overflow defer, got {:?}",
             out.diagnostics,
         );
     }

@@ -12,6 +12,62 @@
 
 ## [Unreleased]
 
+### 追加
+
+- `cairn-lang-core::block_array::lower` — `level y=N` ブロックが
+  block-array lowering の phase-bucket に参加するようになりました。
+  新しい `flatten_members` 事前パスが各 `level` を
+  `(y_offset, child)` ペアに展開するため、`level` 直下にネストされた
+  `walls` / `door` / `window` / `stair` は authored `y` を level の
+  `y=` 分ずらして massing / openings / envelope の各フェーズに届きます。
+  `max_wall_height` は `max_wall_top` に改名し、フラット化後のリストを
+  集約するようになったので、`level y=N walls id=X height=H` は
+  `y = N + H` まで struct のロープラン (roof plane) を伸ばします。
+  level のネスト (2 段以上) は `W_DEFERRED_MEMBER` で defer します。
+- `cairn-lang-core::block_array::lower` — `MemberRole::Stair` を最小
+  実装 (`fill_stair`) しました。`themed-tower.crn` の軒 (eave) パターン
+  (`kind=stairs`、`side=front|back|left|right`、`half=top|bottom`、
+  `facing=out|in`、`shape=straight|outer_left|outer_right`、`y=`) を
+  カバーします。stair band は壁のオーバーハング行 (壁の外側 1 voxel) に
+  `y = y_offset + local_y` で並び、base id は解決された `mat_slot=` の
+  BlockState から取得します (未解決なら `spruce_stairs`)。それ以外の
+  `kind=` / `half=` / `facing=` / `shape=` は該当箇所を指す
+  `W_DEFERRED_MEMBER` で defer します。
+- `cairn-lang-core::block_array::lower` — `fill_window` が themed-tower
+  の 2 階矢狭間 (arrow-slit) パターン `repeat=N step=M` をサポートします。
+  同じ矩形を `N` 回、`step` voxel ずつずらして塗ります。`repeat` を
+  省略すると 1 とみなし、`repeat>=2 step=0` は defer します
+  (インスタンスが重なるため)。`mat_slot=` を持たない window は無音の
+  drop ではなく空気を彫るようになったので、`class=arrow_slit` のスリット
+  が壁に本物の穴を空けます。`mat_slot=` 明示のある window は変化なし。
+- `crates/cairn-lang-formats/tests/themed_tower_level_lower.rs` — 新規
+  統合テスト。`examples/themed-tower.crn` を built-in レジストリパック
+  経由で end-to-end に lower し、dims、palette (`dark_oak_stairs` /
+  `dark_oak_planks` を含む解決済み 5 種)、2 階の壁リング、軒 stair band、
+  矢狭間の空気彫りパターン、そして「`W_DEFERRED_MEMBER` 0 件」の契約を
+  pin します。materials resolver に built-in パックが必要で、
+  `cairn-lang-core` が `cairn-lang-formats` に依存できない (循環)
+  ため配置は `cairn-lang-formats` の tests/。
+
+### 変更
+
+- `cairn-lang-core::block_array::lower` — `fill_roof` は `mat_slot=`
+  が roof kind の canonical id 以外に解決されても `W_DEFERRED_MEMBER`
+  を出さなくなりました。代わりに解決された id をそのまま palette に
+  焼き込みます (`gable` / `shed` / `hip` / `flat` 全てで有効)。これで
+  `themed-tower.crn` の `slot roof -> @roof.dark_wood` が warning 無しで
+  dark-oak stairs 屋根になります。ただし `properties` が非空の
+  `mat_slot=` 状態は依然として defer します
+  (geometry generator が `facing` / `half` / `shape` を所有するため)。
+- `crates/cairn-lang-cli/tests/cli_compile.rs` — `c14b`
+  ("themed-tower に W_DEFERRED_MEMBER が残る" pin) を `c14e`
+  ("themed-tower が defer 無しで compile される" pin) に置き換え、
+  cottage の `c14` / village の `c21` と同じ品質ラインに揃えました。
+- `crates/cairn-lang-cli/tests/cli_lower.rs::lower_3_deferred_member_warnings_print_to_stderr`
+  は themed-tower (現在 clean) から離れ、`pressure_plate` を含む
+  簡易ソースを in-line で使うようになりました。deferred-warning 経路の
+  regression 保護は維持されます。
+
 最初の公開ナンバー付きリリースは **`2026.7.0`** (予定) です。それまでの間、本節はそのリリースに
 向けてリポジトリに積まれた内容を記録します。`cairn-lang-*` クレートはまだ crates.io に公開されて
 おらず、`canary` のワークスペースバージョンは `0.0.0` プレースホルダのままです。`cargo publish`

@@ -10,6 +10,61 @@ and is a separate axis from the Minecraft target version.
 
 ## [Unreleased]
 
+### Added
+
+- `cairn-lang-core::block_array::lower` — `level y=N` blocks now
+  participate in phase-bucketed voxelisation. A new `flatten_members`
+  pre-pass expands each `level` into `(y_offset, child)` pairs so a
+  `walls` / `door` / `window` / `stair` nested inside a `level` reaches
+  the massing / openings / envelope phases with its authored `y` shifted
+  up by the level's `y=`. `max_wall_height` becomes `max_wall_top` and
+  now aggregates over the flattened list so a `level y=N walls id=X
+  height=H` correctly extends the struct's roof plane to `y = N + H`.
+  Nested `level` blocks defer with `W_DEFERRED_MEMBER` (depth 1 only).
+- `cairn-lang-core::block_array::lower` — `MemberRole::Stair` gains a
+  minimal `fill_stair` implementation targeting the eave pattern
+  `themed-tower.crn` uses: `kind=stairs`, `side=front|back|left|right`,
+  `half=top|bottom`, `facing=out|in`, `shape=straight|outer_left|outer_right`,
+  and an optional `y=` local offset. The stair band paints along the
+  wall's overhang row (one voxel outside the wall) at
+  `y = y_offset + local_y`, taking its base id from the resolved
+  `mat_slot=` state and falling back to `spruce_stairs` otherwise. Any
+  other `kind=` / `half=` / `facing=` / `shape=` still defers with a
+  targeted `W_DEFERRED_MEMBER`.
+- `cairn-lang-core::block_array::lower` — `fill_window` supports the
+  `repeat=N step=M` arrow-slit pattern themed-tower's second-floor
+  windows use. The rectangle is stamped `N` times along the wall,
+  advancing by `step` voxels between stamps; `repeat` collapses to 1 when
+  absent, and `repeat>=2 step=0` defers so instances cannot overlap.
+  Windows without a `mat_slot=` binding now carve air instead of dropping
+  silently, so `class=arrow_slit` slits produce actual openings in the
+  wall. Windows with an explicit `mat_slot=` are unaffected.
+- `crates/cairn-lang-formats/tests/themed_tower_level_lower.rs` — new
+  integration test that lowers `examples/themed-tower.crn` end-to-end
+  through the built-in registry pack and pins dims, palette (five
+  resolved ids including `dark_oak_stairs` and `dark_oak_planks`), the
+  upper-wall ring, the eave stair band, the arrow-slit air carve
+  pattern, and the "zero `W_DEFERRED_MEMBER`" contract. Lives in
+  `cairn-lang-formats` because `cairn-lang-core` cannot depend on
+  `cairn-lang-formats` for the materials resolver without a cycle.
+
+### Changed
+
+- `cairn-lang-core::block_array::lower` — `fill_roof` no longer emits a
+  `W_DEFERRED_MEMBER` when a `mat_slot=` binding resolves to an id other
+  than the roof kind's canonical hardcode. Instead, the resolved id lands
+  in the palette verbatim for `gable`, `shed`, `hip`, and `flat` roofs,
+  giving `themed-tower.crn`'s `slot roof -> @roof.dark_wood` its
+  dark-oak stairs without a warning. A `mat_slot=` state whose
+  `properties` are non-empty still fires a deferred warning (the
+  geometry generator owns `facing` / `half` / `shape`).
+- `crates/cairn-lang-cli/tests/cli_compile.rs` — `c14b`
+  "`W_DEFERRED_MEMBER` still fires on themed-tower" is replaced by
+  `c14e` "themed-tower compiles without deferred warnings", pinning the
+  same shape as `c14` (cottage) and `c21` (village).
+- `crates/cairn-lang-cli/tests/cli_lower.rs::lower_3_deferred_member_warnings_print_to_stderr`
+  moves off `themed-tower.crn` (now clean) onto a bare `pressure_plate`
+  snippet, so the deferred-warning path still has coverage.
 
 
 
