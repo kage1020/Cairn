@@ -87,12 +87,14 @@ fn themed_tower_upper_walls_paint_at_second_floor_height() {
     // low-z corner (1, y, 1) is the *back-left* corner of the tower.
     let out = lower_themed_tower();
     let ba = out.structures.get("struct::keep").unwrap();
-    let cobble_idx = ba
-        .palette
-        .entries
-        .iter()
-        .position(|s| s.id == "minecraft:cobblestone")
-        .expect("cobblestone palette entry present") as u16;
+    let cobble_idx = u16::try_from(
+        ba.palette
+            .entries
+            .iter()
+            .position(|s| s.id == "minecraft:cobblestone")
+            .expect("cobblestone palette entry present"),
+    )
+    .expect("palette index fits in u16");
     for y in 6..=9 {
         let i = ba.dims.index(1, y, 1).expect("index within bounds");
         assert_eq!(
@@ -159,13 +161,16 @@ fn themed_tower_arrow_slit_repeat_step_carves_three_openings() {
         "arrow-slit repeat=3 step=2 size=1x2 should carve 6 air cells through the front wall",
     );
     // Cells outside the stamped columns must remain cobblestone (the level
-    // walls). Sample the SW corner at y=7 which is not on the slit column.
-    let cobble_idx = ba
-        .palette
-        .entries
-        .iter()
-        .position(|s| s.id == "minecraft:cobblestone")
-        .expect("cobblestone palette entry present") as u16;
+    // walls). Sample a control column at x=7 that is not on any slit
+    // column so the arrow-slit air carves do not touch it.
+    let cobble_idx = u16::try_from(
+        ba.palette
+            .entries
+            .iter()
+            .position(|s| s.id == "minecraft:cobblestone")
+            .expect("cobblestone palette entry present"),
+    )
+    .expect("palette index fits in u16");
     let control_x = 7u32;
     let ci = ba
         .dims
@@ -189,9 +194,6 @@ fn themed_tower_emits_zero_deferred_member_warnings() {
         deferred.is_empty(),
         "themed-tower must lower without deferred members; got {} — first: {}",
         deferred.len(),
-        deferred
-            .first()
-            .map(|d| d.primary.as_str())
-            .unwrap_or("<none>"),
+        deferred.first().map_or("<none>", |d| d.primary.as_str()),
     );
 }

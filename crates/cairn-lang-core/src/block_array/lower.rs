@@ -788,13 +788,34 @@ fn lower_body_to_block_array<'a>(
     }
 
     for (y_offset, member) in massing {
-        lower_massing_member(member, y_offset, &ctx, &mut palette, &mut voxels, diagnostics);
+        lower_massing_member(
+            member,
+            y_offset,
+            &ctx,
+            &mut palette,
+            &mut voxels,
+            diagnostics,
+        );
     }
     for (y_offset, member) in envelope {
-        lower_envelope_member(member, y_offset, &ctx, &mut palette, &mut voxels, diagnostics);
+        lower_envelope_member(
+            member,
+            y_offset,
+            &ctx,
+            &mut palette,
+            &mut voxels,
+            diagnostics,
+        );
     }
     for (y_offset, member) in openings {
-        lower_opening_member(member, y_offset, &ctx, &mut palette, &mut voxels, diagnostics);
+        lower_opening_member(
+            member,
+            y_offset,
+            &ctx,
+            &mut palette,
+            &mut voxels,
+            diagnostics,
+        );
     }
 
     BlockArray {
@@ -929,15 +950,15 @@ fn flatten_members<'a>(
     for member in members {
         if matches!(member.role, MemberRole::Level) {
             let y_offset = match nonneg_int_or_defer(member, "y", diagnostics) {
-                Some(Some(v)) => v,
-                Some(None) => {
+                NonNegRead::Valid(v) => v,
+                NonNegRead::Absent => {
                     diagnostics.push(diag_deferred_member_reason(
                         member,
                         "level requires `y=N` (non-negative integer) to place its children",
                     ));
                     continue;
                 }
-                None => continue,
+                NonNegRead::Deferred => continue,
             };
             for child in &member.children.members {
                 if matches!(child.role, MemberRole::Level) {
@@ -1152,7 +1173,7 @@ fn palette_index_for(
 /// The struct's roof plane must sit above the tallest wall column, and a
 /// level-scoped `walls id=upper height=H` inside a `level y=N` block extends
 /// the wall column up to `y = N + H`. Returning the maximum over the
-/// (y_offset, height) pairs from the flattened member list keeps the
+/// `(y_offset, height)` pairs from the flattened member list keeps the
 /// dim math correct when a struct mixes struct-scoped and level-scoped
 /// walls. Members without a positive `height=` contribute `0`; the
 /// `W_DEFERRED_MEMBER` for that member fires later in the massing phase
@@ -1263,32 +1284,42 @@ fn nonneg_int(member: &Member, key: &str) -> Option<u32> {
     }
 }
 
-/// Read a non-negative integer `key=` and defer the member when the key
-/// is present but not a well-formed `u32`.
+/// Result of reading a non-negative integer `key=` with defer semantics.
 ///
-/// Callers get three outcomes: `Some(Some(v))` (key present and valid),
-/// `Some(None)` (key absent — apply your own default), or `None` (key
-/// present but invalid; a `W_DEFERRED_MEMBER` has already been pushed
-/// and the caller should return). Stricter than [`nonneg_int`] alone
-/// because the callee cannot distinguish "no key" from "invalid key",
-/// which historically let `y=\"top\"` silently collapse to 0.
+/// The block-array pass distinguishes three outcomes on a `key=`:
+/// - `Valid(v)`: the key is present and parsed to a `u32`.
+/// - `Absent`: the key was not written; the caller applies its own
+///   default.
+/// - `Deferred`: the key was present but did not parse to a
+///   non-negative `u32`. A `W_DEFERRED_MEMBER` has already been pushed
+///   and the caller must return.
+///
+/// Using a named tri-state keeps callers explicit about which case they
+/// treat as a default vs which case aborts, and closes the
+/// `y="top"`-silently-becomes-`0` gap that the plain [`nonneg_int`]
+/// return type could not.
+enum NonNegRead {
+    Valid(u32),
+    Absent,
+    Deferred,
+}
+
 fn nonneg_int_or_defer(
     member: &Member,
     key: &str,
     diagnostics: &mut Vec<Diagnostic>,
-) -> Option<Option<u32>> {
+) -> NonNegRead {
     if !member.intent_state.contains_key(key) {
-        return Some(None);
+        return NonNegRead::Absent;
     }
-    match nonneg_int(member, key) {
-        Some(v) => Some(Some(v)),
-        None => {
-            diagnostics.push(diag_deferred_member_reason(
-                member,
-                &format!("`{key}=` must be a non-negative integer that fits in u32"),
-            ));
-            None
-        }
+    if let Some(v) = nonneg_int(member, key) {
+        NonNegRead::Valid(v)
+    } else {
+        diagnostics.push(diag_deferred_member_reason(
+            member,
+            &format!("`{key}=` must be a non-negative integer that fits in u32"),
+        ));
+        NonNegRead::Deferred
     }
 }
 
@@ -1423,8 +1454,7 @@ fn fill_roof(
     }
     let base_id = resolved
         .as_ref()
-        .map(|s| s.id.as_str())
-        .unwrap_or(kind.base_block_id());
+        .map_or(kind.base_block_id(), |s| s.id.as_str());
 
     match kind {
         RoofKind::Gable => fill_roof_gable(ctx, palette, voxels, base_id),
@@ -1457,7 +1487,7 @@ fn fill_roof_gable(
     let mut face_indices = [PaletteIndex::AIR; 4];
     for (slot, face) in face_indices.iter_mut().zip(face_table.iter().copied()) {
         let mut state = gable_stair_state(ridge_axis, face);
-        state.id = base_id.to_owned();
+        base_id.clone_into(&mut state.id);
         *slot = palette.intern(state);
     }
     for GableVoxel { pos, face } in gable_voxels(roof_w, roof_h, ctx.wall_top) {
@@ -1485,10 +1515,10 @@ fn fill_roof_shed(
         return;
     };
     let mut slope_state = shed_stair_state(slope_to, ShedFace::Slope);
-    slope_state.id = base_id.to_owned();
+    base_id.clone_into(&mut slope_state.id);
     let slope_idx = palette.intern(slope_state);
     let mut apex_state = shed_stair_state(slope_to, ShedFace::Apex);
-    apex_state.id = base_id.to_owned();
+    base_id.clone_into(&mut apex_state.id);
     let apex_idx = palette.intern(apex_state);
     for ShedVoxel { pos, face } in shed_voxels(ctx.dims.x, ctx.dims.z, ctx.wall_top, slope_to) {
         let idx = match face {
@@ -1524,7 +1554,7 @@ fn fill_roof_hip(
     // intern call into the voxel loop closes that gap.
     for HipVoxel { pos, face } in hip_voxels(roof_w, roof_h, ctx.wall_top) {
         let mut state = hip_stair_state(ridge_axis, face);
-        state.id = base_id.to_owned();
+        base_id.clone_into(&mut state.id);
         let idx = palette.intern(state);
         if let Some(i) = ctx.dims.index(pos.0, pos.1, pos.2) {
             voxels[i] = idx;
@@ -1539,7 +1569,7 @@ fn fill_roof_flat(
     base_id: &str,
 ) {
     let mut deck_state = flat_block_state();
-    deck_state.id = base_id.to_owned();
+    base_id.clone_into(&mut deck_state.id);
     let deck_idx = palette.intern(deck_state);
     for (x, y, z) in flat_voxels(ctx.dims.x, ctx.dims.z, ctx.wall_top) {
         if let Some(i) = ctx.dims.index(x, y, z) {
@@ -1711,6 +1741,7 @@ fn carve_door(
 /// overwrite the wall itself). Overhang has to be at least 1 for the
 /// eave to sit outside the wall; without one the stair collapses onto
 /// the wall row and a `W_DEFERRED_MEMBER` fires instead.
+#[allow(clippy::too_many_lines)] // one linear defer-and-paint chain reads better than 6 tiny helpers
 fn fill_stair(
     member: &Member,
     y_offset: u32,
@@ -1782,9 +1813,9 @@ fn fill_stair(
         return;
     }
     let y_local = match nonneg_int_or_defer(member, "y", diagnostics) {
-        Some(Some(v)) => v,
-        Some(None) => 0,
-        None => return,
+        NonNegRead::Valid(v) => v,
+        NonNegRead::Absent => 0,
+        NonNegRead::Deferred => return,
     };
     let y_world = y_local.saturating_add(y_offset);
     if y_world >= ctx.dims.y {
@@ -1817,8 +1848,7 @@ fn fill_stair(
         diagnostics.push(diag_deferred_member_reason(
             member,
             &format!(
-                "eave `stair`'s `mat_slot=` did not resolve to a block id; the band falls back to `{}`",
-                STAIR_BASE_ID,
+                "eave `stair`'s `mat_slot=` did not resolve to a block id; the band falls back to `{STAIR_BASE_ID}`",
             ),
         ));
     }
@@ -1833,10 +1863,7 @@ fn fill_stair(
             ),
         ));
     }
-    let base_id = resolved
-        .as_ref()
-        .map(|s| s.id.as_str())
-        .unwrap_or(STAIR_BASE_ID);
+    let base_id = resolved.as_ref().map_or(STAIR_BASE_ID, |s| s.id.as_str());
     let idx = palette.intern(stair_state(base_id, facing, half, shape));
     let length = wall_length(side, ctx.interior_w, ctx.interior_h);
     for u in 0..length {
@@ -1885,6 +1912,7 @@ fn shift_outward(side: WallSide, x: u32, z: u32) -> (u32, u32) {
     }
 }
 
+#[allow(clippy::too_many_lines)] // one linear parse-and-paint chain reads better than 6 tiny helpers
 fn fill_window(
     member: &Member,
     y_offset: u32,
@@ -1903,9 +1931,9 @@ fn fill_window(
     // stricter than "missing" and matches how `repeat=` and `step=` treat
     // the same shape below.
     let offset = match nonneg_int_or_defer(member, "offset", diagnostics) {
-        Some(Some(v)) => v,
-        Some(None) => 0,
-        None => return,
+        NonNegRead::Valid(v) => v,
+        NonNegRead::Absent => 0,
+        NonNegRead::Deferred => return,
     };
     let Some(y_start_local) = nonneg_int(member, "y") else {
         diagnostics.push(diag_deferred_member_reason(
@@ -1938,21 +1966,21 @@ fn fill_window(
     // nor changes the voxel output. The slit look-and-feel is a
     // follow-up.
     let repeat = match nonneg_int_or_defer(member, "repeat", diagnostics) {
-        Some(Some(0)) => {
+        NonNegRead::Valid(0) => {
             diagnostics.push(diag_deferred_member_reason(
                 member,
                 "window `repeat=0` would stamp no instances; drop the window instead",
             ));
             return;
         }
-        Some(Some(v)) => v,
-        Some(None) => 1,
-        None => return,
+        NonNegRead::Valid(v) => v,
+        NonNegRead::Absent => 1,
+        NonNegRead::Deferred => return,
     };
     let step = match nonneg_int_or_defer(member, "step", diagnostics) {
-        Some(Some(v)) => v,
-        Some(None) => 0,
-        None => return,
+        NonNegRead::Valid(v) => v,
+        NonNegRead::Absent => 0,
+        NonNegRead::Deferred => return,
     };
     if repeat > 1 && sym {
         diagnostics.push(diag_deferred_member_reason(
@@ -2825,7 +2853,12 @@ mod tests {
         // deck voxel at the roof plane uses the resolved id.
         let src = "theme t:\n  slot w -> @cobblestone\n  slot r -> @spruce_stairs\n\nstruct s size=5x5\n  walls mat_slot=w height=3\n  roof kind=flat mat_slot=r\n";
         let out = lowered(src);
-        assert_eq!(deferred_count(&out), 0, "unexpected diagnostics: {:?}", out.diagnostics);
+        assert_eq!(
+            deferred_count(&out),
+            0,
+            "unexpected diagnostics: {:?}",
+            out.diagnostics
+        );
         let ba = out.structures.get("struct::s").unwrap();
         // Flat deck sits at wall_top + 1 = 4. Interior x∈[0, 4], z∈[0, 4].
         assert_eq!(block_id(ba, 2, 4, 2), "minecraft:spruce_stairs");
@@ -2947,7 +2980,12 @@ mod tests {
         // resolved id is used verbatim.
         let src = "theme t:\n  slot w -> @cobblestone\n  slot r -> @oak_stairs\n\nstruct s size=5x5\n  walls mat_slot=w height=3\n  roof kind=gable mat_slot=r\n";
         let out = lowered(src);
-        assert_eq!(deferred_count(&out), 0, "unexpected diagnostics: {:?}", out.diagnostics);
+        assert_eq!(
+            deferred_count(&out),
+            0,
+            "unexpected diagnostics: {:?}",
+            out.diagnostics
+        );
         let ba = out.structures.get("struct::s").unwrap();
         assert!(
             ba.palette
@@ -3644,7 +3682,12 @@ mod tests {
         let out = lowered(src);
         let ba = out.structures.get("struct::s").expect("structure lowered");
         assert_eq!(ba.dims.y, 13);
-        assert_eq!(deferred_count(&out), 0, "unexpected defers: {:?}", out.diagnostics);
+        assert_eq!(
+            deferred_count(&out),
+            0,
+            "unexpected defers: {:?}",
+            out.diagnostics
+        );
         // Second-floor SW-most (low-x, low-z) corner at y=6..=9 is
         // cobblestone from the level walls, not air.
         for y in 6..=9 {
@@ -3675,7 +3718,9 @@ mod tests {
         let src = "theme t:\n  slot w -> @cobblestone\n  slot r -> @spruce_stairs\n\nstruct s size=5x5\n  walls mat_slot=w height=3\n  roof kind=gable mat_slot=r overhang=1\n  stair id=e kind=spiral mat_slot=r side=front half=top\n";
         let out = lowered(src);
         assert!(
-            out.diagnostics.iter().any(|d| d.primary.contains("stair `kind=spiral`")),
+            out.diagnostics
+                .iter()
+                .any(|d| d.primary.contains("stair `kind=spiral`")),
             "expected defer for kind=spiral, got {:?}",
             out.diagnostics,
         );
@@ -3686,7 +3731,9 @@ mod tests {
         let src = "theme t:\n  slot w -> @cobblestone\n  slot r -> @spruce_stairs\n\nstruct s size=5x5\n  walls mat_slot=w height=3\n  roof kind=gable mat_slot=r overhang=1\n  stair id=e kind=stairs mat_slot=r side=front half=middle\n";
         let out = lowered(src);
         assert!(
-            out.diagnostics.iter().any(|d| d.primary.contains("stair `half=middle`")),
+            out.diagnostics
+                .iter()
+                .any(|d| d.primary.contains("stair `half=middle`")),
             "expected defer for half=middle, got {:?}",
             out.diagnostics,
         );
@@ -3697,7 +3744,9 @@ mod tests {
         let src = "theme t:\n  slot w -> @cobblestone\n  slot r -> @spruce_stairs\n\nstruct s size=5x5\n  walls mat_slot=w height=3\n  roof kind=gable mat_slot=r overhang=1\n  stair id=e kind=stairs mat_slot=r side=front half=top facing=north\n";
         let out = lowered(src);
         assert!(
-            out.diagnostics.iter().any(|d| d.primary.contains("stair `facing=north`")),
+            out.diagnostics
+                .iter()
+                .any(|d| d.primary.contains("stair `facing=north`")),
             "expected defer for facing=north, got {:?}",
             out.diagnostics,
         );
@@ -3708,7 +3757,9 @@ mod tests {
         let src = "theme t:\n  slot w -> @cobblestone\n  slot r -> @spruce_stairs\n\nstruct s size=5x5\n  walls mat_slot=w height=3\n  roof kind=gable mat_slot=r overhang=1\n  stair id=e kind=stairs mat_slot=r side=front half=top facing=out shape=inner_left\n";
         let out = lowered(src);
         assert!(
-            out.diagnostics.iter().any(|d| d.primary.contains("stair `shape=inner_left`")),
+            out.diagnostics
+                .iter()
+                .any(|d| d.primary.contains("stair `shape=inner_left`")),
             "expected defer for shape=inner_left, got {:?}",
             out.diagnostics,
         );
@@ -3721,7 +3772,9 @@ mod tests {
         let src = "theme t:\n  slot w -> @cobblestone\n  slot r -> @spruce_stairs\n\nstruct s size=5x5\n  walls mat_slot=w height=3\n  roof kind=flat mat_slot=r\n  stair id=e kind=stairs mat_slot=r side=front half=top facing=out\n";
         let out = lowered(src);
         assert!(
-            out.diagnostics.iter().any(|d| d.primary.contains("overhang=")),
+            out.diagnostics
+                .iter()
+                .any(|d| d.primary.contains("overhang=")),
             "expected defer for overhang=0, got {:?}",
             out.diagnostics,
         );
@@ -3746,13 +3799,20 @@ mod tests {
         // side=front + facing=in → the stair riser points -z (north).
         let src = "theme t:\n  slot w -> @cobblestone\n  slot r -> @spruce_stairs\n\nstruct s size=5x5\n  walls mat_slot=w height=3\n  roof kind=gable mat_slot=r overhang=1\n  stair id=e kind=stairs mat_slot=r side=front half=top facing=in\n";
         let out = lowered(src);
-        assert_eq!(deferred_count(&out), 0, "unexpected defers: {:?}", out.diagnostics);
+        assert_eq!(
+            deferred_count(&out),
+            0,
+            "unexpected defers: {:?}",
+            out.diagnostics
+        );
         let ba = out.structures.get("struct::s").unwrap();
         // Overhang row outside front wall is z = overhang + interior_h = 6.
         // Local y=0 → world y=0. Interior x∈[1, 5]. Grab column x=3.
-        let state = &ba.palette.entries
-            [usize::from(ba.voxels[ba.dims.index(3, 0, 6).unwrap()].0)];
-        assert_eq!(state.properties.get("facing").map(String::as_str), Some("north"));
+        let state = &ba.palette.entries[usize::from(ba.voxels[ba.dims.index(3, 0, 6).unwrap()].0)];
+        assert_eq!(
+            state.properties.get("facing").map(String::as_str),
+            Some("north")
+        );
     }
 
     // --- fill_window unhappy path coverage (CG-4) ---------------------------
@@ -3762,7 +3822,9 @@ mod tests {
         let src = "theme t:\n  slot w -> @cobblestone\n\nstruct s size=6x5\n  walls mat_slot=w height=3\n  window side=front y=1 size=1x1 repeat=0\n";
         let out = lowered(src);
         assert!(
-            out.diagnostics.iter().any(|d| d.primary.contains("repeat=0")),
+            out.diagnostics
+                .iter()
+                .any(|d| d.primary.contains("repeat=0")),
             "expected defer for repeat=0, got {:?}",
             out.diagnostics,
         );
@@ -3773,7 +3835,9 @@ mod tests {
         let src = "theme t:\n  slot w -> @cobblestone\n\nstruct s size=6x5\n  walls mat_slot=w height=3\n  window side=front y=1 size=1x1 repeat=3\n";
         let out = lowered(src);
         assert!(
-            out.diagnostics.iter().any(|d| d.primary.contains("requires a positive `step=`")),
+            out.diagnostics
+                .iter()
+                .any(|d| d.primary.contains("requires a positive `step=`")),
             "expected defer for repeat without step, got {:?}",
             out.diagnostics,
         );
@@ -3784,7 +3848,9 @@ mod tests {
         let src = "theme t:\n  slot w -> @cobblestone\n\nstruct s size=6x5\n  walls mat_slot=w height=3\n  window side=front y=1 size=1x1 repeat=2 step=2 sym=true\n";
         let out = lowered(src);
         assert!(
-            out.diagnostics.iter().any(|d| d.primary.contains("`repeat=` and `sym=true`")),
+            out.diagnostics
+                .iter()
+                .any(|d| d.primary.contains("`repeat=` and `sym=true`")),
             "expected defer for repeat+sym, got {:?}",
             out.diagnostics,
         );
@@ -3796,7 +3862,9 @@ mod tests {
         let src = "theme t:\n  slot w -> @cobblestone\n\nstruct s size=6x5\n  walls mat_slot=w height=3\n  window side=front y=1 size=2x1 repeat=4 step=2\n";
         let out = lowered(src);
         assert!(
-            out.diagnostics.iter().any(|d| d.primary.contains("extends beyond")),
+            out.diagnostics
+                .iter()
+                .any(|d| d.primary.contains("extends beyond")),
             "expected span-overrun defer, got {:?}",
             out.diagnostics,
         );
@@ -3809,7 +3877,12 @@ mod tests {
         // z=interior_h - 1 = 4. Column at u=1 must remain cobblestone.
         let src = "theme t:\n  slot w -> @cobblestone\n\nstruct s size=6x5\n  walls mat_slot=w height=3\n  window side=front y=1 size=1x1 repeat=2 step=3\n";
         let out = lowered(src);
-        assert_eq!(deferred_count(&out), 0, "unexpected defers: {:?}", out.diagnostics);
+        assert_eq!(
+            deferred_count(&out),
+            0,
+            "unexpected defers: {:?}",
+            out.diagnostics
+        );
         let ba = out.structures.get("struct::s").unwrap();
         // Air carve (no mat_slot=) → voxel is air (palette index 0).
         assert_eq!(block_id(ba, 0, 1, 4), BlockState::AIR_ID);
@@ -3825,7 +3898,12 @@ mod tests {
         // silently drop). Independent of the arrow-slit repeat pattern.
         let src = "theme t:\n  slot w -> @cobblestone\n\nstruct s size=5x5\n  walls mat_slot=w height=3\n  window side=front y=1 offset=2 size=1x1\n";
         let out = lowered(src);
-        assert_eq!(deferred_count(&out), 0, "unexpected defers: {:?}", out.diagnostics);
+        assert_eq!(
+            deferred_count(&out),
+            0,
+            "unexpected defers: {:?}",
+            out.diagnostics
+        );
         let ba = out.structures.get("struct::s").unwrap();
         // The cell that used to be a wall voxel is now air.
         assert_eq!(block_id(ba, 2, 1, 4), BlockState::AIR_ID);
@@ -3839,7 +3917,9 @@ mod tests {
         let src = "theme t:\n  slot w -> @cobblestone\n  slot r -> @spruce_stairs\n\nstruct s size=5x5\n  walls mat_slot=w height=3\n  roof kind=flat mat_slot=r\n  window side=front y=3 size=1x2\n";
         let out = lowered(src);
         assert!(
-            out.diagnostics.iter().any(|d| d.primary.contains("extends above the wall column")),
+            out.diagnostics
+                .iter()
+                .any(|d| d.primary.contains("extends above the wall column")),
             "expected wall_top-gate defer, got {:?}",
             out.diagnostics,
         );
@@ -3856,7 +3936,9 @@ mod tests {
         let src = "theme t:\n  slot w -> @cobblestone\n\nstruct s size=5x5\n  walls mat_slot=w height=3\n  level id=roofline y=3\n    door id=hole side=front at=center\n";
         let out = lowered(src);
         assert!(
-            out.diagnostics.iter().any(|d| d.primary.contains("at least one wall voxel above")),
+            out.diagnostics
+                .iter()
+                .any(|d| d.primary.contains("at least one wall voxel above")),
             "expected level-cap defer, got {:?}",
             out.diagnostics,
         );
@@ -3872,7 +3954,9 @@ mod tests {
         let src = "theme t:\n  slot w -> @cobblestone\n\nstruct s size=5x5\n  walls mat_slot=w height=3\n  level id=huge y=5000000000\n    walls id=upper mat_slot=w height=1\n";
         let out = lowered(src);
         assert!(
-            out.diagnostics.iter().any(|d| d.primary.contains("fits in u32")),
+            out.diagnostics
+                .iter()
+                .any(|d| d.primary.contains("fits in u32")),
             "expected overflow defer, got {:?}",
             out.diagnostics,
         );
