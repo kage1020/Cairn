@@ -32,6 +32,11 @@ permissions:
   # Needed by the "Dispatch Publish workflow" step (`gh workflow run publish.yml`);
   # `gh` calls the workflow-dispatches REST endpoint which is gated on this scope.
   actions: write
+  # Needed by `rust-lang/crates-io-auth-action` to mint an OIDC token that
+  # crates.io exchanges for a short-lived, crate-scoped registry token. Without
+  # this scope release-plz `release` fails with "ensure the 'id-token' permission
+  # is set to 'write'" before it even reaches cargo publish.
+  id-token: write
 
 concurrency:
   group: release-${{ github.ref }}
