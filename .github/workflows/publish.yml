@@ -65,8 +65,13 @@ jobs:
             runner: ubuntu-24.04-arm
             archive: tar.gz
             ext: ""
+          # macos-latest (= macos-14, Apple Silicon) cross-compiles cleanly to
+          # x86_64-apple-darwin via the x86_64 slice Xcode ships. Using
+          # macos-13 (Intel) instead sits in GitHub's queue for hours: Intel
+          # macOS runners are scarce compared to the M-series pool and get
+          # serialized on any account that isn't running its own runner farm.
           - target: x86_64-apple-darwin
-            runner: macos-13
+            runner: macos-latest
             archive: tar.gz
             ext: ""
           - target: aarch64-apple-darwin
