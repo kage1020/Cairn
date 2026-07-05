@@ -444,6 +444,47 @@ fn c14c_roof_kind_examples_lower_without_deferred_warnings() {
 }
 
 #[test]
+fn c14f_redstone_door_pressure_plate_paints_without_deferring() {
+    // `redstone-door.crn` uses two `pressure_plate` fixtures placed with
+    // the compound `at=<side>.outside` / `at=inside.<side>` anchor.
+    // Pressure-plate lowering paints both lines, so neither fires a
+    // `W_DEFERRED_MEMBER`. The remaining deferred warnings belong to
+    // `circuit region=…` and the `door[id=front] opened_by=…` actuator
+    // patch, which stay unimplemented until circuit lowering and the
+    // selector-form actuator pass land. This slots into the same
+    // "example transitions from deferred to clean" shape `c14e` uses
+    // for themed-tower and `c14c` for the sloped roofs.
+    let tmp = TempDir::new().expect("tempdir");
+    let dst = tmp.path().join("redstone-door.crn");
+    fs::copy(examples_dir().join("redstone-door.crn"), &dst).expect("copy redstone-door");
+    let out_dir = TempDir::new().expect("out tempdir");
+    let result = run_compile(&[
+        dst.to_str().unwrap(),
+        "--edition",
+        "java",
+        "--out",
+        out_dir.path().to_str().unwrap(),
+    ]);
+    let stderr = String::from_utf8(result.stderr).expect("utf-8");
+    assert!(
+        result.status.success(),
+        "redstone-door should compile, stderr={stderr}",
+    );
+    assert!(
+        !stderr.contains("`pressure_plate`"),
+        "pressure_plate lowering should no longer fire W_DEFERRED_MEMBER, stderr={stderr}",
+    );
+    assert!(
+        stderr.contains("`circuit`"),
+        "`circuit region=…` remains deferred until circuit lowering lands; stderr={stderr}",
+    );
+    assert!(
+        out_dir.path().join("gatehouse.nbt").exists(),
+        "redstone-door should still write gatehouse.nbt, stderr={stderr}",
+    );
+}
+
+#[test]
 fn c15_lockfile_registry_pack_hash_is_populated() {
     // The registry pack ingest replaces the hardcoded data_version table,
     // and the lockfile must pin the bytes the compile resolved against.

@@ -9,6 +9,7 @@
 
 # Cairn lockfiles are generated; ignore unless intentionally committed
 *.cairn.lock
+*.crn.lock
 
 # Node
 node_modules/

@@ -73,30 +73,29 @@ fn lower_2_json_format_round_trips_as_block_array_ir() {
 
 #[test]
 fn lower_3_deferred_member_warnings_print_to_stderr() {
-    // themed-tower.crn voxelises clean once level-block lowering and
-    // roof/stair `mat_slot=` honouring land together, so the deferred
-    // regression uses a hand-written source that still exercises an
-    // unimplemented role. A bare `pressure_plate` is convenient — the
-    // redstone lowering pass is not yet in this milestone — and produces
-    // exactly the same `W_DEFERRED_MEMBER` shape the old themed-tower
-    // check was reading. Kept in-line rather than as an example so we do
-    // not commit an example the docs would then need to describe.
+    // The deferred-warning regression uses a hand-written source that still
+    // exercises an unimplemented role. As roles land the carrier moves to
+    // the next one — themed-tower held it until level/eave stairs, then
+    // `pressure_plate` briefly, and now `circuit` is the next role whose
+    // lowering has not been spec'd yet. Kept in-line rather than as an
+    // example so we do not commit an example the docs would then need to
+    // describe.
     let source = concat!(
         "theme t:\n",
         "  slot floor -> spruce_planks\n",
         "\n",
         "struct s size=2x2\n",
         "  floor mat_slot=floor\n",
-        "  pressure_plate side=front at=center\n",
+        "  circuit region=floor void=2\n",
     );
     let tmp = TempDir::new().expect("tempdir");
-    let src_path = tmp.path().join("pressure-plate.crn");
+    let src_path = tmp.path().join("circuit.crn");
     fs::write(&src_path, source).expect("write source");
     let out = run_lower(&[src_path.to_str().unwrap()]);
     let stderr = String::from_utf8(out.stderr).expect("utf-8");
     assert!(
         stderr.contains("W_DEFERRED_MEMBER"),
-        "expected at least one W_DEFERRED_MEMBER on a `pressure_plate` role, stderr={stderr}",
+        "expected at least one W_DEFERRED_MEMBER on a `circuit` role, stderr={stderr}",
     );
 }
 
