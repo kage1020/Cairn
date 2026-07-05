@@ -148,7 +148,10 @@ fn redstone_door_circuit_line_emits_no_deferred_warning() {
         1,
         "redstone-door should have exactly one deferred member (the actuator patch on `door[id=front]`); got {} — primaries: {:?}",
         deferred.len(),
-        deferred.iter().map(|d| d.primary.as_str()).collect::<Vec<_>>(),
+        deferred
+            .iter()
+            .map(|d| d.primary.as_str())
+            .collect::<Vec<_>>(),
     );
     assert!(
         deferred[0].primary.contains("side="),
