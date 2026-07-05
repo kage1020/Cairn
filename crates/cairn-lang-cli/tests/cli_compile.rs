@@ -446,13 +446,14 @@ fn c14c_roof_kind_examples_lower_without_deferred_warnings() {
 #[test]
 fn c14f_redstone_door_pressure_plate_paints_without_deferring() {
     // `redstone-door.crn` uses two `pressure_plate` fixtures placed with
-    // the compound `at=<side>.outside` / `at=inside.<side>` anchor. Once
-    // pressure-plate lowering lands, neither line fires a
-    // `W_DEFERRED_MEMBER` — the remaining deferred warnings belong to
+    // the compound `at=<side>.outside` / `at=inside.<side>` anchor.
+    // Pressure-plate lowering paints both lines, so neither fires a
+    // `W_DEFERRED_MEMBER`. The remaining deferred warnings belong to
     // `circuit region=…` and the `door[id=front] opened_by=…` actuator
-    // patch, both of which stay unimplemented until later PRs. This
-    // slots into the same "example transitions from deferred to clean"
-    // shape as `c14e` for themed-tower and `c14c` for the sloped roofs.
+    // patch, which stay unimplemented until circuit lowering and the
+    // selector-form actuator pass land. This slots into the same
+    // "example transitions from deferred to clean" shape `c14e` uses
+    // for themed-tower and `c14c` for the sloped roofs.
     let tmp = TempDir::new().expect("tempdir");
     let dst = tmp.path().join("redstone-door.crn");
     fs::copy(examples_dir().join("redstone-door.crn"), &dst).expect("copy redstone-door");
@@ -475,7 +476,7 @@ fn c14f_redstone_door_pressure_plate_paints_without_deferring() {
     );
     assert!(
         stderr.contains("`circuit`"),
-        "`circuit region=…` remains deferred until its own PR; stderr={stderr}",
+        "`circuit region=…` remains deferred until circuit lowering lands; stderr={stderr}",
     );
     assert!(
         out_dir.path().join("gatehouse.nbt").exists(),

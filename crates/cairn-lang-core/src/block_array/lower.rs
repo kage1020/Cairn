@@ -2009,7 +2009,8 @@ fn plate_anchor_of(member: &Member) -> Result<PlateAnchor, String> {
 /// Paint a `pressure_plate` fixture onto the block array as a single
 /// vanilla plate voxel.
 ///
-/// Only the subset `redstone-door.crn` exercises is honoured today:
+/// Only the compound-anchor subset the intent IR currently exposes is
+/// honoured:
 /// - `at=<side>.outside` / `at=inside.<side>` compound anchors,
 /// - `offset=N` and `y=N` non-negative integer offsets along the wall's
 ///   axis and the vertical axis (both default to 0 when absent),
@@ -2019,10 +2020,10 @@ fn plate_anchor_of(member: &Member) -> Result<PlateAnchor, String> {
 ///   dropped.
 ///
 /// The `-> sig.<name>` signal binding on `member.binding` is parsed but
-/// intentionally not consumed here — sensor/actuator wiring lives on the
-/// Redstone lowering pass that has not landed yet. Ignoring the binding
-/// mirrors `carve_door`'s current handling of `mat_slot=`: the physical
-/// block is placed, the logical wiring is deferred to its own PR.
+/// not consumed here — sensor/actuator wiring belongs to the redstone
+/// lowering pass that voxelises `logic` / `assert` / `circuit` items.
+/// The physical block is placed regardless, mirroring `carve_door`'s
+/// handling of `mat_slot=`.
 fn fill_pressure_plate(
     member: &Member,
     y_offset: u32,
@@ -2061,14 +2062,18 @@ fn fill_pressure_plate(
 /// diagnostic already pushed) when any of the inputs is missing / out
 /// of range / lands outside the block array.
 ///
-/// `<side>.outside` shifts one voxel toward the exterior; if that step
-/// lands outside the struct's dims (a struct without overhang has no
-/// exterior cell at the wall row), the shift falls back to the wall's
-/// own foundation cell so authors can still write `at=front.outside`
-/// on a plain flat-roof gatehouse. `inside.<side>` always shifts one
-/// voxel inward and defers when the shift saturates onto the wall
-/// itself (a 1-voxel-thin struct has no interior cell adjacent to any
-/// wall).
+/// `<side>.outside` shifts one voxel toward the exterior. When the
+/// shift lands outside the struct's dims *and* `y_world == 0`, it falls
+/// back to the wall's own foundation cell (the floor voxel directly
+/// under the wall column) so authors can still write `at=front.outside`
+/// on a plain flat-roof gatehouse with no overhang. Above the floor row
+/// the same fallback would overwrite the wall block that the massing
+/// phase painted, so `y_world >= 1` without a usable exterior cell
+/// defers instead.
+///
+/// `inside.<side>` always shifts one voxel inward and defers when the
+/// shift saturates onto the wall itself (a 1-voxel-thin struct has no
+/// interior cell adjacent to any wall).
 fn plate_voxel_position(
     member: &Member,
     y_offset: u32,
@@ -2109,7 +2114,7 @@ fn plate_voxel_position(
         ));
         return None;
     }
-    let (wx, _wy, wz) = wall_local_to_grid(
+    let Some((wx, _wy, wz)) = wall_local_to_grid(
         side,
         offset,
         y_world,
@@ -2117,14 +2122,45 @@ fn plate_voxel_position(
         ctx.interior_w,
         ctx.interior_h,
         ctx.dims,
-    )?;
+    ) else {
+        // Preceding bounds checks (`y_world < dims.y`, `offset < length`)
+        // already cover every rejection `wall_local_to_grid` performs
+        // today. Turning the `None` into a defer keeps the guard honest
+        // if that helper grows a new failure mode: a silent skip would
+        // let plates disappear without a diagnostic.
+        diagnostics.push(diag_deferred_member_reason(
+            member,
+            "pressure_plate anchor did not map onto the wall grid (internal invariant broken)",
+        ));
+        return None;
+    };
     match anchor {
         PlateAnchor::Outside(_) => {
             let (sx, sz) = shift_outward(side, wx, wz);
-            if ctx.dims.index(sx, y_world, sz).is_some() {
+            // The shift succeeds only when it produces a genuinely new
+            // voxel that lives in dims. A saturating shift that lands
+            // back on the wall column (Left/Back walls at coordinate 0
+            // when overhang=0) is not a real exterior cell, so treat it
+            // as "no exterior available" just like an out-of-dims shift.
+            let shift_reached_exterior =
+                (sx, sz) != (wx, wz) && ctx.dims.index(sx, y_world, sz).is_some();
+            if shift_reached_exterior {
                 Some((sx, y_world, sz))
-            } else {
+            } else if y_world == 0 {
+                // Foundation fallback: the wall column's y=0 cell is
+                // still floor material (walls start at y=1), so
+                // replacing it with a plate is honest to the anchor
+                // name.
                 Some((wx, y_world, wz))
+            } else {
+                diagnostics.push(diag_deferred_member_reason(
+                    member,
+                    &format!(
+                        "pressure_plate `at={}.outside` at y={y_world} has no exterior voxel to sit on (the struct has no overhang; the foundation fallback only applies at y=0 so a higher plate would overwrite the wall)",
+                        side_name(side),
+                    ),
+                ));
+                None
             }
         }
         PlateAnchor::Inside(_) => {
@@ -2146,12 +2182,25 @@ fn plate_voxel_position(
 
 /// Resolve a `pressure_plate` `mat_slot=` binding into the concrete
 /// block id the palette entry should carry, defaulting to
-/// [`PRESSURE_PLATE_BASE_ID`] when no binding is present. Returns
-/// `None` (with a diagnostic already pushed) when a `mat_slot=` was
-/// written but resolved to a state with bracketed properties — the
-/// plate has no author-facing state properties in this PR, so a
-/// `[facing=…]` literal cannot be applied without an interpretation
-/// the block-array IR is not ready to fix.
+/// [`PRESSURE_PLATE_BASE_ID`] when no binding is present or the resolver
+/// returned no state.
+///
+/// `resolve_member_state` already emits `W_ABSTRACT_TOKEN_DEFERRED` /
+/// `E_UNKNOWN_ABSTRACT_TOKEN` for abstract-token failures and the
+/// struct-level `W_NO_THEME_BOUND` for a missing theme, so a `None`
+/// return here is already diagnosed upstream — echoing the failure
+/// with another `W_DEFERRED_MEMBER` would just double up on the same
+/// root cause. Falling back to `PRESSURE_PLATE_BASE_ID` keeps the
+/// fixture visible in-game so authors can still read the artefact.
+///
+/// A resolved state with non-empty `properties` still defers *and*
+/// skips the paint: the block-array IR has no handling for bracketed
+/// state literals on plates, so silently reducing a `plate[...]`
+/// binding to a plain plate would drop the author's intent. This is
+/// stricter than `fill_stair`'s current behaviour (which defers but
+/// keeps painting) — `pressure_plate` has no geometry-derived state
+/// axis of its own, so the plain-plate fallback carries less signal
+/// than the stair band's does.
 fn resolve_plate_base_id(
     member: &Member,
     ctx: &StructCtx<'_>,
@@ -2164,21 +2213,13 @@ fn resolve_plate_base_id(
         diagnostics,
         ctx.theme_missing,
     );
-    if member.mat_slot.is_some() && resolved.is_none() {
-        diagnostics.push(diag_deferred_member_reason(
-            member,
-            &format!(
-                "pressure_plate's `mat_slot=` did not resolve to a block id; the fixture falls back to `{PRESSURE_PLATE_BASE_ID}`",
-            ),
-        ));
-    }
     if let Some(state) = &resolved
         && !state.properties.is_empty()
     {
         diagnostics.push(diag_deferred_member_reason(
             member,
             &format!(
-                "pressure_plate does not yet honour bracketed state literals; the `mat_slot=` binding to `{}[...]` was not applied",
+                "pressure_plate does not honour bracketed state literals; the `mat_slot=` binding to `{}[...]` was not applied",
                 state.id,
             ),
         ));
@@ -4216,6 +4257,154 @@ mod tests {
                 .iter()
                 .any(|d| d.primary.contains("at least one wall voxel above")),
             "expected level-cap defer, got {:?}",
+            out.diagnostics,
+        );
+    }
+
+    // --- pressure_plate lowering --------------------------------------------
+
+    #[test]
+    fn pressure_plate_outside_with_overhang_paints_in_the_overhang_column() {
+        // With `overhang=1` on the roof the struct inflates by one voxel
+        // on every horizontal axis (dims.x = 3+2 = 5, dims.z = 5). The
+        // front wall sits at z=overhang+ih-1=3, and the exterior
+        // overhang column is at z=4. `at=front.outside offset=0 y=0`
+        // must land in that exterior column, not fall back to the wall
+        // row.
+        let src = "theme t:\n  slot p -> @oak_pressure_plate\n\nstruct s size=3x3\n  walls mat_slot=p height=2\n  roof kind=flat mat_slot=p overhang=1\n  pressure_plate at=front.outside offset=0 y=0\n";
+        let out = lowered(src);
+        let ba = out.structures.get("struct::s").unwrap();
+        assert_eq!(ba.dims.x, 5);
+        assert_eq!(ba.dims.z, 5);
+        assert_eq!(block_id(ba, 1, 0, 4), "minecraft:oak_pressure_plate");
+        // The wall's own foundation cell at z=3 must NOT hold a plate.
+        assert_ne!(block_id(ba, 1, 0, 3), "minecraft:oak_pressure_plate");
+    }
+
+    #[test]
+    fn pressure_plate_outside_at_y_zero_without_overhang_falls_back_to_foundation() {
+        // No roof → dims stay at the authored 3x3 footprint (overhang=0).
+        // `at=front.outside offset=0 y=0` cannot reach an exterior cell,
+        // so the foundation fallback paints on the wall's own y=0 column
+        // (still floor material at that row).
+        let src = "theme t:\n  slot p -> @oak_pressure_plate\n\nstruct s size=3x3\n  walls mat_slot=p height=2\n  pressure_plate at=front.outside offset=0 y=0\n";
+        let out = lowered(src);
+        let ba = out.structures.get("struct::s").unwrap();
+        assert_eq!(ba.dims.x, 3);
+        assert_eq!(ba.dims.z, 3);
+        assert_eq!(block_id(ba, 0, 0, 2), "minecraft:oak_pressure_plate");
+        assert_eq!(deferred_count(&out), 0);
+    }
+
+    #[test]
+    fn pressure_plate_outside_above_ground_without_overhang_defers() {
+        // A plate at `y=1` with no overhang would clobber the wall block
+        // the massing phase painted directly above the foundation. The
+        // fallback is restricted to y=0 for that reason and higher plates
+        // must defer.
+        let src = "theme t:\n  slot p -> @oak_pressure_plate\n\nstruct s size=3x3\n  walls mat_slot=p height=2\n  pressure_plate at=front.outside offset=0 y=1\n";
+        let out = lowered(src);
+        assert!(
+            out.diagnostics
+                .iter()
+                .any(|d| d.primary.contains("has no exterior voxel")),
+            "expected an exterior-voxel defer at y=1, got {:?}",
+            out.diagnostics,
+        );
+    }
+
+    #[test]
+    fn pressure_plate_outside_saturating_shift_defers_above_ground() {
+        // Left wall at overhang=0 sits at x=0. `shift_outward` saturates
+        // back to x=0, which is a valid dims cell but *not* an exterior
+        // voxel. At y=1 the saturating shift must NOT silently overwrite
+        // the wall block — the anchor defers instead.
+        let src = "theme t:\n  slot p -> @oak_pressure_plate\n\nstruct s size=3x3\n  walls mat_slot=p height=2\n  pressure_plate at=left.outside offset=0 y=1\n";
+        let out = lowered(src);
+        let ba = out.structures.get("struct::s").unwrap();
+        assert!(
+            out.diagnostics
+                .iter()
+                .any(|d| d.primary.contains("has no exterior voxel")),
+            "expected saturating-shift defer, got {:?}",
+            out.diagnostics,
+        );
+        // And the wall block above the foundation must survive intact.
+        assert_eq!(block_id(ba, 0, 1, 1), "minecraft:oak_pressure_plate");
+    }
+
+    #[test]
+    fn pressure_plate_inside_paints_one_voxel_toward_the_interior() {
+        let src = "theme t:\n  slot p -> @oak_pressure_plate\n\nstruct s size=3x3\n  walls mat_slot=p height=2\n  pressure_plate at=inside.front offset=0 y=0\n";
+        let out = lowered(src);
+        let ba = out.structures.get("struct::s").unwrap();
+        assert_eq!(block_id(ba, 0, 0, 1), "minecraft:oak_pressure_plate");
+        assert_eq!(deferred_count(&out), 0);
+    }
+
+    #[test]
+    fn pressure_plate_mat_slot_resolves_into_the_palette() {
+        // A `mat_slot=` bound to a canonical id must land in the palette
+        // verbatim — the default `oak_pressure_plate` fallback only
+        // fires when no binding resolves.
+        let src = "theme t:\n  slot fixture -> @spruce_pressure_plate\n\nstruct s size=3x3\n  walls mat_slot=fixture height=2\n  pressure_plate mat_slot=fixture at=inside.front offset=0 y=0\n";
+        let out = lowered(src);
+        let ba = out.structures.get("struct::s").unwrap();
+        let ids: Vec<&str> = ba.palette.entries.iter().map(|s| s.id.as_str()).collect();
+        assert!(
+            ids.contains(&"minecraft:spruce_pressure_plate"),
+            "palette should carry the resolved id, got {ids:?}",
+        );
+        assert_eq!(block_id(ba, 0, 0, 1), "minecraft:spruce_pressure_plate");
+    }
+
+    #[test]
+    fn pressure_plate_rejects_missing_and_malformed_anchors() {
+        for (source, needle) in [
+            (
+                "theme t:\n  slot p -> @oak_pressure_plate\n\nstruct s size=3x3\n  walls mat_slot=p height=2\n  pressure_plate offset=0 y=0\n",
+                "without `at=`",
+            ),
+            (
+                "theme t:\n  slot p -> @oak_pressure_plate\n\nstruct s size=3x3\n  walls mat_slot=p height=2\n  pressure_plate at=center offset=0 y=0\n",
+                "must be `<side>.outside`",
+            ),
+            (
+                "theme t:\n  slot p -> @oak_pressure_plate\n\nstruct s size=3x3\n  walls mat_slot=p height=2\n  pressure_plate at=up.outside offset=0 y=0\n",
+                "is not one of front, back, left, right",
+            ),
+        ] {
+            let out = lowered(source);
+            assert!(
+                out.diagnostics.iter().any(|d| d.primary.contains(needle)),
+                "expected `{needle}` in diagnostics for source={source:?}, got {:?}",
+                out.diagnostics,
+            );
+        }
+    }
+
+    #[test]
+    fn pressure_plate_out_of_range_offset_or_y_defers() {
+        // offset=99 past a 3-length front wall.
+        let out = lowered(
+            "theme t:\n  slot p -> @oak_pressure_plate\n\nstruct s size=3x3\n  walls mat_slot=p height=2\n  pressure_plate at=inside.front offset=99 y=0\n",
+        );
+        assert!(
+            out.diagnostics
+                .iter()
+                .any(|d| d.primary.contains("runs past the front wall")),
+            "expected offset-out-of-range defer, got {:?}",
+            out.diagnostics,
+        );
+        // y=99 past the struct's dims.y.
+        let out = lowered(
+            "theme t:\n  slot p -> @oak_pressure_plate\n\nstruct s size=3x3\n  walls mat_slot=p height=2\n  pressure_plate at=inside.front offset=0 y=99\n",
+        );
+        assert!(
+            out.diagnostics
+                .iter()
+                .any(|d| d.primary.contains("does not fit in the struct")),
+            "expected y-out-of-range defer, got {:?}",
             out.diagnostics,
         );
     }

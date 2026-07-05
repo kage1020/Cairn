@@ -1,10 +1,10 @@
-//! Integration coverage for `redstone-door.crn` after `pressure_plate`
-//! lowering lands. Pins the palette (air, floor material, wall material,
-//! `oak_pressure_plate`), the two plate voxels, and the invariant that no
-//! `W_DEFERRED_MEMBER` fires on either `pressure_plate` line. Later PRs
-//! that add `circuit` and the selector-form `door[id=…] opened_by=…`
-//! actuator patch will each shave one entry off the remaining deferred
-//! stream this file measures.
+//! Integration coverage for `redstone-door.crn` under `pressure_plate`
+//! lowering. Pins the palette (air, floor material, wall material,
+//! `oak_pressure_plate`), the two plate voxels, and the invariant that
+//! no `W_DEFERRED_MEMBER` fires on either `pressure_plate` line. Once
+//! `circuit region=…` and the selector-form `door[id=…] opened_by=…`
+//! actuator patch grow their own lowering passes each will shave one
+//! entry off the remaining deferred stream this file measures.
 
 use std::path::PathBuf;
 
@@ -56,11 +56,13 @@ fn redstone_door_palette_contains_oak_pressure_plate() {
 }
 
 #[test]
-fn redstone_door_outside_plate_paints_at_front_wall_corner() {
+fn redstone_door_outside_plate_falls_back_to_wall_column_without_overhang() {
     // `pressure_plate id=plate at=front.outside offset=0 y=0` — the
     // shift-outward step lands at z=dims.z (out of range) because the
-    // struct has no overhang, so the plate falls back to the front wall
-    // column itself at (x=0, y=0, z=4).
+    // struct has no overhang. The `y=0` foundation fallback then paints
+    // on the wall's own column at (x=0, y=0, z=4). The main-line
+    // "shift into overhang column" semantics is covered by a unit test
+    // in `cairn-lang-core::block_array::lower::tests`.
     let out = lower_redstone_door();
     let ba = out.structures.get("struct::gatehouse").unwrap();
     let plate_idx = u16::try_from(
@@ -100,8 +102,9 @@ fn redstone_door_inside_plate_paints_one_voxel_inside_the_front_wall() {
 fn redstone_door_pressure_plate_lines_emit_no_deferred_warnings() {
     // Two plates → zero `W_DEFERRED_MEMBER` diagnostics whose primary
     // message names the `pressure_plate` role. Other deferred warnings
-    // (`circuit`, actuator patch) are still expected and are covered by
-    // their own tests.
+    // (`circuit`, the selector-form actuator patch) are still expected
+    // and are covered by their own tests once their lowering rules are
+    // spec'd.
     let out = lower_redstone_door();
     let plate_deferred = out
         .diagnostics
