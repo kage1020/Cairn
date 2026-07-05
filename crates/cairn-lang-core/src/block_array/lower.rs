@@ -791,7 +791,17 @@ fn lower_body_to_block_array<'a>(
             Some(Phase::Massing) => massing.push((y_offset, member)),
             Some(Phase::Envelope) => envelope.push((y_offset, member)),
             Some(Phase::Openings) => openings.push((y_offset, member)),
-            None => diagnostics.push(diag_deferred_member(member)),
+            None => match &member.role {
+                // `circuit region=<label> void=<N>` reserves a routing
+                // region for the future `logic_synth → logic_place →
+                // logic_route` passes (spec/redstone.md §14.5 / §14.8).
+                // Nothing lands in the block array from this member; the
+                // recognizer only checks the surface shape so a valid
+                // fixture stays quiet while a malformed one still
+                // surfaces a targeted `W_DEFERRED_MEMBER`.
+                MemberRole::Circuit => recognize_circuit_region(member, diagnostics),
+                _ => diagnostics.push(diag_deferred_member(member)),
+            },
         }
     }
 
@@ -2228,6 +2238,89 @@ fn resolve_plate_base_id(
     Some(resolved.map_or_else(|| PRESSURE_PLATE_BASE_ID.to_owned(), |s| s.id))
 }
 
+/// Recognise a `circuit region=<label> void=<N>` fixture without emitting
+/// voxels.
+///
+/// `circuit` reserves a routing region for the future
+/// `logic_synth → logic_place → logic_route` passes (spec/redstone.md
+/// §14.5 / §14.8). Nothing lands in the block array at this stage — the
+/// physical dust / repeater / cell tiles are decided by the logic layer,
+/// which is not part of block-array lowering yet. Recognising the shape
+/// here (rather than defaulting to `W_DEFERRED_MEMBER`) keeps
+/// `redstone-door.crn` from firing a per-source-line warning while the
+/// downstream passes are still under construction, mirroring how
+/// `logic` / `assert` items never reach this function at all.
+///
+/// The recognised region name is intentionally NOT threaded onto the
+/// [`BlockArray`] today: the receiver is the future logic pipeline,
+/// which walks the intent IR directly and does not consume block-array
+/// side-channels. When that pipeline lands the hand-off will be a fresh
+/// intent-IR walk rather than an extension of this recogniser.
+///
+/// The surface contract accepted today:
+/// - `region=<label>` — the region name a later logic pass will look up
+///   (`floor`, `basement`, …). Accepts any `Ident` or `Str` value; other
+///   value kinds (integers, booleans, dotted refs, …) defer with a
+///   kind-mismatch primary that names the offending kind. The
+///   block-array pass does not yet validate that the label matches an
+///   existing member kind on the struct — that check belongs to the
+///   routing pass, which owns the catalogue of routable regions.
+/// - `void=<N>` — a `u32` service-layer height greater than zero. A
+///   present-but-invalid value defers via `nonneg_int_or_defer` (which
+///   also catches values that overflow `u32`), and `void=0` explicitly
+///   defers because reserving zero blocks of routing headroom is almost
+///   always a typo (an author who wants no reserved layer just drops
+///   the `circuit` line).
+///
+/// Malformed shapes fall back to `diag_deferred_member_reason` so the
+/// author still sees a targeted warning naming the missing / invalid
+/// key rather than the generic "not yet handled" message.
+fn recognize_circuit_region(member: &Member, diagnostics: &mut Vec<Diagnostic>) {
+    let Some(raw_region) = member.intent_state.get("region") else {
+        diagnostics.push(diag_deferred_member_reason(
+            member,
+            "circuit requires `region=<label>` (e.g. `region=floor`, `region=basement`)",
+        ));
+        return;
+    };
+    let Some(region) = raw_region.value.as_label_str() else {
+        diagnostics.push(diag_deferred_member_reason(
+            member,
+            &format!(
+                "circuit `region=` must be an identifier or string label, got {}",
+                raw_region.value.kind_name(),
+            ),
+        ));
+        return;
+    };
+    if region.is_empty() {
+        diagnostics.push(diag_deferred_member_reason(
+            member,
+            "circuit `region=` must be a non-empty label",
+        ));
+        return;
+    }
+    // `NonNegRead::Deferred` already pushed its own `void=` primary via
+    // `nonneg_int_or_defer` (covering both non-integer values and
+    // integers that overflow `u32`), so it shares the "no extra
+    // diagnostic" arm with the valid-positive case.
+    match nonneg_int_or_defer(member, "void", diagnostics) {
+        NonNegRead::Valid(0) => {
+            diagnostics.push(diag_deferred_member_reason(
+                member,
+                "circuit `void=0` reserves no service layer; use a `u32` value >= 1",
+            ));
+        }
+        NonNegRead::Absent => {
+            diagnostics.push(diag_deferred_member_reason(
+                member,
+                "circuit requires `void=<N>` (a `u32` service-layer height >= 1)",
+            ));
+        }
+        NonNegRead::Valid(_) | NonNegRead::Deferred => {}
+    }
+}
+
 #[allow(clippy::too_many_lines)] // one linear parse-and-paint chain reads better than 6 tiny helpers
 fn fill_window(
     member: &Member,
@@ -2561,7 +2654,8 @@ fn diag_deferred_member_reason(member: &Member, reason: &str) -> Diagnostic {
             span: None,
             message: "block-array lowering currently voxelises floor, walls, door, window, \
                       roof (kind=gable|shed|hip|flat), stair (kind=stairs), pressure_plate \
-                      (at=<side>.outside|inside.<side>), and level y=N grouping; other roles \
+                      (at=<side>.outside|inside.<side>), and level y=N grouping, and \
+                      recognises circuit region=<label> void=<N> (u32, N>=1); other roles \
                       will be added as their lowering rules are spec'd"
                 .to_owned(),
         }],
@@ -2777,6 +2871,137 @@ mod tests {
                 assert_eq!(block_id(ba, x, 0, z), "minecraft:cobblestone");
             }
         }
+    }
+
+    #[test]
+    fn circuit_region_recognised_without_deferred_warning() {
+        // `circuit region=<label> void=<N>` is a routing marker for the
+        // future logic passes; block-array lowering must accept it
+        // silently without a `W_DEFERRED_MEMBER`.
+        let src = "theme t:\n  slot f -> @cobblestone\n\nstruct s size=3x3\n  floor mat_slot=f\n  circuit region=floor void=2\n";
+        let out = lowered(src);
+        assert_eq!(
+            deferred_count(&out),
+            0,
+            "circuit should not emit W_DEFERRED_MEMBER, got {:?}",
+            out.diagnostics,
+        );
+    }
+
+    #[test]
+    fn circuit_without_region_defers() {
+        let src = "theme t:\n  slot f -> @cobblestone\n\nstruct s size=3x3\n  floor mat_slot=f\n  circuit void=2\n";
+        let out = lowered(src);
+        let deferred: Vec<&Diagnostic> = out
+            .diagnostics
+            .iter()
+            .filter(|d| d.code == DiagnosticCode::DeferredMember)
+            .collect();
+        assert_eq!(deferred.len(), 1);
+        assert!(
+            deferred[0].primary.contains("region="),
+            "expected the primary to mention region=, got {}",
+            deferred[0].primary,
+        );
+    }
+
+    #[test]
+    fn circuit_without_void_defers() {
+        let src = "theme t:\n  slot f -> @cobblestone\n\nstruct s size=3x3\n  floor mat_slot=f\n  circuit region=floor\n";
+        let out = lowered(src);
+        let deferred: Vec<&Diagnostic> = out
+            .diagnostics
+            .iter()
+            .filter(|d| d.code == DiagnosticCode::DeferredMember)
+            .collect();
+        assert_eq!(deferred.len(), 1);
+        assert!(
+            deferred[0].primary.contains("void="),
+            "expected the primary to mention void=, got {}",
+            deferred[0].primary,
+        );
+    }
+
+    #[test]
+    fn circuit_with_zero_void_defers() {
+        let src = "theme t:\n  slot f -> @cobblestone\n\nstruct s size=3x3\n  floor mat_slot=f\n  circuit region=floor void=0\n";
+        let out = lowered(src);
+        let deferred: Vec<&Diagnostic> = out
+            .diagnostics
+            .iter()
+            .filter(|d| d.code == DiagnosticCode::DeferredMember)
+            .collect();
+        assert_eq!(deferred.len(), 1);
+        assert!(
+            deferred[0].primary.contains("void=0"),
+            "expected the primary to mention void=0, got {}",
+            deferred[0].primary,
+        );
+    }
+
+    #[test]
+    fn circuit_with_nonu32_void_defers() {
+        // `void=` values that overflow `u32` land in
+        // `NonNegRead::Deferred`; `nonneg_int_or_defer` owns the primary
+        // so `recognize_circuit_region` must not also push its own —
+        // exactly one diagnostic naming `void=` should fire.
+        let src = "theme t:\n  slot f -> @cobblestone\n\nstruct s size=3x3\n  floor mat_slot=f\n  circuit region=floor void=99999999999\n";
+        let out = lowered(src);
+        let deferred: Vec<&Diagnostic> = out
+            .diagnostics
+            .iter()
+            .filter(|d| d.code == DiagnosticCode::DeferredMember)
+            .collect();
+        assert_eq!(deferred.len(), 1);
+        assert!(
+            deferred[0].primary.contains("void="),
+            "expected the primary to mention void=, got {}",
+            deferred[0].primary,
+        );
+    }
+
+    #[test]
+    fn circuit_with_empty_region_defers() {
+        // Empty `region=""` is reachable through `ValueKind::Str("")`
+        // and must earn its own primary distinct from "region= absent".
+        let src = "theme t:\n  slot f -> @cobblestone\n\nstruct s size=3x3\n  floor mat_slot=f\n  circuit region=\"\" void=2\n";
+        let out = lowered(src);
+        let deferred: Vec<&Diagnostic> = out
+            .diagnostics
+            .iter()
+            .filter(|d| d.code == DiagnosticCode::DeferredMember)
+            .collect();
+        assert_eq!(deferred.len(), 1);
+        assert!(
+            deferred[0].primary.contains("non-empty"),
+            "expected the primary to say `region=` must be non-empty, got {}",
+            deferred[0].primary,
+        );
+    }
+
+    #[test]
+    fn circuit_with_non_label_region_defers() {
+        // `region=42` is well-formed but the wrong kind — the recogniser
+        // must distinguish "kind mismatch" from "missing key" so an
+        // author sees a targeted primary that names the offending kind.
+        let src = "theme t:\n  slot f -> @cobblestone\n\nstruct s size=3x3\n  floor mat_slot=f\n  circuit region=42 void=2\n";
+        let out = lowered(src);
+        let deferred: Vec<&Diagnostic> = out
+            .diagnostics
+            .iter()
+            .filter(|d| d.code == DiagnosticCode::DeferredMember)
+            .collect();
+        assert_eq!(deferred.len(), 1);
+        assert!(
+            deferred[0].primary.contains("identifier or string label"),
+            "expected the primary to explain the region= label requirement, got {}",
+            deferred[0].primary,
+        );
+        assert!(
+            deferred[0].primary.contains("integer"),
+            "expected the primary to name the offending kind, got {}",
+            deferred[0].primary,
+        );
     }
 
     #[test]
