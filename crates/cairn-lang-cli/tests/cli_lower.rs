@@ -74,10 +74,13 @@ fn lower_2_json_format_round_trips_as_block_array_ir() {
 #[test]
 fn lower_3_deferred_member_warnings_print_to_stderr() {
     // The deferred-warning regression uses a hand-written source that still
-    // exercises an unimplemented role. As roles land the carrier moves to
-    // the next one — themed-tower held it until level/eave stairs, then
-    // `pressure_plate` briefly, and now `circuit` is the next role whose
-    // lowering has not been spec'd yet. Kept in-line rather than as an
+    // exercises an unimplemented lowering path. As roles land the carrier
+    // moves to the next one — themed-tower held it until level/eave stairs,
+    // then `pressure_plate` briefly, then `circuit` until region markers
+    // were recognised, and now a `stair kind=stairs shape=inner_left`
+    // carries the regression: the stair path only lowers `straight`,
+    // `outer_left`, and `outer_right`, so an `inner_*` shape still emits
+    // a targeted `W_DEFERRED_MEMBER`. Kept in-line rather than as an
     // example so we do not commit an example the docs would then need to
     // describe.
     let source = concat!(
@@ -86,16 +89,17 @@ fn lower_3_deferred_member_warnings_print_to_stderr() {
         "\n",
         "struct s size=2x2\n",
         "  floor mat_slot=floor\n",
-        "  circuit region=floor void=2\n",
+        "  roof kind=flat overhang=1\n",
+        "  stair kind=stairs side=front shape=inner_left\n",
     );
     let tmp = TempDir::new().expect("tempdir");
-    let src_path = tmp.path().join("circuit.crn");
+    let src_path = tmp.path().join("stair-inner-left.crn");
     fs::write(&src_path, source).expect("write source");
     let out = run_lower(&[src_path.to_str().unwrap()]);
     let stderr = String::from_utf8(out.stderr).expect("utf-8");
     assert!(
         stderr.contains("W_DEFERRED_MEMBER"),
-        "expected at least one W_DEFERRED_MEMBER on a `circuit` role, stderr={stderr}",
+        "expected at least one W_DEFERRED_MEMBER on the `stair shape=inner_left` line, stderr={stderr}",
     );
 }
 

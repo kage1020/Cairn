@@ -446,12 +446,14 @@ fn c14c_roof_kind_examples_lower_without_deferred_warnings() {
 #[test]
 fn c14f_redstone_door_pressure_plate_paints_without_deferring() {
     // `redstone-door.crn` uses two `pressure_plate` fixtures placed with
-    // the compound `at=<side>.outside` / `at=inside.<side>` anchor.
-    // Pressure-plate lowering paints both lines, so neither fires a
-    // `W_DEFERRED_MEMBER`. The remaining deferred warnings belong to
-    // `circuit region=…` and the `door[id=front] opened_by=…` actuator
-    // patch, which stay unimplemented until circuit lowering and the
-    // selector-form actuator pass land. This slots into the same
+    // the compound `at=<side>.outside` / `at=inside.<side>` anchor and a
+    // `circuit region=floor void=2` routing marker. Pressure-plate
+    // lowering paints both plate lines and the circuit recogniser
+    // accepts the region marker without emitting a diagnostic, so
+    // neither role fires a `W_DEFERRED_MEMBER`. The one remaining
+    // deferred warning belongs to the `door[id=front] opened_by=…`
+    // selector-form actuator patch, which stays unimplemented until
+    // the actuator wiring pass lands. This slots into the same
     // "example transitions from deferred to clean" shape `c14e` uses
     // for themed-tower and `c14c` for the sloped roofs.
     let tmp = TempDir::new().expect("tempdir");
@@ -470,13 +472,21 @@ fn c14f_redstone_door_pressure_plate_paints_without_deferring() {
         result.status.success(),
         "redstone-door should compile, stderr={stderr}",
     );
+    // Only inspect the `warning[W_DEFERRED_MEMBER]` primary lines — the
+    // catalogue note that follows each warning lists every supported
+    // role by name (including `pressure_plate` / `circuit`) and would
+    // false-positive a plain substring check.
+    let deferred_primaries: Vec<&str> = stderr
+        .lines()
+        .filter(|line| line.contains("warning[W_DEFERRED_MEMBER]"))
+        .collect();
     assert!(
-        !stderr.contains("`pressure_plate`"),
-        "pressure_plate lowering should no longer fire W_DEFERRED_MEMBER, stderr={stderr}",
+        !deferred_primaries.iter().any(|line| line.contains("pressure_plate")),
+        "pressure_plate lowering should no longer fire W_DEFERRED_MEMBER, primaries={deferred_primaries:?}",
     );
     assert!(
-        stderr.contains("`circuit`"),
-        "`circuit region=…` remains deferred until circuit lowering lands; stderr={stderr}",
+        !deferred_primaries.iter().any(|line| line.contains("circuit")),
+        "circuit region markers should no longer fire W_DEFERRED_MEMBER, primaries={deferred_primaries:?}",
     );
     assert!(
         out_dir.path().join("gatehouse.nbt").exists(),

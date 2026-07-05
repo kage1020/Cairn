@@ -48,6 +48,20 @@
   pin します。materials resolver に built-in パックが必要で、
   `cairn-lang-core` が `cairn-lang-formats` に依存できない (循環)
   ため配置は `cairn-lang-formats` の tests/。
+- `cairn-lang-core::block_array::lower` — `MemberRole::Circuit` を
+  最小認識 (`recognize_circuit_region`) しました。`redstone-door.crn` の
+  `circuit region=floor void=2` のように、`region=<Ident|Label>` と
+  `void=<N>` (正の `u32`) を持つ回路領域マーカーを surface 形式のみ
+  検査し、voxel は一切置きません (spec/redstone.md §14.5 / §14.8 で
+  dust / repeater / cell の配置は `logic_synth → logic_place →
+  logic_route` に委ねられているため)。`region=` 欠落、`void=` 欠落、
+  `void=0`、`void` が `u32` に収まらない — これらは対象キーを指す
+  primary 付きで従来通り `W_DEFERRED_MEMBER` を発火します。
+- `crates/cairn-lang-formats/tests/redstone_door_pressure_plate_lower.rs`
+  — 新規 `redstone_door_circuit_line_emits_no_deferred_warning` テスト。
+  `circuit region=floor void=2` 行に対する
+  「`W_DEFERRED_MEMBER` 0 件」契約を pin します
+  (隣接する `pressure_plate` の 0 件テストと同じ形)。
 
 ### 変更
 
@@ -67,6 +81,21 @@
   は themed-tower (現在 clean) から離れ、`pressure_plate` を含む
   簡易ソースを in-line で使うようになりました。deferred-warning 経路の
   regression 保護は維持されます。
+- `crates/cairn-lang-cli/tests/cli_lower.rs::lower_3_deferred_member_warnings_print_to_stderr`
+  は `circuit` (現在は無音で認識) から離れ、
+  `stair kind=stairs side=front shape=inner_left` の in-line ソースに
+  移りました。stair の lowering は `straight` / `outer_left` /
+  `outer_right` のみサポートし、`inner_left` / `inner_right` は
+  依然 defer するため、それが deferred-warning の regression キャリアを
+  引き継ぎます。
+- `crates/cairn-lang-cli/tests/cli_compile.rs::c14f_redstone_door_pressure_plate_paints_without_deferring`
+  は `circuit` の assertion を「まだ残る」から「もう残らない」に反転し、
+  `warning[W_DEFERRED_MEMBER]` プライマリ行のみを直接調べる形に
+  リファクタしました (defer note が全対応ロール名を列挙する形式に
+  なったため、単純な部分文字列一致では pressure_plate / circuit を
+  誤検知するのを避けるため)。残る `door[id=front] opened_by=…` の
+  actuator patch defer はここではアサートせず、actuator wiring
+  パス着地時に専用テストを追加します。
 
 最初の公開ナンバー付きリリースは **`2026.7.0`** (予定) です。それまでの間、本節はそのリリースに
 向けてリポジトリに積まれた内容を記録します。`cairn-lang-*` クレートはまだ crates.io に公開されて

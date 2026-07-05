@@ -66,6 +66,22 @@ and is a separate axis from the Minecraft target version.
   voxels (front-wall corner at (0,0,4) for the `outside` anchor and one
   voxel inward at (0,0,3) for the `inside.front` anchor), and the
   "zero `W_DEFERRED_MEMBER` on `pressure_plate`" contract.
+- `cairn-lang-core::block_array::lower` — `MemberRole::Circuit` gains a
+  minimal `recognize_circuit_region` implementation covering the fixture
+  shape `redstone-door.crn` authored: `region=<Ident|Label>` naming the
+  region a later logic pass will look up, and `void=<N>` (positive
+  `u32`) reserving a service-layer height. No voxels are painted —
+  spec/redstone.md §14.5 / §14.8 places dust / repeater / cell tiles
+  on the future `logic_synth → logic_place → logic_route` passes — so
+  the recogniser only guards the surface shape. `region=` absent,
+  `void=` absent, `void=0`, and non-`u32` `void=` still fire
+  `W_DEFERRED_MEMBER` with a targeted primary that names the missing
+  or invalid key.
+- `crates/cairn-lang-formats/tests/redstone_door_pressure_plate_lower.rs`
+  — new `redstone_door_circuit_line_emits_no_deferred_warning` test
+  pins the "zero `W_DEFERRED_MEMBER` on `circuit`" contract on the
+  `circuit region=floor void=2` line, mirroring the shape of the
+  neighbouring pressure_plate zero-defer test.
 
 ### Changed
 
@@ -90,6 +106,21 @@ and is a separate axis from the Minecraft target version.
   `redstone-door.crn` compiles without a `pressure_plate` deferred
   warning while `circuit` is still surfaced, mirroring the same shape
   `c14e` uses for themed-tower.
+- `crates/cairn-lang-cli/tests/cli_lower.rs::lower_3_deferred_member_warnings_print_to_stderr`
+  moves off the `circuit` snippet (now recognised) onto a
+  `stair kind=stairs side=front shape=inner_left` snippet — the stair
+  path lowers `straight`, `outer_left`, and `outer_right` but still
+  defers `inner_left` / `inner_right`, so an inner-corner stair carries
+  the deferred-warning regression from here.
+- `crates/cairn-lang-cli/tests/cli_compile.rs::c14f_redstone_door_pressure_plate_paints_without_deferring`
+  flips the `circuit` assertion from "still surfaced" to "no longer
+  surfaced" now that `recognize_circuit_region` accepts the marker
+  silently, and inspects the `warning[W_DEFERRED_MEMBER]` primary
+  lines directly so the catalogue note (which lists every supported
+  role by name) does not false-positive the substring check. The
+  remaining `door[id=front] opened_by=…` actuator-patch defer is not
+  asserted here; a dedicated test will land with the actuator wiring
+  pass.
 
 
 

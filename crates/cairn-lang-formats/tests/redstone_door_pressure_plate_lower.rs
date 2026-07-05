@@ -1,10 +1,11 @@
 //! Integration coverage for `redstone-door.crn` under `pressure_plate`
-//! lowering. Pins the palette (air, floor material, wall material,
-//! `oak_pressure_plate`), the two plate voxels, and the invariant that
-//! no `W_DEFERRED_MEMBER` fires on either `pressure_plate` line. Once
-//! `circuit region=…` and the selector-form `door[id=…] opened_by=…`
-//! actuator patch grow their own lowering passes each will shave one
-//! entry off the remaining deferred stream this file measures.
+//! and `circuit` lowering. Pins the palette (air, floor material, wall
+//! material, `oak_pressure_plate`), the two plate voxels, and the
+//! invariants that no `W_DEFERRED_MEMBER` fires on either
+//! `pressure_plate` line or on the `circuit region=floor void=2`
+//! routing marker. Once the selector-form `door[id=…] opened_by=…`
+//! actuator patch grows its own lowering pass it will shave the last
+//! remaining deferred entry off the stream this file measures.
 
 use std::path::PathBuf;
 
@@ -101,10 +102,10 @@ fn redstone_door_inside_plate_paints_one_voxel_inside_the_front_wall() {
 #[test]
 fn redstone_door_pressure_plate_lines_emit_no_deferred_warnings() {
     // Two plates → zero `W_DEFERRED_MEMBER` diagnostics whose primary
-    // message names the `pressure_plate` role. Other deferred warnings
-    // (`circuit`, the selector-form actuator patch) are still expected
-    // and are covered by their own tests once their lowering rules are
-    // spec'd.
+    // message names the `pressure_plate` role. The remaining deferred
+    // warning (the selector-form actuator patch on `door[id=front]`) is
+    // still expected and will be covered by its own test once the
+    // actuator wiring pass lands.
     let out = lower_redstone_door();
     let plate_deferred = out
         .diagnostics
@@ -117,6 +118,32 @@ fn redstone_door_pressure_plate_lines_emit_no_deferred_warnings() {
         "pressure_plate must lower without deferred members; got {} — first: {}",
         plate_deferred.len(),
         plate_deferred
+            .first()
+            .map_or("<none>", |d| d.primary.as_str()),
+    );
+}
+
+#[test]
+fn redstone_door_circuit_line_emits_no_deferred_warning() {
+    // `circuit region=floor void=2` is a routing marker for the future
+    // logic passes; block-array lowering recognises the shape and emits
+    // no `W_DEFERRED_MEMBER`. The primary text of a `DeferredMember`
+    // diagnostic mentions "circuit" only when the recogniser rejected
+    // the surface shape, so filtering on that substring pins the
+    // "recognised silently" contract without matching the actuator
+    // patch diagnostic that still lingers on this example.
+    let out = lower_redstone_door();
+    let circuit_deferred = out
+        .diagnostics
+        .iter()
+        .filter(|d| matches!(d.code, DiagnosticCode::DeferredMember))
+        .filter(|d| d.primary.contains("circuit"))
+        .collect::<Vec<_>>();
+    assert!(
+        circuit_deferred.is_empty(),
+        "circuit must lower without deferred members; got {} — first: {}",
+        circuit_deferred.len(),
+        circuit_deferred
             .first()
             .map_or("<none>", |d| d.primary.as_str()),
     );
