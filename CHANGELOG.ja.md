@@ -83,10 +83,12 @@
   near-miss を目視で発見できます。今回対応するのは
   `door[id=…] opened_by=` のみで、`lamp lit_by=` / `piston powered_by=`
   / `dispenser fired_by=` は各キーワードが役割テーブルに載る PR で
-  追加予定です。これで `redstone-door.crn` の
-  `door[id=front] opened_by=sig.open` (line 25) が clean に compile
-  され、同 example で最後まで残っていた `W_DEFERRED_MEMBER` が
-  消えました。
+  追加予定です。selector 内の未知属性・intent 側の未知キーも silent
+  受理せず defer するため、将来 `powered_by=` が実装されたときに
+  既存ソースの意味を暗黙に変えることを防ぎます。これで
+  `redstone-door.crn` のアクチュエータパッチ行
+  `door[id=front] opened_by=sig.open` が clean に compile され、
+  同 example で最後まで残っていた `W_DEFERRED_MEMBER` が消えました。
 
 ### 変更
 

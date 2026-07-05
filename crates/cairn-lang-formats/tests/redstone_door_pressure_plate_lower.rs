@@ -5,7 +5,9 @@
 //! of the three fixture roles: the `pressure_plate` lines, the
 //! `circuit region=floor void=2` routing marker, or the
 //! `door[id=front] opened_by=sig.open` actuator patch that binds the
-//! physical door on line 15 to a logic-graph signal.
+//! physical `door id=front` declared earlier in the struct body to a
+//! logic-graph signal. Line-number references are intentionally avoided
+//! so the tests survive edits to the fixture.
 
 use std::path::PathBuf;
 
@@ -127,16 +129,17 @@ fn redstone_door_pressure_plate_lines_emit_no_deferred_warnings() {
 fn redstone_door_lowers_without_deferred_warnings() {
     // `circuit region=floor void=2` is a routing marker for the future
     // logic passes; `door[id=front] opened_by=sig.open` is an actuator
-    // patch that binds the physical `door id=front` on line 15 to a
-    // logic-graph signal. Block-array lowering recognises both shapes
-    // as surface-guards for the future redstone pipeline — neither
-    // emits voxels, neither fires a `W_DEFERRED_MEMBER`. Combined with
-    // the plate paint tested above, this pins the whole example at
-    // "zero deferred members" so a regression on any of the three
-    // recognisers fails loud. Instead of filtering primaries by a
-    // per-role substring (which would silently pass a regression where
-    // the recogniser routes into `nonneg_int_or_defer`'s primary — that
-    // primary does not name the enclosing role), pin the total count.
+    // patch that binds the physical `door id=front` declared earlier
+    // in the struct to a logic-graph signal. Block-array lowering
+    // recognises both shapes as surface-guards for the future redstone
+    // pipeline — neither emits voxels, neither fires a
+    // `W_DEFERRED_MEMBER`. Combined with the plate paint tested above,
+    // this pins the whole example at "zero deferred members" so a
+    // regression on any of the three recognisers fails loud. Instead
+    // of filtering primaries by a per-role substring (which would
+    // silently pass a regression where the recogniser routes into
+    // `nonneg_int_or_defer`'s primary — that primary does not name
+    // the enclosing role), pin the total count.
     let out = lower_redstone_door();
     let deferred = out
         .diagnostics
@@ -151,5 +154,55 @@ fn redstone_door_lowers_without_deferred_warnings() {
             .iter()
             .map(|d| d.primary.as_str())
             .collect::<Vec<_>>(),
+    );
+}
+
+#[test]
+fn redstone_door_actuator_patch_bad_id_emits_actuator_shaped_primary() {
+    // Canary that guards against the recogniser silently degrading to
+    // "always accept": if the "zero deferred" invariant above ever
+    // starts holding because `recognize_actuator_patch` was accidentally
+    // turned into a no-op, this test still catches the regression by
+    // appending a known-bad patch to a copy of the fixture. A
+    // `door[id=nonexistent] opened_by=sig.open` line must produce
+    // exactly one deferred entry whose primary carries the recogniser's
+    // fingerprint (both the offending id rendered verbatim and the
+    // fixture's real door id `front`). Filtering on the "actuator patch"
+    // substring keeps the assertion targeted at this recogniser rather
+    // than any other deferral upstream.
+    let mut source = std::fs::read_to_string(examples_dir().join("redstone-door.crn"))
+        .expect("redstone-door.crn readable");
+    source.push_str("  door[id=nonexistent] opened_by=sig.open\n");
+    let module = cairn_lang_core::parse(&source).expect("parse redstone-door canary");
+    let ir = cairn_lang_core::lower(&module);
+    let resolution = cairn_lang_core::resolve(&ir);
+    let pack = builtin_java();
+    let out = lower_to_block_array(&ir, &resolution, Some(&pack.materials));
+
+    let actuator_defers: Vec<&cairn_lang_core::check::Diagnostic> = out
+        .diagnostics
+        .iter()
+        .filter(|d| matches!(d.code, DiagnosticCode::DeferredMember))
+        .filter(|d| d.primary.contains("actuator patch"))
+        .collect();
+    assert_eq!(
+        actuator_defers.len(),
+        1,
+        "canary expected exactly one actuator-shaped deferred entry, got {} — primaries: {:?}",
+        actuator_defers.len(),
+        actuator_defers
+            .iter()
+            .map(|d| d.primary.as_str())
+            .collect::<Vec<_>>(),
+    );
+    assert!(
+        actuator_defers[0].primary.contains("id=nonexistent"),
+        "canary primary must render the offending id verbatim, got {}",
+        actuator_defers[0].primary,
+    );
+    assert!(
+        actuator_defers[0].primary.contains("front"),
+        "canary primary must list `front` as a known door id (the fixture's only physical door), got {}",
+        actuator_defers[0].primary,
     );
 }

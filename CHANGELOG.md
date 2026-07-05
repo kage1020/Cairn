@@ -101,9 +101,13 @@ and is a separate axis from the Minecraft target version.
   door id declared in the scope so the author can spot near-misses.
   Only `door[id=…] opened_by=` is covered — `lit_by=` / `powered_by=`
   / `fired_by=` on lamps / pistons / dispensers land with their
-  keywords in a future PR. `redstone-door.crn`'s
-  `door[id=front] opened_by=sig.open` (line 25) now compiles clean;
-  the last surviving `W_DEFERRED_MEMBER` on that example is gone.
+  keywords in a future PR. Unknown selector attributes and unknown
+  intent-state keys on a patch also defer (not silently accepted) so a
+  future `powered_by=` cannot retroactively change the meaning of
+  source that shipped meanwhile. `redstone-door.crn`'s
+  `door[id=front] opened_by=sig.open` actuator-patch line now compiles
+  clean; the last surviving `W_DEFERRED_MEMBER` on that example is
+  gone.
 
 ### Changed
 
