@@ -47,6 +47,25 @@ and is a separate axis from the Minecraft target version.
   pattern, and the "zero `W_DEFERRED_MEMBER`" contract. Lives in
   `cairn-lang-formats` because `cairn-lang-core` cannot depend on
   `cairn-lang-formats` for the materials resolver without a cycle.
+- `cairn-lang-core::block_array::lower` — `MemberRole::PressurePlate`
+  gains a minimal `fill_pressure_plate` implementation covering the
+  fixture shape `redstone-door.crn` authored: an `at=<side>.outside` /
+  `at=inside.<side>` compound anchor (two-segment `DotRef`), non-negative
+  `offset=N` along the wall axis, non-negative `y=N` from the floor, and
+  an optional `mat_slot=` that resolves to a bare block id (`oak_pressure_plate`
+  fallback). `<side>.outside` on a struct without overhang falls back to
+  the wall's foundation cell so the anchor still lowers cleanly. The
+  `-> sig.<name>` binding on `Member.binding` is parsed but intentionally
+  read-through until the redstone lowering pass lands. Any other `at=`
+  shape or a resolved state with bracketed properties still fires
+  `W_DEFERRED_MEMBER`.
+- `crates/cairn-lang-formats/tests/redstone_door_pressure_plate_lower.rs`
+  — new integration test that lowers `examples/redstone-door.crn` end-to-end
+  through the built-in registry pack and pins gatehouse dims (7x4x5), the
+  presence of `minecraft:oak_pressure_plate` in the palette, both plate
+  voxels (front-wall corner at (0,0,4) for the `outside` anchor and one
+  voxel inward at (0,0,3) for the `inside.front` anchor), and the
+  "zero `W_DEFERRED_MEMBER` on `pressure_plate`" contract.
 
 ### Changed
 
@@ -63,8 +82,14 @@ and is a separate axis from the Minecraft target version.
   `c14e` "themed-tower compiles without deferred warnings", pinning the
   same shape as `c14` (cottage) and `c21` (village).
 - `crates/cairn-lang-cli/tests/cli_lower.rs::lower_3_deferred_member_warnings_print_to_stderr`
-  moves off `themed-tower.crn` (now clean) onto a bare `pressure_plate`
-  snippet, so the deferred-warning path still has coverage.
+  moves off the `pressure_plate` snippet (now clean) onto a bare
+  `circuit region=floor void=2` snippet — that is the next role whose
+  lowering has not yet been spec'd, so it carries the deferred-warning
+  regression from here.
+- `crates/cairn-lang-cli/tests/cli_compile.rs` — new `c14f` pins that
+  `redstone-door.crn` compiles without a `pressure_plate` deferred
+  warning while `circuit` is still surfaced, mirroring the same shape
+  `c14e` uses for themed-tower.
 
 
 

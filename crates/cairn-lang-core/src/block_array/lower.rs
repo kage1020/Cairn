@@ -59,6 +59,14 @@ use super::roof::{
 use super::walkway::{WalkwayLayout, build_walkway_array, l_path, port_world_position};
 use super::{BlockArray, BlockArrayIr, BlockState, Dims, Palette, PaletteIndex};
 
+/// Vanilla pressure plate id used by `pressure_plate` members that do not
+/// resolve a `mat_slot=` binding. Species-specific plates (spruce, dark
+/// oak, ...) land with the registry pack once the theme-slot table grows
+/// a fixture axis; until then a bare `pressure_plate` lowers to
+/// `oak_pressure_plate` and a `mat_slot=` that resolves to a different id
+/// is honoured verbatim (mirroring [`STAIR_BASE_ID`]'s contract).
+const PRESSURE_PLATE_BASE_ID: &str = "minecraft:oak_pressure_plate";
+
 /// Lower every `struct` in `intent` into a [`BlockArray`].
 ///
 /// Pairs each struct with its [`ScopeResolution`] from `resolution` so the
@@ -914,13 +922,14 @@ fn member_phase(role: &MemberRole) -> Option<Phase> {
     match role {
         MemberRole::Floor | MemberRole::Walls => Some(Phase::Massing),
         MemberRole::Roof | MemberRole::Stair => Some(Phase::Envelope),
-        MemberRole::Door | MemberRole::Window => Some(Phase::Openings),
+        MemberRole::Door | MemberRole::Window | MemberRole::PressurePlate => {
+            Some(Phase::Openings)
+        }
         // `Level` is consumed by `flatten_members` and never reaches
         // this function; the arm is exhaustive for the enum but omits
         // `Level` on purpose so a future call site that forgets to
         // flatten first fails the compile.
-        MemberRole::PressurePlate
-        | MemberRole::Circuit
+        MemberRole::Circuit
         | MemberRole::Place
         | MemberRole::Connect
         | MemberRole::Other(_) => None,
@@ -1075,7 +1084,10 @@ fn lower_opening_member(
     match &member.role {
         MemberRole::Door => carve_door(member, y_offset, ctx, voxels, diagnostics),
         MemberRole::Window => fill_window(member, y_offset, ctx, palette, voxels, diagnostics),
-        _ => unreachable!("openings phase only contains door/window"),
+        MemberRole::PressurePlate => {
+            fill_pressure_plate(member, y_offset, ctx, palette, voxels, diagnostics);
+        }
+        _ => unreachable!("openings phase only contains door/window/pressure_plate"),
     }
 }
 
@@ -1912,6 +1924,248 @@ fn shift_outward(side: WallSide, x: u32, z: u32) -> (u32, u32) {
     }
 }
 
+/// Shift a wall voxel's `(x, z)` by one voxel toward the interior so a
+/// fixture placed with `at=inside.<side>` sits on the interior floor row
+/// next to the wall rather than overwriting the wall itself.
+fn shift_inward(side: WallSide, x: u32, z: u32) -> (u32, u32) {
+    match side {
+        WallSide::Front => (x, z.saturating_sub(1)),
+        WallSide::Back => (x, z.saturating_add(1)),
+        WallSide::Left => (x.saturating_add(1), z),
+        WallSide::Right => (x.saturating_sub(1), z),
+    }
+}
+
+/// Which side of the wall a `pressure_plate at=…` anchor sits on.
+///
+/// The DSL spells this as a two-segment `DotRef`:
+/// - `at=<side>.outside` — plate sits on the exterior overhang column
+///   adjacent to `<side>`. When the struct has no overhang the plate
+///   falls back to the wall's own foundation cell (the floor voxel
+///   directly beneath the wall column) so authors can still write
+///   `at=front.outside` on a plain flat-roof gatehouse.
+/// - `at=inside.<side>` — plate sits one voxel toward the interior from
+///   the wall's own column.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PlateAnchor {
+    Outside(WallSide),
+    Inside(WallSide),
+}
+
+impl PlateAnchor {
+    fn side(self) -> WallSide {
+        match self {
+            Self::Outside(s) | Self::Inside(s) => s,
+        }
+    }
+}
+
+/// Parse a `pressure_plate at=…` value into a [`PlateAnchor`].
+///
+/// Returns `Err(reason)` when the `at=` argument is not a two-segment
+/// dotted reference of the shape the DSL accepts. The caller turns the
+/// reason into a `W_DEFERRED_MEMBER` diagnostic anchored on the member.
+fn plate_anchor_of(member: &Member) -> Result<PlateAnchor, String> {
+    let raw = member
+        .intent_state
+        .get("at")
+        .ok_or_else(|| "pressure_plate without `at=` is not supported (use `at=<side>.outside` or `at=inside.<side>`)".to_owned())?;
+    let dotref = match &raw.value.kind {
+        ValueKind::DotRef(d) => d,
+        _ => {
+            return Err(
+                "pressure_plate `at=` must be `<side>.outside` or `inside.<side>` (two-segment dotted reference)"
+                    .to_owned(),
+            );
+        }
+    };
+    let segments = dotref.segments();
+    if segments.len() != 2 {
+        return Err(format!(
+            "pressure_plate `at={dotref}` must have exactly two segments (`<side>.outside` or `inside.<side>`)",
+        ));
+    }
+    let (head, tail) = (segments[0].as_str(), segments[1].as_str());
+    // `<side>.outside` — the head names the wall side, the tail is the
+    // literal `outside`. Everything else fails through to the paired
+    // `inside.<side>` shape below.
+    if tail == "outside" {
+        return WallSide::from_ident(head)
+            .map(PlateAnchor::Outside)
+            .ok_or_else(|| {
+                format!(
+                    "pressure_plate `at={head}.outside`: `{head}` is not one of front, back, left, right",
+                )
+            });
+    }
+    if head == "inside" {
+        return WallSide::from_ident(tail)
+            .map(PlateAnchor::Inside)
+            .ok_or_else(|| {
+                format!(
+                    "pressure_plate `at=inside.{tail}`: `{tail}` is not one of front, back, left, right",
+                )
+            });
+    }
+    Err(format!(
+        "pressure_plate `at={dotref}` is not a recognised anchor (use `<side>.outside` or `inside.<side>`)",
+    ))
+}
+
+/// Paint a `pressure_plate` fixture onto the block array as a single
+/// vanilla plate voxel.
+///
+/// Only the subset `redstone-door.crn` exercises is honoured today:
+/// - `at=<side>.outside` / `at=inside.<side>` compound anchors,
+/// - `offset=N` and `y=N` non-negative integer offsets along the wall's
+///   axis and the vertical axis (both default to 0 when absent),
+/// - an optional `mat_slot=` that resolves to a bare block id (no
+///   `[property=…]` state literal). Anything else emits a
+///   `W_DEFERRED_MEMBER` warning so the fixture is loud about what it
+///   dropped.
+///
+/// The `-> sig.<name>` signal binding on `member.binding` is parsed but
+/// intentionally not consumed here — sensor/actuator wiring lives on the
+/// Redstone lowering pass that has not landed yet. Ignoring the binding
+/// mirrors `carve_door`'s current handling of `mat_slot=`: the physical
+/// block is placed, the logical wiring is deferred to its own PR.
+fn fill_pressure_plate(
+    member: &Member,
+    y_offset: u32,
+    ctx: &StructCtx<'_>,
+    palette: &mut Palette,
+    voxels: &mut [PaletteIndex],
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    let anchor = match plate_anchor_of(member) {
+        Ok(a) => a,
+        Err(reason) => {
+            diagnostics.push(diag_deferred_member_reason(member, &reason));
+            return;
+        }
+    };
+    let side = anchor.side();
+    let offset = match nonneg_int_or_defer(member, "offset", diagnostics) {
+        NonNegRead::Valid(v) => v,
+        NonNegRead::Absent => 0,
+        NonNegRead::Deferred => return,
+    };
+    let y_local = match nonneg_int_or_defer(member, "y", diagnostics) {
+        NonNegRead::Valid(v) => v,
+        NonNegRead::Absent => 0,
+        NonNegRead::Deferred => return,
+    };
+    let y_world = y_local.saturating_add(y_offset);
+    if y_world >= ctx.dims.y {
+        diagnostics.push(diag_deferred_member_reason(
+            member,
+            &format!(
+                "pressure_plate y={y_world} does not fit in the struct (dims.y={})",
+                ctx.dims.y,
+            ),
+        ));
+        return;
+    }
+    if offset >= wall_length(side, ctx.interior_w, ctx.interior_h) {
+        diagnostics.push(diag_deferred_member_reason(
+            member,
+            &format!(
+                "pressure_plate `offset={offset}` runs past the {} wall (length {})",
+                side_name(side),
+                wall_length(side, ctx.interior_w, ctx.interior_h),
+            ),
+        ));
+        return;
+    }
+    let Some((wx, _wy, wz)) = wall_local_to_grid(
+        side,
+        offset,
+        y_world,
+        ctx.overhang,
+        ctx.interior_w,
+        ctx.interior_h,
+        ctx.dims,
+    ) else {
+        diagnostics.push(diag_deferred_member_reason(
+            member,
+            "pressure_plate coordinates fall outside the struct's block array",
+        ));
+        return;
+    };
+    // Resolve `mat_slot=` to a base id, defaulting to `oak_pressure_plate`.
+    // A resolved state with non-empty properties defers on the same
+    // grounds `fill_stair` does — the plate has no author-facing state
+    // properties in this PR, so a `[facing=…]` literal cannot be applied
+    // without an interpretation the block-array IR is not ready to fix.
+    let resolved = resolve_member_state(
+        member,
+        ctx.scope,
+        ctx.materials,
+        diagnostics,
+        ctx.theme_missing,
+    );
+    if member.mat_slot.is_some() && resolved.is_none() {
+        diagnostics.push(diag_deferred_member_reason(
+            member,
+            &format!(
+                "pressure_plate's `mat_slot=` did not resolve to a block id; the fixture falls back to `{PRESSURE_PLATE_BASE_ID}`",
+            ),
+        ));
+    }
+    if let Some(state) = &resolved
+        && !state.properties.is_empty()
+    {
+        diagnostics.push(diag_deferred_member_reason(
+            member,
+            &format!(
+                "pressure_plate does not yet honour bracketed state literals; the `mat_slot=` binding to `{}[...]` was not applied",
+                state.id,
+            ),
+        ));
+        return;
+    }
+    let base_id = resolved.as_ref().map_or(PRESSURE_PLATE_BASE_ID, |s| s.id.as_str());
+    let idx = palette.intern(BlockState::bare(base_id));
+    // `<side>.outside` shifts one voxel toward the exterior; if that step
+    // lands outside the struct's dims (a struct without overhang has no
+    // exterior cell at the wall row), fall back to painting on the wall's
+    // own column so authors can still author `at=front.outside` on a
+    // plain flat-roof gatehouse. `inside.<side>` always shifts one voxel
+    // inward and defers when the shift saturates onto the wall itself.
+    let (x, z) = match anchor {
+        PlateAnchor::Outside(_) => {
+            let (sx, sz) = shift_outward(side, wx, wz);
+            if ctx.dims.index(sx, y_world, sz).is_some() {
+                (sx, sz)
+            } else {
+                (wx, wz)
+            }
+        }
+        PlateAnchor::Inside(_) => {
+            let (sx, sz) = shift_inward(side, wx, wz);
+            if (sx, sz) == (wx, wz) {
+                diagnostics.push(diag_deferred_member_reason(
+                    member,
+                    &format!(
+                        "pressure_plate `at=inside.{}`: no interior voxel to place the fixture on",
+                        side_name(side),
+                    ),
+                ));
+                return;
+            }
+            (sx, sz)
+        }
+    };
+    if let Some(i) = ctx.dims.index(x, y_world, z) {
+        voxels[i] = idx;
+    } else {
+        diagnostics.push(diag_deferred_member_reason(
+            member,
+            "pressure_plate resolved to a voxel outside the struct's block array",
+        ));
+    }
+}
+
 #[allow(clippy::too_many_lines)] // one linear parse-and-paint chain reads better than 6 tiny helpers
 fn fill_window(
     member: &Member,
@@ -2244,8 +2498,9 @@ fn diag_deferred_member_reason(member: &Member, reason: &str) -> Diagnostic {
         notes: vec![DiagnosticNote {
             span: None,
             message: "block-array lowering currently voxelises floor, walls, door, window, \
-                      roof (kind=gable|shed|hip|flat), stair (kind=stairs), and level y=N \
-                      grouping; other roles will be added as their lowering rules are spec'd"
+                      roof (kind=gable|shed|hip|flat), stair (kind=stairs), pressure_plate \
+                      (at=<side>.outside|inside.<side>), and level y=N grouping; other roles \
+                      will be added as their lowering rules are spec'd"
                 .to_owned(),
         }],
         data: None,
