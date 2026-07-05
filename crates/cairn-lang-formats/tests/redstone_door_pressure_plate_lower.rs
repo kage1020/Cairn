@@ -92,10 +92,7 @@ fn redstone_door_inside_plate_paints_one_voxel_inside_the_front_wall() {
             .expect("oak_pressure_plate palette entry present"),
     )
     .expect("palette index fits in u16");
-    let i = ba
-        .dims
-        .index(0, 0, 3)
-        .expect("interior row within bounds");
+    let i = ba.dims.index(0, 0, 3).expect("interior row within bounds");
     assert_eq!(ba.voxels[i].0, plate_idx);
 }
 
@@ -116,6 +113,8 @@ fn redstone_door_pressure_plate_lines_emit_no_deferred_warnings() {
         plate_deferred.is_empty(),
         "pressure_plate must lower without deferred members; got {} — first: {}",
         plate_deferred.len(),
-        plate_deferred.first().map_or("<none>", |d| d.primary.as_str()),
+        plate_deferred
+            .first()
+            .map_or("<none>", |d| d.primary.as_str()),
     );
 }
