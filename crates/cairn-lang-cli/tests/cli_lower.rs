@@ -73,16 +73,13 @@ fn lower_2_json_format_round_trips_as_block_array_ir() {
 
 #[test]
 fn lower_3_deferred_member_warnings_print_to_stderr() {
-    // The deferred-warning regression uses a hand-written source that still
-    // exercises an unimplemented lowering path. As roles land the carrier
-    // moves to the next one — themed-tower held it until level/eave stairs,
-    // then `pressure_plate` briefly, then `circuit` until region markers
-    // were recognised, and now a `stair kind=stairs shape=inner_left`
-    // carries the regression: the stair path only lowers `straight`,
-    // `outer_left`, and `outer_right`, so an `inner_*` shape still emits
-    // a targeted `W_DEFERRED_MEMBER`. Kept in-line rather than as an
-    // example so we do not commit an example the docs would then need to
-    // describe.
+    // The current carrier is a `stair kind=stairs shape=inner_left`.
+    // `fill_stair` accepts only `shape=straight` / `outer_left` /
+    // `outer_right`, so an `inner_*` shape still emits a targeted
+    // `W_DEFERRED_MEMBER` — that is what this test pins. Kept in-line
+    // rather than as an example so we do not commit an example the
+    // docs would then need to describe. CHANGELOG owns the history of
+    // which construct held the carrier before this one.
     let source = concat!(
         "theme t:\n",
         "  slot floor -> spruce_planks\n",
@@ -100,6 +97,10 @@ fn lower_3_deferred_member_warnings_print_to_stderr() {
     assert!(
         stderr.contains("W_DEFERRED_MEMBER"),
         "expected at least one W_DEFERRED_MEMBER on the `stair shape=inner_left` line, stderr={stderr}",
+    );
+    assert!(
+        stderr.contains("shape=inner_left"),
+        "the deferred primary should name the offending `shape=inner_left`, stderr={stderr}",
     );
 }
 

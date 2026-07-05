@@ -472,21 +472,31 @@ fn c14f_redstone_door_pressure_plate_paints_without_deferring() {
         result.status.success(),
         "redstone-door should compile, stderr={stderr}",
     );
-    // Only inspect the `warning[W_DEFERRED_MEMBER]` primary lines — the
-    // catalogue note that follows each warning lists every supported
-    // role by name (including `pressure_plate` / `circuit`) and would
-    // false-positive a plain substring check.
+    // Baseline-pin the `warning[W_DEFERRED_MEMBER]` primary lines
+    // against the current known survivor — the `door[id=front]
+    // opened_by=…` actuator patch on line 25, which still routes
+    // through `carve_door` and defers with `missing side=`. A plain
+    // `stderr.contains(...)` check would false-positive the catalogue
+    // note printed after each warning (the note lists every supported
+    // role by name, including `pressure_plate` / `circuit`), and a
+    // literal-substring check on the primaries would false-negative a
+    // future refactor that stops naming `pressure_plate` / `circuit`
+    // in the primary text. Counting the primaries and asserting the
+    // shape of the one survivor catches both.
     let deferred_primaries: Vec<&str> = stderr
         .lines()
         .filter(|line| line.contains("warning[W_DEFERRED_MEMBER]"))
         .collect();
-    assert!(
-        !deferred_primaries.iter().any(|line| line.contains("pressure_plate")),
-        "pressure_plate lowering should no longer fire W_DEFERRED_MEMBER, primaries={deferred_primaries:?}",
+    assert_eq!(
+        deferred_primaries.len(),
+        1,
+        "redstone-door should have exactly one deferred member (the actuator patch); got {}, primaries={deferred_primaries:?}",
+        deferred_primaries.len(),
     );
     assert!(
-        !deferred_primaries.iter().any(|line| line.contains("circuit")),
-        "circuit region markers should no longer fire W_DEFERRED_MEMBER, primaries={deferred_primaries:?}",
+        deferred_primaries[0].contains("side="),
+        "the one surviving W_DEFERRED_MEMBER must be the `missing side=` actuator patch, got {}",
+        deferred_primaries[0],
     );
     assert!(
         out_dir.path().join("gatehouse.nbt").exists(),

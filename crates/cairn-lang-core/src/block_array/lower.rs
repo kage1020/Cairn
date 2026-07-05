@@ -2251,30 +2251,45 @@ fn resolve_plate_base_id(
 /// downstream passes are still under construction, mirroring how
 /// `logic` / `assert` items never reach this function at all.
 ///
+/// The recognised region name is intentionally NOT threaded onto the
+/// [`BlockArray`] today: the receiver is the future logic pipeline,
+/// which walks the intent IR directly and does not consume block-array
+/// side-channels. When that pipeline lands the hand-off will be a fresh
+/// intent-IR walk rather than an extension of this recogniser.
+///
 /// The surface contract accepted today:
-/// - `region=<Ident|Label>` — the region name a later logic pass will
-///   look up (`floor`, `basement`, …). The block-array pass does not
-///   yet validate that the label matches an existing member kind on the
-///   struct; that check belongs to the routing pass, which owns the
-///   catalogue of routable regions.
-/// - `void=<N>` — a positive `u32` reserved service-layer height. A
-///   present-but-invalid value defers via `nonneg_int_or_defer`, and
-///   `void=0` explicitly defers because reserving zero blocks of routing
-///   headroom is almost always a typo (an author who wants no reserved
-///   layer just drops the `circuit` line).
+/// - `region=<label>` — the region name a later logic pass will look up
+///   (`floor`, `basement`, …). Accepts any `Ident` or `Str` value; other
+///   value kinds (integers, booleans, dotted refs, …) defer with a
+///   kind-mismatch primary that names the offending kind. The
+///   block-array pass does not yet validate that the label matches an
+///   existing member kind on the struct — that check belongs to the
+///   routing pass, which owns the catalogue of routable regions.
+/// - `void=<N>` — a `u32` service-layer height greater than zero. A
+///   present-but-invalid value defers via `nonneg_int_or_defer` (which
+///   also catches values that overflow `u32`), and `void=0` explicitly
+///   defers because reserving zero blocks of routing headroom is almost
+///   always a typo (an author who wants no reserved layer just drops
+///   the `circuit` line).
 ///
 /// Malformed shapes fall back to `diag_deferred_member_reason` so the
-/// author still sees a targeted warning naming the missing key rather
-/// than the generic "not yet handled" message.
+/// author still sees a targeted warning naming the missing / invalid
+/// key rather than the generic "not yet handled" message.
 fn recognize_circuit_region(member: &Member, diagnostics: &mut Vec<Diagnostic>) {
-    let Some(region) = member
-        .intent_state
-        .get("region")
-        .and_then(|v| v.value.as_label_str())
-    else {
+    let Some(raw_region) = member.intent_state.get("region") else {
         diagnostics.push(diag_deferred_member_reason(
             member,
             "circuit requires `region=<label>` (e.g. `region=floor`, `region=basement`)",
+        ));
+        return;
+    };
+    let Some(region) = raw_region.value.as_label_str() else {
+        diagnostics.push(diag_deferred_member_reason(
+            member,
+            &format!(
+                "circuit `region=` must be an identifier or string label, got {}",
+                raw_region.value.kind_name(),
+            ),
         ));
         return;
     };
@@ -2286,19 +2301,20 @@ fn recognize_circuit_region(member: &Member, diagnostics: &mut Vec<Diagnostic>) 
         return;
     }
     // `NonNegRead::Deferred` already pushed its own `void=` primary via
-    // `nonneg_int_or_defer` so it shares the "no extra diagnostic" arm
-    // with the valid-positive case.
+    // `nonneg_int_or_defer` (covering both non-integer values and
+    // integers that overflow `u32`), so it shares the "no extra
+    // diagnostic" arm with the valid-positive case.
     match nonneg_int_or_defer(member, "void", diagnostics) {
         NonNegRead::Valid(0) => {
             diagnostics.push(diag_deferred_member_reason(
                 member,
-                "circuit `void=0` reserves no service layer; use `void>=1`",
+                "circuit `void=0` reserves no service layer; use a `u32` value >= 1",
             ));
         }
         NonNegRead::Absent => {
             diagnostics.push(diag_deferred_member_reason(
                 member,
-                "circuit requires `void=<N>` (positive integer service-layer height)",
+                "circuit requires `void=<N>` (a `u32` service-layer height >= 1)",
             ));
         }
         NonNegRead::Valid(_) | NonNegRead::Deferred => {}
@@ -2639,8 +2655,8 @@ fn diag_deferred_member_reason(member: &Member, reason: &str) -> Diagnostic {
             message: "block-array lowering currently voxelises floor, walls, door, window, \
                       roof (kind=gable|shed|hip|flat), stair (kind=stairs), pressure_plate \
                       (at=<side>.outside|inside.<side>), and level y=N grouping, and \
-                      recognises circuit region=<label> void=<N>; other roles will be added \
-                      as their lowering rules are spec'd"
+                      recognises circuit region=<label> void=<N> (u32, N>=1); other roles \
+                      will be added as their lowering rules are spec'd"
                 .to_owned(),
         }],
         data: None,
@@ -2919,6 +2935,71 @@ mod tests {
         assert!(
             deferred[0].primary.contains("void=0"),
             "expected the primary to mention void=0, got {}",
+            deferred[0].primary,
+        );
+    }
+
+    #[test]
+    fn circuit_with_nonu32_void_defers() {
+        // `void=` values that overflow `u32` land in
+        // `NonNegRead::Deferred`; `nonneg_int_or_defer` owns the primary
+        // so `recognize_circuit_region` must not also push its own —
+        // exactly one diagnostic naming `void=` should fire.
+        let src = "theme t:\n  slot f -> @cobblestone\n\nstruct s size=3x3\n  floor mat_slot=f\n  circuit region=floor void=99999999999\n";
+        let out = lowered(src);
+        let deferred: Vec<&Diagnostic> = out
+            .diagnostics
+            .iter()
+            .filter(|d| d.code == DiagnosticCode::DeferredMember)
+            .collect();
+        assert_eq!(deferred.len(), 1);
+        assert!(
+            deferred[0].primary.contains("void="),
+            "expected the primary to mention void=, got {}",
+            deferred[0].primary,
+        );
+    }
+
+    #[test]
+    fn circuit_with_empty_region_defers() {
+        // Empty `region=""` is reachable through `ValueKind::Str("")`
+        // and must earn its own primary distinct from "region= absent".
+        let src = "theme t:\n  slot f -> @cobblestone\n\nstruct s size=3x3\n  floor mat_slot=f\n  circuit region=\"\" void=2\n";
+        let out = lowered(src);
+        let deferred: Vec<&Diagnostic> = out
+            .diagnostics
+            .iter()
+            .filter(|d| d.code == DiagnosticCode::DeferredMember)
+            .collect();
+        assert_eq!(deferred.len(), 1);
+        assert!(
+            deferred[0].primary.contains("non-empty"),
+            "expected the primary to say `region=` must be non-empty, got {}",
+            deferred[0].primary,
+        );
+    }
+
+    #[test]
+    fn circuit_with_non_label_region_defers() {
+        // `region=42` is well-formed but the wrong kind — the recogniser
+        // must distinguish "kind mismatch" from "missing key" so an
+        // author sees a targeted primary that names the offending kind.
+        let src = "theme t:\n  slot f -> @cobblestone\n\nstruct s size=3x3\n  floor mat_slot=f\n  circuit region=42 void=2\n";
+        let out = lowered(src);
+        let deferred: Vec<&Diagnostic> = out
+            .diagnostics
+            .iter()
+            .filter(|d| d.code == DiagnosticCode::DeferredMember)
+            .collect();
+        assert_eq!(deferred.len(), 1);
+        assert!(
+            deferred[0].primary.contains("identifier or string label"),
+            "expected the primary to explain the region= label requirement, got {}",
+            deferred[0].primary,
+        );
+        assert!(
+            deferred[0].primary.contains("integer"),
+            "expected the primary to name the offending kind, got {}",
             deferred[0].primary,
         );
     }

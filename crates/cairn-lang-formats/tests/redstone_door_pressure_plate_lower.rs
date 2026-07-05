@@ -127,24 +127,32 @@ fn redstone_door_pressure_plate_lines_emit_no_deferred_warnings() {
 fn redstone_door_circuit_line_emits_no_deferred_warning() {
     // `circuit region=floor void=2` is a routing marker for the future
     // logic passes; block-array lowering recognises the shape and emits
-    // no `W_DEFERRED_MEMBER`. The primary text of a `DeferredMember`
-    // diagnostic mentions "circuit" only when the recogniser rejected
-    // the surface shape, so filtering on that substring pins the
-    // "recognised silently" contract without matching the actuator
-    // patch diagnostic that still lingers on this example.
+    // no `W_DEFERRED_MEMBER`. Instead of filtering the diagnostic
+    // primary on `"circuit"` (which would silently pass a regression
+    // where the recogniser routes into `nonneg_int_or_defer`'s primary
+    // — that primary never mentions "circuit"), pin the total
+    // `DeferredMember` count against a baseline of one: the sole
+    // surviving deferred entry is the `door[id=front] opened_by=…`
+    // actuator patch on line 25 of `examples/redstone-door.crn`
+    // (`carve_door` still surfaces the missing `side=` on the
+    // selector-form Member). When the actuator wiring pass lands the
+    // baseline drops to zero.
     let out = lower_redstone_door();
-    let circuit_deferred = out
+    let deferred = out
         .diagnostics
         .iter()
         .filter(|d| matches!(d.code, DiagnosticCode::DeferredMember))
-        .filter(|d| d.primary.contains("circuit"))
         .collect::<Vec<_>>();
+    assert_eq!(
+        deferred.len(),
+        1,
+        "redstone-door should have exactly one deferred member (the actuator patch on `door[id=front]`); got {} — primaries: {:?}",
+        deferred.len(),
+        deferred.iter().map(|d| d.primary.as_str()).collect::<Vec<_>>(),
+    );
     assert!(
-        circuit_deferred.is_empty(),
-        "circuit must lower without deferred members; got {} — first: {}",
-        circuit_deferred.len(),
-        circuit_deferred
-            .first()
-            .map_or("<none>", |d| d.primary.as_str()),
+        deferred[0].primary.contains("side="),
+        "the one surviving deferred entry must be the actuator patch (`missing side=`), got {}",
+        deferred[0].primary,
     );
 }

@@ -68,15 +68,17 @@ and is a separate axis from the Minecraft target version.
   "zero `W_DEFERRED_MEMBER` on `pressure_plate`" contract.
 - `cairn-lang-core::block_array::lower` — `MemberRole::Circuit` gains a
   minimal `recognize_circuit_region` implementation covering the fixture
-  shape `redstone-door.crn` authored: `region=<Ident|Label>` naming the
-  region a later logic pass will look up, and `void=<N>` (positive
-  `u32`) reserving a service-layer height. No voxels are painted —
-  spec/redstone.md §14.5 / §14.8 places dust / repeater / cell tiles
-  on the future `logic_synth → logic_place → logic_route` passes — so
-  the recogniser only guards the surface shape. `region=` absent,
-  `void=` absent, `void=0`, and non-`u32` `void=` still fire
-  `W_DEFERRED_MEMBER` with a targeted primary that names the missing
-  or invalid key.
+  shape `redstone-door.crn` authored: `region=<label>` (an `Ident` or
+  `Str` naming the region a later logic pass will look up) and
+  `void=<N>` (a `u32` service-layer height, `N >= 1`). No voxels are
+  painted — spec/redstone.md §14.5 / §14.8 places dust / repeater /
+  cell tiles on the future `logic_synth → logic_place → logic_route`
+  passes — so the recogniser only guards the surface shape. `region=`
+  absent, `region=` present but of a non-label kind (integer, boolean,
+  size, token, reference, list), `region=""` empty, `void=` absent,
+  `void=0`, and non-`u32` `void=` each fire `W_DEFERRED_MEMBER` with a
+  targeted primary that names the missing / invalid key (the offending
+  kind is included in the region-kind-mismatch primary).
 - `crates/cairn-lang-formats/tests/redstone_door_pressure_plate_lower.rs`
   — new `redstone_door_circuit_line_emits_no_deferred_warning` test
   pins the "zero `W_DEFERRED_MEMBER` on `circuit`" contract on the
@@ -113,14 +115,21 @@ and is a separate axis from the Minecraft target version.
   defers `inner_left` / `inner_right`, so an inner-corner stair carries
   the deferred-warning regression from here.
 - `crates/cairn-lang-cli/tests/cli_compile.rs::c14f_redstone_door_pressure_plate_paints_without_deferring`
-  flips the `circuit` assertion from "still surfaced" to "no longer
-  surfaced" now that `recognize_circuit_region` accepts the marker
-  silently, and inspects the `warning[W_DEFERRED_MEMBER]` primary
-  lines directly so the catalogue note (which lists every supported
-  role by name) does not false-positive the substring check. The
-  remaining `door[id=front] opened_by=…` actuator-patch defer is not
-  asserted here; a dedicated test will land with the actuator wiring
-  pass.
+  drops the `circuit` / `pressure_plate` substring checks and pins the
+  `warning[W_DEFERRED_MEMBER]` primary count against a baseline of one
+  (the actuator patch on line 25's `door[id=front] opened_by=…`
+  Member, which `carve_door` still surfaces as `missing side=`). A
+  substring check would false-positive the catalogue note that follows
+  each warning (the note lists every supported role by name) and
+  false-negative a refactor that stops naming the role in the primary
+  text; the baseline pin catches both.
+- `crates/cairn-lang-formats/tests/redstone_door_pressure_plate_lower.rs::redstone_door_circuit_line_emits_no_deferred_warning`
+  applies the same baseline-pin refactor: it now asserts exactly one
+  `DeferredMember` diagnostic (the actuator patch) rather than
+  filtering primaries for `"circuit"` — the void-overflow path routes
+  through `nonneg_int_or_defer` whose primary never mentions
+  `"circuit"`, so a substring filter would silently pass regressions
+  on that arm.
 
 
 

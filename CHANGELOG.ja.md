@@ -50,13 +50,17 @@
   ため配置は `cairn-lang-formats` の tests/。
 - `cairn-lang-core::block_array::lower` — `MemberRole::Circuit` を
   最小認識 (`recognize_circuit_region`) しました。`redstone-door.crn` の
-  `circuit region=floor void=2` のように、`region=<Ident|Label>` と
-  `void=<N>` (正の `u32`) を持つ回路領域マーカーを surface 形式のみ
+  `circuit region=floor void=2` のように、`region=<label>` (領域名を
+  指す `Ident` または `Str`) と `void=<N>` (`u32` かつ `N >= 1` の
+  service-layer 高さ) を持つ回路領域マーカーを surface 形式のみ
   検査し、voxel は一切置きません (spec/redstone.md §14.5 / §14.8 で
   dust / repeater / cell の配置は `logic_synth → logic_place →
-  logic_route` に委ねられているため)。`region=` 欠落、`void=` 欠落、
-  `void=0`、`void` が `u32` に収まらない — これらは対象キーを指す
-  primary 付きで従来通り `W_DEFERRED_MEMBER` を発火します。
+  logic_route` に委ねられているため)。`region=` 欠落、`region=` が
+  非 label 種別 (integer / boolean / size / token / reference / list)、
+  `region=""` (空文字列)、`void=` 欠落、`void=0`、`void` が `u32` に
+  収まらない — これらは対象キーを指す primary 付きで
+  `W_DEFERRED_MEMBER` を発火します (kind mismatch の primary には
+  該当 kind 名も含みます)。
 - `crates/cairn-lang-formats/tests/redstone_door_pressure_plate_lower.rs`
   — 新規 `redstone_door_circuit_line_emits_no_deferred_warning` テスト。
   `circuit region=floor void=2` 行に対する
@@ -89,13 +93,19 @@
   依然 defer するため、それが deferred-warning の regression キャリアを
   引き継ぎます。
 - `crates/cairn-lang-cli/tests/cli_compile.rs::c14f_redstone_door_pressure_plate_paints_without_deferring`
-  は `circuit` の assertion を「まだ残る」から「もう残らない」に反転し、
-  `warning[W_DEFERRED_MEMBER]` プライマリ行のみを直接調べる形に
-  リファクタしました (defer note が全対応ロール名を列挙する形式に
-  なったため、単純な部分文字列一致では pressure_plate / circuit を
-  誤検知するのを避けるため)。残る `door[id=front] opened_by=…` の
-  actuator patch defer はここではアサートせず、actuator wiring
-  パス着地時に専用テストを追加します。
+  は `circuit` / `pressure_plate` の substring チェックを廃止し、
+  `warning[W_DEFERRED_MEMBER]` プライマリ行数を baseline 1 に pin
+  する形に変更しました (残る 1 件は line 25 の
+  `door[id=front] opened_by=…` に対する `carve_door` の
+  `missing side=`)。substring チェックは catalog note が全ロール名を
+  列挙する形式で false-positive し、また将来 primary から
+  当該ロール名を除くリファクタで false-negative するため、baseline pin
+  で両方を捕捉します。
+- `crates/cairn-lang-formats/tests/redstone_door_pressure_plate_lower.rs::redstone_door_circuit_line_emits_no_deferred_warning`
+  も同じ baseline pin に切り替え、`DeferredMember` の総数を 1 に pin
+  します。`void=` u32 溢れ経路の primary は `nonneg_int_or_defer` 側
+  に属し `"circuit"` を含まないため、substring フィルタでは溢れ経路の
+  regression を検出できないという指摘への対応です。
 
 最初の公開ナンバー付きリリースは **`2026.7.0`** (予定) です。それまでの間、本節はそのリリースに
 向けてリポジトリに積まれた内容を記録します。`cairn-lang-*` クレートはまだ crates.io に公開されて
