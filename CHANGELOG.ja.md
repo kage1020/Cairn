@@ -66,6 +66,27 @@
   `circuit region=floor void=2` 行に対する
   「`W_DEFERRED_MEMBER` 0 件」契約を pin します
   (隣接する `pressure_plate` の 0 件テストと同じ形)。
+- `cairn-lang-core::block_array::lower` — `MemberRole::Door` のうち
+  surface 行が selector 形式 (`door[id=X] opened_by=…`) のものを、
+  phase-bucket に入る前に **アクチュエータパッチ** として認識する
+  ようにしました。新設の `recognize_actuator_patch` ガードが
+  patch 行を `openings` フェーズから外すので、`carve_door` の
+  `side_of` が patch 行に対して「`side=` 欠落」を誤検知しません。
+  レコグナイザは surface 形式のみ (spec/redstone.md §14.2) を検査
+  します: `[selector]` は物理 door を指す `id=<label>` を持たねばならず
+  (level ネストされた door も選択可能)、`opened_by=` は 2 セグメント
+  の `sig.<name>` `DotRef` に解決しなければなりません。`id=` の
+  欠落・非 label 値・未宣言 id、`opened_by=` の欠落、`sig.<name>` 以外の
+  `opened_by=` 値は、それぞれ対象キーを指す primary 付きで
+  `W_DEFERRED_MEMBER` を発火します。未知 id の primary は同じ
+  スコープに宣言されている物理 door の id をすべて列挙するので、
+  near-miss を目視で発見できます。今回対応するのは
+  `door[id=…] opened_by=` のみで、`lamp lit_by=` / `piston powered_by=`
+  / `dispenser fired_by=` は各キーワードが役割テーブルに載る PR で
+  追加予定です。これで `redstone-door.crn` の
+  `door[id=front] opened_by=sig.open` (line 25) が clean に compile
+  され、同 example で最後まで残っていた `W_DEFERRED_MEMBER` が
+  消えました。
 
 ### 変更
 
@@ -106,6 +127,19 @@
   します。`void=` u32 溢れ経路の primary は `nonneg_int_or_defer` 側
   に属し `"circuit"` を含まないため、substring フィルタでは溢れ経路の
   regression を検出できないという指摘への対応です。
+- `crates/cairn-lang-cli/tests/cli_compile.rs::c14f_redstone_door_pressure_plate_paints_without_deferring`
+  を `c14f_redstone_door_compiles_without_deferred_warnings` に改名し、
+  baseline 1 の pin を廃止して
+  `stderr.matches("W_DEFERRED_MEMBER").count() == 0` を pin する形に
+  切り替えました (cottage の `c14` / themed-tower の `c14e` と同じ形)。
+  `gatehouse.nbt` の存在確認は残しているので、lowering が silent に
+  regress したケースも成果物欠落で fail-loud します。
+- `crates/cairn-lang-formats/tests/redstone_door_pressure_plate_lower.rs::redstone_door_circuit_line_emits_no_deferred_warning`
+  を `redstone_door_lowers_without_deferred_warnings` に改名し、
+  「唯一の defer はアクチュエータパッチ」の baseline 1 を廃止して
+  「defer 0 件」に切り替えました。plate paint と circuit region
+  マーカーに加え actuator patch も認識されたので、example 全体が
+  clean に lower されます。
 
 最初の公開ナンバー付きリリースは **`2026.7.0`** (予定) です。それまでの間、本節はそのリリースに
 向けてリポジトリに積まれた内容を記録します。`cairn-lang-*` クレートはまだ crates.io に公開されて

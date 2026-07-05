@@ -1,11 +1,11 @@
-//! Integration coverage for `redstone-door.crn` under `pressure_plate`
-//! and `circuit` lowering. Pins the palette (air, floor material, wall
-//! material, `oak_pressure_plate`), the two plate voxels, and the
-//! invariants that no `W_DEFERRED_MEMBER` fires on either
-//! `pressure_plate` line or on the `circuit region=floor void=2`
-//! routing marker. Once the selector-form `door[id=…] opened_by=…`
-//! actuator patch grows its own lowering pass it will shave the last
-//! remaining deferred entry off the stream this file measures.
+//! Integration coverage for `redstone-door.crn` under `pressure_plate`,
+//! `circuit`, and door actuator-patch lowering. Pins the palette (air,
+//! floor material, wall material, `oak_pressure_plate`), the two plate
+//! voxels, and the invariant that no `W_DEFERRED_MEMBER` fires on any
+//! of the three fixture roles: the `pressure_plate` lines, the
+//! `circuit region=floor void=2` routing marker, or the
+//! `door[id=front] opened_by=sig.open` actuator patch that binds the
+//! physical door on line 15 to a logic-graph signal.
 
 use std::path::PathBuf;
 
@@ -124,38 +124,32 @@ fn redstone_door_pressure_plate_lines_emit_no_deferred_warnings() {
 }
 
 #[test]
-fn redstone_door_circuit_line_emits_no_deferred_warning() {
+fn redstone_door_lowers_without_deferred_warnings() {
     // `circuit region=floor void=2` is a routing marker for the future
-    // logic passes; block-array lowering recognises the shape and emits
-    // no `W_DEFERRED_MEMBER`. Instead of filtering the diagnostic
-    // primary on `"circuit"` (which would silently pass a regression
-    // where the recogniser routes into `nonneg_int_or_defer`'s primary
-    // — that primary never mentions "circuit"), pin the total
-    // `DeferredMember` count against a baseline of one: the sole
-    // surviving deferred entry is the `door[id=front] opened_by=…`
-    // actuator patch on line 25 of `examples/redstone-door.crn`
-    // (`carve_door` still surfaces the missing `side=` on the
-    // selector-form Member). When the actuator wiring pass lands the
-    // baseline drops to zero.
+    // logic passes; `door[id=front] opened_by=sig.open` is an actuator
+    // patch that binds the physical `door id=front` on line 15 to a
+    // logic-graph signal. Block-array lowering recognises both shapes
+    // as surface-guards for the future redstone pipeline — neither
+    // emits voxels, neither fires a `W_DEFERRED_MEMBER`. Combined with
+    // the plate paint tested above, this pins the whole example at
+    // "zero deferred members" so a regression on any of the three
+    // recognisers fails loud. Instead of filtering primaries by a
+    // per-role substring (which would silently pass a regression where
+    // the recogniser routes into `nonneg_int_or_defer`'s primary — that
+    // primary does not name the enclosing role), pin the total count.
     let out = lower_redstone_door();
     let deferred = out
         .diagnostics
         .iter()
         .filter(|d| matches!(d.code, DiagnosticCode::DeferredMember))
         .collect::<Vec<_>>();
-    assert_eq!(
-        deferred.len(),
-        1,
-        "redstone-door should have exactly one deferred member (the actuator patch on `door[id=front]`); got {} — primaries: {:?}",
+    assert!(
+        deferred.is_empty(),
+        "redstone-door should have zero deferred members; got {} — primaries: {:?}",
         deferred.len(),
         deferred
             .iter()
             .map(|d| d.primary.as_str())
             .collect::<Vec<_>>(),
-    );
-    assert!(
-        deferred[0].primary.contains("side="),
-        "the one surviving deferred entry must be the actuator patch (`missing side=`), got {}",
-        deferred[0].primary,
     );
 }

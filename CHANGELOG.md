@@ -84,6 +84,26 @@ and is a separate axis from the Minecraft target version.
   pins the "zero `W_DEFERRED_MEMBER` on `circuit`" contract on the
   `circuit region=floor void=2` line, mirroring the shape of the
   neighbouring pressure_plate zero-defer test.
+- `cairn-lang-core::block_array::lower` — `MemberRole::Door` members
+  whose surface line is the selector form (`door[id=X] opened_by=…`)
+  are now recognised as **actuator patches** before phase-bucketing.
+  A new `recognize_actuator_patch` guard peels these lines off the
+  `openings` phase so `carve_door`'s `side_of` check no longer
+  false-positives "missing `side=`" on a patch line. The recogniser
+  validates the surface shape only (spec/redstone.md §14.2): the
+  `[selector]` must carry an `id=<label>` naming a physical door
+  declared in the same `flatten_members` view (level-nested doors
+  are selectable), and `opened_by=` must resolve to a two-segment
+  `sig.<name>` `DotRef`. Missing / non-label / unknown `id=`,
+  missing `opened_by=`, or an `opened_by=` value that is not a
+  `sig.<name>` reference each fire `W_DEFERRED_MEMBER` with a
+  targeted primary; the unknown-id primary lists every physical
+  door id declared in the scope so the author can spot near-misses.
+  Only `door[id=…] opened_by=` is covered — `lit_by=` / `powered_by=`
+  / `fired_by=` on lamps / pistons / dispensers land with their
+  keywords in a future PR. `redstone-door.crn`'s
+  `door[id=front] opened_by=sig.open` (line 25) now compiles clean;
+  the last surviving `W_DEFERRED_MEMBER` on that example is gone.
 
 ### Changed
 
@@ -130,6 +150,19 @@ and is a separate axis from the Minecraft target version.
   through `nonneg_int_or_defer` whose primary never mentions
   `"circuit"`, so a substring filter would silently pass regressions
   on that arm.
+- `crates/cairn-lang-cli/tests/cli_compile.rs::c14f_redstone_door_pressure_plate_paints_without_deferring`
+  is renamed to `c14f_redstone_door_compiles_without_deferred_warnings`
+  and drops the baseline of one in favour of pinning
+  `stderr.matches("W_DEFERRED_MEMBER").count() == 0`, matching the
+  shape `c14` (cottage) and `c14e` (themed-tower) already use. The
+  `gatehouse.nbt` existence assertion is retained so a regression
+  that turns lowering silent still fails loud on the missing artefact.
+- `crates/cairn-lang-formats/tests/redstone_door_pressure_plate_lower.rs::redstone_door_circuit_line_emits_no_deferred_warning`
+  is renamed to `redstone_door_lowers_without_deferred_warnings` and
+  drops the "exactly one deferred (the actuator patch)" baseline in
+  favour of "zero deferred" — the actuator patch is now recognised
+  alongside the plate paint and the circuit region marker, so the
+  whole example lowers clean.
 
 
 
