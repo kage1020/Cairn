@@ -16,13 +16,16 @@
 //!    whether to fail with `W_DEFERRED_MEMBER`.
 //! 2. [`l_path`] walks a Manhattan L (x-axis first, then z-axis) between
 //!    two world voxels at a constant Y, deduplicating the corner cell so
-//!    every coordinate appears once.
+//!    every coordinate appears once. When the L collides with an
+//!    existing structure, [`route_path`] searches the ground plane for a
+//!    deterministic shortest detour around the obstacle instead.
 //! 3. [`build_walkway_array`] turns the path into a [`BlockArray`] whose
 //!    voxel grid bounds the strip's bounding box, returning the world-
 //!    space origin so the lockfile can pin where the array lives. Cells
 //!    that overlap an existing structure ([`blocked`] in the signature)
 //!    are skipped and counted so the caller can emit one
-//!    `W_WALKWAY_BLOCKED` warning per row.
+//!    `W_WALKWAY_BLOCKED` warning per row — with [`route_path`] in
+//!    front, that only happens when no unobstructed route exists at all.
 //!
 //! The walkway always sits at the two ports' shared Y. 3D path search
 //! (staircases, multi-level walkways) is intentionally out of scope so
@@ -240,6 +243,190 @@ pub fn l_path(from: (i32, i32, i32), to: (i32, i32, i32)) -> Vec<(i32, i32, i32)
         }
     }
     voxels
+}
+
+/// Upper bound on the search rectangle, in cells, that [`route_path`]
+/// is willing to explore. The rectangle is the bounding box of the
+/// blocked cells on the walk plane plus the two endpoints, inflated by
+/// one cell — for every shipping example that is a few hundred cells.
+/// The cap only exists so a pathological source (two ports megametres
+/// apart with a pebble between them) degrades to the skip-and-warn
+/// fallback instead of allocating the world.
+const ROUTE_AREA_CAP: u64 = 4_000_000;
+
+/// Direction of travel between two 4-neighbour ground-plane cells.
+/// Carried in the search state so the cost function can count turns:
+/// among equal-length routes the fewest-turns one wins, which keeps
+/// the laid strip looking like a hand-drawn path (long straight runs)
+/// instead of a staircase zigzag.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+enum StepDir {
+    PosX,
+    NegX,
+    PosZ,
+    NegZ,
+}
+
+impl StepDir {
+    fn delta(self) -> (i32, i32) {
+        match self {
+            Self::PosX => (1, 0),
+            Self::NegX => (-1, 0),
+            Self::PosZ => (0, 1),
+            Self::NegZ => (0, -1),
+        }
+    }
+}
+
+/// Fixed neighbour expansion order. Part of the determinism contract:
+/// together with the monotonic queue sequence number it fully orders
+/// equal-cost candidates, so the same source always lowers to the same
+/// strip and the lockfile stays reproducible.
+const STEP_DIRS: [StepDir; 4] = [StepDir::PosX, StepDir::NegX, StepDir::PosZ, StepDir::NegZ];
+
+/// Deterministic shortest detour between two world voxels at a shared
+/// Y, avoiding `blocked` cells. The fallback [`l_path`] cannot route
+/// around obstacles; this search can, so `connect` rows whose straight
+/// L would cut through a placement floor still lay an unbroken strip.
+///
+/// The search is Dijkstra over `(cell, incoming direction)` states with
+/// the lexicographic cost `(path length, turn count)` — shortest first,
+/// and among equal-length routes the one with the fewest direction
+/// changes. Ties beyond that are broken by the fixed [`STEP_DIRS`]
+/// expansion order and a monotonic queue sequence number, never by hash
+/// iteration order, so the result is fully deterministic (a lockfile
+/// requirement).
+///
+/// The searchable area is the bounding rectangle of the blocked cells
+/// *on the walk plane* (`y == from.1`) plus both endpoints, inflated by
+/// one cell so a route can always hug the outside of the outermost
+/// obstacle. Blocked cells on other Y planes neither obstruct nor
+/// inflate the search.
+///
+/// Returns the cell sequence from `from` to `to` inclusive, or `None`
+/// when:
+///
+/// * either endpoint is itself a blocked cell (a port buried under
+///   another placement's floor),
+/// * no unobstructed route exists inside the search rectangle (the
+///   target is fully enclosed),
+/// * the search rectangle exceeds [`ROUTE_AREA_CAP`] cells.
+///
+/// The caller is expected to fall back to [`l_path`] with skipped
+/// cells and a `W_WALKWAY_BLOCKED` warning on `None`.
+#[must_use]
+pub fn route_path<S: BuildHasher>(
+    from: (i32, i32, i32),
+    to: (i32, i32, i32),
+    blocked: &HashSet<(i32, i32, i32), S>,
+) -> Option<Vec<(i32, i32, i32)>> {
+    use std::cmp::Reverse;
+    use std::collections::{BinaryHeap, HashMap};
+
+    /// Ground-plane `(x, z)` coordinate — the Y is fixed for the whole
+    /// search.
+    type Cell = (i32, i32);
+
+    let y = from.1;
+    if blocked.contains(&from) || blocked.contains(&to) {
+        return None;
+    }
+    if from == to {
+        return Some(vec![from]);
+    }
+
+    // Search rectangle: bbox(blocked on this plane ∪ endpoints) + 1.
+    let mut min_x = from.0.min(to.0);
+    let mut max_x = from.0.max(to.0);
+    let mut min_z = from.2.min(to.2);
+    let mut max_z = from.2.max(to.2);
+    for &(x, by, z) in blocked {
+        if by != y {
+            continue;
+        }
+        min_x = min_x.min(x);
+        max_x = max_x.max(x);
+        min_z = min_z.min(z);
+        max_z = max_z.max(z);
+    }
+    let min_x = min_x.checked_sub(1)?;
+    let max_x = max_x.checked_add(1)?;
+    let min_z = min_z.checked_sub(1)?;
+    let max_z = max_z.checked_add(1)?;
+    let span_x = u64::try_from(i64::from(max_x) - i64::from(min_x) + 1).ok()?;
+    let span_z = u64::try_from(i64::from(max_z) - i64::from(min_z) + 1).ok()?;
+    if span_x.checked_mul(span_z)? > ROUTE_AREA_CAP {
+        return None;
+    }
+    let in_bounds = |(x, z): (i32, i32)| x >= min_x && x <= max_x && z >= min_z && z <= max_z;
+
+    // Dijkstra over (cell, dir). `best` keeps the smallest (len, turns)
+    // seen per state; on an exact cost tie the first-queued candidate
+    // wins (never relaxed on equality), which pins the tie-break to the
+    // deterministic queue order below.
+    let mut best: HashMap<(Cell, StepDir), (u32, u32)> = HashMap::new();
+    let mut parent: HashMap<(Cell, StepDir), (Cell, StepDir)> = HashMap::new();
+    // The heap orders by (len, turns, seq); `states[seq]` carries the
+    // matching (cell, dir) payload so the heap entries stay `Copy` and
+    // totally ordered without a custom `Ord` impl.
+    let mut heap: BinaryHeap<Reverse<(u32, u32, u32)>> = BinaryHeap::new();
+    let mut states: Vec<(Cell, StepDir)> = Vec::new();
+
+    let start = (from.0, from.2);
+    let goal = (to.0, to.2);
+    for dir in STEP_DIRS {
+        let (dx, dz) = dir.delta();
+        let cell = (start.0 + dx, start.1 + dz);
+        if !in_bounds(cell) || blocked.contains(&(cell.0, y, cell.1)) {
+            continue;
+        }
+        // First step off the port costs no turn regardless of heading.
+        let cost = (1, 0);
+        best.insert((cell, dir), cost);
+        let seq = u32::try_from(states.len()).ok()?;
+        states.push((cell, dir));
+        heap.push(Reverse((cost.0, cost.1, seq)));
+    }
+
+    let mut goal_state: Option<(Cell, StepDir)> = None;
+    while let Some(Reverse((len, turns, seq))) = heap.pop() {
+        let (cell, dir) = states[usize::try_from(seq).ok()?];
+        // Stale heap entry: a cheaper cost for this state was queued
+        // after this one was pushed.
+        if best.get(&(cell, dir)) != Some(&(len, turns)) {
+            continue;
+        }
+        if cell == goal {
+            goal_state = Some((cell, dir));
+            break;
+        }
+        for next_dir in STEP_DIRS {
+            let (dx, dz) = next_dir.delta();
+            let next = (cell.0 + dx, cell.1 + dz);
+            if !in_bounds(next) || blocked.contains(&(next.0, y, next.1)) {
+                continue;
+            }
+            let next_cost = (len.checked_add(1)?, turns + u32::from(next_dir != dir));
+            let key = (next, next_dir);
+            if best.get(&key).is_none_or(|&c| next_cost < c) {
+                best.insert(key, next_cost);
+                parent.insert(key, (cell, dir));
+                let next_seq = u32::try_from(states.len()).ok()?;
+                states.push(key);
+                heap.push(Reverse((next_cost.0, next_cost.1, next_seq)));
+            }
+        }
+    }
+
+    let mut state = goal_state?;
+    let mut cells = vec![(state.0.0, y, state.0.1)];
+    while let Some(&prev) = parent.get(&state) {
+        cells.push((prev.0.0, y, prev.0.1));
+        state = prev;
+    }
+    cells.push(from);
+    cells.reverse();
+    Some(cells)
 }
 
 /// Build a [`BlockArray`] from a path of world voxels and a palette
@@ -510,6 +697,143 @@ mod tests {
 
     fn pid(name: &str) -> PortId {
         PortId::new(name).expect("valid port id")
+    }
+
+    /// Manhattan distance between two ground-plane cells — the minimal
+    /// possible number of steps, so `route_path` output length can be
+    /// asserted against `manhattan + 1` cells when no detour is needed.
+    fn manhattan(a: (i32, i32, i32), b: (i32, i32, i32)) -> usize {
+        usize::try_from((a.0 - b.0).abs() + (a.2 - b.2).abs()).expect("non-negative")
+    }
+
+    /// Structural invariants every successful route must satisfy: the
+    /// endpoints are the requested ports, consecutive cells are
+    /// 4-neighbour adjacent at a constant Y, no cell repeats, and no
+    /// cell collides with `blocked`.
+    fn assert_route_shape(
+        path: &[(i32, i32, i32)],
+        from: (i32, i32, i32),
+        to: (i32, i32, i32),
+        blocked: &HashSet<(i32, i32, i32)>,
+    ) {
+        assert_eq!(path.first(), Some(&from), "route must start at `from`");
+        assert_eq!(path.last(), Some(&to), "route must end at `to`");
+        for pair in path.windows(2) {
+            let (a, b) = (pair[0], pair[1]);
+            assert_eq!(a.1, b.1, "route must stay at a constant Y: {a:?} -> {b:?}");
+            assert_eq!(
+                (a.0 - b.0).abs() + (a.2 - b.2).abs(),
+                1,
+                "route cells must be 4-neighbour adjacent: {a:?} -> {b:?}",
+            );
+        }
+        let mut seen = HashSet::new();
+        for cell in path {
+            assert!(seen.insert(*cell), "route revisits cell {cell:?}");
+            assert!(
+                !blocked.contains(cell),
+                "route crosses blocked cell {cell:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn route_path_unobstructed_is_shortest() {
+        // With nothing in the way the route must not detour: the cell
+        // count is exactly the Manhattan distance plus the start cell.
+        let blocked: HashSet<(i32, i32, i32)> = HashSet::new();
+        let (from, to) = ((0, 0, 0), (3, 0, 2));
+        let path = route_path(from, to, &blocked).expect("open plane routes");
+        assert_route_shape(&path, from, to, &blocked);
+        assert_eq!(path.len(), manhattan(from, to) + 1);
+    }
+
+    #[test]
+    fn route_path_detours_around_a_wall() {
+        // A solid wall of blocked cells across the straight line forces
+        // the route around one end. Wall at x=2, z∈[-2, 2]; endpoints on
+        // either side at z=0. Shortest detour: up/down to z=±3 and back
+        // → 4 + manhattan extra steps.
+        let mut blocked: HashSet<(i32, i32, i32)> = HashSet::new();
+        for z in -2..=2 {
+            blocked.insert((2, 0, z));
+        }
+        let (from, to) = ((0, 0, 0), (4, 0, 0));
+        let path = route_path(from, to, &blocked).expect("detour exists");
+        assert_route_shape(&path, from, to, &blocked);
+        // Manhattan is 4; rounding the wall costs 3 extra cells each way
+        // (to z=3 or z=-3 and back) → 4 + 6 steps, 11 cells.
+        assert_eq!(path.len(), manhattan(from, to) + 6 + 1);
+    }
+
+    #[test]
+    fn route_path_is_deterministic() {
+        // Two runs over the same input must produce the identical cell
+        // sequence — the lockfile pins walkway origin/dims, so a
+        // hash-order-dependent tie-break would break reproducible builds.
+        let mut blocked: HashSet<(i32, i32, i32)> = HashSet::new();
+        for z in -2..=2 {
+            blocked.insert((2, 0, z));
+        }
+        let a = route_path((0, 0, 0), (4, 0, 0), &blocked).expect("routes");
+        let b = route_path((0, 0, 0), (4, 0, 0), &blocked).expect("routes");
+        assert_eq!(a, b);
+    }
+
+    #[test]
+    fn route_path_returns_none_when_endpoint_is_blocked() {
+        // A port buried under another placement's floor cannot anchor
+        // a route; the caller falls back to the skip-and-warn lay.
+        let mut blocked: HashSet<(i32, i32, i32)> = HashSet::new();
+        blocked.insert((0, 0, 0));
+        blocked.insert((9, 0, 9));
+        assert!(route_path((0, 0, 0), (5, 0, 5), &blocked).is_none());
+        assert!(route_path((5, 0, 5), (9, 0, 9), &blocked).is_none());
+    }
+
+    #[test]
+    fn route_path_returns_none_when_target_is_enclosed() {
+        // A full ring of blocked cells around `to` leaves no route at
+        // all — the search must terminate with `None` rather than spin.
+        let mut blocked: HashSet<(i32, i32, i32)> = HashSet::new();
+        for d in -1..=1 {
+            blocked.insert((5 + d, 0, 4));
+            blocked.insert((5 + d, 0, 6));
+            blocked.insert((4, 0, 5 + d));
+            blocked.insert((6, 0, 5 + d));
+        }
+        assert!(route_path((0, 0, 0), (5, 0, 5), &blocked).is_none());
+    }
+
+    #[test]
+    fn route_path_same_endpoints_yields_single_cell() {
+        let blocked: HashSet<(i32, i32, i32)> = HashSet::new();
+        assert_eq!(
+            route_path((5, 0, 5), (5, 0, 5), &blocked),
+            Some(vec![(5, 0, 5)]),
+        );
+    }
+
+    #[test]
+    fn route_path_ignores_blocked_cells_on_other_y_planes() {
+        // `blocked` is a world-space 3D set; cells at a different Y must
+        // neither obstruct the route nor inflate the search bounds.
+        let mut blocked: HashSet<(i32, i32, i32)> = HashSet::new();
+        for z in -2..=2 {
+            blocked.insert((2, 7, z));
+        }
+        let (from, to) = ((0, 0, 0), (4, 0, 0));
+        let path = route_path(from, to, &blocked).expect("open at y=0");
+        assert_eq!(path.len(), manhattan(from, to) + 1);
+    }
+
+    #[test]
+    fn route_path_gives_up_past_the_area_cap() {
+        // Endpoints so far apart that the bounding rectangle exceeds the
+        // search cap must return `None` instead of allocating the world.
+        let mut blocked: HashSet<(i32, i32, i32)> = HashSet::new();
+        blocked.insert((1, 0, 0));
+        assert!(route_path((0, 0, 0), (10_000_000, 0, 10_000_000), &blocked).is_none());
     }
 
     #[test]

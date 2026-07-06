@@ -770,9 +770,9 @@ fn c21_village_lowers_connect_rows_into_walkway_artifacts() {
     // Port model and walkway voxelisation are wired through end-to-end, so
     // the two `connect` rows in village.crn must lower into per-walkway
     // `.nbt` artifacts (one per row) instead of degrading to
-    // W_DEFERRED_MEMBER. The exit must stay 0 — any W_WALKWAY_BLOCKED
-    // warnings that fall out of the cottage overlap are advisory,
-    // mirroring c14b's warnings-do-not-fail-the-build rule.
+    // W_DEFERRED_MEMBER. The home1↔home3 row detours around home1's
+    // floor, so the whole example must also compile without a single
+    // W_WALKWAY_BLOCKED — village is a warning-free example now.
     let (_tmp_src, src) = example_in_tempdir("village.crn");
     let out_dir = TempDir::new().expect("out tempdir");
     let result = run_compile(&[
@@ -788,6 +788,11 @@ fn c21_village_lowers_connect_rows_into_walkway_artifacts() {
         stderr.matches("W_DEFERRED_MEMBER").count(),
         0,
         "connect rows must no longer emit W_DEFERRED_MEMBER; stderr={stderr}",
+    );
+    assert_eq!(
+        stderr.matches("W_WALKWAY_BLOCKED").count(),
+        0,
+        "the home1↔home3 walkway must route around home1 instead of warning; stderr={stderr}",
     );
     // The two `connect` rows land as `hamlet_walkway_*.nbt` files
     // alongside the three placement files.

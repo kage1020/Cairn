@@ -108,6 +108,23 @@ and is a separate axis from the Minecraft target version.
   `door[id=front] opened_by=sig.open` actuator-patch line now compiles
   clean; the last surviving `W_DEFERRED_MEMBER` on that example is
   gone.
+- `cairn-lang-core::block_array::walkway` — new `route_path` ground-plane
+  router for `connect` walkways. When the straight Manhattan L between
+  two ports would cross a placement floor, `lower_connects` now searches
+  for a detour instead of skipping the colliding cells: Dijkstra over
+  `(cell, direction)` states with the lexicographic cost
+  `(path length, turn count)`, so the strip takes the shortest route
+  around the obstacle and, among equal-length routes, the one with the
+  fewest turns. Ties are broken by a fixed expansion order and a
+  monotonic queue sequence — never by hash iteration order — so the
+  same source always lays the same strip and the lockfile stays
+  reproducible. The search area is the bounding box of the blocked
+  cells on the walk plane plus both endpoints, inflated by one cell,
+  with a 4-million-cell cap that degrades pathological inputs to the
+  skip-and-warn fallback. `village.crn`'s `home1.entry ↔ home3.entry`
+  row — whose L used to cut a 7-cell hole through home1's floor —
+  now detours around home1's east face and the example compiles with
+  zero warnings.
 
 ### Changed
 
@@ -167,6 +184,26 @@ and is a separate axis from the Minecraft target version.
   favour of "zero deferred" — the actuator patch is now recognised
   alongside the plate paint and the circuit region marker, so the
   whole example lowers clean.
+- `W_WALKWAY_BLOCKED` now only fires when the detour search finds **no**
+  unobstructed route between the two ports (a port buried under another
+  placement's floor, a fully enclosed target, or the area cap); the row
+  then falls back to the straight L with the colliding cells skipped,
+  exactly as before, so the `data: { kind: "walkway_blocked",
+  skipped: N }` payload and the "skipped N cells" primary text are
+  unchanged. The note now says no route exists instead of suggesting
+  the gap alone is too narrow.
+- `crates/cairn-lang-core/src/block_array/lower.rs` — the
+  `walkway_blocked_cells_skip_with_w_walkway_blocked_count` fixture
+  gains a third placement whose floor buries the `from` port (the old
+  two-place fixture now routes around `b` cleanly and moved to the new
+  `walkway_routes_around_obstructed_l_path_without_warning` /
+  `walkway_detour_is_deterministic_across_lowerings` tests).
+- `crates/cairn-lang-core/tests/village_lower.rs` — the home1↔home3
+  walkway pins move from the straight strip (`footprint 1×15`) to the
+  detour around home1's east face (`footprint 6×15`, still anchored at
+  home3's front port), and a new
+  `village_emits_zero_walkway_blocked_warnings` test pins the
+  "village compiles warning-free, 25 unbroken gravel cells" contract.
 
 
 

@@ -107,11 +107,16 @@ single port at the primary `offset` side (the mirrored cut still appears in the 
 
 **Path.** The walkway runs as a Manhattan L (x-axis leg, then z-axis leg) at the two ports' shared
 Y — 3D path search (staircases, multi-level walkways) is intentionally out of scope so the port
-surface can land in one piece. Cells that overlap an existing structure floor are skipped and the
-row earns one `W_WALKWAY_BLOCKED` warning so the author can widen the placement gap. The warning
-also carries a machine-readable payload (`data: { kind: "walkway_blocked", skipped: N }`) in the
-`--format json` output so LSP quick-fixes and CI annotators can read the skip count without
-re-parsing the human-readable message — see §11.2 of `spec/lint.md`.
+surface can land in one piece. When the L would cross an existing structure floor, the compiler
+searches the ground plane for a detour instead: the shortest route around the obstacle, and among
+equal-length routes the one with the fewest turns, with deterministic tie-breaking so the same
+source always lays the same strip (a lockfile requirement). Only when no unobstructed route exists
+at all — a port buried under another placement's floor, or a fully enclosed target — does the row
+fall back to the straight L with the colliding cells skipped, earning one `W_WALKWAY_BLOCKED`
+warning so the author can widen the placement gap. The warning also carries a machine-readable
+payload (`data: { kind: "walkway_blocked", skipped: N }`) in the `--format json` output so LSP
+quick-fixes and CI annotators can read the skip count without re-parsing the human-readable
+message — see §11.2 of `spec/lint.md`.
 
 **Material.** The `path=@TOKEN` value lifts through the same `mat_slot=` pipeline used for member
 materials — concrete tokens like `@gravel` work without a registry pack; abstract tokens like
@@ -136,8 +141,9 @@ re-running the resolver.
 - `E_MISSING_PATH_MATERIAL` — the row omits `path=`; walkway lowering has nothing to lay.
 - `E_UNRESOLVED_PLACE_REF` — the head place id (left of the dot) does not name a prior place in
   this site, shared with §9.3.3.
-- `W_WALKWAY_BLOCKED` — the L-shaped path crossed an existing structure floor; the colliding
-  cells are skipped and the rest of the strip still lays. JSON payload exposes the skip count as
-  `data.skipped` so tooling does not need to re-parse the message text.
+- `W_WALKWAY_BLOCKED` — no unobstructed route exists between the two ports (the detour search
+  found the near port buried or the far port enclosed); the row falls back to the straight L with
+  the colliding cells skipped, and the rest of the strip still lays. JSON payload exposes the skip
+  count as `data.skipped` so tooling does not need to re-parse the message text.
 - `W_DUPLICATE_WALKWAY` — the same `(from, to)` port pair has already been laid in this site;
   the duplicate row is dropped.

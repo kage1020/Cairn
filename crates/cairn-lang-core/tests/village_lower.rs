@@ -92,6 +92,13 @@ fn village_emits_three_placements_and_two_walkways() {
                 );
             }
             ("home1", "home3") => {
+                // A straight z run from (5, 8) to (5, -6) would cut
+                // through home1's floor, so the router detours around
+                // home1's east face: east along z=8 to x=10 (one cell
+                // past the floor's x∈[1,9]), north to z=-6, back west
+                // to the port at x=5. The east side wins the
+                // equal-length tie against the west side because the
+                // router expands +x first.
                 assert_eq!(
                     walkway.origin,
                     (5, 0, -6),
@@ -99,8 +106,8 @@ fn village_emits_three_placements_and_two_walkways() {
                 );
                 assert_eq!(
                     walkway.footprint,
-                    Footprint { x: 1, z: 15 },
-                    "home1↔home3 walkway runs purely along z",
+                    Footprint { x: 6, z: 15 },
+                    "home1↔home3 walkway detours around home1's east face",
                 );
             }
             (from, to) => panic!("unexpected walkway pair {from}↔{to}"),
@@ -133,6 +140,38 @@ fn village_walkway_block_arrays_share_keys_with_walkways_map() {
             ba.palette.entries.iter().map(|s| &s.id).collect::<Vec<_>>(),
         );
     }
+}
+
+#[test]
+fn village_emits_zero_walkway_blocked_warnings() {
+    // The home1↔home3 row used to warn `W_WALKWAY_BLOCKED` (its straight
+    // L cut through home1's floor and shipped a strip with a 7-cell
+    // hole). With the ground-plane router the walkway detours around the
+    // building instead, so the whole example must lower warning-free and
+    // the laid strip must be unbroken.
+    let out = lower_village();
+    let blocked: Vec<_> = out
+        .diagnostics
+        .iter()
+        .filter(|d| d.code == DiagnosticCode::WalkwayBlocked)
+        .collect();
+    assert!(
+        blocked.is_empty(),
+        "village.crn must route every walkway without collisions, got {blocked:#?}",
+    );
+    // The detour is a shortest route: Manhattan distance 14 plus 5 cells
+    // out to x=10 and 5 cells back → 24 steps, 25 gravel cells.
+    let ba = out
+        .structures
+        .get("walkway::hamlet::home1.entry__home3.entry")
+        .expect("home1↔home3 walkway block array present");
+    let gravel_count = (0..ba.dims.volume())
+        .filter(|&i| ba.palette.entries[usize::from(ba.voxels[i].0)].id == "minecraft:gravel")
+        .count();
+    assert_eq!(
+        gravel_count, 25,
+        "detour must lay an unbroken 25-cell gravel strip",
+    );
 }
 
 #[test]

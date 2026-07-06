@@ -89,6 +89,20 @@
   `redstone-door.crn` のアクチュエータパッチ行
   `door[id=front] opened_by=sig.open` が clean に compile され、
   同 example で最後まで残っていた `W_DEFERRED_MEMBER` が消えました。
+- `cairn-lang-core::block_array::walkway` — `connect` walkway 用の
+  地面平面ルーター `route_path` を新設しました。2 ポート間の直進
+  Manhattan L が placement の床を横切る場合、`lower_connects` は
+  衝突セルをスキップする代わりに迂回路を探索します:
+  `(セル, 進行方向)` を状態とする Dijkstra で、コストは辞書式
+  `(経路長, 曲がり回数)` — 障害物を回る最短経路のうち曲がりが最少の
+  ものを選びます。タイブレークは固定の展開順と単調増加のキュー連番で
+  決まり、hash の反復順には依存しないため、同じソースは常に同じ
+  strip を敷設し lockfile の再現性が保たれます。探索領域は歩行平面上の
+  blocked セルと両端点の bounding box を 1 セル膨張した矩形で、
+  400 万セルの上限を超える病的な入力は skip-and-warn フォールバックに
+  degrade します。これまで home1 の床に 7 セルの穴を開けていた
+  `village.crn` の `home1.entry ↔ home3.entry` 行は home1 の東面を
+  迂回するようになり、example 全体が警告ゼロで compile されます。
 
 ### 変更
 
@@ -142,6 +156,27 @@
   「defer 0 件」に切り替えました。plate paint と circuit region
   マーカーに加え actuator patch も認識されたので、example 全体が
   clean に lower されます。
+- `W_WALKWAY_BLOCKED` は、迂回探索が 2 ポート間に遮られない経路を
+  **一つも** 見つけられなかった場合 (ポートが他 placement の床に
+  埋まっている、到達先が完全に囲まれている、面積上限超過) にのみ
+  発火するようになりました。その場合は従来どおり直進 L に
+  フォールバックして衝突セルをスキップするため、
+  `data: { kind: "walkway_blocked", skipped: N }` ペイロードと
+  "skipped N cells" のプライマリ文言は不変です。note は「gap を
+  広げる」だけでなく「経路が存在しない」ことを伝える文言になりました。
+- `crates/cairn-lang-core/src/block_array/lower.rs` —
+  `walkway_blocked_cells_skip_with_w_walkway_blocked_count` の fixture
+  に `from` ポートを床で埋める 3 つ目の placement を追加しました
+  (旧 2-place fixture は迂回可能になったため、新設の
+  `walkway_routes_around_obstructed_l_path_without_warning` /
+  `walkway_detour_is_deterministic_across_lowerings` テストに
+  移りました)。
+- `crates/cairn-lang-core/tests/village_lower.rs` — home1↔home3
+  walkway の pin を直進 strip (`footprint 1×15`) から home1 東面の
+  迂回路 (`footprint 6×15`、anchor は home3 の front ポートのまま) に
+  更新し、「village が警告ゼロで compile され、25 セルの途切れない
+  gravel strip が敷かれる」契約を pin する
+  `village_emits_zero_walkway_blocked_warnings` テストを新設しました。
 
 最初の公開ナンバー付きリリースは **`2026.7.0`** (予定) です。それまでの間、本節はそのリリースに
 向けてリポジトリに積まれた内容を記録します。`cairn-lang-*` クレートはまだ crates.io に公開されて
