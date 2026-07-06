@@ -786,7 +786,18 @@ fn lower_body_to_block_array<'a>(
     let mut massing: Vec<(u32, &Member)> = Vec::new();
     let mut envelope: Vec<(u32, &Member)> = Vec::new();
     let mut openings: Vec<(u32, &Member)> = Vec::new();
-    for (y_offset, member) in flattened {
+    for &(y_offset, member) in &flattened {
+        // Actuator patches (`door[id=X] opened_by=sig.Y`) are metadata
+        // overlays on an already-declared physical door — they carry
+        // neither `side=` nor `at=` and must not enter the openings
+        // phase, or `carve_door`'s `side_of` guard would false-positive
+        // "missing side=". The recogniser handles the surface shape
+        // here; the wired signal graph is threaded on by the future
+        // redstone lowering pipeline (spec/redstone.md §14.2).
+        if is_actuator_patch(member) {
+            recognize_actuator_patch(member, &flattened, diagnostics);
+            continue;
+        }
         match member_phase(&member.role) {
             Some(Phase::Massing) => massing.push((y_offset, member)),
             Some(Phase::Envelope) => envelope.push((y_offset, member)),
@@ -2321,6 +2332,238 @@ fn recognize_circuit_region(member: &Member, diagnostics: &mut Vec<Diagnostic>) 
     }
 }
 
+/// The only selector attribute an actuator patch recognises today.
+const ACTUATOR_PATCH_SELECTOR_KEYS: &[&str] = &["id"];
+
+/// The only intent-state key an actuator patch recognises today. Extending
+/// this list to `lit_by` / `powered_by` / `fired_by` requires landing the
+/// matching keyword in the role table first (spec/redstone.md §14.2).
+const ACTUATOR_PATCH_INTENT_KEYS: &[&str] = &["opened_by"];
+
+/// A door member is an **actuator patch** when its surface line uses the
+/// selector form (`door[…] …`). The bracketed selector references an
+/// already-declared physical door by `id=`; its role in block-array
+/// lowering is pure metadata (an `opened_by=` signal binding for the
+/// future redstone lowering pipeline, `spec/redstone.md` §14.2). Routing
+/// patch lines through `carve_door` would false-positive `side_of`'s
+/// "missing `side=`" guard, so `lower_body_to_block_array` peels them off
+/// before the phase-bucketing match. Whether the patch also carries
+/// stray `side=` / `at=` keys is checked inside the recogniser, not
+/// here, so the classifier stays a one-liner and the diagnostic path
+/// owns key-allowlist enforcement.
+fn is_actuator_patch(member: &Member) -> bool {
+    matches!(member.role, MemberRole::Door) && member.selector.is_some()
+}
+
+/// Recognise a `door[id=X] opened_by=sig.Y` actuator patch without
+/// emitting voxels.
+///
+/// The block-array pass owns the *surface shape* of the patch — the
+/// selector allowlist, the `opened_by=` presence, and the `sig.<name>`
+/// signal-reference well-formedness — so a malformed patch fails loud
+/// with a targeted `W_DEFERRED_MEMBER` while a well-formed one stays
+/// quiet. Threading the signal binding onto the future logic pipeline
+/// happens in the redstone lowering pass that consumes the intent IR
+/// directly (mirroring how `recognize_circuit_region` leaves its
+/// recognised region name off the block array).
+///
+/// The surface contract accepted today:
+/// - The `[selector]` must contain an `id=<label>` — an `Ident` or
+///   `Str` value. Other value kinds defer with a kind-mismatch primary.
+/// - The selector's only recognised key is `id=` (see
+///   [`ACTUATOR_PATCH_SELECTOR_KEYS`]). Any other selector attribute
+///   defers with a primary that names the unknown key so a stray
+///   `class=main` or `foo=bar` does not slip through silently.
+/// - The label must match exactly one physical `door` member in the
+///   same `flatten_members` view (so a door authored under `level y=N`
+///   is still selectable). Absence defers with a primary that lists
+///   the ids that ARE declared; ambiguity (the same `id=` declared in
+///   two scopes the flattener merges) defers separately with an
+///   "ambiguous" primary so the author is never silently rebinding the
+///   first hit.
+/// - `opened_by=` must be present. `spec/redstone.md` §14.2 also
+///   defines `lit_by=` on lamps, `powered_by=` on pistons, and
+///   `fired_by=` on dispensers, but those keywords are not yet in the
+///   role table — door + `opened_by` is the only shape
+///   `redstone-door.crn` exercises today. Any other intent-state key
+///   defers with a primary that names the offending key so a future
+///   `powered_by=` implementation cannot silently change the meaning
+///   of existing source (see [`ACTUATOR_PATCH_INTENT_KEYS`]).
+/// - The `opened_by=` value must be a two-segment `sig.<name>`
+///   `DotRef`. Non-`DotRef` values defer with a "got <kind>" primary;
+///   a `DotRef` whose head is not `sig` or whose segment count is not
+///   2 defers with the offending path rendered verbatim.
+///
+/// The signal *name* on the RHS of `sig.` is intentionally not
+/// validated against a namespace here — the signal graph does not
+/// exist at block-array lowering time, so a `sig.does_not_exist`
+/// binding surfaces later in the redstone lowering pass when the
+/// graph is walked. The surface recogniser only owns the syntactic
+/// shape.
+///
+/// `siblings` is the same flattened `(y_offset, &Member)` list the
+/// phase-bucketing loop iterates over. Passed as a slice so the
+/// recogniser can look up physical doors without a second walk of the
+/// intent IR.
+#[allow(clippy::too_many_lines)] // one linear surface-guard chain reads better than 8 tiny helpers
+fn recognize_actuator_patch(
+    member: &Member,
+    siblings: &[(u32, &Member)],
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    // `is_actuator_patch` guarantees `selector.is_some()` at the call
+    // site. Pinning the invariant with a `debug_assert!` fails loud in
+    // tests if a future refactor of the classifier drops the selector
+    // check without also revisiting this recogniser; the `let-else`
+    // below then keeps release builds usable rather than panicking.
+    debug_assert!(
+        member.selector.is_some(),
+        "recognize_actuator_patch called on a member without a selector; \
+         is_actuator_patch invariant broken",
+    );
+    let Some(selector) = member.selector.as_ref() else {
+        return;
+    };
+    let unknown_selector_keys: Vec<&str> = selector
+        .keys()
+        .map(String::as_str)
+        .filter(|k| !ACTUATOR_PATCH_SELECTOR_KEYS.contains(k))
+        .collect();
+    if !unknown_selector_keys.is_empty() {
+        diagnostics.push(diag_deferred_member_reason(
+            member,
+            &format!(
+                "door actuator patch `[selector]` accepts only `id=<label>`; unknown attribute(s): {}",
+                unknown_selector_keys.join(", "),
+            ),
+        ));
+        return;
+    }
+    let Some(id_value) = selector.get("id") else {
+        diagnostics.push(diag_deferred_member_reason(
+            member,
+            "door actuator patch requires an `[id=<label>]` selector naming the physical door to bind against",
+        ));
+        return;
+    };
+    let Some(id_label) = id_value.value.as_label_str() else {
+        diagnostics.push(diag_deferred_member_reason(
+            member,
+            &format!(
+                "door actuator patch `[id=]` selector must be an identifier or string label, got {}",
+                id_value.value.kind_name(),
+            ),
+        ));
+        return;
+    };
+    // Walk the flattened view to gather every physical door's id along
+    // with an occurrence count. A physical door is `MemberRole::Door`
+    // with no selector of its own — a selector-bearing door would be
+    // another patch, not a target. Source order is preserved for the
+    // "known door ids" listing so the rendering is stable across runs.
+    // The occurrence count catches the ambiguous shape a top-level
+    // `door id=X` plus a `level y=N door id=X` produces after
+    // flattening — `duplicate` runs per-scope and does not flag it, so
+    // a silent "first hit wins" would let the patch bind to whichever
+    // door happened to sort first.
+    let mut physical_door_ids: Vec<(&str, u32)> = Vec::new();
+    for (_, m) in siblings {
+        if !matches!(m.role, MemberRole::Door) || m.selector.is_some() {
+            continue;
+        }
+        let Some(door_id) = m.id.as_deref() else {
+            continue;
+        };
+        if let Some((_, count)) = physical_door_ids.iter_mut().find(|(id, _)| *id == door_id) {
+            *count = count.saturating_add(1);
+        } else {
+            physical_door_ids.push((door_id, 1));
+        }
+    }
+    let selected = physical_door_ids
+        .iter()
+        .find(|(id, _)| *id == id_label)
+        .copied();
+    match selected {
+        Some((_, count)) if count >= 2 => {
+            diagnostics.push(diag_deferred_member_reason(
+                member,
+                &format!(
+                    "door actuator patch selects `id={id_label}` but the same id is declared on {count} physical doors in this scope; disambiguate the target before binding an actuator signal",
+                ),
+            ));
+            return;
+        }
+        Some(_) => {}
+        None => {
+            let known_list = if physical_door_ids.is_empty() {
+                "no physical door members are declared in this scope".to_owned()
+            } else {
+                let ids: Vec<&str> = physical_door_ids.iter().map(|(id, _)| *id).collect();
+                format!("known door ids: {}", ids.join(", "))
+            };
+            diagnostics.push(diag_deferred_member_reason(
+                member,
+                &format!(
+                    "door actuator patch selects `id={id_label}` but no physical door with that id exists ({known_list})",
+                ),
+            ));
+            return;
+        }
+    }
+    let unknown_intent_keys: Vec<&str> = member
+        .intent_state
+        .keys()
+        .map(String::as_str)
+        .filter(|k| !ACTUATOR_PATCH_INTENT_KEYS.contains(k))
+        .collect();
+    if !unknown_intent_keys.is_empty() {
+        diagnostics.push(diag_deferred_member_reason(
+            member,
+            &format!(
+                "door actuator patch accepts only `opened_by=sig.<name>` today; unknown attribute(s): {} (spec/redstone.md §14.2 reserves `lit_by=` / `powered_by=` / `fired_by=` for future keywords)",
+                unknown_intent_keys.join(", "),
+            ),
+        ));
+        return;
+    }
+    let Some(opened_by) = member.intent_state.get("opened_by") else {
+        diagnostics.push(diag_deferred_member_reason(
+            member,
+            "door actuator patch requires an `opened_by=sig.<name>` binding (only `opened_by=` is recognised on doors today)",
+        ));
+        return;
+    };
+    match &opened_by.value.kind {
+        ValueKind::DotRef(dotref) if dotref.head() == "sig" && dotref.tail().len() == 1 => {}
+        ValueKind::DotRef(dotref) if dotref.head() == "sig" => {
+            diagnostics.push(diag_deferred_member_reason(
+                member,
+                &format!(
+                    "door actuator patch `opened_by=` must be a two-segment signal reference `sig.<name>`, got `{dotref}`",
+                ),
+            ));
+        }
+        ValueKind::DotRef(dotref) => {
+            diagnostics.push(diag_deferred_member_reason(
+                member,
+                &format!(
+                    "door actuator patch `opened_by=` must be a signal reference `sig.<name>` (head must be `sig`), got `{dotref}`",
+                ),
+            ));
+        }
+        _ => {
+            diagnostics.push(diag_deferred_member_reason(
+                member,
+                &format!(
+                    "door actuator patch `opened_by=` must be a signal reference `sig.<name>`, got {}",
+                    opened_by.value.kind_name(),
+                ),
+            ));
+        }
+    }
+}
+
 #[allow(clippy::too_many_lines)] // one linear parse-and-paint chain reads better than 6 tiny helpers
 fn fill_window(
     member: &Member,
@@ -2655,7 +2898,8 @@ fn diag_deferred_member_reason(member: &Member, reason: &str) -> Diagnostic {
             message: "block-array lowering currently voxelises floor, walls, door, window, \
                       roof (kind=gable|shed|hip|flat), stair (kind=stairs), pressure_plate \
                       (at=<side>.outside|inside.<side>), and level y=N grouping, and \
-                      recognises circuit region=<label> void=<N> (u32, N>=1); other roles \
+                      recognises circuit region=<label> void=<N> (u32, N>=1) plus \
+                      door[id=<name>] opened_by=sig.<name> actuator patches; other roles \
                       will be added as their lowering rules are spec'd"
                 .to_owned(),
         }],
@@ -3002,6 +3246,377 @@ mod tests {
             "expected the primary to name the offending kind, got {}",
             deferred[0].primary,
         );
+    }
+
+    #[test]
+    fn actuator_patch_opened_by_recognised_without_deferred_warning() {
+        // A `door[id=front] opened_by=sig.open` patch line references an
+        // already-declared physical door and binds its `opened_by=` signal.
+        // Block-array lowering routes the patch out of the openings phase
+        // so `carve_door` never sees it — no "missing side=" defer, no
+        // duplicate carve.
+        let src = "theme t:\n  slot w -> @cobblestone\n\nstruct s size=5x5\n  \
+                   walls mat_slot=w height=3\n  \
+                   door id=front side=front at=center\n  \
+                   door[id=front] opened_by=sig.open\n";
+        let out = lowered(src);
+        assert_eq!(
+            deferred_count(&out),
+            0,
+            "actuator patch should not emit W_DEFERRED_MEMBER, got {:?}",
+            out.diagnostics,
+        );
+    }
+
+    #[test]
+    fn actuator_patch_unknown_selector_key_defers() {
+        // A door patch line whose `[selector]` carries anything beyond
+        // the whitelisted `id=` key would silently drop the extra
+        // attribute — including a future actuator selector before its
+        // support lands. The recogniser rejects the shape with a
+        // primary that both names the offending key and reminds the
+        // author which selector attribute IS accepted.
+        let src = "theme t:\n  slot w -> @cobblestone\n\nstruct s size=5x5\n  \
+                   walls mat_slot=w height=3\n  \
+                   door id=front side=front at=center\n  \
+                   door[id=front class=main] opened_by=sig.open\n";
+        let out = lowered(src);
+        let deferred: Vec<&Diagnostic> = out
+            .diagnostics
+            .iter()
+            .filter(|d| d.code == DiagnosticCode::DeferredMember)
+            .collect();
+        assert_eq!(deferred.len(), 1);
+        assert!(
+            deferred[0].primary.contains("class"),
+            "expected the primary to name the unknown selector key `class`, got {}",
+            deferred[0].primary,
+        );
+        assert!(
+            deferred[0].primary.contains("id="),
+            "expected the primary to remind the author about the `id=<label>` selector shape, got {}",
+            deferred[0].primary,
+        );
+    }
+
+    #[test]
+    fn actuator_patch_empty_selector_defers() {
+        // `door[]` — the parser accepts an empty selector, but there is
+        // no id to bind against. This exercises the "id missing"
+        // branch on its own (without also tripping the unknown-key
+        // branch that `actuator_patch_unknown_selector_key_defers`
+        // covers) so a regression that collapses the two arms into
+        // one still fails on this test.
+        let src = "theme t:\n  slot w -> @cobblestone\n\nstruct s size=5x5\n  \
+                   walls mat_slot=w height=3\n  \
+                   door id=front side=front at=center\n  \
+                   door[] opened_by=sig.open\n";
+        let out = lowered(src);
+        let deferred: Vec<&Diagnostic> = out
+            .diagnostics
+            .iter()
+            .filter(|d| d.code == DiagnosticCode::DeferredMember)
+            .collect();
+        assert_eq!(deferred.len(), 1);
+        assert!(
+            deferred[0].primary.contains("id="),
+            "expected the primary to name the missing `id=` selector key, got {}",
+            deferred[0].primary,
+        );
+        assert!(
+            !deferred[0].primary.contains("unknown attribute"),
+            "empty selector should NOT route through the unknown-key branch, got {}",
+            deferred[0].primary,
+        );
+    }
+
+    #[test]
+    fn actuator_patch_selector_id_non_label_defers() {
+        // `door[id=3] opened_by=sig.open` — the selector is present but
+        // its value is not a label. Mirrors circuit's kind-mismatch arm.
+        let src = "theme t:\n  slot w -> @cobblestone\n\nstruct s size=5x5\n  \
+                   walls mat_slot=w height=3\n  \
+                   door id=front side=front at=center\n  \
+                   door[id=3] opened_by=sig.open\n";
+        let out = lowered(src);
+        let deferred: Vec<&Diagnostic> = out
+            .diagnostics
+            .iter()
+            .filter(|d| d.code == DiagnosticCode::DeferredMember)
+            .collect();
+        assert_eq!(deferred.len(), 1);
+        assert!(
+            deferred[0].primary.contains("integer"),
+            "expected the primary to name the offending kind, got {}",
+            deferred[0].primary,
+        );
+    }
+
+    #[test]
+    fn actuator_patch_unknown_id_defers_with_known_ids_note() {
+        // The selector `id=back` names no physical door in the same
+        // struct. The recogniser must fail loud with a primary that both
+        // names the unknown id and lists the ids that ARE declared, so
+        // the author can spot the near-miss without scrolling back.
+        let src = "theme t:\n  slot w -> @cobblestone\n\nstruct s size=5x5\n  \
+                   walls mat_slot=w height=3\n  \
+                   door id=front side=front at=center\n  \
+                   door[id=back] opened_by=sig.open\n";
+        let out = lowered(src);
+        let deferred: Vec<&Diagnostic> = out
+            .diagnostics
+            .iter()
+            .filter(|d| d.code == DiagnosticCode::DeferredMember)
+            .collect();
+        assert_eq!(deferred.len(), 1);
+        assert!(
+            deferred[0].primary.contains("back"),
+            "expected the primary to name the unknown id `back`, got {}",
+            deferred[0].primary,
+        );
+        assert!(
+            deferred[0].primary.contains("front"),
+            "expected the primary to list `front` as a known door id, got {}",
+            deferred[0].primary,
+        );
+    }
+
+    #[test]
+    fn actuator_patch_without_actuator_key_defers() {
+        // A `door[id=front]` line with no `opened_by=` — currently the
+        // only recognised actuator key on doors — carries no metadata to
+        // record. Silent acceptance would drop the author's intent, so
+        // the recogniser defers with a primary that names `opened_by`.
+        let src = "theme t:\n  slot w -> @cobblestone\n\nstruct s size=5x5\n  \
+                   walls mat_slot=w height=3\n  \
+                   door id=front side=front at=center\n  \
+                   door[id=front]\n";
+        let out = lowered(src);
+        let deferred: Vec<&Diagnostic> = out
+            .diagnostics
+            .iter()
+            .filter(|d| d.code == DiagnosticCode::DeferredMember)
+            .collect();
+        assert_eq!(deferred.len(), 1);
+        assert!(
+            deferred[0].primary.contains("opened_by"),
+            "expected the primary to name the missing `opened_by=` key, got {}",
+            deferred[0].primary,
+        );
+    }
+
+    #[test]
+    fn actuator_patch_opened_by_non_signal_defers() {
+        // `opened_by=3` — the value is not a signal reference. The
+        // recogniser must name the offending kind and the required
+        // `sig.<name>` shape.
+        let src = "theme t:\n  slot w -> @cobblestone\n\nstruct s size=5x5\n  \
+                   walls mat_slot=w height=3\n  \
+                   door id=front side=front at=center\n  \
+                   door[id=front] opened_by=3\n";
+        let out = lowered(src);
+        let deferred: Vec<&Diagnostic> = out
+            .diagnostics
+            .iter()
+            .filter(|d| d.code == DiagnosticCode::DeferredMember)
+            .collect();
+        assert_eq!(deferred.len(), 1);
+        assert!(
+            deferred[0].primary.contains("sig."),
+            "expected the primary to name the required `sig.<name>` shape, got {}",
+            deferred[0].primary,
+        );
+        assert!(
+            deferred[0].primary.contains("integer"),
+            "expected the primary to name the offending kind, got {}",
+            deferred[0].primary,
+        );
+    }
+
+    #[test]
+    fn actuator_patch_opened_by_non_sig_dotref_defers() {
+        // `opened_by=foo.bar` parses as a two-segment DotRef but the
+        // head is not `sig`, so it cannot be a signal reference under
+        // spec/redstone.md §14.2's namespace.
+        let src = "theme t:\n  slot w -> @cobblestone\n\nstruct s size=5x5\n  \
+                   walls mat_slot=w height=3\n  \
+                   door id=front side=front at=center\n  \
+                   door[id=front] opened_by=foo.bar\n";
+        let out = lowered(src);
+        let deferred: Vec<&Diagnostic> = out
+            .diagnostics
+            .iter()
+            .filter(|d| d.code == DiagnosticCode::DeferredMember)
+            .collect();
+        assert_eq!(deferred.len(), 1);
+        assert!(
+            deferred[0].primary.contains("sig."),
+            "expected the primary to name the required `sig.<name>` shape, got {}",
+            deferred[0].primary,
+        );
+    }
+
+    #[test]
+    fn actuator_patch_selects_door_declared_inside_level() {
+        // A physical door authored under `level y=0` is still selectable
+        // by the top-level actuator patch — the recogniser walks the
+        // flattened member list so nesting does not hide the id. A
+        // `y=0` level exercises the flattener's grouping without also
+        // tripping the wall-top interaction that a higher y would
+        // introduce; `flatten_members` treats every level the same
+        // regardless of `y=`, so the visibility guarantee generalises.
+        let src = "theme t:\n  slot w -> @cobblestone\n\nstruct s size=5x5\n  \
+                   walls mat_slot=w height=3\n  \
+                   level y=0\n    \
+                     door id=inner side=front at=center\n  \
+                   door[id=inner] opened_by=sig.tick\n";
+        let out = lowered(src);
+        assert_eq!(
+            deferred_count(&out),
+            0,
+            "actuator patch should resolve a level-nested door id, got {:?}",
+            out.diagnostics,
+        );
+    }
+
+    #[test]
+    fn actuator_patch_unknown_intent_key_defers() {
+        // `door[id=front] opened_by=sig.x powered_by=sig.y` — the
+        // recogniser accepts only `opened_by=` today. Silently allowing
+        // a `powered_by=` on doors would let a future PR that lands
+        // `powered_by=` on doors silently change the meaning of source
+        // that shipped meanwhile. Reject the shape now with a primary
+        // that names the offending key(s) and points at
+        // spec/redstone.md §14.2.
+        let src = "theme t:\n  slot w -> @cobblestone\n\nstruct s size=5x5\n  \
+                   walls mat_slot=w height=3\n  \
+                   door id=front side=front at=center\n  \
+                   door[id=front] opened_by=sig.open powered_by=sig.on\n";
+        let out = lowered(src);
+        let deferred: Vec<&Diagnostic> = out
+            .diagnostics
+            .iter()
+            .filter(|d| d.code == DiagnosticCode::DeferredMember)
+            .collect();
+        assert_eq!(deferred.len(), 1);
+        assert!(
+            deferred[0].primary.contains("powered_by"),
+            "expected the primary to name the unknown attribute `powered_by`, got {}",
+            deferred[0].primary,
+        );
+        assert!(
+            deferred[0].primary.contains("opened_by"),
+            "expected the primary to remind the author which key IS recognised, got {}",
+            deferred[0].primary,
+        );
+    }
+
+    #[test]
+    fn actuator_patch_ambiguous_id_defers() {
+        // A `door id=front` at the top level plus another `door id=front`
+        // nested under a `level y=0` produces two physical doors with
+        // the same id after `flatten_members` runs. The `duplicate`
+        // check pass scopes id-uniqueness per body, so it does NOT flag
+        // this shape. Silently binding the patch to whichever door
+        // sorted first would drop the author's intent — the recogniser
+        // must defer with an explicit "ambiguous" primary.
+        let src = "theme t:\n  slot w -> @cobblestone\n\nstruct s size=5x5\n  \
+                   walls mat_slot=w height=3\n  \
+                   door id=front side=front at=center\n  \
+                   level y=0\n    \
+                     door id=front side=back at=center\n  \
+                   door[id=front] opened_by=sig.open\n";
+        let out = lowered(src);
+        let deferred: Vec<&Diagnostic> = out
+            .diagnostics
+            .iter()
+            .filter(|d| d.code == DiagnosticCode::DeferredMember)
+            .collect();
+        assert_eq!(deferred.len(), 1);
+        assert!(
+            deferred[0].primary.contains("ambiguous")
+                || deferred[0].primary.contains("2 physical doors"),
+            "expected the primary to flag the ambiguity, got {}",
+            deferred[0].primary,
+        );
+    }
+
+    #[test]
+    fn actuator_patch_no_physical_doors_defers() {
+        // An actuator patch in a scope with no physical doors at all
+        // exercises the empty-`known_list` branch of the unknown-id
+        // recogniser. The primary must call that scope shape out
+        // explicitly ("no physical door members are declared") rather
+        // than render an empty "known door ids: " suffix that reads
+        // like a truncation.
+        let src = "theme t:\n  slot w -> @cobblestone\n\nstruct s size=5x5\n  \
+                   walls mat_slot=w height=3\n  \
+                   door[id=front] opened_by=sig.open\n";
+        let out = lowered(src);
+        let deferred: Vec<&Diagnostic> = out
+            .diagnostics
+            .iter()
+            .filter(|d| d.code == DiagnosticCode::DeferredMember)
+            .collect();
+        assert_eq!(deferred.len(), 1);
+        assert!(
+            deferred[0].primary.contains("no physical door"),
+            "expected the primary to name the empty-scope shape, got {}",
+            deferred[0].primary,
+        );
+    }
+
+    #[test]
+    fn actuator_patch_three_segment_sig_defers() {
+        // `opened_by=sig.a.b` — the head is `sig` but the tail has more
+        // than one segment, so this is not a signal reference under
+        // spec/redstone.md §14.2. Silently accepting a
+        // longer-than-expected DotRef would let a future guard that
+        // degrades to `head() == "sig"` (dropping the segment-count
+        // check) slip through unnoticed; pin the segment-count arm
+        // explicitly.
+        let src = "theme t:\n  slot w -> @cobblestone\n\nstruct s size=5x5\n  \
+                   walls mat_slot=w height=3\n  \
+                   door id=front side=front at=center\n  \
+                   door[id=front] opened_by=sig.open.extra\n";
+        let out = lowered(src);
+        let deferred: Vec<&Diagnostic> = out
+            .diagnostics
+            .iter()
+            .filter(|d| d.code == DiagnosticCode::DeferredMember)
+            .collect();
+        assert_eq!(deferred.len(), 1);
+        assert!(
+            deferred[0].primary.contains("two-segment"),
+            "expected the primary to name the two-segment requirement, got {}",
+            deferred[0].primary,
+        );
+        assert!(
+            deferred[0].primary.contains("sig.open.extra"),
+            "expected the primary to render the offending path verbatim, got {}",
+            deferred[0].primary,
+        );
+    }
+
+    #[test]
+    fn actuator_patch_does_not_repaint_the_door_voxels() {
+        // The physical `door id=front side=front at=center` on the front
+        // wall carves a 2-cell opening at (2, 1..=2, 4). The actuator
+        // patch that follows must NOT touch those voxels — no re-carve,
+        // no palette entry added. Assert both cells stay air, the wall
+        // material lives at every other front-wall cell, and the palette
+        // still holds exactly {air, wall}.
+        let src = "theme t:\n  slot w -> @cobblestone\n\nstruct s size=5x5\n  \
+                   walls mat_slot=w height=3\n  \
+                   door id=front side=front at=center\n  \
+                   door[id=front] opened_by=sig.open\n";
+        let out = lowered(src);
+        let ba = out.structures.get("struct::s").unwrap();
+        assert_eq!(block_id(ba, 2, 1, 4), BlockState::AIR_ID);
+        assert_eq!(block_id(ba, 2, 2, 4), BlockState::AIR_ID);
+        assert_eq!(block_id(ba, 0, 1, 4), "minecraft:cobblestone");
+        let ids: Vec<&str> = ba.palette.entries.iter().map(|s| s.id.as_str()).collect();
+        assert_eq!(ids, vec![BlockState::AIR_ID, "minecraft:cobblestone"]);
     }
 
     #[test]

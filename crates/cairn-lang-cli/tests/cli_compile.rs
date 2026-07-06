@@ -444,18 +444,17 @@ fn c14c_roof_kind_examples_lower_without_deferred_warnings() {
 }
 
 #[test]
-fn c14f_redstone_door_pressure_plate_paints_without_deferring() {
-    // `redstone-door.crn` uses two `pressure_plate` fixtures placed with
-    // the compound `at=<side>.outside` / `at=inside.<side>` anchor and a
-    // `circuit region=floor void=2` routing marker. Pressure-plate
-    // lowering paints both plate lines and the circuit recogniser
-    // accepts the region marker without emitting a diagnostic, so
-    // neither role fires a `W_DEFERRED_MEMBER`. The one remaining
-    // deferred warning belongs to the `door[id=front] opened_by=…`
-    // selector-form actuator patch, which stays unimplemented until
-    // the actuator wiring pass lands. This slots into the same
-    // "example transitions from deferred to clean" shape `c14e` uses
-    // for themed-tower and `c14c` for the sloped roofs.
+fn c14f_redstone_door_compiles_without_deferred_warnings() {
+    // `redstone-door.crn` exercises the fixtures/actuator surface end-to-end:
+    // two `pressure_plate` fixtures with the compound `at=<side>.outside` /
+    // `at=inside.<side>` anchor, a `circuit region=floor void=2` routing
+    // marker, and a `door[id=front] opened_by=sig.open` actuator patch that
+    // binds an already-declared physical door. Each of the three roles is
+    // recognised at block-array lowering (the plate paints its voxels, the
+    // circuit region and the actuator patch are surface-guards for the
+    // future logic pipeline), so no `W_DEFERRED_MEMBER` fires on this
+    // example. This slots into the same "example transitions from deferred
+    // to clean" shape `c14` (cottage) and `c14e` (themed-tower) already use.
     let tmp = TempDir::new().expect("tempdir");
     let dst = tmp.path().join("redstone-door.crn");
     fs::copy(examples_dir().join("redstone-door.crn"), &dst).expect("copy redstone-door");
@@ -472,31 +471,10 @@ fn c14f_redstone_door_pressure_plate_paints_without_deferring() {
         result.status.success(),
         "redstone-door should compile, stderr={stderr}",
     );
-    // Baseline-pin the `warning[W_DEFERRED_MEMBER]` primary lines
-    // against the current known survivor — the `door[id=front]
-    // opened_by=…` actuator patch on line 25, which still routes
-    // through `carve_door` and defers with `missing side=`. A plain
-    // `stderr.contains(...)` check would false-positive the catalogue
-    // note printed after each warning (the note lists every supported
-    // role by name, including `pressure_plate` / `circuit`), and a
-    // literal-substring check on the primaries would false-negative a
-    // future refactor that stops naming `pressure_plate` / `circuit`
-    // in the primary text. Counting the primaries and asserting the
-    // shape of the one survivor catches both.
-    let deferred_primaries: Vec<&str> = stderr
-        .lines()
-        .filter(|line| line.contains("warning[W_DEFERRED_MEMBER]"))
-        .collect();
     assert_eq!(
-        deferred_primaries.len(),
-        1,
-        "redstone-door should have exactly one deferred member (the actuator patch); got {}, primaries={deferred_primaries:?}",
-        deferred_primaries.len(),
-    );
-    assert!(
-        deferred_primaries[0].contains("side="),
-        "the one surviving W_DEFERRED_MEMBER must be the `missing side=` actuator patch, got {}",
-        deferred_primaries[0],
+        stderr.matches("W_DEFERRED_MEMBER").count(),
+        0,
+        "redstone-door should lower clean, stderr={stderr}",
     );
     assert!(
         out_dir.path().join("gatehouse.nbt").exists(),
