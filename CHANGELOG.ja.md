@@ -103,6 +103,13 @@
   degrade します。これまで home1 の床に 7 セルの穴を開けていた
   `village.crn` の `home1.entry ↔ home3.entry` 行は home1 の東面を
   迂回するようになり、example 全体が警告ゼロで compile されます。
+  `route_path` は `Result<_, RoutePathError>` (ポート埋没 / 到達不能 /
+  面積上限 / 座標 overflow) を返すため、呼び出し側は警告 note を実際の
+  原因に対応付けられます。また `BlockedIndex` (lowering ごとに 1 回
+  構築) を受け取る設計にしたので、平面ごとの bounding box は blocked
+  集合の単一スキャンから得られ、`connect` 行ごとのフルスキャン
+  (衝突行が多い大規模 site ではユーザ入力起点の実質 DoS になる) を
+  排除しています。
 
 ### 変更
 
@@ -162,8 +169,11 @@
   発火するようになりました。その場合は従来どおり直進 L に
   フォールバックして衝突セルをスキップするため、
   `data: { kind: "walkway_blocked", skipped: N }` ペイロードと
-  "skipped N cells" のプライマリ文言は不変です。note は「gap を
-  広げる」だけでなく「経路が存在しない」ことを伝える文言になりました。
+  "skipped N cells" のプライマリ文言は不変です。note は具体的な原因 —
+  どちらのポートが埋まっているか、到達先の閉塞、探索面積上限 (実測値と
+  上限値の両方を明記)、座標 overflow — をそれぞれの対処法とともに
+  書き分けるようになり、4 原因中 3 つには効かない「gap を広げる」
+  一択の提案を廃止しました。
 - `crates/cairn-lang-core/src/block_array/lower.rs` —
   `walkway_blocked_cells_skip_with_w_walkway_blocked_count` の fixture
   に `from` ポートを床で埋める 3 つ目の placement を追加しました

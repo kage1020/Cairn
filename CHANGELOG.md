@@ -124,7 +124,14 @@ and is a separate axis from the Minecraft target version.
   skip-and-warn fallback. `village.crn`'s `home1.entry ↔ home3.entry`
   row — whose L used to cut a 7-cell hole through home1's floor —
   now detours around home1's east face and the example compiles with
-  zero warnings.
+  zero warnings. `route_path` returns `Result<_, RoutePathError>`
+  (buried endpoint / unreachable target / area cap / coordinate
+  overflow) so the caller can match the warning note to the actual
+  cause, and takes a `BlockedIndex` — built once per lowering — so the
+  per-plane bounding rectangle comes from a single scan of the blocked
+  set instead of one full re-scan per `connect` row (a site with many
+  colliding rows would otherwise multiply that scan into an effective
+  DoS on user input).
 
 ### Changed
 
@@ -190,8 +197,10 @@ and is a separate axis from the Minecraft target version.
   then falls back to the straight L with the colliding cells skipped,
   exactly as before, so the `data: { kind: "walkway_blocked",
   skipped: N }` payload and the "skipped N cells" primary text are
-  unchanged. The note now says no route exists instead of suggesting
-  the gap alone is too narrow.
+  unchanged. The note now names the concrete cause — which port is
+  buried, an enclosed target, the search-area cap (with both numbers),
+  or coordinate overflow — each with its own remedy, instead of one
+  catch-all gap-widening suggestion that cannot fix three of the four.
 - `crates/cairn-lang-core/src/block_array/lower.rs` — the
   `walkway_blocked_cells_skip_with_w_walkway_blocked_count` fixture
   gains a third placement whose floor buries the `from` port (the old

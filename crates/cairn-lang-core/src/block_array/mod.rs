@@ -32,7 +32,10 @@ use serde::Serialize;
 
 pub use lower::lower_to_block_array;
 pub use material::{AbstractMaterialResolver, MaterialDeferred, resolve_block_state};
-pub use walkway::{WalkwayLayout, build_walkway_array, l_path, port_world_position, route_path};
+pub use walkway::{
+    BlockedIndex, RoutePathError, WalkwayLayout, build_walkway_array, l_path, port_world_position,
+    route_path,
+};
 
 use crate::check::Diagnostic;
 use crate::ids::{PlaceId, SiteName, WalkwayEndpoint, WalkwayScopeKey};
