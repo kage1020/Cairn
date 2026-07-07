@@ -12,11 +12,14 @@ use cairn_lang_core::lock::{
 };
 use cairn_lang_core::resolve::{VersionAxes, compute_axes, resolve};
 use cairn_lang_core::{Severity, check, lower, parse};
-use cairn_lang_formats::data_version::resolve_java_target;
-use cairn_lang_formats::java_structure::{
-    Compound, build_structure_tag, output_filename, write_compound_gzip,
+use cairn_lang_formats::bedrock_structure::{build_mcstructure_tag, write_mcstructure};
+use cairn_lang_formats::data_version::{
+    BedrockTarget, JavaTarget, resolve_bedrock_target, resolve_java_target,
 };
-use cairn_lang_formats::registry::builtin_java;
+use cairn_lang_formats::java_structure::{
+    Compound, OutputExt, build_structure_tag, output_filename, write_compound_gzip,
+};
+use cairn_lang_formats::registry::{RegistryPack, builtin_bedrock, builtin_java};
 use clap::{Parser, Subcommand, ValueEnum};
 
 /// `cairn` — Minecraft build DSL command-line interface.
@@ -84,13 +87,15 @@ enum Command {
         #[arg(long, value_enum, default_value_t = LowerFormat::Ascii)]
         format: LowerFormat,
     },
-    /// Compile a .crn source file to its edition+version-pinned NBT artifact
-    /// set and write a lockfile next to the source. The Java backend
-    /// currently voxelises `floor` and `walls` only; other roles degrade
-    /// to air with a `W_DEFERRED_MEMBER` warning and the build still
-    /// succeeds, matching `cairn lower`. Exits 0 on success, 1 on parse,
-    /// lowering, or I/O failure (including an unsupported `--target`),
-    /// and 2 when the source file cannot be located.
+    /// Compile a .crn source file to its edition+version-pinned structure
+    /// artifact set and write a lockfile next to the source. `--edition
+    /// java` writes gzip `.nbt` structures; `--edition bedrock` writes
+    /// uncompressed `.mcstructure` files. The Bedrock backend emits
+    /// stateless palettes only for now — a palette entry that carries
+    /// blockstate properties is a hard error rather than a silent drop.
+    /// Exits 0 on success, 1 on parse, lowering, or I/O failure (including
+    /// an unsupported `--target` or a stateful Bedrock palette), and 2
+    /// when the source file cannot be located.
     Compile {
         /// Path to the .crn file to compile.
         file: PathBuf,
@@ -573,6 +578,53 @@ fn print_y_slice(ba: &BlockArray, y: u32) {
     }
 }
 
+/// A resolved compile target: an edition-specific version-integer wrapper
+/// plus the knowledge of which backend serialises it. Every downstream
+/// step (filename extension, tag builder, writer, lockfile row) branches
+/// on this one value so a new edition is added in a single place.
+enum ResolvedTarget {
+    /// Java vanilla structure target (`.nbt`, gzip).
+    Java(JavaTarget),
+    /// Bedrock structure target (`.mcstructure`, uncompressed).
+    Bedrock(BedrockTarget),
+}
+
+impl ResolvedTarget {
+    /// On-disk extension the backend writes.
+    fn output_ext(&self) -> OutputExt {
+        match self {
+            ResolvedTarget::Java(_) => OutputExt::Nbt,
+            ResolvedTarget::Bedrock(_) => OutputExt::Mcstructure,
+        }
+    }
+
+    /// Human-facing Minecraft version string for the lockfile.
+    fn mc_version(&self) -> &str {
+        match self {
+            ResolvedTarget::Java(t) => &t.mc_version,
+            ResolvedTarget::Bedrock(t) => &t.mc_version,
+        }
+    }
+
+    /// Edition-specific version integer for the lockfile (`DataVersion`
+    /// for Java, block-palette `version` for Bedrock).
+    fn version_int(&self) -> i32 {
+        match self {
+            ResolvedTarget::Java(t) => t.data_version,
+            ResolvedTarget::Bedrock(t) => t.block_version,
+        }
+    }
+
+    /// Registry pack whose bytes the compile resolved against, hashed into
+    /// the lockfile.
+    fn registry_pack(&self) -> &'static RegistryPack {
+        match self {
+            ResolvedTarget::Java(_) => builtin_java(),
+            ResolvedTarget::Bedrock(_) => builtin_bedrock(),
+        }
+    }
+}
+
 fn run_compile(
     file: &Path,
     edition: EditionArg,
@@ -580,7 +632,7 @@ fn run_compile(
     out: Option<&Path>,
     lock: Option<&Path>,
 ) -> ExitCode {
-    let (source, block_ir) = match load_and_lower(file) {
+    let (source, block_ir) = match load_and_lower(file, edition) {
         Ok(pair) => pair,
         Err(code) => return code,
     };
@@ -607,7 +659,7 @@ fn run_compile(
     write_artifacts_and_lock(&prepared, &source, &block_ir, edition, &target, &lock_path)
 }
 
-fn load_and_lower(file: &Path) -> Result<(String, BlockArrayIr), ExitCode> {
+fn load_and_lower(file: &Path, edition: EditionArg) -> Result<(String, BlockArrayIr), ExitCode> {
     let source = std::fs::read_to_string(file).map_err(|err| {
         eprintln!("error: cannot read `{}`: {err}", file.display());
         match err.kind() {
@@ -626,7 +678,15 @@ fn load_and_lower(file: &Path) -> Result<(String, BlockArrayIr), ExitCode> {
     })?;
     let ir = lower(&module);
     let resolution = resolve(&ir);
-    let mut block_ir = lower_to_block_array(&ir, &resolution, Some(&builtin_java().materials));
+    // The materials catalog is edition-specific: an abstract `@token`
+    // resolves through the pack whose backend will serialise it, so a
+    // future per-edition block vocabulary lowers correctly without a
+    // second lowering pass.
+    let materials = match edition {
+        EditionArg::Java => &builtin_java().materials,
+        EditionArg::Bedrock => &builtin_bedrock().materials,
+    };
+    let mut block_ir = lower_to_block_array(&ir, &resolution, Some(materials));
     // Resolver diagnostics (`E_UNRESOLVED_PLACE_REF`, `E_UNRESOLVED_SLOT`,
     // `W_UNUSED_DEF`, ...) are produced before lowering and must still reach
     // the CLI's diagnostic stream — otherwise a `place use=cottag` typo
@@ -662,19 +722,20 @@ fn report_lowering_diagnostics(file: &Path, source: &str, block_ir: &BlockArrayI
     has_error
 }
 
-fn resolve_target(
-    edition: EditionArg,
-    target: &str,
-) -> Result<cairn_lang_formats::data_version::JavaTarget, ExitCode> {
+fn resolve_target(edition: EditionArg, target: &str) -> Result<ResolvedTarget, ExitCode> {
     match edition {
-        EditionArg::Bedrock => {
-            eprintln!("error: --edition bedrock is not implemented; Java only");
-            Err(ExitCode::from(1))
-        }
-        EditionArg::Java => resolve_java_target(target).map_err(|err| {
-            eprintln!("error: {err}");
-            ExitCode::from(1)
-        }),
+        EditionArg::Java => resolve_java_target(target)
+            .map(ResolvedTarget::Java)
+            .map_err(|err| {
+                eprintln!("error: {err}");
+                ExitCode::from(1)
+            }),
+        EditionArg::Bedrock => resolve_bedrock_target(target)
+            .map(ResolvedTarget::Bedrock)
+            .map_err(|err| {
+                eprintln!("error: {err}");
+                ExitCode::from(1)
+            }),
     }
 }
 
@@ -697,27 +758,33 @@ fn prepare_out_dir(file: &Path, requested: Option<&Path>) -> Result<PathBuf, Exi
 }
 
 /// Build every structure tag tree up front. A backend error here (abstract
-/// palette entry, dimension overflow) must not leave half-written `.nbt`
-/// files behind, so the function holds off all I/O until it knows the IR
-/// is serialisable.
+/// palette entry, stateful Bedrock entry, dimension overflow) must not
+/// leave half-written artifacts behind, so the function holds off all I/O
+/// until it knows the IR is serialisable.
 fn prepare_artifacts(
     block_ir: &BlockArrayIr,
-    target: &cairn_lang_formats::data_version::JavaTarget,
+    target: &ResolvedTarget,
     out_dir: &Path,
 ) -> Result<Vec<(PathBuf, Compound)>, ExitCode> {
     let mut prepared = Vec::with_capacity(block_ir.structures.len());
     let mut seen_paths: std::collections::HashMap<PathBuf, String> =
         std::collections::HashMap::with_capacity(block_ir.structures.len());
     for (scope, ba) in &block_ir.structures {
-        let tag = build_structure_tag(ba, target).map_err(|err| {
-            eprintln!("error: building `{scope}`: {err}");
-            ExitCode::from(1)
-        })?;
-        let path = out_dir.join(output_filename(scope));
+        let tag = match target {
+            ResolvedTarget::Java(t) => build_structure_tag(ba, t).map_err(|err| {
+                eprintln!("error: building `{scope}`: {err}");
+                ExitCode::from(1)
+            })?,
+            ResolvedTarget::Bedrock(t) => build_mcstructure_tag(ba, t).map_err(|err| {
+                eprintln!("error: building `{scope}`: {err}");
+                ExitCode::from(1)
+            })?,
+        };
+        let path = out_dir.join(output_filename(scope, target.output_ext()));
         // Walkway IR keys allow `.` / `_` in place and port ids; the
         // `output_filename` flatten of `.` → `_` can fold two distinct
         // walkways into the same on-disk name (e.g. `a.b_c__d.e_f` vs
-        // `a_b.c__d_e.f` both → `..._a_b_c__d_e_f.nbt`). Detecting that
+        // `a_b.c__d_e.f` both → `..._a_b_c__d_e_f`). Detecting that
         // here keeps the second walkway from silently overwriting the
         // first.
         if let Some(first) = seen_paths.insert(path.clone(), scope.clone()) {
@@ -732,20 +799,21 @@ fn prepare_artifacts(
     Ok(prepared)
 }
 
-/// Write the prepared `.nbt` files and the lockfile, rolling back every
-/// already-written file (and the lockfile) on any failure so the on-disk
-/// state stays consistent — either every artifact + the lock, or none.
+/// Write the prepared structure files and the lockfile, rolling back
+/// every already-written file (and the lockfile) on any failure so the
+/// on-disk state stays consistent — either every artifact + the lock, or
+/// none.
 fn write_artifacts_and_lock(
     prepared: &[(PathBuf, Compound)],
     source: &str,
     block_ir: &BlockArrayIr,
     edition: EditionArg,
-    target: &cairn_lang_formats::data_version::JavaTarget,
+    target: &ResolvedTarget,
     lock_path: &Path,
 ) -> ExitCode {
     let mut written: Vec<PathBuf> = Vec::with_capacity(prepared.len());
     for (path, tag) in prepared {
-        if let Err(err) = write_tag_atomically(path, tag) {
+        if let Err(err) = write_tag_atomically(path, tag, target) {
             rollback(&written, None);
             eprintln!("error: writing `{}`: {err}", path.display());
             return ExitCode::from(1);
@@ -789,19 +857,30 @@ fn resolve_out_dir(source: &Path, requested: Option<&Path>) -> Option<PathBuf> {
     })
 }
 
-fn write_tag_atomically(final_path: &Path, tag: &Compound) -> Result<(), std::io::Error> {
+fn write_tag_atomically(
+    final_path: &Path,
+    tag: &Compound,
+    target: &ResolvedTarget,
+) -> Result<(), std::io::Error> {
     use std::io::Write as _;
 
     // Write to a sibling `.tmp` file then rename so an interrupted write
     // (process kill, disk full mid-stream) never leaves a half-encoded
-    // `.nbt` at the real path.
+    // structure at the real path.
     let mut tmp_path = final_path.as_os_str().to_owned();
     tmp_path.push(".tmp");
     let tmp_path = PathBuf::from(tmp_path);
 
     let mut f = std::fs::File::create(&tmp_path)?;
-    write_compound_gzip(&mut f, tag)
-        .map_err(|e| std::io::Error::other(format!("nbt encode: {e}")))?;
+    let encode = match target {
+        // Java `.nbt` is gzip-wrapped big-endian; Bedrock `.mcstructure`
+        // is raw little-endian. The extension chosen in `prepare_artifacts`
+        // and the writer chosen here must always agree, which is why both
+        // key off the same `ResolvedTarget`.
+        ResolvedTarget::Java(_) => write_compound_gzip(&mut f, tag),
+        ResolvedTarget::Bedrock(_) => write_mcstructure(&mut f, tag),
+    };
+    encode.map_err(|e| std::io::Error::other(format!("nbt encode: {e}")))?;
     f.flush()?;
     f.sync_all()?;
     drop(f);
@@ -832,24 +911,25 @@ fn build_lockfile(
     source: &str,
     block_ir: &BlockArrayIr,
     edition: EditionArg,
-    target: &cairn_lang_formats::data_version::JavaTarget,
+    target: &ResolvedTarget,
 ) -> Result<Lockfile, cairn_lang_core::lock::HashError> {
     Ok(Lockfile {
         source_hash: hash_source(source),
         cairn_version: CAIRN_VERSION.to_owned(),
         target: LockTarget {
             edition: edition.as_lock_edition(),
-            mc_version: target.mc_version.clone(),
-            data_version: target.data_version,
+            mc_version: target.mc_version().to_owned(),
+            data_version: target.version_int(),
         },
         inputs: LockInputs {
-            // The registry pack ingest replaces the hardcoded `data_version`
-            // table; its bytes hash pins the exact (mc_version, DataVersion)
-            // resolution rules a downstream re-compile must match. The
-            // constraint catalog ingest will fill the second field once
-            // catalogs ship; until then it stays zero (per
-            // `LockInputs::zero`'s contract).
-            registry_pack_hash: builtin_java().bytes_hash.clone(),
+            // The registry pack ingest replaces the hardcoded version
+            // table; its bytes hash pins the exact (mc_version, version
+            // integer) resolution rules a downstream re-compile must
+            // match, keyed to the edition being compiled. The constraint
+            // catalog ingest will fill the second field once catalogs
+            // ship; until then it stays zero (per `LockInputs::zero`'s
+            // contract).
+            registry_pack_hash: target.registry_pack().bytes_hash.clone(),
             constraint_catalog_hash: HashHex::zero(),
         },
         resolved_ir_hash: hash_resolved_ir(block_ir)?,

@@ -34,6 +34,19 @@ pub enum PackEdition {
     Bedrock,
 }
 
+impl PackEdition {
+    /// Lowercase label matching the manifest's on-disk spelling and the
+    /// CLI's `--edition` vocabulary. Used in error messages so the text a
+    /// user reads matches the flag value they typed.
+    #[must_use]
+    pub fn label(self) -> &'static str {
+        match self {
+            PackEdition::Java => "java",
+            PackEdition::Bedrock => "bedrock",
+        }
+    }
+}
+
 /// Component file references inside a registry pack.
 ///
 /// `data_versions` is the only required component in the initial cut.

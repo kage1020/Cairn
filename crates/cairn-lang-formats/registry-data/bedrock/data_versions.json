@@ -1,0 +1,9 @@
+{
+  "schema_version": 1,
+  "latest": "1.21.60",
+  "versions": [
+    { "mc_version": "1.21.0", "data_version": 18153472 },
+    { "mc_version": "1.21.40", "data_version": 18163712 },
+    { "mc_version": "1.21.60", "data_version": 18168865 }
+  ]
+}

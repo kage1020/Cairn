@@ -129,9 +129,31 @@ pub fn write_compound_gzip<W: std::io::Write>(
     write_java_gzip(writer, "", root)
 }
 
+/// On-disk extension of a compiled structure artifact, one per backend.
+/// Kept next to [`output_filename`] so a caller cannot pass a free-form
+/// string and end up with `".nbt.nbt"` or a bare `"mcstructure"`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OutputExt {
+    /// Java vanilla structure (`.nbt`).
+    Nbt,
+    /// Bedrock structure (`.mcstructure`).
+    Mcstructure,
+}
+
+impl OutputExt {
+    /// Extension without the leading dot.
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            OutputExt::Nbt => "nbt",
+            OutputExt::Mcstructure => "mcstructure",
+        }
+    }
+}
+
 /// Filename for a single [`BlockArray`] within a multi-structure IR.
 ///
-/// Strips the source-scope prefix:
+/// Strips the source-scope prefix (shown for [`OutputExt::Nbt`]):
 /// - `"struct::cottage"` → `"cottage.nbt"`
 /// - `"site::hamlet::home1"` → `"home1.nbt"` — per-`place` placements
 ///   share an output directory with sibling structs; the site name is
@@ -146,7 +168,8 @@ pub fn write_compound_gzip<W: std::io::Write>(
 /// Kept here (not in the CLI) so the wasm playground and any other consumer
 /// agree on naming when they land.
 #[must_use]
-pub fn output_filename(source_scope: &str) -> String {
+pub fn output_filename(source_scope: &str, ext: OutputExt) -> String {
+    let ext = ext.as_str();
     // A canonical walkway scope key carries the full
     // `walkway::SITE::PLACE.PORT__PLACE.PORT` shape. Detect that here so
     // we can tell two cases apart:
@@ -185,7 +208,7 @@ pub fn output_filename(source_scope: &str) -> String {
                 // naming contract.
                 let p = key.parts();
                 return format!(
-                    "{site}_walkway_{from_place}_{from_port}__{to_place}_{to_port}.nbt",
+                    "{site}_walkway_{from_place}_{from_port}__{to_place}_{to_port}.{ext}",
                     site = p.site,
                     from_place = p.from_place,
                     from_port = p.from_port,
@@ -213,10 +236,10 @@ pub fn output_filename(source_scope: &str) -> String {
                 .and_then(|rest| rest.split_once("::").map(|(_, id)| id))
         })
         .unwrap_or(source_scope);
-    format!("{bare}.nbt")
+    format!("{bare}.{ext}")
 }
 
-fn is_concrete_id(id: &str) -> bool {
+pub(crate) fn is_concrete_id(id: &str) -> bool {
     // A concrete Minecraft id always carries exactly one `:` separating a
     // non-empty namespace from a non-empty path. Abstract tokens lowered
     // from `@cobblestone` look like `@cobblestone` — no colon at all — and

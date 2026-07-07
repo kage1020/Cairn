@@ -1,11 +1,12 @@
 # cairn-lang-nbt
 
-NBT codec for the Cairn language. The Java writer ships today; the Bedrock
-codec and the streaming reader follow.
+NBT codec for the Cairn language. The Java and Bedrock writers ship today;
+the streaming reader follows.
 
 - **Java**: big-endian, gzipped, root compound tags. **Writer is public.**
-- **Bedrock**: little-endian (and varint little-endian for network payloads),
-  nameless lists of records. *Not yet implemented.*
+- **Bedrock**: little-endian, uncompressed (the `.mcstructure` on-disk
+  form). **Writer is public.** The varint little-endian network payload
+  form is not needed for structure files and has not landed.
 
 This crate is deliberately *just* the codec. It does not know anything about Litematica regions,
 schematic palettes, or Cairn's block-array IR — those live in
@@ -14,12 +15,12 @@ fuzzed and benchmarked without dragging in the higher-level format machinery.
 
 ## Status
 
-Java writer ships. The full Java NBT tag taxonomy (`Byte` through
-`LongArray`), an `IndexMap`-ordered `Compound`, and the two writer
-entrypoints (`write_java_uncompressed` for tests, `write_java_gzip` for
-the on-disk `.nbt` Minecraft expects) are public.
+Both writers ship. The full NBT tag taxonomy (`Byte` through `LongArray`),
+an `IndexMap`-ordered `Compound`, and the writer entrypoints are public.
+The byte-level encoder is a single endian-parameterised core, so the Java
+and Bedrock writers share validation rules and cannot drift apart.
 
-Bedrock little-endian and the streaming reader are still to land.
+The streaming reader is still to land.
 
 ## Public API
 
@@ -29,14 +30,15 @@ Bedrock little-endian and the streaming reader are still to land.
 | `tag::Compound` | `IndexMap<String, Tag>` — insertion order is the wire order. |
 | `tag::List` | Homogeneous list with an explicit element type id. |
 | `java::write_java_uncompressed` | Raw big-endian payload, no gzip. |
-| `java::write_java_gzip` | Gzip-wrapped output at `Compression::default()`. |
+| `java::write_java_gzip` | Gzip-wrapped big-endian output at `Compression::default()`. |
+| `bedrock::write_bedrock_uncompressed` | Raw little-endian payload (the `.mcstructure` form). |
 | `java::NbtIoError` | `InvalidString`, `HeterogeneousList`, `LengthOverflow`, `Io`. |
 
 ## Scope
 
 - Tag types: `End`, `Byte`, `Short`, `Int`, `Long`, `Float`, `Double`, `ByteArray`, `String`, `List`,
   `Compound`, `IntArray`, `LongArray`.
-- Both endiannesses, both flavors.
+- Both endiannesses (big-endian Java, little-endian Bedrock) ship on the writer side.
 - A streaming reader for large files (Litematica regions, structure blocks split across many chunks).
 
 Out of scope:
