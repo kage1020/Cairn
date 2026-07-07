@@ -56,7 +56,10 @@ use super::roof::{
     hip_voxels, shed_extra_height, shed_high_side, shed_slope_span, shed_stair_state, shed_voxels,
     stair_state,
 };
-use super::walkway::{WalkwayLayout, build_walkway_array, l_path, port_world_position};
+use super::walkway::{
+    BlockedIndex, RoutePathError, WalkwayLayout, build_walkway_array, l_path, port_world_position,
+    route_path,
+};
 use super::{BlockArray, BlockArrayIr, BlockState, Dims, Palette, PaletteIndex};
 
 /// Vanilla pressure plate id used by `pressure_plate` members that do not
@@ -199,6 +202,12 @@ fn lower_connects(
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     let mut seen_pairs: HashSet<(SiteName, PlaceId, PortId, PlaceId, PortId)> = HashSet::new();
+    // Index the blocked set once for every row: the router needs the
+    // per-plane bounding rectangle, and deriving it per row would
+    // re-scan the whole set — a large site with many colliding rows
+    // would multiply one linear scan into an effective DoS on user
+    // input. See `BlockedIndex` for the cost contract.
+    let blocked_index = BlockedIndex::new(blocked);
 
     for connect in &resolution.connects {
         let from_key = place_scope_key(connect.site.as_str(), connect.from.place.as_str());
@@ -369,7 +378,24 @@ fn lower_connects(
         };
         let material_id = material.id.clone();
 
-        let path = l_path(from_pos, to_pos);
+        // Straight Manhattan L first — the cheap path, and identity for
+        // every unobstructed row (existing lockfiles stay byte-stable).
+        // Only when the L collides with a placement floor does the
+        // ground-plane router search for a detour; a `RoutePathError`
+        // (endpoint buried, target enclosed, area cap, coordinate
+        // overflow) falls back to the L with skipped cells so the row
+        // still lays and earns its `W_WALKWAY_BLOCKED` below, with a
+        // note matched to the error.
+        let straight = l_path(from_pos, to_pos);
+        let (path, route_failure) = if straight.iter().any(|cell| blocked.contains(cell)) {
+            match route_path(from_pos, to_pos, &blocked_index) {
+                Ok(detour) => (detour, None),
+                Err(e) => (straight, Some(e)),
+            }
+        } else {
+            (straight, None)
+        };
+        let routed = route_failure.is_none();
         let from_endpoint = WalkwayEndpoint {
             place: connect.from.place.clone(),
             port: connect.from.port.clone(),
@@ -391,6 +417,16 @@ fn lower_connects(
             origin,
             blocked_count: skipped,
         } = build_walkway_array(&path, material, blocked, &scope_key);
+        if routed {
+            // Both the collision-free straight L and a router detour
+            // are collision-free by construction; a skipped cell here
+            // means the router returned a path that crosses `blocked`,
+            // which is an algorithm bug, not an input condition.
+            debug_assert_eq!(
+                skipped, 0,
+                "walkway `{scope_key}` laid a routed path with {skipped} collisions",
+            );
+        }
         if skipped > 0 {
             diagnostics.push(Diagnostic {
                 code: DiagnosticCode::WalkwayBlocked,
@@ -403,9 +439,7 @@ fn lower_connects(
                 ),
                 notes: vec![DiagnosticNote {
                     span: None,
-                    message:
-                        "widen the placement gap so the walkway can route around the obstacle"
-                            .to_owned(),
+                    message: walkway_blocked_note(connect, route_failure),
                 }],
                 data: Some(DiagnosticData::WalkwayBlocked {
                     skipped: skipped as u64,
@@ -435,6 +469,60 @@ fn lower_connects(
                 path_material: material_id,
             },
         );
+    }
+}
+
+/// Note text for a `W_WALKWAY_BLOCKED` warning, matched to why the
+/// router could not detour. The remedies differ per cause — widening
+/// the gap fixes an enclosed target but does nothing for a port buried
+/// under another placement's floor or a site past the area cap — so a
+/// single catch-all suggestion would misdirect the author on three of
+/// the four arms.
+fn walkway_blocked_note(
+    connect: &crate::resolve::ValidatedConnect,
+    route_failure: Option<RoutePathError>,
+) -> String {
+    match route_failure {
+        Some(RoutePathError::EndpointBlocked {
+            from_blocked,
+            to_blocked,
+        }) => {
+            let buried = match (from_blocked, to_blocked) {
+                (true, true) => format!(
+                    "ports `{from}` and `{to}` are",
+                    from = connect.from,
+                    to = connect.to,
+                ),
+                (true, false) => format!("port `{from}` is", from = connect.from),
+                (false, true) => format!("port `{to}` is", to = connect.to),
+                (false, false) => {
+                    unreachable!("EndpointBlocked carries at least one blocked side")
+                }
+            };
+            format!(
+                "{buried} buried inside another placement's floor; move that door/window to \
+                 an unobstructed wall or pull the placements apart",
+            )
+        }
+        Some(RoutePathError::AreaCapExceeded { area, cap }) => format!(
+            "the walkway search area ({area} cells) exceeds the router's cap of {cap} cells; \
+             place the two structures closer together",
+        ),
+        Some(RoutePathError::CoordinateOverflow) => {
+            "the walkway endpoints sit at the edge of the representable coordinate space; \
+             move the site closer to the origin"
+                .to_owned()
+        }
+        // `TargetUnreachable` and `None` share the generic remedy: the
+        // ports are fine but every route between them is walled off.
+        // (`None` with skipped cells cannot happen — the router is only
+        // bypassed when the straight L is collision-free — but the
+        // catch-all keeps the note truthful if that wiring ever drifts.)
+        Some(RoutePathError::TargetUnreachable) | None => {
+            "no unobstructed route exists between the two ports; widen the placement gap so \
+             the walkway can round the obstacle"
+                .to_owned()
+        }
     }
 }
 
@@ -4351,14 +4439,16 @@ mod tests {
         );
     }
 
-    fn walkway_with_blocked_path_source() -> &'static str {
-        // Two `home` placements wired back-to-back so the L-path between
-        // their ports threads through `b`'s floor. `a` exposes a
+    fn walkway_with_blocked_l_path_source() -> &'static str {
+        // Two `home` placements wired back-to-back so the straight L-path
+        // between their ports threads through `b`'s floor. `a` exposes a
         // `side=back` door (port sits at world z = -1), `b` exposes
         // `side=front` (port sits at world z = 3). With `east_of=a gap=2`
         // `b` lands at origin (5, 0, 0) with interior 3x3, so the L-path
-        // `(1, -1) -> (6, -1) -> (6, 3)` passes through (6, 0), (6, 1),
-        // (6, 2) — exactly `b`'s floor cells on the right edge.
+        // `(1, -1) -> (6, -1) -> (6, 3)` would pass through (6, 0),
+        // (6, 1), (6, 2) — the middle column of `b`'s 3×3 floor.
+        // A detour through the open x∈[3,4] gap between the two floors
+        // exists, so the router must find it.
         concat!(
             "theme t:\n",
             "  slot wall -> @cobblestone\n",
@@ -4381,13 +4471,107 @@ mod tests {
     }
 
     #[test]
+    fn walkway_routes_around_obstructed_l_path_without_warning() {
+        // When the straight L collides with a placement floor but an
+        // unobstructed detour exists, the router must lay the detour and
+        // the row must not earn a `W_WALKWAY_BLOCKED` — the strip stays
+        // unbroken instead of shipping with a hole through the building.
+        let out = lowered(walkway_with_blocked_l_path_source());
+        assert!(
+            out.diagnostics
+                .iter()
+                .all(|d| d.code != DiagnosticCode::WalkwayBlocked),
+            "detourable row must not warn, got {:?}",
+            out.diagnostics,
+        );
+        let walkway = out
+            .walkways
+            .get("walkway::s::a.back__b.front")
+            .expect("walkway IR present");
+        // Both minimal detours (via the x=3 or x=4 column) share the
+        // L-path's bounding box, so origin/footprint are pinned exactly
+        // even though the tie-break picks one column.
+        assert_eq!(walkway.origin, (1, 0, -1));
+        assert_eq!(walkway.footprint, Footprint { x: 6, z: 5 });
+        let ba = out
+            .structures
+            .get("walkway::s::a.back__b.front")
+            .expect("walkway block array present");
+        // The detour is a shortest route: Manhattan distance 9 → 10
+        // cells, all gravel, none skipped.
+        let gravel_count = (0..ba.dims.volume())
+            .filter(|&i| ba.palette.entries[usize::from(ba.voxels[i].0)].id == "minecraft:gravel")
+            .count();
+        assert_eq!(gravel_count, 10, "shortest detour lays 10 gravel cells");
+        // Endpoints are gravel; the cells the L would have crossed on
+        // `b`'s floor edge (world (6, 0..=2) → local (5, 1..=3)) stay
+        // air because the route went around them.
+        assert_eq!(block_id(ba, 0, 0, 0), "minecraft:gravel");
+        assert_eq!(block_id(ba, 5, 0, 4), "minecraft:gravel");
+        for dz in 1..=3 {
+            assert_eq!(
+                block_id(ba, 5, 0, dz),
+                BlockState::AIR_ID,
+                "floor cell at local (5, 0, {dz}) must stay untouched",
+            );
+        }
+    }
+
+    #[test]
+    fn walkway_detour_is_deterministic_across_lowerings() {
+        // The router breaks ties by fixed expansion order, never by hash
+        // iteration order — two lowerings of the same source must produce
+        // the identical voxel grid (the lockfile pins walkway placement,
+        // so a wobbling tie-break would break reproducible builds).
+        let first = lowered(walkway_with_blocked_l_path_source());
+        let second = lowered(walkway_with_blocked_l_path_source());
+        assert_eq!(
+            first.structures.get("walkway::s::a.back__b.front"),
+            second.structures.get("walkway::s::a.back__b.front"),
+        );
+    }
+
+    fn walkway_with_unroutable_port_source() -> &'static str {
+        // Same back-to-back pair as
+        // `walkway_with_blocked_l_path_source`, plus a third placement
+        // `c` stacked directly north of `a` (`gap=0` → origin
+        // (0, 0, -3)) whose floor covers `a`'s back port cell (1, -1).
+        // A route cannot leave a buried port, so the row must fall back
+        // to the L-path skip-and-warn lay. The L crosses `c`'s floor at
+        // (1, -1) and (2, -1) and `b`'s floor at (6, 0..=2) — 5 skipped
+        // cells.
+        concat!(
+            "theme t:\n",
+            "  slot wall -> @cobblestone\n",
+            "\n",
+            "def back_home size=3x3:\n",
+            "  floor mat_slot=wall\n",
+            "  walls mat_slot=wall height=2\n",
+            "  door id=back side=back at=center\n",
+            "\n",
+            "def front_home size=3x3:\n",
+            "  floor mat_slot=wall\n",
+            "  walls mat_slot=wall height=2\n",
+            "  door id=front side=front at=center\n",
+            "\n",
+            "site s:\n",
+            "  place id=a use=back_home theme=t at=origin\n",
+            "  place id=b use=front_home theme=t east_of=a gap=2\n",
+            "  place id=c use=front_home theme=t north_of=a gap=0\n",
+            "  connect a.back to b.front path=@gravel\n",
+        )
+    }
+
+    #[test]
     fn walkway_blocked_cells_skip_with_w_walkway_blocked_count() {
-        // `lower_connects` must emit exactly one `W_WALKWAY_BLOCKED` per
-        // connect row and the warning's primary must name how many cells
-        // were skipped. The collision count is load-bearing: a regression
-        // that swallows obstructions silently would leave the lockfile
-        // claiming voxels the on-disk NBT does not actually carry.
-        let out = lowered(walkway_with_blocked_path_source());
+        // When no unobstructed route exists (here: `a`'s port cell is
+        // buried under `c`'s floor), `lower_connects` must emit exactly
+        // one `W_WALKWAY_BLOCKED` per connect row and the warning's
+        // primary must name how many cells were skipped. The collision
+        // count is load-bearing: a regression that swallows obstructions
+        // silently would leave the lockfile claiming voxels the on-disk
+        // NBT does not actually carry.
+        let out = lowered(walkway_with_unroutable_port_source());
         let blocked: Vec<_> = out
             .diagnostics
             .iter()
@@ -4401,10 +4585,18 @@ mod tests {
         );
         assert_eq!(
             blocked[0].data,
-            Some(DiagnosticData::WalkwayBlocked { skipped: 3 }),
-            "expected the structured payload to report three skipped cells, got data={:?} primary={}",
+            Some(DiagnosticData::WalkwayBlocked { skipped: 5 }),
+            "expected the structured payload to report five skipped cells, got data={:?} primary={}",
             blocked[0].data,
             blocked[0].primary,
+        );
+        // The note must name the actual cause — `a.back` is buried
+        // under `c`'s floor — not fall back to the generic
+        // widen-the-gap suggestion, which cannot fix a buried port.
+        let note = &blocked[0].notes[0].message;
+        assert!(
+            note.contains("port `a.back` is buried"),
+            "note must point at the buried port, got {note}",
         );
         // AC4 from issue #40: the `primary` string is part of the gcc-style
         // text-format contract that humans (and existing pre-payload test
@@ -4413,7 +4605,7 @@ mod tests {
         // `{skipped}` from the format string — or changes the
         // `port_label` shape — from sliding past CI.
         assert!(
-            blocked[0].primary.contains("skipped 3 cells"),
+            blocked[0].primary.contains("skipped 5 cells"),
             "primary text contract must still name the skip count, got {}",
             blocked[0].primary,
         );
@@ -4423,13 +4615,13 @@ mod tests {
         // even though the `check` CLI does not itself drive walkway
         // lowering — any future caller that wires the JSON formatter
         // around `lower_to_block_array` inherits the same contract.
-        let source = walkway_with_blocked_path_source();
+        let source = walkway_with_unroutable_port_source();
         let lines = crate::check::LineStarts::new(source);
         let rendered = blocked[0].render(source, &lines);
         let value = serde_json::to_value(&rendered).expect("rendered serialises");
         assert_eq!(
             value["data"],
-            serde_json::json!({"kind": "walkway_blocked", "skipped": 3}),
+            serde_json::json!({"kind": "walkway_blocked", "skipped": 5}),
             "JSON `data` payload must match the structured contract, got {value}",
         );
         // AC3 negative-case ride-along: every *other* diagnostic emitted by
@@ -4462,6 +4654,15 @@ mod tests {
             .expect("walkway block array present despite collisions");
         // Path corner at (6, -1) is still gravel.
         assert_eq!(block_id(ba, 5, 0, 0), "minecraft:gravel");
+        // The buried port cell and its neighbour under `c`'s floor
+        // (world (1, -1), (2, -1) → local (0, 0), (1, 0)) stay air.
+        for dx in 0..=1 {
+            assert_eq!(
+                block_id(ba, dx, 0, 0),
+                BlockState::AIR_ID,
+                "blocked cell at local ({dx}, 0, 0) should stay air",
+            );
+        }
         // Cells colliding with `b`'s floor (world (6,0), (6,1), (6,2))
         // map to local (5, 1), (5, 2), (5, 3) — they must stay air.
         for dz in 1..=3 {
