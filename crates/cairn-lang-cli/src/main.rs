@@ -12,7 +12,7 @@ use cairn_lang_core::lock::{
 };
 use cairn_lang_core::resolve::{VersionAxes, compute_axes, resolve};
 use cairn_lang_core::{Severity, check, lower, parse};
-use cairn_lang_formats::bedrock_structure::{build_mcstructure_tag, write_mcstructure};
+use cairn_lang_formats::bedrock_structure::{ParityNote, build_mcstructure_tag, write_mcstructure};
 use cairn_lang_formats::data_version::{
     BedrockTarget, JavaTarget, resolve_bedrock_target, resolve_java_target,
 };
@@ -147,10 +147,12 @@ enum InfoFormat {
 
 #[derive(Copy, Clone, ValueEnum)]
 enum EditionArg {
-    /// Java Edition. The only fully implemented backend so far.
+    /// Java Edition. Emits a gzip-compressed vanilla `.nbt` structure.
     Java,
-    /// Bedrock Edition. Reserved for a future backend; passing it here
-    /// exits with a dedicated error so the CLI surface stays stable.
+    /// Bedrock Edition. Emits an uncompressed little-endian `.mcstructure`;
+    /// the stair family's blockstate is mapped to Bedrock `states` and
+    /// unrepresentable intent (stair `shape`) degrades with a
+    /// `W_INTENT_DEGRADED` warning.
     Bedrock,
 }
 
@@ -603,12 +605,21 @@ impl ResolvedTarget {
         }
     }
 
-    /// Build the structure tag tree for this edition's backend. The two
-    /// backends raise different error types; both are rendered to a
-    /// message string here so the caller has one error shape to report.
-    fn build_tag(&self, ba: &BlockArray) -> Result<Compound, String> {
+    /// Build the structure tag tree for this edition's backend, plus any
+    /// `W_INTENT_DEGRADED` parity notes raised while lowering intent to the
+    /// edition (Java is always lossless, so its note list is empty). The two
+    /// backends raise different error types; both are rendered to a message
+    /// string here so the caller has one error shape to report.
+    ///
+    /// [`ParityNote`] is threaded verbatim rather than flattened to a message
+    /// string so the CLI can key the warning by the palette id that
+    /// degraded, keeping the (`id`, `message`) pair machine-parsable for
+    /// downstream tools.
+    fn build_tag(&self, ba: &BlockArray) -> Result<(Compound, Vec<ParityNote>), String> {
         match self {
-            ResolvedTarget::Java(t) => build_structure_tag(ba, t).map_err(|e| e.to_string()),
+            ResolvedTarget::Java(t) => build_structure_tag(ba, t)
+                .map(|tag| (tag, Vec::new()))
+                .map_err(|e| e.to_string()),
             ResolvedTarget::Bedrock(t) => build_mcstructure_tag(ba, t).map_err(|e| e.to_string()),
         }
     }
@@ -800,10 +811,19 @@ fn prepare_artifacts(
     let mut seen_paths: std::collections::HashMap<PathBuf, String> =
         std::collections::HashMap::with_capacity(block_ir.structures.len());
     for (scope, ba) in &block_ir.structures {
-        let tag = target.build_tag(ba).map_err(|err| {
+        let (tag, degraded) = target.build_tag(ba).map_err(|err| {
             eprintln!("error: building `{scope}`: {err}");
             ExitCode::from(1)
         })?;
+        for note in degraded {
+            // Keep `id` on the warning line so tools can group by the
+            // degraded palette entry, not just by scope.
+            eprintln!(
+                "warning[W_INTENT_DEGRADED]: {scope}: {id}: {message}",
+                id = note.id,
+                message = note.message,
+            );
+        }
         let path = out_dir.join(output_filename(scope, target.output_ext()));
         // Walkway IR keys allow `.` / `_` in place and port ids; the
         // `output_filename` flatten of `.` → `_` can fold two distinct

@@ -14,6 +14,26 @@
 
 ### 追加
 
+- `cairn-lang-formats::bedrock_state` — Bedrock バックエンド向けの
+  per-edition blockstate 変換。`.mcstructure` ライターが後続とした対応です。
+  `translate_states` は **stair family**（現状 lowering がプロパティ付きで
+  intern する唯一のブロック種）を、Java の `facing` / `half` 文字列
+  プロパティから Bedrock の型付き `states` へマップします —
+  `weirdo_direction`（`east=0, west=1, south=2, north=3`、wiki の
+  `Stairs/BS` 一覧で検証）と `upside_down_bit`（`top=1, bottom=0`）。stair の
+  `shape` に対応する Bedrock 状態はないため、`straight`（Bedrock の既定）は
+  劣化なしで落とし、コーナー shape は `ParityNote` として落とし、CLI が
+  `warning[W_INTENT_DEGRADED]` として表示します（spec versioning-editions
+  §10.3 `dropped_states: [shape]` / §10.7。§10.4 の無音削除禁止を満たす）。
+  マップ対象外の family でプロパティを持つブロックや、Java ドメイン外の
+  stair 状態値は、従来通り自己修正トリプル付きで fail-loud します。
+  `build_mcstructure_tag` は `(Compound, Vec<ParityNote>)` を返すようになり、
+  palette entry ごとに空 compound ではなく実際の `states` を書き出します。
+  `cottage.crn`（すべて `straight` の切妻屋根）は `--edition bedrock` で
+  クリーンにコンパイルされ、`themed-tower.crn` は非 straight の軒コーナーで
+  `W_INTENT_DEGRADED` を 1 件出してコンパイルされます。
+  `BedrockStructureError::StatefulPaletteEntry` のハードエラーは透過的な
+  `BedrockStructureError::State(BedrockStateError)` に置き換わりました。
 - `cairn-lang-nbt::bedrock::write_bedrock_uncompressed` — Bedrock の
   非圧縮 `.mcstructure` 向けリトルエンディアン NBT ライター。バイト列
   エンコーダを Endian パラメータ化した単一のコア (`writer.rs`) に抽出し

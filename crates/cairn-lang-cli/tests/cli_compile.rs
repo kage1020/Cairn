@@ -262,11 +262,11 @@ fn c8c_bedrock_lockfile_records_bedrock_target_and_pack_hash() {
 }
 
 #[test]
-fn c8d_bedrock_rejects_stateful_palette_entry() {
-    // cottage.crn resolves a gable roof to `minecraft:spruce_stairs` with
-    // blockstate properties, which the stateless-only Bedrock backend must
-    // reject loudly (spec §10.4) rather than drop silently. No artifact
-    // should be written.
+fn c8d_bedrock_cottage_maps_stair_states_without_degradation() {
+    // cottage.crn resolves a gable roof to `*_stairs` with `facing`/`half`/
+    // `shape=straight` properties. The Bedrock backend maps facing/half to
+    // Bedrock `states` and drops the (straight, i.e. default) shape without a
+    // note, so the compile succeeds cleanly and writes the artifact.
     let tmp = TempDir::new().expect("tempdir");
     let dst = tmp.path().join("cottage.crn");
     fs::copy(examples_dir().join("cottage.crn"), &dst).expect("copy cottage");
@@ -278,15 +278,51 @@ fn c8d_bedrock_rejects_stateful_palette_entry() {
         "--out",
         out_dir.path().to_str().unwrap(),
     ]);
-    assert_eq!(result.status.code(), Some(1));
     let stderr = String::from_utf8(result.stderr).expect("utf-8");
     assert!(
-        stderr.contains("blockstate properties") && stderr.contains("--edition java"),
-        "expected a stateful-entry explanation with the self-correction triple, got: {stderr}",
+        result.status.success(),
+        "cottage on bedrock, stderr={stderr}"
     );
     assert!(
-        !out_dir.path().join("cottage.mcstructure").exists(),
-        "no artifact should be written on a hard error",
+        !stderr.contains("W_INTENT_DEGRADED"),
+        "cottage's straight gable stairs must not degrade, got: {stderr}",
+    );
+    assert!(
+        out_dir.path().join("cottage.mcstructure").exists(),
+        "the mcstructure artifact should be written",
+    );
+}
+
+#[test]
+fn c8f_bedrock_themed_tower_degrades_stair_shape_but_compiles() {
+    // themed-tower.crn's eave stairs use non-straight shapes
+    // (`outer_left`/`outer_right`), which Bedrock has no state for. The
+    // compile still succeeds (exit 0) but surfaces a W_INTENT_DEGRADED
+    // warning per dropped shape (spec §10.3 `dropped_states:[shape]` / §10.7),
+    // and the artifact is written.
+    let tmp = TempDir::new().expect("tempdir");
+    let dst = tmp.path().join("themed-tower.crn");
+    fs::copy(examples_dir().join("themed-tower.crn"), &dst).expect("copy themed-tower");
+    let out_dir = TempDir::new().expect("out tempdir");
+    let result = run_compile(&[
+        dst.to_str().unwrap(),
+        "--edition",
+        "bedrock",
+        "--out",
+        out_dir.path().to_str().unwrap(),
+    ]);
+    let stderr = String::from_utf8(result.stderr).expect("utf-8");
+    assert!(
+        result.status.success(),
+        "themed-tower should still compile on bedrock, stderr={stderr}",
+    );
+    assert!(
+        stderr.contains("W_INTENT_DEGRADED") && stderr.contains("shape"),
+        "expected a shape-drop degradation warning, got: {stderr}",
+    );
+    assert!(
+        out_dir.path().join("keep.mcstructure").exists(),
+        "the mcstructure artifact should still be written on a degradation",
     );
 }
 

@@ -1,16 +1,21 @@
 //! Readers and writers around the Cairn block-array IR for existing schematic formats.
 //!
 //! Supported: vanilla Java `.nbt` structures and Bedrock `.mcstructure`
-//! (writers only; the Bedrock writer emits stateless palettes until
-//! per-edition state mapping lands).
+//! (writers only; the Bedrock writer maps the stair family's blockstate
+//! properties to Bedrock `states` and drops unrepresentable intent with a
+//! degradation note).
 //! Planned: Litematica `.litematic` and the `WorldEdit` `.schem` format.
 
+pub mod bedrock_state;
 pub mod bedrock_structure;
 pub mod data_version;
 pub mod java_structure;
 pub mod registry;
 
-pub use bedrock_structure::{BedrockStructureError, build_mcstructure_tag, write_mcstructure};
+pub use bedrock_state::{BedrockStateError, StateTranslation, translate_states};
+pub use bedrock_structure::{
+    BedrockStructureError, ParityNote, build_mcstructure_tag, write_mcstructure,
+};
 pub use data_version::{
     BedrockTarget, JavaTarget, UnsupportedTarget, resolve_bedrock_target, resolve_java_target,
     supported_list,
