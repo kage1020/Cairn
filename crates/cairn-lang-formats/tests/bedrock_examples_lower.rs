@@ -1,15 +1,15 @@
 //! End-to-end coverage for compiling the example builds through the Bedrock
-//! `.mcstructure` backend (M4 — Java/Bedrock parity).
+//! `.mcstructure` backend.
 //!
 //! Lives in `cairn-lang-formats` because the pipeline needs both the built-in
 //! Bedrock registry pack (`builtin_bedrock`, to resolve the abstract material
 //! tokens) and the Bedrock structure backend (`build_mcstructure_tag`), which
 //! `cairn-lang-core` cannot reach without a dependency cycle.
 //!
-//! Pins the M4-PR2 contract: the roof stair family — the only block kind the
-//! lowering interns with blockstate properties — now maps to Bedrock `states`
-//! instead of failing loud, so `cottage` compiles cleanly and `themed-tower`
-//! compiles with exactly the shape-drop degradation its eave corners incur.
+//! Contract pinned: the roof stair family — the only block kind the lowering
+//! interns with blockstate properties — maps to Bedrock `states` rather than
+//! failing loud, so `cottage` compiles cleanly and `themed-tower` compiles
+//! with exactly the shape-drop degradation its eave corners incur.
 
 use std::path::PathBuf;
 
@@ -40,7 +40,7 @@ fn lower_bedrock(example: &str) -> BlockArrayIr {
 
 #[test]
 fn cottage_compiles_to_mcstructure_without_degradation() {
-    // AC12: cottage's gable roof stairs are all `shape=straight`
+    // cottage's gable roof stairs are all `shape=straight`
     // (`roof::gable_stair_state`), which is Bedrock's default — so every
     // stair palette entry maps losslessly and no W_INTENT_DEGRADED note is
     // raised.
@@ -114,10 +114,10 @@ fn cottage_roof_stairs_carry_bedrock_states() {
 
 #[test]
 fn themed_tower_compiles_to_mcstructure_with_shape_degradation() {
-    // AC13: themed-tower's eave stairs use non-straight shapes
-    // (`outer_left`/`outer_right`), which Bedrock has no state for. The build
-    // succeeds but raises at least one W_INTENT_DEGRADED note per dropped
-    // shape.
+    // themed-tower's eave stair binds `shape=outer_left`, which Bedrock has
+    // no state for. The build succeeds; palette dedup means one warning per
+    // distinct dropped `(id, shape)`, and today's source has exactly one
+    // such palette entry (`dark_oak_stairs` with `outer_left`).
     let out = lower_bedrock("themed-tower.crn");
     let target = resolve_bedrock_target("latest").expect("known target");
     let mut total_notes = 0;
@@ -129,8 +129,8 @@ fn themed_tower_compiles_to_mcstructure_with_shape_degradation() {
         }
         total_notes += notes.len();
     }
-    assert!(
-        total_notes >= 1,
-        "themed-tower's non-straight eave stairs must degrade on Bedrock"
+    assert_eq!(
+        total_notes, 1,
+        "themed-tower has exactly one non-straight stair palette entry today"
     );
 }

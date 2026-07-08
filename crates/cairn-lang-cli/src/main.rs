@@ -12,7 +12,7 @@ use cairn_lang_core::lock::{
 };
 use cairn_lang_core::resolve::{VersionAxes, compute_axes, resolve};
 use cairn_lang_core::{Severity, check, lower, parse};
-use cairn_lang_formats::bedrock_structure::{build_mcstructure_tag, write_mcstructure};
+use cairn_lang_formats::bedrock_structure::{ParityNote, build_mcstructure_tag, write_mcstructure};
 use cairn_lang_formats::data_version::{
     BedrockTarget, JavaTarget, resolve_bedrock_target, resolve_java_target,
 };
@@ -610,14 +610,17 @@ impl ResolvedTarget {
     /// edition (Java is always lossless, so its note list is empty). The two
     /// backends raise different error types; both are rendered to a message
     /// string here so the caller has one error shape to report.
-    fn build_tag(&self, ba: &BlockArray) -> Result<(Compound, Vec<String>), String> {
+    ///
+    /// [`ParityNote`] is threaded verbatim rather than flattened to a message
+    /// string so the CLI can key the warning by the palette id that
+    /// degraded, keeping the (`id`, `message`) pair machine-parsable for
+    /// downstream tools.
+    fn build_tag(&self, ba: &BlockArray) -> Result<(Compound, Vec<ParityNote>), String> {
         match self {
             ResolvedTarget::Java(t) => build_structure_tag(ba, t)
                 .map(|tag| (tag, Vec::new()))
                 .map_err(|e| e.to_string()),
-            ResolvedTarget::Bedrock(t) => build_mcstructure_tag(ba, t)
-                .map(|(tag, notes)| (tag, notes.into_iter().map(|n| n.message).collect()))
-                .map_err(|e| e.to_string()),
+            ResolvedTarget::Bedrock(t) => build_mcstructure_tag(ba, t).map_err(|e| e.to_string()),
         }
     }
 
@@ -812,8 +815,14 @@ fn prepare_artifacts(
             eprintln!("error: building `{scope}`: {err}");
             ExitCode::from(1)
         })?;
-        for message in degraded {
-            eprintln!("warning[W_INTENT_DEGRADED]: {scope}: {message}");
+        for note in degraded {
+            // Keep `id` on the warning line so tools can group by the
+            // degraded palette entry, not just by scope.
+            eprintln!(
+                "warning[W_INTENT_DEGRADED]: {scope}: {id}: {message}",
+                id = note.id,
+                message = note.message,
+            );
         }
         let path = out_dir.join(output_filename(scope, target.output_ext()));
         // Walkway IR keys allow `.` / `_` in place and port ids; the

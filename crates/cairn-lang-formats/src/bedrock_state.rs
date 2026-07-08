@@ -9,17 +9,23 @@
 //!
 //! Per spec versioning-editions §10.3 ("Java as the base, Bedrock as
 //! overriding diffs") and §10.7 (`intent_state` neutral, `resolved_state`
-//! per-edition), this module holds the hand-written Bedrock diff. The first
-//! cut covers the **stair family** — the only block kind Cairn's lowering
-//! interns with properties today (roof slopes / eaves,
-//! `cairn_lang_core::block_array::roof`). Everything else with properties is
-//! a hard error rather than a silent pass-through.
+//! per-edition), this module holds the hand-written Bedrock diff. It
+//! currently covers the **stair family**; further block families extend
+//! the same match dispatch additively as their lowering paths land. Any
+//! block with properties outside a covered family is a hard error rather
+//! than a silent pass-through.
 //!
 //! `shape` has no Bedrock equivalent (§10.7: "stairs shape — no state on
 //! Bedrock"). A non-`straight` shape is **dropped with a degradation note**
 //! (spec §10.3 `dropped_states: [shape]`, §10.7 `W_INTENT_DEGRADED`), never
 //! silently (§10.4 forbids implicit dropping). `shape=straight` is the
 //! Bedrock default, so it drops without a note.
+//!
+//! Numeric domains here are pinned against the Bedrock stair block-state
+//! listing on `minecraft.wiki` / `wiki.bedrock.dev` (`Stairs/BS`,
+//! consulted 2026-07 against Bedrock 1.21.60). The Cairn spec's §10.7
+//! illustrative example uses different `weirdo_direction` values; the
+//! wiki listing is authoritative for the on-disk mapping.
 
 use cairn_lang_nbt::Compound;
 use cairn_lang_nbt::tag::Tag;
@@ -231,20 +237,20 @@ mod tests {
     }
 
     fn stair_props(facing: &str, half: &str, shape: &str) -> IndexMap<String, String> {
-        // Same key order the geometry layer interns
-        // (`roof::stair_state`): facing, half, shape.
+        // Preserve the facing / half / shape insertion order the lowering
+        // uses so `translate_states` sees the same key stream at runtime.
         props([("facing", facing), ("half", half), ("shape", shape)])
     }
 
     #[test]
-    fn ac1_bare_block_has_empty_states_and_no_degradation() {
+    fn bare_block_has_empty_states_and_no_degradation() {
         let t = translate_states("minecraft:oak_planks", &IndexMap::new()).expect("bare");
         assert!(t.states.entries.is_empty());
         assert!(t.degraded.is_empty());
     }
 
     #[test]
-    fn ac2_stair_maps_facing_and_half_straight_is_lossless() {
+    fn stair_maps_facing_and_half_straight_is_lossless() {
         let t = translate_states(
             "minecraft:dark_oak_stairs",
             &stair_props("north", "bottom", "straight"),
@@ -258,7 +264,7 @@ mod tests {
     }
 
     #[test]
-    fn ac3_all_four_facings_map_to_distinct_weirdo_directions() {
+    fn all_four_facings_map_to_distinct_weirdo_directions() {
         let expected = [("east", 0), ("west", 1), ("south", 2), ("north", 3)];
         for (facing, weirdo) in expected {
             let t = translate_states(
@@ -275,7 +281,7 @@ mod tests {
     }
 
     #[test]
-    fn ac4_half_top_sets_upside_down_bit() {
+    fn half_top_sets_upside_down_bit() {
         let t = translate_states(
             "minecraft:spruce_stairs",
             &stair_props("east", "top", "straight"),
@@ -285,7 +291,7 @@ mod tests {
     }
 
     #[test]
-    fn ac5_non_straight_shape_drops_with_degradation_note() {
+    fn non_straight_shape_drops_with_degradation_note() {
         let t = translate_states(
             "minecraft:oak_stairs",
             &stair_props("south", "top", "outer_left"),
@@ -311,21 +317,26 @@ mod tests {
     }
 
     #[test]
-    fn ac6_non_stair_with_properties_fails_loud() {
+    fn non_stair_with_properties_fails_loud() {
         let err = translate_states("minecraft:oak_door", &props([("facing", "north")]))
             .expect_err("stateful non-stair");
         assert!(matches!(
             err,
             BedrockStateError::UnmappableBlock { ref id, .. } if id == "minecraft:oak_door"
         ));
+        // Self-correction triple (spec §10.4): what is wrong / what is
+        // valid / suggested fix. Each fragment is pinned so a message
+        // reword that breaks the lint loop's expectation fails here first.
         let msg = err.to_string();
-        assert!(msg.contains("minecraft:oak_door"), "got: {msg}");
-        assert!(msg.contains("facing=north"), "got: {msg}");
-        assert!(msg.contains("--edition java"), "suggested fix, got: {msg}");
+        assert!(msg.contains("minecraft:oak_door"), "wrong: {msg}");
+        assert!(msg.contains("facing=north"), "wrong: {msg}");
+        assert!(msg.contains("`minecraft:oak_planks`"), "valid: {msg}");
+        assert!(msg.contains("`*_stairs`"), "valid: {msg}");
+        assert!(msg.contains("--edition java"), "fix: {msg}");
     }
 
     #[test]
-    fn ac7_unknown_stair_facing_value_fails_loud() {
+    fn unknown_stair_facing_value_fails_loud() {
         let err = translate_states(
             "minecraft:oak_stairs",
             &stair_props("up", "bottom", "straight"),
@@ -335,6 +346,32 @@ mod tests {
             err,
             BedrockStateError::UnknownStairState { key: "facing", ref value, .. } if value == "up"
         ));
+        let msg = err.to_string();
+        assert!(msg.contains("facing=up"), "wrong: {msg}");
+        // Valid values (FACING_VALID) surface in the message so the lint
+        // loop can steer back to the closed domain instead of guessing.
+        assert!(msg.contains("east, west, south, north"), "valid: {msg}");
+        assert!(msg.contains("--edition java"), "fix: {msg}");
+    }
+
+    #[test]
+    fn unknown_stair_half_value_fails_loud() {
+        // Mirrors the facing test to guard against a future
+        // `upside_down_bit()` refactor that silently maps unknown values to
+        // `0` — a silent drop that spec §10.4 forbids.
+        let err = translate_states(
+            "minecraft:oak_stairs",
+            &stair_props("north", "middle", "straight"),
+        )
+        .expect_err("bad half");
+        assert!(matches!(
+            err,
+            BedrockStateError::UnknownStairState { key: "half", ref value, .. } if value == "middle"
+        ));
+        let msg = err.to_string();
+        assert!(msg.contains("half=middle"), "wrong: {msg}");
+        assert!(msg.contains("top, bottom"), "valid: {msg}");
+        assert!(msg.contains("--edition java"), "fix: {msg}");
     }
 
     #[test]
@@ -345,5 +382,9 @@ mod tests {
             err,
             BedrockStateError::UnknownStairKey { ref key, .. } if key == "waterlogged"
         ));
+        let msg = err.to_string();
+        assert!(msg.contains("waterlogged"), "wrong: {msg}");
+        assert!(msg.contains("Handled: facing, half, shape"), "valid: {msg}");
+        assert!(msg.contains("--edition java"), "fix: {msg}");
     }
 }
