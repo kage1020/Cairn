@@ -23,11 +23,12 @@
 //! layer carries co-located blocks (waterlogging); Cairn's lowering never
 //! authors those today, so it is `-1`-filled ("no block here").
 //!
-//! This first cut emits **stateless palettes only**: a palette entry that
-//! carries blockstate properties is a hard error rather than a silent
-//! drop (spec versioning-editions §10.4), because Java-shaped property
-//! names (`facing=`, `half=`) are not valid Bedrock state keys until the
-//! per-edition state mapping lands.
+//! Blockstate properties are translated per edition by
+//! [`crate::bedrock_state`]: the stair family's `facing` / `half` become
+//! Bedrock's `weirdo_direction` / `upside_down_bit`, and intent Bedrock
+//! cannot express (stair `shape`) is dropped with a degradation note rather
+//! than silently (spec versioning-editions §10.3 / §10.4 / §10.7). A block
+//! with properties outside a mapped family is still a hard error.
 
 use cairn_lang_core::block_array::BlockArray;
 pub use cairn_lang_nbt::Compound;
@@ -35,8 +36,22 @@ use cairn_lang_nbt::tag::{List, Tag};
 use cairn_lang_nbt::{NbtIoError, write_bedrock_uncompressed};
 use thiserror::Error;
 
+use crate::bedrock_state::{BedrockStateError, translate_states};
 use crate::data_version::BedrockTarget;
 use crate::java_structure::is_concrete_id;
+
+/// A palette entry whose intent was degraded to fit Bedrock — surfaced by the
+/// caller as `W_INTENT_DEGRADED`. The serialiser has no source span (a
+/// [`cairn_lang_core::block_array::BlockState`] carries none), so the note is
+/// keyed by the palette entry's id and left for the CLI to attribute to the
+/// enclosing structure scope.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ParityNote {
+    /// Concrete id of the palette entry whose intent degraded.
+    pub id: String,
+    /// Human-readable degradation message.
+    pub message: String,
+}
 
 /// Errors raised while serialising a [`BlockArray`] to a `.mcstructure`.
 #[derive(Debug, Error)]
@@ -52,22 +67,12 @@ pub enum BedrockStructureError {
         /// Offending id verbatim.
         id: String,
     },
-    /// A palette entry carries blockstate properties, which this backend
-    /// cannot yet express in Bedrock's `states` vocabulary. The message
-    /// carries the self-correction triple (what is wrong / what is valid
-    /// / suggested fix) so the lint loop can act on it.
-    #[error(
-        "palette entry `{id}[{properties}]` carries blockstate properties; the Bedrock backend \
-         emits stateless palettes only until per-edition state mapping lands. Valid: bare block \
-         ids (e.g. `minecraft:oak_planks`). Fix: bind the member's mat_slot to a property-free \
-         material, or compile with `--edition java`"
-    )]
-    StatefulPaletteEntry {
-        /// Offending id verbatim.
-        id: String,
-        /// The entry's `key=value` pairs, comma-joined for the message.
-        properties: String,
-    },
+    /// A palette entry's blockstate properties could not be translated to
+    /// Bedrock's `states` vocabulary (an unmapped block family, or a value
+    /// outside the Java domain). The forwarded error carries the
+    /// self-correction triple so the lint loop can act on it.
+    #[error(transparent)]
+    State(#[from] BedrockStateError),
     /// A voxel dimension overflowed the `i32` wire width NBT uses.
     #[error("dimension {axis} = {value} exceeds NBT i32 wire limit")]
     DimensionOverflow {
@@ -79,7 +84,8 @@ pub enum BedrockStructureError {
 }
 
 /// Build the unnamed root [`Compound`] for a `.mcstructure` file from a
-/// lowered [`BlockArray`].
+/// lowered [`BlockArray`], alongside any [`ParityNote`]s raised while
+/// translating blockstate properties to Bedrock's `states` vocabulary.
 ///
 /// Pure: no I/O happens here, so the same tree can be serialised twice
 /// (hashing, artifact write) without rebuilding.
@@ -87,31 +93,33 @@ pub enum BedrockStructureError {
 /// # Errors
 ///
 /// Returns [`BedrockStructureError::AbstractPaletteEntry`] for an
-/// unresolved abstract token, [`BedrockStructureError::StatefulPaletteEntry`]
-/// for a palette entry with blockstate properties (see the module docs),
-/// and [`BedrockStructureError::DimensionOverflow`] when a dimension does
-/// not fit the wire width.
+/// unresolved abstract token, [`BedrockStructureError::State`] for a palette
+/// entry whose properties cannot be mapped to Bedrock (see
+/// [`crate::bedrock_state`]), and [`BedrockStructureError::DimensionOverflow`]
+/// when a dimension does not fit the wire width.
 pub fn build_mcstructure_tag(
     ba: &BlockArray,
     target: &BedrockTarget,
-) -> Result<Compound, BedrockStructureError> {
+) -> Result<(Compound, Vec<ParityNote>), BedrockStructureError> {
+    // Translate every palette entry up front: a mapping failure (abstract
+    // token, unmapped stateful block) aborts the whole build before any tree
+    // is assembled, mirroring the Java backend's fail-loud contract.
+    let mut palette_states: Vec<Compound> = Vec::with_capacity(ba.palette.entries.len());
+    let mut notes: Vec<ParityNote> = Vec::new();
     for entry in &ba.palette.entries {
         if !is_concrete_id(&entry.id) {
             return Err(BedrockStructureError::AbstractPaletteEntry {
                 id: entry.id.clone(),
             });
         }
-        if !entry.properties.is_empty() {
-            return Err(BedrockStructureError::StatefulPaletteEntry {
+        let translated = translate_states(&entry.id, &entry.properties)?;
+        for message in translated.degraded {
+            notes.push(ParityNote {
                 id: entry.id.clone(),
-                properties: entry
-                    .properties
-                    .iter()
-                    .map(|(k, v)| format!("{k}={v}"))
-                    .collect::<Vec<_>>()
-                    .join(","),
+                message,
             });
         }
+        palette_states.push(translated.states);
     }
 
     let size_x = dim_to_i32(ba.dims.x, "x")?;
@@ -121,7 +129,10 @@ pub fn build_mcstructure_tag(
     let mut structure = Compound::new();
     structure.insert("block_indices", Tag::List(block_indices(ba)));
     structure.insert("entities", Tag::List(List::empty()));
-    structure.insert("palette", Tag::Compound(palette_compound(ba, target)));
+    structure.insert(
+        "palette",
+        Tag::Compound(palette_compound(ba, target, palette_states)),
+    );
 
     let mut root = Compound::new();
     root.insert("format_version", Tag::Int(1));
@@ -131,7 +142,7 @@ pub fn build_mcstructure_tag(
         "structure_world_origin",
         Tag::List(List::of_ints([0, 0, 0])),
     );
-    Ok(root)
+    Ok((root, notes))
 }
 
 /// Write an already-built `.mcstructure` root under the empty root name
@@ -188,17 +199,23 @@ fn block_indices(ba: &BlockArray) -> List {
     }
 }
 
-fn palette_compound(ba: &BlockArray, target: &BedrockTarget) -> Compound {
+fn palette_compound(
+    ba: &BlockArray,
+    target: &BedrockTarget,
+    palette_states: Vec<Compound>,
+) -> Compound {
     let entries: Vec<Compound> = ba
         .palette
         .entries
         .iter()
-        .map(|state| {
+        .zip(palette_states)
+        .map(|(state, states)| {
             let mut c = Compound::new();
             c.insert("name", Tag::String(state.id.clone()));
-            // Stateless by the guard in `build_mcstructure_tag`; the empty
-            // compound is still written because the game expects the key.
-            c.insert("states", Tag::Compound(Compound::new()));
+            // Bedrock `states` translated from the Java properties by
+            // `build_mcstructure_tag`; an empty compound for a bare block
+            // (the game still expects the key).
+            c.insert("states", Tag::Compound(states));
             c.insert("version", Tag::Int(target.block_version));
             c
         })

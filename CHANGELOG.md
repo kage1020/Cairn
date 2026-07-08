@@ -12,6 +12,26 @@ and is a separate axis from the Minecraft target version.
 
 ### Added
 
+- `cairn-lang-formats::bedrock_state` — per-edition blockstate translation
+  for the Bedrock backend, the follow-up the `.mcstructure` writer deferred.
+  `translate_states` maps the **stair family** (the only block kind the
+  lowering interns with properties today) from Java's `facing` / `half`
+  string properties to Bedrock's typed `states` — `weirdo_direction`
+  (`east=0, west=1, south=2, north=3`, verified against the wiki
+  `Stairs/BS` listing) and `upside_down_bit` (`top=1, bottom=0`). Stair
+  `shape` has no Bedrock state: `straight` (the Bedrock default) drops
+  losslessly, while a corner shape drops with a `ParityNote` the CLI
+  surfaces as `warning[W_INTENT_DEGRADED]` (spec versioning-editions §10.3
+  `dropped_states: [shape]` / §10.7, never a silent drop per §10.4). A
+  block with properties outside a mapped family, or a stair state value
+  outside the Java domain, still fails loud with the self-correction triple.
+  `build_mcstructure_tag` now returns `(Compound, Vec<ParityNote>)` and
+  writes real `states` per palette entry instead of the old empty compound;
+  `cottage.crn` (all-`straight` gable roof) compiles clean for
+  `--edition bedrock`, and `themed-tower.crn` compiles with one
+  `W_INTENT_DEGRADED` for its non-straight eave corners. The
+  `BedrockStructureError::StatefulPaletteEntry` hard error is replaced by
+  a transparent `BedrockStructureError::State(BedrockStateError)`.
 - `cairn-lang-nbt::bedrock::write_bedrock_uncompressed` — a little-endian
   NBT writer for Bedrock's uncompressed `.mcstructure` on-disk form. The
   byte-level encoder is refactored into a single endian-parameterised core

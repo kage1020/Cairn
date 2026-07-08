@@ -5,6 +5,7 @@
 //! fastest axis, palette entries of `{ name, states, version }`.
 
 use cairn_lang_core::block_array::{BlockArray, BlockState, Dims, Palette, PaletteIndex};
+use cairn_lang_formats::bedrock_state::BedrockStateError;
 use cairn_lang_formats::bedrock_structure::{
     BedrockStructureError, build_mcstructure_tag, write_mcstructure,
 };
@@ -59,7 +60,7 @@ fn structure_compound(root: &Compound) -> &Compound {
 fn m1_root_carries_format_version_size_structure_and_origin() {
     // AC M1: root key set and scalar values.
     let (ba, _) = asymmetric_array();
-    let root = build_mcstructure_tag(&ba, &target_1_21_60()).expect("build");
+    let (root, _notes) = build_mcstructure_tag(&ba, &target_1_21_60()).expect("build");
     let keys: Vec<&String> = root.entries.keys().collect();
     assert_eq!(
         keys,
@@ -87,7 +88,7 @@ fn m2_block_indices_are_z_fastest_with_minus_one_second_layer() {
     // fastest — flat index (x * size_y + y) * size_z + z — and layer 1 is
     // volume × -1 (no waterlog layer authored).
     let (ba, planks) = asymmetric_array();
-    let root = build_mcstructure_tag(&ba, &target_1_21_60()).expect("build");
+    let (root, _notes) = build_mcstructure_tag(&ba, &target_1_21_60()).expect("build");
     let structure = structure_compound(&root);
     let layers = match structure.entries.get("block_indices") {
         Some(Tag::List(l)) => l,
@@ -117,15 +118,15 @@ fn m2_block_indices_are_z_fastest_with_minus_one_second_layer() {
 #[test]
 fn m3_palette_entries_carry_name_empty_states_and_version() {
     // AC M3: `structure.palette.default.block_palette[i]` mirrors the IR
-    // palette order, `states` is an empty compound (stateless palettes
-    // only in this cut), and `version` is the target's block version.
+    // palette order, `states` is an empty compound for a bare (property-free)
+    // block, and `version` is the target's block version.
     // `block_position_data` is present and empty, and `entities` is an
     // empty list.
     let (ba, _) = asymmetric_array();
     let target = target_1_21_60();
     // 1.21.60's wiki-confirmed block-palette marker is 1.21.60.33.
     assert_eq!(target.block_version, block_version(1, 21, 60, 33));
-    let root = build_mcstructure_tag(&ba, &target).expect("build");
+    let (root, _notes) = build_mcstructure_tag(&ba, &target).expect("build");
     let structure = structure_compound(&root);
 
     match structure.entries.get("entities") {
@@ -170,36 +171,117 @@ fn m3_palette_entries_carry_name_empty_states_and_version() {
     }
 }
 
-#[test]
-fn m4_stateful_palette_entry_fails_loud() {
-    // AC M4: a palette entry with blockstate properties is a hard error
-    // (spec versioning-editions §10.4 — no silent substitution/dropping)
-    // whose message carries the self-correction triple.
+/// Build a single-voxel array whose one non-air palette entry is `state`.
+fn single_stateful_array(state: BlockState) -> BlockArray {
     let mut palette = Palette::new_with_air();
-    let mut stairs = BlockState::bare("minecraft:spruce_stairs");
-    stairs
-        .properties
-        .insert("facing".to_owned(), "north".to_owned());
-    let idx = palette.intern(stairs);
-    let ba = BlockArray {
+    let idx = palette.intern(state);
+    BlockArray {
         dims: Dims { x: 1, y: 1, z: 1 },
         palette,
         voxels: vec![idx],
         block_entities: vec![],
         entities: vec![],
         source_scope: "struct::stateful".to_owned(),
+    }
+}
+
+/// The typed `states` compound of the last (non-air) block-palette entry.
+fn last_palette_states(root: &Compound) -> &Compound {
+    let structure = structure_compound(root);
+    let default = match structure.entries.get("palette") {
+        Some(Tag::Compound(p)) => match p.entries.get("default") {
+            Some(Tag::Compound(d)) => d,
+            other => panic!("palette.default is not a Compound: {other:?}"),
+        },
+        other => panic!("palette is not a Compound: {other:?}"),
     };
+    let entries = match default.entries.get("block_palette") {
+        Some(Tag::List(l)) => &l.items,
+        other => panic!("block_palette is not a List: {other:?}"),
+    };
+    match entries.last() {
+        Some(Tag::Compound(c)) => match c.entries.get("states") {
+            Some(Tag::Compound(s)) => s,
+            other => panic!("states is not a Compound: {other:?}"),
+        },
+        other => panic!("no last palette entry: {other:?}"),
+    }
+}
+
+#[test]
+fn m4_unmappable_stateful_entry_fails_loud() {
+    // AC8: a stateful entry outside a mapped family is a hard error (spec
+    // versioning-editions §10.4 — no silent substitution/dropping) whose
+    // message carries the self-correction triple. Stairs are now mapped, so
+    // fail-loud is pinned on a non-stair stateful block.
+    let mut door = BlockState::bare("minecraft:oak_door");
+    door.properties
+        .insert("facing".to_owned(), "north".to_owned());
+    let ba = single_stateful_array(door);
     let err = build_mcstructure_tag(&ba, &target_1_21_60()).expect_err("stateful entry");
     match &err {
-        BedrockStructureError::StatefulPaletteEntry { id, .. } => {
-            assert_eq!(id, "minecraft:spruce_stairs");
+        BedrockStructureError::State(BedrockStateError::UnmappableBlock { id, .. }) => {
+            assert_eq!(id, "minecraft:oak_door");
         }
-        other => panic!("expected StatefulPaletteEntry, got {other:?}"),
+        other => panic!("expected State(UnmappableBlock), got {other:?}"),
     }
     let msg = err.to_string();
-    assert!(msg.contains("minecraft:spruce_stairs"), "got: {msg}");
-    assert!(msg.contains("facing"), "got: {msg}");
+    assert!(msg.contains("minecraft:oak_door"), "got: {msg}");
+    assert!(msg.contains("facing=north"), "got: {msg}");
     assert!(msg.contains("--edition java"), "suggested fix, got: {msg}");
+}
+
+#[test]
+fn m4b_stair_states_map_to_bedrock_vocabulary() {
+    // AC9: a stair palette entry's Java facing/half map to Bedrock's
+    // weirdo_direction/upside_down_bit as typed states; a straight shape is
+    // lossless (no degradation note).
+    let mut stairs = BlockState::bare("minecraft:dark_oak_stairs");
+    stairs
+        .properties
+        .insert("facing".to_owned(), "south".to_owned());
+    stairs
+        .properties
+        .insert("half".to_owned(), "top".to_owned());
+    stairs
+        .properties
+        .insert("shape".to_owned(), "straight".to_owned());
+    let ba = single_stateful_array(stairs);
+    let (root, notes) = build_mcstructure_tag(&ba, &target_1_21_60()).expect("build");
+    assert!(notes.is_empty(), "straight shape is lossless: {notes:?}");
+    let states = last_palette_states(&root);
+    assert_eq!(states.entries.get("weirdo_direction"), Some(&Tag::Int(2)));
+    assert_eq!(states.entries.get("upside_down_bit"), Some(&Tag::Byte(1)));
+    assert_eq!(states.entries.len(), 2);
+}
+
+#[test]
+fn m4c_non_straight_stair_shape_degrades() {
+    // AC10: a non-straight stair shape has no Bedrock state; the build
+    // succeeds but raises exactly one W_INTENT_DEGRADED note naming the id.
+    let mut stairs = BlockState::bare("minecraft:oak_stairs");
+    stairs
+        .properties
+        .insert("facing".to_owned(), "east".to_owned());
+    stairs
+        .properties
+        .insert("half".to_owned(), "bottom".to_owned());
+    stairs
+        .properties
+        .insert("shape".to_owned(), "outer_left".to_owned());
+    let ba = single_stateful_array(stairs);
+    let (root, notes) = build_mcstructure_tag(&ba, &target_1_21_60()).expect("build");
+    assert_eq!(notes.len(), 1);
+    assert_eq!(notes[0].id, "minecraft:oak_stairs");
+    assert!(
+        notes[0].message.contains("shape"),
+        "got: {}",
+        notes[0].message
+    );
+    // The mappable intent still lands in `states`.
+    let states = last_palette_states(&root);
+    assert_eq!(states.entries.get("weirdo_direction"), Some(&Tag::Int(0)));
+    assert_eq!(states.entries.get("upside_down_bit"), Some(&Tag::Byte(0)));
 }
 
 #[test]
@@ -230,7 +312,7 @@ fn m6_write_mcstructure_is_uncompressed_little_endian() {
     // filename helper produces `.mcstructure` names alongside the `.nbt`
     // ones.
     let (ba, _) = asymmetric_array();
-    let root = build_mcstructure_tag(&ba, &target_1_21_60()).expect("build");
+    let (root, _notes) = build_mcstructure_tag(&ba, &target_1_21_60()).expect("build");
     let mut buf = Vec::new();
     write_mcstructure(&mut buf, &root).expect("write");
     assert_eq!(&buf[..3], &[0x0a, 0x00, 0x00]);
