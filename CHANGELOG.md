@@ -12,6 +12,43 @@ and is a separate axis from the Minecraft target version.
 
 ### Added
 
+- `cairn-lang-nbt::bedrock::write_bedrock_uncompressed` — a little-endian
+  NBT writer for Bedrock's uncompressed `.mcstructure` on-disk form. The
+  byte-level encoder is refactored into a single endian-parameterised core
+  (`writer.rs`) shared with the Java writer, so the two dialects differ
+  only in scalar byte order and can never drift apart on validation rules
+  (`InvalidString` / `HeterogeneousList` / `LengthOverflow`). The Java
+  public API (`write_java_uncompressed` / `write_java_gzip`) and its error
+  type are unchanged.
+- `cairn-lang-formats::bedrock_structure` — a `.mcstructure` serialiser
+  mirroring `java_structure`. `build_mcstructure_tag` lowers a
+  `BlockArray` into the Bedrock root shape (`format_version`, `size`,
+  `structure.block_indices` two-layer Z-fastest arrays with a `-1`-filled
+  waterlog layer, `structure.palette.default.block_palette` of
+  `{ name, states, version }`, `structure_world_origin`), and
+  `write_mcstructure` writes it uncompressed. This first cut emits
+  **stateless palettes only**: a palette entry carrying blockstate
+  properties fails loud with `BedrockStructureError::StatefulPaletteEntry`
+  (spec versioning-editions §10.4 forbids silent substitution/dropping),
+  its message carrying the self-correction triple. Per-edition state
+  mapping (`facing` / `half` / `shape`) lands in a follow-up.
+- `cairn-lang-formats` builtin Bedrock registry pack
+  (`registry-data/bedrock/`) plus `builtin_bedrock` / `load_builtin_bedrock`
+  and `data_version::{BedrockTarget, resolve_bedrock_target}`. The pack's
+  `data_versions` column carries the `.mcstructure` block-palette `version`
+  integer (`(major << 24) | (minor << 16) | (patch << 8) | revision`); the
+  materials catalog covers the same abstract tokens the Java pack lifts.
+  Target resolution reuses the Java pack's machinery (`latest` alias,
+  Damerau-Levenshtein suggestion), and `UnsupportedTarget` now names the
+  edition whose version table was consulted.
+- `cairn compile --edition bedrock` writes `.mcstructure` artifacts and a
+  lockfile whose `target.edition = bedrock`, `data_version = block_version`,
+  and `registry_pack_hash` pins the Bedrock pack bytes. The Java `.nbt`
+  path is byte-for-byte unchanged. A `ResolvedTarget` enum threads the
+  edition through artifact naming (`OutputExt`), tag building, the writer
+  (gzip vs uncompressed), and the lockfile so a future edition slots in at
+  one site.
+
 - `cairn-lang-core::block_array::lower` — `level y=N` blocks now
   participate in phase-bucketed voxelisation. A new `flatten_members`
   pre-pass expands each `level` into `(y_offset, child)` pairs so a

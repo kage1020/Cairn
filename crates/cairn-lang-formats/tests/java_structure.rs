@@ -3,12 +3,18 @@
 use cairn_lang_core::block_array::{BlockArray, BlockState, Dims, Palette, PaletteIndex};
 use cairn_lang_formats::data_version::{JavaTarget, resolve_java_target};
 use cairn_lang_formats::java_structure::{
-    JavaStructureError, build_structure_tag, output_filename, write_structure_gzip,
+    JavaStructureError, OutputExt, build_structure_tag, output_filename, write_structure_gzip,
 };
 use cairn_lang_nbt::tag::Tag;
 
 fn target_1_21_4() -> JavaTarget {
     resolve_java_target("1.21.4").expect("known target")
+}
+
+/// The `.nbt` flavour every naming test in this file pins; the
+/// `.mcstructure` flavour is pinned in `bedrock_structure.rs`.
+fn output_filename_nbt(source_scope: &str) -> String {
+    output_filename(source_scope, OutputExt::Nbt)
 }
 
 fn unit_air() -> BlockArray {
@@ -283,8 +289,8 @@ fn f8_abstract_palette_id_rejected() {
 #[test]
 fn f9_output_filename_strips_struct_prefix() {
     // AC F9: scope key → filename.
-    assert_eq!(output_filename("struct::cottage"), "cottage.nbt");
-    assert_eq!(output_filename("cottage"), "cottage.nbt");
+    assert_eq!(output_filename_nbt("struct::cottage"), "cottage.nbt");
+    assert_eq!(output_filename_nbt("cottage"), "cottage.nbt");
 }
 
 #[test]
@@ -293,8 +299,11 @@ fn output_filename_strips_site_and_name_prefixes_to_place_id() {
     // uses only the `place id=` so siblings share a flat output dir with
     // structs. Multi-site flat-namespace collisions are deliberately out
     // of scope for the initial site lowering.
-    assert_eq!(output_filename("site::hamlet::home1"), "home1.nbt");
-    assert_eq!(output_filename("site::village::cottage_2"), "cottage_2.nbt");
+    assert_eq!(output_filename_nbt("site::hamlet::home1"), "home1.nbt");
+    assert_eq!(
+        output_filename_nbt("site::village::cottage_2"),
+        "cottage_2.nbt"
+    );
 }
 
 #[test]
@@ -304,9 +313,9 @@ fn output_filename_preserves_inner_colons_and_unicode() {
     // We strip only the exact `struct::` prefix and leave the rest
     // verbatim, including any subsequent `::`; downstream filename
     // sanitisation is the OS layer's responsibility on Windows.
-    assert_eq!(output_filename("struct::deep::room"), "deep::room.nbt");
+    assert_eq!(output_filename_nbt("struct::deep::room"), "deep::room.nbt");
     // No prefix, no transformation: the scope key carries through verbatim.
-    assert_eq!(output_filename("塔"), "塔.nbt");
+    assert_eq!(output_filename_nbt("塔"), "塔.nbt");
 }
 
 #[test]
@@ -318,19 +327,22 @@ fn output_filename_flattens_walkway_scope_to_site_prefixed_name() {
     // flattened to `_` so the on-disk name stays a single identifier
     // token across operating systems.
     assert_eq!(
-        output_filename("walkway::hamlet::home1.entry__home2.entry"),
+        output_filename_nbt("walkway::hamlet::home1.entry__home2.entry"),
         "hamlet_walkway_home1_entry__home2_entry.nbt",
     );
     // Different site → different filename prefix.
     assert_eq!(
-        output_filename("walkway::village::a.door__b.door"),
+        output_filename_nbt("walkway::village::a.door__b.door"),
         "village_walkway_a_door__b_door.nbt",
     );
     // A walkway-prefixed key without the `::` site separator falls
     // through to the generic branch rather than panicking — the IR
     // contract guarantees the full shape, but the fallback keeps the
     // helper total against hand-built keys.
-    assert_eq!(output_filename("walkway::no_site"), "walkway::no_site.nbt");
+    assert_eq!(
+        output_filename_nbt("walkway::no_site"),
+        "walkway::no_site.nbt"
+    );
 }
 
 #[test]
@@ -339,7 +351,7 @@ fn output_filename_handles_empty_input() {
     // is malformed on every OS we target. We don't try to fix it — IR
     // callers control the scope key, and a silent rename would mask the
     // bug.
-    assert_eq!(output_filename(""), ".nbt");
+    assert_eq!(output_filename_nbt(""), ".nbt");
 }
 
 #[test]

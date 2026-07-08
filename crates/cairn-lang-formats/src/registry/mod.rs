@@ -24,7 +24,8 @@ pub use data_versions::{DataVersionEntry, DataVersionTable};
 pub use hash::pack_hash;
 pub use load::{
     PackSource, RegistryError, RegistryPack, SUPPORTED_DATA_VERSIONS_SCHEMA,
-    SUPPORTED_MANIFEST_SCHEMA, builtin_java, load_builtin_java, load_from_dir,
+    SUPPORTED_MANIFEST_SCHEMA, builtin_bedrock, builtin_java, load_builtin_bedrock,
+    load_builtin_java, load_from_dir,
 };
 pub use manifest::{PackEdition, PackFiles, PackManifest};
 pub use materials::{

@@ -17,13 +17,21 @@ use super::hash::pack_hash;
 use super::manifest::{PackEdition, PackManifest};
 use super::materials::{MaterialsCatalog, MaterialsError, MaterialsIndex};
 
-/// Built-in `pack.json` bytes, statically embedded at compile time.
+/// Built-in Java `pack.json` bytes, statically embedded at compile time.
 const BUILTIN_JAVA_MANIFEST: &str = include_str!("../../registry-data/java/pack.json");
-/// Built-in `data_versions.json` bytes, statically embedded at compile time.
+/// Built-in Java `data_versions.json` bytes, statically embedded at compile time.
 const BUILTIN_JAVA_DATA_VERSIONS: &str =
     include_str!("../../registry-data/java/data_versions.json");
-/// Built-in `materials.json` bytes, statically embedded at compile time.
+/// Built-in Java `materials.json` bytes, statically embedded at compile time.
 const BUILTIN_JAVA_MATERIALS: &str = include_str!("../../registry-data/java/materials.json");
+
+/// Built-in Bedrock `pack.json` bytes, statically embedded at compile time.
+const BUILTIN_BEDROCK_MANIFEST: &str = include_str!("../../registry-data/bedrock/pack.json");
+/// Built-in Bedrock `data_versions.json` bytes, statically embedded at compile time.
+const BUILTIN_BEDROCK_DATA_VERSIONS: &str =
+    include_str!("../../registry-data/bedrock/data_versions.json");
+/// Built-in Bedrock `materials.json` bytes, statically embedded at compile time.
+const BUILTIN_BEDROCK_MATERIALS: &str = include_str!("../../registry-data/bedrock/materials.json");
 
 /// Highest manifest `schema_version` this Cairn build understands.
 pub const SUPPORTED_MANIFEST_SCHEMA: u32 = 1;
@@ -142,29 +150,24 @@ impl From<MaterialsError> for RegistryError {
     }
 }
 
-/// Resolved Minecraft target used by the Java backend.
-///
-/// Held by [`crate::data_version::JavaTarget`] for backwards compatibility
-/// with existing callers; this module just provides the function that
-/// builds one from a [`DataVersionTable`].
-fn entry_for(
-    table: &DataVersionTable,
-    mc_version: &str,
-) -> Option<crate::data_version::JavaTarget> {
+/// Look up one row of a [`DataVersionTable`] by `mc_version`, returning
+/// the owned `(mc_version, data_version)` pair the per-edition target
+/// types are built from.
+fn entry_for(table: &DataVersionTable, mc_version: &str) -> Option<(String, i32)> {
     table
         .versions
         .iter()
         .find(|e| e.mc_version == mc_version)
-        .map(|e| crate::data_version::JavaTarget {
-            mc_version: e.mc_version.clone(),
-            data_version: e.data_version,
-        })
+        .map(|e| (e.mc_version.clone(), e.data_version))
 }
 
 impl RegistryPack {
     /// Resolve a CLI `--target` value against this pack's
-    /// `DataVersionTable`. The literal `"latest"` aliases the row named
-    /// by `DataVersionTable::latest`.
+    /// `DataVersionTable`, returning the raw `(mc_version, data_version)`
+    /// row. The literal `"latest"` aliases the row named by
+    /// `DataVersionTable::latest`. The per-edition wrappers
+    /// ([`Self::resolve_java_target`] / [`Self::resolve_bedrock_target`])
+    /// stamp the pair into their edition's target type.
     ///
     /// # Errors
     ///
@@ -179,10 +182,10 @@ impl RegistryPack {
     /// That branch is dead by construction: validation rejects exactly
     /// this case at load time, and `RegistryPack` cannot be constructed
     /// without going through validation.
-    pub fn resolve_java_target(
+    fn resolve_target_row(
         &self,
         requested: &str,
-    ) -> Result<crate::data_version::JavaTarget, crate::data_version::UnsupportedTarget> {
+    ) -> Result<(String, i32), crate::data_version::UnsupportedTarget> {
         if requested == "latest" {
             // `latest` was validated at load time against `versions`, so
             // the lookup here cannot miss.
@@ -191,10 +194,78 @@ impl RegistryPack {
         }
         entry_for(&self.data_versions, requested).ok_or_else(|| {
             crate::data_version::UnsupportedTarget {
+                edition: self.manifest.edition.label(),
                 requested: requested.to_owned(),
                 suggestion: self.suggestion_for(requested),
                 supported: self.supported_list(),
             }
+        })
+    }
+
+    /// Resolve a CLI `--target` value into a Java backend target.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`crate::data_version::UnsupportedTarget`] when the
+    /// requested string is neither the `"latest"` alias nor an exact
+    /// `mc_version` match.
+    ///
+    /// # Panics
+    ///
+    /// Panics if called on a non-Java pack — resolving against the wrong
+    /// edition's `data_version` column would return a meaningful-but-wrong
+    /// integer, so it is a hard caller-bug guard rather than a recoverable
+    /// error.
+    pub fn resolve_java_target(
+        &self,
+        requested: &str,
+    ) -> Result<crate::data_version::JavaTarget, crate::data_version::UnsupportedTarget> {
+        // A full `assert!` (not `debug_assert!`): both editions share the
+        // `data_version` column with different meanings, so resolving
+        // against the wrong pack would return a plausible-but-wrong integer
+        // — a §10.4 silent-substitution hazard. Resolution runs once per
+        // compile, so the guard's cost is irrelevant and it must survive
+        // release builds (e.g. once `--registry-pack` can supply a pack).
+        assert_eq!(
+            self.manifest.edition,
+            PackEdition::Java,
+            "Java target resolution against a non-Java pack is a caller bug",
+        );
+        let (mc_version, data_version) = self.resolve_target_row(requested)?;
+        Ok(crate::data_version::JavaTarget {
+            mc_version,
+            data_version,
+        })
+    }
+
+    /// Resolve a CLI `--target` value into a Bedrock backend target. The
+    /// pack's `data_version` column carries the `.mcstructure` block
+    /// palette `version` integer for Bedrock packs.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`crate::data_version::UnsupportedTarget`] when the
+    /// requested string is neither the `"latest"` alias nor an exact
+    /// `mc_version` match.
+    ///
+    /// # Panics
+    ///
+    /// Panics if called on a non-Bedrock pack, for the same caller-bug
+    /// reason as [`Self::resolve_java_target`].
+    pub fn resolve_bedrock_target(
+        &self,
+        requested: &str,
+    ) -> Result<crate::data_version::BedrockTarget, crate::data_version::UnsupportedTarget> {
+        // See `resolve_java_target` for why this is a full `assert!`.
+        assert_eq!(
+            self.manifest.edition,
+            PackEdition::Bedrock,
+            "Bedrock target resolution against a non-Bedrock pack is a caller bug",
+        );
+        let (mc_version, block_version) = self.resolve_target_row(requested)?;
+        Ok(crate::data_version::BedrockTarget {
+            mc_version,
+            block_version,
         })
     }
 
@@ -254,27 +325,76 @@ pub fn builtin_java() -> &'static RegistryPack {
 ///
 /// Returns [`RegistryError`] if the embedded JSON fails to deserialise,
 /// declares an unsupported schema, or fails validation. In practice all
-/// of these would mean the bundled `data/registry/java/*.json` files have
+/// of these would mean the bundled `registry-data/java/*.json` files have
 /// been corrupted, which is a release-process bug.
 pub fn load_builtin_java() -> Result<RegistryPack, RegistryError> {
-    let manifest = parse_manifest(BUILTIN_JAVA_MANIFEST)?;
-    validate_manifest(&manifest, PackEdition::Java)?;
-    let data_versions = parse_data_versions(BUILTIN_JAVA_DATA_VERSIONS)?;
+    load_builtin(
+        PackEdition::Java,
+        BUILTIN_JAVA_MANIFEST,
+        BUILTIN_JAVA_DATA_VERSIONS,
+        BUILTIN_JAVA_MATERIALS,
+    )
+}
+
+/// Built-in Bedrock pack, parsed once per process. The mirror of
+/// [`builtin_java`] for `--edition bedrock` compiles.
+///
+/// # Panics
+///
+/// Panics if the embedded JSON fails to parse or validate, for the same
+/// build-invariant reason as [`builtin_java`].
+pub fn builtin_bedrock() -> &'static RegistryPack {
+    static PACK: OnceLock<RegistryPack> = OnceLock::new();
+    PACK.get_or_init(|| {
+        load_builtin_bedrock()
+            .expect("built-in registry pack failed to load — this is a build invariant")
+    })
+}
+
+/// Parse the built-in Bedrock pack from its embedded bytes.
+///
+/// # Errors
+///
+/// Returns [`RegistryError`] if the embedded JSON fails to deserialise,
+/// declares an unsupported schema, or fails validation. In practice all
+/// of these would mean the bundled `registry-data/bedrock/*.json` files
+/// have been corrupted, which is a release-process bug.
+pub fn load_builtin_bedrock() -> Result<RegistryPack, RegistryError> {
+    load_builtin(
+        PackEdition::Bedrock,
+        BUILTIN_BEDROCK_MANIFEST,
+        BUILTIN_BEDROCK_DATA_VERSIONS,
+        BUILTIN_BEDROCK_MATERIALS,
+    )
+}
+
+/// Shared parse + validate + hash path for the embedded packs. Keeping
+/// one implementation means a validation rule added for one edition can
+/// never silently miss the other.
+fn load_builtin(
+    edition: PackEdition,
+    manifest_src: &'static str,
+    data_versions_src: &'static str,
+    materials_src: &'static str,
+) -> Result<RegistryPack, RegistryError> {
+    let manifest = parse_manifest(manifest_src)?;
+    validate_manifest(&manifest, edition)?;
+    let data_versions = parse_data_versions(data_versions_src)?;
     validate_data_versions(&data_versions)?;
     let materials = if manifest.files.materials.is_some() {
-        let catalog = parse_materials(BUILTIN_JAVA_MATERIALS)?;
+        let catalog = parse_materials(materials_src)?;
         MaterialsIndex::from_catalog(catalog)?
     } else {
         MaterialsIndex::empty()
     };
     let mut components: Vec<(&str, &[u8])> = vec![(
         manifest.files.data_versions.as_str(),
-        BUILTIN_JAVA_DATA_VERSIONS.as_bytes(),
+        data_versions_src.as_bytes(),
     )];
     if let Some(name) = manifest.files.materials.as_deref() {
-        components.push((name, BUILTIN_JAVA_MATERIALS.as_bytes()));
+        components.push((name, materials_src.as_bytes()));
     }
-    let bytes_hash = pack_hash(BUILTIN_JAVA_MANIFEST.as_bytes(), &components);
+    let bytes_hash = pack_hash(manifest_src.as_bytes(), &components);
     Ok(RegistryPack {
         manifest,
         data_versions,
@@ -616,6 +736,67 @@ mod tests {
         let a = load_builtin_java().expect("a");
         let b = load_builtin_java().expect("b");
         assert_eq!(a.bytes_hash, b.bytes_hash);
+    }
+
+    #[test]
+    fn load_builtin_bedrock_succeeds() {
+        let pack = load_builtin_bedrock().expect("builtin pack");
+        assert_eq!(pack.manifest.edition, PackEdition::Bedrock);
+        assert_eq!(pack.manifest.name, "cairn-builtin-bedrock");
+        assert_eq!(pack.source, PackSource::Builtin);
+        assert!(!pack.data_versions.versions.is_empty());
+        // The materials catalog must cover the same abstract tokens the
+        // Java pack lifts, or a `.crn` that compiles for Java would fail
+        // resolution for Bedrock on vocabulary rather than parity.
+        let java = load_builtin_java().expect("java pack");
+        for token in java.materials.tokens() {
+            assert!(
+                pack.materials.lookup_id(token).is_some(),
+                "bedrock pack is missing token `{token}`",
+            );
+        }
+    }
+
+    #[test]
+    fn builtin_bedrock_resolves_known_targets_and_latest() {
+        // The block-palette `version` integer packs (major, minor, patch,
+        // revision) one byte each, major high. Deriving the expected value
+        // from the parts pins the JSON table against the documented
+        // packing rather than restating the packed integer.
+        let version = |major: i32, minor: i32, patch: i32, revision: i32| {
+            (major << 24) | (minor << 16) | (patch << 8) | revision
+        };
+        let pack = load_builtin_bedrock().expect("builtin pack");
+        // 1.21.0 uses the release baseline marker 1.21.0.0.
+        let t = pack.resolve_bedrock_target("1.21.0").expect("1.21.0");
+        assert_eq!(t.mc_version, "1.21.0");
+        assert_eq!(t.block_version, version(1, 21, 0, 0));
+        // `latest` (1.21.60) carries the wiki-confirmed post-release
+        // marker 1.21.60.33, exercised in the structure test.
+        let latest = pack.resolve_bedrock_target("latest").expect("latest");
+        assert_eq!(latest.mc_version, pack.data_versions.latest);
+        assert_eq!(latest.block_version, version(1, 21, 60, 33));
+    }
+
+    #[test]
+    fn builtin_bedrock_unknown_target_names_bedrock_edition() {
+        let pack = load_builtin_bedrock().expect("builtin pack");
+        let err = pack
+            .resolve_bedrock_target("1.21.61")
+            .expect_err("unknown target");
+        assert_eq!(err.edition, "bedrock");
+        assert_eq!(err.suggestion.as_deref(), Some("1.21.60"));
+        assert!(err.supported.contains("1.21.60"));
+        assert!(
+            err.to_string().starts_with("unsupported bedrock target"),
+            "error must name the bedrock vocabulary, got: {err}",
+        );
+    }
+
+    #[test]
+    fn bedrock_pack_hash_snapshot() {
+        let pack = load_builtin_bedrock().expect("builtin pack");
+        insta::assert_snapshot!("builtin_bedrock_pack_hash", pack.bytes_hash.as_str());
     }
 
     #[test]

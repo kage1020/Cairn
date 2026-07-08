@@ -173,11 +173,106 @@ fn c7_lockfile_records_target_triple() {
 }
 
 #[test]
-fn c8_bedrock_edition_exits_one_with_explanation() {
-    let (_tmp_src, src) = cottage_in_tempdir();
+fn c8_bedrock_compiles_stateless_example_to_mcstructure() {
+    // roof-flat.crn resolves entirely to bare (stateless) block ids —
+    // planks and cobblestone — so it is the smallest example the Bedrock
+    // backend can round-trip end-to-end. The compile must exit 0, write a
+    // `roof_flat.mcstructure`, and lower without any deferred warnings.
+    let tmp = TempDir::new().expect("tempdir");
+    let dst = tmp.path().join("roof-flat.crn");
+    fs::copy(examples_dir().join("roof-flat.crn"), &dst).expect("copy roof-flat");
     let out_dir = TempDir::new().expect("out tempdir");
     let result = run_compile(&[
-        src.to_str().unwrap(),
+        dst.to_str().unwrap(),
+        "--edition",
+        "bedrock",
+        "--out",
+        out_dir.path().to_str().unwrap(),
+    ]);
+    let stderr = String::from_utf8(result.stderr).expect("utf-8");
+    assert!(
+        result.status.success(),
+        "roof-flat should compile for bedrock; stderr={stderr}",
+    );
+    assert_eq!(
+        stderr.matches("W_DEFERRED_MEMBER").count(),
+        0,
+        "roof-flat should lower clean, stderr={stderr}",
+    );
+    let written = out_dir.path().join("roof_flat.mcstructure");
+    assert!(written.exists(), "expected {} to exist", written.display());
+}
+
+#[test]
+fn c8b_bedrock_mcstructure_is_uncompressed_little_endian() {
+    // The `.mcstructure` bytes must be raw NBT (unnamed root compound,
+    // 0x0a + u16 zero length), never a gzip stream (0x1f 0x8b) the way the
+    // Java `.nbt` is.
+    let tmp = TempDir::new().expect("tempdir");
+    let dst = tmp.path().join("roof-flat.crn");
+    fs::copy(examples_dir().join("roof-flat.crn"), &dst).expect("copy roof-flat");
+    let out_dir = TempDir::new().expect("out tempdir");
+    let result = run_compile(&[
+        dst.to_str().unwrap(),
+        "--edition",
+        "bedrock",
+        "--out",
+        out_dir.path().to_str().unwrap(),
+    ]);
+    assert!(result.status.success());
+    let bytes = fs::read(out_dir.path().join("roof_flat.mcstructure")).expect("read mcstructure");
+    assert!(bytes.len() >= 3);
+    assert_ne!(&bytes[..2], &[0x1f, 0x8b], "must not be gzip");
+    assert_eq!(&bytes[..3], &[0x0a, 0x00, 0x00], "unnamed root compound");
+}
+
+#[test]
+fn c8c_bedrock_lockfile_records_bedrock_target_and_pack_hash() {
+    let tmp = TempDir::new().expect("tempdir");
+    let dst = tmp.path().join("roof-flat.crn");
+    fs::copy(examples_dir().join("roof-flat.crn"), &dst).expect("copy roof-flat");
+    let out_dir = TempDir::new().expect("out tempdir");
+    let lock_path = out_dir.path().join("c8c.lock");
+    let result = run_compile(&[
+        dst.to_str().unwrap(),
+        "--edition",
+        "bedrock",
+        "--target",
+        "1.21.60",
+        "--out",
+        out_dir.path().to_str().unwrap(),
+        "--lock",
+        lock_path.to_str().unwrap(),
+    ]);
+    assert!(
+        result.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&result.stderr),
+    );
+    let lf = Lockfile::read_from_path(&lock_path).expect("read lock");
+    assert_eq!(lf.target.edition, LockEdition::Bedrock);
+    assert_eq!(lf.target.mc_version, "1.21.60");
+    // Bedrock's block-palette version integer, not a Java DataVersion.
+    assert_eq!(lf.target.data_version, 18_168_865);
+    assert_ne!(
+        lf.inputs.registry_pack_hash.as_str(),
+        HashHex::ZERO_STR,
+        "bedrock pack hash must be filled in",
+    );
+}
+
+#[test]
+fn c8d_bedrock_rejects_stateful_palette_entry() {
+    // cottage.crn resolves a gable roof to `minecraft:spruce_stairs` with
+    // blockstate properties, which the stateless-only Bedrock backend must
+    // reject loudly (spec §10.4) rather than drop silently. No artifact
+    // should be written.
+    let tmp = TempDir::new().expect("tempdir");
+    let dst = tmp.path().join("cottage.crn");
+    fs::copy(examples_dir().join("cottage.crn"), &dst).expect("copy cottage");
+    let out_dir = TempDir::new().expect("out tempdir");
+    let result = run_compile(&[
+        dst.to_str().unwrap(),
         "--edition",
         "bedrock",
         "--out",
@@ -186,9 +281,37 @@ fn c8_bedrock_edition_exits_one_with_explanation() {
     assert_eq!(result.status.code(), Some(1));
     let stderr = String::from_utf8(result.stderr).expect("utf-8");
     assert!(
-        stderr.contains("not implemented"),
-        "expected explanation, got stderr={stderr}",
+        stderr.contains("blockstate properties") && stderr.contains("--edition java"),
+        "expected a stateful-entry explanation with the self-correction triple, got: {stderr}",
     );
+    assert!(
+        !out_dir.path().join("cottage.mcstructure").exists(),
+        "no artifact should be written on a hard error",
+    );
+}
+
+#[test]
+fn c8e_bedrock_unknown_target_names_bedrock_versions() {
+    let tmp = TempDir::new().expect("tempdir");
+    let dst = tmp.path().join("roof-flat.crn");
+    fs::copy(examples_dir().join("roof-flat.crn"), &dst).expect("copy roof-flat");
+    let out_dir = TempDir::new().expect("out tempdir");
+    let result = run_compile(&[
+        dst.to_str().unwrap(),
+        "--edition",
+        "bedrock",
+        "--target",
+        "1.21.61",
+        "--out",
+        out_dir.path().to_str().unwrap(),
+    ]);
+    assert_eq!(result.status.code(), Some(1));
+    let stderr = String::from_utf8(result.stderr).expect("utf-8");
+    assert!(
+        stderr.contains("unsupported bedrock target"),
+        "error must name the bedrock vocabulary, got: {stderr}",
+    );
+    assert!(stderr.contains("1.21.60"), "supported list, got: {stderr}");
 }
 
 #[test]

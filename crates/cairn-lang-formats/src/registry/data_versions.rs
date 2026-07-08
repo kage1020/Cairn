@@ -1,9 +1,12 @@
-//! `data_versions.json` schema — the `(mc_version, DataVersion)` table.
+//! `data_versions.json` schema — the `(mc_version, version integer)` table.
 //!
 //! Replaces the hardcoded `JAVA_TARGETS` array that lived in
 //! [`crate::data_version`] before the registry pack ingest landed. The
 //! file is loaded once per process and resolution against it happens via
-//! [`crate::data_version::resolve_java_target`].
+//! [`crate::data_version::resolve_java_target`] /
+//! [`crate::data_version::resolve_bedrock_target`]. Both editions share
+//! the schema; what the integer means is a per-edition contract documented
+//! on [`DataVersionEntry::data_version`].
 
 use serde::Deserialize;
 
@@ -29,7 +32,11 @@ pub struct DataVersionTable {
 pub struct DataVersionEntry {
     /// Human-facing Minecraft version, e.g. `"1.21.4"`.
     pub mc_version: String,
-    /// `DataVersion` integer the Java structure NBT root carries.
+    /// Edition-specific version integer. For Java packs this is the
+    /// `DataVersion` the structure NBT root carries; for Bedrock packs it
+    /// is the block-palette `version` integer every `.mcstructure`
+    /// palette entry carries (`(major << 24) | (minor << 16) |
+    /// (patch << 8) | revision` of the client build).
     pub data_version: i32,
     /// Release date in `YYYY-MM-DD` form. Informational; not consumed by
     /// the compiler. `Option` so older packs without the field still load.

@@ -14,6 +14,42 @@
 
 ### 追加
 
+- `cairn-lang-nbt::bedrock::write_bedrock_uncompressed` — Bedrock の
+  非圧縮 `.mcstructure` 向けリトルエンディアン NBT ライター。バイト列
+  エンコーダを Endian パラメータ化した単一のコア (`writer.rs`) に抽出し
+  Java ライターと共有したため、両ダイアレクトはスカラーのバイト順のみ
+  異なり、検証ルール (`InvalidString` / `HeterogeneousList` /
+  `LengthOverflow`) が乖離しなくなりました。Java 側の公開 API
+  (`write_java_uncompressed` / `write_java_gzip`) とエラー型は不変です。
+- `cairn-lang-formats::bedrock_structure` — `java_structure` を鏡写しに
+  した `.mcstructure` シリアライザ。`build_mcstructure_tag` が
+  `BlockArray` を Bedrock のルート形状 (`format_version`、`size`、
+  Z 最速の 2 層 `structure.block_indices` で第 2 層は `-1` 埋めの
+  waterlog 層、`{ name, states, version }` からなる
+  `structure.palette.default.block_palette`、`structure_world_origin`)
+  に lower し、`write_mcstructure` が非圧縮で書き出します。この初回分は
+  **stateless な palette のみ**を対象とし、blockstate プロパティを持つ
+  palette entry は `BedrockStructureError::StatefulPaletteEntry` で
+  fail-loud します (spec versioning-editions §10.4 は無音の置換/削除を
+  禁止)。メッセージは自己修正トリプルを持ちます。per-edition の state
+  マッピング (`facing` / `half` / `shape`) は後続で対応します。
+- `cairn-lang-formats` の組み込み Bedrock レジストリパック
+  (`registry-data/bedrock/`)、`builtin_bedrock` / `load_builtin_bedrock`、
+  `data_version::{BedrockTarget, resolve_bedrock_target}`。パックの
+  `data_versions` 列は `.mcstructure` の block-palette `version` 整数
+  (`(major << 24) | (minor << 16) | (patch << 8) | revision`) を保持し、
+  materials カタログは Java パックが lift するのと同じ abstract token を
+  カバーします。ターゲット解決は Java パックの機構 (`latest` エイリアス、
+  Damerau-Levenshtein の suggestion) を再利用し、`UnsupportedTarget` は
+  参照したバージョンテーブルのエディション名を含めるようになりました。
+- `cairn compile --edition bedrock` が `.mcstructure` 成果物と、
+  `target.edition = bedrock`・`data_version = block_version`・
+  `registry_pack_hash` に Bedrock パックのバイトを固定した lockfile を
+  書き出します。Java `.nbt` 経路はバイト単位で不変です。`ResolvedTarget`
+  enum がエディションを成果物名 (`OutputExt`)・タグ構築・ライター
+  (gzip か非圧縮か)・lockfile へと通すため、将来のエディション追加が
+  1 箇所で済みます。
+
 - `cairn-lang-core::block_array::lower` — `level y=N` ブロックが
   block-array lowering の phase-bucket に参加するようになりました。
   新しい `flatten_members` 事前パスが各 `level` を

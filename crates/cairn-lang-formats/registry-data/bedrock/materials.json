@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "namespace": "minecraft",
+  "entries": [
+    { "token": "floor.wood.broadleaf", "block": "oak_planks" },
+    { "token": "floor.wood.conifer", "block": "spruce_planks" },
+    { "token": "floor.stone.cobble", "block": "cobblestone" },
+    { "token": "floor.stone.smooth", "block": "stone_bricks" },
+    { "token": "wall.wood.broadleaf", "block": "oak_planks" },
+    { "token": "wall.wood.conifer", "block": "spruce_planks" },
+    { "token": "wall.stone.cobble", "block": "cobblestone" },
+    { "token": "wall.stone.smooth", "block": "stone_bricks" },
+    { "token": "wood.dark", "block": "dark_oak_planks" },
+    { "token": "wood.light", "block": "birch_planks" },
+    { "token": "wood.warm", "block": "oak_planks" },
+    { "token": "wood.cool", "block": "spruce_planks" },
+    { "token": "roof.dark_wood", "block": "dark_oak_stairs" },
+    { "token": "roof.light_wood", "block": "birch_stairs" },
+    { "token": "roof.warm_wood", "block": "oak_stairs" },
+    { "token": "roof.cool_wood", "block": "spruce_stairs" }
+  ]
+}

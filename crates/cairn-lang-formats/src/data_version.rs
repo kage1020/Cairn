@@ -1,4 +1,4 @@
-//! `--target <mc_version>` → Minecraft `DataVersion` resolution.
+//! `--target <mc_version>` → per-edition version-integer resolution.
 //!
 //! Java structure NBT carries a `DataVersion` integer that the loading
 //! client uses to know whether and how to run DFU upgrades. The mapping
@@ -6,10 +6,15 @@
 //! the built-in registry pack at `registry-data/java/data_versions.json`
 //! (see [`crate::registry`]). The hardcoded table that used to live in
 //! this module was removed when the registry pack ingest landed.
+//!
+//! Bedrock `.mcstructure` palettes carry an analogous `version` integer
+//! per block (`(major << 24) | (minor << 16) | (patch << 8) | revision`);
+//! its table lives at `registry-data/bedrock/data_versions.json` and
+//! resolves through the same machinery into a [`BedrockTarget`].
 
 use std::fmt;
 
-use crate::registry::builtin_java;
+use crate::registry::{builtin_bedrock, builtin_java};
 
 /// Resolved Minecraft target. `mc_version` is owned (cloned from the
 /// registry pack) so a future `--registry-pack <dir>` flow can drop
@@ -24,9 +29,24 @@ pub struct JavaTarget {
     pub data_version: i32,
 }
 
+/// Resolved Bedrock target. The `block_version` integer is what every
+/// `.mcstructure` block-palette entry carries under `version` so the game
+/// knows which schema the block states were authored against.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BedrockTarget {
+    /// Human-facing version string, e.g. `"1.21.60"`.
+    pub mc_version: String,
+    /// Block palette `version` integer written into every `.mcstructure`
+    /// palette entry.
+    pub block_version: i32,
+}
+
 /// `--target` value did not match any version in the registry pack.
 #[derive(Debug)]
 pub struct UnsupportedTarget {
+    /// Which edition's version table was consulted (`"java"` /
+    /// `"bedrock"`), so the error names the right `--target` vocabulary.
+    pub edition: &'static str,
     /// Verbatim value passed via `--target`.
     pub requested: String,
     /// Closest supported version when one sits within the suggestion pass's
@@ -41,7 +61,11 @@ pub struct UnsupportedTarget {
 
 impl fmt::Display for UnsupportedTarget {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "unsupported java target `{}`. ", self.requested)?;
+        write!(
+            f,
+            "unsupported {} target `{}`. ",
+            self.edition, self.requested
+        )?;
         if let Some(s) = &self.suggestion {
             write!(f, "did you mean `{s}`? ")?;
         }
@@ -62,6 +86,18 @@ impl std::error::Error for UnsupportedTarget {}
 /// exact `mc_version` match nor the `"latest"` alias.
 pub fn resolve_java_target(requested: &str) -> Result<JavaTarget, UnsupportedTarget> {
     builtin_java().resolve_java_target(requested)
+}
+
+/// Resolve a `--target` string against the built-in Bedrock registry pack.
+/// The literal `"latest"` aliases the row named by `data_versions.latest`,
+/// matching [`resolve_java_target`].
+///
+/// # Errors
+///
+/// Returns [`UnsupportedTarget`] when the requested string is neither an
+/// exact `mc_version` match nor the `"latest"` alias.
+pub fn resolve_bedrock_target(requested: &str) -> Result<BedrockTarget, UnsupportedTarget> {
+    builtin_bedrock().resolve_bedrock_target(requested)
 }
 
 /// Human-readable list of supported `mc_version` strings (built-in pack),
