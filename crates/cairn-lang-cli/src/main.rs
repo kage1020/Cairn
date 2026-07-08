@@ -590,12 +590,42 @@ enum ResolvedTarget {
 }
 
 impl ResolvedTarget {
-    /// On-disk extension the backend writes.
+    /// On-disk extension the backend writes. The three edition-varying
+    /// steps of a compile — extension, tag builder ([`Self::build_tag`]),
+    /// and writer ([`Self::write_tag`]) — all live on this type so their
+    /// correspondence is co-located rather than kept in step by convention
+    /// across scattered `match`es. Adding an edition means adding one arm
+    /// to each and the compiler flags any it misses.
     fn output_ext(&self) -> OutputExt {
         match self {
             ResolvedTarget::Java(_) => OutputExt::Nbt,
             ResolvedTarget::Bedrock(_) => OutputExt::Mcstructure,
         }
+    }
+
+    /// Build the structure tag tree for this edition's backend. The two
+    /// backends raise different error types; both are rendered to a
+    /// message string here so the caller has one error shape to report.
+    fn build_tag(&self, ba: &BlockArray) -> Result<Compound, String> {
+        match self {
+            ResolvedTarget::Java(t) => build_structure_tag(ba, t).map_err(|e| e.to_string()),
+            ResolvedTarget::Bedrock(t) => build_mcstructure_tag(ba, t).map_err(|e| e.to_string()),
+        }
+    }
+
+    /// Write a built tag tree in this edition's on-disk form: Java `.nbt`
+    /// is gzip-wrapped big-endian, Bedrock `.mcstructure` is raw
+    /// little-endian.
+    fn write_tag<W: std::io::Write>(
+        &self,
+        writer: &mut W,
+        tag: &Compound,
+    ) -> Result<(), std::io::Error> {
+        let encoded = match self {
+            ResolvedTarget::Java(_) => write_compound_gzip(writer, tag),
+            ResolvedTarget::Bedrock(_) => write_mcstructure(writer, tag),
+        };
+        encoded.map_err(|e| std::io::Error::other(format!("nbt encode: {e}")))
     }
 
     /// Human-facing Minecraft version string for the lockfile.
@@ -770,16 +800,10 @@ fn prepare_artifacts(
     let mut seen_paths: std::collections::HashMap<PathBuf, String> =
         std::collections::HashMap::with_capacity(block_ir.structures.len());
     for (scope, ba) in &block_ir.structures {
-        let tag = match target {
-            ResolvedTarget::Java(t) => build_structure_tag(ba, t).map_err(|err| {
-                eprintln!("error: building `{scope}`: {err}");
-                ExitCode::from(1)
-            })?,
-            ResolvedTarget::Bedrock(t) => build_mcstructure_tag(ba, t).map_err(|err| {
-                eprintln!("error: building `{scope}`: {err}");
-                ExitCode::from(1)
-            })?,
-        };
+        let tag = target.build_tag(ba).map_err(|err| {
+            eprintln!("error: building `{scope}`: {err}");
+            ExitCode::from(1)
+        })?;
         let path = out_dir.join(output_filename(scope, target.output_ext()));
         // Walkway IR keys allow `.` / `_` in place and port ids; the
         // `output_filename` flatten of `.` → `_` can fold two distinct
@@ -871,21 +895,21 @@ fn write_tag_atomically(
     tmp_path.push(".tmp");
     let tmp_path = PathBuf::from(tmp_path);
 
-    let mut f = std::fs::File::create(&tmp_path)?;
-    let encode = match target {
-        // Java `.nbt` is gzip-wrapped big-endian; Bedrock `.mcstructure`
-        // is raw little-endian. The extension chosen in `prepare_artifacts`
-        // and the writer chosen here must always agree, which is why both
-        // key off the same `ResolvedTarget`.
-        ResolvedTarget::Java(_) => write_compound_gzip(&mut f, tag),
-        ResolvedTarget::Bedrock(_) => write_mcstructure(&mut f, tag),
-    };
-    encode.map_err(|e| std::io::Error::other(format!("nbt encode: {e}")))?;
-    f.flush()?;
-    f.sync_all()?;
-    drop(f);
-    std::fs::rename(&tmp_path, final_path)?;
-    Ok(())
+    // Any failure before the rename must clean up the partial `.tmp` so a
+    // retry does not accumulate orphans (and the caller's rollback, which
+    // only knows the final paths, cannot reach it).
+    let result = (|| {
+        let mut f = std::fs::File::create(&tmp_path)?;
+        target.write_tag(&mut f, tag)?;
+        f.flush()?;
+        f.sync_all()?;
+        drop(f);
+        std::fs::rename(&tmp_path, final_path)
+    })();
+    if result.is_err() {
+        let _ = std::fs::remove_file(&tmp_path);
+    }
+    result
 }
 
 fn rollback(written: &[PathBuf], lock_path: Option<&Path>) {

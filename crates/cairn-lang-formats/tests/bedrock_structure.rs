@@ -16,6 +16,15 @@ fn target_1_21_60() -> BedrockTarget {
     resolve_bedrock_target("1.21.60").expect("known target")
 }
 
+/// The `.mcstructure` block-palette `version` integer packs
+/// `(major, minor, patch, revision)` one byte each, major in the high
+/// byte. Deriving the expected value from the parts — rather than
+/// restating the packed integer — pins that the JSON table and this
+/// documented formula agree.
+fn block_version(major: i32, minor: i32, patch: i32, revision: i32) -> i32 {
+    (major << 24) | (minor << 16) | (patch << 8) | revision
+}
+
 /// Non-cubic 2×3×4 array with two marked voxels. Distinct per-axis sizes
 /// make any axis-order mistake in the index math shift at least one of
 /// the expected flat indices.
@@ -114,9 +123,8 @@ fn m3_palette_entries_carry_name_empty_states_and_version() {
     // empty list.
     let (ba, _) = asymmetric_array();
     let target = target_1_21_60();
-    // 1.21.60's wiki-confirmed block-palette marker 1.21.60.33:
-    // (1 << 24) | (21 << 16) | (60 << 8) | 33 = 18_168_865.
-    assert_eq!(target.block_version, 18_168_865);
+    // 1.21.60's wiki-confirmed block-palette marker is 1.21.60.33.
+    assert_eq!(target.block_version, block_version(1, 21, 60, 33));
     let root = build_mcstructure_tag(&ba, &target).expect("build");
     let structure = structure_compound(&root);
 

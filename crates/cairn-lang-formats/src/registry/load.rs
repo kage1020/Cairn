@@ -209,11 +209,24 @@ impl RegistryPack {
     /// Returns [`crate::data_version::UnsupportedTarget`] when the
     /// requested string is neither the `"latest"` alias nor an exact
     /// `mc_version` match.
+    ///
+    /// # Panics
+    ///
+    /// Panics if called on a non-Java pack — resolving against the wrong
+    /// edition's `data_version` column would return a meaningful-but-wrong
+    /// integer, so it is a hard caller-bug guard rather than a recoverable
+    /// error.
     pub fn resolve_java_target(
         &self,
         requested: &str,
     ) -> Result<crate::data_version::JavaTarget, crate::data_version::UnsupportedTarget> {
-        debug_assert_eq!(
+        // A full `assert!` (not `debug_assert!`): both editions share the
+        // `data_version` column with different meanings, so resolving
+        // against the wrong pack would return a plausible-but-wrong integer
+        // — a §10.4 silent-substitution hazard. Resolution runs once per
+        // compile, so the guard's cost is irrelevant and it must survive
+        // release builds (e.g. once `--registry-pack` can supply a pack).
+        assert_eq!(
             self.manifest.edition,
             PackEdition::Java,
             "Java target resolution against a non-Java pack is a caller bug",
@@ -234,11 +247,17 @@ impl RegistryPack {
     /// Returns [`crate::data_version::UnsupportedTarget`] when the
     /// requested string is neither the `"latest"` alias nor an exact
     /// `mc_version` match.
+    ///
+    /// # Panics
+    ///
+    /// Panics if called on a non-Bedrock pack, for the same caller-bug
+    /// reason as [`Self::resolve_java_target`].
     pub fn resolve_bedrock_target(
         &self,
         requested: &str,
     ) -> Result<crate::data_version::BedrockTarget, crate::data_version::UnsupportedTarget> {
-        debug_assert_eq!(
+        // See `resolve_java_target` for why this is a full `assert!`.
+        assert_eq!(
             self.manifest.edition,
             PackEdition::Bedrock,
             "Bedrock target resolution against a non-Bedrock pack is a caller bug",
@@ -740,17 +759,23 @@ mod tests {
 
     #[test]
     fn builtin_bedrock_resolves_known_targets_and_latest() {
+        // The block-palette `version` integer packs (major, minor, patch,
+        // revision) one byte each, major high. Deriving the expected value
+        // from the parts pins the JSON table against the documented
+        // packing rather than restating the packed integer.
+        let version = |major: i32, minor: i32, patch: i32, revision: i32| {
+            (major << 24) | (minor << 16) | (patch << 8) | revision
+        };
         let pack = load_builtin_bedrock().expect("builtin pack");
-        // 1.21.0 release baseline marker 1.21.0.0:
-        // (1 << 24) | (21 << 16) | (0 << 8) | 0 = 18_153_472.
+        // 1.21.0 uses the release baseline marker 1.21.0.0.
         let t = pack.resolve_bedrock_target("1.21.0").expect("1.21.0");
         assert_eq!(t.mc_version, "1.21.0");
-        assert_eq!(t.block_version, 18_153_472);
+        assert_eq!(t.block_version, version(1, 21, 0, 0));
         // `latest` (1.21.60) carries the wiki-confirmed post-release
-        // marker 1.21.60.33 = 18_168_865, exercised in the structure test.
+        // marker 1.21.60.33, exercised in the structure test.
         let latest = pack.resolve_bedrock_target("latest").expect("latest");
         assert_eq!(latest.mc_version, pack.data_versions.latest);
-        assert_eq!(latest.block_version, 18_168_865);
+        assert_eq!(latest.block_version, version(1, 21, 60, 33));
     }
 
     #[test]

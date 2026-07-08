@@ -2,7 +2,7 @@
   "schema_version": 1,
   "edition": "bedrock",
   "name": "cairn-builtin-bedrock",
-  "description": "Built-in Bedrock registry pack bundled with the Cairn reference compiler. Sourced from wiki.bedrock.dev version tables (no automated extraction yet).",
+  "description": "Built-in Bedrock registry pack bundled with the Cairn reference compiler. Sourced from wiki.bedrock.dev (no automated extraction yet). Material block ids are the flattened Bedrock identifiers, which match their Java spelling for these vanilla blocks (planks, cobblestone, stone_bricks, stairs).",
   "files": {
     "data_versions": "data_versions.json",
     "materials": "materials.json"
