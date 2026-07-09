@@ -5,7 +5,7 @@ use cairn_lang_core::{DiagnosticCode, check, lower, parse};
 fn diagnose(source: &str) -> Vec<cairn_lang_core::Diagnostic> {
     let module = parse(source).unwrap_or_else(|e| panic!("parse failed: {e}"));
     let ir = lower(&module);
-    check(&module, &ir)
+    check(&module, &ir, None)
 }
 
 /// Convenience: pull `&source[span]` so AC tables can assert what text the

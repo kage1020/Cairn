@@ -86,6 +86,7 @@ dependencies = [
  "cairn-lang-core",
  "cairn-lang-formats",
  "clap",
+ "flate2",
  "serde_json",
  "tempfile",
 ]

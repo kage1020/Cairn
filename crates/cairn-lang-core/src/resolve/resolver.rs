@@ -55,6 +55,7 @@ use serde::Serialize;
 
 use crate::ast::{Value, ValueKind};
 use crate::check::{Diagnostic, DiagnosticCode, DiagnosticNote, Severity};
+use crate::edition::Edition;
 use crate::error::Span;
 use crate::ids::{PlaceId, PortId, SiteName};
 use crate::intent::{
@@ -187,8 +188,18 @@ pub struct ResolvedMemberBinding {
 /// Always returns a [`Resolution`] — every theme appears in `.themes`, every
 /// struct/def/site appears in `.scopes`, and any problems encountered are
 /// collected into `.diagnostics`.
+///
+/// The `edition` argument drives per-edition theme-variant selection
+/// (spec versioning-editions §10.7 hierarchy #2): when the file declares
+/// two themes whose names share a base and differ only by an `_java` /
+/// `_bedrock` suffix, `Some(Edition::Java)` picks the `_java` variant and
+/// `Some(Edition::Bedrock)` picks the `_bedrock` variant. `None` is the
+/// "no edition has been picked yet" case (typically `cairn check` without
+/// `--edition`) — the resolver unions slot names across variants of the
+/// same logical theme so a `mat_slot=NAME` reference that only one variant
+/// declares does not spuriously fire `E_UNRESOLVED_SLOT`.
 #[must_use]
-pub fn resolve(ir: &IntentModule) -> Resolution {
+pub fn resolve(ir: &IntentModule, edition: Option<Edition>) -> Resolution {
     let mut diagnostics: Vec<Diagnostic> = Vec::new();
     let mut themes: IndexMap<String, ThemeBinding> = IndexMap::new();
     for theme in &ir.themes {
@@ -200,14 +211,31 @@ pub fn resolve(ir: &IntentModule) -> Resolution {
         themes.insert(binding.name.clone(), binding);
     }
 
-    let single_theme_name = single_theme(&themes);
+    let single_logical = single_logical_theme(&themes);
     let mut scopes: IndexMap<String, ScopeResolution> = IndexMap::new();
     let mut applied_themes: HashSet<String> = HashSet::new();
+
+    let (auto_picked, auto_siblings) = match single_logical.as_deref() {
+        Some(logical) => {
+            let picked = pick_variant(&themes, logical, edition).map(str::to_owned);
+            let siblings = match (&picked, edition) {
+                // Sibling slots only gate `E_UNRESOLVED_SLOT` under the
+                // no-edition-yet case — a Some(edition) compile binds one
+                // variant authoritatively and cross-variant slots must not
+                // soften diagnostics for it.
+                (Some(name), None) => sibling_slot_names(&themes, logical, name),
+                _ => HashSet::new(),
+            };
+            (picked, siblings)
+        }
+        None => (None, HashSet::new()),
+    };
 
     for s in &ir.structs {
         let resolution = resolve_struct_or_def(
             &s.members,
-            single_theme_name.as_deref(),
+            auto_picked.as_deref(),
+            &auto_siblings,
             &mut themes,
             &mut applied_themes,
             &mut diagnostics,
@@ -217,7 +245,8 @@ pub fn resolve(ir: &IntentModule) -> Resolution {
     for d in &ir.defs {
         let resolution = resolve_struct_or_def(
             &d.members,
-            single_theme_name.as_deref(),
+            auto_picked.as_deref(),
+            &auto_siblings,
             &mut themes,
             &mut applied_themes,
             &mut diagnostics,
@@ -271,12 +300,115 @@ fn build_theme_binding(theme: &ThemeIr) -> ThemeBinding {
     }
 }
 
-fn single_theme(themes: &IndexMap<String, ThemeBinding>) -> Option<String> {
-    if themes.len() == 1 {
-        themes.keys().next().cloned()
+/// Strip an `_java` / `_bedrock` suffix from a theme name, returning the
+/// logical name plus the variant marker.
+///
+/// A theme declared as `theme shop_java:` reports `("shop", Some(Java))`;
+/// `theme medieval:` reports `("medieval", None)`. The suffix set is
+/// closed (matches [`Edition`]) so a future edition adds one arm here.
+fn strip_edition_suffix(name: &str) -> (&str, Option<Edition>) {
+    if let Some(base) = name.strip_suffix("_java") {
+        (base, Some(Edition::Java))
+    } else if let Some(base) = name.strip_suffix("_bedrock") {
+        (base, Some(Edition::Bedrock))
     } else {
-        None
+        (name, None)
     }
+}
+
+/// Return the sole *logical* theme name in the file, ignoring per-edition
+/// variant suffixes.
+///
+/// A file with `theme shop_java` + `theme shop_bedrock` reports
+/// `Some("shop")` because both are variants of one logical theme — this
+/// keeps the auto-pick rule intact when the author uses spec §10.7
+/// variants. A file with `theme cottage` + `theme keep` reports `None`
+/// because the two names are genuinely distinct logical themes.
+fn single_logical_theme(themes: &IndexMap<String, ThemeBinding>) -> Option<String> {
+    let mut logical: Option<String> = None;
+    for name in themes.keys() {
+        let (l, _) = strip_edition_suffix(name);
+        match &logical {
+            None => logical = Some(l.to_owned()),
+            Some(seen) if seen == l => {}
+            Some(_) => return None,
+        }
+    }
+    logical
+}
+
+/// Pick the theme name to bind for `logical` under `edition`.
+///
+/// Order of preference:
+///
+/// - `Some(Java)`    → `<logical>_java` → unsuffixed `<logical>` → **unbound**
+/// - `Some(Bedrock)` → `<logical>_bedrock` → unsuffixed `<logical>` → **unbound**
+/// - `None`          → unsuffixed `<logical>` → `<logical>_java` → `<logical>_bedrock`
+///
+/// Under a `Some(edition)` compile the fallback deliberately **stops at
+/// the unsuffixed variant** rather than cross over to the opposite
+/// edition's variant. Binding, say, a `_bedrock` theme under
+/// `--edition java` would silently route Bedrock-only slot values into a
+/// Java `.nbt`; leaving the scope unbound instead surfaces the mismatch
+/// through `E_UNRESOLVED_SLOT` on any `mat_slot=X` reference, which is
+/// the loud outcome spec versioning-editions §10.4 requires.
+///
+/// The `None` case still tolerates a partial file (only one variant
+/// declared): it prefers the unsuffixed theme, then Java, then Bedrock —
+/// a deterministic order that avoids leaking source-order into
+/// diagnostics.
+fn pick_variant<'a>(
+    themes: &'a IndexMap<String, ThemeBinding>,
+    logical: &str,
+    edition: Option<Edition>,
+) -> Option<&'a str> {
+    let mut unsuffixed: Option<&str> = None;
+    let mut java: Option<&str> = None;
+    let mut bedrock: Option<&str> = None;
+    for name in themes.keys() {
+        let (l, variant) = strip_edition_suffix(name);
+        if l != logical {
+            continue;
+        }
+        match variant {
+            None => unsuffixed = Some(name.as_str()),
+            Some(Edition::Java) => java = Some(name.as_str()),
+            Some(Edition::Bedrock) => bedrock = Some(name.as_str()),
+        }
+    }
+    match edition {
+        Some(Edition::Java) => java.or(unsuffixed),
+        Some(Edition::Bedrock) => bedrock.or(unsuffixed),
+        None => unsuffixed.or(java).or(bedrock),
+    }
+}
+
+/// Slot names present in *sibling* variants of the same logical theme.
+///
+/// Used to gate `E_UNRESOLVED_SLOT` under the edition = `None` case: a
+/// `mat_slot=X` should not error when `X` is declared by any variant of the
+/// picked scope's logical theme. Returns an empty set when no siblings exist
+/// (single-variant file, or edition-bound compile) — the caller then falls
+/// back to the picked variant's slots alone.
+fn sibling_slot_names(
+    themes: &IndexMap<String, ThemeBinding>,
+    logical: &str,
+    picked: &str,
+) -> HashSet<String> {
+    let mut out = HashSet::new();
+    for (name, binding) in themes {
+        if name == picked {
+            continue;
+        }
+        let (l, _) = strip_edition_suffix(name);
+        if l != logical {
+            continue;
+        }
+        for slot in binding.slots.keys() {
+            out.insert(slot.clone());
+        }
+    }
+    out
 }
 
 fn struct_key(s: &StructIr) -> String {
@@ -441,10 +573,16 @@ fn resolve_site_placements(
 
         // Cross-scope resolve: run the def's members under the picked theme,
         // even when the file has multiple themes (the per-place `theme=`
-        // wins over the single-theme heuristic).
+        // wins over the single-theme heuristic). Sibling-variant slot union
+        // does not apply here — the author explicitly named one theme via
+        // `theme=`, so unresolved slots on that specific theme are real
+        // errors, not the multi-variant softening the top-level scope loop
+        // uses under `cairn check`.
+        let no_siblings: HashSet<String> = HashSet::new();
         let resolution = resolve_struct_or_def(
             &def.members,
             Some(theme_name),
+            &no_siblings,
             themes,
             applied_themes,
             diagnostics,
@@ -457,7 +595,7 @@ fn resolve_site_placements(
 }
 
 /// Validate one `connect from.port to to.port path=@MAT` row and push a
-/// matching [`ResolvedConnect`] when both ends and the path material
+/// matching [`ValidatedConnect`] when both ends and the path material
 /// pass every check.
 ///
 /// Failures all skip the push so the walkway voxeliser only sees rows it
@@ -997,18 +1135,46 @@ fn invalid_place_origin_diag(place_id: &str, span: Span, message: &str) -> Diagn
     }
 }
 
+/// Resolve one struct / def / place scope against a specific picked
+/// theme name.
+///
+/// `picked_theme_name` is a fully-qualified theme name (e.g. `shop_java`),
+/// not a logical name — variant selection is the caller's job. `sibling_slots`
+/// carries the union of slot names in sibling variants of the same logical
+/// theme, used to gate `E_UNRESOLVED_SLOT` under the edition = `None` case;
+/// pass an empty set when no siblings apply (single-variant file, or a
+/// site-side explicit `theme=X` binding).
 fn resolve_struct_or_def(
     members: &[Member],
-    single_theme_name: Option<&str>,
+    picked_theme_name: Option<&str>,
+    sibling_slots: &HashSet<String>,
     themes: &mut IndexMap<String, ThemeBinding>,
     applied_themes: &mut HashSet<String>,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> ScopeResolution {
-    let (theme_name, theme_slots) = match single_theme_name {
-        Some(name) => themes.get(name).map_or((None, None), |t| {
+    // Structural invariant: `pick_variant` (the only caller producing an
+    // auto-picked name here) iterates `themes.keys()` to build its
+    // candidates, so any name it returns is guaranteed to be in `themes`.
+    // The site-side branch that hits this with a user-supplied `theme=X`
+    // label filters through `themes.contains_key(theme_name)` up-slope
+    // before calling in. Reaching the `None` arm of `themes.get` would
+    // mean one of those guarantees broke — asymmetric with `validate_port`,
+    // which uses the same shape of loud fallback. `debug_assert!(false)`
+    // trips in dev / test builds; a release build silently degrades to
+    // the unbound-theme path rather than panicking on user data.
+    let (theme_name, theme_slots) = if let Some(name) = picked_theme_name {
+        if let Some(t) = themes.get(name) {
             (Some(name.to_owned()), Some(t.slots.clone()))
-        }),
-        None => (None, None),
+        } else {
+            debug_assert!(
+                false,
+                "resolve_struct_or_def: picked theme `{name}` is not in the themes map; \
+                 pick_variant should only surface names it read from themes.keys()",
+            );
+            (None, None)
+        }
+    } else {
+        (None, None)
     };
 
     if let Some(name) = &theme_name {
@@ -1023,6 +1189,7 @@ fn resolve_struct_or_def(
         members,
         theme_slots.as_ref(),
         theme_name.as_deref(),
+        sibling_slots,
         themes,
         &mut resolution,
         diagnostics,
@@ -1034,6 +1201,7 @@ fn resolve_members(
     members: &[Member],
     theme_slots: Option<&IndexMap<String, ValueWithSpan>>,
     theme_name: Option<&str>,
+    sibling_slots: &HashSet<String>,
     themes: &mut IndexMap<String, ThemeBinding>,
     out: &mut ScopeResolution,
     diagnostics: &mut Vec<Diagnostic>,
@@ -1042,11 +1210,19 @@ fn resolve_members(
         let mut binding = ResolvedMemberBinding::default();
 
         // 1. mat_slot resolution against the scope's applied theme.
+        //    A slot the picked variant does not declare is still "known"
+        //    when a sibling variant of the same logical theme declares it,
+        //    which suppresses `E_UNRESOLVED_SLOT` for spec §10.7's
+        //    edition-variant themes under `cairn check` without an
+        //    `--edition` pin. `slot_value` stays `None` in that case — the
+        //    concrete binding is edition-specific and comes into scope only
+        //    once the compile picks a variant.
         if let Some(slot_name) = &member.mat_slot
             && let (Some(slots), Some(tname)) = (theme_slots, theme_name)
         {
             match slots.get(slot_name) {
                 Some(v) => binding.slot_value = Some(v.clone()),
+                None if sibling_slots.contains(slot_name) => {}
                 None => diagnostics.push(unresolved_slot_diag(slot_name, tname, member, slots)),
             }
         }
@@ -1074,7 +1250,15 @@ fn resolve_members(
             members: children, ..
         } = &member.children;
         if !children.is_empty() {
-            resolve_members(children, theme_slots, theme_name, themes, out, diagnostics);
+            resolve_members(
+                children,
+                theme_slots,
+                theme_name,
+                sibling_slots,
+                themes,
+                out,
+                diagnostics,
+            );
         }
     }
 }
@@ -1252,7 +1436,7 @@ mod tests {
     #[test]
     fn single_theme_file_resolves_struct_slots() {
         let src = "theme t:\n  slot wall -> @cobblestone\n\nstruct s size=4x4\n  walls mat_slot=wall height=3\n";
-        let r = resolve(&ir(src));
+        let r = resolve(&ir(src), None);
         let scope = r.scopes.get("struct::s").expect("scope present");
         assert_eq!(scope.bound_theme.as_deref(), Some("t"));
         let bound = scope.members.values().next().expect("member binding");
@@ -1267,7 +1451,7 @@ mod tests {
     #[test]
     fn unresolved_slot_emits_diagnostic() {
         let src = "theme t:\n  slot wall -> @cobblestone\n\nstruct s size=4x4\n  walls mat_slot=floor height=3\n";
-        let r = resolve(&ir(src));
+        let r = resolve(&ir(src), None);
         assert!(
             r.diagnostics
                 .iter()
@@ -1280,7 +1464,7 @@ mod tests {
     #[test]
     fn multiple_themes_leave_struct_unbound() {
         let src = "theme a:\n  slot wall -> @cobblestone\ntheme b:\n  slot wall -> @stone\n\nstruct s size=4x4\n  walls mat_slot=wall height=3\n";
-        let r = resolve(&ir(src));
+        let r = resolve(&ir(src), None);
         let scope = r.scopes.get("struct::s").unwrap();
         assert!(scope.bound_theme.is_none());
         // No E_UNRESOLVED_SLOT because no theme was applied.
@@ -1298,7 +1482,7 @@ mod tests {
         // `selector_extras`, even when the scope's `bound_theme` was None.
         // That violated the per-theme DI contract from §7.
         let src = "theme a:\n  walls[class=outer] -> trim=@a_trim\ntheme b:\n  walls[class=outer] -> trim=@b_trim\n\nstruct s size=4x4\n  walls class=outer height=3\n";
-        let r = resolve(&ir(src));
+        let r = resolve(&ir(src), None);
         let scope = r.scopes.get("struct::s").unwrap();
         assert!(scope.bound_theme.is_none());
         let bound = scope.members.values().next().unwrap();
@@ -1317,7 +1501,7 @@ mod tests {
         // that binding runs, the selectors are not "unmatched", they're
         // "not yet bound".
         let src = "theme a:\n  walls[class=outer] -> trim=@a\ntheme b:\n  walls[class=outer] -> trim=@b\n\nstruct s size=4x4\n  walls class=outer height=3\n";
-        let r = resolve(&ir(src));
+        let r = resolve(&ir(src), None);
         assert!(
             !r.diagnostics
                 .iter()
@@ -1330,7 +1514,7 @@ mod tests {
     #[test]
     fn selector_match_adds_extras_and_marks_matched() {
         let src = "theme t:\n  slot wall -> @cobblestone\n  walls[class=outer] -> trim=@spruce_log\n\nstruct s size=4x4\n  walls class=outer mat_slot=wall height=3\n";
-        let r = resolve(&ir(src));
+        let r = resolve(&ir(src), None);
         let scope = r.scopes.get("struct::s").unwrap();
         let bound = scope.members.values().next().unwrap();
         assert!(
@@ -1348,7 +1532,7 @@ mod tests {
     #[test]
     fn unmatched_selector_emits_warning() {
         let src = "theme t:\n  slot wall -> @cobblestone\n  walls[class=does_not_exist] -> trim=@spruce_log\n\nstruct s size=4x4\n  walls class=outer mat_slot=wall height=3\n";
-        let r = resolve(&ir(src));
+        let r = resolve(&ir(src), None);
         assert!(
             r.diagnostics
                 .iter()
@@ -1363,7 +1547,7 @@ mod tests {
         // the resolver must surface that as a targeted suggestion so the
         // fix is unambiguous.
         let src = "theme t:\n  slot wall -> @cobblestone\n\nstruct s size=4x4\n  walls mat_slot=wal height=3\n";
-        let r = resolve(&ir(src));
+        let r = resolve(&ir(src), None);
         let diag = r
             .diagnostics
             .iter()
@@ -1383,7 +1567,7 @@ mod tests {
         // No theme slot is close to `quartz` — the resolver must not invent
         // a guess. The remediation note stays as the lone follow-up.
         let src = "theme t:\n  slot wall -> @cobblestone\n\nstruct s size=4x4\n  walls mat_slot=quartz height=3\n";
-        let r = resolve(&ir(src));
+        let r = resolve(&ir(src), None);
         let diag = r
             .diagnostics
             .iter()
@@ -1418,7 +1602,7 @@ mod tests {
             "  place id=b use=cottage theme=t east_of=a gap=2\n",
             "  connect a.entry to b.entry path=@gravel\n",
         );
-        let r = resolve(&ir(src));
+        let r = resolve(&ir(src), None);
         assert!(
             !r.diagnostics.iter().any(|d| d.severity == Severity::Error),
             "no errors expected, got {:?}",
@@ -1451,7 +1635,7 @@ mod tests {
             "  place id=b use=cottage theme=t east_of=a gap=2\n",
             "  connect a.entr to b.entry path=@gravel\n",
         );
-        let r = resolve(&ir(src));
+        let r = resolve(&ir(src), None);
         let diag = r
             .diagnostics
             .iter()
@@ -1494,7 +1678,7 @@ mod tests {
             "  place id=b use=cottage theme=t east_of=a gap=2\n",
             "  connect a.entry to b.entry path=@gravel\n",
         );
-        let r = resolve(&ir(src));
+        let r = resolve(&ir(src), None);
         assert!(
             r.diagnostics
                 .iter()
@@ -1519,7 +1703,7 @@ mod tests {
             "  place id=b use=cottage theme=t east_of=a gap=2\n",
             "  connect a.entry to b.entry\n",
         );
-        let r = resolve(&ir(src));
+        let r = resolve(&ir(src), None);
         assert!(
             r.diagnostics
                 .iter()
@@ -1550,7 +1734,7 @@ mod tests {
             "  place id=b use=cottage theme=t east_of=a gap=2\n",
             "  connect a.entry to b.entry path=plain_ident\n",
         );
-        let r = resolve(&ir(src));
+        let r = resolve(&ir(src), None);
         let diag = r
             .diagnostics
             .iter()
@@ -1583,7 +1767,7 @@ mod tests {
             "  place id=a use=cottage theme=t at=origin\n",
             "  connect a.entry to ghost.entry path=@gravel\n",
         );
-        let r = resolve(&ir(src));
+        let r = resolve(&ir(src), None);
         let diag = r
             .diagnostics
             .iter()
@@ -1620,7 +1804,7 @@ mod tests {
             "  place id=a use=cottage theme=t at=origin\n",
             "  connect ghost.entry to phantom.entry path=@gravel\n",
         );
-        let r = resolve(&ir(src));
+        let r = resolve(&ir(src), None);
         let ghost_hit = r
             .diagnostics
             .iter()
@@ -1656,7 +1840,7 @@ mod tests {
             "  place id=b use=cottage theme=t east_of=a gap=2\n",
             "  connect a.entry to b.entr path=@gravel\n",
         );
-        let r = resolve(&ir(src));
+        let r = resolve(&ir(src), None);
         let diag = r
             .diagnostics
             .iter()
@@ -1703,7 +1887,7 @@ mod tests {
             "  place id=a use=cottage theme=t at=origin\n",
             "  connect ghost.entry to a.entry path=@gravel\n",
         );
-        let r = resolve(&ir(src));
+        let r = resolve(&ir(src), None);
         let diag = r
             .diagnostics
             .iter()
@@ -1734,9 +1918,290 @@ mod tests {
     #[test]
     fn unknown_slot_target_emits_warning() {
         let src = "theme t:\n  slot wall -> plain_ident\n\nstruct s size=4x4\n  walls mat_slot=wall height=3\n";
-        let r = resolve(&ir(src));
+        let r = resolve(&ir(src), None);
         assert!(r.diagnostics.iter().any(
             |d| d.code == DiagnosticCode::UnknownSlotTarget && d.severity == Severity::Warning
         ),);
+    }
+
+    // ------------------------------------------------------------------
+    // Per-edition theme fallback (spec versioning-editions §10.7 #2).
+    // The following tests pin the AC set that keeps the resolver honest
+    // about which variant it bound and when the sibling-slot union kicks in.
+    // ------------------------------------------------------------------
+
+    fn per_edition_variants_src() -> String {
+        // One logical theme `t` split into `_java` / `_bedrock` variants.
+        // Each variant has a private slot (`java_only` / `bedrock_only`) so
+        // the variant-picking behaviour is observable via `slot_value`, and
+        // a shared slot (`floor`) confirms both variants participate in
+        // `single_logical_theme` grouping.
+        [
+            "theme t_java:",
+            "  slot floor -> @oak_planks",
+            "  slot java_only -> @spruce_planks",
+            "",
+            "theme t_bedrock:",
+            "  slot floor -> @oak_planks",
+            "  slot bedrock_only -> @dark_oak_planks",
+            "",
+            "struct s size=4x4",
+            "  floor  mat_slot=floor",
+            "",
+        ]
+        .join("\n")
+    }
+
+    #[test]
+    fn per_edition_java_picks_java_variant() {
+        let r = resolve(&ir(&per_edition_variants_src()), Some(Edition::Java));
+        let scope = r.scopes.get("struct::s").expect("scope present");
+        assert_eq!(scope.bound_theme.as_deref(), Some("t_java"));
+        assert!(
+            r.diagnostics.is_empty(),
+            "no diagnostics expected for a slot both variants declare, got {:?}",
+            r.diagnostics,
+        );
+    }
+
+    #[test]
+    fn per_edition_bedrock_picks_bedrock_variant() {
+        let r = resolve(&ir(&per_edition_variants_src()), Some(Edition::Bedrock));
+        let scope = r.scopes.get("struct::s").expect("scope present");
+        assert_eq!(scope.bound_theme.as_deref(), Some("t_bedrock"));
+        assert!(r.diagnostics.is_empty(), "got {:?}", r.diagnostics);
+    }
+
+    #[test]
+    fn per_edition_variant_binds_only_its_own_slot_under_compile() {
+        // Under Some(Java), a member referencing a slot that only the
+        // Bedrock variant declares must fail loud — sibling-slot union is
+        // reserved for the edition = None case.
+        let src = [
+            "theme t_java:",
+            "  slot floor -> @oak_planks",
+            "",
+            "theme t_bedrock:",
+            "  slot floor -> @oak_planks",
+            "  slot bedrock_only -> @dark_oak_planks",
+            "",
+            "struct s size=4x4",
+            "  floor mat_slot=bedrock_only",
+            "",
+        ]
+        .join("\n");
+        let r = resolve(&ir(&src), Some(Edition::Java));
+        assert!(
+            r.diagnostics
+                .iter()
+                .any(|d| d.code == DiagnosticCode::UnresolvedSlot),
+            "expected E_UNRESOLVED_SLOT under --edition java for a Bedrock-only slot, got {:?}",
+            r.diagnostics,
+        );
+    }
+
+    #[test]
+    fn per_edition_check_unions_slots_across_variants() {
+        // AC10: resolve(ir, None) on a file with `_java` + `_bedrock` variants
+        // must accept a `mat_slot=X` when X is declared by *either* variant.
+        let src = [
+            "theme t_java:",
+            "  slot floor -> @oak_planks",
+            "  slot java_only -> @spruce_planks",
+            "",
+            "theme t_bedrock:",
+            "  slot floor -> @oak_planks",
+            "  slot bedrock_only -> @dark_oak_planks",
+            "",
+            "struct s size=4x4",
+            "  floor mat_slot=java_only",
+            "  floor mat_slot=bedrock_only",
+            "",
+        ]
+        .join("\n");
+        let r = resolve(&ir(&src), None);
+        assert!(
+            !r.diagnostics
+                .iter()
+                .any(|d| d.code == DiagnosticCode::UnresolvedSlot),
+            "sibling-slot union should suppress E_UNRESOLVED_SLOT for either variant's slot, got {:?}",
+            r.diagnostics,
+        );
+    }
+
+    #[test]
+    fn per_edition_check_still_errors_on_slot_absent_from_all_variants() {
+        // The union softens `mat_slot=X` only when X is declared *somewhere*.
+        // A slot declared by no variant of the logical theme is still an
+        // error, so a genuine typo is still caught under `cairn check`.
+        let src = [
+            "theme t_java:",
+            "  slot floor -> @oak_planks",
+            "",
+            "theme t_bedrock:",
+            "  slot floor -> @oak_planks",
+            "",
+            "struct s size=4x4",
+            "  floor mat_slot=totally_bogus",
+            "",
+        ]
+        .join("\n");
+        let r = resolve(&ir(&src), None);
+        assert!(
+            r.diagnostics
+                .iter()
+                .any(|d| d.code == DiagnosticCode::UnresolvedSlot),
+            "expected E_UNRESOLVED_SLOT for a slot no variant declares, got {:?}",
+            r.diagnostics,
+        );
+    }
+
+    #[test]
+    fn per_edition_falls_back_to_unsuffixed_when_variant_missing() {
+        // `theme t:` (no variant suffix) is the shared-default form used
+        // by every existing example. It must resolve for both editions so
+        // the current corpus keeps compiling untouched.
+        let src = [
+            "theme t:",
+            "  slot floor -> @oak_planks",
+            "",
+            "struct s size=4x4",
+            "  floor mat_slot=floor",
+            "",
+        ]
+        .join("\n");
+        for edition in [Some(Edition::Java), Some(Edition::Bedrock), None] {
+            let r = resolve(&ir(&src), edition);
+            let scope = r.scopes.get("struct::s").unwrap();
+            assert_eq!(
+                scope.bound_theme.as_deref(),
+                Some("t"),
+                "edition={edition:?}"
+            );
+            assert!(
+                r.diagnostics.is_empty(),
+                "edition={edition:?}: got {:?}",
+                r.diagnostics,
+            );
+        }
+    }
+
+    #[test]
+    fn per_edition_java_preferred_over_bedrock_when_unsuffixed_absent() {
+        // `edition = None` prefers the unsuffixed variant, then Java, then
+        // Bedrock — the deterministic order avoids leaking source order
+        // into diagnostics when only variants exist.
+        let src = [
+            "theme t_bedrock:",
+            "  slot floor -> @dark_oak_planks",
+            "",
+            "theme t_java:",
+            "  slot floor -> @oak_planks",
+            "",
+            "struct s size=4x4",
+            "  floor mat_slot=floor",
+            "",
+        ]
+        .join("\n");
+        let r = resolve(&ir(&src), None);
+        let scope = r.scopes.get("struct::s").unwrap();
+        assert_eq!(scope.bound_theme.as_deref(), Some("t_java"));
+    }
+
+    #[test]
+    fn distinct_logical_themes_still_leave_scope_unbound() {
+        // Two truly distinct logical themes (`cottage` and `keep`) remain
+        // the multi-theme deferred-selection case — the `_java`/`_bedrock`
+        // grouping must not collapse them into one.
+        let src = [
+            "theme cottage:",
+            "  slot floor -> @oak_planks",
+            "",
+            "theme keep:",
+            "  slot floor -> @stone_bricks",
+            "",
+            "struct s size=4x4",
+            "  floor mat_slot=floor",
+            "",
+        ]
+        .join("\n");
+        let r = resolve(&ir(&src), Some(Edition::Java));
+        let scope = r.scopes.get("struct::s").unwrap();
+        assert!(
+            scope.bound_theme.is_none(),
+            "two distinct logical themes must remain unbound, got {:?}",
+            scope.bound_theme,
+        );
+    }
+
+    #[test]
+    fn per_edition_java_does_not_fall_back_to_bedrock_variant() {
+        // Silent misrouting guard: a file with only `theme t_bedrock:` must
+        // leave the scope unbound under `Some(Edition::Java)` rather than
+        // silently binding the Bedrock variant. Any `mat_slot=` reference
+        // then surfaces as `E_UNRESOLVED_SLOT`, which is the loud outcome
+        // spec §10.4 requires — binding across editions would route
+        // Bedrock-only slot values into a Java `.nbt`.
+        let src = [
+            "theme t_bedrock:",
+            "  slot floor -> @dark_oak_planks",
+            "",
+            "struct s size=4x4",
+            "  floor mat_slot=floor",
+            "",
+        ]
+        .join("\n");
+        let r = resolve(&ir(&src), Some(Edition::Java));
+        let scope = r.scopes.get("struct::s").unwrap();
+        assert!(
+            scope.bound_theme.is_none(),
+            "Some(Java) with only `_bedrock` variant must not bind, got {:?}",
+            scope.bound_theme,
+        );
+        // The unresolved-slot diagnostic is skipped here because no theme
+        // is bound at all — matching the multi-theme "no auto-pick" branch
+        // in `multiple_themes_leave_struct_unbound`. That branch is the
+        // authority on unbound-scope semantics; the AC to pin under a
+        // downstream compile is that lowering treats an unbound scope's
+        // `mat_slot` as an unresolved abstract material.
+        assert!(
+            !r.diagnostics
+                .iter()
+                .any(|d| d.code == DiagnosticCode::UnresolvedSlot),
+        );
+    }
+
+    #[test]
+    fn per_edition_bedrock_does_not_fall_back_to_java_variant() {
+        // Symmetric guard for the opposite direction — a file with only
+        // `theme t_java:` must not bind under `Some(Edition::Bedrock)`.
+        let src = [
+            "theme t_java:",
+            "  slot floor -> @oak_planks",
+            "",
+            "struct s size=4x4",
+            "  floor mat_slot=floor",
+            "",
+        ]
+        .join("\n");
+        let r = resolve(&ir(&src), Some(Edition::Bedrock));
+        let scope = r.scopes.get("struct::s").unwrap();
+        assert!(scope.bound_theme.is_none());
+    }
+
+    #[test]
+    fn strip_edition_suffix_recognises_both_editions() {
+        assert_eq!(
+            strip_edition_suffix("shop_java"),
+            ("shop", Some(Edition::Java))
+        );
+        assert_eq!(
+            strip_edition_suffix("shop_bedrock"),
+            ("shop", Some(Edition::Bedrock)),
+        );
+        assert_eq!(strip_edition_suffix("medieval"), ("medieval", None));
+        // Names that happen to end with a similar substring but are not
+        // suffixed with the closed edition set remain unsuffixed.
+        assert_eq!(strip_edition_suffix("javanese"), ("javanese", None));
     }
 }

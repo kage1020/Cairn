@@ -17,6 +17,8 @@
     { "token": "roof.dark_wood", "block": "dark_oak_stairs" },
     { "token": "roof.light_wood", "block": "birch_stairs" },
     { "token": "roof.warm_wood", "block": "oak_stairs" },
-    { "token": "roof.cool_wood", "block": "spruce_stairs" }
+    { "token": "roof.cool_wood", "block": "spruce_stairs" },
+    { "token": "sign.oak", "block": "oak_sign" },
+    { "token": "sign.oak_wall", "block": "oak_wall_sign" }
   ]
 }

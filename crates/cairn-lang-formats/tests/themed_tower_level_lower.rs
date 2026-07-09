@@ -29,7 +29,7 @@ fn lower_themed_tower() -> BlockArrayIr {
         .expect("themed-tower.crn readable");
     let module = parse(&source).expect("parse themed-tower");
     let ir = lower(&module);
-    let resolution = resolve(&ir);
+    let resolution = resolve(&ir, None);
     let pack = builtin_java();
     lower_to_block_array(&ir, &resolution, Some(&pack.materials))
 }

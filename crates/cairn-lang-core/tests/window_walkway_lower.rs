@@ -28,7 +28,7 @@ fn lower_window_walkway() -> BlockArrayIr {
         .expect("window-walkway.crn must read");
     let module = parse(&source).expect("parse");
     let ir = lower(&module);
-    let resolution = resolve(&ir);
+    let resolution = resolve(&ir, None);
     let mut out = lower_to_block_array(&ir, &resolution, None);
     let mut combined = resolution.diagnostics;
     combined.append(&mut out.diagnostics);
@@ -179,7 +179,7 @@ place id=peer   use=hut theme=plain east_of=anchor gap=4\n  \
 connect anchor.entry to peer.overflow path=@gravel\n";
     let module = parse(src).expect("parse");
     let ir = lower(&module);
-    let resolution = resolve(&ir);
+    let resolution = resolve(&ir, None);
     let mut out = lower_to_block_array(&ir, &resolution, None);
     let mut combined = resolution.diagnostics;
     combined.append(&mut out.diagnostics);

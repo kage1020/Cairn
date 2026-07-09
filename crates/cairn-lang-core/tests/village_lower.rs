@@ -27,7 +27,7 @@ fn lower_village() -> BlockArrayIr {
         std::fs::read_to_string(examples_dir().join("village.crn")).expect("village.crn must read");
     let module = parse(&source).expect("parse");
     let ir = lower(&module);
-    let resolution = resolve(&ir);
+    let resolution = resolve(&ir, None);
     let mut out = lower_to_block_array(&ir, &resolution, None);
     // Resolver diagnostics are produced before lowering; mirror the CLI
     // wiring so the assertion below sees both lists merged.

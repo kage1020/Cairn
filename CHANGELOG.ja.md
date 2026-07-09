@@ -14,6 +14,68 @@
 
 ### 追加
 
+- `cairn-lang-formats::portability` — `cairn info` の
+  `edition_portability` 軸を支えるパレットエントリ単位のポータビリティ
+  カウンタ（spec versioning-editions §10.5）。`portability_for_bedrock` は
+  air 以外のパレットエントリを `bedrock_state::translate_states` に通し、
+  結果を `{portable, degraded, unsupported}` に集計します — 劣化ノートなしの
+  変換は portable、劣化ノート付き（現状は stair の `shape != straight`）は
+  degraded、`BedrockStateError` は unsupported として数えます。
+  `portability_for_java` は air 以外を全て portable として報告します
+  （§10.3 の「Java is the base」に従う）。カウント粒度はパレットエントリ
+  単位で、`.mcstructure` ライターが実際に書き出す粒度と一致します —
+  lowering が複数の異なるパレットエントリを intern するメンバー（コーナー
+  stair を含む切妻屋根など）は、エントリ単位で 1 行ずつ寄与します。
+- `cairn-lang-core::Edition` — Resolver と CLI で共有される横断的な
+  エディション marker (`Java` / `Bedrock`)。将来 3 番目のエディションを
+  追加するときも 1 か所に variant を足すだけで済みます。`FromStr` は
+  未知のエディション文字列を loud に拒否し
+  (`unknown edition `{input}`. Valid: java, bedrock. Fix: ...`)、
+  `cairn info --editions foo` は dry-run lowering を走らせる前に exit 2 で
+  拒否するようになりました（未知のエディションが 0 埋めの portability 行に
+  無音でフォワードされる従来の穴を塞ぐ）。
+- `cairn-lang-core::resolve` — per-edition テーマフォールバック
+  （spec versioning-editions §10.7 代替階層 #2）。名前が `_java` /
+  `_bedrock` で終わるテーマは論理テーマの edition 変種と扱われます
+  （`theme shop_java:` と `theme shop_bedrock:` は論理名 `shop` を共有）。
+  `resolve` は `edition: Option<Edition>` を引数に取るようになり、
+  struct/def スコープごとに対応する変種を自動選択します。指定された
+  variant がない場合は同一論理名の未サフィックステーマにフォールバック
+  します。既存の未サフィックステーマ（`theme medieval:` のような
+  従来形）は両エディションで従来通り解決されます。`resolve(ir, None)`
+  — エディション未指定の `cairn check` 経路 — では両 variant のスロット
+  名を union し、片方の variant にしか宣言されていないスロットへの
+  `mat_slot=NAME` 参照が誤って `E_UNRESOLVED_SLOT` を出さないように
+  します。selector マッチは選ばれた variant にのみスコープされ、§7 の
+  per-theme DI コントラクトを維持します。`resolve(&ir)` の呼び出しは
+  `resolve(&ir, edition)` に、`check(&module, &ir)` は
+  `check(&module, &ir, edition)` に移行しました。
+- `cairn info --editions java,bedrock` は `degraded` / `unsupported`
+  列を per-edition dry-run lowering から生成するようになりました
+  （リクエストされたエディションごとに `lower_to_block_array` を 1 回走らせ、
+  対応する built-in pack で materials を解決し、パレットを
+  `portability_for_*` に流す）。ハードコードされたゼロは廃止です。
+  `themed-tower.crn` では軒の `shape=outer_left` stair が
+  `Bedrock: degraded: >=1` として表面化し、`cottage.crn` は両軸とも 0 の
+  ままです。`EditionPortability` の JSON / テキスト形状は変わらないため、
+  `--format json` の消費者はワイヤ破壊なく実データを受け取ります。
+  `cairn-lang-core::resolve::compute_axes` は per-edition 集計を呼び手から
+  受け取る `Vec<EditionPortability>` 引数を持つようになりました
+  （`core` は `formats` に依存しないため、集計は CLI 層で作って渡す形）。
+- `cairn check --edition java|bedrock` — オプショナルな edition ピン。
+  指定された variant にしか宣言されていないスロットへの `mat_slot=X`
+  参照は `E_UNRESOLVED_SLOT` として発火します。`--edition` 未指定時は
+  Resolver が両 variant のスロット名を union するため、後にどちらの
+  エディションでコンパイルされてもファイルは `check` を通過します。
+- `examples/edition-fallback.crn`（+ `.crn.lock`） — 論理テーマ `shop` を
+  `shop_java`（`floating_text` スロットを `@sign.oak` にバインド）と
+  `shop_bedrock`（`@sign.oak_wall` にバインド）の 2 variant に分割し、
+  spec §10.7 代替階層 #2 をエンドツーエンドで示す例。spec の
+  例示的な `text_display` パターンが必要とするエンティティ概念を導入せず、
+  既存の block-only パイプラインだけで完結します。Java コンパイルは
+  palette に `oak_sign`、Bedrock コンパイルは `oak_wall_sign` を書き出します。
+  新しい material token `sign.oak` / `sign.oak_wall` は両 built-in pack に
+  追加されました。
 - `cairn-lang-formats::bedrock_state` — Bedrock バックエンド向けの
   per-edition blockstate 変換。`.mcstructure` ライターが後続とした対応です。
   `translate_states` は **stair family**（現状 lowering がプロパティ付きで

@@ -10,8 +10,8 @@ use cairn_lang_core::lock::{
     HashHex, LockEdition, LockInputs, LockPlacement, LockTarget, LockWalkway, Lockfile,
     hash_resolved_ir, hash_source,
 };
-use cairn_lang_core::resolve::{VersionAxes, compute_axes, resolve};
-use cairn_lang_core::{Severity, check, lower, parse};
+use cairn_lang_core::resolve::{EditionPortability, VersionAxes, compute_axes, resolve};
+use cairn_lang_core::{Edition, Severity, check, lower, parse};
 use cairn_lang_formats::bedrock_structure::{ParityNote, build_mcstructure_tag, write_mcstructure};
 use cairn_lang_formats::data_version::{
     BedrockTarget, JavaTarget, resolve_bedrock_target, resolve_java_target,
@@ -19,6 +19,7 @@ use cairn_lang_formats::data_version::{
 use cairn_lang_formats::java_structure::{
     Compound, OutputExt, build_structure_tag, output_filename, write_compound_gzip,
 };
+use cairn_lang_formats::portability::{portability_for_bedrock, portability_for_java};
 use cairn_lang_formats::registry::{RegistryPack, builtin_bedrock, builtin_java};
 use clap::{Parser, Subcommand, ValueEnum};
 
@@ -52,6 +53,15 @@ enum Command {
     Check {
         /// Path to the .crn file to check.
         file: PathBuf,
+        /// Optional edition pin. When set, per-edition theme variants
+        /// (spec versioning-editions §10.7) are resolved for the picked
+        /// edition specifically — a `mat_slot=X` reference to a slot only
+        /// the *other* variant declares fires `E_UNRESOLVED_SLOT`. When
+        /// omitted, the resolver unions slot names across both variants
+        /// of one logical theme so the file passes `check` regardless of
+        /// which edition it ends up compiling for.
+        #[arg(long, value_enum)]
+        edition: Option<EditionArg>,
         /// Output format for the diagnostics.
         #[arg(long, value_enum, default_value_t = CheckFormat::Text)]
         format: CheckFormat,
@@ -163,6 +173,16 @@ impl EditionArg {
             EditionArg::Bedrock => LockEdition::Bedrock,
         }
     }
+
+    /// Convert to the core-crate [`Edition`] marker so the resolver's
+    /// per-edition theme-variant selection sees the same value the compile
+    /// backend does.
+    fn as_edition(self) -> Edition {
+        match self {
+            EditionArg::Java => Edition::Java,
+            EditionArg::Bedrock => Edition::Bedrock,
+        }
+    }
 }
 
 #[derive(Copy, Clone, ValueEnum)]
@@ -180,7 +200,11 @@ fn main() -> ExitCode {
     let cli = Cli::parse();
     match cli.command {
         Some(Command::Parse { file, format }) => run_parse(&file, format),
-        Some(Command::Check { file, format }) => run_check(&file, format),
+        Some(Command::Check {
+            file,
+            edition,
+            format,
+        }) => run_check(&file, edition, format),
         Some(Command::Info {
             file,
             editions,
@@ -247,7 +271,7 @@ fn run_parse(file: &Path, format: Format) -> ExitCode {
     }
 }
 
-fn run_check(file: &Path, format: CheckFormat) -> ExitCode {
+fn run_check(file: &Path, edition: Option<EditionArg>, format: CheckFormat) -> ExitCode {
     let source = match std::fs::read_to_string(file) {
         Ok(s) => s,
         Err(err) => {
@@ -275,7 +299,7 @@ fn run_check(file: &Path, format: CheckFormat) -> ExitCode {
         }
     };
     let ir = lower(&module);
-    let diagnostics = check(&module, &ir);
+    let diagnostics = check(&module, &ir, edition.map(EditionArg::as_edition));
     let has_error = diagnostics.iter().any(|d| d.severity == Severity::Error);
     // Build the line-start index once and reuse it for every diagnostic /
     // note position lookup. Without this we'd re-walk the entire source for
@@ -345,6 +369,17 @@ fn run_info(file: &Path, editions: &[String], format: InfoFormat) -> ExitCode {
         eprintln!("error: --editions value must not contain empty entries");
         return ExitCode::from(2);
     }
+    // Reject unknown edition names before the (expensive) dry-run lowering.
+    // The parity table's contract is "every entry is a real portability
+    // figure"; letting an unknown edition through would either silently
+    // produce zeros or a Java-flavoured fallback the caller couldn't
+    // distinguish from a real portable-only classification.
+    for e in editions {
+        if let Err(err) = e.parse::<Edition>() {
+            eprintln!("error: {err}");
+            return ExitCode::from(2);
+        }
+    }
 
     let source = match std::fs::read_to_string(file) {
         Ok(s) => s,
@@ -369,8 +404,78 @@ fn run_info(file: &Path, editions: &[String], format: InfoFormat) -> ExitCode {
         }
     };
     let ir = lower(&module);
-    let resolution = resolve(&ir);
-    let axes = compute_axes(&module, &ir, &resolution, editions);
+
+    // Surface resolver + lowering diagnostics before running the parity
+    // dry-run — the same contract `run_check` / `run_lower` / `run_compile`
+    // already honor. Without this, a `.crn` carrying an
+    // `E_UNRESOLVED_SLOT` (or any other Error-severity finding) would
+    // still get `cairn info` exit 0 with a portability row computed
+    // against a partially unresolved IR, which is a poor CI gate.
+    //
+    // The diagnostic set follows `cairn check` semantics — `resolve(ir,
+    // None)` unions slot names across per-edition variants — so a file
+    // whose only "problem" is that one variant declares a slot the other
+    // doesn't still passes here. A per-edition strict pass (`resolve(ir,
+    // Some(edition))`) is what the parity dry-run below runs; its
+    // downstream lowering may add lowering-level diagnostics that are
+    // edition-agnostic in practice.
+    let resolution = resolve(&ir, None);
+    let mut block_ir = lower_to_block_array(&ir, &resolution, Some(&builtin_java().materials));
+    let mut combined = resolution.diagnostics.clone();
+    combined.append(&mut block_ir.diagnostics);
+
+    let lines = LineStarts::new(&source);
+    let mut has_error = false;
+    for d in &combined {
+        let pos = lines.position(&source, d.span.start);
+        eprintln!(
+            "{}:{}: {}[{}]: {}",
+            file.display(),
+            pos,
+            d.severity.as_str(),
+            d.code.as_str(),
+            d.primary,
+        );
+        for note in &d.notes {
+            eprintln!("  note: {}", note.message);
+        }
+        if d.severity == Severity::Error {
+            has_error = true;
+        }
+    }
+    if has_error {
+        return ExitCode::from(1);
+    }
+
+    // One dry-run lower per requested edition: the resolver's per-edition
+    // theme variant selection can produce a different palette per edition
+    // (the whole point of spec §10.7 hierarchy #2), so a single shared
+    // block-array IR would misrepresent the parity axis.
+    //
+    // The lowering never writes files here — it stops at the in-memory
+    // `BlockArrayIr` that `portability_for_*` inspects.
+    let mut per_edition: Vec<EditionPortability> = Vec::with_capacity(editions.len());
+    for e in editions {
+        let edition: Edition = e.parse().expect("validated above");
+        let per_edition_resolution = resolve(&ir, Some(edition));
+        let materials = match edition {
+            Edition::Java => &builtin_java().materials,
+            Edition::Bedrock => &builtin_bedrock().materials,
+        };
+        let per_block_ir = lower_to_block_array(&ir, &per_edition_resolution, Some(materials));
+        let counts = match edition {
+            Edition::Java => portability_for_java(&per_block_ir),
+            Edition::Bedrock => portability_for_bedrock(&per_block_ir),
+        };
+        per_edition.push(EditionPortability {
+            edition,
+            portable: counts.portable,
+            degraded: counts.degraded,
+            unsupported: counts.unsupported,
+        });
+    }
+
+    let axes = compute_axes(&module, &ir, &resolution, per_edition);
 
     match format {
         InfoFormat::Text => {
@@ -409,7 +514,7 @@ fn print_text(axes: &VersionAxes) {
             .map(|ep| {
                 format!(
                     "{}: portable: {}  degraded: {}  unsupported: {}",
-                    capitalise(&ep.edition),
+                    capitalise(ep.edition.as_str()),
                     ep.portable,
                     ep.degraded,
                     ep.unsupported,
@@ -464,7 +569,7 @@ fn run_lower(file: &Path, format: LowerFormat) -> ExitCode {
         }
     };
     let ir = lower(&module);
-    let resolution = resolve(&ir);
+    let resolution = resolve(&ir, None);
     let mut block_ir = lower_to_block_array(&ir, &resolution, Some(&builtin_java().materials));
     // Mirror `load_and_lower`: semantic findings produced by the resolver
     // belong on the same diagnostic stream as the lowering deferrals they
@@ -718,7 +823,7 @@ fn load_and_lower(file: &Path, edition: EditionArg) -> Result<(String, BlockArra
         ExitCode::from(1)
     })?;
     let ir = lower(&module);
-    let resolution = resolve(&ir);
+    let resolution = resolve(&ir, Some(edition.as_edition()));
     // The materials catalog is edition-specific: an abstract `@token`
     // resolves through the pack whose backend will serialise it, so a
     // future per-edition block vocabulary lowers correctly without a
