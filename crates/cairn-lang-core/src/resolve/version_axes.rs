@@ -22,6 +22,7 @@
 use serde::Serialize;
 
 use crate::ast::{Header, Module};
+use crate::edition::Edition;
 use crate::intent::IntentModule;
 
 use super::requires_parse::{compare_versions, parse_min_version};
@@ -56,10 +57,17 @@ pub struct RegistryRange {
 }
 
 /// Per-edition portability counts.
+///
+/// The `edition` field is the [`Edition`] enum (not a raw `String`) so
+/// downstream consumers cannot silently receive an unrecognised edition
+/// label — the CLI's `--editions` parser already rejects unknown strings,
+/// and this type keeps that invariant load-bearing in the type system.
+/// [`Edition`]'s [`Serialize`] impl emits the canonical lowercase name so
+/// the JSON wire shape (`"edition":"java"` / `"bedrock"`) is unchanged.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct EditionPortability {
-    /// Edition identifier as supplied on the CLI (`"java"`, `"bedrock"`).
-    pub edition: String,
+    /// Target edition this row's counts describe.
+    pub edition: Edition,
     /// Members that compile straight through.
     pub portable: u32,
     /// Members that compile but lose detail (e.g. stair `shape` on Bedrock).
@@ -153,12 +161,12 @@ mod tests {
     /// Fabricate a per-edition portability list matching the shape the CLI
     /// forwards from `cairn-lang-formats::portability`. Used to keep the
     /// axis-1 / axis-3 tests independent of the axis-2 data source.
-    fn synthetic_portability(entries: &[(&str, u32, u32, u32)]) -> Vec<EditionPortability> {
+    fn synthetic_portability(entries: &[(Edition, u32, u32, u32)]) -> Vec<EditionPortability> {
         entries
             .iter()
             .map(
                 |&(edition, portable, degraded, unsupported)| EditionPortability {
-                    edition: edition.to_owned(),
+                    edition,
                     portable,
                     degraded,
                     unsupported,
@@ -171,7 +179,12 @@ mod tests {
     fn registry_compat_min_from_requires_header() {
         let src = "@requires version>=1.20\n\nstruct s size=4x4\n  walls mat_slot=wall height=3\n";
         let (m, i, r) = module_with(src);
-        let axes = compute_axes(&m, &i, &r, synthetic_portability(&[("java", 0, 0, 0)]));
+        let axes = compute_axes(
+            &m,
+            &i,
+            &r,
+            synthetic_portability(&[(Edition::Java, 0, 0, 0)]),
+        );
         assert_eq!(axes.registry_compat.min, "1.20");
         assert_eq!(axes.registry_compat.max, "latest");
     }
@@ -180,7 +193,12 @@ mod tests {
     fn registry_compat_takes_max_when_multiple_requires_present() {
         let src = "@requires version>=1.20\n@requires version>=1.21\n\nstruct s size=4x4\n  walls mat_slot=wall height=3\n";
         let (m, i, r) = module_with(src);
-        let axes = compute_axes(&m, &i, &r, synthetic_portability(&[("java", 0, 0, 0)]));
+        let axes = compute_axes(
+            &m,
+            &i,
+            &r,
+            synthetic_portability(&[(Edition::Java, 0, 0, 0)]),
+        );
         assert_eq!(axes.registry_compat.min, "1.21");
     }
 
@@ -188,7 +206,12 @@ mod tests {
     fn registry_compat_defaults_when_requires_absent() {
         let src = "struct s size=4x4\n  walls mat_slot=wall height=3\n";
         let (m, i, r) = module_with(src);
-        let axes = compute_axes(&m, &i, &r, synthetic_portability(&[("java", 0, 0, 0)]));
+        let axes = compute_axes(
+            &m,
+            &i,
+            &r,
+            synthetic_portability(&[(Edition::Java, 0, 0, 0)]),
+        );
         assert_eq!(axes.registry_compat.min, "0.0");
     }
 
@@ -205,24 +228,35 @@ mod tests {
             &m,
             &i,
             &r,
-            synthetic_portability(&[("java", 3, 0, 0), ("bedrock", 1, 1, 1)]),
+            synthetic_portability(&[(Edition::Java, 3, 0, 0), (Edition::Bedrock, 1, 1, 1)]),
         );
         assert_eq!(axes.edition_portability.len(), 2);
-        assert_eq!(axes.edition_portability[0].edition, "java");
+        assert_eq!(axes.edition_portability[0].edition, Edition::Java);
         assert_eq!(axes.edition_portability[0].portable, 3);
         assert_eq!(axes.edition_portability[0].degraded, 0);
         assert_eq!(axes.edition_portability[0].unsupported, 0);
-        assert_eq!(axes.edition_portability[1].edition, "bedrock");
+        assert_eq!(axes.edition_portability[1].edition, Edition::Bedrock);
         assert_eq!(axes.edition_portability[1].portable, 1);
         assert_eq!(axes.edition_portability[1].degraded, 1);
         assert_eq!(axes.edition_portability[1].unsupported, 1);
+        // JSON wire shape must remain unchanged so downstream consumers
+        // treating `edition_portability[].edition` as a lowercase string
+        // continue to work under the enum-typed field.
+        let json = serde_json::to_string(&axes).unwrap();
+        assert!(json.contains(r#""edition":"java""#), "got: {json}");
+        assert!(json.contains(r#""edition":"bedrock""#), "got: {json}");
     }
 
     #[test]
     fn semantic_sensitive_is_empty_without_catalog() {
         let src = "struct s size=4x4\n  walls height=3\n";
         let (m, i, r) = module_with(src);
-        let axes = compute_axes(&m, &i, &r, synthetic_portability(&[("java", 0, 0, 0)]));
+        let axes = compute_axes(
+            &m,
+            &i,
+            &r,
+            synthetic_portability(&[(Edition::Java, 0, 0, 0)]),
+        );
         assert!(axes.semantic_sensitive.is_empty());
     }
 }

@@ -405,6 +405,48 @@ fn run_info(file: &Path, editions: &[String], format: InfoFormat) -> ExitCode {
     };
     let ir = lower(&module);
 
+    // Surface resolver + lowering diagnostics before running the parity
+    // dry-run — the same contract `run_check` / `run_lower` / `run_compile`
+    // already honor. Without this, a `.crn` carrying an
+    // `E_UNRESOLVED_SLOT` (or any other Error-severity finding) would
+    // still get `cairn info` exit 0 with a portability row computed
+    // against a partially unresolved IR, which is a poor CI gate.
+    //
+    // The diagnostic set follows `cairn check` semantics — `resolve(ir,
+    // None)` unions slot names across per-edition variants — so a file
+    // whose only "problem" is that one variant declares a slot the other
+    // doesn't still passes here. A per-edition strict pass (`resolve(ir,
+    // Some(edition))`) is what the parity dry-run below runs; its
+    // downstream lowering may add lowering-level diagnostics that are
+    // edition-agnostic in practice.
+    let resolution = resolve(&ir, None);
+    let mut block_ir = lower_to_block_array(&ir, &resolution, Some(&builtin_java().materials));
+    let mut combined = resolution.diagnostics.clone();
+    combined.append(&mut block_ir.diagnostics);
+
+    let lines = LineStarts::new(&source);
+    let mut has_error = false;
+    for d in &combined {
+        let pos = lines.position(&source, d.span.start);
+        eprintln!(
+            "{}:{}: {}[{}]: {}",
+            file.display(),
+            pos,
+            d.severity.as_str(),
+            d.code.as_str(),
+            d.primary,
+        );
+        for note in &d.notes {
+            eprintln!("  note: {}", note.message);
+        }
+        if d.severity == Severity::Error {
+            has_error = true;
+        }
+    }
+    if has_error {
+        return ExitCode::from(1);
+    }
+
     // One dry-run lower per requested edition: the resolver's per-edition
     // theme variant selection can produce a different palette per edition
     // (the whole point of spec §10.7 hierarchy #2), so a single shared
@@ -415,25 +457,24 @@ fn run_info(file: &Path, editions: &[String], format: InfoFormat) -> ExitCode {
     let mut per_edition: Vec<EditionPortability> = Vec::with_capacity(editions.len());
     for e in editions {
         let edition: Edition = e.parse().expect("validated above");
-        let resolution = resolve(&ir, Some(edition));
+        let per_edition_resolution = resolve(&ir, Some(edition));
         let materials = match edition {
             Edition::Java => &builtin_java().materials,
             Edition::Bedrock => &builtin_bedrock().materials,
         };
-        let block_ir = lower_to_block_array(&ir, &resolution, Some(materials));
+        let per_block_ir = lower_to_block_array(&ir, &per_edition_resolution, Some(materials));
         let counts = match edition {
-            Edition::Java => portability_for_java(&block_ir),
-            Edition::Bedrock => portability_for_bedrock(&block_ir),
+            Edition::Java => portability_for_java(&per_block_ir),
+            Edition::Bedrock => portability_for_bedrock(&per_block_ir),
         };
         per_edition.push(EditionPortability {
-            edition: e.clone(),
+            edition,
             portable: counts.portable,
             degraded: counts.degraded,
             unsupported: counts.unsupported,
         });
     }
 
-    let resolution = resolve(&ir, None);
     let axes = compute_axes(&module, &ir, &resolution, per_edition);
 
     match format {
@@ -473,7 +514,7 @@ fn print_text(axes: &VersionAxes) {
             .map(|ep| {
                 format!(
                     "{}: portable: {}  degraded: {}  unsupported: {}",
-                    capitalise(&ep.edition),
+                    capitalise(ep.edition.as_str()),
                     ep.portable,
                     ep.degraded,
                     ep.unsupported,

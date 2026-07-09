@@ -341,15 +341,22 @@ fn single_logical_theme(themes: &IndexMap<String, ThemeBinding>) -> Option<Strin
 ///
 /// Order of preference:
 ///
-/// - `Some(Java)`    → `<logical>_java` → unsuffixed `<logical>` → any variant
-/// - `Some(Bedrock)` → `<logical>_bedrock` → unsuffixed `<logical>` → any variant
+/// - `Some(Java)`    → `<logical>_java` → unsuffixed `<logical>` → **unbound**
+/// - `Some(Bedrock)` → `<logical>_bedrock` → unsuffixed `<logical>` → **unbound**
 /// - `None`          → unsuffixed `<logical>` → `<logical>_java` → `<logical>_bedrock`
 ///
-/// The final "any variant" tier keeps a scope bound to *some* theme so
-/// `mat_slot` resolution still runs; the [`edition`] = `None` order prefers
-/// Java to keep resolver behaviour deterministic across CI runs
-/// (`IndexMap` iteration is by insertion order, which would leak source
-/// order into diagnostics otherwise).
+/// Under a `Some(edition)` compile the fallback deliberately **stops at
+/// the unsuffixed variant** rather than cross over to the opposite
+/// edition's variant. Binding, say, a `_bedrock` theme under
+/// `--edition java` would silently route Bedrock-only slot values into a
+/// Java `.nbt`; leaving the scope unbound instead surfaces the mismatch
+/// through `E_UNRESOLVED_SLOT` on any `mat_slot=X` reference, which is
+/// the loud outcome spec versioning-editions §10.4 requires.
+///
+/// The `None` case still tolerates a partial file (only one variant
+/// declared): it prefers the unsuffixed theme, then Java, then Bedrock —
+/// a deterministic order that avoids leaking source-order into
+/// diagnostics.
 fn pick_variant<'a>(
     themes: &'a IndexMap<String, ThemeBinding>,
     logical: &str,
@@ -370,8 +377,8 @@ fn pick_variant<'a>(
         }
     }
     match edition {
-        Some(Edition::Java) => java.or(unsuffixed).or(bedrock),
-        Some(Edition::Bedrock) => bedrock.or(unsuffixed).or(java),
+        Some(Edition::Java) => java.or(unsuffixed),
+        Some(Edition::Bedrock) => bedrock.or(unsuffixed),
         None => unsuffixed.or(java).or(bedrock),
     }
 }
@@ -588,7 +595,7 @@ fn resolve_site_placements(
 }
 
 /// Validate one `connect from.port to to.port path=@MAT` row and push a
-/// matching [`ResolvedConnect`] when both ends and the path material
+/// matching [`ValidatedConnect`] when both ends and the path material
 /// pass every check.
 ///
 /// Failures all skip the push so the walkway voxeliser only sees rows it
@@ -1145,11 +1152,29 @@ fn resolve_struct_or_def(
     applied_themes: &mut HashSet<String>,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> ScopeResolution {
-    let (theme_name, theme_slots) = match picked_theme_name {
-        Some(name) => themes.get(name).map_or((None, None), |t| {
+    // Structural invariant: `pick_variant` (the only caller producing an
+    // auto-picked name here) iterates `themes.keys()` to build its
+    // candidates, so any name it returns is guaranteed to be in `themes`.
+    // The site-side branch that hits this with a user-supplied `theme=X`
+    // label filters through `themes.contains_key(theme_name)` up-slope
+    // before calling in. Reaching the `None` arm of `themes.get` would
+    // mean one of those guarantees broke — asymmetric with `validate_port`,
+    // which uses the same shape of loud fallback. `debug_assert!(false)`
+    // trips in dev / test builds; a release build silently degrades to
+    // the unbound-theme path rather than panicking on user data.
+    let (theme_name, theme_slots) = if let Some(name) = picked_theme_name {
+        if let Some(t) = themes.get(name) {
             (Some(name.to_owned()), Some(t.slots.clone()))
-        }),
-        None => (None, None),
+        } else {
+            debug_assert!(
+                false,
+                "resolve_struct_or_def: picked theme `{name}` is not in the themes map; \
+                 pick_variant should only surface names it read from themes.keys()",
+            );
+            (None, None)
+        }
+    } else {
+        (None, None)
     };
 
     if let Some(name) = &theme_name {
@@ -2107,6 +2132,61 @@ mod tests {
             "two distinct logical themes must remain unbound, got {:?}",
             scope.bound_theme,
         );
+    }
+
+    #[test]
+    fn per_edition_java_does_not_fall_back_to_bedrock_variant() {
+        // Silent misrouting guard: a file with only `theme t_bedrock:` must
+        // leave the scope unbound under `Some(Edition::Java)` rather than
+        // silently binding the Bedrock variant. Any `mat_slot=` reference
+        // then surfaces as `E_UNRESOLVED_SLOT`, which is the loud outcome
+        // spec §10.4 requires — binding across editions would route
+        // Bedrock-only slot values into a Java `.nbt`.
+        let src = [
+            "theme t_bedrock:",
+            "  slot floor -> @dark_oak_planks",
+            "",
+            "struct s size=4x4",
+            "  floor mat_slot=floor",
+            "",
+        ]
+        .join("\n");
+        let r = resolve(&ir(&src), Some(Edition::Java));
+        let scope = r.scopes.get("struct::s").unwrap();
+        assert!(
+            scope.bound_theme.is_none(),
+            "Some(Java) with only `_bedrock` variant must not bind, got {:?}",
+            scope.bound_theme,
+        );
+        // The unresolved-slot diagnostic is skipped here because no theme
+        // is bound at all — matching the multi-theme "no auto-pick" branch
+        // in `multiple_themes_leave_struct_unbound`. That branch is the
+        // authority on unbound-scope semantics; the AC to pin under a
+        // downstream compile is that lowering treats an unbound scope's
+        // `mat_slot` as an unresolved abstract material.
+        assert!(
+            !r.diagnostics
+                .iter()
+                .any(|d| d.code == DiagnosticCode::UnresolvedSlot),
+        );
+    }
+
+    #[test]
+    fn per_edition_bedrock_does_not_fall_back_to_java_variant() {
+        // Symmetric guard for the opposite direction — a file with only
+        // `theme t_java:` must not bind under `Some(Edition::Bedrock)`.
+        let src = [
+            "theme t_java:",
+            "  slot floor -> @oak_planks",
+            "",
+            "struct s size=4x4",
+            "  floor mat_slot=floor",
+            "",
+        ]
+        .join("\n");
+        let r = resolve(&ir(&src), Some(Edition::Bedrock));
+        let scope = r.scopes.get("struct::s").unwrap();
+        assert!(scope.bound_theme.is_none());
     }
 
     #[test]

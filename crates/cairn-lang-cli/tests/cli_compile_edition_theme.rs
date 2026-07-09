@@ -121,18 +121,13 @@ fn ac6_bedrock_compile_writes_oak_wall_sign_and_not_oak_sign() {
 
     let structure = out_dir.path().join("shop.mcstructure");
     let bytes = read_bytes(&structure);
-    assert!(
-        bytes_contain(&bytes, "minecraft:oak_wall_sign"),
-        "Bedrock palette must include oak_wall_sign (from shop_bedrock's floating_text slot)",
-    );
-    assert!(
-        !bytes_contain(&bytes, "minecraft:oak_sign,"),
-        "Bedrock palette must not include the Java variant's plain oak_sign",
-    );
-    // Guard against a plausible partial-match false negative — `oak_wall_sign`
-    // itself contains no `oak_sign` substring outside the `_wall_` split, so
-    // the exact-match check above already discriminates. This sanity assertion
-    // pins the intent in case a future palette formatter re-arranges bytes.
+    // `oak_wall_sign` = `o a k _ w a l l _ s i g n`, which does **not** contain
+    // `oak_sign` = `o a k _ s i g n` as a substring (after `oak_` comes
+    // `wall_`, not `sign`). So the two counts are independent bytewise —
+    // a raw `oak_sign` hit implies the plain Java-variant block leaked
+    // into the Bedrock palette. This replaces the earlier `!bytes_contain(
+    // "minecraft:oak_sign,")` guard, which was vacuously true (literal
+    // commas do not appear inside NBT-encoded strings).
     let raw_oak_sign_hits = bytes
         .windows(b"oak_sign".len())
         .filter(|w| *w == b"oak_sign")
@@ -142,8 +137,93 @@ fn ac6_bedrock_compile_writes_oak_wall_sign_and_not_oak_sign() {
         .filter(|w| *w == b"oak_wall_sign")
         .count();
     assert!(
-        raw_oak_sign_hits == 0 || raw_oak_sign_hits <= wall_sign_hits,
-        "unexpected raw `oak_sign` occurrences ({raw_oak_sign_hits}) vs `oak_wall_sign` ({wall_sign_hits})",
+        wall_sign_hits > 0,
+        "Bedrock palette must include oak_wall_sign (from shop_bedrock's floating_text slot); got {wall_sign_hits} hits",
+    );
+    assert_eq!(
+        raw_oak_sign_hits, 0,
+        "Bedrock palette must not include the Java variant's plain oak_sign; got {raw_oak_sign_hits} bytewise hits",
+    );
+}
+
+#[test]
+fn check_edition_flag_wires_strict_variant_pin_through_cli() {
+    // Wiring guard: a file whose only `floating_text` binding lives in the
+    // Bedrock variant must pass `check --edition bedrock` and pass
+    // `check` (no pin, sibling-slot union), but fail `check --edition java`
+    // with `E_UNRESOLVED_SLOT`. Without this pin, a CLI dispatch bug that
+    // forwarded `None` regardless of the `--edition` flag would still pass
+    // every resolver-level unit test (which invoke `resolve` directly) —
+    // only the CLI wiring test catches it.
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    let path = tmp.path().join("bedrock_only_slot.crn");
+    std::fs::write(
+        &path,
+        [
+            "@cairn 2026.06",
+            "@requires version>=1.20",
+            "",
+            "theme t_java:",
+            "  slot floor -> @oak_planks",
+            "",
+            "theme t_bedrock:",
+            "  slot floor -> @oak_planks",
+            "  slot bedrock_only -> @dark_oak_planks",
+            "",
+            "struct s size=4x4",
+            "  floor mat_slot=bedrock_only",
+            "",
+        ]
+        .join("\n"),
+    )
+    .expect("write test crn");
+    let path_str = path.to_str().unwrap();
+
+    // 1. `check --edition bedrock` succeeds: the Bedrock variant declares
+    //    the slot.
+    let out = Command::new(cargo_bin())
+        .args(["check", "--edition", "bedrock", path_str])
+        .output()
+        .expect("run cairn");
+    assert!(
+        out.status.success(),
+        "check --edition bedrock must succeed; stderr={}",
+        String::from_utf8_lossy(&out.stderr),
+    );
+
+    // 2. `check` (no pin) succeeds: the sibling-slot union covers the slot.
+    let out = Command::new(cargo_bin())
+        .args(["check", path_str])
+        .output()
+        .expect("run cairn");
+    assert!(
+        out.status.success(),
+        "check (no --edition) must succeed via sibling-slot union; stderr={}",
+        String::from_utf8_lossy(&out.stderr),
+    );
+
+    // 3. `check --edition java` fails with `E_UNRESOLVED_SLOT`: the Java
+    //    variant does not declare `bedrock_only`, and the strict-pin path
+    //    disables the sibling-slot union.
+    let out = Command::new(cargo_bin())
+        .args(["check", "--edition", "java", path_str])
+        .output()
+        .expect("run cairn");
+    // `cairn check` writes diagnostic lines to stdout (matching gcc's
+    // convention for tool integration), reserving stderr for I/O and
+    // parse-level errors that pre-empt the diagnostic pipeline. Look at
+    // stdout for the code assertion.
+    assert_eq!(
+        out.status.code(),
+        Some(1),
+        "check --edition java must exit 1 on Bedrock-only slot; stdout={}; stderr={}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr),
+    );
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        stdout.contains("E_UNRESOLVED_SLOT"),
+        "expected E_UNRESOLVED_SLOT in diagnostics, got stdout={stdout}",
     );
 }
 

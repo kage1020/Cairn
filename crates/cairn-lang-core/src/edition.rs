@@ -15,18 +15,32 @@
 use std::fmt;
 use std::str::FromStr;
 
+use serde::{Serialize, Serializer};
+
 /// A Minecraft edition Cairn can target.
 ///
 /// The variants are ordered `Java`, `Bedrock` so the derived `Ord` matches
 /// the spec's "Java as the base, Bedrock as overriding diffs" framing
 /// (versioning-editions §10.3) — Java sorts first when the ordering is
 /// otherwise arbitrary.
+///
+/// The [`Serialize`] impl emits the canonical lowercase string
+/// (`"java"` / `"bedrock"`) rather than the derived variant name so JSON
+/// consumers of `cairn info` / lockfile-adjacent payloads see the same
+/// spelling the CLI accepts — enabling a wire-compatible upgrade from an
+/// older `edition: String` field to this enum.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Edition {
     /// Java Edition. Emits gzip-compressed vanilla `.nbt` structures.
     Java,
     /// Bedrock Edition. Emits uncompressed little-endian `.mcstructure`.
     Bedrock,
+}
+
+impl Serialize for Edition {
+    fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        s.serialize_str(self.as_str())
+    }
 }
 
 impl Edition {
@@ -112,5 +126,17 @@ mod tests {
     #[test]
     fn ord_puts_java_before_bedrock() {
         assert!(Edition::Java < Edition::Bedrock);
+    }
+
+    #[test]
+    fn serialize_emits_canonical_lowercase_string() {
+        // Wire compatibility with the historical `edition: String` field —
+        // consumers of the info JSON continue to see `"java"` / `"bedrock"`
+        // rather than the derived enum name.
+        assert_eq!(serde_json::to_string(&Edition::Java).unwrap(), "\"java\"");
+        assert_eq!(
+            serde_json::to_string(&Edition::Bedrock).unwrap(),
+            "\"bedrock\"",
+        );
     }
 }
