@@ -18,7 +18,7 @@ fn check_example(filename: &str) {
         std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
     let module = parse(&source).unwrap_or_else(|e| panic!("parse {filename}: {e}"));
     let ir = lower(&module);
-    let diagnostics = check(&module, &ir);
+    let diagnostics = check(&module, &ir, None);
     assert!(
         diagnostics.is_empty(),
         "example `{filename}` must lint clean, got: {diagnostics:#?}",

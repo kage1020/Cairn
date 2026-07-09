@@ -1,0 +1,34 @@
+@cairn 2026.06
+@requires version>=1.20
+
+# Per-edition theme fallback (spec versioning-editions §10.7 hierarchy #2).
+#
+# The `floating_text` slot has no cross-edition primitive: Java's
+# `text_display` is an entity (added 1.19.4), and Bedrock has no equivalent
+# display entity at all. Both editions can carry a plain sign though, so
+# the logical theme `shop` splits into `shop_java` (resolving the slot to
+# a standing oak sign) and `shop_bedrock` (resolving it to a wall-mounted
+# oak sign). The semantic layer — `mat_slot=floating_text` on the window
+# member — is edition-neutral and never touches `@edition`, which §10.7
+# forbids outside the escape-hatch layer.
+#
+# `cairn compile --edition java` picks `shop_java`; `--edition bedrock`
+# picks `shop_bedrock`. `cairn check` (no `--edition`) unions the slot
+# names across both variants so `mat_slot=floating_text` resolves without
+# emitting `E_UNRESOLVED_SLOT` under either variant's presence.
+
+theme shop_java:
+  slot floor          -> @floor.stone.smooth
+  slot wall           -> @wall.stone.cobble
+  slot floating_text  -> @sign.oak
+
+theme shop_bedrock:
+  slot floor          -> @floor.stone.smooth
+  slot wall           -> @wall.stone.cobble
+  slot floating_text  -> @sign.oak_wall
+
+struct shop size=5x5
+  floor  mat_slot=floor
+  walls  class=outer mat_slot=wall height=3
+  door   side=front at=center
+  window class=display side=front offset=2 y=2 size=1x1 mat_slot=floating_text

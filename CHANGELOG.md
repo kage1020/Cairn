@@ -12,6 +12,70 @@ and is a separate axis from the Minecraft target version.
 
 ### Added
 
+- `cairn-lang-formats::portability` — palette-entry portability counters
+  backing the `edition_portability` axis of `cairn info` (spec
+  versioning-editions §10.5). `portability_for_bedrock` runs every
+  non-air palette entry through `bedrock_state::translate_states` and
+  folds the outcome into `{portable, degraded, unsupported}`: a
+  lossless translation counts portable, a translation carrying a
+  degradation note (`shape != straight` on stairs today) counts
+  degraded, and a `BedrockStateError` counts unsupported.
+  `portability_for_java` reports every non-air entry as portable
+  (Java is the base per §10.3). The counting granularity is
+  per-palette-entry so the figures track what the `.mcstructure`
+  writer actually emits — a member whose lowering interns several
+  distinct palette entries contributes one row per entry.
+- `cairn-lang-core::Edition` — cross-cutting edition marker (`Java` /
+  `Bedrock`) shared by the resolver and the CLI so a future third
+  edition adds one variant in one place. `FromStr` gates unknown edition
+  strings loud (`unknown edition `{input}`. Valid: java, bedrock. Fix:
+  ...`), and `cairn info --editions foo` now exits 2 before running the
+  dry-run lowering rather than silently forwarding an unrecognised
+  edition to a zero-fill portability row.
+- `cairn-lang-core::resolve` — per-edition theme fallback (spec
+  versioning-editions §10.7 hierarchy #2). A theme whose name ends in
+  `_java` / `_bedrock` declares an edition variant of a logical theme
+  (`theme shop_java:` and `theme shop_bedrock:` share the logical name
+  `shop`). `resolve` now takes an `edition: Option<Edition>` argument
+  and auto-picks the matching variant per struct/def scope, falling
+  back to an unsuffixed theme of the same logical name when the
+  requested variant is absent. Unsuffixed themes (the `theme medieval:`
+  shape used by every existing example) resolve unchanged under both
+  editions. Under `resolve(ir, None)` — the `cairn check` path where
+  no edition has been picked — the resolver unions slot names across
+  variants of one logical theme so `mat_slot=NAME` presence checks do
+  not spuriously fire on slots that only one variant declares. Selector
+  matching in the `None` case is scoped per-picked variant to preserve
+  the per-theme DI contract from §7. `resolve(&ir)` callers migrate to
+  `resolve(&ir, edition)`; `check(&module, &ir)` migrates to
+  `check(&module, &ir, edition)`.
+- `cairn info --editions java,bedrock` now populates the `degraded` /
+  `unsupported` columns from a per-edition dry-run lowering (one
+  `lower_to_block_array` per requested edition, materials resolved
+  against the matching built-in pack, palette fed into
+  `portability_for_*`) instead of the hard-coded zeros. On
+  `themed-tower.crn` the eave's `shape=outer_left` stair now surfaces
+  as `Bedrock: degraded: >=1`; `cottage.crn` stays at zero across both
+  axes. The `EditionPortability` JSON / text shape is unchanged so
+  `--format json` consumers see real values without a wire break;
+  `compute_axes` in `cairn-lang-core::resolve` gained a
+  `Vec<EditionPortability>` argument that carries the per-edition
+  figures from the caller (the CLI, since `core` does not depend on
+  `formats`).
+- `cairn check --edition java|bedrock` — optional edition pin so a
+  `mat_slot=X` reference to a slot only the *other* variant declares
+  fires `E_UNRESOLVED_SLOT`. When `--edition` is omitted, the resolver
+  unions slot names across both variants of one logical theme so the
+  file passes `check` regardless of which edition it later compiles
+  for.
+- `examples/edition-fallback.crn` (+ `.crn.lock`) — a `shop` logical
+  theme with `shop_java` binding the `floating_text` slot to
+  `@sign.oak` and `shop_bedrock` binding it to `@sign.oak_wall`,
+  demonstrating spec §10.7 hierarchy #2 end-to-end without introducing
+  the entity concept the spec's illustrative `text_display` example
+  would require. The Java compile writes `oak_sign` into the palette;
+  the Bedrock compile writes `oak_wall_sign`. New material tokens
+  `sign.oak` / `sign.oak_wall` land in both built-in packs.
 - `cairn-lang-formats::bedrock_state` — per-edition blockstate translation
   for the Bedrock backend, the follow-up the `.mcstructure` writer deferred.
   `translate_states` maps the **stair family** (the only block kind the

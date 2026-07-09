@@ -3082,7 +3082,7 @@ mod tests {
     fn lowered(source: &str) -> BlockArrayIr {
         let module = parse(source).expect("parse");
         let ir = lower(&module);
-        let resolution = resolve(&ir);
+        let resolution = resolve(&ir, None);
         lower_to_block_array(&ir, &resolution, None)
     }
 
@@ -3092,7 +3092,7 @@ mod tests {
     ) -> BlockArrayIr {
         let module = parse(source).expect("parse");
         let ir = lower(&module);
-        let resolution = resolve(&ir);
+        let resolution = resolve(&ir, None);
         lower_to_block_array(&ir, &resolution, Some(resolver))
     }
 

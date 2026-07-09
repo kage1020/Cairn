@@ -33,7 +33,7 @@ fn lower_bedrock(example: &str) -> BlockArrayIr {
         std::fs::read_to_string(examples_dir().join(example)).expect("example .crn readable");
     let module = parse(&source).expect("parse example");
     let ir = lower(&module);
-    let resolution = resolve(&ir);
+    let resolution = resolve(&ir, None);
     let pack = builtin_bedrock();
     lower_to_block_array(&ir, &resolution, Some(&pack.materials))
 }

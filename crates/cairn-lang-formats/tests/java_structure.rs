@@ -390,7 +390,7 @@ fn cottage_structure_tag() -> cairn_lang_formats::java_structure::Compound {
     .expect("read cottage.crn");
     let module = parse(&source).expect("parse");
     let ir = lower(&module);
-    let resolution = resolve(&ir);
+    let resolution = resolve(&ir, None);
     let block_array = lower_to_block_array(&ir, &resolution, None);
     let ba = block_array
         .structures

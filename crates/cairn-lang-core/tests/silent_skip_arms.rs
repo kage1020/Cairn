@@ -53,7 +53,7 @@ struct Outcome {
 fn run(src: &str) -> Outcome {
     let module = parse(src).expect("parse");
     let ir = lower(&module);
-    let resolution = resolve(&ir);
+    let resolution = resolve(&ir, None);
     let mut out: BlockArrayIr = lower_to_block_array(&ir, &resolution, None);
     let mut combined = resolution.diagnostics;
     combined.append(&mut out.diagnostics);
