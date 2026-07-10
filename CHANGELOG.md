@@ -12,6 +12,33 @@ and is a separate axis from the Minecraft target version.
 
 ### Added
 
+- `cairn-lsp` completion (M5-PR2) — `textDocument/completion` over the
+  language's closed vocabularies, advertised at `initialize` with trigger
+  characters `@`, `=`, and `.`. Four cursor contexts are recognised:
+  line-opening keywords (top-level `theme`/`def`/`site`/`struct`, member
+  commands inside `struct`/`def`/`site` bodies, and `slot` + selector
+  keywords inside `theme` bodies), `mat_slot=` values (the union of slot
+  names declared by the document's themes, so `_java`/`_bedrock` variant
+  themes union naturally — matching how unpinned `cairn check` treats
+  slot presence), and `@` material tokens fed from the built-in registry
+  union (java ∪ bedrock): every abstract token with its resolved
+  canonical id as the item detail, plus the deduplicated canonical ids
+  from the catalog's value column (the full canonical vocabulary waits
+  on a registry blocks table that does not exist yet). Context detection
+  is a line-local text heuristic — Cairn is strictly line-oriented, so
+  the line prefix is grammatically sufficient — which keeps completion
+  working while the document fails to parse, the normal state
+  mid-keystroke; a drift-guard test pins the `slot NAME -> TARGET` scan
+  to the parser's view of every shipped example. Items replace the
+  partial token under the cursor via `TextEdit` (UTF-16-correct ranges)
+  and carry `sortText` freezing the curated declaration/catalog order;
+  prefix filtering is left to the client, and positions without a closed
+  set (comments, free-form values, header directives) return no items
+  rather than inventing a vocabulary (principles P3). The server now
+  keeps a `DocumentStore` (URI → last synced text) so requests can read
+  documents outside a change notification; asking about a never-opened
+  document is refused loud with `InvalidParams`. `cairn-lang-lsp` gains
+  a `cairn-lang-formats` dependency for the registry packs.
 - `cairn-lsp` (M5-PR1) — the first working cut of the language server:
   a `[[bin]]` target of `cairn-lang-lsp` speaking standard LSP over
   stdio. It advertises full-content document sync at `initialize`,
@@ -32,9 +59,9 @@ and is a separate axis from the Minecraft target version.
   `line_index::LineIndex`, keeping UTF-16 knowledge out of
   `cairn-lang-core`. Transport is `lsp-server` + `lsp-types`
   (rust-analyzer's synchronous stdio scaffold — no async runtime
-  enters the workspace). Completion and the VS Code extension are the
-  remaining M5 halves (M5-PR2 / M5-PR3); binary distribution in the
-  publish pipeline lands with the extension.
+  enters the workspace). Completion followed as M5-PR2 (above); the
+  VS Code extension is the remaining M5 piece (M5-PR3), and binary
+  distribution in the publish pipeline lands with the extension.
 - `cairn-lang-formats::portability` — palette-entry portability counters
   backing the `edition_portability` axis of `cairn info` (spec
   versioning-editions §10.5). `portability_for_bedrock` runs every

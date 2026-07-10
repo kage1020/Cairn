@@ -110,6 +110,32 @@ impl Server {
         }));
     }
 
+    /// Send a `textDocument/completion` request and return the response
+    /// carrying `id`, skipping interleaved diagnostics pushes.
+    fn request_completion(
+        &mut self,
+        id: i64,
+        uri: &str,
+        line: u32,
+        character: u32,
+    ) -> serde_json::Value {
+        self.send(&serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": id,
+            "method": "textDocument/completion",
+            "params": {
+                "textDocument": { "uri": uri },
+                "position": { "line": line, "character": character },
+            },
+        }));
+        loop {
+            let message = self.read_message();
+            if message.get("id") == Some(&serde_json::json!(id)) {
+                break message;
+            }
+        }
+    }
+
     /// Run the `shutdown`/`exit` handshake and assert the process exits 0.
     fn shutdown(mut self) {
         self.send(&serde_json::json!({
@@ -344,6 +370,73 @@ fn lsp_10_documents_publish_under_their_own_uris() {
     }));
     let third = server.read_until_method("textDocument/publishDiagnostics");
     assert_eq!(diagnostics_for(&third, broken_uri).len(), 0);
+    server.shutdown();
+}
+
+/// Labels of a completion response's item array.
+fn completion_labels(response: &serde_json::Value) -> Vec<&str> {
+    response["result"]
+        .as_array()
+        .expect("completion result should be an item array")
+        .iter()
+        .map(|item| item["label"].as_str().expect("string label"))
+        .collect()
+}
+
+#[test]
+fn lsp_12_initialize_advertises_completion_with_trigger_characters() {
+    let (server, response) = Server::start();
+    let provider = &response["result"]["capabilities"]["completionProvider"];
+    assert_eq!(
+        provider["triggerCharacters"],
+        serde_json::json!(["@", "=", "."]),
+    );
+    server.shutdown();
+}
+
+#[test]
+fn lsp_13_completion_at_mat_slot_returns_declared_slot_names() {
+    // A completion request against the opened document resolves through the
+    // document store and answers with the theme's slot names — on a document
+    // whose cursor line does not parse.
+    let (mut server, _) = Server::start();
+    let source = "theme a:\n  slot floor -> @oak_planks\nstruct s size=2x2\n  floor mat_slot=";
+    server.did_open(source, 1);
+    let response = server.request_completion(7, TEST_URI, 3, 17);
+    assert_eq!(completion_labels(&response), vec!["floor"]);
+    server.shutdown();
+}
+
+#[test]
+fn lsp_14_completion_reflects_did_change_revisions() {
+    // The store must serve the *latest* synced revision: a slot added via
+    // didChange shows up in the next completion answer.
+    let (mut server, _) = Server::start();
+    let source = "theme a:\n  slot floor -> @oak_planks\nstruct s size=2x2\n  floor mat_slot=";
+    server.did_open(source, 1);
+    let revised = "theme a:\n  slot floor -> @oak_planks\n  slot wall -> @cobblestone\n\
+                   struct s size=2x2\n  floor mat_slot=";
+    server.send(&serde_json::json!({
+        "jsonrpc": "2.0",
+        "method": "textDocument/didChange",
+        "params": {
+            "textDocument": { "uri": TEST_URI, "version": 2 },
+            "contentChanges": [ { "text": revised } ],
+        },
+    }));
+    let response = server.request_completion(8, TEST_URI, 4, 17);
+    assert_eq!(completion_labels(&response), vec!["floor", "wall"]);
+    server.shutdown();
+}
+
+#[test]
+fn lsp_15_completion_on_unopened_document_is_invalid_params() {
+    // Requests are always answered; asking about a document the client
+    // never opened is a protocol violation on the client's side, surfaced
+    // loud as -32602 InvalidParams — and the server keeps serving.
+    let (mut server, _) = Server::start();
+    let response = server.request_completion(9, "file:///never-opened.crn", 0, 0);
+    assert_eq!(response["error"]["code"], serde_json::json!(-32602));
     server.shutdown();
 }
 

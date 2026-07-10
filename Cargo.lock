@@ -129,6 +129,7 @@ name = "cairn-lang-lsp"
 version = "2026.7.2"
 dependencies = [
  "cairn-lang-core",
+ "cairn-lang-formats",
  "lsp-server",
  "lsp-types",
  "serde",

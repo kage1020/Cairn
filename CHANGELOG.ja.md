@@ -14,6 +14,32 @@
 
 ### 追加
 
+- `cairn-lsp` completion（M5-PR2）— 言語の closed vocabulary に対する
+  `textDocument/completion`。`initialize` でトリガー文字 `@`・`=`・`.`
+  とともに広告される。カーソルの 4 コンテキストを認識する: 行頭キーワード
+  （トップレベルの `theme`/`def`/`site`/`struct`、`struct`/`def`/`site`
+  ボディ内のメンバーコマンド、`theme` ボディ内の `slot` + セレクタ
+  キーワード）、`mat_slot=` の値（ドキュメント内の全テーマが宣言する
+  slot 名の union — `_java`/`_bedrock` 変種テーマも自然に union され、
+  edition 未指定の `cairn check` の slot 存在検査と同じ扱い）、そして
+  `@` 材料トークン（組み込みレジストリの union、java ∪ bedrock）:
+  各 abstract token は解決先の canonical id を item detail に持ち、
+  加えてカタログ value 列から重複排除した canonical id 群を返す
+  （canonical の完全な語彙はまだ存在しないレジストリ blocks テーブル
+  待ち）。コンテキスト判定は行ローカルなテキストヒューリスティック —
+  Cairn は厳密に行指向なので行プレフィックスが文法的に十分 — で、
+  キーストローク途中の常態であるパース不能なドキュメントでも補完が
+  動き続ける。`slot NAME -> TARGET` の行スキャンは全出荷サンプルに
+  対してパーサの見解と一致することをドリフトガードテストが固定する。
+  各 item は `TextEdit`（UTF-16 で正しい range）でカーソル下の部分
+  トークンを置換し、宣言順/カタログ順を凍結する `sortText` を持つ。
+  プレフィックスフィルタはクライアントに委ね、closed set が無い位置
+  （コメント、自由形式の値、ヘッダディレクティブ）は語彙を捏造せず
+  空を返す（principles P3）。サーバーは `DocumentStore`（URI → 最終
+  同期テキスト）を保持するようになり、変更通知の外でもドキュメントを
+  読めるようになった。未 open のドキュメントへのリクエストは
+  `InvalidParams` で loud に拒否する。`cairn-lang-lsp` はレジストリ
+  パックのため `cairn-lang-formats` に依存するようになった。
 - `cairn-lsp`（M5-PR1）— 言語サーバーの最初の動作版。`cairn-lang-lsp` の
   `[[bin]]` ターゲットとして標準 LSP を stdio 上で話す。`initialize` で
   全文同期（full-content sync）を広告し、`didOpen`/`didChange` のたびに
@@ -32,9 +58,9 @@
   行 / UTF-16 コードユニット座標へ変換し、UTF-16 の知識を
   `cairn-lang-core` の外に保つ。トランスポートは `lsp-server` +
   `lsp-types`（rust-analyzer の同期 stdio 基盤 — 非同期ランタイムは
-  ワークスペースに入らない）。completion と VS Code 拡張は M5 の残り半分
-  （M5-PR2 / M5-PR3）で、publish パイプラインへのバイナリ配布は拡張と
-  同時に着地する。
+  ワークスペースに入らない）。completion は M5-PR2 として続いた（上記）。
+  VS Code 拡張が M5 の残り（M5-PR3）で、publish パイプラインへの
+  バイナリ配布は拡張と同時に着地する。
 - `cairn-lang-formats::portability` — `cairn info` の
   `edition_portability` 軸を支えるパレットエントリ単位のポータビリティ
   カウンタ（spec versioning-editions §10.5）。`portability_for_bedrock` は
