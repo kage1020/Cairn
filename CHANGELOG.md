@@ -12,6 +12,29 @@ and is a separate axis from the Minecraft target version.
 
 ### Added
 
+- `cairn-lsp` (M5-PR1) — the first working cut of the language server:
+  a `[[bin]]` target of `cairn-lang-lsp` speaking standard LSP over
+  stdio. It advertises full-content document sync at `initialize`,
+  runs the same `parse → lower → check` pipeline as `cairn check`
+  (edition unpinned, so slot presence checks union the per-edition
+  theme variants) on every `didOpen`/`didChange`, and pushes
+  `textDocument/publishDiagnostics`; `didClose` publishes an empty set
+  so no stale squiggles survive. Check findings keep the stable
+  `E_*`/`W_*` string in the LSP `code` field with `source: "cairn"`,
+  span-carrying notes surface as `relatedInformation`, spanless notes
+  (the "valid candidates" / "Suggested fix:" footers) fold into the
+  message as `note:` lines so the self-correction triple reaches the
+  editor verbatim, and structured `data` payloads pass through for
+  future quick-fixes. A parse/lex failure pre-empts the check passes
+  and yields exactly one error diagnostic spanning to the end of the
+  offending line. Positions are converted from core's byte spans to
+  the protocol's 0-based line / UTF-16 code-unit coordinates by a new
+  `line_index::LineIndex`, keeping UTF-16 knowledge out of
+  `cairn-lang-core`. Transport is `lsp-server` + `lsp-types`
+  (rust-analyzer's synchronous stdio scaffold — no async runtime
+  enters the workspace). Completion and the VS Code extension are the
+  remaining M5 halves (M5-PR2 / M5-PR3); binary distribution in the
+  publish pipeline lands with the extension.
 - `cairn-lang-formats::portability` — palette-entry portability counters
   backing the `edition_portability` axis of `cairn info` (spec
   versioning-editions §10.5). `portability_for_bedrock` runs every
