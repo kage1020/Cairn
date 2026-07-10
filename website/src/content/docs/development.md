@@ -22,7 +22,7 @@ Cairn/
 │   ├── cairn-lang-nbt/          # Java/Bedrock NBT codec        (lib)
 │   ├── cairn-lang-formats/      # .nbt / .litematic / .schem / .mcstructure  (lib)
 │   ├── cairn-lang-redstone/     # logic synth + P&R + tick sim  (lib)
-│   ├── cairn-lang-lsp/          # Language Server Protocol      (lib)
+│   ├── cairn-lang-lsp/          # Language Server Protocol      (lib + bin `cairn-lsp`)
 │   └── cairn-lang-wasm/         # WebAssembly bindings          (cdylib + rlib)
 ├── spec/                   # normative specification (Markdown)
 ├── docs/                   # this guide, tutorial, etc.

@@ -14,6 +14,27 @@
 
 ### 追加
 
+- `cairn-lsp`（M5-PR1）— 言語サーバーの最初の動作版。`cairn-lang-lsp` の
+  `[[bin]]` ターゲットとして標準 LSP を stdio 上で話す。`initialize` で
+  全文同期（full-content sync）を広告し、`didOpen`/`didChange` のたびに
+  `cairn check` と同じ `parse → lower → check` パイプライン（edition 未指定
+  のため slot 存在検査はエディション別テーマ変種を union）を実行して
+  `textDocument/publishDiagnostics` を push する。`didClose` は空集合を
+  publish して古い squiggle を残さない。check の所見は安定コード
+  `E_*`/`W_*` 文字列を LSP `code` フィールドに、`source: "cairn"` とともに
+  保持し、span 付き note は `relatedInformation` に、span なし note
+  （valid candidates / Suggested fix のフッタ）は `note:` 行として
+  message に畳み込まれ、self-correction triple がそのままエディタへ届く。
+  構造化 `data` ペイロードは将来の quick-fix 向けにパススルーされる。
+  parse/lex 失敗は check パスを pre-empt し、当該行の行末までを range と
+  する error diagnostic をちょうど 1 件だけ生成する。位置は新設の
+  `line_index::LineIndex` が core の byte span からプロトコルの 0-based
+  行 / UTF-16 コードユニット座標へ変換し、UTF-16 の知識を
+  `cairn-lang-core` の外に保つ。トランスポートは `lsp-server` +
+  `lsp-types`（rust-analyzer の同期 stdio 基盤 — 非同期ランタイムは
+  ワークスペースに入らない）。completion と VS Code 拡張は M5 の残り半分
+  （M5-PR2 / M5-PR3）で、publish パイプラインへのバイナリ配布は拡張と
+  同時に着地する。
 - `cairn-lang-formats::portability` — `cairn info` の
   `edition_portability` 軸を支えるパレットエントリ単位のポータビリティ
   カウンタ（spec versioning-editions §10.5）。`portability_for_bedrock` は
