@@ -71,10 +71,19 @@ fn convert(
         source: Some("cairn".to_owned()),
         message,
         related_information: (!related.is_empty()).then_some(related),
-        data: diagnostic
-            .data
-            .as_ref()
-            .and_then(|data| serde_json::to_value(data).ok()),
+        data: diagnostic.data.as_ref().and_then(|data| {
+            // `DiagnosticData` serialisation cannot fail today (plain enums
+            // and integers), but if a future payload variant breaks that,
+            // dropping it silently would starve a quick-fix of its input —
+            // log so the miss is visible without killing the diagnostic.
+            match serde_json::to_value(data) {
+                Ok(value) => Some(value),
+                Err(err) => {
+                    eprintln!("cairn-lsp: dropping unserialisable diagnostic data payload: {err}");
+                    None
+                }
+            }
+        }),
         ..lsp_types::Diagnostic::default()
     }
 }
@@ -127,7 +136,7 @@ mod tests {
 
     #[test]
     fn duplicate_fixture_reports_e_duplicate_size_with_error_severity() {
-        // AC2 (function level): the duplicate fixture carries a second
+        // The duplicate fixture carries a second
         // `size=5x5` on line 0; the finding surfaces with the stable code
         // string, ERROR severity, source "cairn", and a 0-based range on
         // that line.
@@ -146,7 +155,7 @@ mod tests {
 
     #[test]
     fn span_notes_become_related_information() {
-        // AC3 (first half): the "first declared here" note on a duplicate
+        // The "first declared here" note on a duplicate
         // finding points back into the same document with a distinct range.
         let diagnostics = compute_diagnostics(&uri(), DUPLICATE);
         let dup = diagnostics
@@ -170,7 +179,7 @@ mod tests {
 
     #[test]
     fn spanless_notes_append_to_message_as_note_lines() {
-        // AC3 (second half): the closed-set "expected one of" footer on
+        // The closed-set "expected one of" footer on
         // E_UNKNOWN_KEYWORD has no span of its own and must survive inside
         // the message body so the self-correction triple stays intact.
         let source = "struct s size=2x2\n  wals height=4\n";
@@ -188,7 +197,7 @@ mod tests {
 
     #[test]
     fn parse_error_yields_exactly_one_error_diagnostic() {
-        // AC4 (function level): parser-rejected content produces a single
+        // Parser-rejected content produces a single
         // ERROR diagnostic carrying the parse error's own message and a
         // non-empty range on the offending line.
         let source = "struct s size=2x2\n\tfloor\n";
@@ -209,13 +218,13 @@ mod tests {
 
     #[test]
     fn clean_fixture_reports_no_diagnostics() {
-        // AC5 (function level): mirrors cli_4_clean_fixture_json_output_is_empty_array.
+        // Mirrors cli_4_clean_fixture_json_output_is_empty_array.
         assert_eq!(compute_diagnostics(&uri(), CLEAN), vec![]);
     }
 
     #[test]
     fn ranges_count_utf16_code_units_on_non_ascii_lines() {
-        // AC8 (function level): a 😀 (2 UTF-16 units, 4 bytes, 1 scalar)
+        // A 😀 (2 UTF-16 units, 4 bytes, 1 scalar)
         // inside a string ahead of the duplicated key shifts the reported
         // column by exactly 2 units — asserting the UTF-16 count is
         // distinct from both the byte and scalar interpretations.

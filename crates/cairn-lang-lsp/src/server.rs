@@ -1,17 +1,15 @@
 //! Stdio JSON-RPC server loop.
 //!
-//! Owns the transport half of the language server: capability negotiation,
-//! the document store, and pushing [`crate::diagnostics::compute_diagnostics`]
-//! results to the client via `textDocument/publishDiagnostics`. The loop is
-//! synchronous (one message at a time) — the compiler pipeline is fast enough
-//! that full recomputation per keystroke stays well under interactive
-//! latency for the file sizes `.crn` sources reach.
-
-use std::collections::HashMap;
+//! Owns the transport half of the language server: capability negotiation
+//! and pushing [`crate::diagnostics::compute_diagnostics`] results to the
+//! client via `textDocument/publishDiagnostics`. The loop is synchronous
+//! (one message at a time) — the compiler pipeline is fast enough that full
+//! recomputation per keystroke stays well under interactive latency for the
+//! file sizes `.crn` sources reach.
 
 use lsp_server::{Connection, ErrorCode, Message, Notification, Response};
 use lsp_types::notification::{
-    DidChangeTextDocument, DidCloseTextDocument, DidOpenTextDocument, Notification as _,
+    DidChangeTextDocument, DidCloseTextDocument, DidOpenTextDocument, Exit, Notification as _,
     PublishDiagnostics,
 };
 
@@ -46,9 +44,11 @@ fn server_capabilities() -> lsp_types::ServerCapabilities {
 ///
 /// # Errors
 ///
-/// Propagates I/O failures on stdin/stdout, JSON (de)serialisation failures,
-/// and protocol violations detected by `lsp-server` (e.g. messages before
-/// `initialize`).
+/// Propagates I/O failures on stdin/stdout, JSON (de)serialisation failures
+/// on the server's own outgoing messages, protocol violations detected by
+/// `lsp-server` (e.g. messages before `initialize`), and an `exit`
+/// notification arriving without a preceding `shutdown` request — the LSP
+/// spec requires that sequence to end the process with a non-zero code.
 pub fn run() -> Result<(), DynError> {
     let (connection, io_threads) = Connection::stdio();
     let capabilities = serde_json::to_value(server_capabilities())?;
@@ -63,12 +63,8 @@ pub fn run() -> Result<(), DynError> {
 }
 
 /// Dispatch loop: requests are answered (only `shutdown` is known),
-/// notifications drive the document store and diagnostics publishing.
+/// notifications drive diagnostics publishing.
 fn main_loop(connection: &Connection) -> Result<(), DynError> {
-    // Keyed by the URI's string form: `lsp_types::Uri` has interior
-    // mutability (a lazily-populated parse cache), which disqualifies it
-    // as a hash-map key under `clippy::mutable_key_type`.
-    let mut documents: HashMap<String, String> = HashMap::new();
     for message in &connection.receiver {
         match message {
             Message::Request(request) => {
@@ -86,7 +82,14 @@ fn main_loop(connection: &Connection) -> Result<(), DynError> {
                 connection.sender.send(Message::Response(response))?;
             }
             Message::Notification(notification) => {
-                handle_notification(connection, &mut documents, notification)?;
+                // `handle_shutdown` consumes the `exit` that follows a
+                // `shutdown` request, so an `exit` reaching this loop
+                // skipped the handshake — the spec requires that to end
+                // the process with a non-zero code.
+                if notification.method == Exit::METHOD {
+                    return Err("exit notification received before shutdown request".into());
+                }
+                handle_notification(connection, notification)?;
             }
             Message::Response(_) => {
                 // The server sends no requests, so no responses are
@@ -97,21 +100,46 @@ fn main_loop(connection: &Connection) -> Result<(), DynError> {
     Ok(())
 }
 
-/// Apply one client notification to the document store and republish
-/// diagnostics for the affected document. Unknown notifications are ignored
-/// per the LSP spec.
+/// Deserialise a notification's params, logging and discarding the
+/// notification when the payload does not match the method's schema.
+/// Notifications are fire-and-forget — one malformed message from a buggy
+/// client must not take down the server (and with it every open document's
+/// diagnostics).
+fn parse_params<T: serde::de::DeserializeOwned>(
+    method: &str,
+    params: serde_json::Value,
+) -> Option<T> {
+    match serde_json::from_value(params) {
+        Ok(parsed) => Some(parsed),
+        Err(err) => {
+            eprintln!("cairn-lsp: ignoring malformed `{method}` notification: {err}");
+            None
+        }
+    }
+}
+
+/// React to one client notification by republishing diagnostics for the
+/// affected document. Unknown notifications are ignored per the LSP spec.
+///
+/// No document store is kept: both `didOpen` and `didChange` (full sync)
+/// carry the complete text, and `didClose` only needs the URI — so the
+/// notification itself is always the freshest source of truth. A store
+/// arrives with the completion feature, which has to read documents outside
+/// a change notification.
 fn handle_notification(
     connection: &Connection,
-    documents: &mut HashMap<String, String>,
     notification: Notification,
 ) -> Result<(), DynError> {
     match notification.method.as_str() {
         DidOpenTextDocument::METHOD => {
-            let params: lsp_types::DidOpenTextDocumentParams =
-                serde_json::from_value(notification.params)?;
+            let Some(params) = parse_params::<lsp_types::DidOpenTextDocumentParams>(
+                DidOpenTextDocument::METHOD,
+                notification.params,
+            ) else {
+                return Ok(());
+            };
             let uri = params.text_document.uri;
             let diagnostics = compute_diagnostics(&uri, &params.text_document.text);
-            documents.insert(uri.to_string(), params.text_document.text);
             publish(
                 connection,
                 uri,
@@ -120,17 +148,24 @@ fn handle_notification(
             )?;
         }
         DidChangeTextDocument::METHOD => {
-            let mut params: lsp_types::DidChangeTextDocumentParams =
-                serde_json::from_value(notification.params)?;
+            let Some(mut params) = parse_params::<lsp_types::DidChangeTextDocumentParams>(
+                DidChangeTextDocument::METHOD,
+                notification.params,
+            ) else {
+                return Ok(());
+            };
             // Full sync: the last change event carries the complete new
             // text. A client honouring the advertised FULL kind sends
             // exactly one event; taking the last is correct either way.
             let Some(change) = params.content_changes.pop() else {
+                eprintln!(
+                    "cairn-lsp: ignoring `{}` notification with empty contentChanges",
+                    DidChangeTextDocument::METHOD,
+                );
                 return Ok(());
             };
             let uri = params.text_document.uri;
             let diagnostics = compute_diagnostics(&uri, &change.text);
-            documents.insert(uri.to_string(), change.text);
             publish(
                 connection,
                 uri,
@@ -139,13 +174,15 @@ fn handle_notification(
             )?;
         }
         DidCloseTextDocument::METHOD => {
-            let params: lsp_types::DidCloseTextDocumentParams =
-                serde_json::from_value(notification.params)?;
-            let uri = params.text_document.uri;
-            documents.remove(uri.as_str());
+            let Some(params) = parse_params::<lsp_types::DidCloseTextDocumentParams>(
+                DidCloseTextDocument::METHOD,
+                notification.params,
+            ) else {
+                return Ok(());
+            };
             // Publish an empty set so the editor clears stale squiggles
             // for the closed document.
-            publish(connection, uri, None, Vec::new())?;
+            publish(connection, params.text_document.uri, None, Vec::new())?;
         }
         _ => {}
     }

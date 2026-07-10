@@ -92,12 +92,16 @@ impl Server {
     }
 
     fn did_open(&mut self, text: &str, version: i32) {
+        self.did_open_uri(TEST_URI, text, version);
+    }
+
+    fn did_open_uri(&mut self, uri: &str, text: &str, version: i32) {
         self.send(&serde_json::json!({
             "jsonrpc": "2.0",
             "method": "textDocument/didOpen",
             "params": {
                 "textDocument": {
-                    "uri": TEST_URI,
+                    "uri": uri,
                     "languageId": "cairn",
                     "version": version,
                     "text": text,
@@ -135,10 +139,15 @@ impl Server {
 
 /// Extract the diagnostics array from a `publishDiagnostics` notification.
 fn diagnostics_of(message: &serde_json::Value) -> &Vec<serde_json::Value> {
+    diagnostics_for(message, TEST_URI)
+}
+
+/// Extract the diagnostics array, asserting the notification targets `uri`.
+fn diagnostics_for<'m>(message: &'m serde_json::Value, uri: &str) -> &'m Vec<serde_json::Value> {
     assert_eq!(
         message["params"]["uri"].as_str(),
-        Some(TEST_URI),
-        "diagnostics should target the test document",
+        Some(uri),
+        "diagnostics should target the expected document",
     );
     message["params"]["diagnostics"]
         .as_array()
@@ -147,7 +156,6 @@ fn diagnostics_of(message: &serde_json::Value) -> &Vec<serde_json::Value> {
 
 #[test]
 fn lsp_1_initialize_advertises_full_sync_and_shuts_down_clean() {
-    // AC1 + AC9.
     let (server, response) = Server::start();
     assert_eq!(response.get("id"), Some(&serde_json::json!(1)));
     let sync = &response["result"]["capabilities"]["textDocumentSync"];
@@ -158,7 +166,7 @@ fn lsp_1_initialize_advertises_full_sync_and_shuts_down_clean() {
 
 #[test]
 fn lsp_2_did_open_duplicate_publishes_e_duplicate_size() {
-    // AC2 + AC3: the duplicate fixture surfaces the stable code with
+    // The duplicate fixture surfaces the stable code with
     // ERROR severity and a relatedInformation pointer at the first
     // declaration.
     let (mut server, _) = Server::start();
@@ -186,7 +194,7 @@ fn lsp_2_did_open_duplicate_publishes_e_duplicate_size() {
 
 #[test]
 fn lsp_3_parse_error_publishes_single_error() {
-    // AC4: parser-rejected content (tab indentation) yields exactly one
+    // Parser-rejected content (tab indentation) yields exactly one
     // ERROR diagnostic on the offending line.
     let (mut server, _) = Server::start();
     server.did_open("struct s size=2x2\n\tfloor\n", 1);
@@ -202,7 +210,6 @@ fn lsp_3_parse_error_publishes_single_error() {
 
 #[test]
 fn lsp_4_clean_file_publishes_empty() {
-    // AC5.
     let (mut server, _) = Server::start();
     server.did_open(CLEAN, 1);
     let message = server.read_until_method("textDocument/publishDiagnostics");
@@ -212,7 +219,7 @@ fn lsp_4_clean_file_publishes_empty() {
 
 #[test]
 fn lsp_5_did_change_clears_diagnostics() {
-    // AC6: replacing broken content with clean content via full-sync
+    // Replacing broken content with clean content via full-sync
     // didChange publishes an empty set and echoes the version.
     let (mut server, _) = Server::start();
     server.did_open(DUPLICATE, 1);
@@ -234,7 +241,6 @@ fn lsp_5_did_change_clears_diagnostics() {
 
 #[test]
 fn lsp_6_did_close_clears_diagnostics() {
-    // AC7.
     let (mut server, _) = Server::start();
     server.did_open(DUPLICATE, 1);
     let first = server.read_until_method("textDocument/publishDiagnostics");
@@ -253,7 +259,7 @@ fn lsp_6_did_close_clears_diagnostics() {
 
 #[test]
 fn lsp_7_utf16_range_on_non_ascii_line() {
-    // AC8: the column of a finding behind a 😀 counts UTF-16 code units.
+    // The column of a finding behind a 😀 counts UTF-16 code units.
     let (mut server, _) = Server::start();
     let source = "struct s size=2x2\n  door id=\"😀\" id=x\n";
     server.did_open(source, 1);
@@ -272,5 +278,99 @@ fn lsp_7_utf16_range_on_non_ascii_line() {
         dup["range"]["start"]["character"],
         serde_json::json!(utf16_col),
     );
+    server.shutdown();
+}
+
+#[test]
+fn lsp_8_unknown_request_gets_method_not_found() {
+    // An unsupported request must be answered — a silent server leaves the
+    // client blocked on the response id forever. -32601 is the JSON-RPC
+    // MethodNotFound code.
+    let (mut server, _) = Server::start();
+    server.send(&serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": 42,
+        "method": "textDocument/hover",
+        "params": {},
+    }));
+    let response = loop {
+        let message = server.read_message();
+        if message.get("id") == Some(&serde_json::json!(42)) {
+            break message;
+        }
+    };
+    assert_eq!(response["error"]["code"], serde_json::json!(-32601));
+    server.shutdown();
+}
+
+#[test]
+fn lsp_9_exit_without_shutdown_exits_nonzero() {
+    // The LSP spec requires `exit` without a preceding `shutdown` request
+    // to terminate the process with a non-zero code.
+    let (mut server, _) = Server::start();
+    server.send(&serde_json::json!({
+        "jsonrpc": "2.0",
+        "method": "exit",
+    }));
+    let status = server.child.wait().expect("wait for server exit");
+    assert_eq!(
+        status.code(),
+        Some(1),
+        "exit before shutdown should exit non-zero",
+    );
+}
+
+#[test]
+fn lsp_10_documents_publish_under_their_own_uris() {
+    // Two open documents must not bleed into each other: each publish
+    // targets the URI of the notification that triggered it, and a
+    // didChange on one leaves the other's diagnostics untouched.
+    let broken_uri = "file:///broken.crn";
+    let clean_uri = "file:///clean.crn";
+    let (mut server, _) = Server::start();
+    server.did_open_uri(broken_uri, DUPLICATE, 1);
+    let first = server.read_until_method("textDocument/publishDiagnostics");
+    assert!(!diagnostics_for(&first, broken_uri).is_empty());
+    server.did_open_uri(clean_uri, CLEAN, 1);
+    let second = server.read_until_method("textDocument/publishDiagnostics");
+    assert_eq!(diagnostics_for(&second, clean_uri).len(), 0);
+    server.send(&serde_json::json!({
+        "jsonrpc": "2.0",
+        "method": "textDocument/didChange",
+        "params": {
+            "textDocument": { "uri": broken_uri, "version": 2 },
+            "contentChanges": [ { "text": CLEAN } ],
+        },
+    }));
+    let third = server.read_until_method("textDocument/publishDiagnostics");
+    assert_eq!(diagnostics_for(&third, broken_uri).len(), 0);
+    server.shutdown();
+}
+
+#[test]
+fn lsp_11_malformed_notifications_do_not_kill_the_server() {
+    // Notifications are fire-and-forget: a payload that does not match the
+    // method's schema (or a didChange with empty contentChanges) must be
+    // logged and skipped, not crash the loop — one buggy client message
+    // would otherwise take every open document's diagnostics down with it.
+    let (mut server, _) = Server::start();
+    server.send(&serde_json::json!({
+        "jsonrpc": "2.0",
+        "method": "textDocument/didOpen",
+        "params": { "textDocument": { "uri": TEST_URI } },
+    }));
+    server.send(&serde_json::json!({
+        "jsonrpc": "2.0",
+        "method": "textDocument/didChange",
+        "params": {
+            "textDocument": { "uri": TEST_URI, "version": 2 },
+            "contentChanges": [],
+        },
+    }));
+    // The server must still be alive and serving: a valid didOpen after
+    // the malformed traffic publishes as usual.
+    server.did_open(CLEAN, 3);
+    let message = server.read_until_method("textDocument/publishDiagnostics");
+    assert_eq!(diagnostics_of(&message).len(), 0);
     server.shutdown();
 }

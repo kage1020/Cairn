@@ -142,7 +142,7 @@ mod tests {
 
     #[test]
     fn position_clamps_past_eof_to_final_position() {
-        // AC10 (first half): offsets beyond the source clamp to the last
+        // Offsets beyond the source clamp to the last
         // position instead of panicking on the slice.
         let source = "abc\n";
         let index = LineIndex::new(source);
@@ -158,7 +158,7 @@ mod tests {
     #[test]
     fn position_counts_utf16_code_units_not_bytes_or_scalars() {
         // 'é' is 2 bytes / 1 scalar / 1 UTF-16 unit; '😀' (U+1F600) is
-        // 4 bytes / 1 scalar / 2 UTF-16 units. AC10 (second half): the
+        // 4 bytes / 1 scalar / 2 UTF-16 units. The
         // astral char advances `character` by 2.
         let source = "é😀x\n";
         let index = LineIndex::new(source);

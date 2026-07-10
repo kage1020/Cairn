@@ -131,6 +131,7 @@ dependencies = [
  "cairn-lang-core",
  "lsp-server",
  "lsp-types",
+ "serde",
  "serde_json",
 ]
 
