@@ -9,6 +9,10 @@ license.workspace = true
 repository.workspace = true
 authors.workspace = true
 
+[[bin]]
+name = "cairn-lsp"
+path = "src/main.rs"
+
 [dependencies]
 cairn-lang-core = { workspace = true }
 lsp-server = "0.8.0"
