@@ -21,6 +21,11 @@ pnpm-debug.log*
 website/dist/
 website/.astro/
 
+# VS Code extension build output
+editors/vscode/dist/
+editors/vscode/*.vsix
+editors/vscode/*.tsbuildinfo
+
 # Python
 __pycache__/
 *.py[cod]
