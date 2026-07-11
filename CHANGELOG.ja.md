@@ -14,6 +14,32 @@
 
 ### 追加
 
+- Cairn VS Code 拡張機能と `cairn-lsp` バイナリ配布（M5-PR3）— M5
+  developer experience マイルストーンをクローズする。新規
+  `editors/vscode/` TypeScript 拡張（本 PR では Marketplace ではなく
+  `.vsix` 単位で配布）は `onLanguage:cairn` /
+  `workspaceContains:**/*.crn` で activate し、`cairn.serverPath` 設定
+  または OS の `PATH` から `cairn-lsp` を解決する（見つからない場合は
+  silent no-op せず、Release ページへのリンク付き通知 1 件を出す）。
+  `vscode-languageclient@9` を介して stdio 上で spawn し、activate 時に
+  サーバの `--version` 文字列を Output panel に記録するので、バグ報告に
+  バージョンが自然と含まれる。最小 TextMate 文法（`source.cairn`）は
+  コメント (`#`)、ディレクティブ (`@cairn`/`@requires`/`@intended_targets`)、
+  トップレベルキーワード (`theme`/`def`/`site`/`struct`)、メンバ
+  キーワード（`cairn-lang-core::intent::known_keywords` のミラー:
+  `floor`/`walls`/`door`/`window`/`roof`/`stair`/`level`/`pressure_plate`/
+  `circuit`/`place`/`connect`）、material token (`@name.dotted`)、
+  attribute key (`k=`)、`->` slot binding 矢印、および文字列を色付けする。
+  シンタックスは M5-PR1/PR2 で既に届いた LSP 由来の診断・補完の隣で動く。
+  `cairn-lsp` は小さな `--version`（および `-h`/`--help`）フラグを獲得し
+  — `cairn --version` に整合、`crates/cairn-lang-lsp/tests/version_flag.rs`
+  の新規統合テストで固定 —、拡張機能とサポート triage が起動せずとも
+  サーバを識別できる。`.github/workflows/publish.yml` は 6 リリース
+  ターゲットすべてで `cairn` に加えて `cairn-lsp` をクロスコンパイルし、
+  1 アーカイブに両バイナリを同梱する。既存の sigstore 署名がペアを覆う
+  ので、アセット数・`.sha256`・`.sigstore` レイアウトは変わらない。
+  スコープ外: Marketplace / Open VSX 公開、`.vsix` へのバイナリ同梱、
+  semantic-tokens プロバイダ — いずれも M6 または後続 PR に持ち越す。
 - `cairn-lsp` completion（M5-PR2）— 言語の closed vocabulary に対する
   `textDocument/completion`。`initialize` でトリガー文字 `@`・`=`・`.`
   とともに広告される。カーソルの 4 コンテキストを認識する: 行頭キーワード

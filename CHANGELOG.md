@@ -12,6 +12,34 @@ and is a separate axis from the Minecraft target version.
 
 ### Added
 
+- Cairn VS Code extension and `cairn-lsp` binary distribution (M5-PR3) —
+  closes the M5 developer-experience milestone. A new `editors/vscode/`
+  TypeScript extension (published as `.vsix`, not to the Marketplace in
+  this PR) activates on `onLanguage:cairn` / `workspaceContains:**/*.crn`,
+  resolves `cairn-lsp` from the `cairn.serverPath` setting or the OS
+  `PATH` (falling back to a single actionable notification linking to the
+  release page rather than silently no-op-ing), spawns it over stdio with
+  `vscode-languageclient@9`, and logs the server's `--version` string at
+  activation so bug reports carry a version tag without extra ceremony.
+  A minimal TextMate grammar (`source.cairn`) colours comments (`#`),
+  directives (`@cairn`/`@requires`/`@intended_targets`), top-level
+  keywords (`theme`/`def`/`site`/`struct`) and member keywords (mirrors
+  `cairn-lang-core::intent::known_keywords` — `floor`/`walls`/`door`/
+  `window`/`roof`/`stair`/`level`/`pressure_plate`/`circuit`/`place`/
+  `connect`), material tokens (`@name.dotted`), attribute keys (`k=`),
+  the `->` slot-binding arrow, and quoted strings; syntax lives next to
+  the LSP-driven diagnostics/completion the two previous PRs already
+  ship. `cairn-lsp` gains a small `--version` (and `-h`/`--help`) flag —
+  aligned with `cairn --version` and covered by a new integration test
+  in `crates/cairn-lang-lsp/tests/version_flag.rs` — so the extension
+  and support triage can identify the server without opening it.
+  `.github/workflows/publish.yml` now cross-compiles `cairn-lsp`
+  alongside `cairn` for all six release targets and stages both binaries
+  into one archive per target; the existing sigstore signature covers
+  the pair so the asset count, `.sha256`, and `.sigstore` layout are
+  unchanged. Not in scope: Marketplace / Open VSX publishing, bundling
+  the binary inside the `.vsix`, and a semantic-tokens provider — all
+  three are deferred to M6 or later PRs.
 - `cairn-lsp` completion (M5-PR2) — `textDocument/completion` over the
   language's closed vocabularies, advertised at `initialize` with trigger
   characters `@`, `=`, and `.`. Four cursor contexts are recognised:

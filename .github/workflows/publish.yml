@@ -111,9 +111,14 @@ jobs:
         env:
           CARGO_TERM_COLOR: always
           TARGET: ${{ matrix.target }}
-        run: cargo build --release --locked --bin cairn --target "$TARGET"
+        # Ship both binaries in one archive per target. `cairn-lsp` is the
+        # language-server backend the VS Code extension (M5-PR3) spawns; the
+        # extension always runs against the CLI it was released alongside, so
+        # pairing them keeps versions in lockstep and avoids a second sigstore
+        # roundtrip per target.
+        run: cargo build --release --locked --bin cairn --bin cairn-lsp --target "$TARGET"
 
-      - name: Stage binary
+      - name: Stage binaries
         id: stage
         shell: bash
         env:
@@ -125,6 +130,7 @@ jobs:
           name="cairn-${VERSION}-${TARGET}"
           mkdir -p "dist/$name"
           cp "target/${TARGET}/release/cairn${EXT}" "dist/$name/"
+          cp "target/${TARGET}/release/cairn-lsp${EXT}" "dist/$name/"
           cp LICENSE "dist/$name/"
           cp README.md "dist/$name/"
           echo "name=$name" >> "$GITHUB_OUTPUT"
