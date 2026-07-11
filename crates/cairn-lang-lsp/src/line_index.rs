@@ -83,6 +83,38 @@ impl LineIndex {
             .map_or(line_end, |rel| line_start + rel)
     }
 
+    /// Inverse of [`LineIndex::position`]: recover the byte offset of a
+    /// protocol position (0-based line, UTF-16 code-unit column).
+    ///
+    /// Slightly-off coordinates clamp — a request can carry a position one
+    /// keystroke ahead of the last synced revision, and clamping yields the
+    /// nearest valid offset instead of a dead request: a column past the end
+    /// of the line clamps to the line end (before its terminator), a column
+    /// landing between the two UTF-16 units of an astral char clamps down to
+    /// that char's start so the result is always a char boundary, and a line
+    /// exactly one past the last clamps to `source.len()` (the revision race
+    /// can remove at most the lines the change deleted, and answering at EOF
+    /// is right for the common append case). A line further out is not a
+    /// race but a client bug; that returns `None` so the caller can refuse
+    /// the request instead of fabricating an EOF context.
+    #[must_use]
+    pub fn offset_at(&self, source: &str, position: lsp_types::Position) -> Option<usize> {
+        let line = position.line as usize;
+        let Some(&line_start) = self.line_starts.get(line) else {
+            return (line == self.line_starts.len()).then_some(source.len());
+        };
+        let line_end = self.line_end(source, line_start);
+        let target = position.character as usize;
+        let mut units = 0;
+        for (rel, ch) in source[line_start..line_end].char_indices() {
+            if target < units + ch.len_utf16() {
+                return Some(line_start + rel);
+            }
+            units += ch.len_utf16();
+        }
+        Some(line_end)
+    }
+
     /// Byte offset of the end of the line containing `byte_offset` — the
     /// position of its `\n` (or of the `\r` in a `\r\n` pair), or
     /// `source.len()` for the final line.
@@ -241,6 +273,78 @@ mod tests {
         assert_eq!(index.offset_of(source, core_pos(1, 99)), 2);
         // Line past the end of the source clamps to source.len().
         assert_eq!(index.offset_of(source, core_pos(9, 1)), source.len());
+    }
+
+    #[test]
+    fn offset_at_round_trips_with_position() {
+        // For every char boundary (and EOF), converting the byte offset to
+        // an LSP position and back recovers the original offset. Non-ASCII
+        // chars included so UTF-16 column arithmetic is exercised in both
+        // directions.
+        let source = "é😀x\nfoo\nβar";
+        let index = LineIndex::new(source);
+        let boundaries = source.char_indices().map(|(i, _)| i).chain([source.len()]);
+        for offset in boundaries {
+            let position = index.position(source, offset);
+            assert_eq!(
+                index.offset_at(source, position),
+                Some(offset),
+                "round trip failed at byte {offset}",
+            );
+        }
+    }
+
+    #[test]
+    fn offset_at_clamps_column_line_and_surrogate_interior() {
+        let source = "a😀\r\ncd";
+        let index = LineIndex::new(source);
+        // Column past the end of line 0 clamps to the line end, before the
+        // `\r\n` terminator.
+        assert_eq!(
+            index.offset_at(
+                source,
+                lsp_types::Position {
+                    line: 0,
+                    character: 99,
+                },
+            ),
+            Some(5),
+        );
+        // One line past the end clamps to source.len() — a stale position
+        // from a racing didChange deserves an answer.
+        assert_eq!(
+            index.offset_at(
+                source,
+                lsp_types::Position {
+                    line: 2,
+                    character: 0,
+                },
+            ),
+            Some(source.len()),
+        );
+        // Further out is a client bug, refused rather than clamped.
+        assert_eq!(
+            index.offset_at(
+                source,
+                lsp_types::Position {
+                    line: 3,
+                    character: 0,
+                },
+            ),
+            None,
+        );
+        // A column landing between the two UTF-16 units of 😀 clamps down
+        // to the char's start so the result is always a char boundary.
+        assert_eq!(
+            index.offset_at(
+                source,
+                lsp_types::Position {
+                    line: 0,
+                    character: 2,
+                },
+            ),
+            Some(1),
+        );
     }
 
     #[test]

@@ -1,19 +1,24 @@
 //! Stdio JSON-RPC server loop.
 //!
-//! Owns the transport half of the language server: capability negotiation
-//! and pushing [`crate::diagnostics::compute_diagnostics`] results to the
-//! client via `textDocument/publishDiagnostics`. The loop is synchronous
-//! (one message at a time) — the compiler pipeline is fast enough that full
-//! recomputation per keystroke stays well under interactive latency for the
-//! file sizes `.crn` sources reach.
+//! Owns the transport half of the language server: capability negotiation,
+//! pushing [`crate::diagnostics::compute_diagnostics`] results to the client
+//! via `textDocument/publishDiagnostics`, and answering
+//! `textDocument/completion` from [`crate::completion::completions`] against
+//! the [`DocumentStore`]-held text. The loop is synchronous (one message at
+//! a time) — the compiler pipeline is fast enough that full recomputation
+//! per keystroke stays well under interactive latency for the file sizes
+//! `.crn` sources reach.
 
-use lsp_server::{Connection, ErrorCode, Message, Notification, Response};
+use lsp_server::{Connection, ErrorCode, Message, Notification, Request, Response};
 use lsp_types::notification::{
     DidChangeTextDocument, DidCloseTextDocument, DidOpenTextDocument, Exit, Notification as _,
     PublishDiagnostics,
 };
+use lsp_types::request::{Completion, Request as _};
 
+use crate::completion::completions;
 use crate::diagnostics::compute_diagnostics;
+use crate::store::DocumentStore;
 
 /// Errors the transport layer can surface. Boxed because every failure mode
 /// here (broken pipe, malformed JSON, protocol violation) is terminal for
@@ -21,8 +26,11 @@ use crate::diagnostics::compute_diagnostics;
 type DynError = Box<dyn std::error::Error + Send + Sync>;
 
 /// Capabilities advertised in the `initialize` response: full-content
-/// document sync with open/close notifications. Everything else (completion,
-/// hover, code actions) is intentionally absent until it is implemented.
+/// document sync with open/close notifications, and completion triggered by
+/// the characters that open a closed-vocabulary position (`@` a material
+/// token, `=` a `mat_slot` value, `.` a segment inside an abstract token).
+/// Everything else (hover, code actions) is intentionally absent until it
+/// is implemented.
 fn server_capabilities() -> lsp_types::ServerCapabilities {
     lsp_types::ServerCapabilities {
         text_document_sync: Some(lsp_types::TextDocumentSyncCapability::Options(
@@ -32,6 +40,10 @@ fn server_capabilities() -> lsp_types::ServerCapabilities {
                 ..lsp_types::TextDocumentSyncOptions::default()
             },
         )),
+        completion_provider: Some(lsp_types::CompletionOptions {
+            trigger_characters: Some(vec!["@".to_owned(), "=".to_owned(), ".".to_owned()]),
+            ..lsp_types::CompletionOptions::default()
+        }),
         ..lsp_types::ServerCapabilities::default()
     }
 }
@@ -62,24 +74,18 @@ pub fn run() -> Result<(), DynError> {
     Ok(())
 }
 
-/// Dispatch loop: requests are answered (only `shutdown` is known),
-/// notifications drive diagnostics publishing.
+/// Dispatch loop: requests are answered (`shutdown` and `completion` are
+/// known), notifications keep the document store in sync and drive
+/// diagnostics publishing.
 fn main_loop(connection: &Connection) -> Result<(), DynError> {
+    let mut store = DocumentStore::new();
     for message in &connection.receiver {
         match message {
             Message::Request(request) => {
                 if connection.handle_shutdown(&request)? {
                     return Ok(());
                 }
-                // No other requests are supported yet; answer instead of
-                // staying silent so a client waiting on the response id
-                // does not hang.
-                let response = Response::new_err(
-                    request.id,
-                    ErrorCode::MethodNotFound as i32,
-                    format!("method not supported: {}", request.method),
-                );
-                connection.sender.send(Message::Response(response))?;
+                handle_request(connection, &store, request)?;
             }
             Message::Notification(notification) => {
                 // `handle_shutdown` consumes the `exit` that follows a
@@ -89,7 +95,7 @@ fn main_loop(connection: &Connection) -> Result<(), DynError> {
                 if notification.method == Exit::METHOD {
                     return Err("exit notification received before shutdown request".into());
                 }
-                handle_notification(connection, notification)?;
+                handle_notification(connection, &mut store, notification)?;
             }
             Message::Response(_) => {
                 // The server sends no requests, so no responses are
@@ -97,6 +103,63 @@ fn main_loop(connection: &Connection) -> Result<(), DynError> {
             }
         }
     }
+    Ok(())
+}
+
+/// Answer one client request. Every request gets a response — a silent
+/// server leaves the client blocked on the response id forever — so unknown
+/// methods are refused with `MethodNotFound` and a completion request whose
+/// params or document are unusable is refused with `InvalidParams`.
+fn handle_request(
+    connection: &Connection,
+    store: &DocumentStore,
+    request: Request,
+) -> Result<(), DynError> {
+    let response = if request.method == Completion::METHOD {
+        match serde_json::from_value::<lsp_types::CompletionParams>(request.params) {
+            Err(err) => Response::new_err(
+                request.id,
+                ErrorCode::InvalidParams as i32,
+                format!("malformed `{}` params: {err}", Completion::METHOD),
+            ),
+            Ok(params) => {
+                let position = params.text_document_position.position;
+                let uri = params.text_document_position.text_document.uri;
+                match store.get(&uri) {
+                    // Asking about a document the client never synced is a
+                    // client-side protocol violation; refuse it loud instead
+                    // of answering from nothing.
+                    None => Response::new_err(
+                        request.id,
+                        ErrorCode::InvalidParams as i32,
+                        format!("document not open: {}", uri.as_str()),
+                    ),
+                    Some(source) => match completions(source, position) {
+                        Some(items) => Response::new_ok(request.id, items),
+                        // A position far past the document is a client bug,
+                        // not a revision race — refused, not clamped.
+                        None => Response::new_err(
+                            request.id,
+                            ErrorCode::InvalidParams as i32,
+                            format!(
+                                "position {}:{} is past the end of {}",
+                                position.line,
+                                position.character,
+                                uri.as_str(),
+                            ),
+                        ),
+                    },
+                }
+            }
+        }
+    } else {
+        Response::new_err(
+            request.id,
+            ErrorCode::MethodNotFound as i32,
+            format!("method not supported: {}", request.method),
+        )
+    };
+    connection.sender.send(Message::Response(response))?;
     Ok(())
 }
 
@@ -118,16 +181,14 @@ fn parse_params<T: serde::de::DeserializeOwned>(
     }
 }
 
-/// React to one client notification by republishing diagnostics for the
-/// affected document. Unknown notifications are ignored per the LSP spec.
-///
-/// No document store is kept: both `didOpen` and `didChange` (full sync)
-/// carry the complete text, and `didClose` only needs the URI — so the
-/// notification itself is always the freshest source of truth. A store
-/// arrives with the completion feature, which has to read documents outside
-/// a change notification.
+/// React to one client notification: mirror the document text into the
+/// store (completion requests identify their document by URI alone, so the
+/// server has to remember the last synced revision), then republish
+/// diagnostics for the affected document. Unknown notifications are ignored
+/// per the LSP spec.
 fn handle_notification(
     connection: &Connection,
+    store: &mut DocumentStore,
     notification: Notification,
 ) -> Result<(), DynError> {
     match notification.method.as_str() {
@@ -140,6 +201,7 @@ fn handle_notification(
             };
             let uri = params.text_document.uri;
             let diagnostics = compute_diagnostics(&uri, &params.text_document.text);
+            store.open(uri.clone(), params.text_document.text);
             publish(
                 connection,
                 uri,
@@ -166,6 +228,7 @@ fn handle_notification(
             };
             let uri = params.text_document.uri;
             let diagnostics = compute_diagnostics(&uri, &change.text);
+            store.change(uri.clone(), change.text);
             publish(
                 connection,
                 uri,
@@ -180,6 +243,7 @@ fn handle_notification(
             ) else {
                 return Ok(());
             };
+            store.close(&params.text_document.uri);
             // Publish an empty set so the editor clears stale squiggles
             // for the closed document.
             publish(connection, params.text_document.uri, None, Vec::new())?;

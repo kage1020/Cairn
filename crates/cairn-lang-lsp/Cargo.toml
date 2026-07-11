@@ -15,6 +15,7 @@ path = "src/main.rs"
 
 [dependencies]
 cairn-lang-core = { workspace = true }
+cairn-lang-formats = { workspace = true }
 lsp-server = "0.8.0"
 lsp-types = "0.97.0"
 serde = "1.0.228"
