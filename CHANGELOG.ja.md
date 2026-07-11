@@ -14,6 +14,34 @@
 
 ### 追加
 
+- Redstone 組合論理 Netlist IR と `cairn synth --stage netlist`（M6-PR2）—
+  M6 redstone-simulates パイプラインの2枚目。`cairn-lang-redstone` に
+  `compile_netlist(&ScopedLogicIr)` エントリポイントを追加し、
+  M6-PR1 で得た Logic IR の各 `GateNode` を `LogicalCell`
+  （現状は `and` / `or` / `not`。`xor` / `nand` / `nor` / `mux` は
+  Logic IR 側と同じく enum に予約）でタグ付けした `CellNode` に書き換える。
+  セルはカノニカルなポート順 (`[A, B]` / `[A]` / `[Sel, A, B]`) で
+  driver を保持するので、後段のシミュレータや配置器は `PortName` を
+  見ずに位置インデックスで扱える。`NetRef` は Logic IR の arena 型
+  `SignalRef` と同型で、`cells[i]` に含まれる全 `NetRef::Cell(j)` が
+  `j < i` を満たすトポロジカル不変量を単一の forward walk で保存する。
+  `spec/redstone` §14.6 に従い、cell library の3層構造
+  (`Logical Cell → Edition Cell → Physical Tile`) のうち最上段のみをここで選び、
+  Java `ComparatorAND` / Bedrock `TorchAND` の Edition Cell 選択は
+  後段に譲るため IR は edition-neutral のまま。§14.4 / §14.8 のとおり
+  Netlist IR も delay を持たず、リピータ挿入は Placement IR 段まで
+  行わない。CSE / 巡回検出 / 未束縛シグナル報告は M6-PR1 で済んでいるので
+  netlist pass は独自の diagnostic を出さない純粋な構造書き換え。
+  CLI の `cairn synth` に `--stage <logic|netlist>` フラグを追加（既定は
+  後方互換のため `logic`）、依然として `--experimental-logic-synth`
+  ゲート配下。今後の placement / route / simulator 段もこのフラグに
+  乗せていくのでサブコマンドは増やさない。今回のスコープ外:
+  Edition Cell 選択、place-and-route、tick simulator、
+  `assert truth|always|latency` の評価、シーケンシャルマクロ
+  (`latch` / `pulse` / `delay` / `edge_*` / `counter`)、
+  `circuit region=... void=N` の congestion 検出（`E_ROUTE_CONGESTION`）、
+  QC/BUD 拒否（`E_NO_PORTABLE_IMPL`）— それぞれ後続 PR で本 PR が確定した
+  Netlist IR shape の上に積む。
 - Redstone 組合論理 Logic IR と `cairn synth`（M6-PR1）— M6 redstone
   simulates パイプラインの最初のスライス。`cairn-lang-redstone` に
   `synthesize(&IntentModule)` エントリポイントを追加し、全ての

@@ -78,6 +78,45 @@ fn cli_synth_redstone_door_emits_or_gate_json() {
 }
 
 #[test]
+fn cli_synth_stage_netlist_emits_or_cell_json() {
+    // `--stage netlist` prints the Netlist IR of the same example, one
+    // step down the pipeline: gates become cells tagged with a
+    // `LogicalCell`, and drivers become `NetRef`s. Pins the JSON shape
+    // the Netlist IR stage exposes.
+    let path = examples_dir().join("redstone-door.crn");
+    let out = run_synth(&[
+        "--experimental-logic-synth",
+        "--stage",
+        "netlist",
+        path.to_str().unwrap(),
+    ]);
+    assert!(
+        out.status.success(),
+        "expected exit 0, stderr={}",
+        String::from_utf8_lossy(&out.stderr),
+    );
+    let stdout = String::from_utf8(out.stdout).expect("utf-8");
+    let value: serde_json::Value = serde_json::from_str(&stdout)
+        .unwrap_or_else(|err| panic!("stdout should parse as JSON: {err}\n{stdout}"));
+    let scopes = value.as_array().expect("top-level is a scope list");
+    let gatehouse = scopes
+        .iter()
+        .find(|s| s["name"] == "gatehouse")
+        .expect("gatehouse scope in output");
+    let ir = &gatehouse["ir"];
+    assert_eq!(ir["inputs"].as_array().expect("inputs array").len(), 2);
+    assert_eq!(ir["outputs"].as_array().expect("outputs array").len(), 1);
+    let cells = ir["cells"].as_array().expect("cells array");
+    assert_eq!(cells.len(), 1);
+    assert_eq!(cells[0]["cell"], "or");
+    let drivers = cells[0]["drivers"].as_array().expect("drivers array");
+    assert_eq!(drivers.len(), 2);
+    assert_eq!(drivers[0]["port"], "a");
+    assert_eq!(drivers[1]["port"], "b");
+    assert_eq!(ir["outputs"][0]["driver"]["kind"], "cell");
+}
+
+#[test]
 fn cli_synth_missing_file_exits_two() {
     // Path-not-found returns 2 (user-input mistake), consistent with
     // `cairn parse`/`check`/`lower`/`compile`.
