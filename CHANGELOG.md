@@ -12,6 +12,41 @@ and is a separate axis from the Minecraft target version.
 
 ### Added
 
+- Redstone combinational Logic IR + `cairn synth` (M6-PR1) — the first
+  slice of the M6 redstone-simulates pipeline. `cairn-lang-redstone` grows
+  a `synthesize(&IntentModule)` entry point that walks every
+  struct / def / site body, collects sensor bindings (`pressure_plate ...
+  -> sig.X`, and any future sensor whose surface `-> sig.Y` tail parses
+  to a `DotRef`) into `InputPort`s, collects actuator arguments
+  (`opened_by=` / `powered_by=` / `lit_by=` / `fired_by=`, per
+  `spec/redstone` §14.2) into `OutputPort`s, and lowers each
+  `logic sig.X = <expr>` line into a topologically ordered DAG of
+  `GateNode`s. Combinational primitives cover `and` / `or` / `not`
+  (reachable from the current AST directly); `xor` / `nand` / `nor` /
+  `mux` sit on the `GateKind` enum ready for a follow-up parser PR that
+  teaches the surface call-expression syntax. Common subexpression
+  elimination collapses `sig.a or sig.b` written on two `logic` lines
+  to one shared OR gate so downstream placement pays no fanout tax
+  the source never asked for. Four new diagnostic codes fire fail-loud
+  per `spec/lint` §11.4's self-correction triple:
+  `E_LOGIC_UNBOUND_SIGNAL` when a reference names no sensor / earlier
+  binding (with a `Valid signals in scope: ...` footer listing the
+  reachable alternatives), `E_LOGIC_MULTIPLE_DRIVERS` when two `logic`
+  lines share an LHS or a `logic` LHS collides with a sensor,
+  `E_LOGIC_CYCLE` when a combinational dependency chain closes on
+  itself, and `W_LOGIC_UNUSED_SIGNAL` on a bare-ref or gate-producing
+  binding whose LHS no actuator or downstream logic consumes. Cascade
+  suppression tracks the failed-LHS set so a single unbound signal at
+  the root fires exactly one diagnostic, not once per consumer. The
+  CLI ships a matching internal-tier `cairn synth <file>
+  --experimental-logic-synth` subcommand that dumps the per-scope
+  Logic IR as JSON — the gate is mandatory until the pipeline reaches
+  a stable compatibility tier (netlist, placement, route, simulator
+  are still to come). Not in scope for this PR: the Netlist IR, cell
+  library, place-and-route, tick simulator, `assert truth|always`
+  evaluation, and sequential macros (`latch` / `pulse` / `delay` /
+  `edge_*` / `counter`) — each is a follow-up PR that will build on
+  the Logic IR shape this PR pins.
 - Cairn VS Code extension and `cairn-lsp` binary distribution (M5-PR3) —
   closes the M5 developer-experience milestone. A new `editors/vscode/`
   TypeScript extension (published as `.vsix`, not to the Marketplace in

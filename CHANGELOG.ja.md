@@ -14,6 +14,38 @@
 
 ### 追加
 
+- Redstone 組合論理 Logic IR と `cairn synth`（M6-PR1）— M6 redstone
+  simulates パイプラインの最初のスライス。`cairn-lang-redstone` に
+  `synthesize(&IntentModule)` エントリポイントを追加し、全ての
+  struct / def / site body を走査してセンサ束縛 (`pressure_plate ...
+  -> sig.X` および将来的な `-> sig.Y` 尾を持つ任意のセンサ) を
+  `InputPort` として、アクチュエータ引数 (`opened_by=` / `powered_by=`
+  / `lit_by=` / `fired_by=`、`spec/redstone` §14.2 準拠) を
+  `OutputPort` として収集し、各 `logic sig.X = <expr>` 行をトポロジ
+  順に並んだ `GateNode` DAG へ lower する。組合論理プリミティブは
+  `and` / `or` / `not` を synth 経路に含め（現在の AST から到達可能
+  な範囲）、`xor` / `nand` / `nor` / `mux` は `GateKind` enum 上に
+  用意して後続 PR での関数呼出構文サポートを受け入れる準備を整える。
+  共通部分式除去 (CSE) により、2 行の `logic` が同じ `sig.a or sig.b`
+  を書いた場合は 1 個の OR ゲートに統合され、下流の placement が
+  ソースの意図しないファンアウトコストを払わない設計。診断コードは
+  4 種を新設し、`spec/lint` §11.4 の self-correction triple 形式に
+  従う: `E_LOGIC_UNBOUND_SIGNAL`（センサ・先行 `logic` のいずれにも
+  定義されていない参照、`Valid signals in scope: ...` 脚注で候補
+  一覧を提示）、`E_LOGIC_MULTIPLE_DRIVERS`（2 行の `logic` で同一
+  LHS または `logic` LHS がセンサと衝突）、`E_LOGIC_CYCLE`
+  （組合論理依存チェーンが自己ループを構成）、`W_LOGIC_UNUSED_SIGNAL`
+  （LHS がアクチュエータからも下流 `logic` からも参照されない
+  bare-ref / gate 生成 bind）。カスケード抑制のため failed-LHS
+  セットを維持し、根本原因 1 件に対する診断が消費側で複製されない
+  ようにしている。CLI 側には internal-tier の
+  `cairn synth <file> --experimental-logic-synth` サブコマンドが載り、
+  スコープ単位の Logic IR を JSON で dump する（pipeline が stable tier
+  に達するまでフラグは必須）。本 PR のスコープ外: Netlist IR、
+  cell library、place-and-route、tick simulator、`assert truth|always`
+  評価、sequential macros（`latch` / `pulse` / `delay` / `edge_*` /
+  `counter`）— いずれも本 PR で確定した Logic IR shape を土台にする
+  後続 PR で追加する。
 - Cairn VS Code 拡張機能と `cairn-lsp` バイナリ配布（M5-PR3）— M5
   developer experience マイルストーンをクローズする。新規
   `editors/vscode/` TypeScript 拡張（本 PR では Marketplace ではなく
