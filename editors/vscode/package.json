@@ -17,8 +17,15 @@
   "engines": {
     "vscode": "^1.85.0"
   },
-  "categories": ["Programming Languages"],
-  "keywords": ["cairn", "minecraft", "lsp", "language-server"],
+  "categories": [
+    "Programming Languages"
+  ],
+  "keywords": [
+    "cairn",
+    "minecraft",
+    "lsp",
+    "language-server"
+  ],
   "main": "./dist/extension.js",
   "activationEvents": [
     "onLanguage:cairn",
@@ -28,8 +35,13 @@
     "languages": [
       {
         "id": "cairn",
-        "aliases": ["Cairn", "cairn"],
-        "extensions": [".crn"],
+        "aliases": [
+          "Cairn",
+          "cairn"
+        ],
+        "extensions": [
+          ".crn"
+        ],
         "configuration": "./language-configuration.json"
       }
     ],
@@ -46,11 +58,16 @@
         "cairn.serverPath": {
           "type": "string",
           "default": "",
-          "markdownDescription": "Absolute path to the `cairn-lsp` binary. Leave empty to look up `cairn-lsp` on `PATH`. Install the binary from the [GitHub release](https://github.com/kage1020/Cairn/releases) matching your `cairn` CLI version."
+          "scope": "machine-overridable",
+          "markdownDescription": "Absolute path to the `cairn-lsp` binary. Leave empty to look up `cairn-lsp` on `PATH`. Install the binary from the [GitHub release](https://github.com/kage1020/Cairn/releases) matching your `cairn` CLI version. Reload the window after changing this to apply the new server."
         },
         "cairn.trace.server": {
           "type": "string",
-          "enum": ["off", "messages", "verbose"],
+          "enum": [
+            "off",
+            "messages",
+            "verbose"
+          ],
           "default": "off",
           "description": "Trace communication between VS Code and the Cairn language server in the Output panel."
         }
@@ -58,9 +75,11 @@
     }
   },
   "scripts": {
-    "build": "tsc -p .",
-    "watch": "tsc -p . --watch",
-    "package": "vsce package --no-dependencies"
+    "check": "tsc --noEmit -p .",
+    "build": "esbuild src/extension.ts --bundle --external:vscode --platform=node --format=cjs --target=node20 --outfile=dist/extension.js --sourcemap",
+    "build:prod": "esbuild src/extension.ts --bundle --external:vscode --platform=node --format=cjs --target=node20 --outfile=dist/extension.js --minify",
+    "watch": "esbuild src/extension.ts --bundle --external:vscode --platform=node --format=cjs --target=node20 --outfile=dist/extension.js --sourcemap --watch",
+    "package": "pnpm check && pnpm build:prod && vsce package --no-dependencies"
   },
   "dependencies": {
     "vscode-languageclient": "^9.0.1"
@@ -69,6 +88,7 @@
     "@types/node": "^20.11.0",
     "@types/vscode": "^1.85.0",
     "@vscode/vsce": "^3.2.1",
+    "esbuild": "^0.28.1",
     "typescript": "^5.6.3"
   }
 }

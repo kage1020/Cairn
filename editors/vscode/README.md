@@ -21,7 +21,7 @@ CLI in the Cairn release archive.
 
 | Setting              | Type   | Default | Purpose                                                                                       |
 | -------------------- | ------ | ------- | --------------------------------------------------------------------------------------------- |
-| `cairn.serverPath`   | string | `""`    | Absolute path to `cairn-lsp`. Empty → look up on `PATH`.                                      |
+| `cairn.serverPath`   | string | `""`    | Absolute path to `cairn-lsp`. Empty → look up on `PATH`. Reload the window after changing.    |
 | `cairn.trace.server` | enum   | `off`   | Trace LSP messages in the Output panel (`off` / `messages` / `verbose`) for bug reports.      |
 
 ## Development

@@ -5,8 +5,7 @@ node_modules/**
 tsconfig.json
 tsconfig.tsbuildinfo
 pnpm-lock.yaml
-**/*.map
+dist/**/*.map
 **/*.ts
-!dist/**/*
 .gitignore
 .vscodeignore

@@ -29,14 +29,23 @@ fn main() -> ExitCode {
     // when a user runs the binary by hand).
     let mut args = std::env::args().skip(1);
     if let Some(arg) = args.next() {
+        let extra = args.next();
         match arg.as_str() {
-            "-V" | "--version" => {
+            "-V" | "--version" if extra.is_none() => {
                 println!("cairn-lsp {CAIRN_VERSION}");
                 return ExitCode::SUCCESS;
             }
-            "-h" | "--help" => {
+            "-h" | "--help" if extra.is_none() => {
                 print!("{HELP}");
                 return ExitCode::SUCCESS;
+            }
+            "-V" | "--version" | "-h" | "--help" => {
+                let unexpected = extra.unwrap_or_default();
+                eprintln!(
+                    "error: unexpected argument `{unexpected}` after `{arg}`. \
+                     Fix: `cairn-lsp {arg}` takes no further arguments."
+                );
+                return ExitCode::from(2);
             }
             other => {
                 eprintln!(
