@@ -56,14 +56,19 @@ struct SlotDecl {
     theme: Option<String>,
 }
 
-/// Return every completion candidate for `position`, or an empty list when
-/// the cursor is not in any closed-vocabulary context (never invent
-/// candidates where the grammar accepts free-form input).
+/// Return every completion candidate for `position`; an empty list when the
+/// cursor is not in any closed-vocabulary context (never invent candidates
+/// where the grammar accepts free-form input), and `None` when the position
+/// does not exist in the document at all (see [`LineIndex::offset_at`]) —
+/// the transport layer turns that into a request error.
 #[must_use]
-pub fn completions(source: &str, position: lsp_types::Position) -> Vec<lsp_types::CompletionItem> {
+pub fn completions(
+    source: &str,
+    position: lsp_types::Position,
+) -> Option<Vec<lsp_types::CompletionItem>> {
     let index = LineIndex::new(source);
-    let offset = index.offset_at(source, position);
-    match context_at(source, offset) {
+    let offset = index.offset_at(source, position)?;
+    Some(match context_at(source, offset) {
         None => Vec::new(),
         Some(Context::TopLevelKeyword { replace }) => keyword_items(
             &index,
@@ -86,7 +91,7 @@ pub fn completions(source: &str, position: lsp_types::Position) -> Vec<lsp_types
         ),
         Some(Context::SlotName { replace }) => slot_name_items(&index, source, &replace),
         Some(Context::MaterialToken { replace }) => material_items(&index, source, &replace),
-    }
+    })
 }
 
 /// Characters a partial token under the cursor may contain. The dot admits
@@ -97,14 +102,28 @@ fn is_token_char(c: char) -> bool {
     c.is_ascii_alphanumeric() || c == '_' || c == '.'
 }
 
+/// Byte offset of the first `#` in `line` that opens a comment — i.e. sits
+/// outside a string literal. Exact by quote parity: the lexer scans strings
+/// atomically with no escape sequences, and a string cannot span lines, so
+/// counting `"` toggles is the full string grammar.
+fn comment_start(line: &str) -> Option<usize> {
+    let mut in_string = false;
+    for (i, c) in line.char_indices() {
+        match c {
+            '"' => in_string = !in_string,
+            '#' if !in_string => return Some(i),
+            _ => {}
+        }
+    }
+    None
+}
+
 /// Classify the cursor's byte offset into a completion [`Context`].
 fn context_at(source: &str, offset: usize) -> Option<Context> {
     let line_start = source[..offset].rfind('\n').map_or(0, |i| i + 1);
     let prefix = &source[line_start..offset];
-    // A `#` anywhere before the cursor puts it in a comment. (A `#` inside
-    // a string literal is misread as one, at the price of not completing —
-    // conservative in the right direction for a closed-set-first server.)
-    if prefix.contains('#') {
+    // A comment opener before the cursor puts it in a comment.
+    if comment_start(prefix).is_some() {
         return None;
     }
     let token_start = line_start
@@ -114,7 +133,13 @@ fn context_at(source: &str, offset: usize) -> Option<Context> {
             .take_while(|(_, c)| is_token_char(*c))
             .last()
             .map_or(prefix.len(), |(i, _)| i);
-    let replace = token_start..offset;
+    // The token continues past the cursor: replace all of it, or accepting
+    // an item would leave the token's tail glued to the inserted text.
+    let token_end = offset
+        + source[offset..]
+            .find(|c: char| !is_token_char(c))
+            .unwrap_or(source.len() - offset);
+    let replace = token_start..token_end;
     let before_token = &source[line_start..token_start];
     if let Some(head) = before_token.strip_suffix('@') {
         // `@` opening an indent-0 line is a header directive (`@cairn`,
@@ -180,9 +205,10 @@ fn enclosing_block_keyword(source: &str, line_start: usize, indent: usize) -> Op
 fn document_slot_names(source: &str) -> Vec<SlotDecl> {
     let mut decls = Vec::new();
     let mut current_theme: Option<String> = None;
-    for line in source.lines() {
+    for raw_line in source.lines() {
+        let line = comment_start(raw_line).map_or(raw_line, |i| &raw_line[..i]);
         let trimmed = line.trim_start();
-        if trimmed.is_empty() || trimmed.starts_with('#') {
+        if trimmed.is_empty() {
             continue;
         }
         let indent = line.len() - trimmed.len();
@@ -211,12 +237,7 @@ fn document_slot_names(source: &str) -> Vec<SlotDecl> {
         let Some(target) = rest[name.len()..].trim_start().strip_prefix("->") else {
             continue;
         };
-        let target = target
-            .split('#')
-            .next()
-            .unwrap_or_default()
-            .trim()
-            .to_owned();
+        let target = target.trim().to_owned();
         decls.push(SlotDecl {
             name,
             target,
@@ -242,7 +263,9 @@ fn item(
         label: label.to_owned(),
         kind: Some(kind),
         detail: Some(detail),
-        sort_text: Some(format!("{order:04}")),
+        // Six digits leave headroom for the full canonical block vocabulary
+        // (tens of thousands of ids) without breaking lexicographic order.
+        sort_text: Some(format!("{order:06}")),
         text_edit: Some(lsp_types::CompletionTextEdit::Edit(lsp_types::TextEdit {
             range: index.range(source, replace),
             new_text: label.to_owned(),
@@ -327,10 +350,12 @@ fn material_items(
         if !seen.insert(token) {
             continue;
         }
-        let id = java
-            .lookup_id(token)
-            .or_else(|| bedrock.lookup_id(token))
-            .expect("token yielded by the catalog it is looked up in");
+        // A token without a resolvable id cannot be offered with a truthful
+        // detail; skip it rather than crash the whole server on a future
+        // catalog shape this code did not anticipate.
+        let Some(id) = java.lookup_id(token).or_else(|| bedrock.lookup_id(token)) else {
+            continue;
+        };
         items.push(item(
             index,
             source,
@@ -383,6 +408,12 @@ mod tests {
         LineIndex::new(source).position(source, offset)
     }
 
+    /// Candidates at the position right after `needle`, asserting the
+    /// position is inside the document.
+    fn complete(source: &str, needle: &str) -> Vec<lsp_types::CompletionItem> {
+        completions(source, at_end_of(source, needle)).expect("position within document")
+    }
+
     fn labels(items: &[lsp_types::CompletionItem]) -> Vec<&str> {
         items.iter().map(|i| i.label.as_str()).collect()
     }
@@ -411,10 +442,10 @@ mod tests {
 
     #[test]
     fn top_level_line_start_offers_exactly_the_item_keywords() {
-        // AC1: the first word of an indent-0 line completes to the parser's
+        // The first word of an indent-0 line completes to the parser's
         // closed set of top-level items, replacing the partial token.
         let source = "st";
-        let items = completions(source, at_end_of(source, "st"));
+        let items = complete(source, "st");
         assert_eq!(labels(&items), vec!["theme", "def", "site", "struct"]);
         for item in &items {
             assert_eq!(item.kind, Some(lsp_types::CompletionItemKind::KEYWORD));
@@ -424,11 +455,11 @@ mod tests {
 
     #[test]
     fn member_position_offers_all_known_keywords_with_replace_range() {
-        // AC2: inside a struct body the full member-keyword closed set comes
+        // Inside a struct body the full member-keyword closed set comes
         // back (no server-side prefix filter) and every item replaces the
         // partial token's span.
         let source = "struct s size=2x2\n  flo";
-        let items = completions(source, at_end_of(source, "flo"));
+        let items = complete(source, "flo");
         assert_eq!(labels(&items), known_keywords().to_vec());
         for item in &items {
             assert_eq!(item.kind, Some(lsp_types::CompletionItemKind::KEYWORD));
@@ -437,11 +468,24 @@ mod tests {
     }
 
     #[test]
+    fn mid_token_cursor_replaces_the_whole_token() {
+        // A cursor in the middle of a word must replace the entire token,
+        // not just the half before the cursor — otherwise accepting an item
+        // leaves the token's tail glued to the insertion (`structtsam`).
+        let source = "struct s size=2x2\n  flotsam";
+        let items = complete(source, "  flo");
+        assert_eq!(labels(&items), known_keywords().to_vec());
+        for item in &items {
+            assert_eq!(edit_range(item), range(1, 2, 9));
+        }
+    }
+
+    #[test]
     fn theme_body_offers_slot_and_selector_keywords() {
-        // AC3: a theme body line starts with `slot` or a member keyword
+        // A theme body line starts with `slot` or a member keyword
         // opening a selector rule; the details distinguish the two.
         let source = "theme x:\n  s";
-        let items = completions(source, at_end_of(source, "\n  s"));
+        let items = complete(source, "\n  s");
         assert_eq!(items[0].label, "slot");
         assert_eq!(items[0].detail.as_deref(), Some("slot binding"));
         let window = items
@@ -453,15 +497,26 @@ mod tests {
     }
 
     #[test]
+    fn nested_block_body_offers_member_keywords() {
+        // Deeper nesting inside a struct (`level`, `room`) still resolves
+        // to the member-command set: the enclosing-block walk stops at the
+        // nearest shallower line, which is not a `theme` header.
+        let source = "struct t size=5x5\n  level h=4\n    flo";
+        let items = complete(source, "    flo");
+        assert_eq!(labels(&items), known_keywords().to_vec());
+        assert!(!labels(&items).contains(&"slot"));
+    }
+
+    #[test]
     fn slot_names_union_across_themes_survives_parse_failure() {
-        // AC4: the cursor's own line (`mat_slot=` with no value) makes the
+        // The cursor's own line (`mat_slot=` with no value) makes the
         // whole document unparseable — the main case completion exists for —
         // and slot names still arrive as the union across all themes.
         let source = "theme a:\n  slot floor -> @oak_planks\n\
                       theme b:\n  slot wall -> @cobblestone\n\
                       struct s size=2x2\n  floor mat_slot=";
         parse(source).expect_err("document mid-keystroke should not parse");
-        let items = completions(source, at_end_of(source, "mat_slot="));
+        let items = complete(source, "mat_slot=");
         assert_eq!(labels(&items), vec!["floor", "wall"]);
         for item in &items {
             assert_eq!(item.kind, Some(lsp_types::CompletionItemKind::VARIABLE));
@@ -471,12 +526,12 @@ mod tests {
 
     #[test]
     fn slot_value_replace_range_counts_utf16_units() {
-        // AC5: an astral char earlier in the line shifts the replace range
+        // An astral char earlier in the line shifts the replace range
         // by UTF-16 units, not bytes or scalars (same discrimination as the
         // diagnostics range test).
         let source = "theme a:\n  slot walls -> @cobblestone\n\
                       struct s size=2x2\n  door id=\"😀\" mat_slot=wa";
-        let items = completions(source, at_end_of(source, "mat_slot=wa"));
+        let items = complete(source, "mat_slot=wa");
         assert_eq!(labels(&items), vec!["walls"]);
         let line = "  door id=\"😀\" mat_slot=wa";
         let byte_col = line.find("wa").expect("partial token");
@@ -486,12 +541,72 @@ mod tests {
     }
 
     #[test]
+    fn hash_inside_a_string_literal_is_not_a_comment() {
+        // The lexer scans strings atomically (a `#` between quotes is
+        // string content, not a comment opener), so completion must not go
+        // dark on a line like `door id="#front" mat_slot=`.
+        let source = "theme a:\n  slot floor -> @oak_planks\n\
+                      struct s size=2x2\n  door id=\"#front\" mat_slot=";
+        let items = complete(source, "mat_slot=");
+        assert_eq!(labels(&items), vec!["floor"]);
+    }
+
+    #[test]
+    fn slot_target_detail_strips_comments_outside_strings_only() {
+        // A trailing comment on the slot line stays out of the detail, but
+        // a `#` inside a quoted value survives into it.
+        let source = "theme a:\n  slot floor -> @oak_planks # the default\n\
+                      theme b:\n  slot sign -> \"#1\"\n\
+                      struct s size=2x2\n  floor mat_slot=";
+        let items = complete(source, "mat_slot=");
+        assert_eq!(items[0].detail.as_deref(), Some("-> @oak_planks (theme a)"),);
+        assert_eq!(items[1].detail.as_deref(), Some("-> \"#1\" (theme b)"));
+    }
+
+    #[test]
+    fn crlf_documents_complete_and_scan_slots() {
+        // CRLF line endings must not shift keyword classification, replace
+        // ranges, or the slot scan.
+        let keyword_source = "struct s size=2x2\r\n  flo";
+        let items = complete(keyword_source, "flo");
+        assert_eq!(labels(&items), known_keywords().to_vec());
+        assert_eq!(edit_range(&items[0]), range(1, 2, 5));
+
+        let slot_source = "theme a:\r\n  slot floor -> @oak_planks\r\n\
+                           struct s size=2x2\r\n  floor mat_slot=";
+        let items = complete(slot_source, "mat_slot=");
+        assert_eq!(labels(&items), vec!["floor"]);
+        assert_eq!(items[0].detail.as_deref(), Some("-> @oak_planks (theme a)"));
+    }
+
+    #[test]
+    fn position_far_past_the_document_is_refused() {
+        // A position beyond one line past the end is a client bug, not a
+        // clampable race: the caller gets `None` (surfaced as InvalidParams
+        // by the server) instead of candidates fabricated at EOF. One line
+        // past the end still clamps — a didChange can land between the
+        // request and its answer.
+        let source = "st";
+        let far = lsp_types::Position {
+            line: 99,
+            character: 0,
+        };
+        assert_eq!(completions(source, far), None);
+        let one_past = lsp_types::Position {
+            line: 1,
+            character: 0,
+        };
+        let items = completions(source, one_past).expect("one line past the end clamps");
+        assert_eq!(labels(&items), vec!["theme", "def", "site", "struct"]);
+    }
+
+    #[test]
     fn material_token_position_offers_registry_catalog_in_order() {
-        // AC6: after `@` the registry union (java ∪ bedrock) arrives in
+        // After `@` the registry union (java ∪ bedrock) arrives in
         // catalog insertion order — abstract tokens with their resolved id
         // as detail, then the deduplicated canonical ids.
         let source = "theme a:\n  slot floor -> @";
-        let items = completions(source, at_end_of(source, "@"));
+        let items = complete(source, "@");
         assert_eq!(items[0].label, "floor.wood.broadleaf");
         assert_eq!(items[0].detail.as_deref(), Some("minecraft:oak_planks"));
         for item in &items {
@@ -527,12 +642,12 @@ mod tests {
 
     #[test]
     fn material_token_partial_prefix_returns_full_set_replacing_after_at() {
-        // AC7: a typed prefix does not shrink the server's answer — the
+        // A typed prefix does not shrink the server's answer — the
         // client filters — but the replace range starts right after `@`.
         let source = "theme a:\n  slot floor -> @flo";
-        let items = completions(source, at_end_of(source, "@flo"));
+        let items = complete(source, "@flo");
         let empty_prefix_source = "theme a:\n  slot floor -> @";
-        let full = completions(empty_prefix_source, at_end_of(empty_prefix_source, "@"));
+        let full = complete(empty_prefix_source, "@");
         assert_eq!(items.len(), full.len());
         let line = "  slot floor -> @flo";
         let after_at = u32::try_from(line.find('@').expect("at sign") + 1).expect("fits u32");
@@ -543,22 +658,19 @@ mod tests {
 
     #[test]
     fn closed_set_free_positions_offer_nothing() {
-        // AC8: no candidates in a comment, in a free-form value position,
+        // No candidates in a comment, in a free-form value position,
         // or in the header directive position (`@` at indent 0).
         let comment = "# @f";
-        assert_eq!(completions(comment, at_end_of(comment, "@f")), vec![]);
+        assert_eq!(complete(comment, "@f"), vec![]);
         let free_value = "struct s size=2x2\n  walls height=";
-        assert_eq!(
-            completions(free_value, at_end_of(free_value, "height=")),
-            vec![],
-        );
+        assert_eq!(complete(free_value, "height="), vec![]);
         let header = "@c";
-        assert_eq!(completions(header, at_end_of(header, "@c")), vec![]);
+        assert_eq!(complete(header, "@c"), vec![]);
     }
 
     #[test]
     fn slot_scan_matches_parsed_theme_slots_on_all_examples() {
-        // AC9 (drift guard): the line scan and the parser must agree on the
+        // Drift guard: the line scan and the parser must agree on the
         // slot names of every shipped example, so the scan cannot silently
         // fall behind grammar changes.
         let examples = concat!(env!("CARGO_MANIFEST_DIR"), "/../../examples");

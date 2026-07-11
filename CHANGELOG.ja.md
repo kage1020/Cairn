@@ -37,9 +37,11 @@
   （コメント、自由形式の値、ヘッダディレクティブ）は語彙を捏造せず
   空を返す（principles P3）。サーバーは `DocumentStore`（URI → 最終
   同期テキスト）を保持するようになり、変更通知の外でもドキュメントを
-  読めるようになった。未 open のドキュメントへのリクエストは
-  `InvalidParams` で loud に拒否する。`cairn-lang-lsp` はレジストリ
-  パックのため `cairn-lang-formats` に依存するようになった。
+  読めるようになった。未 open のドキュメント、またはドキュメント末尾を
+  1 行超えて外れた position へのリクエストは `InvalidParams` で loud に
+  拒否する（1 行超過までは応答する — `didChange` とリクエストは競合
+  し得る）。`cairn-lang-lsp` はレジストリパックのため
+  `cairn-lang-formats` に依存するようになった。
 - `cairn-lsp`（M5-PR1）— 言語サーバーの最初の動作版。`cairn-lang-lsp` の
   `[[bin]]` ターゲットとして標準 LSP を stdio 上で話す。`initialize` で
   全文同期（full-content sync）を広告し、`didOpen`/`didChange` のたびに

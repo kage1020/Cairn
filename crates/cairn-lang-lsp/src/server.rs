@@ -134,7 +134,21 @@ fn handle_request(
                         ErrorCode::InvalidParams as i32,
                         format!("document not open: {}", uri.as_str()),
                     ),
-                    Some(source) => Response::new_ok(request.id, completions(source, position)),
+                    Some(source) => match completions(source, position) {
+                        Some(items) => Response::new_ok(request.id, items),
+                        // A position far past the document is a client bug,
+                        // not a revision race — refused, not clamped.
+                        None => Response::new_err(
+                            request.id,
+                            ErrorCode::InvalidParams as i32,
+                            format!(
+                                "position {}:{} is past the end of {}",
+                                position.line,
+                                position.character,
+                                uri.as_str(),
+                            ),
+                        ),
+                    },
                 }
             }
         }

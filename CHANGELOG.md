@@ -37,8 +37,10 @@ and is a separate axis from the Minecraft target version.
   rather than inventing a vocabulary (principles P3). The server now
   keeps a `DocumentStore` (URI → last synced text) so requests can read
   documents outside a change notification; asking about a never-opened
-  document is refused loud with `InvalidParams`. `cairn-lang-lsp` gains
-  a `cairn-lang-formats` dependency for the registry packs.
+  document, or a position further than one line past the document's
+  end, is refused loud with `InvalidParams` (one line past still
+  answers — a `didChange` can race the request). `cairn-lang-lsp`
+  gains a `cairn-lang-formats` dependency for the registry packs.
 - `cairn-lsp` (M5-PR1) — the first working cut of the language server:
   a `[[bin]]` target of `cairn-lang-lsp` speaking standard LSP over
   stdio. It advertises full-content document sync at `initialize`,
