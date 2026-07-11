@@ -162,10 +162,11 @@ enum Command {
 
 #[derive(Copy, Clone, ValueEnum)]
 enum SynthStage {
-    /// Edition-neutral Logic IR DAG (M6-PR1 surface).
+    /// Edition-neutral Logic IR DAG produced by `synthesize`.
     Logic,
     /// Netlist IR: Logical Cell selection over the Logic IR DAG. Still
-    /// carries no delay per `spec/redstone` §14.4 / §14.8.
+    /// carries no delay per `spec/redstone` "Time model" / "Connection to
+    /// the IR and phases".
     Netlist,
 }
 

@@ -5,11 +5,13 @@
 //! three-tier (logical cell → edition cell → physical tile) so an edition difference is
 //! confined to the library.
 //!
-//! The current build lands the first two pipeline stages:
+//! The crate currently exposes the first two pipeline stages:
 //! [`synth::synthesize`] lowers the Intent IR's `logic` bindings, sensors,
 //! and actuators into an edition-neutral Logic IR, and
 //! [`netlist::compile_netlist`] rewrites that DAG into a Netlist IR of
-//! cells + nets ready for the placement pass to consume.
+//! cells + nets. The placement, route, and simulator layers below the
+//! Netlist IR are not yet public API — see `spec/redstone` for the
+//! complete pipeline they will fill in.
 
 pub mod diagnostic;
 pub mod logic_ir;

@@ -107,7 +107,9 @@ fn redstone_door_lowers_to_a_single_or_cell() {
 }
 
 /// AC2 — the Netlist IR keeps a strict 1-to-1 mapping with the source
-/// Logic IR (no CSE, no fusion in this pass).
+/// Logic IR (no CSE, no fusion in this pass). Both counts and per-index
+/// gate → cell correspondence are checked, so a future accidental
+/// re-CSE or reorder would flag on the specific position that moved.
 #[test]
 fn netlist_preserves_node_count_and_index_mapping() {
     let source = r"
@@ -133,7 +135,6 @@ struct sim size=5x5
         .iter()
         .find(|e| e.kind == ScopeKind::Struct && e.name == "sim")
         .expect("sim struct has a Logic IR");
-    let logic_len = logic_entry.ir.nodes.len();
 
     let netlist = compile_netlist(&synth.scoped);
     let entry = netlist
@@ -143,11 +144,38 @@ struct sim size=5x5
         .expect("sim struct has a Netlist IR");
     assert_eq!(
         entry.ir.cells.len(),
-        logic_len,
+        logic_entry.ir.nodes.len(),
         "netlist cell count must match Logic IR node count",
     );
     assert_eq!(entry.ir.inputs.len(), logic_entry.ir.inputs.len());
     assert_eq!(entry.ir.outputs.len(), logic_entry.ir.outputs.len());
+
+    for (i, (gate, cell)) in logic_entry
+        .ir
+        .nodes
+        .iter()
+        .zip(entry.ir.cells.iter())
+        .enumerate()
+    {
+        let expected = match gate.kind {
+            GateKind::And2 { .. } => LogicalCell::And,
+            GateKind::Or2 { .. } => LogicalCell::Or,
+            GateKind::Not { .. } => LogicalCell::Not,
+            GateKind::Xor2 { .. } => LogicalCell::Xor,
+            GateKind::Nand2 { .. } => LogicalCell::Nand,
+            GateKind::Nor2 { .. } => LogicalCell::Nor,
+            GateKind::Mux { .. } => LogicalCell::Mux,
+            // GateKind is `#[non_exhaustive]`; a new variant should
+            // land alongside a corresponding LogicalCell mapping and a
+            // new arm here — reaching the wildcard signals that the
+            // per-index correspondence is no longer being verified.
+            _ => panic!("unhandled GateKind variant in AC2 mapping: {:?}", gate.kind),
+        };
+        assert_eq!(
+            cell.cell, expected,
+            "cell[{i}] logical kind should match the source GateKind",
+        );
+    }
 }
 
 /// AC3 — And2 lowers to `LogicalCell::And` with a canonical `[A, B]` port
@@ -329,10 +357,10 @@ fn signal_defs_rewrites_signal_refs_to_net_refs() {
     let netlist = compile_netlist(&synth.scoped);
     let entry = &netlist.scopes[0];
 
-    assert_eq!(
-        entry.ir.signal_defs.get(&sig("sig.step")),
-        Some(&NetRef::Input(0)).or(Some(&NetRef::Input(1))),
-        "sig.step should map to some sensor input",
+    let step = entry.ir.signal_defs.get(&sig("sig.step")).copied();
+    assert!(
+        matches!(step, Some(NetRef::Input(0 | 1))),
+        "sig.step should map to a sensor input port, got {step:?}",
     );
     assert_eq!(
         entry.ir.signal_defs.get(&sig("sig.open")),
@@ -348,5 +376,154 @@ fn signal_defs_rewrites_signal_refs_to_net_refs() {
     assert!(
         json.contains("\"cell\":\"or\""),
         "LogicalCell::Or should serialise as snake_case: {json}",
+    );
+}
+
+/// Two non-empty scopes coexist without their Netlist IRs bleeding into
+/// each other — each entry keeps its own kind / name / IR contents,
+/// covering the `compile_netlist` scope-iteration loop.
+#[test]
+fn multiple_scopes_produce_independent_netlist_entries() {
+    let source = r"
+theme t:
+  slot wall -> @oak_planks
+
+struct alpha size=5x5
+  floor mat_slot=wall
+  pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a
+  logic sig.na = not sig.a
+  door id=d side=front at=center mat_slot=wall opened_by=sig.na
+
+struct beta size=5x5
+  floor mat_slot=wall
+  pressure_plate id=q at=front.outside offset=0 y=0 -> sig.b1
+  pressure_plate id=r at=inside.front  offset=0 y=0 -> sig.b2
+  logic sig.both = sig.b1 and sig.b2
+  door id=e side=front at=center mat_slot=wall opened_by=sig.both
+";
+    let synth = synth_source(source);
+    let netlist = compile_netlist(&synth.scoped);
+    assert_eq!(netlist.scopes.len(), 2, "two non-empty scopes expected");
+
+    let alpha = netlist
+        .scopes
+        .iter()
+        .find(|e| e.name == "alpha")
+        .expect("alpha scope");
+    assert_eq!(alpha.kind, ScopeKind::Struct);
+    assert_eq!(alpha.ir.cells.len(), 1);
+    assert_eq!(alpha.ir.cells[0].cell, LogicalCell::Not);
+    assert_eq!(alpha.ir.inputs.len(), 1);
+
+    let beta = netlist
+        .scopes
+        .iter()
+        .find(|e| e.name == "beta")
+        .expect("beta scope");
+    assert_eq!(beta.kind, ScopeKind::Struct);
+    assert_eq!(beta.ir.cells.len(), 1);
+    assert_eq!(beta.ir.cells[0].cell, LogicalCell::And);
+    assert_eq!(beta.ir.inputs.len(), 2);
+
+    // signal_defs must not cross-pollinate: sig.b1 belongs only to beta.
+    assert!(alpha.ir.signal_defs.get(&sig("sig.b1")).is_none());
+    assert!(beta.ir.signal_defs.get(&sig("sig.b1")).is_some());
+}
+
+/// A `struct` with no redstone content sits alongside a scope with
+/// bindings — the empty one is elided per `spec/redstone` §14.8's
+/// "proportional to redstone content" wording, so the netlist output
+/// still contains exactly one entry.
+#[test]
+fn empty_scope_is_elided_next_to_a_non_empty_one() {
+    let source = r"
+theme t:
+  slot wall -> @oak_planks
+
+struct plain size=3x3
+  floor mat_slot=wall
+
+struct wired size=5x5
+  floor mat_slot=wall
+  pressure_plate id=p at=front.outside offset=0 y=0 -> sig.step
+  logic sig.open = sig.step
+  door id=d side=front at=center mat_slot=wall opened_by=sig.open
+";
+    let synth = synth_source(source);
+    let netlist = compile_netlist(&synth.scoped);
+    assert_eq!(netlist.scopes.len(), 1);
+    assert_eq!(netlist.scopes[0].name, "wired");
+}
+
+/// Build a hand-crafted single-gate `LogicIr` around the given
+/// `GateKind` and verify `compile_netlist` selects `expected_cell` with
+/// the canonical two-input `[A, B]` driver order. Covers the reserved
+/// combinational primitives whose surface syntax the parser does not
+/// yet emit — a `two_input` helper cross-wired to the wrong variant
+/// (e.g. `Xor2 => LogicalCell::Xnor`) would only be caught here.
+fn assert_two_input_gate_lowers(kind: GateKind, expected: LogicalCell) {
+    let mut ir = LogicIr::new();
+    ir.inputs.push(InputPort {
+        name: sig("sig.a"),
+        span: 0..0,
+    });
+    ir.inputs.push(InputPort {
+        name: sig("sig.b"),
+        span: 0..0,
+    });
+    ir.nodes.push(GateNode { kind, span: 0..0 });
+    ir.outputs.push(OutputPort {
+        name: sig("sig.out"),
+        driver: SignalRef::Gate(0),
+        span: 0..0,
+    });
+
+    let mut scoped = ScopedLogicIr::new();
+    scoped.scopes.push(ScopedLogicIrEntry {
+        kind: ScopeKind::Struct,
+        name: "hand".into(),
+        ir,
+    });
+
+    let netlist = compile_netlist(&scoped);
+    let cell = &netlist.scopes[0].ir.cells[0];
+    assert_eq!(cell.cell, expected);
+    assert_eq!(cell.drivers.len(), 2);
+    assert_eq!(cell.drivers[0].port, PortName::A);
+    assert_eq!(cell.drivers[0].net, NetRef::Input(0));
+    assert_eq!(cell.drivers[1].port, PortName::B);
+    assert_eq!(cell.drivers[1].net, NetRef::Input(1));
+}
+
+#[test]
+fn xor_gate_lowers_to_xor_cell_with_a_b_ports() {
+    assert_two_input_gate_lowers(
+        GateKind::Xor2 {
+            a: SignalRef::Input(0),
+            b: SignalRef::Input(1),
+        },
+        LogicalCell::Xor,
+    );
+}
+
+#[test]
+fn nand_gate_lowers_to_nand_cell_with_a_b_ports() {
+    assert_two_input_gate_lowers(
+        GateKind::Nand2 {
+            a: SignalRef::Input(0),
+            b: SignalRef::Input(1),
+        },
+        LogicalCell::Nand,
+    );
+}
+
+#[test]
+fn nor_gate_lowers_to_nor_cell_with_a_b_ports() {
+    assert_two_input_gate_lowers(
+        GateKind::Nor2 {
+            a: SignalRef::Input(0),
+            b: SignalRef::Input(1),
+        },
+        LogicalCell::Nor,
     );
 }

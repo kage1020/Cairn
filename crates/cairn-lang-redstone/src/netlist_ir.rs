@@ -47,9 +47,13 @@ pub enum NetRef {
 /// the same [`LogicalCell::And`] value lowers to Java `ComparatorAND` or
 /// Bedrock `TorchAND` at a later pass (`spec/redstone` §14.6).
 ///
-/// `#[non_exhaustive]` so the sequential-macro cells reserved by
+/// `#[non_exhaustive]` for two reasons: (1) the combinational variants
+/// `Xor` / `Nand` / `Nor` / `Mux` reserved on `GateKind` today are
+/// unreachable until a follow-up parser change teaches the surface
+/// call-expression form, and (2) the sequential-macro cells reserved by
 /// `spec/redstone` §14.1 (`latch` / `pulse` / `delay` / `edge_rising` /
-/// `edge_falling` / `counter`) can join without breaking downstream
+/// `edge_falling` / `counter`) will join once the synth path grows to
+/// emit them. Both add-in paths should stay non-breaking for downstream
 /// exhaust matches.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -181,6 +185,13 @@ pub struct NetlistIr {
     pub signal_defs: IndexMap<DottedRef, NetRef>,
 }
 
+/// Serialise `signal_defs` as a JSON object keyed by the dotted signal
+/// name flattened with `.`. Relies on [`DottedRef::to_string`] being
+/// injective on the value space that reaches this map — the synth pass
+/// only inserts distinct `sig.X` names (a second insert would already
+/// have surfaced `E_LOGIC_MULTIPLE_DRIVERS`), so distinct
+/// [`DottedRef`] keys map to distinct string keys and no entry is
+/// silently overwritten.
 fn serialize_signal_defs<S: Serializer>(
     defs: &IndexMap<DottedRef, NetRef>,
     serializer: S,
@@ -239,6 +250,16 @@ impl ScopedNetlistIr {
     /// IR's elision.
     pub fn push(&mut self, kind: ScopeKind, name: String, ir: NetlistIr) {
         if ir.is_empty() {
+            // The synth pass only ever writes to `signal_defs` alongside
+            // an input / output / gate insertion, so a leftover
+            // `signal_defs` entry with no owner would be a synth-side
+            // regression. Cheap to check here so a stale IR doesn't
+            // silently reach downstream passes.
+            debug_assert!(
+                ir.signal_defs.is_empty(),
+                "empty NetlistIr carries orphan signal_defs entries: {:?}",
+                ir.signal_defs.keys().collect::<Vec<_>>(),
+            );
             return;
         }
         self.scopes.push(ScopedNetlistIrEntry { kind, name, ir });
