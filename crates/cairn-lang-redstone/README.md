@@ -10,7 +10,12 @@ are derived deterministically from a small dataflow description.
 
 ## Status
 
-Skeleton. None of the IR layers, the cell library, or the simulator are implemented yet.
+Combinational logic synthesis landed. `synthesize(&IntentModule)` lowers
+sensor bindings, actuator arguments, and `logic sig.X = <expr>` lines
+into an edition-neutral Logic IR (DAG of `and`/`or`/`not` gates today,
+with `xor`/`nand`/`nor`/`mux` reserved on the enum for a follow-up
+parser PR). The Netlist IR, cell library, place-and-route, and tick
+simulator are still to come.
 
 ## Pipeline
 
@@ -35,7 +40,7 @@ Java/Bedrock difference to the library alone
 
 ## v1 scope
 
-- **Combinational**: `and` / `or` / `not` / `xor` / `nand` / `nor` / `mux`.
+- **Combinational**: `and` / `or` / `not` (landed) / `xor` / `nand` / `nor` / `mux` (Logic IR shape only, synth path lands with the follow-up parser PR).
 - **Curated sequential macros**: `latch` / `pulse` / `delay` / `edge_rising` / `edge_falling` /
   `counter`.
 - **Verification**: truth-table, latency, and bounded-eventually temporal assertions

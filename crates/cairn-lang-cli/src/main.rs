@@ -21,6 +21,7 @@ use cairn_lang_formats::java_structure::{
 };
 use cairn_lang_formats::portability::{portability_for_bedrock, portability_for_java};
 use cairn_lang_formats::registry::{RegistryPack, builtin_bedrock, builtin_java};
+use cairn_lang_redstone::synthesize;
 use clap::{Parser, Subcommand, ValueEnum};
 
 /// `cairn` — Minecraft build DSL command-line interface.
@@ -106,6 +107,26 @@ enum Command {
     /// Exits 0 on success, 1 on parse, lowering, or I/O failure (including
     /// an unsupported `--target` or a stateful Bedrock palette), and 2
     /// when the source file cannot be located.
+    /// Lower a .crn source file's `logic` bindings, sensors, and actuators
+    /// to the redstone Logic IR (edition-neutral, zero-delay DAG) and print
+    /// the result as JSON. **Internal / experimental** — the shape of the
+    /// output is not covered by the stable compatibility tier and may
+    /// change at any time as the netlist / placement / route stages land.
+    /// Requires `--experimental-logic-synth` so a caller cannot end up
+    /// depending on it accidentally.
+    ///
+    /// Exits 0 when synthesis produced a well-formed IR (warnings still
+    /// allowed), 1 on parse failure, I/O error, or any Error-severity
+    /// synth diagnostic, and 2 when the file cannot be located.
+    Synth {
+        /// Path to the .crn file to synthesise.
+        file: PathBuf,
+        /// Opt-in flag confirming the caller understands this surface is
+        /// internal. Required until the redstone pipeline reaches a stable
+        /// tier; without it the subcommand exits 2 with a hint.
+        #[arg(long)]
+        experimental_logic_synth: bool,
+    },
     Compile {
         /// Path to the .crn file to compile.
         file: PathBuf,
@@ -211,6 +232,10 @@ fn main() -> ExitCode {
             format,
         }) => run_info(&file, &editions, format),
         Some(Command::Lower { file, format }) => run_lower(&file, format),
+        Some(Command::Synth {
+            file,
+            experimental_logic_synth,
+        }) => run_synth(&file, experimental_logic_synth),
         Some(Command::Compile {
             file,
             edition,
@@ -622,6 +647,86 @@ fn run_lower(file: &Path, format: LowerFormat) -> ExitCode {
         LowerFormat::Debug => {
             println!("{block_ir:#?}");
             success_exit
+        }
+    }
+}
+
+fn run_synth(file: &Path, experimental_flag: bool) -> ExitCode {
+    if !experimental_flag {
+        // Gated behind `--experimental-logic-synth` because the redstone
+        // pipeline is still Internal-tier (`spec/compatibility`) — the
+        // Logic IR wire form will grow the netlist / placement / route
+        // layers in follow-up PRs, and every intermediate shape is fair
+        // game for a breaking change. Exit 2 (usage error) so a script
+        // that accidentally reaches this subcommand does not read the
+        // gate as a warning it can ignore.
+        eprintln!(
+            "error: `cairn synth` is an internal / experimental surface; pass --experimental-logic-synth to opt in",
+        );
+        return ExitCode::from(2);
+    }
+
+    let source = match std::fs::read_to_string(file) {
+        Ok(s) => s,
+        Err(err) => {
+            eprintln!("error: cannot read `{}`: {err}", file.display());
+            return match err.kind() {
+                std::io::ErrorKind::NotFound => ExitCode::from(2),
+                _ => ExitCode::from(1),
+            };
+        }
+    };
+    let module = match parse(&source) {
+        Ok(m) => m,
+        Err(err) => {
+            eprintln!(
+                "error: {}:{}: {}",
+                file.display(),
+                err.position(),
+                err.user_message(),
+            );
+            return ExitCode::from(1);
+        }
+    };
+    let ir = lower(&module);
+    let synth = synthesize(&ir);
+    let lines = LineStarts::new(&source);
+
+    let mut has_error = false;
+    for d in &synth.diagnostics {
+        let pos = lines.position(&source, d.span.start);
+        eprintln!(
+            "{}:{}: {}[{}]: {}",
+            file.display(),
+            pos,
+            d.severity.as_str(),
+            d.code.as_str(),
+            d.primary,
+        );
+        for note in &d.notes {
+            if let Some(span) = note.span.as_ref() {
+                let note_pos = lines.position(&source, span.start);
+                eprintln!("{}:{}:   note: {}", file.display(), note_pos, note.message);
+            } else {
+                eprintln!("  note: {}", note.message);
+            }
+        }
+        if d.severity == Severity::Error {
+            has_error = true;
+        }
+    }
+    if has_error {
+        return ExitCode::from(1);
+    }
+
+    match serde_json::to_string_pretty(&synth.scoped) {
+        Ok(json) => {
+            println!("{json}");
+            ExitCode::SUCCESS
+        }
+        Err(err) => {
+            eprintln!("error: failed to serialise Logic IR as JSON: {err}");
+            ExitCode::from(1)
         }
     }
 }
