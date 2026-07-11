@@ -107,26 +107,6 @@ enum Command {
     /// Exits 0 on success, 1 on parse, lowering, or I/O failure (including
     /// an unsupported `--target` or a stateful Bedrock palette), and 2
     /// when the source file cannot be located.
-    /// Lower a .crn source file's `logic` bindings, sensors, and actuators
-    /// to the redstone Logic IR (edition-neutral, zero-delay DAG) and print
-    /// the result as JSON. **Internal / experimental** — the shape of the
-    /// output is not covered by the stable compatibility tier and may
-    /// change at any time as the netlist / placement / route stages land.
-    /// Requires `--experimental-logic-synth` so a caller cannot end up
-    /// depending on it accidentally.
-    ///
-    /// Exits 0 when synthesis produced a well-formed IR (warnings still
-    /// allowed), 1 on parse failure, I/O error, or any Error-severity
-    /// synth diagnostic, and 2 when the file cannot be located.
-    Synth {
-        /// Path to the .crn file to synthesise.
-        file: PathBuf,
-        /// Opt-in flag confirming the caller understands this surface is
-        /// internal. Required until the redstone pipeline reaches a stable
-        /// tier; without it the subcommand exits 2 with a hint.
-        #[arg(long)]
-        experimental_logic_synth: bool,
-    },
     Compile {
         /// Path to the .crn file to compile.
         file: PathBuf,
@@ -149,6 +129,26 @@ enum Command {
         /// directory.
         #[arg(long)]
         lock: Option<PathBuf>,
+    },
+    /// Lower a .crn source file's `logic` bindings, sensors, and actuators
+    /// to the redstone Logic IR (edition-neutral, zero-delay DAG) and print
+    /// the result as JSON. **Internal / experimental** — the shape of the
+    /// output is not covered by the stable compatibility tier and may
+    /// change at any time as the netlist / placement / route stages land.
+    /// Requires `--experimental-logic-synth` so a caller cannot end up
+    /// depending on it accidentally.
+    ///
+    /// Exits 0 when synthesis produced a well-formed IR (warnings still
+    /// allowed), 1 on parse failure, I/O error, or any Error-severity
+    /// synth diagnostic, and 2 when the file cannot be located.
+    Synth {
+        /// Path to the .crn file to synthesise.
+        file: PathBuf,
+        /// Opt-in flag confirming the caller understands this surface is
+        /// internal. Required until the redstone pipeline reaches a stable
+        /// tier; without it the subcommand exits 2 with a hint.
+        #[arg(long)]
+        experimental_logic_synth: bool,
     },
 }
 
@@ -656,7 +656,7 @@ fn run_synth(file: &Path, experimental_flag: bool) -> ExitCode {
         // Gated behind `--experimental-logic-synth` because the redstone
         // pipeline is still Internal-tier (`spec/compatibility`) — the
         // Logic IR wire form will grow the netlist / placement / route
-        // layers in follow-up PRs, and every intermediate shape is fair
+        // layers over later changes, and every intermediate shape is fair
         // game for a breaking change. Exit 2 (usage error) so a script
         // that accidentally reaches this subcommand does not read the
         // gate as a warning it can ignore.
@@ -689,33 +689,25 @@ fn run_synth(file: &Path, experimental_flag: bool) -> ExitCode {
         }
     };
     let ir = lower(&module);
-    let synth = synthesize(&ir);
     let lines = LineStarts::new(&source);
 
-    let mut has_error = false;
-    for d in &synth.diagnostics {
-        let pos = lines.position(&source, d.span.start);
-        eprintln!(
-            "{}:{}: {}[{}]: {}",
-            file.display(),
-            pos,
-            d.severity.as_str(),
-            d.code.as_str(),
-            d.primary,
-        );
-        for note in &d.notes {
-            if let Some(span) = note.span.as_ref() {
-                let note_pos = lines.position(&source, span.start);
-                eprintln!("{}:{}:   note: {}", file.display(), note_pos, note.message);
-            } else {
-                eprintln!("  note: {}", note.message);
-            }
-        }
-        if d.severity == Severity::Error {
-            has_error = true;
-        }
+    // Mirror `run_check` / `run_lower` / `run_compile`: surface
+    // resolver + check diagnostics before running the redstone synth. A
+    // `.crn` whose only problem is `E_UNRESOLVED_SLOT` or a typo caught
+    // by `check` would otherwise exit 0 through the synth path with a
+    // partially resolved IR, which is a poor CI gate.
+    let resolution = resolve(&ir, None);
+    let mut has_error = report_core_diagnostics(file, &source, &lines, &resolution.diagnostics);
+    let check_diagnostics = check(&module, &ir, None);
+    if report_core_diagnostics(file, &source, &lines, &check_diagnostics) {
+        has_error = true;
     }
     if has_error {
+        return ExitCode::from(1);
+    }
+
+    let synth = synthesize(&ir);
+    if report_synth_diagnostics(file, &source, &lines, &synth.diagnostics) {
         return ExitCode::from(1);
     }
 
@@ -729,6 +721,77 @@ fn run_synth(file: &Path, experimental_flag: bool) -> ExitCode {
             ExitCode::from(1)
         }
     }
+}
+
+/// Print `cairn-lang-core::check::Diagnostic`s in gcc-style, returning
+/// `true` when any Error-severity finding was seen. Shared between
+/// `run_synth`'s resolve + check pre-passes.
+fn report_core_diagnostics(
+    file: &Path,
+    source: &str,
+    lines: &LineStarts,
+    diagnostics: &[cairn_lang_core::check::Diagnostic],
+) -> bool {
+    let mut has_error = false;
+    for d in diagnostics {
+        let pos = lines.position(source, d.span.start);
+        eprintln!(
+            "{}:{}: {}[{}]: {}",
+            file.display(),
+            pos,
+            d.severity.as_str(),
+            d.code.as_str(),
+            d.primary,
+        );
+        for note in &d.notes {
+            if let Some(span) = note.span.as_ref() {
+                let note_pos = lines.position(source, span.start);
+                eprintln!("{}:{}:   note: {}", file.display(), note_pos, note.message);
+            } else {
+                eprintln!("  note: {}", note.message);
+            }
+        }
+        if d.severity == Severity::Error {
+            has_error = true;
+        }
+    }
+    has_error
+}
+
+/// Print redstone synth diagnostics in the same format the core passes
+/// use. Kept as a separate function because the finding type is
+/// crate-local — merging the two would require an `impl` trait bound on
+/// the diagnostic shape that neither side owns.
+fn report_synth_diagnostics(
+    file: &Path,
+    source: &str,
+    lines: &LineStarts,
+    diagnostics: &[cairn_lang_redstone::Diagnostic],
+) -> bool {
+    let mut has_error = false;
+    for d in diagnostics {
+        let pos = lines.position(source, d.span.start);
+        eprintln!(
+            "{}:{}: {}[{}]: {}",
+            file.display(),
+            pos,
+            d.severity.as_str(),
+            d.code.as_str(),
+            d.primary,
+        );
+        for note in &d.notes {
+            if let Some(span) = note.span.as_ref() {
+                let note_pos = lines.position(source, span.start);
+                eprintln!("{}:{}:   note: {}", file.display(), note_pos, note.message);
+            } else {
+                eprintln!("  note: {}", note.message);
+            }
+        }
+        if d.severity == Severity::Error {
+            has_error = true;
+        }
+    }
+    has_error
 }
 
 fn print_block_ir_ascii(block_ir: &BlockArrayIr) {

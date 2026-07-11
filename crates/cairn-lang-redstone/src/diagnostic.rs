@@ -10,9 +10,12 @@
 //!
 //! Message prose follows the self-correction triple from `spec/lint` §11.4:
 //! what is wrong, valid alternatives, suggested fix. The primary string
-//! renders the first clause; notes carry the alternatives and suggestion so
-//! LSP quick-fix logic can dispatch on structured fields without re-parsing
-//! the human-readable prose.
+//! carries the first clause; the alternatives and the suggestion land in
+//! [`DiagnosticNote`]s so the human-readable output still reads as three
+//! groups. LSP-facing structured payloads are intentionally absent for
+//! now — a downstream consumer that needs machine-readable quick-fix data
+//! matches on the stable [`DiagnosticCode`] `E_*` / `W_*` string and
+//! parses the note prose, mirroring the current `cairn-lang-core` contract.
 
 use cairn_lang_core::check::Severity;
 use cairn_lang_core::error::Span;
@@ -22,7 +25,7 @@ use serde::{Serialize, Serializer};
 ///
 /// The string form (`E_LOGIC_UNBOUND_SIGNAL`, ...) is the contract surface;
 /// LSP quick-fix logic and CI annotators match on it without inspecting the
-/// prose `primary` message. `#[non_exhaustive]` so a follow-up PR adding
+/// prose `primary` message. `#[non_exhaustive]` so a follow-up pass adding
 /// codes for netlist / placement / route stages does not break external
 /// exhaust matches.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -35,15 +38,23 @@ pub enum DiagnosticCode {
     /// reference would leave the actuator wired to air (Java) or nothing
     /// (Bedrock) with no signal to the author.
     LogicUnboundSignal,
-    /// Two or more `logic sig.X = ...` lines define the same LHS in the
-    /// same scope. The synth pass picks the first definition; the duplicate
-    /// is flagged with a `first declared here` note pointing at the winner.
+    /// Two or more sources try to drive the same signal. Fires for
+    /// `logic sig.X = ...` lines that share an LHS in the same scope, and
+    /// for a `logic` LHS that collides with a sensor already emitting the
+    /// signal. The first source wins so downstream references still
+    /// resolve; the losers surface with `first declared here` /
+    /// `sensor emits this signal here` notes.
     LogicMultipleDrivers,
     /// A `logic` binding graph has at least one cycle
-    /// (`logic sig.a = sig.b; logic sig.b = sig.a`). Cycles cannot lower to
-    /// a combinational DAG and would require a latch macro (out of scope
-    /// for the M6-PR1 combinational-only slice).
+    /// (`logic sig.a = sig.b; logic sig.b = sig.a`). Cycles cannot lower
+    /// to a combinational DAG and would require a latch macro (not yet
+    /// wired into the synth path).
     LogicCycle,
+    /// A `logic` binding uses a boolean primitive the current combinational
+    /// lowering does not know how to synthesise. Fires when the AST grows a
+    /// new `Expr` variant (e.g. a future function-call form for `xor` /
+    /// `mux`) that the synth pass has not yet been extended for.
+    LogicUnsupportedPrimitive,
     /// A `logic sig.X = ...` binding is unreachable — no actuator, no
     /// downstream logic references its LHS. Warning-severity because the
     /// synthesised DAG is still valid; an unused signal is usually a typo
@@ -61,6 +72,7 @@ impl DiagnosticCode {
             Self::LogicUnboundSignal => "E_LOGIC_UNBOUND_SIGNAL",
             Self::LogicMultipleDrivers => "E_LOGIC_MULTIPLE_DRIVERS",
             Self::LogicCycle => "E_LOGIC_CYCLE",
+            Self::LogicUnsupportedPrimitive => "E_LOGIC_UNSUPPORTED_PRIMITIVE",
             Self::LogicUnusedSignal => "W_LOGIC_UNUSED_SIGNAL",
         }
     }
@@ -70,9 +82,10 @@ impl DiagnosticCode {
     #[must_use]
     pub const fn severity(self) -> Severity {
         match self {
-            Self::LogicUnboundSignal | Self::LogicMultipleDrivers | Self::LogicCycle => {
-                Severity::Error
-            }
+            Self::LogicUnboundSignal
+            | Self::LogicMultipleDrivers
+            | Self::LogicCycle
+            | Self::LogicUnsupportedPrimitive => Severity::Error,
             Self::LogicUnusedSignal => Severity::Warning,
         }
     }

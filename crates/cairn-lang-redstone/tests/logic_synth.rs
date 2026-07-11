@@ -1,9 +1,11 @@
 //! Integration tests for `cairn_lang_redstone::synthesize`.
 //!
-//! Locks the AC-1..AC-7 behaviours of the M6-PR1 slice: happy path over
-//! `examples/redstone-door.crn`, unbound / duplicate / cyclic / unused
-//! signal diagnostics, nested-body traversal, and common-subexpression
-//! sharing.
+//! Locks the observable behaviours of the combinational synth slice:
+//! happy path over `examples/redstone-door.crn`, unbound / duplicate /
+//! cyclic / unused signal diagnostics, nested-body traversal,
+//! common-subexpression sharing (including commutativity), gate arity
+//! per primitive, topological ordering across out-of-order declarations,
+//! and cascade-suppression so a single root cause fires one diagnostic.
 
 use std::path::PathBuf;
 
@@ -27,12 +29,12 @@ fn synth_source(source: &str) -> cairn_lang_redstone::SynthOutput {
     synthesize(&intent)
 }
 
+fn count_code(out: &cairn_lang_redstone::SynthOutput, code: DiagnosticCode) -> usize {
+    out.diagnostics.iter().filter(|d| d.code == code).count()
+}
+
 #[test]
 fn ac1_redstone_door_synthesises_two_inputs_one_or_gate_one_output() {
-    // Happy path: the canonical `redstone-door.crn` example lowers to a
-    // single OR gate wired between two sensor inputs and one actuator
-    // output. This locks the shape of the DAG so a follow-up refactor
-    // that reorders signal collection cannot silently drop a port.
     let source = load_example("redstone-door.crn");
     let out = synth_source(&source);
 
@@ -68,9 +70,12 @@ fn ac1_redstone_door_synthesises_two_inputs_one_or_gate_one_output() {
     assert_eq!(ir.outputs[0].name.to_string(), "sig.open");
 
     assert_eq!(ir.nodes.len(), 1, "one combinational OR gate");
-    assert_eq!(ir.nodes[0].kind, GateKind::Or2);
+    assert!(
+        matches!(ir.nodes[0].kind, GateKind::Or2 { .. }),
+        "gate 0 should be Or2, got {:?}",
+        ir.nodes[0].kind,
+    );
 
-    // Actuator's driver must be the OR gate.
     let SignalRef::Gate(driver_idx) = ir.outputs[0].driver else {
         panic!(
             "actuator driver should be a gate, got {:?}",
@@ -82,9 +87,6 @@ fn ac1_redstone_door_synthesises_two_inputs_one_or_gate_one_output() {
 
 #[test]
 fn ac2_unbound_signal_reports_e_logic_unbound_signal() {
-    // A `logic` binding whose RHS names a signal that no sensor emits and
-    // no other `logic` line defines must fail-loud rather than silently
-    // wire the actuator to air.
     let source = "\
 @cairn 2026.06
 
@@ -114,9 +116,6 @@ struct s size=1x1
 
 #[test]
 fn ac3_multiple_drivers_report_e_logic_multiple_drivers() {
-    // Two `logic sig.X = ...` lines with the same LHS is a fail-loud
-    // ambiguity — a downstream reference cannot pick without dropping
-    // one silently.
     let source = "\
 @cairn 2026.06
 
@@ -151,9 +150,6 @@ struct s size=1x1
 
 #[test]
 fn ac4_cyclic_bindings_report_e_logic_cycle() {
-    // `logic sig.a = sig.b` and `logic sig.b = sig.a` form a
-    // combinational cycle. The synth pass rejects it — a latch macro
-    // (out of scope for M6-PR1) would be required.
     let source = "\
 @cairn 2026.06
 
@@ -178,8 +174,6 @@ struct s size=1x1
 
 #[test]
 fn ac5_unused_logic_binding_warns_and_still_synthesises() {
-    // An unreachable `logic` line is a warning, not an error. The scope
-    // still produces a Logic IR entry so the reachable half round-trips.
     let source = "\
 @cairn 2026.06
 
@@ -216,9 +210,6 @@ struct s size=1x1
 
 #[test]
 fn ac6_nested_level_body_collects_signals() {
-    // Sensors, actuators, and `logic` lines nested inside a `level y=0`
-    // block are recursively collected, so a struct that splits its
-    // circuit across levels still lowers.
     let source = "\
 @cairn 2026.06
 
@@ -249,9 +240,6 @@ struct s size=1x1
 
 #[test]
 fn ac7_common_subexpressions_share_a_single_gate() {
-    // Two `logic` lines whose RHS builds the same `sig.a or sig.b` collapse
-    // to one OR gate. CSE prevents the follow-up placement PR from paying
-    // for structurally redundant fanout the source never asked for.
     let source = "\
 @cairn 2026.06
 
@@ -265,7 +253,6 @@ struct s size=1x1
   door[id=front] opened_by=sig.y
 ";
     let out = synth_source(source);
-    // Both LHS names should map to the same underlying gate (CSE).
     let entry = out
         .scoped
         .scopes
@@ -273,5 +260,277 @@ struct s size=1x1
         .find(|e| e.name == "s")
         .expect("scope entry present");
     assert_eq!(entry.ir.nodes.len(), 1, "single OR2 gate after CSE");
-    assert_eq!(entry.ir.nodes[0].kind, GateKind::Or2);
+    assert!(matches!(entry.ir.nodes[0].kind, GateKind::Or2 { .. }));
+}
+
+#[test]
+fn commutative_cse_shares_a_gate_when_operand_order_flips() {
+    // `sig.a or sig.b` and `sig.b or sig.a` denote the same
+    // combinational function; CSE must recognise it or downstream
+    // placement pays for a redundant gate.
+    let source = "\
+@cairn 2026.06
+
+struct s size=1x1
+  pressure_plate id=p1 at=front.outside offset=0 y=0 -> sig.a
+  pressure_plate id=p2 at=inside.front offset=0 y=0 -> sig.b
+  logic sig.x = sig.a or sig.b
+  logic sig.y = sig.b or sig.a
+  door id=front side=front at=center
+  door[id=front] opened_by=sig.x
+  door[id=front] opened_by=sig.y
+";
+    let out = synth_source(source);
+    let entry = out
+        .scoped
+        .scopes
+        .iter()
+        .find(|e| e.name == "s")
+        .expect("scope entry present");
+    assert_eq!(
+        entry.ir.nodes.len(),
+        1,
+        "commutative CSE should collapse to a single OR node, got {:?}",
+        entry.ir.nodes,
+    );
+}
+
+#[test]
+fn and_gate_lowers_with_two_inputs() {
+    // happy-path coverage for `and`. Also asserts the operand shape
+    // — `And2 { a, b }` — so a future refactor that swaps to a
+    // vec-based encoding gets caught here.
+    let source = "\
+@cairn 2026.06
+
+struct s size=1x1
+  pressure_plate id=p1 at=front.outside offset=0 y=0 -> sig.a
+  pressure_plate id=p2 at=inside.front offset=0 y=0 -> sig.b
+  logic sig.out = sig.a and sig.b
+  door id=front side=front at=center
+  door[id=front] opened_by=sig.out
+";
+    let out = synth_source(source);
+    let entry = out
+        .scoped
+        .scopes
+        .iter()
+        .find(|e| e.name == "s")
+        .expect("scope entry present");
+    assert_eq!(entry.ir.nodes.len(), 1);
+    let GateKind::And2 { a, b } = entry.ir.nodes[0].kind else {
+        panic!("expected And2, got {:?}", entry.ir.nodes[0].kind);
+    };
+    assert!(matches!(a, SignalRef::Input(_)));
+    assert!(matches!(b, SignalRef::Input(_)));
+}
+
+#[test]
+fn not_gate_lowers_with_one_input() {
+    // happy-path coverage for `not`. Also asserts the arity-1
+    // encoding at the type layer.
+    let source = "\
+@cairn 2026.06
+
+struct s size=1x1
+  pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a
+  logic sig.out = not sig.a
+  door id=front side=front at=center
+  door[id=front] opened_by=sig.out
+";
+    let out = synth_source(source);
+    let entry = out
+        .scoped
+        .scopes
+        .iter()
+        .find(|e| e.name == "s")
+        .expect("scope entry present");
+    assert_eq!(entry.ir.nodes.len(), 1);
+    let GateKind::Not { a } = entry.ir.nodes[0].kind else {
+        panic!("expected Not, got {:?}", entry.ir.nodes[0].kind);
+    };
+    assert!(matches!(a, SignalRef::Input(_)));
+}
+
+#[test]
+fn topologically_ordered_multi_gate_dag() {
+    // `sig.out = sig.mid and sig.tail` where `mid` and `tail` are
+    // both driven by earlier `logic` lines. Every gate's operands must
+    // reference an earlier index or an input; the DAG is a strict
+    // topological order regardless of source declaration order.
+    let source = "\
+@cairn 2026.06
+
+struct s size=1x1
+  pressure_plate id=p1 at=front.outside offset=0 y=0 -> sig.a
+  pressure_plate id=p2 at=inside.front offset=0 y=0 -> sig.b
+  logic sig.out = sig.mid and sig.tail
+  logic sig.mid = sig.a or sig.b
+  logic sig.tail = not sig.a
+  door id=front side=front at=center
+  door[id=front] opened_by=sig.out
+";
+    let out = synth_source(source);
+    let entry = out
+        .scoped
+        .scopes
+        .iter()
+        .find(|e| e.name == "s")
+        .expect("scope entry present");
+    let ir = &entry.ir;
+    assert_eq!(ir.nodes.len(), 3, "three gates: OR, NOT, AND");
+
+    for (idx, node) in ir.nodes.iter().enumerate() {
+        let this_idx = u32::try_from(idx).expect("small index");
+        let mut seen = Vec::new();
+        node.kind.each_input(|r| seen.push(r));
+        for r in seen {
+            match r {
+                SignalRef::Input(i) => assert!(
+                    (i as usize) < ir.inputs.len(),
+                    "input index out of range at gate {idx}",
+                ),
+                SignalRef::Gate(j) => assert!(
+                    j < this_idx,
+                    "gate {idx} operand references gate {j} which is not earlier",
+                ),
+            }
+        }
+    }
+}
+
+#[test]
+fn cascade_suppression_reports_single_root_cause_for_shared_unbound() {
+    // `logic sig.x = sig.undef` and `door opened_by=sig.undef` both
+    // reference the missing signal. After cascade suppression the author
+    // sees exactly one E_LOGIC_UNBOUND_SIGNAL naming `sig.undef` — not
+    // one per consumer.
+    let source = "\
+@cairn 2026.06
+
+struct s size=1x1
+  logic sig.x = sig.undef
+  door id=front side=front at=center
+  door[id=front] opened_by=sig.undef
+";
+    let out = synth_source(source);
+    assert_eq!(
+        count_code(&out, DiagnosticCode::LogicUnboundSignal),
+        1,
+        "cascade suppression should collapse to a single finding, got: {:?}",
+        out.diagnostics,
+    );
+}
+
+#[test]
+fn actuator_side_unbound_signal_flags_the_driver_arg() {
+    // coverage for the actuator-only path — no `logic` line names the
+    // signal at all; `opened_by=sig.ghost` should fail loud.
+    let source = "\
+@cairn 2026.06
+
+struct s size=1x1
+  door id=front side=front at=center
+  door[id=front] opened_by=sig.ghost
+";
+    let out = synth_source(source);
+    let unbound: Vec<_> = out
+        .diagnostics
+        .iter()
+        .filter(|d| d.code == DiagnosticCode::LogicUnboundSignal)
+        .collect();
+    assert_eq!(unbound.len(), 1);
+    assert!(
+        unbound[0].primary.contains("sig.ghost"),
+        "expected the signal name in the primary, got: {}",
+        unbound[0].primary,
+    );
+    assert!(
+        unbound[0].primary.contains("actuator argument"),
+        "primary should distinguish the actuator source, got: {}",
+        unbound[0].primary,
+    );
+}
+
+#[test]
+fn sensor_and_logic_lhs_collision_reports_e_logic_multiple_drivers() {
+    // a sensor already drives sig.step; a `logic sig.step = ...`
+    // line trying to redefine it collides. The finding must fire the same
+    // E_LOGIC_MULTIPLE_DRIVERS code with a `sensor emits this signal
+    // here` note, not silently drop the `logic` line.
+    let source = "\
+@cairn 2026.06
+
+struct s size=1x1
+  pressure_plate id=p at=front.outside offset=0 y=0 -> sig.step
+  logic sig.step = sig.step
+  door id=front side=front at=center
+  door[id=front] opened_by=sig.step
+";
+    let out = synth_source(source);
+    let dups: Vec<_> = out
+        .diagnostics
+        .iter()
+        .filter(|d| d.code == DiagnosticCode::LogicMultipleDrivers)
+        .collect();
+    assert_eq!(dups.len(), 1);
+    assert!(
+        dups[0]
+            .notes
+            .iter()
+            .any(|n| n.message == "sensor emits this signal here"),
+        "sensor-collision diagnostic should note the sensor source, got: {:?}",
+        dups[0].notes,
+    );
+}
+
+#[test]
+fn self_referential_binding_reports_e_logic_cycle() {
+    // `logic sig.a = sig.a` — the shortest cycle. Distinct code
+    // path from the mutual-recursion test (`resolve_ref` sees `dr` in
+    // `in_progress` immediately, without a second `lower_binding` call).
+    let source = "\
+@cairn 2026.06
+
+struct s size=1x1
+  logic sig.a = sig.a
+  door id=front side=front at=center
+  door[id=front] opened_by=sig.a
+";
+    let out = synth_source(source);
+    assert!(
+        count_code(&out, DiagnosticCode::LogicCycle) >= 1,
+        "self-reference should be flagged as E_LOGIC_CYCLE, got: {:?}",
+        out.diagnostics,
+    );
+}
+
+#[test]
+fn multiple_independent_unbound_refs_in_one_rhs_all_reported() {
+    // `sig.undef1 or sig.undef2` — both operands are independent
+    // root causes. A short-circuit on the first would leave the second
+    // hidden until the author fixed the first and re-ran.
+    let source = "\
+@cairn 2026.06
+
+struct s size=1x1
+  logic sig.out = sig.undef1 or sig.undef2
+  door id=front side=front at=center
+  door[id=front] opened_by=sig.out
+";
+    let out = synth_source(source);
+    let unbound: Vec<_> = out
+        .diagnostics
+        .iter()
+        .filter(|d| d.code == DiagnosticCode::LogicUnboundSignal)
+        .collect();
+    assert_eq!(
+        unbound.len(),
+        2,
+        "expected two independent unbound findings, got: {:?}",
+        out.diagnostics,
+    );
+    let primaries: String = unbound.iter().map(|d| d.primary.as_str()).collect();
+    assert!(primaries.contains("sig.undef1"), "sig.undef1 must be named");
+    assert!(primaries.contains("sig.undef2"), "sig.undef2 must be named");
 }
