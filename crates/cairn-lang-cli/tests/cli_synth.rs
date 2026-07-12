@@ -117,6 +117,133 @@ fn cli_synth_stage_netlist_emits_or_cell_json() {
 }
 
 #[test]
+fn cli_synth_stage_edition_java_maps_or_cell_to_java_repeater_or() {
+    // `--stage edition --edition java` picks the Java realisation of each
+    // Netlist IR cell. `redstone-door.crn`'s sole Or cell should surface
+    // as `java_repeater_or` and the scope should carry `edition: "java"`.
+    let path = examples_dir().join("redstone-door.crn");
+    let out = run_synth(&[
+        "--experimental-logic-synth",
+        "--stage",
+        "edition",
+        "--edition",
+        "java",
+        path.to_str().unwrap(),
+    ]);
+    assert!(
+        out.status.success(),
+        "expected exit 0, stderr={}",
+        String::from_utf8_lossy(&out.stderr),
+    );
+    let stdout = String::from_utf8(out.stdout).expect("utf-8");
+    let value: serde_json::Value = serde_json::from_str(&stdout)
+        .unwrap_or_else(|err| panic!("stdout should parse as JSON: {err}\n{stdout}"));
+    let scopes = value.as_array().expect("top-level is a scope list");
+    let gatehouse = scopes
+        .iter()
+        .find(|s| s["name"] == "gatehouse")
+        .expect("gatehouse scope in output");
+    let ir = &gatehouse["ir"];
+    assert_eq!(ir["edition"], "java");
+    let cells = ir["cells"].as_array().expect("cells array");
+    assert_eq!(cells.len(), 1);
+    assert_eq!(cells[0]["cell"], "java_repeater_or");
+    let drivers = cells[0]["drivers"].as_array().expect("drivers array");
+    assert_eq!(drivers.len(), 2);
+    assert_eq!(drivers[0]["port"], "a");
+    assert_eq!(drivers[1]["port"], "b");
+}
+
+#[test]
+fn cli_synth_stage_edition_bedrock_maps_or_cell_to_bedrock_torch_or() {
+    // `--edition bedrock` swaps in the Bedrock realisation. Everything
+    // else about the scope (inputs, outputs, driver arity) is
+    // edition-independent and should match the Java run byte-for-byte
+    // apart from the cell tag and the edition field.
+    let path = examples_dir().join("redstone-door.crn");
+    let out = run_synth(&[
+        "--experimental-logic-synth",
+        "--stage",
+        "edition",
+        "--edition",
+        "bedrock",
+        path.to_str().unwrap(),
+    ]);
+    assert!(
+        out.status.success(),
+        "expected exit 0, stderr={}",
+        String::from_utf8_lossy(&out.stderr),
+    );
+    let stdout = String::from_utf8(out.stdout).expect("utf-8");
+    let value: serde_json::Value = serde_json::from_str(&stdout)
+        .unwrap_or_else(|err| panic!("stdout should parse as JSON: {err}\n{stdout}"));
+    let gatehouse = value
+        .as_array()
+        .and_then(|s| s.iter().find(|s| s["name"] == "gatehouse"))
+        .expect("gatehouse scope");
+    let ir = &gatehouse["ir"];
+    assert_eq!(ir["edition"], "bedrock");
+    assert_eq!(ir["cells"][0]["cell"], "bedrock_torch_or");
+}
+
+#[test]
+fn cli_synth_stage_logic_rejects_edition_flag() {
+    // The Logic IR is edition-neutral by contract, so `--edition` cannot
+    // shape its output. Rather than silently ignoring the flag (which
+    // would leave the caller believing it took effect), refuse the run
+    // with exit 2. Same policy applies to `--stage netlist`.
+    let path = examples_dir().join("redstone-door.crn");
+    let out = run_synth(&[
+        "--experimental-logic-synth",
+        "--stage",
+        "logic",
+        "--edition",
+        "java",
+        path.to_str().unwrap(),
+    ]);
+    assert_eq!(out.status.code(), Some(2));
+    let stderr = String::from_utf8(out.stderr).expect("utf-8");
+    assert!(
+        stderr.contains("--edition"),
+        "usage hint should name the stray flag, got: {stderr}",
+    );
+}
+
+#[test]
+fn cli_synth_stage_netlist_rejects_edition_flag() {
+    let path = examples_dir().join("redstone-door.crn");
+    let out = run_synth(&[
+        "--experimental-logic-synth",
+        "--stage",
+        "netlist",
+        "--edition",
+        "bedrock",
+        path.to_str().unwrap(),
+    ]);
+    assert_eq!(out.status.code(), Some(2));
+}
+
+#[test]
+fn cli_synth_stage_edition_requires_edition_flag() {
+    // `--stage edition` without `--edition` is a usage mistake: exit 2 so
+    // a script that forgets the flag cannot silently emit a default
+    // Java-tagged IR the caller did not ask for.
+    let path = examples_dir().join("redstone-door.crn");
+    let out = run_synth(&[
+        "--experimental-logic-synth",
+        "--stage",
+        "edition",
+        path.to_str().unwrap(),
+    ]);
+    assert_eq!(out.status.code(), Some(2));
+    let stderr = String::from_utf8(out.stderr).expect("utf-8");
+    assert!(
+        stderr.contains("--edition"),
+        "usage hint should name the missing flag, got: {stderr}",
+    );
+}
+
+#[test]
 fn cli_synth_missing_file_exits_two() {
     // Path-not-found returns 2 (user-input mistake), consistent with
     // `cairn parse`/`check`/`lower`/`compile`.
