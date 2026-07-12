@@ -27,7 +27,7 @@ use std::num::NonZeroU32;
 use indexmap::IndexMap;
 use serde::Serialize;
 
-use crate::ast::{DottedRef, Expr, Header, TruthRow};
+use crate::ast::{DottedRef, Expr, Header, TruthRow, ValueKind};
 use crate::error::Span;
 
 pub use self::keyword_table::{known_keywords, role_of};
@@ -216,4 +216,137 @@ impl AssertIr {
             Self::Truth { span, .. } | Self::Always { span, .. } => span,
         }
     }
+}
+
+/// Which family of Intent IR scope a downstream pass is describing.
+///
+/// Introduced so passes that hand data off across crates (redstone
+/// placement, future routing) can key on scope identity without
+/// depending on the surface AST or on a downstream crate's local
+/// discriminator. The three variants intentionally mirror the shape of
+/// [`IntentModule::structs`] / [`IntentModule::defs`] / [`IntentModule::sites`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ScopeKind {
+    /// A `struct NAME` body.
+    Struct,
+    /// A `def NAME[ ARGS]` body.
+    Def,
+    /// A `site NAME` body.
+    Site,
+}
+
+/// One recognised `circuit region=<label> void=<N>` fixture together
+/// with the footprint of its enclosing scope.
+///
+/// Produced by [`circuit_regions`] out of a lowered [`IntentModule`] so
+/// the redstone placement pass (`spec/redstone` §14.5) has one entry
+/// point for looking up the reserved area of each scope instead of
+/// walking [`Member`]s and re-decoding `intent_state` at every caller.
+/// The block-array pass's [`crate::block_array`] recogniser owns the
+/// shape validation and per-shape diagnostics; this lift function
+/// silently filters out any malformed or size-less fixture so the two
+/// sides cannot both fire diagnostics for the same source line.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct CircuitRegion {
+    /// Which scope family the circuit member was declared under.
+    pub scope_kind: ScopeKind,
+    /// Source-level name of the scope (`struct gatehouse` → `"gatehouse"`).
+    pub scope_name: String,
+    /// `region=<label>` value the circuit member declared.
+    pub label: String,
+    /// `void=<N>` service-layer height (`>= 1`).
+    pub void: u32,
+    /// Width of the enclosing scope's footprint, copied from `size=WxH`.
+    pub width: u32,
+    /// Depth of the enclosing scope's footprint, copied from `size=WxH`.
+    pub depth: u32,
+    /// Byte range of the originating `circuit region=...` line.
+    #[serde(skip)]
+    pub span: Span,
+}
+
+/// Lift every well-formed `circuit region=<label> void=<N>` fixture out
+/// of `module`, tagged with the enclosing scope's footprint.
+///
+/// Walks `module.structs` / `module.defs` at the top level (children
+/// under `level` blocks are not descended into for v1 — a circuit
+/// member nested inside a `level` stays a follow-up for the routing
+/// pass that actually needs it). Sites are skipped because they carry
+/// no `size` for the routing pass to budget against. Any circuit member
+/// whose `region=` value is missing, non-label, or empty, or whose
+/// `void=` is missing, non-integer, or zero, is dropped silently — the
+/// block-array pass's `recognize_circuit_region` already surfaces those
+/// with `W_DEFERRED_MEMBER` at check time.
+#[must_use]
+pub fn circuit_regions(module: &IntentModule) -> Vec<CircuitRegion> {
+    let mut out = Vec::new();
+    for s in &module.structs {
+        collect_circuit_regions(
+            ScopeKind::Struct,
+            &s.name,
+            s.size.as_ref(),
+            &s.members,
+            &mut out,
+        );
+    }
+    for d in &module.defs {
+        collect_circuit_regions(
+            ScopeKind::Def,
+            &d.name,
+            d.size.as_ref(),
+            &d.members,
+            &mut out,
+        );
+    }
+    out
+}
+
+fn collect_circuit_regions(
+    scope_kind: ScopeKind,
+    scope_name: &str,
+    size: Option<&Size>,
+    members: &[Member],
+    out: &mut Vec<CircuitRegion>,
+) {
+    let Some(size) = size else {
+        return;
+    };
+    for m in members {
+        if !matches!(m.role, MemberRole::Circuit) {
+            continue;
+        }
+        let Some((label, void)) = parse_circuit_region_fixture(m) else {
+            continue;
+        };
+        out.push(CircuitRegion {
+            scope_kind,
+            scope_name: scope_name.to_owned(),
+            label,
+            void,
+            width: size.w.get(),
+            depth: size.h.get(),
+            span: m.span.clone(),
+        });
+    }
+}
+
+/// Parse the `region=<label>` / `void=<N>` payload of a `circuit`
+/// [`Member`] into `(label, void)` when both sides are well-formed.
+/// Returns `None` for any missing or malformed key so callers cannot
+/// silently accept a partial fixture. The block-array pass owns the
+/// per-shape diagnostic prose; this parser stays quiet so a shared
+/// happy-path stays drift-proof between the two consumers.
+fn parse_circuit_region_fixture(member: &Member) -> Option<(String, u32)> {
+    let raw_region = member.intent_state.get("region")?;
+    let label = raw_region.value.as_label_str()?;
+    if label.is_empty() {
+        return None;
+    }
+    let raw_void = member.intent_state.get("void")?;
+    let void = match &raw_void.value.kind {
+        ValueKind::Int(v) if *v >= 1 => u32::try_from(*v).ok()?,
+        _ => return None,
+    };
+    Some((label.to_owned(), void))
 }

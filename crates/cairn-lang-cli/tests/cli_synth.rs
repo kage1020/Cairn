@@ -224,6 +224,149 @@ fn cli_synth_stage_netlist_rejects_edition_flag() {
 }
 
 #[test]
+fn cli_synth_stage_placement_java_places_or_cell_at_origin() {
+    // `--stage placement --edition java` runs the Edition Netlist IR
+    // through the placement pass. `redstone-door.crn`'s sole cell should
+    // land at `{x:0,y:0,z:0}` inside its `circuit region=floor void=2`
+    // reservation (width/depth copied from `size=7x5`). `wire_length`
+    // and `delay_ticks` are absent from the JSON today because Steiner
+    // routing and delay insertion are follow-up passes.
+    let path = examples_dir().join("redstone-door.crn");
+    let out = run_synth(&[
+        "--experimental-logic-synth",
+        "--stage",
+        "placement",
+        "--edition",
+        "java",
+        path.to_str().unwrap(),
+    ]);
+    assert!(
+        out.status.success(),
+        "expected exit 0, stderr={}",
+        String::from_utf8_lossy(&out.stderr),
+    );
+    let stdout = String::from_utf8(out.stdout).expect("utf-8");
+    let value: serde_json::Value = serde_json::from_str(&stdout)
+        .unwrap_or_else(|err| panic!("stdout should parse as JSON: {err}\n{stdout}"));
+    let gatehouse = value
+        .as_array()
+        .and_then(|s| s.iter().find(|s| s["name"] == "gatehouse"))
+        .expect("gatehouse scope");
+    let ir = &gatehouse["ir"];
+    assert_eq!(ir["edition"], "java");
+    let region = &ir["region"];
+    assert_eq!(region["label"], "floor");
+    assert_eq!(region["void"], 2);
+    assert_eq!(region["width"], 7);
+    assert_eq!(region["depth"], 5);
+    let cells = ir["cells"].as_array().expect("cells array");
+    assert_eq!(cells.len(), 1);
+    assert_eq!(cells[0]["cell"], "java_repeater_or");
+    let coord = &cells[0]["coord"];
+    assert_eq!(coord["x"], 0);
+    assert_eq!(coord["y"], 0);
+    assert_eq!(coord["z"], 0);
+    assert!(
+        cells[0].get("wire_length").is_none(),
+        "wire_length must be elided today: {stdout}",
+    );
+    assert!(
+        cells[0].get("delay_ticks").is_none(),
+        "delay_ticks must be elided today: {stdout}",
+    );
+}
+
+#[test]
+fn cli_synth_stage_placement_bedrock_matches_java_layout() {
+    // Swapping to `--edition bedrock` picks the Bedrock cell realisation
+    // but the reservation and coordinate are edition-independent by
+    // contract, so only the `cell` tag and `edition` field differ from
+    // the Java run.
+    let path = examples_dir().join("redstone-door.crn");
+    let out = run_synth(&[
+        "--experimental-logic-synth",
+        "--stage",
+        "placement",
+        "--edition",
+        "bedrock",
+        path.to_str().unwrap(),
+    ]);
+    assert!(
+        out.status.success(),
+        "expected exit 0, stderr={}",
+        String::from_utf8_lossy(&out.stderr),
+    );
+    let stdout = String::from_utf8(out.stdout).expect("utf-8");
+    let value: serde_json::Value = serde_json::from_str(&stdout)
+        .unwrap_or_else(|err| panic!("stdout should parse as JSON: {err}\n{stdout}"));
+    let gatehouse = value
+        .as_array()
+        .and_then(|s| s.iter().find(|s| s["name"] == "gatehouse"))
+        .expect("gatehouse scope");
+    let ir = &gatehouse["ir"];
+    assert_eq!(ir["edition"], "bedrock");
+    assert_eq!(ir["cells"][0]["cell"], "bedrock_torch_or");
+    assert_eq!(ir["cells"][0]["coord"]["x"], 0);
+}
+
+#[test]
+fn cli_synth_stage_placement_requires_edition_flag() {
+    // `--stage placement` without `--edition` is a usage mistake: the
+    // Placement IR carries an `edition` field on every scope, so
+    // running without a target would silently pick a default the
+    // caller did not choose. Exit 2 with a usage hint instead.
+    let path = examples_dir().join("redstone-door.crn");
+    let out = run_synth(&[
+        "--experimental-logic-synth",
+        "--stage",
+        "placement",
+        path.to_str().unwrap(),
+    ]);
+    assert_eq!(out.status.code(), Some(2));
+    let stderr = String::from_utf8(out.stderr).expect("utf-8");
+    assert!(
+        stderr.contains("--edition"),
+        "usage hint should name the missing flag, got: {stderr}",
+    );
+}
+
+#[test]
+fn cli_synth_stage_placement_congestion_exits_one() {
+    // A scope whose synthesised netlist overflows its `circuit
+    // region=... void=N` reservation should fail loud with
+    // `E_ROUTE_CONGESTION` on stderr and exit 1 — the same convention
+    // the synth pass's earlier fail-loud diagnostics follow.
+    let dir = tempfile::tempdir().expect("temp dir");
+    let path = dir.path().join("tiny.crn");
+    let source = "@cairn 2026.06\n@requires version>=1.20\n\n\
+        theme t:\n  slot wall -> @oak_planks\n\n\
+        struct tiny size=3x3\n  \
+        floor mat_slot=wall\n  \
+        pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a\n  \
+        pressure_plate id=q at=inside.front  offset=0 y=0 -> sig.b\n  \
+        logic sig.and_ab   = sig.a and sig.b\n  \
+        logic sig.or_ab    = sig.a or sig.b\n  \
+        logic sig.combined = sig.and_ab and sig.or_ab\n  \
+        door id=d side=front at=center mat_slot=wall opened_by=sig.combined\n  \
+        circuit region=floor void=1\n";
+    std::fs::write(&path, source).expect("write congestion fixture");
+    let out = run_synth(&[
+        "--experimental-logic-synth",
+        "--stage",
+        "placement",
+        "--edition",
+        "java",
+        path.to_str().unwrap(),
+    ]);
+    assert_eq!(out.status.code(), Some(1));
+    let stderr = String::from_utf8(out.stderr).expect("utf-8");
+    assert!(
+        stderr.contains("E_ROUTE_CONGESTION"),
+        "expected E_ROUTE_CONGESTION on stderr, got: {stderr}",
+    );
+}
+
+#[test]
 fn cli_synth_stage_edition_requires_edition_flag() {
     // `--stage edition` without `--edition` is a usage mistake: exit 2 so
     // a script that forgets the flag cannot silently emit a default

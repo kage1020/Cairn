@@ -14,6 +14,57 @@
 
 ### 追加
 
+- Redstone Placement IR と `cairn synth --stage placement
+  --edition <java|bedrock>`（M6-PR4）— M6 redstone-simulates
+  パイプラインの4枚目。`cairn-lang-redstone` に
+  `compile_placement(&ScopedEditionNetlistIr, &IntentModule)`
+  エントリポイントを追加し、M6-PR3 の Edition Netlist IR を走査して
+  各 edition タグ付きセルをスコープの `circuit region=` 予約領域に
+  配置する — `spec/redstone` §14.5 の5段パイプライン
+  （Placement → Steiner routing → Delay insertion → Crossing
+  legalization → Edition legalization）の第1段。セルは
+  Edition Netlist IR が既に持つトポロジカル順（`cells[i]` 内の
+  `NetRef::Cell(j)` は `j < i` を満たす）で並び、`x = i`, `y = 0`,
+  `z = 0` に固定される — 1D 配置で、クロスやファンアウトが絡む
+  pseudo-2.5D へのリフトは routing pass 側の担当。§14.4 の
+  「delay は routed wire length から決まる」に従い、`PlacedCellNode`
+  の `wire_length` / `delay_ticks` は `Option` として予約され今段では
+  常に `None` — 続く PR での値埋めは field write であって schema
+  変更ではないので、下流 JSON consumer は今日から stable な wire
+  shape を見る。`CircuitRegionReservation` は `region=<label>
+  void=<N>` の予約情報と、囲むスコープの `size=WxH` foot print を
+  Intent IR から丸ごとコピーして持つので、routing pass が消費する
+  型は 1 つに集約される。`spec/lint` §11.4 の self-correction
+  triple に沿った 2 つの新規 diagnostic コード:
+  `E_NO_CIRCUIT_REGION` は「配置すべきセルがあるのに `circuit
+  region=` 行が無い（あるいは囲むスコープに `size=` が無い）」
+  ケースを、`E_ROUTE_CONGESTION` は「netlist の必要面積が予約領域を
+  上回った」ケースを検出する。後者の primary は比率と予約 shape を
+  引用する（`synthesized netlist needs ~1.3x the reserved area
+  (void=1, region 3x3)`）— footer は §14.5 が挙げる 3 つの修正
+  （`increase void, enlarge region, or split into multiple
+  circuit blocks`）をそのまま提示する。congestion / missing-region で
+  失敗したスコープは出力から drop されるので、下流 consumer が
+  partial layout を silent に受け取ることは無い（synth pass の
+  未束縛シグナル cascade 抑制と同じ fail-loud ポリシー）。
+  `cairn-lang-core` には `intent::circuit_regions(&IntentModule)
+  -> Vec<CircuitRegion>` API を薄く追加 — 既に検証済みの
+  `circuit region=` fixture を Intent IR から取り出す共通エントリ
+  で、redstone crate が `member.intent_state` を再度パースする
+  必要が無い。block-array pass 側の `recognize_circuit_region` は
+  引き続き per-shape の `W_DEFERRED_MEMBER` を担当するので、
+  2 consumer が同じ source line に対して diagnostic を二重発火する
+  ことは無い。CLI の `cairn synth --stage` に `placement` 値を追加。
+  `--edition <java|bedrock>` フラグは `edition` と同様に必須で、
+  edition-neutral な `logic` / `netlist` stage では引き続き exit 2
+  で拒否される。今回のスコープ外: Steiner routing / wire length
+  確定、delay insertion（リピータバッファ）、crossing legalization、
+  edition legalization、block-array voxel 落とし、physical tile
+  （3層目）cell library、tick simulator、`assert truth|always|
+  latency` の評価、シーケンシャルマクロ (`latch` / `pulse` /
+  `delay` / `edge_*` / `counter`)、QC/BUD 拒否
+  (`E_NO_PORTABLE_IMPL`) — それぞれ後続 PR が本 PR で確定した
+  Placement IR shape の上に積む。
 - Redstone Edition Netlist IR と `cairn synth --stage edition
   --edition <java|bedrock>`（M6-PR3）— M6 redstone-simulates
   パイプラインの3枚目。`cairn-lang-redstone` に

@@ -21,7 +21,9 @@ use cairn_lang_formats::java_structure::{
 };
 use cairn_lang_formats::portability::{portability_for_bedrock, portability_for_java};
 use cairn_lang_formats::registry::{RegistryPack, builtin_bedrock, builtin_java};
-use cairn_lang_redstone::{compile_edition_netlist, compile_netlist, synthesize};
+use cairn_lang_redstone::{
+    compile_edition_netlist, compile_netlist, compile_placement, synthesize,
+};
 use clap::{Parser, Subcommand, ValueEnum};
 
 /// `cairn` — Minecraft build DSL command-line interface.
@@ -135,12 +137,15 @@ enum Command {
     /// JSON. `--stage logic` (default) prints the edition-neutral Logic IR
     /// DAG; `--stage netlist` prints the Netlist IR of Logical Cells + nets
     /// derived from that DAG; `--stage edition` picks the target-edition
-    /// realisation of each cell and prints the Edition Netlist IR — the
-    /// `--edition <java|bedrock>` flag is required in that mode and
-    /// ignored otherwise (the earlier stages are edition-neutral).
+    /// realisation of each cell and prints the Edition Netlist IR;
+    /// `--stage placement` lays those edition-tagged cells out inside
+    /// each scope's `circuit region=` reservation and prints the
+    /// Placement IR. The `--edition <java|bedrock>` flag is required in
+    /// the `edition` and `placement` modes and refused otherwise (the
+    /// earlier stages are edition-neutral by contract).
     /// **Internal / experimental** — the shape of the output is not
     /// covered by the stable compatibility tier and may change at any time
-    /// as the placement / route / simulator stages land. Requires
+    /// as the route / simulator stages land. Requires
     /// `--experimental-logic-synth` so a caller cannot end up depending on
     /// it accidentally.
     ///
@@ -161,9 +166,10 @@ enum Command {
         /// the internal surface area (and `--help` output) contained.
         #[arg(long, value_enum, default_value_t = SynthStage::Logic)]
         stage: SynthStage,
-        /// Target edition for the Edition Netlist IR. Required when
-        /// `--stage edition` is set; ignored for `logic` / `netlist`,
-        /// which are edition-neutral by contract.
+        /// Target edition for the Edition Netlist IR / Placement IR.
+        /// Required when `--stage edition` or `--stage placement` is
+        /// set; refused for `logic` / `netlist`, which are
+        /// edition-neutral by contract.
         #[arg(long, value_enum)]
         edition: Option<EditionArg>,
     },
@@ -181,6 +187,12 @@ enum SynthStage {
     /// against `--edition`. The middle tier of `spec/redstone` §14.6's
     /// three-tier cell library. Still carries no delay.
     Edition,
+    /// Placement IR: 1D coordinate assignment over the Edition Netlist
+    /// IR against `--edition`. Stage 1 of `spec/redstone` §14.5's
+    /// place-and-route pipeline. `wire_length` and `delay_ticks` are
+    /// reserved as `Option`s and stay `None` until the routing and
+    /// delay-insertion follow-up passes land.
+    Placement,
 }
 
 #[derive(Copy, Clone, ValueEnum)]
@@ -709,9 +721,9 @@ fn run_synth(
     // logic` or `--stage netlist` almost certainly expected it to shape
     // the output, and swallowing the mistake would make the CLI's
     // stage-vs-edition axis ambiguous.
-    if !matches!(stage, SynthStage::Edition) && edition.is_some() {
+    if !matches!(stage, SynthStage::Edition | SynthStage::Placement) && edition.is_some() {
         eprintln!(
-            "error: `--edition` is only meaningful with `--stage edition`; the `logic` and `netlist` stages are edition-neutral",
+            "error: `--edition` is only meaningful with `--stage edition` or `--stage placement`; the `logic` and `netlist` stages are edition-neutral",
         );
         return ExitCode::from(2);
     }
@@ -777,6 +789,24 @@ fn run_synth(
             (
                 serde_json::to_string_pretty(&edition_netlist),
                 "Edition Netlist IR",
+            )
+        }
+        SynthStage::Placement => {
+            let Some(edition_arg) = edition else {
+                eprintln!(
+                    "error: `cairn synth --stage placement` requires --edition <java|bedrock>",
+                );
+                return ExitCode::from(2);
+            };
+            let netlist = compile_netlist(&synth.scoped);
+            let edition_netlist = compile_edition_netlist(&netlist, edition_arg.as_edition());
+            let placement = compile_placement(&edition_netlist, &ir);
+            if report_synth_diagnostics(file, &source, &lines, &placement.diagnostics) {
+                return ExitCode::from(1);
+            }
+            (
+                serde_json::to_string_pretty(&placement.scoped),
+                "Placement IR",
             )
         }
     };

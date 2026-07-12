@@ -12,6 +12,59 @@ and is a separate axis from the Minecraft target version.
 
 ### Added
 
+- Redstone Placement IR + `cairn synth --stage placement
+  --edition <java|bedrock>` (M6-PR4) — the fourth slice of the M6
+  redstone-simulates pipeline. `cairn-lang-redstone` grows a
+  `compile_placement(&ScopedEditionNetlistIr, &IntentModule)` entry
+  point that walks the Edition Netlist IR produced by M6-PR3 and lays
+  each edition-tagged cell out inside its scope's `circuit region=`
+  reservation — stage 1 of the five-stage place-and-route pipeline
+  described by `spec/redstone` §14.5 (Placement → Steiner routing →
+  Delay insertion → Crossing legalization → Edition legalization).
+  Cells are placed in the topological order the Edition Netlist IR
+  already carries (`NetRef::Cell(j)` in `cells[i]` satisfies `j < i`),
+  stamped with `x = i`, `y = 0`, `z = 0` — a 1D layout the routing
+  pass will lift to pseudo-2.5D once crossings and fanout enter the
+  picture. `wire_length` and `delay_ticks` are reserved as `Option`s
+  on `PlacedCellNode` and stay `None` at this stage because §14.4
+  ties delay to the actual routed wire length, which is the routing
+  pass's output; a follow-up PR fills them in as a value change, not
+  a schema change, so downstream JSON consumers see a stable wire
+  shape today. `CircuitRegionReservation` captures the `region=<label>
+  void=<N>` reservation together with the enclosing scope's
+  `size=WxH` footprint copied verbatim from the Intent IR so the
+  routing pass has one type to consume. Two new diagnostic codes fire
+  per `spec/lint` §11.4's self-correction triple:
+  `E_NO_CIRCUIT_REGION` when a scope has cells to place but declared
+  no `circuit region=` line (or the enclosing scope has no `size=`),
+  and `E_ROUTE_CONGESTION` when the netlist needs more area than the
+  reservation offers — the primary quotes the ratio and reservation
+  shape (`synthesized netlist needs ~1.3x the reserved area
+  (void=1, region 3x3)`), the footer names the three fixes §14.5
+  suggests (`increase void, enlarge region, or split into multiple
+  circuit blocks`). Congestion / missing-region failures elide the
+  offending scope from the output so a downstream consumer cannot
+  silently accept a partial layout, matching the fail-loud cascade
+  policy the synth pass uses on unbound signals. `cairn-lang-core`
+  gains a small `intent::circuit_regions(&IntentModule) -> Vec<CircuitRegion>`
+  API that lifts the already-validated `circuit region=` fixtures out
+  of the Intent IR so the redstone crate has one entry point instead
+  of re-parsing `member.intent_state` in a second place — the
+  block-array pass's `recognize_circuit_region` still owns the
+  per-shape `W_DEFERRED_MEMBER` diagnostics, so the two consumers
+  agree on the happy-path shape without either firing a duplicate
+  diagnostic for the same source line. The CLI's `cairn synth
+  --stage` gains a `placement` value; the `--edition <java|bedrock>`
+  flag is required in that mode alongside `edition` and stays refused
+  on the edition-neutral `logic` / `netlist` stages (exit 2). Not in
+  scope for this PR: Steiner routing / wire-length determination,
+  delay insertion (repeater buffers), crossing legalization,
+  edition legalization, block-array voxel lowering, the physical-tile
+  (tier 3) cell library, the tick simulator, `assert truth|always|
+  latency` evaluation, sequential macros (`latch` / `pulse` / `delay`
+  / `edge_*` / `counter`), and QC/BUD refusal
+  (`E_NO_PORTABLE_IMPL`) — each remains a follow-up that will build
+  on the Placement IR shape this PR pins.
 - Redstone Edition Netlist IR + `cairn synth --stage edition
   --edition <java|bedrock>` (M6-PR3) — the third slice of the M6
   redstone-simulates pipeline. `cairn-lang-redstone` grows a
