@@ -8,7 +8,7 @@
 //! the shared [`Severity`] rendering and the `code.as_str()` convention
 //! adopted below.
 //!
-//! Message prose follows the self-correction triple from `spec/lint` §11.4:
+//! Message prose follows the self-correction triple from `spec/lint` §11:
 //! what is wrong, valid alternatives, suggested fix. The primary string
 //! carries the first clause; the alternatives and the suggestion land in
 //! [`DiagnosticNote`]s so the human-readable output still reads as three

@@ -34,7 +34,7 @@ and is a separate axis from the Minecraft target version.
   void=<N>` reservation together with the enclosing scope's
   `size=WxH` footprint copied verbatim from the Intent IR so the
   routing pass has one type to consume. Two new diagnostic codes fire
-  per `spec/lint` §11.4's self-correction triple:
+  per `spec/lint` §11's self-correction triple:
   `E_NO_CIRCUIT_REGION` when a scope has cells to place but declared
   no `circuit region=` line (or the enclosing scope has no `size=`),
   and `E_ROUTE_CONGESTION` when the netlist needs more area than the
@@ -157,7 +157,7 @@ and is a separate axis from the Minecraft target version.
   elimination collapses `sig.a or sig.b` written on two `logic` lines
   to one shared OR gate so downstream placement pays no fanout tax
   the source never asked for. Four new diagnostic codes fire fail-loud
-  per `spec/lint` §11.4's self-correction triple:
+  per `spec/lint` §11's self-correction triple:
   `E_LOGIC_UNBOUND_SIGNAL` when a reference names no sensor / earlier
   binding (with a `Valid signals in scope: ...` footer listing the
   reachable alternatives), `E_LOGIC_MULTIPLE_DRIVERS` when two `logic`

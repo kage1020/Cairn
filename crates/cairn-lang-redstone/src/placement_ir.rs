@@ -98,7 +98,20 @@ impl CircuitRegionReservation {
 /// delay-insertion follow-up passes. They stay `None` at this stage and
 /// serialise out via `skip_serializing_if` so the JSON wire form does
 /// not grow empty `"wire_length": null` noise before the values matter.
+///
+/// The two `Option`s are independent for wire-shape brevity, but
+/// nothing in this pass sets either; `(Some(_), None)` never appears in
+/// output produced by [`crate::placement::compile_placement`]. A
+/// follow-up PR that lands routing + delay together may collapse the
+/// pair into a phase-typed enum (`enum RoutingState { Unrouted,
+/// Routed(u32), Delayed { wire_length, delay_ticks } }`) so the
+/// invalid intermediate state cannot be represented — that migration
+/// is `#[non_exhaustive]`-safe because both fields are absent from
+/// today's JSON. Downstream code that constructs a [`PlacedCellNode`]
+/// out-of-band should keep the two fields consistent (both `None` or
+/// both `Some`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[non_exhaustive]
 pub struct PlacedCellNode {
     /// Edition-specific realisation chosen for this cell (copied verbatim
     /// from the source [`crate::edition_netlist_ir::EditionCellNode`]).
@@ -134,6 +147,7 @@ pub struct PlacedCellNode {
 /// target edition is pinned so a JSON dump makes clear which library
 /// the cells were selected from before placement ran.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[non_exhaustive]
 pub struct PlacementIr {
     /// Edition this IR was compiled for. Equal to every cell's
     /// [`EditionCell::edition`] by construction.

@@ -34,7 +34,7 @@
   shape を見る。`CircuitRegionReservation` は `region=<label>
   void=<N>` の予約情報と、囲むスコープの `size=WxH` foot print を
   Intent IR から丸ごとコピーして持つので、routing pass が消費する
-  型は 1 つに集約される。`spec/lint` §11.4 の self-correction
+  型は 1 つに集約される。`spec/lint` §11 の self-correction
   triple に沿った 2 つの新規 diagnostic コード:
   `E_NO_CIRCUIT_REGION` は「配置すべきセルがあるのに `circuit
   region=` 行が無い（あるいは囲むスコープに `size=` が無い）」
@@ -146,7 +146,7 @@
   共通部分式除去 (CSE) により、2 行の `logic` が同じ `sig.a or sig.b`
   を書いた場合は 1 個の OR ゲートに統合され、下流の placement が
   ソースの意図しないファンアウトコストを払わない設計。診断コードは
-  4 種を新設し、`spec/lint` §11.4 の self-correction triple 形式に
+  4 種を新設し、`spec/lint` §11 の self-correction triple 形式に
   従う: `E_LOGIC_UNBOUND_SIGNAL`（センサ・先行 `logic` のいずれにも
   定義されていない参照、`Valid signals in scope: ...` 脚注で候補
   一覧を提示）、`E_LOGIC_MULTIPLE_DRIVERS`（2 行の `logic` で同一

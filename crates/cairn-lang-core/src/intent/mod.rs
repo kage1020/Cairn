@@ -248,6 +248,7 @@ pub enum ScopeKind {
 /// silently filters out any malformed or size-less fixture so the two
 /// sides cannot both fire diagnostics for the same source line.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[non_exhaustive]
 pub struct CircuitRegion {
     /// Which scope family the circuit member was declared under.
     pub scope_kind: ScopeKind,
@@ -275,9 +276,14 @@ pub struct CircuitRegion {
 /// pass that actually needs it). Sites are skipped because they carry
 /// no `size` for the routing pass to budget against. Any circuit member
 /// whose `region=` value is missing, non-label, or empty, or whose
-/// `void=` is missing, non-integer, or zero, is dropped silently — the
-/// block-array pass's `recognize_circuit_region` already surfaces those
-/// with `W_DEFERRED_MEMBER` at check time.
+/// `void=` is missing, non-integer, or zero, is dropped silently —
+/// downstream passes see the same "no reservation for this scope" state
+/// they would on a truly missing line and are expected to surface a
+/// diagnostic that names the malformed-fixture case alongside the
+/// missing-line one. (`cairn check` still reports each malformed shape
+/// individually via the block-array pass's `recognize_circuit_region`;
+/// this function is called from paths that skip the block-array lower,
+/// so it cannot rely on that pass firing.)
 #[must_use]
 pub fn circuit_regions(module: &IntentModule) -> Vec<CircuitRegion> {
     let mut out = Vec::new();
@@ -334,9 +340,13 @@ fn collect_circuit_regions(
 /// Parse the `region=<label>` / `void=<N>` payload of a `circuit`
 /// [`Member`] into `(label, void)` when both sides are well-formed.
 /// Returns `None` for any missing or malformed key so callers cannot
-/// silently accept a partial fixture. The block-array pass owns the
-/// per-shape diagnostic prose; this parser stays quiet so a shared
-/// happy-path stays drift-proof between the two consumers.
+/// silently accept a partial fixture. Callers that surface a
+/// diagnostic on `None` should mention every rejection cause the
+/// block-array pass's `recognize_circuit_region` distinguishes
+/// (`region=` absent / non-label / empty; `void=` absent / non-integer
+/// / zero) because this function is called from paths that skip
+/// `cairn check` and cannot rely on the per-shape `W_DEFERRED_MEMBER`
+/// stream to disambiguate.
 fn parse_circuit_region_fixture(member: &Member) -> Option<(String, u32)> {
     let raw_region = member.intent_state.get("region")?;
     let label = raw_region.value.as_label_str()?;

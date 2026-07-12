@@ -239,16 +239,29 @@ struct tiny size=3x3
         "primary should quote the region footprint, got {:?}",
         d.primary,
     );
+    // The primary span must anchor to the `circuit region=` line so an
+    // LSP quick-fix or editor jump lands on the reservation declaration,
+    // not the first cell's source offset. `spec/redstone` §14.5's
+    // example diagnostic anchors at the region.
+    let source_at_span = &source[d.span.clone()];
+    assert!(
+        source_at_span.starts_with("circuit region="),
+        "congestion span must anchor to the `circuit region=` line, got {source_at_span:?}",
+    );
     let footer = d
         .notes
         .iter()
         .find(|n| n.span.is_none())
         .expect("congestion has a fix footer");
-    assert!(
-        footer.message.contains("increase") && footer.message.contains("void"),
-        "footer should mention `increase void`, got {:?}",
-        footer.message,
-    );
+    // Spec §14.5's canonical fix triple: increase `void`, enlarge
+    // region, or split into multiple `circuit` blocks.
+    for phrase in ["increase", "void", "enlarge", "region", "split", "circuit"] {
+        assert!(
+            footer.message.contains(phrase),
+            "footer should carry the spec §14.5 triple (missing {phrase:?}), got {:?}",
+            footer.message,
+        );
+    }
 
     assert!(
         out.scoped.scopes.iter().all(|e| e.name != "tiny"),
@@ -349,6 +362,167 @@ fn json_dump_carries_region_and_coord_and_omits_reserved_fields() {
         !json.contains("\"delay_ticks\""),
         "delay_ticks must be elided today: {json}",
     );
+}
+
+/// `AC5b` — a scope that DECLARED a `circuit region=` line but whose
+/// enclosing struct is missing a `size=WxH` header cannot be placed:
+/// there is no reservation footprint to budget against, so the pass
+/// falls back to `E_NO_CIRCUIT_REGION`. The primary message must
+/// name the missing-`size=` cause so an author who sees the error on
+/// a source line that clearly declares `circuit region=...` can
+/// still identify the fix.
+#[test]
+fn missing_size_falls_through_to_no_circuit_region() {
+    let source = r"
+theme t:
+  slot wall -> @oak_planks
+
+def gadget
+  floor mat_slot=wall
+  pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a
+  pressure_plate id=q at=inside.front  offset=0 y=0 -> sig.b
+  logic sig.open = sig.a or sig.b
+  door id=d side=front at=center mat_slot=wall opened_by=sig.open
+  circuit region=floor void=2
+";
+    let (edition_netlist, intent) = edition_netlist_from_source(source, Edition::Java);
+    let out = compile_placement(&edition_netlist, &intent);
+
+    let missing: Vec<_> = out
+        .diagnostics
+        .iter()
+        .filter(|d| d.code == DiagnosticCode::NoCircuitRegion)
+        .collect();
+    assert_eq!(
+        missing.len(),
+        1,
+        "expected exactly one E_NO_CIRCUIT_REGION for the size-less def, got {:?}",
+        out.diagnostics,
+    );
+    assert!(
+        missing[0].primary.contains("size=")
+            || missing[0]
+                .notes
+                .iter()
+                .any(|n| n.message.contains("size=")),
+        "diagnostic must name the missing `size=` cause, got primary={:?} notes={:?}",
+        missing[0].primary,
+        missing[0].notes,
+    );
+}
+
+/// `AC5c` — a scope that declared `circuit region=floor void=0` (an
+/// explicitly malformed reservation the parser rejects as unusable)
+/// must not silently look like "no reservation declared". The
+/// `E_NO_CIRCUIT_REGION` message therefore has to enumerate the
+/// malformed-`void=` cause alongside the missing-line and missing-`size=`
+/// cases, so an author staring at an obvious `void=0` on the line above
+/// can still connect the error to their input.
+#[test]
+fn void_zero_surfaces_no_circuit_region_with_malformed_hint() {
+    let source = r"
+theme t:
+  slot wall -> @oak_planks
+
+struct simple size=5x5
+  floor mat_slot=wall
+  pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a
+  pressure_plate id=q at=inside.front  offset=0 y=0 -> sig.b
+  logic sig.open = sig.a or sig.b
+  door id=d side=front at=center mat_slot=wall opened_by=sig.open
+  circuit region=floor void=0
+";
+    let (edition_netlist, intent) = edition_netlist_from_source(source, Edition::Java);
+    let out = compile_placement(&edition_netlist, &intent);
+
+    let d = out
+        .diagnostics
+        .iter()
+        .find(|d| d.code == DiagnosticCode::NoCircuitRegion)
+        .expect("void=0 must surface as E_NO_CIRCUIT_REGION");
+    assert!(
+        d.primary.contains("malformed") || d.primary.contains("void"),
+        "diagnostic must name the malformed-`void=` cause, got {:?}",
+        d.primary,
+    );
+}
+
+/// A scope whose Edition Netlist IR carries inputs and outputs but no
+/// cells — a `pressure_plate -> sig.a` bound directly to `door
+/// opened_by=sig.a` with no `logic` line in between — has nothing to
+/// place. The pass elides such scopes cleanly (no panic, no diagnostic,
+/// no orphan `PlacementIr` entry), so the routing pass can re-scan the
+/// Edition Netlist IR for these no-cell wires without a broken
+/// intermediate state.
+#[test]
+fn identity_wire_scope_is_elided_cleanly() {
+    let source = r"
+theme t:
+  slot wall -> @oak_planks
+  slot door -> @oak_door
+
+struct wire size=5x5
+  floor mat_slot=wall
+  pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a
+  door id=d side=front at=center mat_slot=door opened_by=sig.a
+  circuit region=floor void=2
+";
+    let (edition_netlist, intent) = edition_netlist_from_source(source, Edition::Java);
+    let out = compile_placement(&edition_netlist, &intent);
+
+    assert!(
+        out.diagnostics.is_empty(),
+        "identity-wire scope must not raise diagnostics, got {:?}",
+        out.diagnostics,
+    );
+    assert!(
+        out.scoped.scopes.iter().all(|e| e.name != "wire"),
+        "identity-wire scope must be elided from the Placement IR",
+    );
+}
+
+/// A scope with two `circuit region=` lines silently keeps the first
+/// and drops the rest — the v1 policy. The follow-up routing PR may
+/// warn or route into every reservation, but today's placement pass
+/// must not fail loud on duplicates because the block-array pass
+/// already accepts them without complaint.
+#[test]
+fn duplicate_circuit_region_first_wins_silently() {
+    let source = r"
+theme t:
+  slot wall -> @oak_planks
+
+struct dup size=7x5
+  floor mat_slot=wall
+  pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a
+  pressure_plate id=q at=inside.front  offset=0 y=0 -> sig.b
+  logic sig.open = sig.a or sig.b
+  door id=d side=front at=center mat_slot=wall opened_by=sig.open
+  circuit region=floor void=2
+  circuit region=basement void=3
+";
+    let (edition_netlist, intent) = edition_netlist_from_source(source, Edition::Java);
+    let out = compile_placement(&edition_netlist, &intent);
+
+    assert!(
+        out.diagnostics.is_empty(),
+        "v1 must not raise diagnostics on duplicate `circuit region=` lines, got {:?}",
+        out.diagnostics,
+    );
+    let ir = &out
+        .scoped
+        .scopes
+        .iter()
+        .find(|e| e.name == "dup")
+        .expect("dup scope survives")
+        .ir;
+    let region = ir.region.as_ref().expect("dup has a reservation");
+    assert_eq!(
+        region.label, "floor",
+        "first `circuit region=` line must win, got label={:?}",
+        region.label,
+    );
+    assert_eq!(region.void, 2);
 }
 
 /// AC8 — two non-empty scopes are placed independently: each looks up

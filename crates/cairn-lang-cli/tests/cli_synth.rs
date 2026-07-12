@@ -331,6 +331,39 @@ fn cli_synth_stage_placement_requires_edition_flag() {
 }
 
 #[test]
+fn cli_synth_stage_placement_missing_region_exits_one() {
+    // A scope with cells but no `circuit region=` line surfaces
+    // `E_NO_CIRCUIT_REGION` on stderr and exits 1 — the symmetric E2E
+    // gate to the congestion case below, so both fail-loud paths are
+    // wired through the CLI in the same shape.
+    let dir = tempfile::tempdir().expect("temp dir");
+    let path = dir.path().join("noregion.crn");
+    let source = "@cairn 2026.06\n@requires version>=1.20\n\n\
+        theme t:\n  slot wall -> @oak_planks\n\n\
+        struct noregion size=7x5\n  \
+        floor mat_slot=wall\n  \
+        pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a\n  \
+        pressure_plate id=q at=inside.front  offset=0 y=0 -> sig.b\n  \
+        logic sig.open = sig.a or sig.b\n  \
+        door id=d side=front at=center mat_slot=wall opened_by=sig.open\n";
+    std::fs::write(&path, source).expect("write missing-region fixture");
+    let out = run_synth(&[
+        "--experimental-logic-synth",
+        "--stage",
+        "placement",
+        "--edition",
+        "java",
+        path.to_str().unwrap(),
+    ]);
+    assert_eq!(out.status.code(), Some(1));
+    let stderr = String::from_utf8(out.stderr).expect("utf-8");
+    assert!(
+        stderr.contains("E_NO_CIRCUIT_REGION"),
+        "expected E_NO_CIRCUIT_REGION on stderr, got: {stderr}",
+    );
+}
+
+#[test]
 fn cli_synth_stage_placement_congestion_exits_one() {
     // A scope whose synthesised netlist overflows its `circuit
     // region=... void=N` reservation should fail loud with
