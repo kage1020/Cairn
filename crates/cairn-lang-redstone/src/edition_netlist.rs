@@ -16,11 +16,11 @@
 //! No diagnostics are emitted: CSE / cycle / unbound-signal reporting
 //! ran in [`crate::synth::synthesize`], the Logical-Cell selection ran in
 //! [`crate::netlist::compile_netlist`], and this stage is a pure lookup.
-//! QC / BUD refusal (`E_NO_PORTABLE_IMPL`, §14.6) is not scaffolded here
-//! because none of today's reachable
+//! QC / BUD refusal (`E_NO_PORTABLE_IMPL`, §14.6) joins the pass
+//! alongside the first cell that needs it (sequential-macro or observer
+//! families), since none of today's reachable
 //! [`crate::netlist_ir::LogicalCell`] variants require update-order
-//! semantics; the diagnostic will land alongside the sequential-macro or
-//! observer PR that introduces the first cell that needs it.
+//! semantics.
 
 use cairn_lang_core::Edition;
 
@@ -63,25 +63,48 @@ fn compile_scope(source: &NetlistIr, edition: Edition) -> EditionNetlistIr {
         })
         .collect();
     out.signal_defs.clone_from(&source.signal_defs);
+    debug_assert!(
+        out.cells.iter().all(|c| c.cell.edition() == edition),
+        "compile_scope produced a cell whose edition tag disagrees with the container's",
+    );
     out
 }
 
 /// Look up the edition-specific realisation of `logical` for `edition`.
 ///
-/// `And` / `Or` / `Not` are the only [`LogicalCell`] variants the synth
-/// path can reach today, so those pairs are pinned; the rest fall through
-/// to [`EditionCell::Reserved`] until the parser change that makes them
-/// reachable also pins their Java / Bedrock realisations.
+/// The match is fully exhaustive over `(Edition, LogicalCell)` — no
+/// wildcard arm. That gives compile-time protection against two silent
+/// regressions:
+///
+/// 1. **New `Edition` variant** (e.g. `Education`) — every arm below
+///    fails to compile until the third edition's realisation is chosen,
+///    preventing a silent "matches Java" fallthrough.
+/// 2. **New `LogicalCell` variant** — same story via
+///    `#[non_exhaustive]`-within-crate matching, since both types live
+///    in this crate.
+///
+/// The `*Unpinned` variants for `Xor` / `Nand` / `Nor` / `Mux` are the
+/// safety net for the third silent regression: **new surface syntax that
+/// makes an already-reserved cell reachable**. Renaming the variant to
+/// its pinned physical form (e.g. `JavaXorUnpinned` → some
+/// `JavaComparatorXor`) is the natural editing motion at every mapping
+/// site, so the parser expansion cannot slip through without also
+/// choosing a physical implementation.
 fn select_edition_cell(logical: LogicalCell, edition: Edition) -> EditionCell {
     match (edition, logical) {
         (Edition::Java, LogicalCell::And) => EditionCell::JavaComparatorAnd,
         (Edition::Java, LogicalCell::Or) => EditionCell::JavaRepeaterOr,
         (Edition::Java, LogicalCell::Not) => EditionCell::JavaInverterTorch,
+        (Edition::Java, LogicalCell::Xor) => EditionCell::JavaXorUnpinned,
+        (Edition::Java, LogicalCell::Nand) => EditionCell::JavaNandUnpinned,
+        (Edition::Java, LogicalCell::Nor) => EditionCell::JavaNorUnpinned,
+        (Edition::Java, LogicalCell::Mux) => EditionCell::JavaMuxUnpinned,
         (Edition::Bedrock, LogicalCell::And) => EditionCell::BedrockTorchAnd,
         (Edition::Bedrock, LogicalCell::Or) => EditionCell::BedrockTorchOr,
         (Edition::Bedrock, LogicalCell::Not) => EditionCell::BedrockInverterTorch,
-        (_, LogicalCell::Xor | LogicalCell::Nand | LogicalCell::Nor | LogicalCell::Mux) => {
-            EditionCell::Reserved
-        }
+        (Edition::Bedrock, LogicalCell::Xor) => EditionCell::BedrockXorUnpinned,
+        (Edition::Bedrock, LogicalCell::Nand) => EditionCell::BedrockNandUnpinned,
+        (Edition::Bedrock, LogicalCell::Nor) => EditionCell::BedrockNorUnpinned,
+        (Edition::Bedrock, LogicalCell::Mux) => EditionCell::BedrockMuxUnpinned,
     }
 }

@@ -19,8 +19,8 @@
 //! QC / BUD refusal (`E_NO_PORTABLE_IMPL`, §14.6) is not scaffolded here
 //! because none of the currently reachable [`crate::netlist_ir::LogicalCell`]
 //! variants (`And` / `Or` / `Not`) require update-order semantics; the
-//! diagnostic will land alongside the sequential-macro or observer PR that
-//! introduces the first cell that needs it.
+//! diagnostic joins the pass alongside the first cell that needs it
+//! (sequential-macro or observer families).
 
 use cairn_lang_core::Edition;
 use cairn_lang_core::ast::DottedRef;
@@ -33,25 +33,29 @@ use crate::logic_ir::ScopeKind;
 use crate::netlist_ir::{CellPortDriver, NetRef, NetlistInput, NetlistOutput};
 
 /// Edition-specific realisation of a [`crate::netlist_ir::LogicalCell`]
-/// (`spec/redstone` §14.6). Each variant names both the target edition
-/// and the physical implementation family a downstream placer will
-/// materialise, so a bug that pairs a Java AND cell with a Bedrock torch
-/// tile is a type error, not a runtime mishap.
+/// (`spec/redstone` §14.6). Each variant carries both a target edition
+/// and a physical implementation family, so pairing a Java AND cell with
+/// a Bedrock torch tile is a type error, not a runtime mishap.
 ///
-/// The variant set covers every `(LogicalCell, Edition)` combination that
-/// today's synth path can reach — `And` / `Or` / `Not` on both editions —
-/// plus a single [`EditionCell::Reserved`] catch-all for the parser-
-/// unreachable cells (`Xor` / `Nand` / `Nor` / `Mux`) whose Java / Bedrock
-/// realisations have not been pinned yet. Reserved is intentionally
-/// edition-agnostic: the follow-up PR that teaches the surface parser
-/// those primitives will also split Reserved into per-edition variants,
-/// same shape as the And / Or / Not pairs.
+/// The variant set covers *every* `(Edition, LogicalCell)` combination.
+/// The pinned pairs (`ComparatorAnd` / `TorchAnd` / `RepeaterOr` /
+/// `TorchOr` / `InverterTorch`) name the physical implementation the
+/// downstream placer will materialise. The `*Unpinned` pairs are named
+/// placeholders for the parser-unreachable cells (`Xor` / `Nand` / `Nor`
+/// / `Mux`) whose Java / Bedrock realisations have not been chosen yet —
+/// keeping them as concrete per-edition variants (rather than one
+/// edition-agnostic `Reserved`) makes container/cell edition parity a
+/// pure naming invariant, and makes the eventual pinning a rename in the
+/// one match arm that produces the variant instead of a fresh enum
+/// entry. No wildcard fall-through arm exists in
+/// [`crate::edition_netlist::compile_edition_netlist`], so a future
+/// third `Edition` variant (Education) triggers a compile error at every
+/// mapping site rather than silently degrading to the wrong realisation.
 ///
 /// `#[non_exhaustive]` for the same reason [`crate::netlist_ir::LogicalCell`]
 /// carries the attribute — adding a sequential-macro cell (`latch` /
-/// `pulse` / `delay` / `edge_*` / `counter`, §14.1) or a new Edition
-/// (Education) later should not be a breaking change for downstream
-/// exhaustive matches.
+/// `pulse` / `delay` / `edge_*` / `counter`, §14.1) later should not be a
+/// breaking change for downstream exhaustive matches.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]
@@ -77,11 +81,52 @@ pub enum EditionCell {
     /// Bedrock NOT — a single inverter torch, edition-tagged for the same
     /// reason as [`EditionCell::JavaInverterTorch`].
     BedrockInverterTorch,
-    /// Placeholder for the parser-unreachable
-    /// [`crate::netlist_ir::LogicalCell`]s (`Xor` / `Nand` / `Nor` /
-    /// `Mux`). Never constructed on today's synth path; kept exhaustive
-    /// so a downstream `match` never has to reach for a wildcard arm.
-    Reserved,
+    /// Java XOR — unpinned placeholder. Reachable only via hand-built IR
+    /// today (the surface parser cannot emit `xor`); the mapping arm in
+    /// [`crate::edition_netlist::compile_edition_netlist`] will rename this
+    /// variant to its pinned form the same time the parser change lands.
+    JavaXorUnpinned,
+    /// Bedrock XOR — unpinned placeholder; pair of
+    /// [`EditionCell::JavaXorUnpinned`].
+    BedrockXorUnpinned,
+    /// Java NAND — unpinned placeholder.
+    JavaNandUnpinned,
+    /// Bedrock NAND — unpinned placeholder.
+    BedrockNandUnpinned,
+    /// Java NOR — unpinned placeholder.
+    JavaNorUnpinned,
+    /// Bedrock NOR — unpinned placeholder.
+    BedrockNorUnpinned,
+    /// Java 2:1 MUX — unpinned placeholder.
+    JavaMuxUnpinned,
+    /// Bedrock 2:1 MUX — unpinned placeholder.
+    BedrockMuxUnpinned,
+}
+
+impl EditionCell {
+    /// The target edition this variant realises. Used by
+    /// [`crate::edition_netlist::compile_edition_netlist`] to
+    /// `debug_assert!` that every cell in an [`EditionNetlistIr`]
+    /// agrees with its container's [`EditionNetlistIr::edition`].
+    #[must_use]
+    pub fn edition(self) -> Edition {
+        match self {
+            Self::JavaComparatorAnd
+            | Self::JavaRepeaterOr
+            | Self::JavaInverterTorch
+            | Self::JavaXorUnpinned
+            | Self::JavaNandUnpinned
+            | Self::JavaNorUnpinned
+            | Self::JavaMuxUnpinned => Edition::Java,
+            Self::BedrockTorchAnd
+            | Self::BedrockTorchOr
+            | Self::BedrockInverterTorch
+            | Self::BedrockXorUnpinned
+            | Self::BedrockNandUnpinned
+            | Self::BedrockNorUnpinned
+            | Self::BedrockMuxUnpinned => Edition::Bedrock,
+        }
+    }
 }
 
 /// One cell in the DAG, tagged with its edition-specific realisation.

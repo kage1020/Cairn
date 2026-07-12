@@ -704,6 +704,18 @@ fn run_synth(
         return ExitCode::from(2);
     }
 
+    // Reject `--edition` on the edition-neutral stages loud instead of
+    // silently ignoring it — a caller who passed the flag on `--stage
+    // logic` or `--stage netlist` almost certainly expected it to shape
+    // the output, and swallowing the mistake would make the CLI's
+    // stage-vs-edition axis ambiguous.
+    if !matches!(stage, SynthStage::Edition) && edition.is_some() {
+        eprintln!(
+            "error: `--edition` is only meaningful with `--stage edition`; the `logic` and `netlist` stages are edition-neutral",
+        );
+        return ExitCode::from(2);
+    }
+
     let source = match std::fs::read_to_string(file) {
         Ok(s) => s,
         Err(err) => {

@@ -31,24 +31,31 @@ and is a separate axis from the Minecraft target version.
   Bedrock `InverterTorch` (structurally shared but edition-tagged so a
   later placer can pick the correct tile orientation, one of the
   edition-absorbed differences per §14.6). The parser-unreachable
-  cells (`xor` / `nand` / `nor` / `mux`) fall through to
-  `EditionCell::Reserved` until the follow-up parser PR that makes them
-  reachable also pins their Java / Bedrock realisations. Per
-  `spec/redstone` §14.4 / §14.8 the Edition Netlist IR still carries no
-  delay: repeater insertion is a Placement IR concern. The pass emits
-  no diagnostics — CSE, cycle detection, and unbound-signal reporting
-  ran in M6-PR1 and Logical Cell selection ran in M6-PR2, so this
-  stage is a pure structural rewrite. The CLI's `cairn synth --stage`
-  gains an `edition` value alongside `logic` / `netlist`; the
-  `--edition <java|bedrock>` flag is required in that mode and ignored
-  otherwise (the earlier stages are edition-neutral by contract). Not
-  in scope for this PR: place-and-route, repeater insertion, tick
-  simulator, `assert truth|always|latency` evaluation, sequential
-  macros (`latch` / `pulse` / `delay` / `edge_*` / `counter`),
-  `circuit region=... void=N` congestion detection
+  cells (`xor` / `nand` / `nor` / `mux`) each land as a per-edition
+  `*Unpinned` placeholder variant (`JavaXorUnpinned`,
+  `BedrockXorUnpinned`, ...) rather than one edition-agnostic
+  catch-all, so container / cell edition parity is enforced by naming
+  and the eventual parser change renames the placeholder in the one
+  match arm that produces it. The `(Edition, LogicalCell)` match is
+  fully exhaustive with no wildcard, so adding a third `Edition`
+  variant (Education) triggers a compile error at every mapping site
+  instead of a silent Java fallthrough. Per `spec/redstone` §14.4 /
+  §14.8 the Edition Netlist IR still carries no delay: repeater
+  insertion is a Placement IR concern. The pass emits no diagnostics
+  — CSE, cycle detection, and unbound-signal reporting ran in M6-PR1
+  and Logical Cell selection ran in M6-PR2, so this stage is a pure
+  structural rewrite. The CLI's `cairn synth --stage` gains an
+  `edition` value alongside `logic` / `netlist`; the `--edition
+  <java|bedrock>` flag is required in that mode and refused on
+  `logic` / `netlist` (exit 2) rather than silently ignored, so the
+  stage-vs-edition axes cannot drift out of sync in a caller's head.
+  Not in scope for this PR: place-and-route, repeater insertion,
+  tick simulator, `assert truth|always|latency` evaluation,
+  sequential macros (`latch` / `pulse` / `delay` / `edge_*` /
+  `counter`), `circuit region=... void=N` congestion detection
   (`E_ROUTE_CONGESTION`), and QC/BUD refusal (`E_NO_PORTABLE_IMPL`) —
-  each remains a follow-up PR that will build on the Edition Netlist
-  IR shape this PR pins.
+  each remains a follow-up that will build on the Edition Netlist IR
+  shape this PR pins.
 - Redstone combinational Netlist IR + `cairn synth --stage netlist`
   (M6-PR2) — the second slice of the M6 redstone-simulates pipeline.
   `cairn-lang-redstone` grows a `compile_netlist(&ScopedLogicIr)` entry

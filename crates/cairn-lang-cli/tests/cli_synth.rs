@@ -187,6 +187,43 @@ fn cli_synth_stage_edition_bedrock_maps_or_cell_to_bedrock_torch_or() {
 }
 
 #[test]
+fn cli_synth_stage_logic_rejects_edition_flag() {
+    // The Logic IR is edition-neutral by contract, so `--edition` cannot
+    // shape its output. Rather than silently ignoring the flag (which
+    // would leave the caller believing it took effect), refuse the run
+    // with exit 2. Same policy applies to `--stage netlist`.
+    let path = examples_dir().join("redstone-door.crn");
+    let out = run_synth(&[
+        "--experimental-logic-synth",
+        "--stage",
+        "logic",
+        "--edition",
+        "java",
+        path.to_str().unwrap(),
+    ]);
+    assert_eq!(out.status.code(), Some(2));
+    let stderr = String::from_utf8(out.stderr).expect("utf-8");
+    assert!(
+        stderr.contains("--edition"),
+        "usage hint should name the stray flag, got: {stderr}",
+    );
+}
+
+#[test]
+fn cli_synth_stage_netlist_rejects_edition_flag() {
+    let path = examples_dir().join("redstone-door.crn");
+    let out = run_synth(&[
+        "--experimental-logic-synth",
+        "--stage",
+        "netlist",
+        "--edition",
+        "bedrock",
+        path.to_str().unwrap(),
+    ]);
+    assert_eq!(out.status.code(), Some(2));
+}
+
+#[test]
 fn cli_synth_stage_edition_requires_edition_flag() {
     // `--stage edition` without `--edition` is a usage mistake: exit 2 so
     // a script that forgets the flag cannot silently emit a default

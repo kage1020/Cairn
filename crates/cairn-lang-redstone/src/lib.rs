@@ -5,16 +5,19 @@
 //! three-tier (logical cell → edition cell → physical tile) so an edition difference is
 //! confined to the library.
 //!
-//! The crate currently exposes the first three pipeline stages:
-//! [`synth::synthesize`] lowers the Intent IR's `logic` bindings, sensors,
-//! and actuators into an edition-neutral Logic IR;
-//! [`netlist::compile_netlist`] rewrites that DAG into a Netlist IR of
-//! cells + nets (still edition-neutral); and
-//! [`edition_netlist::compile_edition_netlist`] selects the target-edition
-//! realisation of each cell against a [`cairn_lang_core::Edition`]. The
-//! placement, route, and simulator layers below the Edition Netlist IR
-//! are not yet public API — see `spec/redstone` for the complete pipeline
-//! they will fill in.
+//! The crate currently exposes the first two of `spec/redstone` §14.8's
+//! three IR layers plus the cell library's tier-2 selection pass:
+//! [`synth::synthesize`] lowers the Intent IR's `logic` bindings,
+//! sensors, and actuators into an edition-neutral Logic IR;
+//! [`netlist::compile_netlist`] rewrites that DAG into an
+//! edition-neutral Netlist IR of cells + nets; and
+//! [`edition_netlist::compile_edition_netlist`] picks the target-edition
+//! realisation of each cell against a [`cairn_lang_core::Edition`] —
+//! the second rung (`Edition Cell`) of the three-tier cell library
+//! from §14.6, materialised as [`edition_netlist_ir::EditionNetlistIr`]
+//! so the placement pass has one type to consume. The placement, route,
+//! and simulator layers are not yet public API — see `spec/redstone`
+//! for the complete pipeline they will fill in.
 
 pub mod diagnostic;
 pub mod edition_netlist;

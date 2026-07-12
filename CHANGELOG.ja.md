@@ -31,21 +31,27 @@
   `not` は Java / Bedrock 双方の `InverterTorch`（構造は共通だが後段の
   配置器が正しいタイル向きを選べるようエディションタグは保持、§14.6 の
   エディション吸収済み差分の一つ「orientation」に相当）。パーサ未到達な
-  セル (`xor` / `nand` / `nor` / `mux`) は `EditionCell::Reserved` に
-  フォールスルーし、それらを到達可能にする後続パーサ PR が Java /
-  Bedrock 実装を確定するまで留保する。§14.4 / §14.8 のとおり Edition
-  Netlist IR も delay を持たず、リピータ挿入は Placement IR 側で行う。
-  CSE / 巡回検出 / 未束縛シグナル報告は M6-PR1 で、Logical Cell 選択は
-  M6-PR2 で済んでいるので、この pass も独自の diagnostic を出さない
-  純構造書き換え。CLI の `cairn synth --stage` に `edition` 値を追加、
-  同モードでは `--edition <java|bedrock>` フラグが必須で、他モードでは
-  edition-neutral 契約により無視される。今回のスコープ外:
-  place-and-route、リピータ挿入、tick simulator、
-  `assert truth|always|latency` の評価、シーケンシャルマクロ
-  (`latch` / `pulse` / `delay` / `edge_*` / `counter`)、
+  セル (`xor` / `nand` / `nor` / `mux`) は edition-agnostic な catch-all
+  ではなく、per-edition の `*Unpinned` プレースホルダバリアント
+  (`JavaXorUnpinned` / `BedrockXorUnpinned` / ...) にそれぞれ落ちるので、
+  コンテナ / セルの edition 整合は命名で強制され、後続のパーサ変更は
+  「対応する 1 match arm で placeholder をピン留め名にリネーム」で済む。
+  `(Edition, LogicalCell)` の照合はワイルドカード無しで完全網羅なので、
+  第 3 の `Edition` バリアント（Education）追加時は全マッピング箇所で
+  コンパイルエラーになり、silent な Java フォールスルーは起こらない。
+  §14.4 / §14.8 のとおり Edition Netlist IR も delay を持たず、リピータ
+  挿入は Placement IR 側で行う。CSE / 巡回検出 / 未束縛シグナル報告は
+  M6-PR1 で、Logical Cell 選択は M6-PR2 で済んでいるので、この pass も
+  独自の diagnostic を出さない純構造書き換え。CLI の `cairn synth
+  --stage` に `edition` 値を追加、同モードでは `--edition <java|bedrock>`
+  フラグが必須で、`logic` / `netlist` に渡された場合は exit 2 で拒否する
+  (silent に無視すると stage-vs-edition の軸が呼び出し側の頭の中で
+  ずれるため)。今回のスコープ外: place-and-route、リピータ挿入、
+  tick simulator、`assert truth|always|latency` の評価、シーケンシャル
+  マクロ (`latch` / `pulse` / `delay` / `edge_*` / `counter`)、
   `circuit region=... void=N` の congestion 検出 (`E_ROUTE_CONGESTION`)、
-  QC/BUD 拒否 (`E_NO_PORTABLE_IMPL`) — それぞれ後続 PR で本 PR が
-  確定した Edition Netlist IR shape の上に積む。
+  QC/BUD 拒否 (`E_NO_PORTABLE_IMPL`) — それぞれ後続で本 PR が確定した
+  Edition Netlist IR shape の上に積む。
 - Redstone 組合論理 Netlist IR と `cairn synth --stage netlist`（M6-PR2）—
   M6 redstone-simulates パイプラインの2枚目。`cairn-lang-redstone` に
   `compile_netlist(&ScopedLogicIr)` エントリポイントを追加し、

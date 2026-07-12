@@ -4,10 +4,10 @@
 //! (`spec/redstone` §14.6 `Logical Cell → Edition Cell → Physical Tile`,
 //! second tier): the `examples/redstone-door.crn` happy path, per-edition
 //! mapping for every reachable `LogicalCell` (`And` / `Or` / `Not`), the
-//! canonical port order carried through from the Netlist IR, the reserved
-//! catch-all for the parser-unreachable cells (`Xor` / `Nand` / `Nor` /
-//! `Mux`), the `edition` field on the JSON wire form, and empty-scope
-//! elision.
+//! canonical port order carried through from the Netlist IR, the
+//! per-edition `*Unpinned` placeholders that stand in for the
+//! parser-unreachable cells (`Xor` / `Nand` / `Nor` / `Mux`), the
+//! `edition` field on the JSON wire form, and empty-scope elision.
 
 use std::path::PathBuf;
 
@@ -159,126 +159,109 @@ struct sim size=5x5
 }
 
 /// AC4 — the reachable `LogicalCell` variants (`And`, `Or`, `Not`) each
-/// pick their Java realisation, and `Xor`/`Nand`/`Nor`/`Mux` fall back to
-/// `EditionCell::Reserved` so an accidental parser expansion cannot
-/// silently emit an unmapped cell.
+/// pick their Java realisation, and the parser-unreachable cells
+/// (`Xor` / `Nand` / `Nor` / `Mux`) fall through to their `Java*Unpinned`
+/// placeholders so a future parser expansion cannot silently emit a
+/// container-mismatched cell.
 #[test]
 fn java_mapping_is_exhaustive_over_logical_cells() {
+    let two_input =
+        |kind: fn(SignalRef, SignalRef) -> GateKind| kind(SignalRef::Input(0), SignalRef::Input(1));
+    let and = two_input(|a, b| GateKind::And2 { a, b });
+    let or = two_input(|a, b| GateKind::Or2 { a, b });
+    let xor = two_input(|a, b| GateKind::Xor2 { a, b });
+    let nand = two_input(|a, b| GateKind::Nand2 { a, b });
+    let nor = two_input(|a, b| GateKind::Nor2 { a, b });
+    let not_gate = GateKind::Not {
+        a: SignalRef::Input(0),
+    };
+    let mux = GateKind::Mux {
+        sel: SignalRef::Input(0),
+        a: SignalRef::Input(1),
+        b: SignalRef::Input(2),
+    };
+
     assert_eq!(
-        edition_cell_for(
-            GateKind::And2 {
-                a: SignalRef::Input(0),
-                b: SignalRef::Input(1),
-            },
-            Edition::Java
-        ),
+        edition_cell_for(and, Edition::Java),
         EditionCell::JavaComparatorAnd,
     );
     assert_eq!(
-        edition_cell_for(
-            GateKind::Or2 {
-                a: SignalRef::Input(0),
-                b: SignalRef::Input(1),
-            },
-            Edition::Java
-        ),
+        edition_cell_for(or, Edition::Java),
         EditionCell::JavaRepeaterOr,
     );
     assert_eq!(
-        edition_cell_for(
-            GateKind::Not {
-                a: SignalRef::Input(0)
-            },
-            Edition::Java
-        ),
+        edition_cell_for(not_gate, Edition::Java),
         EditionCell::JavaInverterTorch,
     );
-    for reserved in [
-        GateKind::Xor2 {
-            a: SignalRef::Input(0),
-            b: SignalRef::Input(1),
-        },
-        GateKind::Nand2 {
-            a: SignalRef::Input(0),
-            b: SignalRef::Input(1),
-        },
-        GateKind::Nor2 {
-            a: SignalRef::Input(0),
-            b: SignalRef::Input(1),
-        },
-        GateKind::Mux {
-            sel: SignalRef::Input(0),
-            a: SignalRef::Input(1),
-            b: SignalRef::Input(1),
-        },
-    ] {
-        assert_eq!(
-            edition_cell_for(reserved, Edition::Java),
-            EditionCell::Reserved,
-            "unreachable {reserved:?} should fall through to Reserved on Java",
-        );
-    }
+    assert_eq!(
+        edition_cell_for(xor, Edition::Java),
+        EditionCell::JavaXorUnpinned,
+    );
+    assert_eq!(
+        edition_cell_for(nand, Edition::Java),
+        EditionCell::JavaNandUnpinned,
+    );
+    assert_eq!(
+        edition_cell_for(nor, Edition::Java),
+        EditionCell::JavaNorUnpinned,
+    );
+    assert_eq!(
+        edition_cell_for(mux, Edition::Java),
+        EditionCell::JavaMuxUnpinned,
+    );
 }
 
 /// AC5 — Bedrock realisations pick their own edition-tagged variants for
-/// every reachable cell; reserved cells stay `Reserved` regardless of the
-/// edition.
+/// every reachable cell; the unreachable cells fall through to
+/// `Bedrock*Unpinned` — the container edition tag is baked into the
+/// variant name, so a downstream consumer cannot mistake a Java placeholder
+/// for a Bedrock one.
 #[test]
 fn bedrock_mapping_is_exhaustive_over_logical_cells() {
+    let two_input =
+        |kind: fn(SignalRef, SignalRef) -> GateKind| kind(SignalRef::Input(0), SignalRef::Input(1));
+    let and = two_input(|a, b| GateKind::And2 { a, b });
+    let or = two_input(|a, b| GateKind::Or2 { a, b });
+    let xor = two_input(|a, b| GateKind::Xor2 { a, b });
+    let nand = two_input(|a, b| GateKind::Nand2 { a, b });
+    let nor = two_input(|a, b| GateKind::Nor2 { a, b });
+    let not_gate = GateKind::Not {
+        a: SignalRef::Input(0),
+    };
+    let mux = GateKind::Mux {
+        sel: SignalRef::Input(0),
+        a: SignalRef::Input(1),
+        b: SignalRef::Input(2),
+    };
+
     assert_eq!(
-        edition_cell_for(
-            GateKind::And2 {
-                a: SignalRef::Input(0),
-                b: SignalRef::Input(1),
-            },
-            Edition::Bedrock
-        ),
+        edition_cell_for(and, Edition::Bedrock),
         EditionCell::BedrockTorchAnd,
     );
     assert_eq!(
-        edition_cell_for(
-            GateKind::Or2 {
-                a: SignalRef::Input(0),
-                b: SignalRef::Input(1),
-            },
-            Edition::Bedrock
-        ),
+        edition_cell_for(or, Edition::Bedrock),
         EditionCell::BedrockTorchOr,
     );
     assert_eq!(
-        edition_cell_for(
-            GateKind::Not {
-                a: SignalRef::Input(0)
-            },
-            Edition::Bedrock
-        ),
+        edition_cell_for(not_gate, Edition::Bedrock),
         EditionCell::BedrockInverterTorch,
     );
-    for reserved in [
-        GateKind::Xor2 {
-            a: SignalRef::Input(0),
-            b: SignalRef::Input(1),
-        },
-        GateKind::Nand2 {
-            a: SignalRef::Input(0),
-            b: SignalRef::Input(1),
-        },
-        GateKind::Nor2 {
-            a: SignalRef::Input(0),
-            b: SignalRef::Input(1),
-        },
-        GateKind::Mux {
-            sel: SignalRef::Input(0),
-            a: SignalRef::Input(1),
-            b: SignalRef::Input(1),
-        },
-    ] {
-        assert_eq!(
-            edition_cell_for(reserved, Edition::Bedrock),
-            EditionCell::Reserved,
-            "unreachable {reserved:?} should fall through to Reserved on Bedrock",
-        );
-    }
+    assert_eq!(
+        edition_cell_for(xor, Edition::Bedrock),
+        EditionCell::BedrockXorUnpinned,
+    );
+    assert_eq!(
+        edition_cell_for(nand, Edition::Bedrock),
+        EditionCell::BedrockNandUnpinned,
+    );
+    assert_eq!(
+        edition_cell_for(nor, Edition::Bedrock),
+        EditionCell::BedrockNorUnpinned,
+    );
+    assert_eq!(
+        edition_cell_for(mux, Edition::Bedrock),
+        EditionCell::BedrockMuxUnpinned,
+    );
 }
 
 /// AC6 — scopes whose Netlist IR was empty produce no Edition Netlist IR
@@ -363,10 +346,148 @@ struct beta size=5x5
     assert!(beta.ir.signal_defs.get(&sig("sig.b1")).is_some());
 }
 
+/// The Java and Bedrock runs of the same Netlist IR differ *only* in
+/// the container's `edition` field and each cell's `cell` tag — every
+/// other structural byte (inputs, outputs, driver arity + port order,
+/// span, `signal_defs`) is edition-independent by contract, and this
+/// test locks that so a future edition pass that accidentally reorders
+/// or drops non-cell state (or forgets to copy `signal_defs`) fails
+/// loud instead of silently drifting.
+#[test]
+fn java_and_bedrock_edition_netlists_differ_only_in_edition_and_cell_tags() {
+    let source = r"
+theme t:
+  slot wall -> @oak_planks
+
+struct sim size=5x5
+  floor mat_slot=wall
+
+  pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a
+  pressure_plate id=q at=inside.front  offset=0 y=0 -> sig.b
+
+  logic sig.both = sig.a and sig.b
+  logic sig.na   = not sig.a
+
+  door id=d side=front at=center mat_slot=wall opened_by=sig.both
+  door id=e side=back  at=center mat_slot=wall opened_by=sig.na
+";
+    let synth = synth_source(source);
+    let netlist = compile_netlist(&synth.scoped);
+
+    let java = compile_edition_netlist(&netlist, Edition::Java);
+    let bedrock = compile_edition_netlist(&netlist, Edition::Bedrock);
+
+    assert_eq!(java.scopes.len(), bedrock.scopes.len());
+    for (j, b) in java.scopes.iter().zip(bedrock.scopes.iter()) {
+        assert_eq!(j.kind, b.kind);
+        assert_eq!(j.name, b.name);
+        assert_eq!(j.ir.inputs, b.ir.inputs);
+        assert_eq!(j.ir.outputs, b.ir.outputs);
+        assert_eq!(j.ir.signal_defs, b.ir.signal_defs);
+        assert_ne!(j.ir.edition, b.ir.edition);
+        assert_eq!(j.ir.edition, Edition::Java);
+        assert_eq!(b.ir.edition, Edition::Bedrock);
+        assert_eq!(j.ir.cells.len(), b.ir.cells.len());
+        for (jc, bc) in j.ir.cells.iter().zip(b.ir.cells.iter()) {
+            assert_eq!(jc.drivers, bc.drivers);
+            assert_eq!(jc.span, bc.span);
+            assert_ne!(jc.cell, bc.cell, "cell tag must differ per edition");
+            assert_eq!(jc.cell.edition(), Edition::Java);
+            assert_eq!(bc.cell.edition(), Edition::Bedrock);
+        }
+    }
+}
+
+/// The Netlist IR's `outputs` list can carry more than one entry — a
+/// scope with two actuators. Locks that every entry, not just the first,
+/// is copied verbatim (the `.clone_from` on `out.outputs` in `compile_scope`
+/// is a single call today, so this test would fail loud if that were
+/// reduced to a `take(1)` mistake in a later refactor).
+#[test]
+fn compile_edition_netlist_copies_all_outputs_verbatim() {
+    let source = r"
+theme t:
+  slot wall -> @oak_planks
+
+struct sim size=5x5
+  floor mat_slot=wall
+
+  pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a
+  pressure_plate id=q at=inside.front  offset=0 y=0 -> sig.b
+
+  logic sig.both = sig.a and sig.b
+  logic sig.na   = not sig.a
+
+  door id=d side=front at=center mat_slot=wall opened_by=sig.both
+  door id=e side=back  at=center mat_slot=wall opened_by=sig.na
+";
+    let synth = synth_source(source);
+    let netlist = compile_netlist(&synth.scoped);
+    let edition = compile_edition_netlist(&netlist, Edition::Java);
+
+    let src_outputs = &netlist.scopes[0].ir.outputs;
+    let dst_outputs = &edition.scopes[0].ir.outputs;
+    assert!(
+        src_outputs.len() >= 2,
+        "sanity: fixture wires two actuators"
+    );
+    assert_eq!(src_outputs, dst_outputs);
+}
+
+/// The `*Unpinned` placeholders serialise as their `snake_case` name —
+/// no `serde` attribute drift can silently make a downstream consumer
+/// think a `JavaXor` cell landed when the pass emitted a placeholder.
+#[test]
+fn unpinned_variants_serialise_as_snake_case() {
+    let mut logic = LogicIr::new();
+    logic.inputs.push(InputPort {
+        name: sig("sig.a"),
+        span: 0..0,
+    });
+    logic.inputs.push(InputPort {
+        name: sig("sig.b"),
+        span: 0..0,
+    });
+    logic.nodes.push(GateNode {
+        kind: GateKind::Xor2 {
+            a: SignalRef::Input(0),
+            b: SignalRef::Input(1),
+        },
+        span: 0..0,
+    });
+    logic.outputs.push(OutputPort {
+        name: sig("sig.out"),
+        driver: SignalRef::Gate(0),
+        span: 0..0,
+    });
+
+    let mut scoped = ScopedLogicIr::new();
+    scoped.scopes.push(ScopedLogicIrEntry {
+        kind: ScopeKind::Struct,
+        name: "hand".into(),
+        ir: logic,
+    });
+
+    let netlist = compile_netlist(&scoped);
+    let java = compile_edition_netlist(&netlist, Edition::Java);
+    let json = serde_json::to_string(&java).expect("serialise");
+    assert!(
+        json.contains("\"cell\":\"java_xor_unpinned\""),
+        "Java XOR should serialise as its unpinned placeholder name: {json}",
+    );
+
+    let bedrock = compile_edition_netlist(&netlist, Edition::Bedrock);
+    let json = serde_json::to_string(&bedrock).expect("serialise");
+    assert!(
+        json.contains("\"cell\":\"bedrock_xor_unpinned\""),
+        "Bedrock XOR should serialise as its unpinned placeholder name: {json}",
+    );
+}
+
 /// Build a single-gate Netlist IR around `kind`, run
 /// `compile_edition_netlist` for `edition`, and return the resulting cell
-/// tag. Lets AC4 / AC5 hit reserved variants without going through the
-/// surface parser.
+/// tag. Lets AC4 / AC5 hit the `*Unpinned` variants without going through
+/// the surface parser.
 fn edition_cell_for(kind: GateKind, edition: Edition) -> EditionCell {
     let mut ir = LogicIr::new();
     let mut input_count = 0u32;
