@@ -21,7 +21,7 @@ use cairn_lang_formats::java_structure::{
 };
 use cairn_lang_formats::portability::{portability_for_bedrock, portability_for_java};
 use cairn_lang_formats::registry::{RegistryPack, builtin_bedrock, builtin_java};
-use cairn_lang_redstone::synthesize;
+use cairn_lang_redstone::{compile_netlist, synthesize};
 use clap::{Parser, Subcommand, ValueEnum};
 
 /// `cairn` — Minecraft build DSL command-line interface.
@@ -131,16 +131,19 @@ enum Command {
         lock: Option<PathBuf>,
     },
     /// Lower a .crn source file's `logic` bindings, sensors, and actuators
-    /// to the redstone Logic IR (edition-neutral, zero-delay DAG) and print
-    /// the result as JSON. **Internal / experimental** — the shape of the
-    /// output is not covered by the stable compatibility tier and may
-    /// change at any time as the netlist / placement / route stages land.
+    /// through the redstone pipeline and print an intermediate stage as
+    /// JSON. `--stage logic` (default) prints the edition-neutral Logic IR
+    /// DAG; `--stage netlist` prints the Netlist IR of Logical Cells + nets
+    /// derived from that DAG. **Internal / experimental** — the shape of
+    /// the output is not covered by the stable compatibility tier and may
+    /// change at any time as the placement / route / simulator stages land.
     /// Requires `--experimental-logic-synth` so a caller cannot end up
     /// depending on it accidentally.
     ///
-    /// Exits 0 when synthesis produced a well-formed IR (warnings still
-    /// allowed), 1 on parse failure, I/O error, or any Error-severity
-    /// synth diagnostic, and 2 when the file cannot be located.
+    /// Exits 0 when the requested stage produced a well-formed IR
+    /// (warnings still allowed), 1 on parse failure, I/O error, or any
+    /// Error-severity synth diagnostic, and 2 when the file cannot be
+    /// located.
     Synth {
         /// Path to the .crn file to synthesise.
         file: PathBuf,
@@ -149,7 +152,22 @@ enum Command {
         /// tier; without it the subcommand exits 2 with a hint.
         #[arg(long)]
         experimental_logic_synth: bool,
+        /// Which pipeline stage to print. Adding stages here as they
+        /// land is preferred over a new subcommand per stage — it keeps
+        /// the internal surface area (and `--help` output) contained.
+        #[arg(long, value_enum, default_value_t = SynthStage::Logic)]
+        stage: SynthStage,
     },
+}
+
+#[derive(Copy, Clone, ValueEnum)]
+enum SynthStage {
+    /// Edition-neutral Logic IR DAG produced by `synthesize`.
+    Logic,
+    /// Netlist IR: Logical Cell selection over the Logic IR DAG. Still
+    /// carries no delay per `spec/redstone` "Time model" / "Connection to
+    /// the IR and phases".
+    Netlist,
 }
 
 #[derive(Copy, Clone, ValueEnum)]
@@ -235,7 +253,8 @@ fn main() -> ExitCode {
         Some(Command::Synth {
             file,
             experimental_logic_synth,
-        }) => run_synth(&file, experimental_logic_synth),
+            stage,
+        }) => run_synth(&file, experimental_logic_synth, stage),
         Some(Command::Compile {
             file,
             edition,
@@ -651,7 +670,7 @@ fn run_lower(file: &Path, format: LowerFormat) -> ExitCode {
     }
 }
 
-fn run_synth(file: &Path, experimental_flag: bool) -> ExitCode {
+fn run_synth(file: &Path, experimental_flag: bool, stage: SynthStage) -> ExitCode {
     if !experimental_flag {
         // Gated behind `--experimental-logic-synth` because the redstone
         // pipeline is still Internal-tier (`spec/compatibility`) — the
@@ -711,13 +730,20 @@ fn run_synth(file: &Path, experimental_flag: bool) -> ExitCode {
         return ExitCode::from(1);
     }
 
-    match serde_json::to_string_pretty(&synth.scoped) {
-        Ok(json) => {
-            println!("{json}");
+    let (json, label) = match stage {
+        SynthStage::Logic => (serde_json::to_string_pretty(&synth.scoped), "Logic IR"),
+        SynthStage::Netlist => {
+            let netlist = compile_netlist(&synth.scoped);
+            (serde_json::to_string_pretty(&netlist), "Netlist IR")
+        }
+    };
+    match json {
+        Ok(text) => {
+            println!("{text}");
             ExitCode::SUCCESS
         }
         Err(err) => {
-            eprintln!("error: failed to serialise Logic IR as JSON: {err}");
+            eprintln!("error: failed to serialise {label} as JSON: {err}");
             ExitCode::from(1)
         }
     }

@@ -12,6 +12,38 @@ and is a separate axis from the Minecraft target version.
 
 ### Added
 
+- Redstone combinational Netlist IR + `cairn synth --stage netlist`
+  (M6-PR2) — the second slice of the M6 redstone-simulates pipeline.
+  `cairn-lang-redstone` grows a `compile_netlist(&ScopedLogicIr)` entry
+  point that walks the Logic IR produced by M6-PR1 and rewrites every
+  `GateNode` into a `CellNode` tagged with a `LogicalCell` (`and` / `or`
+  / `not` reachable today; `xor` / `nand` / `nor` / `mux` reserved on
+  the enum matching the Logic IR side). Cells carry canonical port
+  drivers (`[A, B]` for two-input gates, `[A]` for `Not`, `[Sel, A, B]`
+  for `Mux`) so a downstream simulator or placer can index by position
+  without inspecting `PortName`. `NetRef` mirrors the Logic IR's arena
+  `SignalRef` split so the topological invariant (every `NetRef::Cell(j)`
+  in `cells[i]` satisfies `j < i`) carries through the rewrite as a
+  single forward walk. Per `spec/redstone` §14.6, only the top of the
+  three-tier cell library (`Logical Cell → Edition Cell → Physical
+  Tile`) is chosen here — Java `ComparatorAND` vs Bedrock `TorchAND`
+  edition selection stays for a later pass so the IR remains
+  edition-neutral. Per §14.4 / §14.8 the Netlist IR still carries no
+  delay: repeaters are inserted only at the Placement IR stage. The
+  netlist pass emits no diagnostics of its own — CSE, cycle detection,
+  and unbound-signal reporting have already run in M6-PR1, so this
+  stage is a pure structural rewrite. The CLI's `cairn synth` gains a
+  `--stage <logic|netlist>` flag (defaults to `logic` for backwards
+  compatibility) still gated behind `--experimental-logic-synth`;
+  future placement / route / simulator stages will keep landing on the
+  same flag rather than sprouting new subcommands. Not in scope for
+  this PR: Edition Cell selection, place-and-route, tick simulator,
+  `assert truth|always|latency` evaluation, sequential macros
+  (`latch` / `pulse` / `delay` / `edge_*` / `counter`),
+  `circuit region=... void=N` congestion detection
+  (`E_ROUTE_CONGESTION`), and QC/BUD refusal (`E_NO_PORTABLE_IMPL`) —
+  each remains a follow-up PR that will build on the Netlist IR shape
+  this PR pins.
 - Redstone combinational Logic IR + `cairn synth` (M6-PR1) — the first
   slice of the M6 redstone-simulates pipeline. `cairn-lang-redstone` grows
   a `synthesize(&IntentModule)` entry point that walks every
