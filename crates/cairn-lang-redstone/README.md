@@ -10,15 +10,19 @@ are derived deterministically from a small dataflow description.
 
 ## Status
 
-Combinational logic synthesis and Netlist IR selection landed.
-`synthesize(&IntentModule)` lowers sensor bindings, actuator arguments,
-and `logic sig.X = <expr>` lines into an edition-neutral Logic IR
-(DAG of `and`/`or`/`not` gates today, with `xor`/`nand`/`nor`/`mux`
-reserved on the enum for a follow-up parser PR), and
-`compile_netlist(&ScopedLogicIr)` rewrites that DAG into a Netlist IR of
-Logical Cells + nets ready for the placement pass. Edition Cell
-selection (Java `ComparatorAND` / Bedrock `TorchAND`), place-and-route,
-and the tick simulator are still to come.
+Combinational logic synthesis, Netlist IR selection, and Edition Cell
+selection landed. `synthesize(&IntentModule)` lowers sensor bindings,
+actuator arguments, and `logic sig.X = <expr>` lines into an
+edition-neutral Logic IR (DAG of `and`/`or`/`not` gates today, with
+`xor`/`nand`/`nor`/`mux` reserved on the enum for a follow-up parser
+PR); `compile_netlist(&ScopedLogicIr)` rewrites that DAG into a Netlist
+IR of Logical Cells + nets; and
+`compile_edition_netlist(&ScopedNetlistIr, Edition)` picks the target-
+edition realisation of each cell (Java `ComparatorAND` /
+`RepeaterOr` / `InverterTorch` vs Bedrock `TorchAND` / `TorchOr` /
+`InverterTorch`) — the middle rung of the three-tier cell library.
+Place-and-route, the tick simulator, and QC/BUD refusal
+(`E_NO_PORTABLE_IMPL`) are still to come.
 
 ## Pipeline
 
@@ -30,7 +34,9 @@ Intent IR        logic declarations / circuit region / signal binding
    ↓ logic_synth
 Logic IR         logical expressions / dependency DAG (edition-neutral, zero delay)
    ↓
-Netlist IR       cells / nets (logical cell selection; still carries no delay)
+Netlist IR       cells / nets (logical cell selection; still edition-neutral, zero delay)
+   ↓
+Edition Netlist  edition-tagged cells (Java vs Bedrock realisation; still carries no delay)
    ↓ logic_place
 Placement IR     cell coordinates + actual wire length — delay/tick first determined here
    ↓ logic_route

@@ -12,6 +12,43 @@ and is a separate axis from the Minecraft target version.
 
 ### Added
 
+- Redstone Edition Netlist IR + `cairn synth --stage edition
+  --edition <java|bedrock>` (M6-PR3) — the third slice of the M6
+  redstone-simulates pipeline. `cairn-lang-redstone` grows a
+  `compile_edition_netlist(&ScopedNetlistIr, Edition)` entry point that
+  walks the Netlist IR produced by M6-PR2 and picks the target-edition
+  realisation of each `LogicalCell` — the middle tier of the three-tier
+  cell library documented in `spec/redstone` §14.6 (`Logical Cell →
+  Edition Cell → Physical Tile`). The pass is a pure structural lookup:
+  drivers, `NetRef`s, inputs, outputs, and `signal_defs` are copied
+  verbatim from the source Netlist IR, and the topological invariant
+  (`NetRef::Cell(j)` in `cells[i]` still satisfies `j < i`) carries
+  through by construction. `EditionCell` names both the target edition
+  and the physical implementation family so a bug that pairs a Java AND
+  cell with a Bedrock torch tile is a type error, not a runtime mishap
+  — `and` maps to Java `ComparatorAnd` / Bedrock `TorchAnd`, `or` maps
+  to Java `RepeaterOr` / Bedrock `TorchOr`, and `not` maps to Java /
+  Bedrock `InverterTorch` (structurally shared but edition-tagged so a
+  later placer can pick the correct tile orientation, one of the
+  edition-absorbed differences per §14.6). The parser-unreachable
+  cells (`xor` / `nand` / `nor` / `mux`) fall through to
+  `EditionCell::Reserved` until the follow-up parser PR that makes them
+  reachable also pins their Java / Bedrock realisations. Per
+  `spec/redstone` §14.4 / §14.8 the Edition Netlist IR still carries no
+  delay: repeater insertion is a Placement IR concern. The pass emits
+  no diagnostics — CSE, cycle detection, and unbound-signal reporting
+  ran in M6-PR1 and Logical Cell selection ran in M6-PR2, so this
+  stage is a pure structural rewrite. The CLI's `cairn synth --stage`
+  gains an `edition` value alongside `logic` / `netlist`; the
+  `--edition <java|bedrock>` flag is required in that mode and ignored
+  otherwise (the earlier stages are edition-neutral by contract). Not
+  in scope for this PR: place-and-route, repeater insertion, tick
+  simulator, `assert truth|always|latency` evaluation, sequential
+  macros (`latch` / `pulse` / `delay` / `edge_*` / `counter`),
+  `circuit region=... void=N` congestion detection
+  (`E_ROUTE_CONGESTION`), and QC/BUD refusal (`E_NO_PORTABLE_IMPL`) —
+  each remains a follow-up PR that will build on the Edition Netlist
+  IR shape this PR pins.
 - Redstone combinational Netlist IR + `cairn synth --stage netlist`
   (M6-PR2) — the second slice of the M6 redstone-simulates pipeline.
   `cairn-lang-redstone` grows a `compile_netlist(&ScopedLogicIr)` entry

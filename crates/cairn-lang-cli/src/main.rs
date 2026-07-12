@@ -21,7 +21,7 @@ use cairn_lang_formats::java_structure::{
 };
 use cairn_lang_formats::portability::{portability_for_bedrock, portability_for_java};
 use cairn_lang_formats::registry::{RegistryPack, builtin_bedrock, builtin_java};
-use cairn_lang_redstone::{compile_netlist, synthesize};
+use cairn_lang_redstone::{compile_edition_netlist, compile_netlist, synthesize};
 use clap::{Parser, Subcommand, ValueEnum};
 
 /// `cairn` — Minecraft build DSL command-line interface.
@@ -134,11 +134,15 @@ enum Command {
     /// through the redstone pipeline and print an intermediate stage as
     /// JSON. `--stage logic` (default) prints the edition-neutral Logic IR
     /// DAG; `--stage netlist` prints the Netlist IR of Logical Cells + nets
-    /// derived from that DAG. **Internal / experimental** — the shape of
-    /// the output is not covered by the stable compatibility tier and may
-    /// change at any time as the placement / route / simulator stages land.
-    /// Requires `--experimental-logic-synth` so a caller cannot end up
-    /// depending on it accidentally.
+    /// derived from that DAG; `--stage edition` picks the target-edition
+    /// realisation of each cell and prints the Edition Netlist IR — the
+    /// `--edition <java|bedrock>` flag is required in that mode and
+    /// ignored otherwise (the earlier stages are edition-neutral).
+    /// **Internal / experimental** — the shape of the output is not
+    /// covered by the stable compatibility tier and may change at any time
+    /// as the placement / route / simulator stages land. Requires
+    /// `--experimental-logic-synth` so a caller cannot end up depending on
+    /// it accidentally.
     ///
     /// Exits 0 when the requested stage produced a well-formed IR
     /// (warnings still allowed), 1 on parse failure, I/O error, or any
@@ -157,6 +161,11 @@ enum Command {
         /// the internal surface area (and `--help` output) contained.
         #[arg(long, value_enum, default_value_t = SynthStage::Logic)]
         stage: SynthStage,
+        /// Target edition for the Edition Netlist IR. Required when
+        /// `--stage edition` is set; ignored for `logic` / `netlist`,
+        /// which are edition-neutral by contract.
+        #[arg(long, value_enum)]
+        edition: Option<EditionArg>,
     },
 }
 
@@ -168,6 +177,10 @@ enum SynthStage {
     /// carries no delay per `spec/redstone` "Time model" / "Connection to
     /// the IR and phases".
     Netlist,
+    /// Edition Netlist IR: Edition Cell selection over the Netlist IR
+    /// against `--edition`. The middle tier of `spec/redstone` §14.6's
+    /// three-tier cell library. Still carries no delay.
+    Edition,
 }
 
 #[derive(Copy, Clone, ValueEnum)]
@@ -254,7 +267,8 @@ fn main() -> ExitCode {
             file,
             experimental_logic_synth,
             stage,
-        }) => run_synth(&file, experimental_logic_synth, stage),
+            edition,
+        }) => run_synth(&file, experimental_logic_synth, stage, edition),
         Some(Command::Compile {
             file,
             edition,
@@ -670,7 +684,12 @@ fn run_lower(file: &Path, format: LowerFormat) -> ExitCode {
     }
 }
 
-fn run_synth(file: &Path, experimental_flag: bool, stage: SynthStage) -> ExitCode {
+fn run_synth(
+    file: &Path,
+    experimental_flag: bool,
+    stage: SynthStage,
+    edition: Option<EditionArg>,
+) -> ExitCode {
     if !experimental_flag {
         // Gated behind `--experimental-logic-synth` because the redstone
         // pipeline is still Internal-tier (`spec/compatibility`) — the
@@ -735,6 +754,18 @@ fn run_synth(file: &Path, experimental_flag: bool, stage: SynthStage) -> ExitCod
         SynthStage::Netlist => {
             let netlist = compile_netlist(&synth.scoped);
             (serde_json::to_string_pretty(&netlist), "Netlist IR")
+        }
+        SynthStage::Edition => {
+            let Some(edition_arg) = edition else {
+                eprintln!("error: `cairn synth --stage edition` requires --edition <java|bedrock>");
+                return ExitCode::from(2);
+            };
+            let netlist = compile_netlist(&synth.scoped);
+            let edition_netlist = compile_edition_netlist(&netlist, edition_arg.as_edition());
+            (
+                serde_json::to_string_pretty(&edition_netlist),
+                "Edition Netlist IR",
+            )
         }
     };
     match json {
