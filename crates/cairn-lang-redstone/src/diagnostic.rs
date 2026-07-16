@@ -8,7 +8,7 @@
 //! the shared [`Severity`] rendering and the `code.as_str()` convention
 //! adopted below.
 //!
-//! Message prose follows the self-correction triple from `spec/lint` §11.4:
+//! Message prose follows the self-correction triple from `spec/lint` §11:
 //! what is wrong, valid alternatives, suggested fix. The primary string
 //! carries the first clause; the alternatives and the suggestion land in
 //! [`DiagnosticNote`]s so the human-readable output still reads as three
@@ -60,6 +60,22 @@ pub enum DiagnosticCode {
     /// synthesised DAG is still valid; an unused signal is usually a typo
     /// on the reference side but occasionally an intentional scratch.
     LogicUnusedSignal,
+    /// A scope has redstone cells to place but the enclosing struct / def
+    /// declared no `circuit region=<label> void=<N>` reservation (or the
+    /// enclosing scope had no `size=WxH` for the reservation to sit
+    /// inside). Fail-loud per `spec/redstone` §14.5 — silently placing
+    /// cells "somewhere" would produce voxels outside the author's
+    /// declared footprint. Fix: add a `circuit region=` line whose
+    /// `region=` label names a member kind that lives in the scope's
+    /// footprint, and give the enclosing scope a `size=WxH` header.
+    NoCircuitRegion,
+    /// The synthesised netlist for a scope needs more area than its
+    /// `circuit region=<label> void=<N>` reservation offers.
+    /// `spec/redstone` §14.5's canonical failure: routing cannot be
+    /// confined to the reserved region, so the pass fails loud with the
+    /// self-correction triple ("increase `void`", "enlarge region",
+    /// "split into multiple `circuit` blocks").
+    RouteCongestion,
 }
 
 impl DiagnosticCode {
@@ -74,6 +90,8 @@ impl DiagnosticCode {
             Self::LogicCycle => "E_LOGIC_CYCLE",
             Self::LogicUnsupportedPrimitive => "E_LOGIC_UNSUPPORTED_PRIMITIVE",
             Self::LogicUnusedSignal => "W_LOGIC_UNUSED_SIGNAL",
+            Self::NoCircuitRegion => "E_NO_CIRCUIT_REGION",
+            Self::RouteCongestion => "E_ROUTE_CONGESTION",
         }
     }
 
@@ -85,7 +103,9 @@ impl DiagnosticCode {
             Self::LogicUnboundSignal
             | Self::LogicMultipleDrivers
             | Self::LogicCycle
-            | Self::LogicUnsupportedPrimitive => Severity::Error,
+            | Self::LogicUnsupportedPrimitive
+            | Self::NoCircuitRegion
+            | Self::RouteCongestion => Severity::Error,
             Self::LogicUnusedSignal => Severity::Warning,
         }
     }

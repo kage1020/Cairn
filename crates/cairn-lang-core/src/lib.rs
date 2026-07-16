@@ -32,7 +32,10 @@ pub use ids::{
     IdError, KeyConstructError, KeyParseError, PlaceId, PortId, SiteName, WalkwayEndpoint,
     WalkwayScopeKey,
 };
-pub use intent::{IntentModule, Member, MemberRole, SemanticLevel, lower};
+pub use intent::{
+    CircuitRegion, IntentModule, Member, MemberRole, ScopeKind, SemanticLevel, circuit_regions,
+    lower,
+};
 pub use lex::{Token, TokenKind, lex};
 pub use parse::parse;
 pub use resolve::{Resolution, ThemeBinding, VersionAxes, compute_axes, resolve};
