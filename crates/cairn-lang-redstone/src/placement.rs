@@ -194,10 +194,7 @@ fn missing_region_diagnostic(source: &EditionNetlistIr) -> Diagnostic {
     )
 }
 
-fn congestion_diagnostic(
-    reservation: &CircuitRegionReservation,
-    required_area: u64,
-) -> Diagnostic {
+fn congestion_diagnostic(reservation: &CircuitRegionReservation, required_area: u64) -> Diagnostic {
     let reserved_area = reservation.reserved_area();
     // `reserved_area > 0` by construction: `parse_circuit_region_fixture`
     // rejects `void=0`, and `intent::Size` guarantees `NonZeroU32` for
