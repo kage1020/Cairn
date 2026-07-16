@@ -346,8 +346,8 @@ fn json_dump_carries_region_and_coord_and_omits_reserved_fields() {
         json.contains("\"label\":\"floor\""),
         "region label missing: {json}",
     );
-    assert!(json.contains("\"void\":2"), "region void missing: {json}",);
-    assert!(json.contains("\"coord\":{"), "coord object missing: {json}",);
+    assert!(json.contains("\"void\":2"), "region void missing: {json}");
+    assert!(json.contains("\"coord\":{"), "coord object missing: {json}");
     assert!(
         !json.contains("\"wire_length\""),
         "wire_length must be elided today: {json}",
