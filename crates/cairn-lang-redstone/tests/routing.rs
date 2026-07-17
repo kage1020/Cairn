@@ -3,11 +3,12 @@
 //! Locks the observable behaviours of the Steiner-routing slice
 //! (`spec/redstone` §14.5, stage 2 of place-and-route): the
 //! `examples/redstone-door.crn` happy path (per edition), single-cell
-//! `wire_length` attribution, multi-cell cascades, fanout with shared
-//! trees, `E_ROUTE_CONGESTION` when the post-routing footprint
-//! exceeds the reservation, pass-through of scopes elided by upstream
-//! stages, the JSON wire form growing a `wire_length` field, and
-//! per-scope independence when a module carries more than one scope.
+//! `wire_length` attribution, multi-cell cascades with L-shape nets
+//! whose `wire_length` values are pinned to exact Manhattan sums,
+//! `E_ROUTE_CONGESTION` when the post-routing footprint exceeds the
+//! reservation, pass-through of scopes elided by upstream stages,
+//! the JSON wire form growing a `wire_length` field, and per-scope
+//! independence when a module carries more than one scope.
 
 use std::path::PathBuf;
 
@@ -90,8 +91,8 @@ fn redstone_door_java_fills_wire_length_from_input_pads() {
 
 /// AC2 — the same example compiled for Bedrock produces the same
 /// `wire_length` because the pad and cell coordinates are
-/// edition-independent by the M6-PR4 layout contract. Only the cell
-/// tag and edition field differ from AC1.
+/// edition-independent by the placement-pass layout contract. Only
+/// the cell tag and edition field differ from AC1.
 #[test]
 fn redstone_door_bedrock_matches_java_wire_length() {
     let source = load_example("redstone-door.crn");
@@ -113,14 +114,25 @@ fn redstone_door_bedrock_matches_java_wire_length() {
     }
 }
 
-/// AC3 — a scope whose logic produces three distinct cells fills
-/// every cell's `wire_length` field. Cells sit at `(0, 0, 0)`,
-/// `(1, 0, 0)`, `(2, 0, 0)` per placement's topological order, and
-/// their driver sources map to input pads at `(0, 0, 1)` / `(0, 0,
-/// 2)` and earlier cell coords, so every `wire_length` is a small
-/// positive Manhattan sum. `delay_ticks` stays `None` at every cell.
+/// AC3 — a scope whose logic produces three cascaded cells fills
+/// every cell's `wire_length` with a pinned Manhattan sum, so a
+/// regression in either the input-pad coordinate convention or the
+/// per-driver attribution walk trips this test. Cell placement lays
+/// cells at `x = i, y = 0, z = 0`, and input pads land at
+/// `(0, 0, 1+i)`, so the exact sums are:
+///
+/// - cell[0] `sig.and_ab = sig.a and sig.b`: `M((0,0,1)→(0,0,0)) +
+///   M((0,0,2)→(0,0,0)) = 1 + 2 = 3`.
+/// - cell[1] `sig.or_ab  = sig.a or sig.b`:  same source pair,
+///   different cell coord: `M((0,0,1)→(1,0,0)) + M((0,0,2)→(1,0,0))
+///   = 2 + 3 = 5`. This is the L-shape case (dx=1, dz≥1) that the
+///   `draw_l_shape` axis order regression would otherwise sneak past.
+/// - cell[2] `sig.combined = sig.and_ab and sig.or_ab`: cell-to-cell
+///   drivers: `M((0,0,0)→(2,0,0)) + M((1,0,0)→(2,0,0)) = 2 + 1 = 3`.
+///
+/// `delay_ticks` stays `None` at every cell.
 #[test]
-fn multi_cell_scope_populates_wire_length_everywhere() {
+fn multi_cell_scope_pins_wire_length_including_l_shape_nets() {
     let source = r"
 theme t:
   slot wall -> @oak_planks
@@ -154,14 +166,16 @@ struct sim size=7x5
         .find(|e| e.name == "sim")
         .expect("sim scope");
     assert_eq!(entry.ir.cells.len(), 3);
-    for (i, cell) in entry.ir.cells.iter().enumerate() {
-        assert!(
-            cell.wire_length.is_some(),
-            "cell[{i}] must carry a routed wire_length, got None",
-        );
+    // cell[0] at (0,0,0), input pads at (0,0,1) and (0,0,2).
+    assert_eq!(entry.ir.cells[0].wire_length, Some(3));
+    // cell[1] at (1,0,0), same input pad pair — L-shape drivers.
+    assert_eq!(entry.ir.cells[1].wire_length, Some(5));
+    // cell[2] at (2,0,0), driven by cell[0]=(0,0,0) and cell[1]=(1,0,0).
+    assert_eq!(entry.ir.cells[2].wire_length, Some(3));
+    for cell in &entry.ir.cells {
         assert!(
             cell.delay_ticks.is_none(),
-            "cell[{i}] must not carry delay_ticks (stage 3 is future work), got {:?}",
+            "delay_ticks must not appear (stage 3 is future work), got {:?}",
             cell.delay_ticks,
         );
     }
@@ -171,12 +185,13 @@ struct sim size=7x5
 /// budget boundary (`cells.len() * CELL_FOOTPRINT == reserved_area`)
 /// passes placement but fires `E_ROUTE_CONGESTION` once the routing
 /// pass adds any wire on top. The reservation footprint fits the
-/// M6-PR4 pessimistic estimate exactly, so the routing pass's stricter
-/// post-routing accounting is what promotes this to a failure. The
-/// primary quotes the ratio and reservation shape in the "routed
-/// netlist occupies ~N.Mx..." form, and the failed scope is elided
-/// from the output so a downstream pass cannot silently consume a
-/// partial layout.
+/// placement-pass pessimistic estimate exactly, so the routing pass's
+/// stricter post-routing accounting is what promotes this to a
+/// failure. The primary quotes the ratio, the scope name, and the
+/// reservation shape in the "routed netlist for struct `<name>`
+/// occupies ~N.Mx..." form, and the failed scope is elided from the
+/// output so a downstream pass cannot silently consume a partial
+/// layout.
 #[test]
 fn post_routing_congestion_fires_route_congestion_and_elides_scope() {
     // 3 cells × 4 blocks = 12 required cell area vs 4 × 3 × 1 = 12
@@ -217,8 +232,13 @@ struct pack size=4x3
     let d = congestion[0];
     assert_eq!(d.severity, Severity::Error);
     assert!(
-        d.primary.starts_with("routed netlist occupies "),
+        d.primary.starts_with("routed netlist for "),
         "primary should mark the routing-side origin, got {:?}",
+        d.primary,
+    );
+    assert!(
+        d.primary.contains("struct `pack`"),
+        "primary should name the failed scope, got {:?}",
         d.primary,
     );
     assert!(
@@ -262,7 +282,6 @@ fn empty_placement_ir_produces_empty_routing_output() {
     let scoped = ScopedPlacementIr::new();
     let routed = compile_routing(&scoped);
     assert!(routed.diagnostics.is_empty());
-    assert!(routed.scoped.is_empty());
     assert!(routed.scoped.scopes.is_empty());
 }
 
@@ -271,7 +290,7 @@ fn empty_placement_ir_produces_empty_routing_output() {
 /// is elided by `compile_placement` already, so `compile_routing`
 /// never sees it. The routing output must still be diagnostic-clean.
 #[test]
-fn identity_wire_scope_reaches_routing_pass_as_empty_and_stays_empty() {
+fn identity_wire_scope_is_elided_before_routing() {
     let source = r"
 theme t:
   slot wall -> @oak_planks
@@ -300,7 +319,8 @@ struct wire size=5x5
 /// `"wire_length": N` field on every cell object, while `delay_ticks`
 /// stays elided (`skip_serializing_if = "Option::is_none"`). Pins the
 /// wire-form contract that distinguishes `--stage placement` (no
-/// `wire_length`) from `--stage route` (`wire_length` present) output.
+/// `wire_length`) from `--stage route` (`wire_length` present)
+/// output.
 #[test]
 fn json_dump_carries_wire_length_and_omits_delay_ticks() {
     let source = load_example("redstone-door.crn");
@@ -326,6 +346,58 @@ fn json_dump_carries_wire_length_and_omits_delay_ticks() {
         json.contains("\"coord\":{"),
         "coord object should still be present: {json}",
     );
+}
+
+/// `AC7b` — routing must not perturb any Placement IR field other than
+/// `wire_length`. Serialise the placement and routing outputs to
+/// compact JSON, strip the routing side's `,"wire_length":<int>`
+/// entries, and byte-compare the remainder. Pins the "field-write
+/// only" wire-form contract the pass docstring on `PlacedCellNode`
+/// declares: a downstream JSON consumer that inspects
+/// `--stage placement` output today should see byte-identical bytes
+/// from `--stage route` once `wire_length` is peeled off, so field
+/// reordering, added/removed fields, or key-name typos in unrelated
+/// structs trip here even when the JSON parses equivalently.
+#[test]
+fn routing_leaves_placement_fields_byte_identical_apart_from_wire_length() {
+    let source = load_example("redstone-door.crn");
+    let placement = placement_from_source(&source, Edition::Java);
+    let placement_json = serde_json::to_string(&placement).expect("serialise placement");
+
+    let routed = compile_routing(&placement);
+    assert!(
+        routed.diagnostics.is_empty(),
+        "clean fixture must route without diagnostics: {:?}",
+        routed.diagnostics,
+    );
+    let routed_json = serde_json::to_string(&routed.scoped).expect("serialise routed");
+
+    // `wire_length` sits after `coord` in `PlacedCellNode`'s struct
+    // declaration and `serde` emits fields in declaration order, so
+    // in compact JSON it always shows up as `,"wire_length":<int>`.
+    // Strip that pattern and the routed and placement bytes must
+    // match exactly.
+    let stripped_routed = strip_wire_length(&routed_json);
+    assert_eq!(
+        stripped_routed, placement_json,
+        "routing must not perturb placement fields — routed compact JSON with wire_length stripped should match placement compact JSON byte-for-byte",
+    );
+}
+
+fn strip_wire_length(compact: &str) -> String {
+    const PATTERN: &str = ",\"wire_length\":";
+    let mut out = String::with_capacity(compact.len());
+    let mut rest = compact;
+    while let Some(idx) = rest.find(PATTERN) {
+        out.push_str(&rest[..idx]);
+        let after = &rest[idx + PATTERN.len()..];
+        let end = after
+            .find(|c: char| !c.is_ascii_digit())
+            .unwrap_or(after.len());
+        rest = &after[end..];
+    }
+    out.push_str(rest);
+    out
 }
 
 /// AC8 — two non-empty scopes route independently. A clean scope
@@ -377,13 +449,15 @@ struct beta size=4x3
         routed.scoped.scopes.iter().all(|e| e.name != "beta"),
         "beta must elide because routing exceeds the reservation",
     );
+    let beta_congestion = routed
+        .diagnostics
+        .iter()
+        .find(|d| d.code == DiagnosticCode::RouteCongestion)
+        .expect("beta's congestion must surface as E_ROUTE_CONGESTION");
     assert!(
-        routed
-            .diagnostics
-            .iter()
-            .any(|d| d.code == DiagnosticCode::RouteCongestion),
-        "beta's congestion must surface as E_ROUTE_CONGESTION: {:?}",
-        routed.diagnostics,
+        beta_congestion.primary.contains("struct `beta`"),
+        "congestion primary must name the failed scope, got {:?}",
+        beta_congestion.primary,
     );
 }
 

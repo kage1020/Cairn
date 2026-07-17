@@ -869,10 +869,14 @@ fn dispatch_synth_stage(
 
 /// Enforce the `--edition <java|bedrock>` requirement for the
 /// edition-tagged stages. The stage name is baked into the error
-/// message so a caller sees exactly which stage tripped the gate.
+/// message so a caller sees exactly which stage tripped the gate,
+/// plus a short "why" hint so a caller who doesn't know the pipeline
+/// still connects the flag to the edition-specific cell library.
 fn require_edition(edition: Option<EditionArg>, stage_name: &str) -> Result<EditionArg, ExitCode> {
     edition.ok_or_else(|| {
-        eprintln!("error: `cairn synth --stage {stage_name}` requires --edition <java|bedrock>");
+        eprintln!(
+            "error: `cairn synth --stage {stage_name}` requires --edition <java|bedrock> (this stage picks the target-edition cell realisation, so the flag is not optional)",
+        );
         ExitCode::from(2)
     })
 }

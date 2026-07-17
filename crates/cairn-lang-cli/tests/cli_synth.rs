@@ -509,6 +509,10 @@ fn cli_synth_stage_route_requires_edition_flag() {
         stderr.contains("--edition"),
         "usage hint should name the missing flag, got: {stderr}",
     );
+    assert!(
+        stderr.contains("--stage route"),
+        "usage hint should name the tripped stage so a caller cannot mis-attribute the error, got: {stderr}",
+    );
 }
 
 #[test]
@@ -546,8 +550,8 @@ fn cli_synth_stage_route_congestion_exits_one() {
         "expected E_ROUTE_CONGESTION on stderr, got: {stderr}",
     );
     assert!(
-        stderr.contains("routed netlist occupies"),
-        "primary should mark the routing-side origin, got: {stderr}",
+        stderr.contains("routed netlist for struct `pack`"),
+        "primary should name the routing origin and failed scope, got: {stderr}",
     );
 }
 

@@ -13,39 +13,57 @@
 //!
 //! The v1 algorithm is deliberately minimal:
 //!
-//! - **Net collection.** Each cell driver, each output driver, and
-//!   every unused input becomes a `(source_coord, [sink_coord…])`
-//!   entry. Source coordinates are `NetRef::Input(i) →
-//!   input_pad(i, region)` (left edge, z = 1 + i, saturating at
-//!   `depth-1` for degenerate regions) and `NetRef::Cell(j) →
-//!   cells[j].coord`. Output pad coordinates are the right edge,
-//!   z = 1 + k, saturating similarly.
-//! - **Steiner tree.** Kou-Markowsky-style rectilinear minimum
-//!   spanning tree over the `{source} ∪ sinks` terminal set — Kruskal
-//!   with union-find on the complete Manhattan graph, then each MST
-//!   edge is rendered as an L-shape (x-then-z-then-y, deterministic
-//!   for regression stability) into the occupancy set.
+//! - **Net collection.** Each cell driver produces one sink entry on
+//!   its driver's net (`NetRef::Input(i)` or `NetRef::Cell(j)`), and
+//!   each output driver produces one sink entry on its actuator's
+//!   net. Unused inputs (a sensor whose signal reaches no cell or
+//!   output) still contribute their pad coordinate to the occupancy
+//!   set — otherwise a downstream congestion re-check would
+//!   understate the routed area — but they add no net because there
+//!   is nothing to route from them. Source coordinates are
+//!   `NetRef::Input(i) → input_pad(i, region)` (left edge, z = 1 + i,
+//!   saturating at `depth-1` for pathological regions — see
+//!   [`input_pad`]) and `NetRef::Cell(j) → cells[j].coord`. Output
+//!   pad coordinates are the right edge, z = 1 + k, saturating
+//!   similarly.
+//! - **Steiner tree.** Rectilinear minimum spanning tree over the
+//!   `{source} ∪ sinks` terminal set — Kruskal with union-find on
+//!   the complete Manhattan graph, then each MST edge is rendered as
+//!   an L-shape (x-then-z-then-y, deterministic for regression
+//!   stability) into the occupancy set. This is the Kou-Markowsky-Berman
+//!   (KMB) approximation truncated at its second stage; the third
+//!   KMB stage (Steiner-point insertion on the drawn edges) is not
+//!   run here because the delay-insertion pass (stage 3, §14.4) only
+//!   consumes the per-sink Manhattan sum, so the extra work would
+//!   not shift a downstream decision.
 //! - **Occupancy.** A per-scope `HashSet<CellCoord>` seeded with
 //!   every cell coord, every input pad, and every output pad, then
 //!   grown by each drawn L-shape. Duplicate visits share (Steiner
-//!   fanout is the whole point). Cross-net overlap is tolerated in
-//!   v1; the crossing-legalization pass (stage 4 of §14.5) is what
-//!   promotes those to a `RouteLayer::Bridge` / `Via` escape in a
-//!   later PR.
+//!   fanout is the whole point). If seeding itself trips a duplicate
+//!   — a pad collapsed onto a cell coord or another pad because the
+//!   reservation cannot fit the pad row — the pass fires
+//!   `E_ROUTE_CONGESTION` immediately with a "pad layout" primary
+//!   rather than a silent misroute. Cross-net overlap between
+//!   distinct signals during Steiner draw is tolerated in v1; the
+//!   crossing-legalization pass (stage 4 of §14.5) promotes those
+//!   to a `RouteLayer::Bridge` / `Via` escape in a later PR.
 //! - **`wire_length` attribution.** For every cell, `wire_length =
 //!   sum over drivers of Manhattan(driver-source-coord, cell.coord)`.
 //!   The tree-total path is not attributed per-sink today because the
-//!   downstream delay-insertion pass (stage 3, §14.4) uses the sum of
-//!   Manhattan distances as its input, and re-tree-walking here would
+//!   downstream delay-insertion pass (stage 3, §14.4) consumes the
+//!   sum of Manhattan distances, and re-tree-walking here would
 //!   double the work without shifting the delay decision.
-//! - **Congestion.** After every net is laid, `occupancy.len() +
-//!   cell_footprint > reserved_area` fires `E_ROUTE_CONGESTION`
-//!   against the reservation span. The primary message differs from
-//!   the placement-pass version so a downstream reader can tell whether
-//!   the pessimistic cell-only budget or the actual routed layout was
-//!   the trigger. Failed scopes are elided from the output list — the
-//!   same fail-loud policy [`crate::placement::compile_placement`]
-//!   applies to placement failures.
+//! - **Congestion.** After every net is laid,
+//!   `cells.len() * CELL_FOOTPRINT + wire_only_coords > reserved_area`
+//!   fires `E_ROUTE_CONGESTION` against the reservation span. The
+//!   primary message differs from the placement-pass version so a
+//!   downstream reader can tell whether the pessimistic cell-only
+//!   budget or the actual routed layout was the trigger. Failed
+//!   scopes are elided from the output list so a partial
+//!   `wire_length` never reaches the delay-insertion pass — a partial
+//!   attribution would let stage 3 compute delays against a layout
+//!   that no downstream stage can materialise into voxels, silently
+//!   corrupting `assert latency(...)` verification per §14.7.
 //!
 //! Future stages fill the intentional gaps: attenuation-limit
 //! (`E_ATTENUATION_LIMIT`, dust segments > 15) belongs to delay
@@ -62,17 +80,18 @@ use std::collections::HashSet;
 use cairn_lang_core::check::Severity;
 
 use crate::diagnostic::{Diagnostic, DiagnosticCode};
+use crate::logic_ir::ScopeKind;
 use crate::netlist_ir::NetRef;
 use crate::placement_ir::{
     CellCoord, CircuitRegionReservation, PlacementIr, ScopedPlacementIr, ScopedPlacementIrEntry,
 };
 
-/// Per-cell footprint used by the post-routing congestion budget. Kept
-/// in sync with [`crate::placement::CELL_FOOTPRINT`] so a scope that
+/// Per-cell footprint used by the post-routing congestion budget.
+/// Re-exports [`crate::placement::CELL_FOOTPRINT`] so a scope that
 /// placed at the cell-only budget boundary needs at most one Manhattan
 /// segment of new wire to flip to `E_ROUTE_CONGESTION` at this stage —
-/// i.e. the routing pass carries the same footprint model the
-/// placement pass used, and adds wire occupancy on top.
+/// the routing pass carries the same footprint model the placement
+/// pass used and adds wire occupancy on top.
 pub const CELL_FOOTPRINT: u32 = crate::placement::CELL_FOOTPRINT;
 
 /// Output of a [`compile_routing`] run.
@@ -105,19 +124,19 @@ impl RoutingOutput {
 /// Lower a [`ScopedPlacementIr`] into a routed [`ScopedPlacementIr`].
 ///
 /// Reads the reservation from every scope's `region` field rather than
-/// re-consulting the Intent IR: the Placement IR is self-describing
-/// by the M6-PR4 contract, so the routing pass has no `IntentModule`
+/// re-consulting the Intent IR — the Placement IR is self-describing
+/// by construction, so the routing pass has no `IntentModule`
 /// dependency.
 ///
 /// One entry per non-empty [`PlacementIr`] whose routing succeeded;
 /// scopes whose routing raises an Error-severity diagnostic (today,
-/// only `E_ROUTE_CONGESTION`) are elided from the output so
-/// downstream passes cannot silently accept a partial layout.
+/// only `E_ROUTE_CONGESTION`) are elided from the output so a partial
+/// `wire_length` cannot pollute the delay-insertion pass downstream.
 #[must_use]
 pub fn compile_routing(placement: &ScopedPlacementIr) -> RoutingOutput {
     let mut out = RoutingOutput::new();
     for entry in &placement.scopes {
-        match route_scope(&entry.ir) {
+        match route_scope(entry) {
             Ok(ir) => {
                 out.scoped.scopes.push(ScopedPlacementIrEntry {
                     kind: entry.kind,
@@ -135,18 +154,27 @@ pub fn compile_routing(placement: &ScopedPlacementIr) -> RoutingOutput {
 /// Error-severity diagnostic on failure.
 type ScopeRouting = Result<PlacementIr, Diagnostic>;
 
-fn route_scope(source: &PlacementIr) -> ScopeRouting {
+fn route_scope(entry: &ScopedPlacementIrEntry) -> ScopeRouting {
+    let source = &entry.ir;
     // Defensive pass-through: a scope with no cells cannot be laid
     // out further than placement already did. `ScopedPlacementIr::push`
-    // elides these on the input side (M6-PR4 invariant), so the
-    // branch is a belt-and-braces for hand-built IRs.
+    // elides these on the input side, so this branch is a
+    // belt-and-braces for hand-built IRs.
     if source.cells.is_empty() {
         return Ok(source.clone());
     }
     let Some(region) = source.region.clone() else {
-        // Same rationale: placement fires `E_NO_CIRCUIT_REGION` and
-        // elides the scope before it can reach the routing pass, so
-        // this branch is defensive for hand-built IRs.
+        // The upstream placement pass fires `E_NO_CIRCUIT_REGION` and
+        // elides any scope with cells but no region before it can
+        // reach the routing pass. A hand-built IR reaching here with
+        // cells and no region is a caller-side bug — assert loud in
+        // debug builds so a fixture regression trips fast, then fall
+        // through with a pass-through in release so a downstream
+        // consumer still sees deterministic output.
+        debug_assert!(
+            source.cells.is_empty(),
+            "route_scope received a PlacementIr with cells but no region — placement should have elided it",
+        );
         return Ok(source.clone());
     };
 
@@ -163,18 +191,49 @@ fn route_scope(source: &PlacementIr) -> ScopeRouting {
             NetRef::Cell(j) => {
                 // `j < ir.cells.len()` by the topological invariant
                 // carried across every prior IR stage (`NetRef::Cell(j)`
-                // in `cells[i]` satisfies `j < i`). A clamp keeps this
-                // defensive against hand-built IRs.
+                // in `cells[i]` satisfies `j < i`). Assert loud in
+                // debug builds so a fixture that breaks the invariant
+                // is caught immediately; in release, saturate the
+                // lookup to the last cell so a caller-side bug still
+                // produces deterministic output rather than a panic.
+                debug_assert!(
+                    (j as usize) < cell_coords.len(),
+                    "NetRef::Cell({j}) out of range (cells.len()={}) — topological invariant broken",
+                    cell_coords.len(),
+                );
                 cell_coords
                     .get(j as usize)
                     .copied()
-                    .unwrap_or(CellCoord { x: 0, y: 0, z: 0 })
+                    .unwrap_or_else(|| *cell_coords.last().expect("cells.is_empty checked above"))
             }
         }
     };
 
-    // Collect nets: source → sink list. `HashMap` is deterministic
-    // because we sort keys before iterating.
+    // Occupancy seed: every cell coord, then every input pad, then
+    // every output pad. A duplicate insert means the reservation
+    // cannot fit the pad row without collapsing pads onto a cell or
+    // another pad — that is a real overflow the routing pass owns,
+    // not a silent misroute, so fire `E_ROUTE_CONGESTION` with a
+    // "pad layout" primary immediately.
+    let mut occupancy: HashSet<CellCoord> = HashSet::with_capacity(ir.cells.len() * 4);
+    for coord in &cell_coords {
+        occupancy.insert(*coord);
+    }
+    for i in 0..ir.inputs.len() {
+        let pad = input_pad(i, &region);
+        if !occupancy.insert(pad) {
+            return Err(pad_overlap_diagnostic(entry, &region, "input", i, pad));
+        }
+    }
+    for k in 0..ir.outputs.len() {
+        let pad = output_pad(k, &region);
+        if !occupancy.insert(pad) {
+            return Err(pad_overlap_diagnostic(entry, &region, "output", k, pad));
+        }
+    }
+
+    // Collect nets: source → sink list. `HashMap` order is not
+    // relied on — we sort the key set below before laying wires.
     let mut nets: HashMap<NetRef, Vec<CellCoord>> = HashMap::new();
     for (i, cell) in ir.cells.iter().enumerate() {
         let sink = cell_coords[i];
@@ -187,26 +246,13 @@ fn route_scope(source: &PlacementIr) -> ScopeRouting {
         nets.entry(output.driver).or_default().push(sink);
     }
 
-    // Occupancy seed: every cell coord, every input pad, every output
-    // pad. Cell footprint is applied as an area budget below (not
-    // per-block) because the placement pass already staked out cells
-    // pessimistically at 4 blocks each.
-    let mut occupancy: HashSet<CellCoord> = HashSet::with_capacity(ir.cells.len() * 4);
-    for coord in &cell_coords {
-        occupancy.insert(*coord);
-    }
-    for i in 0..ir.inputs.len() {
-        occupancy.insert(input_pad(i, &region));
-    }
-    for k in 0..ir.outputs.len() {
-        occupancy.insert(output_pad(k, &region));
-    }
-
-    // Process nets in a deterministic order: fanout descending, tie by
-    // NetRef key ascending. Higher-fanout nets should stake claim on
-    // the shortest L-shape first so a lower-fanout net does not steer
-    // the shared segments through a longer L. Deterministic tie-break
-    // pins the regression story.
+    // Process nets in a deterministic order: fanout descending, tie
+    // by NetRef key ascending. Sorting is inert against the v1
+    // occupancy model (both L-shape elbows have identical Manhattan
+    // length and `draw_l_shape` picks a fixed axis order), but pins
+    // a stable schedule so a follow-up pass that consults occupancy
+    // for elbow selection has one deterministic order to slot into
+    // without rewriting the caller.
     let mut net_order: Vec<NetRef> = nets.keys().copied().collect();
     net_order.sort_by(|a, b| {
         let fa = nets[a].len();
@@ -224,27 +270,7 @@ fn route_scope(source: &PlacementIr) -> ScopeRouting {
         route_net(source_coord, sinks, &mut occupancy);
     }
 
-    // Attribute wire_length per cell: sum of Manhattan(driver source,
-    // cell coord) over drivers. The Steiner-shared tree total is used
-    // for congestion accounting above; per-sink Manhattan is what the
-    // delay-insertion pass (§14.4) will consume, so attributing it
-    // here saves a second walk in the follow-up PR. Compute into a
-    // side vector first so `ir.cells` can be borrowed immutably while
-    // the driver sources are looked up, then commit in a mutable
-    // pass.
-    let wire_lengths: Vec<u32> = ir
-        .cells
-        .iter()
-        .zip(cell_coords.iter())
-        .map(|(cell, &sink)| {
-            cell.drivers.iter().fold(0u32, |acc, driver| {
-                acc.saturating_add(manhattan(source_of_net(driver.net), sink))
-            })
-        })
-        .collect();
-    for (cell, len) in ir.cells.iter_mut().zip(wire_lengths) {
-        cell.wire_length = Some(len);
-    }
+    attribute_wire_lengths(&mut ir, &cell_coords, &source_of_net);
 
     // Congestion check against the actual post-routing footprint.
     // `cells.len() * CELL_FOOTPRINT` carries forward the pessimistic
@@ -261,10 +287,47 @@ fn route_scope(source: &PlacementIr) -> ScopeRouting {
     let used = cell_budget.saturating_add(wire_only);
     let reserved = region.reserved_area();
     if used > reserved {
-        return Err(congestion_diagnostic(&region, used));
+        return Err(congestion_diagnostic(entry, &region, used));
     }
 
     Ok(ir)
+}
+
+/// Fill every cell's `wire_length` with the sum of Manhattan
+/// distances from each driver's source into that cell. The
+/// Steiner-shared tree total is used for congestion accounting at
+/// the routing-pass level; per-sink Manhattan is what the
+/// delay-insertion pass (§14.4) will consume, so attributing it
+/// here saves a second walk in the follow-up PR.
+///
+/// Computes into a side vector first so `ir.cells` can be borrowed
+/// immutably while the driver sources are looked up through
+/// `source_of_net`, then commits in a mutable pass. Asserts loud
+/// in debug builds if any cell already carries a `Some(_)`
+/// `wire_length` — that would mean the caller routed twice, which
+/// the phase table on `PlacedCellNode` forbids.
+fn attribute_wire_lengths<F>(ir: &mut PlacementIr, cell_coords: &[CellCoord], source_of_net: &F)
+where
+    F: Fn(NetRef) -> CellCoord,
+{
+    let wire_lengths: Vec<u32> = ir
+        .cells
+        .iter()
+        .zip(cell_coords.iter())
+        .map(|(cell, &sink)| {
+            cell.drivers.iter().fold(0u32, |acc, driver| {
+                acc.saturating_add(manhattan(source_of_net(driver.net), sink))
+            })
+        })
+        .collect();
+    for (cell, len) in ir.cells.iter_mut().zip(wire_lengths) {
+        debug_assert!(
+            cell.wire_length.is_none(),
+            "route_scope re-routing a PlacedCellNode whose wire_length is already Some({:?}) — routing should run once per placement",
+            cell.wire_length,
+        );
+        cell.wire_length = Some(len);
+    }
 }
 
 fn net_ref_key(net: NetRef) -> (u8, u32) {
@@ -276,21 +339,21 @@ fn net_ref_key(net: NetRef) -> (u8, u32) {
 
 /// v1 input-pad coordinate: left edge (`x=0`), first service layer
 /// (`y=0`), z-axis increasing as the input index grows. Saturates at
-/// `depth-1` for degenerate `depth=1` regions — those regions cannot
-/// fit even one input pad past the cell row without collision, and
-/// the resulting overlap surfaces as `E_ROUTE_CONGESTION` downstream
-/// rather than a silent misroute. Pinning the coordinate here is a v1
-/// convention; once a subsequent PR needs pad coords outside routing,
-/// `input_pads` joins [`PlacementIr`] as a `#[non_exhaustive]`-safe
-/// field.
+/// `depth-1` whenever the input count would push z past the region's
+/// z-extent (`inputs.len() + 1 > depth`); the resulting overlap is
+/// caught at seeding time and surfaces as `E_ROUTE_CONGESTION`
+/// rather than a silent misroute. Pinning the coordinate here is a
+/// v1 convention; once a subsequent PR needs pad coords outside
+/// routing, `input_pads` joins [`PlacementIr`] as a
+/// `#[non_exhaustive]`-safe field.
 fn input_pad(i: usize, region: &CircuitRegionReservation) -> CellCoord {
     let raw = u32::try_from(i.saturating_add(1)).unwrap_or(u32::MAX);
     let z = raw.min(region.depth.saturating_sub(1));
     CellCoord { x: 0, y: 0, z }
 }
 
-/// v1 output-pad coordinate: right edge (`x=width-1`), same saturating
-/// z-axis convention as [`input_pad`].
+/// v1 output-pad coordinate: right edge (`x=width-1`), same
+/// saturating z-axis convention as [`input_pad`].
 fn output_pad(k: usize, region: &CircuitRegionReservation) -> CellCoord {
     let raw = u32::try_from(k.saturating_add(1)).unwrap_or(u32::MAX);
     let z = raw.min(region.depth.saturating_sub(1));
@@ -307,8 +370,8 @@ fn manhattan(a: CellCoord, b: CellCoord) -> u32 {
 
 fn route_net(source: CellCoord, sinks: &[CellCoord], occupancy: &mut HashSet<CellCoord>) {
     // Terminal set = source ∪ sinks, deduplicated so a fanout net
-    // whose sinks include the source coordinate (a degenerate hand-built
-    // case) still produces a well-formed MST.
+    // whose sinks include the source coordinate (a degenerate
+    // hand-built case) still produces a well-formed MST.
     let mut terminals: Vec<CellCoord> = Vec::with_capacity(1 + sinks.len());
     terminals.push(source);
     for s in sinks {
@@ -360,9 +423,9 @@ fn union_find(parent: &mut [usize], x: usize) -> usize {
 
 fn draw_l_shape(a: CellCoord, b: CellCoord, occupancy: &mut HashSet<CellCoord>) {
     // Deterministic axis order: x, then z, then y. The routing pass's
-    // regression story pins on this order — a follow-up that picks the
-    // less-congested elbow per net can only firm this up because both
-    // L-shapes have identical Manhattan length by construction.
+    // regression story pins on this order — a follow-up that picks
+    // the less-congested elbow per net can only firm this up because
+    // both L-shapes have identical Manhattan length by construction.
     let mut cur = a;
     occupancy.insert(cur);
     while cur.x != b.x {
@@ -379,20 +442,29 @@ fn draw_l_shape(a: CellCoord, b: CellCoord, occupancy: &mut HashSet<CellCoord>) 
     }
 }
 
-fn congestion_diagnostic(reservation: &CircuitRegionReservation, used: u64) -> Diagnostic {
+fn congestion_diagnostic(
+    entry: &ScopedPlacementIrEntry,
+    reservation: &CircuitRegionReservation,
+    used: u64,
+) -> Diagnostic {
     let reserved = reservation.reserved_area();
-    // `reserved_area > 0` by construction — the placement pass
-    // already screens `width=0` / `depth=0` / `void=0` reservations
-    // out via `E_NO_CIRCUIT_REGION` before this pass runs.
-    debug_assert!(
-        reserved > 0,
-        "reservation.reserved_area() must be > 0 to compare against routed occupancy",
-    );
+    // `reserved_area > 0` is a placement-side invariant (width /
+    // depth are `NonZeroU32` in the Intent IR and `void=0` is refused
+    // by the placement pass). A hand-built IR that reaches here with
+    // `reserved == 0` would panic on the ratio division below —
+    // fall back to a divide-by-zero-free primary that still names
+    // the failed scope so the caller sees a diagnostic rather than
+    // an `ExitCode(101)`.
+    if reserved == 0 {
+        return zero_reservation_diagnostic(entry, reservation);
+    }
     let ratio_x10 = (used.saturating_mul(10)) / reserved;
     let whole = ratio_x10 / 10;
     let tenths = ratio_x10 % 10;
     let primary = format!(
-        "routed netlist occupies ~{whole}.{tenths}x the reserved area (void={void}, region {width}x{depth})",
+        "routed netlist for {kind} `{name}` occupies ~{whole}.{tenths}x the reserved area (void={void}, region {width}x{depth})",
+        kind = scope_kind_label(entry.kind),
+        name = entry.name,
         void = reservation.void,
         width = reservation.width,
         depth = reservation.depth,
@@ -407,4 +479,66 @@ fn congestion_diagnostic(reservation: &CircuitRegionReservation, used: u64) -> D
     );
     debug_assert_eq!(diag.severity, Severity::Error);
     diag
+}
+
+fn pad_overlap_diagnostic(
+    entry: &ScopedPlacementIrEntry,
+    reservation: &CircuitRegionReservation,
+    pad_kind: &str,
+    pad_index: usize,
+    pad_coord: CellCoord,
+) -> Diagnostic {
+    let primary = format!(
+        "routed netlist for {kind} `{name}` cannot fit its {pad_kind} pad #{pad_index} at ({x},{y},{z}) — the reserved area (void={void}, region {width}x{depth}) collapses I/O pads onto a cell coord or another pad",
+        kind = scope_kind_label(entry.kind),
+        name = entry.name,
+        x = pad_coord.x,
+        y = pad_coord.y,
+        z = pad_coord.z,
+        void = reservation.void,
+        width = reservation.width,
+        depth = reservation.depth,
+    );
+    let mut diag = Diagnostic::new(
+        DiagnosticCode::RouteCongestion,
+        reservation.span.clone(),
+        primary,
+    );
+    diag = diag.with_footer(
+        "Fix: enlarge `size=WxH` so `depth >= max(inputs, outputs) + 1`, or split into multiple `circuit` blocks",
+    );
+    debug_assert_eq!(diag.severity, Severity::Error);
+    diag
+}
+
+fn zero_reservation_diagnostic(
+    entry: &ScopedPlacementIrEntry,
+    reservation: &CircuitRegionReservation,
+) -> Diagnostic {
+    let primary = format!(
+        "routed netlist for {kind} `{name}` has a zero-area reservation (void={void}, region {width}x{depth}) — routing cannot lay any wire",
+        kind = scope_kind_label(entry.kind),
+        name = entry.name,
+        void = reservation.void,
+        width = reservation.width,
+        depth = reservation.depth,
+    );
+    let mut diag = Diagnostic::new(
+        DiagnosticCode::RouteCongestion,
+        reservation.span.clone(),
+        primary,
+    );
+    diag = diag.with_footer(
+        "Fix: increase `void`, enlarge region, or split into multiple `circuit` blocks",
+    );
+    debug_assert_eq!(diag.severity, Severity::Error);
+    diag
+}
+
+fn scope_kind_label(kind: ScopeKind) -> &'static str {
+    match kind {
+        ScopeKind::Struct => "struct",
+        ScopeKind::Def => "def",
+        ScopeKind::Site => "site",
+    }
 }
