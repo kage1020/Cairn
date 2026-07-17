@@ -1,0 +1,409 @@
+//! Integration tests for `cairn_lang_redstone::compile_routing`.
+//!
+//! Locks the observable behaviours of the Steiner-routing slice
+//! (`spec/redstone` §14.5, stage 2 of place-and-route): the
+//! `examples/redstone-door.crn` happy path (per edition), single-cell
+//! `wire_length` attribution, multi-cell cascades, fanout with shared
+//! trees, `E_ROUTE_CONGESTION` when the post-routing footprint
+//! exceeds the reservation, pass-through of scopes elided by upstream
+//! stages, the JSON wire form growing a `wire_length` field, and
+//! per-scope independence when a module carries more than one scope.
+
+use std::path::PathBuf;
+
+use cairn_lang_core::Edition;
+use cairn_lang_core::check::Severity;
+use cairn_lang_core::{lower, parse};
+use cairn_lang_redstone::{
+    DiagnosticCode, ScopedPlacementIr, compile_edition_netlist, compile_netlist, compile_placement,
+    compile_routing, synthesize,
+};
+
+fn load_example(name: &str) -> String {
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("..")
+        .join("..")
+        .join("examples")
+        .join(name);
+    std::fs::read_to_string(&path).unwrap_or_else(|err| panic!("read {}: {err}", path.display()))
+}
+
+fn placement_from_source(source: &str, edition: Edition) -> ScopedPlacementIr {
+    let module = parse(source).expect("parse");
+    let intent = lower(&module);
+    let synth = synthesize(&intent);
+    assert!(
+        synth
+            .diagnostics
+            .iter()
+            .all(|d| d.severity != Severity::Error),
+        "fixture must synth cleanly: {:?}",
+        synth.diagnostics,
+    );
+    let netlist = compile_netlist(&synth.scoped);
+    let edition_netlist = compile_edition_netlist(&netlist, edition);
+    let placement = compile_placement(&edition_netlist, &intent);
+    assert!(
+        placement.diagnostics.is_empty(),
+        "fixture must place cleanly (routing tests are downstream of placement): {:?}",
+        placement.diagnostics,
+    );
+    placement.scoped
+}
+
+/// AC1 — `examples/redstone-door.crn` compiled for Java routes its
+/// sole `JavaRepeaterOr` cell with `wire_length = Some(3)`: the sum of
+/// Manhattan distances from each input pad (v1 convention: `(0, 0,
+/// 1+i)`) to the cell coord `(0, 0, 0)` — one step for `sig.step`,
+/// two for `sig.exit`. `delay_ticks` stays `None` (routing does not
+/// insert delay per `spec/redstone` §14.4; that is stage 3).
+#[test]
+fn redstone_door_java_fills_wire_length_from_input_pads() {
+    let source = load_example("redstone-door.crn");
+    let placement = placement_from_source(&source, Edition::Java);
+    let routed = compile_routing(&placement);
+    assert!(
+        routed.diagnostics.is_empty(),
+        "clean example must not raise routing diagnostics: {:?}",
+        routed.diagnostics,
+    );
+
+    let entry = routed
+        .scoped
+        .scopes
+        .iter()
+        .find(|e| e.name == "gatehouse")
+        .expect("gatehouse scope");
+    let ir = &entry.ir;
+    assert_eq!(ir.cells.len(), 1);
+    let cell = &ir.cells[0];
+    assert_eq!(
+        cell.wire_length,
+        Some(3),
+        "wire_length must be Manhattan(step→cell) + Manhattan(exit→cell) = 1 + 2 = 3",
+    );
+    assert!(
+        cell.delay_ticks.is_none(),
+        "delay_ticks stays None: Stage 3 (delay insertion) is a follow-up",
+    );
+}
+
+/// AC2 — the same example compiled for Bedrock produces the same
+/// `wire_length` because the pad and cell coordinates are
+/// edition-independent by the M6-PR4 layout contract. Only the cell
+/// tag and edition field differ from AC1.
+#[test]
+fn redstone_door_bedrock_matches_java_wire_length() {
+    let source = load_example("redstone-door.crn");
+    let java = compile_routing(&placement_from_source(&source, Edition::Java));
+    let bedrock = compile_routing(&placement_from_source(&source, Edition::Bedrock));
+
+    assert_eq!(java.scoped.scopes.len(), bedrock.scoped.scopes.len());
+    for (j, b) in java.scoped.scopes.iter().zip(bedrock.scoped.scopes.iter()) {
+        assert_eq!(j.name, b.name);
+        assert_eq!(j.ir.cells.len(), b.ir.cells.len());
+        for (jc, bc) in j.ir.cells.iter().zip(b.ir.cells.iter()) {
+            assert_eq!(jc.coord, bc.coord);
+            assert_eq!(
+                jc.wire_length, bc.wire_length,
+                "wire_length is edition-independent by construction",
+            );
+            assert_ne!(jc.cell, bc.cell, "cell tag differs per edition");
+        }
+    }
+}
+
+/// AC3 — a scope whose logic produces three distinct cells fills
+/// every cell's `wire_length` field. Cells sit at `(0, 0, 0)`,
+/// `(1, 0, 0)`, `(2, 0, 0)` per placement's topological order, and
+/// their driver sources map to input pads at `(0, 0, 1)` / `(0, 0,
+/// 2)` and earlier cell coords, so every `wire_length` is a small
+/// positive Manhattan sum. `delay_ticks` stays `None` at every cell.
+#[test]
+fn multi_cell_scope_populates_wire_length_everywhere() {
+    let source = r"
+theme t:
+  slot wall -> @oak_planks
+
+struct sim size=7x5
+  floor mat_slot=wall
+
+  pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a
+  pressure_plate id=q at=inside.front  offset=0 y=0 -> sig.b
+
+  logic sig.and_ab   = sig.a and sig.b
+  logic sig.or_ab    = sig.a or sig.b
+  logic sig.combined = sig.and_ab and sig.or_ab
+
+  door id=d side=front at=center mat_slot=wall opened_by=sig.combined
+
+  circuit region=floor void=3
+";
+    let placement = placement_from_source(source, Edition::Java);
+    let routed = compile_routing(&placement);
+    assert!(
+        routed.diagnostics.is_empty(),
+        "clean fixture must not raise routing diagnostics: {:?}",
+        routed.diagnostics,
+    );
+
+    let entry = routed
+        .scoped
+        .scopes
+        .iter()
+        .find(|e| e.name == "sim")
+        .expect("sim scope");
+    assert_eq!(entry.ir.cells.len(), 3);
+    for (i, cell) in entry.ir.cells.iter().enumerate() {
+        assert!(
+            cell.wire_length.is_some(),
+            "cell[{i}] must carry a routed wire_length, got None",
+        );
+        assert!(
+            cell.delay_ticks.is_none(),
+            "cell[{i}] must not carry delay_ticks (stage 3 is future work), got {:?}",
+            cell.delay_ticks,
+        );
+    }
+}
+
+/// AC4 — a scope whose synthesised netlist packs cells to the cell-only
+/// budget boundary (`cells.len() * CELL_FOOTPRINT == reserved_area`)
+/// passes placement but fires `E_ROUTE_CONGESTION` once the routing
+/// pass adds any wire on top. The reservation footprint fits the
+/// M6-PR4 pessimistic estimate exactly, so the routing pass's stricter
+/// post-routing accounting is what promotes this to a failure. The
+/// primary quotes the ratio and reservation shape in the "routed
+/// netlist occupies ~N.Mx..." form, and the failed scope is elided
+/// from the output so a downstream pass cannot silently consume a
+/// partial layout.
+#[test]
+fn post_routing_congestion_fires_route_congestion_and_elides_scope() {
+    // 3 cells × 4 blocks = 12 required cell area vs 4 × 3 × 1 = 12
+    // reserved blocks — placement passes at the boundary, routing
+    // then adds wire and overflows.
+    let source = r"
+theme t:
+  slot wall -> @oak_planks
+
+struct pack size=4x3
+  floor mat_slot=wall
+
+  pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a
+  pressure_plate id=q at=inside.front  offset=0 y=0 -> sig.b
+
+  logic sig.and_ab   = sig.a and sig.b
+  logic sig.or_ab    = sig.a or sig.b
+  logic sig.combined = sig.and_ab and sig.or_ab
+
+  door id=d side=front at=center mat_slot=wall opened_by=sig.combined
+
+  circuit region=floor void=1
+";
+    let placement = placement_from_source(source, Edition::Java);
+    let routed = compile_routing(&placement);
+
+    let congestion: Vec<_> = routed
+        .diagnostics
+        .iter()
+        .filter(|d| d.code == DiagnosticCode::RouteCongestion)
+        .collect();
+    assert_eq!(
+        congestion.len(),
+        1,
+        "expected exactly one E_ROUTE_CONGESTION, got {:?}",
+        routed.diagnostics,
+    );
+    let d = congestion[0];
+    assert_eq!(d.severity, Severity::Error);
+    assert!(
+        d.primary.starts_with("routed netlist occupies "),
+        "primary should mark the routing-side origin, got {:?}",
+        d.primary,
+    );
+    assert!(
+        d.primary.contains("void=1"),
+        "primary should quote the reservation shape, got {:?}",
+        d.primary,
+    );
+    assert!(
+        d.primary.contains("4x3"),
+        "primary should quote the region footprint, got {:?}",
+        d.primary,
+    );
+    let source_at_span = &source[d.span.clone()];
+    assert!(
+        source_at_span.starts_with("circuit region="),
+        "congestion span must anchor to the `circuit region=` line, got {source_at_span:?}",
+    );
+    let footer = d
+        .notes
+        .iter()
+        .find(|n| n.span.is_none())
+        .expect("congestion has a fix footer");
+    for phrase in ["increase", "void", "enlarge", "region", "split", "circuit"] {
+        assert!(
+            footer.message.contains(phrase),
+            "footer should carry the spec §14.5 triple (missing {phrase:?}), got {:?}",
+            footer.message,
+        );
+    }
+    assert!(
+        routed.scoped.scopes.iter().all(|e| e.name != "pack"),
+        "failed scope must be elided from the routing output",
+    );
+}
+
+/// AC5 — an empty `ScopedPlacementIr` (no scopes) routes to an empty
+/// `ScopedPlacementIr` with zero diagnostics: routing is a
+/// per-scope map, so no scopes ⇒ no work ⇒ no findings.
+#[test]
+fn empty_placement_ir_produces_empty_routing_output() {
+    let scoped = ScopedPlacementIr::new();
+    let routed = compile_routing(&scoped);
+    assert!(routed.diagnostics.is_empty());
+    assert!(routed.scoped.is_empty());
+    assert!(routed.scoped.scopes.is_empty());
+}
+
+/// AC6 — a scope whose Placement IR carries inputs and outputs but
+/// no cells (a pressure-plate wired straight to a door via `sig.a`)
+/// is elided by `compile_placement` already, so `compile_routing`
+/// never sees it. The routing output must still be diagnostic-clean.
+#[test]
+fn identity_wire_scope_reaches_routing_pass_as_empty_and_stays_empty() {
+    let source = r"
+theme t:
+  slot wall -> @oak_planks
+  slot door -> @oak_door
+
+struct wire size=5x5
+  floor mat_slot=wall
+  pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a
+  door id=d side=front at=center mat_slot=door opened_by=sig.a
+  circuit region=floor void=2
+";
+    let placement = placement_from_source(source, Edition::Java);
+    let routed = compile_routing(&placement);
+    assert!(
+        routed.diagnostics.is_empty(),
+        "identity-wire scope must not raise routing diagnostics, got {:?}",
+        routed.diagnostics,
+    );
+    assert!(
+        routed.scoped.scopes.iter().all(|e| e.name != "wire"),
+        "identity-wire scope must stay elided in the routed output",
+    );
+}
+
+/// AC7 — the JSON dump of a routed Placement IR carries a
+/// `"wire_length": N` field on every cell object, while `delay_ticks`
+/// stays elided (`skip_serializing_if = "Option::is_none"`). Pins the
+/// wire-form contract that distinguishes `--stage placement` (no
+/// `wire_length`) from `--stage route` (`wire_length` present) output.
+#[test]
+fn json_dump_carries_wire_length_and_omits_delay_ticks() {
+    let source = load_example("redstone-door.crn");
+    let placement = placement_from_source(&source, Edition::Java);
+    let routed = compile_routing(&placement);
+
+    let json = serde_json::to_string(&routed.scoped).expect("serialise");
+    assert!(
+        json.contains("\"wire_length\":"),
+        "wire_length must appear in routed JSON: {json}",
+    );
+    assert!(
+        !json.contains("\"delay_ticks\""),
+        "delay_ticks must be elided at this stage: {json}",
+    );
+    // Sanity: the region and coord shapes carried across from
+    // placement stay intact after routing.
+    assert!(
+        json.contains("\"region\":{"),
+        "region object should still be present: {json}",
+    );
+    assert!(
+        json.contains("\"coord\":{"),
+        "coord object should still be present: {json}",
+    );
+}
+
+/// AC8 — two non-empty scopes route independently. A clean scope
+/// passes through with `wire_length` populated; a scope that fails
+/// congestion elides without poisoning the sibling. The scope order
+/// on the output matches the input order for the survivors.
+#[test]
+fn multiple_scopes_route_independently() {
+    let source = r"
+theme t:
+  slot wall -> @oak_planks
+
+struct alpha size=7x5
+  floor mat_slot=wall
+  pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a
+  pressure_plate id=q at=inside.front  offset=0 y=0 -> sig.b
+  logic sig.open = sig.a or sig.b
+  door id=d side=front at=center mat_slot=wall opened_by=sig.open
+  circuit region=floor void=2
+
+struct beta size=4x3
+  floor mat_slot=wall
+  pressure_plate id=r at=front.outside offset=0 y=0 -> sig.c
+  pressure_plate id=s at=inside.front  offset=0 y=0 -> sig.d
+  logic sig.and_cd   = sig.c and sig.d
+  logic sig.or_cd    = sig.c or sig.d
+  logic sig.combined = sig.and_cd and sig.or_cd
+  door id=e side=front at=center mat_slot=wall opened_by=sig.combined
+  circuit region=floor void=1
+";
+    let placement = placement_from_source(source, Edition::Java);
+    let routed = compile_routing(&placement);
+
+    // alpha routes cleanly.
+    let alpha = routed
+        .scoped
+        .scopes
+        .iter()
+        .find(|e| e.name == "alpha")
+        .expect("alpha scope survives routing");
+    assert!(
+        alpha.ir.cells.iter().all(|c| c.wire_length.is_some()),
+        "every alpha cell must carry a routed wire_length",
+    );
+
+    // beta hits congestion (same shape as AC4) → elided with a
+    // diagnostic without shifting alpha.
+    assert!(
+        routed.scoped.scopes.iter().all(|e| e.name != "beta"),
+        "beta must elide because routing exceeds the reservation",
+    );
+    assert!(
+        routed
+            .diagnostics
+            .iter()
+            .any(|d| d.code == DiagnosticCode::RouteCongestion),
+        "beta's congestion must surface as E_ROUTE_CONGESTION: {:?}",
+        routed.diagnostics,
+    );
+}
+
+/// AC9 — Placement IR guarantees Java and Bedrock produce the same
+/// per-cell coordinate given the same source. Routing therefore
+/// produces the same `wire_length` values on both editions; only the
+/// cell tag and edition field differ. Pins the "routing is
+/// edition-agnostic in its numeric output" invariant so a future
+/// change that accidentally couples `wire_length` to edition-specific
+/// cell footprints trips the regression here.
+#[test]
+fn edition_parity_wire_length_matches_across_java_and_bedrock() {
+    let source = load_example("redstone-door.crn");
+    let java = compile_routing(&placement_from_source(&source, Edition::Java));
+    let bedrock = compile_routing(&placement_from_source(&source, Edition::Bedrock));
+
+    for (jscope, bscope) in java.scoped.scopes.iter().zip(bedrock.scoped.scopes.iter()) {
+        for (jc, bc) in jscope.ir.cells.iter().zip(bscope.ir.cells.iter()) {
+            assert_eq!(jc.wire_length, bc.wire_length);
+            assert_eq!(jc.coord, bc.coord);
+        }
+    }
+}

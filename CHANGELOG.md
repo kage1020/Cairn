@@ -12,6 +12,62 @@ and is a separate axis from the Minecraft target version.
 
 ### Added
 
+- Redstone Steiner routing + `cairn synth --stage route
+  --edition <java|bedrock>` (M6-PR5) — the fifth slice of the M6
+  redstone-simulates pipeline. `cairn-lang-redstone` grows a
+  `compile_routing(&ScopedPlacementIr) -> RoutingOutput` entry point
+  that walks the Placement IR produced by M6-PR4 and lays a
+  rectilinear Manhattan Steiner tree per driver net inside every
+  scope's `circuit region=` reservation — stage 2 of the five-stage
+  place-and-route pipeline `spec/redstone` §14.5 describes
+  (Placement → Steiner routing → Delay insertion → Crossing
+  legalization → Edition legalization). No new IR type joins the
+  crate: the routing pass is a field write per the phase table on
+  `PlacedCellNode`, promoting every cell's `wire_length` from `None`
+  to `Some(sum of Manhattan distances from each driver source into
+  the cell)`. `delay_ticks` stays `None` at this stage because §14.4
+  ties delay to the routed wire length plus the physical cell choice
+  — that is stage 3's concern. The v1 algorithm keeps to the smallest
+  set of concepts that still exercises the shape the follow-up passes
+  need: net collection ("source coord → sink coords" per NetRef),
+  Kou-Markowsky-style rectilinear MST (Kruskal over the complete
+  Manhattan graph on `{source} ∪ sinks`, deterministic weight/index
+  tie-break so the regression story pins), L-shape rendering
+  (x-then-z-then-y for stability), a per-scope `HashSet<CellCoord>`
+  occupancy set seeded with every cell coord + input / output pad,
+  and a wire-only footprint sum for the congestion budget. Input pad
+  coordinates land at `(x=0, y=0, z=1+i)` and output pad coordinates
+  at `(x=width-1, y=0, z=1+k)`, both saturating at `depth-1` for
+  degenerate regions — a v1 convention that stays crate-private today
+  and joins `PlacementIr` as `#[non_exhaustive]`-safe `input_pads` /
+  `output_pads` fields once a subsequent PR needs them outside
+  routing. The existing `E_ROUTE_CONGESTION` code fires again here,
+  now against the actual post-routing footprint (`cells.len() *
+  CELL_FOOTPRINT + unique wire coords > reserved_area`) rather than
+  the cell-only pessimistic budget the placement pass used — the
+  primary reads `routed netlist occupies ~N.Mx the reserved area
+  (void=V, region WxD)` so a downstream reader can tell placement's
+  fail-loud apart from routing's; the footer keeps the §14.5
+  three-fix triple verbatim. Placement's pessimism (cells × 4) means
+  a scope routing to `E_ROUTE_CONGESTION` almost always packed cells
+  right at the reservation boundary and needed only a Manhattan step
+  of new wire to flip — the intentional cost model, not a
+  double-detection oversight. Failed scopes elide from the output so
+  a downstream pass cannot silently consume a partial routed layout,
+  matching the fail-loud cascade policy the earlier stages use. The
+  CLI's `cairn synth --stage` gains a `route` value; the `--edition
+  <java|bedrock>` flag is required in that mode alongside `edition`
+  and `placement`, and stays refused on the edition-neutral `logic`
+  / `netlist` stages (exit 2). Not in scope for this PR: delay
+  insertion (repeater buffers), attenuation-limit detection
+  (`E_ATTENUATION_LIMIT`, dust segments > 15), crossing legalization
+  and the `RouteLayer::Bridge` / `Via` escape, edition legalization,
+  block-array voxel lowering, the physical-tile (tier 3) cell
+  library, the tick simulator, `assert truth|always|latency`
+  evaluation, sequential macros (`latch` / `pulse` / `delay` /
+  `edge_*` / `counter`), and QC/BUD refusal
+  (`E_NO_PORTABLE_IMPL`) — each remains a follow-up that will build
+  on the routed Placement IR shape this PR pins.
 - Redstone Placement IR + `cairn synth --stage placement
   --edition <java|bedrock>` (M6-PR4) — the fourth slice of the M6
   redstone-simulates pipeline. `cairn-lang-redstone` grows a

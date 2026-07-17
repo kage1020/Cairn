@@ -94,22 +94,28 @@ impl CircuitRegionReservation {
 /// One placed cell — an [`EditionCell`] plus its assigned [`CellCoord`]
 /// inside the reservation.
 ///
-/// `wire_length` and `delay_ticks` are reserved for the routing and
-/// delay-insertion follow-up passes. They stay `None` at this stage and
-/// serialise out via `skip_serializing_if` so the JSON wire form does
-/// not grow empty `"wire_length": null` noise before the values matter.
+/// `wire_length` and `delay_ticks` are progressive fields written by the
+/// routing and delay-insertion follow-up passes. The three legitimate
+/// phase states are:
 ///
-/// The two `Option`s are independent for wire-shape brevity, but
-/// nothing in this pass sets either; `(Some(_), None)` never appears in
-/// output produced by [`crate::placement::compile_placement`]. A
-/// follow-up PR that lands routing + delay together may collapse the
-/// pair into a phase-typed enum (`enum RoutingState { Unrouted,
-/// Routed(u32), Delayed { wire_length, delay_ticks } }`) so the
-/// invalid intermediate state cannot be represented — that migration
-/// is `#[non_exhaustive]`-safe because both fields are absent from
-/// today's JSON. Downstream code that constructs a [`PlacedCellNode`]
-/// out-of-band should keep the two fields consistent (both `None` or
-/// both `Some`).
+/// | Producer                          | `wire_length` | `delay_ticks` |
+/// |-----------------------------------|---------------|---------------|
+/// | [`crate::placement::compile_placement`] alone (Stage 1) | `None`     | `None`     |
+/// | [`crate::routing::compile_routing`]   (Stage 2)          | `Some(_)`  | `None`     |
+/// | Delay-insertion follow-up             (Stage 3)          | `Some(_)`  | `Some(_)`  |
+///
+/// `(None, Some(_))` is illegal by contract (delay follows routed wire
+/// length per `spec/redstone` §14.4) and never appears in output any
+/// pass in this crate produces. Both fields serialise via
+/// `skip_serializing_if = "Option::is_none"` so `--stage placement` JSON
+/// stays byte-identical to Stage 1 output — the routing pass is a pure
+/// field write that adds `"wire_length": N` without disturbing any
+/// other field or its ordering. A follow-up PR that lands routing +
+/// delay together may collapse the pair into a phase-typed enum
+/// (`enum RoutingState { Unrouted, Routed(u32), Delayed { wire_length,
+/// delay_ticks } }`) so the illegal state cannot be represented; that
+/// migration is `#[non_exhaustive]`-safe because both fields are absent
+/// from today's JSON.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[non_exhaustive]
 pub struct PlacedCellNode {
@@ -122,16 +128,19 @@ pub struct PlacedCellNode {
     pub drivers: Vec<CellPortDriver>,
     /// Coordinate assigned by the placement pass.
     pub coord: CellCoord,
-    /// Reserved for the routing pass (Steiner routing, stage 2 of
-    /// `spec/redstone` §14.5). Always `None` at this stage; the routing
-    /// pass will fill it with the Manhattan wire length from each
-    /// driver to this cell.
+    /// Manhattan wire length from every driver of this cell into it.
+    /// `None` until the routing pass (Steiner routing, stage 2 of
+    /// `spec/redstone` §14.5) fills it in;
+    /// [`crate::routing::compile_routing`] rewrites it to `Some(sum of
+    /// segments)` once the Steiner tree for every incoming net has been
+    /// laid.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub wire_length: Option<u32>,
-    /// Reserved for the delay-insertion pass (stage 3 of `spec/redstone`
-    /// §14.5). Always `None` at this stage; the delay pass will fill it
-    /// with the tick count implied by the routed wire length + cell
-    /// choice per §14.4.
+    /// Tick count implied by the routed wire length + this cell's
+    /// physical realisation per `spec/redstone` §14.4. `None` until the
+    /// delay-insertion pass (stage 3 of §14.5) fills it in; routing on
+    /// its own leaves this `None` while promoting [`Self::wire_length`]
+    /// to `Some(_)`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub delay_ticks: Option<u32>,
     /// Byte range of the originating `logic ...` sub-expression, inherited
