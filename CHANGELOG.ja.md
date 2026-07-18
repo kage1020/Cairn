@@ -14,6 +14,60 @@
 
 ### 追加
 
+- Redstone Steiner routing と `cairn synth --stage route
+  --edition <java|bedrock>`（M6-PR5）— M6 redstone-simulates
+  パイプラインの5枚目。`cairn-lang-redstone` に
+  `compile_routing(&ScopedPlacementIr) -> RoutingOutput`
+  エントリポイントを追加し、M6-PR4 の Placement IR を走査して各
+  スコープの `circuit region=` 予約領域の中に driver net ごとの
+  Manhattan Steiner tree を敷く — `spec/redstone` §14.5 の 5 段
+  パイプライン（Placement → Steiner routing → Delay insertion →
+  Crossing legalization → Edition legalization）の第 2 段。新しい
+  IR 型は追加しない: routing pass は `PlacedCellNode` の phase 表に
+  沿った field write で、各セルの `wire_length` を `None` から
+  `Some(driver source から cell への Manhattan 距離の総和)` に
+  書き換える。`delay_ticks` は本段でも `None` のまま — §14.4 が
+  「delay は routed wire length + 物理セル選択から決まる」と規定して
+  おり、これは stage 3 の担当だから。v1 のアルゴリズムは後続 pass が
+  必要とする shape を最小限で満たす構成に絞る: net 収集（NetRef
+  ごとに source coord → sink coords）、Kou-Markowsky 風の
+  rectilinear MST（`{source} ∪ sinks` の完全 Manhattan グラフに
+  Kruskal、重み/インデックスで決定論的な tie-break を打つので
+  regression story が pin される）、L-shape 描画（x → z → y の
+  固定順で安定性確保）、スコープ単位の `HashSet<CellCoord>` 占有
+  集合（全 cell coord と入力 / 出力 pad で seed）、そして congestion
+  予算用の wire-only footprint の総和。入力 pad 座標は `(x=0, y=0,
+  z=1+i)`、出力 pad 座標は `(x=width-1, y=0, z=1+k)` に置き、
+  degenerate region では `depth-1` で飽和させる — これは v1 の
+  convention として crate-private に閉じ、routing の外側で必要に
+  なった時点で `PlacementIr` の `input_pads` / `output_pads` フィールド
+  として `#[non_exhaustive]`-safe に追加する。既存の
+  `E_ROUTE_CONGESTION` コードはここで再発火し、判定基準は placement
+  pass の cell-only pessimistic budget ではなく実際の post-routing
+  footprint（`cells.len() * CELL_FOOTPRINT + unique wire coords >
+  reserved_area`）を使う。primary は `routed netlist occupies
+  ~N.Mx the reserved area (void=V, region WxD)` と読み、下流の
+  reader が placement 側の fail-loud と routing 側のそれとを区別
+  できる。footer は §14.5 の 3 つの修正 triple をそのまま維持する。
+  placement の pessimism（cells × 4）のおかげで、routing が
+  `E_ROUTE_CONGESTION` に落ちるスコープはほぼ必ずセルが予約領域の
+  境界きっかりまで詰まっていて、あと Manhattan で 1 段のワイヤを
+  引くだけで flip するもの — 意図的なコストモデルであり、二重検出の
+  見落としではない。congestion で失敗したスコープは routing 出力
+  から drop されるので、下流 pass が partial routed layout を silent
+  に受け取ることはない（earlier stage と同じ fail-loud cascade
+  ポリシー）。CLI の `cairn synth --stage` に `route` 値を追加。
+  `--edition <java|bedrock>` フラグは `edition` / `placement` と
+  同様に必須で、edition-neutral な `logic` / `netlist` stage では
+  引き続き exit 2 で拒否する。今回のスコープ外: delay insertion
+  （リピータバッファ）、attenuation-limit 検出
+  （`E_ATTENUATION_LIMIT`、dust segment 15 blocks 超）、crossing
+  legalization と `RouteLayer::Bridge` / `Via` エスケープ、edition
+  legalization、block-array voxel 落とし、physical-tile（3層目）cell
+  library、tick simulator、`assert truth|always|latency` の評価、
+  シーケンシャルマクロ (`latch` / `pulse` / `delay` / `edge_*` /
+  `counter`)、QC/BUD 拒否 (`E_NO_PORTABLE_IMPL`) — それぞれ本 PR で
+  確定した routed Placement IR shape の上に後続 PR が積む。
 - Redstone Placement IR と `cairn synth --stage placement
   --edition <java|bedrock>`（M6-PR4）— M6 redstone-simulates
   パイプラインの4枚目。`cairn-lang-redstone` に

@@ -15,15 +15,18 @@
 //! realisation of each cell against a [`cairn_lang_core::Edition`] —
 //! the second rung (`Edition Cell`) of the three-tier cell library
 //! from §14.6, materialised as [`edition_netlist_ir::EditionNetlistIr`]
-//! so the placement pass has one type to consume; and
+//! so the placement pass has one type to consume;
 //! [`placement::compile_placement`] lays out those edition-tagged
 //! cells inside each scope's `circuit region=` reservation — stage 1
-//! of the five-stage place-and-route pipeline §14.5 describes.
-//! `wire_length` and `delay_ticks` are reserved as `Option`s on
-//! [`placement_ir::PlacedCellNode`] and stay `None` until the routing
-//! and delay-insertion follow-up passes land. The physical-tile
-//! selection, route, and simulator layers are not yet public API —
-//! see `spec/redstone` for the complete pipeline they will fill in.
+//! of the five-stage place-and-route pipeline §14.5 describes; and
+//! [`routing::compile_routing`] runs stage 2 (Steiner routing) over
+//! that layout, filling every [`placement_ir::PlacedCellNode`]'s
+//! `wire_length` with the Manhattan total of the driver→sink Steiner
+//! tree and re-checking `E_ROUTE_CONGESTION` against the actual
+//! post-routing occupancy. `delay_ticks` stays `None` until the
+//! delay-insertion follow-up pass (stage 3 of §14.5) lands. The
+//! physical-tile selection and simulator layers are not yet public API
+//! — see `spec/redstone` for the complete pipeline they will fill in.
 
 pub mod diagnostic;
 pub mod edition_netlist;
@@ -33,6 +36,7 @@ pub mod netlist;
 pub mod netlist_ir;
 pub mod placement;
 pub mod placement_ir;
+pub mod routing;
 pub mod synth;
 
 pub use diagnostic::{Diagnostic, DiagnosticCode, DiagnosticNote};
@@ -55,4 +59,5 @@ pub use placement_ir::{
     CellCoord, CircuitRegionReservation, PlacedCellNode, PlacementIr, ScopedPlacementIr,
     ScopedPlacementIrEntry,
 };
+pub use routing::{RoutingOutput, compile_routing};
 pub use synth::{SynthOutput, synthesize};
