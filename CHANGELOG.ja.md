@@ -14,6 +14,60 @@
 
 ### 追加
 
+- Redstone delay insertion と `cairn synth --stage delay
+  --edition <java|bedrock>`（M6-PR6）— M6 redstone-simulates
+  パイプラインの 6 枚目。`cairn-lang-redstone` に
+  `compile_delay(&ScopedPlacementIr) -> DelayOutput` エントリポイントを
+  追加し、M6-PR5 の routed Placement IR を走査して各セルの
+  `delay_ticks` を `None` から `Some(base delay + implicit buffer
+  repeater 由来 tick)` に書き換える — `spec/redstone` §14.5 の 5 段
+  パイプライン（Placement → Steiner routing → Delay insertion →
+  Crossing legalization → Edition legalization）の第 3 段。新しい IR
+  型は追加しない: delay pass は `PlacedCellNode` の phase 表に沿った
+  field write で、M6-PR5 の `wire_length` write と対称。base delay は
+  `EditionCell::edition(self)` の兄弟として `const fn
+  base_delay_ticks(self)` を追加し、cell library の変種テーブルの
+  隣に tick 数字を置く: Java `ComparatorAnd` / `RepeaterOr` /
+  `InverterTorch` と Bedrock `InverterTorch` はそれぞれ 1 tick、
+  Bedrock `TorchAnd` は 2 tick（NAND→NAND の 2-torch 直列）、Bedrock
+  `TorchOr` は 0 tick（bare dust merge）、`*Unpinned` variant は
+  pessimistic な 2 tick sentinel（将来の pinned rename が 1 行の match
+  arm 書き換えで済み、delay 見積もりを silent に狂わせない）。暗黙
+  buffer repeater は dust attenuation 上限 15 blocks を跨ぐ driver
+  segment に付く: 長さ `s` blocks の segment は `floor((s - 1) /
+  DUST_ATTENUATION_LIMIT)` 個の buffer を実装扱いし、各 buffer は
+  `BUFFER_REPEATER_TICKS`（1 tick, デフォルトの `repeater delay=1` に
+  一致）を寄与する。buffer は **暗黙**扱いで座標を割り当てない — routing
+  pass は自身の per-scope occupancy 集合を既に破棄しており、buffer
+  座標決定は stage 4（crossing legalization）が cross-net overlap を
+  `RouteLayer::Bridge` / `Via` layer にエスケープするのと合わせて
+  owner になる方が自然だから。新診断 `E_ATTENUATION_LIMIT` は driver
+  segment が `MAX_ATTENUATION_SEGMENT`（256 blocks — buffer 16 個
+  連続分）を超えたときのみ発火する v1 sanity cap。`(DUST_ATTENUATION_LIMIT,
+  MAX_ATTENUATION_SEGMENT]` の帯は正常経路で暗黙 buffer が吸収し、
+  256 blocks 超えは stage-4 bridge/via 幾何が必須の非現実的な長さで
+  fail-loud させる。per-driver Manhattan segment は routing pass と
+  同じ `NetRef → source coord` 経路で再算出する（routing は driver 総和
+  としての `wire_length` のみを保存する意図的な選択で、per-driver segment
+  は再歩行が安価で JSON に二重に持たせるとむしろ膨らむ）; その共有の
+  ために `input_pad` / `output_pad` / `manhattan` を `pub(crate)` に
+  昇格 — pad 座標の owner は routing pass のまま維持し、将来
+  `PlacementIr` の field に昇格する予定は 1 段の migration に保つ。
+  Attenuation で失敗したスコープは delay 出力から drop され、下流の
+  tick simulator が partial `delay_ticks` を silent に読み取ることは
+  ない。CLI の `cairn synth --stage` に `delay` 値を追加。`--edition
+  <java|bedrock>` フラグは `edition` / `placement` / `route` と同様に
+  必須で、edition-neutral な `logic` / `netlist` stage では引き続き
+  exit 2 で拒否する。`--stage delay` は upstream の fail-loud を継承
+  する: routing 段で `E_ROUTE_CONGESTION` に落ちたスコープは
+  routing 段で報告され exit 1 になり、delay pass は走らない。今回の
+  スコープ外: crossing legalization と `RouteLayer::Bridge` / `Via`
+  エスケープ、edition legalization、block-array voxel 落とし、
+  physical-tile（3層目）cell library、tick simulator、`assert
+  truth|always|latency` の評価、シーケンシャルマクロ（`latch` /
+  `pulse` / `delay` / `edge_*` / `counter`）、QC/BUD 拒否
+  (`E_NO_PORTABLE_IMPL`) — それぞれ本 PR で確定した delayed Placement
+  IR shape の上に後続 PR が積む。
 - Redstone Steiner routing と `cairn synth --stage route
   --edition <java|bedrock>`（M6-PR5）— M6 redstone-simulates
   パイプラインの5枚目。`cairn-lang-redstone` に

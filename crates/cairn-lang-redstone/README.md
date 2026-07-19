@@ -11,13 +11,13 @@ are derived deterministically from a small dataflow description.
 ## Status
 
 Combinational logic synthesis, Netlist IR selection, Edition Cell
-selection, cell placement, and Steiner routing landed. `synthesize(&IntentModule)`
-lowers sensor bindings, actuator arguments, and `logic sig.X = <expr>`
-lines into an edition-neutral Logic IR (DAG of `and` / `or` / `not`
-gates today, with `xor` / `nand` / `nor` / `mux` reserved on the enum
-until the surface parser reaches them);
-`compile_netlist(&ScopedLogicIr)` rewrites that DAG into an
-edition-neutral Netlist IR of Logical Cells + nets;
+selection, cell placement, Steiner routing, and delay insertion
+landed. `synthesize(&IntentModule)` lowers sensor bindings, actuator
+arguments, and `logic sig.X = <expr>` lines into an edition-neutral
+Logic IR (DAG of `and` / `or` / `not` gates today, with `xor` /
+`nand` / `nor` / `mux` reserved on the enum until the surface parser
+reaches them); `compile_netlist(&ScopedLogicIr)` rewrites that DAG
+into an edition-neutral Netlist IR of Logical Cells + nets;
 `compile_edition_netlist(&ScopedNetlistIr, Edition)` picks the target-
 edition realisation of each cell — the second rung of the three-tier
 cell library that sits inside the Netlist → Placement transition (Java
@@ -26,12 +26,16 @@ cell library that sits inside the Netlist → Placement transition (Java
 `compile_placement(&ScopedEditionNetlistIr, &IntentModule)` lays those
 edition-tagged cells out inside each scope's `circuit region=`
 reservation (stage 1 of `spec/redstone` §14.5's five-stage
-place-and-route); and `compile_routing(&ScopedPlacementIr)` runs
-Steiner routing over that layout, filling every cell's `wire_length`
-with the sum of Manhattan distances from each driver source into the
-cell (stage 2 of §14.5). Delay insertion, crossing legalization,
-edition legalization, the tick simulator, and QC/BUD refusal
-(`E_NO_PORTABLE_IMPL`) are still to come.
+place-and-route); `compile_routing(&ScopedPlacementIr)` runs Steiner
+routing over that layout, filling every cell's `wire_length` with the
+sum of Manhattan distances from each driver source into the cell
+(stage 2 of §14.5); and `compile_delay(&ScopedPlacementIr)` runs
+delay insertion, promoting each cell's `delay_ticks` from `None` to
+`Some(base delay + implicit buffer repeater ticks)` and refusing with
+`E_ATTENUATION_LIMIT` when a driver segment exceeds the v1 sanity cap
+(stage 3 of §14.5). Crossing legalization (`RouteLayer::Bridge` /
+`Via` escape), edition legalization, the tick simulator, and QC/BUD
+refusal (`E_NO_PORTABLE_IMPL`) are still to come.
 
 ## Pipeline
 

@@ -574,6 +574,180 @@ fn cli_synth_stage_route_rejects_missing_edition_when_stage_neutral() {
 }
 
 #[test]
+fn cli_synth_stage_delay_java_fills_delay_ticks() {
+    // `--stage delay --edition java` runs delay insertion over the
+    // routed IR. `redstone-door.crn`'s sole `JavaRepeaterOr` cell
+    // picks up `delay_ticks = 1` (base 1 tick, no implicit buffer
+    // repeater because both driver segments sit under the 15-block
+    // attenuation limit) and `wire_length` survives from the routing
+    // stage.
+    let path = examples_dir().join("redstone-door.crn");
+    let out = run_synth(&[
+        "--experimental-logic-synth",
+        "--stage",
+        "delay",
+        "--edition",
+        "java",
+        path.to_str().unwrap(),
+    ]);
+    assert!(
+        out.status.success(),
+        "expected exit 0, stderr={}",
+        String::from_utf8_lossy(&out.stderr),
+    );
+    let stdout = String::from_utf8(out.stdout).expect("utf-8");
+    let value: serde_json::Value = serde_json::from_str(&stdout)
+        .unwrap_or_else(|err| panic!("stdout should parse as JSON: {err}\n{stdout}"));
+    let gatehouse = value
+        .as_array()
+        .and_then(|s| s.iter().find(|s| s["name"] == "gatehouse"))
+        .expect("gatehouse scope");
+    let ir = &gatehouse["ir"];
+    assert_eq!(ir["edition"], "java");
+    let cells = ir["cells"].as_array().expect("cells array");
+    assert_eq!(cells.len(), 1);
+    assert_eq!(cells[0]["cell"], "java_repeater_or");
+    assert_eq!(cells[0]["wire_length"], 3);
+    assert_eq!(cells[0]["delay_ticks"], 1);
+}
+
+#[test]
+fn cli_synth_stage_delay_bedrock_matches_bedrock_torch_or() {
+    // BedrockTorchOr is a bare dust merge, so `delay_ticks = 0` on
+    // Bedrock even though the same DSL source yields `delay_ticks = 1`
+    // on Java. Pins the "delay is edition-specific by cell choice"
+    // split into the CLI surface.
+    let path = examples_dir().join("redstone-door.crn");
+    let out = run_synth(&[
+        "--experimental-logic-synth",
+        "--stage",
+        "delay",
+        "--edition",
+        "bedrock",
+        path.to_str().unwrap(),
+    ]);
+    assert!(
+        out.status.success(),
+        "expected exit 0, stderr={}",
+        String::from_utf8_lossy(&out.stderr),
+    );
+    let stdout = String::from_utf8(out.stdout).expect("utf-8");
+    let value: serde_json::Value = serde_json::from_str(&stdout)
+        .unwrap_or_else(|err| panic!("stdout should parse as JSON: {err}\n{stdout}"));
+    let gatehouse = value
+        .as_array()
+        .and_then(|s| s.iter().find(|s| s["name"] == "gatehouse"))
+        .expect("gatehouse scope");
+    let ir = &gatehouse["ir"];
+    assert_eq!(ir["edition"], "bedrock");
+    assert_eq!(ir["cells"][0]["cell"], "bedrock_torch_or");
+    assert_eq!(ir["cells"][0]["wire_length"], 3);
+    assert_eq!(ir["cells"][0]["delay_ticks"], 0);
+}
+
+#[test]
+fn cli_synth_stage_delay_requires_edition_flag() {
+    // `--stage delay` without `--edition` is a usage mistake symmetric
+    // to `--stage route`: exit 2 with a hint naming the tripped stage.
+    let path = examples_dir().join("redstone-door.crn");
+    let out = run_synth(&[
+        "--experimental-logic-synth",
+        "--stage",
+        "delay",
+        path.to_str().unwrap(),
+    ]);
+    assert_eq!(out.status.code(), Some(2));
+    let stderr = String::from_utf8(out.stderr).expect("utf-8");
+    assert!(
+        stderr.contains("--edition"),
+        "usage hint should name the missing flag, got: {stderr}",
+    );
+    assert!(
+        stderr.contains("--stage delay"),
+        "usage hint should name the tripped stage so a caller cannot mis-attribute the error, got: {stderr}",
+    );
+}
+
+#[test]
+fn cli_synth_stage_delay_inherits_upstream_congestion_failure() {
+    // A scope that fails at the routing stage (E_ROUTE_CONGESTION) is
+    // elided from routing's output. The delay stage runs on the elided
+    // set, so its own diagnostics list is empty; but the routing
+    // failure was already reported and the process exits 1. Pins the
+    // "delay stage inherits upstream fail-loud" contract so an author
+    // running `--stage delay` sees the same congestion errors they
+    // would have seen from `--stage route`.
+    let dir = tempfile::tempdir().expect("temp dir");
+    let path = dir.path().join("pack.crn");
+    let source = "@cairn 2026.06\n@requires version>=1.20\n\n\
+        theme t:\n  slot wall -> @oak_planks\n\n\
+        struct pack size=4x3\n  \
+        floor mat_slot=wall\n  \
+        pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a\n  \
+        pressure_plate id=q at=inside.front  offset=0 y=0 -> sig.b\n  \
+        logic sig.and_ab   = sig.a and sig.b\n  \
+        logic sig.or_ab    = sig.a or sig.b\n  \
+        logic sig.combined = sig.and_ab and sig.or_ab\n  \
+        door id=d side=front at=center mat_slot=wall opened_by=sig.combined\n  \
+        circuit region=floor void=1\n";
+    std::fs::write(&path, source).expect("write congestion fixture");
+    let out = run_synth(&[
+        "--experimental-logic-synth",
+        "--stage",
+        "delay",
+        "--edition",
+        "java",
+        path.to_str().unwrap(),
+    ]);
+    assert_eq!(out.status.code(), Some(1));
+    let stderr = String::from_utf8(out.stderr).expect("utf-8");
+    assert!(
+        stderr.contains("E_ROUTE_CONGESTION"),
+        "expected E_ROUTE_CONGESTION inherited from routing on stderr, got: {stderr}",
+    );
+}
+
+#[test]
+fn cli_synth_stage_delay_attenuation_limit_exits_one() {
+    // A scope whose routed output-pad segment exceeds the v1
+    // attenuation cap must fail loud with `E_ATTENUATION_LIMIT` on
+    // stderr and exit 1. Uses a 300-block-wide region so the
+    // `sig.out` output driver spans the full x-axis to the right-edge
+    // output pad — that segment (~300 blocks) sits well past the
+    // 256-block cap.
+    let dir = tempfile::tempdir().expect("temp dir");
+    let path = dir.path().join("wide.crn");
+    let source = "@cairn 2026.06\n@requires version>=1.20\n\n\
+        theme t:\n  slot wall -> @oak_planks\n\n\
+        struct wide_pack size=300x5\n  \
+        floor mat_slot=wall\n  \
+        pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a\n  \
+        pressure_plate id=q at=inside.front  offset=0 y=0 -> sig.b\n  \
+        logic sig.out = sig.a or sig.b\n  \
+        door id=d side=front at=center mat_slot=wall opened_by=sig.out\n  \
+        circuit region=floor void=3\n";
+    std::fs::write(&path, source).expect("write attenuation fixture");
+    let out = run_synth(&[
+        "--experimental-logic-synth",
+        "--stage",
+        "delay",
+        "--edition",
+        "java",
+        path.to_str().unwrap(),
+    ]);
+    assert_eq!(out.status.code(), Some(1));
+    let stderr = String::from_utf8(out.stderr).expect("utf-8");
+    assert!(
+        stderr.contains("E_ATTENUATION_LIMIT"),
+        "expected E_ATTENUATION_LIMIT on stderr, got: {stderr}",
+    );
+    assert!(
+        stderr.contains("routed netlist for struct `wide_pack`"),
+        "primary should name the delay-side origin and failed scope, got: {stderr}",
+    );
+}
+
+#[test]
 fn cli_synth_missing_file_exits_two() {
     // Path-not-found returns 2 (user-input mistake), consistent with
     // `cairn parse`/`check`/`lower`/`compile`.

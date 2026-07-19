@@ -9,7 +9,9 @@
 //! and rewrites every cell's [`crate::placement_ir::PlacedCellNode::wire_length`]
 //! from `None` to `Some(sum of driver-to-cell Manhattan distances)`.
 //! [`crate::placement_ir::PlacedCellNode::delay_ticks`] stays `None`
-//! until the delay-insertion pass (stage 3 of §14.5) lands.
+//! at this stage; the delay-insertion pass
+//! ([`crate::delay::compile_delay`], stage 3 of §14.5) promotes it
+//! to `Some(_)`.
 //!
 //! The v1 algorithm is deliberately minimal:
 //!
@@ -65,14 +67,18 @@
 //!   that no downstream stage can materialise into voxels, silently
 //!   corrupting `assert latency(...)` verification per §14.7.
 //!
-//! Future stages fill the intentional gaps: attenuation-limit
-//! (`E_ATTENUATION_LIMIT`, dust segments > 15) belongs to delay
-//! insertion, `RouteLayer::Bridge` / `Via` escape belongs to crossing
-//! legalization, and the input / output pad coordinates the routing
-//! pass picks today become a `PlacementIr` field
-//! (`input_pads` / `output_pads`) once a subsequent PR needs them
-//! outside routing — that migration is `#[non_exhaustive]`-safe on
-//! both types.
+//! Future stages fill the intentional gaps: `RouteLayer::Bridge` /
+//! `Via` escape belongs to crossing legalization (stage 4 of §14.5),
+//! and the input / output pad coordinates the routing pass picks today
+//! become a `PlacementIr` field (`input_pads` / `output_pads`) once a
+//! subsequent PR needs them outside routing — that migration is
+//! `#[non_exhaustive]`-safe on both types. Attenuation accounting
+//! itself has landed as [`crate::delay::compile_delay`] (stage 3): the
+//! delay pass re-derives per-driver Manhattan segments from the same
+//! `NetRef → source coord` mapping used here, counts implicit buffer
+//! repeaters for segments beyond the 15-block dust attenuation limit,
+//! and refuses with `E_ATTENUATION_LIMIT` when a single segment
+//! exceeds the v1 sanity cap.
 
 use std::collections::HashMap;
 use std::collections::HashSet;
@@ -346,7 +352,7 @@ fn net_ref_key(net: NetRef) -> (u8, u32) {
 /// v1 convention; once a subsequent PR needs pad coords outside
 /// routing, `input_pads` joins [`PlacementIr`] as a
 /// `#[non_exhaustive]`-safe field.
-fn input_pad(i: usize, region: &CircuitRegionReservation) -> CellCoord {
+pub(crate) fn input_pad(i: usize, region: &CircuitRegionReservation) -> CellCoord {
     let raw = u32::try_from(i.saturating_add(1)).unwrap_or(u32::MAX);
     let z = raw.min(region.depth.saturating_sub(1));
     CellCoord { x: 0, y: 0, z }
@@ -354,14 +360,14 @@ fn input_pad(i: usize, region: &CircuitRegionReservation) -> CellCoord {
 
 /// v1 output-pad coordinate: right edge (`x=width-1`), same
 /// saturating z-axis convention as [`input_pad`].
-fn output_pad(k: usize, region: &CircuitRegionReservation) -> CellCoord {
+pub(crate) fn output_pad(k: usize, region: &CircuitRegionReservation) -> CellCoord {
     let raw = u32::try_from(k.saturating_add(1)).unwrap_or(u32::MAX);
     let z = raw.min(region.depth.saturating_sub(1));
     let x = region.width.saturating_sub(1);
     CellCoord { x, y: 0, z }
 }
 
-fn manhattan(a: CellCoord, b: CellCoord) -> u32 {
+pub(crate) fn manhattan(a: CellCoord, b: CellCoord) -> u32 {
     let dx = a.x.max(b.x) - a.x.min(b.x);
     let dy = a.y.max(b.y) - a.y.min(b.y);
     let dz = a.z.max(b.z) - a.z.min(b.z);

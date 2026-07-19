@@ -12,6 +12,63 @@ and is a separate axis from the Minecraft target version.
 
 ### Added
 
+- Redstone delay insertion + `cairn synth --stage delay
+  --edition <java|bedrock>` (M6-PR6) — the sixth slice of the M6
+  redstone-simulates pipeline. `cairn-lang-redstone` grows a
+  `compile_delay(&ScopedPlacementIr) -> DelayOutput` entry point that
+  walks the routed Placement IR produced by M6-PR5 and promotes each
+  cell's `delay_ticks` from `None` to `Some(base delay + implicit
+  buffer repeater ticks)` — stage 3 of the five-stage place-and-route
+  pipeline `spec/redstone` §14.5 describes (Placement → Steiner
+  routing → Delay insertion → Crossing legalization → Edition
+  legalization). No new IR type joins the crate: the delay pass is a
+  field write per the phase table on `PlacedCellNode`, symmetrical to
+  the routing pass's `wire_length` write. Base delay is a `const fn
+  base_delay_ticks(self)` sibling of `EditionCell::edition(self)` so
+  the numbers live next to the cell library they characterise: Java
+  `ComparatorAnd` / `RepeaterOr` / `InverterTorch` and Bedrock
+  `InverterTorch` carry 1 tick each, Bedrock `TorchAnd` carries 2
+  ticks (two-torch NAND→NAND stacked in series), Bedrock `TorchOr`
+  carries 0 ticks (bare dust merge), and every `*Unpinned` variant
+  returns a pessimistic 2-tick sentinel so a future pinned rename is
+  a one-arm swap that cannot silently degrade delay accounting.
+  Implicit buffer repeaters cover driver segments that would breach
+  the 15-block dust attenuation limit: for a segment of `s` blocks
+  the pass counts `floor((s - 1) / DUST_ATTENUATION_LIMIT)` buffers,
+  each contributing `BUFFER_REPEATER_TICKS` (1 tick, matching the
+  default `repeater delay=1` setting). Buffers are counted, not
+  materialised — the routing pass already discarded its per-scope
+  occupancy set, and stage 4 (crossing legalization) is the natural
+  owner of buffer coord assignment because it also needs to escape
+  cross-net overlaps into a `RouteLayer::Bridge` / `Via` layer. The
+  new `E_ATTENUATION_LIMIT` code fires only when a single driver
+  segment exceeds `MAX_ATTENUATION_SEGMENT` (256 blocks — 16
+  back-to-back buffers), the sanity cap past which stage-4
+  bridge/via geometry becomes unavoidable; segments in the
+  `(DUST_ATTENUATION_LIMIT, MAX_ATTENUATION_SEGMENT]` band are normal
+  and absorbed by implicit buffers. Per-driver Manhattan segments
+  are recomputed from the same `NetRef → source coord` mapping the
+  routing pass uses (the routing pass stored only the driver-sum
+  `wire_length`, deliberately — per-driver segments are cheap to
+  re-walk and would bloat the JSON if stored twice); `input_pad` /
+  `output_pad` / `manhattan` are promoted to `pub(crate)` so the
+  routing pass stays the owner of the pad-coord convention until a
+  subsequent PR promotes it to a `PlacementIr` field. Failed scopes
+  elide from the output so a downstream tick simulator cannot silently
+  consume a partial `delay_ticks` set. The CLI's `cairn synth
+  --stage` gains a `delay` value; the `--edition <java|bedrock>`
+  flag is required in that mode alongside `edition` / `placement` /
+  `route`, and stays refused on the edition-neutral `logic` /
+  `netlist` stages (exit 2). `--stage delay` inherits upstream
+  fail-loud: a scope that trips `E_ROUTE_CONGESTION` at routing is
+  reported and exits 1 before the delay pass runs. Not in scope for
+  this PR: crossing legalization and the `RouteLayer::Bridge` /
+  `Via` escape, edition legalization, block-array voxel lowering,
+  the physical-tile (tier 3) cell library, the tick simulator,
+  `assert truth|always|latency` evaluation, sequential macros
+  (`latch` / `pulse` / `delay` / `edge_*` / `counter`), and QC/BUD
+  refusal (`E_NO_PORTABLE_IMPL`) — each remains a follow-up that
+  will build on the delayed Placement IR shape this PR pins.
 - Redstone Steiner routing + `cairn synth --stage route
   --edition <java|bedrock>` (M6-PR5) — the fifth slice of the M6
   redstone-simulates pipeline. `cairn-lang-redstone` grows a
