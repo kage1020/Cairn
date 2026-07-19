@@ -478,6 +478,7 @@ mod tests {
             coord,
             wire_length: Some(0),
             delay_ticks: None,
+            buffer_coords: Vec::new(),
             span: Span::default(),
         }
     }
@@ -494,12 +495,12 @@ mod tests {
         ir.region = Some(reservation(300, 3, 3));
         ir.cells.push(placed_cell(
             EditionCell::JavaComparatorAnd,
-            CellCoord { x: 0, y: 0, z: 0 },
+            CellCoord::new(0, 0, 0),
             vec![],
         ));
         ir.cells.push(placed_cell(
             EditionCell::JavaComparatorAnd,
-            CellCoord { x: 299, y: 0, z: 0 },
+            CellCoord::new(299, 0, 0),
             vec![CellPortDriver {
                 port: PortName::A,
                 net: NetRef::Cell(0),
@@ -536,7 +537,7 @@ mod tests {
         let mut ir = PlacementIr::new(Edition::Java);
         ir.cells.push(placed_cell(
             EditionCell::JavaComparatorAnd,
-            CellCoord { x: 0, y: 0, z: 0 },
+            CellCoord::new(0, 0, 0),
             vec![],
         ));
         let delayed = compile_delay(&scoped(ScopeKind::Struct, "roomless", ir));
@@ -594,7 +595,7 @@ mod tests {
         ir.region = Some(reservation(5, 3, 2));
         ir.cells.push(placed_cell(
             EditionCell::JavaComparatorAnd,
-            CellCoord { x: 0, y: 0, z: 0 },
+            CellCoord::new(0, 0, 0),
             vec![CellPortDriver {
                 port: PortName::A,
                 net: NetRef::Cell(u32::MAX),

@@ -14,6 +14,61 @@
 
 ### 追加
 
+- Redstone crossing legalization と `cairn synth --stage crossing
+  --edition <java|bedrock>`（M6-PR7）— M6 redstone-simulates
+  パイプラインの 7 枚目。`cairn-lang-redstone` に
+  `compile_crossing(&ScopedPlacementIr) -> CrossingOutput`
+  エントリポイントを追加し、M6-PR6 の delayed Placement IR を走査して
+  routing / delay pass と同じ `NetRef → source coord` マッピングで各
+  net の Manhattan Steiner tree を再描画し、ground `RouteLayer::Plane`
+  上で 2 つの異なる net が共有する wire coord を検出し、`spec/redstone`
+  §14.5 の pseudo-2.5D テキストが挙げる 2 種のエスケープハッチを
+  materialise する — 5 段パイプライン（Placement → Steiner routing →
+  Delay insertion → Crossing legalization → Edition legalization）の
+  第 4 段。新しい IR 型は追加しない: crossing pass は `PlacedCellNode`
+  の phase 表に沿った field write で、routing / delay pass の
+  `wire_length` / `delay_ticks` write と対称。`CellCoord` に
+  `layer: RouteLayer`（`Plane` / `Bridge` / `Via`）を追加、
+  `PlacedCellNode` に `buffer_coords: Vec<CellCoord>` を追加し、
+  crossing pass は delay pass が数えた implicit buffer repeater の
+  具体座標を 1 個ずつここに埋める。両フィールドともデフォルト値では
+  serde-skip され（`layer` は `Plane` のとき、`buffer_coords` は
+  空のとき）、`--stage placement` / `--stage route` / `--stage delay`
+  の JSON は本 PR 前と byte-identical に維持される — crossing pass は
+  純粋に additive な field write で、実際に crossing をエスケープした
+  スコープや buffer を配置したスコープにだけ新キーが surface する。
+  Cross-net 検出は routing と同じ determinism 順（fanout 降順 →
+  `NetRef` 昇順）で per-net wire path を歩き、cell coord / I/O pad
+  coord は「net の endpoint」の意味を持ち wire pass-through ではない
+  ので crossing scope から除外する。crossing がプレーンから抜けられない
+  ケース（`void=<N>` 予約に y-layer の余裕がない、すなわち `void < 2`）
+  では新診断 `E_CROSSING_CONGESTION` を予約領域の span 上で発火し、
+  自己修正三点セット（「`void` を増やす」「region を広げる」
+  「複数の `circuit` に分割する」）を提示する。暗黙 buffer repeater の
+  座標は各 driver の L-shape 経路（x → z → y、routing と同じ軸順で
+  決定論的）上の `k * DUST_ATTENUATION_LIMIT`（`k = 1..=buffer_count`）
+  の点から拾う; cell / pad / plane 上の crossing / 既配置 buffer と
+  衝突する候補は bridge layer の `y = 1` に逃がし、そこも塞がっている
+  場合は `E_BUFFER_COORD_COLLISION` を発火 — delay pass が既に
+  segment を `MAX_ATTENUATION_SEGMENT`（16 buffers）で cap し、
+  routing pass が footprint を予約面積で cap しているので、実際には
+  非常にタイトな `void=1` かつ短い cascade が多いケースだけがこの
+  診断を trip する。失敗したスコープは crossing 出力から drop され、
+  下流の block-array voxel 落とし（stage 5 の消費者）が「実現不能な
+  レイアウトに対する部分 buffer」を silent に materialise することは
+  ない。CLI の `cairn synth --stage` に `crossing` 値を追加。
+  `--edition <java|bedrock>` フラグは `edition` / `placement` /
+  `route` / `delay` と同様に必須で、edition-neutral な `logic` /
+  `netlist` stage では引き続き exit 2 で拒否する。`--stage crossing`
+  は upstream の fail-loud を継承する: routing 段で
+  `E_ROUTE_CONGESTION`、delay 段で `E_ATTENUATION_LIMIT` に落ちた
+  スコープはそれぞれの段で報告され exit 1 になり、crossing pass は
+  走らない。今回のスコープ外: edition legalization、block-array
+  voxel 落とし、physical-tile（3 層目）cell library、tick simulator、
+  `assert truth|always|latency` の評価、シーケンシャルマクロ
+  （`latch` / `pulse` / `delay` / `edge_*` / `counter`）、QC/BUD
+  拒否 (`E_NO_PORTABLE_IMPL`) — それぞれ本 PR で確定した legalized
+  Placement IR shape の上に後続 PR が積む。
 - Redstone delay insertion と `cairn synth --stage delay
   --edition <java|bedrock>`（M6-PR6）— M6 redstone-simulates
   パイプラインの 6 枚目。`cairn-lang-redstone` に

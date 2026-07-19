@@ -94,6 +94,31 @@ pub enum DiagnosticCode {
     /// `circuit` blocks, or pin cell / actuator placement closer to
     /// its drivers.
     AttenuationLimit,
+    /// The crossing-legalization pass ran out of `Bridge` / `Via` layer
+    /// budget while escaping cross-net overlaps. `spec/redstone` §14.5
+    /// stage 4 lifts a wire onto a bridge coord whenever two nets would
+    /// otherwise share a `Plane` coord; the escape layer draws from the
+    /// same `void=<N>` service-layer height the placement / routing
+    /// passes already consume, and this code fires once every `y` layer
+    /// in the reservation has a wire on it and the pass still needs to
+    /// escape another crossing. Fix: increase `void`, enlarge the
+    /// `circuit region=` footprint so fewer wires cross, or split the
+    /// logic across multiple `circuit` blocks so each block routes
+    /// with fewer overlaps.
+    CrossingCongestion,
+    /// The crossing-legalization pass could not place a required
+    /// implicit buffer repeater — every candidate coord along the
+    /// driver segment already carries a cell, pad, or another buffer,
+    /// and no `Bridge` layer coord was free either. Rare in practice:
+    /// the delay pass already caps segments at
+    /// `MAX_ATTENUATION_SEGMENT` (16 buffers) and the routing pass
+    /// caps footprint at the reservation area, so this only fires on a
+    /// pathological packing (a very tight `void=1` region with many
+    /// short cascades where every plane coord is a cell). Fix:
+    /// increase `void` so buffers can fall onto a bridge layer, or
+    /// enlarge the `circuit region=` footprint so buffer candidates
+    /// have room on the plane.
+    BufferCoordCollision,
 }
 
 impl DiagnosticCode {
@@ -111,6 +136,8 @@ impl DiagnosticCode {
             Self::NoCircuitRegion => "E_NO_CIRCUIT_REGION",
             Self::RouteCongestion => "E_ROUTE_CONGESTION",
             Self::AttenuationLimit => "E_ATTENUATION_LIMIT",
+            Self::CrossingCongestion => "E_CROSSING_CONGESTION",
+            Self::BufferCoordCollision => "E_BUFFER_COORD_COLLISION",
         }
     }
 
@@ -125,7 +152,9 @@ impl DiagnosticCode {
             | Self::LogicUnsupportedPrimitive
             | Self::NoCircuitRegion
             | Self::RouteCongestion
-            | Self::AttenuationLimit => Severity::Error,
+            | Self::AttenuationLimit
+            | Self::CrossingCongestion
+            | Self::BufferCoordCollision => Severity::Error,
             Self::LogicUnusedSignal => Severity::Warning,
         }
     }

@@ -12,6 +12,71 @@ and is a separate axis from the Minecraft target version.
 
 ### Added
 
+- Redstone crossing legalization + `cairn synth --stage crossing
+  --edition <java|bedrock>` (M6-PR7) — the seventh slice of the M6
+  redstone-simulates pipeline. `cairn-lang-redstone` grows a
+  `compile_crossing(&ScopedPlacementIr) -> CrossingOutput` entry
+  point that walks the delayed Placement IR produced by M6-PR6,
+  re-derives every net's Manhattan Steiner tree from the same
+  `NetRef → source coord` mapping the routing and delay passes use
+  (routing discarded its per-scope occupancy set before yielding the
+  routed IR, so wire coords are cheap to re-walk here and would
+  bloat the JSON if stored twice), detects wire coords two distinct
+  nets would otherwise share on the ground `RouteLayer::Plane`, and
+  materialises the two escape hatches `spec/redstone` §14.5's
+  pseudo-2.5D text names — stage 4 of the five-stage place-and-route
+  pipeline (Placement → Steiner routing → Delay insertion → Crossing
+  legalization → Edition legalization). No new IR type joins the
+  crate: the crossing pass is a field write per the phase table on
+  `PlacedCellNode`, symmetrical to the routing and delay passes'
+  `wire_length` / `delay_ticks` writes. `CellCoord` grows a
+  `layer: RouteLayer` tag (`Plane` / `Bridge` / `Via`), and
+  `PlacedCellNode` grows `buffer_coords: Vec<CellCoord>` that the
+  crossing pass fills with one coord per implicit buffer repeater the
+  delay pass counted. Both fields serde-skip on their defaults
+  (`layer` skips when `Plane`, `buffer_coords` skips when empty), so
+  `--stage placement` / `--stage route` / `--stage delay` JSON stays
+  byte-identical to what those passes produced before stage 4 landed
+  — the crossing pass is a pure additive field write that surfaces
+  new keys only for scopes that actually escaped a crossing or placed
+  a buffer.
+  Cross-net detection walks per-net wire paths in the same
+  determinism-preserving order as routing (fanout descending, then
+  `NetRef` ascending) so a follow-up pass that consults the paths
+  for elbow selection has a canonical schedule; cell coords and I/O
+  pad coords are excluded from crossing scope because those carry the
+  net's endpoint semantic, not a wire pass-through. A crossing that
+  cannot escape the plane (the `void=<N>` reservation offers no
+  y-layer, i.e. `void < 2`) fires the new
+  `E_CROSSING_CONGESTION` code against the reservation span with the
+  self-correction triple ("increase `void`", "enlarge region", "split
+  into multiple `circuit` blocks"). Implicit buffer repeater coords
+  are picked from each driver's L-shape path (x-then-z-then-y,
+  matching routing's axis order) at `k * DUST_ATTENUATION_LIMIT`
+  (`k = 1..=buffer_count`); a candidate that collides with a cell /
+  pad / plane crossing / earlier buffer escapes to the bridge layer
+  at `y = 1`, and a collision that cannot be escaped fires
+  `E_BUFFER_COORD_COLLISION` — rare in practice because the delay
+  pass already caps segments at `MAX_ATTENUATION_SEGMENT` (16
+  buffers) and the routing pass caps footprint at the reservation
+  area, so only pathological packings (very tight `void=1` region
+  with many short cascades) trip it. Failed scopes elide from the
+  output so the future block-array voxel lowering (stage 5's
+  downstream consumer) cannot silently materialise buffers against a
+  layout no other stage can realise. The CLI's `cairn synth --stage`
+  gains a `crossing` value; the `--edition <java|bedrock>` flag is
+  required in that mode alongside `edition` / `placement` / `route`
+  / `delay`, and stays refused on the edition-neutral `logic` /
+  `netlist` stages (exit 2). `--stage crossing` inherits upstream
+  fail-loud: a scope that trips `E_ROUTE_CONGESTION` at routing or
+  `E_ATTENUATION_LIMIT` at delay insertion is reported and exits 1
+  before the crossing pass runs. Not in scope for this PR: edition
+  legalization, block-array voxel lowering, the physical-tile
+  (tier 3) cell library, the tick simulator, `assert
+  truth|always|latency` evaluation, sequential macros (`latch` /
+  `pulse` / `delay` / `edge_*` / `counter`), and QC/BUD refusal
+  (`E_NO_PORTABLE_IMPL`) — each remains a follow-up that will build
+  on the legalized Placement IR shape this PR pins.
 - Redstone delay insertion + `cairn synth --stage delay
   --edition <java|bedrock>` (M6-PR6) — the sixth slice of the M6
   redstone-simulates pipeline. `cairn-lang-redstone` grows a
