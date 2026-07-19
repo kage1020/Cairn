@@ -30,8 +30,10 @@ and is a separate axis from the Minecraft target version.
   `InverterTorch` carry 1 tick each, Bedrock `TorchAnd` carries 2
   ticks (two-torch NAND→NAND stacked in series), Bedrock `TorchOr`
   carries 0 ticks (bare dust merge), and every `*Unpinned` variant
-  returns a pessimistic 2-tick sentinel so a future pinned rename is
-  a one-arm swap that cannot silently degrade delay accounting.
+  returns `UNPINNED_BASE_DELAY_TICKS` (3 ticks — strictly above the
+  currently-pinned max of 2) so a future pinned rename is a one-arm
+  swap that cannot silently degrade delay accounting or blend in with
+  a pinned value already in the table.
   Implicit buffer repeaters cover driver segments that would breach
   the 15-block dust attenuation limit: for a segment of `s` blocks
   the pass counts `floor((s - 1) / DUST_ATTENUATION_LIMIT)` buffers,

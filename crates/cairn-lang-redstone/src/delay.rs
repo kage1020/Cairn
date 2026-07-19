@@ -60,7 +60,6 @@
 use cairn_lang_core::check::Severity;
 
 use crate::diagnostic::{Diagnostic, DiagnosticCode};
-use crate::logic_ir::ScopeKind;
 use crate::netlist_ir::NetRef;
 use crate::placement_ir::{
     CellCoord, CircuitRegionReservation, PlacementIr, ScopedPlacementIr, ScopedPlacementIrEntry,
@@ -78,6 +77,28 @@ pub const DUST_ATTENUATION_LIMIT: u32 = 15;
 /// exposes per-buffer delay tuning (Tier 0 `repeater delay=<N>`) would
 /// swap this constant for a per-buffer field on the routed IR.
 pub const BUFFER_REPEATER_TICKS: u32 = 1;
+
+/// Compile-time guard on [`BUFFER_REPEATER_TICKS`]. A default repeater
+/// cannot delay by less than one tick — if this constant is ever set
+/// to zero, `buffer_repeater_ticks_for_segment` would report zero
+/// implicit-buffer contribution for any segment length, silently
+/// under-reporting `delay_ticks` on every fixture that crosses the
+/// 15-block attenuation limit. Assert forces the value ≥ 1 so a
+/// future edit cannot slide past this without deliberate intent.
+const _: () = assert!(
+    BUFFER_REPEATER_TICKS >= 1,
+    "BUFFER_REPEATER_TICKS must be at least 1 — a default repeater delays by one tick",
+);
+
+/// Compile-time guard on the sanity cap: it must sit above the
+/// attenuation limit, otherwise the "beyond attenuation limit but
+/// within cap" band that `buffer_repeater_ticks_for_segment` fills
+/// with implicit buffers would be empty and every segment past 15
+/// blocks would refuse instead of being absorbed by buffers.
+const _: () = assert!(
+    MAX_ATTENUATION_SEGMENT > DUST_ATTENUATION_LIMIT,
+    "MAX_ATTENUATION_SEGMENT must exceed DUST_ATTENUATION_LIMIT so implicit buffers have a band to cover",
+);
 
 /// v1 sanity cap on a single driver segment's Manhattan length. A
 /// segment longer than this needs stage-4 crossing legalization to
@@ -153,25 +174,28 @@ type ScopeDelay = Result<PlacementIr, Diagnostic>;
 
 fn delay_scope(entry: &ScopedPlacementIrEntry) -> ScopeDelay {
     let source = &entry.ir;
-    // Defensive pass-through: a scope with no cells has no delay to
-    // attribute. Upstream stages elide empty scopes; this branch is a
-    // belt-and-braces for hand-built IRs.
-    if source.cells.is_empty() {
+    // Region absence with any placed cells or output drivers is a
+    // caller-side hand-built-IR bug: the placement pass fires
+    // `E_NO_CIRCUIT_REGION` and elides such scopes before they can
+    // reach delay insertion. Refuse with the same diagnostic code so
+    // a downstream caller sees a consistent error surface; scopes
+    // with neither cells nor output drivers still pass through so a
+    // module without any redstone survives the delay pipeline as-is.
+    // Stricter than routing's belt-and-braces `debug_assert! +
+    // Ok(source.clone())` fall-through by design: delay writes
+    // `delay_ticks`, and the phase table on `PlacedCellNode` promises
+    // `(Some, Some)` after this stage — silently returning `(None,
+    // None)` on a partial IR would let a future tick simulator read a
+    // Stage-1 shape from a Stage-3 output.
+    let Some(region) = source.region.clone() else {
+        if source.cells.is_empty() && source.outputs.is_empty() {
+            return Ok(source.clone());
+        }
+        return Err(missing_region_diagnostic(entry));
+    };
+    if source.cells.is_empty() && source.outputs.is_empty() {
         return Ok(source.clone());
     }
-    let Some(region) = source.region.clone() else {
-        // The placement / routing passes both fire on this branch:
-        // placement raises `E_NO_CIRCUIT_REGION` and elides the scope,
-        // routing carries a defensive `debug_assert!` for hand-built
-        // IRs. Mirror routing's belt-and-braces so a hand-built IR
-        // that ships cells without a region trips fast in debug and
-        // stays deterministic in release.
-        debug_assert!(
-            source.cells.is_empty(),
-            "delay_scope received a PlacementIr with cells but no region — placement should have elided it",
-        );
-        return Ok(source.clone());
-    };
 
     let mut ir = source.clone();
 
@@ -184,20 +208,24 @@ fn delay_scope(entry: &ScopedPlacementIrEntry) -> ScopeDelay {
     // that saves no runtime work.
     let cell_coords: Vec<CellCoord> = ir.cells.iter().map(|c| c.coord).collect();
 
+    // Netlist synthesis guarantees the topological invariant
+    // (`NetRef::Cell(j)` inside `cells[i]` satisfies `j < i`), so
+    // `.expect(...)` is safe on both debug and release paths — an
+    // out-of-range access here means the caller handed in a
+    // hand-built IR that skipped synthesis, in which case panicking
+    // loud beats silently sinking into a fall-back coord and under-
+    // reporting `delay_ticks`. Stricter than routing's `debug_assert
+    // + last-cell fallback` by the same phase-table-contract argument
+    // that hardens the missing-region branch above.
     let source_of_net = |net: NetRef| -> CellCoord {
         match net {
             NetRef::Input(i) => input_pad(i as usize, &region),
-            NetRef::Cell(j) => {
-                debug_assert!(
-                    (j as usize) < cell_coords.len(),
-                    "NetRef::Cell({j}) out of range (cells.len()={}) — topological invariant broken",
+            NetRef::Cell(j) => *cell_coords.get(j as usize).unwrap_or_else(|| {
+                panic!(
+                    "NetRef::Cell({j}) out of range (cells.len()={}) — topological invariant broken by caller-side hand-built IR",
                     cell_coords.len(),
-                );
-                cell_coords
-                    .get(j as usize)
-                    .copied()
-                    .unwrap_or_else(|| *cell_coords.last().expect("cells.is_empty checked above"))
-            }
+                )
+            }),
         }
     };
 
@@ -313,7 +341,7 @@ fn attenuation_diagnostic(
 ) -> Diagnostic {
     let primary = format!(
         "routed netlist for {kind} `{name}` has a driver segment of {segment} blocks into cell #{cell_index} port #{driver_index} — exceeds the v1 attenuation limit of {cap} blocks (dust decays 1/block, so this segment would need {buffers} buffer repeaters and a stage-4 crossing-legalization escape to materialize)",
-        kind = scope_kind_label(entry.kind),
+        kind = entry.kind.label(),
         name = entry.name,
         cap = MAX_ATTENUATION_SEGMENT,
         buffers = buffer_repeater_ticks_for_segment(segment) / BUFFER_REPEATER_TICKS.max(1),
@@ -338,7 +366,7 @@ fn attenuation_output_diagnostic(
 ) -> Diagnostic {
     let primary = format!(
         "routed netlist for {kind} `{name}` has a driver segment of {segment} blocks into output pad #{output_index} — exceeds the v1 attenuation limit of {cap} blocks (dust decays 1/block, so this segment would need {buffers} buffer repeaters and a stage-4 crossing-legalization escape to materialize)",
-        kind = scope_kind_label(entry.kind),
+        kind = entry.kind.label(),
         name = entry.name,
         cap = MAX_ATTENUATION_SEGMENT,
         buffers = buffer_repeater_ticks_for_segment(segment) / BUFFER_REPEATER_TICKS.max(1),
@@ -355,10 +383,223 @@ fn attenuation_output_diagnostic(
     diag
 }
 
-fn scope_kind_label(kind: ScopeKind) -> &'static str {
-    match kind {
-        ScopeKind::Struct => "struct",
-        ScopeKind::Def => "def",
-        ScopeKind::Site => "site",
+/// Refuse a scope that reached delay insertion carrying cells or
+/// output drivers but no `circuit region=` reservation. Reuses
+/// `E_NO_CIRCUIT_REGION` because the failure mode is the same the
+/// placement pass catches; a downstream reader that matches on the
+/// code sees a consistent taxonomy across stages. The span anchors on
+/// the first placed cell's span (mirroring the placement-pass
+/// helper), falling back to a default span when the scope carries
+/// only outputs and no cells to hang the span on.
+fn missing_region_diagnostic(entry: &ScopedPlacementIrEntry) -> Diagnostic {
+    let span = entry
+        .ir
+        .cells
+        .first()
+        .map(|c| c.span.clone())
+        .unwrap_or_default();
+    let primary = format!(
+        "routed netlist for {kind} `{name}` reached delay insertion carrying cells or output drivers but no `circuit region=<label> void=<N>` reservation — the placement pass should have elided this scope",
+        kind = entry.kind.label(),
+        name = entry.name,
+    );
+    let mut diag = Diagnostic::new(DiagnosticCode::NoCircuitRegion, span, primary);
+    diag = diag.with_footer(
+        "Fix: add a `circuit region=<label> void=<N>` line to the enclosing scope, or run `--stage placement` first to see the underlying error",
+    );
+    debug_assert_eq!(diag.severity, Severity::Error);
+    diag
+}
+
+#[cfg(test)]
+mod tests {
+    //! Crate-internal unit tests for delay-pass behaviours that
+    //! `tests/delay.rs` cannot reach through synth fixtures alone:
+    //! - the cell-driver branch of `attenuation_diagnostic` (needs a
+    //!   segment past 256 blocks between two cells, which no realistic
+    //!   `.crn` produces);
+    //! - the missing-region refusal introduced by Critical 4, which
+    //!   can only be built by hand-constructing a `PlacementIr`
+    //!   because `compile_placement` already elides that shape;
+    //! - `buffer_repeater_ticks_for_segment` at multiple boundary
+    //!   segment lengths (0, 15, 16, 30, 31, cap) so a formula change
+    //!   trips per-boundary rather than by aggregate.
+    //!
+    //! Uses crate-internal struct construction (all `PlacedCellNode` /
+    //! `PlacementIr` / `CircuitRegionReservation` fields are `pub`;
+    //! `#[non_exhaustive]` blocks only external crates), keeping the
+    //! integration-test surface in `tests/delay.rs` focused on synth
+    //! fixtures.
+
+    use cairn_lang_core::Edition;
+    use cairn_lang_core::error::Span;
+
+    use super::{
+        BUFFER_REPEATER_TICKS, DUST_ATTENUATION_LIMIT, MAX_ATTENUATION_SEGMENT,
+        buffer_repeater_ticks_for_segment, compile_delay,
+    };
+    use crate::diagnostic::DiagnosticCode;
+    use crate::edition_netlist_ir::EditionCell;
+    use crate::logic_ir::ScopeKind;
+    use crate::netlist_ir::{CellPortDriver, NetRef, PortName};
+    use crate::placement_ir::{
+        CellCoord, CircuitRegionReservation, PlacedCellNode, PlacementIr, ScopedPlacementIr,
+        ScopedPlacementIrEntry,
+    };
+
+    fn reservation(width: u32, depth: u32, void: u32) -> CircuitRegionReservation {
+        CircuitRegionReservation {
+            label: "floor".to_owned(),
+            void,
+            width,
+            depth,
+            span: Span::default(),
+        }
+    }
+
+    fn scoped(kind: ScopeKind, name: &str, ir: PlacementIr) -> ScopedPlacementIr {
+        let mut scoped = ScopedPlacementIr::new();
+        scoped.scopes.push(ScopedPlacementIrEntry {
+            kind,
+            name: name.to_owned(),
+            ir,
+        });
+        scoped
+    }
+
+    fn placed_cell(
+        cell: EditionCell,
+        coord: CellCoord,
+        drivers: Vec<CellPortDriver>,
+    ) -> PlacedCellNode {
+        PlacedCellNode {
+            cell,
+            drivers,
+            coord,
+            wire_length: Some(0),
+            delay_ticks: None,
+            span: Span::default(),
+        }
+    }
+
+    #[test]
+    fn cell_driver_attenuation_primary_names_cell_and_port() {
+        // Two cells wide-spread inside a `size=300x3` reservation so
+        // the cell[1] driver from cell[0] spans a Manhattan segment
+        // over `MAX_ATTENUATION_SEGMENT`. Only reachable by hand-built
+        // IR — the placement pass lays cells at `x = topological
+        // index`, so producing this shape from a `.crn` would need a
+        // 258-cell chain.
+        let mut ir = PlacementIr::new(Edition::Java);
+        ir.region = Some(reservation(300, 3, 3));
+        ir.cells.push(placed_cell(
+            EditionCell::JavaComparatorAnd,
+            CellCoord { x: 0, y: 0, z: 0 },
+            vec![],
+        ));
+        ir.cells.push(placed_cell(
+            EditionCell::JavaComparatorAnd,
+            CellCoord { x: 299, y: 0, z: 0 },
+            vec![CellPortDriver {
+                port: PortName::A,
+                net: NetRef::Cell(0),
+            }],
+        ));
+        let delayed = compile_delay(&scoped(ScopeKind::Struct, "wide", ir));
+        let attenuation = delayed
+            .diagnostics
+            .iter()
+            .find(|d| d.code == DiagnosticCode::AttenuationLimit)
+            .expect("cell-driver segment past cap must fire E_ATTENUATION_LIMIT");
+        assert!(
+            attenuation.primary.contains("into cell #1"),
+            "primary must name the failing cell index, got {:?}",
+            attenuation.primary,
+        );
+        assert!(
+            attenuation.primary.contains("port #0"),
+            "primary must name the failing driver port, got {:?}",
+            attenuation.primary,
+        );
+        assert!(
+            delayed.scoped.scopes.is_empty(),
+            "failed scope must be elided",
+        );
+    }
+
+    #[test]
+    fn missing_region_with_cells_fires_no_circuit_region() {
+        // A hand-built `PlacementIr` with cells but no region reaches
+        // delay because it skipped placement. Critical 4 hardens this
+        // path to refuse instead of silently passing through with a
+        // `(None, None)` phase-table violation.
+        let mut ir = PlacementIr::new(Edition::Java);
+        ir.cells.push(placed_cell(
+            EditionCell::JavaComparatorAnd,
+            CellCoord { x: 0, y: 0, z: 0 },
+            vec![],
+        ));
+        let delayed = compile_delay(&scoped(ScopeKind::Struct, "roomless", ir));
+        let diag = delayed
+            .diagnostics
+            .iter()
+            .find(|d| d.code == DiagnosticCode::NoCircuitRegion)
+            .expect("missing region with cells must fire E_NO_CIRCUIT_REGION");
+        assert!(
+            diag.primary.contains("struct `roomless`"),
+            "primary must name the scope, got {:?}",
+            diag.primary,
+        );
+        assert!(
+            delayed.scoped.scopes.is_empty(),
+            "failed scope must elide even though it carried cells",
+        );
+    }
+
+    #[test]
+    fn buffer_repeater_ticks_boundary_table() {
+        // Boundary values of the piecewise formula
+        // `s <= 15 → 0`, `s in (15, 30] → 1 * BUFFER_REPEATER_TICKS`,
+        // `s in (30, 45] → 2 * BUFFER_REPEATER_TICKS`, ... pinned as a
+        // table so a `(s - 1) / 15` → `s / 15` slip trips each row
+        // rather than the aggregate.
+        for (segment, expected_buffers) in [
+            (0_u32, 0_u32),
+            (1, 0),
+            (DUST_ATTENUATION_LIMIT, 0),
+            (DUST_ATTENUATION_LIMIT + 1, 1),
+            (2 * DUST_ATTENUATION_LIMIT, 1),
+            (2 * DUST_ATTENUATION_LIMIT + 1, 2),
+            (3 * DUST_ATTENUATION_LIMIT, 2),
+            (3 * DUST_ATTENUATION_LIMIT + 1, 3),
+            (MAX_ATTENUATION_SEGMENT, 17),
+        ] {
+            assert_eq!(
+                buffer_repeater_ticks_for_segment(segment),
+                expected_buffers * BUFFER_REPEATER_TICKS,
+                "segment {segment} blocks",
+            );
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "topological invariant broken")]
+    fn out_of_range_net_ref_cell_panics_loudly() {
+        // A hand-built IR with `NetRef::Cell(u32::MAX)` violates the
+        // synthesis-side topological invariant. Critical 3 hardens
+        // this from "silent last-cell fallback" to a loud release
+        // panic so a caller-side bug cannot produce silently wrong
+        // `delay_ticks`.
+        let mut ir = PlacementIr::new(Edition::Java);
+        ir.region = Some(reservation(5, 3, 2));
+        ir.cells.push(placed_cell(
+            EditionCell::JavaComparatorAnd,
+            CellCoord { x: 0, y: 0, z: 0 },
+            vec![CellPortDriver {
+                port: PortName::A,
+                net: NetRef::Cell(u32::MAX),
+            }],
+        ));
+        let _ = compile_delay(&scoped(ScopeKind::Struct, "broken", ir));
     }
 }

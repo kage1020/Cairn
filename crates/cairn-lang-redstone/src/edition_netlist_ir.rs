@@ -108,8 +108,11 @@ impl EditionCell {
     /// [`crate::edition_netlist::compile_edition_netlist`] to
     /// `debug_assert!` that every cell in an [`EditionNetlistIr`]
     /// agrees with its container's [`EditionNetlistIr::edition`].
+    /// `const` so a downstream table lookup that pairs this variant
+    /// with [`Self::base_delay_ticks`] stays evaluable at compile
+    /// time.
     #[must_use]
-    pub fn edition(self) -> Edition {
+    pub const fn edition(self) -> Edition {
         match self {
             Self::JavaComparatorAnd
             | Self::JavaRepeaterOr
@@ -196,6 +199,18 @@ impl EditionCell {
 /// `_Unpinned` cells via the parser today, so the sentinel is a
 /// crate-internal invariant.
 const UNPINNED_BASE_DELAY_TICKS: u32 = 3;
+
+/// Compile-time guard on the sentinel's core invariant: pinned base
+/// delays currently top out at 2 ticks (`BedrockTorchAnd`), so the
+/// sentinel must exceed that. If a future pinning bumps a real cell
+/// to 3 ticks without also bumping this sentinel, delay dumps could
+/// silently blend the sentinel value into a legitimate pinned delay
+/// — this const assert forces the ambiguity to be resolved at build
+/// time.
+const _: () = assert!(
+    UNPINNED_BASE_DELAY_TICKS > 2,
+    "UNPINNED_BASE_DELAY_TICKS must sit strictly above every pinned base_delay_ticks value",
+);
 
 /// One cell in the DAG, tagged with its edition-specific realisation.
 ///

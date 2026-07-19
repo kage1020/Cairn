@@ -31,8 +31,10 @@
   `InverterTorch` と Bedrock `InverterTorch` はそれぞれ 1 tick、
   Bedrock `TorchAnd` は 2 tick（NAND→NAND の 2-torch 直列）、Bedrock
   `TorchOr` は 0 tick（bare dust merge）、`*Unpinned` variant は
-  pessimistic な 2 tick sentinel（将来の pinned rename が 1 行の match
-  arm 書き換えで済み、delay 見積もりを silent に狂わせない）。暗黙
+  `UNPINNED_BASE_DELAY_TICKS`（3 tick — 現在 pinned な最大 2 tick より
+  厳密に大きい）を返す pessimistic sentinel（将来の pinned rename が 1 行の
+  match arm 書き換えで済み、delay 見積もりを silent に狂わせず、
+  pinned 値と混同されない）。暗黙
   buffer repeater は dust attenuation 上限 15 blocks を跨ぐ driver
   segment に付く: 長さ `s` blocks の segment は `floor((s - 1) /
   DUST_ATTENUATION_LIMIT)` 個の buffer を実装扱いし、各 buffer は

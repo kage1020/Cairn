@@ -86,7 +86,6 @@ use std::collections::HashSet;
 use cairn_lang_core::check::Severity;
 
 use crate::diagnostic::{Diagnostic, DiagnosticCode};
-use crate::logic_ir::ScopeKind;
 use crate::netlist_ir::NetRef;
 use crate::placement_ir::{
     CellCoord, CircuitRegionReservation, PlacementIr, ScopedPlacementIr, ScopedPlacementIrEntry,
@@ -469,7 +468,7 @@ fn congestion_diagnostic(
     let tenths = ratio_x10 % 10;
     let primary = format!(
         "routed netlist for {kind} `{name}` occupies ~{whole}.{tenths}x the reserved area (void={void}, region {width}x{depth})",
-        kind = scope_kind_label(entry.kind),
+        kind = entry.kind.label(),
         name = entry.name,
         void = reservation.void,
         width = reservation.width,
@@ -496,7 +495,7 @@ fn pad_overlap_diagnostic(
 ) -> Diagnostic {
     let primary = format!(
         "routed netlist for {kind} `{name}` cannot fit its {pad_kind} pad #{pad_index} at ({x},{y},{z}) — the reserved area (void={void}, region {width}x{depth}) collapses I/O pads onto a cell coord or another pad",
-        kind = scope_kind_label(entry.kind),
+        kind = entry.kind.label(),
         name = entry.name,
         x = pad_coord.x,
         y = pad_coord.y,
@@ -523,7 +522,7 @@ fn zero_reservation_diagnostic(
 ) -> Diagnostic {
     let primary = format!(
         "routed netlist for {kind} `{name}` has a zero-area reservation (void={void}, region {width}x{depth}) — routing cannot lay any wire",
-        kind = scope_kind_label(entry.kind),
+        kind = entry.kind.label(),
         name = entry.name,
         void = reservation.void,
         width = reservation.width,
@@ -539,12 +538,4 @@ fn zero_reservation_diagnostic(
     );
     debug_assert_eq!(diag.severity, Severity::Error);
     diag
-}
-
-fn scope_kind_label(kind: ScopeKind) -> &'static str {
-    match kind {
-        ScopeKind::Struct => "struct",
-        ScopeKind::Def => "def",
-        ScopeKind::Site => "site",
-    }
 }

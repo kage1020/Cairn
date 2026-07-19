@@ -275,6 +275,22 @@ pub enum ScopeKind {
     Site,
 }
 
+impl ScopeKind {
+    /// Lower-case source-form label for this scope kind (`"struct"` /
+    /// `"def"` / `"site"`). Used by every pass that formats a
+    /// diagnostic primary as "{kind} \`{name}\`" so the string form
+    /// stays consistent across the pipeline instead of being
+    /// duplicated in each pass's `scope_kind_label` helper.
+    #[must_use]
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Struct => "struct",
+            Self::Def => "def",
+            Self::Site => "site",
+        }
+    }
+}
+
 /// Ordered list of `(scope kind, scope name)` → [`LogicIr`] entries
 /// covering an entire `.crn` module.
 ///

@@ -17,9 +17,8 @@ use cairn_lang_core::Edition;
 use cairn_lang_core::check::Severity;
 use cairn_lang_core::{lower, parse};
 use cairn_lang_redstone::{
-    BUFFER_REPEATER_TICKS, DUST_ATTENUATION_LIMIT, DiagnosticCode, MAX_ATTENUATION_SEGMENT,
-    ScopedPlacementIr, compile_delay, compile_edition_netlist, compile_netlist, compile_placement,
-    compile_routing, synthesize,
+    DiagnosticCode, MAX_ATTENUATION_SEGMENT, ScopedPlacementIr, compile_delay,
+    compile_edition_netlist, compile_netlist, compile_placement, compile_routing, synthesize,
 };
 
 fn load_example(name: &str) -> String {
@@ -338,32 +337,141 @@ struct chain size=20x5
         .find(|e| e.name == "chain")
         .expect("chain scope");
     // cell[0] .. cell[15] map to `sig.c0` .. `sig.c15`, all
-    // `JavaComparatorAnd` with base_delay = 1.
+    // `JavaComparatorAnd` with base_delay = 1. Each cell has two
+    // drivers: the previous cell (segment 1 block, no buffer) and
+    // shared `sig.b` (segment i + 2 blocks — the input pad at
+    // `(0, 0, 2)` reaches `(i, 0, 0)`). For i ≤ 13 the long segment
+    // ≤ 15 so no buffer ticks accrue and `delay_ticks = 1`; at i = 14
+    // it crosses the attenuation limit and `(16 - 1) / 15 = 1` buffer
+    // is added, so `delay_ticks = 2` from that cell onward. Values
+    // are hardcoded per index (not derived from the formula the
+    // implementation itself uses) so a self-referential off-by-one in
+    // `buffer_repeater_ticks_for_segment` cannot slide past the test.
     assert_eq!(entry.ir.cells.len(), 16);
+    let expected: [u32; 16] = [
+        1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, // i = 0..=13, segment ≤ 15
+        2, 2, // i = 14 (segment 16), i = 15 (segment 17)
+    ];
     for (i, cell) in entry.ir.cells.iter().enumerate() {
-        // Segments: `sig.b` pad → cell[i] = i + 2 blocks (previous
-        // cell driver = 1 block for i > 0 or `sig.a` pad segment for
-        // i = 0, both under the limit).
-        let long_segment = u32::try_from(i).expect("fixture index fits u32") + 2;
-        let expected_buffers = if long_segment <= DUST_ATTENUATION_LIMIT {
-            0
-        } else {
-            (long_segment - 1) / DUST_ATTENUATION_LIMIT
-        };
-        let expected_ticks = 1 /* base */ + expected_buffers * BUFFER_REPEATER_TICKS;
         assert_eq!(
             cell.delay_ticks,
-            Some(expected_ticks),
-            "cell[{i}]: expected base 1 + {expected_buffers} implicit buffer tick(s)",
+            Some(expected[i]),
+            "cell[{i}]: expected delay_ticks = {}",
+            expected[i],
         );
     }
-    // At least one cell must have crossed the attenuation limit —
-    // otherwise the fixture is too small to exercise the buffer
-    // path.
-    assert!(
-        entry.ir.cells.iter().any(|c| c.delay_ticks.unwrap() > 1),
-        "chain fixture must include at least one cell with an implicit buffer",
+    // The chain must exercise both bands of the delay model — base
+    // alone (i ≤ 13) and base + implicit buffer (i ≥ 14) — otherwise
+    // shrinking the fixture would silently lose the buffer path.
+    assert!(entry.ir.cells.iter().any(|c| c.delay_ticks == Some(1)));
+    assert!(entry.ir.cells.iter().any(|c| c.delay_ticks == Some(2)));
+}
+
+/// `AC5b` — `sig.and_ab = sig.a and sig.b` on Bedrock lowers to
+/// `BedrockTorchAnd` whose `base_delay_ticks() = 2` (two-torch
+/// NAND→NAND stacked in series). Pins the only pinned base delay
+/// that is neither 0 nor 1 — without this fixture a typo swapping
+/// `BedrockTorchAnd` to `1` or `3` in the base-delay table would slip
+/// past every other AC (which only cover the 0-tick `BedrockTorchOr`,
+/// the 1-tick pinned Java/Bedrock cells, or the 0-buffer `and` cell
+/// on Java). Both driver segments (1 and 2 blocks) sit under the
+/// attenuation limit so `delay_ticks = base_delay + 0 = 2`.
+#[test]
+fn bedrock_torch_and_delay_ticks_pin_two_tick_base() {
+    let source = r"
+theme t:
+  slot wall -> @oak_planks
+
+struct band size=5x5
+  floor mat_slot=wall
+  pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a
+  pressure_plate id=q at=inside.front  offset=0 y=0 -> sig.b
+  logic sig.out = sig.a and sig.b
+  door id=d side=front at=center mat_slot=wall opened_by=sig.out
+  circuit region=floor void=2
+";
+    let routed = routed_from_source(source, Edition::Bedrock);
+    let delayed = compile_delay(&routed);
+    assert!(delayed.diagnostics.is_empty(), "{:?}", delayed.diagnostics);
+    let entry = delayed
+        .scoped
+        .scopes
+        .iter()
+        .find(|e| e.name == "band")
+        .expect("band scope");
+    assert_eq!(entry.ir.cells.len(), 1);
+    assert_eq!(entry.ir.cells[0].cell.edition(), Edition::Bedrock);
+    assert_eq!(
+        entry.ir.cells[0].delay_ticks,
+        Some(2),
+        "BedrockTorchAnd base_delay must be 2 ticks",
     );
+}
+
+/// `AC5c` — output-pad Manhattan segment of exactly
+/// `MAX_ATTENUATION_SEGMENT` blocks passes cleanly; one more block
+/// fails. Pins the `>` vs `>=` boundary in `delay_scope`'s sanity
+/// check so a future rewrite cannot silently slide the cap by one.
+///
+/// With `size=256x5` the output pad lands at `(255, 0, 1)` and the
+/// sole cell at `(0, 0, 0)`, so the output segment is exactly 256
+/// blocks — matching the cap. `size=257x5` bumps the pad to
+/// `(256, 0, 1)` and the segment to 257, one over the cap.
+#[test]
+fn max_attenuation_segment_boundary_at_256_is_inclusive() {
+    let at_cap_source = "@cairn 2026.06\n@requires version>=1.20\n\n\
+        theme t:\n  slot wall -> @oak_planks\n\n\
+        struct band size=256x5\n  \
+        floor mat_slot=wall\n  \
+        pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a\n  \
+        pressure_plate id=q at=inside.front  offset=0 y=0 -> sig.b\n  \
+        logic sig.out = sig.a or sig.b\n  \
+        door id=d side=front at=center mat_slot=wall opened_by=sig.out\n  \
+        circuit region=floor void=3\n";
+    let routed = routed_from_source(at_cap_source, Edition::Java);
+    let delayed = compile_delay(&routed);
+    assert!(
+        delayed.diagnostics.is_empty(),
+        "segment == MAX_ATTENUATION_SEGMENT must pass: {:?}",
+        delayed.diagnostics,
+    );
+    let entry = delayed
+        .scoped
+        .scopes
+        .iter()
+        .find(|e| e.name == "band")
+        .expect("band scope");
+    assert!(entry.ir.cells[0].delay_ticks.is_some());
+}
+
+#[test]
+fn max_attenuation_segment_boundary_at_257_is_exclusive() {
+    let over_cap_source = "@cairn 2026.06\n@requires version>=1.20\n\n\
+        theme t:\n  slot wall -> @oak_planks\n\n\
+        struct band size=257x5\n  \
+        floor mat_slot=wall\n  \
+        pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a\n  \
+        pressure_plate id=q at=inside.front  offset=0 y=0 -> sig.b\n  \
+        logic sig.out = sig.a or sig.b\n  \
+        door id=d side=front at=center mat_slot=wall opened_by=sig.out\n  \
+        circuit region=floor void=3\n";
+    let routed = routed_from_source(over_cap_source, Edition::Java);
+    let delayed = compile_delay(&routed);
+    assert_eq!(
+        delayed
+            .diagnostics
+            .iter()
+            .filter(|d| d.code == DiagnosticCode::AttenuationLimit)
+            .count(),
+        1,
+        "segment == MAX_ATTENUATION_SEGMENT + 1 must fail: {:?}",
+        delayed.diagnostics,
+    );
+    // Assert `MAX_ATTENUATION_SEGMENT` reads as 256 today so the
+    // boundary fixtures above stay meaningful — a future edit that
+    // bumps the cap without updating this test would silently lose
+    // its boundary coverage.
+    assert_eq!(MAX_ATTENUATION_SEGMENT, 256);
 }
 
 /// AC6 — an empty `ScopedPlacementIr` (no scopes) delays to an empty

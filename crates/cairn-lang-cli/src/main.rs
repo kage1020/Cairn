@@ -145,11 +145,12 @@ enum Command {
     /// Placement IR and prints the routed layout with every cell's
     /// `wire_length` populated; `--stage delay` runs delay insertion
     /// over the routed IR and fills every cell's `delay_ticks` with
-    /// base tick delay plus one tick per implicit buffer repeater
-    /// each driver segment beyond the 15-block dust attenuation limit
-    /// implies. The `--edition <java|bedrock>` flag is required in the
-    /// `edition`, `placement`, `route`, and `delay` modes and refused
-    /// otherwise (the earlier stages are edition-neutral by contract).
+    /// the sum of the cell's base delay and each implicit buffer
+    /// repeater's `BUFFER_REPEATER_TICKS` contribution over every
+    /// driver segment beyond the `DUST_ATTENUATION_LIMIT`. The
+    /// `--edition <java|bedrock>` flag is required in the `edition`,
+    /// `placement`, `route`, and `delay` modes and refused otherwise
+    /// (the earlier stages are edition-neutral by contract).
     /// **Internal / experimental** — the shape of the output is not
     /// covered by the stable compatibility tier and may change at any time
     /// as the route / simulator stages land. Requires
@@ -211,12 +212,16 @@ enum SynthStage {
     /// Delayed Placement IR: delay insertion over the routed Placement
     /// IR against `--edition`. Stage 3 of `spec/redstone` §14.5's
     /// place-and-route pipeline. Fills every cell's `delay_ticks`
-    /// with the sum of the cell's physical base delay and one tick
-    /// per implicit buffer repeater implied by each driver segment
-    /// that would otherwise exceed the 15-block dust attenuation
-    /// limit; refuses with `E_ATTENUATION_LIMIT` when a segment
-    /// exceeds the v1 sanity cap that would need a stage-4
-    /// crossing-legalization escape.
+    /// with the sum of the cell's physical base delay
+    /// ([`cairn_lang_redstone::EditionCell::base_delay_ticks`]) and
+    /// each implicit buffer repeater's
+    /// [`cairn_lang_redstone::BUFFER_REPEATER_TICKS`] contribution
+    /// implied by driver segments beyond
+    /// [`cairn_lang_redstone::DUST_ATTENUATION_LIMIT`]; refuses with
+    /// `E_ATTENUATION_LIMIT` when a segment exceeds the v1 sanity cap
+    /// [`cairn_lang_redstone::MAX_ATTENUATION_SEGMENT`], the threshold
+    /// past which a stage-4 crossing-legalization escape becomes
+    /// unavoidable.
     Delay,
 }
 
