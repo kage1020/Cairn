@@ -108,8 +108,11 @@ impl EditionCell {
     /// [`crate::edition_netlist::compile_edition_netlist`] to
     /// `debug_assert!` that every cell in an [`EditionNetlistIr`]
     /// agrees with its container's [`EditionNetlistIr::edition`].
+    /// `const` so a downstream table lookup that pairs this variant
+    /// with [`Self::base_delay_ticks`] stays evaluable at compile
+    /// time.
     #[must_use]
-    pub fn edition(self) -> Edition {
+    pub const fn edition(self) -> Edition {
         match self {
             Self::JavaComparatorAnd
             | Self::JavaRepeaterOr
@@ -127,7 +130,87 @@ impl EditionCell {
             | Self::BedrockMuxUnpinned => Edition::Bedrock,
         }
     }
+
+    /// Base tick delay contributed by this cell's physical realisation,
+    /// exclusive of any implicit buffer repeaters the delay-insertion
+    /// pass adds for driver segments beyond the dust attenuation limit.
+    ///
+    /// `spec/redstone` §14.4 ties tick counts to the cell selection
+    /// plus the routed wire length. This method exposes the first
+    /// half — the constant tick contribution of the physical tile —
+    /// so [`crate::delay::compile_delay`] can compose it with the
+    /// per-driver buffer count without re-deriving the edition split
+    /// each time.
+    ///
+    /// The canonical numbers follow Minecraft's baseline redstone
+    /// physics: a comparator in subtract mode delays 1 tick, a
+    /// repeater on its default `delay=1` setting delays 1 tick, a
+    /// redstone torch inverter delays 1 tick, and a bare dust merge
+    /// carries no cell-level tick. The two-torch Bedrock AND is
+    /// therefore 2 ticks (NAND→NAND stacked in series), and the
+    /// Bedrock OR is a bare dust merge with no cell tick (matching
+    /// the [`Self::BedrockTorchOr`] doc-comment's "no repeater
+    /// necessary" note).
+    ///
+    /// The `*Unpinned` variants are parser-unreachable placeholders
+    /// today (Xor / Nand / Nor / Mux); they return
+    /// [`UNPINNED_BASE_DELAY_TICKS`], a pessimistic sentinel that
+    /// sits **strictly above** every pinned base delay so a future
+    /// pinning that lands new physics without touching this table
+    /// would over-estimate rather than under-estimate — the same
+    /// "reserved but not yet pinned" pattern
+    /// [`crate::edition_netlist::compile_edition_netlist`] uses for
+    /// their variants. Keeping the sentinel distinct from any real
+    /// value also makes the pinning migration observable in delay
+    /// dumps: an `_Unpinned` cell with `delay_ticks =
+    /// UNPINNED_BASE_DELAY_TICKS` is visibly different from a pinned
+    /// 2-tick cell, so a future PR that flips `JavaXorUnpinned` to
+    /// `JavaXorComparatorPair` and hard-codes 2 ticks shifts every
+    /// downstream regression that was silently accepting the sentinel.
+    #[must_use]
+    pub const fn base_delay_ticks(self) -> u32 {
+        match self {
+            Self::JavaComparatorAnd
+            | Self::JavaRepeaterOr
+            | Self::JavaInverterTorch
+            | Self::BedrockInverterTorch => 1,
+            Self::BedrockTorchAnd => 2,
+            Self::BedrockTorchOr => 0,
+            Self::JavaXorUnpinned
+            | Self::JavaNandUnpinned
+            | Self::JavaNorUnpinned
+            | Self::JavaMuxUnpinned
+            | Self::BedrockXorUnpinned
+            | Self::BedrockNandUnpinned
+            | Self::BedrockNorUnpinned
+            | Self::BedrockMuxUnpinned => UNPINNED_BASE_DELAY_TICKS,
+        }
+    }
 }
+
+/// Pessimistic base-delay sentinel returned by
+/// [`EditionCell::base_delay_ticks`] for every parser-unreachable
+/// `*Unpinned` variant. Strictly above every pinned base delay in the
+/// table (currently 2 ticks for `BedrockTorchAnd`) so a future rename
+/// that lands new physics without touching the table over-estimates
+/// rather than silently inheriting a real value; distinct from any
+/// pinned tick so an `_Unpinned` cell's delay is visibly different in
+/// a JSON dump. Not `pub` — external callers cannot construct
+/// `_Unpinned` cells via the parser today, so the sentinel is a
+/// crate-internal invariant.
+const UNPINNED_BASE_DELAY_TICKS: u32 = 3;
+
+/// Compile-time guard on the sentinel's core invariant: pinned base
+/// delays currently top out at 2 ticks (`BedrockTorchAnd`), so the
+/// sentinel must exceed that. If a future pinning bumps a real cell
+/// to 3 ticks without also bumping this sentinel, delay dumps could
+/// silently blend the sentinel value into a legitimate pinned delay
+/// — this const assert forces the ambiguity to be resolved at build
+/// time.
+const _: () = assert!(
+    UNPINNED_BASE_DELAY_TICKS > 2,
+    "UNPINNED_BASE_DELAY_TICKS must sit strictly above every pinned base_delay_ticks value",
+);
 
 /// One cell in the DAG, tagged with its edition-specific realisation.
 ///

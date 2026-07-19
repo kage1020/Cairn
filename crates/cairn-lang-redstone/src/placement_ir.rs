@@ -12,14 +12,16 @@
 //! out (Placement → Steiner routing → Delay insertion → Crossing
 //! legalization → Edition legalization).
 //!
-//! Delay is still not carried at this stage. Per `spec/redstone` §14.4
-//! delay is determined "for the first time in the Placement IR" once
-//! wire length is known; wire length is the output of the routing pass
-//! (Steiner routing, stage 2 of §14.5), so [`PlacedCellNode::wire_length`]
-//! and [`PlacedCellNode::delay_ticks`] stay reserved as `Option`s that
-//! this pass always leaves `None`. Adding real values in a follow-up
-//! pass is a field-write, not a schema change, so downstream JSON
-//! consumers see a stable wire shape today.
+//! Delay is not carried at the placement stage itself. Per
+//! `spec/redstone` §14.4 delay is determined "for the first time in
+//! the Placement IR" once wire length is known; wire length is the
+//! output of the routing pass (Steiner routing, stage 2 of §14.5) and
+//! is folded into `delay_ticks` by the delay-insertion pass
+//! ([`crate::delay::compile_delay`], stage 3), so
+//! [`PlacedCellNode::wire_length`] and [`PlacedCellNode::delay_ticks`]
+//! are reserved as `Option`s that the placement pass leaves `None`.
+//! Adding values in a follow-up pass is a field-write, not a schema
+//! change, so downstream JSON consumers see a stable wire shape.
 //!
 //! `circuit region=... void=N` congestion detection (`E_ROUTE_CONGESTION`)
 //! and missing-reservation refusal (`E_NO_CIRCUIT_REGION`) fire here —
@@ -95,14 +97,14 @@ impl CircuitRegionReservation {
 /// inside the reservation.
 ///
 /// `wire_length` and `delay_ticks` are progressive fields written by the
-/// routing and delay-insertion follow-up passes. The three legitimate
-/// phase states are:
+/// routing and delay-insertion passes. The three legitimate phase
+/// states are:
 ///
 /// | Producer                          | `wire_length` | `delay_ticks` |
 /// |-----------------------------------|---------------|---------------|
 /// | [`crate::placement::compile_placement`] alone (Stage 1) | `None`     | `None`     |
 /// | [`crate::routing::compile_routing`]   (Stage 2)          | `Some(_)`  | `None`     |
-/// | Delay-insertion follow-up             (Stage 3)          | `Some(_)`  | `Some(_)`  |
+/// | [`crate::delay::compile_delay`]       (Stage 3)          | `Some(_)`  | `Some(_)`  |
 ///
 /// `(None, Some(_))` is illegal by contract (delay follows routed wire
 /// length per `spec/redstone` §14.4) and never appears in output any
@@ -138,9 +140,9 @@ pub struct PlacedCellNode {
     pub wire_length: Option<u32>,
     /// Tick count implied by the routed wire length + this cell's
     /// physical realisation per `spec/redstone` §14.4. `None` until the
-    /// delay-insertion pass (stage 3 of §14.5) fills it in; routing on
-    /// its own leaves this `None` while promoting [`Self::wire_length`]
-    /// to `Some(_)`.
+    /// delay-insertion pass ([`crate::delay::compile_delay`], stage 3
+    /// of §14.5) fills it in; routing on its own leaves this `None`
+    /// while promoting [`Self::wire_length`] to `Some(_)`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub delay_ticks: Option<u32>,
     /// Byte range of the originating `logic ...` sub-expression, inherited

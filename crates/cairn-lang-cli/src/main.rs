@@ -22,7 +22,8 @@ use cairn_lang_formats::java_structure::{
 use cairn_lang_formats::portability::{portability_for_bedrock, portability_for_java};
 use cairn_lang_formats::registry::{RegistryPack, builtin_bedrock, builtin_java};
 use cairn_lang_redstone::{
-    compile_edition_netlist, compile_netlist, compile_placement, compile_routing, synthesize,
+    compile_delay, compile_edition_netlist, compile_netlist, compile_placement, compile_routing,
+    synthesize,
 };
 use clap::{Parser, Subcommand, ValueEnum};
 
@@ -142,10 +143,14 @@ enum Command {
     /// each scope's `circuit region=` reservation and prints the
     /// Placement IR; `--stage route` runs Steiner routing over the
     /// Placement IR and prints the routed layout with every cell's
-    /// `wire_length` populated. The `--edition <java|bedrock>` flag is
-    /// required in the `edition`, `placement`, and `route` modes and
-    /// refused otherwise (the earlier stages are edition-neutral by
-    /// contract).
+    /// `wire_length` populated; `--stage delay` runs delay insertion
+    /// over the routed IR and fills every cell's `delay_ticks` with
+    /// the sum of the cell's base delay and each implicit buffer
+    /// repeater's `BUFFER_REPEATER_TICKS` contribution over every
+    /// driver segment beyond the `DUST_ATTENUATION_LIMIT`. The
+    /// `--edition <java|bedrock>` flag is required in the `edition`,
+    /// `placement`, `route`, and `delay` modes and refused otherwise
+    /// (the earlier stages are edition-neutral by contract).
     /// **Internal / experimental** — the shape of the output is not
     /// covered by the stable compatibility tier and may change at any time
     /// as the route / simulator stages land. Requires
@@ -170,9 +175,10 @@ enum Command {
         #[arg(long, value_enum, default_value_t = SynthStage::Logic)]
         stage: SynthStage,
         /// Target edition for the Edition Netlist IR / Placement IR /
-        /// routed Placement IR. Required when `--stage edition`,
-        /// `--stage placement`, or `--stage route` is set; refused for
-        /// `logic` / `netlist`, which are edition-neutral by contract.
+        /// routed Placement IR / delayed Placement IR. Required when
+        /// `--stage edition`, `--stage placement`, `--stage route`, or
+        /// `--stage delay` is set; refused for `logic` / `netlist`,
+        /// which are edition-neutral by contract.
         #[arg(long, value_enum)]
         edition: Option<EditionArg>,
     },
@@ -201,8 +207,22 @@ enum SynthStage {
     /// place-and-route pipeline. Fills every cell's `wire_length`
     /// with the sum of Manhattan distances from each driver source
     /// into the cell; `delay_ticks` stays `None` until the
-    /// delay-insertion pass (stage 3) lands.
+    /// delay-insertion pass (stage 3) runs.
     Route,
+    /// Delayed Placement IR: delay insertion over the routed Placement
+    /// IR against `--edition`. Stage 3 of `spec/redstone` §14.5's
+    /// place-and-route pipeline. Fills every cell's `delay_ticks`
+    /// with the sum of the cell's physical base delay
+    /// ([`cairn_lang_redstone::EditionCell::base_delay_ticks`]) and
+    /// each implicit buffer repeater's
+    /// [`cairn_lang_redstone::BUFFER_REPEATER_TICKS`] contribution
+    /// implied by driver segments beyond
+    /// [`cairn_lang_redstone::DUST_ATTENUATION_LIMIT`]; refuses with
+    /// `E_ATTENUATION_LIMIT` when a segment exceeds the v1 sanity cap
+    /// [`cairn_lang_redstone::MAX_ATTENUATION_SEGMENT`], the threshold
+    /// past which a stage-4 crossing-legalization escape becomes
+    /// unavoidable.
+    Delay,
 }
 
 #[derive(Copy, Clone, ValueEnum)]
@@ -733,11 +753,11 @@ fn run_synth(
     // stage-vs-edition axis ambiguous.
     if !matches!(
         stage,
-        SynthStage::Edition | SynthStage::Placement | SynthStage::Route,
+        SynthStage::Edition | SynthStage::Placement | SynthStage::Route | SynthStage::Delay,
     ) && edition.is_some()
     {
         eprintln!(
-            "error: `--edition` is only meaningful with `--stage edition`, `--stage placement`, or `--stage route`; the `logic` and `netlist` stages are edition-neutral",
+            "error: `--edition` is only meaningful with `--stage edition`, `--stage placement`, `--stage route`, or `--stage delay`; the `logic` and `netlist` stages are edition-neutral",
         );
         return ExitCode::from(2);
     }
@@ -862,6 +882,27 @@ fn dispatch_synth_stage(
             Ok((
                 serde_json::to_string_pretty(&routing.scoped),
                 "Routed Placement IR",
+            ))
+        }
+        SynthStage::Delay => {
+            let edition_arg = require_edition(edition, "delay")?;
+            let netlist = compile_netlist(&synth.scoped);
+            let edition_netlist = compile_edition_netlist(&netlist, edition_arg.as_edition());
+            let placement = compile_placement(&edition_netlist, ir);
+            if report_synth_diagnostics(file, source, lines, &placement.diagnostics) {
+                return Err(ExitCode::from(1));
+            }
+            let routing = compile_routing(&placement.scoped);
+            if report_synth_diagnostics(file, source, lines, &routing.diagnostics) {
+                return Err(ExitCode::from(1));
+            }
+            let delay = compile_delay(&routing.scoped);
+            if report_synth_diagnostics(file, source, lines, &delay.diagnostics) {
+                return Err(ExitCode::from(1));
+            }
+            Ok((
+                serde_json::to_string_pretty(&delay.scoped),
+                "Delayed Placement IR",
             ))
         }
     }

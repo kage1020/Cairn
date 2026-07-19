@@ -18,16 +18,21 @@
 //! so the placement pass has one type to consume;
 //! [`placement::compile_placement`] lays out those edition-tagged
 //! cells inside each scope's `circuit region=` reservation — stage 1
-//! of the five-stage place-and-route pipeline §14.5 describes; and
+//! of the five-stage place-and-route pipeline §14.5 describes;
 //! [`routing::compile_routing`] runs stage 2 (Steiner routing) over
 //! that layout, filling every [`placement_ir::PlacedCellNode`]'s
 //! `wire_length` with the Manhattan total of the driver→sink Steiner
 //! tree and re-checking `E_ROUTE_CONGESTION` against the actual
-//! post-routing occupancy. `delay_ticks` stays `None` until the
-//! delay-insertion follow-up pass (stage 3 of §14.5) lands. The
-//! physical-tile selection and simulator layers are not yet public API
-//! — see `spec/redstone` for the complete pipeline they will fill in.
+//! post-routing occupancy; and [`delay::compile_delay`] runs stage 3
+//! (delay insertion) over the routed IR, promoting every cell's
+//! `delay_ticks` from `None` to `Some(base delay + implicit buffer
+//! repeater ticks)` and refusing with `E_ATTENUATION_LIMIT` whenever a
+//! single driver segment exceeds the v1 sanity cap that would need a
+//! stage-4 bridge/via escape. The physical-tile selection and
+//! simulator layers are not yet public API — see `spec/redstone` for
+//! the complete pipeline they will fill in.
 
+pub mod delay;
 pub mod diagnostic;
 pub mod edition_netlist;
 pub mod edition_netlist_ir;
@@ -39,6 +44,10 @@ pub mod placement_ir;
 pub mod routing;
 pub mod synth;
 
+pub use delay::{
+    BUFFER_REPEATER_TICKS, DUST_ATTENUATION_LIMIT, DelayOutput, MAX_ATTENUATION_SEGMENT,
+    compile_delay,
+};
 pub use diagnostic::{Diagnostic, DiagnosticCode, DiagnosticNote};
 pub use edition_netlist::compile_edition_netlist;
 pub use edition_netlist_ir::{

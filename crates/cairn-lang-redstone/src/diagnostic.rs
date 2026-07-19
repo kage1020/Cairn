@@ -76,6 +76,24 @@ pub enum DiagnosticCode {
     /// self-correction triple ("increase `void`", "enlarge region",
     /// "split into multiple `circuit` blocks").
     RouteCongestion,
+    /// A routed driver segment (source pad or driver cell → sink coord,
+    /// where the sink is either a downstream cell coord or an actuator
+    /// output-pad coord, Manhattan distance) exceeds the v1 sanity cap
+    /// for implicit buffer-repeater insertion. `spec/redstone` §14.5
+    /// stage 3 lets segments longer than the 15-block dust attenuation
+    /// limit be covered by buffer repeaters silently; this code fires
+    /// only when the segment is so long that materialising it needs a
+    /// stage-4 crossing-legalization escape (`RouteLayer::Bridge` /
+    /// `Via`) that v1 does not implement, so the pass refuses instead
+    /// of quietly counting an unrealisable buffer chain into
+    /// `delay_ticks`. Fires on both driver-to-cell and driver-to-
+    /// output-pad segments — a wide `circuit region=` reservation can
+    /// trip either edge depending on which side sits farther from the
+    /// driver. Fix: enlarge the `circuit region=` footprint so no
+    /// driver segment exceeds the cap, split the logic across multiple
+    /// `circuit` blocks, or pin cell / actuator placement closer to
+    /// its drivers.
+    AttenuationLimit,
 }
 
 impl DiagnosticCode {
@@ -92,6 +110,7 @@ impl DiagnosticCode {
             Self::LogicUnusedSignal => "W_LOGIC_UNUSED_SIGNAL",
             Self::NoCircuitRegion => "E_NO_CIRCUIT_REGION",
             Self::RouteCongestion => "E_ROUTE_CONGESTION",
+            Self::AttenuationLimit => "E_ATTENUATION_LIMIT",
         }
     }
 
@@ -105,7 +124,8 @@ impl DiagnosticCode {
             | Self::LogicCycle
             | Self::LogicUnsupportedPrimitive
             | Self::NoCircuitRegion
-            | Self::RouteCongestion => Severity::Error,
+            | Self::RouteCongestion
+            | Self::AttenuationLimit => Severity::Error,
             Self::LogicUnusedSignal => Severity::Warning,
         }
     }
