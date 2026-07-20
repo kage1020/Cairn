@@ -695,7 +695,7 @@ mod tests {
         // does not exist in the example set yet.
         //
         // Input pads land at (0, 0, 1) and (0, 0, 2) per
-        // `routing::input_pad` (z = 1 + i, saturating at depth-1).
+        // `routing_geometry::input_pad` (z = 1 + i, saturating at depth-1).
         // Placing cell 0 at (3, 0, 3) and cell 1 at (3, 0, 1) makes
         // the two L-shapes (x-then-z-then-y) share the wire coord
         // (3, 0, 2) — neither cell nor pad, so it counts as a

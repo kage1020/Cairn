@@ -255,7 +255,7 @@ fn route_scope(entry: &ScopedPlacementIrEntry) -> ScopeRouting {
     // Process nets in a deterministic order: fanout descending, tie
     // by NetRef key ascending. Sorting is inert against the v1
     // occupancy model (both L-shape elbows have identical Manhattan
-    // length and `draw_l_shape` picks a fixed axis order), but pins
+    // length and `l_shape_path` picks a fixed axis order), but pins
     // a stable schedule so a follow-up pass that consults occupancy
     // for elbow selection has one deterministic order to slot into
     // without rewriting the caller.
