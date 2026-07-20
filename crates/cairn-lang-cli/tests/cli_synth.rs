@@ -328,6 +328,11 @@ fn cli_synth_stage_placement_requires_edition_flag() {
         stderr.contains("--edition"),
         "usage hint should name the missing flag, got: {stderr}",
     );
+    assert!(
+        stderr.contains("--stage placement"),
+        "usage hint should name the failing stage as it is spelled on \
+         the CLI so the mirror stays in sync with clap, got: {stderr}",
+    );
 }
 
 #[test]
@@ -416,6 +421,11 @@ fn cli_synth_stage_edition_requires_edition_flag() {
     assert!(
         stderr.contains("--edition"),
         "usage hint should name the missing flag, got: {stderr}",
+    );
+    assert!(
+        stderr.contains("--stage edition"),
+        "usage hint should name the failing stage as it is spelled on \
+         the CLI so the mirror stays in sync with clap, got: {stderr}",
     );
 }
 
@@ -836,8 +846,9 @@ fn cli_synth_stage_crossing_requires_edition_flag() {
         "usage hint should name the required flag, got: {stderr}",
     );
     assert!(
-        stderr.contains("crossing"),
-        "usage hint should name the failing stage, got: {stderr}",
+        stderr.contains("--stage crossing"),
+        "usage hint should name the failing stage as it is spelled on \
+         the CLI so the mirror stays in sync with clap, got: {stderr}",
     );
 }
 

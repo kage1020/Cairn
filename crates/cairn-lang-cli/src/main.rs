@@ -856,13 +856,16 @@ fn run_synth(
 }
 
 /// Run the requested pipeline stage and return the JSON serialisation
-/// plus a human-facing label. Extracted from [`run_synth`] so the top
-/// entry point stays under clippy's line budget. The body walks the
-/// pipeline linearly and short-circuits at the requested stage so
-/// each new stage is one appended `let ...; report_synth_diagnostics;
-/// if matches!(...) { return }` block — the `report_synth_diagnostics`
-/// call sits next to the pass that produced the diagnostics, which
-/// makes it hard to forget on future additions.
+/// plus a human-facing label. The body walks the pipeline linearly and
+/// short-circuits at the requested stage. Each pass whose contract can
+/// raise diagnostics (Placement / Route / Delay / Crossing) is followed
+/// immediately by `report_synth_diagnostics` so the report call sits
+/// next to the pass that produced it and is hard to forget on future
+/// additions; `compile_netlist` and `compile_edition_netlist` are
+/// diagnostic-free by contract and intentionally have no report call.
+/// The tail is an exhaustive `match` on `SynthStage` so adding a new
+/// variant fails to compile here instead of silently reusing the
+/// Crossing payload.
 fn dispatch_synth_stage(
     stage: SynthStage,
     edition: Option<EditionArg>,
@@ -927,17 +930,30 @@ fn dispatch_synth_stage(
     if report_synth_diagnostics(file, source, lines, &crossing.diagnostics) {
         return Err(ExitCode::from(1));
     }
-    debug_assert!(matches!(stage, SynthStage::Crossing));
-    Ok((
-        serde_json::to_string_pretty(&crossing.scoped),
-        "Legalized Placement IR",
-    ))
+    match stage {
+        SynthStage::Crossing => Ok((
+            serde_json::to_string_pretty(&crossing.scoped),
+            "Legalized Placement IR",
+        )),
+        SynthStage::Logic
+        | SynthStage::Netlist
+        | SynthStage::Edition
+        | SynthStage::Placement
+        | SynthStage::Route
+        | SynthStage::Delay => {
+            unreachable!("earlier guards return for non-Crossing stages")
+        }
+    }
 }
 
-/// The `--stage <name>` spelling used in `require_edition`'s error
-/// message. Kept as a single source of truth so the stderr wording
-/// stays in lock-step with the `SynthStage` variants that `clap`
-/// derives from the enum's `ValueEnum` impl.
+/// Hand-maintained mirror of clap's kebab-case derivation of
+/// `SynthStage` variant names, used by `require_edition` when it
+/// composes the `--stage <name>` fragment of its stderr message. The
+/// canonical spelling is whatever clap accepts on the command line
+/// (derived from `#[derive(ValueEnum)]` on `SynthStage`); this
+/// function must be kept in sync on every variant addition or
+/// rename. Its exhaustive `match` provides a compile-time nudge to
+/// do so.
 fn stage_flag(stage: SynthStage) -> &'static str {
     match stage {
         SynthStage::Logic => "logic",
