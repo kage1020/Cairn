@@ -857,10 +857,12 @@ fn run_synth(
 
 /// Run the requested pipeline stage and return the JSON serialisation
 /// plus a human-facing label. Extracted from [`run_synth`] so the top
-/// entry point stays under clippy's line budget and the arm bodies read
-/// as a flat table of stage → work. Any Error-severity synth diagnostic
-/// raised by an intermediate stage short-circuits the return with the
-/// matching exit code.
+/// entry point stays under clippy's line budget. The body walks the
+/// pipeline linearly and short-circuits at the requested stage so
+/// each new stage is one appended `let ...; report_synth_diagnostics;
+/// if matches!(...) { return }` block — the `report_synth_diagnostics`
+/// call sits next to the pass that produced the diagnostics, which
+/// makes it hard to forget on future additions.
 fn dispatch_synth_stage(
     stage: SynthStage,
     edition: Option<EditionArg>,
@@ -870,97 +872,81 @@ fn dispatch_synth_stage(
     source: &str,
     lines: &LineStarts,
 ) -> Result<(serde_json::Result<String>, &'static str), ExitCode> {
+    if matches!(stage, SynthStage::Logic) {
+        return Ok((serde_json::to_string_pretty(&synth.scoped), "Logic IR"));
+    }
+
+    let netlist = compile_netlist(&synth.scoped);
+    if matches!(stage, SynthStage::Netlist) {
+        return Ok((serde_json::to_string_pretty(&netlist), "Netlist IR"));
+    }
+
+    let edition = require_edition(edition, stage_flag(stage))?.as_edition();
+    let edition_netlist = compile_edition_netlist(&netlist, edition);
+    if matches!(stage, SynthStage::Edition) {
+        return Ok((
+            serde_json::to_string_pretty(&edition_netlist),
+            "Edition Netlist IR",
+        ));
+    }
+
+    let placement = compile_placement(&edition_netlist, ir);
+    if report_synth_diagnostics(file, source, lines, &placement.diagnostics) {
+        return Err(ExitCode::from(1));
+    }
+    if matches!(stage, SynthStage::Placement) {
+        return Ok((
+            serde_json::to_string_pretty(&placement.scoped),
+            "Placement IR",
+        ));
+    }
+
+    let routing = compile_routing(&placement.scoped);
+    if report_synth_diagnostics(file, source, lines, &routing.diagnostics) {
+        return Err(ExitCode::from(1));
+    }
+    if matches!(stage, SynthStage::Route) {
+        return Ok((
+            serde_json::to_string_pretty(&routing.scoped),
+            "Routed Placement IR",
+        ));
+    }
+
+    let delay = compile_delay(&routing.scoped);
+    if report_synth_diagnostics(file, source, lines, &delay.diagnostics) {
+        return Err(ExitCode::from(1));
+    }
+    if matches!(stage, SynthStage::Delay) {
+        return Ok((
+            serde_json::to_string_pretty(&delay.scoped),
+            "Delayed Placement IR",
+        ));
+    }
+
+    let crossing = compile_crossing(&delay.scoped);
+    if report_synth_diagnostics(file, source, lines, &crossing.diagnostics) {
+        return Err(ExitCode::from(1));
+    }
+    debug_assert!(matches!(stage, SynthStage::Crossing));
+    Ok((
+        serde_json::to_string_pretty(&crossing.scoped),
+        "Legalized Placement IR",
+    ))
+}
+
+/// The `--stage <name>` spelling used in `require_edition`'s error
+/// message. Kept as a single source of truth so the stderr wording
+/// stays in lock-step with the `SynthStage` variants that `clap`
+/// derives from the enum's `ValueEnum` impl.
+fn stage_flag(stage: SynthStage) -> &'static str {
     match stage {
-        SynthStage::Logic => Ok((serde_json::to_string_pretty(&synth.scoped), "Logic IR")),
-        SynthStage::Netlist => {
-            let netlist = compile_netlist(&synth.scoped);
-            Ok((serde_json::to_string_pretty(&netlist), "Netlist IR"))
-        }
-        SynthStage::Edition => {
-            let edition_arg = require_edition(edition, "edition")?;
-            let netlist = compile_netlist(&synth.scoped);
-            let edition_netlist = compile_edition_netlist(&netlist, edition_arg.as_edition());
-            Ok((
-                serde_json::to_string_pretty(&edition_netlist),
-                "Edition Netlist IR",
-            ))
-        }
-        SynthStage::Placement => {
-            let edition_arg = require_edition(edition, "placement")?;
-            let netlist = compile_netlist(&synth.scoped);
-            let edition_netlist = compile_edition_netlist(&netlist, edition_arg.as_edition());
-            let placement = compile_placement(&edition_netlist, ir);
-            if report_synth_diagnostics(file, source, lines, &placement.diagnostics) {
-                return Err(ExitCode::from(1));
-            }
-            Ok((
-                serde_json::to_string_pretty(&placement.scoped),
-                "Placement IR",
-            ))
-        }
-        SynthStage::Route => {
-            let edition_arg = require_edition(edition, "route")?;
-            let netlist = compile_netlist(&synth.scoped);
-            let edition_netlist = compile_edition_netlist(&netlist, edition_arg.as_edition());
-            let placement = compile_placement(&edition_netlist, ir);
-            if report_synth_diagnostics(file, source, lines, &placement.diagnostics) {
-                return Err(ExitCode::from(1));
-            }
-            let routing = compile_routing(&placement.scoped);
-            if report_synth_diagnostics(file, source, lines, &routing.diagnostics) {
-                return Err(ExitCode::from(1));
-            }
-            Ok((
-                serde_json::to_string_pretty(&routing.scoped),
-                "Routed Placement IR",
-            ))
-        }
-        SynthStage::Delay => {
-            let edition_arg = require_edition(edition, "delay")?;
-            let netlist = compile_netlist(&synth.scoped);
-            let edition_netlist = compile_edition_netlist(&netlist, edition_arg.as_edition());
-            let placement = compile_placement(&edition_netlist, ir);
-            if report_synth_diagnostics(file, source, lines, &placement.diagnostics) {
-                return Err(ExitCode::from(1));
-            }
-            let routing = compile_routing(&placement.scoped);
-            if report_synth_diagnostics(file, source, lines, &routing.diagnostics) {
-                return Err(ExitCode::from(1));
-            }
-            let delay = compile_delay(&routing.scoped);
-            if report_synth_diagnostics(file, source, lines, &delay.diagnostics) {
-                return Err(ExitCode::from(1));
-            }
-            Ok((
-                serde_json::to_string_pretty(&delay.scoped),
-                "Delayed Placement IR",
-            ))
-        }
-        SynthStage::Crossing => {
-            let edition_arg = require_edition(edition, "crossing")?;
-            let netlist = compile_netlist(&synth.scoped);
-            let edition_netlist = compile_edition_netlist(&netlist, edition_arg.as_edition());
-            let placement = compile_placement(&edition_netlist, ir);
-            if report_synth_diagnostics(file, source, lines, &placement.diagnostics) {
-                return Err(ExitCode::from(1));
-            }
-            let routing = compile_routing(&placement.scoped);
-            if report_synth_diagnostics(file, source, lines, &routing.diagnostics) {
-                return Err(ExitCode::from(1));
-            }
-            let delay = compile_delay(&routing.scoped);
-            if report_synth_diagnostics(file, source, lines, &delay.diagnostics) {
-                return Err(ExitCode::from(1));
-            }
-            let crossing = compile_crossing(&delay.scoped);
-            if report_synth_diagnostics(file, source, lines, &crossing.diagnostics) {
-                return Err(ExitCode::from(1));
-            }
-            Ok((
-                serde_json::to_string_pretty(&crossing.scoped),
-                "Legalized Placement IR",
-            ))
-        }
+        SynthStage::Logic => "logic",
+        SynthStage::Netlist => "netlist",
+        SynthStage::Edition => "edition",
+        SynthStage::Placement => "placement",
+        SynthStage::Route => "route",
+        SynthStage::Delay => "delay",
+        SynthStage::Crossing => "crossing",
     }
 }
 
