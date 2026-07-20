@@ -47,6 +47,7 @@ pub mod netlist_ir;
 pub mod placement;
 pub mod placement_ir;
 pub mod routing;
+pub mod routing_geometry;
 pub mod synth;
 
 pub use crossing::{CrossingOutput, compile_crossing};

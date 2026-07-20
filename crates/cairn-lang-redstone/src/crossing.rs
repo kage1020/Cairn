@@ -71,7 +71,9 @@ use crate::placement_ir::{
     CellCoord, CircuitRegionReservation, PlacementIr, RouteLayer, ScopedPlacementIr,
     ScopedPlacementIrEntry,
 };
-use crate::routing::{input_pad, manhattan, output_pad};
+use crate::routing_geometry::{
+    input_pad, l_shape_path, manhattan, net_ref_key, net_wire_path, output_pad,
+};
 
 /// Output of a [`compile_crossing`] run.
 ///
@@ -401,100 +403,6 @@ fn collect_nets(
         nets.entry(output.driver).or_default().push(sink);
     }
     nets
-}
-
-/// Deterministic net-order key matching the routing pass's tie-break:
-/// `Input(_)` sorts before `Cell(_)`, then by index ascending. Kept
-/// crate-local so both passes can be understood in isolation.
-fn net_ref_key(net: NetRef) -> (u8, u32) {
-    match net {
-        NetRef::Input(i) => (0, i),
-        NetRef::Cell(j) => (1, j),
-    }
-}
-
-/// Manhattan Steiner tree over `{source} ∪ sinks`, rendered as the
-/// concatenation of every MST edge's L-shape path. Kruskal on the
-/// complete Manhattan graph with `(weight, i, j)` tie-break gives a
-/// deterministic MST regardless of `HashMap` iteration order.
-/// Matches [`crate::routing::compile_routing`]'s per-net algorithm so
-/// the two passes see the same wire path for the same input; the
-/// helper is duplicated here rather than shared because merging the
-/// two would demand a common crate module, and the current copies
-/// are read-only from the routing side.
-fn net_wire_path(source: CellCoord, sinks: &[CellCoord]) -> Vec<CellCoord> {
-    let mut terminals: Vec<CellCoord> = Vec::with_capacity(1 + sinks.len());
-    terminals.push(source);
-    for s in sinks {
-        if !terminals.contains(s) {
-            terminals.push(*s);
-        }
-    }
-    if terminals.len() < 2 {
-        return vec![source];
-    }
-    let n = terminals.len();
-    let mut edges: Vec<(u32, usize, usize)> = Vec::with_capacity(n * (n - 1) / 2);
-    for i in 0..n {
-        for j in (i + 1)..n {
-            edges.push((manhattan(terminals[i], terminals[j]), i, j));
-        }
-    }
-    edges.sort_unstable();
-
-    let mut parent: Vec<usize> = (0..n).collect();
-    let mut path: Vec<CellCoord> = Vec::new();
-    for (_, i, j) in edges {
-        let ri = union_find(&mut parent, i);
-        let rj = union_find(&mut parent, j);
-        if ri == rj {
-            continue;
-        }
-        parent[ri] = rj;
-        path.extend(l_shape_path(terminals[i], terminals[j]));
-    }
-    path
-}
-
-/// Iterative path-compressed union-find over an index-keyed forest.
-/// Used by [`net_wire_path`] for Kruskal MST.
-fn union_find(parent: &mut [usize], x: usize) -> usize {
-    let mut root = x;
-    while parent[root] != root {
-        root = parent[root];
-    }
-    let mut cur = x;
-    while parent[cur] != root {
-        let next = parent[cur];
-        parent[cur] = root;
-        cur = next;
-    }
-    root
-}
-
-/// One L-shape between two coords, returned as the ordered coord
-/// sequence including both endpoints. Axis order is x-then-z-then-y,
-/// matching [`crate::routing::compile_routing`]'s draw so both passes
-/// see the same wire coords for the same terminal pair. Both L-shape
-/// orderings have identical Manhattan length; the axis order fixes a
-/// canonical choice. Result length equals `manhattan(a, b) + 1`.
-fn l_shape_path(a: CellCoord, b: CellCoord) -> Vec<CellCoord> {
-    let mut path = Vec::with_capacity((manhattan(a, b) as usize).saturating_add(1));
-    let mut cur = a;
-    path.push(cur);
-    while cur.x != b.x {
-        cur.x = if cur.x < b.x { cur.x + 1 } else { cur.x - 1 };
-        path.push(cur);
-    }
-    while cur.z != b.z {
-        cur.z = if cur.z < b.z { cur.z + 1 } else { cur.z - 1 };
-        path.push(cur);
-    }
-    while cur.y != b.y {
-        cur.y = if cur.y < b.y { cur.y + 1 } else { cur.y - 1 };
-        path.push(cur);
-    }
-    path
 }
 
 fn crossing_congestion_diagnostic(
