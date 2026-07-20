@@ -772,3 +772,107 @@ fn cli_synth_unparseable_source_exits_one() {
         "expected an error line on stderr, got: {stderr}",
     );
 }
+
+#[test]
+fn cli_synth_stage_crossing_java_legalizes_or_cell_scope() {
+    // `--stage crossing --edition java` runs the full pipeline
+    // through stage 4. The `redstone-door.crn` fixture has a single
+    // net with short segments, so the legalized IR matches the
+    // delayed IR verbatim (no crossings, no buffers) — but the
+    // stage's JSON round-trip must still succeed and expose the same
+    // scope shape.
+    let path = examples_dir().join("redstone-door.crn");
+    let out = run_synth(&[
+        "--experimental-logic-synth",
+        "--stage",
+        "crossing",
+        "--edition",
+        "java",
+        path.to_str().unwrap(),
+    ]);
+    assert!(
+        out.status.success(),
+        "expected exit 0, stderr={}",
+        String::from_utf8_lossy(&out.stderr),
+    );
+    let stdout = String::from_utf8(out.stdout).expect("utf-8");
+    let value: serde_json::Value = serde_json::from_str(&stdout)
+        .unwrap_or_else(|err| panic!("stdout should parse as JSON: {err}\n{stdout}"));
+    let gatehouse = value
+        .as_array()
+        .and_then(|s| s.iter().find(|s| s["name"] == "gatehouse"))
+        .expect("gatehouse scope");
+    let ir = &gatehouse["ir"];
+    assert_eq!(ir["edition"], "java");
+    let cells = ir["cells"].as_array().expect("cells array");
+    assert_eq!(cells.len(), 1);
+    assert!(
+        cells[0].get("buffer_coords").is_none(),
+        "empty buffer_coords must serde-skip so the wire form stays byte-identical to --stage delay: {stdout}",
+    );
+    assert!(
+        cells[0]["coord"].get("layer").is_none(),
+        "plane cell coord must serde-skip its layer field: {stdout}",
+    );
+}
+
+#[test]
+fn cli_synth_stage_crossing_requires_edition_flag() {
+    // `--stage crossing` without `--edition` follows the placement /
+    // route / delay pattern: exit 2 with a usage hint that names the
+    // required flag. The crossing pass reads edition-tagged cells, so
+    // the flag is not optional.
+    let path = examples_dir().join("redstone-door.crn");
+    let out = run_synth(&[
+        "--experimental-logic-synth",
+        "--stage",
+        "crossing",
+        path.to_str().unwrap(),
+    ]);
+    assert_eq!(out.status.code(), Some(2));
+    let stderr = String::from_utf8(out.stderr).expect("utf-8");
+    assert!(
+        stderr.contains("--edition"),
+        "usage hint should name the required flag, got: {stderr}",
+    );
+    assert!(
+        stderr.contains("crossing"),
+        "usage hint should name the failing stage, got: {stderr}",
+    );
+}
+
+#[test]
+fn cli_synth_stage_crossing_inherits_upstream_attenuation_failure() {
+    // `--stage crossing` runs stages 1-4 in sequence, so an
+    // Error-severity diagnostic from any prior stage (here, the
+    // delay pass's `E_ATTENUATION_LIMIT` on a 300-block-wide region)
+    // short-circuits with exit 1 before stage 4 runs. The stderr
+    // still names the origin stage so a downstream reader can tell
+    // which pass tripped.
+    let dir = tempfile::tempdir().expect("temp dir");
+    let path = dir.path().join("wide.crn");
+    let source = "@cairn 2026.06\n@requires version>=1.20\n\n\
+        theme t:\n  slot wall -> @oak_planks\n\n\
+        struct wide_pack size=300x5\n  \
+        floor mat_slot=wall\n  \
+        pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a\n  \
+        pressure_plate id=q at=inside.front  offset=0 y=0 -> sig.b\n  \
+        logic sig.out = sig.a or sig.b\n  \
+        door id=d side=front at=center mat_slot=wall opened_by=sig.out\n  \
+        circuit region=floor void=3\n";
+    std::fs::write(&path, source).expect("write attenuation fixture");
+    let out = run_synth(&[
+        "--experimental-logic-synth",
+        "--stage",
+        "crossing",
+        "--edition",
+        "java",
+        path.to_str().unwrap(),
+    ]);
+    assert_eq!(out.status.code(), Some(1));
+    let stderr = String::from_utf8(out.stderr).expect("utf-8");
+    assert!(
+        stderr.contains("E_ATTENUATION_LIMIT"),
+        "expected upstream E_ATTENUATION_LIMIT on stderr, got: {stderr}",
+    );
+}

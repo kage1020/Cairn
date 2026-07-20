@@ -354,7 +354,7 @@ fn net_ref_key(net: NetRef) -> (u8, u32) {
 pub(crate) fn input_pad(i: usize, region: &CircuitRegionReservation) -> CellCoord {
     let raw = u32::try_from(i.saturating_add(1)).unwrap_or(u32::MAX);
     let z = raw.min(region.depth.saturating_sub(1));
-    CellCoord { x: 0, y: 0, z }
+    CellCoord::new(0, 0, z)
 }
 
 /// v1 output-pad coordinate: right edge (`x=width-1`), same
@@ -363,7 +363,7 @@ pub(crate) fn output_pad(k: usize, region: &CircuitRegionReservation) -> CellCoo
     let raw = u32::try_from(k.saturating_add(1)).unwrap_or(u32::MAX);
     let z = raw.min(region.depth.saturating_sub(1));
     let x = region.width.saturating_sub(1);
-    CellCoord { x, y: 0, z }
+    CellCoord::new(x, 0, z)
 }
 
 pub(crate) fn manhattan(a: CellCoord, b: CellCoord) -> u32 {

@@ -40,23 +40,142 @@ use crate::edition_netlist_ir::EditionCell;
 use crate::logic_ir::ScopeKind;
 use crate::netlist_ir::{CellPortDriver, NetRef, NetlistInput, NetlistOutput};
 
-/// Coordinate of a placed cell inside its scope's `circuit region`
-/// reservation.
+/// Which of `spec/redstone` §14.5's three pseudo-2.5D layers a
+/// coordinate lives on. `Plane` is the ground layer every cell coord
+/// and every un-escaped wire segment sits on; `Bridge` is the
+/// horizontal escape layer the crossing-legalization pass lifts a
+/// buffer repeater onto when its plane candidate is taken; `Via` is
+/// the vertical tap between the two.
 ///
-/// 1D today — the placement pass assigns `x = topological index`,
-/// `y = 0`, `z = 0`. The two extra axes are reserved so the routing
-/// pass can lift the layout to pseudo-2.5D (`spec/redstone` §14.5's
-/// `plane` / `via` / `bridge` internal concepts) without a wire-format
-/// change. `Copy` because a coordinate is a value type consumers pass
-/// around by value.
+/// Cell coords are `Plane` by construction — the placement pass never
+/// stamps `Bridge` / `Via` on a cell body. Buffer-repeater coords the
+/// crossing-legalization pass writes may carry either escape layer;
+/// wire coords themselves are not lifted onto `Bridge` in v1 (a plane
+/// crossing that cannot be absorbed by the buffer-escape path is
+/// refused via [`crate::DiagnosticCode::CrossingCongestion`]).
+/// Serialising as the enum's stable lowercase string (`plane` /
+/// `bridge` / `via`) keeps the JSON wire form small and matches the
+/// vocabulary spec §14.5 uses.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum RouteLayer {
+    /// Ground layer — every cell coord and every un-escaped wire
+    /// segment sits here. Default so that any code path which forgets
+    /// to set the layer explicitly defaults to the ground layer rather
+    /// than an escape layer.
+    #[default]
+    Plane,
+    /// Horizontal escape layer for buffer repeaters the
+    /// crossing-legalization pass lifted off the `Plane` to avoid a
+    /// collision with a cell / pad / plane crossing.
+    Bridge,
+    /// Reserved for the vertical `Plane` ↔ `Bridge` tap. No producer
+    /// materialises `Via` in v1: buffer repeaters are treated as their
+    /// own `Bridge` cell without an explicit ramp coord, and wire
+    /// bridges themselves are not lifted. Kept in the enum so a
+    /// downstream consumer can match exhaustively against the full
+    /// §14.5 vocabulary; a subsequent pass that grows `Via` producers
+    /// is `#[non_exhaustive]`-safe.
+    Via,
+}
+
+impl RouteLayer {
+    /// `true` for the default [`Self::Plane`] layer. Used by the
+    /// `serde(skip_serializing_if = "…")` attribute on
+    /// [`CellCoord::layer`] so the JSON wire form of a `Plane` coord
+    /// omits the `layer` field entirely — the routed / delayed IR
+    /// shape is a pure additive subset of the legalized IR shape.
+    #[must_use]
+    pub const fn is_plane(&self) -> bool {
+        matches!(self, Self::Plane)
+    }
+
+    /// Stable lowercase string form used in the JSON wire format and
+    /// matched by downstream tooling. Mirrors the vocabulary spec
+    /// §14.5 uses when it introduces the three concepts.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Plane => "plane",
+            Self::Bridge => "bridge",
+            Self::Via => "via",
+        }
+    }
+}
+
+impl Serialize for RouteLayer {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+/// Coordinate inside a scope's `circuit region` reservation.
+///
+/// `Copy` because a coordinate is a value type consumers pass around
+/// by value. Cell coords stamped by [`crate::placement::compile_placement`]
+/// use `x = topological index`, `y = 0`, `z = 0`, [`RouteLayer::Plane`].
+/// Pad coords derived by the routing pass at the reservation edges
+/// use `y = 0` on the plane with `z = 1 + i` (saturating at `depth-1`
+/// for pathological regions); buffer-repeater coords stamped by
+/// [`crate::crossing::compile_crossing`] may use `y >= 1` and
+/// [`RouteLayer::Bridge`] when the plane candidate is taken.
+///
+/// The `layer` field participates in `Eq` and `Hash`, so
+/// `(x, y, z, Plane)` and `(x, y, z, Bridge)` are distinct map keys.
+/// This matches the pseudo-2.5D model — a plane wire and a bridge
+/// wire at the same `(x, y, z)` do not collide in the voxel view —
+/// but a downstream consumer that only cares about voxel identity
+/// should compare `(x, y, z)` explicitly rather than relying on the
+/// derived `Eq`.
+///
+/// `layer` serialises only when it differs from [`RouteLayer::Plane`]
+/// so a placement / routing / delay JSON dump omits the `layer` key
+/// entirely: the legalized IR shape is a pure additive subset of the
+/// earlier stages' shape.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
 pub struct CellCoord {
     /// Column along the region's x-axis. Zero at the region's origin.
     pub x: u32,
-    /// Reserved for the routing pass. Always `0` at this stage.
+    /// Row along the region's y-axis. `0` for `Plane` coords; the
+    /// crossing pass may set `y >= 1` for buffer coords lifted onto a
+    /// `Bridge` layer inside the reservation's `void=<N>` budget.
     pub y: u32,
-    /// Reserved for the routing pass. Always `0` at this stage.
+    /// Row along the region's z-axis. `0` for cell coords stamped by
+    /// the placement pass; pad and buffer coords may sit at
+    /// `z = 1 + i` (saturating at `depth-1`).
     pub z: u32,
+    /// Pseudo-2.5D layer this coord lives on. Cell coords are
+    /// [`RouteLayer::Plane`] by construction; the crossing-legalization
+    /// pass may stamp [`RouteLayer::Bridge`] on a buffer-repeater
+    /// coord that collides with a cell / pad / plane crossing.
+    /// Serialised only when it differs from the default so a
+    /// `Plane` coord's JSON omits the `layer` field.
+    #[serde(skip_serializing_if = "RouteLayer::is_plane")]
+    pub layer: RouteLayer,
+}
+
+impl CellCoord {
+    /// [`RouteLayer::Plane`] coord at the given axis position. The
+    /// most common construction path — used by every placement /
+    /// routing / delay call site.
+    #[must_use]
+    pub const fn new(x: u32, y: u32, z: u32) -> Self {
+        Self {
+            x,
+            y,
+            z,
+            layer: RouteLayer::Plane,
+        }
+    }
+
+    /// Coord with an explicit [`RouteLayer`]. Crate-internal: only
+    /// [`crate::crossing::compile_crossing`] needs to stamp a
+    /// non-`Plane` layer, and pinning it to the crate keeps external
+    /// consumers from building bridge / via coords the pipeline does
+    /// not know how to consume.
+    #[must_use]
+    pub(crate) const fn with_layer(x: u32, y: u32, z: u32, layer: RouteLayer) -> Self {
+        Self { x, y, z, layer }
+    }
 }
 
 /// The `circuit region=<label> void=<N>` reservation the enclosing
@@ -96,28 +215,31 @@ impl CircuitRegionReservation {
 /// One placed cell — an [`EditionCell`] plus its assigned [`CellCoord`]
 /// inside the reservation.
 ///
-/// `wire_length` and `delay_ticks` are progressive fields written by the
-/// routing and delay-insertion passes. The three legitimate phase
-/// states are:
+/// `wire_length`, `delay_ticks`, and `buffer_coords` are progressive
+/// fields written by the routing, delay-insertion, and
+/// crossing-legalization passes. The four legitimate phase states are:
 ///
-/// | Producer                          | `wire_length` | `delay_ticks` |
-/// |-----------------------------------|---------------|---------------|
-/// | [`crate::placement::compile_placement`] alone (Stage 1) | `None`     | `None`     |
-/// | [`crate::routing::compile_routing`]   (Stage 2)          | `Some(_)`  | `None`     |
-/// | [`crate::delay::compile_delay`]       (Stage 3)          | `Some(_)`  | `Some(_)`  |
+/// | Producer                                             | `wire_length` | `delay_ticks` | `buffer_coords`           |
+/// |------------------------------------------------------|---------------|---------------|---------------------------|
+/// | [`crate::placement::compile_placement`] alone (Stage 1) | `None`     | `None`     | empty                     |
+/// | [`crate::routing::compile_routing`]   (Stage 2)          | `Some(_)`  | `None`     | empty                     |
+/// | [`crate::delay::compile_delay`]       (Stage 3)          | `Some(_)`  | `Some(_)`  | empty                     |
+/// | [`crate::crossing::compile_crossing`] (Stage 4)          | `Some(_)`  | `Some(_)`  | one entry per buffer tick |
 ///
-/// `(None, Some(_))` is illegal by contract (delay follows routed wire
-/// length per `spec/redstone` §14.4) and never appears in output any
-/// pass in this crate produces. Both fields serialise via
-/// `skip_serializing_if = "Option::is_none"` so `--stage placement` JSON
-/// stays byte-identical to Stage 1 output — the routing pass is a pure
-/// field write that adds `"wire_length": N` without disturbing any
-/// other field or its ordering. A follow-up PR that lands routing +
-/// delay together may collapse the pair into a phase-typed enum
-/// (`enum RoutingState { Unrouted, Routed(u32), Delayed { wire_length,
-/// delay_ticks } }`) so the illegal state cannot be represented; that
-/// migration is `#[non_exhaustive]`-safe because both fields are absent
-/// from today's JSON.
+/// `(None, Some(_))` and any state where `buffer_coords.len()` differs
+/// from the buffer tick contribution the delay pass folded into
+/// `delay_ticks` are illegal by contract (delay follows routed wire
+/// length per `spec/redstone` §14.4; buffer coords materialise what the
+/// delay pass counted). Both `Option` fields serialise via
+/// `skip_serializing_if = "Option::is_none"` and `buffer_coords` via
+/// `skip_serializing_if = "Vec::is_empty"`, so the JSON dump of a
+/// stage-N output is a pure additive subset of the stage-(N+1) dump on
+/// scopes whose stage-(N+1) pass had nothing to write. Representing
+/// the four-state machine as three parallel optionals is a deliberate
+/// trade for `#[non_exhaustive]`-friendly additive evolution; a
+/// consumer that cares about the state machine matches on the
+/// `(wire_length.is_some(), delay_ticks.is_some(),
+/// !buffer_coords.is_empty())` triple.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[non_exhaustive]
 pub struct PlacedCellNode {
@@ -145,6 +267,20 @@ pub struct PlacedCellNode {
     /// while promoting [`Self::wire_length`] to `Some(_)`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub delay_ticks: Option<u32>,
+    /// Coordinates of the implicit buffer repeaters the delay pass
+    /// counted for this cell's driver segments. Empty until the
+    /// crossing-legalization pass (stage 4 of `spec/redstone` §14.5)
+    /// walks the delayed IR, at which point every entry carries the
+    /// coord of one buffer with the [`RouteLayer`] the pass chose —
+    /// `Plane` when the coord fit the ground layer and `Bridge` when
+    /// the plane candidate collided with a cell / pad / plane
+    /// crossing / earlier buffer and had to escape upward. Length
+    /// equals the buffer tick contribution the delay pass folded into
+    /// [`Self::delay_ticks`]. Absent from the JSON wire form when
+    /// empty so the placement / routing / delay dumps omit the
+    /// `buffer_coords` field entirely.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub buffer_coords: Vec<CellCoord>,
     /// Byte range of the originating `logic ...` sub-expression, inherited
     /// from the source [`crate::edition_netlist_ir::EditionCellNode`].
     #[serde(skip)]

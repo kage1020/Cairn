@@ -12,6 +12,67 @@ and is a separate axis from the Minecraft target version.
 
 ### Added
 
+- Redstone crossing legalization + `cairn synth --stage crossing
+  --edition <java|bedrock>` (M6-PR7) — the seventh slice of the M6
+  redstone-simulates pipeline. `cairn-lang-redstone` grows a
+  `compile_crossing(&ScopedPlacementIr) -> CrossingOutput` entry
+  point that walks the delayed Placement IR produced by M6-PR6,
+  re-derives every net's Manhattan Steiner tree from the same
+  `NetRef → source coord` mapping the routing and delay passes use
+  (routing discards its per-scope occupancy set before yielding the
+  routed IR, and pushing wire coords into the shared IR would bloat
+  every consumer's JSON dump), and carries out two tasks —
+  stage 4 of the five-stage place-and-route pipeline (Placement →
+  Steiner routing → Delay insertion → Crossing legalization →
+  Edition legalization).
+  Task 1 is plane-crossing detection: a wire coord (neither cell
+  nor pad) owned by two distinct nets is refused with the new
+  `E_CROSSING_CONGESTION` code when the `void=<N>` reservation
+  offers no y-layer above the plane (`void < 2`). v1 does not lift
+  the wire crossing itself onto a `Bridge` layer — the routed wire
+  path is not carried on the IR, so an escape record would have
+  nowhere to attach; the crossing coord set is instead used inside
+  the pass to steer task 2. Task 2 is implicit buffer repeater
+  coord assignment: for every driver segment the delay pass counted
+  buffers on, the L-shape path is re-walked (x → z → y, matching
+  the routing pass's axis order) and buffers land at
+  `k * DUST_ATTENUATION_LIMIT` (`k = 1..=buffer_count`); a
+  candidate that collides with a cell coord / pad coord / plane
+  crossing / earlier buffer escapes to the first free
+  `RouteLayer::Bridge` y-layer inside the `void=<N>` budget
+  (`y in 1..void`), and if every bridge y-layer at that `(x, z)`
+  is taken the pass refuses with the new `E_BUFFER_COORD_COLLISION`
+  code. Both diagnostics carry the self-correction triple
+  ("increase `void`", "enlarge region", "split into multiple
+  `circuit` blocks") and the `CrossingCongestion` primary names the
+  two conflicting nets at the anchor coord so a downstream reader
+  can locate the source-level signals responsible.
+  No new IR type joins the crate: the crossing pass is a field
+  write per the phase table on `PlacedCellNode`. `CellCoord` grows
+  a `layer: RouteLayer` tag (`Plane` / `Bridge` / `Via`; `Via` has
+  no producer in v1 and is documented as reserved), and
+  `PlacedCellNode` grows `buffer_coords: Vec<CellCoord>` that the
+  crossing pass fills with one entry per implicit buffer repeater
+  the delay pass counted. Both fields serde-skip on their defaults
+  (`layer` skips when `Plane`, `buffer_coords` skips when empty),
+  so a placement / routing / delay JSON dump is a pure additive
+  subset of the legalized IR dump — no key changes for scopes with
+  nothing to legalize. Failed scopes elide from the output so a
+  downstream block-array voxel lowering cannot silently materialise
+  buffers against a layout no other stage can realise. The CLI's
+  `cairn synth --stage` gains a `crossing` value; the
+  `--edition <java|bedrock>` flag is required in that mode
+  alongside `edition` / `placement` / `route` / `delay`, and stays
+  refused on the edition-neutral `logic` / `netlist` stages (exit
+  2). `--stage crossing` inherits upstream fail-loud: a scope that
+  trips `E_ROUTE_CONGESTION` at routing or `E_ATTENUATION_LIMIT` at
+  delay insertion is reported and exits 1 before the crossing pass
+  runs. Not in scope for this PR: wire-crossing `Bridge` / `Via`
+  materialisation on the IR, edition legalization, block-array
+  voxel lowering, the physical-tile (tier 3) cell library, the
+  tick simulator, `assert truth|always|latency` evaluation,
+  sequential macros (`latch` / `pulse` / `delay` / `edge_*` /
+  `counter`), and QC/BUD refusal (`E_NO_PORTABLE_IMPL`).
 - Redstone delay insertion + `cairn synth --stage delay
   --edition <java|bedrock>` (M6-PR6) — the sixth slice of the M6
   redstone-simulates pipeline. `cairn-lang-redstone` grows a

@@ -22,8 +22,8 @@ use cairn_lang_formats::java_structure::{
 use cairn_lang_formats::portability::{portability_for_bedrock, portability_for_java};
 use cairn_lang_formats::registry::{RegistryPack, builtin_bedrock, builtin_java};
 use cairn_lang_redstone::{
-    compile_delay, compile_edition_netlist, compile_netlist, compile_placement, compile_routing,
-    synthesize,
+    compile_crossing, compile_delay, compile_edition_netlist, compile_netlist, compile_placement,
+    compile_routing, synthesize,
 };
 use clap::{Parser, Subcommand, ValueEnum};
 
@@ -147,10 +147,18 @@ enum Command {
     /// over the routed IR and fills every cell's `delay_ticks` with
     /// the sum of the cell's base delay and each implicit buffer
     /// repeater's `BUFFER_REPEATER_TICKS` contribution over every
-    /// driver segment beyond the `DUST_ATTENUATION_LIMIT`. The
-    /// `--edition <java|bedrock>` flag is required in the `edition`,
-    /// `placement`, `route`, and `delay` modes and refused otherwise
-    /// (the earlier stages are edition-neutral by contract).
+    /// driver segment beyond the `DUST_ATTENUATION_LIMIT`;
+    /// `--stage crossing` runs crossing legalization over the delayed
+    /// IR, refuses with `E_CROSSING_CONGESTION` when a cross-net
+    /// plane overlap cannot fit inside the `void=<N>` reservation,
+    /// and fills every cell's `buffer_coords` with the concrete
+    /// coord of each implicit buffer repeater (escaping to a
+    /// `RouteLayer::Bridge` y-layer whenever the plane candidate
+    /// collides with a cell / pad / plane crossing / earlier
+    /// buffer). The `--edition <java|bedrock>` flag is required in
+    /// the `edition`, `placement`, `route`, `delay`, and `crossing`
+    /// modes and refused otherwise (the earlier stages are
+    /// edition-neutral by contract).
     /// **Internal / experimental** — the shape of the output is not
     /// covered by the stable compatibility tier and may change at any time
     /// as the route / simulator stages land. Requires
@@ -175,9 +183,10 @@ enum Command {
         #[arg(long, value_enum, default_value_t = SynthStage::Logic)]
         stage: SynthStage,
         /// Target edition for the Edition Netlist IR / Placement IR /
-        /// routed Placement IR / delayed Placement IR. Required when
-        /// `--stage edition`, `--stage placement`, `--stage route`, or
-        /// `--stage delay` is set; refused for `logic` / `netlist`,
+        /// routed Placement IR / delayed Placement IR / legalized
+        /// Placement IR. Required when `--stage edition`,
+        /// `--stage placement`, `--stage route`, `--stage delay`, or
+        /// `--stage crossing` is set; refused for `logic` / `netlist`,
         /// which are edition-neutral by contract.
         #[arg(long, value_enum)]
         edition: Option<EditionArg>,
@@ -223,6 +232,24 @@ enum SynthStage {
     /// past which a stage-4 crossing-legalization escape becomes
     /// unavoidable.
     Delay,
+    /// Legalized Placement IR: crossing legalization over the delayed
+    /// Placement IR against `--edition`. Stage 4 of `spec/redstone`
+    /// §14.5's place-and-route pipeline. Detects wire coords two
+    /// distinct nets would otherwise share on the ground plane
+    /// (refused with `E_CROSSING_CONGESTION` when the
+    /// `circuit region=<label> void=<N>` reservation offers no
+    /// y-layer to escape to) and materialises the concrete coord of
+    /// every implicit buffer repeater the delay pass counted into
+    /// every cell's `buffer_coords`. A buffer whose plane candidate
+    /// collides with a cell / pad / plane crossing / earlier buffer
+    /// escapes to the first free `RouteLayer::Bridge` y-layer inside
+    /// the `void=<N>` budget; if every bridge y-layer at that
+    /// `(x, z)` is also taken, refuses with
+    /// `E_BUFFER_COORD_COLLISION`. v1 does not lift the wire
+    /// crossing itself onto `Bridge` — the routed wire path is not
+    /// carried on the IR, and stage-5 block-array lowering re-runs
+    /// the routing algorithm to derive the crossings itself.
+    Crossing,
 }
 
 #[derive(Copy, Clone, ValueEnum)]
@@ -753,11 +780,15 @@ fn run_synth(
     // stage-vs-edition axis ambiguous.
     if !matches!(
         stage,
-        SynthStage::Edition | SynthStage::Placement | SynthStage::Route | SynthStage::Delay,
+        SynthStage::Edition
+            | SynthStage::Placement
+            | SynthStage::Route
+            | SynthStage::Delay
+            | SynthStage::Crossing,
     ) && edition.is_some()
     {
         eprintln!(
-            "error: `--edition` is only meaningful with `--stage edition`, `--stage placement`, `--stage route`, or `--stage delay`; the `logic` and `netlist` stages are edition-neutral",
+            "error: `--edition` is only meaningful with `--stage edition`, `--stage placement`, `--stage route`, `--stage delay`, or `--stage crossing`; the `logic` and `netlist` stages are edition-neutral",
         );
         return ExitCode::from(2);
     }
@@ -903,6 +934,31 @@ fn dispatch_synth_stage(
             Ok((
                 serde_json::to_string_pretty(&delay.scoped),
                 "Delayed Placement IR",
+            ))
+        }
+        SynthStage::Crossing => {
+            let edition_arg = require_edition(edition, "crossing")?;
+            let netlist = compile_netlist(&synth.scoped);
+            let edition_netlist = compile_edition_netlist(&netlist, edition_arg.as_edition());
+            let placement = compile_placement(&edition_netlist, ir);
+            if report_synth_diagnostics(file, source, lines, &placement.diagnostics) {
+                return Err(ExitCode::from(1));
+            }
+            let routing = compile_routing(&placement.scoped);
+            if report_synth_diagnostics(file, source, lines, &routing.diagnostics) {
+                return Err(ExitCode::from(1));
+            }
+            let delay = compile_delay(&routing.scoped);
+            if report_synth_diagnostics(file, source, lines, &delay.diagnostics) {
+                return Err(ExitCode::from(1));
+            }
+            let crossing = compile_crossing(&delay.scoped);
+            if report_synth_diagnostics(file, source, lines, &crossing.diagnostics) {
+                return Err(ExitCode::from(1));
+            }
+            Ok((
+                serde_json::to_string_pretty(&crossing.scoped),
+                "Legalized Placement IR",
             ))
         }
     }

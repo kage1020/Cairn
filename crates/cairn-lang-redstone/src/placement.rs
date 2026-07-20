@@ -163,9 +163,10 @@ fn compile_scope(
         ir.cells.push(PlacedCellNode {
             cell: source_cell.cell,
             drivers: source_cell.drivers.clone(),
-            coord: CellCoord { x, y: 0, z: 0 },
+            coord: CellCoord::new(x, 0, 0),
             wire_length: None,
             delay_ticks: None,
+            buffer_coords: Vec::new(),
             span: source_cell.span.clone(),
         });
     }

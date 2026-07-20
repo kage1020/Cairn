@@ -11,31 +11,38 @@ are derived deterministically from a small dataflow description.
 ## Status
 
 Combinational logic synthesis, Netlist IR selection, Edition Cell
-selection, cell placement, Steiner routing, and delay insertion
-landed. `synthesize(&IntentModule)` lowers sensor bindings, actuator
-arguments, and `logic sig.X = <expr>` lines into an edition-neutral
-Logic IR (DAG of `and` / `or` / `not` gates today, with `xor` /
-`nand` / `nor` / `mux` reserved on the enum until the surface parser
-reaches them); `compile_netlist(&ScopedLogicIr)` rewrites that DAG
-into an edition-neutral Netlist IR of Logical Cells + nets;
-`compile_edition_netlist(&ScopedNetlistIr, Edition)` picks the target-
-edition realisation of each cell — the second rung of the three-tier
-cell library that sits inside the Netlist → Placement transition (Java
-`ComparatorAnd` / `RepeaterOr` / `InverterTorch` vs Bedrock `TorchAnd`
-/ `TorchOr` / `InverterTorch`);
+selection, cell placement, Steiner routing, delay insertion, and
+crossing legalization landed. `synthesize(&IntentModule)` lowers
+sensor bindings, actuator arguments, and `logic sig.X = <expr>` lines
+into an edition-neutral Logic IR (DAG of `and` / `or` / `not` gates
+today, with `xor` / `nand` / `nor` / `mux` reserved on the enum until
+the surface parser reaches them); `compile_netlist(&ScopedLogicIr)`
+rewrites that DAG into an edition-neutral Netlist IR of Logical Cells
++ nets; `compile_edition_netlist(&ScopedNetlistIr, Edition)` picks the
+target-edition realisation of each cell — the second rung of the
+three-tier cell library that sits inside the Netlist → Placement
+transition (Java `ComparatorAnd` / `RepeaterOr` / `InverterTorch` vs
+Bedrock `TorchAnd` / `TorchOr` / `InverterTorch`);
 `compile_placement(&ScopedEditionNetlistIr, &IntentModule)` lays those
 edition-tagged cells out inside each scope's `circuit region=`
 reservation (stage 1 of `spec/redstone` §14.5's five-stage
 place-and-route); `compile_routing(&ScopedPlacementIr)` runs Steiner
 routing over that layout, filling every cell's `wire_length` with the
 sum of Manhattan distances from each driver source into the cell
-(stage 2 of §14.5); and `compile_delay(&ScopedPlacementIr)` runs
-delay insertion, promoting each cell's `delay_ticks` from `None` to
+(stage 2 of §14.5); `compile_delay(&ScopedPlacementIr)` runs delay
+insertion, promoting each cell's `delay_ticks` from `None` to
 `Some(base delay + implicit buffer repeater ticks)` and refusing with
 `E_ATTENUATION_LIMIT` when a driver segment exceeds the v1 sanity cap
-(stage 3 of §14.5). Crossing legalization (`RouteLayer::Bridge` /
-`Via` escape), edition legalization, the tick simulator, and QC/BUD
-refusal (`E_NO_PORTABLE_IMPL`) are still to come.
+(stage 3 of §14.5); and `compile_crossing(&ScopedPlacementIr)` runs
+crossing legalization, detecting plane overlaps between distinct
+nets (refused with `E_CROSSING_CONGESTION` when the `void=<N>`
+reservation offers no bridge layer to escape to) and filling every
+cell's `buffer_coords` with the concrete coord of each implicit
+buffer repeater the delay pass counted — a collision on the plane
+lifts the buffer onto the first free `RouteLayer::Bridge` y-layer
+inside the `void=<N>` budget (stage 4 of §14.5). Edition
+legalization, the tick simulator, and QC/BUD refusal
+(`E_NO_PORTABLE_IMPL`) are still to come.
 
 ## Pipeline
 

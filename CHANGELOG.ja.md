@@ -14,6 +14,61 @@
 
 ### 追加
 
+- Redstone crossing legalization と `cairn synth --stage crossing
+  --edition <java|bedrock>`（M6-PR7）— M6 redstone-simulates
+  パイプラインの 7 枚目。`cairn-lang-redstone` に
+  `compile_crossing(&ScopedPlacementIr) -> CrossingOutput`
+  エントリポイントを追加し、M6-PR6 の delayed Placement IR を走査して
+  routing / delay pass と同じ `NetRef → source coord` マッピングで各
+  net の Manhattan Steiner tree を再描画し、2 つのタスクを実行する —
+  `spec/redstone` §14.5 の 5 段パイプライン（Placement → Steiner
+  routing → Delay insertion → Crossing legalization → Edition
+  legalization）の第 4 段。
+  タスク 1 は plane crossing 検出: cell/pad ではない wire coord を
+  2 つの異なる net が占めるケースを検出し、`void=<N>` 予約に plane
+  より上の y-layer が無い（`void < 2`）場合は新診断
+  `E_CROSSING_CONGESTION` を発火して refuse する。v1 では wire
+  crossing 自体を `Bridge` layer に持ち上げない — routed wire path
+  は IR に保存されないため escape 記録の attach 先がなく、代わりに
+  crossing coord set は pass 内でタスク 2 のバッファ配置を steer
+  するためだけに使われる。タスク 2 は暗黙 buffer repeater の座標
+  割り当て: 各 driver segment について L-shape 経路（x → z → y、
+  routing と同じ軸順）を再走し、`k * DUST_ATTENUATION_LIMIT`
+  （`k = 1..=buffer_count`）の点に buffer を置く。cell / pad /
+  plane crossing / 既配置 buffer と衝突する候補は
+  `void=<N>` 予約内の最初の空いた `RouteLayer::Bridge` y-layer
+  （`y in 1..void`）にエスケープし、その `(x, z)` の全 bridge
+  y-layer が塞がっている場合は新診断 `E_BUFFER_COORD_COLLISION`
+  で refuse する。両診断ともユーザーへの自己修正三点セット
+  （「`void` を増やす」「region を広げる」「複数の `circuit` に
+  分割する」）を提示し、`CrossingCongestion` の primary は衝突する
+  2 net の名前を anchor 座標と共に含めるので、ユーザーは原因の
+  ソースレベル信号を特定できる。
+  新しい IR 型は追加しない: crossing pass は `PlacedCellNode` の
+  phase 表に沿った field write。`CellCoord` に `layer: RouteLayer`
+  （`Plane` / `Bridge` / `Via`; `Via` は v1 で producer なし、
+  reserved と明記）を追加、`PlacedCellNode` に
+  `buffer_coords: Vec<CellCoord>` を追加し、crossing pass は
+  delay pass が数えた implicit buffer repeater の具体座標を 1 個
+  ずつここに埋める。両フィールドともデフォルト値では serde-skip
+  され（`layer` は `Plane` のとき、`buffer_coords` は空のとき）、
+  placement / routing / delay JSON dump は legalized IR dump の
+  purely additive subset として扱える。失敗したスコープは crossing
+  出力から drop され、下流の block-array voxel 落としが
+  「実現不能なレイアウトに対する部分 buffer」を silent に
+  materialise することはない。CLI の `cairn synth --stage` に
+  `crossing` 値を追加。`--edition <java|bedrock>` フラグは
+  `edition` / `placement` / `route` / `delay` と同様に必須で、
+  edition-neutral な `logic` / `netlist` stage では引き続き
+  exit 2 で拒否する。`--stage crossing` は upstream の fail-loud
+  を継承する: routing 段で `E_ROUTE_CONGESTION`、delay 段で
+  `E_ATTENUATION_LIMIT` に落ちたスコープはそれぞれの段で報告され
+  exit 1 になり、crossing pass は走らない。今回のスコープ外:
+  wire crossing の `Bridge` / `Via` materialisation、edition
+  legalization、block-array voxel 落とし、physical-tile（3 層目）
+  cell library、tick simulator、`assert truth|always|latency`
+  の評価、シーケンシャルマクロ（`latch` / `pulse` / `delay` /
+  `edge_*` / `counter`）、QC/BUD 拒否 (`E_NO_PORTABLE_IMPL`)。
 - Redstone delay insertion と `cairn synth --stage delay
   --edition <java|bedrock>`（M6-PR6）— M6 redstone-simulates
   パイプラインの 6 枚目。`cairn-lang-redstone` に
