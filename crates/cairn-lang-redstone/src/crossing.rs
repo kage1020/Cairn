@@ -282,17 +282,12 @@ fn legalize_scope(entry: &ScopedPlacementIrEntry) -> ScopeLegalization {
     )?;
 
     for (cell, buffers) in ir.cells.iter_mut().zip(buffer_coords_per_cell) {
-        // Loud in release too: the phase table on `PlacedCellNode`
-        // forbids a re-run of stage 4, and silently overwriting a
-        // populated `buffer_coords` would let a caller who chained
-        // `compile_crossing(&legalized.scoped)` produce a
-        // stale-but-plausible IR.
-        assert!(
-            cell.buffer_coords.is_empty(),
-            "legalize_scope re-writing a PlacedCellNode whose buffer_coords is already {} entries — crossing legalization must run at most once per delayed IR",
-            cell.buffer_coords.len(),
-        );
-        cell.buffer_coords = buffers;
+        // Loud in release too: `PlacementPhase::legalize` panics on any
+        // non-`Delayed` variant, so a caller who chained
+        // `compile_crossing(&legalized.scoped)` (or handed us a
+        // still-`Unrouted` / `Routed` cell) trips a release-panic here
+        // rather than silently producing a stale-but-plausible IR.
+        cell.phase.legalize(buffers);
     }
 
     Ok(ir)
@@ -630,8 +625,8 @@ mod tests {
     use crate::logic_ir::ScopeKind;
     use crate::netlist_ir::{CellPortDriver, NetRef, NetlistOutput, PortName};
     use crate::placement_ir::{
-        CellCoord, CircuitRegionReservation, PlacedCellNode, PlacementIr, RouteLayer,
-        ScopedPlacementIr, ScopedPlacementIrEntry,
+        CellCoord, CircuitRegionReservation, PlacedCellNode, PlacementIr, PlacementPhase,
+        RouteLayer, ScopedPlacementIr, ScopedPlacementIrEntry,
     };
 
     fn reservation(width: u32, depth: u32, void: u32) -> CircuitRegionReservation {
@@ -663,9 +658,10 @@ mod tests {
             cell,
             drivers,
             coord,
-            wire_length: Some(0),
-            delay_ticks: Some(0),
-            buffer_coords: Vec::new(),
+            phase: PlacementPhase::Delayed {
+                wire_length: 0,
+                delay_ticks: 0,
+            },
             span: Span::default(),
         }
     }
@@ -718,9 +714,9 @@ mod tests {
         assert!(legalized.diagnostics.is_empty());
         let cell = &legalized.scoped.scopes[0].ir.cells[0];
         assert!(
-            cell.buffer_coords.is_empty(),
+            cell.buffer_coords().is_empty(),
             "segment <= 15 blocks needs no buffer, got {:?}",
-            cell.buffer_coords,
+            cell.buffer_coords(),
         );
         assert_eq!(
             cell.coord.layer,
@@ -757,15 +753,29 @@ mod tests {
         );
         let cell = &legalized.scoped.scopes[0].ir.cells[0];
         assert_eq!(
-            cell.buffer_coords.len(),
+            cell.buffer_coords().len(),
             1,
             "16-block segment needs exactly one buffer, got {:?}",
-            cell.buffer_coords,
+            cell.buffer_coords(),
         );
         assert_eq!(
-            cell.buffer_coords[0].layer,
+            cell.buffer_coords()[0].layer,
             RouteLayer::Plane,
             "no collision → buffer stays on plane",
+        );
+        // Pins the `PlacedCellNode` `Serialize` impl's 6-field path
+        // (cell + drivers + coord + wire_length + delay_ticks +
+        // buffer_coords). Without this, no test would exercise the
+        // full `Legalized { buffer_coords: <non-empty> }` JSON shape —
+        // only the 5-field `Legalized { buffer_coords: empty }` case
+        // is covered by the byte-identity tests. A regression that
+        // dropped `buffer_coords` (or announced the wrong
+        // `field_count`) would slip past every other assertion here.
+        let json = serde_json::to_string(&legalized.scoped)
+            .expect("legalized scoped IR must serialise cleanly");
+        assert!(
+            json.contains("\"buffer_coords\":[{\"x\":15,\"y\":0,\"z\":1}]"),
+            "expected buffer_coords entry to appear in JSON verbatim, got {json}",
         );
     }
 
@@ -878,9 +888,9 @@ mod tests {
                 cell.coord,
             );
             assert!(
-                cell.buffer_coords.is_empty(),
+                cell.buffer_coords().is_empty(),
                 "short segments need no buffer coord; got {:?}",
-                cell.buffer_coords,
+                cell.buffer_coords(),
             );
         }
     }
@@ -1014,21 +1024,34 @@ mod tests {
             legalized.diagnostics,
         );
         let cells = &legalized.scoped.scopes[0].ir.cells;
-        assert_eq!(cells[0].buffer_coords.len(), 1);
-        assert_eq!(cells[1].buffer_coords.len(), 1);
+        assert_eq!(cells[0].buffer_coords().len(), 1);
+        assert_eq!(cells[1].buffer_coords().len(), 1);
         assert_eq!(
-            cells[0].buffer_coords[0].layer,
+            cells[0].buffer_coords()[0].layer,
             RouteLayer::Plane,
             "first buffer sits on plane",
         );
         assert_eq!(
-            cells[1].buffer_coords[0].layer,
+            cells[1].buffer_coords()[0].layer,
             RouteLayer::Bridge,
             "second buffer escapes to bridge",
         );
         assert_eq!(
-            cells[1].buffer_coords[0].y, 1,
+            cells[1].buffer_coords()[0].y,
+            1,
             "bridge escape lands on first free y-layer (y=1)",
+        );
+        // Complements the plane-buffer JSON assertion in
+        // `long_segment_places_buffer_on_plane` by pinning the
+        // non-default `RouteLayer::Bridge` variant's JSON form
+        // (`"layer":"bridge"`). Together the two tests cover the
+        // full `Legalized { buffer_coords: <non-empty> }` Serialize
+        // path across both `RouteLayer` producers.
+        let json = serde_json::to_string(&legalized.scoped)
+            .expect("legalized scoped IR must serialise cleanly");
+        assert!(
+            json.contains("\"layer\":\"bridge\""),
+            "expected the bridge-escape buffer to serialise its layer tag, got {json}",
         );
     }
 

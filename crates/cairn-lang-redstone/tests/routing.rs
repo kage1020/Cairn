@@ -79,12 +79,12 @@ fn redstone_door_java_fills_wire_length_from_input_pads() {
     assert_eq!(ir.cells.len(), 1);
     let cell = &ir.cells[0];
     assert_eq!(
-        cell.wire_length,
+        cell.wire_length(),
         Some(3),
         "wire_length must be Manhattan(step→cell) + Manhattan(exit→cell) = 1 + 2 = 3",
     );
     assert!(
-        cell.delay_ticks.is_none(),
+        cell.delay_ticks().is_none(),
         "delay_ticks stays None: Stage 3 (delay insertion) is a follow-up",
     );
 }
@@ -106,7 +106,8 @@ fn redstone_door_bedrock_matches_java_wire_length() {
         for (jc, bc) in j.ir.cells.iter().zip(b.ir.cells.iter()) {
             assert_eq!(jc.coord, bc.coord);
             assert_eq!(
-                jc.wire_length, bc.wire_length,
+                jc.wire_length(),
+                bc.wire_length(),
                 "wire_length is edition-independent by construction",
             );
             assert_ne!(jc.cell, bc.cell, "cell tag differs per edition");
@@ -167,16 +168,16 @@ struct sim size=7x5
         .expect("sim scope");
     assert_eq!(entry.ir.cells.len(), 3);
     // cell[0] at (0,0,0), input pads at (0,0,1) and (0,0,2).
-    assert_eq!(entry.ir.cells[0].wire_length, Some(3));
+    assert_eq!(entry.ir.cells[0].wire_length(), Some(3));
     // cell[1] at (1,0,0), same input pad pair — L-shape drivers.
-    assert_eq!(entry.ir.cells[1].wire_length, Some(5));
+    assert_eq!(entry.ir.cells[1].wire_length(), Some(5));
     // cell[2] at (2,0,0), driven by cell[0]=(0,0,0) and cell[1]=(1,0,0).
-    assert_eq!(entry.ir.cells[2].wire_length, Some(3));
+    assert_eq!(entry.ir.cells[2].wire_length(), Some(3));
     for cell in &entry.ir.cells {
         assert!(
-            cell.delay_ticks.is_none(),
+            cell.delay_ticks().is_none(),
             "delay_ticks must not appear (stage 3 is future work), got {:?}",
-            cell.delay_ticks,
+            cell.delay_ticks(),
         );
     }
 }
@@ -439,7 +440,7 @@ struct beta size=4x3
         .find(|e| e.name == "alpha")
         .expect("alpha scope survives routing");
     assert!(
-        alpha.ir.cells.iter().all(|c| c.wire_length.is_some()),
+        alpha.ir.cells.iter().all(|c| c.wire_length().is_some()),
         "every alpha cell must carry a routed wire_length",
     );
 
@@ -476,7 +477,7 @@ fn edition_parity_wire_length_matches_across_java_and_bedrock() {
 
     for (jscope, bscope) in java.scoped.scopes.iter().zip(bedrock.scoped.scopes.iter()) {
         for (jc, bc) in jscope.ir.cells.iter().zip(bscope.ir.cells.iter()) {
-            assert_eq!(jc.wire_length, bc.wire_length);
+            assert_eq!(jc.wire_length(), bc.wire_length());
             assert_eq!(jc.coord, bc.coord);
         }
     }

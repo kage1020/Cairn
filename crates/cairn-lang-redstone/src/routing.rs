@@ -326,12 +326,7 @@ where
         })
         .collect();
     for (cell, len) in ir.cells.iter_mut().zip(wire_lengths) {
-        debug_assert!(
-            cell.wire_length.is_none(),
-            "route_scope re-routing a PlacedCellNode whose wire_length is already Some({:?}) — routing should run once per placement",
-            cell.wire_length,
-        );
-        cell.wire_length = Some(len);
+        cell.phase.route(len);
     }
 }
 

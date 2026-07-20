@@ -12,6 +12,31 @@
 
 ## [Unreleased]
 
+### 変更
+
+- 下記 M6-PR5 / M6-PR6 / M6-PR7 が `PlacedCellNode` に追加した 3 つの
+  進化フィールド (`wire_length` / `delay_ticks` / `buffer_coords`)
+  を単一の `phase: PlacementPhase` enum に集約した。`Unrouted` /
+  `Routed` / `Delayed` / `Legalized` の 4 variants が
+  place-and-route パイプラインの最初 4 ステージに一対一で対応し、
+  「`delay_ticks` は付いているが `wire_length` が無い」「delay 前
+  なのに `buffer_coords` に値がある」といった不正状態を型で表現
+  不能にした。ステージ間の遷移は `PlacementPhase::route` / `delay`
+  / `legalize` で表現し、各メソッドは現在の variant を pattern
+  match して不正な呼び出し順で release-loud panic を起こす — これ
+  まで 3 pass に散在していた `debug_assert!` / release-`assert!`
+  のガードを、統一された release-loud 契約に置き換える。
+  `PlacementPhase` は `#[non_exhaustive]` なので将来の Stage 5
+  (`EditionLegalized`) 追加は accessor が既に隠している以外の
+  downstream `match` サイトに対して additive。`PlacedCellNode` の
+  `phase` フィールド自体は `pub(crate)` で、下流コンシューマからは
+  旧フィールドと等価な `Option<u32>` / `&[CellCoord]` を返すフラット
+  アクセッサ (`wire_length()` / `delay_ticks()` / `buffer_coords()`)
+  経由のみ見える。手書き `Serialize` 実装が phase を
+  `{cell, drivers, coord[, wire_length][, delay_ticks][, buffer_coords]}`
+  にフラット化するため JSON wire 形式は以前のリビジョンと byte 等価
+  — 下流コンシューマからはスキーマ変更に見えない。
+
 ### 追加
 
 - Redstone crossing legalization と `cairn synth --stage crossing
