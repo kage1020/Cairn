@@ -13,23 +13,29 @@ and is a separate axis from the Minecraft target version.
 ### Changed
 
 - `PlacedCellNode`'s three progressive fields (`wire_length`,
-  `delay_ticks`, `buffer_coords`) collapse into a single
-  `phase: PlacementPhase` enum whose four variants (`Unrouted`,
+  `delay_ticks`, `buffer_coords`) that M6-PR5 / M6-PR6 / M6-PR7 above
+  added as parallel `Option` / `Vec` fields are collapsed into a
+  single `phase: PlacementPhase` enum whose four variants (`Unrouted`,
   `Routed`, `Delayed`, `Legalized`) correspond one-to-one with the
-  place-and-route pipeline stages. Illegal states such as
-  "carries `delay_ticks` but no `wire_length`" or "populated
-  `buffer_coords` before delay ran" are unrepresentable — each
-  stage transition is expressed by `PlacementPhase::route` /
-  `delay` / `legalize`, which pattern-match the current variant and
-  panic on any out-of-order call (replacing the earlier scattered
-  `debug_assert!` / release-`assert!` guards on the three passes).
-  Read-only accessor methods on `PlacedCellNode`
-  (`wire_length()` / `delay_ticks()` / `buffer_coords()`) project
-  the phase back onto the flat option / slice shape callers used to
-  read, and a hand-written `Serialize` impl flattens the phase back
-  onto `{cell, drivers, coord[, wire_length][, delay_ticks][, buffer_coords]}`
-  so the JSON wire form is byte-identical to earlier revisions —
-  no consumer sees a schema change.
+  first four stages of the place-and-route pipeline. Illegal states
+  such as "carries `delay_ticks` but no `wire_length`" or "populated
+  `buffer_coords` before delay ran" are unrepresentable — each stage
+  transition is expressed by `PlacementPhase::route` / `delay` /
+  `legalize`, which pattern-match the current variant and panic on
+  any out-of-order call (replacing the earlier scattered
+  `debug_assert!` / release-`assert!` guards on the three passes with
+  a uniform release-loud contract). `PlacementPhase` is
+  `#[non_exhaustive]` so a future Stage-5 `EditionLegalized` variant
+  is additive on the downstream `match` sites the enum's accessors
+  do not already cover. The `phase` field on `PlacedCellNode` itself
+  is `pub(crate)`: downstream consumers see only the flat accessor
+  methods `wire_length()` / `delay_ticks()` / `buffer_coords()`,
+  which return the same `Option<u32>` / `&[CellCoord]` shape the old
+  fields exposed, and a hand-written `Serialize` impl flattens the
+  phase back onto
+  `{cell, drivers, coord[, wire_length][, delay_ticks][, buffer_coords]}`
+  so the JSON wire form is byte-identical to earlier revisions — no
+  consumer sees a schema change.
 
 ### Added
 

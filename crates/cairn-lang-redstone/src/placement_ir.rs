@@ -213,10 +213,13 @@ impl CircuitRegionReservation {
 }
 
 /// Progressive state of a [`PlacedCellNode`] as it moves through the
-/// four-stage place-and-route pipeline (`spec/redstone` §14.5).
+/// first four of the five stages of the place-and-route pipeline
+/// (`spec/redstone` §14.5 — Placement → Steiner routing → Delay
+/// insertion → Crossing legalization → Edition legalization; the
+/// fifth stage is future work and does not yet have a variant).
 ///
 /// Every legal `(wire_length, delay_ticks, buffer_coords)` combination
-/// that the pipeline can produce corresponds to exactly one variant:
+/// the pipeline can produce is one of these variants:
 ///
 /// | Producer                                             | Variant                                                                     |
 /// |------------------------------------------------------|-----------------------------------------------------------------------------|
@@ -235,7 +238,12 @@ impl CircuitRegionReservation {
 /// delay pass counted, and a scope whose delay pass counted zero
 /// buffers is still legalized (transitions to [`Self::Legalized`] with
 /// an empty vector).
+///
+/// `#[non_exhaustive]` so a future Stage-5 `EditionLegalized` variant
+/// is additive: downstream `match` sites in other crates must carry a
+/// `_ => …` arm today.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum PlacementPhase {
     /// Fresh out of the placement pass — no wire, no delay, no buffers.
     Unrouted,
@@ -301,11 +309,16 @@ impl PlacementPhase {
     /// empty slice so callers can treat "nothing to place" and "not
     /// yet legalized" identically for read-only purposes; use the
     /// enum discriminant if the distinction matters.
+    ///
+    /// All variants are matched explicitly rather than via `_ => &[]`
+    /// so that adding a Stage-5 variant becomes a compile error here
+    /// instead of a silent empty-slice return that would drop the new
+    /// stage's data from the JSON dump.
     #[must_use]
     pub fn buffer_coords(&self) -> &[CellCoord] {
         match self {
+            Self::Unrouted | Self::Routed { .. } | Self::Delayed { .. } => &[],
             Self::Legalized { buffer_coords, .. } => buffer_coords,
-            _ => &[],
         }
     }
 
@@ -316,15 +329,21 @@ impl PlacementPhase {
     /// Panics if the phase is not [`Self::Unrouted`]. Routing must run
     /// exactly once per placement, and the phase table on
     /// [`PlacedCellNode`] forbids re-routing.
+    ///
+    /// All non-`Unrouted` variants are listed explicitly (rather than a
+    /// `_ =>` catch-all) so a Stage-5 variant addition becomes a
+    /// compile error here — the author must decide whether Stage 5 can
+    /// be re-routed rather than silently panicking.
     #[track_caller]
     pub fn route(&mut self, wire_length: u32) {
         match self {
-            Self::Unrouted => {}
-            other => panic!(
-                "PlacementPhase::route called on {other:?} — routing must run once per placement"
+            Self::Unrouted => {
+                *self = Self::Routed { wire_length };
+            }
+            Self::Routed { .. } | Self::Delayed { .. } | Self::Legalized { .. } => panic!(
+                "PlacementPhase::route called on {self:?} — routing must run once per placement"
             ),
         }
-        *self = Self::Routed { wire_length };
     }
 
     /// [`Self::Routed`] → [`Self::Delayed`].
@@ -334,13 +353,14 @@ impl PlacementPhase {
     /// Panics if the phase is not [`Self::Routed`]. Delay insertion
     /// must run exactly once per routed IR, and the phase table on
     /// [`PlacedCellNode`] forbids re-writing a `delay_ticks` that was
-    /// already committed.
+    /// already committed. See [`Self::route`] for why the arms are
+    /// enumerated explicitly.
     #[track_caller]
     pub fn delay(&mut self, delay_ticks: u32) {
         let wire_length = match self {
             Self::Routed { wire_length } => *wire_length,
-            other => panic!(
-                "PlacementPhase::delay called on {other:?} — delay insertion must run once per routed IR"
+            Self::Unrouted | Self::Delayed { .. } | Self::Legalized { .. } => panic!(
+                "PlacementPhase::delay called on {self:?} — delay insertion must run once per routed IR"
             ),
         };
         *self = Self::Delayed {
@@ -358,6 +378,7 @@ impl PlacementPhase {
     /// the earlier release-loud `assert!` on the crossing pass, so a
     /// caller who chained `compile_crossing(&legalized.scoped)` trips
     /// here rather than silently producing a stale-but-plausible IR.
+    /// See [`Self::route`] for why the arms are enumerated explicitly.
     #[track_caller]
     pub fn legalize(&mut self, buffer_coords: Vec<CellCoord>) {
         let (wire_length, delay_ticks) = match self {
@@ -365,8 +386,8 @@ impl PlacementPhase {
                 wire_length,
                 delay_ticks,
             } => (*wire_length, *delay_ticks),
-            other => panic!(
-                "PlacementPhase::legalize called on {other:?} — crossing legalization must run at most once per delayed IR"
+            Self::Unrouted | Self::Routed { .. } | Self::Legalized { .. } => panic!(
+                "PlacementPhase::legalize called on {self:?} — crossing legalization must run at most once per delayed IR"
             ),
         };
         *self = Self::Legalized {
@@ -410,7 +431,16 @@ pub struct PlacedCellNode {
     /// Coordinate assigned by the placement pass.
     pub coord: CellCoord,
     /// Progressive pipeline state — see [`PlacementPhase`].
-    pub phase: PlacementPhase,
+    ///
+    /// Crate-visible so the three pipeline passes (routing, delay,
+    /// crossing) can call the phase-transition methods, but hidden from
+    /// downstream crates: writes must go through
+    /// [`PlacementPhase::route`] / [`PlacementPhase::delay`] /
+    /// [`PlacementPhase::legalize`], and reads through the flat
+    /// accessor methods on this struct. Direct field assignment would
+    /// bypass the phase-transition guards and re-open the illegal
+    /// states the enum exists to forbid.
+    pub(crate) phase: PlacementPhase,
     /// Byte range of the originating `logic ...` sub-expression, inherited
     /// from the source [`crate::edition_netlist_ir::EditionCellNode`].
     pub span: Span,
@@ -439,6 +469,16 @@ impl PlacedCellNode {
     }
 }
 
+// If [`PlacedCellNode`] grows a new visible field — or [`PlacementPhase`]
+// gains a Stage-5 variant whose payload the JSON must expose — add it to
+// both the field-count tally and the `serialize_field` calls below.
+// `serde_json` tolerates a field-count mismatch, but binary formats
+// (bincode, postcard, msgpack) rely on the announced count being exact;
+// the `debug_assert_eq!` at the end catches a divergence in tests. Do not
+// `#[derive(Serialize)]` this type — the derived output would tag the
+// enum variant and break the byte-identity contract locked in by
+// `routing_leaves_placement_fields_byte_identical_apart_from_wire_length`
+// et al.
 impl Serialize for PlacedCellNode {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         let wire_length = self.wire_length();
@@ -457,18 +497,29 @@ impl Serialize for PlacedCellNode {
         }
 
         let mut state = serializer.serialize_struct("PlacedCellNode", field_count)?;
+        let mut written = 0_usize;
         state.serialize_field("cell", &self.cell)?;
+        written += 1;
         state.serialize_field("drivers", &self.drivers)?;
+        written += 1;
         state.serialize_field("coord", &self.coord)?;
+        written += 1;
         if let Some(wl) = wire_length {
             state.serialize_field("wire_length", &wl)?;
+            written += 1;
         }
         if let Some(dt) = delay_ticks {
             state.serialize_field("delay_ticks", &dt)?;
+            written += 1;
         }
         if !buffer_coords.is_empty() {
             state.serialize_field("buffer_coords", buffer_coords)?;
+            written += 1;
         }
+        debug_assert_eq!(
+            written, field_count,
+            "PlacedCellNode Serialize: announced field_count ({field_count}) diverges from serialize_field call count ({written}); binary formats such as bincode / postcard would produce malformed output",
+        );
         state.end()
     }
 }
@@ -606,4 +657,180 @@ pub struct ScopedPlacementIrEntry {
     pub name: String,
     /// Placement IR laid out from the scope's Edition Netlist IR.
     pub ir: PlacementIr,
+}
+
+#[cfg(test)]
+mod tests {
+    //! Direct coverage for [`PlacementPhase`] — the four legal
+    //! transitions, the nine illegal ones the transition methods must
+    //! reject with a release-loud panic, and the flat accessor
+    //! projections. Each pipeline pass (`routing.rs` / `delay.rs` /
+    //! `crossing.rs`) has its own end-to-end coverage; this module
+    //! pins the state-machine invariants of the enum itself so a
+    //! regression that loosens a transition guard is caught here
+    //! rather than at the far end of the pipeline.
+    use super::*;
+
+    fn routed() -> PlacementPhase {
+        PlacementPhase::Routed { wire_length: 3 }
+    }
+
+    fn delayed() -> PlacementPhase {
+        PlacementPhase::Delayed {
+            wire_length: 3,
+            delay_ticks: 1,
+        }
+    }
+
+    fn legalized() -> PlacementPhase {
+        PlacementPhase::Legalized {
+            wire_length: 3,
+            delay_ticks: 1,
+            buffer_coords: vec![CellCoord::new(5, 0, 0)],
+        }
+    }
+
+    #[test]
+    fn route_from_unrouted_transitions_to_routed() {
+        let mut phase = PlacementPhase::Unrouted;
+        phase.route(7);
+        assert_eq!(phase, PlacementPhase::Routed { wire_length: 7 });
+    }
+
+    #[test]
+    #[should_panic(expected = "routing must run once per placement")]
+    fn route_from_routed_panics() {
+        let mut phase = routed();
+        phase.route(5);
+    }
+
+    #[test]
+    #[should_panic(expected = "routing must run once per placement")]
+    fn route_from_delayed_panics() {
+        let mut phase = delayed();
+        phase.route(5);
+    }
+
+    #[test]
+    #[should_panic(expected = "routing must run once per placement")]
+    fn route_from_legalized_panics() {
+        let mut phase = legalized();
+        phase.route(5);
+    }
+
+    #[test]
+    fn delay_from_routed_transitions_to_delayed_and_preserves_wire_length() {
+        let mut phase = PlacementPhase::Routed { wire_length: 9 };
+        phase.delay(4);
+        assert_eq!(
+            phase,
+            PlacementPhase::Delayed {
+                wire_length: 9,
+                delay_ticks: 4,
+            },
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "delay insertion must run once per routed IR")]
+    fn delay_from_unrouted_panics() {
+        let mut phase = PlacementPhase::Unrouted;
+        phase.delay(2);
+    }
+
+    #[test]
+    #[should_panic(expected = "delay insertion must run once per routed IR")]
+    fn delay_from_delayed_panics() {
+        let mut phase = delayed();
+        phase.delay(2);
+    }
+
+    #[test]
+    #[should_panic(expected = "delay insertion must run once per routed IR")]
+    fn delay_from_legalized_panics() {
+        let mut phase = legalized();
+        phase.delay(2);
+    }
+
+    #[test]
+    fn legalize_from_delayed_transitions_and_preserves_prior_fields() {
+        let mut phase = PlacementPhase::Delayed {
+            wire_length: 12,
+            delay_ticks: 3,
+        };
+        let coords = vec![CellCoord::new(1, 0, 0), CellCoord::new(2, 0, 0)];
+        phase.legalize(coords.clone());
+        assert_eq!(
+            phase,
+            PlacementPhase::Legalized {
+                wire_length: 12,
+                delay_ticks: 3,
+                buffer_coords: coords,
+            },
+        );
+    }
+
+    #[test]
+    fn legalize_from_delayed_with_empty_buffers_stays_legalized() {
+        // A scope whose delay pass counted zero buffers must still
+        // transition to Legalized — an empty buffer_coords does not
+        // mean "not yet legalized".
+        let mut phase = PlacementPhase::Delayed {
+            wire_length: 4,
+            delay_ticks: 0,
+        };
+        phase.legalize(Vec::new());
+        assert!(matches!(
+            phase,
+            PlacementPhase::Legalized {
+                buffer_coords: ref bc,
+                ..
+            } if bc.is_empty()
+        ));
+    }
+
+    #[test]
+    #[should_panic(expected = "must run at most once per delayed IR")]
+    fn legalize_from_unrouted_panics() {
+        let mut phase = PlacementPhase::Unrouted;
+        phase.legalize(vec![]);
+    }
+
+    #[test]
+    #[should_panic(expected = "must run at most once per delayed IR")]
+    fn legalize_from_routed_panics() {
+        let mut phase = routed();
+        phase.legalize(vec![]);
+    }
+
+    #[test]
+    #[should_panic(expected = "must run at most once per delayed IR")]
+    fn legalize_from_legalized_panics() {
+        let mut phase = legalized();
+        phase.legalize(vec![]);
+    }
+
+    #[test]
+    fn wire_length_accessor_covers_every_variant() {
+        assert_eq!(PlacementPhase::Unrouted.wire_length(), None);
+        assert_eq!(routed().wire_length(), Some(3));
+        assert_eq!(delayed().wire_length(), Some(3));
+        assert_eq!(legalized().wire_length(), Some(3));
+    }
+
+    #[test]
+    fn delay_ticks_accessor_covers_every_variant() {
+        assert_eq!(PlacementPhase::Unrouted.delay_ticks(), None);
+        assert_eq!(routed().delay_ticks(), None);
+        assert_eq!(delayed().delay_ticks(), Some(1));
+        assert_eq!(legalized().delay_ticks(), Some(1));
+    }
+
+    #[test]
+    fn buffer_coords_accessor_covers_every_variant() {
+        assert!(PlacementPhase::Unrouted.buffer_coords().is_empty());
+        assert!(routed().buffer_coords().is_empty());
+        assert!(delayed().buffer_coords().is_empty());
+        assert_eq!(legalized().buffer_coords(), &[CellCoord::new(5, 0, 0)]);
+    }
 }

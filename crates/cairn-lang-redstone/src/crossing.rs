@@ -763,6 +763,20 @@ mod tests {
             RouteLayer::Plane,
             "no collision → buffer stays on plane",
         );
+        // Pins the `PlacedCellNode` `Serialize` impl's 6-field path
+        // (cell + drivers + coord + wire_length + delay_ticks +
+        // buffer_coords). Without this, no test would exercise the
+        // full `Legalized { buffer_coords: <non-empty> }` JSON shape —
+        // only the 5-field `Legalized { buffer_coords: empty }` case
+        // is covered by the byte-identity tests. A regression that
+        // dropped `buffer_coords` (or announced the wrong
+        // `field_count`) would slip past every other assertion here.
+        let json = serde_json::to_string(&legalized.scoped)
+            .expect("legalized scoped IR must serialise cleanly");
+        assert!(
+            json.contains("\"buffer_coords\":[{\"x\":15,\"y\":0,\"z\":1}]"),
+            "expected buffer_coords entry to appear in JSON verbatim, got {json}",
+        );
     }
 
     #[test]
@@ -1026,6 +1040,18 @@ mod tests {
             cells[1].buffer_coords()[0].y,
             1,
             "bridge escape lands on first free y-layer (y=1)",
+        );
+        // Complements the plane-buffer JSON assertion in
+        // `long_segment_places_buffer_on_plane` by pinning the
+        // non-default `RouteLayer::Bridge` variant's JSON form
+        // (`"layer":"bridge"`). Together the two tests cover the
+        // full `Legalized { buffer_coords: <non-empty> }` Serialize
+        // path across both `RouteLayer` producers.
+        let json = serde_json::to_string(&legalized.scoped)
+            .expect("legalized scoped IR must serialise cleanly");
+        assert!(
+            json.contains("\"layer\":\"bridge\""),
+            "expected the bridge-escape buffer to serialise its layer tag, got {json}",
         );
     }
 
