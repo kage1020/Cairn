@@ -34,10 +34,13 @@ insertion, promoting each cell's `delay_ticks` from `None` to
 `Some(base delay + implicit buffer repeater ticks)` and refusing with
 `E_ATTENUATION_LIMIT` when a driver segment exceeds the v1 sanity cap
 (stage 3 of §14.5); and `compile_crossing(&ScopedPlacementIr)` runs
-crossing legalization, escaping cross-net plane overlaps onto the
-pseudo-2.5D `Bridge` / `Via` layers and filling every cell's
-`buffer_coords` with the concrete coord of each implicit buffer
-repeater the delay pass counted (stage 4 of §14.5). Edition
+crossing legalization, detecting plane overlaps between distinct
+nets (refused with `E_CROSSING_CONGESTION` when the `void=<N>`
+reservation offers no bridge layer to escape to) and filling every
+cell's `buffer_coords` with the concrete coord of each implicit
+buffer repeater the delay pass counted — a collision on the plane
+lifts the buffer onto the first free `RouteLayer::Bridge` y-layer
+inside the `void=<N>` budget (stage 4 of §14.5). Edition
 legalization, the tick simulator, and QC/BUD refusal
 (`E_NO_PORTABLE_IMPL`) are still to come.
 

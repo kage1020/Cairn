@@ -7,52 +7,57 @@
 //! [`crate::placement_ir::PlacedCellNode`] in each scope's delayed
 //! Placement IR, re-derives every net's Manhattan Steiner tree from
 //! the same `NetRef → source coord` mapping the routing and delay
-//! passes use (the routing pass discarded its per-scope occupancy set
-//! before yielding the routed IR, so wire coords are cheap to re-walk
-//! here and would bloat the JSON wire form if stored twice), detects
-//! coords two different nets would otherwise share on the ground
-//! [`crate::placement_ir::RouteLayer::Plane`], and materialises the
-//! two escape hatches §14.5's "pseudo-2.5D" text names:
+//! passes use (the routing pass discards its per-scope occupancy set
+//! before yielding the routed IR, and storing wire coords in the
+//! shared IR would bloat every JSON dump for every consumer), and
+//! carries out two tasks:
 //!
-//! - **Bridge / Via escape.** A coord shared by two distinct nets is a
-//!   crossing and would short in the Minecraft voxel model. The pass
-//!   lifts the coord onto the next unused y-layer of the scope's
-//!   `circuit region=<label> void=<N>` reservation
-//!   ([`crate::placement_ir::RouteLayer::Bridge`]), and reserves a
-//!   [`crate::placement_ir::RouteLayer::Via`] transition rung where a
-//!   bridge segment enters or leaves the plane. `void=1` reservations
-//!   have no free y-layer to escape to, so the pass refuses with
-//!   [`crate::DiagnosticCode::CrossingCongestion`] rather than emit an
-//!   unrealisable layout.
-//! - **Implicit buffer repeater coord assignment.** The delay pass
-//!   (stage 3) counted `floor((s - 1) / DUST_ATTENUATION_LIMIT)`
-//!   buffer repeaters per driver segment of length `s`, folded their
-//!   tick contribution into `delay_ticks`, but deferred coord
-//!   assignment because stage 4 already owns the free-block set the
-//!   Bridge / Via escape draws from. This pass walks each driver's
-//!   Manhattan L-shape (x-then-z-then-y, matching the routing pass's
-//!   axis order so the regression story pins across stages) and picks
-//!   coords at `k * DUST_ATTENUATION_LIMIT` (`k = 1..=buffer_count`).
-//!   A candidate that collides with a cell coord, pad coord, existing
-//!   buffer, or plane crossing escapes to the bridge layer; if that
-//!   layer is also unavailable (`void < 2`) the pass refuses with
-//!   [`crate::DiagnosticCode::BufferCoordCollision`].
+//! 1. **Plane crossing detection.** A wire coord (neither cell nor
+//!    pad) that ends up owned by two distinct nets is a "crossing"
+//!    that would short in the Minecraft voxel model. v1 does not lift
+//!    wire coords themselves onto a `Bridge` layer — the routed wire
+//!    path is not stored in the IR, so an escape record would have
+//!    nowhere to attach. Instead, a scope with any plane crossing
+//!    against a `void < 2` reservation is refused with
+//!    [`crate::DiagnosticCode::CrossingCongestion`]; `void >= 2`
+//!    scopes are accepted on the grounds that the reserved service
+//!    layers are wide enough for a `stage 5` block-array lowering to
+//!    re-derive the same Steiner trees and lift the crossings itself.
+//!    The set of crossing coords is only used inside this pass to
+//!    steer buffer placement (below) — it is not surfaced on the IR.
+//! 2. **Implicit buffer repeater coord assignment.** The delay pass
+//!    counted `floor((s - 1) / DUST_ATTENUATION_LIMIT)` buffer
+//!    repeaters per driver segment of length `s` and folded their tick
+//!    contribution into `delay_ticks`; this pass materialises the
+//!    concrete coord of each one into
+//!    [`crate::placement_ir::PlacedCellNode::buffer_coords`]. Each
+//!    driver's Manhattan L-shape is walked in the routing pass's
+//!    axis order (x → z → y) and coords are picked at
+//!    `k * DUST_ATTENUATION_LIMIT` (`k = 1..=buffer_count`). A
+//!    candidate that collides with a cell coord, pad coord, plane
+//!    crossing, or earlier buffer escapes to the first free y-layer
+//!    inside the `void=<N>` budget on
+//!    [`crate::placement_ir::RouteLayer::Bridge`]; if every layer is
+//!    taken (or `void < 2`), the pass refuses with
+//!    [`crate::DiagnosticCode::BufferCoordCollision`].
 //!
-//! Failed scopes are elided from the output for the same reason the
-//! routing pass elides congestion failures — a partial `buffer_coords`
-//! set would let the future block-array voxel lowering (stage 5's
-//! downstream consumer) materialise buffers against a layout no other
-//! stage can realise.
+//! [`crate::placement_ir::RouteLayer::Via`] has no producer in v1: the
+//! bridge escape is a single coord, not a segment with distinct
+//! plane / bridge endpoints, so there is no ramp to name. The variant
+//! is kept in the enum for exhaustive matches against §14.5's full
+//! vocabulary.
+//!
+//! Failed scopes are elided from the output so a `stage 5` consumer
+//! never reads a partially-populated `buffer_coords` — the same
+//! fail-loud policy the routing and delay passes use.
 //!
 //! The crossing pass is a field write on
-//! [`crate::placement_ir::PlacedCellNode::buffer_coords`] per the phase
-//! table on that type; no new IR type is introduced. `--stage
-//! placement` / `--stage route` / `--stage delay` JSON stays
-//! byte-identical to today because `buffer_coords` is serde-skipped on
-//! empty and `layer` on plane, and both fields serialise appended
-//! after every previously present field in the phase table's field
-//! declaration order (matching serde's compact-JSON layout) when this
-//! pass writes them.
+//! [`crate::placement_ir::PlacedCellNode::buffer_coords`] and
+//! [`crate::placement_ir::CellCoord::layer`] per the phase table on
+//! `PlacedCellNode`; no new IR type is introduced. Both fields
+//! serde-skip on their defaults, so a scope whose crossing pass
+//! writes nothing dumps as the identical JSON its delay-pass input
+//! did.
 
 use std::collections::HashMap;
 use std::collections::HashSet;
@@ -216,9 +221,12 @@ fn legalize_scope(entry: &ScopedPlacementIrEntry) -> ScopeLegalization {
 
     // Detect plane crossings: two distinct nets sharing a
     // non-reserved coord. Iteration order is `net_order` so the
-    // "first owner wins" choice is deterministic across runs.
+    // "first owner wins" choice and the identity of the "second net"
+    // recorded at each crossing coord are both deterministic across
+    // runs. The `(first, second)` pair is preserved so the crossing
+    // diagnostic can name the two nets responsible.
     let mut plane_owners: HashMap<CellCoord, NetRef> = HashMap::new();
-    let mut crossings: HashSet<CellCoord> = HashSet::new();
+    let mut crossings: HashMap<CellCoord, (NetRef, NetRef)> = HashMap::new();
     for net in &net_order {
         for coord in &wire_paths[net] {
             if reserved.contains(coord) {
@@ -231,8 +239,12 @@ fn legalize_scope(entry: &ScopedPlacementIrEntry) -> ScopeLegalization {
                 Some(existing) if existing == *net => {
                     // Same net's Steiner fanout — normal.
                 }
-                Some(_) => {
-                    crossings.insert(*coord);
+                Some(first) => {
+                    // First-crossing pair wins; a third net hitting
+                    // the same coord does not overwrite. Sufficient
+                    // for the v1 diagnostic which anchors on one
+                    // coord anyway.
+                    crossings.entry(*coord).or_insert((first, *net));
                 }
             }
         }
@@ -245,12 +257,16 @@ fn legalize_scope(entry: &ScopedPlacementIrEntry) -> ScopeLegalization {
     if !crossings.is_empty() && region.void < 2 {
         // Deterministic pick: smallest crossing coord by (x, z) so
         // the diagnostic anchor does not drift across runs.
-        let mut sorted: Vec<CellCoord> = crossings.iter().copied().collect();
-        sorted.sort_unstable_by_key(|c| (c.x, c.z));
+        let mut anchors: Vec<(CellCoord, (NetRef, NetRef))> =
+            crossings.iter().map(|(c, owners)| (*c, *owners)).collect();
+        anchors.sort_unstable_by_key(|(c, _)| (c.x, c.z, c.y));
+        let (anchor, anchor_owners) = anchors[0];
         return Err(crossing_congestion_diagnostic(
             entry,
+            &ir,
             &region,
-            sorted[0],
+            anchor,
+            anchor_owners,
             crossings.len(),
         ));
     }
@@ -266,9 +282,14 @@ fn legalize_scope(entry: &ScopedPlacementIrEntry) -> ScopeLegalization {
     )?;
 
     for (cell, buffers) in ir.cells.iter_mut().zip(buffer_coords_per_cell) {
-        debug_assert!(
+        // Loud in release too: the phase table on `PlacedCellNode`
+        // forbids a re-run of stage 4, and silently overwriting a
+        // populated `buffer_coords` would let a caller who chained
+        // `compile_crossing(&legalized.scoped)` produce a
+        // stale-but-plausible IR.
+        assert!(
             cell.buffer_coords.is_empty(),
-            "legalize_scope re-writing a PlacedCellNode whose buffer_coords is already {} entries — crossing legalization should run once per delayed IR",
+            "legalize_scope re-writing a PlacedCellNode whose buffer_coords is already {} entries — crossing legalization must run at most once per delayed IR",
             cell.buffer_coords.len(),
         );
         cell.buffer_coords = buffers;
@@ -281,17 +302,19 @@ fn legalize_scope(entry: &ScopedPlacementIrEntry) -> ScopeLegalization {
 /// source-to-sink L-shape and pick coords at
 /// `k * DUST_ATTENUATION_LIMIT` (`k = 1..=buffer_count`). A collision
 /// with a reserved coord, a plane crossing, or another buffer already
-/// placed on the plane escapes to `RouteLayer::Bridge` at `y = 1`; if
-/// the bridge slot is also taken (or `void < 2`), refuse with
-/// `E_BUFFER_COORD_COLLISION`. Split out of `legalize_scope` so the
-/// entry function stays under clippy's `too_many_lines` budget and
-/// the allocation strategy reads as a self-contained table.
+/// placed on the plane escapes to the first free `RouteLayer::Bridge`
+/// y-layer inside the reservation's `void=<N>` budget (`y in
+/// 1..void`); if every bridge y-layer at the candidate `(x, z)` is
+/// taken (or `void < 2` so no bridge layer exists at all), refuse
+/// with `E_BUFFER_COORD_COLLISION`. Split out of `legalize_scope` so
+/// the entry function stays under clippy's `too_many_lines` budget
+/// and the allocation strategy reads as a self-contained table.
 fn allocate_buffer_coords<F>(
     ir: &PlacementIr,
     entry: &ScopedPlacementIrEntry,
     region: &CircuitRegionReservation,
     cell_coords: &[CellCoord],
-    crossings: &HashSet<CellCoord>,
+    crossings: &HashMap<CellCoord, (NetRef, NetRef)>,
     reserved: &HashSet<CellCoord>,
     source_of_net: &F,
 ) -> Result<Vec<Vec<CellCoord>>, Diagnostic>
@@ -314,34 +337,47 @@ where
                 (segment - 1) / DUST_ATTENUATION_LIMIT
             };
             for k in 1..=buffer_count {
-                // `k * DUST_ATTENUATION_LIMIT` steps from the source.
-                // Saturating at the last path coord defends against
-                // an off-by-one in a hand-built IR whose segment
-                // disagrees with the derived path length; the delay
-                // pass's `MAX_ATTENUATION_SEGMENT` cap keeps this
-                // path short enough that the `usize` index cannot
-                // overflow in practice.
+                // `path.len() == segment + 1` and `k * DUST_ATTENUATION_LIMIT
+                // <= buffer_count * DUST_ATTENUATION_LIMIT <= segment - 1`,
+                // so `idx` is always a valid path index. Loud in
+                // release: a silent saturating fallback would place
+                // the buffer at the sink coord and let a caller-side
+                // bug (segment / buffer_count / path.len() drift)
+                // materialise a buffer at the cell body without any
+                // diagnostic.
                 let idx = (k as usize).saturating_mul(DUST_ATTENUATION_LIMIT as usize);
-                let candidate = *path
-                    .get(idx)
-                    .unwrap_or_else(|| path.last().expect("path always has >=1 coord"));
+                let candidate = *path.get(idx).unwrap_or_else(|| {
+                    panic!(
+                        "buffer index {idx} out of range (path.len()={}) for cell #{cell_index} driver — segment / buffer_count / path.len() invariant broken by caller-side hand-built IR",
+                        path.len(),
+                    )
+                });
                 let plane_taken = reserved.contains(&candidate)
-                    || crossings.contains(&candidate)
+                    || crossings.contains_key(&candidate)
                     || plane_buffers.contains(&candidate);
                 if !plane_taken {
                     plane_buffers.insert(candidate);
                     buffers_for_cell.push(candidate);
                     continue;
                 }
-                let bridge_candidate =
-                    CellCoord::with_layer(candidate.x, 1, candidate.z, RouteLayer::Bridge);
-                if region.void < 2 || bridge_buffers.contains(&bridge_candidate) {
-                    return Err(buffer_collision_diagnostic(
-                        entry, region, cell_index, candidate,
-                    ));
+                let mut escaped = None;
+                for y in 1..region.void {
+                    let bridge_candidate =
+                        CellCoord::with_layer(candidate.x, y, candidate.z, RouteLayer::Bridge);
+                    if !bridge_buffers.contains(&bridge_candidate) {
+                        bridge_buffers.insert(bridge_candidate);
+                        escaped = Some(bridge_candidate);
+                        break;
+                    }
                 }
-                bridge_buffers.insert(bridge_candidate);
-                buffers_for_cell.push(bridge_candidate);
+                match escaped {
+                    Some(bridge) => buffers_for_cell.push(bridge),
+                    None => {
+                        return Err(buffer_collision_diagnostic(
+                            entry, region, cell_index, candidate,
+                        ));
+                    }
+                }
             }
         }
         per_cell.push(buffers_for_cell);
@@ -383,11 +419,14 @@ fn net_ref_key(net: NetRef) -> (u8, u32) {
 }
 
 /// Manhattan Steiner tree over `{source} ∪ sinks`, rendered as the
-/// concatenation of every MST edge's L-shape path. Deterministic
-/// weight/index tie-break so a follow-up pass that consults this
-/// path for elbow selection has a single canonical order to slot
-/// into. Matches the routing pass's `route_net` algorithm; kept
-/// crate-local so the crossing pass reads standalone.
+/// concatenation of every MST edge's L-shape path. Kruskal on the
+/// complete Manhattan graph with `(weight, i, j)` tie-break gives a
+/// deterministic MST regardless of `HashMap` iteration order.
+/// Matches [`crate::routing::compile_routing`]'s per-net algorithm so
+/// the two passes see the same wire path for the same input; the
+/// helper is duplicated here rather than shared because merging the
+/// two would demand a common crate module, and the current copies
+/// are read-only from the routing side.
 fn net_wire_path(source: CellCoord, sinks: &[CellCoord]) -> Vec<CellCoord> {
     let mut terminals: Vec<CellCoord> = Vec::with_capacity(1 + sinks.len());
     terminals.push(source);
@@ -422,6 +461,8 @@ fn net_wire_path(source: CellCoord, sinks: &[CellCoord]) -> Vec<CellCoord> {
     path
 }
 
+/// Iterative path-compressed union-find over an index-keyed forest.
+/// Used by [`net_wire_path`] for Kruskal MST.
 fn union_find(parent: &mut [usize], x: usize) -> usize {
     let mut root = x;
     while parent[root] != root {
@@ -437,12 +478,11 @@ fn union_find(parent: &mut [usize], x: usize) -> usize {
 }
 
 /// One L-shape between two coords, returned as the ordered coord
-/// sequence including both endpoints. Axis order is
-/// x-then-z-then-y — the routing pass's regression story pins on this
-/// order, and any follow-up pass that picks the less-congested elbow
-/// per net can only firm this up because both L-shapes have identical
-/// Manhattan length by construction. Result length equals
-/// `manhattan(a, b) + 1`.
+/// sequence including both endpoints. Axis order is x-then-z-then-y,
+/// matching [`crate::routing::compile_routing`]'s draw so both passes
+/// see the same wire coords for the same terminal pair. Both L-shape
+/// orderings have identical Manhattan length; the axis order fixes a
+/// canonical choice. Result length equals `manhattan(a, b) + 1`.
 fn l_shape_path(a: CellCoord, b: CellCoord) -> Vec<CellCoord> {
     let mut path = Vec::with_capacity((manhattan(a, b) as usize).saturating_add(1));
     let mut cur = a;
@@ -464,14 +504,19 @@ fn l_shape_path(a: CellCoord, b: CellCoord) -> Vec<CellCoord> {
 
 fn crossing_congestion_diagnostic(
     entry: &ScopedPlacementIrEntry,
+    ir: &PlacementIr,
     reservation: &CircuitRegionReservation,
     anchor: CellCoord,
+    anchor_owners: (NetRef, NetRef),
     crossing_count: usize,
 ) -> Diagnostic {
+    let (first, second) = anchor_owners;
     let primary = format!(
-        "routed netlist for {kind} `{name}` has {crossing_count} plane crossing(s) (first at ({x},{y},{z})) but the `void={void}` reservation offers no bridge layer to escape to — bridges need at least y=1, which requires void>=2",
+        "routed netlist for {kind} `{name}` has {crossing_count} plane crossing(s), including {first_label} vs {second_label} at ({x},{y},{z}) — but the `void={void}` reservation offers no bridge layer to escape to (bridges need at least y=1, which requires void>=2)",
         kind = entry.kind.label(),
         name = entry.name,
+        first_label = net_label(first, ir),
+        second_label = net_label(second, ir),
         x = anchor.x,
         y = anchor.y,
         z = anchor.z,
@@ -487,6 +532,23 @@ fn crossing_congestion_diagnostic(
     );
     debug_assert_eq!(diag.severity, Severity::Error);
     diag
+}
+
+/// Human-facing label for a [`NetRef`] used inside diagnostic prose.
+/// Resolves `Input(i)` to the sensor's dotted `sig.<name>` when the
+/// scope carries one at that index, falling back to the raw `input pad
+/// #i` form for a hand-built IR whose input row is shorter than the
+/// synthesis path implies. Cell drivers surface as `cell #j` because
+/// the Netlist IR does not carry a source-level name for a synthesised
+/// gate.
+fn net_label(net: NetRef, ir: &PlacementIr) -> String {
+    match net {
+        NetRef::Input(i) => ir
+            .inputs
+            .get(i as usize)
+            .map_or_else(|| format!("input pad #{i}"), |input| input.name.to_string()),
+        NetRef::Cell(j) => format!("cell #{j}"),
+    }
 }
 
 fn buffer_collision_diagnostic(
@@ -766,7 +828,10 @@ mod tests {
         // Same fixture but with `void=2` — a bridge layer is
         // available, so the crossing legalizes silently and the
         // scope survives with cells intact. Buffer coords stay empty
-        // because every segment is under `DUST_ATTENUATION_LIMIT`.
+        // because every segment is under `DUST_ATTENUATION_LIMIT`
+        // (short segments do not need any buffer coord at all, and
+        // v1 does not lift the wire crossing itself onto Bridge —
+        // the crossing set is only used to steer buffer placement).
         let mut ir = PlacementIr::new(Edition::Java);
         ir.region = Some(reservation(5, 5, 2));
         ir.inputs.push(crate::netlist_ir::NetlistInput {
@@ -801,6 +866,194 @@ mod tests {
         );
         assert_eq!(legalized.scoped.scopes.len(), 1);
         assert_eq!(legalized.scoped.scopes[0].ir.cells.len(), 2);
+        // v1 does not lift the wire crossing onto Bridge — cells and
+        // buffers stay on Plane. Locked here so a change that grows
+        // wire-layer materialisation on the IR trips this test rather
+        // than silently reshaping the wire form.
+        for cell in &legalized.scoped.scopes[0].ir.cells {
+            assert_eq!(
+                cell.coord.layer,
+                RouteLayer::Plane,
+                "cell coord stays on plane; got {:?}",
+                cell.coord,
+            );
+            assert!(
+                cell.buffer_coords.is_empty(),
+                "short segments need no buffer coord; got {:?}",
+                cell.buffer_coords,
+            );
+        }
+    }
+
+    #[test]
+    fn crossing_diagnostic_names_both_conflicting_nets() {
+        // Same crossing fixture as the void=1 refusal, this time
+        // pinned to the primary text so a diagnostic-consumer can
+        // rely on the "left vs right at coord" shape. Uses the
+        // `NetlistInput.name` values `sig.a` / `sig.b` so the
+        // human-facing label resolution path is exercised.
+        let mut ir = PlacementIr::new(Edition::Java);
+        ir.region = Some(reservation(5, 5, 1));
+        ir.inputs.push(crate::netlist_ir::NetlistInput {
+            name: cairn_lang_core::ast::DottedRef::new("sig".into(), vec!["a".into()]),
+            span: Span::default(),
+        });
+        ir.inputs.push(crate::netlist_ir::NetlistInput {
+            name: cairn_lang_core::ast::DottedRef::new("sig".into(), vec!["b".into()]),
+            span: Span::default(),
+        });
+        ir.cells.push(placed_cell(
+            EditionCell::JavaRepeaterOr,
+            CellCoord::new(3, 0, 3),
+            vec![CellPortDriver {
+                port: PortName::A,
+                net: NetRef::Input(0),
+            }],
+        ));
+        ir.cells.push(placed_cell(
+            EditionCell::JavaRepeaterOr,
+            CellCoord::new(3, 0, 1),
+            vec![CellPortDriver {
+                port: PortName::A,
+                net: NetRef::Input(1),
+            }],
+        ));
+        let legalized = compile_crossing(&scoped(ScopeKind::Struct, "crossed", ir));
+        let diag = legalized
+            .diagnostics
+            .iter()
+            .find(|d| d.code == DiagnosticCode::CrossingCongestion)
+            .expect("crossing must fire");
+        assert!(
+            diag.primary.contains("sig.a"),
+            "primary must name the first net (sig.a): {}",
+            diag.primary,
+        );
+        assert!(
+            diag.primary.contains("sig.b"),
+            "primary must name the second net (sig.b): {}",
+            diag.primary,
+        );
+    }
+
+    #[test]
+    fn buffer_collision_fires_when_bridge_slot_taken() {
+        // Fan-out on Input(0) to three cells at x = 16, 17, 18. All
+        // three drivers compute their buffer candidate at (15,0,1)
+        // — the 15-step point of the shared prefix. With `void=2`
+        // the bridge has exactly one y-layer (y=1); the first
+        // buffer lands on plane, the second escapes to bridge y=1,
+        // and the third has nowhere left to go → refuse with
+        // `E_BUFFER_COORD_COLLISION`.
+        let mut ir = PlacementIr::new(Edition::Java);
+        ir.region = Some(reservation(20, 3, 2));
+        ir.inputs.push(crate::netlist_ir::NetlistInput {
+            name: cairn_lang_core::ast::DottedRef::new("sig".into(), vec!["a".into()]),
+            span: Span::default(),
+        });
+        for x in 16..19u32 {
+            ir.cells.push(placed_cell(
+                EditionCell::JavaRepeaterOr,
+                CellCoord::new(x, 0, 1),
+                vec![CellPortDriver {
+                    port: PortName::A,
+                    net: NetRef::Input(0),
+                }],
+            ));
+        }
+        let legalized = compile_crossing(&scoped(ScopeKind::Struct, "packed", ir));
+        assert!(
+            legalized
+                .diagnostics
+                .iter()
+                .any(|d| d.code == DiagnosticCode::BufferCoordCollision),
+            "third driver must trip E_BUFFER_COORD_COLLISION: {:?}",
+            legalized.diagnostics,
+        );
+        assert!(
+            legalized.scoped.scopes.is_empty(),
+            "failed scope must elide",
+        );
+    }
+
+    #[test]
+    fn bridge_escape_uses_next_free_y_layer() {
+        // Fan-out on Input(0): two cells at x=16 and x=17 both take
+        // their buffer coord at (15,0,1) — the 15-step point of the
+        // Input(0)-to-sink L-shape is the same for both because the
+        // shared prefix is 15 blocks long. The first cell's buffer
+        // lands on plane; the second's plane candidate is taken, so
+        // it escapes to Bridge at y=1 (first free bridge layer in
+        // the `void=3` budget).
+        let mut ir = PlacementIr::new(Edition::Java);
+        ir.region = Some(reservation(20, 3, 3));
+        ir.inputs.push(crate::netlist_ir::NetlistInput {
+            name: cairn_lang_core::ast::DottedRef::new("sig".into(), vec!["a".into()]),
+            span: Span::default(),
+        });
+        ir.cells.push(placed_cell(
+            EditionCell::JavaRepeaterOr,
+            CellCoord::new(16, 0, 1),
+            vec![CellPortDriver {
+                port: PortName::A,
+                net: NetRef::Input(0),
+            }],
+        ));
+        ir.cells.push(placed_cell(
+            EditionCell::JavaRepeaterOr,
+            CellCoord::new(17, 0, 1),
+            vec![CellPortDriver {
+                port: PortName::A,
+                net: NetRef::Input(0),
+            }],
+        ));
+        let legalized = compile_crossing(&scoped(ScopeKind::Struct, "escaped", ir));
+        assert!(
+            legalized.diagnostics.is_empty(),
+            "void=3 lets the second buffer escape: {:?}",
+            legalized.diagnostics,
+        );
+        let cells = &legalized.scoped.scopes[0].ir.cells;
+        assert_eq!(cells[0].buffer_coords.len(), 1);
+        assert_eq!(cells[1].buffer_coords.len(), 1);
+        assert_eq!(
+            cells[0].buffer_coords[0].layer,
+            RouteLayer::Plane,
+            "first buffer sits on plane",
+        );
+        assert_eq!(
+            cells[1].buffer_coords[0].layer,
+            RouteLayer::Bridge,
+            "second buffer escapes to bridge",
+        );
+        assert_eq!(
+            cells[1].buffer_coords[0].y, 1,
+            "bridge escape lands on first free y-layer (y=1)",
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "must run at most once per delayed IR")]
+    fn re_running_crossing_pass_panics_loudly() {
+        // Chaining `compile_crossing(&legalized.scoped)` is forbidden
+        // by the phase table on `PlacedCellNode`. Loud in release so
+        // a caller cannot silently double-populate `buffer_coords`.
+        let mut ir = PlacementIr::new(Edition::Java);
+        ir.region = Some(reservation(20, 3, 2));
+        ir.inputs.push(crate::netlist_ir::NetlistInput {
+            name: cairn_lang_core::ast::DottedRef::new("sig".into(), vec!["a".into()]),
+            span: Span::default(),
+        });
+        ir.cells.push(placed_cell(
+            EditionCell::JavaRepeaterOr,
+            CellCoord::new(16, 0, 1),
+            vec![CellPortDriver {
+                port: PortName::A,
+                net: NetRef::Input(0),
+            }],
+        ));
+        let first = compile_crossing(&scoped(ScopeKind::Struct, "twice", ir));
+        let _second = compile_crossing(&first.scoped);
     }
 
     #[test]

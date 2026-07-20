@@ -149,12 +149,16 @@ enum Command {
     /// repeater's `BUFFER_REPEATER_TICKS` contribution over every
     /// driver segment beyond the `DUST_ATTENUATION_LIMIT`;
     /// `--stage crossing` runs crossing legalization over the delayed
-    /// IR, escapes cross-net plane overlaps onto the pseudo-2.5D
-    /// `Bridge` / `Via` layers, and fills every cell's `buffer_coords`
-    /// with the concrete coord of each implicit buffer repeater. The
-    /// `--edition <java|bedrock>` flag is required in the `edition`,
-    /// `placement`, `route`, `delay`, and `crossing` modes and refused
-    /// otherwise (the earlier stages are edition-neutral by contract).
+    /// IR, refuses with `E_CROSSING_CONGESTION` when a cross-net
+    /// plane overlap cannot fit inside the `void=<N>` reservation,
+    /// and fills every cell's `buffer_coords` with the concrete
+    /// coord of each implicit buffer repeater (escaping to a
+    /// `RouteLayer::Bridge` y-layer whenever the plane candidate
+    /// collides with a cell / pad / plane crossing / earlier
+    /// buffer). The `--edition <java|bedrock>` flag is required in
+    /// the `edition`, `placement`, `route`, `delay`, and `crossing`
+    /// modes and refused otherwise (the earlier stages are
+    /// edition-neutral by contract).
     /// **Internal / experimental** — the shape of the output is not
     /// covered by the stable compatibility tier and may change at any time
     /// as the route / simulator stages land. Requires
@@ -231,16 +235,20 @@ enum SynthStage {
     /// Legalized Placement IR: crossing legalization over the delayed
     /// Placement IR against `--edition`. Stage 4 of `spec/redstone`
     /// §14.5's place-and-route pipeline. Detects wire coords two
-    /// distinct nets would otherwise share on the ground plane,
-    /// escapes them onto the pseudo-2.5D `Bridge` / `Via` layers of
-    /// the `circuit region=<label> void=<N>` reservation, and
-    /// materialises the concrete coord of every implicit buffer
-    /// repeater the delay pass counted into every cell's
-    /// `buffer_coords`. Refuses with `E_CROSSING_CONGESTION` when
-    /// `void < 2` leaves no bridge layer to escape a crossing to, and
-    /// with `E_BUFFER_COORD_COLLISION` when a required buffer coord
-    /// collides with a cell / pad / other buffer and cannot be
-    /// escaped onto the bridge layer either.
+    /// distinct nets would otherwise share on the ground plane
+    /// (refused with `E_CROSSING_CONGESTION` when the
+    /// `circuit region=<label> void=<N>` reservation offers no
+    /// y-layer to escape to) and materialises the concrete coord of
+    /// every implicit buffer repeater the delay pass counted into
+    /// every cell's `buffer_coords`. A buffer whose plane candidate
+    /// collides with a cell / pad / plane crossing / earlier buffer
+    /// escapes to the first free `RouteLayer::Bridge` y-layer inside
+    /// the `void=<N>` budget; if every bridge y-layer at that
+    /// `(x, z)` is also taken, refuses with
+    /// `E_BUFFER_COORD_COLLISION`. v1 does not lift the wire
+    /// crossing itself onto `Bridge` — the routed wire path is not
+    /// carried on the IR, and stage-5 block-array lowering re-runs
+    /// the routing algorithm to derive the crossings itself.
     Crossing,
 }
 
