@@ -90,6 +90,7 @@ use crate::netlist_ir::NetRef;
 use crate::placement_ir::{
     CellCoord, CircuitRegionReservation, PlacementIr, ScopedPlacementIr, ScopedPlacementIrEntry,
 };
+use crate::routing_geometry::{input_pad, manhattan, net_ref_key, net_wire_path, output_pad};
 
 /// Per-cell footprint used by the post-routing congestion budget.
 /// Re-exports [`crate::placement::CELL_FOOTPRINT`] so a scope that
@@ -272,7 +273,9 @@ fn route_scope(entry: &ScopedPlacementIrEntry) -> ScopeRouting {
             continue;
         }
         let source_coord = source_of_net(net);
-        route_net(source_coord, sinks, &mut occupancy);
+        for coord in net_wire_path(source_coord, sinks) {
+            occupancy.insert(coord);
+        }
     }
 
     attribute_wire_lengths(&mut ir, &cell_coords, &source_of_net);
@@ -327,118 +330,6 @@ where
         .collect();
     for (cell, len) in ir.cells.iter_mut().zip(wire_lengths) {
         cell.phase.route(len);
-    }
-}
-
-fn net_ref_key(net: NetRef) -> (u8, u32) {
-    match net {
-        NetRef::Input(i) => (0, i),
-        NetRef::Cell(j) => (1, j),
-    }
-}
-
-/// v1 input-pad coordinate: left edge (`x=0`), first service layer
-/// (`y=0`), z-axis increasing as the input index grows. Saturates at
-/// `depth-1` whenever the input count would push z past the region's
-/// z-extent (`inputs.len() + 1 > depth`); the resulting overlap is
-/// caught at seeding time and surfaces as `E_ROUTE_CONGESTION`
-/// rather than a silent misroute. Pinning the coordinate here is a
-/// v1 convention; once a subsequent PR needs pad coords outside
-/// routing, `input_pads` joins [`PlacementIr`] as a
-/// `#[non_exhaustive]`-safe field.
-pub(crate) fn input_pad(i: usize, region: &CircuitRegionReservation) -> CellCoord {
-    let raw = u32::try_from(i.saturating_add(1)).unwrap_or(u32::MAX);
-    let z = raw.min(region.depth.saturating_sub(1));
-    CellCoord::new(0, 0, z)
-}
-
-/// v1 output-pad coordinate: right edge (`x=width-1`), same
-/// saturating z-axis convention as [`input_pad`].
-pub(crate) fn output_pad(k: usize, region: &CircuitRegionReservation) -> CellCoord {
-    let raw = u32::try_from(k.saturating_add(1)).unwrap_or(u32::MAX);
-    let z = raw.min(region.depth.saturating_sub(1));
-    let x = region.width.saturating_sub(1);
-    CellCoord::new(x, 0, z)
-}
-
-pub(crate) fn manhattan(a: CellCoord, b: CellCoord) -> u32 {
-    let dx = a.x.max(b.x) - a.x.min(b.x);
-    let dy = a.y.max(b.y) - a.y.min(b.y);
-    let dz = a.z.max(b.z) - a.z.min(b.z);
-    dx.saturating_add(dy).saturating_add(dz)
-}
-
-fn route_net(source: CellCoord, sinks: &[CellCoord], occupancy: &mut HashSet<CellCoord>) {
-    // Terminal set = source ∪ sinks, deduplicated so a fanout net
-    // whose sinks include the source coordinate (a degenerate
-    // hand-built case) still produces a well-formed MST.
-    let mut terminals: Vec<CellCoord> = Vec::with_capacity(1 + sinks.len());
-    terminals.push(source);
-    for s in sinks {
-        if !terminals.contains(s) {
-            terminals.push(*s);
-        }
-    }
-    if terminals.len() < 2 {
-        occupancy.insert(source);
-        return;
-    }
-
-    // Complete-graph edge list, sorted by (weight, i, j) for
-    // deterministic MST regardless of HashSet iteration order.
-    let n = terminals.len();
-    let mut edges: Vec<(u32, usize, usize)> = Vec::with_capacity(n * (n - 1) / 2);
-    for i in 0..n {
-        for j in (i + 1)..n {
-            edges.push((manhattan(terminals[i], terminals[j]), i, j));
-        }
-    }
-    edges.sort_unstable();
-
-    let mut parent: Vec<usize> = (0..n).collect();
-    for (_, i, j) in edges {
-        let ri = union_find(&mut parent, i);
-        let rj = union_find(&mut parent, j);
-        if ri == rj {
-            continue;
-        }
-        parent[ri] = rj;
-        draw_l_shape(terminals[i], terminals[j], occupancy);
-    }
-}
-
-fn union_find(parent: &mut [usize], x: usize) -> usize {
-    let mut root = x;
-    while parent[root] != root {
-        root = parent[root];
-    }
-    let mut cur = x;
-    while parent[cur] != root {
-        let next = parent[cur];
-        parent[cur] = root;
-        cur = next;
-    }
-    root
-}
-
-fn draw_l_shape(a: CellCoord, b: CellCoord, occupancy: &mut HashSet<CellCoord>) {
-    // Deterministic axis order: x, then z, then y. The routing pass's
-    // regression story pins on this order — a follow-up that picks
-    // the less-congested elbow per net can only firm this up because
-    // both L-shapes have identical Manhattan length by construction.
-    let mut cur = a;
-    occupancy.insert(cur);
-    while cur.x != b.x {
-        cur.x = if cur.x < b.x { cur.x + 1 } else { cur.x - 1 };
-        occupancy.insert(cur);
-    }
-    while cur.z != b.z {
-        cur.z = if cur.z < b.z { cur.z + 1 } else { cur.z - 1 };
-        occupancy.insert(cur);
-    }
-    while cur.y != b.y {
-        cur.y = if cur.y < b.y { cur.y + 1 } else { cur.y - 1 };
-        occupancy.insert(cur);
     }
 }
 
