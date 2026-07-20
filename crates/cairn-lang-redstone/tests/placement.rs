@@ -87,11 +87,11 @@ fn redstone_door_java_places_or_cell_at_origin() {
     assert_eq!(cell.coord.y, 0);
     assert_eq!(cell.coord.z, 0);
     assert!(
-        cell.wire_length.is_none(),
+        cell.wire_length().is_none(),
         "wire_length is a follow-up pass output",
     );
     assert!(
-        cell.delay_ticks.is_none(),
+        cell.delay_ticks().is_none(),
         "delay_ticks is a follow-up pass output",
     );
 }

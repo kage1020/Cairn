@@ -10,6 +10,27 @@ and is a separate axis from the Minecraft target version.
 
 ## [Unreleased]
 
+### Changed
+
+- `PlacedCellNode`'s three progressive fields (`wire_length`,
+  `delay_ticks`, `buffer_coords`) collapse into a single
+  `phase: PlacementPhase` enum whose four variants (`Unrouted`,
+  `Routed`, `Delayed`, `Legalized`) correspond one-to-one with the
+  place-and-route pipeline stages. Illegal states such as
+  "carries `delay_ticks` but no `wire_length`" or "populated
+  `buffer_coords` before delay ran" are unrepresentable — each
+  stage transition is expressed by `PlacementPhase::route` /
+  `delay` / `legalize`, which pattern-match the current variant and
+  panic on any out-of-order call (replacing the earlier scattered
+  `debug_assert!` / release-`assert!` guards on the three passes).
+  Read-only accessor methods on `PlacedCellNode`
+  (`wire_length()` / `delay_ticks()` / `buffer_coords()`) project
+  the phase back onto the flat option / slice shape callers used to
+  read, and a hand-written `Serialize` impl flattens the phase back
+  onto `{cell, drivers, coord[, wire_length][, delay_ticks][, buffer_coords]}`
+  so the JSON wire form is byte-identical to earlier revisions —
+  no consumer sees a schema change.
+
 ### Added
 
 - Redstone crossing legalization + `cairn synth --stage crossing

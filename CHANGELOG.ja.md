@@ -12,6 +12,26 @@
 
 ## [Unreleased]
 
+### 変更
+
+- `PlacedCellNode` の 3 つの進化フィールド (`wire_length` /
+  `delay_ticks` / `buffer_coords`) を単一の `phase: PlacementPhase`
+  enum に集約した。`Unrouted` / `Routed` / `Delayed` / `Legalized`
+  の 4 variants が place-and-route パイプラインの各ステージに
+  一対一で対応し、「`delay_ticks` は付いているが `wire_length`
+  が無い」「delay 前なのに `buffer_coords` に値がある」といった
+  不正状態を型で表現不能にした。ステージ間の遷移は
+  `PlacementPhase::route` / `delay` / `legalize` で表現し、
+  各メソッドは現在の variant を pattern match して不正な呼び出し
+  順で panic するため、これまで 3 pass に散在していた
+  `debug_assert!` / release-`assert!` のガードを置き換える。
+  `PlacedCellNode` の read 用アクセッサ (`wire_length()` /
+  `delay_ticks()` / `buffer_coords()`) は旧フィールド名と等価な
+  Option / slice 形状を返し、手書き `Serialize` 実装が phase を
+  `{cell, drivers, coord[, wire_length][, delay_ticks][, buffer_coords]}`
+  にフラット化するため JSON wire 形式は以前のリビジョンと byte
+  等価 — 下流コンシューマからはスキーマ変更に見えない。
+
 ### 追加
 
 - Redstone crossing legalization と `cairn synth --stage crossing

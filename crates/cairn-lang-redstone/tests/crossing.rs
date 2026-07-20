@@ -93,9 +93,9 @@ fn redstone_door_java_carries_no_buffers() {
         .first()
         .expect("gatehouse must have a placed cell");
     assert!(
-        cell.buffer_coords.is_empty(),
+        cell.buffer_coords().is_empty(),
         "short segments need no buffer, got {:?}",
-        cell.buffer_coords,
+        cell.buffer_coords(),
     );
 }
 
@@ -125,11 +125,11 @@ fn redstone_door_bedrock_carries_no_buffers() {
         .first()
         .expect("gatehouse must have a placed cell");
     assert_eq!(
-        cell.delay_ticks,
+        cell.delay_ticks(),
         Some(0),
         "delay ticks preserved from stage 3",
     );
-    assert!(cell.buffer_coords.is_empty(), "no buffer expected");
+    assert!(cell.buffer_coords().is_empty(), "no buffer expected");
 }
 
 /// AC3 — empty module (no scopes with redstone) passes through

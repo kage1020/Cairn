@@ -304,12 +304,7 @@ where
         })
         .collect();
     for (cell, ticks) in ir.cells.iter_mut().zip(delay_ticks) {
-        debug_assert!(
-            cell.delay_ticks.is_none(),
-            "delay_scope re-writing a PlacedCellNode whose delay_ticks is already Some({:?}) — delay insertion should run once per routed IR",
-            cell.delay_ticks,
-        );
-        cell.delay_ticks = Some(ticks);
+        cell.phase.delay(ticks);
     }
 }
 
@@ -443,8 +438,8 @@ mod tests {
     use crate::logic_ir::ScopeKind;
     use crate::netlist_ir::{CellPortDriver, NetRef, PortName};
     use crate::placement_ir::{
-        CellCoord, CircuitRegionReservation, PlacedCellNode, PlacementIr, ScopedPlacementIr,
-        ScopedPlacementIrEntry,
+        CellCoord, CircuitRegionReservation, PlacedCellNode, PlacementIr, PlacementPhase,
+        ScopedPlacementIr, ScopedPlacementIrEntry,
     };
 
     fn reservation(width: u32, depth: u32, void: u32) -> CircuitRegionReservation {
@@ -476,9 +471,7 @@ mod tests {
             cell,
             drivers,
             coord,
-            wire_length: Some(0),
-            delay_ticks: None,
-            buffer_coords: Vec::new(),
+            phase: PlacementPhase::Routed { wire_length: 0 },
             span: Span::default(),
         }
     }

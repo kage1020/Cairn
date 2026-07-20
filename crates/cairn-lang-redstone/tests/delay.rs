@@ -88,12 +88,12 @@ fn redstone_door_java_delay_ticks_equal_base_repeater_delay() {
         .first()
         .expect("gatehouse must have a placed cell");
     assert_eq!(
-        cell.delay_ticks,
+        cell.delay_ticks(),
         Some(1),
         "JavaRepeaterOr base = 1 tick, both driver segments ≤ 15 → 0 buffers",
     );
     assert_eq!(
-        cell.wire_length,
+        cell.wire_length(),
         Some(3),
         "routing's wire_length must survive the delay pass verbatim",
     );
@@ -128,12 +128,12 @@ fn redstone_door_bedrock_delay_ticks_are_zero() {
         .first()
         .expect("gatehouse must have a placed cell");
     assert_eq!(
-        cell.delay_ticks,
+        cell.delay_ticks(),
         Some(0),
         "BedrockTorchOr is a bare dust merge → 0 cell tick + 0 buffers",
     );
     assert_eq!(
-        cell.wire_length,
+        cell.wire_length(),
         Some(3),
         "wire_length is edition-independent by construction",
     );
@@ -183,19 +183,19 @@ struct sim size=7x5
         .expect("sim scope");
     assert_eq!(entry.ir.cells.len(), 3);
     // JavaComparatorAnd: base 1, segments [1, 2] → 0 buffers.
-    assert_eq!(entry.ir.cells[0].delay_ticks, Some(1));
+    assert_eq!(entry.ir.cells[0].delay_ticks(), Some(1));
     // JavaRepeaterOr: base 1, segments [2, 3] → 0 buffers.
-    assert_eq!(entry.ir.cells[1].delay_ticks, Some(1));
+    assert_eq!(entry.ir.cells[1].delay_ticks(), Some(1));
     // JavaComparatorAnd: base 1, cell-to-cell segments [2, 1] → 0 buffers.
-    assert_eq!(entry.ir.cells[2].delay_ticks, Some(1));
+    assert_eq!(entry.ir.cells[2].delay_ticks(), Some(1));
     // `wire_length` from routing must be preserved verbatim on every
     // cell (locked separately by the byte-identical JSON regression
     // below, but pinned per-cell here so a divergent field write in
     // `attribute_delay_ticks` trips this test rather than the JSON
     // one).
-    assert_eq!(entry.ir.cells[0].wire_length, Some(3));
-    assert_eq!(entry.ir.cells[1].wire_length, Some(5));
-    assert_eq!(entry.ir.cells[2].wire_length, Some(3));
+    assert_eq!(entry.ir.cells[0].wire_length(), Some(3));
+    assert_eq!(entry.ir.cells[1].wire_length(), Some(5));
+    assert_eq!(entry.ir.cells[2].wire_length(), Some(3));
 }
 
 /// AC4 — a scope whose routed output-pad segment exceeds
@@ -354,7 +354,7 @@ struct chain size=20x5
     ];
     for (i, cell) in entry.ir.cells.iter().enumerate() {
         assert_eq!(
-            cell.delay_ticks,
+            cell.delay_ticks(),
             Some(expected[i]),
             "cell[{i}]: expected delay_ticks = {}",
             expected[i],
@@ -363,8 +363,8 @@ struct chain size=20x5
     // The chain must exercise both bands of the delay model — base
     // alone (i ≤ 13) and base + implicit buffer (i ≥ 14) — otherwise
     // shrinking the fixture would silently lose the buffer path.
-    assert!(entry.ir.cells.iter().any(|c| c.delay_ticks == Some(1)));
-    assert!(entry.ir.cells.iter().any(|c| c.delay_ticks == Some(2)));
+    assert!(entry.ir.cells.iter().any(|c| c.delay_ticks() == Some(1)));
+    assert!(entry.ir.cells.iter().any(|c| c.delay_ticks() == Some(2)));
 }
 
 /// `AC5b` — `sig.and_ab = sig.a and sig.b` on Bedrock lowers to
@@ -402,7 +402,7 @@ struct band size=5x5
     assert_eq!(entry.ir.cells.len(), 1);
     assert_eq!(entry.ir.cells[0].cell.edition(), Edition::Bedrock);
     assert_eq!(
-        entry.ir.cells[0].delay_ticks,
+        entry.ir.cells[0].delay_ticks(),
         Some(2),
         "BedrockTorchAnd base_delay must be 2 ticks",
     );
@@ -441,7 +441,7 @@ fn max_attenuation_segment_boundary_at_256_is_inclusive() {
         .iter()
         .find(|e| e.name == "band")
         .expect("band scope");
-    assert!(entry.ir.cells[0].delay_ticks.is_some());
+    assert!(entry.ir.cells[0].delay_ticks().is_some());
 }
 
 #[test]
@@ -627,7 +627,8 @@ struct inv size=5x5
     assert_eq!(j.ir.cells.len(), 1);
     assert_eq!(b.ir.cells.len(), 1);
     assert_eq!(
-        j.ir.cells[0].delay_ticks, b.ir.cells[0].delay_ticks,
+        j.ir.cells[0].delay_ticks(),
+        b.ir.cells[0].delay_ticks(),
         "InverterTorch base_delay is identical on both editions → delay_ticks must match",
     );
     assert_ne!(
@@ -673,7 +674,7 @@ struct wide_pack size=300x5
         .find(|e| e.name == "alpha")
         .expect("alpha scope survives delay");
     assert!(
-        alpha.ir.cells.iter().all(|c| c.delay_ticks.is_some()),
+        alpha.ir.cells.iter().all(|c| c.delay_ticks().is_some()),
         "every alpha cell must carry a computed delay_ticks",
     );
 

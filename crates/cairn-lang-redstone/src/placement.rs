@@ -42,7 +42,8 @@ use crate::diagnostic::{Diagnostic, DiagnosticCode};
 use crate::edition_netlist_ir::{EditionNetlistIr, ScopedEditionNetlistIr};
 use crate::logic_ir::ScopeKind;
 use crate::placement_ir::{
-    CellCoord, CircuitRegionReservation, PlacedCellNode, PlacementIr, ScopedPlacementIr,
+    CellCoord, CircuitRegionReservation, PlacedCellNode, PlacementIr, PlacementPhase,
+    ScopedPlacementIr,
 };
 
 /// Per-cell footprint used by the v1 congestion estimate. Four blocks
@@ -164,9 +165,7 @@ fn compile_scope(
             cell: source_cell.cell,
             drivers: source_cell.drivers.clone(),
             coord: CellCoord::new(x, 0, 0),
-            wire_length: None,
-            delay_ticks: None,
-            buffer_coords: Vec::new(),
+            phase: PlacementPhase::Unrouted,
             span: source_cell.span.clone(),
         });
     }
