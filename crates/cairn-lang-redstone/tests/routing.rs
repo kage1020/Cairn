@@ -127,7 +127,7 @@ fn redstone_door_bedrock_matches_java_wire_length() {
 /// - cell[1] `sig.or_ab  = sig.a or sig.b`:  same source pair,
 ///   different cell coord: `M((0,0,1)→(1,0,0)) + M((0,0,2)→(1,0,0))
 ///   = 2 + 3 = 5`. This is the L-shape case (dx=1, dz≥1) that the
-///   `draw_l_shape` axis order regression would otherwise sneak past.
+///   `l_shape_path` axis order regression would otherwise sneak past.
 /// - cell[2] `sig.combined = sig.and_ab and sig.or_ab`: cell-to-cell
 ///   drivers: `M((0,0,0)→(2,0,0)) + M((1,0,0)→(2,0,0)) = 2 + 1 = 3`.
 ///

@@ -64,7 +64,7 @@ use crate::netlist_ir::NetRef;
 use crate::placement_ir::{
     CellCoord, CircuitRegionReservation, PlacementIr, ScopedPlacementIr, ScopedPlacementIrEntry,
 };
-use crate::routing::{input_pad, manhattan, output_pad};
+use crate::routing_geometry::{input_pad, manhattan, output_pad};
 
 /// Signal-attenuation ceiling per dust segment (`spec/redstone` §14.5
 /// "signal attenuation limit of 15"). A dust source starts at strength
