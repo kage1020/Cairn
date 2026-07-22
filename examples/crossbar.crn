@@ -8,9 +8,8 @@
 # — genuine crossing coords that the delayed→legalized crossing pass
 # has to fold onto the bridge void.
 #
-# Kept intentionally minimal so the wire form pinned by the
-# byte-identical integration test in `crates/cairn-lang-redstone/
-# tests/crossing.rs` reads at a glance.
+# Kept intentionally minimal so the wire form pinned by the redstone
+# crate's byte-identity crossing integration test reads at a glance.
 
 theme cross:
   slot wall -> @oak_planks

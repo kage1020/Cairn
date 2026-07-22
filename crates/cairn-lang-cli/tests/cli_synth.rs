@@ -800,14 +800,18 @@ fn cli_synth_stage_crossing_java_legalizes_or_cell_scope() {
         "java",
         path.to_str().unwrap(),
     ]);
+    let stderr = String::from_utf8_lossy(&out.stderr).into_owned();
+    assert!(out.status.success(), "expected exit 0, stderr={stderr}");
     assert!(
-        out.status.success(),
-        "expected exit 0, stderr={}",
-        String::from_utf8_lossy(&out.stderr),
+        stderr.is_empty(),
+        "a clean fixture must not spill diagnostics on stderr; a future \
+         deprecation notice would otherwise reach users silently. Got: {stderr}",
     );
-    let stdout = String::from_utf8(out.stdout).expect("utf-8");
-    let value: serde_json::Value = serde_json::from_str(&stdout)
-        .unwrap_or_else(|err| panic!("stdout should parse as JSON: {err}\n{stdout}"));
+    let stdout = String::from_utf8(out.stdout)
+        .unwrap_or_else(|err| panic!("stdout should be utf-8: {err}\nstderr={stderr}"));
+    let value: serde_json::Value = serde_json::from_str(&stdout).unwrap_or_else(|err| {
+        panic!("stdout should parse as JSON: {err}\nstdout={stdout}\nstderr={stderr}")
+    });
     let gatehouse = value
         .as_array()
         .and_then(|s| s.iter().find(|s| s["name"] == "gatehouse"))
@@ -844,14 +848,18 @@ fn cli_synth_stage_crossing_bedrock_legalizes_or_cell_scope() {
         "bedrock",
         path.to_str().unwrap(),
     ]);
+    let stderr = String::from_utf8_lossy(&out.stderr).into_owned();
+    assert!(out.status.success(), "expected exit 0, stderr={stderr}");
     assert!(
-        out.status.success(),
-        "expected exit 0, stderr={}",
-        String::from_utf8_lossy(&out.stderr),
+        stderr.is_empty(),
+        "a clean fixture must not spill diagnostics on stderr; a future \
+         deprecation notice would otherwise reach users silently. Got: {stderr}",
     );
-    let stdout = String::from_utf8(out.stdout).expect("utf-8");
-    let value: serde_json::Value = serde_json::from_str(&stdout)
-        .unwrap_or_else(|err| panic!("stdout should parse as JSON: {err}\n{stdout}"));
+    let stdout = String::from_utf8(out.stdout)
+        .unwrap_or_else(|err| panic!("stdout should be utf-8: {err}\nstderr={stderr}"));
+    let value: serde_json::Value = serde_json::from_str(&stdout).unwrap_or_else(|err| {
+        panic!("stdout should parse as JSON: {err}\nstdout={stdout}\nstderr={stderr}")
+    });
     let gatehouse = value
         .as_array()
         .and_then(|s| s.iter().find(|s| s["name"] == "gatehouse"))

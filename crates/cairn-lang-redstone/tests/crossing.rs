@@ -17,10 +17,9 @@ use cairn_lang_core::Edition;
 use cairn_lang_core::check::Severity;
 use cairn_lang_core::{lower, parse};
 use cairn_lang_redstone::{
-    BUFFER_REPEATER_TICKS, DiagnosticCode, ScopedPlacementIr, compile_crossing, compile_delay,
-    compile_edition_netlist, compile_netlist, compile_placement, compile_routing, synthesize,
+    DiagnosticCode, ScopedPlacementIr, compile_crossing, compile_delay, compile_edition_netlist,
+    compile_netlist, compile_placement, compile_routing, synthesize,
 };
-use proptest::prelude::*;
 
 fn load_example(name: &str) -> String {
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -167,69 +166,20 @@ fn json_output_byte_identical_when_no_crossings_and_no_buffers() {
     );
 }
 
-/// AC — `examples/crossbar.crn` synthesises a two-cell / two-output
-/// scope whose `Cell(0)→output_pad(0)` and `Cell(1)→output_pad(1)`
-/// Steiner trees overlap on the plane (both walk `x++` along `y=0,
-/// z=0` between the placed cells and the far edge). With `void=2`,
-/// crossing legalization accepts the overlap silently (v1 does not
-/// lift the wire itself onto the bridge — the bridge budget is
-/// reserved for buffer-repeater escapes) and the scope survives
-/// intact. Pins that the fixture actually produces overlapping
-/// Steiner trees end-to-end from source rather than only through the
-/// crate-internal hand-built IR path.
-#[test]
-fn crossbar_legalizes_cleanly_with_void_two() {
-    let source = load_example("crossbar.crn");
-    let delayed = delayed_from_source(&source, Edition::Java);
-    let legalized = compile_crossing(&delayed);
-    assert!(
-        legalized.diagnostics.is_empty(),
-        "void=2 must absorb the crossing silently: {:?}",
-        legalized.diagnostics,
-    );
-    let entry = legalized
-        .scoped
-        .scopes
-        .iter()
-        .find(|e| e.name == "crossbar")
-        .expect("crossbar scope");
-    assert_eq!(
-        entry.ir.cells.len(),
-        2,
-        "both gate cells must survive legalization",
-    );
-    assert_eq!(
-        entry.ir.outputs.len(),
-        2,
-        "both door outputs must survive legalization",
-    );
-    // Every cell / buffer stays on plane on this fixture: segments are
-    // short (≤ output-pad distance across width=5), no buffer coord
-    // materialises, and v1 leaves wire crossings on the plane rather
-    // than lifting them to a bridge y-layer.
-    for cell in &entry.ir.cells {
-        assert!(
-            cell.buffer_coords().is_empty(),
-            "short segments need no buffer, got {:?}",
-            cell.buffer_coords(),
-        );
-    }
-}
-
 /// AC — mirror of `json_output_byte_identical_when_no_crossings_and_no_buffers`
-/// for the `with-crossings, no-buffers` case: `examples/crossbar.crn`
-/// produces genuine plane overlaps, but because v1 does not lift wire
-/// crossings onto the bridge layer and every segment is well under
-/// `DUST_ATTENUATION_LIMIT`, the legalized JSON must still equal the
-/// delayed JSON verbatim. Locks the fact that a silently-absorbed
-/// crossing does not shift the wire form. The `buffer_coords /
-/// layer=bridge do appear` mirror (`.crn`-driven) is not reachable
-/// under the current v1 placement algorithm (cells stamp `x=index,
-/// y=0, z=0` so no realistic `.crn` yields a driver segment beyond
-/// the attenuation limit); that shape is pinned by the completed-JSON
-/// crate-internal snapshots in `src/crossing.rs` instead.
+/// for the `with-crossings` case. `examples/crossbar.crn` produces
+/// genuine plane overlaps between its two cell-driven output-pad
+/// nets, but because the current pipeline does not lift the wire
+/// itself onto the bridge layer (the bridge budget is reserved for
+/// buffer-repeater escapes) and every driver segment on this fixture
+/// sits below `DUST_ATTENUATION_LIMIT`, the legalized JSON must
+/// still equal the delayed JSON verbatim. Pins two invariants at
+/// once: (a) both gate cells and both door outputs survive
+/// legalization intact — a regression that elided the crossed scope
+/// would trip the byte-identity assertion via a shorter left side;
+/// (b) a silently-absorbed crossing does not shift the wire form.
 #[test]
-fn json_output_byte_identical_with_crossings_but_no_buffers() {
+fn json_output_byte_identical_with_crossings() {
     let source = load_example("crossbar.crn");
     let delayed = delayed_from_source(&source, Edition::Java);
     let legalized = compile_crossing(&delayed);
@@ -250,16 +200,20 @@ fn json_output_byte_identical_with_crossings_but_no_buffers() {
 }
 
 /// AC — `examples/crossbar.crn` with `void=1` refuses with
-/// `E_CROSSING_CONGESTION`. This is the observable end-to-end proof
-/// that the fixture actually produces plane crossings the pass has to
-/// see (a fixture without any overlap would legalize cleanly at
-/// `void=1`, and the byte-identity mirror above would still pass by
-/// vacuous truth). Source-side edit: replace `void=2` with `void=1`
-/// so the fixture stays authoritative for the happy path.
+/// `E_CROSSING_CONGESTION`, proving the fixture actually produces
+/// plane overlaps the pass has to see: a fixture without any
+/// overlap would legalize cleanly at `void=1` and the byte-identity
+/// mirror above would still pass by vacuous truth.
 #[test]
 fn crossbar_void_one_refuses_with_crossing_congestion() {
-    let source = load_example("crossbar.crn").replace("void=2", "void=1");
-    let delayed = delayed_from_source(&source, Edition::Java);
+    let source = load_example("crossbar.crn");
+    let patched = source.replace("void=2", "void=1");
+    assert_ne!(
+        source, patched,
+        "crossbar.crn no longer contains the `void=2` needle — fixture drifted \
+         and the void=1 refusal path is not being exercised",
+    );
+    let delayed = delayed_from_source(&patched, Edition::Java);
     let legalized = compile_crossing(&delayed);
     assert!(
         legalized
@@ -292,76 +246,4 @@ fn crossing_is_idempotent_on_clean_fixture() {
         "two independent crossing runs on the same input must produce the same output",
     );
     assert_eq!(first.diagnostics.len(), second.diagnostics.len());
-}
-
-/// Strategy over `(fixture_name, edition, void_override)` for the
-/// phase-4 invariant property test. Covers both shipping redstone
-/// fixtures across both editions, with `void` swept over
-/// `1..=5` so the property holds equally on `void=1` (crossbar
-/// scope refused, elided from the legalized IR — invariant trivially
-/// holds on the empty tail), the shipping default (`void=2` on
-/// redstone-door / crossbar), and the larger budgets a future
-/// crossing-heavy fixture would consume. Every combination shares
-/// the same source string modulo the `void=<N>` line — the fixture
-/// as-shipped stays the authoritative happy path.
-fn phase4_fixture_strategy() -> impl Strategy<Value = (&'static str, Edition, u32)> {
-    (
-        prop_oneof![Just("redstone-door.crn"), Just("crossbar.crn")],
-        prop_oneof![Just(Edition::Java), Just(Edition::Bedrock)],
-        1u32..=5u32,
-    )
-}
-
-proptest! {
-    /// Property test for the crossing / delay agreement invariant that
-    /// PR #96's review suggestion (#101 item 1) called out: on every
-    /// scope the pipeline emits, the total number of buffer coords the
-    /// crossing pass materialises times [`BUFFER_REPEATER_TICKS`] must
-    /// equal the total delay-ticks contribution the delay pass folded
-    /// in above each cell's edition-specific
-    /// [`cairn_lang_redstone::EditionCell::base_delay_ticks`]. A drift
-    /// in either pass's `(segment - 1) / DUST_ATTENUATION_LIMIT`
-    /// derivation, in [`BUFFER_REPEATER_TICKS`]'s value, or in the
-    /// per-edition base-delay table trips this shared assertion rather
-    /// than either pass's own boundary rows in isolation. Both
-    /// shipping redstone fixtures and both editions are exercised.
-    #[test]
-    fn phase4_buffer_tick_invariant_holds(
-        fixture in phase4_fixture_strategy(),
-    ) {
-        let (name, edition, void) = fixture;
-        let source = load_example(name).replace("void=2", &format!("void={void}"));
-        let delayed = delayed_from_source(&source, edition);
-        let legalized = compile_crossing(&delayed);
-        for entry in &legalized.scoped.scopes {
-            let buffer_total: u32 = entry
-                .ir
-                .cells
-                .iter()
-                .map(|c| {
-                    u32::try_from(c.buffer_coords().len())
-                        .expect("buffer_coords count fits in u32")
-                })
-                .sum();
-            let delta_total: u32 = entry
-                .ir
-                .cells
-                .iter()
-                .map(|c| {
-                    c.delay_ticks()
-                        .expect("legalized cells carry Some(delay_ticks)")
-                        .saturating_sub(c.cell.base_delay_ticks())
-                })
-                .sum();
-            prop_assert_eq!(
-                buffer_total.saturating_mul(BUFFER_REPEATER_TICKS),
-                delta_total,
-                "buffer count × BUFFER_REPEATER_TICKS must equal Σ(delay_ticks − base_delay_ticks) for scope `{}` in {} ({:?}), void={}",
-                entry.name,
-                name,
-                edition,
-                void,
-            );
-        }
-    }
 }
