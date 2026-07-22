@@ -68,7 +68,7 @@ use crate::delay::DUST_ATTENUATION_LIMIT;
 use crate::diagnostic::{Diagnostic, DiagnosticCode};
 use crate::netlist_ir::NetRef;
 use crate::placement_ir::{
-    CellCoord, CircuitRegionReservation, PlacementIr, RouteLayer, ScopedPlacementIr,
+    BufferCoord, CellCoord, CircuitRegionReservation, PlacementIr, RouteLayer, ScopedPlacementIr,
     ScopedPlacementIrEntry,
 };
 use crate::routing_geometry::{
@@ -314,16 +314,16 @@ fn allocate_buffer_coords<F>(
     crossings: &HashMap<CellCoord, (NetRef, NetRef)>,
     reserved: &HashSet<CellCoord>,
     source_of_net: &F,
-) -> Result<Vec<Vec<CellCoord>>, Diagnostic>
+) -> Result<Vec<Vec<BufferCoord>>, Diagnostic>
 where
     F: Fn(NetRef) -> CellCoord,
 {
     let mut plane_buffers: HashSet<CellCoord> = HashSet::new();
     let mut bridge_buffers: HashSet<CellCoord> = HashSet::new();
-    let mut per_cell: Vec<Vec<CellCoord>> = Vec::with_capacity(ir.cells.len());
+    let mut per_cell: Vec<Vec<BufferCoord>> = Vec::with_capacity(ir.cells.len());
     for (cell_index, cell) in ir.cells.iter().enumerate() {
         let sink = cell_coords[cell_index];
-        let mut buffers_for_cell: Vec<CellCoord> = Vec::new();
+        let mut buffers_for_cell: Vec<BufferCoord> = Vec::new();
         for driver in &cell.drivers {
             let src = source_of_net(driver.net);
             let path = l_shape_path(src, sink);
@@ -354,7 +354,7 @@ where
                     || plane_buffers.contains(&candidate);
                 if !plane_taken {
                     plane_buffers.insert(candidate);
-                    buffers_for_cell.push(candidate);
+                    buffers_for_cell.push(BufferCoord::new(driver.port, candidate));
                     continue;
                 }
                 let mut escaped = None;
@@ -368,7 +368,7 @@ where
                     }
                 }
                 match escaped {
-                    Some(bridge) => buffers_for_cell.push(bridge),
+                    Some(bridge) => buffers_for_cell.push(BufferCoord::new(driver.port, bridge)),
                     None => {
                         return Err(buffer_collision_diagnostic(
                             entry, region, cell_index, candidate,
@@ -667,9 +667,14 @@ mod tests {
             cell.buffer_coords(),
         );
         assert_eq!(
-            cell.buffer_coords()[0].layer,
+            cell.buffer_coords()[0].coord.layer,
             RouteLayer::Plane,
             "no collision → buffer stays on plane",
+        );
+        assert_eq!(
+            cell.buffer_coords()[0].port,
+            PortName::A,
+            "buffer carries its driver port for stage-5 voxel lowering",
         );
         // Pins the `PlacedCellNode` `Serialize` impl's 6-field path
         // (cell + drivers + coord + wire_length + delay_ticks +
@@ -682,7 +687,9 @@ mod tests {
         let json = serde_json::to_string(&legalized.scoped)
             .expect("legalized scoped IR must serialise cleanly");
         assert!(
-            json.contains("\"buffer_coords\":[{\"x\":15,\"y\":0,\"z\":1}]"),
+            json.contains(
+                "\"buffer_coords\":[{\"port\":\"a\",\"coord\":{\"x\":15,\"y\":0,\"z\":1}}]"
+            ),
             "expected buffer_coords entry to appear in JSON verbatim, got {json}",
         );
     }
@@ -935,19 +942,24 @@ mod tests {
         assert_eq!(cells[0].buffer_coords().len(), 1);
         assert_eq!(cells[1].buffer_coords().len(), 1);
         assert_eq!(
-            cells[0].buffer_coords()[0].layer,
+            cells[0].buffer_coords()[0].coord.layer,
             RouteLayer::Plane,
             "first buffer sits on plane",
         );
         assert_eq!(
-            cells[1].buffer_coords()[0].layer,
+            cells[1].buffer_coords()[0].coord.layer,
             RouteLayer::Bridge,
             "second buffer escapes to bridge",
         );
         assert_eq!(
-            cells[1].buffer_coords()[0].y,
+            cells[1].buffer_coords()[0].coord.y,
             1,
             "bridge escape lands on first free y-layer (y=1)",
+        );
+        assert_eq!(
+            cells[1].buffer_coords()[0].port,
+            PortName::A,
+            "bridge-escaped buffer still carries its driver port",
         );
         // Complements the plane-buffer JSON assertion in
         // `long_segment_places_buffer_on_plane` by pinning the

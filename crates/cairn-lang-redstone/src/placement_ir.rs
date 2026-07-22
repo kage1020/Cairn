@@ -38,7 +38,7 @@ use serde::{Serialize, Serializer};
 
 use crate::edition_netlist_ir::EditionCell;
 use crate::logic_ir::ScopeKind;
-use crate::netlist_ir::{CellPortDriver, NetRef, NetlistInput, NetlistOutput};
+use crate::netlist_ir::{CellPortDriver, NetRef, NetlistInput, NetlistOutput, PortName};
 
 /// Which of `spec/redstone` §14.5's three pseudo-2.5D layers a
 /// coordinate lives on. `Plane` is the ground layer every cell coord
@@ -178,6 +178,44 @@ impl CellCoord {
     }
 }
 
+/// One implicit buffer repeater the crossing-legalization pass
+/// materialised, tagged with the driver port on the owning cell it
+/// belongs to.
+///
+/// The driver attribution is copied verbatim from
+/// [`PlacedCellNode::drivers`]`[i].port` at push time, so a downstream
+/// block-array voxel lowering can group buffers by their source
+/// segment without recomputing `Manhattan segment length /
+/// DUST_ATTENUATION_LIMIT` from scratch.
+///
+/// Serialises as `{"port": "<a|b|sel>", "coord": {...}}`, matching the
+/// `{port, ...}` shape [`CellPortDriver`] uses on the netlist side.
+/// The nested `coord` still elides its `layer` field when it stays on
+/// [`RouteLayer::Plane`], so the JSON footprint of a plane buffer stays
+/// compact.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
+pub struct BufferCoord {
+    /// Driver port on the owning cell this buffer sits on the segment
+    /// for. Copies [`CellPortDriver::port`] from the driver the
+    /// crossing pass was walking when it emitted this entry.
+    pub port: PortName,
+    /// Coordinate the crossing pass chose for the buffer. Carries the
+    /// pass's [`RouteLayer`] decision — `Plane` when the ground
+    /// candidate was free, `Bridge` when the pass escaped upward to
+    /// dodge a collision.
+    pub coord: CellCoord,
+}
+
+impl BufferCoord {
+    /// New `(port, coord)` attribution pair. Mirrors the
+    /// [`CellCoord::new`] constructor convention so the crossing pass
+    /// and its tests build entries without struct-literal noise.
+    #[must_use]
+    pub const fn new(port: PortName, coord: CellCoord) -> Self {
+        Self { port, coord }
+    }
+}
+
 /// The `circuit region=<label> void=<N>` reservation the enclosing
 /// scope declared, together with the footprint that reservation sits
 /// inside.
@@ -271,13 +309,15 @@ pub enum PlacementPhase {
         wire_length: u32,
         /// Preserved from [`Self::Delayed`].
         delay_ticks: u32,
-        /// One coord per implicit buffer the delay pass counted. Each
-        /// entry carries the [`RouteLayer`] the pass chose — `Plane`
-        /// when the coord fit the ground layer, `Bridge` when the
-        /// plane candidate collided with a cell / pad / plane crossing /
-        /// earlier buffer and had to escape upward. Empty when the
-        /// delay pass counted zero buffers.
-        buffer_coords: Vec<CellCoord>,
+        /// One entry per implicit buffer the delay pass counted,
+        /// pairing the coord the pass chose with the driver port on
+        /// this cell that the buffer sits on the segment for. The
+        /// [`RouteLayer`] the pass chose lives on `entry.coord.layer`
+        /// — `Plane` when the coord fit the ground layer, `Bridge`
+        /// when the plane candidate collided with a cell / pad /
+        /// plane crossing / earlier buffer and had to escape upward.
+        /// Empty when the delay pass counted zero buffers.
+        buffer_coords: Vec<BufferCoord>,
     },
 }
 
@@ -315,7 +355,7 @@ impl PlacementPhase {
     /// instead of a silent empty-slice return that would drop the new
     /// stage's data from the JSON dump.
     #[must_use]
-    pub fn buffer_coords(&self) -> &[CellCoord] {
+    pub fn buffer_coords(&self) -> &[BufferCoord] {
         match self {
             Self::Unrouted | Self::Routed { .. } | Self::Delayed { .. } => &[],
             Self::Legalized { buffer_coords, .. } => buffer_coords,
@@ -380,7 +420,7 @@ impl PlacementPhase {
     /// here rather than silently producing a stale-but-plausible IR.
     /// See [`Self::route`] for why the arms are enumerated explicitly.
     #[track_caller]
-    pub fn legalize(&mut self, buffer_coords: Vec<CellCoord>) {
+    pub fn legalize(&mut self, buffer_coords: Vec<BufferCoord>) {
         let (wire_length, delay_ticks) = match self {
             Self::Delayed {
                 wire_length,
@@ -464,7 +504,7 @@ impl PlacedCellNode {
     /// Buffer coordinates once crossing legalization has run. See
     /// [`PlacementPhase::buffer_coords`].
     #[must_use]
-    pub fn buffer_coords(&self) -> &[CellCoord] {
+    pub fn buffer_coords(&self) -> &[BufferCoord] {
         self.phase.buffer_coords()
     }
 }
@@ -683,10 +723,13 @@ mod tests {
     }
 
     fn legalized() -> PlacementPhase {
+        // `PortName::A` is fixture noise — none of the state-machine
+        // tests below assert on the driver port; they only care about
+        // the buffer-coord vector's shape and identity round-trip.
         PlacementPhase::Legalized {
             wire_length: 3,
             delay_ticks: 1,
-            buffer_coords: vec![CellCoord::new(5, 0, 0)],
+            buffer_coords: vec![BufferCoord::new(PortName::A, CellCoord::new(5, 0, 0))],
         }
     }
 
@@ -758,7 +801,10 @@ mod tests {
             wire_length: 12,
             delay_ticks: 3,
         };
-        let coords = vec![CellCoord::new(1, 0, 0), CellCoord::new(2, 0, 0)];
+        let coords = vec![
+            BufferCoord::new(PortName::A, CellCoord::new(1, 0, 0)),
+            BufferCoord::new(PortName::A, CellCoord::new(2, 0, 0)),
+        ];
         phase.legalize(coords.clone());
         assert_eq!(
             phase,
@@ -831,6 +877,9 @@ mod tests {
         assert!(PlacementPhase::Unrouted.buffer_coords().is_empty());
         assert!(routed().buffer_coords().is_empty());
         assert!(delayed().buffer_coords().is_empty());
-        assert_eq!(legalized().buffer_coords(), &[CellCoord::new(5, 0, 0)]);
+        assert_eq!(
+            legalized().buffer_coords(),
+            &[BufferCoord::new(PortName::A, CellCoord::new(5, 0, 0))],
+        );
     }
 }
