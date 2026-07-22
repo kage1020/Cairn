@@ -1170,6 +1170,116 @@ mod tests {
     }
 
     #[test]
+    fn buffer_coord_index_at_kth_boundary() {
+        // Pins the mapping `k → path_index = k * DUST_ATTENUATION_LIMIT`
+        // that `allocate_buffer_coords` inlines. A driver segment of 46
+        // blocks (Manhattan) trips the attenuation limit three times, so
+        // three buffer coords land at `k = 1, 2, 3`. The delay pass's
+        // `buffer_repeater_ticks_boundary_table` pins the tick side of
+        // the same formula against a table of `s → buffers`; this test
+        // is its structural mirror — a slip in either pass's
+        // `(segment - 1) / DUST_ATTENUATION_LIMIT` derivation trips a
+        // dedicated row rather than the aggregate delay total.
+        //
+        // L-shape `(0, 0, 1) → (45, 0, 0)` walks x++ 45 steps then
+        // z-- 1 step, so `path[k * 15]` is `(k * 15, 0, 1)` for
+        // `k = 1, 2, 3` (path[45] is the last x-axis step before the
+        // final z-- to the sink). No collision → every buffer stays on
+        // plane, which is the invariant the boundary formula depends
+        // on: if a k-th buffer landed off-formula, the plane candidate
+        // would drift too and the layer assertion would trip alongside
+        // the coord assertion.
+        let mut ir = PlacementIr::new(Edition::Java);
+        ir.region = Some(reservation(50, 3, 3));
+        ir.inputs.push(crate::netlist_ir::NetlistInput {
+            name: cairn_lang_core::ast::DottedRef::new("sig".into(), vec!["a".into()]),
+            span: Span::default(),
+        });
+        ir.cells.push(placed_cell(
+            EditionCell::JavaRepeaterOr,
+            CellCoord::new(45, 0, 0),
+            vec![CellPortDriver {
+                port: PortName::A,
+                net: NetRef::Input(0),
+            }],
+        ));
+        let legalized = compile_crossing(&scoped(ScopeKind::Struct, "boundary", ir));
+        assert!(
+            legalized.diagnostics.is_empty(),
+            "clean fixture: {:?}",
+            legalized.diagnostics,
+        );
+        let bufs = legalized.scoped.scopes[0].ir.cells[0].buffer_coords();
+        assert_eq!(
+            bufs.len(),
+            3,
+            "segment 46 → floor((46-1)/15) = 3 buffers, got {bufs:?}",
+        );
+        assert_eq!(
+            bufs[0].coord,
+            CellCoord::new(15, 0, 1),
+            "k=1 buffer sits at path[15]",
+        );
+        assert_eq!(
+            bufs[1].coord,
+            CellCoord::new(30, 0, 1),
+            "k=2 buffer sits at path[30]",
+        );
+        assert_eq!(
+            bufs[2].coord,
+            CellCoord::new(45, 0, 1),
+            "k=3 buffer sits at path[45] — the last x-axis step before the final z decrement",
+        );
+        for b in bufs {
+            assert_eq!(
+                b.coord.layer,
+                RouteLayer::Plane,
+                "no collision → every k-th buffer stays on plane; got {b:?}",
+            );
+        }
+    }
+
+    #[test]
+    fn buffer_coord_index_at_max_segment_boundary() {
+        // Companion to `buffer_coord_index_at_kth_boundary`: pins the
+        // formula against the far end of the range that the delay
+        // pass's `MAX_ATTENUATION_SEGMENT = 256` sanity cap permits. A
+        // segment of exactly 256 blocks yields 17 buffers at
+        // `k * 15` for `k = 1..=17`, matching the `(256, 17)` row in
+        // `buffer_repeater_ticks_boundary_table`. Together the two
+        // tests bracket the piecewise formula at both boundaries.
+        let mut ir = PlacementIr::new(Edition::Java);
+        ir.region = Some(reservation(256, 3, 3));
+        ir.inputs.push(crate::netlist_ir::NetlistInput {
+            name: cairn_lang_core::ast::DottedRef::new("sig".into(), vec!["a".into()]),
+            span: Span::default(),
+        });
+        ir.cells.push(placed_cell(
+            EditionCell::JavaRepeaterOr,
+            CellCoord::new(255, 0, 0),
+            vec![CellPortDriver {
+                port: PortName::A,
+                net: NetRef::Input(0),
+            }],
+        ));
+        let legalized = compile_crossing(&scoped(ScopeKind::Struct, "max_boundary", ir));
+        assert!(
+            legalized.diagnostics.is_empty(),
+            "segment == MAX_ATTENUATION_SEGMENT must legalize cleanly: {:?}",
+            legalized.diagnostics,
+        );
+        let bufs = legalized.scoped.scopes[0].ir.cells[0].buffer_coords();
+        assert_eq!(bufs.len(), 17, "segment 256 → 17 buffers, got {bufs:?}");
+        for k in 1..=17u32 {
+            assert_eq!(
+                bufs[(k - 1) as usize].coord,
+                CellCoord::new(k * 15, 0, 1),
+                "k={k} buffer must sit at path[k * 15]",
+            );
+        }
+    }
+
+    #[test]
     #[should_panic(expected = "topological invariant broken")]
     fn out_of_range_net_ref_cell_panics_loudly() {
         // Mirrors `delay.rs`'s equivalent guard: a hand-built IR with

@@ -1,0 +1,34 @@
+@cairn 2026.06
+@requires version>=1.20
+
+# A two-net crossing fixture: two independent pressure plates drive
+# two independent gates, whose output signals fan out to two doors on
+# opposite ends of the region. Because both cells route to the far
+# edge on the same plane, their Steiner trees overlap on the plane
+# — genuine crossing coords that the delayed→legalized crossing pass
+# has to fold onto the bridge void.
+#
+# Kept intentionally minimal so the wire form pinned by the
+# byte-identical integration test in `crates/cairn-lang-redstone/
+# tests/crossing.rs` reads at a glance.
+
+theme cross:
+  slot wall -> @oak_planks
+  slot door -> @oak_door
+
+struct crossbar size=5x4
+  floor mat_slot=wall
+  walls class=outer mat_slot=wall height=3
+  door  id=front side=front at=center mat_slot=door
+  door  id=back  side=back  at=center mat_slot=door
+
+  pressure_plate id=plate1 at=front.outside offset=0 y=0 -> sig.a
+  pressure_plate id=plate2 at=inside.front  offset=0 y=0 -> sig.b
+
+  logic sig.f1 = sig.a and sig.b
+  logic sig.f2 = sig.a or sig.b
+
+  door[id=front] opened_by=sig.f1
+  door[id=back]  opened_by=sig.f2
+
+  circuit region=floor void=2
