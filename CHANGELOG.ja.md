@@ -14,6 +14,27 @@
 
 ### 変更
 
+- `PlacementPhase::Legalized::buffer_coords` の型を
+  `Vec<CellCoord>` から `Vec<BufferCoord>` に拡張した。新しい
+  `BufferCoord { port: PortName, coord: CellCoord }` は crossing
+  pass が materialize した各 implicit buffer repeater について、
+  その buffer がどの cell driver port の segment に乗ったのかを
+  座標と一緒に保持する。crossing pass は buffer 座標を選ぶ際に
+  既に `cell.drivers` を走査していたが、出口で port 情報を捨てて
+  いた — 下流の block-array voxel lowering は
+  `drivers[i].net → source coord → floor((s - 1) /
+  DUST_ATTENUATION_LIMIT)` を再計算しないと port を復元できなかった。
+  attribution を座標と並べて持たせることで、lowering 側が
+  driver 単位で buffer を直接グルーピングできるようになる。
+  非空エントリの JSON wire 形式は
+  `{"x":..,"y":..,"z":..[,"layer":..]}` から
+  `{"port":"a","coord":{"x":..,"y":..,"z":..[,"layer":..]}}` に
+  変わり、netlist 側の `CellPortDriver` が既に採っている
+  `{port, ...}` shape と揃えた。空の `buffer_coords` は従来通り
+  serde-skip されるので、delay pass が 0 buffer と数えたスコープは
+  delayed IR と byte 等価のまま。`PlacedCellNode::buffer_coords()` /
+  `PlacementPhase::buffer_coords()` は `&[BufferCoord]` を返し、
+  `PlacementPhase::legalize` は `Vec<BufferCoord>` を受け取る。
 - 下記 M6-PR5 / M6-PR6 / M6-PR7 が `PlacedCellNode` に追加した 3 つの
   進化フィールド (`wire_length` / `delay_ticks` / `buffer_coords`)
   を単一の `phase: PlacementPhase` enum に集約した。`Unrouted` /

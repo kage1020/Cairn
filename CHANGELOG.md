@@ -12,6 +12,26 @@ and is a separate axis from the Minecraft target version.
 
 ### Changed
 
+- `PlacementPhase::Legalized::buffer_coords` widens from
+  `Vec<CellCoord>` to `Vec<BufferCoord>`, where the new
+  `BufferCoord { port: PortName, coord: CellCoord }` pairs every
+  implicit buffer repeater the crossing pass materialised with the
+  driver port on the owning cell that the buffer sits on the segment
+  for. The crossing pass already iterated `cell.drivers` when picking
+  buffer coords, but dropped the port on the way out; a downstream
+  block-array voxel lowering had to re-derive it from
+  `drivers[i].net → source coord → floor((s - 1) /
+  DUST_ATTENUATION_LIMIT)`. Attribution is now carried alongside the
+  coord so the lowering can group buffers by driver directly. The JSON
+  wire form of a non-empty entry shifts from
+  `{"x":..,"y":..,"z":..[,"layer":..]}` to
+  `{"port":"a","coord":{"x":..,"y":..,"z":..[,"layer":..]}}`, matching
+  the `{port, ...}` shape `CellPortDriver` already uses on the netlist
+  side. Empty `buffer_coords` still serde-skips, so a scope whose
+  delay pass counted zero buffers stays byte-identical to its delayed
+  IR. `PlacedCellNode::buffer_coords()` and
+  `PlacementPhase::buffer_coords()` now return `&[BufferCoord]`;
+  `PlacementPhase::legalize` takes `Vec<BufferCoord>`.
 - `PlacedCellNode`'s three progressive fields (`wire_length`,
   `delay_ticks`, `buffer_coords`) that M6-PR5 / M6-PR6 / M6-PR7 above
   added as parallel `Option` / `Vec` fields are collapsed into a

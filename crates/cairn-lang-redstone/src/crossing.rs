@@ -68,7 +68,7 @@ use crate::delay::DUST_ATTENUATION_LIMIT;
 use crate::diagnostic::{Diagnostic, DiagnosticCode};
 use crate::netlist_ir::NetRef;
 use crate::placement_ir::{
-    CellCoord, CircuitRegionReservation, PlacementIr, RouteLayer, ScopedPlacementIr,
+    BufferCoord, CellCoord, CircuitRegionReservation, PlacementIr, RouteLayer, ScopedPlacementIr,
     ScopedPlacementIrEntry,
 };
 use crate::routing_geometry::{
@@ -314,16 +314,16 @@ fn allocate_buffer_coords<F>(
     crossings: &HashMap<CellCoord, (NetRef, NetRef)>,
     reserved: &HashSet<CellCoord>,
     source_of_net: &F,
-) -> Result<Vec<Vec<CellCoord>>, Diagnostic>
+) -> Result<Vec<Vec<BufferCoord>>, Diagnostic>
 where
     F: Fn(NetRef) -> CellCoord,
 {
     let mut plane_buffers: HashSet<CellCoord> = HashSet::new();
     let mut bridge_buffers: HashSet<CellCoord> = HashSet::new();
-    let mut per_cell: Vec<Vec<CellCoord>> = Vec::with_capacity(ir.cells.len());
+    let mut per_cell: Vec<Vec<BufferCoord>> = Vec::with_capacity(ir.cells.len());
     for (cell_index, cell) in ir.cells.iter().enumerate() {
         let sink = cell_coords[cell_index];
-        let mut buffers_for_cell: Vec<CellCoord> = Vec::new();
+        let mut buffers_for_cell: Vec<BufferCoord> = Vec::new();
         for driver in &cell.drivers {
             let src = source_of_net(driver.net);
             let path = l_shape_path(src, sink);
@@ -354,7 +354,7 @@ where
                     || plane_buffers.contains(&candidate);
                 if !plane_taken {
                     plane_buffers.insert(candidate);
-                    buffers_for_cell.push(candidate);
+                    buffers_for_cell.push(BufferCoord::new(driver.port, candidate));
                     continue;
                 }
                 let mut escaped = None;
@@ -368,7 +368,7 @@ where
                     }
                 }
                 match escaped {
-                    Some(bridge) => buffers_for_cell.push(bridge),
+                    Some(bridge) => buffers_for_cell.push(BufferCoord::new(driver.port, bridge)),
                     None => {
                         return Err(buffer_collision_diagnostic(
                             entry, region, cell_index, candidate,
@@ -377,6 +377,21 @@ where
                 }
             }
         }
+        // Producer-side contract on [`BufferCoord::port`]: every entry
+        // must name a driver that actually exists on the owning cell.
+        // Trivially true today because both push sites source
+        // `driver.port` from the enclosing `for driver in &cell.drivers`
+        // loop, but debug-asserted so a future buffer producer (e.g.
+        // fan-out duplication) added elsewhere cannot silently emit a
+        // `BufferCoord` whose `port` does not match any driver — the
+        // downstream voxel lowering would then group buffers under a
+        // driver that does not exist.
+        debug_assert!(
+            buffers_for_cell
+                .iter()
+                .all(|b| cell.drivers.iter().any(|d| d.port == b.port)),
+            "BufferCoord::port must reference a driver on cells[{cell_index}]",
+        );
         per_cell.push(buffers_for_cell);
     }
     Ok(per_cell)
@@ -667,9 +682,14 @@ mod tests {
             cell.buffer_coords(),
         );
         assert_eq!(
-            cell.buffer_coords()[0].layer,
+            cell.buffer_coords()[0].coord.layer,
             RouteLayer::Plane,
             "no collision → buffer stays on plane",
+        );
+        assert_eq!(
+            cell.buffer_coords()[0].port,
+            PortName::A,
+            "buffer preserves its driver port on the plane placement path",
         );
         // Pins the `PlacedCellNode` `Serialize` impl's 6-field path
         // (cell + drivers + coord + wire_length + delay_ticks +
@@ -682,7 +702,9 @@ mod tests {
         let json = serde_json::to_string(&legalized.scoped)
             .expect("legalized scoped IR must serialise cleanly");
         assert!(
-            json.contains("\"buffer_coords\":[{\"x\":15,\"y\":0,\"z\":1}]"),
+            json.contains(
+                "\"buffer_coords\":[{\"port\":\"a\",\"coord\":{\"x\":15,\"y\":0,\"z\":1}}]"
+            ),
             "expected buffer_coords entry to appear in JSON verbatim, got {json}",
         );
     }
@@ -935,19 +957,24 @@ mod tests {
         assert_eq!(cells[0].buffer_coords().len(), 1);
         assert_eq!(cells[1].buffer_coords().len(), 1);
         assert_eq!(
-            cells[0].buffer_coords()[0].layer,
+            cells[0].buffer_coords()[0].coord.layer,
             RouteLayer::Plane,
             "first buffer sits on plane",
         );
         assert_eq!(
-            cells[1].buffer_coords()[0].layer,
+            cells[1].buffer_coords()[0].coord.layer,
             RouteLayer::Bridge,
             "second buffer escapes to bridge",
         );
         assert_eq!(
-            cells[1].buffer_coords()[0].y,
+            cells[1].buffer_coords()[0].coord.y,
             1,
             "bridge escape lands on first free y-layer (y=1)",
+        );
+        assert_eq!(
+            cells[1].buffer_coords()[0].port,
+            PortName::A,
+            "buffer preserves its driver port through the bridge escape",
         );
         // Complements the plane-buffer JSON assertion in
         // `long_segment_places_buffer_on_plane` by pinning the
@@ -961,6 +988,96 @@ mod tests {
             json.contains("\"layer\":\"bridge\""),
             "expected the bridge-escape buffer to serialise its layer tag, got {json}",
         );
+    }
+
+    #[test]
+    fn mux_multi_port_carries_each_driver_port_across_plane_and_bridge() {
+        // Every other buffer-coord test uses a single driver on
+        // `PortName::A`, so a regression that hard-coded
+        // `BufferCoord::new(PortName::A, ..)` at either push site would
+        // slip past them. This test forces the crossing pass to walk
+        // all three `[Sel, A, B]` drivers on one Mux and pins that
+        // (a) each buffer carries its own driver's port,
+        // (b) the port survives the plane→bridge escape rewrite in
+        //     order — Sel keeps its plane candidate; A escapes to
+        //     bridge y=1; B escapes to bridge y=2,
+        // (c) the JSON wire form emits `"port":"sel"` / `"port":"b"`
+        //     alongside the already-covered `"port":"a"`.
+        //
+        // All three drivers reference `Input(0)` so their L-shape
+        // paths are byte-identical, which forces the collision the
+        // test needs — realistic Mux fixtures normally give each port
+        // its own signal, but the crossing pass only reads
+        // `driver.port` and `driver.net`, so the invariant this test
+        // pins is producer-side symmetry: `driver.port` must reach
+        // the emitted `BufferCoord` unchanged whether the buffer sits
+        // on `Plane` or on any `Bridge` y-layer.
+        let mut ir = PlacementIr::new(Edition::Java);
+        ir.region = Some(reservation(20, 3, 3));
+        ir.inputs.push(crate::netlist_ir::NetlistInput {
+            name: cairn_lang_core::ast::DottedRef::new("sig".into(), vec!["a".into()]),
+            span: Span::default(),
+        });
+        ir.cells.push(placed_cell(
+            EditionCell::JavaMuxUnpinned,
+            CellCoord::new(16, 0, 1),
+            vec![
+                CellPortDriver {
+                    port: PortName::Sel,
+                    net: NetRef::Input(0),
+                },
+                CellPortDriver {
+                    port: PortName::A,
+                    net: NetRef::Input(0),
+                },
+                CellPortDriver {
+                    port: PortName::B,
+                    net: NetRef::Input(0),
+                },
+            ],
+        ));
+        let legalized = compile_crossing(&scoped(ScopeKind::Struct, "mux", ir));
+        assert!(
+            legalized.diagnostics.is_empty(),
+            "void=3 lets both bridge escapes land: {:?}",
+            legalized.diagnostics,
+        );
+        let bufs = legalized.scoped.scopes[0].ir.cells[0].buffer_coords();
+        assert_eq!(bufs.len(), 3, "one buffer per driver: {bufs:?}");
+        assert_eq!(
+            bufs[0].port,
+            PortName::Sel,
+            "first driver's buffer carries Sel",
+        );
+        assert_eq!(
+            bufs[1].port,
+            PortName::A,
+            "second driver's buffer carries A"
+        );
+        assert_eq!(bufs[2].port, PortName::B, "third driver's buffer carries B");
+        assert_eq!(
+            bufs[0].coord.layer,
+            RouteLayer::Plane,
+            "Sel wins the plane candidate first",
+        );
+        assert_eq!(
+            (bufs[1].coord.layer, bufs[1].coord.y),
+            (RouteLayer::Bridge, 1),
+            "A escapes to the first bridge y-layer",
+        );
+        assert_eq!(
+            (bufs[2].coord.layer, bufs[2].coord.y),
+            (RouteLayer::Bridge, 2),
+            "B escapes to the next free bridge y-layer",
+        );
+        let json = serde_json::to_string(&legalized.scoped)
+            .expect("legalized scoped IR must serialise cleanly");
+        for port in ["\"port\":\"sel\"", "\"port\":\"a\"", "\"port\":\"b\""] {
+            assert!(
+                json.contains(port),
+                "JSON wire form must carry {port}, got {json}",
+            );
+        }
     }
 
     #[test]

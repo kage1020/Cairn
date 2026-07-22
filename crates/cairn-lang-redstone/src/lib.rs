@@ -72,7 +72,7 @@ pub use netlist_ir::{
 };
 pub use placement::{CELL_FOOTPRINT, PlacementOutput, compile_placement};
 pub use placement_ir::{
-    CellCoord, CircuitRegionReservation, PlacedCellNode, PlacementIr, RouteLayer,
+    BufferCoord, CellCoord, CircuitRegionReservation, PlacedCellNode, PlacementIr, RouteLayer,
     ScopedPlacementIr, ScopedPlacementIrEntry,
 };
 pub use routing::{RoutingOutput, compile_routing};
