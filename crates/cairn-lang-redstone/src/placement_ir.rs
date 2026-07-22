@@ -184,9 +184,21 @@ impl CellCoord {
 ///
 /// The driver attribution is copied verbatim from
 /// [`PlacedCellNode::drivers`]`[i].port` at push time, so a downstream
-/// block-array voxel lowering can group buffers by their source
-/// segment without recomputing `Manhattan segment length /
-/// DUST_ATTENUATION_LIMIT` from scratch.
+/// consumer can group buffers by their source segment without
+/// recomputing `floor((s - 1) / DUST_ATTENUATION_LIMIT)` from scratch.
+///
+/// **Order contract on `Vec<BufferCoord>`** (as returned by
+/// [`PlacedCellNode::buffer_coords`]): entries appear in
+/// [`PlacedCellNode::drivers`] iteration order, and within one
+/// driver's segment in the crossing pass's Manhattan traversal order
+/// (x → z → y, matching the routing pass's axis order). A consumer
+/// that reads the vector positionally therefore sees driver 0's
+/// buffers before driver 1's, and closer-to-source buffers before
+/// closer-to-sink ones.
+///
+/// **Coord layer.** [`Self::coord`]`.layer` records the crossing
+/// pass's placement decision — see [`RouteLayer`] for the full
+/// vocabulary and which variants a producer emits today.
 ///
 /// Serialises as `{"port": "<a|b|sel>", "coord": {...}}`, matching the
 /// `{port, ...}` shape [`CellPortDriver`] uses on the netlist side.
@@ -199,10 +211,9 @@ pub struct BufferCoord {
     /// for. Copies [`CellPortDriver::port`] from the driver the
     /// crossing pass was walking when it emitted this entry.
     pub port: PortName,
-    /// Coordinate the crossing pass chose for the buffer. Carries the
-    /// pass's [`RouteLayer`] decision — `Plane` when the ground
-    /// candidate was free, `Bridge` when the pass escaped upward to
-    /// dodge a collision.
+    /// Coordinate the crossing pass chose for the buffer. The
+    /// `layer` field records the placement decision — see
+    /// [`RouteLayer`] for the vocabulary.
     pub coord: CellCoord,
 }
 
@@ -309,14 +320,13 @@ pub enum PlacementPhase {
         wire_length: u32,
         /// Preserved from [`Self::Delayed`].
         delay_ticks: u32,
-        /// One entry per implicit buffer the delay pass counted,
-        /// pairing the coord the pass chose with the driver port on
-        /// this cell that the buffer sits on the segment for. The
-        /// [`RouteLayer`] the pass chose lives on `entry.coord.layer`
-        /// — `Plane` when the coord fit the ground layer, `Bridge`
-        /// when the plane candidate collided with a cell / pad /
-        /// plane crossing / earlier buffer and had to escape upward.
+        /// One entry per implicit buffer repeater the delay pass
+        /// counted; the crossing pass populates each entry with the
+        /// coord it chose and the driver port that buffer belongs to.
         /// Empty when the delay pass counted zero buffers.
+        ///
+        /// See [`BufferCoord`] for the per-entry shape, ordering
+        /// contract, and layer semantics.
         buffer_coords: Vec<BufferCoord>,
     },
 }
