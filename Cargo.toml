@@ -8,6 +8,7 @@ members = [
     "crates/cairn-lang-redstone",
     "crates/cairn-lang-lsp",
     "crates/cairn-lang-wasm",
+    "crates/cairn-lang-tree-sitter",
 ]
 
 [workspace.package]
