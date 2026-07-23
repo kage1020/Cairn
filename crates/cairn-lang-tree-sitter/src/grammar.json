@@ -3,16 +3,36 @@
   "name": "cairn",
   "rules": {
     "source_file": {
-      "type": "CHOICE",
+      "type": "SEQ",
       "members": [
         {
-          "type": "SYMBOL",
-          "name": "identifier"
+          "type": "REPEAT",
+          "content": {
+            "type": "SYMBOL",
+            "name": "_newline"
+          }
         },
         {
-          "type": "BLANK"
+          "type": "REPEAT",
+          "content": {
+            "type": "SEQ",
+            "members": [
+              {
+                "type": "SYMBOL",
+                "name": "_blank_placeholder"
+              },
+              {
+                "type": "SYMBOL",
+                "name": "_newline"
+              }
+            ]
+          }
         }
       ]
+    },
+    "_blank_placeholder": {
+      "type": "SYMBOL",
+      "name": "identifier"
     },
     "identifier": {
       "type": "PATTERN",
@@ -35,7 +55,20 @@
   ],
   "conflicts": [],
   "precedences": [],
-  "externals": [],
+  "externals": [
+    {
+      "type": "SYMBOL",
+      "name": "_indent"
+    },
+    {
+      "type": "SYMBOL",
+      "name": "_dedent"
+    },
+    {
+      "type": "SYMBOL",
+      "name": "_newline"
+    }
+  ],
   "inline": [],
   "supertypes": [],
   "reserved": {}

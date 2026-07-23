@@ -1,0 +1,45 @@
+==================
+Simple nested block
+==================
+
+theme keep:
+  slot floor -> @oak
+  slot wall -> @stone
+
+---
+
+(source_file
+  (theme_decl
+    (identifier)
+    (theme_body
+      (slot_binding (identifier) (material_ref (identifier)))
+      (slot_binding (identifier) (material_ref (identifier))))))
+
+==================
+Two-level nesting
+==================
+
+struct keep size=11x9
+  level id=floor1 y=0
+    door id=entry side=front at=center
+
+---
+
+(source_file
+  (struct_decl
+    (identifier)
+    (attribute_list
+      (attribute (identifier) (size_literal (integer) (integer))))
+    (struct_body
+      (nested_scope
+        (identifier)
+        (attribute_list
+          (attribute (identifier) (identifier))
+          (attribute (identifier) (integer)))
+        (struct_body
+          (member_stmt
+            (member_keyword)
+            (attribute_list
+              (attribute (identifier) (identifier))
+              (attribute (identifier) (identifier))
+              (attribute (identifier) (identifier)))))))))
