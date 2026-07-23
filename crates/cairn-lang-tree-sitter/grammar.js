@@ -16,6 +16,8 @@ module.exports = grammar({
 
   externals: $ => [$._indent, $._dedent, $._newline],
 
+  word: $ => $.identifier,
+
   rules: {
     source_file: $ => seq(
       repeat($._newline),
