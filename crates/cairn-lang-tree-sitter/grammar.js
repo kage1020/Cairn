@@ -193,7 +193,7 @@ module.exports = grammar({
     theme_decl: $ => seq(
       'theme',
       field('name', $.identifier),
-      ':',
+      optional(':'),
       $._newline,
       field('body', $.theme_body),
     ),

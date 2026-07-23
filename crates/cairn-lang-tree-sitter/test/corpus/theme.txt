@@ -51,3 +51,18 @@ theme keep_dark:
       (slot_binding
         (identifier)
         (material_ref (identifier) (identifier) (identifier))))))
+
+==================
+Theme without trailing colon
+==================
+
+theme minimal
+  slot floor -> @stone
+
+---
+
+(source_file
+  (theme_decl
+    (identifier)
+    (theme_body
+      (slot_binding (identifier) (material_ref (identifier))))))
