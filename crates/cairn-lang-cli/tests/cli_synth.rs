@@ -800,14 +800,18 @@ fn cli_synth_stage_crossing_java_legalizes_or_cell_scope() {
         "java",
         path.to_str().unwrap(),
     ]);
+    let stderr = String::from_utf8_lossy(&out.stderr).into_owned();
+    assert!(out.status.success(), "expected exit 0, stderr={stderr}");
     assert!(
-        out.status.success(),
-        "expected exit 0, stderr={}",
-        String::from_utf8_lossy(&out.stderr),
+        stderr.is_empty(),
+        "a clean fixture must not spill diagnostics on stderr; a future \
+         deprecation notice would otherwise reach users silently. Got: {stderr}",
     );
-    let stdout = String::from_utf8(out.stdout).expect("utf-8");
-    let value: serde_json::Value = serde_json::from_str(&stdout)
-        .unwrap_or_else(|err| panic!("stdout should parse as JSON: {err}\n{stdout}"));
+    let stdout = String::from_utf8(out.stdout)
+        .unwrap_or_else(|err| panic!("stdout should be utf-8: {err}\nstderr={stderr}"));
+    let value: serde_json::Value = serde_json::from_str(&stdout).unwrap_or_else(|err| {
+        panic!("stdout should parse as JSON: {err}\nstdout={stdout}\nstderr={stderr}")
+    });
     let gatehouse = value
         .as_array()
         .and_then(|s| s.iter().find(|s| s["name"] == "gatehouse"))
@@ -816,6 +820,61 @@ fn cli_synth_stage_crossing_java_legalizes_or_cell_scope() {
     assert_eq!(ir["edition"], "java");
     let cells = ir["cells"].as_array().expect("cells array");
     assert_eq!(cells.len(), 1);
+    assert!(
+        cells[0].get("buffer_coords").is_none(),
+        "empty buffer_coords must serde-skip so the wire form stays byte-identical to --stage delay: {stdout}",
+    );
+    assert!(
+        cells[0]["coord"].get("layer").is_none(),
+        "plane cell coord must serde-skip its layer field: {stdout}",
+    );
+}
+
+#[test]
+fn cli_synth_stage_crossing_bedrock_legalizes_or_cell_scope() {
+    // Everything about crossing legalization on the redstone-door
+    // fixture is edition-independent (single net, short segments —
+    // no crossings, no buffers), so the Bedrock run differs from the
+    // Java run only in the cell tag and the edition field. Mirrors
+    // the placement / route / delay stage's Java+Bedrock pattern so
+    // `--stage crossing` gets the same edition-parity coverage the
+    // other edition-tagged stages already have.
+    let path = examples_dir().join("redstone-door.crn");
+    let out = run_synth(&[
+        "--experimental-logic-synth",
+        "--stage",
+        "crossing",
+        "--edition",
+        "bedrock",
+        path.to_str().unwrap(),
+    ]);
+    let stderr = String::from_utf8_lossy(&out.stderr).into_owned();
+    assert!(out.status.success(), "expected exit 0, stderr={stderr}");
+    assert!(
+        stderr.is_empty(),
+        "a clean fixture must not spill diagnostics on stderr; a future \
+         deprecation notice would otherwise reach users silently. Got: {stderr}",
+    );
+    let stdout = String::from_utf8(out.stdout)
+        .unwrap_or_else(|err| panic!("stdout should be utf-8: {err}\nstderr={stderr}"));
+    let value: serde_json::Value = serde_json::from_str(&stdout).unwrap_or_else(|err| {
+        panic!("stdout should parse as JSON: {err}\nstdout={stdout}\nstderr={stderr}")
+    });
+    let gatehouse = value
+        .as_array()
+        .and_then(|s| s.iter().find(|s| s["name"] == "gatehouse"))
+        .expect("gatehouse scope");
+    let ir = &gatehouse["ir"];
+    assert_eq!(ir["edition"], "bedrock");
+    let cells = ir["cells"].as_array().expect("cells array");
+    assert_eq!(cells.len(), 1);
+    assert_eq!(
+        cells[0]["cell"], "bedrock_torch_or",
+        "Bedrock edition realises `or` as the torch-based cell",
+    );
+    // Same serde-skip contract as the Java run: empty buffer_coords
+    // and a plane-layer coord both elide their fields so the wire
+    // form stays byte-identical to the earlier stages on this fixture.
     assert!(
         cells[0].get("buffer_coords").is_none(),
         "empty buffer_coords must serde-skip so the wire form stays byte-identical to --stage delay: {stdout}",

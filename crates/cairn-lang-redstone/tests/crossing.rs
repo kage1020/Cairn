@@ -17,8 +17,8 @@ use cairn_lang_core::Edition;
 use cairn_lang_core::check::Severity;
 use cairn_lang_core::{lower, parse};
 use cairn_lang_redstone::{
-    ScopedPlacementIr, compile_crossing, compile_delay, compile_edition_netlist, compile_netlist,
-    compile_placement, compile_routing, synthesize,
+    DiagnosticCode, ScopedPlacementIr, compile_crossing, compile_delay, compile_edition_netlist,
+    compile_netlist, compile_placement, compile_routing, synthesize,
 };
 
 fn load_example(name: &str) -> String {
@@ -163,6 +163,69 @@ fn json_output_byte_identical_when_no_crossings_and_no_buffers() {
     assert_eq!(
         delayed_json, legalized_json,
         "stage 4 output must match stage 3 verbatim on a fixture without crossings",
+    );
+}
+
+/// AC — mirror of `json_output_byte_identical_when_no_crossings_and_no_buffers`
+/// for the `with-crossings` case. `examples/crossbar.crn` produces
+/// genuine plane overlaps between its two cell-driven output-pad
+/// nets, but because the current pipeline does not lift the wire
+/// itself onto the bridge layer (the bridge budget is reserved for
+/// buffer-repeater escapes) and every driver segment on this fixture
+/// sits below `DUST_ATTENUATION_LIMIT`, the legalized JSON must
+/// still equal the delayed JSON verbatim. Pins two invariants at
+/// once: (a) both gate cells and both door outputs survive
+/// legalization intact — a regression that elided the crossed scope
+/// would trip the byte-identity assertion via a shorter left side;
+/// (b) a silently-absorbed crossing does not shift the wire form.
+#[test]
+fn json_output_byte_identical_with_crossings() {
+    let source = load_example("crossbar.crn");
+    let delayed = delayed_from_source(&source, Edition::Java);
+    let legalized = compile_crossing(&delayed);
+    assert!(
+        legalized.diagnostics.is_empty(),
+        "crossbar.crn must legalize cleanly at void=2: {:?}",
+        legalized.diagnostics,
+    );
+
+    let delayed_json = serde_json::to_string_pretty(&delayed).expect("delayed IR serialises");
+    let legalized_json =
+        serde_json::to_string_pretty(&legalized.scoped).expect("legalized IR serialises");
+
+    assert_eq!(
+        delayed_json, legalized_json,
+        "silently-absorbed crossings must not shift the wire form of the legalized IR",
+    );
+}
+
+/// AC — `examples/crossbar.crn` with `void=1` refuses with
+/// `E_CROSSING_CONGESTION`, proving the fixture actually produces
+/// plane overlaps the pass has to see: a fixture without any
+/// overlap would legalize cleanly at `void=1` and the byte-identity
+/// mirror above would still pass by vacuous truth.
+#[test]
+fn crossbar_void_one_refuses_with_crossing_congestion() {
+    let source = load_example("crossbar.crn");
+    let patched = source.replace("void=2", "void=1");
+    assert_ne!(
+        source, patched,
+        "crossbar.crn no longer contains the `void=2` needle — fixture drifted \
+         and the void=1 refusal path is not being exercised",
+    );
+    let delayed = delayed_from_source(&patched, Edition::Java);
+    let legalized = compile_crossing(&delayed);
+    assert!(
+        legalized
+            .diagnostics
+            .iter()
+            .any(|d| d.code == DiagnosticCode::CrossingCongestion),
+        "void=1 crossbar must trip E_CROSSING_CONGESTION: {:?}",
+        legalized.diagnostics,
+    );
+    assert!(
+        legalized.scoped.scopes.iter().all(|e| e.name != "crossbar"),
+        "failed scope must elide from the legalized IR",
     );
 }
 

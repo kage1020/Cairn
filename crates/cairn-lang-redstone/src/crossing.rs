@@ -1170,6 +1170,116 @@ mod tests {
     }
 
     #[test]
+    fn buffer_coord_index_at_kth_boundary() {
+        // Pins the mapping `k → path_index = k * DUST_ATTENUATION_LIMIT`
+        // that `allocate_buffer_coords` inlines. A driver segment of 46
+        // blocks (Manhattan) trips the attenuation limit three times, so
+        // three buffer coords land at `k = 1, 2, 3`. The delay pass has
+        // a mirrored boundary-row test on the tick side of the same
+        // formula (`s → buffers`); this test is its structural mirror
+        // on the coord side — a slip in either pass's
+        // `(segment - 1) / DUST_ATTENUATION_LIMIT` derivation trips a
+        // dedicated row rather than the aggregate delay total.
+        //
+        // L-shape `(0, 0, 1) → (45, 0, 0)` walks x++ 45 steps then
+        // z-- 1 step, so `path[k * 15]` is `(k * 15, 0, 1)` for
+        // `k = 1, 2, 3` (path[45] is the last x-axis step before the
+        // final z-- to the sink). No collision → every buffer stays on
+        // plane, which is the invariant the boundary formula depends
+        // on: if a k-th buffer landed off-formula, the plane candidate
+        // would drift too and the layer assertion would trip alongside
+        // the coord assertion.
+        let mut ir = PlacementIr::new(Edition::Java);
+        ir.region = Some(reservation(50, 3, 3));
+        ir.inputs.push(crate::netlist_ir::NetlistInput {
+            name: cairn_lang_core::ast::DottedRef::new("sig".into(), vec!["a".into()]),
+            span: Span::default(),
+        });
+        ir.cells.push(placed_cell(
+            EditionCell::JavaRepeaterOr,
+            CellCoord::new(45, 0, 0),
+            vec![CellPortDriver {
+                port: PortName::A,
+                net: NetRef::Input(0),
+            }],
+        ));
+        let legalized = compile_crossing(&scoped(ScopeKind::Struct, "boundary", ir));
+        assert!(
+            legalized.diagnostics.is_empty(),
+            "clean fixture: {:?}",
+            legalized.diagnostics,
+        );
+        let bufs = legalized.scoped.scopes[0].ir.cells[0].buffer_coords();
+        assert_eq!(
+            bufs.len(),
+            3,
+            "segment 46 → floor((46-1)/15) = 3 buffers, got {bufs:?}",
+        );
+        assert_eq!(
+            bufs[0].coord,
+            CellCoord::new(15, 0, 1),
+            "k=1 buffer sits at path[15]",
+        );
+        assert_eq!(
+            bufs[1].coord,
+            CellCoord::new(30, 0, 1),
+            "k=2 buffer sits at path[30]",
+        );
+        assert_eq!(
+            bufs[2].coord,
+            CellCoord::new(45, 0, 1),
+            "k=3 buffer sits at path[45] — the last x-axis step before the final z decrement",
+        );
+        for b in bufs {
+            assert_eq!(
+                b.coord.layer,
+                RouteLayer::Plane,
+                "no collision → every k-th buffer stays on plane; got {b:?}",
+            );
+        }
+    }
+
+    #[test]
+    fn buffer_coord_index_at_max_segment_boundary() {
+        // Companion to `buffer_coord_index_at_kth_boundary`: pins the
+        // formula against the far end of the range the delay pass's
+        // `MAX_ATTENUATION_SEGMENT = 256` sanity cap permits. A
+        // segment of exactly 256 blocks yields 17 buffers at
+        // `k * 15` for `k = 1..=17`, matching the tick-side boundary
+        // table row for that segment. Together the two tests bracket
+        // the piecewise formula at both boundaries on the coord side.
+        let mut ir = PlacementIr::new(Edition::Java);
+        ir.region = Some(reservation(256, 3, 3));
+        ir.inputs.push(crate::netlist_ir::NetlistInput {
+            name: cairn_lang_core::ast::DottedRef::new("sig".into(), vec!["a".into()]),
+            span: Span::default(),
+        });
+        ir.cells.push(placed_cell(
+            EditionCell::JavaRepeaterOr,
+            CellCoord::new(255, 0, 0),
+            vec![CellPortDriver {
+                port: PortName::A,
+                net: NetRef::Input(0),
+            }],
+        ));
+        let legalized = compile_crossing(&scoped(ScopeKind::Struct, "max_boundary", ir));
+        assert!(
+            legalized.diagnostics.is_empty(),
+            "segment == MAX_ATTENUATION_SEGMENT must legalize cleanly: {:?}",
+            legalized.diagnostics,
+        );
+        let bufs = legalized.scoped.scopes[0].ir.cells[0].buffer_coords();
+        assert_eq!(bufs.len(), 17, "segment 256 → 17 buffers, got {bufs:?}");
+        for k in 1..=17u32 {
+            assert_eq!(
+                bufs[(k - 1) as usize].coord,
+                CellCoord::new(k * 15, 0, 1),
+                "k={k} buffer must sit at path[k * 15]",
+            );
+        }
+    }
+
+    #[test]
     #[should_panic(expected = "topological invariant broken")]
     fn out_of_range_net_ref_cell_panics_loudly() {
         // Mirrors `delay.rs`'s equivalent guard: a hand-built IR with
@@ -1188,5 +1298,156 @@ mod tests {
             }],
         ));
         let _ = compile_crossing(&scoped(ScopeKind::Struct, "broken", ir));
+    }
+
+    mod phase4_invariant {
+        //! Property tests for the crossing / delay agreement invariant
+        //! (see the `phase4_buffer_tick_invariant_holds` doc). Kept
+        //! inside the crossing pass's own crate-internal test module so
+        //! the strategy can hand-build `Unrouted` [`PlacedCellNode`]s
+        //! (the `PlacementPhase` variants and the `pub(crate)`
+        //! `phase` field are not reachable from `tests/crossing.rs`).
+        use proptest::prelude::*;
+
+        use super::{
+            CellCoord, CellPortDriver, Edition, EditionCell, NetRef, PlacedCellNode, PlacementIr,
+            PlacementPhase, PortName, ScopeKind, Span, compile_crossing, placed_cell, reservation,
+            scoped,
+        };
+        use crate::delay::{BUFFER_REPEATER_TICKS, compile_delay};
+        use crate::routing::compile_routing;
+
+        /// Strategy over sink positions for the phase-4 invariant
+        /// property test. Each `x` in the returned `Vec` seeds one
+        /// cell at `(x, 0, 0)` driven from `Input(0)` at `(0, 0, 1)`,
+        /// so the driver segment length is `x + 1`. Positions in
+        /// `1..=99` cover both the sub-limit segments (`x + 1 ≤ 15`,
+        /// zero buffers) and the multi-boundary segments
+        /// (`x + 1 > 15`, one or more buffers) — the mix keeps
+        /// `buffer_total` non-zero on the majority of cases so the
+        /// invariant is discriminating.
+        fn phase4_scope_strategy() -> impl Strategy<Value = Vec<u32>> {
+            prop::collection::vec(1u32..=99u32, 1..=3)
+        }
+
+        /// Placate an unused-import lint when the outer `mod tests`
+        /// re-exports items the inner `super::*` glob would otherwise
+        /// re-import; keeps `placed_cell` alive as an intentional
+        /// symbol import for future cases that want the shorter
+        /// helper.
+        #[allow(dead_code)]
+        fn _keep_placed_cell_alive() -> PlacedCellNode {
+            placed_cell(
+                EditionCell::JavaRepeaterOr,
+                CellCoord::new(0, 0, 0),
+                Vec::new(),
+            )
+        }
+
+        proptest! {
+            #![proptest_config(ProptestConfig { cases: 32, ..ProptestConfig::default() })]
+
+            /// Crossing / delay agreement invariant: on every emitted
+            /// scope, `Σ cell.buffer_coords().len() ×
+            /// BUFFER_REPEATER_TICKS` must equal `Σ (cell.delay_ticks()
+            /// − cell.cell.base_delay_ticks())`. A drift in either
+            /// pass's `(segment − 1) / DUST_ATTENUATION_LIMIT`
+            /// derivation, in `BUFFER_REPEATER_TICKS`, or in the
+            /// per-edition base-delay table trips this shared
+            /// assertion rather than each pass's own boundary rows
+            /// in isolation.
+            ///
+            /// Uses hand-built `Unrouted` cells threaded through
+            /// `compile_routing → compile_delay → compile_crossing`.
+            /// `checked_sub` / `checked_mul` refuse to silently clamp
+            /// on the failure direction the invariant is meant to
+            /// catch (a delay pass regressing below the edition
+            /// `base_delay_ticks`, or a buffer count overflowing
+            /// `u32`).
+            #[test]
+            fn phase4_buffer_tick_invariant_holds(xs in phase4_scope_strategy()) {
+                let mut ir = PlacementIr::new(Edition::Java);
+                ir.region = Some(reservation(200, 3, 3));
+                ir.inputs.push(crate::netlist_ir::NetlistInput {
+                    name: cairn_lang_core::ast::DottedRef::new("sig".into(), vec!["a".into()]),
+                    span: Span::default(),
+                });
+                for &x in &xs {
+                    ir.cells.push(PlacedCellNode {
+                        cell: EditionCell::JavaRepeaterOr,
+                        drivers: vec![CellPortDriver {
+                            port: PortName::A,
+                            net: NetRef::Input(0),
+                        }],
+                        coord: CellCoord::new(x, 0, 0),
+                        phase: PlacementPhase::Unrouted,
+                        span: Span::default(),
+                    });
+                }
+                let routed = compile_routing(&scoped(ScopeKind::Struct, "prop", ir));
+                prop_assert!(
+                    routed.diagnostics.is_empty(),
+                    "routing diagnostics for xs={:?}: {:?}",
+                    xs,
+                    routed.diagnostics,
+                );
+                let delayed = compile_delay(&routed.scoped);
+                prop_assert!(
+                    delayed.diagnostics.is_empty(),
+                    "delay diagnostics for xs={:?}: {:?}",
+                    xs,
+                    delayed.diagnostics,
+                );
+                let legalized = compile_crossing(&delayed.scoped);
+                prop_assert!(
+                    legalized.diagnostics.is_empty(),
+                    "crossing diagnostics for xs={:?}: {:?}",
+                    xs,
+                    legalized.diagnostics,
+                );
+
+                for entry in &legalized.scoped.scopes {
+                    let buffer_total: u32 = entry
+                        .ir
+                        .cells
+                        .iter()
+                        .map(|c| {
+                            u32::try_from(c.buffer_coords().len())
+                                .expect("buffer_coords count fits in u32")
+                        })
+                        .sum();
+                    let mut delta_total: u32 = 0;
+                    for cell in &entry.ir.cells {
+                        let dt = cell
+                            .delay_ticks()
+                            .expect("legalized cells carry Some(delay_ticks)");
+                        let base = cell.cell.base_delay_ticks();
+                        let delta = dt.checked_sub(base);
+                        prop_assert!(
+                            delta.is_some(),
+                            "delay_ticks {} < base_delay_ticks {} for cell at {:?} — delay pass regressed below the edition base",
+                            dt,
+                            base,
+                            cell.coord,
+                        );
+                        delta_total = delta_total
+                            .checked_add(delta.unwrap())
+                            .expect("delta_total sum overflowed u32");
+                    }
+                    let lhs = buffer_total
+                        .checked_mul(BUFFER_REPEATER_TICKS)
+                        .expect("buffer_total × BUFFER_REPEATER_TICKS overflowed u32");
+                    prop_assert_eq!(
+                        lhs,
+                        delta_total,
+                        "buffer count × BUFFER_REPEATER_TICKS ({}) must equal Σ(delay_ticks − base_delay_ticks) ({}) for scope `{}` with xs={:?}",
+                        lhs,
+                        delta_total,
+                        entry.name,
+                        xs,
+                    );
+                }
+            }
+        }
     }
 }
