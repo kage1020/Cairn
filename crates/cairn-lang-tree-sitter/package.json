@@ -10,6 +10,7 @@
   ],
   "author": "kage1020 and the Cairn authors",
   "license": "Apache-2.0",
+  "packageManager": "pnpm@10.14.0",
   "main": "bindings/node",
   "types": "bindings/node/index.d.ts",
   "files": [
