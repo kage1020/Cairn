@@ -1,0 +1,51 @@
+==================
+Cottage struct
+==================
+
+struct cottage size=9x7
+  floor mat_slot=floor
+  walls class=outer mat_slot=wall height=4
+  door side=front at=center
+
+---
+
+(source_file
+  (struct_decl
+    (identifier)
+    (attribute_list
+      (attribute (identifier) (size_literal (integer) (integer))))
+    (struct_body
+      (member_stmt (member_keyword)
+        (attribute_list (attribute (identifier) (identifier))))
+      (member_stmt (member_keyword)
+        (attribute_list
+          (attribute (identifier) (identifier))
+          (attribute (identifier) (identifier))
+          (attribute (identifier) (integer))))
+      (member_stmt (member_keyword)
+        (attribute_list
+          (attribute (identifier) (identifier))
+          (attribute (identifier) (identifier)))))))
+
+==================
+Member with arrow to signal
+==================
+
+struct gatehouse size=7x5
+  pressure_plate id=plate at=front.outside offset=0 y=0 -> sig.step
+
+---
+
+(source_file
+  (struct_decl
+    (identifier)
+    (attribute_list
+      (attribute (identifier) (size_literal (integer) (integer))))
+    (struct_body
+      (member_stmt (member_keyword)
+        (attribute_list
+          (attribute (identifier) (identifier))
+          (attribute (identifier) (signal_ref (identifier) (identifier)))
+          (attribute (identifier) (integer))
+          (attribute (identifier) (integer)))
+        (signal_ref (identifier) (identifier))))))

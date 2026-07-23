@@ -9,12 +9,26 @@ function body($, item) {
   return seq($._indent, repeat(seq(item, $._newline)), $._dedent);
 }
 
+/**
+ * Build a `struct`/`def`/`site` declaration rule: `keyword name [args]`,
+ * newline-terminated, followed by an indented `struct_body`.
+ */
+function declOf(keyword) {
+  return $ => seq(
+    keyword,
+    field('name', $.identifier),
+    optional(field('args', $.attribute_list)),
+    $._newline,
+    field('body', $.struct_body),
+  );
+}
+
 module.exports = grammar({
   name: 'cairn',
 
   extras: $ => [/ +/, $.comment],
 
-  externals: $ => [$._indent, $._dedent, $._newline],
+  externals: $ => [$._indent, $._dedent, $._newline, $._size_x],
 
   word: $ => $.identifier,
 
@@ -26,8 +40,38 @@ module.exports = grammar({
 
     _top_level_decl: $ => choice(
       $.theme_decl,
-      /* struct/def/site added in later tasks */
+      $.struct_decl,
+      $.def_decl,
+      $.site_decl,
     ),
+
+    struct_decl: declOf('struct'),
+    def_decl:    declOf('def'),
+    site_decl:   declOf('site'),
+
+    struct_body: $ => seq(
+      $._indent,
+      repeat(seq($._struct_body_item, $._newline)),
+      $._dedent,
+    ),
+
+    _struct_body_item: $ => choice($.member_stmt /* extended in later tasks */),
+
+    member_stmt: $ => seq(
+      field('keyword', $.member_keyword),
+      optional(field('args', $.attribute_list)),
+      optional(seq('->', field('output', $.signal_ref))),
+    ),
+
+    member_keyword: $ => choice(
+      'floor', 'walls', 'door', 'window', 'roof', 'stair',
+      'pressure_plate', 'circuit', 'place', 'connect',
+    ),
+
+    signal_ref: $ => prec.left(seq(
+      $.identifier,
+      repeat1(seq('.', $.identifier)),
+    )),
 
     theme_decl: $ => seq(
       'theme',
@@ -62,7 +106,25 @@ module.exports = grammar({
 
     material_ref: $ => seq('@', $.identifier, repeat(seq('.', $.identifier))),
 
-    size_literal: $ => token(seq(/[0-9]+/, 'x', /[0-9]+/)),
+    // The `x` separator is produced by the external scanner (`$._size_x`)
+    // rather than a plain `token.immediate('x')`. Reason: `attribute_list`
+    // is `repeat1($.attribute)`, so an `identifier` token starting a second
+    // attribute is *also* grammatically valid right where the separator
+    // must appear; for input like `9x7`, tree-sitter's keyword-extraction
+    // machinery (triggered by `word: $.identifier`) greedily scans the
+    // word-shaped run `x7`, and since that whole run isn't a registered
+    // keyword, falls back to a generic `identifier` token covering `x7` —
+    // so a grammar-level literal `x` token can never win against it,
+    // regardless of precedence (longest match is compared before
+    // precedence). The external scanner runs before that machinery, is
+    // only ever consulted where the grammar expects this separator, and
+    // is checked before extras are skipped, which is exactly what enforces
+    // immediate adjacency (`9 x 7` must not parse as one size literal).
+    size_literal: $ => seq(
+      alias(token(/[0-9]+/), $.integer),
+      $._size_x,
+      alias(token.immediate(/[0-9]+/), $.integer),
+    ),
 
     directive: $ => choice(
       seq(field('name', alias('@cairn', $.directive_name)),
@@ -88,6 +150,7 @@ module.exports = grammar({
     _value: $ => choice(
       $.size_literal,
       $.material_ref,
+      prec(2, $.signal_ref),
       $.integer,
       $.boolean,
       $.string,

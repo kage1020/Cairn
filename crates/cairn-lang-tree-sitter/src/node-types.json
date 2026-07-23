@@ -34,6 +34,10 @@
             "named": true
           },
           {
+            "type": "signal_ref",
+            "named": true
+          },
+          {
             "type": "size_literal",
             "named": true
           },
@@ -70,6 +74,42 @@
     "fields": {}
   },
   {
+    "type": "def_decl",
+    "named": true,
+    "fields": {
+      "args": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "attribute_list",
+            "named": true
+          }
+        ]
+      },
+      "body": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "struct_body",
+            "named": true
+          }
+        ]
+      },
+      "name": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "identifier",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
     "type": "directive",
     "named": true,
     "fields": {
@@ -100,6 +140,11 @@
     }
   },
   {
+    "type": "integer",
+    "named": true,
+    "fields": {}
+  },
+  {
     "type": "material_ref",
     "named": true,
     "fields": {},
@@ -112,6 +157,47 @@
           "named": true
         }
       ]
+    }
+  },
+  {
+    "type": "member_keyword",
+    "named": true,
+    "fields": {}
+  },
+  {
+    "type": "member_stmt",
+    "named": true,
+    "fields": {
+      "args": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "attribute_list",
+            "named": true
+          }
+        ]
+      },
+      "keyword": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "member_keyword",
+            "named": true
+          }
+        ]
+      },
+      "output": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "signal_ref",
+            "named": true
+          }
+        ]
+      }
     }
   },
   {
@@ -160,6 +246,72 @@
     }
   },
   {
+    "type": "signal_ref",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "identifier",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "site_decl",
+    "named": true,
+    "fields": {
+      "args": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "attribute_list",
+            "named": true
+          }
+        ]
+      },
+      "body": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "struct_body",
+            "named": true
+          }
+        ]
+      },
+      "name": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "identifier",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
+    "type": "size_literal",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "integer",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
     "type": "slot_binding",
     "named": true,
     "fields": {
@@ -195,7 +347,19 @@
       "required": false,
       "types": [
         {
+          "type": "def_decl",
+          "named": true
+        },
+        {
           "type": "directive",
+          "named": true
+        },
+        {
+          "type": "site_decl",
+          "named": true
+        },
+        {
+          "type": "struct_decl",
           "named": true
         },
         {
@@ -203,6 +367,57 @@
           "named": true
         }
       ]
+    }
+  },
+  {
+    "type": "struct_body",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": false,
+      "types": [
+        {
+          "type": "member_stmt",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "struct_decl",
+    "named": true,
+    "fields": {
+      "args": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "attribute_list",
+            "named": true
+          }
+        ]
+      },
+      "body": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "struct_body",
+            "named": true
+          }
+        ]
+      },
+      "name": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "identifier",
+            "named": true
+          }
+        ]
+      }
     }
   },
   {
@@ -272,6 +487,10 @@
         },
         {
           "type": "material_ref",
+          "named": true
+        },
+        {
+          "type": "signal_ref",
           "named": true
         },
         {
@@ -353,16 +572,36 @@
     "named": false
   },
   {
+    "type": "circuit",
+    "named": false
+  },
+  {
     "type": "comment",
     "named": true,
     "extra": true
+  },
+  {
+    "type": "connect",
+    "named": false
+  },
+  {
+    "type": "def",
+    "named": false
   },
   {
     "type": "directive_name",
     "named": true
   },
   {
+    "type": "door",
+    "named": false
+  },
+  {
     "type": "false",
+    "named": false
+  },
+  {
+    "type": "floor",
     "named": false
   },
   {
@@ -370,20 +609,36 @@
     "named": true
   },
   {
-    "type": "integer",
-    "named": true
+    "type": "place",
+    "named": false
   },
   {
-    "type": "size_literal",
-    "named": true
+    "type": "pressure_plate",
+    "named": false
+  },
+  {
+    "type": "roof",
+    "named": false
+  },
+  {
+    "type": "site",
+    "named": false
   },
   {
     "type": "slot",
     "named": false
   },
   {
+    "type": "stair",
+    "named": false
+  },
+  {
     "type": "string",
     "named": true
+  },
+  {
+    "type": "struct",
+    "named": false
   },
   {
     "type": "theme",
@@ -400,5 +655,13 @@
   {
     "type": "version_literal",
     "named": true
+  },
+  {
+    "type": "walls",
+    "named": false
+  },
+  {
+    "type": "window",
+    "named": false
   }
 ]

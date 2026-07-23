@@ -5,6 +5,7 @@ enum TokenType {
   INDENT,
   DEDENT,
   NEWLINE,
+  SIZE_X,
 };
 
 typedef struct {
@@ -68,6 +69,25 @@ static bool at_line_break(TSLexer *lexer) {
 
 bool tree_sitter_cairn_external_scanner_scan(void *payload, TSLexer *lexer, const bool *valid_symbols) {
   Scanner *s = (Scanner *)payload;
+
+  // Size-literal separator `x` in e.g. `9x7`. Handled by the external
+  // scanner (rather than a plain grammar-level `token.immediate('x')`)
+  // because tree-sitter's keyword-extraction machinery, triggered by
+  // `word: $.identifier`, greedily scans any word-shaped run of characters
+  // starting at a letter (here, `x7`) before checking it against the
+  // keyword table; since `x7` is not a registered keyword, extraction falls
+  // back to a generic `identifier` token covering `x7`, so a plain literal
+  // 'x' token can never win the match. The external scanner runs before
+  // that machinery and is only ever consulted where the grammar expects
+  // this separator, so it can commit to the single `x` character directly.
+  // It is checked before any extras (spaces) are skipped, which is exactly
+  // what enforces immediate adjacency: `9 x 7` must not parse as one size
+  // literal.
+  if (valid_symbols[SIZE_X] && lexer->lookahead == 'x') {
+    advance(lexer);
+    lexer->result_symbol = SIZE_X;
+    return true;
+  }
 
   // At EOF: synthesize the missing NEWLINE first (matches
   // cairn-lang-core::lex::scan_line_body, which emits a Newline token for a
