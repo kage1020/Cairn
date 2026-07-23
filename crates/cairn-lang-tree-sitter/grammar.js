@@ -55,7 +55,31 @@ module.exports = grammar({
       $._dedent,
     ),
 
-    _struct_body_item: $ => choice($.member_stmt, $.nested_scope),
+    _struct_body_item: $ => choice($.member_stmt, $.nested_scope, $.logic_decl),
+
+    logic_decl: $ => seq(
+      'logic',
+      field('name', $.signal_ref),
+      '=',
+      field('value', $._bool_expr),
+    ),
+
+    _bool_expr: $ => choice(
+      $.binary_expression,
+      $.unary_expression,
+      $.parenthesized_expression,
+      $.signal_ref,
+      $.boolean,
+    ),
+
+    binary_expression: $ => choice(
+      prec.left(1, seq(field('lhs', $._bool_expr), 'or',  field('rhs', $._bool_expr))),
+      prec.left(2, seq(field('lhs', $._bool_expr), 'and', field('rhs', $._bool_expr))),
+    ),
+
+    unary_expression: $ => prec(3, seq('not', field('operand', $._bool_expr))),
+
+    parenthesized_expression: $ => seq('(', $._bool_expr, ')'),
 
     nested_scope: $ => seq(
       field('keyword', alias(choice('level', 'room'), $.identifier)),

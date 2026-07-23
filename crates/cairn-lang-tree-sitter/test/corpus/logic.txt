@@ -1,0 +1,44 @@
+==================
+logic with or
+==================
+
+struct gatehouse size=7x5
+  logic sig.open = sig.step or sig.exit
+
+---
+
+(source_file
+  (struct_decl
+    (identifier)
+    (attribute_list
+      (attribute (identifier) (size_literal (integer) (integer))))
+    (struct_body
+      (logic_decl
+        (signal_ref (identifier) (identifier))
+        (binary_expression
+          (signal_ref (identifier) (identifier))
+          (signal_ref (identifier) (identifier)))))))
+
+==================
+logic with and, not, parens precedence
+==================
+
+struct sample size=5x5
+  logic sig.out = not sig.a and (sig.b or sig.c)
+
+---
+
+(source_file
+  (struct_decl
+    (identifier)
+    (attribute_list
+      (attribute (identifier) (size_literal (integer) (integer))))
+    (struct_body
+      (logic_decl
+        (signal_ref (identifier) (identifier))
+        (binary_expression
+          (unary_expression (signal_ref (identifier) (identifier)))
+          (parenthesized_expression
+            (binary_expression
+              (signal_ref (identifier) (identifier))
+              (signal_ref (identifier) (identifier)))))))))
