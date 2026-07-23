@@ -8,6 +8,7 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 
 use tree_sitter::Parser;
 
@@ -44,4 +45,36 @@ fn all_examples_parse_without_error() {
         }
     }
     assert!(failures.is_empty(), "grammar rejected: {failures:#?}");
+}
+
+/// Regression guard for `queries/highlights.scm` and `queries/locals.scm`:
+/// shells out to the locally installed `tree-sitter` CLI (a dev dependency
+/// installed via `pnpm install`) and compares its `highlight` output for
+/// `examples/cottage.crn` against the golden ANSI snapshot frozen in
+/// `test/highlight/cottage.ansi`. A diff here means either the grammar or
+/// the queries changed in a way that alters highlighting; regenerate the
+/// golden deliberately if so.
+#[test]
+fn cottage_highlight_golden_is_stable() {
+    let golden = include_str!("../test/highlight/cottage.ansi");
+
+    let cli = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("node_modules")
+        .join(".bin")
+        .join(if cfg!(windows) {
+            "tree-sitter.cmd"
+        } else {
+            "tree-sitter"
+        });
+
+    let output = Command::new(cli)
+        .current_dir(env!("CARGO_MANIFEST_DIR"))
+        .args(["highlight", "../../examples/cottage.crn"])
+        .output()
+        .expect("run tree-sitter CLI");
+
+    assert!(output.status.success(), "cli failed: {output:?}");
+    let rendered = String::from_utf8(output.stdout).expect("utf-8");
+
+    assert_eq!(rendered, golden, "highlight output drifted from golden");
 }

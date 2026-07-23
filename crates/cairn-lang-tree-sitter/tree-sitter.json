@@ -1,0 +1,40 @@
+{
+  "grammars": [
+    {
+      "name": "cairn",
+      "camelcase": "Cairn",
+      "scope": "source.cairn",
+      "path": ".",
+      "file-types": [
+        "crn",
+        "ansi"
+      ],
+      "highlights": "queries/highlights.scm",
+      "locals": "queries/locals.scm",
+      "injections": "queries/injections.scm"
+    }
+  ],
+  "metadata": {
+    "version": "2026.7.2",
+    "license": "Apache-2.0",
+    "description": "tree-sitter grammar for the Cairn build description language",
+    "authors": [
+      {
+        "name": "kage1020 and the Cairn authors"
+      }
+    ],
+    "links": {
+      "repository": "https://github.com/kage1020/Cairn",
+      "homepage": "https://github.com/kage1020/Cairn"
+    }
+  },
+  "bindings": {
+    "c": true,
+    "go": false,
+    "node": true,
+    "python": false,
+    "rust": true,
+    "swift": false,
+    "zig": false
+  }
+}
