@@ -46,7 +46,7 @@
   "extras": [
     {
       "type": "PATTERN",
-      "value": "[ \\t]+"
+      "value": " +"
     },
     {
       "type": "SYMBOL",

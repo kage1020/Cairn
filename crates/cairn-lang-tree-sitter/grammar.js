@@ -12,7 +12,7 @@ function body($, item) {
 module.exports = grammar({
   name: 'cairn',
 
-  extras: $ => [/[ \t]+/, $.comment],
+  extras: $ => [/ +/, $.comment],
 
   externals: $ => [$._indent, $._dedent, $._newline],
 

@@ -127,9 +127,8 @@ static bool ts_lex(TSLexer *lexer, TSStateId state) {
   switch (state) {
     case 0:
       if (eof) ADVANCE(1);
+      if (lookahead == ' ') SKIP(0);
       if (lookahead == '#') ADVANCE(3);
-      if (lookahead == '\t' ||
-          lookahead == ' ') SKIP(0);
       if (('A' <= lookahead && lookahead <= 'Z') ||
           lookahead == '_' ||
           ('a' <= lookahead && lookahead <= 'z')) ADVANCE(2);

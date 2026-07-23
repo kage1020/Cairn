@@ -69,8 +69,15 @@ static bool at_line_break(TSLexer *lexer) {
 bool tree_sitter_cairn_external_scanner_scan(void *payload, TSLexer *lexer, const bool *valid_symbols) {
   Scanner *s = (Scanner *)payload;
 
-  // Emit trailing DEDENTs at EOF.
+  // At EOF: synthesize the missing NEWLINE first (matches
+  // cairn-lang-core::lex::scan_line_body, which emits a Newline token for a
+  // final content line with no trailing line break before closing any
+  // remaining indents), then emit trailing DEDENTs.
   if (lexer->eof(lexer)) {
+    if (valid_symbols[NEWLINE]) {
+      lexer->result_symbol = NEWLINE;
+      return true;
+    }
     if (valid_symbols[DEDENT] && s->indent_stack.size > 1) {
       array_pop(&s->indent_stack);
       lexer->result_symbol = DEDENT;
@@ -110,6 +117,10 @@ bool tree_sitter_cairn_external_scanner_scan(void *payload, TSLexer *lexer, cons
   }
 
   if (lexer->eof(lexer)) {
+    if (valid_symbols[NEWLINE]) {
+      lexer->result_symbol = NEWLINE;
+      return true;
+    }
     if (valid_symbols[DEDENT] && s->indent_stack.size > 1) {
       array_pop(&s->indent_stack);
       lexer->result_symbol = DEDENT;
