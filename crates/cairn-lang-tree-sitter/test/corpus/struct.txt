@@ -16,16 +16,16 @@ struct cottage size=9x7
       (attribute (identifier) (size_literal (integer) (integer))))
     (struct_body
       (member_stmt (member_keyword)
-        (attribute_list (attribute (identifier) (identifier))))
+        (command_arg_list (command_arg (attribute (identifier) (identifier)))))
       (member_stmt (member_keyword)
-        (attribute_list
-          (attribute (identifier) (identifier))
-          (attribute (identifier) (identifier))
-          (attribute (identifier) (integer))))
+        (command_arg_list
+          (command_arg (attribute (identifier) (identifier)))
+          (command_arg (attribute (identifier) (identifier)))
+          (command_arg (attribute (identifier) (integer)))))
       (member_stmt (member_keyword)
-        (attribute_list
-          (attribute (identifier) (identifier))
-          (attribute (identifier) (identifier)))))))
+        (command_arg_list
+          (command_arg (attribute (identifier) (identifier)))
+          (command_arg (attribute (identifier) (identifier))))))))
 
 ==================
 Member with arrow to signal
@@ -43,9 +43,9 @@ struct gatehouse size=7x5
       (attribute (identifier) (size_literal (integer) (integer))))
     (struct_body
       (member_stmt (member_keyword)
-        (attribute_list
-          (attribute (identifier) (identifier))
-          (attribute (identifier) (signal_ref (identifier) (identifier)))
-          (attribute (identifier) (integer))
-          (attribute (identifier) (integer)))
+        (command_arg_list
+          (command_arg (attribute (identifier) (identifier)))
+          (command_arg (attribute (identifier) (signal_ref (identifier) (identifier))))
+          (command_arg (attribute (identifier) (integer)))
+          (command_arg (attribute (identifier) (integer))))
         (signal_ref (identifier) (identifier))))))

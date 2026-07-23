@@ -21,7 +21,7 @@ struct keep size=11x9
           (attribute (identifier) (integer)))
         (struct_body
           (member_stmt (member_keyword)
-            (attribute_list
-              (attribute (identifier) (identifier))
-              (attribute (identifier) (identifier))
-              (attribute (identifier) (identifier)))))))))
+            (command_arg_list
+              (command_arg (attribute (identifier) (identifier)))
+              (command_arg (attribute (identifier) (identifier)))
+              (command_arg (attribute (identifier) (identifier))))))))))

@@ -10,6 +10,17 @@ enum TokenType {
 
 typedef struct {
   Array(uint16_t) indent_stack;
+  // Set once an end-of-file NEWLINE has been synthesized since the last
+  // DEDENT. Grammar sites that need "one or more" newlines
+  // (`repeat1($._newline)`, used to swallow blank/comment lines between
+  // same-level items) would otherwise re-request NEWLINE forever at EOF:
+  // the synthesized token is zero-width (no `advance()` call), so nothing
+  // ever bounds the repeat. A DEDENT always closes out the enclosing body
+  // before an *outer* site can ask for its own newline, so resetting on
+  // DEDENT lets every nesting level still get its own one-shot synthesized
+  // newline while capping any single `repeat1` to exactly one synthetic
+  // match.
+  bool eof_newline_used;
 } Scanner;
 
 static inline void advance(TSLexer *lexer) { lexer->advance(lexer, false); }
@@ -19,6 +30,7 @@ void *tree_sitter_cairn_external_scanner_create(void) {
   Scanner *s = ts_calloc(1, sizeof(Scanner));
   array_init(&s->indent_stack);
   array_push(&s->indent_stack, 0);
+  s->eof_newline_used = false;
   return s;
 }
 
@@ -41,12 +53,17 @@ unsigned tree_sitter_cairn_external_scanner_serialize(void *payload, char *buffe
     memcpy(buffer + size, &v, sizeof(v));
     size += sizeof(v);
   }
+  if (size + sizeof(uint8_t) > TREE_SITTER_SERIALIZATION_BUFFER_SIZE) return 0;
+  uint8_t eof_flag = s->eof_newline_used ? 1 : 0;
+  memcpy(buffer + size, &eof_flag, sizeof(eof_flag));
+  size += sizeof(eof_flag);
   return size;
 }
 
 void tree_sitter_cairn_external_scanner_deserialize(void *payload, const char *buffer, unsigned length) {
   Scanner *s = (Scanner *)payload;
   array_clear(&s->indent_stack);
+  s->eof_newline_used = false;
   if (length == 0) {
     array_push(&s->indent_stack, 0);
     return;
@@ -60,6 +77,12 @@ void tree_sitter_cairn_external_scanner_deserialize(void *payload, const char *b
     memcpy(&v, buffer + offset, sizeof(v));
     offset += sizeof(v);
     array_push(&s->indent_stack, v);
+  }
+  if (offset + sizeof(uint8_t) <= length) {
+    uint8_t eof_flag;
+    memcpy(&eof_flag, buffer + offset, sizeof(eof_flag));
+    offset += sizeof(eof_flag);
+    s->eof_newline_used = eof_flag != 0;
   }
 }
 
@@ -93,13 +116,21 @@ bool tree_sitter_cairn_external_scanner_scan(void *payload, TSLexer *lexer, cons
   // cairn-lang-core::lex::scan_line_body, which emits a Newline token for a
   // final content line with no trailing line break before closing any
   // remaining indents), then emit trailing DEDENTs.
+  //
+  // The synthesized NEWLINE is zero-width (no `advance()` call), so it is
+  // gated by `eof_newline_used`: a `repeat1($._newline)` site (blank/
+  // comment lines between same-level items) would otherwise be offered an
+  // endless run of these and never terminate. DEDENT resets the flag, so
+  // each enclosing body still gets its own one-shot synthesized newline.
   if (lexer->eof(lexer)) {
-    if (valid_symbols[NEWLINE]) {
+    if (valid_symbols[NEWLINE] && !s->eof_newline_used) {
+      s->eof_newline_used = true;
       lexer->result_symbol = NEWLINE;
       return true;
     }
     if (valid_symbols[DEDENT] && s->indent_stack.size > 1) {
       array_pop(&s->indent_stack);
+      s->eof_newline_used = false;
       lexer->result_symbol = DEDENT;
       return true;
     }
@@ -137,12 +168,14 @@ bool tree_sitter_cairn_external_scanner_scan(void *payload, TSLexer *lexer, cons
   }
 
   if (lexer->eof(lexer)) {
-    if (valid_symbols[NEWLINE]) {
+    if (valid_symbols[NEWLINE] && !s->eof_newline_used) {
+      s->eof_newline_used = true;
       lexer->result_symbol = NEWLINE;
       return true;
     }
     if (valid_symbols[DEDENT] && s->indent_stack.size > 1) {
       array_pop(&s->indent_stack);
+      s->eof_newline_used = false;
       lexer->result_symbol = DEDENT;
       return true;
     }

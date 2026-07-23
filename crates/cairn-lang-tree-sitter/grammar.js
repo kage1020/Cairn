@@ -1,23 +1,52 @@
 /// <reference types="tree-sitter-cli/dsl" />
 
 /**
- * Wrap an indented block: `_indent`, then zero or more `item` each followed
- * by `_newline`, then `_dedent`. Used by later rules for indent-structured
- * bodies (theme_body, struct_body, ...).
+ * Wrap an indented block: `_indent`, then zero or more items, then
+ * `_dedent`. Used by later rules for indent-structured bodies (theme_body,
+ * struct_body, ...).
+ *
+ * Two item shapes:
+ *  - `lineItem`s are single-line (no body of their own), so *this* rule is
+ *    on the hook for their line terminator: each is followed by
+ *    `repeat1($._newline)`.
+ *  - `selfTerminating` (optional) items already end in their own nested
+ *    `$._dedent` (e.g. `nested_scope`, itself a `struct_body`), so no
+ *    trailing `$._newline` follows them here — there usually isn't a real
+ *    newline character left to consume at that point, since a blank line
+ *    between that item and whatever comes next is already swallowed by
+ *    the *nested* body's own trailing `repeat1($._newline)` (see below).
+ *
+ * `repeat1($._newline)` (not a single `$._newline`) after a lineItem: a
+ * blank or comment-only line between two body items is invisible to the
+ * reference lexer (cairn-lang-core::lex skips it without emitting a
+ * token), but the external scanner here emits exactly one NEWLINE per
+ * physical line break — so each blank line between items surfaces as one
+ * more NEWLINE token the grammar must be able to consume. Whichever
+ * lineItem immediately precedes a body/top-level boundary greedily
+ * consumes every blank line up to that boundary, so nothing else needs to
+ * additionally account for them.
  */
-function body($, item) {
-  return seq($._indent, repeat(seq(item, $._newline)), $._dedent);
+function body($, lineItem, selfTerminating) {
+  const alternatives = [seq(lineItem, repeat1($._newline))];
+  if (selfTerminating) alternatives.push(selfTerminating);
+  return seq($._indent, repeat(choice(...alternatives)), $._dedent);
 }
 
 /**
- * Build a `struct`/`def`/`site` declaration rule: `keyword name [args]`,
- * newline-terminated, followed by an indented `struct_body`.
+ * Build a `struct`/`def`/`site` declaration rule: `keyword name [args]
+ * [:]`, newline-terminated, followed by an indented `struct_body`. The
+ * trailing colon is optional, matching
+ * cairn-lang-core::parse::Parser::consume_optional_colon, called after
+ * struct/def/site headers exactly as it is after `theme` — real-world
+ * `.crn` files use it inconsistently (e.g. `struct cottage size=9x7` vs.
+ * `def cottage size=3x3:`).
  */
 function declOf(keyword) {
   return $ => seq(
     keyword,
     field('name', $.identifier),
     optional(field('args', $.attribute_list)),
+    optional(':'),
     $._newline,
     field('body', $.struct_body),
   );
@@ -33,9 +62,20 @@ module.exports = grammar({
   word: $ => $.identifier,
 
   rules: {
+    // `directive` is single-line, so it needs its own trailing
+    // `repeat1($._newline)` here (see the comment on `body()`) to absorb
+    // any blank/comment lines up to the next item. `_top_level_decl` is
+    // never bare — struct/def/site/theme all require a body — so it
+    // already ends in `$._dedent`; by the time control returns here,
+    // whatever blank lines followed it were already consumed by that
+    // body's own trailing `repeat1($._newline)`, so no additional
+    // `$._newline` is expected (or, past EOF, available) right here.
     source_file: $ => seq(
       repeat($._newline),
-      repeat(seq(choice($.directive, $._top_level_decl), $._newline)),
+      repeat(choice(
+        seq($.directive, repeat1($._newline)),
+        $._top_level_decl,
+      )),
     ),
 
     _top_level_decl: $ => choice(
@@ -49,14 +89,13 @@ module.exports = grammar({
     def_decl:    declOf('def'),
     site_decl:   declOf('site'),
 
-    struct_body: $ => seq(
-      $._indent,
-      repeat(seq($._struct_body_item, $._newline)),
-      $._dedent,
-    ),
-
-    _struct_body_item: $ => choice(
-      $.member_stmt, $.nested_scope, $.logic_decl, $.assert_stmt,
+    // `nested_scope` is `selfTerminating` (see `body()`): it has its own
+    // `struct_body`, so it already ends in `$._dedent` and needs no
+    // trailing `$._newline` of its own here.
+    struct_body: $ => body(
+      $,
+      choice($.member_stmt, $.logic_decl, $.assert_stmt),
+      $.nested_scope,
     ),
 
     assert_stmt: $ => seq('assert', choice($.truth_form, $.temporal_form)),
@@ -121,9 +160,23 @@ module.exports = grammar({
       field('body', $.struct_body),
     ),
 
+    // Member command args, e.g. `connect west.east_corner to east.west_corner
+    // path=@gravel`: a mix of `key=value` attributes and bare positional
+    // values (identifiers, signal refs, ...), matching
+    // cairn-lang-core::parse::Parser::parse_command's generic arg loop
+    // (`is_at_key_eq()` picks an attribute, anything else is a positional
+    // value). Deliberately not reusing `attribute_list` here: struct/def/
+    // site header args and selector bindings stay strictly `key=value`
+    // (cairn-lang-core::parse::Parser::parse_header_args_until_eol only
+    // ever calls `parse_arg`), only member-command bodies accept bare
+    // positional values.
+    command_arg_list: $ => repeat1($.command_arg),
+    command_arg: $ => choice($.attribute, $._value),
+
     member_stmt: $ => seq(
       field('keyword', $.member_keyword),
-      optional(field('args', $.attribute_list)),
+      optional(seq('[', field('selector', $.attribute_list), ']')),
+      optional(field('args', $.command_arg_list)),
       optional(seq('->', field('output', $.signal_ref))),
     ),
 

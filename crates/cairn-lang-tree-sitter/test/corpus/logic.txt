@@ -42,3 +42,54 @@ struct sample size=5x5
             (binary_expression
               (signal_ref (identifier) (identifier))
               (signal_ref (identifier) (identifier)))))))))
+
+==================
+Member override with bracket selector
+==================
+
+struct gatehouse size=7x5
+  door id=front side=front at=center
+  door[id=front] opened_by=sig.open
+
+---
+
+(source_file
+  (struct_decl
+    name: (identifier)
+    args: (attribute_list
+      (attribute key: (identifier) value: (size_literal (integer) (integer))))
+    body: (struct_body
+      (member_stmt
+        keyword: (member_keyword)
+        args: (command_arg_list
+          (command_arg (attribute key: (identifier) value: (identifier)))
+          (command_arg (attribute key: (identifier) value: (identifier)))
+          (command_arg (attribute key: (identifier) value: (identifier)))))
+      (member_stmt
+        keyword: (member_keyword)
+        selector: (attribute_list
+          (attribute key: (identifier) value: (identifier)))
+        args: (command_arg_list
+          (command_arg (attribute key: (identifier) value: (signal_ref (identifier) (identifier)))))))))
+
+==================
+connect with positional signal refs and bare `to`
+==================
+
+struct duo size=5x5
+  connect west.east_corner to east.west_corner path=@gravel
+
+---
+
+(source_file
+  (struct_decl
+    (identifier)
+    (attribute_list
+      (attribute (identifier) (size_literal (integer) (integer))))
+    (struct_body
+      (member_stmt (member_keyword)
+        (command_arg_list
+          (command_arg (signal_ref (identifier) (identifier)))
+          (command_arg (identifier))
+          (command_arg (signal_ref (identifier) (identifier)))
+          (command_arg (attribute (identifier) (material_ref (identifier)))))))))

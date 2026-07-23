@@ -151,6 +151,68 @@
     "fields": {}
   },
   {
+    "type": "command_arg",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": false,
+      "required": true,
+      "types": [
+        {
+          "type": "attribute",
+          "named": true
+        },
+        {
+          "type": "boolean",
+          "named": true
+        },
+        {
+          "type": "identifier",
+          "named": true
+        },
+        {
+          "type": "integer",
+          "named": true
+        },
+        {
+          "type": "material_ref",
+          "named": true
+        },
+        {
+          "type": "signal_ref",
+          "named": true
+        },
+        {
+          "type": "size_literal",
+          "named": true
+        },
+        {
+          "type": "string",
+          "named": true
+        },
+        {
+          "type": "value_list",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "command_arg_list",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "command_arg",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
     "type": "def_decl",
     "named": true,
     "fields": {
@@ -292,7 +354,7 @@
         "required": false,
         "types": [
           {
-            "type": "attribute_list",
+            "type": "command_arg_list",
             "named": true
           }
         ]
@@ -313,6 +375,16 @@
         "types": [
           {
             "type": "signal_ref",
+            "named": true
+          }
+        ]
+      },
+      "selector": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "attribute_list",
             "named": true
           }
         ]
