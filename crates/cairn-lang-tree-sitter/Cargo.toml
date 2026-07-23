@@ -8,6 +8,7 @@ license.workspace = true
 repository.workspace = true
 homepage.workspace = true
 authors.workspace = true
+publish.workspace = true
 build = "bindings/rust/build.rs"
 include = [
     "bindings/rust/**",
@@ -26,10 +27,13 @@ path = "bindings/rust/lib.rs"
 
 [lints.rust]
 unsafe_code = "allow"
+missing_docs = "warn"
 
 [lints.clippy]
 all = { level = "warn", priority = -1 }
 pedantic = { level = "warn", priority = -1 }
+module_name_repetitions = "allow"
+must_use_candidate = "allow"
 
 [dependencies]
 tree-sitter-language = "0.1.7"
