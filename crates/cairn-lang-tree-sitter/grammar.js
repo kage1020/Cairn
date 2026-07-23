@@ -55,7 +55,14 @@ module.exports = grammar({
       $._dedent,
     ),
 
-    _struct_body_item: $ => choice($.member_stmt /* extended in later tasks */),
+    _struct_body_item: $ => choice($.member_stmt, $.nested_scope),
+
+    nested_scope: $ => seq(
+      field('keyword', alias(choice('level', 'room'), $.identifier)),
+      optional(field('args', $.attribute_list)),
+      $._newline,
+      field('body', $.struct_body),
+    ),
 
     member_stmt: $ => seq(
       field('keyword', $.member_keyword),
