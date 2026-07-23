@@ -55,7 +55,39 @@ module.exports = grammar({
       $._dedent,
     ),
 
-    _struct_body_item: $ => choice($.member_stmt, $.nested_scope, $.logic_decl),
+    _struct_body_item: $ => choice(
+      $.member_stmt, $.nested_scope, $.logic_decl, $.assert_stmt,
+    ),
+
+    assert_stmt: $ => seq('assert', choice($.truth_form, $.temporal_form)),
+
+    truth_form: $ => seq(
+      'truth', '(',
+      field('inputs', $.signal_list),
+      '->',
+      field('output', $.signal_ref),
+      ')',
+      '{',
+      $.truth_row,
+      repeat(seq(';', $.truth_row)),
+      optional(';'),
+      '}',
+    ),
+
+    signal_list: $ => seq($.signal_ref, repeat(seq(',', $.signal_ref))),
+
+    truth_row: $ => seq($.bit_pattern, '->', $.bit_pattern),
+    bit_pattern: $ => /[01]+/,
+
+    temporal_form: $ => seq('always', '(', $.temporal_expr, ')'),
+
+    temporal_expr: $ => seq(
+      field('trigger', $.signal_ref),
+      '->',
+      'eventually',
+      field('target', $.signal_ref),
+      optional(seq('within', field('bound', $.integer))),
+    ),
 
     logic_decl: $ => seq(
       'logic',

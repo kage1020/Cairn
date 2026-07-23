@@ -1,0 +1,47 @@
+==================
+Truth table
+==================
+
+struct s size=3x3
+  assert truth(sig.a, sig.b -> sig.out) { 00->0; 01->1; 10->1; 11->1 }
+
+---
+
+(source_file
+  (struct_decl
+    (identifier)
+    (attribute_list
+      (attribute (identifier) (size_literal (integer) (integer))))
+    (struct_body
+      (assert_stmt
+        (truth_form
+          (signal_list
+            (signal_ref (identifier) (identifier))
+            (signal_ref (identifier) (identifier)))
+          (signal_ref (identifier) (identifier))
+          (truth_row (bit_pattern) (bit_pattern))
+          (truth_row (bit_pattern) (bit_pattern))
+          (truth_row (bit_pattern) (bit_pattern))
+          (truth_row (bit_pattern) (bit_pattern)))))))
+
+==================
+Temporal assertion
+==================
+
+struct s size=3x3
+  assert always(sig.step -> eventually sig.open within 2)
+
+---
+
+(source_file
+  (struct_decl
+    (identifier)
+    (attribute_list
+      (attribute (identifier) (size_literal (integer) (integer))))
+    (struct_body
+      (assert_stmt
+        (temporal_form
+          (temporal_expr
+            (signal_ref (identifier) (identifier))
+            (signal_ref (identifier) (identifier))
+            (integer)))))))
