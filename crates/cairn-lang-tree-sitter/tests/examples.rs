@@ -1,0 +1,47 @@
+//! Example integration test.
+//!
+//! For every `.crn` under `examples/` at the repo root, parse it with the
+//! tree-sitter grammar and assert the resulting syntax tree has no
+//! `ERROR` node. This is the primary regression guardrail against the
+//! reference parser: `cairn-lang-core` already accepts every file in
+//! `examples/`, so the grammar must accept them too.
+
+use std::fs;
+use std::path::{Path, PathBuf};
+
+use tree_sitter::Parser;
+
+fn examples_dir() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(Path::parent)
+        .expect("workspace root")
+        .join("examples")
+}
+
+fn crn_files() -> Vec<PathBuf> {
+    fs::read_dir(examples_dir())
+        .expect("examples dir")
+        .filter_map(Result::ok)
+        .map(|e| e.path())
+        .filter(|p| p.extension().is_some_and(|ext| ext == "crn"))
+        .collect()
+}
+
+#[test]
+fn all_examples_parse_without_error() {
+    let mut parser = Parser::new();
+    parser
+        .set_language(&cairn_lang_tree_sitter::LANGUAGE.into())
+        .expect("load cairn language");
+
+    let mut failures = Vec::new();
+    for path in crn_files() {
+        let src = fs::read_to_string(&path).unwrap();
+        let tree = parser.parse(&src, None).expect("parse produced no tree");
+        if tree.root_node().has_error() {
+            failures.push(format!("{}", path.display()));
+        }
+    }
+    assert!(failures.is_empty(), "grammar rejected: {failures:#?}");
+}
