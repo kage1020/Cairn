@@ -19,10 +19,41 @@ module.exports = grammar({
   rules: {
     source_file: $ => seq(
       repeat($._newline),
-      repeat(seq($._blank_placeholder, $._newline)),
+      repeat(seq($.directive, $._newline)),
     ),
 
-    _blank_placeholder: $ => $.identifier,
+    directive: $ => choice(
+      seq(field('name', alias('@cairn', $.directive_name)),
+          field('arg', $.version_expr)),
+      seq(field('name', alias('@requires', $.directive_name)),
+          optional('version'),
+          field('arg', $.version_expr)),
+      seq(field('name', alias('@intended_targets', $.directive_name)),
+          field('arg', $.value_list)),
+    ),
+
+    version_expr: $ => seq(
+      optional($._version_op),
+      $.version_literal,
+    ),
+
+    _version_op: $ => choice('>=', '<=', '>', '<', '='),
+
+    version_literal: $ => /[0-9]+(\.[0-9]+)*/,
+
+    value_list: $ => seq('[', optional(seq($._value, repeat(seq(',', $._value)))), ']'),
+
+    _value: $ => choice(
+      $.integer,
+      $.boolean,
+      $.string,
+      $.identifier,
+      $.value_list,
+    ),
+
+    integer: $ => /[0-9]+/,
+    boolean: $ => choice('true', 'false'),
+    string:  $ => /"([^"\\]|\\.)*"/,
 
     identifier: $ => /[A-Za-z_][A-Za-z0-9_]*/,
 

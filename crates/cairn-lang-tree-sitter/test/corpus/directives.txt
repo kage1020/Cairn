@@ -1,0 +1,38 @@
+==================
+@cairn version
+==================
+
+@cairn 2026.06
+
+---
+
+(source_file
+  (directive
+    (directive_name)
+    (version_expr (version_literal))))
+
+==================
+@requires with operator
+==================
+
+@requires version>=1.20
+
+---
+
+(source_file
+  (directive
+    (directive_name)
+    (version_expr (version_literal))))
+
+==================
+@intended_targets list
+==================
+
+@intended_targets ["1.20.4","1.21.4"]
+
+---
+
+(source_file
+  (directive
+    (directive_name)
+    (value_list (string) (string))))
