@@ -86,7 +86,8 @@ module.exports = grammar({
       '->',
       'eventually',
       field('target', $.signal_ref),
-      optional(seq('within', field('bound', $.integer))),
+      'within',
+      field('bound', $.integer),
     ),
 
     logic_decl: $ => seq(
