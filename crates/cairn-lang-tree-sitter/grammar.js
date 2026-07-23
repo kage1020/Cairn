@@ -21,8 +21,48 @@ module.exports = grammar({
   rules: {
     source_file: $ => seq(
       repeat($._newline),
-      repeat(seq($.directive, $._newline)),
+      repeat(seq(choice($.directive, $._top_level_decl), $._newline)),
     ),
+
+    _top_level_decl: $ => choice(
+      $.theme_decl,
+      /* struct/def/site added in later tasks */
+    ),
+
+    theme_decl: $ => seq(
+      'theme',
+      field('name', $.identifier),
+      ':',
+      $._newline,
+      field('body', $.theme_body),
+    ),
+
+    theme_body: $ => body($, choice($.slot_binding, $.selector_rule)),
+
+    slot_binding: $ => seq(
+      'slot',
+      field('name', $.identifier),
+      '->',
+      field('target', $.material_ref),
+    ),
+
+    selector_rule: $ => seq(
+      field('selector', $.selector),
+      optional(seq('->', field('bindings', $.attribute_list))),
+    ),
+
+    selector: $ => seq(
+      $.identifier,
+      optional(seq('[', $.attribute_list, ']')),
+      repeat(seq('.', $.identifier)),
+    ),
+
+    attribute_list: $ => repeat1($.attribute),
+    attribute: $ => seq(field('key', $.identifier), '=', field('value', $._value)),
+
+    material_ref: $ => seq('@', $.identifier, repeat(seq('.', $.identifier))),
+
+    size_literal: $ => token(seq(/[0-9]+/, 'x', /[0-9]+/)),
 
     directive: $ => choice(
       seq(field('name', alias('@cairn', $.directive_name)),
@@ -46,6 +86,8 @@ module.exports = grammar({
     value_list: $ => seq('[', optional(seq($._value, repeat(seq(',', $._value)))), ']'),
 
     _value: $ => choice(
+      $.size_literal,
+      $.material_ref,
       $.integer,
       $.boolean,
       $.string,
