@@ -60,11 +60,19 @@ and the website playground.
    `tree-sitter-<lang>` layout so npm and cargo consumers see one canonical
    package.
 4. **Version tracks the Cairn CalVer bundle.** Initial release is
-   `2026.7.0`, matching the current spec draft. Grammar breaks — anything
-   that changes an accepted-source set or a public node name — are permitted
-   only on monthly CalVer minors, following the
+   `2026.7.2`, matching the current `workspace.package.version` in the root
+   `Cargo.toml`. Grammar breaks — anything that changes an accepted-source
+   set or a public node name — are permitted only on monthly CalVer minors,
+   following the
    [Compatibility Tiers](../../../website/src/content/docs/spec/compatibility.md)
    already used by the language itself.
+5. **Workspace lints must be respected.** The workspace forbids
+   `unsafe_code` and warns on `missing_docs`. The crate overrides
+   `unsafe_code` to `allow` in its own `[lints.rust]` because tree-sitter's
+   generated FFI (`extern "C" { fn tree_sitter_cairn() -> Language; }`) is
+   unavoidably unsafe; the override is scoped so the workspace policy still
+   applies everywhere else. `missing_docs` stays on and every public item
+   in `bindings/rust/lib.rs` carries a doc comment.
 
 ## 3. Package layout
 
@@ -285,7 +293,7 @@ Serialisation (for tree-sitter's incremental parsing) writes
 
 ## 8. Version and publish
 
-- Initial version: `2026.7.0`.
+- Initial version: `2026.7.2`.
 - `Cargo.toml` and `package.json` share the same version string.
 - Rust publish rides the existing release-plz workflow. The crate is added
   to the release-plz configuration so the same tag drives both.
