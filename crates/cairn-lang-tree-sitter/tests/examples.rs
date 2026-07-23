@@ -67,6 +67,19 @@ fn cottage_highlight_golden_is_stable() {
             "tree-sitter"
         });
 
+    // The CLI is installed by `pnpm install` in this crate; the workspace-wide
+    // `cargo test --workspace` in `.github/workflows/ci.yml` runs without a
+    // Node setup, so the binary is absent there. Skip in that case — the
+    // dedicated `tree-sitter.yml` workflow (which does `pnpm install`) is the
+    // authoritative gate for highlight-golden drift.
+    if !cli.exists() {
+        eprintln!(
+            "skip: tree-sitter CLI not found at {} (run `pnpm install` in this crate first)",
+            cli.display()
+        );
+        return;
+    }
+
     let output = Command::new(cli)
         .current_dir(env!("CARGO_MANIFEST_DIR"))
         .args(["highlight", "../../examples/cottage.crn"])

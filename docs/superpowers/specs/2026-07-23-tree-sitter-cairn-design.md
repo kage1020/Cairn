@@ -317,14 +317,22 @@ matching the CalVer pattern for the `wasm-build` job:
    what is committed.
 2. **tree-sitter-test** (`ubuntu-latest`): `pnpm dlx tree-sitter test`
    against `test/corpus/`.
-3. **rust-test** (`ubuntu-latest`, `windows-latest`, `macos-latest`):
-   `cargo test -p cairn-lang-tree-sitter`. Includes the corpus-independent
-   example integration test described in §10.
-4. **node-smoke** (all three OSes, node 20 and 22): `pnpm install --frozen`
+3. **node-smoke** (all three OSes, node 20 and 22): `pnpm install --frozen`
    inside the crate, then
    `node -e "console.log(require('./bindings/node').name)"`.
-5. **wasm-build** (on tag push only, `ubuntu-latest`): emsdk setup,
+4. **wasm-build** (on tag push only, `ubuntu-latest`): emsdk setup,
    `tree-sitter build --wasm`, upload `parser.wasm` as a release asset.
+
+Rust tests (`cargo test -p cairn-lang-tree-sitter`) are covered by the
+workspace-wide `.github/workflows/ci.yml` matrix (`cargo test --workspace`
+on `ubuntu-latest`/`windows-latest`/`macos-latest`) so this workflow does
+not duplicate them. The `cottage_highlight_golden_is_stable` integration
+test requires the pnpm-installed `tree-sitter` CLI and skips (with an
+`eprintln!` note) when that binary is absent, so it is a no-op under
+`ci.yml`'s Rust-only environment and executes only from a local dev loop
+that has run `pnpm install` in the crate. If the golden-drift gate is
+promoted to CI later, add a `pnpm install` + focused-test step to
+`tree-sitter.yml` rather than re-adding a duplicate rust-test job.
 
 `pnpm` is the workspace-wide package manager (matches `editors/vscode` and
 `website`). `pnpm-lock.yaml` for the tree-sitter crate lives at its own
