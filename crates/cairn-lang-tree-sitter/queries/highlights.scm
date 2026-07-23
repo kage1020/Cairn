@@ -34,7 +34,14 @@
 ; types / references
 (material_ref) @type
 (attribute key: (identifier) @variable.parameter)
-(signal_ref (identifier) . (identifier) @variable.member)
+; First segment stays as @variable (default, via the generic identifier
+; fallback); every segment after the first `.` is member-like. The leading
+; `.` anchors the first `(identifier)` to the start of the pattern; the
+; trailing `(identifier)` is unanchored, so tree-sitter matches it once per
+; remaining sibling — for `a.b.c.d` this yields @variable.member on b, c,
+; and d (verified empirically with `tree-sitter query` against a synthetic
+; 4-segment signal_ref).
+(signal_ref . (identifier) (identifier) @variable.member)
 
 ; comments
 (comment) @comment
