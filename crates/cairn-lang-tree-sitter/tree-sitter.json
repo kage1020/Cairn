@@ -6,8 +6,7 @@
       "scope": "source.cairn",
       "path": ".",
       "file-types": [
-        "crn",
-        "ansi"
+        "crn"
       ],
       "highlights": "queries/highlights.scm",
       "locals": "queries/locals.scm",

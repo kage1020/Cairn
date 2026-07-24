@@ -4,4 +4,6 @@ module.exports = require("node-gyp-build")(root);
 
 try {
   module.exports.nodeTypeInfo = require("../../src/node-types.json");
-} catch (_) {}
+} catch (err) {
+  if (err && err.code !== "MODULE_NOT_FOUND") throw err;
+}

@@ -1,0 +1,19 @@
+==================
+Space around x is not size
+==================
+
+@cairn 2026.06
+struct s size=9 x 7
+
+---
+
+(source_file
+  (directive
+    (directive_name)
+    (version_expr (version_literal)))
+  (struct_decl
+    (identifier)
+    (attribute_list
+      (attribute (identifier) (integer)))
+    (ERROR
+      (identifier))))

@@ -108,8 +108,12 @@ crates/cairn-lang-tree-sitter/
       nested.txt
       redstone.txt
       errors.txt
-    highlight/
-      cottage.ansi            # golden output of `tree-sitter highlight`
+      size_literal.txt
+      indent_errors.txt
+  tests/
+    examples.rs
+    data/
+      cottage.ansi             # golden output of `tree-sitter highlight`
 ```
 
 Generated artefacts (`src/parser.c`, `src/grammar.json`, `src/node-types.json`,
@@ -315,24 +319,34 @@ matching the CalVer pattern for the `wasm-build` job:
    generate`, then `git diff --exit-code src/parser.c src/grammar.json
    src/node-types.json`. Fails the build if generated artefacts drift from
    what is committed.
-2. **tree-sitter-test** (`ubuntu-latest`): `pnpm dlx tree-sitter test`
-   against `test/corpus/`.
+2. **tree-sitter-test** (`ubuntu-latest`): `pnpm install --frozen-lockfile`,
+   `pnpm test` (`tree-sitter test` against `test/corpus/`), then
+   `dtolnay/rust-toolchain@stable` + `cargo test -p cairn-lang-tree-sitter
+   --test examples`. The `cargo test` step runs after `pnpm install` so the
+   pnpm-installed `tree-sitter` CLI is on disk, which is what makes
+   `cottage_highlight_golden_is_stable` (see below) actually execute instead
+   of skipping.
 3. **node-smoke** (all three OSes, node 20 and 22): `pnpm install --frozen`
    inside the crate, then
    `node -e "console.log(require('./bindings/node').name)"`.
 4. **wasm-build** (on tag push only, `ubuntu-latest`): emsdk setup,
-   `tree-sitter build --wasm`, upload `parser.wasm` as a release asset.
+   `tree-sitter build --wasm`, a verify step (`test -s` + `file | grep
+   WebAssembly`) confirming the artefact is nonempty and actually WASM, then
+   upload `tree-sitter-cairn.wasm` as a release asset.
 
 Rust tests (`cargo test -p cairn-lang-tree-sitter`) are covered by the
 workspace-wide `.github/workflows/ci.yml` matrix (`cargo test --workspace`
-on `ubuntu-latest`/`windows-latest`/`macos-latest`) so this workflow does
-not duplicate them. The `cottage_highlight_golden_is_stable` integration
-test requires the pnpm-installed `tree-sitter` CLI and skips (with an
-`eprintln!` note) when that binary is absent, so it is a no-op under
-`ci.yml`'s Rust-only environment and executes only from a local dev loop
-that has run `pnpm install` in the crate. If the golden-drift gate is
-promoted to CI later, add a `pnpm install` + focused-test step to
-`tree-sitter.yml` rather than re-adding a duplicate rust-test job.
+on `ubuntu-latest`/`windows-latest`/`macos-latest`), but that matrix runs
+without a Node setup so `cottage_highlight_golden_is_stable` skips there
+(with an `eprintln!` note) when the pnpm-installed `tree-sitter` CLI binary
+is absent. `tree-sitter-test` in this workflow is the environment that has
+run `pnpm install`, so it re-runs `cargo test -p cairn-lang-tree-sitter
+--test examples` there specifically to make the golden-drift gate fire in
+CI; the parse-only test (`all_examples_parse_without_error`) is duplicated
+across both workflows, which is an accepted tradeoff for keeping the golden
+gate in the one place that has the CLI. The golden itself lives at
+`tests/data/cottage.ansi` (moved out of `test/highlight/`, which the
+`tree-sitter` CLI auto-scans as corpus input — see §3).
 
 `pnpm` is the workspace-wide package manager (matches `editors/vscode` and
 `website`). `pnpm-lock.yaml` for the tree-sitter crate lives at its own
@@ -350,9 +364,14 @@ package root and is committed.
    `themed-tower`, `village`, `window-walkway`), parse each, assert
    `!tree.root_node().has_error()`. This guarantees the grammar stays in
    lockstep with the reference parser on the canonical corpus.
-3. **Highlight golden** (`test/highlight/cottage.ansi`). Freeze the output
+3. **Highlight golden** (`tests/data/cottage.ansi`). Freeze the output
    of `tree-sitter highlight examples/cottage.crn`. A change to
-   `highlights.scm` requires an intentional golden update.
+   `highlights.scm` requires an intentional golden update. The golden lives
+   outside `test/` (which the `tree-sitter` CLI auto-scans as corpus input)
+   so it doesn't need a matching `.ansi` entry in `tree-sitter.json`'s
+   `file-types` — that grammar association would otherwise cause every
+   Zed/Neovim/Helix/linguist consumer to highlight arbitrary `.ansi` files
+   as Cairn.
 4. **Node smoke** (CI only, no Node test framework). Loading the module and
    asserting the language object is enough — behavioural coverage lives in
    the Rust and tree-sitter test suites.

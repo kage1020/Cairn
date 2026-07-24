@@ -51,12 +51,18 @@ fn all_examples_parse_without_error() {
 /// shells out to the locally installed `tree-sitter` CLI (a dev dependency
 /// installed via `pnpm install`) and compares its `highlight` output for
 /// `examples/cottage.crn` against the golden ANSI snapshot frozen in
-/// `test/highlight/cottage.ansi`. A diff here means either the grammar or
+/// `tests/data/cottage.ansi`. A diff here means either the grammar or
 /// the queries changed in a way that alters highlighting; regenerate the
 /// golden deliberately if so.
+///
+/// The golden lives under `tests/data/` rather than `test/highlight/`
+/// (the tree-sitter CLI's default corpus scan target) so that `tree-sitter
+/// test` never tries to parse it as a corpus file, and so the grammar's
+/// `file-types` in `tree-sitter.json` doesn't need to claim `.ansi` files
+/// just to keep the CLI happy.
 #[test]
 fn cottage_highlight_golden_is_stable() {
-    let golden = include_str!("../test/highlight/cottage.ansi");
+    let golden = include_str!("data/cottage.ansi");
 
     let cli = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("node_modules")

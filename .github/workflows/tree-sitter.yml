@@ -52,6 +52,8 @@ jobs:
           cache-dependency-path: crates/cairn-lang-tree-sitter/pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile
       - run: pnpm test
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo test -p cairn-lang-tree-sitter --test examples
 
   node-smoke:
     name: Node addon smoke (${{ matrix.os }}, node ${{ matrix.node }})
@@ -89,6 +91,10 @@ jobs:
       - uses: mymindstorm/setup-emsdk@v14
       - run: pnpm install --frozen-lockfile
       - run: pnpm exec tree-sitter build --wasm --output tree-sitter-cairn.wasm
+      - name: Verify WASM artifact
+        run: |
+          test -s tree-sitter-cairn.wasm
+          file tree-sitter-cairn.wasm | grep -q "WebAssembly"
       - uses: softprops/action-gh-release@v2
         with:
           files: crates/cairn-lang-tree-sitter/tree-sitter-cairn.wasm
