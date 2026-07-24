@@ -104,6 +104,10 @@
             "named": true
           },
           {
+            "type": "identifier",
+            "named": true
+          },
+          {
             "type": "parenthesized_expression",
             "named": true
           },
@@ -127,6 +131,10 @@
           },
           {
             "type": "boolean",
+            "named": true
+          },
+          {
+            "type": "identifier",
             "named": true
           },
           {
@@ -311,6 +319,10 @@
           },
           {
             "type": "boolean",
+            "named": true
+          },
+          {
+            "type": "identifier",
             "named": true
           },
           {
@@ -560,6 +572,10 @@
           "named": true
         },
         {
+          "type": "identifier",
+          "named": true
+        },
+        {
           "type": "parenthesized_expression",
           "named": true
         },
@@ -657,16 +673,6 @@
     "type": "site_decl",
     "named": true,
     "fields": {
-      "args": {
-        "multiple": false,
-        "required": false,
-        "types": [
-          {
-            "type": "attribute_list",
-            "named": true
-          }
-        ]
-      },
       "body": {
         "multiple": false,
         "required": false,
@@ -1002,6 +1008,10 @@
           },
           {
             "type": "boolean",
+            "named": true
+          },
+          {
+            "type": "identifier",
             "named": true
           },
           {

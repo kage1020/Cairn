@@ -213,22 +213,6 @@
           "type": "CHOICE",
           "members": [
             {
-              "type": "FIELD",
-              "name": "args",
-              "content": {
-                "type": "SYMBOL",
-                "name": "attribute_list"
-              }
-            },
-            {
-              "type": "BLANK"
-            }
-          ]
-        },
-        {
-          "type": "CHOICE",
-          "members": [
-            {
               "type": "STRING",
               "value": ":"
             },
@@ -589,6 +573,10 @@
         {
           "type": "SYMBOL",
           "name": "signal_ref"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "identifier"
         },
         {
           "type": "SYMBOL",

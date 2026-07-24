@@ -128,16 +128,14 @@ def cottage size=1x1
 site declaration
 ==================
 
-site plaza size=1x1
-  floor mat_slot=x
+site plaza
+  place kind=fountain
 
 ---
 
 (source_file
   (site_decl
     (identifier)
-    (attribute_list
-      (attribute (identifier) (size_literal (integer) (integer))))
     (struct_body
       (member_stmt (member_keyword)
         (command_arg_list (command_arg (attribute (identifier) (identifier))))))))

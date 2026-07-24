@@ -99,7 +99,17 @@ module.exports = grammar({
 
     struct_decl: declOf('struct'),
     def_decl:    declOf('def'),
-    site_decl:   declOf('site'),
+
+    // `site_decl` diverges from struct/def: cairn-lang-core::parse::parse_site_item
+    // does not call parse_header_args_until_eol, so `site foo:` accepts no
+    // header args — only the name (and optional colon + body).
+    site_decl: $ => seq(
+      'site',
+      field('name', $.identifier),
+      optional(':'),
+      $._newline,
+      optional(field('body', $.struct_body)),
+    ),
 
     // `nested_scope` and `member_stmt_with_body` are `selfTerminating` (see
     // `body()`): both have their own `struct_body`, so they already end in
@@ -157,11 +167,17 @@ module.exports = grammar({
       field('value', $._bool_expr),
     ),
 
+    // `_bool_expr` operands mirror cairn-lang-core::parse::parse_expr_not,
+    // which resolves atoms via parse_dotted_ref — a head identifier with an
+    // optional dotted tail. `signal_ref` in this grammar requires ≥1 tail
+    // segment (repeat1), so the degenerate bare-identifier case (`a` alone)
+    // is covered by the explicit `identifier` alternative below.
     _bool_expr: $ => choice(
       $.binary_expression,
       $.unary_expression,
       $.parenthesized_expression,
       $.signal_ref,
+      $.identifier,
       $.boolean,
     ),
 
