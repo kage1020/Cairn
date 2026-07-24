@@ -66,3 +66,15 @@ theme minimal
     (identifier)
     (theme_body
       (slot_binding (identifier) (material_ref (identifier))))))
+
+==================
+Theme with no body
+==================
+
+theme empty:
+
+---
+
+(source_file
+  (theme_decl
+    (identifier)))

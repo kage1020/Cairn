@@ -69,6 +69,44 @@ struct shed size=1x1:
         (command_arg_list (command_arg (attribute (identifier) (identifier))))))))
 
 ==================
+Struct with no body
+==================
+
+struct empty size=1x1
+
+---
+
+(source_file
+  (struct_decl
+    (identifier)
+    (attribute_list
+      (attribute (identifier) (size_literal (integer) (integer))))))
+
+==================
+Member statement with indented body
+==================
+
+struct gatehouse size=7x5
+  circuit id=main
+    place block=@redstone_wire
+
+---
+
+(source_file
+  (struct_decl
+    (identifier)
+    (attribute_list
+      (attribute (identifier) (size_literal (integer) (integer))))
+    (struct_body
+      (member_stmt_with_body
+        (member_keyword)
+        (command_arg_list (command_arg (attribute (identifier) (identifier))))
+        (struct_body
+          (member_stmt (member_keyword)
+            (command_arg_list
+              (command_arg (attribute (identifier) (material_ref (identifier)))))))))))
+
+==================
 def declaration
 ==================
 

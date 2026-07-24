@@ -44,6 +44,46 @@ struct sample size=5x5
               (signal_ref (identifier) (identifier)))))))))
 
 ==================
+logic with bare identifier name (degenerate dotted ref)
+==================
+
+struct s size=3x3
+  logic flag = sig.a or sig.b
+
+---
+
+(source_file
+  (struct_decl
+    (identifier)
+    (attribute_list
+      (attribute (identifier) (size_literal (integer) (integer))))
+    (struct_body
+      (logic_decl
+        (identifier)
+        (binary_expression
+          (signal_ref (identifier) (identifier))
+          (signal_ref (identifier) (identifier)))))))
+
+==================
+Member statement with non-signal_ref arrow output
+==================
+
+struct s size=3x3
+  pressure_plate id=plate -> 3
+
+---
+
+(source_file
+  (struct_decl
+    (identifier)
+    (attribute_list
+      (attribute (identifier) (size_literal (integer) (integer))))
+    (struct_body
+      (member_stmt (member_keyword)
+        (command_arg_list (command_arg (attribute (identifier) (identifier))))
+        (integer)))))
+
+==================
 Member override with bracket selector
 ==================
 

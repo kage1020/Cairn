@@ -8,18 +8,39 @@ enum TokenType {
   SIZE_X,
 };
 
+// Upper bound on `indent_stack`'s length that `serialize()` below can
+// always fit in `TREE_SITTER_SERIALIZATION_BUFFER_SIZE`: the 2-byte
+// length prefix, plus one `uint16_t` per stack entry, plus the 1-byte
+// `eof_newline_used` flag. Enforced on push (see the INDENT branch in
+// `scan()`) rather than tolerated in `serialize()`: `serialize()` returning
+// a short count on overflow is silently reinterpreted by tree-sitter as
+// "no state" (see `deserialize()`'s `length == 0` path), corrupting the
+// indent stack rather than surfacing an error. Cairn's 2-space-per-level
+// indent convention means reaching this cap in a legitimate file would
+// require on the order of a thousand nesting levels (2000+ leading spaces
+// on one line) — evidence of a bug or pathological/adversarial input, not
+// a real program, so an INDENT that would exceed the cap is refused
+// outright (surfacing as an ERROR node) rather than risking silent
+// corruption later at serialize() time.
+#define MAX_INDENT_DEPTH \
+  ((TREE_SITTER_SERIALIZATION_BUFFER_SIZE - sizeof(uint16_t) - sizeof(uint8_t)) / sizeof(uint16_t))
+
 typedef struct {
   Array(uint16_t) indent_stack;
   // Set once an end-of-file NEWLINE has been synthesized since the last
-  // DEDENT. Grammar sites that need "one or more" newlines
+  // EOF-path DEDENT. Grammar sites that need "one or more" newlines
   // (`repeat1($._newline)`, used to swallow blank/comment lines between
   // same-level items) would otherwise re-request NEWLINE forever at EOF:
   // the synthesized token is zero-width (no `advance()` call), so nothing
-  // ever bounds the repeat. A DEDENT always closes out the enclosing body
-  // before an *outer* site can ask for its own newline, so resetting on
-  // DEDENT lets every nesting level still get its own one-shot synthesized
-  // newline while capping any single `repeat1` to exactly one synthetic
-  // match.
+  // ever bounds the repeat. Only the DEDENTs emitted on the EOF path (see
+  // the two `lexer->eof(lexer)` blocks in `scan()`) reset this flag — the
+  // non-EOF DEDENT branch (ordinary mid-file dedent, driven by a real
+  // decrease in leading-space count) leaves it untouched, since it isn't
+  // preceded by a synthesized EOF newline in the first place. Each EOF
+  // DEDENT closes out one enclosing body before an *outer* site can ask
+  // for its own newline, so resetting there lets every nesting level still
+  // get its own one-shot synthesized newline while capping any single
+  // `repeat1` to exactly one synthetic match.
   bool eof_newline_used;
 } Scanner;
 
@@ -60,23 +81,52 @@ unsigned tree_sitter_cairn_external_scanner_serialize(void *payload, char *buffe
   return size;
 }
 
+// Resets `s` to the same single-sentinel-level state `create()` starts
+// with. Shared by every early-return path in `deserialize()` below: a
+// too-short `length` (empty buffer, or one that claims more entries than
+// it actually holds — truncated/corrupt input, however that occurred)
+// gets the same treatment as "no prior state", rather than reading past
+// `buffer + length`.
+static void reset_to_sentinel(Scanner *s) {
+  array_clear(&s->indent_stack);
+  array_push(&s->indent_stack, 0);
+  s->eof_newline_used = false;
+}
+
 void tree_sitter_cairn_external_scanner_deserialize(void *payload, const char *buffer, unsigned length) {
   Scanner *s = (Scanner *)payload;
-  array_clear(&s->indent_stack);
-  s->eof_newline_used = false;
   if (length == 0) {
-    array_push(&s->indent_stack, 0);
+    reset_to_sentinel(s);
     return;
   }
+  array_clear(&s->indent_stack);
+  s->eof_newline_used = false;
   unsigned offset = 0;
   uint16_t len;
+  if (offset + sizeof(len) > length) {
+    reset_to_sentinel(s);
+    return;
+  }
   memcpy(&len, buffer + offset, sizeof(len));
   offset += sizeof(len);
   for (uint16_t i = 0; i < len; i++) {
     uint16_t v;
+    if (offset + sizeof(v) > length) {
+      reset_to_sentinel(s);
+      return;
+    }
     memcpy(&v, buffer + offset, sizeof(v));
     offset += sizeof(v);
     array_push(&s->indent_stack, v);
+  }
+  // `len == 0` is itself a corrupt/impossible state — `serialize()` always
+  // writes at least the base `0` level — but is representable within an
+  // otherwise-valid-length buffer, so it isn't caught by the bounds checks
+  // above. Restore the invariant every other function in this file relies
+  // on (`array_back(&s->indent_stack)` is always safe to call) rather than
+  // leaving an empty stack.
+  if (s->indent_stack.size == 0) {
+    array_push(&s->indent_stack, 0);
   }
   if (offset + sizeof(uint8_t) <= length) {
     uint8_t eof_flag;
@@ -193,6 +243,9 @@ bool tree_sitter_cairn_external_scanner_scan(void *payload, TSLexer *lexer, cons
   if (level > current) {
     if (level != current + 1) return false;
     if (!valid_symbols[INDENT]) return false;
+    // See `MAX_INDENT_DEPTH`'s comment: refuse rather than push past what
+    // `serialize()` can represent.
+    if (s->indent_stack.size >= MAX_INDENT_DEPTH) return false;
     array_push(&s->indent_stack, level);
     lexer->result_symbol = INDENT;
     return true;

@@ -48,7 +48,7 @@ function declOf(keyword) {
     optional(field('args', $.attribute_list)),
     optional(':'),
     $._newline,
-    field('body', $.struct_body),
+    optional(field('body', $.struct_body)),
   );
 }
 
@@ -60,6 +60,18 @@ module.exports = grammar({
   externals: $ => [$._indent, $._dedent, $._newline, $._size_x],
 
   word: $ => $.identifier,
+
+  // `member_stmt` and `member_stmt_with_body` share the `_member_stmt_head
+  // _newline` prefix (see the comment on `member_stmt`); whether an
+  // `_indent` follows that newline (routing into `member_stmt_with_body`)
+  // or not (routing into plain `member_stmt`, with `body()`'s
+  // `repeat1($._newline)` consuming the newline instead) isn't decidable
+  // from the shared prefix alone. Declaring the conflict lets the
+  // generated GLR parser carry both interpretations across the shared
+  // `_newline` and resolve once the next token (`_indent` or not) is seen.
+  conflicts: $ => [
+    [$.member_stmt, $.member_stmt_with_body],
+  ],
 
   rules: {
     // `directive` is single-line, so it needs its own trailing
@@ -89,13 +101,13 @@ module.exports = grammar({
     def_decl:    declOf('def'),
     site_decl:   declOf('site'),
 
-    // `nested_scope` is `selfTerminating` (see `body()`): it has its own
-    // `struct_body`, so it already ends in `$._dedent` and needs no
-    // trailing `$._newline` of its own here.
+    // `nested_scope` and `member_stmt_with_body` are `selfTerminating` (see
+    // `body()`): both have their own `struct_body`, so they already end in
+    // `$._dedent` and need no trailing `$._newline` of their own here.
     struct_body: $ => body(
       $,
       choice($.member_stmt, $.logic_decl, $.assert_stmt),
-      $.nested_scope,
+      choice($.nested_scope, $.member_stmt_with_body),
     ),
 
     assert_stmt: $ => seq('assert', choice($.truth_form, $.temporal_form)),
@@ -104,7 +116,7 @@ module.exports = grammar({
       'truth', '(',
       field('inputs', $.signal_list),
       '->',
-      field('output', $.signal_ref),
+      field('output', $._dotted_ref),
       ')',
       '{',
       $.truth_row,
@@ -113,7 +125,16 @@ module.exports = grammar({
       '}',
     ),
 
-    signal_list: $ => seq($.signal_ref, repeat(seq(',', $.signal_ref))),
+    signal_list: $ => seq($._dotted_ref, repeat(seq(',', $._dotted_ref))),
+
+    // `signal_ref` itself only ever matches a dotted path (one or more
+    // `.identifier` segments); a bare identifier is a degenerate
+    // zero-segment case. cairn-lang-core::parse::Parser::parse_dotted_ref
+    // (the single reference-parser routine backing every one of these call
+    // sites) accepts both shapes uniformly, so every grammar site that
+    // calls it accepts `choice($.signal_ref, $.identifier)` instead of
+    // `$.signal_ref` alone.
+    _dotted_ref: $ => choice($.signal_ref, $.identifier),
 
     truth_row: $ => seq($.bit_pattern, '->', $.bit_pattern),
     bit_pattern: $ => /[01]+/,
@@ -121,17 +142,17 @@ module.exports = grammar({
     temporal_form: $ => seq('always', '(', $.temporal_expr, ')'),
 
     temporal_expr: $ => seq(
-      field('trigger', $.signal_ref),
+      field('trigger', $._dotted_ref),
       '->',
       'eventually',
-      field('target', $.signal_ref),
+      field('target', $._dotted_ref),
       'within',
       field('bound', $.integer),
     ),
 
     logic_decl: $ => seq(
       'logic',
-      field('name', $.signal_ref),
+      field('name', $._dotted_ref),
       '=',
       field('value', $._bool_expr),
     ),
@@ -173,11 +194,30 @@ module.exports = grammar({
     command_arg_list: $ => repeat1($.command_arg),
     command_arg: $ => choice($.attribute, $._value),
 
-    member_stmt: $ => seq(
+    // `member_stmt` (a `lineItem`, see `body()`) and `member_stmt_with_body`
+    // (`selfTerminating`) share the same head — keyword, optional bracket
+    // selector, optional arg list, optional `-> output` tail — matching
+    // cairn-lang-core::parse::Parser::parse_command up through its call to
+    // `parse_value` for the arrow tail (line ~300). Split into two rules
+    // rather than making the body itself optional on one rule: `body()`
+    // needs to know statically, per alternative, whether the item already
+    // consumed its own trailing newline (`selfTerminating`) or needs one
+    // supplied (`lineItem`) — an `optional(field('body', ...))` on a single
+    // rule can't express "newline handling differs depending on whether the
+    // optional part is present".
+    member_stmt: $ => $._member_stmt_head,
+
+    member_stmt_with_body: $ => seq(
+      $._member_stmt_head,
+      $._newline,
+      field('body', $.struct_body),
+    ),
+
+    _member_stmt_head: $ => seq(
       field('keyword', $.member_keyword),
       optional(seq('[', field('selector', $.attribute_list), ']')),
       optional(field('args', $.command_arg_list)),
-      optional(seq('->', field('output', $.signal_ref))),
+      optional(seq('->', field('output', $._value))),
     ),
 
     member_keyword: $ => choice(
@@ -195,7 +235,7 @@ module.exports = grammar({
       field('name', $.identifier),
       optional(':'),
       $._newline,
-      field('body', $.theme_body),
+      optional(field('body', $.theme_body)),
     ),
 
     theme_body: $ => body($, choice($.slot_binding, $.selector_rule)),
