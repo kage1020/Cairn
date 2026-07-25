@@ -1,0 +1,16 @@
+==================
+Odd indent is rejected
+==================
+
+theme t:
+   slot a -> @b
+
+---
+
+(source_file
+  (theme_decl
+    (identifier)
+    (ERROR
+      (identifier)
+      (identifier)
+      (identifier))))

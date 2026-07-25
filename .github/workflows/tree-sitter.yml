@@ -1,0 +1,111 @@
+name: tree-sitter
+
+# tree-sitter-specific gates for crates/cairn-lang-tree-sitter/. The crate's Rust
+# tests are already covered by ci.yml's `cargo test --workspace` on every push/PR;
+# this workflow only adds what ci.yml doesn't: generated-file drift, the
+# tree-sitter corpus (pnpm), the Node addon smoke build, and (on tag push) the
+# WASM release asset.
+
+on:
+  push:
+    branches: [main, canary]
+    tags: ["v*"]
+    paths:
+      - "crates/cairn-lang-tree-sitter/**"
+      - ".github/workflows/tree-sitter.yml"
+  pull_request:
+    paths:
+      - "crates/cairn-lang-tree-sitter/**"
+      - ".github/workflows/tree-sitter.yml"
+
+defaults:
+  run:
+    working-directory: crates/cairn-lang-tree-sitter
+
+jobs:
+  generate-check:
+    name: Generate drift check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: crates/cairn-lang-tree-sitter/package.json
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: crates/cairn-lang-tree-sitter/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run generate
+      - name: Ensure generated files match commit
+        run: git diff --exit-code src/parser.c src/grammar.json src/node-types.json
+
+  tree-sitter-test:
+    name: tree-sitter corpus
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: crates/cairn-lang-tree-sitter/package.json
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: crates/cairn-lang-tree-sitter/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm test
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo test -p cairn-lang-tree-sitter --test examples
+
+  node-smoke:
+    name: Node addon smoke (${{ matrix.os }}, node ${{ matrix.node }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        # Node 20 is intentionally excluded: node-gyp 13 depends on undici
+        # APIs (webidl.util.markAsUncloneable) that only exist from Node 22+.
+        # Node 20 is also being deprecated on GitHub Actions runners.
+        node: [22]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: crates/cairn-lang-tree-sitter/package.json
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: pnpm
+          cache-dependency-path: crates/cairn-lang-tree-sitter/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec node-gyp rebuild --release
+      - run: node -e "console.log(require('./bindings/node').name)"
+
+  wasm-build:
+    name: WASM build (release asset)
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    needs: [generate-check, tree-sitter-test]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: crates/cairn-lang-tree-sitter/package.json
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: crates/cairn-lang-tree-sitter/pnpm-lock.yaml
+      - uses: mymindstorm/setup-emsdk@v14
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec tree-sitter build --wasm --output tree-sitter-cairn.wasm
+      - name: Verify WASM artifact
+        run: |
+          test -s tree-sitter-cairn.wasm
+          file tree-sitter-cairn.wasm | grep -q "WebAssembly"
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: crates/cairn-lang-tree-sitter/tree-sitter-cairn.wasm
