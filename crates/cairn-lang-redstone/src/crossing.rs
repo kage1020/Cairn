@@ -1309,6 +1309,36 @@ mod tests {
         let _ = compile_crossing(&scoped(ScopeKind::Struct, "broken", ir));
     }
 
+    #[test]
+    #[should_panic(
+        expected = "for cell #1 at (4,0,1) in struct `mixed` — crossing legalization must run at most once per delayed IR"
+    )]
+    fn legalize_panic_names_the_offending_cell_not_the_first_one() {
+        // Re-running the whole pass always trips on `cells[0]`, which
+        // would let a regression that hardcoded the index to zero — or
+        // that read the coord off the wrong cell — pass unnoticed. A
+        // hand-built IR whose first cell is still `Delayed` while the
+        // second is already `Legalized` forces the panic past the head
+        // of the loop, so both the index and the coord have to be
+        // threaded from the cell actually being transitioned.
+        let mut ir = PlacementIr::new(Edition::Java);
+        ir.region = Some(reservation(8, 3, 2));
+        ir.cells.push(placed_cell(
+            EditionCell::JavaRepeaterOr,
+            CellCoord::new(0, 0, 0),
+            vec![],
+        ));
+        let mut already_legalized =
+            placed_cell(EditionCell::JavaRepeaterOr, CellCoord::new(4, 0, 1), vec![]);
+        already_legalized.phase = PlacementPhase::Legalized {
+            wire_length: 0,
+            delay_ticks: 0,
+            buffer_coords: Vec::new(),
+        };
+        ir.cells.push(already_legalized);
+        let _ = compile_crossing(&scoped(ScopeKind::Struct, "mixed", ir));
+    }
+
     mod phase4_invariant {
         //! Property tests for the crossing / delay agreement invariant
         //! (see the `phase4_buffer_tick_invariant_holds` doc). Kept

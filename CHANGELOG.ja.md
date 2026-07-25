@@ -76,8 +76,11 @@
   記述され、`PlacementIr::cells` 内での位置・placement
   coord・所属 scope の 3 点から組み立てる — `PlacedCellNode` は
   source-level name を持たないため、この 3 点が cell の唯一の安定した
-  識別子である。coord の `layer` は意図的に落とした（cell coord は
-  構築上つねに `RouteLayer::Plane`）。context 無しの `route` /
+  識別子である。coord の `layer` は `RouteLayer::Plane` でないときだけ
+  描画する — cell coord では起こり得ない（placement pass が `Plane` を
+  刻み、以降どの pass も cell body を動かさない）ので通常の描画は短い
+  まま、かつ invariant を破った hand-built IR が plane coord に見える
+  座標を出力することもない。context 無しの `route` /
   `delay` / `legalize` は無変更で、文面も従来とバイト単位で同一 —
   context が無い場合は空の節を描画するのではなく ` for …` 節ごと落と
   すため、余分な区切りが混入しない。

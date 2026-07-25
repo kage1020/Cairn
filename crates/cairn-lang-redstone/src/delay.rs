@@ -605,4 +605,36 @@ mod tests {
         ));
         let _ = compile_delay(&scoped(ScopeKind::Struct, "broken", ir));
     }
+
+    #[test]
+    #[should_panic(
+        expected = "for cell #1 at (4,0,1) in struct `mixed` — delay insertion must run once per routed IR"
+    )]
+    fn delay_panic_names_the_offending_cell_not_the_first_one() {
+        // Re-running the whole pass always trips on `cells[0]`, which
+        // would let a regression that hardcoded the index to zero — or
+        // that read the coord off the wrong cell — pass unnoticed. A
+        // hand-built IR whose first cell is still `Routed` while the
+        // second is already `Delayed` forces the panic past the head
+        // of the loop, so both the index and the coord have to be
+        // threaded from the cell actually being transitioned.
+        let mut ir = PlacementIr::new(Edition::Java);
+        ir.region = Some(reservation(8, 3, 2));
+        ir.cells.push(placed_cell(
+            EditionCell::JavaComparatorAnd,
+            CellCoord::new(0, 0, 0),
+            vec![],
+        ));
+        let mut already_delayed = placed_cell(
+            EditionCell::JavaComparatorAnd,
+            CellCoord::new(4, 0, 1),
+            vec![],
+        );
+        already_delayed.phase = PlacementPhase::Delayed {
+            wire_length: 0,
+            delay_ticks: 0,
+        };
+        ir.cells.push(already_delayed);
+        let _ = compile_delay(&scoped(ScopeKind::Struct, "mixed", ir));
+    }
 }

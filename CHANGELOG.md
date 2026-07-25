@@ -76,9 +76,12 @@ and is a separate axis from the Minecraft target version.
   ``{kind} `{name}` ``), built from the cell's position in
   `PlacementIr::cells`, its placement coord, and the owning scope —
   `PlacedCellNode` carries no source-level name, so that triple is a
-  cell's only stable identity. The coord's `layer` is deliberately
-  omitted because cell coords are `RouteLayer::Plane` by
-  construction. The context-free `route` / `delay` / `legalize` forms
+  cell's only stable identity. The coord's `layer` renders only when
+  it is not `RouteLayer::Plane` — which for a cell coord is never,
+  since the placement pass stamps `Plane` and no later pass moves a
+  cell body off it — so the common rendering stays short without
+  letting a hand-built IR that breaks the invariant print a coord
+  that reads as a plane coord. The context-free `route` / `delay` / `legalize` forms
   are unchanged and still produce their previous message byte for
   byte: an absent context drops the whole ` for …` clause rather than
   rendering an empty one, so no stray separator reaches the message.

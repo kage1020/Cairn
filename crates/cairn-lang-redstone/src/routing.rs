@@ -68,13 +68,17 @@
 //!   that no downstream stage can materialise into voxels, silently
 //!   corrupting `assert latency(...)` verification per §14.7.
 //!
-//! Future stages fill the intentional gaps: `RouteLayer::Bridge` /
-//! `Via` escape belongs to crossing legalization (stage 4 of §14.5),
-//! and the input / output pad coordinates the routing pass picks today
-//! become a `PlacementIr` field (`input_pads` / `output_pads`) once a
-//! subsequent PR needs them outside routing — that migration is
-//! `#[non_exhaustive]`-safe on both types. Attenuation accounting
-//! itself has landed as [`crate::delay::compile_delay`] (stage 3): the
+//! One intentional gap is left here: the input / output pad
+//! coordinates the routing pass derives on the fly are not stored, and
+//! would become a `PlacementIr` field (`input_pads` / `output_pads`)
+//! if a consumer ever needs them outside routing — that migration is
+//! `#[non_exhaustive]`-safe on both types. The escape layers are not
+//! such a gap: `RouteLayer::Bridge` has its producer in
+//! [`crate::crossing::compile_crossing`] (stage 4 of §14.5), but only
+//! for implicit buffer-repeater coords — v1 lifts no wire coord onto
+//! an escape layer, and `RouteLayer::Via` has no producer at all.
+//! Attenuation accounting has landed as
+//! [`crate::delay::compile_delay`] (stage 3): the
 //! delay pass re-derives per-driver Manhattan segments from the same
 //! `NetRef → source coord` mapping used here, counts implicit buffer
 //! repeaters for segments beyond the 15-block dust attenuation limit,
@@ -434,4 +438,79 @@ fn zero_reservation_diagnostic(
     );
     debug_assert_eq!(diag.severity, Severity::Error);
     diag
+}
+
+#[cfg(test)]
+mod tests {
+    //! Crate-internal coverage for the routing pass's phase-transition
+    //! commit. `tests/routing.rs` drives real synth fixtures and can
+    //! only ever hand this pass a uniformly `Unrouted` IR; building a
+    //! scope whose cells sit in different phases needs the
+    //! `pub(crate)` `phase` field, so it lives here.
+
+    use cairn_lang_core::Edition;
+    use cairn_lang_core::error::Span;
+
+    use super::compile_routing;
+    use crate::edition_netlist_ir::EditionCell;
+    use crate::logic_ir::ScopeKind;
+    use crate::placement_ir::{
+        CellCoord, CircuitRegionReservation, PlacedCellNode, PlacementIr, PlacementPhase,
+        ScopedPlacementIr, ScopedPlacementIrEntry,
+    };
+
+    fn reservation(width: u32, depth: u32, void: u32) -> CircuitRegionReservation {
+        CircuitRegionReservation {
+            label: "floor".to_owned(),
+            void,
+            width,
+            depth,
+            span: Span::default(),
+        }
+    }
+
+    fn scoped(kind: ScopeKind, name: &str, ir: PlacementIr) -> ScopedPlacementIr {
+        let mut scoped = ScopedPlacementIr::new();
+        scoped.scopes.push(ScopedPlacementIrEntry {
+            kind,
+            name: name.to_owned(),
+            ir,
+        });
+        scoped
+    }
+
+    fn placed_cell(coord: CellCoord, phase: PlacementPhase) -> PlacedCellNode {
+        PlacedCellNode {
+            cell: EditionCell::JavaRepeaterOr,
+            drivers: vec![],
+            coord,
+            phase,
+            span: Span::default(),
+        }
+    }
+
+    #[test]
+    #[should_panic(
+        expected = "for cell #1 at (4,0,1) in struct `mixed` — routing must run once per placement"
+    )]
+    fn route_panic_names_the_offending_cell_not_the_first_one() {
+        // Re-running the whole pass always trips on `cells[0]`, which
+        // would let a regression that hardcoded the index to zero — or
+        // that read the coord off the wrong cell — pass unnoticed. A
+        // hand-built IR whose first cell is still `Unrouted` while the
+        // second is already `Routed` forces the panic past the head of
+        // the loop, so both the index and the coord have to be
+        // threaded from the cell actually being transitioned.
+        let mut ir = PlacementIr::new(Edition::Java);
+        ir.region = Some(reservation(8, 3, 2));
+        ir.cells.push(placed_cell(
+            CellCoord::new(0, 0, 0),
+            PlacementPhase::Unrouted,
+        ));
+        ir.cells.push(placed_cell(
+            CellCoord::new(4, 0, 1),
+            PlacementPhase::Routed { wire_length: 0 },
+        ));
+        let _ = compile_routing(&scoped(ScopeKind::Struct, "mixed", ir));
+    }
 }

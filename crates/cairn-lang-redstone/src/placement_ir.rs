@@ -572,9 +572,18 @@ fn transition_panic(
 /// (`cell #{index}`, `({x},{y},{z})`, ``{kind} `{name}` ``) so a panic
 /// and an `E_*` diagnostic about the same cell read alike.
 ///
-/// [`CellCoord::layer`] is deliberately dropped: cell coords are
-/// [`RouteLayer::Plane`] by construction, and only the buffer coords
-/// the crossing pass allocates can be lifted onto a `Bridge` layer.
+/// [`CellCoord::layer`] renders only when it is not
+/// [`RouteLayer::Plane`], which for a cell coord is never: the
+/// placement pass stamps `Plane` and no later pass moves a cell body
+/// off it — only the buffer coords the crossing pass allocates can be
+/// lifted onto a `Bridge` layer. Suppressing the default rather than
+/// dropping the field outright keeps the common rendering short
+/// without letting a hand-built IR that breaks the invariant print a
+/// coord that silently reads as a plane coord. Enforcing the
+/// invariant with an assertion here instead was rejected: this type
+/// is built on the happy path for every cell of every pass, and a
+/// breadcrumb whose whole purpose is to improve a panic must not be
+/// able to raise one of its own.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct CellIdentity<'a> {
     index: usize,
@@ -583,8 +592,15 @@ pub(crate) struct CellIdentity<'a> {
 }
 
 impl<'a> CellIdentity<'a> {
-    /// Breadcrumb for `scope.ir.cells[index]`, whose placement coord is
-    /// `coord`.
+    /// Breadcrumb for the cell at position `index` of the scope being
+    /// transitioned, whose placement coord is `coord`.
+    ///
+    /// `coord` is passed in rather than read back out of
+    /// `scope.ir.cells[index]` because a pass transitions the cells of
+    /// its own working clone of the IR, not the entry's: taking the
+    /// coord from the very cell being transitioned cannot go stale or
+    /// index out of bounds, whereas reaching back into `scope.ir`
+    /// could do both if a pass ever adds or drops a cell.
     pub(crate) const fn new(
         index: usize,
         coord: CellCoord,
@@ -602,11 +618,18 @@ impl fmt::Display for CellIdentity<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "cell #{index} at ({x},{y},{z}) in {kind} `{name}`",
+            "cell #{index} at ({x},{y},{z}",
             index = self.index,
             x = self.coord.x,
             y = self.coord.y,
             z = self.coord.z,
+        )?;
+        if !self.coord.layer.is_plane() {
+            write!(f, " on {layer}", layer = self.coord.layer.as_str())?;
+        }
+        write!(
+            f,
+            ") in {kind} `{name}`",
             kind = self.scope.kind.label(),
             name = self.scope.name,
         )
@@ -1052,6 +1075,43 @@ mod tests {
         );
     }
 
+    /// Every scope family has to render, not just the `struct` the
+    /// other fixtures use — a `def` or `site` scope that fell through
+    /// to a placeholder label would leave an operator unable to tell
+    /// two same-named scopes apart.
+    #[test]
+    fn cell_identity_renders_every_scope_kind() {
+        for (kind, expected) in [
+            (ScopeKind::Struct, "cell #7 at (1,0,2) in struct `probe`"),
+            (ScopeKind::Def, "cell #7 at (1,0,2) in def `probe`"),
+            (ScopeKind::Site, "cell #7 at (1,0,2) in site `probe`"),
+        ] {
+            let scope = ScopedPlacementIrEntry {
+                kind,
+                ..probe_scope()
+            };
+            assert_eq!(probe_identity(&scope).to_string(), expected);
+        }
+    }
+
+    /// A cell coord is `Plane` by construction, so the layer stays
+    /// suppressed on every real breadcrumb. A hand-built IR that
+    /// breaks that invariant must not print a coord that reads as a
+    /// plane coord, so the escape layer surfaces rather than being
+    /// dropped.
+    #[test]
+    fn cell_identity_surfaces_a_non_plane_layer() {
+        let scope = probe_scope();
+        let bridged = CellCoord {
+            layer: RouteLayer::Bridge,
+            ..CellCoord::new(1, 0, 2)
+        };
+        assert_eq!(
+            CellIdentity::new(7, bridged, &scope).to_string(),
+            "cell #7 at (1,0,2 on bridge) in struct `probe`",
+        );
+    }
+
     #[test]
     fn route_at_from_unrouted_transitions_to_routed() {
         let scope = probe_scope();
@@ -1199,9 +1259,16 @@ mod tests {
                 "context-free panic grew a double space: {payload}",
             );
         }
+        // Exact match on all three, not just one: the context-free
+        // wording is the wire format the `#[should_panic]` sites
+        // across this crate key on.
         assert_eq!(
-            payloads[0],
-            "PlacementPhase::route called on Routed { wire_length: 3 } — routing must run once per placement",
+            payloads,
+            [
+                "PlacementPhase::route called on Routed { wire_length: 3 } — routing must run once per placement",
+                "PlacementPhase::delay called on Unrouted — delay insertion must run once per routed IR",
+                "PlacementPhase::legalize called on Unrouted — crossing legalization must run at most once per delayed IR",
+            ],
         );
     }
 
