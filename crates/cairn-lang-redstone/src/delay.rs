@@ -62,7 +62,8 @@ use cairn_lang_core::check::Severity;
 use crate::diagnostic::{Diagnostic, DiagnosticCode};
 use crate::netlist_ir::NetRef;
 use crate::placement_ir::{
-    CellCoord, CircuitRegionReservation, PlacementIr, ScopedPlacementIr, ScopedPlacementIrEntry,
+    CellCoord, CellIdentity, CircuitRegionReservation, PlacementIr, ScopedPlacementIr,
+    ScopedPlacementIrEntry,
 };
 use crate::routing_geometry::{input_pad, manhattan, output_pad};
 
@@ -266,7 +267,7 @@ fn delay_scope(entry: &ScopedPlacementIrEntry) -> ScopeDelay {
         }
     }
 
-    attribute_delay_ticks(&mut ir, &cell_coords, &source_of_net);
+    attribute_delay_ticks(&mut ir, entry, &cell_coords, &source_of_net);
 
     Ok(ir)
 }
@@ -279,12 +280,19 @@ fn delay_scope(entry: &ScopedPlacementIrEntry) -> ScopeDelay {
 ///
 /// Computes into a side vector first so `ir.cells` can be borrowed
 /// immutably while the driver sources are looked up through
-/// `source_of_net`, then commits in a mutable pass. Asserts loud in
-/// debug builds if any cell already carries a `Some(_)` `delay_ticks` —
-/// that would mean the caller ran delay insertion twice, which the
-/// phase table on `PlacedCellNode` forbids.
-fn attribute_delay_ticks<F>(ir: &mut PlacementIr, cell_coords: &[CellCoord], source_of_net: &F)
-where
+/// `source_of_net`, then commits in a mutable pass. The commit is loud
+/// in release too: `PlacementPhase::delay_at` panics on any
+/// non-`Routed` variant, which is what a caller who ran delay
+/// insertion twice hands us — the phase table on `PlacedCellNode`
+/// forbids it. `entry` is threaded in purely so that panic can name
+/// the offending cell instead of leaving the operator to walk back
+/// from the backtrace.
+fn attribute_delay_ticks<F>(
+    ir: &mut PlacementIr,
+    entry: &ScopedPlacementIrEntry,
+    cell_coords: &[CellCoord],
+    source_of_net: &F,
+) where
     F: Fn(NetRef) -> CellCoord,
 {
     let delay_ticks: Vec<u32> = ir
@@ -303,8 +311,9 @@ where
             cell.cell.base_delay_ticks().saturating_add(buffer_ticks)
         })
         .collect();
-    for (cell, ticks) in ir.cells.iter_mut().zip(delay_ticks) {
-        cell.phase.delay(ticks);
+    for (index, (cell, ticks)) in ir.cells.iter_mut().zip(delay_ticks).enumerate() {
+        let identity = CellIdentity::new(index, cell.coord, entry);
+        cell.phase.delay_at(ticks, identity);
     }
 }
 

@@ -59,6 +59,29 @@ and is a separate axis from the Minecraft target version.
 
 ### Added
 
+- `PlacementPhase::route_at` / `delay_at` / `legalize_at` — context-
+  carrying twins of the three phase-transition methods, added so an
+  out-of-order transition panic names the cell that tripped it. The
+  existing methods already carried `#[track_caller]`, which puts the
+  calling `.rs:line` in the backtrace but says nothing about *which*
+  cell was already routed / delayed / legalized, leaving an operator
+  to walk back from the backtrace into the IR to find out. The `_at`
+  forms take any `Display` and splice it into the panic between the
+  offending phase and the invariant clause, so the routing, delay,
+  and crossing passes now fail with e.g. `PlacementPhase::legalize
+  called on Legalized { .. } for cell #0 at (16,0,1) in struct
+  `twice` — crossing legalization must run at most once per delayed
+  IR`. The breadcrumb is rendered in the same vocabulary the pass
+  diagnostics already use (`cell #{index}`, `({x},{y},{z})`,
+  ``{kind} `{name}` ``), built from the cell's position in
+  `PlacementIr::cells`, its placement coord, and the owning scope —
+  `PlacedCellNode` carries no source-level name, so that triple is a
+  cell's only stable identity. The coord's `layer` is deliberately
+  omitted because cell coords are `RouteLayer::Plane` by
+  construction. The context-free `route` / `delay` / `legalize` forms
+  are unchanged and still produce their previous message byte for
+  byte: an absent context drops the whole ` for …` clause rather than
+  rendering an empty one, so no stray separator reaches the message.
 - Redstone crossing legalization + `cairn synth --stage crossing
   --edition <java|bedrock>` (M6-PR7) — the seventh slice of the M6
   redstone-simulates pipeline. `cairn-lang-redstone` grows a

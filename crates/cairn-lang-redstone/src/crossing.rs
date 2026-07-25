@@ -68,8 +68,8 @@ use crate::delay::DUST_ATTENUATION_LIMIT;
 use crate::diagnostic::{Diagnostic, DiagnosticCode};
 use crate::netlist_ir::NetRef;
 use crate::placement_ir::{
-    BufferCoord, CellCoord, CircuitRegionReservation, PlacementIr, RouteLayer, ScopedPlacementIr,
-    ScopedPlacementIrEntry,
+    BufferCoord, CellCoord, CellIdentity, CircuitRegionReservation, PlacementIr, RouteLayer,
+    ScopedPlacementIr, ScopedPlacementIrEntry,
 };
 use crate::routing_geometry::{
     input_pad, l_shape_path, manhattan, net_ref_key, net_wire_path, output_pad,
@@ -283,13 +283,16 @@ fn legalize_scope(entry: &ScopedPlacementIrEntry) -> ScopeLegalization {
         &source_of_net,
     )?;
 
-    for (cell, buffers) in ir.cells.iter_mut().zip(buffer_coords_per_cell) {
-        // Loud in release too: `PlacementPhase::legalize` panics on any
-        // non-`Delayed` variant, so a caller who chained
+    for (index, (cell, buffers)) in ir.cells.iter_mut().zip(buffer_coords_per_cell).enumerate() {
+        // Loud in release too: `PlacementPhase::legalize_at` panics on
+        // any non-`Delayed` variant, so a caller who chained
         // `compile_crossing(&legalized.scoped)` (or handed us a
         // still-`Unrouted` / `Routed` cell) trips a release-panic here
-        // rather than silently producing a stale-but-plausible IR.
-        cell.phase.legalize(buffers);
+        // rather than silently producing a stale-but-plausible IR. The
+        // identity rides along so that panic names the offending cell
+        // rather than only the phase it tripped on.
+        let identity = CellIdentity::new(index, cell.coord, entry);
+        cell.phase.legalize_at(buffers, identity);
     }
 
     Ok(ir)
@@ -1081,11 +1084,17 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "must run at most once per delayed IR")]
+    #[should_panic(
+        expected = "for cell #0 at (16,0,1) in struct `twice` — crossing legalization must run at most once per delayed IR"
+    )]
     fn re_running_crossing_pass_panics_loudly() {
         // Chaining `compile_crossing(&legalized.scoped)` is forbidden
         // by the phase table on `PlacedCellNode`. Loud in release so
         // a caller cannot silently double-populate `buffer_coords`.
+        // The expected substring pins the cell identity as well as the
+        // invariant: the breadcrumb is what tells an operator which
+        // cell tripped the guard without walking the backtrace back
+        // into the IR.
         let mut ir = PlacementIr::new(Edition::Java);
         ir.region = Some(reservation(20, 3, 2));
         ir.inputs.push(crate::netlist_ir::NetlistInput {

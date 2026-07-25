@@ -47,8 +47,9 @@
 //!   `E_ROUTE_CONGESTION` immediately with a "pad layout" primary
 //!   rather than a silent misroute. Cross-net overlap between
 //!   distinct signals during Steiner draw is tolerated in v1; the
-//!   crossing-legalization pass (stage 4 of §14.5) promotes those
-//!   to a `RouteLayer::Bridge` / `Via` escape in a later PR.
+//!   crossing-legalization pass (stage 4 of §14.5) is what owns
+//!   those, refusing a scope whose `void=<N>` reservation is too
+//!   thin to absorb them with `E_CROSSING_CONGESTION`.
 //! - **`wire_length` attribution.** For every cell, `wire_length =
 //!   sum over drivers of Manhattan(driver-source-coord, cell.coord)`.
 //!   The tree-total path is not attributed per-sink today because the
@@ -88,7 +89,8 @@ use cairn_lang_core::check::Severity;
 use crate::diagnostic::{Diagnostic, DiagnosticCode};
 use crate::netlist_ir::NetRef;
 use crate::placement_ir::{
-    CellCoord, CircuitRegionReservation, PlacementIr, ScopedPlacementIr, ScopedPlacementIrEntry,
+    CellCoord, CellIdentity, CircuitRegionReservation, PlacementIr, ScopedPlacementIr,
+    ScopedPlacementIrEntry,
 };
 use crate::routing_geometry::{input_pad, manhattan, net_ref_key, net_wire_path, output_pad};
 
@@ -278,7 +280,7 @@ fn route_scope(entry: &ScopedPlacementIrEntry) -> ScopeRouting {
         }
     }
 
-    attribute_wire_lengths(&mut ir, &cell_coords, &source_of_net);
+    attribute_wire_lengths(&mut ir, entry, &cell_coords, &source_of_net);
 
     // Congestion check against the actual post-routing footprint.
     // `cells.len() * CELL_FOOTPRINT` carries forward the pessimistic
@@ -305,17 +307,24 @@ fn route_scope(entry: &ScopedPlacementIrEntry) -> ScopeRouting {
 /// distances from each driver's source into that cell. The
 /// Steiner-shared tree total is used for congestion accounting at
 /// the routing-pass level; per-sink Manhattan is what the
-/// delay-insertion pass (§14.4) will consume, so attributing it
-/// here saves a second walk in the follow-up PR.
+/// delay-insertion pass (§14.4) consumes, so attributing it here
+/// saves that pass a second walk.
 ///
 /// Computes into a side vector first so `ir.cells` can be borrowed
 /// immutably while the driver sources are looked up through
-/// `source_of_net`, then commits in a mutable pass. Asserts loud
-/// in debug builds if any cell already carries a `Some(_)`
-/// `wire_length` — that would mean the caller routed twice, which
-/// the phase table on `PlacedCellNode` forbids.
-fn attribute_wire_lengths<F>(ir: &mut PlacementIr, cell_coords: &[CellCoord], source_of_net: &F)
-where
+/// `source_of_net`, then commits in a mutable pass. The commit is
+/// loud in release too: `PlacementPhase::route_at` panics on any
+/// non-`Unrouted` variant, which is what a caller who routed twice
+/// hands us — the phase table on `PlacedCellNode` forbids it.
+/// `entry` is threaded in purely so that panic can name the offending
+/// cell instead of leaving the operator to walk back from the
+/// backtrace.
+fn attribute_wire_lengths<F>(
+    ir: &mut PlacementIr,
+    entry: &ScopedPlacementIrEntry,
+    cell_coords: &[CellCoord],
+    source_of_net: &F,
+) where
     F: Fn(NetRef) -> CellCoord,
 {
     let wire_lengths: Vec<u32> = ir
@@ -328,8 +337,9 @@ where
             })
         })
         .collect();
-    for (cell, len) in ir.cells.iter_mut().zip(wire_lengths) {
-        cell.phase.route(len);
+    for (index, (cell, len)) in ir.cells.iter_mut().zip(wire_lengths).enumerate() {
+        let identity = CellIdentity::new(index, cell.coord, entry);
+        cell.phase.route_at(len, identity);
     }
 }
 
