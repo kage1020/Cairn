@@ -47,8 +47,9 @@
 //!   `E_ROUTE_CONGESTION` immediately with a "pad layout" primary
 //!   rather than a silent misroute. Cross-net overlap between
 //!   distinct signals during Steiner draw is tolerated in v1; the
-//!   crossing-legalization pass (stage 4 of §14.5) promotes those
-//!   to a `RouteLayer::Bridge` / `Via` escape in a later PR.
+//!   crossing-legalization pass (stage 4 of §14.5) is what owns
+//!   those, refusing a scope whose `void=<N>` reservation is too
+//!   thin to absorb them with `E_CROSSING_CONGESTION`.
 //! - **`wire_length` attribution.** For every cell, `wire_length =
 //!   sum over drivers of Manhattan(driver-source-coord, cell.coord)`.
 //!   The tree-total path is not attributed per-sink today because the
@@ -67,13 +68,17 @@
 //!   that no downstream stage can materialise into voxels, silently
 //!   corrupting `assert latency(...)` verification per §14.7.
 //!
-//! Future stages fill the intentional gaps: `RouteLayer::Bridge` /
-//! `Via` escape belongs to crossing legalization (stage 4 of §14.5),
-//! and the input / output pad coordinates the routing pass picks today
-//! become a `PlacementIr` field (`input_pads` / `output_pads`) once a
-//! subsequent PR needs them outside routing — that migration is
-//! `#[non_exhaustive]`-safe on both types. Attenuation accounting
-//! itself has landed as [`crate::delay::compile_delay`] (stage 3): the
+//! One intentional gap is left here: the input / output pad
+//! coordinates the routing pass derives on the fly are not stored, and
+//! would become a `PlacementIr` field (`input_pads` / `output_pads`)
+//! if a consumer ever needs them outside routing — that migration is
+//! `#[non_exhaustive]`-safe on both types. The escape layers are not
+//! such a gap: `RouteLayer::Bridge` has its producer in
+//! [`crate::crossing::compile_crossing`] (stage 4 of §14.5), but only
+//! for implicit buffer-repeater coords — v1 lifts no wire coord onto
+//! an escape layer, and `RouteLayer::Via` has no producer at all.
+//! Attenuation accounting has landed as
+//! [`crate::delay::compile_delay`] (stage 3): the
 //! delay pass re-derives per-driver Manhattan segments from the same
 //! `NetRef → source coord` mapping used here, counts implicit buffer
 //! repeaters for segments beyond the 15-block dust attenuation limit,
@@ -88,7 +93,8 @@ use cairn_lang_core::check::Severity;
 use crate::diagnostic::{Diagnostic, DiagnosticCode};
 use crate::netlist_ir::NetRef;
 use crate::placement_ir::{
-    CellCoord, CircuitRegionReservation, PlacementIr, ScopedPlacementIr, ScopedPlacementIrEntry,
+    CellCoord, CellIdentity, CircuitRegionReservation, PlacementIr, ScopedPlacementIr,
+    ScopedPlacementIrEntry,
 };
 use crate::routing_geometry::{input_pad, manhattan, net_ref_key, net_wire_path, output_pad};
 
@@ -278,7 +284,7 @@ fn route_scope(entry: &ScopedPlacementIrEntry) -> ScopeRouting {
         }
     }
 
-    attribute_wire_lengths(&mut ir, &cell_coords, &source_of_net);
+    attribute_wire_lengths(&mut ir, entry, &cell_coords, &source_of_net);
 
     // Congestion check against the actual post-routing footprint.
     // `cells.len() * CELL_FOOTPRINT` carries forward the pessimistic
@@ -305,17 +311,24 @@ fn route_scope(entry: &ScopedPlacementIrEntry) -> ScopeRouting {
 /// distances from each driver's source into that cell. The
 /// Steiner-shared tree total is used for congestion accounting at
 /// the routing-pass level; per-sink Manhattan is what the
-/// delay-insertion pass (§14.4) will consume, so attributing it
-/// here saves a second walk in the follow-up PR.
+/// delay-insertion pass (§14.4) consumes, so attributing it here
+/// saves that pass a second walk.
 ///
 /// Computes into a side vector first so `ir.cells` can be borrowed
 /// immutably while the driver sources are looked up through
-/// `source_of_net`, then commits in a mutable pass. Asserts loud
-/// in debug builds if any cell already carries a `Some(_)`
-/// `wire_length` — that would mean the caller routed twice, which
-/// the phase table on `PlacedCellNode` forbids.
-fn attribute_wire_lengths<F>(ir: &mut PlacementIr, cell_coords: &[CellCoord], source_of_net: &F)
-where
+/// `source_of_net`, then commits in a mutable pass. The commit is
+/// loud in release too: `PlacementPhase::route_at` panics on any
+/// non-`Unrouted` variant, which is what a caller who routed twice
+/// hands us — the phase table on `PlacedCellNode` forbids it.
+/// `entry` is threaded in purely so that panic can name the offending
+/// cell instead of leaving the operator to walk back from the
+/// backtrace.
+fn attribute_wire_lengths<F>(
+    ir: &mut PlacementIr,
+    entry: &ScopedPlacementIrEntry,
+    cell_coords: &[CellCoord],
+    source_of_net: &F,
+) where
     F: Fn(NetRef) -> CellCoord,
 {
     let wire_lengths: Vec<u32> = ir
@@ -328,8 +341,9 @@ where
             })
         })
         .collect();
-    for (cell, len) in ir.cells.iter_mut().zip(wire_lengths) {
-        cell.phase.route(len);
+    for (index, (cell, len)) in ir.cells.iter_mut().zip(wire_lengths).enumerate() {
+        let identity = CellIdentity::new(index, cell.coord, entry);
+        cell.phase.route_at(len, identity);
     }
 }
 
@@ -424,4 +438,79 @@ fn zero_reservation_diagnostic(
     );
     debug_assert_eq!(diag.severity, Severity::Error);
     diag
+}
+
+#[cfg(test)]
+mod tests {
+    //! Crate-internal coverage for the routing pass's phase-transition
+    //! commit. `tests/routing.rs` drives real synth fixtures and can
+    //! only ever hand this pass a uniformly `Unrouted` IR; building a
+    //! scope whose cells sit in different phases needs the
+    //! `pub(crate)` `phase` field, so it lives here.
+
+    use cairn_lang_core::Edition;
+    use cairn_lang_core::error::Span;
+
+    use super::compile_routing;
+    use crate::edition_netlist_ir::EditionCell;
+    use crate::logic_ir::ScopeKind;
+    use crate::placement_ir::{
+        CellCoord, CircuitRegionReservation, PlacedCellNode, PlacementIr, PlacementPhase,
+        ScopedPlacementIr, ScopedPlacementIrEntry,
+    };
+
+    fn reservation(width: u32, depth: u32, void: u32) -> CircuitRegionReservation {
+        CircuitRegionReservation {
+            label: "floor".to_owned(),
+            void,
+            width,
+            depth,
+            span: Span::default(),
+        }
+    }
+
+    fn scoped(kind: ScopeKind, name: &str, ir: PlacementIr) -> ScopedPlacementIr {
+        let mut scoped = ScopedPlacementIr::new();
+        scoped.scopes.push(ScopedPlacementIrEntry {
+            kind,
+            name: name.to_owned(),
+            ir,
+        });
+        scoped
+    }
+
+    fn placed_cell(coord: CellCoord, phase: PlacementPhase) -> PlacedCellNode {
+        PlacedCellNode {
+            cell: EditionCell::JavaRepeaterOr,
+            drivers: vec![],
+            coord,
+            phase,
+            span: Span::default(),
+        }
+    }
+
+    #[test]
+    #[should_panic(
+        expected = "for cell #1 at (4,0,1) in struct `mixed` — routing must run once per placement"
+    )]
+    fn route_panic_names_the_offending_cell_not_the_first_one() {
+        // Re-running the whole pass always trips on `cells[0]`, which
+        // would let a regression that hardcoded the index to zero — or
+        // that read the coord off the wrong cell — pass unnoticed. A
+        // hand-built IR whose first cell is still `Unrouted` while the
+        // second is already `Routed` forces the panic past the head of
+        // the loop, so both the index and the coord have to be
+        // threaded from the cell actually being transitioned.
+        let mut ir = PlacementIr::new(Edition::Java);
+        ir.region = Some(reservation(8, 3, 2));
+        ir.cells.push(placed_cell(
+            CellCoord::new(0, 0, 0),
+            PlacementPhase::Unrouted,
+        ));
+        ir.cells.push(placed_cell(
+            CellCoord::new(4, 0, 1),
+            PlacementPhase::Routed { wire_length: 0 },
+        ));
+        let _ = compile_routing(&scoped(ScopeKind::Struct, "mixed", ir));
+    }
 }

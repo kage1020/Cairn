@@ -29,6 +29,8 @@
 //! Attenuation limits (dust segments exceeding 15 blocks) belong to the
 //! routing pass and stay a follow-up.
 
+use std::fmt;
+
 use cairn_lang_core::Edition;
 use cairn_lang_core::ast::DottedRef;
 use cairn_lang_core::error::Span;
@@ -374,43 +376,97 @@ impl PlacementPhase {
 
     /// [`Self::Unrouted`] → [`Self::Routed`].
     ///
+    /// Carries no caller context, so an out-of-order call names only
+    /// the phase it tripped on. Prefer [`Self::route_at`] from a
+    /// pipeline pass, which names the offending cell as well.
+    ///
     /// # Panics
     ///
     /// Panics if the phase is not [`Self::Unrouted`]. Routing must run
     /// exactly once per placement, and the phase table on
     /// [`PlacedCellNode`] forbids re-routing.
+    #[track_caller]
+    pub fn route(&mut self, wire_length: u32) {
+        self.route_inner(wire_length, None);
+    }
+
+    /// [`Self::Unrouted`] → [`Self::Routed`], naming `context` in the
+    /// panic an out-of-order call raises.
     ///
+    /// `#[track_caller]` alone puts the calling `.rs:line` in the
+    /// backtrace but says nothing about *which* cell tripped the
+    /// guard, leaving the operator to walk back from the backtrace
+    /// into the IR. Pipeline passes pass a [`CellIdentity`]; any
+    /// [`fmt::Display`] works.
+    ///
+    /// # Panics
+    ///
+    /// Panics under exactly the conditions [`Self::route`] does.
+    #[track_caller]
+    pub fn route_at(&mut self, wire_length: u32, context: impl fmt::Display) {
+        self.route_inner(wire_length, Some(&context));
+    }
+
     /// All non-`Unrouted` variants are listed explicitly (rather than a
     /// `_ =>` catch-all) so a Stage-5 variant addition becomes a
     /// compile error here — the author must decide whether Stage 5 can
     /// be re-routed rather than silently panicking.
     #[track_caller]
-    pub fn route(&mut self, wire_length: u32) {
+    fn route_inner(&mut self, wire_length: u32, context: Option<&dyn fmt::Display>) {
         match self {
             Self::Unrouted => {
                 *self = Self::Routed { wire_length };
             }
-            Self::Routed { .. } | Self::Delayed { .. } | Self::Legalized { .. } => panic!(
-                "PlacementPhase::route called on {self:?} — routing must run once per placement"
-            ),
+            Self::Routed { .. } | Self::Delayed { .. } | Self::Legalized { .. } => {
+                transition_panic(
+                    "route",
+                    self,
+                    "routing must run once per placement",
+                    context,
+                )
+            }
         }
     }
 
     /// [`Self::Routed`] → [`Self::Delayed`].
+    ///
+    /// Carries no caller context — see [`Self::delay_at`] for the form
+    /// a pipeline pass should use.
     ///
     /// # Panics
     ///
     /// Panics if the phase is not [`Self::Routed`]. Delay insertion
     /// must run exactly once per routed IR, and the phase table on
     /// [`PlacedCellNode`] forbids re-writing a `delay_ticks` that was
-    /// already committed. See [`Self::route`] for why the arms are
-    /// enumerated explicitly.
+    /// already committed.
     #[track_caller]
     pub fn delay(&mut self, delay_ticks: u32) {
+        self.delay_inner(delay_ticks, None);
+    }
+
+    /// [`Self::Routed`] → [`Self::Delayed`], naming `context` in the
+    /// panic an out-of-order call raises. See [`Self::route_at`] for
+    /// why the context is worth carrying.
+    ///
+    /// # Panics
+    ///
+    /// Panics under exactly the conditions [`Self::delay`] does.
+    #[track_caller]
+    pub fn delay_at(&mut self, delay_ticks: u32, context: impl fmt::Display) {
+        self.delay_inner(delay_ticks, Some(&context));
+    }
+
+    /// See [`Self::route_inner`] for why the arms are enumerated
+    /// explicitly.
+    #[track_caller]
+    fn delay_inner(&mut self, delay_ticks: u32, context: Option<&dyn fmt::Display>) {
         let wire_length = match self {
             Self::Routed { wire_length } => *wire_length,
-            Self::Unrouted | Self::Delayed { .. } | Self::Legalized { .. } => panic!(
-                "PlacementPhase::delay called on {self:?} — delay insertion must run once per routed IR"
+            Self::Unrouted | Self::Delayed { .. } | Self::Legalized { .. } => transition_panic(
+                "delay",
+                self,
+                "delay insertion must run once per routed IR",
+                context,
             ),
         };
         *self = Self::Delayed {
@@ -421,6 +477,9 @@ impl PlacementPhase {
 
     /// [`Self::Delayed`] → [`Self::Legalized`].
     ///
+    /// Carries no caller context — see [`Self::legalize_at`] for the
+    /// form a pipeline pass should use.
+    ///
     /// # Panics
     ///
     /// Panics if the phase is not [`Self::Delayed`]. Crossing
@@ -428,16 +487,41 @@ impl PlacementPhase {
     /// the earlier release-loud `assert!` on the crossing pass, so a
     /// caller who chained `compile_crossing(&legalized.scoped)` trips
     /// here rather than silently producing a stale-but-plausible IR.
-    /// See [`Self::route`] for why the arms are enumerated explicitly.
     #[track_caller]
     pub fn legalize(&mut self, buffer_coords: Vec<BufferCoord>) {
+        self.legalize_inner(buffer_coords, None);
+    }
+
+    /// [`Self::Delayed`] → [`Self::Legalized`], naming `context` in the
+    /// panic an out-of-order call raises. See [`Self::route_at`] for
+    /// why the context is worth carrying.
+    ///
+    /// # Panics
+    ///
+    /// Panics under exactly the conditions [`Self::legalize`] does.
+    #[track_caller]
+    pub fn legalize_at(&mut self, buffer_coords: Vec<BufferCoord>, context: impl fmt::Display) {
+        self.legalize_inner(buffer_coords, Some(&context));
+    }
+
+    /// See [`Self::route_inner`] for why the arms are enumerated
+    /// explicitly.
+    #[track_caller]
+    fn legalize_inner(
+        &mut self,
+        buffer_coords: Vec<BufferCoord>,
+        context: Option<&dyn fmt::Display>,
+    ) {
         let (wire_length, delay_ticks) = match self {
             Self::Delayed {
                 wire_length,
                 delay_ticks,
             } => (*wire_length, *delay_ticks),
-            Self::Unrouted | Self::Routed { .. } | Self::Legalized { .. } => panic!(
-                "PlacementPhase::legalize called on {self:?} — crossing legalization must run at most once per delayed IR"
+            Self::Unrouted | Self::Routed { .. } | Self::Legalized { .. } => transition_panic(
+                "legalize",
+                self,
+                "crossing legalization must run at most once per delayed IR",
+                context,
             ),
         };
         *self = Self::Legalized {
@@ -445,6 +529,110 @@ impl PlacementPhase {
             delay_ticks,
             buffer_coords,
         };
+    }
+}
+
+/// Raise the release-loud panic an out-of-order [`PlacementPhase`]
+/// transition owes its caller.
+///
+/// Splicing the identity clause in here rather than at each `panic!`
+/// site keeps the context-free forms byte-identical to what they
+/// produced before the `*_at` variants existed — an absent context
+/// drops the whole ` for {context}` clause rather than rendering an
+/// empty one, so no stray separator or double space reaches the
+/// message.
+///
+/// `#[track_caller]` on every layer between the pass and here means
+/// the reported location is still the pipeline pass's `.rs:line`, not
+/// this function's.
+#[track_caller]
+fn transition_panic(
+    method: &str,
+    current: &PlacementPhase,
+    invariant: &str,
+    context: Option<&dyn fmt::Display>,
+) -> ! {
+    match context {
+        Some(context) => {
+            panic!("PlacementPhase::{method} called on {current:?} for {context} — {invariant}")
+        }
+        None => panic!("PlacementPhase::{method} called on {current:?} — {invariant}"),
+    }
+}
+
+/// Identity breadcrumb a pipeline pass hands to
+/// [`PlacementPhase::route_at`] / [`PlacementPhase::delay_at`] /
+/// [`PlacementPhase::legalize_at`] so an out-of-order transition panic
+/// names the cell that tripped it.
+///
+/// [`PlacedCellNode`] carries no source-level name, so a cell's only
+/// stable identity is its position in [`PlacementIr::cells`], the
+/// coord the placement pass stamped on it, and the scope that owns it.
+/// Rendered in the same vocabulary the pass diagnostics already use
+/// (`cell #{index}`, `({x},{y},{z})`, ``{kind} `{name}` ``) so a panic
+/// and an `E_*` diagnostic about the same cell read alike.
+///
+/// [`CellCoord::layer`] renders only when it is not
+/// [`RouteLayer::Plane`], which for a cell coord is never: the
+/// placement pass stamps `Plane` and no later pass moves a cell body
+/// off it — only the buffer coords the crossing pass allocates can be
+/// lifted onto a `Bridge` layer. Suppressing the default rather than
+/// dropping the field outright keeps the common rendering short
+/// without letting a hand-built IR that breaks the invariant print a
+/// coord that silently reads as a plane coord. Enforcing the
+/// invariant with an assertion here instead was rejected: this type
+/// is built on the happy path for every cell of every pass, and a
+/// breadcrumb whose whole purpose is to improve a panic must not be
+/// able to raise one of its own.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct CellIdentity<'a> {
+    index: usize,
+    coord: CellCoord,
+    scope: &'a ScopedPlacementIrEntry,
+}
+
+impl<'a> CellIdentity<'a> {
+    /// Breadcrumb for the cell at position `index` of the scope being
+    /// transitioned, whose placement coord is `coord`.
+    ///
+    /// `coord` is passed in rather than read back out of
+    /// `scope.ir.cells[index]` because a pass transitions the cells of
+    /// its own working clone of the IR, not the entry's: taking the
+    /// coord from the very cell being transitioned cannot go stale or
+    /// index out of bounds, whereas reaching back into `scope.ir`
+    /// could do both if a pass ever adds or drops a cell.
+    pub(crate) const fn new(
+        index: usize,
+        coord: CellCoord,
+        scope: &'a ScopedPlacementIrEntry,
+    ) -> Self {
+        Self {
+            index,
+            coord,
+            scope,
+        }
+    }
+}
+
+impl fmt::Display for CellIdentity<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "cell #{index} at ({x},{y},{z}",
+            index = self.index,
+            x = self.coord.x,
+            y = self.coord.y,
+            z = self.coord.z,
+        )?;
+        if !self.coord.layer.is_plane() {
+            write!(f, " on {layer}", layer = self.coord.layer.as_str())?;
+        }
+        write!(
+            f,
+            ") in {kind} `{name}`",
+            kind = self.scope.kind.label(),
+            name = self.scope.name,
+        )
     }
 }
 
@@ -864,6 +1052,235 @@ mod tests {
     fn legalize_from_legalized_panics() {
         let mut phase = legalized();
         phase.legalize(vec![]);
+    }
+
+    fn probe_scope() -> ScopedPlacementIrEntry {
+        ScopedPlacementIrEntry {
+            kind: ScopeKind::Struct,
+            name: "probe".to_string(),
+            ir: PlacementIr::new(Edition::Java),
+        }
+    }
+
+    fn probe_identity(scope: &ScopedPlacementIrEntry) -> CellIdentity<'_> {
+        CellIdentity::new(7, CellCoord::new(1, 0, 2), scope)
+    }
+
+    #[test]
+    fn cell_identity_renders_index_coord_and_scope() {
+        let scope = probe_scope();
+        assert_eq!(
+            probe_identity(&scope).to_string(),
+            "cell #7 at (1,0,2) in struct `probe`",
+        );
+    }
+
+    /// Every scope family has to render, not just the `struct` the
+    /// other fixtures use — a `def` or `site` scope that fell through
+    /// to a placeholder label would leave an operator unable to tell
+    /// two same-named scopes apart.
+    #[test]
+    fn cell_identity_renders_every_scope_kind() {
+        for (kind, expected) in [
+            (ScopeKind::Struct, "cell #7 at (1,0,2) in struct `probe`"),
+            (ScopeKind::Def, "cell #7 at (1,0,2) in def `probe`"),
+            (ScopeKind::Site, "cell #7 at (1,0,2) in site `probe`"),
+        ] {
+            let scope = ScopedPlacementIrEntry {
+                kind,
+                ..probe_scope()
+            };
+            assert_eq!(probe_identity(&scope).to_string(), expected);
+        }
+    }
+
+    /// A cell coord is `Plane` by construction, so the layer stays
+    /// suppressed on every real breadcrumb. A hand-built IR that
+    /// breaks that invariant must not print a coord that reads as a
+    /// plane coord, so the escape layer surfaces rather than being
+    /// dropped.
+    #[test]
+    fn cell_identity_surfaces_a_non_plane_layer() {
+        let scope = probe_scope();
+        let bridged = CellCoord {
+            layer: RouteLayer::Bridge,
+            ..CellCoord::new(1, 0, 2)
+        };
+        assert_eq!(
+            CellIdentity::new(7, bridged, &scope).to_string(),
+            "cell #7 at (1,0,2 on bridge) in struct `probe`",
+        );
+    }
+
+    #[test]
+    fn route_at_from_unrouted_transitions_to_routed() {
+        let scope = probe_scope();
+        let mut phase = PlacementPhase::Unrouted;
+        phase.route_at(7, probe_identity(&scope));
+        assert_eq!(phase, PlacementPhase::Routed { wire_length: 7 });
+    }
+
+    #[test]
+    #[should_panic(expected = "for cell #7 at (1,0,2) in struct `probe` — routing must run once")]
+    fn route_at_from_routed_panics_with_cell_identity() {
+        let scope = probe_scope();
+        let mut phase = routed();
+        phase.route_at(5, probe_identity(&scope));
+    }
+
+    #[test]
+    #[should_panic(expected = "for cell #7 at (1,0,2) in struct `probe` — routing must run once")]
+    fn route_at_from_delayed_panics_with_cell_identity() {
+        let scope = probe_scope();
+        let mut phase = delayed();
+        phase.route_at(5, probe_identity(&scope));
+    }
+
+    #[test]
+    #[should_panic(expected = "for cell #7 at (1,0,2) in struct `probe` — routing must run once")]
+    fn route_at_from_legalized_panics_with_cell_identity() {
+        let scope = probe_scope();
+        let mut phase = legalized();
+        phase.route_at(5, probe_identity(&scope));
+    }
+
+    #[test]
+    fn delay_at_from_routed_transitions_and_preserves_wire_length() {
+        let scope = probe_scope();
+        let mut phase = PlacementPhase::Routed { wire_length: 9 };
+        phase.delay_at(4, probe_identity(&scope));
+        assert_eq!(
+            phase,
+            PlacementPhase::Delayed {
+                wire_length: 9,
+                delay_ticks: 4,
+            },
+        );
+    }
+
+    #[test]
+    #[should_panic(
+        expected = "for cell #7 at (1,0,2) in struct `probe` — delay insertion must run"
+    )]
+    fn delay_at_from_unrouted_panics_with_cell_identity() {
+        let scope = probe_scope();
+        let mut phase = PlacementPhase::Unrouted;
+        phase.delay_at(2, probe_identity(&scope));
+    }
+
+    #[test]
+    #[should_panic(
+        expected = "for cell #7 at (1,0,2) in struct `probe` — delay insertion must run"
+    )]
+    fn delay_at_from_delayed_panics_with_cell_identity() {
+        let scope = probe_scope();
+        let mut phase = delayed();
+        phase.delay_at(2, probe_identity(&scope));
+    }
+
+    #[test]
+    #[should_panic(
+        expected = "for cell #7 at (1,0,2) in struct `probe` — delay insertion must run"
+    )]
+    fn delay_at_from_legalized_panics_with_cell_identity() {
+        let scope = probe_scope();
+        let mut phase = legalized();
+        phase.delay_at(2, probe_identity(&scope));
+    }
+
+    #[test]
+    fn legalize_at_from_delayed_transitions_and_preserves_prior_fields() {
+        let scope = probe_scope();
+        let mut phase = PlacementPhase::Delayed {
+            wire_length: 12,
+            delay_ticks: 3,
+        };
+        let coords = vec![BufferCoord::new(PortName::A, CellCoord::new(1, 0, 0))];
+        phase.legalize_at(coords.clone(), probe_identity(&scope));
+        assert_eq!(
+            phase,
+            PlacementPhase::Legalized {
+                wire_length: 12,
+                delay_ticks: 3,
+                buffer_coords: coords,
+            },
+        );
+    }
+
+    #[test]
+    #[should_panic(
+        expected = "for cell #7 at (1,0,2) in struct `probe` — crossing legalization must run"
+    )]
+    fn legalize_at_from_unrouted_panics_with_cell_identity() {
+        let scope = probe_scope();
+        let mut phase = PlacementPhase::Unrouted;
+        phase.legalize_at(vec![], probe_identity(&scope));
+    }
+
+    #[test]
+    #[should_panic(
+        expected = "for cell #7 at (1,0,2) in struct `probe` — crossing legalization must run"
+    )]
+    fn legalize_at_from_routed_panics_with_cell_identity() {
+        let scope = probe_scope();
+        let mut phase = routed();
+        phase.legalize_at(vec![], probe_identity(&scope));
+    }
+
+    #[test]
+    #[should_panic(
+        expected = "for cell #7 at (1,0,2) in struct `probe` — crossing legalization must run"
+    )]
+    fn legalize_at_from_legalized_panics_with_cell_identity() {
+        let scope = probe_scope();
+        let mut phase = legalized();
+        phase.legalize_at(vec![], probe_identity(&scope));
+    }
+
+    /// The context-free transition forms must not grow a dangling
+    /// separator now that the `*_at` variants splice one in. Pinned by
+    /// reading the panic payload directly rather than through
+    /// `#[should_panic]`, which can only assert on a substring that is
+    /// present — never on one that is absent.
+    #[test]
+    fn context_free_transitions_panic_without_an_identity_clause() {
+        let payloads = [
+            panic_message(|| routed().route(5)),
+            panic_message(|| PlacementPhase::Unrouted.delay(2)),
+            panic_message(|| PlacementPhase::Unrouted.legalize(vec![])),
+        ];
+        for payload in &payloads {
+            assert!(
+                !payload.contains(" for "),
+                "context-free panic grew an identity clause: {payload}",
+            );
+            assert!(
+                !payload.contains("  "),
+                "context-free panic grew a double space: {payload}",
+            );
+        }
+        // Exact match on all three, not just one: the context-free
+        // wording is the wire format the `#[should_panic]` sites
+        // across this crate key on.
+        assert_eq!(
+            payloads,
+            [
+                "PlacementPhase::route called on Routed { wire_length: 3 } — routing must run once per placement",
+                "PlacementPhase::delay called on Unrouted — delay insertion must run once per routed IR",
+                "PlacementPhase::legalize called on Unrouted — crossing legalization must run at most once per delayed IR",
+            ],
+        );
+    }
+
+    fn panic_message(body: impl FnOnce() + std::panic::UnwindSafe) -> String {
+        let previous = std::panic::take_hook();
+        std::panic::set_hook(Box::new(|_| {}));
+        let payload = std::panic::catch_unwind(body).expect_err("transition must panic");
+        std::panic::set_hook(previous);
+        payload
+            .downcast_ref::<String>()
+            .cloned()
+            .expect("transition panics carry a formatted String payload")
     }
 
     #[test]

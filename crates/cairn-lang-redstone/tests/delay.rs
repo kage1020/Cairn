@@ -695,3 +695,18 @@ struct wide_pack size=300x5
         wide_attenuation.primary,
     );
 }
+
+/// AC11 — chaining `compile_delay(&delayed.scoped)` is forbidden by
+/// the phase table on `PlacedCellNode`, and the panic it raises names
+/// the cell that tripped it. Mirrors the routing pass's equivalent
+/// guard: without the breadcrumb the backtrace points at the pass but
+/// not at the cell whose `delay_ticks` was already committed.
+#[test]
+#[should_panic(
+    expected = "for cell #0 at (0,0,0) in struct `gatehouse` — delay insertion must run once per routed IR"
+)]
+fn re_running_delay_pass_panics_loudly() {
+    let source = load_example("redstone-door.crn");
+    let delayed = compile_delay(&routed_from_source(&source, Edition::Java));
+    let _twice = compile_delay(&delayed.scoped);
+}

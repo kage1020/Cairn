@@ -482,3 +482,19 @@ fn edition_parity_wire_length_matches_across_java_and_bedrock() {
         }
     }
 }
+
+/// AC10 — chaining `compile_routing(&routed.scoped)` is forbidden by
+/// the phase table on `PlacedCellNode`, and the panic it raises names
+/// the cell that tripped it. `#[track_caller]` alone would put only
+/// the pass's `.rs:line` in the backtrace, leaving an operator to walk
+/// back into the IR to find out which cell was already routed; the
+/// expected substring pins the breadcrumb that spares them that walk.
+#[test]
+#[should_panic(
+    expected = "for cell #0 at (0,0,0) in struct `gatehouse` — routing must run once per placement"
+)]
+fn re_running_routing_pass_panics_loudly() {
+    let source = load_example("redstone-door.crn");
+    let routed = compile_routing(&placement_from_source(&source, Edition::Java));
+    let _twice = compile_routing(&routed.scoped);
+}

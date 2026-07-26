@@ -68,8 +68,8 @@ use crate::delay::DUST_ATTENUATION_LIMIT;
 use crate::diagnostic::{Diagnostic, DiagnosticCode};
 use crate::netlist_ir::NetRef;
 use crate::placement_ir::{
-    BufferCoord, CellCoord, CircuitRegionReservation, PlacementIr, RouteLayer, ScopedPlacementIr,
-    ScopedPlacementIrEntry,
+    BufferCoord, CellCoord, CellIdentity, CircuitRegionReservation, PlacementIr, RouteLayer,
+    ScopedPlacementIr, ScopedPlacementIrEntry,
 };
 use crate::routing_geometry::{
     input_pad, l_shape_path, manhattan, net_ref_key, net_wire_path, output_pad,
@@ -283,13 +283,16 @@ fn legalize_scope(entry: &ScopedPlacementIrEntry) -> ScopeLegalization {
         &source_of_net,
     )?;
 
-    for (cell, buffers) in ir.cells.iter_mut().zip(buffer_coords_per_cell) {
-        // Loud in release too: `PlacementPhase::legalize` panics on any
-        // non-`Delayed` variant, so a caller who chained
+    for (index, (cell, buffers)) in ir.cells.iter_mut().zip(buffer_coords_per_cell).enumerate() {
+        // Loud in release too: `PlacementPhase::legalize_at` panics on
+        // any non-`Delayed` variant, so a caller who chained
         // `compile_crossing(&legalized.scoped)` (or handed us a
         // still-`Unrouted` / `Routed` cell) trips a release-panic here
-        // rather than silently producing a stale-but-plausible IR.
-        cell.phase.legalize(buffers);
+        // rather than silently producing a stale-but-plausible IR. The
+        // identity rides along so that panic names the offending cell
+        // rather than only the phase it tripped on.
+        let identity = CellIdentity::new(index, cell.coord, entry);
+        cell.phase.legalize_at(buffers, identity);
     }
 
     Ok(ir)
@@ -1081,11 +1084,17 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "must run at most once per delayed IR")]
+    #[should_panic(
+        expected = "for cell #0 at (16,0,1) in struct `twice` — crossing legalization must run at most once per delayed IR"
+    )]
     fn re_running_crossing_pass_panics_loudly() {
         // Chaining `compile_crossing(&legalized.scoped)` is forbidden
         // by the phase table on `PlacedCellNode`. Loud in release so
         // a caller cannot silently double-populate `buffer_coords`.
+        // The expected substring pins the cell identity as well as the
+        // invariant: the breadcrumb is what tells an operator which
+        // cell tripped the guard without walking the backtrace back
+        // into the IR.
         let mut ir = PlacementIr::new(Edition::Java);
         ir.region = Some(reservation(20, 3, 2));
         ir.inputs.push(crate::netlist_ir::NetlistInput {
@@ -1298,6 +1307,36 @@ mod tests {
             }],
         ));
         let _ = compile_crossing(&scoped(ScopeKind::Struct, "broken", ir));
+    }
+
+    #[test]
+    #[should_panic(
+        expected = "for cell #1 at (4,0,1) in struct `mixed` — crossing legalization must run at most once per delayed IR"
+    )]
+    fn legalize_panic_names_the_offending_cell_not_the_first_one() {
+        // Re-running the whole pass always trips on `cells[0]`, which
+        // would let a regression that hardcoded the index to zero — or
+        // that read the coord off the wrong cell — pass unnoticed. A
+        // hand-built IR whose first cell is still `Delayed` while the
+        // second is already `Legalized` forces the panic past the head
+        // of the loop, so both the index and the coord have to be
+        // threaded from the cell actually being transitioned.
+        let mut ir = PlacementIr::new(Edition::Java);
+        ir.region = Some(reservation(8, 3, 2));
+        ir.cells.push(placed_cell(
+            EditionCell::JavaRepeaterOr,
+            CellCoord::new(0, 0, 0),
+            vec![],
+        ));
+        let mut already_legalized =
+            placed_cell(EditionCell::JavaRepeaterOr, CellCoord::new(4, 0, 1), vec![]);
+        already_legalized.phase = PlacementPhase::Legalized {
+            wire_length: 0,
+            delay_ticks: 0,
+            buffer_coords: Vec::new(),
+        };
+        ir.cells.push(already_legalized);
+        let _ = compile_crossing(&scoped(ScopeKind::Struct, "mixed", ir));
     }
 
     mod phase4_invariant {

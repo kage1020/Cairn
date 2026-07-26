@@ -60,6 +60,30 @@
 
 ### 追加
 
+- `PlacementPhase::route_at` / `delay_at` / `legalize_at` — 3 つの
+  phase 遷移メソッドに context を載せられる双子を追加し、順序違反の
+  遷移 panic がそれを踏んだ cell を名指しするようにした。既存メソッド
+  にも `#[track_caller]` は付いており backtrace には呼び出し側の
+  `.rs:line` が出るが、**どの** cell が既に routed / delayed /
+  legalized だったのかは分からず、オペレータは backtrace から IR を
+  辿り直す必要があった。`_at` 形は任意の `Display` を受け取り、
+  違反した phase と invariant 節の間に差し込む。これにより routing /
+  delay / crossing の各 pass は例えば `PlacementPhase::legalize
+  called on Legalized { .. } for cell #0 at (16,0,1) in struct
+  `twice` — crossing legalization must run at most once per delayed
+  IR` のように失敗する。パンくずは pass 診断が既に使っている語彙
+  （`cell #{index}` / `({x},{y},{z})` / ``{kind} `{name}` ``）で
+  記述され、`PlacementIr::cells` 内での位置・placement
+  coord・所属 scope の 3 点から組み立てる — `PlacedCellNode` は
+  source-level name を持たないため、この 3 点が cell の唯一の安定した
+  識別子である。coord の `layer` は `RouteLayer::Plane` でないときだけ
+  描画する — cell coord では起こり得ない（placement pass が `Plane` を
+  刻み、以降どの pass も cell body を動かさない）ので通常の描画は短い
+  まま、かつ invariant を破った hand-built IR が plane coord に見える
+  座標を出力することもない。context 無しの `route` /
+  `delay` / `legalize` は無変更で、文面も従来とバイト単位で同一 —
+  context が無い場合は空の節を描画するのではなく ` for …` 節ごと落と
+  すため、余分な区切りが混入しない。
 - Redstone crossing legalization と `cairn synth --stage crossing
   --edition <java|bedrock>`（M6-PR7）— M6 redstone-simulates
   パイプラインの 7 枚目。`cairn-lang-redstone` に
