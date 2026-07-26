@@ -56,8 +56,11 @@
 //! [`crate::placement_ir::CellCoord::layer`] per the phase table on
 //! `PlacedCellNode`; no new IR type is introduced. Both fields
 //! serde-skip on their defaults, so a scope whose crossing pass
-//! writes nothing dumps as the identical JSON its delay-pass input
-//! did.
+//! writes nothing dumps as the JSON its delay-pass input did apart
+//! from the `stage` tag — which is exactly why that tag exists: it
+//! is the only thing telling a consumer this pass ran at all when
+//! there was nothing to legalize (see
+//! [`crate::placement_ir::PlacementStage`]).
 
 use std::collections::HashMap;
 use std::collections::HashSet;

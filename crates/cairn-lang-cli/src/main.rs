@@ -155,10 +155,14 @@ enum Command {
     /// coord of each implicit buffer repeater (escaping to a
     /// `RouteLayer::Bridge` y-layer whenever the plane candidate
     /// collides with a cell / pad / plane crossing / earlier
-    /// buffer). The `--edition <java|bedrock>` flag is required in
-    /// the `edition`, `placement`, `route`, `delay`, and `crossing`
-    /// modes and refused otherwise (the earlier stages are
-    /// edition-neutral by contract).
+    /// buffer). Every cell of the four Placement IR stages carries a
+    /// `"stage"` key echoing the flag value that produced the dump
+    /// (`placement` / `route` / `delay` / `crossing`), so a consumer
+    /// reads the stage off the output instead of inferring it from
+    /// which optional keys are present. The `--edition <java|bedrock>`
+    /// flag is required in the `edition`, `placement`, `route`,
+    /// `delay`, and `crossing` modes and refused otherwise (the
+    /// earlier stages are edition-neutral by contract).
     /// **Internal / experimental** — the shape of the output is not
     /// covered by the stable compatibility tier and may change at any time
     /// as the route / simulator stages land. Requires
@@ -180,6 +184,10 @@ enum Command {
         /// Which pipeline stage to print. Adding stages here as they
         /// land is preferred over a new subcommand per stage — it keeps
         /// the internal surface area (and `--help` output) contained.
+        /// For the four Placement IR stages the value chosen here is
+        /// echoed back as every cell's `"stage"` key, so the flag and
+        /// the dump share one vocabulary
+        /// ([`cairn_lang_redstone::PlacementStage`]).
         #[arg(long, value_enum, default_value_t = SynthStage::Logic)]
         stage: SynthStage,
         /// Target edition for the Edition Netlist IR / Placement IR /
@@ -248,7 +256,11 @@ enum SynthStage {
     /// `E_BUFFER_COORD_COLLISION`. v1 does not lift the wire
     /// crossing itself onto `Bridge` — the routed wire path is not
     /// carried on the IR, and stage-5 block-array lowering re-runs
-    /// the routing algorithm to derive the crossings itself.
+    /// the routing algorithm to derive the crossings itself. A scope
+    /// with nothing to legalize emits no `buffer_coords` at all
+    /// (the empty vector serde-skips); the `"stage": "crossing"` tag
+    /// on every cell, not the presence of that key, is what marks the
+    /// dump as having been through this pass.
     Crossing,
 }
 
@@ -954,6 +966,12 @@ fn dispatch_synth_stage(
 /// function must be kept in sync on every variant addition or
 /// rename. Its exhaustive `match` provides a compile-time nudge to
 /// do so.
+///
+/// The four Placement IR stages share their spelling with
+/// [`cairn_lang_redstone::PlacementStage::as_str`], which puts the
+/// same word in the dump's `"stage"` key. Nothing in the type system
+/// ties the two together — the `cli_synth_stage_*` tests assert the
+/// equality per stage instead.
 fn stage_flag(stage: SynthStage) -> &'static str {
     match stage {
         SynthStage::Logic => "logic",

@@ -52,10 +52,12 @@
 //!
 //! The delay pass is a field write on `PlacedCellNode::delay_ticks`
 //! per the phase table on that type; no new IR type is introduced.
-//! `--stage route` JSON stays byte-identical to today because
-//! `delay_ticks` is serde-skipped on `None` and appended as
-//! `,"delay_ticks":N` (after `wire_length` in field declaration order,
-//! matching serde's compact-JSON layout) when this pass writes it.
+//! `--stage route` JSON keeps every key it had because `delay_ticks`
+//! is serde-skipped on `None` and appended as `,"delay_ticks":N`
+//! (after `wire_length` in the hand-written `Serialize` impl's
+//! emission order, matching serde's compact-JSON layout) when this
+//! pass writes it. The one value that moves is the `stage` tag, which
+//! goes from `route` to `delay`.
 
 use cairn_lang_core::check::Severity;
 

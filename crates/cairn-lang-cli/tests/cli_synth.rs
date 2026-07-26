@@ -262,6 +262,10 @@ fn cli_synth_stage_placement_java_places_or_cell_at_origin() {
     let cells = ir["cells"].as_array().expect("cells array");
     assert_eq!(cells.len(), 1);
     assert_eq!(cells[0]["cell"], "java_repeater_or");
+    assert_eq!(
+        cells[0]["stage"], "placement",
+        "the stage tag must echo the --stage flag that produced the dump: {stdout}",
+    );
     let coord = &cells[0]["coord"];
     assert_eq!(coord["x"], 0);
     assert_eq!(coord["y"], 0);
@@ -463,6 +467,10 @@ fn cli_synth_stage_route_java_fills_wire_length() {
     let cells = ir["cells"].as_array().expect("cells array");
     assert_eq!(cells.len(), 1);
     assert_eq!(cells[0]["cell"], "java_repeater_or");
+    assert_eq!(
+        cells[0]["stage"], "route",
+        "the stage tag must echo the --stage flag that produced the dump: {stdout}",
+    );
     assert_eq!(cells[0]["wire_length"], 3);
     assert!(
         cells[0].get("delay_ticks").is_none(),
@@ -617,6 +625,10 @@ fn cli_synth_stage_delay_java_fills_delay_ticks() {
     let cells = ir["cells"].as_array().expect("cells array");
     assert_eq!(cells.len(), 1);
     assert_eq!(cells[0]["cell"], "java_repeater_or");
+    assert_eq!(
+        cells[0]["stage"], "delay",
+        "the stage tag must echo the --stage flag that produced the dump: {stdout}",
+    );
     assert_eq!(cells[0]["wire_length"], 3);
     assert_eq!(cells[0]["delay_ticks"], 1);
 }
@@ -788,9 +800,9 @@ fn cli_synth_stage_crossing_java_legalizes_or_cell_scope() {
     // `--stage crossing --edition java` runs the full pipeline
     // through stage 4. The `redstone-door.crn` fixture has a single
     // net with short segments, so the legalized IR matches the
-    // delayed IR verbatim (no crossings, no buffers) — but the
-    // stage's JSON round-trip must still succeed and expose the same
-    // scope shape.
+    // delayed IR apart from the `stage` tag (no crossings, no
+    // buffers) — but the stage's JSON round-trip must still succeed
+    // and expose the same scope shape.
     let path = examples_dir().join("redstone-door.crn");
     let out = run_synth(&[
         "--experimental-logic-synth",
@@ -820,9 +832,14 @@ fn cli_synth_stage_crossing_java_legalizes_or_cell_scope() {
     assert_eq!(ir["edition"], "java");
     let cells = ir["cells"].as_array().expect("cells array");
     assert_eq!(cells.len(), 1);
+    assert_eq!(
+        cells[0]["stage"], "crossing",
+        "the stage tag must echo the --stage flag that produced the dump — it is what \
+         distinguishes this zero-buffer legalized dump from its --stage delay input: {stdout}",
+    );
     assert!(
         cells[0].get("buffer_coords").is_none(),
-        "empty buffer_coords must serde-skip so the wire form stays byte-identical to --stage delay: {stdout}",
+        "empty buffer_coords must serde-skip: the stage tag, not a sentinel empty array, is what marks a dump as legalized: {stdout}",
     );
     assert!(
         cells[0]["coord"].get("layer").is_none(),
@@ -872,12 +889,17 @@ fn cli_synth_stage_crossing_bedrock_legalizes_or_cell_scope() {
         cells[0]["cell"], "bedrock_torch_or",
         "Bedrock edition realises `or` as the torch-based cell",
     );
+    assert_eq!(
+        cells[0]["stage"], "crossing",
+        "the stage tag must echo the --stage flag that produced the dump: {stdout}",
+    );
     // Same serde-skip contract as the Java run: empty buffer_coords
     // and a plane-layer coord both elide their fields so the wire
-    // form stays byte-identical to the earlier stages on this fixture.
+    // form stays byte-identical to the earlier stages on this fixture
+    // apart from the stage tag asserted above.
     assert!(
         cells[0].get("buffer_coords").is_none(),
-        "empty buffer_coords must serde-skip so the wire form stays byte-identical to --stage delay: {stdout}",
+        "empty buffer_coords must serde-skip: the stage tag, not a sentinel empty array, is what marks a dump as legalized: {stdout}",
     );
     assert!(
         cells[0]["coord"].get("layer").is_none(),

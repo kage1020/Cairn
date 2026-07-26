@@ -40,8 +40,12 @@ reservation offers no bridge layer to escape to) and filling every
 cell's `buffer_coords` with the concrete coord of each implicit
 buffer repeater the delay pass counted — a collision on the plane
 lifts the buffer onto the first free `RouteLayer::Bridge` y-layer
-inside the `void=<N>` budget (stage 4 of §14.5). Edition
-legalization, the tick simulator, and QC/BUD refusal
+inside the `void=<N>` budget (stage 4 of §14.5). Every placed cell
+records which of those four passes last touched it as a
+`PlacementStage`, dumped as a `"stage"` key in the same vocabulary
+`cairn synth --stage <s>` accepts, so a JSON consumer reads the stage
+off the output rather than inferring it from which optional keys are
+present. Edition legalization, the tick simulator, and QC/BUD refusal
 (`E_NO_PORTABLE_IMPL`) are still to come.
 
 ## Pipeline

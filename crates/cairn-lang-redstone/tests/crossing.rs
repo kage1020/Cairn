@@ -4,8 +4,10 @@
 //! (`spec/redstone` §14.5, stage 4 of place-and-route): the
 //! `examples/redstone-door.crn` happy path (per edition), empty-module
 //! pass-through, the JSON wire form staying byte-identical to the
-//! delayed IR when no crossing / buffer coord landed on a non-`Plane`
-//! layer (both new fields serde-skip on default), and per-scope
+//! delayed IR apart from the `stage` tag when no crossing / buffer
+//! coord landed on a non-`Plane` layer (both new fields serde-skip on
+//! default), the tag itself keeping a zero-buffer legalized dump
+//! distinguishable from its delayed input, and per-scope
 //! independence when a module carries more than one scope. Fixtures
 //! with genuine plane crossings are exercised in the crate-internal
 //! unit tests (`src/crossing.rs`) because the example set does not yet
@@ -145,13 +147,14 @@ fn empty_module_passes_through() {
     assert!(legalized.scoped.scopes.is_empty());
 }
 
-/// AC4 — the JSON wire form of the legalized IR equals the delayed
-/// IR verbatim when no crossing / buffer coord landed on a non-`Plane`
-/// layer. Both `buffer_coords` (empty) and `layer` (Plane) serde-skip
-/// under those conditions, so the addition of stage 4 does not shift
-/// the wire shape of scope IRs that had nothing to legalize.
+/// AC4 — apart from the `stage` tag, the JSON wire form of the
+/// legalized IR equals the delayed IR verbatim when no crossing /
+/// buffer coord landed on a non-`Plane` layer. Both `buffer_coords`
+/// (empty) and `layer` (Plane) serde-skip under those conditions, so
+/// the addition of stage 4 shifts nothing but the tag on scope IRs
+/// that had nothing to legalize.
 #[test]
-fn json_output_byte_identical_when_no_crossings_and_no_buffers() {
+fn json_output_byte_identical_apart_from_stage_tag_when_no_crossings_and_no_buffers() {
     let source = load_example("redstone-door.crn");
     let delayed = delayed_from_source(&source, Edition::Java);
     let legalized = compile_crossing(&delayed);
@@ -161,25 +164,93 @@ fn json_output_byte_identical_when_no_crossings_and_no_buffers() {
         serde_json::to_string_pretty(&legalized.scoped).expect("legalized IR serialises");
 
     assert_eq!(
-        delayed_json, legalized_json,
-        "stage 4 output must match stage 3 verbatim on a fixture without crossings",
+        normalize_stage_tags(&delayed_json),
+        normalize_stage_tags(&legalized_json),
+        "stage 4 output must match stage 3 apart from the stage tag on a fixture without crossings",
     );
 }
 
-/// AC — mirror of `json_output_byte_identical_when_no_crossings_and_no_buffers`
+/// The reason the `stage` tag exists, pinned end-to-end:
+/// `redstone-door.crn`
+/// materialises zero buffers, so before the tag existed the
+/// delayed and legalized dumps were byte-identical and a downstream
+/// consumer could not tell "stage 3 output" from "stage 4 output with
+/// nothing to legalize". The two dumps must now differ, and differ
+/// *only* by the tag — the empty `buffer_coords` still serde-skips, so
+/// presence-of-empty-array was deliberately not adopted as the
+/// discriminator.
+#[test]
+fn legalized_with_zero_buffers_is_distinguishable_from_delayed() {
+    let source = load_example("redstone-door.crn");
+    let delayed = delayed_from_source(&source, Edition::Java);
+    let legalized = compile_crossing(&delayed);
+
+    let delayed_json = serde_json::to_string(&delayed).expect("delayed IR serialises");
+    let legalized_json = serde_json::to_string(&legalized.scoped).expect("legalized IR serialises");
+    assert_ne!(
+        delayed_json, legalized_json,
+        "a stage-4 dump must not be byte-identical to its stage-3 input",
+    );
+
+    for (json, expected) in [(&delayed_json, "delay"), (&legalized_json, "crossing")] {
+        let value: serde_json::Value = serde_json::from_str(json).expect("dump parses");
+        let cells = value
+            .as_array()
+            .and_then(|scopes| scopes.iter().find(|s| s["name"] == "gatehouse"))
+            .map(|scope| &scope["ir"]["cells"])
+            .and_then(serde_json::Value::as_array)
+            .expect("gatehouse cells");
+        assert!(!cells.is_empty(), "gatehouse must carry a placed cell");
+        for cell in cells {
+            assert_eq!(cell["stage"], expected, "stage tag on {json}");
+            assert!(
+                cell.get("buffer_coords").is_none(),
+                "empty buffer_coords must still serde-skip: {json}",
+            );
+        }
+    }
+}
+
+/// Rewrite every `"stage": "<name>"` value to a fixed placeholder so
+/// two adjacent stages' dumps can be byte-compared on everything
+/// *except* the tag that distinguishes them. Handles both the compact
+/// and the pretty spelling because the separator between the key and
+/// the value is copied through verbatim.
+fn normalize_stage_tags(json: &str) -> String {
+    const KEY: &str = "\"stage\":";
+    let mut out = String::with_capacity(json.len());
+    let mut rest = json;
+    while let Some(idx) = rest.find(KEY) {
+        let (before, after) = rest.split_at(idx + KEY.len());
+        out.push_str(before);
+        let open = after.find('"').expect("stage tag value is a string");
+        let close = after[open + 1..]
+            .find('"')
+            .expect("stage tag value is a closed string");
+        out.push_str(&after[..open]);
+        out.push_str("\"<stage>\"");
+        rest = &after[open + close + 2..];
+    }
+    out.push_str(rest);
+    out
+}
+
+/// AC — mirror of
+/// `json_output_byte_identical_apart_from_stage_tag_when_no_crossings_and_no_buffers`
 /// for the `with-crossings` case. `examples/crossbar.crn` produces
 /// genuine plane overlaps between its two cell-driven output-pad
 /// nets, but because the current pipeline does not lift the wire
 /// itself onto the bridge layer (the bridge budget is reserved for
 /// buffer-repeater escapes) and every driver segment on this fixture
 /// sits below `DUST_ATTENUATION_LIMIT`, the legalized JSON must
-/// still equal the delayed JSON verbatim. Pins two invariants at
-/// once: (a) both gate cells and both door outputs survive
-/// legalization intact — a regression that elided the crossed scope
-/// would trip the byte-identity assertion via a shorter left side;
-/// (b) a silently-absorbed crossing does not shift the wire form.
+/// still equal the delayed JSON apart from the stage tag. Pins two
+/// invariants at once: (a) both gate cells and both door outputs
+/// survive legalization intact — a regression that elided the crossed
+/// scope would trip the byte-identity assertion via a shorter left
+/// side; (b) a silently-absorbed crossing does not shift the wire
+/// form.
 #[test]
-fn json_output_byte_identical_with_crossings() {
+fn json_output_byte_identical_apart_from_stage_tag_with_crossings() {
     let source = load_example("crossbar.crn");
     let delayed = delayed_from_source(&source, Edition::Java);
     let legalized = compile_crossing(&delayed);
@@ -194,7 +265,8 @@ fn json_output_byte_identical_with_crossings() {
         serde_json::to_string_pretty(&legalized.scoped).expect("legalized IR serialises");
 
     assert_eq!(
-        delayed_json, legalized_json,
+        normalize_stage_tags(&delayed_json),
+        normalize_stage_tags(&legalized_json),
         "silently-absorbed crossings must not shift the wire form of the legalized IR",
     );
 }
