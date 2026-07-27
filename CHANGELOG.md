@@ -12,6 +12,23 @@ and is a separate axis from the Minecraft target version.
 
 ### Changed
 
+- The three `PlacementPhase` transitions now state one cardinality.
+  `route` and `delay` panicked with "must run once per …" while
+  `legalize` said "must run **at most** once per delayed IR", wording
+  inherited from the release-loud `assert!` the crossing pass carried
+  before the phase enum existed; all three now say "must run
+  **exactly** once per …". Beyond the inconsistency, "at most once"
+  understated what the guard checks: `legalize` also refuses a phase
+  that never reached `Delayed`, so a skipped stage trips it just as a
+  repeated one does, and only "exactly once" says so. The doc comments
+  on `route` and `delay` already read "exactly once", so the panics now
+  agree with the contract they document. The cardinality clause moves
+  out of the three call sites into a single `TRANSITION_CARDINALITY`
+  const that `transition_panic` splices between the offending pass and
+  the phase it consumes — a transition added beside these three picks
+  the two nouns but not how strong the guard claims to be, which is
+  what let the wording drift in the first place.
+
 - Every `PlacedCellNode` in the JSON dump gains a leading `"stage"`
   key naming the place-and-route pass that last wrote to it —
   `placement` / `route` / `delay` / `crossing`, the same vocabulary
@@ -113,7 +130,7 @@ and is a separate axis from the Minecraft target version.
   offending phase and the invariant clause, so the routing, delay,
   and crossing passes now fail with e.g. `PlacementPhase::legalize
   called on Legalized { .. } for cell #0 at (16,0,1) in struct
-  `twice` — crossing legalization must run at most once per delayed
+  `twice` — crossing legalization must run exactly once per delayed
   IR`. The breadcrumb is rendered in the same vocabulary the pass
   diagnostics already use (`cell #{index}`, `({x},{y},{z})`,
   ``{kind} `{name}` ``), built from the cell's position in
@@ -125,8 +142,8 @@ and is a separate axis from the Minecraft target version.
   cell body off it — so the common rendering stays short without
   letting a hand-built IR that breaks the invariant print a coord
   that reads as a plane coord. The context-free `route` / `delay` / `legalize` forms
-  are unchanged and still produce their previous message byte for
-  byte: an absent context drops the whole ` for …` clause rather than
+  differ from their `_at` twins by the identity clause and nothing
+  else: an absent context drops the whole ` for …` clause rather than
   rendering an empty one, so no stray separator reaches the message.
 - Redstone crossing legalization + `cairn synth --stage crossing
   --edition <java|bedrock>` (M6-PR7) — the seventh slice of the M6

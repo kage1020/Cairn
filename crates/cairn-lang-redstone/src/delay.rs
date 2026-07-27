@@ -615,7 +615,7 @@ mod tests {
 
     #[test]
     #[should_panic(
-        expected = "for cell #1 at (4,0,1) in struct `mixed` — delay insertion must run once per routed IR"
+        expected = "for cell #1 at (4,0,1) in struct `mixed` — delay insertion must run exactly once per routed IR"
     )]
     fn delay_panic_names_the_offending_cell_not_the_first_one() {
         // Re-running the whole pass always trips on `cells[0]`, which

@@ -715,7 +715,7 @@ struct wide_pack size=300x5
 /// not at the cell whose `delay_ticks` was already committed.
 #[test]
 #[should_panic(
-    expected = "for cell #0 at (0,0,0) in struct `gatehouse` — delay insertion must run once per routed IR"
+    expected = "for cell #0 at (0,0,0) in struct `gatehouse` — delay insertion must run exactly once per routed IR"
 )]
 fn re_running_delay_pass_panics_loudly() {
     let source = load_example("redstone-door.crn");
