@@ -621,12 +621,14 @@ impl PlacementPhase {
 /// and the phase that pass consumes.
 ///
 /// Spelled once so a transition added beside `route` / `delay` /
-/// `legalize` cannot invent its own strength. While each call site
-/// owned its whole invariant string the three drifted — `legalize`
-/// said "at most once", inherited from the release-loud `assert!` the
-/// crossing pass carried before this enum existed, while the other two
-/// said "once" — and the weaker reading hid that skipping a stage is a
-/// bug too, not only repeating one.
+/// `legalize` cannot invent its own strength, which holds only as long
+/// as every transition raises its guard through [`transition_panic`]
+/// rather than writing its own `panic!`.
+///
+/// "Exactly" rather than "at most": each transition accepts one source
+/// variant and refuses every other, so a phase that never reached that
+/// source trips the same guard a re-run does. A skipped stage is as
+/// much a bug as a repeated one, and only "exactly once" says so.
 const TRANSITION_CARDINALITY: &str = "must run exactly once per";
 
 /// Raise the release-loud panic an out-of-order [`PlacementPhase`]
@@ -634,14 +636,13 @@ const TRANSITION_CARDINALITY: &str = "must run exactly once per";
 ///
 /// The invariant clause is assembled here from the offending `pass`
 /// and the `source` phase it consumes, with
-/// [`TRANSITION_CARDINALITY`] between them, so a caller can pick the
-/// two nouns but not how strong the guard claims to be.
+/// [`TRANSITION_CARDINALITY`] between them.
 ///
-/// Splicing the identity clause in here rather than at each `panic!`
-/// site keeps the context-free forms and the `*_at` forms in sync — an
-/// absent context drops the whole ` for {context}` clause rather than
-/// rendering an empty one, so no stray separator or double space
-/// reaches the message.
+/// Splicing the identity clause in here rather than in each
+/// transition keeps the context-free forms and the `*_at` forms in
+/// sync — an absent context drops the whole ` for {context}` clause
+/// rather than rendering an empty one, so no stray separator or double
+/// space reaches the message.
 ///
 /// `#[track_caller]` on every layer between the pass and here means
 /// the reported location is still the pipeline pass's `.rs:line`, not
@@ -1401,13 +1402,16 @@ mod tests {
         );
     }
 
-    /// The three transitions once drifted between "once" and "at most
-    /// once" because each call site owned its whole invariant string,
-    /// and the weaker reading understated the guard: `legalize` also
-    /// refuses a phase that never reached `Delayed`, which is a skipped
-    /// stage rather than a repeated one. Pin that all six entry points
-    /// now quote one shared clause, so a fourth transition cannot
-    /// re-open the gap by spelling its own.
+    /// Pin that all six entry points quote one shared clause, so a
+    /// transition added beside these three cannot spell its own.
+    ///
+    /// Asserting on the const puts it on both sides, so this test
+    /// cannot tell what the clause *says*; the exact-match array in
+    /// [`context_free_transitions_panic_without_an_identity_clause`]
+    /// is what pins the wording itself. The entry points are listed
+    /// by hand, so a transition that bypassed [`transition_panic`]
+    /// would escape both — the const is the structural guard, and
+    /// these two tests only keep its reach honest.
     #[test]
     fn every_transition_panic_shares_one_cardinality_clause() {
         let scope = probe_scope();
