@@ -20,6 +20,10 @@ use cairn_lang_redstone::{
     compile_routing, synthesize,
 };
 
+mod common;
+
+use common::normalize_stage_tags;
+
 fn load_example(name: &str) -> String {
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("..")
@@ -391,30 +395,6 @@ fn routing_leaves_placement_fields_byte_identical_apart_from_wire_length_and_sta
     );
 }
 
-/// Rewrite every `"stage": "<name>"` value to a fixed placeholder so
-/// two adjacent stages' dumps can be byte-compared on everything
-/// *except* the tag that distinguishes them. Handles both the compact
-/// and the pretty spelling because the separator between the key and
-/// the value is copied through verbatim.
-fn normalize_stage_tags(json: &str) -> String {
-    const KEY: &str = "\"stage\":";
-    let mut out = String::with_capacity(json.len());
-    let mut rest = json;
-    while let Some(idx) = rest.find(KEY) {
-        let (before, after) = rest.split_at(idx + KEY.len());
-        out.push_str(before);
-        let open = after.find('"').expect("stage tag value is a string");
-        let close = after[open + 1..]
-            .find('"')
-            .expect("stage tag value is a closed string");
-        out.push_str(&after[..open]);
-        out.push_str("\"<stage>\"");
-        rest = &after[open + close + 2..];
-    }
-    out.push_str(rest);
-    out
-}
-
 fn strip_wire_length(compact: &str) -> String {
     const PATTERN: &str = ",\"wire_length\":";
     let mut out = String::with_capacity(compact.len());
@@ -514,7 +494,8 @@ fn edition_parity_wire_length_matches_across_java_and_bedrock() {
 }
 
 /// AC10 — chaining `compile_routing(&routed.scoped)` is forbidden by
-/// the phase table on `PlacedCellNode`, and the panic it raises names
+/// the producer↔variant table on `PlacementPhase`, and the panic it
+/// raises names
 /// the cell that tripped it. `#[track_caller]` alone would put only
 /// the pass's `.rs:line` in the backtrace, leaving an operator to walk
 /// back into the IR to find out which cell was already routed; the

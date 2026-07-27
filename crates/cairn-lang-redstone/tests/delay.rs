@@ -8,8 +8,8 @@
 //! segment exceeds the v1 sanity cap, pass-through of scopes elided by
 //! upstream stages, the JSON wire form growing a `delay_ticks` field,
 //! a wire form otherwise byte-identical to the routed IR apart from
-//! the `stage` tag (delay is a field-write on
-//! `PlacedCellNode::delay_ticks`), and per-scope independence when
+//! the `stage` tag (delay writes nothing but `delay_ticks`), and
+//! per-scope independence when
 //! a module carries more than one scope.
 
 use std::path::PathBuf;
@@ -21,6 +21,10 @@ use cairn_lang_redstone::{
     DiagnosticCode, MAX_ATTENUATION_SEGMENT, ScopedPlacementIr, compile_delay,
     compile_edition_netlist, compile_netlist, compile_placement, compile_routing, synthesize,
 };
+
+mod common;
+
+use common::normalize_stage_tags;
 
 fn load_example(name: &str) -> String {
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -596,30 +600,6 @@ fn strip_delay_ticks(compact: &str) -> String {
     out
 }
 
-/// Rewrite every `"stage": "<name>"` value to a fixed placeholder so
-/// two adjacent stages' dumps can be byte-compared on everything
-/// *except* the tag that distinguishes them. Handles both the compact
-/// and the pretty spelling because the separator between the key and
-/// the value is copied through verbatim.
-fn normalize_stage_tags(json: &str) -> String {
-    const KEY: &str = "\"stage\":";
-    let mut out = String::with_capacity(json.len());
-    let mut rest = json;
-    while let Some(idx) = rest.find(KEY) {
-        let (before, after) = rest.split_at(idx + KEY.len());
-        out.push_str(before);
-        let open = after.find('"').expect("stage tag value is a string");
-        let close = after[open + 1..]
-            .find('"')
-            .expect("stage tag value is a closed string");
-        out.push_str(&after[..open]);
-        out.push_str("\"<stage>\"");
-        rest = &after[open + close + 2..];
-    }
-    out.push_str(rest);
-    out
-}
-
 /// AC9 — Java and Bedrock `InverterTorch` both carry base 1 tick, so
 /// a `sig.x = not sig.a` fixture produces matching `delay_ticks` on
 /// both editions even though the cell tag differs. Pins the "delay
@@ -728,7 +708,8 @@ struct wide_pack size=300x5
 }
 
 /// AC11 — chaining `compile_delay(&delayed.scoped)` is forbidden by
-/// the phase table on `PlacedCellNode`, and the panic it raises names
+/// the producer↔variant table on `PlacementPhase`, and the panic it
+/// raises names
 /// the cell that tripped it. Mirrors the routing pass's equivalent
 /// guard: without the breadcrumb the backtrace points at the pass but
 /// not at the cell whose `delay_ticks` was already committed.

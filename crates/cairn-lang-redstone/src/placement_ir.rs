@@ -474,8 +474,8 @@ impl PlacementPhase {
     /// # Panics
     ///
     /// Panics if the phase is not [`Self::Unrouted`]. Routing must run
-    /// exactly once per placement, and the phase table on
-    /// [`PlacedCellNode`] forbids re-routing.
+    /// exactly once per placement, and the producer↔variant table on
+    /// this enum forbids re-routing.
     #[track_caller]
     pub fn route(&mut self, wire_length: u32) {
         self.route_inner(wire_length, None);
@@ -527,8 +527,8 @@ impl PlacementPhase {
     /// # Panics
     ///
     /// Panics if the phase is not [`Self::Routed`]. Delay insertion
-    /// must run exactly once per routed IR, and the phase table on
-    /// [`PlacedCellNode`] forbids re-writing a `delay_ticks` that was
+    /// must run exactly once per routed IR, and the producer↔variant
+    /// table on this enum forbids re-writing a `delay_ticks` that was
     /// already committed.
     #[track_caller]
     pub fn delay(&mut self, delay_ticks: u32) {
@@ -1473,16 +1473,25 @@ mod tests {
         assert_eq!(PlacementStage::Crossing.as_str(), "crossing");
     }
 
-    /// Serialises as a bare string, not as a tagged object — a derived
-    /// `Serialize` on a fieldless enum would also produce a string, but
-    /// pinning it here keeps a future refactor from silently reshaping
-    /// the tag.
+    /// Every variant serialises as a bare string, not as a tagged
+    /// object — a derived `Serialize` on a fieldless enum would also
+    /// produce a string, but pinning it here keeps a future refactor
+    /// from silently reshaping the tag. All four are covered rather
+    /// than one representative: `Serialize` routes through `as_str`'s
+    /// `match`, so a single sample cannot catch a mis-wired arm.
     #[test]
-    fn stage_serialises_as_a_bare_string() {
-        assert_eq!(
-            serde_json::to_string(&PlacementStage::Delay).expect("stage serialises"),
-            "\"delay\"",
-        );
+    fn every_stage_serialises_as_a_bare_string() {
+        for (stage, expected) in [
+            (PlacementStage::Placement, "\"placement\""),
+            (PlacementStage::Route, "\"route\""),
+            (PlacementStage::Delay, "\"delay\""),
+            (PlacementStage::Crossing, "\"crossing\""),
+        ] {
+            assert_eq!(
+                serde_json::to_string(&stage).expect("stage serialises"),
+                expected,
+            );
+        }
     }
 
     /// The reason the tag exists: before it, these two phases produced
@@ -1514,8 +1523,11 @@ mod tests {
             !legalized_json.contains("buffer_coords"),
             "empty buffer_coords must still serde-skip: {legalized_json}",
         );
+        // Rewriting the tag's key/value pair — not the bare word
+        // `"delay"`, which also prefixes the `delay_ticks` key — turns
+        // one dump into the other exactly, so nothing else moved.
         assert_eq!(
-            delayed_json.replace("\"delay\"", "\"crossing\""),
+            delayed_json.replace("\"stage\":\"delay\"", "\"stage\":\"crossing\""),
             legalized_json,
         );
     }

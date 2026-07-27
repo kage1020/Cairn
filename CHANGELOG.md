@@ -86,7 +86,14 @@ and is a separate axis from the Minecraft target version.
   types. `PlacementPhase::stage()` and `PlacedCellNode::stage()`
   return it; `PlacementStage::as_str` fixes the wire spelling
   (`placement` / `route` / `delay` / `crossing`) in one place the way
-  `RouteLayer::as_str` already does for the layer vocabulary. Unlike
+  `RouteLayer::as_str` already does for the layer vocabulary — the
+  `--stage <name>` fragment `cairn synth` prints when it refuses a
+  missing `--edition` now derives its four Placement spellings from
+  the same accessor instead of repeating the literals, and a unit
+  test reads the third spelling in that chain (the one clap derives
+  from the `SynthStage` variant identifier, which no type ties to
+  either) back out of `ValueEnum` so a variant rename cannot silently
+  desynchronise the accepted flag from the emitted tag. Unlike
   the three value accessors it sits beside, `stage()` is total: every
   phase belongs to exactly one stage, including a `Legalized` with no
   buffer coords to show for itself. Both it and the `Serialize` impl

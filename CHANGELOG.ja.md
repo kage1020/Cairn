@@ -87,7 +87,14 @@
   `PlacementPhase::stage()` / `PlacedCellNode::stage()` が返し、
   `PlacementStage::as_str` が wire 上の綴り (`placement` / `route` /
   `delay` / `crossing`) を 1 か所に固定する — layer 語彙に対して
-  `RouteLayer::as_str` が果たしているのと同じ役割。隣接する 3 つの
+  `RouteLayer::as_str` が果たしているのと同じ役割。`cairn synth` が
+  `--edition` 欠落を拒否する際に出す `--stage <name>` 断片も、
+  Placement 系 4 stage についてはリテラルの再掲をやめてこの accessor
+  から導出するようになった。連鎖の 3 つ目の綴り — clap が
+  `SynthStage` の variant 識別子から導出する、どの型とも結びつかない
+  もの — は unit test が `ValueEnum` から読み戻して照合するので、
+  variant rename で「受け付けるフラグ」と「出力されるタグ」が黙って
+  ずれることはない。隣接する 3 つの
   値アクセッサと違い `stage()` は全域で、buffer 座標を 1 つも持たない
   `Legalized` を含めどの phase もちょうど 1 つの stage に属する。
   `stage()` と `Serialize` 実装はいずれも `_ =>` の catch-all では

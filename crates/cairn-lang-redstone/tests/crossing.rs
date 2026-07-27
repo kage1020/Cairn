@@ -23,6 +23,10 @@ use cairn_lang_redstone::{
     compile_netlist, compile_placement, compile_routing, synthesize,
 };
 
+mod common;
+
+use common::normalize_stage_tags;
+
 fn load_example(name: &str) -> String {
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("..")
@@ -209,30 +213,6 @@ fn legalized_with_zero_buffers_is_distinguishable_from_delayed() {
             );
         }
     }
-}
-
-/// Rewrite every `"stage": "<name>"` value to a fixed placeholder so
-/// two adjacent stages' dumps can be byte-compared on everything
-/// *except* the tag that distinguishes them. Handles both the compact
-/// and the pretty spelling because the separator between the key and
-/// the value is copied through verbatim.
-fn normalize_stage_tags(json: &str) -> String {
-    const KEY: &str = "\"stage\":";
-    let mut out = String::with_capacity(json.len());
-    let mut rest = json;
-    while let Some(idx) = rest.find(KEY) {
-        let (before, after) = rest.split_at(idx + KEY.len());
-        out.push_str(before);
-        let open = after.find('"').expect("stage tag value is a string");
-        let close = after[open + 1..]
-            .find('"')
-            .expect("stage tag value is a closed string");
-        out.push_str(&after[..open]);
-        out.push_str("\"<stage>\"");
-        rest = &after[open + close + 2..];
-    }
-    out.push_str(rest);
-    out
 }
 
 /// AC — mirror of
