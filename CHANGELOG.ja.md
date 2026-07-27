@@ -14,6 +14,25 @@
 
 ### 変更
 
+- JSON dump の各 `PlacedCellNode` に、最後にその cell へ書き込んだ
+  place-and-route pass を名指しする `"stage"` キーを先頭フィールド
+  として追加した。値は `placement` / `route` / `delay` / `crossing`
+  で、`cairn synth --stage <s>` が受け付ける語彙と同一 — dump 自身が
+  それを生成したフラグ名を持つ。従来はどの optional キーが出ているか
+  から stage を推論するしかなく、その推論は全域ではなかった:
+  `PlacementPhase::Delayed` の cell と、crossing pass が buffer を
+  0 個しか materialize しなかった `Legalized` の cell は、空の
+  `buffer_coords` が serde-skip されるためまったく同じキー集合に
+  シリアライズされる。つまり JSON を読む側は stage 3 の dump と
+  「legalize すべきものが無かった stage 4 の dump」を区別できなかった。
+  タグの導入でこれを解決しつつ、空 Vec を sentinel に昇格させることは
+  していない — `buffer_coords` は空なら従来通り省略される。
+  以下のエントリが述べる「stage N の dump は stage N+1 の dump の
+  純粋な部分集合」という契約は、これに伴い「`stage` タグを除いて
+  部分集合」へと緩和される: タグは stage ごとに新しく*現れる*のでは
+  なく*値が変わる*唯一のフィールドである。タグは保存されず毎回の
+  シリアライズ時に phase から導出されるため、名指しする variant と
+  乖離しえない。
 - `PlacementPhase::Legalized::buffer_coords` の型を
   `Vec<CellCoord>` から `Vec<BufferCoord>` に拡張した。新しい
   `BufferCoord { port: PortName, coord: CellCoord }` は crossing
@@ -32,7 +51,8 @@
   変わり、netlist 側の `CellPortDriver` が既に採っている
   `{port, ...}` shape と揃えた。空の `buffer_coords` は従来通り
   serde-skip されるので、delay pass が 0 buffer と数えたスコープは
-  delayed IR と byte 等価のまま。`PlacedCellNode::buffer_coords()` /
+  上記 `stage` タグを除けば delayed IR と byte 等価のまま。
+  `PlacedCellNode::buffer_coords()` /
   `PlacementPhase::buffer_coords()` は `&[BufferCoord]` を返し、
   `PlacementPhase::legalize` は `Vec<BufferCoord>` を受け取る。
 - 下記 M6-PR5 / M6-PR6 / M6-PR7 が `PlacedCellNode` に追加した 3 つの
@@ -54,12 +74,35 @@
   旧フィールドと等価な `Option<u32>` / `&[CellCoord]` を返すフラット
   アクセッサ (`wire_length()` / `delay_ticks()` / `buffer_coords()`)
   経由のみ見える。手書き `Serialize` 実装が phase を
-  `{cell, drivers, coord[, wire_length][, delay_ticks][, buffer_coords]}`
-  にフラット化するため JSON wire 形式は以前のリビジョンと byte 等価
-  — 下流コンシューマからはスキーマ変更に見えない。
+  `{stage, cell, drivers, coord[, wire_length][, delay_ticks][, buffer_coords]}`
+  にフラット化するため、値の綴りは tagged enum object にならず以前の
+  リビジョンのフラット形のまま — wire 形式への追加は上記の `stage`
+  キーのみ。
 
 ### 追加
 
+- `PlacementStage` — 上記「変更」の `"stage"` キーを支える
+  `PlacementPhase` の 4 variant への射影。他の Placement IR 型と
+  同様 `cairn-lang-redstone` のルートから export する。
+  `PlacementPhase::stage()` / `PlacedCellNode::stage()` が返し、
+  `PlacementStage::as_str` が wire 上の綴り (`placement` / `route` /
+  `delay` / `crossing`) を 1 か所に固定する — layer 語彙に対して
+  `RouteLayer::as_str` が果たしているのと同じ役割。`cairn synth` が
+  `--edition` 欠落を拒否する際に出す `--stage <name>` 断片も、
+  Placement 系 4 stage についてはリテラルの再掲をやめてこの accessor
+  から導出するようになった。連鎖の 3 つ目の綴り — clap が
+  `SynthStage` の variant 識別子から導出する、どの型とも結びつかない
+  もの — は unit test が `ValueEnum` から読み戻して照合するので、
+  variant rename で「受け付けるフラグ」と「出力されるタグ」が黙って
+  ずれることはない。隣接する 3 つの
+  値アクセッサと違い `stage()` は全域で、buffer 座標を 1 つも持たない
+  `Legalized` を含めどの phase もちょうど 1 つの stage に属する。
+  `stage()` と `Serialize` 実装はいずれも `_ =>` の catch-all では
+  なく全 variant を明示列挙しているので、Stage 5 の variant 追加は
+  「stage 5 の dump が黙って `crossing` と誤ラベルされる」ではなく
+  それを名指しすべき 2 か所でのコンパイルエラーになる。
+  `PlacementStage` は `PlacementPhase` と同じ理由で
+  `#[non_exhaustive]`。
 - `PlacementPhase::route_at` / `delay_at` / `legalize_at` — 3 つの
   phase 遷移メソッドに context を載せられる双子を追加し、順序違反の
   遷移 panic がそれを踏んだ cell を名指しするようにした。既存メソッド
@@ -122,8 +165,10 @@
   delay pass が数えた implicit buffer repeater の具体座標を 1 個
   ずつここに埋める。両フィールドともデフォルト値では serde-skip
   され（`layer` は `Plane` のとき、`buffer_coords` は空のとき）、
-  placement / routing / delay JSON dump は legalized IR dump の
-  purely additive subset として扱える。失敗したスコープは crossing
+  placement / routing / delay JSON dump は `stage` タグを除けば
+  legalized IR dump の additive subset として扱える — legalize 対象の
+  無いスコープでキーは増減せず、変わるのはタグの値だけ。
+  失敗したスコープは crossing
   出力から drop され、下流の block-array voxel 落としが
   「実現不能なレイアウトに対する部分 buffer」を silent に
   materialise することはない。CLI の `cairn synth --stage` に

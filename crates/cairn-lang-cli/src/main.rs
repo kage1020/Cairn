@@ -22,8 +22,8 @@ use cairn_lang_formats::java_structure::{
 use cairn_lang_formats::portability::{portability_for_bedrock, portability_for_java};
 use cairn_lang_formats::registry::{RegistryPack, builtin_bedrock, builtin_java};
 use cairn_lang_redstone::{
-    compile_crossing, compile_delay, compile_edition_netlist, compile_netlist, compile_placement,
-    compile_routing, synthesize,
+    PlacementStage, compile_crossing, compile_delay, compile_edition_netlist, compile_netlist,
+    compile_placement, compile_routing, synthesize,
 };
 use clap::{Parser, Subcommand, ValueEnum};
 
@@ -155,10 +155,14 @@ enum Command {
     /// coord of each implicit buffer repeater (escaping to a
     /// `RouteLayer::Bridge` y-layer whenever the plane candidate
     /// collides with a cell / pad / plane crossing / earlier
-    /// buffer). The `--edition <java|bedrock>` flag is required in
-    /// the `edition`, `placement`, `route`, `delay`, and `crossing`
-    /// modes and refused otherwise (the earlier stages are
-    /// edition-neutral by contract).
+    /// buffer). Every cell of the four Placement IR stages carries a
+    /// `"stage"` key echoing the flag value that produced the dump
+    /// (`placement` / `route` / `delay` / `crossing`), so a consumer
+    /// reads the stage off the output instead of inferring it from
+    /// which optional keys are present. The `--edition <java|bedrock>`
+    /// flag is required in the `edition`, `placement`, `route`,
+    /// `delay`, and `crossing` modes and refused otherwise (the
+    /// earlier stages are edition-neutral by contract).
     /// **Internal / experimental** — the shape of the output is not
     /// covered by the stable compatibility tier and may change at any time
     /// as the route / simulator stages land. Requires
@@ -180,6 +184,10 @@ enum Command {
         /// Which pipeline stage to print. Adding stages here as they
         /// land is preferred over a new subcommand per stage — it keeps
         /// the internal surface area (and `--help` output) contained.
+        /// For the four Placement IR stages the value chosen here is
+        /// echoed back as every cell's `"stage"` key, so the flag and
+        /// the dump share one vocabulary
+        /// ([`cairn_lang_redstone::PlacementStage`]).
         #[arg(long, value_enum, default_value_t = SynthStage::Logic)]
         stage: SynthStage,
         /// Target edition for the Edition Netlist IR / Placement IR /
@@ -248,7 +256,11 @@ enum SynthStage {
     /// `E_BUFFER_COORD_COLLISION`. v1 does not lift the wire
     /// crossing itself onto `Bridge` — the routed wire path is not
     /// carried on the IR, and stage-5 block-array lowering re-runs
-    /// the routing algorithm to derive the crossings itself.
+    /// the routing algorithm to derive the crossings itself. A scope
+    /// with nothing to legalize emits no `buffer_coords` at all
+    /// (the empty vector serde-skips); the `"stage": "crossing"` tag
+    /// on every cell, not the presence of that key, is what marks the
+    /// dump as having been through this pass.
     Crossing,
 }
 
@@ -954,15 +966,23 @@ fn dispatch_synth_stage(
 /// function must be kept in sync on every variant addition or
 /// rename. Its exhaustive `match` provides a compile-time nudge to
 /// do so.
+///
+/// The four Placement IR stages take their spelling from
+/// [`PlacementStage::as_str`] rather than repeating the literal, so
+/// the word this function prints and the word the dump's `"stage"`
+/// key carries cannot drift apart. What no type can enforce is the
+/// third spelling in the chain — the one clap derives from the
+/// variant identifier — so `placement_stage_names_match_clap` below
+/// pins that against `ValueEnum` directly.
 fn stage_flag(stage: SynthStage) -> &'static str {
     match stage {
         SynthStage::Logic => "logic",
         SynthStage::Netlist => "netlist",
         SynthStage::Edition => "edition",
-        SynthStage::Placement => "placement",
-        SynthStage::Route => "route",
-        SynthStage::Delay => "delay",
-        SynthStage::Crossing => "crossing",
+        SynthStage::Placement => PlacementStage::Placement.as_str(),
+        SynthStage::Route => PlacementStage::Route.as_str(),
+        SynthStage::Delay => PlacementStage::Delay.as_str(),
+        SynthStage::Crossing => PlacementStage::Crossing.as_str(),
     }
 }
 
@@ -1542,4 +1562,50 @@ fn build_lockfile(
             })
             .collect(),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    //! Unit coverage for the argument-surface invariants the
+    //! end-to-end `tests/cli_*.rs` binaries can only assert
+    //! circumstantially, by hard-coding both sides of a pairing.
+    use super::*;
+
+    /// The four Placement IR stages spell their `--stage` value, the
+    /// `--stage <name>` fragment `require_edition` prints, and the
+    /// `"stage"` key of the JSON dump the same way. `stage_flag`
+    /// already derives the second from the third, but the first is
+    /// clap's own kebab-casing of the variant identifier, which no
+    /// type ties to either — renaming `SynthStage::Route` to
+    /// `Routing` would silently start accepting `--stage routing`
+    /// while the dump kept saying `route`. Reading the name back out
+    /// of `ValueEnum` is the only way to pin that.
+    #[test]
+    fn placement_stage_names_match_clap() {
+        for (stage, placement) in [
+            (SynthStage::Placement, PlacementStage::Placement),
+            (SynthStage::Route, PlacementStage::Route),
+            (SynthStage::Delay, PlacementStage::Delay),
+            (SynthStage::Crossing, PlacementStage::Crossing),
+        ] {
+            let clap_name = stage
+                .to_possible_value()
+                .expect("no SynthStage variant is skipped");
+            assert_eq!(clap_name.get_name(), placement.as_str());
+            assert_eq!(stage_flag(stage), placement.as_str());
+        }
+    }
+
+    /// The edition-neutral stages have no Placement IR counterpart,
+    /// so their spellings stay literals in `stage_flag` — pinned here
+    /// against clap for the same reason.
+    #[test]
+    fn edition_neutral_stage_names_match_clap() {
+        for stage in [SynthStage::Logic, SynthStage::Netlist, SynthStage::Edition] {
+            let clap_name = stage
+                .to_possible_value()
+                .expect("no SynthStage variant is skipped");
+            assert_eq!(clap_name.get_name(), stage_flag(stage));
+        }
+    }
 }

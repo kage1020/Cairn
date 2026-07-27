@@ -12,6 +12,25 @@ and is a separate axis from the Minecraft target version.
 
 ### Changed
 
+- Every `PlacedCellNode` in the JSON dump gains a leading `"stage"`
+  key naming the place-and-route pass that last wrote to it —
+  `placement` / `route` / `delay` / `crossing`, the same vocabulary
+  `cairn synth --stage <s>` accepts, so a dump names the flag that
+  produced it. Until now the stage had to be inferred from which
+  optional keys were present, and that inference was not total: a
+  `PlacementPhase::Delayed` cell and a `Legalized` cell whose crossing
+  pass materialised zero buffers serialise to exactly the same keys,
+  because an empty `buffer_coords` serde-skips. A consumer parsing the
+  JSON therefore could not tell a stage-3 dump from a stage-4 dump with
+  nothing to legalize. The tag resolves that without promoting the
+  empty vector to a sentinel — `buffer_coords` still elides when
+  empty. The "stage-N dump is a pure additive subset of the
+  stage-(N+1) dump" contract the entries below describe is
+  correspondingly relaxed to "additive subset apart from the `stage`
+  tag": the tag is the one field whose *value* changes from stage to
+  stage rather than appearing for the first time. The tag is derived
+  from the phase on every serialisation rather than stored, so it
+  cannot drift from the variant it names.
 - `PlacementPhase::Legalized::buffer_coords` widens from
   `Vec<CellCoord>` to `Vec<BufferCoord>`, where the new
   `BufferCoord { port: PortName, coord: CellCoord }` pairs every
@@ -29,7 +48,8 @@ and is a separate axis from the Minecraft target version.
   the `{port, ...}` shape `CellPortDriver` already uses on the netlist
   side. Empty `buffer_coords` still serde-skips, so a scope whose
   delay pass counted zero buffers stays byte-identical to its delayed
-  IR. `PlacedCellNode::buffer_coords()` and
+  IR apart from the `stage` tag above.
+  `PlacedCellNode::buffer_coords()` and
   `PlacementPhase::buffer_coords()` now return `&[BufferCoord]`;
   `PlacementPhase::legalize` takes `Vec<BufferCoord>`.
 - `PlacedCellNode`'s three progressive fields (`wire_length`,
@@ -53,12 +73,35 @@ and is a separate axis from the Minecraft target version.
   which return the same `Option<u32>` / `&[CellCoord]` shape the old
   fields exposed, and a hand-written `Serialize` impl flattens the
   phase back onto
-  `{cell, drivers, coord[, wire_length][, delay_ticks][, buffer_coords]}`
-  so the JSON wire form is byte-identical to earlier revisions — no
-  consumer sees a schema change.
+  `{stage, cell, drivers, coord[, wire_length][, delay_ticks][, buffer_coords]}`
+  so the values keep the flat spelling earlier revisions produced
+  rather than becoming a tagged enum object; the only wire-form
+  addition is the `stage` key described above.
 
 ### Added
 
+- `PlacementStage` — the four-variant projection of `PlacementPhase`
+  that backs the `"stage"` key described under *Changed*, exported
+  from `cairn-lang-redstone`'s root alongside the other Placement IR
+  types. `PlacementPhase::stage()` and `PlacedCellNode::stage()`
+  return it; `PlacementStage::as_str` fixes the wire spelling
+  (`placement` / `route` / `delay` / `crossing`) in one place the way
+  `RouteLayer::as_str` already does for the layer vocabulary — the
+  `--stage <name>` fragment `cairn synth` prints when it refuses a
+  missing `--edition` now derives its four Placement spellings from
+  the same accessor instead of repeating the literals, and a unit
+  test reads the third spelling in that chain (the one clap derives
+  from the `SynthStage` variant identifier, which no type ties to
+  either) back out of `ValueEnum` so a variant rename cannot silently
+  desynchronise the accepted flag from the emitted tag. Unlike
+  the three value accessors it sits beside, `stage()` is total: every
+  phase belongs to exactly one stage, including a `Legalized` with no
+  buffer coords to show for itself. Both it and the `Serialize` impl
+  enumerate every variant explicitly rather than falling through a
+  `_ =>` arm, so adding the Stage-5 variant is a compile error at the
+  two sites that must name it rather than a dump that silently
+  mislabels stage-5 output as `crossing`. `PlacementStage` is
+  `#[non_exhaustive]` for the same reason `PlacementPhase` is.
 - `PlacementPhase::route_at` / `delay_at` / `legalize_at` — context-
   carrying twins of the three phase-transition methods, added so an
   out-of-order transition panic names the cell that tripped it. The
@@ -128,9 +171,10 @@ and is a separate axis from the Minecraft target version.
   crossing pass fills with one entry per implicit buffer repeater
   the delay pass counted. Both fields serde-skip on their defaults
   (`layer` skips when `Plane`, `buffer_coords` skips when empty),
-  so a placement / routing / delay JSON dump is a pure additive
-  subset of the legalized IR dump — no key changes for scopes with
-  nothing to legalize. Failed scopes elide from the output so a
+  so a placement / routing / delay JSON dump is an additive subset
+  of the legalized IR dump apart from the `stage` tag — no key
+  changes for scopes with nothing to legalize, only a tag whose
+  value moves on. Failed scopes elide from the output so a
   downstream block-array voxel lowering cannot silently materialise
   buffers against a layout no other stage can realise. The CLI's
   `cairn synth --stage` gains a `crossing` value; the

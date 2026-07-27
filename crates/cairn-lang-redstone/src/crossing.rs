@@ -51,13 +51,21 @@
 //! never reads a partially-populated `buffer_coords` — the same
 //! fail-loud policy the routing and delay passes use.
 //!
-//! The crossing pass is a field write on
-//! [`crate::placement_ir::PlacedCellNode::buffer_coords`] and
-//! [`crate::placement_ir::CellCoord::layer`] per the phase table on
-//! `PlacedCellNode`; no new IR type is introduced. Both fields
+//! The crossing pass is one
+//! [`crate::placement_ir::PlacementPhase::legalize`] transition per
+//! cell, per the producer↔variant table on that enum, carrying the
+//! buffer coords it allocated (each stamped with a
+//! [`crate::placement_ir::CellCoord::layer`]); no new IR type is
+//! introduced, and
+//! [`crate::placement_ir::PlacedCellNode::buffer_coords`] is the
+//! read-only projection of the resulting variant. Both the layer and
+//! the coord vector
 //! serde-skip on their defaults, so a scope whose crossing pass
-//! writes nothing dumps as the identical JSON its delay-pass input
-//! did.
+//! writes nothing dumps as the JSON its delay-pass input did apart
+//! from the `stage` tag — which is exactly why that tag exists: it
+//! is the only thing telling a consumer this pass ran at all when
+//! there was nothing to legalize (see
+//! [`crate::placement_ir::PlacementStage`]).
 
 use std::collections::HashMap;
 use std::collections::HashSet;
@@ -83,8 +91,8 @@ use crate::routing_geometry::{
 /// non-failed scope's `buffer_coords` populated with one entry per
 /// implicit buffer repeater the delay pass counted, each tagged with
 /// the [`RouteLayer`] the pass chose. No new IR type; the crossing
-/// pass is a field write per the phase table on
-/// [`crate::placement_ir::PlacedCellNode`].
+/// pass is one [`crate::placement_ir::PlacementPhase::legalize`]
+/// transition per cell, per the producer↔variant table on that enum.
 #[derive(Debug, Clone, PartialEq, Default)]
 #[non_exhaustive]
 pub struct CrossingOutput {
@@ -169,7 +177,7 @@ fn legalize_scope(entry: &ScopedPlacementIrEntry) -> ScopeLegalization {
     // panicking loud on an out-of-range access beats silently
     // sinking into a fall-back coord. Same reasoning as the delay
     // pass's stricter branch — this pass writes `buffer_coords`, and
-    // the phase table on `PlacedCellNode` promises populated
+    // the producer↔variant table on `PlacementPhase` promises populated
     // `buffer_coords` after stage 4, so a silent under-population
     // would let the downstream voxel lowering read a stage-3 shape
     // from a stage-4 output.
@@ -694,11 +702,11 @@ mod tests {
             PortName::A,
             "buffer preserves its driver port on the plane placement path",
         );
-        // Pins the `PlacedCellNode` `Serialize` impl's 6-field path
-        // (cell + drivers + coord + wire_length + delay_ticks +
-        // buffer_coords). Without this, no test would exercise the
+        // Pins the `PlacedCellNode` `Serialize` impl's widest path
+        // (stage + cell + drivers + coord + wire_length + delay_ticks
+        // + buffer_coords). Without this, no test would exercise the
         // full `Legalized { buffer_coords: <non-empty> }` JSON shape —
-        // only the 5-field `Legalized { buffer_coords: empty }` case
+        // only the narrower `Legalized { buffer_coords: empty }` case
         // is covered by the byte-identity tests. A regression that
         // dropped `buffer_coords` (or announced the wrong
         // `field_count`) would slip past every other assertion here.
@@ -709,6 +717,14 @@ mod tests {
                 "\"buffer_coords\":[{\"port\":\"a\",\"coord\":{\"x\":15,\"y\":0,\"z\":1}}]"
             ),
             "expected buffer_coords entry to appear in JSON verbatim, got {json}",
+        );
+        // The stage tag and a populated `buffer_coords` coexist: no
+        // `.crn` example reaches this path (every fixture's segments
+        // sit below the attenuation limit), so this hand-built IR is
+        // the only place the pairing is observable.
+        assert!(
+            json.contains("\"stage\":\"crossing\""),
+            "expected the crossing stage tag alongside buffer_coords, got {json}",
         );
     }
 
@@ -1089,7 +1105,8 @@ mod tests {
     )]
     fn re_running_crossing_pass_panics_loudly() {
         // Chaining `compile_crossing(&legalized.scoped)` is forbidden
-        // by the phase table on `PlacedCellNode`. Loud in release so
+        // by the producer↔variant table on `PlacementPhase`. Loud in
+        // release so
         // a caller cannot silently double-populate `buffer_coords`.
         // The expected substring pins the cell identity as well as the
         // invariant: the breadcrumb is what tells an operator which

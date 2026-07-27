@@ -7,8 +7,9 @@
 //! plus implicit buffer repeaters, `E_ATTENUATION_LIMIT` when a driver
 //! segment exceeds the v1 sanity cap, pass-through of scopes elided by
 //! upstream stages, the JSON wire form growing a `delay_ticks` field,
-//! byte-identical wire form vs the routed IR (delay is a field-write
-//! on `PlacedCellNode::delay_ticks`), and per-scope independence when
+//! a wire form otherwise byte-identical to the routed IR apart from
+//! the `stage` tag (delay writes nothing but `delay_ticks`), and
+//! per-scope independence when
 //! a module carries more than one scope.
 
 use std::path::PathBuf;
@@ -20,6 +21,10 @@ use cairn_lang_redstone::{
     DiagnosticCode, MAX_ATTENUATION_SEGMENT, ScopedPlacementIr, compile_delay,
     compile_edition_netlist, compile_netlist, compile_placement, compile_routing, synthesize,
 };
+
+mod common;
+
+use common::normalize_stage_tags;
 
 fn load_example(name: &str) -> String {
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -528,6 +533,10 @@ fn json_dump_carries_delay_ticks_and_preserves_wire_length() {
 
     let json = serde_json::to_string(&delayed.scoped).expect("serialise");
     assert!(
+        json.contains("\"stage\":\"delay\""),
+        "every delayed cell must carry the delay stage tag: {json}",
+    );
+    assert!(
         json.contains("\"wire_length\":"),
         "wire_length must survive the delay pass: {json}",
     );
@@ -538,17 +547,18 @@ fn json_dump_carries_delay_ticks_and_preserves_wire_length() {
 }
 
 /// `AC8b` — delay insertion must not perturb any Placement IR field
-/// other than `delay_ticks`. Serialise the routed and delayed outputs
-/// to compact JSON, strip the delayed side's `,"delay_ticks":<int>`
-/// entries, and byte-compare the remainder. Pins the "field-write
-/// only" wire-form contract the pass docstring on `PlacedCellNode`
-/// declares: a downstream JSON consumer that inspects `--stage route`
-/// output today should see byte-identical bytes from `--stage delay`
-/// once `delay_ticks` is peeled off, so field reordering, added or
-/// removed fields, or key-name typos in unrelated structs trip here
-/// even when the JSON parses equivalently.
+/// other than `delay_ticks` and the `stage` tag. Serialise the routed
+/// and delayed outputs to compact JSON, strip the delayed side's
+/// `,"delay_ticks":<int>` entries, normalise both sides' stage tags,
+/// and byte-compare the remainder. Pins the "field-write only"
+/// wire-form contract the pass docstring on `PlacedCellNode` declares:
+/// a downstream JSON consumer that inspects `--stage route` output
+/// today should see byte-identical bytes from `--stage delay` once
+/// `delay_ticks` and the tag are peeled off, so field reordering,
+/// added or removed fields, or key-name typos in unrelated structs
+/// trip here even when the JSON parses equivalently.
 #[test]
-fn delay_leaves_routed_fields_byte_identical_apart_from_delay_ticks() {
+fn delay_leaves_routed_fields_byte_identical_apart_from_delay_ticks_and_stage() {
     let source = load_example("redstone-door.crn");
     let routed = routed_from_source(&source, Edition::Java);
     let routed_json = serde_json::to_string(&routed).expect("serialise routed");
@@ -562,14 +572,15 @@ fn delay_leaves_routed_fields_byte_identical_apart_from_delay_ticks() {
     let delayed_json = serde_json::to_string(&delayed.scoped).expect("serialise delayed");
 
     // `delay_ticks` sits after `wire_length` in `PlacedCellNode`'s
-    // struct declaration and `serde` emits fields in declaration
-    // order, so in compact JSON it always shows up as
-    // `,"delay_ticks":<int>`. Strip that pattern and the delayed and
-    // routed bytes must match exactly.
-    let stripped_delayed = strip_delay_ticks(&delayed_json);
+    // emission order, so in compact JSON it always shows up as
+    // `,"delay_ticks":<int>`. Strip that pattern, normalise the stage
+    // tag each side carries, and the delayed and routed bytes must
+    // match exactly.
+    let stripped_delayed = normalize_stage_tags(&strip_delay_ticks(&delayed_json));
     assert_eq!(
-        stripped_delayed, routed_json,
-        "delay must not perturb routed fields — delayed compact JSON with delay_ticks stripped should match routed compact JSON byte-for-byte",
+        stripped_delayed,
+        normalize_stage_tags(&routed_json),
+        "delay must not perturb routed fields — delayed compact JSON with delay_ticks stripped and the stage tag normalised should match routed compact JSON byte-for-byte",
     );
 }
 
@@ -697,7 +708,8 @@ struct wide_pack size=300x5
 }
 
 /// AC11 — chaining `compile_delay(&delayed.scoped)` is forbidden by
-/// the phase table on `PlacedCellNode`, and the panic it raises names
+/// the producer↔variant table on `PlacementPhase`, and the panic it
+/// raises names
 /// the cell that tripped it. Mirrors the routing pass's equivalent
 /// guard: without the breadcrumb the backtrace points at the pass but
 /// not at the cell whose `delay_ticks` was already committed.

@@ -21,7 +21,12 @@
 //! [`PlacedCellNode::wire_length`] and [`PlacedCellNode::delay_ticks`]
 //! are reserved as `Option`s that the placement pass leaves `None`.
 //! Adding values in a follow-up pass is a field-write, not a schema
-//! change, so downstream JSON consumers see a stable wire shape.
+//! change, so downstream JSON consumers see a stable wire shape. Which
+//! pass a given dump came out of is named outright by the `stage` tag
+//! every cell carries ([`PlacementStage`]) rather than inferred from
+//! which optional keys are present, because that inference cannot
+//! separate a stage-4 dump with nothing to legalize from its stage-3
+//! input.
 //!
 //! `circuit region=... void=N` congestion detection (`E_ROUTE_CONGESTION`)
 //! and missing-reservation refusal (`E_NO_CIRCUIT_REGION`) fire here —
@@ -85,7 +90,8 @@ impl RouteLayer {
     /// `serde(skip_serializing_if = "…")` attribute on
     /// [`CellCoord::layer`] so the JSON wire form of a `Plane` coord
     /// omits the `layer` field entirely — the routed / delayed IR
-    /// shape is a pure additive subset of the legalized IR shape.
+    /// shape is an additive subset of the legalized IR shape apart
+    /// from the `stage` tag ([`PlacementStage`]).
     #[must_use]
     pub const fn is_plane(&self) -> bool {
         matches!(self, Self::Plane)
@@ -131,8 +137,9 @@ impl Serialize for RouteLayer {
 ///
 /// `layer` serialises only when it differs from [`RouteLayer::Plane`]
 /// so a placement / routing / delay JSON dump omits the `layer` key
-/// entirely: the legalized IR shape is a pure additive subset of the
-/// earlier stages' shape.
+/// entirely: the legalized IR shape is an additive superset of the
+/// earlier stages' shape apart from the `stage` tag
+/// ([`PlacementStage`]), whose value changes rather than appears.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
 pub struct CellCoord {
     /// Column along the region's x-axis. Zero at the region's origin.
@@ -263,6 +270,66 @@ impl CircuitRegionReservation {
     }
 }
 
+/// Which place-and-route pass last wrote to a [`PlacedCellNode`],
+/// projected out of its [`PlacementPhase`] and emitted as the `stage`
+/// key of the JSON wire form.
+///
+/// Without it a JSON consumer has to infer the stage from which
+/// optional keys are present, and that inference is not total:
+/// [`PlacementPhase::Delayed`] and a [`PlacementPhase::Legalized`]
+/// whose crossing pass materialised zero buffers carry exactly the
+/// same keys, because an empty `buffer_coords` serde-skips. The tag
+/// makes the two distinguishable without turning the empty vector
+/// into a sentinel.
+///
+/// The strings are the same vocabulary `cairn synth --stage <s>`
+/// accepts, so a dump names the flag that produced it and a consumer
+/// can round-trip the two. Keep them in step with the CLI's
+/// `SynthStage` value names — the CLI test suite asserts the
+/// equality per stage.
+///
+/// `#[non_exhaustive]` for the same reason [`PlacementPhase`] is: the
+/// fifth stage (Edition legalization) has no variant yet.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum PlacementStage {
+    /// Produced by [`crate::placement::compile_placement`] — paired
+    /// with [`PlacementPhase::Unrouted`].
+    Placement,
+    /// Produced by [`crate::routing::compile_routing`] — paired with
+    /// [`PlacementPhase::Routed`].
+    Route,
+    /// Produced by [`crate::delay::compile_delay`] — paired with
+    /// [`PlacementPhase::Delayed`].
+    Delay,
+    /// Produced by [`crate::crossing::compile_crossing`] — paired with
+    /// [`PlacementPhase::Legalized`], whether or not that pass had any
+    /// buffer to materialise.
+    Crossing,
+}
+
+impl PlacementStage {
+    /// Stable lowercase string form used in the JSON wire format and
+    /// accepted by `cairn synth --stage <s>`. Mirrors
+    /// [`RouteLayer::as_str`], which fixes the other wire-level enum in
+    /// this module to one authoritative spelling.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Placement => "placement",
+            Self::Route => "route",
+            Self::Delay => "delay",
+            Self::Crossing => "crossing",
+        }
+    }
+}
+
+impl Serialize for PlacementStage {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
 /// Progressive state of a [`PlacedCellNode`] as it moves through the
 /// first four of the five stages of the place-and-route pipeline
 /// (`spec/redstone` §14.5 — Placement → Steiner routing → Delay
@@ -272,12 +339,16 @@ impl CircuitRegionReservation {
 /// Every legal `(wire_length, delay_ticks, buffer_coords)` combination
 /// the pipeline can produce is one of these variants:
 ///
-/// | Producer                                             | Variant                                                                     |
-/// |------------------------------------------------------|-----------------------------------------------------------------------------|
-/// | [`crate::placement::compile_placement`] (Stage 1)    | [`Self::Unrouted`]                                                          |
-/// | [`crate::routing::compile_routing`]     (Stage 2)    | [`Self::Routed`] `{ wire_length }`                                          |
-/// | [`crate::delay::compile_delay`]         (Stage 3)    | [`Self::Delayed`] `{ wire_length, delay_ticks }`                            |
-/// | [`crate::crossing::compile_crossing`]   (Stage 4)    | [`Self::Legalized`] `{ wire_length, delay_ticks, buffer_coords }`           |
+/// | Producer                                             | Variant                                                                     | `stage` tag   |
+/// |------------------------------------------------------|-----------------------------------------------------------------------------|---------------|
+/// | [`crate::placement::compile_placement`] (Stage 1)    | [`Self::Unrouted`]                                                          | `placement`   |
+/// | [`crate::routing::compile_routing`]     (Stage 2)    | [`Self::Routed`] `{ wire_length }`                                          | `route`       |
+/// | [`crate::delay::compile_delay`]         (Stage 3)    | [`Self::Delayed`] `{ wire_length, delay_ticks }`                            | `delay`       |
+/// | [`crate::crossing::compile_crossing`]   (Stage 4)    | [`Self::Legalized`] `{ wire_length, delay_ticks, buffer_coords }`           | `crossing`    |
+///
+/// The rightmost column is [`Self::stage`] — see [`PlacementStage`]
+/// for why the JSON dump names its stage outright instead of leaving
+/// a consumer to infer it from which optional keys are present.
 ///
 /// Illegal shapes such as "have `delay_ticks` but no `wire_length`" or
 /// "carry `buffer_coords` before the delay pass has run" are
@@ -374,6 +445,26 @@ impl PlacementPhase {
         }
     }
 
+    /// Which pass last wrote to this cell — the discriminant projected
+    /// onto the [`PlacementStage`] the JSON wire form carries. Unlike
+    /// the three value accessors above this one is total: every phase
+    /// belongs to exactly one stage, including a [`Self::Legalized`]
+    /// that has no buffer coords to show for itself.
+    ///
+    /// All variants are matched explicitly rather than via a `_ =>`
+    /// catch-all so that adding a Stage-5 variant becomes a compile
+    /// error here instead of a silent mislabelling of the new stage's
+    /// dumps as stage 4.
+    #[must_use]
+    pub const fn stage(&self) -> PlacementStage {
+        match self {
+            Self::Unrouted => PlacementStage::Placement,
+            Self::Routed { .. } => PlacementStage::Route,
+            Self::Delayed { .. } => PlacementStage::Delay,
+            Self::Legalized { .. } => PlacementStage::Crossing,
+        }
+    }
+
     /// [`Self::Unrouted`] → [`Self::Routed`].
     ///
     /// Carries no caller context, so an out-of-order call names only
@@ -383,8 +474,8 @@ impl PlacementPhase {
     /// # Panics
     ///
     /// Panics if the phase is not [`Self::Unrouted`]. Routing must run
-    /// exactly once per placement, and the phase table on
-    /// [`PlacedCellNode`] forbids re-routing.
+    /// exactly once per placement, and the producer↔variant table on
+    /// this enum forbids re-routing.
     #[track_caller]
     pub fn route(&mut self, wire_length: u32) {
         self.route_inner(wire_length, None);
@@ -436,8 +527,8 @@ impl PlacementPhase {
     /// # Panics
     ///
     /// Panics if the phase is not [`Self::Routed`]. Delay insertion
-    /// must run exactly once per routed IR, and the phase table on
-    /// [`PlacedCellNode`] forbids re-writing a `delay_ticks` that was
+    /// must run exactly once per routed IR, and the producer↔variant
+    /// table on this enum forbids re-writing a `delay_ticks` that was
     /// already committed.
     #[track_caller]
     pub fn delay(&mut self, delay_ticks: u32) {
@@ -648,14 +739,19 @@ impl fmt::Display for CellIdentity<'_> {
 /// [`Self::delay_ticks`], and [`Self::buffer_coords`] project the
 /// phase back onto the three flat fields the JSON wire form exposes,
 /// so consumers that only care about the values do not need to match
-/// on the phase enum.
+/// on the phase enum; [`Self::stage`] projects the discriminant
+/// itself.
 ///
-/// The custom [`Serialize`] impl flattens [`Self::phase`] back onto
-/// `{cell, drivers, coord[, wire_length][, delay_ticks][, buffer_coords]}` —
-/// exactly the shape earlier revisions of this struct produced via
-/// three `skip_serializing_if` optionals, so the JSON dump of a
-/// stage-N output is still a pure additive subset of the stage-(N+1)
-/// dump on scopes whose stage-(N+1) pass had nothing to write.
+/// The custom [`Serialize`] impl flattens [`Self::phase`] onto
+/// `{stage, cell, drivers, coord[, wire_length][, delay_ticks][, buffer_coords]}`.
+/// The three optionals carry the shape earlier revisions of this
+/// struct produced via `skip_serializing_if`, so the JSON dump of a
+/// stage-N output is an additive subset of the stage-(N+1) dump *apart
+/// from the `stage` tag* on scopes whose stage-(N+1) pass had nothing
+/// to write. The tag is the one field whose value changes rather than
+/// appears, and it exists precisely because the subset relation made
+/// a zero-buffer [`PlacementPhase::Legalized`] indistinguishable from
+/// a [`PlacementPhase::Delayed`] — see [`PlacementStage`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct PlacedCellNode {
@@ -705,17 +801,26 @@ impl PlacedCellNode {
     pub fn buffer_coords(&self) -> &[BufferCoord] {
         self.phase.buffer_coords()
     }
+
+    /// Which pass last wrote to this cell. See
+    /// [`PlacementPhase::stage`].
+    #[must_use]
+    pub const fn stage(&self) -> PlacementStage {
+        self.phase.stage()
+    }
 }
 
 // If [`PlacedCellNode`] grows a new visible field — or [`PlacementPhase`]
 // gains a Stage-5 variant whose payload the JSON must expose — add it to
-// both the field-count tally and the `serialize_field` calls below.
+// both the field-count tally and the `serialize_field` calls below, and
+// give the new stage a [`PlacementStage`] variant so the `stage` tag
+// keeps naming the pass that produced the dump.
 // `serde_json` tolerates a field-count mismatch, but binary formats
 // (bincode, postcard, msgpack) rely on the announced count being exact;
 // the `debug_assert_eq!` at the end catches a divergence in tests. Do not
 // `#[derive(Serialize)]` this type — the derived output would tag the
-// enum variant and break the byte-identity contract locked in by
-// `routing_leaves_placement_fields_byte_identical_apart_from_wire_length`
+// enum variant and reshape the flat wire form locked in by
+// `routing_leaves_placement_fields_byte_identical_apart_from_wire_length_and_stage`
 // et al.
 impl Serialize for PlacedCellNode {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
@@ -723,7 +828,7 @@ impl Serialize for PlacedCellNode {
         let delay_ticks = self.delay_ticks();
         let buffer_coords = self.buffer_coords();
 
-        let mut field_count = 3; // cell, drivers, coord
+        let mut field_count = 4; // stage, cell, drivers, coord
         if wire_length.is_some() {
             field_count += 1;
         }
@@ -736,6 +841,11 @@ impl Serialize for PlacedCellNode {
 
         let mut state = serializer.serialize_struct("PlacedCellNode", field_count)?;
         let mut written = 0_usize;
+        // First so a truncated or eyeballed dump still says which pass
+        // produced it, and so the tag reads ahead of the values it
+        // qualifies.
+        state.serialize_field("stage", &self.stage())?;
+        written += 1;
         state.serialize_field("cell", &self.cell)?;
         written += 1;
         state.serialize_field("drivers", &self.drivers)?;
@@ -1307,6 +1417,118 @@ mod tests {
         assert_eq!(
             legalized().buffer_coords(),
             &[BufferCoord::new(PortName::A, CellCoord::new(5, 0, 0))],
+        );
+    }
+
+    #[test]
+    fn stage_accessor_covers_every_variant() {
+        assert_eq!(PlacementPhase::Unrouted.stage(), PlacementStage::Placement);
+        assert_eq!(routed().stage(), PlacementStage::Route);
+        assert_eq!(delayed().stage(), PlacementStage::Delay);
+        assert_eq!(legalized().stage(), PlacementStage::Crossing);
+    }
+
+    /// The whole point of the tag: a scope whose delay pass counted
+    /// zero buffers still reports the crossing stage, so a consumer
+    /// never has to infer "did stage 4 run?" from the absence of
+    /// `buffer_coords`.
+    #[test]
+    fn legalized_with_zero_buffers_still_reports_the_crossing_stage() {
+        let empty = PlacementPhase::Legalized {
+            wire_length: 3,
+            delay_ticks: 1,
+            buffer_coords: Vec::new(),
+        };
+        assert_eq!(empty.stage(), PlacementStage::Crossing);
+        assert_eq!(empty.stage(), legalized().stage());
+        assert_ne!(empty.stage(), delayed().stage());
+    }
+
+    fn probe_cell(phase: PlacementPhase) -> PlacedCellNode {
+        PlacedCellNode {
+            cell: EditionCell::JavaRepeaterOr,
+            drivers: Vec::new(),
+            coord: CellCoord::new(0, 0, 0),
+            phase,
+            span: Span::default(),
+        }
+    }
+
+    #[test]
+    fn placed_cell_stage_accessor_projects_the_phase() {
+        for phase in [PlacementPhase::Unrouted, routed(), delayed(), legalized()] {
+            let expected = phase.stage();
+            assert_eq!(probe_cell(phase).stage(), expected);
+        }
+    }
+
+    /// The four strings are the JSON wire form and must equal the
+    /// `cairn synth --stage <s>` flag values, so they are pinned here
+    /// rather than left to whatever `as_str` happens to return.
+    #[test]
+    fn stage_renders_the_cli_flag_vocabulary() {
+        assert_eq!(PlacementStage::Placement.as_str(), "placement");
+        assert_eq!(PlacementStage::Route.as_str(), "route");
+        assert_eq!(PlacementStage::Delay.as_str(), "delay");
+        assert_eq!(PlacementStage::Crossing.as_str(), "crossing");
+    }
+
+    /// Every variant serialises as a bare string, not as a tagged
+    /// object — a derived `Serialize` on a fieldless enum would also
+    /// produce a string, but pinning it here keeps a future refactor
+    /// from silently reshaping the tag. All four are covered rather
+    /// than one representative: `Serialize` routes through `as_str`'s
+    /// `match`, so a single sample cannot catch a mis-wired arm.
+    #[test]
+    fn every_stage_serialises_as_a_bare_string() {
+        for (stage, expected) in [
+            (PlacementStage::Placement, "\"placement\""),
+            (PlacementStage::Route, "\"route\""),
+            (PlacementStage::Delay, "\"delay\""),
+            (PlacementStage::Crossing, "\"crossing\""),
+        ] {
+            assert_eq!(
+                serde_json::to_string(&stage).expect("stage serialises"),
+                expected,
+            );
+        }
+    }
+
+    /// The reason the tag exists: before it, these two phases produced
+    /// identical JSON.
+    #[test]
+    fn delayed_and_legalized_with_zero_buffers_serialise_differently() {
+        let delayed_json =
+            serde_json::to_string(&probe_cell(delayed())).expect("delayed cell serialises");
+        let legalized_json = serde_json::to_string(&probe_cell(PlacementPhase::Legalized {
+            wire_length: 3,
+            delay_ticks: 1,
+            buffer_coords: Vec::new(),
+        }))
+        .expect("legalized cell serialises");
+
+        assert_ne!(delayed_json, legalized_json);
+        assert!(
+            delayed_json.contains("\"stage\":\"delay\""),
+            "delayed cell must carry the delay tag: {delayed_json}",
+        );
+        assert!(
+            legalized_json.contains("\"stage\":\"crossing\""),
+            "legalized cell must carry the crossing tag: {legalized_json}",
+        );
+        // The tag is the *only* difference: `buffer_coords` still
+        // serde-skips when empty, so the sentinel-array alternative
+        // stays unadopted.
+        assert!(
+            !legalized_json.contains("buffer_coords"),
+            "empty buffer_coords must still serde-skip: {legalized_json}",
+        );
+        // Rewriting the tag's key/value pair — not the bare word
+        // `"delay"`, which also prefixes the `delay_ticks` key — turns
+        // one dump into the other exactly, so nothing else moved.
+        assert_eq!(
+            delayed_json.replace("\"stage\":\"delay\"", "\"stage\":\"crossing\""),
+            legalized_json,
         );
     }
 }

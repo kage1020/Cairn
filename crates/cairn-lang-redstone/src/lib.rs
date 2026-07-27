@@ -32,7 +32,11 @@
 //! over the delayed IR, detecting cross-net plane overlaps, escaping
 //! them onto [`placement_ir::RouteLayer::Bridge`] / `Via` layers, and
 //! filling every cell's `buffer_coords` with the coord of each
-//! implicit buffer repeater the delay pass counted. The physical-tile
+//! implicit buffer repeater the delay pass counted. Every
+//! [`placement_ir::PlacedCellNode`] names the last of those four
+//! passes to touch it via [`placement_ir::PlacementStage`], which the
+//! JSON dump carries as a `stage` key in the same vocabulary
+//! `cairn synth --stage <s>` accepts. The physical-tile
 //! selection and simulator layers are not yet public API — see
 //! `spec/redstone` for the complete pipeline they will fill in.
 
@@ -72,8 +76,8 @@ pub use netlist_ir::{
 };
 pub use placement::{CELL_FOOTPRINT, PlacementOutput, compile_placement};
 pub use placement_ir::{
-    BufferCoord, CellCoord, CircuitRegionReservation, PlacedCellNode, PlacementIr, RouteLayer,
-    ScopedPlacementIr, ScopedPlacementIrEntry,
+    BufferCoord, CellCoord, CircuitRegionReservation, PlacedCellNode, PlacementIr, PlacementStage,
+    RouteLayer, ScopedPlacementIr, ScopedPlacementIrEntry,
 };
 pub use routing::{RoutingOutput, compile_routing};
 pub use synth::{SynthOutput, synthesize};

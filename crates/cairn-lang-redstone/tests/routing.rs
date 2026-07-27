@@ -20,6 +20,10 @@ use cairn_lang_redstone::{
     compile_routing, synthesize,
 };
 
+mod common;
+
+use common::normalize_stage_tags;
+
 fn load_example(name: &str) -> String {
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("..")
@@ -330,6 +334,10 @@ fn json_dump_carries_wire_length_and_omits_delay_ticks() {
 
     let json = serde_json::to_string(&routed.scoped).expect("serialise");
     assert!(
+        json.contains("\"stage\":\"route\""),
+        "every routed cell must carry the route stage tag: {json}",
+    );
+    assert!(
         json.contains("\"wire_length\":"),
         "wire_length must appear in routed JSON: {json}",
     );
@@ -350,17 +358,18 @@ fn json_dump_carries_wire_length_and_omits_delay_ticks() {
 }
 
 /// `AC7b` — routing must not perturb any Placement IR field other than
-/// `wire_length`. Serialise the placement and routing outputs to
-/// compact JSON, strip the routing side's `,"wire_length":<int>`
-/// entries, and byte-compare the remainder. Pins the "field-write
-/// only" wire-form contract the pass docstring on `PlacedCellNode`
-/// declares: a downstream JSON consumer that inspects
-/// `--stage placement` output today should see byte-identical bytes
-/// from `--stage route` once `wire_length` is peeled off, so field
-/// reordering, added/removed fields, or key-name typos in unrelated
-/// structs trip here even when the JSON parses equivalently.
+/// `wire_length` and the `stage` tag. Serialise the placement and
+/// routing outputs to compact JSON, strip the routing side's
+/// `,"wire_length":<int>` entries, normalise both sides' stage tags,
+/// and byte-compare the remainder. Pins the "field-write only"
+/// wire-form contract the pass docstring on `PlacedCellNode` declares:
+/// a downstream JSON consumer that inspects `--stage placement` output
+/// today should see byte-identical bytes from `--stage route` once
+/// `wire_length` and the tag are peeled off, so field reordering,
+/// added/removed fields, or key-name typos in unrelated structs trip
+/// here even when the JSON parses equivalently.
 #[test]
-fn routing_leaves_placement_fields_byte_identical_apart_from_wire_length() {
+fn routing_leaves_placement_fields_byte_identical_apart_from_wire_length_and_stage() {
     let source = load_example("redstone-door.crn");
     let placement = placement_from_source(&source, Edition::Java);
     let placement_json = serde_json::to_string(&placement).expect("serialise placement");
@@ -373,15 +382,16 @@ fn routing_leaves_placement_fields_byte_identical_apart_from_wire_length() {
     );
     let routed_json = serde_json::to_string(&routed.scoped).expect("serialise routed");
 
-    // `wire_length` sits after `coord` in `PlacedCellNode`'s struct
-    // declaration and `serde` emits fields in declaration order, so
-    // in compact JSON it always shows up as `,"wire_length":<int>`.
-    // Strip that pattern and the routed and placement bytes must
+    // `wire_length` sits after `coord` in `PlacedCellNode`'s emission
+    // order, so in compact JSON it always shows up as
+    // `,"wire_length":<int>`. Strip that pattern, normalise the stage
+    // tag each side carries, and the routed and placement bytes must
     // match exactly.
-    let stripped_routed = strip_wire_length(&routed_json);
+    let stripped_routed = normalize_stage_tags(&strip_wire_length(&routed_json));
     assert_eq!(
-        stripped_routed, placement_json,
-        "routing must not perturb placement fields — routed compact JSON with wire_length stripped should match placement compact JSON byte-for-byte",
+        stripped_routed,
+        normalize_stage_tags(&placement_json),
+        "routing must not perturb placement fields — routed compact JSON with wire_length stripped and the stage tag normalised should match placement compact JSON byte-for-byte",
     );
 }
 
@@ -484,7 +494,8 @@ fn edition_parity_wire_length_matches_across_java_and_bedrock() {
 }
 
 /// AC10 — chaining `compile_routing(&routed.scoped)` is forbidden by
-/// the phase table on `PlacedCellNode`, and the panic it raises names
+/// the producer↔variant table on `PlacementPhase`, and the panic it
+/// raises names
 /// the cell that tripped it. `#[track_caller]` alone would put only
 /// the pass's `.rs:line` in the backtrace, leaving an operator to walk
 /// back into the IR to find out which cell was already routed; the

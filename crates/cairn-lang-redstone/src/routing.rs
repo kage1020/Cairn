@@ -113,8 +113,9 @@ pub const CELL_FOOTPRINT: u32 = crate::placement::CELL_FOOTPRINT;
 /// place-and-route pipeline. The routed IR is a
 /// [`ScopedPlacementIr`] with every non-failed scope's
 /// `wire_length` promoted from `None` to `Some(_)` — no new IR type;
-/// the routing pass is a field write per the phase table on
-/// [`crate::placement_ir::PlacedCellNode`].
+/// the routing pass is one
+/// [`crate::placement_ir::PlacementPhase::route`] transition per
+/// cell, per the producer↔variant table on that enum.
 #[derive(Debug, Clone, PartialEq, Default)]
 #[non_exhaustive]
 pub struct RoutingOutput {
@@ -319,7 +320,8 @@ fn route_scope(entry: &ScopedPlacementIrEntry) -> ScopeRouting {
 /// `source_of_net`, then commits in a mutable pass. The commit is
 /// loud in release too: `PlacementPhase::route_at` panics on any
 /// non-`Unrouted` variant, which is what a caller who routed twice
-/// hands us — the phase table on `PlacedCellNode` forbids it.
+/// hands us — the producer↔variant table on `PlacementPhase`
+/// forbids it.
 /// `entry` is threaded in purely so that panic can name the offending
 /// cell instead of leaving the operator to walk back from the
 /// backtrace.

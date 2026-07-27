@@ -50,12 +50,17 @@
 //! simulator report a `latency` figure computed against a layout no
 //! downstream stage can materialise.
 //!
-//! The delay pass is a field write on `PlacedCellNode::delay_ticks`
-//! per the phase table on that type; no new IR type is introduced.
-//! `--stage route` JSON stays byte-identical to today because
-//! `delay_ticks` is serde-skipped on `None` and appended as
-//! `,"delay_ticks":N` (after `wire_length` in field declaration order,
-//! matching serde's compact-JSON layout) when this pass writes it.
+//! The delay pass is one `PlacementPhase::delay` transition per cell,
+//! per the producer↔variant table on that enum; no new IR type is
+//! introduced, and `PlacedCellNode::delay_ticks` is the read-only
+//! projection of the resulting variant rather than a field the pass
+//! assigns.
+//! `--stage route` JSON keeps every key it had because `delay_ticks`
+//! is serde-skipped on `None` and appended as `,"delay_ticks":N`
+//! (after `wire_length` in the hand-written `Serialize` impl's
+//! emission order, matching serde's compact-JSON layout) when this
+//! pass writes it. The one value that moves is the `stage` tag, which
+//! goes from `route` to `delay`.
 
 use cairn_lang_core::check::Severity;
 
@@ -119,8 +124,9 @@ pub const MAX_ATTENUATION_SEGMENT: u32 = 256;
 /// uniform result type across every stage of the place-and-route
 /// pipeline. The delayed IR is a [`ScopedPlacementIr`] with every
 /// non-failed scope's `delay_ticks` promoted from `None` to `Some(_)` —
-/// no new IR type; the delay pass is a field write per the phase
-/// table on [`crate::placement_ir::PlacedCellNode`].
+/// no new IR type; the delay pass is one
+/// [`crate::placement_ir::PlacementPhase::delay`] transition per cell,
+/// per the producer↔variant table on that enum.
 #[derive(Debug, Clone, PartialEq, Default)]
 #[non_exhaustive]
 pub struct DelayOutput {
@@ -184,7 +190,8 @@ fn delay_scope(entry: &ScopedPlacementIrEntry) -> ScopeDelay {
     // module without any redstone survives the delay pipeline as-is.
     // Stricter than routing's belt-and-braces `debug_assert! +
     // Ok(source.clone())` fall-through by design: delay writes
-    // `delay_ticks`, and the phase table on `PlacedCellNode` promises
+    // `delay_ticks`, and the producer↔variant table on
+    // `PlacementPhase` promises
     // `(Some, Some)` after this stage — silently returning `(None,
     // None)` on a partial IR would let a future tick simulator read a
     // Stage-1 shape from a Stage-3 output.
@@ -283,8 +290,8 @@ fn delay_scope(entry: &ScopedPlacementIrEntry) -> ScopeDelay {
 /// `source_of_net`, then commits in a mutable pass. The commit is loud
 /// in release too: `PlacementPhase::delay_at` panics on any
 /// non-`Routed` variant, which is what a caller who ran delay
-/// insertion twice hands us — the phase table on `PlacedCellNode`
-/// forbids it. `entry` is threaded in purely so that panic can name
+/// insertion twice hands us — the producer↔variant table on
+/// `PlacementPhase` forbids it. `entry` is threaded in purely so that panic can name
 /// the offending cell instead of leaving the operator to walk back
 /// from the backtrace.
 fn attribute_delay_ticks<F>(

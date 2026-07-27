@@ -324,11 +324,12 @@ fn empty_edition_netlist_produces_no_placement_entry() {
 }
 
 /// AC7 — the JSON dump carries `edition`, a `region` object with the
-/// four reservation fields, and a per-cell `coord` object. `wire_length`
-/// and `delay_ticks` are absent (`skip_serializing_if = "Option::is_none"`)
-/// so the wire form does not carry future-only fields today.
+/// four reservation fields, a per-cell `coord` object, and the
+/// `stage` tag naming the pass that produced it. `wire_length` and
+/// `delay_ticks` are absent (the phase this stage stamps carries
+/// neither) so the wire form does not carry future-only fields today.
 #[test]
-fn json_dump_carries_region_and_coord_and_omits_reserved_fields() {
+fn json_dump_carries_stage_region_and_coord_and_omits_reserved_fields() {
     let source = load_example("redstone-door.crn");
     let (edition_netlist, intent) = edition_netlist_from_source(&source, Edition::Java);
     let out = compile_placement(&edition_netlist, &intent);
@@ -337,6 +338,10 @@ fn json_dump_carries_region_and_coord_and_omits_reserved_fields() {
     assert!(
         json.contains("\"edition\":\"java\""),
         "edition tag missing: {json}",
+    );
+    assert!(
+        json.contains("\"stage\":\"placement\""),
+        "every placed cell must carry the placement stage tag: {json}",
     );
     assert!(
         json.contains("\"region\":{"),
