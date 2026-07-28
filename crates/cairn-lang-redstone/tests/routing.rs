@@ -502,7 +502,7 @@ fn edition_parity_wire_length_matches_across_java_and_bedrock() {
 /// expected substring pins the breadcrumb that spares them that walk.
 #[test]
 #[should_panic(
-    expected = "for cell #0 at (0,0,0) in struct `gatehouse` — routing must run once per placement"
+    expected = "for cell #0 at (0,0,0) in struct `gatehouse` — routing must run exactly once per placement"
 )]
 fn re_running_routing_pass_panics_loudly() {
     let source = load_example("redstone-door.crn");

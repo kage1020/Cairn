@@ -493,7 +493,7 @@ mod tests {
 
     #[test]
     #[should_panic(
-        expected = "for cell #1 at (4,0,1) in struct `mixed` — routing must run once per placement"
+        expected = "for cell #1 at (4,0,1) in struct `mixed` — routing must run exactly once per placement"
     )]
     fn route_panic_names_the_offending_cell_not_the_first_one() {
         // Re-running the whole pass always trips on `cells[0]`, which

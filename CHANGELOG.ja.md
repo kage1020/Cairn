@@ -14,6 +14,24 @@
 
 ### 変更
 
+- `PlacementPhase` の 3 つの遷移が同じ cardinality を名乗るように
+  した。`route` / `delay` が "must run once per …" だった一方で
+  `legalize` だけが "must run **at most** once per delayed IR" で、
+  これは phase enum 導入以前に crossing pass が持っていた
+  release-loud な `assert!` の文言を引き継いだものだった。
+  3 つとも "must run **exactly** once per …" に統一した。
+  不揃い以前に "at most once" は guard の実際の検査内容を
+  過小評価していた — `legalize` は `Delayed` に到達していない
+  phase も拒否するので、段階飛ばしも再実行と同じくここで落ちる。
+  それを伝えられるのは "exactly once" だけである。`route` /
+  `delay` の doc コメントは元々 "exactly once" と書いていたので、
+  panic 文面が自分の記述する契約と一致したことにもなる。
+  cardinality 節は 3 か所の呼び出し側から `TRANSITION_CARDINALITY`
+  という単一の const に移し、`transition_panic` が違反した pass 名と
+  その pass が消費する phase の間に差し込む — この 3 つの隣に追加
+  される遷移は 2 つの名詞を選べるが guard の強さは選べない。
+  文言が drift したのはまさにそれが可能だったからである。
+
 - JSON dump の各 `PlacedCellNode` に、最後にその cell へ書き込んだ
   place-and-route pass を名指しする `"stage"` キーを先頭フィールド
   として追加した。値は `placement` / `route` / `delay` / `crossing`
@@ -113,7 +131,7 @@
   違反した phase と invariant 節の間に差し込む。これにより routing /
   delay / crossing の各 pass は例えば `PlacementPhase::legalize
   called on Legalized { .. } for cell #0 at (16,0,1) in struct
-  `twice` — crossing legalization must run at most once per delayed
+  `twice` — crossing legalization must run exactly once per delayed
   IR` のように失敗する。パンくずは pass 診断が既に使っている語彙
   （`cell #{index}` / `({x},{y},{z})` / ``{kind} `{name}` ``）で
   記述され、`PlacementIr::cells` 内での位置・placement
@@ -124,9 +142,9 @@
   刻み、以降どの pass も cell body を動かさない）ので通常の描画は短い
   まま、かつ invariant を破った hand-built IR が plane coord に見える
   座標を出力することもない。context 無しの `route` /
-  `delay` / `legalize` は無変更で、文面も従来とバイト単位で同一 —
-  context が無い場合は空の節を描画するのではなく ` for …` 節ごと落と
-  すため、余分な区切りが混入しない。
+  `delay` / `legalize` は、対応する `_at` 形と identity 節の有無だけが
+  異なる — context が無い場合は空の節を描画するのではなく ` for …`
+  節ごと落とすため、余分な区切りが混入しない。
 - Redstone crossing legalization と `cairn synth --stage crossing
   --edition <java|bedrock>`（M6-PR7）— M6 redstone-simulates
   パイプラインの 7 枚目。`cairn-lang-redstone` に

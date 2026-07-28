@@ -1101,7 +1101,7 @@ mod tests {
 
     #[test]
     #[should_panic(
-        expected = "for cell #0 at (16,0,1) in struct `twice` — crossing legalization must run at most once per delayed IR"
+        expected = "for cell #0 at (16,0,1) in struct `twice` — crossing legalization must run exactly once per delayed IR"
     )]
     fn re_running_crossing_pass_panics_loudly() {
         // Chaining `compile_crossing(&legalized.scoped)` is forbidden
@@ -1328,7 +1328,7 @@ mod tests {
 
     #[test]
     #[should_panic(
-        expected = "for cell #1 at (4,0,1) in struct `mixed` — crossing legalization must run at most once per delayed IR"
+        expected = "for cell #1 at (4,0,1) in struct `mixed` — crossing legalization must run exactly once per delayed IR"
     )]
     fn legalize_panic_names_the_offending_cell_not_the_first_one() {
         // Re-running the whole pass always trips on `cells[0]`, which
