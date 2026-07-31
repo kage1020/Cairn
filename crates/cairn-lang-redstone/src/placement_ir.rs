@@ -650,9 +650,10 @@ impl PlacementPhase {
     /// [`Self::try_route`] for which callers want this form and why the
     /// arms are enumerated explicitly.
     ///
-    /// A refused call hands `buffer_coords` back to the caller by
-    /// dropping it rather than committing it — the phase is left
-    /// exactly as it was found.
+    /// A refused call drops `buffer_coords` unwritten and leaves the
+    /// phase exactly as it was found. The vector is taken by value, so
+    /// a caller that needs it after a refusal has to clone it before
+    /// calling.
     ///
     /// # Errors
     ///
@@ -756,13 +757,15 @@ impl PlacementPhaseTransitionError {
     /// spliced in, in the same place and format
     /// [`PlacementPhase::route_at`] and friends put theirs.
     ///
-    /// A consumer that recovered from the refusal still knows which
-    /// cell it was working on; this is how it says so without
-    /// hand-assembling a message that would drift from the panicking
-    /// forms'. Pipeline passes pass a [`CellIdentity`]; any
-    /// [`fmt::Display`] works.
+    /// A consumer that recovered from the refusal still knows what it
+    /// was working on — the index of the cell in the dump it is
+    /// ingesting, the path of the cache entry it is validating, the
+    /// document position it is reporting on — and this is how it says
+    /// so without hand-assembling a message that would drift from the
+    /// panicking forms'. Any [`fmt::Display`] works, and it is taken by
+    /// value like the context the `*_at` transitions take.
     #[must_use]
-    pub fn with_context<'a>(&'a self, context: &'a dyn fmt::Display) -> impl fmt::Display + 'a {
+    pub fn with_context<'a, C: fmt::Display + 'a>(&'a self, context: C) -> impl fmt::Display + 'a {
         TransitionMessage {
             error: self,
             context: Some(context),
@@ -800,7 +803,7 @@ impl PlacementPhaseTransitionError {
 
 impl fmt::Display for PlacementPhaseTransitionError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        TransitionMessage {
+        TransitionMessage::<&dyn fmt::Display> {
             error: self,
             context: None,
         }
@@ -834,12 +837,18 @@ const TRANSITION_CARDINALITY: &str = "must run exactly once per";
 /// apart. An absent context drops the whole ` for {context}` clause
 /// rather than rendering an empty one, so no stray separator or double
 /// space reaches the message.
-struct TransitionMessage<'a> {
+///
+/// The context is a type parameter rather than a `&dyn fmt::Display` so
+/// that the public [`PlacementPhaseTransitionError::with_context`] can
+/// own the value its caller passes, matching how the `*_at` transitions
+/// take theirs. The panic path instantiates it at `&dyn fmt::Display`,
+/// which is what it already holds.
+struct TransitionMessage<'a, C: fmt::Display> {
     error: &'a PlacementPhaseTransitionError,
-    context: Option<&'a dyn fmt::Display>,
+    context: Option<C>,
 }
 
-impl fmt::Display for TransitionMessage<'_> {
+impl<C: fmt::Display> fmt::Display for TransitionMessage<'_, C> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
@@ -847,7 +856,7 @@ impl fmt::Display for TransitionMessage<'_> {
             method = self.error.method(),
             current = self.error.current(),
         )?;
-        if let Some(context) = self.context {
+        if let Some(context) = &self.context {
             write!(f, " for {context}")?;
         }
         write!(
@@ -1580,17 +1589,76 @@ mod tests {
         phase.legalize_at(vec![], probe_identity(&scope));
     }
 
-    /// Drive one out-of-order `try_*` transition and hand back the
-    /// error it refused with.
+    /// One of the three transitions, as a value, so a test can drive
+    /// every refusal through one loop instead of picking a
+    /// representative per transition and leaving the other two
+    /// rejected phases unrendered.
     ///
-    /// Takes the phase by value so each case starts from a fresh
-    /// subject and the caller can compare the post-call phase against
-    /// its own untouched copy.
-    fn transition_error(
-        mut phase: PlacementPhase,
-        transition: impl FnOnce(&mut PlacementPhase) -> Result<(), PlacementPhaseTransitionError>,
-    ) -> PlacementPhaseTransitionError {
-        transition(&mut phase).expect_err("out-of-order transition must be refused")
+    /// The fixture arguments are baked in: which `wire_length` or
+    /// buffer vector a refused call was handed never reaches the
+    /// message, so varying them here would only obscure the pairing.
+    #[derive(Clone, Copy)]
+    enum Transition {
+        Route,
+        Delay,
+        Legalize,
+    }
+
+    impl Transition {
+        /// The fallible form.
+        fn tried(self, phase: &mut PlacementPhase) -> Result<(), PlacementPhaseTransitionError> {
+            match self {
+                Self::Route => phase.try_route(5),
+                Self::Delay => phase.try_delay(2),
+                Self::Legalize => phase.try_legalize(vec![]),
+            }
+        }
+
+        /// The panicking form.
+        fn panicking(self, phase: &mut PlacementPhase) {
+            match self {
+                Self::Route => phase.route(5),
+                Self::Delay => phase.delay(2),
+                Self::Legalize => phase.legalize(vec![]),
+            }
+        }
+
+        /// The panicking form that names a context.
+        fn panicking_at(self, phase: &mut PlacementPhase, context: impl fmt::Display) {
+            match self {
+                Self::Route => phase.route_at(5, context),
+                Self::Delay => phase.delay_at(2, context),
+                Self::Legalize => phase.legalize_at(vec![], context),
+            }
+        }
+
+        /// Drive this transition against a phase that refuses it,
+        /// against a throwaway clone so the caller's phase stays
+        /// available for the next rendering of the same refusal.
+        fn refusal(self, phase: &PlacementPhase) -> PlacementPhaseTransitionError {
+            self.tried(&mut phase.clone())
+                .expect_err("out-of-order transition must be refused")
+        }
+    }
+
+    /// Every (transition, phase it refuses) pair — the nine illegal
+    /// edges of the four-state machine.
+    ///
+    /// `Legalized` appears as a rejected phase for all three, which is
+    /// what puts a populated `buffer_coords` through the `{current:?}`
+    /// rendering the messages carry.
+    fn refusals() -> [(Transition, PlacementPhase); 9] {
+        [
+            (Transition::Route, routed()),
+            (Transition::Route, delayed()),
+            (Transition::Route, legalized()),
+            (Transition::Delay, PlacementPhase::Unrouted),
+            (Transition::Delay, delayed()),
+            (Transition::Delay, legalized()),
+            (Transition::Legalize, PlacementPhase::Unrouted),
+            (Transition::Legalize, routed()),
+            (Transition::Legalize, legalized()),
+        ]
     }
 
     #[test]
@@ -1629,6 +1697,25 @@ mod tests {
                 buffer_coords: coords,
             },
         );
+    }
+
+    /// The fallible form owes the same "empty is still legalized"
+    /// promise the panicking one does — a scope whose delay pass
+    /// counted zero buffers must not read as "not yet legalized".
+    #[test]
+    fn try_legalize_from_delayed_with_empty_buffers_stays_legalized() {
+        let mut phase = PlacementPhase::Delayed {
+            wire_length: 4,
+            delay_ticks: 0,
+        };
+        assert_eq!(phase.try_legalize(Vec::new()), Ok(()));
+        assert!(matches!(
+            phase,
+            PlacementPhase::Legalized {
+                buffer_coords: ref bc,
+                ..
+            } if bc.is_empty()
+        ));
     }
 
     /// A refused transition must leave the subject exactly as it found
@@ -1681,68 +1768,83 @@ mod tests {
         }
     }
 
+    /// A phase that refused a transition must be more than *equal* to
+    /// what it was — it must still work. Post-call equality alone would
+    /// survive a refactor that moved out of `self` and rebuilt an equal
+    /// value; carrying on into the next legal transition is what shows
+    /// the subject itself came through.
+    #[test]
+    fn a_refused_transition_leaves_the_phase_usable() {
+        let mut phase = routed();
+        assert!(phase.try_route(5).is_err());
+        phase.delay(2);
+        assert_eq!(
+            phase,
+            PlacementPhase::Delayed {
+                wire_length: 3,
+                delay_ticks: 2,
+            },
+        );
+    }
+
     /// The fallible and panicking forms are two renderings of one
     /// refusal, so the error's own `Display` must reproduce the
     /// context-free panic byte for byte. Comparing against the live
     /// panic payload rather than a hard-coded string means the two can
     /// only drift by drifting together.
+    ///
+    /// Every refusal is walked, not one per transition: the phase is
+    /// rendered through `{current:?}`, so a `Legalized` subject is the
+    /// only case that puts a `Vec<BufferCoord>` through it.
     #[test]
     fn try_transition_errors_render_as_the_context_free_panic() {
-        let renderings = [
-            transition_error(routed(), |phase| phase.try_route(5)).to_string(),
-            transition_error(PlacementPhase::Unrouted, |phase| phase.try_delay(2)).to_string(),
-            transition_error(PlacementPhase::Unrouted, |phase| phase.try_legalize(vec![]))
-                .to_string(),
-        ];
-        let panics = [
-            panic_message(|| routed().route(5)),
-            panic_message(|| PlacementPhase::Unrouted.delay(2)),
-            panic_message(|| PlacementPhase::Unrouted.legalize(vec![])),
-        ];
-        assert_eq!(renderings, panics);
+        for (transition, phase) in refusals() {
+            assert_eq!(
+                transition.refusal(&phase).to_string(),
+                panic_message(|| transition.panicking(&mut phase.clone())),
+            );
+        }
     }
 
-    /// A caller that recovered from the `Err` still has the cell
-    /// identity the pipeline passes hand to the `*_at` forms, so
-    /// splicing it in must land in the same place and read the same
-    /// way — otherwise an ingest diagnostic and a pipeline panic about
-    /// the same cell would not look alike.
+    /// A caller that recovered from the `Err` still knows what it was
+    /// working on, so splicing that in must land in the same place and
+    /// read the same way as the `*_at` forms — otherwise an ingest
+    /// diagnostic and a pipeline panic about the same cell would not
+    /// look alike.
     #[test]
     fn try_transition_errors_with_context_render_as_the_at_panic() {
         let scope = probe_scope();
-        let identity = probe_identity(&scope);
-        let renderings = [
-            transition_error(routed(), |phase| phase.try_route(5))
-                .with_context(&identity)
-                .to_string(),
-            transition_error(PlacementPhase::Unrouted, |phase| phase.try_delay(2))
-                .with_context(&identity)
-                .to_string(),
-            transition_error(PlacementPhase::Unrouted, |phase| phase.try_legalize(vec![]))
-                .with_context(&identity)
-                .to_string(),
-        ];
-        let panics = [
-            panic_message(|| routed().route_at(5, probe_identity(&scope))),
-            panic_message(|| PlacementPhase::Unrouted.delay_at(2, probe_identity(&scope))),
-            panic_message(|| PlacementPhase::Unrouted.legalize_at(vec![], probe_identity(&scope))),
-        ];
-        assert_eq!(renderings, panics);
+        for (transition, phase) in refusals() {
+            let error = transition.refusal(&phase);
+            assert_eq!(
+                error.with_context(probe_identity(&scope)).to_string(),
+                panic_message(
+                    || transition.panicking_at(&mut phase.clone(), probe_identity(&scope))
+                ),
+            );
+        }
     }
 
     /// The consumers this fallible mirror exists for — cache
     /// validators, IR ingest, the language server — put the refusal on
     /// a `?` or into a `Box<dyn Error>`, and compare or stash it
     /// alongside the phase it names.
+    ///
+    /// Walked over every refusal so [`PlacementPhaseTransitionError::current`]
+    /// is exercised on all three variants: it reads them through one
+    /// merged arm, which a fourth variant added without a matching arm
+    /// would silently leave out.
     #[test]
     fn transition_error_is_a_comparable_std_error() {
         fn assert_std_error<E: std::error::Error + Clone + Eq>(_: &E) {}
 
-        let error = transition_error(routed(), |phase| phase.try_route(5));
-        assert_std_error(&error);
-        assert_eq!(error.clone(), error);
-        assert_eq!(error.current(), &routed());
-        assert!(std::error::Error::source(&error).is_none());
+        for (transition, phase) in refusals() {
+            let error = transition.refusal(&phase);
+            assert_std_error(&error);
+            assert_eq!(error.clone(), error);
+            assert_eq!(error.current(), &phase);
+            assert!(std::error::Error::source(&error).is_none());
+        }
     }
 
     /// The context-free transition forms must not grow a dangling
@@ -1800,9 +1902,12 @@ mod tests {
             panic_message(|| routed().route_at(5, probe_identity(&scope))),
             panic_message(|| PlacementPhase::Unrouted.delay_at(2, probe_identity(&scope))),
             panic_message(|| PlacementPhase::Unrouted.legalize_at(vec![], probe_identity(&scope))),
-            transition_error(routed(), |phase| phase.try_route(5)).to_string(),
-            transition_error(PlacementPhase::Unrouted, |phase| phase.try_delay(2)).to_string(),
-            transition_error(PlacementPhase::Unrouted, |phase| phase.try_legalize(vec![]))
+            Transition::Route.refusal(&routed()).to_string(),
+            Transition::Delay
+                .refusal(&PlacementPhase::Unrouted)
+                .to_string(),
+            Transition::Legalize
+                .refusal(&PlacementPhase::Unrouted)
                 .to_string(),
         ];
         for message in &messages {
