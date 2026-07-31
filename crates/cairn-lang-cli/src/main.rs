@@ -895,7 +895,7 @@ fn dispatch_synth_stage(
     // usage mistake, and a usage mistake is worth reporting before any
     // synthesis work is paid for, not after.
     let edition = if stage_requires_edition(stage) {
-        Some(require_edition(edition, stage_flag(stage))?.as_edition())
+        Some(require_edition(edition, stage_cli_name(stage))?.as_edition())
     } else {
         None
     };
@@ -985,22 +985,30 @@ fn dispatch_synth_stage(
 }
 
 /// Hand-maintained mirror of clap's kebab-case derivation of
-/// `SynthStage` variant names, used by `require_edition` when it
-/// composes the `--stage <name>` fragment of its stderr message. The
+/// `SynthStage` variant names: the single place the messages this
+/// binary composes at runtime read a stage's spelling from, so what
+/// a caller is told to type matches what the parser accepts. The
 /// canonical spelling is whatever clap accepts on the command line
 /// (derived from `#[derive(ValueEnum)]` on `SynthStage`); this
 /// function must be kept in sync on every variant addition or
 /// rename. Its exhaustive `match` provides a compile-time nudge to
 /// do so.
 ///
+/// What it does not reach is the `--stage` / `--edition` `--help`
+/// prose, which clap takes as string literals and which therefore
+/// spells every stage by hand — the same carve-out
+/// `stage_requires_edition` names for the partition it owns. A
+/// variant added here still has to be worked into that prose
+/// separately.
+///
 /// The four Placement IR stages take their spelling from
 /// [`PlacementStage::as_str`] rather than repeating the literal, so
-/// the word this function prints and the word the dump's `"stage"`
+/// the word this function returns and the word the dump's `"stage"`
 /// key carries cannot drift apart. What no type can enforce is the
 /// third spelling in the chain — the one clap derives from the
 /// variant identifier — so `placement_stage_names_match_clap` below
 /// pins that against `ValueEnum` directly.
-fn stage_flag(stage: SynthStage) -> &'static str {
+fn stage_cli_name(stage: SynthStage) -> &'static str {
     match stage {
         SynthStage::Logic => "logic",
         SynthStage::Netlist => "netlist",
@@ -1075,7 +1083,7 @@ fn join_stages(
         .iter()
         .copied()
         .filter(|stage| select(*stage))
-        .map(|stage| render(stage_flag(stage)))
+        .map(|stage| render(stage_cli_name(stage)))
         .collect();
     match items.split_last() {
         None => String::new(),
@@ -1672,7 +1680,7 @@ mod tests {
 
     /// The four Placement IR stages spell their `--stage` value, the
     /// `--stage <name>` fragment `require_edition` prints, and the
-    /// `"stage"` key of the JSON dump the same way. `stage_flag`
+    /// `"stage"` key of the JSON dump the same way. `stage_cli_name`
     /// already derives the second from the third, but the first is
     /// clap's own kebab-casing of the variant identifier, which no
     /// type ties to either — renaming `SynthStage::Route` to
@@ -1691,20 +1699,20 @@ mod tests {
                 .to_possible_value()
                 .expect("no SynthStage variant is skipped");
             assert_eq!(clap_name.get_name(), placement.as_str());
-            assert_eq!(stage_flag(stage), placement.as_str());
+            assert_eq!(stage_cli_name(stage), placement.as_str());
         }
     }
 
     /// The edition-neutral stages have no Placement IR counterpart,
-    /// so their spellings stay literals in `stage_flag` — pinned here
-    /// against clap for the same reason.
+    /// so their spellings stay literals in `stage_cli_name` — pinned
+    /// here against clap for the same reason.
     #[test]
     fn edition_neutral_stage_names_match_clap() {
         for stage in [SynthStage::Logic, SynthStage::Netlist, SynthStage::Edition] {
             let clap_name = stage
                 .to_possible_value()
                 .expect("no SynthStage variant is skipped");
-            assert_eq!(clap_name.get_name(), stage_flag(stage));
+            assert_eq!(clap_name.get_name(), stage_cli_name(stage));
         }
     }
 
