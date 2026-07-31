@@ -24,14 +24,21 @@ const LF_SOURCE: &str = concat!(
     "    door id=entry side=front  # eol note\n",
 );
 
-fn parse_to_sexp(source: &str) -> String {
+/// `label` names which line-ending variant is being parsed, and the source is
+/// printed escaped: a rejection here can come from either side of the
+/// comparison below, and a raw `\r` is invisible in panic output, so neither
+/// the failing variant nor its bytes would otherwise be identifiable.
+fn parse_to_sexp(label: &str, source: &str) -> String {
     let mut parser = Parser::new();
     parser
         .set_language(&cairn_lang_tree_sitter::LANGUAGE.into())
         .expect("load cairn language");
     let tree = parser.parse(source, None).expect("parse produced no tree");
     let root = tree.root_node();
-    assert!(!root.has_error(), "grammar rejected:\n{source}");
+    assert!(
+        !root.has_error(),
+        "grammar rejected the {label} source: {source:?}"
+    );
     root.to_sexp()
 }
 
@@ -42,7 +49,7 @@ fn parse_to_sexp(source: &str) -> String {
 #[test]
 fn crlf_source_parses_identically_to_lf() {
     let crlf = LF_SOURCE.replace('\n', "\r\n");
-    assert_eq!(parse_to_sexp(&crlf), parse_to_sexp(LF_SOURCE));
+    assert_eq!(parse_to_sexp("CRLF", &crlf), parse_to_sexp("LF", LF_SOURCE));
 }
 
 /// The last line of a file need not be terminated; dropping the final line
@@ -53,5 +60,8 @@ fn crlf_source_parses_identically_to_lf() {
 fn crlf_source_without_final_line_break_parses_identically_to_lf() {
     let lf = LF_SOURCE.trim_end_matches('\n');
     let crlf = lf.replace('\n', "\r\n");
-    assert_eq!(parse_to_sexp(&crlf), parse_to_sexp(lf));
+    assert_eq!(
+        parse_to_sexp("unterminated CRLF", &crlf),
+        parse_to_sexp("unterminated LF", lf)
+    );
 }

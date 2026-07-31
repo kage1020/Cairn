@@ -22,7 +22,7 @@ struct s size=3x3  # header note
         (command_arg_list (command_arg (attribute (identifier) (identifier))))))))
 
 ==================
-Trailing comment inside a nested scope
+Trailing comments and a comment-only line inside a nested scope
 ==================
 
 struct keep size=5x5

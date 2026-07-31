@@ -154,3 +154,26 @@ struct s size=3x3
         (binary_expression
           (boolean)
           (unary_expression (boolean)))))))
+
+==================
+logic with and binding tighter than or
+==================
+
+struct s size=3x3
+  logic sig.out = sig.a or sig.b and sig.c
+
+---
+
+(source_file
+  (struct_decl
+    (identifier)
+    (attribute_list
+      (attribute (identifier) (size_literal (integer) (integer))))
+    (struct_body
+      (logic_decl
+        (signal_ref (identifier) (identifier))
+        (binary_expression
+          (signal_ref (identifier) (identifier))
+          (binary_expression
+            (signal_ref (identifier) (identifier))
+            (signal_ref (identifier) (identifier))))))))
