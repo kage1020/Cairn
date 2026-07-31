@@ -12,6 +12,31 @@
 
 ## [Unreleased]
 
+### 追加
+
+- `PlacementPhase` の 3 つの遷移に、失敗を値で返すミラーを追加した:
+  `try_route` / `try_delay` / `try_legalize` で、いずれも
+  `Result<(), PlacementPhaseTransitionError>` を返す。順序違反で
+  panic するのはパイプラインの各パスにとっては正しい形である —
+  フレッシュなコンパイルにおける順序違反は必ず呼び出し側のバグで、
+  復帰経路が存在しない。しかし復帰経路を持つ消費者にとってはそうでは
+  なくなる: 古いキャッシュ項目を「作り直す」判断に変換する検証器、
+  不正な dump を診断で拒否すべき IR 取り込み、呼び出し 1 回のミスで
+  長命プロセスを落とせない language server である。パイプラインは
+  引き続き panic 版を呼ぶが、その panic 版は `try_*` ミラー +
+  panic という形になったので、どの遷移が合法かは 1 か所でしか
+  述べられず、2 つの形が食い違うことはない。エラーは variant 名だけ
+  でなく違反時の phase 全体を運ぶので、消費者はその cell が実際に
+  どこまで進んでいたかを見られる。同時にそれが、エラーの `Display`
+  が panic 文言をバイト単位で再現できる理由でもある — ハードコード
+  した写しではなく実際の panic payload と突き合わせるテストで固定
+  してある。`PlacementPhaseTransitionError::with_context` は
+  呼び出し側の cell 識別子を `route_at` などと同じ位置に差し込むので、
+  同じ cell についての取り込み診断とパイプライン panic が同じ読み口に
+  なる。拒否された遷移は phase を一切変更しない — panic する呼び出し側
+  と違い、復帰する呼び出し側はその後もその phase を使うからである。
+  `PlacementPhase` と新しいエラー型は crate ルートから re-export した。
+
 ### 変更
 
 - `PlacementPhase` の 3 つの遷移が同じ cardinality を名乗るように
@@ -27,7 +52,7 @@
   `delay` の doc コメントは元々 "exactly once" と書いていたので、
   panic 文面が自分の記述する契約と一致したことにもなる。
   cardinality 節は 3 か所の呼び出し側から `TRANSITION_CARDINALITY`
-  という単一の const に移し、`transition_panic` が違反した pass 名と
+  という単一の const に移し、すべての遷移メッセージが違反した pass 名と
   その pass が消費する phase の間に差し込む — この 3 つの隣に追加
   される遷移は 2 つの名詞を選べるが guard の強さは選べない。
   文言が drift したのはまさにそれが可能だったからである。

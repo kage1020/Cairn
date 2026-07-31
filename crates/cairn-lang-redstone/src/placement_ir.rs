@@ -355,7 +355,11 @@ impl Serialize for PlacementStage {
 /// unrepresentable — each transition is expressed by the mutation
 /// methods [`Self::route`], [`Self::delay`], and [`Self::legalize`],
 /// which pattern-match the current variant and panic on any out-of-order
-/// call. `buffer_coords` on [`Self::Legalized`] is allowed to be empty:
+/// call. Each has a fallible mirror ([`Self::try_route`],
+/// [`Self::try_delay`], [`Self::try_legalize`]) that returns
+/// [`PlacementPhaseTransitionError`] instead, for the callers to whom
+/// an out-of-order transition is recoverable input rather than a bug.
+/// `buffer_coords` on [`Self::Legalized`] is allowed to be empty:
 /// the crossing pass materialises one entry per implicit buffer the
 /// delay pass counted, and a scope whose delay pass counted zero
 /// buffers is still legalized (transitions to [`Self::Legalized`] with
@@ -475,7 +479,9 @@ impl PlacementPhase {
     ///
     /// Panics if the phase is not [`Self::Unrouted`]. Routing must run
     /// exactly once per placement, and the producer↔variant table on
-    /// this enum forbids re-routing.
+    /// this enum forbids re-routing. Use [`Self::try_route`] where an
+    /// out-of-order call is a recoverable input condition rather than
+    /// a caller-side bug.
     #[track_caller]
     pub fn route(&mut self, wire_length: u32) {
         self.route_inner(wire_length, None);
@@ -498,19 +504,51 @@ impl PlacementPhase {
         self.route_inner(wire_length, Some(&context));
     }
 
+    /// [`Self::Unrouted`] → [`Self::Routed`], refusing an out-of-order
+    /// call with an [`Err`] instead of a panic.
+    ///
+    /// [`Self::route`] is the form the pipeline passes use: a
+    /// wrong-order transition in a fresh compile is a caller-side bug
+    /// with no recovery path, and panicking is what surfaces it. This
+    /// form is for the consumers that do have one — a cache validator
+    /// that rebuilds from scratch, an IR ingest that refuses a
+    /// malformed dump with a diagnostic, a language server that cannot
+    /// take a process down over one bad call.
+    ///
+    /// A refused call leaves the phase untouched, so a caller that
+    /// recovers can go on using it.
+    ///
     /// All non-`Unrouted` variants are listed explicitly (rather than a
     /// `_ =>` catch-all) so a Stage-5 variant addition becomes a
     /// compile error here — the author must decide whether Stage 5 can
-    /// be re-routed rather than silently panicking.
-    #[track_caller]
-    fn route_inner(&mut self, wire_length: u32, context: Option<&dyn fmt::Display>) {
+    /// be re-routed rather than silently refusing.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`PlacementPhaseTransitionError::RouteOnNonUnrouted`],
+    /// carrying the phase it found, whenever the phase is not
+    /// [`Self::Unrouted`].
+    pub fn try_route(&mut self, wire_length: u32) -> Result<(), PlacementPhaseTransitionError> {
         match self {
             Self::Unrouted => {
                 *self = Self::Routed { wire_length };
+                Ok(())
             }
             Self::Routed { .. } | Self::Delayed { .. } | Self::Legalized { .. } => {
-                transition_panic("route", self, "routing", "placement", context)
+                Err(PlacementPhaseTransitionError::RouteOnNonUnrouted {
+                    current: self.clone(),
+                })
             }
+        }
+    }
+
+    /// The panicking forms are [`Self::try_route`] plus a panic, so the
+    /// guard itself is stated once and the two forms cannot disagree
+    /// about which transitions are legal.
+    #[track_caller]
+    fn route_inner(&mut self, wire_length: u32, context: Option<&dyn fmt::Display>) {
+        if let Err(error) = self.try_route(wire_length) {
+            transition_panic(&error, context);
         }
     }
 
@@ -524,7 +562,8 @@ impl PlacementPhase {
     /// Panics if the phase is not [`Self::Routed`]. Delay insertion
     /// must run exactly once per routed IR, and the producer↔variant
     /// table on this enum forbids re-writing a `delay_ticks` that was
-    /// already committed.
+    /// already committed. See [`Self::try_delay`] for the fallible
+    /// mirror.
     #[track_caller]
     pub fn delay(&mut self, delay_ticks: u32) {
         self.delay_inner(delay_ticks, None);
@@ -542,20 +581,38 @@ impl PlacementPhase {
         self.delay_inner(delay_ticks, Some(&context));
     }
 
-    /// See [`Self::route_inner`] for why the arms are enumerated
-    /// explicitly.
-    #[track_caller]
-    fn delay_inner(&mut self, delay_ticks: u32, context: Option<&dyn fmt::Display>) {
+    /// [`Self::Routed`] → [`Self::Delayed`], refusing an out-of-order
+    /// call with an [`Err`] instead of a panic. See [`Self::try_route`]
+    /// for which callers want this form and why the arms are
+    /// enumerated explicitly.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`PlacementPhaseTransitionError::DelayOnNonRouted`],
+    /// carrying the phase it found, whenever the phase is not
+    /// [`Self::Routed`].
+    pub fn try_delay(&mut self, delay_ticks: u32) -> Result<(), PlacementPhaseTransitionError> {
         let wire_length = match self {
             Self::Routed { wire_length } => *wire_length,
             Self::Unrouted | Self::Delayed { .. } | Self::Legalized { .. } => {
-                transition_panic("delay", self, "delay insertion", "routed IR", context)
+                return Err(PlacementPhaseTransitionError::DelayOnNonRouted {
+                    current: self.clone(),
+                });
             }
         };
         *self = Self::Delayed {
             wire_length,
             delay_ticks,
         };
+        Ok(())
+    }
+
+    /// See [`Self::route_inner`] for why the panicking forms delegate.
+    #[track_caller]
+    fn delay_inner(&mut self, delay_ticks: u32, context: Option<&dyn fmt::Display>) {
+        if let Err(error) = self.try_delay(delay_ticks) {
+            transition_panic(&error, context);
+        }
     }
 
     /// [`Self::Delayed`] → [`Self::Legalized`].
@@ -570,6 +627,7 @@ impl PlacementPhase {
     /// who chained `compile_crossing(&legalized.scoped)` trips here
     /// rather than silently producing a stale-but-plausible IR, and one
     /// who reached for it before delay insertion ran trips here too.
+    /// See [`Self::try_legalize`] for the fallible mirror.
     #[track_caller]
     pub fn legalize(&mut self, buffer_coords: Vec<BufferCoord>) {
         self.legalize_inner(buffer_coords, None);
@@ -587,43 +645,179 @@ impl PlacementPhase {
         self.legalize_inner(buffer_coords, Some(&context));
     }
 
-    /// See [`Self::route_inner`] for why the arms are enumerated
-    /// explicitly.
-    #[track_caller]
-    fn legalize_inner(
+    /// [`Self::Delayed`] → [`Self::Legalized`], refusing an
+    /// out-of-order call with an [`Err`] instead of a panic. See
+    /// [`Self::try_route`] for which callers want this form and why the
+    /// arms are enumerated explicitly.
+    ///
+    /// A refused call hands `buffer_coords` back to the caller by
+    /// dropping it rather than committing it — the phase is left
+    /// exactly as it was found.
+    ///
+    /// # Errors
+    ///
+    /// Returns
+    /// [`PlacementPhaseTransitionError::LegalizeOnNonDelayed`],
+    /// carrying the phase it found, whenever the phase is not
+    /// [`Self::Delayed`].
+    pub fn try_legalize(
         &mut self,
         buffer_coords: Vec<BufferCoord>,
-        context: Option<&dyn fmt::Display>,
-    ) {
+    ) -> Result<(), PlacementPhaseTransitionError> {
         let (wire_length, delay_ticks) = match self {
             Self::Delayed {
                 wire_length,
                 delay_ticks,
             } => (*wire_length, *delay_ticks),
-            Self::Unrouted | Self::Routed { .. } | Self::Legalized { .. } => transition_panic(
-                "legalize",
-                self,
-                "crossing legalization",
-                "delayed IR",
-                context,
-            ),
+            Self::Unrouted | Self::Routed { .. } | Self::Legalized { .. } => {
+                return Err(PlacementPhaseTransitionError::LegalizeOnNonDelayed {
+                    current: self.clone(),
+                });
+            }
         };
         *self = Self::Legalized {
             wire_length,
             delay_ticks,
             buffer_coords,
         };
+        Ok(())
+    }
+
+    /// See [`Self::route_inner`] for why the panicking forms delegate.
+    #[track_caller]
+    fn legalize_inner(
+        &mut self,
+        buffer_coords: Vec<BufferCoord>,
+        context: Option<&dyn fmt::Display>,
+    ) {
+        if let Err(error) = self.try_legalize(buffer_coords) {
+            transition_panic(&error, context);
+        }
     }
 }
 
-/// The cardinality clause every out-of-order [`PlacementPhase`]
-/// transition panic carries, between the pass that tripped the guard
-/// and the phase that pass consumes.
+/// Why a [`PlacementPhase`] transition refused: the transition that
+/// was attempted, plus the phase it found instead of the one it
+/// consumes.
+///
+/// Returned by [`PlacementPhase::try_route`] /
+/// [`PlacementPhase::try_delay`] / [`PlacementPhase::try_legalize`],
+/// and the same value the panicking forms render into their payload —
+/// so a recovered refusal and a release-loud one read alike.
+///
+/// The whole offending phase is carried rather than just its variant
+/// name: a consumer diagnosing a stale cache entry or a malformed IR
+/// dump wants the `wire_length` / `delay_ticks` the phase got as far
+/// as, and it is what lets [`fmt::Display`] reproduce the panic
+/// wording exactly.
+///
+/// `#[non_exhaustive]` for the same reason [`PlacementPhase`] is: a
+/// Stage-5 transition brings a fourth refusal with it, and that must
+/// be an additive change for downstream `match` sites.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum PlacementPhaseTransitionError {
+    /// [`PlacementPhase::try_route`] was called on a phase that had
+    /// already been routed, delayed, or legalized.
+    RouteOnNonUnrouted {
+        /// The phase found instead of [`PlacementPhase::Unrouted`].
+        current: PlacementPhase,
+    },
+    /// [`PlacementPhase::try_delay`] was called on a phase that had not
+    /// been routed yet, or had already been delayed or legalized.
+    DelayOnNonRouted {
+        /// The phase found instead of [`PlacementPhase::Routed`].
+        current: PlacementPhase,
+    },
+    /// [`PlacementPhase::try_legalize`] was called on a phase that had
+    /// not been delayed yet, or had already been legalized.
+    LegalizeOnNonDelayed {
+        /// The phase found instead of [`PlacementPhase::Delayed`].
+        current: PlacementPhase,
+    },
+}
+
+impl PlacementPhaseTransitionError {
+    /// The phase the refused transition found.
+    ///
+    /// Total across every variant, so a consumer can read the offending
+    /// phase without matching — which under `#[non_exhaustive]` would
+    /// otherwise cost it a `_ =>` arm.
+    #[must_use]
+    pub const fn current(&self) -> &PlacementPhase {
+        match self {
+            Self::RouteOnNonUnrouted { current }
+            | Self::DelayOnNonRouted { current }
+            | Self::LegalizeOnNonDelayed { current } => current,
+        }
+    }
+
+    /// Render this refusal with a caller-supplied identity clause
+    /// spliced in, in the same place and format
+    /// [`PlacementPhase::route_at`] and friends put theirs.
+    ///
+    /// A consumer that recovered from the refusal still knows which
+    /// cell it was working on; this is how it says so without
+    /// hand-assembling a message that would drift from the panicking
+    /// forms'. Pipeline passes pass a [`CellIdentity`]; any
+    /// [`fmt::Display`] works.
+    #[must_use]
+    pub fn with_context<'a>(&'a self, context: &'a dyn fmt::Display) -> impl fmt::Display + 'a {
+        TransitionMessage {
+            error: self,
+            context: Some(context),
+        }
+    }
+
+    /// The transition method that refused, as it is spelled in the
+    /// message.
+    const fn method(&self) -> &'static str {
+        match self {
+            Self::RouteOnNonUnrouted { .. } => "route",
+            Self::DelayOnNonRouted { .. } => "delay",
+            Self::LegalizeOnNonDelayed { .. } => "legalize",
+        }
+    }
+
+    /// The pipeline pass that transition belongs to.
+    const fn pass(&self) -> &'static str {
+        match self {
+            Self::RouteOnNonUnrouted { .. } => "routing",
+            Self::DelayOnNonRouted { .. } => "delay insertion",
+            Self::LegalizeOnNonDelayed { .. } => "crossing legalization",
+        }
+    }
+
+    /// What that pass consumes exactly one of.
+    const fn source(&self) -> &'static str {
+        match self {
+            Self::RouteOnNonUnrouted { .. } => "placement",
+            Self::DelayOnNonRouted { .. } => "routed IR",
+            Self::LegalizeOnNonDelayed { .. } => "delayed IR",
+        }
+    }
+}
+
+impl fmt::Display for PlacementPhaseTransitionError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        TransitionMessage {
+            error: self,
+            context: None,
+        }
+        .fmt(f)
+    }
+}
+
+impl std::error::Error for PlacementPhaseTransitionError {}
+
+/// The cardinality clause every refused [`PlacementPhase`] transition
+/// carries, between the pass that tripped the guard and the phase that
+/// pass consumes.
 ///
 /// Spelled once so a transition added beside `route` / `delay` /
 /// `legalize` cannot invent its own strength, which holds only as long
-/// as every transition raises its guard through [`transition_panic`]
-/// rather than writing its own `panic!`.
+/// as every transition reports through [`TransitionMessage`] rather
+/// than writing its own message.
 ///
 /// "Exactly" rather than "at most": each transition accepts one source
 /// variant and refuses every other, so a phase that never reached that
@@ -631,38 +825,56 @@ impl PlacementPhase {
 /// much a bug as a repeated one, and only "exactly once" says so.
 const TRANSITION_CARDINALITY: &str = "must run exactly once per";
 
+/// The one rendering of a [`PlacementPhaseTransitionError`], with the
+/// identity clause optional.
+///
+/// Every message this module produces — the `Display` of the error, the
+/// `with_context` form, and both shapes of transition panic — goes
+/// through here, so the fallible and panicking forms cannot drift
+/// apart. An absent context drops the whole ` for {context}` clause
+/// rather than rendering an empty one, so no stray separator or double
+/// space reaches the message.
+struct TransitionMessage<'a> {
+    error: &'a PlacementPhaseTransitionError,
+    context: Option<&'a dyn fmt::Display>,
+}
+
+impl fmt::Display for TransitionMessage<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "PlacementPhase::{method} called on {current:?}",
+            method = self.error.method(),
+            current = self.error.current(),
+        )?;
+        if let Some(context) = self.context {
+            write!(f, " for {context}")?;
+        }
+        write!(
+            f,
+            " — {pass} {TRANSITION_CARDINALITY} {source}",
+            pass = self.error.pass(),
+            source = self.error.source(),
+        )
+    }
+}
+
 /// Raise the release-loud panic an out-of-order [`PlacementPhase`]
 /// transition owes its caller.
 ///
-/// The invariant clause is assembled here from the offending `pass`
-/// and the `source` phase it consumes, with
-/// [`TRANSITION_CARDINALITY`] between them.
-///
-/// Splicing the identity clause in here rather than in each
-/// transition keeps the context-free forms and the `*_at` forms in
-/// sync — an absent context drops the whole ` for {context}` clause
-/// rather than rendering an empty one, so no stray separator or double
-/// space reaches the message.
+/// The panicking transition forms are their `try_*` mirror plus this
+/// call, so the message is assembled from the same error value a
+/// recovering caller would have received.
 ///
 /// `#[track_caller]` on every layer between the pass and here means
 /// the reported location is still the pipeline pass's `.rs:line`, not
 /// this function's.
 #[track_caller]
 fn transition_panic(
-    method: &str,
-    current: &PlacementPhase,
-    pass: &str,
-    source: &str,
+    error: &PlacementPhaseTransitionError,
     context: Option<&dyn fmt::Display>,
 ) -> ! {
-    match context {
-        Some(context) => panic!(
-            "PlacementPhase::{method} called on {current:?} for {context} — {pass} {TRANSITION_CARDINALITY} {source}"
-        ),
-        None => panic!(
-            "PlacementPhase::{method} called on {current:?} — {pass} {TRANSITION_CARDINALITY} {source}"
-        ),
-    }
+    panic!("{}", TransitionMessage { error, context });
 }
 
 /// Identity breadcrumb a pipeline pass hands to
@@ -1025,11 +1237,12 @@ pub struct ScopedPlacementIrEntry {
 mod tests {
     //! Direct coverage for [`PlacementPhase`] — the four legal
     //! transitions, the nine illegal ones the transition methods must
-    //! reject with a release-loud panic, and the flat accessor
-    //! projections. Each pipeline pass (`routing.rs` / `delay.rs` /
-    //! `crossing.rs`) has its own end-to-end coverage; this module
-    //! pins the state-machine invariants of the enum itself so a
-    //! regression that loosens a transition guard is caught here
+    //! reject (with a release-loud panic, or with a
+    //! [`PlacementPhaseTransitionError`] from the `try_*` mirrors), and
+    //! the flat accessor projections. Each pipeline pass (`routing.rs`
+    //! / `delay.rs` / `crossing.rs`) has its own end-to-end coverage;
+    //! this module pins the state-machine invariants of the enum itself
+    //! so a regression that loosens a transition guard is caught here
     //! rather than at the far end of the pipeline.
     use super::*;
 
@@ -1367,6 +1580,171 @@ mod tests {
         phase.legalize_at(vec![], probe_identity(&scope));
     }
 
+    /// Drive one out-of-order `try_*` transition and hand back the
+    /// error it refused with.
+    ///
+    /// Takes the phase by value so each case starts from a fresh
+    /// subject and the caller can compare the post-call phase against
+    /// its own untouched copy.
+    fn transition_error(
+        mut phase: PlacementPhase,
+        transition: impl FnOnce(&mut PlacementPhase) -> Result<(), PlacementPhaseTransitionError>,
+    ) -> PlacementPhaseTransitionError {
+        transition(&mut phase).expect_err("out-of-order transition must be refused")
+    }
+
+    #[test]
+    fn try_route_from_unrouted_transitions_to_routed() {
+        let mut phase = PlacementPhase::Unrouted;
+        assert_eq!(phase.try_route(7), Ok(()));
+        assert_eq!(phase, PlacementPhase::Routed { wire_length: 7 });
+    }
+
+    #[test]
+    fn try_delay_from_routed_transitions_and_preserves_wire_length() {
+        let mut phase = PlacementPhase::Routed { wire_length: 9 };
+        assert_eq!(phase.try_delay(4), Ok(()));
+        assert_eq!(
+            phase,
+            PlacementPhase::Delayed {
+                wire_length: 9,
+                delay_ticks: 4,
+            },
+        );
+    }
+
+    #[test]
+    fn try_legalize_from_delayed_transitions_and_preserves_prior_fields() {
+        let mut phase = PlacementPhase::Delayed {
+            wire_length: 12,
+            delay_ticks: 3,
+        };
+        let coords = vec![BufferCoord::new(PortName::A, CellCoord::new(1, 0, 0))];
+        assert_eq!(phase.try_legalize(coords.clone()), Ok(()));
+        assert_eq!(
+            phase,
+            PlacementPhase::Legalized {
+                wire_length: 12,
+                delay_ticks: 3,
+                buffer_coords: coords,
+            },
+        );
+    }
+
+    /// A refused transition must leave the subject exactly as it found
+    /// it. The panicking forms never had to promise this — the process
+    /// is going down — but a caller that recovers from the `Err` goes
+    /// on to use the phase, so a half-applied write here would hand it
+    /// a state the producer↔variant table says cannot exist.
+    #[test]
+    fn try_route_from_every_other_phase_errs_without_mutating() {
+        for phase in [routed(), delayed(), legalized()] {
+            let mut subject = phase.clone();
+            let error = subject
+                .try_route(5)
+                .expect_err("routing a non-Unrouted phase must be refused");
+            assert_eq!(subject, phase, "a refused transition mutated the phase");
+            assert_eq!(
+                error,
+                PlacementPhaseTransitionError::RouteOnNonUnrouted { current: phase },
+            );
+        }
+    }
+
+    #[test]
+    fn try_delay_from_every_other_phase_errs_without_mutating() {
+        for phase in [PlacementPhase::Unrouted, delayed(), legalized()] {
+            let mut subject = phase.clone();
+            let error = subject
+                .try_delay(2)
+                .expect_err("delaying a non-Routed phase must be refused");
+            assert_eq!(subject, phase, "a refused transition mutated the phase");
+            assert_eq!(
+                error,
+                PlacementPhaseTransitionError::DelayOnNonRouted { current: phase },
+            );
+        }
+    }
+
+    #[test]
+    fn try_legalize_from_every_other_phase_errs_without_mutating() {
+        for phase in [PlacementPhase::Unrouted, routed(), legalized()] {
+            let mut subject = phase.clone();
+            let error = subject
+                .try_legalize(vec![])
+                .expect_err("legalizing a non-Delayed phase must be refused");
+            assert_eq!(subject, phase, "a refused transition mutated the phase");
+            assert_eq!(
+                error,
+                PlacementPhaseTransitionError::LegalizeOnNonDelayed { current: phase },
+            );
+        }
+    }
+
+    /// The fallible and panicking forms are two renderings of one
+    /// refusal, so the error's own `Display` must reproduce the
+    /// context-free panic byte for byte. Comparing against the live
+    /// panic payload rather than a hard-coded string means the two can
+    /// only drift by drifting together.
+    #[test]
+    fn try_transition_errors_render_as_the_context_free_panic() {
+        let renderings = [
+            transition_error(routed(), |phase| phase.try_route(5)).to_string(),
+            transition_error(PlacementPhase::Unrouted, |phase| phase.try_delay(2)).to_string(),
+            transition_error(PlacementPhase::Unrouted, |phase| phase.try_legalize(vec![]))
+                .to_string(),
+        ];
+        let panics = [
+            panic_message(|| routed().route(5)),
+            panic_message(|| PlacementPhase::Unrouted.delay(2)),
+            panic_message(|| PlacementPhase::Unrouted.legalize(vec![])),
+        ];
+        assert_eq!(renderings, panics);
+    }
+
+    /// A caller that recovered from the `Err` still has the cell
+    /// identity the pipeline passes hand to the `*_at` forms, so
+    /// splicing it in must land in the same place and read the same
+    /// way — otherwise an ingest diagnostic and a pipeline panic about
+    /// the same cell would not look alike.
+    #[test]
+    fn try_transition_errors_with_context_render_as_the_at_panic() {
+        let scope = probe_scope();
+        let identity = probe_identity(&scope);
+        let renderings = [
+            transition_error(routed(), |phase| phase.try_route(5))
+                .with_context(&identity)
+                .to_string(),
+            transition_error(PlacementPhase::Unrouted, |phase| phase.try_delay(2))
+                .with_context(&identity)
+                .to_string(),
+            transition_error(PlacementPhase::Unrouted, |phase| phase.try_legalize(vec![]))
+                .with_context(&identity)
+                .to_string(),
+        ];
+        let panics = [
+            panic_message(|| routed().route_at(5, probe_identity(&scope))),
+            panic_message(|| PlacementPhase::Unrouted.delay_at(2, probe_identity(&scope))),
+            panic_message(|| PlacementPhase::Unrouted.legalize_at(vec![], probe_identity(&scope))),
+        ];
+        assert_eq!(renderings, panics);
+    }
+
+    /// The consumers this fallible mirror exists for — cache
+    /// validators, IR ingest, the language server — put the refusal on
+    /// a `?` or into a `Box<dyn Error>`, and compare or stash it
+    /// alongside the phase it names.
+    #[test]
+    fn transition_error_is_a_comparable_std_error() {
+        fn assert_std_error<E: std::error::Error + Clone + Eq>(_: &E) {}
+
+        let error = transition_error(routed(), |phase| phase.try_route(5));
+        assert_std_error(&error);
+        assert_eq!(error.clone(), error);
+        assert_eq!(error.current(), &routed());
+        assert!(std::error::Error::source(&error).is_none());
+    }
+
     /// The context-free transition forms must not grow a dangling
     /// separator now that the `*_at` variants splice one in. Pinned by
     /// reading the panic payload directly rather than through
@@ -1402,31 +1780,35 @@ mod tests {
         );
     }
 
-    /// Pin that all six entry points quote one shared clause, so a
+    /// Pin that all nine entry points quote one shared clause, so a
     /// transition added beside these three cannot spell its own.
     ///
     /// Asserting on the const puts it on both sides, so this test
     /// cannot tell what the clause *says*; the exact-match array in
     /// [`context_free_transitions_panic_without_an_identity_clause`]
     /// is what pins the wording itself. The entry points are listed
-    /// by hand, so a transition that bypassed [`transition_panic`]
+    /// by hand, so a transition that bypassed [`TransitionMessage`]
     /// would escape both — the const is the structural guard, and
     /// these two tests only keep its reach honest.
     #[test]
-    fn every_transition_panic_shares_one_cardinality_clause() {
+    fn every_transition_message_shares_one_cardinality_clause() {
         let scope = probe_scope();
-        let payloads = [
+        let messages = [
             panic_message(|| routed().route(5)),
             panic_message(|| PlacementPhase::Unrouted.delay(2)),
             panic_message(|| PlacementPhase::Unrouted.legalize(vec![])),
             panic_message(|| routed().route_at(5, probe_identity(&scope))),
             panic_message(|| PlacementPhase::Unrouted.delay_at(2, probe_identity(&scope))),
             panic_message(|| PlacementPhase::Unrouted.legalize_at(vec![], probe_identity(&scope))),
+            transition_error(routed(), |phase| phase.try_route(5)).to_string(),
+            transition_error(PlacementPhase::Unrouted, |phase| phase.try_delay(2)).to_string(),
+            transition_error(PlacementPhase::Unrouted, |phase| phase.try_legalize(vec![]))
+                .to_string(),
         ];
-        for payload in &payloads {
+        for message in &messages {
             assert!(
-                payload.contains(TRANSITION_CARDINALITY),
-                "transition panic does not quote `{TRANSITION_CARDINALITY}`: {payload}",
+                message.contains(TRANSITION_CARDINALITY),
+                "transition message does not quote `{TRANSITION_CARDINALITY}`: {message}",
             );
         }
     }
