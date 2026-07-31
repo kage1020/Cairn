@@ -969,6 +969,63 @@ fn cli_synth_stage_crossing_inherits_upstream_attenuation_failure() {
     );
 }
 
+#[test]
+fn cli_synth_stage_crossing_congestion_exits_one() {
+    // The crossing pass's own Error diagnostics have to reach the
+    // caller the way every earlier stage's do: exit 1 with the code on
+    // stderr and nothing on stdout. The upstream-inheritance test
+    // above cannot stand in for this one — it short-circuits a stage
+    // earlier — so without this case a dropped diagnostic report
+    // between the crossing pass and the JSON dump would let a refused
+    // scope be printed as a legalized IR.
+    //
+    // `crossbar.crn` is the fixture whose two Steiner trees overlap on
+    // the plane: at its shipping `void=2` the crossings fold onto the
+    // bridge layer, and at `void=1` there is no layer to escape to.
+    // Patching the reservation instead of restating the geometry keeps
+    // the overlap defined in exactly one place.
+    let source = std::fs::read_to_string(examples_dir().join("crossbar.crn"))
+        .expect("read crossbar fixture");
+    let patched = source.replace("void=2", "void=1");
+    assert_ne!(
+        source, patched,
+        "crossbar.crn no longer contains the `void=2` needle — the fixture \
+         drifted and the crossing refusal is not being exercised",
+    );
+    let dir = tempfile::tempdir().expect("temp dir");
+    let path = dir.path().join("crossbar.crn");
+    std::fs::write(&path, &patched).expect("write crossing congestion fixture");
+    let out = run_synth(&[
+        "--experimental-logic-synth",
+        "--stage",
+        "crossing",
+        "--edition",
+        "java",
+        path.to_str().unwrap(),
+    ]);
+    assert_eq!(out.status.code(), Some(1));
+    let stderr = String::from_utf8(out.stderr).expect("utf-8");
+    assert!(
+        stderr.contains("E_CROSSING_CONGESTION"),
+        "expected E_CROSSING_CONGESTION on stderr, got: {stderr}",
+    );
+    assert!(
+        stderr.contains("routed netlist for struct `crossbar`")
+            && stderr.contains("plane crossing"),
+        "primary should name the crossing-side origin and failed scope, got: {stderr}",
+    );
+    assert!(
+        !stderr.contains("E_ROUTE_CONGESTION") && !stderr.contains("E_ATTENUATION_LIMIT"),
+        "the refusal must come from the crossing pass itself, not from an \
+         upstream stage the fixture happened to trip as well, got: {stderr}",
+    );
+    assert!(
+        out.stdout.is_empty(),
+        "a refused scope must not reach stdout as a legalized IR dump, got: {}",
+        String::from_utf8_lossy(&out.stdout),
+    );
+}
+
 /// Every value `--stage` accepts, read back off the binary.
 ///
 /// The unit tests inside the binary walk `SynthStage` through clap's
