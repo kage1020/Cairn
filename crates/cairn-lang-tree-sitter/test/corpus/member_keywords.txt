@@ -1,0 +1,66 @@
+==================
+Every member keyword
+==================
+
+struct s size=9x7
+  floor mat_slot=floor
+  walls mat_slot=wall height=3
+  door side=front at=center
+  window side=front offset=2 y=2
+  roof kind=gable overhang=1
+  stair id=up from=0 to=1
+  pressure_plate id=plate at=front.outside
+  circuit id=main region=floor
+  place kind=lamp at=center
+  connect west.east_corner to east.west_corner
+
+---
+
+(source_file
+  (struct_decl
+    (identifier)
+    (attribute_list
+      (attribute (identifier) (size_literal (integer) (integer))))
+    (struct_body
+      (member_stmt (member_keyword)
+        (command_arg_list
+          (command_arg (attribute (identifier) (identifier)))))
+      (member_stmt (member_keyword)
+        (command_arg_list
+          (command_arg (attribute (identifier) (identifier)))
+          (command_arg (attribute (identifier) (integer)))))
+      (member_stmt (member_keyword)
+        (command_arg_list
+          (command_arg (attribute (identifier) (identifier)))
+          (command_arg (attribute (identifier) (identifier)))))
+      (member_stmt (member_keyword)
+        (command_arg_list
+          (command_arg (attribute (identifier) (identifier)))
+          (command_arg (attribute (identifier) (integer)))
+          (command_arg (attribute (identifier) (integer)))))
+      (member_stmt (member_keyword)
+        (command_arg_list
+          (command_arg (attribute (identifier) (identifier)))
+          (command_arg (attribute (identifier) (integer)))))
+      (member_stmt (member_keyword)
+        (command_arg_list
+          (command_arg (attribute (identifier) (identifier)))
+          (command_arg (attribute (identifier) (integer)))
+          (command_arg (attribute (identifier) (integer)))))
+      (member_stmt (member_keyword)
+        (command_arg_list
+          (command_arg (attribute (identifier) (identifier)))
+          (command_arg (attribute (identifier) (signal_ref (identifier) (identifier))))))
+      (member_stmt (member_keyword)
+        (command_arg_list
+          (command_arg (attribute (identifier) (identifier)))
+          (command_arg (attribute (identifier) (identifier)))))
+      (member_stmt (member_keyword)
+        (command_arg_list
+          (command_arg (attribute (identifier) (identifier)))
+          (command_arg (attribute (identifier) (identifier)))))
+      (member_stmt (member_keyword)
+        (command_arg_list
+          (command_arg (signal_ref (identifier) (identifier)))
+          (command_arg (identifier))
+          (command_arg (signal_ref (identifier) (identifier))))))))

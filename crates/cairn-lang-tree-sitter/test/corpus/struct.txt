@@ -139,3 +139,78 @@ site plaza
     (struct_body
       (member_stmt (member_keyword)
         (command_arg_list (command_arg (attribute (identifier) (identifier))))))))
+
+==================
+Member with selector, args, and arrow output
+==================
+
+struct gatehouse size=7x5
+  door id=front side=front at=center
+  door[id=front] opened_by=sig.open -> sig.latch
+
+---
+
+(source_file
+  (struct_decl
+    name: (identifier)
+    args: (attribute_list
+      (attribute key: (identifier) value: (size_literal (integer) (integer))))
+    body: (struct_body
+      (member_stmt
+        keyword: (member_keyword)
+        args: (command_arg_list
+          (command_arg (attribute key: (identifier) value: (identifier)))
+          (command_arg (attribute key: (identifier) value: (identifier)))
+          (command_arg (attribute key: (identifier) value: (identifier)))))
+      (member_stmt
+        keyword: (member_keyword)
+        selector: (attribute_list
+          (attribute key: (identifier) value: (identifier)))
+        args: (command_arg_list
+          (command_arg (attribute key: (identifier) value: (signal_ref (identifier) (identifier)))))
+        output: (signal_ref (identifier) (identifier))))))
+
+==================
+def and site with trailing colon
+==================
+
+def shed size=1x1:
+  floor mat_slot=x
+
+site plaza:
+  place kind=fountain
+
+---
+
+(source_file
+  (def_decl
+    (identifier)
+    (attribute_list
+      (attribute (identifier) (size_literal (integer) (integer))))
+    (struct_body
+      (member_stmt (member_keyword)
+        (command_arg_list (command_arg (attribute (identifier) (identifier)))))))
+  (site_decl
+    (identifier)
+    (struct_body
+      (member_stmt (member_keyword)
+        (command_arg_list (command_arg (attribute (identifier) (identifier))))))))
+
+==================
+site header args are rejected
+==================
+
+site plaza kind=town
+  place kind=fountain
+
+---
+
+(source_file
+  (site_decl
+    (identifier)
+    (ERROR
+      (identifier)
+      (identifier))
+    (struct_body
+      (member_stmt (member_keyword)
+        (command_arg_list (command_arg (attribute (identifier) (identifier))))))))

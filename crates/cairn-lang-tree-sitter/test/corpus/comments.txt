@@ -1,0 +1,53 @@
+==================
+Trailing comment on a header and a command line
+==================
+
+struct s size=3x3  # header note
+  floor mat_slot=floor  # eol note
+  walls mat_slot=wall
+
+---
+
+(source_file
+  (struct_decl
+    (identifier)
+    (attribute_list
+      (attribute (identifier) (size_literal (integer) (integer))))
+    (comment)
+    (struct_body
+      (member_stmt (member_keyword)
+        (command_arg_list (command_arg (attribute (identifier) (identifier)))))
+      (comment)
+      (member_stmt (member_keyword)
+        (command_arg_list (command_arg (attribute (identifier) (identifier))))))))
+
+==================
+Trailing comment inside a nested scope
+==================
+
+struct keep size=5x5
+  level id=l0 y=0  # scope note
+    # indented comment-only line
+    floor mat_slot=floor  # inner note
+  walls mat_slot=wall
+
+---
+
+(source_file
+  (struct_decl
+    (identifier)
+    (attribute_list
+      (attribute (identifier) (size_literal (integer) (integer))))
+    (struct_body
+      (nested_scope
+        (identifier)
+        (attribute_list
+          (attribute (identifier) (identifier))
+          (attribute (identifier) (integer)))
+        (comment)
+        (struct_body
+          (member_stmt (member_keyword)
+            (command_arg_list (command_arg (attribute (identifier) (identifier)))))
+          (comment)))
+      (member_stmt (member_keyword)
+        (command_arg_list (command_arg (attribute (identifier) (identifier))))))))

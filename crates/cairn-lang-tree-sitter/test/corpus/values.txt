@@ -1,0 +1,68 @@
+==================
+Boolean and string command args
+==================
+
+struct s size=3x3
+  window sym=true label="north bay"
+  window sym=false
+
+---
+
+(source_file
+  (struct_decl
+    (identifier)
+    (attribute_list
+      (attribute (identifier) (size_literal (integer) (integer))))
+    (struct_body
+      (member_stmt (member_keyword)
+        (command_arg_list
+          (command_arg (attribute (identifier) (boolean)))
+          (command_arg (attribute (identifier) (string)))))
+      (member_stmt (member_keyword)
+        (command_arg_list
+          (command_arg (attribute (identifier) (boolean))))))))
+
+==================
+List value with nested and empty lists
+==================
+
+struct s size=3x3
+  place tags=[a, 2, [b, @stone], []]
+
+---
+
+(source_file
+  (struct_decl
+    (identifier)
+    (attribute_list
+      (attribute (identifier) (size_literal (integer) (integer))))
+    (struct_body
+      (member_stmt (member_keyword)
+        (command_arg_list
+          (command_arg
+            (attribute (identifier)
+              (value_list
+                (identifier)
+                (integer)
+                (value_list (identifier) (material_ref (identifier)))
+                (value_list)))))))))
+
+==================
+Size literal as a positional command arg
+==================
+
+struct s size=3x3
+  place 3x3 kind=pad
+
+---
+
+(source_file
+  (struct_decl
+    (identifier)
+    (attribute_list
+      (attribute (identifier) (size_literal (integer) (integer))))
+    (struct_body
+      (member_stmt (member_keyword)
+        (command_arg_list
+          (command_arg (size_literal (integer) (integer)))
+          (command_arg (attribute (identifier) (identifier))))))))
