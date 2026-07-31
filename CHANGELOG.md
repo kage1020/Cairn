@@ -10,6 +10,33 @@ and is a separate axis from the Minecraft target version.
 
 ## [Unreleased]
 
+### Added
+
+- `PlacementPhase` gains fallible mirrors of its three transitions:
+  `try_route` / `try_delay` / `try_legalize`, each returning
+  `Result<(), PlacementPhaseTransitionError>`. Panicking on an
+  out-of-order transition is the right shape for the pipeline passes,
+  where a wrong-order call in a fresh compile is always a caller-side
+  bug with no recovery path — but it stops being right for the
+  consumers that do have one: a cache validator that turns a stale
+  entry into a rebuild-from-scratch decision, an IR ingest that must
+  refuse a malformed dump with a diagnostic, a language server that
+  cannot take a long-lived process down over one bad call. The
+  pipeline keeps calling the panicking forms, which are now their
+  `try_*` mirror plus a panic, so which transitions are legal is
+  stated once and the two forms cannot disagree. The error carries the
+  whole offending phase rather than just its variant name, so a
+  consumer can see how far the cell actually got, and so the error's
+  `Display` reproduces the panic wording byte for byte — pinned by a
+  test that compares the two live rather than against a hard-coded
+  copy. `PlacementPhaseTransitionError::with_context` splices a
+  caller-supplied cell identity into the same position `route_at` and
+  friends put theirs, so an ingest diagnostic and a pipeline panic
+  about the same cell read alike. A refused transition leaves the
+  phase exactly as it found it, since unlike a panicking caller a
+  recovering one goes on to use it. `PlacementPhase` and the new error
+  type are re-exported from the crate root.
+
 ### Changed
 
 - The three `PlacementPhase` transitions now state one cardinality.
@@ -24,10 +51,10 @@ and is a separate axis from the Minecraft target version.
   on `route` and `delay` already read "exactly once", so the panics now
   agree with the contract they document. The cardinality clause moves
   out of the three call sites into a single `TRANSITION_CARDINALITY`
-  const that `transition_panic` splices between the offending pass and
-  the phase it consumes — a transition added beside these three picks
-  the two nouns but not how strong the guard claims to be, which is
-  what let the wording drift in the first place.
+  const that every transition message splices between the offending
+  pass and the phase it consumes — a transition added beside these
+  three picks the two nouns but not how strong the guard claims to be,
+  which is what let the wording drift in the first place.
 
 - Every `PlacedCellNode` in the JSON dump gains a leading `"stage"`
   key naming the place-and-route pass that last wrote to it —

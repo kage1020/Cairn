@@ -76,8 +76,9 @@ pub use netlist_ir::{
 };
 pub use placement::{CELL_FOOTPRINT, PlacementOutput, compile_placement};
 pub use placement_ir::{
-    BufferCoord, CellCoord, CircuitRegionReservation, PlacedCellNode, PlacementIr, PlacementStage,
-    RouteLayer, ScopedPlacementIr, ScopedPlacementIrEntry,
+    BufferCoord, CellCoord, CircuitRegionReservation, PlacedCellNode, PlacementIr, PlacementPhase,
+    PlacementPhaseTransitionError, PlacementStage, RouteLayer, ScopedPlacementIr,
+    ScopedPlacementIrEntry,
 };
 pub use routing::{RoutingOutput, compile_routing};
 pub use synth::{SynthOutput, synthesize};
