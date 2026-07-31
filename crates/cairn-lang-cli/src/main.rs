@@ -792,7 +792,9 @@ fn run_synth(
     // stage-vs-edition axis ambiguous.
     if !stage_requires_edition(stage) && edition.is_some() {
         eprintln!(
-            "error: `--edition` is only meaningful with `--stage edition`, `--stage placement`, `--stage route`, `--stage delay`, or `--stage crossing`; the `logic` and `netlist` stages are edition-neutral",
+            "error: `--edition` is only meaningful with {}; the {} stages are edition-neutral",
+            edition_required_stage_list(),
+            edition_neutral_stage_list(),
         );
         return ExitCode::from(2);
     }
@@ -891,12 +893,7 @@ fn dispatch_synth_stage(
 
     // Resolved ahead of `compile_netlist`: a missing `--edition` is a
     // usage mistake, and a usage mistake is worth reporting before any
-    // synthesis work is paid for, not after. It also keeps the gate
-    // ahead of whatever the passes below may one day print — a
-    // diagnostic emitted by the netlist pass would otherwise reach the
-    // caller first and bury the flag they actually have to fix. Logic
-    // returned above, so `None` here means the Netlist stage, the one
-    // remaining stage that is edition-neutral by contract.
+    // synthesis work is paid for, not after.
     let edition = if stage_requires_edition(stage) {
         Some(require_edition(edition, stage_flag(stage))?.as_edition())
     } else {
@@ -904,8 +901,27 @@ fn dispatch_synth_stage(
     };
 
     let netlist = compile_netlist(&synth.scoped);
-    let Some(edition) = edition else {
-        return Ok((serde_json::to_string_pretty(&netlist), "Netlist IR"));
+    // The edition-neutral tail dispatches on the stage, not on "no
+    // edition was resolved". The two say the same thing today, but only
+    // the former makes a stage added later state its own answer here:
+    // the negative form would hand it the Netlist payload, under the
+    // Netlist label, with exit 0.
+    let edition = match (edition, stage) {
+        (Some(edition), _) => edition,
+        (None, SynthStage::Netlist) => {
+            return Ok((serde_json::to_string_pretty(&netlist), "Netlist IR"));
+        }
+        (None, SynthStage::Logic) => unreachable!("the Logic guard above returns"),
+        (
+            None,
+            SynthStage::Edition
+            | SynthStage::Placement
+            | SynthStage::Route
+            | SynthStage::Delay
+            | SynthStage::Crossing,
+        ) => unreachable!(
+            "stage_requires_edition holds here, so the gate above resolved an edition or returned"
+        ),
     };
     let edition_netlist = compile_edition_netlist(&netlist, edition);
     if matches!(stage, SynthStage::Edition) {
@@ -1007,6 +1023,13 @@ fn stage_flag(stage: SynthStage) -> &'static str {
 /// `match` makes a new `SynthStage` variant a compile error here,
 /// where the decision belongs, rather than a silent default to
 /// edition-neutral.
+///
+/// The stray-`--edition` message renders its two stage lists from this
+/// function too, so what a caller is told matches what the gates
+/// enforce. What stays hand-written is the same partition as it
+/// appears in prose in the `--stage` / `--edition` `--help` text,
+/// which clap takes as string literals: a stage added on the `true`
+/// side has to be worked into both sentences by hand.
 fn stage_requires_edition(stage: SynthStage) -> bool {
     match stage {
         SynthStage::Logic | SynthStage::Netlist => false,
@@ -1015,6 +1038,50 @@ fn stage_requires_edition(stage: SynthStage) -> bool {
         | SynthStage::Route
         | SynthStage::Delay
         | SynthStage::Crossing => true,
+    }
+}
+
+/// `` `--stage a`, `--stage b`, or `--stage c` `` over the stages that
+/// require `--edition`, for the stray-flag message.
+fn edition_required_stage_list() -> String {
+    join_stages(stage_requires_edition, "or", |name| {
+        format!("`--stage {name}`")
+    })
+}
+
+/// `` `a` and `b` `` over the stages that refuse `--edition`, for the
+/// same message. Renders bare stage names because that half of the
+/// sentence talks about the stages themselves rather than about the
+/// flag a caller would have typed.
+fn edition_neutral_stage_list() -> String {
+    join_stages(
+        |stage| !stage_requires_edition(stage),
+        "and",
+        |name| format!("`{name}`"),
+    )
+}
+
+/// Render the `--stage` values matching `select` as an English list,
+/// in the order clap declares them, with each name passed through
+/// `render` first. Walking `ValueEnum` rather than a literal list is
+/// what lets the stray-`--edition` message pick up a stage the day it
+/// lands instead of naming a set that has since moved on.
+fn join_stages(
+    select: impl Fn(SynthStage) -> bool,
+    conjunction: &str,
+    render: impl Fn(&str) -> String,
+) -> String {
+    let items: Vec<String> = SynthStage::value_variants()
+        .iter()
+        .copied()
+        .filter(|stage| select(*stage))
+        .map(|stage| render(stage_flag(stage)))
+        .collect();
+    match items.split_last() {
+        None => String::new(),
+        Some((last, [])) => last.clone(),
+        Some((last, [only])) => format!("{only} {conjunction} {last}"),
+        Some((last, rest)) => format!("{}, {conjunction} {last}", rest.join(", ")),
     }
 }
 
@@ -1667,5 +1734,20 @@ mod tests {
                 name.get_name(),
             );
         }
+    }
+
+    /// The stray-`--edition` message reads its two stage lists off
+    /// `stage_requires_edition`, which keeps them honest but puts the
+    /// English between them — the commas, the conjunction, the
+    /// backticks — under no other check. Pinned here so the derivation
+    /// cannot start producing a list that is correct and unreadable.
+    #[test]
+    fn stray_edition_message_lists_read_as_english() {
+        assert_eq!(
+            edition_required_stage_list(),
+            "`--stage edition`, `--stage placement`, `--stage route`, \
+             `--stage delay`, or `--stage crossing`",
+        );
+        assert_eq!(edition_neutral_stage_list(), "`logic` and `netlist`");
     }
 }

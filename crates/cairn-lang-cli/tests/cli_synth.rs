@@ -969,6 +969,31 @@ fn cli_synth_stage_crossing_inherits_upstream_attenuation_failure() {
     );
 }
 
+/// Every value `--stage` accepts, read back off the binary.
+///
+/// The unit tests inside the binary walk `SynthStage` through clap's
+/// `ValueEnum`; an integration test cannot see that enum, and a
+/// literal list here would quietly stop covering a stage the day one
+/// lands. Refusing a bogus value gets the same list from the outside,
+/// on one line — steadier to parse than the `--help` block, where each
+/// value carries a paragraph of prose.
+fn stage_values() -> Vec<String> {
+    let out = run_synth(&["--stage", "not-a-stage", "unused.crn"]);
+    assert_eq!(
+        out.status.code(),
+        Some(2),
+        "an unknown --stage value should be a usage error",
+    );
+    let stderr = String::from_utf8(out.stderr).expect("utf-8");
+    let Some((_, rest)) = stderr.split_once("[possible values: ") else {
+        panic!("clap should list --stage's values, got: {stderr}");
+    };
+    let Some((list, _)) = rest.split_once(']') else {
+        panic!("clap's value list should be closed, got: {stderr}");
+    };
+    list.split(", ").map(str::to_string).collect()
+}
+
 #[test]
 fn cli_synth_missing_edition_reports_only_the_usage_error() {
     // The per-stage tests above each pin their own exit code and hint
@@ -981,30 +1006,50 @@ fn cli_synth_missing_edition_reports_only_the_usage_error() {
     // pass upstream of the edition-tagged stages starts emitting a
     // diagnostic, this is what catches the usage error being buried
     // under it.
+    //
+    // Driven off every `--stage` value rather than the edition-tagged
+    // ones: which side a stage falls on is the binary's own business
+    // (and is pinned there), and running the neutral ones through the
+    // same loop says the gate stays out of their way.
     let path = examples_dir().join("redstone-door.crn");
-    for stage in ["edition", "placement", "route", "delay", "crossing"] {
+    let mut gated = 0;
+    for stage in stage_values() {
         let out = run_synth(&[
             "--experimental-logic-synth",
             "--stage",
-            stage,
+            &stage,
             path.to_str().unwrap(),
         ]);
-        assert_eq!(out.status.code(), Some(2), "--stage {stage} exit code");
-        assert!(
-            out.stdout.is_empty(),
-            "--stage {stage} must print no IR before the usage gate, got: {}",
-            String::from_utf8_lossy(&out.stdout),
-        );
         let stderr = String::from_utf8(out.stderr).expect("utf-8");
-        let lines: Vec<&str> = stderr.lines().filter(|l| !l.trim().is_empty()).collect();
-        assert_eq!(
-            lines.len(),
-            1,
-            "--stage {stage} stderr should be the usage error alone, got: {stderr}",
-        );
-        assert!(
-            lines[0].contains(&format!("--stage {stage}")) && lines[0].contains("--edition"),
-            "--stage {stage} stderr line should be the missing-edition hint, got: {stderr}",
-        );
+        match out.status.code() {
+            Some(2) => {
+                gated += 1;
+                assert!(
+                    out.stdout.is_empty(),
+                    "--stage {stage} must print no IR before the usage gate, got: {}",
+                    String::from_utf8_lossy(&out.stdout),
+                );
+                let lines: Vec<&str> = stderr.lines().filter(|l| !l.trim().is_empty()).collect();
+                assert_eq!(
+                    lines.len(),
+                    1,
+                    "--stage {stage} stderr should be the usage error alone, got: {stderr}",
+                );
+                assert!(
+                    lines[0].contains(&format!("--stage {stage}"))
+                        && lines[0].contains("--edition"),
+                    "--stage {stage} stderr line should be the missing-edition hint, got: {stderr}",
+                );
+            }
+            Some(0) => assert!(
+                stderr.is_empty(),
+                "edition-neutral --stage {stage} should run clean without the flag, got: {stderr}",
+            ),
+            other => panic!("--stage {stage} without --edition exited {other:?}: {stderr}"),
+        }
     }
+    assert!(
+        gated > 0,
+        "no --stage value required --edition, so this test asserted nothing about the gate",
+    );
 }
