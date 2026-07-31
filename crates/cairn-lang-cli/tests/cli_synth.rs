@@ -980,18 +980,21 @@ fn cli_synth_stage_crossing_congestion_exits_one() {
     // scope be printed as a legalized IR.
     //
     // `crossbar.crn` is the fixture whose two Steiner trees overlap on
-    // the plane: at its shipping `void=2` the crossings fold onto the
-    // bridge layer, and at `void=1` there is no layer to escape to.
-    // Patching the reservation instead of restating the geometry keeps
-    // the overlap defined in exactly one place.
+    // the plane. Its shipping `void=2` reserves bridge y-layers wide
+    // enough for a later pass to lift those crossings onto, so the
+    // scope is accepted; `void=1` leaves nowhere to lift them and the
+    // pass refuses. Patching the reservation rather than restating the
+    // geometry keeps the overlap defined in exactly one place.
     let source = std::fs::read_to_string(examples_dir().join("crossbar.crn"))
         .expect("read crossbar fixture");
-    let patched = source.replace("void=2", "void=1");
-    assert_ne!(
-        source, patched,
-        "crossbar.crn no longer contains the `void=2` needle — the fixture \
-         drifted and the crossing refusal is not being exercised",
+    assert_eq!(
+        source.matches("void=2").count(),
+        1,
+        "crossbar.crn no longer carries exactly one `void=2` needle — the \
+         fixture drifted, and patching it would either no-op (leaving the \
+         crossing refusal unexercised) or rewrite an unintended second site",
     );
+    let patched = source.replace("void=2", "void=1");
     let dir = tempfile::tempdir().expect("temp dir");
     let path = dir.path().join("crossbar.crn");
     std::fs::write(&path, &patched).expect("write crossing congestion fixture");
@@ -1014,10 +1017,18 @@ fn cli_synth_stage_crossing_congestion_exits_one() {
             && stderr.contains("plane crossing"),
         "primary should name the crossing-side origin and failed scope, got: {stderr}",
     );
+    // Split per upstream code: which one leaked says whether the
+    // fixture drifted into a routing overflow or into an over-long
+    // segment, and the refusal is only this pass's own if neither did.
     assert!(
-        !stderr.contains("E_ROUTE_CONGESTION") && !stderr.contains("E_ATTENUATION_LIMIT"),
-        "the refusal must come from the crossing pass itself, not from an \
-         upstream stage the fixture happened to trip as well, got: {stderr}",
+        !stderr.contains("E_ROUTE_CONGESTION"),
+        "the refusal must come from the crossing pass itself, but the fixture \
+         also tripped routing, got: {stderr}",
+    );
+    assert!(
+        !stderr.contains("E_ATTENUATION_LIMIT"),
+        "the refusal must come from the crossing pass itself, but the fixture \
+         also tripped delay-side attenuation, got: {stderr}",
     );
     assert!(
         out.stdout.is_empty(),
