@@ -790,17 +790,11 @@ fn run_synth(
     // logic` or `--stage netlist` almost certainly expected it to shape
     // the output, and swallowing the mistake would make the CLI's
     // stage-vs-edition axis ambiguous.
-    if !matches!(
-        stage,
-        SynthStage::Edition
-            | SynthStage::Placement
-            | SynthStage::Route
-            | SynthStage::Delay
-            | SynthStage::Crossing,
-    ) && edition.is_some()
-    {
+    if !stage_requires_edition(stage) && edition.is_some() {
         eprintln!(
-            "error: `--edition` is only meaningful with `--stage edition`, `--stage placement`, `--stage route`, `--stage delay`, or `--stage crossing`; the `logic` and `netlist` stages are edition-neutral",
+            "error: `--edition` is only meaningful with {}; the {} stages are edition-neutral",
+            edition_required_stage_list(),
+            edition_neutral_stage_list(),
         );
         return ExitCode::from(2);
     }
@@ -878,6 +872,12 @@ fn run_synth(
 /// The tail is an exhaustive `match` on `SynthStage` so adding a new
 /// variant fails to compile here instead of silently reusing the
 /// Crossing payload.
+///
+/// One thing sits outside that linear order on purpose: the
+/// `--edition` gate runs before the first pass, not at the point the
+/// value is first consumed. A pass inserted ahead of the edition-tagged
+/// stages belongs below the gate, so a caller who forgot the flag still
+/// hears about the flag rather than about whatever that pass had to say.
 fn dispatch_synth_stage(
     stage: SynthStage,
     edition: Option<EditionArg>,
@@ -891,12 +891,38 @@ fn dispatch_synth_stage(
         return Ok((serde_json::to_string_pretty(&synth.scoped), "Logic IR"));
     }
 
-    let netlist = compile_netlist(&synth.scoped);
-    if matches!(stage, SynthStage::Netlist) {
-        return Ok((serde_json::to_string_pretty(&netlist), "Netlist IR"));
-    }
+    // Resolved ahead of `compile_netlist`: a missing `--edition` is a
+    // usage mistake, and a usage mistake is worth reporting before any
+    // synthesis work is paid for, not after.
+    let edition = if stage_requires_edition(stage) {
+        Some(require_edition(edition, stage_flag(stage))?.as_edition())
+    } else {
+        None
+    };
 
-    let edition = require_edition(edition, stage_flag(stage))?.as_edition();
+    let netlist = compile_netlist(&synth.scoped);
+    // The edition-neutral tail dispatches on the stage, not on "no
+    // edition was resolved". The two say the same thing today, but only
+    // the former makes a stage added later state its own answer here:
+    // the negative form would hand it the Netlist payload, under the
+    // Netlist label, with exit 0.
+    let edition = match (edition, stage) {
+        (Some(edition), _) => edition,
+        (None, SynthStage::Netlist) => {
+            return Ok((serde_json::to_string_pretty(&netlist), "Netlist IR"));
+        }
+        (None, SynthStage::Logic) => unreachable!("the Logic guard above returns"),
+        (
+            None,
+            SynthStage::Edition
+            | SynthStage::Placement
+            | SynthStage::Route
+            | SynthStage::Delay
+            | SynthStage::Crossing,
+        ) => unreachable!(
+            "stage_requires_edition holds here, so the gate above resolved an edition or returned"
+        ),
+    };
     let edition_netlist = compile_edition_netlist(&netlist, edition);
     if matches!(stage, SynthStage::Edition) {
         return Ok((
@@ -983,6 +1009,79 @@ fn stage_flag(stage: SynthStage) -> &'static str {
         SynthStage::Route => PlacementStage::Route.as_str(),
         SynthStage::Delay => PlacementStage::Delay.as_str(),
         SynthStage::Crossing => PlacementStage::Crossing.as_str(),
+    }
+}
+
+/// Whether `--stage <stage>` reads the target-edition cell library and
+/// therefore needs `--edition <java|bedrock>` alongside it.
+///
+/// The same partition drives both halves of the flag's contract:
+/// `run_synth` refuses `--edition` as stray on the stages this returns
+/// `false` for, and `dispatch_synth_stage` demands it on the ones it
+/// returns `true` for. Spelling the set once is what keeps a stage
+/// from landing in neither half — or, worse, in both. The exhaustive
+/// `match` makes a new `SynthStage` variant a compile error here,
+/// where the decision belongs, rather than a silent default to
+/// edition-neutral.
+///
+/// The stray-`--edition` message renders its two stage lists from this
+/// function too, so what a caller is told matches what the gates
+/// enforce. What stays hand-written is the same partition as it
+/// appears in prose in the `--stage` / `--edition` `--help` text,
+/// which clap takes as string literals: a stage added on the `true`
+/// side has to be worked into both sentences by hand.
+fn stage_requires_edition(stage: SynthStage) -> bool {
+    match stage {
+        SynthStage::Logic | SynthStage::Netlist => false,
+        SynthStage::Edition
+        | SynthStage::Placement
+        | SynthStage::Route
+        | SynthStage::Delay
+        | SynthStage::Crossing => true,
+    }
+}
+
+/// `` `--stage a`, `--stage b`, or `--stage c` `` over the stages that
+/// require `--edition`, for the stray-flag message.
+fn edition_required_stage_list() -> String {
+    join_stages(stage_requires_edition, "or", |name| {
+        format!("`--stage {name}`")
+    })
+}
+
+/// `` `a` and `b` `` over the stages that refuse `--edition`, for the
+/// same message. Renders bare stage names because that half of the
+/// sentence talks about the stages themselves rather than about the
+/// flag a caller would have typed.
+fn edition_neutral_stage_list() -> String {
+    join_stages(
+        |stage| !stage_requires_edition(stage),
+        "and",
+        |name| format!("`{name}`"),
+    )
+}
+
+/// Render the `--stage` values matching `select` as an English list,
+/// in the order clap declares them, with each name passed through
+/// `render` first. Walking `ValueEnum` rather than a literal list is
+/// what lets the stray-`--edition` message pick up a stage the day it
+/// lands instead of naming a set that has since moved on.
+fn join_stages(
+    select: impl Fn(SynthStage) -> bool,
+    conjunction: &str,
+    render: impl Fn(&str) -> String,
+) -> String {
+    let items: Vec<String> = SynthStage::value_variants()
+        .iter()
+        .copied()
+        .filter(|stage| select(*stage))
+        .map(|stage| render(stage_flag(stage)))
+        .collect();
+    match items.split_last() {
+        None => String::new(),
+        Some((last, [])) => last.clone(),
+        Some((last, [only])) => format!("{only} {conjunction} {last}"),
+        Some((last, rest)) => format!("{}, {conjunction} {last}", rest.join(", ")),
     }
 }
 
@@ -1607,5 +1706,48 @@ mod tests {
                 .expect("no SynthStage variant is skipped");
             assert_eq!(clap_name.get_name(), stage_flag(stage));
         }
+    }
+
+    /// `stage_requires_edition` decides two user-visible behaviours at
+    /// once — whether `--edition` is refused as stray and whether its
+    /// absence is a usage error — so the set it names is pinned here
+    /// against the `--stage` spellings a caller actually types. The
+    /// loop walks `ValueEnum`'s full variant list rather than a
+    /// hand-written one, so a stage added without a decision on its
+    /// edition-dependence fails here instead of quietly joining the
+    /// edition-neutral side.
+    #[test]
+    fn edition_required_stages_match_the_documented_set() {
+        for stage in SynthStage::value_variants() {
+            let name = stage
+                .to_possible_value()
+                .expect("no SynthStage variant is skipped");
+            let expected = match name.get_name() {
+                "logic" | "netlist" => false,
+                "edition" | "placement" | "route" | "delay" | "crossing" => true,
+                other => panic!("unclassified --stage value `{other}`"),
+            };
+            assert_eq!(
+                stage_requires_edition(*stage),
+                expected,
+                "--stage {} edition-dependence",
+                name.get_name(),
+            );
+        }
+    }
+
+    /// The stray-`--edition` message reads its two stage lists off
+    /// `stage_requires_edition`, which keeps them honest but puts the
+    /// English between them — the commas, the conjunction, the
+    /// backticks — under no other check. Pinned here so the derivation
+    /// cannot start producing a list that is correct and unreadable.
+    #[test]
+    fn stray_edition_message_lists_read_as_english() {
+        assert_eq!(
+            edition_required_stage_list(),
+            "`--stage edition`, `--stage placement`, `--stage route`, \
+             `--stage delay`, or `--stage crossing`",
+        );
+        assert_eq!(edition_neutral_stage_list(), "`logic` and `netlist`");
     }
 }
