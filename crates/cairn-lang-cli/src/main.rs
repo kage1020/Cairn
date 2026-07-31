@@ -985,17 +985,25 @@ fn dispatch_synth_stage(
 }
 
 /// Hand-maintained mirror of clap's kebab-case derivation of
-/// `SynthStage` variant names: the single place every message that
-/// has to name a stage the way a caller types it reads its spelling
-/// from. The canonical spelling is whatever clap accepts on the
-/// command line (derived from `#[derive(ValueEnum)]` on
-/// `SynthStage`); this function must be kept in sync on every variant
-/// addition or rename. Its exhaustive `match` provides a compile-time
-/// nudge to do so.
+/// `SynthStage` variant names: the single place the messages this
+/// binary composes at runtime read a stage's spelling from, so what
+/// a caller is told to type matches what the parser accepts. The
+/// canonical spelling is whatever clap accepts on the command line
+/// (derived from `#[derive(ValueEnum)]` on `SynthStage`); this
+/// function must be kept in sync on every variant addition or
+/// rename. Its exhaustive `match` provides a compile-time nudge to
+/// do so.
+///
+/// What it does not reach is the `--stage` / `--edition` `--help`
+/// prose, which clap takes as string literals and which therefore
+/// spells every stage by hand — the same carve-out
+/// `stage_requires_edition` names for the partition it owns. A
+/// variant added here still has to be worked into that prose
+/// separately.
 ///
 /// The four Placement IR stages take their spelling from
 /// [`PlacementStage::as_str`] rather than repeating the literal, so
-/// the word this function prints and the word the dump's `"stage"`
+/// the word this function returns and the word the dump's `"stage"`
 /// key carries cannot drift apart. What no type can enforce is the
 /// third spelling in the chain — the one clap derives from the
 /// variant identifier — so `placement_stage_names_match_clap` below
@@ -1696,8 +1704,8 @@ mod tests {
     }
 
     /// The edition-neutral stages have no Placement IR counterpart,
-    /// so their spellings stay literals in `stage_cli_name` — pinned here
-    /// against clap for the same reason.
+    /// so their spellings stay literals in `stage_cli_name` — pinned
+    /// here against clap for the same reason.
     #[test]
     fn edition_neutral_stage_names_match_clap() {
         for stage in [SynthStage::Logic, SynthStage::Netlist, SynthStage::Edition] {
