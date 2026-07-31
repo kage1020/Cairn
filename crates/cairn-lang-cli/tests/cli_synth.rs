@@ -968,3 +968,43 @@ fn cli_synth_stage_crossing_inherits_upstream_attenuation_failure() {
         "expected upstream E_ATTENUATION_LIMIT on stderr, got: {stderr}",
     );
 }
+
+#[test]
+fn cli_synth_missing_edition_reports_only_the_usage_error() {
+    // The per-stage tests above each pin their own exit code and hint
+    // text; what this one pins is that nothing else runs first. A
+    // missing `--edition` is a usage mistake, so the gate stands ahead
+    // of every synthesis pass: stdout stays empty (no partial IR dump
+    // escaped) and stderr carries that one line and nothing else. The
+    // pipeline passes are silent on this fixture today, so the
+    // assertion is about ordering rather than about them — the day a
+    // pass upstream of the edition-tagged stages starts emitting a
+    // diagnostic, this is what catches the usage error being buried
+    // under it.
+    let path = examples_dir().join("redstone-door.crn");
+    for stage in ["edition", "placement", "route", "delay", "crossing"] {
+        let out = run_synth(&[
+            "--experimental-logic-synth",
+            "--stage",
+            stage,
+            path.to_str().unwrap(),
+        ]);
+        assert_eq!(out.status.code(), Some(2), "--stage {stage} exit code");
+        assert!(
+            out.stdout.is_empty(),
+            "--stage {stage} must print no IR before the usage gate, got: {}",
+            String::from_utf8_lossy(&out.stdout),
+        );
+        let stderr = String::from_utf8(out.stderr).expect("utf-8");
+        let lines: Vec<&str> = stderr.lines().filter(|l| !l.trim().is_empty()).collect();
+        assert_eq!(
+            lines.len(),
+            1,
+            "--stage {stage} stderr should be the usage error alone, got: {stderr}",
+        );
+        assert!(
+            lines[0].contains(&format!("--stage {stage}")) && lines[0].contains("--edition"),
+            "--stage {stage} stderr line should be the missing-edition hint, got: {stderr}",
+        );
+    }
+}
