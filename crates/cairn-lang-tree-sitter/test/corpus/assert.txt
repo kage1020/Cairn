@@ -1,5 +1,5 @@
 ==================
-Truth table
+Truth table (field labels)
 ==================
 
 struct s size=3x3
@@ -9,23 +9,23 @@ struct s size=3x3
 
 (source_file
   (struct_decl
-    (identifier)
-    (attribute_list
-      (attribute (identifier) (size_literal (integer) (integer))))
-    (struct_body
+    name: (identifier)
+    args: (attribute_list
+      (attribute key: (identifier) value: (size_literal (integer) (integer))))
+    body: (struct_body
       (assert_stmt
         (truth_form
-          (signal_list
+          inputs: (signal_list
             (signal_ref (identifier) (identifier))
             (signal_ref (identifier) (identifier)))
-          (signal_ref (identifier) (identifier))
+          output: (signal_ref (identifier) (identifier))
           (truth_row (bit_pattern) (bit_pattern))
           (truth_row (bit_pattern) (bit_pattern))
           (truth_row (bit_pattern) (bit_pattern))
           (truth_row (bit_pattern) (bit_pattern)))))))
 
 ==================
-Temporal assertion
+Temporal assertion (field labels)
 ==================
 
 struct s size=3x3
@@ -35,16 +35,16 @@ struct s size=3x3
 
 (source_file
   (struct_decl
-    (identifier)
-    (attribute_list
-      (attribute (identifier) (size_literal (integer) (integer))))
-    (struct_body
+    name: (identifier)
+    args: (attribute_list
+      (attribute key: (identifier) value: (size_literal (integer) (integer))))
+    body: (struct_body
       (assert_stmt
         (temporal_form
           (temporal_expr
-            (signal_ref (identifier) (identifier))
-            (signal_ref (identifier) (identifier))
-            (integer)))))))
+            trigger: (signal_ref (identifier) (identifier))
+            target: (signal_ref (identifier) (identifier))
+            bound: (integer)))))))
 
 ==================
 Truth table and temporal assertion with bare identifiers (degenerate dotted refs)

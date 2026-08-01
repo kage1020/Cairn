@@ -1,0 +1,119 @@
+name: npm publish
+
+# Publishes the `tree-sitter-cairn` npm package for an already-released tag.
+#
+# Kept out of tree-sitter.yml on purpose: that workflow runs on every pull
+# request, and a workflow that can mint an npm publishing token has no business
+# being reachable from a fork's `pull_request` event. release.yml dispatches this
+# one after release-plz has published to crates.io, so the npm version and the
+# crates.io version always come from the same tag and the same commit.
+#
+# Authentication is npm Trusted Publishing (OIDC): the package has this
+# repository + this workflow file registered as a trusted publisher on npmjs.com,
+# so no `NPM_TOKEN` secret is read here. The first publish of a package can never
+# use OIDC — npm has no pending-publisher concept, so the package must already
+# exist before a trusted publisher can be attached to it. That one initial
+# publish was done by hand; every one after it runs here.
+#
+# The upload uses the npm CLI rather than pnpm, even though pnpm is what installs
+# and tests the package. pnpm's OIDC support is still open upstream
+# (pnpm/pnpm#9812) and the paths that did work regressed to a 404 in pnpm 11
+# (pnpm/pnpm#11513), so pnpm handles the lockfile and the test run and npm
+# handles the token exchange.
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to publish from (e.g. v2026.8.0)"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: npm-publish-${{ github.event.inputs.tag }}
+  cancel-in-progress: false
+
+defaults:
+  run:
+    working-directory: crates/cairn-lang-tree-sitter
+
+jobs:
+  publish:
+    name: Publish tree-sitter-cairn
+    runs-on: ubuntu-latest
+    permissions:
+      # Lets the npm CLI mint the OIDC token npmjs.com exchanges for a
+      # short-lived, package-scoped registry token.
+      id-token: write
+    steps:
+      # Bind the untrusted dispatch input to an env var and reject anything that
+      # is not a CalVer release tag before it reaches the checkout below.
+      - id: validate
+        name: Validate tag
+        working-directory: .
+        shell: bash
+        env:
+          RAW_TAG: ${{ github.event.inputs.tag }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$RAW_TAG" =~ ^v[0-9]{4}\.(0|[1-9][0-9]*)(\.[0-9]+)?$ ]]; then
+            echo "Refusing to publish untrusted tag: $RAW_TAG" >&2
+            exit 1
+          fi
+          echo "tag=$RAW_TAG" >> "$GITHUB_OUTPUT"
+          echo "version=${RAW_TAG#v}" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.validate.outputs.tag }}
+
+      # tree-sitter.yml's version-sync job proves the three manifests agree with
+      # each other on any ref it runs against. This is the narrower question the
+      # publish itself turns on: the tarball is named after package.json, so a
+      # package.json left behind by a bump would silently republish an old
+      # version number against new code.
+      - name: Ensure package.json matches the tag
+        shell: bash
+        env:
+          VERSION: ${{ steps.validate.outputs.version }}
+        run: |
+          set -euo pipefail
+          declared=$(jq -er '.version' package.json)
+          if [ "$declared" != "$VERSION" ]; then
+            echo "package.json declares $declared but the tag says $VERSION" >&2
+            exit 1
+          fi
+
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: crates/cairn-lang-tree-sitter/package.json
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: crates/cairn-lang-tree-sitter/pnpm-lock.yaml
+          registry-url: https://registry.npmjs.org
+
+      - run: pnpm install --frozen-lockfile
+
+      # The tarball ships the generated parser, so a drifted src/parser.c would
+      # go out verbatim. Regenerate and diff here rather than trusting that the
+      # tagged commit's own CI run covered it.
+      - run: pnpm run generate
+      - name: Ensure generated files match the tag
+        run: git diff --exit-code src/parser.c src/grammar.json src/node-types.json
+      - run: pnpm test
+
+      # Trusted Publishing needs npm >= 11.5.1, which is newer than the npm
+      # bundled with Node 22 on the runner images.
+      - name: Install a Trusted-Publishing-capable npm
+        run: npm install -g npm@latest
+
+      # --provenance is passed explicitly even though npm documents it as
+      # automatic under Trusted Publishing; it is a no-op when the attestation
+      # would have been generated anyway, and a hard failure rather than a silent
+      # omission if it would not have been.
+      - run: npm publish --access public --provenance

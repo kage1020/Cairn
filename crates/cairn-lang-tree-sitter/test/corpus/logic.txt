@@ -20,7 +20,7 @@ struct gatehouse size=7x5
           (signal_ref (identifier) (identifier)))))))
 
 ==================
-logic with and, not, parens precedence
+logic with and, not, parens precedence (field labels)
 ==================
 
 struct sample size=5x5
@@ -30,18 +30,19 @@ struct sample size=5x5
 
 (source_file
   (struct_decl
-    (identifier)
-    (attribute_list
-      (attribute (identifier) (size_literal (integer) (integer))))
-    (struct_body
+    name: (identifier)
+    args: (attribute_list
+      (attribute key: (identifier) value: (size_literal (integer) (integer))))
+    body: (struct_body
       (logic_decl
-        (signal_ref (identifier) (identifier))
-        (binary_expression
-          (unary_expression (signal_ref (identifier) (identifier)))
-          (parenthesized_expression
+        name: (signal_ref (identifier) (identifier))
+        value: (binary_expression
+          lhs: (unary_expression
+            operand: (signal_ref (identifier) (identifier)))
+          rhs: (parenthesized_expression
             (binary_expression
-              (signal_ref (identifier) (identifier))
-              (signal_ref (identifier) (identifier)))))))))
+              lhs: (signal_ref (identifier) (identifier))
+              rhs: (signal_ref (identifier) (identifier)))))))))
 
 ==================
 logic with bare identifier name (degenerate dotted ref)
@@ -84,7 +85,7 @@ struct s size=3x3
         (integer)))))
 
 ==================
-Member override with bracket selector
+Member override with bracket selector (field labels)
 ==================
 
 struct gatehouse size=7x5
