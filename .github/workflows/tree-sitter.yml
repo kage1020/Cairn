@@ -57,7 +57,7 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm test
       - uses: dtolnay/rust-toolchain@stable
-      - run: cargo test -p cairn-lang-tree-sitter --test examples
+      - run: cargo test -p cairn-lang-tree-sitter
 
   node-smoke:
     name: Node addon smoke (${{ matrix.os }}, node ${{ matrix.node }})

@@ -25,3 +25,37 @@ struct keep size=11x9
               (command_arg (attribute (identifier) (identifier)))
               (command_arg (attribute (identifier) (identifier)))
               (command_arg (attribute (identifier) (identifier))))))))))
+
+==================
+room nested inside level
+==================
+
+struct keep size=11x9
+  level id=floor1 y=0
+    room id=hall
+      door id=entry side=front at=center
+
+---
+
+(source_file
+  (struct_decl
+    (identifier)
+    (attribute_list
+      (attribute (identifier) (size_literal (integer) (integer))))
+    (struct_body
+      (nested_scope
+        (identifier)
+        (attribute_list
+          (attribute (identifier) (identifier))
+          (attribute (identifier) (integer)))
+        (struct_body
+          (nested_scope
+            (identifier)
+            (attribute_list
+              (attribute (identifier) (identifier)))
+            (struct_body
+              (member_stmt (member_keyword)
+                (command_arg_list
+                  (command_arg (attribute (identifier) (identifier)))
+                  (command_arg (attribute (identifier) (identifier)))
+                  (command_arg (attribute (identifier) (identifier))))))))))))

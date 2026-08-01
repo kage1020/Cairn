@@ -78,3 +78,26 @@ struct s size=3x3
             (identifier)
             (identifier)
             (integer)))))))
+
+==================
+Truth table with trailing semicolon
+==================
+
+struct s size=3x3
+  assert truth(sig.a -> sig.out) { 0->0; 1->1; }
+
+---
+
+(source_file
+  (struct_decl
+    (identifier)
+    (attribute_list
+      (attribute (identifier) (size_literal (integer) (integer))))
+    (struct_body
+      (assert_stmt
+        (truth_form
+          (signal_list
+            (signal_ref (identifier) (identifier)))
+          (signal_ref (identifier) (identifier))
+          (truth_row (bit_pattern) (bit_pattern))
+          (truth_row (bit_pattern) (bit_pattern)))))))

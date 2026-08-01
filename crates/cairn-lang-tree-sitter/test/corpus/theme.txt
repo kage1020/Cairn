@@ -78,3 +78,40 @@ theme empty:
 (source_file
   (theme_decl
     (identifier)))
+
+==================
+Selector with dotted tail and no bindings
+==================
+
+theme t:
+  window.frame
+
+---
+
+(source_file
+  (theme_decl
+    (identifier)
+    (theme_body
+      (selector_rule
+        (selector (identifier) (identifier))))))
+
+==================
+Selector with attribute filter, dotted tail, and bindings
+==================
+
+theme t:
+  door[class=heavy].panel -> mat_slot=@oak
+
+---
+
+(source_file
+  (theme_decl
+    (identifier)
+    (theme_body
+      (selector_rule
+        (selector
+          (identifier)
+          (attribute_list (attribute (identifier) (identifier)))
+          (identifier))
+        (attribute_list
+          (attribute (identifier) (material_ref (identifier))))))))
