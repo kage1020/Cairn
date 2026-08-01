@@ -5773,7 +5773,7 @@ TS_PUBLIC const TSLanguage *tree_sitter_cairn(void) {
     .metadata = {
       .major_version = 234,
       .minor_version = 8,
-      .patch_version = 0,
+      .patch_version = 2,
     },
   };
   return &language;
