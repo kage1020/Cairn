@@ -1,6 +1,6 @@
 {
   "name": "tree-sitter-cairn",
-  "version": "2026.8.0",
+  "version": "2026.8.1",
   "description": "tree-sitter grammar for the Cairn build description language",
   "keywords": [
     "parser",
