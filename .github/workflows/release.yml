@@ -152,6 +152,29 @@ jobs:
             echo "$file $path -> $(jq -er "$path" "$file")"
           done
 
+      # `tree-sitter generate` bakes tree-sitter.json's metadata.version into
+      # src/parser.c as the TSLanguage major/minor/patch triple, so the bump
+      # above is not a manifest-only edit — it invalidates a checked-in generated
+      # file. Regenerate here so the release PR carries a parser.c that matches
+      # the version it declares; otherwise tree-sitter.yml's generate-check job
+      # fails on every release PR, and the tarball published to npm ships a
+      # parser advertising the previous version.
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: crates/cairn-lang-tree-sitter/package.json
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: crates/cairn-lang-tree-sitter/pnpm-lock.yaml
+      - name: Regenerate the tree-sitter parser for the new version
+        working-directory: crates/cairn-lang-tree-sitter
+        run: |
+          set -euo pipefail
+          pnpm install --frozen-lockfile
+          pnpm run generate
+          git diff --stat src/parser.c src/grammar.json src/node-types.json
+
       # release-pr never publishes, so no crates.io token is needed here.
       - name: Run release-plz release-pr
         uses: release-plz/action@v0.5
