@@ -10,6 +10,11 @@ and is a separate axis from the Minecraft target version.
 
 ## [Unreleased]
 
+## 2026.8.2 — 2026-08-01
+
+### Fixed
+- *(tree-sitter)* regenerate the parser when the version moves
+
 ## 2026.8.0 — 2026-08-01
 
 ### Added
