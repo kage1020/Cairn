@@ -128,37 +128,6 @@ jobs:
           echo "--- Cargo.toml [workspace.package] + [workspace.dependencies] ---"
           awk '/^\[workspace\.(package|dependencies)\]/,/^$/' Cargo.toml
 
-      # The tree-sitter crate is the one workspace member that also ships to a
-      # registry release-plz knows nothing about. Its npm manifest and its
-      # tree-sitter manifest each carry their own copy of the version, and
-      # release-plz rewrites only Cargo.toml, so without this step a CalVer bump
-      # leaves the npm package advertising the previous month's number against
-      # this month's grammar. tree-sitter.yml's version-sync job is what turns a
-      # miss here into a red build instead of a bad publish.
-      - name: Set tree-sitter package version
-        env:
-          NEW_VERSION: ${{ needs.compute-version.outputs.version }}
-        working-directory: crates/cairn-lang-tree-sitter
-        run: |
-          set -euo pipefail
-          # jq rather than sed: `version` is not a unique key in either file
-          # once nested objects are in play, and a path expression cannot drift
-          # onto a dependency's version the way a line-oriented match can.
-          for spec in "package.json:.version" "tree-sitter.json:.metadata.version"; do
-            file="${spec%%:*}"
-            path="${spec#*:}"
-            jq --indent 2 --arg v "$NEW_VERSION" "$path = \$v" "$file" > "$file.tmp"
-            mv "$file.tmp" "$file"
-            echo "$file $path -> $(jq -er "$path" "$file")"
-          done
-
-      # `tree-sitter generate` bakes tree-sitter.json's metadata.version into
-      # src/parser.c as the TSLanguage major/minor/patch triple, so the bump
-      # above is not a manifest-only edit — it invalidates a checked-in generated
-      # file. Regenerate here so the release PR carries a parser.c that matches
-      # the version it declares; otherwise tree-sitter.yml's generate-check job
-      # fails on every release PR, and the tarball published to npm ships a
-      # parser advertising the previous version.
       - uses: pnpm/action-setup@v4
         with:
           package_json_file: crates/cairn-lang-tree-sitter/package.json
@@ -167,21 +136,83 @@ jobs:
           node-version: 22
           cache: pnpm
           cache-dependency-path: crates/cairn-lang-tree-sitter/pnpm-lock.yaml
-      - name: Regenerate the tree-sitter parser for the new version
-        working-directory: crates/cairn-lang-tree-sitter
-        run: |
-          set -euo pipefail
-          pnpm install --frozen-lockfile
-          pnpm run generate
-          git diff --stat src/parser.c src/grammar.json src/node-types.json
 
       # release-pr never publishes, so no crates.io token is needed here.
       - name: Run release-plz release-pr
+        id: release_pr
         uses: release-plz/action@v0.5
         with:
           command: release-pr
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # The tree-sitter crate is the one workspace member that also ships to a
+      # registry release-plz knows nothing about: its npm manifest and its
+      # tree-sitter manifest each carry their own copy of the version, and
+      # release-plz rewrites only Cargo.toml. Left alone, a CalVer bump leaves
+      # the npm package advertising the previous month's number against this
+      # month's grammar.
+      #
+      # This runs after release-plz rather than before it because the version
+      # pre-set above is an *input* to release-plz's decision, not the outcome
+      # of it. release-plz kept the pre-set number for 2026.8.0 and then chose
+      # 2026.8.2 over a pre-set 2026.8.1 for the next one, which is enough to
+      # say that writing the manifests from the pre-set value is writing them
+      # from a guess. Read the number back off the branch release-plz actually
+      # produced instead, so the manifests follow whatever it decided.
+      #
+      # `tree-sitter generate` bakes tree-sitter.json's metadata.version into
+      # src/parser.c as the TSLanguage major/minor/patch triple, so this is not
+      # a manifest-only edit — it invalidates a checked-in generated file, and
+      # tree-sitter.yml's generate-check job fails the release PR if the two
+      # disagree.
+      - name: Align the tree-sitter manifests with the version release-plz chose
+        if: steps.release_pr.outputs.prs_created == 'true'
+        env:
+          PR: ${{ steps.release_pr.outputs.pr }}
+        run: |
+          set -euo pipefail
+          branch=$(jq -er '.head_branch' <<<"$PR")
+          git fetch origin "$branch"
+          # -f discards the dirty tree the pre-set steps left behind; everything
+          # worth keeping is already committed on the branch.
+          git checkout -f -B "$branch" "origin/$branch"
+
+          version=$(awk '
+            /^\[workspace\.package\]/   { in_section = 1; next }
+            /^\[/                       { in_section = 0 }
+            in_section && /^version = / { gsub(/"/, "", $3); print $3; exit }
+          ' Cargo.toml)
+          if [ -z "$version" ]; then
+            echo "Could not read the version release-plz wrote to Cargo.toml" >&2
+            exit 1
+          fi
+          echo "release-plz settled on $version"
+
+          cd crates/cairn-lang-tree-sitter
+          # jq rather than sed: `version` is not a unique key in either file once
+          # nested objects are in play, and a path expression cannot drift onto a
+          # dependency's version the way a line-oriented match can.
+          for spec in "package.json:.version" "tree-sitter.json:.metadata.version"; do
+            file="${spec%%:*}"
+            path="${spec#*:}"
+            jq --indent 2 --arg v "$version" "$path = \$v" "$file" > "$file.tmp"
+            mv "$file.tmp" "$file"
+          done
+          pnpm install --frozen-lockfile
+          pnpm run generate
+          cd ../..
+
+          if git diff --quiet; then
+            echo "manifests already agreed with $version; nothing to push"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -aqm "chore: align tree-sitter manifests with $version"
+          git push origin "$branch"
+          echo "Pushed the alignment commit. If the release PR's checks were" \
+               "created before this push, re-run them before merging."
 
   release-patch:
     name: Publish merged release
