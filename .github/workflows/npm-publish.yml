@@ -90,12 +90,20 @@ jobs:
       - uses: pnpm/action-setup@v4
         with:
           package_json_file: crates/cairn-lang-tree-sitter/package.json
+      # Deliberately no `registry-url`. Setting it makes setup-node write an
+      # .npmrc containing `//registry.npmjs.org/:_authToken=${NODE_AUTH_TOKEN}`
+      # and export NODE_AUTH_TOKEN as a placeholder. npm then sees auth as
+      # already configured, never starts the OIDC exchange, and sends the
+      # placeholder as a credential — which the registry answers with a 404 on
+      # the PUT rather than a 403, because it will not confirm that a package it
+      # won't let you touch exists (actions/setup-node#1551). Trusted Publishing
+      # only engages when nothing has configured a token, and registry.npmjs.org
+      # is npm's default registry anyway, so there is nothing to point at.
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: pnpm
           cache-dependency-path: crates/cairn-lang-tree-sitter/pnpm-lock.yaml
-          registry-url: https://registry.npmjs.org
 
       - run: pnpm install --frozen-lockfile
 
