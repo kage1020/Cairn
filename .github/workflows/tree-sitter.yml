@@ -2,9 +2,17 @@ name: tree-sitter
 
 # tree-sitter-specific gates for crates/cairn-lang-tree-sitter/. The crate's Rust
 # tests are already covered by ci.yml's `cargo test --workspace` on every push/PR;
-# this workflow only adds what ci.yml doesn't: generated-file drift, the
-# tree-sitter corpus (pnpm), the Node addon smoke build, and (on tag push) the
-# WASM release asset.
+# this workflow only adds what ci.yml doesn't: version parity across the three
+# manifests that carry the version, generated-file drift, the tree-sitter corpus
+# (pnpm), the Node addon smoke build, and the WASM release asset.
+#
+# The WASM asset is reachable two ways. A human pushing a `v*` tag fires the tag
+# trigger below; release-plz cannot, because it pushes its tag with GITHUB_TOKEN
+# and GitHub's recursion guard stops a token-made push from firing another
+# workflow's `on: push: tags:`. release.yml therefore dispatches this workflow
+# explicitly with the tag it just created, the same way it already does for
+# publish.yml. Both paths converge on `resolve-ref`, the one place the tag is
+# validated and turned into the ref every other job checks out.
 
 on:
   push:
@@ -17,17 +25,111 @@ on:
     paths:
       - "crates/cairn-lang-tree-sitter/**"
       - ".github/workflows/tree-sitter.yml"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to build the WASM release asset from (e.g. v2026.8.0)"
+        required: true
+        type: string
+
+permissions:
+  contents: read
 
 defaults:
   run:
     working-directory: crates/cairn-lang-tree-sitter
 
 jobs:
-  generate-check:
-    name: Generate drift check
+  resolve-ref:
+    name: Resolve checkout ref
+    runs-on: ubuntu-latest
+    outputs:
+      ref: ${{ steps.resolve.outputs.ref }}
+      tag: ${{ steps.resolve.outputs.tag }}
+    steps:
+      # Nothing is checked out here, so the workflow-level working-directory
+      # would point at a path that does not exist yet. Run at the workspace root.
+      - id: resolve
+        working-directory: .
+        shell: bash
+        env:
+          RAW_TAG: ${{ github.event.inputs.tag || (github.ref_type == 'tag' && github.ref_name) || '' }}
+        run: |
+          set -euo pipefail
+          # Branch pushes and pull requests release nothing: leave both outputs
+          # empty so actions/checkout falls back to its own default ref and
+          # wasm-build stays skipped.
+          if [ -z "$RAW_TAG" ]; then
+            echo "ref=" >> "$GITHUB_OUTPUT"
+            echo "tag=" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # Same CalVer gate publish.yml applies to its own tag input. Every
+          # downstream job checks this value out and the release asset is
+          # uploaded under it, so an unvalidated dispatch input must reach
+          # neither. `v*` in the push filter is broad enough to let a malformed
+          # tag through, so the check covers that path too.
+          if [[ ! "$RAW_TAG" =~ ^v[0-9]{4}\.(0|[1-9][0-9]*)(\.[0-9]+)?$ ]]; then
+            echo "Refusing to build untrusted tag: $RAW_TAG" >&2
+            exit 1
+          fi
+          echo "ref=$RAW_TAG" >> "$GITHUB_OUTPUT"
+          echo "tag=$RAW_TAG" >> "$GITHUB_OUTPUT"
+
+  version-sync:
+    name: Version parity
+    needs: resolve-ref
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.resolve-ref.outputs.ref }}
+
+      # The crate's Cargo.toml says `version.workspace = true`, so the Rust side
+      # of the version is whatever `[workspace.package]` holds. The npm package
+      # and the tree-sitter manifest each carry their own copy, and release-plz
+      # rewrites only Cargo.toml — it has no npm support. This job is what stops
+      # the three from drifting apart after a CalVer bump; release.yml's "Set
+      # workspace version" step is what keeps them moving together.
+      - name: Compare the three version declarations
+        shell: bash
+        env:
+          TAG: ${{ needs.resolve-ref.outputs.tag }}
+        run: |
+          set -euo pipefail
+          workspace=$(awk '
+            /^\[workspace\.package\]/   { in_section = 1; next }
+            /^\[/                       { in_section = 0 }
+            in_section && /^version = / { gsub(/"/, "", $3); print $3; exit }
+          ' ../../Cargo.toml)
+          if [ -z "$workspace" ]; then
+            echo "Could not read version from [workspace.package] in Cargo.toml" >&2
+            exit 1
+          fi
+          package=$(jq -er '.version' package.json)
+          manifest=$(jq -er '.metadata.version' tree-sitter.json)
+          echo "Cargo [workspace.package]: $workspace"
+          echo "package.json:              $package"
+          echo "tree-sitter.json:          $manifest"
+          if [ "$workspace" != "$package" ] || [ "$workspace" != "$manifest" ]; then
+            echo "Version declarations disagree. All three move together." >&2
+            exit 1
+          fi
+          # On a release ref the tag is a fourth copy of the same number, and the
+          # one the published artifacts are named after.
+          if [ -n "$TAG" ] && [ "$workspace" != "${TAG#v}" ]; then
+            echo "Tag $TAG does not match the declared version $workspace" >&2
+            exit 1
+          fi
+
+  generate-check:
+    name: Generate drift check
+    needs: resolve-ref
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.resolve-ref.outputs.ref }}
       - uses: pnpm/action-setup@v4
         with:
           package_json_file: crates/cairn-lang-tree-sitter/package.json
@@ -43,9 +145,12 @@ jobs:
 
   tree-sitter-test:
     name: tree-sitter corpus
+    needs: resolve-ref
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.resolve-ref.outputs.ref }}
       - uses: pnpm/action-setup@v4
         with:
           package_json_file: crates/cairn-lang-tree-sitter/package.json
@@ -61,6 +166,7 @@ jobs:
 
   node-smoke:
     name: Node addon smoke (${{ matrix.os }}, node ${{ matrix.node }})
+    needs: resolve-ref
     strategy:
       fail-fast: false
       matrix:
@@ -72,6 +178,8 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.resolve-ref.outputs.ref }}
       - uses: pnpm/action-setup@v4
         with:
           package_json_file: crates/cairn-lang-tree-sitter/package.json
@@ -86,11 +194,16 @@ jobs:
 
   wasm-build:
     name: WASM build (release asset)
-    if: startsWith(github.ref, 'refs/tags/')
+    if: needs.resolve-ref.outputs.tag != ''
+    needs: [resolve-ref, version-sync, generate-check, tree-sitter-test]
     runs-on: ubuntu-latest
-    needs: [generate-check, tree-sitter-test]
+    permissions:
+      # softprops/action-gh-release attaches the artifact to the GitHub Release.
+      contents: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.resolve-ref.outputs.ref }}
       - uses: pnpm/action-setup@v4
         with:
           package_json_file: crates/cairn-lang-tree-sitter/package.json
@@ -106,6 +219,9 @@ jobs:
         run: |
           test -s tree-sitter-cairn.wasm
           file tree-sitter-cairn.wasm | grep -q "WebAssembly"
+      # tag_name is explicit because on the dispatch path github.ref points at a
+      # branch, leaving the action with no tag to attach the asset to.
       - uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ needs.resolve-ref.outputs.tag }}
           files: crates/cairn-lang-tree-sitter/tree-sitter-cairn.wasm

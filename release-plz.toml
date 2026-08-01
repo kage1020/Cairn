@@ -51,6 +51,18 @@ pr_labels = ["release"]
 # crates.io. The exchange happens in `release.yml` via the
 # `rust-lang/crates-io-auth-action` step; no long-lived registry secret is
 # read anywhere in this repo.
+#
+# Adding a new publishable workspace member takes one manual step before it can
+# ride this automation. A Trusted Publishing token cannot create a crate that
+# does not exist yet — crates.io has no pending-publisher concept, and refuses
+# the upload with "Trusted Publishing tokens do not support creating new crates.
+# Publish the crate manually, first". So the first version of a new crate goes
+# out with `cargo publish -p <crate>` from a machine holding a crates.io token,
+# and the Trusted Publisher entry is attached to the crate afterwards. Until
+# that is done, every push to canary fails at `release-plz release`, because it
+# tries to publish the crate whose version is not yet on the registry. The npm
+# side of `cairn-lang-tree-sitter` has the identical constraint; see
+# `.github/workflows/npm-publish.yml`.
 [[package]]
 name = "cairn-lang-cli"
 publish = true

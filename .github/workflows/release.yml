@@ -128,6 +128,30 @@ jobs:
           echo "--- Cargo.toml [workspace.package] + [workspace.dependencies] ---"
           awk '/^\[workspace\.(package|dependencies)\]/,/^$/' Cargo.toml
 
+      # The tree-sitter crate is the one workspace member that also ships to a
+      # registry release-plz knows nothing about. Its npm manifest and its
+      # tree-sitter manifest each carry their own copy of the version, and
+      # release-plz rewrites only Cargo.toml, so without this step a CalVer bump
+      # leaves the npm package advertising the previous month's number against
+      # this month's grammar. tree-sitter.yml's version-sync job is what turns a
+      # miss here into a red build instead of a bad publish.
+      - name: Set tree-sitter package version
+        env:
+          NEW_VERSION: ${{ needs.compute-version.outputs.version }}
+        working-directory: crates/cairn-lang-tree-sitter
+        run: |
+          set -euo pipefail
+          # jq rather than sed: `version` is not a unique key in either file
+          # once nested objects are in play, and a path expression cannot drift
+          # onto a dependency's version the way a line-oriented match can.
+          for spec in "package.json:.version" "tree-sitter.json:.metadata.version"; do
+            file="${spec%%:*}"
+            path="${spec#*:}"
+            jq --indent 2 --arg v "$NEW_VERSION" "$path = \$v" "$file" > "$file.tmp"
+            mv "$file.tmp" "$file"
+            echo "$file $path -> $(jq -er "$path" "$file")"
+          done
+
       # release-pr never publishes, so no crates.io token is needed here.
       - name: Run release-plz release-pr
         uses: release-plz/action@v0.5
@@ -180,13 +204,22 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CARGO_REGISTRY_TOKEN: ${{ steps.cratesio-auth.outputs.token }}
 
-      # Auto-dispatch the Publish workflow for the just-released tag. Tag pushes
-      # made with GITHUB_TOKEN don't trigger `on: push: tags:` in other workflows
-      # (GitHub's recursion guard), so without this step publish.yml sits idle
-      # until someone runs it manually. `workflow_dispatch` explicitly bypasses
-      # the recursion guard, so `gh workflow run` from inside this job fires
-      # publish.yml cleanly. Same tag-detection shape as the promote step below.
-      - name: Dispatch Publish workflow for the new tag
+      # Auto-dispatch the tag-triggered workflows for the just-released tag. Tag
+      # pushes made with GITHUB_TOKEN don't trigger `on: push: tags:` in other
+      # workflows (GitHub's recursion guard), so without this step they sit idle
+      # until someone runs them manually. `workflow_dispatch` explicitly bypasses
+      # the recursion guard, so `gh workflow run` from inside this job fires them
+      # cleanly. Same tag-detection shape as the promote step below.
+      #
+      # - publish.yml builds and signs the `cairn` / `cairn-lsp` binaries.
+      # - tree-sitter.yml builds `tree-sitter-cairn.wasm` and attaches it to the
+      #   release; the website pins that asset URL at build time.
+      # - npm-publish.yml ships the same grammar to npm, so the npm package and
+      #   the crates.io crate always come from one tag.
+      #
+      # Each is dispatched independently: a failure in one is a missing artifact
+      # to re-dispatch by hand, not a reason to withhold the other two.
+      - name: Dispatch tag-triggered workflows for the new tag
         if: steps.release_plz.outputs.releases_created == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -199,8 +232,15 @@ jobs:
             echo "release-plz reported a release but no v* tag is reachable from HEAD; skipping publish dispatch." >&2
             exit 1
           fi
-          echo "Dispatching publish.yml for $release_tag"
-          gh workflow run publish.yml -f tag="$release_tag"
+          failed=()
+          for wf in publish.yml tree-sitter.yml npm-publish.yml; do
+            echo "Dispatching $wf for $release_tag"
+            gh workflow run "$wf" -f tag="$release_tag" || failed+=("$wf")
+          done
+          if [ ${#failed[@]} -gt 0 ]; then
+            echo "Failed to dispatch: ${failed[*]}. Re-run them manually with the tag $release_tag." >&2
+            exit 1
+          fi
 
       # Open a canary → main promote PR only when release-plz reports it
       # actually published in this run. The `releases_created` output is the
