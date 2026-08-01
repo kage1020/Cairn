@@ -1,5 +1,5 @@
 ==================
-level nested inside struct
+level nested inside struct (field labels)
 ==================
 
 struct keep size=11x9
@@ -10,21 +10,22 @@ struct keep size=11x9
 
 (source_file
   (struct_decl
-    (identifier)
-    (attribute_list
-      (attribute (identifier) (size_literal (integer) (integer))))
-    (struct_body
+    name: (identifier)
+    args: (attribute_list
+      (attribute key: (identifier) value: (size_literal (integer) (integer))))
+    body: (struct_body
       (nested_scope
-        (identifier)
-        (attribute_list
-          (attribute (identifier) (identifier))
-          (attribute (identifier) (integer)))
-        (struct_body
-          (member_stmt (member_keyword)
-            (command_arg_list
-              (command_arg (attribute (identifier) (identifier)))
-              (command_arg (attribute (identifier) (identifier)))
-              (command_arg (attribute (identifier) (identifier))))))))))
+        keyword: (identifier)
+        args: (attribute_list
+          (attribute key: (identifier) value: (identifier))
+          (attribute key: (identifier) value: (integer)))
+        body: (struct_body
+          (member_stmt
+            keyword: (member_keyword)
+            args: (command_arg_list
+              (command_arg (attribute key: (identifier) value: (identifier)))
+              (command_arg (attribute key: (identifier) value: (identifier)))
+              (command_arg (attribute key: (identifier) value: (identifier))))))))))
 
 ==================
 room nested inside level

@@ -1,5 +1,5 @@
 ==================
-Bare theme with slots
+Bare theme with slots (field labels)
 ==================
 
 theme medieval:
@@ -10,10 +10,10 @@ theme medieval:
 
 (source_file
   (theme_decl
-    (identifier)
-    (theme_body
-      (slot_binding (identifier) (material_ref (identifier)))
-      (slot_binding (identifier) (material_ref (identifier))))))
+    name: (identifier)
+    body: (theme_body
+      (slot_binding name: (identifier) target: (material_ref (identifier)))
+      (slot_binding name: (identifier) target: (material_ref (identifier))))))
 
 ==================
 Selector rule with attribute filter
@@ -96,7 +96,7 @@ theme t:
         (selector (identifier) (identifier))))))
 
 ==================
-Selector with attribute filter, dotted tail, and bindings
+Selector with attribute filter, dotted tail, and bindings (field labels)
 ==================
 
 theme t:
@@ -106,12 +106,12 @@ theme t:
 
 (source_file
   (theme_decl
-    (identifier)
-    (theme_body
+    name: (identifier)
+    body: (theme_body
       (selector_rule
-        (selector
+        selector: (selector
           (identifier)
-          (attribute_list (attribute (identifier) (identifier)))
+          (attribute_list (attribute key: (identifier) value: (identifier)))
           (identifier))
-        (attribute_list
-          (attribute (identifier) (material_ref (identifier))))))))
+        bindings: (attribute_list
+          (attribute key: (identifier) value: (material_ref (identifier))))))))

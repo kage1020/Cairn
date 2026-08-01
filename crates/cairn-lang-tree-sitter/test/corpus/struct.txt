@@ -83,7 +83,7 @@ struct empty size=1x1
       (attribute (identifier) (size_literal (integer) (integer))))))
 
 ==================
-Member statement with indented body
+Member statement with indented body (field labels)
 ==================
 
 struct gatehouse size=7x5
@@ -94,20 +94,22 @@ struct gatehouse size=7x5
 
 (source_file
   (struct_decl
-    (identifier)
-    (attribute_list
-      (attribute (identifier) (size_literal (integer) (integer))))
-    (struct_body
+    name: (identifier)
+    args: (attribute_list
+      (attribute key: (identifier) value: (size_literal (integer) (integer))))
+    body: (struct_body
       (member_stmt_with_body
-        (member_keyword)
-        (command_arg_list (command_arg (attribute (identifier) (identifier))))
-        (struct_body
-          (member_stmt (member_keyword)
-            (command_arg_list
-              (command_arg (attribute (identifier) (material_ref (identifier)))))))))))
+        keyword: (member_keyword)
+        args: (command_arg_list
+          (command_arg (attribute key: (identifier) value: (identifier))))
+        body: (struct_body
+          (member_stmt
+            keyword: (member_keyword)
+            args: (command_arg_list
+              (command_arg (attribute key: (identifier) value: (material_ref (identifier)))))))))))
 
 ==================
-def declaration
+def declaration (field labels)
 ==================
 
 def cottage size=1x1
@@ -117,15 +119,17 @@ def cottage size=1x1
 
 (source_file
   (def_decl
-    (identifier)
-    (attribute_list
-      (attribute (identifier) (size_literal (integer) (integer))))
-    (struct_body
-      (member_stmt (member_keyword)
-        (command_arg_list (command_arg (attribute (identifier) (identifier))))))))
+    name: (identifier)
+    args: (attribute_list
+      (attribute key: (identifier) value: (size_literal (integer) (integer))))
+    body: (struct_body
+      (member_stmt
+        keyword: (member_keyword)
+        args: (command_arg_list
+          (command_arg (attribute key: (identifier) value: (identifier))))))))
 
 ==================
-site declaration
+site declaration (field labels)
 ==================
 
 site plaza
@@ -135,13 +139,15 @@ site plaza
 
 (source_file
   (site_decl
-    (identifier)
-    (struct_body
-      (member_stmt (member_keyword)
-        (command_arg_list (command_arg (attribute (identifier) (identifier))))))))
+    name: (identifier)
+    body: (struct_body
+      (member_stmt
+        keyword: (member_keyword)
+        args: (command_arg_list
+          (command_arg (attribute key: (identifier) value: (identifier))))))))
 
 ==================
-Member with selector, args, and arrow output
+Member with selector, args, and arrow output (field labels)
 ==================
 
 struct gatehouse size=7x5
