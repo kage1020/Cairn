@@ -29,6 +29,7 @@ pub use diagnostic::{
 pub use sink::DiagnosticSink;
 
 use crate::ast::Module;
+use crate::edition::Edition;
 use crate::intent::IntentModule;
 
 /// Run every validation pass over the given module + IR and collect all
@@ -42,14 +43,24 @@ use crate::intent::IntentModule;
 /// diagnostics (`E_UNRESOLVED_SLOT`, `E_UNKNOWN_SLOT_TARGET`,
 /// `E_THEME_SELECTOR_UNMATCHED`) are merged with the syntactic findings so a
 /// single `cairn check` invocation reports both kinds together.
+/// Run every syntactic + semantic diagnostic pass and return the merged,
+/// span-sorted findings.
+///
+/// The `edition` argument threads through to the resolver so per-edition
+/// theme-variant selection (spec versioning-editions §10.7) can pin the
+/// diagnostic set for a specific target. Pass `None` when no target has
+/// been picked yet (the CLI's `cairn check` without `--edition`); the
+/// resolver then unions slot names across variants of one logical theme
+/// so `mat_slot=` references that only one variant declares don't
+/// spuriously fire `E_UNRESOLVED_SLOT`.
 #[must_use]
-pub fn check(module: &Module, ir: &IntentModule) -> Vec<Diagnostic> {
+pub fn check(module: &Module, ir: &IntentModule, edition: Option<Edition>) -> Vec<Diagnostic> {
     let mut sink = DiagnosticSink::new();
     duplicate::run(module, &mut sink);
     keyword_allowlist::run(ir, &mut sink);
     connect_arity::run(ir, &mut sink);
     type_mismatch::run(module, &mut sink);
-    for d in crate::resolve::resolve(ir).diagnostics {
+    for d in crate::resolve::resolve(ir, edition).diagnostics {
         sink.push(d);
     }
     sink.into_sorted()

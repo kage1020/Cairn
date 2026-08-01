@@ -12,6 +12,847 @@
 
 ## [Unreleased]
 
+### 追加
+
+- `PlacementPhase` の 3 つの遷移に、失敗を値で返すミラーを追加した:
+  `try_route` / `try_delay` / `try_legalize` で、いずれも
+  `Result<(), PlacementPhaseTransitionError>` を返す。順序違反で
+  panic するのはパイプラインの各パスにとっては正しい形である —
+  フレッシュなコンパイルにおける順序違反は必ず呼び出し側のバグで、
+  復帰経路が存在しない。しかし復帰経路を持つ消費者にとってはそうでは
+  なくなる: 古いキャッシュ項目を「作り直す」判断に変換する検証器、
+  不正な dump を診断で拒否すべき IR 取り込み、呼び出し 1 回のミスで
+  長命プロセスを落とせない language server である。パイプラインは
+  引き続き panic 版を呼ぶが、その panic 版は `try_*` ミラー +
+  panic という形になったので、どの遷移が合法かは 1 か所でしか
+  述べられず、2 つの形が食い違うことはない。エラーは variant 名だけ
+  でなく違反時の phase 全体を運ぶので、消費者はその cell が実際に
+  どこまで進んでいたかを見られる。同時にそれが、エラーの `Display`
+  が panic 文言をバイト単位で再現できる理由でもある — ハードコード
+  した写しではなく実際の panic payload と突き合わせるテストで固定
+  してある。`PlacementPhaseTransitionError::with_context` は
+  呼び出し側の cell 識別子を `route_at` などと同じ位置に差し込むので、
+  同じ cell についての取り込み診断とパイプライン panic が同じ読み口に
+  なる。拒否された遷移は phase を一切変更しない — panic する呼び出し側
+  と違い、復帰する呼び出し側はその後もその phase を使うからである。
+  `PlacementPhase` と新しいエラー型は crate ルートから re-export した。
+
+### 変更
+
+- `PlacementPhase` の 3 つの遷移が同じ cardinality を名乗るように
+  した。`route` / `delay` が "must run once per …" だった一方で
+  `legalize` だけが "must run **at most** once per delayed IR" で、
+  これは phase enum 導入以前に crossing pass が持っていた
+  release-loud な `assert!` の文言を引き継いだものだった。
+  3 つとも "must run **exactly** once per …" に統一した。
+  不揃い以前に "at most once" は guard の実際の検査内容を
+  過小評価していた — `legalize` は `Delayed` に到達していない
+  phase も拒否するので、段階飛ばしも再実行と同じくここで落ちる。
+  それを伝えられるのは "exactly once" だけである。`route` /
+  `delay` の doc コメントは元々 "exactly once" と書いていたので、
+  panic 文面が自分の記述する契約と一致したことにもなる。
+  cardinality 節は 3 か所の呼び出し側から `TRANSITION_CARDINALITY`
+  という単一の const に移し、すべての遷移メッセージが違反した pass 名と
+  その pass が消費する phase の間に差し込む — この 3 つの隣に追加
+  される遷移は 2 つの名詞を選べるが guard の強さは選べない。
+  文言が drift したのはまさにそれが可能だったからである。
+
+- JSON dump の各 `PlacedCellNode` に、最後にその cell へ書き込んだ
+  place-and-route pass を名指しする `"stage"` キーを先頭フィールド
+  として追加した。値は `placement` / `route` / `delay` / `crossing`
+  で、`cairn synth --stage <s>` が受け付ける語彙と同一 — dump 自身が
+  それを生成したフラグ名を持つ。従来はどの optional キーが出ているか
+  から stage を推論するしかなく、その推論は全域ではなかった:
+  `PlacementPhase::Delayed` の cell と、crossing pass が buffer を
+  0 個しか materialize しなかった `Legalized` の cell は、空の
+  `buffer_coords` が serde-skip されるためまったく同じキー集合に
+  シリアライズされる。つまり JSON を読む側は stage 3 の dump と
+  「legalize すべきものが無かった stage 4 の dump」を区別できなかった。
+  タグの導入でこれを解決しつつ、空 Vec を sentinel に昇格させることは
+  していない — `buffer_coords` は空なら従来通り省略される。
+  以下のエントリが述べる「stage N の dump は stage N+1 の dump の
+  純粋な部分集合」という契約は、これに伴い「`stage` タグを除いて
+  部分集合」へと緩和される: タグは stage ごとに新しく*現れる*のでは
+  なく*値が変わる*唯一のフィールドである。タグは保存されず毎回の
+  シリアライズ時に phase から導出されるため、名指しする variant と
+  乖離しえない。
+- `PlacementPhase::Legalized::buffer_coords` の型を
+  `Vec<CellCoord>` から `Vec<BufferCoord>` に拡張した。新しい
+  `BufferCoord { port: PortName, coord: CellCoord }` は crossing
+  pass が materialize した各 implicit buffer repeater について、
+  その buffer がどの cell driver port の segment に乗ったのかを
+  座標と一緒に保持する。crossing pass は buffer 座標を選ぶ際に
+  既に `cell.drivers` を走査していたが、出口で port 情報を捨てて
+  いた — 下流の block-array voxel lowering は
+  `drivers[i].net → source coord → floor((s - 1) /
+  DUST_ATTENUATION_LIMIT)` を再計算しないと port を復元できなかった。
+  attribution を座標と並べて持たせることで、lowering 側が
+  driver 単位で buffer を直接グルーピングできるようになる。
+  非空エントリの JSON wire 形式は
+  `{"x":..,"y":..,"z":..[,"layer":..]}` から
+  `{"port":"a","coord":{"x":..,"y":..,"z":..[,"layer":..]}}` に
+  変わり、netlist 側の `CellPortDriver` が既に採っている
+  `{port, ...}` shape と揃えた。空の `buffer_coords` は従来通り
+  serde-skip されるので、delay pass が 0 buffer と数えたスコープは
+  上記 `stage` タグを除けば delayed IR と byte 等価のまま。
+  `PlacedCellNode::buffer_coords()` /
+  `PlacementPhase::buffer_coords()` は `&[BufferCoord]` を返し、
+  `PlacementPhase::legalize` は `Vec<BufferCoord>` を受け取る。
+- 下記 M6-PR5 / M6-PR6 / M6-PR7 が `PlacedCellNode` に追加した 3 つの
+  進化フィールド (`wire_length` / `delay_ticks` / `buffer_coords`)
+  を単一の `phase: PlacementPhase` enum に集約した。`Unrouted` /
+  `Routed` / `Delayed` / `Legalized` の 4 variants が
+  place-and-route パイプラインの最初 4 ステージに一対一で対応し、
+  「`delay_ticks` は付いているが `wire_length` が無い」「delay 前
+  なのに `buffer_coords` に値がある」といった不正状態を型で表現
+  不能にした。ステージ間の遷移は `PlacementPhase::route` / `delay`
+  / `legalize` で表現し、各メソッドは現在の variant を pattern
+  match して不正な呼び出し順で release-loud panic を起こす — これ
+  まで 3 pass に散在していた `debug_assert!` / release-`assert!`
+  のガードを、統一された release-loud 契約に置き換える。
+  `PlacementPhase` は `#[non_exhaustive]` なので将来の Stage 5
+  (`EditionLegalized`) 追加は accessor が既に隠している以外の
+  downstream `match` サイトに対して additive。`PlacedCellNode` の
+  `phase` フィールド自体は `pub(crate)` で、下流コンシューマからは
+  旧フィールドと等価な `Option<u32>` / `&[CellCoord]` を返すフラット
+  アクセッサ (`wire_length()` / `delay_ticks()` / `buffer_coords()`)
+  経由のみ見える。手書き `Serialize` 実装が phase を
+  `{stage, cell, drivers, coord[, wire_length][, delay_ticks][, buffer_coords]}`
+  にフラット化するため、値の綴りは tagged enum object にならず以前の
+  リビジョンのフラット形のまま — wire 形式への追加は上記の `stage`
+  キーのみ。
+
+### 追加
+
+- `PlacementStage` — 上記「変更」の `"stage"` キーを支える
+  `PlacementPhase` の 4 variant への射影。他の Placement IR 型と
+  同様 `cairn-lang-redstone` のルートから export する。
+  `PlacementPhase::stage()` / `PlacedCellNode::stage()` が返し、
+  `PlacementStage::as_str` が wire 上の綴り (`placement` / `route` /
+  `delay` / `crossing`) を 1 か所に固定する — layer 語彙に対して
+  `RouteLayer::as_str` が果たしているのと同じ役割。`cairn synth` が
+  `--edition` 欠落を拒否する際に出す `--stage <name>` 断片も、
+  Placement 系 4 stage についてはリテラルの再掲をやめてこの accessor
+  から導出するようになった。連鎖の 3 つ目の綴り — clap が
+  `SynthStage` の variant 識別子から導出する、どの型とも結びつかない
+  もの — は unit test が `ValueEnum` から読み戻して照合するので、
+  variant rename で「受け付けるフラグ」と「出力されるタグ」が黙って
+  ずれることはない。隣接する 3 つの
+  値アクセッサと違い `stage()` は全域で、buffer 座標を 1 つも持たない
+  `Legalized` を含めどの phase もちょうど 1 つの stage に属する。
+  `stage()` と `Serialize` 実装はいずれも `_ =>` の catch-all では
+  なく全 variant を明示列挙しているので、Stage 5 の variant 追加は
+  「stage 5 の dump が黙って `crossing` と誤ラベルされる」ではなく
+  それを名指しすべき 2 か所でのコンパイルエラーになる。
+  `PlacementStage` は `PlacementPhase` と同じ理由で
+  `#[non_exhaustive]`。
+- `PlacementPhase::route_at` / `delay_at` / `legalize_at` — 3 つの
+  phase 遷移メソッドに context を載せられる双子を追加し、順序違反の
+  遷移 panic がそれを踏んだ cell を名指しするようにした。既存メソッド
+  にも `#[track_caller]` は付いており backtrace には呼び出し側の
+  `.rs:line` が出るが、**どの** cell が既に routed / delayed /
+  legalized だったのかは分からず、オペレータは backtrace から IR を
+  辿り直す必要があった。`_at` 形は任意の `Display` を受け取り、
+  違反した phase と invariant 節の間に差し込む。これにより routing /
+  delay / crossing の各 pass は例えば `PlacementPhase::legalize
+  called on Legalized { .. } for cell #0 at (16,0,1) in struct
+  `twice` — crossing legalization must run exactly once per delayed
+  IR` のように失敗する。パンくずは pass 診断が既に使っている語彙
+  （`cell #{index}` / `({x},{y},{z})` / ``{kind} `{name}` ``）で
+  記述され、`PlacementIr::cells` 内での位置・placement
+  coord・所属 scope の 3 点から組み立てる — `PlacedCellNode` は
+  source-level name を持たないため、この 3 点が cell の唯一の安定した
+  識別子である。coord の `layer` は `RouteLayer::Plane` でないときだけ
+  描画する — cell coord では起こり得ない（placement pass が `Plane` を
+  刻み、以降どの pass も cell body を動かさない）ので通常の描画は短い
+  まま、かつ invariant を破った hand-built IR が plane coord に見える
+  座標を出力することもない。context 無しの `route` /
+  `delay` / `legalize` は、対応する `_at` 形と identity 節の有無だけが
+  異なる — context が無い場合は空の節を描画するのではなく ` for …`
+  節ごと落とすため、余分な区切りが混入しない。
+- Redstone crossing legalization と `cairn synth --stage crossing
+  --edition <java|bedrock>`（M6-PR7）— M6 redstone-simulates
+  パイプラインの 7 枚目。`cairn-lang-redstone` に
+  `compile_crossing(&ScopedPlacementIr) -> CrossingOutput`
+  エントリポイントを追加し、M6-PR6 の delayed Placement IR を走査して
+  routing / delay pass と同じ `NetRef → source coord` マッピングで各
+  net の Manhattan Steiner tree を再描画し、2 つのタスクを実行する —
+  `spec/redstone` §14.5 の 5 段パイプライン（Placement → Steiner
+  routing → Delay insertion → Crossing legalization → Edition
+  legalization）の第 4 段。
+  タスク 1 は plane crossing 検出: cell/pad ではない wire coord を
+  2 つの異なる net が占めるケースを検出し、`void=<N>` 予約に plane
+  より上の y-layer が無い（`void < 2`）場合は新診断
+  `E_CROSSING_CONGESTION` を発火して refuse する。v1 では wire
+  crossing 自体を `Bridge` layer に持ち上げない — routed wire path
+  は IR に保存されないため escape 記録の attach 先がなく、代わりに
+  crossing coord set は pass 内でタスク 2 のバッファ配置を steer
+  するためだけに使われる。タスク 2 は暗黙 buffer repeater の座標
+  割り当て: 各 driver segment について L-shape 経路（x → z → y、
+  routing と同じ軸順）を再走し、`k * DUST_ATTENUATION_LIMIT`
+  （`k = 1..=buffer_count`）の点に buffer を置く。cell / pad /
+  plane crossing / 既配置 buffer と衝突する候補は
+  `void=<N>` 予約内の最初の空いた `RouteLayer::Bridge` y-layer
+  （`y in 1..void`）にエスケープし、その `(x, z)` の全 bridge
+  y-layer が塞がっている場合は新診断 `E_BUFFER_COORD_COLLISION`
+  で refuse する。両診断ともユーザーへの自己修正三点セット
+  （「`void` を増やす」「region を広げる」「複数の `circuit` に
+  分割する」）を提示し、`CrossingCongestion` の primary は衝突する
+  2 net の名前を anchor 座標と共に含めるので、ユーザーは原因の
+  ソースレベル信号を特定できる。
+  新しい IR 型は追加しない: crossing pass は `PlacedCellNode` の
+  phase 表に沿った field write。`CellCoord` に `layer: RouteLayer`
+  （`Plane` / `Bridge` / `Via`; `Via` は v1 で producer なし、
+  reserved と明記）を追加、`PlacedCellNode` に
+  `buffer_coords: Vec<CellCoord>` を追加し、crossing pass は
+  delay pass が数えた implicit buffer repeater の具体座標を 1 個
+  ずつここに埋める。両フィールドともデフォルト値では serde-skip
+  され（`layer` は `Plane` のとき、`buffer_coords` は空のとき）、
+  placement / routing / delay JSON dump は `stage` タグを除けば
+  legalized IR dump の additive subset として扱える — legalize 対象の
+  無いスコープでキーは増減せず、変わるのはタグの値だけ。
+  失敗したスコープは crossing
+  出力から drop され、下流の block-array voxel 落としが
+  「実現不能なレイアウトに対する部分 buffer」を silent に
+  materialise することはない。CLI の `cairn synth --stage` に
+  `crossing` 値を追加。`--edition <java|bedrock>` フラグは
+  `edition` / `placement` / `route` / `delay` と同様に必須で、
+  edition-neutral な `logic` / `netlist` stage では引き続き
+  exit 2 で拒否する。`--stage crossing` は upstream の fail-loud
+  を継承する: routing 段で `E_ROUTE_CONGESTION`、delay 段で
+  `E_ATTENUATION_LIMIT` に落ちたスコープはそれぞれの段で報告され
+  exit 1 になり、crossing pass は走らない。今回のスコープ外:
+  wire crossing の `Bridge` / `Via` materialisation、edition
+  legalization、block-array voxel 落とし、physical-tile（3 層目）
+  cell library、tick simulator、`assert truth|always|latency`
+  の評価、シーケンシャルマクロ（`latch` / `pulse` / `delay` /
+  `edge_*` / `counter`）、QC/BUD 拒否 (`E_NO_PORTABLE_IMPL`)。
+- Redstone delay insertion と `cairn synth --stage delay
+  --edition <java|bedrock>`（M6-PR6）— M6 redstone-simulates
+  パイプラインの 6 枚目。`cairn-lang-redstone` に
+  `compile_delay(&ScopedPlacementIr) -> DelayOutput` エントリポイントを
+  追加し、M6-PR5 の routed Placement IR を走査して各セルの
+  `delay_ticks` を `None` から `Some(base delay + implicit buffer
+  repeater 由来 tick)` に書き換える — `spec/redstone` §14.5 の 5 段
+  パイプライン（Placement → Steiner routing → Delay insertion →
+  Crossing legalization → Edition legalization）の第 3 段。新しい IR
+  型は追加しない: delay pass は `PlacedCellNode` の phase 表に沿った
+  field write で、M6-PR5 の `wire_length` write と対称。base delay は
+  `EditionCell::edition(self)` の兄弟として `const fn
+  base_delay_ticks(self)` を追加し、cell library の変種テーブルの
+  隣に tick 数字を置く: Java `ComparatorAnd` / `RepeaterOr` /
+  `InverterTorch` と Bedrock `InverterTorch` はそれぞれ 1 tick、
+  Bedrock `TorchAnd` は 2 tick（NAND→NAND の 2-torch 直列）、Bedrock
+  `TorchOr` は 0 tick（bare dust merge）、`*Unpinned` variant は
+  `UNPINNED_BASE_DELAY_TICKS`（3 tick — 現在 pinned な最大 2 tick より
+  厳密に大きい）を返す pessimistic sentinel（将来の pinned rename が 1 行の
+  match arm 書き換えで済み、delay 見積もりを silent に狂わせず、
+  pinned 値と混同されない）。暗黙
+  buffer repeater は dust attenuation 上限 15 blocks を跨ぐ driver
+  segment に付く: 長さ `s` blocks の segment は `floor((s - 1) /
+  DUST_ATTENUATION_LIMIT)` 個の buffer を実装扱いし、各 buffer は
+  `BUFFER_REPEATER_TICKS`（1 tick, デフォルトの `repeater delay=1` に
+  一致）を寄与する。buffer は **暗黙**扱いで座標を割り当てない — routing
+  pass は自身の per-scope occupancy 集合を既に破棄しており、buffer
+  座標決定は stage 4（crossing legalization）が cross-net overlap を
+  `RouteLayer::Bridge` / `Via` layer にエスケープするのと合わせて
+  owner になる方が自然だから。新診断 `E_ATTENUATION_LIMIT` は driver
+  segment が `MAX_ATTENUATION_SEGMENT`（256 blocks — buffer 16 個
+  連続分）を超えたときのみ発火する v1 sanity cap。`(DUST_ATTENUATION_LIMIT,
+  MAX_ATTENUATION_SEGMENT]` の帯は正常経路で暗黙 buffer が吸収し、
+  256 blocks 超えは stage-4 bridge/via 幾何が必須の非現実的な長さで
+  fail-loud させる。per-driver Manhattan segment は routing pass と
+  同じ `NetRef → source coord` 経路で再算出する（routing は driver 総和
+  としての `wire_length` のみを保存する意図的な選択で、per-driver segment
+  は再歩行が安価で JSON に二重に持たせるとむしろ膨らむ）; その共有の
+  ために `input_pad` / `output_pad` / `manhattan` を `pub(crate)` に
+  昇格 — pad 座標の owner は routing pass のまま維持し、将来
+  `PlacementIr` の field に昇格する予定は 1 段の migration に保つ。
+  Attenuation で失敗したスコープは delay 出力から drop され、下流の
+  tick simulator が partial `delay_ticks` を silent に読み取ることは
+  ない。CLI の `cairn synth --stage` に `delay` 値を追加。`--edition
+  <java|bedrock>` フラグは `edition` / `placement` / `route` と同様に
+  必須で、edition-neutral な `logic` / `netlist` stage では引き続き
+  exit 2 で拒否する。`--stage delay` は upstream の fail-loud を継承
+  する: routing 段で `E_ROUTE_CONGESTION` に落ちたスコープは
+  routing 段で報告され exit 1 になり、delay pass は走らない。今回の
+  スコープ外: crossing legalization と `RouteLayer::Bridge` / `Via`
+  エスケープ、edition legalization、block-array voxel 落とし、
+  physical-tile（3層目）cell library、tick simulator、`assert
+  truth|always|latency` の評価、シーケンシャルマクロ（`latch` /
+  `pulse` / `delay` / `edge_*` / `counter`）、QC/BUD 拒否
+  (`E_NO_PORTABLE_IMPL`) — それぞれ本 PR で確定した delayed Placement
+  IR shape の上に後続 PR が積む。
+- Redstone Steiner routing と `cairn synth --stage route
+  --edition <java|bedrock>`（M6-PR5）— M6 redstone-simulates
+  パイプラインの5枚目。`cairn-lang-redstone` に
+  `compile_routing(&ScopedPlacementIr) -> RoutingOutput`
+  エントリポイントを追加し、M6-PR4 の Placement IR を走査して各
+  スコープの `circuit region=` 予約領域の中に driver net ごとの
+  Manhattan Steiner tree を敷く — `spec/redstone` §14.5 の 5 段
+  パイプライン（Placement → Steiner routing → Delay insertion →
+  Crossing legalization → Edition legalization）の第 2 段。新しい
+  IR 型は追加しない: routing pass は `PlacedCellNode` の phase 表に
+  沿った field write で、各セルの `wire_length` を `None` から
+  `Some(driver source から cell への Manhattan 距離の総和)` に
+  書き換える。`delay_ticks` は本段でも `None` のまま — §14.4 が
+  「delay は routed wire length + 物理セル選択から決まる」と規定して
+  おり、これは stage 3 の担当だから。v1 のアルゴリズムは後続 pass が
+  必要とする shape を最小限で満たす構成に絞る: net 収集（NetRef
+  ごとに source coord → sink coords）、Kou-Markowsky 風の
+  rectilinear MST（`{source} ∪ sinks` の完全 Manhattan グラフに
+  Kruskal、重み/インデックスで決定論的な tie-break を打つので
+  regression story が pin される）、L-shape 描画（x → z → y の
+  固定順で安定性確保）、スコープ単位の `HashSet<CellCoord>` 占有
+  集合（全 cell coord と入力 / 出力 pad で seed）、そして congestion
+  予算用の wire-only footprint の総和。入力 pad 座標は `(x=0, y=0,
+  z=1+i)`、出力 pad 座標は `(x=width-1, y=0, z=1+k)` に置き、
+  degenerate region では `depth-1` で飽和させる — これは v1 の
+  convention として crate-private に閉じ、routing の外側で必要に
+  なった時点で `PlacementIr` の `input_pads` / `output_pads` フィールド
+  として `#[non_exhaustive]`-safe に追加する。既存の
+  `E_ROUTE_CONGESTION` コードはここで再発火し、判定基準は placement
+  pass の cell-only pessimistic budget ではなく実際の post-routing
+  footprint（`cells.len() * CELL_FOOTPRINT + unique wire coords >
+  reserved_area`）を使う。primary は `routed netlist occupies
+  ~N.Mx the reserved area (void=V, region WxD)` と読み、下流の
+  reader が placement 側の fail-loud と routing 側のそれとを区別
+  できる。footer は §14.5 の 3 つの修正 triple をそのまま維持する。
+  placement の pessimism（cells × 4）のおかげで、routing が
+  `E_ROUTE_CONGESTION` に落ちるスコープはほぼ必ずセルが予約領域の
+  境界きっかりまで詰まっていて、あと Manhattan で 1 段のワイヤを
+  引くだけで flip するもの — 意図的なコストモデルであり、二重検出の
+  見落としではない。congestion で失敗したスコープは routing 出力
+  から drop されるので、下流 pass が partial routed layout を silent
+  に受け取ることはない（earlier stage と同じ fail-loud cascade
+  ポリシー）。CLI の `cairn synth --stage` に `route` 値を追加。
+  `--edition <java|bedrock>` フラグは `edition` / `placement` と
+  同様に必須で、edition-neutral な `logic` / `netlist` stage では
+  引き続き exit 2 で拒否する。今回のスコープ外: delay insertion
+  （リピータバッファ）、attenuation-limit 検出
+  （`E_ATTENUATION_LIMIT`、dust segment 15 blocks 超）、crossing
+  legalization と `RouteLayer::Bridge` / `Via` エスケープ、edition
+  legalization、block-array voxel 落とし、physical-tile（3層目）cell
+  library、tick simulator、`assert truth|always|latency` の評価、
+  シーケンシャルマクロ (`latch` / `pulse` / `delay` / `edge_*` /
+  `counter`)、QC/BUD 拒否 (`E_NO_PORTABLE_IMPL`) — それぞれ本 PR で
+  確定した routed Placement IR shape の上に後続 PR が積む。
+- Redstone Placement IR と `cairn synth --stage placement
+  --edition <java|bedrock>`（M6-PR4）— M6 redstone-simulates
+  パイプラインの4枚目。`cairn-lang-redstone` に
+  `compile_placement(&ScopedEditionNetlistIr, &IntentModule)`
+  エントリポイントを追加し、M6-PR3 の Edition Netlist IR を走査して
+  各 edition タグ付きセルをスコープの `circuit region=` 予約領域に
+  配置する — `spec/redstone` §14.5 の5段パイプライン
+  （Placement → Steiner routing → Delay insertion → Crossing
+  legalization → Edition legalization）の第1段。セルは
+  Edition Netlist IR が既に持つトポロジカル順（`cells[i]` 内の
+  `NetRef::Cell(j)` は `j < i` を満たす）で並び、`x = i`, `y = 0`,
+  `z = 0` に固定される — 1D 配置で、クロスやファンアウトが絡む
+  pseudo-2.5D へのリフトは routing pass 側の担当。§14.4 の
+  「delay は routed wire length から決まる」に従い、`PlacedCellNode`
+  の `wire_length` / `delay_ticks` は `Option` として予約され今段では
+  常に `None` — 続く PR での値埋めは field write であって schema
+  変更ではないので、下流 JSON consumer は今日から stable な wire
+  shape を見る。`CircuitRegionReservation` は `region=<label>
+  void=<N>` の予約情報と、囲むスコープの `size=WxH` foot print を
+  Intent IR から丸ごとコピーして持つので、routing pass が消費する
+  型は 1 つに集約される。`spec/lint` §11 の self-correction
+  triple に沿った 2 つの新規 diagnostic コード:
+  `E_NO_CIRCUIT_REGION` は「配置すべきセルがあるのに `circuit
+  region=` 行が無い（あるいは囲むスコープに `size=` が無い）」
+  ケースを、`E_ROUTE_CONGESTION` は「netlist の必要面積が予約領域を
+  上回った」ケースを検出する。後者の primary は比率と予約 shape を
+  引用する（`synthesized netlist needs ~1.3x the reserved area
+  (void=1, region 3x3)`）— footer は §14.5 が挙げる 3 つの修正
+  （`increase void, enlarge region, or split into multiple
+  circuit blocks`）をそのまま提示する。congestion / missing-region で
+  失敗したスコープは出力から drop されるので、下流 consumer が
+  partial layout を silent に受け取ることは無い（synth pass の
+  未束縛シグナル cascade 抑制と同じ fail-loud ポリシー）。
+  `cairn-lang-core` には `intent::circuit_regions(&IntentModule)
+  -> Vec<CircuitRegion>` API を薄く追加 — 既に検証済みの
+  `circuit region=` fixture を Intent IR から取り出す共通エントリ
+  で、redstone crate が `member.intent_state` を再度パースする
+  必要が無い。block-array pass 側の `recognize_circuit_region` は
+  引き続き per-shape の `W_DEFERRED_MEMBER` を担当するので、
+  2 consumer が同じ source line に対して diagnostic を二重発火する
+  ことは無い。CLI の `cairn synth --stage` に `placement` 値を追加。
+  `--edition <java|bedrock>` フラグは `edition` と同様に必須で、
+  edition-neutral な `logic` / `netlist` stage では引き続き exit 2
+  で拒否される。今回のスコープ外: Steiner routing / wire length
+  確定、delay insertion（リピータバッファ）、crossing legalization、
+  edition legalization、block-array voxel 落とし、physical tile
+  （3層目）cell library、tick simulator、`assert truth|always|
+  latency` の評価、シーケンシャルマクロ (`latch` / `pulse` /
+  `delay` / `edge_*` / `counter`)、QC/BUD 拒否
+  (`E_NO_PORTABLE_IMPL`) — それぞれ後続 PR が本 PR で確定した
+  Placement IR shape の上に積む。
+- Redstone Edition Netlist IR と `cairn synth --stage edition
+  --edition <java|bedrock>`（M6-PR3）— M6 redstone-simulates
+  パイプラインの3枚目。`cairn-lang-redstone` に
+  `compile_edition_netlist(&ScopedNetlistIr, Edition)` エントリポイントを
+  追加し、M6-PR2 の Netlist IR を走査して各 `LogicalCell` を
+  ターゲットエディションでの実装へ落とす — `spec/redstone` §14.6 の
+  3層セルライブラリ (`Logical Cell → Edition Cell → Physical Tile`)
+  の中段。純粋な構造リライトで、driver / `NetRef` / inputs / outputs /
+  `signal_defs` は源の Netlist IR から丸ごとコピーされ、トポロジカル
+  不変量 (`cells[i]` 内の `NetRef::Cell(j)` は `j < i`) は構成で保存される。
+  `EditionCell` はターゲットエディションと物理実装ファミリの両方を名前に
+  持ち、Java AND セルを Bedrock トーチタイルに誤って組み合わせるバグは
+  ランタイムエラーではなく型エラーになる — `and` は Java `ComparatorAnd`
+  / Bedrock `TorchAnd`、`or` は Java `RepeaterOr` / Bedrock `TorchOr`、
+  `not` は Java / Bedrock 双方の `InverterTorch`（構造は共通だが後段の
+  配置器が正しいタイル向きを選べるようエディションタグは保持、§14.6 の
+  エディション吸収済み差分の一つ「orientation」に相当）。パーサ未到達な
+  セル (`xor` / `nand` / `nor` / `mux`) は edition-agnostic な catch-all
+  ではなく、per-edition の `*Unpinned` プレースホルダバリアント
+  (`JavaXorUnpinned` / `BedrockXorUnpinned` / ...) にそれぞれ落ちるので、
+  コンテナ / セルの edition 整合は命名で強制され、後続のパーサ変更は
+  「対応する 1 match arm で placeholder をピン留め名にリネーム」で済む。
+  `(Edition, LogicalCell)` の照合はワイルドカード無しで完全網羅なので、
+  第 3 の `Edition` バリアント（Education）追加時は全マッピング箇所で
+  コンパイルエラーになり、silent な Java フォールスルーは起こらない。
+  §14.4 / §14.8 のとおり Edition Netlist IR も delay を持たず、リピータ
+  挿入は Placement IR 側で行う。CSE / 巡回検出 / 未束縛シグナル報告は
+  M6-PR1 で、Logical Cell 選択は M6-PR2 で済んでいるので、この pass も
+  独自の diagnostic を出さない純構造書き換え。CLI の `cairn synth
+  --stage` に `edition` 値を追加、同モードでは `--edition <java|bedrock>`
+  フラグが必須で、`logic` / `netlist` に渡された場合は exit 2 で拒否する
+  (silent に無視すると stage-vs-edition の軸が呼び出し側の頭の中で
+  ずれるため)。今回のスコープ外: place-and-route、リピータ挿入、
+  tick simulator、`assert truth|always|latency` の評価、シーケンシャル
+  マクロ (`latch` / `pulse` / `delay` / `edge_*` / `counter`)、
+  `circuit region=... void=N` の congestion 検出 (`E_ROUTE_CONGESTION`)、
+  QC/BUD 拒否 (`E_NO_PORTABLE_IMPL`) — それぞれ後続で本 PR が確定した
+  Edition Netlist IR shape の上に積む。
+- Redstone 組合論理 Netlist IR と `cairn synth --stage netlist`（M6-PR2）—
+  M6 redstone-simulates パイプラインの2枚目。`cairn-lang-redstone` に
+  `compile_netlist(&ScopedLogicIr)` エントリポイントを追加し、
+  M6-PR1 で得た Logic IR の各 `GateNode` を `LogicalCell`
+  （現状は `and` / `or` / `not`。`xor` / `nand` / `nor` / `mux` は
+  Logic IR 側と同じく enum に予約）でタグ付けした `CellNode` に書き換える。
+  セルはカノニカルなポート順 (`[A, B]` / `[A]` / `[Sel, A, B]`) で
+  driver を保持するので、後段のシミュレータや配置器は `PortName` を
+  見ずに位置インデックスで扱える。`NetRef` は Logic IR の arena 型
+  `SignalRef` と同型で、`cells[i]` に含まれる全 `NetRef::Cell(j)` が
+  `j < i` を満たすトポロジカル不変量を単一の forward walk で保存する。
+  `spec/redstone` §14.6 に従い、cell library の3層構造
+  (`Logical Cell → Edition Cell → Physical Tile`) のうち最上段のみをここで選び、
+  Java `ComparatorAND` / Bedrock `TorchAND` の Edition Cell 選択は
+  後段に譲るため IR は edition-neutral のまま。§14.4 / §14.8 のとおり
+  Netlist IR も delay を持たず、リピータ挿入は Placement IR 段まで
+  行わない。CSE / 巡回検出 / 未束縛シグナル報告は M6-PR1 で済んでいるので
+  netlist pass は独自の diagnostic を出さない純粋な構造書き換え。
+  CLI の `cairn synth` に `--stage <logic|netlist>` フラグを追加（既定は
+  後方互換のため `logic`）、依然として `--experimental-logic-synth`
+  ゲート配下。今後の placement / route / simulator 段もこのフラグに
+  乗せていくのでサブコマンドは増やさない。今回のスコープ外:
+  Edition Cell 選択、place-and-route、tick simulator、
+  `assert truth|always|latency` の評価、シーケンシャルマクロ
+  (`latch` / `pulse` / `delay` / `edge_*` / `counter`)、
+  `circuit region=... void=N` の congestion 検出（`E_ROUTE_CONGESTION`）、
+  QC/BUD 拒否（`E_NO_PORTABLE_IMPL`）— それぞれ後続 PR で本 PR が確定した
+  Netlist IR shape の上に積む。
+- Redstone 組合論理 Logic IR と `cairn synth`（M6-PR1）— M6 redstone
+  simulates パイプラインの最初のスライス。`cairn-lang-redstone` に
+  `synthesize(&IntentModule)` エントリポイントを追加し、全ての
+  struct / def / site body を走査してセンサ束縛 (`pressure_plate ...
+  -> sig.X` および将来的な `-> sig.Y` 尾を持つ任意のセンサ) を
+  `InputPort` として、アクチュエータ引数 (`opened_by=` / `powered_by=`
+  / `lit_by=` / `fired_by=`、`spec/redstone` §14.2 準拠) を
+  `OutputPort` として収集し、各 `logic sig.X = <expr>` 行をトポロジ
+  順に並んだ `GateNode` DAG へ lower する。組合論理プリミティブは
+  `and` / `or` / `not` を synth 経路に含め（現在の AST から到達可能
+  な範囲）、`xor` / `nand` / `nor` / `mux` は `GateKind` enum 上に
+  用意して後続 PR での関数呼出構文サポートを受け入れる準備を整える。
+  共通部分式除去 (CSE) により、2 行の `logic` が同じ `sig.a or sig.b`
+  を書いた場合は 1 個の OR ゲートに統合され、下流の placement が
+  ソースの意図しないファンアウトコストを払わない設計。診断コードは
+  4 種を新設し、`spec/lint` §11 の self-correction triple 形式に
+  従う: `E_LOGIC_UNBOUND_SIGNAL`（センサ・先行 `logic` のいずれにも
+  定義されていない参照、`Valid signals in scope: ...` 脚注で候補
+  一覧を提示）、`E_LOGIC_MULTIPLE_DRIVERS`（2 行の `logic` で同一
+  LHS または `logic` LHS がセンサと衝突）、`E_LOGIC_CYCLE`
+  （組合論理依存チェーンが自己ループを構成）、`W_LOGIC_UNUSED_SIGNAL`
+  （LHS がアクチュエータからも下流 `logic` からも参照されない
+  bare-ref / gate 生成 bind）。カスケード抑制のため failed-LHS
+  セットを維持し、根本原因 1 件に対する診断が消費側で複製されない
+  ようにしている。CLI 側には internal-tier の
+  `cairn synth <file> --experimental-logic-synth` サブコマンドが載り、
+  スコープ単位の Logic IR を JSON で dump する（pipeline が stable tier
+  に達するまでフラグは必須）。本 PR のスコープ外: Netlist IR、
+  cell library、place-and-route、tick simulator、`assert truth|always`
+  評価、sequential macros（`latch` / `pulse` / `delay` / `edge_*` /
+  `counter`）— いずれも本 PR で確定した Logic IR shape を土台にする
+  後続 PR で追加する。
+- Cairn VS Code 拡張機能と `cairn-lsp` バイナリ配布（M5-PR3）— M5
+  developer experience マイルストーンをクローズする。新規
+  `editors/vscode/` TypeScript 拡張（本 PR では Marketplace ではなく
+  `.vsix` 単位で配布）は `onLanguage:cairn` /
+  `workspaceContains:**/*.crn` で activate し、`cairn.serverPath` 設定
+  または OS の `PATH` から `cairn-lsp` を解決する（見つからない場合は
+  silent no-op せず、Release ページへのリンク付き通知 1 件を出す）。
+  `vscode-languageclient@9` を介して stdio 上で spawn し、activate 時に
+  サーバの `--version` 文字列を Output panel に記録するので、バグ報告に
+  バージョンが自然と含まれる。最小 TextMate 文法（`source.cairn`）は
+  コメント (`#`)、ディレクティブ (`@cairn`/`@requires`/`@intended_targets`)、
+  トップレベルキーワード (`theme`/`def`/`site`/`struct`)、メンバ
+  キーワード（`cairn-lang-core::intent::known_keywords` のミラー:
+  `floor`/`walls`/`door`/`window`/`roof`/`stair`/`level`/`pressure_plate`/
+  `circuit`/`place`/`connect`）、material token (`@name.dotted`)、
+  attribute key (`k=`)、`->` slot binding 矢印、および文字列を色付けする。
+  シンタックスは M5-PR1/PR2 で既に届いた LSP 由来の診断・補完の隣で動く。
+  `cairn-lsp` は小さな `--version`（および `-h`/`--help`）フラグを獲得し
+  — `cairn --version` に整合、`crates/cairn-lang-lsp/tests/version_flag.rs`
+  の新規統合テストで固定 —、拡張機能とサポート triage が起動せずとも
+  サーバを識別できる。`.github/workflows/publish.yml` は 6 リリース
+  ターゲットすべてで `cairn` に加えて `cairn-lsp` をクロスコンパイルし、
+  1 アーカイブに両バイナリを同梱する。既存の sigstore 署名がペアを覆う
+  ので、アセット数・`.sha256`・`.sigstore` レイアウトは変わらない。
+  スコープ外: Marketplace / Open VSX 公開、`.vsix` へのバイナリ同梱、
+  semantic-tokens プロバイダ — いずれも M6 または後続 PR に持ち越す。
+- `cairn-lsp` completion（M5-PR2）— 言語の closed vocabulary に対する
+  `textDocument/completion`。`initialize` でトリガー文字 `@`・`=`・`.`
+  とともに広告される。カーソルの 4 コンテキストを認識する: 行頭キーワード
+  （トップレベルの `theme`/`def`/`site`/`struct`、`struct`/`def`/`site`
+  ボディ内のメンバーコマンド、`theme` ボディ内の `slot` + セレクタ
+  キーワード）、`mat_slot=` の値（ドキュメント内の全テーマが宣言する
+  slot 名の union — `_java`/`_bedrock` 変種テーマも自然に union され、
+  edition 未指定の `cairn check` の slot 存在検査と同じ扱い）、そして
+  `@` 材料トークン（組み込みレジストリの union、java ∪ bedrock）:
+  各 abstract token は解決先の canonical id を item detail に持ち、
+  加えてカタログ value 列から重複排除した canonical id 群を返す
+  （canonical の完全な語彙はまだ存在しないレジストリ blocks テーブル
+  待ち）。コンテキスト判定は行ローカルなテキストヒューリスティック —
+  Cairn は厳密に行指向なので行プレフィックスが文法的に十分 — で、
+  キーストローク途中の常態であるパース不能なドキュメントでも補完が
+  動き続ける。`slot NAME -> TARGET` の行スキャンは全出荷サンプルに
+  対してパーサの見解と一致することをドリフトガードテストが固定する。
+  各 item は `TextEdit`（UTF-16 で正しい range）でカーソル下の部分
+  トークンを置換し、宣言順/カタログ順を凍結する `sortText` を持つ。
+  プレフィックスフィルタはクライアントに委ね、closed set が無い位置
+  （コメント、自由形式の値、ヘッダディレクティブ）は語彙を捏造せず
+  空を返す（principles P3）。サーバーは `DocumentStore`（URI → 最終
+  同期テキスト）を保持するようになり、変更通知の外でもドキュメントを
+  読めるようになった。未 open のドキュメント、またはドキュメント末尾を
+  1 行超えて外れた position へのリクエストは `InvalidParams` で loud に
+  拒否する（1 行超過までは応答する — `didChange` とリクエストは競合
+  し得る）。`cairn-lang-lsp` はレジストリパックのため
+  `cairn-lang-formats` に依存するようになった。
+- `cairn-lsp`（M5-PR1）— 言語サーバーの最初の動作版。`cairn-lang-lsp` の
+  `[[bin]]` ターゲットとして標準 LSP を stdio 上で話す。`initialize` で
+  全文同期（full-content sync）を広告し、`didOpen`/`didChange` のたびに
+  `cairn check` と同じ `parse → lower → check` パイプライン（edition 未指定
+  のため slot 存在検査はエディション別テーマ変種を union）を実行して
+  `textDocument/publishDiagnostics` を push する。`didClose` は空集合を
+  publish して古い squiggle を残さない。check の所見は安定コード
+  `E_*`/`W_*` 文字列を LSP `code` フィールドに、`source: "cairn"` とともに
+  保持し、span 付き note は `relatedInformation` に、span なし note
+  （valid candidates / Suggested fix のフッタ）は `note:` 行として
+  message に畳み込まれ、self-correction triple がそのままエディタへ届く。
+  構造化 `data` ペイロードは将来の quick-fix 向けにパススルーされる。
+  parse/lex 失敗は check パスを pre-empt し、当該行の行末までを range と
+  する error diagnostic をちょうど 1 件だけ生成する。位置は新設の
+  `line_index::LineIndex` が core の byte span からプロトコルの 0-based
+  行 / UTF-16 コードユニット座標へ変換し、UTF-16 の知識を
+  `cairn-lang-core` の外に保つ。トランスポートは `lsp-server` +
+  `lsp-types`（rust-analyzer の同期 stdio 基盤 — 非同期ランタイムは
+  ワークスペースに入らない）。completion は M5-PR2 として続いた（上記）。
+  VS Code 拡張が M5 の残り（M5-PR3）で、publish パイプラインへの
+  バイナリ配布は拡張と同時に着地する。
+- `cairn-lang-formats::portability` — `cairn info` の
+  `edition_portability` 軸を支えるパレットエントリ単位のポータビリティ
+  カウンタ（spec versioning-editions §10.5）。`portability_for_bedrock` は
+  air 以外のパレットエントリを `bedrock_state::translate_states` に通し、
+  結果を `{portable, degraded, unsupported}` に集計します — 劣化ノートなしの
+  変換は portable、劣化ノート付き（現状は stair の `shape != straight`）は
+  degraded、`BedrockStateError` は unsupported として数えます。
+  `portability_for_java` は air 以外を全て portable として報告します
+  （§10.3 の「Java is the base」に従う）。カウント粒度はパレットエントリ
+  単位で、`.mcstructure` ライターが実際に書き出す粒度と一致します —
+  lowering が複数の異なるパレットエントリを intern するメンバー（コーナー
+  stair を含む切妻屋根など）は、エントリ単位で 1 行ずつ寄与します。
+- `cairn-lang-core::Edition` — Resolver と CLI で共有される横断的な
+  エディション marker (`Java` / `Bedrock`)。将来 3 番目のエディションを
+  追加するときも 1 か所に variant を足すだけで済みます。`FromStr` は
+  未知のエディション文字列を loud に拒否し
+  (`unknown edition `{input}`. Valid: java, bedrock. Fix: ...`)、
+  `cairn info --editions foo` は dry-run lowering を走らせる前に exit 2 で
+  拒否するようになりました（未知のエディションが 0 埋めの portability 行に
+  無音でフォワードされる従来の穴を塞ぐ）。
+- `cairn-lang-core::resolve` — per-edition テーマフォールバック
+  （spec versioning-editions §10.7 代替階層 #2）。名前が `_java` /
+  `_bedrock` で終わるテーマは論理テーマの edition 変種と扱われます
+  （`theme shop_java:` と `theme shop_bedrock:` は論理名 `shop` を共有）。
+  `resolve` は `edition: Option<Edition>` を引数に取るようになり、
+  struct/def スコープごとに対応する変種を自動選択します。指定された
+  variant がない場合は同一論理名の未サフィックステーマにフォールバック
+  します。既存の未サフィックステーマ（`theme medieval:` のような
+  従来形）は両エディションで従来通り解決されます。`resolve(ir, None)`
+  — エディション未指定の `cairn check` 経路 — では両 variant のスロット
+  名を union し、片方の variant にしか宣言されていないスロットへの
+  `mat_slot=NAME` 参照が誤って `E_UNRESOLVED_SLOT` を出さないように
+  します。selector マッチは選ばれた variant にのみスコープされ、§7 の
+  per-theme DI コントラクトを維持します。`resolve(&ir)` の呼び出しは
+  `resolve(&ir, edition)` に、`check(&module, &ir)` は
+  `check(&module, &ir, edition)` に移行しました。
+- `cairn info --editions java,bedrock` は `degraded` / `unsupported`
+  列を per-edition dry-run lowering から生成するようになりました
+  （リクエストされたエディションごとに `lower_to_block_array` を 1 回走らせ、
+  対応する built-in pack で materials を解決し、パレットを
+  `portability_for_*` に流す）。ハードコードされたゼロは廃止です。
+  `themed-tower.crn` では軒の `shape=outer_left` stair が
+  `Bedrock: degraded: >=1` として表面化し、`cottage.crn` は両軸とも 0 の
+  ままです。`EditionPortability` の JSON / テキスト形状は変わらないため、
+  `--format json` の消費者はワイヤ破壊なく実データを受け取ります。
+  `cairn-lang-core::resolve::compute_axes` は per-edition 集計を呼び手から
+  受け取る `Vec<EditionPortability>` 引数を持つようになりました
+  （`core` は `formats` に依存しないため、集計は CLI 層で作って渡す形）。
+- `cairn check --edition java|bedrock` — オプショナルな edition ピン。
+  指定された variant にしか宣言されていないスロットへの `mat_slot=X`
+  参照は `E_UNRESOLVED_SLOT` として発火します。`--edition` 未指定時は
+  Resolver が両 variant のスロット名を union するため、後にどちらの
+  エディションでコンパイルされてもファイルは `check` を通過します。
+- `examples/edition-fallback.crn`（+ `.crn.lock`） — 論理テーマ `shop` を
+  `shop_java`（`floating_text` スロットを `@sign.oak` にバインド）と
+  `shop_bedrock`（`@sign.oak_wall` にバインド）の 2 variant に分割し、
+  spec §10.7 代替階層 #2 をエンドツーエンドで示す例。spec の
+  例示的な `text_display` パターンが必要とするエンティティ概念を導入せず、
+  既存の block-only パイプラインだけで完結します。Java コンパイルは
+  palette に `oak_sign`、Bedrock コンパイルは `oak_wall_sign` を書き出します。
+  新しい material token `sign.oak` / `sign.oak_wall` は両 built-in pack に
+  追加されました。
+- `cairn-lang-formats::bedrock_state` — Bedrock バックエンド向けの
+  per-edition blockstate 変換。`.mcstructure` ライターが後続とした対応です。
+  `translate_states` は **stair family**（現状 lowering がプロパティ付きで
+  intern する唯一のブロック種）を、Java の `facing` / `half` 文字列
+  プロパティから Bedrock の型付き `states` へマップします —
+  `weirdo_direction`（`east=0, west=1, south=2, north=3`、wiki の
+  `Stairs/BS` 一覧で検証）と `upside_down_bit`（`top=1, bottom=0`）。stair の
+  `shape` に対応する Bedrock 状態はないため、`straight`（Bedrock の既定）は
+  劣化なしで落とし、コーナー shape は `ParityNote` として落とし、CLI が
+  `warning[W_INTENT_DEGRADED]` として表示します（spec versioning-editions
+  §10.3 `dropped_states: [shape]` / §10.7。§10.4 の無音削除禁止を満たす）。
+  マップ対象外の family でプロパティを持つブロックや、Java ドメイン外の
+  stair 状態値は、従来通り自己修正トリプル付きで fail-loud します。
+  `build_mcstructure_tag` は `(Compound, Vec<ParityNote>)` を返すようになり、
+  palette entry ごとに空 compound ではなく実際の `states` を書き出します。
+  `cottage.crn`（すべて `straight` の切妻屋根）は `--edition bedrock` で
+  クリーンにコンパイルされ、`themed-tower.crn` は非 straight の軒コーナーで
+  `W_INTENT_DEGRADED` を 1 件出してコンパイルされます。
+  `BedrockStructureError::StatefulPaletteEntry` のハードエラーは透過的な
+  `BedrockStructureError::State(BedrockStateError)` に置き換わりました。
+- `cairn-lang-nbt::bedrock::write_bedrock_uncompressed` — Bedrock の
+  非圧縮 `.mcstructure` 向けリトルエンディアン NBT ライター。バイト列
+  エンコーダを Endian パラメータ化した単一のコア (`writer.rs`) に抽出し
+  Java ライターと共有したため、両ダイアレクトはスカラーのバイト順のみ
+  異なり、検証ルール (`InvalidString` / `HeterogeneousList` /
+  `LengthOverflow`) が乖離しなくなりました。Java 側の公開 API
+  (`write_java_uncompressed` / `write_java_gzip`) とエラー型は不変です。
+- `cairn-lang-formats::bedrock_structure` — `java_structure` を鏡写しに
+  した `.mcstructure` シリアライザ。`build_mcstructure_tag` が
+  `BlockArray` を Bedrock のルート形状 (`format_version`、`size`、
+  Z 最速の 2 層 `structure.block_indices` で第 2 層は `-1` 埋めの
+  waterlog 層、`{ name, states, version }` からなる
+  `structure.palette.default.block_palette`、`structure_world_origin`)
+  に lower し、`write_mcstructure` が非圧縮で書き出します。この初回分は
+  **stateless な palette のみ**を対象とし、blockstate プロパティを持つ
+  palette entry は `BedrockStructureError::StatefulPaletteEntry` で
+  fail-loud します (spec versioning-editions §10.4 は無音の置換/削除を
+  禁止)。メッセージは自己修正トリプルを持ちます。per-edition の state
+  マッピング (`facing` / `half` / `shape`) は後続で対応します。
+- `cairn-lang-formats` の組み込み Bedrock レジストリパック
+  (`registry-data/bedrock/`)、`builtin_bedrock` / `load_builtin_bedrock`、
+  `data_version::{BedrockTarget, resolve_bedrock_target}`。パックの
+  `data_versions` 列は `.mcstructure` の block-palette `version` 整数
+  (`(major << 24) | (minor << 16) | (patch << 8) | revision`) を保持し、
+  materials カタログは Java パックが lift するのと同じ abstract token を
+  カバーします。ターゲット解決は Java パックの機構 (`latest` エイリアス、
+  Damerau-Levenshtein の suggestion) を再利用し、`UnsupportedTarget` は
+  参照したバージョンテーブルのエディション名を含めるようになりました。
+- `cairn compile --edition bedrock` が `.mcstructure` 成果物と、
+  `target.edition = bedrock`・`data_version = block_version`・
+  `registry_pack_hash` に Bedrock パックのバイトを固定した lockfile を
+  書き出します。Java `.nbt` 経路はバイト単位で不変です。`ResolvedTarget`
+  enum がエディションを成果物名 (`OutputExt`)・タグ構築・ライター
+  (gzip か非圧縮か)・lockfile へと通すため、将来のエディション追加が
+  1 箇所で済みます。
+
+- `cairn-lang-core::block_array::lower` — `level y=N` ブロックが
+  block-array lowering の phase-bucket に参加するようになりました。
+  新しい `flatten_members` 事前パスが各 `level` を
+  `(y_offset, child)` ペアに展開するため、`level` 直下にネストされた
+  `walls` / `door` / `window` / `stair` は authored `y` を level の
+  `y=` 分ずらして massing / openings / envelope の各フェーズに届きます。
+  `max_wall_height` は `max_wall_top` に改名し、フラット化後のリストを
+  集約するようになったので、`level y=N walls id=X height=H` は
+  `y = N + H` まで struct のロープラン (roof plane) を伸ばします。
+  level のネスト (2 段以上) は `W_DEFERRED_MEMBER` で defer します。
+- `cairn-lang-core::block_array::lower` — `MemberRole::Stair` を最小
+  実装 (`fill_stair`) しました。`themed-tower.crn` の軒 (eave) パターン
+  (`kind=stairs`、`side=front|back|left|right`、`half=top|bottom`、
+  `facing=out|in`、`shape=straight|outer_left|outer_right`、`y=`) を
+  カバーします。stair band は壁のオーバーハング行 (壁の外側 1 voxel) に
+  `y = y_offset + local_y` で並び、base id は解決された `mat_slot=` の
+  BlockState から取得します (未解決なら `spruce_stairs`)。それ以外の
+  `kind=` / `half=` / `facing=` / `shape=` は該当箇所を指す
+  `W_DEFERRED_MEMBER` で defer します。
+- `cairn-lang-core::block_array::lower` — `fill_window` が themed-tower
+  の 2 階矢狭間 (arrow-slit) パターン `repeat=N step=M` をサポートします。
+  同じ矩形を `N` 回、`step` voxel ずつずらして塗ります。`repeat` を
+  省略すると 1 とみなし、`repeat>=2 step=0` は defer します
+  (インスタンスが重なるため)。`mat_slot=` を持たない window は無音の
+  drop ではなく空気を彫るようになったので、`class=arrow_slit` のスリット
+  が壁に本物の穴を空けます。`mat_slot=` 明示のある window は変化なし。
+- `crates/cairn-lang-formats/tests/themed_tower_level_lower.rs` — 新規
+  統合テスト。`examples/themed-tower.crn` を built-in レジストリパック
+  経由で end-to-end に lower し、dims、palette (`dark_oak_stairs` /
+  `dark_oak_planks` を含む解決済み 5 種)、2 階の壁リング、軒 stair band、
+  矢狭間の空気彫りパターン、そして「`W_DEFERRED_MEMBER` 0 件」の契約を
+  pin します。materials resolver に built-in パックが必要で、
+  `cairn-lang-core` が `cairn-lang-formats` に依存できない (循環)
+  ため配置は `cairn-lang-formats` の tests/。
+- `cairn-lang-core::block_array::lower` — `MemberRole::Circuit` を
+  最小認識 (`recognize_circuit_region`) しました。`redstone-door.crn` の
+  `circuit region=floor void=2` のように、`region=<label>` (領域名を
+  指す `Ident` または `Str`) と `void=<N>` (`u32` かつ `N >= 1` の
+  service-layer 高さ) を持つ回路領域マーカーを surface 形式のみ
+  検査し、voxel は一切置きません (spec/redstone.md §14.5 / §14.8 で
+  dust / repeater / cell の配置は `logic_synth → logic_place →
+  logic_route` に委ねられているため)。`region=` 欠落、`region=` が
+  非 label 種別 (integer / boolean / size / token / reference / list)、
+  `region=""` (空文字列)、`void=` 欠落、`void=0`、`void` が `u32` に
+  収まらない — これらは対象キーを指す primary 付きで
+  `W_DEFERRED_MEMBER` を発火します (kind mismatch の primary には
+  該当 kind 名も含みます)。
+- `crates/cairn-lang-formats/tests/redstone_door_pressure_plate_lower.rs`
+  — 新規 `redstone_door_circuit_line_emits_no_deferred_warning` テスト。
+  `circuit region=floor void=2` 行に対する
+  「`W_DEFERRED_MEMBER` 0 件」契約を pin します
+  (隣接する `pressure_plate` の 0 件テストと同じ形)。
+- `cairn-lang-core::block_array::lower` — `MemberRole::Door` のうち
+  surface 行が selector 形式 (`door[id=X] opened_by=…`) のものを、
+  phase-bucket に入る前に **アクチュエータパッチ** として認識する
+  ようにしました。新設の `recognize_actuator_patch` ガードが
+  patch 行を `openings` フェーズから外すので、`carve_door` の
+  `side_of` が patch 行に対して「`side=` 欠落」を誤検知しません。
+  レコグナイザは surface 形式のみ (spec/redstone.md §14.2) を検査
+  します: `[selector]` は物理 door を指す `id=<label>` を持たねばならず
+  (level ネストされた door も選択可能)、`opened_by=` は 2 セグメント
+  の `sig.<name>` `DotRef` に解決しなければなりません。`id=` の
+  欠落・非 label 値・未宣言 id、`opened_by=` の欠落、`sig.<name>` 以外の
+  `opened_by=` 値は、それぞれ対象キーを指す primary 付きで
+  `W_DEFERRED_MEMBER` を発火します。未知 id の primary は同じ
+  スコープに宣言されている物理 door の id をすべて列挙するので、
+  near-miss を目視で発見できます。今回対応するのは
+  `door[id=…] opened_by=` のみで、`lamp lit_by=` / `piston powered_by=`
+  / `dispenser fired_by=` は各キーワードが役割テーブルに載る PR で
+  追加予定です。selector 内の未知属性・intent 側の未知キーも silent
+  受理せず defer するため、将来 `powered_by=` が実装されたときに
+  既存ソースの意味を暗黙に変えることを防ぎます。これで
+  `redstone-door.crn` のアクチュエータパッチ行
+  `door[id=front] opened_by=sig.open` が clean に compile され、
+  同 example で最後まで残っていた `W_DEFERRED_MEMBER` が消えました。
+- `cairn-lang-core::block_array::walkway` — `connect` walkway 用の
+  地面平面ルーター `route_path` を新設しました。2 ポート間の直進
+  Manhattan L が placement の床を横切る場合、`lower_connects` は
+  衝突セルをスキップする代わりに迂回路を探索します:
+  `(セル, 進行方向)` を状態とする Dijkstra で、コストは辞書式
+  `(経路長, 曲がり回数)` — 障害物を回る最短経路のうち曲がりが最少の
+  ものを選びます。タイブレークは固定の展開順と単調増加のキュー連番で
+  決まり、hash の反復順には依存しないため、同じソースは常に同じ
+  strip を敷設し lockfile の再現性が保たれます。探索領域は歩行平面上の
+  blocked セルと両端点の bounding box を 1 セル膨張した矩形で、
+  400 万セルの上限を超える病的な入力は skip-and-warn フォールバックに
+  degrade します。これまで home1 の床に 7 セルの穴を開けていた
+  `village.crn` の `home1.entry ↔ home3.entry` 行は home1 の東面を
+  迂回するようになり、example 全体が警告ゼロで compile されます。
+  `route_path` は `Result<_, RoutePathError>` (ポート埋没 / 到達不能 /
+  面積上限 / 座標 overflow) を返すため、呼び出し側は警告 note を実際の
+  原因に対応付けられます。また `BlockedIndex` (lowering ごとに 1 回
+  構築) を受け取る設計にしたので、平面ごとの bounding box は blocked
+  集合の単一スキャンから得られ、`connect` 行ごとのフルスキャン
+  (衝突行が多い大規模 site ではユーザ入力起点の実質 DoS になる) を
+  排除しています。
+
+### 変更
+
+- `cairn-lang-core::block_array::lower` — `fill_roof` は `mat_slot=`
+  が roof kind の canonical id 以外に解決されても `W_DEFERRED_MEMBER`
+  を出さなくなりました。代わりに解決された id をそのまま palette に
+  焼き込みます (`gable` / `shed` / `hip` / `flat` 全てで有効)。これで
+  `themed-tower.crn` の `slot roof -> @roof.dark_wood` が warning 無しで
+  dark-oak stairs 屋根になります。ただし `properties` が非空の
+  `mat_slot=` 状態は依然として defer します
+  (geometry generator が `facing` / `half` / `shape` を所有するため)。
+- `crates/cairn-lang-cli/tests/cli_compile.rs` — `c14b`
+  ("themed-tower に W_DEFERRED_MEMBER が残る" pin) を `c14e`
+  ("themed-tower が defer 無しで compile される" pin) に置き換え、
+  cottage の `c14` / village の `c21` と同じ品質ラインに揃えました。
+- `crates/cairn-lang-cli/tests/cli_lower.rs::lower_3_deferred_member_warnings_print_to_stderr`
+  は themed-tower (現在 clean) から離れ、`pressure_plate` を含む
+  簡易ソースを in-line で使うようになりました。deferred-warning 経路の
+  regression 保護は維持されます。
+- `crates/cairn-lang-cli/tests/cli_lower.rs::lower_3_deferred_member_warnings_print_to_stderr`
+  は `circuit` (現在は無音で認識) から離れ、
+  `stair kind=stairs side=front shape=inner_left` の in-line ソースに
+  移りました。stair の lowering は `straight` / `outer_left` /
+  `outer_right` のみサポートし、`inner_left` / `inner_right` は
+  依然 defer するため、それが deferred-warning の regression キャリアを
+  引き継ぎます。
+- `crates/cairn-lang-cli/tests/cli_compile.rs::c14f_redstone_door_pressure_plate_paints_without_deferring`
+  は `circuit` / `pressure_plate` の substring チェックを廃止し、
+  `warning[W_DEFERRED_MEMBER]` プライマリ行数を baseline 1 に pin
+  する形に変更しました (残る 1 件は line 25 の
+  `door[id=front] opened_by=…` に対する `carve_door` の
+  `missing side=`)。substring チェックは catalog note が全ロール名を
+  列挙する形式で false-positive し、また将来 primary から
+  当該ロール名を除くリファクタで false-negative するため、baseline pin
+  で両方を捕捉します。
+- `crates/cairn-lang-formats/tests/redstone_door_pressure_plate_lower.rs::redstone_door_circuit_line_emits_no_deferred_warning`
+  も同じ baseline pin に切り替え、`DeferredMember` の総数を 1 に pin
+  します。`void=` u32 溢れ経路の primary は `nonneg_int_or_defer` 側
+  に属し `"circuit"` を含まないため、substring フィルタでは溢れ経路の
+  regression を検出できないという指摘への対応です。
+- `crates/cairn-lang-cli/tests/cli_compile.rs::c14f_redstone_door_pressure_plate_paints_without_deferring`
+  を `c14f_redstone_door_compiles_without_deferred_warnings` に改名し、
+  baseline 1 の pin を廃止して
+  `stderr.matches("W_DEFERRED_MEMBER").count() == 0` を pin する形に
+  切り替えました (cottage の `c14` / themed-tower の `c14e` と同じ形)。
+  `gatehouse.nbt` の存在確認は残しているので、lowering が silent に
+  regress したケースも成果物欠落で fail-loud します。
+- `crates/cairn-lang-formats/tests/redstone_door_pressure_plate_lower.rs::redstone_door_circuit_line_emits_no_deferred_warning`
+  を `redstone_door_lowers_without_deferred_warnings` に改名し、
+  「唯一の defer はアクチュエータパッチ」の baseline 1 を廃止して
+  「defer 0 件」に切り替えました。plate paint と circuit region
+  マーカーに加え actuator patch も認識されたので、example 全体が
+  clean に lower されます。
+- `W_WALKWAY_BLOCKED` は、迂回探索が 2 ポート間に遮られない経路を
+  **一つも** 見つけられなかった場合 (ポートが他 placement の床に
+  埋まっている、到達先が完全に囲まれている、面積上限超過) にのみ
+  発火するようになりました。その場合は従来どおり直進 L に
+  フォールバックして衝突セルをスキップするため、
+  `data: { kind: "walkway_blocked", skipped: N }` ペイロードと
+  "skipped N cells" のプライマリ文言は不変です。note は具体的な原因 —
+  どちらのポートが埋まっているか、到達先の閉塞、探索面積上限 (実測値と
+  上限値の両方を明記)、座標 overflow — をそれぞれの対処法とともに
+  書き分けるようになり、4 原因中 3 つには効かない「gap を広げる」
+  一択の提案を廃止しました。
+- `crates/cairn-lang-core/src/block_array/lower.rs` —
+  `walkway_blocked_cells_skip_with_w_walkway_blocked_count` の fixture
+  に `from` ポートを床で埋める 3 つ目の placement を追加しました
+  (旧 2-place fixture は迂回可能になったため、新設の
+  `walkway_routes_around_obstructed_l_path_without_warning` /
+  `walkway_detour_is_deterministic_across_lowerings` テストに
+  移りました)。
+- `crates/cairn-lang-core/tests/village_lower.rs` — home1↔home3
+  walkway の pin を直進 strip (`footprint 1×15`) から home1 東面の
+  迂回路 (`footprint 6×15`、anchor は home3 の front ポートのまま) に
+  更新し、「village が警告ゼロで compile され、25 セルの途切れない
+  gravel strip が敷かれる」契約を pin する
+  `village_emits_zero_walkway_blocked_warnings` テストを新設しました。
+
 最初の公開ナンバー付きリリースは **`2026.7.0`** (予定) です。それまでの間、本節はそのリリースに
 向けてリポジトリに積まれた内容を記録します。`cairn-lang-*` クレートはまだ crates.io に公開されて
 おらず、`canary` のワークスペースバージョンは `0.0.0` プレースホルダのままです。`cargo publish`

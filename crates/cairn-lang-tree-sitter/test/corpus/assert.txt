@@ -1,0 +1,103 @@
+==================
+Truth table (field labels)
+==================
+
+struct s size=3x3
+  assert truth(sig.a, sig.b -> sig.out) { 00->0; 01->1; 10->1; 11->1 }
+
+---
+
+(source_file
+  (struct_decl
+    name: (identifier)
+    args: (attribute_list
+      (attribute key: (identifier) value: (size_literal (integer) (integer))))
+    body: (struct_body
+      (assert_stmt
+        (truth_form
+          inputs: (signal_list
+            (signal_ref (identifier) (identifier))
+            (signal_ref (identifier) (identifier)))
+          output: (signal_ref (identifier) (identifier))
+          (truth_row (bit_pattern) (bit_pattern))
+          (truth_row (bit_pattern) (bit_pattern))
+          (truth_row (bit_pattern) (bit_pattern))
+          (truth_row (bit_pattern) (bit_pattern)))))))
+
+==================
+Temporal assertion (field labels)
+==================
+
+struct s size=3x3
+  assert always(sig.step -> eventually sig.open within 2)
+
+---
+
+(source_file
+  (struct_decl
+    name: (identifier)
+    args: (attribute_list
+      (attribute key: (identifier) value: (size_literal (integer) (integer))))
+    body: (struct_body
+      (assert_stmt
+        (temporal_form
+          (temporal_expr
+            trigger: (signal_ref (identifier) (identifier))
+            target: (signal_ref (identifier) (identifier))
+            bound: (integer)))))))
+
+==================
+Truth table and temporal assertion with bare identifiers (degenerate dotted refs)
+==================
+
+struct s size=3x3
+  assert truth(a, b -> out) { 00->0; 01->1; 10->1; 11->1 }
+  assert always(step -> eventually open within 2)
+
+---
+
+(source_file
+  (struct_decl
+    (identifier)
+    (attribute_list
+      (attribute (identifier) (size_literal (integer) (integer))))
+    (struct_body
+      (assert_stmt
+        (truth_form
+          (signal_list
+            (identifier)
+            (identifier))
+          (identifier)
+          (truth_row (bit_pattern) (bit_pattern))
+          (truth_row (bit_pattern) (bit_pattern))
+          (truth_row (bit_pattern) (bit_pattern))
+          (truth_row (bit_pattern) (bit_pattern))))
+      (assert_stmt
+        (temporal_form
+          (temporal_expr
+            (identifier)
+            (identifier)
+            (integer)))))))
+
+==================
+Truth table with trailing semicolon
+==================
+
+struct s size=3x3
+  assert truth(sig.a -> sig.out) { 0->0; 1->1; }
+
+---
+
+(source_file
+  (struct_decl
+    (identifier)
+    (attribute_list
+      (attribute (identifier) (size_literal (integer) (integer))))
+    (struct_body
+      (assert_stmt
+        (truth_form
+          (signal_list
+            (signal_ref (identifier) (identifier)))
+          (signal_ref (identifier) (identifier))
+          (truth_row (bit_pattern) (bit_pattern))
+          (truth_row (bit_pattern) (bit_pattern)))))))

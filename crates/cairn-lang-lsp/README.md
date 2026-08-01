@@ -8,14 +8,25 @@ consume incrementally.
 
 ## Status
 
-Skeleton. The server binary, transports, and capability negotiation are not yet wired.
+The `cairn-lsp` binary speaks standard LSP over stdio: it negotiates full-content document sync at
+`initialize`, pushes `textDocument/publishDiagnostics` — computed by the same
+`parse → lower → check` pipeline as `cairn check` — on every `didOpen`/`didChange`, clearing them
+on `didClose`, and answers `textDocument/completion` from the closed vocabularies. Hover and code
+actions are not yet wired.
+
+## Shipped capabilities
+
+| Capability | Notes |
+|---|---|
+| `textDocument/publishDiagnostics` (push) | Stable `E_*`/`W_*` strings in `code`, `source: "cairn"`, span notes as `relatedInformation`, spanless notes folded into `message` as `note:` lines, structured payloads in `data`. Positions are 0-based lines with UTF-16 code-unit columns (the protocol default). |
+| `textDocument/completion` | Four closed-vocabulary contexts, detected line-locally so completion works while the document fails to parse: line-opening keywords (top-level items, member commands, `slot` + selector keywords in theme bodies), `mat_slot=` values (union of slot names declared by the document's themes — edition variants union naturally, matching unpinned `cairn check`), and `@` material tokens from the built-in registry union (java ∪ bedrock): abstract tokens with their resolved canonical id as detail, plus the deduplicated canonical ids from the catalog's value column. The full canonical vocabulary waits on a blocks table the registry packs do not carry yet. Trigger characters: `@`, `=`, `.`. |
 
 ## Planned capabilities
 
 | Capability | Spec reference |
 |---|---|
-| `textDocument/diagnostic` — syntax, geometry, attachment, support, fluid, version_caps, edit_stability, redstone | [lint](https://cairn.kage1020.com/spec/lint/) |
-| `textDocument/completion` — canonical material tokens, `mat_slot` names, theme selectors | [materials-themes §7.2](https://cairn.kage1020.com/spec/materials-themes/) |
+| `textDocument/diagnostic` (pull) — syntax, geometry, attachment, support, fluid, version_caps, edit_stability, redstone | [lint](https://cairn.kage1020.com/spec/lint/) |
+| `textDocument/completion` over a full canonical block vocabulary (needs a registry blocks table) | [materials-themes §7.2](https://cairn.kage1020.com/spec/materials-themes/) |
 | `textDocument/hover` — block primitive docs, blockstate intent vs resolved view | [blockstate §6.2](https://cairn.kage1020.com/spec/blockstate/) |
 | `textDocument/codeAction` — apply the "Suggested fix:" payloads from lint messages | [lint](https://cairn.kage1020.com/spec/lint/), [versioning-editions §10.4](https://cairn.kage1020.com/spec/versioning-editions/) |
 | `workspace/executeCommand` — `cairn.info`, `cairn.diffBlocks` | [versioning-editions §10.5](https://cairn.kage1020.com/spec/versioning-editions/), [ecosystem-interop §12.2](https://cairn.kage1020.com/spec/ecosystem-interop/) |
@@ -33,6 +44,10 @@ Skeleton. The server binary, transports, and capability negotiation are not yet 
 ## Dependencies
 
 - [`cairn-lang-core`](../cairn-lang-core/README.md) for the parser, IR, and lint engine.
+- [`cairn-lang-formats`](../cairn-lang-formats/README.md) for the built-in registry packs backing
+  material-token completion.
+- [`lsp-server`](https://crates.io/crates/lsp-server) / [`lsp-types`](https://crates.io/crates/lsp-types)
+  for the synchronous stdio transport and protocol types (no async runtime).
 
 ## License
 

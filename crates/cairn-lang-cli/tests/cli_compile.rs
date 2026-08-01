@@ -173,22 +173,181 @@ fn c7_lockfile_records_target_triple() {
 }
 
 #[test]
-fn c8_bedrock_edition_exits_one_with_explanation() {
-    let (_tmp_src, src) = cottage_in_tempdir();
+fn c8_bedrock_compiles_stateless_example_to_mcstructure() {
+    // roof-flat.crn resolves entirely to bare (stateless) block ids —
+    // planks and cobblestone — so it is the smallest example the Bedrock
+    // backend can round-trip end-to-end. The compile must exit 0, write a
+    // `roof_flat.mcstructure`, and lower without any deferred warnings.
+    let tmp = TempDir::new().expect("tempdir");
+    let dst = tmp.path().join("roof-flat.crn");
+    fs::copy(examples_dir().join("roof-flat.crn"), &dst).expect("copy roof-flat");
     let out_dir = TempDir::new().expect("out tempdir");
     let result = run_compile(&[
-        src.to_str().unwrap(),
+        dst.to_str().unwrap(),
         "--edition",
         "bedrock",
+        "--out",
+        out_dir.path().to_str().unwrap(),
+    ]);
+    let stderr = String::from_utf8(result.stderr).expect("utf-8");
+    assert!(
+        result.status.success(),
+        "roof-flat should compile for bedrock; stderr={stderr}",
+    );
+    assert_eq!(
+        stderr.matches("W_DEFERRED_MEMBER").count(),
+        0,
+        "roof-flat should lower clean, stderr={stderr}",
+    );
+    let written = out_dir.path().join("roof_flat.mcstructure");
+    assert!(written.exists(), "expected {} to exist", written.display());
+}
+
+#[test]
+fn c8b_bedrock_mcstructure_is_uncompressed_little_endian() {
+    // The `.mcstructure` bytes must be raw NBT (unnamed root compound,
+    // 0x0a + u16 zero length), never a gzip stream (0x1f 0x8b) the way the
+    // Java `.nbt` is.
+    let tmp = TempDir::new().expect("tempdir");
+    let dst = tmp.path().join("roof-flat.crn");
+    fs::copy(examples_dir().join("roof-flat.crn"), &dst).expect("copy roof-flat");
+    let out_dir = TempDir::new().expect("out tempdir");
+    let result = run_compile(&[
+        dst.to_str().unwrap(),
+        "--edition",
+        "bedrock",
+        "--out",
+        out_dir.path().to_str().unwrap(),
+    ]);
+    assert!(result.status.success());
+    let bytes = fs::read(out_dir.path().join("roof_flat.mcstructure")).expect("read mcstructure");
+    assert!(bytes.len() >= 3);
+    assert_ne!(&bytes[..2], &[0x1f, 0x8b], "must not be gzip");
+    assert_eq!(&bytes[..3], &[0x0a, 0x00, 0x00], "unnamed root compound");
+}
+
+#[test]
+fn c8c_bedrock_lockfile_records_bedrock_target_and_pack_hash() {
+    let tmp = TempDir::new().expect("tempdir");
+    let dst = tmp.path().join("roof-flat.crn");
+    fs::copy(examples_dir().join("roof-flat.crn"), &dst).expect("copy roof-flat");
+    let out_dir = TempDir::new().expect("out tempdir");
+    let lock_path = out_dir.path().join("c8c.lock");
+    let result = run_compile(&[
+        dst.to_str().unwrap(),
+        "--edition",
+        "bedrock",
+        "--target",
+        "1.21.60",
+        "--out",
+        out_dir.path().to_str().unwrap(),
+        "--lock",
+        lock_path.to_str().unwrap(),
+    ]);
+    assert!(
+        result.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&result.stderr),
+    );
+    let lf = Lockfile::read_from_path(&lock_path).expect("read lock");
+    assert_eq!(lf.target.edition, LockEdition::Bedrock);
+    assert_eq!(lf.target.mc_version, "1.21.60");
+    // Bedrock's block-palette version integer, not a Java DataVersion.
+    assert_eq!(lf.target.data_version, 18_168_865);
+    assert_ne!(
+        lf.inputs.registry_pack_hash.as_str(),
+        HashHex::ZERO_STR,
+        "bedrock pack hash must be filled in",
+    );
+}
+
+#[test]
+fn c8d_bedrock_cottage_maps_stair_states_without_degradation() {
+    // cottage.crn resolves a gable roof to `*_stairs` with `facing`/`half`/
+    // `shape=straight` properties. The Bedrock backend maps facing/half to
+    // Bedrock `states` and drops the (straight, i.e. default) shape without a
+    // note, so the compile succeeds cleanly and writes the artifact.
+    let tmp = TempDir::new().expect("tempdir");
+    let dst = tmp.path().join("cottage.crn");
+    fs::copy(examples_dir().join("cottage.crn"), &dst).expect("copy cottage");
+    let out_dir = TempDir::new().expect("out tempdir");
+    let result = run_compile(&[
+        dst.to_str().unwrap(),
+        "--edition",
+        "bedrock",
+        "--out",
+        out_dir.path().to_str().unwrap(),
+    ]);
+    let stderr = String::from_utf8(result.stderr).expect("utf-8");
+    assert!(
+        result.status.success(),
+        "cottage on bedrock, stderr={stderr}"
+    );
+    assert!(
+        !stderr.contains("W_INTENT_DEGRADED"),
+        "cottage's straight gable stairs must not degrade, got: {stderr}",
+    );
+    assert!(
+        out_dir.path().join("cottage.mcstructure").exists(),
+        "the mcstructure artifact should be written",
+    );
+}
+
+#[test]
+fn c8f_bedrock_themed_tower_degrades_stair_shape_but_compiles() {
+    // themed-tower.crn's eave stairs use non-straight shapes
+    // (`outer_left`/`outer_right`), which Bedrock has no state for. The
+    // compile still succeeds (exit 0) but surfaces a W_INTENT_DEGRADED
+    // warning per dropped shape (spec §10.3 `dropped_states:[shape]` / §10.7),
+    // and the artifact is written.
+    let tmp = TempDir::new().expect("tempdir");
+    let dst = tmp.path().join("themed-tower.crn");
+    fs::copy(examples_dir().join("themed-tower.crn"), &dst).expect("copy themed-tower");
+    let out_dir = TempDir::new().expect("out tempdir");
+    let result = run_compile(&[
+        dst.to_str().unwrap(),
+        "--edition",
+        "bedrock",
+        "--out",
+        out_dir.path().to_str().unwrap(),
+    ]);
+    let stderr = String::from_utf8(result.stderr).expect("utf-8");
+    assert!(
+        result.status.success(),
+        "themed-tower should still compile on bedrock, stderr={stderr}",
+    );
+    assert!(
+        stderr.contains("W_INTENT_DEGRADED") && stderr.contains("shape"),
+        "expected a shape-drop degradation warning, got: {stderr}",
+    );
+    assert!(
+        out_dir.path().join("keep.mcstructure").exists(),
+        "the mcstructure artifact should still be written on a degradation",
+    );
+}
+
+#[test]
+fn c8e_bedrock_unknown_target_names_bedrock_versions() {
+    let tmp = TempDir::new().expect("tempdir");
+    let dst = tmp.path().join("roof-flat.crn");
+    fs::copy(examples_dir().join("roof-flat.crn"), &dst).expect("copy roof-flat");
+    let out_dir = TempDir::new().expect("out tempdir");
+    let result = run_compile(&[
+        dst.to_str().unwrap(),
+        "--edition",
+        "bedrock",
+        "--target",
+        "1.21.61",
         "--out",
         out_dir.path().to_str().unwrap(),
     ]);
     assert_eq!(result.status.code(), Some(1));
     let stderr = String::from_utf8(result.stderr).expect("utf-8");
     assert!(
-        stderr.contains("not implemented"),
-        "expected explanation, got stderr={stderr}",
+        stderr.contains("unsupported bedrock target"),
+        "error must name the bedrock vocabulary, got: {stderr}",
     );
+    assert!(stderr.contains("1.21.60"), "supported list, got: {stderr}");
 }
 
 #[test]
@@ -444,6 +603,45 @@ fn c14c_roof_kind_examples_lower_without_deferred_warnings() {
 }
 
 #[test]
+fn c14f_redstone_door_compiles_without_deferred_warnings() {
+    // `redstone-door.crn` exercises the fixtures/actuator surface end-to-end:
+    // two `pressure_plate` fixtures with the compound `at=<side>.outside` /
+    // `at=inside.<side>` anchor, a `circuit region=floor void=2` routing
+    // marker, and a `door[id=front] opened_by=sig.open` actuator patch that
+    // binds an already-declared physical door. Each of the three roles is
+    // recognised at block-array lowering (the plate paints its voxels, the
+    // circuit region and the actuator patch are surface-guards for the
+    // future logic pipeline), so no `W_DEFERRED_MEMBER` fires on this
+    // example. This slots into the same "example transitions from deferred
+    // to clean" shape `c14` (cottage) and `c14e` (themed-tower) already use.
+    let tmp = TempDir::new().expect("tempdir");
+    let dst = tmp.path().join("redstone-door.crn");
+    fs::copy(examples_dir().join("redstone-door.crn"), &dst).expect("copy redstone-door");
+    let out_dir = TempDir::new().expect("out tempdir");
+    let result = run_compile(&[
+        dst.to_str().unwrap(),
+        "--edition",
+        "java",
+        "--out",
+        out_dir.path().to_str().unwrap(),
+    ]);
+    let stderr = String::from_utf8(result.stderr).expect("utf-8");
+    assert!(
+        result.status.success(),
+        "redstone-door should compile, stderr={stderr}",
+    );
+    assert_eq!(
+        stderr.matches("W_DEFERRED_MEMBER").count(),
+        0,
+        "redstone-door should lower clean, stderr={stderr}",
+    );
+    assert!(
+        out_dir.path().join("gatehouse.nbt").exists(),
+        "redstone-door should still write gatehouse.nbt, stderr={stderr}",
+    );
+}
+
+#[test]
 fn c15_lockfile_registry_pack_hash_is_populated() {
     // The registry pack ingest replaces the hardcoded data_version table,
     // and the lockfile must pin the bytes the compile resolved against.
@@ -499,13 +697,14 @@ fn c14_cottage_compiles_without_deferred_warnings() {
 }
 
 #[test]
-fn c14b_deferred_member_warning_still_exits_zero_on_other_examples() {
-    // The `cairn compile` exit-code contract is "warnings do not fail the
-    // build". We pin it against `themed-tower.crn`, which still exercises
-    // roles outside the implemented phases (`level` blocks contain doors
-    // and windows that lowering cannot reach yet). The exact warning
-    // count is intentionally not asserted — what matters is that at least
-    // one `W_DEFERRED_MEMBER` fires and the exit code stays 0.
+fn c14e_themed_tower_compiles_without_deferred_warnings() {
+    // themed-tower exercises `level y=N` grouping, per-level walls, an eave
+    // `stair`, and a `repeat=/step=` window pattern. Once level flattening
+    // and stair voxelisation landed together with roof/stair honouring
+    // resolved `mat_slot=` ids, every `level` child paints into the block
+    // array and no `W_DEFERRED_MEMBER` should fire on this example. This
+    // test replaces the earlier `c14b`, which pinned "at least one deferred
+    // warning" while level lowering was still absent.
     let tmp = TempDir::new().expect("tempdir");
     let dst = tmp.path().join("themed-tower.crn");
     fs::copy(examples_dir().join("themed-tower.crn"), &dst).expect("copy themed-tower");
@@ -517,15 +716,19 @@ fn c14b_deferred_member_warning_still_exits_zero_on_other_examples() {
         "--out",
         out_dir.path().to_str().unwrap(),
     ]);
-    assert!(
-        result.status.success(),
-        "stderr={}",
-        String::from_utf8_lossy(&result.stderr),
-    );
     let stderr = String::from_utf8(result.stderr).expect("utf-8");
     assert!(
-        stderr.contains("W_DEFERRED_MEMBER"),
-        "expected at least one deferred-member warning on themed-tower, stderr={stderr}",
+        result.status.success(),
+        "themed-tower should compile clean; stderr={stderr}",
+    );
+    assert_eq!(
+        stderr.matches("W_DEFERRED_MEMBER").count(),
+        0,
+        "themed-tower should lower without deferred-member warnings, stderr={stderr}",
+    );
+    assert!(
+        out_dir.path().join("keep.nbt").exists(),
+        "themed-tower should still write keep.nbt, stderr={stderr}",
     );
 }
 
@@ -726,9 +929,9 @@ fn c21_village_lowers_connect_rows_into_walkway_artifacts() {
     // Port model and walkway voxelisation are wired through end-to-end, so
     // the two `connect` rows in village.crn must lower into per-walkway
     // `.nbt` artifacts (one per row) instead of degrading to
-    // W_DEFERRED_MEMBER. The exit must stay 0 — any W_WALKWAY_BLOCKED
-    // warnings that fall out of the cottage overlap are advisory,
-    // mirroring c14b's warnings-do-not-fail-the-build rule.
+    // W_DEFERRED_MEMBER. The home1↔home3 row detours around home1's
+    // floor, so the whole example must also compile without a single
+    // W_WALKWAY_BLOCKED — village is a warning-free example now.
     let (_tmp_src, src) = example_in_tempdir("village.crn");
     let out_dir = TempDir::new().expect("out tempdir");
     let result = run_compile(&[
@@ -744,6 +947,11 @@ fn c21_village_lowers_connect_rows_into_walkway_artifacts() {
         stderr.matches("W_DEFERRED_MEMBER").count(),
         0,
         "connect rows must no longer emit W_DEFERRED_MEMBER; stderr={stderr}",
+    );
+    assert_eq!(
+        stderr.matches("W_WALKWAY_BLOCKED").count(),
+        0,
+        "the home1↔home3 walkway must route around home1 instead of warning; stderr={stderr}",
     );
     // The two `connect` rows land as `hamlet_walkway_*.nbt` files
     // alongside the three placement files.

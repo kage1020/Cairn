@@ -9,6 +9,7 @@
 
 # Cairn lockfiles are generated; ignore unless intentionally committed
 *.cairn.lock
+*.crn.lock
 
 # Node
 node_modules/
@@ -19,6 +20,11 @@ pnpm-debug.log*
 # Astro / Starlight site
 website/dist/
 website/.astro/
+
+# VS Code extension build output
+editors/vscode/dist/
+editors/vscode/*.vsix
+editors/vscode/*.tsbuildinfo
 
 # Python
 __pycache__/

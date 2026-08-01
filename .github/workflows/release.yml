@@ -6,9 +6,13 @@ name: Release
 # - Monthly minor: cron at 04:17 UTC on the 1st (offset from the hour to avoid
 #   GitHub Actions cron congestion). Computes YYYY.M.0, pre-sets the workspace
 #   version on canary, then runs release-plz to generate the changelog and PR.
-# - Patch: every push to canary. release-plz decides whether to open a PR based
-#   on the `release_commits` regex in release-plz.toml.
-# - Manual: workflow_dispatch with optional `version` input.
+#   This is the ONLY path that opens a release PR under the monthly cadence.
+# - Push to canary: does NOT open a new release PR. It only runs `release-plz
+#   release` to detect an already-merged release PR and publish + tag it. A
+#   feature/fix commit landing on canary between monthly cycles is queued for
+#   the next monthly PR, not turned into a patch release on the spot.
+# - Manual: workflow_dispatch with optional `version` input. Same shape as the
+#   monthly cron path (opens a release PR).
 #
 # When release-plz publishes (a release PR was merged into canary), this workflow
 # detects the newly-created `v*` tag at HEAD and fast-forwards `main` to canary.
@@ -32,6 +36,11 @@ permissions:
   # Needed by the "Dispatch Publish workflow" step (`gh workflow run publish.yml`);
   # `gh` calls the workflow-dispatches REST endpoint which is gated on this scope.
   actions: write
+  # Needed by `rust-lang/crates-io-auth-action` to mint an OIDC token that
+  # crates.io exchanges for a short-lived, crate-scoped registry token. Without
+  # this scope release-plz `release` fails with "ensure the 'id-token' permission
+  # is set to 'write'" before it even reaches cargo publish.
+  id-token: write
 
 concurrency:
   group: release-${{ github.ref }}
@@ -119,16 +128,40 @@ jobs:
           echo "--- Cargo.toml [workspace.package] + [workspace.dependencies] ---"
           awk '/^\[workspace\.(package|dependencies)\]/,/^$/' Cargo.toml
 
+      # The tree-sitter crate is the one workspace member that also ships to a
+      # registry release-plz knows nothing about. Its npm manifest and its
+      # tree-sitter manifest each carry their own copy of the version, and
+      # release-plz rewrites only Cargo.toml, so without this step a CalVer bump
+      # leaves the npm package advertising the previous month's number against
+      # this month's grammar. tree-sitter.yml's version-sync job is what turns a
+      # miss here into a red build instead of a bad publish.
+      - name: Set tree-sitter package version
+        env:
+          NEW_VERSION: ${{ needs.compute-version.outputs.version }}
+        working-directory: crates/cairn-lang-tree-sitter
+        run: |
+          set -euo pipefail
+          # jq rather than sed: `version` is not a unique key in either file
+          # once nested objects are in play, and a path expression cannot drift
+          # onto a dependency's version the way a line-oriented match can.
+          for spec in "package.json:.version" "tree-sitter.json:.metadata.version"; do
+            file="${spec%%:*}"
+            path="${spec#*:}"
+            jq --indent 2 --arg v "$NEW_VERSION" "$path = \$v" "$file" > "$file.tmp"
+            mv "$file.tmp" "$file"
+            echo "$file $path -> $(jq -er "$path" "$file")"
+          done
+
+      # release-pr never publishes, so no crates.io token is needed here.
       - name: Run release-plz release-pr
         uses: release-plz/action@v0.5
         with:
           command: release-pr
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
 
   release-patch:
-    name: Open patch PR or publish merged release
+    name: Publish merged release
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:
@@ -148,15 +181,20 @@ jobs:
           shared-key: release-patch
           save-if: ${{ github.ref == 'refs/heads/canary' }}
 
-      # Split into two calls: `release` first (publish + tag any merged
-      # release PR), then `release-pr` (open a patch PR only for new commits
-      # since the release). Running the default command combines both, but
-      # release-pr runs BEFORE release inside that combo — so on the very push
-      # that merges a release PR, release-pr sees Cargo.toml ahead of
-      # crates.io and opens a phantom v(patch+1) PR for the downstream crates
-      # whose Cargo.lock dep on the just-bumped anchor shifted. Running
-      # release first closes that window: by the time release-pr looks,
-      # crates.io matches Cargo.toml and no cascade PR is proposed.
+      # Only `release` runs on the push path: it publishes + tags whatever
+      # release PR just got merged into canary. No `release-pr` here — patch
+      # PRs on every qualifying push would violate the monthly cadence, and
+      # the queued commits get folded into the next monthly cron PR anyway.
+      # Exchange the workflow's OIDC token for a short-lived, crate-scoped
+      # crates.io token. This is the crates.io Trusted Publishing flow: each
+      # cairn-lang-* crate has this repo + this workflow file registered as a
+      # Trusted Publisher on crates.io, so no static `CARGO_REGISTRY_TOKEN`
+      # secret is read. The token only actually gets spent by the `release`
+      # sub-command below when there's something to publish.
+      - name: Authenticate to crates.io via OIDC
+        id: cratesio-auth
+        uses: rust-lang/crates-io-auth-action@v1
+
       - name: Run release-plz release
         id: release_plz
         uses: release-plz/action@v0.5
@@ -164,28 +202,24 @@ jobs:
           command: release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+          CARGO_REGISTRY_TOKEN: ${{ steps.cratesio-auth.outputs.token }}
 
-      - name: Run release-plz release-pr
-        # Only when the preceding `release` didn't itself produce a release —
-        # avoids opening a patch PR immediately after a full release just
-        # landed, and matches the intent that release-pr is the "propose the
-        # next patch" step, not the "propose alongside the current release" one.
-        if: steps.release_plz.outputs.releases_created != 'true'
-        uses: release-plz/action@v0.5
-        with:
-          command: release-pr
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
-
-      # Auto-dispatch the Publish workflow for the just-released tag. Tag pushes
-      # made with GITHUB_TOKEN don't trigger `on: push: tags:` in other workflows
-      # (GitHub's recursion guard), so without this step publish.yml sits idle
-      # until someone runs it manually. `workflow_dispatch` explicitly bypasses
-      # the recursion guard, so `gh workflow run` from inside this job fires
-      # publish.yml cleanly. Same tag-detection shape as the promote step below.
-      - name: Dispatch Publish workflow for the new tag
+      # Auto-dispatch the tag-triggered workflows for the just-released tag. Tag
+      # pushes made with GITHUB_TOKEN don't trigger `on: push: tags:` in other
+      # workflows (GitHub's recursion guard), so without this step they sit idle
+      # until someone runs them manually. `workflow_dispatch` explicitly bypasses
+      # the recursion guard, so `gh workflow run` from inside this job fires them
+      # cleanly. Same tag-detection shape as the promote step below.
+      #
+      # - publish.yml builds and signs the `cairn` / `cairn-lsp` binaries.
+      # - tree-sitter.yml builds `tree-sitter-cairn.wasm` and attaches it to the
+      #   release; the website pins that asset URL at build time.
+      # - npm-publish.yml ships the same grammar to npm, so the npm package and
+      #   the crates.io crate always come from one tag.
+      #
+      # Each is dispatched independently: a failure in one is a missing artifact
+      # to re-dispatch by hand, not a reason to withhold the other two.
+      - name: Dispatch tag-triggered workflows for the new tag
         if: steps.release_plz.outputs.releases_created == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -198,8 +232,15 @@ jobs:
             echo "release-plz reported a release but no v* tag is reachable from HEAD; skipping publish dispatch." >&2
             exit 1
           fi
-          echo "Dispatching publish.yml for $release_tag"
-          gh workflow run publish.yml -f tag="$release_tag"
+          failed=()
+          for wf in publish.yml tree-sitter.yml npm-publish.yml; do
+            echo "Dispatching $wf for $release_tag"
+            gh workflow run "$wf" -f tag="$release_tag" || failed+=("$wf")
+          done
+          if [ ${#failed[@]} -gt 0 ]; then
+            echo "Failed to dispatch: ${failed[*]}. Re-run them manually with the tag $release_tag." >&2
+            exit 1
+          fi
 
       # Open a canary → main promote PR only when release-plz reports it
       # actually published in this run. The `releases_created` output is the

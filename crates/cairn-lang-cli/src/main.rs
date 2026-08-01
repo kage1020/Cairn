@@ -10,13 +10,21 @@ use cairn_lang_core::lock::{
     HashHex, LockEdition, LockInputs, LockPlacement, LockTarget, LockWalkway, Lockfile,
     hash_resolved_ir, hash_source,
 };
-use cairn_lang_core::resolve::{VersionAxes, compute_axes, resolve};
-use cairn_lang_core::{Severity, check, lower, parse};
-use cairn_lang_formats::data_version::resolve_java_target;
-use cairn_lang_formats::java_structure::{
-    Compound, build_structure_tag, output_filename, write_compound_gzip,
+use cairn_lang_core::resolve::{EditionPortability, VersionAxes, compute_axes, resolve};
+use cairn_lang_core::{Edition, Severity, check, lower, parse};
+use cairn_lang_formats::bedrock_structure::{ParityNote, build_mcstructure_tag, write_mcstructure};
+use cairn_lang_formats::data_version::{
+    BedrockTarget, JavaTarget, resolve_bedrock_target, resolve_java_target,
 };
-use cairn_lang_formats::registry::builtin_java;
+use cairn_lang_formats::java_structure::{
+    Compound, OutputExt, build_structure_tag, output_filename, write_compound_gzip,
+};
+use cairn_lang_formats::portability::{portability_for_bedrock, portability_for_java};
+use cairn_lang_formats::registry::{RegistryPack, builtin_bedrock, builtin_java};
+use cairn_lang_redstone::{
+    PlacementStage, compile_crossing, compile_delay, compile_edition_netlist, compile_netlist,
+    compile_placement, compile_routing, synthesize,
+};
 use clap::{Parser, Subcommand, ValueEnum};
 
 /// `cairn` — Minecraft build DSL command-line interface.
@@ -49,6 +57,15 @@ enum Command {
     Check {
         /// Path to the .crn file to check.
         file: PathBuf,
+        /// Optional edition pin. When set, per-edition theme variants
+        /// (spec versioning-editions §10.7) are resolved for the picked
+        /// edition specifically — a `mat_slot=X` reference to a slot only
+        /// the *other* variant declares fires `E_UNRESOLVED_SLOT`. When
+        /// omitted, the resolver unions slot names across both variants
+        /// of one logical theme so the file passes `check` regardless of
+        /// which edition it ends up compiling for.
+        #[arg(long, value_enum)]
+        edition: Option<EditionArg>,
         /// Output format for the diagnostics.
         #[arg(long, value_enum, default_value_t = CheckFormat::Text)]
         format: CheckFormat,
@@ -84,13 +101,15 @@ enum Command {
         #[arg(long, value_enum, default_value_t = LowerFormat::Ascii)]
         format: LowerFormat,
     },
-    /// Compile a .crn source file to its edition+version-pinned NBT artifact
-    /// set and write a lockfile next to the source. The Java backend
-    /// currently voxelises `floor` and `walls` only; other roles degrade
-    /// to air with a `W_DEFERRED_MEMBER` warning and the build still
-    /// succeeds, matching `cairn lower`. Exits 0 on success, 1 on parse,
-    /// lowering, or I/O failure (including an unsupported `--target`),
-    /// and 2 when the source file cannot be located.
+    /// Compile a .crn source file to its edition+version-pinned structure
+    /// artifact set and write a lockfile next to the source. `--edition
+    /// java` writes gzip `.nbt` structures; `--edition bedrock` writes
+    /// uncompressed `.mcstructure` files. The Bedrock backend emits
+    /// stateless palettes only for now — a palette entry that carries
+    /// blockstate properties is a hard error rather than a silent drop.
+    /// Exits 0 on success, 1 on parse, lowering, or I/O failure (including
+    /// an unsupported `--target` or a stateful Bedrock palette), and 2
+    /// when the source file cannot be located.
     Compile {
         /// Path to the .crn file to compile.
         file: PathBuf,
@@ -114,6 +133,135 @@ enum Command {
         #[arg(long)]
         lock: Option<PathBuf>,
     },
+    /// Lower a .crn source file's `logic` bindings, sensors, and actuators
+    /// through the redstone pipeline and print an intermediate stage as
+    /// JSON. `--stage logic` (default) prints the edition-neutral Logic IR
+    /// DAG; `--stage netlist` prints the Netlist IR of Logical Cells + nets
+    /// derived from that DAG; `--stage edition` picks the target-edition
+    /// realisation of each cell and prints the Edition Netlist IR;
+    /// `--stage placement` lays those edition-tagged cells out inside
+    /// each scope's `circuit region=` reservation and prints the
+    /// Placement IR; `--stage route` runs Steiner routing over the
+    /// Placement IR and prints the routed layout with every cell's
+    /// `wire_length` populated; `--stage delay` runs delay insertion
+    /// over the routed IR and fills every cell's `delay_ticks` with
+    /// the sum of the cell's base delay and each implicit buffer
+    /// repeater's `BUFFER_REPEATER_TICKS` contribution over every
+    /// driver segment beyond the `DUST_ATTENUATION_LIMIT`;
+    /// `--stage crossing` runs crossing legalization over the delayed
+    /// IR, refuses with `E_CROSSING_CONGESTION` when a cross-net
+    /// plane overlap cannot fit inside the `void=<N>` reservation,
+    /// and fills every cell's `buffer_coords` with the concrete
+    /// coord of each implicit buffer repeater (escaping to a
+    /// `RouteLayer::Bridge` y-layer whenever the plane candidate
+    /// collides with a cell / pad / plane crossing / earlier
+    /// buffer). Every cell of the four Placement IR stages carries a
+    /// `"stage"` key echoing the flag value that produced the dump
+    /// (`placement` / `route` / `delay` / `crossing`), so a consumer
+    /// reads the stage off the output instead of inferring it from
+    /// which optional keys are present. The `--edition <java|bedrock>`
+    /// flag is required in the `edition`, `placement`, `route`,
+    /// `delay`, and `crossing` modes and refused otherwise (the
+    /// earlier stages are edition-neutral by contract).
+    /// **Internal / experimental** — the shape of the output is not
+    /// covered by the stable compatibility tier and may change at any time
+    /// as the route / simulator stages land. Requires
+    /// `--experimental-logic-synth` so a caller cannot end up depending on
+    /// it accidentally.
+    ///
+    /// Exits 0 when the requested stage produced a well-formed IR
+    /// (warnings still allowed), 1 on parse failure, I/O error, or any
+    /// Error-severity synth diagnostic, and 2 when the file cannot be
+    /// located.
+    Synth {
+        /// Path to the .crn file to synthesise.
+        file: PathBuf,
+        /// Opt-in flag confirming the caller understands this surface is
+        /// internal. Required until the redstone pipeline reaches a stable
+        /// tier; without it the subcommand exits 2 with a hint.
+        #[arg(long)]
+        experimental_logic_synth: bool,
+        /// Which pipeline stage to print. Adding stages here as they
+        /// land is preferred over a new subcommand per stage — it keeps
+        /// the internal surface area (and `--help` output) contained.
+        /// For the four Placement IR stages the value chosen here is
+        /// echoed back as every cell's `"stage"` key, so the flag and
+        /// the dump share one vocabulary
+        /// ([`cairn_lang_redstone::PlacementStage`]).
+        #[arg(long, value_enum, default_value_t = SynthStage::Logic)]
+        stage: SynthStage,
+        /// Target edition for the Edition Netlist IR / Placement IR /
+        /// routed Placement IR / delayed Placement IR / legalized
+        /// Placement IR. Required when `--stage edition`,
+        /// `--stage placement`, `--stage route`, `--stage delay`, or
+        /// `--stage crossing` is set; refused for `logic` / `netlist`,
+        /// which are edition-neutral by contract.
+        #[arg(long, value_enum)]
+        edition: Option<EditionArg>,
+    },
+}
+
+#[derive(Copy, Clone, ValueEnum)]
+enum SynthStage {
+    /// Edition-neutral Logic IR DAG produced by `synthesize`.
+    Logic,
+    /// Netlist IR: Logical Cell selection over the Logic IR DAG. Still
+    /// carries no delay per `spec/redstone` "Time model" / "Connection to
+    /// the IR and phases".
+    Netlist,
+    /// Edition Netlist IR: Edition Cell selection over the Netlist IR
+    /// against `--edition`. The middle tier of `spec/redstone` §14.6's
+    /// three-tier cell library. Still carries no delay.
+    Edition,
+    /// Placement IR: 1D coordinate assignment over the Edition Netlist
+    /// IR against `--edition`. Stage 1 of `spec/redstone` §14.5's
+    /// place-and-route pipeline. `wire_length` and `delay_ticks` are
+    /// reserved as `Option`s and stay `None` until the routing and
+    /// delay-insertion follow-up passes land.
+    Placement,
+    /// Routed Placement IR: Steiner routing over the Placement IR
+    /// against `--edition`. Stage 2 of `spec/redstone` §14.5's
+    /// place-and-route pipeline. Fills every cell's `wire_length`
+    /// with the sum of Manhattan distances from each driver source
+    /// into the cell; `delay_ticks` stays `None` until the
+    /// delay-insertion pass (stage 3) runs.
+    Route,
+    /// Delayed Placement IR: delay insertion over the routed Placement
+    /// IR against `--edition`. Stage 3 of `spec/redstone` §14.5's
+    /// place-and-route pipeline. Fills every cell's `delay_ticks`
+    /// with the sum of the cell's physical base delay
+    /// ([`cairn_lang_redstone::EditionCell::base_delay_ticks`]) and
+    /// each implicit buffer repeater's
+    /// [`cairn_lang_redstone::BUFFER_REPEATER_TICKS`] contribution
+    /// implied by driver segments beyond
+    /// [`cairn_lang_redstone::DUST_ATTENUATION_LIMIT`]; refuses with
+    /// `E_ATTENUATION_LIMIT` when a segment exceeds the v1 sanity cap
+    /// [`cairn_lang_redstone::MAX_ATTENUATION_SEGMENT`], the threshold
+    /// past which a stage-4 crossing-legalization escape becomes
+    /// unavoidable.
+    Delay,
+    /// Legalized Placement IR: crossing legalization over the delayed
+    /// Placement IR against `--edition`. Stage 4 of `spec/redstone`
+    /// §14.5's place-and-route pipeline. Detects wire coords two
+    /// distinct nets would otherwise share on the ground plane
+    /// (refused with `E_CROSSING_CONGESTION` when the
+    /// `circuit region=<label> void=<N>` reservation offers no
+    /// y-layer to escape to) and materialises the concrete coord of
+    /// every implicit buffer repeater the delay pass counted into
+    /// every cell's `buffer_coords`. A buffer whose plane candidate
+    /// collides with a cell / pad / plane crossing / earlier buffer
+    /// escapes to the first free `RouteLayer::Bridge` y-layer inside
+    /// the `void=<N>` budget; if every bridge y-layer at that
+    /// `(x, z)` is also taken, refuses with
+    /// `E_BUFFER_COORD_COLLISION`. v1 does not lift the wire
+    /// crossing itself onto `Bridge` — the routed wire path is not
+    /// carried on the IR, and stage-5 block-array lowering re-runs
+    /// the routing algorithm to derive the crossings itself. A scope
+    /// with nothing to legalize emits no `buffer_coords` at all
+    /// (the empty vector serde-skips); the `"stage": "crossing"` tag
+    /// on every cell, not the presence of that key, is what marks the
+    /// dump as having been through this pass.
+    Crossing,
 }
 
 #[derive(Copy, Clone, ValueEnum)]
@@ -142,10 +290,12 @@ enum InfoFormat {
 
 #[derive(Copy, Clone, ValueEnum)]
 enum EditionArg {
-    /// Java Edition. The only fully implemented backend so far.
+    /// Java Edition. Emits a gzip-compressed vanilla `.nbt` structure.
     Java,
-    /// Bedrock Edition. Reserved for a future backend; passing it here
-    /// exits with a dedicated error so the CLI surface stays stable.
+    /// Bedrock Edition. Emits an uncompressed little-endian `.mcstructure`;
+    /// the stair family's blockstate is mapped to Bedrock `states` and
+    /// unrepresentable intent (stair `shape`) degrades with a
+    /// `W_INTENT_DEGRADED` warning.
     Bedrock,
 }
 
@@ -154,6 +304,16 @@ impl EditionArg {
         match self {
             EditionArg::Java => LockEdition::Java,
             EditionArg::Bedrock => LockEdition::Bedrock,
+        }
+    }
+
+    /// Convert to the core-crate [`Edition`] marker so the resolver's
+    /// per-edition theme-variant selection sees the same value the compile
+    /// backend does.
+    fn as_edition(self) -> Edition {
+        match self {
+            EditionArg::Java => Edition::Java,
+            EditionArg::Bedrock => Edition::Bedrock,
         }
     }
 }
@@ -173,13 +333,23 @@ fn main() -> ExitCode {
     let cli = Cli::parse();
     match cli.command {
         Some(Command::Parse { file, format }) => run_parse(&file, format),
-        Some(Command::Check { file, format }) => run_check(&file, format),
+        Some(Command::Check {
+            file,
+            edition,
+            format,
+        }) => run_check(&file, edition, format),
         Some(Command::Info {
             file,
             editions,
             format,
         }) => run_info(&file, &editions, format),
         Some(Command::Lower { file, format }) => run_lower(&file, format),
+        Some(Command::Synth {
+            file,
+            experimental_logic_synth,
+            stage,
+            edition,
+        }) => run_synth(&file, experimental_logic_synth, stage, edition),
         Some(Command::Compile {
             file,
             edition,
@@ -240,7 +410,7 @@ fn run_parse(file: &Path, format: Format) -> ExitCode {
     }
 }
 
-fn run_check(file: &Path, format: CheckFormat) -> ExitCode {
+fn run_check(file: &Path, edition: Option<EditionArg>, format: CheckFormat) -> ExitCode {
     let source = match std::fs::read_to_string(file) {
         Ok(s) => s,
         Err(err) => {
@@ -268,7 +438,7 @@ fn run_check(file: &Path, format: CheckFormat) -> ExitCode {
         }
     };
     let ir = lower(&module);
-    let diagnostics = check(&module, &ir);
+    let diagnostics = check(&module, &ir, edition.map(EditionArg::as_edition));
     let has_error = diagnostics.iter().any(|d| d.severity == Severity::Error);
     // Build the line-start index once and reuse it for every diagnostic /
     // note position lookup. Without this we'd re-walk the entire source for
@@ -338,6 +508,17 @@ fn run_info(file: &Path, editions: &[String], format: InfoFormat) -> ExitCode {
         eprintln!("error: --editions value must not contain empty entries");
         return ExitCode::from(2);
     }
+    // Reject unknown edition names before the (expensive) dry-run lowering.
+    // The parity table's contract is "every entry is a real portability
+    // figure"; letting an unknown edition through would either silently
+    // produce zeros or a Java-flavoured fallback the caller couldn't
+    // distinguish from a real portable-only classification.
+    for e in editions {
+        if let Err(err) = e.parse::<Edition>() {
+            eprintln!("error: {err}");
+            return ExitCode::from(2);
+        }
+    }
 
     let source = match std::fs::read_to_string(file) {
         Ok(s) => s,
@@ -362,8 +543,78 @@ fn run_info(file: &Path, editions: &[String], format: InfoFormat) -> ExitCode {
         }
     };
     let ir = lower(&module);
-    let resolution = resolve(&ir);
-    let axes = compute_axes(&module, &ir, &resolution, editions);
+
+    // Surface resolver + lowering diagnostics before running the parity
+    // dry-run — the same contract `run_check` / `run_lower` / `run_compile`
+    // already honor. Without this, a `.crn` carrying an
+    // `E_UNRESOLVED_SLOT` (or any other Error-severity finding) would
+    // still get `cairn info` exit 0 with a portability row computed
+    // against a partially unresolved IR, which is a poor CI gate.
+    //
+    // The diagnostic set follows `cairn check` semantics — `resolve(ir,
+    // None)` unions slot names across per-edition variants — so a file
+    // whose only "problem" is that one variant declares a slot the other
+    // doesn't still passes here. A per-edition strict pass (`resolve(ir,
+    // Some(edition))`) is what the parity dry-run below runs; its
+    // downstream lowering may add lowering-level diagnostics that are
+    // edition-agnostic in practice.
+    let resolution = resolve(&ir, None);
+    let mut block_ir = lower_to_block_array(&ir, &resolution, Some(&builtin_java().materials));
+    let mut combined = resolution.diagnostics.clone();
+    combined.append(&mut block_ir.diagnostics);
+
+    let lines = LineStarts::new(&source);
+    let mut has_error = false;
+    for d in &combined {
+        let pos = lines.position(&source, d.span.start);
+        eprintln!(
+            "{}:{}: {}[{}]: {}",
+            file.display(),
+            pos,
+            d.severity.as_str(),
+            d.code.as_str(),
+            d.primary,
+        );
+        for note in &d.notes {
+            eprintln!("  note: {}", note.message);
+        }
+        if d.severity == Severity::Error {
+            has_error = true;
+        }
+    }
+    if has_error {
+        return ExitCode::from(1);
+    }
+
+    // One dry-run lower per requested edition: the resolver's per-edition
+    // theme variant selection can produce a different palette per edition
+    // (the whole point of spec §10.7 hierarchy #2), so a single shared
+    // block-array IR would misrepresent the parity axis.
+    //
+    // The lowering never writes files here — it stops at the in-memory
+    // `BlockArrayIr` that `portability_for_*` inspects.
+    let mut per_edition: Vec<EditionPortability> = Vec::with_capacity(editions.len());
+    for e in editions {
+        let edition: Edition = e.parse().expect("validated above");
+        let per_edition_resolution = resolve(&ir, Some(edition));
+        let materials = match edition {
+            Edition::Java => &builtin_java().materials,
+            Edition::Bedrock => &builtin_bedrock().materials,
+        };
+        let per_block_ir = lower_to_block_array(&ir, &per_edition_resolution, Some(materials));
+        let counts = match edition {
+            Edition::Java => portability_for_java(&per_block_ir),
+            Edition::Bedrock => portability_for_bedrock(&per_block_ir),
+        };
+        per_edition.push(EditionPortability {
+            edition,
+            portable: counts.portable,
+            degraded: counts.degraded,
+            unsupported: counts.unsupported,
+        });
+    }
+
+    let axes = compute_axes(&module, &ir, &resolution, per_edition);
 
     match format {
         InfoFormat::Text => {
@@ -402,7 +653,7 @@ fn print_text(axes: &VersionAxes) {
             .map(|ep| {
                 format!(
                     "{}: portable: {}  degraded: {}  unsupported: {}",
-                    capitalise(&ep.edition),
+                    capitalise(ep.edition.as_str()),
                     ep.portable,
                     ep.degraded,
                     ep.unsupported,
@@ -457,7 +708,7 @@ fn run_lower(file: &Path, format: LowerFormat) -> ExitCode {
         }
     };
     let ir = lower(&module);
-    let resolution = resolve(&ir);
+    let resolution = resolve(&ir, None);
     let mut block_ir = lower_to_block_array(&ir, &resolution, Some(&builtin_java().materials));
     // Mirror `load_and_lower`: semantic findings produced by the resolver
     // belong on the same diagnostic stream as the lowering deferrals they
@@ -512,6 +763,419 @@ fn run_lower(file: &Path, format: LowerFormat) -> ExitCode {
             success_exit
         }
     }
+}
+
+fn run_synth(
+    file: &Path,
+    experimental_flag: bool,
+    stage: SynthStage,
+    edition: Option<EditionArg>,
+) -> ExitCode {
+    if !experimental_flag {
+        // Gated behind `--experimental-logic-synth` because the redstone
+        // pipeline is still Internal-tier (`spec/compatibility`) — the
+        // Logic IR wire form will grow the netlist / placement / route
+        // layers over later changes, and every intermediate shape is fair
+        // game for a breaking change. Exit 2 (usage error) so a script
+        // that accidentally reaches this subcommand does not read the
+        // gate as a warning it can ignore.
+        eprintln!(
+            "error: `cairn synth` is an internal / experimental surface; pass --experimental-logic-synth to opt in",
+        );
+        return ExitCode::from(2);
+    }
+
+    // Reject `--edition` on the edition-neutral stages loud instead of
+    // silently ignoring it — a caller who passed the flag on `--stage
+    // logic` or `--stage netlist` almost certainly expected it to shape
+    // the output, and swallowing the mistake would make the CLI's
+    // stage-vs-edition axis ambiguous.
+    if !stage_requires_edition(stage) && edition.is_some() {
+        eprintln!(
+            "error: `--edition` is only meaningful with {}; the {} stages are edition-neutral",
+            edition_required_stage_list(),
+            edition_neutral_stage_list(),
+        );
+        return ExitCode::from(2);
+    }
+
+    let source = match std::fs::read_to_string(file) {
+        Ok(s) => s,
+        Err(err) => {
+            eprintln!("error: cannot read `{}`: {err}", file.display());
+            return match err.kind() {
+                std::io::ErrorKind::NotFound => ExitCode::from(2),
+                _ => ExitCode::from(1),
+            };
+        }
+    };
+    let module = match parse(&source) {
+        Ok(m) => m,
+        Err(err) => {
+            eprintln!(
+                "error: {}:{}: {}",
+                file.display(),
+                err.position(),
+                err.user_message(),
+            );
+            return ExitCode::from(1);
+        }
+    };
+    let ir = lower(&module);
+    let lines = LineStarts::new(&source);
+
+    // Mirror `run_check` / `run_lower` / `run_compile`: surface
+    // resolver + check diagnostics before running the redstone synth. A
+    // `.crn` whose only problem is `E_UNRESOLVED_SLOT` or a typo caught
+    // by `check` would otherwise exit 0 through the synth path with a
+    // partially resolved IR, which is a poor CI gate.
+    let resolution = resolve(&ir, None);
+    let mut has_error = report_core_diagnostics(file, &source, &lines, &resolution.diagnostics);
+    let check_diagnostics = check(&module, &ir, None);
+    if report_core_diagnostics(file, &source, &lines, &check_diagnostics) {
+        has_error = true;
+    }
+    if has_error {
+        return ExitCode::from(1);
+    }
+
+    let synth = synthesize(&ir);
+    if report_synth_diagnostics(file, &source, &lines, &synth.diagnostics) {
+        return ExitCode::from(1);
+    }
+
+    let (json, label) =
+        match dispatch_synth_stage(stage, edition, &synth, &ir, file, &source, &lines) {
+            Ok(pair) => pair,
+            Err(code) => return code,
+        };
+    match json {
+        Ok(text) => {
+            println!("{text}");
+            ExitCode::SUCCESS
+        }
+        Err(err) => {
+            eprintln!("error: failed to serialise {label} as JSON: {err}");
+            ExitCode::from(1)
+        }
+    }
+}
+
+/// Run the requested pipeline stage and return the JSON serialisation
+/// plus a human-facing label. The body walks the pipeline linearly and
+/// short-circuits at the requested stage. Each pass whose contract can
+/// raise diagnostics (Placement / Route / Delay / Crossing) is followed
+/// immediately by `report_synth_diagnostics` so the report call sits
+/// next to the pass that produced it and is hard to forget on future
+/// additions; `compile_netlist` and `compile_edition_netlist` are
+/// diagnostic-free by contract and intentionally have no report call.
+/// The tail is an exhaustive `match` on `SynthStage` so adding a new
+/// variant fails to compile here instead of silently reusing the
+/// Crossing payload.
+///
+/// One thing sits outside that linear order on purpose: the
+/// `--edition` gate runs before the first pass, not at the point the
+/// value is first consumed. A pass inserted ahead of the edition-tagged
+/// stages belongs below the gate, so a caller who forgot the flag still
+/// hears about the flag rather than about whatever that pass had to say.
+fn dispatch_synth_stage(
+    stage: SynthStage,
+    edition: Option<EditionArg>,
+    synth: &cairn_lang_redstone::SynthOutput,
+    ir: &cairn_lang_core::IntentModule,
+    file: &Path,
+    source: &str,
+    lines: &LineStarts,
+) -> Result<(serde_json::Result<String>, &'static str), ExitCode> {
+    if matches!(stage, SynthStage::Logic) {
+        return Ok((serde_json::to_string_pretty(&synth.scoped), "Logic IR"));
+    }
+
+    // Resolved ahead of `compile_netlist`: a missing `--edition` is a
+    // usage mistake, and a usage mistake is worth reporting before any
+    // synthesis work is paid for, not after.
+    let edition = if stage_requires_edition(stage) {
+        Some(require_edition(edition, stage_cli_name(stage))?.as_edition())
+    } else {
+        None
+    };
+
+    let netlist = compile_netlist(&synth.scoped);
+    // The edition-neutral tail dispatches on the stage, not on "no
+    // edition was resolved". The two say the same thing today, but only
+    // the former makes a stage added later state its own answer here:
+    // the negative form would hand it the Netlist payload, under the
+    // Netlist label, with exit 0.
+    let edition = match (edition, stage) {
+        (Some(edition), _) => edition,
+        (None, SynthStage::Netlist) => {
+            return Ok((serde_json::to_string_pretty(&netlist), "Netlist IR"));
+        }
+        (None, SynthStage::Logic) => unreachable!("the Logic guard above returns"),
+        (
+            None,
+            SynthStage::Edition
+            | SynthStage::Placement
+            | SynthStage::Route
+            | SynthStage::Delay
+            | SynthStage::Crossing,
+        ) => unreachable!(
+            "stage_requires_edition holds here, so the gate above resolved an edition or returned"
+        ),
+    };
+    let edition_netlist = compile_edition_netlist(&netlist, edition);
+    if matches!(stage, SynthStage::Edition) {
+        return Ok((
+            serde_json::to_string_pretty(&edition_netlist),
+            "Edition Netlist IR",
+        ));
+    }
+
+    let placement = compile_placement(&edition_netlist, ir);
+    if report_synth_diagnostics(file, source, lines, &placement.diagnostics) {
+        return Err(ExitCode::from(1));
+    }
+    if matches!(stage, SynthStage::Placement) {
+        return Ok((
+            serde_json::to_string_pretty(&placement.scoped),
+            "Placement IR",
+        ));
+    }
+
+    let routing = compile_routing(&placement.scoped);
+    if report_synth_diagnostics(file, source, lines, &routing.diagnostics) {
+        return Err(ExitCode::from(1));
+    }
+    if matches!(stage, SynthStage::Route) {
+        return Ok((
+            serde_json::to_string_pretty(&routing.scoped),
+            "Routed Placement IR",
+        ));
+    }
+
+    let delay = compile_delay(&routing.scoped);
+    if report_synth_diagnostics(file, source, lines, &delay.diagnostics) {
+        return Err(ExitCode::from(1));
+    }
+    if matches!(stage, SynthStage::Delay) {
+        return Ok((
+            serde_json::to_string_pretty(&delay.scoped),
+            "Delayed Placement IR",
+        ));
+    }
+
+    let crossing = compile_crossing(&delay.scoped);
+    if report_synth_diagnostics(file, source, lines, &crossing.diagnostics) {
+        return Err(ExitCode::from(1));
+    }
+    match stage {
+        SynthStage::Crossing => Ok((
+            serde_json::to_string_pretty(&crossing.scoped),
+            "Legalized Placement IR",
+        )),
+        SynthStage::Logic
+        | SynthStage::Netlist
+        | SynthStage::Edition
+        | SynthStage::Placement
+        | SynthStage::Route
+        | SynthStage::Delay => {
+            unreachable!("earlier guards return for non-Crossing stages")
+        }
+    }
+}
+
+/// Hand-maintained mirror of clap's kebab-case derivation of
+/// `SynthStage` variant names: the single place the messages this
+/// binary composes at runtime read a stage's spelling from, so what
+/// a caller is told to type matches what the parser accepts. The
+/// canonical spelling is whatever clap accepts on the command line
+/// (derived from `#[derive(ValueEnum)]` on `SynthStage`); this
+/// function must be kept in sync on every variant addition or
+/// rename. Its exhaustive `match` provides a compile-time nudge to
+/// do so.
+///
+/// What it does not reach is the `--stage` / `--edition` `--help`
+/// prose, which clap takes as string literals and which therefore
+/// spells every stage by hand — the same carve-out
+/// `stage_requires_edition` names for the partition it owns. A
+/// variant added here still has to be worked into that prose
+/// separately.
+///
+/// The four Placement IR stages take their spelling from
+/// [`PlacementStage::as_str`] rather than repeating the literal, so
+/// the word this function returns and the word the dump's `"stage"`
+/// key carries cannot drift apart. What no type can enforce is the
+/// third spelling in the chain — the one clap derives from the
+/// variant identifier — so `placement_stage_names_match_clap` below
+/// pins that against `ValueEnum` directly.
+fn stage_cli_name(stage: SynthStage) -> &'static str {
+    match stage {
+        SynthStage::Logic => "logic",
+        SynthStage::Netlist => "netlist",
+        SynthStage::Edition => "edition",
+        SynthStage::Placement => PlacementStage::Placement.as_str(),
+        SynthStage::Route => PlacementStage::Route.as_str(),
+        SynthStage::Delay => PlacementStage::Delay.as_str(),
+        SynthStage::Crossing => PlacementStage::Crossing.as_str(),
+    }
+}
+
+/// Whether `--stage <stage>` reads the target-edition cell library and
+/// therefore needs `--edition <java|bedrock>` alongside it.
+///
+/// The same partition drives both halves of the flag's contract:
+/// `run_synth` refuses `--edition` as stray on the stages this returns
+/// `false` for, and `dispatch_synth_stage` demands it on the ones it
+/// returns `true` for. Spelling the set once is what keeps a stage
+/// from landing in neither half — or, worse, in both. The exhaustive
+/// `match` makes a new `SynthStage` variant a compile error here,
+/// where the decision belongs, rather than a silent default to
+/// edition-neutral.
+///
+/// The stray-`--edition` message renders its two stage lists from this
+/// function too, so what a caller is told matches what the gates
+/// enforce. What stays hand-written is the same partition as it
+/// appears in prose in the `--stage` / `--edition` `--help` text,
+/// which clap takes as string literals: a stage added on the `true`
+/// side has to be worked into both sentences by hand.
+fn stage_requires_edition(stage: SynthStage) -> bool {
+    match stage {
+        SynthStage::Logic | SynthStage::Netlist => false,
+        SynthStage::Edition
+        | SynthStage::Placement
+        | SynthStage::Route
+        | SynthStage::Delay
+        | SynthStage::Crossing => true,
+    }
+}
+
+/// `` `--stage a`, `--stage b`, or `--stage c` `` over the stages that
+/// require `--edition`, for the stray-flag message.
+fn edition_required_stage_list() -> String {
+    join_stages(stage_requires_edition, "or", |name| {
+        format!("`--stage {name}`")
+    })
+}
+
+/// `` `a` and `b` `` over the stages that refuse `--edition`, for the
+/// same message. Renders bare stage names because that half of the
+/// sentence talks about the stages themselves rather than about the
+/// flag a caller would have typed.
+fn edition_neutral_stage_list() -> String {
+    join_stages(
+        |stage| !stage_requires_edition(stage),
+        "and",
+        |name| format!("`{name}`"),
+    )
+}
+
+/// Render the `--stage` values matching `select` as an English list,
+/// in the order clap declares them, with each name passed through
+/// `render` first. Walking `ValueEnum` rather than a literal list is
+/// what lets the stray-`--edition` message pick up a stage the day it
+/// lands instead of naming a set that has since moved on.
+fn join_stages(
+    select: impl Fn(SynthStage) -> bool,
+    conjunction: &str,
+    render: impl Fn(&str) -> String,
+) -> String {
+    let items: Vec<String> = SynthStage::value_variants()
+        .iter()
+        .copied()
+        .filter(|stage| select(*stage))
+        .map(|stage| render(stage_cli_name(stage)))
+        .collect();
+    match items.split_last() {
+        None => String::new(),
+        Some((last, [])) => last.clone(),
+        Some((last, [only])) => format!("{only} {conjunction} {last}"),
+        Some((last, rest)) => format!("{}, {conjunction} {last}", rest.join(", ")),
+    }
+}
+
+/// Enforce the `--edition <java|bedrock>` requirement for the
+/// edition-tagged stages. The stage name is baked into the error
+/// message so a caller sees exactly which stage tripped the gate,
+/// plus a short "why" hint so a caller who doesn't know the pipeline
+/// still connects the flag to the edition-specific cell library.
+fn require_edition(edition: Option<EditionArg>, stage_name: &str) -> Result<EditionArg, ExitCode> {
+    edition.ok_or_else(|| {
+        eprintln!(
+            "error: `cairn synth --stage {stage_name}` requires --edition <java|bedrock> (this stage picks the target-edition cell realisation, so the flag is not optional)",
+        );
+        ExitCode::from(2)
+    })
+}
+
+/// Print `cairn-lang-core::check::Diagnostic`s in gcc-style, returning
+/// `true` when any Error-severity finding was seen. Shared between
+/// `run_synth`'s resolve + check pre-passes.
+fn report_core_diagnostics(
+    file: &Path,
+    source: &str,
+    lines: &LineStarts,
+    diagnostics: &[cairn_lang_core::check::Diagnostic],
+) -> bool {
+    let mut has_error = false;
+    for d in diagnostics {
+        let pos = lines.position(source, d.span.start);
+        eprintln!(
+            "{}:{}: {}[{}]: {}",
+            file.display(),
+            pos,
+            d.severity.as_str(),
+            d.code.as_str(),
+            d.primary,
+        );
+        for note in &d.notes {
+            if let Some(span) = note.span.as_ref() {
+                let note_pos = lines.position(source, span.start);
+                eprintln!("{}:{}:   note: {}", file.display(), note_pos, note.message);
+            } else {
+                eprintln!("  note: {}", note.message);
+            }
+        }
+        if d.severity == Severity::Error {
+            has_error = true;
+        }
+    }
+    has_error
+}
+
+/// Print redstone synth diagnostics in the same format the core passes
+/// use. Kept as a separate function because the finding type is
+/// crate-local — merging the two would require an `impl` trait bound on
+/// the diagnostic shape that neither side owns.
+fn report_synth_diagnostics(
+    file: &Path,
+    source: &str,
+    lines: &LineStarts,
+    diagnostics: &[cairn_lang_redstone::Diagnostic],
+) -> bool {
+    let mut has_error = false;
+    for d in diagnostics {
+        let pos = lines.position(source, d.span.start);
+        eprintln!(
+            "{}:{}: {}[{}]: {}",
+            file.display(),
+            pos,
+            d.severity.as_str(),
+            d.code.as_str(),
+            d.primary,
+        );
+        for note in &d.notes {
+            if let Some(span) = note.span.as_ref() {
+                let note_pos = lines.position(source, span.start);
+                eprintln!("{}:{}:   note: {}", file.display(), note_pos, note.message);
+            } else {
+                eprintln!("  note: {}", note.message);
+            }
+        }
+        if d.severity == Severity::Error {
+            has_error = true;
+        }
+    }
+    has_error
 }
 
 fn print_block_ir_ascii(block_ir: &BlockArrayIr) {
@@ -573,6 +1237,92 @@ fn print_y_slice(ba: &BlockArray, y: u32) {
     }
 }
 
+/// A resolved compile target: an edition-specific version-integer wrapper
+/// plus the knowledge of which backend serialises it. Every downstream
+/// step (filename extension, tag builder, writer, lockfile row) branches
+/// on this one value so a new edition is added in a single place.
+enum ResolvedTarget {
+    /// Java vanilla structure target (`.nbt`, gzip).
+    Java(JavaTarget),
+    /// Bedrock structure target (`.mcstructure`, uncompressed).
+    Bedrock(BedrockTarget),
+}
+
+impl ResolvedTarget {
+    /// On-disk extension the backend writes. The three edition-varying
+    /// steps of a compile — extension, tag builder ([`Self::build_tag`]),
+    /// and writer ([`Self::write_tag`]) — all live on this type so their
+    /// correspondence is co-located rather than kept in step by convention
+    /// across scattered `match`es. Adding an edition means adding one arm
+    /// to each and the compiler flags any it misses.
+    fn output_ext(&self) -> OutputExt {
+        match self {
+            ResolvedTarget::Java(_) => OutputExt::Nbt,
+            ResolvedTarget::Bedrock(_) => OutputExt::Mcstructure,
+        }
+    }
+
+    /// Build the structure tag tree for this edition's backend, plus any
+    /// `W_INTENT_DEGRADED` parity notes raised while lowering intent to the
+    /// edition (Java is always lossless, so its note list is empty). The two
+    /// backends raise different error types; both are rendered to a message
+    /// string here so the caller has one error shape to report.
+    ///
+    /// [`ParityNote`] is threaded verbatim rather than flattened to a message
+    /// string so the CLI can key the warning by the palette id that
+    /// degraded, keeping the (`id`, `message`) pair machine-parsable for
+    /// downstream tools.
+    fn build_tag(&self, ba: &BlockArray) -> Result<(Compound, Vec<ParityNote>), String> {
+        match self {
+            ResolvedTarget::Java(t) => build_structure_tag(ba, t)
+                .map(|tag| (tag, Vec::new()))
+                .map_err(|e| e.to_string()),
+            ResolvedTarget::Bedrock(t) => build_mcstructure_tag(ba, t).map_err(|e| e.to_string()),
+        }
+    }
+
+    /// Write a built tag tree in this edition's on-disk form: Java `.nbt`
+    /// is gzip-wrapped big-endian, Bedrock `.mcstructure` is raw
+    /// little-endian.
+    fn write_tag<W: std::io::Write>(
+        &self,
+        writer: &mut W,
+        tag: &Compound,
+    ) -> Result<(), std::io::Error> {
+        let encoded = match self {
+            ResolvedTarget::Java(_) => write_compound_gzip(writer, tag),
+            ResolvedTarget::Bedrock(_) => write_mcstructure(writer, tag),
+        };
+        encoded.map_err(|e| std::io::Error::other(format!("nbt encode: {e}")))
+    }
+
+    /// Human-facing Minecraft version string for the lockfile.
+    fn mc_version(&self) -> &str {
+        match self {
+            ResolvedTarget::Java(t) => &t.mc_version,
+            ResolvedTarget::Bedrock(t) => &t.mc_version,
+        }
+    }
+
+    /// Edition-specific version integer for the lockfile (`DataVersion`
+    /// for Java, block-palette `version` for Bedrock).
+    fn version_int(&self) -> i32 {
+        match self {
+            ResolvedTarget::Java(t) => t.data_version,
+            ResolvedTarget::Bedrock(t) => t.block_version,
+        }
+    }
+
+    /// Registry pack whose bytes the compile resolved against, hashed into
+    /// the lockfile.
+    fn registry_pack(&self) -> &'static RegistryPack {
+        match self {
+            ResolvedTarget::Java(_) => builtin_java(),
+            ResolvedTarget::Bedrock(_) => builtin_bedrock(),
+        }
+    }
+}
+
 fn run_compile(
     file: &Path,
     edition: EditionArg,
@@ -580,7 +1330,7 @@ fn run_compile(
     out: Option<&Path>,
     lock: Option<&Path>,
 ) -> ExitCode {
-    let (source, block_ir) = match load_and_lower(file) {
+    let (source, block_ir) = match load_and_lower(file, edition) {
         Ok(pair) => pair,
         Err(code) => return code,
     };
@@ -607,7 +1357,7 @@ fn run_compile(
     write_artifacts_and_lock(&prepared, &source, &block_ir, edition, &target, &lock_path)
 }
 
-fn load_and_lower(file: &Path) -> Result<(String, BlockArrayIr), ExitCode> {
+fn load_and_lower(file: &Path, edition: EditionArg) -> Result<(String, BlockArrayIr), ExitCode> {
     let source = std::fs::read_to_string(file).map_err(|err| {
         eprintln!("error: cannot read `{}`: {err}", file.display());
         match err.kind() {
@@ -625,8 +1375,16 @@ fn load_and_lower(file: &Path) -> Result<(String, BlockArrayIr), ExitCode> {
         ExitCode::from(1)
     })?;
     let ir = lower(&module);
-    let resolution = resolve(&ir);
-    let mut block_ir = lower_to_block_array(&ir, &resolution, Some(&builtin_java().materials));
+    let resolution = resolve(&ir, Some(edition.as_edition()));
+    // The materials catalog is edition-specific: an abstract `@token`
+    // resolves through the pack whose backend will serialise it, so a
+    // future per-edition block vocabulary lowers correctly without a
+    // second lowering pass.
+    let materials = match edition {
+        EditionArg::Java => &builtin_java().materials,
+        EditionArg::Bedrock => &builtin_bedrock().materials,
+    };
+    let mut block_ir = lower_to_block_array(&ir, &resolution, Some(materials));
     // Resolver diagnostics (`E_UNRESOLVED_PLACE_REF`, `E_UNRESOLVED_SLOT`,
     // `W_UNUSED_DEF`, ...) are produced before lowering and must still reach
     // the CLI's diagnostic stream — otherwise a `place use=cottag` typo
@@ -662,19 +1420,20 @@ fn report_lowering_diagnostics(file: &Path, source: &str, block_ir: &BlockArrayI
     has_error
 }
 
-fn resolve_target(
-    edition: EditionArg,
-    target: &str,
-) -> Result<cairn_lang_formats::data_version::JavaTarget, ExitCode> {
+fn resolve_target(edition: EditionArg, target: &str) -> Result<ResolvedTarget, ExitCode> {
     match edition {
-        EditionArg::Bedrock => {
-            eprintln!("error: --edition bedrock is not implemented; Java only");
-            Err(ExitCode::from(1))
-        }
-        EditionArg::Java => resolve_java_target(target).map_err(|err| {
-            eprintln!("error: {err}");
-            ExitCode::from(1)
-        }),
+        EditionArg::Java => resolve_java_target(target)
+            .map(ResolvedTarget::Java)
+            .map_err(|err| {
+                eprintln!("error: {err}");
+                ExitCode::from(1)
+            }),
+        EditionArg::Bedrock => resolve_bedrock_target(target)
+            .map(ResolvedTarget::Bedrock)
+            .map_err(|err| {
+                eprintln!("error: {err}");
+                ExitCode::from(1)
+            }),
     }
 }
 
@@ -697,27 +1456,36 @@ fn prepare_out_dir(file: &Path, requested: Option<&Path>) -> Result<PathBuf, Exi
 }
 
 /// Build every structure tag tree up front. A backend error here (abstract
-/// palette entry, dimension overflow) must not leave half-written `.nbt`
-/// files behind, so the function holds off all I/O until it knows the IR
-/// is serialisable.
+/// palette entry, stateful Bedrock entry, dimension overflow) must not
+/// leave half-written artifacts behind, so the function holds off all I/O
+/// until it knows the IR is serialisable.
 fn prepare_artifacts(
     block_ir: &BlockArrayIr,
-    target: &cairn_lang_formats::data_version::JavaTarget,
+    target: &ResolvedTarget,
     out_dir: &Path,
 ) -> Result<Vec<(PathBuf, Compound)>, ExitCode> {
     let mut prepared = Vec::with_capacity(block_ir.structures.len());
     let mut seen_paths: std::collections::HashMap<PathBuf, String> =
         std::collections::HashMap::with_capacity(block_ir.structures.len());
     for (scope, ba) in &block_ir.structures {
-        let tag = build_structure_tag(ba, target).map_err(|err| {
+        let (tag, degraded) = target.build_tag(ba).map_err(|err| {
             eprintln!("error: building `{scope}`: {err}");
             ExitCode::from(1)
         })?;
-        let path = out_dir.join(output_filename(scope));
+        for note in degraded {
+            // Keep `id` on the warning line so tools can group by the
+            // degraded palette entry, not just by scope.
+            eprintln!(
+                "warning[W_INTENT_DEGRADED]: {scope}: {id}: {message}",
+                id = note.id,
+                message = note.message,
+            );
+        }
+        let path = out_dir.join(output_filename(scope, target.output_ext()));
         // Walkway IR keys allow `.` / `_` in place and port ids; the
         // `output_filename` flatten of `.` → `_` can fold two distinct
         // walkways into the same on-disk name (e.g. `a.b_c__d.e_f` vs
-        // `a_b.c__d_e.f` both → `..._a_b_c__d_e_f.nbt`). Detecting that
+        // `a_b.c__d_e.f` both → `..._a_b_c__d_e_f`). Detecting that
         // here keeps the second walkway from silently overwriting the
         // first.
         if let Some(first) = seen_paths.insert(path.clone(), scope.clone()) {
@@ -732,20 +1500,21 @@ fn prepare_artifacts(
     Ok(prepared)
 }
 
-/// Write the prepared `.nbt` files and the lockfile, rolling back every
-/// already-written file (and the lockfile) on any failure so the on-disk
-/// state stays consistent — either every artifact + the lock, or none.
+/// Write the prepared structure files and the lockfile, rolling back
+/// every already-written file (and the lockfile) on any failure so the
+/// on-disk state stays consistent — either every artifact + the lock, or
+/// none.
 fn write_artifacts_and_lock(
     prepared: &[(PathBuf, Compound)],
     source: &str,
     block_ir: &BlockArrayIr,
     edition: EditionArg,
-    target: &cairn_lang_formats::data_version::JavaTarget,
+    target: &ResolvedTarget,
     lock_path: &Path,
 ) -> ExitCode {
     let mut written: Vec<PathBuf> = Vec::with_capacity(prepared.len());
     for (path, tag) in prepared {
-        if let Err(err) = write_tag_atomically(path, tag) {
+        if let Err(err) = write_tag_atomically(path, tag, target) {
             rollback(&written, None);
             eprintln!("error: writing `{}`: {err}", path.display());
             return ExitCode::from(1);
@@ -789,24 +1558,35 @@ fn resolve_out_dir(source: &Path, requested: Option<&Path>) -> Option<PathBuf> {
     })
 }
 
-fn write_tag_atomically(final_path: &Path, tag: &Compound) -> Result<(), std::io::Error> {
+fn write_tag_atomically(
+    final_path: &Path,
+    tag: &Compound,
+    target: &ResolvedTarget,
+) -> Result<(), std::io::Error> {
     use std::io::Write as _;
 
     // Write to a sibling `.tmp` file then rename so an interrupted write
     // (process kill, disk full mid-stream) never leaves a half-encoded
-    // `.nbt` at the real path.
+    // structure at the real path.
     let mut tmp_path = final_path.as_os_str().to_owned();
     tmp_path.push(".tmp");
     let tmp_path = PathBuf::from(tmp_path);
 
-    let mut f = std::fs::File::create(&tmp_path)?;
-    write_compound_gzip(&mut f, tag)
-        .map_err(|e| std::io::Error::other(format!("nbt encode: {e}")))?;
-    f.flush()?;
-    f.sync_all()?;
-    drop(f);
-    std::fs::rename(&tmp_path, final_path)?;
-    Ok(())
+    // Any failure before the rename must clean up the partial `.tmp` so a
+    // retry does not accumulate orphans (and the caller's rollback, which
+    // only knows the final paths, cannot reach it).
+    let result = (|| {
+        let mut f = std::fs::File::create(&tmp_path)?;
+        target.write_tag(&mut f, tag)?;
+        f.flush()?;
+        f.sync_all()?;
+        drop(f);
+        std::fs::rename(&tmp_path, final_path)
+    })();
+    if result.is_err() {
+        let _ = std::fs::remove_file(&tmp_path);
+    }
+    result
 }
 
 fn rollback(written: &[PathBuf], lock_path: Option<&Path>) {
@@ -832,24 +1612,25 @@ fn build_lockfile(
     source: &str,
     block_ir: &BlockArrayIr,
     edition: EditionArg,
-    target: &cairn_lang_formats::data_version::JavaTarget,
+    target: &ResolvedTarget,
 ) -> Result<Lockfile, cairn_lang_core::lock::HashError> {
     Ok(Lockfile {
         source_hash: hash_source(source),
         cairn_version: CAIRN_VERSION.to_owned(),
         target: LockTarget {
             edition: edition.as_lock_edition(),
-            mc_version: target.mc_version.clone(),
-            data_version: target.data_version,
+            mc_version: target.mc_version().to_owned(),
+            data_version: target.version_int(),
         },
         inputs: LockInputs {
-            // The registry pack ingest replaces the hardcoded `data_version`
-            // table; its bytes hash pins the exact (mc_version, DataVersion)
-            // resolution rules a downstream re-compile must match. The
-            // constraint catalog ingest will fill the second field once
-            // catalogs ship; until then it stays zero (per
-            // `LockInputs::zero`'s contract).
-            registry_pack_hash: builtin_java().bytes_hash.clone(),
+            // The registry pack ingest replaces the hardcoded version
+            // table; its bytes hash pins the exact (mc_version, version
+            // integer) resolution rules a downstream re-compile must
+            // match, keyed to the edition being compiled. The constraint
+            // catalog ingest will fill the second field once catalogs
+            // ship; until then it stays zero (per `LockInputs::zero`'s
+            // contract).
+            registry_pack_hash: target.registry_pack().bytes_hash.clone(),
             constraint_catalog_hash: HashHex::zero(),
         },
         resolved_ir_hash: hash_resolved_ir(block_ir)?,
@@ -888,4 +1669,93 @@ fn build_lockfile(
             })
             .collect(),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    //! Unit coverage for the argument-surface invariants the
+    //! end-to-end `tests/cli_*.rs` binaries can only assert
+    //! circumstantially, by hard-coding both sides of a pairing.
+    use super::*;
+
+    /// The four Placement IR stages spell their `--stage` value, the
+    /// `--stage <name>` fragment `require_edition` prints, and the
+    /// `"stage"` key of the JSON dump the same way. `stage_cli_name`
+    /// already derives the second from the third, but the first is
+    /// clap's own kebab-casing of the variant identifier, which no
+    /// type ties to either — renaming `SynthStage::Route` to
+    /// `Routing` would silently start accepting `--stage routing`
+    /// while the dump kept saying `route`. Reading the name back out
+    /// of `ValueEnum` is the only way to pin that.
+    #[test]
+    fn placement_stage_names_match_clap() {
+        for (stage, placement) in [
+            (SynthStage::Placement, PlacementStage::Placement),
+            (SynthStage::Route, PlacementStage::Route),
+            (SynthStage::Delay, PlacementStage::Delay),
+            (SynthStage::Crossing, PlacementStage::Crossing),
+        ] {
+            let clap_name = stage
+                .to_possible_value()
+                .expect("no SynthStage variant is skipped");
+            assert_eq!(clap_name.get_name(), placement.as_str());
+            assert_eq!(stage_cli_name(stage), placement.as_str());
+        }
+    }
+
+    /// The edition-neutral stages have no Placement IR counterpart,
+    /// so their spellings stay literals in `stage_cli_name` — pinned
+    /// here against clap for the same reason.
+    #[test]
+    fn edition_neutral_stage_names_match_clap() {
+        for stage in [SynthStage::Logic, SynthStage::Netlist, SynthStage::Edition] {
+            let clap_name = stage
+                .to_possible_value()
+                .expect("no SynthStage variant is skipped");
+            assert_eq!(clap_name.get_name(), stage_cli_name(stage));
+        }
+    }
+
+    /// `stage_requires_edition` decides two user-visible behaviours at
+    /// once — whether `--edition` is refused as stray and whether its
+    /// absence is a usage error — so the set it names is pinned here
+    /// against the `--stage` spellings a caller actually types. The
+    /// loop walks `ValueEnum`'s full variant list rather than a
+    /// hand-written one, so a stage added without a decision on its
+    /// edition-dependence fails here instead of quietly joining the
+    /// edition-neutral side.
+    #[test]
+    fn edition_required_stages_match_the_documented_set() {
+        for stage in SynthStage::value_variants() {
+            let name = stage
+                .to_possible_value()
+                .expect("no SynthStage variant is skipped");
+            let expected = match name.get_name() {
+                "logic" | "netlist" => false,
+                "edition" | "placement" | "route" | "delay" | "crossing" => true,
+                other => panic!("unclassified --stage value `{other}`"),
+            };
+            assert_eq!(
+                stage_requires_edition(*stage),
+                expected,
+                "--stage {} edition-dependence",
+                name.get_name(),
+            );
+        }
+    }
+
+    /// The stray-`--edition` message reads its two stage lists off
+    /// `stage_requires_edition`, which keeps them honest but puts the
+    /// English between them — the commas, the conjunction, the
+    /// backticks — under no other check. Pinned here so the derivation
+    /// cannot start producing a list that is correct and unreadable.
+    #[test]
+    fn stray_edition_message_lists_read_as_english() {
+        assert_eq!(
+            edition_required_stage_list(),
+            "`--stage edition`, `--stage placement`, `--stage route`, \
+             `--stage delay`, or `--stage crossing`",
+        );
+        assert_eq!(edition_neutral_stage_list(), "`logic` and `netlist`");
+    }
 }

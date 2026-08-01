@@ -69,7 +69,7 @@ evolving — additions for new codes are strictly additive, so consumers should 
 
 | Code                 | `data` payload                                                   |
 | -------------------- | ---------------------------------------------------------------- |
-| `W_WALKWAY_BLOCKED`  | `{ "kind": "walkway_blocked", "skipped": <u64> }` — number of cells along the L-shaped path that overlapped an existing structure and were dropped from the lay. |
+| `W_WALKWAY_BLOCKED`  | `{ "kind": "walkway_blocked", "skipped": <u64> }` — number of cells along the fallback L-shaped path that overlapped an existing structure and were dropped from the lay (emitted only when the detour search found no unobstructed route). |
 
 Codes not listed above omit `data` entirely; reading `entry.data` returns `undefined` and the JSON
 key is absent (it does not serialise as `null`). New `data` entries land alongside the code that

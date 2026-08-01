@@ -10,7 +10,43 @@ are derived deterministically from a small dataflow description.
 
 ## Status
 
-Skeleton. None of the IR layers, the cell library, or the simulator are implemented yet.
+Combinational logic synthesis, Netlist IR selection, Edition Cell
+selection, cell placement, Steiner routing, delay insertion, and
+crossing legalization landed. `synthesize(&IntentModule)` lowers
+sensor bindings, actuator arguments, and `logic sig.X = <expr>` lines
+into an edition-neutral Logic IR (DAG of `and` / `or` / `not` gates
+today, with `xor` / `nand` / `nor` / `mux` reserved on the enum until
+the surface parser reaches them); `compile_netlist(&ScopedLogicIr)`
+rewrites that DAG into an edition-neutral Netlist IR of Logical Cells
++ nets; `compile_edition_netlist(&ScopedNetlistIr, Edition)` picks the
+target-edition realisation of each cell — the second rung of the
+three-tier cell library that sits inside the Netlist → Placement
+transition (Java `ComparatorAnd` / `RepeaterOr` / `InverterTorch` vs
+Bedrock `TorchAnd` / `TorchOr` / `InverterTorch`);
+`compile_placement(&ScopedEditionNetlistIr, &IntentModule)` lays those
+edition-tagged cells out inside each scope's `circuit region=`
+reservation (stage 1 of `spec/redstone` §14.5's five-stage
+place-and-route); `compile_routing(&ScopedPlacementIr)` runs Steiner
+routing over that layout, filling every cell's `wire_length` with the
+sum of Manhattan distances from each driver source into the cell
+(stage 2 of §14.5); `compile_delay(&ScopedPlacementIr)` runs delay
+insertion, promoting each cell's `delay_ticks` from `None` to
+`Some(base delay + implicit buffer repeater ticks)` and refusing with
+`E_ATTENUATION_LIMIT` when a driver segment exceeds the v1 sanity cap
+(stage 3 of §14.5); and `compile_crossing(&ScopedPlacementIr)` runs
+crossing legalization, detecting plane overlaps between distinct
+nets (refused with `E_CROSSING_CONGESTION` when the `void=<N>`
+reservation offers no bridge layer to escape to) and filling every
+cell's `buffer_coords` with the concrete coord of each implicit
+buffer repeater the delay pass counted — a collision on the plane
+lifts the buffer onto the first free `RouteLayer::Bridge` y-layer
+inside the `void=<N>` budget (stage 4 of §14.5). Every placed cell
+records which of those four passes last touched it as a
+`PlacementStage`, dumped as a `"stage"` key in the same vocabulary
+`cairn synth --stage <s>` accepts, so a JSON consumer reads the stage
+off the output rather than inferring it from which optional keys are
+present. Edition legalization, the tick simulator, and QC/BUD refusal
+(`E_NO_PORTABLE_IMPL`) are still to come.
 
 ## Pipeline
 
@@ -22,7 +58,8 @@ Intent IR        logic declarations / circuit region / signal binding
    ↓ logic_synth
 Logic IR         logical expressions / dependency DAG (edition-neutral, zero delay)
    ↓
-Netlist IR       cells / nets (logical cell selection; still carries no delay)
+Netlist IR       cells / nets (Logical Cell selection; still edition-neutral, zero delay)
+   ↓ Edition Cell selection (cell library tier 2; edition-tagged, still no delay)
    ↓ logic_place
 Placement IR     cell coordinates + actual wire length — delay/tick first determined here
    ↓ logic_route
@@ -35,7 +72,7 @@ Java/Bedrock difference to the library alone
 
 ## v1 scope
 
-- **Combinational**: `and` / `or` / `not` / `xor` / `nand` / `nor` / `mux`.
+- **Combinational**: `and` / `or` / `not` (landed, both Logic IR and Netlist IR) / `xor` / `nand` / `nor` / `mux` (Logic IR + Netlist IR shape only, synth path lands with the follow-up parser PR).
 - **Curated sequential macros**: `latch` / `pulse` / `delay` / `edge_rising` / `edge_falling` /
   `counter`.
 - **Verification**: truth-table, latency, and bounded-eventually temporal assertions

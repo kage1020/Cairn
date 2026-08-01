@@ -1,0 +1,117 @@
+==================
+Bare theme with slots (field labels)
+==================
+
+theme medieval:
+  slot floor -> @oak_planks
+  slot wall -> @cobblestone
+
+---
+
+(source_file
+  (theme_decl
+    name: (identifier)
+    body: (theme_body
+      (slot_binding name: (identifier) target: (material_ref (identifier)))
+      (slot_binding name: (identifier) target: (material_ref (identifier))))))
+
+==================
+Selector rule with attribute filter
+==================
+
+theme medieval:
+  window[class=small] -> frame=@spruce_wood
+
+---
+
+(source_file
+  (theme_decl
+    (identifier)
+    (theme_body
+      (selector_rule
+        (selector
+          (identifier)
+          (attribute_list (attribute (identifier) (identifier))))
+        (attribute_list
+          (attribute (identifier) (material_ref (identifier))))))))
+
+==================
+Material with dotted path
+==================
+
+theme keep_dark:
+  slot wall -> @wall.stone.cobble
+
+---
+
+(source_file
+  (theme_decl
+    (identifier)
+    (theme_body
+      (slot_binding
+        (identifier)
+        (material_ref (identifier) (identifier) (identifier))))))
+
+==================
+Theme without trailing colon
+==================
+
+theme minimal
+  slot floor -> @stone
+
+---
+
+(source_file
+  (theme_decl
+    (identifier)
+    (theme_body
+      (slot_binding (identifier) (material_ref (identifier))))))
+
+==================
+Theme with no body
+==================
+
+theme empty:
+
+---
+
+(source_file
+  (theme_decl
+    (identifier)))
+
+==================
+Selector with dotted tail and no bindings
+==================
+
+theme t:
+  window.frame
+
+---
+
+(source_file
+  (theme_decl
+    (identifier)
+    (theme_body
+      (selector_rule
+        (selector (identifier) (identifier))))))
+
+==================
+Selector with attribute filter, dotted tail, and bindings (field labels)
+==================
+
+theme t:
+  door[class=heavy].panel -> mat_slot=@oak
+
+---
+
+(source_file
+  (theme_decl
+    name: (identifier)
+    body: (theme_body
+      (selector_rule
+        selector: (selector
+          (identifier)
+          (attribute_list (attribute key: (identifier) value: (identifier)))
+          (identifier))
+        bindings: (attribute_list
+          (attribute key: (identifier) value: (material_ref (identifier))))))))

@@ -1,0 +1,74 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "Cairn",
+  "scopeName": "source.cairn",
+  "patterns": [
+    { "include": "#comment" },
+    { "include": "#directive" },
+    { "include": "#top-level" },
+    { "include": "#slot-binding" },
+    { "include": "#member-keyword" },
+    { "include": "#string" },
+    { "include": "#material-token" },
+    { "include": "#attribute-key" },
+    { "include": "#arrow" },
+    { "include": "#number" }
+  ],
+  "repository": {
+    "comment": {
+      "name": "comment.line.number-sign.cairn",
+      "match": "#.*$"
+    },
+    "directive": {
+      "name": "meta.directive.cairn",
+      "match": "^\\s*(@cairn|@requires|@intended_targets)\\b",
+      "captures": {
+        "1": { "name": "keyword.control.directive.cairn" }
+      }
+    },
+    "top-level": {
+      "match": "^\\s*(theme|def|site|struct)\\b",
+      "captures": {
+        "1": { "name": "keyword.other.top-level.cairn" }
+      }
+    },
+    "slot-binding": {
+      "match": "^\\s*(slot)\\s+([A-Za-z_][A-Za-z0-9_]*)",
+      "captures": {
+        "1": { "name": "keyword.other.slot.cairn" },
+        "2": { "name": "variable.other.slot-name.cairn" }
+      }
+    },
+    "member-keyword": {
+      "match": "^\\s*(floor|walls|door|window|roof|stair|level|pressure_plate|circuit|place|connect)\\b",
+      "captures": {
+        "1": { "name": "keyword.other.member.cairn" }
+      }
+    },
+    "string": {
+      "name": "string.quoted.double.cairn",
+      "begin": "\"",
+      "end": "\"|$",
+      "patterns": []
+    },
+    "material-token": {
+      "name": "entity.name.type.material.cairn",
+      "match": "@[A-Za-z_][A-Za-z0-9_\\.]*"
+    },
+    "attribute-key": {
+      "match": "\\b([A-Za-z_][A-Za-z0-9_]*)\\s*(=)",
+      "captures": {
+        "1": { "name": "variable.parameter.attribute.cairn" },
+        "2": { "name": "keyword.operator.assignment.cairn" }
+      }
+    },
+    "arrow": {
+      "name": "keyword.operator.arrow.cairn",
+      "match": "->"
+    },
+    "number": {
+      "name": "constant.numeric.cairn",
+      "match": "\\b\\d+(x\\d+)?\\b"
+    }
+  }
+}

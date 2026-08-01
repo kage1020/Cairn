@@ -1,0 +1,222 @@
+==================
+Cottage struct
+==================
+
+struct cottage size=9x7
+  floor mat_slot=floor
+  walls class=outer mat_slot=wall height=4
+  door side=front at=center
+
+---
+
+(source_file
+  (struct_decl
+    (identifier)
+    (attribute_list
+      (attribute (identifier) (size_literal (integer) (integer))))
+    (struct_body
+      (member_stmt (member_keyword)
+        (command_arg_list (command_arg (attribute (identifier) (identifier)))))
+      (member_stmt (member_keyword)
+        (command_arg_list
+          (command_arg (attribute (identifier) (identifier)))
+          (command_arg (attribute (identifier) (identifier)))
+          (command_arg (attribute (identifier) (integer)))))
+      (member_stmt (member_keyword)
+        (command_arg_list
+          (command_arg (attribute (identifier) (identifier)))
+          (command_arg (attribute (identifier) (identifier))))))))
+
+==================
+Member with arrow to signal
+==================
+
+struct gatehouse size=7x5
+  pressure_plate id=plate at=front.outside offset=0 y=0 -> sig.step
+
+---
+
+(source_file
+  (struct_decl
+    (identifier)
+    (attribute_list
+      (attribute (identifier) (size_literal (integer) (integer))))
+    (struct_body
+      (member_stmt (member_keyword)
+        (command_arg_list
+          (command_arg (attribute (identifier) (identifier)))
+          (command_arg (attribute (identifier) (signal_ref (identifier) (identifier))))
+          (command_arg (attribute (identifier) (integer)))
+          (command_arg (attribute (identifier) (integer))))
+        (signal_ref (identifier) (identifier))))))
+
+==================
+Struct with trailing colon
+==================
+
+struct shed size=1x1:
+  floor mat_slot=x
+
+---
+
+(source_file
+  (struct_decl
+    (identifier)
+    (attribute_list
+      (attribute (identifier) (size_literal (integer) (integer))))
+    (struct_body
+      (member_stmt (member_keyword)
+        (command_arg_list (command_arg (attribute (identifier) (identifier))))))))
+
+==================
+Struct with no body
+==================
+
+struct empty size=1x1
+
+---
+
+(source_file
+  (struct_decl
+    (identifier)
+    (attribute_list
+      (attribute (identifier) (size_literal (integer) (integer))))))
+
+==================
+Member statement with indented body (field labels)
+==================
+
+struct gatehouse size=7x5
+  circuit id=main
+    place block=@redstone_wire
+
+---
+
+(source_file
+  (struct_decl
+    name: (identifier)
+    args: (attribute_list
+      (attribute key: (identifier) value: (size_literal (integer) (integer))))
+    body: (struct_body
+      (member_stmt_with_body
+        keyword: (member_keyword)
+        args: (command_arg_list
+          (command_arg (attribute key: (identifier) value: (identifier))))
+        body: (struct_body
+          (member_stmt
+            keyword: (member_keyword)
+            args: (command_arg_list
+              (command_arg (attribute key: (identifier) value: (material_ref (identifier)))))))))))
+
+==================
+def declaration (field labels)
+==================
+
+def cottage size=1x1
+  floor mat_slot=x
+
+---
+
+(source_file
+  (def_decl
+    name: (identifier)
+    args: (attribute_list
+      (attribute key: (identifier) value: (size_literal (integer) (integer))))
+    body: (struct_body
+      (member_stmt
+        keyword: (member_keyword)
+        args: (command_arg_list
+          (command_arg (attribute key: (identifier) value: (identifier))))))))
+
+==================
+site declaration (field labels)
+==================
+
+site plaza
+  place kind=fountain
+
+---
+
+(source_file
+  (site_decl
+    name: (identifier)
+    body: (struct_body
+      (member_stmt
+        keyword: (member_keyword)
+        args: (command_arg_list
+          (command_arg (attribute key: (identifier) value: (identifier))))))))
+
+==================
+Member with selector, args, and arrow output (field labels)
+==================
+
+struct gatehouse size=7x5
+  door id=front side=front at=center
+  door[id=front] opened_by=sig.open -> sig.latch
+
+---
+
+(source_file
+  (struct_decl
+    name: (identifier)
+    args: (attribute_list
+      (attribute key: (identifier) value: (size_literal (integer) (integer))))
+    body: (struct_body
+      (member_stmt
+        keyword: (member_keyword)
+        args: (command_arg_list
+          (command_arg (attribute key: (identifier) value: (identifier)))
+          (command_arg (attribute key: (identifier) value: (identifier)))
+          (command_arg (attribute key: (identifier) value: (identifier)))))
+      (member_stmt
+        keyword: (member_keyword)
+        selector: (attribute_list
+          (attribute key: (identifier) value: (identifier)))
+        args: (command_arg_list
+          (command_arg (attribute key: (identifier) value: (signal_ref (identifier) (identifier)))))
+        output: (signal_ref (identifier) (identifier))))))
+
+==================
+def and site with trailing colon
+==================
+
+def shed size=1x1:
+  floor mat_slot=x
+
+site plaza:
+  place kind=fountain
+
+---
+
+(source_file
+  (def_decl
+    (identifier)
+    (attribute_list
+      (attribute (identifier) (size_literal (integer) (integer))))
+    (struct_body
+      (member_stmt (member_keyword)
+        (command_arg_list (command_arg (attribute (identifier) (identifier)))))))
+  (site_decl
+    (identifier)
+    (struct_body
+      (member_stmt (member_keyword)
+        (command_arg_list (command_arg (attribute (identifier) (identifier))))))))
+
+==================
+site header args are rejected
+==================
+
+site plaza kind=town
+  place kind=fountain
+
+---
+
+(source_file
+  (site_decl
+    (identifier)
+    (ERROR
+      (identifier)
+      (identifier))
+    (struct_body
+      (member_stmt (member_keyword)
+        (command_arg_list (command_arg (attribute (identifier) (identifier))))))))

@@ -10,6 +10,7 @@
 pub mod ast;
 pub mod block_array;
 pub mod check;
+pub mod edition;
 pub mod error;
 pub mod ids;
 pub mod intent;
@@ -25,12 +26,16 @@ pub use block_array::{
     lower_to_block_array,
 };
 pub use check::{Diagnostic, DiagnosticCode, Severity, check};
+pub use edition::{Edition, UnknownEdition};
 pub use error::{LexError, ParseError, Position, Span};
 pub use ids::{
     IdError, KeyConstructError, KeyParseError, PlaceId, PortId, SiteName, WalkwayEndpoint,
     WalkwayScopeKey,
 };
-pub use intent::{IntentModule, Member, MemberRole, SemanticLevel, lower};
+pub use intent::{
+    CircuitRegion, IntentModule, Member, MemberRole, ScopeKind, SemanticLevel, circuit_regions,
+    lower,
+};
 pub use lex::{Token, TokenKind, lex};
 pub use parse::parse;
 pub use resolve::{Resolution, ThemeBinding, VersionAxes, compute_axes, resolve};

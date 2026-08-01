@@ -1,0 +1,52 @@
+==================
+Odd indent is rejected
+==================
+
+theme t:
+   slot a -> @b
+
+---
+
+(source_file
+  (theme_decl
+    (identifier)
+    (ERROR
+      (identifier)
+      (identifier)
+      (identifier))))
+
+==================
+Tab indent is rejected
+==================
+
+theme t:
+	slot a -> @b
+
+---
+
+(source_file
+  (theme_decl
+    (identifier)
+    (ERROR
+      (UNEXPECTED '\t')
+      (identifier)
+      (identifier))))
+
+==================
+Multi-level indent jump is rejected
+==================
+
+struct s size=3x3
+    floor mat_slot=x
+
+---
+
+(source_file
+  (struct_decl
+    (identifier)
+    (ERROR
+      (attribute_list
+        (attribute (identifier) (size_literal (integer) (integer))))
+      (identifier))
+    (attribute_list
+      (attribute (identifier) (identifier)))))

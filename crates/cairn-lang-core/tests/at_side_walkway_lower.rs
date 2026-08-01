@@ -30,7 +30,7 @@ fn lower_at_side_walkway() -> BlockArrayIr {
         .expect("at-side-walkway.crn must read");
     let module = parse(&source).expect("parse");
     let ir = lower(&module);
-    let resolution = resolve(&ir);
+    let resolution = resolve(&ir, None);
     let mut out = lower_to_block_array(&ir, &resolution, None);
     // Mirror the CLI wiring: resolver diagnostics fire before lowering, so
     // merge both lists for the W_WALKWAY_BLOCKED / W_DEFERRED_MEMBER

@@ -16,7 +16,7 @@ use cairn_lang_core::{Diagnostic, DiagnosticCode, Severity, check, lower, parse}
 fn diagnose(source: &str) -> Vec<Diagnostic> {
     let module = parse(source).unwrap_or_else(|e| panic!("parse failed: {e}"));
     let ir = lower(&module);
-    check(&module, &ir)
+    check(&module, &ir, None)
 }
 
 fn arity_only(diagnostics: Vec<Diagnostic>) -> Vec<Diagnostic> {

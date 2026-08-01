@@ -10,6 +10,922 @@ and is a separate axis from the Minecraft target version.
 
 ## [Unreleased]
 
+## 2026.8.0 — 2026-08-01
+
+### Added
+- *(redstone,cli,core)* place edition-tagged cells inside circuit region reservations (M6-PR4) ([#93](https://github.com/kage1020/Cairn/pull/93))
+- *(core,formats,cli)* populate parity table and per-edition theme fallback (M4-PR3) ([#86](https://github.com/kage1020/Cairn/pull/86))
+- *(core)* route walkways around structures so village compiles clean ([#83](https://github.com/kage1020/Cairn/pull/83))
+- *(core)* recognize door actuator patches so redstone-door compiles clean ([#82](https://github.com/kage1020/Cairn/pull/82))
+- *(core)* recognize circuit region markers so redstone-door drops the circuit deferred ([#81](https://github.com/kage1020/Cairn/pull/81))
+- *(core)* lower pressure_plate fixtures so redstone-door drops the plate deferreds ([#80](https://github.com/kage1020/Cairn/pull/80))
+- *(core)* lower level blocks and eave stairs so themed-tower compiles clean ([#77](https://github.com/kage1020/Cairn/pull/77))
+
+### Added
+
+- `PlacementPhase` gains fallible mirrors of its three transitions:
+  `try_route` / `try_delay` / `try_legalize`, each returning
+  `Result<(), PlacementPhaseTransitionError>`. Panicking on an
+  out-of-order transition is the right shape for the pipeline passes,
+  where a wrong-order call in a fresh compile is always a caller-side
+  bug with no recovery path — but it stops being right for the
+  consumers that do have one: a cache validator that turns a stale
+  entry into a rebuild-from-scratch decision, an IR ingest that must
+  refuse a malformed dump with a diagnostic, a language server that
+  cannot take a long-lived process down over one bad call. The
+  pipeline keeps calling the panicking forms, which are now their
+  `try_*` mirror plus a panic, so which transitions are legal is
+  stated once and the two forms cannot disagree. The error carries the
+  whole offending phase rather than just its variant name, so a
+  consumer can see how far the cell actually got, and so the error's
+  `Display` reproduces the panic wording byte for byte — pinned by a
+  test that compares the two live rather than against a hard-coded
+  copy. `PlacementPhaseTransitionError::with_context` splices a
+  caller-supplied cell identity into the same position `route_at` and
+  friends put theirs, so an ingest diagnostic and a pipeline panic
+  about the same cell read alike. A refused transition leaves the
+  phase exactly as it found it, since unlike a panicking caller a
+  recovering one goes on to use it. `PlacementPhase` and the new error
+  type are re-exported from the crate root.
+
+### Changed
+
+- The three `PlacementPhase` transitions now state one cardinality.
+  `route` and `delay` panicked with "must run once per …" while
+  `legalize` said "must run **at most** once per delayed IR", wording
+  inherited from the release-loud `assert!` the crossing pass carried
+  before the phase enum existed; all three now say "must run
+  **exactly** once per …". Beyond the inconsistency, "at most once"
+  understated what the guard checks: `legalize` also refuses a phase
+  that never reached `Delayed`, so a skipped stage trips it just as a
+  repeated one does, and only "exactly once" says so. The doc comments
+  on `route` and `delay` already read "exactly once", so the panics now
+  agree with the contract they document. The cardinality clause moves
+  out of the three call sites into a single `TRANSITION_CARDINALITY`
+  const that every transition message splices between the offending
+  pass and the phase it consumes — a transition added beside these
+  three picks the two nouns but not how strong the guard claims to be,
+  which is what let the wording drift in the first place.
+
+- Every `PlacedCellNode` in the JSON dump gains a leading `"stage"`
+  key naming the place-and-route pass that last wrote to it —
+  `placement` / `route` / `delay` / `crossing`, the same vocabulary
+  `cairn synth --stage <s>` accepts, so a dump names the flag that
+  produced it. Until now the stage had to be inferred from which
+  optional keys were present, and that inference was not total: a
+  `PlacementPhase::Delayed` cell and a `Legalized` cell whose crossing
+  pass materialised zero buffers serialise to exactly the same keys,
+  because an empty `buffer_coords` serde-skips. A consumer parsing the
+  JSON therefore could not tell a stage-3 dump from a stage-4 dump with
+  nothing to legalize. The tag resolves that without promoting the
+  empty vector to a sentinel — `buffer_coords` still elides when
+  empty. The "stage-N dump is a pure additive subset of the
+  stage-(N+1) dump" contract the entries below describe is
+  correspondingly relaxed to "additive subset apart from the `stage`
+  tag": the tag is the one field whose *value* changes from stage to
+  stage rather than appearing for the first time. The tag is derived
+  from the phase on every serialisation rather than stored, so it
+  cannot drift from the variant it names.
+- `PlacementPhase::Legalized::buffer_coords` widens from
+  `Vec<CellCoord>` to `Vec<BufferCoord>`, where the new
+  `BufferCoord { port: PortName, coord: CellCoord }` pairs every
+  implicit buffer repeater the crossing pass materialised with the
+  driver port on the owning cell that the buffer sits on the segment
+  for. The crossing pass already iterated `cell.drivers` when picking
+  buffer coords, but dropped the port on the way out; a downstream
+  block-array voxel lowering had to re-derive it from
+  `drivers[i].net → source coord → floor((s - 1) /
+  DUST_ATTENUATION_LIMIT)`. Attribution is now carried alongside the
+  coord so the lowering can group buffers by driver directly. The JSON
+  wire form of a non-empty entry shifts from
+  `{"x":..,"y":..,"z":..[,"layer":..]}` to
+  `{"port":"a","coord":{"x":..,"y":..,"z":..[,"layer":..]}}`, matching
+  the `{port, ...}` shape `CellPortDriver` already uses on the netlist
+  side. Empty `buffer_coords` still serde-skips, so a scope whose
+  delay pass counted zero buffers stays byte-identical to its delayed
+  IR apart from the `stage` tag above.
+  `PlacedCellNode::buffer_coords()` and
+  `PlacementPhase::buffer_coords()` now return `&[BufferCoord]`;
+  `PlacementPhase::legalize` takes `Vec<BufferCoord>`.
+- `PlacedCellNode`'s three progressive fields (`wire_length`,
+  `delay_ticks`, `buffer_coords`) that M6-PR5 / M6-PR6 / M6-PR7 above
+  added as parallel `Option` / `Vec` fields are collapsed into a
+  single `phase: PlacementPhase` enum whose four variants (`Unrouted`,
+  `Routed`, `Delayed`, `Legalized`) correspond one-to-one with the
+  first four stages of the place-and-route pipeline. Illegal states
+  such as "carries `delay_ticks` but no `wire_length`" or "populated
+  `buffer_coords` before delay ran" are unrepresentable — each stage
+  transition is expressed by `PlacementPhase::route` / `delay` /
+  `legalize`, which pattern-match the current variant and panic on
+  any out-of-order call (replacing the earlier scattered
+  `debug_assert!` / release-`assert!` guards on the three passes with
+  a uniform release-loud contract). `PlacementPhase` is
+  `#[non_exhaustive]` so a future Stage-5 `EditionLegalized` variant
+  is additive on the downstream `match` sites the enum's accessors
+  do not already cover. The `phase` field on `PlacedCellNode` itself
+  is `pub(crate)`: downstream consumers see only the flat accessor
+  methods `wire_length()` / `delay_ticks()` / `buffer_coords()`,
+  which return the same `Option<u32>` / `&[CellCoord]` shape the old
+  fields exposed, and a hand-written `Serialize` impl flattens the
+  phase back onto
+  `{stage, cell, drivers, coord[, wire_length][, delay_ticks][, buffer_coords]}`
+  so the values keep the flat spelling earlier revisions produced
+  rather than becoming a tagged enum object; the only wire-form
+  addition is the `stage` key described above.
+
+### Added
+
+- `PlacementStage` — the four-variant projection of `PlacementPhase`
+  that backs the `"stage"` key described under *Changed*, exported
+  from `cairn-lang-redstone`'s root alongside the other Placement IR
+  types. `PlacementPhase::stage()` and `PlacedCellNode::stage()`
+  return it; `PlacementStage::as_str` fixes the wire spelling
+  (`placement` / `route` / `delay` / `crossing`) in one place the way
+  `RouteLayer::as_str` already does for the layer vocabulary — the
+  `--stage <name>` fragment `cairn synth` prints when it refuses a
+  missing `--edition` now derives its four Placement spellings from
+  the same accessor instead of repeating the literals, and a unit
+  test reads the third spelling in that chain (the one clap derives
+  from the `SynthStage` variant identifier, which no type ties to
+  either) back out of `ValueEnum` so a variant rename cannot silently
+  desynchronise the accepted flag from the emitted tag. Unlike
+  the three value accessors it sits beside, `stage()` is total: every
+  phase belongs to exactly one stage, including a `Legalized` with no
+  buffer coords to show for itself. Both it and the `Serialize` impl
+  enumerate every variant explicitly rather than falling through a
+  `_ =>` arm, so adding the Stage-5 variant is a compile error at the
+  two sites that must name it rather than a dump that silently
+  mislabels stage-5 output as `crossing`. `PlacementStage` is
+  `#[non_exhaustive]` for the same reason `PlacementPhase` is.
+- `PlacementPhase::route_at` / `delay_at` / `legalize_at` — context-
+  carrying twins of the three phase-transition methods, added so an
+  out-of-order transition panic names the cell that tripped it. The
+  existing methods already carried `#[track_caller]`, which puts the
+  calling `.rs:line` in the backtrace but says nothing about *which*
+  cell was already routed / delayed / legalized, leaving an operator
+  to walk back from the backtrace into the IR to find out. The `_at`
+  forms take any `Display` and splice it into the panic between the
+  offending phase and the invariant clause, so the routing, delay,
+  and crossing passes now fail with e.g. `PlacementPhase::legalize
+  called on Legalized { .. } for cell #0 at (16,0,1) in struct
+  `twice` — crossing legalization must run exactly once per delayed
+  IR`. The breadcrumb is rendered in the same vocabulary the pass
+  diagnostics already use (`cell #{index}`, `({x},{y},{z})`,
+  ``{kind} `{name}` ``), built from the cell's position in
+  `PlacementIr::cells`, its placement coord, and the owning scope —
+  `PlacedCellNode` carries no source-level name, so that triple is a
+  cell's only stable identity. The coord's `layer` renders only when
+  it is not `RouteLayer::Plane` — which for a cell coord is never,
+  since the placement pass stamps `Plane` and no later pass moves a
+  cell body off it — so the common rendering stays short without
+  letting a hand-built IR that breaks the invariant print a coord
+  that reads as a plane coord. The context-free `route` / `delay` / `legalize` forms
+  differ from their `_at` twins by the identity clause and nothing
+  else: an absent context drops the whole ` for …` clause rather than
+  rendering an empty one, so no stray separator reaches the message.
+- Redstone crossing legalization + `cairn synth --stage crossing
+  --edition <java|bedrock>` (M6-PR7) — the seventh slice of the M6
+  redstone-simulates pipeline. `cairn-lang-redstone` grows a
+  `compile_crossing(&ScopedPlacementIr) -> CrossingOutput` entry
+  point that walks the delayed Placement IR produced by M6-PR6,
+  re-derives every net's Manhattan Steiner tree from the same
+  `NetRef → source coord` mapping the routing and delay passes use
+  (routing discards its per-scope occupancy set before yielding the
+  routed IR, and pushing wire coords into the shared IR would bloat
+  every consumer's JSON dump), and carries out two tasks —
+  stage 4 of the five-stage place-and-route pipeline (Placement →
+  Steiner routing → Delay insertion → Crossing legalization →
+  Edition legalization).
+  Task 1 is plane-crossing detection: a wire coord (neither cell
+  nor pad) owned by two distinct nets is refused with the new
+  `E_CROSSING_CONGESTION` code when the `void=<N>` reservation
+  offers no y-layer above the plane (`void < 2`). v1 does not lift
+  the wire crossing itself onto a `Bridge` layer — the routed wire
+  path is not carried on the IR, so an escape record would have
+  nowhere to attach; the crossing coord set is instead used inside
+  the pass to steer task 2. Task 2 is implicit buffer repeater
+  coord assignment: for every driver segment the delay pass counted
+  buffers on, the L-shape path is re-walked (x → z → y, matching
+  the routing pass's axis order) and buffers land at
+  `k * DUST_ATTENUATION_LIMIT` (`k = 1..=buffer_count`); a
+  candidate that collides with a cell coord / pad coord / plane
+  crossing / earlier buffer escapes to the first free
+  `RouteLayer::Bridge` y-layer inside the `void=<N>` budget
+  (`y in 1..void`), and if every bridge y-layer at that `(x, z)`
+  is taken the pass refuses with the new `E_BUFFER_COORD_COLLISION`
+  code. Both diagnostics carry the self-correction triple
+  ("increase `void`", "enlarge region", "split into multiple
+  `circuit` blocks") and the `CrossingCongestion` primary names the
+  two conflicting nets at the anchor coord so a downstream reader
+  can locate the source-level signals responsible.
+  No new IR type joins the crate: the crossing pass is a field
+  write per the phase table on `PlacedCellNode`. `CellCoord` grows
+  a `layer: RouteLayer` tag (`Plane` / `Bridge` / `Via`; `Via` has
+  no producer in v1 and is documented as reserved), and
+  `PlacedCellNode` grows `buffer_coords: Vec<CellCoord>` that the
+  crossing pass fills with one entry per implicit buffer repeater
+  the delay pass counted. Both fields serde-skip on their defaults
+  (`layer` skips when `Plane`, `buffer_coords` skips when empty),
+  so a placement / routing / delay JSON dump is an additive subset
+  of the legalized IR dump apart from the `stage` tag — no key
+  changes for scopes with nothing to legalize, only a tag whose
+  value moves on. Failed scopes elide from the output so a
+  downstream block-array voxel lowering cannot silently materialise
+  buffers against a layout no other stage can realise. The CLI's
+  `cairn synth --stage` gains a `crossing` value; the
+  `--edition <java|bedrock>` flag is required in that mode
+  alongside `edition` / `placement` / `route` / `delay`, and stays
+  refused on the edition-neutral `logic` / `netlist` stages (exit
+  2). `--stage crossing` inherits upstream fail-loud: a scope that
+  trips `E_ROUTE_CONGESTION` at routing or `E_ATTENUATION_LIMIT` at
+  delay insertion is reported and exits 1 before the crossing pass
+  runs. Not in scope for this PR: wire-crossing `Bridge` / `Via`
+  materialisation on the IR, edition legalization, block-array
+  voxel lowering, the physical-tile (tier 3) cell library, the
+  tick simulator, `assert truth|always|latency` evaluation,
+  sequential macros (`latch` / `pulse` / `delay` / `edge_*` /
+  `counter`), and QC/BUD refusal (`E_NO_PORTABLE_IMPL`).
+- Redstone delay insertion + `cairn synth --stage delay
+  --edition <java|bedrock>` (M6-PR6) — the sixth slice of the M6
+  redstone-simulates pipeline. `cairn-lang-redstone` grows a
+  `compile_delay(&ScopedPlacementIr) -> DelayOutput` entry point that
+  walks the routed Placement IR produced by M6-PR5 and promotes each
+  cell's `delay_ticks` from `None` to `Some(base delay + implicit
+  buffer repeater ticks)` — stage 3 of the five-stage place-and-route
+  pipeline `spec/redstone` §14.5 describes (Placement → Steiner
+  routing → Delay insertion → Crossing legalization → Edition
+  legalization). No new IR type joins the crate: the delay pass is a
+  field write per the phase table on `PlacedCellNode`, symmetrical to
+  the routing pass's `wire_length` write. Base delay is a `const fn
+  base_delay_ticks(self)` sibling of `EditionCell::edition(self)` so
+  the numbers live next to the cell library they characterise: Java
+  `ComparatorAnd` / `RepeaterOr` / `InverterTorch` and Bedrock
+  `InverterTorch` carry 1 tick each, Bedrock `TorchAnd` carries 2
+  ticks (two-torch NAND→NAND stacked in series), Bedrock `TorchOr`
+  carries 0 ticks (bare dust merge), and every `*Unpinned` variant
+  returns `UNPINNED_BASE_DELAY_TICKS` (3 ticks — strictly above the
+  currently-pinned max of 2) so a future pinned rename is a one-arm
+  swap that cannot silently degrade delay accounting or blend in with
+  a pinned value already in the table.
+  Implicit buffer repeaters cover driver segments that would breach
+  the 15-block dust attenuation limit: for a segment of `s` blocks
+  the pass counts `floor((s - 1) / DUST_ATTENUATION_LIMIT)` buffers,
+  each contributing `BUFFER_REPEATER_TICKS` (1 tick, matching the
+  default `repeater delay=1` setting). Buffers are counted, not
+  materialised — the routing pass already discarded its per-scope
+  occupancy set, and stage 4 (crossing legalization) is the natural
+  owner of buffer coord assignment because it also needs to escape
+  cross-net overlaps into a `RouteLayer::Bridge` / `Via` layer. The
+  new `E_ATTENUATION_LIMIT` code fires only when a single driver
+  segment exceeds `MAX_ATTENUATION_SEGMENT` (256 blocks — 16
+  back-to-back buffers), the sanity cap past which stage-4
+  bridge/via geometry becomes unavoidable; segments in the
+  `(DUST_ATTENUATION_LIMIT, MAX_ATTENUATION_SEGMENT]` band are normal
+  and absorbed by implicit buffers. Per-driver Manhattan segments
+  are recomputed from the same `NetRef → source coord` mapping the
+  routing pass uses (the routing pass stored only the driver-sum
+  `wire_length`, deliberately — per-driver segments are cheap to
+  re-walk and would bloat the JSON if stored twice); `input_pad` /
+  `output_pad` / `manhattan` are promoted to `pub(crate)` so the
+  routing pass stays the owner of the pad-coord convention until a
+  subsequent PR promotes it to a `PlacementIr` field. Failed scopes
+  elide from the output so a downstream tick simulator cannot silently
+  consume a partial `delay_ticks` set. The CLI's `cairn synth
+  --stage` gains a `delay` value; the `--edition <java|bedrock>`
+  flag is required in that mode alongside `edition` / `placement` /
+  `route`, and stays refused on the edition-neutral `logic` /
+  `netlist` stages (exit 2). `--stage delay` inherits upstream
+  fail-loud: a scope that trips `E_ROUTE_CONGESTION` at routing is
+  reported and exits 1 before the delay pass runs. Not in scope for
+  this PR: crossing legalization and the `RouteLayer::Bridge` /
+  `Via` escape, edition legalization, block-array voxel lowering,
+  the physical-tile (tier 3) cell library, the tick simulator,
+  `assert truth|always|latency` evaluation, sequential macros
+  (`latch` / `pulse` / `delay` / `edge_*` / `counter`), and QC/BUD
+  refusal (`E_NO_PORTABLE_IMPL`) — each remains a follow-up that
+  will build on the delayed Placement IR shape this PR pins.
+- Redstone Steiner routing + `cairn synth --stage route
+  --edition <java|bedrock>` (M6-PR5) — the fifth slice of the M6
+  redstone-simulates pipeline. `cairn-lang-redstone` grows a
+  `compile_routing(&ScopedPlacementIr) -> RoutingOutput` entry point
+  that walks the Placement IR produced by M6-PR4 and lays a
+  rectilinear Manhattan Steiner tree per driver net inside every
+  scope's `circuit region=` reservation — stage 2 of the five-stage
+  place-and-route pipeline `spec/redstone` §14.5 describes
+  (Placement → Steiner routing → Delay insertion → Crossing
+  legalization → Edition legalization). No new IR type joins the
+  crate: the routing pass is a field write per the phase table on
+  `PlacedCellNode`, promoting every cell's `wire_length` from `None`
+  to `Some(sum of Manhattan distances from each driver source into
+  the cell)`. `delay_ticks` stays `None` at this stage because §14.4
+  ties delay to the routed wire length plus the physical cell choice
+  — that is stage 3's concern. The v1 algorithm keeps to the smallest
+  set of concepts that still exercises the shape the follow-up passes
+  need: net collection ("source coord → sink coords" per NetRef),
+  Kou-Markowsky-style rectilinear MST (Kruskal over the complete
+  Manhattan graph on `{source} ∪ sinks`, deterministic weight/index
+  tie-break so the regression story pins), L-shape rendering
+  (x-then-z-then-y for stability), a per-scope `HashSet<CellCoord>`
+  occupancy set seeded with every cell coord + input / output pad,
+  and a wire-only footprint sum for the congestion budget. Input pad
+  coordinates land at `(x=0, y=0, z=1+i)` and output pad coordinates
+  at `(x=width-1, y=0, z=1+k)`, both saturating at `depth-1` for
+  degenerate regions — a v1 convention that stays crate-private today
+  and joins `PlacementIr` as `#[non_exhaustive]`-safe `input_pads` /
+  `output_pads` fields once a subsequent PR needs them outside
+  routing. The existing `E_ROUTE_CONGESTION` code fires again here,
+  now against the actual post-routing footprint (`cells.len() *
+  CELL_FOOTPRINT + unique wire coords > reserved_area`) rather than
+  the cell-only pessimistic budget the placement pass used — the
+  primary reads `routed netlist occupies ~N.Mx the reserved area
+  (void=V, region WxD)` so a downstream reader can tell placement's
+  fail-loud apart from routing's; the footer keeps the §14.5
+  three-fix triple verbatim. Placement's pessimism (cells × 4) means
+  a scope routing to `E_ROUTE_CONGESTION` almost always packed cells
+  right at the reservation boundary and needed only a Manhattan step
+  of new wire to flip — the intentional cost model, not a
+  double-detection oversight. Failed scopes elide from the output so
+  a downstream pass cannot silently consume a partial routed layout,
+  matching the fail-loud cascade policy the earlier stages use. The
+  CLI's `cairn synth --stage` gains a `route` value; the `--edition
+  <java|bedrock>` flag is required in that mode alongside `edition`
+  and `placement`, and stays refused on the edition-neutral `logic`
+  / `netlist` stages (exit 2). Not in scope for this PR: delay
+  insertion (repeater buffers), attenuation-limit detection
+  (`E_ATTENUATION_LIMIT`, dust segments > 15), crossing legalization
+  and the `RouteLayer::Bridge` / `Via` escape, edition legalization,
+  block-array voxel lowering, the physical-tile (tier 3) cell
+  library, the tick simulator, `assert truth|always|latency`
+  evaluation, sequential macros (`latch` / `pulse` / `delay` /
+  `edge_*` / `counter`), and QC/BUD refusal
+  (`E_NO_PORTABLE_IMPL`) — each remains a follow-up that will build
+  on the routed Placement IR shape this PR pins.
+- Redstone Placement IR + `cairn synth --stage placement
+  --edition <java|bedrock>` (M6-PR4) — the fourth slice of the M6
+  redstone-simulates pipeline. `cairn-lang-redstone` grows a
+  `compile_placement(&ScopedEditionNetlistIr, &IntentModule)` entry
+  point that walks the Edition Netlist IR produced by M6-PR3 and lays
+  each edition-tagged cell out inside its scope's `circuit region=`
+  reservation — stage 1 of the five-stage place-and-route pipeline
+  described by `spec/redstone` §14.5 (Placement → Steiner routing →
+  Delay insertion → Crossing legalization → Edition legalization).
+  Cells are placed in the topological order the Edition Netlist IR
+  already carries (`NetRef::Cell(j)` in `cells[i]` satisfies `j < i`),
+  stamped with `x = i`, `y = 0`, `z = 0` — a 1D layout the routing
+  pass will lift to pseudo-2.5D once crossings and fanout enter the
+  picture. `wire_length` and `delay_ticks` are reserved as `Option`s
+  on `PlacedCellNode` and stay `None` at this stage because §14.4
+  ties delay to the actual routed wire length, which is the routing
+  pass's output; a follow-up PR fills them in as a value change, not
+  a schema change, so downstream JSON consumers see a stable wire
+  shape today. `CircuitRegionReservation` captures the `region=<label>
+  void=<N>` reservation together with the enclosing scope's
+  `size=WxH` footprint copied verbatim from the Intent IR so the
+  routing pass has one type to consume. Two new diagnostic codes fire
+  per `spec/lint` §11's self-correction triple:
+  `E_NO_CIRCUIT_REGION` when a scope has cells to place but declared
+  no `circuit region=` line (or the enclosing scope has no `size=`),
+  and `E_ROUTE_CONGESTION` when the netlist needs more area than the
+  reservation offers — the primary quotes the ratio and reservation
+  shape (`synthesized netlist needs ~1.3x the reserved area
+  (void=1, region 3x3)`), the footer names the three fixes §14.5
+  suggests (`increase void, enlarge region, or split into multiple
+  circuit blocks`). Congestion / missing-region failures elide the
+  offending scope from the output so a downstream consumer cannot
+  silently accept a partial layout, matching the fail-loud cascade
+  policy the synth pass uses on unbound signals. `cairn-lang-core`
+  gains a small `intent::circuit_regions(&IntentModule) -> Vec<CircuitRegion>`
+  API that lifts the already-validated `circuit region=` fixtures out
+  of the Intent IR so the redstone crate has one entry point instead
+  of re-parsing `member.intent_state` in a second place — the
+  block-array pass's `recognize_circuit_region` still owns the
+  per-shape `W_DEFERRED_MEMBER` diagnostics, so the two consumers
+  agree on the happy-path shape without either firing a duplicate
+  diagnostic for the same source line. The CLI's `cairn synth
+  --stage` gains a `placement` value; the `--edition <java|bedrock>`
+  flag is required in that mode alongside `edition` and stays refused
+  on the edition-neutral `logic` / `netlist` stages (exit 2). Not in
+  scope for this PR: Steiner routing / wire-length determination,
+  delay insertion (repeater buffers), crossing legalization,
+  edition legalization, block-array voxel lowering, the physical-tile
+  (tier 3) cell library, the tick simulator, `assert truth|always|
+  latency` evaluation, sequential macros (`latch` / `pulse` / `delay`
+  / `edge_*` / `counter`), and QC/BUD refusal
+  (`E_NO_PORTABLE_IMPL`) — each remains a follow-up that will build
+  on the Placement IR shape this PR pins.
+- Redstone Edition Netlist IR + `cairn synth --stage edition
+  --edition <java|bedrock>` (M6-PR3) — the third slice of the M6
+  redstone-simulates pipeline. `cairn-lang-redstone` grows a
+  `compile_edition_netlist(&ScopedNetlistIr, Edition)` entry point that
+  walks the Netlist IR produced by M6-PR2 and picks the target-edition
+  realisation of each `LogicalCell` — the middle tier of the three-tier
+  cell library documented in `spec/redstone` §14.6 (`Logical Cell →
+  Edition Cell → Physical Tile`). The pass is a pure structural lookup:
+  drivers, `NetRef`s, inputs, outputs, and `signal_defs` are copied
+  verbatim from the source Netlist IR, and the topological invariant
+  (`NetRef::Cell(j)` in `cells[i]` still satisfies `j < i`) carries
+  through by construction. `EditionCell` names both the target edition
+  and the physical implementation family so a bug that pairs a Java AND
+  cell with a Bedrock torch tile is a type error, not a runtime mishap
+  — `and` maps to Java `ComparatorAnd` / Bedrock `TorchAnd`, `or` maps
+  to Java `RepeaterOr` / Bedrock `TorchOr`, and `not` maps to Java /
+  Bedrock `InverterTorch` (structurally shared but edition-tagged so a
+  later placer can pick the correct tile orientation, one of the
+  edition-absorbed differences per §14.6). The parser-unreachable
+  cells (`xor` / `nand` / `nor` / `mux`) each land as a per-edition
+  `*Unpinned` placeholder variant (`JavaXorUnpinned`,
+  `BedrockXorUnpinned`, ...) rather than one edition-agnostic
+  catch-all, so container / cell edition parity is enforced by naming
+  and the eventual parser change renames the placeholder in the one
+  match arm that produces it. The `(Edition, LogicalCell)` match is
+  fully exhaustive with no wildcard, so adding a third `Edition`
+  variant (Education) triggers a compile error at every mapping site
+  instead of a silent Java fallthrough. Per `spec/redstone` §14.4 /
+  §14.8 the Edition Netlist IR still carries no delay: repeater
+  insertion is a Placement IR concern. The pass emits no diagnostics
+  — CSE, cycle detection, and unbound-signal reporting ran in M6-PR1
+  and Logical Cell selection ran in M6-PR2, so this stage is a pure
+  structural rewrite. The CLI's `cairn synth --stage` gains an
+  `edition` value alongside `logic` / `netlist`; the `--edition
+  <java|bedrock>` flag is required in that mode and refused on
+  `logic` / `netlist` (exit 2) rather than silently ignored, so the
+  stage-vs-edition axes cannot drift out of sync in a caller's head.
+  Not in scope for this PR: place-and-route, repeater insertion,
+  tick simulator, `assert truth|always|latency` evaluation,
+  sequential macros (`latch` / `pulse` / `delay` / `edge_*` /
+  `counter`), `circuit region=... void=N` congestion detection
+  (`E_ROUTE_CONGESTION`), and QC/BUD refusal (`E_NO_PORTABLE_IMPL`) —
+  each remains a follow-up that will build on the Edition Netlist IR
+  shape this PR pins.
+- Redstone combinational Netlist IR + `cairn synth --stage netlist`
+  (M6-PR2) — the second slice of the M6 redstone-simulates pipeline.
+  `cairn-lang-redstone` grows a `compile_netlist(&ScopedLogicIr)` entry
+  point that walks the Logic IR produced by M6-PR1 and rewrites every
+  `GateNode` into a `CellNode` tagged with a `LogicalCell` (`and` / `or`
+  / `not` reachable today; `xor` / `nand` / `nor` / `mux` reserved on
+  the enum matching the Logic IR side). Cells carry canonical port
+  drivers (`[A, B]` for two-input gates, `[A]` for `Not`, `[Sel, A, B]`
+  for `Mux`) so a downstream simulator or placer can index by position
+  without inspecting `PortName`. `NetRef` mirrors the Logic IR's arena
+  `SignalRef` split so the topological invariant (every `NetRef::Cell(j)`
+  in `cells[i]` satisfies `j < i`) carries through the rewrite as a
+  single forward walk. Per `spec/redstone` §14.6, only the top of the
+  three-tier cell library (`Logical Cell → Edition Cell → Physical
+  Tile`) is chosen here — Java `ComparatorAND` vs Bedrock `TorchAND`
+  edition selection stays for a later pass so the IR remains
+  edition-neutral. Per §14.4 / §14.8 the Netlist IR still carries no
+  delay: repeaters are inserted only at the Placement IR stage. The
+  netlist pass emits no diagnostics of its own — CSE, cycle detection,
+  and unbound-signal reporting have already run in M6-PR1, so this
+  stage is a pure structural rewrite. The CLI's `cairn synth` gains a
+  `--stage <logic|netlist>` flag (defaults to `logic` for backwards
+  compatibility) still gated behind `--experimental-logic-synth`;
+  future placement / route / simulator stages will keep landing on the
+  same flag rather than sprouting new subcommands. Not in scope for
+  this PR: Edition Cell selection, place-and-route, tick simulator,
+  `assert truth|always|latency` evaluation, sequential macros
+  (`latch` / `pulse` / `delay` / `edge_*` / `counter`),
+  `circuit region=... void=N` congestion detection
+  (`E_ROUTE_CONGESTION`), and QC/BUD refusal (`E_NO_PORTABLE_IMPL`) —
+  each remains a follow-up PR that will build on the Netlist IR shape
+  this PR pins.
+- Redstone combinational Logic IR + `cairn synth` (M6-PR1) — the first
+  slice of the M6 redstone-simulates pipeline. `cairn-lang-redstone` grows
+  a `synthesize(&IntentModule)` entry point that walks every
+  struct / def / site body, collects sensor bindings (`pressure_plate ...
+  -> sig.X`, and any future sensor whose surface `-> sig.Y` tail parses
+  to a `DotRef`) into `InputPort`s, collects actuator arguments
+  (`opened_by=` / `powered_by=` / `lit_by=` / `fired_by=`, per
+  `spec/redstone` §14.2) into `OutputPort`s, and lowers each
+  `logic sig.X = <expr>` line into a topologically ordered DAG of
+  `GateNode`s. Combinational primitives cover `and` / `or` / `not`
+  (reachable from the current AST directly); `xor` / `nand` / `nor` /
+  `mux` sit on the `GateKind` enum ready for a follow-up parser PR that
+  teaches the surface call-expression syntax. Common subexpression
+  elimination collapses `sig.a or sig.b` written on two `logic` lines
+  to one shared OR gate so downstream placement pays no fanout tax
+  the source never asked for. Four new diagnostic codes fire fail-loud
+  per `spec/lint` §11's self-correction triple:
+  `E_LOGIC_UNBOUND_SIGNAL` when a reference names no sensor / earlier
+  binding (with a `Valid signals in scope: ...` footer listing the
+  reachable alternatives), `E_LOGIC_MULTIPLE_DRIVERS` when two `logic`
+  lines share an LHS or a `logic` LHS collides with a sensor,
+  `E_LOGIC_CYCLE` when a combinational dependency chain closes on
+  itself, and `W_LOGIC_UNUSED_SIGNAL` on a bare-ref or gate-producing
+  binding whose LHS no actuator or downstream logic consumes. Cascade
+  suppression tracks the failed-LHS set so a single unbound signal at
+  the root fires exactly one diagnostic, not once per consumer. The
+  CLI ships a matching internal-tier `cairn synth <file>
+  --experimental-logic-synth` subcommand that dumps the per-scope
+  Logic IR as JSON — the gate is mandatory until the pipeline reaches
+  a stable compatibility tier (netlist, placement, route, simulator
+  are still to come). Not in scope for this PR: the Netlist IR, cell
+  library, place-and-route, tick simulator, `assert truth|always`
+  evaluation, and sequential macros (`latch` / `pulse` / `delay` /
+  `edge_*` / `counter`) — each is a follow-up PR that will build on
+  the Logic IR shape this PR pins.
+- Cairn VS Code extension and `cairn-lsp` binary distribution (M5-PR3) —
+  closes the M5 developer-experience milestone. A new `editors/vscode/`
+  TypeScript extension (published as `.vsix`, not to the Marketplace in
+  this PR) activates on `onLanguage:cairn` / `workspaceContains:**/*.crn`,
+  resolves `cairn-lsp` from the `cairn.serverPath` setting or the OS
+  `PATH` (falling back to a single actionable notification linking to the
+  release page rather than silently no-op-ing), spawns it over stdio with
+  `vscode-languageclient@9`, and logs the server's `--version` string at
+  activation so bug reports carry a version tag without extra ceremony.
+  A minimal TextMate grammar (`source.cairn`) colours comments (`#`),
+  directives (`@cairn`/`@requires`/`@intended_targets`), top-level
+  keywords (`theme`/`def`/`site`/`struct`) and member keywords (mirrors
+  `cairn-lang-core::intent::known_keywords` — `floor`/`walls`/`door`/
+  `window`/`roof`/`stair`/`level`/`pressure_plate`/`circuit`/`place`/
+  `connect`), material tokens (`@name.dotted`), attribute keys (`k=`),
+  the `->` slot-binding arrow, and quoted strings; syntax lives next to
+  the LSP-driven diagnostics/completion the two previous PRs already
+  ship. `cairn-lsp` gains a small `--version` (and `-h`/`--help`) flag —
+  aligned with `cairn --version` and covered by a new integration test
+  in `crates/cairn-lang-lsp/tests/version_flag.rs` — so the extension
+  and support triage can identify the server without opening it.
+  `.github/workflows/publish.yml` now cross-compiles `cairn-lsp`
+  alongside `cairn` for all six release targets and stages both binaries
+  into one archive per target; the existing sigstore signature covers
+  the pair so the asset count, `.sha256`, and `.sigstore` layout are
+  unchanged. Not in scope: Marketplace / Open VSX publishing, bundling
+  the binary inside the `.vsix`, and a semantic-tokens provider — all
+  three are deferred to M6 or later PRs.
+- `cairn-lsp` completion (M5-PR2) — `textDocument/completion` over the
+  language's closed vocabularies, advertised at `initialize` with trigger
+  characters `@`, `=`, and `.`. Four cursor contexts are recognised:
+  line-opening keywords (top-level `theme`/`def`/`site`/`struct`, member
+  commands inside `struct`/`def`/`site` bodies, and `slot` + selector
+  keywords inside `theme` bodies), `mat_slot=` values (the union of slot
+  names declared by the document's themes, so `_java`/`_bedrock` variant
+  themes union naturally — matching how unpinned `cairn check` treats
+  slot presence), and `@` material tokens fed from the built-in registry
+  union (java ∪ bedrock): every abstract token with its resolved
+  canonical id as the item detail, plus the deduplicated canonical ids
+  from the catalog's value column (the full canonical vocabulary waits
+  on a registry blocks table that does not exist yet). Context detection
+  is a line-local text heuristic — Cairn is strictly line-oriented, so
+  the line prefix is grammatically sufficient — which keeps completion
+  working while the document fails to parse, the normal state
+  mid-keystroke; a drift-guard test pins the `slot NAME -> TARGET` scan
+  to the parser's view of every shipped example. Items replace the
+  partial token under the cursor via `TextEdit` (UTF-16-correct ranges)
+  and carry `sortText` freezing the curated declaration/catalog order;
+  prefix filtering is left to the client, and positions without a closed
+  set (comments, free-form values, header directives) return no items
+  rather than inventing a vocabulary (principles P3). The server now
+  keeps a `DocumentStore` (URI → last synced text) so requests can read
+  documents outside a change notification; asking about a never-opened
+  document, or a position further than one line past the document's
+  end, is refused loud with `InvalidParams` (one line past still
+  answers — a `didChange` can race the request). `cairn-lang-lsp`
+  gains a `cairn-lang-formats` dependency for the registry packs.
+- `cairn-lsp` (M5-PR1) — the first working cut of the language server:
+  a `[[bin]]` target of `cairn-lang-lsp` speaking standard LSP over
+  stdio. It advertises full-content document sync at `initialize`,
+  runs the same `parse → lower → check` pipeline as `cairn check`
+  (edition unpinned, so slot presence checks union the per-edition
+  theme variants) on every `didOpen`/`didChange`, and pushes
+  `textDocument/publishDiagnostics`; `didClose` publishes an empty set
+  so no stale squiggles survive. Check findings keep the stable
+  `E_*`/`W_*` string in the LSP `code` field with `source: "cairn"`,
+  span-carrying notes surface as `relatedInformation`, spanless notes
+  (the "valid candidates" / "Suggested fix:" footers) fold into the
+  message as `note:` lines so the self-correction triple reaches the
+  editor verbatim, and structured `data` payloads pass through for
+  future quick-fixes. A parse/lex failure pre-empts the check passes
+  and yields exactly one error diagnostic spanning to the end of the
+  offending line. Positions are converted from core's byte spans to
+  the protocol's 0-based line / UTF-16 code-unit coordinates by a new
+  `line_index::LineIndex`, keeping UTF-16 knowledge out of
+  `cairn-lang-core`. Transport is `lsp-server` + `lsp-types`
+  (rust-analyzer's synchronous stdio scaffold — no async runtime
+  enters the workspace). Completion followed as M5-PR2 (above); the
+  VS Code extension is the remaining M5 piece (M5-PR3), and binary
+  distribution in the publish pipeline lands with the extension.
+- `cairn-lang-formats::portability` — palette-entry portability counters
+  backing the `edition_portability` axis of `cairn info` (spec
+  versioning-editions §10.5). `portability_for_bedrock` runs every
+  non-air palette entry through `bedrock_state::translate_states` and
+  folds the outcome into `{portable, degraded, unsupported}`: a
+  lossless translation counts portable, a translation carrying a
+  degradation note (`shape != straight` on stairs today) counts
+  degraded, and a `BedrockStateError` counts unsupported.
+  `portability_for_java` reports every non-air entry as portable
+  (Java is the base per §10.3). The counting granularity is
+  per-palette-entry so the figures track what the `.mcstructure`
+  writer actually emits — a member whose lowering interns several
+  distinct palette entries contributes one row per entry.
+- `cairn-lang-core::Edition` — cross-cutting edition marker (`Java` /
+  `Bedrock`) shared by the resolver and the CLI so a future third
+  edition adds one variant in one place. `FromStr` gates unknown edition
+  strings loud (`unknown edition `{input}`. Valid: java, bedrock. Fix:
+  ...`), and `cairn info --editions foo` now exits 2 before running the
+  dry-run lowering rather than silently forwarding an unrecognised
+  edition to a zero-fill portability row.
+- `cairn-lang-core::resolve` — per-edition theme fallback (spec
+  versioning-editions §10.7 hierarchy #2). A theme whose name ends in
+  `_java` / `_bedrock` declares an edition variant of a logical theme
+  (`theme shop_java:` and `theme shop_bedrock:` share the logical name
+  `shop`). `resolve` now takes an `edition: Option<Edition>` argument
+  and auto-picks the matching variant per struct/def scope, falling
+  back to an unsuffixed theme of the same logical name when the
+  requested variant is absent. Unsuffixed themes (the `theme medieval:`
+  shape used by every existing example) resolve unchanged under both
+  editions. Under `resolve(ir, None)` — the `cairn check` path where
+  no edition has been picked — the resolver unions slot names across
+  variants of one logical theme so `mat_slot=NAME` presence checks do
+  not spuriously fire on slots that only one variant declares. Selector
+  matching in the `None` case is scoped per-picked variant to preserve
+  the per-theme DI contract from §7. `resolve(&ir)` callers migrate to
+  `resolve(&ir, edition)`; `check(&module, &ir)` migrates to
+  `check(&module, &ir, edition)`.
+- `cairn info --editions java,bedrock` now populates the `degraded` /
+  `unsupported` columns from a per-edition dry-run lowering (one
+  `lower_to_block_array` per requested edition, materials resolved
+  against the matching built-in pack, palette fed into
+  `portability_for_*`) instead of the hard-coded zeros. On
+  `themed-tower.crn` the eave's `shape=outer_left` stair now surfaces
+  as `Bedrock: degraded: >=1`; `cottage.crn` stays at zero across both
+  axes. The `EditionPortability` JSON / text shape is unchanged so
+  `--format json` consumers see real values without a wire break;
+  `compute_axes` in `cairn-lang-core::resolve` gained a
+  `Vec<EditionPortability>` argument that carries the per-edition
+  figures from the caller (the CLI, since `core` does not depend on
+  `formats`).
+- `cairn check --edition java|bedrock` — optional edition pin so a
+  `mat_slot=X` reference to a slot only the *other* variant declares
+  fires `E_UNRESOLVED_SLOT`. When `--edition` is omitted, the resolver
+  unions slot names across both variants of one logical theme so the
+  file passes `check` regardless of which edition it later compiles
+  for.
+- `examples/edition-fallback.crn` (+ `.crn.lock`) — a `shop` logical
+  theme with `shop_java` binding the `floating_text` slot to
+  `@sign.oak` and `shop_bedrock` binding it to `@sign.oak_wall`,
+  demonstrating spec §10.7 hierarchy #2 end-to-end without introducing
+  the entity concept the spec's illustrative `text_display` example
+  would require. The Java compile writes `oak_sign` into the palette;
+  the Bedrock compile writes `oak_wall_sign`. New material tokens
+  `sign.oak` / `sign.oak_wall` land in both built-in packs.
+- `cairn-lang-formats::bedrock_state` — per-edition blockstate translation
+  for the Bedrock backend, the follow-up the `.mcstructure` writer deferred.
+  `translate_states` maps the **stair family** (the only block kind the
+  lowering interns with properties today) from Java's `facing` / `half`
+  string properties to Bedrock's typed `states` — `weirdo_direction`
+  (`east=0, west=1, south=2, north=3`, verified against the wiki
+  `Stairs/BS` listing) and `upside_down_bit` (`top=1, bottom=0`). Stair
+  `shape` has no Bedrock state: `straight` (the Bedrock default) drops
+  losslessly, while a corner shape drops with a `ParityNote` the CLI
+  surfaces as `warning[W_INTENT_DEGRADED]` (spec versioning-editions §10.3
+  `dropped_states: [shape]` / §10.7, never a silent drop per §10.4). A
+  block with properties outside a mapped family, or a stair state value
+  outside the Java domain, still fails loud with the self-correction triple.
+  `build_mcstructure_tag` now returns `(Compound, Vec<ParityNote>)` and
+  writes real `states` per palette entry instead of the old empty compound;
+  `cottage.crn` (all-`straight` gable roof) compiles clean for
+  `--edition bedrock`, and `themed-tower.crn` compiles with one
+  `W_INTENT_DEGRADED` for its non-straight eave corners. The
+  `BedrockStructureError::StatefulPaletteEntry` hard error is replaced by
+  a transparent `BedrockStructureError::State(BedrockStateError)`.
+- `cairn-lang-nbt::bedrock::write_bedrock_uncompressed` — a little-endian
+  NBT writer for Bedrock's uncompressed `.mcstructure` on-disk form. The
+  byte-level encoder is refactored into a single endian-parameterised core
+  (`writer.rs`) shared with the Java writer, so the two dialects differ
+  only in scalar byte order and can never drift apart on validation rules
+  (`InvalidString` / `HeterogeneousList` / `LengthOverflow`). The Java
+  public API (`write_java_uncompressed` / `write_java_gzip`) and its error
+  type are unchanged.
+- `cairn-lang-formats::bedrock_structure` — a `.mcstructure` serialiser
+  mirroring `java_structure`. `build_mcstructure_tag` lowers a
+  `BlockArray` into the Bedrock root shape (`format_version`, `size`,
+  `structure.block_indices` two-layer Z-fastest arrays with a `-1`-filled
+  waterlog layer, `structure.palette.default.block_palette` of
+  `{ name, states, version }`, `structure_world_origin`), and
+  `write_mcstructure` writes it uncompressed. This first cut emits
+  **stateless palettes only**: a palette entry carrying blockstate
+  properties fails loud with `BedrockStructureError::StatefulPaletteEntry`
+  (spec versioning-editions §10.4 forbids silent substitution/dropping),
+  its message carrying the self-correction triple. Per-edition state
+  mapping (`facing` / `half` / `shape`) lands in a follow-up.
+- `cairn-lang-formats` builtin Bedrock registry pack
+  (`registry-data/bedrock/`) plus `builtin_bedrock` / `load_builtin_bedrock`
+  and `data_version::{BedrockTarget, resolve_bedrock_target}`. The pack's
+  `data_versions` column carries the `.mcstructure` block-palette `version`
+  integer (`(major << 24) | (minor << 16) | (patch << 8) | revision`); the
+  materials catalog covers the same abstract tokens the Java pack lifts.
+  Target resolution reuses the Java pack's machinery (`latest` alias,
+  Damerau-Levenshtein suggestion), and `UnsupportedTarget` now names the
+  edition whose version table was consulted.
+- `cairn compile --edition bedrock` writes `.mcstructure` artifacts and a
+  lockfile whose `target.edition = bedrock`, `data_version = block_version`,
+  and `registry_pack_hash` pins the Bedrock pack bytes. The Java `.nbt`
+  path is byte-for-byte unchanged. A `ResolvedTarget` enum threads the
+  edition through artifact naming (`OutputExt`), tag building, the writer
+  (gzip vs uncompressed), and the lockfile so a future edition slots in at
+  one site.
+
+- `cairn-lang-core::block_array::lower` — `level y=N` blocks now
+  participate in phase-bucketed voxelisation. A new `flatten_members`
+  pre-pass expands each `level` into `(y_offset, child)` pairs so a
+  `walls` / `door` / `window` / `stair` nested inside a `level` reaches
+  the massing / openings / envelope phases with its authored `y` shifted
+  up by the level's `y=`. `max_wall_height` becomes `max_wall_top` and
+  now aggregates over the flattened list so a `level y=N walls id=X
+  height=H` correctly extends the struct's roof plane to `y = N + H`.
+  Nested `level` blocks defer with `W_DEFERRED_MEMBER` (depth 1 only).
+- `cairn-lang-core::block_array::lower` — `MemberRole::Stair` gains a
+  minimal `fill_stair` implementation targeting the eave pattern
+  `themed-tower.crn` uses: `kind=stairs`, `side=front|back|left|right`,
+  `half=top|bottom`, `facing=out|in`, `shape=straight|outer_left|outer_right`,
+  and an optional `y=` local offset. The stair band paints along the
+  wall's overhang row (one voxel outside the wall) at
+  `y = y_offset + local_y`, taking its base id from the resolved
+  `mat_slot=` state and falling back to `spruce_stairs` otherwise. Any
+  other `kind=` / `half=` / `facing=` / `shape=` still defers with a
+  targeted `W_DEFERRED_MEMBER`.
+- `cairn-lang-core::block_array::lower` — `fill_window` supports the
+  `repeat=N step=M` arrow-slit pattern themed-tower's second-floor
+  windows use. The rectangle is stamped `N` times along the wall,
+  advancing by `step` voxels between stamps; `repeat` collapses to 1 when
+  absent, and `repeat>=2 step=0` defers so instances cannot overlap.
+  Windows without a `mat_slot=` binding now carve air instead of dropping
+  silently, so `class=arrow_slit` slits produce actual openings in the
+  wall. Windows with an explicit `mat_slot=` are unaffected.
+- `crates/cairn-lang-formats/tests/themed_tower_level_lower.rs` — new
+  integration test that lowers `examples/themed-tower.crn` end-to-end
+  through the built-in registry pack and pins dims, palette (five
+  resolved ids including `dark_oak_stairs` and `dark_oak_planks`), the
+  upper-wall ring, the eave stair band, the arrow-slit air carve
+  pattern, and the "zero `W_DEFERRED_MEMBER`" contract. Lives in
+  `cairn-lang-formats` because `cairn-lang-core` cannot depend on
+  `cairn-lang-formats` for the materials resolver without a cycle.
+- `cairn-lang-core::block_array::lower` — `MemberRole::PressurePlate`
+  gains a minimal `fill_pressure_plate` implementation covering the
+  fixture shape `redstone-door.crn` authored: an `at=<side>.outside` /
+  `at=inside.<side>` compound anchor (two-segment `DotRef`), non-negative
+  `offset=N` along the wall axis, non-negative `y=N` from the floor, and
+  an optional `mat_slot=` that resolves to a bare block id (`oak_pressure_plate`
+  fallback). `<side>.outside` on a struct without overhang falls back to
+  the wall's foundation cell so the anchor still lowers cleanly. The
+  `-> sig.<name>` binding on `Member.binding` is parsed but intentionally
+  read-through until the redstone lowering pass lands. Any other `at=`
+  shape or a resolved state with bracketed properties still fires
+  `W_DEFERRED_MEMBER`.
+- `crates/cairn-lang-formats/tests/redstone_door_pressure_plate_lower.rs`
+  — new integration test that lowers `examples/redstone-door.crn` end-to-end
+  through the built-in registry pack and pins gatehouse dims (7x4x5), the
+  presence of `minecraft:oak_pressure_plate` in the palette, both plate
+  voxels (front-wall corner at (0,0,4) for the `outside` anchor and one
+  voxel inward at (0,0,3) for the `inside.front` anchor), and the
+  "zero `W_DEFERRED_MEMBER` on `pressure_plate`" contract.
+- `cairn-lang-core::block_array::lower` — `MemberRole::Circuit` gains a
+  minimal `recognize_circuit_region` implementation covering the fixture
+  shape `redstone-door.crn` authored: `region=<label>` (an `Ident` or
+  `Str` naming the region a later logic pass will look up) and
+  `void=<N>` (a `u32` service-layer height, `N >= 1`). No voxels are
+  painted — spec/redstone.md §14.5 / §14.8 places dust / repeater /
+  cell tiles on the future `logic_synth → logic_place → logic_route`
+  passes — so the recogniser only guards the surface shape. `region=`
+  absent, `region=` present but of a non-label kind (integer, boolean,
+  size, token, reference, list), `region=""` empty, `void=` absent,
+  `void=0`, and non-`u32` `void=` each fire `W_DEFERRED_MEMBER` with a
+  targeted primary that names the missing / invalid key (the offending
+  kind is included in the region-kind-mismatch primary).
+- `crates/cairn-lang-formats/tests/redstone_door_pressure_plate_lower.rs`
+  — new `redstone_door_circuit_line_emits_no_deferred_warning` test
+  pins the "zero `W_DEFERRED_MEMBER` on `circuit`" contract on the
+  `circuit region=floor void=2` line, mirroring the shape of the
+  neighbouring pressure_plate zero-defer test.
+- `cairn-lang-core::block_array::lower` — `MemberRole::Door` members
+  whose surface line is the selector form (`door[id=X] opened_by=…`)
+  are now recognised as **actuator patches** before phase-bucketing.
+  A new `recognize_actuator_patch` guard peels these lines off the
+  `openings` phase so `carve_door`'s `side_of` check no longer
+  false-positives "missing `side=`" on a patch line. The recogniser
+  validates the surface shape only (spec/redstone.md §14.2): the
+  `[selector]` must carry an `id=<label>` naming a physical door
+  declared in the same `flatten_members` view (level-nested doors
+  are selectable), and `opened_by=` must resolve to a two-segment
+  `sig.<name>` `DotRef`. Missing / non-label / unknown `id=`,
+  missing `opened_by=`, or an `opened_by=` value that is not a
+  `sig.<name>` reference each fire `W_DEFERRED_MEMBER` with a
+  targeted primary; the unknown-id primary lists every physical
+  door id declared in the scope so the author can spot near-misses.
+  Only `door[id=…] opened_by=` is covered — `lit_by=` / `powered_by=`
+  / `fired_by=` on lamps / pistons / dispensers land with their
+  keywords in a future PR. Unknown selector attributes and unknown
+  intent-state keys on a patch also defer (not silently accepted) so a
+  future `powered_by=` cannot retroactively change the meaning of
+  source that shipped meanwhile. `redstone-door.crn`'s
+  `door[id=front] opened_by=sig.open` actuator-patch line now compiles
+  clean; the last surviving `W_DEFERRED_MEMBER` on that example is
+  gone.
+- `cairn-lang-core::block_array::walkway` — new `route_path` ground-plane
+  router for `connect` walkways. When the straight Manhattan L between
+  two ports would cross a placement floor, `lower_connects` now searches
+  for a detour instead of skipping the colliding cells: Dijkstra over
+  `(cell, direction)` states with the lexicographic cost
+  `(path length, turn count)`, so the strip takes the shortest route
+  around the obstacle and, among equal-length routes, the one with the
+  fewest turns. Ties are broken by a fixed expansion order and a
+  monotonic queue sequence — never by hash iteration order — so the
+  same source always lays the same strip and the lockfile stays
+  reproducible. The search area is the bounding box of the blocked
+  cells on the walk plane plus both endpoints, inflated by one cell,
+  with a 4-million-cell cap that degrades pathological inputs to the
+  skip-and-warn fallback. `village.crn`'s `home1.entry ↔ home3.entry`
+  row — whose L used to cut a 7-cell hole through home1's floor —
+  now detours around home1's east face and the example compiles with
+  zero warnings. `route_path` returns `Result<_, RoutePathError>`
+  (buried endpoint / unreachable target / area cap / coordinate
+  overflow) so the caller can match the warning note to the actual
+  cause, and takes a `BlockedIndex` — built once per lowering — so the
+  per-plane bounding rectangle comes from a single scan of the blocked
+  set instead of one full re-scan per `connect` row (a site with many
+  colliding rows would otherwise multiply that scan into an effective
+  DoS on user input).
+
+### Changed
+
+- `cairn-lang-core::block_array::lower` — `fill_roof` no longer emits a
+  `W_DEFERRED_MEMBER` when a `mat_slot=` binding resolves to an id other
+  than the roof kind's canonical hardcode. Instead, the resolved id lands
+  in the palette verbatim for `gable`, `shed`, `hip`, and `flat` roofs,
+  giving `themed-tower.crn`'s `slot roof -> @roof.dark_wood` its
+  dark-oak stairs without a warning. A `mat_slot=` state whose
+  `properties` are non-empty still fires a deferred warning (the
+  geometry generator owns `facing` / `half` / `shape`).
+- `crates/cairn-lang-cli/tests/cli_compile.rs` — `c14b`
+  "`W_DEFERRED_MEMBER` still fires on themed-tower" is replaced by
+  `c14e` "themed-tower compiles without deferred warnings", pinning the
+  same shape as `c14` (cottage) and `c21` (village).
+- `crates/cairn-lang-cli/tests/cli_lower.rs::lower_3_deferred_member_warnings_print_to_stderr`
+  moves off the `pressure_plate` snippet (now clean) onto a bare
+  `circuit region=floor void=2` snippet — that is the next role whose
+  lowering has not yet been spec'd, so it carries the deferred-warning
+  regression from here.
+- `crates/cairn-lang-cli/tests/cli_compile.rs` — new `c14f` pins that
+  `redstone-door.crn` compiles without a `pressure_plate` deferred
+  warning while `circuit` is still surfaced, mirroring the same shape
+  `c14e` uses for themed-tower.
+- `crates/cairn-lang-cli/tests/cli_lower.rs::lower_3_deferred_member_warnings_print_to_stderr`
+  moves off the `circuit` snippet (now recognised) onto a
+  `stair kind=stairs side=front shape=inner_left` snippet — the stair
+  path lowers `straight`, `outer_left`, and `outer_right` but still
+  defers `inner_left` / `inner_right`, so an inner-corner stair carries
+  the deferred-warning regression from here.
+- `crates/cairn-lang-cli/tests/cli_compile.rs::c14f_redstone_door_pressure_plate_paints_without_deferring`
+  drops the `circuit` / `pressure_plate` substring checks and pins the
+  `warning[W_DEFERRED_MEMBER]` primary count against a baseline of one
+  (the actuator patch on line 25's `door[id=front] opened_by=…`
+  Member, which `carve_door` still surfaces as `missing side=`). A
+  substring check would false-positive the catalogue note that follows
+  each warning (the note lists every supported role by name) and
+  false-negative a refactor that stops naming the role in the primary
+  text; the baseline pin catches both.
+- `crates/cairn-lang-formats/tests/redstone_door_pressure_plate_lower.rs::redstone_door_circuit_line_emits_no_deferred_warning`
+  applies the same baseline-pin refactor: it now asserts exactly one
+  `DeferredMember` diagnostic (the actuator patch) rather than
+  filtering primaries for `"circuit"` — the void-overflow path routes
+  through `nonneg_int_or_defer` whose primary never mentions
+  `"circuit"`, so a substring filter would silently pass regressions
+  on that arm.
+- `crates/cairn-lang-cli/tests/cli_compile.rs::c14f_redstone_door_pressure_plate_paints_without_deferring`
+  is renamed to `c14f_redstone_door_compiles_without_deferred_warnings`
+  and drops the baseline of one in favour of pinning
+  `stderr.matches("W_DEFERRED_MEMBER").count() == 0`, matching the
+  shape `c14` (cottage) and `c14e` (themed-tower) already use. The
+  `gatehouse.nbt` existence assertion is retained so a regression
+  that turns lowering silent still fails loud on the missing artefact.
+- `crates/cairn-lang-formats/tests/redstone_door_pressure_plate_lower.rs::redstone_door_circuit_line_emits_no_deferred_warning`
+  is renamed to `redstone_door_lowers_without_deferred_warnings` and
+  drops the "exactly one deferred (the actuator patch)" baseline in
+  favour of "zero deferred" — the actuator patch is now recognised
+  alongside the plate paint and the circuit region marker, so the
+  whole example lowers clean.
+- `W_WALKWAY_BLOCKED` now only fires when the detour search finds **no**
+  unobstructed route between the two ports (a port buried under another
+  placement's floor, a fully enclosed target, or the area cap); the row
+  then falls back to the straight L with the colliding cells skipped,
+  exactly as before, so the `data: { kind: "walkway_blocked",
+  skipped: N }` payload and the "skipped N cells" primary text are
+  unchanged. The note now names the concrete cause — which port is
+  buried, an enclosed target, the search-area cap (with both numbers),
+  or coordinate overflow — each with its own remedy, instead of one
+  catch-all gap-widening suggestion that cannot fix three of the four.
+- `crates/cairn-lang-core/src/block_array/lower.rs` — the
+  `walkway_blocked_cells_skip_with_w_walkway_blocked_count` fixture
+  gains a third placement whose floor buries the `from` port (the old
+  two-place fixture now routes around `b` cleanly and moved to the new
+  `walkway_routes_around_obstructed_l_path_without_warning` /
+  `walkway_detour_is_deterministic_across_lowerings` tests).
+- `crates/cairn-lang-core/tests/village_lower.rs` — the home1↔home3
+  walkway pins move from the straight strip (`footprint 1×15`) to the
+  detour around home1's east face (`footprint 6×15`, still anchored at
+  home3's front port), and a new
+  `village_emits_zero_walkway_blocked_warnings` test pins the
+  "village compiles warning-free, 25 unbroken gravel cells" contract.
 
 
 

@@ -1,0 +1,45 @@
+[package]
+name = "cairn-lang-tree-sitter"
+description = "tree-sitter grammar for the Cairn build description language"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+publish.workspace = true
+build = "bindings/rust/build.rs"
+include = [
+    "bindings/rust/**",
+    "grammar.js",
+    "queries/**",
+    "src/*.c",
+    "src/*.h",
+    "src/*.json",
+    "src/tree_sitter/*.h",
+    "!**/*.gyp",
+    "!**/*.gypi",
+]
+
+[lib]
+path = "bindings/rust/lib.rs"
+
+[lints.rust]
+unsafe_code = "allow"
+missing_docs = "warn"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+module_name_repetitions = "allow"
+must_use_candidate = "allow"
+
+[dependencies]
+tree-sitter-language = "0.1.7"
+
+[build-dependencies]
+cc = "1.3.0"
+
+[dev-dependencies]
+tree-sitter = "0.26.11"

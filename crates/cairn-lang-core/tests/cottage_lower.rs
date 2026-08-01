@@ -25,7 +25,7 @@ fn lower_example(name: &str) -> BlockArrayIr {
         std::fs::read_to_string(examples_dir().join(name)).expect("example file must be readable");
     let module = parse(&source).expect("parse");
     let ir = lower(&module);
-    let resolution = resolve(&ir);
+    let resolution = resolve(&ir, None);
     lower_to_block_array(&ir, &resolution, None)
 }
 
