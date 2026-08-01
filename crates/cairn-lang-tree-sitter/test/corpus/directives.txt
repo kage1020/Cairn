@@ -1,5 +1,5 @@
 ==================
-@cairn version
+@cairn version (field labels)
 ==================
 
 @cairn 2026.06
@@ -8,8 +8,8 @@
 
 (source_file
   (directive
-    (directive_name)
-    (version_expr (version_literal))))
+    name: (directive_name)
+    arg: (version_expr (version_literal))))
 
 ==================
 @requires with operator
@@ -25,7 +25,7 @@
     (version_expr (version_literal))))
 
 ==================
-@intended_targets list
+@intended_targets list (field labels)
 ==================
 
 @intended_targets ["1.20.4","1.21.4"]
@@ -34,8 +34,8 @@
 
 (source_file
   (directive
-    (directive_name)
-    (value_list (string) (string))))
+    name: (directive_name)
+    arg: (value_list (string) (string))))
 
 ==================
 @requires bare version, no prefix or operator

@@ -10,6 +10,15 @@
   ],
   "author": "kage1020 and the Cairn authors",
   "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kage1020/Cairn.git",
+    "directory": "crates/cairn-lang-tree-sitter"
+  },
+  "homepage": "https://github.com/kage1020/Cairn",
+  "bugs": {
+    "url": "https://github.com/kage1020/Cairn/issues"
+  },
   "packageManager": "pnpm@10.14.0",
   "main": "bindings/node",
   "types": "bindings/node/index.d.ts",
