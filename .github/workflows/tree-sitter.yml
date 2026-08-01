@@ -15,15 +15,23 @@ name: tree-sitter
 # validated and turned into the ref every other job checks out.
 
 on:
+  # `Cargo.toml` is in the filter for the version-sync job's sake. The workspace
+  # version lives there while the two copies it has to agree with live under the
+  # crate, so a release PR that bumps only Cargo.toml is precisely the change
+  # that can break parity — and, without this path, precisely the change that
+  # would not run the job that checks it. That is not hypothetical: the release
+  # PR for v2026.8.0 merged green and left the npm manifests a version behind.
   push:
     branches: [main, canary]
     tags: ["v*"]
     paths:
       - "crates/cairn-lang-tree-sitter/**"
+      - "Cargo.toml"
       - ".github/workflows/tree-sitter.yml"
   pull_request:
     paths:
       - "crates/cairn-lang-tree-sitter/**"
+      - "Cargo.toml"
       - ".github/workflows/tree-sitter.yml"
   workflow_dispatch:
     inputs:
