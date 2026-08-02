@@ -109,6 +109,35 @@ struct gatehouse size=7x5
               (command_arg (attribute key: (identifier) value: (material_ref (identifier)))))))))))
 
 ==================
+Member statement with selector, arrow output, and indented body (field labels)
+==================
+
+struct gatehouse size=7x5
+  circuit[id=main] region=floor -> sig.out
+    place kind=lamp
+
+---
+
+(source_file
+  (struct_decl
+    name: (identifier)
+    args: (attribute_list
+      (attribute key: (identifier) value: (size_literal (integer) (integer))))
+    body: (struct_body
+      (member_stmt_with_body
+        keyword: (member_keyword)
+        selector: (attribute_list
+          (attribute key: (identifier) value: (identifier)))
+        args: (command_arg_list
+          (command_arg (attribute key: (identifier) value: (identifier))))
+        output: (signal_ref (identifier) (identifier))
+        body: (struct_body
+          (member_stmt
+            keyword: (member_keyword)
+            args: (command_arg_list
+              (command_arg (attribute key: (identifier) value: (identifier))))))))))
+
+==================
 def declaration (field labels)
 ==================
 

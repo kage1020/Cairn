@@ -12,7 +12,7 @@
     arg: (version_expr (version_literal))))
 
 ==================
-@requires with operator
+@requires with operator (field labels)
 ==================
 
 @requires version>=1.20
@@ -21,8 +21,8 @@
 
 (source_file
   (directive
-    (directive_name)
-    (version_expr (version_literal))))
+    name: (directive_name)
+    arg: (version_expr (version_literal))))
 
 ==================
 @intended_targets list (field labels)
