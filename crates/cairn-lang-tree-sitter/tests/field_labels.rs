@@ -4,35 +4,49 @@
 //! expected S-expression carries none, and dropping a `field(...)` from a
 //! grammar rule leaves the tree *shape* untouched. So a corpus written without
 //! labels keeps passing even after `field('name', $.identifier)` decays to
-//! `$.identifier` — and the labels are public API: `queries/highlights.scm`
-//! and `queries/locals.scm` match on them, as does every `child_by_field_name`
-//! caller on the Rust and Node side. `test/corpus/` therefore keeps one
-//! `(field labels)` case per field-bearing rule, whose expected tree spells the
-//! labels out.
+//! `$.identifier` — and the labels are consumed: in-repo by
+//! `queries/highlights.scm` and `queries/locals.scm`, and downstream by
+//! anything calling `child_by_field_name` on the published grammar.
+//! `test/corpus/` therefore keeps a `(field labels)` case per field-bearing
+//! rule, whose expected tree spells the labels out.
 //!
-//! Which rules those are is otherwise maintained entirely by hand, so a rule
-//! that gains a field later gains no test with it. This test closes that gap
-//! mechanically: every `(node, field)` pair the generated `src/node-types.json`
-//! declares must appear as a label under that node in some expected tree.
+//! Which rules those are was otherwise maintained entirely by hand, so a rule
+//! that gained a field gained no test with it. This test holds the two sides
+//! equal: the set of `(node, field)` pairs the generated `src/node-types.json`
+//! declares must be exactly the set labelled somewhere in the corpus.
+//!
+//! Both directions matter, and they catch different regressions:
+//!
+//! - A declared pair with no label is a rule whose `field(...)` could be
+//!   deleted without failing anything.
+//! - A labelled pair that is no longer declared is that deletion having
+//!   happened. `tree-sitter test` catches it too, but only in the
+//!   `tree-sitter.yml` workflow behind a paths filter; this side of the
+//!   assertion puts it in `cargo test --workspace`, which runs on every PR.
 //!
 //! Division of labour with `tree-sitter test`: labelling is all-or-nothing per
 //! case (one label anywhere sets the CLI's `has_fields` flag and the whole tree
 //! is then compared with labels), so the CLI already rejects a case whose
-//! labels are wrong, misplaced, or incomplete. This test only asserts they are
-//! *present* somewhere — never that they are correct.
+//! labels are wrong or misplaced. This test asserts *which* labels exist, never
+//! that a tree is shaped correctly.
 //!
 //! Known limitation: `node-types.json` is per node, not per grammar branch. A
-//! rule that declares the same field in several `choice` branches — `directive`
-//! declares `name` and `arg` once per directive keyword — is satisfied here by
-//! a single branch, because the branches are indistinguishable in the
-//! S-expression (`@cairn` and `@requires` both produce
-//! `(directive name: (directive_name) arg: (version_expr ...))`). The corpus
-//! keeps a labelled case per `directive` branch for that reason; nothing here
-//! enforces it.
+//! rule that declares the same field in several `choice` branches is satisfied
+//! here by any one of them, because the branches are indistinguishable in the
+//! S-expression — `directive` declares `name` and `arg` once per directive
+//! keyword and all three produce `(directive name: ... arg: ...)`;
+//! `binary_expression` declares `lhs` and `rhs` once for `or` and once for
+//! `and`. The corpus labels every such branch anyway — `directive` across one
+//! case per keyword, `binary_expression` within the single case whose
+//! expression nests an `or` inside an `and` — but nothing here enforces it.
 
 use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
+
+/// Node names tree-sitter uses for parse failures. Labels below one of these
+/// describe error recovery, not the grammar, so they pin nothing.
+const ERROR_NODES: [&str; 3] = ["ERROR", "MISSING", "UNEXPECTED"];
 
 fn crate_dir() -> &'static Path {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -61,86 +75,149 @@ fn declared_fields() -> BTreeSet<(String, String)> {
     declared
 }
 
+/// Every file under `test/corpus/`, recursively.
+///
+/// `tree-sitter test` walks that directory and does not care about extensions,
+/// so neither does this — a case moved into a subdirectory or saved without
+/// `.txt` must not fall out of the ledger unnoticed.
 fn corpus_files() -> Vec<PathBuf> {
-    let mut files: Vec<PathBuf> = fs::read_dir(crate_dir().join("test/corpus"))
-        .expect("read corpus dir")
-        .filter_map(Result::ok)
-        .map(|entry| entry.path())
-        .filter(|path| path.extension().is_some_and(|ext| ext == "txt"))
-        .collect();
+    fn walk(dir: &Path, into: &mut Vec<PathBuf>) {
+        for entry in fs::read_dir(dir).expect("read corpus dir").flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                walk(&path, into);
+            } else {
+                into.push(path);
+            }
+        }
+    }
+
+    let mut files = Vec::new();
+    walk(&crate_dir().join("test/corpus"), &mut files);
     files.sort();
     files
 }
 
-fn is_rule_of(line: &str, glyph: char) -> bool {
-    line.len() >= 3 && line.chars().all(|c| c == glyph)
+/// One corpus case.
+struct Case {
+    title: String,
+    /// `:skip`, `:error`, `:platform(...)`, ... — the attribute lines the CLI
+    /// allows between the test name and the closing rule.
+    markers: Vec<String>,
+    /// Text after the `---` divider. Empty when the case has none.
+    tree: String,
 }
 
-/// Pull the expected S-expression out of every case in one corpus file.
+/// Whether a line opens or closes a corpus section.
 ///
-/// The corpus format is a `=` rule, a title, another `=` rule, the input, a
-/// `-` divider, then the expected tree, running until the next case's opening
-/// rule. Only the expected trees are returned: Cairn source has its own
-/// parentheses (`truth(a -> b)`) and its own trailing colons (`theme t:`), so
-/// scanning the input side would report phantom field labels.
-fn expected_trees(text: &str) -> Vec<String> {
+/// The CLI's header and divider patterns are `^={3,}` and `^-{3,}` with an
+/// optional trailing suffix (`====== marker`, `--- note`), not a line of one
+/// repeated glyph, so this matches on the leading run only. Requiring the whole
+/// line to be uniform would run the divider search past the end of its case and
+/// hang the next case's tree off the wrong title.
+fn is_rule(line: &str, glyph: char) -> bool {
+    line.chars().take_while(|c| *c == glyph).count() >= 3
+}
+
+/// Split one corpus file into cases.
+///
+/// The format is an `=` rule, the test name, zero or more attribute lines,
+/// another `=` rule, the input, a `-` divider, then the expected tree, running
+/// until the next case's opening rule. Only the expected side is kept: Cairn
+/// source has parentheses of its own (`truth(a -> b)`) and trailing colons of
+/// its own (`theme t:`), both of which would read as phantom field labels.
+fn parse_cases(text: &str) -> Vec<Case> {
     let lines: Vec<&str> = text.lines().map(str::trim_end).collect();
-    let mut trees = Vec::new();
+    let mut cases = Vec::new();
 
     let mut i = 0;
     while i < lines.len() {
-        let is_case_header =
-            is_rule_of(lines[i], '=') && i + 2 < lines.len() && is_rule_of(lines[i + 2], '=');
-        if !is_case_header {
+        if !is_rule(lines[i], '=') {
             i += 1;
             continue;
         }
-        let title = lines[i + 1];
-        i += 3;
 
-        while i < lines.len() && !is_rule_of(lines[i], '-') {
-            i += 1;
+        // The header runs to the next `=` rule; everything between is the test
+        // name followed by its attribute lines.
+        let mut close = i + 1;
+        while close < lines.len() && !is_rule(lines[close], '=') {
+            close += 1;
         }
         assert!(
-            i < lines.len(),
+            close < lines.len(),
+            "corpus case header starting `{}` is never closed",
+            lines[i]
+        );
+        assert!(close > i + 1, "corpus case header has no test name");
+
+        let title = lines[i + 1].to_owned();
+        let markers: Vec<String> = lines[i + 2..close]
+            .iter()
+            .filter(|line| line.starts_with(':'))
+            .map(|line| (*line).to_owned())
+            .collect();
+
+        // The body ends where the next case's opening rule begins.
+        let body_start = close + 1;
+        let mut body_end = body_start;
+        while body_end < lines.len() && !is_rule(lines[body_end], '=') {
+            body_end += 1;
+        }
+
+        let divider = (body_start..body_end).find(|n| is_rule(lines[*n], '-'));
+        // A case that asserts a parse failure carries no expected tree. Anything
+        // else without a divider is malformed.
+        assert!(
+            divider.is_some() || markers.iter().any(|m| m.starts_with(":error")),
             "corpus case `{title}` has no `---` divider"
         );
-        i += 1;
+        let tree = divider.map_or_else(String::new, |n| lines[n + 1..body_end].join("\n"));
 
-        let start = i;
-        while i < lines.len() && !is_rule_of(lines[i], '=') {
-            i += 1;
-        }
-        trees.push(lines[start..i].join("\n"));
+        cases.push(Case {
+            title,
+            markers,
+            tree,
+        });
+        i = body_end;
     }
-    trees
+
+    cases
 }
 
 /// Record every `(enclosing node, field)` pair labelled in one expected tree.
 ///
 /// Tokens are `(`, `)`, quoted anonymous tokens (`'\t'`, `";"`), and bare
-/// words; a word ending in `:` is a field label and belongs to the node on top
-/// of the stack, a word right after `(` is a node name.
+/// words; a word ending in `:` is a field label belonging to the node on top of
+/// the stack, and a word right after `(` names the node just opened. Every `(`
+/// pushes, named or not, so that a quoted token in node position cannot leave
+/// the following `)` popping the *parent* and re-parenting the labels after it.
 fn collect_labelled_fields(tree: &str, into: &mut BTreeSet<(String, String)>) {
     let bytes = tree.as_bytes();
     let mut stack: Vec<&str> = Vec::new();
+    let mut open_error_nodes = 0usize;
     let mut at_node_name = false;
 
     let mut i = 0;
     while i < bytes.len() {
         match bytes[i] {
             b'(' => {
+                stack.push("");
                 at_node_name = true;
                 i += 1;
             }
             b')' => {
-                stack.pop();
+                let closed = stack.pop().expect("unbalanced `)` in an expected tree");
+                if ERROR_NODES.contains(&closed) {
+                    open_error_nodes -= 1;
+                }
                 at_node_name = false;
                 i += 1;
             }
             quote @ (b'\'' | b'"') => {
                 i += 1;
                 while i < bytes.len() && bytes[i] != quote {
+                    // A backslash escapes the next byte, so `'\''` does not end
+                    // here. The corpus reaches this through `(UNEXPECTED '\t')`.
                     i += usize::from(bytes[i] == b'\\') + 1;
                 }
                 i += 1;
@@ -160,18 +237,29 @@ fn collect_labelled_fields(tree: &str, into: &mut BTreeSet<(String, String)>) {
                     let node = stack
                         .last()
                         .unwrap_or_else(|| panic!("field label `{word}` outside any node"));
-                    into.insert(((*node).to_owned(), field.to_owned()));
+                    assert!(
+                        !node.is_empty(),
+                        "field label `{word}` before its node name"
+                    );
+                    if open_error_nodes == 0 {
+                        into.insert(((*node).to_owned(), field.to_owned()));
+                    }
                 } else if at_node_name {
-                    stack.push(word);
+                    *stack.last_mut().expect("a node was opened") = word;
+                    if ERROR_NODES.contains(&word) {
+                        open_error_nodes += 1;
+                    }
                 }
                 at_node_name = false;
             }
         }
     }
+
+    assert!(stack.is_empty(), "unbalanced `(` in an expected tree");
 }
 
 #[test]
-fn every_declared_field_is_pinned_by_a_corpus_case() {
+fn corpus_labels_match_the_fields_the_grammar_declares() {
     let declared = declared_fields();
     assert!(
         !declared.is_empty(),
@@ -179,25 +267,127 @@ fn every_declared_field_is_pinned_by_a_corpus_case() {
     );
 
     let mut labelled = BTreeSet::new();
+    let mut uncounted = Vec::new();
+    let mut cases = 0usize;
+    let mut rules = 0usize;
+
     for path in corpus_files() {
         let text =
             fs::read_to_string(&path).unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
-        for tree in expected_trees(&text) {
-            collect_labelled_fields(&tree, &mut labelled);
+        rules += text
+            .lines()
+            .filter(|line| is_rule(line.trim_end(), '='))
+            .count();
+
+        for case in parse_cases(&text) {
+            cases += 1;
+            // Every marker either skips the case outright or narrows the
+            // platforms and languages it runs on, so its labels cannot be
+            // relied on to pin anything.
+            if case.markers.is_empty() {
+                collect_labelled_fields(&case.tree, &mut labelled);
+            } else {
+                uncounted.push(format!("{} {}", case.title, case.markers.join(" ")));
+            }
         }
     }
+
+    // Each case is delimited by exactly two `=` rules. If that does not add up,
+    // a case was silently dropped and the coverage below is measured against a
+    // corpus smaller than the one the CLI runs.
+    assert_eq!(
+        rules,
+        cases * 2,
+        "found {rules} `===` rules but only {cases} corpus cases — a case was not recognised"
+    );
 
     let unpinned: Vec<String> = declared
         .difference(&labelled)
         .map(|(node, field)| format!("{node}.{field}"))
         .collect();
+    let stale: Vec<String> = labelled
+        .difference(&declared)
+        .map(|(node, field)| format!("{node}.{field}"))
+        .collect();
 
     assert!(
         unpinned.is_empty(),
-        "the grammar declares these fields but no corpus case pins them with a label, so \
-         removing the `field(...)` would not fail any test: {unpinned:#?}\n\
+        "the grammar declares these fields but no corpus case labels them, so removing the \
+         `field(...)` would leave the corpus green: {unpinned:#?}\n\
          Fix: pick a case whose input makes the field present, mark its title `(field labels)`, \
          and write out every field label in its expected tree — labelling is all-or-nothing per \
-         case, so a partially labelled tree fails."
+         case, so a partially labelled tree fails.\n\
+         Cases excluded from the count because they carry markers: {uncounted:#?}"
+    );
+    assert!(
+        stale.is_empty(),
+        "the corpus labels these fields but the grammar no longer declares them: {stale:#?}\n\
+         Either a `field(...)` was dropped from grammar.js — restore it — or the removal was \
+         deliberate, in which case drop the labels too."
+    );
+}
+
+#[test]
+fn attribute_lines_do_not_hide_a_case() {
+    let cases = parse_cases(
+        "===\nWith markers\n:platform(linux)\n:fail_fast\n===\n\nin\n\n---\n\n(a b: (c))\n",
+    );
+    assert_eq!(cases.len(), 1);
+    assert_eq!(cases[0].title, "With markers");
+    assert_eq!(cases[0].markers, [":platform(linux)", ":fail_fast"]);
+    assert_eq!(cases[0].tree.trim(), "(a b: (c))");
+}
+
+#[test]
+fn error_cases_may_omit_the_divider() {
+    let cases = parse_cases("===\nRejected\n:error\n===\n\nin\n");
+    assert_eq!(cases.len(), 1);
+    assert!(cases[0].tree.is_empty());
+}
+
+#[test]
+#[should_panic(expected = "has no `---` divider")]
+fn a_plain_case_may_not_omit_the_divider() {
+    parse_cases("===\nNo divider\n===\n\nin\n");
+}
+
+#[test]
+fn rules_and_dividers_may_carry_a_suffix() {
+    let cases = parse_cases(
+        "====== one\nFirst\n====== one\n\nin\n\n--- note\n\n(a b: (c))\n\
+         \n===\nSecond\n===\n\nin\n\n---\n\n(d e: (f))\n",
+    );
+    let titles: Vec<&str> = cases.iter().map(|c| c.title.as_str()).collect();
+    assert_eq!(titles, ["First", "Second"]);
+    assert_eq!(cases[0].tree.trim(), "(a b: (c))");
+    assert_eq!(cases[1].tree.trim(), "(d e: (f))");
+}
+
+#[test]
+fn labels_under_an_error_node_pin_nothing() {
+    let mut found = BTreeSet::new();
+    collect_labelled_fields(
+        "(source_file\n  (struct_decl name: (identifier)\n    (ERROR keyword: (identifier))))",
+        &mut found,
+    );
+    assert_eq!(
+        found,
+        BTreeSet::from([("struct_decl".to_owned(), "name".to_owned())])
+    );
+}
+
+#[test]
+fn quoted_tokens_do_not_shift_the_stack() {
+    let mut found = BTreeSet::new();
+    collect_labelled_fields(
+        "(binary_expression lhs: (a) \"and\" (UNEXPECTED '\\t') rhs: (b))",
+        &mut found,
+    );
+    assert_eq!(
+        found,
+        BTreeSet::from([
+            ("binary_expression".to_owned(), "lhs".to_owned()),
+            ("binary_expression".to_owned(), "rhs".to_owned()),
+        ])
     );
 }
