@@ -419,7 +419,7 @@ fn lower_all_bindings<'a>(
         failed_lhs: HashSet::new(),
         cse: HashMap::new(),
         depth: 0,
-        depth_reported: false,
+        depth_reported: HashSet::new(),
     };
 
     for (idx, b) in bindings.iter().enumerate() {
@@ -436,6 +436,13 @@ fn lower_all_bindings<'a>(
             continue;
         }
         if lower_binding(b.lhs, ir, &mut ctx, diagnostics).is_err() {
+            // Records every failure kind, including a depth refusal, which is
+            // a property of the path walked rather than of this binding. That
+            // is only harmless because `finish_scope` drops the whole scope on
+            // any Error, so the cascade suppression `failed_lhs` also drives
+            // (`resolve_actuators`, `audit_unused_signals`) never reports on an
+            // IR anyone sees. A future change that lets a scope survive an
+            // Error has to split the two uses apart first.
             ctx.failed_lhs.insert(b.lhs.clone());
         }
     }
@@ -543,29 +550,53 @@ struct LoweringCtx<'a> {
     /// [`GateKind`]. Symmetric variants are canonicalised at construction,
     /// so `a and b` and `b and a` share a cache slot.
     cse: HashMap<GateKind, u32>,
-    /// How many nested [`lower_expr`] / [`lower_binding`] frames are open,
-    /// bounded by [`MAX_LOWERING_DEPTH`].
+    /// How many nested [`lower_expr`] frames are open, bounded by
+    /// [`MAX_LOWERING_DEPTH`]. [`lower_binding`] does not touch it directly;
+    /// it costs depth only through the [`lower_expr`] it calls.
     depth: usize,
-    /// Set once the limit has been reported, so one deep chain yields one
-    /// diagnostic instead of one per branch that hits the wall.
-    depth_reported: bool,
+    /// Bindings that already reported the limit, keyed by span. Two
+    /// independent chains in one scope each get their diagnostic, while the
+    /// several branches of one binding that all hit the wall share one —
+    /// `lower_binary` deliberately keeps every root cause on a single pass,
+    /// and a bare flag broke that for the second chain.
+    depth_reported: HashSet<(usize, usize)>,
 }
 
 /// Deepest `logic` lowering recursion before the pass refuses.
 ///
-/// [`lower_binding`] resolves a reference by lowering the binding it names,
-/// so the recursion is as deep as the dependency chain when the source
-/// declares it in reverse. Measured on a debug build, roughly 410 bindings
-/// in reverse order overflowed the native stack — an uncatchable abort, with
-/// no diagnostic. The same graph written in dependency order stayed shallow
-/// at several thousand bindings, because each reference is already resolved
-/// by the time it is reached.
+/// Depth is counted in [`lower_expr`] frames, which is not the unit an
+/// author writes in:
 ///
-/// A combinational chain long enough to reach this limit would carry more
-/// gate delay than any Minecraft circuit can use, so refusing here costs no
-/// realistic source. It does leave the pass sensitive to declaration order,
-/// which is now a loud refusal naming the fix rather than a crash.
-const MAX_LOWERING_DEPTH: usize = 128;
+/// - one expression node on the path costs **one** level
+/// - one binding a reference chains through costs **two** — the operand
+///   descent plus the referenced binding's own expression
+///
+/// so this bound is reached by roughly `MAX_LOWERING_DEPTH / 2` chained
+/// bindings. The diagnostic states both, because "nested past 256 levels"
+/// on a file with 130 `logic` lines is not something an author can act on.
+///
+/// The depth comes from declaration order, not graph size: [`lower_binding`]
+/// resolves a reference by lowering the binding it names, so a chain
+/// declared in reverse recurses once per binding while the same graph in
+/// dependency order stays shallow at several thousand. Measured on a debug
+/// build, roughly 410 reverse-declared bindings overflowed the native stack
+/// — an uncatchable abort, with no diagnostic.
+///
+/// Sits above `cairn_lang_core`'s expression-tree bound so a single
+/// well-formed expression can never reach it; what remains is the chained
+/// case, which is what the diagnostic's footer addresses.
+pub const MAX_LOWERING_DEPTH: usize = 256;
+
+// A single well-formed expression must never be able to reach the bound: it
+// would earn the footer below, which tells the author to reorder bindings —
+// useless advice for a scope holding one. `cairn_lang_core` caps the tree it
+// hands over, and one node costs one level here, so keeping this above that
+// cap is what makes the chained case the only reachable one. Asserted rather
+// than assumed, because the two constants live in different crates.
+const _: () = assert!(
+    cairn_lang_core::MAX_EXPR_DEPTH < MAX_LOWERING_DEPTH,
+    "an expression the parser accepts must not be able to exhaust the lowering budget on its own",
+);
 
 /// Sentinel returned by [`lower_binding`] / [`lower_expr`] when a
 /// diagnostic has already been queued and the caller should abandon the
@@ -612,19 +643,23 @@ fn lower_expr<'a>(
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Result<SignalRef, LoweringFailed> {
     if ctx.depth >= MAX_LOWERING_DEPTH {
-        if !ctx.depth_reported {
-            ctx.depth_reported = true;
+        let key = (binding_span.start, binding_span.end);
+        if ctx.depth_reported.insert(key) {
             let label = scope_label(ctx.kind, ctx.scope_name);
             diagnostics.push(
                 Diagnostic::new(
                     DiagnosticCode::LogicNestingTooDeep,
                     binding_span.clone(),
-                    format!("{label} `logic` lowering nested past {MAX_LOWERING_DEPTH} levels"),
+                    format!(
+                        "{label} `logic` lowering nested past {MAX_LOWERING_DEPTH} levels, about \
+                         {} chained bindings",
+                        MAX_LOWERING_DEPTH / 2,
+                    ),
                 )
                 .with_footer(
                     "Fix: declare each `logic` binding after the ones it references. A binding is \
                      lowered by descending into whatever it names, so a chain written in reverse \
-                     costs one level per binding, while the same graph in dependency order costs \
+                     costs two levels per binding, while the same graph in dependency order costs \
                      none.",
                 ),
             );
