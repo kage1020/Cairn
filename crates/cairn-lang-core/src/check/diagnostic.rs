@@ -41,6 +41,11 @@ impl Severity {
 /// codes while the diagnostic surface is still **Evolving** does not break
 /// callers' exhaust matches.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+// `EnumIter` exists so the in-crate tests can walk every variant instead of
+// re-listing them by hand — a hand-written list silently omits whatever was
+// added last, which is exactly the case the tests are there to catch. It is
+// `cfg(test)` so no proc-macro dependency reaches a shipped build.
+#[cfg_attr(test, derive(strum::EnumIter))]
 #[non_exhaustive]
 pub enum DiagnosticCode {
     /// More than one `size=` argument in a struct or def header.

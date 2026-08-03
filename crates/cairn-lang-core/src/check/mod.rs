@@ -4,9 +4,14 @@
 //! Each pass is non-fatal: passes accumulate findings into a
 //! [`DiagnosticSink`] and the top-level [`check`] runs every pass before
 //! returning. The order `duplicate` → `keyword_allowlist` →
-//! `connect_arity` → `type_mismatch` is fixed so the emitted list is
-//! stable across runs, but the diagnostics themselves are sorted by
-//! source position once everything has finished collecting.
+//! `connect_arity` → `type_mismatch` → [`crate::resolve::resolve`] is fixed
+//! so the emitted list is stable across runs, but the diagnostics
+//! themselves are sorted by source position once everything has finished
+//! collecting.
+//!
+//! Block-array lowering is *not* among those passes, so an `Error` it
+//! raises never reaches `cairn check`. `check::tests` pins which codes that
+//! covers.
 //!
 //! The boundary with lowering is intentional: `crate::intent::lower` is a
 //! total function (see its module doc) and never rejects input. Any
@@ -32,8 +37,8 @@ use crate::ast::Module;
 use crate::edition::Edition;
 use crate::intent::IntentModule;
 
-/// Run every validation pass over the given module + IR and collect all
-/// findings.
+/// Run every syntactic + semantic validation pass over the given module +
+/// IR and return the merged, span-sorted findings.
 ///
 /// Passes run unconditionally; none short-circuit, none depend on another's
 /// findings being empty. The returned list is sorted by `(span.start,
@@ -42,9 +47,10 @@ use crate::intent::IntentModule;
 /// A final theme-binding pass runs via [`crate::resolve::resolve`]; its
 /// diagnostics (`E_UNRESOLVED_SLOT`, `E_UNKNOWN_SLOT_TARGET`,
 /// `E_THEME_SELECTOR_UNMATCHED`) are merged with the syntactic findings so a
-/// single `cairn check` invocation reports both kinds together.
-/// Run every syntactic + semantic diagnostic pass and return the merged,
-/// span-sorted findings.
+/// single `cairn check` invocation reports both kinds together. A caller
+/// that has its own [`crate::resolve::Resolution`] must therefore *not*
+/// append `Resolution::diagnostics` on top of this list — they are already
+/// in it, and appending duplicates every one of them.
 ///
 /// The `edition` argument threads through to the resolver so per-edition
 /// theme-variant selection (spec versioning-editions §10.7) can pin the
@@ -68,35 +74,36 @@ pub fn check(module: &Module, ir: &IntentModule, edition: Option<Edition>) -> Ve
 
 #[cfg(test)]
 mod tests {
-    use super::DiagnosticCode as C;
-    use super::{DiagnosticCode, Severity};
+    use strum::IntoEnumIterator;
 
-    /// Which pass inside [`check`] can raise a given code.
+    use super::{DiagnosticCode, DiagnosticCode as C, Severity};
+
+    /// Which pass raises a code, and therefore whether [`check`] can see it.
     ///
-    /// The distinction matters to the CLI: resolver findings already reached
-    /// `cairn lower` / `info` / `compile` through `Resolution::diagnostics`,
-    /// but the syntactic passes ran only under `cairn check` until those
-    /// commands started calling [`check`] themselves. Every `Error`-severity
-    /// code in the [`Origin::Syntactic`] set therefore needs a fixture in
-    /// `cairn-lang-cli/tests/cli_check_parity.rs`, which is what keeps the
-    /// four commands from drifting apart again.
+    /// [`check`] runs the syntactic passes and merges `resolve`'s output. It
+    /// does **not** run block-array lowering, so a code raised only there is
+    /// invisible to `cairn check` no matter its severity — the asymmetry
+    /// `check_sees_every_error_code_except_the_lowering_only_ones` pins.
     ///
-    /// The match below is deliberately exhaustive. `DiagnosticCode` is
+    /// The match is exhaustive on purpose. `DiagnosticCode` is
     /// `#[non_exhaustive]` for downstream crates but not in-crate, so a new
-    /// variant stops this file compiling and forces the author to say which
-    /// pass raises it.
+    /// variant stops this file compiling until someone says where it comes
+    /// from.
     #[derive(Debug, PartialEq, Eq)]
-    enum Origin {
+    enum RaisedBy {
         /// `duplicate` / `keyword_allowlist` / `connect_arity` /
         /// `type_mismatch`, run directly by [`check`].
         Syntactic,
         /// `crate::resolve::resolve`, whose diagnostics [`check`] merges in.
         Resolver,
-        /// `crate::block_array`, reported by the commands that lower.
-        Lowering,
+        /// Raised from both `crate::resolve` and `crate::block_array`, so
+        /// `cairn check` reports a subset of the occurrences a build does.
+        ResolverAndLowering,
+        /// `crate::block_array` only. [`check`] never runs that pass.
+        LoweringOnly,
     }
 
-    fn origin(code: DiagnosticCode) -> Origin {
+    fn raised_by(code: DiagnosticCode) -> RaisedBy {
         match code {
             C::DuplicateSize
             | C::DuplicateSlot
@@ -105,15 +112,9 @@ mod tests {
             | C::UnknownKeyword
             | C::TypeMismatchLabel
             | C::TypeMismatchSize
-            | C::ConnectArity => Origin::Syntactic,
+            | C::ConnectArity => RaisedBy::Syntactic,
             C::UnresolvedSlot
-            | C::UnknownSlotTarget
             | C::ThemeSelectorUnmatched
-            | C::NoThemeBound
-            | C::AbstractTokenDeferred
-            | C::UnknownAbstractToken
-            | C::StructNoSize
-            | C::DefNoSize
             | C::UnresolvedPlaceRef
             | C::UnresolvedThemeRef
             | C::DuplicatePlaceId
@@ -121,93 +122,78 @@ mod tests {
             | C::UnusedDef
             | C::UnresolvedPort
             | C::AmbiguousPort
-            | C::MissingPathMaterial => Origin::Resolver,
+            | C::MissingPathMaterial
+            | C::DeferredConnect => RaisedBy::Resolver,
+            C::UnknownSlotTarget => RaisedBy::ResolverAndLowering,
             C::DeferredMember
+            | C::NoThemeBound
+            | C::AbstractTokenDeferred
+            | C::UnknownAbstractToken
+            | C::StructNoSize
+            | C::DefNoSize
             | C::WalkwayBlocked
             | C::DuplicateWalkway
-            | C::DeferredConnect
-            | C::InvalidWalkwayIdent => Origin::Lowering,
+            | C::InvalidWalkwayIdent => RaisedBy::LoweringOnly,
         }
     }
 
-    /// Every variant, so the assertions below scan the whole surface rather
-    /// than whichever ones happen to be listed. Keep in step with the enum;
-    /// `origin`'s exhaustive match is what makes a missing addition visible.
-    const ALL: &[DiagnosticCode] = &[
-        C::DuplicateSize,
-        C::DuplicateSlot,
-        C::DuplicateArg,
-        C::DuplicateId,
-        C::UnknownKeyword,
-        C::TypeMismatchLabel,
-        C::TypeMismatchSize,
-        C::UnresolvedSlot,
-        C::UnknownSlotTarget,
-        C::ThemeSelectorUnmatched,
-        C::DeferredMember,
-        C::NoThemeBound,
-        C::AbstractTokenDeferred,
-        C::UnknownAbstractToken,
-        C::StructNoSize,
-        C::DefNoSize,
-        C::UnresolvedPlaceRef,
-        C::UnresolvedThemeRef,
-        C::DuplicatePlaceId,
-        C::InvalidPlaceOrigin,
-        C::UnusedDef,
-        C::UnresolvedPort,
-        C::AmbiguousPort,
-        C::MissingPathMaterial,
-        C::WalkwayBlocked,
-        C::DuplicateWalkway,
-        C::DeferredConnect,
-        C::InvalidWalkwayIdent,
-        C::ConnectArity,
-    ];
-
-    /// Pins the exact set the CLI parity fixtures have to cover. A new
-    /// syntactic `Error` code lands here first, and the failure message
-    /// says where else it has to go.
-    #[test]
-    fn syntactic_error_codes_match_the_cli_parity_fixtures() {
-        let mut actual: Vec<&str> = ALL
-            .iter()
-            .copied()
-            .filter(|c| origin(*c) == Origin::Syntactic && c.severity() == Severity::Error)
+    fn codes_where(predicate: impl Fn(DiagnosticCode) -> bool) -> Vec<&'static str> {
+        let mut names: Vec<&'static str> = DiagnosticCode::iter()
+            .filter(|c| predicate(*c))
             .map(DiagnosticCode::as_str)
             .collect();
-        actual.sort_unstable();
+        names.sort_unstable();
+        names
+    }
 
-        let expected = [
-            "E_CONNECT_ARITY",
-            "E_DUPLICATE_ARG",
-            "E_DUPLICATE_ID",
-            "E_DUPLICATE_SIZE",
-            "E_DUPLICATE_SLOT",
-            "E_TYPE_MISMATCH_LABEL",
-            "E_TYPE_MISMATCH_SIZE",
-            "E_UNKNOWN_KEYWORD",
-        ];
+    /// The set `cairn-lang-cli/tests/cli_check_parity.rs` keeps a fixture for.
+    ///
+    /// These are the codes only [`check`] produces, so before the build
+    /// commands started calling it they reached `cairn check` and nothing
+    /// else. Adding one without a fixture would leave that gap reopenable
+    /// without any test noticing.
+    #[test]
+    fn syntactic_error_codes_are_covered_by_cli_fixtures() {
+        let actual =
+            codes_where(|c| raised_by(c) == RaisedBy::Syntactic && c.severity() == Severity::Error);
         assert_eq!(
-            actual, expected,
+            actual,
+            [
+                "E_CONNECT_ARITY",
+                "E_DUPLICATE_ARG",
+                "E_DUPLICATE_ID",
+                "E_DUPLICATE_SIZE",
+                "E_DUPLICATE_SLOT",
+                "E_TYPE_MISMATCH_LABEL",
+                "E_TYPE_MISMATCH_SIZE",
+                "E_UNKNOWN_KEYWORD",
+            ],
             "the syntactic Error set changed: add or remove the matching \
              fixture in cairn-lang-cli/tests/cli_check_parity.rs so \
              `cairn lower` / `info` / `compile` stay in step with `cairn check`",
         );
     }
 
-    /// Guards `ALL` itself: `origin`'s match catches a new variant, but only
-    /// if the variant also reaches these scans.
+    /// `cairn check` is documented and used as the gate the build commands
+    /// sit behind, but it does not lower, so an `Error` raised during
+    /// block-array lowering escapes it: `cairn check` exits 0 and
+    /// `cairn compile` then exits 1 on the same file.
+    ///
+    /// This pins the size of that hole rather than leaving it implied. A new
+    /// entry here means another way for `cairn check` to pass a source the
+    /// build refuses, so it should be a deliberate decision, not a side
+    /// effect.
     #[test]
-    fn all_lists_every_code_exactly_once() {
-        let mut names: Vec<&str> = ALL.iter().copied().map(DiagnosticCode::as_str).collect();
-        let before = names.len();
-        names.sort_unstable();
-        names.dedup();
-        assert_eq!(names.len(), before, "ALL repeats a code");
+    fn check_sees_every_error_code_except_the_lowering_only_ones() {
+        let escapes = codes_where(|c| {
+            raised_by(c) == RaisedBy::LoweringOnly && c.severity() == Severity::Error
+        });
         assert_eq!(
-            before, 29,
-            "ALL is out of step with DiagnosticCode; add the new variant here too",
+            escapes,
+            ["E_UNKNOWN_ABSTRACT_TOKEN"],
+            "an Error-severity code raised only during block-array lowering \
+             cannot be reported by `cairn check`, so a CI job gating on it \
+             goes green on a source `cairn compile` refuses",
         );
     }
 }
