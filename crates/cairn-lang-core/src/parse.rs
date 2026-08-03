@@ -41,7 +41,23 @@ pub fn parse(source: &str) -> Result<Module, ParseError> {
 ///
 /// Real sources come nowhere near: values are scalars and flat lists, and a
 /// `logic` expression this deep would be unreadable long before it got here.
-const MAX_NESTING_DEPTH: usize = 64;
+pub const MAX_NESTING_DEPTH: usize = 64;
+
+/// Deepest boolean-expression tree the parser will hand back.
+///
+/// Separate from [`MAX_NESTING_DEPTH`] because it bounds a different stack.
+/// That one keeps the parser's own descent finite; this one keeps the
+/// *result* finite, because `or` and `and` are parsed iteratively and so
+/// build a left-leaning tree one node deep per term at no cost to the
+/// parser. Every consumer walks that tree recursively — `Serialize`, the
+/// check passes, and `Box`'s recursive `Drop` — so leaving it unbounded
+/// only moves the overflow downstream of the guard.
+///
+/// Measured on a debug build, `cairn parse` (which serialises the AST) died
+/// at roughly 570 terms, so this keeps the same order of margin
+/// [`MAX_NESTING_DEPTH`] holds against its own measurement. A chain past it
+/// splits into intermediate `logic` bindings, which the diagnostic says.
+pub const MAX_EXPR_DEPTH: usize = 128;
 
 struct Parser<'a> {
     source: &'a str,
@@ -351,7 +367,13 @@ impl<'a> Parser<'a> {
         }
         let span = start_byte..self.last_byte();
         self.expect_newline()?;
-        let children = self.parse_optional_command_body()?;
+        // An indented body is the third recursive production, alongside list
+        // values and expressions: `parse_command` → here → `parse_command`.
+        // Reaching a nested body costs O(n²) source bytes because each level
+        // repeats its own indent, but that is a constant factor, not a
+        // bound — 400 levels is a third of a megabyte and used to abort the
+        // process just as `[[[…` did.
+        let children = self.nested(Self::parse_optional_command_body)?;
         Ok(Statement::Generic {
             keyword,
             selector,
@@ -482,36 +504,63 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_expr(&mut self) -> Result<Expr, ParseError> {
-        self.parse_expr_or()
+        Ok(self.parse_expr_or()?.0)
     }
 
-    fn parse_expr_or(&mut self) -> Result<Expr, ParseError> {
-        let mut lhs = self.parse_expr_and()?;
+    /// Refuse a boolean tree deeper than [`MAX_EXPR_DEPTH`].
+    ///
+    /// [`Self::nested`] bounds how deep the *parser* descends, which is a
+    /// different quantity: `or` and `and` iterate, so a flat chain costs the
+    /// parser nothing while still building a left-leaning tree one node deep
+    /// per term. Everything downstream walks that tree recursively —
+    /// `Serialize`, the check passes, and `Box`'s own recursive `Drop` — so
+    /// an unbounded chain moves the overflow out of the parser and into
+    /// whoever touches the result. Measured on a debug build,
+    /// `cairn parse` (which serialises) died at roughly 570 terms.
+    fn charge_expr_depth(&self, depth: usize) -> Result<(), ParseError> {
+        if depth > MAX_EXPR_DEPTH {
+            return Err(ParseError::NestingTooDeep {
+                position: self.position(),
+                limit: MAX_EXPR_DEPTH,
+            });
+        }
+        Ok(())
+    }
+
+    /// Returns the expression and the depth of the tree it built, so an
+    /// iteratively-parsed chain still pays for the shape it produced.
+    fn parse_expr_or(&mut self) -> Result<(Expr, usize), ParseError> {
+        let (mut lhs, mut depth) = self.parse_expr_and()?;
         while self.match_keyword("or") {
-            let rhs = self.parse_expr_and()?;
+            let (rhs, rhs_depth) = self.parse_expr_and()?;
+            depth = depth.max(rhs_depth) + 1;
+            self.charge_expr_depth(depth)?;
             lhs = Expr::Or(Box::new(lhs), Box::new(rhs));
         }
-        Ok(lhs)
+        Ok((lhs, depth))
     }
 
-    fn parse_expr_and(&mut self) -> Result<Expr, ParseError> {
-        let mut lhs = self.parse_expr_not()?;
+    fn parse_expr_and(&mut self) -> Result<(Expr, usize), ParseError> {
+        let (mut lhs, mut depth) = self.parse_expr_not()?;
         while self.match_keyword("and") {
-            let rhs = self.parse_expr_not()?;
+            let (rhs, rhs_depth) = self.parse_expr_not()?;
+            depth = depth.max(rhs_depth) + 1;
+            self.charge_expr_depth(depth)?;
             lhs = Expr::And(Box::new(lhs), Box::new(rhs));
         }
-        Ok(lhs)
+        Ok((lhs, depth))
     }
 
     /// Both recursive shapes an expression can take — a `not` chain and a
-    /// parenthesised sub-expression — pass through [`Self::nested`], so the
-    /// depth counter covers the two of them together rather than each
-    /// separately. `or` and `and` iterate rather than recurse, so a long
-    /// flat chain costs no depth.
-    fn parse_expr_not(&mut self) -> Result<Expr, ParseError> {
+    /// parenthesised sub-expression — pass through [`Self::nested`], which
+    /// bounds the parser's own descent. Parentheses build no node, so they
+    /// cost descent without costing tree depth; `not` costs both.
+    fn parse_expr_not(&mut self) -> Result<(Expr, usize), ParseError> {
         if self.match_keyword("not") {
-            let inner = self.nested(Self::parse_expr_not)?;
-            return Ok(Expr::Not(Box::new(inner)));
+            let (inner, inner_depth) = self.nested(Self::parse_expr_not)?;
+            let depth = inner_depth + 1;
+            self.charge_expr_depth(depth)?;
+            return Ok((Expr::Not(Box::new(inner)), depth));
         }
         if self.peek_is(&TokenKind::LParen) {
             self.advance();
@@ -520,7 +569,7 @@ impl<'a> Parser<'a> {
             return Ok(inner);
         }
         let dotted = self.parse_dotted_ref()?;
-        Ok(Expr::Ref(dotted))
+        Ok((Expr::Ref(dotted), 1))
     }
 
     fn match_keyword(&mut self, kw: &str) -> bool {

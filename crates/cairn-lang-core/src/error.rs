@@ -97,8 +97,9 @@ pub fn describe_int_kind(kind: IntErrorKind) -> &'static str {
 /// far to unwind to make the source legal again.
 fn render_nesting_too_deep(limit: usize) -> String {
     format!(
-        "value and expression nesting is limited to {limit} levels; \
-         flatten the list or split the expression across `logic` bindings"
+        "nesting is limited to {limit} levels here; \
+         flatten the list, unindent the block, or split the expression \
+         across intermediate `logic` bindings"
     )
 }
 
@@ -191,7 +192,10 @@ pub enum ParseError {
     /// which re-parses on each keystroke.
     #[error("{position}: {}", render_nesting_too_deep(*limit))]
     NestingTooDeep {
-        /// Where the level that exceeded the limit begins.
+        /// First token of the level that went one too far.
+        ///
+        /// Not the bracket or keyword that opened it: the guard fires once
+        /// the level has been entered, so the position sits just inside.
         position: Position,
         /// The limit that was exceeded, so the message can state it.
         limit: usize,
