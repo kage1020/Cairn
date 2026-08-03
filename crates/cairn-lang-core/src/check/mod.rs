@@ -65,3 +65,149 @@ pub fn check(module: &Module, ir: &IntentModule, edition: Option<Edition>) -> Ve
     }
     sink.into_sorted()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::DiagnosticCode as C;
+    use super::{DiagnosticCode, Severity};
+
+    /// Which pass inside [`check`] can raise a given code.
+    ///
+    /// The distinction matters to the CLI: resolver findings already reached
+    /// `cairn lower` / `info` / `compile` through `Resolution::diagnostics`,
+    /// but the syntactic passes ran only under `cairn check` until those
+    /// commands started calling [`check`] themselves. Every `Error`-severity
+    /// code in the [`Origin::Syntactic`] set therefore needs a fixture in
+    /// `cairn-lang-cli/tests/cli_check_parity.rs`, which is what keeps the
+    /// four commands from drifting apart again.
+    ///
+    /// The match below is deliberately exhaustive. `DiagnosticCode` is
+    /// `#[non_exhaustive]` for downstream crates but not in-crate, so a new
+    /// variant stops this file compiling and forces the author to say which
+    /// pass raises it.
+    #[derive(Debug, PartialEq, Eq)]
+    enum Origin {
+        /// `duplicate` / `keyword_allowlist` / `connect_arity` /
+        /// `type_mismatch`, run directly by [`check`].
+        Syntactic,
+        /// `crate::resolve::resolve`, whose diagnostics [`check`] merges in.
+        Resolver,
+        /// `crate::block_array`, reported by the commands that lower.
+        Lowering,
+    }
+
+    fn origin(code: DiagnosticCode) -> Origin {
+        match code {
+            C::DuplicateSize
+            | C::DuplicateSlot
+            | C::DuplicateArg
+            | C::DuplicateId
+            | C::UnknownKeyword
+            | C::TypeMismatchLabel
+            | C::TypeMismatchSize
+            | C::ConnectArity => Origin::Syntactic,
+            C::UnresolvedSlot
+            | C::UnknownSlotTarget
+            | C::ThemeSelectorUnmatched
+            | C::NoThemeBound
+            | C::AbstractTokenDeferred
+            | C::UnknownAbstractToken
+            | C::StructNoSize
+            | C::DefNoSize
+            | C::UnresolvedPlaceRef
+            | C::UnresolvedThemeRef
+            | C::DuplicatePlaceId
+            | C::InvalidPlaceOrigin
+            | C::UnusedDef
+            | C::UnresolvedPort
+            | C::AmbiguousPort
+            | C::MissingPathMaterial => Origin::Resolver,
+            C::DeferredMember
+            | C::WalkwayBlocked
+            | C::DuplicateWalkway
+            | C::DeferredConnect
+            | C::InvalidWalkwayIdent => Origin::Lowering,
+        }
+    }
+
+    /// Every variant, so the assertions below scan the whole surface rather
+    /// than whichever ones happen to be listed. Keep in step with the enum;
+    /// `origin`'s exhaustive match is what makes a missing addition visible.
+    const ALL: &[DiagnosticCode] = &[
+        C::DuplicateSize,
+        C::DuplicateSlot,
+        C::DuplicateArg,
+        C::DuplicateId,
+        C::UnknownKeyword,
+        C::TypeMismatchLabel,
+        C::TypeMismatchSize,
+        C::UnresolvedSlot,
+        C::UnknownSlotTarget,
+        C::ThemeSelectorUnmatched,
+        C::DeferredMember,
+        C::NoThemeBound,
+        C::AbstractTokenDeferred,
+        C::UnknownAbstractToken,
+        C::StructNoSize,
+        C::DefNoSize,
+        C::UnresolvedPlaceRef,
+        C::UnresolvedThemeRef,
+        C::DuplicatePlaceId,
+        C::InvalidPlaceOrigin,
+        C::UnusedDef,
+        C::UnresolvedPort,
+        C::AmbiguousPort,
+        C::MissingPathMaterial,
+        C::WalkwayBlocked,
+        C::DuplicateWalkway,
+        C::DeferredConnect,
+        C::InvalidWalkwayIdent,
+        C::ConnectArity,
+    ];
+
+    /// Pins the exact set the CLI parity fixtures have to cover. A new
+    /// syntactic `Error` code lands here first, and the failure message
+    /// says where else it has to go.
+    #[test]
+    fn syntactic_error_codes_match_the_cli_parity_fixtures() {
+        let mut actual: Vec<&str> = ALL
+            .iter()
+            .copied()
+            .filter(|c| origin(*c) == Origin::Syntactic && c.severity() == Severity::Error)
+            .map(DiagnosticCode::as_str)
+            .collect();
+        actual.sort_unstable();
+
+        let expected = [
+            "E_CONNECT_ARITY",
+            "E_DUPLICATE_ARG",
+            "E_DUPLICATE_ID",
+            "E_DUPLICATE_SIZE",
+            "E_DUPLICATE_SLOT",
+            "E_TYPE_MISMATCH_LABEL",
+            "E_TYPE_MISMATCH_SIZE",
+            "E_UNKNOWN_KEYWORD",
+        ];
+        assert_eq!(
+            actual, expected,
+            "the syntactic Error set changed: add or remove the matching \
+             fixture in cairn-lang-cli/tests/cli_check_parity.rs so \
+             `cairn lower` / `info` / `compile` stay in step with `cairn check`",
+        );
+    }
+
+    /// Guards `ALL` itself: `origin`'s match catches a new variant, but only
+    /// if the variant also reaches these scans.
+    #[test]
+    fn all_lists_every_code_exactly_once() {
+        let mut names: Vec<&str> = ALL.iter().copied().map(DiagnosticCode::as_str).collect();
+        let before = names.len();
+        names.sort_unstable();
+        names.dedup();
+        assert_eq!(names.len(), before, "ALL repeats a code");
+        assert_eq!(
+            before, 29,
+            "ALL is out of step with DiagnosticCode; add the new variant here too",
+        );
+    }
+}
