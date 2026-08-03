@@ -1,11 +1,16 @@
 //! Parity between `cairn check` and the commands that build on it.
 //!
-//! `check` is the gate the other subcommands are supposed to sit behind:
-//! a source it rejects with an `Error`-severity diagnostic must not lower,
-//! must not report portability figures, and must not compile. Before this
-//! suite existed only `cairn synth` ran the check pass, so `cairn compile`
-//! happily wrote artifacts — and a `verified: true` lockfile — for a file
-//! `cairn check` had just rejected with exit 1.
+//! `check` is the gate the other subcommands sit behind: a source it rejects
+//! with an `Error`-severity diagnostic must not lower, must not report
+//! portability figures, and must not compile. Before this suite existed,
+//! `check` ran only from `cairn check` and `cairn synth`, so `cairn compile`
+//! wrote artifacts — and a `verified: true` lockfile — for a file `cairn
+//! check` had just rejected with exit 1.
+//!
+//! Parity here means the whole diagnostic stream, not just the exit code.
+//! The build commands report `check`'s findings verbatim and in order, then
+//! append their own lowering diagnostics; anything else (a dropped code, a
+//! duplicated one, a reordered one) is a regression these tests catch.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -24,8 +29,8 @@ fn examples_dir() -> PathBuf {
         .join("examples")
 }
 
-/// Shared prologue so each fixture below differs only in the construct
-/// that trips its diagnostic.
+/// Shared prologue so each fixture differs only in the construct that trips
+/// its diagnostic.
 const HEADER: &str = "@cairn 2026.06\n\
 @requires version>=1.20\n\
 \n\
@@ -34,13 +39,15 @@ theme t:\n\
 \x20\x20slot wall  -> @cobblestone\n\
 \n";
 
-/// One fixture per `Error`-severity code the syntactic check passes emit,
-/// as `(code, source)`.
+/// One fixture per `Error`-severity code the syntactic passes inside
+/// `check` emit.
 ///
-/// `cairn_lang_core::check`'s `syntactic_error_codes_match_the_cli_parity_fixtures`
-/// unit test holds the authoritative list behind an exhaustive `match`, so a
-/// code cannot join that set without a compile error pointing back here.
-const FIXTURES: &[(&str, &str)] = &[
+/// `cairn_lang_core`'s `syntactic_error_codes_are_covered_by_cli_fixtures`
+/// pins that set by iterating the `DiagnosticCode` enum, and names this file
+/// when the two disagree. Adding a variant there forces a classification;
+/// classifying it as a syntactic `Error` then fails that assertion until a
+/// fixture lands here.
+const SYNTACTIC_FIXTURES: &[(&str, &str)] = &[
     (
         "E_DUPLICATE_SIZE",
         "struct s size=5x5 size=6x6\n  floor mat_slot=floor\n",
@@ -82,10 +89,37 @@ const FIXTURES: &[(&str, &str)] = &[
     ),
 ];
 
-/// Write one fixture into its own directory, so a `compile` run that
-/// (incorrectly) emits artifacts cannot be confused with another's.
-fn write_fixture(root: &Path, code: &str, body: &str) -> PathBuf {
-    let dir = root.join(code);
+/// Resolver-origin fixtures. `check` merges the resolver's findings, so
+/// these travel the same path — and they are the ones that were reported
+/// twice when the build commands appended `Resolution::diagnostics` on top
+/// of `check`'s already-merged output. Without them in the population the
+/// duplicated half is not represented at all.
+const RESOLVER_FIXTURES: &[(&str, &str)] = &[
+    (
+        "E_UNRESOLVED_PLACE_REF",
+        // Also emits `W_UNUSED_DEF`, which puts a warning *before* the error
+        // in span order — so a stream that is re-sorted or re-ordered shows up.
+        "def hut size=4x4:\n  floor mat_slot=floor\n\
+         \nsite s:\n  place id=a use=nosuchdef theme=t at=origin\n",
+    ),
+    (
+        "E_UNRESOLVED_SLOT",
+        "struct s size=5x5\n  floor mat_slot=nosuchslot\n",
+    ),
+];
+
+fn all_fixtures() -> impl Iterator<Item = &'static (&'static str, &'static str)> {
+    SYNTACTIC_FIXTURES.iter().chain(RESOLVER_FIXTURES)
+}
+
+/// Write one fixture into its own directory.
+///
+/// The directory is numbered rather than named after the diagnostic code on
+/// purpose: every diagnostic line begins with the file path, so a directory
+/// called `E_DUPLICATE_SIZE` made `stderr.contains("E_DUPLICATE_SIZE")` true
+/// no matter which code — if any — the command actually reported.
+fn write_fixture(root: &Path, index: usize, body: &str) -> PathBuf {
+    let dir = root.join(format!("fixture_{index:02}"));
     fs::create_dir_all(&dir).expect("create fixture dir");
     let path = dir.join("fixture.crn");
     fs::write(&path, format!("{HEADER}{body}")).expect("write fixture");
@@ -103,79 +137,176 @@ fn exit_code(out: &std::process::Output) -> i32 {
     out.status.code().expect("process exited via a signal")
 }
 
+/// A diagnostic reduced to what parity is about: where it points, how bad it
+/// is, and which code it carries. The prose `primary` is deliberately left
+/// out — `diagnostic.rs` states the code, not the prose, is the contract.
+type Reported = (u64, u64, String, String);
+
+/// Diagnostics from `cairn check --format json`, in emission order.
+fn check_stream(path: &Path) -> Vec<Reported> {
+    let out = run(&["check", path.to_str().unwrap(), "--format", "json"]);
+    let stdout = String::from_utf8(out.stdout).expect("utf-8");
+    let parsed: serde_json::Value = serde_json::from_str(&stdout).expect("valid JSON");
+    parsed
+        .as_array()
+        .expect("array of diagnostics")
+        .iter()
+        .map(|d| {
+            (
+                d["line"].as_u64().expect("line"),
+                d["col"].as_u64().expect("col"),
+                d["severity"].as_str().expect("severity").to_owned(),
+                d["code"].as_str().expect("code").to_owned(),
+            )
+        })
+        .collect()
+}
+
+/// Diagnostics parsed back out of a build command's stderr, in emission
+/// order. Lines that are not `FILE:LINE:COL: SEVERITY[CODE]: ...` — notes,
+/// `wrote ...`, plain `error:` messages — are skipped.
+///
+/// Parsing rather than substring-matching is what makes these assertions
+/// mean something: it pins which code was reported, where, and how often.
+fn stderr_stream(stderr: &str) -> Vec<Reported> {
+    stderr
+        .lines()
+        .filter_map(|line| {
+            // The file path may itself contain `:` (`C:\...`), so anchor on
+            // the severity marker and walk backwards from there.
+            let (head, tail) = ["error[", "warning["].iter().find_map(|marker| {
+                let needle = format!(": {marker}");
+                line.find(&needle)
+                    .map(|i| (&line[..i], &line[i + ": ".len()..]))
+            })?;
+            let (severity, tail) = tail.split_once('[')?;
+            let (code, _) = tail.split_once(']')?;
+            let (head, col) = head.rsplit_once(':')?;
+            let (_, line_no) = head.rsplit_once(':')?;
+            Some((
+                line_no.parse().ok()?,
+                col.parse().ok()?,
+                severity.to_owned(),
+                code.to_owned(),
+            ))
+        })
+        .collect()
+}
+
+/// The four subcommands, and how to invoke each against a fixture.
+fn build_commands(path: &str, out_dir: &str) -> Vec<(&'static str, Vec<String>)> {
+    vec![
+        ("lower", vec!["lower".into(), path.into()]),
+        ("info", vec!["info".into(), path.into()]),
+        (
+            "compile",
+            vec![
+                "compile".into(),
+                path.into(),
+                "--edition".into(),
+                "java".into(),
+                "--out".into(),
+                out_dir.into(),
+            ],
+        ),
+    ]
+}
+
 #[test]
-fn parity_1_check_rejects_every_fixture_with_its_own_code() {
+fn parity_1_check_reports_each_fixture_code_exactly_once() {
     let tmp = TempDir::new().expect("tempdir");
-    for (code, body) in FIXTURES {
-        let path = write_fixture(tmp.path(), code, body);
-        let out = run(&["check", path.to_str().unwrap(), "--format", "json"]);
+    for (index, (code, body)) in all_fixtures().enumerate() {
+        let path = write_fixture(tmp.path(), index, body);
+        let stream = check_stream(&path);
+        let errors: Vec<&Reported> = stream.iter().filter(|d| d.2 == "error").collect();
         assert_eq!(
-            exit_code(&out),
+            errors.len(),
             1,
-            "{code}: check should reject the fixture; stdout={} stderr={}",
-            String::from_utf8_lossy(&out.stdout),
-            String::from_utf8_lossy(&out.stderr),
+            "{code}: fixture should trip exactly one error, got {errors:?}",
         );
-        let stdout = String::from_utf8(out.stdout).expect("utf-8");
-        let parsed: serde_json::Value = serde_json::from_str(&stdout).expect("valid JSON");
-        let reported: Vec<&str> = parsed
-            .as_array()
-            .expect("array of diagnostics")
-            .iter()
-            .filter(|d| d["severity"] == "error")
-            .filter_map(|d| d["code"].as_str())
-            .collect();
-        assert!(
-            reported.contains(code),
-            "{code}: expected it among the reported error codes, got {reported:?}",
-        );
+        assert_eq!(errors[0].3, *code, "{code}: wrong code reported");
+        let out = run(&["check", path.to_str().unwrap()]);
+        assert_eq!(exit_code(&out), 1, "{code}: check should exit 1");
     }
 }
 
 #[test]
-fn parity_2_lower_rejects_every_check_error() {
+fn parity_2_build_commands_replay_the_check_stream_verbatim() {
+    // The single assertion this suite exists for. Each build command must
+    // report exactly what `check` reported, in the same order, before adding
+    // any lowering diagnostics of its own.
+    //
+    // Prefix equality alone would not be enough: appending a second copy of
+    // the resolver's findings after `check`'s output keeps the prefix intact
+    // while doubling every resolver diagnostic and, because `check` sorts by
+    // span and the resolver does not, printing the copy out of order. The
+    // occurrence count is what catches that.
     let tmp = TempDir::new().expect("tempdir");
-    for (code, body) in FIXTURES {
-        let path = write_fixture(tmp.path(), code, body);
-        let out = run(&["lower", path.to_str().unwrap()]);
-        let stderr = String::from_utf8_lossy(&out.stderr).into_owned();
-        assert_eq!(
-            exit_code(&out),
-            1,
-            "{code}: lower accepted a source check rejects; stderr={stderr}",
-        );
-        assert!(
-            stderr.contains(code),
-            "{code}: lower must name the code on stderr, got {stderr}",
-        );
-    }
-}
-
-#[test]
-fn parity_3_info_rejects_every_check_error() {
-    let tmp = TempDir::new().expect("tempdir");
-    for (code, body) in FIXTURES {
-        let path = write_fixture(tmp.path(), code, body);
-        let out = run(&["info", path.to_str().unwrap()]);
-        let stderr = String::from_utf8_lossy(&out.stderr).into_owned();
-        assert_eq!(
-            exit_code(&out),
-            1,
-            "{code}: info accepted a source check rejects; stderr={stderr}",
-        );
-        assert!(
-            stderr.contains(code),
-            "{code}: info must name the code on stderr, got {stderr}",
-        );
-    }
-}
-
-#[test]
-fn parity_4_compile_rejects_every_check_error_and_writes_nothing() {
-    let tmp = TempDir::new().expect("tempdir");
-    for (code, body) in FIXTURES {
-        let path = write_fixture(tmp.path(), code, body);
+    for (index, (code, body)) in all_fixtures().enumerate() {
+        let path = write_fixture(tmp.path(), index, body);
+        let expected = check_stream(&path);
+        assert!(!expected.is_empty(), "{code}: fixture reports nothing");
         let out_dir = path.parent().expect("fixture dir").join("out");
+
+        for (name, args) in build_commands(path.to_str().unwrap(), out_dir.to_str().unwrap()) {
+            let argv: Vec<&str> = args.iter().map(String::as_str).collect();
+            let out = run(&argv);
+            let stderr = String::from_utf8_lossy(&out.stderr).into_owned();
+            let actual = stderr_stream(&stderr);
+
+            assert!(
+                actual.starts_with(&expected),
+                "{code}: `{name}` must replay the check stream first\n  \
+                 expected prefix: {expected:?}\n  actual: {actual:?}\n  stderr:\n{stderr}",
+            );
+            for diagnostic in &expected {
+                let seen = actual.iter().filter(|d| *d == diagnostic).count();
+                assert_eq!(
+                    seen, 1,
+                    "{code}: `{name}` reported {diagnostic:?} {seen} times\n  \
+                     actual: {actual:?}\n  stderr:\n{stderr}",
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn parity_3_build_commands_refuse_every_check_error() {
+    let tmp = TempDir::new().expect("tempdir");
+    for (index, (code, body)) in all_fixtures().enumerate() {
+        let path = write_fixture(tmp.path(), index, body);
+        let out_dir = path.parent().expect("fixture dir").join("out");
+
+        for (name, args) in build_commands(path.to_str().unwrap(), out_dir.to_str().unwrap()) {
+            let argv: Vec<&str> = args.iter().map(String::as_str).collect();
+            let out = run(&argv);
+            assert_eq!(
+                exit_code(&out),
+                1,
+                "{code}: `{name}` accepted a source check rejects; stderr={}",
+                String::from_utf8_lossy(&out.stderr),
+            );
+            assert!(
+                out.stdout.is_empty(),
+                "{code}: `{name}` wrote {} bytes to stdout while refusing; a redirect \
+                 keeps that file regardless of the exit code",
+                out.stdout.len(),
+            );
+        }
+    }
+}
+
+#[test]
+fn parity_4_a_refused_compile_leaves_no_artifact_and_no_lockfile() {
+    let tmp = TempDir::new().expect("tempdir");
+    for (index, (code, body)) in all_fixtures().enumerate() {
+        let path = write_fixture(tmp.path(), index, body);
+        // Pre-create the output directory so its emptiness is a real
+        // observation rather than the read failing on a missing path.
+        let out_dir = path.parent().expect("fixture dir").join("out");
+        fs::create_dir_all(&out_dir).expect("create out dir");
+
         let out = run(&[
             "compile",
             path.to_str().unwrap(),
@@ -184,25 +315,19 @@ fn parity_4_compile_rejects_every_check_error_and_writes_nothing() {
             "--out",
             out_dir.to_str().unwrap(),
         ]);
-        let stderr = String::from_utf8_lossy(&out.stderr).into_owned();
-        assert_eq!(
-            exit_code(&out),
-            1,
-            "{code}: compile accepted a source check rejects; stderr={stderr}",
-        );
-        assert!(
-            stderr.contains(code),
-            "{code}: compile must name the code on stderr, got {stderr}",
-        );
+        assert_eq!(exit_code(&out), 1, "{code}: compile should refuse");
+
         let lock = path.with_extension("crn.lock");
         assert!(
             !lock.exists(),
             "{code}: a refused compile must not certify the source with {}",
             lock.display(),
         );
-        let artifacts: Vec<_> = fs::read_dir(&out_dir)
-            .map(|rd| rd.filter_map(Result::ok).map(|e| e.path()).collect())
-            .unwrap_or_default();
+        let artifacts: Vec<PathBuf> = fs::read_dir(&out_dir)
+            .expect("out dir exists")
+            .filter_map(Result::ok)
+            .map(|e| e.path())
+            .collect();
         assert!(
             artifacts.is_empty(),
             "{code}: a refused compile must not leave artifacts, found {artifacts:?}",
@@ -211,17 +336,21 @@ fn parity_4_compile_rejects_every_check_error_and_writes_nothing() {
 }
 
 #[test]
-fn parity_5_compile_announces_a_build_that_produced_no_structures() {
-    // Templates and themes alone legitimately compile to nothing, so this is
-    // a warning and not a refusal — `c26_bare_def_without_place_emits_w_unused
-    // _def_and_no_nbt` pins that contract. What it must not be is silent: the
-    // exit code cannot distinguish a template library from a build whose
-    // structures all fell out along the way, and the lockfile written beside
-    // it reads as a certification either way.
+fn parity_5_a_template_only_library_compiles_to_nothing_without_complaint() {
+    // The case `c26_bare_def_without_place_emits_w_unused_def_and_no_nbt`
+    // pins: a `def` no site instantiates is a template, templates lower to
+    // no voxels, and that is not a failure. Declaring nothing is different
+    // from losing something — which is what `parity_6` covers.
     let tmp = TempDir::new().expect("tempdir");
-    let path = tmp.path().join("empty.crn");
-    fs::write(&path, "").expect("write empty source");
+    let path = tmp.path().join("library.crn");
+    fs::write(
+        &path,
+        "@cairn 2026.06\n\ntheme t:\n  slot wall -> @cobblestone\n\
+         \ndef hut size=4x4:\n  walls class=outer mat_slot=wall height=3\n",
+    )
+    .expect("write library");
     let out_dir = tmp.path().join("out");
+
     let out = run(&[
         "compile",
         path.to_str().unwrap(),
@@ -233,13 +362,71 @@ fn parity_5_compile_announces_a_build_that_produced_no_structures() {
     let stderr = String::from_utf8_lossy(&out.stderr).into_owned();
     assert_eq!(exit_code(&out), 0, "stderr={stderr}");
     assert!(
-        stderr.contains("no structures were produced"),
-        "expected a warning naming the empty result, got {stderr}",
+        !stderr.contains("E_PARTIAL_BUILD"),
+        "a template library requests no scopes, so nothing was dropped; stderr={stderr}",
+    );
+    // `W_UNUSED_DEF` reaches the stream through `check`, exactly once.
+    let reported = stderr_stream(&stderr);
+    let unused: Vec<&Reported> = reported.iter().filter(|d| d.3 == "W_UNUSED_DEF").collect();
+    assert_eq!(
+        unused.len(),
+        1,
+        "expected one W_UNUSED_DEF, got {reported:?}"
+    );
+    assert!(
+        path.with_extension("crn.lock").exists(),
+        "a successful compile still writes its lockfile",
     );
 }
 
 #[test]
-fn parity_6_every_example_still_passes_all_four_commands() {
+fn parity_6_a_partially_lowered_source_is_not_certified() {
+    // Every code that drops a scope is Warning severity, so before this the
+    // exit code stayed 0 and the lockfile still said `verified: true` for a
+    // build missing one of the two structures the source asked for.
+    let tmp = TempDir::new().expect("tempdir");
+    let path = tmp.path().join("partial.crn");
+    fs::write(
+        &path,
+        "@cairn 2026.06\n\ntheme t:\n  slot wall -> @cobblestone\n\
+         \nstruct good size=4x4\n  walls class=outer mat_slot=wall height=3\n\
+         \nstruct bad\n  walls class=outer mat_slot=wall height=3\n",
+    )
+    .expect("write partial source");
+    let out_dir = tmp.path().join("out");
+    fs::create_dir_all(&out_dir).expect("create out dir");
+
+    let out = run(&[
+        "compile",
+        path.to_str().unwrap(),
+        "--edition",
+        "java",
+        "--out",
+        out_dir.to_str().unwrap(),
+    ]);
+    let stderr = String::from_utf8_lossy(&out.stderr).into_owned();
+    assert_eq!(exit_code(&out), 1, "stderr={stderr}");
+    assert!(
+        stderr.contains("E_PARTIAL_BUILD") && stderr.contains("struct::bad"),
+        "the refusal must name the scope that went missing; stderr={stderr}",
+    );
+    assert!(
+        !path.with_extension("crn.lock").exists(),
+        "a partial build must not be certified by a lockfile",
+    );
+    let artifacts: Vec<PathBuf> = fs::read_dir(&out_dir)
+        .expect("out dir exists")
+        .filter_map(Result::ok)
+        .map(|e| e.path())
+        .collect();
+    assert!(
+        artifacts.is_empty(),
+        "the structure that did lower must not be written either, found {artifacts:?}",
+    );
+}
+
+#[test]
+fn parity_7_every_example_still_passes_all_four_commands() {
     let tmp = TempDir::new().expect("tempdir");
     let mut seen = 0usize;
     for entry in fs::read_dir(examples_dir()).expect("read examples") {
@@ -255,35 +442,34 @@ fn parity_6_every_example_still_passes_all_four_commands() {
         fs::copy(&src, &work).expect("copy example");
         let path = work.to_str().unwrap();
 
-        for cmd in [vec!["check", path], vec!["lower", path], vec!["info", path]] {
-            let out = run(&cmd);
-            assert_eq!(
-                exit_code(&out),
-                0,
-                "{name:?}: `{}` regressed; stderr={}",
-                cmd[0],
-                String::from_utf8_lossy(&out.stderr),
-            );
-        }
-
-        let out_dir = tmp.path().join(format!("out-{}", name.to_string_lossy()));
-        let out = run(&[
-            "compile",
-            path,
-            "--edition",
-            "java",
-            "--out",
-            out_dir.to_str().unwrap(),
-        ]);
+        let out = run(&["check", path]);
         assert_eq!(
             exit_code(&out),
             0,
-            "{name:?}: compile regressed; stderr={}",
+            "{name:?}: check regressed; stderr={}",
             String::from_utf8_lossy(&out.stderr),
         );
+        let expected = check_stream(&work);
+
+        let out_dir = tmp.path().join(format!("out-{}", name.to_string_lossy()));
+        for (cmd, args) in build_commands(path, out_dir.to_str().unwrap()) {
+            let argv: Vec<&str> = args.iter().map(String::as_str).collect();
+            let out = run(&argv);
+            let stderr = String::from_utf8_lossy(&out.stderr).into_owned();
+            assert_eq!(
+                exit_code(&out),
+                0,
+                "{name:?}: `{cmd}` regressed; stderr={stderr}",
+            );
+            // The corpus is clean, so this pins that a build command does not
+            // *invent* diagnostics either — the direction an exit-code-only
+            // assertion cannot see.
+            assert!(
+                stderr_stream(&stderr).starts_with(&expected),
+                "{name:?}: `{cmd}` diverged from the check stream\n  \
+                 expected prefix: {expected:?}\n  stderr:\n{stderr}",
+            );
+        }
     }
-    assert!(
-        seen >= 12,
-        "expected the example corpus, found {seen} files"
-    );
+    assert!(seen > 0, "no examples found — the corpus path is wrong");
 }
