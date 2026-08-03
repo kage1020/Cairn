@@ -83,12 +83,35 @@ struct empty size=1x1
       (attribute (identifier) (size_literal (integer) (integer))))))
 
 ==================
-Member statement with indented body (field labels)
+Member statement with indented body
 ==================
 
 struct gatehouse size=7x5
   circuit id=main
     place block=@redstone_wire
+
+---
+
+(source_file
+  (struct_decl
+    (identifier)
+    (attribute_list
+      (attribute (identifier) (size_literal (integer) (integer))))
+    (struct_body
+      (member_stmt_with_body (member_keyword)
+        (command_arg_list (command_arg (attribute (identifier) (identifier))))
+        (struct_body
+          (member_stmt (member_keyword)
+            (command_arg_list
+              (command_arg (attribute (identifier) (material_ref (identifier)))))))))))
+
+==================
+Member statement with selector, arrow output, and indented body (field labels)
+==================
+
+struct gatehouse size=7x5
+  circuit[id=main] region=hall -> sig.out
+    place kind=lamp
 
 ---
 
@@ -100,13 +123,16 @@ struct gatehouse size=7x5
     body: (struct_body
       (member_stmt_with_body
         keyword: (member_keyword)
+        selector: (attribute_list
+          (attribute key: (identifier) value: (identifier)))
         args: (command_arg_list
           (command_arg (attribute key: (identifier) value: (identifier))))
+        output: (signal_ref (identifier) (identifier))
         body: (struct_body
           (member_stmt
             keyword: (member_keyword)
             args: (command_arg_list
-              (command_arg (attribute key: (identifier) value: (material_ref (identifier)))))))))))
+              (command_arg (attribute key: (identifier) value: (identifier))))))))))
 
 ==================
 def declaration (field labels)

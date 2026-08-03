@@ -193,6 +193,7 @@ name = "cairn-lang-tree-sitter"
 version = "2026.8.2"
 dependencies = [
  "cc",
+ "serde_json",
  "tree-sitter",
  "tree-sitter-language",
 ]
