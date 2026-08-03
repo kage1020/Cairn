@@ -418,6 +418,8 @@ fn lower_all_bindings<'a>(
         in_progress: HashMap::new(),
         failed_lhs: HashSet::new(),
         cse: HashMap::new(),
+        depth: 0,
+        depth_reported: false,
     };
 
     for (idx, b) in bindings.iter().enumerate() {
@@ -541,7 +543,29 @@ struct LoweringCtx<'a> {
     /// [`GateKind`]. Symmetric variants are canonicalised at construction,
     /// so `a and b` and `b and a` share a cache slot.
     cse: HashMap<GateKind, u32>,
+    /// How many nested [`lower_expr`] / [`lower_binding`] frames are open,
+    /// bounded by [`MAX_LOWERING_DEPTH`].
+    depth: usize,
+    /// Set once the limit has been reported, so one deep chain yields one
+    /// diagnostic instead of one per branch that hits the wall.
+    depth_reported: bool,
 }
+
+/// Deepest `logic` lowering recursion before the pass refuses.
+///
+/// [`lower_binding`] resolves a reference by lowering the binding it names,
+/// so the recursion is as deep as the dependency chain when the source
+/// declares it in reverse. Measured on a debug build, roughly 410 bindings
+/// in reverse order overflowed the native stack — an uncatchable abort, with
+/// no diagnostic. The same graph written in dependency order stayed shallow
+/// at several thousand bindings, because each reference is already resolved
+/// by the time it is reached.
+///
+/// A combinational chain long enough to reach this limit would carry more
+/// gate delay than any Minecraft circuit can use, so refusing here costs no
+/// realistic source. It does leave the pass sensitive to declaration order,
+/// which is now a loud refusal naming the fix rather than a crash.
+const MAX_LOWERING_DEPTH: usize = 128;
 
 /// Sentinel returned by [`lower_binding`] / [`lower_expr`] when a
 /// diagnostic has already been queued and the caller should abandon the
@@ -574,11 +598,50 @@ fn lower_binding<'a>(
     }
 }
 
+/// Lower one boolean expression, one level deeper than the caller.
+///
+/// Every recursive step in the pass — nested operands, and the descent into
+/// a referenced binding via [`resolve_ref`] — funnels through here, so this
+/// is the single place [`MAX_LOWERING_DEPTH`] is enforced. A new recursive
+/// site cannot reopen the hole by forgetting to count.
+fn lower_expr<'a>(
+    expr: &'a Expr,
+    binding_span: &Span,
+    ir: &mut LogicIr,
+    ctx: &mut LoweringCtx<'a>,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Result<SignalRef, LoweringFailed> {
+    if ctx.depth >= MAX_LOWERING_DEPTH {
+        if !ctx.depth_reported {
+            ctx.depth_reported = true;
+            let label = scope_label(ctx.kind, ctx.scope_name);
+            diagnostics.push(
+                Diagnostic::new(
+                    DiagnosticCode::LogicNestingTooDeep,
+                    binding_span.clone(),
+                    format!("{label} `logic` lowering nested past {MAX_LOWERING_DEPTH} levels"),
+                )
+                .with_footer(
+                    "Fix: declare each `logic` binding after the ones it references. A binding is \
+                     lowered by descending into whatever it names, so a chain written in reverse \
+                     costs one level per binding, while the same graph in dependency order costs \
+                     none.",
+                ),
+            );
+        }
+        return Err(LoweringFailed);
+    }
+    ctx.depth += 1;
+    let result = lower_expr_inner(expr, binding_span, ir, ctx, diagnostics);
+    ctx.depth -= 1;
+    result
+}
+
 /// Lower one boolean expression. Every operand is lowered independently
 /// before the enclosing gate is built, and every recursive failure is
 /// collected — a `logic sig.x = sig.undef1 or sig.undef2` reports both
 /// unbound refs rather than shortcircuiting at the first.
-fn lower_expr<'a>(
+fn lower_expr_inner<'a>(
     expr: &'a Expr,
     binding_span: &Span,
     ir: &mut LogicIr,

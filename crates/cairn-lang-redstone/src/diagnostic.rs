@@ -119,6 +119,15 @@ pub enum DiagnosticCode {
     /// enlarge the `circuit region=` footprint so buffer candidates
     /// have room on the plane.
     BufferCoordCollision,
+    /// Lowering a `logic` binding descended past
+    /// `synth::MAX_LOWERING_DEPTH`. A binding is lowered by descending into
+    /// whatever it references, so a chain declared in the reverse of its
+    /// dependency order costs one level per binding. Past the limit the
+    /// native stack would overflow, which aborts the process instead of
+    /// producing a diagnostic. Fix: declare the chain in dependency order —
+    /// the same graph written that way lowers at any length, because each
+    /// reference is already resolved when it is reached.
+    LogicNestingTooDeep,
 }
 
 impl DiagnosticCode {
@@ -138,6 +147,7 @@ impl DiagnosticCode {
             Self::AttenuationLimit => "E_ATTENUATION_LIMIT",
             Self::CrossingCongestion => "E_CROSSING_CONGESTION",
             Self::BufferCoordCollision => "E_BUFFER_COORD_COLLISION",
+            Self::LogicNestingTooDeep => "E_LOGIC_NESTING_TOO_DEEP",
         }
     }
 
@@ -154,7 +164,8 @@ impl DiagnosticCode {
             | Self::RouteCongestion
             | Self::AttenuationLimit
             | Self::CrossingCongestion
-            | Self::BufferCoordCollision => Severity::Error,
+            | Self::BufferCoordCollision
+            | Self::LogicNestingTooDeep => Severity::Error,
             Self::LogicUnusedSignal => Severity::Warning,
         }
     }
