@@ -544,25 +544,26 @@ fn run_info(file: &Path, editions: &[String], format: InfoFormat) -> ExitCode {
     };
     let ir = lower(&module);
 
-    // Surface resolver + lowering diagnostics before running the parity
-    // dry-run — the same contract `run_check` / `run_lower` / `run_compile`
-    // already honor. Without this, a `.crn` carrying an
-    // `E_UNRESOLVED_SLOT` (or any other Error-severity finding) would
-    // still get `cairn info` exit 0 with a portability row computed
-    // against a partially unresolved IR, which is a poor CI gate.
+    // Surface the check pass (syntactic + resolver) and lowering
+    // diagnostics before running the parity dry-run — the same contract
+    // `run_check` / `run_lower` / `run_compile` honor. Without this, a
+    // `.crn` carrying an `E_UNRESOLVED_SLOT` (or any other Error-severity
+    // finding) would still get `cairn info` exit 0 with a portability row
+    // computed against a partially unresolved IR, which is a poor CI gate.
     //
-    // The diagnostic set follows `cairn check` semantics — `resolve(ir,
-    // None)` unions slot names across per-edition variants — so a file
-    // whose only "problem" is that one variant declares a slot the other
-    // doesn't still passes here. A per-edition strict pass (`resolve(ir,
-    // Some(edition))`) is what the parity dry-run below runs; its
-    // downstream lowering may add lowering-level diagnostics that are
-    // edition-agnostic in practice.
+    // This gate is edition-neutral — `resolve(ir, None)` unions slot names
+    // across per-edition variants — so a file whose only "problem" is that
+    // one variant declares a slot the other does not still passes here.
+    // The strict per-edition pass runs inside the dry-run below, which
+    // reports whatever only it can see.
     let resolution = resolve(&ir, None);
     let mut block_ir = lower_to_block_array(&ir, &resolution, Some(&builtin_java().materials));
-    let mut combined = check(&module, &ir, None);
-    combined.append(&mut resolution.diagnostics.clone());
-    combined.append(&mut block_ir.diagnostics);
+    let combined = build_diagnostics(
+        &module,
+        &ir,
+        None,
+        std::mem::take(&mut block_ir.diagnostics),
+    );
 
     let lines = LineStarts::new(&source);
     let mut has_error = false;
@@ -587,33 +588,10 @@ fn run_info(file: &Path, editions: &[String], format: InfoFormat) -> ExitCode {
         return ExitCode::from(1);
     }
 
-    // One dry-run lower per requested edition: the resolver's per-edition
-    // theme variant selection can produce a different palette per edition
-    // (the whole point of spec §10.7 hierarchy #2), so a single shared
-    // block-array IR would misrepresent the parity axis.
-    //
-    // The lowering never writes files here — it stops at the in-memory
-    // `BlockArrayIr` that `portability_for_*` inspects.
-    let mut per_edition: Vec<EditionPortability> = Vec::with_capacity(editions.len());
-    for e in editions {
-        let edition: Edition = e.parse().expect("validated above");
-        let per_edition_resolution = resolve(&ir, Some(edition));
-        let materials = match edition {
-            Edition::Java => &builtin_java().materials,
-            Edition::Bedrock => &builtin_bedrock().materials,
-        };
-        let per_block_ir = lower_to_block_array(&ir, &per_edition_resolution, Some(materials));
-        let counts = match edition {
-            Edition::Java => portability_for_java(&per_block_ir),
-            Edition::Bedrock => portability_for_bedrock(&per_block_ir),
-        };
-        per_edition.push(EditionPortability {
-            edition,
-            portable: counts.portable,
-            degraded: counts.degraded,
-            unsupported: counts.unsupported,
-        });
-    }
+    let per_edition = match edition_portability(file, &source, &lines, &ir, editions, &combined) {
+        Ok(table) => table,
+        Err(code) => return code,
+    };
 
     let axes = compute_axes(&module, &ir, &resolution, per_edition);
 
@@ -633,6 +611,84 @@ fn run_info(file: &Path, editions: &[String], format: InfoFormat) -> ExitCode {
             }
         },
     }
+}
+
+/// One dry-run lower per requested edition, returning the portability row
+/// for each.
+///
+/// The resolver's per-edition theme-variant selection can produce a
+/// different palette per edition (the whole point of spec §10.7 hierarchy
+/// #2), so a single shared block-array IR would misrepresent the parity
+/// axis. Nothing is written to disk — the lowering stops at the in-memory
+/// `BlockArrayIr` that `portability_for_*` inspects.
+///
+/// A finding only the strict per-edition pass produces is reported here and
+/// turns into exit 1. Without that, a source `cairn compile --edition
+/// bedrock` refuses with `E_UNRESOLVED_SLOT` was described as
+/// `degraded: 0  unsupported: 0`, with the member that failed to resolve
+/// visible only as a smaller `portable` count — indistinguishable from
+/// "this edition simply has fewer structures". A parity report that cannot
+/// show a parity failure is worse than none.
+///
+/// `already_reported` is the edition-neutral stream the caller has printed;
+/// only diagnostics absent from it are reported, keyed by code and span, so
+/// the shared findings are not repeated once per edition.
+fn edition_portability(
+    file: &Path,
+    source: &str,
+    lines: &LineStarts,
+    ir: &cairn_lang_core::intent::IntentModule,
+    editions: &[String],
+    already_reported: &[cairn_lang_core::check::Diagnostic],
+) -> Result<Vec<EditionPortability>, ExitCode> {
+    let already: std::collections::HashSet<(&str, usize, usize)> = already_reported
+        .iter()
+        .map(|d| (d.code.as_str(), d.span.start, d.span.end))
+        .collect();
+    let mut table: Vec<EditionPortability> = Vec::with_capacity(editions.len());
+    let mut edition_specific_error = false;
+
+    for e in editions {
+        let edition: Edition = e.parse().expect("validated by the caller");
+        let resolution = resolve(ir, Some(edition));
+        let materials = match edition {
+            Edition::Java => &builtin_java().materials,
+            Edition::Bedrock => &builtin_bedrock().materials,
+        };
+        let block_ir = lower_to_block_array(ir, &resolution, Some(materials));
+
+        let only_here: Vec<_> = resolution
+            .diagnostics
+            .iter()
+            .chain(block_ir.diagnostics.iter())
+            .filter(|d| !already.contains(&(d.code.as_str(), d.span.start, d.span.end)))
+            .cloned()
+            .collect();
+        if !only_here.is_empty() {
+            eprintln!("note: reported for --editions {}", edition.as_str());
+            if report_core_diagnostics(file, source, lines, &only_here) {
+                edition_specific_error = true;
+            }
+        }
+
+        let counts = match edition {
+            Edition::Java => portability_for_java(&block_ir),
+            Edition::Bedrock => portability_for_bedrock(&block_ir),
+        };
+        table.push(EditionPortability {
+            edition,
+            portable: counts.portable,
+            degraded: counts.degraded,
+            unsupported: counts.unsupported,
+        });
+    }
+
+    // Every requested edition is walked before returning, so one bad edition
+    // does not hide a second one's findings.
+    if edition_specific_error {
+        return Err(ExitCode::from(1));
+    }
+    Ok(table)
 }
 
 fn print_text(axes: &VersionAxes) {
@@ -711,15 +767,15 @@ fn run_lower(file: &Path, format: LowerFormat) -> ExitCode {
     let ir = lower(&module);
     let resolution = resolve(&ir, None);
     let mut block_ir = lower_to_block_array(&ir, &resolution, Some(&builtin_java().materials));
-    // Mirror `load_and_lower`: the syntactic check passes gate the pipeline,
-    // and semantic findings produced by the resolver belong on the same
-    // diagnostic stream as the lowering deferrals they tend to cascade into.
-    // Concatenated in pipeline order (check -> resolve -> lower) so a report
-    // reads in the order the passes ran.
-    let mut combined = check(&module, &ir, None);
-    combined.append(&mut resolution.diagnostics.clone());
-    combined.append(&mut block_ir.diagnostics);
-    block_ir.diagnostics = combined;
+    // Mirror `load_and_lower`: the check pass gates the pipeline, and the
+    // lowering deferrals its findings tend to cascade into follow on the
+    // same stream.
+    block_ir.diagnostics = build_diagnostics(
+        &module,
+        &ir,
+        None,
+        std::mem::take(&mut block_ir.diagnostics),
+    );
 
     let lines = LineStarts::new(&source);
     let mut has_error = false;
@@ -741,21 +797,24 @@ fn run_lower(file: &Path, format: LowerFormat) -> ExitCode {
         }
     }
 
-    let success_exit = if has_error {
-        ExitCode::from(1)
-    } else {
-        ExitCode::SUCCESS
-    };
+    // Refuse before printing, the way `run_info` and `run_compile` do. The
+    // exit code alone does not protect a redirect: `cairn lower f.crn
+    // --format json > ir.json` creates the file before the process ends, so
+    // emitting the IR anyway hands a pipeline a well-formed artifact built
+    // from a source `cairn check` rejects.
+    if has_error {
+        return ExitCode::from(1);
+    }
 
     match format {
         LowerFormat::Ascii => {
             print_block_ir_ascii(&block_ir);
-            success_exit
+            ExitCode::SUCCESS
         }
         LowerFormat::Json => match serde_json::to_string_pretty(&block_ir) {
             Ok(json) => {
                 println!("{json}");
-                success_exit
+                ExitCode::SUCCESS
             }
             Err(err) => {
                 eprintln!("error: failed to serialise block-array IR as JSON: {err}");
@@ -764,7 +823,7 @@ fn run_lower(file: &Path, format: LowerFormat) -> ExitCode {
         },
         LowerFormat::Debug => {
             println!("{block_ir:#?}");
-            success_exit
+            ExitCode::SUCCESS
         }
     }
 }
@@ -828,18 +887,14 @@ fn run_synth(
     let ir = lower(&module);
     let lines = LineStarts::new(&source);
 
-    // Mirror `run_check` / `run_lower` / `run_compile`: surface
-    // resolver + check diagnostics before running the redstone synth. A
-    // `.crn` whose only problem is `E_UNRESOLVED_SLOT` or a typo caught
-    // by `check` would otherwise exit 0 through the synth path with a
-    // partially resolved IR, which is a poor CI gate.
-    let resolution = resolve(&ir, None);
-    let mut has_error = report_core_diagnostics(file, &source, &lines, &resolution.diagnostics);
-    let check_diagnostics = check(&module, &ir, None);
-    if report_core_diagnostics(file, &source, &lines, &check_diagnostics) {
-        has_error = true;
-    }
-    if has_error {
+    // Mirror `run_check` / `run_lower` / `run_compile`: surface the check
+    // diagnostics before running the redstone synth. A `.crn` whose only
+    // problem is `E_UNRESOLVED_SLOT` or a typo caught by `check` would
+    // otherwise exit 0 through the synth path with a partially resolved
+    // IR, which is a poor CI gate. Synth does not lower to block arrays,
+    // so there are no lowering diagnostics to append here.
+    let diagnostics = build_diagnostics(&module, &ir, None, Vec::new());
+    if report_core_diagnostics(file, &source, &lines, &diagnostics) {
         return ExitCode::from(1);
     }
 
@@ -1114,6 +1169,30 @@ fn require_edition(edition: Option<EditionArg>, stage_name: &str) -> Result<Edit
 /// Print `cairn-lang-core::check::Diagnostic`s in gcc-style, returning
 /// `true` when any Error-severity finding was seen. Shared between
 /// `run_synth`'s resolve + check pre-passes.
+/// Every diagnostic a command must report, in one stream, in the order the
+/// passes ran.
+///
+/// [`check`] runs the syntactic passes **and** merges the resolver's
+/// findings (see `cairn_lang_core::check::check`), so a caller must not
+/// append `Resolution::diagnostics` on top of it. Doing so printed every
+/// resolver finding twice, and — because [`check`] returns span-sorted
+/// output while the resolver emits in discovery order — the second copy
+/// walked the file backwards.
+///
+/// `lowering` carries the block-array pass's own diagnostics, which
+/// [`check`] never sees; pass an empty vector from a command that does not
+/// lower.
+fn build_diagnostics(
+    module: &cairn_lang_core::ast::Module,
+    ir: &cairn_lang_core::intent::IntentModule,
+    edition: Option<Edition>,
+    lowering: Vec<cairn_lang_core::check::Diagnostic>,
+) -> Vec<cairn_lang_core::check::Diagnostic> {
+    let mut combined = check(module, ir, edition);
+    combined.extend(lowering);
+    combined
+}
+
 fn report_core_diagnostics(
     file: &Path,
     source: &str,
@@ -1334,11 +1413,40 @@ fn run_compile(
     out: Option<&Path>,
     lock: Option<&Path>,
 ) -> ExitCode {
-    let (source, block_ir) = match load_and_lower(file, edition) {
-        Ok(pair) => pair,
+    let Lowered {
+        source,
+        block_ir,
+        dropped_scopes,
+    } = match load_and_lower(file, edition) {
+        Ok(lowered) => lowered,
         Err(code) => return code,
     };
     if report_lowering_diagnostics(file, &source, &block_ir) {
+        return ExitCode::from(1);
+    }
+    // A lockfile records that a specific resolved IR was built for a
+    // specific target, so it must not certify a build that is missing part
+    // of what the source asked for. Every code that drops a scope
+    // (`W_STRUCT_NO_SIZE`, `W_DEF_NO_SIZE`, ...) is Warning severity, so
+    // without this the exit code stays 0 and the lockfile still reads
+    // `verified: true` — the same shape of defect as compiling a source
+    // `cairn check` rejects.
+    //
+    // Declaring nothing is not the same as losing something: a source that
+    // is only templates and themes requests no scopes, produces none, and
+    // still compiles (see
+    // `c26_bare_def_without_place_emits_w_unused_def_and_no_nbt`).
+    if !dropped_scopes.is_empty() {
+        eprintln!(
+            "error[E_PARTIAL_BUILD]: {}: {} of {} requested scopes did not lower; \
+             refusing to certify a partial build",
+            file.display(),
+            dropped_scopes.len(),
+            dropped_scopes.len() + block_ir.structures.len(),
+        );
+        for scope in &dropped_scopes {
+            eprintln!("  note: `{scope}` produced no voxels");
+        }
         return ExitCode::from(1);
     }
 
@@ -1356,24 +1464,24 @@ fn run_compile(
         Ok(p) => p,
         Err(code) => return code,
     };
-    // A source that is only templates and themes legitimately compiles to
-    // nothing — see `c26_bare_def_without_place_emits_w_unused_def_and_no_nbt`
-    // — so this stays a warning rather than a refusal. It exists because the
-    // exit code alone cannot tell a template library apart from a build whose
-    // structures all fell out along the way, and the lockfile written next to
-    // it reads as a certification either way.
-    if prepared.is_empty() {
-        eprintln!(
-            "warning: {}: no structures were produced; only the lockfile was written",
-            file.display(),
-        );
-    }
 
     let lock_path = lock.map_or_else(|| default_lock_path(file), Path::to_path_buf);
     write_artifacts_and_lock(&prepared, &source, &block_ir, edition, &target, &lock_path)
 }
 
-fn load_and_lower(file: &Path, edition: EditionArg) -> Result<(String, BlockArrayIr), ExitCode> {
+/// A `.crn` read, parsed, resolved, and lowered, plus what the lowering
+/// failed to produce.
+struct Lowered {
+    source: String,
+    block_ir: BlockArrayIr,
+    /// Scopes the resolver recorded (`struct::NAME`, `site::SITE::PLACE`)
+    /// that the block-array pass did not turn into a structure, in resolver
+    /// order. `def::` keys are excluded: a def is a template and lowers to
+    /// voxels only through a `place` that instantiates it.
+    dropped_scopes: Vec<String>,
+}
+
+fn load_and_lower(file: &Path, edition: EditionArg) -> Result<Lowered, ExitCode> {
     let source = std::fs::read_to_string(file).map_err(|err| {
         eprintln!("error: cannot read `{}`: {err}", file.display());
         match err.kind() {
@@ -1401,25 +1509,30 @@ fn load_and_lower(file: &Path, edition: EditionArg) -> Result<(String, BlockArra
         EditionArg::Bedrock => &builtin_bedrock().materials,
     };
     let mut block_ir = lower_to_block_array(&ir, &resolution, Some(materials));
-    // Every pass that can refuse the build feeds one stream, concatenated in
-    // the order the passes ran (check -> resolve -> lower).
-    //
     // The check pass is the gate `cairn check` exposes; running it here is
     // what keeps `compile` from accepting a source that `check` rejects. It
     // used to be skipped, so an `E_DUPLICATE_ID` would compile to artifacts
-    // plus a `verified: true` lockfile at exit 0.
-    //
-    // Resolver diagnostics (`E_UNRESOLVED_PLACE_REF`, `E_UNRESOLVED_SLOT`,
-    // `W_UNUSED_DEF`, ...) are produced before lowering and must still reach
-    // the CLI's diagnostic stream — otherwise a `place use=cottag` typo
-    // (which the resolver flags as an Error) would silently produce zero
-    // `.nbt` files at exit 0. They read above the lowering deferrals that
-    // may have cascaded from them.
-    let mut combined = check(&module, &ir, Some(edition.as_edition()));
-    combined.append(&mut resolution.diagnostics.clone());
-    combined.append(&mut block_ir.diagnostics);
-    block_ir.diagnostics = combined;
-    Ok((source, block_ir))
+    // plus a `verified: true` lockfile at exit 0. Resolver findings such as
+    // a `place use=cottag` typo (`E_UNRESOLVED_PLACE_REF`) reach the stream
+    // through the same call — `check` merges them.
+    block_ir.diagnostics = build_diagnostics(
+        &module,
+        &ir,
+        Some(edition.as_edition()),
+        std::mem::take(&mut block_ir.diagnostics),
+    );
+    let dropped_scopes = resolution
+        .scopes
+        .keys()
+        .filter(|key| !key.starts_with("def::"))
+        .filter(|key| !block_ir.structures.contains_key(key.as_str()))
+        .cloned()
+        .collect();
+    Ok(Lowered {
+        source,
+        block_ir,
+        dropped_scopes,
+    })
 }
 
 fn report_lowering_diagnostics(file: &Path, source: &str, block_ir: &BlockArrayIr) -> bool {
