@@ -26,10 +26,30 @@ pub fn parse(source: &str) -> Result<Module, ParseError> {
     parser.parse_module()
 }
 
+/// Deepest value / expression nesting the parser will descend into.
+///
+/// Recursive descent spends native stack per level, and a Rust stack
+/// overflow is an uncatchable abort: it takes the process down, and with it
+/// any embedder — `cairn-lsp` re-parses on every keystroke. Refusing is the
+/// only way to keep that a diagnostic rather than a crash.
+///
+/// Measured on a debug build, the tightest shape (`mat=[[[…`) overflowed at
+/// 287 levels, parenthesised expressions at 380, and `not` chains at 785.
+/// Sitting well under the tightest of those leaves room for a thread with a
+/// smaller stack than the main one, and for the deeper frames a debug build
+/// of a future pass may add.
+///
+/// Real sources come nowhere near: values are scalars and flat lists, and a
+/// `logic` expression this deep would be unreadable long before it got here.
+const MAX_NESTING_DEPTH: usize = 64;
+
 struct Parser<'a> {
     source: &'a str,
     tokens: &'a [Token],
     pos: usize,
+    /// How many value / expression levels are currently open, bounded by
+    /// [`MAX_NESTING_DEPTH`].
+    depth: usize,
 }
 
 impl<'a> Parser<'a> {
@@ -38,7 +58,30 @@ impl<'a> Parser<'a> {
             source,
             tokens,
             pos: 0,
+            depth: 0,
         }
+    }
+
+    /// Run `descend` one nesting level deeper, refusing past
+    /// [`MAX_NESTING_DEPTH`].
+    ///
+    /// Every recursive step in a value or expression goes through here, so
+    /// the counter is the single place the bound is enforced — a new
+    /// recursive production cannot reopen the hole by forgetting to check.
+    fn nested<T>(
+        &mut self,
+        descend: impl FnOnce(&mut Self) -> Result<T, ParseError>,
+    ) -> Result<T, ParseError> {
+        if self.depth >= MAX_NESTING_DEPTH {
+            return Err(ParseError::NestingTooDeep {
+                position: self.position(),
+                limit: MAX_NESTING_DEPTH,
+            });
+        }
+        self.depth += 1;
+        let result = descend(self);
+        self.depth -= 1;
+        result
     }
 
     fn parse_module(&mut self) -> Result<Module, ParseError> {
@@ -460,14 +503,19 @@ impl<'a> Parser<'a> {
         Ok(lhs)
     }
 
+    /// Both recursive shapes an expression can take — a `not` chain and a
+    /// parenthesised sub-expression — pass through [`Self::nested`], so the
+    /// depth counter covers the two of them together rather than each
+    /// separately. `or` and `and` iterate rather than recurse, so a long
+    /// flat chain costs no depth.
     fn parse_expr_not(&mut self) -> Result<Expr, ParseError> {
         if self.match_keyword("not") {
-            let inner = self.parse_expr_not()?;
+            let inner = self.nested(Self::parse_expr_not)?;
             return Ok(Expr::Not(Box::new(inner)));
         }
         if self.peek_is(&TokenKind::LParen) {
             self.advance();
-            let inner = self.parse_expr_or()?;
+            let inner = self.nested(Self::parse_expr_or)?;
             self.expect(&TokenKind::RParen)?;
             return Ok(inner);
         }
@@ -589,7 +637,7 @@ impl<'a> Parser<'a> {
                 self.advance();
                 let mut items = Vec::new();
                 while !self.peek_is(&TokenKind::RBracket) && !self.at_eof() {
-                    items.push(self.parse_value()?);
+                    items.push(self.nested(Self::parse_value)?);
                     if self.peek_is(&TokenKind::Comma) {
                         self.advance();
                     }

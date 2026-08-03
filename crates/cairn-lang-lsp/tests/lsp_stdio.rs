@@ -467,3 +467,39 @@ fn lsp_11_malformed_notifications_do_not_kill_the_server() {
     assert_eq!(diagnostics_of(&message).len(), 0);
     server.shutdown();
 }
+
+#[test]
+fn lsp_16_deeply_nested_document_is_diagnosed_not_fatal() {
+    // A Rust stack overflow aborts the process, so unbounded parser
+    // recursion did not merely produce a bad diagnostic here — it killed the
+    // language server, which re-parses on every keystroke. A user typing
+    // brackets would have watched the editor report a crashed server.
+    //
+    // Asserting the *next* request still gets an answer is what makes this a
+    // liveness test rather than a diagnostics test: a dead server publishes
+    // nothing at all, which an "expect diagnostics" assertion alone could
+    // not tell apart from a parse that succeeded.
+    let deep = format!(
+        "struct a size=1x1\n  window mat={}x{}\n",
+        "[".repeat(400),
+        "]".repeat(400),
+    );
+    let (mut server, _) = Server::start();
+    server.did_open(&deep, 1);
+    let published = server.read_until_method("textDocument/publishDiagnostics");
+    let diagnostics = diagnostics_of(&published);
+    assert_eq!(
+        diagnostics.len(),
+        1,
+        "a parse failure publishes one diagnostic; got {diagnostics:?}",
+    );
+    assert!(
+        diagnostics[0]["message"]
+            .as_str()
+            .expect("message")
+            .contains("nesting"),
+        "the message should name the nesting limit; got {:?}",
+        diagnostics[0]["message"],
+    );
+    server.shutdown();
+}
