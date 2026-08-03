@@ -560,7 +560,8 @@ fn run_info(file: &Path, editions: &[String], format: InfoFormat) -> ExitCode {
     // edition-agnostic in practice.
     let resolution = resolve(&ir, None);
     let mut block_ir = lower_to_block_array(&ir, &resolution, Some(&builtin_java().materials));
-    let mut combined = resolution.diagnostics.clone();
+    let mut combined = check(&module, &ir, None);
+    combined.append(&mut resolution.diagnostics.clone());
     combined.append(&mut block_ir.diagnostics);
 
     let lines = LineStarts::new(&source);
@@ -710,10 +711,13 @@ fn run_lower(file: &Path, format: LowerFormat) -> ExitCode {
     let ir = lower(&module);
     let resolution = resolve(&ir, None);
     let mut block_ir = lower_to_block_array(&ir, &resolution, Some(&builtin_java().materials));
-    // Mirror `load_and_lower`: semantic findings produced by the resolver
-    // belong on the same diagnostic stream as the lowering deferrals they
-    // tend to cascade into.
-    let mut combined = resolution.diagnostics;
+    // Mirror `load_and_lower`: the syntactic check passes gate the pipeline,
+    // and semantic findings produced by the resolver belong on the same
+    // diagnostic stream as the lowering deferrals they tend to cascade into.
+    // Concatenated in pipeline order (check -> resolve -> lower) so a report
+    // reads in the order the passes ran.
+    let mut combined = check(&module, &ir, None);
+    combined.append(&mut resolution.diagnostics.clone());
     combined.append(&mut block_ir.diagnostics);
     block_ir.diagnostics = combined;
 
@@ -1352,6 +1356,18 @@ fn run_compile(
         Ok(p) => p,
         Err(code) => return code,
     };
+    // A source that is only templates and themes legitimately compiles to
+    // nothing — see `c26_bare_def_without_place_emits_w_unused_def_and_no_nbt`
+    // — so this stays a warning rather than a refusal. It exists because the
+    // exit code alone cannot tell a template library apart from a build whose
+    // structures all fell out along the way, and the lockfile written next to
+    // it reads as a certification either way.
+    if prepared.is_empty() {
+        eprintln!(
+            "warning: {}: no structures were produced; only the lockfile was written",
+            file.display(),
+        );
+    }
 
     let lock_path = lock.map_or_else(|| default_lock_path(file), Path::to_path_buf);
     write_artifacts_and_lock(&prepared, &source, &block_ir, edition, &target, &lock_path)
@@ -1385,13 +1401,22 @@ fn load_and_lower(file: &Path, edition: EditionArg) -> Result<(String, BlockArra
         EditionArg::Bedrock => &builtin_bedrock().materials,
     };
     let mut block_ir = lower_to_block_array(&ir, &resolution, Some(materials));
+    // Every pass that can refuse the build feeds one stream, concatenated in
+    // the order the passes ran (check -> resolve -> lower).
+    //
+    // The check pass is the gate `cairn check` exposes; running it here is
+    // what keeps `compile` from accepting a source that `check` rejects. It
+    // used to be skipped, so an `E_DUPLICATE_ID` would compile to artifacts
+    // plus a `verified: true` lockfile at exit 0.
+    //
     // Resolver diagnostics (`E_UNRESOLVED_PLACE_REF`, `E_UNRESOLVED_SLOT`,
     // `W_UNUSED_DEF`, ...) are produced before lowering and must still reach
     // the CLI's diagnostic stream — otherwise a `place use=cottag` typo
     // (which the resolver flags as an Error) would silently produce zero
-    // `.nbt` files at exit 0. Prepend so semantic problems read above the
-    // lowering deferrals that may have cascaded from them.
-    let mut combined = resolution.diagnostics;
+    // `.nbt` files at exit 0. They read above the lowering deferrals that
+    // may have cascaded from them.
+    let mut combined = check(&module, &ir, Some(edition.as_edition()));
+    combined.append(&mut resolution.diagnostics.clone());
     combined.append(&mut block_ir.diagnostics);
     block_ir.diagnostics = combined;
     Ok((source, block_ir))
