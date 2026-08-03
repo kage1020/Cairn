@@ -210,3 +210,78 @@ fn ac4_unknown_edition_rejected_with_exit_two() {
         "stderr should list valid editions, got: {stderr}",
     );
 }
+
+#[test]
+fn ac5_an_edition_specific_resolve_failure_is_reported_not_counted_away() {
+    // `info` gates on the edition-neutral pass, which unions slot names
+    // across per-edition theme variants. A slot only one variant declares
+    // therefore resolves there and fails only in the strict per-edition
+    // pass the parity dry-run runs.
+    //
+    // Reporting nothing made the failure indistinguishable from a design
+    // choice: the member that could not resolve just lowered a smaller
+    // `portable` count for that edition, with `degraded: 0
+    // unsupported: 0` beside it. The one command whose job is showing
+    // per-edition divergence was the one that could not show it.
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    let src = tmp.path().join("split.crn");
+    std::fs::write(
+        &src,
+        "@cairn 2026.06\n\n\
+         theme shop_java:\n\
+         \x20\x20slot wall           -> @wall.stone.cobble\n\
+         \x20\x20slot floating_text  -> @sign.oak\n\n\
+         theme shop_bedrock:\n\
+         \x20\x20slot wall           -> @wall.stone.cobble\n\n\
+         struct shop size=5x5\n\
+         \x20\x20walls  class=outer mat_slot=wall height=3\n\
+         \x20\x20window class=display side=front offset=2 y=2 size=1x1 mat_slot=floating_text\n",
+    )
+    .expect("write split source");
+    let path = src.to_str().unwrap();
+
+    // The edition-neutral gate sees a slot declared by one variant, so it
+    // passes — this is the premise that makes the case interesting.
+    let check = Command::new(cargo_bin())
+        .args(["check", path])
+        .output()
+        .expect("run cairn");
+    assert_eq!(check.status.code(), Some(0), "premise: check accepts it");
+
+    // Bedrock cannot resolve it, and `compile` says so.
+    let compile = Command::new(cargo_bin())
+        .args([
+            "compile",
+            path,
+            "--edition",
+            "bedrock",
+            "--out",
+            tmp.path().join("out").to_str().unwrap(),
+        ])
+        .output()
+        .expect("run cairn");
+    assert_eq!(
+        compile.status.code(),
+        Some(1),
+        "premise: compile refuses it"
+    );
+
+    let info = Command::new(cargo_bin())
+        .args(["info", path, "--editions", "java,bedrock"])
+        .output()
+        .expect("run cairn");
+    let stderr = String::from_utf8_lossy(&info.stderr).into_owned();
+    assert_eq!(
+        info.status.code(),
+        Some(1),
+        "info must not pass a source compile refuses; stderr={stderr}",
+    );
+    assert!(
+        stderr.contains("E_UNRESOLVED_SLOT") && stderr.contains("bedrock"),
+        "the report must name the code and the edition it belongs to; stderr={stderr}",
+    );
+    assert!(
+        info.stdout.is_empty(),
+        "no portability table should be printed when a figure could not be computed",
+    );
+}
