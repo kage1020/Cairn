@@ -45,7 +45,7 @@ use crate::intent::{
 };
 use crate::resolve::{Resolution, ScopeResolution, place_scope_key};
 
-use super::{Footprint, Placement, Walkway};
+use super::{Footprint, MAX_STRUCTURE_VOLUME, Placement, Walkway};
 
 use super::material::{AbstractMaterialResolver, MaterialDeferred, resolve_block_state};
 use super::openings::{WallSide, wall_length, wall_local_to_grid};
@@ -57,8 +57,8 @@ use super::roof::{
     stair_state,
 };
 use super::walkway::{
-    BlockedIndex, RoutePathError, WalkwayLayout, build_walkway_array, l_path, port_world_position,
-    route_path,
+    BlockedIndex, ROUTE_AREA_CAP, RoutePathError, WalkwayLayout, build_walkway_array, l_path,
+    l_path_len, port_world_position, route_path,
 };
 use super::{BlockArray, BlockArrayIr, BlockState, Dims, Palette, PaletteIndex};
 
@@ -386,6 +386,34 @@ fn lower_connects(
         // overflow) falls back to the L with skipped cells so the row
         // still lays and earns its `W_WALKWAY_BLOCKED` below, with a
         // note matched to the error.
+        // Ask how long the L would be before building it. The cap has
+        // always described this case — "two ports megametres apart" — but
+        // only `route_path` consulted it, and `route_path` runs second and
+        // only when something is in the way. An unobstructed pair walked
+        // past the cap and materialised the whole strip: `gap=100000000`
+        // spent 53 seconds on a 1.4 GB `Vec` before any check saw it.
+        if l_path_len(from_pos, to_pos).is_none() {
+            let failure = RoutePathError::AreaCapExceeded {
+                area: u64::MAX,
+                cap: ROUTE_AREA_CAP,
+            };
+            diagnostics.push(Diagnostic {
+                code: DiagnosticCode::WalkwayBlocked,
+                severity: Severity::Warning,
+                span: connect.span.clone(),
+                primary: format!(
+                    "walkway `{from} ↔ {to}` spans more than {ROUTE_AREA_CAP} cells and was not laid",
+                    from = connect.from,
+                    to = connect.to,
+                ),
+                notes: vec![DiagnosticNote {
+                    span: None,
+                    message: walkway_blocked_note(connect, Some(failure)),
+                }],
+                data: None,
+            });
+            continue;
+        }
         let straight = l_path(from_pos, to_pos);
         let (path, route_failure) = if straight.iter().any(|cell| blocked.contains(cell)) {
             match route_path(from_pos, to_pos, &blocked_index) {
@@ -649,7 +677,7 @@ fn lower_struct<'a>(
         diagnostics.push(diag_struct_no_size(s));
         return None;
     };
-    Some(lower_body_to_block_array(
+    lower_body_to_block_array(
         BodyDescriptor {
             kind: BodyKind::Struct,
             scope_label: &s.name,
@@ -661,7 +689,7 @@ fn lower_struct<'a>(
         scope,
         materials,
         diagnostics,
-    ))
+    )
 }
 
 /// Lower every `place` in `site` into its own per-place [`BlockArray`] and a
@@ -704,6 +732,19 @@ fn lower_site<'a>(
             continue;
         }
         let Some(place_id) = member.id.as_deref() else {
+            continue;
+        };
+        // Build the typed ids once, here, rather than asserting the
+        // invariant again at the bottom of the loop. `id=` takes a string
+        // literal, so nothing upstream of the resolver's
+        // `E_INVALID_PLACE_ID` guarantees the contents — and the bottom of
+        // this loop used to `expect` that guarantee, which is where a
+        // `place id="home.1"` panicked. Skipping silently keeps the
+        // diagnostic count honest: the resolver already reported it, the
+        // same way the missing-scope arm below does.
+        let (Ok(placement_site), Ok(placement_id)) =
+            (SiteName::new(site.name.as_str()), PlaceId::new(place_id))
+        else {
             continue;
         };
 
@@ -754,7 +795,7 @@ fn lower_site<'a>(
             continue;
         };
 
-        let ba = lower_body_to_block_array(
+        let Some(ba) = lower_body_to_block_array(
             BodyDescriptor {
                 kind: BodyKind::Place,
                 scope_label: place_id,
@@ -766,7 +807,12 @@ fn lower_site<'a>(
             Some(scope),
             materials,
             diagnostics,
-        );
+        ) else {
+            // The extent was refused; the diagnostic names the scope, and
+            // recording a placement for a structure that does not exist
+            // would leave the lockfile pointing at nothing.
+            continue;
+        };
         // `ba.source_scope` now owns the IR key — read it back so the two
         // map inserts share that one allocation as their canonical key
         // (one extra clone for `placements`, one move into `structures`).
@@ -774,10 +820,8 @@ fn lower_site<'a>(
         placements.insert(
             ba.source_scope.clone(),
             Placement {
-                site: SiteName::new(site.name.as_str())
-                    .expect("surface lexer enforces SiteName invariants"),
-                place_id: PlaceId::new(place_id)
-                    .expect("surface lexer enforces PlaceId invariants"),
+                site: placement_site,
+                place_id: placement_id,
                 source_def: use_name.to_owned(),
                 theme: theme_name.to_owned(),
                 origin,
@@ -812,12 +856,17 @@ struct BodyDescriptor<'a> {
     source_scope: String,
 }
 
+/// Lower one struct or place body into voxels.
+///
+/// `None` means the extent the body asks for is past
+/// [`MAX_STRUCTURE_VOLUME`]; the diagnostic has already been pushed and the
+/// caller drops the scope.
 fn lower_body_to_block_array<'a>(
     body: BodyDescriptor<'a>,
     scope: Option<&'a ScopeResolution>,
     materials: Option<&'a dyn AbstractMaterialResolver>,
     diagnostics: &mut Vec<Diagnostic>,
-) -> BlockArray {
+) -> Option<BlockArray> {
     let interior_w = body.size.w.get();
     let interior_h = body.size.h.get();
 
@@ -835,7 +884,7 @@ fn lower_body_to_block_array<'a>(
     // room outside the wall ring. Floors, walls, doors, and windows are
     // authored against the *interior* size and shifted inward by this
     // amount in their respective fill helpers.
-    let overhang = max_roof_overhang(body.members);
+    let overhang = max_roof_overhang(body.members, diagnostics);
     // Level blocks contribute their own walls to the struct's tallest wall
     // voxel and their own roles to every phase. Flatten them once here so
     // the dim math (which needs the true wall-top including level walls)
@@ -852,6 +901,14 @@ fn lower_body_to_block_array<'a>(
         y: 1u32.saturating_add(max_wall_top).saturating_add(roof_extra),
         z: interior_h.saturating_add(overhang.saturating_mul(2)),
     };
+    // Ask before allocating. Each of `size=`, `height=`, `overhang=`, and
+    // `level y=` is a valid `u32` in its own right, so nothing upstream can
+    // see that their product is not: `size=100000x100000` alone asks the
+    // allocator for 10^10 cells.
+    if !dims.fits_volume_budget() {
+        diagnostics.push(diag_structure_too_large(&body, dims));
+        return None;
+    }
     let mut palette = Palette::new_with_air();
     let mut voxels = vec![PaletteIndex::AIR; dims.volume()];
 
@@ -935,13 +992,36 @@ fn lower_body_to_block_array<'a>(
         );
     }
 
-    BlockArray {
+    Some(BlockArray {
         dims,
         palette,
         voxels,
         block_entities: Vec::new(),
         entities: Vec::new(),
         source_scope: body.source_scope,
+    })
+}
+
+/// The scope asked for more voxels than [`MAX_STRUCTURE_VOLUME`] allows.
+///
+/// Names the extent rather than only the limit: the numbers an author wrote
+/// are `size=`, `height=`, and `overhang=`, and the product is what went out
+/// of range, so showing the derived extent is what connects the two.
+fn diag_structure_too_large(body: &BodyDescriptor<'_>, dims: Dims) -> Diagnostic {
+    Diagnostic {
+        code: DiagnosticCode::StructureTooLarge,
+        severity: Severity::Warning,
+        span: body.header_span.clone(),
+        primary: format!(
+            "`{}` derives a {}x{}x{} voxel extent, past the {MAX_STRUCTURE_VOLUME}-voxel              maximum; block-array lowering skipped it",
+            body.scope_label, dims.x, dims.y, dims.z,
+        ),
+        notes: vec![DiagnosticNote {
+            span: None,
+            message: "the extent is derived from `size=` plus the tallest `height=` and the                       largest `overhang=`; reduce whichever of those is out of scale"
+                .to_owned(),
+        }],
+        data: None,
     }
 }
 
@@ -1305,11 +1385,21 @@ fn max_wall_top(flattened: &[(u32, &Member)]) -> u32 {
         .unwrap_or(0)
 }
 
-fn max_roof_overhang(members: &[Member]) -> u32 {
+/// Largest `overhang=` across the scope's roof members.
+///
+/// This is the only place `overhang=` is read, so an out-of-range value has
+/// to be diagnosed here or nowhere: treating it as absent silently shrank
+/// the roof back to the wall line with nothing said. Every other `key=`
+/// reaches the author through [`nonneg_int_or_defer`], and this one now
+/// does too.
+fn max_roof_overhang(members: &[Member], diagnostics: &mut Vec<Diagnostic>) -> u32 {
     members
         .iter()
         .filter(|m| matches!(m.role, MemberRole::Roof))
-        .filter_map(|m| nonneg_int(m, "overhang"))
+        .filter_map(|m| match nonneg_int_or_defer(m, "overhang", diagnostics) {
+            NonNegRead::Valid(v) => Some(v),
+            NonNegRead::Absent | NonNegRead::Deferred => None,
+        })
         .max()
         .unwrap_or(0)
 }
@@ -1381,10 +1471,16 @@ fn wall_height(member: &Member, diagnostics: &mut Vec<Diagnostic>) -> Option<u32
     }
 }
 
+/// `None` covers "absent", "not a positive integer", and "past `u32`"
+/// alike, which is what [`wall_height`] turns into one `W_DEFERRED_MEMBER`.
+///
+/// Saturating instead would put a wall top at `u32::MAX` because the author
+/// asked for `2^33` — the outcome [`nonneg_int`] documents as the reason it
+/// refuses rather than clamps.
 fn height_value(member: &Member) -> Option<u32> {
     let raw = member.intent_state.get("height")?;
     match &raw.value.kind {
-        ValueKind::Int(v) if *v > 0 => Some(u32::try_from(*v).unwrap_or(u32::MAX)),
+        ValueKind::Int(v) if *v > 0 => u32::try_from(*v).ok(),
         _ => None,
     }
 }

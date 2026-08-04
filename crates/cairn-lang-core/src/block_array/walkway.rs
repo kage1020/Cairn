@@ -205,6 +205,10 @@ pub fn port_world_position(
 /// Y for the whole strip.
 #[must_use]
 pub fn l_path(from: (i32, i32, i32), to: (i32, i32, i32)) -> Vec<(i32, i32, i32)> {
+    debug_assert!(
+        l_path_len(from, to).is_some_and(|len| len <= ROUTE_AREA_CAP),
+        "l_path called past the cap; callers must ask `l_path_len` first",
+    );
     let y = from.1;
     let mut voxels: Vec<(i32, i32, i32)> = Vec::new();
     let (x0, z0) = (from.0, from.2);
@@ -252,7 +256,25 @@ pub fn l_path(from: (i32, i32, i32), to: (i32, i32, i32)) -> Vec<(i32, i32, i32)
 /// The cap only exists so a pathological source (two ports megametres
 /// apart with a pebble between them) degrades to the skip-and-warn
 /// fallback instead of allocating the world.
-const ROUTE_AREA_CAP: u64 = 4_000_000;
+pub const ROUTE_AREA_CAP: u64 = 4_000_000;
+
+/// Cells [`l_path`] would produce for this pair, or `None` past
+/// [`ROUTE_AREA_CAP`].
+///
+/// The cap's own doc explains why it exists — "a pathological source (two
+/// ports megametres apart plus one pebble) degrades to the skip-and-warn
+/// fallback instead of allocating the world" — but it only ever guarded
+/// `route_path`, the detour search. `l_path` runs first and unconditionally,
+/// so removing the pebble walked straight past the cap: `gap=100000000`
+/// spent 53 seconds building a 1.4 GB `Vec` before anything looked at it.
+#[must_use]
+pub fn l_path_len(from: (i32, i32, i32), to: (i32, i32, i32)) -> Option<u64> {
+    let dx = u64::from(from.0.abs_diff(to.0));
+    let dz = u64::from(from.2.abs_diff(to.2));
+    // Inclusive of both endpoints, and the corner cell is shared.
+    let len = dx.checked_add(dz)?.checked_add(1)?;
+    (len <= ROUTE_AREA_CAP).then_some(len)
+}
 
 /// Direction of travel between two 4-neighbour ground-plane cells.
 /// Carried in the search state so the cost function can count turns:
@@ -723,12 +745,37 @@ fn door_world_xz(
     let w_i = i32::try_from(interior_w).ok()?;
     let h_i = i32::try_from(interior_h).ok()?;
     let o = i32::try_from(overhang).ok()?;
-    Some(match side {
-        WallSide::Front => (origin.0 + o + u_i, origin.2 + o + h_i - 1),
-        WallSide::Back => (origin.0 + o + (w_i - 1 - u_i), origin.2 + o),
-        WallSide::Left => (origin.0 + o, origin.2 + o + u_i),
-        WallSide::Right => (origin.0 + o + w_i - 1, origin.2 + o + (h_i - 1 - u_i)),
-    })
+    // Composed with `checked_*`, matching `window_world_xz` and the `None`
+    // contract `port_world_position` documents for both. Guarding only the
+    // individual conversions left the sum unguarded, so a `place` far enough
+    // out — `gap=2147483647` reaches it — panicked in a debug build and
+    // wrapped in a release one, sending the router billions of cells the
+    // other way.
+    let (x, z) = match side {
+        WallSide::Front => (
+            origin.0.checked_add(o)?.checked_add(u_i)?,
+            origin.2.checked_add(o)?.checked_add(h_i)?.checked_sub(1)?,
+        ),
+        WallSide::Back => (
+            origin
+                .0
+                .checked_add(o)?
+                .checked_add(w_i.checked_sub(1)?.checked_sub(u_i)?)?,
+            origin.2.checked_add(o)?,
+        ),
+        WallSide::Left => (
+            origin.0.checked_add(o)?,
+            origin.2.checked_add(o)?.checked_add(u_i)?,
+        ),
+        WallSide::Right => (
+            origin.0.checked_add(o)?.checked_add(w_i)?.checked_sub(1)?,
+            origin
+                .2
+                .checked_add(o)?
+                .checked_add(h_i.checked_sub(1)?.checked_sub(u_i)?)?,
+        ),
+    };
+    Some((x, z))
 }
 
 /// Window port wall-local centre offset: `offset + size.w / 2`, with

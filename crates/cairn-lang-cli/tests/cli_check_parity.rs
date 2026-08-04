@@ -106,6 +106,14 @@ const RESOLVER_FIXTURES: &[(&str, &str)] = &[
         "E_UNRESOLVED_SLOT",
         "struct s size=5x5\n  floor mat_slot=nosuchslot\n",
     ),
+    (
+        // `id=` takes a string literal, so its contents used to reach the
+        // scope-key builder unexamined — and `.` is one of the separators
+        // that key is joined on.
+        "E_INVALID_PLACE_ID",
+        "def hut size=3x3:\n  floor id=floor mat_slot=floor\n\
+         \nsite s:\n  place id=\"home.1\" use=hut theme=t at=origin\n",
+    ),
 ];
 
 fn all_fixtures() -> impl Iterator<Item = &'static (&'static str, &'static str)> {

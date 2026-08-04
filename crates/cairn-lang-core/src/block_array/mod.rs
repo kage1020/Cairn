@@ -199,12 +199,56 @@ impl Footprint {
     }
 }
 
+/// Largest voxel volume the lowering pass will build for one scope.
+///
+/// A 256-cube. It exists to turn an arithmetic accident into a diagnostic,
+/// not to constrain anything anyone writes: the largest shipped example is
+/// under 2500 voxels, while `size=100000x100000` asks for 10^10 and
+/// `walls height=2147483647` for more again. Every one of those numbers is
+/// a valid `u32` on its own, so no per-key range check catches them — only
+/// the product does.
+///
+/// A structure at the bound already costs 32 MB for the index vector alone
+/// (`PaletteIndex` is two bytes), so the ceiling is well past where the
+/// output stops being useful and well below where the allocator gives up.
+pub const MAX_STRUCTURE_VOLUME: usize = 256 * 256 * 256;
+
 impl Dims {
-    /// Total voxel count. Returns `usize` rather than `u32` because
-    /// downstream allocations index a `Vec`.
+    /// Total voxel count, or `None` when the product overflows `usize`.
+    ///
+    /// The only honest way to ask: `size=4294967295x4294967295` overflows
+    /// the multiplication itself, which panics in a debug build and — worse
+    /// — wraps in a release one, handing back a small number that then
+    /// disagrees with [`Self::index`] and turns into an out-of-bounds write.
+    #[must_use]
+    pub fn checked_volume(self) -> Option<usize> {
+        (self.x as usize)
+            .checked_mul(self.y as usize)?
+            .checked_mul(self.z as usize)
+    }
+
+    /// Whether this extent is within [`MAX_STRUCTURE_VOLUME`].
+    ///
+    /// Callers that are about to allocate must ask this first; the lowering
+    /// pass reports [`crate::check::DiagnosticCode::StructureTooLarge`] and
+    /// skips the scope when it says no.
+    #[must_use]
+    pub fn fits_volume_budget(self) -> bool {
+        self.checked_volume()
+            .is_some_and(|volume| volume <= MAX_STRUCTURE_VOLUME)
+    }
+
+    /// Total voxel count, saturating at `usize::MAX`.
+    ///
+    /// Safe to call on any [`Dims`], but only meaningful on one that has
+    /// already passed [`Self::fits_volume_budget`] — which every
+    /// [`BlockArray`] the lowering pass produces has, so readers of a built
+    /// array can use it directly.
     #[must_use]
     pub fn volume(self) -> usize {
-        (self.x as usize) * (self.y as usize) * (self.z as usize)
+        (self.x as usize)
+            .saturating_mul(self.y as usize)
+            .saturating_mul(self.z as usize)
     }
 
     /// Linear offset of `(x, y, z)` into a `(y, z, x)`-ordered flat array.

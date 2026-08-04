@@ -57,7 +57,7 @@ use crate::ast::{Value, ValueKind};
 use crate::check::{Diagnostic, DiagnosticCode, DiagnosticNote, Severity};
 use crate::edition::Edition;
 use crate::error::Span;
-use crate::ids::{PlaceId, PortId, SiteName};
+use crate::ids::{IdError, PlaceId, PortId, SiteName};
 use crate::intent::{
     DefIr, IntentModule, Member, MemberBody, MemberRole, SiteIr, StructIr, ThemeIr, ValueWithSpan,
     role_of,
@@ -488,6 +488,19 @@ fn resolve_site_placements(
             continue;
         };
 
+        // Validate before the id becomes half of a scope key. `PlaceId`
+        // states the invariants, and `place_scope_key` joins on `::`, so an
+        // id carrying `.` or `:` produces a key nothing can parse back —
+        // which is where the lowering pass used to `expect` and panic.
+        if let Err(err) = PlaceId::new(place_id) {
+            diagnostics.push(invalid_place_id_diag(
+                place_id,
+                &site.name,
+                member.span.clone(),
+                &err,
+            ));
+            continue;
+        }
         if let Some(first) = seen_place_ids.get(place_id) {
             diagnostics.push(duplicate_place_id_diag(
                 &site.name,
@@ -1119,6 +1132,25 @@ fn duplicate_place_id_diag(
         notes: vec![DiagnosticNote {
             span: Some(first.clone()),
             message: "first declared here".to_owned(),
+        }],
+        data: None,
+    }
+}
+
+fn invalid_place_id_diag(place_id: &str, site_name: &str, span: Span, err: &IdError) -> Diagnostic {
+    let reason = match err {
+        IdError::Empty => "it is empty".to_owned(),
+        IdError::ForbiddenChar { ch, .. } => format!("it contains `{ch}`"),
+    };
+    Diagnostic {
+        code: DiagnosticCode::InvalidPlaceId,
+        severity: Severity::Error,
+        span,
+        primary: format!("`place id={place_id}` in site `{site_name}` is not a usable id: {reason}"),
+        notes: vec![DiagnosticNote {
+            span: None,
+            message: "a place id becomes part of the `site::<site>::<place>` scope key, so it                       must be non-empty and free of `.`, `:`, and whitespace"
+                .to_owned(),
         }],
         data: None,
     }

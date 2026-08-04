@@ -123,6 +123,7 @@ mod tests {
             | C::UnresolvedPort
             | C::AmbiguousPort
             | C::MissingPathMaterial
+            | C::InvalidPlaceId
             | C::DeferredConnect => RaisedBy::Resolver,
             C::UnknownSlotTarget => RaisedBy::ResolverAndLowering,
             C::DeferredMember
@@ -133,6 +134,7 @@ mod tests {
             | C::DefNoSize
             | C::WalkwayBlocked
             | C::DuplicateWalkway
+            | C::StructureTooLarge
             | C::InvalidWalkwayIdent => RaisedBy::LoweringOnly,
         }
     }

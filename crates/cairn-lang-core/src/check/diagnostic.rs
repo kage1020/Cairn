@@ -112,6 +112,26 @@ pub enum DiagnosticCode {
     /// Fail-loud because the per-place colour scheme would otherwise vanish
     /// silently; carries a nearest-match suggestion when one fits.
     UnresolvedThemeRef,
+    /// A scope's derived voxel extent exceeds
+    /// [`crate::block_array::MAX_STRUCTURE_VOLUME`], so the pass skips it
+    /// rather than allocating for it.
+    ///
+    /// Every input that feeds the extent — `size=`, `walls height=`,
+    /// `roof overhang=`, `level y=` — is range-checked on its own, so this
+    /// only fires on a combination whose *product* is out of reach. Warning
+    /// severity, matching `StructNoSize`: the scope is skipped, and
+    /// `cairn compile` refuses separately rather than certifying a build
+    /// missing one of the scopes its source asked for.
+    StructureTooLarge,
+    /// A `place id=` breaks an invariant [`crate::ids::PlaceId`] relies on:
+    /// it is empty, or contains `.`, `:`, or whitespace.
+    ///
+    /// Those characters are the structural separators the scope key
+    /// `site::SITE::PLACE` and every walkway key parsed back out of it are
+    /// built from, so an id carrying one cannot round-trip. `id=` accepts a
+    /// string literal, which is what let the value through — nothing between
+    /// the lexer and the key constructor looked at its contents.
+    InvalidPlaceId,
     /// Two `place` rows in the same site share an `id=`. The first definition
     /// wins for downstream references; the duplicate is dropped and the
     /// error names both spans.
@@ -205,6 +225,8 @@ impl DiagnosticCode {
             Self::DefNoSize => "W_DEF_NO_SIZE",
             Self::UnresolvedPlaceRef => "E_UNRESOLVED_PLACE_REF",
             Self::UnresolvedThemeRef => "E_UNRESOLVED_THEME_REF",
+            Self::StructureTooLarge => "W_STRUCTURE_TOO_LARGE",
+            Self::InvalidPlaceId => "E_INVALID_PLACE_ID",
             Self::DuplicatePlaceId => "E_DUPLICATE_PLACE_ID",
             Self::InvalidPlaceOrigin => "E_INVALID_PLACE_ORIGIN",
             Self::UnusedDef => "W_UNUSED_DEF",
@@ -246,12 +268,14 @@ impl DiagnosticCode {
             | Self::UnresolvedPlaceRef
             | Self::UnresolvedThemeRef
             | Self::DuplicatePlaceId
+            | Self::InvalidPlaceId
             | Self::InvalidPlaceOrigin
             | Self::UnresolvedPort
             | Self::AmbiguousPort
             | Self::MissingPathMaterial
             | Self::ConnectArity => Severity::Error,
             Self::UnknownSlotTarget
+            | Self::StructureTooLarge
             | Self::ThemeSelectorUnmatched
             | Self::DeferredMember
             | Self::NoThemeBound
