@@ -42,9 +42,23 @@ impl Lockfile {
     /// Propagates I/O failure from creating or writing `path`, or YAML
     /// encoder failure from the schema.
     pub fn write_to_path(&self, path: &Path) -> Result<(), LockError> {
-        let body = serde_yml::to_string(self)?;
+        let body = self.to_yaml()?;
         fs::write(path, body)?;
         Ok(())
+    }
+
+    /// Serialise to the YAML body [`Self::write_to_path`] would write.
+    ///
+    /// Exposed so a caller that has to stage the bytes before committing
+    /// them — `cairn compile` writes the lockfile and its artifacts as one
+    /// set — can do the encoding and the I/O as separate steps, and fail
+    /// out of the first without having touched anything.
+    ///
+    /// # Errors
+    ///
+    /// Propagates YAML encode failure.
+    pub fn to_yaml(&self) -> Result<String, LockError> {
+        Ok(serde_yml::to_string(self)?)
     }
 
     /// Read a lockfile back from `path`.
