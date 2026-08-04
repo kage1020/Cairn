@@ -1466,6 +1466,9 @@ fn run_compile(
     };
 
     let lock_path = lock.map_or_else(|| default_lock_path(file), Path::to_path_buf);
+    if let Err(code) = check_lock_path_is_free(&prepared, &lock_path) {
+        return code;
+    }
     write_artifacts_and_lock(&prepared, &source, &block_ir, edition, &target, &lock_path)
 }
 
@@ -1638,25 +1641,55 @@ fn prepare_artifacts(
     Ok(prepared)
 }
 
+/// Refuse a `--lock` that would land on a path the artifacts already own.
+///
+/// `prepare_artifacts` checks the artifacts against each other, and the
+/// lockfile was never folded into that check, so `--lock out/home1.nbt` put
+/// two entries with the same destination into one set. They staged over each
+/// other's bytes, and during the commit the second one deleted the backup
+/// the first had just taken — destroying the previous build's artifact with
+/// no copy left anywhere. That is the failure this whole path exists to
+/// prevent, reachable through an argument the CLI accepted without comment.
+///
+/// The scratch names count too: `--lock out/home1.nbt.tmp` collides during
+/// staging rather than during the commit, and is just as unrecoverable.
+fn check_lock_path_is_free(
+    prepared: &[(PathBuf, Compound)],
+    lock_path: &Path,
+) -> Result<(), ExitCode> {
+    let taken: std::collections::HashSet<PathBuf> = prepared
+        .iter()
+        .flat_map(|(path, _)| staging::reserved_paths(path))
+        .collect();
+    for reserved in staging::reserved_paths(lock_path) {
+        if taken.contains(&reserved) {
+            eprintln!(
+                "error: lockfile path `{}` collides with an artifact this build writes (`{}`)",
+                lock_path.display(),
+                reserved.display(),
+            );
+            eprintln!(
+                "  note: pass a `--lock` outside `--out`, or rename the struct whose artifact \
+                 shares the name"
+            );
+            return Err(ExitCode::from(1));
+        }
+    }
+    Ok(())
+}
+
 /// Write the prepared structure files and the lockfile as one set: either
 /// every artifact plus the lock, or the directory exactly as it was.
 ///
 /// Two phases. Staging writes each file beside where it belongs, so every
 /// way the encode or the write can fail happens while the previous build is
-/// still untouched. Committing is renames only, and each one moves what it
-/// would have destroyed aside until the whole set has landed.
+/// still untouched. Committing is renames only; [`staging::StagedSet::commit`]
+/// describes what makes that step recoverable.
 ///
-/// The split is what the contract needs. The earlier single-phase version
-/// wrote each artifact straight to its destination and, on failure, deleted
-/// the paths it had written — but a rename consumes what was already there,
-/// so that list mixed files this run created with files it replaced, and
-/// deleting both meant a failure on the lockfile took the previous build's
-/// artifacts with it.
-///
-/// One risk remains, and it is a narrower one: a rename that fails
-/// mid-commit is undone by more renames, which can themselves fail. Those
-/// are reported per file rather than swallowed, because a half-restored
-/// directory the operator does not know about is worse than one they do.
+/// What the phases buy is a place to fail from. The single-phase version
+/// wrote each artifact atomically but *individually*, so by the time the
+/// lockfile failed some destinations had already been overwritten, and the
+/// only undo available was deleting them.
 fn write_artifacts_and_lock(
     prepared: &[(PathBuf, Compound)],
     source: &str,
@@ -1665,18 +1698,16 @@ fn write_artifacts_and_lock(
     target: &ResolvedTarget,
     lock_path: &Path,
 ) -> ExitCode {
-    // Phase 1 — stage. Every file is written beside where it belongs, so
-    // nothing a previous build produced has been touched yet and a failure
-    // is a plain cleanup of our own scratch.
-    let mut staged: Vec<Staged> = Vec::with_capacity(prepared.len() + 1);
+    // Phase 1 — stage. Nothing a previous build produced is touched, so a
+    // failure here costs only our own scratch.
+    let mut staged = staging::StagedSet::default();
     for (path, tag) in prepared {
-        match stage_tag(path, tag, target) {
-            Ok(entry) => staged.push(entry),
-            Err(err) => {
-                discard_staged(&staged);
-                eprintln!("error: writing `{}`: {err}", path.display());
-                return ExitCode::from(1);
-            }
+        if let Err(err) = staged.stage(path, staging::Kind::Artifact, |file| {
+            target.write_tag(file, tag)
+        }) {
+            staged.discard();
+            eprintln!("error: writing `{}`: {err}", path.display());
+            return ExitCode::from(1);
         }
     }
 
@@ -1688,164 +1719,347 @@ fn write_artifacts_and_lock(
     {
         Ok(body) => body,
         Err(err) => {
-            discard_staged(&staged);
+            staged.discard();
             eprintln!("error: {err}");
             return ExitCode::from(1);
         }
     };
-    match stage_bytes(lock_path, lock_body.as_bytes()) {
-        Ok(entry) => staged.push(entry),
-        Err(err) => {
-            discard_staged(&staged);
-            eprintln!("error: writing lockfile `{}`: {err}", lock_path.display());
-            return ExitCode::from(1);
-        }
+    if let Err(err) = staged.stage(lock_path, staging::Kind::Lockfile, |file| {
+        std::io::Write::write_all(file, lock_body.as_bytes())
+    }) {
+        staged.discard();
+        eprintln!("error: writing lockfile `{}`: {err}", lock_path.display());
+        return ExitCode::from(1);
     }
 
     // Phase 2 — commit. Renames only, each keeping what it replaces until
     // the whole set has landed.
-    if let Err((path, err)) = commit_staged(&staged) {
-        eprintln!("error: writing `{}`: {err}", path.display());
-        return ExitCode::from(1);
-    }
-
-    for entry in &staged {
-        println!("wrote {}", entry.final_path.display());
-    }
-    ExitCode::SUCCESS
-}
-
-/// A file written beside its destination, waiting to be renamed into place.
-struct Staged {
-    /// Where it belongs once every file in the set has been written.
-    final_path: PathBuf,
-    /// Where it is now.
-    tmp_path: PathBuf,
-}
-
-/// A destination that already held a file, moved aside for the duration of
-/// the commit so a failure part-way through can put it back.
-struct Displaced {
-    final_path: PathBuf,
-    backup_path: PathBuf,
-}
-
-/// `path` with `suffix` appended to the whole file name.
-///
-/// Not `Path::with_extension`, which would replace `.nbt` rather than
-/// extend it and so fuse `home1.nbt` and `home1.mcstructure` onto one
-/// scratch path.
-fn suffixed(path: &Path, suffix: &str) -> PathBuf {
-    let mut raw = path.as_os_str().to_owned();
-    raw.push(suffix);
-    PathBuf::from(raw)
-}
-
-fn stage_tag(
-    final_path: &Path,
-    tag: &Compound,
-    target: &ResolvedTarget,
-) -> Result<Staged, std::io::Error> {
-    stage_with(final_path, |file| target.write_tag(file, tag))
-}
-
-fn stage_bytes(final_path: &Path, bytes: &[u8]) -> Result<Staged, std::io::Error> {
-    use std::io::Write as _;
-    stage_with(final_path, |file| file.write_all(bytes))
-}
-
-fn stage_with(
-    final_path: &Path,
-    write: impl FnOnce(&mut std::fs::File) -> Result<(), std::io::Error>,
-) -> Result<Staged, std::io::Error> {
-    use std::io::Write as _;
-
-    let tmp_path = suffixed(final_path, ".tmp");
-    // Any failure before the handle closes must clean up the partial file,
-    // so a retry does not accumulate orphans.
-    let result = (|| {
-        let mut file = std::fs::File::create(&tmp_path)?;
-        write(&mut file)?;
-        file.flush()?;
-        file.sync_all()
-    })();
-    if let Err(err) = result {
-        let _ = std::fs::remove_file(&tmp_path);
-        return Err(err);
-    }
-    Ok(Staged {
-        final_path: final_path.to_path_buf(),
-        tmp_path,
-    })
-}
-
-fn discard_staged(staged: &[Staged]) {
-    for entry in staged {
-        let _ = std::fs::remove_file(&entry.tmp_path);
-    }
-}
-
-/// Move every staged file into place, or leave the directory as it was.
-///
-/// A rename consumes whatever is already at the destination, so the file it
-/// would destroy is moved aside first and only deleted once the whole set
-/// has landed. Deleting eagerly is what made a failure on the last file take
-/// the previous build's output with it: the list of "files we wrote" was a
-/// mix of ones this run created and ones it replaced, and undoing it deleted
-/// both.
-///
-/// `is_file` rather than `exists`: a directory sitting where an artifact
-/// belongs is not something to move aside and put back, it is the reason the
-/// rename below is about to fail.
-fn commit_staged(staged: &[Staged]) -> Result<(), (PathBuf, std::io::Error)> {
-    let mut displaced: Vec<Displaced> = Vec::new();
-    let mut committed: Vec<&Path> = Vec::new();
-
-    for entry in staged {
-        if entry.final_path.is_file() {
-            let backup_path = suffixed(&entry.final_path, ".bak");
-            let _ = std::fs::remove_file(&backup_path);
-            if let Err(err) = std::fs::rename(&entry.final_path, &backup_path) {
-                undo_commit(&displaced, &committed);
-                discard_staged(staged);
-                return Err((entry.final_path.clone(), err));
+    match staged.commit() {
+        Ok(written) => {
+            for path in written {
+                println!("wrote {}", path.display());
             }
-            displaced.push(Displaced {
-                final_path: entry.final_path.clone(),
-                backup_path,
-            });
+            ExitCode::SUCCESS
         }
-        if let Err(err) = std::fs::rename(&entry.tmp_path, &entry.final_path) {
-            undo_commit(&displaced, &committed);
-            discard_staged(staged);
-            return Err((entry.final_path.clone(), err));
+        Err(failure) => {
+            eprintln!("error: {failure}");
+            ExitCode::from(1)
         }
-        committed.push(&entry.final_path);
     }
-
-    for entry in &displaced {
-        let _ = std::fs::remove_file(&entry.backup_path);
-    }
-    Ok(())
 }
 
-/// Put the directory back the way the commit found it.
+/// Staging a set of output files and committing them together.
 ///
-/// Restoring can itself fail — the same disk that refused a rename can
-/// refuse this one — and a silent failure here is the worst outcome
-/// available, so it is reported per file rather than swallowed.
-fn undo_commit(displaced: &[Displaced], committed: &[&Path]) {
-    for path in committed {
-        let _ = std::fs::remove_file(path);
+/// A module rather than loose functions so the invariant that makes the
+/// commit recoverable — a staged file is only ever reachable through the
+/// scratch path this code chose — is enforced by privacy instead of by
+/// convention. `main.rs` has no other modules, so without one the fields
+/// below would be visible to every line in the file.
+mod staging {
+    use std::fmt;
+    use std::fs;
+    use std::io;
+    use std::path::{Path, PathBuf};
+
+    /// What a staged file is going to become, so a failure can name it.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub enum Kind {
+        Artifact,
+        Lockfile,
     }
-    for entry in displaced {
-        let _ = std::fs::remove_file(&entry.final_path);
-        if let Err(err) = std::fs::rename(&entry.backup_path, &entry.final_path) {
-            eprintln!(
-                "error: `{}` could not be restored from `{}`: {err}",
-                entry.final_path.display(),
-                entry.backup_path.display(),
-            );
+
+    impl fmt::Display for Kind {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            match self {
+                Self::Artifact => f.write_str("artifact"),
+                Self::Lockfile => f.write_str("lockfile"),
+            }
+        }
+    }
+
+    /// Which half of the commit failed.
+    ///
+    /// The two call for different fixes and point at different paths, so a
+    /// single "writing `X`" message for both sent the operator after the
+    /// wrong file: a stale `X.bak` directory blocks the *displace* step
+    /// while the error named `X`.
+    #[derive(Debug, Clone, Copy)]
+    enum Step {
+        /// Moving what is already at the destination out of the way.
+        Displace,
+        /// Renaming the staged file into the destination.
+        Place,
+    }
+
+    /// A commit that could not complete. The directory has been put back.
+    #[derive(Debug)]
+    pub struct CommitFailure {
+        kind: Kind,
+        step: Step,
+        /// The path the failing rename touched — the backup for a displace,
+        /// the destination for a place.
+        path: PathBuf,
+        source: io::Error,
+    }
+
+    impl fmt::Display for CommitFailure {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            let Self {
+                kind,
+                step,
+                path,
+                source,
+            } = self;
+            match step {
+                Step::Displace => write!(
+                    f,
+                    "the existing {kind} could not be moved aside to `{}`: {source}",
+                    path.display(),
+                ),
+                Step::Place => write!(f, "writing {kind} `{}`: {source}", path.display()),
+            }
+        }
+    }
+
+    /// A file written beside its destination, waiting to be renamed there.
+    struct Staged {
+        kind: Kind,
+        /// Where it belongs once every file in the set has been written.
+        final_path: PathBuf,
+        /// Where it is now.
+        tmp_path: PathBuf,
+    }
+
+    /// A destination that already held something, moved aside for the
+    /// duration of the commit so a failure part-way can put it back.
+    struct Displaced {
+        final_path: PathBuf,
+        backup_path: PathBuf,
+    }
+
+    /// Output files written but not yet in place.
+    #[derive(Default)]
+    pub struct StagedSet {
+        entries: Vec<Staged>,
+    }
+
+    /// `path` with `suffix` appended to the whole file name.
+    ///
+    /// Not `Path::with_extension`, which replaces the extension rather than
+    /// extending it: a lockfile at `village.crn.lock` would stage to
+    /// `village.crn.tmp`, colliding with any other `village.crn.*` scratch
+    /// and losing the `.lock` that names it.
+    fn suffixed(path: &Path, suffix: &str) -> PathBuf {
+        let mut raw = path.as_os_str().to_owned();
+        raw.push(suffix);
+        PathBuf::from(raw)
+    }
+
+    /// Every path this set will create or rename, staging scratch included.
+    ///
+    /// Callers check these against each other before staging starts: two
+    /// entries sharing a destination would stage over each other's bytes and
+    /// then fight over the same backup during the commit.
+    pub fn reserved_paths(final_path: &Path) -> [PathBuf; 3] {
+        [
+            final_path.to_path_buf(),
+            suffixed(final_path, ".tmp"),
+            suffixed(final_path, ".bak"),
+        ]
+    }
+
+    /// What is sitting at a destination right now.
+    enum Occupant {
+        /// Nothing — the commit will create the file.
+        Vacant,
+        /// A file or symlink, which `rename` can move aside and put back.
+        Movable,
+        /// A directory. `rename` cannot replace one with a file, so this is
+        /// not something to back up; it is the reason the place step below
+        /// is about to fail, and it fails with the directory named.
+        Directory,
+    }
+
+    /// Deliberately `symlink_metadata` rather than `Path::is_file`, which
+    /// folds every metadata error into `false`. A `false` here means "no
+    /// backup needed", so a transient stat failure would let the commit
+    /// overwrite a file it could not restore — the exact loss this whole
+    /// module exists to prevent. An unreadable destination is a hard error
+    /// instead.
+    fn occupant(path: &Path) -> io::Result<Occupant> {
+        match fs::symlink_metadata(path) {
+            Ok(meta) if meta.is_dir() => Ok(Occupant::Directory),
+            Ok(_) => Ok(Occupant::Movable),
+            Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(Occupant::Vacant),
+            Err(err) => Err(err),
+        }
+    }
+
+    impl StagedSet {
+        /// Write one file beside `final_path`.
+        ///
+        /// # Errors
+        ///
+        /// Propagates the I/O failure. The partial scratch file is removed
+        /// before returning: a failed entry is never added to the set, so
+        /// [`Self::discard`] has no way to reach it afterwards.
+        pub fn stage(
+            &mut self,
+            final_path: &Path,
+            kind: Kind,
+            write: impl FnOnce(&mut fs::File) -> io::Result<()>,
+        ) -> io::Result<()> {
+            use std::io::Write as _;
+
+            let tmp_path = suffixed(final_path, ".tmp");
+            let result = (|| {
+                let mut file = fs::File::create(&tmp_path)?;
+                write(&mut file)?;
+                file.flush()?;
+                // The commit below is a rename, which is only atomic with
+                // respect to the directory entry — without this the bytes
+                // can still be in flight when the rename publishes the name,
+                // so a crash leaves a correctly-named, half-written file.
+                file.sync_all()
+            })();
+            if let Err(err) = result {
+                let _ = fs::remove_file(&tmp_path);
+                return Err(err);
+            }
+            self.entries.push(Staged {
+                kind,
+                final_path: final_path.to_path_buf(),
+                tmp_path,
+            });
+            Ok(())
+        }
+
+        /// Throw the staged files away without touching any destination.
+        pub fn discard(self) {
+            for entry in &self.entries {
+                let _ = fs::remove_file(&entry.tmp_path);
+            }
+        }
+
+        /// Move every staged file into place, or leave the directory as it
+        /// was, and return the paths written.
+        ///
+        /// A rename consumes whatever is already at the destination, so each
+        /// one moves that file aside first and only deletes the backup once
+        /// the whole set has landed. Deleting eagerly is what made a failure
+        /// on the last file take the previous build with it: a list of "files
+        /// we wrote" mixes ones this run created with ones it replaced, and
+        /// undoing it deleted both.
+        ///
+        /// Consuming `self` so the set cannot be committed twice, nor
+        /// discarded after its scratch files have been renamed away.
+        ///
+        /// # Errors
+        ///
+        /// Returns the first rename that failed, after undoing the ones
+        /// before it.
+        pub fn commit(self) -> Result<Vec<PathBuf>, CommitFailure> {
+            let mut displaced: Vec<Displaced> = Vec::new();
+            let mut committed: Vec<PathBuf> = Vec::new();
+
+            for entry in &self.entries {
+                match occupant(&entry.final_path) {
+                    Ok(Occupant::Movable) => {
+                        let backup_path = suffixed(&entry.final_path, ".bak");
+                        if let Err(err) = fs::rename(&entry.final_path, &backup_path) {
+                            undo(&displaced, &committed);
+                            self.discard_scratch();
+                            return Err(CommitFailure {
+                                kind: entry.kind,
+                                step: Step::Displace,
+                                path: backup_path,
+                                source: err,
+                            });
+                        }
+                        displaced.push(Displaced {
+                            final_path: entry.final_path.clone(),
+                            backup_path,
+                        });
+                    }
+                    Ok(Occupant::Vacant | Occupant::Directory) => {}
+                    Err(err) => {
+                        undo(&displaced, &committed);
+                        self.discard_scratch();
+                        return Err(CommitFailure {
+                            kind: entry.kind,
+                            step: Step::Displace,
+                            path: entry.final_path.clone(),
+                            source: err,
+                        });
+                    }
+                }
+                if let Err(err) = fs::rename(&entry.tmp_path, &entry.final_path) {
+                    undo(&displaced, &committed);
+                    self.discard_scratch();
+                    return Err(CommitFailure {
+                        kind: entry.kind,
+                        step: Step::Place,
+                        path: entry.final_path.clone(),
+                        source: err,
+                    });
+                }
+                committed.push(entry.final_path.clone());
+            }
+
+            for entry in &displaced {
+                if let Err(err) = fs::remove_file(&entry.backup_path) {
+                    // The build succeeded, so this is not a failure — but
+                    // the leftover is a copy of the previous build under a
+                    // name that looks like scratch, and nothing later will
+                    // come back for it.
+                    eprintln!(
+                        "warning: `{}` was left behind after replacing `{}`: {err}",
+                        entry.backup_path.display(),
+                        entry.final_path.display(),
+                    );
+                }
+            }
+            Ok(committed)
+        }
+
+        /// `discard` by reference, for the undo paths that still need the
+        /// entry list afterwards.
+        fn discard_scratch(&self) {
+            for entry in &self.entries {
+                let _ = fs::remove_file(&entry.tmp_path);
+            }
+        }
+    }
+
+    /// Put the directory back the way the commit found it.
+    ///
+    /// Every step is reported on failure rather than swallowed. A half-
+    /// restored directory the operator knows about beats one they do not,
+    /// and the delete loop in particular has no later step that would
+    /// surface its failure: an entry that was created rather than replaced
+    /// appears in `committed` and never in `displaced`, so nothing touches
+    /// its path again. On Windows that is not hypothetical — deleting a file
+    /// another process holds open fails, while renaming onto a vacant name
+    /// succeeds regardless.
+    fn undo(displaced: &[Displaced], committed: &[PathBuf]) {
+        for path in committed {
+            if let Err(err) = fs::remove_file(path) {
+                eprintln!(
+                    "error: `{}` was written by a build that then failed, and could not be \
+                     removed: {err}",
+                    path.display(),
+                );
+            }
+        }
+        for entry in displaced {
+            let _ = fs::remove_file(&entry.final_path);
+            if let Err(err) = fs::rename(&entry.backup_path, &entry.final_path) {
+                eprintln!(
+                    "error: `{}` could not be restored from `{}`: {err}",
+                    entry.final_path.display(),
+                    entry.backup_path.display(),
+                );
+            }
         }
     }
 }

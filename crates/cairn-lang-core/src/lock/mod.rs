@@ -14,7 +14,8 @@ mod hash;
 mod schema;
 
 use std::fs;
-use std::path::Path;
+use std::io::Write as _;
+use std::path::{Path, PathBuf};
 
 pub use hash::{HashError, HashHex, HashParseError, hash_resolved_ir, hash_source};
 pub use schema::{
@@ -41,18 +42,42 @@ impl Lockfile {
     ///
     /// Propagates I/O failure from creating or writing `path`, or YAML
     /// encoder failure from the schema.
+    /// Writes through a sibling temporary file and a rename, so a failure
+    /// part-way cannot leave a truncated lockfile where a valid one was.
+    /// `fs::write` truncates in place, which turns a full disk or a lost
+    /// handle into a file that no longer parses — worse than the old
+    /// contents and worse than no file at all.
     pub fn write_to_path(&self, path: &Path) -> Result<(), LockError> {
         let body = self.to_yaml()?;
-        fs::write(path, body)?;
+        let mut tmp = path.as_os_str().to_owned();
+        tmp.push(".tmp");
+        let tmp = PathBuf::from(tmp);
+
+        let staged = (|| -> Result<(), std::io::Error> {
+            let mut file = fs::File::create(&tmp)?;
+            file.write_all(body.as_bytes())?;
+            file.flush()?;
+            // The rename below publishes the name, not the bytes; without
+            // this a crash can leave the new name pointing at a partial
+            // file.
+            file.sync_all()
+        })();
+        if let Err(err) = staged {
+            let _ = fs::remove_file(&tmp);
+            return Err(err.into());
+        }
+        if let Err(err) = fs::rename(&tmp, path) {
+            let _ = fs::remove_file(&tmp);
+            return Err(err.into());
+        }
         Ok(())
     }
 
     /// Serialise to the YAML body [`Self::write_to_path`] would write.
     ///
-    /// Exposed so a caller that has to stage the bytes before committing
-    /// them — `cairn compile` writes the lockfile and its artifacts as one
-    /// set — can do the encoding and the I/O as separate steps, and fail
-    /// out of the first without having touched anything.
+    /// Separating the encoding from the I/O lets a caller that has to place
+    /// several files together fail out of the encode without having touched
+    /// the filesystem at all.
     ///
     /// # Errors
     ///
