@@ -205,6 +205,10 @@ pub fn port_world_position(
 /// Y for the whole strip.
 #[must_use]
 pub fn l_path(from: (i32, i32, i32), to: (i32, i32, i32)) -> Vec<(i32, i32, i32)> {
+    debug_assert!(
+        l_path_area(from, to) <= ROUTE_AREA_CAP,
+        "l_path called past the cap; callers must ask `l_path_area` first",
+    );
     let y = from.1;
     let mut voxels: Vec<(i32, i32, i32)> = Vec::new();
     let (x0, z0) = (from.0, from.2);
@@ -252,7 +256,31 @@ pub fn l_path(from: (i32, i32, i32), to: (i32, i32, i32)) -> Vec<(i32, i32, i32)
 /// The cap only exists so a pathological source (two ports megametres
 /// apart with a pebble between them) degrades to the skip-and-warn
 /// fallback instead of allocating the world.
-const ROUTE_AREA_CAP: u64 = 4_000_000;
+pub const ROUTE_AREA_CAP: u64 = 4_000_000;
+
+/// Ground-plane cells the straight L between these two ports would span,
+/// as a bounding-box area.
+///
+/// Area, not path length, because area is what gets allocated:
+/// `build_walkway_array` sizes its voxel buffer from the bounding box, and
+/// `route_path` measures the same quantity against the same cap. A pair
+/// `2_000_000` cells apart on each axis has a path length of 4M — inside a
+/// length-based bound — and a bounding box of 4x10^12.
+///
+/// [`ROUTE_AREA_CAP`]'s doc has always described this case ("two ports
+/// megametres apart"), but only `route_path` consulted it, and `route_path`
+/// runs second and only when something is in the way. An unobstructed pair
+/// walked straight past: two `place` rows chained with `east_of=` and
+/// `north_of=` at `gap=30000` spent 32 seconds on roughly 1.8 GB.
+///
+/// Saturates at `u64::MAX` if the product overflows, which is the sentinel
+/// [`RoutePathError::AreaCapExceeded`] already documents for that field.
+#[must_use]
+pub fn l_path_area(from: (i32, i32, i32), to: (i32, i32, i32)) -> u64 {
+    let dx = u128::from(from.0.abs_diff(to.0)) + 1;
+    let dz = u128::from(from.2.abs_diff(to.2)) + 1;
+    u64::try_from(dx * dz).unwrap_or(u64::MAX)
+}
 
 /// Direction of travel between two 4-neighbour ground-plane cells.
 /// Carried in the search state so the cost function can count turns:
@@ -723,12 +751,37 @@ fn door_world_xz(
     let w_i = i32::try_from(interior_w).ok()?;
     let h_i = i32::try_from(interior_h).ok()?;
     let o = i32::try_from(overhang).ok()?;
-    Some(match side {
-        WallSide::Front => (origin.0 + o + u_i, origin.2 + o + h_i - 1),
-        WallSide::Back => (origin.0 + o + (w_i - 1 - u_i), origin.2 + o),
-        WallSide::Left => (origin.0 + o, origin.2 + o + u_i),
-        WallSide::Right => (origin.0 + o + w_i - 1, origin.2 + o + (h_i - 1 - u_i)),
-    })
+    // Composed with `checked_*`, matching `window_world_xz` and the `None`
+    // contract `port_world_position` documents for both. Guarding only the
+    // individual conversions left the sum unguarded, so a `place` far enough
+    // out — `gap=2147483647` reaches it — panicked in a debug build and
+    // wrapped in a release one, sending the router billions of cells the
+    // other way.
+    let (x, z) = match side {
+        WallSide::Front => (
+            origin.0.checked_add(o)?.checked_add(u_i)?,
+            origin.2.checked_add(o)?.checked_add(h_i)?.checked_sub(1)?,
+        ),
+        WallSide::Back => (
+            origin
+                .0
+                .checked_add(o)?
+                .checked_add(w_i.checked_sub(1)?.checked_sub(u_i)?)?,
+            origin.2.checked_add(o)?,
+        ),
+        WallSide::Left => (
+            origin.0.checked_add(o)?,
+            origin.2.checked_add(o)?.checked_add(u_i)?,
+        ),
+        WallSide::Right => (
+            origin.0.checked_add(o)?.checked_add(w_i)?.checked_sub(1)?,
+            origin
+                .2
+                .checked_add(o)?
+                .checked_add(h_i.checked_sub(1)?.checked_sub(u_i)?)?,
+        ),
+    };
+    Some((x, z))
 }
 
 /// Window port wall-local centre offset: `offset + size.w / 2`, with
