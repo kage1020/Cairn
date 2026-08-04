@@ -206,8 +206,8 @@ pub fn port_world_position(
 #[must_use]
 pub fn l_path(from: (i32, i32, i32), to: (i32, i32, i32)) -> Vec<(i32, i32, i32)> {
     debug_assert!(
-        l_path_len(from, to).is_some_and(|len| len <= ROUTE_AREA_CAP),
-        "l_path called past the cap; callers must ask `l_path_len` first",
+        l_path_area(from, to) <= ROUTE_AREA_CAP,
+        "l_path called past the cap; callers must ask `l_path_area` first",
     );
     let y = from.1;
     let mut voxels: Vec<(i32, i32, i32)> = Vec::new();
@@ -258,22 +258,28 @@ pub fn l_path(from: (i32, i32, i32), to: (i32, i32, i32)) -> Vec<(i32, i32, i32)
 /// fallback instead of allocating the world.
 pub const ROUTE_AREA_CAP: u64 = 4_000_000;
 
-/// Cells [`l_path`] would produce for this pair, or `None` past
-/// [`ROUTE_AREA_CAP`].
+/// Ground-plane cells the straight L between these two ports would span,
+/// as a bounding-box area.
 ///
-/// The cap's own doc explains why it exists — "a pathological source (two
-/// ports megametres apart plus one pebble) degrades to the skip-and-warn
-/// fallback instead of allocating the world" — but it only ever guarded
-/// `route_path`, the detour search. `l_path` runs first and unconditionally,
-/// so removing the pebble walked straight past the cap: `gap=100000000`
-/// spent 53 seconds building a 1.4 GB `Vec` before anything looked at it.
+/// Area, not path length, because area is what gets allocated:
+/// `build_walkway_array` sizes its voxel buffer from the bounding box, and
+/// `route_path` measures the same quantity against the same cap. A pair
+/// `2_000_000` cells apart on each axis has a path length of 4M — inside a
+/// length-based bound — and a bounding box of 4x10^12.
+///
+/// [`ROUTE_AREA_CAP`]'s doc has always described this case ("two ports
+/// megametres apart"), but only `route_path` consulted it, and `route_path`
+/// runs second and only when something is in the way. An unobstructed pair
+/// walked straight past: two `place` rows chained with `east_of=` and
+/// `north_of=` at `gap=30000` spent 32 seconds on roughly 1.8 GB.
+///
+/// Saturates at `u64::MAX` if the product overflows, which is the sentinel
+/// [`RoutePathError::AreaCapExceeded`] already documents for that field.
 #[must_use]
-pub fn l_path_len(from: (i32, i32, i32), to: (i32, i32, i32)) -> Option<u64> {
-    let dx = u64::from(from.0.abs_diff(to.0));
-    let dz = u64::from(from.2.abs_diff(to.2));
-    // Inclusive of both endpoints, and the corner cell is shared.
-    let len = dx.checked_add(dz)?.checked_add(1)?;
-    (len <= ROUTE_AREA_CAP).then_some(len)
+pub fn l_path_area(from: (i32, i32, i32), to: (i32, i32, i32)) -> u64 {
+    let dx = u128::from(from.0.abs_diff(to.0)) + 1;
+    let dz = u128::from(from.2.abs_diff(to.2)) + 1;
+    u64::try_from(dx * dz).unwrap_or(u64::MAX)
 }
 
 /// Direction of travel between two 4-neighbour ground-plane cells.

@@ -1146,10 +1146,13 @@ fn invalid_place_id_diag(place_id: &str, site_name: &str, span: Span, err: &IdEr
         code: DiagnosticCode::InvalidPlaceId,
         severity: Severity::Error,
         span,
-        primary: format!("`place id={place_id}` in site `{site_name}` is not a usable id: {reason}"),
+        primary: format!(
+            "`place id={place_id}` in site `{site_name}` is not a usable id: {reason}"
+        ),
         notes: vec![DiagnosticNote {
             span: None,
-            message: "a place id becomes part of the `site::<site>::<place>` scope key, so it                       must be non-empty and free of `.`, `:`, and whitespace"
+            message: "a place id becomes part of the `site::<site>::<place>` scope key, \
+                      so it must be non-empty and free of `.`, `:`, and whitespace"
                 .to_owned(),
         }],
         data: None,

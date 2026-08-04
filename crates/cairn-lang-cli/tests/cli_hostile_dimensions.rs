@@ -103,6 +103,20 @@ fn connected(gap: &str) -> String {
     ))
 }
 
+/// Two ports offset on *both* axes, via an `east_of=` / `north_of=` chain.
+///
+/// The single-axis pair above only ever spans a line, so a pair like this is
+/// what tells a length bound apart from an area one.
+fn connected_diagonally(gap: &str) -> String {
+    source(&format!(
+        "{HUT}site duo:\n\
+         \x20\x20place id=a use=hut theme=t at=origin\n\
+         \x20\x20place id=b use=hut theme=t east_of=a gap={gap}\n\
+         \x20\x20place id=c use=hut theme=t north_of=b gap={gap}\n\
+         \x20\x20connect a.entry to c.entry path=@path\n"
+    ))
+}
+
 /// Every shape measured to crash, abort, or hang before the bounds existed,
 /// with what it did.
 ///
@@ -158,9 +172,16 @@ fn hostile_sources() -> Vec<(&'static str, String)> {
             ),
         ),
         // Walkway port resolution added `i32`s without checking, and the
-        // path was materialised before anything looked at its length.
+        // strip was materialised before anything measured it.
         ("gap-i32-max", connected("2147483647")),
         ("gap-large", connected("100000000")),
+        // Area, not length. A single-axis pair only ever spans a line, so a
+        // bound on path length looks sufficient — which is exactly the shape
+        // that hid the leak. `gap=30000` on both axes is a 60001-cell path
+        // and a 900-million-cell bounding box, and the bounding box is what
+        // gets allocated: 32 seconds, roughly 1.8 GB.
+        ("gap-diagonal", connected_diagonally("30000")),
+        ("gap-diagonal-large", connected_diagonally("1000000")),
     ]
 }
 

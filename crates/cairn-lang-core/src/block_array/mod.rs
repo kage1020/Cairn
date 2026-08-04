@@ -211,7 +211,22 @@ impl Footprint {
 /// A structure at the bound already costs 32 MB for the index vector alone
 /// (`PaletteIndex` is two bytes), so the ceiling is well past where the
 /// output stops being useful and well below where the allocator gives up.
+///
+/// Per scope, not per module: a source declaring a thousand structs can
+/// still ask for a thousand times this. Bounding the total would need a
+/// budget threaded through the whole pass, and nothing today streams
+/// scopes to disk as they finish, so the two would have to land together.
 pub const MAX_STRUCTURE_VOLUME: usize = 256 * 256 * 256;
+
+// Walkways are the other thing the pass allocates, and they are bounded by
+// `walkway::ROUTE_AREA_CAP` instead — a cell count over a one-block-thick
+// plane, so it is directly comparable. Keeping it under the volume bound is
+// what makes `Dims::volume`'s claim below true of every array this pass
+// produces, walkways included.
+const _: () = assert!(
+    crate::block_array::walkway::ROUTE_AREA_CAP <= MAX_STRUCTURE_VOLUME as u64,
+    "a walkway inside the router's area cap must also be inside the structure volume bound",
+);
 
 impl Dims {
     /// Total voxel count, or `None` when the product overflows `usize`.

@@ -58,7 +58,7 @@ use super::roof::{
 };
 use super::walkway::{
     BlockedIndex, ROUTE_AREA_CAP, RoutePathError, WalkwayLayout, build_walkway_array, l_path,
-    l_path_len, port_world_position, route_path,
+    l_path_area, port_world_position, route_path,
 };
 use super::{BlockArray, BlockArrayIr, BlockState, Dims, Palette, PaletteIndex};
 
@@ -392,9 +392,14 @@ fn lower_connects(
         // only when something is in the way. An unobstructed pair walked
         // past the cap and materialised the whole strip: `gap=100000000`
         // spent 53 seconds on a 1.4 GB `Vec` before any check saw it.
-        if l_path_len(from_pos, to_pos).is_none() {
+        // Measure before building. `route_path` already refuses on this
+        // quantity, but it runs second and only when the straight L is
+        // obstructed — an unobstructed pair reached `build_walkway_array`
+        // and sized a voxel buffer from the bounding box directly.
+        let straight_area = l_path_area(from_pos, to_pos);
+        if straight_area > ROUTE_AREA_CAP {
             let failure = RoutePathError::AreaCapExceeded {
-                area: u64::MAX,
+                area: straight_area,
                 cap: ROUTE_AREA_CAP,
             };
             diagnostics.push(Diagnostic {
@@ -402,7 +407,8 @@ fn lower_connects(
                 severity: Severity::Warning,
                 span: connect.span.clone(),
                 primary: format!(
-                    "walkway `{from} ↔ {to}` spans more than {ROUTE_AREA_CAP} cells and was not laid",
+                    "walkway `{from} ↔ {to}` spans {straight_area} cells, past the \
+                     {ROUTE_AREA_CAP}-cell router cap, and was not laid",
                     from = connect.from,
                     to = connect.to,
                 ),
@@ -735,16 +741,29 @@ fn lower_site<'a>(
             continue;
         };
         // Build the typed ids once, here, rather than asserting the
-        // invariant again at the bottom of the loop. `id=` takes a string
-        // literal, so nothing upstream of the resolver's
-        // `E_INVALID_PLACE_ID` guarantees the contents — and the bottom of
-        // this loop used to `expect` that guarantee, which is where a
-        // `place id="home.1"` panicked. Skipping silently keeps the
-        // diagnostic count honest: the resolver already reported it, the
-        // same way the missing-scope arm below does.
-        let (Ok(placement_site), Ok(placement_id)) =
-            (SiteName::new(site.name.as_str()), PlaceId::new(place_id))
-        else {
+        // invariant again at the bottom of the loop, which is where a
+        // `place id="home.1"` used to `expect` and panic.
+        //
+        // The two ids fail for different reasons and so are handled
+        // separately. `id=` takes a string literal, so nothing upstream of
+        // the resolver's `E_INVALID_PLACE_ID` constrains its contents —
+        // reachable, already reported, skip silently the way the
+        // missing-scope arm below does.
+        let Ok(placement_id) = PlaceId::new(place_id) else {
+            continue;
+        };
+        // A site name is an identifier the lexer produced, so it cannot
+        // carry `.`, `:`, or whitespace. Folding this into the arm above
+        // would mean a future relaxation of the site-name grammar silently
+        // dropped every place in the site; the `debug_assert!` convention
+        // this file already uses for unreachable invariants fails loud in
+        // tests instead.
+        let Ok(placement_site) = SiteName::new(site.name.as_str()) else {
+            debug_assert!(
+                false,
+                "site name `{}` is not a valid SiteName; the lexer is supposed to guarantee it",
+                site.name,
+            );
             continue;
         };
 
@@ -1013,12 +1032,14 @@ fn diag_structure_too_large(body: &BodyDescriptor<'_>, dims: Dims) -> Diagnostic
         severity: Severity::Warning,
         span: body.header_span.clone(),
         primary: format!(
-            "`{}` derives a {}x{}x{} voxel extent, past the {MAX_STRUCTURE_VOLUME}-voxel              maximum; block-array lowering skipped it",
+            "`{}` derives a {}x{}x{} voxel extent, past the \
+             {MAX_STRUCTURE_VOLUME}-voxel maximum; block-array lowering skipped it",
             body.scope_label, dims.x, dims.y, dims.z,
         ),
         notes: vec![DiagnosticNote {
             span: None,
-            message: "the extent is derived from `size=` plus the tallest `height=` and the                       largest `overhang=`; reduce whichever of those is out of scale"
+            message: "the extent is derived from `size=` plus the tallest `height=` \
+                      and the largest `overhang=`; reduce whichever of those is out of scale"
                 .to_owned(),
         }],
         data: None,
