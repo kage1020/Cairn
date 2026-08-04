@@ -467,3 +467,62 @@ fn lsp_11_malformed_notifications_do_not_kill_the_server() {
     assert_eq!(diagnostics_of(&message).len(), 0);
     server.shutdown();
 }
+
+#[test]
+fn lsp_16_deeply_nested_document_is_diagnosed_not_fatal() {
+    // A Rust stack overflow aborts the process, so unbounded parser
+    // recursion did not merely produce a bad diagnostic here — it killed the
+    // language server, which re-parses on every keystroke. A user typing
+    // brackets would have watched the editor report a crashed server.
+    //
+    // Asserting the *next* request still gets an answer is what makes this a
+    // liveness test rather than a diagnostics test: a dead server publishes
+    // nothing at all, which an "expect diagnostics" assertion alone could
+    // not tell apart from a parse that succeeded.
+    // Both recursive shapes reach here: brackets nest a value, indentation
+    // nests a body. The second one stayed unguarded after the first was
+    // fixed, so covering only brackets would have declared this closed while
+    // the server still died on an indented document.
+    let mut indented = String::from("struct a size=1x1\n");
+    for level in 1..=500 {
+        indented.push_str(&"  ".repeat(level));
+        indented.push_str("level y=0\n");
+    }
+    let brackets = format!(
+        "struct a size=1x1\n  window mat={}x{}\n",
+        "[".repeat(400),
+        "]".repeat(400),
+    );
+
+    for (shape, deep) in [("brackets", brackets), ("indent", indented)] {
+        let (mut server, _) = Server::start();
+        server.did_open(&deep, 1);
+        let published = server.read_until_method("textDocument/publishDiagnostics");
+        let diagnostics = diagnostics_of(&published);
+        assert_eq!(
+            diagnostics.len(),
+            1,
+            "{shape}: a parse failure publishes one diagnostic; got {diagnostics:?}",
+        );
+        assert!(
+            diagnostics[0]["message"]
+                .as_str()
+                .expect("message")
+                .contains("nesting"),
+            "{shape}: the message should name the nesting limit; got {:?}",
+            diagnostics[0]["message"],
+        );
+
+        // The liveness half, and the reason this is not just a diagnostics
+        // test: a dead server publishes nothing, which the assertions above
+        // cannot tell apart from a parse that succeeded.
+        server.did_open(CLEAN, 2);
+        let after = server.read_until_method("textDocument/publishDiagnostics");
+        assert_eq!(
+            diagnostics_of(&after).len(),
+            0,
+            "{shape}: the server must still serve the next document",
+        );
+        server.shutdown();
+    }
+}

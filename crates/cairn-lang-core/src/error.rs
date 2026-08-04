@@ -92,6 +92,17 @@ pub fn describe_int_kind(kind: IntErrorKind) -> &'static str {
     }
 }
 
+/// Names the limit rather than only reporting that one exists: the author
+/// (or the LLM editing loop the language is designed around) has to know how
+/// far to unwind to make the source legal again.
+fn render_nesting_too_deep(limit: usize) -> String {
+    format!(
+        "nesting is limited to {limit} levels here; \
+         flatten the list, unindent the block, or split the expression \
+         across intermediate `logic` bindings"
+    )
+}
+
 fn render_invalid_int(context: IntContext, lexeme: &str, kind: IntErrorKind) -> String {
     format!(
         "{} `{}`: {}",
@@ -173,6 +184,22 @@ pub enum ParseError {
         /// What was expected vs found.
         message: String,
     },
+    /// Value or expression nesting ran past the parser's depth limit.
+    ///
+    /// Raised instead of descending far enough to exhaust the native stack.
+    /// A Rust stack overflow aborts the process and cannot be caught, so it
+    /// would take down every embedder too — including the language server,
+    /// which re-parses on each keystroke.
+    #[error("{position}: {}", render_nesting_too_deep(*limit))]
+    NestingTooDeep {
+        /// First token of the level that went one too far.
+        ///
+        /// Not the bracket or keyword that opened it: the guard fires once
+        /// the level has been entered, so the position sits just inside.
+        position: Position,
+        /// The limit that was exceeded, so the message can state it.
+        limit: usize,
+    },
     /// An integer literal could not be parsed.
     #[error("{position}: {}", render_invalid_int(*context, lexeme, *kind))]
     InvalidInt {
@@ -235,7 +262,9 @@ impl ParseError {
     pub fn position(&self) -> Position {
         match self {
             Self::Lex(err) => err.position(),
-            Self::Syntax { position, .. } | Self::InvalidInt { position, .. } => *position,
+            Self::Syntax { position, .. }
+            | Self::InvalidInt { position, .. }
+            | Self::NestingTooDeep { position, .. } => *position,
         }
     }
 
@@ -245,6 +274,7 @@ impl ParseError {
         match self {
             Self::Lex(err) => err.user_message(),
             Self::Syntax { message, .. } => message.clone(),
+            Self::NestingTooDeep { limit, .. } => render_nesting_too_deep(*limit),
             Self::InvalidInt {
                 context,
                 lexeme,

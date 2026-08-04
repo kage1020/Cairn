@@ -29,6 +29,12 @@ use serde::{Serialize, Serializer};
 /// codes for netlist / placement / route stages does not break external
 /// exhaust matches.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+// `EnumIter` lets the in-crate tests walk every variant instead of
+// re-listing them, which is the only way a check over "all codes" cannot
+// silently omit whichever was added last. `cfg(test)` keeps the proc macro
+// out of shipped builds; `cairn_lang_core::check::DiagnosticCode` carries
+// the same guard for the same reason.
+#[cfg_attr(test, derive(strum::EnumIter))]
 #[non_exhaustive]
 pub enum DiagnosticCode {
     /// A `logic sig.X = <expr>` references a signal name that no sensor
@@ -119,6 +125,15 @@ pub enum DiagnosticCode {
     /// enlarge the `circuit region=` footprint so buffer candidates
     /// have room on the plane.
     BufferCoordCollision,
+    /// Lowering a `logic` binding descended past
+    /// [`crate::synth::MAX_LOWERING_DEPTH`]. A binding is lowered by descending into
+    /// whatever it references, so a chain declared in the reverse of its
+    /// dependency order costs one level per binding. Past the limit the
+    /// native stack would overflow, which aborts the process instead of
+    /// producing a diagnostic. Fix: declare the chain in dependency order —
+    /// the same graph written that way lowers at any length, because each
+    /// reference is already resolved when it is reached.
+    LogicNestingTooDeep,
 }
 
 impl DiagnosticCode {
@@ -138,6 +153,7 @@ impl DiagnosticCode {
             Self::AttenuationLimit => "E_ATTENUATION_LIMIT",
             Self::CrossingCongestion => "E_CROSSING_CONGESTION",
             Self::BufferCoordCollision => "E_BUFFER_COORD_COLLISION",
+            Self::LogicNestingTooDeep => "E_LOGIC_NESTING_TOO_DEEP",
         }
     }
 
@@ -154,7 +170,8 @@ impl DiagnosticCode {
             | Self::RouteCongestion
             | Self::AttenuationLimit
             | Self::CrossingCongestion
-            | Self::BufferCoordCollision => Severity::Error,
+            | Self::BufferCoordCollision
+            | Self::LogicNestingTooDeep => Severity::Error,
             Self::LogicUnusedSignal => Severity::Warning,
         }
     }
@@ -241,5 +258,45 @@ impl Diagnostic {
             message: message.into(),
         });
         self
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use strum::IntoEnumIterator;
+
+    use super::{DiagnosticCode, Severity};
+
+    /// The prefix is the contract downstream tooling filters on: a CI
+    /// annotator that treats `E_` as failing and `W_` as advisory reads the
+    /// string, not `severity()`. Nothing tied the two together, so a new
+    /// code could ship announcing the opposite of what it is — and the
+    /// walk is over every variant, not a hand-written list, so the one
+    /// added last cannot be the one left out.
+    #[test]
+    fn the_code_prefix_agrees_with_the_severity() {
+        for code in DiagnosticCode::iter() {
+            let expected = match code.severity() {
+                Severity::Error => "E_",
+                Severity::Warning => "W_",
+            };
+            assert!(
+                code.as_str().starts_with(expected),
+                "{code:?} is {:?} but its string form is {}",
+                code.severity(),
+                code.as_str(),
+            );
+        }
+    }
+
+    /// Two codes sharing a string would make them indistinguishable to
+    /// every consumer that matches on it.
+    #[test]
+    fn every_code_has_its_own_string() {
+        let mut seen: Vec<&str> = DiagnosticCode::iter().map(DiagnosticCode::as_str).collect();
+        let total = seen.len();
+        seen.sort_unstable();
+        seen.dedup();
+        assert_eq!(seen.len(), total, "two variants share a string form");
     }
 }
