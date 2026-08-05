@@ -272,7 +272,7 @@ fn to_slot(src: &str, from: &str, text: &str) -> std::ops::Range<usize> {
     slot_span(src, &format!("connect {from} to "), text)
 }
 
-fn only_endpoint_diag(src: &str) -> Diagnostic {
+fn only_arity_diag(src: &str) -> Diagnostic {
     let mut arity = arity_only(diagnose(src));
     assert_eq!(arity.len(), 1, "expected one diagnostic, got: {arity:#?}");
     arity.remove(0)
@@ -284,9 +284,11 @@ fn only_endpoint_diag(src: &str) -> Diagnostic {
 /// `1` (integer) from `"1"` (string) without opening the file.
 ///
 /// A list is absent here on purpose: `connect [a.entry] to b.entry`
-/// fails in the parser before this pass runs, because the `[` in the
-/// first positional slot is read as the start of a `key=[...]`
-/// argument. The to-slot covers the list shape instead — see
+/// fails in the parser before this pass runs. A `[` immediately after
+/// the keyword opens a selector (`parse_command` reads `connect[...]`
+/// as an attribute filter), and a selector body is a `key=value` list,
+/// so the parser stops at the `.` asking for an `=`. The to-slot covers
+/// the list shape instead — see
 /// `ca_11_to_side_non_reference_endpoints_are_flagged`.
 const NON_REFERENCE_ENDPOINTS: &[(&str, &str)] = &[
     ("a", "identifier"),
@@ -307,7 +309,7 @@ const NON_REFERENCE_ENDPOINTS: &[(&str, &str)] = &[
 fn ca_10_from_side_non_reference_endpoints_are_flagged() {
     for (text, kind) in NON_REFERENCE_ENDPOINTS {
         let src = format!("{PROLOGUE}connect {text} to b.entry path=@gravel\n");
-        let d = only_endpoint_diag(&src);
+        let d = only_arity_diag(&src);
         assert_eq!(d.severity, Severity::Error);
         assert_eq!(
             d.span,
@@ -323,6 +325,11 @@ fn ca_10_from_side_non_reference_endpoints_are_flagged() {
         assert!(
             d.primary.contains(kind),
             "message should name the actual kind `{kind}` for `{text}`, got: {}",
+            d.primary,
+        );
+        assert!(
+            d.primary.contains(&format!("`{text}`")),
+            "message should quote the value as written for `{text}`, got: {}",
             d.primary,
         );
     }
@@ -341,7 +348,7 @@ fn ca_11_to_side_non_reference_endpoints_are_flagged() {
         .collect();
     for (text, kind) in cases {
         let src = format!("{PROLOGUE}connect a.entry to {text} path=@gravel\n");
-        let d = only_endpoint_diag(&src);
+        let d = only_arity_diag(&src);
         assert_eq!(
             d.span,
             to_slot(&src, "a.entry", text),
@@ -356,6 +363,14 @@ fn ca_11_to_side_non_reference_endpoints_are_flagged() {
         assert!(
             d.primary.contains(kind),
             "message should name the actual kind `{kind}` for `{text}`, got: {}",
+            d.primary,
+        );
+        // A list has no bounded surface form, so it is named by kind
+        // alone; every other shape must carry the text as written.
+        assert_eq!(
+            d.primary.contains(&format!("`{text}`")),
+            kind != "list",
+            "surface form of `{text}` should appear iff it is bounded, got: {}",
             d.primary,
         );
     }
@@ -386,10 +401,10 @@ fn ca_12_both_endpoints_broken_earn_one_diagnostic_each() {
 #[test]
 fn ca_13_from_side_reference_with_extra_segment_is_flagged() {
     let src = format!("{PROLOGUE}connect a.entry.x to b.entry path=@gravel\n");
-    let d = only_endpoint_diag(&src);
+    let d = only_arity_diag(&src);
     assert_eq!(d.span, from_slot(&src, "a.entry.x"));
     assert!(
-        d.primary.contains("a.entry.x") && d.primary.contains('3'),
+        d.primary.contains("a.entry.x") && d.primary.contains("3 segments"),
         "message should quote the reference and its segment count, got: {}",
         d.primary,
     );
@@ -399,10 +414,10 @@ fn ca_13_from_side_reference_with_extra_segment_is_flagged() {
 #[test]
 fn ca_14_to_side_reference_with_extra_segment_is_flagged() {
     let src = format!("{PROLOGUE}connect a.entry to b.entry.x path=@gravel\n");
-    let d = only_endpoint_diag(&src);
+    let d = only_arity_diag(&src);
     assert_eq!(d.span, to_slot(&src, "a.entry", "b.entry.x"));
     assert!(
-        d.primary.contains("b.entry.x") && d.primary.contains('3'),
+        d.primary.contains("b.entry.x") && d.primary.contains("3 segments"),
         "message should quote the reference and its segment count, got: {}",
         d.primary,
     );
@@ -430,7 +445,7 @@ fn ca_15_over_arity_also_reports_broken_endpoints() {
 #[test]
 fn ca_16_wrong_separator_suppresses_endpoint_findings() {
     let src = format!("{PROLOGUE}connect 1 xxx 2 path=@gravel\n");
-    let d = only_endpoint_diag(&src);
+    let d = only_arity_diag(&src);
     assert_eq!(slice(&src, &d), "xxx");
 }
 
@@ -442,10 +457,29 @@ fn ca_16_wrong_separator_suppresses_endpoint_findings() {
 #[test]
 fn ca_17_missing_half_suppresses_endpoint_findings() {
     let src = format!("{PROLOGUE}connect 1 path=@gravel\n");
-    let d = only_endpoint_diag(&src);
+    let d = only_arity_diag(&src);
     assert!(
         d.primary.contains("missing"),
         "expected the missing-half message, got: {}",
+        d.primary,
+    );
+}
+
+/// The `to` keyword present with no target is the other suppression
+/// arm: the row stops mid-shape, so the endpoint that *is* written
+/// stays unreported until the author finishes the line. Sits beside
+/// `ca_17` because the two arms are reached by different positional
+/// counts and a refactor could easily fix one and drop the other.
+#[test]
+fn ca_17b_to_without_target_suppresses_endpoint_findings() {
+    let src = format!(
+        "{PROLOGUE}connect 1 to path=@gravel
+"
+    );
+    let d = only_arity_diag(&src);
+    assert!(
+        d.primary.contains("missing"),
+        "expected the missing-target message, got: {}",
         d.primary,
     );
 }
@@ -460,14 +494,14 @@ fn ca_17_missing_half_suppresses_endpoint_findings() {
 #[test]
 fn ca_18_string_separator_renders_distinctly_from_the_bare_keyword() {
     let quoted = format!("{PROLOGUE}connect a.entry \"to\" b.entry path=@gravel\n");
-    let d = only_endpoint_diag(&quoted);
+    let d = only_arity_diag(&quoted);
     assert!(
         d.primary.contains("\"to\""),
         "a string separator must keep its quotes in the message, got: {}",
         d.primary,
     );
     let bare = format!("{PROLOGUE}connect a.entry xxx b.entry path=@gravel\n");
-    let other = only_endpoint_diag(&bare);
+    let other = only_arity_diag(&bare);
     assert_ne!(
         d.primary, other.primary,
         "the quoted and bare separators must not render identically",
@@ -498,15 +532,97 @@ fn ca_20_endpoint_notes_name_the_repair_for_the_shape_at_hand() {
     let cases = [
         ("a", "a.<port>"),
         ("\"a.entry\"", "quotes"),
+        ("@gravel", "path=@"),
         ("a.entry.x", "one dot"),
     ];
     for (text, expected) in cases {
         let src = format!("{PROLOGUE}connect {text} to b.entry path=@gravel\n");
-        let d = only_endpoint_diag(&src);
+        let d = only_arity_diag(&src);
         assert!(
             d.notes.iter().any(|n| n.message.contains(expected)),
             "endpoint `{text}` should carry a note mentioning `{expected}`, got: {:#?}",
             d.notes,
         );
+    }
+}
+
+/// A prologue whose places actually resolve.
+///
+/// [`PROLOGUE`] declares a `struct`, but `place use=` looks for a
+/// `def`, so every source built on it carries two
+/// `E_UNRESOLVED_PLACE_REF`s and the resolver abandons each placement
+/// before it ever reads a `connect` endpoint. Every assertion above
+/// filters to `E_CONNECT_ARITY`, so none of them can see what the two
+/// layers do to one row together. This prologue gives the resolver
+/// something to resolve.
+const RESOLVING_PROLOGUE: &str = "def hut size=3x3:\n  \
+floor id=floor mat_slot=floor\n  \
+walls id=walls class=outer mat_slot=wall height=3\n  \
+door  id=entry side=front at=center\n\n\
+theme plain:\n  \
+slot floor -> @oak_planks\n  \
+slot wall  -> @cobblestone\n\n\
+site duo:\n  \
+place id=anchor use=hut theme=plain at=origin\n  \
+place id=peer   use=hut theme=plain east_of=anchor gap=4\n  ";
+
+fn all_codes(source: &str) -> Vec<&'static str> {
+    diagnose(source).iter().map(|d| d.code.as_str()).collect()
+}
+
+/// One mistake earns one diagnostic once both layers have run.
+///
+/// The endpoint check and the resolver's endpoint guard look at the
+/// same slot, and the resolver's silent return is justified in its own
+/// comment by "re-pushing here would report one mistake twice". Nothing
+/// pinned that: with a resolvable prologue, a malformed endpoint must
+/// produce `E_CONNECT_ARITY` and nothing else, and the well-formed row
+/// must produce nothing at all.
+#[test]
+fn ca_21_one_endpoint_mistake_earns_one_diagnostic_across_both_layers() {
+    let clean = format!("{RESOLVING_PROLOGUE}connect anchor.entry to peer.entry path=@gravel\n");
+    assert!(
+        all_codes(&clean).is_empty(),
+        "the resolvable prologue must be clean on a well-formed row, got: {:?}",
+        all_codes(&clean),
+    );
+    for row in [
+        "connect anchor to peer.entry path=@gravel",
+        "connect anchor.entry to peer path=@gravel",
+        "connect \"anchor.entry\" to peer.entry path=@gravel",
+        "connect @gravel to peer.entry path=@gravel",
+        "connect anchor.entry.x to peer.entry path=@gravel",
+        "connect anchor.entry to peer.entry.x path=@gravel",
+    ] {
+        let src = format!("{RESOLVING_PROLOGUE}{row}\n");
+        assert_eq!(
+            all_codes(&src),
+            ["E_CONNECT_ARITY"],
+            "`{row}` must earn exactly one diagnostic",
+        );
+    }
+    let both = format!("{RESOLVING_PROLOGUE}connect 1 to 2 path=@gravel\n");
+    assert_eq!(all_codes(&both), ["E_CONNECT_ARITY", "E_CONNECT_ARITY"]);
+}
+
+/// The division of labour holds in the other direction too: a row whose
+/// endpoints are the right *shape* but name the wrong thing belongs to
+/// the resolver, and this pass must stay quiet. Without this, widening
+/// the endpoint check until it swallowed the resolver's cases would
+/// look like progress.
+#[test]
+fn ca_22_well_shaped_endpoints_that_do_not_resolve_stay_with_the_resolver() {
+    for (row, expected) in [
+        (
+            "connect nosuch.entry to peer.entry path=@gravel",
+            "E_UNRESOLVED_PLACE_REF",
+        ),
+        (
+            "connect anchor.nosuch to peer.entry path=@gravel",
+            "E_UNRESOLVED_PORT",
+        ),
+    ] {
+        let src = format!("{RESOLVING_PROLOGUE}{row}\n");
+        assert_eq!(all_codes(&src), [expected], "for `{row}`");
     }
 }

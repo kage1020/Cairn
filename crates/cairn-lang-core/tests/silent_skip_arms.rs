@@ -46,6 +46,9 @@
 //!    one that was not silent but *wrong*: the resolver read
 //!    `tail()[0]` and laid the walkway the author would have got by
 //!    deleting the trailing segments.
+//! 7. **`connect` rows carrying a fourth positional** — the count
+//!    bound, which the endpoint and separator cases do not exercise
+//!    because they all pass exactly three.
 
 use cairn_lang_core::block_array::{BlockArrayIr, lower_to_block_array};
 use cairn_lang_core::check::{Diagnostic, DiagnosticCode, Severity};
@@ -285,8 +288,8 @@ connect anchor.entry to\n"
 /// is not the literal `to` keyword) used to slip through the resolver
 /// guard because `positional.get(2)` is `Some`. The strengthened
 /// guard now rejects it on shape-mismatch; this test pins that
-/// behaviour so a regression that softens the guard re-introduces
-/// the silent-misinterpretation hole the C1 review caught.
+/// behaviour so a regression that softens the guard cannot quietly
+/// re-open the silent-misinterpretation hole.
 #[test]
 fn connect_with_wrong_separator_silently_returns_without_diagnostics() {
     let src = format!(
@@ -331,12 +334,13 @@ place id=peer   use=hut theme=plain east_of=anchor gap=4\n  \
 /// the user-facing `E_CONNECT_ARITY`; what the resolver owes a library
 /// caller is that no walkway is laid from a row it could not read.
 ///
-/// The four shapes here are the parser-reachable non-reference kinds
-/// that differ in how they could plausibly be typed: a bare place id
-/// (the port forgotten), a quoted reference (the author reached for
-/// string syntax), a material token (copied from `path=`), and a
-/// literal. They share one resolver arm, so they are pinned together —
-/// a future guard that special-cases one of them shows up here.
+/// The shapes here are the parser-reachable non-reference kinds that
+/// differ in how they could plausibly be typed: a bare place id with
+/// the port forgotten (on either end, since the two ends are separate
+/// call sites), a quoted reference (the author reached for string
+/// syntax), a material token (copied from `path=`), and a literal.
+/// They share one resolver arm, so they are pinned together — a future
+/// guard that special-cases one of them shows up here.
 #[test]
 fn connect_with_non_reference_endpoint_silently_returns_without_diagnostics() {
     for row in [
@@ -358,6 +362,34 @@ fn connect_with_non_reference_endpoint_silently_returns_without_diagnostics() {
             outcome.diagnostics,
         );
     }
+}
+
+/// A row carrying more than three positionals must not lay a walkway
+/// through the resolver-only path.
+///
+/// The resolver used to read `positional.first()` and
+/// `positional.get(2)`, which accepts any longer row and quietly
+/// ignores the tail. That made the two layers disagree about what is
+/// well-formed rather than merely about how loudly to say so: `check`
+/// calls `connect a.entry to b.entry c.exit` an error while
+/// `resolve(ir)` laid its walkway. The exact-length slice pattern is
+/// what holds the count, so this pins it — the endpoint and separator
+/// tests above would all still pass with the count bound removed.
+#[test]
+fn connect_with_extra_positionals_lays_no_walkway() {
+    let outcome = run(&duo(
+        "connect anchor.entry to peer.entry c.exit path=@gravel",
+    ));
+    assert_eq!(
+        outcome.walkways, 0,
+        "an over-arity row must not lay a walkway through the resolver-only path",
+    );
+    assert_eq!(
+        errors(&outcome.diagnostics),
+        0,
+        "arity enforcement is owned by `check::connect_arity`; the resolver-only path stays silent, got: {:#?}",
+        outcome.diagnostics,
+    );
 }
 
 /// An endpoint carrying a second dot must not lay a walkway either.
