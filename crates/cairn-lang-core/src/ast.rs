@@ -146,6 +146,9 @@ pub enum Item {
     Theme {
         /// Theme name following the `theme` keyword.
         name: String,
+        /// Byte range of the name token alone.
+        #[serde(skip)]
+        name_span: Span,
         /// Body rules in source order.
         body: Vec<ThemeRule>,
         /// Byte range covering the whole `theme ...` block including its
@@ -157,6 +160,9 @@ pub enum Item {
     Def {
         /// Definition name following the `def` keyword.
         name: String,
+        /// Byte range of the name token alone.
+        #[serde(skip)]
+        name_span: Span,
         /// Inline `key=value` arguments on the definition header.
         args: Vec<Arg>,
         /// Indented body statements in source order.
@@ -170,6 +176,9 @@ pub enum Item {
     Site {
         /// Site name following the `site` keyword.
         name: String,
+        /// Byte range of the name token alone.
+        #[serde(skip)]
+        name_span: Span,
         /// Indented body statements in source order.
         body: Vec<Statement>,
         /// Byte range covering the whole `site ...` block including its
@@ -181,6 +190,9 @@ pub enum Item {
     Struct {
         /// Struct name following the `struct` keyword.
         name: String,
+        /// Byte range of the name token alone.
+        #[serde(skip)]
+        name_span: Span,
         /// Inline `key=value` arguments on the struct header.
         args: Vec<Arg>,
         /// Indented body statements in source order.
@@ -201,6 +213,41 @@ impl Item {
             | Self::Def { span, .. }
             | Self::Site { span, .. }
             | Self::Struct { span, .. } => span,
+        }
+    }
+
+    /// Keyword introducing this item, as written in source.
+    #[must_use]
+    pub fn keyword(&self) -> &'static str {
+        match self {
+            Self::Theme { .. } => "theme",
+            Self::Def { .. } => "def",
+            Self::Site { .. } => "site",
+            Self::Struct { .. } => "struct",
+        }
+    }
+
+    /// Name this item declares, and the byte range of the name token
+    /// alone.
+    ///
+    /// [`Self::span`] covers the whole block including its indented
+    /// body, which is the wrong thing to underline when the finding is
+    /// about the name.
+    #[must_use]
+    pub fn name(&self) -> (&str, &Span) {
+        match self {
+            Self::Theme {
+                name, name_span, ..
+            }
+            | Self::Def {
+                name, name_span, ..
+            }
+            | Self::Site {
+                name, name_span, ..
+            }
+            | Self::Struct {
+                name, name_span, ..
+            } => (name, name_span),
         }
     }
 }

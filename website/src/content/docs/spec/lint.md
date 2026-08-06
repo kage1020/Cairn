@@ -14,6 +14,14 @@ first-class parts of the spec; messages MUST be in a shape that feeds the self-c
   - `E_DUPLICATE_ARG`  — repeated `key=` in the same argument list.
   - `E_DUPLICATE_ID`   — two members share an `id=` within the same
     immediate body scope.
+  - `E_DUPLICATE_ITEM` — two top-level items of the same kind share a
+    name. The four kinds (`theme` / `def` / `struct` / `site`) are
+    separate namespaces, so a name reused across kinds is not a
+    collision. The **first** declaration is the one that resolves; the
+    rest are skipped, which is why the repeat is an error rather than a
+    silent shadow.
+  - `E_DUPLICATE_HEADER` — a `@directive` is declared more than once.
+    A module carries at most one of each (§5.3).
   - `E_UNKNOWN_KEYWORD` — statement keyword is not in the known-keyword table.
   - `E_TYPE_MISMATCH_LABEL` — `id=` / `class=` / `mat_slot=` value is not
     a label (identifier or string).

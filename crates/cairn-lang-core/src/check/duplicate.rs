@@ -6,7 +6,12 @@
 //! last-write-wins; the surface form is the only place where both the first
 //! and second occurrences are still visible.
 //!
-//! The four codes emitted here use distinct scopes:
+//! The codes emitted here use distinct scopes:
+//! - `E_DUPLICATE_HEADER` — a `@directive` appears more than once in the
+//!   module.
+//! - `E_DUPLICATE_ITEM` — two top-level items *of the same kind* share a
+//!   name. The four kinds are separate namespaces, so this is four
+//!   independent scopes rather than one.
 //! - `E_DUPLICATE_SIZE` — a struct/def header has more than one `size=`.
 //! - `E_DUPLICATE_SLOT` — a `theme` body has two `slot NAME ->` lines for
 //!   the same `NAME`.
@@ -16,15 +21,21 @@
 //! - `E_DUPLICATE_ID`   — two members in the same immediate body scope
 //!   declare `id=NAME` for the same `NAME` (per-body scope; nested `level`
 //!   blocks have their own namespace).
+//!
+//! Every scope here reports the *repeat* and points a note at the first
+//! declaration, so the anchor is the line the author would delete or
+//! rename and the note is the one they would keep.
 
 use indexmap::IndexMap;
 
-use crate::ast::{Arg, Item, Module, Statement, ThemeRule, ValueKind};
+use crate::ast::{Arg, Header, Item, Module, Statement, ThemeRule, ValueKind};
 use crate::error::Span;
 
 use super::{Diagnostic, DiagnosticCode, DiagnosticNote, DiagnosticSink};
 
 pub(super) fn run(module: &Module, sink: &mut DiagnosticSink) {
+    check_headers(&module.headers, sink);
+    check_item_names(&module.items, sink);
     for item in &module.items {
         match item {
             Item::Theme { body, .. } => check_theme_body(body, sink),
@@ -33,6 +44,92 @@ pub(super) fn run(module: &Module, sink: &mut DiagnosticSink) {
                 check_body(body, sink);
             }
             Item::Site { body, .. } => check_body(body, sink),
+        }
+    }
+}
+
+/// Module-header scope: each `@directive` may be declared once.
+///
+/// A repeat is not merely redundant. `@cairn` and `@intended_targets`
+/// have exactly one reader each, which takes the first match and never
+/// looks further; `@requires` floors are folded together by taking the
+/// strictest, so a second line asking for *less* than the first leaves
+/// no trace anywhere in the build. Both shapes are a declaration the
+/// author wrote and the compiler discarded.
+fn check_headers(headers: &[Header], sink: &mut DiagnosticSink) {
+    let mut seen: IndexMap<&'static str, Span> = IndexMap::new();
+    for header in headers {
+        let directive = match header {
+            Header::Cairn { .. } => "@cairn",
+            Header::Requires { .. } => "@requires",
+            Header::IntendedTargets { .. } => "@intended_targets",
+        };
+        let span = header.span().clone();
+        if let Some(first_span) = seen.get(directive) {
+            sink.push(Diagnostic {
+                code: DiagnosticCode::DuplicateHeader,
+                severity: DiagnosticCode::DuplicateHeader.severity(),
+                span,
+                primary: format!("`{directive}` is declared more than once"),
+                notes: vec![
+                    DiagnosticNote {
+                        span: Some(first_span.clone()),
+                        message: "first declaration here".into(),
+                    },
+                    DiagnosticNote {
+                        span: None,
+                        message: format!(
+                            "a module carries at most one `{directive}`; keep the line that states what you mean and delete the other",
+                        ),
+                    },
+                ],
+                data: None,
+            });
+        } else {
+            seen.insert(directive, span);
+        }
+    }
+}
+
+/// Top-level name scope, one namespace per item kind.
+///
+/// The resolver keys structs, defs, and placements under `struct::`,
+/// `def::`, and `site::NAME::` prefixes and holds themes in a map of
+/// their own, so the same name on two different kinds never collides and
+/// must not be reported. A repeat *within* a kind is the case where one
+/// declaration is discarded: the resolver binds the first and skips the
+/// rest, which leaves the second body's members out of every artifact.
+fn check_item_names(items: &[Item], sink: &mut DiagnosticSink) {
+    let mut seen: IndexMap<(&'static str, &str), Span> = IndexMap::new();
+    for item in items {
+        let keyword = item.keyword();
+        // Anchor on the name token, not the item's span: the block span
+        // covers the indented body, and underlining a whole `def` says
+        // nothing about which word to change.
+        let (name, span) = item.name();
+        let span = span.clone();
+        if let Some(first_span) = seen.get(&(keyword, name)) {
+            sink.push(Diagnostic {
+                code: DiagnosticCode::DuplicateItem,
+                severity: DiagnosticCode::DuplicateItem.severity(),
+                span,
+                primary: format!("`{keyword} {name}` is declared more than once"),
+                notes: vec![
+                    DiagnosticNote {
+                        span: Some(first_span.clone()),
+                        message: "first declaration here".into(),
+                    },
+                    DiagnosticNote {
+                        span: None,
+                        message: format!(
+                            "the first `{keyword} {name}` is the one that resolves; rename this one, or merge the two bodies",
+                        ),
+                    },
+                ],
+                data: None,
+            });
+        } else {
+            seen.insert((keyword, name), span);
         }
     }
 }

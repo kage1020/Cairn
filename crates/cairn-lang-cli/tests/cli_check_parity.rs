@@ -39,6 +39,26 @@ theme t:\n\
 \x20\x20slot wall  -> @cobblestone\n\
 \n";
 
+/// A fixture's source.
+///
+/// Most fixtures differ only in the construct that trips their diagnostic,
+/// so they are written as a body appended to [`HEADER`]. A header
+/// diagnostic cannot be: the directive it repeats is legal only before the
+/// first item, so that fixture owns its whole source.
+enum Source {
+    WithPrologue(&'static str),
+    Whole(&'static str),
+}
+
+impl Source {
+    fn text(&self) -> String {
+        match self {
+            Self::WithPrologue(body) => format!("{HEADER}{body}"),
+            Self::Whole(text) => (*text).to_owned(),
+        }
+    }
+}
+
 /// One fixture per `Error`-severity code the syntactic passes inside
 /// `check` emit.
 ///
@@ -47,45 +67,70 @@ theme t:\n\
 /// when the two disagree. Adding a variant there forces a classification;
 /// classifying it as a syntactic `Error` then fails that assertion until a
 /// fixture lands here.
-const SYNTACTIC_FIXTURES: &[(&str, &str)] = &[
+const SYNTACTIC_FIXTURES: &[(&str, Source)] = &[
     (
         "E_DUPLICATE_SIZE",
-        "struct s size=5x5 size=6x6\n  floor mat_slot=floor\n",
+        Source::WithPrologue("struct s size=5x5 size=6x6\n  floor mat_slot=floor\n"),
     ),
     (
         "E_DUPLICATE_SLOT",
         // Declares its own theme: the shared header binds each slot once.
-        "theme dup:\n  slot wall -> @cobblestone\n  slot wall -> @stone_bricks\n\
-         \nstruct s size=5x5\n  walls mat_slot=wall height=3\n",
+        Source::WithPrologue(
+            "theme dup:\n  slot wall -> @cobblestone\n  slot wall -> @stone_bricks\n\
+             \nstruct s size=5x5\n  walls mat_slot=wall height=3\n",
+        ),
     ),
     (
         "E_DUPLICATE_ARG",
-        "struct s size=5x5\n  floor id=a id=b mat_slot=floor\n",
+        Source::WithPrologue("struct s size=5x5\n  floor id=a id=b mat_slot=floor\n"),
     ),
     (
         "E_DUPLICATE_ID",
-        "struct s size=5x5\n  floor id=x mat_slot=floor\n\
-         \x20\x20walls id=x class=outer mat_slot=wall height=3\n",
+        Source::WithPrologue(
+            "struct s size=5x5\n  floor id=x mat_slot=floor\n\
+             \x20\x20walls id=x class=outer mat_slot=wall height=3\n",
+        ),
+    ),
+    (
+        // The prologue already binds `theme t`, so the repeat is the only
+        // construct this body adds.
+        "E_DUPLICATE_ITEM",
+        Source::WithPrologue(
+            "theme t:\n  slot floor -> @stone\n\
+             \nstruct s size=5x5\n  floor mat_slot=floor\n",
+        ),
+    ),
+    (
+        // Headers are legal only before the first item, so this fixture
+        // cannot be a body appended to the shared prologue.
+        "E_DUPLICATE_HEADER",
+        Source::Whole(
+            "@cairn 2026.06\n@cairn 2026.07\n\
+             \ntheme t:\n  slot floor -> @oak_planks\n\
+             \nstruct s size=5x5\n  floor mat_slot=floor\n",
+        ),
     ),
     (
         "E_UNKNOWN_KEYWORD",
-        "struct s size=5x5\n  torch mat_slot=wall\n",
+        Source::WithPrologue("struct s size=5x5\n  torch mat_slot=wall\n"),
     ),
     (
         "E_TYPE_MISMATCH_LABEL",
-        "struct s size=5x5\n  floor id=1 mat_slot=floor\n",
+        Source::WithPrologue("struct s size=5x5\n  floor id=1 mat_slot=floor\n"),
     ),
     (
         "E_TYPE_MISMATCH_SIZE",
-        "struct s size=abc\n  floor mat_slot=floor\n",
+        Source::WithPrologue("struct s size=abc\n  floor mat_slot=floor\n"),
     ),
     (
         "E_CONNECT_ARITY",
-        "def hut size=3x3:\n  floor id=floor mat_slot=floor\n\
-         \x20\x20door id=entry side=front at=center\n\
-         \nsite s:\n  place id=a use=hut theme=t at=origin\n\
-         \x20\x20place id=b use=hut theme=t east_of=a gap=4\n\
-         \x20\x20connect a.entry b.entry path=@gravel\n",
+        Source::WithPrologue(
+            "def hut size=3x3:\n  floor id=floor mat_slot=floor\n\
+             \x20\x20door id=entry side=front at=center\n\
+             \nsite s:\n  place id=a use=hut theme=t at=origin\n\
+             \x20\x20place id=b use=hut theme=t east_of=a gap=4\n\
+             \x20\x20connect a.entry b.entry path=@gravel\n",
+        ),
     ),
 ];
 
@@ -94,29 +139,33 @@ const SYNTACTIC_FIXTURES: &[(&str, &str)] = &[
 /// twice when the build commands appended `Resolution::diagnostics` on top
 /// of `check`'s already-merged output. Without them in the population the
 /// duplicated half is not represented at all.
-const RESOLVER_FIXTURES: &[(&str, &str)] = &[
+const RESOLVER_FIXTURES: &[(&str, Source)] = &[
     (
         "E_UNRESOLVED_PLACE_REF",
         // Also emits `W_UNUSED_DEF`, which puts a warning *before* the error
         // in span order — so a stream that is re-sorted or re-ordered shows up.
-        "def hut size=4x4:\n  floor mat_slot=floor\n\
-         \nsite s:\n  place id=a use=nosuchdef theme=t at=origin\n",
+        Source::WithPrologue(
+            "def hut size=4x4:\n  floor mat_slot=floor\n\
+             \nsite s:\n  place id=a use=nosuchdef theme=t at=origin\n",
+        ),
     ),
     (
         "E_UNRESOLVED_SLOT",
-        "struct s size=5x5\n  floor mat_slot=nosuchslot\n",
+        Source::WithPrologue("struct s size=5x5\n  floor mat_slot=nosuchslot\n"),
     ),
     (
         // `id=` takes a string literal, so its contents used to reach the
         // scope-key builder unexamined — and `.` is one of the separators
         // that key is joined on.
         "E_INVALID_PLACE_ID",
-        "def hut size=3x3:\n  floor id=floor mat_slot=floor\n\
-         \nsite s:\n  place id=\"home.1\" use=hut theme=t at=origin\n",
+        Source::WithPrologue(
+            "def hut size=3x3:\n  floor id=floor mat_slot=floor\n\
+             \nsite s:\n  place id=\"home.1\" use=hut theme=t at=origin\n",
+        ),
     ),
 ];
 
-fn all_fixtures() -> impl Iterator<Item = &'static (&'static str, &'static str)> {
+fn all_fixtures() -> impl Iterator<Item = &'static (&'static str, Source)> {
     SYNTACTIC_FIXTURES.iter().chain(RESOLVER_FIXTURES)
 }
 
@@ -126,11 +175,11 @@ fn all_fixtures() -> impl Iterator<Item = &'static (&'static str, &'static str)>
 /// purpose: every diagnostic line begins with the file path, so a directory
 /// called `E_DUPLICATE_SIZE` made `stderr.contains("E_DUPLICATE_SIZE")` true
 /// no matter which code — if any — the command actually reported.
-fn write_fixture(root: &Path, index: usize, body: &str) -> PathBuf {
+fn write_fixture(root: &Path, index: usize, source: &Source) -> PathBuf {
     let dir = root.join(format!("fixture_{index:02}"));
     fs::create_dir_all(&dir).expect("create fixture dir");
     let path = dir.join("fixture.crn");
-    fs::write(&path, format!("{HEADER}{body}")).expect("write fixture");
+    fs::write(&path, source.text()).expect("write fixture");
     path
 }
 

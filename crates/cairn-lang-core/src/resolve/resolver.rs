@@ -189,6 +189,24 @@ pub struct ResolvedMemberBinding {
 /// struct/def/site appears in `.scopes`, and any problems encountered are
 /// collected into `.diagnostics`.
 ///
+/// INVARIANT(`FIRST_BINDING_WINS`): when two top-level items of the same
+/// kind share a name, the first one declared is the one that binds, and
+/// the rest are skipped. The four kinds are separate namespaces
+/// (`struct::`, `def::`, `site::NAME::`, and the themes map), so this is
+/// a within-kind rule only.
+///
+/// The direction has to be picked because the collision is real, and
+/// picking it uniformly is what keeps the resolution readable: `def` used
+/// to bind first for a `place use=` lookup (`defs.iter().find`) and last
+/// in `scopes`, so the same duplicate produced a placement sized from one
+/// body and a scope resolved from the other. First also matches the
+/// `E_DUPLICATE_ITEM` message, which tells the author the first
+/// declaration is the one that resolves.
+///
+/// Skipping is only about the *binding*. Each duplicate body is still
+/// walked and still contributes its own diagnostics, so an author fixing
+/// the collision sees the problems inside both bodies in the same run.
+///
 /// The `edition` argument drives per-edition theme-variant selection
 /// (spec versioning-editions §10.7 hierarchy #2): when the file declares
 /// two themes whose names share a base and differ only by an `_java` /
@@ -204,11 +222,11 @@ pub fn resolve(ir: &IntentModule, edition: Option<Edition>) -> Resolution {
     let mut themes: IndexMap<String, ThemeBinding> = IndexMap::new();
     for theme in &ir.themes {
         let binding = build_theme_binding(theme);
-        // Last-write-wins on duplicate theme names (the `duplicate` pass in
-        // `check` is the authority on flagging the collision). Keeping the
-        // map insertion-ordered means downstream consumers see the same
-        // theme order the source declared.
-        themes.insert(binding.name.clone(), binding);
+        // First-write-wins on duplicate names, as everywhere else in this
+        // function (see `FIRST_BINDING_WINS`). Keeping the map
+        // insertion-ordered means downstream consumers see the same theme
+        // order the source declared.
+        themes.entry(binding.name.clone()).or_insert(binding);
     }
 
     let single_logical = single_logical_theme(&themes);
@@ -240,7 +258,7 @@ pub fn resolve(ir: &IntentModule, edition: Option<Edition>) -> Resolution {
             &mut applied_themes,
             &mut diagnostics,
         );
-        scopes.insert(struct_key(s), resolution);
+        scopes.entry(struct_key(s)).or_insert(resolution);
     }
     for d in &ir.defs {
         let resolution = resolve_struct_or_def(
@@ -251,7 +269,7 @@ pub fn resolve(ir: &IntentModule, edition: Option<Edition>) -> Resolution {
             &mut applied_themes,
             &mut diagnostics,
         );
-        scopes.insert(def_key(d), resolution);
+        scopes.entry(def_key(d)).or_insert(resolution);
     }
     let mut used_defs: HashSet<String> = HashSet::new();
     let mut connects: Vec<ValidatedConnect> = Vec::new();
@@ -600,7 +618,9 @@ fn resolve_site_placements(
             applied_themes,
             diagnostics,
         );
-        scopes.insert(place_scope_key(&site.name, place_id), resolution);
+        scopes
+            .entry(place_scope_key(&site.name, place_id))
+            .or_insert(resolution);
         // Record this place's def so a later `connect` row can look up
         // the def's members without re-walking the site body.
         place_def.insert(place_id.to_owned(), use_name.to_owned());

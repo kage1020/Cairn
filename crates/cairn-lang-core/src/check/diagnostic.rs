@@ -57,6 +57,23 @@ pub enum DiagnosticCode {
     DuplicateArg,
     /// Two or more members in the same immediate body share an `id=`.
     DuplicateId,
+    /// Two or more top-level items of the same kind share a name.
+    ///
+    /// The four kinds occupy separate namespaces (the resolver keys
+    /// them `struct::`, `def::`, `site::`, and a themes map of its own),
+    /// so `theme x` alongside `struct x` is not a collision — only a
+    /// repeat within one kind is. The message names the keyword, since
+    /// the repair differs by what the author meant: rename, or merge
+    /// the two bodies.
+    DuplicateItem,
+    /// A `@directive` header appears more than once in a module.
+    ///
+    /// Each header in `spec/syntax.md` §5.3 is described as one optional
+    /// declaration. A repeat is either ignored outright (`@cairn`,
+    /// `@intended_targets`) or folded into the strictest value
+    /// (`@requires`, whose floors are maxed), so a second line that says
+    /// something weaker leaves no trace in the build.
+    DuplicateHeader,
     /// A statement keyword not in the known-keyword table.
     UnknownKeyword,
     /// `id=`, `class=`, or `mat_slot=` whose value is not a label
@@ -211,6 +228,8 @@ impl DiagnosticCode {
             Self::DuplicateSlot => "E_DUPLICATE_SLOT",
             Self::DuplicateArg => "E_DUPLICATE_ARG",
             Self::DuplicateId => "E_DUPLICATE_ID",
+            Self::DuplicateItem => "E_DUPLICATE_ITEM",
+            Self::DuplicateHeader => "E_DUPLICATE_HEADER",
             Self::UnknownKeyword => "E_UNKNOWN_KEYWORD",
             Self::TypeMismatchLabel => "E_TYPE_MISMATCH_LABEL",
             Self::TypeMismatchSize => "E_TYPE_MISMATCH_SIZE",
@@ -273,7 +292,9 @@ impl DiagnosticCode {
             | Self::UnresolvedPort
             | Self::AmbiguousPort
             | Self::MissingPathMaterial
-            | Self::ConnectArity => Severity::Error,
+            | Self::ConnectArity
+            | Self::DuplicateItem
+            | Self::DuplicateHeader => Severity::Error,
             Self::UnknownSlotTarget
             | Self::StructureTooLarge
             | Self::ThemeSelectorUnmatched
