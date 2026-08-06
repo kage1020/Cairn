@@ -10,6 +10,14 @@
 //! typo would otherwise leave the user with a silently-vanished walkway
 //! and no signal. This pass anchors `E_CONNECT_ARITY` at the missing
 //! positional's parse position before the resolver runs.
+//!
+//! "Shape" covers the two endpoint slots as well as the count: the
+//! grammar admits exactly a one-dot `<place>.<port>` reference on each
+//! side of `to`. Every other value the parser accepts in a positional
+//! slot — a bare identifier, a literal, a material token, a quoted
+//! string, a list, a reference with a second dot — reaches the resolver,
+//! which drops it and lays no walkway. The endpoint cases below pin the
+//! diagnostic that keeps that drop from being silent.
 
 use cairn_lang_core::{Diagnostic, DiagnosticCode, Severity, check, lower, parse};
 
@@ -232,5 +240,389 @@ fn ca_9_examples_village_and_l_walkway_are_arity_clean() {
             arity.is_empty(),
             "{path} must be arity-clean, got: {arity:#?}",
         );
+    }
+}
+
+/// Byte range of the slot that follows `prefix` on the `connect` row.
+///
+/// Locating by the text that precedes the slot rather than by the slot
+/// text itself keeps a one-character endpoint (`a`, `1`) from matching
+/// an earlier occurrence — `a` appears in `place id=a` and again inside
+/// the from-side `a.entry` before it appears as the to-side endpoint.
+/// The `starts_with` assertion makes a mis-specified prefix a test
+/// failure rather than a silently misplaced expectation.
+fn slot_span(src: &str, prefix: &str, text: &str) -> std::ops::Range<usize> {
+    let start = src
+        .rfind(prefix)
+        .unwrap_or_else(|| panic!("`{prefix}` is not in:\n{src}"))
+        + prefix.len();
+    assert!(
+        src[start..].starts_with(text),
+        "expected `{text}` right after `{prefix}`, found `{}`",
+        &src[start..src.len().min(start + text.len() + 8)],
+    );
+    start..start + text.len()
+}
+
+fn from_slot(src: &str, text: &str) -> std::ops::Range<usize> {
+    slot_span(src, "connect ", text)
+}
+
+fn to_slot(src: &str, from: &str, text: &str) -> std::ops::Range<usize> {
+    slot_span(src, &format!("connect {from} to "), text)
+}
+
+fn only_arity_diag(src: &str) -> Diagnostic {
+    let mut arity = arity_only(diagnose(src));
+    assert_eq!(arity.len(), 1, "expected one diagnostic, got: {arity:#?}");
+    arity.remove(0)
+}
+
+/// Every non-reference value the parser accepts in the from-slot. Each
+/// entry is `(source text, expected kind word)`; the kind word is
+/// `Value::kind_name`, which the message quotes so the author can tell
+/// `1` (integer) from `"1"` (string) without opening the file.
+///
+/// A list is absent here on purpose: `connect [a.entry] to b.entry`
+/// fails in the parser before this pass runs. A `[` immediately after
+/// the keyword opens a selector (`parse_command` reads `connect[...]`
+/// as an attribute filter), and a selector body is a `key=value` list,
+/// so the parser stops at the `.` asking for an `=`. The to-slot covers
+/// the list shape instead — see
+/// `ca_11_to_side_non_reference_endpoints_are_flagged`.
+const NON_REFERENCE_ENDPOINTS: &[(&str, &str)] = &[
+    ("a", "identifier"),
+    ("true", "boolean"),
+    ("1", "integer"),
+    ("9x7", "size"),
+    ("@gravel", "token"),
+    ("\"a.entry\"", "string"),
+];
+
+/// A from-slot that is not a `<place>.<port>` reference earns one
+/// `E_CONNECT_ARITY` anchored on the offending value. Before this pass
+/// grew endpoint validation, every one of these rows checked clean and
+/// lowered to zero walkways — the exact silent-drop `E_CONNECT_ARITY`
+/// exists to prevent, arrived at through the endpoint slot rather than
+/// the positional count.
+#[test]
+fn ca_10_from_side_non_reference_endpoints_are_flagged() {
+    for (text, kind) in NON_REFERENCE_ENDPOINTS {
+        let src = format!("{PROLOGUE}connect {text} to b.entry path=@gravel\n");
+        let d = only_arity_diag(&src);
+        assert_eq!(d.severity, Severity::Error);
+        assert_eq!(
+            d.span,
+            from_slot(&src, text),
+            "span should underline the offending endpoint `{text}`, got {:?}",
+            slice(&src, &d),
+        );
+        assert!(
+            d.primary.contains("`<from>.<port>`"),
+            "message should name the from-side shape for `{text}`, got: {}",
+            d.primary,
+        );
+        assert!(
+            d.primary.contains(kind),
+            "message should name the actual kind `{kind}` for `{text}`, got: {}",
+            d.primary,
+        );
+        assert!(
+            d.primary.contains(&format!("`{text}`")),
+            "message should quote the value as written for `{text}`, got: {}",
+            d.primary,
+        );
+    }
+}
+
+/// Mirror of the from-slot matrix on the to-slot, plus the list shape
+/// that only reaches this pass from the to-slot. The two slots are
+/// separate call sites, so a fix applied to one and not the other would
+/// leave half the silent drops in place.
+#[test]
+fn ca_11_to_side_non_reference_endpoints_are_flagged() {
+    let cases: Vec<(&str, &str)> = NON_REFERENCE_ENDPOINTS
+        .iter()
+        .copied()
+        .chain(std::iter::once(("[b.entry]", "list")))
+        .collect();
+    for (text, kind) in cases {
+        let src = format!("{PROLOGUE}connect a.entry to {text} path=@gravel\n");
+        let d = only_arity_diag(&src);
+        assert_eq!(
+            d.span,
+            to_slot(&src, "a.entry", text),
+            "span should underline the offending endpoint `{text}`, got {:?}",
+            slice(&src, &d),
+        );
+        assert!(
+            d.primary.contains("`<to>.<port>`"),
+            "message should name the to-side shape for `{text}`, got: {}",
+            d.primary,
+        );
+        assert!(
+            d.primary.contains(kind),
+            "message should name the actual kind `{kind}` for `{text}`, got: {}",
+            d.primary,
+        );
+        // A list has no bounded surface form, so it is named by kind
+        // alone; every other shape must carry the text as written.
+        assert_eq!(
+            d.primary.contains(&format!("`{text}`")),
+            kind != "list",
+            "surface form of `{text}` should appear iff it is bounded, got: {}",
+            d.primary,
+        );
+    }
+}
+
+/// Both halves broken earns one diagnostic per half, in source order.
+/// The two endpoints are independent fix sites — unlike the separator
+/// case, neither has to be corrected before the other is interpretable
+/// — so reporting only the first would send the author round the
+/// edit-check loop twice for one line.
+#[test]
+fn ca_12_both_endpoints_broken_earn_one_diagnostic_each() {
+    let src = format!("{PROLOGUE}connect 1 to 2 path=@gravel\n");
+    let arity = arity_only(diagnose(&src));
+    assert_eq!(arity.len(), 2, "got: {arity:#?}");
+    assert_eq!(arity[0].span, from_slot(&src, "1"));
+    assert_eq!(arity[1].span, to_slot(&src, "1", "2"));
+    assert!(arity[0].primary.contains("`<from>.<port>`"));
+    assert!(arity[1].primary.contains("`<to>.<port>`"));
+}
+
+/// A reference with a second dot is worse than a dropped row: the
+/// resolver used to read `tail()[0]` and ignore the rest, so
+/// `a.entry.typo` laid the walkway `a.entry` would have laid. The
+/// author's mistake compiled into a valid-looking build. The message
+/// names the segment count so the extra dot is visible in the log
+/// without the source alongside.
+#[test]
+fn ca_13_from_side_reference_with_extra_segment_is_flagged() {
+    let src = format!("{PROLOGUE}connect a.entry.x to b.entry path=@gravel\n");
+    let d = only_arity_diag(&src);
+    assert_eq!(d.span, from_slot(&src, "a.entry.x"));
+    assert!(
+        d.primary.contains("a.entry.x") && d.primary.contains("3 segments"),
+        "message should quote the reference and its segment count, got: {}",
+        d.primary,
+    );
+}
+
+/// The to-slot mirror of the extra-segment case.
+#[test]
+fn ca_14_to_side_reference_with_extra_segment_is_flagged() {
+    let src = format!("{PROLOGUE}connect a.entry to b.entry.x path=@gravel\n");
+    let d = only_arity_diag(&src);
+    assert_eq!(d.span, to_slot(&src, "a.entry", "b.entry.x"));
+    assert!(
+        d.primary.contains("b.entry.x") && d.primary.contains("3 segments"),
+        "message should quote the reference and its segment count, got: {}",
+        d.primary,
+    );
+}
+
+/// Trailing extras and broken endpoints are independent mistakes, so
+/// the row reports all three. This is the one arm where the pass emits
+/// more than one finding for a row without the halves being separate
+/// slots: removing `c.exit` does not make `1` or `2` a port reference,
+/// so withholding the endpoint findings would only hide work the author
+/// still has to do.
+#[test]
+fn ca_15_over_arity_also_reports_broken_endpoints() {
+    let src = format!("{PROLOGUE}connect 1 to 2 c.exit path=@gravel\n");
+    let arity = arity_only(diagnose(&src));
+    assert_eq!(arity.len(), 3, "got: {arity:#?}");
+    let spans: Vec<_> = arity.iter().map(|d| slice(&src, d)).collect();
+    assert_eq!(spans, vec!["1", "2", "c.exit"]);
+}
+
+/// A wrong separator suppresses the endpoint findings: until the
+/// author writes `to`, which positional is the target is a guess, and
+/// the pass would be reporting on slots it cannot yet identify. Pins
+/// the boundary of the previous test's "report everything" rule.
+#[test]
+fn ca_16_wrong_separator_suppresses_endpoint_findings() {
+    let src = format!("{PROLOGUE}connect 1 xxx 2 path=@gravel\n");
+    let d = only_arity_diag(&src);
+    assert_eq!(slice(&src, &d), "xxx");
+}
+
+/// A row missing its second half reports the missing half only. The
+/// same reasoning as the separator case: the author's next edit adds
+/// the `to <to>.<port>` text, and an endpoint complaint about the half
+/// that is already written would be answered by a line they have not
+/// finished typing.
+#[test]
+fn ca_17_missing_half_suppresses_endpoint_findings() {
+    let src = format!("{PROLOGUE}connect 1 path=@gravel\n");
+    let d = only_arity_diag(&src);
+    assert!(
+        d.primary.contains("missing"),
+        "expected the missing-half message, got: {}",
+        d.primary,
+    );
+}
+
+/// The `to` keyword present with no target is the other suppression
+/// arm: the row stops mid-shape, so the endpoint that *is* written
+/// stays unreported until the author finishes the line. Sits beside
+/// `ca_17` because the two arms are reached by different positional
+/// counts and a refactor could easily fix one and drop the other.
+#[test]
+fn ca_17b_to_without_target_suppresses_endpoint_findings() {
+    let src = format!(
+        "{PROLOGUE}connect 1 to path=@gravel
+"
+    );
+    let d = only_arity_diag(&src);
+    assert!(
+        d.primary.contains("missing"),
+        "expected the missing-target message, got: {}",
+        d.primary,
+    );
+}
+
+/// `connect a.entry "to" b.entry` used to render as ``expected `to`
+/// ... got `to` `` because the message printed a string literal's
+/// contents verbatim. `spec/lint.md` requires messages an author can
+/// act on without re-reading the source; a message that asks for the
+/// thing it says it received cannot be acted on at all. The quotes now
+/// survive into the message, and the bare-keyword rendering stays
+/// distinct.
+#[test]
+fn ca_18_string_separator_renders_distinctly_from_the_bare_keyword() {
+    let quoted = format!("{PROLOGUE}connect a.entry \"to\" b.entry path=@gravel\n");
+    let d = only_arity_diag(&quoted);
+    assert!(
+        d.primary.contains("\"to\""),
+        "a string separator must keep its quotes in the message, got: {}",
+        d.primary,
+    );
+    let bare = format!("{PROLOGUE}connect a.entry xxx b.entry path=@gravel\n");
+    let other = only_arity_diag(&bare);
+    assert_ne!(
+        d.primary, other.primary,
+        "the quoted and bare separators must not render identically",
+    );
+}
+
+/// `connect` lowers to `MemberRole::Connect` in every scope, so a row
+/// inside a `def` body reaches this pass too (see the pass doc). The
+/// endpoint check must fire there as well — a stray `connect` with a
+/// broken endpoint is no more useful than a well-formed one in the
+/// wrong scope, and the arity arms already report at this position.
+#[test]
+fn ca_19_endpoint_check_reaches_connect_rows_outside_a_site() {
+    let src = "def d size=3x3:\n  \
+floor id=floor\n  \
+connect 1 to 2 path=@gravel\n";
+    let arity = arity_only(diagnose(src));
+    assert_eq!(arity.len(), 2, "got: {arity:#?}");
+}
+
+/// The notes carry the shape-specific repair, not just the generic
+/// example: a bare identifier is missing its port, a quoted reference
+/// only has to lose its quotes, and an extra dot has to go. Each is a
+/// single edit the author can apply from the message alone, which is
+/// what `spec/lint.md` asks of a diagnostic.
+#[test]
+fn ca_20_endpoint_notes_name_the_repair_for_the_shape_at_hand() {
+    let cases = [
+        ("a", "a.<port>"),
+        ("\"a.entry\"", "quotes"),
+        ("@gravel", "path=@"),
+        ("a.entry.x", "one dot"),
+    ];
+    for (text, expected) in cases {
+        let src = format!("{PROLOGUE}connect {text} to b.entry path=@gravel\n");
+        let d = only_arity_diag(&src);
+        assert!(
+            d.notes.iter().any(|n| n.message.contains(expected)),
+            "endpoint `{text}` should carry a note mentioning `{expected}`, got: {:#?}",
+            d.notes,
+        );
+    }
+}
+
+/// A prologue whose places actually resolve.
+///
+/// [`PROLOGUE`] declares a `struct`, but `place use=` looks for a
+/// `def`, so every source built on it carries two
+/// `E_UNRESOLVED_PLACE_REF`s and the resolver abandons each placement
+/// before it ever reads a `connect` endpoint. Every assertion above
+/// filters to `E_CONNECT_ARITY`, so none of them can see what the two
+/// layers do to one row together. This prologue gives the resolver
+/// something to resolve.
+const RESOLVING_PROLOGUE: &str = "def hut size=3x3:\n  \
+floor id=floor mat_slot=floor\n  \
+walls id=walls class=outer mat_slot=wall height=3\n  \
+door  id=entry side=front at=center\n\n\
+theme plain:\n  \
+slot floor -> @oak_planks\n  \
+slot wall  -> @cobblestone\n\n\
+site duo:\n  \
+place id=anchor use=hut theme=plain at=origin\n  \
+place id=peer   use=hut theme=plain east_of=anchor gap=4\n  ";
+
+fn all_codes(source: &str) -> Vec<&'static str> {
+    diagnose(source).iter().map(|d| d.code.as_str()).collect()
+}
+
+/// One mistake earns one diagnostic once both layers have run.
+///
+/// The endpoint check and the resolver's endpoint guard look at the
+/// same slot, and the resolver's silent return is justified in its own
+/// comment by "re-pushing here would report one mistake twice". Nothing
+/// pinned that: with a resolvable prologue, a malformed endpoint must
+/// produce `E_CONNECT_ARITY` and nothing else, and the well-formed row
+/// must produce nothing at all.
+#[test]
+fn ca_21_one_endpoint_mistake_earns_one_diagnostic_across_both_layers() {
+    let clean = format!("{RESOLVING_PROLOGUE}connect anchor.entry to peer.entry path=@gravel\n");
+    assert!(
+        all_codes(&clean).is_empty(),
+        "the resolvable prologue must be clean on a well-formed row, got: {:?}",
+        all_codes(&clean),
+    );
+    for row in [
+        "connect anchor to peer.entry path=@gravel",
+        "connect anchor.entry to peer path=@gravel",
+        "connect \"anchor.entry\" to peer.entry path=@gravel",
+        "connect @gravel to peer.entry path=@gravel",
+        "connect anchor.entry.x to peer.entry path=@gravel",
+        "connect anchor.entry to peer.entry.x path=@gravel",
+    ] {
+        let src = format!("{RESOLVING_PROLOGUE}{row}\n");
+        assert_eq!(
+            all_codes(&src),
+            ["E_CONNECT_ARITY"],
+            "`{row}` must earn exactly one diagnostic",
+        );
+    }
+    let both = format!("{RESOLVING_PROLOGUE}connect 1 to 2 path=@gravel\n");
+    assert_eq!(all_codes(&both), ["E_CONNECT_ARITY", "E_CONNECT_ARITY"]);
+}
+
+/// The division of labour holds in the other direction too: a row whose
+/// endpoints are the right *shape* but name the wrong thing belongs to
+/// the resolver, and this pass must stay quiet. Without this, widening
+/// the endpoint check until it swallowed the resolver's cases would
+/// look like progress.
+#[test]
+fn ca_22_well_shaped_endpoints_that_do_not_resolve_stay_with_the_resolver() {
+    for (row, expected) in [
+        (
+            "connect nosuch.entry to peer.entry path=@gravel",
+            "E_UNRESOLVED_PLACE_REF",
+        ),
+        (
+            "connect anchor.nosuch to peer.entry path=@gravel",
+            "E_UNRESOLVED_PORT",
+        ),
+    ] {
+        let src = format!("{RESOLVING_PROLOGUE}{row}\n");
+        assert_eq!(all_codes(&src), [expected], "for `{row}`");
     }
 }

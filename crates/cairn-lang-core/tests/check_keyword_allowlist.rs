@@ -141,7 +141,7 @@ struct s size=4x4
   circuit at=back
 site h:
   place use=s
-  connect a to b
+  connect a.entry to b.entry path=@gravel
 ";
     let diags = diagnose(src);
     let kw_diags: Vec<_> = diags

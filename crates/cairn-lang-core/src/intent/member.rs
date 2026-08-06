@@ -116,6 +116,36 @@ pub enum MemberRole {
     Other(String),
 }
 
+/// Which end of a `connect FROM.PORT to TO.PORT` row a positional
+/// value occupies.
+///
+/// Both `check::connect_arity` and the resolver check the two ends
+/// identically and differ only in how they name the one at fault, so
+/// both reach for the same discriminant. Sharing the type instead of
+/// passing `"from"` / `"to"` around is what keeps the naming honest:
+/// the resolver's stringly-typed predecessor rendered the end as
+/// ``` `from=a.entry` ```, copying the `use=` / `east_of=` argument-key
+/// style onto a slot that has no argument key — advice that does not
+/// parse if the author follows it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ConnectEnd {
+    /// The `FROM.PORT` slot, before the `to` keyword.
+    From,
+    /// The `TO.PORT` slot, after the `to` keyword.
+    To,
+}
+
+impl ConnectEnd {
+    /// Bare name of the end, for prose that supplies its own framing
+    /// (`the {} endpoint`).
+    pub(crate) fn label(self) -> &'static str {
+        match self {
+            Self::From => "from",
+            Self::To => "to",
+        }
+    }
+}
+
 /// Sub-body indented under a [`Member`] (typically a `level y=...` block).
 ///
 /// Mirrors the three statement flavours [`super::StructIr`] groups at the

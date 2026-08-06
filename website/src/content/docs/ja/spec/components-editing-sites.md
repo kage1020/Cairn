@@ -128,6 +128,12 @@ door / window / 予約ロールの契約が順番に列挙されます。`window
 
 **Diagnostics**:
 
+- `E_CONNECT_ARITY` — 行の positional 形状が `FROM.PORT to TO.PORT` になっていない (片側が
+  欠落している、`to` キーワードが無いか別のトークンに置き換わっている、`TO.PORT` の後ろに余分な
+  positional が続いている、端点がドット 1 つの `PLACE.PORT` 参照ではない)。欠落位置のカーソル、
+  問題のセパレータ、問題の端点、または余剰 positional の連なりにアンカーされます。resolver が
+  読めない端点はその行の歩道をまるごと失わせるため、端点の形状は解決前に検査します
+  (`E_UNRESOLVED_PORT` は解決すべきポート ID が存在することを前提とするコードです)。
 - `E_UNRESOLVED_PORT` — ドット右側のポート ID が参照先 def のメンバーに存在しない (近接候補が
   あれば `did you mean` ノートを付与)。
 - `E_AMBIGUOUS_PORT` — def が同名 `id=` を複数のメンバーで公開している。重複を解消して参照を

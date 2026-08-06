@@ -3,7 +3,7 @@
 //! Consumes the token stream from [`crate::lex`] and produces a [`Module`].
 //! The grammar is line-based with indent-driven nesting: a command can carry
 //! `key=value` arguments, an optional bracketed selector, optional bare
-//! positional values (for forms like `connect a to b path=@gravel`), and an
+//! positional values (for forms like `connect a.entry to b.entry path=@gravel`), and an
 //! optional `-> binding` tail.
 //!
 //! Special forms `logic` and `assert` flow into dedicated

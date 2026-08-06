@@ -59,8 +59,8 @@ use crate::edition::Edition;
 use crate::error::Span;
 use crate::ids::{IdError, PlaceId, PortId, SiteName};
 use crate::intent::{
-    DefIr, IntentModule, Member, MemberBody, MemberRole, SiteIr, StructIr, ThemeIr, ValueWithSpan,
-    role_of,
+    ConnectEnd, DefIr, IntentModule, Member, MemberBody, MemberRole, SiteIr, StructIr, ThemeIr,
+    ValueWithSpan, role_of,
 };
 use crate::suggest::nearest_match;
 
@@ -638,37 +638,39 @@ fn resolve_connect_row(
     //   positional[0] = DotRef(from.port)
     //   positional[1] = Ident("to")
     //   positional[2] = DotRef(to.port)
-    let from_value = member.positional.first();
-    let to_value = member.positional.get(2);
-    let middle_is_to = matches!(
-        member.positional.get(1),
-        Some(v) if matches!(&v.kind, ValueKind::Ident(s) if s == "to"),
-    );
-    let (Some(from_value), Some(to_value), true) = (from_value, to_value, middle_is_to) else {
-        // INVARIANT(upstream-diagnosed): inside the top-level `check`
-        // pipeline, `check::connect_arity` has already pushed
-        // `E_CONNECT_ARITY` into the same sink for any row whose
-        // positional shape is not `FROM.PORT to TO.PORT`, so a user
-        // running `cairn check` always sees a position-anchored
-        // signal even when this arm fires. The arm survives for
-        // library callers that invoke `resolve(ir)` directly (LSP
-        // fast paths, ad-hoc tooling): the silent return keeps
-        // walkway voxelisation from picking up a half-formed or
-        // misshapen row instead of panicking on a partial parse.
-        //
-        // The guard rejects both the missing-half cases
-        // (`positional.len() < 3`) and the wrong-separator case
-        // (`positional[1] != Ident("to")`), so `connect a.entry xxx
-        // b.entry` does not slip through to validation either. Pinned
-        // by `tests/silent_skip_arms.rs` (resolver-only) and
-        // `tests/check_connect_arity.rs` (full pipeline).
+    //
+    // INVARIANT(upstream-diagnosed): inside the top-level `check`
+    // pipeline, `check::connect_arity` has already pushed
+    // `E_CONNECT_ARITY` into the same sink for any row whose positional
+    // shape is not `FROM.PORT to TO.PORT`, so a user running `cairn
+    // check` always sees a position-anchored signal even when these
+    // guards fire. The guards survive for library callers that invoke
+    // `resolve(ir)` directly (LSP fast paths, ad-hoc tooling): the
+    // silent return keeps walkway voxelisation from picking up a
+    // half-formed or misshapen row instead of panicking on a partial
+    // parse.
+    //
+    // The slice pattern rejects the missing-half cases and the
+    // over-arity case together, and the separator test rejects
+    // `connect a.entry xxx b.entry`. Matching an exact-length slice
+    // rather than indexing is what keeps the count bound here: reading
+    // `positional[0..3]` accepted `connect a.entry to b.entry c.exit`
+    // and laid a walkway for a row `check` calls an error, which is a
+    // disagreement about well-formedness between the two layers rather
+    // than a difference in how loudly they say so. Pinned by
+    // `tests/silent_skip_arms.rs` (resolver-only) and
+    // `tests/check_connect_arity.rs` (full pipeline).
+    let [from_value, separator, to_value] = member.positional.as_slice() else {
         return;
     };
+    if !matches!(&separator.kind, ValueKind::Ident(keyword) if keyword == "to") {
+        return;
+    }
     // Lift both ends before short-circuiting so a row with two broken
     // halves earns two diagnostics, not just the first. `validate_port`
     // already follows the same accumulate-then-decide pattern below.
-    let from = port_ref_from_value(from_value, "from", seen_place_ids, diagnostics);
-    let to = port_ref_from_value(to_value, "to", seen_place_ids, diagnostics);
+    let from = port_ref_from_value(from_value, ConnectEnd::From, seen_place_ids, diagnostics);
+    let to = port_ref_from_value(to_value, ConnectEnd::To, seen_place_ids, diagnostics);
     let (Some(from), Some(to)) = (from, to) else {
         return;
     };
@@ -737,57 +739,56 @@ fn resolve_connect_row(
 
 /// Lift one positional [`Value`] into a [`PortRef`], emitting
 /// `E_UNRESOLVED_PLACE_REF` if the head segment does not name a prior
-/// place in the same site and returning `None` on any non-`DotRef`
-/// shape. `side` ("from" / "to") goes into the primary diagnostic so
-/// the user can tell the two ends apart at a glance.
+/// place in the same site and returning `None` for any shape other than
+/// a one-dot `<place>.<port>` reference. `end` goes into the primary
+/// diagnostic so the user can tell the two ends apart at a glance.
 fn port_ref_from_value(
     raw: &Value,
-    side: &str,
+    end: ConnectEnd,
     seen_place_ids: &IndexMap<String, Span>,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Option<PortRef> {
+    // INVARIANT(upstream-diagnosed): inside the top-level `check`
+    // pipeline, `check::connect_arity` has already pushed
+    // `E_CONNECT_ARITY` into the same sink for any endpoint that is not
+    // a one-dot reference, so a user running `cairn check` always sees
+    // a position-anchored signal even when these guards fire. Re-pushing
+    // here would report one mistake twice.
+    //
+    // The guards survive for library callers that invoke `resolve(ir)`
+    // directly (LSP fast paths, ad-hoc tooling), mirroring the guards on
+    // `resolve_connect_row` above: returning `None` keeps walkway
+    // voxelisation from picking up a row whose endpoints name nothing.
+    //
+    // What each guard actually catches differs by origin. The parser
+    // builds a `DotRef` only when a `.` follows the head token, so a
+    // parsed reference always carries at least one tail segment: from
+    // source, the first guard catches every non-reference value
+    // (`connect a to b` arrives as `Ident`) and the second catches only
+    // `place.port.extra`. An empty tail is reachable just by hand-built
+    // IR, and takes the same silent path. An `E_UNRESOLVED_PORT` arm
+    // used to sit on that empty-tail case with a "missing a port id"
+    // message; it could not fire from parsed source, and the author
+    // who writes `connect a to b` now gets that advice from
+    // `check::connect_arity`, anchored on the value itself.
+    //
+    // Pinned by `tests/silent_skip_arms.rs` (resolver-only) and
+    // `tests/check_connect_arity.rs` (full pipeline).
     let ValueKind::DotRef(dot) = &raw.kind else {
-        // INVARIANT(upstream-diagnosed): `connect <from> to <to>` only
-        // accepts a `Value` whose `ValueKind` is `DotRef`. Any other shape
-        // — bare literal, token, call — fails the surface grammar at parse
-        // time or the connect-member discriminator in `intent::lower`,
-        // which emits its own structural diagnostic before this row
-        // reaches the resolver. Re-pushing here would double-count a
-        // single malformed row. Verification of the upstream emission is
-        // parser-level and cannot be checked from inside this
-        // `Vec<Diagnostic>`-scoped pass, so the contract is enforced by
-        // the doc comment plus the grammar tests in `tests/parse_*.rs`
-        // (a debug_assert here would tangle the resolver's API with the
-        // parser's diagnostic timing, which is intentionally kept
-        // outside this pass's responsibility).
         return None;
     };
-    if dot.tail().is_empty() {
-        // `connect home1 to ...` — the user named a place but no port.
-        // Treat it as an unresolved port so the diagnostic carries the
-        // same `did you mean` shape a typo would have on the right side
-        // of the dot. Suggestion pool is empty because we have no def
-        // yet (the head place itself may still be unknown), so the user
-        // just gets the missing-port message.
-        diagnostics.push(Diagnostic {
-            code: DiagnosticCode::UnresolvedPort,
-            severity: Severity::Error,
-            span: raw.span.clone(),
-            primary: format!(
-                "`{side}` is missing a port id: write `{place}.PORT` to name a member of the placed def",
-                place = dot.head(),
-            ),
-            notes: vec![],
-            data: None,
-        });
+    let [port] = dot.tail() else {
         return None;
-    }
+    };
     let place_str = dot.head();
-    let port_str = dot.tail()[0].as_str();
+    let port_str = port.as_str();
     if !seen_place_ids.contains_key(place_str) {
         let prior: Vec<&str> = seen_place_ids.keys().map(String::as_str).collect();
         diagnostics.push(unresolved_place_ref_diag(
-            &format!("`{side}={place_str}.{port_str}` does not name a prior place in this site"),
+            &format!(
+                "the `{end}` endpoint `{place_str}.{port_str}` does not name a prior place in this site",
+                end = end.label(),
+            ),
             raw.span.clone(),
             place_str,
             prior.iter().copied(),
