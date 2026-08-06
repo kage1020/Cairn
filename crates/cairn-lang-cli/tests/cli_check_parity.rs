@@ -30,8 +30,11 @@ fn examples_dir() -> PathBuf {
 }
 
 /// Shared prologue so each fixture differs only in the construct that trips
-/// its diagnostic.
-const HEADER: &str = "@cairn 2026.06\n\
+/// its diagnostic. Named for its role rather than for the `@directive`
+/// lines it happens to open with — `Source::Whole` exists because one
+/// fixture is about those, and calling both "header" made the two read
+/// as the same thing.
+const PROLOGUE: &str = "@cairn 2026.06\n\
 @requires version>=1.20\n\
 \n\
 theme t:\n\
@@ -42,7 +45,7 @@ theme t:\n\
 /// A fixture's source.
 ///
 /// Most fixtures differ only in the construct that trips their diagnostic,
-/// so they are written as a body appended to [`HEADER`]. A header
+/// so they are written as a body appended to [`PROLOGUE`]. A header
 /// diagnostic cannot be: the directive it repeats is legal only before the
 /// first item, so that fixture owns its whole source.
 enum Source {
@@ -53,7 +56,7 @@ enum Source {
 impl Source {
     fn text(&self) -> String {
         match self {
-            Self::WithPrologue(body) => format!("{HEADER}{body}"),
+            Self::WithPrologue(body) => format!("{PROLOGUE}{body}"),
             Self::Whole(text) => (*text).to_owned(),
         }
     }

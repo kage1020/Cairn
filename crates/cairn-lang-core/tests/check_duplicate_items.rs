@@ -10,14 +10,16 @@
 //! Two invariants are pinned here:
 //!
 //! 1. **Reporting** — a repeat within one kind, or a repeated
-//!    `@directive`, is an error anchored on the repeat with a note on the
-//!    first declaration. Names are per-kind: the resolver keys scopes
-//!    `struct::` / `def::` / `site::NAME::` and holds themes separately,
-//!    so `theme x` alongside `struct x` is not a collision.
-//! 2. **Resolution** — the *first* declaration binds. That direction is
-//!    not arbitrary: `def` used to bind first for a `place use=` lookup
-//!    and last in the scopes map, so one duplicate produced a placement
-//!    sized from one body and a scope resolved from the other.
+//!    single-valued `@directive`, is an error anchored on the repeat
+//!    with a note on the first declaration. Names are per-kind: the
+//!    resolver keys scopes `struct::` / `def::` / `site::NAME::` and
+//!    holds themes separately, so `theme x` alongside `struct x` is not
+//!    a collision.
+//! 2. **Resolution** — the first declaration to claim a *binding key*
+//!    wins. The key is the name for `theme` / `struct` / `def`, but
+//!    `site::NAME::PLACE_ID` for a placement, so two `site` blocks of
+//!    one name merge rather than shadow. `FIRST_BINDING_WINS` on
+//!    `resolve` records why that direction was picked.
 
 use cairn_lang_core::block_array::{BlockArrayIr, lower_to_block_array};
 use cairn_lang_core::{Diagnostic, DiagnosticCode, Severity, check, lower, parse, resolve};
@@ -66,46 +68,72 @@ fn di_1_each_item_kind_reports_its_own_duplicate_name() {
     let cases = [
         (
             "theme",
-            format!("{THEME}theme t:\n  slot floor -> @stone\n\nstruct s size=3x3\n  floor\n"),
+            "t",
+            format!(
+                "{THEME}theme t:
+  slot floor -> @stone
+
+struct s size=3x3
+  floor
+"
+            ),
         ),
         (
             "def",
+            "hut",
             format!(
-                "{THEME}def hut size=3x3:\n  floor id=f\n\ndef hut size=5x5:\n  floor id=f\n\nsite s:\n  place id=a use=hut theme=t at=origin\n"
+                "{THEME}def hut size=3x3:
+  floor id=f
+
+def hut size=5x5:
+  floor id=f
+
+site s:
+  place id=a use=hut theme=t at=origin
+"
             ),
         ),
         (
             "struct",
-            format!("{THEME}struct s size=3x3\n  floor\n\nstruct s size=5x5\n  floor\n"),
+            "s",
+            format!(
+                "{THEME}struct s size=3x3
+  floor
+
+struct s size=5x5
+  floor
+"
+            ),
         ),
         (
             "site",
+            "s",
             format!(
-                "{THEME}def hut size=3x3:\n  floor id=f\n\nsite s:\n  place id=a use=hut theme=t at=origin\n\nsite s:\n  place id=b use=hut theme=t at=origin\n"
+                "{THEME}def hut size=3x3:
+  floor id=f
+
+site s:
+  place id=a use=hut theme=t at=origin
+
+site s:
+  place id=b use=hut theme=t at=origin
+"
             ),
         ),
     ];
-    for (keyword, src) in cases {
+    for (keyword, name, src) in cases {
         let found = of_code(&src, DiagnosticCode::DuplicateItem);
         assert_eq!(found.len(), 1, "{keyword}: got {found:#?}");
         let d = &found[0];
         assert_eq!(d.severity, Severity::Error);
-        let name = match keyword {
-            "def" => "hut",
-            _ => match keyword {
-                "theme" => "t",
-                _ => "s",
-            },
-        };
-        assert_eq!(
-            d.span.start,
-            nth(&src, &format!("{keyword} {name}"), 1) + keyword.len() + 1,
-            "{keyword}: span should start at the second name token",
-        );
         assert_eq!(
             slice(&src, d),
             name,
-            "{keyword}: span should cover the name"
+            "{keyword}: span should cover the name token",
+        );
+        assert!(
+            d.span.start > nth(&src, &format!("{keyword} {name}"), 1),
+            "{keyword}: span should be inside the second declaration",
         );
         assert!(
             d.primary.contains(&format!("`{keyword} {name}`")),
@@ -117,6 +145,27 @@ fn di_1_each_item_kind_reports_its_own_duplicate_name() {
             "{keyword}: a note should point at the first declaration",
         );
     }
+}
+
+/// The anchor survives extra whitespace between keyword and name.
+///
+/// This is the case `name_span` exists for: the alternative was to
+/// rebuild the header line as `span.start + keyword.len() + 1`, which
+/// silently slides off the name as soon as the author lines their
+/// declarations up.
+#[test]
+fn di_1b_the_anchor_follows_the_name_through_padded_whitespace() {
+    let src = format!(
+        "{THEME}struct   s size=3x3
+  floor
+
+struct   s size=5x5
+  floor
+"
+    );
+    let found = of_code(&src, DiagnosticCode::DuplicateItem);
+    assert_eq!(found.len(), 1, "got {found:#?}");
+    assert_eq!(slice(&src, &found[0]), "s");
 }
 
 /// Three declarations earn two errors, not one. Reporting only the first
@@ -169,25 +218,34 @@ fn di_4_duplicates_separated_by_other_items_are_still_reported() {
     );
 }
 
-/// Each `@directive` may be declared once. `@cairn` and
-/// `@intended_targets` have one reader each, which takes the first match;
-/// `@requires` floors are folded by taking the strictest, so a second
-/// line asking for less leaves no trace at all.
+/// A single-valued `@directive` may be declared once.
+///
+/// `@cairn` and `@intended_targets` each answer a one-answer question,
+/// and neither has a consumer in the compiler yet — so nothing would
+/// choose between two of them.
 #[test]
-fn di_5_each_repeated_header_directive_is_reported() {
+fn di_5_each_repeated_single_valued_header_is_reported() {
     let cases = [
-        ("@cairn", "@cairn 2026.06\n@cairn 2026.07\n"),
         (
-            "@requires",
-            "@requires version>=1.20\n@requires version>=1.19\n",
+            "@cairn",
+            "@cairn 2026.06
+@cairn 2026.07
+",
         ),
         (
             "@intended_targets",
-            "@intended_targets [\"1.20.4\"]\n@intended_targets [\"1.21.4\"]\n",
+            "@intended_targets [\"1.20.4\"]
+@intended_targets [\"1.21.4\"]
+",
         ),
     ];
     for (directive, headers) in cases {
-        let src = format!("{headers}\n{THEME}struct s size=3x3\n  floor\n");
+        let src = format!(
+            "{headers}
+{THEME}struct s size=3x3
+  floor
+"
+        );
         let found = of_code(&src, DiagnosticCode::DuplicateHeader);
         assert_eq!(found.len(), 1, "{directive}: got {found:#?}");
         let d = &found[0];
@@ -207,6 +265,37 @@ fn di_5_each_repeated_header_directive_is_reported() {
             "{directive}: a note should point at the first declaration",
         );
     }
+}
+
+/// `@requires` is exempt, and that is not an oversight.
+///
+/// `resolve::version_axes` folds every `version>=X` floor to the
+/// strictest across all of them — the conjunction of the constraints,
+/// not a choice between them — which `RegistryRange`'s doc states and
+/// that module's tests pin. Reporting a repeat here would make an error
+/// of a shape the rest of the crate defines as meaningful, and the
+/// collision would not show up in either test suite because neither
+/// crosses the other's layer. This test is that crossing.
+#[test]
+fn di_5b_repeated_requires_is_legal_because_its_floors_compose() {
+    let src = format!(
+        "@requires version>=1.20
+@requires version>=1.21
+
+{THEME}struct s size=3x3
+  floor
+"
+    );
+    let found = of_code(&src, DiagnosticCode::DuplicateHeader);
+    assert!(found.is_empty(), "got {found:#?}");
+    let module = parse(&src).expect("parse");
+    let ir = lower(&module);
+    let resolution = resolve(&ir, None);
+    let axes = cairn_lang_core::resolve::compute_axes(&module, &ir, &resolution, Vec::new());
+    assert_eq!(
+        axes.registry_compat.min, "1.21",
+        "the strictest floor must still win",
+    );
 }
 
 /// Three different directives together are the normal case and must stay
@@ -308,16 +397,20 @@ fn di_8_the_first_def_binds_for_both_the_placement_and_the_scope() {
     }
 }
 
-/// Same rule for the other three kinds, observed through whatever each
-/// one actually decides.
+/// A duplicate `theme` name: the first binding supplies the slot value,
+/// so the lowered palette carries oak rather than stone.
 #[test]
-fn di_9_the_first_declaration_binds_for_every_kind() {
-    // theme: the first binding supplies the slot value, so the lowered
-    // palette carries oak rather than stone.
-    let theme_src = "theme t:\n  slot floor -> @oak_planks\n\n\
-theme t:\n  slot floor -> @stone\n\n\
-struct s size=3x3\n  floor mat_slot=floor\n";
-    let (_, block) = resolved(theme_src);
+fn di_9a_the_first_theme_supplies_the_slot_value() {
+    let src = "theme t:
+  slot floor -> @oak_planks
+
+theme t:
+  slot floor -> @stone
+
+struct s size=3x3
+  floor mat_slot=floor
+";
+    let (_, block) = resolved(src);
     let palette: Vec<&str> = block.structures["struct::s"]
         .palette
         .entries
@@ -328,19 +421,93 @@ struct s size=3x3\n  floor mat_slot=floor\n";
         palette.iter().any(|id| id.contains("oak")),
         "the first theme must supply the slot value, got palette {palette:?}",
     );
+}
 
-    // struct: the first header supplies `size=`.
-    let struct_src = format!("{THEME}struct s size=9x9\n  floor\n\nstruct s size=3x3\n  floor\n");
-    let (_, block) = resolved(&struct_src);
-    assert_eq!(dims(&block, "struct::s"), (9, 1, 9));
+/// A duplicate `struct` name: the first header supplies `size=`.
+///
+/// This one goes through block-array lowering's own `structures` map,
+/// not the resolver's. The resolver's half is invisible in the dims, so
+/// a fix applied only there would leave this test red.
+#[test]
+fn di_9b_the_first_struct_supplies_the_size() {
+    let src = format!(
+        "{THEME}struct s size=9x9
+  floor
 
-    // site: two blocks of one name put two `place id=a` rows under the
-    // same scope key, and the first wins there too.
-    let site_src = format!(
-        "{THEME}def big size=9x9:\n  floor id=f\n\ndef small size=3x3:\n  floor id=f\n\nsite s:\n  place id=a use=big theme=t at=origin\n\nsite s:\n  place id=a use=small theme=t at=origin\n"
+struct s size=3x3
+  floor
+"
     );
-    let (_, block) = resolved(&site_src);
+    let (_, block) = resolved(&src);
+    assert_eq!(dims(&block, "struct::s"), (9, 1, 9));
+}
+
+/// Two `site` blocks of one name whose places collide on `id=`: the
+/// binding key is `site::NAME::PLACE_ID`, so this is the only site shape
+/// where first-wins has anything to decide.
+#[test]
+fn di_9c_a_place_id_repeated_across_site_blocks_keeps_the_first() {
+    let src = format!(
+        "{THEME}def big size=9x9:
+  floor id=f
+
+def small size=3x3:
+  floor id=f
+
+site s:
+  place id=a use=big theme=t at=origin
+
+site s:
+  place id=a use=small theme=t at=origin
+"
+    );
+    let (_, block) = resolved(&src);
     assert_eq!(dims(&block, "site::s::a"), (9, 1, 9));
+    assert_eq!(
+        block.placements.len(),
+        1,
+        "the colliding place must not produce a second entry",
+    );
+}
+
+/// Two `site` blocks of one name whose places do *not* collide: nothing
+/// is dropped. Both build, under one shared `site::s::` namespace.
+///
+/// This is the shape the diagnostic's note has to describe correctly.
+/// An author told "the first `site s` is the one that resolves" would
+/// delete the second block and lose a placement that was in the build —
+/// so the claim is pinned here rather than left to the prose.
+#[test]
+fn di_9d_site_blocks_of_one_name_merge_rather_than_shadow() {
+    let src = format!(
+        "{THEME}def big size=9x9:
+  floor id=f
+
+def small size=3x3:
+  floor id=f
+
+site s:
+  place id=a use=big theme=t at=origin
+
+site s:
+  place id=b use=small theme=t at=origin
+"
+    );
+    let (resolution, block) = resolved(&src);
+    let keys: Vec<&str> = block.placements.keys().map(String::as_str).collect();
+    assert_eq!(keys, ["site::s::a", "site::s::b"]);
+    assert_eq!(dims(&block, "site::s::a"), (9, 1, 9));
+    assert_eq!(dims(&block, "site::s::b"), (3, 1, 3));
+    assert!(
+        resolution.scopes.contains_key("site::s::a")
+            && resolution.scopes.contains_key("site::s::b"),
+        "both places must resolve, got {:?}",
+        resolution.scopes.keys().collect::<Vec<_>>(),
+    );
+    // The collision is still worth reporting: the namespace is shared
+    // but `east_of=` is not, so the two blocks cannot reference each
+    // other's places.
+    assert!(codes(&src).contains(&"E_DUPLICATE_ITEM"));
 }
 
 /// Binding the first declaration does not mean ignoring the rest. The
@@ -349,12 +516,35 @@ struct s size=3x3\n  floor mat_slot=floor\n";
 /// would reveal a fresh wave of errors the author never saw.
 #[test]
 fn di_10_the_duplicate_body_still_contributes_its_own_diagnostics() {
-    let src = format!(
-        "{THEME}struct s size=3x3\n  floor mat_slot=floor\n\nstruct s size=3x3\n  floor mat_slot=nosuchslot\n"
+    let struct_src = format!(
+        "{THEME}struct s size=3x3
+  floor mat_slot=floor
+
+struct s size=3x3
+  floor mat_slot=nosuchslot
+"
     );
-    let found = codes(&src);
+    let found = codes(&struct_src);
     assert!(
         found.contains(&"E_DUPLICATE_ITEM") && found.contains(&"E_UNRESOLVED_SLOT"),
         "expected both the collision and the duplicate body's own error, got {found:?}",
+    );
+
+    // `theme` is the kind where this is not free. Theme findings are
+    // driven by the bound map, which holds one entry per name, so the
+    // shadowed body's bad slot value used to vanish with it.
+    let theme_src = "theme t:
+  slot floor -> @oak_planks
+
+theme t:
+  slot floor -> notatoken
+
+struct s size=3x3
+  floor mat_slot=floor
+";
+    let found = codes(theme_src);
+    assert!(
+        found.contains(&"E_DUPLICATE_ITEM") && found.contains(&"E_UNKNOWN_SLOT_TARGET"),
+        "the shadowed theme body's own finding must survive, got {found:?}",
     );
 }

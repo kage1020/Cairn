@@ -103,11 +103,10 @@ pub fn lower_to_block_array(
         // two unrelated problems instead of one.
         if let Some(ba) = lower_struct(s, scope, materials, &mut diagnostics) {
             // First-write-wins on a duplicate name, matching
-            // `resolve`'s `FIRST_BINDING_WINS`. The two maps are keyed
-            // the same way and are read together downstream — the
-            // lockfile pairs a scope's resolution with its voxels — so a
-            // disagreement here would pin the first body's materials
-            // onto the second body's blocks.
+            // `resolve`'s `FIRST_BINDING_WINS`. `resolution.scopes` has
+            // already bound the first body; taking the last here would
+            // paint the second body's voxels with the first body's
+            // resolved materials.
             structures.entry(key).or_insert(ba);
         }
     }
@@ -842,9 +841,13 @@ fn lower_site<'a>(
         // map inserts share that one allocation as their canonical key
         // (one extra clone for `placements`, one move into `structures`).
         let dims = ba.dims;
-        // First-write-wins, as above: two `site` blocks of one name put
-        // their `place id=` rows under the same key, and the resolver
-        // has already bound the first.
+        // First-write-wins, as above. Two `site` blocks of one name put
+        // their `place id=` rows into one `site::NAME::` namespace, so
+        // only a repeated `id=` collides — and the resolver has already
+        // bound the first of those. `placements` and `structures` share
+        // the key here, and the lockfile reads a placement's dims beside
+        // the structure it names, so the two must agree on which body
+        // won.
         placements
             .entry(ba.source_scope.clone())
             .or_insert(Placement {

@@ -8,11 +8,14 @@
 //!
 //! Source-position propagation: [`Header`], [`Item`], [`Statement`],
 //! [`ThemeRule`], [`Arg`], and [`Value`] each carry a `span` field pointing at
-//! the byte range of the originating source. Diagnostic-collecting passes in
+//! the byte range of the originating source, and [`Item`] carries a second,
+//! narrower `name_span` for the name token alone — a block's `span` reaches to
+//! the end of its indented body, which is too much to underline for a finding
+//! about the name. Diagnostic-collecting passes in
 //! `crate::check` rely on those spans to point a user at a specific spot in
-//! their `.crn` file. The `span` fields are tagged `#[serde(skip)]` so the
-//! externally-visible wire shape is unchanged from before spans were threaded
-//! through. The boolean-expression family ([`Expr`], [`TruthRow`],
+//! their `.crn` file. Every span field is tagged `#[serde(skip)]`, including
+//! any added later, so the externally-visible wire shape is unchanged from
+//! before spans were threaded through. The boolean-expression family ([`Expr`], [`TruthRow`],
 //! [`DottedRef`]) is intentionally span-free for now; those nodes only appear
 //! inside `logic`/`assert` lines that the reference-resolution pass will
 //! revisit, and spending the bytes here today would not buy any diagnostic
@@ -204,6 +207,43 @@ pub enum Item {
     },
 }
 
+/// Which top-level construct an [`Item`] is.
+///
+/// The kind is also the name's namespace. The resolver keys scopes
+/// `struct::NAME`, `def::NAME`, and `site::NAME::PLACE_ID`, and holds
+/// themes in a map of their own, so one name may be declared once per
+/// kind without colliding. `check::duplicate` and the resolver both
+/// depend on that fact; a `&'static str` in each would be two tables to
+/// keep in step, and nothing would catch a typo in either.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ItemKind {
+    /// `theme NAME` block.
+    Theme,
+    /// `def NAME` block.
+    Def,
+    /// `site NAME` block.
+    Site,
+    /// `struct NAME` block.
+    Struct,
+}
+
+impl ItemKind {
+    /// Keyword introducing this kind, as written in source.
+    ///
+    /// Doubles as the scope-key prefix for the three kinds that have
+    /// one (`struct::`, `def::`, `site::`); themes are held by name in
+    /// a map of their own and so have no key.
+    #[must_use]
+    pub fn keyword(self) -> &'static str {
+        match self {
+            Self::Theme => "theme",
+            Self::Def => "def",
+            Self::Site => "site",
+            Self::Struct => "struct",
+        }
+    }
+}
+
 impl Item {
     /// Byte range covered by this item in the original source.
     #[must_use]
@@ -216,38 +256,40 @@ impl Item {
         }
     }
 
-    /// Keyword introducing this item, as written in source.
+    /// Which top-level construct this is.
     #[must_use]
-    pub fn keyword(&self) -> &'static str {
+    pub fn kind(&self) -> ItemKind {
         match self {
-            Self::Theme { .. } => "theme",
-            Self::Def { .. } => "def",
-            Self::Site { .. } => "site",
-            Self::Struct { .. } => "struct",
+            Self::Theme { .. } => ItemKind::Theme,
+            Self::Def { .. } => ItemKind::Def,
+            Self::Site { .. } => ItemKind::Site,
+            Self::Struct { .. } => ItemKind::Struct,
         }
     }
 
-    /// Name this item declares, and the byte range of the name token
-    /// alone.
+    /// Name this item declares.
+    #[must_use]
+    pub fn name(&self) -> &str {
+        match self {
+            Self::Theme { name, .. }
+            | Self::Def { name, .. }
+            | Self::Site { name, .. }
+            | Self::Struct { name, .. } => name,
+        }
+    }
+
+    /// Byte range of the name token alone.
     ///
     /// [`Self::span`] covers the whole block including its indented
     /// body, which is the wrong thing to underline when the finding is
     /// about the name.
     #[must_use]
-    pub fn name(&self) -> (&str, &Span) {
+    pub fn name_span(&self) -> &Span {
         match self {
-            Self::Theme {
-                name, name_span, ..
-            }
-            | Self::Def {
-                name, name_span, ..
-            }
-            | Self::Site {
-                name, name_span, ..
-            }
-            | Self::Struct {
-                name, name_span, ..
-            } => (name, name_span),
+            Self::Theme { name_span, .. }
+            | Self::Def { name_span, .. }
+            | Self::Site { name_span, .. }
+            | Self::Struct { name_span, .. } => name_span,
         }
     }
 }

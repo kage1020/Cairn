@@ -17,11 +17,17 @@ first-class parts of the spec; messages MUST be in a shape that feeds the self-c
   - `E_DUPLICATE_ITEM` — two top-level items of the same kind share a
     name. The four kinds (`theme` / `def` / `struct` / `site`) are
     separate namespaces, so a name reused across kinds is not a
-    collision. The **first** declaration is the one that resolves; the
-    rest are skipped, which is why the repeat is an error rather than a
-    silent shadow.
-  - `E_DUPLICATE_HEADER` — a `@directive` is declared more than once.
-    A module carries at most one of each (§5.3).
+    collision. For `theme` / `def` / `struct` the name is the binding
+    key, so the **first** declaration is the one that resolves and the
+    rest bind nothing. For `site` the binding key is the per-place
+    `site::NAME::PLACE_ID`, so two blocks of one name merge into a
+    shared place namespace instead of shadowing — every place with a
+    distinct `id=` still builds, only a repeated `id=` collides, and
+    `east_of=` does not reach across the blocks.
+  - `E_DUPLICATE_HEADER` — a single-valued `@directive` (`@cairn`,
+    `@intended_targets`) is declared more than once (§5.3). `@requires`
+    is excluded: its floors compose to the strictest across every line,
+    so a second one adds a constraint rather than displacing the first.
   - `E_UNKNOWN_KEYWORD` — statement keyword is not in the known-keyword table.
   - `E_TYPE_MISMATCH_LABEL` — `id=` / `class=` / `mat_slot=` value is not
     a label (identifier or string).

@@ -49,6 +49,13 @@
 //! 7. **`connect` rows carrying a fourth positional** — the count
 //!    bound, which the endpoint and separator cases do not exercise
 //!    because they all pass exactly three.
+//! 8. **Top-level names declared twice** — `resolve` binds the first and
+//!    skips the rest without a diagnostic, because
+//!    `check::duplicate` owns `E_DUPLICATE_ITEM` and can anchor it on
+//!    the name token, which the IR no longer carries. Same division of
+//!    labour as the `connect` arms; pinned here so a library caller
+//!    that skips `check` has the skip written down rather than
+//!    discovered.
 
 use cairn_lang_core::block_array::{BlockArrayIr, lower_to_block_array};
 use cairn_lang_core::check::{Diagnostic, DiagnosticCode, Severity};
@@ -417,4 +424,63 @@ fn connect_with_extra_segment_endpoint_lays_no_walkway() {
             outcome.diagnostics,
         );
     }
+}
+
+/// A duplicate top-level name binds once and says nothing about it
+/// through the resolver-only path.
+///
+/// `check::duplicate` owns the diagnostic and every CLI command gates
+/// on it, so this is not a hole a user reaches. It *is* a hole a
+/// library caller reaches — `resolve` and `lower_to_block_array` are
+/// public, and the latter's own doc invites callers who assemble the
+/// pipeline themselves. Pinning it here makes the silence a decision
+/// rather than an accident, and puts the fact next to the other arms
+/// that share it.
+#[test]
+fn duplicate_item_names_bind_once_and_stay_silent_through_resolve() {
+    let src = format!(
+        "{PROLOGUE}def lodge size=9x9:
+  floor id=floor mat_slot=floor
+
+def lodge size=3x3:
+  floor id=floor mat_slot=floor
+
+site duo:
+  place id=anchor use=lodge theme=plain at=origin
+"
+    );
+    let module = parse(&src).expect("parse");
+    let ir = lower(&module);
+    let resolution = resolve(&ir, None);
+    assert_eq!(
+        errors(&resolution.diagnostics),
+        0,
+        "name collisions are owned by `check::duplicate`; the resolver-only path stays silent, got: {:#?}",
+        resolution.diagnostics,
+    );
+    assert_eq!(
+        resolution
+            .scopes
+            .keys()
+            .filter(|k| *k == "def::lodge")
+            .count(),
+        1,
+        "the name must bind exactly once",
+    );
+    let out: BlockArrayIr = lower_to_block_array(&ir, &resolution, None);
+    assert_eq!(
+        errors(&out.diagnostics),
+        0,
+        "lowering must not report the collision either, got: {:#?}",
+        out.diagnostics,
+    );
+    let placement = out
+        .placements
+        .get("site::duo::anchor")
+        .expect("the placement resolves");
+    assert_eq!(
+        (placement.dims.x, placement.dims.z),
+        (9, 9),
+        "the first declaration is the one that binds",
+    );
 }

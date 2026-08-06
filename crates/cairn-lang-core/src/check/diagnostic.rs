@@ -60,19 +60,23 @@ pub enum DiagnosticCode {
     /// Two or more top-level items of the same kind share a name.
     ///
     /// The four kinds occupy separate namespaces (the resolver keys
-    /// them `struct::`, `def::`, `site::`, and a themes map of its own),
-    /// so `theme x` alongside `struct x` is not a collision — only a
-    /// repeat within one kind is. The message names the keyword, since
-    /// the repair differs by what the author meant: rename, or merge
-    /// the two bodies.
+    /// them `struct::NAME`, `def::NAME`, `site::NAME::PLACE_ID`, and a
+    /// themes map of its own), so `theme x` alongside `struct x` is not
+    /// a collision — only a repeat within one kind is. The message names
+    /// the keyword, and the note differs by kind: for the three whose
+    /// name is the binding key the second declaration binds nothing,
+    /// while two `site` blocks of one name merge into a shared place
+    /// namespace instead of shadowing.
     DuplicateItem,
-    /// A `@directive` header appears more than once in a module.
+    /// A single-valued `@directive` header appears more than once.
     ///
-    /// Each header in `spec/syntax.md` §5.3 is described as one optional
-    /// declaration. A repeat is either ignored outright (`@cairn`,
-    /// `@intended_targets`) or folded into the strictest value
-    /// (`@requires`, whose floors are maxed), so a second line that says
-    /// something weaker leaves no trace in the build.
+    /// `@cairn` and `@intended_targets` each answer a question with one
+    /// answer — which language version the file was written against,
+    /// which targets it was designed for. Neither has a consumer in the
+    /// compiler yet, so nothing would decide between two of them.
+    /// `@requires` is not covered: its floors compose, folding to the
+    /// strictest across every line, so a second one adds a constraint
+    /// rather than displacing the first.
     DuplicateHeader,
     /// A statement keyword not in the known-keyword table.
     UnknownKeyword,
@@ -592,6 +596,8 @@ mod tests {
             DiagnosticCode::DuplicateSlot,
             DiagnosticCode::DuplicateArg,
             DiagnosticCode::DuplicateId,
+            DiagnosticCode::DuplicateItem,
+            DiagnosticCode::DuplicateHeader,
             DiagnosticCode::UnknownKeyword,
             DiagnosticCode::TypeMismatchLabel,
             DiagnosticCode::TypeMismatchSize,
@@ -654,6 +660,8 @@ mod tests {
             DiagnosticCode::DuplicateSlot,
             DiagnosticCode::DuplicateArg,
             DiagnosticCode::DuplicateId,
+            DiagnosticCode::DuplicateItem,
+            DiagnosticCode::DuplicateHeader,
             DiagnosticCode::UnknownKeyword,
             DiagnosticCode::TypeMismatchLabel,
             DiagnosticCode::TypeMismatchSize,
