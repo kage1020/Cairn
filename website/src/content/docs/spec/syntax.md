@@ -18,6 +18,13 @@ window front G 2 2 2x2                                            # forbidden (p
 Keep nesting shallow (`struct` / `def` / `level` / `room` / `theme` / `site`). Deep nesting increases
 LLM generation errors.
 
+Top-level names are scoped per kind: `theme` / `def` / `struct` / `site` are four namespaces, so one
+name may appear once in each. Declaring it twice within one kind is `E_DUPLICATE_ITEM`. For `theme` /
+`def` / `struct` the name is what binds, so the first declaration resolves and the repeat would
+otherwise be dropped from the build without a signal. Two `site` blocks of one name merge instead:
+their places share one `site::NAME::` namespace, so nothing is dropped unless a `place id=` repeats
+— but `east_of=` cannot reach across the blocks, so the merge is half a merge and still an error.
+
 ## 5.3 Headers (optional declarations)
 Metadata MAY be placed in headers rather than in the semantic body:
 
@@ -33,6 +40,10 @@ Metadata MAY be placed in headers rather than in the semantic body:
 - See [Versioning and Editions](versioning-editions) for `@requires`.
 - `@intended_targets` is a hint about "which Minecraft version it was designed for", not a claim of
   being verified. The verified target is recorded only in the lock.
+- `@cairn` and `@intended_targets` appear **at most once** per module → `E_DUPLICATE_HEADER`. Each
+  answers a question that has one answer, and neither has a consumer in the compiler yet, so nothing
+  would decide between two of them. `@requires` is the exception: its floors *compose*, folding to
+  the strictest across every line, so repeating it adds a constraint rather than displacing one.
 
 ## 5.4 Selectors (P4)
 - Wall selectors: `front` (+z) / `back` / `left` / `right`. `offset` runs along the wall; `y` is

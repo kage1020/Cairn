@@ -6,7 +6,13 @@
 //! last-write-wins; the surface form is the only place where both the first
 //! and second occurrences are still visible.
 //!
-//! The four codes emitted here use distinct scopes:
+//! The codes emitted here use distinct scopes:
+//! - `E_DUPLICATE_HEADER` — a single-valued `@directive` (`@cairn`,
+//!   `@intended_targets`) appears more than once in the module.
+//!   `@requires` is exempt; see [`check_headers`].
+//! - `E_DUPLICATE_ITEM` — two top-level items *of the same kind* share a
+//!   name. The four kinds are separate namespaces, so this is four
+//!   independent scopes rather than one.
 //! - `E_DUPLICATE_SIZE` — a struct/def header has more than one `size=`.
 //! - `E_DUPLICATE_SLOT` — a `theme` body has two `slot NAME ->` lines for
 //!   the same `NAME`.
@@ -16,15 +22,21 @@
 //! - `E_DUPLICATE_ID`   — two members in the same immediate body scope
 //!   declare `id=NAME` for the same `NAME` (per-body scope; nested `level`
 //!   blocks have their own namespace).
+//!
+//! Every scope here reports the *repeat* and points a note at the first
+//! declaration, so the anchor is the token the author would edit and the
+//! note is the one they would keep.
 
 use indexmap::IndexMap;
 
-use crate::ast::{Arg, Item, Module, Statement, ThemeRule, ValueKind};
+use crate::ast::{Arg, Header, Item, ItemKind, Module, Statement, ThemeRule, ValueKind};
 use crate::error::Span;
 
 use super::{Diagnostic, DiagnosticCode, DiagnosticNote, DiagnosticSink};
 
 pub(super) fn run(module: &Module, sink: &mut DiagnosticSink) {
+    check_headers(&module.headers, sink);
+    check_item_names(&module.items, sink);
     for item in &module.items {
         match item {
             Item::Theme { body, .. } => check_theme_body(body, sink),
@@ -34,6 +46,123 @@ pub(super) fn run(module: &Module, sink: &mut DiagnosticSink) {
             }
             Item::Site { body, .. } => check_body(body, sink),
         }
+    }
+}
+
+/// Module-header scope: a single-valued `@directive` may be declared
+/// once.
+///
+/// `@cairn` and `@intended_targets` are single-valued by construction —
+/// one language version the file was written against, one list of
+/// intended targets. Two of either state two answers to a question that
+/// has one, and no rule anywhere says which holds. Neither has a
+/// consumer in the compiler today (both are provenance for a future
+/// reader), which is precisely why a repeat has to be reported rather
+/// than resolved: there is no reader to prefer one over the other, and
+/// picking silently later would be worse than saying so now.
+///
+/// `@requires` is exempt because it *composes*. `resolve::version_axes`
+/// folds every `version>=X` floor to the strictest, which is the
+/// conjunction of the constraints, not a choice between them — nothing
+/// is discarded, and the behaviour is documented on `RegistryRange` and
+/// pinned by that module's tests. Reporting it here would make an error
+/// out of a shape the rest of the crate defines as meaningful.
+fn check_headers(headers: &[Header], sink: &mut DiagnosticSink) {
+    let mut seen: IndexMap<&'static str, Span> = IndexMap::new();
+    for header in headers {
+        let directive = match header {
+            Header::Cairn { .. } => "@cairn",
+            Header::IntendedTargets { .. } => "@intended_targets",
+            Header::Requires { .. } => continue,
+        };
+        let span = header.span().clone();
+        if let Some(first_span) = seen.get(directive) {
+            sink.push(Diagnostic {
+                code: DiagnosticCode::DuplicateHeader,
+                severity: DiagnosticCode::DuplicateHeader.severity(),
+                span,
+                primary: format!("`{directive}` is declared more than once"),
+                notes: vec![
+                    DiagnosticNote {
+                        span: Some(first_span.clone()),
+                        message: "first declaration here".into(),
+                    },
+                    DiagnosticNote {
+                        span: None,
+                        message: format!(
+                            "`{directive}` is single-valued: keep the line that states what you mean and delete the other",
+                        ),
+                    },
+                ],
+                data: None,
+            });
+        } else {
+            seen.insert(directive, span);
+        }
+    }
+}
+
+/// Top-level name scope, one namespace per item kind.
+///
+/// [`ItemKind`] is the namespace: the resolver keys scopes `struct::`,
+/// `def::`, and `site::NAME::` and holds themes in a map of their own,
+/// so the same name on two different kinds never collides and must not
+/// be reported. Keying the seen-map by the kind rather than by a
+/// keyword string is what keeps this pass and the resolver reading the
+/// same definition of "namespace".
+fn check_item_names(items: &[Item], sink: &mut DiagnosticSink) {
+    let mut seen: IndexMap<(ItemKind, &str), Span> = IndexMap::new();
+    for item in items {
+        let kind = item.kind();
+        let keyword = kind.keyword();
+        let name = item.name();
+        // Anchor on the name token, not the item's span: the block span
+        // covers the indented body, and underlining a whole `def` says
+        // nothing about which word to change.
+        let span = item.name_span().clone();
+        if let Some(first_span) = seen.get(&(kind, name)) {
+            sink.push(Diagnostic {
+                code: DiagnosticCode::DuplicateItem,
+                severity: DiagnosticCode::DuplicateItem.severity(),
+                span,
+                primary: format!("`{keyword} {name}` is declared more than once"),
+                notes: vec![
+                    DiagnosticNote {
+                        span: Some(first_span.clone()),
+                        message: "first declaration here".into(),
+                    },
+                    DiagnosticNote {
+                        span: None,
+                        message: repair_advice(kind, name),
+                    },
+                ],
+                data: None,
+            });
+        } else {
+            seen.insert((kind, name), span);
+        }
+    }
+}
+
+/// What the author has to do about a repeated name, which differs by
+/// kind because what the repeat costs differs by kind.
+///
+/// For `theme` / `def` / `struct` the name *is* the binding key, so the
+/// second declaration binds nothing and its body reaches no artifact.
+/// For `site` the binding key is `site::NAME::PLACE_ID`, so two blocks
+/// of one name do not shadow each other — their places land in one
+/// shared namespace and all of them build. Telling that author "the
+/// first one resolves" would invite them to delete a block whose
+/// placements were in the build.
+fn repair_advice(kind: ItemKind, name: &str) -> String {
+    let keyword = kind.keyword();
+    match kind {
+        ItemKind::Site => format!(
+            "two `{keyword} {name}` blocks share one `site::{name}::` namespace: places with distinct `id=` all build, a repeated `id=` keeps only the first, and `east_of=` cannot reach across the blocks — merge the bodies into one block, or give this one its own name"
+        ),
+        ItemKind::Theme | ItemKind::Def | ItemKind::Struct => format!(
+            "the first `{keyword} {name}` is the one that resolves; rename this one, or merge the two bodies"
+        ),
     }
 }
 

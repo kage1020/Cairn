@@ -57,6 +57,27 @@ pub enum DiagnosticCode {
     DuplicateArg,
     /// Two or more members in the same immediate body share an `id=`.
     DuplicateId,
+    /// Two or more top-level items of the same kind share a name.
+    ///
+    /// The four kinds occupy separate namespaces (the resolver keys
+    /// them `struct::NAME`, `def::NAME`, `site::NAME::PLACE_ID`, and a
+    /// themes map of its own), so `theme x` alongside `struct x` is not
+    /// a collision — only a repeat within one kind is. The message names
+    /// the keyword, and the note differs by kind: for the three whose
+    /// name is the binding key the second declaration binds nothing,
+    /// while two `site` blocks of one name merge into a shared place
+    /// namespace instead of shadowing.
+    DuplicateItem,
+    /// A single-valued `@directive` header appears more than once.
+    ///
+    /// `@cairn` and `@intended_targets` each answer a question with one
+    /// answer — which language version the file was written against,
+    /// which targets it was designed for. Neither has a consumer in the
+    /// compiler yet, so nothing would decide between two of them.
+    /// `@requires` is not covered: its floors compose, folding to the
+    /// strictest across every line, so a second one adds a constraint
+    /// rather than displacing the first.
+    DuplicateHeader,
     /// A statement keyword not in the known-keyword table.
     UnknownKeyword,
     /// `id=`, `class=`, or `mat_slot=` whose value is not a label
@@ -211,6 +232,8 @@ impl DiagnosticCode {
             Self::DuplicateSlot => "E_DUPLICATE_SLOT",
             Self::DuplicateArg => "E_DUPLICATE_ARG",
             Self::DuplicateId => "E_DUPLICATE_ID",
+            Self::DuplicateItem => "E_DUPLICATE_ITEM",
+            Self::DuplicateHeader => "E_DUPLICATE_HEADER",
             Self::UnknownKeyword => "E_UNKNOWN_KEYWORD",
             Self::TypeMismatchLabel => "E_TYPE_MISMATCH_LABEL",
             Self::TypeMismatchSize => "E_TYPE_MISMATCH_SIZE",
@@ -273,7 +296,9 @@ impl DiagnosticCode {
             | Self::UnresolvedPort
             | Self::AmbiguousPort
             | Self::MissingPathMaterial
-            | Self::ConnectArity => Severity::Error,
+            | Self::ConnectArity
+            | Self::DuplicateItem
+            | Self::DuplicateHeader => Severity::Error,
             Self::UnknownSlotTarget
             | Self::StructureTooLarge
             | Self::ThemeSelectorUnmatched
@@ -571,6 +596,8 @@ mod tests {
             DiagnosticCode::DuplicateSlot,
             DiagnosticCode::DuplicateArg,
             DiagnosticCode::DuplicateId,
+            DiagnosticCode::DuplicateItem,
+            DiagnosticCode::DuplicateHeader,
             DiagnosticCode::UnknownKeyword,
             DiagnosticCode::TypeMismatchLabel,
             DiagnosticCode::TypeMismatchSize,
@@ -633,6 +660,8 @@ mod tests {
             DiagnosticCode::DuplicateSlot,
             DiagnosticCode::DuplicateArg,
             DiagnosticCode::DuplicateId,
+            DiagnosticCode::DuplicateItem,
+            DiagnosticCode::DuplicateHeader,
             DiagnosticCode::UnknownKeyword,
             DiagnosticCode::TypeMismatchLabel,
             DiagnosticCode::TypeMismatchSize,

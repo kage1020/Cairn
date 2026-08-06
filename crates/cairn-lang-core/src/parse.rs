@@ -210,7 +210,7 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_theme_item(&mut self, start_byte: usize) -> Result<Item, ParseError> {
-        let name = self.expect_ident()?;
+        let (name, name_span) = self.expect_ident_spanned()?;
         self.consume_optional_colon();
         self.expect_newline()?;
         let body = if self.peek_is(&TokenKind::Indent) {
@@ -227,7 +227,12 @@ impl<'a> Parser<'a> {
             Vec::new()
         };
         let span = start_byte..self.last_content_byte();
-        Ok(Item::Theme { name, body, span })
+        Ok(Item::Theme {
+            name,
+            name_span,
+            body,
+            span,
+        })
     }
 
     fn parse_theme_rule(&mut self) -> Result<ThemeRule, ParseError> {
@@ -270,7 +275,7 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_def_item(&mut self, start_byte: usize) -> Result<Item, ParseError> {
-        let name = self.expect_ident()?;
+        let (name, name_span) = self.expect_ident_spanned()?;
         let args = self.parse_header_args_until_eol()?;
         self.consume_optional_colon();
         self.expect_newline()?;
@@ -278,6 +283,7 @@ impl<'a> Parser<'a> {
         let span = start_byte..self.last_content_byte();
         Ok(Item::Def {
             name,
+            name_span,
             args,
             body,
             span,
@@ -285,16 +291,21 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_site_item(&mut self, start_byte: usize) -> Result<Item, ParseError> {
-        let name = self.expect_ident()?;
+        let (name, name_span) = self.expect_ident_spanned()?;
         self.consume_optional_colon();
         self.expect_newline()?;
         let body = self.parse_optional_command_body()?;
         let span = start_byte..self.last_content_byte();
-        Ok(Item::Site { name, body, span })
+        Ok(Item::Site {
+            name,
+            name_span,
+            body,
+            span,
+        })
     }
 
     fn parse_struct_item(&mut self, start_byte: usize) -> Result<Item, ParseError> {
-        let name = self.expect_ident()?;
+        let (name, name_span) = self.expect_ident_spanned()?;
         let args = self.parse_header_args_until_eol()?;
         self.consume_optional_colon();
         self.expect_newline()?;
@@ -302,6 +313,7 @@ impl<'a> Parser<'a> {
         let span = start_byte..self.last_content_byte();
         Ok(Item::Struct {
             name,
+            name_span,
             args,
             body,
             span,
@@ -762,6 +774,16 @@ impl<'a> Parser<'a> {
     }
 
     fn expect_ident(&mut self) -> Result<String, ParseError> {
+        self.expect_ident_spanned().map(|(name, _)| name)
+    }
+
+    /// [`Self::expect_ident`] keeping the identifier's own byte range.
+    ///
+    /// Callers that record a name in the AST need it: the enclosing
+    /// item's span covers the indented body, and reconstructing the
+    /// header line from `span.start` plus the keyword's length assumes a
+    /// single space that `def   hut` does not have.
+    fn expect_ident_spanned(&mut self) -> Result<(String, crate::error::Span), ParseError> {
         let position = self.position();
         let Some(token) = self.peek().cloned() else {
             return Err(ParseError::Syntax {
@@ -771,7 +793,7 @@ impl<'a> Parser<'a> {
         };
         if let TokenKind::Ident(name) = token.kind {
             self.advance();
-            Ok(name)
+            Ok((name, token.span))
         } else {
             Err(ParseError::Syntax {
                 position,

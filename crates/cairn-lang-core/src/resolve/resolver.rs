@@ -185,9 +185,48 @@ pub struct ResolvedMemberBinding {
 
 /// Resolve theme bindings over the given Intent IR.
 ///
-/// Always returns a [`Resolution`] — every theme appears in `.themes`, every
-/// struct/def/site appears in `.scopes`, and any problems encountered are
-/// collected into `.diagnostics`.
+/// Always returns a [`Resolution`] — every distinct theme name appears in
+/// `.themes`, every distinct scope key appears in `.scopes`, and any
+/// problems encountered are collected into `.diagnostics`.
+///
+/// INVARIANT(`FIRST_BINDING_WINS`): when two declarations produce the
+/// same binding key, the first one binds and the later ones are skipped.
+///
+/// The binding key is not always the item name. It is the name for
+/// `theme`, `struct::NAME` for a struct and `def::NAME` for a def — but
+/// `site::NAME::PLACE_ID` for a placement, which includes the place id.
+/// Two `site` blocks of one name therefore do not shadow each other:
+/// their places land in one shared namespace and every place with a
+/// distinct `id=` binds. Only a place id repeated across those blocks
+/// collides, and there the first wins like everywhere else.
+///
+/// The direction has to be picked because the collision is real, and
+/// picking it uniformly is what keeps the resolution readable — a `def`
+/// whose placement is sized from one body and whose members resolve
+/// from another is a wrong build, not a stylistic difference. `first`
+/// is the one `defs.iter().find` (the `place use=` lookup) already
+/// takes, and the one `E_DUPLICATE_ITEM` tells the author about.
+/// `tests/check_duplicate_items.rs` records the shape that made the
+/// choice necessary.
+///
+/// INVARIANT(upstream-diagnosed): a skipped binding is not reported from
+/// here. `check::duplicate` has already pushed `E_DUPLICATE_ITEM` into
+/// the same sink for every repeated name, so a user running `cairn
+/// check` — or any build command, all of which gate on it — sees a
+/// position-anchored signal. Re-pushing would report one mistake twice,
+/// and the pass that owns it can anchor on the name token, which the IR
+/// no longer carries. This is the same division of labour the silent
+/// arms in [`resolve_connect_row`] follow, and it is pinned the same
+/// way, by `tests/silent_skip_arms.rs` for the resolver-only path and
+/// `tests/check_duplicate_items.rs` for the full pipeline. A
+/// `debug_assert` on the skip is deliberately absent: the condition is
+/// ordinary malformed input, and aborting on it would take down the LSP
+/// on a file the author is halfway through editing.
+///
+/// Skipping is only about the *binding*. Each duplicate body is still
+/// walked and still contributes its own body-local diagnostics, so an
+/// author fixing the collision sees the problems inside both bodies in
+/// the same run.
 ///
 /// The `edition` argument drives per-edition theme-variant selection
 /// (spec versioning-editions §10.7 hierarchy #2): when the file declares
@@ -202,13 +241,20 @@ pub struct ResolvedMemberBinding {
 pub fn resolve(ir: &IntentModule, edition: Option<Edition>) -> Resolution {
     let mut diagnostics: Vec<Diagnostic> = Vec::new();
     let mut themes: IndexMap<String, ThemeBinding> = IndexMap::new();
+    // Every declared body, including one whose name lost the binding.
+    // The map holds one entry per name, so it is not the right thing to
+    // walk for findings that are local to a body — a bad slot value in a
+    // shadowed `theme` is still a bad slot value, and the author should
+    // not have to fix the name first to be told about it.
+    let mut declared: Vec<ThemeBinding> = Vec::with_capacity(ir.themes.len());
     for theme in &ir.themes {
         let binding = build_theme_binding(theme);
-        // Last-write-wins on duplicate theme names (the `duplicate` pass in
-        // `check` is the authority on flagging the collision). Keeping the
-        // map insertion-ordered means downstream consumers see the same
-        // theme order the source declared.
-        themes.insert(binding.name.clone(), binding);
+        declared.push(binding.clone());
+        // First-write-wins on duplicate names, as everywhere else in this
+        // function (see `FIRST_BINDING_WINS`). Keeping the map
+        // insertion-ordered means downstream consumers see the same theme
+        // order the source declared.
+        themes.entry(binding.name.clone()).or_insert(binding);
     }
 
     let single_logical = single_logical_theme(&themes);
@@ -240,7 +286,7 @@ pub fn resolve(ir: &IntentModule, edition: Option<Edition>) -> Resolution {
             &mut applied_themes,
             &mut diagnostics,
         );
-        scopes.insert(struct_key(s), resolution);
+        scopes.entry(struct_key(s)).or_insert(resolution);
     }
     for d in &ir.defs {
         let resolution = resolve_struct_or_def(
@@ -251,7 +297,7 @@ pub fn resolve(ir: &IntentModule, edition: Option<Edition>) -> Resolution {
             &mut applied_themes,
             &mut diagnostics,
         );
-        scopes.insert(def_key(d), resolution);
+        scopes.entry(def_key(d)).or_insert(resolution);
     }
     let mut used_defs: HashSet<String> = HashSet::new();
     let mut connects: Vec<ValidatedConnect> = Vec::new();
@@ -269,7 +315,7 @@ pub fn resolve(ir: &IntentModule, edition: Option<Edition>) -> Resolution {
     }
     check_unused_defs(&ir.defs, &used_defs, &mut diagnostics);
 
-    check_slot_targets(&themes, &mut diagnostics);
+    check_slot_targets(&declared, &mut diagnostics);
     check_unmatched_selectors(&themes, &applied_themes, &mut diagnostics);
 
     Resolution {
@@ -600,7 +646,9 @@ fn resolve_site_placements(
             applied_themes,
             diagnostics,
         );
-        scopes.insert(place_scope_key(&site.name, place_id), resolution);
+        scopes
+            .entry(place_scope_key(&site.name, place_id))
+            .or_insert(resolution);
         // Record this place's def so a later `connect` row can look up
         // the def's members without re-walking the site body.
         place_def.insert(place_id.to_owned(), use_name.to_owned());
@@ -1391,8 +1439,14 @@ fn unresolved_slot_diag(
     }
 }
 
-fn check_slot_targets(themes: &IndexMap<String, ThemeBinding>, diagnostics: &mut Vec<Diagnostic>) {
-    for theme in themes.values() {
+/// Flag slot values that are not material tokens.
+///
+/// Takes every *declared* theme rather than the bound map: the check is
+/// local to one body and needs no resolution, so a body whose name lost
+/// the binding still gets its findings. Selector matching is the
+/// opposite case — see [`check_unmatched_selectors`].
+fn check_slot_targets(themes: &[ThemeBinding], diagnostics: &mut Vec<Diagnostic>) {
+    for theme in themes {
         for (slot_name, v) in &theme.slots {
             if classify_token(&v.value) == TokenKind::NotAToken {
                 diagnostics.push(Diagnostic {
@@ -1416,6 +1470,13 @@ fn check_slot_targets(themes: &IndexMap<String, ThemeBinding>, diagnostics: &mut
     }
 }
 
+/// Flag theme selectors that matched no member.
+///
+/// Takes the bound map, not every declared body. "Matched nothing" is a
+/// statement about a resolution this selector took part in, and a body
+/// whose name lost the binding never got to take part — reporting its
+/// selectors would blame them for a name collision reported elsewhere.
+/// The body-local counterpart is [`check_slot_targets`].
 fn check_unmatched_selectors(
     themes: &IndexMap<String, ThemeBinding>,
     applied_themes: &HashSet<String>,

@@ -53,6 +53,15 @@ fn noisy_sources() -> Vec<String> {
         ),
         format!("{THEME}struct s size=5x5\n  torch mat_slot=wall\n"),
         format!("{THEME}struct s size=5x5\n  floor mat_slot=nosuchslot\n"),
+        // Duplicate names and headers. Each kind gets its own source
+        // because the repair note is written per kind, so one fixture
+        // would leave the other branch's prose unchecked.
+        format!("{THEME}{HUT}def hut size=5x5:\n  floor id=floor mat_slot=floor\n"),
+        format!("{THEME}struct s size=5x5\n  floor\n\nstruct s size=6x6\n  floor\n"),
+        format!(
+            "{THEME}{HUT}site s:\n  place id=a use=hut theme=t at=origin\n\nsite s:\n  place id=b use=hut theme=t at=origin\n"
+        ),
+        format!("@cairn 2026.06\n@cairn 2026.07\n\n{THEME}struct s size=5x5\n  floor\n"),
     ]
 }
 

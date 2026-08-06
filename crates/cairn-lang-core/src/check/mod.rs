@@ -109,6 +109,8 @@ mod tests {
             | C::DuplicateSlot
             | C::DuplicateArg
             | C::DuplicateId
+            | C::DuplicateItem
+            | C::DuplicateHeader
             | C::UnknownKeyword
             | C::TypeMismatchLabel
             | C::TypeMismatchSize
@@ -163,7 +165,9 @@ mod tests {
             [
                 "E_CONNECT_ARITY",
                 "E_DUPLICATE_ARG",
+                "E_DUPLICATE_HEADER",
                 "E_DUPLICATE_ID",
+                "E_DUPLICATE_ITEM",
                 "E_DUPLICATE_SIZE",
                 "E_DUPLICATE_SLOT",
                 "E_TYPE_MISMATCH_LABEL",
