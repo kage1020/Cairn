@@ -37,6 +37,7 @@ mod version_axes;
 
 pub use binding::{SelectorMatch, ThemeBinding, TokenKind, classify_token};
 pub use requires_parse::{compare_versions, parse_min_version};
+pub(crate) use resolver::select_the_same_members;
 pub use resolver::{
     PortRef, Resolution, ResolvedMemberBinding, ScopeResolution, ValidatedConnect, place_scope_key,
     resolve,

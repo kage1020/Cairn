@@ -89,6 +89,7 @@ fn the_corpus_reaches_the_codes_its_prose_assertions_are_written_for() {
         "E_DUPLICATE_HEADER",
         "E_DUPLICATE_ID",
         "E_DUPLICATE_ITEM",
+        "E_DUPLICATE_SELECTOR",
         "E_DUPLICATE_SIZE",
         "E_INCOMPLETE_PLACE",
         "E_INVALID_PLACE_ID",

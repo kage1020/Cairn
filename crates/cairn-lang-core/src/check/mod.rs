@@ -27,6 +27,7 @@ mod keyword_allowlist;
 mod member_scope;
 mod nesting;
 mod positional;
+mod prose;
 mod sink;
 mod type_mismatch;
 
@@ -65,7 +66,7 @@ use crate::intent::IntentModule;
 #[must_use]
 pub fn check(module: &Module, ir: &IntentModule, edition: Option<Edition>) -> Vec<Diagnostic> {
     let mut sink = DiagnosticSink::new();
-    duplicate::run(module, &mut sink);
+    duplicate::run(module, ir, &mut sink);
     keyword_allowlist::run(ir, &mut sink);
     member_scope::run(ir, &mut sink);
     connect_arity::run(ir, &mut sink);
@@ -114,6 +115,7 @@ mod tests {
         match code {
             C::DuplicateSize
             | C::DuplicateSlot
+            | C::DuplicateSelector
             | C::DuplicateArg
             | C::DuplicateId
             | C::DuplicateItem
@@ -179,6 +181,7 @@ mod tests {
                 "E_DUPLICATE_HEADER",
                 "E_DUPLICATE_ID",
                 "E_DUPLICATE_ITEM",
+                "E_DUPLICATE_SELECTOR",
                 "E_DUPLICATE_SIZE",
                 "E_DUPLICATE_SLOT",
                 "E_MISPLACED_MEMBER",

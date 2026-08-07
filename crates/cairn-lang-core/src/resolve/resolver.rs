@@ -59,8 +59,8 @@ use crate::edition::Edition;
 use crate::error::Span;
 use crate::ids::{IdError, PlaceId, PortId, SiteName};
 use crate::intent::{
-    ConnectEnd, DefIr, IntentModule, Member, MemberBody, MemberRole, SiteIr, StructIr, ThemeIr,
-    ValueWithSpan, role_of,
+    ConnectEnd, DefIr, IntentModule, Member, MemberBody, MemberRole, SelectorRule, SiteIr,
+    StructIr, ThemeIr, ValueWithSpan, role_of,
 };
 use crate::suggest::nearest_match;
 
@@ -1461,6 +1461,62 @@ fn resolve_members(
                 diagnostics,
             );
         }
+    }
+}
+
+/// Whether two selector rows pick out the same members — in this file and
+/// in any other.
+///
+/// [`selector_matches`] cannot tell two rows apart when they carry the same
+/// keyword (the comparison is string equality against `MemberRole::keyword`)
+/// and attribute maps with the same keys whose values are interchangeable
+/// under [`member_attr_matches`]. Interchangeability is per key rather than
+/// per value: `class=small` and `class="small"` name one label and select
+/// alike, while `side=front` and `side="front"` are two [`ValueKind`]s and
+/// select disjoint sets.
+///
+/// The relation is an equivalence — key-set equality and per-key value
+/// equality are each reflexive, symmetric, and transitive — so a caller
+/// grouping rows may compare a new row against one representative of a
+/// group rather than against every row in it.
+///
+/// Lives beside the matcher rather than in the pass that reports duplicate
+/// rows, so the answer stays derived from the rule it is about.
+pub(crate) fn select_the_same_members(a: &SelectorRule, b: &SelectorRule) -> bool {
+    a.keyword == b.keyword
+        && a.attrs.len() == b.attrs.len()
+        && a.attrs.iter().all(|(key, value)| {
+            b.attrs
+                .get(key)
+                .is_some_and(|other| attr_values_select_alike(key, &value.value, &other.value))
+        })
+}
+
+/// Whether swapping one selector attribute value for the other leaves
+/// [`member_attr_matches`] answering the same for every member under `key`.
+///
+/// The split mirrors that function's arms. `id` / `class` / `mat_slot` are
+/// read off [`Member`]'s own fields through [`value_eq_label`], which takes
+/// an `Ident` or a `Str` carrying the same text; every other key is
+/// compared against an [`crate::intent::IntentState`] entry by
+/// [`ValueKind`], where the two spellings are different values.
+/// `tests/check_duplicate_selector.rs` pins the two together from the
+/// outside, by checking `E_THEME_SELECTOR_UNMATCHED` alongside the finding.
+///
+/// A value that is neither `Ident` nor `Str` under a label key matches no
+/// member whatever it is, so two rows carrying such values displace nothing
+/// from each other. `false` is the accurate answer there, not a
+/// conservative one.
+fn attr_values_select_alike(key: &str, a: &Value, b: &Value) -> bool {
+    match key {
+        "id" | "class" | "mat_slot" => match (&a.kind, &b.kind) {
+            (
+                ValueKind::Ident(left) | ValueKind::Str(left),
+                ValueKind::Ident(right) | ValueKind::Str(right),
+            ) => left == right,
+            _ => false,
+        },
+        _ => a.kind == b.kind,
     }
 }
 

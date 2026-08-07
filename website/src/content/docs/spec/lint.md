@@ -11,6 +11,15 @@ first-class parts of the spec; messages MUST be in a shape that feeds the self-c
   in `cairn check` today:
   - `E_DUPLICATE_SIZE` — header has more than one `size=`.
   - `E_DUPLICATE_SLOT` — `theme` body declares the same slot twice.
+  - `E_DUPLICATE_SELECTOR` — two selector rows in one `theme` body select
+    the same members and bind the same key, so the earlier binding is read
+    by nothing (§7.1). Sameness is by meaning, not by source text:
+    attribute order does not count, and `class=` / `id=` / `mat_slot=`
+    compare as label text, so `small` and `"small"` are one value. Rows
+    that bind *different* keys are excluded — they compose, every binding
+    reaching every member both rows select — and so are rows whose
+    attributes merely overlap, where a member only the wider row selects
+    still reads its binding.
   - `E_DUPLICATE_ARG`  — repeated `key=` in the same argument list.
   - `E_DUPLICATE_ID`   — two members share an `id=` within the same
     immediate body scope.
@@ -113,6 +122,7 @@ evolving — additions for new codes are strictly additive, so consumers should 
 | Code                 | `data` payload                                                   |
 | -------------------- | ---------------------------------------------------------------- |
 | `W_WALKWAY_BLOCKED`  | `{ "kind": "walkway_blocked", "skipped": <u64> }` — number of cells along the fallback L-shaped path that overlapped an existing structure and were dropped from the lay (emitted only when the detour search found no unobstructed route). |
+| `E_DUPLICATE_SELECTOR` | `{ "kind": "duplicate_selector", "rebound": ["frame"] }` — the binding keys this selector row takes over from an earlier one, without the trailing `=`, in the order the message lists them. Always non-empty. |
 | `E_INCOMPLETE_PLACE` | `{ "kind": "incomplete_place", "missing": ["id", "use", "theme"] }` — the keys the `place` row does not declare, without the trailing `=`, in the order the message lists them. Always non-empty. |
 
 Codes not listed above omit `data` entirely; reading `entry.data` returns `undefined` and the JSON

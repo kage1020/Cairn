@@ -4,7 +4,11 @@
 //! Walks the surface AST rather than the IR because the IR's
 //! [`IntentState`](crate::intent::IntentState) and `args` maps are
 //! last-write-wins; the surface form is the only place where both the first
-//! and second occurrences are still visible.
+//! and second occurrences are still visible. `E_DUPLICATE_SELECTOR` is the
+//! exception, and for the reason the rule states rather than against it —
+//! `ThemeIr::selectors` is a `Vec` that keeps every row, and it is the
+//! shape the matcher those rows feed actually reads. See
+//! [`check_theme_selectors`].
 //!
 //! The codes emitted here use distinct scopes:
 //! - `E_DUPLICATE_HEADER` — a single-valued `@directive` (`@cairn`,
@@ -16,6 +20,8 @@
 //! - `E_DUPLICATE_SIZE` — a struct/def header has more than one `size=`.
 //! - `E_DUPLICATE_SLOT` — a `theme` body has two `slot NAME ->` lines for
 //!   the same `NAME`.
+//! - `E_DUPLICATE_SELECTOR` — a `theme` body has two selector rows that
+//!   select the same members and bind the same key.
 //! - `E_DUPLICATE_ARG`  — any other duplicate `key=` inside the same
 //!   argument list (header excluding `size=`, statement args, selector
 //!   attrs, selector bindings, header args of struct/def excluding size).
@@ -23,18 +29,24 @@
 //!   declare `id=NAME` for the same `NAME` (per-body scope; nested `level`
 //!   blocks have their own namespace).
 //!
-//! Every scope here reports the *repeat* and points a note at the first
-//! declaration, so the anchor is the token the author would edit and the
-//! note is the one they would keep.
+//! Every scope here reports the *repeat* and points a note at the
+//! declaration it displaces, so the anchor is the token the author would
+//! edit and the note is the one they would keep. For all but the selector
+//! scope the displaced declaration is the first one — nothing between them
+//! took anything away. A selector row's binding can be displaced twice
+//! over, so there the note names the most recent one.
 
 use indexmap::IndexMap;
 
 use crate::ast::{Arg, Header, Item, ItemKind, Module, Statement, ThemeRule, ValueKind};
 use crate::error::Span;
+use crate::intent::{IntentModule, SelectorRule, ThemeIr};
+use crate::resolve::select_the_same_members;
 
-use super::{Diagnostic, DiagnosticCode, DiagnosticNote, DiagnosticSink};
+use super::prose::and_list;
+use super::{Diagnostic, DiagnosticCode, DiagnosticData, DiagnosticNote, DiagnosticSink};
 
-pub(super) fn run(module: &Module, sink: &mut DiagnosticSink) {
+pub(super) fn run(module: &Module, ir: &IntentModule, sink: &mut DiagnosticSink) {
     check_headers(&module.headers, sink);
     check_item_names(&module.items, sink);
     for item in &module.items {
@@ -46,6 +58,16 @@ pub(super) fn run(module: &Module, sink: &mut DiagnosticSink) {
             }
             Item::Site { body, .. } => check_body(body, sink),
         }
+    }
+    // The one scope read off the IR rather than the surface AST, walked in
+    // its own loop because it needs a different tree. `lower` visits items
+    // in order and keeps one `ThemeIr` per `theme` block, including the
+    // blocks whose name lost the binding, so this is the same set of
+    // bodies the loop above walks; the sink sorts by span at the end, so
+    // splitting the theme work across two passes does not reorder anything
+    // the user sees.
+    for theme in &ir.themes {
+        check_theme_selectors(theme, sink);
     }
 }
 
@@ -191,6 +213,118 @@ fn check_theme_body(body: &[ThemeRule], sink: &mut DiagnosticSink) {
                 check_arg_list(bindings, sink);
             }
         }
+    }
+}
+
+/// One equivalence class of selector rows: the row that opened it, and
+/// the row that most recently bound each key.
+struct SelectorGroup<'a> {
+    /// Class representative, compared against every later row.
+    /// [`select_the_same_members`] is an equivalence relation, so agreeing
+    /// with the representative is agreeing with the whole class.
+    representative: &'a SelectorRule,
+    /// Binding key -> span of the row that bound it last.
+    bound: IndexMap<&'a str, &'a Span>,
+}
+
+/// Theme-selector scope: two rows that select the same members and bind the
+/// same key, where the second row's value is the only one any member reads.
+///
+/// This is the one scope in the pass that reads the IR. The module's reason
+/// for preferring the surface AST — the IR's maps are last-write-wins, so
+/// the earlier occurrence is already gone — does not apply here:
+/// `ThemeIr::selectors` is a `Vec` in source order with every row intact.
+/// What the IR adds is the shape `resolve` matches on, so "these two rows
+/// select the same members" is answered by the matcher's own rule instead
+/// of a second copy of it written over `Vec<Arg>`. A key repeated *inside*
+/// one row is a different scope and stays with [`check_arg_list`], which
+/// runs over the same rows from the AST side.
+fn check_theme_selectors(theme: &ThemeIr, sink: &mut DiagnosticSink) {
+    let mut groups: Vec<SelectorGroup<'_>> = Vec::new();
+    for rule in &theme.selectors {
+        let existing = groups
+            .iter()
+            .position(|group| select_the_same_members(group.representative, rule));
+        let index = if let Some(index) = existing {
+            index
+        } else {
+            groups.push(SelectorGroup {
+                representative: rule,
+                bound: IndexMap::new(),
+            });
+            groups.len() - 1
+        };
+        let group = &mut groups[index];
+        let rebound: Vec<(&str, &Span)> = rule
+            .bindings
+            .keys()
+            .filter_map(|key| {
+                group
+                    .bound
+                    .get(key.as_str())
+                    .map(|span| (key.as_str(), *span))
+            })
+            .collect();
+        if !rebound.is_empty() {
+            sink.push(duplicate_selector_diag(rule, &theme.name, &rebound));
+        }
+        // Record this row against every key it binds, displacing whatever
+        // was there. The map then holds the binding a *later* row would
+        // actually replace, which is what its note has to point at: with
+        // three rows on one key, the first row's value was gone before the
+        // third was reached, and naming it would send the author to a line
+        // whose value nothing was reading either.
+        for key in rule.bindings.keys() {
+            group.bound.insert(key.as_str(), &rule.span);
+        }
+    }
+}
+
+fn duplicate_selector_diag(
+    rule: &SelectorRule,
+    theme_name: &str,
+    rebound: &[(&str, &Span)],
+) -> Diagnostic {
+    let quoted: Vec<String> = rebound.iter().map(|(key, _)| format!("`{key}=`")).collect();
+    let listed = and_list(&quoted).expect("built only for a non-empty rebound set");
+    // One note per displaced *row*, not per displaced key: two keys can
+    // come from two different rows, and two from one row would otherwise
+    // name the same line twice.
+    let mut per_row: IndexMap<&Span, Vec<String>> = IndexMap::new();
+    for (key, span) in rebound {
+        per_row.entry(span).or_default().push(format!("`{key}=`"));
+    }
+    let mut notes: Vec<DiagnosticNote> = per_row
+        .into_iter()
+        .map(|(span, keys)| DiagnosticNote {
+            span: Some(span.clone()),
+            message: format!(
+                "{} bound here",
+                and_list(&keys).expect("each row contributed at least one key"),
+            ),
+        })
+        .collect();
+    notes.push(DiagnosticNote {
+        span: None,
+        message: format!(
+            "rows with the same attributes match exactly the same members, and bindings merge in source order, so what every member reads is this row's {listed}",
+        ),
+    });
+    notes.push(DiagnosticNote {
+        span: None,
+        message: "merge the rows, or narrow one selector so they pick different members".into(),
+    });
+    Diagnostic {
+        code: DiagnosticCode::DuplicateSelector,
+        span: rule.span.clone(),
+        primary: format!(
+            "`{}[...]` in theme `{theme_name}` selects the same members as an earlier row and rebinds {listed}",
+            rule.keyword,
+        ),
+        notes,
+        data: Some(DiagnosticData::DuplicateSelector {
+            rebound: rebound.iter().map(|(key, _)| (*key).to_owned()).collect(),
+        }),
     }
 }
 

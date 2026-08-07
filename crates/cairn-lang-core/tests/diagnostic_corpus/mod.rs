@@ -57,6 +57,16 @@ pub fn noisy_sources() -> Vec<String> {
             "{THEME}{HUT}site s:\n  place id=a use=hut theme=t at=origin\n\nsite s:\n  place id=b use=hut theme=t at=origin\n"
         ),
         format!("@cairn 2026.06\n@cairn 2026.07\n\n{THEME}struct s size=5x5\n  floor\n"),
+        // Two selector rows that coincide, over a member both of them
+        // select — so the prose under test is about the pair of rows and
+        // not about a rule that reached nothing. Written out rather than
+        // built from `THEME` because the rows belong inside it.
+        "theme t:\n  slot wall -> @cobblestone\n  \
+         window[class=small] -> frame=@spruce_wood\n  \
+         window[class=small] -> frame=@dark_oak_wood\n\n\
+         struct s size=5x5\n  \
+         window class=small side=front offset=1 y=1 size=1x1 mat_slot=wall\n"
+            .to_owned(),
         // Unsupported nesting, one source per branch of the message:
         // the two scopes, and the two reasons a `level` loses its body.
         // Singular and plural both appear — the verb agrees with the

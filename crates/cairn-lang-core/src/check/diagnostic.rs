@@ -52,6 +52,23 @@ pub enum DiagnosticCode {
     DuplicateSize,
     /// Repeated `slot NAME` line in a single `theme` block.
     DuplicateSlot,
+    /// Two selector rows in one `theme` block select the same members and
+    /// bind the same key.
+    ///
+    /// A member's selector bindings are the merge of every row it matches,
+    /// taken in source order, so a key two rows bind keeps the later
+    /// value. When the rows carry the same keyword and the same attributes
+    /// they match member for member, which leaves no member anywhere that
+    /// reads the earlier binding.
+    ///
+    /// Two shapes are not covered. Rows binding *different* keys compose,
+    /// the way `@requires` floors do — every binding reaches every member
+    /// both rows select. And rows whose attributes merely overlap
+    /// (`window[class=small]` against `window[class=small,side=front]`) do
+    /// not coincide: a member the wider row selects alone still reads its
+    /// binding. Which of two overlapping rows wins is the cascade, and the
+    /// cascade is source order by design.
+    DuplicateSelector,
     /// Repeated `key=` in the same argument list (struct/def header,
     /// statement args, selector attrs / bindings).
     DuplicateArg,
@@ -301,6 +318,7 @@ impl DiagnosticCode {
         match self {
             Self::DuplicateSize => "E_DUPLICATE_SIZE",
             Self::DuplicateSlot => "E_DUPLICATE_SLOT",
+            Self::DuplicateSelector => "E_DUPLICATE_SELECTOR",
             Self::DuplicateArg => "E_DUPLICATE_ARG",
             Self::DuplicateId => "E_DUPLICATE_ID",
             Self::DuplicateItem => "E_DUPLICATE_ITEM",
@@ -372,6 +390,7 @@ impl DiagnosticCode {
         match self {
             Self::DuplicateSize
             | Self::DuplicateSlot
+            | Self::DuplicateSelector
             | Self::DuplicateArg
             | Self::DuplicateId
             | Self::MisplacedMember
@@ -460,6 +479,18 @@ pub enum DiagnosticData {
     IncompletePlace {
         /// Missing key names (`id`, `use`, `theme`).
         missing: Vec<String>,
+    },
+    /// Companion payload for [`DiagnosticCode::DuplicateSelector`]. The
+    /// binding keys this selector row takes over from an earlier row,
+    /// without the trailing `=`, in the order the message lists them.
+    ///
+    /// Carried for the reason [`Self::IncompletePlace`] is: "merge these
+    /// rows" is the obvious quick-fix and it needs the key set, not a
+    /// sentence to take apart. Invariant: non-empty — a row sharing no
+    /// binding key with an earlier one produces no finding at all.
+    DuplicateSelector {
+        /// Rebound key names (`frame`, `sill`, ...).
+        rebound: Vec<String>,
     },
 }
 
@@ -739,6 +770,7 @@ mod tests {
                 "E_DUPLICATE_ID",
                 "E_DUPLICATE_ITEM",
                 "E_DUPLICATE_PLACE_ID",
+                "E_DUPLICATE_SELECTOR",
                 "E_DUPLICATE_SIZE",
                 "E_DUPLICATE_SLOT",
                 "E_INCOMPLETE_PLACE",
@@ -789,6 +821,7 @@ mod tests {
                 "E_DUPLICATE_ID",
                 "E_DUPLICATE_ITEM",
                 "E_DUPLICATE_PLACE_ID",
+                "E_DUPLICATE_SELECTOR",
                 "E_DUPLICATE_SIZE",
                 "E_DUPLICATE_SLOT",
                 "E_INCOMPLETE_PLACE",
