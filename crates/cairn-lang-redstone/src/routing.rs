@@ -384,7 +384,7 @@ fn congestion_diagnostic(
     diag = diag.with_footer(
         "Fix: increase `void`, enlarge region, or split into multiple `circuit` blocks",
     );
-    debug_assert_eq!(diag.severity, Severity::Error);
+    debug_assert_eq!(diag.severity(), Severity::Error);
     diag
 }
 
@@ -414,7 +414,7 @@ fn pad_overlap_diagnostic(
     diag = diag.with_footer(
         "Fix: enlarge `size=WxH` so `depth >= max(inputs, outputs) + 1`, or split into multiple `circuit` blocks",
     );
-    debug_assert_eq!(diag.severity, Severity::Error);
+    debug_assert_eq!(diag.severity(), Severity::Error);
     diag
 }
 
@@ -438,7 +438,7 @@ fn zero_reservation_diagnostic(
     diag = diag.with_footer(
         "Fix: increase `void`, enlarge region, or split into multiple `circuit` blocks",
     );
-    debug_assert_eq!(diag.severity, Severity::Error);
+    debug_assert_eq!(diag.severity(), Severity::Error);
     diag
 }
 

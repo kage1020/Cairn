@@ -209,8 +209,6 @@ pub struct DiagnosticNote {
 pub struct Diagnostic {
     /// Stable code identifying the kind of finding.
     pub code: DiagnosticCode,
-    /// Severity of the finding.
-    pub severity: Severity,
     /// Byte range the primary message points at.
     #[serde(skip)]
     pub span: Span,
@@ -223,14 +221,23 @@ pub struct Diagnostic {
 }
 
 impl Diagnostic {
-    /// Build a [`Diagnostic`] from a code (severity is derived) plus the
-    /// primary span and message. The most common construction path — used
-    /// by every non-cycle site in the synth pass.
+    /// Severity of this finding, read from [`DiagnosticCode::severity`].
+    ///
+    /// A method rather than a field, matching `cairn_lang_core`'s
+    /// [`Diagnostic`](cairn_lang_core::Diagnostic): the two cannot
+    /// disagree if only one of them exists.
+    #[must_use]
+    pub fn severity(&self) -> Severity {
+        self.code.severity()
+    }
+
+    /// Build a [`Diagnostic`] from a code plus the primary span and
+    /// message. The most common construction path — used by every
+    /// non-cycle site in the synth pass.
     #[must_use]
     pub fn new(code: DiagnosticCode, span: Span, primary: String) -> Self {
         Self {
             code,
-            severity: code.severity(),
             span,
             primary,
             notes: Vec::new(),

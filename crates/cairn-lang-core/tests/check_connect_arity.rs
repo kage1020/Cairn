@@ -69,7 +69,7 @@ fn ca_2_bare_connect_emits_arity_with_keyword_span() {
     assert_eq!(arity.len(), 1, "got: {arity:#?}");
     let d = &arity[0];
     assert_eq!(d.code, DiagnosticCode::ConnectArity);
-    assert_eq!(d.severity, Severity::Error);
+    assert_eq!(d.severity(), Severity::Error);
     assert!(
         slice(&src, d).starts_with("connect"),
         "primary span should cover the `connect` row, got: {:?}",
@@ -310,7 +310,7 @@ fn ca_10_from_side_non_reference_endpoints_are_flagged() {
     for (text, kind) in NON_REFERENCE_ENDPOINTS {
         let src = format!("{PROLOGUE}connect {text} to b.entry path=@gravel\n");
         let d = only_arity_diag(&src);
-        assert_eq!(d.severity, Severity::Error);
+        assert_eq!(d.severity(), Severity::Error);
         assert_eq!(
             d.span,
             from_slot(&src, text),

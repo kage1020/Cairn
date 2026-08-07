@@ -86,10 +86,38 @@ pub enum DiagnosticCode {
     /// buckets. Every other body is dropped before lowering, and a
     /// `site` body has no grouping construct at all.
     UnsupportedNesting,
+    /// A statement keyword that is in the known-keyword table but whose
+    /// enclosing body has no reader for it.
+    ///
+    /// The surface grammar accepts every keyword in every body, and the
+    /// role table is global, so `place` in a `struct` body and `floor` in
+    /// a `site` body both parse and classify. Neither reaches the build:
+    /// the geometry passes bucket by role and the site passes match only
+    /// `place` / `connect`, so the member is dropped between the IR and
+    /// the voxels.
+    MisplacedMember,
     /// A statement keyword not in the known-keyword table.
     UnknownKeyword,
-    /// `id=`, `class=`, or `mat_slot=` whose value is not a label
-    /// (identifier or string).
+    /// A statement carrying bare positional values in a form that takes
+    /// none.
+    ///
+    /// Spec §5.1 requires `key=value` for everything after the command
+    /// keyword; `connect FROM.PORT to TO.PORT` is the single exception and
+    /// is checked by `E_CONNECT_ARITY` instead. The line-based parser
+    /// collects any bare token into `positional` and every reader but
+    /// `connect`'s ignores that list, so a dropped `=` (`height 3`) or a
+    /// spec-forbidden positional form (`window front G 2 2 2x2`) changes
+    /// the build without a word.
+    UnexpectedPositional,
+    /// A label-typed key whose value is not a label (identifier or
+    /// string): `id=`, `class=`, `mat_slot=`, `use=`, or `theme=`.
+    ///
+    /// The five are one code because every reader lifts them the same
+    /// way, through `Value::as_label_str`, and answers `None` the same
+    /// way. For `use=` / `theme=` that `None` is indistinguishable at the
+    /// resolver from the key being absent, which is a deliberate hole in
+    /// the grammar — so this code is what tells a typo apart from a
+    /// `place` row that names no def on purpose.
     TypeMismatchLabel,
     /// `size=` whose value is not a `WxH` literal.
     TypeMismatchSize,
@@ -97,8 +125,21 @@ pub enum DiagnosticCode {
     UnresolvedSlot,
     /// `slot NAME -> VALUE` whose VALUE is neither a canonical nor an
     /// abstract material token (see `spec/materials-themes.md` §7.2).
+    ///
+    /// Error rather than advisory: the slot binds to nothing, so every
+    /// `mat_slot=NAME` pointing at it lowers to air. A theme whose slots
+    /// are all mistyped builds a hollow shell of the requested extent —
+    /// the "implicit dropping" `spec/lint.md` §11.3 forbids, and not
+    /// something the author can see in an exit code that stayed 0.
     UnknownSlotTarget,
     /// `theme` selector rule that does not match any member in the file.
+    ///
+    /// Warning, unlike its `E_`-prefixed neighbour above: a rule that
+    /// matches nothing overrides nothing, so every member keeps the
+    /// material it would have had with the rule deleted. Nothing is
+    /// dropped and the build is exactly what the rest of the source
+    /// asked for — the finding is about the author's intent, which is
+    /// the advisory half of `spec/lint.md` §11.3.
     ThemeSelectorUnmatched,
     /// A member role the block-array lowering pass does not yet handle
     /// (door/window/roof/...). Surfaces during `cairn lower` so a partial
@@ -243,7 +284,9 @@ impl DiagnosticCode {
             Self::DuplicateItem => "E_DUPLICATE_ITEM",
             Self::DuplicateHeader => "E_DUPLICATE_HEADER",
             Self::UnsupportedNesting => "E_UNSUPPORTED_NESTING",
+            Self::MisplacedMember => "E_MISPLACED_MEMBER",
             Self::UnknownKeyword => "E_UNKNOWN_KEYWORD",
+            Self::UnexpectedPositional => "E_UNEXPECTED_POSITIONAL",
             Self::TypeMismatchLabel => "E_TYPE_MISMATCH_LABEL",
             Self::TypeMismatchSize => "E_TYPE_MISMATCH_SIZE",
             Self::UnresolvedSlot => "E_UNRESOLVED_SLOT",
@@ -275,16 +318,32 @@ impl DiagnosticCode {
 
     /// Severity assigned to this code.
     ///
-    /// Errors are silent-substitution-style problems that would otherwise
-    /// feed bad data into later passes; warnings are advisory drift that
-    /// does not block a build. See `spec/lint.md` §11.3 for the rule.
-    /// The block-array lowering warnings (`W_DEFERRED_MEMBER`,
-    /// `W_NO_THEME_BOUND`, `W_ABSTRACT_TOKEN_DEFERRED`, `W_STRUCT_NO_SIZE`)
-    /// each mark a partial-build degradation rather than an unsalvageable
-    /// input. `E_UNKNOWN_ABSTRACT_TOKEN` is the one lowering code that is
-    /// an `Error`: when a registry pack *was* offered but does not declare
-    /// the bound token, silently falling back to air would hide a typo
-    /// the pack author needs to fix (spec §7.2's fail-loud rule).
+    /// **The** severity for the code: every emission site reads it from
+    /// here rather than writing a literal, so reclassifying a code is one
+    /// edit and cannot leave a pass disagreeing with the ledger. Pinned by
+    /// `tests/diagnostic_severity.rs`, which walks a broad fixture corpus
+    /// and compares each finding against this function.
+    ///
+    /// `spec/lint.md` §11.3 draws the line at the *build*: a finding is an
+    /// error when leaving it alone yields something other than what the
+    /// source asked for — a concept that is absent, an id that resolves to
+    /// nothing, a value outside its domain — because silent substitution
+    /// and implicit dropping are forbidden. Everything else is a warning:
+    /// version / edition drift, the non-guarantee of redstone timing, and
+    /// the partial-build degradations the block-array pass reports
+    /// (`W_DEFERRED_MEMBER`, `W_NO_THEME_BOUND`, `W_ABSTRACT_TOKEN_DEFERRED`,
+    /// `W_STRUCT_NO_SIZE`), where the compiler — not the source — is the
+    /// incomplete side and `cairn compile` refuses separately rather than
+    /// certifying a partial build.
+    ///
+    /// Two codes sit close to the line and are decided in their variant
+    /// docs: `E_UNKNOWN_SLOT_TARGET` is an error because the members
+    /// bound to the slot lower to air, and `E_THEME_SELECTOR_UNMATCHED`
+    /// is a warning because a rule matching nothing changes nothing.
+    /// `E_UNKNOWN_ABSTRACT_TOKEN` is the one lowering code that is an
+    /// error: when a registry pack *was* offered but does not declare the
+    /// bound token, falling back to air would hide a typo the pack author
+    /// needs to fix (spec §7.2's fail-loud rule).
     #[must_use]
     pub fn severity(self) -> Severity {
         match self {
@@ -292,10 +351,13 @@ impl DiagnosticCode {
             | Self::DuplicateSlot
             | Self::DuplicateArg
             | Self::DuplicateId
+            | Self::MisplacedMember
             | Self::UnknownKeyword
+            | Self::UnexpectedPositional
             | Self::TypeMismatchLabel
             | Self::TypeMismatchSize
             | Self::UnresolvedSlot
+            | Self::UnknownSlotTarget
             | Self::UnknownAbstractToken
             | Self::UnresolvedPlaceRef
             | Self::UnresolvedThemeRef
@@ -309,8 +371,7 @@ impl DiagnosticCode {
             | Self::DuplicateItem
             | Self::DuplicateHeader
             | Self::UnsupportedNesting => Severity::Error,
-            Self::UnknownSlotTarget
-            | Self::StructureTooLarge
+            Self::StructureTooLarge
             | Self::ThemeSelectorUnmatched
             | Self::DeferredMember
             | Self::NoThemeBound
@@ -397,8 +458,6 @@ pub struct DiagnosticNote {
 pub struct Diagnostic {
     /// Stable code identifying the kind of finding.
     pub code: DiagnosticCode,
-    /// Severity of the finding.
-    pub severity: Severity,
     /// Byte range the primary message points at.
     #[serde(skip)]
     pub span: Span,
@@ -418,6 +477,21 @@ pub struct Diagnostic {
 }
 
 impl Diagnostic {
+    /// Severity of this finding, read from [`DiagnosticCode::severity`].
+    ///
+    /// A method rather than a field so the two cannot disagree. Every pass
+    /// builds its findings as struct literals, and twenty-eight sites used
+    /// to write a `severity:` value of their own — which made
+    /// [`DiagnosticCode::severity`] documentation rather than the source of
+    /// truth, and made reclassifying a code an edit that compiled while
+    /// changing no exit code. A literal written back in now fails to
+    /// compile, which is a stronger guarantee than any corpus-driven test
+    /// could give: a test only covers the codes its fixtures reach.
+    #[must_use]
+    pub fn severity(&self) -> Severity {
+        self.code.severity()
+    }
+
     /// Convert this diagnostic's primary byte span into a 1-based
     /// `line:column` [`Position`] against the given source string.
     ///
@@ -446,7 +520,7 @@ impl Diagnostic {
         let end = lines.position(source, self.span.end);
         RenderedDiagnostic {
             code: self.code,
-            severity: self.severity,
+            severity: self.severity(),
             line: start.line.get(),
             col: start.col.get(),
             end_line: end.line.get(),
@@ -592,120 +666,132 @@ pub fn position_at(source: &str, byte_offset: usize) -> Position {
 
 #[cfg(test)]
 mod tests {
+    use strum::IntoEnumIterator;
+
     use super::*;
 
-    #[test]
-    fn code_as_str_round_trips_for_every_variant() {
-        // Every code's string form starts with `E_`; the prefix is part of
-        // the diagnostic contract surface and downstream matchers depend on
-        // it. The block-array lowering codes use the `W_` prefix instead
-        // and are covered by `block_array_codes_use_w_prefix`. Severity
-        // expectations live in `code_severity_matches_spec`.
-        for code in [
-            DiagnosticCode::DuplicateSize,
-            DiagnosticCode::DuplicateSlot,
-            DiagnosticCode::DuplicateArg,
-            DiagnosticCode::DuplicateId,
-            DiagnosticCode::DuplicateItem,
-            DiagnosticCode::DuplicateHeader,
-            DiagnosticCode::UnsupportedNesting,
-            DiagnosticCode::UnknownKeyword,
-            DiagnosticCode::TypeMismatchLabel,
-            DiagnosticCode::TypeMismatchSize,
-            DiagnosticCode::UnresolvedSlot,
-            DiagnosticCode::UnknownSlotTarget,
-            DiagnosticCode::ThemeSelectorUnmatched,
-            DiagnosticCode::UnknownAbstractToken,
-            DiagnosticCode::UnresolvedPlaceRef,
-            DiagnosticCode::UnresolvedThemeRef,
-            DiagnosticCode::DuplicatePlaceId,
-            DiagnosticCode::InvalidPlaceOrigin,
-            DiagnosticCode::UnresolvedPort,
-            DiagnosticCode::AmbiguousPort,
-            DiagnosticCode::MissingPathMaterial,
-            DiagnosticCode::ConnectArity,
-        ] {
-            let s = code.as_str();
-            assert!(
-                s.starts_with("E_"),
-                "code {code:?} should render to an E_-prefixed string, got {s}",
-            );
-        }
+    /// Stable strings of every code the predicate accepts, sorted.
+    ///
+    /// The left side comes from `EnumIter`, so the assertions below are
+    /// exhaustive: a new variant lands in one of the expected lists or
+    /// fails the comparison. The `for code in [...]` loops this replaced
+    /// tolerated an omission silently, which is the one mistake a
+    /// contract-surface test exists to catch.
+    fn codes_where(predicate: impl Fn(DiagnosticCode) -> bool) -> Vec<&'static str> {
+        let mut names: Vec<&'static str> = DiagnosticCode::iter()
+            .filter(|c| predicate(*c))
+            .map(DiagnosticCode::as_str)
+            .collect();
+        names.sort_unstable();
+        names
     }
 
     #[test]
-    fn block_array_codes_use_w_prefix() {
-        // The block-array lowering warnings opt into a distinct `W_` prefix
-        // so LSP quick-fixes and CI annotators can tell partial-build
-        // degradations apart from the older `E_` warnings without having to
-        // re-decide severity. Locking the stable string form here makes the
-        // next addition fail loud if it lands with the wrong name.
-        for (code, expected) in [
-            (DiagnosticCode::DeferredMember, "W_DEFERRED_MEMBER"),
-            (DiagnosticCode::NoThemeBound, "W_NO_THEME_BOUND"),
-            (
-                DiagnosticCode::AbstractTokenDeferred,
+    fn every_code_renders_its_documented_string() {
+        // The string form is the contract surface downstream matchers pin
+        // on, so it is spelled out here rather than derived — a rename
+        // that breaks an LSP quick-fix should be visible in the diff as a
+        // changed literal, not as a passing test.
+        assert_eq!(
+            codes_where(|_| true),
+            [
+                "E_AMBIGUOUS_PORT",
+                "E_CONNECT_ARITY",
+                "E_DUPLICATE_ARG",
+                "E_DUPLICATE_HEADER",
+                "E_DUPLICATE_ID",
+                "E_DUPLICATE_ITEM",
+                "E_DUPLICATE_PLACE_ID",
+                "E_DUPLICATE_SIZE",
+                "E_DUPLICATE_SLOT",
+                "E_INVALID_PLACE_ID",
+                "E_INVALID_PLACE_ORIGIN",
+                "E_MISPLACED_MEMBER",
+                "E_MISSING_PATH_MATERIAL",
+                "E_THEME_SELECTOR_UNMATCHED",
+                "E_TYPE_MISMATCH_LABEL",
+                "E_TYPE_MISMATCH_SIZE",
+                "E_UNEXPECTED_POSITIONAL",
+                "E_UNKNOWN_ABSTRACT_TOKEN",
+                "E_UNKNOWN_KEYWORD",
+                "E_UNKNOWN_SLOT_TARGET",
+                "E_UNRESOLVED_PLACE_REF",
+                "E_UNRESOLVED_PORT",
+                "E_UNRESOLVED_SLOT",
+                "E_UNRESOLVED_THEME_REF",
+                "E_UNSUPPORTED_NESTING",
                 "W_ABSTRACT_TOKEN_DEFERRED",
-            ),
-            (DiagnosticCode::StructNoSize, "W_STRUCT_NO_SIZE"),
-            (DiagnosticCode::DefNoSize, "W_DEF_NO_SIZE"),
-            (DiagnosticCode::UnusedDef, "W_UNUSED_DEF"),
-            (DiagnosticCode::WalkwayBlocked, "W_WALKWAY_BLOCKED"),
-            (DiagnosticCode::DuplicateWalkway, "W_DUPLICATE_WALKWAY"),
-            (DiagnosticCode::DeferredConnect, "W_DEFERRED_CONNECT"),
-            (
-                DiagnosticCode::InvalidWalkwayIdent,
+                "W_DEFERRED_CONNECT",
+                "W_DEFERRED_MEMBER",
+                "W_DEF_NO_SIZE",
+                "W_DUPLICATE_WALKWAY",
                 "W_INVALID_WALKWAY_IDENT",
-            ),
-        ] {
-            assert_eq!(code.as_str(), expected, "{code:?}");
-        }
+                "W_NO_THEME_BOUND",
+                "W_STRUCTURE_TOO_LARGE",
+                "W_STRUCT_NO_SIZE",
+                "W_UNUSED_DEF",
+                "W_WALKWAY_BLOCKED",
+            ],
+        );
     }
 
     #[test]
-    fn code_severity_matches_spec() {
-        // Errors block a build; warnings are advisory. The split here mirrors
-        // `spec/lint.md` §11.3.
-        for code in [
-            DiagnosticCode::DuplicateSize,
-            DiagnosticCode::DuplicateSlot,
-            DiagnosticCode::DuplicateArg,
-            DiagnosticCode::DuplicateId,
-            DiagnosticCode::DuplicateItem,
-            DiagnosticCode::DuplicateHeader,
-            DiagnosticCode::UnsupportedNesting,
-            DiagnosticCode::UnknownKeyword,
-            DiagnosticCode::TypeMismatchLabel,
-            DiagnosticCode::TypeMismatchSize,
-            DiagnosticCode::UnresolvedSlot,
-            DiagnosticCode::UnknownAbstractToken,
-            DiagnosticCode::UnresolvedPlaceRef,
-            DiagnosticCode::UnresolvedThemeRef,
-            DiagnosticCode::DuplicatePlaceId,
-            DiagnosticCode::InvalidPlaceOrigin,
-            DiagnosticCode::UnresolvedPort,
-            DiagnosticCode::AmbiguousPort,
-            DiagnosticCode::MissingPathMaterial,
-            DiagnosticCode::ConnectArity,
-        ] {
-            assert_eq!(code.severity(), Severity::Error, "{code:?}");
-        }
-        for code in [
-            DiagnosticCode::UnknownSlotTarget,
-            DiagnosticCode::ThemeSelectorUnmatched,
-            DiagnosticCode::DeferredMember,
-            DiagnosticCode::NoThemeBound,
-            DiagnosticCode::AbstractTokenDeferred,
-            DiagnosticCode::StructNoSize,
-            DiagnosticCode::DefNoSize,
-            DiagnosticCode::UnusedDef,
-            DiagnosticCode::WalkwayBlocked,
-            DiagnosticCode::DuplicateWalkway,
-            DiagnosticCode::DeferredConnect,
-            DiagnosticCode::InvalidWalkwayIdent,
-        ] {
-            assert_eq!(code.severity(), Severity::Warning, "{code:?}");
-        }
+    fn every_code_is_classified_against_spec_11_3() {
+        // Errors block a build; warnings are advisory. `severity` carries
+        // the rule and the two borderline calls; this pins the resulting
+        // partition so a reclassification is a deliberate edit here rather
+        // than a silent change in exit codes.
+        assert_eq!(
+            codes_where(|c| c.severity() == Severity::Error),
+            [
+                "E_AMBIGUOUS_PORT",
+                "E_CONNECT_ARITY",
+                "E_DUPLICATE_ARG",
+                "E_DUPLICATE_HEADER",
+                "E_DUPLICATE_ID",
+                "E_DUPLICATE_ITEM",
+                "E_DUPLICATE_PLACE_ID",
+                "E_DUPLICATE_SIZE",
+                "E_DUPLICATE_SLOT",
+                "E_INVALID_PLACE_ID",
+                "E_INVALID_PLACE_ORIGIN",
+                "E_MISPLACED_MEMBER",
+                "E_MISSING_PATH_MATERIAL",
+                "E_TYPE_MISMATCH_LABEL",
+                "E_TYPE_MISMATCH_SIZE",
+                "E_UNEXPECTED_POSITIONAL",
+                "E_UNKNOWN_ABSTRACT_TOKEN",
+                "E_UNKNOWN_KEYWORD",
+                "E_UNKNOWN_SLOT_TARGET",
+                "E_UNRESOLVED_PLACE_REF",
+                "E_UNRESOLVED_PORT",
+                "E_UNRESOLVED_SLOT",
+                "E_UNRESOLVED_THEME_REF",
+                "E_UNSUPPORTED_NESTING",
+            ],
+        );
+        assert_eq!(
+            codes_where(|c| c.severity() == Severity::Warning),
+            [
+                "E_THEME_SELECTOR_UNMATCHED",
+                "W_ABSTRACT_TOKEN_DEFERRED",
+                "W_DEFERRED_CONNECT",
+                "W_DEFERRED_MEMBER",
+                "W_DEF_NO_SIZE",
+                "W_DUPLICATE_WALKWAY",
+                "W_INVALID_WALKWAY_IDENT",
+                "W_NO_THEME_BOUND",
+                "W_STRUCTURE_TOO_LARGE",
+                "W_STRUCT_NO_SIZE",
+                "W_UNUSED_DEF",
+                "W_WALKWAY_BLOCKED",
+            ],
+            "the `W_` prefix marks a partial-build degradation, which is a \
+             claim about what the compiler did rather than about severity, so \
+             an `E_`-prefixed warning is not by itself a misclassification — \
+             but it is the shape worth re-reading against §11.3 whenever one \
+             lands",
+        );
     }
 
     #[test]
@@ -751,7 +837,6 @@ mod tests {
         let lines = LineStarts::new("abc\n");
         let diag = Diagnostic {
             code: DiagnosticCode::DuplicateSize,
-            severity: Severity::Error,
             span: Span { start: 0, end: 3 },
             primary: "duplicate size".to_owned(),
             notes: vec![],
@@ -775,7 +860,6 @@ mod tests {
         let lines = LineStarts::new("abc\n");
         let diag = Diagnostic {
             code: DiagnosticCode::WalkwayBlocked,
-            severity: Severity::Warning,
             span: Span { start: 0, end: 3 },
             primary: "walkway skipped 3 cells".to_owned(),
             notes: vec![],

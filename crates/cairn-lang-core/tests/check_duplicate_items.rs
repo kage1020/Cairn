@@ -125,7 +125,7 @@ site s:
         let found = of_code(&src, DiagnosticCode::DuplicateItem);
         assert_eq!(found.len(), 1, "{keyword}: got {found:#?}");
         let d = &found[0];
-        assert_eq!(d.severity, Severity::Error);
+        assert_eq!(d.severity(), Severity::Error);
         assert_eq!(
             slice(&src, d),
             name,
@@ -249,7 +249,7 @@ fn di_5_each_repeated_single_valued_header_is_reported() {
         let found = of_code(&src, DiagnosticCode::DuplicateHeader);
         assert_eq!(found.len(), 1, "{directive}: got {found:#?}");
         let d = &found[0];
-        assert_eq!(d.severity, Severity::Error);
+        assert_eq!(d.severity(), Severity::Error);
         assert_eq!(
             d.span.start,
             nth(&src, directive, 1),

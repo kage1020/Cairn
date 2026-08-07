@@ -56,7 +56,7 @@ fn redstone_door_lowers_to_a_single_or_cell() {
         synth
             .diagnostics
             .iter()
-            .all(|d| d.severity != Severity::Error),
+            .all(|d| d.severity() != Severity::Error),
         "clean example must not raise errors: {:?}",
         synth.diagnostics,
     );

@@ -439,7 +439,7 @@ fn run_check(file: &Path, edition: Option<EditionArg>, format: CheckFormat) -> E
     };
     let ir = lower(&module);
     let diagnostics = check(&module, &ir, edition.map(EditionArg::as_edition));
-    let has_error = diagnostics.iter().any(|d| d.severity == Severity::Error);
+    let has_error = diagnostics.iter().any(|d| d.severity() == Severity::Error);
     // Build the line-start index once and reuse it for every diagnostic /
     // note position lookup. Without this we'd re-walk the entire source for
     // each position computation, which gets expensive when a single file
@@ -454,7 +454,7 @@ fn run_check(file: &Path, edition: Option<EditionArg>, format: CheckFormat) -> E
                     "{}:{}: {}[{}]: {}",
                     file.display(),
                     pos,
-                    d.severity.as_str(),
+                    d.severity().as_str(),
                     d.code.as_str(),
                     d.primary,
                 );
@@ -573,14 +573,14 @@ fn run_info(file: &Path, editions: &[String], format: InfoFormat) -> ExitCode {
             "{}:{}: {}[{}]: {}",
             file.display(),
             pos,
-            d.severity.as_str(),
+            d.severity().as_str(),
             d.code.as_str(),
             d.primary,
         );
         for note in &d.notes {
             eprintln!("  note: {}", note.message);
         }
-        if d.severity == Severity::Error {
+        if d.severity() == Severity::Error {
             has_error = true;
         }
     }
@@ -785,14 +785,14 @@ fn run_lower(file: &Path, format: LowerFormat) -> ExitCode {
             "{}:{}: {}[{}]: {}",
             file.display(),
             pos,
-            d.severity.as_str(),
+            d.severity().as_str(),
             d.code.as_str(),
             d.primary,
         );
         for note in &d.notes {
             eprintln!("  note: {}", note.message);
         }
-        if d.severity == Severity::Error {
+        if d.severity() == Severity::Error {
             has_error = true;
         }
     }
@@ -1206,7 +1206,7 @@ fn report_core_diagnostics(
             "{}:{}: {}[{}]: {}",
             file.display(),
             pos,
-            d.severity.as_str(),
+            d.severity().as_str(),
             d.code.as_str(),
             d.primary,
         );
@@ -1218,7 +1218,7 @@ fn report_core_diagnostics(
                 eprintln!("  note: {}", note.message);
             }
         }
-        if d.severity == Severity::Error {
+        if d.severity() == Severity::Error {
             has_error = true;
         }
     }
@@ -1242,7 +1242,7 @@ fn report_synth_diagnostics(
             "{}:{}: {}[{}]: {}",
             file.display(),
             pos,
-            d.severity.as_str(),
+            d.severity().as_str(),
             d.code.as_str(),
             d.primary,
         );
@@ -1254,7 +1254,7 @@ fn report_synth_diagnostics(
                 eprintln!("  note: {}", note.message);
             }
         }
-        if d.severity == Severity::Error {
+        if d.severity() == Severity::Error {
             has_error = true;
         }
     }
@@ -1547,14 +1547,14 @@ fn report_lowering_diagnostics(file: &Path, source: &str, block_ir: &BlockArrayI
             "{}:{}: {}[{}]: {}",
             file.display(),
             pos,
-            d.severity.as_str(),
+            d.severity().as_str(),
             d.code.as_str(),
             d.primary,
         );
         for note in &d.notes {
             eprintln!("  note: {}", note.message);
         }
-        if d.severity == Severity::Error {
+        if d.severity() == Severity::Error {
             has_error = true;
         }
     }

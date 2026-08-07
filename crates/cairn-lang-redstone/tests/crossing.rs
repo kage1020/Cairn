@@ -44,7 +44,7 @@ fn delayed_from_source(source: &str, edition: Edition) -> ScopedPlacementIr {
         synth
             .diagnostics
             .iter()
-            .all(|d| d.severity != Severity::Error),
+            .all(|d| d.severity() != Severity::Error),
         "fixture must synth cleanly: {:?}",
         synth.diagnostics,
     );

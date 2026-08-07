@@ -29,13 +29,26 @@ first-class parts of the spec; messages MUST be in a shape that feeds the self-c
     is excluded: its floors compose to the strictest across every line,
     so a second one adds a constraint rather than displacing the first.
   - `E_UNKNOWN_KEYWORD` — statement keyword is not in the known-keyword table.
+  - `E_MISPLACED_MEMBER` — statement keyword is in the table but the
+    enclosing body has no reader for it: a `place` / `connect` in a
+    `struct` or `def`, or a geometry keyword among a `site`'s rows
+    (§5.2). Reported once at the offending row; anything indented under
+    it goes with it, and the note counts those lines.
+  - `E_UNEXPECTED_POSITIONAL` — a bare value on a line that reads none
+    (§5.1). `connect FROM.PORT to TO.PORT` is the one exception and is
+    covered by `E_CONNECT_ARITY`. Anchored on the run from the first
+    bare value to the last, which is not necessarily a prefix of the
+    line: a dropped `=` leaves bare values after an argument.
   - `E_UNSUPPORTED_NESTING` — a member carries an indented body that
     nothing reads. Only `level y=N` inside a `struct` or `def` groups
     members; a `site` body is a flat list of `place` and `connect` rows.
     Anchored on the run of indented members, reported once per dropped
     subtree at its root.
-  - `E_TYPE_MISMATCH_LABEL` — `id=` / `class=` / `mat_slot=` value is not
-    a label (identifier or string).
+  - `E_TYPE_MISMATCH_LABEL` — a label-typed key's value is not a label
+    (identifier or string). The label-typed keys are `id=`, `class=`,
+    `mat_slot=`, `use=`, and `theme=`. For the last two the mistyped
+    value is otherwise indistinguishable from the key being absent,
+    which is legal, so the whole `place` row would vanish unremarked.
   - `E_TYPE_MISMATCH_SIZE`  — `size=` value is not a `WxH` literal.
   - `E_CONNECT_ARITY` — `connect` row whose positional shape is not
     `FROM.PORT to TO.PORT`: a half is missing, the literal `to`
@@ -103,7 +116,13 @@ needs them as the diagnostic surface stabilises.
 - Things that, left alone, cause unintended results — concept absence, unknown IDs, out-of-domain
   states — are **errors** (silent substitution and implicit dropping are forbidden).
 - Semantic drift across versions/editions, the non-guarantee of redstone behavior, etc. are
-  **warnings**.
+  **warnings**. So are the partial-build degradations the block-array pass reports (`W_*`), where
+  the compiler rather than the source is the incomplete side and `cairn compile` refuses separately.
+- The `E_` / `W_` prefix is not the severity. `W_` marks a partial-build degradation, and two
+  `E_`-prefixed codes are decided against the rule above rather than by their name:
+  `E_UNKNOWN_SLOT_TARGET` is an **error**, because a slot bound to a non-material value lowers every
+  member that references it to air; `E_THEME_SELECTOR_UNMATCHED` is a **warning**, because a rule
+  that matches nothing overrides nothing and the build is what the rest of the source asked for.
 - Whether autofix is offered is defined by the implementation.
 
 ## 11.4 Constraint catalog

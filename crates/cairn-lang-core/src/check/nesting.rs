@@ -8,15 +8,20 @@
 //! Everything else is dropped before any block is placed — and dropped
 //! quietly, which is what this pass exists to stop.
 //!
-//! Four ways to lose a body, all one code because the author's next
+//! Three ways to lose a body, all one code because the author's next
 //! action is the same (move the members) and the message says which
 //! case they are in:
 //!
 //! * the parent's role is not a grouping construct at all;
-//! * `level` in a `site` body, where nothing unwraps it;
 //! * `level` inside another `level`, which the lowering pass refuses;
 //! * `level` whose `y=` is missing or not a `u32`, so it has nowhere to
 //!   put the children.
+//!
+//! A fourth shape — `level` in a `site` body, where nothing unwraps it —
+//! belongs to [`super::member_scope`] instead: a `site` body has no
+//! reader for `level` at all, so the finding is about the row rather
+//! than about what is indented under it, and reporting both would bill
+//! one mistake twice.
 //!
 //! The last two also earn a `W_DEFERRED_MEMBER` from block-array
 //! lowering. That is not a substitute: `check` does not lower (see the
@@ -58,26 +63,15 @@
 //! member inside it.
 
 use crate::error::Span;
-use crate::intent::{IntentModule, Member, MemberRole};
+use crate::intent::{BodyKind, IntentModule, Member, MemberRole};
 
 use super::{Diagnostic, DiagnosticCode, DiagnosticNote, DiagnosticSink};
-
-/// Which body a member sits in, and so which nesting it may carry.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Scope {
-    /// A `struct` or `def` body, where `level y=N` groups members.
-    Geometry,
-    /// A `site` body, a flat list of `place` and `connect` rows.
-    Site,
-}
 
 /// Why an indented body will not reach the build.
 #[derive(Debug, Clone, Copy)]
 enum Loss {
     /// The parent's role is not a grouping construct.
     NotAGroupingConstruct,
-    /// `level` outside a `struct` or `def` body.
-    LevelOutsideGeometry,
     /// `level` inside another `level`.
     LevelInsideLevel,
     /// `level` with no usable `y=` to place its children at.
@@ -86,17 +80,17 @@ enum Loss {
 
 pub(super) fn run(ir: &IntentModule, sink: &mut DiagnosticSink) {
     for s in &ir.structs {
-        walk(&s.members, Scope::Geometry, false, sink);
+        walk(&s.members, BodyKind::Geometry, false, sink);
     }
     for d in &ir.defs {
-        walk(&d.members, Scope::Geometry, false, sink);
+        walk(&d.members, BodyKind::Geometry, false, sink);
     }
     for s in &ir.sites {
-        walk(&s.placements, Scope::Site, false, sink);
+        walk(&s.placements, BodyKind::Site, false, sink);
     }
 }
 
-fn walk(members: &[Member], scope: Scope, inside_level: bool, sink: &mut DiagnosticSink) {
+fn walk(members: &[Member], scope: BodyKind, inside_level: bool, sink: &mut DiagnosticSink) {
     for member in members {
         let (Some(first), Some(last)) = (
             member.children.members.first(),
@@ -104,41 +98,58 @@ fn walk(members: &[Member], scope: Scope, inside_level: bool, sink: &mut Diagnos
         ) else {
             continue;
         };
-        // An unknown keyword is `keyword_allowlist`'s finding, and its
-        // repair is the keyword, not the indentation — "move these into
-        // a `level`" would send the author to fix the wrong line. The
-        // subtree under it is skipped rather than walked: it hangs off a
-        // row that does not name anything the compiler builds.
-        if matches!(member.role, MemberRole::Other(_)) {
+        // An unknown keyword is `keyword_allowlist`'s finding, and a
+        // keyword this body has no reader for is `member_scope`'s. Both
+        // repairs are the keyword line, not the indentation — "move
+        // these into a `level`" would send the author to fix the wrong
+        // line, and in a `site` body there is no `level` to move them
+        // into. The subtree under either is skipped rather than walked:
+        // it hangs off a row that does not name anything the compiler
+        // builds here.
+        if matches!(member.role, MemberRole::Other(_)) || !member.role.is_read_in(scope) {
             continue;
         }
-        match loss(member, scope, inside_level) {
+        match loss(member, inside_level) {
             Some(loss) => report(member, first, last, loss, scope, sink),
             None => walk(&member.children.members, scope, true, sink),
         }
     }
 }
 
+/// Whether this member's indented body reaches the build.
+///
+/// [`super::member_scope`] asks before recursing, for the same reason
+/// this pass asks before recursing: a body about to be reported as lost
+/// takes its children with it, so a second finding on one of those
+/// children bills one mistake twice — and with repairs that disagree,
+/// since following "dedent these" leaves the other finding standing.
+///
+/// Only meaningful for a role the enclosing body reads; both callers
+/// check that first.
+pub(super) fn body_reaches_the_build(member: &Member, inside_level: bool) -> bool {
+    loss(member, inside_level).is_none()
+}
+
 /// How this member's indented body is lost, or `None` when it reaches
 /// the build.
 ///
-/// `level` is a grouping construct only where something groups by it.
-/// `lower_site` iterates a site's rows for `Place` and `Connect` roles
-/// and a `Level` is neither, so the keyword being in the role table
-/// buys it nothing there.
-fn loss(member: &Member, scope: Scope, inside_level: bool) -> Option<Loss> {
+/// Only reached for a role the enclosing body reads — `walk` hands the
+/// rest to `member_scope` — so a `Level` here is always in a `struct` or
+/// `def`, where `flatten_members` is the thing that would unwrap it.
+fn loss(member: &Member, inside_level: bool) -> Option<Loss> {
     if !matches!(member.role, MemberRole::Level) {
         return Some(Loss::NotAGroupingConstruct);
     }
-    match scope {
-        Scope::Site => Some(Loss::LevelOutsideGeometry),
-        Scope::Geometry if inside_level => Some(Loss::LevelInsideLevel),
-        // Same reader as `flatten_members`, through the same accessor,
-        // so "the offset this pass accepted" and "the offset lowering
-        // placed the children at" cannot drift apart.
-        Scope::Geometry if member.nonneg_u32("y").is_none() => Some(Loss::LevelWithoutOffset),
-        Scope::Geometry => None,
+    if inside_level {
+        return Some(Loss::LevelInsideLevel);
     }
+    // Same reader as `flatten_members`, through the same accessor, so
+    // "the offset this pass accepted" and "the offset lowering placed
+    // the children at" cannot drift apart.
+    if member.nonneg_u32("y").is_none() {
+        return Some(Loss::LevelWithoutOffset);
+    }
+    None
 }
 
 fn report(
@@ -146,7 +157,7 @@ fn report(
     first: &Member,
     last: &Member,
     loss: Loss,
-    scope: Scope,
+    scope: BodyKind,
     sink: &mut DiagnosticSink,
 ) {
     let keyword = member.role.keyword();
@@ -157,21 +168,14 @@ fn report(
         end: subtree_end(last),
     };
     let (primary, advice) = match (loss, scope) {
-        (Loss::NotAGroupingConstruct, Scope::Site) => (
+        (Loss::NotAGroupingConstruct, BodyKind::Site) => (
             format!(
                 "`{keyword}` does not group members: the {count} {subject} indented under it {} not part of the site",
                 if count == 1 { "is" } else { "are" },
             ),
             "a `site` body is a flat list of `place` and `connect` rows — dedent these to the site's own indentation".to_owned(),
         ),
-        (Loss::LevelOutsideGeometry, _) => (
-            format!(
-                "`level` groups members only inside a `struct` or `def`: the {count} {subject} indented under it {} not part of the site",
-                if count == 1 { "is" } else { "are" },
-            ),
-            "a `site` body is a flat list of `place` and `connect` rows — dedent these to the site's own indentation".to_owned(),
-        ),
-        (Loss::NotAGroupingConstruct, Scope::Geometry) => (
+        (Loss::NotAGroupingConstruct, BodyKind::Geometry) => (
             geometry_primary(&format!("`{keyword}` does not group members"), count, subject),
             "only `level y=N` groups members inside a `struct` or `def` body — move these out to the enclosing body, or into a `level`".to_owned(),
         ),
@@ -194,7 +198,7 @@ fn report(
             message: advice,
         },
     ];
-    if scope == Scope::Geometry {
+    if scope == BodyKind::Geometry {
         notes.push(DiagnosticNote {
             span: None,
             message: "these members are not gone: they still take a theme binding, and any `-> sig.NAME` or `logic` line still reaches redstone synthesis. What they do not produce is blocks".to_owned(),
@@ -202,7 +206,6 @@ fn report(
     }
     sink.push(Diagnostic {
         code: DiagnosticCode::UnsupportedNesting,
-        severity: DiagnosticCode::UnsupportedNesting.severity(),
         span,
         primary,
         notes,

@@ -79,7 +79,6 @@ fn check_headers(headers: &[Header], sink: &mut DiagnosticSink) {
         if let Some(first_span) = seen.get(directive) {
             sink.push(Diagnostic {
                 code: DiagnosticCode::DuplicateHeader,
-                severity: DiagnosticCode::DuplicateHeader.severity(),
                 span,
                 primary: format!("`{directive}` is declared more than once"),
                 notes: vec![
@@ -123,7 +122,6 @@ fn check_item_names(items: &[Item], sink: &mut DiagnosticSink) {
         if let Some(first_span) = seen.get(&(kind, name)) {
             sink.push(Diagnostic {
                 code: DiagnosticCode::DuplicateItem,
-                severity: DiagnosticCode::DuplicateItem.severity(),
                 span,
                 primary: format!("`{keyword} {name}` is declared more than once"),
                 notes: vec![
@@ -174,7 +172,6 @@ fn check_theme_body(body: &[ThemeRule], sink: &mut DiagnosticSink) {
                 if let Some(first_span) = seen.get(slot) {
                     sink.push(Diagnostic {
                         code: DiagnosticCode::DuplicateSlot,
-                        severity: DiagnosticCode::DuplicateSlot.severity(),
                         span: span.clone(),
                         primary: format!("`slot {slot}` is declared more than once"),
                         notes: vec![DiagnosticNote {
@@ -210,7 +207,6 @@ fn check_header_args(args: &[Arg], sink: &mut DiagnosticSink) {
             };
             sink.push(Diagnostic {
                 code,
-                severity: code.severity(),
                 span: arg.span.clone(),
                 primary: format!("`{}=` is declared more than once in this header", arg.key),
                 notes: vec![DiagnosticNote {
@@ -232,7 +228,6 @@ fn check_arg_list(args: &[Arg], sink: &mut DiagnosticSink) {
         if let Some(first_span) = seen.get(&arg.key) {
             sink.push(Diagnostic {
                 code: DiagnosticCode::DuplicateArg,
-                severity: DiagnosticCode::DuplicateArg.severity(),
                 span: arg.span.clone(),
                 primary: format!("`{}=` is declared more than once", arg.key),
                 notes: vec![DiagnosticNote {
@@ -271,7 +266,6 @@ fn check_body(body: &[Statement], sink: &mut DiagnosticSink) {
                 if let Some(first_span) = seen_ids.get(&id) {
                     sink.push(Diagnostic {
                         code: DiagnosticCode::DuplicateId,
-                        severity: DiagnosticCode::DuplicateId.severity(),
                         span: id_span,
                         primary: format!("`id={id}` is declared more than once in this scope"),
                         notes: vec![DiagnosticNote {

@@ -33,7 +33,9 @@ use crate::error::Span;
 pub use self::keyword_table::{known_keywords, role_of};
 pub use self::lower::lower;
 pub(crate) use self::member::ConnectEnd;
-pub use self::member::{IntentState, Member, MemberBody, MemberRole, ResolvedState, ValueWithSpan};
+pub use self::member::{
+    BodyKind, IntentState, Member, MemberBody, MemberRole, ResolvedState, ValueWithSpan,
+};
 pub use self::semantic_level::SemanticLevel;
 
 /// Intent IR for a whole `.crn` module.

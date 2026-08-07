@@ -36,8 +36,8 @@ use std::collections::HashSet;
 
 use indexmap::IndexMap;
 
-use crate::ast::ValueKind;
-use crate::check::{Diagnostic, DiagnosticCode, DiagnosticData, DiagnosticNote, Severity};
+use crate::ast::{SIGNAL_HEAD, ValueKind};
+use crate::check::{Diagnostic, DiagnosticCode, DiagnosticData, DiagnosticNote};
 use crate::error::Span;
 use crate::ids::{PlaceId, PortId, SiteName, WalkwayEndpoint, WalkwayScopeKey};
 use crate::intent::{
@@ -281,7 +281,6 @@ fn lower_connects(
             };
             diagnostics.push(Diagnostic {
                 code: DiagnosticCode::DeferredMember,
-                severity: Severity::Warning,
                 span: connect.span.clone(),
                 primary: format!(
                     "walkway `{from_label} ↔ {to_label}` was skipped because port {unplaceable} could not be placed",
@@ -326,7 +325,6 @@ fn lower_connects(
         if !seen_pairs.insert(dedup_key) {
             diagnostics.push(Diagnostic {
                 code: DiagnosticCode::DuplicateWalkway,
-                severity: Severity::Warning,
                 span: connect.span.clone(),
                 primary: format!(
                     "duplicate walkway `{from} ↔ {to}` in site `{site}`; the second row was dropped",
@@ -409,7 +407,6 @@ fn lower_connects(
             };
             diagnostics.push(Diagnostic {
                 code: DiagnosticCode::WalkwayBlocked,
-                severity: Severity::Warning,
                 span: connect.span.clone(),
                 primary: format!(
                     "walkway `{from} ↔ {to}` spans {straight_area} cells, past the \
@@ -469,7 +466,6 @@ fn lower_connects(
         if skipped > 0 {
             diagnostics.push(Diagnostic {
                 code: DiagnosticCode::WalkwayBlocked,
-                severity: Severity::Warning,
                 span: connect.span.clone(),
                 primary: format!(
                     "walkway `{from} ↔ {to}` skipped {skipped} cells that overlapped an existing structure",
@@ -572,7 +568,6 @@ fn diag_walkway_invalid_ident(
     let crate::ids::KeyConstructError::ConsecutiveUnderscore { role, segment } = err;
     Diagnostic {
         code: DiagnosticCode::InvalidWalkwayIdent,
-        severity: Severity::Warning,
         span: connect.span.clone(),
         primary: format!(
             "walkway `{from} ↔ {to}` was dropped because the {role} id `{segment}` \
@@ -612,7 +607,6 @@ fn diag_walkway_endpoint_skipped(
     };
     Diagnostic {
         code: DiagnosticCode::DeferredMember,
-        severity: Severity::Warning,
         span: connect.span.clone(),
         primary: format!(
             "walkway `{from_label} ↔ {to_label}` was skipped because the {missing} did not lower",
@@ -634,7 +628,6 @@ fn diag_walkway_abstract_token(
 ) -> Diagnostic {
     Diagnostic {
         code: DiagnosticCode::AbstractTokenDeferred,
-        severity: Severity::Warning,
         span: connect.path.span.clone(),
         primary: format!(
             "abstract path token `@{token}` cannot be lowered without the registry pack; the walkway falls back to air",
@@ -668,7 +661,6 @@ fn diag_walkway_unknown_token(
     });
     Diagnostic {
         code: DiagnosticCode::UnknownAbstractToken,
-        severity: Severity::Error,
         span: connect.path.span.clone(),
         primary: format!(
             "abstract path token `@{token}` is not declared by the registry pack's materials catalog",
@@ -690,7 +682,7 @@ fn lower_struct<'a>(
     };
     lower_body_to_block_array(
         BodyDescriptor {
-            kind: BodyKind::Struct,
+            kind: VoxelSource::Struct,
             scope_label: &s.name,
             size,
             members: &s.members,
@@ -774,10 +766,17 @@ fn lower_site<'a>(
 
         let key = place_scope_key(&site.name, place_id);
         let Some(scope) = resolution.scopes.get(&key) else {
-            // The resolver emitted `E_UNRESOLVED_PLACE_REF` /
-            // `E_UNRESOLVED_THEME_REF` / `E_INVALID_PLACE_ORIGIN`; lowering
-            // skips this place silently so the diagnostic count stays
-            // honest.
+            // Usually the resolver already said why: `E_UNRESOLVED_PLACE_REF`
+            // / `E_UNRESOLVED_THEME_REF` / `E_INVALID_PLACE_ORIGIN`, so
+            // repeating it here would double the count.
+            //
+            // Not always, though. A `place` row with no `use=` or no
+            // `theme=` takes a silent arm in `resolve_site_placements` (see
+            // the two INVARIANT blocks there) and lands here with nothing
+            // reported at either layer. Staying silent is still the right
+            // call for this arm — lowering has no span for the missing key
+            // and no way to tell which one it was — but the gap is the
+            // resolver's to close, not evidence that it already did.
             continue;
         };
 
@@ -821,7 +820,7 @@ fn lower_site<'a>(
 
         let Some(ba) = lower_body_to_block_array(
             BodyDescriptor {
-                kind: BodyKind::Place,
+                kind: VoxelSource::Place,
                 scope_label: place_id,
                 size: def_size,
                 members: &def.members,
@@ -862,19 +861,24 @@ fn lower_site<'a>(
     }
 }
 
-/// What kind of body the lowering is processing. Lets diagnostic messages
+/// Which lowering entry point produced this body. Lets diagnostic messages
 /// distinguish a sizeless struct from a sizeless def without adding two
 /// near-identical helpers, and lets a future fixtures pass switch on the
 /// host when origin conventions differ.
+///
+/// Distinct from [`crate::intent::BodyKind`], which splits `struct` / `def`
+/// from `site` by what the author wrote. This one splits by what is being
+/// voxelised, and a `place` voxelises a `def` — so the two disagree on
+/// every placement and were worth separate names.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum BodyKind {
+enum VoxelSource {
     Struct,
     Place,
 }
 
 /// Inputs shared by the struct and place lowering paths.
 struct BodyDescriptor<'a> {
-    kind: BodyKind,
+    kind: VoxelSource,
     /// Display name for diagnostics (`cottage`, `home1`).
     scope_label: &'a str,
     size: &'a Size,
@@ -1040,7 +1044,6 @@ fn lower_body_to_block_array<'a>(
 fn diag_structure_too_large(body: &BodyDescriptor<'_>, dims: Dims) -> Diagnostic {
     Diagnostic {
         code: DiagnosticCode::StructureTooLarge,
-        severity: Severity::Warning,
         span: body.header_span.clone(),
         primary: format!(
             "`{}` derives a {}x{}x{} voxel extent, past the \
@@ -2748,8 +2751,8 @@ fn recognize_actuator_patch(
         return;
     };
     match &opened_by.value.kind {
-        ValueKind::DotRef(dotref) if dotref.head() == "sig" && dotref.tail().len() == 1 => {}
-        ValueKind::DotRef(dotref) if dotref.head() == "sig" => {
+        ValueKind::DotRef(dotref) if dotref.head() == SIGNAL_HEAD && dotref.tail().len() == 1 => {}
+        ValueKind::DotRef(dotref) if dotref.head() == SIGNAL_HEAD => {
             diagnostics.push(diag_deferred_member_reason(
                 member,
                 &format!(
@@ -3039,7 +3042,6 @@ fn side_name(side: WallSide) -> &'static str {
 fn diag_struct_no_size(s: &StructIr) -> Diagnostic {
     Diagnostic {
         code: DiagnosticCode::StructNoSize,
-        severity: Severity::Warning,
         span: s.span.clone(),
         primary: format!(
             "struct `{}` has no `size=WxH`; block-array lowering skipped it",
@@ -3053,14 +3055,13 @@ fn diag_struct_no_size(s: &StructIr) -> Diagnostic {
     }
 }
 
-fn diag_no_theme_bound_generic(kind: BodyKind, label: &str, header_span: &Span) -> Diagnostic {
+fn diag_no_theme_bound_generic(kind: VoxelSource, label: &str, header_span: &Span) -> Diagnostic {
     let host = match kind {
-        BodyKind::Struct => "struct",
-        BodyKind::Place => "place",
+        VoxelSource::Struct => "struct",
+        VoxelSource::Place => "place",
     };
     Diagnostic {
         code: DiagnosticCode::NoThemeBound,
-        severity: Severity::Warning,
         span: header_span.clone(),
         primary: format!(
             "{host} `{label}` has no theme bound; every `mat_slot=` will lower to air",
@@ -3078,7 +3079,6 @@ fn diag_no_theme_bound_generic(kind: BodyKind, label: &str, header_span: &Span) 
 fn diag_def_no_size(def: &DefIr) -> Diagnostic {
     Diagnostic {
         code: DiagnosticCode::DefNoSize,
-        severity: Severity::Warning,
         span: def.span.clone(),
         primary: format!(
             "def `{}` has no `size=WxH`; placements that `use={}` cannot derive a voxel footprint",
@@ -3103,7 +3103,6 @@ fn diag_deferred_member(member: &Member) -> Diagnostic {
 fn diag_deferred_member_reason(member: &Member, reason: &str) -> Diagnostic {
     Diagnostic {
         code: DiagnosticCode::DeferredMember,
-        severity: Severity::Warning,
         span: member.span.clone(),
         primary: reason.to_owned(),
         notes: vec![DiagnosticNote {
@@ -3123,7 +3122,6 @@ fn diag_deferred_member_reason(member: &Member, reason: &str) -> Diagnostic {
 fn diag_abstract_token(member: &Member, token: &str, slot: &ValueWithSpan) -> Diagnostic {
     Diagnostic {
         code: DiagnosticCode::AbstractTokenDeferred,
-        severity: Severity::Warning,
         span: member_or_slot_span(member, slot),
         primary: format!(
             "abstract token `@{token}` cannot be lowered without the registry pack; the cell falls back to air",
@@ -3162,7 +3160,6 @@ fn diag_unknown_abstract_token(
     });
     Diagnostic {
         code: DiagnosticCode::UnknownAbstractToken,
-        severity: Severity::Error,
         span: member_or_slot_span(member, slot),
         primary,
         notes,
@@ -3185,6 +3182,7 @@ fn member_or_slot_span(member: &Member, slot: &ValueWithSpan) -> Span {
 mod tests {
     use super::*;
     use crate::block_array::BlockState;
+    use crate::check::Severity;
     use crate::{lower, parse, resolve};
 
     fn lowered(source: &str) -> BlockArrayIr {
@@ -3900,7 +3898,7 @@ mod tests {
             .iter()
             .find(|d| d.code == DiagnosticCode::UnknownAbstractToken)
             .expect("expected E_UNKNOWN_ABSTRACT_TOKEN, got {:?}");
-        assert_eq!(diag.severity, Severity::Error);
+        assert_eq!(diag.severity(), Severity::Error);
         assert!(
             diag.notes
                 .iter()
@@ -4856,7 +4854,7 @@ mod tests {
                     out.diagnostics,
                 )
             });
-        assert_eq!(diag.severity, Severity::Warning);
+        assert_eq!(diag.severity(), Severity::Warning);
         assert!(
             diag.primary.contains("@walkway.gravel"),
             "expected the abstract token to be named, got {}",
@@ -4889,7 +4887,7 @@ mod tests {
                     out.diagnostics,
                 )
             });
-        assert_eq!(diag.severity, Severity::Error);
+        assert_eq!(diag.severity(), Severity::Error);
         assert!(
             diag.notes
                 .iter()

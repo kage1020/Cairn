@@ -215,7 +215,7 @@ fn village_emits_no_resolver_errors() {
     let errors: Vec<_> = out
         .diagnostics
         .iter()
-        .filter(|d| d.severity == Severity::Error)
+        .filter(|d| d.severity() == Severity::Error)
         .collect();
     assert!(
         errors.is_empty(),

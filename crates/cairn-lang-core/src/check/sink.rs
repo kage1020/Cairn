@@ -61,7 +61,6 @@ mod tests {
     fn diag(start: usize, end: usize, code: DiagnosticCode, msg: &str) -> Diagnostic {
         Diagnostic {
             code,
-            severity: code.severity(),
             span: start..end,
             primary: msg.into(),
             notes: Vec::new(),

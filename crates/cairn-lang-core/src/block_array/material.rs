@@ -101,7 +101,7 @@ pub enum MaterialDeferred {
 ///   the catalog does not declare the token. The `suggestion` field carries
 ///   the nearest declared token when one exists.
 /// - `Err(MaterialDeferred::AlreadyDiagnosed)` for non-token values; the
-///   `E_UNKNOWN_SLOT_TARGET` warning has already fired during resolve.
+///   `E_UNKNOWN_SLOT_TARGET` error has already fired during resolve.
 ///
 /// # Errors
 ///
