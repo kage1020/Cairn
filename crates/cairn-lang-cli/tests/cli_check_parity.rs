@@ -118,6 +118,18 @@ const SYNTACTIC_FIXTURES: &[(&str, Source)] = &[
         Source::WithPrologue("struct s size=5x5\n  torch mat_slot=wall\n"),
     ),
     (
+        // The site half of this code's message. The geometry half is
+        // covered by `cairn-lang-core`'s own suite; what the CLI path
+        // adds is that the whole stream survives the trip through the
+        // build commands, and the two scopes render different prose.
+        "E_UNSUPPORTED_NESTING",
+        Source::WithPrologue(
+            "def hut size=3x3:\n  floor id=floor mat_slot=floor\n\
+             \nsite s:\n  place id=a use=hut theme=t at=origin\n\
+             \x20\x20\x20\x20place id=b use=hut theme=t east_of=a gap=4\n",
+        ),
+    ),
+    (
         "E_TYPE_MISMATCH_LABEL",
         Source::WithPrologue("struct s size=5x5\n  floor id=1 mat_slot=floor\n"),
     ),

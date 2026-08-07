@@ -24,6 +24,7 @@ mod connect_arity;
 mod diagnostic;
 mod duplicate;
 mod keyword_allowlist;
+mod nesting;
 mod sink;
 mod type_mismatch;
 
@@ -65,6 +66,7 @@ pub fn check(module: &Module, ir: &IntentModule, edition: Option<Edition>) -> Ve
     duplicate::run(module, &mut sink);
     keyword_allowlist::run(ir, &mut sink);
     connect_arity::run(ir, &mut sink);
+    nesting::run(ir, &mut sink);
     type_mismatch::run(module, &mut sink);
     for d in crate::resolve::resolve(ir, edition).diagnostics {
         sink.push(d);
@@ -111,6 +113,7 @@ mod tests {
             | C::DuplicateId
             | C::DuplicateItem
             | C::DuplicateHeader
+            | C::UnsupportedNesting
             | C::UnknownKeyword
             | C::TypeMismatchLabel
             | C::TypeMismatchSize
@@ -173,6 +176,7 @@ mod tests {
                 "E_TYPE_MISMATCH_LABEL",
                 "E_TYPE_MISMATCH_SIZE",
                 "E_UNKNOWN_KEYWORD",
+                "E_UNSUPPORTED_NESTING",
             ],
             "the syntactic Error set changed: add or remove the matching \
              fixture in cairn-lang-cli/tests/cli_check_parity.rs so \

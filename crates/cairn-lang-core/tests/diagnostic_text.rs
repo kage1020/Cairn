@@ -62,6 +62,26 @@ fn noisy_sources() -> Vec<String> {
             "{THEME}{HUT}site s:\n  place id=a use=hut theme=t at=origin\n\nsite s:\n  place id=b use=hut theme=t at=origin\n"
         ),
         format!("@cairn 2026.06\n@cairn 2026.07\n\n{THEME}struct s size=5x5\n  floor\n"),
+        // Unsupported nesting, one source per branch of the message:
+        // the two scopes, and the three reasons a `level` loses its
+        // body. Singular and plural both appear — the verb agrees with
+        // the count, and only a rendered string shows that.
+        format!(
+            "{THEME}struct s size=5x5\n  floor mat_slot=floor\n  walls mat_slot=wall height=3\n    door id=d side=front at=center\n"
+        ),
+        format!(
+            "{THEME}struct s size=5x5\n  floor mat_slot=floor\n  walls mat_slot=wall height=3\n    door id=d side=front at=center\n    window id=w side=front y=1 offset=1 size=1x1\n"
+        ),
+        format!(
+            "{THEME}{HUT}site s:\n  place id=a use=hut theme=t at=origin\n    place id=b use=hut theme=t east_of=a gap=4\n"
+        ),
+        format!("{THEME}{HUT}site s:\n  level y=0\n    place id=a use=hut theme=t at=origin\n"),
+        format!(
+            "{THEME}struct s size=5x5\n  floor mat_slot=floor\n  level y=0\n    level y=1\n      walls mat_slot=wall height=3\n"
+        ),
+        format!(
+            "{THEME}struct s size=5x5\n  floor mat_slot=floor\n  level\n    walls mat_slot=wall height=3\n"
+        ),
     ]
 }
 

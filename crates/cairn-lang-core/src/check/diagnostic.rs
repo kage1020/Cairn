@@ -78,6 +78,14 @@ pub enum DiagnosticCode {
     /// strictest across every line, so a second one adds a constraint
     /// rather than displacing the first.
     DuplicateHeader,
+    /// A member carries an indented body that nothing reads.
+    ///
+    /// The surface grammar hangs a body off every command, but only
+    /// `level y=N` inside a `struct` or `def` has a reader — the
+    /// block-array pass unwraps it so the children join the phase
+    /// buckets. Every other body is dropped before lowering, and a
+    /// `site` body has no grouping construct at all.
+    UnsupportedNesting,
     /// A statement keyword not in the known-keyword table.
     UnknownKeyword,
     /// `id=`, `class=`, or `mat_slot=` whose value is not a label
@@ -234,6 +242,7 @@ impl DiagnosticCode {
             Self::DuplicateId => "E_DUPLICATE_ID",
             Self::DuplicateItem => "E_DUPLICATE_ITEM",
             Self::DuplicateHeader => "E_DUPLICATE_HEADER",
+            Self::UnsupportedNesting => "E_UNSUPPORTED_NESTING",
             Self::UnknownKeyword => "E_UNKNOWN_KEYWORD",
             Self::TypeMismatchLabel => "E_TYPE_MISMATCH_LABEL",
             Self::TypeMismatchSize => "E_TYPE_MISMATCH_SIZE",
@@ -298,7 +307,8 @@ impl DiagnosticCode {
             | Self::MissingPathMaterial
             | Self::ConnectArity
             | Self::DuplicateItem
-            | Self::DuplicateHeader => Severity::Error,
+            | Self::DuplicateHeader
+            | Self::UnsupportedNesting => Severity::Error,
             Self::UnknownSlotTarget
             | Self::StructureTooLarge
             | Self::ThemeSelectorUnmatched
@@ -598,6 +608,7 @@ mod tests {
             DiagnosticCode::DuplicateId,
             DiagnosticCode::DuplicateItem,
             DiagnosticCode::DuplicateHeader,
+            DiagnosticCode::UnsupportedNesting,
             DiagnosticCode::UnknownKeyword,
             DiagnosticCode::TypeMismatchLabel,
             DiagnosticCode::TypeMismatchSize,
@@ -662,6 +673,7 @@ mod tests {
             DiagnosticCode::DuplicateId,
             DiagnosticCode::DuplicateItem,
             DiagnosticCode::DuplicateHeader,
+            DiagnosticCode::UnsupportedNesting,
             DiagnosticCode::UnknownKeyword,
             DiagnosticCode::TypeMismatchLabel,
             DiagnosticCode::TypeMismatchSize,

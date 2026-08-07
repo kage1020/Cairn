@@ -1356,21 +1356,13 @@ fn selector_matches(sel: &SelectorMatch, member: &Member) -> bool {
         .all(|(key, expected)| member_attr_matches(member, key, &expected.value))
 }
 
+/// Whether a selector's keyword names this member's role.
+///
+/// `MemberRole::keyword` is the inverse of `intent::role_of`, so the
+/// comparison is the identity it looks like — including the `Other`
+/// case, where the role carries the author's own word.
 fn keyword_matches_role(keyword: &str, role: &MemberRole) -> bool {
-    matches!(
-        (keyword, role),
-        ("floor", MemberRole::Floor)
-            | ("walls", MemberRole::Walls)
-            | ("door", MemberRole::Door)
-            | ("window", MemberRole::Window)
-            | ("roof", MemberRole::Roof)
-            | ("stair", MemberRole::Stair)
-            | ("level", MemberRole::Level)
-            | ("pressure_plate", MemberRole::PressurePlate)
-            | ("circuit", MemberRole::Circuit)
-            | ("place", MemberRole::Place)
-            | ("connect", MemberRole::Connect)
-    ) || matches!(role, MemberRole::Other(other) if other == keyword)
+    role.keyword() == keyword
 }
 
 /// Compare a selector attribute's expected value against the corresponding
