@@ -116,6 +116,32 @@ pub enum MemberRole {
     Other(String),
 }
 
+impl MemberRole {
+    /// Surface keyword this role was classified from.
+    ///
+    /// The inverse of [`super::role_of`], so a diagnostic can quote the
+    /// word the author typed without carrying it separately on every
+    /// [`Member`]. `keyword_table`'s round-trip test keeps the two
+    /// sides from drifting.
+    #[must_use]
+    pub fn keyword(&self) -> &str {
+        match self {
+            Self::Floor => "floor",
+            Self::Walls => "walls",
+            Self::Door => "door",
+            Self::Window => "window",
+            Self::Roof => "roof",
+            Self::Stair => "stair",
+            Self::Level => "level",
+            Self::PressurePlate => "pressure_plate",
+            Self::Circuit => "circuit",
+            Self::Place => "place",
+            Self::Connect => "connect",
+            Self::Other(keyword) => keyword,
+        }
+    }
+}
+
 /// Which end of a `connect FROM.PORT to TO.PORT` row a positional
 /// value occupies.
 ///

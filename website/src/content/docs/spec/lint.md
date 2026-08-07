@@ -29,6 +29,11 @@ first-class parts of the spec; messages MUST be in a shape that feeds the self-c
     is excluded: its floors compose to the strictest across every line,
     so a second one adds a constraint rather than displacing the first.
   - `E_UNKNOWN_KEYWORD` — statement keyword is not in the known-keyword table.
+  - `E_UNSUPPORTED_NESTING` — a member carries an indented body that
+    nothing reads. Only `level y=N` inside a `struct` or `def` groups
+    members; a `site` body is a flat list of `place` and `connect` rows.
+    Anchored on the run of indented members, reported once per dropped
+    subtree at its root.
   - `E_TYPE_MISMATCH_LABEL` — `id=` / `class=` / `mat_slot=` value is not
     a label (identifier or string).
   - `E_TYPE_MISMATCH_SIZE`  — `size=` value is not a `WxH` literal.

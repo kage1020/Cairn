@@ -91,4 +91,20 @@ mod tests {
     fn unknown_keyword_falls_through_to_other() {
         assert_eq!(role_of("mystery"), MemberRole::Other("mystery".to_owned()));
     }
+
+    /// `MemberRole::keyword` is the inverse of [`role_of`], and
+    /// diagnostics quote it back to the author. A role added here
+    /// without its keyword arm would render as some other member's
+    /// word, which is worse than rendering nothing.
+    #[test]
+    fn every_known_keyword_survives_the_round_trip_through_its_role() {
+        for kw in KNOWN_KEYWORDS {
+            assert_eq!(
+                role_of(kw).keyword(),
+                *kw,
+                "`{kw}` should come back out of its role unchanged",
+            );
+        }
+        assert_eq!(role_of("mystery").keyword(), "mystery");
+    }
 }

@@ -118,6 +118,14 @@ const SYNTACTIC_FIXTURES: &[(&str, Source)] = &[
         Source::WithPrologue("struct s size=5x5\n  torch mat_slot=wall\n"),
     ),
     (
+        "E_UNSUPPORTED_NESTING",
+        Source::WithPrologue(
+            "struct s size=5x5\n  floor mat_slot=floor\n\
+             \x20\x20walls class=outer mat_slot=wall height=3\n\
+             \x20\x20\x20\x20door id=d side=front at=center\n",
+        ),
+    ),
+    (
         "E_TYPE_MISMATCH_LABEL",
         Source::WithPrologue("struct s size=5x5\n  floor id=1 mat_slot=floor\n"),
     ),
