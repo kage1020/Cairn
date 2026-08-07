@@ -523,16 +523,22 @@ fn resolve_site_placements(
             continue;
         }
 
-        // INVARIANT(structural): `id=` is intentionally optional on `place`.
+        // Report every key the row is short of at once, before any of the
+        // per-key work, so the author fixes one line once instead of
+        // re-running the compiler to discover the next omission. The row is
+        // still walked past this point when it has an `id=`: registering it
+        // in `seen_place_ids` is what keeps a later `east_of=` or a
+        // `connect` naming it behaving as it did — an incomplete row is a
+        // row that failed, not a row that was never written.
+        if let Some(diagnostic) = incomplete_place_diag(member, &site.name) {
+            diagnostics.push(diagnostic);
+        }
+
         // An unnamed placement has no scope key to register, cannot be
-        // referenced by `east_of` / `north_of`, and is unreachable from
-        // any `connect` row (dot-ref needs a name on the left side). No
-        // `check` pass — `keyword_allowlist`, `duplicate`, or
-        // `type_mismatch` — currently treats a missing `id=` as a
-        // structural failure, so the silent skip is by design rather
-        // than a missing upstream diagnostic. If `id=` ever becomes
-        // mandatory the new `check` pass owns the error and this arm
-        // becomes unreachable.
+        // referenced by `east_of` / `north_of`, and is unreachable from any
+        // `connect` row (a dot-ref needs a name on the left side), so there
+        // is nothing further to do with it. The finding above is what makes
+        // that a report rather than a silent skip.
         let Some(place_id) = member.id.as_deref() else {
             continue;
         };
@@ -579,23 +585,13 @@ fn resolve_site_placements(
             .get("theme")
             .and_then(|v| v.value.as_label_str());
 
-        // INVARIANT(structural): `use=` is intentionally optional in the
-        // surface grammar — a `place` row may declare just an `id=`
-        // without committing to a def (e.g. as a deliberate
-        // work-in-progress marker). No `check` pass currently requires
-        // `use=`, so emitting a resolver-level error here would tighten
-        // the language without an M3 motivation.
-        //
-        // Two inputs reach this arm and only one of them is covered.
-        // A `use=` that is *present* but not label-shaped answers `None`
-        // through `as_label_str` exactly as an absent key does; that half
-        // is `check::type_mismatch`'s `E_TYPE_MISMATCH_LABEL`. The absent
-        // half is still a silent drop with no owner: `place id=a at=origin`
-        // builds nothing and `cairn check` exits 0, and unless a `connect`
-        // names the place, the `W_DEFERRED_CONNECT` cascade below never
-        // fires either. `spec/lint.md` §11.3 says that should be an error;
-        // giving it one is a language change of its own, tracked
-        // separately from the mistyped case.
+        // Both inputs that reach this arm are already reported, and by
+        // different owners: an absent `use=` by `incomplete_place_diag`
+        // above, a present-but-not-label-shaped one (`use=3`, which
+        // `as_label_str` also answers `None` for) by
+        // `check::type_mismatch`'s `E_TYPE_MISMATCH_LABEL`. Calling the
+        // second one missing would be a lie, which is why the completeness
+        // check keys on the *key* rather than on the lifted value.
         //
         // Skipping the rest of the pipeline prevents `place_def` and the
         // scope map from carrying a half-built entry, so the lowering pass
@@ -616,24 +612,16 @@ fn resolve_site_placements(
         let def = def.expect("checked is_none above");
         used_defs.insert(def.name.clone());
 
-        // INVARIANT(structural): an omitted `theme=` on a `place` row is a
-        // silent drop with no owner, on single- and multi-theme files
-        // alike. The site-wide heuristic in `resolve_struct_or_def`
-        // defaults a *scope* to the lone theme, but this arm returns
-        // before any scope is built, so the placement is skipped either
-        // way: `place id=a use=hut at=origin` lowers nothing and
-        // `cairn check` exits 0. An `E_PLACE_THEME_REQUIRED` pass is the
-        // correct long-term home and is tracked separately.
-        //
-        // As with `use=` above, a `theme=` that is present but not
-        // label-shaped lands here too — that half is
-        // `check::type_mismatch`'s, and only that half.
+        // Same split as `use=` above: absent is `incomplete_place_diag`'s,
+        // mistyped is `check::type_mismatch`'s. The single-theme heuristic
+        // in `resolve_struct_or_def` does not rescue an omitted `theme=`
+        // here — it defaults a *scope*, and this arm returns before any
+        // scope is built.
         //
         // Skipping the rest of the pipeline here leaves `place_def` unset
-        // for this place; a downstream `connect` targeting it surfaces the
-        // gap via the `W_DEFERRED_CONNECT` cascade in `validate_port`,
-        // which is the only signal either arm produces — and only when
-        // some `connect` names the place.
+        // for this place; a downstream `connect` targeting it additionally
+        // earns the `W_DEFERRED_CONNECT` cascade in `validate_port`, the
+        // same pairing an unresolved `use=DEF` already produces.
         let Some(theme_name) = theme_target else {
             continue;
         };
@@ -1173,6 +1161,66 @@ fn unresolved_theme_ref_diag<'a>(
         notes,
         data: None,
     }
+}
+
+/// Report a `place` row missing any of the keys it needs to become a
+/// placement, or `None` when it has all three.
+///
+/// `id=` names the `.nbt` the compiler writes for this placement
+/// (`spec/components-editing-sites.md` §9.3.4) and is the second half of
+/// the scope key `site::SITE::PLACE` that `east_of=` and `connect` parse
+/// back out — so it cannot be auto-addressed the way §5.5 auto-addresses a
+/// geometry member, whose address derives from its role and position
+/// rather than naming an output file. `use=` names the `def` the placement
+/// instantiates and `theme=` the theme its `mat_slot=` members resolve
+/// against; without either there is no volume to voxelise.
+///
+/// Absence is read off the surface keys, not off the lifted values:
+/// `member.id` is `None` both for an absent `id=` and for an `id=3` that
+/// `intent::lower` declined to hoist, and only the first is a missing key.
+fn incomplete_place_diag(member: &Member, site_name: &str) -> Option<Diagnostic> {
+    let absent =
+        |key: &str, lifted_present: bool| !lifted_present && !member.intent_state.contains_key(key);
+    let missing: Vec<&str> = [
+        ("id", member.id.is_some()),
+        ("use", false),
+        ("theme", false),
+    ]
+    .into_iter()
+    .filter(|(key, lifted)| absent(key, *lifted))
+    .map(|(key, _)| key)
+    .collect();
+    if missing.is_empty() {
+        return None;
+    }
+    let quoted: Vec<String> = missing.iter().map(|key| format!("`{key}=`")).collect();
+    // "a, b, and c" rather than "a, b, c": the list is read aloud in a
+    // sentence, and up to three keys fit without wrapping.
+    let listed = match quoted.split_last() {
+        Some((last, [])) => last.clone(),
+        Some((last, head)) => format!("{}, and {last}", head.join(", ")),
+        None => unreachable!("the empty case returned above"),
+    };
+    let mut notes = Vec::new();
+    for key in &missing {
+        notes.push(DiagnosticNote {
+            span: None,
+            message: match *key {
+                "id" => "`id=` names the `.nbt` this placement is written to, and is the half of the scope key that `east_of=` and `connect` refer to — the compiler has no name to invent for it".to_owned(),
+                "use" => "`use=DEF` names the `def` this placement instantiates".to_owned(),
+                _ => "`theme=NAME` names the theme this placement's `mat_slot=` members resolve against".to_owned(),
+            },
+        });
+    }
+    Some(Diagnostic {
+        code: DiagnosticCode::IncompletePlace,
+        span: member.span.clone(),
+        primary: format!(
+            "`place` in site `{site_name}` is missing {listed}, so no placement is built for it",
+        ),
+        notes,
+        data: None,
+    })
 }
 
 fn duplicate_place_id_diag(

@@ -60,6 +60,11 @@ first-class parts of the spec; messages MUST be in a shape that feeds the self-c
     cursor, the offending separator, the offending endpoint, or the run
     of trailing extras. Each endpoint is reported separately: the two
     ends are independent fix sites.
+  - `E_INCOMPLETE_PLACE` — a `place` row omits `id=`, `use=`, or
+    `theme=` (§9.3). The row cannot become a placement without all three,
+    so it is dropped from the build; the message names every key the row
+    is short of. A key that is *present but mistyped* is
+    `E_TYPE_MISMATCH_LABEL` instead — it is on the line, just not a label.
 - **Geometry**: AABB expansion detecting "window outside the wall", "door hanging in mid-air".
 - **attachment**: whether a frame/painting/sign/button/lever/torch is on a valid attachment face
   (detect attachment to air).

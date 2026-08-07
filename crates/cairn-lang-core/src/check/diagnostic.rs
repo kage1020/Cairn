@@ -193,6 +193,19 @@ pub enum DiagnosticCode {
     /// `cairn compile` refuses separately rather than certifying a build
     /// missing one of the scopes its source asked for.
     StructureTooLarge,
+    /// A `place` row omits a key it cannot become a placement without:
+    /// `id=`, `use=`, or `theme=`.
+    ///
+    /// The three are one code because the row fails the same way for each
+    /// — `resolve_site_placements` skips it, no `.nbt` is written, and the
+    /// build is missing a building the source asked for. The message names
+    /// every key the row is short of, so the author fixes one line once
+    /// rather than re-running the compiler per key.
+    ///
+    /// Only a key that is *absent* counts. A key that is present but not
+    /// label-shaped (`use=3`) reaches the same skip, but calling it missing
+    /// would be a lie and `E_TYPE_MISMATCH_LABEL` already names it.
+    IncompletePlace,
     /// A `place id=` breaks an invariant [`crate::ids::PlaceId`] relies on:
     /// it is empty, or contains `.`, `:`, or whitespace.
     ///
@@ -243,13 +256,18 @@ pub enum DiagnosticCode {
     /// new connection.
     DuplicateWalkway,
     /// A `connect` row targets a `place` that the resolver registered in
-    /// `seen_place_ids` but never finished lifting into `place_def` (the
-    /// `place` row was silently skipped by `resolve_site_placements` for a
-    /// missing `use=` or `theme=`, neither of which currently has its own
-    /// upstream diagnostic). Without this cascade warning the walkway would
-    /// vanish from the build and the user would see no signal that the
-    /// `connect` did nothing; mirrors the `W_DEFERRED_MEMBER` pattern used
-    /// by walkway endpoint cascades in `block_array::lower`.
+    /// `seen_place_ids` but never finished lifting into `place_def` — the
+    /// `place` row was skipped by `resolve_site_placements` for an absent
+    /// `use=` / `theme=` (`E_INCOMPLETE_PLACE`), a mistyped one
+    /// (`E_TYPE_MISMATCH_LABEL`), or a name that resolved to nothing
+    /// (`E_UNRESOLVED_PLACE_REF` / `E_UNRESOLVED_THEME_REF`).
+    ///
+    /// The root cause is therefore reported elsewhere, and this is not a
+    /// duplicate of it: the other finding says which row is broken, this
+    /// one says which walkway went with it. Without it the walkway would
+    /// vanish from the build with no signal that the `connect` did nothing.
+    /// Mirrors the `W_DEFERRED_MEMBER` pattern used by walkway endpoint
+    /// cascades in `block_array::lower`.
     DeferredConnect,
     /// A `connect` row whose site / place / port identifier contains the
     /// `__` substring. The surface lexer permits `_` in identifiers, but
@@ -301,6 +319,7 @@ impl DiagnosticCode {
             Self::UnresolvedPlaceRef => "E_UNRESOLVED_PLACE_REF",
             Self::UnresolvedThemeRef => "E_UNRESOLVED_THEME_REF",
             Self::StructureTooLarge => "W_STRUCTURE_TOO_LARGE",
+            Self::IncompletePlace => "E_INCOMPLETE_PLACE",
             Self::InvalidPlaceId => "E_INVALID_PLACE_ID",
             Self::DuplicatePlaceId => "E_DUPLICATE_PLACE_ID",
             Self::InvalidPlaceOrigin => "E_INVALID_PLACE_ORIGIN",
@@ -362,6 +381,7 @@ impl DiagnosticCode {
             | Self::UnresolvedPlaceRef
             | Self::UnresolvedThemeRef
             | Self::DuplicatePlaceId
+            | Self::IncompletePlace
             | Self::InvalidPlaceId
             | Self::InvalidPlaceOrigin
             | Self::UnresolvedPort
@@ -704,6 +724,7 @@ mod tests {
                 "E_DUPLICATE_PLACE_ID",
                 "E_DUPLICATE_SIZE",
                 "E_DUPLICATE_SLOT",
+                "E_INCOMPLETE_PLACE",
                 "E_INVALID_PLACE_ID",
                 "E_INVALID_PLACE_ORIGIN",
                 "E_MISPLACED_MEMBER",
@@ -753,6 +774,7 @@ mod tests {
                 "E_DUPLICATE_PLACE_ID",
                 "E_DUPLICATE_SIZE",
                 "E_DUPLICATE_SLOT",
+                "E_INCOMPLETE_PLACE",
                 "E_INVALID_PLACE_ID",
                 "E_INVALID_PLACE_ORIGIN",
                 "E_MISPLACED_MEMBER",

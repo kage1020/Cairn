@@ -136,6 +136,7 @@ mod tests {
             | C::AmbiguousPort
             | C::MissingPathMaterial
             | C::InvalidPlaceId
+            | C::IncompletePlace
             | C::DeferredConnect => RaisedBy::Resolver,
             C::UnknownSlotTarget => RaisedBy::ResolverAndLowering,
             C::DeferredMember

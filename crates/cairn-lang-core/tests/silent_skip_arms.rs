@@ -2,31 +2,34 @@
 //! `resolve::resolver::resolve_site_placements` and the cascade
 //! `W_DEFERRED_CONNECT` warning in `validate_port`.
 //!
-//! Three `place`-level arms intentionally `continue` without emitting a
-//! diagnostic when a row lacks `id=`, `use=`, or `theme=`. A fourth arm
-//! in `resolve_connect_row` returns when the `connect` line is missing
-//! its `to` positional. The risk that previously sat on these arms was
-//! that a downstream `connect` referencing the silent place would drop
-//! its walkway with no visible signal at all — exactly the failure
-//! mode `W_DEFERRED_MEMBER` already covers for endpoint cascades in
+//! One arm in `resolve_connect_row` returns when the `connect` line is
+//! missing its `to` positional, and several endpoint shapes take the same
+//! return. The risk that sits on these arms is that a row the author wrote
+//! drops its walkway with no visible signal — the failure mode
+//! `W_DEFERRED_MEMBER` already covers for endpoint cascades in
 //! `block_array::lower`.
+//!
+//! The three `place`-level arms this file used to open with are no longer
+//! silent: `E_INCOMPLETE_PLACE` names an absent `id=` / `use=` / `theme=`
+//! at the row. What is still worth pinning about them is the *cascade* —
+//! a `connect` naming such a place still says so itself, rather than
+//! leaving the author to infer which walkway went missing.
 //!
 //! Coverage matrix:
 //!
 //! 1. **Baseline** — a well-formed `connect` lays exactly one walkway
 //!    and emits zero diagnostics. Pins the negative space so the
-//!    silent-arm cases are interpretable.
-//! 2. **Missing `use=`** — the cascade emits exactly one
-//!    `W_DEFERRED_CONNECT`, no walkway, no errors. Pins the
-//!    refactor-safety net: a future bug that drops a normal-path
-//!    `place_def.insert` would surface as a wave of these warnings
-//!    instead of silently breaking every walkway.
-//! 3. **Missing `theme=`** — same cascade shape; multi-theme files
-//!    where `theme=` is currently a known silent-gap input still
-//!    surface their downstream `connect` failures through this code.
+//!    remaining cases are interpretable.
+//! 2. **Missing `use=`** — one `E_INCOMPLETE_PLACE` at the `place` row
+//!    *and* one `W_DEFERRED_CONNECT` at the `connect` row, no walkway.
+//!    The pairing is the same one an unresolved `use=DEF` already
+//!    produces, and the cascade is the refactor-safety net: a future bug
+//!    that drops a normal-path `place_def.insert` would surface as a wave
+//!    of these warnings instead of silently breaking every walkway.
+//! 3. **Missing `theme=`** — same pairing.
 //! 4. **Missing `id=`** — unreachable from any `connect` by
-//!    construction (no name to dot-ref), so the only contract worth
-//!    pinning is "no spurious diagnostics from the silent arm itself".
+//!    construction (no name to dot-ref), so what is pinned is that the
+//!    row is reported once and the cascade does not fire.
 //! 5. **`connect` rows with a non-`FROM.PORT to TO.PORT` shape** —
 //!    three entries to the same silent return at the resolver, all
 //!    pinned together so a future guard refactor cannot split their
@@ -54,22 +57,12 @@
 //!    both. `check::type_mismatch` tells them apart for the user; what
 //!    is pinned here is that the resolver does not, so a guard that
 //!    splits them has to say so.
-//! 9. **`use=` / `theme=` absent, with no `connect` naming the place** —
-//!    the half that is still uncovered. The cascade in (2) and (3) only
-//!    fires because a `connect` targets the skipped place; with no such
-//!    row the placement is dropped from the build in complete silence
-//!    and `cairn check` exits 0. Pinned as the *current* behaviour, not
-//!    as the intended one — `spec/lint.md` §11.3 calls implicit dropping
-//!    an error, and closing it is a language change of its own. A test
-//!    that has to be edited to close the gap is the point: the gap is
-//!    then a decision rather than something the next reader discovers.
-//! 10. **Top-level names declared twice** — `resolve` binds the first and
-//!     skips the rest without a diagnostic, because
-//!     `check::duplicate` owns `E_DUPLICATE_ITEM` and can anchor it on
-//!     the name token, which the IR no longer carries. Same division of
-//!     labour as the `connect` arms; pinned here so a library caller
-//!     that skips `check` has the skip written down rather than
-//!     discovered.
+//! 9. **Top-level names declared twice** — `resolve` binds the first and
+//!    skips the rest without a diagnostic, because `check::duplicate`
+//!    owns `E_DUPLICATE_ITEM` and can anchor it on the name token, which
+//!    the IR no longer carries. Same division of labour as the `connect`
+//!    arms; pinned here so a library caller that skips `check` has the
+//!    skip written down rather than discovered.
 
 use cairn_lang_core::block_array::{BlockArrayIr, lower_to_block_array};
 use cairn_lang_core::check::{Diagnostic, DiagnosticCode, Severity};
@@ -167,15 +160,15 @@ connect anchor.entry to silent.entry path=@gravel\n"
         "a connect targeting a `use=`-less place must drop its walkway",
     );
     assert_eq!(
-        errors(&outcome.diagnostics),
-        0,
-        "missing `use=` is a known silent input; no errors should surface, got: {:#?}",
+        count(&outcome.diagnostics, DiagnosticCode::IncompletePlace),
+        1,
+        "the `place` row names its own problem, got: {:#?}",
         outcome.diagnostics,
     );
     assert_eq!(
         count(&outcome.diagnostics, DiagnosticCode::DeferredConnect),
         1,
-        "exactly one `W_DEFERRED_CONNECT` must cascade from the missing `use=`",
+        "and the `connect` row still says which walkway went with it",
     );
 }
 
@@ -199,23 +192,23 @@ connect anchor.entry to themeless.entry path=@gravel\n"
         "a connect targeting a `theme=`-less place must drop its walkway",
     );
     assert_eq!(
-        errors(&outcome.diagnostics),
-        0,
-        "missing `theme=` is a known silent input; no errors should surface, got: {:#?}",
+        count(&outcome.diagnostics, DiagnosticCode::IncompletePlace),
+        1,
+        "the `place` row names its own problem, got: {:#?}",
         outcome.diagnostics,
     );
     assert_eq!(
         count(&outcome.diagnostics, DiagnosticCode::DeferredConnect),
         1,
-        "exactly one `W_DEFERRED_CONNECT` must cascade from the missing `theme=`",
+        "and the `connect` row still says which walkway went with it",
     );
 }
 
 /// An unnamed `place` row is unreachable from any `connect` row by
-/// construction (no `id=` for the dot-ref left side), so the silent
-/// arm cannot cascade. The contract worth pinning is that the silent
-/// arm itself does not produce diagnostics and the surrounding site
-/// still lowers without errors.
+/// construction (no `id=` for the dot-ref left side), so nothing can
+/// cascade from it. The contract worth pinning is that it is reported
+/// exactly once, at the row, and that the absence of a cascade is not
+/// mistaken for the absence of a finding.
 #[test]
 fn place_without_id_skips_silently_without_diagnostics() {
     let src = format!(
@@ -226,9 +219,9 @@ place           use=hut theme=plain east_of=anchor gap=4\n"
     );
     let outcome = run(&src);
     assert_eq!(
-        errors(&outcome.diagnostics),
-        0,
-        "an unnamed `place` must not push any error, got: {:#?}",
+        count(&outcome.diagnostics, DiagnosticCode::IncompletePlace),
+        1,
+        "an unnamed `place` is reported once, got: {:#?}",
         outcome.diagnostics,
     );
     assert_eq!(
@@ -540,58 +533,6 @@ connect anchor.entry to silent.entry path=@gravel\n"
             count(&outcome.diagnostics, DiagnosticCode::DeferredConnect),
             1,
             "the same cascade an absent `use=` produces must fire for `{row}`",
-        );
-    }
-}
-
-/// An incomplete `place` with nothing pointing at it is dropped from the
-/// build without a word about the row itself.
-///
-/// The cascade the two tests above rely on is a *downstream* signal: it
-/// fires from `validate_port` when a `connect` names the skipped place. A
-/// site with no `connect` gets nothing that names the row — not from
-/// `resolve`, not from lowering, and so not from `cairn check` either.
-/// (`W_UNUSED_DEF` does fire on the `use=`-less half, but it is about the
-/// def going unreferenced, points at the def's own span, and does not fire
-/// at all when the missing key is `theme=`.) Pinned as the *current*
-/// behaviour, not the intended one — `spec/lint.md` §11.3 calls implicit
-/// dropping an error, and closing this is a language change of its own.
-/// A test that has to be edited to close the gap is the point: the gap is
-/// then a decision rather than something the next reader discovers.
-#[test]
-fn an_incomplete_place_with_no_connect_is_dropped_without_naming_the_row() {
-    for row in [
-        "place id=lonely           theme=plain at=origin",
-        "place id=lonely use=hut               at=origin",
-    ] {
-        let src = format!(
-            "{PROLOGUE}site solo:
-  {row}
-"
-        );
-        let outcome = run(&src);
-        assert_eq!(
-            errors(&outcome.diagnostics),
-            0,
-            "no error reports the incomplete row today, for `{row}`, got: {:#?}",
-            outcome.diagnostics,
-        );
-        assert!(
-            !outcome
-                .diagnostics
-                .iter()
-                .any(|d| d.primary.contains("lonely")),
-            "and nothing names it, for `{row}`, got: {:#?}",
-            outcome.diagnostics,
-        );
-
-        let module = parse(&src).expect("parse");
-        let ir = lower(&module);
-        let resolution = resolve(&ir, None);
-        let built = lower_to_block_array(&ir, &resolution, None);
-        assert!(
-            built.placements.is_empty(),
-            "and the placement is gone from the build, for `{row}`",
         );
     }
 }
