@@ -173,15 +173,26 @@ fn ne_3_level_groups_its_children_and_the_walk_continues_inside() {
 /// iterates the rows for `Place` and `Connect` and a `Level` is
 /// neither, so nothing unwraps it.
 #[test]
-fn ne_4_level_in_a_site_body_does_not_group_anything() {
+fn ne_4_level_in_a_site_body_is_reported_as_a_misplaced_row_not_as_nesting() {
     let src = format!(
         "{PRELUDE}site duo:\n  level y=0\n    \
          place id=anchor use=hut theme=plain at=origin\n"
     );
-    let d = one(&src);
+    assert!(
+        nesting_only(&src).is_empty(),
+        "a `site` body has no reader for `level` at all, so the finding is \
+         about the row rather than about what is indented under it — \
+         reporting both would bill one mistake twice, got {:#?}",
+        nesting_only(&src),
+    );
     assert_eq!(
-        d.primary,
-        "`level` groups members only inside a `struct` or `def`: the 1 member indented under it is not part of the site",
+        diagnose(&src)
+            .iter()
+            .filter(|d| d.code == DiagnosticCode::MisplacedMember)
+            .count(),
+        1,
+        "`member_scope` owns the row, and its advice is the one that fits: \
+         the indented `place` belongs in the site, one indent to the left",
     );
 }
 

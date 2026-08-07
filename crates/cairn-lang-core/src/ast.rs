@@ -352,9 +352,16 @@ pub enum Statement {
         /// Optional bracketed selector immediately after the keyword.
         #[serde(skip_serializing_if = "Option::is_none")]
         selector: Option<Vec<Arg>>,
-        /// Bare positional values consumed before any `key=value` argument.
-        /// Empty for the overwhelming majority of commands; non-empty only for
-        /// special forms such as `connect <ref> to <ref>`.
+        /// Bare values on the line, in source order.
+        ///
+        /// Not a prefix: the parse loop appends here whenever the next token
+        /// is not `key=`, `-> binding`, or a selector, so `size=2 x2` leaves
+        /// one entry *after* an argument. `check::positional` relies on that
+        /// — an interleaved bare value is usually a dropped `=`, which is the
+        /// shape worth catching.
+        ///
+        /// Empty for every well-formed command but `connect <ref> to <ref>`,
+        /// the one form with a reader for it (`spec/syntax.md` §5.1).
         #[serde(skip_serializing_if = "Vec::is_empty")]
         positional: Vec<Value>,
         /// `key=value` arguments in source order.

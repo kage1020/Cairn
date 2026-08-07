@@ -114,8 +114,25 @@ const SYNTACTIC_FIXTURES: &[(&str, Source)] = &[
         ),
     ),
     (
+        // The site half of this code. It is the half that had no reporter
+        // at either stage — a geometry row among a site's placements
+        // produced neither voxels nor a diagnostic — so it is the one
+        // worth carrying through the build commands.
+        "E_MISPLACED_MEMBER",
+        Source::WithPrologue(
+            "def hut size=3x3:\n  floor id=floor mat_slot=floor\n\
+             \nsite s:\n  place id=a use=hut theme=t at=origin\n\
+             \x20\x20floor id=stray mat_slot=floor\n",
+        ),
+    ),
+    (
         "E_UNKNOWN_KEYWORD",
         Source::WithPrologue("struct s size=5x5\n  torch mat_slot=wall\n"),
+    ),
+    (
+        // `spec/syntax.md` §5.1's own forbidden example.
+        "E_UNEXPECTED_POSITIONAL",
+        Source::WithPrologue("struct s size=5x5\n  window front G 2 2 2x2 mat_slot=wall\n"),
     ),
     (
         // The site half of this code's message. The geometry half is

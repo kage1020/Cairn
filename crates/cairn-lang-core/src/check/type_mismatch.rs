@@ -1,5 +1,5 @@
-//! `type_mismatch` pass — flags `id=`/`class=`/`mat_slot=` with non-label
-//! values and `size=` with a non-`Size` value.
+//! `type_mismatch` pass — flags label-typed keys with non-label values and
+//! `size=` with a non-`Size` value.
 //!
 //! Walks the surface AST because the offending values may have been hoisted
 //! out of `IntentState` during lowering (when the value *was* a label) or
@@ -10,7 +10,17 @@ use crate::ast::{Arg, Item, Module, Statement, ThemeRule, Value, ValueKind};
 
 use super::{Diagnostic, DiagnosticCode, DiagnosticSink};
 
-const LABEL_KEYS: &[&str] = &["id", "class", "mat_slot"];
+/// Keys whose value every reader lifts through `Value::as_label_str`.
+///
+/// `id` / `class` / `mat_slot` are hoisted onto [`crate::intent::Member`]'s
+/// own fields during lowering; `use` / `theme` stay in `intent_state` and
+/// are read by `resolve::resolve_site_placements`. The distinction does not
+/// reach the author: all five reject a non-label the same way, and for
+/// `use=` / `theme=` the rejection used to be the resolver's silent
+/// `continue`, which drops the whole placement — the same arm a `place` row
+/// with no `use=` at all takes. Naming the mistyped case here is what tells
+/// those two apart.
+const LABEL_KEYS: &[&str] = &["id", "class", "mat_slot", "use", "theme"];
 
 pub(super) fn run(module: &Module, sink: &mut DiagnosticSink) {
     for item in &module.items {

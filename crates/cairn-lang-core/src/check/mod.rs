@@ -4,10 +4,10 @@
 //! Each pass is non-fatal: passes accumulate findings into a
 //! [`DiagnosticSink`] and the top-level [`check`] runs every pass before
 //! returning. The order `duplicate` → `keyword_allowlist` →
-//! `connect_arity` → `type_mismatch` → [`crate::resolve::resolve`] is fixed
-//! so the emitted list is stable across runs, but the diagnostics
-//! themselves are sorted by source position once everything has finished
-//! collecting.
+//! `member_scope` → `connect_arity` → `nesting` → `positional` →
+//! `type_mismatch` → [`crate::resolve::resolve`] is fixed so the emitted
+//! list is stable across runs, but the diagnostics themselves are sorted by
+//! source position once everything has finished collecting.
 //!
 //! Block-array lowering is *not* among those passes, so an `Error` it
 //! raises never reaches `cairn check`. `check::tests` pins which codes that
@@ -24,7 +24,9 @@ mod connect_arity;
 mod diagnostic;
 mod duplicate;
 mod keyword_allowlist;
+mod member_scope;
 mod nesting;
+mod positional;
 mod sink;
 mod type_mismatch;
 
@@ -65,8 +67,10 @@ pub fn check(module: &Module, ir: &IntentModule, edition: Option<Edition>) -> Ve
     let mut sink = DiagnosticSink::new();
     duplicate::run(module, &mut sink);
     keyword_allowlist::run(ir, &mut sink);
+    member_scope::run(ir, &mut sink);
     connect_arity::run(ir, &mut sink);
     nesting::run(ir, &mut sink);
+    positional::run(ir, &mut sink);
     type_mismatch::run(module, &mut sink);
     for d in crate::resolve::resolve(ir, edition).diagnostics {
         sink.push(d);
@@ -93,8 +97,9 @@ mod tests {
     /// from.
     #[derive(Debug, PartialEq, Eq)]
     enum RaisedBy {
-        /// `duplicate` / `keyword_allowlist` / `connect_arity` /
-        /// `type_mismatch`, run directly by [`check`].
+        /// `duplicate` / `keyword_allowlist` / `member_scope` /
+        /// `connect_arity` / `nesting` / `positional` / `type_mismatch`,
+        /// run directly by [`check`].
         Syntactic,
         /// `crate::resolve::resolve`, whose diagnostics [`check`] merges in.
         Resolver,
@@ -114,7 +119,9 @@ mod tests {
             | C::DuplicateItem
             | C::DuplicateHeader
             | C::UnsupportedNesting
+            | C::MisplacedMember
             | C::UnknownKeyword
+            | C::UnexpectedPositional
             | C::TypeMismatchLabel
             | C::TypeMismatchSize
             | C::ConnectArity => RaisedBy::Syntactic,
@@ -173,8 +180,10 @@ mod tests {
                 "E_DUPLICATE_ITEM",
                 "E_DUPLICATE_SIZE",
                 "E_DUPLICATE_SLOT",
+                "E_MISPLACED_MEMBER",
                 "E_TYPE_MISMATCH_LABEL",
                 "E_TYPE_MISMATCH_SIZE",
+                "E_UNEXPECTED_POSITIONAL",
                 "E_UNKNOWN_KEYWORD",
                 "E_UNSUPPORTED_NESTING",
             ],

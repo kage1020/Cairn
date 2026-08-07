@@ -14,6 +14,13 @@ window side=front mat_slot=glass offset=2 y=2 size=2x2 sym=true   # OK
 window front G 2 2 2x2                                            # forbidden (positional args)
 ```
 
+A bare value on a line that reads none is `E_UNEXPECTED_POSITIONAL`. `connect FROM.PORT to
+TO.PORT` is the single form with a reader for positionals, and its shape is checked by
+`E_CONNECT_ARITY` instead. The rule catches more than the style above: the parser puts any token
+that is not `key=`, `-> binding`, or `[selector]` into the same list, so a dropped `=`
+(`walls mat_slot=wall height 3`) lands there too and would otherwise build a wall of the default
+height.
+
 ## 5.2 Nesting
 Keep nesting shallow (`struct` / `def` / `level` / `theme` / `site`). Deep nesting increases
 LLM generation errors. (`room` is not in this list: it is still open — see
@@ -23,6 +30,14 @@ Inside a body, `level y=N` is the only member that groups other members, and onl
 `def`. A `site` body is a flat list of `place` and `connect` rows with no grouping construct at all.
 An indented body anywhere else produces no blocks — it is not lowered, not placed, and lays no
 walkway — so it is `E_UNSUPPORTED_NESTING` rather than a silent drop.
+
+Which keywords a body accepts follows from the same split. A `struct` / `def` body describes one
+building's geometry (`floor`, `walls`, `door`, `window`, `roof`, `stair`, `level`,
+`pressure_plate`, `circuit`); a `site` body describes a layout (`place`, `connect`). The keyword
+table is global, so writing one in the other body parses and classifies — and then reaches nothing,
+because the geometry passes bucket by role and the site passes match `place` / `connect`. That is
+`E_MISPLACED_MEMBER`, reported once at the offending row; anything indented under it goes with it.
+`logic` and `assert` lines are not members and are read from either body.
 
 Top-level names are scoped per kind: `theme` / `def` / `struct` / `site` are four namespaces, so one
 name may appear once in each. Declaring it twice within one kind is `E_DUPLICATE_ITEM`. For `theme` /

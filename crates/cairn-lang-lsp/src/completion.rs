@@ -12,15 +12,16 @@
 //! strictly line-oriented (one line = one command, spec syntax §5.1), so the
 //! line prefix up to the cursor is grammatically sufficient — and the parser
 //! stops at its first error, which a document mid-keystroke almost always
-//! contains. The one cross-line lookup (which block encloses the cursor
-//! line) walks indentation upward, and `mat_slot=` values are collected by
+//! contains. The one cross-line lookup (which top-level item's body the
+//! cursor line sits in — and so which member keywords have a reader there)
+//! walks upward to the nearest indent-0 line, and `mat_slot=` values are collected by
 //! scanning `slot NAME -> TARGET` lines document-wide; a drift-guard test
 //! asserts that scan agrees with the parser on every shipped example.
 
 use std::collections::HashSet;
 
 use cairn_lang_core::Span;
-use cairn_lang_core::intent::known_keywords;
+use cairn_lang_core::intent::BodyKind;
 use cairn_lang_formats::{builtin_bedrock, builtin_java};
 
 use crate::line_index::LineIndex;
@@ -34,8 +35,15 @@ enum Context {
     /// First word of an indent-0 line: a top-level item keyword.
     TopLevelKeyword { replace: Span },
     /// First word of an indented line inside a `struct`/`def`/`site` (or
-    /// a deeper `level`) body: a member command keyword.
-    MemberKeyword { replace: Span },
+    /// a deeper `level`) body: a member command keyword the enclosing item
+    /// has a reader for.
+    ///
+    /// The keyword table is global but the readers are not: a `place` in a
+    /// `struct` body and a `floor` among a site's rows both classify and
+    /// then reach nothing, which `check::member_scope` reports as
+    /// `E_MISPLACED_MEMBER`. Offering the full table here would put an
+    /// error one keystroke away.
+    MemberKeyword { replace: Span, body: BodyKind },
     /// First word of an indented line inside a `theme` body: `slot` or a
     /// member keyword opening a selector rule.
     ThemeBodyKeyword { replace: Span },
@@ -76,18 +84,25 @@ pub fn completions(
             &replace,
             TOP_LEVEL_KEYWORDS.iter().map(|kw| (*kw, "top-level item")),
         ),
-        Some(Context::MemberKeyword { replace }) => keyword_items(
+        Some(Context::MemberKeyword { replace, body }) => keyword_items(
             &index,
             source,
             &replace,
-            known_keywords().iter().map(|kw| (*kw, "member command")),
+            body.allowed_keywords()
+                .into_iter()
+                .map(|kw| (kw, "member command")),
         ),
+        // A theme selector names a member by keyword and is matched
+        // against every body, so its vocabulary is the whole table.
         Some(Context::ThemeBodyKeyword { replace }) => keyword_items(
             &index,
             source,
             &replace,
-            std::iter::once(("slot", "slot binding"))
-                .chain(known_keywords().iter().map(|kw| (*kw, "theme selector"))),
+            std::iter::once(("slot", "slot binding")).chain(
+                cairn_lang_core::intent::known_keywords()
+                    .iter()
+                    .map(|kw| (*kw, "theme selector")),
+            ),
         ),
         Some(Context::SlotName { replace }) => slot_name_items(&index, source, &replace),
         Some(Context::MaterialToken { replace }) => material_items(&index, source, &replace),
@@ -170,16 +185,29 @@ fn context_at(source: &str, offset: usize) -> Option<Context> {
     if indent == 0 {
         return Some(Context::TopLevelKeyword { replace });
     }
-    match enclosing_block_keyword(source, line_start, indent) {
+    // The *item* keyword, not the nearest block header: a member nested
+    // under a `level` still belongs to the `struct` that opened the body,
+    // and `level` itself names no vocabulary.
+    match enclosing_item_keyword(source, line_start) {
         Some("theme") => Some(Context::ThemeBodyKeyword { replace }),
-        _ => Some(Context::MemberKeyword { replace }),
+        Some("site") => Some(Context::MemberKeyword {
+            replace,
+            body: BodyKind::Site,
+        }),
+        Some("struct" | "def") => Some(Context::MemberKeyword {
+            replace,
+            body: BodyKind::Geometry,
+        }),
+        // An indented line with no item above it is not inside any body,
+        // so there is no closed set to offer — inventing one would be the
+        // hallucination this module exists to avoid.
+        _ => None,
     }
 }
 
-/// First word of the nearest non-blank, non-comment line above `line_start`
-/// with strictly smaller indentation — the block header enclosing the
-/// cursor line.
-fn enclosing_block_keyword(source: &str, line_start: usize, indent: usize) -> Option<&str> {
+/// First word of the nearest non-blank, non-comment indent-0 line above
+/// `line_start` — the top-level item whose body the cursor line sits in.
+fn enclosing_item_keyword(source: &str, line_start: usize) -> Option<&str> {
     source[..line_start]
         .lines()
         .rev()
@@ -190,7 +218,7 @@ fn enclosing_block_keyword(source: &str, line_start: usize, indent: usize) -> Op
             }
             Some((line.len() - trimmed.len(), trimmed))
         })
-        .find(|(line_indent, _)| *line_indent < indent)
+        .find(|(line_indent, _)| *line_indent == 0)
         .map(|(_, trimmed)| {
             let end = trimmed
                 .find(|c: char| !is_token_char(c))
@@ -454,13 +482,14 @@ mod tests {
     }
 
     #[test]
-    fn member_position_offers_all_known_keywords_with_replace_range() {
-        // Inside a struct body the full member-keyword closed set comes
-        // back (no server-side prefix filter) and every item replaces the
-        // partial token's span.
+    fn member_position_offers_the_bodys_keywords_with_replace_range() {
+        // Inside a struct body the geometry closed set comes back (no
+        // server-side prefix filter) and every item replaces the partial
+        // token's span. `place` / `connect` are absent: they classify here
+        // and then reach nothing, which is `E_MISPLACED_MEMBER`.
         let source = "struct s size=2x2\n  flo";
         let items = complete(source, "flo");
-        assert_eq!(labels(&items), known_keywords().to_vec());
+        assert_eq!(labels(&items), BodyKind::Geometry.allowed_keywords());
         for item in &items {
             assert_eq!(item.kind, Some(lsp_types::CompletionItemKind::KEYWORD));
             assert_eq!(edit_range(item), range(1, 2, 5));
@@ -474,7 +503,7 @@ mod tests {
         // leaves the token's tail glued to the insertion (`structtsam`).
         let source = "struct s size=2x2\n  flotsam";
         let items = complete(source, "  flo");
-        assert_eq!(labels(&items), known_keywords().to_vec());
+        assert_eq!(labels(&items), BodyKind::Geometry.allowed_keywords());
         for item in &items {
             assert_eq!(edit_range(item), range(1, 2, 9));
         }
@@ -493,18 +522,38 @@ mod tests {
             .find(|i| i.label == "window")
             .expect("member keywords offered as selectors");
         assert_eq!(window.detail.as_deref(), Some("theme selector"));
-        assert_eq!(items.len(), 1 + known_keywords().len());
+        assert_eq!(
+            items.len(),
+            1 + cairn_lang_core::intent::known_keywords().len(),
+            "a selector is matched against every body, so its vocabulary stays the whole table",
+        );
     }
 
     #[test]
-    fn nested_block_body_offers_member_keywords() {
-        // Deeper nesting inside a struct (`level`) still resolves
-        // to the member-command set: the enclosing-block walk stops at the
-        // nearest shallower line, which is not a `theme` header.
+    fn nested_block_body_offers_the_enclosing_items_keywords() {
+        // Deeper nesting inside a struct (`level`) resolves to the same
+        // set as the struct body itself: the walk looks for the enclosing
+        // *item*, so an intervening `level` — which names no vocabulary of
+        // its own — does not change the answer.
         let source = "struct t size=5x5\n  level h=4\n    flo";
         let items = complete(source, "    flo");
-        assert_eq!(labels(&items), known_keywords().to_vec());
+        assert_eq!(labels(&items), BodyKind::Geometry.allowed_keywords());
         assert!(!labels(&items).contains(&"slot"));
+    }
+
+    #[test]
+    fn a_site_body_offers_only_the_rows_it_reads() {
+        let source = "site s:\n  p";
+        let items = complete(source, "\n  p");
+        assert_eq!(labels(&items), BodyKind::Site.allowed_keywords());
+    }
+
+    #[test]
+    fn an_indented_line_with_no_item_above_it_offers_nothing() {
+        // There is no body, so there is no closed set — and inventing one
+        // is the hallucination this module exists to avoid.
+        let items = complete("  flo", "  flo");
+        assert!(items.is_empty(), "got {items:#?}");
     }
 
     #[test]
@@ -569,7 +618,7 @@ mod tests {
         // ranges, or the slot scan.
         let keyword_source = "struct s size=2x2\r\n  flo";
         let items = complete(keyword_source, "flo");
-        assert_eq!(labels(&items), known_keywords().to_vec());
+        assert_eq!(labels(&items), BodyKind::Geometry.allowed_keywords());
         assert_eq!(edit_range(&items[0]), range(1, 2, 5));
 
         let slot_source = "theme a:\r\n  slot floor -> @oak_planks\r\n\

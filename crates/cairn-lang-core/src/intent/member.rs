@@ -135,7 +135,86 @@ impl Member {
     }
 }
 
+/// Which top-level body a member sits in, and so which roles the later
+/// passes have a reader for.
+///
+/// The two bodies are read by different code and share no keyword. A
+/// `struct` / `def` body is voxelised by `block_array`'s phase buckets; a
+/// `site` body is walked by the resolver's placement loop, which matches
+/// only [`MemberRole::Place`] and [`MemberRole::Connect`] and drops
+/// everything else without a word. Naming the split once keeps
+/// `check::member_scope` (which reports a member the enclosing body has no
+/// reader for) and `check::nesting` (which reports an indented body nothing
+/// unwraps) from encoding it twice.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BodyKind {
+    /// A `struct` or `def` body — one building's geometry.
+    Geometry,
+    /// A `site` body — a flat list of `place` and `connect` rows.
+    Site,
+}
+
+impl BodyKind {
+    /// Surface keyword(s) naming this body, for prose that has to say
+    /// where the author is.
+    #[must_use]
+    pub fn describe(self) -> &'static str {
+        match self {
+            Self::Geometry => "`struct` or `def`",
+            Self::Site => "`site`",
+        }
+    }
+
+    /// Keywords this body has a reader for, in the order
+    /// [`super::known_keywords`] declares them.
+    ///
+    /// Rendered as the "expected one of" note, so it is the closed set the
+    /// author picks a replacement from.
+    #[must_use]
+    pub fn allowed_keywords(self) -> Vec<&'static str> {
+        super::known_keywords()
+            .iter()
+            .copied()
+            .filter(|kw| super::role_of(kw).is_read_in(self))
+            .collect()
+    }
+}
+
 impl MemberRole {
+    /// Whether a body of this kind has anything that reads this role.
+    ///
+    /// Derived from the readers, not from the grammar: the surface parser
+    /// accepts every keyword in every body, so this is the only place the
+    /// distinction is written down.
+    ///
+    /// * Geometry — `block_array`'s `member_phase` buckets `floor`,
+    ///   `walls`, `roof`, `stair`, `door`, `window`, and `pressure_plate`;
+    ///   `recognize_circuit_region` reads `circuit`; `flatten_members`
+    ///   unwraps `level`.
+    /// * Site — `resolve::resolve_site_placements` and
+    ///   `block_array::lower_site` match `place` and `connect`.
+    ///
+    /// [`MemberRole::Other`] answers `false` for both, but no pass should
+    /// report it on that basis: the keyword is not in the table at all, so
+    /// `check::keyword_allowlist` owns it and the repair is the word rather
+    /// than the body it sits in.
+    #[must_use]
+    pub fn is_read_in(&self, body: BodyKind) -> bool {
+        match self {
+            Self::Floor
+            | Self::Walls
+            | Self::Door
+            | Self::Window
+            | Self::Roof
+            | Self::Stair
+            | Self::Level
+            | Self::PressurePlate
+            | Self::Circuit => body == BodyKind::Geometry,
+            Self::Place | Self::Connect => body == BodyKind::Site,
+            Self::Other(_) => false,
+        }
+    }
+
     /// Surface keyword this role was classified from.
     ///
     /// The inverse of [`super::role_of`], so a diagnostic can quote the

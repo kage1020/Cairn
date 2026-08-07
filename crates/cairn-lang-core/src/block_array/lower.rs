@@ -37,7 +37,7 @@ use std::collections::HashSet;
 use indexmap::IndexMap;
 
 use crate::ast::ValueKind;
-use crate::check::{Diagnostic, DiagnosticCode, DiagnosticData, DiagnosticNote, Severity};
+use crate::check::{Diagnostic, DiagnosticCode, DiagnosticData, DiagnosticNote};
 use crate::error::Span;
 use crate::ids::{PlaceId, PortId, SiteName, WalkwayEndpoint, WalkwayScopeKey};
 use crate::intent::{
@@ -281,7 +281,7 @@ fn lower_connects(
             };
             diagnostics.push(Diagnostic {
                 code: DiagnosticCode::DeferredMember,
-                severity: Severity::Warning,
+                severity: DiagnosticCode::DeferredMember.severity(),
                 span: connect.span.clone(),
                 primary: format!(
                     "walkway `{from_label} ↔ {to_label}` was skipped because port {unplaceable} could not be placed",
@@ -326,7 +326,7 @@ fn lower_connects(
         if !seen_pairs.insert(dedup_key) {
             diagnostics.push(Diagnostic {
                 code: DiagnosticCode::DuplicateWalkway,
-                severity: Severity::Warning,
+                severity: DiagnosticCode::DuplicateWalkway.severity(),
                 span: connect.span.clone(),
                 primary: format!(
                     "duplicate walkway `{from} ↔ {to}` in site `{site}`; the second row was dropped",
@@ -409,7 +409,7 @@ fn lower_connects(
             };
             diagnostics.push(Diagnostic {
                 code: DiagnosticCode::WalkwayBlocked,
-                severity: Severity::Warning,
+                severity: DiagnosticCode::WalkwayBlocked.severity(),
                 span: connect.span.clone(),
                 primary: format!(
                     "walkway `{from} ↔ {to}` spans {straight_area} cells, past the \
@@ -469,7 +469,7 @@ fn lower_connects(
         if skipped > 0 {
             diagnostics.push(Diagnostic {
                 code: DiagnosticCode::WalkwayBlocked,
-                severity: Severity::Warning,
+                severity: DiagnosticCode::WalkwayBlocked.severity(),
                 span: connect.span.clone(),
                 primary: format!(
                     "walkway `{from} ↔ {to}` skipped {skipped} cells that overlapped an existing structure",
@@ -572,7 +572,7 @@ fn diag_walkway_invalid_ident(
     let crate::ids::KeyConstructError::ConsecutiveUnderscore { role, segment } = err;
     Diagnostic {
         code: DiagnosticCode::InvalidWalkwayIdent,
-        severity: Severity::Warning,
+        severity: DiagnosticCode::InvalidWalkwayIdent.severity(),
         span: connect.span.clone(),
         primary: format!(
             "walkway `{from} ↔ {to}` was dropped because the {role} id `{segment}` \
@@ -612,7 +612,7 @@ fn diag_walkway_endpoint_skipped(
     };
     Diagnostic {
         code: DiagnosticCode::DeferredMember,
-        severity: Severity::Warning,
+        severity: DiagnosticCode::DeferredMember.severity(),
         span: connect.span.clone(),
         primary: format!(
             "walkway `{from_label} ↔ {to_label}` was skipped because the {missing} did not lower",
@@ -634,7 +634,7 @@ fn diag_walkway_abstract_token(
 ) -> Diagnostic {
     Diagnostic {
         code: DiagnosticCode::AbstractTokenDeferred,
-        severity: Severity::Warning,
+        severity: DiagnosticCode::AbstractTokenDeferred.severity(),
         span: connect.path.span.clone(),
         primary: format!(
             "abstract path token `@{token}` cannot be lowered without the registry pack; the walkway falls back to air",
@@ -668,7 +668,7 @@ fn diag_walkway_unknown_token(
     });
     Diagnostic {
         code: DiagnosticCode::UnknownAbstractToken,
-        severity: Severity::Error,
+        severity: DiagnosticCode::UnknownAbstractToken.severity(),
         span: connect.path.span.clone(),
         primary: format!(
             "abstract path token `@{token}` is not declared by the registry pack's materials catalog",
@@ -1040,7 +1040,7 @@ fn lower_body_to_block_array<'a>(
 fn diag_structure_too_large(body: &BodyDescriptor<'_>, dims: Dims) -> Diagnostic {
     Diagnostic {
         code: DiagnosticCode::StructureTooLarge,
-        severity: Severity::Warning,
+        severity: DiagnosticCode::StructureTooLarge.severity(),
         span: body.header_span.clone(),
         primary: format!(
             "`{}` derives a {}x{}x{} voxel extent, past the \
@@ -3039,7 +3039,7 @@ fn side_name(side: WallSide) -> &'static str {
 fn diag_struct_no_size(s: &StructIr) -> Diagnostic {
     Diagnostic {
         code: DiagnosticCode::StructNoSize,
-        severity: Severity::Warning,
+        severity: DiagnosticCode::StructNoSize.severity(),
         span: s.span.clone(),
         primary: format!(
             "struct `{}` has no `size=WxH`; block-array lowering skipped it",
@@ -3060,7 +3060,7 @@ fn diag_no_theme_bound_generic(kind: BodyKind, label: &str, header_span: &Span) 
     };
     Diagnostic {
         code: DiagnosticCode::NoThemeBound,
-        severity: Severity::Warning,
+        severity: DiagnosticCode::NoThemeBound.severity(),
         span: header_span.clone(),
         primary: format!(
             "{host} `{label}` has no theme bound; every `mat_slot=` will lower to air",
@@ -3078,7 +3078,7 @@ fn diag_no_theme_bound_generic(kind: BodyKind, label: &str, header_span: &Span) 
 fn diag_def_no_size(def: &DefIr) -> Diagnostic {
     Diagnostic {
         code: DiagnosticCode::DefNoSize,
-        severity: Severity::Warning,
+        severity: DiagnosticCode::DefNoSize.severity(),
         span: def.span.clone(),
         primary: format!(
             "def `{}` has no `size=WxH`; placements that `use={}` cannot derive a voxel footprint",
@@ -3103,7 +3103,7 @@ fn diag_deferred_member(member: &Member) -> Diagnostic {
 fn diag_deferred_member_reason(member: &Member, reason: &str) -> Diagnostic {
     Diagnostic {
         code: DiagnosticCode::DeferredMember,
-        severity: Severity::Warning,
+        severity: DiagnosticCode::DeferredMember.severity(),
         span: member.span.clone(),
         primary: reason.to_owned(),
         notes: vec![DiagnosticNote {
@@ -3123,7 +3123,7 @@ fn diag_deferred_member_reason(member: &Member, reason: &str) -> Diagnostic {
 fn diag_abstract_token(member: &Member, token: &str, slot: &ValueWithSpan) -> Diagnostic {
     Diagnostic {
         code: DiagnosticCode::AbstractTokenDeferred,
-        severity: Severity::Warning,
+        severity: DiagnosticCode::AbstractTokenDeferred.severity(),
         span: member_or_slot_span(member, slot),
         primary: format!(
             "abstract token `@{token}` cannot be lowered without the registry pack; the cell falls back to air",
@@ -3162,7 +3162,7 @@ fn diag_unknown_abstract_token(
     });
     Diagnostic {
         code: DiagnosticCode::UnknownAbstractToken,
-        severity: Severity::Error,
+        severity: DiagnosticCode::UnknownAbstractToken.severity(),
         span: member_or_slot_span(member, slot),
         primary,
         notes,
@@ -3185,6 +3185,7 @@ fn member_or_slot_span(member: &Member, slot: &ValueWithSpan) -> Span {
 mod tests {
     use super::*;
     use crate::block_array::BlockState;
+    use crate::check::Severity;
     use crate::{lower, parse, resolve};
 
     fn lowered(source: &str) -> BlockArrayIr {

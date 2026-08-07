@@ -9,7 +9,7 @@
 //! 2. **selector matches** — each `KEYWORD[attrs] -> bindings` row in a theme
 //!    is paired with the member(s) it actually matches in the file;
 //! 3. **diagnostics** — `E_UNRESOLVED_SLOT` (Error) for `mat_slot=NAME` that
-//!    no theme provides, `E_UNKNOWN_SLOT_TARGET` (Warning) for theme slot
+//!    no theme provides, `E_UNKNOWN_SLOT_TARGET` (Error) for theme slot
 //!    targets that look like neither a canonical nor an abstract material
 //!    token, and `E_THEME_SELECTOR_UNMATCHED` (Warning) for selectors that
 //!    don't bind to anything.

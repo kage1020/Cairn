@@ -54,7 +54,7 @@ use indexmap::IndexMap;
 use serde::Serialize;
 
 use crate::ast::{Value, ValueKind};
-use crate::check::{Diagnostic, DiagnosticCode, DiagnosticNote, Severity};
+use crate::check::{Diagnostic, DiagnosticCode, DiagnosticNote};
 use crate::edition::Edition;
 use crate::error::Span;
 use crate::ids::{IdError, PlaceId, PortId, SiteName};
@@ -581,7 +581,12 @@ fn resolve_site_placements(
         // without committing to a def (e.g. as a deliberate
         // work-in-progress marker). No `check` pass currently requires
         // `use=`, so emitting a resolver-level error here would tighten
-        // the language without an M3 motivation. Skipping the rest of
+        // the language without an M3 motivation. A `use=` that is
+        // *present* but not label-shaped reaches this same arm, since
+        // `as_label_str` answers `None` either way; that case is
+        // `check::type_mismatch`'s `E_TYPE_MISMATCH_LABEL`, which is why
+        // the arm can stay silent without leaving a mistyped value
+        // undiagnosed. Skipping the rest of
         // the pipeline prevents `place_def` and the scope map from
         // carrying a half-built entry, so the lowering pass below does
         // not emit a `.nbt` for a placement with no def. Downstream
@@ -612,7 +617,10 @@ fn resolve_site_placements(
         // coverage. On multi-theme files an omitted `theme=` is a known
         // silent gap: no `check` pass requires it and no targeted
         // diagnostic exists yet (an `E_PLACE_THEME_REQUIRED` pass would
-        // be the correct long-term home and is tracked separately).
+        // be the correct long-term home and is tracked separately). As
+        // with `use=` above, a `theme=` that is present but not
+        // label-shaped lands here too and is owned by
+        // `check::type_mismatch`, not by this arm.
         // Skipping the rest of the pipeline here leaves `place_def`
         // unset for this place; downstream `connect` rows targeting it
         // surface the gap via the `W_DEFERRED_CONNECT` cascade in
@@ -735,7 +743,7 @@ fn resolve_connect_row(
     let Some(path) = path else {
         diagnostics.push(Diagnostic {
             code: DiagnosticCode::MissingPathMaterial,
-            severity: Severity::Error,
+            severity: DiagnosticCode::MissingPathMaterial.severity(),
             span: member.span.clone(),
             primary: "`connect` requires a `path=` material to lay the walkway".to_owned(),
             notes: vec![DiagnosticNote {
@@ -757,7 +765,7 @@ fn resolve_connect_row(
     if !matches!(path.value.kind, ValueKind::Token(_)) {
         diagnostics.push(Diagnostic {
             code: DiagnosticCode::MissingPathMaterial,
-            severity: Severity::Error,
+            severity: DiagnosticCode::MissingPathMaterial.severity(),
             span: path.span.clone(),
             primary: format!(
                 "`connect path=` must be a material token like `@gravel`, got {}",
@@ -958,7 +966,7 @@ fn validate_port(
             });
             diagnostics.push(Diagnostic {
                 code: DiagnosticCode::UnresolvedPort,
-                severity: Severity::Error,
+                severity: DiagnosticCode::UnresolvedPort.severity(),
                 span: port.span.clone(),
                 primary: format!(
                     "port `{port_id}` is not declared by `def {def_name}` (used by `place {place_id}`)",
@@ -975,7 +983,7 @@ fn validate_port(
         n => {
             diagnostics.push(Diagnostic {
                 code: DiagnosticCode::AmbiguousPort,
-                severity: Severity::Error,
+                severity: DiagnosticCode::AmbiguousPort.severity(),
                 span: port.span.clone(),
                 primary: format!(
                     "port `{port_id}` matches {n} members of `def {def_name}`; the reference is ambiguous",
@@ -1085,7 +1093,7 @@ fn check_unused_defs(defs: &[DefIr], used: &HashSet<String>, diagnostics: &mut V
         }
         diagnostics.push(Diagnostic {
             code: DiagnosticCode::UnusedDef,
-            severity: Severity::Warning,
+            severity: DiagnosticCode::UnusedDef.severity(),
             span: def.span.clone(),
             primary: format!(
                 "def `{name}` is never referenced by a `place use={name}`",
@@ -1116,7 +1124,7 @@ fn unresolved_place_ref_diag<'a>(
     }
     Diagnostic {
         code: DiagnosticCode::UnresolvedPlaceRef,
-        severity: Severity::Error,
+        severity: DiagnosticCode::UnresolvedPlaceRef.severity(),
         span,
         primary: primary.to_owned(),
         notes,
@@ -1159,7 +1167,7 @@ fn unresolved_theme_ref_diag<'a>(
     }
     Diagnostic {
         code: DiagnosticCode::UnresolvedThemeRef,
-        severity: Severity::Error,
+        severity: DiagnosticCode::UnresolvedThemeRef.severity(),
         span,
         primary: format!("`theme={theme}` is not a declared theme"),
         notes,
@@ -1175,7 +1183,7 @@ fn duplicate_place_id_diag(
 ) -> Diagnostic {
     Diagnostic {
         code: DiagnosticCode::DuplicatePlaceId,
-        severity: Severity::Error,
+        severity: DiagnosticCode::DuplicatePlaceId.severity(),
         span: second.clone(),
         primary: format!("duplicate `id={place_id}` in site `{site_name}`"),
         notes: vec![DiagnosticNote {
@@ -1193,7 +1201,7 @@ fn invalid_place_id_diag(place_id: &str, site_name: &str, span: Span, err: &IdEr
     };
     Diagnostic {
         code: DiagnosticCode::InvalidPlaceId,
-        severity: Severity::Error,
+        severity: DiagnosticCode::InvalidPlaceId.severity(),
         span,
         primary: format!(
             "`place id={place_id}` in site `{site_name}` is not a usable id: {reason}"
@@ -1211,7 +1219,7 @@ fn invalid_place_id_diag(place_id: &str, site_name: &str, span: Span, err: &IdEr
 fn invalid_place_origin_diag(place_id: &str, span: Span, message: &str) -> Diagnostic {
     Diagnostic {
         code: DiagnosticCode::InvalidPlaceOrigin,
-        severity: Severity::Error,
+        severity: DiagnosticCode::InvalidPlaceOrigin.severity(),
         span,
         primary: format!("invalid origin selector on `place id={place_id}`: {message}"),
         notes: vec![],
@@ -1423,7 +1431,7 @@ fn unresolved_slot_diag(
     });
     Diagnostic {
         code: DiagnosticCode::UnresolvedSlot,
-        severity: Severity::Error,
+        severity: DiagnosticCode::UnresolvedSlot.severity(),
         span: member.span.clone(),
         primary: format!("`mat_slot={slot}` is not declared in theme `{theme_name}`"),
         notes,
@@ -1443,7 +1451,7 @@ fn check_slot_targets(themes: &[ThemeBinding], diagnostics: &mut Vec<Diagnostic>
             if classify_token(&v.value) == TokenKind::NotAToken {
                 diagnostics.push(Diagnostic {
                     code: DiagnosticCode::UnknownSlotTarget,
-                    severity: Severity::Warning,
+                    severity: DiagnosticCode::UnknownSlotTarget.severity(),
                     span: v.span.clone(),
                     primary: format!(
                         "slot `{slot}` in theme `{theme}` does not bind to a canonical or abstract material token",
@@ -1494,7 +1502,7 @@ fn check_unmatched_selectors(
             if sel.matched_member_spans.is_empty() {
                 diagnostics.push(Diagnostic {
                     code: DiagnosticCode::ThemeSelectorUnmatched,
-                    severity: Severity::Warning,
+                    severity: DiagnosticCode::ThemeSelectorUnmatched.severity(),
                     span: sel.source_span.clone(),
                     primary: format!(
                         "theme selector `{kw}[...]` in `{theme}` does not match any member",
@@ -1515,6 +1523,7 @@ fn check_unmatched_selectors(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::check::Severity;
     use crate::{lower, parse};
 
     fn ir(source: &str) -> IntentModule {
@@ -2004,13 +2013,19 @@ mod tests {
         assert!(r.connects.is_empty(), "broken connect must not resolve");
     }
 
+    /// A slot bound to something that is not a material token is an
+    /// error, not advisory: `walls mat_slot=wall` below lowers to air, so
+    /// a `cairn check` that exited 0 would certify a hollow build.
     #[test]
-    fn unknown_slot_target_emits_warning() {
+    fn unknown_slot_target_emits_error() {
         let src = "theme t:\n  slot wall -> plain_ident\n\nstruct s size=4x4\n  walls mat_slot=wall height=3\n";
         let r = resolve(&ir(src), None);
-        assert!(r.diagnostics.iter().any(
-            |d| d.code == DiagnosticCode::UnknownSlotTarget && d.severity == Severity::Warning
-        ),);
+        assert!(
+            r.diagnostics
+                .iter()
+                .any(|d| d.code == DiagnosticCode::UnknownSlotTarget
+                    && d.severity == Severity::Error),
+        );
     }
 
     // ------------------------------------------------------------------

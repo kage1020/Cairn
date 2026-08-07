@@ -14,6 +14,12 @@ window side=front mat_slot=glass offset=2 y=2 size=2x2 sym=true   # OK
 window front G 2 2 2x2                                            # 禁止 (位置引数)
 ```
 
+位置値を読まない行に裸の値があると `E_UNEXPECTED_POSITIONAL` になります。位置値の読み手を持つ
+形式は `connect FROM.PORT to TO.PORT` だけで、その形状は `E_CONNECT_ARITY` が検査します。この
+規則が拾うのは上のスタイル違反だけではありません。パーサは `key=` / `-> binding` / `[selector]`
+のいずれでもないトークンをすべて同じリストに入れるため、`=` の打ち漏らし
+(`walls mat_slot=wall height 3`) もここに落ち、放置すればデフォルト高さの壁が建ちます。
+
 ## 5.2 ネスト
 ネストは浅く保ちます (`struct` / `def` / `level` / `theme` / `site`)。深いネストは LLM の生成
 ミスを増やします。(`room` はこの一覧にありません。まだ未決の概念であり
@@ -23,6 +29,14 @@ window front G 2 2 2x2                                            # 禁止 (位�
 ます。`site` の本体は `place` / `connect` 行のフラットな並びで、グループ化構文はありません。それ以外
 の場所にインデントした本体はブロックを一切生みません — 立体化もされず、配置もされず、歩道も敷き
 ません — ので、無言で落とさず `E_UNSUPPORTED_NESTING` として報告します。
+
+どのキーワードをどの本体に書けるかも同じ区分に従います。`struct` / `def` の本体は 1 棟のジオメトリ
+を記述し (`floor` / `walls` / `door` / `window` / `roof` / `stair` / `level` / `pressure_plate` /
+`circuit`)、`site` の本体は配置を記述します (`place` / `connect`)。キーワード表はグローバルなので、
+一方を他方の本体に書いても構文解析も役割分類も通ります — そして何にも届きません。ジオメトリ側の
+パスは役割でフェーズに振り分け、site 側のパスは `place` / `connect` だけを拾うためです。これが
+`E_MISPLACED_MEMBER` で、該当行に 1 件だけ報告し、その下にインデントされたものは一緒に失われます。
+`logic` / `assert` 行はメンバではなく、どちらの本体からも読まれます。
 
 トップレベルの名前は種類ごとにスコープされます。`theme` / `def` / `struct` / `site` は 4 つの別々の
 名前空間なので、同じ名前を各種類に 1 つずつ置くのは正当です。同一種類で 2 回宣言すると
