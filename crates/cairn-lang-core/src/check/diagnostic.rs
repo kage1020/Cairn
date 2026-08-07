@@ -115,9 +115,11 @@ pub enum DiagnosticCode {
     /// The five are one code because every reader lifts them the same
     /// way, through `Value::as_label_str`, and answers `None` the same
     /// way. For `use=` / `theme=` that `None` is indistinguishable at the
-    /// resolver from the key being absent, which is a deliberate hole in
-    /// the grammar — so this code is what tells a typo apart from a
-    /// `place` row that names no def on purpose.
+    /// resolver from the key being absent — and both are errors, reported
+    /// by different codes: an absent key is `E_INCOMPLETE_PLACE`, a key
+    /// that is on the line but not usable is this one. Telling them apart
+    /// is what keeps the message from asking the author to add a key they
+    /// already wrote.
     TypeMismatchLabel,
     /// `size=` whose value is not a `WxH` literal.
     TypeMismatchSize,
@@ -259,7 +261,9 @@ pub enum DiagnosticCode {
     /// `seen_place_ids` but never finished lifting into `place_def` — the
     /// `place` row was skipped by `resolve_site_placements` for an absent
     /// `use=` / `theme=` (`E_INCOMPLETE_PLACE`), a mistyped one
-    /// (`E_TYPE_MISMATCH_LABEL`), or a name that resolved to nothing
+    /// (`E_TYPE_MISMATCH_LABEL`), a failed origin selector
+    /// (`E_INVALID_PLACE_ORIGIN`, whose row registers before it is
+    /// validated), or a name that resolved to nothing
     /// (`E_UNRESOLVED_PLACE_REF` / `E_UNRESOLVED_THEME_REF`).
     ///
     /// The root cause is therefore reported elsewhere, and this is not a
@@ -443,6 +447,19 @@ pub enum DiagnosticData {
         /// the underlying `skipped > 0`. Typed as `u64` so `usize` lifts
         /// without lossy truncation on any platform Cairn supports.
         skipped: u64,
+    },
+    /// Companion payload for [`DiagnosticCode::IncompletePlace`]. The keys
+    /// the `place` row does not declare, without the trailing `=`, in the
+    /// order the message lists them.
+    ///
+    /// Carried because "insert the missing keys" is the obvious quick-fix
+    /// for this code, and recovering the set from the rendered sentence is
+    /// exactly the prose-parsing `spec/lint.md` §11.2 tells consumers to
+    /// avoid. Invariant: non-empty — a row that declares all three keys
+    /// produces no finding at all.
+    IncompletePlace {
+        /// Missing key names (`id`, `use`, `theme`).
+        missing: Vec<String>,
     },
 }
 

@@ -52,11 +52,13 @@
 //! 7. **`connect` rows carrying a fourth positional** — the count
 //!    bound, which the endpoint and separator cases do not exercise
 //!    because they all pass exactly three.
-//! 8. **`use=` / `theme=` present but not label-shaped** — the same arm
-//!    as the absent case, because `as_label_str` answers `None` for
-//!    both. `check::type_mismatch` tells them apart for the user; what
-//!    is pinned here is that the resolver does not, so a guard that
-//!    splits them has to say so.
+//! 8. **`use=` / `theme=` present but not label-shaped** — the same
+//!    resolver arm as the absent case, because `as_label_str` answers
+//!    `None` for both, but a *different* code above it:
+//!    `E_TYPE_MISMATCH_LABEL` rather than `E_INCOMPLETE_PLACE`. Pinned
+//!    here because the resolver still cannot tell the two apart — the
+//!    completeness check reads the surface key, not the lifted value —
+//!    so a guard that starts distinguishing them has to say so.
 //! 9. **Top-level names declared twice** — `resolve` binds the first and
 //!    skips the rest without a diagnostic, because `check::duplicate`
 //!    owns `E_DUPLICATE_ITEM` and can anchor it on the name token, which
@@ -172,11 +174,9 @@ connect anchor.entry to silent.entry path=@gravel\n"
     );
 }
 
-/// Mirror test for missing `theme=`. The multi-theme case is the known
-/// silent gap; this single-theme fixture exercises the cascade shape
-/// identically by suppressing the per-site heuristic (no theme name on
-/// the placement is treated as a structural skip regardless of how
-/// many themes the file declares — see the resolver doc).
+/// Mirror test for missing `theme=`. The theme count is irrelevant: the
+/// arm returns before any scope is built, so the single-theme heuristic
+/// in `resolve_struct_or_def` never gets a chance to default it.
 #[test]
 fn missing_theme_cascades_w_deferred_connect_with_no_walkway() {
     let src = format!(
@@ -210,7 +210,7 @@ connect anchor.entry to themeless.entry path=@gravel\n"
 /// exactly once, at the row, and that the absence of a cascade is not
 /// mistaken for the absence of a finding.
 #[test]
-fn place_without_id_skips_silently_without_diagnostics() {
+fn place_without_id_is_reported_once_and_cannot_cascade() {
     let src = format!(
         "{PROLOGUE}\
 site duo:\n  \
@@ -493,16 +493,21 @@ site duo:
 }
 
 /// A `use=` / `theme=` that is *present but not label-shaped* takes the
-/// same arm as one that is absent: `Value::as_label_str` answers `None`
-/// either way, so the row is dropped and the resolver says nothing.
+/// same resolver arm as one that is absent: `Value::as_label_str`
+/// answers `None` either way, so the row is dropped and this layer says
+/// nothing about it.
 ///
-/// The two cases needed telling apart. An absent `use=` is a deliberate
-/// hole in the grammar — a `place` row may name an id and nothing else —
-/// while `use=3` is a mistyped value with no reading under which the
-/// author meant to leave the def out. `check::type_mismatch` now owns
-/// the second (`E_TYPE_MISMATCH_LABEL`); this pins that the resolver-only
-/// path still treats them identically, so a future guard that splits
-/// them here shows up as a deliberate change.
+/// Both are errors, reported above by different codes — an absent key by
+/// `E_INCOMPLETE_PLACE`, a mistyped one by `E_TYPE_MISMATCH_LABEL`. The
+/// completeness check reads the surface key rather than the lifted
+/// value, which is what keeps `use=3` from being reported as a key the
+/// author forgot to write. What is pinned here is the layer below: the
+/// resolver still treats the two identically, so a guard that starts
+/// distinguishing them shows up as a deliberate change.
+///
+/// The rows carry all three keys apart from the mistyped one, so a
+/// stray `E_INCOMPLETE_PLACE` here would mean the check had started
+/// reading values instead of keys.
 #[test]
 fn non_label_use_or_theme_takes_the_same_silent_arm_as_an_absent_one() {
     for row in [
@@ -528,6 +533,13 @@ connect anchor.entry to silent.entry path=@gravel\n"
             "the mistyped value is owned by `check::type_mismatch`; the \
              resolver-only path stays silent for `{row}`, got: {:#?}",
             outcome.diagnostics,
+        );
+        assert_eq!(
+            count(&outcome.diagnostics, DiagnosticCode::IncompletePlace),
+            0,
+            "and it is not reported as an absent key for `{row}` — the key is \
+             on the line, so asking for it again would be advice the author \
+             has already followed",
         );
         assert_eq!(
             count(&outcome.diagnostics, DiagnosticCode::DeferredConnect),

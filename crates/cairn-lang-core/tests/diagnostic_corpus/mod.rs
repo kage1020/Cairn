@@ -101,6 +101,19 @@ pub fn noisy_sources() -> Vec<String> {
         // both have to read.
         format!("{THEME}{HUT}site s:\n  place id=a theme=t at=origin\n"),
         format!("{THEME}{HUT}site s:\n  place at=origin\n"),
+        // The two-key arity of the missing-key list, which joins without a
+        // serial comma, and an id-less row whose origin selector also
+        // fails — the branch that has no name to quote.
+        format!(
+            "{THEME}{HUT}site s:
+  place id=b at=origin
+"
+        ),
+        format!(
+            "{THEME}{HUT}site s:
+  place use=hut theme=t at=middle
+"
+        ),
         // Positional values, singular and plural.
         format!("{THEME}struct s size=5x5\n  roof flat mat_slot=wall\n"),
         format!("{THEME}struct s size=5x5\n  window front G 2 2 2x2 mat_slot=wall\n"),

@@ -75,10 +75,10 @@ resolve its `mat_slot=` members against — so it is `E_INCOMPLETE_PLACE` and th
 the build. The message names every key the row is short of. A key that is present but not a label
 (`use=3`) is `E_TYPE_MISMATCH_LABEL` instead: it is on the line, just not usable.
 
-`id=` is required rather than auto-assigned, unlike the geometry members of §5.5. A member's
-auto-address derives from its role and position inside a body; a `place`'s name is the file the
-compiler writes and the second half of the scope key `east_of=` and `connect` refer to, so an
-invented one would be a name the author never wrote and cannot point at.
+`id=` is required rather than auto-assigned, unlike the geometry members of §9.2. An auto-address
+derives from parent / role / side / level / offset and names nothing outside the body it sits in; a
+`place`'s `id=` is the name `east_of=` and `connect` refer to, and the name its `.nbt` is written
+under (§9.3.4), so an invented one would be a name the author never wrote and cannot point at.
 
 - `use=NAME` must name a top-level `def`. Unknown names fail with `E_UNRESOLVED_PLACE_REF`, with a
   nearest-match suggestion when one fits the standard spell cap (§10.6 of `versioning-editions.md`).

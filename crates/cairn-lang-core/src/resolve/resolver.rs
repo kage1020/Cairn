@@ -54,7 +54,7 @@ use indexmap::IndexMap;
 use serde::Serialize;
 
 use crate::ast::{Value, ValueKind};
-use crate::check::{Diagnostic, DiagnosticCode, DiagnosticNote};
+use crate::check::{Diagnostic, DiagnosticCode, DiagnosticData, DiagnosticNote};
 use crate::edition::Edition;
 use crate::error::Span;
 use crate::ids::{IdError, PlaceId, PortId, SiteName};
@@ -523,48 +523,10 @@ fn resolve_site_placements(
             continue;
         }
 
-        // Report every key the row is short of at once, before any of the
-        // per-key work, so the author fixes one line once instead of
-        // re-running the compiler to discover the next omission. The row is
-        // still walked past this point when it has an `id=`: registering it
-        // in `seen_place_ids` is what keeps a later `east_of=` or a
-        // `connect` naming it behaving as it did — an incomplete row is a
-        // row that failed, not a row that was never written.
-        if let Some(diagnostic) = incomplete_place_diag(member, &site.name) {
-            diagnostics.push(diagnostic);
-        }
-
-        // An unnamed placement has no scope key to register, cannot be
-        // referenced by `east_of` / `north_of`, and is unreachable from any
-        // `connect` row (a dot-ref needs a name on the left side), so there
-        // is nothing further to do with it. The finding above is what makes
-        // that a report rather than a silent skip.
-        let Some(place_id) = member.id.as_deref() else {
+        let Some(place_id) = usable_place_id(member, &site.name, &seen_place_ids, diagnostics)
+        else {
             continue;
         };
-
-        // Validate before the id becomes half of a scope key. `PlaceId`
-        // states the invariants, and `place_scope_key` joins on `::`, so an
-        // id carrying `.` or `:` produces a key nothing can parse back —
-        // which is where the lowering pass used to `expect` and panic.
-        if let Err(err) = PlaceId::new(place_id) {
-            diagnostics.push(invalid_place_id_diag(
-                place_id,
-                &site.name,
-                member.span.clone(),
-                &err,
-            ));
-            continue;
-        }
-        if let Some(first) = seen_place_ids.get(place_id) {
-            diagnostics.push(duplicate_place_id_diag(
-                &site.name,
-                place_id,
-                first,
-                &member.span,
-            ));
-            continue;
-        }
         seen_place_ids.insert(place_id.to_owned(), member.span.clone());
 
         // Validate origin selectors before any cross-scope lookup so the
@@ -572,7 +534,13 @@ fn resolve_site_placements(
         // the rest of the placement unsalvageable — skip the def/theme
         // resolution and the scope insert so the lowering pass does not
         // emit a `.nbt` for a structurally rejected placement.
-        if !validate_place_origin(member, &site.name, place_id, &seen_place_ids, diagnostics) {
+        if !validate_place_origin(
+            member,
+            &site.name,
+            Some(place_id),
+            &seen_place_ids,
+            diagnostics,
+        ) {
             continue;
         }
 
@@ -599,8 +567,7 @@ fn resolve_site_placements(
         let Some(use_name) = use_target else {
             continue;
         };
-        let def = defs.iter().find(|d| d.name == use_name);
-        if def.is_none() {
+        let Some(def) = defs.iter().find(|d| d.name == use_name) else {
             diagnostics.push(unresolved_place_ref_diag(
                 &format!("`use={use_name}` references an unknown def"),
                 member.span.clone(),
@@ -608,8 +575,7 @@ fn resolve_site_placements(
                 def_names.iter().copied(),
             ));
             continue;
-        }
-        let def = def.expect("checked is_none above");
+        };
         used_defs.insert(def.name.clone());
 
         // Same split as `use=` above: absent is `incomplete_place_diag`'s,
@@ -874,39 +840,33 @@ fn validate_port(
     let Some(def_name) = place_def.get(port.place.as_str()) else {
         // `port_ref_from_value` already gates the lift on
         // `seen_place_ids`, so reaching here means `port.place_id` is
-        // registered but its `place_def` entry never landed. The arms
-        // in `resolve_site_placements` that skip the insert split into
-        // two camps:
+        // registered but its `place_def` entry never landed. Every arm in
+        // `resolve_site_placements` that skips the insert reports the row
+        // itself: an absent `use=` / `theme=` (`E_INCOMPLETE_PLACE`), a
+        // mistyped one (`E_TYPE_MISMATCH_LABEL`), a failed origin selector
+        // (`E_INVALID_PLACE_ORIGIN`), a `use=` naming an unknown def
+        // (`E_UNRESOLVED_PLACE_REF`), a `theme=` naming an unknown theme
+        // (`E_UNRESOLVED_THEME_REF`). There is no silent camp left.
         //
-        // - upstream-diagnosed: `validate_place_origin` failure
-        //   (`E_INVALID_PLACE_ORIGIN`), duplicate id
-        //   (`E_DUPLICATE_PLACE_ID`), `use=` naming an unknown def
-        //   (`E_UNRESOLVED_PLACE_REF`), `theme=` naming an unknown
-        //   theme (`E_UNRESOLVED_THEME_REF`). The user already sees a
-        //   targeted error for these.
-        // - intentionally silent: missing `use=` / missing `theme=`
-        //   (multi-theme files). The surface grammar accepts both and
-        //   no `check` pass requires either today.
-        //
-        // Either way the walkway would vanish from the build. Emit a
-        // cascade `W_DEFERRED_CONNECT` so the silent arms surface as
-        // an explicit signal — mirroring the `W_DEFERRED_MEMBER` cascade
-        // used for walkway endpoint cascades in `block_array::lower` —
-        // and so a future refactor that drops a normal-path
-        // `place_def.insert` cannot silently break every walkway.
+        // The cascade is not a duplicate of any of them. Each says which
+        // row is broken; this says which walkway went with it, which
+        // nothing else does — mirroring the `W_DEFERRED_MEMBER` cascade
+        // used for walkway endpoints in `block_array::lower`. It also keeps
+        // a future refactor that drops a normal-path `place_def.insert`
+        // from silently breaking every walkway.
         diagnostics.push(Diagnostic {
             code: DiagnosticCode::DeferredConnect,
             span: port.span.clone(),
             primary: format!(
-                "`connect` target `{place_id}.{port_id}` references a place with no resolved \
-                 def/theme; no walkway laid",
+                "`connect` target `{place_id}.{port_id}` names a `place` row that did not \
+                 resolve; no walkway laid",
                 place_id = port.place,
                 port_id = port.port,
             ),
             notes: vec![DiagnosticNote {
                 span: None,
-                message: "add `use=DEF` and `theme=NAME` to the referenced `place`, or remove \
-                          this `connect` row"
+                message: "that row carries its own diagnostic saying what is wrong with it; \
+                          fixing it is what lays this walkway"
                     .to_owned(),
             }],
             data: None,
@@ -999,10 +959,15 @@ fn validate_port(
 /// `E_INVALID_PLACE_ORIGIN` or `E_UNRESOLVED_PLACE_REF` (target reference)
 /// was emitted — the caller must skip the rest of the placement so the
 /// lowering pass does not voxelise a structurally rejected `place`.
+/// `place_id` is `None` for a row that declared no `id=`. Such a row is
+/// already reported as incomplete and can never be referenced, but its
+/// origin selector is checked anyway so every problem on the line surfaces
+/// together — the same reason the missing-key finding lists all three keys
+/// at once.
 fn validate_place_origin(
     member: &Member,
     site_name: &str,
-    place_id: &str,
+    place_id: Option<&str>,
     seen_place_ids: &IndexMap<String, Span>,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> bool {
@@ -1056,13 +1021,13 @@ fn validate_place_origin(
             ok = false;
             continue;
         };
-        if !seen_place_ids.contains_key(target) || target == place_id {
+        if !seen_place_ids.contains_key(target) || Some(target) == place_id {
             // Suggestion pool is *prior* place ids only — pointing at a
             // later place would let cycles slip in. The same-site exclusion
             // keeps `east_of=self` from showing up as a viable suggestion.
             let prior: Vec<&str> = seen_place_ids
                 .keys()
-                .filter(|id| id.as_str() != place_id)
+                .filter(|id| Some(id.as_str()) != place_id)
                 .map(String::as_str)
                 .collect();
             diagnostics.push(unresolved_place_ref_diag_with_ordering_note(
@@ -1163,63 +1128,155 @@ fn unresolved_theme_ref_diag<'a>(
     }
 }
 
-/// Report a `place` row missing any of the keys it needs to become a
-/// placement, or `None` when it has all three.
+/// Validate everything about a `place` row that can be judged from the row
+/// alone, and yield the id the rest of the loop keys on.
 ///
-/// `id=` names the `.nbt` the compiler writes for this placement
-/// (`spec/components-editing-sites.md` §9.3.4) and is the second half of
-/// the scope key `site::SITE::PLACE` that `east_of=` and `connect` parse
-/// back out — so it cannot be auto-addressed the way §5.5 auto-addresses a
-/// geometry member, whose address derives from its role and position
-/// rather than naming an output file. `use=` names the `def` the placement
-/// instantiates and `theme=` the theme its `mat_slot=` members resolve
-/// against; without either there is no volume to voxelise.
+/// `None` means the row cannot become a placement and every reason has been
+/// reported. Split out from `resolve_site_placements` because it is the one
+/// stretch that needs nothing but the row and the ids seen before it — the
+/// cross-scope work below needs the def list, the theme map, and three
+/// output maps besides.
 ///
-/// Absence is read off the surface keys, not off the lifted values:
-/// `member.id` is `None` both for an absent `id=` and for an `id=3` that
-/// `intent::lower` declined to hoist, and only the first is a missing key.
-fn incomplete_place_diag(member: &Member, site_name: &str) -> Option<Diagnostic> {
-    let absent =
-        |key: &str, lifted_present: bool| !lifted_present && !member.intent_state.contains_key(key);
-    let missing: Vec<&str> = [
-        ("id", member.id.is_some()),
-        ("use", false),
-        ("theme", false),
-    ]
-    .into_iter()
-    .filter(|(key, lifted)| absent(key, *lifted))
-    .map(|(key, _)| key)
-    .collect();
-    if missing.is_empty() {
+/// Ordering is load-bearing. The completeness check runs first so the
+/// author sees every key the row is short of before any consequence of one
+/// of them, and the origin selector is checked on both paths out: without
+/// that, adding the `id=` this function just asked for would surface a
+/// *new* error on the line the author had only now fixed, which is the
+/// re-run cycle listing all three keys at once exists to avoid.
+fn usable_place_id<'a>(
+    member: &'a Member,
+    site_name: &str,
+    seen_place_ids: &IndexMap<String, Span>,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Option<&'a str> {
+    if let Some(diagnostic) = incomplete_place_diag(member, site_name) {
+        diagnostics.push(diagnostic);
+    }
+
+    // An unnamed placement has nothing to register, cannot be referenced by
+    // `east_of` / `north_of`, and is unreachable from any `connect` row (a
+    // dot-ref needs a name on the left side), so there is nothing further to
+    // do with it once its own line has been judged.
+    let Some(place_id) = member.id.as_deref() else {
+        validate_place_origin(member, site_name, None, seen_place_ids, diagnostics);
+        return None;
+    };
+
+    // Validate before the id becomes half of a scope key. `PlaceId` states
+    // the invariants, and `place_scope_key` joins on `::`, so an id carrying
+    // `.` or `:` produces a key nothing can parse back — which is where the
+    // lowering pass used to `expect` and panic.
+    if let Err(err) = PlaceId::new(place_id) {
+        diagnostics.push(invalid_place_id_diag(
+            place_id,
+            site_name,
+            member.span.clone(),
+            &err,
+        ));
         return None;
     }
-    let quoted: Vec<String> = missing.iter().map(|key| format!("`{key}=`")).collect();
-    // "a, b, and c" rather than "a, b, c": the list is read aloud in a
-    // sentence, and up to three keys fit without wrapping.
-    let listed = match quoted.split_last() {
-        Some((last, [])) => last.clone(),
-        Some((last, head)) => format!("{}, and {last}", head.join(", ")),
-        None => unreachable!("the empty case returned above"),
-    };
-    let mut notes = Vec::new();
-    for key in &missing {
-        notes.push(DiagnosticNote {
-            span: None,
-            message: match *key {
-                "id" => "`id=` names the `.nbt` this placement is written to, and is the half of the scope key that `east_of=` and `connect` refer to — the compiler has no name to invent for it".to_owned(),
-                "use" => "`use=DEF` names the `def` this placement instantiates".to_owned(),
-                _ => "`theme=NAME` names the theme this placement's `mat_slot=` members resolve against".to_owned(),
-            },
-        });
+    if let Some(first) = seen_place_ids.get(place_id) {
+        diagnostics.push(duplicate_place_id_diag(
+            site_name,
+            place_id,
+            first,
+            &member.span,
+        ));
+        return None;
     }
+    Some(place_id)
+}
+
+/// Keys a `place` row must declare, paired with what each one is for.
+///
+/// Ordered as an author writes them, and the order is load-bearing twice
+/// over: it fixes both the sentence the message builds and the `missing`
+/// list in the structured payload, so the same source always renders the
+/// same text.
+///
+/// Carrying the purpose here rather than in a `match` on the key is what
+/// keeps a fourth required key (`at=` is the realistic candidate) from
+/// inheriting some other key's note through a wildcard arm.
+const REQUIRED_PLACE_KEYS: &[(&str, &str)] = &[
+    (
+        "id",
+        "`id=` is the name every `east_of=` and `connect` refers to, and the name this placement's `.nbt` is written under — the compiler has no name to invent for it",
+    ),
+    (
+        "use",
+        "`use=DEF` names the `def` this placement instantiates",
+    ),
+    (
+        "theme",
+        "`theme=NAME` names the theme this placement's `mat_slot=` members resolve against",
+    ),
+];
+
+/// Whether the row carries `key=` at all, regardless of what its value is.
+///
+/// `intent::lower` hoists a label-shaped `id=` out of `intent_state` onto
+/// [`Member::id`], so `id=b` lands in one of the two and `id=3` — not
+/// label-shaped, so not hoisted — lands in the other. Every other `place`
+/// key stays in `intent_state` either way. Asking both is what keeps a
+/// mistyped key from being reported as an absent one, which would send the
+/// author to add a key already on the line.
+fn declares(member: &Member, key: &str) -> bool {
+    member.intent_state.contains_key(key) || (key == "id" && member.id.is_some())
+}
+
+/// Report a `place` row missing any of the keys it needs to become a
+/// placement, or `None` when it declares all three.
+///
+/// `id=` names the `.nbt` the compiler writes for this placement
+/// (`spec/components-editing-sites.md` §9.3.4) and is the name `east_of=`
+/// and `connect` refer to — so it cannot be auto-assigned the way
+/// `spec/components-editing-sites.md` §9.2 auto-assigns a geometry
+/// member's address, which derives from parent / role / side / level /
+/// offset and names nothing outside the body it sits in. `use=` names the
+/// `def` the placement instantiates and `theme=` the theme its `mat_slot=`
+/// members resolve against; without either there is no volume to voxelise.
+fn incomplete_place_diag(member: &Member, site_name: &str) -> Option<Diagnostic> {
+    let missing: Vec<&(&str, &str)> = REQUIRED_PLACE_KEYS
+        .iter()
+        .filter(|(key, _)| !declares(member, key))
+        .collect();
+    let quoted: Vec<String> = missing.iter().map(|(key, _)| format!("`{key}=`")).collect();
+    // The serial comma is a three-or-more rule, so two keys join bare.
+    // Returning through `split_last` rather than an early `is_empty` guard
+    // keeps the "nothing missing" exit and the "nothing to join" exit as
+    // one branch — and keeps a `place` constructor from panicking while
+    // reporting somebody else's error.
+    let listed = match quoted.split_last()? {
+        (last, []) => last.clone(),
+        (last, [only]) => format!("{only} and {last}"),
+        (last, head) => format!("{}, and {last}", head.join(", ")),
+    };
+    // Named when the row has one, matching `E_INVALID_PLACE_ORIGIN` and
+    // `E_DUPLICATE_PLACE_ID`: two incomplete rows in one site would
+    // otherwise render byte-identical primaries.
+    let subject = member
+        .id
+        .as_deref()
+        .map_or_else(|| "`place`".to_owned(), |id| format!("`place id={id}`"));
     Some(Diagnostic {
         code: DiagnosticCode::IncompletePlace,
         span: member.span.clone(),
         primary: format!(
-            "`place` in site `{site_name}` is missing {listed}, so no placement is built for it",
+            "{subject} in site `{site_name}` is missing {listed}, so no placement is built for it",
         ),
-        notes,
-        data: None,
+        notes: missing
+            .iter()
+            .map(|(_, purpose)| DiagnosticNote {
+                span: None,
+                message: (*purpose).to_owned(),
+            })
+            .collect(),
+        // The key set is what a quick-fix needs, and `spec/lint.md` §11.2
+        // asks consumers to match on `(code, data.kind)` rather than parse
+        // the prose it is also rendered into.
+        data: Some(DiagnosticData::IncompletePlace {
+            missing: missing.iter().map(|(key, _)| (*key).to_owned()).collect(),
+        }),
     })
 }
 
@@ -1262,11 +1319,18 @@ fn invalid_place_id_diag(place_id: &str, site_name: &str, span: Span, err: &IdEr
     }
 }
 
-fn invalid_place_origin_diag(place_id: &str, span: Span, message: &str) -> Diagnostic {
+fn invalid_place_origin_diag(place_id: Option<&str>, span: Span, message: &str) -> Diagnostic {
+    // A row with no `id=` is already reported as incomplete; it still gets
+    // this finding, and quoting a name it does not have would be worse than
+    // quoting none.
+    let subject = place_id.map_or_else(
+        || "`place`".to_owned(),
+        |place_id| format!("`place id={place_id}`"),
+    );
     Diagnostic {
         code: DiagnosticCode::InvalidPlaceOrigin,
         span,
-        primary: format!("invalid origin selector on `place id={place_id}`: {message}"),
+        primary: format!("invalid origin selector on {subject}: {message}"),
         notes: vec![],
         data: None,
     }

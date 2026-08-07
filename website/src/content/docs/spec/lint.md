@@ -47,8 +47,9 @@ first-class parts of the spec; messages MUST be in a shape that feeds the self-c
   - `E_TYPE_MISMATCH_LABEL` — a label-typed key's value is not a label
     (identifier or string). The label-typed keys are `id=`, `class=`,
     `mat_slot=`, `use=`, and `theme=`. For the last two the mistyped
-    value is otherwise indistinguishable from the key being absent,
-    which is legal, so the whole `place` row would vanish unremarked.
+    value is indistinguishable at the resolver from the key being absent;
+    both are errors, and this is the one that says the key is on the line
+    but unusable (the other is `E_INCOMPLETE_PLACE`).
   - `E_TYPE_MISMATCH_SIZE`  — `size=` value is not a `WxH` literal.
   - `E_CONNECT_ARITY` — `connect` row whose positional shape is not
     `FROM.PORT to TO.PORT`: a half is missing, the literal `to`
@@ -112,6 +113,7 @@ evolving — additions for new codes are strictly additive, so consumers should 
 | Code                 | `data` payload                                                   |
 | -------------------- | ---------------------------------------------------------------- |
 | `W_WALKWAY_BLOCKED`  | `{ "kind": "walkway_blocked", "skipped": <u64> }` — number of cells along the fallback L-shaped path that overlapped an existing structure and were dropped from the lay (emitted only when the detour search found no unobstructed route). |
+| `E_INCOMPLETE_PLACE` | `{ "kind": "incomplete_place", "missing": ["id", "use", "theme"] }` — the keys the `place` row does not declare, without the trailing `=`, in the order the message lists them. Always non-empty. |
 
 Codes not listed above omit `data` entirely; reading `entry.data` returns `undefined` and the JSON
 key is absent (it does not serialise as `null`). New `data` entries land alongside the code that
