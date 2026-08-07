@@ -91,4 +91,9 @@ Metadata MAY be placed in headers rather than in the semantic body:
 ## 5.5 IDs, classes, addresses
 - Important members MAY declare `id=`. `class=` groups members.
 - Unspecified members are auto-assigned a stable, meaning-based address by the compiler (editing model
-  in [Components, Editing, and Multi-building](components-editing-sites)).
+  in [Components, Editing, and Multi-building](components-editing-sites) §9.2).
+- A `place` row is the exception: its `id=` is required, not auto-assigned, and omitting it is
+  `E_INCOMPLETE_PLACE` (§9.3.3). An auto-address derives from parent / role / side / level / offset
+  and names nothing outside the body it sits in; a `place`'s `id=` is what `east_of=` and `connect`
+  refer to and what its `.nbt` is written under, so an invented one would be a name the author never
+  wrote and cannot point at.

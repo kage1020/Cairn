@@ -182,6 +182,16 @@ const RESOLVER_FIXTURES: &[(&str, Source)] = &[
         ),
     ),
     (
+        // The site half of the place-row family: three keys, one code, and
+        // the row is dropped from the build for each of them.
+        "E_INCOMPLETE_PLACE",
+        Source::WithPrologue(
+            "def hut size=3x3:\n  floor id=floor mat_slot=floor\n\
+             \nsite s:\n  place id=a use=hut theme=t at=origin\n\
+             \x20\x20place id=b theme=t east_of=a gap=4\n",
+        ),
+    ),
+    (
         "E_UNRESOLVED_SLOT",
         Source::WithPrologue("struct s size=5x5\n  floor mat_slot=nosuchslot\n"),
     ),

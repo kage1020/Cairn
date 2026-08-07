@@ -47,8 +47,9 @@ first-class parts of the spec; messages MUST be in a shape that feeds the self-c
   - `E_TYPE_MISMATCH_LABEL` — a label-typed key's value is not a label
     (identifier or string). The label-typed keys are `id=`, `class=`,
     `mat_slot=`, `use=`, and `theme=`. For the last two the mistyped
-    value is otherwise indistinguishable from the key being absent,
-    which is legal, so the whole `place` row would vanish unremarked.
+    value is indistinguishable at the resolver from the key being absent;
+    both are errors, and this is the one that says the key is on the line
+    but unusable (the other is `E_INCOMPLETE_PLACE`).
   - `E_TYPE_MISMATCH_SIZE`  — `size=` value is not a `WxH` literal.
   - `E_CONNECT_ARITY` — `connect` row whose positional shape is not
     `FROM.PORT to TO.PORT`: a half is missing, the literal `to`
@@ -60,6 +61,11 @@ first-class parts of the spec; messages MUST be in a shape that feeds the self-c
     cursor, the offending separator, the offending endpoint, or the run
     of trailing extras. Each endpoint is reported separately: the two
     ends are independent fix sites.
+  - `E_INCOMPLETE_PLACE` — a `place` row omits `id=`, `use=`, or
+    `theme=` (§9.3). The row cannot become a placement without all three,
+    so it is dropped from the build; the message names every key the row
+    is short of. A key that is *present but mistyped* is
+    `E_TYPE_MISMATCH_LABEL` instead — it is on the line, just not a label.
 - **Geometry**: AABB expansion detecting "window outside the wall", "door hanging in mid-air".
 - **attachment**: whether a frame/painting/sign/button/lever/torch is on a valid attachment face
   (detect attachment to air).
@@ -107,6 +113,7 @@ evolving — additions for new codes are strictly additive, so consumers should 
 | Code                 | `data` payload                                                   |
 | -------------------- | ---------------------------------------------------------------- |
 | `W_WALKWAY_BLOCKED`  | `{ "kind": "walkway_blocked", "skipped": <u64> }` — number of cells along the fallback L-shaped path that overlapped an existing structure and were dropped from the lay (emitted only when the detour search found no unobstructed route). |
+| `E_INCOMPLETE_PLACE` | `{ "kind": "incomplete_place", "missing": ["id", "use", "theme"] }` — the keys the `place` row does not declare, without the trailing `=`, in the order the message lists them. Always non-empty. |
 
 Codes not listed above omit `data` entirely; reading `entry.data` returns `undefined` and the JSON
 key is absent (it does not serialise as `null`). New `data` entries land alongside the code that

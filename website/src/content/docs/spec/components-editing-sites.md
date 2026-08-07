@@ -69,6 +69,17 @@ Combining selectors (`at` + `east_of`, or `east_of` + `north_of`) is rejected wi
 `E_INVALID_PLACE_ORIGIN`; using `at=` with anything other than `origin` is the same error.
 
 ### 9.3.3 Cross-scope references
+Every `place` row declares `id=`, `use=`, and `theme=`. A row short of any of them cannot become a
+placement — there is no name for its `.nbt` (§9.3.4), no `def` to instantiate, or no theme to
+resolve its `mat_slot=` members against — so it is `E_INCOMPLETE_PLACE` and the row is dropped from
+the build. The message names every key the row is short of. A key that is present but not a label
+(`use=3`) is `E_TYPE_MISMATCH_LABEL` instead: it is on the line, just not usable.
+
+`id=` is required rather than auto-assigned, unlike the geometry members of §9.2. An auto-address
+derives from parent / role / side / level / offset and names nothing outside the body it sits in; a
+`place`'s `id=` is the name `east_of=` and `connect` refer to, and the name its `.nbt` is written
+under (§9.3.4), so an invented one would be a name the author never wrote and cannot point at.
+
 - `use=NAME` must name a top-level `def`. Unknown names fail with `E_UNRESOLVED_PLACE_REF`, with a
   nearest-match suggestion when one fits the standard spell cap (§10.6 of `versioning-editions.md`).
 - `theme=NAME` must name a `theme` declared in the same file. Unknown themes fail with
