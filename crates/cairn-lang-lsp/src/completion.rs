@@ -34,7 +34,7 @@ enum Context {
     /// First word of an indent-0 line: a top-level item keyword.
     TopLevelKeyword { replace: Span },
     /// First word of an indented line inside a `struct`/`def`/`site` (or
-    /// deeper `level`/`room`) body: a member command keyword.
+    /// a deeper `level`) body: a member command keyword.
     MemberKeyword { replace: Span },
     /// First word of an indented line inside a `theme` body: `slot` or a
     /// member keyword opening a selector rule.
@@ -498,7 +498,7 @@ mod tests {
 
     #[test]
     fn nested_block_body_offers_member_keywords() {
-        // Deeper nesting inside a struct (`level`, `room`) still resolves
+        // Deeper nesting inside a struct (`level`) still resolves
         // to the member-command set: the enclosing-block walk stops at the
         // nearest shallower line, which is not a `theme` header.
         let source = "struct t size=5x5\n  level h=4\n    flo";

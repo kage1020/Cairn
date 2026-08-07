@@ -11,7 +11,7 @@ use std::ops::{Deref, DerefMut};
 use indexmap::IndexMap;
 use serde::Serialize;
 
-use crate::ast::Value;
+use crate::ast::{Value, ValueKind};
 use crate::error::Span;
 
 use super::{AssertIr, LogicBinding};
@@ -114,6 +114,25 @@ pub enum MemberRole {
     /// validation pass reports these via `E_UNKNOWN_KEYWORD`; lower itself
     /// never fails.
     Other(String),
+}
+
+impl Member {
+    /// Read `key=` as a non-negative `u32`, or `None` when the argument
+    /// is absent, is not an integer, is negative, or would not fit.
+    ///
+    /// Shared rather than re-read per pass: `block_array` places a
+    /// `level`'s children at this offset and `check::nesting` reports a
+    /// `level` that has none, so the two have to agree on what counts
+    /// as a usable value. `u32::try_from` failing on overflow is the
+    /// point — no member should land at `u32::MAX` because the author
+    /// asked for `2^33`.
+    #[must_use]
+    pub fn nonneg_u32(&self, key: &str) -> Option<u32> {
+        match &self.intent_state.get(key)?.value.kind {
+            ValueKind::Int(v) if *v >= 0 => u32::try_from(*v).ok(),
+            _ => None,
+        }
+    }
 }
 
 impl MemberRole {

@@ -1517,17 +1517,14 @@ fn height_value(member: &Member) -> Option<u32> {
     }
 }
 
+/// Read `key=` as a non-negative `u32`.
+///
+/// Thin wrapper over [`Member::nonneg_u32`] so this file keeps its
+/// local vocabulary; the rule itself lives on the member because
+/// `check::nesting` decides whether a `level` has a usable offset and
+/// has to agree with where the children are placed.
 fn nonneg_int(member: &Member, key: &str) -> Option<u32> {
-    let raw = member.intent_state.get(key)?;
-    match &raw.value.kind {
-        // `u32::try_from` fails on values that would silently truncate to
-        // `u32::MAX`. Returning `None` on overflow lets the caller decide
-        // between "absent" and "present but invalid" via the same defer
-        // path they already use for non-integer values — no cell should
-        // ever land at `u32::MAX` because the author asked for `2^33`.
-        ValueKind::Int(v) if *v >= 0 => u32::try_from(*v).ok(),
-        _ => None,
-    }
+    member.nonneg_u32(key)
 }
 
 /// Result of reading a non-negative integer `key=` with defer semantics.
@@ -3096,7 +3093,7 @@ fn diag_def_no_size(def: &DefIr) -> Diagnostic {
 }
 
 fn diag_deferred_member(member: &Member) -> Diagnostic {
-    let role = role_name(&member.role);
+    let role = MemberRole::keyword(&member.role);
     diag_deferred_member_reason(
         member,
         &format!("`{role}` is not yet handled by block-array lowering"),
@@ -3181,23 +3178,6 @@ fn member_or_slot_span(member: &Member, slot: &ValueWithSpan) -> Span {
         member.span.clone()
     } else {
         slot.span.clone()
-    }
-}
-
-fn role_name(role: &MemberRole) -> &str {
-    match role {
-        MemberRole::Floor => "floor",
-        MemberRole::Walls => "walls",
-        MemberRole::Door => "door",
-        MemberRole::Window => "window",
-        MemberRole::Roof => "roof",
-        MemberRole::Stair => "stair",
-        MemberRole::Level => "level",
-        MemberRole::PressurePlate => "pressure_plate",
-        MemberRole::Circuit => "circuit",
-        MemberRole::Place => "place",
-        MemberRole::Connect => "connect",
-        MemberRole::Other(name) => name.as_str(),
     }
 }
 

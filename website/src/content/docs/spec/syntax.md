@@ -15,8 +15,9 @@ window front G 2 2 2x2                                            # forbidden (p
 ```
 
 ## 5.2 Nesting
-Keep nesting shallow (`struct` / `def` / `level` / `room` / `theme` / `site`). Deep nesting increases
-LLM generation errors.
+Keep nesting shallow (`struct` / `def` / `level` / `theme` / `site`). Deep nesting increases
+LLM generation errors. (`room` is not in this list: it is still open — see
+[Open Issues](open-issues) — so writing one today is `E_UNKNOWN_KEYWORD`.)
 
 Inside a body, `level y=N` is the only member that groups other members, and only in a `struct` or a
 `def`. A `site` body is a flat list of `place` and `connect` rows with no grouping construct at all.

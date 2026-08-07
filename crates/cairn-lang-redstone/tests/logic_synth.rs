@@ -208,6 +208,43 @@ struct s size=1x1
     );
 }
 
+/// Signals reach synthesis from a body `check::nesting` reports as
+/// unsupported, which is why `E_UNSUPPORTED_NESTING` says the members
+/// produce no *blocks* rather than that they are gone.
+///
+/// `collect_member` recurses through every member, not only `level`, so
+/// this holds for any parent. The claim lives in that diagnostic's note,
+/// so something outside `cairn-lang-core` has to hold it — the note
+/// would otherwise be prose no test can contradict.
+#[test]
+fn ac6b_signals_reach_synthesis_from_a_body_that_produces_no_blocks() {
+    let source = "@cairn 2026.06
+
+struct s size=1x1
+  walls class=outer mat_slot=wall height=3
+    pressure_plate id=p at=front.outside offset=0 y=0 -> sig.step
+    logic sig.open = sig.step
+    door id=front side=front at=center
+    door[id=front] opened_by=sig.open
+";
+    let out = synth_source(source);
+    let entry = out
+        .scoped
+        .scopes
+        .iter()
+        .find(|e| e.name == "s")
+        .expect("a body under a non-`level` member still produces a scope entry");
+    assert_eq!(entry.ir.inputs.len(), 1);
+    assert_eq!(entry.ir.outputs.len(), 1);
+    assert!(
+        out.diagnostics
+            .iter()
+            .all(|d| d.severity != Severity::Error),
+        "synthesis must not raise errors: {:?}",
+        out.diagnostics,
+    );
+}
+
 #[test]
 fn ac6_nested_level_body_collects_signals() {
     let source = "\

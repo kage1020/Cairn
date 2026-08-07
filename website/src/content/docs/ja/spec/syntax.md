@@ -15,8 +15,9 @@ window front G 2 2 2x2                                            # 禁止 (位�
 ```
 
 ## 5.2 ネスト
-ネストは浅く保ちます (`struct` / `def` / `level` / `room` / `theme` / `site`)。深いネストは LLM の生成
-ミスを増やします。
+ネストは浅く保ちます (`struct` / `def` / `level` / `theme` / `site`)。深いネストは LLM の生成
+ミスを増やします。(`room` はこの一覧にありません。まだ未決の概念であり
+[未解決課題](open-issues) を参照 — 現時点で書くと `E_UNKNOWN_KEYWORD` になります。)
 
 本体の内側で他のメンバをグループ化できるのは `level y=N` だけで、しかも `struct` / `def` の中に限り
 ます。`site` の本体は `place` / `connect` 行のフラットな並びで、グループ化構文はありません。それ以外
