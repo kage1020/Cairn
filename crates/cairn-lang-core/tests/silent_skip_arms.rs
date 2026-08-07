@@ -54,13 +54,22 @@
 //!    both. `check::type_mismatch` tells them apart for the user; what
 //!    is pinned here is that the resolver does not, so a guard that
 //!    splits them has to say so.
-//! 9. **Top-level names declared twice** — `resolve` binds the first and
-//!    skips the rest without a diagnostic, because
-//!    `check::duplicate` owns `E_DUPLICATE_ITEM` and can anchor it on
-//!    the name token, which the IR no longer carries. Same division of
-//!    labour as the `connect` arms; pinned here so a library caller
-//!    that skips `check` has the skip written down rather than
-//!    discovered.
+//! 9. **`use=` / `theme=` absent, with no `connect` naming the place** —
+//!    the half that is still uncovered. The cascade in (2) and (3) only
+//!    fires because a `connect` targets the skipped place; with no such
+//!    row the placement is dropped from the build in complete silence
+//!    and `cairn check` exits 0. Pinned as the *current* behaviour, not
+//!    as the intended one — `spec/lint.md` §11.3 calls implicit dropping
+//!    an error, and closing it is a language change of its own. A test
+//!    that has to be edited to close the gap is the point: the gap is
+//!    then a decision rather than something the next reader discovers.
+//! 10. **Top-level names declared twice** — `resolve` binds the first and
+//!     skips the rest without a diagnostic, because
+//!     `check::duplicate` owns `E_DUPLICATE_ITEM` and can anchor it on
+//!     the name token, which the IR no longer carries. Same division of
+//!     labour as the `connect` arms; pinned here so a library caller
+//!     that skips `check` has the skip written down rather than
+//!     discovered.
 
 use cairn_lang_core::block_array::{BlockArrayIr, lower_to_block_array};
 use cairn_lang_core::check::{Diagnostic, DiagnosticCode, Severity};
@@ -91,7 +100,7 @@ fn count(diagnostics: &[Diagnostic], code: DiagnosticCode) -> usize {
 fn errors(diagnostics: &[Diagnostic]) -> usize {
     diagnostics
         .iter()
-        .filter(|d| d.severity == Severity::Error)
+        .filter(|d| d.severity() == Severity::Error)
         .count()
 }
 
@@ -531,6 +540,58 @@ connect anchor.entry to silent.entry path=@gravel\n"
             count(&outcome.diagnostics, DiagnosticCode::DeferredConnect),
             1,
             "the same cascade an absent `use=` produces must fire for `{row}`",
+        );
+    }
+}
+
+/// An incomplete `place` with nothing pointing at it is dropped from the
+/// build without a word about the row itself.
+///
+/// The cascade the two tests above rely on is a *downstream* signal: it
+/// fires from `validate_port` when a `connect` names the skipped place. A
+/// site with no `connect` gets nothing that names the row — not from
+/// `resolve`, not from lowering, and so not from `cairn check` either.
+/// (`W_UNUSED_DEF` does fire on the `use=`-less half, but it is about the
+/// def going unreferenced, points at the def's own span, and does not fire
+/// at all when the missing key is `theme=`.) Pinned as the *current*
+/// behaviour, not the intended one — `spec/lint.md` §11.3 calls implicit
+/// dropping an error, and closing this is a language change of its own.
+/// A test that has to be edited to close the gap is the point: the gap is
+/// then a decision rather than something the next reader discovers.
+#[test]
+fn an_incomplete_place_with_no_connect_is_dropped_without_naming_the_row() {
+    for row in [
+        "place id=lonely           theme=plain at=origin",
+        "place id=lonely use=hut               at=origin",
+    ] {
+        let src = format!(
+            "{PROLOGUE}site solo:
+  {row}
+"
+        );
+        let outcome = run(&src);
+        assert_eq!(
+            errors(&outcome.diagnostics),
+            0,
+            "no error reports the incomplete row today, for `{row}`, got: {:#?}",
+            outcome.diagnostics,
+        );
+        assert!(
+            !outcome
+                .diagnostics
+                .iter()
+                .any(|d| d.primary.contains("lonely")),
+            "and nothing names it, for `{row}`, got: {:#?}",
+            outcome.diagnostics,
+        );
+
+        let module = parse(&src).expect("parse");
+        let ir = lower(&module);
+        let resolution = resolve(&ir, None);
+        let built = lower_to_block_array(&ir, &resolution, None);
+        assert!(
+            built.placements.is_empty(),
+            "and the placement is gone from the build, for `{row}`",
         );
     }
 }

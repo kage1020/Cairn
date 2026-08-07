@@ -459,7 +459,7 @@ fn crossing_congestion_diagnostic(
     diag = diag.with_footer(
         "Fix: increase `void` so bridges have a y-layer above the plane, enlarge `region=` so fewer wires cross, or split the logic across multiple `circuit` blocks",
     );
-    debug_assert_eq!(diag.severity, Severity::Error);
+    debug_assert_eq!(diag.severity(), Severity::Error);
     diag
 }
 
@@ -503,7 +503,7 @@ fn buffer_collision_diagnostic(
     diag = diag.with_footer(
         "Fix: increase `void` so buffers can fall onto a bridge layer, or enlarge `region=` so buffer candidates have room on the plane",
     );
-    debug_assert_eq!(diag.severity, Severity::Error);
+    debug_assert_eq!(diag.severity(), Severity::Error);
     diag
 }
 
@@ -523,7 +523,7 @@ fn missing_region_diagnostic(entry: &ScopedPlacementIrEntry) -> Diagnostic {
     diag = diag.with_footer(
         "Fix: add a `circuit region=<label> void=<N>` line to the enclosing scope, or run `--stage placement` first to see the underlying error",
     );
-    debug_assert_eq!(diag.severity, Severity::Error);
+    debug_assert_eq!(diag.severity(), Severity::Error);
     diag
 }
 

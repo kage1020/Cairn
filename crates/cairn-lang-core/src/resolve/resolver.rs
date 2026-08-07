@@ -516,7 +516,10 @@ fn resolve_site_placements(
             continue;
         }
         if !matches!(member.role, MemberRole::Place) {
-            // Other site-local members (logic, assert) are out of scope here.
+            // Everything that reaches here is a member a `site` body has no
+            // reader for — `logic` and `assert` are not members at all and
+            // live in `SiteIr`'s own fields. `check::member_scope` reports
+            // this row as `E_MISPLACED_MEMBER`; this arm is why it had to.
             continue;
         }
 
@@ -581,19 +584,22 @@ fn resolve_site_placements(
         // without committing to a def (e.g. as a deliberate
         // work-in-progress marker). No `check` pass currently requires
         // `use=`, so emitting a resolver-level error here would tighten
-        // the language without an M3 motivation. A `use=` that is
-        // *present* but not label-shaped reaches this same arm, since
-        // `as_label_str` answers `None` either way; that case is
-        // `check::type_mismatch`'s `E_TYPE_MISMATCH_LABEL`, which is why
-        // the arm can stay silent without leaving a mistyped value
-        // undiagnosed. Skipping the rest of
-        // the pipeline prevents `place_def` and the scope map from
-        // carrying a half-built entry, so the lowering pass below does
-        // not emit a `.nbt` for a placement with no def. Downstream
-        // `connect` rows that target this place surface the gap via
-        // `validate_port`'s `place_def` miss arm, which emits
-        // `W_DEFERRED_CONNECT` so the user sees *why* the walkway was
-        // not laid instead of watching it vanish silently.
+        // the language without an M3 motivation.
+        //
+        // Two inputs reach this arm and only one of them is covered.
+        // A `use=` that is *present* but not label-shaped answers `None`
+        // through `as_label_str` exactly as an absent key does; that half
+        // is `check::type_mismatch`'s `E_TYPE_MISMATCH_LABEL`. The absent
+        // half is still a silent drop with no owner: `place id=a at=origin`
+        // builds nothing and `cairn check` exits 0, and unless a `connect`
+        // names the place, the `W_DEFERRED_CONNECT` cascade below never
+        // fires either. `spec/lint.md` §11.3 says that should be an error;
+        // giving it one is a language change of its own, tracked
+        // separately from the mistyped case.
+        //
+        // Skipping the rest of the pipeline prevents `place_def` and the
+        // scope map from carrying a half-built entry, so the lowering pass
+        // below does not emit a `.nbt` for a placement with no def.
         let Some(use_name) = use_target else {
             continue;
         };
@@ -610,22 +616,24 @@ fn resolve_site_placements(
         let def = def.expect("checked is_none above");
         used_defs.insert(def.name.clone());
 
-        // INVARIANT(structural): `theme=` is intentionally optional on a
-        // per-place basis only for single-theme files — the site-wide
-        // heuristic in `resolve_struct_or_def` defaults to the lone
-        // theme there, so the user can omit `theme=` without losing
-        // coverage. On multi-theme files an omitted `theme=` is a known
-        // silent gap: no `check` pass requires it and no targeted
-        // diagnostic exists yet (an `E_PLACE_THEME_REQUIRED` pass would
-        // be the correct long-term home and is tracked separately). As
-        // with `use=` above, a `theme=` that is present but not
-        // label-shaped lands here too and is owned by
-        // `check::type_mismatch`, not by this arm.
-        // Skipping the rest of the pipeline here leaves `place_def`
-        // unset for this place; downstream `connect` rows targeting it
-        // surface the gap via the `W_DEFERRED_CONNECT` cascade in
-        // `validate_port`, which keeps the multi-theme silent skip
-        // visible until the dedicated check pass lands.
+        // INVARIANT(structural): an omitted `theme=` on a `place` row is a
+        // silent drop with no owner, on single- and multi-theme files
+        // alike. The site-wide heuristic in `resolve_struct_or_def`
+        // defaults a *scope* to the lone theme, but this arm returns
+        // before any scope is built, so the placement is skipped either
+        // way: `place id=a use=hut at=origin` lowers nothing and
+        // `cairn check` exits 0. An `E_PLACE_THEME_REQUIRED` pass is the
+        // correct long-term home and is tracked separately.
+        //
+        // As with `use=` above, a `theme=` that is present but not
+        // label-shaped lands here too — that half is
+        // `check::type_mismatch`'s, and only that half.
+        //
+        // Skipping the rest of the pipeline here leaves `place_def` unset
+        // for this place; a downstream `connect` targeting it surfaces the
+        // gap via the `W_DEFERRED_CONNECT` cascade in `validate_port`,
+        // which is the only signal either arm produces — and only when
+        // some `connect` names the place.
         let Some(theme_name) = theme_target else {
             continue;
         };
@@ -743,7 +751,6 @@ fn resolve_connect_row(
     let Some(path) = path else {
         diagnostics.push(Diagnostic {
             code: DiagnosticCode::MissingPathMaterial,
-            severity: DiagnosticCode::MissingPathMaterial.severity(),
             span: member.span.clone(),
             primary: "`connect` requires a `path=` material to lay the walkway".to_owned(),
             notes: vec![DiagnosticNote {
@@ -765,7 +772,6 @@ fn resolve_connect_row(
     if !matches!(path.value.kind, ValueKind::Token(_)) {
         diagnostics.push(Diagnostic {
             code: DiagnosticCode::MissingPathMaterial,
-            severity: DiagnosticCode::MissingPathMaterial.severity(),
             span: path.span.clone(),
             primary: format!(
                 "`connect path=` must be a material token like `@gravel`, got {}",
@@ -902,7 +908,6 @@ fn validate_port(
         // `place_def.insert` cannot silently break every walkway.
         diagnostics.push(Diagnostic {
             code: DiagnosticCode::DeferredConnect,
-            severity: DiagnosticCode::DeferredConnect.severity(),
             span: port.span.clone(),
             primary: format!(
                 "`connect` target `{place_id}.{port_id}` references a place with no resolved \
@@ -966,7 +971,6 @@ fn validate_port(
             });
             diagnostics.push(Diagnostic {
                 code: DiagnosticCode::UnresolvedPort,
-                severity: DiagnosticCode::UnresolvedPort.severity(),
                 span: port.span.clone(),
                 primary: format!(
                     "port `{port_id}` is not declared by `def {def_name}` (used by `place {place_id}`)",
@@ -983,7 +987,6 @@ fn validate_port(
         n => {
             diagnostics.push(Diagnostic {
                 code: DiagnosticCode::AmbiguousPort,
-                severity: DiagnosticCode::AmbiguousPort.severity(),
                 span: port.span.clone(),
                 primary: format!(
                     "port `{port_id}` matches {n} members of `def {def_name}`; the reference is ambiguous",
@@ -1093,7 +1096,6 @@ fn check_unused_defs(defs: &[DefIr], used: &HashSet<String>, diagnostics: &mut V
         }
         diagnostics.push(Diagnostic {
             code: DiagnosticCode::UnusedDef,
-            severity: DiagnosticCode::UnusedDef.severity(),
             span: def.span.clone(),
             primary: format!(
                 "def `{name}` is never referenced by a `place use={name}`",
@@ -1124,7 +1126,6 @@ fn unresolved_place_ref_diag<'a>(
     }
     Diagnostic {
         code: DiagnosticCode::UnresolvedPlaceRef,
-        severity: DiagnosticCode::UnresolvedPlaceRef.severity(),
         span,
         primary: primary.to_owned(),
         notes,
@@ -1167,7 +1168,6 @@ fn unresolved_theme_ref_diag<'a>(
     }
     Diagnostic {
         code: DiagnosticCode::UnresolvedThemeRef,
-        severity: DiagnosticCode::UnresolvedThemeRef.severity(),
         span,
         primary: format!("`theme={theme}` is not a declared theme"),
         notes,
@@ -1183,7 +1183,6 @@ fn duplicate_place_id_diag(
 ) -> Diagnostic {
     Diagnostic {
         code: DiagnosticCode::DuplicatePlaceId,
-        severity: DiagnosticCode::DuplicatePlaceId.severity(),
         span: second.clone(),
         primary: format!("duplicate `id={place_id}` in site `{site_name}`"),
         notes: vec![DiagnosticNote {
@@ -1201,7 +1200,6 @@ fn invalid_place_id_diag(place_id: &str, site_name: &str, span: Span, err: &IdEr
     };
     Diagnostic {
         code: DiagnosticCode::InvalidPlaceId,
-        severity: DiagnosticCode::InvalidPlaceId.severity(),
         span,
         primary: format!(
             "`place id={place_id}` in site `{site_name}` is not a usable id: {reason}"
@@ -1219,7 +1217,6 @@ fn invalid_place_id_diag(place_id: &str, site_name: &str, span: Span, err: &IdEr
 fn invalid_place_origin_diag(place_id: &str, span: Span, message: &str) -> Diagnostic {
     Diagnostic {
         code: DiagnosticCode::InvalidPlaceOrigin,
-        severity: DiagnosticCode::InvalidPlaceOrigin.severity(),
         span,
         primary: format!("invalid origin selector on `place id={place_id}`: {message}"),
         notes: vec![],
@@ -1431,7 +1428,6 @@ fn unresolved_slot_diag(
     });
     Diagnostic {
         code: DiagnosticCode::UnresolvedSlot,
-        severity: DiagnosticCode::UnresolvedSlot.severity(),
         span: member.span.clone(),
         primary: format!("`mat_slot={slot}` is not declared in theme `{theme_name}`"),
         notes,
@@ -1451,7 +1447,6 @@ fn check_slot_targets(themes: &[ThemeBinding], diagnostics: &mut Vec<Diagnostic>
             if classify_token(&v.value) == TokenKind::NotAToken {
                 diagnostics.push(Diagnostic {
                     code: DiagnosticCode::UnknownSlotTarget,
-                    severity: DiagnosticCode::UnknownSlotTarget.severity(),
                     span: v.span.clone(),
                     primary: format!(
                         "slot `{slot}` in theme `{theme}` does not bind to a canonical or abstract material token",
@@ -1502,7 +1497,6 @@ fn check_unmatched_selectors(
             if sel.matched_member_spans.is_empty() {
                 diagnostics.push(Diagnostic {
                     code: DiagnosticCode::ThemeSelectorUnmatched,
-                    severity: DiagnosticCode::ThemeSelectorUnmatched.severity(),
                     span: sel.source_span.clone(),
                     primary: format!(
                         "theme selector `{kw}[...]` in `{theme}` does not match any member",
@@ -1551,9 +1545,9 @@ mod tests {
         let src = "theme t:\n  slot wall -> @cobblestone\n\nstruct s size=4x4\n  walls mat_slot=floor height=3\n";
         let r = resolve(&ir(src), None);
         assert!(
-            r.diagnostics
-                .iter()
-                .any(|d| d.code == DiagnosticCode::UnresolvedSlot && d.severity == Severity::Error),
+            r.diagnostics.iter().any(
+                |d| d.code == DiagnosticCode::UnresolvedSlot && d.severity() == Severity::Error
+            ),
             "expected E_UNRESOLVED_SLOT, got {:?}",
             r.diagnostics,
         );
@@ -1635,7 +1629,7 @@ mod tests {
             r.diagnostics
                 .iter()
                 .any(|d| d.code == DiagnosticCode::ThemeSelectorUnmatched
-                    && d.severity == Severity::Warning),
+                    && d.severity() == Severity::Warning),
         );
     }
 
@@ -1702,7 +1696,9 @@ mod tests {
         );
         let r = resolve(&ir(src), None);
         assert!(
-            !r.diagnostics.iter().any(|d| d.severity == Severity::Error),
+            !r.diagnostics
+                .iter()
+                .any(|d| d.severity() == Severity::Error),
             "no errors expected, got {:?}",
             r.diagnostics,
         );
@@ -1739,7 +1735,7 @@ mod tests {
             .iter()
             .find(|d| d.code == DiagnosticCode::UnresolvedPort)
             .unwrap_or_else(|| panic!("expected E_UNRESOLVED_PORT, got {:?}", r.diagnostics));
-        assert_eq!(diag.severity, Severity::Error);
+        assert_eq!(diag.severity(), Severity::Error);
         assert!(
             diag.notes.iter().any(|n| n.message.contains("a.entry")),
             "expected nearest-match note pointing at a.entry, got {:?}",
@@ -1838,7 +1834,7 @@ mod tests {
             .iter()
             .find(|d| d.code == DiagnosticCode::MissingPathMaterial)
             .unwrap_or_else(|| panic!("expected E_MISSING_PATH_MATERIAL, got {:?}", r.diagnostics));
-        assert_eq!(diag.severity, Severity::Error);
+        assert_eq!(diag.severity(), Severity::Error);
         assert!(
             diag.primary.contains("token") && diag.primary.contains("identifier"),
             "expected the message to call out the kind mismatch, got: {}",
@@ -1944,7 +1940,7 @@ mod tests {
             .iter()
             .find(|d| d.code == DiagnosticCode::UnresolvedPort)
             .unwrap_or_else(|| panic!("expected E_UNRESOLVED_PORT, got {:?}", r.diagnostics));
-        assert_eq!(diag.severity, Severity::Error);
+        assert_eq!(diag.severity(), Severity::Error);
         assert!(
             diag.notes.iter().any(|n| n.message.contains("b.entry")),
             "expected nearest-match note pointing at b.entry, got {:?}",
@@ -2020,12 +2016,9 @@ mod tests {
     fn unknown_slot_target_emits_error() {
         let src = "theme t:\n  slot wall -> plain_ident\n\nstruct s size=4x4\n  walls mat_slot=wall height=3\n";
         let r = resolve(&ir(src), None);
-        assert!(
-            r.diagnostics
-                .iter()
-                .any(|d| d.code == DiagnosticCode::UnknownSlotTarget
-                    && d.severity == Severity::Error),
-        );
+        assert!(r.diagnostics.iter().any(
+            |d| d.code == DiagnosticCode::UnknownSlotTarget && d.severity() == Severity::Error
+        ),);
     }
 
     // ------------------------------------------------------------------

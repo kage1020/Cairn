@@ -573,6 +573,16 @@ pub enum Expr {
     Not(Box<Expr>),
 }
 
+/// Head segment marking a [`DottedRef`] as a redstone signal name rather
+/// than a member id or a place reference.
+///
+/// Lives here, next to the type it classifies, because three layers ask the
+/// same question: `block_array` decides whether an actuator argument is
+/// wired, `check::member_scope` decides whether a misplaced member is
+/// carrying a signal worth mentioning, and `redstone::synth` collects the
+/// sensors and actuators themselves.
+pub const SIGNAL_HEAD: &str = "sig";
+
 /// A non-empty dotted name path such as `home1.entry`, `sig.step`, or a bare
 /// `outer` (single segment).
 ///

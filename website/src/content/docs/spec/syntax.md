@@ -18,8 +18,8 @@ A bare value on a line that reads none is `E_UNEXPECTED_POSITIONAL`. `connect FR
 TO.PORT` is the single form with a reader for positionals, and its shape is checked by
 `E_CONNECT_ARITY` instead. The rule catches more than the style above: the parser puts any token
 that is not `key=`, `-> binding`, or `[selector]` into the same list, so a dropped `=`
-(`walls mat_slot=wall height 3`) lands there too and would otherwise build a wall of the default
-height.
+(`walls mat_slot=wall height 3`) lands there too — and a `walls` with no `height=` is not
+shortened, it is not built at all.
 
 ## 5.2 Nesting
 Keep nesting shallow (`struct` / `def` / `level` / `theme` / `site`). Deep nesting increases
@@ -37,7 +37,9 @@ building's geometry (`floor`, `walls`, `door`, `window`, `roof`, `stair`, `level
 table is global, so writing one in the other body parses and classifies — and then reaches nothing,
 because the geometry passes bucket by role and the site passes match `place` / `connect`. That is
 `E_MISPLACED_MEMBER`, reported once at the offending row; anything indented under it goes with it.
-`logic` and `assert` lines are not members and are read from either body.
+`logic` and `assert` lines are not members, so the rule does not reach them: a `logic` line is
+read by redstone synthesis from either body, and an `assert` is read by nothing yet — the
+evaluator is not implemented, which is a gap in the compiler rather than in the placement.
 
 Top-level names are scoped per kind: `theme` / `def` / `struct` / `site` are four namespaces, so one
 name may appear once in each. Declaring it twice within one kind is `E_DUPLICATE_ITEM`. For `theme` /

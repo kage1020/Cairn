@@ -64,7 +64,6 @@ fn report(member: &Member, first: &Value, last: &Value, sink: &mut DiagnosticSin
     let count = member.positional.len();
     sink.push(Diagnostic {
         code: DiagnosticCode::UnexpectedPositional,
-        severity: DiagnosticCode::UnexpectedPositional.severity(),
         span: Span {
             start: first.span.start,
             end: last.span.end,

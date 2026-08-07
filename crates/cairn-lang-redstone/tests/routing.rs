@@ -41,7 +41,7 @@ fn placement_from_source(source: &str, edition: Edition) -> ScopedPlacementIr {
         synth
             .diagnostics
             .iter()
-            .all(|d| d.severity != Severity::Error),
+            .all(|d| d.severity() != Severity::Error),
         "fixture must synth cleanly: {:?}",
         synth.diagnostics,
     );
@@ -235,7 +235,7 @@ struct pack size=4x3
         routed.diagnostics,
     );
     let d = congestion[0];
-    assert_eq!(d.severity, Severity::Error);
+    assert_eq!(d.severity(), Severity::Error);
     assert!(
         d.primary.starts_with("routed netlist for "),
         "primary should mark the routing-side origin, got {:?}",

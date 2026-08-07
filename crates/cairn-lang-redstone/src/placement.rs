@@ -221,7 +221,7 @@ fn congestion_diagnostic(reservation: &CircuitRegionReservation, required_area: 
     diag = diag.with_footer(
         "Fix: increase `void`, enlarge region, or split into multiple `circuit` blocks",
     );
-    debug_assert_eq!(diag.severity, Severity::Error);
+    debug_assert_eq!(diag.severity(), Severity::Error);
     diag
 }
 

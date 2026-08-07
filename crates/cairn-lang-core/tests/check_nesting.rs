@@ -83,7 +83,7 @@ fn ne_1_every_nested_row_in_a_site_body_is_reported() {
     for (keyword, body) in cases {
         let src = format!("{PRELUDE}{body}");
         let d = one(&src);
-        assert_eq!(d.severity, Severity::Error);
+        assert_eq!(d.severity(), Severity::Error);
         assert_eq!(
             d.primary,
             format!(
@@ -109,7 +109,7 @@ fn ne_2_a_member_nested_under_a_geometry_member_is_reported() {
          door id=d side=front at=center\n"
     );
     let d = one(&src);
-    assert_eq!(d.severity, Severity::Error);
+    assert_eq!(d.severity(), Severity::Error);
     assert_eq!(
         d.primary,
         "`walls` does not group members: the 1 member indented under it produces no blocks",

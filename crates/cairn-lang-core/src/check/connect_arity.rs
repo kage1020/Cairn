@@ -56,15 +56,12 @@ pub(super) fn run(ir: &IntentModule, sink: &mut DiagnosticSink) {
     // `connect` carries semantic meaning only at site placement scope,
     // but `intent::keyword_table::role_of` treats `connect` as global
     // and lowers any occurrence to [`MemberRole::Connect`] regardless
-    // of the surrounding body. `keyword_allowlist` matches on
-    // [`MemberRole::Other`] only, so a stray `connect` inside a
-    // `struct` or `def` body would otherwise pass every check and
-    // reach the resolver, which simply ignores it (sites are the only
-    // collection the resolver iterates for connects). Walk every
-    // scope here so the arity diagnostic still fires on those stray
-    // rows — they are no more useful than a malformed `connect`
-    // inside a site, and surfacing them at parse position is cheaper
-    // than tracking down "why did my connect do nothing" later.
+    // of the surrounding body. `check::member_scope` reports a `connect`
+    // written into a `struct` or `def` body as `E_MISPLACED_MEMBER`, but
+    // that finding is about the body rather than the row: it says nothing
+    // about whether the row would have been well-formed where it belongs.
+    // Walk every scope here so a stray row gets both halves at once,
+    // instead of an arity error appearing only after the first is fixed.
     for s in &ir.structs {
         walk(&s.members, sink);
     }
@@ -284,7 +281,6 @@ fn example_note() -> DiagnosticNote {
 fn push(sink: &mut DiagnosticSink, span: Span, primary: String, notes: Vec<DiagnosticNote>) {
     sink.push(Diagnostic {
         code: DiagnosticCode::ConnectArity,
-        severity: DiagnosticCode::ConnectArity.severity(),
         span,
         primary,
         notes,

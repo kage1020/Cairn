@@ -10,7 +10,15 @@ use crate::ast::{Arg, Item, Module, Statement, ThemeRule, Value, ValueKind};
 
 use super::{Diagnostic, DiagnosticCode, DiagnosticSink};
 
-/// Keys whose value every reader lifts through `Value::as_label_str`.
+/// Keys whose value is a label and whose mistyping is otherwise silent.
+///
+/// Not every `as_label_str` call site is here. `circuit region=` is lifted
+/// the same way but has its own recognizer in `block_array`, which names
+/// the key and the offending kind in a `W_DEFERRED_MEMBER`; adding it to
+/// this list would report the same value twice with two different codes.
+/// `east_of=` / `north_of=` are owned by `E_INVALID_PLACE_ORIGIN` for the
+/// same reason. What is left are the keys whose mistyped value reaches a
+/// reader that skips silently.
 ///
 /// `id` / `class` / `mat_slot` are hoisted onto [`crate::intent::Member`]'s
 /// own fields during lowering; `use` / `theme` stay in `intent_state` and
@@ -83,7 +91,6 @@ fn check_size(value: &Value, sink: &mut DiagnosticSink) {
     }
     sink.push(Diagnostic {
         code: DiagnosticCode::TypeMismatchSize,
-        severity: DiagnosticCode::TypeMismatchSize.severity(),
         span: value.span.clone(),
         primary: format!("`size=` expects a `WxH` literal, got {}", value.kind_name()),
         notes: Vec::new(),
@@ -97,7 +104,6 @@ fn check_label(key: &str, value: &Value, sink: &mut DiagnosticSink) {
     }
     sink.push(Diagnostic {
         code: DiagnosticCode::TypeMismatchLabel,
-        severity: DiagnosticCode::TypeMismatchLabel.severity(),
         span: value.span.clone(),
         primary: format!(
             "`{key}=` expects a label (identifier or string), got {}",

@@ -109,8 +109,15 @@ pub enum DiagnosticCode {
     /// spec-forbidden positional form (`window front G 2 2 2x2`) changes
     /// the build without a word.
     UnexpectedPositional,
-    /// `id=`, `class=`, or `mat_slot=` whose value is not a label
-    /// (identifier or string).
+    /// A label-typed key whose value is not a label (identifier or
+    /// string): `id=`, `class=`, `mat_slot=`, `use=`, or `theme=`.
+    ///
+    /// The five are one code because every reader lifts them the same
+    /// way, through `Value::as_label_str`, and answers `None` the same
+    /// way. For `use=` / `theme=` that `None` is indistinguishable at the
+    /// resolver from the key being absent, which is a deliberate hole in
+    /// the grammar — so this code is what tells a typo apart from a
+    /// `place` row that names no def on purpose.
     TypeMismatchLabel,
     /// `size=` whose value is not a `WxH` literal.
     TypeMismatchSize,
@@ -451,8 +458,6 @@ pub struct DiagnosticNote {
 pub struct Diagnostic {
     /// Stable code identifying the kind of finding.
     pub code: DiagnosticCode,
-    /// Severity of the finding.
-    pub severity: Severity,
     /// Byte range the primary message points at.
     #[serde(skip)]
     pub span: Span,
@@ -472,6 +477,21 @@ pub struct Diagnostic {
 }
 
 impl Diagnostic {
+    /// Severity of this finding, read from [`DiagnosticCode::severity`].
+    ///
+    /// A method rather than a field so the two cannot disagree. Every pass
+    /// builds its findings as struct literals, and twenty-eight sites used
+    /// to write a `severity:` value of their own — which made
+    /// [`DiagnosticCode::severity`] documentation rather than the source of
+    /// truth, and made reclassifying a code an edit that compiled while
+    /// changing no exit code. A literal written back in now fails to
+    /// compile, which is a stronger guarantee than any corpus-driven test
+    /// could give: a test only covers the codes its fixtures reach.
+    #[must_use]
+    pub fn severity(&self) -> Severity {
+        self.code.severity()
+    }
+
     /// Convert this diagnostic's primary byte span into a 1-based
     /// `line:column` [`Position`] against the given source string.
     ///
@@ -500,7 +520,7 @@ impl Diagnostic {
         let end = lines.position(source, self.span.end);
         RenderedDiagnostic {
             code: self.code,
-            severity: self.severity,
+            severity: self.severity(),
             line: start.line.get(),
             col: start.col.get(),
             end_line: end.line.get(),
@@ -817,7 +837,6 @@ mod tests {
         let lines = LineStarts::new("abc\n");
         let diag = Diagnostic {
             code: DiagnosticCode::DuplicateSize,
-            severity: Severity::Error,
             span: Span { start: 0, end: 3 },
             primary: "duplicate size".to_owned(),
             notes: vec![],
@@ -841,7 +860,6 @@ mod tests {
         let lines = LineStarts::new("abc\n");
         let diag = Diagnostic {
             code: DiagnosticCode::WalkwayBlocked,
-            severity: Severity::Warning,
             span: Span { start: 0, end: 3 },
             primary: "walkway skipped 3 cells".to_owned(),
             notes: vec![],

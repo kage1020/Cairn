@@ -44,8 +44,11 @@ first-class parts of the spec; messages MUST be in a shape that feeds the self-c
     members; a `site` body is a flat list of `place` and `connect` rows.
     Anchored on the run of indented members, reported once per dropped
     subtree at its root.
-  - `E_TYPE_MISMATCH_LABEL` — `id=` / `class=` / `mat_slot=` value is not
-    a label (identifier or string).
+  - `E_TYPE_MISMATCH_LABEL` — a label-typed key's value is not a label
+    (identifier or string). The label-typed keys are `id=`, `class=`,
+    `mat_slot=`, `use=`, and `theme=`. For the last two the mistyped
+    value is otherwise indistinguishable from the key being absent,
+    which is legal, so the whole `place` row would vanish unremarked.
   - `E_TYPE_MISMATCH_SIZE`  — `size=` value is not a `WxH` literal.
   - `E_CONNECT_ARITY` — `connect` row whose positional shape is not
     `FROM.PORT to TO.PORT`: a half is missing, the literal `to`

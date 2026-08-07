@@ -1,11 +1,10 @@
 //! A source corpus chosen to light up as much of the diagnostic surface
 //! as one pass can.
 //!
-//! Only a code that actually fires gets checked, so the properties every
-//! finding has to satisfy — readable prose, a severity matching the
-//! ledger — are only as good as the set of codes these sources reach.
-//! Shared by `diagnostic_text.rs` and `diagnostic_severity.rs` rather
-//! than duplicated, so a fixture added for one property covers the other.
+//! Only a code that actually fires gets its prose checked, so the
+//! properties every finding has to satisfy are only as good as the set of
+//! codes these sources reach. `diagnostic_text.rs` asserts that reach
+//! alongside the prose rules themselves.
 
 use cairn_lang_core::block_array::lower_to_block_array;
 use cairn_lang_core::check::{Diagnostic, check};
@@ -87,6 +86,15 @@ pub fn noisy_sources() -> Vec<String> {
         format!("{THEME}{HUT}site s:\n  level y=0\n    place id=a use=hut theme=t at=origin\n"),
         format!(
             "{THEME}{HUT}site s:\n  place id=a use=hut theme=t at=origin\n  walls mat_slot=wall height=3\n    floor mat_slot=floor\n    door id=d side=front at=center\n"
+        ),
+        // A misplaced row that carries a signal: the message softens its
+        // claim rather than telling the author it reaches nothing, and
+        // that softening is its own sentence to check.
+        format!(
+            "{THEME}{HUT}site s:
+  place id=a use=hut theme=t at=origin
+  pressure_plate id=gate at=front.outside -> sig.step
+"
         ),
         // Positional values, singular and plural.
         format!("{THEME}struct s size=5x5\n  roof flat mat_slot=wall\n"),

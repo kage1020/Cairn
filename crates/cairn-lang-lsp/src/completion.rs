@@ -44,6 +44,10 @@ enum Context {
     /// `E_MISPLACED_MEMBER`. Offering the full table here would put an
     /// error one keystroke away.
     MemberKeyword { replace: Span, body: BodyKind },
+    /// First word of an indented line whose enclosing item keyword did not
+    /// resolve — typically a header still being typed. The body kind is
+    /// unknown, so the whole table is offered rather than nothing.
+    UnscopedMemberKeyword { replace: Span },
     /// First word of an indented line inside a `theme` body: `slot` or a
     /// member keyword opening a selector rule.
     ThemeBodyKeyword { replace: Span },
@@ -91,6 +95,14 @@ pub fn completions(
             body.allowed_keywords()
                 .into_iter()
                 .map(|kw| (kw, "member command")),
+        ),
+        Some(Context::UnscopedMemberKeyword { replace }) => keyword_items(
+            &index,
+            source,
+            &replace,
+            cairn_lang_core::intent::known_keywords()
+                .iter()
+                .map(|kw| (*kw, "member command")),
         ),
         // A theme selector names a member by keyword and is matched
         // against every body, so its vocabulary is the whole table.
@@ -198,10 +210,13 @@ fn context_at(source: &str, offset: usize) -> Option<Context> {
             replace,
             body: BodyKind::Geometry,
         }),
-        // An indented line with no item above it is not inside any body,
-        // so there is no closed set to offer — inventing one would be the
-        // hallucination this module exists to avoid.
-        _ => None,
+        // The header is mid-keystroke (`stru s size=2x2`) or absent. The
+        // body kind is unresolved, not empty — and an empty list is
+        // indistinguishable from "no candidates", which would read as a
+        // wrong answer rather than a missing one. Offer the union, which
+        // is what this position offered before the split; the scoped set
+        // arrives as soon as the header parses as a keyword.
+        _ => Some(Context::UnscopedMemberKeyword { replace }),
     }
 }
 
@@ -549,11 +564,23 @@ mod tests {
     }
 
     #[test]
-    fn an_indented_line_with_no_item_above_it_offers_nothing() {
-        // There is no body, so there is no closed set — and inventing one
-        // is the hallucination this module exists to avoid.
-        let items = complete("  flo", "  flo");
-        assert!(items.is_empty(), "got {items:#?}");
+    fn an_unresolved_header_offers_the_whole_table_rather_than_nothing() {
+        // A header mid-keystroke leaves the body kind unknown. An empty
+        // list reads as "no candidates", which is a wrong answer rather
+        // than a missing one — so the union is offered until the header
+        // parses.
+        for source in [
+            "  flo",
+            "stru s size=2x2
+  flo",
+        ] {
+            let items = complete(source, "flo");
+            assert_eq!(
+                labels(&items),
+                cairn_lang_core::intent::known_keywords().to_vec(),
+                "for {source:?}",
+            );
+        }
     }
 
     #[test]

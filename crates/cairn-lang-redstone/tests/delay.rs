@@ -43,7 +43,7 @@ fn routed_from_source(source: &str, edition: Edition) -> ScopedPlacementIr {
         synth
             .diagnostics
             .iter()
-            .all(|d| d.severity != Severity::Error),
+            .all(|d| d.severity() != Severity::Error),
         "fixture must synth cleanly: {:?}",
         synth.diagnostics,
     );
@@ -242,7 +242,7 @@ struct wide_pack size=300x5
         delayed.diagnostics,
     );
     let d = attenuation[0];
-    assert_eq!(d.severity, Severity::Error);
+    assert_eq!(d.severity(), Severity::Error);
     assert!(
         d.primary.starts_with("routed netlist for "),
         "primary should mark the delay-side origin, got {:?}",

@@ -39,7 +39,12 @@ pub struct Member {
     /// member.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub selector: Option<IndexMap<String, ValueWithSpan>>,
-    /// Bare positional values appearing before the first `key=` argument.
+    /// Bare values on the line, in source order.
+    ///
+    /// Not a prefix — see [`crate::ast::Statement::Generic`]'s field of the
+    /// same name for why. `check::positional` reads *this* copy and spans
+    /// the run first-to-last, so the distinction is load-bearing here
+    /// rather than merely accurate.
     /// Empty for almost every command; non-empty only for special forms
     /// such as `connect <ref> to <ref>` whose surface grammar mandates them.
     #[serde(skip_serializing_if = "Vec::is_empty")]
@@ -198,20 +203,41 @@ impl MemberRole {
     /// report it on that basis: the keyword is not in the table at all, so
     /// `check::keyword_allowlist` owns it and the repair is the word rather
     /// than the body it sits in.
+    ///
+    /// Matched on the pair with no wildcard so both axes are checked: a
+    /// third [`BodyKind`] has to be answered for every role here rather
+    /// than silently reading as "no reader", which would empty
+    /// [`BodyKind::allowed_keywords`] and report every member of that body.
     #[must_use]
     pub fn is_read_in(&self, body: BodyKind) -> bool {
-        match self {
-            Self::Floor
-            | Self::Walls
-            | Self::Door
-            | Self::Window
-            | Self::Roof
-            | Self::Stair
-            | Self::Level
-            | Self::PressurePlate
-            | Self::Circuit => body == BodyKind::Geometry,
-            Self::Place | Self::Connect => body == BodyKind::Site,
-            Self::Other(_) => false,
+        match (body, self) {
+            (
+                BodyKind::Geometry,
+                Self::Floor
+                | Self::Walls
+                | Self::Door
+                | Self::Window
+                | Self::Roof
+                | Self::Stair
+                | Self::Level
+                | Self::PressurePlate
+                | Self::Circuit,
+            )
+            | (BodyKind::Site, Self::Place | Self::Connect) => true,
+            (BodyKind::Geometry, Self::Place | Self::Connect)
+            | (
+                BodyKind::Site,
+                Self::Floor
+                | Self::Walls
+                | Self::Door
+                | Self::Window
+                | Self::Roof
+                | Self::Stair
+                | Self::Level
+                | Self::PressurePlate
+                | Self::Circuit,
+            )
+            | (_, Self::Other(_)) => false,
         }
     }
 

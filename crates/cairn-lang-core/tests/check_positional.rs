@@ -10,11 +10,15 @@
 //! `cairn check` reporting nothing.
 //!
 //! The shape that makes this more than a style rule is a dropped `=`.
-//! `walls mat_slot=wall height 3` is one keystroke from correct and
-//! lowers as `walls mat_slot=wall` — a wall of the default height, in a
-//! build that otherwise looks right.
+//! `walls mat_slot=wall height 3` is one keystroke from correct, and
+//! there is no default to fall back on: `wall_height` refuses a member
+//! with no positive `height=`, so the wall is not built at all. Before
+//! this pass, `cairn check` exited 0 on that line and only `cairn lower`
+//! said anything — about the missing `height=`, never about the two bare
+//! values that explain it.
 
-use cairn_lang_core::{Diagnostic, DiagnosticCode, Severity, check, lower, parse};
+use cairn_lang_core::block_array::lower_to_block_array;
+use cairn_lang_core::{Diagnostic, DiagnosticCode, Severity, check, lower, parse, resolve};
 
 fn diagnose(source: &str) -> Vec<Diagnostic> {
     let module = parse(source).unwrap_or_else(|e| panic!("parse failed: {e}\nsource:\n{source}"));
@@ -47,6 +51,12 @@ fn struct_with(row: &str) -> String {
     format!("{PRELUDE}struct s size=5x5\n  floor mat_slot=floor\n  {row}\n")
 }
 
+/// `run` walks `ir.structs` and `ir.defs` in separate loops, so a
+/// struct-only suite leaves the `def` loop unexecuted.
+fn def_with(row: &str) -> String {
+    format!("{PRELUDE}def lodge size=5x5:\n  floor mat_slot=floor\n  {row}\n")
+}
+
 fn duo_with(row: &str) -> String {
     format!(
         "{PRELUDE}site duo:\n  place id=anchor use=hut theme=plain at=origin\n  \
@@ -57,18 +67,23 @@ fn duo_with(row: &str) -> String {
 /// The spec's own forbidden example.
 #[test]
 fn po_1_the_spec_forbidden_form_is_an_error() {
-    let src = struct_with("window front G 2 2 2x2 mat_slot=wall");
-    let d = one(&src);
-    assert_eq!(d.severity, Severity::Error);
-    assert_eq!(
-        d.primary,
-        "`window` reads only `key=value` arguments: the 5 bare values on this line are dropped",
-    );
+    for src in [
+        struct_with("window front G 2 2 2x2 mat_slot=wall"),
+        def_with("window front G 2 2 2x2 mat_slot=wall"),
+    ] {
+        let d = one(&src);
+        assert_eq!(d.severity(), Severity::Error);
+        assert_eq!(
+            d.primary,
+            "`window` reads only `key=value` arguments: the 5 bare values on this line are dropped",
+        );
+    }
 }
 
 /// A dropped `=` lands in the same list. This is the shape that changes
-/// a build rather than only offending the style rule: `height 3` reads
-/// as two bare values and the wall takes its default height.
+/// a build rather than only offending the style rule: `height 3` reads as
+/// two bare values, and `walls` with no `height=` is not built at all —
+/// there is no default to fall back on.
 #[test]
 fn po_2_a_dropped_equals_sign_is_reported() {
     let src = struct_with("walls mat_slot=wall height 3");
@@ -212,4 +227,34 @@ fn po_10_a_site_row_is_covered_too() {
     let src = duo_with("place extra theme=plain at=origin");
     let d = one(&src);
     assert_eq!(&src[d.span.clone()], "extra");
+}
+
+/// The premise the message is written on, measured on the build: a
+/// `walls` line whose `height=` lost its `=` is not built shorter, it is
+/// not built at all. Without this the doc comments above are a claim
+/// about lowering that no test in this file exercises.
+#[test]
+fn po_11_a_dropped_equals_costs_the_whole_member() {
+    let solid = |source: &str| {
+        let module = parse(source).expect("parse");
+        let ir = lower(&module);
+        let resolution = resolve(&ir, None);
+        let built = lower_to_block_array(&ir, &resolution, None);
+        built.structures["struct::s"]
+            .voxels
+            .iter()
+            .filter(|c| c.0 != 0)
+            .count()
+    };
+    let keyed = solid(&struct_with("walls mat_slot=wall height=3"));
+    let dropped = solid(&struct_with("walls mat_slot=wall height 3"));
+    let no_walls = solid(&struct_with("floor mat_slot=floor"));
+    assert!(
+        keyed > dropped,
+        "the wall should be missing: keyed={keyed} dropped={dropped}",
+    );
+    assert_eq!(
+        dropped, no_walls,
+        "missing entirely, not shortened — there is no default height",
+    );
 }

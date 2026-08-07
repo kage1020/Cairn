@@ -42,7 +42,7 @@ fn convert(
     index: &LineIndex,
     diagnostic: &CoreDiagnostic,
 ) -> lsp_types::Diagnostic {
-    let severity = match diagnostic.severity {
+    let severity = match diagnostic.severity() {
         Severity::Error => lsp_types::DiagnosticSeverity::ERROR,
         Severity::Warning => lsp_types::DiagnosticSeverity::WARNING,
     };

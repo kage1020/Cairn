@@ -39,7 +39,7 @@ fn edition_netlist_from_source(
         synth
             .diagnostics
             .iter()
-            .all(|d| d.severity != Severity::Error),
+            .all(|d| d.severity() != Severity::Error),
         "fixture must synth cleanly: {:?}",
         synth.diagnostics,
     );
@@ -223,7 +223,7 @@ struct tiny size=3x3
         out.diagnostics,
     );
     let d = congestion[0];
-    assert_eq!(d.severity, Severity::Error);
+    assert_eq!(d.severity(), Severity::Error);
     assert!(
         d.primary.contains("~1.3x"),
         "primary should quote the ratio, got {:?}",
@@ -303,7 +303,7 @@ struct nomarker size=7x5
         "expected exactly one E_NO_CIRCUIT_REGION, got {:?}",
         out.diagnostics,
     );
-    assert_eq!(missing[0].severity, Severity::Error);
+    assert_eq!(missing[0].severity(), Severity::Error);
     assert!(
         out.scoped.scopes.iter().all(|e| e.name != "nomarker"),
         "failed scope must be elided from the output",

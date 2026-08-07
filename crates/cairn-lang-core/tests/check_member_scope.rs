@@ -72,6 +72,14 @@ fn struct_with(row: &str) -> String {
     format!("{PRELUDE}struct s size=5x5\n  floor mat_slot=floor\n  {row}\n")
 }
 
+/// `run` walks `ir.structs` and `ir.defs` in separate loops, so a
+/// struct-only suite leaves the `def` loop unexecuted — deleting it used
+/// to keep the whole crate green. And a `def` is the half users reach
+/// first, since a `site` is what instantiates one.
+fn def_with(row: &str) -> String {
+    format!("{PRELUDE}def lodge size=5x5:\n  floor mat_slot=floor\n  {row}\n")
+}
+
 fn site_with(row: &str) -> String {
     format!(
         "{PRELUDE}site duo:\n  place id=anchor use=hut theme=plain at=origin\n  \
@@ -79,20 +87,21 @@ fn site_with(row: &str) -> String {
     )
 }
 
-/// The bug as reported: `place` and `connect` written into a `def` body.
-/// `cairn check` exited 0 on this source.
+/// The bug as reported: `place` and `connect` written into a `struct` or
+/// `def` body. `cairn check` exited 0 on this source.
 #[test]
 fn ms_1_a_site_row_in_a_geometry_body_is_an_error() {
     for row in SITE_ROWS {
-        let src = struct_with(row);
-        let d = one(&src);
-        assert_eq!(d.severity, Severity::Error, "for `{row}`");
-        assert!(
-            d.primary
-                .starts_with("nothing in a `struct` or `def` body reads `"),
-            "for `{row}`, got {:?}",
-            d.primary,
-        );
+        for src in [struct_with(row), def_with(row)] {
+            let d = one(&src);
+            assert_eq!(d.severity(), Severity::Error, "for `{row}`");
+            assert!(
+                d.primary
+                    .starts_with("nothing in a `struct` or `def` body lowers `"),
+                "for `{row}`, got {:?}",
+                d.primary,
+            );
+        }
     }
 }
 
@@ -103,9 +112,9 @@ fn ms_2_a_geometry_row_in_a_site_body_is_an_error() {
     for row in GEOMETRY_ROWS {
         let src = site_with(row);
         let d = one(&src);
-        assert_eq!(d.severity, Severity::Error, "for `{row}`");
+        assert_eq!(d.severity(), Severity::Error, "for `{row}`");
         assert!(
-            d.primary.starts_with("nothing in a `site` body reads `"),
+            d.primary.starts_with("nothing in a `site` body lowers `"),
             "for `{row}`, got {:?}",
             d.primary,
         );
@@ -117,12 +126,13 @@ fn ms_2_a_geometry_row_in_a_site_body_is_an_error() {
 #[test]
 fn ms_3_a_row_the_body_reads_is_not_reported() {
     for row in GEOMETRY_ROWS {
-        let src = struct_with(row);
-        assert!(
-            misplaced_only(&src).is_empty(),
-            "`{row}` belongs in a `struct` body, got {:#?}",
-            misplaced_only(&src),
-        );
+        for src in [struct_with(row), def_with(row)] {
+            assert!(
+                misplaced_only(&src).is_empty(),
+                "`{row}` belongs in a geometry body, got {:#?}",
+                misplaced_only(&src),
+            );
+        }
     }
     for row in SITE_ROWS {
         let src = site_with(row);
@@ -144,7 +154,7 @@ fn ms_4_the_body_kind_carries_through_a_level() {
          place id=extra use=hut theme=plain at=origin\n"
     );
     let d = one(&src);
-    assert!(d.primary.contains("reads `place`"), "got {:?}", d.primary);
+    assert!(d.primary.contains("lowers `place`"), "got {:?}", d.primary);
 }
 
 /// One finding per misplaced subtree. Everything indented under a row
@@ -159,7 +169,7 @@ fn ms_5_a_subtree_is_reported_once_at_its_root() {
     );
     let d = one(&src);
     assert!(
-        d.primary.contains("reads `walls`"),
+        d.primary.contains("lowers `walls`"),
         "the outermost misplaced row is the one reported, got {:?}",
         d.primary,
     );
@@ -215,8 +225,8 @@ fn ms_7_an_unknown_keyword_is_left_to_the_allowlist() {
 }
 
 /// `logic` and `assert` lines are not members — `intent::lower` sorts
-/// them into `MemberBody`'s own fields and redstone synthesis reads them
-/// from either body — so this pass must not touch them.
+/// them into `MemberBody`'s own fields, so they never reach this walk —
+/// and the pass must not touch them.
 #[test]
 fn ms_8_logic_and_assert_lines_are_not_members() {
     let src = format!(
@@ -278,4 +288,123 @@ fn ms_11_the_span_underlines_the_offending_row() {
     let src = site_with("floor id=stray mat_slot=floor");
     let d = one(&src);
     assert_eq!(&src[d.span.clone()], "floor id=stray mat_slot=floor");
+}
+
+/// The `def` loop is a separate `run` arm from the `struct` loop, and a
+/// `def` is what a `site` instantiates, so the geometry half of this code
+/// reaches users through it first. Deleting the loop used to leave the
+/// whole crate green.
+#[test]
+fn ms_12_the_def_loop_is_walked() {
+    let d = one(&def_with("place id=extra use=hut theme=plain at=origin"));
+    assert!(
+        d.primary
+            .starts_with("nothing in a `struct` or `def` body lowers `place`"),
+        "got {:?}",
+        d.primary,
+    );
+}
+
+/// "Produces nothing" is about the block array. `redstone::synth`'s
+/// `collect_member` is role-agnostic and its `lower_site` walks a site's
+/// rows, so a `-> sig.NAME` tail on a misplaced row does still reach
+/// synthesis — the message says so rather than overclaiming, and says why
+/// that is not a reason to keep the row where it is.
+#[test]
+fn ms_13_a_signal_bearing_row_is_not_told_it_reaches_nothing() {
+    let hedge = "the `sig.` reference on this line does still reach redstone synthesis — but the block it would sense or drive is the one being dropped, so move the member and the signal keeps working";
+    let sensor = one(&site_with(
+        "pressure_plate id=gate at=front.outside -> sig.step",
+    ));
+    assert!(notes(&sensor).contains(&hedge), "got {:#?}", notes(&sensor));
+
+    // An actuator argument counts too, and a row with no signal at all
+    // must not carry the note — otherwise it would be noise on every
+    // finding rather than a correction on the ones that need it.
+    let actuator = one(&site_with("door[id=entry] opened_by=sig.open"));
+    assert!(
+        notes(&actuator).contains(&hedge),
+        "got {:#?}",
+        notes(&actuator),
+    );
+    let plain = one(&site_with("floor mat_slot=floor"));
+    assert!(!notes(&plain).contains(&hedge), "got {:#?}", notes(&plain));
+}
+
+/// The lost-member count covers the whole subtree. Counting direct
+/// children only would report "the 1 member indented under it" for a
+/// three-deep run — understating the cost by exactly the part the author
+/// cannot see from the reported line.
+#[test]
+fn ms_14_the_nested_count_covers_the_whole_subtree() {
+    let src = format!(
+        "{PRELUDE}site duo:\n  place id=anchor use=hut theme=plain at=origin\n  \
+         walls mat_slot=wall height=3\n    level y=0\n      floor mat_slot=floor\n"
+    );
+    let d = one(&src);
+    assert!(
+        notes(&d).contains(&"the 2 members indented under it go with it"),
+        "got {:#?}",
+        notes(&d),
+    );
+}
+
+/// The other half of `ms_6`: a row this body *does* read, whose indented
+/// body `nesting` is about to declare lost. Descending into it would bill
+/// one mistake twice with repairs that disagree — following nesting's
+/// "dedent these" leaves the `E_MISPLACED_MEMBER` standing.
+#[test]
+fn ms_15_a_child_of_a_lost_body_is_left_to_nesting() {
+    let src = format!(
+        "{PRELUDE}site duo:\n  place id=anchor use=hut theme=plain at=origin\n    \
+         floor mat_slot=floor\n"
+    );
+    assert!(
+        misplaced_only(&src).is_empty(),
+        "got {:#?}",
+        misplaced_only(&src),
+    );
+    let codes: Vec<&str> = diagnose(&src).iter().map(|d| d.code.as_str()).collect();
+    assert_eq!(
+        codes
+            .iter()
+            .filter(|c| **c == "E_UNSUPPORTED_NESTING")
+            .count(),
+        1,
+        "got {codes:?}",
+    );
+}
+
+/// A subtree hanging off an unknown keyword is skipped by this pass, as
+/// it is by `nesting`: the row names nothing the compiler builds, so the
+/// repair is the word and everything below it is re-judged afterwards.
+#[test]
+fn ms_16_a_subtree_under_an_unknown_keyword_is_left_alone() {
+    let src = format!(
+        "{PRELUDE}site duo:\n  place id=anchor use=hut theme=plain at=origin\n  \
+         bogus id=b\n    floor mat_slot=floor\n"
+    );
+    assert!(
+        misplaced_only(&src).is_empty(),
+        "got {:#?}",
+        misplaced_only(&src),
+    );
+    assert!(
+        diagnose(&src)
+            .iter()
+            .any(|d| d.code == DiagnosticCode::UnknownKeyword),
+    );
+}
+
+/// The two row tables above are hand-written, and a new `MemberRole` would
+/// shrink the matrix without failing anything. Their combined length is the
+/// table's, so an addition has to land in one of them.
+#[test]
+fn ms_17_the_row_tables_cover_every_known_keyword() {
+    assert_eq!(
+        GEOMETRY_ROWS.len() + SITE_ROWS.len(),
+        cairn_lang_core::intent::known_keywords().len(),
+        "a keyword was added to the role table without a row here, so the \
+         matrix these tests walk is no longer the whole table",
+    );
 }

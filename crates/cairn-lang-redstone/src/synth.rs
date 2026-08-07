@@ -38,7 +38,7 @@ use crate::logic_ir::{
     GateKind, GateNode, InputPort, LogicIr, OutputPort, ScopeKind, ScopedLogicIr,
     ScopedLogicIrEntry, SignalRef,
 };
-use cairn_lang_core::ast::{DottedRef, Expr, ValueKind};
+use cairn_lang_core::ast::{DottedRef, Expr, SIGNAL_HEAD, ValueKind};
 use cairn_lang_core::check::Severity;
 use cairn_lang_core::error::Span;
 use cairn_lang_core::intent::{
@@ -54,10 +54,6 @@ use cairn_lang_core::intent::{
 /// the `check` pass (a future extension), not silently become a live
 /// output port here.
 const ACTUATOR_ARG_KEYS: &[&str] = &["opened_by", "powered_by", "lit_by", "fired_by"];
-
-/// The head segment (`sig`) that identifies a dotted reference as a
-/// redstone signal name, rather than a member id or a place ref.
-const SIGNAL_HEAD: &str = "sig";
 
 /// Successful synth output: the per-scope Logic IR plus every diagnostic
 /// collected across the module. Errors abort the containing scope's IR
@@ -108,9 +104,15 @@ fn lower_def(d: &DefIr, out: &mut SynthOutput) {
 
 fn lower_site(s: &SiteIr, out: &mut SynthOutput) {
     let mut collected = ScopeCollected::default();
-    // A site body carries `place` / `connect` members which never emit
-    // sensor bindings themselves; the walk still descends in case a future
-    // extension lets a site host `pressure_plate` or `door` directly.
+    // A site body carries `place` / `connect` rows, which never emit sensor
+    // bindings themselves, so in practice only `s.logic` contributes here.
+    // The walk still descends because `collect_body` is shared with the two
+    // scopes that do have members — not because a site may host a fixture:
+    // `check::member_scope` reports `pressure_plate` / `door` written among
+    // a site's rows as `E_MISPLACED_MEMBER`, since nothing lowers them into
+    // a block and a sensor with no block behind it senses nothing. Letting
+    // a site host fixtures for real is a lowering change, and this walk
+    // would already be ready for it.
     collect_body(&s.placements, &s.logic, &mut collected);
     finish_scope(ScopeKind::Site, &s.name, &collected, out);
 }
@@ -288,7 +290,7 @@ fn finish_scope(
         &mut diagnostics,
     );
 
-    let scope_has_error = diagnostics.iter().any(|d| d.severity == Severity::Error);
+    let scope_has_error = diagnostics.iter().any(|d| d.severity() == Severity::Error);
     out.diagnostics.extend(diagnostics);
     if !scope_has_error {
         out.scoped.scopes.push(ScopedLogicIrEntry {

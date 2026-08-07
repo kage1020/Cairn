@@ -365,7 +365,7 @@ fn attenuation_diagnostic(
     diag = diag.with_footer(
         "Fix: enlarge `region=` so no driver→cell segment exceeds the cap, split into multiple `circuit` blocks, or pin cell placement closer to its drivers",
     );
-    debug_assert_eq!(diag.severity, Severity::Error);
+    debug_assert_eq!(diag.severity(), Severity::Error);
     diag
 }
 
@@ -390,7 +390,7 @@ fn attenuation_output_diagnostic(
     diag = diag.with_footer(
         "Fix: enlarge `region=` so no driver→sink segment exceeds the cap, split into multiple `circuit` blocks, or pin actuator placement closer to its drivers",
     );
-    debug_assert_eq!(diag.severity, Severity::Error);
+    debug_assert_eq!(diag.severity(), Severity::Error);
     diag
 }
 
@@ -418,7 +418,7 @@ fn missing_region_diagnostic(entry: &ScopedPlacementIrEntry) -> Diagnostic {
     diag = diag.with_footer(
         "Fix: add a `circuit region=<label> void=<N>` line to the enclosing scope, or run `--stage placement` first to see the underlying error",
     );
-    debug_assert_eq!(diag.severity, Severity::Error);
+    debug_assert_eq!(diag.severity(), Severity::Error);
     diag
 }
 

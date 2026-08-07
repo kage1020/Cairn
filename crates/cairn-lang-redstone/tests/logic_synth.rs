@@ -41,7 +41,7 @@ fn ac1_redstone_door_synthesises_two_inputs_one_or_gate_one_output() {
     assert!(
         out.diagnostics
             .iter()
-            .all(|d| d.severity != Severity::Error),
+            .all(|d| d.severity() != Severity::Error),
         "clean example must not raise errors: {:?}",
         out.diagnostics,
     );
@@ -199,7 +199,7 @@ struct s size=1x1
     let has_error = out
         .diagnostics
         .iter()
-        .any(|d| d.severity == Severity::Error);
+        .any(|d| d.severity() == Severity::Error);
     assert!(!has_error, "warning must not block IR construction");
 
     assert!(
@@ -239,7 +239,7 @@ struct s size=1x1
     assert!(
         out.diagnostics
             .iter()
-            .all(|d| d.severity != Severity::Error),
+            .all(|d| d.severity() != Severity::Error),
         "synthesis must not raise errors: {:?}",
         out.diagnostics,
     );
@@ -269,7 +269,7 @@ struct s size=1x1
     assert!(
         out.diagnostics
             .iter()
-            .all(|d| d.severity != Severity::Error),
+            .all(|d| d.severity() != Severity::Error),
         "nested lowering must not raise errors: {:?}",
         out.diagnostics,
     );

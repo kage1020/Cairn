@@ -116,6 +116,20 @@ fn walk(members: &[Member], scope: BodyKind, inside_level: bool, sink: &mut Diag
     }
 }
 
+/// Whether this member's indented body reaches the build.
+///
+/// [`super::member_scope`] asks before recursing, for the same reason
+/// this pass asks before recursing: a body about to be reported as lost
+/// takes its children with it, so a second finding on one of those
+/// children bills one mistake twice — and with repairs that disagree,
+/// since following "dedent these" leaves the other finding standing.
+///
+/// Only meaningful for a role the enclosing body reads; both callers
+/// check that first.
+pub(super) fn body_reaches_the_build(member: &Member, inside_level: bool) -> bool {
+    loss(member, inside_level).is_none()
+}
+
 /// How this member's indented body is lost, or `None` when it reaches
 /// the build.
 ///
@@ -192,7 +206,6 @@ fn report(
     }
     sink.push(Diagnostic {
         code: DiagnosticCode::UnsupportedNesting,
-        severity: DiagnosticCode::UnsupportedNesting.severity(),
         span,
         primary,
         notes,
