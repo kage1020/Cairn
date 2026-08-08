@@ -199,11 +199,12 @@ impl CellCoord {
 /// **Order contract on `Vec<BufferCoord>`** (as returned by
 /// [`PlacedCellNode::buffer_coords`]): entries appear in
 /// [`PlacedCellNode::drivers`] iteration order, and within one
-/// driver's segment in the crossing pass's Manhattan traversal order
-/// (x → z → y, matching the routing pass's axis order). A consumer
-/// that reads the vector positionally therefore sees driver 0's
-/// buffers before driver 1's, and closer-to-source buffers before
-/// closer-to-sink ones.
+/// driver's segment in the order the routed path visits them. A
+/// consumer that reads the vector positionally therefore sees driver
+/// 0's buffers before driver 1's, and closer-to-source buffers before
+/// closer-to-sink ones. That order is *not* one x → z → y sweep: the
+/// route is a chain of L-shapes between tree terminals, so it turns as
+/// often as the tree does.
 ///
 /// **Coord layer.** [`Self::coord`]`.layer` records the crossing
 /// pass's placement decision — see [`RouteLayer`] for the full

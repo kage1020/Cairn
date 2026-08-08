@@ -35,9 +35,13 @@
 //!   stability) into the occupancy set. This is the Kou-Markowsky-Berman
 //!   (KMB) approximation truncated at its second stage; the third
 //!   KMB stage (Steiner-point insertion on the drawn edges) is not
-//!   run here because the delay-insertion pass (stage 3, §14.4) only
-//!   consumes the per-sink Manhattan sum, so the extra work would
-//!   not shift a downstream decision.
+//!   run here. It used to be justified as free — the delay pass
+//!   consumed a per-sink Manhattan sum, so a differently shaped tree
+//!   changed nothing downstream. That is no longer true: stages 3 and
+//!   4 both measure the routed path, so inserting Steiner points would
+//!   move buffer counts, tick totals, and repeater coords. It is a
+//!   decision for whoever takes it, not an omission with no
+//!   consequences.
 //! - **Occupancy.** A per-scope `HashSet<CellCoord>` seeded with
 //!   every cell coord, every input pad, and every output pad, then
 //!   grown by each drawn L-shape. Duplicate visits share (Steiner
@@ -51,11 +55,13 @@
 //!   those, refusing a scope whose `void=<N>` reservation is too
 //!   thin to absorb them with `E_CROSSING_CONGESTION`.
 //! - **`wire_length` attribution.** For every cell, `wire_length =
-//!   sum over drivers of Manhattan(driver-source-coord, cell.coord)`.
-//!   The tree-total path is not attributed per-sink today because the
-//!   downstream delay-insertion pass (stage 3, §14.4) consumes the
-//!   sum of Manhattan distances, and re-tree-walking here would
-//!   double the work without shifting the delay decision.
+//!   sum over drivers of the routed length from that driver's source
+//!   into this cell` —
+//!   `route_to`, the same measure
+//!   stage 3 counts buffer repeaters against. The tree total is not
+//!   attributed per-sink: dust a cell shares with a sibling sink feeds
+//!   both, and the congestion budget below is where the shared total
+//!   is counted once.
 //! - **Congestion.** After every net is laid,
 //!   `cells.len() * CELL_FOOTPRINT + wire_only_coords > reserved_area`
 //!   fires `E_ROUTE_CONGESTION` against the reservation span. The
@@ -85,7 +91,6 @@
 //! and refuses with `E_ATTENUATION_LIMIT` when a single segment
 //! exceeds the v1 sanity cap.
 
-use std::collections::HashMap;
 use std::collections::HashSet;
 
 use cairn_lang_core::check::Severity;
@@ -96,7 +101,7 @@ use crate::placement_ir::{
     CellCoord, CellIdentity, CircuitRegionReservation, PlacementIr, ScopedPlacementIr,
     ScopedPlacementIrEntry,
 };
-use crate::routing_geometry::{input_pad, manhattan, net_ref_key, net_wire_path, output_pad};
+use crate::routing_geometry::{collect_nets, input_pad, net_order, net_trees, output_pad};
 
 /// Per-cell footprint used by the post-routing congestion budget.
 /// Re-exports [`crate::placement::CELL_FOOTPRINT`] so a scope that
@@ -245,47 +250,46 @@ fn route_scope(entry: &ScopedPlacementIrEntry) -> ScopeRouting {
         }
     }
 
-    // Collect nets: source → sink list. `HashMap` order is not
-    // relied on — we sort the key set below before laying wires.
-    let mut nets: HashMap<NetRef, Vec<CellCoord>> = HashMap::new();
-    for (i, cell) in ir.cells.iter().enumerate() {
-        let sink = cell_coords[i];
-        for driver in &cell.drivers {
-            nets.entry(driver.net).or_default().push(sink);
-        }
-    }
-    for (k, output) in ir.outputs.iter().enumerate() {
-        let sink = output_pad(k, &region);
-        nets.entry(output.driver).or_default().push(sink);
-    }
-
-    // Process nets in a deterministic order: fanout descending, tie
-    // by NetRef key ascending. Sorting is inert against the v1
-    // occupancy model (both L-shape elbows have identical Manhattan
-    // length and `l_shape_path` picks a fixed axis order), but pins
-    // a stable schedule so a follow-up pass that consults occupancy
-    // for elbow selection has one deterministic order to slot into
-    // without rewriting the caller.
-    let mut net_order: Vec<NetRef> = nets.keys().copied().collect();
-    net_order.sort_by(|a, b| {
-        let fa = nets[a].len();
-        let fb = nets[b].len();
-        fb.cmp(&fa)
-            .then_with(|| net_ref_key(*a).cmp(&net_ref_key(*b)))
-    });
-
-    for net in net_order {
-        let sinks = &nets[&net];
-        if sinks.is_empty() {
-            continue;
-        }
-        let source_coord = source_of_net(net);
-        for coord in net_wire_path(source_coord, sinks) {
+    // Nets and their Steiner trees come from `routing_geometry`, which
+    // the delay and crossing passes call with the same arguments. The
+    // tree is the only description of where a net's dust runs, so
+    // stage 3's buffer count and stage 4's buffer coords are measured
+    // against the wire this stage actually laid.
+    //
+    // `net_order` is inert against the v1 occupancy model — both
+    // L-shape elbows have identical Manhattan length and
+    // `l_shape_path` picks a fixed axis order — but pins a stable
+    // schedule for a follow-up pass that consults occupancy when
+    // choosing an elbow.
+    let nets = collect_nets(&ir, &region);
+    let trees = net_trees(&nets, source_of_net);
+    for net in net_order(&nets) {
+        for coord in trees[&net].wire_path() {
             occupancy.insert(coord);
         }
     }
 
-    attribute_wire_lengths(&mut ir, entry, &cell_coords, &source_of_net);
+    // The routed length from a driver's source to one of its sinks —
+    // the same measure the delay pass counts buffer repeaters against.
+    // `route_to` answers `None` only for a sink that is not a terminal
+    // of the net, which `collect_nets` rules out: it built the tree's
+    // terminal list from this driver list.
+    let segment_of = |net: NetRef, sink: CellCoord| -> u32 {
+        let route = trees
+            .get(&net)
+            .and_then(|tree| tree.route_to(sink))
+            .unwrap_or_else(|| {
+                panic!(
+                    "sink ({x},{y},{z}) is not a terminal of the net driving it — the driver list and the collected nets disagree",
+                    x = sink.x,
+                    y = sink.y,
+                    z = sink.z,
+                )
+            });
+        u32::try_from(route.len().saturating_sub(1)).unwrap_or(u32::MAX)
+    };
+
+    attribute_wire_lengths(&mut ir, entry, &cell_coords, &segment_of);
 
     // Congestion check against the actual post-routing footprint.
     // `cells.len() * CELL_FOOTPRINT` carries forward the pessimistic
@@ -308,16 +312,20 @@ fn route_scope(entry: &ScopedPlacementIrEntry) -> ScopeRouting {
     Ok(ir)
 }
 
-/// Fill every cell's `wire_length` with the sum of Manhattan
-/// distances from each driver's source into that cell. The
-/// Steiner-shared tree total is used for congestion accounting at
-/// the routing-pass level; per-sink Manhattan is what the
-/// delay-insertion pass (§14.4) consumes, so attributing it here
-/// saves that pass a second walk.
+/// Fill every cell's `wire_length` with the routed length of each of
+/// its driver paths, summed.
+///
+/// Per-driver rather than the Steiner-shared tree total, which is what
+/// the congestion budget counts: a cell's figure answers "how much
+/// dust feeds this cell", and dust shared with a sibling sink feeds
+/// both. Routed rather than Manhattan because the two are different
+/// numbers whenever the tree detours, and a record carrying a
+/// straight-line `wire_length` beside a `delay_ticks` charged for the
+/// routed one describes no single layout.
 ///
 /// Computes into a side vector first so `ir.cells` can be borrowed
-/// immutably while the driver sources are looked up through
-/// `source_of_net`, then commits in a mutable pass. The commit is
+/// immutably while the driver routes are measured through
+/// `segment_of`, then commits in a mutable pass. The commit is
 /// loud in release too: `PlacementPhase::route_at` panics on any
 /// non-`Unrouted` variant, which is what a caller who routed twice
 /// hands us — the producer↔variant table on `PlacementPhase`
@@ -329,9 +337,9 @@ fn attribute_wire_lengths<F>(
     ir: &mut PlacementIr,
     entry: &ScopedPlacementIrEntry,
     cell_coords: &[CellCoord],
-    source_of_net: &F,
+    segment_of: &F,
 ) where
-    F: Fn(NetRef) -> CellCoord,
+    F: Fn(NetRef, CellCoord) -> u32,
 {
     let wire_lengths: Vec<u32> = ir
         .cells
@@ -339,7 +347,7 @@ fn attribute_wire_lengths<F>(
         .zip(cell_coords.iter())
         .map(|(cell, &sink)| {
             cell.drivers.iter().fold(0u32, |acc, driver| {
-                acc.saturating_add(manhattan(source_of_net(driver.net), sink))
+                acc.saturating_add(segment_of(driver.net, sink))
             })
         })
         .collect();
@@ -456,6 +464,7 @@ mod tests {
     use super::compile_routing;
     use crate::edition_netlist_ir::EditionCell;
     use crate::logic_ir::ScopeKind;
+    use crate::netlist_ir::{CellPortDriver, NetRef, PortName};
     use crate::placement_ir::{
         CellCoord, CircuitRegionReservation, PlacedCellNode, PlacementIr, PlacementPhase,
         ScopedPlacementIr, ScopedPlacementIrEntry,
@@ -489,6 +498,50 @@ mod tests {
             phase,
             span: Span::default(),
         }
+    }
+
+    /// `wire_length` reports the dust that feeds a cell, so it counts
+    /// the routed path and not the straight line between the driver's
+    /// source and the cell. The detour fixture is 24 blocks of dust
+    /// across 14 blocks of distance; a record carrying 14 beside a
+    /// `delay_ticks` charged for 24 describes no single layout.
+    ///
+    /// Hand-built because v1's placement pass lays cells in one row,
+    /// where the two measures coincide for every cell — the difference
+    /// this pins is reachable only once placement goes off-axis.
+    #[test]
+    fn wire_length_counts_the_routed_path() {
+        let mut ir = PlacementIr::new(Edition::Java);
+        ir.region = Some(reservation(16, 8, 2));
+        ir.inputs.push(crate::netlist_ir::NetlistInput {
+            name: cairn_lang_core::ast::DottedRef::new("sig".into(), vec!["a".into()]),
+            span: Span::default(),
+        });
+        for coord in [CellCoord::new(7, 0, 6), CellCoord::new(14, 0, 1)] {
+            ir.cells.push(PlacedCellNode {
+                cell: EditionCell::JavaRepeaterOr,
+                drivers: vec![CellPortDriver {
+                    port: PortName::A,
+                    net: NetRef::Input(0),
+                }],
+                coord,
+                phase: PlacementPhase::Unrouted,
+                span: Span::default(),
+            });
+        }
+        let routed = compile_routing(&scoped(ScopeKind::Struct, "detour", ir));
+        assert!(routed.diagnostics.is_empty(), "{:?}", routed.diagnostics);
+        let lengths: Vec<Option<u32>> = routed.scoped.scopes[0]
+            .ir
+            .cells
+            .iter()
+            .map(PlacedCellNode::wire_length)
+            .collect();
+        assert_eq!(
+            lengths,
+            vec![Some(12), Some(24)],
+            "the second cell is 14 blocks away and 24 blocks of wire from its driver",
+        );
     }
 
     #[test]

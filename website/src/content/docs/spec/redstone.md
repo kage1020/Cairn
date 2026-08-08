@@ -77,7 +77,9 @@ concepts `plane` / `via` / `bridge` internally (not exposed in the DSL).
   - placement: topological order, left→right.
   - routing: Manhattan. Crossings escape to a `bridge tile` or a vertical layer. Fanout builds a tree.
   - delay insertion: insert a repeater as a buffer only where a segment exceeds the signal attenuation
-    limit of 15.
+    limit of 15. A segment is measured along the **routed** path from the driver to that sink, and the
+    buffer stands on that path: a Steiner tree drops the direct source→sink edge whenever two others
+    are cheaper, so the straight line between the two is not always wire.
 - Routing is confined to the `circuit` region; if it does not fit, fail-loud (report congestion = area
   shortage).
 ```

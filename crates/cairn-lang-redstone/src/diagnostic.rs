@@ -84,7 +84,9 @@ pub enum DiagnosticCode {
     RouteCongestion,
     /// A routed driver segment (source pad or driver cell → sink coord,
     /// where the sink is either a downstream cell coord or an actuator
-    /// output-pad coord, Manhattan distance) exceeds the v1 sanity cap
+    /// output-pad coord, measured along the routed path rather than as
+    /// the straight-line distance between its ends) exceeds the v1
+    /// sanity cap
     /// for implicit buffer-repeater insertion. `spec/redstone` §14.5
     /// stage 3 lets segments longer than the 15-block dust attenuation
     /// limit be covered by buffer repeaters silently; this code fires
