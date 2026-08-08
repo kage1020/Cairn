@@ -13,19 +13,45 @@ struct cottage size=9x7
   (struct_decl
     (identifier)
     (attribute_list
-      (attribute (identifier) (size_literal (integer) (integer))))
+      (attribute
+        (identifier)
+        (size_literal
+          (integer)
+          (integer))))
     (struct_body
-      (member_stmt (member_keyword)
-        (command_arg_list (command_arg (attribute (identifier) (identifier)))))
-      (member_stmt (member_keyword)
+      (member_stmt
+        (member_keyword)
         (command_arg_list
-          (command_arg (attribute (identifier) (identifier)))
-          (command_arg (attribute (identifier) (identifier)))
-          (command_arg (attribute (identifier) (integer)))))
-      (member_stmt (member_keyword)
+          (command_arg
+            (attribute
+              (identifier)
+              (identifier)))))
+      (member_stmt
+        (member_keyword)
         (command_arg_list
-          (command_arg (attribute (identifier) (identifier)))
-          (command_arg (attribute (identifier) (identifier))))))))
+          (command_arg
+            (attribute
+              (identifier)
+              (identifier)))
+          (command_arg
+            (attribute
+              (identifier)
+              (identifier)))
+          (command_arg
+            (attribute
+              (identifier)
+              (integer)))))
+      (member_stmt
+        (member_keyword)
+        (command_arg_list
+          (command_arg
+            (attribute
+              (identifier)
+              (identifier)))
+          (command_arg
+            (attribute
+              (identifier)
+              (identifier))))))))
 
 ==================
 Member with arrow to signal
@@ -40,15 +66,36 @@ struct gatehouse size=7x5
   (struct_decl
     (identifier)
     (attribute_list
-      (attribute (identifier) (size_literal (integer) (integer))))
+      (attribute
+        (identifier)
+        (size_literal
+          (integer)
+          (integer))))
     (struct_body
-      (member_stmt (member_keyword)
+      (member_stmt
+        (member_keyword)
         (command_arg_list
-          (command_arg (attribute (identifier) (identifier)))
-          (command_arg (attribute (identifier) (signal_ref (identifier) (identifier))))
-          (command_arg (attribute (identifier) (integer)))
-          (command_arg (attribute (identifier) (integer))))
-        (signal_ref (identifier) (identifier))))))
+          (command_arg
+            (attribute
+              (identifier)
+              (identifier)))
+          (command_arg
+            (attribute
+              (identifier)
+              (signal_ref
+                (identifier)
+                (identifier))))
+          (command_arg
+            (attribute
+              (identifier)
+              (integer)))
+          (command_arg
+            (attribute
+              (identifier)
+              (integer))))
+        (signal_ref
+          (identifier)
+          (identifier))))))
 
 ==================
 Struct with trailing colon
@@ -63,10 +110,19 @@ struct shed size=1x1:
   (struct_decl
     (identifier)
     (attribute_list
-      (attribute (identifier) (size_literal (integer) (integer))))
+      (attribute
+        (identifier)
+        (size_literal
+          (integer)
+          (integer))))
     (struct_body
-      (member_stmt (member_keyword)
-        (command_arg_list (command_arg (attribute (identifier) (identifier))))))))
+      (member_stmt
+        (member_keyword)
+        (command_arg_list
+          (command_arg
+            (attribute
+              (identifier)
+              (identifier))))))))
 
 ==================
 Struct with no body
@@ -80,7 +136,11 @@ struct empty size=1x1
   (struct_decl
     (identifier)
     (attribute_list
-      (attribute (identifier) (size_literal (integer) (integer))))))
+      (attribute
+        (identifier)
+        (size_literal
+          (integer)
+          (integer))))))
 
 ==================
 Member statement with indented body
@@ -96,14 +156,28 @@ struct gatehouse size=7x5
   (struct_decl
     (identifier)
     (attribute_list
-      (attribute (identifier) (size_literal (integer) (integer))))
+      (attribute
+        (identifier)
+        (size_literal
+          (integer)
+          (integer))))
     (struct_body
-      (member_stmt_with_body (member_keyword)
-        (command_arg_list (command_arg (attribute (identifier) (identifier))))
+      (member_stmt_with_body
+        (member_keyword)
+        (command_arg_list
+          (command_arg
+            (attribute
+              (identifier)
+              (identifier))))
         (struct_body
-          (member_stmt (member_keyword)
+          (member_stmt
+            (member_keyword)
             (command_arg_list
-              (command_arg (attribute (identifier) (material_ref (identifier)))))))))))
+              (command_arg
+                (attribute
+                  (identifier)
+                  (material_ref
+                    (identifier)))))))))))
 
 ==================
 Member statement with selector, arrow output, and indented body (field labels)
@@ -119,20 +193,35 @@ struct gatehouse size=7x5
   (struct_decl
     name: (identifier)
     args: (attribute_list
-      (attribute key: (identifier) value: (size_literal (integer) (integer))))
+      (attribute
+        key: (identifier)
+        value: (size_literal
+          (integer)
+          (integer))))
     body: (struct_body
       (member_stmt_with_body
         keyword: (member_keyword)
-        selector: (attribute_list
-          (attribute key: (identifier) value: (identifier)))
+        selector: (selector
+          (filter_list
+            (attribute
+              key: (identifier)
+              value: (identifier))))
         args: (command_arg_list
-          (command_arg (attribute key: (identifier) value: (identifier))))
-        output: (signal_ref (identifier) (identifier))
+          (command_arg
+            (attribute
+              key: (identifier)
+              value: (identifier))))
+        output: (signal_ref
+          (identifier)
+          (identifier))
         body: (struct_body
           (member_stmt
             keyword: (member_keyword)
             args: (command_arg_list
-              (command_arg (attribute key: (identifier) value: (identifier))))))))))
+              (command_arg
+                (attribute
+                  key: (identifier)
+                  value: (identifier))))))))))
 
 ==================
 def declaration (field labels)
@@ -147,12 +236,19 @@ def cottage size=1x1
   (def_decl
     name: (identifier)
     args: (attribute_list
-      (attribute key: (identifier) value: (size_literal (integer) (integer))))
+      (attribute
+        key: (identifier)
+        value: (size_literal
+          (integer)
+          (integer))))
     body: (struct_body
       (member_stmt
         keyword: (member_keyword)
         args: (command_arg_list
-          (command_arg (attribute key: (identifier) value: (identifier))))))))
+          (command_arg
+            (attribute
+              key: (identifier)
+              value: (identifier))))))))
 
 ==================
 site declaration (field labels)
@@ -170,7 +266,10 @@ site plaza
       (member_stmt
         keyword: (member_keyword)
         args: (command_arg_list
-          (command_arg (attribute key: (identifier) value: (identifier))))))))
+          (command_arg
+            (attribute
+              key: (identifier)
+              value: (identifier))))))))
 
 ==================
 Member with selector, args, and arrow output (field labels)
@@ -186,21 +285,44 @@ struct gatehouse size=7x5
   (struct_decl
     name: (identifier)
     args: (attribute_list
-      (attribute key: (identifier) value: (size_literal (integer) (integer))))
+      (attribute
+        key: (identifier)
+        value: (size_literal
+          (integer)
+          (integer))))
     body: (struct_body
       (member_stmt
         keyword: (member_keyword)
         args: (command_arg_list
-          (command_arg (attribute key: (identifier) value: (identifier)))
-          (command_arg (attribute key: (identifier) value: (identifier)))
-          (command_arg (attribute key: (identifier) value: (identifier)))))
+          (command_arg
+            (attribute
+              key: (identifier)
+              value: (identifier)))
+          (command_arg
+            (attribute
+              key: (identifier)
+              value: (identifier)))
+          (command_arg
+            (attribute
+              key: (identifier)
+              value: (identifier)))))
       (member_stmt
         keyword: (member_keyword)
-        selector: (attribute_list
-          (attribute key: (identifier) value: (identifier)))
+        selector: (selector
+          (filter_list
+            (attribute
+              key: (identifier)
+              value: (identifier))))
         args: (command_arg_list
-          (command_arg (attribute key: (identifier) value: (signal_ref (identifier) (identifier)))))
-        output: (signal_ref (identifier) (identifier))))))
+          (command_arg
+            (attribute
+              key: (identifier)
+              value: (signal_ref
+                (identifier)
+                (identifier)))))
+        output: (signal_ref
+          (identifier)
+          (identifier))))))
 
 ==================
 def and site with trailing colon
@@ -218,18 +340,33 @@ site plaza:
   (def_decl
     (identifier)
     (attribute_list
-      (attribute (identifier) (size_literal (integer) (integer))))
+      (attribute
+        (identifier)
+        (size_literal
+          (integer)
+          (integer))))
     (struct_body
-      (member_stmt (member_keyword)
-        (command_arg_list (command_arg (attribute (identifier) (identifier)))))))
+      (member_stmt
+        (member_keyword)
+        (command_arg_list
+          (command_arg
+            (attribute
+              (identifier)
+              (identifier)))))))
   (site_decl
     (identifier)
     (struct_body
-      (member_stmt (member_keyword)
-        (command_arg_list (command_arg (attribute (identifier) (identifier))))))))
+      (member_stmt
+        (member_keyword)
+        (command_arg_list
+          (command_arg
+            (attribute
+              (identifier)
+              (identifier))))))))
 
 ==================
 site header args are rejected
+:error
 ==================
 
 site plaza kind=town
@@ -237,12 +374,4 @@ site plaza kind=town
 
 ---
 
-(source_file
-  (site_decl
-    (identifier)
-    (ERROR
-      (identifier)
-      (identifier))
-    (struct_body
-      (member_stmt (member_keyword)
-        (command_arg_list (command_arg (attribute (identifier) (identifier))))))))
+

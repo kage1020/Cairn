@@ -12,14 +12,28 @@ struct s size=3x3  # header note
   (struct_decl
     (identifier)
     (attribute_list
-      (attribute (identifier) (size_literal (integer) (integer))))
+      (attribute
+        (identifier)
+        (size_literal
+          (integer)
+          (integer))))
     (comment)
     (struct_body
-      (member_stmt (member_keyword)
-        (command_arg_list (command_arg (attribute (identifier) (identifier)))))
+      (member_stmt
+        (member_keyword)
+        (command_arg_list
+          (command_arg
+            (attribute
+              (identifier)
+              (identifier)))))
       (comment)
-      (member_stmt (member_keyword)
-        (command_arg_list (command_arg (attribute (identifier) (identifier))))))))
+      (member_stmt
+        (member_keyword)
+        (command_arg_list
+          (command_arg
+            (attribute
+              (identifier)
+              (identifier))))))))
 
 ==================
 Trailing comments and a comment-only line inside a nested scope
@@ -37,17 +51,37 @@ struct keep size=5x5
   (struct_decl
     (identifier)
     (attribute_list
-      (attribute (identifier) (size_literal (integer) (integer))))
-    (struct_body
-      (nested_scope
+      (attribute
         (identifier)
-        (attribute_list
-          (attribute (identifier) (identifier))
-          (attribute (identifier) (integer)))
+        (size_literal
+          (integer)
+          (integer))))
+    (struct_body
+      (member_stmt_with_body
+        (member_keyword)
+        (command_arg_list
+          (command_arg
+            (attribute
+              (identifier)
+              (identifier)))
+          (command_arg
+            (attribute
+              (identifier)
+              (integer))))
         (comment)
         (struct_body
-          (member_stmt (member_keyword)
-            (command_arg_list (command_arg (attribute (identifier) (identifier)))))
+          (member_stmt
+            (member_keyword)
+            (command_arg_list
+              (command_arg
+                (attribute
+                  (identifier)
+                  (identifier)))))
           (comment)))
-      (member_stmt (member_keyword)
-        (command_arg_list (command_arg (attribute (identifier) (identifier))))))))
+      (member_stmt
+        (member_keyword)
+        (command_arg_list
+          (command_arg
+            (attribute
+              (identifier)
+              (identifier))))))))

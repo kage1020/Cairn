@@ -10,11 +10,12 @@
  *    on the hook for their line terminator: each is followed by
  *    `repeat1($._newline)`.
  *  - `selfTerminating` (optional) items already end in their own nested
- *    `$._dedent` (e.g. `nested_scope`, itself a `struct_body`), so no
- *    trailing `$._newline` follows them here — there usually isn't a real
- *    newline character left to consume at that point, since a blank line
- *    between that item and whatever comes next is already swallowed by
- *    the *nested* body's own trailing `repeat1($._newline)` (see below).
+ *    `$._dedent` (e.g. `member_stmt_with_body`, itself holding a
+ *    `struct_body`), so no trailing `$._newline` follows them here — there
+ *    usually isn't a real newline character left to consume at that point,
+ *    since a blank line between that item and whatever comes next is
+ *    already swallowed by the *nested* body's own trailing
+ *    `repeat1($._newline)` (see below).
  *
  * `repeat1($._newline)` (not a single `$._newline`) after a lineItem: a
  * blank or comment-only line between two body items is invisible to the
@@ -33,12 +34,12 @@ function body($, lineItem, selfTerminating) {
 }
 
 /**
- * Build a `struct`/`def`/`site` declaration rule: `keyword name [args]
- * [:]`, newline-terminated, followed by an indented `struct_body`. The
- * trailing colon is optional, matching
+ * Build a `struct`/`def` declaration rule: `keyword name [args] [:]`,
+ * newline-terminated, followed by an indented `struct_body`. The trailing
+ * colon is optional, matching
  * cairn-lang-core::parse::Parser::consume_optional_colon, called after
- * struct/def/site headers exactly as it is after `theme` — real-world
- * `.crn` files use it inconsistently (e.g. `struct cottage size=9x7` vs.
+ * struct/def headers exactly as it is after `theme` — real-world `.crn`
+ * files use it inconsistently (e.g. `struct cottage size=9x7` vs.
  * `def cottage size=3x3:`).
  */
 function declOf(keyword) {
@@ -57,9 +58,24 @@ module.exports = grammar({
 
   extras: $ => [/ +/, $.comment],
 
-  externals: $ => [$._indent, $._dedent, $._newline, $._size_x],
+  externals: $ => [$._indent, $._dedent, $._newline, $._file_start, $._size_x],
 
   word: $ => $.identifier,
+
+  // cairn-lang-core::lex::Lexer::scan_ident turns these two lexemes into
+  // `Bool` tokens before anything asks what was expected, so they are the
+  // only two words in the language that can never stand as an identifier.
+  // Reserving them globally is what refuses `logic s.out = true` and
+  // `struct true size=3x3`, both of which the reference parser rejects
+  // with "expected identifier".
+  //
+  // Only these two. Every other keyword — `theme`, `struct`, `floor`,
+  // `slot` — is an ordinary identifier the parser recognises by position,
+  // so `struct s` may hold a member named `theme` and the grammar has to
+  // let it.
+  reserved: {
+    global: _ => ['true', 'false'],
+  },
 
   // `member_stmt` and `member_stmt_with_body` share the `_member_stmt_head
   // _newline` prefix (see the comment on `member_stmt`); whether an
@@ -74,6 +90,15 @@ module.exports = grammar({
   ],
 
   rules: {
+    // `_file_start` consumes the file's opening layout so the first
+    // content line is checked for legal indentation like every other line
+    // is — see the branch of the same name in `src/scanner.c`.
+    //
+    // Directives come before every declaration and never after one:
+    // cairn-lang-core::parse::Parser::parse_module reads them in a leading
+    // loop, so an `@` once the item loop has started reaches
+    // `expect_ident` and fails.
+    //
     // `directive` is single-line, so it needs its own trailing
     // `repeat1($._newline)` here (see the comment on `body()`) to absorb
     // any blank/comment lines up to the next item. `_top_level_decl` is
@@ -83,11 +108,10 @@ module.exports = grammar({
     // body's own trailing `repeat1($._newline)`, so no additional
     // `$._newline` is expected (or, past EOF, available) right here.
     source_file: $ => seq(
+      $._file_start,
       repeat($._newline),
-      repeat(choice(
-        seq($.directive, repeat1($._newline)),
-        $._top_level_decl,
-      )),
+      repeat(seq($.directive, repeat1($._newline))),
+      repeat($._top_level_decl),
     ),
 
     _top_level_decl: $ => choice(
@@ -111,17 +135,23 @@ module.exports = grammar({
       optional(field('body', $.struct_body)),
     ),
 
-    // `nested_scope` and `member_stmt_with_body` are `selfTerminating` (see
-    // `body()`): both have their own `struct_body`, so they already end in
-    // `$._dedent` and need no trailing `$._newline` of their own here.
+    // `member_stmt_with_body` is `selfTerminating` (see `body()`): it has
+    // its own `struct_body`, so it already ends in `$._dedent` and needs
+    // no trailing `$._newline` of its own here.
     struct_body: $ => body(
       $,
       choice($.member_stmt, $.logic_decl, $.assert_stmt),
-      choice($.nested_scope, $.member_stmt_with_body),
+      $.member_stmt_with_body,
     ),
 
     assert_stmt: $ => seq('assert', choice($.truth_form, $.temporal_form)),
 
+    // Rows are optional and their separators are too:
+    // cairn-lang-core::parse::Parser::parse_assert_truth loops
+    // `while !RBrace && !at_eof`, reading a row and then consuming a `;`
+    // only if one is there. So `{ }`, `{ 0 -> 1 1 -> 0 }`, and
+    // `{ 0 -> 1; }` are all accepted, while a leading `;` is not — the
+    // loop opens by demanding an integer.
     truth_form: $ => seq(
       'truth', '(',
       field('inputs', $.signal_list),
@@ -129,9 +159,7 @@ module.exports = grammar({
       field('output', $._dotted_ref),
       ')',
       '{',
-      $.truth_row,
-      repeat(seq(';', $.truth_row)),
-      optional(';'),
+      repeat(seq($.truth_row, optional(';'))),
       '}',
     ),
 
@@ -146,8 +174,14 @@ module.exports = grammar({
     // `$.signal_ref` alone.
     _dotted_ref: $ => choice($.signal_ref, $.identifier),
 
-    truth_row: $ => seq($.bit_pattern, '->', $.bit_pattern),
-    bit_pattern: $ => /[01]+/,
+    // The two sides of a row are read differently. The input side is an
+    // integer lexeme with no constraint on its digits (`parse_assert_truth`
+    // keeps the raw text and leaves width-vs-input-count to a later pass),
+    // while the output side is compared against the literal strings `0`
+    // and `1` and refused otherwise — so `2 -> 1` parses and `0 -> 10`
+    // does not.
+    truth_row: $ => seq(field('inputs', $.integer), '->', field('output', $.bit)),
+    bit: $ => token(/[01]/),
 
     temporal_form: $ => seq('always', '(', $.temporal_expr, ')'),
 
@@ -169,16 +203,17 @@ module.exports = grammar({
 
     // `_bool_expr` operands mirror cairn-lang-core::parse::parse_expr_not,
     // which resolves atoms via parse_dotted_ref — a head identifier with an
-    // optional dotted tail. `signal_ref` in this grammar requires ≥1 tail
-    // segment (repeat1), so the degenerate bare-identifier case (`a` alone)
-    // is covered by the explicit `identifier` alternative below.
+    // optional dotted tail, and nothing else. A boolean literal is
+    // deliberately absent: `logic s.out = true` reaches `expect_ident` with
+    // a `Bool` token and is refused. `signal_ref` in this grammar requires
+    // ≥1 tail segment (repeat1), so the degenerate bare-identifier case
+    // (`a` alone) is covered by the explicit `identifier` alternative.
     _bool_expr: $ => choice(
       $.binary_expression,
       $.unary_expression,
       $.parenthesized_expression,
       $.signal_ref,
       $.identifier,
-      $.boolean,
     ),
 
     binary_expression: $ => choice(
@@ -190,37 +225,15 @@ module.exports = grammar({
 
     parenthesized_expression: $ => seq('(', $._bool_expr, ')'),
 
-    nested_scope: $ => seq(
-      field('keyword', alias(choice('level', 'room'), $.identifier)),
-      optional(field('args', $.attribute_list)),
-      $._newline,
-      field('body', $.struct_body),
-    ),
-
-    // Member command args, e.g. `connect west.east_corner to east.west_corner
-    // path=@gravel`: a mix of `key=value` attributes and bare positional
-    // values (identifiers, signal refs, ...), matching
-    // cairn-lang-core::parse::Parser::parse_command's generic arg loop
-    // (`is_at_key_eq()` picks an attribute, anything else is a positional
-    // value). Deliberately not reusing `attribute_list` here: struct/def/
-    // site header args and selector bindings stay strictly `key=value`
-    // (cairn-lang-core::parse::Parser::parse_header_args_until_eol only
-    // ever calls `parse_arg`), only member-command bodies accept bare
-    // positional values.
-    command_arg_list: $ => repeat1($.command_arg),
-    command_arg: $ => choice($.attribute, $._value),
-
     // `member_stmt` (a `lineItem`, see `body()`) and `member_stmt_with_body`
     // (`selfTerminating`) share the same head — keyword, optional bracket
-    // selector, optional arg list, optional `-> output` tail — matching
-    // cairn-lang-core::parse::Parser::parse_command up through its call to
-    // `parse_value` for the arrow tail (line ~300). Split into two rules
-    // rather than making the body itself optional on one rule: `body()`
-    // needs to know statically, per alternative, whether the item already
-    // consumed its own trailing newline (`selfTerminating`) or needs one
-    // supplied (`lineItem`) — an `optional(field('body', ...))` on a single
-    // rule can't express "newline handling differs depending on whether the
-    // optional part is present".
+    // selector, arguments, and an optional `-> output` tail. Split into two
+    // rules rather than making the body itself optional on one rule:
+    // `body()` needs to know statically, per alternative, whether the item
+    // already consumed its own trailing newline (`selfTerminating`) or
+    // needs one supplied (`lineItem`) — an `optional(field('body', ...))`
+    // on a single rule can't express "newline handling differs depending on
+    // whether the optional part is present".
     member_stmt: $ => $._member_stmt_head,
 
     member_stmt_with_body: $ => seq(
@@ -229,16 +242,64 @@ module.exports = grammar({
       field('body', $.struct_body),
     ),
 
+    // One shape for every member command, matching
+    // cairn-lang-core::parse::Parser::parse_command, which reads a keyword
+    // and then loops over arguments until end of line before recursing into
+    // an optional indented body. `level` and `room` have no rule of their
+    // own here because they have none there either: they are ordinary
+    // keywords whose body happens to be the one the geometry passes read,
+    // and the parser lets *any* member carry children (writing one where
+    // nothing reads it is `E_UNSUPPORTED_NESTING`, a check diagnostic
+    // rather than a syntax error).
+    //
+    // The `-> output` tail sits mid-loop rather than at the end because
+    // that is where `parse_command` handles it: the arrow is one branch of
+    // the argument loop, which then continues, so `place x -> out mat=@oak`
+    // parses. A second arrow is refused, which the shape here expresses by
+    // allowing arguments before and after at most one of them.
     _member_stmt_head: $ => seq(
-      field('keyword', $.member_keyword),
-      optional(seq('[', field('selector', $.attribute_list), ']')),
-      optional(field('args', $.command_arg_list)),
-      optional(seq('->', field('output', $._value))),
+      field('keyword', alias($.identifier, $.member_keyword)),
+      choice(
+        seq(
+          field('selector', alias($.selector_filter, $.selector)),
+          optional(field('args', $.command_arg_list)),
+        ),
+        field('args', alias($._command_arg_list_no_leading_list, $.command_arg_list)),
+        blank(),
+      ),
+      optional(seq(
+        '->',
+        field('output', $._value),
+        optional(field('args', $.command_arg_list)),
+      )),
     ),
 
-    member_keyword: $ => choice(
-      'floor', 'walls', 'door', 'window', 'roof', 'stair',
-      'pressure_plate', 'circuit', 'place', 'connect',
+    // A mix of `key=value` attributes and bare positional values
+    // (identifiers, signal refs, lists, ...), matching `parse_command`'s
+    // generic argument loop: `is_at_key_eq()` picks an attribute, anything
+    // else is a positional value.
+    command_arg_list: $ => repeat1($.command_arg),
+    command_arg: $ => choice($.attribute, $._value),
+
+    // The same list, but its first argument may not be a bracketed one:
+    // `parse_command` tests for `[` before it enters the argument loop, so
+    // a bracket in that one position is the selector or nothing.
+    // `place [1,2]` is read as a selector holding `1`, where an attribute
+    // is required, and refused.
+    _command_arg_list_no_leading_list: $ => seq(
+      alias($._command_arg_no_list, $.command_arg),
+      repeat($.command_arg),
+    ),
+
+    _command_arg_no_list: $ => choice(
+      $.attribute,
+      $.size_literal,
+      $.material_ref,
+      prec(2, $.signal_ref),
+      $.integer,
+      $.boolean,
+      $.string,
+      $.identifier,
     ),
 
     signal_ref: $ => prec.left(seq(
@@ -256,25 +317,49 @@ module.exports = grammar({
 
     theme_body: $ => body($, choice($.slot_binding, $.selector_rule)),
 
+    // The target is a full value, not only a material reference:
+    // cairn-lang-core::parse::Parser::parse_theme_rule calls `parse_value`
+    // here, so `slot floor -> oak` and `slot floor -> "oak"` are as valid
+    // as `slot floor -> @oak_planks`.
     slot_binding: $ => seq(
       'slot',
       field('name', $.identifier),
       '->',
-      field('target', $.material_ref),
+      field('target', $._value),
     ),
 
+    // A theme row that is not a `slot` must be a selector, and the shape is
+    // fixed: keyword, bracketed filter, arrow, then zero or more bindings.
+    // `parse_theme_rule` refuses a row with no bracket ("expected `slot` or
+    // `<keyword>[..]`") and then demands the arrow, and it reads no dotted
+    // tail — `window[side=front].inside` stops at the `.`.
     selector_rule: $ => seq(
       field('selector', $.selector),
-      optional(seq('->', field('bindings', $.attribute_list))),
+      '->',
+      optional(field('bindings', $.attribute_list)),
     ),
 
+    // A theme selector row carries its keyword inside the node; a member
+    // command's keyword is the statement's own, so `_member_stmt_head`
+    // aliases the bracket part alone. `parse_theme_rule` and
+    // `parse_command` read the same `[key=value, ...]` shape through
+    // `parse_arg_list_until(RBracket)`, which accepts an empty list and
+    // treats a comma as separator noise it can skip.
     selector: $ => seq(
-      $.identifier,
-      optional(seq('[', $.attribute_list, ']')),
-      repeat(seq('.', $.identifier)),
+      field('keyword', $.identifier),
+      field('filter', $.selector_filter),
     ),
 
+    selector_filter: $ => seq('[', optional($.filter_list), ']'),
+
+    filter_list: $ => seq($.attribute, repeat(seq(optional(','), $.attribute))),
+
+    // Comma-free, unlike `filter_list`: declaration header args
+    // (`parse_header_args_until_eol`) and theme selector bindings both loop
+    // on `parse_arg` alone, so a comma between them is not skipped but read
+    // as the start of the next argument, where it fails.
     attribute_list: $ => repeat1($.attribute),
+
     attribute: $ => seq(field('key', $.identifier), '=', field('value', $._value)),
 
     material_ref: $ => seq('@', $.identifier, repeat(seq('.', $.identifier))),
@@ -293,32 +378,48 @@ module.exports = grammar({
     // only ever consulted where the grammar expects this separator, and
     // is checked before extras are skipped, which is exactly what enforces
     // immediate adjacency (`9 x 7` must not parse as one size literal).
+    //
+    // The first extent shares its pattern with `integer` deliberately: a
+    // narrower one (say, refusing an all-zero run, which `parse_value`
+    // does) would be a second token matching the same text at the same
+    // position, and the lexer has nothing to choose between them — every
+    // bare `1` in a value position would start a size literal and then
+    // fail for want of an `x`.
     size_literal: $ => seq(
       alias(token(/[0-9]+/), $.integer),
       $._size_x,
       alias(token.immediate(/[0-9]+/), $.integer),
     ),
 
+    // `@cairn` and `@requires` carry an opaque rest-of-line literal.
+    // `parse_header` consumes every token up to the newline and keeps the
+    // raw source slice, leaving version syntax to a later pass — so
+    // `@cairn draft` and `@requires mc>=1.20` are as much a parse as
+    // `@cairn 2026.06` is, and an empty value is the one refusal.
+    // `@intended_targets` is the exception: its value is re-lexed and must
+    // be a list of strings.
     directive: $ => choice(
       seq(field('name', alias('@cairn', $.directive_name)),
-          field('arg', $.version_expr)),
+          field('arg', $.directive_literal)),
       seq(field('name', alias('@requires', $.directive_name)),
-          optional('version'),
-          field('arg', $.version_expr)),
+          field('arg', $.directive_literal)),
       seq(field('name', alias('@intended_targets', $.directive_name)),
-          field('arg', $.value_list)),
+          field('arg', $.string_list)),
     ),
 
-    version_expr: $ => seq(
-      optional($._version_op),
-      $.version_literal,
-    ),
+    // Stops at `#` because the reference lexer strips a comment before the
+    // header parser ever sees it, and holds internal spaces because that
+    // parser spans from the first token after the name to the last one on
+    // the line. The trailing run keeps the token from ending on a space,
+    // which would otherwise put whitespace inside the node.
+    directive_literal: $ => token(/[^#\r\n \t]+( +[^#\r\n \t]+)*/),
 
-    _version_op: $ => choice('>=', '<=', '>', '<', '='),
+    string_list: $ => seq('[', repeat(seq($.string, optional(','))), ']'),
 
-    version_literal: $ => /[0-9]+(\.[0-9]+)*/,
-
-    value_list: $ => seq('[', optional(seq($._value, repeat(seq(',', $._value)))), ']'),
+    // A comma between items is optional in both directions: the list loop
+    // in `parse_value` reads a value and then consumes a comma if one
+    // follows, so `[a,]` and `[a b]` both parse while `[,a]` does not.
+    value_list: $ => seq('[', repeat(seq($._value, optional(','))), ']'),
 
     _value: $ => choice(
       $.size_literal,
@@ -333,7 +434,12 @@ module.exports = grammar({
 
     integer: $ => /[0-9]+/,
     boolean: $ => choice('true', 'false'),
-    string:  $ => /"([^"\\]|\\.)*"/,
+
+    // No escape sequences: `scan_string` ends the literal at the first
+    // unescaped-or-not `"`, so `"a\"b"` is the string `a\` followed by
+    // stray tokens, and a quote with no closing partner on the same line
+    // is `LexError::UnterminatedString` rather than a run to end of file.
+    string:  $ => /"[^"\r\n]*"/,
 
     identifier: $ => /[A-Za-z_][A-Za-z0-9_]*/,
 
