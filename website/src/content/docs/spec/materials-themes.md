@@ -21,6 +21,20 @@ theme medieval:
   window[class=small] -> frame=@spruce_wood
 ```
 
+A member collects the bindings of **every** selector row it matches, taken in source order, so a key
+two rows both bind keeps the later value — the cascade CSS applies to two rules of equal weight. Rows
+whose attributes merely overlap rely on that: `window[class=small,side=front]` refines
+`window[class=small]` for the members it selects, and the members only the wider row selects keep the
+wider row's binding.
+
+Two rows that select the *same* members are a different thing. Same keyword and same attributes means
+they match member for member, so a key they both bind is read by nothing on the earlier row; that is
+`E_DUPLICATE_SELECTOR` ([Lint and Diagnostics](lint) §11.1). Sameness is by meaning: attribute order
+is not part of it, and a `class=` / `id=` / `mat_slot=` value compares as label text, so
+`window[class=small]` and `window[class="small"]` are one selector. Rows that coincide but bind
+different keys are not reported — they compose, and splitting a long binding list over two lines is
+allowed.
+
 `def`, `theme`, and `site` are unified by the same slot-bearing Component mechanism
 ([Components, Editing, and Multi-building](components-editing-sites)).
 

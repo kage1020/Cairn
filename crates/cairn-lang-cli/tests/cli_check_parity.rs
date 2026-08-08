@@ -45,9 +45,11 @@ theme t:\n\
 /// A fixture's source.
 ///
 /// Most fixtures differ only in the construct that trips their diagnostic,
-/// so they are written as a body appended to [`PROLOGUE`]. A header
-/// diagnostic cannot be: the directive it repeats is legal only before the
-/// first item, so that fixture owns its whole source.
+/// so they are written as a body appended to [`PROLOGUE`]. Two cannot be.
+/// A header diagnostic repeats a directive that is legal only before the
+/// first item; and a selector fixture has to add rows to the file's *only*
+/// theme, because a second `theme` block leaves no theme auto-bound and the
+/// rows then reach no member. Both own their whole source.
 enum Source {
     WithPrologue(&'static str),
     Whole(&'static str),
@@ -81,6 +83,20 @@ const SYNTACTIC_FIXTURES: &[(&str, Source)] = &[
         Source::WithPrologue(
             "theme dup:\n  slot wall -> @cobblestone\n  slot wall -> @stone_bricks\n\
              \nstruct s size=5x5\n  walls mat_slot=wall height=3\n",
+        ),
+    ),
+    (
+        // Two rows with one keyword and one attribute set select the same
+        // members, so the later `frame=` is the only one anything reads.
+        // Written whole so the rows join the theme the struct binds.
+        "E_DUPLICATE_SELECTOR",
+        Source::Whole(
+            "@cairn 2026.06\n@requires version>=1.20\n\n\
+             theme t:\n  slot wall -> @cobblestone\n  \
+             window[class=small] -> frame=@spruce_wood\n  \
+             window[class=small] -> frame=@dark_oak_wood\n\n\
+             struct s size=5x5\n  \
+             window class=small side=front offset=1 y=1 size=1x1 mat_slot=wall\n",
         ),
     ),
     (

@@ -17,6 +17,7 @@ pub mod intent;
 pub mod lex;
 pub mod lock;
 pub mod parse;
+pub(crate) mod prose;
 pub mod resolve;
 pub mod suggest;
 
