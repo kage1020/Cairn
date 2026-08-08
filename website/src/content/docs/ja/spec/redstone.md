@@ -75,6 +75,9 @@ logic sig.sel   = mux(sel=sig.s, a=sig.x, b=sig.y)
   - placement: トポロジ順、左→右。
   - routing: マンハッタン。交差は `bridge tile` か垂直層に逃がす。fanout は木を作る。
   - delay insertion: 信号減衰の 15 を超えるセグメントにのみバッファとして repeater を挿入。
+    セグメントは、ドライバからそのシンクまでの **実配線経路** に沿って測り、バッファはその経路上に
+    置きます。Steiner 木は他の 2 辺の方が安ければ source→sink の直通辺を落とすため、両者を結ぶ
+    直線が配線であるとは限りません。
 - 配線は `circuit` 領域に閉じます。収まらなければ fail-loud (congestion = 領域不足を報告)。
 ```
 circuit region=basement void=3       # 高さ 3 のサービス層を確保し、合成回路をここに配線

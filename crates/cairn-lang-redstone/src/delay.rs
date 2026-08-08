@@ -4,11 +4,11 @@
 //! §14.5 lays out (Placement → Steiner routing → Delay insertion →
 //! Crossing legalization → Edition legalization). Walks every
 //! [`crate::placement_ir::PlacedCellNode`] in each scope's routed
-//! Placement IR, re-derives per-driver Manhattan segment lengths from
-//! the same `NetRef → source coord` mapping the routing pass uses
-//! (routing stored only the driver-sum `wire_length`, deliberately —
-//! per-driver segments are cheap to re-walk here and would bloat the
-//! JSON wire form if stored twice), and rewrites every cell's
+//! Placement IR, re-derives per-driver segment lengths from the same
+//! [`crate::routing_geometry::NetTree`] the routing pass laid (routing
+//! stored only the driver-sum `wire_length`, deliberately — the trees
+//! are cheap to rebuild and would bloat the JSON wire form if stored
+//! twice), and rewrites every cell's
 //! [`crate::placement_ir::PlacedCellNode::delay_ticks`] from `None` to
 //! `Some(base + implicit buffer contribution)`:
 //!
@@ -27,6 +27,18 @@
 //!   refresh the signal to strength 15 before it reaches the sink.
 //!   Each buffer contributes [`BUFFER_REPEATER_TICKS`] (default
 //!   repeater delay, 1 tick).
+//!
+//! A driver's segment is the length of the *routed* path from the
+//! net's source to that sink —
+//! [`crate::routing_geometry::NetTree::route_to`], not the
+//! straight-line Manhattan distance. The two coincide for every layout
+//! v1's placement pass produces, because it lays cells in one monotone
+//! row between the pad columns, but they are different quantities: a
+//! minimum spanning tree drops the direct source→sink edge whenever
+//! two others are cheaper, and the signal then detours through the
+//! terminal between them. Counting against the route is what lets
+//! stage 4 put every buffer this stage paid for onto the dust it
+//! refreshes.
 //!
 //! Buffer repeaters are **counted, not materialised** here. The
 //! routing pass discarded its per-scope occupancy set before yielding
@@ -70,7 +82,7 @@ use crate::placement_ir::{
     CellCoord, CellIdentity, CircuitRegionReservation, PlacementIr, ScopedPlacementIr,
     ScopedPlacementIrEntry,
 };
-use crate::routing_geometry::{input_pad, manhattan, output_pad};
+use crate::routing_geometry::{collect_nets, input_pad, net_trees, output_pad};
 
 /// Signal-attenuation ceiling per dust segment (`spec/redstone` §14.5
 /// "signal attenuation limit of 15"). A dust source starts at strength
@@ -237,6 +249,30 @@ fn delay_scope(entry: &ScopedPlacementIrEntry) -> ScopeDelay {
         }
     };
 
+    // The routed length from a driver's source to one of its sinks.
+    // `route_to` answers `None` only for a sink that is not a terminal
+    // of the net, which `collect_nets` makes unreachable — the sink
+    // list it built is the terminal list the tree was grown from. Loud
+    // for the same reason `source_of_net` above is: a hand-built IR
+    // that broke the correspondence would otherwise under-report
+    // `delay_ticks` in silence.
+    let nets = collect_nets(&ir, &region);
+    let trees = net_trees(&nets, source_of_net);
+    let segment_of = |net: NetRef, sink: CellCoord| -> u32 {
+        let route = trees
+            .get(&net)
+            .and_then(|tree| tree.route_to(sink))
+            .unwrap_or_else(|| {
+                panic!(
+                    "sink ({x},{y},{z}) is not a terminal of the net driving it — the driver list and the collected nets disagree",
+                    x = sink.x,
+                    y = sink.y,
+                    z = sink.z,
+                )
+            });
+        u32::try_from(route.len().saturating_sub(1)).unwrap_or(u32::MAX)
+    };
+
     // First pass: refuse if any driver segment exceeds the v1 sanity
     // cap. Done before writing `delay_ticks` so a failed scope leaves
     // no partial attribution behind — `delay_scope`'s `Err` return
@@ -244,7 +280,7 @@ fn delay_scope(entry: &ScopedPlacementIrEntry) -> ScopeDelay {
     for (cell_index, cell) in ir.cells.iter().enumerate() {
         let sink = cell_coords[cell_index];
         for (driver_index, driver) in cell.drivers.iter().enumerate() {
-            let segment = manhattan(source_of_net(driver.net), sink);
+            let segment = segment_of(driver.net, sink);
             if segment > MAX_ATTENUATION_SEGMENT {
                 return Err(attenuation_diagnostic(
                     entry,
@@ -259,11 +295,11 @@ fn delay_scope(entry: &ScopedPlacementIrEntry) -> ScopeDelay {
 
     // Also flag output driver segments: an actuator wired straight to
     // a sensor across a wide region can hit the same sanity cap
-    // without touching a cell. Uses the same source→sink Manhattan
-    // model; the sink is the output pad coord.
+    // without touching a cell. Same routed-length model; the sink is
+    // the output pad coord.
     for (output_index, output) in ir.outputs.iter().enumerate() {
         let sink = output_pad(output_index, &region);
-        let segment = manhattan(source_of_net(output.driver), sink);
+        let segment = segment_of(output.driver, sink);
         if segment > MAX_ATTENUATION_SEGMENT {
             return Err(attenuation_output_diagnostic(
                 entry,
@@ -274,20 +310,20 @@ fn delay_scope(entry: &ScopedPlacementIrEntry) -> ScopeDelay {
         }
     }
 
-    attribute_delay_ticks(&mut ir, entry, &cell_coords, &source_of_net);
+    attribute_delay_ticks(&mut ir, entry, &cell_coords, &segment_of);
 
     Ok(ir)
 }
 
 /// Fill every cell's `delay_ticks` with `base_delay(cell) + Σ buffer
-/// ticks per driver`. Buffers are counted from the per-driver
-/// Manhattan segment length recomputed via `source_of_net`; the
-/// routing pass stored only the driver-sum `wire_length` so
-/// re-derivation is required here (documented in the pass module doc).
+/// ticks per driver`. Buffers are counted from the routed length of
+/// each driver's path, measured via `segment_of`; the routing pass
+/// stored only the driver-sum `wire_length` so re-derivation is
+/// required here (documented in the pass module doc).
 ///
 /// Computes into a side vector first so `ir.cells` can be borrowed
-/// immutably while the driver sources are looked up through
-/// `source_of_net`, then commits in a mutable pass. The commit is loud
+/// immutably while the driver routes are measured through
+/// `segment_of`, then commits in a mutable pass. The commit is loud
 /// in release too: `PlacementPhase::delay_at` panics on any
 /// non-`Routed` variant, which is what a caller who ran delay
 /// insertion twice hands us — the producer↔variant table on
@@ -298,9 +334,9 @@ fn attribute_delay_ticks<F>(
     ir: &mut PlacementIr,
     entry: &ScopedPlacementIrEntry,
     cell_coords: &[CellCoord],
-    source_of_net: &F,
+    segment_of: &F,
 ) where
-    F: Fn(NetRef) -> CellCoord,
+    F: Fn(NetRef, CellCoord) -> u32,
 {
     let delay_ticks: Vec<u32> = ir
         .cells
@@ -310,10 +346,7 @@ fn attribute_delay_ticks<F>(
             let buffer_ticks = cell
                 .drivers
                 .iter()
-                .map(|driver| {
-                    let segment = manhattan(source_of_net(driver.net), sink);
-                    buffer_repeater_ticks_for_segment(segment)
-                })
+                .map(|driver| buffer_repeater_ticks_for_segment(segment_of(driver.net, sink)))
                 .fold(0u32, u32::saturating_add);
             cell.cell.base_delay_ticks().saturating_add(buffer_ticks)
         })
@@ -325,7 +358,7 @@ fn attribute_delay_ticks<F>(
 }
 
 /// Buffer repeaters needed to keep `segment` blocks of dust at
-/// strength ≥ 1 at the sink, multiplied by [`BUFFER_REPEATER_TICKS`].
+/// strength ≥ 1 at the sink.
 ///
 /// A source at strength 15 loses one unit per block, so segments of
 /// at most `DUST_ATTENUATION_LIMIT` blocks reach the sink without a
@@ -335,12 +368,22 @@ fn attribute_delay_ticks<F>(
 /// `u32::MAX` from a hand-built IR that skips the sanity check) from
 /// overflowing — the sanity cap in `delay_scope` already prevents
 /// that path in practice.
-fn buffer_repeater_ticks_for_segment(segment: u32) -> u32 {
+///
+/// `crate::crossing` calls this with the same routed length to decide
+/// how many coords to materialise, so the ticks this pass writes and
+/// the `buffer_coords` stage 4 emits are one number by construction
+/// rather than two that happen to agree.
+pub(crate) fn buffer_count_for_segment(segment: u32) -> u32 {
     if segment <= DUST_ATTENUATION_LIMIT {
         return 0;
     }
-    let buffers = (segment.saturating_sub(1)) / DUST_ATTENUATION_LIMIT;
-    buffers.saturating_mul(BUFFER_REPEATER_TICKS)
+    (segment.saturating_sub(1)) / DUST_ATTENUATION_LIMIT
+}
+
+/// [`buffer_count_for_segment`] converted to ticks by
+/// [`BUFFER_REPEATER_TICKS`].
+fn buffer_repeater_ticks_for_segment(segment: u32) -> u32 {
+    buffer_count_for_segment(segment).saturating_mul(BUFFER_REPEATER_TICKS)
 }
 
 fn attenuation_diagnostic(

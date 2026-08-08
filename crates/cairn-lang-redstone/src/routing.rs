@@ -85,7 +85,6 @@
 //! and refuses with `E_ATTENUATION_LIMIT` when a single segment
 //! exceeds the v1 sanity cap.
 
-use std::collections::HashMap;
 use std::collections::HashSet;
 
 use cairn_lang_core::check::Severity;
@@ -96,7 +95,9 @@ use crate::placement_ir::{
     CellCoord, CellIdentity, CircuitRegionReservation, PlacementIr, ScopedPlacementIr,
     ScopedPlacementIrEntry,
 };
-use crate::routing_geometry::{input_pad, manhattan, net_ref_key, net_wire_path, output_pad};
+use crate::routing_geometry::{
+    collect_nets, input_pad, manhattan, net_order, net_trees, output_pad,
+};
 
 /// Per-cell footprint used by the post-routing congestion budget.
 /// Re-exports [`crate::placement::CELL_FOOTPRINT`] so a scope that
@@ -245,42 +246,21 @@ fn route_scope(entry: &ScopedPlacementIrEntry) -> ScopeRouting {
         }
     }
 
-    // Collect nets: source → sink list. `HashMap` order is not
-    // relied on — we sort the key set below before laying wires.
-    let mut nets: HashMap<NetRef, Vec<CellCoord>> = HashMap::new();
-    for (i, cell) in ir.cells.iter().enumerate() {
-        let sink = cell_coords[i];
-        for driver in &cell.drivers {
-            nets.entry(driver.net).or_default().push(sink);
-        }
-    }
-    for (k, output) in ir.outputs.iter().enumerate() {
-        let sink = output_pad(k, &region);
-        nets.entry(output.driver).or_default().push(sink);
-    }
-
-    // Process nets in a deterministic order: fanout descending, tie
-    // by NetRef key ascending. Sorting is inert against the v1
-    // occupancy model (both L-shape elbows have identical Manhattan
-    // length and `l_shape_path` picks a fixed axis order), but pins
-    // a stable schedule so a follow-up pass that consults occupancy
-    // for elbow selection has one deterministic order to slot into
-    // without rewriting the caller.
-    let mut net_order: Vec<NetRef> = nets.keys().copied().collect();
-    net_order.sort_by(|a, b| {
-        let fa = nets[a].len();
-        let fb = nets[b].len();
-        fb.cmp(&fa)
-            .then_with(|| net_ref_key(*a).cmp(&net_ref_key(*b)))
-    });
-
-    for net in net_order {
-        let sinks = &nets[&net];
-        if sinks.is_empty() {
-            continue;
-        }
-        let source_coord = source_of_net(net);
-        for coord in net_wire_path(source_coord, sinks) {
+    // Nets and their Steiner trees come from `routing_geometry`, which
+    // the delay and crossing passes call with the same arguments. The
+    // tree is the only description of where a net's dust runs, so
+    // stage 3's buffer count and stage 4's buffer coords are measured
+    // against the wire this stage actually laid.
+    //
+    // `net_order` is inert against the v1 occupancy model — both
+    // L-shape elbows have identical Manhattan length and
+    // `l_shape_path` picks a fixed axis order — but pins a stable
+    // schedule for a follow-up pass that consults occupancy when
+    // choosing an elbow.
+    let nets = collect_nets(&ir, &region);
+    let trees = net_trees(&nets, source_of_net);
+    for net in net_order(&nets) {
+        for coord in trees[&net].wire_path() {
             occupancy.insert(coord);
         }
     }
