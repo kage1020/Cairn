@@ -5,7 +5,7 @@
 //! Crossing legalization → Edition legalization). Walks every
 //! [`crate::placement_ir::PlacedCellNode`] in each scope's routed
 //! Placement IR, re-derives per-driver segment lengths from the same
-//! [`crate::routing_geometry::NetTree`] the routing pass laid (routing
+//! `NetTree` the routing pass laid (routing
 //! stored only the driver-sum `wire_length`, deliberately — the trees
 //! are cheap to rebuild and would bloat the JSON wire form if stored
 //! twice), and rewrites every cell's
@@ -30,15 +30,26 @@
 //!
 //! A driver's segment is the length of the *routed* path from the
 //! net's source to that sink —
-//! [`crate::routing_geometry::NetTree::route_to`], not the
-//! straight-line Manhattan distance. The two coincide for every layout
-//! v1's placement pass produces, because it lays cells in one monotone
-//! row between the pad columns, but they are different quantities: a
-//! minimum spanning tree drops the direct source→sink edge whenever
-//! two others are cheaper, and the signal then detours through the
-//! terminal between them. Counting against the route is what lets
-//! stage 4 put every buffer this stage paid for onto the dust it
-//! refreshes.
+//! `route_to`, not the
+//! straight-line Manhattan distance. A minimum spanning tree drops the
+//! direct source→sink edge whenever two others are cheaper, and the
+//! signal then detours through the terminal between them. Counting
+//! against the route is what lets stage 4 put every buffer this stage
+//! paid for onto the dust it refreshes.
+//!
+//! The change is not confined to layouts v1 cannot produce. Cells sit
+//! in one monotone row, but the actuator pads join their driver's net
+//! as terminals too, and a pad on the far edge pulls the tree out of
+//! that row: a scope whose sensor drives both the cell row and an
+//! output pad measures `width + 2` to the pad where the straight line
+//! is `width`. What that does *not* reach is a cell's buffer count —
+//! an exhaustive walk of v1's placement shapes (cells at `(i,0,0)`,
+//! pads on the edge columns, every input / output count up to three
+//! and every output subset) finds no layout where a cell's routed
+//! segment crosses a [`DUST_ATTENUATION_LIMIT`] boundary its Manhattan
+//! distance does not. The reachable difference is the sanity cap on
+//! output segments, which `attenuation_cap_measures_the_routed_output
+//! _segment` pins.
 //!
 //! Buffer repeaters are **counted, not materialised** here. The
 //! routing pass discarded its per-scope occupancy set before yielding
@@ -118,16 +129,16 @@ const _: () = assert!(
     "MAX_ATTENUATION_SEGMENT must exceed DUST_ATTENUATION_LIMIT so implicit buffers have a band to cover",
 );
 
-/// v1 sanity cap on a single driver segment's Manhattan length. A
+/// v1 sanity cap on a single driver segment's *routed* length — the
+/// dust the signal travels, not the straight line between its ends. A
 /// segment longer than this needs stage-4 crossing legalization to
 /// escape into a `RouteLayer::Bridge` / `Via` layer — v1 has no such
 /// escape, so the delay pass refuses with `E_ATTENUATION_LIMIT` rather
 /// than count an unrealisable buffer chain into `delay_ticks`.
 ///
-/// 256 blocks equals 16 buffer repeaters back-to-back (each covering
-/// `DUST_ATTENUATION_LIMIT`); anything past that in a single flat
-/// segment reads as a placement mistake rather than a routing corner
-/// case in every fixture the crate ships today.
+/// 256 blocks is 17 buffer repeaters (`(256 - 1) / 15`); anything past
+/// that in a single flat segment reads as a placement mistake rather
+/// than a routing corner case in every fixture the crate ships today.
 pub const MAX_ATTENUATION_SEGMENT: u32 = 256;
 
 /// Output of a [`compile_delay`] run.
@@ -508,6 +519,64 @@ mod tests {
             width,
             depth,
             span: Span::default(),
+        }
+    }
+
+    /// The sanity cap counts the dust, not the distance.
+    ///
+    /// An actuator pad joins its driver's net as a terminal, and the
+    /// tree reaches it through the cell row rather than straight down
+    /// the region — so the segment into a pad at the far edge is
+    /// `width + 2` where the straight line is `width`. At `width =
+    /// 256` that is the difference between "at the cap" and "over it",
+    /// and it is a shape v1's placement pass produces: one sensor
+    /// driving both a cell and a door.
+    ///
+    /// The two widths are asserted together so the boundary is pinned
+    /// from both sides rather than by one row that a changed constant
+    /// would slide past.
+    #[test]
+    fn attenuation_cap_measures_the_routed_output_segment() {
+        for (width, refuses) in [(254u32, false), (255, true)] {
+            let mut ir = PlacementIr::new(Edition::Java);
+            ir.region = Some(reservation(width, 4, 2));
+            for name in ["a", "b"] {
+                ir.inputs.push(crate::netlist_ir::NetlistInput {
+                    name: cairn_lang_core::ast::DottedRef::new("sig".into(), vec![name.into()]),
+                    span: Span::default(),
+                });
+            }
+            // Two cells, so the tree reaches the pad through the row
+            // instead of straight from the sensor: with one cell the
+            // direct pad edge is the cheapest and the route collapses
+            // onto the straight line.
+            for x in [0u32, 1] {
+                ir.cells.push(placed_cell(
+                    EditionCell::JavaRepeaterOr,
+                    CellCoord::new(x, 0, 0),
+                    vec![CellPortDriver {
+                        port: PortName::A,
+                        net: NetRef::Input(1),
+                    }],
+                ));
+            }
+            ir.outputs.push(crate::netlist_ir::NetlistOutput {
+                name: cairn_lang_core::ast::DottedRef::new("sig".into(), vec!["out".into()]),
+                driver: NetRef::Input(1),
+                span: Span::default(),
+            });
+            let delayed = compile_delay(&scoped(ScopeKind::Struct, "wide", ir));
+            let fired = delayed
+                .diagnostics
+                .iter()
+                .any(|d| d.code == DiagnosticCode::AttenuationLimit);
+            assert_eq!(
+                fired,
+                refuses,
+                "width {width}: straight line {width}, routed {}, cap {MAX_ATTENUATION_SEGMENT}; got {:?}",
+                width + 2,
+                delayed.diagnostics,
+            );
         }
     }
 

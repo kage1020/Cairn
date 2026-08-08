@@ -12,7 +12,15 @@
 //! `crates/cairn-lang-redstone/tests/routing.rs` and the crossing /
 //! delay integration tests catch any drift.
 //!
-//! [`NetTree`] is the one derivation of where a net's dust runs.
+//! [`NetTree`] is the one derivation of where a net's dust runs, and it
+//! draws each edge exactly once so its two projections cannot disagree:
+//! [`NetTree::route_to`] returns a slice of the same coords
+//! [`NetTree::wire_path`] reports, reversed where the walk runs against
+//! the edge. Rendering an edge twice is what put buffer repeaters off
+//! the wire — [`l_shape_path`] is direction-asymmetric, so drawing
+//! `a → b` and `b → a` picks opposite elbows and produces two disjoint
+//! coord sets for one edge.
+//!
 //! Stage 2 drains [`NetTree::wire_path`] into its occupancy set, stage
 //! 3 measures [`NetTree::route_to`] to count buffer repeaters, and
 //! stage 4 walks the same route to place them. Keeping the tree as
@@ -130,6 +138,21 @@ where
         .collect()
 }
 
+/// One MST edge: the terminal indices it joins, always `from < to`,
+/// and the dust drawn between them in that direction.
+///
+/// The coords are rendered once, at construction. Both of
+/// [`NetTree`]'s projections read this same `Vec` — [`NetTree::route_to`]
+/// reverses it when the walk runs `to → from` — so "the route is part
+/// of the wire" is a fact about the data rather than a property two
+/// renderings have to keep agreeing on.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct TreeEdge {
+    from: usize,
+    to: usize,
+    dust: Vec<CellCoord>,
+}
+
 /// One net's rectilinear Steiner tree: the terminal set, whose first
 /// entry is always the net's source, and the MST edges over it in
 /// Kruskal acceptance order.
@@ -140,7 +163,7 @@ where
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct NetTree {
     terminals: Vec<CellCoord>,
-    edges: Vec<(usize, usize)>,
+    edges: Vec<TreeEdge>,
 }
 
 impl NetTree {
@@ -159,8 +182,8 @@ impl NetTree {
             return vec![self.terminals[0]];
         }
         let mut path: Vec<CellCoord> = Vec::new();
-        for &(i, j) in &self.edges {
-            path.extend(l_shape_path(self.terminals[i], self.terminals[j]));
+        for edge in &self.edges {
+            path.extend(edge.dust.iter().copied());
         }
         path
     }
@@ -176,33 +199,52 @@ impl NetTree {
     /// detours through the intervening terminal. `route_to(source)` is
     /// the single-coord path.
     ///
+    /// Every coord returned is one [`Self::wire_path`] reports. The
+    /// edge dust is drawn once at construction and reversed here when
+    /// the walk runs against it, rather than re-rendered — an
+    /// [`l_shape_path`] taken backwards is a different set of coords,
+    /// which is how buffers used to end up beside the wire instead of
+    /// on it.
+    ///
     /// `None` when `sink` is not one of this net's terminals — a
     /// caller asking about a sink on a different net.
     pub(crate) fn route_to(&self, sink: CellCoord) -> Option<Vec<CellCoord>> {
         let target = self.terminals.iter().position(|t| *t == sink)?;
-        let chain = self.terminal_chain(target)?;
+        let chain = self.terminal_chain(target);
         let mut path = vec![self.terminals[chain[0]]];
         for pair in chain.windows(2) {
-            path.extend(
-                l_shape_path(self.terminals[pair[0]], self.terminals[pair[1]])
-                    .into_iter()
-                    .skip(1),
-            );
+            let edge = self
+                .edges
+                .iter()
+                .find(|e| {
+                    (e.from, e.to) == (pair[0], pair[1]) || (e.from, e.to) == (pair[1], pair[0])
+                })
+                .expect("the chain only steps along edges of this tree");
+            if edge.from == pair[0] {
+                path.extend(edge.dust.iter().skip(1).copied());
+            } else {
+                path.extend(edge.dust.iter().rev().skip(1).copied());
+            }
         }
         Some(path)
     }
 
     /// Terminal indices from the source to `target`, both ends
-    /// included. `None` only if the edge set does not span the
-    /// terminals, which Kruskal over a complete graph rules out.
-    fn terminal_chain(&self, target: usize) -> Option<Vec<usize>> {
+    /// included.
+    ///
+    /// Panics if the edges do not span the terminals, which Kruskal
+    /// over a complete graph rules out — kept as its own failure so it
+    /// cannot be mistaken for `route_to`'s "not a terminal of this
+    /// net" answer, which is a caller-side disagreement rather than a
+    /// broken tree.
+    fn terminal_chain(&self, target: usize) -> Vec<usize> {
         if target == 0 {
-            return Some(vec![0]);
+            return vec![0];
         }
         let mut adjacency: Vec<Vec<usize>> = vec![Vec::new(); self.terminals.len()];
-        for &(i, j) in &self.edges {
-            adjacency[i].push(j);
-            adjacency[j].push(i);
+        for edge in &self.edges {
+            adjacency[edge.from].push(edge.to);
+            adjacency[edge.to].push(edge.from);
         }
         let mut previous: Vec<Option<usize>> = vec![None; self.terminals.len()];
         let mut seen = vec![false; self.terminals.len()];
@@ -218,9 +260,7 @@ impl NetTree {
                 queue.push_back(next);
             }
         }
-        if !seen[target] {
-            return None;
-        }
+        assert!(seen[target], "the MST edge set does not span its terminals");
         let mut chain = vec![target];
         let mut node = target;
         while let Some(prev) = previous[node] {
@@ -228,7 +268,7 @@ impl NetTree {
             node = prev;
         }
         chain.reverse();
-        Some(chain)
+        chain
     }
 }
 
@@ -262,7 +302,7 @@ pub(crate) fn net_tree(source: CellCoord, sinks: &[CellCoord]) -> NetTree {
     candidates.sort_unstable();
 
     let mut parent: Vec<usize> = (0..n).collect();
-    let mut edges: Vec<(usize, usize)> = Vec::with_capacity(n - 1);
+    let mut edges: Vec<TreeEdge> = Vec::with_capacity(n - 1);
     for (_, i, j) in candidates {
         let ri = union_find(&mut parent, i);
         let rj = union_find(&mut parent, j);
@@ -270,7 +310,15 @@ pub(crate) fn net_tree(source: CellCoord, sinks: &[CellCoord]) -> NetTree {
             continue;
         }
         parent[ri] = rj;
-        edges.push((i, j));
+        // Drawn `i → j` because the candidate generator only ever
+        // emits `i < j`, so every edge in the tree has one canonical
+        // direction and one rendering. `route_to` reverses this `Vec`
+        // rather than re-rendering it the other way round.
+        edges.push(TreeEdge {
+            from: i,
+            to: j,
+            dust: l_shape_path(terminals[i], terminals[j]),
+        });
     }
     NetTree { terminals, edges }
 }
@@ -317,6 +365,8 @@ pub(crate) fn l_shape_path(a: CellCoord, b: CellCoord) -> Vec<CellCoord> {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashSet;
+
     use cairn_lang_core::error::Span;
 
     use super::*;
@@ -416,19 +466,19 @@ mod tests {
     }
 
     #[test]
-    fn net_wire_path_empty_sinks_returns_source_only() {
+    fn wire_path_of_a_sinkless_net_is_the_source() {
         let src = CellCoord::new(1, 2, 3);
         assert_eq!(wire_path(src, &[]), vec![src]);
     }
 
     #[test]
-    fn net_wire_path_dedups_source_appearing_in_sinks() {
+    fn wire_path_dedups_a_source_that_is_also_a_sink() {
         let src = CellCoord::new(0, 0, 0);
         assert_eq!(wire_path(src, &[src]), vec![src]);
     }
 
     #[test]
-    fn net_wire_path_single_sink_matches_l_shape() {
+    fn wire_path_of_a_lone_sink_is_the_l_shape() {
         let src = CellCoord::new(0, 0, 0);
         let sink = CellCoord::new(2, 0, 1);
         assert_eq!(wire_path(src, &[sink]), l_shape_path(src, sink));
@@ -472,6 +522,34 @@ mod tests {
             !strays.is_empty(),
             "the straight line has to leave the net's wire for this fixture to mean anything",
         );
+    }
+
+    /// The reversed-edge case, from the layout a reviewer found it in.
+    /// The MST keeps `(14,0,5)—(10,0,1)` and `pad—(10,0,1)`, so the
+    /// walk to `(14,0,5)` runs against the second edge's stored
+    /// direction. Rendering it backwards with [`l_shape_path`] picks
+    /// the opposite elbow and lands seven coords beside the wire; the
+    /// buffer allocator then put a repeater on one of them, and
+    /// nothing noticed because the occupancy map is built from
+    /// [`NetTree::wire_path`] and had no owner recorded there.
+    #[test]
+    fn route_to_reuses_the_dust_when_it_walks_an_edge_backwards() {
+        let source = CellCoord::new(0, 0, 1);
+        let sinks = [CellCoord::new(14, 0, 5), CellCoord::new(10, 0, 1)];
+        let tree = net_tree(source, &sinks);
+        let owned: HashSet<CellCoord> = tree.wire_path().into_iter().collect();
+        for sink in sinks {
+            let route = tree.route_to(sink).expect("a terminal of this net");
+            let strays: Vec<CellCoord> = route
+                .iter()
+                .copied()
+                .filter(|coord| !owned.contains(coord))
+                .collect();
+            assert!(
+                strays.is_empty(),
+                "the route to {sink:?} leaves the wire at {strays:?}",
+            );
+        }
     }
 
     /// Every step of a route moves one block: the shared endpoint
@@ -579,8 +657,67 @@ mod tests {
         );
     }
 
+    mod route_invariants {
+        //! Property coverage for the two facts every consumer of
+        //! [`NetTree`] leans on: a route is part of the wire, and it
+        //! is a walk. Both held for the collinear layouts v1's
+        //! placement produces and failed on 41% of random trees, so
+        //! the example-based tests above could not have found the
+        //! reversed-edge bug on their own.
+        use proptest::prelude::*;
+
+        use super::{CellCoord, HashSet, manhattan, net_tree};
+
+        /// A source and up to four sinks in a 12×3×12 box — wide
+        /// enough that terminals differ on two axes, which is what it
+        /// takes for the two elbows of one edge to be different
+        /// coords.
+        fn terminals() -> impl Strategy<Value = (CellCoord, Vec<CellCoord>)> {
+            let coord = (0u32..12, 0u32..3, 0u32..12).prop_map(|(x, y, z)| CellCoord::new(x, y, z));
+            (coord.clone(), prop::collection::vec(coord, 1..=4))
+        }
+
+        proptest! {
+            #![proptest_config(ProptestConfig { cases: 256, ..ProptestConfig::default() })]
+
+            #[test]
+            fn route_to_is_a_subpath_of_wire_path((source, sinks) in terminals()) {
+                let tree = net_tree(source, &sinks);
+                let owned: HashSet<CellCoord> = tree.wire_path().into_iter().collect();
+                for sink in &sinks {
+                    let route = tree.route_to(*sink).expect("a terminal of this net");
+                    for coord in route {
+                        prop_assert!(
+                            owned.contains(&coord),
+                            "route to {sink:?} visits {coord:?}, which the net does not own",
+                        );
+                    }
+                }
+            }
+
+            #[test]
+            fn route_to_steps_one_block_at_a_time((source, sinks) in terminals()) {
+                let tree = net_tree(source, &sinks);
+                for sink in &sinks {
+                    let route = tree.route_to(*sink).expect("a terminal of this net");
+                    prop_assert_eq!(route.first().copied(), Some(source));
+                    prop_assert_eq!(route.last().copied(), Some(*sink));
+                    for pair in route.windows(2) {
+                        prop_assert_eq!(manhattan(pair[0], pair[1]), 1);
+                    }
+                }
+            }
+
+            #[test]
+            fn wire_path_starts_at_the_source((source, sinks) in terminals()) {
+                let tree = net_tree(source, &sinks);
+                prop_assert!(tree.wire_path().contains(&source));
+            }
+        }
+    }
+
     #[test]
-    fn net_wire_path_kruskal_tie_break_picks_lex_smallest_edges() {
+    fn wire_path_kruskal_tie_break_picks_lex_smallest_edges() {
         // Three collinear terminals: A-B and B-C each weigh 2, A-C
         // weighs 4. A weight-only sort would leave the MST ambiguous
         // between {A-B, B-C} and {A-B, A-C} once ties break either
