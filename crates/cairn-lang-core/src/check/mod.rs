@@ -27,7 +27,6 @@ mod keyword_allowlist;
 mod member_scope;
 mod nesting;
 mod positional;
-mod prose;
 mod sink;
 mod type_mismatch;
 

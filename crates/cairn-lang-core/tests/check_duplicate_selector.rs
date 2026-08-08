@@ -109,7 +109,7 @@ fn ds_2_the_rebound_key_list_reads_at_every_arity() {
         assert_eq!(
             d.primary,
             format!(
-                "`window[...]` in theme `medieval` selects the same members as an earlier row and rebinds {listed}"
+                "`window[class=small]` in theme `medieval` selects the same members as an earlier row and rebinds {listed}"
             ),
             "for `{second}`",
         );
@@ -166,17 +166,27 @@ fn ds_3b_the_anchored_notes_are_one_per_displaced_row() {
     );
     assert_eq!(d.notes.len(), 3, "and no second anchor: {:#?}", d.notes);
 
+    // The offending row binds `sill=` first, so insertion order would put
+    // the note about line 3 ahead of the one about line 2. Notes are sorted
+    // by span instead, so they read down the file.
     let from_two_rows = theme_with(
         "  window[class=small] -> frame=@spruce_wood\n  \
          window[class=small] -> sill=@oak_slab\n  \
-         window[class=small] -> frame=@dark_oak_wood sill=@stone_slab\n",
+         window[class=small] -> sill=@stone_slab frame=@dark_oak_wood\n",
     );
     let d = one(&from_two_rows);
     assert_eq!(notes(&d)[0], "`frame=` bound here");
     assert_eq!(notes(&d)[1], "`sill=` bound here");
+    let anchors: Vec<&str> = d.notes[..2]
+        .iter()
+        .map(|n| &from_two_rows[n.span.clone().expect("anchored note")])
+        .collect();
     assert_eq!(
-        &from_two_rows[d.notes[1].span.clone().expect("anchored note")],
-        "window[class=small] -> sill=@oak_slab",
+        anchors,
+        vec![
+            "window[class=small] -> frame=@spruce_wood",
+            "window[class=small] -> sill=@oak_slab",
+        ],
     );
 }
 
@@ -398,6 +408,86 @@ fn ds_14_it_coexists_with_a_key_repeated_inside_one_row() {
     let mut seen = codes(&src);
     seen.sort_unstable();
     assert_eq!(seen, vec!["E_DUPLICATE_ARG", "E_DUPLICATE_SELECTOR"]);
+}
+
+/// The selector is rendered, not elided, so two distinct pairs in one
+/// theme do not produce byte-identical primaries — the reason
+/// `incomplete_place_diag` names its subject. The rendering keeps source
+/// order and the source spelling of each value, so it reads as the line
+/// the author has to find.
+#[test]
+fn ds_16_the_primary_renders_the_selector_that_identifies_the_row() {
+    let src = theme_with(
+        "  window[class=small] -> frame=@spruce_wood\n  \
+         window[class=small] -> frame=@dark_oak_wood\n  \
+         window[side=front,y=2] -> frame=@birch_wood\n  \
+         window[side=front,y=2] -> frame=@oak_wood\n",
+    );
+    let rendered: Vec<String> = selector_only(&src)
+        .iter()
+        .map(|d| {
+            d.primary
+                .split_once("` in theme")
+                .expect("the primary opens with the rendered selector")
+                .0
+                .trim_start_matches('`')
+                .to_owned()
+        })
+        .collect();
+    assert_eq!(rendered, ["window[class=small]", "window[side=front,y=2]"]);
+}
+
+/// A label key holding a non-label value pairs with nothing — not even a
+/// byte-identical row. `value_eq_label` rejects such a value for every
+/// member, so neither row binds anything the other could take over, and
+/// `select_the_same_members` is not even reflexive there. The rows are
+/// already an error by a different scope, which is what keeps the gap from
+/// costing the author anything.
+#[test]
+fn ds_17_a_label_key_holding_a_non_label_value_pairs_with_nothing() {
+    for attr in ["id=5", "class=5", "mat_slot=5", "class=true"] {
+        let src = theme_with(&format!(
+            "  window[{attr}] -> frame=@spruce_wood\n  \
+             window[{attr}] -> frame=@dark_oak_wood\n"
+        ));
+        let mut seen = codes(&src);
+        seen.sort_unstable();
+        assert_eq!(
+            seen,
+            vec![
+                "E_THEME_SELECTOR_UNMATCHED",
+                "E_THEME_SELECTOR_UNMATCHED",
+                "E_TYPE_MISMATCH_LABEL",
+                "E_TYPE_MISMATCH_LABEL",
+            ],
+            "`{attr}` matches no member, so the identical rows displace nothing",
+        );
+    }
+}
+
+/// A `theme` block whose name lost the binding is still checked. `lower`
+/// keeps one `ThemeIr` per block with no keying by name, and this pass
+/// walks that list — the resolver's first-write-wins dedupe happens later
+/// and elsewhere. Without this, keying themes by name in `lower` would
+/// silently stop checking the shadowed body.
+#[test]
+fn ds_18_a_theme_whose_name_lost_the_binding_is_still_checked() {
+    let src = "theme medieval:\n  \
+         slot glass -> @glass_pane\n  \
+         window[class=small] -> frame=@spruce_wood\n\n\
+         theme medieval:\n  \
+         slot glass -> @white_stained_glass\n  \
+         window[class=small] -> frame=@birch_wood\n  \
+         window[class=small] -> frame=@dark_oak_wood\n\n\
+         struct cottage size=9x7\n  \
+         window class=small side=front offset=2 y=2 size=2x2 mat_slot=glass\n";
+    let found = selector_only(src);
+    assert_eq!(found.len(), 1, "got {found:#?}");
+    assert_eq!(
+        &src[found[0].span.clone()],
+        "window[class=small] -> frame=@dark_oak_wood",
+        "the pair inside the shadowed block, not the one spanning the blocks",
+    );
 }
 
 /// Two coinciding rows that reach no member are still a pair. The pass is

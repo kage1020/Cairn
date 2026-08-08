@@ -1,5 +1,5 @@
-//! `duplicate` pass — flags `key=` / `slot` / `id=` repeated in the same
-//! scope.
+//! `duplicate` pass — flags a `key=` / `slot` / `id=` / item name repeated
+//! in the same scope, and a `theme` selector row repeated as a whole.
 //!
 //! Walks the surface AST rather than the IR because the IR's
 //! [`IntentState`](crate::intent::IntentState) and `args` maps are
@@ -29,21 +29,21 @@
 //!   declare `id=NAME` for the same `NAME` (per-body scope; nested `level`
 //!   blocks have their own namespace).
 //!
-//! Every scope here reports the *repeat* and points a note at the
-//! declaration it displaces, so the anchor is the token the author would
-//! edit and the note is the one they would keep. For all but the selector
-//! scope the displaced declaration is the first one — nothing between them
-//! took anything away. A selector row's binding can be displaced twice
-//! over, so there the note names the most recent one.
+//! Every scope here reports the *repeat* and points a note at the first
+//! declaration, so the anchor is the token the author would edit and the
+//! note is the one they would keep. `E_DUPLICATE_SELECTOR` is the
+//! exception: it names the row the repeat actually takes the value from,
+//! which past two rows is not the first one. See [`check_theme_selectors`]
+//! for why that scope needs the distinction and the others do not.
 
 use indexmap::IndexMap;
 
 use crate::ast::{Arg, Header, Item, ItemKind, Module, Statement, ThemeRule, ValueKind};
 use crate::error::Span;
 use crate::intent::{IntentModule, SelectorRule, ThemeIr};
+use crate::prose::{and_list, selector_text};
 use crate::resolve::select_the_same_members;
 
-use super::prose::and_list;
 use super::{Diagnostic, DiagnosticCode, DiagnosticData, DiagnosticNote, DiagnosticSink};
 
 pub(super) fn run(module: &Module, ir: &IntentModule, sink: &mut DiagnosticSink) {
@@ -223,7 +223,10 @@ struct SelectorGroup<'a> {
     /// [`select_the_same_members`] is an equivalence relation, so agreeing
     /// with the representative is agreeing with the whole class.
     representative: &'a SelectorRule,
-    /// Binding key -> span of the row that bound it last.
+    /// Binding key -> span of the row that bound it last. Only ever
+    /// `get` and `insert`, so the ordering is not load-bearing here;
+    /// `IndexMap` for consistency with the rest of the pass. The map in
+    /// [`duplicate_selector_diag`] is the one whose order is read.
     bound: IndexMap<&'a str, &'a Span>,
 }
 
@@ -239,6 +242,19 @@ struct SelectorGroup<'a> {
 /// of a second copy of it written over `Vec<Arg>`. A key repeated *inside*
 /// one row is a different scope and stays with [`check_arg_list`], which
 /// runs over the same rows from the AST side.
+///
+/// Where the rest of the pass points its note at the *first* declaration,
+/// this one points at the most recent row to bind the key. The other
+/// scopes have nothing between the two occurrences that took anything
+/// away, so "first" and "displaced by this repeat" name the same row; a
+/// selector binding can be displaced more than once, and naming the first
+/// row would send the author to a value that was already gone.
+///
+/// Unlike `resolve`'s `check_unmatched_selectors`, no theme is skipped for
+/// not being applied to a scope. Two rows saying two things about one
+/// filter are redundant whether or not anything is bound to the theme
+/// today, and suppressing the finding would surface it later, on the
+/// unrelated edit that binds it.
 fn check_theme_selectors(theme: &ThemeIr, sink: &mut DiagnosticSink) {
     let mut groups: Vec<SelectorGroup<'_>> = Vec::new();
     for rule in &theme.selectors {
@@ -294,6 +310,10 @@ fn duplicate_selector_diag(
     for (key, span) in rebound {
         per_row.entry(span).or_default().push(format!("`{key}=`"));
     }
+    // Notes in source order. Insertion order is the offending row's binding
+    // order, which can put the note about a later line ahead of an earlier
+    // one when two rows are displaced at once.
+    per_row.sort_unstable_by(|a, _, b, _| a.start.cmp(&b.start));
     let mut notes: Vec<DiagnosticNote> = per_row
         .into_iter()
         .map(|(span, keys)| DiagnosticNote {
@@ -318,8 +338,8 @@ fn duplicate_selector_diag(
         code: DiagnosticCode::DuplicateSelector,
         span: rule.span.clone(),
         primary: format!(
-            "`{}[...]` in theme `{theme_name}` selects the same members as an earlier row and rebinds {listed}",
-            rule.keyword,
+            "`{selector}` in theme `{theme_name}` selects the same members as an earlier row and rebinds {listed}",
+            selector = selector_text(&rule.keyword, &rule.attrs),
         ),
         notes,
         data: Some(DiagnosticData::DuplicateSelector {
