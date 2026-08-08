@@ -11,18 +11,36 @@ struct s size=3x3
   (struct_decl
     name: (identifier)
     args: (attribute_list
-      (attribute key: (identifier) value: (size_literal (integer) (integer))))
+      (attribute
+        key: (identifier)
+        value: (size_literal
+          (integer)
+          (integer))))
     body: (struct_body
       (assert_stmt
         (truth_form
           inputs: (signal_list
-            (signal_ref (identifier) (identifier))
-            (signal_ref (identifier) (identifier)))
-          output: (signal_ref (identifier) (identifier))
-          (truth_row (bit_pattern) (bit_pattern))
-          (truth_row (bit_pattern) (bit_pattern))
-          (truth_row (bit_pattern) (bit_pattern))
-          (truth_row (bit_pattern) (bit_pattern)))))))
+            (signal_ref
+              (identifier)
+              (identifier))
+            (signal_ref
+              (identifier)
+              (identifier)))
+          output: (signal_ref
+            (identifier)
+            (identifier))
+          (truth_row
+            inputs: (integer)
+            output: (bit))
+          (truth_row
+            inputs: (integer)
+            output: (bit))
+          (truth_row
+            inputs: (integer)
+            output: (bit))
+          (truth_row
+            inputs: (integer)
+            output: (bit)))))))
 
 ==================
 Temporal assertion (field labels)
@@ -37,13 +55,21 @@ struct s size=3x3
   (struct_decl
     name: (identifier)
     args: (attribute_list
-      (attribute key: (identifier) value: (size_literal (integer) (integer))))
+      (attribute
+        key: (identifier)
+        value: (size_literal
+          (integer)
+          (integer))))
     body: (struct_body
       (assert_stmt
         (temporal_form
           (temporal_expr
-            trigger: (signal_ref (identifier) (identifier))
-            target: (signal_ref (identifier) (identifier))
+            trigger: (signal_ref
+              (identifier)
+              (identifier))
+            target: (signal_ref
+              (identifier)
+              (identifier))
             bound: (integer)))))))
 
 ==================
@@ -60,7 +86,11 @@ struct s size=3x3
   (struct_decl
     (identifier)
     (attribute_list
-      (attribute (identifier) (size_literal (integer) (integer))))
+      (attribute
+        (identifier)
+        (size_literal
+          (integer)
+          (integer))))
     (struct_body
       (assert_stmt
         (truth_form
@@ -68,10 +98,18 @@ struct s size=3x3
             (identifier)
             (identifier))
           (identifier)
-          (truth_row (bit_pattern) (bit_pattern))
-          (truth_row (bit_pattern) (bit_pattern))
-          (truth_row (bit_pattern) (bit_pattern))
-          (truth_row (bit_pattern) (bit_pattern))))
+          (truth_row
+            (integer)
+            (bit))
+          (truth_row
+            (integer)
+            (bit))
+          (truth_row
+            (integer)
+            (bit))
+          (truth_row
+            (integer)
+            (bit))))
       (assert_stmt
         (temporal_form
           (temporal_expr
@@ -92,12 +130,24 @@ struct s size=3x3
   (struct_decl
     (identifier)
     (attribute_list
-      (attribute (identifier) (size_literal (integer) (integer))))
+      (attribute
+        (identifier)
+        (size_literal
+          (integer)
+          (integer))))
     (struct_body
       (assert_stmt
         (truth_form
           (signal_list
-            (signal_ref (identifier) (identifier)))
-          (signal_ref (identifier) (identifier))
-          (truth_row (bit_pattern) (bit_pattern))
-          (truth_row (bit_pattern) (bit_pattern)))))))
+            (signal_ref
+              (identifier)
+              (identifier)))
+          (signal_ref
+            (identifier)
+            (identifier))
+          (truth_row
+            (integer)
+            (bit))
+          (truth_row
+            (integer)
+            (bit)))))))

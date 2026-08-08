@@ -12,11 +12,17 @@ theme medieval:
   (theme_decl
     name: (identifier)
     body: (theme_body
-      (slot_binding name: (identifier) target: (material_ref (identifier)))
-      (slot_binding name: (identifier) target: (material_ref (identifier))))))
+      (slot_binding
+        name: (identifier)
+        target: (material_ref
+          (identifier)))
+      (slot_binding
+        name: (identifier)
+        target: (material_ref
+          (identifier))))))
 
 ==================
-Selector rule with attribute filter
+Selector rule with attribute filter (field labels)
 ==================
 
 theme medieval:
@@ -26,14 +32,21 @@ theme medieval:
 
 (source_file
   (theme_decl
-    (identifier)
-    (theme_body
+    name: (identifier)
+    body: (theme_body
       (selector_rule
-        (selector
-          (identifier)
-          (attribute_list (attribute (identifier) (identifier))))
-        (attribute_list
-          (attribute (identifier) (material_ref (identifier))))))))
+        selector: (selector
+          keyword: (identifier)
+          filter: (selector_filter
+            (filter_list
+              (attribute
+                key: (identifier)
+                value: (identifier)))))
+        bindings: (attribute_list
+          (attribute
+            key: (identifier)
+            value: (material_ref
+              (identifier))))))))
 
 ==================
 Material with dotted path
@@ -50,7 +63,10 @@ theme keep_dark:
     (theme_body
       (slot_binding
         (identifier)
-        (material_ref (identifier) (identifier) (identifier))))))
+        (material_ref
+          (identifier)
+          (identifier)
+          (identifier))))))
 
 ==================
 Theme without trailing colon
@@ -65,7 +81,10 @@ theme minimal
   (theme_decl
     (identifier)
     (theme_body
-      (slot_binding (identifier) (material_ref (identifier))))))
+      (slot_binding
+        (identifier)
+        (material_ref
+          (identifier))))))
 
 ==================
 Theme with no body
@@ -80,11 +99,42 @@ theme empty:
     (identifier)))
 
 ==================
-Selector with dotted tail and no bindings
+A theme row with no bracket is not a selector
+:error
 ==================
 
 theme t:
   window.frame
+
+---
+
+==================
+A selector's dotted tail is rejected
+:error
+==================
+
+theme t:
+  door[class=heavy].panel -> mat_slot=@oak
+
+---
+
+==================
+A selector with no arrow is rejected
+:error
+==================
+
+theme t:
+  window[side=front]
+
+---
+
+==================
+Empty filter, comma-separated filter, and no bindings
+==================
+
+theme t:
+  window[] ->
+  door[a=1, b=2] -> mat=@oak
 
 ---
 
@@ -93,25 +143,47 @@ theme t:
     (identifier)
     (theme_body
       (selector_rule
-        (selector (identifier) (identifier))))))
+        (selector
+          (identifier)
+          (selector_filter)))
+      (selector_rule
+        (selector
+          (identifier)
+          (selector_filter
+            (filter_list
+              (attribute
+                (identifier)
+                (integer))
+              (attribute
+                (identifier)
+                (integer)))))
+        (attribute_list
+          (attribute
+            (identifier)
+            (material_ref
+              (identifier))))))))
 
 ==================
-Selector with attribute filter, dotted tail, and bindings (field labels)
+A slot target is any value, not only a material
 ==================
 
 theme t:
-  door[class=heavy].panel -> mat_slot=@oak
+  slot floor -> oak
+  slot wall -> "cobble"
+  slot pane -> 3
 
 ---
 
 (source_file
   (theme_decl
-    name: (identifier)
-    body: (theme_body
-      (selector_rule
-        selector: (selector
-          (identifier)
-          (attribute_list (attribute key: (identifier) value: (identifier)))
-          (identifier))
-        bindings: (attribute_list
-          (attribute key: (identifier) value: (material_ref (identifier))))))))
+    (identifier)
+    (theme_body
+      (slot_binding
+        (identifier)
+        (identifier))
+      (slot_binding
+        (identifier)
+        (string))
+      (slot_binding
+        (identifier)
+        (integer)))))

@@ -1,14 +1,14 @@
-; An `id=<ident>` attribute (whether inside a bracketed selector, e.g.
-; `door[id=front]`, a plain member_stmt command arg, e.g. `floor id=floor`,
-; or a nested_scope arg, e.g. `level id=floor1 y=0`) defines a local
-; reference target. `attribute` has the identical key/value field shape in
-; every one of these positions (member_stmt's `selector` attribute_list,
-; member_stmt's command_arg_list -> command_arg -> attribute, and
-; nested_scope's `args` attribute_list — see grammar.js), so matching on
-; `attribute` directly, without pinning the parent, covers all of them.
-; Verified against examples/: every `id=` in the corpus appears in one of
-; these three positions; no struct/def/site header uses `id=`, so no
-; separate pattern is added for those.
+; An `id=<ident>` attribute — inside a bracketed selector (e.g.
+; `door[id=front]`), among a member command's args (e.g. `floor id=floor`,
+; `level id=floor1 y=0`), or in a theme selector's bindings — defines a
+; local reference target. `attribute` has the identical key/value field
+; shape in every one of these positions (see grammar.js: the selector's
+; `filter_list`, a command's `command_arg_list`, and a theme row's
+; `attribute_list` all hold the same node), so matching on `attribute`
+; directly, without pinning the parent, covers all of them. Verified
+; against examples/: every `id=` in the corpus appears in one of these
+; positions; no struct/def/site header uses `id=`, so no separate pattern
+; is added for those.
 (attribute
   key: (identifier) @_key
   value: (identifier) @local.definition.member
