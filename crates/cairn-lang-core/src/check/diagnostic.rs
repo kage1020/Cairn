@@ -563,9 +563,8 @@ impl Diagnostic {
     /// Convert this diagnostic's primary byte span into a 1-based
     /// `line:column` [`Position`] against the given source string.
     ///
-    /// Lines are split on `\n` (covering both LF and CRLF — the trailing
-    /// `\r` adds one column the user sees an extra column for, but the
-    /// behaviour matches what `cairn parse` reports today). Column counts
+    /// Lines are split by [`crate::lines`], the same rule the lexer walks
+    /// by, so this and a parse error name the same row. Column counts
     /// Unicode scalar values, mirroring the `Position` documentation.
     ///
     /// O(`source.len()`) per call. When converting many diagnostics from
@@ -932,26 +931,42 @@ mod tests {
     }
 
     #[test]
-    fn line_starts_returns_identical_positions_to_position_at() {
-        // Soak the equivalence — for any char-boundary offset, the cached
-        // and linear implementations agree. Locks the optimisation in step
-        // with the (already-tested) reference.
-        let source = "α\nfoo\nbar\nβaz\n";
-        let lines = LineStarts::new(source);
-        // Only char-boundary offsets: byte 0 (start of α), 2 (after α =
-        // start of \n), 3 (start of 'f'), 6 (start of \n), 7 (start of 'b'),
-        // 10 (start of \n), 11 (start of β), 13 (after β), and EOF.
-        for offset in [0_usize, 2, 3, 6, 7, 10, 11, 13, source.len()] {
-            assert!(
-                source.is_char_boundary(offset),
-                "test bug: offset {offset} is not a char boundary",
-            );
-            let cached = lines.position(source, offset);
-            let linear = position_at(source, offset);
-            assert_eq!(
-                cached, linear,
-                "offset {offset} disagrees: cached={cached:?} linear={linear:?}",
-            );
+    fn position_agrees_with_a_direct_walk_of_the_source() {
+        // The index exists so N diagnostics do not re-walk the source N
+        // times, and the walk is what it has to reproduce: step one
+        // character at a time, bumping the line at each break and the
+        // column otherwise. Comparing against `position_at` instead would
+        // now be comparing the index with itself — there is one
+        // implementation, which is the point of having one rule.
+        for source in ["α\nfoo\nbar\nβaz\n", "a\r\nb\rc", "\r\r\n", "", "no break"] {
+            let lines = LineStarts::new(source);
+            let (mut line, mut col, mut offset) = (1_u32, 1_u32, 0_usize);
+            loop {
+                let expected = Position {
+                    line: NonZeroU32::new(line).expect("1-based"),
+                    col: NonZeroU32::new(col).expect("1-based"),
+                };
+                assert_eq!(
+                    lines.position(source, offset),
+                    expected,
+                    "{source:?} at byte {offset}",
+                );
+                if offset == source.len() {
+                    break;
+                }
+                if let Some(len) = crate::lines::terminator_len(source, offset) {
+                    offset += len;
+                    line += 1;
+                    col = 1;
+                } else {
+                    offset += source[offset..]
+                        .chars()
+                        .next()
+                        .expect("offset is inside the source")
+                        .len_utf8();
+                    col += 1;
+                }
+            }
         }
     }
 }
