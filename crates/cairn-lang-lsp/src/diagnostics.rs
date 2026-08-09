@@ -249,4 +249,51 @@ mod tests {
             u32::try_from(utf16_col).expect("fits u32"),
         );
     }
+
+    /// The text a diagnostic covers does not depend on how the author's
+    /// editor ends its lines.
+    ///
+    /// The reported break: a document with a lone `\r` in it published the
+    /// `walls` finding at line 2 — the `struct t` line — because the index
+    /// had not counted the `\r` as a break while the editor had. Asserting
+    /// on the *text* the range selects rather than on the line number is
+    /// what makes the three renderings directly comparable, and it is also
+    /// what the reader sees: a highlight over the wrong words.
+    #[test]
+    fn a_diagnostic_covers_the_same_text_whatever_the_line_ending() {
+        let base = "struct s size=2x2\n  floor\n  wals height=4\nstruct t size=3x3 size=4x4\n";
+        let mut selected = Vec::new();
+        for rendering in [
+            base.to_owned(),
+            base.replace('\n', "\r\n"),
+            base.replace('\n', "\r"),
+        ] {
+            let source = rendering.as_str();
+            let index = LineIndex::new(source);
+            let covered: Vec<(String, String)> = compute_diagnostics(&uri(), source)
+                .iter()
+                .map(|d| {
+                    let start = index
+                        .offset_at(source, d.range.start)
+                        .expect("range start is inside the document");
+                    let end = index
+                        .offset_at(source, d.range.end)
+                        .expect("range end is inside the document");
+                    (code_of(d).to_owned(), source[start..end].to_owned())
+                })
+                .collect();
+            selected.push(covered);
+        }
+        assert_eq!(selected[1], selected[0], "CRLF disagrees with LF");
+        assert_eq!(selected[2], selected[0], "lone CR disagrees with LF");
+        // And the covered text is the offending token, not a neighbouring
+        // line's — the failure mode the line numbers alone would hide.
+        assert!(
+            selected[0]
+                .iter()
+                .any(|(code, text)| code == "E_UNKNOWN_KEYWORD" && text == "wals height=4"),
+            "expected the unknown keyword itself to be covered, got {:?}",
+            selected[0],
+        );
+    }
 }

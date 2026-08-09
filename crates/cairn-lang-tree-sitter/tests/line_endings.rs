@@ -8,6 +8,8 @@
 //! corpus fixture would silently become `\n` and stop testing anything. The
 //! source is therefore built here, in Rust, where the bytes are literal.
 
+use std::collections::{BTreeMap, BTreeSet};
+
 use tree_sitter::Parser;
 
 /// Exercises both scanner line-break paths in one file: a nested indent
@@ -86,4 +88,152 @@ fn crlf_source_without_final_line_break_parses_identically_to_lf() {
         parse_to_sexp("unterminated CRLF", &crlf),
         parse_to_sexp("unterminated LF", lf)
     );
+}
+
+// -- node positions -------------------------------------------------------
+//
+// The tree being identical is not the same claim as the *positions* being
+// right. An editor that drives highlighting from this grammar reads
+// `Point.row` / `Point.column`, and compares them against the line numbers
+// `cairn check` prints from `cairn-lang-core`. Those two have to name the
+// same place.
+
+/// Where each leaf starts, keyed by byte offset: the 1-based row and column
+/// tree-sitter reports for it.
+///
+/// Keyed by offset rather than compared position-by-position because the two
+/// implementations do not agree on token *boundaries* — the grammar splits
+/// `5x5` into two integers around a literal `x` where the lexer produces one
+/// `Size`, and `2026.06` is one directive literal against the lexer's two
+/// integers. Those are tokenisation differences, not position defects; the
+/// claim under test is that wherever both name the same byte, they name the
+/// same place in the file.
+fn leaf_positions(source: &str) -> BTreeMap<usize, (u32, u32)> {
+    let mut parser = Parser::new();
+    parser
+        .set_language(&cairn_lang_tree_sitter::LANGUAGE.into())
+        .expect("load cairn language");
+    let tree = parser.parse(source, None).expect("parse produced no tree");
+    let mut cursor = tree.walk();
+    let mut leaves = BTreeMap::new();
+    let mut pending = vec![tree.root_node()];
+    while let Some(node) = pending.pop() {
+        if node.child_count() == 0 {
+            let point = node.start_position();
+            leaves.insert(
+                node.start_byte(),
+                (
+                    u32::try_from(point.row).expect("row fits u32") + 1,
+                    u32::try_from(point.column).expect("column fits u32") + 1,
+                ),
+            );
+        } else {
+            pending.extend(node.children(&mut cursor));
+        }
+    }
+    leaves
+}
+
+/// The same, from the reference lexer. Byte columns on both sides:
+/// `Point.column` counts bytes, and the fixture is ASCII so the distinction
+/// from characters does not arise. Synthetic tokens are dropped — they have
+/// no text, so no node corresponds to them.
+fn core_positions(source: &str) -> BTreeMap<usize, (u32, u32)> {
+    cairn_lang_core::lex::lex(source)
+        .expect("the reference lexer accepts the fixture")
+        .into_iter()
+        .filter(|token| !source[token.span.clone()].trim().is_empty())
+        .map(|token| {
+            (
+                token.span.start,
+                (token.position.line.get(), token.position.col.get()),
+            )
+        })
+        .collect()
+}
+
+/// One byte offset both implementations start a token at, and where each
+/// says that offset is.
+struct SharedPosition {
+    /// Byte offset into the source — the key the two are joined on.
+    offset: usize,
+    /// 1-based line and column from the reference lexer.
+    reference: (u32, u32),
+    /// 1-based row and column from the tree-sitter node.
+    node: (u32, u32),
+}
+
+/// Join the two implementations on the offsets they both name.
+fn shared_positions(source: &str) -> Vec<SharedPosition> {
+    let nodes = leaf_positions(source);
+    core_positions(source)
+        .into_iter()
+        .filter_map(|(offset, reference)| {
+            nodes.get(&offset).map(|node| SharedPosition {
+                offset,
+                reference,
+                node: *node,
+            })
+        })
+        .collect()
+}
+
+#[test]
+fn node_positions_match_the_reference_lexer_for_lf_and_crlf() {
+    for (label, source) in [
+        ("LF", LF_SOURCE.to_owned()),
+        ("CRLF", LF_SOURCE.replace('\n', "\r\n")),
+    ] {
+        let shared = shared_positions(&source);
+        // Every line of the fixture that holds a token has to be
+        // represented, or a comparison that only ever saw line 1 would pass
+        // on a broken row counter. Lines 4 and 5 are the blank and the
+        // comment-only line; neither produces one.
+        let rows: BTreeSet<u32> = shared.iter().map(|s| s.reference.0).collect();
+        assert_eq!(
+            rows,
+            BTreeSet::from([1, 2, 3, 6, 7]),
+            "{label}: the wrong lines were compared",
+        );
+        for shared in shared {
+            assert_eq!(
+                shared.reference, shared.node,
+                "{label}: byte {}",
+                shared.offset,
+            );
+        }
+    }
+}
+
+/// A lone `\r` is where they part, and the grammar cannot close the gap.
+///
+/// `Point.row` is maintained by the tree-sitter *runtime*'s lexer, which
+/// advances it on `\n` and nothing else; an external scanner is handed
+/// `advance` and `get_column`, not the point. So a CR-only file parses to
+/// the right tree — `lone_cr_source_parses_identically_to_lf` above — while
+/// every node after the first line reports row 0 and a column that has been
+/// climbing since the file began.
+///
+/// Pinned rather than left implicit: if a future runtime widens its line
+/// rule this test fails, which is the signal to delete it and fold the CR
+/// case into the parity test above.
+#[test]
+fn a_lone_carriage_return_leaves_every_node_on_the_first_row() {
+    let cr = LF_SOURCE.replace('\n', "\r");
+    let rows: BTreeSet<u32> = leaf_positions(&cr)
+        .into_values()
+        .map(|(row, _)| row)
+        .collect();
+    assert_eq!(
+        rows,
+        BTreeSet::from([1]),
+        "the runtime advanced a row on a lone `\\r`; the divergence this pins is gone",
+    );
+    // And the reference lexer does place them on separate lines, so the
+    // two really are describing the same file differently.
+    let reference: BTreeSet<u32> = core_positions(&cr)
+        .into_values()
+        .map(|(line, _)| line)
+        .collect();
+    assert!(reference.len() > 1, "{reference:?}");
 }

@@ -48,6 +48,15 @@ reported as such.
 A UTF-8 byte-order mark at the very start of a file is ignored — it is what a default Windows
 editor writes, and it is not part of the text. One anywhere else is an ordinary stray character.
 
+A line ends at `\n`, at `\r\n`, or at a lone `\r`, and the three are the same line break. This is
+what an editor means by a line — VS Code and Monaco both split on all three — so a diagnostic's
+line number and the line number under the cursor name the same row whichever ending the file uses.
+Reported positions are one place: a position points at the text that is wrong, so an error at the
+end of a line is reported at the end of *that* line and never at the first column of the next one.
+The tree-sitter grammar is the exception, and it is a limitation rather than a rule: the row in a
+syntax node comes from the tree-sitter runtime, which advances it on `\n` alone, so a file whose
+only terminator is a lone `\r` highlights as one long line even though it parses correctly.
+
 ## 5.2 Nesting
 Keep nesting shallow (`struct` / `def` / `level` / `theme` / `site`). Deep nesting increases
 LLM generation errors. (`room` is not in this list: it is still open — see

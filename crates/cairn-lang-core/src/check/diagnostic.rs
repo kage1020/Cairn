@@ -670,7 +670,7 @@ pub struct RenderedNote {
 #[derive(Debug, Clone)]
 pub struct LineStarts {
     /// Byte offset of the first character of each line (line 1 starts at
-    /// offset 0; subsequent entries are the byte after each `\n`).
+    /// offset 0; subsequent entries are the byte after each line break).
     starts: Vec<usize>,
 }
 
@@ -678,20 +678,18 @@ impl LineStarts {
     /// Build the index by walking the source exactly once.
     #[must_use]
     pub fn new(source: &str) -> Self {
-        let mut starts = vec![0];
-        for (i, byte) in source.bytes().enumerate() {
-            if byte == b'\n' {
-                starts.push(i + 1);
-            }
+        Self {
+            starts: crate::lines::starts(source),
         }
-        Self { starts }
     }
 
     /// Resolve a byte offset into a 1-based `line:column` [`Position`].
     ///
-    /// Identical semantics to [`position_at`]; this method does the
-    /// expensive part (counting newlines) up front, then runs a binary
-    /// search per query.
+    /// Offsets past the end of `source` clamp to the final position.
+    /// `usize → u32` overflow saturates to `u32::MAX` rather than wrapping:
+    /// any source large enough to exceed 4 billion lines is also large
+    /// enough that "we lost track of the exact column" is the reader's last
+    /// concern.
     #[must_use]
     pub fn position(&self, source: &str, byte_offset: usize) -> Position {
         let clamped = byte_offset.min(source.len());
@@ -712,24 +710,13 @@ impl LineStarts {
 
 /// Compute a 1-based `line:column` for a byte offset into `source`.
 ///
-/// `usize → u32` overflow saturates to `u32::MAX` rather than wrapping: any
-/// source large enough to exceed 4 billion lines is also large enough that
-/// "we lost track of the exact column" is the user's last concern.
-///
 /// O(`source.len()`) per call. Prefer [`LineStarts`] when converting many
-/// offsets from the same source.
+/// offsets from the same source — this is the one-shot convenience over the
+/// same index, not a second answer to the same question. Computing the line
+/// here independently is how the two came to disagree about a lone `\r`.
 #[must_use]
 pub fn position_at(source: &str, byte_offset: usize) -> Position {
-    let clamped = byte_offset.min(source.len());
-    let prefix = &source[..clamped];
-    let line_count = prefix.bytes().filter(|b| *b == b'\n').count() + 1;
-    let last_line_start = prefix.rfind('\n').map_or(0, |i| i + 1);
-    let column_chars = source[last_line_start..clamped].chars().count() + 1;
-    let line =
-        NonZeroU32::new(u32::try_from(line_count).unwrap_or(u32::MAX)).unwrap_or(NonZeroU32::MIN);
-    let col =
-        NonZeroU32::new(u32::try_from(column_chars).unwrap_or(u32::MAX)).unwrap_or(NonZeroU32::MIN);
-    Position { line, col }
+    LineStarts::new(source).position(source, byte_offset)
 }
 
 #[cfg(test)]
