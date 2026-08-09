@@ -30,16 +30,16 @@ struct s size=3x3
             (identifier)
             (identifier))
           (truth_row
-            inputs: (integer)
+            inputs: (bit_pattern)
             output: (bit))
           (truth_row
-            inputs: (integer)
+            inputs: (bit_pattern)
             output: (bit))
           (truth_row
-            inputs: (integer)
+            inputs: (bit_pattern)
             output: (bit))
           (truth_row
-            inputs: (integer)
+            inputs: (bit_pattern)
             output: (bit)))))))
 
 ==================
@@ -99,16 +99,16 @@ struct s size=3x3
             (identifier))
           (identifier)
           (truth_row
-            (integer)
+            (bit_pattern)
             (bit))
           (truth_row
-            (integer)
+            (bit_pattern)
             (bit))
           (truth_row
-            (integer)
+            (bit_pattern)
             (bit))
           (truth_row
-            (integer)
+            (bit_pattern)
             (bit))))
       (assert_stmt
         (temporal_form
@@ -146,8 +146,8 @@ struct s size=3x3
             (identifier)
             (identifier))
           (truth_row
-            (integer)
+            (bit_pattern)
             (bit))
           (truth_row
-            (integer)
+            (bit_pattern)
             (bit)))))))

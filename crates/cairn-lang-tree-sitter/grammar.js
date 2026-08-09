@@ -182,13 +182,16 @@ module.exports = grammar({
     // `$.signal_ref` alone.
     _dotted_ref: $ => choice($.signal_ref, $.identifier),
 
-    // The two sides of a row are read differently. The input side is an
-    // integer lexeme with no constraint on its digits (`parse_assert_truth`
-    // keeps the raw text and leaves width-vs-input-count to a later pass),
-    // while the output side is compared against the literal strings `0`
-    // and `1` and refused otherwise — so `2 -> 1` parses and `0 -> 10`
-    // does not.
-    truth_row: $ => seq(field('inputs', $.integer), '->', field('output', $.bit)),
+    // Both sides hold bits and nothing else, so `2 -> 1` and `0 -> 10`
+    // are equally refused. The two are still separate rules because their
+    // widths differ: the input side carries one bit per signal in the
+    // table's input list, and `parse_assert_truth` compares the two — a
+    // count this grammar cannot reach, since it would have to relate two
+    // repetitions in different halves of the rule. So a pattern of the
+    // wrong *width* parses here and is refused there, which
+    // `tests/parser_parity.rs` records rather than pretends away.
+    truth_row: $ => seq(field('inputs', $.bit_pattern), '->', field('output', $.bit)),
+    bit_pattern: $ => token(/[01]+/),
     bit: $ => token(/[01]/),
 
     temporal_form: $ => seq('always', '(', $.temporal_expr, ')'),
@@ -399,6 +402,19 @@ module.exports = grammar({
     // position, and the lexer has nothing to choose between them — every
     // bare `1` in a value position would start a size literal and then
     // fail for want of an `x`.
+    //
+    // The height carries no such guard, though `scan_number` refuses a
+    // literal whose run continues into a third extent or a word
+    // (`2x2x9`, `2x2y`). Expressing that needs negative lookahead, which
+    // tree-sitter's regex engine rejects outright, and the alternative —
+    // making the height a token that also swallows the offending tail —
+    // would put the error inside `size_literal` instead of ending the
+    // literal at it. So this grammar accepts what `scan_number` refuses,
+    // wherever the rule is actually reached: `size_with_a_third_extent`
+    // in `tests/parser_parity.rs` records it under `KNOWN_DIVERGENCES`.
+    // (A declaration header refuses the same text for an unrelated
+    // reason — it takes no trailing bare token — which is why the
+    // fixtures for it are named after headers, not sizes.)
     size_literal: $ => seq(
       alias(token(/[0-9]+/), $.integer),
       $._size_x,

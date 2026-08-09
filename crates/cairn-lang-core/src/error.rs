@@ -103,6 +103,27 @@ fn render_nesting_too_deep(limit: usize) -> String {
     )
 }
 
+/// Name a character the lexer could not place.
+///
+/// Quoting it verbatim is right for a character the reader can see and
+/// useless otherwise: U+FEFF renders as nothing, so the message quoted an
+/// empty string, and U+00A0 renders as a space, so it read as though an
+/// ordinary space were the problem. Neither tells the author what to
+/// delete.
+///
+/// The test is whether the glyph carries the information, not whether it
+/// is ASCII. A full-width `＝` and a stray `あ` are both plainly visible
+/// and are the likeliest mistakes in a project with Japanese docs, so
+/// they keep their glyph; the codepoint rides along, because two
+/// characters that look alike are exactly when one is needed.
+fn render_unexpected_char(ch: char) -> String {
+    if ch.is_control() || ch.is_whitespace() || ch == '\u{feff}' {
+        format!("unexpected character U+{:04X}", ch as u32)
+    } else {
+        format!("unexpected character `{ch}` (U+{:04X})", ch as u32)
+    }
+}
+
 fn render_invalid_int(context: IntContext, lexeme: &str, kind: IntErrorKind) -> String {
     format!(
         "{} `{}`: {}",
@@ -130,6 +151,25 @@ pub enum LexError {
         /// Number of leading spaces observed.
         got: u32,
     },
+    /// Indentation opens more than one level in a single step.
+    ///
+    /// Separate from [`LexError::OddIndent`] because the repair is
+    /// different and the other message actively misleads: a 4-space
+    /// indent already *is* a multiple of 2, so being told to make it one
+    /// leaves an author — or a generator reading the message back — with
+    /// nothing to change.
+    #[error(
+        "{position}: indentation opens more than one level at once \
+         (got {got} spaces, expected {expected} spaces)"
+    )]
+    IndentJump {
+        /// Where the over-deep indentation begins.
+        position: Position,
+        /// Number of leading spaces observed.
+        got: u32,
+        /// The one width that opens exactly one level here.
+        expected: u32,
+    },
     /// Indentation pops to a level that was never entered.
     #[error("{position}: dedent does not match any enclosing indentation level")]
     UnmatchedDedent {
@@ -143,12 +183,33 @@ pub enum LexError {
         position: Position,
     },
     /// An unrecognised character was encountered.
-    #[error("{position}: unexpected character `{ch}`")]
+    #[error("{position}: {}", render_unexpected_char(*ch))]
     UnexpectedChar {
         /// Where the character is.
         position: Position,
         /// The offending character.
         ch: char,
+    },
+    /// A size literal is followed by text that would have continued it.
+    ///
+    /// `2x2x9` holds a third extent the token has no room for, and `2x2y`
+    /// runs the literal into a word. Both used to lex as a `Size` plus a
+    /// stray identifier: in a member's arguments that reached
+    /// `check::positional`, which reported a bare value the author never
+    /// wrote, at a column past the literal that produced it; in a
+    /// declaration header, which has no positional list, the parser
+    /// failed at the end of the line instead.
+    #[error(
+        "{position}: size literal `{literal}` is followed by `{found}`; \
+         a size is two extents, as in `9x7`"
+    )]
+    TrailingSizeSegment {
+        /// Where the literal starts.
+        position: Position,
+        /// The literal as written, up to the offending character.
+        literal: String,
+        /// The character that would have continued it.
+        found: char,
     },
     /// An integer literal could not be parsed. Carries the failure `kind` so
     /// downstream tooling (e.g. LSP quick-fix) can dispatch without parsing
@@ -240,9 +301,11 @@ impl LexError {
         match self {
             Self::TabIndent { position }
             | Self::OddIndent { position, .. }
+            | Self::IndentJump { position, .. }
             | Self::UnmatchedDedent { position }
             | Self::UnterminatedString { position }
             | Self::UnexpectedChar { position, .. }
+            | Self::TrailingSizeSegment { position, .. }
             | Self::InvalidInt { position, .. } => *position,
         }
     }

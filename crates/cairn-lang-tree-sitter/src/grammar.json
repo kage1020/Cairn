@@ -436,7 +436,7 @@
           "name": "inputs",
           "content": {
             "type": "SYMBOL",
-            "name": "integer"
+            "name": "bit_pattern"
           }
         },
         {
@@ -452,6 +452,13 @@
           }
         }
       ]
+    },
+    "bit_pattern": {
+      "type": "TOKEN",
+      "content": {
+        "type": "PATTERN",
+        "value": "[01]+"
+      }
     },
     "bit": {
       "type": "TOKEN",

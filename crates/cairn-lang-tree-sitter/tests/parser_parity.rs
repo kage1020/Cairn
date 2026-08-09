@@ -267,10 +267,17 @@ const FIXTURES: &[(&str, &str, Verdict)] = &[
         "struct s size=3x3\n  assert truth(a.b -> c.d) { 0 -> 1; }\n",
         Accept,
     ),
-    // The input side is any integer lexeme; only the output is a bit.
+    // Both sides of a row hold bits and nothing else.
     (
         "truth_non_bit_input",
         "struct s size=3x3\n  assert truth(a.b -> c.d) { 2 -> 1 }\n",
+        Reject,
+    ),
+    // One bit per input signal, counted against the list left of the
+    // arrow.
+    (
+        "truth_row_matches_the_input_arity",
+        "struct s size=3x3\n  assert truth(a.b, c.d -> e.f) { 01 -> 1 }\n",
         Accept,
     ),
     (
@@ -303,6 +310,21 @@ const FIXTURES: &[(&str, &str, Verdict)] = &[
         "size_leading_zero",
         "struct s size=03x3\n  floor mat_slot=f\n",
         Accept,
+    ),
+    // Both refuse this, but not for the reason it looks like: a
+    // declaration header refuses *any* trailing bare token, so
+    // `size=2x2 junk` fails here identically. The size rule is not
+    // consulted, which is why the real case lives in
+    // `KNOWN_DIVERGENCES` — see `size_with_a_third_extent`.
+    (
+        "a_header_refuses_a_trailing_token",
+        "struct s size=2x2x9\n  floor a=1\n",
+        Reject,
+    ),
+    (
+        "a_header_refuses_a_trailing_token_whatever_it_is",
+        "struct s size=2x2 junk\n  floor a=1\n",
+        Reject,
     ),
     (
         "size_spaced",
@@ -496,6 +518,52 @@ const KNOWN_DIVERGENCES: &[(&str, &str, Verdict)] = &[
     (
         "size_zero_extent",
         "struct s size=0x3\n  floor mat_slot=f\n",
+        Accept,
+    ),
+    // -- a size literal that runs into a word --------------------------
+    //
+    // Where the rule is actually consulted — a member's arguments, or a
+    // value — the grammar takes what `scan_number` refuses. `Size` holds
+    // two extents; a run continuing past the second is a literal the
+    // token cannot carry.
+    //
+    // Expressing that here needs negative lookahead after the height,
+    // which tree-sitter's regex engine rejects outright ("look-around ...
+    // is not supported"). Widening the height token to swallow the tail
+    // would move the error inside `size_literal` rather than ending the
+    // literal at it, which is a different tree, not a refusal.
+    (
+        "size_with_a_third_extent",
+        "struct s size=3x3\n  floor mat_slot=f size=2x2x9\n",
+        Accept,
+    ),
+    (
+        "size_running_into_a_word",
+        "struct s size=3x3\n  floor mat_slot=f size=2x2y\n",
+        Accept,
+    ),
+    // -- a truth row wider than `i64` -----------------------------------
+    //
+    // A row's pattern reaches the parser as an `Int` token, so `lex.rs`
+    // parses it as `i64` on the way through and a 20-bit row of ones
+    // overflows. The digits are pattern data rather than a number — the
+    // parser keeps the lexeme precisely because `01` and `1` differ — so
+    // the ceiling is an artefact of the token type, not a rule. This
+    // grammar's `bit_pattern` has no such ceiling and accepts the row.
+    (
+        "truth_row_wider_than_i64",
+        "struct s size=3x3\n  assert truth(a, b, c, d, e, f, g, h, i, j, k, l, m, n, o, p, q, r, s, t -> z) { 11111111111111111111 -> 1 }\n",
+        Accept,
+    ),
+    // -- a truth row of the wrong width --------------------------------
+    //
+    // `parse_assert_truth` compares a row's width against the number of
+    // signals left of the arrow. This grammar would have to relate two
+    // repetitions in different halves of one rule, which a context-free
+    // grammar cannot; the digits themselves are checked on both sides.
+    (
+        "truth_row_wider_than_the_input_list",
+        "struct s size=3x3\n  assert truth(a.b -> c.d) { 00 -> 1 }\n",
         Accept,
     ),
     (

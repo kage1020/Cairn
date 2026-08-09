@@ -1022,7 +1022,7 @@
         "required": true,
         "types": [
           {
-            "type": "integer",
+            "type": "bit_pattern",
             "named": true
           }
         ]
@@ -1172,6 +1172,10 @@
   },
   {
     "type": "bit",
+    "named": true
+  },
+  {
+    "type": "bit_pattern",
     "named": true
   },
   {

@@ -21,6 +21,33 @@ that is not `key=`, `-> binding`, or `[selector]` into the same list, so a dropp
 (`walls mat_slot=wall height 3`) lands there too — and a `walls` with no `height=` is not
 shortened, it is not built at all.
 
+### 5.1.1 Literals and separators
+A size literal is exactly two extents, `WxH`. A run that continues past the second — `2x2x9`, or
+`2x2y` — is refused rather than read as a size followed by something else. Read that way, the
+something else lands among the positional values, where it is reported as a bare argument the
+author never wrote (§5.1), at a column past the literal that produced it — and in a declaration
+header, which keeps no positional values, the failure surfaces at the end of the line instead.
+Refusing at the literal also reaches the tools that never run the checks, such as the tree-sitter
+grammar an editor highlights with.
+
+Commas are **optional separators**, not structure: `mat=[a, b]` and `mat=[a b]` name the same two
+items, as do `[side=front, y=2]` and `[side=front y=2]`. The two lists differ in how much
+punctuation they tolerate — a `[selector]`'s attribute list skips a comma wherever it finds one, so
+`[side=front, , y=2]` parses, while a value list reads at most one between items and refuses
+`[a, , b]`. The one place a comma carries meaning is the input list of `assert truth(...)`, where
+it separates signals whose count the row width is checked against.
+
+A truth-table row assigns one bit per input signal, so `truth(a, b -> out)` takes rows two bits
+wide and `{ 2->0 }` or `{ 0->0 }` are refused: a row the evaluator cannot read looks like coverage
+and is worse than no row at all.
+
+Indentation is two spaces per level and opens one level at a time. A width that is not a multiple
+of two and a jump of more than one level are different mistakes with different repairs, and are
+reported as such.
+
+A UTF-8 byte-order mark at the very start of a file is ignored — it is what a default Windows
+editor writes, and it is not part of the text. One anywhere else is an ordinary stray character.
+
 ## 5.2 Nesting
 Keep nesting shallow (`struct` / `def` / `level` / `theme` / `site`). Deep nesting increases
 LLM generation errors. (`room` is not in this list: it is still open — see

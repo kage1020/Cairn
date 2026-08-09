@@ -443,7 +443,45 @@ impl<'a> Parser<'a> {
         self.expect(&TokenKind::LBrace)?;
         let mut rows = Vec::new();
         while !self.peek_is(&TokenKind::RBrace) && !self.at_eof() {
+            let pattern_position = self.position();
             let inputs_lex = self.expect_int_lexeme()?;
+            // A row assigns one bit per input signal, so the pattern is
+            // checked against the list left of the arrow.
+            //
+            // Here rather than downstream, though `AssertIr::Truth` does
+            // keep `inputs` beside `rows` and could check it again: this
+            // is where the failure has a position to point at, and where
+            // it is checked once instead of by every pass that grows a
+            // reason to care. Nothing reads `AssertIr::Truth` yet — the
+            // evaluator is unimplemented, as `check::nesting` notes — so
+            // "downstream" is a plan, and a table that asserts nothing
+            // would sit in the IR looking exactly like one that passes
+            // until that plan arrives.
+            //
+            // A leading zero is data here rather than a numeric quirk,
+            // which is why the row keeps the raw lexeme: `01` and `1` are
+            // different rows of a two-input table.
+            if let Some(bad) = inputs_lex.chars().find(|c| !matches!(c, '0' | '1')) {
+                return Err(ParseError::Syntax {
+                    position: pattern_position,
+                    message: format!(
+                        "truth-table input pattern `{inputs_lex}` must hold only `0` and `1`, \
+                         got `{bad}`"
+                    ),
+                });
+            }
+            if inputs_lex.chars().count() != inputs.len() {
+                return Err(ParseError::Syntax {
+                    position: pattern_position,
+                    message: format!(
+                        "truth-table input pattern `{inputs_lex}` is {got} bits wide, \
+                         but the table has {want} input{plural}",
+                        got = inputs_lex.chars().count(),
+                        want = inputs.len(),
+                        plural = if inputs.len() == 1 { "" } else { "s" },
+                    ),
+                });
+            }
             self.expect(&TokenKind::Arrow)?;
             let out_lex = self.expect_int_lexeme()?;
             let output = match out_lex.as_str() {
