@@ -52,6 +52,28 @@ fn crlf_source_parses_identically_to_lf() {
     assert_eq!(parse_to_sexp("CRLF", &crlf), parse_to_sexp("LF", LF_SOURCE));
 }
 
+/// A lone `\r` must too, and this variant is the one that needs the whole
+/// s-expression rather than an error check.
+///
+/// `get_column()` restarts at `\n` and at nothing else, so in a `\r`-only
+/// file every line is measured against a column that has been climbing
+/// since the file began. Getting that wrong does not reliably fail the
+/// parse — it can just as easily nest a member one level too deep, which
+/// nothing but a tree comparison sees.
+///
+/// `LF_SOURCE` is the right fixture because it already holds a blank line
+/// and a comment-only line, and those are what carry the scanner across a
+/// second line break before it measures the next one — the case where the
+/// base column has to move with it.
+#[test]
+fn lone_cr_source_parses_identically_to_lf() {
+    let cr = LF_SOURCE.replace('\n', "\r");
+    assert_eq!(
+        parse_to_sexp("lone CR", &cr),
+        parse_to_sexp("LF", LF_SOURCE)
+    );
+}
+
 /// The last line of a file need not be terminated; dropping the final line
 /// break is what makes the scanner synthesize its zero-width EOF NEWLINE, and
 /// that path has to behave the same whichever line ending the rest of the

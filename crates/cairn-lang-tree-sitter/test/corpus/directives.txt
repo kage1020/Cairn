@@ -9,7 +9,7 @@
 (source_file
   (directive
     name: (directive_name)
-    arg: (version_expr (version_literal))))
+    arg: (directive_literal)))
 
 ==================
 @requires with operator (field labels)
@@ -22,7 +22,7 @@
 (source_file
   (directive
     name: (directive_name)
-    arg: (version_expr (version_literal))))
+    arg: (directive_literal)))
 
 ==================
 @intended_targets list (field labels)
@@ -35,7 +35,9 @@
 (source_file
   (directive
     name: (directive_name)
-    arg: (value_list (string) (string))))
+    arg: (string_list
+      (string)
+      (string))))
 
 ==================
 @requires bare version, no prefix or operator
@@ -48,7 +50,7 @@
 (source_file
   (directive
     (directive_name)
-    (version_expr (version_literal))))
+    (directive_literal)))
 
 ==================
 @requires with < operator
@@ -61,7 +63,7 @@
 (source_file
   (directive
     (directive_name)
-    (version_expr (version_literal))))
+    (directive_literal)))
 
 ==================
 @requires with = operator
@@ -74,7 +76,7 @@
 (source_file
   (directive
     (directive_name)
-    (version_expr (version_literal))))
+    (directive_literal)))
 
 ==================
 @requires with <= operator
@@ -87,7 +89,7 @@
 (source_file
   (directive
     (directive_name)
-    (version_expr (version_literal))))
+    (directive_literal)))
 
 ==================
 @requires with > operator
@@ -100,7 +102,7 @@
 (source_file
   (directive
     (directive_name)
-    (version_expr (version_literal))))
+    (directive_literal)))
 
 ==================
 @requires single-segment version
@@ -113,7 +115,7 @@
 (source_file
   (directive
     (directive_name)
-    (version_expr (version_literal))))
+    (directive_literal)))
 
 ==================
 @cairn four-segment version
@@ -126,7 +128,7 @@
 (source_file
   (directive
     (directive_name)
-    (version_expr (version_literal))))
+    (directive_literal)))
 
 ==================
 @intended_targets empty list
@@ -139,4 +141,26 @@
 (source_file
   (directive
     (directive_name)
-    (value_list)))
+    (string_list)))
+
+==================
+A directive name is one whole word
+:error
+==================
+
+@cairnx 2026.06
+
+---
+
+==================
+@cairn with an opaque value
+==================
+
+@cairn draft
+
+---
+
+(source_file
+  (directive
+    (directive_name)
+    (directive_literal)))

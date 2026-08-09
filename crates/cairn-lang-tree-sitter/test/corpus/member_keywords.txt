@@ -20,47 +20,127 @@ struct s size=9x7
   (struct_decl
     (identifier)
     (attribute_list
-      (attribute (identifier) (size_literal (integer) (integer))))
+      (attribute
+        (identifier)
+        (size_literal
+          (integer)
+          (integer))))
     (struct_body
-      (member_stmt (member_keyword)
+      (member_stmt
+        (member_keyword)
         (command_arg_list
-          (command_arg (attribute (identifier) (identifier)))))
-      (member_stmt (member_keyword)
+          (command_arg
+            (attribute
+              (identifier)
+              (identifier)))))
+      (member_stmt
+        (member_keyword)
         (command_arg_list
-          (command_arg (attribute (identifier) (identifier)))
-          (command_arg (attribute (identifier) (integer)))))
-      (member_stmt (member_keyword)
+          (command_arg
+            (attribute
+              (identifier)
+              (identifier)))
+          (command_arg
+            (attribute
+              (identifier)
+              (integer)))))
+      (member_stmt
+        (member_keyword)
         (command_arg_list
-          (command_arg (attribute (identifier) (identifier)))
-          (command_arg (attribute (identifier) (identifier)))))
-      (member_stmt (member_keyword)
+          (command_arg
+            (attribute
+              (identifier)
+              (identifier)))
+          (command_arg
+            (attribute
+              (identifier)
+              (identifier)))))
+      (member_stmt
+        (member_keyword)
         (command_arg_list
-          (command_arg (attribute (identifier) (identifier)))
-          (command_arg (attribute (identifier) (integer)))
-          (command_arg (attribute (identifier) (integer)))))
-      (member_stmt (member_keyword)
+          (command_arg
+            (attribute
+              (identifier)
+              (identifier)))
+          (command_arg
+            (attribute
+              (identifier)
+              (integer)))
+          (command_arg
+            (attribute
+              (identifier)
+              (integer)))))
+      (member_stmt
+        (member_keyword)
         (command_arg_list
-          (command_arg (attribute (identifier) (identifier)))
-          (command_arg (attribute (identifier) (integer)))))
-      (member_stmt (member_keyword)
+          (command_arg
+            (attribute
+              (identifier)
+              (identifier)))
+          (command_arg
+            (attribute
+              (identifier)
+              (integer)))))
+      (member_stmt
+        (member_keyword)
         (command_arg_list
-          (command_arg (attribute (identifier) (identifier)))
-          (command_arg (attribute (identifier) (integer)))
-          (command_arg (attribute (identifier) (integer)))))
-      (member_stmt (member_keyword)
+          (command_arg
+            (attribute
+              (identifier)
+              (identifier)))
+          (command_arg
+            (attribute
+              (identifier)
+              (integer)))
+          (command_arg
+            (attribute
+              (identifier)
+              (integer)))))
+      (member_stmt
+        (member_keyword)
         (command_arg_list
-          (command_arg (attribute (identifier) (identifier)))
-          (command_arg (attribute (identifier) (signal_ref (identifier) (identifier))))))
-      (member_stmt (member_keyword)
+          (command_arg
+            (attribute
+              (identifier)
+              (identifier)))
+          (command_arg
+            (attribute
+              (identifier)
+              (signal_ref
+                (identifier)
+                (identifier))))))
+      (member_stmt
+        (member_keyword)
         (command_arg_list
-          (command_arg (attribute (identifier) (identifier)))
-          (command_arg (attribute (identifier) (identifier)))))
-      (member_stmt (member_keyword)
+          (command_arg
+            (attribute
+              (identifier)
+              (identifier)))
+          (command_arg
+            (attribute
+              (identifier)
+              (identifier)))))
+      (member_stmt
+        (member_keyword)
         (command_arg_list
-          (command_arg (attribute (identifier) (identifier)))
-          (command_arg (attribute (identifier) (identifier)))))
-      (member_stmt (member_keyword)
+          (command_arg
+            (attribute
+              (identifier)
+              (identifier)))
+          (command_arg
+            (attribute
+              (identifier)
+              (identifier)))))
+      (member_stmt
+        (member_keyword)
         (command_arg_list
-          (command_arg (signal_ref (identifier) (identifier)))
-          (command_arg (identifier))
-          (command_arg (signal_ref (identifier) (identifier))))))))
+          (command_arg
+            (signal_ref
+              (identifier)
+              (identifier)))
+          (command_arg
+            (identifier))
+          (command_arg
+            (signal_ref
+              (identifier)
+              (identifier))))))))

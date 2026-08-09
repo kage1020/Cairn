@@ -12,15 +12,30 @@ struct s size=3x3
   (struct_decl
     (identifier)
     (attribute_list
-      (attribute (identifier) (size_literal (integer) (integer))))
+      (attribute
+        (identifier)
+        (size_literal
+          (integer)
+          (integer))))
     (struct_body
-      (member_stmt (member_keyword)
+      (member_stmt
+        (member_keyword)
         (command_arg_list
-          (command_arg (attribute (identifier) (boolean)))
-          (command_arg (attribute (identifier) (string)))))
-      (member_stmt (member_keyword)
+          (command_arg
+            (attribute
+              (identifier)
+              (boolean)))
+          (command_arg
+            (attribute
+              (identifier)
+              (string)))))
+      (member_stmt
+        (member_keyword)
         (command_arg_list
-          (command_arg (attribute (identifier) (boolean))))))))
+          (command_arg
+            (attribute
+              (identifier)
+              (boolean))))))))
 
 ==================
 List value with nested and empty lists
@@ -35,16 +50,25 @@ struct s size=3x3
   (struct_decl
     (identifier)
     (attribute_list
-      (attribute (identifier) (size_literal (integer) (integer))))
+      (attribute
+        (identifier)
+        (size_literal
+          (integer)
+          (integer))))
     (struct_body
-      (member_stmt (member_keyword)
+      (member_stmt
+        (member_keyword)
         (command_arg_list
           (command_arg
-            (attribute (identifier)
+            (attribute
+              (identifier)
               (value_list
                 (identifier)
                 (integer)
-                (value_list (identifier) (material_ref (identifier)))
+                (value_list
+                  (identifier)
+                  (material_ref
+                    (identifier)))
                 (value_list)))))))))
 
 ==================
@@ -60,9 +84,20 @@ struct s size=3x3
   (struct_decl
     (identifier)
     (attribute_list
-      (attribute (identifier) (size_literal (integer) (integer))))
+      (attribute
+        (identifier)
+        (size_literal
+          (integer)
+          (integer))))
     (struct_body
-      (member_stmt (member_keyword)
+      (member_stmt
+        (member_keyword)
         (command_arg_list
-          (command_arg (size_literal (integer) (integer)))
-          (command_arg (attribute (identifier) (identifier))))))))
+          (command_arg
+            (size_literal
+              (integer)
+              (integer)))
+          (command_arg
+            (attribute
+              (identifier)
+              (identifier))))))))

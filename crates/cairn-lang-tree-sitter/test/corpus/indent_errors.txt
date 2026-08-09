@@ -1,5 +1,6 @@
 ==================
 Odd indent is rejected
+:error
 ==================
 
 theme t:
@@ -7,16 +8,9 @@ theme t:
 
 ---
 
-(source_file
-  (theme_decl
-    (identifier)
-    (ERROR
-      (identifier)
-      (identifier)
-      (identifier))))
-
 ==================
 Tab indent is rejected
+:error
 ==================
 
 theme t:
@@ -24,16 +18,9 @@ theme t:
 
 ---
 
-(source_file
-  (theme_decl
-    (identifier)
-    (ERROR
-      (UNEXPECTED '\t')
-      (identifier)
-      (identifier))))
-
 ==================
 Multi-level indent jump is rejected
+:error
 ==================
 
 struct s size=3x3
@@ -41,12 +28,101 @@ struct s size=3x3
 
 ---
 
+==================
+Two levels of dedent to a non-zero column
+==================
+
+struct a size=3x3
+  level y=0
+    room
+      floor mat_slot=f
+  walls mat_slot=w
+  door side=front
+
+---
+
 (source_file
   (struct_decl
     (identifier)
-    (ERROR
-      (attribute_list
-        (attribute (identifier) (size_literal (integer) (integer))))
-      (identifier))
     (attribute_list
-      (attribute (identifier) (identifier)))))
+      (attribute
+        (identifier)
+        (size_literal
+          (integer)
+          (integer))))
+    (struct_body
+      (member_stmt_with_body
+        (member_keyword)
+        (command_arg_list
+          (command_arg
+            (attribute
+              (identifier)
+              (integer))))
+        (struct_body
+          (member_stmt_with_body
+            (member_keyword)
+            (struct_body
+              (member_stmt
+                (member_keyword)
+                (command_arg_list
+                  (command_arg
+                    (attribute
+                      (identifier)
+                      (identifier)))))))))
+      (member_stmt
+        (member_keyword)
+        (command_arg_list
+          (command_arg
+            (attribute
+              (identifier)
+              (identifier)))))
+      (member_stmt
+        (member_keyword)
+        (command_arg_list
+          (command_arg
+            (attribute
+              (identifier)
+              (identifier))))))))
+
+==================
+Odd indent where no level change is required
+:error
+==================
+
+theme t:
+  slot a -> @b
+   slot c -> @d
+
+---
+
+==================
+Odd indent one level deeper than the line before
+:error
+==================
+
+struct s size=3x3
+  floor a=1
+     walls b=2
+
+---
+
+==================
+An indented first line is rejected
+:error
+==================
+
+  theme t:
+    slot a -> @b
+
+---
+
+==================
+Indent jump inside a body
+:error
+==================
+
+struct s size=3x3
+  level y=0
+      room
+
+---
