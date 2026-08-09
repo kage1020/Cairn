@@ -115,3 +115,14 @@ An indented first line is rejected
     slot a -> @b
 
 ---
+
+==================
+Indent jump inside a body
+:error
+==================
+
+struct s size=3x3
+  level y=0
+      room
+
+---

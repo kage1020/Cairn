@@ -1131,37 +1131,20 @@
       ]
     },
     "filter_list": {
-      "type": "SEQ",
-      "members": [
-        {
-          "type": "SYMBOL",
-          "name": "attribute"
-        },
-        {
-          "type": "REPEAT",
-          "content": {
-            "type": "SEQ",
-            "members": [
-              {
-                "type": "CHOICE",
-                "members": [
-                  {
-                    "type": "STRING",
-                    "value": ","
-                  },
-                  {
-                    "type": "BLANK"
-                  }
-                ]
-              },
-              {
-                "type": "SYMBOL",
-                "name": "attribute"
-              }
-            ]
+      "type": "REPEAT1",
+      "content": {
+        "type": "CHOICE",
+        "members": [
+          {
+            "type": "SYMBOL",
+            "name": "attribute"
+          },
+          {
+            "type": "STRING",
+            "value": ","
           }
-        }
-      ]
+        ]
+      }
     },
     "attribute_list": {
       "type": "REPEAT1",
@@ -1269,8 +1252,8 @@
               "content": {
                 "type": "ALIAS",
                 "content": {
-                  "type": "STRING",
-                  "value": "@cairn"
+                  "type": "SYMBOL",
+                  "name": "_cairn_name"
                 },
                 "named": true,
                 "value": "directive_name"
@@ -1295,8 +1278,8 @@
               "content": {
                 "type": "ALIAS",
                 "content": {
-                  "type": "STRING",
-                  "value": "@requires"
+                  "type": "SYMBOL",
+                  "name": "_requires_name"
                 },
                 "named": true,
                 "value": "directive_name"
@@ -1321,8 +1304,8 @@
               "content": {
                 "type": "ALIAS",
                 "content": {
-                  "type": "STRING",
-                  "value": "@intended_targets"
+                  "type": "SYMBOL",
+                  "name": "_intended_targets_name"
                 },
                 "named": true,
                 "value": "directive_name"
@@ -1337,6 +1320,45 @@
               }
             }
           ]
+        }
+      ]
+    },
+    "_cairn_name": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "STRING",
+          "value": "@"
+        },
+        {
+          "type": "STRING",
+          "value": "cairn"
+        }
+      ]
+    },
+    "_requires_name": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "STRING",
+          "value": "@"
+        },
+        {
+          "type": "STRING",
+          "value": "requires"
+        }
+      ]
+    },
+    "_intended_targets_name": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "STRING",
+          "value": "@"
+        },
+        {
+          "type": "STRING",
+          "value": "intended_targets"
         }
       ]
     },
@@ -1529,6 +1551,10 @@
     {
       "type": "SYMBOL",
       "name": "_size_x"
+    },
+    {
+      "type": "SYMBOL",
+      "name": "_error_sentinel"
     }
   ],
   "inline": [],

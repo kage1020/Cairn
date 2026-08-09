@@ -2,10 +2,11 @@
 ; `door[id=front]`), among a member command's args (e.g. `floor id=floor`,
 ; `level id=floor1 y=0`), or in a theme selector's bindings — defines a
 ; local reference target. `attribute` has the identical key/value field
-; shape in every one of these positions (see grammar.js: the selector's
-; `filter_list`, a command's `command_arg_list`, and a theme row's
-; `attribute_list` all hold the same node), so matching on `attribute`
-; directly, without pinning the parent, covers all of them. Verified
+; shape in every one of these positions — the selector's `filter_list`
+; and a theme row's `attribute_list` hold it directly, a command's
+; `command_arg_list` holds it inside a `command_arg` — so matching on
+; `attribute` directly, without pinning the parent, covers all of them
+; regardless of the depth it sits at. Verified
 ; against examples/: every `id=` in the corpus appears in one of these
 ; positions; no struct/def/site header uses `id=`, so no separate pattern
 ; is added for those.

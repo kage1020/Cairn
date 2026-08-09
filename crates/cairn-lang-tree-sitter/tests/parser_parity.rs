@@ -16,8 +16,10 @@
 //! flips in *both* parsers still fails: agreeing on the wrong answer is
 //! the failure mode a differential test alone cannot see.
 //!
-//! Deliberate divergences live in [`RANGE_DIVERGENCES`] with the reason
-//! each one is out of a grammar's reach.
+//! Divergences that remain live in [`KNOWN_DIVERGENCES`], each with the
+//! reason it is still there. That list is asserted, not skipped: a
+//! divergence that gets fixed fails the test that holds it, so the list
+//! shrinks deliberately rather than drifting.
 
 use tree_sitter::Parser;
 
@@ -358,28 +360,211 @@ const FIXTURES: &[(&str, &str, Verdict)] = &[
     ("crlf", "theme t:\r\n  slot a -> @b\r\n", Accept),
     ("lone_cr", "theme t:\r  slot a -> @b\r", Accept),
     ("no_trailing_newline", "theme t:\n  slot a -> @b", Accept),
+    // A lone `\r` ends a line for the reference lexer but not for
+    // `get_column()`, which restarts only at `\n`. Every line after the
+    // first is therefore measured against a running column, and the blank
+    // and comment-only lines below are what carry the scanner across a
+    // second break before it measures — the case where the base column it
+    // measures from has to have moved with it.
+    (
+        "lone_cr_body_after_blank_line",
+        "struct a size=3x3\r\r  floor m=1\r",
+        Accept,
+    ),
+    (
+        "lone_cr_body_after_comment_line",
+        "theme t:\r  # c\r  slot a -> @b\r",
+        Accept,
+    ),
+    (
+        "lone_cr_nested_body_after_blank_line",
+        "struct s size=3x3\r  a x=1\r\r    b x=2\r",
+        Accept,
+    ),
+    (
+        "lone_cr_multi_level_dedent",
+        "struct a size=3x3\r  level y=0\r    room\r      floor mat_slot=f\r  walls mat_slot=w\r",
+        Accept,
+    ),
+    // A file of nothing but spaces holds no line for them to indent.
+    ("spaces_with_no_line_break", "  ", Accept),
+    ("blank_line_then_spaces", "\n  ", Accept),
+    // Three levels closed by one line, landing at level 0.
+    (
+        "dedent_three_levels_to_zero",
+        "struct s size=3x3\n  a x=1\n    b x=2\n      c x=3\nstruct t size=3x3\n  e x=5\n",
+        Accept,
+    ),
+    // A jump of more than one level, inside a body. The scanner can
+    // decline the INDENT, but declining alone lets the `/ +/` extra eat
+    // the spaces and the line lands as a sibling one level short — so the
+    // refusal has to come from the newline in front of it.
+    (
+        "indent_jump_inside_a_body",
+        "struct s size=3x3\n  level y=0\n      room\n",
+        Reject,
+    ),
+    (
+        "indent_jump_below_a_nested_body",
+        "struct s size=3x3\n  level y=0\n    room\n        f m=1\n",
+        Reject,
+    ),
+    // The keyword redesign's boundary: any identifier opens a statement
+    // except the two the reference parser dispatches elsewhere.
+    (
+        "member_logic_needs_its_own_shape",
+        "struct s size=3x3\n  logic a=1\n",
+        Reject,
+    ),
+    (
+        "member_assert_needs_its_own_shape",
+        "struct s size=3x3\n  assert a=1\n",
+        Reject,
+    ),
+    (
+        "member_named_theme",
+        "struct s size=3x3\n  theme a=1\n",
+        Accept,
+    ),
+    ("member_named_and", "struct s size=3x3\n  and a=1\n", Accept),
+    (
+        "member_keyword_is_one_word",
+        "struct s size=3x3\n  a.b x=1\n",
+        Reject,
+    ),
+    (
+        "theme_body_takes_no_member_row",
+        "theme t:\n  floor mat_slot=f\n",
+        Reject,
+    ),
+    // A directive name is one whole word, so a longer one is not that
+    // directive with a value glued to it.
+    ("directive_name_with_a_suffix", "@cairnx 2026.06\n", Reject),
+    ("directive_name_glued_to_value", "@cairn2026.06\n", Reject),
+    ("directive_name_after_a_space", "@ cairn 2026.06\n", Accept),
+    // Commas are separator noise in a bracketed filter, anywhere and in
+    // any number — `parse_arg_list_until` skips one wherever it finds it.
+    (
+        "filter_leading_comma",
+        "struct s size=3x3\n  door[,a=1]\n",
+        Accept,
+    ),
+    (
+        "filter_trailing_comma",
+        "struct s size=3x3\n  door[a=1,]\n",
+        Accept,
+    ),
+    (
+        "filter_doubled_comma",
+        "struct s size=3x3\n  door[a=1,,b=2]\n",
+        Accept,
+    ),
+    (
+        "filter_only_a_comma",
+        "struct s size=3x3\n  door[,]\n",
+        Accept,
+    ),
+    (
+        "theme_filter_leading_comma",
+        "theme t:\n  window[,a=1] -> c=1\n",
+        Accept,
+    ),
 ];
 
-/// Fixtures the reference parser refuses on a value's *range*, which a
-/// context-free grammar has no way to express: the refusal comes from
-/// `NonZeroU32::new` and `str::parse::<i64>` inside
-/// `cairn-lang-core::parse::Parser::parse_value`, after a token that is
-/// lexically well-formed.
+/// `(name, source, what the grammar says)` for every source the two
+/// parsers still disagree about — the reference parser's verdict being
+/// the opposite of the one recorded here.
 ///
-/// Listed rather than omitted so the divergence stays visible, and
-/// asserted rather than skipped: each one must still parse here and still
-/// be refused there. A grammar that started rejecting them would be
-/// rejecting by digit count, which is the wrong shape of rule and would
-/// mis-refuse a valid literal one digit longer.
-const RANGE_DIVERGENCES: &[(&str, &str)] = &[
+/// Both directions appear, so this is the full inventory and not only the
+/// half that is comfortable. Each entry is asserted rather than skipped:
+/// the divergence must still exist, in the direction stated. Fixing one
+/// therefore fails this test, which is the point — the list is meant to
+/// shrink on purpose.
+const KNOWN_DIVERGENCES: &[(&str, &str, Verdict)] = &[
+    // -- value ranges, which no grammar can express -------------------
+    //
+    // `NonZeroU32::new` in `parse_value` refuses a zero extent after the
+    // token is built, and `str::parse::<i64>` refuses an integer past
+    // `i64` while building one — the latter in the lexer (`scan_number`),
+    // as `LexError::InvalidInt`, so it is a lex error rather than a value
+    // check on a finished token. A grammar can only
+    // approximate either by digit count, which would mis-refuse a valid
+    // literal one digit longer — and a narrower `size_literal` pattern
+    // collides with `integer` at the same position, so every bare `1` in
+    // value position would start a size literal and fail for want of an
+    // `x`.
     (
         "size_zero_extent",
         "struct s size=0x3\n  floor mat_slot=f\n",
+        Accept,
     ),
     (
         "integer_out_of_range",
         "struct s size=3x3\n  floor n=99999999999999999999\n",
+        Accept,
     ),
+    // -- a declaration with no body, followed by more file ------------
+    //
+    // A body absorbs the blank and comment-only lines behind it through
+    // `body()`'s trailing `repeat1($._newline)`. A declaration without
+    // one has nothing to do that, and the obvious repair — letting the
+    // bodyless branch consume them itself — puts two rules in contention
+    // for the same newlines and breaks multi-level dedent instead
+    // (measured: it re-breaks the very bug this crate's depth test
+    // pins). It needs the newline handling reworked rather than patched.
+    (
+        "bodyless_decl_then_blank_line",
+        "theme a:\n\nstruct s size=3x3\n  floor a=1\n",
+        Reject,
+    ),
+    (
+        "bodyless_decl_then_comment_line",
+        "theme a:\n# c\nstruct s size=3x3\n  floor a=1\n",
+        Reject,
+    ),
+    // -- whitespace before a line break ------------------------------
+    //
+    // tree-sitter consults the external scanner *before* it skips extras,
+    // so a line ending in a space reaches the NEWLINE branch with the
+    // space in `lookahead` rather than the break, and no branch there can
+    // consume one.
+    //
+    // Skipping the run is not the repair it appears to be: at the start of
+    // a line that same run is the line's indentation, the two are told
+    // apart only by reading to the end of the run, and reading it moves
+    // the lexer past an indent the branches below still have to measure.
+    // Doing it anyway re-breaks multi-level dedent — measured, not
+    // assumed. The repair is a way to inspect a run without consuming it.
+    (
+        "trailing_space_on_a_header",
+        "theme t: \n  slot a -> @b\n",
+        Reject,
+    ),
+    (
+        "trailing_space_on_a_body_row",
+        "theme t:\n  slot a -> @b \n",
+        Reject,
+    ),
+    (
+        "blank_line_of_only_spaces",
+        "theme t:\n  slot a -> @b\n  \n  slot c -> @d\n",
+        Reject,
+    ),
+    // -- indentation the scanner is never asked about -----------------
+    //
+    // Both are lines the reference lexer refuses on their indentation and
+    // this grammar takes. `_file_start` covers the same class at the top
+    // of a file, but only there: after a directive, and inside a body
+    // that cannot nest, neither INDENT nor DEDENT is valid, so the
+    // scanner is not consulted and the `/ +/` extra eats the leading
+    // spaces. Closing them needs a token that is valid wherever a line
+    // may begin, which `_file_start` is the single-position sketch of.
+    (
+        "indent_under_a_slot_row",
+        "theme t:\n  slot a -> @b\n    slot c -> @d\n",
+        Accept,
+    ),
+    ("indent_after_a_directive", "@cairn 1\n  theme t:\n", Accept),
 ];
 
 fn grammar_accepts(parser: &mut Parser, source: &str) -> bool {
@@ -421,21 +606,80 @@ fn both_parsers_reach_the_written_verdict() {
     assert!(wrong.is_empty(), "{}", wrong.join("\n"));
 }
 
-/// The listed divergences are exactly the ones that exist: each parses
-/// here and is refused there.
+/// The scanner keeps its hands off the input during error recovery.
+///
+/// `_error_sentinel` is in no rule, so tree-sitter marks it valid only
+/// once it has abandoned the parse and is offering every external token
+/// at once. The generated table makes that reachable rather than
+/// theoretical — `ts_external_scanner_states[1]` marks all five valid,
+/// `FILE_START` included, and that branch rewrites `line_start_column`
+/// with wherever the lexer happens to stand.
+///
+/// The property this asserts is that the *rest of the file* survives the
+/// broken line: a source whose second row is malformed and whose fourth
+/// is not must still place that fourth row where its indentation says.
+/// Without the guard the scanner answers mid-recovery, and the layout
+/// state it leaves behind describes a line the parse already discarded.
+///
+/// It is asserted this way because a coarser test cannot see it: 546
+/// malformed sources were swept with and without the guard and *no
+/// accept/reject verdict* changed, so no fixture in `FIXTURES` can pin
+/// it. 208 of 300 recovery trees did change, which is where the risk
+/// lives.
 #[test]
-fn range_divergences_are_the_only_ones() {
+fn a_broken_line_does_not_displace_the_lines_after_it() {
     let mut parser = new_parser();
-    for (name, source) in RANGE_DIVERGENCES {
-        assert!(
-            cairn_lang_core::parse::parse(source).is_err(),
-            "{name}: the reference parser now accepts this, so it is no longer a divergence",
-        );
-        assert!(
-            grammar_accepts(&mut parser, source),
-            "{name}: the grammar now refuses this; if that is deliberate, move it into FIXTURES",
-        );
+    // An unterminated list runs the parser off the end of its line and on
+    // into the next declaration, which is where recovery starts asking the
+    // scanner about lines it has already given up on.
+    let source = "struct s size=3x3\n  floor a=[1,\nstruct t size=3x3\n  d x=2\n";
+    let tree = parser.parse(source, None).expect("parse produced no tree");
+    assert!(
+        tree.root_node().has_error(),
+        "the fixture is supposed to be malformed; it no longer is",
+    );
+    let mut placed = Vec::new();
+    grammar_members(tree.root_node(), source, 0, &mut placed);
+    assert_eq!(
+        placed,
+        vec![(1usize, "floor".to_owned())],
+        "recovery placed a member the source does not have there",
+    );
+}
+
+/// Every listed divergence still diverges, in the direction listed.
+///
+/// This does not claim the list is complete — nothing here can, since the
+/// space of sources is infinite. It claims the opposite and more useful
+/// thing: that none of these has been quietly fixed or quietly flipped.
+/// A fix fails this test and is meant to, so the entry is removed by the
+/// change that earns it.
+#[test]
+fn listed_divergences_still_diverge() {
+    let mut parser = new_parser();
+    let mut wrong = Vec::new();
+    for (name, source, grammar_says) in KNOWN_DIVERGENCES {
+        let core = if cairn_lang_core::parse::parse(source).is_ok() {
+            Accept
+        } else {
+            Reject
+        };
+        let grammar = if grammar_accepts(&mut parser, source) {
+            Accept
+        } else {
+            Reject
+        };
+        if grammar != *grammar_says || core == grammar {
+            wrong.push(format!(
+                "{name}: listed as grammar={grammar_says:?} against the reference parser, but core said {core:?} and the grammar said {grammar:?}\n  source: {source:?}"
+            ));
+        }
     }
+    assert!(
+        wrong.is_empty(),
+        "a listed divergence changed. If you fixed one, delete its entry and add the source to FIXTURES:\n{}",
+        wrong.join("\n"),
+    );
 }
 
 /// Where each member sits agrees too, not just the yes/no.
@@ -462,6 +706,13 @@ fn accepted_sources_place_every_member_at_the_same_depth() {
             continue;
         };
         let tree = parser.parse(source, None).expect("parse produced no tree");
+        // The fixture is an `Accept`, so an error tree is already a
+        // failure of the test above; walking one here would compare a
+        // subsequence salvaged from recovery and could match by accident.
+        assert!(
+            !tree.root_node().has_error(),
+            "{name}: the grammar rejected an Accept fixture",
+        );
         let mut core = Vec::new();
         core_members(&module, &mut core);
         let mut grammar = Vec::new();
@@ -521,7 +772,10 @@ fn grammar_members(
         // the depth recorded here is the one already accumulated.
         out.push((depth, keyword.to_owned()));
         depth
-    } else if matches!(node.kind(), "theme_body" | "struct_body") {
+    } else if node.kind() == "struct_body" {
+        // Only `struct_body` counts a level: a theme body holds rules
+        // rather than member commands, so it contributes nothing to walk
+        // and `core_members` skips it on the other side too.
         depth + 1
     } else {
         depth

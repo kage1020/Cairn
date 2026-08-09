@@ -17,8 +17,9 @@ and the website playground.
 
 - A `grammar.js` that parses every construct produced by `cairn-lang-core`'s
   reference lexer and parser: directives, `theme` / `struct` / `def` / `site`
-  declarations, member commands, nested `level` / `room` scopes, logic
-  declarations, and `assert` forms (truth tables and temporal assertions).
+  declarations, member commands (`level` and `room` among them — they
+  are ordinary keywords, see §4), logic declarations, and `assert` forms
+  (truth tables and temporal assertions).
 - An external scanner in C that emits synthetic `_indent` / `_dedent` /
   `_newline` tokens matching `cairn-lang-core::lex` (2-space indent, one level
   per step, tab-indent is an error, blank and comment-only lines do not shift
@@ -101,17 +102,24 @@ crates/cairn-lang-tree-sitter/
     locals.scm
     injections.scm            # empty (no embedded languages today)
   test/
-    corpus/
+    corpus/                   # one file per rule cluster
+      assert.txt
+      comments.txt
       directives.txt
-      theme.txt
-      struct.txt
-      nested.txt
-      redstone.txt
-      errors.txt
-      size_literal.txt
+      indent.txt
       indent_errors.txt
+      logic.txt
+      member_keywords.txt
+      nested.txt
+      size_literal.txt
+      struct.txt
+      theme.txt
+      values.txt
   tests/
-    examples.rs
+    examples.rs               # examples/*.crn parse + highlight golden
+    parser_parity.rs          # accept/reject against cairn-lang-core
+    field_labels.rs           # every declared field is labelled somewhere
+    line_endings.rs           # LF / CRLF / lone CR agree
     data/
       cottage.ansi             # golden output of `tree-sitter highlight`
 ```
@@ -136,16 +144,16 @@ directive         : "@cairn" directive_literal
 
 top_level_decl    : theme_decl | struct_decl | def_decl | site_decl
 
-theme_decl        : "theme" identifier ":" block_of<theme_body_item>
+theme_decl        : "theme" identifier ":"? block_of<theme_body_item>?
 theme_body_item   : slot_binding | selector_rule
 slot_binding      : "slot" identifier "->" value
 selector_rule     : selector "->" attribute_list?
 selector          : identifier selector_filter
 selector_filter   : "[" filter_list? "]"
 
-struct_decl       : "struct" identifier attribute_list block_of<struct_body_item>
-def_decl          : "def"    identifier attribute_list block_of<struct_body_item>
-site_decl         : "site"   identifier               block_of<struct_body_item>
+struct_decl       : "struct" identifier attribute_list? ":"? block_of<struct_body_item>?
+def_decl          : "def"    identifier attribute_list? ":"? block_of<struct_body_item>?
+site_decl         : "site"   identifier                ":"? block_of<struct_body_item>?
 
 struct_body_item  : member_stmt
                   | member_stmt_with_body
@@ -181,7 +189,7 @@ material_ref      : "@" identifier ("." identifier)*
 signal_ref        : identifier ("." identifier)+    # sig.step, inside.front
 dotted_ref        : signal_ref | identifier
 size_literal      : integer "x" integer             # 9x7, no whitespace
-directive_literal : /[^#\r\n]+/                     # opaque to end of line
+directive_literal : /[^#\r\n \t]+( +[^#\r\n \t]+)*/  # opaque to end of line
 
 bool_expr         : logical_or
 logical_or        : logical_and ("or" logical_and)*
@@ -236,6 +244,13 @@ external scanner injects `_indent`, `_dedent`, and `_newline` tokens.
 - Every rule listed above becomes a named node. Container rules
   (`command_arg_list`, `attribute_list`, `filter_list`) are named for
   query ergonomics.
+- `selector` appears in two shapes, because the two sites that use it
+  carry the keyword differently. A theme row's is the whole thing —
+  `keyword` plus `filter` — while a member command's keyword belongs to
+  the statement, so `_member_stmt_head` aliases the bracket part alone
+  (`alias($.selector_filter, $.selector)`). A query that wants only the
+  theme-row form must therefore match on the `keyword` field's presence,
+  as `highlights.scm` does; matching the node name alone catches both.
 
 ## 5. External scanner
 
@@ -264,8 +279,11 @@ Behaviour, mirroring `cairn-lang-core::lex`:
    state — the scanner consumes them and continues.
 3. If `spaces / 2` is greater than the top of `indent_stack` by exactly one,
    push it and emit `_indent`. A jump of more than one level is an error.
-4. If it is less than the top, pop while greater and emit one `_dedent` per
-   pop. If the level does not match after popping, emit `ERROR`.
+4. If it is less than the top, pop while greater and emit one `_dedent`
+   per pop. The level always matches after popping — levels only ever
+   rise by one (see 3), so the stack holds every level between the two —
+   which is what lets the scanner set the owed count once, from
+   `current - level`, instead of re-deriving it per token.
 5. `\n`, `\r\n`, and lone `\r` all count as one line break and produce
    `_newline`. EOF closes any remaining open indents with `_dedent` tokens.
 6. An odd leading-space count is an error wherever it appears, including
@@ -280,8 +298,13 @@ Behaviour, mirroring `cairn-lang-core::lex`:
    content line is indented. It exists because that line is the one place
    an indentation error has no preceding line break to hang off.
 
-Serialisation (for tree-sitter's incremental parsing) writes
-`indent_stack.len` and the stack entries as little-endian `uint32_t`s.
+Serialisation (for tree-sitter's incremental parsing) writes, in order:
+`indent_stack.len` as a `uint16_t`, that many `uint16_t` stack entries,
+`pending_dedents` as a `uint16_t`, `line_start_column` as a `uint32_t`,
+and `eof_newline_used` as one byte. `MAX_INDENT_DEPTH` is derived from
+exactly that layout, so a field added here without adjusting it would let
+`serialize()` overrun — which tree-sitter reads back as "no state" rather
+than as an error.
 
 ## 6. Highlight queries
 
@@ -307,9 +330,14 @@ Serialisation (for tree-sitter's incremental parsing) writes
 | `@punctuation.delimiter` | `,`, `;`, `.`, `:` |
 
 `queries/locals.scm` binds `id=<ident>` attributes as
-`@local.definition.member` and every attribute value that references an id
-(`opened_by=`, `mat_slot=`, and any bare `identifier` value inside an
-`attribute`) as `@local.reference`.
+`@local.definition.member` and emits **no** `@local.reference`. Capturing
+every non-`id` identifier value was tried and removed: most attribute
+values are enum literals (`side=`, `class=`, `mat_slot=`, ...), so the
+pattern tagged coincidental text matches — `side=front` as a reference to
+an unrelated `id=front` — and the grammar has no list of keys that
+reliably hold an id (`opened_by=` takes a signal ref, not an id). A narrow
+pattern keyed on specific attribute names can be added once those names
+are identified.
 
 `queries/injections.scm` is empty for the initial release.
 

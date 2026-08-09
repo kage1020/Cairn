@@ -279,12 +279,17 @@
     }
   },
   {
+    "type": "directive_name",
+    "named": true,
+    "fields": {}
+  },
+  {
     "type": "filter_list",
     "named": true,
     "fields": {},
     "children": {
       "multiple": true,
-      "required": true,
+      "required": false,
       "types": [
         {
           "type": "attribute",
@@ -1170,6 +1175,10 @@
     "named": true
   },
   {
+    "type": "cairn",
+    "named": false
+  },
+  {
     "type": "comment",
     "named": true,
     "extra": true
@@ -1180,10 +1189,6 @@
   },
   {
     "type": "directive_literal",
-    "named": true
-  },
-  {
-    "type": "directive_name",
     "named": true
   },
   {
@@ -1199,6 +1204,10 @@
     "named": true
   },
   {
+    "type": "intended_targets",
+    "named": false
+  },
+  {
     "type": "logic",
     "named": false
   },
@@ -1212,6 +1221,10 @@
   },
   {
     "type": "or",
+    "named": false
+  },
+  {
+    "type": "requires",
     "named": false
   },
   {

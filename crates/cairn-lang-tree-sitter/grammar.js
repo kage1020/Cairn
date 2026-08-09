@@ -58,7 +58,12 @@ module.exports = grammar({
 
   extras: $ => [/ +/, $.comment],
 
-  externals: $ => [$._indent, $._dedent, $._newline, $._file_start, $._size_x],
+  // `_error_sentinel` is in no rule, so it is valid only during error
+  // recovery, when tree-sitter offers every external token at once. The
+  // scanner tests it and bows out — see the guard at the top of `scan()`.
+  externals: $ => [
+    $._indent, $._dedent, $._newline, $._file_start, $._size_x, $._error_sentinel,
+  ],
 
   word: $ => $.identifier,
 
@@ -101,12 +106,15 @@ module.exports = grammar({
     //
     // `directive` is single-line, so it needs its own trailing
     // `repeat1($._newline)` here (see the comment on `body()`) to absorb
-    // any blank/comment lines up to the next item. `_top_level_decl` is
-    // never bare — struct/def/site/theme all require a body — so it
-    // already ends in `$._dedent`; by the time control returns here,
-    // whatever blank lines followed it were already consumed by that
-    // body's own trailing `repeat1($._newline)`, so no additional
-    // `$._newline` is expected (or, past EOF, available) right here.
+    // any blank/comment lines up to the next item.
+    //
+    // `_top_level_decl` supplies its own: a declaration with a body ends
+    // in `$._dedent`, with the blank lines behind it already eaten by that
+    // body's trailing `repeat1($._newline)`, so no newline is expected (or,
+    // past EOF, available) right here. A declaration *without* a body has
+    // no such body to do the eating, and the blank lines after it go
+    // unconsumed — see the `bodyless_decl_*` entries in
+    // `tests/parser_parity.rs`, which record that as a known divergence.
     source_file: $ => seq(
       $._file_start,
       repeat($._newline),
@@ -352,7 +360,13 @@ module.exports = grammar({
 
     selector_filter: $ => seq('[', optional($.filter_list), ']'),
 
-    filter_list: $ => seq($.attribute, repeat(seq(optional(','), $.attribute))),
+    // Commas are separator noise, in any number and any position:
+    // `parse_arg_list_until` skips one wherever it finds it and only ever
+    // requires the list to hold attributes, so `[,a=1]`, `[a=1,]`,
+    // `[a=1,,b=2]` and `[,]` all parse. Written as a comma-or-attribute
+    // repetition rather than a separated list because a separated list
+    // cannot express any of those four.
+    filter_list: $ => repeat1(choice($.attribute, ',')),
 
     // Comma-free, unlike `filter_list`: declaration header args
     // (`parse_header_args_until_eol`) and theme selector bindings both loop
@@ -398,14 +412,33 @@ module.exports = grammar({
     // `@cairn 2026.06` is, and an empty value is the one refusal.
     // `@intended_targets` is the exception: its value is re-lexed and must
     // be a list of strings.
+    //
+    // The name is `@` followed by one whole identifier rather than a
+    // literal `'@cairn'`, because a literal has no word boundary after it:
+    // `@cairnx 2026.06` would match the literal and leave `x 2026.06` as
+    // the opaque value, which the reference parser refuses — it reads the
+    // name with `expect_ident` and matches the string it gets. Spelling
+    // the name that way here means the same word decides.
     directive: $ => choice(
-      seq(field('name', alias('@cairn', $.directive_name)),
+      seq(field('name', alias($._cairn_name, $.directive_name)),
           field('arg', $.directive_literal)),
-      seq(field('name', alias('@requires', $.directive_name)),
+      seq(field('name', alias($._requires_name, $.directive_name)),
           field('arg', $.directive_literal)),
-      seq(field('name', alias('@intended_targets', $.directive_name)),
+      seq(field('name', alias($._intended_targets_name, $.directive_name)),
           field('arg', $.string_list)),
     ),
+
+    // `@` and the word are separate tokens, deliberately. That is what
+    // gives the name a word boundary: `word: $.identifier` puts keyword
+    // extraction in front of the lexer, so `@cairnx` scans the whole run
+    // `cairnx`, finds it is not the keyword `cairn`, and fails — where a
+    // glued `'@cairn'` literal would match its first six characters and
+    // leave `x 2026.06` as the value. It also matches the reference
+    // lexer, which emits `At` and then an identifier, so `@ cairn 1` is
+    // the same directive to both.
+    _cairn_name: _ => seq('@', 'cairn'),
+    _requires_name: _ => seq('@', 'requires'),
+    _intended_targets_name: _ => seq('@', 'intended_targets'),
 
     // Stops at `#` because the reference lexer strips a comment before the
     // header parser ever sees it, and holds internal spaces because that
@@ -436,9 +469,10 @@ module.exports = grammar({
     boolean: $ => choice('true', 'false'),
 
     // No escape sequences: `scan_string` ends the literal at the first
-    // unescaped-or-not `"`, so `"a\"b"` is the string `a\` followed by
-    // stray tokens, and a quote with no closing partner on the same line
-    // is `LexError::UnterminatedString` rather than a run to end of file.
+    // `"`, whatever precedes it. So `"a\"b"` lexes as the string `a\`,
+    // then the identifier `b`, then a quote that reaches the line's end
+    // unclosed — which is `LexError::UnterminatedString`, and a lex error
+    // refuses the whole file rather than the one line.
     string:  $ => /"[^"\r\n]*"/,
 
     identifier: $ => /[A-Za-z_][A-Za-z0-9_]*/,

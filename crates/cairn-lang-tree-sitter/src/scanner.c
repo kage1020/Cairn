@@ -7,6 +7,7 @@ enum TokenType {
   NEWLINE,
   FILE_START,
   SIZE_X,
+  ERROR_SENTINEL,
 };
 
 // Upper bound on `indent_stack`'s length that `serialize()` below can
@@ -195,36 +196,54 @@ static bool emit_dedent(Scanner *s, TSLexer *lexer) {
 }
 
 // Whether the line following the line break the lexer has just consumed
-// is a content line indented by an odd number of spaces —
-// cairn-lang-core::lex::Lexer::scan_line_start's `LexError::OddIndent`.
+// is indented in a way `cairn-lang-core::lex::Lexer::scan_line_start`
+// refuses: an odd number of spaces (`LexError::OddIndent`), or a jump of
+// more than one level, which that function reports as `OddIndent` too.
+//
+// Both are checked here, one line early, because neither can be refused
+// where it occurs. A line at the level it already sits at asks the
+// scanner for no token, so there is nothing to withhold; and a line two
+// levels deeper asks for an INDENT that this scanner can decline —
+// whereupon tree-sitter falls back to its internal lexer, the `/ +/`
+// extra eats the leading spaces, and the line parses as a sibling one
+// level short. Refusing the preceding NEWLINE is the only lever that
+// stops the file rather than quietly reshaping it.
 //
 // Called with the token already marked (see the NEWLINE branch in
 // `scan()`), so the characters read here are lookahead: they are not part
 // of whatever token the caller goes on to produce.
 //
-// Blank and comment-only lines carry no indentation — the reference lexer
-// skips them before it counts — so they answer `false` and leave the
-// verdict to the line break that follows them, which puts the refusal on
-// the break nearest the offending line.
-static bool next_line_indent_is_odd(TSLexer *lexer) {
+// Blank and comment-only lines carry no indentation, so they answer
+// `false` and leave the verdict to the line break that follows them,
+// which puts the refusal on the break nearest the offending line. That
+// matches `scan_line_start`, which counts a blank line's leading spaces
+// like any other line's but then discards the line before comparing the
+// count to anything.
+static bool next_line_indent_is_illegal(Scanner *s, TSLexer *lexer) {
   uint32_t spaces = 0;
   while (lexer->lookahead == ' ') {
     advance(lexer);
     spaces++;
   }
   if (at_line_break(lexer) || lexer->lookahead == '#') return false;
-  return (spaces & 1u) != 0;
+  if (spaces & 1u) return true;
+  return spaces / 2 > (uint32_t)*array_back(&s->indent_stack) + 1;
 }
 
 bool tree_sitter_cairn_external_scanner_scan(void *payload, TSLexer *lexer, const bool *valid_symbols) {
   Scanner *s = (Scanner *)payload;
 
-  // `_error_sentinel` belongs to no rule, so the parser only ever marks it
-  // valid when it has given up on the current parse and is calling every
-  // external token at once looking for a way to resynchronise. Producing
-  // an indent token there would pop or push a level for a line the parse
-  // has already abandoned, leaving the stack describing a different file
-  // than the one being read.
+  // `_error_sentinel` belongs to no rule, so the parser marks it valid
+  // only once it has given up on the current parse and is offering every
+  // external token at once, looking for somewhere to resynchronise. Every
+  // branch below reads the file's layout and half of them move the indent
+  // stack, so answering there would describe a line the parse has already
+  // abandoned. The generated table makes this reachable rather than
+  // theoretical: `ts_external_scanner_states[1]` marks all five tokens
+  // valid, including `FILE_START`, whose branch overwrites
+  // `line_start_column` with wherever it happens to be standing.
+  if (valid_symbols[ERROR_SENTINEL]) return false;
+
   // Size-literal separator `x` in e.g. `9x7`. Handled by the external
   // scanner (rather than a plain grammar-level `token.immediate('x')`)
   // because tree-sitter's keyword-extraction machinery, triggered by
@@ -269,7 +288,11 @@ bool tree_sitter_cairn_external_scanner_scan(void *payload, TSLexer *lexer, cons
         else { skip(lexer); }
         continue;
       }
-      // A content line (or EOF, which has no indentation to be wrong).
+      // EOF has no indentation to be wrong: a file of nothing but
+      // spaces holds no line for them to indent, and the reference lexer
+      // reaches its end without ever counting them.
+      if (lexer->eof(lexer)) break;
+      // A content line.
       if (spaces > 0) return false;
       break;
     }
@@ -320,6 +343,16 @@ bool tree_sitter_cairn_external_scanner_scan(void *payload, TSLexer *lexer, cons
   // lever available — a line that sits at the level it already sits at asks
   // the scanner for no token at all, so at that point there is nothing left
   // to withhold.
+  //
+  // A line ending in a space never reaches here with the break in
+  // `lookahead`: tree-sitter consults the external scanner *before* it
+  // skips extras, so the space is what this branch sees, and no branch
+  // below can consume one either. That is the `trailing_space_*` entries
+  // in `tests/parser_parity.rs`. Skipping the run here is not the repair
+  // it looks like — at the start of a line the same run is the line's
+  // indentation, and the two are only distinguishable by reading to the
+  // end of the run, which moves the lexer past an indent the branches
+  // below still need to measure.
   if (valid_symbols[NEWLINE] && (lexer->lookahead == '\n' || lexer->lookahead == '\r')) {
     if (lexer->lookahead == '\r') {
       advance(lexer);
@@ -329,7 +362,7 @@ bool tree_sitter_cairn_external_scanner_scan(void *payload, TSLexer *lexer, cons
     }
     uint32_t next_line_column = lexer->get_column(lexer);
     lexer->mark_end(lexer);
-    if (next_line_indent_is_odd(lexer)) return false;
+    if (next_line_indent_is_illegal(s, lexer)) return false;
     s->line_start_column = next_line_column;
     lexer->result_symbol = NEWLINE;
     return true;
@@ -342,6 +375,20 @@ bool tree_sitter_cairn_external_scanner_scan(void *payload, TSLexer *lexer, cons
   if (!(valid_symbols[INDENT] || valid_symbols[DEDENT])) return false;
 
   // Skip blank and comment-only lines without shifting indent state.
+  //
+  // `base` tracks where the line the loop lands on begins, because
+  // `get_column()` cannot be asked for it: the column restarts at `\n`
+  // and at nothing else, so every lone `\r` the loop crosses leaves the
+  // count running on from the line before.
+  //
+  // Local, and deliberately not written back to the scanner. Whichever
+  // token this call produces is followed by that line's own break, and
+  // the NEWLINE branch above records the base for the line after it — so
+  // a write here is overwritten before anything reads it. Confirmed by
+  // measurement rather than by reading: adding the two writes changes no
+  // tree across a sweep of nested and dedenting bodies in all three line
+  // endings.
+  uint32_t base = s->line_start_column;
   for (;;) {
     while (lexer->lookahead == ' ') skip(lexer);
     if (lexer->lookahead == '#') {
@@ -350,6 +397,7 @@ bool tree_sitter_cairn_external_scanner_scan(void *payload, TSLexer *lexer, cons
     if (lexer->lookahead == '\n' || lexer->lookahead == '\r') {
       if (lexer->lookahead == '\r') { skip(lexer); if (lexer->lookahead == '\n') skip(lexer); }
       else { skip(lexer); }
+      base = lexer->get_column(lexer);
       continue;
     }
     break;
@@ -370,9 +418,10 @@ bool tree_sitter_cairn_external_scanner_scan(void *payload, TSLexer *lexer, cons
 
   // Count leading spaces at the beginning of a real line. Tab is an error.
   //
-  // The skip loop above may have crossed line breaks of its own, so the
-  // base is re-read here rather than taken from `line_start_column`.
-  uint32_t spaces = lexer->get_column(lexer) - s->line_start_column;
+  // Measured from `base` rather than from `line_start_column`, which
+  // describes the line the loop above started on and not the one it
+  // finished on.
+  uint32_t spaces = lexer->get_column(lexer) - base;
   if (lexer->lookahead == '\t') return false;
 
   if (spaces & 1u) return false; // odd indent, let LR surface an ERROR

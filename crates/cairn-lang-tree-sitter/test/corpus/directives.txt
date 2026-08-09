@@ -142,3 +142,25 @@
   (directive
     (directive_name)
     (string_list)))
+
+==================
+A directive name is one whole word
+:error
+==================
+
+@cairnx 2026.06
+
+---
+
+==================
+@cairn with an opaque value
+==================
+
+@cairn draft
+
+---
+
+(source_file
+  (directive
+    (directive_name)
+    (directive_literal)))
