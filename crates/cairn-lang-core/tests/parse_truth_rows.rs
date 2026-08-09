@@ -24,8 +24,8 @@ fn body(rows: &str, inputs: &str) -> String {
 fn an_input_pattern_holds_only_zero_and_one() {
     let text = refusal(&body("2->0", "sig.a"));
     assert!(
-        text.contains('2'),
-        "the message should quote the pattern it refused: {text}",
+        text.contains("`2`") && text.contains("`0` and `1`"),
+        "the message should quote the pattern and the digits allowed: {text}",
     );
 }
 
@@ -33,8 +33,10 @@ fn an_input_pattern_holds_only_zero_and_one() {
 #[test]
 fn an_input_pattern_is_as_wide_as_the_input_list() {
     let text = refusal(&body("000->0", "sig.a"));
+    // Both numbers and their roles: a message naming 3 and 1 in the wrong
+    // places reads as plausibly as the right one.
     assert!(
-        text.contains('3') && text.contains('1'),
+        text.contains("3 bits wide") && text.contains("1 input"),
         "the message should name the width found and the width required: {text}",
     );
 }

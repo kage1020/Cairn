@@ -549,6 +549,7 @@ impl Value {
 
 /// One row of an `assert truth(...)` table.
 #[derive(Debug, Clone, PartialEq, Serialize)]
+#[non_exhaustive]
 pub struct TruthRow {
     /// Input bit pattern, e.g. `01` (preserved with its leading zeros).
     pub inputs: String,

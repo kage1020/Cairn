@@ -10,7 +10,7 @@
 //! same as files written on Linux.
 //!
 //! Indent/Dedent asymmetry: only one `Indent` token may be emitted per indent
-//! step (the lexer rejects multi-level jumps as `OddIndent`), but a single
+//! step (the lexer rejects multi-level jumps as `IndentJump`), but a single
 //! dedented line emits *one `Dedent` per level closed*. Parsers can therefore
 //! rely on `Dedent` counts to know how many scopes ended on that line.
 //!
@@ -29,6 +29,14 @@ use crate::error::{IntContext, LexError, Position, Span};
 /// zero sentinel is never popped. The `expect` calls below document that
 /// invariant rather than hiding it behind an `unwrap_or(&0)` default.
 const INDENT_STACK_NONEMPTY: &str = "indent_stack invariant: bottom 0 sentinel is never popped";
+
+/// Leading spaces per indentation level.
+///
+/// Named because the number appears in three roles that a bare `2` does
+/// not distinguish: the divisor turning a space count into a level, the
+/// parity a width must satisfy, and the multiplier turning a level back
+/// into the width a diagnostic asks for.
+const SPACES_PER_LEVEL: u32 = 2;
 
 /// One lexical token.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -164,16 +172,22 @@ impl<'src> Lexer<'src> {
         // stays an offset into the string the caller handed us — an
         // editor highlighting a diagnostic indexes the same bytes.
         //
-        // `col` is left at 1: the mark occupies no column an author can
-        // see, so counting it would put every diagnostic on the first
-        // line one column to the right of where it looks.
-        let pos = usize::from(src.starts_with(BOM)) * BOM.len();
+        // `col` counts it, though it occupies no column an author can
+        // see. Not counting it would be the friendlier number in
+        // isolation, but it is not the only one reported: every
+        // span-derived position — `LineStarts::position` here,
+        // `LineIndex` in the LSP — resolves a column by counting
+        // characters from the line's start, and both count the mark.
+        // A lexer that skipped it would put its own errors one column
+        // left of every other layer's, on the first line of exactly the
+        // files a Windows editor produces.
+        let has_bom = src.starts_with(BOM);
         Self {
             src,
             bytes: src.as_bytes(),
-            pos,
+            pos: if has_bom { BOM.len() } else { 0 },
             line: 1,
-            col: 1,
+            col: if has_bom { 2 } else { 1 },
             indent_stack: vec![0],
             out: Vec::new(),
         }
@@ -218,13 +232,13 @@ impl<'src> Lexer<'src> {
                 return Ok(());
             }
 
-            if spaces % 2 != 0 {
+            if spaces % SPACES_PER_LEVEL != 0 {
                 return Err(LexError::OddIndent {
                     position: start_position,
                     got: spaces,
                 });
             }
-            let level = spaces / 2;
+            let level = spaces / SPACES_PER_LEVEL;
             let current = *self.indent_stack.last().expect(INDENT_STACK_NONEMPTY);
             if level > current {
                 // Only allow one level of indent increase at a time.
@@ -238,7 +252,7 @@ impl<'src> Lexer<'src> {
                     return Err(LexError::IndentJump {
                         position: start_position,
                         got: spaces,
-                        expected: (current + 1) * 2,
+                        expected: (current + 1) * SPACES_PER_LEVEL,
                     });
                 }
                 self.indent_stack.push(level);
@@ -443,9 +457,19 @@ impl<'src> Lexer<'src> {
             // A `Size` holds two extents. If the run continues into a
             // third (`2x2x9`) or into a word (`2x2y`), the author wrote
             // something this token cannot carry, and splitting it into a
-            // `Size` plus an identifier loses the difference silently:
-            // the identifier lands among the parser's positional
-            // arguments, which nothing reads.
+            // `Size` plus an identifier reports the wrong thing in the
+            // wrong place: the identifier lands among the parser's
+            // positional values, where `check::positional` eventually
+            // reports it as a stray argument — a true statement about a
+            // token the author never wrote, pointing past the literal
+            // that produced it. In a declaration header there is no
+            // positional list at all, so the parser fails at the end of
+            // the line instead.
+            //
+            // Refusing here also reaches the consumers that never run
+            // `check`: the tree-sitter grammar, an editor's scan path, a
+            // formatter. `check::positional` is the only guard today, and
+            // it sits downstream of all of them.
             if let Some(found) = self.peek().filter(|b| is_ident_continue(*b)) {
                 return Err(LexError::TrailingSizeSegment {
                     position,

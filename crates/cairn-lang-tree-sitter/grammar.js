@@ -406,11 +406,15 @@ module.exports = grammar({
     // The height carries no such guard, though `scan_number` refuses a
     // literal whose run continues into a third extent or a word
     // (`2x2x9`, `2x2y`). Expressing that needs negative lookahead, which
-    // tree-sitter's regex engine does not have, and the alternative —
+    // tree-sitter's regex engine rejects outright, and the alternative —
     // making the height a token that also swallows the offending tail —
-    // would put the error inside `size_literal` instead of ending it.
-    // Recorded in `tests/parser_parity.rs` as a divergence rather than
-    // approximated.
+    // would put the error inside `size_literal` instead of ending the
+    // literal at it. So this grammar accepts what `scan_number` refuses,
+    // wherever the rule is actually reached: `size_with_a_third_extent`
+    // in `tests/parser_parity.rs` records it under `KNOWN_DIVERGENCES`.
+    // (A declaration header refuses the same text for an unrelated
+    // reason — it takes no trailing bare token — which is why the
+    // fixtures for it are named after headers, not sizes.)
     size_literal: $ => seq(
       alias(token(/[0-9]+/), $.integer),
       $._size_x,

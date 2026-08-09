@@ -311,19 +311,19 @@ const FIXTURES: &[(&str, &str, Verdict)] = &[
         "struct s size=03x3\n  floor mat_slot=f\n",
         Accept,
     ),
-    // A size holds two extents, and a run continuing past the second is
-    // refused on both sides — for different reasons, which is why both
-    // are pinned. `scan_number` inspects the character after the height;
-    // here the height's token simply ends, and nothing in the grammar
-    // takes an identifier in that position.
+    // Both refuse this, but not for the reason it looks like: a
+    // declaration header refuses *any* trailing bare token, so
+    // `size=2x2 junk` fails here identically. The size rule is not
+    // consulted, which is why the real case lives in
+    // `KNOWN_DIVERGENCES` — see `size_with_a_third_extent`.
     (
-        "size_with_a_third_extent",
+        "a_header_refuses_a_trailing_token",
         "struct s size=2x2x9\n  floor a=1\n",
         Reject,
     ),
     (
-        "size_running_into_a_word",
-        "struct s size=2x2y\n  floor a=1\n",
+        "a_header_refuses_a_trailing_token_whatever_it_is",
+        "struct s size=2x2 junk\n  floor a=1\n",
         Reject,
     ),
     (
@@ -518,6 +518,41 @@ const KNOWN_DIVERGENCES: &[(&str, &str, Verdict)] = &[
     (
         "size_zero_extent",
         "struct s size=0x3\n  floor mat_slot=f\n",
+        Accept,
+    ),
+    // -- a size literal that runs into a word --------------------------
+    //
+    // Where the rule is actually consulted — a member's arguments, or a
+    // value — the grammar takes what `scan_number` refuses. `Size` holds
+    // two extents; a run continuing past the second is a literal the
+    // token cannot carry.
+    //
+    // Expressing that here needs negative lookahead after the height,
+    // which tree-sitter's regex engine rejects outright ("look-around ...
+    // is not supported"). Widening the height token to swallow the tail
+    // would move the error inside `size_literal` rather than ending the
+    // literal at it, which is a different tree, not a refusal.
+    (
+        "size_with_a_third_extent",
+        "struct s size=3x3\n  floor mat_slot=f size=2x2x9\n",
+        Accept,
+    ),
+    (
+        "size_running_into_a_word",
+        "struct s size=3x3\n  floor mat_slot=f size=2x2y\n",
+        Accept,
+    ),
+    // -- a truth row wider than `i64` -----------------------------------
+    //
+    // A row's pattern reaches the parser as an `Int` token, so `lex.rs`
+    // parses it as `i64` on the way through and a 20-bit row of ones
+    // overflows. The digits are pattern data rather than a number — the
+    // parser keeps the lexeme precisely because `01` and `1` differ — so
+    // the ceiling is an artefact of the token type, not a rule. This
+    // grammar's `bit_pattern` has no such ceiling and accepts the row.
+    (
+        "truth_row_wider_than_i64",
+        "struct s size=3x3\n  assert truth(a, b, c, d, e, f, g, h, i, j, k, l, m, n, o, p, q, r, s, t -> z) { 11111111111111111111 -> 1 }\n",
         Accept,
     ),
     // -- a truth row of the wrong width --------------------------------

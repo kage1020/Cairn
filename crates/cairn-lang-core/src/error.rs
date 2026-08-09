@@ -105,17 +105,22 @@ fn render_nesting_too_deep(limit: usize) -> String {
 
 /// Name a character the lexer could not place.
 ///
-/// Quoting it verbatim is right for a character the reader can see, and
+/// Quoting it verbatim is right for a character the reader can see and
 /// useless otherwise: U+FEFF renders as nothing, so the message quoted an
 /// empty string, and U+00A0 renders as a space, so it read as though an
 /// ordinary space were the problem. Neither tells the author what to
-/// delete. Anything not printable-and-unambiguous is therefore named by
-/// codepoint instead of shown.
+/// delete.
+///
+/// The test is whether the glyph carries the information, not whether it
+/// is ASCII. A full-width `＝` and a stray `あ` are both plainly visible
+/// and are the likeliest mistakes in a project with Japanese docs, so
+/// they keep their glyph; the codepoint rides along, because two
+/// characters that look alike are exactly when one is needed.
 fn render_unexpected_char(ch: char) -> String {
-    if ch.is_ascii_graphic() {
-        format!("unexpected character `{ch}`")
-    } else {
+    if ch.is_control() || ch.is_whitespace() || ch == '\u{feff}' {
         format!("unexpected character U+{:04X}", ch as u32)
+    } else {
+        format!("unexpected character `{ch}` (U+{:04X})", ch as u32)
     }
 }
 
@@ -155,7 +160,7 @@ pub enum LexError {
     /// nothing to change.
     #[error(
         "{position}: indentation opens more than one level at once \
-         (got {got} spaces, expected {expected})"
+         (got {got} spaces, expected {expected} spaces)"
     )]
     IndentJump {
         /// Where the over-deep indentation begins.
@@ -189,8 +194,11 @@ pub enum LexError {
     ///
     /// `2x2x9` holds a third extent the token has no room for, and `2x2y`
     /// runs the literal into a word. Both used to lex as a `Size` plus a
-    /// stray identifier, which the parser filed as a positional argument
-    /// that nothing reads — so the build came out `2x2` and said nothing.
+    /// stray identifier: in a member's arguments that reached
+    /// `check::positional`, which reported a bare value the author never
+    /// wrote, at a column past the literal that produced it; in a
+    /// declaration header, which has no positional list, the parser
+    /// failed at the end of the line instead.
     #[error(
         "{position}: size literal `{literal}` is followed by `{found}`; \
          a size is two extents, as in `9x7`"

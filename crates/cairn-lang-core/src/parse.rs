@@ -446,12 +446,17 @@ impl<'a> Parser<'a> {
             let pattern_position = self.position();
             let inputs_lex = self.expect_int_lexeme()?;
             // A row assigns one bit per input signal, so the pattern is
-            // checked against the list left of the arrow — the only place
-            // that count is in hand. Nothing downstream holds the two
-            // together: `intent::lower` clones the lexeme, so a row of
-            // `2` or a three-bit row for one signal would reach the
-            // evaluator describing no assignment at all, and a table that
-            // asserts nothing looks exactly like one that passes.
+            // checked against the list left of the arrow.
+            //
+            // Here rather than downstream, though `AssertIr::Truth` does
+            // keep `inputs` beside `rows` and could check it again: this
+            // is where the failure has a position to point at, and where
+            // it is checked once instead of by every pass that grows a
+            // reason to care. Nothing reads `AssertIr::Truth` yet — the
+            // evaluator is unimplemented, as `check::nesting` notes — so
+            // "downstream" is a plan, and a table that asserts nothing
+            // would sit in the IR looking exactly like one that passes
+            // until that plan arrives.
             //
             // A leading zero is data here rather than a numeric quirk,
             // which is why the row keeps the raw lexeme: `01` and `1` are

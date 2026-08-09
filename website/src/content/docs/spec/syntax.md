@@ -21,16 +21,21 @@ that is not `key=`, `-> binding`, or `[selector]` into the same list, so a dropp
 (`walls mat_slot=wall height 3`) lands there too — and a `walls` with no `height=` is not
 shortened, it is not built at all.
 
-
-## 5.1.1 Literals and separators
+### 5.1.1 Literals and separators
 A size literal is exactly two extents, `WxH`. A run that continues past the second — `2x2x9`, or
-`2x2y` — is refused rather than read as a size followed by something else, because the something
-else would land among the positional values and be dropped without a diagnostic.
+`2x2y` — is refused rather than read as a size followed by something else. Read that way, the
+something else lands among the positional values, where it is reported as a bare argument the
+author never wrote (§5.1), at a column past the literal that produced it — and in a declaration
+header, which keeps no positional values, the failure surfaces at the end of the line instead.
+Refusing at the literal also reaches the tools that never run the checks, such as the tree-sitter
+grammar an editor highlights with.
 
-Commas between list items and between the attributes of a `[selector]` are **optional separators**:
-`[a, b]`, `[a b]`, and `[a, , b]` all name the same two items. They are punctuation for the reader,
-not structure. The one place a comma is required is the input list of `assert truth(...)`, where it
-separates signals whose count the row width is checked against.
+Commas are **optional separators**, not structure: `mat=[a, b]` and `mat=[a b]` name the same two
+items, as do `[side=front, y=2]` and `[side=front y=2]`. The two lists differ in how much
+punctuation they tolerate — a `[selector]`'s attribute list skips a comma wherever it finds one, so
+`[side=front, , y=2]` parses, while a value list reads at most one between items and refuses
+`[a, , b]`. The one place a comma carries meaning is the input list of `assert truth(...)`, where
+it separates signals whose count the row width is checked against.
 
 A truth-table row assigns one bit per input signal, so `truth(a, b -> out)` takes rows two bits
 wide and `{ 2->0 }` or `{ 0->0 }` are refused: a row the evaluator cannot read looks like coverage

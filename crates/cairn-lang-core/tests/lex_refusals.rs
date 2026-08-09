@@ -25,9 +25,12 @@ fn message(source: &str) -> String {
 
 // -- size literals --------------------------------------------------------
 
-/// `2x2x9` used to lex as `Size(2,2)` followed by `Ident("x9")`, and the
-/// stray identifier landed in the parser's positional list where nothing
-/// reads it — so the build came out `2x2` with no diagnostic anywhere.
+/// `2x2x9` used to lex as `Size(2,2)` followed by `Ident("x9")`. The
+/// stray identifier was reported — by `check::positional`, as a bare
+/// value, at a column past the literal that produced it — or, in a
+/// declaration header, not by that pass at all, since a header keeps no
+/// positional list and the parser simply ran to the end of the line.
+/// Neither names the size literal.
 #[test]
 fn a_size_literal_with_a_third_extent_is_refused() {
     let err = lex("struct s size=2x2x9\n").unwrap_err();
@@ -47,21 +50,27 @@ fn a_size_literal_followed_by_a_word_character_is_refused() {
         "struct s size=2x2_\n",
         "struct s size=2x2x\n",
     ] {
+        // The variant, not merely a refusal: `2x2_` becoming an
+        // `UnexpectedChar` would still be an error and would still be
+        // wrong about what the author needs to change.
+        let err = lex(source).unwrap_err();
         assert!(
-            lex(source).is_err(),
-            "{source:?} should be refused, not truncated",
+            matches!(err, LexError::TrailingSizeSegment { .. }),
+            "{source:?} should be refused as a size literal: {err:?}",
         );
     }
 }
 
 /// The refusal is a variant of its own, so a quick-fix can dispatch on it
-/// without reading prose — and so it is not mistaken for the neighbouring
-/// conditions, which is the failure this issue's indent item is about.
+/// without reading prose.
 #[test]
 fn the_trailing_segment_refusal_names_the_character_it_found() {
     let text = message("struct s size=2x2x9\n");
+    // The literal as written and the character that ended it. Quoting
+    // `2x2` alone would leave the author guessing which `x` was the
+    // problem, and `contains('x')` on its own is implied by `2x2`.
     assert!(
-        text.contains("2x2") && text.contains('x'),
+        text.contains("`2x2`") && text.contains("`x`"),
         "the message should quote the literal and the character after it: {text}",
     );
 }
@@ -133,9 +142,12 @@ fn a_multi_level_jump_is_not_reported_as_odd_indentation() {
 #[test]
 fn the_jump_refusal_names_the_width_that_would_work() {
     let text = message("struct keep size=3x3\n    floor mat_slot=wall\n");
+    // Both numbers *and* which is which: `contains('2') && contains('4')`
+    // passes just as well with the two swapped, which is the one way this
+    // message can be wrong and still look right.
     assert!(
-        text.contains('2') && text.contains('4'),
-        "the message should name both the width found and the one expected: {text}",
+        text.contains("got 4") && text.contains("expected 2"),
+        "the message should name the width found and the width expected, in that order: {text}",
     );
 }
 
@@ -205,12 +217,26 @@ fn a_leading_byte_order_mark_is_skipped() {
 }
 
 /// Only at offset 0. A BOM in the middle of a file is a real stray
-/// character and stays one — skipping it there would hide the same class
-/// of bug this issue is about.
+/// character and stays one: skipping it anywhere would silently accept a
+/// file with a mark buried in it, which is a corruption worth reporting.
 #[test]
 fn a_byte_order_mark_after_the_start_is_still_refused() {
     let err = lex("struct s\u{feff} size=3x3\n").unwrap_err();
-    assert!(matches!(err, LexError::UnexpectedChar { .. }), "{err:?}");
+    // The position as well as the variant. Testing "it is refused" alone
+    // still passes when the skip is keyed on the mark appearing
+    // *anywhere* rather than at the start: the file is still rejected,
+    // but three bytes of real text have been skipped off the front and
+    // every position after them is wrong.
+    assert!(
+        matches!(
+            err,
+            LexError::UnexpectedChar {
+                ch: '\u{feff}',
+                position,
+            } if position.line.get() == 1 && position.col.get() == 9,
+        ),
+        "{err:?}",
+    );
 }
 
 /// U+00A0 renders as a space, so quoting it verbatim produced a message
@@ -225,10 +251,65 @@ fn an_invisible_character_is_named_by_codepoint() {
     );
 }
 
-/// A printable character still shows itself — a codepoint would be worse
-/// for the common case.
+/// A visible character keeps its glyph. The codepoint rides along
+/// because the characters most worth reporting are the ones that look
+/// like another: a full-width `＝` is the likeliest way to break a file
+/// in a project whose docs are written in Japanese, and it is
+/// indistinguishable from `=` in the message without one.
 #[test]
-fn a_printable_unexpected_character_shows_itself() {
-    let text = message("struct s size=3x3\n  floor ?=1\n");
-    assert!(text.contains('?'), "{text}");
+fn a_visible_unexpected_character_keeps_its_glyph() {
+    for (source, glyph, codepoint) in [
+        ("struct s size=3x3\n  floor ?=1\n", '?', "003F"),
+        ("struct s size\u{ff1d}3x3\n", '\u{ff1d}', "FF1D"),
+        ("struct \u{3042} size=3x3\n", '\u{3042}', "3042"),
+    ] {
+        let text = message(source);
+        assert!(
+            text.contains(glyph) && text.contains(codepoint),
+            "expected both the glyph and U+{codepoint} in: {text}",
+        );
+    }
+}
+
+/// A BOM occupies a column in every span-derived position — `LineStarts`
+/// here and `LineIndex` in the LSP both count characters from the line's
+/// start — so the lexer counts it too. Skipping it in one layer and not
+/// the others puts a lexer error one column left of a check diagnostic
+/// about the same character, on the first line of exactly the files a
+/// Windows editor produces.
+#[test]
+fn a_byte_order_mark_occupies_a_column() {
+    let with_bom = lex("\u{feff}struct s size=3x3\n").expect("lex");
+    let without = lex("struct s size=3x3\n").expect("lex");
+    assert_eq!(
+        with_bom[0].position.col.get(),
+        without[0].position.col.get() + 1,
+        "the mark should shift the first token's column by one",
+    );
+}
+
+/// Spans stay offsets into the string the caller handed us, which is what
+/// lets an editor highlight a diagnostic without knowing whether a mark
+/// was skipped. Trimming the source instead would shift every span by
+/// three bytes and break nothing else in this file.
+#[test]
+fn a_byte_order_mark_shifts_every_span_by_its_own_width() {
+    let with_bom = lex("\u{feff}struct s size=3x3\n").expect("lex");
+    let without = lex("struct s size=3x3\n").expect("lex");
+    let bom_len = "\u{feff}".len();
+    for (a, b) in with_bom.iter().zip(without.iter()) {
+        assert_eq!(
+            a.span.start,
+            b.span.start + bom_len,
+            "span should be an offset into the source as given",
+        );
+    }
+}
+
+/// A file holding nothing but a mark holds no tokens, and one whose first
+/// line is indented is still refused for that.
+#[test]
+fn a_byte_order_mark_alone_is_an_empty_file() {
+    assert!(lex("\u{feff}").expect("lex").is_empty());
+    assert!(lex("\u{feff}  struct s\n").is_ok());
 }
