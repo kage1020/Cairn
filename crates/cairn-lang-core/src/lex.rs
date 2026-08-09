@@ -14,6 +14,10 @@
 //! dedented line emits *one `Dedent` per level closed*. Parsers can therefore
 //! rely on `Dedent` counts to know how many scopes ended on that line.
 //!
+//! A byte-order mark at the very start of the file is skipped, since that
+//! is what a default Windows editor writes and it is not part of the text.
+//! One anywhere else is an ordinary stray character.
+//!
 //! Comments (`#` to end-of-line), blank lines, and trailing whitespace are
 //! discarded silently; everything else either becomes a token or fails with a
 //! [`LexError`].
@@ -150,12 +154,24 @@ struct Lexer<'src> {
     out: Vec<Token>,
 }
 
+/// U+FEFF, the byte-order mark, as it appears in UTF-8.
+const BOM: &str = "\u{feff}";
+
 impl<'src> Lexer<'src> {
     fn new(src: &'src str) -> Self {
+        // A leading BOM is metadata about the encoding, not text. Skipped
+        // by advancing `pos` rather than by trimming `src`, so every span
+        // stays an offset into the string the caller handed us — an
+        // editor highlighting a diagnostic indexes the same bytes.
+        //
+        // `col` is left at 1: the mark occupies no column an author can
+        // see, so counting it would put every diagnostic on the first
+        // line one column to the right of where it looks.
+        let pos = usize::from(src.starts_with(BOM)) * BOM.len();
         Self {
             src,
             bytes: src.as_bytes(),
-            pos: 0,
+            pos,
             line: 1,
             col: 1,
             indent_stack: vec![0],
@@ -212,10 +228,17 @@ impl<'src> Lexer<'src> {
             let current = *self.indent_stack.last().expect(INDENT_STACK_NONEMPTY);
             if level > current {
                 // Only allow one level of indent increase at a time.
+                //
+                // Its own variant rather than `OddIndent`: 4 spaces is a
+                // multiple of 2, so "indentation must be a multiple of 2"
+                // describes a rule the line already satisfies. `expected`
+                // carries the one width that opens exactly one level from
+                // here, which is what the author has to write.
                 if level != current + 1 {
-                    return Err(LexError::OddIndent {
+                    return Err(LexError::IndentJump {
                         position: start_position,
                         got: spaces,
+                        expected: (current + 1) * 2,
                     });
                 }
                 self.indent_stack.push(level);
@@ -417,6 +440,19 @@ impl<'src> Lexer<'src> {
             }
             let w_str = &self.src[start..lexeme_end];
             let h_str = &self.src[h_start..self.pos];
+            // A `Size` holds two extents. If the run continues into a
+            // third (`2x2x9`) or into a word (`2x2y`), the author wrote
+            // something this token cannot carry, and splitting it into a
+            // `Size` plus an identifier loses the difference silently:
+            // the identifier lands among the parser's positional
+            // arguments, which nothing reads.
+            if let Some(found) = self.peek().filter(|b| is_ident_continue(*b)) {
+                return Err(LexError::TrailingSizeSegment {
+                    position,
+                    literal: self.src[start..self.pos].to_owned(),
+                    found: char::from(found),
+                });
+            }
             let w = w_str.parse::<u32>().map_err(|err| LexError::InvalidInt {
                 position,
                 context: IntContext::SizeWidth,

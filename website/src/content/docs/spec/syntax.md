@@ -21,6 +21,28 @@ that is not `key=`, `-> binding`, or `[selector]` into the same list, so a dropp
 (`walls mat_slot=wall height 3`) lands there too — and a `walls` with no `height=` is not
 shortened, it is not built at all.
 
+
+## 5.1.1 Literals and separators
+A size literal is exactly two extents, `WxH`. A run that continues past the second — `2x2x9`, or
+`2x2y` — is refused rather than read as a size followed by something else, because the something
+else would land among the positional values and be dropped without a diagnostic.
+
+Commas between list items and between the attributes of a `[selector]` are **optional separators**:
+`[a, b]`, `[a b]`, and `[a, , b]` all name the same two items. They are punctuation for the reader,
+not structure. The one place a comma is required is the input list of `assert truth(...)`, where it
+separates signals whose count the row width is checked against.
+
+A truth-table row assigns one bit per input signal, so `truth(a, b -> out)` takes rows two bits
+wide and `{ 2->0 }` or `{ 0->0 }` are refused: a row the evaluator cannot read looks like coverage
+and is worse than no row at all.
+
+Indentation is two spaces per level and opens one level at a time. A width that is not a multiple
+of two and a jump of more than one level are different mistakes with different repairs, and are
+reported as such.
+
+A UTF-8 byte-order mark at the very start of a file is ignored — it is what a default Windows
+editor writes, and it is not part of the text. One anywhere else is an ordinary stray character.
+
 ## 5.2 Nesting
 Keep nesting shallow (`struct` / `def` / `level` / `theme` / `site`). Deep nesting increases
 LLM generation errors. (`room` is not in this list: it is still open — see

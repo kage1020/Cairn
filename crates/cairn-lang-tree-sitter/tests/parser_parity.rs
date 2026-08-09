@@ -267,10 +267,17 @@ const FIXTURES: &[(&str, &str, Verdict)] = &[
         "struct s size=3x3\n  assert truth(a.b -> c.d) { 0 -> 1; }\n",
         Accept,
     ),
-    // The input side is any integer lexeme; only the output is a bit.
+    // Both sides of a row hold bits and nothing else.
     (
         "truth_non_bit_input",
         "struct s size=3x3\n  assert truth(a.b -> c.d) { 2 -> 1 }\n",
+        Reject,
+    ),
+    // One bit per input signal, counted against the list left of the
+    // arrow.
+    (
+        "truth_row_matches_the_input_arity",
+        "struct s size=3x3\n  assert truth(a.b, c.d -> e.f) { 01 -> 1 }\n",
         Accept,
     ),
     (
@@ -303,6 +310,21 @@ const FIXTURES: &[(&str, &str, Verdict)] = &[
         "size_leading_zero",
         "struct s size=03x3\n  floor mat_slot=f\n",
         Accept,
+    ),
+    // A size holds two extents, and a run continuing past the second is
+    // refused on both sides — for different reasons, which is why both
+    // are pinned. `scan_number` inspects the character after the height;
+    // here the height's token simply ends, and nothing in the grammar
+    // takes an identifier in that position.
+    (
+        "size_with_a_third_extent",
+        "struct s size=2x2x9\n  floor a=1\n",
+        Reject,
+    ),
+    (
+        "size_running_into_a_word",
+        "struct s size=2x2y\n  floor a=1\n",
+        Reject,
     ),
     (
         "size_spaced",
@@ -496,6 +518,17 @@ const KNOWN_DIVERGENCES: &[(&str, &str, Verdict)] = &[
     (
         "size_zero_extent",
         "struct s size=0x3\n  floor mat_slot=f\n",
+        Accept,
+    ),
+    // -- a truth row of the wrong width --------------------------------
+    //
+    // `parse_assert_truth` compares a row's width against the number of
+    // signals left of the arrow. This grammar would have to relate two
+    // repetitions in different halves of one rule, which a context-free
+    // grammar cannot; the digits themselves are checked on both sides.
+    (
+        "truth_row_wider_than_the_input_list",
+        "struct s size=3x3\n  assert truth(a.b -> c.d) { 00 -> 1 }\n",
         Accept,
     ),
     (

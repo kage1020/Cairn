@@ -443,7 +443,40 @@ impl<'a> Parser<'a> {
         self.expect(&TokenKind::LBrace)?;
         let mut rows = Vec::new();
         while !self.peek_is(&TokenKind::RBrace) && !self.at_eof() {
+            let pattern_position = self.position();
             let inputs_lex = self.expect_int_lexeme()?;
+            // A row assigns one bit per input signal, so the pattern is
+            // checked against the list left of the arrow — the only place
+            // that count is in hand. Nothing downstream holds the two
+            // together: `intent::lower` clones the lexeme, so a row of
+            // `2` or a three-bit row for one signal would reach the
+            // evaluator describing no assignment at all, and a table that
+            // asserts nothing looks exactly like one that passes.
+            //
+            // A leading zero is data here rather than a numeric quirk,
+            // which is why the row keeps the raw lexeme: `01` and `1` are
+            // different rows of a two-input table.
+            if let Some(bad) = inputs_lex.chars().find(|c| !matches!(c, '0' | '1')) {
+                return Err(ParseError::Syntax {
+                    position: pattern_position,
+                    message: format!(
+                        "truth-table input pattern `{inputs_lex}` must hold only `0` and `1`, \
+                         got `{bad}`"
+                    ),
+                });
+            }
+            if inputs_lex.chars().count() != inputs.len() {
+                return Err(ParseError::Syntax {
+                    position: pattern_position,
+                    message: format!(
+                        "truth-table input pattern `{inputs_lex}` is {got} bits wide, \
+                         but the table has {want} input{plural}",
+                        got = inputs_lex.chars().count(),
+                        want = inputs.len(),
+                        plural = if inputs.len() == 1 { "" } else { "s" },
+                    ),
+                });
+            }
             self.expect(&TokenKind::Arrow)?;
             let out_lex = self.expect_int_lexeme()?;
             let output = match out_lex.as_str() {
