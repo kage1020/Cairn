@@ -649,18 +649,26 @@ mod tests {
 
     #[test]
     fn line_endings_do_not_shift_keyword_classification_or_replace_ranges() {
-        // A lone `\r` used to leave both scanners here reading the whole
-        // document as one line: `enclosing_item_keyword` then found no
-        // indent-0 line above the cursor and fell back to the unscoped
-        // union, and the replace range landed on line 0.
-        for (label, source) in renderings("struct s size=2x2\n  flo") {
-            let items = complete(&source, "flo");
+        // A lone `\r` used to leave every scanner here reading the document
+        // as one line, and the replace range landed on line 0.
+        //
+        // The `theme` above the `struct` is what makes the enclosing-item
+        // scan discriminating: read as one line, the document begins with
+        // `theme` and the cursor is offered a theme body's vocabulary. With
+        // a single-item document the collapsed reading happens to start
+        // with the right keyword and the wrong scan looks right.
+        // `wal`, not `flo`: the cursor is located by the first occurrence
+        // of the needle, and `floor` appears in the slot declaration above.
+        for (label, source) in
+            renderings("theme a:\n  slot floor -> @oak_planks\nstruct s size=2x2\n  wal")
+        {
+            let items = complete(&source, "wal");
             assert_eq!(
                 labels(&items),
                 BodyKind::Geometry.allowed_keywords(),
                 "{label}"
             );
-            assert_eq!(edit_range(&items[0]), range(1, 2, 5), "{label}");
+            assert_eq!(edit_range(&items[0]), range(3, 2, 5), "{label}");
         }
     }
 
