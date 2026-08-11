@@ -50,8 +50,8 @@ use super::{Footprint, MAX_STRUCTURE_VOLUME, Placement, Walkway};
 use super::material::{IdOrigin, MaterialDeferred, TargetRegistry, UnknownId, resolve_block_state};
 use super::openings::{WallSide, wall_length, wall_local_to_grid};
 use super::roof::{
-    Cardinal, GableVoxel, HipVoxel, RoofKind, STAIR_BASE_ID, ShedFace, ShedVoxel, StairFace,
-    StairShape, flat_block_state, flat_extra_height, flat_voxels, gable_extra_height,
+    Cardinal, FLAT_BASE_ID, GableVoxel, HipVoxel, RoofKind, STAIR_BASE_ID, ShedFace, ShedVoxel,
+    StairFace, StairShape, flat_block_state, flat_extra_height, flat_voxels, gable_extra_height,
     gable_ridge_axis, gable_stair_state, gable_voxels, hip_extra_height, hip_stair_state,
     hip_voxels, shed_extra_height, shed_high_side, shed_slope_span, shed_stair_state, shed_voxels,
     stair_state,
@@ -81,6 +81,21 @@ const PRESSURE_PLATE_TOKEN: &str = "pressure_plate.default";
 /// `mat_slot=` binding, which is honoured verbatim (mirroring
 /// [`STAIR_BASE_ID`]'s contract).
 const PRESSURE_PLATE_BASE_ID: &str = "minecraft:oak_pressure_plate";
+
+/// Block ids lowering can put in a palette that no pack can redirect.
+///
+/// These are compiled into this crate, so nothing checks them against the
+/// target the way `E_UNKNOWN_ID` checks an authored id — and no pack can
+/// respell them either, because none of them reads a catalog token. They
+/// must therefore be valid on every supported target of every edition, and
+/// a pack-side test holds them to exactly that. It is the only thing
+/// standing between a hardcoded Java spelling and a Bedrock structure file
+/// full of air.
+///
+/// [`PRESSURE_PLATE_BASE_ID`] is deliberately absent: it *is* redirectable
+/// (through [`PRESSURE_PLATE_TOKEN`]), so its per-edition correctness is a
+/// question about the packs, and the pack-side tests ask it there.
+pub const BUILTIN_BLOCK_IDS: &[&str] = &[BlockState::AIR_ID, STAIR_BASE_ID, FLAT_BASE_ID];
 
 /// Lower every `struct` in `intent` into a [`BlockArray`].
 ///
@@ -3266,6 +3281,33 @@ mod tests {
     use super::*;
     use crate::block_array::BlockState;
     use crate::check::Severity;
+
+    /// Every hardcoded id that no pack can redirect is in the list the
+    /// pack-side tests hold against the real registries. A const added
+    /// here and forgotten there would be checked by nothing at all.
+    #[test]
+    fn every_unredirectable_builtin_id_is_in_the_list_the_pack_tests_walk() {
+        for id in [BlockState::AIR_ID, STAIR_BASE_ID, FLAT_BASE_ID] {
+            assert!(
+                BUILTIN_BLOCK_IDS.contains(&id),
+                "`{id}` is emitted with no catalog able to correct it but is not in \
+                 BUILTIN_BLOCK_IDS, so no test holds it against any target's block table",
+            );
+        }
+    }
+
+    /// The plate is the one hardcoded id a pack *can* redirect, and the
+    /// list would be making a false promise if it carried it: the id is a
+    /// Java spelling, and Bedrock declares nothing by that name.
+    #[test]
+    fn the_redirectable_plate_id_is_not_in_that_list() {
+        assert!(
+            !BUILTIN_BLOCK_IDS.contains(&PRESSURE_PLATE_BASE_ID),
+            "BUILTIN_BLOCK_IDS promises every target declares its entries, and no Bedrock \
+             target declares `{PRESSURE_PLATE_BASE_ID}`; the plate is covered by the pack \
+             tests around `{PRESSURE_PLATE_TOKEN}` instead",
+        );
+    }
     use crate::{lower, parse, resolve};
 
     fn lowered(source: &str) -> BlockArrayIr {
