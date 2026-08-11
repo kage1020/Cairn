@@ -63,6 +63,13 @@ pub struct PackFiles {
     /// in its place.
     #[serde(default)]
     pub materials: Option<String>,
+    /// Relative filename of the per-version `blocks` id table JSON.
+    /// Optional on the same terms as `materials`: a pack without it loads,
+    /// and the loader fills [`crate::registry::BlocksIndex::empty`] in its
+    /// place. A compile against such a pack cannot check whether an id
+    /// exists and says so rather than passing ids silently.
+    #[serde(default)]
+    pub blocks: Option<String>,
 }
 
 #[cfg(test)]
@@ -84,6 +91,23 @@ mod tests {
         assert_eq!(m.name, "cairn-builtin-java");
         assert_eq!(m.files.data_versions, "data_versions.json");
         assert!(m.files.materials.is_none(), "materials defaults to None");
+        assert!(m.files.blocks.is_none(), "blocks defaults to None");
+    }
+
+    #[test]
+    fn manifest_with_blocks_component_roundtrips() {
+        let src = r#"{
+            "schema_version": 1,
+            "edition": "bedrock",
+            "name": "cairn-builtin-bedrock",
+            "description": "test",
+            "files": {
+                "data_versions": "data_versions.json",
+                "blocks": "blocks.json"
+            }
+        }"#;
+        let m: PackManifest = serde_json::from_str(src).expect("deserialise manifest");
+        assert_eq!(m.files.blocks.as_deref(), Some("blocks.json"));
     }
 
     #[test]

@@ -578,7 +578,11 @@ fn run_info(file: &Path, editions: &[String], format: InfoFormat) -> ExitCode {
     // The strict per-edition pass runs inside the dry-run below, which
     // reports whatever only it can see.
     let resolution = resolve(&ir, None);
-    let mut block_ir = lower_to_block_array(&ir, &resolution, Some(&builtin_java().materials));
+    // No `--target` here, so the view carries no id table and block ids go
+    // unchecked: `cairn check` cannot say whether `@light` exists without
+    // being told which version to ask. `cairn compile --target` is where
+    // that question has an answer.
+    let mut block_ir = lower_to_block_array(&ir, &resolution, Some(&builtin_java().view(None)));
     let combined = build_diagnostics(
         &module,
         &ir,
@@ -672,11 +676,14 @@ fn edition_portability(
     for e in editions {
         let edition: Edition = e.parse().expect("validated by the caller");
         let resolution = resolve(ir, Some(edition));
-        let materials = match edition {
-            Edition::Java => &builtin_java().materials,
-            Edition::Bedrock => &builtin_bedrock().materials,
+        let pack = match edition {
+            Edition::Java => builtin_java(),
+            Edition::Bedrock => builtin_bedrock(),
         };
-        let block_ir = lower_to_block_array(ir, &resolution, Some(materials));
+        // `cairn info` reports across every target in the pack's range, so
+        // there is no single version to check ids against; see the note in
+        // `run_check`.
+        let block_ir = lower_to_block_array(ir, &resolution, Some(&pack.view(None)));
 
         let only_here: Vec<_> = resolution
             .diagnostics
@@ -787,7 +794,8 @@ fn run_lower(file: &Path, format: LowerFormat) -> ExitCode {
     };
     let ir = lower(&module);
     let resolution = resolve(&ir, None);
-    let mut block_ir = lower_to_block_array(&ir, &resolution, Some(&builtin_java().materials));
+    // No `--target` here either; see the note in `run_check`.
+    let mut block_ir = lower_to_block_array(&ir, &resolution, Some(&builtin_java().view(None)));
     // Mirror `load_and_lower`: the check pass gates the pipeline, and the
     // lowering deferrals its findings tend to cascade into follow on the
     // same stream.
@@ -1434,12 +1442,22 @@ fn run_compile(
     out: Option<&Path>,
     lock: Option<&Path>,
 ) -> ExitCode {
+    // Resolved before lowering because lowering checks every block id
+    // against the pinned version's table, and reported below rather than
+    // here — see `resolve_target`. A target that does not resolve leaves
+    // lowering with nothing to check against, which is the same "no target
+    // pinned" mode `cairn check` runs in.
+    let resolved_target = resolve_target(edition, target);
+    let pinned = resolved_target
+        .as_ref()
+        .ok()
+        .map(ResolvedTarget::mc_version);
     let Lowered {
         source,
         block_ir,
         dropped_scopes,
         version_floor,
-    } = match load_and_lower(file, edition) {
+    } = match load_and_lower(file, edition, pinned) {
         Ok(lowered) => lowered,
         Err(code) => return code,
     };
@@ -1472,9 +1490,12 @@ fn run_compile(
         return ExitCode::from(1);
     }
 
-    let target = match resolve_target(edition, target) {
+    let target = match resolved_target {
         Ok(t) => t,
-        Err(code) => return code,
+        Err(err) => {
+            eprintln!("error: {err}");
+            return ExitCode::from(1);
+        }
     };
     if let Err(code) =
         enforce_version_floor(file, &source, version_floor.as_ref(), edition, &target)
@@ -1516,7 +1537,11 @@ struct Lowered {
     version_floor: Option<VersionFloor>,
 }
 
-fn load_and_lower(file: &Path, edition: EditionArg) -> Result<Lowered, ExitCode> {
+fn load_and_lower(
+    file: &Path,
+    edition: EditionArg,
+    mc_version: Option<&str>,
+) -> Result<Lowered, ExitCode> {
     let source = std::fs::read_to_string(file).map_err(|err| {
         eprintln!("error: cannot read `{}`: {err}", file.display());
         match err.kind() {
@@ -1535,15 +1560,13 @@ fn load_and_lower(file: &Path, edition: EditionArg) -> Result<Lowered, ExitCode>
     })?;
     let ir = lower(&module);
     let resolution = resolve(&ir, Some(edition.as_edition()));
-    // The materials catalog is edition-specific: an abstract `@token`
-    // resolves through the pack whose backend will serialise it, so a
-    // future per-edition block vocabulary lowers correctly without a
-    // second lowering pass.
-    let materials = match edition {
-        EditionArg::Java => &builtin_java().materials,
-        EditionArg::Bedrock => &builtin_bedrock().materials,
-    };
-    let mut block_ir = lower_to_block_array(&ir, &resolution, Some(materials));
+    // The pack is edition-specific: an abstract `@token` resolves through
+    // the pack whose backend will serialise it, and the id table it is
+    // checked against belongs to the one version that pack was pinned to.
+    // `mc_version: None` (no `--target` resolved) leaves the id check off
+    // rather than running it against a version nobody chose.
+    let registry = edition.registry_pack().view(mc_version);
+    let mut block_ir = lower_to_block_array(&ir, &resolution, Some(&registry));
     // The check pass is the gate `cairn check` exposes; running it here is
     // what keeps `compile` from accepting a source that `check` rejects. It
     // used to be skipped, so an `E_DUPLICATE_ID` would compile to artifacts
@@ -1676,20 +1699,21 @@ fn report_lowering_diagnostics(file: &Path, source: &str, block_ir: &BlockArrayI
     has_error
 }
 
-fn resolve_target(edition: EditionArg, target: &str) -> Result<ResolvedTarget, ExitCode> {
+/// Resolve `--target` against the pack for `--edition`.
+///
+/// Returns the failure instead of printing it: `run_compile` resolves the
+/// target before it lowers (block-array lowering needs the pinned version
+/// to check block ids against) but reports the failure where it always
+/// did, after the parse and lowering diagnostics. A command-line mistake
+/// that jumped ahead of a syntax error would change which problem a user
+/// is told about first.
+fn resolve_target(
+    edition: EditionArg,
+    target: &str,
+) -> Result<ResolvedTarget, cairn_lang_formats::data_version::UnsupportedTarget> {
     match edition {
-        EditionArg::Java => resolve_java_target(target)
-            .map(ResolvedTarget::Java)
-            .map_err(|err| {
-                eprintln!("error: {err}");
-                ExitCode::from(1)
-            }),
-        EditionArg::Bedrock => resolve_bedrock_target(target)
-            .map(ResolvedTarget::Bedrock)
-            .map_err(|err| {
-                eprintln!("error: {err}");
-                ExitCode::from(1)
-            }),
+        EditionArg::Java => resolve_java_target(target).map(ResolvedTarget::Java),
+        EditionArg::Bedrock => resolve_bedrock_target(target).map(ResolvedTarget::Bedrock),
     }
 }
 

@@ -30,7 +30,11 @@ fn lower_redstone_door() -> BlockArrayIr {
     let ir = lower(&module);
     let resolution = resolve(&ir, None);
     let pack = builtin_java();
-    lower_to_block_array(&ir, &resolution, Some(&pack.materials))
+    lower_to_block_array(
+        &ir,
+        &resolution,
+        Some(&pack.view(Some(&pack.data_versions.latest))),
+    )
 }
 
 #[test]
@@ -177,7 +181,11 @@ fn redstone_door_actuator_patch_bad_id_emits_actuator_shaped_primary() {
     let ir = cairn_lang_core::lower(&module);
     let resolution = cairn_lang_core::resolve(&ir, None);
     let pack = builtin_java();
-    let out = lower_to_block_array(&ir, &resolution, Some(&pack.materials));
+    let out = lower_to_block_array(
+        &ir,
+        &resolution,
+        Some(&pack.view(Some(&pack.data_versions.latest))),
+    );
 
     let actuator_defers: Vec<&cairn_lang_core::check::Diagnostic> = out
         .diagnostics

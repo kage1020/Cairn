@@ -94,7 +94,7 @@ fn ac5_java_compile_writes_oak_sign_and_not_wall_sign() {
 }
 
 #[test]
-fn ac6_bedrock_compile_writes_oak_wall_sign_and_not_oak_sign() {
+fn ac6_bedrock_compile_writes_the_bedrock_wall_sign_and_not_the_java_one() {
     let (_tmp_src, src) = fallback_in_tempdir();
     let out_dir = TempDir::new().expect("out tempdir");
     let result = Command::new(cargo_bin())
@@ -121,28 +121,27 @@ fn ac6_bedrock_compile_writes_oak_wall_sign_and_not_oak_sign() {
 
     let structure = out_dir.path().join("shop.mcstructure");
     let bytes = read_bytes(&structure);
-    // `oak_wall_sign` = `o a k _ w a l l _ s i g n`, which does **not** contain
-    // `oak_sign` = `o a k _ s i g n` as a substring (after `oak_` comes
-    // `wall_`, not `sign`). So the two counts are independent bytewise —
-    // a raw `oak_sign` hit implies the plain Java-variant block leaked
-    // into the Bedrock palette. This replaces the earlier `!bytes_contain(
-    // "minecraft:oak_sign,")` guard, which was vacuously true (literal
-    // commas do not appear inside NBT-encoded strings).
-    let raw_oak_sign_hits = bytes
-        .windows(b"oak_sign".len())
-        .filter(|w| *w == b"oak_sign")
-        .count();
-    let wall_sign_hits = bytes
+    // Bedrock has no `oak_wall_sign` at all — it spells the block
+    // `wall_sign`, and the pack used to hand the Java spelling to the
+    // `.mcstructure` writer, which produced a file the game loads as air.
+    // `oak_wall_sign` contains `wall_sign` as a substring, so a plain
+    // `wall_sign` hit does not by itself prove the Java id is gone;
+    // counting `oak_` separately is what distinguishes them.
+    let java_spelling_hits = bytes
         .windows(b"oak_wall_sign".len())
         .filter(|w| *w == b"oak_wall_sign")
         .count();
+    let bedrock_spelling_hits = bytes
+        .windows(b"wall_sign".len())
+        .filter(|w| *w == b"wall_sign")
+        .count();
     assert!(
-        wall_sign_hits > 0,
-        "Bedrock palette must include oak_wall_sign (from shop_bedrock's floating_text slot); got {wall_sign_hits} hits",
+        bedrock_spelling_hits > 0,
+        "Bedrock palette must include wall_sign (from shop_bedrock's floating_text slot); got {bedrock_spelling_hits} hits",
     );
     assert_eq!(
-        raw_oak_sign_hits, 0,
-        "Bedrock palette must not include the Java variant's plain oak_sign; got {raw_oak_sign_hits} bytewise hits",
+        java_spelling_hits, 0,
+        "Bedrock palette must not include the Java-only oak_wall_sign; got {java_spelling_hits} bytewise hits",
     );
 }
 

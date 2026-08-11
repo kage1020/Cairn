@@ -47,7 +47,7 @@ use crate::resolve::{Resolution, ScopeResolution, place_scope_key};
 
 use super::{Footprint, MAX_STRUCTURE_VOLUME, Placement, Walkway};
 
-use super::material::{AbstractMaterialResolver, MaterialDeferred, resolve_block_state};
+use super::material::{IdOrigin, MaterialDeferred, TargetRegistry, UnknownId, resolve_block_state};
 use super::openings::{WallSide, wall_length, wall_local_to_grid};
 use super::roof::{
     Cardinal, GableVoxel, HipVoxel, RoofKind, STAIR_BASE_ID, ShedFace, ShedVoxel, StairFace,
@@ -62,12 +62,24 @@ use super::walkway::{
 };
 use super::{BlockArray, BlockArrayIr, BlockState, Dims, Palette, PaletteIndex};
 
-/// Vanilla pressure plate id used by `pressure_plate` members that do not
-/// resolve a `mat_slot=` binding. Species-specific plates (spruce, dark
-/// oak, ...) land with the registry pack once the theme-slot table grows
-/// a fixture axis; until then a bare `pressure_plate` lowers to
-/// `oak_pressure_plate` and a `mat_slot=` that resolves to a different id
-/// is honoured verbatim (mirroring [`STAIR_BASE_ID`]'s contract).
+/// Catalog token a `pressure_plate` member's default material comes from.
+///
+/// The id itself is edition-specific — Java spells it
+/// `oak_pressure_plate`, Bedrock `wooden_pressure_plate` — and lowering
+/// has no edition of its own to decide with. Reading it out of the pack
+/// keeps the knowledge in the one place that is already per-edition, at
+/// the cost of the token also being writable by an author as
+/// `@pressure_plate.default`. That is accepted: the alternative is a
+/// second pack component whose only member is this one row.
+const PRESSURE_PLATE_TOKEN: &str = "pressure_plate.default";
+
+/// Pressure plate id used when no registry pack is offered at all.
+///
+/// The no-pack path has no edition either, and spec versioning-editions
+/// §10.3 makes Java the base, so the Java spelling is the honest default.
+/// Species-specific plates (spruce, dark oak, ...) still come from a
+/// `mat_slot=` binding, which is honoured verbatim (mirroring
+/// [`STAIR_BASE_ID`]'s contract).
 const PRESSURE_PLATE_BASE_ID: &str = "minecraft:oak_pressure_plate";
 
 /// Lower every `struct` in `intent` into a [`BlockArray`].
@@ -80,16 +92,18 @@ const PRESSURE_PLATE_BASE_ID: &str = "minecraft:oak_pressure_plate";
 /// outside the three implemented phases are reported via
 /// `W_DEFERRED_MEMBER` and skipped.
 ///
-/// `materials` is the registry-pack-backed abstract-token lifter. `Some`
-/// turns `@floor.wood.broadleaf`-style tokens into concrete Java ids and
-/// fail-loud on misses; `None` keeps the pre-PR2 behaviour where every
-/// abstract token degrades to a `W_ABSTRACT_TOKEN_DEFERRED` warning so
-/// library callers without a pack still get a partial build.
+/// `registry` is the registry-pack-backed view of the compile's target.
+/// `Some` turns `@floor.wood.broadleaf`-style tokens into concrete ids,
+/// fails loud on misses, and — when the run pinned a `--target` — refuses
+/// any id that target does not declare (`E_UNKNOWN_ID`). `None` keeps the
+/// pre-PR2 behaviour where every abstract token degrades to a
+/// `W_ABSTRACT_TOKEN_DEFERRED` warning so library callers without a pack
+/// still get a partial build.
 #[must_use]
 pub fn lower_to_block_array(
     intent: &IntentModule,
     resolution: &Resolution,
-    materials: Option<&dyn AbstractMaterialResolver>,
+    registry: Option<&dyn TargetRegistry>,
 ) -> BlockArrayIr {
     let mut structures: IndexMap<String, BlockArray> = IndexMap::new();
     let mut diagnostics: Vec<Diagnostic> = Vec::new();
@@ -101,7 +115,7 @@ pub fn lower_to_block_array(
         // diagnostic (no `size=`, etc.), so the skip here is silent on
         // purpose — diagnosing twice would teach a reader the struct had
         // two unrelated problems instead of one.
-        if let Some(ba) = lower_struct(s, scope, materials, &mut diagnostics) {
+        if let Some(ba) = lower_struct(s, scope, registry, &mut diagnostics) {
             // First-write-wins on a duplicate name, matching
             // `resolve`'s `FIRST_BINDING_WINS`. `resolution.scopes` has
             // already bound the first body; taking the last here would
@@ -118,7 +132,7 @@ pub fn lower_to_block_array(
             site,
             &intent.defs,
             resolution,
-            materials,
+            registry,
             &mut structures,
             &mut placements,
             &mut diagnostics,
@@ -133,7 +147,7 @@ pub fn lower_to_block_array(
     lower_connects(
         resolution,
         &intent.defs,
-        materials,
+        registry,
         &placements,
         &blocked,
         &mut structures,
@@ -199,7 +213,7 @@ fn collect_floor_cells(
 fn lower_connects(
     resolution: &Resolution,
     defs: &[DefIr],
-    materials: Option<&dyn AbstractMaterialResolver>,
+    registry: Option<&dyn TargetRegistry>,
     placements: &IndexMap<String, Placement>,
     blocked: &HashSet<(i32, i32, i32)>,
     structures: &mut IndexMap<String, BlockArray>,
@@ -342,7 +356,7 @@ fn lower_connects(
             continue;
         }
 
-        let material = match resolve_block_state(&connect.path, materials) {
+        let material = match resolve_block_state(&connect.path, registry) {
             Ok(state) => state,
             Err(MaterialDeferred::Abstract(token)) => {
                 diagnostics.push(diag_walkway_abstract_token(connect, &token));
@@ -354,6 +368,10 @@ fn lower_connects(
                     &token,
                     suggestion.as_deref(),
                 ));
+                continue;
+            }
+            Err(MaterialDeferred::UnknownId(unknown)) => {
+                diagnostics.push(diag_unknown_id(connect.path.span.clone(), &unknown));
                 continue;
             }
             Err(MaterialDeferred::AlreadyDiagnosed) => {
@@ -670,10 +688,59 @@ fn diag_walkway_unknown_token(
     }
 }
 
+/// Report a block id the compile's target does not declare.
+///
+/// One builder serves both the member and the walkway site: the span
+/// differs and nothing else does. The prose fork that matters is not which
+/// statement the id sat on but *who chose it* — an author can correct what
+/// they typed, while a catalog mapping is not theirs to edit and a message
+/// that blames their token sends them to the wrong file.
+fn diag_unknown_id(span: Span, unknown: &UnknownId) -> Diagnostic {
+    let UnknownId {
+        id,
+        registry,
+        origin,
+        suggestion,
+    } = unknown;
+    let mut notes = Vec::with_capacity(2);
+    if let IdOrigin::Catalog { token } = origin {
+        notes.push(DiagnosticNote {
+            span: None,
+            message: format!(
+                "the registry pack maps `@{token}` onto it; the token is fine and the pack's mapping is not, so this is not a fix you make here",
+            ),
+        });
+    }
+    notes.push(DiagnosticNote {
+        span: None,
+        message: match suggestion {
+            Some(candidate) => format!("`{registry}` spells the nearest block `{candidate}`"),
+            None => format!(
+                "no block in `{registry}` is near enough to suggest; compile against a target that declares `{id}`, or pick a block this one has",
+            ),
+        },
+    });
+    Diagnostic {
+        code: DiagnosticCode::UnknownId,
+        span,
+        primary: format!("`{id}` is not a block in `{registry}`"),
+        notes,
+        data: Some(DiagnosticData::UnknownId {
+            id: id.clone(),
+            registry: registry.clone(),
+            token: match origin {
+                IdOrigin::Authored => None,
+                IdOrigin::Catalog { token } => Some(token.clone()),
+            },
+            suggestion: suggestion.clone(),
+        }),
+    }
+}
+
 fn lower_struct<'a>(
     s: &StructIr,
     scope: Option<&'a ScopeResolution>,
-    materials: Option<&'a dyn AbstractMaterialResolver>,
+    registry: Option<&'a dyn TargetRegistry>,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Option<BlockArray> {
     let Some(size) = s.size.as_ref() else {
@@ -690,7 +757,7 @@ fn lower_struct<'a>(
             source_scope: format!("struct::{}", s.name),
         },
         scope,
-        materials,
+        registry,
         diagnostics,
     )
 }
@@ -718,7 +785,7 @@ fn lower_site<'a>(
     site: &SiteIr,
     defs: &[DefIr],
     resolution: &'a Resolution,
-    materials: Option<&'a dyn AbstractMaterialResolver>,
+    registry: Option<&'a dyn TargetRegistry>,
     structures: &mut IndexMap<String, BlockArray>,
     placements: &mut IndexMap<String, Placement>,
     diagnostics: &mut Vec<Diagnostic>,
@@ -828,7 +895,7 @@ fn lower_site<'a>(
                 source_scope: key,
             },
             Some(scope),
-            materials,
+            registry,
             diagnostics,
         ) else {
             // The extent was refused; the diagnostic names the scope, and
@@ -898,7 +965,7 @@ struct BodyDescriptor<'a> {
 fn lower_body_to_block_array<'a>(
     body: BodyDescriptor<'a>,
     scope: Option<&'a ScopeResolution>,
-    materials: Option<&'a dyn AbstractMaterialResolver>,
+    registry: Option<&'a dyn TargetRegistry>,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Option<BlockArray> {
     let interior_w = body.size.w.get();
@@ -948,7 +1015,7 @@ fn lower_body_to_block_array<'a>(
 
     let ctx = StructCtx {
         scope,
-        materials,
+        registry,
         theme_missing,
         dims,
         overhang,
@@ -1124,7 +1191,7 @@ fn resolve_place_origin(
 /// one field change instead of touching every helper signature.
 struct StructCtx<'a> {
     scope: Option<&'a ScopeResolution>,
-    materials: Option<&'a dyn AbstractMaterialResolver>,
+    registry: Option<&'a dyn TargetRegistry>,
     theme_missing: bool,
     dims: Dims,
     overhang: u32,
@@ -1237,7 +1304,7 @@ fn lower_massing_member(
             let Some(idx) = palette_index_for(
                 member,
                 ctx.scope,
-                ctx.materials,
+                ctx.registry,
                 palette,
                 diagnostics,
                 ctx.theme_missing,
@@ -1253,7 +1320,7 @@ fn lower_massing_member(
             let Some(idx) = palette_index_for(
                 member,
                 ctx.scope,
-                ctx.materials,
+                ctx.registry,
                 palette,
                 diagnostics,
                 ctx.theme_missing,
@@ -1321,9 +1388,9 @@ fn lower_opening_member(
 /// - the member never carried a `mat_slot=`,
 /// - the resolver already flagged the slot via `E_UNRESOLVED_SLOT` (the
 ///   binding has `slot_value == None`),
-/// - the value lowered as an abstract token and no `materials` resolver was
+/// - the value lowered as an abstract token and no `registry` resolver was
 ///   offered (a `W_ABSTRACT_TOKEN_DEFERRED` warning is emitted),
-/// - the value lowered as an abstract token the offered `materials` resolver
+/// - the value lowered as an abstract token the offered `registry` resolver
 ///   does not declare (an `E_UNKNOWN_ABSTRACT_TOKEN` error is emitted with
 ///   the nearest declared candidate, when one exists),
 /// - the value was not a token at all (`E_UNKNOWN_SLOT_TARGET` already
@@ -1337,7 +1404,7 @@ fn lower_opening_member(
 fn resolve_member_state(
     member: &Member,
     scope: Option<&ScopeResolution>,
-    materials: Option<&dyn AbstractMaterialResolver>,
+    registry: Option<&dyn TargetRegistry>,
     diagnostics: &mut Vec<Diagnostic>,
     theme_missing: bool,
 ) -> Option<BlockState> {
@@ -1347,7 +1414,7 @@ fn resolve_member_state(
     let scope = scope?;
     let binding = scope.members.get(&member.span.start)?;
     let slot_value: &ValueWithSpan = binding.slot_value.as_ref()?;
-    match resolve_block_state(slot_value, materials) {
+    match resolve_block_state(slot_value, registry) {
         Ok(state) => Some(state),
         Err(MaterialDeferred::Abstract(token)) => {
             diagnostics.push(diag_abstract_token(member, &token, slot_value));
@@ -1360,6 +1427,10 @@ fn resolve_member_state(
                 suggestion.as_deref(),
                 slot_value,
             ));
+            None
+        }
+        Err(MaterialDeferred::UnknownId(unknown)) => {
+            diagnostics.push(diag_unknown_id(slot_value.span.clone(), &unknown));
             None
         }
         Err(MaterialDeferred::AlreadyDiagnosed) => {
@@ -1392,12 +1463,12 @@ fn resolve_member_state(
 fn palette_index_for(
     member: &Member,
     scope: Option<&ScopeResolution>,
-    materials: Option<&dyn AbstractMaterialResolver>,
+    registry: Option<&dyn TargetRegistry>,
     palette: &mut Palette,
     diagnostics: &mut Vec<Diagnostic>,
     theme_missing: bool,
 ) -> Option<PaletteIndex> {
-    resolve_member_state(member, scope, materials, diagnostics, theme_missing)
+    resolve_member_state(member, scope, registry, diagnostics, theme_missing)
         .map(|state| palette.intern(state))
 }
 
@@ -1672,7 +1743,7 @@ fn fill_roof(
     let resolved = resolve_member_state(
         member,
         ctx.scope,
-        ctx.materials,
+        ctx.registry,
         diagnostics,
         ctx.theme_missing,
     );
@@ -2086,7 +2157,7 @@ fn fill_stair(
     let resolved = resolve_member_state(
         member,
         ctx.scope,
-        ctx.materials,
+        ctx.registry,
         diagnostics,
         ctx.theme_missing,
     );
@@ -2446,7 +2517,7 @@ fn resolve_plate_base_id(
     let resolved = resolve_member_state(
         member,
         ctx.scope,
-        ctx.materials,
+        ctx.registry,
         diagnostics,
         ctx.theme_missing,
     );
@@ -2462,7 +2533,19 @@ fn resolve_plate_base_id(
         ));
         return None;
     }
-    Some(resolved.map_or_else(|| PRESSURE_PLATE_BASE_ID.to_owned(), |s| s.id))
+    Some(resolved.map_or_else(|| plate_base_id(ctx.registry), |s| s.id))
+}
+
+/// The pressure plate id for this compile's edition.
+///
+/// Asks the pack for [`PRESSURE_PLATE_TOKEN`] and falls back to
+/// [`PRESSURE_PLATE_BASE_ID`] only when there is no pack to ask, or when
+/// the pack predates the token. A pack that declares it wins, which is how
+/// `--edition bedrock` stops emitting the Java-only `oak_pressure_plate`.
+fn plate_base_id(registry: Option<&dyn TargetRegistry>) -> String {
+    registry
+        .and_then(|r| r.lookup(PRESSURE_PLATE_TOKEN))
+        .map_or_else(|| PRESSURE_PLATE_BASE_ID.to_owned(), |state| state.id)
 }
 
 /// Recognise a `circuit region=<label> void=<N>` fixture without emitting
@@ -2875,7 +2958,7 @@ fn fill_window(
         let Some(idx) = palette_index_for(
             member,
             ctx.scope,
-            ctx.materials,
+            ctx.registry,
             palette,
             diagnostics,
             ctx.theme_missing,
@@ -3155,7 +3238,7 @@ fn diag_unknown_abstract_token(
     notes.push(DiagnosticNote {
         span: None,
         message: "abstract material tokens must be declared in the pack's `materials` catalog \
-                  (see `spec/materials-themes.md` §7.2)"
+                  (see `spec/registry-themes.md` §7.2)"
             .to_owned(),
     });
     Diagnostic {
@@ -3192,21 +3275,22 @@ mod tests {
         lower_to_block_array(&ir, &resolution, None)
     }
 
-    fn lowered_with_resolver(
-        source: &str,
-        resolver: &dyn AbstractMaterialResolver,
-    ) -> BlockArrayIr {
+    fn lowered_with_resolver(source: &str, resolver: &dyn TargetRegistry) -> BlockArrayIr {
         let module = parse(source).expect("parse");
         let ir = lower(&module);
         let resolution = resolve(&ir, None);
         lower_to_block_array(&ir, &resolution, Some(resolver))
     }
 
+    /// In-memory registry for the lowering tests. Declares no id table,
+    /// so these tests exercise lowering the way `cairn check` runs it —
+    /// with no target pinned and no id refuted. The `E_UNKNOWN_ID` path
+    /// has its own tests in `material.rs` and `cli_block_ids.rs`.
     struct FakeResolver {
         entries: Vec<(&'static str, &'static str)>,
     }
 
-    impl AbstractMaterialResolver for FakeResolver {
+    impl TargetRegistry for FakeResolver {
         fn lookup(&self, token: &str) -> Option<BlockState> {
             self.entries
                 .iter()
@@ -3216,6 +3300,10 @@ mod tests {
 
         fn known_tokens(&self) -> Vec<String> {
             self.entries.iter().map(|(t, _)| (*t).to_owned()).collect()
+        }
+
+        fn block_ids(&self) -> Option<crate::block_array::BlockIdSet<'_>> {
+            None
         }
     }
 
