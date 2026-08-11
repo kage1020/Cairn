@@ -105,6 +105,12 @@ fn a_target_below_the_declared_floor_is_refused() {
 
 /// The reported symptom. Exiting non-zero while leaving a lock behind would
 /// still leave `verified: true` on disk for the next reader.
+///
+/// The empty output directory counts. `--out` is created before the
+/// structure tags are built, so a check placed even one step later than it
+/// is leaves that directory behind — a file count alone cannot tell the
+/// two orderings apart, and the ordering is the whole point of running
+/// before any of it.
 #[test]
 fn a_refused_target_writes_nothing() {
     let fixture = Fixture::new("nothing", &format!("@requires version>=1.21\n{BUILD}"));
@@ -114,6 +120,10 @@ fn a_refused_target_writes_nothing() {
         fixture.artifacts(),
         Vec::<String>::new(),
         "a refused compile must leave no artifact and no lock",
+    );
+    assert!(
+        !fixture.out().exists(),
+        "a refused compile must not create its output directory either",
     );
 }
 

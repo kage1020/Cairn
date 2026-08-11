@@ -388,6 +388,20 @@ mod tests {
             compare_versions("4294967296", "4294967296"),
             Ordering::Equal,
         );
+        // Leading zeros are padding, not digits of the number. Ordering by
+        // length first is only numeric order once they are gone —
+        // `04294967296` is eleven characters and the smaller value.
+        assert_eq!(
+            compare_versions("04294967296", "4294967296"),
+            Ordering::Equal,
+        );
+        assert_eq!(
+            compare_versions("04294967296", "4294967297"),
+            Ordering::Less,
+        );
+        // And an all-zero run is zero rather than nothing, so a component
+        // of `000` still stands in for an absent one.
+        assert_eq!(compare_versions("1.20", "1.20.000"), Ordering::Equal);
         // The same, in the position a version would use it.
         assert_eq!(compare_versions("1.4294967296", "1.999"), Ordering::Greater);
     }
