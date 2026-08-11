@@ -496,6 +496,27 @@ pub enum DiagnosticData {
         /// Missing key names (`id`, `use`, `theme`).
         missing: Vec<String>,
     },
+    /// Companion payload for [`DiagnosticCode::InvalidRequires`]. Which
+    /// way the expression failed, and the text that failed.
+    ///
+    /// Carried for the reason [`Self::IncompletePlace`] is: the code
+    /// covers several distinct mistakes and the obvious quick-fix differs
+    /// between them — replacing `<` with `>=` is a one-character edit a
+    /// tool can offer, while a snapshot label is not repairable at all
+    /// today. Telling them apart from the rendered sentence is the
+    /// prose-parsing `spec/lint.md` §11.2 tells consumers to avoid.
+    InvalidRequires {
+        /// Stable name of the failure, from
+        /// [`crate::resolve::RequirementError::kind`]:
+        /// `not_a_version_requirement`, `unsupported_operator`,
+        /// `empty_version`, `component_not_a_number`,
+        /// `component_too_large`, or `trailing_tokens`.
+        reason: String,
+        /// The part of the expression the reason is about: the operator as
+        /// written, the offending component, or the trailing text. Empty
+        /// when the failure names no fragment of its own.
+        found: String,
+    },
     /// Companion payload for [`DiagnosticCode::DuplicateSelector`]. The
     /// binding keys this selector row takes over from an earlier row,
     /// without the trailing `=`, in the order the message lists them.

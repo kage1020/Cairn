@@ -134,10 +134,18 @@ fn derive_min_version(module: &Module) -> String {
 ///
 /// `@requires` floors compose by taking the maximum: each line adds a
 /// constraint rather than displacing the one before (spec syntax §5.3), and
-/// `[a, ∞) ∩ [b, ∞)` is `[max(a, b), ∞)`. Requirements the grammar refuses
-/// declare nothing and are skipped here — they are reported by
-/// `check::requires`, and honouring half of an expression that has already
-/// been called an error would be the worst of both.
+/// `[a, ∞) ∩ [b, ∞)` is `[max(a, b), ∞)`. Two lines naming the *same*
+/// version — `version>=1.21` and `version>=1.21.0` — leave the maximum
+/// undecided, and the first one wins, so a diagnostic points at the line
+/// that has been there longest rather than moving when an equivalent one is
+/// appended below it.
+///
+/// Requirements the grammar refuses declare nothing and are skipped here.
+/// They are reported by `check::requires` at `Error` severity, which is
+/// what stops a compile before it can be held to half of an expression that
+/// has already been called a mistake — see
+/// `crates/cairn-lang-core/tests/silent_skip_arms.rs` for the caller that
+/// bypasses `check` and what it gets instead.
 ///
 /// Returns `None` when the module declares no usable floor, which is the
 /// ordinary case: the constraint is optional. Callers wanting the
@@ -169,6 +177,7 @@ pub fn declared_version_floor(module: &Module) -> Option<VersionFloor> {
 /// `--target` against the floor — point at the line that set it rather than
 /// at the file.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct VersionFloor {
     /// The version as written, already known to be dotted decimal.
     pub version: String,

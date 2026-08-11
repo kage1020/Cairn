@@ -12,9 +12,9 @@
 //! does not carry headers into the IR.
 
 use crate::ast::{Header, Module};
-use crate::resolve::parse_requirement;
+use crate::resolve::{RequirementError, parse_requirement};
 
-use super::{Diagnostic, DiagnosticCode, DiagnosticSink};
+use super::{Diagnostic, DiagnosticCode, DiagnosticData, DiagnosticSink};
 
 pub(super) fn run(module: &Module, sink: &mut DiagnosticSink) {
     for header in &module.headers {
@@ -29,7 +29,27 @@ pub(super) fn run(module: &Module, sink: &mut DiagnosticSink) {
             span: span.clone(),
             primary: format!("`@requires` declares no version floor: {error}"),
             notes: Vec::new(),
-            data: None,
+            data: Some(DiagnosticData::InvalidRequires {
+                reason: error.kind().to_owned(),
+                found: offending_text(&error),
+            }),
         });
+    }
+}
+
+/// The fragment of the expression the failure is about, for a consumer
+/// building a quick-fix over it.
+///
+/// Empty when the failure names no fragment: "this is not a version
+/// requirement" and "there is no version here" are about the whole
+/// expression, and inventing a substring for them would give a tool
+/// something to replace that the author never wrote.
+fn offending_text(error: &RequirementError) -> String {
+    match error {
+        RequirementError::UnsupportedOperator(operator) => operator.clone(),
+        RequirementError::Component { component, .. }
+        | RequirementError::ComponentTooLarge { component, .. } => component.clone(),
+        RequirementError::TrailingTokens(rest) => rest.clone(),
+        _ => String::new(),
     }
 }

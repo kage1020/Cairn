@@ -2,7 +2,7 @@
 //! comparison.
 //!
 //! Spec context: `@requires` is a Minecraft-side capability floor (see
-//! `spec/versioning-editions.md` §10.5). Floors compose by taking the
+//! `spec/versioning-editions.md` §10.4). Floors compose by taking the
 //! strictest across every `@requires` line, which is the
 //! registry-compatible-range lower edge `cairn info` prints and the bound
 //! `cairn compile --target` is held to.
@@ -11,15 +11,24 @@
 //! §10.1 makes `DataVersion` the canonical ordering key precisely so that
 //! ordering survives Minecraft's move from semver-ish to date-based version
 //! labels. The registry pack does ship that table now
-//! (`registry-data/*/data_versions.json`), so the obstacle is no longer its
-//! absence — it is coverage: the table names the handful of versions the
-//! pack was built for, and a floor like `version>=1.19` names a version
-//! that is not one of them and still has to be ordered. Until a lookup can
-//! answer for an arbitrary label, comparison stays component-wise over
-//! dotted decimals, which orders every label Cairn currently accepts and
-//! will mis-order a date-based one against a semver one.
+//! (`crates/cairn-lang-formats/registry-data/*/data_versions.json`), so the
+//! obstacle is no longer its absence — it is coverage: the table names the
+//! handful of versions the pack was built for, and a floor like
+//! `version>=1.19` names a version that is not one of them and still has to
+//! be ordered. Until a lookup can answer for an arbitrary label, comparison
+//! stays component-wise over dotted decimals.
 //!
-//! That is also why [`RequirementError::Segment`] exists rather than a
+//! Two things that convention gets wrong, both recorded in the spec's
+//! "Ordering, and where it stops" and neither fixable here:
+//!
+//! - A date-based label ordered against a semver one.
+//! - **Two editions' numbering compared as if they were one.** Java ships
+//!   `1.20.4 / 1.21 / 1.21.4`, Bedrock `1.21.0 / 1.21.40 / 1.21.60`; a floor
+//!   carries no edition, so `version>=1.21.4` reads as satisfied by Bedrock
+//!   `1.21.40` on `40 > 4`. Whether `@requires` is edition-neutral at all is
+//!   an open language question, not an oversight here.
+//!
+//! That is also why [`RequirementError::Component`] exists rather than a
 //! lenient fallback: a label this comparison cannot order is refused at the
 //! directive instead of sorting oddly three layers later.
 
@@ -33,6 +42,7 @@ use std::fmt;
 /// an actionable message for a directive whose whole job is to state one
 /// constraint.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum RequirementError {
     /// The expression does not open with the `version` subject.
     NotAVersionRequirement,
@@ -41,17 +51,51 @@ pub enum RequirementError {
     UnsupportedOperator(String),
     /// `version>=` with nothing after it.
     EmptyVersion,
-    /// A segment that is not a number this comparison can order: empty,
-    /// non-digit, or too large for `u32`. Holds the whole version as
-    /// written and the offending segment.
-    Segment {
+    /// A component that is not a decimal number: empty, or holding
+    /// something other than digits. Holds the whole version as written and
+    /// the offending component.
+    ///
+    /// Separate from [`Self::ComponentTooLarge`] because the repair
+    /// differs. `24w14a` is a real Minecraft snapshot label, and telling
+    /// its author it "is not a number between 0 and 4294967295" describes
+    /// the check rather than the problem: the version is fine, Cairn cannot
+    /// order it yet.
+    Component {
         /// The version string as the author wrote it.
         version: String,
-        /// The dot-separated segment that could not be read.
-        segment: String,
+        /// The dot-separated component that could not be read.
+        component: String,
+    },
+    /// A component of digits that does not fit in `u32`, which is what the
+    /// comparison orders by. Holds the whole version and the component.
+    ComponentTooLarge {
+        /// The version string as the author wrote it.
+        version: String,
+        /// The dot-separated component that overflowed.
+        component: String,
     },
     /// Text after the version. Holds it verbatim.
     TrailingTokens(String),
+}
+
+impl RequirementError {
+    /// Stable machine-readable name for this failure, for a consumer
+    /// choosing a quick-fix without reading the prose.
+    ///
+    /// Kept beside the variants rather than derived from them, because
+    /// [`crate::check::DiagnosticData`] carries these strings onto the wire
+    /// and a rename there is a break for anything matching on them.
+    #[must_use]
+    pub fn kind(&self) -> &'static str {
+        match self {
+            Self::NotAVersionRequirement => "not_a_version_requirement",
+            Self::UnsupportedOperator(_) => "unsupported_operator",
+            Self::EmptyVersion => "empty_version",
+            Self::Component { .. } => "component_not_a_number",
+            Self::ComponentTooLarge { .. } => "component_too_large",
+            Self::TrailingTokens(_) => "trailing_tokens",
+        }
+    }
 }
 
 impl fmt::Display for RequirementError {
@@ -66,18 +110,25 @@ impl fmt::Display for RequirementError {
                  as in `version>=1.21`",
             ),
             Self::EmptyVersion => write!(f, "`version>=` names no version, as in `version>=1.21`"),
-            Self::Segment { version, segment } => {
-                if segment.is_empty() {
-                    write!(f, "version `{version}` has an empty component")
-                } else {
-                    write!(
-                        f,
-                        "version `{version}` has the component `{segment}`, which is not a \
-                         number between 0 and {}",
-                        u32::MAX,
-                    )
-                }
+            Self::Component { version, component } if component.is_empty() => {
+                write!(
+                    f,
+                    "version `{version}` has an empty component; a version is digits \
+                     separated by single dots, as in `1.21.4`",
+                )
             }
+            Self::Component { version, component } => write!(
+                f,
+                "version `{version}` has the component `{component}`, which is not a decimal \
+                 number. Cairn orders versions by their components, so a label it cannot read \
+                 that way — a snapshot such as `24w14a`, or a pre-release suffix — cannot be \
+                 used as a floor yet",
+            ),
+            Self::ComponentTooLarge { version, component } => write!(
+                f,
+                "version `{version}` has the component `{component}`, which is larger than {}",
+                u32::MAX,
+            ),
             Self::TrailingTokens(rest) => {
                 write!(
                     f,
@@ -108,7 +159,10 @@ pub fn parse_requirement(raw: &str) -> Result<&str, RequirementError> {
         .strip_prefix("version")
         .ok_or(RequirementError::NotAVersionRequirement)?
         .trim_start();
-    let rest = strip_operator(rest)?.trim();
+    // Only the leading whitespace: what follows the version is trimmed by
+    // the split below, so trimming it twice would be a second rule saying
+    // the same thing.
+    let rest = strip_operator(rest)?.trim_start();
     if rest.is_empty() {
         return Err(RequirementError::EmptyVersion);
     }
@@ -121,11 +175,21 @@ pub fn parse_requirement(raw: &str) -> Result<&str, RequirementError> {
     if !trailing.is_empty() {
         return Err(RequirementError::TrailingTokens(trailing.to_owned()));
     }
-    for segment in version.split('.') {
-        if segment.parse::<u32>().is_err() {
-            return Err(RequirementError::Segment {
+    for component in version.split('.') {
+        // `is_digits` before `parse`, because integer `FromStr` accepts a
+        // leading `+`: without it `version>=1.+0` parses, and `+0` is then
+        // not a digit run to the comparison, which stops treating it as the
+        // zero it looks like.
+        if !is_digits(component) {
+            return Err(RequirementError::Component {
                 version: version.to_owned(),
-                segment: segment.to_owned(),
+                component: component.to_owned(),
+            });
+        }
+        if component.parse::<u32>().is_err() {
+            return Err(RequirementError::ComponentTooLarge {
+                version: version.to_owned(),
+                component: component.to_owned(),
             });
         }
     }
@@ -150,8 +214,7 @@ fn strip_operator(rest: &str) -> Result<&str, RequirementError> {
     }
 }
 
-/// Strip the `version>=` prefix from a raw `@requires` expression and return
-/// the remaining version string.
+/// Read an `@requires` expression as a version floor, or nothing.
 ///
 /// The lenient face of [`parse_requirement`], for callers that only want
 /// the floor and have no way to report why there is not one. A caller that
@@ -165,17 +228,27 @@ pub fn parse_min_version(raw: &str) -> Option<&str> {
 /// Compare two dotted-decimal version strings component-wise.
 ///
 /// A missing trailing component is treated as `0`: `"1.20"` compares equal
-/// to `"1.20.0"`.
+/// to `"1.20.0"`, and so does `"1.020"` — leading zeros are padding, not
+/// digits of the number.
 ///
 /// This is `pub`, so it has to hold up on input [`parse_requirement`] would
-/// have refused — a caller can reach it with a hand-edited string that
-/// never passed through a directive. Segments too large for `u32` are
-/// therefore ordered by digit count and then lexicographically, which is
-/// numeric order for any run of digits: the previous fallback compared them
-/// as plain strings and put `4294967296` *below* `999`. Segments that are
-/// not digits at all keep the lexicographic answer, which is arbitrary but
-/// total; refusing them is [`parse_requirement`]'s job, and panicking here
-/// would take out `cairn info` on a file it could otherwise describe.
+/// have refused: a caller can reach it with a hand-edited string that never
+/// passed through a directive, and `cairn info` describing such a file is
+/// better than `cairn info` panicking on it. It is a **total order** — a
+/// weaker promise than "meaningful", and the one `slice::sort_by` requires
+/// on pain of a panic. Getting there needs components to be classified
+/// before they are compared:
+///
+/// - A run of digits is a number, ordered by value however long the run
+///   (digit count after leading zeros, then lexicographically — the
+///   previous fallback compared long runs as plain strings and put
+///   `4294967296` *below* `999`).
+/// - Anything else is ordered lexicographically among its own kind, and
+///   sorts above every number.
+///
+/// Mixing the two orders per pair, which is what this did before, is what
+/// made it intransitive: `5abc < 999 < 4294967296 < 5abc`. Which side
+/// non-numbers land on is arbitrary; that they all land on one side is not.
 #[must_use]
 pub fn compare_versions(a: &str, b: &str) -> Ordering {
     let mut left = a.split('.');
@@ -204,21 +277,34 @@ pub fn compare_versions(a: &str, b: &str) -> Ordering {
 }
 
 /// Order one pair of dot-separated components.
+///
+/// Classify first, compare second. Deciding per pair — numerically when
+/// both happen to be digits, lexicographically otherwise — is what let
+/// `5abc < 999` and `999 < 4294967296` coexist with `5abc > 4294967296`.
 fn compare_segments(l: &str, r: &str) -> Ordering {
-    match (l.parse::<u32>(), r.parse::<u32>()) {
-        (Ok(li), Ok(ri)) => li.cmp(&ri),
-        // At least one overflowed `u32`. Both being all digits is the
-        // reachable case, and there the longer run is the larger number
-        // once leading zeros are out of the way.
-        _ if is_digits(l) && is_digits(r) => {
-            let (l, r) = (trim_leading_zeros(l), trim_leading_zeros(r));
-            l.len().cmp(&r.len()).then_with(|| l.cmp(r))
-        }
-        _ => l.cmp(r),
+    match (numeric_key(l), numeric_key(r)) {
+        // Both numbers. Once the leading zeros are gone the longer run is
+        // the larger value, whatever `u32` can hold.
+        (Some(l), Some(r)) => l.len().cmp(&r.len()).then_with(|| l.cmp(r)),
+        // A number and something that is not one. Every number sorts below
+        // every non-number so the two orders never interleave.
+        (Some(_), None) => Ordering::Less,
+        (None, Some(_)) => Ordering::Greater,
+        (None, None) => l.cmp(r),
     }
 }
 
+/// A component's value as a comparable digit run, or `None` when it is not
+/// a number at all.
+fn numeric_key(s: &str) -> Option<&str> {
+    is_digits(s).then(|| trim_leading_zeros(s))
+}
+
 /// Whether a component is a run of ASCII digits, however long.
+///
+/// Empty is not a run: a version of `1.` has a component the grammar
+/// refuses, and calling it zero here would make `1.` and `1.0` the same
+/// version at the one layer that is supposed to keep them apart.
 fn is_digits(s: &str) -> bool {
     !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit())
 }
@@ -255,9 +341,9 @@ mod tests {
         assert_eq!(parse_min_version("1.20"), None);
     }
 
-    /// The reported case: a space before the operator hid the whole floor.
-    /// It is what a human writes, and `version>= 1.20` already worked, so
-    /// the two spellings differed for no reason a reader could see.
+    /// A space before the operator used to hide the whole floor. It is
+    /// what a human writes, and `version>= 1.20` already worked, so the two
+    /// spellings differed for no reason a reader could see.
     #[test]
     fn parse_min_version_accepts_whitespace_before_the_operator() {
         for raw in [
@@ -294,10 +380,48 @@ mod tests {
         );
         assert_eq!(
             parse_requirement("version>=1.a"),
-            Err(RequirementError::Segment {
+            Err(RequirementError::Component {
                 version: "1.a".to_owned(),
-                segment: "a".to_owned(),
+                component: "a".to_owned(),
             }),
+        );
+        assert_eq!(
+            parse_requirement("version>=1..2"),
+            Err(RequirementError::Component {
+                version: "1..2".to_owned(),
+                component: String::new(),
+            }),
+        );
+    }
+
+    /// The two component failures say different things, because the repair
+    /// differs. A snapshot label is a real version Cairn cannot order; a
+    /// component past `u32` is a number too big to be one.
+    #[test]
+    fn the_two_component_failures_read_differently() {
+        let snapshot = parse_requirement("version>=24w14a").expect_err("not a number");
+        let overflow = parse_requirement("version>=4294967296").expect_err("too large");
+        assert_eq!(snapshot.kind(), "component_not_a_number");
+        assert_eq!(overflow.kind(), "component_too_large");
+        assert!(snapshot.to_string().contains("24w14a"), "{snapshot}");
+        assert!(
+            !snapshot.to_string().contains("4294967295"),
+            "a snapshot label is not a number out of range: {snapshot}",
+        );
+        assert!(overflow.to_string().contains("4294967295"), "{overflow}");
+    }
+
+    /// An empty component gets its own sentence — `1..2` is a typo, not a
+    /// label Cairn cannot order, and the two repairs have nothing in
+    /// common.
+    #[test]
+    fn an_empty_component_says_so() {
+        let text = parse_requirement("version>=1..2")
+            .expect_err("empty component")
+            .to_string();
+        assert!(
+            text.contains("empty component"),
+            "the message should name the shape of the mistake: {text}",
         );
     }
 
@@ -315,20 +439,46 @@ mod tests {
         }
     }
 
-    /// The overflow the audit found. `4294967296` is all ASCII digits, so
-    /// the old digit check passed it through to a comparison that could not
-    /// order it.
+    /// `4294967296` is all ASCII digits, so a digit-only check passes it
+    /// through to a comparison that cannot order it.
     #[test]
-    fn parse_requirement_refuses_a_segment_too_large_to_order() {
+    fn parse_requirement_refuses_a_component_too_large_to_order() {
         assert_eq!(
             parse_requirement("version>=4294967296"),
-            Err(RequirementError::Segment {
+            Err(RequirementError::ComponentTooLarge {
                 version: "4294967296".to_owned(),
-                segment: "4294967296".to_owned(),
+                component: "4294967296".to_owned(),
             }),
         );
         // One below the boundary is a number, however unlikely.
         assert_eq!(parse_min_version("version>=4294967295"), Some("4294967295"));
+    }
+
+    /// Rust's integer `FromStr` accepts a leading `+`, so `parse::<u32>()`
+    /// alone is looser than the dotted-decimal grammar this documents. The
+    /// lexer refuses `+` in a `.crn` file, but both of these are `pub` and
+    /// a caller can hand them any string.
+    ///
+    /// It is not only a tidiness point: `+0` is not a digit run to the
+    /// comparison, so it stops being the zero it looks like and
+    /// `1.20.+0 > 1.20`.
+    #[test]
+    fn parse_requirement_refuses_a_signed_component() {
+        for raw in [
+            "version>=+1",
+            "version>=1.+0",
+            "version>=+1.+20",
+            "version>=-1",
+        ] {
+            assert!(
+                matches!(
+                    parse_requirement(raw),
+                    Err(RequirementError::Component { .. }),
+                ),
+                "{raw:?} -> {:?}",
+                parse_requirement(raw),
+            );
+        }
     }
 
     #[test]
@@ -368,10 +518,10 @@ mod tests {
         assert_eq!(compare_versions("1.0007", "1.7"), Ordering::Equal);
     }
 
-    /// The reported inversion. This is `pub`, so it has to be right on
-    /// input the directive would have refused: `4294967296` overflows
-    /// `u32`, the old fallback compared it as a string, and `'4' < '9'`
-    /// put it below `999`.
+    /// This is `pub`, so it has to be right on input the directive would
+    /// have refused: `4294967296` overflows `u32`, a string fallback
+    /// compares it by first character, and `'4' < '9'` puts it below
+    /// `999`.
     #[test]
     fn compare_versions_orders_digits_past_u32_by_value() {
         assert_eq!(compare_versions("4294967296", "999"), Ordering::Greater);
@@ -408,16 +558,80 @@ mod tests {
 
     /// A component that is not a number at all still orders, because this
     /// function is reachable from `cairn info` on a hand-edited file and a
-    /// panic there would be worse than an arbitrary answer. Which way it
-    /// sorts is not a promise; that it is total, and antisymmetric, is.
+    /// panic there would be worse than an arbitrary answer.
+    ///
+    /// Which way such a version sorts is not a promise. That it sorts *at
+    /// all* is: `slice::sort_by` panics on a comparator that is not a total
+    /// order, and nothing stops a caller passing this one.
+    ///
+    /// Antisymmetry alone does not get there — it survives cycles, and the
+    /// version this replaced had them. Every triple over a fixed alphabet
+    /// is the cheapest way to see the difference: 21 values is 9261
+    /// comparisons, run in well under a millisecond.
     #[test]
-    fn compare_versions_is_total_on_input_the_grammar_refuses() {
-        for (a, b) in [("1.a", "1.20"), ("x", "1"), ("1.", "1.0"), ("", "0")] {
-            assert_eq!(
-                compare_versions(a, b).reverse(),
-                compare_versions(b, a),
-                "{a:?} vs {b:?}",
-            );
+    fn compare_versions_is_a_total_order_on_input_the_grammar_refuses() {
+        // Chosen to mix the classes the comparison distinguishes: short and
+        // long digit runs, runs past `u32`, leading zeros, non-digits,
+        // empties, and multi-component versions of each.
+        const ALPHABET: &[&str] = &[
+            "",
+            "0",
+            "00",
+            "1",
+            "1.",
+            ".1",
+            "1.0",
+            "1.00",
+            "1.20",
+            "1.21",
+            "1.21.0",
+            "999",
+            "5abc",
+            "a",
+            "x",
+            "24w14a",
+            "4294967296",
+            "04294967296",
+            "4294967297",
+            "1.4294967296",
+            "1.+0",
+        ];
+
+        for &a in ALPHABET {
+            assert_eq!(compare_versions(a, a), Ordering::Equal, "{a:?}");
+            for &b in ALPHABET {
+                assert_eq!(
+                    compare_versions(a, b).reverse(),
+                    compare_versions(b, a),
+                    "not antisymmetric: {a:?} vs {b:?}",
+                );
+                for &c in ALPHABET {
+                    // Transitivity of `<=`, which for a total order also
+                    // gives transitivity of `<` and of `==`.
+                    if compare_versions(a, b).is_le() && compare_versions(b, c).is_le() {
+                        assert!(
+                            compare_versions(a, c).is_le(),
+                            "not transitive: {a:?} <= {b:?} <= {c:?} but {a:?} > {c:?}",
+                        );
+                    }
+                }
+            }
         }
+    }
+
+    /// The classification the total order rests on: every version made of
+    /// numbers sorts below every version that is not, whatever the
+    /// characters would say. Mixing the two orders per pair is what put
+    /// `5abc` below `999` and above `4294967296` at the same time.
+    #[test]
+    fn a_component_that_is_not_a_number_sorts_above_every_number() {
+        assert_eq!(compare_versions("5abc", "999"), Ordering::Greater);
+        assert_eq!(compare_versions("5abc", "4294967296"), Ordering::Greater);
+        assert_eq!(compare_versions("a", "99999999999"), Ordering::Greater);
+        // An empty component is not a number either, so `1.` is not `1.0`.
+        // Arbitrary, but fixed: the alternative is a comparison that calls
+        // a version the grammar refuses equal to one it accepts.
+        assert_eq!(compare_versions("1.", "1.0"), Ordering::Greater);
+        assert_eq!(compare_versions("1.0", "1."), Ordering::Less);
     }
 }

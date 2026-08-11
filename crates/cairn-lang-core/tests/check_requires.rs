@@ -59,7 +59,7 @@ fn floor(header: &str) -> String {
 
 // -- the grammar ----------------------------------------------------------
 
-/// The reported case: a space around the operator made the floor vanish.
+/// A space around the operator used to make the floor vanish.
 /// `version >= 1.21` is what a human writes first, and the constraint was
 /// dropped with `cairn check` exiting 0 and `cairn info` printing `0.0`.
 #[test]
@@ -91,10 +91,9 @@ fn repeated_requirements_fold_to_the_strictest() {
 
 // -- what it refuses ------------------------------------------------------
 
-/// The other reported case. `version<1.20` is not a constraint Cairn can
-/// intersect — only `>=` is defined — and it used to be dropped, so the
-/// file read as if it declared an upper bound that was never enforced or
-/// even acknowledged.
+/// `version<1.20` is not a constraint Cairn can intersect — only `>=` is
+/// defined — and it used to be dropped, so the file read as if it declared
+/// an upper bound that was never enforced or even acknowledged.
 #[test]
 fn an_operator_other_than_at_least_is_refused() {
     for (header, operator) in [
@@ -123,41 +122,102 @@ fn an_empty_payload_is_refused() {
     }
 }
 
-/// A non-numeric segment cannot be ordered against a target, and the old
-/// lexicographic fallback ordered it wrongly rather than refusing it.
+/// A component that is not a number cannot be ordered against a target,
+/// and a lexicographic fallback orders it wrongly rather than refusing it.
+///
+/// Each fixture carries the exact text its own message must quote. A
+/// disjunction over the three would pass on any message mentioning any of
+/// them, including three copies of one wrong message.
 #[test]
-fn a_non_numeric_segment_is_refused() {
-    for (header, segment) in [
-        ("@requires version>=1.a\n", "a"),
-        ("@requires version>=1..2\n", ""),
-        ("@requires version>=x\n", "x"),
+fn a_component_that_is_not_a_number_is_refused() {
+    for (header, version, component) in [
+        ("@requires version>=1.a\n", "1.a", "a"),
+        ("@requires version>=x\n", "x", "x"),
+        ("@requires version>=1.2.beta\n", "1.2.beta", "beta"),
     ] {
         let text = message(header);
         assert!(
-            text.contains("1.a") || text.contains("1..2") || text.contains('x'),
+            text.contains(version),
             "{header:?} should quote the version it could not read: {text}",
         );
-        if !segment.is_empty() {
-            assert!(
-                text.contains(segment),
-                "{header:?} should name the segment `{segment}`: {text}",
-            );
-        }
+        assert!(
+            text.contains(component),
+            "{header:?} should name the component `{component}`: {text}",
+        );
     }
+    // An empty component is its own shape of mistake and gets its own
+    // sentence — there is no fragment to quote back.
+    let text = message("@requires version>=1..2\n");
+    assert!(
+        text.contains("1..2") && text.contains("empty component"),
+        "{text}",
+    );
 }
 
-/// The overflow the audit found: `4294967296` is all ASCII digits, so it
-/// passed the old check, and `compare_versions` then fell back to a
-/// lexicographic compare that sorted it *below* `999`. Refusing it here is
-/// the first of the two guards; `compare_versions` gets the other, because
-/// it is public and can be reached without this pass.
+/// A snapshot label is a real Minecraft version, so the refusal has to say
+/// Cairn cannot order it rather than that it is a number out of range.
 #[test]
-fn a_segment_too_large_to_compare_is_refused() {
+fn a_snapshot_label_is_refused_for_the_reason_it_is_refused() {
+    let text = message("@requires version>=24w14a\n");
+    assert!(text.contains("24w14a"), "{text}");
+    assert!(
+        !text.contains("4294967295"),
+        "a snapshot label is not a number out of range: {text}",
+    );
+}
+
+/// `4294967296` is all ASCII digits, so a digit-only check passes it to a
+/// comparison that cannot order it. Refusing it here is the first of two
+/// guards; `compare_versions` gets the other, because it is public and can
+/// be reached without this pass.
+#[test]
+fn a_component_too_large_to_compare_is_refused() {
     let text = message("@requires version>=4294967296\n");
     assert!(
         text.contains("4294967296"),
-        "the message should name the segment that does not fit: {text}",
+        "the message should name the component that does not fit: {text}",
     );
+}
+
+/// The payload carries the failure as data, so a quick-fix does not have to
+/// take the sentence apart. `spec/lint.md` §11.2 asks for exactly that, and
+/// this one code covers several mistakes whose repairs have nothing in
+/// common — replacing `<` with `>=` is a one-character edit a tool can
+/// offer, while a snapshot label cannot be repaired at all today.
+#[test]
+fn the_finding_carries_the_failure_as_data() {
+    use cairn_lang_core::check::DiagnosticData;
+
+    for (header, reason, found) in [
+        ("@requires version<1.20\n", "unsupported_operator", "<"),
+        ("@requires version>=1.a\n", "component_not_a_number", "a"),
+        (
+            "@requires version>=4294967296\n",
+            "component_too_large",
+            "4294967296",
+        ),
+        (
+            "@requires version>=1.21 extra\n",
+            "trailing_tokens",
+            "extra",
+        ),
+        ("@requires version>=\n", "empty_version", ""),
+        ("@requires nonsense\n", "not_a_version_requirement", ""),
+    ] {
+        let payload = diagnostics(header)
+            .into_iter()
+            .find(|d| d.code == DiagnosticCode::InvalidRequires)
+            .and_then(|d| d.data)
+            .unwrap_or_else(|| panic!("{header:?} should carry a payload"));
+        assert_eq!(
+            payload,
+            DiagnosticData::InvalidRequires {
+                reason: reason.to_owned(),
+                found: found.to_owned(),
+            },
+            "{header:?}",
+        );
+    }
 }
 
 #[test]

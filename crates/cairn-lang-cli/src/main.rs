@@ -319,6 +319,24 @@ impl EditionArg {
             EditionArg::Bedrock => Edition::Bedrock,
         }
     }
+
+    /// The built-in registry pack this edition compiles against, whose
+    /// version table is the closed set of `--target` values.
+    fn registry_pack(self) -> &'static RegistryPack {
+        match self {
+            EditionArg::Java => builtin_java(),
+            EditionArg::Bedrock => builtin_bedrock(),
+        }
+    }
+
+    /// Lowercase name, matching the `--edition` spelling and the label
+    /// `UnsupportedTarget` uses, so one message never calls it two things.
+    fn as_str(self) -> &'static str {
+        match self {
+            EditionArg::Java => "java",
+            EditionArg::Bedrock => "bedrock",
+        }
+    }
 }
 
 #[derive(Copy, Clone, ValueEnum)]
@@ -1458,7 +1476,9 @@ fn run_compile(
         Ok(t) => t,
         Err(code) => return code,
     };
-    if let Err(code) = enforce_version_floor(file, &source, version_floor.as_ref(), &target) {
+    if let Err(code) =
+        enforce_version_floor(file, &source, version_floor.as_ref(), edition, &target)
+    {
         return code;
     }
 
@@ -1570,6 +1590,13 @@ fn load_and_lower(file: &Path, edition: EditionArg) -> Result<Lowered, ExitCode>
 /// is not in the pack yet; when it arrives it joins this code rather than
 /// getting its own, because both answer "the target is below a floor".
 ///
+/// The comparison is `cairn-lang-core`'s dotted-decimal one, which does not
+/// know that the two editions number releases differently. A Java-shaped
+/// floor of `1.21.4` reads as satisfied by Bedrock `1.21.40` on `40 > 4`;
+/// the spec's "Ordering, and where it stops" records that, and whether
+/// `@requires` is edition-neutral at all is an open language question
+/// rather than something to settle here.
+///
 /// # Errors
 ///
 /// Returns exit code 1 when the target is below the floor.
@@ -1577,6 +1604,7 @@ fn enforce_version_floor(
     file: &Path,
     source: &str,
     floor: Option<&VersionFloor>,
+    edition: EditionArg,
     target: &ResolvedTarget,
 ) -> Result<(), ExitCode> {
     let Some(floor) = floor else {
@@ -1593,10 +1621,35 @@ fn enforce_version_floor(
         floor.version,
         target.mc_version(),
     );
-    eprintln!(
-        "  fix: --target >={}, or relax the `@requires` line",
-        floor.version,
-    );
+    // `spec/lint.md` §11.2 makes the closed set of candidates valid in the
+    // target part of the message, not an extra. Naming the floor alone
+    // sends an author to `--target >=99.0`, which is a second error and no
+    // closer to a build; whether *any* supported target satisfies the floor
+    // is the fact that decides what they do next.
+    let supported = edition.registry_pack().supported_list();
+    let usable: Vec<&str> = supported
+        .split(", ")
+        .filter(|candidate| {
+            *candidate != "latest" && !compare_versions(candidate, &floor.version).is_lt()
+        })
+        .collect();
+    if usable.is_empty() {
+        eprintln!(
+            "  no supported {} target satisfies it: {supported}",
+            edition.as_str(),
+        );
+        eprintln!("  fix: lower the `@requires` floor, or build against another edition");
+    } else {
+        eprintln!(
+            "  valid {} targets: {}",
+            edition.as_str(),
+            usable.join(", ")
+        );
+        eprintln!(
+            "  fix: --target {}, or lower the `@requires` floor",
+            usable[0],
+        );
+    }
     Err(ExitCode::from(1))
 }
 

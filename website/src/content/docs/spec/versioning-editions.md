@@ -110,13 +110,23 @@ so their intersection is never empty. A constraint that would need an upper boun
 
 ### Ordering, and where it stops
 §10.1 makes `DataVersion` the canonical ordering key. Version comparison today is **component-wise
-over dotted decimals** instead, and that is a known shortfall rather than a second convention: it
-orders every label `@requires` accepts and will mis-order a date-based label against a semver one.
-The pack does ship a `DataVersion` table, so the obstacle is not its absence but its coverage — it
-names the versions the pack was built for, and a floor may name any version. Until a lookup can
-answer for an arbitrary label, a version Cairn cannot order is refused at the directive rather than
-sorted wrongly later: pre-release and date-based labels (`1.21.4-rc1`) are not accepted in
-`@requires`.
+over dotted decimals** instead, and that is a known shortfall rather than a second convention. The
+pack does ship a `DataVersion` table, so the obstacle is not its absence but its coverage — it names
+the versions the pack was built for, and a floor may name any version. Until a lookup can answer for
+an arbitrary label, a version Cairn cannot order is refused at the directive rather than sorted
+wrongly later: pre-release, snapshot and date-based labels (`1.21.4-rc1`, `24w14a`) are not accepted
+in `@requires`.
+
+Two things the convention gets wrong within what it does accept:
+
+- **A date-based label against a semver one.** This is the transition §10.1 exists to survive, and
+  dotted-decimal comparison does not survive it.
+- **The two editions' numbering, compared as if it were one.** Java releases run
+  `1.20.4 / 1.21 / 1.21.4`, Bedrock `1.21.0 / 1.21.40 / 1.21.60`. A floor carries no edition, so
+  `@requires version>=1.21.4` reads as satisfied by Bedrock `1.21.40` — `40 > 4` — and the build is
+  certified against a version that, in Java's numbering, is below the floor. Whether `@requires` is
+  edition-neutral at all is an open language question: a floor naming a version one edition does not
+  have needs a meaning before the comparison can have one.
 
 ## 10.5 "Which version is it for?" = three axes
 There is no single "for-version". `cairn info` returns three axes:
