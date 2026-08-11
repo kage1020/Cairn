@@ -5,7 +5,7 @@
 //! [`DiagnosticSink`] and the top-level [`check`] runs every pass before
 //! returning. The order `duplicate` → `keyword_allowlist` →
 //! `member_scope` → `connect_arity` → `nesting` → `positional` →
-//! `type_mismatch` → [`crate::resolve::resolve`] is fixed so the emitted
+//! `requires` → `type_mismatch` → [`crate::resolve::resolve`] is fixed so the emitted
 //! list is stable across runs, but the diagnostics themselves are sorted by
 //! source position once everything has finished collecting.
 //!
@@ -27,6 +27,7 @@ mod keyword_allowlist;
 mod member_scope;
 mod nesting;
 mod positional;
+mod requires;
 mod sink;
 mod type_mismatch;
 
@@ -71,6 +72,7 @@ pub fn check(module: &Module, ir: &IntentModule, edition: Option<Edition>) -> Ve
     connect_arity::run(ir, &mut sink);
     nesting::run(ir, &mut sink);
     positional::run(ir, &mut sink);
+    requires::run(module, &mut sink);
     type_mismatch::run(module, &mut sink);
     for d in crate::resolve::resolve(ir, edition).diagnostics {
         sink.push(d);
@@ -98,8 +100,8 @@ mod tests {
     #[derive(Debug, PartialEq, Eq)]
     enum RaisedBy {
         /// `duplicate` / `keyword_allowlist` / `member_scope` /
-        /// `connect_arity` / `nesting` / `positional` / `type_mismatch`,
-        /// run directly by [`check`].
+        /// `connect_arity` / `nesting` / `positional` / `requires` /
+        /// `type_mismatch`, run directly by [`check`].
         Syntactic,
         /// `crate::resolve::resolve`, whose diagnostics [`check`] merges in.
         Resolver,
@@ -123,6 +125,7 @@ mod tests {
             | C::MisplacedMember
             | C::UnknownKeyword
             | C::UnexpectedPositional
+            | C::InvalidRequires
             | C::TypeMismatchLabel
             | C::TypeMismatchSize
             | C::ConnectArity => RaisedBy::Syntactic,
@@ -183,6 +186,7 @@ mod tests {
                 "E_DUPLICATE_SELECTOR",
                 "E_DUPLICATE_SIZE",
                 "E_DUPLICATE_SLOT",
+                "E_INVALID_REQUIRES",
                 "E_MISPLACED_MEMBER",
                 "E_TYPE_MISMATCH_LABEL",
                 "E_TYPE_MISMATCH_SIZE",

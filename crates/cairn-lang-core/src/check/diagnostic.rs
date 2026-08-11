@@ -126,6 +126,20 @@ pub enum DiagnosticCode {
     /// spec-forbidden positional form (`window front G 2 2 2x2`) changes
     /// the build without a word.
     UnexpectedPositional,
+    /// An `@requires` expression that is not a version floor.
+    ///
+    /// The directive declares one constraint and nothing else, so an
+    /// expression the compiler cannot read declares nothing — and the
+    /// author cannot tell, because the line is still in the file. The
+    /// grammar is `version>=X` and only that: a floor composes with other
+    /// floors by taking the strictest, which no other operator does
+    /// (spec syntax §5.3, versioning-editions §10.4).
+    ///
+    /// Not to be confused with `E_REQUIRES_CONFLICT`, which the spec
+    /// reserves for a declared floor contradicting the registry-*inferred*
+    /// range. No such range is derived yet, so that code has nothing to
+    /// compare against and is not defined here.
+    InvalidRequires,
     /// A label-typed key whose value is not a label (identifier or
     /// string): `id=`, `class=`, `mat_slot=`, `use=`, or `theme=`.
     ///
@@ -327,6 +341,7 @@ impl DiagnosticCode {
             Self::MisplacedMember => "E_MISPLACED_MEMBER",
             Self::UnknownKeyword => "E_UNKNOWN_KEYWORD",
             Self::UnexpectedPositional => "E_UNEXPECTED_POSITIONAL",
+            Self::InvalidRequires => "E_INVALID_REQUIRES",
             Self::TypeMismatchLabel => "E_TYPE_MISMATCH_LABEL",
             Self::TypeMismatchSize => "E_TYPE_MISMATCH_SIZE",
             Self::UnresolvedSlot => "E_UNRESOLVED_SLOT",
@@ -396,6 +411,7 @@ impl DiagnosticCode {
             | Self::MisplacedMember
             | Self::UnknownKeyword
             | Self::UnexpectedPositional
+            | Self::InvalidRequires
             | Self::TypeMismatchLabel
             | Self::TypeMismatchSize
             | Self::UnresolvedSlot
@@ -479,6 +495,27 @@ pub enum DiagnosticData {
     IncompletePlace {
         /// Missing key names (`id`, `use`, `theme`).
         missing: Vec<String>,
+    },
+    /// Companion payload for [`DiagnosticCode::InvalidRequires`]. Which
+    /// way the expression failed, and the text that failed.
+    ///
+    /// Carried for the reason [`Self::IncompletePlace`] is: the code
+    /// covers several distinct mistakes and the obvious quick-fix differs
+    /// between them — replacing `<` with `>=` is a one-character edit a
+    /// tool can offer, while a snapshot label is not repairable at all
+    /// today. Telling them apart from the rendered sentence is the
+    /// prose-parsing `spec/lint.md` §11.2 tells consumers to avoid.
+    InvalidRequires {
+        /// Stable name of the failure, from
+        /// [`crate::resolve::RequirementError::kind`]:
+        /// `not_a_version_requirement`, `unsupported_operator`,
+        /// `empty_version`, `component_not_a_number`,
+        /// `component_too_large`, or `trailing_tokens`.
+        reason: String,
+        /// The part of the expression the reason is about: the operator as
+        /// written, the offending component, or the trailing text. Empty
+        /// when the failure names no fragment of its own.
+        found: String,
     },
     /// Companion payload for [`DiagnosticCode::DuplicateSelector`]. The
     /// binding keys this selector row takes over from an earlier row,
@@ -767,6 +804,7 @@ mod tests {
                 "E_INCOMPLETE_PLACE",
                 "E_INVALID_PLACE_ID",
                 "E_INVALID_PLACE_ORIGIN",
+                "E_INVALID_REQUIRES",
                 "E_MISPLACED_MEMBER",
                 "E_MISSING_PATH_MATERIAL",
                 "E_THEME_SELECTOR_UNMATCHED",
@@ -818,6 +856,7 @@ mod tests {
                 "E_INCOMPLETE_PLACE",
                 "E_INVALID_PLACE_ID",
                 "E_INVALID_PLACE_ORIGIN",
+                "E_INVALID_REQUIRES",
                 "E_MISPLACED_MEMBER",
                 "E_MISSING_PATH_MATERIAL",
                 "E_TYPE_MISMATCH_LABEL",

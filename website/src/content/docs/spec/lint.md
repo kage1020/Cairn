@@ -37,6 +37,14 @@ first-class parts of the spec; messages MUST be in a shape that feeds the self-c
     `@intended_targets`) is declared more than once (§5.3). `@requires`
     is excluded: its floors compose to the strictest across every line,
     so a second one adds a constraint rather than displacing the first.
+  - `E_INVALID_REQUIRES` — an `@requires` expression that is not a version
+    floor (§5.3). The accepted shape is `version`, `>=`, and a
+    dotted-decimal version, with whitespace optional between the three; the
+    code covers an operator other than `>=`, a missing version, a component
+    that is not a decimal number or does not fit in a `u32`, and text after
+    the version. Reported rather than dropped, because the directive states
+    one constraint and an expression that states none leaves a floor in the
+    file that no longer reaches the compiler.
   - `E_UNKNOWN_KEYWORD` — statement keyword is not in the known-keyword table.
   - `E_MISPLACED_MEMBER` — statement keyword is in the table but the
     enclosing body has no reader for it: a `place` / `connect` in a

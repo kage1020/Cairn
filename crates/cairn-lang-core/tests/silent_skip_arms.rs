@@ -548,3 +548,41 @@ connect anchor.entry to silent.entry path=@gravel\n"
         );
     }
 }
+
+/// A `@requires` expression the grammar refuses declares no floor, and
+/// `declared_version_floor` skips it without a word.
+///
+/// That skip is what keeps a caller from being held to half of an
+/// expression already called a mistake, and it is safe *only* because
+/// `check::requires` reports the same header at `Error` severity — every
+/// CLI path runs `check` before it reads a floor. A library caller that
+/// resolves version axes without running `check` gets the skip and no
+/// signal, which is the shape this file exists to write down.
+#[test]
+fn a_refused_requirement_is_skipped_silently_by_the_floor_derivation() {
+    let source = "@requires version<1.20\n@requires nonsense\nstruct s size=2x2\n";
+    let module = cairn_lang_core::parse(source).expect("the headers parse");
+
+    assert_eq!(
+        cairn_lang_core::resolve::declared_version_floor(&module),
+        None,
+        "neither expression is a floor, so none is derived",
+    );
+
+    // And the signal the skip depends on: two headers, two errors, from
+    // the pass the CLI runs first.
+    let ir = cairn_lang_core::lower(&module);
+    let reported = cairn_lang_core::check(&module, &ir, None);
+    let invalid: Vec<_> = reported
+        .iter()
+        .filter(|d| d.code == DiagnosticCode::InvalidRequires)
+        .collect();
+    assert_eq!(invalid.len(), 2, "{reported:#?}");
+    for diagnostic in invalid {
+        assert_eq!(
+            diagnostic.code.severity(),
+            cairn_lang_core::Severity::Error,
+            "a warning would let a compile proceed with no floor at all",
+        );
+    }
+}

@@ -23,6 +23,7 @@ use serde::Serialize;
 
 use crate::ast::{Header, Module};
 use crate::edition::Edition;
+use crate::error::Span;
 use crate::intent::IntentModule;
 
 use super::requires_parse::{compare_versions, parse_min_version};
@@ -125,24 +126,63 @@ pub fn compute_axes(
 }
 
 fn derive_min_version(module: &Module) -> String {
-    let mut best: Option<String> = None;
+    declared_version_floor(module).map_or_else(|| "0.0".to_owned(), |floor| floor.version)
+}
+
+/// The strictest version floor `module` declares, and the directive that
+/// declared it.
+///
+/// `@requires` floors compose by taking the maximum: each line adds a
+/// constraint rather than displacing the one before (spec syntax §5.3), and
+/// `[a, ∞) ∩ [b, ∞)` is `[max(a, b), ∞)`. Two lines naming the *same*
+/// version — `version>=1.21` and `version>=1.21.0` — leave the maximum
+/// undecided, and the first one wins, so a diagnostic points at the line
+/// that has been there longest rather than moving when an equivalent one is
+/// appended below it.
+///
+/// Requirements the grammar refuses declare nothing and are skipped here.
+/// They are reported by `check::requires` at `Error` severity, which is
+/// what stops a compile before it can be held to half of an expression that
+/// has already been called a mistake — see
+/// `crates/cairn-lang-core/tests/silent_skip_arms.rs` for the caller that
+/// bypasses `check` and what it gets instead.
+///
+/// Returns `None` when the module declares no usable floor, which is the
+/// ordinary case: the constraint is optional. Callers wanting the
+/// `cairn info` rendering of that (`"0.0"`) should ask [`compute_axes`].
+#[must_use]
+pub fn declared_version_floor(module: &Module) -> Option<VersionFloor> {
+    let mut best: Option<VersionFloor> = None;
     for header in &module.headers {
-        if let Header::Requires { requirement, .. } = header
-            && let Some(v) = parse_min_version(requirement.as_str())
+        if let Header::Requires { requirement, span } = header
+            && let Some(version) = parse_min_version(requirement.as_str())
         {
-            best = Some(match best {
-                None => v.to_owned(),
-                Some(prev) => {
-                    if compare_versions(v, &prev).is_gt() {
-                        v.to_owned()
-                    } else {
-                        prev
-                    }
-                }
-            });
+            let strictest = best
+                .as_ref()
+                .is_none_or(|prev| compare_versions(version, &prev.version).is_gt());
+            if strictest {
+                best = Some(VersionFloor {
+                    version: version.to_owned(),
+                    span: span.clone(),
+                });
+            }
         }
     }
-    best.unwrap_or_else(|| "0.0".to_owned())
+    best
+}
+
+/// A version floor a module declares, with the directive it came from.
+///
+/// The span is what lets a caller outside this crate — the CLI enforcing
+/// `--target` against the floor — point at the line that set it rather than
+/// at the file.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct VersionFloor {
+    /// The version as written, already known to be dotted decimal.
+    pub version: String,
+    /// Byte range of the `@requires` directive that declared it.
+    pub span: Span,
 }
 
 #[cfg(test)]
