@@ -536,6 +536,45 @@ mod tests {
         }
     }
 
+    /// A suggestion is only useful if it is an id the target actually
+    /// declares, and an id is namespace plus path.
+    ///
+    /// Searching paths across namespaces finds `cogwheels` one edit from
+    /// `cogwheel` and hands back `minecraft:cogwheels` — a string that
+    /// exists in no registry anywhere, offered as the fix for an id that
+    /// does not exist either. Both built-in packs are entirely
+    /// `minecraft:`, so only a modded-shaped table reaches this.
+    #[test]
+    fn a_suggestion_never_borrows_a_path_from_another_namespace() {
+        let registry = FakeResolver::new(vec![]).pinned(&["create:cogwheels"]);
+        let err = resolve_block_state(&token("cogwheel"), Some(&registry)).unwrap_err();
+        match err {
+            MaterialDeferred::UnknownId(unknown) => {
+                assert_eq!(unknown.id, "minecraft:cogwheel");
+                assert_eq!(
+                    unknown.suggestion, None,
+                    "`create:cogwheels` is not a candidate for a `minecraft:` id, and \
+                     `minecraft:cogwheels` is not an id at all",
+                );
+            }
+            other => panic!("expected UnknownId, got {other:?}"),
+        }
+    }
+
+    /// The same table does suggest within its own namespace, so the test
+    /// above is not passing because the search found nothing to look at.
+    #[test]
+    fn a_suggestion_is_still_found_inside_the_namespace_that_has_one() {
+        let registry = FakeResolver::new(vec![]).pinned(&["create:cogwheels"]);
+        let err = resolve_block_state(&token("create:cogwheel"), Some(&registry)).unwrap_err();
+        match err {
+            MaterialDeferred::UnknownId(unknown) => {
+                assert_eq!(unknown.suggestion.as_deref(), Some("create:cogwheels"));
+            }
+            other => panic!("expected UnknownId, got {other:?}"),
+        }
+    }
+
     #[test]
     fn an_authored_id_the_target_declares_passes() {
         let registry = FakeResolver::new(vec![]).pinned(&["minecraft:light"]);
