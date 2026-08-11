@@ -166,44 +166,39 @@ impl<'a> DoubleEndedIterator for Split<'a> {
             Some(len) => &self.rest[..self.rest.len() - len],
             None => self.rest,
         };
-        let Some(start) = last_terminator_start(body) else {
-            self.rest = "";
-            return Some(body);
-        };
-        let len = terminator_len(body, start).expect("a terminator starts here");
-        // The terminator stays in `rest`: it is what closes the line before,
-        // and dropping it here would silently swallow an empty line between
-        // two breaks.
-        self.rest = &self.rest[..start + len];
-        Some(&body[start + len..])
+        // Everything after the last break in `body` is the line. Everything
+        // up to and including that break stays in `rest`, because the break
+        // is what closes the line before it — dropping it here would
+        // swallow an empty line between two breaks. When `body` holds no
+        // break at all, `start_of` answers 0 and both halves fall out: the
+        // whole of `body` is the line and nothing remains.
+        let line_start = start_of(body, body.len());
+        // `line_start` is at most `body.len()`, and equals it only if
+        // `body` ends in a break — which `trailing_terminator_len` has
+        // already removed. So the tail always shrinks. That rests on the
+        // two saying the same thing about what a terminator is; should they
+        // ever stop, this walk stops consuming input, and a hang is a far
+        // worse way to find that out than a panic.
+        debug_assert!(
+            line_start < self.rest.len(),
+            "the reverse walk must consume input: {:?} yielded nothing",
+            self.rest,
+        );
+        self.rest = &self.rest[..line_start];
+        Some(&body[line_start..])
     }
 }
 
 impl std::iter::FusedIterator for Split<'_> {}
 
 /// Length of the terminator `source` ends with, if it ends with one.
+///
+/// Defers the pair's shape to [`end_before`] rather than restating it: the
+/// last byte says whether a terminator ends here, and the shared rule says
+/// how far back it began.
 fn trailing_terminator_len(source: &str) -> Option<usize> {
-    let bytes = source.as_bytes();
-    match bytes.last()? {
-        b'\n' if bytes.len() >= 2 && bytes[bytes.len() - 2] == b'\r' => Some(2),
-        b'\r' | b'\n' => Some(1),
-        _ => None,
-    }
-}
-
-/// Offset at which the last terminator in `source` begins.
-fn last_terminator_start(source: &str) -> Option<usize> {
-    let bytes = source.as_bytes();
-    let last = bytes.iter().rposition(|b| matches!(b, b'\r' | b'\n'))?;
-    // A `\n` found this way may be the second half of a pair, whose first
-    // byte is where the break actually starts.
-    Some(
-        if last > 0 && bytes[last] == b'\n' && bytes[last - 1] == b'\r' {
-            last - 1
-        } else {
-            last
-        },
-    )
+    matches!(source.as_bytes().last()?, b'\r' | b'\n')
+        .then(|| source.len() - end_before(source, source.len()))
 }
 
 #[cfg(test)]
