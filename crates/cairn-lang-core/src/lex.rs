@@ -7,7 +7,10 @@
 //!
 //! Line endings: `\n`, `\r\n`, and lone `\r` are all accepted as a single
 //! logical newline so files written on Windows (`core.autocrlf=true`) lex the
-//! same as files written on Linux.
+//! same as files written on Linux. The rule itself lives in
+//! [`crate::lines`], shared with every layer that resolves a byte offset
+//! into a `line:column` after the fact — a `Newline` here and a diagnostic
+//! there have to name the same row.
 //!
 //! Indent/Dedent asymmetry: only one `Indent` token may be emitted per indent
 //! step (the lexer rejects multi-level jumps as `IndentJump`), but a single
@@ -303,8 +306,17 @@ impl<'src> Lexer<'src> {
                 return Ok(());
             };
             if b == b'\n' || b == b'\r' {
+                // Recorded before the break is consumed. A `Newline` is
+                // where a line *ends*, and the parser reports "expected X,
+                // got end of line" at the position of the token it stopped
+                // at — so a position taken after the break sends the reader
+                // to the first column of the next line, which holds none of
+                // the text that is wrong and, after the last break in a
+                // file, holds no text at all.
+                let start = self.pos;
+                let position = self.position();
                 self.consume_line_break();
-                self.push_synthetic(TokenKind::Newline);
+                self.push_at(TokenKind::Newline, start..self.pos, position);
                 return Ok(());
             }
             if b == b'#' {
@@ -556,25 +568,18 @@ impl<'src> Lexer<'src> {
 
     /// Consume one line break (`\n`, `\r\n`, or lone `\r`) if present and bump
     /// the line counter. Returns `true` if any input was consumed.
+    ///
+    /// Which byte sequences count is [`crate::lines::terminator_len`]'s to
+    /// say, so that this lexer and every layer that resolves a byte offset
+    /// into a `line:column` after the fact split the source the same way.
     fn consume_line_break(&mut self) -> bool {
-        match self.peek() {
-            Some(b'\r') => {
-                self.pos += 1;
-                if self.peek() == Some(b'\n') {
-                    self.pos += 1;
-                }
-                self.line += 1;
-                self.col = 1;
-                true
-            }
-            Some(b'\n') => {
-                self.pos += 1;
-                self.line += 1;
-                self.col = 1;
-                true
-            }
-            _ => false,
-        }
+        let Some(len) = crate::lines::terminator_len(self.src, self.pos) else {
+            return false;
+        };
+        self.pos += len;
+        self.line += 1;
+        self.col = 1;
+        true
     }
 
     fn position(&self) -> Position {

@@ -147,7 +147,7 @@ fn comment_start(line: &str) -> Option<usize> {
 
 /// Classify the cursor's byte offset into a completion [`Context`].
 fn context_at(source: &str, offset: usize) -> Option<Context> {
-    let line_start = source[..offset].rfind('\n').map_or(0, |i| i + 1);
+    let line_start = cairn_lang_core::lines::start_of(source, offset);
     let prefix = &source[line_start..offset];
     // A comment opener before the cursor puts it in a comment.
     if comment_start(prefix).is_some() {
@@ -222,9 +222,11 @@ fn context_at(source: &str, offset: usize) -> Option<Context> {
 
 /// First word of the nearest non-blank, non-comment indent-0 line above
 /// `line_start` — the top-level item whose body the cursor line sits in.
+///
+/// Walks upward, so it stops at the first item header it meets rather than
+/// reading to the top of the document on every keystroke.
 fn enclosing_item_keyword(source: &str, line_start: usize) -> Option<&str> {
-    source[..line_start]
-        .lines()
+    cairn_lang_core::lines::split(&source[..line_start])
         .rev()
         .filter_map(|line| {
             let trimmed = line.trim_start();
@@ -248,7 +250,7 @@ fn enclosing_item_keyword(source: &str, line_start: usize) -> Option<&str> {
 fn document_slot_names(source: &str) -> Vec<SlotDecl> {
     let mut decls = Vec::new();
     let mut current_theme: Option<String> = None;
-    for raw_line in source.lines() {
+    for raw_line in cairn_lang_core::lines::split(source) {
         let line = comment_start(raw_line).map_or(raw_line, |i| &raw_line[..i]);
         let trimmed = line.trim_start();
         if trimmed.is_empty() {
@@ -639,20 +641,53 @@ mod tests {
         assert_eq!(items[1].detail.as_deref(), Some("-> \"#1\" (theme b)"));
     }
 
-    #[test]
-    fn crlf_documents_complete_and_scan_slots() {
-        // CRLF line endings must not shift keyword classification, replace
-        // ranges, or the slot scan.
-        let keyword_source = "struct s size=2x2\r\n  flo";
-        let items = complete(keyword_source, "flo");
-        assert_eq!(labels(&items), BodyKind::Geometry.allowed_keywords());
-        assert_eq!(edit_range(&items[0]), range(1, 2, 5));
+    /// The same document written the three ways Cairn accepts.
+    fn renderings(lf_source: &str) -> [(&'static str, String); 3] {
+        [
+            ("LF", lf_source.to_owned()),
+            ("CRLF", lf_source.replace('\n', "\r\n")),
+            ("CR", lf_source.replace('\n', "\r")),
+        ]
+    }
 
-        let slot_source = "theme a:\r\n  slot floor -> @oak_planks\r\n\
-                           struct s size=2x2\r\n  floor mat_slot=";
-        let items = complete(slot_source, "mat_slot=");
-        assert_eq!(labels(&items), vec!["floor"]);
-        assert_eq!(items[0].detail.as_deref(), Some("-> @oak_planks (theme a)"));
+    #[test]
+    fn line_endings_do_not_shift_keyword_classification_or_replace_ranges() {
+        // A lone `\r` used to leave every scanner here reading the document
+        // as one line, and the replace range landed on line 0.
+        //
+        // The `theme` above the `struct` is what makes the enclosing-item
+        // scan discriminating: read as one line, the document begins with
+        // `theme` and the cursor is offered a theme body's vocabulary. With
+        // a single-item document the collapsed reading happens to start
+        // with the right keyword and the wrong scan looks right.
+        // `wal`, not `flo`: the cursor is located by the first occurrence
+        // of the needle, and `floor` appears in the slot declaration above.
+        for (label, source) in
+            renderings("theme a:\n  slot floor -> @oak_planks\nstruct s size=2x2\n  wal")
+        {
+            let items = complete(&source, "wal");
+            assert_eq!(
+                labels(&items),
+                BodyKind::Geometry.allowed_keywords(),
+                "{label}"
+            );
+            assert_eq!(edit_range(&items[0]), range(3, 2, 5), "{label}");
+        }
+    }
+
+    #[test]
+    fn line_endings_do_not_shift_the_slot_scan() {
+        for (label, source) in renderings(
+            "theme a:\n  slot floor -> @oak_planks\nstruct s size=2x2\n  floor mat_slot=",
+        ) {
+            let items = complete(&source, "mat_slot=");
+            assert_eq!(labels(&items), vec!["floor"], "{label}");
+            assert_eq!(
+                items[0].detail.as_deref(),
+                Some("-> @oak_planks (theme a)"),
+                "{label}",
+            );
+        }
     }
 
     #[test]

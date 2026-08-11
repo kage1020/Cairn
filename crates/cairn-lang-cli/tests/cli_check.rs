@@ -103,14 +103,41 @@ fn cli_4_clean_fixture_json_output_is_empty_array() {
 fn cli_5_parse_failure_exits_one_with_parse_style_message() {
     // A file the parser rejects must still hand the user a gcc-style
     // location, just like `cairn parse` does today.
-    let bad_path = tempfile_with_contents("@unknown_directive nope\n");
-    let out = run_check(&[bad_path.to_str().unwrap()]);
+    let bad = tempfile_with_contents("directive", "@unknown_directive nope\n");
+    let out = run_check(&[bad.arg()]);
     assert_eq!(out.status.code(), Some(1));
     let stderr = String::from_utf8(out.stderr).expect("utf-8");
     assert!(
         stderr.contains("unknown directive"),
         "expected parse error in stderr, got: {stderr}",
     );
+}
+
+/// A parse error at the end of a line names that line, in the output the
+/// user actually reads.
+///
+/// The layer below is covered by `cairn-lang-core`'s `line_positions`
+/// tests; this one exists because the file the CLI is handed is the one an
+/// editor wrote, terminator and all. The whole of `def foo bar\n` is on
+/// line 1, and the gcc-style prefix used to read `:2:1` — sending a reader,
+/// or a model repairing its own output, to a line holding none of it.
+#[test]
+fn cli_end_of_line_parse_error_names_the_line_that_has_it() {
+    for (label, source) in [
+        ("lf", "def foo bar\n"),
+        ("crlf", "def foo bar\r\n"),
+        ("cr", "def foo bar\r"),
+        ("none", "def foo bar"),
+    ] {
+        let file = tempfile_with_contents(label, source);
+        let out = run_check(&[file.arg()]);
+        assert_eq!(out.status.code(), Some(1), "{label}");
+        let stderr = String::from_utf8(out.stderr).expect("utf-8");
+        assert!(
+            stderr.contains(":1:12: "),
+            "{label}: expected the error at 1:12, got: {stderr}",
+        );
+    }
 }
 
 #[test]
@@ -173,7 +200,7 @@ fn cli_json_output_carries_line_and_col_for_every_diagnostic() {
             "code should be the E_-prefixed string, got: {}",
             entry["code"],
         );
-        // AC3 from issue #40: codes without a structured payload must
+        // Codes without a structured payload must
         // omit the `data` key entirely so the JSON contract stays
         // additive for consumers that pin a fixed key set. The
         // `duplicate.crn` fixture only triggers `E_DUPLICATE_*` codes,
@@ -218,14 +245,39 @@ fn cli_type_mismatch_fixture_reports_both_label_and_size_codes() {
     assert!(stdout.contains("E_TYPE_MISMATCH_SIZE"));
 }
 
-/// Write a transient `.crn` file under the system temp dir, returning its
-/// path. Used by [`cli_5_parse_failure_exits_one_with_parse_style_message`]
-/// so the test does not depend on a checked-in fixture intentionally
-/// broken at the parse layer.
-fn tempfile_with_contents(contents: &str) -> PathBuf {
+/// Write a transient `.crn` file under the system temp dir, removing it
+/// when the returned handle drops. Lets a test depend on a source that is
+/// intentionally broken at the parse layer without checking one in, and
+/// without leaving one behind on every run.
+///
+/// `label` distinguishes concurrent callers: the harness runs these tests
+/// as threads of one process, so the pid alone would have two of them
+/// writing and reading the same path.
+fn tempfile_with_contents(label: &str, contents: &str) -> TempSource {
     let mut path = std::env::temp_dir();
     let pid = std::process::id();
-    path.push(format!("cairn-cli-check-{pid}.crn"));
+    path.push(format!("cairn-cli-check-{pid}-{label}.crn"));
     std::fs::write(&path, contents).expect("write tempfile");
-    path
+    TempSource { path }
+}
+
+/// A `.crn` file that exists for the length of one test.
+struct TempSource {
+    /// Where it was written; `Drop` removes it.
+    path: PathBuf,
+}
+
+impl TempSource {
+    /// The path as the CLI wants it on its argument list.
+    fn arg(&self) -> &str {
+        self.path.to_str().expect("temp path is utf-8")
+    }
+}
+
+impl Drop for TempSource {
+    fn drop(&mut self) {
+        // Best effort: a test that has already failed should report that
+        // failure, not a cleanup error on top of it.
+        let _ = std::fs::remove_file(&self.path);
+    }
 }

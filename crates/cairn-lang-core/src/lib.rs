@@ -15,6 +15,7 @@ pub mod error;
 pub mod ids;
 pub mod intent;
 pub mod lex;
+pub mod lines;
 pub mod lock;
 pub mod parse;
 pub(crate) mod prose;

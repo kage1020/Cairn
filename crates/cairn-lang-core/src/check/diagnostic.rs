@@ -563,9 +563,8 @@ impl Diagnostic {
     /// Convert this diagnostic's primary byte span into a 1-based
     /// `line:column` [`Position`] against the given source string.
     ///
-    /// Lines are split on `\n` (covering both LF and CRLF — the trailing
-    /// `\r` adds one column the user sees an extra column for, but the
-    /// behaviour matches what `cairn parse` reports today). Column counts
+    /// Lines are split by [`crate::lines`], the same rule the lexer walks
+    /// by, so this and a parse error name the same row. Column counts
     /// Unicode scalar values, mirroring the `Position` documentation.
     ///
     /// O(`source.len()`) per call. When converting many diagnostics from
@@ -670,7 +669,7 @@ pub struct RenderedNote {
 #[derive(Debug, Clone)]
 pub struct LineStarts {
     /// Byte offset of the first character of each line (line 1 starts at
-    /// offset 0; subsequent entries are the byte after each `\n`).
+    /// offset 0; subsequent entries are the byte after each line break).
     starts: Vec<usize>,
 }
 
@@ -678,29 +677,31 @@ impl LineStarts {
     /// Build the index by walking the source exactly once.
     #[must_use]
     pub fn new(source: &str) -> Self {
-        let mut starts = vec![0];
-        for (i, byte) in source.bytes().enumerate() {
-            if byte == b'\n' {
-                starts.push(i + 1);
-            }
+        Self {
+            starts: crate::lines::starts(source),
         }
-        Self { starts }
     }
 
     /// Resolve a byte offset into a 1-based `line:column` [`Position`].
     ///
-    /// Identical semantics to [`position_at`]; this method does the
-    /// expensive part (counting newlines) up front, then runs a binary
-    /// search per query.
+    /// `byte_offset` must be a character boundary — every offset in this
+    /// crate comes from a [`Span`], which is built from one. Offsets past
+    /// the end of `source` clamp to the final position; an offset inside a
+    /// character does not, and panics on the slice.
+    ///
+    /// Line and column saturate at `u32::MAX` rather than wrapping. Each
+    /// needs its own four billion — of lines in the file, of characters on
+    /// the line — and a source that reaches either has worse problems than
+    /// a truncated position.
     #[must_use]
     pub fn position(&self, source: &str, byte_offset: usize) -> Position {
         let clamped = byte_offset.min(source.len());
         // partition_point returns the first index whose start > clamped;
         // line numbers are 1-based and the starts vector is 1-aligned with
-        // them, so the returned index *is* the line number.
-        let line_idx = self.starts.partition_point(|&s| s <= clamped);
-        let line_number = line_idx.max(1);
-        let line_start = self.starts[line_idx - 1];
+        // them, so the returned index *is* the line number. It is never 0:
+        // `starts[0]` is 0, which is `<= clamped` for every offset.
+        let line_number = self.starts.partition_point(|&s| s <= clamped);
+        let line_start = self.starts[line_number - 1];
         let column_chars = source[line_start..clamped].chars().count() + 1;
         let line = NonZeroU32::new(u32::try_from(line_number).unwrap_or(u32::MAX))
             .unwrap_or(NonZeroU32::MIN);
@@ -712,24 +713,14 @@ impl LineStarts {
 
 /// Compute a 1-based `line:column` for a byte offset into `source`.
 ///
-/// `usize → u32` overflow saturates to `u32::MAX` rather than wrapping: any
-/// source large enough to exceed 4 billion lines is also large enough that
-/// "we lost track of the exact column" is the user's last concern.
-///
-/// O(`source.len()`) per call. Prefer [`LineStarts`] when converting many
-/// offsets from the same source.
+/// The one-shot convenience over [`LineStarts`], not a second answer to the
+/// same question — computing the line here independently is how the two
+/// came to disagree about a lone `\r`. It builds and discards an index per
+/// call, so prefer holding one when converting many offsets from the same
+/// source; the O(`source.len()`) cost per call is unchanged.
 #[must_use]
 pub fn position_at(source: &str, byte_offset: usize) -> Position {
-    let clamped = byte_offset.min(source.len());
-    let prefix = &source[..clamped];
-    let line_count = prefix.bytes().filter(|b| *b == b'\n').count() + 1;
-    let last_line_start = prefix.rfind('\n').map_or(0, |i| i + 1);
-    let column_chars = source[last_line_start..clamped].chars().count() + 1;
-    let line =
-        NonZeroU32::new(u32::try_from(line_count).unwrap_or(u32::MAX)).unwrap_or(NonZeroU32::MIN);
-    let col =
-        NonZeroU32::new(u32::try_from(column_chars).unwrap_or(u32::MAX)).unwrap_or(NonZeroU32::MIN);
-    Position { line, col }
+    LineStarts::new(source).position(source, byte_offset)
 }
 
 #[cfg(test)]
@@ -890,7 +881,7 @@ mod tests {
 
     #[test]
     fn diagnostic_data_walkway_blocked_serialises_with_kind_tag() {
-        // AC1 from issue #40: the structured payload must surface as
+        // The structured payload must surface as
         // `{"kind":"walkway_blocked","skipped":N}` so downstream tooling
         // can match on a stable discriminator instead of re-parsing the
         // human-readable `primary` string.
@@ -904,7 +895,7 @@ mod tests {
 
     #[test]
     fn rendered_diagnostic_omits_data_key_when_payload_absent() {
-        // AC3: `data: None` must serialise to *no key at all* so existing
+        // `data: None` must serialise to *no key at all* so existing
         // JSON consumers that did not opt into the new field keep working.
         let lines = LineStarts::new("abc\n");
         let diag = Diagnostic {
@@ -925,7 +916,7 @@ mod tests {
 
     #[test]
     fn rendered_diagnostic_propagates_data_payload_when_present() {
-        // AC2 boundary at the render layer: a `Diagnostic` carrying a
+        // At the render layer: a `Diagnostic` carrying a
         // payload must lift it into `RenderedDiagnostic` so the JSON
         // formatter (and any other consumer of `render`) sees the same
         // structured data the in-memory finding holds.
@@ -945,26 +936,42 @@ mod tests {
     }
 
     #[test]
-    fn line_starts_returns_identical_positions_to_position_at() {
-        // Soak the equivalence — for any char-boundary offset, the cached
-        // and linear implementations agree. Locks the optimisation in step
-        // with the (already-tested) reference.
-        let source = "α\nfoo\nbar\nβaz\n";
-        let lines = LineStarts::new(source);
-        // Only char-boundary offsets: byte 0 (start of α), 2 (after α =
-        // start of \n), 3 (start of 'f'), 6 (start of \n), 7 (start of 'b'),
-        // 10 (start of \n), 11 (start of β), 13 (after β), and EOF.
-        for offset in [0_usize, 2, 3, 6, 7, 10, 11, 13, source.len()] {
-            assert!(
-                source.is_char_boundary(offset),
-                "test bug: offset {offset} is not a char boundary",
-            );
-            let cached = lines.position(source, offset);
-            let linear = position_at(source, offset);
-            assert_eq!(
-                cached, linear,
-                "offset {offset} disagrees: cached={cached:?} linear={linear:?}",
-            );
+    fn position_agrees_with_a_direct_walk_of_the_source() {
+        // The index exists so N diagnostics do not re-walk the source N
+        // times, and the walk is what it has to reproduce: step one
+        // character at a time, bumping the line at each break and the
+        // column otherwise. Comparing against `position_at` instead would
+        // now be comparing the index with itself — there is one
+        // implementation, which is the point of having one rule.
+        for source in ["α\nfoo\nbar\nβaz\n", "a\r\nb\rc", "\r\r\n", "", "no break"] {
+            let lines = LineStarts::new(source);
+            let (mut line, mut col, mut offset) = (1_u32, 1_u32, 0_usize);
+            loop {
+                let expected = Position {
+                    line: NonZeroU32::new(line).expect("1-based"),
+                    col: NonZeroU32::new(col).expect("1-based"),
+                };
+                assert_eq!(
+                    lines.position(source, offset),
+                    expected,
+                    "{source:?} at byte {offset}",
+                );
+                if offset == source.len() {
+                    break;
+                }
+                if let Some(len) = crate::lines::terminator_len(source, offset) {
+                    offset += len;
+                    line += 1;
+                    col = 1;
+                } else {
+                    offset += source[offset..]
+                        .chars()
+                        .next()
+                        .expect("offset is inside the source")
+                        .len_utf8();
+                    col += 1;
+                }
+            }
         }
     }
 }
