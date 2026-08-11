@@ -104,10 +104,10 @@ fn crlf_source_without_final_line_break_parses_identically_to_lf() {
 /// Keyed by offset rather than compared position-by-position because the two
 /// implementations do not agree on token *boundaries* — the grammar splits
 /// `5x5` into two integers around a literal `x` where the lexer produces one
-/// `Size`, and `2026.06` is one directive literal against the lexer's two
-/// integers. Those are tokenisation differences, not position defects; the
-/// claim under test is that wherever both name the same byte, they name the
-/// same place in the file.
+/// `Size`, and `2026.06` is one `directive_literal` against the lexer's
+/// `Int` / `Dot` / `Int`. Those are tokenisation differences, not position
+/// defects; the claim under test is that wherever both name the same byte,
+/// they name the same place in the file.
 fn leaf_positions(source: &str) -> BTreeMap<usize, (u32, u32)> {
     let mut parser = Parser::new();
     parser
@@ -134,10 +134,18 @@ fn leaf_positions(source: &str) -> BTreeMap<usize, (u32, u32)> {
     leaves
 }
 
-/// The same, from the reference lexer. Byte columns on both sides:
-/// `Point.column` counts bytes, and the fixture is ASCII so the distinction
-/// from characters does not arise. Synthetic tokens are dropped — they have
-/// no text, so no node corresponds to them.
+/// The same, from the reference lexer.
+///
+/// `Point.column` counts bytes and a `Position` counts characters, so the
+/// two agree on columns only while the line is ASCII —
+/// `a_non_ascii_line_shifts_every_column_after_it` below pins where they
+/// stop. `LF_SOURCE` is ASCII, so the comparisons here are of line numbers
+/// and of columns alike.
+///
+/// Tokens whose text is only whitespace are dropped: the synthetic
+/// `Indent` / `Dedent` / `Newline` have no node to be compared against, and
+/// since the fix a `Newline` spans its terminator rather than nothing, so
+/// "has an empty span" would no longer select them.
 fn core_positions(source: &str) -> BTreeMap<usize, (u32, u32)> {
     cairn_lang_core::lex::lex(source)
         .expect("the reference lexer accepts the fixture")
@@ -205,14 +213,15 @@ fn node_positions_match_the_reference_lexer_for_lf_and_crlf() {
     }
 }
 
-/// A lone `\r` is where they part, and the grammar cannot close the gap.
+/// A lone `\r` is where their *lines* part, and the grammar cannot close
+/// the gap.
 ///
 /// `Point.row` is maintained by the tree-sitter *runtime*'s lexer, which
 /// advances it on `\n` and nothing else; an external scanner is handed
 /// `advance` and `get_column`, not the point. So a CR-only file parses to
 /// the right tree — `lone_cr_source_parses_identically_to_lf` above — while
-/// every node after the first line reports row 0 and a column that has been
-/// climbing since the file began.
+/// every node stays on the first row and its column keeps climbing across
+/// what should have been a line break.
 ///
 /// Pinned rather than left implicit: if a future runtime widens its line
 /// rule this test fails, which is the signal to delete it and fold the CR
@@ -220,14 +229,25 @@ fn node_positions_match_the_reference_lexer_for_lf_and_crlf() {
 #[test]
 fn a_lone_carriage_return_leaves_every_node_on_the_first_row() {
     let cr = LF_SOURCE.replace('\n', "\r");
-    let rows: BTreeSet<u32> = leaf_positions(&cr)
-        .into_values()
-        .map(|(row, _)| row)
-        .collect();
+    let nodes = leaf_positions(&cr);
+    let rows: BTreeSet<u32> = nodes.values().map(|(row, _)| *row).collect();
     assert_eq!(
         rows,
         BTreeSet::from([1]),
         "the runtime advanced a row on a lone `\\r`; the divergence this pins is gone",
+    );
+    // The column keeps climbing rather than restarting, which is the other
+    // half of the same defect and the half a row check cannot see: the last
+    // token of the file is reported further right than the file is wide.
+    let widest = nodes.values().map(|(_, col)| *col).max().expect("nodes");
+    let longest_line = LF_SOURCE
+        .lines()
+        .map(|line| u32::try_from(line.chars().count()).expect("fits u32"))
+        .max()
+        .expect("lines");
+    assert!(
+        widest > longest_line,
+        "columns restarted somewhere: widest {widest} against a longest line of {longest_line}",
     );
     // And the reference lexer does place them on separate lines, so the
     // two really are describing the same file differently.
@@ -236,4 +256,34 @@ fn a_lone_carriage_return_leaves_every_node_on_the_first_row() {
         .map(|(line, _)| line)
         .collect();
     assert!(reference.len() > 1, "{reference:?}");
+}
+
+/// And a non-ASCII character is where their *columns* part.
+///
+/// `Point.column` is a byte count; a `Position` column is a character
+/// count. Neither is wrong — tree-sitter's API is byte-addressed
+/// throughout, and a consumer converts — but the parity test above holds
+/// only because its fixture is ASCII, and a Japanese label in a `.crn` file
+/// is an ordinary thing to write in this project. Pinned so that claim
+/// cannot quietly widen.
+#[test]
+fn a_non_ascii_line_shifts_every_column_after_it() {
+    let source = "struct s size=3x3 label=\"日本\" id=x\n";
+    let shared = shared_positions(source);
+    let id = source.find("id=").expect("fixture holds `id=`");
+    let entry = shared
+        .iter()
+        .find(|s| s.offset == id)
+        .expect("both name the `id` token");
+    // Two three-byte characters where the lexer counted two: four columns.
+    assert_eq!(entry.node.1 - entry.reference.1, 4);
+    // Everything before the label still agrees, so the shift is the label's
+    // and not a whole-line offset.
+    for shared in shared.iter().filter(|s| s.offset < id) {
+        assert_eq!(
+            shared.reference, shared.node,
+            "byte {} is before the label and should agree",
+            shared.offset,
+        );
+    }
 }

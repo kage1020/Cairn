@@ -20,9 +20,9 @@ use cairn_lang_core::{Position as CorePosition, Span};
 /// Precomputed line-start byte offsets for one document revision.
 ///
 /// Build once per document text with [`LineIndex::new`], then convert any
-/// number of byte offsets / spans. Mirrors `cairn_lang_core::LineStarts`
-/// (whose internal offsets are private) but targets the LSP coordinate
-/// system directly.
+/// number of byte offsets / spans. Mirrors
+/// [`cairn_lang_core::check::LineStarts`] (whose internal offsets are
+/// private) but targets the LSP coordinate system directly.
 #[derive(Debug, Clone)]
 pub struct LineIndex {
     /// Byte offset of the first byte of each line: entry 0 is always 0, and
@@ -124,26 +124,12 @@ impl LineIndex {
     pub fn line_end(&self, source: &str, byte_offset: usize) -> usize {
         let clamped = byte_offset.min(source.len());
         let line_idx = self.line_starts.partition_point(|&s| s <= clamped) - 1;
-        let line_start = self.line_starts[line_idx];
-        let Some(&next_start) = self.line_starts.get(line_idx + 1) else {
-            return source.len();
-        };
-        // `next_start` is the byte after the terminator, so one back is the
-        // terminator's *last* byte. That is the whole terminator unless it
-        // is a `\r\n` pair, whose `\r` also has to be excluded so a range
-        // never covers a carriage return.
-        //
-        // The `end > line_start` guard is what keeps the step back inside
-        // this line: for a source of two lone `\r`s, the second line is
-        // empty and the byte before it is the first line's `\r`, which is
-        // not this line's to give up.
-        let end = next_start - 1;
-        let bytes = source.as_bytes();
-        if end > line_start && bytes[end] == b'\n' && bytes[end - 1] == b'\r' {
-            end - 1
-        } else {
-            end
-        }
+        // The last line has no terminator to stop before.
+        self.line_starts
+            .get(line_idx + 1)
+            .map_or(source.len(), |&next_start| {
+                cairn_lang_core::lines::end_before(source, next_start)
+            })
     }
 }
 
@@ -448,14 +434,21 @@ mod tests {
         }
     }
 
-    /// Stepping back over a terminator must not step out of the line doing
-    /// the stepping. Two lone `\r`s put a `\r` immediately before an empty
-    /// line, and an unguarded "is the byte before the end a `\r`?" test
-    /// answers with an offset belonging to the line above — which then
-    /// slices in reverse and panics.
+    /// Stepping back over a terminator must land inside the line doing the
+    /// stepping, on every shape that puts a break next to a break.
+    ///
+    /// A source *opening* with `\n` is the case that matters most and the
+    /// one an earlier version of this file had no fixture for: the first
+    /// line is empty and ends at offset 0, so a step back that reads the
+    /// byte before the terminator leaves the source and panics on the
+    /// subtraction. Two lone `\r`s are the other: the byte before the
+    /// second line's break is the *first* line's, which is not this line's
+    /// to give up.
     #[test]
     fn line_end_never_precedes_its_own_line_start() {
-        for source in ["\r\r", "a\r\r\n", "\r\n\r\n", "a\n\r\nb", "\r\r\r"] {
+        for source in [
+            "\n", "\nx", "\n\r\n", "\r", "\r\r", "a\r\r\n", "\r\n\r\n", "a\n\r\nb", "\r\r\r",
+        ] {
             let index = LineIndex::new(source);
             for (offset, _) in source.char_indices().chain([(source.len(), ' ')]) {
                 let start =

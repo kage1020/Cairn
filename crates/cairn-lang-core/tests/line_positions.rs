@@ -12,8 +12,8 @@
 //! *following* line and carried an empty span at that line's first byte.
 //! Since a parse error at the end of a line reports the position of the
 //! token it stopped at, every "expected X, got end of line" pointed one
-//! line too far — and for the last line of a file, at a line that does not
-//! exist.
+//! line past the text that was wrong — and after the last break in a file,
+//! at a line holding no text at all.
 
 use cairn_lang_core::check::LineStarts;
 use cairn_lang_core::lex::{TokenKind, lex};
@@ -105,22 +105,6 @@ fn every_token_position_is_the_position_of_its_span() {
     }
 }
 
-/// The same invariant stated against the other resolver, since the CLI
-/// reaches for whichever is cheaper at the call site.
-#[test]
-fn the_offset_resolvers_agree_with_each_other() {
-    for (label, source) in renderings(SAMPLE) {
-        let lines = LineStarts::new(&source);
-        for (offset, _) in source.char_indices().chain([(source.len(), ' ')]) {
-            assert_eq!(
-                lines.position(&source, offset),
-                cairn_lang_core::check::position_at(&source, offset),
-                "{label} at byte {offset}",
-            );
-        }
-    }
-}
-
 /// The lone-CR case on its own, because it is the one a `\n`-only line
 /// counter gets wrong while looking right on every other input.
 #[test]
@@ -146,11 +130,16 @@ fn a_trailing_newline_does_not_move_an_end_of_line_error() {
     assert_eq!((position.line.get(), position.col.get()), (1, 12));
 }
 
-/// And it must name a line the file has. `"…\n"` has one line; reporting
-/// line 2 sends a reader — or a model repairing its own output — to a line
-/// that is not there.
+/// And it must name a line that holds some of the offending text. A file
+/// ending in a terminator does have an empty line after it — that is where
+/// a cursor sits at the end of such a file, and `lines::starts` counts it —
+/// but nothing on it is wrong, so an error reported there sends a reader,
+/// or a model repairing its own output, somewhere blank.
+///
+/// `lines::split` drops that trailing empty line, which is exactly the
+/// count wanted here: the lines with text on them.
 #[test]
-fn an_end_of_line_error_names_a_line_the_file_has() {
+fn an_end_of_line_error_names_a_line_with_text_on_it() {
     for source in [
         "def foo bar\n",
         "site s:\n  walls height=\n",
@@ -161,7 +150,7 @@ fn an_end_of_line_error_names_a_line_the_file_has() {
         let lines = cairn_lang_core::lines::split(source).count();
         assert!(
             reported <= lines,
-            "{source:?} has {lines} lines, error reported at line {reported}",
+            "{source:?} has {lines} lines with text, error reported at line {reported}",
         );
         // And specifically at the end of the offending line, one column
         // past its last character.

@@ -684,20 +684,24 @@ impl LineStarts {
 
     /// Resolve a byte offset into a 1-based `line:column` [`Position`].
     ///
-    /// Offsets past the end of `source` clamp to the final position.
-    /// `usize → u32` overflow saturates to `u32::MAX` rather than wrapping:
-    /// any source large enough to exceed 4 billion lines is also large
-    /// enough that "we lost track of the exact column" is the reader's last
-    /// concern.
+    /// `byte_offset` must be a character boundary — every offset in this
+    /// crate comes from a [`Span`], which is built from one. Offsets past
+    /// the end of `source` clamp to the final position; an offset inside a
+    /// character does not, and panics on the slice.
+    ///
+    /// Line and column saturate at `u32::MAX` rather than wrapping. Each
+    /// needs its own four billion — of lines in the file, of characters on
+    /// the line — and a source that reaches either has worse problems than
+    /// a truncated position.
     #[must_use]
     pub fn position(&self, source: &str, byte_offset: usize) -> Position {
         let clamped = byte_offset.min(source.len());
         // partition_point returns the first index whose start > clamped;
         // line numbers are 1-based and the starts vector is 1-aligned with
-        // them, so the returned index *is* the line number.
-        let line_idx = self.starts.partition_point(|&s| s <= clamped);
-        let line_number = line_idx.max(1);
-        let line_start = self.starts[line_idx - 1];
+        // them, so the returned index *is* the line number. It is never 0:
+        // `starts[0]` is 0, which is `<= clamped` for every offset.
+        let line_number = self.starts.partition_point(|&s| s <= clamped);
+        let line_start = self.starts[line_number - 1];
         let column_chars = source[line_start..clamped].chars().count() + 1;
         let line = NonZeroU32::new(u32::try_from(line_number).unwrap_or(u32::MAX))
             .unwrap_or(NonZeroU32::MIN);
@@ -709,10 +713,11 @@ impl LineStarts {
 
 /// Compute a 1-based `line:column` for a byte offset into `source`.
 ///
-/// O(`source.len()`) per call. Prefer [`LineStarts`] when converting many
-/// offsets from the same source — this is the one-shot convenience over the
-/// same index, not a second answer to the same question. Computing the line
-/// here independently is how the two came to disagree about a lone `\r`.
+/// The one-shot convenience over [`LineStarts`], not a second answer to the
+/// same question — computing the line here independently is how the two
+/// came to disagree about a lone `\r`. It builds and discards an index per
+/// call, so prefer holding one when converting many offsets from the same
+/// source; the O(`source.len()`) cost per call is unchanged.
 #[must_use]
 pub fn position_at(source: &str, byte_offset: usize) -> Position {
     LineStarts::new(source).position(source, byte_offset)
@@ -876,7 +881,7 @@ mod tests {
 
     #[test]
     fn diagnostic_data_walkway_blocked_serialises_with_kind_tag() {
-        // AC1 from issue #40: the structured payload must surface as
+        // The structured payload must surface as
         // `{"kind":"walkway_blocked","skipped":N}` so downstream tooling
         // can match on a stable discriminator instead of re-parsing the
         // human-readable `primary` string.
@@ -890,7 +895,7 @@ mod tests {
 
     #[test]
     fn rendered_diagnostic_omits_data_key_when_payload_absent() {
-        // AC3: `data: None` must serialise to *no key at all* so existing
+        // `data: None` must serialise to *no key at all* so existing
         // JSON consumers that did not opt into the new field keep working.
         let lines = LineStarts::new("abc\n");
         let diag = Diagnostic {
@@ -911,7 +916,7 @@ mod tests {
 
     #[test]
     fn rendered_diagnostic_propagates_data_payload_when_present() {
-        // AC2 boundary at the render layer: a `Diagnostic` carrying a
+        // At the render layer: a `Diagnostic` carrying a
         // payload must lift it into `RenderedDiagnostic` so the JSON
         // formatter (and any other consumer of `render`) sees the same
         // structured data the in-memory finding holds.

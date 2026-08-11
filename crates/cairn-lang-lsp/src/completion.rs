@@ -223,22 +223,25 @@ fn context_at(source: &str, offset: usize) -> Option<Context> {
 /// First word of the nearest non-blank, non-comment indent-0 line above
 /// `line_start` — the top-level item whose body the cursor line sits in.
 ///
-/// Iterates forward and keeps the last match rather than reversing: the
-/// nearest such line above the cursor is the last one before it, and the
-/// shared line splitter yields lines in source order only.
+/// Walks upward, so it stops at the first item header it meets rather than
+/// reading to the top of the document on every keystroke.
 fn enclosing_item_keyword(source: &str, line_start: usize) -> Option<&str> {
     cairn_lang_core::lines::split(&source[..line_start])
+        .rev()
         .filter_map(|line| {
             let trimmed = line.trim_start();
-            if trimmed.is_empty() || trimmed.starts_with('#') || line.len() != trimmed.len() {
+            if trimmed.is_empty() || trimmed.starts_with('#') {
                 return None;
             }
+            Some((line.len() - trimmed.len(), trimmed))
+        })
+        .find(|(line_indent, _)| *line_indent == 0)
+        .map(|(_, trimmed)| {
             let end = trimmed
                 .find(|c: char| !is_token_char(c))
                 .unwrap_or(trimmed.len());
-            Some(&trimmed[..end])
+            &trimmed[..end]
         })
-        .last()
 }
 
 /// Scan the whole document for `slot NAME -> TARGET` lines, tracking the

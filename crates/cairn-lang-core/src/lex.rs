@@ -309,9 +309,10 @@ impl<'src> Lexer<'src> {
                 // Recorded before the break is consumed. A `Newline` is
                 // where a line *ends*, and the parser reports "expected X,
                 // got end of line" at the position of the token it stopped
-                // at — so a position taken after the break names the first
-                // column of the next line, which for the last line of a
-                // file is a line the file does not have.
+                // at — so a position taken after the break sends the reader
+                // to the first column of the next line, which holds none of
+                // the text that is wrong and, after the last break in a
+                // file, holds no text at all.
                 let start = self.pos;
                 let position = self.position();
                 self.consume_line_break();

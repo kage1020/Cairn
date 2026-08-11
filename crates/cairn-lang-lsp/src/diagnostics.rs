@@ -92,11 +92,17 @@ fn convert(
 ///
 /// Parse errors carry a 1-based line/column [`cairn_lang_core::Position`]
 /// rather than a byte span, so the range runs from that position to the end
-/// of its line — wide enough for an editor squiggle to be visible — falling
-/// back to the position's own point when the line remainder is empty (the
-/// editor renders a zero-width range as a caret-width marker). No stable
-/// `E_*` code exists for parse failures yet, so `code` stays unset rather
-/// than inventing one outside the core contract.
+/// of its line, which is as much as the position supports.
+///
+/// The largest class of parse error — `expected X, got end of line` — is
+/// reported *at* the end of its line, so its range is zero width and the
+/// editor draws a caret there rather than a squiggle. That is the right
+/// picture: nothing on the line is wrong, something is missing after it.
+/// An error inside a line still gets width, from the offending token to the
+/// line's end.
+///
+/// No stable `E_*` code exists for parse failures yet, so `code` stays
+/// unset rather than inventing one outside the core contract.
 fn parse_error_diagnostic(
     source: &str,
     index: &LineIndex,
@@ -295,5 +301,47 @@ mod tests {
             "expected the unknown keyword itself to be covered, got {:?}",
             selected[0],
         );
+    }
+
+    /// A parse error lands on the line that has it, and on the same line
+    /// whichever way the document ends its lines.
+    ///
+    /// Distinct from the check-diagnostic test above: that one goes through
+    /// `LineIndex::range` from a byte span, while a parse error carries a
+    /// line/column and comes back through `offset_of` and `line_end` — a
+    /// different pair of conversions, and the pair the `Newline` token's
+    /// position feeds.
+    #[test]
+    fn a_parse_error_lands_on_its_own_line_whatever_the_line_ending() {
+        let base = "struct s size=2x2\n  floor mat_slot=\n  walls height=4\n";
+        for rendering in [
+            base.to_owned(),
+            base.replace('\n', "\r\n"),
+            base.replace('\n', "\r"),
+        ] {
+            let source = rendering.as_str();
+            let diagnostics = compute_diagnostics(&uri(), source);
+            assert_eq!(diagnostics.len(), 1, "{source:?}");
+            let range = diagnostics[0].range;
+            // Line 1 is `  floor mat_slot=`, whose value is missing. The
+            // error belongs at its end, not at the start of line 2.
+            assert_eq!(range.start.line, 1, "{source:?}");
+            assert_eq!(range.start.character, 17, "{source:?}");
+            // End of line, so nothing on the line is under the marker.
+            assert_eq!(range.end, range.start, "{source:?}");
+        }
+    }
+
+    /// An error the parser reaches *inside* a line keeps a visible width,
+    /// so the zero-width case above is a property of end-of-line errors and
+    /// not of every parse failure.
+    #[test]
+    fn a_parse_error_inside_a_line_covers_the_rest_of_it() {
+        let source = "struct s size=2x2\n\tfloor\n";
+        let diagnostics = compute_diagnostics(&uri(), source);
+        assert_eq!(diagnostics.len(), 1);
+        let range = diagnostics[0].range;
+        assert_eq!(range.start.line, 1);
+        assert!(range.end > range.start, "{range:?}");
     }
 }
