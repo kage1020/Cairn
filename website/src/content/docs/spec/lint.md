@@ -45,6 +45,12 @@ first-class parts of the spec; messages MUST be in a shape that feeds the self-c
     the version. Reported rather than dropped, because the directive states
     one constraint and an expression that states none leaves a floor in the
     file that no longer reaches the compiler.
+  - `E_UNKNOWN_ID` — a `mat_slot=` resolved to a block ID the compile's target does not
+    declare (`spec/versioning-editions.md` §10.4). Raised during block-array lowering, and
+    only when a target is pinned: `cairn compile --target` has a registry to check against and
+    `cairn check` does not. Covers an ID the author wrote and an ID the registry pack's own
+    materials catalog produced; the message says which, because only the first is a fix the
+    author makes in their source.
   - `E_UNKNOWN_KEYWORD` — statement keyword is not in the known-keyword table.
   - `E_MISPLACED_MEMBER` — statement keyword is in the table but the
     enclosing body has no reader for it: a `place` / `connect` in a
@@ -131,6 +137,7 @@ evolving — additions for new codes are strictly additive, so consumers should 
 | -------------------- | ---------------------------------------------------------------- |
 | `W_WALKWAY_BLOCKED`  | `{ "kind": "walkway_blocked", "skipped": <u64> }` — number of cells along the fallback L-shaped path that overlapped an existing structure and were dropped from the lay (emitted only when the detour search found no unobstructed route). |
 | `E_DUPLICATE_SELECTOR` | `{ "kind": "duplicate_selector", "rebound": ["frame"] }` — the binding keys this selector row takes over from an earlier one, without the trailing `=`, in the order the message lists them. Always non-empty. |
+| `E_UNKNOWN_ID` | `{ "kind": "unknown_id", "id": "minecraft:light", "registry": "bedrock 1.21.60", "token": "floor.stone.smooth", "suggestion": "minecraft:stonebrick" }` — the ID the pinned target does not declare and the target it was checked against. `token` is present only when the pack's materials catalog produced the ID, which is the case where the author's source is correct and the pack is not; `suggestion` is absent when no declared ID is within the typo threshold. |
 | `E_INCOMPLETE_PLACE` | `{ "kind": "incomplete_place", "missing": ["id", "use", "theme"] }` — the keys the `place` row does not declare, without the trailing `=`, in the order the message lists them. Always non-empty. |
 
 Codes not listed above omit `data` entirely; reading `entry.data` returns `undefined` and the JSON

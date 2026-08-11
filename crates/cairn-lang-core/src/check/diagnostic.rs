@@ -560,10 +560,13 @@ pub enum DiagnosticData {
         /// The target it was checked against, as `"<edition> <version>"`.
         registry: String,
         /// The abstract token whose catalog mapping produced the id, when
-        /// one did. `None` when the author wrote the id themselves.
+        /// one did. `None` when the author wrote the id themselves, and
+        /// then absent from the JSON rather than `null`.
+        #[serde(skip_serializing_if = "Option::is_none")]
         token: Option<String>,
         /// Nearest id the target does declare, when one is within the
-        /// suggestion cap.
+        /// suggestion cap. Absent from the JSON when there is none.
+        #[serde(skip_serializing_if = "Option::is_none")]
         suggestion: Option<String>,
     },
 }
@@ -968,6 +971,47 @@ mod tests {
         assert_eq!(
             value,
             serde_json::json!({"kind": "walkway_blocked", "skipped": 3}),
+        );
+    }
+
+    #[test]
+    fn unknown_id_payload_omits_the_halves_it_does_not_have() {
+        // `spec/lint.md` §11.2 documents both fields as absent rather than
+        // `null`, and the two absences mean distinct things: no `token`
+        // says the author wrote the id, no `suggestion` says the target
+        // has nothing near it. A `null` would read as "unknown" for both.
+        let authored = serde_json::to_value(DiagnosticData::UnknownId {
+            id: "minecraft:light".to_owned(),
+            registry: "bedrock 1.21.60".to_owned(),
+            token: None,
+            suggestion: None,
+        })
+        .expect("serialise payload");
+        assert_eq!(
+            authored,
+            serde_json::json!({
+                "kind": "unknown_id",
+                "id": "minecraft:light",
+                "registry": "bedrock 1.21.60",
+            }),
+        );
+
+        let from_catalog = serde_json::to_value(DiagnosticData::UnknownId {
+            id: "minecraft:stone_bricks".to_owned(),
+            registry: "bedrock 1.21.0".to_owned(),
+            token: Some("floor.stone.smooth".to_owned()),
+            suggestion: Some("minecraft:stonebrick".to_owned()),
+        })
+        .expect("serialise payload");
+        assert_eq!(
+            from_catalog,
+            serde_json::json!({
+                "kind": "unknown_id",
+                "id": "minecraft:stone_bricks",
+                "registry": "bedrock 1.21.0",
+                "token": "floor.stone.smooth",
+                "suggestion": "minecraft:stonebrick",
+            }),
         );
     }
 

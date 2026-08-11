@@ -70,6 +70,10 @@ enum Command {
         #[arg(long, value_enum)]
         edition: Option<EditionArg>,
         /// Output format for the diagnostics.
+        ///
+        /// Block ids are not among the findings: whether an id exists has
+        /// no answer without a version, and `check` pins none. `cairn
+        /// compile --target` is where that question is asked.
         #[arg(long, value_enum, default_value_t = CheckFormat::Text)]
         format: CheckFormat,
     },
@@ -110,6 +114,9 @@ enum Command {
     /// uncompressed `.mcstructure` files. The Bedrock backend emits
     /// stateless palettes only for now — a palette entry that carries
     /// blockstate properties is a hard error rather than a silent drop.
+    /// This is also the only command that checks block ids against a
+    /// registry (`E_UNKNOWN_ID`): `--target` pins the one version there is
+    /// an answer for.
     /// Exits 0 on success, 1 on parse, lowering, or I/O failure (including
     /// an unsupported `--target` or a stateful Bedrock palette), and 2
     /// when the source file cannot be located.
