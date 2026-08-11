@@ -371,6 +371,17 @@ fn a_bedrock_target_is_held_to_the_floor_too() {
         stderr.contains("no supported bedrock target satisfies it"),
         "the candidates have to be the target edition's: {stderr}",
     );
+    // The versions, not only the word: naming the edition while listing
+    // the other one's releases is worse than listing neither, because it
+    // reads as a closed set the author can choose from.
+    assert!(
+        stderr.contains("1.21.0, 1.21.40, 1.21.60"),
+        "should list Bedrock's releases: {stderr}",
+    );
+    assert!(
+        !stderr.contains("1.20.4"),
+        "1.20.4 is a Java release and does not exist here: {stderr}",
+    );
 }
 
 /// The trailing-zero rule decides a real build here, not just a unit
