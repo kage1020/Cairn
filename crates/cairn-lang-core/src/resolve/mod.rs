@@ -36,12 +36,15 @@ mod resolver;
 mod version_axes;
 
 pub use binding::{SelectorMatch, ThemeBinding, TokenKind, classify_token};
-pub use requires_parse::{compare_versions, parse_min_version};
+pub use requires_parse::{
+    RequirementError, compare_versions, parse_min_version, parse_requirement,
+};
 pub(crate) use resolver::select_the_same_members;
 pub use resolver::{
     PortRef, Resolution, ResolvedMemberBinding, ScopeResolution, ValidatedConnect, place_scope_key,
     resolve,
 };
 pub use version_axes::{
-    EditionPortability, RegistryRange, SemanticSensitiveFinding, VersionAxes, compute_axes,
+    EditionPortability, RegistryRange, SemanticSensitiveFinding, VersionAxes, VersionFloor,
+    compute_axes, declared_version_floor,
 };

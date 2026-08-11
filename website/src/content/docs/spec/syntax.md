@@ -89,14 +89,19 @@ Metadata MAY be placed in headers rather than in the semantic body:
 
 ```
 @cairn 2026.06                           # optional. The Cairn language version it was written against (CalVer)
-@requires version>=1.20                  # capability floor (optional). Conflict with the inferred value → E_REQUIRES_CONFLICT
+@requires version>=1.20                  # capability floor (optional). Malformed → E_INVALID_REQUIRES
 @intended_targets ["1.20.4","1.21.4"]    # wish/hint. Not a verification record (the record lives in the lock)
 ```
 
 - `@cairn` is the **version of the Cairn language itself** (see the README's Versioning). It is a
   **separate axis** from `@requires` / `@intended_targets` (Minecraft versions). It is optional, and
   exists as provenance so a future compiler can parse/warn correctly.
-- See [Versioning and Editions](versioning-editions) for `@requires`.
+- See [Versioning and Editions](versioning-editions) for `@requires`. Its expression is the subject
+  `version`, the operator `>=`, and a dotted-decimal version, with whitespace optional between the
+  three: `version>=1.21` and `version >= 1.21` are one requirement. `>=` is the only operator, since
+  a floor is the only constraint that composes by folding to the strictest. Every other expression
+  is `E_INVALID_REQUIRES` rather than a line that quietly declares nothing — a floor that evaporates
+  is worse than an absent one, because it is still in the file for a reader to believe.
 - `@intended_targets` is a hint about "which Minecraft version it was designed for", not a claim of
   being verified. The verified target is recorded only in the lock.
 - `@cairn` and `@intended_targets` appear **at most once** per module → `E_DUPLICATE_HEADER`. Each

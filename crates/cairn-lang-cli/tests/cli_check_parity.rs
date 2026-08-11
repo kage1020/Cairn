@@ -130,6 +130,17 @@ const SYNTACTIC_FIXTURES: &[(&str, Source)] = &[
         ),
     ),
     (
+        // Also a header, so also a whole source. `version<1.20` is the
+        // shape an author reaches for when they want a ceiling; only `>=`
+        // is defined, and the line used to declare nothing at all.
+        "E_INVALID_REQUIRES",
+        Source::Whole(
+            "@requires version<1.20\n\
+             \ntheme t:\n  slot floor -> @oak_planks\n\
+             \nstruct s size=5x5\n  floor mat_slot=floor\n",
+        ),
+    ),
+    (
         // The site half of this code. It is the half that had no reporter
         // at either stage — a geometry row among a site's placements
         // produced neither voxels nor a diagnostic — so it is the one

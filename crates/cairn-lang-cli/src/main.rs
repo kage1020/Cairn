@@ -10,7 +10,10 @@ use cairn_lang_core::lock::{
     HashHex, LockEdition, LockInputs, LockPlacement, LockTarget, LockWalkway, Lockfile,
     hash_resolved_ir, hash_source,
 };
-use cairn_lang_core::resolve::{EditionPortability, VersionAxes, compute_axes, resolve};
+use cairn_lang_core::resolve::{
+    EditionPortability, VersionAxes, VersionFloor, compare_versions, compute_axes,
+    declared_version_floor, resolve,
+};
 use cairn_lang_core::{Edition, Severity, check, lower, parse};
 use cairn_lang_formats::bedrock_structure::{ParityNote, build_mcstructure_tag, write_mcstructure};
 use cairn_lang_formats::data_version::{
@@ -1417,6 +1420,7 @@ fn run_compile(
         source,
         block_ir,
         dropped_scopes,
+        version_floor,
     } = match load_and_lower(file, edition) {
         Ok(lowered) => lowered,
         Err(code) => return code,
@@ -1454,6 +1458,9 @@ fn run_compile(
         Ok(t) => t,
         Err(code) => return code,
     };
+    if let Err(code) = enforce_version_floor(file, &source, version_floor.as_ref(), &target) {
+        return code;
+    }
 
     let out_dir = match prepare_out_dir(file, out) {
         Ok(d) => d,
@@ -1482,6 +1489,11 @@ struct Lowered {
     /// order. `def::` keys are excluded: a def is a template and lowers to
     /// voxels only through a `place` that instantiates it.
     dropped_scopes: Vec<String>,
+    /// The strictest `@requires` floor the source declares, carried out of
+    /// the parse so `compile` can hold `--target` to it without reading the
+    /// file a second time. `None` when the source declares none, which is
+    /// the ordinary case.
+    version_floor: Option<VersionFloor>,
 }
 
 fn load_and_lower(file: &Path, edition: EditionArg) -> Result<Lowered, ExitCode> {
@@ -1532,10 +1544,60 @@ fn load_and_lower(file: &Path, edition: EditionArg) -> Result<Lowered, ExitCode>
         .cloned()
         .collect();
     Ok(Lowered {
+        version_floor: declared_version_floor(&module),
         source,
         block_ir,
         dropped_scopes,
     })
+}
+
+/// Refuse a `--target` below the floor the source declares.
+///
+/// `@requires version>=X` is the source's own statement of what it needs.
+/// It was rendered by `cairn info` and enforced nowhere, so compiling
+/// against a lower target succeeded and wrote a lockfile reading
+/// `verified: true` for a version the file itself rules out. A lock records
+/// what was checked; certifying a target the source disowns is the one
+/// thing it must not do.
+///
+/// Checked here rather than in `check()`: the constraint is a relation
+/// between the source and `--target`, and `cairn check` has no target. It
+/// runs before any artifact is prepared, so a refusal leaves nothing on
+/// disk.
+///
+/// Spec §10.4 shows this code on a different comparison — a *material*
+/// introduced after the target, from the registry's `since` data. That data
+/// is not in the pack yet; when it arrives it joins this code rather than
+/// getting its own, because both answer "the target is below a floor".
+///
+/// # Errors
+///
+/// Returns exit code 1 when the target is below the floor.
+fn enforce_version_floor(
+    file: &Path,
+    source: &str,
+    floor: Option<&VersionFloor>,
+    target: &ResolvedTarget,
+) -> Result<(), ExitCode> {
+    let Some(floor) = floor else {
+        return Ok(());
+    };
+    if !compare_versions(target.mc_version(), &floor.version).is_lt() {
+        return Ok(());
+    }
+    let position = LineStarts::new(source).position(source, floor.span.start);
+    eprintln!(
+        "error[E_VERSION_CAP]: {}:{}: this file requires version>={} (target {}).",
+        file.display(),
+        position,
+        floor.version,
+        target.mc_version(),
+    );
+    eprintln!(
+        "  fix: --target >={}, or relax the `@requires` line",
+        floor.version,
+    );
+    Err(ExitCode::from(1))
 }
 
 fn report_lowering_diagnostics(file: &Path, source: &str, block_ir: &BlockArrayIr) -> bool {

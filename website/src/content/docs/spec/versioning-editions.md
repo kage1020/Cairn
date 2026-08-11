@@ -90,7 +90,33 @@ E_PARITY_UNSUPPORTED line 8: text_display is Java-only (since 1.19.4); Bedrock h
 ```
 
 `def` / `theme` may declare `requires version>=X`; the minimum version of a composite is the max of its
-parts.
+parts. (Module-level `@requires` is implemented; the member-level form is not yet parsed.)
+
+### The declared floor is enforced
+A module's `@requires` floor is the strictest of its `@requires` lines, and `cairn compile --target`
+below it is `E_VERSION_CAP` — reported before any artifact is prepared, so a refused build leaves no
+structure file and no lock. That ordering is the point: a lock records what was verified, and a
+`verified: true` for a target the source itself rules out is the one thing it must not say.
+
+The worked example above shows the same code on the *other* comparison, a material introduced after
+the target. Both say "the target is below a floor", so they share a code; the registry `since` data
+that half needs is not in the pack yet.
+
+`E_REQUIRES_CONFLICT` stays **reserved**. It is defined as a declared floor contradicting the
+registry-*inferred* range, and no inferred range is derived yet — the pack carries no `since` /
+`until`. It is not a conflict between two `@requires` lines: floors compose by taking the strictest,
+so their intersection is never empty. A constraint that would need an upper bound, such as
+`version<1.20`, is not a shape the language accepts; it is `E_INVALID_REQUIRES`.
+
+### Ordering, and where it stops
+§10.1 makes `DataVersion` the canonical ordering key. Version comparison today is **component-wise
+over dotted decimals** instead, and that is a known shortfall rather than a second convention: it
+orders every label `@requires` accepts and will mis-order a date-based label against a semver one.
+The pack does ship a `DataVersion` table, so the obstacle is not its absence but its coverage — it
+names the versions the pack was built for, and a floor may name any version. Until a lookup can
+answer for an arbitrary label, a version Cairn cannot order is refused at the directive rather than
+sorted wrongly later: pre-release and date-based labels (`1.21.4-rc1`) are not accepted in
+`@requires`.
 
 ## 10.5 "Which version is it for?" = three axes
 There is no single "for-version". `cairn info` returns three axes:

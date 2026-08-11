@@ -85,14 +85,19 @@ tree-sitter ランタイムが与えるもので、ランタイムは `\n` で�
 
 ```
 @cairn 2026.06                           # オプション。書かれた時点の Cairn 言語バージョン (CalVer)
-@requires version>=1.20                  # capability の下限 (オプション)。推定値との衝突 → E_REQUIRES_CONFLICT
+@requires version>=1.20                  # capability の下限 (オプション)。不正な式 → E_INVALID_REQUIRES
 @intended_targets ["1.20.4","1.21.4"]    # 希望/ヒント。検証記録ではない (検証はロックに記録)
 ```
 
 - `@cairn` は **Cairn 言語自身のバージョン** です (README のバージョニング節を参照)。
   `@requires` / `@intended_targets` (Minecraft バージョン) とは **別軸** です。オプションで、将来の
   コンパイラが正しくパース/警告できるようにする provenance として存在します。
-- `@requires` については [バージョンとエディション](versioning-editions) を参照してください。
+- `@requires` については [バージョンとエディション](versioning-editions) を参照してください。式は
+  主語 `version`、演算子 `>=`、ドット区切り十進のバージョンからなり、3 者の間の空白は任意です。
+  `version>=1.21` と `version >= 1.21` は同一の要求です。演算子は `>=` だけです。最も厳しいものへ
+  畳み込んで合成できる制約が下限しかないためです。それ以外の式はすべて `E_INVALID_REQUIRES` として
+  報告し、黙って何も宣言しない行にはしません。消えてしまう下限は、下限がない場合より悪いからです。
+  行はファイルに残り続け、読む者はそれを信じます。
 - `@intended_targets` は「どの Minecraft バージョン向けに設計したか」のヒントであり、検証済みである
   という主張ではありません。検証済みターゲットはロックにのみ記録されます。
 - `@cairn` と `@intended_targets` は 1 モジュールにつき **1 回まで** です → `E_DUPLICATE_HEADER`。
