@@ -3349,6 +3349,104 @@ mod tests {
         }
     }
 
+    /// A registry with a pinned target, for the `E_UNKNOWN_ID` path.
+    ///
+    /// Separate from [`FakeResolver`] so the tests above keep running in
+    /// the no-target mode they were written for; a table added there would
+    /// start refusing ids in a hundred tests that are about something else.
+    struct PinnedRegistry {
+        entries: Vec<(&'static str, &'static str)>,
+        /// Sorted, fully namespaced ids the pinned target declares.
+        ids: Vec<String>,
+    }
+
+    impl PinnedRegistry {
+        fn new(entries: Vec<(&'static str, &'static str)>, ids: &[&str]) -> Self {
+            let mut ids: Vec<String> = ids.iter().map(|id| (*id).to_owned()).collect();
+            ids.sort();
+            Self { entries, ids }
+        }
+    }
+
+    impl TargetRegistry for PinnedRegistry {
+        fn lookup(&self, token: &str) -> Option<BlockState> {
+            self.entries
+                .iter()
+                .find(|(t, _)| *t == token)
+                .map(|(_, id)| BlockState::bare(format!("minecraft:{id}")))
+        }
+
+        fn known_tokens(&self) -> Vec<String> {
+            self.entries.iter().map(|(t, _)| (*t).to_owned()).collect()
+        }
+
+        fn block_ids(&self) -> Option<crate::block_array::BlockIdSet<'_>> {
+            Some(crate::block_array::BlockIdSet::new("test 1.0", &self.ids))
+        }
+    }
+
+    fn unknown_id_payload(out: &BlockArrayIr) -> (String, String, Option<String>, Option<String>) {
+        let found: Vec<&Diagnostic> = out
+            .diagnostics
+            .iter()
+            .filter(|d| d.code == DiagnosticCode::UnknownId)
+            .collect();
+        assert_eq!(
+            found.len(),
+            1,
+            "expected exactly one E_UNKNOWN_ID, got {:?}",
+            out.diagnostics
+                .iter()
+                .map(|d| d.code.as_str())
+                .collect::<Vec<_>>(),
+        );
+        match found[0].data.clone() {
+            Some(DiagnosticData::UnknownId {
+                id,
+                registry,
+                token,
+                suggestion,
+            }) => (id, registry, token, suggestion),
+            other => panic!("expected an UnknownId payload, got {other:?}"),
+        }
+    }
+
+    /// The payload's `token` is what tells a consumer whose mistake it is,
+    /// and it has to come from the origin rather than be a constant.
+    ///
+    /// `mat_slot=` reaches the same code either way, so the two halves are
+    /// asserted against one another: a payload that hardcoded `None` would
+    /// pass the authored case on its own.
+    #[test]
+    fn the_payload_names_the_token_only_when_the_catalog_chose_the_id() {
+        let registry = PinnedRegistry::new(
+            vec![("floor.stone.smooth", "stone_bricks")],
+            &["minecraft:stonebrick"],
+        );
+
+        let authored = lowered_with_resolver(
+            "theme t:\n  slot floor -> @stone_brick\nstruct s size=2x2\n  floor mat_slot=floor\n",
+            &registry,
+        );
+        let (id, target, token, suggestion) = unknown_id_payload(&authored);
+        assert_eq!(id, "minecraft:stone_brick");
+        assert_eq!(target, "test 1.0");
+        assert_eq!(token, None, "the author wrote this id themselves");
+        assert_eq!(suggestion.as_deref(), Some("minecraft:stonebrick"));
+
+        let from_catalog = lowered_with_resolver(
+            "theme t:\n  slot floor -> @floor.stone.smooth\nstruct s size=2x2\n  floor mat_slot=floor\n",
+            &registry,
+        );
+        let (id, _, token, _) = unknown_id_payload(&from_catalog);
+        assert_eq!(id, "minecraft:stone_bricks");
+        assert_eq!(
+            token.as_deref(),
+            Some("floor.stone.smooth"),
+            "the catalog produced this id, so the author's token is not the fix site",
+        );
+    }
+
     fn block_id(ba: &BlockArray, x: u32, y: u32, z: u32) -> &str {
         let i = ba.dims.index(x, y, z).expect("in-range coordinate");
         let pi = ba.voxels[i];
