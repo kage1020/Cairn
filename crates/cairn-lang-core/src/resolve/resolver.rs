@@ -3015,11 +3015,20 @@ mod tests {
 
     /// A def whose member reads a slot only the Bedrock variant declares,
     /// placed under `theme={reference}`.
+    ///
+    /// The unrelated `barn` theme is load-bearing. A def is resolved twice —
+    /// once as its own top-level scope, once per placement — so with `shop`
+    /// as the module's only logical theme the def's own scope auto-picks a
+    /// variant and reports the slot itself. Every assertion below would then
+    /// hold whatever the placement path did with its siblings. A second
+    /// logical theme suppresses the auto-pick, leaving the `theme=` on the
+    /// `place` as the only thing that can bind this member at all.
     fn placed_reading_a_bedrock_only_slot(reference: &str) -> String {
         format!(
             "theme shop_java:\n  slot floor -> @oak_planks\n\n\
              theme shop_bedrock:\n  slot floor -> @oak_planks\n  \
              slot bedrock_only -> @dark_oak_planks\n\n\
+             theme barn:\n  slot floor -> @hay_block\n\n\
              def hut size=4x4:\n  floor mat_slot=bedrock_only\n\nsite s:\n  \
              place id=home use=hut theme={reference} at=origin\n"
         )
