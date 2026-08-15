@@ -57,6 +57,11 @@ enum Command {
     /// when nothing is reported, 1 when any `Error`-severity diagnostic is
     /// emitted (or the file fails to parse), 2 when the file cannot be
     /// located.
+    ///
+    /// This command does not run block-array lowering, so no lowering-stage
+    /// finding reaches it — `E_UNKNOWN_ID` and `E_UNKNOWN_ABSTRACT_TOKEN`
+    /// among them. `cairn compile` runs both stages and is the gate that
+    /// sees every code.
     Check {
         /// Path to the .crn file to check.
         file: PathBuf,
@@ -70,10 +75,6 @@ enum Command {
         #[arg(long, value_enum)]
         edition: Option<EditionArg>,
         /// Output format for the diagnostics.
-        ///
-        /// Block ids are not among the findings: whether an id exists has
-        /// no answer without a version, and `check` pins none. `cairn
-        /// compile --target` is where that question is asked.
         #[arg(long, value_enum, default_value_t = CheckFormat::Text)]
         format: CheckFormat,
     },
@@ -585,10 +586,11 @@ fn run_info(file: &Path, editions: &[String], format: InfoFormat) -> ExitCode {
     // The strict per-edition pass runs inside the dry-run below, which
     // reports whatever only it can see.
     let resolution = resolve(&ir, None);
-    // No `--target` here, so the view carries no id table and block ids go
-    // unchecked: `cairn check` cannot say whether `@light` exists without
-    // being told which version to ask. `cairn compile --target` is where
-    // that question has an answer.
+    // `info` reports across every target in the pack's range, so there is
+    // no single version to check ids against and the view carries no id
+    // table. Guessing one would refuse ids that are fine on the version
+    // the author compiles for; `cairn compile --target` is where the
+    // question has an answer.
     let mut block_ir = lower_to_block_array(&ir, &resolution, Some(&builtin_java().view(None)));
     let combined = build_diagnostics(
         &module,
@@ -687,9 +689,8 @@ fn edition_portability(
             Edition::Java => builtin_java(),
             Edition::Bedrock => builtin_bedrock(),
         };
-        // `cairn info` reports across every target in the pack's range, so
-        // there is no single version to check ids against; see the note in
-        // `run_check`.
+        // Same reason as the pass above: no single version, so no id
+        // table.
         let block_ir = lower_to_block_array(ir, &resolution, Some(&pack.view(None)));
 
         let only_here: Vec<_> = resolution
@@ -801,7 +802,8 @@ fn run_lower(file: &Path, format: LowerFormat) -> ExitCode {
     };
     let ir = lower(&module);
     let resolution = resolve(&ir, None);
-    // No `--target` here either; see the note in `run_check`.
+    // `lower` takes no `--target` at all, so there is no version to
+    // check ids against; see the note in `run_info`.
     let mut block_ir = lower_to_block_array(&ir, &resolution, Some(&builtin_java().view(None)));
     // Mirror `load_and_lower`: the check pass gates the pipeline, and the
     // lowering deferrals its findings tend to cascade into follow on the

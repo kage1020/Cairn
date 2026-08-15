@@ -246,13 +246,14 @@ fn a_material_token_follows_the_rename_across_its_editions_range() {
     }
 }
 
-/// `cairn check` pins no version, so it has no registry to check ids
-/// against and must not invent one. A source `compile` refuses for an
-/// unknown id still passes `check` — the alternative is `check` guessing a
-/// version and refusing ids that are fine on the one the author compiles
-/// for.
+/// `cairn check` does not run block-array lowering at all, so no
+/// lowering-stage code reaches it — `E_UNKNOWN_ID` included. A source
+/// `compile` refuses for an unknown id therefore still passes `check`.
+///
+/// Worth pinning rather than leaving implicit: it is a real hole for
+/// anyone gating CI on `cairn check`, and it widened by one code here.
 #[test]
-fn check_stays_silent_about_ids_because_it_pins_no_version() {
+fn check_stays_silent_about_ids_because_it_does_not_lower() {
     let fixture = Fixture::new("check", &source_binding("totally_not_a_block"));
     let out = Command::new(cargo_bin())
         .arg("check")
@@ -265,6 +266,71 @@ fn check_stays_silent_about_ids_because_it_pins_no_version() {
         "check has no target to check against, got: {stderr}",
     );
     assert_eq!(out.status.code(), Some(0), "stderr: {stderr}");
+}
+
+/// A walkway's `path=@ID` reaches the check by a second route.
+///
+/// `lower_connects` resolves it outside `resolve_member_state`, so the
+/// member arm passing says nothing about this one. Losing it would put a
+/// walkway strip of a non-existent block into a `.nbt` at exit 0 — and
+/// unlike a member, a walkway that quietly does not appear is easy to
+/// mistake for a routing decision.
+#[test]
+fn a_walkway_path_id_is_checked_too() {
+    let fixture = Fixture::new("walkway", &two_huts_joined_by("totally_not_a_block"));
+    let out = compile(&fixture, "java", "1.21.4");
+    assert_eq!(out.status.code(), Some(1), "stderr: {}", stderr_of(&out));
+    let stderr = stderr_of(&out);
+    assert!(
+        stderr.contains("E_UNKNOWN_ID") && stderr.contains("minecraft:totally_not_a_block"),
+        "expected the path material to be refused, got: {stderr}",
+    );
+
+    // The same shape with a real block has to still build, or the test
+    // above would pass on any source that happens to fail.
+    let ok = Fixture::new("walkway-ok", &two_huts_joined_by("gravel"));
+    let out = compile(&ok, "java", "1.21.4");
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "a walkway of a real block must compile; stderr: {}",
+        stderr_of(&out),
+    );
+}
+
+/// Two placed huts and a walkway between them, with `{path}` as the strip's
+/// material.
+fn two_huts_joined_by(path: &str) -> String {
+    format!(
+        "theme t:\n  slot floor -> @oak_planks\n  slot wall -> @cobblestone\n\n\
+         def hut size=3x3:\n  floor id=f mat_slot=floor\n  \
+         walls id=w mat_slot=wall height=2\n  door id=entry side=front at=center\n\n\
+         site duo:\n  place id=a use=hut theme=t at=origin\n  \
+         place id=b use=hut theme=t east_of=a gap=2\n  \
+         connect a.entry to b.entry path=@{path}\n"
+    )
+}
+
+/// `cairn lower` takes no `--target` at all, so it is in the same position
+/// as `info` — it lowers, but against no version.
+#[test]
+fn lower_stays_silent_about_ids_because_it_takes_no_target() {
+    let fixture = Fixture::new("lower", &source_binding("totally_not_a_block"));
+    let out = Command::new(cargo_bin())
+        .arg("lower")
+        .arg(fixture.source())
+        .output()
+        .expect("failed to invoke cairn binary");
+    let combined = format!(
+        "{}{}",
+        String::from_utf8_lossy(&out.stdout),
+        stderr_of(&out),
+    );
+    assert!(
+        !combined.contains("E_UNKNOWN_ID"),
+        "lower has no target to check against, got: {combined}",
+    );
+    assert_eq!(out.status.code(), Some(0), "stderr: {}", stderr_of(&out));
 }
 
 /// `cairn info` reports across a pack's whole version range, so it is in

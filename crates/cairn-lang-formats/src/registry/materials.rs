@@ -17,6 +17,8 @@
 use indexmap::IndexMap;
 use serde::Deserialize;
 
+use super::namespaced;
+
 /// Highest `materials.schema_version` this Cairn build understands.
 pub const SUPPORTED_MATERIALS_SCHEMA: u32 = 1;
 
@@ -131,12 +133,12 @@ impl MaterialsIndex {
                         mc_version: over.mc_version,
                     });
                 }
-                by_version.insert(over.mc_version, namespaced(namespace, over.block));
+                by_version.insert(over.mc_version, namespaced(namespace, &over.block));
             }
             by_token.insert(
                 entry.token,
                 MaterialMapping {
-                    default: namespaced(namespace, entry.block),
+                    default: namespaced(namespace, &entry.block),
                     by_version,
                 },
             );
@@ -212,15 +214,6 @@ impl MaterialsIndex {
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.by_token.is_empty()
-    }
-}
-
-/// Prepend the catalog namespace unless the entry carries its own.
-fn namespaced(namespace: &str, block: String) -> String {
-    if block.contains(':') {
-        block
-    } else {
-        format!("{namespace}:{block}")
     }
 }
 
@@ -344,6 +337,31 @@ mod tests {
             err,
             MaterialsError::DuplicateMaterialEntry {
                 token: "floor.wood.broadleaf".into(),
+            },
+        );
+    }
+
+    #[test]
+    fn duplicate_override_for_one_version_rejected_at_load_time() {
+        // Same reason as a duplicate token: the silent outcome is "the last
+        // row wins", which the pack author cannot see from the file.
+        let src = r#"{
+            "schema_version": 1,
+            "namespace": "minecraft",
+            "entries": [
+                { "token": "floor.stone.smooth", "block": "stone_bricks",
+                  "overrides": [
+                    { "mc_version": "1.21.0", "block": "stonebrick" },
+                    { "mc_version": "1.21.0", "block": "stone" }
+                  ] }
+            ]
+        }"#;
+        let err = parse(src).unwrap_err();
+        assert_eq!(
+            err,
+            MaterialsError::DuplicateMaterialOverride {
+                token: "floor.stone.smooth".into(),
+                mc_version: "1.21.0".into(),
             },
         );
     }

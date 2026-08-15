@@ -550,18 +550,22 @@ pub enum DiagnosticData {
     ///
     /// Carried for the reason [`Self::IncompletePlace`] is: the obvious
     /// quick-fix is "replace this id with that one", and a tool should not
-    /// have to recover either id from the sentence. `token` additionally
-    /// tells a consumer whether the edit belongs in the source at all —
-    /// when the pack's catalog produced the id, the author's token is
-    /// correct and only the pack is wrong.
+    /// have to recover either id from the sentence. `origin` additionally
+    /// tells a consumer *where* the edit belongs, which differs by case —
+    /// in the source, in the pack's mapping, or in a pack row that does
+    /// not exist yet.
     UnknownId {
         /// The fully namespaced id the target does not declare.
         id: String,
         /// The target it was checked against, as `"<edition> <version>"`.
         registry: String,
-        /// The abstract token whose catalog mapping produced the id, when
-        /// one did. `None` when the author wrote the id themselves, and
-        /// then absent from the JSON rather than `null`.
+        /// Who chose the id, from [`crate::block_array::IdOrigin::kind`]:
+        /// `authored` (the source names it), `catalog` (the pack maps a
+        /// token onto it), or `builtin` (the pack declares no row for a
+        /// member default, so the compiler's own id was used).
+        origin: String,
+        /// The catalog token involved, for the two origins that have one.
+        /// Absent from the JSON for `authored`, rather than `null`.
         #[serde(skip_serializing_if = "Option::is_none")]
         token: Option<String>,
         /// Nearest id the target does declare, when one is within the
@@ -976,13 +980,16 @@ mod tests {
 
     #[test]
     fn unknown_id_payload_omits_the_halves_it_does_not_have() {
-        // `spec/lint.md` §11.2 documents both fields as absent rather than
-        // `null`, and the two absences mean distinct things: no `token`
-        // says the author wrote the id, no `suggestion` says the target
-        // has nothing near it. A `null` would read as "unknown" for both.
+        // `spec/lint.md` §11.2 documents both optional fields as absent
+        // rather than `null`, and the two absences mean distinct things: no
+        // `token` says the author wrote the id, no `suggestion` says the
+        // target has nothing near it. A `null` would read as "unknown" for
+        // both. `origin` is never optional — it is what separates the three
+        // cases, so a consumer always has it.
         let authored = serde_json::to_value(DiagnosticData::UnknownId {
             id: "minecraft:light".to_owned(),
             registry: "bedrock 1.21.60".to_owned(),
+            origin: "authored".to_owned(),
             token: None,
             suggestion: None,
         })
@@ -993,12 +1000,14 @@ mod tests {
                 "kind": "unknown_id",
                 "id": "minecraft:light",
                 "registry": "bedrock 1.21.60",
+                "origin": "authored",
             }),
         );
 
         let from_catalog = serde_json::to_value(DiagnosticData::UnknownId {
             id: "minecraft:stone_bricks".to_owned(),
             registry: "bedrock 1.21.0".to_owned(),
+            origin: "catalog".to_owned(),
             token: Some("floor.stone.smooth".to_owned()),
             suggestion: Some("minecraft:stonebrick".to_owned()),
         })
@@ -1009,10 +1018,41 @@ mod tests {
                 "kind": "unknown_id",
                 "id": "minecraft:stone_bricks",
                 "registry": "bedrock 1.21.0",
+                "origin": "catalog",
                 "token": "floor.stone.smooth",
                 "suggestion": "minecraft:stonebrick",
             }),
         );
+    }
+
+    /// `origin` and `token` are two fields with one job between them, so
+    /// the pairs a consumer may rely on are pinned here rather than left
+    /// to the two call sites to agree on by hand.
+    #[test]
+    fn every_id_origin_has_a_wire_name_and_the_token_that_goes_with_it() {
+        use crate::block_array::IdOrigin;
+
+        let cases = [
+            (IdOrigin::Authored, "authored", None),
+            (
+                IdOrigin::Catalog {
+                    token: "floor.stone.smooth".to_owned(),
+                },
+                "catalog",
+                Some("floor.stone.smooth"),
+            ),
+            (
+                IdOrigin::Builtin {
+                    token: "pressure_plate.default",
+                },
+                "builtin",
+                Some("pressure_plate.default"),
+            ),
+        ];
+        for (origin, kind, token) in cases {
+            assert_eq!(origin.kind(), kind);
+            assert_eq!(origin.token(), token);
+        }
     }
 
     #[test]

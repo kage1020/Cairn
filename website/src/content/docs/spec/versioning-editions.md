@@ -96,10 +96,12 @@ against the edition as a whole. The distinction is not academic: Bedrock 1.21.0 
 everywhere and catch neither mistake. The tables ship in the registry pack's `blocks` component,
 folded with the `inherits + diffs` rule of §10.3.
 
-Because the check needs a pinned version, it runs on `cairn compile --target` and nowhere else.
-`cairn check`, `cairn info`, and `cairn lower` pin none — `info` deliberately reports across the
-whole range — so they skip the comparison rather than pick a version on the author's behalf and
-refuse IDs that are fine on the one that gets built.
+The check therefore runs on `cairn compile --target` and nowhere else, for two different
+reasons. `cairn info` and `cairn lower` do lower, but pin no version — `info` deliberately reports
+across the whole range — so they skip the comparison rather than pick a version on the author's
+behalf and refuse IDs that are fine on the one that gets built. `cairn check` does not reach the
+comparison at all: it does not run block-array lowering, so no lowering-stage code reaches it,
+`E_UNKNOWN_ABSTRACT_TOKEN` included.
 
 The suggested fix is a typo finder over the same table: `oak_plank` is answered with `oak_planks`.
 A **rename** is not a typo and does not fit through it — Bedrock calling Java's `light`

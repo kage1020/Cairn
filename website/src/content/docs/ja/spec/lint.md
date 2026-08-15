@@ -53,11 +53,19 @@ additive (既存出力は変えない) なので、未知の `kind` 値は失敗
 | コード               | `data` ペイロード                                                                   |
 | -------------------- | ----------------------------------------------------------------------------------- |
 | `W_WALKWAY_BLOCKED`  | `{ "kind": "walkway_blocked", "skipped": <u64> }` — フォールバックの L 字経路で既存構造と衝突してスキップされたセル数 (迂回探索が遮られない経路を見つけられなかった場合のみ発火)。 |
-
-| `E_UNKNOWN_ID` | `{ "kind": "unknown_id", "id": "minecraft:light", "registry": "bedrock 1.21.60", "token": "floor.stone.smooth", "suggestion": "minecraft:stonebrick" }` — ピン留めされたターゲットが宣言していない ID と、照合先のターゲット。`token` はパックの materials カタログがその ID を生成した場合のみ存在します (作者のソースは正しく パック側が誤っているケース)。`suggestion` はタイポ閾値内の宣言済み ID が無いときは省略されます。 |
+| `E_UNKNOWN_ID` | `{ "kind": "unknown_id", "id": "minecraft:oak_plank", "registry": "java 1.21.4", "origin": "authored", "suggestion": "minecraft:oak_planks" }` — ピン留めされたターゲットが宣言していない ID、照合先のターゲット、そして誰がその ID を選んだか。`origin` はソースが直接名指しした場合 `authored`、パックがトークンを対応付けた場合 `catalog`、メンバのデフォルト用の行をパックが持たずコンパイラ組み込みの ID が使われた場合 `builtin` です。`token` は後ろ 2 つに付随し、`authored` では省略されます。`suggestion` はタイポ閾値内の宣言済み ID が無いときは省略され、リネームでは常に省略されます。 |
+| ↳ `origin: "catalog"` | `{ …, "id": "minecraft:stone_bricks", "registry": "bedrock 1.21.0", "origin": "catalog", "token": "floor.stone.smooth", "suggestion": "minecraft:stonebrick" }` — 作者のトークンは正しく、パックの対応付けが誤っているので、修正箇所はソースではありません。 |
+| ↳ `origin: "builtin"` | `{ …, "id": "minecraft:oak_pressure_plate", "registry": "bedrock 1.21.60", "origin": "builtin", "token": "pressure_plate.default" }` — メンバのデフォルト用の行をパックが宣言していないため、コンパイラ組み込みの ID が使われました。直すべきはパックです。 |
 
 上の表に載っていないコードは `data` をまるごと省略します (JSON でも `null` ではなくキーごと存在しません)。
 診断面の安定化に合わせて、`data` の新エントリは対応するコードと同時に追加されます。
+
+### `E_UNKNOWN_ID` が発火する場所
+`mat_slot=` が解決したブロック ID を、コンパイルがピン留めしたターゲットが宣言して
+いないときに出ます (`spec/versioning-editions.md` §10.4)。block-array lowering 段の
+診断なので `cairn check` には届きません — `check` は lowering を走らせません。
+作者が書いた ID とパックの materials カタログが生成した ID の両方を対象にし、
+どちらなのかは `origin` が示します。ソースを直すべきなのは前者だけです。
 
 ## 11.3 エラーと警告の区分
 - 放置すると意図しない結果になるもの (概念の不在、未知 ID、ドメイン外の状態) は **エラー** (サイレント

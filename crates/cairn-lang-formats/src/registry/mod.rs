@@ -33,6 +33,21 @@ pub use load::{
     load_builtin_java, load_from_dir,
 };
 pub use manifest::{PackEdition, PackFiles, PackManifest};
+
+/// Prepend `namespace` to a component entry that does not carry one.
+///
+/// Shared by the `materials` and `blocks` components because they name the
+/// same thing the same way: an entry may write `oak_planks` and inherit the
+/// catalog's namespace, or write `create:cogwheel` and keep its own. Two
+/// copies of this rule is two places for the two components to drift apart
+/// on what counts as namespaced.
+pub(crate) fn namespaced(namespace: &str, block: &str) -> String {
+    if block.contains(':') {
+        block.to_owned()
+    } else {
+        format!("{namespace}:{block}")
+    }
+}
 pub use materials::{
     MaterialEntry, MaterialsCatalog, MaterialsError, MaterialsIndex, SUPPORTED_MATERIALS_SCHEMA,
 };

@@ -47,7 +47,9 @@ use crate::resolve::{Resolution, ScopeResolution, place_scope_key};
 
 use super::{Footprint, MAX_STRUCTURE_VOLUME, Placement, Walkway};
 
-use super::material::{IdOrigin, MaterialDeferred, TargetRegistry, UnknownId, resolve_block_state};
+use super::material::{
+    IdOrigin, MaterialDeferred, TargetRegistry, UnknownId, check_id, resolve_block_state,
+};
 use super::openings::{WallSide, wall_length, wall_local_to_grid};
 use super::roof::{
     Cardinal, FLAT_BASE_ID, GableVoxel, HipVoxel, RoofKind, STAIR_BASE_ID, ShedFace, ShedVoxel,
@@ -73,10 +75,12 @@ use super::{BlockArray, BlockArrayIr, BlockState, Dims, Palette, PaletteIndex};
 /// second pack component whose only member is this one row.
 const PRESSURE_PLATE_TOKEN: &str = "pressure_plate.default";
 
-/// Pressure plate id used when no registry pack is offered at all.
+/// Pressure plate id used when the pack cannot supply one — no registry
+/// at all, or a registry with no [`PRESSURE_PLATE_TOKEN`] row.
 ///
-/// The no-pack path has no edition either, and spec versioning-editions
-/// §10.3 makes Java the base, so the Java spelling is the honest default.
+/// Neither case carries an edition, and spec versioning-editions §10.3
+/// makes Java the base, so the Java spelling is the honest default. It is
+/// still checked against the pinned target before it reaches a palette.
 /// Species-specific plates (spruce, dark oak, ...) still come from a
 /// `mat_slot=` binding, which is honoured verbatim (mirroring
 /// [`STAIR_BASE_ID`]'s contract).
@@ -88,9 +92,14 @@ const PRESSURE_PLATE_BASE_ID: &str = "minecraft:oak_pressure_plate";
 /// target the way `E_UNKNOWN_ID` checks an authored id — and no pack can
 /// respell them either, because none of them reads a catalog token. They
 /// must therefore be valid on every supported target of every edition, and
-/// a pack-side test holds them to exactly that. It is the only thing
-/// standing between a hardcoded Java spelling and a Bedrock structure file
-/// full of air.
+/// a pack-side test holds them to exactly that.
+///
+/// The list is not self-verifying: a new hardcoded id that nobody adds here
+/// is caught by
+/// `cairn-lang-formats/tests/pack_ids_exist.rs::every_id_the_examples_intern_exists_in_its_target`,
+/// which lowers real sources and reads the palette rather than trusting a
+/// list. This one stays because it covers the three ids no example is
+/// obliged to reach.
 ///
 /// [`PRESSURE_PLATE_BASE_ID`] is deliberately absent: it *is* redirectable
 /// (through [`PRESSURE_PLATE_TOKEN`]), so its per-edition correctness is a
@@ -111,9 +120,9 @@ pub const BUILTIN_BLOCK_IDS: &[&str] = &[BlockState::AIR_ID, STAIR_BASE_ID, FLAT
 /// `Some` turns `@floor.wood.broadleaf`-style tokens into concrete ids,
 /// fails loud on misses, and — when the run pinned a `--target` — refuses
 /// any id that target does not declare (`E_UNKNOWN_ID`). `None` keeps the
-/// pre-PR2 behaviour where every abstract token degrades to a
-/// `W_ABSTRACT_TOKEN_DEFERRED` warning so library callers without a pack
-/// still get a partial build.
+/// behaviour from before the pack carried a materials catalog: every
+/// abstract token degrades to a `W_ABSTRACT_TOKEN_DEFERRED` warning, so
+/// library callers without a pack still get a partial build.
 #[must_use]
 pub fn lower_to_block_array(
     intent: &IntentModule,
@@ -718,13 +727,20 @@ fn diag_unknown_id(span: Span, unknown: &UnknownId) -> Diagnostic {
         suggestion,
     } = unknown;
     let mut notes = Vec::with_capacity(2);
-    if let IdOrigin::Catalog { token } = origin {
-        notes.push(DiagnosticNote {
+    match origin {
+        IdOrigin::Authored => {}
+        IdOrigin::Catalog { token } => notes.push(DiagnosticNote {
             span: None,
             message: format!(
                 "the registry pack maps `@{token}` onto it; the token is fine and the pack's mapping is not, so this is not a fix you make here",
             ),
-        });
+        }),
+        IdOrigin::Builtin { token } => notes.push(DiagnosticNote {
+            span: None,
+            message: format!(
+                "the registry pack declares no `{token}`, so lowering fell back to the id compiled into the compiler; the pack needs that row",
+            ),
+        }),
     }
     notes.push(DiagnosticNote {
         span: None,
@@ -743,10 +759,8 @@ fn diag_unknown_id(span: Span, unknown: &UnknownId) -> Diagnostic {
         data: Some(DiagnosticData::UnknownId {
             id: id.clone(),
             registry: registry.clone(),
-            token: match origin {
-                IdOrigin::Authored => None,
-                IdOrigin::Catalog { token } => Some(token.clone()),
-            },
+            origin: origin.kind().to_owned(),
+            token: origin.token().map(str::to_owned),
             suggestion: suggestion.clone(),
         }),
     }
@@ -2548,19 +2562,64 @@ fn resolve_plate_base_id(
         ));
         return None;
     }
-    Some(resolved.map_or_else(|| plate_base_id(ctx.registry), |s| s.id))
+    match resolved {
+        Some(state) => Some(state.id),
+        None => plate_base_id(member, ctx.registry, diagnostics),
+    }
 }
 
-/// The pressure plate id for this compile's edition.
+/// The pressure plate id for this compile's edition, checked against the
+/// target the way an authored id is.
 ///
 /// Asks the pack for [`PRESSURE_PLATE_TOKEN`] and falls back to
-/// [`PRESSURE_PLATE_BASE_ID`] only when there is no pack to ask, or when
-/// the pack predates the token. A pack that declares it wins, which is how
+/// [`PRESSURE_PLATE_BASE_ID`] when there is no pack to ask, or when the
+/// pack declares no such row. A pack that declares it wins, which is how
 /// `--edition bedrock` stops emitting the Java-only `oak_pressure_plate`.
-fn plate_base_id(registry: Option<&dyn TargetRegistry>) -> String {
-    registry
-        .and_then(|r| r.lookup(PRESSURE_PLATE_TOKEN))
-        .map_or_else(|| PRESSURE_PLATE_BASE_ID.to_owned(), |state| state.id)
+///
+/// The result goes through [`check_id`] because it reaches the palette
+/// without passing [`resolve_block_state`]. Skipping it would leave one
+/// path in the build — the one whose default is edition-specific and
+/// whose fallback is a Java spelling — writing an id nothing verified,
+/// which is the failure this whole pass exists to remove. Returns `None`
+/// after diagnosing, so the plate is dropped rather than painted with an
+/// id the target has no block for.
+fn plate_base_id(
+    member: &Member,
+    registry: Option<&dyn TargetRegistry>,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Option<String> {
+    let (state, origin) = match registry.and_then(|r| r.lookup(PRESSURE_PLATE_TOKEN)) {
+        Some(state) => (
+            state,
+            IdOrigin::Catalog {
+                token: PRESSURE_PLATE_TOKEN.to_owned(),
+            },
+        ),
+        None => (
+            BlockState::bare(PRESSURE_PLATE_BASE_ID),
+            IdOrigin::Builtin {
+                token: PRESSURE_PLATE_TOKEN,
+            },
+        ),
+    };
+    match check_id(state, registry, &origin) {
+        Ok(state) => Some(state.id),
+        Err(MaterialDeferred::UnknownId(unknown)) => {
+            diagnostics.push(diag_unknown_id(member.span.clone(), &unknown));
+            None
+        }
+        // INVARIANT(check-id-refuses-one-way): `check_id` returns either
+        // the state or `UnknownId`; it has no path to the three deferral
+        // variants, which describe how a `mat_slot=` value failed to
+        // resolve and there is no such value here.
+        Err(other) => {
+            debug_assert!(
+                false,
+                "check_id returned {other:?} for the pressure plate default,                  which resolves no mat_slot= value",
+            );
+            None
+        }
+    }
 }
 
 /// Recognise a `circuit region=<label> void=<N>` fixture without emitting
@@ -3253,7 +3312,7 @@ fn diag_unknown_abstract_token(
     notes.push(DiagnosticNote {
         span: None,
         message: "abstract material tokens must be declared in the pack's `materials` catalog \
-                  (see `spec/registry-themes.md` §7.2)"
+                  (see `spec/materials-themes.md` §7.2)"
             .to_owned(),
     });
     Diagnostic {
@@ -3281,20 +3340,6 @@ mod tests {
     use super::*;
     use crate::block_array::BlockState;
     use crate::check::Severity;
-
-    /// Every hardcoded id that no pack can redirect is in the list the
-    /// pack-side tests hold against the real registries. A const added
-    /// here and forgotten there would be checked by nothing at all.
-    #[test]
-    fn every_unredirectable_builtin_id_is_in_the_list_the_pack_tests_walk() {
-        for id in [BlockState::AIR_ID, STAIR_BASE_ID, FLAT_BASE_ID] {
-            assert!(
-                BUILTIN_BLOCK_IDS.contains(&id),
-                "`{id}` is emitted with no catalog able to correct it but is not in \
-                 BUILTIN_BLOCK_IDS, so no test holds it against any target's block table",
-            );
-        }
-    }
 
     /// The plate is the one hardcoded id a pack *can* redirect, and the
     /// list would be making a false promise if it carried it: the id is a
@@ -3385,7 +3430,15 @@ mod tests {
         }
     }
 
-    fn unknown_id_payload(out: &BlockArrayIr) -> (String, String, Option<String>, Option<String>) {
+    struct UnknownIdPayload {
+        id: String,
+        registry: String,
+        origin: String,
+        token: Option<String>,
+        suggestion: Option<String>,
+    }
+
+    fn unknown_id_payload(out: &BlockArrayIr) -> UnknownIdPayload {
         let found: Vec<&Diagnostic> = out
             .diagnostics
             .iter()
@@ -3404,9 +3457,16 @@ mod tests {
             Some(DiagnosticData::UnknownId {
                 id,
                 registry,
+                origin,
                 token,
                 suggestion,
-            }) => (id, registry, token, suggestion),
+            }) => UnknownIdPayload {
+                id,
+                registry,
+                origin,
+                token,
+                suggestion,
+            },
             other => panic!("expected an UnknownId payload, got {other:?}"),
         }
     }
@@ -3428,22 +3488,74 @@ mod tests {
             "theme t:\n  slot floor -> @stone_brick\nstruct s size=2x2\n  floor mat_slot=floor\n",
             &registry,
         );
-        let (id, target, token, suggestion) = unknown_id_payload(&authored);
-        assert_eq!(id, "minecraft:stone_brick");
-        assert_eq!(target, "test 1.0");
-        assert_eq!(token, None, "the author wrote this id themselves");
-        assert_eq!(suggestion.as_deref(), Some("minecraft:stonebrick"));
+        let payload = unknown_id_payload(&authored);
+        assert_eq!(payload.id, "minecraft:stone_brick");
+        assert_eq!(payload.registry, "test 1.0");
+        assert_eq!(payload.origin, "authored");
+        assert_eq!(payload.token, None, "the author wrote this id themselves");
+        assert_eq!(payload.suggestion.as_deref(), Some("minecraft:stonebrick"));
 
         let from_catalog = lowered_with_resolver(
             "theme t:\n  slot floor -> @floor.stone.smooth\nstruct s size=2x2\n  floor mat_slot=floor\n",
             &registry,
         );
-        let (id, _, token, _) = unknown_id_payload(&from_catalog);
-        assert_eq!(id, "minecraft:stone_bricks");
+        let payload = unknown_id_payload(&from_catalog);
+        assert_eq!(payload.id, "minecraft:stone_bricks");
+        assert_eq!(payload.origin, "catalog");
         assert_eq!(
-            token.as_deref(),
+            payload.token.as_deref(),
             Some("floor.stone.smooth"),
             "the catalog produced this id, so the author's token is not the fix site",
+        );
+    }
+
+    /// The member default that comes from the pack is the one id that
+    /// reaches a palette without passing `resolve_block_state`, so it has
+    /// its own path through the check and its own origin.
+    ///
+    /// Both halves matter. A registry that *declares* the token but maps it
+    /// onto a missing id is the pack's mapping being wrong; a registry with
+    /// no row at all sends lowering to the id compiled into this crate,
+    /// which is a Java spelling and wrong on Bedrock. Before this, neither
+    /// was checked at all.
+    #[test]
+    fn a_member_default_from_the_pack_is_checked_like_any_other_id() {
+        let plate = "struct s size=3x3\n  pressure_plate id=p at=front.outside\n";
+
+        let mapped_wrong = PinnedRegistry::new(
+            vec![(PRESSURE_PLATE_TOKEN, "oak_pressure_plate")],
+            &["minecraft:wooden_pressure_plate"],
+        );
+        let out = lowered_with_resolver(plate, &mapped_wrong);
+        let payload = unknown_id_payload(&out);
+        assert_eq!(payload.id, "minecraft:oak_pressure_plate");
+        assert_eq!(payload.origin, "catalog");
+        assert_eq!(payload.token.as_deref(), Some(PRESSURE_PLATE_TOKEN));
+
+        let no_row = PinnedRegistry::new(vec![], &["minecraft:wooden_pressure_plate"]);
+        let out = lowered_with_resolver(plate, &no_row);
+        let payload = unknown_id_payload(&out);
+        assert_eq!(
+            payload.id, PRESSURE_PLATE_BASE_ID,
+            "a pack with no row sends lowering to the compiled-in default",
+        );
+        assert_eq!(payload.origin, "builtin");
+        assert_eq!(payload.token.as_deref(), Some(PRESSURE_PLATE_TOKEN));
+
+        let right = PinnedRegistry::new(
+            vec![(PRESSURE_PLATE_TOKEN, "wooden_pressure_plate")],
+            &["minecraft:wooden_pressure_plate"],
+        );
+        let out = lowered_with_resolver(plate, &right);
+        assert!(
+            !out.diagnostics
+                .iter()
+                .any(|d| d.code == DiagnosticCode::UnknownId),
+            "a pack that spells it the way the target does must not be refused: {:?}",
+            out.diagnostics
+                .iter()
+                .map(|d| d.primary.as_str())
+                .collect::<Vec<_>>(),
         );
     }
 

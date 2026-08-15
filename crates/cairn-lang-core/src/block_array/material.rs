@@ -192,6 +192,46 @@ pub enum IdOrigin {
         /// The abstract token the author actually wrote, without the `@`.
         token: String,
     },
+    /// Nobody chose it: the member carries no `mat_slot=`, the pack
+    /// declares no catalog token for its default, and lowering fell back
+    /// to an id compiled into `cairn-lang-core`.
+    ///
+    /// Distinct from [`Self::Catalog`] because the fix is the opposite
+    /// one. A catalog mapping exists and is wrong for this target; a
+    /// built-in fallback fires precisely because the pack has nothing to
+    /// say, and the pack is what has to grow the row.
+    Builtin {
+        /// The catalog token that would have redirected it, so the
+        /// message can name the row the pack is missing.
+        token: &'static str,
+    },
+}
+
+impl IdOrigin {
+    /// Stable wire name for the diagnostic payload.
+    ///
+    /// `token` alone cannot separate [`Self::Catalog`] from
+    /// [`Self::Builtin`] — both carry one — and the two need opposite
+    /// fixes, so a consumer that can only see `token` would offer the
+    /// wrong one half the time.
+    #[must_use]
+    pub fn kind(&self) -> &'static str {
+        match self {
+            Self::Authored => "authored",
+            Self::Catalog { .. } => "catalog",
+            Self::Builtin { .. } => "builtin",
+        }
+    }
+
+    /// The catalog token involved, when the origin names one.
+    #[must_use]
+    pub fn token(&self) -> Option<&str> {
+        match self {
+            Self::Authored => None,
+            Self::Catalog { token } => Some(token),
+            Self::Builtin { token } => Some(token),
+        }
+    }
 }
 
 /// Convert a resolved slot value into a canonical [`BlockState`].
@@ -203,7 +243,7 @@ pub enum IdOrigin {
 /// [`MaterialDeferred::UnknownAbstract`] / [`MaterialDeferred::UnknownId`]
 /// with a suggestion. When `None`, abstract tokens stay deferred
 /// ([`MaterialDeferred::Abstract`]) so library callers that never load a
-/// pack still see the same shape they did pre-PR2.
+/// pack still see the shape they did before the pack carried a catalog.
 ///
 /// Returns:
 /// - `Ok(state)` for a canonical token (`@oak_planks`, `@oak_log[axis=x]`)
@@ -271,7 +311,12 @@ pub fn resolve_block_state(
 /// Passes the state through untouched when no target is pinned — that is
 /// the documented "cannot refute" mode of [`TargetRegistry::block_ids`],
 /// not an acceptance.
-fn check_id(
+///
+/// Visible to the lowering pass because `mat_slot=` is not the only way an
+/// id reaches a palette: a member whose default material comes from the
+/// pack (`pressure_plate`) resolves outside [`resolve_block_state`] and
+/// would otherwise be the one id in the build that nothing checks.
+pub(crate) fn check_id(
     state: BlockState,
     registry: Option<&dyn TargetRegistry>,
     origin: &IdOrigin,
@@ -521,10 +566,11 @@ mod tests {
 
     #[test]
     fn a_rename_is_refused_without_a_suggestion_because_it_is_not_a_typo() {
-        // Bedrock spells the Java `light` block `light_block`, six edits
-        // away — past `nearest_match`'s cap. The suggestion is a typo
-        // finder, not a rename map, and claiming otherwise here would need
-        // per-edition id aliases the pack does not carry.
+        // Bedrock 1.21.0 spells the Java `light` block `light_block`, six
+        // edits away — past `nearest_match`'s cap. (From 1.21.40 it is
+        // `light_block_0` … `_15`, which is further still.) The suggestion
+        // is a typo finder, not a rename map, and claiming otherwise here
+        // would need per-edition id aliases the pack does not carry.
         let registry = FakeResolver::new(vec![]).pinned(&["minecraft:light_block"]);
         let err = resolve_block_state(&token("light"), Some(&registry)).unwrap_err();
         match err {

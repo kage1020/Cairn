@@ -11,8 +11,8 @@
 //! repeats a thousand shared ids three times and hides the interesting part.
 //! What a reader wants from `blocks.json` is exactly the diff: Bedrock
 //! 1.21.40 is where `stonebrick` became `stone_bricks` and `light_block`
-//! became `light_block_0` … `light_block_15`, and the `removed` list says so
-//! in eighteen lines.
+//! became `light_block_0` … `light_block_15`, and its `removed` list is
+//! that flattening wave written out in full.
 //!
 //! Folding is validated rather than trusted. A diff that removes an id its
 //! parent never had, or adds one the parent already has, is a pack-author
@@ -22,7 +22,7 @@
 use indexmap::IndexMap;
 use serde::Deserialize;
 
-use cairn_lang_core::block_array::BlockIdSet;
+use super::namespaced;
 
 /// Highest `blocks.schema_version` this Cairn build understands.
 pub const SUPPORTED_BLOCKS_SCHEMA: u32 = 1;
@@ -39,10 +39,11 @@ pub struct BlocksCatalog {
     /// The oldest version's full id list. Every other version is expressed
     /// as a diff reachable from here.
     pub base: BlocksBase,
-    /// Diffs, each naming the version it inherits from. Order in the file
-    /// is not significant: a diff may name any version resolved before it,
-    /// and one that names a version resolved later is refused rather than
-    /// reordered.
+    /// Diffs, each naming the version it inherits from. Rows resolve in
+    /// file order, so a diff may only inherit a version an earlier row (or
+    /// the base) already resolved; one that names a later version is
+    /// refused rather than reordered. What is *not* required is ascending
+    /// version order — the chain is whatever `inherits` describes.
     #[serde(default)]
     pub diffs: Vec<BlocksDiff>,
 }
@@ -99,7 +100,8 @@ impl BlocksIndex {
     /// Returns [`BlocksError`] for an unsupported `schema_version`, an empty
     /// or duplicate-carrying `base`, a duplicate `mc_version`, a diff whose
     /// `inherits` names a version not yet resolved, a `removed` id the
-    /// parent does not have, or an `added` id the parent already has.
+    /// parent does not have, an `added` id the parent already has, or a
+    /// diff that folds to no ids at all.
     pub fn from_catalog(catalog: BlocksCatalog) -> Result<Self, BlocksError> {
         if catalog.schema_version > SUPPORTED_BLOCKS_SCHEMA {
             return Err(BlocksError::UnsupportedSchemaVersion {
@@ -174,6 +176,11 @@ impl BlocksIndex {
                     Err(at) => folded.insert(at, id),
                 }
             }
+            if folded.is_empty() {
+                return Err(BlocksError::EmptyTable {
+                    version: diff.mc_version.clone(),
+                });
+            }
             by_version.insert(diff.mc_version.clone(), folded);
         }
 
@@ -185,15 +192,6 @@ impl BlocksIndex {
     #[must_use]
     pub fn ids_for(&self, mc_version: &str) -> Option<&[String]> {
         self.by_version.get(mc_version).map(Vec::as_slice)
-    }
-
-    /// A [`BlockIdSet`] view of one version's table, labelled for the
-    /// message an `E_UNKNOWN_ID` prints. `None` when the index does not
-    /// describe that version.
-    #[must_use]
-    pub fn set_for<'a>(&'a self, mc_version: &str, label: &'a str) -> Option<BlockIdSet<'a>> {
-        self.ids_for(mc_version)
-            .map(|ids| BlockIdSet::new(label, ids))
     }
 
     /// Every version this index describes, in resolution order.
@@ -211,15 +209,6 @@ impl BlocksIndex {
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.by_version.is_empty()
-    }
-}
-
-/// Prepend the catalog namespace unless the entry carries its own.
-fn namespaced(namespace: &str, block: &str) -> String {
-    if block.contains(':') {
-        block.to_owned()
-    } else {
-        format!("{namespace}:{block}")
     }
 }
 
@@ -246,6 +235,15 @@ pub enum BlocksError {
     #[error("registry pack blocks `base` for `{version}` declares no ids")]
     EmptyBase {
         /// Version the empty base claimed to describe.
+        version: String,
+    },
+    /// A diff removed every id its parent had. The version would then
+    /// declare no blocks at all and refuse `minecraft:air`, which is the
+    /// same "a table that rejects the whole game" outcome
+    /// [`Self::EmptyBase`] exists to catch, reached one step later.
+    #[error("registry pack blocks table for `{version}` folds to no ids at all")]
+    EmptyTable {
+        /// Version whose fold came out empty.
         version: String,
     },
     /// One version listed the same id twice.
@@ -359,7 +357,6 @@ mod tests {
     fn a_version_the_catalog_never_names_has_no_table() {
         let index = parse(TWO_VERSIONS).expect("catalog");
         assert!(index.ids_for("1.2").is_none());
-        assert!(index.set_for("1.2", "test").is_none());
     }
 
     #[test]
@@ -551,6 +548,27 @@ mod tests {
         assert_eq!(
             index.ids_for("1.1"),
             Some(["minecraft:stone".to_owned()].as_slice()),
+        );
+    }
+
+    #[test]
+    fn a_diff_that_removes_everything_is_refused() {
+        let err = parse(
+            r#"{
+            "schema_version": 1,
+            "namespace": "minecraft",
+            "base": { "mc_version": "1.0", "blocks": ["stone"] },
+            "diffs": [
+                { "mc_version": "1.1", "inherits": "1.0", "removed": ["stone"] }
+            ]
+        }"#,
+        )
+        .expect_err("folds to nothing");
+        assert_eq!(
+            err,
+            BlocksError::EmptyTable {
+                version: "1.1".to_owned(),
+            },
         );
     }
 

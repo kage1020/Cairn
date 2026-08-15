@@ -66,8 +66,10 @@ pub struct PackFiles {
     /// Relative filename of the per-version `blocks` id table JSON.
     /// Optional on the same terms as `materials`: a pack without it loads,
     /// and the loader fills [`crate::registry::BlocksIndex::empty`] in its
-    /// place. A compile against such a pack cannot check whether an id
-    /// exists and says so rather than passing ids silently.
+    /// place. A compile against such a pack cannot decide whether an id
+    /// exists, so it does not try — every id passes, exactly as it did
+    /// before this component existed. Nothing announces that; the pack is
+    /// what has to grow the table.
     #[serde(default)]
     pub blocks: Option<String>,
 }

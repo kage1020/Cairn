@@ -56,7 +56,14 @@ pub enum PackSource {
 }
 
 /// A loaded and validated registry pack.
+///
+/// `#[non_exhaustive]` so the "cannot be constructed without going through
+/// validation" guarantee [`Self::resolve_target_row`] relies on holds
+/// outside this crate too: the fields stay readable, but a caller cannot
+/// assemble one from parts that skipped [`validate_data_versions`] and
+/// [`validate_blocks_cover_versions`].
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct RegistryPack {
     /// Top-level manifest.
     pub manifest: PackManifest,
@@ -379,9 +386,20 @@ impl RegistryPack {
     /// The view of this pack that block-array lowering consults.
     ///
     /// `mc_version` is the target the run pinned, or `None` for a run that
-    /// pinned none (`cairn check`, `cairn info`, `cairn lower`). Passing
-    /// `None` leaves [`TargetRegistry::block_ids`] empty, so id validation
-    /// is skipped rather than run against a version the caller never chose.
+    /// pinned none (`cairn info`, `cairn lower`; `cairn check` does not
+    /// lower at all). Passing `None` leaves [`TargetRegistry::block_ids`]
+    /// empty, so id validation is skipped rather than run against a version
+    /// the caller never chose.
+    ///
+    /// # Panics
+    ///
+    /// Panics when the pack has block tables but none for `mc_version`, or
+    /// when the one it has is not sorted. Both are impossible for a pack
+    /// that came through the loader — `validate_blocks_cover_versions`
+    /// refuses the first and `BlocksIndex` builds sorted — so a panic here
+    /// means a `RegistryPack` was assembled some other way. The alternative
+    /// is a compile that checks no ids while looking clean, which is the
+    /// failure this component exists to remove.
     #[must_use]
     pub fn view<'a>(&'a self, mc_version: Option<&'a str>) -> PackView<'a> {
         let ids = mc_version.and_then(|version| {
@@ -393,9 +411,24 @@ impl RegistryPack {
             // A miss here therefore means one of those two rules was
             // bypassed, and the resulting compile would check no ids at
             // all while looking like a clean build.
-            debug_assert!(
+            //
+            // A full `assert!` rather than a `debug_assert!`, matching
+            // `resolve_java_target`'s: the failure is a silent
+            // no-substitution, the kind release builds must not be allowed
+            // to reach, and the cost is one map lookup per compile.
+            assert!(
                 ids.is_some() || self.blocks.is_empty(),
                 "pack `{}` has block tables but none for `{version}`",
+                self.manifest.name,
+            );
+            // Sortedness is the other half of the same guarantee —
+            // `BlockIdSet::contains` binary-searches, so an unsorted table
+            // reports real ids as missing. `BlocksIndex` builds sorted by
+            // construction, so this holds unless a table arrived some other
+            // way; checked once here rather than per lookup.
+            assert!(
+                ids.is_none_or(<[String]>::is_sorted),
+                "pack `{}` block table for `{version}` is not sorted",
                 self.manifest.name,
             );
             ids
@@ -1046,21 +1079,18 @@ mod tests {
     }
 
     #[test]
-    fn adding_the_blocks_component_changes_the_pack_hash() {
+    fn the_blocks_bytes_reach_the_pack_hash() {
         // The hash lands in the lockfile as `inputs.registry_pack_hash`, so
-        // a build resolved against a pack with an id table has to be
-        // distinguishable from one resolved against a pack without.
+        // two builds resolved against different id tables must not record
+        // the same inputs.
+        //
+        // Both packs use the same manifest, so the manifest bytes — which
+        // `pack_hash` concatenates first — cannot be what separates them.
+        // Varying the manifest instead would leave the test green even with
+        // the `components.push` for `blocks` deleted entirely, which is the
+        // line it exists to hold.
         let materials = one_material(r#"{ "token": "a.b", "block": "oak_planks" }"#);
-        let without = load_from_dir_or_die("hash-without", |dir| {
-            write_full_pack(
-                dir,
-                good_manifest(),
-                good_data_versions(),
-                &materials,
-                good_blocks(),
-            );
-        });
-        let with = load_from_dir_or_die("hash-with", |dir| {
+        let one = load_from_dir_or_die("hash-one", |dir| {
             write_full_pack(
                 dir,
                 manifest_with_blocks(),
@@ -1069,7 +1099,23 @@ mod tests {
                 good_blocks(),
             );
         });
-        assert_ne!(without.bytes_hash, with.bytes_hash);
+        let other = load_from_dir_or_die("hash-other", |dir| {
+            write_full_pack(
+                dir,
+                manifest_with_blocks(),
+                good_data_versions(),
+                &materials,
+                r#"{
+                    "schema_version": 1,
+                    "namespace": "minecraft",
+                    "base": { "mc_version": "1.20.4", "blocks": ["oak_planks", "dirt"] },
+                    "diffs": [
+                        { "mc_version": "1.21.4", "inherits": "1.20.4", "added": ["stone"] }
+                    ]
+                }"#,
+            );
+        });
+        assert_ne!(one.bytes_hash, other.bytes_hash);
     }
 
     /// Write a pack into a fresh directory and load it, panicking on any
