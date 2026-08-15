@@ -83,9 +83,11 @@ pub struct BlocksIndex {
 
 impl BlocksIndex {
     /// Index with no versions. Used when a pack omits the `blocks`
-    /// component; [`Self::ids_for`] then always misses, and the lowering
-    /// pass reads that as "this pack cannot refute an id" rather than as
-    /// "no id is valid".
+    /// component. Both lookups then answer "nothing to answer with" rather
+    /// than "absent" — [`Self::ids_for`] misses every version and
+    /// [`Self::declared_by_some_version`] returns `None` — and every caller
+    /// reads that as "this pack cannot refute an id" rather than as "no id
+    /// is valid".
     #[must_use]
     pub fn empty() -> Self {
         Self {
@@ -192,6 +194,29 @@ impl BlocksIndex {
     #[must_use]
     pub fn ids_for(&self, mc_version: &str) -> Option<&[String]> {
         self.by_version.get(mc_version).map(Vec::as_slice)
+    }
+
+    /// Whether any version this index describes declares `id`.
+    ///
+    /// The edition-wide form of [`Self::ids_for`], for callers that report
+    /// across a version range instead of building for one of them. A rename
+    /// inside the range leaves both spellings true for part of it, and both
+    /// answer `Some(true)` here — "which versions" is a question only a
+    /// pinned target can ask.
+    ///
+    /// `None` when the index describes no version at all: a pack shipping no
+    /// `blocks` component has nothing to answer with, and reading that as
+    /// "no version declares it" would make every id absent everywhere.
+    #[must_use]
+    pub fn declared_by_some_version(&self, id: &str) -> Option<bool> {
+        if self.by_version.is_empty() {
+            return None;
+        }
+        Some(
+            self.by_version
+                .values()
+                .any(|ids| ids.binary_search_by(|probe| probe.as_str().cmp(id)).is_ok()),
+        )
     }
 
     /// Every version this index describes, in resolution order.
@@ -380,6 +405,63 @@ mod tests {
         let index = BlocksIndex::empty();
         assert!(index.is_empty());
         assert!(index.ids_for("1.0").is_none());
+    }
+
+    #[test]
+    fn an_id_only_one_version_declares_is_still_declared_by_the_edition() {
+        // The question the range-wide lookup answers is "does this edition
+        // have the block at all", not "does every version have it". A
+        // rename inside the range leaves both spellings true for exactly
+        // one version each, and neither is absent from the edition.
+        let index = parse(TWO_VERSIONS).expect("catalog");
+        assert_eq!(
+            index.declared_by_some_version("minecraft:stonebrick"),
+            Some(true),
+            "declared by 1.0 alone",
+        );
+        assert_eq!(
+            index.declared_by_some_version("minecraft:stone_bricks"),
+            Some(true),
+            "declared by 1.1 alone",
+        );
+        assert_eq!(
+            index.declared_by_some_version("minecraft:cobblestone"),
+            Some(true),
+            "declared by both",
+        );
+    }
+
+    #[test]
+    fn an_id_no_version_declares_is_absent_from_the_edition() {
+        let index = parse(TWO_VERSIONS).expect("catalog");
+        assert_eq!(
+            index.declared_by_some_version("minecraft:oak_sign"),
+            Some(false),
+        );
+    }
+
+    #[test]
+    fn a_prefix_of_a_declared_id_is_not_itself_declared() {
+        // `minecraft:stone` is a prefix of two ids this table has and a
+        // block none of its versions declare. Answering by prefix rather
+        // than by equality would call a whole family of near-miss ids
+        // present, which is the failure mode with no visible symptom: the
+        // id is wrong, the lookup says fine, and the game loads air.
+        let index = parse(TWO_VERSIONS).expect("catalog");
+        assert_eq!(
+            index.declared_by_some_version("minecraft:stone"),
+            Some(false),
+        );
+    }
+
+    #[test]
+    fn an_index_with_no_tables_answers_nothing_rather_than_no() {
+        // `Some(false)` here would turn a pack that ships no `blocks`
+        // component into one that declares no block at all.
+        assert_eq!(
+            BlocksIndex::empty().declared_by_some_version("minecraft:stone"),
+            None,
+        );
     }
 
     #[test]

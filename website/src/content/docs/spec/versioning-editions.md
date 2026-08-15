@@ -175,6 +175,17 @@ semantic-sensitive:      yard_water(cauldron split@1.17), fence(wall conn@1.16)
 recommended test targets: Java min 1.20.0 / latest 1.21.4
 ```
 
+The `edition portability` row counts palette entries, and an entry is `unsupported` for either of two
+reasons: the edition has no such block at all, or it has the block but no representation for the
+states the intent carries (10.7). The first is a question about IDs and the second about states; only
+the second can produce `degraded`, since a block that does not exist has nothing to lose detail from.
+
+Both are asked of the edition rather than of a version, because this command reports across a whole
+compatible range. An ID valid for only part of that range — Bedrock renamed `stonebrick` to
+`stone_bricks` at 1.21.40 — is therefore not `unsupported`: the block exists on the edition, and
+whether the version actually being built has it is the question `cairn compile --target` answers, as
+`E_UNKNOWN_ID` (10.4).
+
 ## 10.6 Provenance and lock (reproducibility)
 - The `.crn` carries only `@intended_targets` (wish/hint). **`verified:true` + DataVersion + the hashes
   exist only in the lock, written by the compiler on a successful build** (users/LLMs do not hand-write

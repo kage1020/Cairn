@@ -170,6 +170,16 @@ semantic-sensitive:      yard_water(cauldron split@1.17), fence(wall conn@1.16)
 recommended test targets: Java min 1.20.0 / latest 1.21.4
 ```
 
+`edition portability` の行はパレットエントリを数えます。エントリが `unsupported` になる理由は 2 つあり、
+そのエディションにそのブロック自体が存在しないか、ブロックはあっても意図が持つ状態を表現できない
+(10.7) かです。前者は ID の問いで、後者は状態の問いです。`degraded` を生むのは後者だけです — 存在しない
+ブロックには失われる詳細がありません。
+
+どちらもバージョンではなくエディションに対して問われます。このコマンドは互換範囲全体について報告するから
+です。範囲の一部でしか有効でない ID — Bedrock は 1.21.40 で `stonebrick` を `stone_bricks` に改名しまし
+た — は `unsupported` にはなりません。ブロックはそのエディションに存在しており、実際にビルドするバージョ
+ンがそれを持つかどうかは `cairn compile --target` が `E_UNKNOWN_ID` (10.4) として答える問いだからです。
+
 ## 10.6 Provenance とロック (再現性)
 - `.crn` は `@intended_targets` (希望/ヒント) のみを持ちます。**`verified:true` + DataVersion +
   ハッシュはコンパイラが成功ビルド時にロックに書き込み** ます (ユーザ/LLM が手書きするものではありま

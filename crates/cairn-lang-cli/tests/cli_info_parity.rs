@@ -23,7 +23,10 @@ fn examples_dir() -> PathBuf {
 }
 
 fn info_json(file: &str, editions: &str) -> Value {
-    let path = examples_dir().join(file);
+    info_json_at(&examples_dir().join(file), editions)
+}
+
+fn info_json_at(path: &std::path::Path, editions: &str) -> Value {
     let out = Command::new(cargo_bin())
         .args([
             "info",
@@ -37,7 +40,8 @@ fn info_json(file: &str, editions: &str) -> Value {
         .expect("run cairn");
     assert!(
         out.status.success(),
-        "cairn info failed for {file}; stderr={}",
+        "cairn info failed for {}; stderr={}",
+        path.display(),
         String::from_utf8_lossy(&out.stderr),
     );
     let stdout = String::from_utf8(out.stdout).expect("utf-8");
@@ -104,11 +108,16 @@ fn ac2_cottage_bedrock_has_no_unsupported_entries() {
 }
 
 #[test]
-fn ac3_java_axis_is_always_pure_portable() {
-    // AC3: Java is the base edition (spec versioning-editions §10.3);
-    // every non-air palette entry must classify as portable. This holds
-    // across every example — pin it on the two files carrying the widest
-    // block variety.
+fn ac3_the_java_axis_is_pure_portable_for_a_source_java_can_build() {
+    // AC3: Java is the base edition (spec versioning-editions §10.3), so
+    // no state ever degrades there and a palette of blocks Java declares
+    // classifies as portable throughout. Pin it on the two files carrying
+    // the widest block variety.
+    //
+    // "Pure portable" is a property of these sources, not of the Java
+    // axis: an id Java has never had counts as unsupported on Java too,
+    // which `a_bedrock_only_block_is_not_reported_as_java_portable`
+    // exercises below.
     for file in ["themed-tower.crn", "cottage.crn"] {
         let axes = info_json(file, "java");
         let java = portability_entry(&axes, "java");
@@ -283,5 +292,251 @@ fn ac5_an_edition_specific_resolve_failure_is_reported_not_counted_away() {
     assert!(
         info.stdout.is_empty(),
         "no portability table should be printed when a figure could not be computed",
+    );
+}
+
+/// A source whose only material exists on one edition, written out to
+/// `tmp` and returned as its path.
+fn one_slot_source(dir: &std::path::Path, name: &str, id: &str) -> PathBuf {
+    let path = dir.join(name);
+    std::fs::write(
+        &path,
+        format!(
+            "@cairn 2026.06\n\n\
+             theme t:\n\
+             \x20\x20slot floor -> @{id}\n\
+             \x20\x20slot wall  -> @cobblestone\n\n\
+             struct hut size=5x5\n\
+             \x20\x20floor mat_slot=floor\n\
+             \x20\x20walls class=outer mat_slot=wall height=3\n\
+             \x20\x20door  side=front at=center\n"
+        ),
+    )
+    .expect("write probe source");
+    path
+}
+
+/// Build `path` for one target, returning `(exit code, stderr)`.
+fn compile_for(
+    path: &std::path::Path,
+    edition: &str,
+    target: &str,
+    out: &std::path::Path,
+) -> (Option<i32>, String) {
+    let result = Command::new(cargo_bin())
+        .args([
+            "compile",
+            path.to_str().unwrap(),
+            "--edition",
+            edition,
+            "--target",
+            target,
+            "--out",
+            out.to_str().unwrap(),
+        ])
+        .output()
+        .expect("run cairn");
+    (
+        result.status.code(),
+        String::from_utf8_lossy(&result.stderr).into_owned(),
+    )
+}
+
+/// Assert that a build of `path` refuses `id` as unknown to that target.
+///
+/// The premise these tests rest on is not "the build failed" — any
+/// diagnostic exits 1, including ones about something else entirely — but
+/// "the build failed *on this id*". Naming the code and the id is what
+/// makes the portability row a claim `compile` actually contradicts.
+fn assert_build_refuses_the_id(
+    path: &std::path::Path,
+    edition: &str,
+    target: &str,
+    out: &std::path::Path,
+    id: &str,
+) {
+    let (code, stderr) = compile_for(path, edition, target, out);
+    assert_eq!(
+        code,
+        Some(1),
+        "premise: the build must fail; stderr={stderr}"
+    );
+    assert!(
+        stderr.contains("E_UNKNOWN_ID") && stderr.contains(id),
+        "premise: it must fail because {edition} {target} has no `{id}`; stderr={stderr}",
+    );
+}
+
+#[test]
+fn a_java_only_block_is_not_reported_as_bedrock_portable() {
+    // `minecraft:oak_sign` is a Java spelling; Bedrock calls that block
+    // `standing_sign` and has never had this id. It carries no properties,
+    // so `translate_states` returns a clean translation for it and the
+    // Bedrock row read `portable` — the one command whose job is answering
+    // "will this port?" answering yes about a block the edition does not
+    // have.
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    let src = one_slot_source(tmp.path(), "javaonly.crn", "oak_sign");
+
+    assert_build_refuses_the_id(
+        &src,
+        "bedrock",
+        "1.21.60",
+        &tmp.path().join("out"),
+        "minecraft:oak_sign",
+    );
+
+    let axes = info_json_at(&src, "java,bedrock");
+    let bedrock = portability_entry(&axes, "bedrock");
+    assert_eq!(
+        as_u64(bedrock, "unsupported"),
+        1,
+        "the Java-only floor material must count as unsupported on Bedrock, got row {bedrock}",
+    );
+    // Java has the block, so its own row stays clean — the count is a
+    // statement about the edition, not a blanket refusal of the source.
+    let java = portability_entry(&axes, "java");
+    assert_eq!(
+        as_u64(java, "unsupported"),
+        0,
+        "Java declares this block; its row must stay clean, got {java}",
+    );
+}
+
+#[test]
+fn a_bedrock_only_block_is_not_reported_as_java_portable() {
+    // The mirror. Java is the base edition for *states*, which is why it
+    // never degrades — it is not a base edition for ids, and a theme
+    // resolving a slot to a Bedrock spelling puts one into a Java palette
+    // exactly the way the case above puts a Java spelling into a Bedrock
+    // one.
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    let src = one_slot_source(tmp.path(), "bedrockonly.crn", "standing_sign");
+
+    assert_build_refuses_the_id(
+        &src,
+        "java",
+        "1.21.4",
+        &tmp.path().join("out"),
+        "minecraft:standing_sign",
+    );
+
+    let axes = info_json_at(&src, "java,bedrock");
+    let java = portability_entry(&axes, "java");
+    assert_eq!(
+        as_u64(java, "unsupported"),
+        1,
+        "the Bedrock-only floor material must count as unsupported on Java, got row {java}",
+    );
+    assert_eq!(
+        as_u64(portability_entry(&axes, "bedrock"), "unsupported"),
+        0,
+        "Bedrock declares this block; its row must stay clean",
+    );
+}
+
+#[test]
+fn a_block_only_part_of_the_range_declares_stays_portable() {
+    // `stone_bricks` does not exist on Bedrock 1.21.0 — it is `stonebrick`
+    // there — and the pack carries a per-version override so each target
+    // gets its own spelling. `info` pins no version and therefore lowers
+    // the default one, so an id axis asking "does *every* supported
+    // version declare this" would report the shipped mapping as
+    // unsupported on an edition that builds it cleanly on all three
+    // targets. The axis asks "does the edition have the block at all".
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    let src = one_slot_source(tmp.path(), "renamed.crn", "floor.stone.smooth");
+    for target in ["1.21.0", "1.21.40", "1.21.60"] {
+        let (code, stderr) = compile_for(&src, "bedrock", target, &tmp.path().join(target));
+        assert_eq!(
+            code,
+            Some(0),
+            "premise: the material must build on every supported Bedrock target; stderr={stderr}",
+        );
+    }
+
+    let axes = info_json_at(&src, "bedrock");
+    let bedrock = portability_entry(&axes, "bedrock");
+    assert_eq!(
+        as_u64(bedrock, "unsupported"),
+        0,
+        "a block the edition has, under whichever spelling the target uses, is not unsupported; \
+         got row {bedrock}",
+    );
+}
+
+#[test]
+fn an_unsupported_entry_is_a_figure_not_a_gate() {
+    // `info` reports; it does not refuse. Spec §10.5's own example output
+    // carries `unsupported: 1`, and a caller that wants the build to fail
+    // runs the build. Exiting non-zero here would also make the count
+    // unreadable from a shell pipeline that checks status first.
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    let src = one_slot_source(tmp.path(), "javaonly.crn", "oak_sign");
+    let out = Command::new(cargo_bin())
+        .args(["info", src.to_str().unwrap(), "--editions", "bedrock"])
+        .output()
+        .expect("run cairn");
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "stderr={}",
+        String::from_utf8_lossy(&out.stderr),
+    );
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        stdout.contains("unsupported: 1"),
+        "the text row must carry the same figure the JSON does, got: {stdout}",
+    );
+}
+
+#[test]
+fn a_walkway_path_material_reaches_the_portability_row() {
+    // A walkway's `path=@ID` resolves through the registry exactly the way
+    // a member's `mat_slot=` does, and its strip is lowered into its own
+    // `BlockArray`. Whether that array reaches the counters is a fact about
+    // the lowering, not about the fold — `non_air_entries` never looks at a
+    // key — so only a source that really lays a walkway can establish it.
+    //
+    // Every shipped example paves with `@gravel`, which both editions have,
+    // so nothing else here could ever raise the count.
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    let src = tmp.path().join("walkway.crn");
+    std::fs::write(
+        &src,
+        "@cairn 2026.06\n\n\
+         theme t:\n\
+         \x20\x20slot floor -> @oak_planks\n\
+         \x20\x20slot wall  -> @cobblestone\n\n\
+         def hut size=3x3:\n\
+         \x20\x20floor id=f mat_slot=floor\n\
+         \x20\x20walls id=w class=outer mat_slot=wall height=2\n\
+         \x20\x20door  id=entry side=front at=center\n\n\
+         site duo:\n\
+         \x20\x20place id=a use=hut theme=t at=origin\n\
+         \x20\x20place id=b use=hut theme=t east_of=a gap=2\n\
+         \x20\x20connect a.entry to b.entry path=@oak_sign\n",
+    )
+    .expect("write walkway source");
+
+    assert_build_refuses_the_id(
+        &src,
+        "bedrock",
+        "1.21.60",
+        &tmp.path().join("out"),
+        "minecraft:oak_sign",
+    );
+
+    let axes = info_json_at(&src, "java,bedrock");
+    let bedrock = portability_entry(&axes, "bedrock");
+    assert_eq!(
+        as_u64(bedrock, "unsupported"),
+        1,
+        "the walkway's paving material must reach the Bedrock row, got {bedrock}",
+    );
+    assert_eq!(
+        as_u64(portability_entry(&axes, "java"), "unsupported"),
+        0,
+        "Java has the block; only the Bedrock row should move",
     );
 }

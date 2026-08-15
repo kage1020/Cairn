@@ -58,10 +58,11 @@ pub enum PackSource {
 /// A loaded and validated registry pack.
 ///
 /// `#[non_exhaustive]` so the "cannot be constructed without going through
-/// validation" guarantee [`Self::resolve_target_row`] relies on holds
-/// outside this crate too: the fields stay readable, but a caller cannot
-/// assemble one from parts that skipped [`validate_data_versions`] and
-/// [`validate_blocks_cover_versions`].
+/// validation" guarantee the target lookup relies on holds outside this
+/// crate too: the fields stay readable, but a caller cannot assemble one
+/// from parts that skipped the loader's validators — the `data_versions`
+/// table, the per-version block tables, and the material overrides are each
+/// checked there, and each lookup below assumes it.
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub struct RegistryPack {

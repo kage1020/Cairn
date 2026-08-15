@@ -689,8 +689,11 @@ fn edition_portability(
             Edition::Java => builtin_java(),
             Edition::Bedrock => builtin_bedrock(),
         };
-        // Same reason as the pass above: no single version, so no id
-        // table.
+        // Same reason as the pass above: no single version, so the lowering
+        // gets no id table and raises no `E_UNKNOWN_ID`. The portability
+        // fold below still reads the pack's tables — it asks the wider
+        // question "does this edition have the block at all", which the
+        // whole range can answer.
         let block_ir = lower_to_block_array(ir, &resolution, Some(&pack.view(None)));
 
         let only_here: Vec<_> = resolution
@@ -708,8 +711,8 @@ fn edition_portability(
         }
 
         let counts = match edition {
-            Edition::Java => portability_for_java(&block_ir),
-            Edition::Bedrock => portability_for_bedrock(&block_ir),
+            Edition::Java => portability_for_java(&block_ir, &pack.blocks),
+            Edition::Bedrock => portability_for_bedrock(&block_ir, &pack.blocks),
         };
         table.push(EditionPortability {
             edition,
