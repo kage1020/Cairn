@@ -229,6 +229,26 @@ pub enum DiagnosticCode {
     /// Fail-loud because the per-place colour scheme would otherwise vanish
     /// silently; carries a nearest-match suggestion when one fits.
     UnresolvedThemeRef,
+    /// The module declares a theme, but under the pinned edition none of
+    /// its per-edition variants (spec versioning-editions §10.7) can bind.
+    ///
+    /// Error, and for the reason §10.4 gives: the alternative to stopping
+    /// is binding the other edition's variant — which routes, say,
+    /// Bedrock-only slot values into a Java `.nbt` — or binding nothing,
+    /// which builds the requested extent out of air. Both are silent
+    /// substitution. The theme is the thing that cannot be honoured, so
+    /// this names the theme rather than reporting each `mat_slot=` that
+    /// found no value.
+    ThemeVariantMissing,
+    /// A `place theme=NAME` named one edition's variant and the pinned
+    /// edition bound a different one.
+    ///
+    /// Warning, not an error: binding the pinned edition's variant is what
+    /// the author almost certainly wants, and §10.7 asks the semantic layer
+    /// to stay edition-neutral. But an explicit name silently becoming a
+    /// different name is worth one line, and the fix — write the logical
+    /// name — is the spelling §10.7 prescribes.
+    ThemeVariantRebound,
     /// A scope's derived voxel extent exceeds
     /// [`crate::block_array::MAX_STRUCTURE_VOLUME`], so the pass skips it
     /// rather than allocating for it.
@@ -370,6 +390,8 @@ impl DiagnosticCode {
             Self::DefNoSize => "W_DEF_NO_SIZE",
             Self::UnresolvedPlaceRef => "E_UNRESOLVED_PLACE_REF",
             Self::UnresolvedThemeRef => "E_UNRESOLVED_THEME_REF",
+            Self::ThemeVariantMissing => "E_THEME_VARIANT_MISSING",
+            Self::ThemeVariantRebound => "W_THEME_VARIANT_REBOUND",
             Self::StructureTooLarge => "W_STRUCTURE_TOO_LARGE",
             Self::IncompletePlace => "E_INCOMPLETE_PLACE",
             Self::InvalidPlaceId => "E_INVALID_PLACE_ID",
@@ -435,6 +457,7 @@ impl DiagnosticCode {
             | Self::UnknownId
             | Self::UnresolvedPlaceRef
             | Self::UnresolvedThemeRef
+            | Self::ThemeVariantMissing
             | Self::DuplicatePlaceId
             | Self::IncompletePlace
             | Self::InvalidPlaceId
@@ -448,6 +471,7 @@ impl DiagnosticCode {
             | Self::UnsupportedNesting => Severity::Error,
             Self::StructureTooLarge
             | Self::ThemeSelectorUnmatched
+            | Self::ThemeVariantRebound
             | Self::DeferredMember
             | Self::NoThemeBound
             | Self::AbstractTokenDeferred
@@ -852,6 +876,7 @@ mod tests {
                 "E_MISPLACED_MEMBER",
                 "E_MISSING_PATH_MATERIAL",
                 "E_THEME_SELECTOR_UNMATCHED",
+                "E_THEME_VARIANT_MISSING",
                 "E_TYPE_MISMATCH_LABEL",
                 "E_TYPE_MISMATCH_SIZE",
                 "E_UNEXPECTED_POSITIONAL",
@@ -873,6 +898,7 @@ mod tests {
                 "W_NO_THEME_BOUND",
                 "W_STRUCTURE_TOO_LARGE",
                 "W_STRUCT_NO_SIZE",
+                "W_THEME_VARIANT_REBOUND",
                 "W_UNUSED_DEF",
                 "W_WALKWAY_BLOCKED",
             ],
@@ -904,6 +930,7 @@ mod tests {
                 "E_INVALID_REQUIRES",
                 "E_MISPLACED_MEMBER",
                 "E_MISSING_PATH_MATERIAL",
+                "E_THEME_VARIANT_MISSING",
                 "E_TYPE_MISMATCH_LABEL",
                 "E_TYPE_MISMATCH_SIZE",
                 "E_UNEXPECTED_POSITIONAL",
@@ -931,6 +958,7 @@ mod tests {
                 "W_NO_THEME_BOUND",
                 "W_STRUCTURE_TOO_LARGE",
                 "W_STRUCT_NO_SIZE",
+                "W_THEME_VARIANT_REBOUND",
                 "W_UNUSED_DEF",
                 "W_WALKWAY_BLOCKED",
             ],

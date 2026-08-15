@@ -85,6 +85,11 @@ first-class parts of the spec; messages MUST be in a shape that feeds the self-c
     cursor, the offending separator, the offending endpoint, or the run
     of trailing extras. Each endpoint is reported separately: the two
     ends are independent fix sites.
+  - `E_THEME_VARIANT_MISSING` — the module declares a theme, and the pinned edition can bind none
+    of its per-edition variants (`spec/versioning-editions.md` §10.7). Only fires under
+    `--edition`: with no pin there is nothing a variant fails to satisfy, and the same source is
+    accepted. Reported once for the module-level pick and once per `place ... theme=` that cannot
+    be honoured, because each is a separate fix site.
   - `E_INCOMPLETE_PLACE` — a `place` row omits `id=`, `use=`, or
     `theme=` (§9.3). The row cannot become a placement without all three,
     so it is dropped from the build; the message names every key the row

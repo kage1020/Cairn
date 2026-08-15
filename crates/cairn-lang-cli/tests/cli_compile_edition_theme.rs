@@ -282,3 +282,228 @@ fn ac8_cottage_still_compiles_under_both_editions() {
         );
     }
 }
+
+// ----------------------------------------------------------------------
+// The pin reaches the site placement path, and a pin the module cannot
+// satisfy stops the build instead of building it out of air.
+// ----------------------------------------------------------------------
+
+/// A module whose logical theme `shop` exists in `variants`, placed through
+/// a site under `theme={reference}`. Each variant binds a different block so
+/// the artifact says which one was bound.
+fn placed_source(reference: &str, variants: &[&str]) -> String {
+    use std::fmt::Write as _;
+
+    let mut declarations = String::new();
+    for variant in variants {
+        let block = match *variant {
+            "_bedrock" => "dark_oak_planks",
+            _ => "spruce_planks",
+        };
+        write!(
+            declarations,
+            "theme shop{variant}:\n\x20\x20slot floor -> @{block}\n\n"
+        )
+        .expect("writing to a String cannot fail");
+    }
+    format!(
+        "@cairn 2026.06\n\n{declarations}\
+         def hut size=4x4:\n\x20\x20floor mat_slot=floor\n\nsite s:\n\
+         \x20\x20place id=home use=hut theme={reference} at=origin\n"
+    )
+}
+
+fn write_source(dir: &Path, name: &str, body: &str) -> PathBuf {
+    let path = dir.join(name);
+    fs::write(&path, body).expect("write source");
+    path
+}
+
+#[test]
+fn a_java_build_writes_the_java_variants_block_whatever_the_place_named() {
+    // The defect, end to end: `theme=shop_bedrock` bound verbatim on the
+    // site path, so a `--edition java` artifact carried the Bedrock
+    // variant's material. The guard that was supposed to prevent it
+    // (`pick_variant`) was never reached from here.
+    let tmp = TempDir::new().expect("tempdir");
+    let src = write_source(
+        tmp.path(),
+        "placed.crn",
+        &placed_source("shop_bedrock", &["_java", "_bedrock"]),
+    );
+    let out_dir = TempDir::new().expect("out tempdir");
+    let result = Command::new(cargo_bin())
+        .args([
+            "compile",
+            src.to_str().unwrap(),
+            "--edition",
+            "java",
+            "--out",
+            out_dir.path().to_str().unwrap(),
+        ])
+        .output()
+        .expect("run cairn");
+    assert!(
+        result.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&result.stderr),
+    );
+    let nbt = gunzip(&read_bytes(&out_dir.path().join("home.nbt")));
+    assert!(
+        bytes_contain(&nbt, "minecraft:spruce_planks"),
+        "the Java variant's material must be the one written",
+    );
+    assert!(
+        !bytes_contain(&nbt, "minecraft:dark_oak_planks"),
+        "the Bedrock variant's material must not reach a Java artifact",
+    );
+    let stderr = String::from_utf8_lossy(&result.stderr);
+    assert!(
+        stderr.contains("W_THEME_VARIANT_REBOUND"),
+        "swapping the named variant is worth saying out loud; stderr={stderr}",
+    );
+}
+
+#[test]
+fn a_build_whose_pin_has_no_variant_stops_before_writing_anything() {
+    // Every `mat_slot=` fell back to air here and the build still wrote a
+    // structure plus a `verified: true` lockfile. The refusal now happens
+    // in the resolver, so nothing is written at all.
+    let tmp = TempDir::new().expect("tempdir");
+    let src = write_source(
+        tmp.path(),
+        "bedrock-only.crn",
+        &placed_source("shop_bedrock", &["_bedrock"]),
+    );
+    let out_dir = TempDir::new().expect("out tempdir");
+    let result = Command::new(cargo_bin())
+        .args([
+            "compile",
+            src.to_str().unwrap(),
+            "--edition",
+            "java",
+            "--out",
+            out_dir.path().to_str().unwrap(),
+        ])
+        .output()
+        .expect("run cairn");
+    let stderr = String::from_utf8_lossy(&result.stderr);
+    assert_eq!(result.status.code(), Some(1), "stderr={stderr}");
+    assert!(
+        stderr.contains("E_THEME_VARIANT_MISSING"),
+        "stderr={stderr}",
+    );
+    assert!(
+        fs::read_dir(out_dir.path())
+            .expect("out dir readable")
+            .next()
+            .is_none(),
+        "no artifact may be written for a build that cannot bind its theme",
+    );
+    assert!(
+        !tmp.path().join("bedrock-only.crn.lock").exists(),
+        "no lockfile may certify a build that did not happen",
+    );
+}
+
+#[test]
+fn check_reports_the_missing_variant_only_when_an_edition_is_pinned() {
+    // `check --edition` is the gate a CI job runs; it has to see this, and
+    // the same source without a pin has nothing to fail against.
+    let tmp = TempDir::new().expect("tempdir");
+    let src = write_source(
+        tmp.path(),
+        "bedrock-only.crn",
+        &placed_source("shop_bedrock", &["_bedrock"]),
+    );
+    let pinned = Command::new(cargo_bin())
+        .args(["check", src.to_str().unwrap(), "--edition", "java"])
+        .output()
+        .expect("run cairn");
+    // `check` renders its diagnostic stream on stdout; the build commands
+    // use stderr because their stdout carries the artifact report.
+    let report = String::from_utf8_lossy(&pinned.stdout);
+    assert_eq!(pinned.status.code(), Some(1), "report={report}");
+    assert!(
+        report.contains("E_THEME_VARIANT_MISSING"),
+        "report={report}",
+    );
+
+    let unpinned = Command::new(cargo_bin())
+        .args(["check", src.to_str().unwrap()])
+        .output()
+        .expect("run cairn");
+    assert_eq!(
+        unpinned.status.code(),
+        Some(0),
+        "stderr={}",
+        String::from_utf8_lossy(&unpinned.stderr),
+    );
+
+    let matching = Command::new(cargo_bin())
+        .args(["check", src.to_str().unwrap(), "--edition", "bedrock"])
+        .output()
+        .expect("run cairn");
+    assert_eq!(
+        matching.status.code(),
+        Some(0),
+        "the variant the module does declare must still bind; stderr={}",
+        String::from_utf8_lossy(&matching.stderr),
+    );
+}
+
+#[test]
+fn a_place_naming_the_logical_theme_builds_under_both_editions() {
+    // The spelling §10.7 prescribes was the one spelling the site path
+    // rejected, because no theme is declared under the bare logical name.
+    let tmp = TempDir::new().expect("tempdir");
+    let src = write_source(
+        tmp.path(),
+        "logical.crn",
+        &placed_source("shop", &["_java", "_bedrock"]),
+    );
+    for (edition, expected, absent) in [
+        (
+            "java",
+            "minecraft:spruce_planks",
+            "minecraft:dark_oak_planks",
+        ),
+        (
+            "bedrock",
+            "minecraft:dark_oak_planks",
+            "minecraft:spruce_planks",
+        ),
+    ] {
+        let out_dir = TempDir::new().expect("out tempdir");
+        let result = Command::new(cargo_bin())
+            .args([
+                "compile",
+                src.to_str().unwrap(),
+                "--edition",
+                edition,
+                "--out",
+                out_dir.path().to_str().unwrap(),
+            ])
+            .output()
+            .expect("run cairn");
+        let stderr = String::from_utf8_lossy(&result.stderr);
+        assert!(result.status.success(), "--edition {edition}: {stderr}");
+        assert!(
+            !stderr.contains("W_THEME_VARIANT_REBOUND"),
+            "the neutral spelling names no variant, so none was swapped: {stderr}",
+        );
+        let artifact = out_dir.path().join(if edition == "java" {
+            "home.nbt"
+        } else {
+            "home.mcstructure"
+        });
+        let bytes = read_bytes(&artifact);
+        let body = if edition == "java" {
+            gunzip(&bytes)
+        } else {
+            bytes
+        };
+        assert!(bytes_contain(&body, expected), "--edition {edition}");
+        assert!(!bytes_contain(&body, absent), "--edition {edition}");
+    }
+}

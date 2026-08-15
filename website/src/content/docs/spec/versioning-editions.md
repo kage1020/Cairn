@@ -255,6 +255,20 @@ theme shop_bedrock: slot floating_text -> sign glowing=true   # Bedrock fallback
 @edition bedrock { raw_block mat=minecraft:light_block["block_light_level"=15] at=4,3,2 }
 ```
 
+- **The build picks the variant, not the source.** `theme NAME_java` / `theme NAME_bedrock` declare
+  two variants of the logical theme `NAME`. A `--edition` pin binds that edition's variant, falls
+  back to an unsuffixed `NAME`, and stops there — binding the *other* edition's variant would route
+  its slot values into this edition's output, the silent substitution 10.4 forbids. When neither
+  exists the compile stops with `E_THEME_VARIANT_MISSING` instead of leaving the theme unbound and
+  building the requested extent out of air.
+
+- **`place ... theme=NAME` names the logical theme** and follows exactly that rule, so one site
+  places the same def under whichever variant the build needs. Naming a variant there
+  (`theme=shop_bedrock`) still resolves — the pinned edition's variant binds and
+  `W_THEME_VARIANT_REBOUND` says which was bound in its place — but the neutral spelling is what the
+  semantic layer is meant to carry. With no `--edition` pin a written name binds verbatim: there is
+  no edition to argue for another variant.
+
 - Cross-version application is asymmetric: **downgrade (new-version NBT → old-version world) = hard
   error** (unknown components cause crashes/corruption). **Upgrade (old-version NBT → new-version world)
   = loud warning + DataVersion stamp + DFU dependence** (only with explicit `--allow-cross-version`).
