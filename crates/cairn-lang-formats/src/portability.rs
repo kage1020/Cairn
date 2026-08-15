@@ -9,19 +9,18 @@
 //! The two sides can still spell an entry differently. `info` pins no
 //! target and so takes each material's default mapping, while a build takes
 //! the target's, and a rename inside an edition's range makes those two ids
-//! different strings for the same block. What must not differ is the
-//! counts, and `tests/example_portability.rs` holds every shipped example
-//! to that against every supported target.
+//! different strings for the same block. What must not differ is how many
+//! entries there are, and `tests/example_portability.rs` holds every
+//! shipped example to that against every supported target.
 //!
 //! Two independent questions decide an entry's category, asked in that
 //! order.
 //!
 //! # Does the edition have the block at all?
 //!
-//! The palette an entry lands in is the one the matching
-//! `cairn compile --edition X` would write, but it can still name a block
-//! that edition has never had: an authored `@oak_sign` reaches a Bedrock
-//! palette unchanged, and Bedrock spells that block `standing_sign`. Until
+//! A palette entry can name a block the edition has never had: an authored
+//! `@oak_sign` lowers verbatim on either edition, and Bedrock spells that
+//! block `standing_sign`. Until
 //! the registry pack grew per-version id tables there was nothing to ask
 //! the question with, so a stateless id counted as portable whichever
 //! edition it came from. An id no supported version of the edition declares
@@ -69,7 +68,7 @@
 //! what the `.mcstructure` writer actually emits rather than a coarser
 //! member-level abstraction.
 //!
-//! The [`BlockState::AIR`] slot at palette index 0 is skipped — every
+//! The [`BlockState::AIR_ID`] slot at palette index 0 is skipped — every
 //! palette carries it by construction (`Palette::new_with_air`), and it
 //! is not a member-authored intent that could be "unsupported".
 
@@ -161,9 +160,13 @@ pub fn portability_for_bedrock(ir: &BlockArrayIr, blocks: &BlocksIndex) -> Porta
 }
 
 /// Every authored palette entry across the IR's structures, in palette
-/// order. Walkway strips carry their own [`crate::registry`]-independent
-/// `BlockArray` under the same map, so a `connect ... path=@ID` is counted
-/// like any member's material.
+/// order.
+///
+/// A walkway strip is lowered into its own `BlockArray` stored under the
+/// same `structures` map (keyed `walkway::SITE::FROM__TO`), so a
+/// `connect ... path=@ID` is counted here like any member's material — and
+/// it needs to be, because that material resolves through the registry
+/// exactly the way a `mat_slot=` one does.
 fn non_air_entries(ir: &BlockArrayIr) -> impl Iterator<Item = &BlockState> {
     ir.structures
         .values()
@@ -422,6 +425,34 @@ mod tests {
             },
         );
         assert_eq!(counts.total(), 1, "one palette entry, one count");
+    }
+
+    #[test]
+    fn an_absent_id_whose_states_would_degrade_is_still_unsupported() {
+        // The two questions disagree here: the states translate (with loss)
+        // while the block does not exist. Asking them in the other order
+        // files the entry as `degraded`, which reads as "builds, looks
+        // slightly wrong" for something that does not build at all — and
+        // `total()` is identical either way, so no parity assertion notices.
+        let properties = stair_props("south", "top", "outer_left");
+        let translated = translate_states("minecraft:spruce_stairs", &properties)
+            .expect("premise: the states translate");
+        assert!(
+            !translated.degraded.is_empty(),
+            "premise: the states translate with loss, so `degraded` is the competing answer",
+        );
+        let ir = one_state_ir(vec![BlockState {
+            id: "minecraft:spruce_stairs".to_owned(),
+            properties,
+        }]);
+        assert_eq!(
+            portability_for_bedrock(&ir, &table()),
+            PortabilityCounts {
+                portable: 0,
+                degraded: 0,
+                unsupported: 1,
+            },
+        );
     }
 
     #[test]

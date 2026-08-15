@@ -69,11 +69,13 @@ pub struct RegistryRange {
 pub struct EditionPortability {
     /// Target edition this row's counts describe.
     pub edition: Edition,
-    /// Members that compile straight through.
+    /// Palette entries that compile straight through.
     pub portable: u32,
-    /// Members that compile but lose detail (e.g. stair `shape` on Bedrock).
+    /// Palette entries that compile but lose detail (e.g. stair `shape` on
+    /// Bedrock).
     pub degraded: u32,
-    /// Members that have no representable form on this edition.
+    /// Palette entries with no representable form on this edition: a block
+    /// the edition does not have, or states it cannot express.
     pub unsupported: u32,
 }
 

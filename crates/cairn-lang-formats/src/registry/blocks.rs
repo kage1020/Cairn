@@ -83,9 +83,11 @@ pub struct BlocksIndex {
 
 impl BlocksIndex {
     /// Index with no versions. Used when a pack omits the `blocks`
-    /// component; [`Self::ids_for`] then always misses, and the lowering
-    /// pass reads that as "this pack cannot refute an id" rather than as
-    /// "no id is valid".
+    /// component. Both lookups then answer "nothing to answer with" rather
+    /// than "absent" — [`Self::ids_for`] misses every version and
+    /// [`Self::declared_by_some_version`] returns `None` — and every caller
+    /// reads that as "this pack cannot refute an id" rather than as "no id
+    /// is valid".
     #[must_use]
     pub fn empty() -> Self {
         Self {

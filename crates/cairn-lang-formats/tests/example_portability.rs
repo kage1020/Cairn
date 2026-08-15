@@ -36,6 +36,10 @@ fn supported_versions(pack: &RegistryPack) -> Vec<&str> {
 }
 
 /// Every `.crn` under `examples/`, as `(file name, source)`.
+///
+/// Refuses to return a set too small to be the shipped one. Every test here
+/// is a loop over this, and a loop over nothing passes — the guard belongs
+/// with the iteration source so no future test can forget it.
 fn examples() -> Vec<(String, String)> {
     let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("..")
@@ -60,6 +64,12 @@ fn examples() -> Vec<(String, String)> {
         })
         .collect();
     found.sort();
+    assert!(
+        found.len() >= 5,
+        "found only {} examples under {}, which is not the shipped set",
+        found.len(),
+        dir.display(),
+    );
     found
 }
 
@@ -95,13 +105,7 @@ fn editions() -> [(Edition, &'static RegistryPack); 2] {
 
 #[test]
 fn no_shipped_example_reports_an_unsupported_entry() {
-    let examples = examples();
-    assert!(
-        examples.len() >= 5,
-        "found only {} examples, which is not the shipped set",
-        examples.len(),
-    );
-    for (name, source) in &examples {
+    for (name, source) in &examples() {
         for (edition, pack) in editions() {
             let block_ir = lower_for(source, edition, pack, None);
             let counts = match edition {
@@ -111,8 +115,9 @@ fn no_shipped_example_reports_an_unsupported_entry() {
             assert_eq!(
                 counts.unsupported, 0,
                 "{name} reports {} unsupported entries on {edition}; every shipped example is \
-                 expected to be buildable on both editions, so this is either a bad material \
-                 mapping or an id axis that has become too strict",
+                 expected to be buildable on both editions. Three things can produce this: a \
+                 material mapped onto a block the edition does not have, an intent whose states \
+                 the edition cannot express, or an id axis that has become too strict",
                 counts.unsupported,
             );
             assert!(
