@@ -1,11 +1,17 @@
 //! Per-edition palette-entry portability counters.
 //!
 //! Backs the "edition portability" axis of `cairn info`
-//! (spec versioning-editions §10.5). The counters are computed against
-//! the lowered [`BlockArrayIr`] so they see exactly the palette the
-//! matching `cairn compile --edition X` would write — the source of truth
-//! is [`crate::bedrock_state::translate_states`], the same function the
-//! `.mcstructure` writer consumes when it emits bytes.
+//! (spec versioning-editions §10.5). The counters run over a real lowered
+//! [`BlockArrayIr`] rather than over the source, so each figure counts
+//! palette entries the matching `cairn compile --edition X` emits, one for
+//! one.
+//!
+//! The two sides can still spell an entry differently. `info` pins no
+//! target and so takes each material's default mapping, while a build takes
+//! the target's, and a rename inside an edition's range makes those two ids
+//! different strings for the same block. What must not differ is the
+//! counts, and `tests/example_portability.rs` holds every shipped example
+//! to that against every supported target.
 //!
 //! Two independent questions decide an entry's category, asked in that
 //! order.
@@ -41,8 +47,10 @@
 //! overriding diffs"), so a palette entry Java declares always counts as
 //! portable there — the Java writer emits `properties` verbatim under the
 //! vanilla `.nbt` schema. Bedrock funnels every entry through
-//! `translate_states` and folds the outcome into
-//! `{portable, degraded, unsupported}`:
+//! [`crate::bedrock_state::translate_states`] — the same function the
+//! `.mcstructure` writer consumes when it emits bytes, so this half of the
+//! classification cannot drift from what a build actually does — and folds
+//! the outcome into `{portable, degraded, unsupported}`:
 //!
 //! - `Ok(StateTranslation { degraded: [], .. })` → **portable** (the intent
 //!   round-trips into Bedrock states with no loss).

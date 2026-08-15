@@ -439,6 +439,20 @@ mod tests {
     }
 
     #[test]
+    fn a_prefix_of_a_declared_id_is_not_itself_declared() {
+        // `minecraft:stone` is a prefix of two ids this table has and a
+        // block none of its versions declare. Answering by prefix rather
+        // than by equality would call a whole family of near-miss ids
+        // present, which is the failure mode with no visible symptom: the
+        // id is wrong, the lookup says fine, and the game loads air.
+        let index = parse(TWO_VERSIONS).expect("catalog");
+        assert_eq!(
+            index.declared_by_some_version("minecraft:stone"),
+            Some(false),
+        );
+    }
+
+    #[test]
     fn an_index_with_no_tables_answers_nothing_rather_than_no() {
         // `Some(false)` here would turn a pack that ships no `blocks`
         // component into one that declares no block at all.
