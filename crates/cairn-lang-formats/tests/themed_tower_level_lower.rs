@@ -31,7 +31,11 @@ fn lower_themed_tower() -> BlockArrayIr {
     let ir = lower(&module);
     let resolution = resolve(&ir, None);
     let pack = builtin_java();
-    lower_to_block_array(&ir, &resolution, Some(&pack.materials))
+    lower_to_block_array(
+        &ir,
+        &resolution,
+        Some(&pack.view(Some(&pack.data_versions.latest))),
+    )
 }
 
 #[test]

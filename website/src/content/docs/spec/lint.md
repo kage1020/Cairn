@@ -45,6 +45,13 @@ first-class parts of the spec; messages MUST be in a shape that feeds the self-c
     the version. Reported rather than dropped, because the directive states
     one constraint and an expression that states none leaves a floor in the
     file that no longer reaches the compiler.
+  - `E_UNKNOWN_ID` — a resolved block ID the compile's target does not declare
+    (`spec/versioning-editions.md` §10.4). Raised during block-array lowering, and only when a
+    target is pinned, so `cairn compile --target` is the one command that reports it —
+    `cairn check` does not run lowering at all. Covers an ID the author wrote, an ID the
+    registry pack's materials catalog produced, and the ID a member default falls back to when
+    the pack declares no row for it; `data.origin` says which, because only the first is a fix
+    the author makes in their own source.
   - `E_UNKNOWN_KEYWORD` — statement keyword is not in the known-keyword table.
   - `E_MISPLACED_MEMBER` — statement keyword is in the table but the
     enclosing body has no reader for it: a `place` / `connect` in a
@@ -131,6 +138,9 @@ evolving — additions for new codes are strictly additive, so consumers should 
 | -------------------- | ---------------------------------------------------------------- |
 | `W_WALKWAY_BLOCKED`  | `{ "kind": "walkway_blocked", "skipped": <u64> }` — number of cells along the fallback L-shaped path that overlapped an existing structure and were dropped from the lay (emitted only when the detour search found no unobstructed route). |
 | `E_DUPLICATE_SELECTOR` | `{ "kind": "duplicate_selector", "rebound": ["frame"] }` — the binding keys this selector row takes over from an earlier one, without the trailing `=`, in the order the message lists them. Always non-empty. |
+| `E_UNKNOWN_ID` | `{ "kind": "unknown_id", "id": "minecraft:oak_plank", "registry": "java 1.21.4", "origin": "authored", "suggestion": "minecraft:oak_planks" }` — the ID the pinned target does not declare, the target it was checked against, and who chose it. `origin` is `authored` when the source names the ID, `catalog` when the pack maps a token onto it, and `builtin` when the pack declares no row for a member default and the compiler's own ID was used. `token` accompanies the latter two and is absent for `authored`; `suggestion` is absent when no declared ID is within the typo threshold, which is always the case for a rename. |
+| ↳ `origin: "catalog"` | `{ …, "id": "minecraft:stone_bricks", "registry": "bedrock 1.21.0", "origin": "catalog", "token": "floor.stone.smooth", "suggestion": "minecraft:stonebrick" }` — the author's token is correct and the pack's mapping is not, so the edit does not belong in the source. |
+| ↳ `origin: "builtin"` | `{ …, "id": "minecraft:oak_pressure_plate", "registry": "bedrock 1.21.60", "origin": "builtin", "token": "pressure_plate.default" }` — the pack declares no row for that member default, so the ID compiled into the compiler was used. The pack is what has to grow the row. |
 | `E_INCOMPLETE_PLACE` | `{ "kind": "incomplete_place", "missing": ["id", "use", "theme"] }` — the keys the `place` row does not declare, without the trailing `=`, in the order the message lists them. Always non-empty. |
 
 Codes not listed above omit `data` entirely; reading `entry.data` returns `undefined` and the JSON

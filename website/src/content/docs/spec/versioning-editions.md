@@ -89,6 +89,32 @@ E_PARITY_UNSUPPORTED line 8: text_display is Java-only (since 1.19.4); Bedrock h
   Suggested: sign side=front text="Inn", or slot+theme fallback, or @edition java guard
 ```
 
+### Which registry an unknown ID is unknown to
+An ID is checked against the block table for the one `(edition, version)` the compile pinned, not
+against the edition as a whole. The distinction is not academic: Bedrock 1.21.0 spells stone bricks
+`stonebrick` and 1.21.40 spells it `stone_bricks`, so an edition-wide answer would accept both
+everywhere and catch neither mistake. The tables ship in the registry pack's `blocks` component,
+folded with the `inherits + diffs` rule of §10.3.
+
+The check therefore runs on `cairn compile --target` and nowhere else, for two different
+reasons. `cairn info` and `cairn lower` do lower, but pin no version — `info` deliberately reports
+across the whole range — so they skip the comparison rather than pick a version on the author's
+behalf and refuse IDs that are fine on the one that gets built. `cairn check` does not reach the
+comparison at all: it does not run block-array lowering, so no lowering-stage code reaches it,
+`E_UNKNOWN_ABSTRACT_TOKEN` included.
+
+The suggested fix is a typo finder over the same table: `oak_plank` is answered with `oak_planks`.
+A **rename** is not a typo and does not fit through it — Bedrock calling Java's `light`
+`light_block` is six edits away — so the message says outright that it has no candidate instead of
+offering the nearest unrelated block. Closing that gap needs a per-edition alias table the pack
+does not carry yet.
+
+The same per-version scoping applies to a pack's own material mappings: an entry may carry
+`overrides` naming the versions that spell it differently, which is what lets one `@floor.stone.smooth`
+resolve across a range containing a rename. What is still deferred is the `since` half — the
+tables record which IDs a version *has*, not which version first introduced one, so the
+`E_VERSION_CAP` example above is still the `@requires` floor rather than registry-inferred.
+
 `def` / `theme` may declare `requires version>=X`; the minimum version of a composite is the max of its
 parts. (Module-level `@requires` is implemented; the member-level form is not yet parsed.)
 

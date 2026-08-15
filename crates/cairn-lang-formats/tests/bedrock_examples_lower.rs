@@ -35,7 +35,11 @@ fn lower_bedrock(example: &str) -> BlockArrayIr {
     let ir = lower(&module);
     let resolution = resolve(&ir, None);
     let pack = builtin_bedrock();
-    lower_to_block_array(&ir, &resolution, Some(&pack.materials))
+    lower_to_block_array(
+        &ir,
+        &resolution,
+        Some(&pack.view(Some(&pack.data_versions.latest))),
+    )
 }
 
 #[test]

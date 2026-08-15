@@ -5,10 +5,15 @@
 //! into the canonical Minecraft id + property bag the voxel grid stores. The
 //! split is here, not inside the resolver, because the canonical/abstract
 //! decision is what the block-array lowering pivots on: abstract tokens are
-//! lifted through a registry-pack-backed [`AbstractMaterialResolver`]; when
-//! no resolver is available, or the catalog does not declare the token, the
+//! lifted through a registry-pack-backed [`TargetRegistry`]; when no
+//! registry is available, or the catalog does not declare the token, the
 //! caller is told which mode the failure took so the resulting diagnostic
 //! can be precise.
+//!
+//! The last step is the same either way: whatever id the value resolved to
+//! is checked against the target's block-id table. That is the only place
+//! that catches a *canonical* token nobody declared — `@totally_not_a_block`
+//! has no dot, so it never reaches the materials catalog at all.
 
 use indexmap::IndexMap;
 
@@ -19,32 +24,103 @@ use crate::suggest::nearest_match;
 
 use super::BlockState;
 
-/// Lookup table for abstract material tokens.
+/// What the registry pack tells lowering, for one compile.
 ///
 /// The block-array lowering pass keeps no direct dependency on
 /// `cairn-lang-formats` (where the on-disk registry pack lives). Instead the
-/// pack-side `MaterialsIndex` implements this trait, and lowering takes it
-/// as `Option<&dyn AbstractMaterialResolver>`: `None` means "no pack was
-/// offered for this run" (LSP highlight, `cairn check` without a pack),
-/// `Some` means "lift abstract tokens through this catalog, fail-loud on
-/// misses".
+/// pack side implements this trait, and lowering takes it as
+/// `Option<&dyn TargetRegistry>`: `None` means "no pack was offered for this
+/// run" (LSP highlight, `cairn check` without a pack), `Some` means "lift
+/// abstract tokens through this catalog, fail-loud on misses".
 ///
 /// Implementations must be cheap to call: lowering invokes [`Self::lookup`]
 /// once per `mat_slot=` value, and [`Self::known_tokens`] only on the miss
 /// path to feed `nearest_match`. Returning an unordered iterator is fine —
 /// the suggestion pass is order-insensitive past the tie-break rule.
-pub trait AbstractMaterialResolver {
+pub trait TargetRegistry {
     /// Lift `token` into a canonical [`BlockState`]. The token text is the
     /// inner body of the `@TOKEN` literal (no leading `@`). Implementations
     /// resolve the namespace and any state literal themselves so the trait
     /// shape stays format-agnostic.
     fn lookup(&self, token: &str) -> Option<BlockState>;
 
-    /// Every token this resolver knows about. Used only when [`Self::lookup`]
+    /// Every token this registry knows about. Used only when [`Self::lookup`]
     /// returns `None`, to feed the `nearest_match` suggestion. Allocating a
     /// fresh `Vec` per miss is intentional — misses are rare on a well-formed
     /// pack and `nearest_match` needs to consume the candidates anyway.
     fn known_tokens(&self) -> Vec<String>;
+
+    /// The block ids valid in the target this compile is pinned to.
+    ///
+    /// `None` means no id table applies — either the pack ships no `blocks`
+    /// component, or the run has no `--target` to pin one (`cairn check`,
+    /// `cairn info`, `cairn lower`). Id validation is then skipped, because
+    /// the honest answer to "does this id exist" is "in which version?" and
+    /// picking one on the caller's behalf would refuse ids that are fine on
+    /// the version they actually compile against.
+    fn block_ids(&self) -> Option<BlockIdSet<'_>>;
+}
+
+/// The block ids valid in one pinned `(edition, version)` target.
+///
+/// A borrowed, sorted slice rather than a set type so the pack can hand out
+/// the table it already folded at load time without rebuilding an index per
+/// lookup, and so `cairn-lang-core` needs no hashing dependency for it.
+#[derive(Debug, Clone, Copy)]
+pub struct BlockIdSet<'a> {
+    /// How the target reads in a diagnostic — `"bedrock 1.21.60"`.
+    label: &'a str,
+    /// Fully namespaced ids in ascending order.
+    ids: &'a [String],
+}
+
+impl<'a> BlockIdSet<'a> {
+    /// Wrap a sorted, fully namespaced id list.
+    ///
+    /// # Panics
+    ///
+    /// Panics in debug builds when `ids` is not sorted ascending — the
+    /// binary search below would otherwise miss real ids for reasons no
+    /// caller could see from the outside.
+    #[must_use]
+    pub fn new(label: &'a str, ids: &'a [String]) -> Self {
+        debug_assert!(
+            ids.is_sorted(),
+            "BlockIdSet expects a sorted id list; `{label}` is not sorted",
+        );
+        Self { label, ids }
+    }
+
+    /// How the target reads in a diagnostic.
+    #[must_use]
+    pub fn label(&self) -> &'a str {
+        self.label
+    }
+
+    /// Whether the target declares `id`.
+    #[must_use]
+    pub fn contains(&self, id: &str) -> bool {
+        self.ids
+            .binary_search_by(|known| known.as_str().cmp(id))
+            .is_ok()
+    }
+
+    /// Every declared id, ascending.
+    pub fn iter(&self) -> impl Iterator<Item = &'a str> {
+        self.ids.iter().map(String::as_str)
+    }
+
+    /// Number of declared ids.
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.ids.len()
+    }
+
+    /// `true` when the target declares no ids at all.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.ids.is_empty()
+    }
 }
 
 /// Default Minecraft id namespace for bare `@name` tokens. A future mod-aware
@@ -62,7 +138,7 @@ const VANILLA_NAMESPACE: &str = "minecraft";
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MaterialDeferred {
     /// The slot bound to an abstract token (`@floor.wood.broadleaf`) and no
-    /// [`AbstractMaterialResolver`] was offered. Carries the inner token
+    /// [`TargetRegistry`] was offered. Carries the inner token
     /// text so the caller can name it in the emitted warning.
     Abstract(String),
     /// The slot bound to an abstract token that the offered resolver does
@@ -79,27 +155,109 @@ pub enum MaterialDeferred {
     /// emitted `E_UNKNOWN_SLOT_TARGET` for this case during `resolve()`, so
     /// lowering stays silent to avoid double-diagnosing the same span.
     AlreadyDiagnosed,
+    /// The value resolved to a block id the pinned target does not declare.
+    /// Spec versioning-editions §10.4 makes this a hard error: writing the
+    /// id anyway produces a structure file the game loads as air, with no
+    /// diagnostic to explain the hole.
+    UnknownId(UnknownId),
+}
+
+/// An id that resolved cleanly but does not exist in the pinned target.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UnknownId {
+    /// The fully namespaced id that was refused.
+    pub id: String,
+    /// How the target reads in the message — `"bedrock 1.21.60"`.
+    pub registry: String,
+    /// Whether the author named the id or the pack's catalog did.
+    pub origin: IdOrigin,
+    /// Closest id the target does declare, when one is within
+    /// `nearest_match`'s edit cap.
+    pub suggestion: Option<String>,
+}
+
+/// Who chose the id that turned out not to exist.
+///
+/// The two cases need different prose and different fixes: an author can
+/// correct what they typed, but a pack mapping is not theirs to edit, and a
+/// message that blames their token for it sends them looking in the wrong
+/// file.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum IdOrigin {
+    /// The author wrote the id, as a canonical `@minecraft:foo` /`@foo`
+    /// token.
+    Authored,
+    /// The pack's materials catalog mapped an abstract token onto it.
+    Catalog {
+        /// The abstract token the author actually wrote, without the `@`.
+        token: String,
+    },
+    /// Nobody chose it: the member carries no `mat_slot=`, the pack
+    /// declares no catalog token for its default, and lowering fell back
+    /// to an id compiled into `cairn-lang-core`.
+    ///
+    /// Distinct from [`Self::Catalog`] because the fix is the opposite
+    /// one. A catalog mapping exists and is wrong for this target; a
+    /// built-in fallback fires precisely because the pack has nothing to
+    /// say, and the pack is what has to grow the row.
+    Builtin {
+        /// The catalog token that would have redirected it, so the
+        /// message can name the row the pack is missing.
+        token: &'static str,
+    },
+}
+
+impl IdOrigin {
+    /// Stable wire name for the diagnostic payload.
+    ///
+    /// `token` alone cannot separate [`Self::Catalog`] from
+    /// [`Self::Builtin`] — both carry one — and the two need opposite
+    /// fixes, so a consumer that can only see `token` would offer the
+    /// wrong one half the time.
+    #[must_use]
+    pub fn kind(&self) -> &'static str {
+        match self {
+            Self::Authored => "authored",
+            Self::Catalog { .. } => "catalog",
+            Self::Builtin { .. } => "builtin",
+        }
+    }
+
+    /// The catalog token involved, when the origin names one.
+    #[must_use]
+    pub fn token(&self) -> Option<&str> {
+        match self {
+            Self::Authored => None,
+            Self::Catalog { token } => Some(token),
+            Self::Builtin { token } => Some(token),
+        }
+    }
 }
 
 /// Convert a resolved slot value into a canonical [`BlockState`].
 ///
-/// `materials` is the offered abstract-token resolver — usually backed by the
-/// built-in registry pack. When `Some`, abstract tokens (`@floor.wood.broadleaf`)
-/// are lifted through the catalog; misses become
-/// [`MaterialDeferred::UnknownAbstract`] with a suggestion. When `None`,
-/// abstract tokens stay deferred ([`MaterialDeferred::Abstract`]) so library
-/// callers that never load a pack still see the same shape they did
-/// pre-PR2.
+/// `registry` is the offered registry view — usually backed by the built-in
+/// registry pack. When `Some`, abstract tokens (`@floor.wood.broadleaf`) are
+/// lifted through its catalog and every resolved id is checked against the
+/// pinned target's id table; misses become
+/// [`MaterialDeferred::UnknownAbstract`] / [`MaterialDeferred::UnknownId`]
+/// with a suggestion. When `None`, abstract tokens stay deferred
+/// ([`MaterialDeferred::Abstract`]) so library callers that never load a
+/// pack still see the shape they did before the pack carried a catalog.
 ///
 /// Returns:
 /// - `Ok(state)` for a canonical token (`@oak_planks`, `@oak_log[axis=x]`)
-///   or an abstract token the resolver knew about. A bracketed state literal
-///   on canonical tokens expands into [`BlockState::properties`].
-/// - `Err(MaterialDeferred::Abstract)` for `@a.b.c` shapes when `materials`
+///   or an abstract token the registry knew about, whose id the target
+///   declares. A bracketed state literal on canonical tokens expands into
+///   [`BlockState::properties`].
+/// - `Err(MaterialDeferred::Abstract)` for `@a.b.c` shapes when `registry`
 ///   is `None`.
-/// - `Err(MaterialDeferred::UnknownAbstract)` when `materials` is `Some` but
+/// - `Err(MaterialDeferred::UnknownAbstract)` when `registry` is `Some` but
 ///   the catalog does not declare the token. The `suggestion` field carries
 ///   the nearest declared token when one exists.
+/// - `Err(MaterialDeferred::UnknownId)` when the value resolved to an id the
+///   pinned target does not declare — including one the catalog itself
+///   produced, which is a pack bug rather than an authoring one.
 /// - `Err(MaterialDeferred::AlreadyDiagnosed)` for non-token values; the
 ///   `E_UNKNOWN_SLOT_TARGET` error has already fired during resolve.
 ///
@@ -110,26 +268,33 @@ pub enum MaterialDeferred {
 /// `W_*` or `E_*` diagnostic.
 pub fn resolve_block_state(
     slot: &ValueWithSpan,
-    materials: Option<&dyn AbstractMaterialResolver>,
+    registry: Option<&dyn TargetRegistry>,
 ) -> Result<BlockState, MaterialDeferred> {
     match classify_token(&slot.value) {
         TokenKind::Canonical => {
             let ValueKind::Token(inner) = &slot.value.kind else {
                 unreachable!("classify_token reports Canonical only for ValueKind::Token");
             };
-            Ok(canonical_to_block_state(inner))
+            let state = canonical_to_block_state(inner);
+            check_id(state, registry, &IdOrigin::Authored)
         }
         TokenKind::Abstract => {
             let ValueKind::Token(inner) = &slot.value.kind else {
                 unreachable!("classify_token reports Abstract only for ValueKind::Token");
             };
-            let Some(resolver) = materials else {
+            let Some(registry) = registry else {
                 return Err(MaterialDeferred::Abstract(inner.clone()));
             };
-            if let Some(state) = resolver.lookup(inner) {
-                return Ok(state);
+            if let Some(state) = registry.lookup(inner) {
+                return check_id(
+                    state,
+                    Some(registry),
+                    &IdOrigin::Catalog {
+                        token: inner.clone(),
+                    },
+                );
             }
-            let pool = resolver.known_tokens();
+            let pool = registry.known_tokens();
             let suggestion =
                 nearest_match(inner, pool.iter().map(String::as_str)).map(str::to_owned);
             Err(MaterialDeferred::UnknownAbstract {
@@ -139,6 +304,53 @@ pub fn resolve_block_state(
         }
         TokenKind::NotAToken => Err(MaterialDeferred::AlreadyDiagnosed),
     }
+}
+
+/// Refuse `state` when the pinned target does not declare its id.
+///
+/// Passes the state through untouched when no target is pinned — that is
+/// the documented "cannot refute" mode of [`TargetRegistry::block_ids`],
+/// not an acceptance.
+///
+/// Visible to the lowering pass because `mat_slot=` is not the only way an
+/// id reaches a palette: a member whose default material comes from the
+/// pack (`pressure_plate`) resolves outside [`resolve_block_state`] and
+/// would otherwise be the one id in the build that nothing checks.
+pub(crate) fn check_id(
+    state: BlockState,
+    registry: Option<&dyn TargetRegistry>,
+    origin: &IdOrigin,
+) -> Result<BlockState, MaterialDeferred> {
+    let Some(ids) = registry.and_then(TargetRegistry::block_ids) else {
+        return Ok(state);
+    };
+    if ids.contains(&state.id) {
+        return Ok(state);
+    }
+    Err(MaterialDeferred::UnknownId(UnknownId {
+        suggestion: nearest_id(&state.id, ids),
+        registry: ids.label().to_owned(),
+        origin: origin.clone(),
+        id: state.id,
+    }))
+}
+
+/// The declared id closest to `id`, compared on the path alone.
+///
+/// `nearest_match`'s edit cap scales with input length, and every vanilla
+/// id shares the ten-character `minecraft:` prefix — long enough to buy a
+/// third edit that the meaningful part never earned. Over a table of a
+/// thousand ids that is the difference between suggesting `oak_planks` for
+/// `oak_plank` and suggesting `dirt` for `light`. Comparing paths within
+/// one namespace puts the cap back on the part the author actually typed.
+fn nearest_id(id: &str, ids: BlockIdSet<'_>) -> Option<String> {
+    let (namespace, path) = id.split_once(':')?;
+    let candidates = ids
+        .iter()
+        .filter_map(|known| known.split_once(':'))
+        .filter(|(ns, _)| *ns == namespace)
+        .map(|(_, path)| path);
+    nearest_match(path, candidates).map(|best| format!("{namespace}:{best}"))
 }
 
 /// Turn a canonical token body (`oak_planks`, `oak_log[axis=x]`,
@@ -212,14 +424,34 @@ mod tests {
         ValueWithSpan::from_value(Value::new(ValueKind::Ident(name.to_owned()), span))
     }
 
-    /// In-memory resolver used by the material tests. Real callers go
-    /// through `cairn-lang-formats::registry::MaterialsIndex`; the inline
-    /// fake here keeps this test file free of a circular crate dependency.
+    /// In-memory registry used by the material tests. Real callers go
+    /// through `cairn-lang-formats::registry::RegistryPack::view`; the
+    /// inline fake here keeps this test file free of a circular crate
+    /// dependency.
     struct FakeResolver {
         entries: Vec<(&'static str, &'static str)>,
+        /// Sorted, fully namespaced ids the pinned target declares. Empty
+        /// means "no target pinned", matching a `blocks`-less pack.
+        ids: Vec<String>,
     }
 
-    impl AbstractMaterialResolver for FakeResolver {
+    impl FakeResolver {
+        fn new(entries: Vec<(&'static str, &'static str)>) -> Self {
+            Self {
+                entries,
+                ids: Vec::new(),
+            }
+        }
+
+        /// Pin a target declaring exactly `ids`.
+        fn pinned(mut self, ids: &[&str]) -> Self {
+            self.ids = ids.iter().map(|id| (*id).to_owned()).collect();
+            self.ids.sort();
+            self
+        }
+    }
+
+    impl TargetRegistry for FakeResolver {
         fn lookup(&self, token: &str) -> Option<BlockState> {
             self.entries
                 .iter()
@@ -229,6 +461,10 @@ mod tests {
 
         fn known_tokens(&self) -> Vec<String> {
             self.entries.iter().map(|(t, _)| (*t).to_owned()).collect()
+        }
+
+        fn block_ids(&self) -> Option<BlockIdSet<'_>> {
+            (!self.ids.is_empty()).then(|| BlockIdSet::new("test 1.0", &self.ids))
         }
     }
 
@@ -272,24 +508,20 @@ mod tests {
 
     #[test]
     fn abstract_token_lifts_through_resolver() {
-        let resolver = FakeResolver {
-            entries: vec![
-                ("floor.wood.broadleaf", "oak_planks"),
-                ("wall.stone.cobble", "cobblestone"),
-            ],
-        };
+        let resolver = FakeResolver::new(vec![
+            ("floor.wood.broadleaf", "oak_planks"),
+            ("wall.stone.cobble", "cobblestone"),
+        ]);
         let bs = resolve_block_state(&token("floor.wood.broadleaf"), Some(&resolver)).unwrap();
         assert_eq!(bs.id, "minecraft:oak_planks");
     }
 
     #[test]
     fn abstract_token_unknown_returns_suggestion() {
-        let resolver = FakeResolver {
-            entries: vec![
-                ("floor.wood.broadleaf", "oak_planks"),
-                ("floor.wood.conifer", "spruce_planks"),
-            ],
-        };
+        let resolver = FakeResolver::new(vec![
+            ("floor.wood.broadleaf", "oak_planks"),
+            ("floor.wood.conifer", "spruce_planks"),
+        ]);
         let err = resolve_block_state(&token("floor.wood.broadlef"), Some(&resolver)).unwrap_err();
         assert_eq!(
             err,
@@ -302,9 +534,7 @@ mod tests {
 
     #[test]
     fn abstract_token_unknown_without_close_candidate_has_no_suggestion() {
-        let resolver = FakeResolver {
-            entries: vec![("floor.wood.broadleaf", "oak_planks")],
-        };
+        let resolver = FakeResolver::new(vec![("floor.wood.broadleaf", "oak_planks")]);
         let err =
             resolve_block_state(&token("totally.different.tree"), Some(&resolver)).unwrap_err();
         match err {
@@ -317,5 +547,131 @@ mod tests {
     fn non_token_value_is_already_diagnosed() {
         let err = resolve_block_state(&ident("plain"), None).unwrap_err();
         assert_eq!(err, MaterialDeferred::AlreadyDiagnosed);
+    }
+
+    #[test]
+    fn an_authored_id_the_target_lacks_is_refused_with_its_registry_named() {
+        let registry = FakeResolver::new(vec![]).pinned(&["minecraft:oak_planks"]);
+        let err = resolve_block_state(&token("oak_plank"), Some(&registry)).unwrap_err();
+        assert_eq!(
+            err,
+            MaterialDeferred::UnknownId(UnknownId {
+                id: "minecraft:oak_plank".into(),
+                registry: "test 1.0".into(),
+                origin: IdOrigin::Authored,
+                suggestion: Some("minecraft:oak_planks".into()),
+            }),
+        );
+    }
+
+    #[test]
+    fn a_rename_is_refused_without_a_suggestion_because_it_is_not_a_typo() {
+        // Bedrock 1.21.0 spells the Java `light` block `light_block`, six
+        // edits away — past `nearest_match`'s cap. (From 1.21.40 it is
+        // `light_block_0` … `_15`, which is further still.) The suggestion
+        // is a typo finder, not a rename map, and claiming otherwise here
+        // would need per-edition id aliases the pack does not carry.
+        let registry = FakeResolver::new(vec![]).pinned(&["minecraft:light_block"]);
+        let err = resolve_block_state(&token("light"), Some(&registry)).unwrap_err();
+        match err {
+            MaterialDeferred::UnknownId(unknown) => {
+                assert_eq!(unknown.id, "minecraft:light");
+                assert!(unknown.suggestion.is_none());
+            }
+            other => panic!("expected UnknownId, got {other:?}"),
+        }
+    }
+
+    /// A suggestion is only useful if it is an id the target actually
+    /// declares, and an id is namespace plus path.
+    ///
+    /// Searching paths across namespaces finds `cogwheels` one edit from
+    /// `cogwheel` and hands back `minecraft:cogwheels` — a string that
+    /// exists in no registry anywhere, offered as the fix for an id that
+    /// does not exist either. Both built-in packs are entirely
+    /// `minecraft:`, so only a modded-shaped table reaches this.
+    #[test]
+    fn a_suggestion_never_borrows_a_path_from_another_namespace() {
+        let registry = FakeResolver::new(vec![]).pinned(&["create:cogwheels"]);
+        let err = resolve_block_state(&token("cogwheel"), Some(&registry)).unwrap_err();
+        match err {
+            MaterialDeferred::UnknownId(unknown) => {
+                assert_eq!(unknown.id, "minecraft:cogwheel");
+                assert_eq!(
+                    unknown.suggestion, None,
+                    "`create:cogwheels` is not a candidate for a `minecraft:` id, and \
+                     `minecraft:cogwheels` is not an id at all",
+                );
+            }
+            other => panic!("expected UnknownId, got {other:?}"),
+        }
+    }
+
+    /// The same table does suggest within its own namespace, so the test
+    /// above is not passing because the search found nothing to look at.
+    #[test]
+    fn a_suggestion_is_still_found_inside_the_namespace_that_has_one() {
+        let registry = FakeResolver::new(vec![]).pinned(&["create:cogwheels"]);
+        let err = resolve_block_state(&token("create:cogwheel"), Some(&registry)).unwrap_err();
+        match err {
+            MaterialDeferred::UnknownId(unknown) => {
+                assert_eq!(unknown.suggestion.as_deref(), Some("create:cogwheels"));
+            }
+            other => panic!("expected UnknownId, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn an_authored_id_the_target_declares_passes() {
+        let registry = FakeResolver::new(vec![]).pinned(&["minecraft:light"]);
+        let bs = resolve_block_state(&token("light"), Some(&registry)).unwrap();
+        assert_eq!(bs.id, "minecraft:light");
+    }
+
+    #[test]
+    fn a_state_literal_is_checked_on_the_id_alone() {
+        // `oak_log[axis=x]` is one id plus a property bag; the id table
+        // keys on the id, so the brackets must not defeat the lookup.
+        let registry = FakeResolver::new(vec![]).pinned(&["minecraft:oak_log"]);
+        let bs = resolve_block_state(&token("oak_log[axis=x]"), Some(&registry)).unwrap();
+        assert_eq!(bs.properties.get("axis").map(String::as_str), Some("x"));
+    }
+
+    #[test]
+    fn a_catalog_mapping_onto_a_missing_id_names_the_token_that_reached_it() {
+        let registry = FakeResolver::new(vec![("floor.stone.smooth", "stone_bricks")])
+            .pinned(&["minecraft:stonebrick"]);
+        let err = resolve_block_state(&token("floor.stone.smooth"), Some(&registry)).unwrap_err();
+        assert_eq!(
+            err,
+            MaterialDeferred::UnknownId(UnknownId {
+                id: "minecraft:stone_bricks".into(),
+                registry: "test 1.0".into(),
+                origin: IdOrigin::Catalog {
+                    token: "floor.stone.smooth".into(),
+                },
+                suggestion: Some("minecraft:stonebrick".into()),
+            }),
+        );
+    }
+
+    #[test]
+    fn an_unpinned_registry_refutes_nothing() {
+        // No target means no id table; the value passes untouched rather
+        // than being checked against a version nobody asked for.
+        let registry = FakeResolver::new(vec![("floor.stone.smooth", "stone_bricks")]);
+        assert!(registry.block_ids().is_none());
+        let bs = resolve_block_state(&token("totally_not_a_block"), Some(&registry)).unwrap();
+        assert_eq!(bs.id, "minecraft:totally_not_a_block");
+    }
+
+    #[test]
+    fn an_unknown_id_with_no_close_candidate_carries_no_suggestion() {
+        let registry = FakeResolver::new(vec![]).pinned(&["minecraft:stone"]);
+        let err = resolve_block_state(&token("totally_not_a_block"), Some(&registry)).unwrap_err();
+        match err {
+            MaterialDeferred::UnknownId(unknown) => assert!(unknown.suggestion.is_none()),
+            other => panic!("expected UnknownId, got {other:?}"),
+        }
     }
 }

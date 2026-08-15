@@ -86,6 +86,29 @@ E_PARITY_UNSUPPORTED line 8: text_display is Java-only (since 1.19.4); Bedrock h
   Suggested: sign side=front text="Inn", or slot+theme fallback, or @edition java guard
 ```
 
+### 未知 ID は「どのレジストリ」に対して未知なのか
+ID はエディション全体ではなく、コンパイルがピン留めした `(edition, version)` 1 つのブロックテーブル
+に対して照合されます。この区別は形式的なものではありません。Bedrock 1.21.0 では石レンガが
+`stonebrick`、1.21.40 では `stone_bricks` なので、エディション単位の回答では両方をどこでも受け入れて
+しまい、どちらの誤りも捕まえられません。テーブルはレジストリパックの `blocks` コンポーネントとして
+同梱され、§10.3 の `inherits + diffs` 規則で畳まれます。
+
+この検査が `cairn compile --target` でのみ走る理由は 2 つあります。`cairn info` と
+`cairn lower` は lowering を走らせますがバージョンをピン留めしません (`info` は意図的にレンジ全体を
+報告します) ので、作者の代わりにバージョンを選んで実際にビルドされる版では正しい ID を拒否する
+くらいなら、照合自体を行いません。`cairn check` はそもそも照合まで到達しません — block-array
+lowering を走らせないので、`E_UNKNOWN_ABSTRACT_TOKEN` を含め lowering 段のコードは一切届きません。
+
+修正候補は同じテーブル上のタイポ探索です。`oak_plank` には `oak_planks` が返ります。**リネーム** は
+タイポではないのでここは通りません — Bedrock が Java の `light` を `light_block` と綴るのは編集距離が 6 あります — したがってメッセージは、近いだけの無関係なブロックを提示するのではなく、候補が無いと
+明言します。この差を埋めるにはパックがまだ持たないエディション別エイリアステーブルが要ります。
+
+同じバージョン単位の扱いはパック自身のマテリアル対応にも及びます。エントリは綴りが異なるバージョンを
+指す `overrides` を持てて、これが 1 つの `@floor.stone.smooth` をリネームをまたぐレンジ全体で解決可能に
+します。まだ先送りなのは `since` 側です。テーブルはあるバージョンがどの ID を **持つ** かを記録するだけ
+で、どのバージョンで最初に導入されたかは持たないため、上の `E_VERSION_CAP` の例は依然レジストリ推論
+ではなく `@requires` の下限です。
+
 `def` / `theme` は `requires version>=X` を宣言してかまいません。コンポジットの最小バージョンはその
 構成要素の最大値です。(モジュール階層の `@requires` は実装済みです。メンバ階層の形式はまだ解析
 できません。)

@@ -195,6 +195,20 @@ pub enum DiagnosticCode {
     /// build stops with a structured suggestion towards the closest known
     /// token.
     UnknownAbstractToken,
+    /// A `mat_slot=` resolved to a block id the compile's target does not
+    /// declare. Fail-loud per spec versioning-editions §10.4 ("unknown IDs
+    /// ... are hard errors"): the id would otherwise be written into a
+    /// structure file the game loads as air, with nothing to explain the
+    /// hole. Distinct from `UnknownAbstractToken`, which fires one step
+    /// earlier when the abstract token itself is undeclared — this variant
+    /// fires on an id that resolved cleanly and simply does not exist in
+    /// that `(edition, version)`, whether the author or the pack's catalog
+    /// chose it.
+    ///
+    /// Only raised when the run pinned a target (`cairn compile --target`).
+    /// `cairn check` / `info` / `lower` have no version to check against
+    /// and skip the comparison rather than guess one.
+    UnknownId,
     /// A `struct` has no `size=WxH` header, so block-array lowering cannot
     /// derive a voxel extent and skips it.
     StructNoSize,
@@ -351,6 +365,7 @@ impl DiagnosticCode {
             Self::NoThemeBound => "W_NO_THEME_BOUND",
             Self::AbstractTokenDeferred => "W_ABSTRACT_TOKEN_DEFERRED",
             Self::UnknownAbstractToken => "E_UNKNOWN_ABSTRACT_TOKEN",
+            Self::UnknownId => "E_UNKNOWN_ID",
             Self::StructNoSize => "W_STRUCT_NO_SIZE",
             Self::DefNoSize => "W_DEF_NO_SIZE",
             Self::UnresolvedPlaceRef => "E_UNRESOLVED_PLACE_REF",
@@ -417,6 +432,7 @@ impl DiagnosticCode {
             | Self::UnresolvedSlot
             | Self::UnknownSlotTarget
             | Self::UnknownAbstractToken
+            | Self::UnknownId
             | Self::UnresolvedPlaceRef
             | Self::UnresolvedThemeRef
             | Self::DuplicatePlaceId
@@ -528,6 +544,34 @@ pub enum DiagnosticData {
     DuplicateSelector {
         /// Rebound key names (`frame`, `sill`, ...).
         rebound: Vec<String>,
+    },
+    /// Companion payload for [`DiagnosticCode::UnknownId`]. The id that does
+    /// not exist, the target it was checked against, and the way back.
+    ///
+    /// Carried for the reason [`Self::IncompletePlace`] is: the obvious
+    /// quick-fix is "replace this id with that one", and a tool should not
+    /// have to recover either id from the sentence. `origin` additionally
+    /// tells a consumer *where* the edit belongs, which differs by case —
+    /// in the source, in the pack's mapping, or in a pack row that does
+    /// not exist yet.
+    UnknownId {
+        /// The fully namespaced id the target does not declare.
+        id: String,
+        /// The target it was checked against, as `"<edition> <version>"`.
+        registry: String,
+        /// Who chose the id, from [`crate::block_array::IdOrigin::kind`]:
+        /// `authored` (the source names it), `catalog` (the pack maps a
+        /// token onto it), or `builtin` (the pack declares no row for a
+        /// member default, so the compiler's own id was used).
+        origin: String,
+        /// The catalog token involved, for the two origins that have one.
+        /// Absent from the JSON for `authored`, rather than `null`.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        token: Option<String>,
+        /// Nearest id the target does declare, when one is within the
+        /// suggestion cap. Absent from the JSON when there is none.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        suggestion: Option<String>,
     },
 }
 
@@ -812,6 +856,7 @@ mod tests {
                 "E_TYPE_MISMATCH_SIZE",
                 "E_UNEXPECTED_POSITIONAL",
                 "E_UNKNOWN_ABSTRACT_TOKEN",
+                "E_UNKNOWN_ID",
                 "E_UNKNOWN_KEYWORD",
                 "E_UNKNOWN_SLOT_TARGET",
                 "E_UNRESOLVED_PLACE_REF",
@@ -863,6 +908,7 @@ mod tests {
                 "E_TYPE_MISMATCH_SIZE",
                 "E_UNEXPECTED_POSITIONAL",
                 "E_UNKNOWN_ABSTRACT_TOKEN",
+                "E_UNKNOWN_ID",
                 "E_UNKNOWN_KEYWORD",
                 "E_UNKNOWN_SLOT_TARGET",
                 "E_UNRESOLVED_PLACE_REF",
@@ -930,6 +976,83 @@ mod tests {
             value,
             serde_json::json!({"kind": "walkway_blocked", "skipped": 3}),
         );
+    }
+
+    #[test]
+    fn unknown_id_payload_omits_the_halves_it_does_not_have() {
+        // `spec/lint.md` §11.2 documents both optional fields as absent
+        // rather than `null`, and the two absences mean distinct things: no
+        // `token` says the author wrote the id, no `suggestion` says the
+        // target has nothing near it. A `null` would read as "unknown" for
+        // both. `origin` is never optional — it is what separates the three
+        // cases, so a consumer always has it.
+        let authored = serde_json::to_value(DiagnosticData::UnknownId {
+            id: "minecraft:light".to_owned(),
+            registry: "bedrock 1.21.60".to_owned(),
+            origin: "authored".to_owned(),
+            token: None,
+            suggestion: None,
+        })
+        .expect("serialise payload");
+        assert_eq!(
+            authored,
+            serde_json::json!({
+                "kind": "unknown_id",
+                "id": "minecraft:light",
+                "registry": "bedrock 1.21.60",
+                "origin": "authored",
+            }),
+        );
+
+        let from_catalog = serde_json::to_value(DiagnosticData::UnknownId {
+            id: "minecraft:stone_bricks".to_owned(),
+            registry: "bedrock 1.21.0".to_owned(),
+            origin: "catalog".to_owned(),
+            token: Some("floor.stone.smooth".to_owned()),
+            suggestion: Some("minecraft:stonebrick".to_owned()),
+        })
+        .expect("serialise payload");
+        assert_eq!(
+            from_catalog,
+            serde_json::json!({
+                "kind": "unknown_id",
+                "id": "minecraft:stone_bricks",
+                "registry": "bedrock 1.21.0",
+                "origin": "catalog",
+                "token": "floor.stone.smooth",
+                "suggestion": "minecraft:stonebrick",
+            }),
+        );
+    }
+
+    /// `origin` and `token` are two fields with one job between them, so
+    /// the pairs a consumer may rely on are pinned here rather than left
+    /// to the two call sites to agree on by hand.
+    #[test]
+    fn every_id_origin_has_a_wire_name_and_the_token_that_goes_with_it() {
+        use crate::block_array::IdOrigin;
+
+        let cases = [
+            (IdOrigin::Authored, "authored", None),
+            (
+                IdOrigin::Catalog {
+                    token: "floor.stone.smooth".to_owned(),
+                },
+                "catalog",
+                Some("floor.stone.smooth"),
+            ),
+            (
+                IdOrigin::Builtin {
+                    token: "pressure_plate.default",
+                },
+                "builtin",
+                Some("pressure_plate.default"),
+            ),
+        ];
+        for (origin, kind, token) in cases {
+            assert_eq!(origin.kind(), kind);
+            assert_eq!(origin.token(), token);
+        }
     }
 
     #[test]

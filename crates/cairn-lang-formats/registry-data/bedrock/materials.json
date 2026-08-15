@@ -5,11 +5,19 @@
     { "token": "floor.wood.broadleaf", "block": "oak_planks" },
     { "token": "floor.wood.conifer", "block": "spruce_planks" },
     { "token": "floor.stone.cobble", "block": "cobblestone" },
-    { "token": "floor.stone.smooth", "block": "stone_bricks" },
+    {
+      "token": "floor.stone.smooth",
+      "block": "stone_bricks",
+      "overrides": [{ "mc_version": "1.21.0", "block": "stonebrick" }]
+    },
     { "token": "wall.wood.broadleaf", "block": "oak_planks" },
     { "token": "wall.wood.conifer", "block": "spruce_planks" },
     { "token": "wall.stone.cobble", "block": "cobblestone" },
-    { "token": "wall.stone.smooth", "block": "stone_bricks" },
+    {
+      "token": "wall.stone.smooth",
+      "block": "stone_bricks",
+      "overrides": [{ "mc_version": "1.21.0", "block": "stonebrick" }]
+    },
     { "token": "wood.dark", "block": "dark_oak_planks" },
     { "token": "wood.light", "block": "birch_planks" },
     { "token": "wood.warm", "block": "oak_planks" },
@@ -18,7 +26,8 @@
     { "token": "roof.light_wood", "block": "birch_stairs" },
     { "token": "roof.warm_wood", "block": "oak_stairs" },
     { "token": "roof.cool_wood", "block": "spruce_stairs" },
-    { "token": "sign.oak", "block": "oak_sign" },
-    { "token": "sign.oak_wall", "block": "oak_wall_sign" }
+    { "token": "sign.oak", "block": "standing_sign" },
+    { "token": "sign.oak_wall", "block": "wall_sign" },
+    { "token": "pressure_plate.default", "block": "wooden_pressure_plate" }
   ]
 }
