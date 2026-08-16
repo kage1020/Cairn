@@ -23,11 +23,11 @@
 //! - **Wall top.** The lowest roof voxel sits at `y = wall_top + 1`.
 //!   `wall_top` is the max `height=` across walls members; without
 //!   walls, the roof starts at `y = 1`.
-//! - **Stair facing.** Sloped roof voxels are `minecraft:spruce_stairs`
-//!   with `facing` pointed *toward the ridge* (the riser's upper-step
-//!   side ends up on the inward side), `half=bottom`. Apex caps reuse
-//!   the slope facings with `half=top` so the upside-down stair closes
-//!   the peak. Per-theme roof species follow with the registry pack.
+//! - **Stair facing.** Sloped roof voxels take `facing` pointed *toward
+//!   the ridge* (the riser's upper-step side ends up on the inward side)
+//!   and `half=bottom`. Apex caps reuse the slope facings with `half=top`
+//!   so the upside-down stair closes the peak. Which stair species wears
+//!   them is the `mat_slot=` binding's to choose — see the next bullet.
 //! - **Material id.** A `mat_slot=` binding chooses the species. `gable`,
 //!   `shed`, and `hip` require a member of the stair family ([`is_stair`])
 //!   because they attach `facing` / `half` / `shape` to whatever they
@@ -64,9 +64,12 @@ pub const FLAT_BASE_ID: &str = "minecraft:spruce_planks";
 ///
 /// The whole family shares one blockstate vocabulary — `facing`, `half`,
 /// `shape` — which is what makes the family, rather than any one species,
-/// the right unit for a geometry pass to require. Keyed off the identifier
-/// *path* so a namespace cannot smuggle a non-stair through: `mystairs` is
-/// not one, and neither is a `create:cogwheel`.
+/// the right unit for a geometry pass to require.
+///
+/// Two rules, doing different work. The `_stairs` suffix is what rejects
+/// `mystairs`. Reading it off the *path* rather than the whole identifier is
+/// what rejects `weird_stairs:cobblestone`, where the family word sits in
+/// the namespace and the block is not a stair at all.
 ///
 /// One owner on purpose. `cairn-lang-formats` asks the same question when
 /// it translates a blockstate for Bedrock, and two copies of this rule

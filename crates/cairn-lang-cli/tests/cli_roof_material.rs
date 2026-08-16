@@ -1,14 +1,15 @@
 //! A sloped roof's material, end to end.
 //!
-//! The geometry attaches `facing` / `half` / `shape` to whatever the roof's
-//! `mat_slot=` resolves to. Binding a whole block therefore produced
-//! `minecraft:cobblestone[facing=south,half=bottom,shape=straight]` — a
-//! blockstate no version of the game has. Java wrote it into a `.nbt` at
-//! exit 0 and said nothing; Bedrock refused it in the state translator and
-//! blamed its own mapping table, one layer below where the mistake was made.
+//! `gable` / `shed` / `hip` lowering derives `facing` / `half` / `shape` and
+//! attaches them to the block the member's `mat_slot=` names. A whole block
+//! has nowhere to carry them, so binding one asks for a blockstate that does
+//! not exist — and neither answer available without the author is
+//! acceptable: attaching the states anyway writes that blockstate into the
+//! artifact, and substituting the fallback species builds the roof out of a
+//! material nobody chose. The build stops instead, on both editions.
 //!
-//! These pin both halves from the CLI: the refusal happens where the choice
-//! is made, and neither writer is asked to represent something invalid.
+//! Any *member of the stair family* is a free choice, which is what the
+//! registry pack's four roof species are for.
 
 use std::fs;
 use std::io::Read;
@@ -22,7 +23,7 @@ fn cargo_bin() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_cairn"))
 }
 
-/// A cottage whose roof reads `slot roof`, bound to `material`.
+/// A hut whose roof reads `slot roof`, bound to `material`.
 fn roofed_source(material: &str) -> String {
     format!(
         "@cairn 2026.06\n\n\
@@ -74,7 +75,7 @@ fn bytes_contain(hay: &[u8], needle: &str) -> bool {
 
 /// The Java writer gzips, so a search over the file as written finds
 /// nothing whatever it is asked for. Decompressing first is what makes the
-/// absence assertions below mean something.
+/// assertions below mean something.
 fn nbt_body(path: &std::path::Path) -> Vec<u8> {
     let bytes = fs::read(path).expect("read artifact");
     let mut out = Vec::new();
@@ -85,69 +86,75 @@ fn nbt_body(path: &std::path::Path) -> Vec<u8> {
 }
 
 #[test]
-fn a_non_stair_roof_material_is_refused_where_it_is_chosen() {
-    let tmp = TempDir::new().expect("tempdir");
-    let src = write_source(tmp.path(), "cobblestone");
-    let out = TempDir::new().expect("out tempdir");
-    let (code, stderr) = compile(&src, "java", "1.21.4", out.path());
-    assert_eq!(code, Some(0), "the build still completes; stderr={stderr}");
-    assert!(
-        stderr.contains("W_DEFERRED_MEMBER")
-            && stderr.contains("minecraft:cobblestone")
-            && stderr.contains("is not a stair"),
-        "the roof must say what it could not do; stderr={stderr}",
-    );
-    let nbt = nbt_body(&out.path().join("hut.nbt"));
-    assert!(
-        bytes_contain(&nbt, "minecraft:spruce_stairs"),
-        "the roof is still built, out of the fallback species",
-    );
-    // Which entry carries which properties is a question about the palette,
-    // not about the bytes — a `.nbt` stores `Name` and `Properties` as
-    // separate tags, so no substring search can pair them. The palette-level
-    // assertion lives in `lower.rs`'s
-    // `a_sloped_roof_refuses_a_material_that_is_not_a_stair`; this test's
-    // job is to show the same thing survives the writer and the CLI.
+fn a_non_stair_roof_material_stops_the_build_on_both_editions() {
+    // Both, because a source's materials are an edition-neutral question:
+    // there is no version of either edition where a cobblestone carries a
+    // stair's `shape`. Java used to write the impossible state and exit 0;
+    // Bedrock used to fail in its state translator, which is true of the
+    // translator and the wrong layer to be reading about.
+    for (edition, target) in [("java", "1.21.4"), ("bedrock", "1.21.60")] {
+        let tmp = TempDir::new().expect("tempdir");
+        let src = write_source(tmp.path(), "cobblestone");
+        let out = TempDir::new().expect("out tempdir");
+        let (code, stderr) = compile(&src, edition, target, out.path());
+        assert_eq!(code, Some(1), "--edition {edition}: stderr={stderr}");
+        assert!(
+            stderr.contains("E_INCOMPATIBLE_MATERIAL")
+                && stderr.contains("minecraft:cobblestone")
+                && stderr.contains("is not a stair"),
+            "--edition {edition}: stderr={stderr}",
+        );
+        assert!(
+            !stderr.contains("the Bedrock backend cannot map"),
+            "the state translator is not the layer at fault; stderr={stderr}",
+        );
+        assert!(
+            fs::read_dir(out.path())
+                .expect("out dir readable")
+                .next()
+                .is_none(),
+            "--edition {edition}: no artifact may be written",
+        );
+        assert!(
+            !tmp.path().join("hut.crn.lock").exists(),
+            "--edition {edition}: no lockfile may certify a build that did not happen",
+        );
+    }
 }
 
 #[test]
-fn bedrock_no_longer_blames_its_own_state_mapping_for_the_roof() {
-    // Before, this failed with "block `minecraft:cobblestone[...]` carries
-    // blockstate properties the Bedrock backend cannot map (only the stair
-    // family is mapped so far)" — true of the backend, and the wrong layer
-    // to be reading about. The material never should have been accepted.
+fn the_refusal_points_at_the_theme_line_and_names_the_slot() {
+    // The member only names a slot; the binding is what needs editing, and
+    // every member reading that slot has the same problem. Anchoring on the
+    // member line would send the author to the wrong file position and
+    // report the same edit once per reader.
     let tmp = TempDir::new().expect("tempdir");
     let src = write_source(tmp.path(), "cobblestone");
     let out = TempDir::new().expect("out tempdir");
-    let (code, stderr) = compile(&src, "bedrock", "1.21.60", out.path());
-    assert_eq!(code, Some(0), "stderr={stderr}");
+    let (_, stderr) = compile(&src, "java", "1.21.4", out.path());
     assert!(
-        !stderr.contains("the Bedrock backend cannot map"),
-        "the backend is not the layer at fault here; stderr={stderr}",
+        stderr.contains("hut.crn:6:"),
+        "the theme's `slot roof ->` line is line 6; stderr={stderr}",
     );
     assert!(
-        stderr.contains("is not a stair"),
-        "the roof is; stderr={stderr}",
-    );
-    assert!(
-        out.path().join("hut.mcstructure").exists(),
-        "the build completes on the fallback species",
+        stderr.contains("mat_slot=roof"),
+        "the note must name the slot that reaches it; stderr={stderr}",
     );
 }
 
 #[test]
 fn a_stair_species_reaches_the_artifact_unremarked() {
-    // The other half of the contract, and the one that makes the check a
-    // family test rather than an equality test against one hardcoded id:
-    // choosing a species is what binding a roof slot is *for*, and the
-    // registry pack ships four of them.
+    // The other half of the contract, and what makes this a family test
+    // rather than an equality test against one hardcoded id: choosing a
+    // species is what binding a roof slot is for, and the registry pack
+    // ships four of them.
     let tmp = TempDir::new().expect("tempdir");
     let src = write_source(tmp.path(), "dark_oak_stairs");
     let out = TempDir::new().expect("out tempdir");
     let (code, stderr) = compile(&src, "java", "1.21.4", out.path());
     assert_eq!(code, Some(0), "stderr={stderr}");
     assert!(
-        !stderr.contains("W_DEFERRED_MEMBER"),
+        !stderr.contains("E_INCOMPATIBLE_MATERIAL") && !stderr.contains("W_DEFERRED_MEMBER"),
         "a stair species is not a deviation; stderr={stderr}",
     );
     let nbt = nbt_body(&out.path().join("hut.nbt"));
@@ -157,6 +164,6 @@ fn a_stair_species_reaches_the_artifact_unremarked() {
     );
     assert!(
         !bytes_contain(&nbt, "minecraft:spruce_stairs"),
-        "the hardcoded fallback must not appear when a species was chosen",
+        "the fallback must not appear when a species was chosen",
     );
 }

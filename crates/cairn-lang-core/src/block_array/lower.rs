@@ -82,8 +82,9 @@ const PRESSURE_PLATE_TOKEN: &str = "pressure_plate.default";
 /// makes Java the base, so the Java spelling is the honest default. It is
 /// still checked against the pinned target before it reaches a palette.
 /// Species-specific plates (spruce, dark oak, ...) still come from a
-/// `mat_slot=` binding, which is honoured verbatim (mirroring
-/// [`STAIR_BASE_ID`]'s contract).
+/// `mat_slot=` binding, which is honoured verbatim — mirroring
+/// [`FLAT_BASE_ID`]'s contract, not [`STAIR_BASE_ID`]'s. A plate attaches
+/// no blockstates, so it has nothing to require of the block it names.
 const PRESSURE_PLATE_BASE_ID: &str = "minecraft:oak_pressure_plate";
 
 /// Block ids lowering can put in a palette that no pack can redirect.
@@ -1773,13 +1774,16 @@ fn fill_roof(
     );
     let base_id = geometry_material_id(
         member,
+        ctx.scope,
         resolved.as_ref(),
         kind.base_block_id(),
-        &format!("`{}` roof", kind.name()),
-        kind.paints_stairs(),
+        &MemberShape {
+            subject: format!("`{}` roof", kind.name()),
+            states_from: "the geometry",
+            requires_stair: kind.paints_stairs(),
+        },
         diagnostics,
     );
-    let base_id = base_id.as_str();
 
     match kind {
         RoofKind::Gable => fill_roof_gable(ctx, palette, voxels, base_id),
@@ -1789,74 +1793,139 @@ fn fill_roof(
     }
 }
 
+/// What a geometry-driven member does with the material it is given.
+///
+/// Lets one function serve every such member: it can name the member and
+/// say where its blockstates came from without knowing which one it is.
+struct MemberShape {
+    /// How the member names itself in a message, already quoted: a roof
+    /// renders as `` `gable` roof ``, an eave as `` eave `stair` ``.
+    subject: String,
+    /// Where its blockstates come from, as a noun phrase: a roof reads the
+    /// geometry, an eave stair reads its own arguments.
+    states_from: &'static str,
+    /// Whether it attaches stair blockstates, and therefore needs a
+    /// material from the stair family.
+    requires_stair: bool,
+}
+
 /// The block id a geometry-driven member paints, given its resolved
 /// `mat_slot=` binding.
 ///
-/// One function for the roof and the eave stair because they take the same
-/// three decisions and used to take them in two places. `subject` names the
-/// member in the messages (``gable` roof`, `eave `stair``) and
-/// `requires_stair` says whether this member attaches `facing` / `half` /
-/// `shape` to what it paints.
-///
-/// Falls back to `fallback` in three cases, reporting the two the author can
-/// act on:
+/// One function for the roof and the eave stair: they take the same three
+/// decisions on the same grounds, and a member that attaches blockstates
+/// has the same obligations wherever it appears. `fallback` is the kind's
+/// own id, used when the binding supplies nothing usable:
 ///
 /// - no `mat_slot=` at all — silent, the member asked for nothing;
 /// - a `mat_slot=` that resolved to nothing — the resolver already said why
 ///   (`E_UNRESOLVED_SLOT`, `E_UNKNOWN_ABSTRACT_TOKEN`, …) or the theme is
-///   missing entirely (`W_NO_THEME_BOUND` fired against the struct), and
-///   this anchors the consequence to the member that will wear the fallback;
+///   missing entirely (`W_NO_THEME_BOUND` fired against the struct), and the
+///   `W_DEFERRED_MEMBER` here anchors the consequence to the member that
+///   wears the fallback;
 /// - a `mat_slot=` that resolved outside the stair family, when this member
-///   needs one. Adopting the id instead put `minecraft:cobblestone[facing=
-///   south,half=bottom,shape=straight]` into a Java `.nbt` at exit 0 — a
-///   blockstate no version of the game has — and made the Bedrock writer
-///   refuse it one layer later, blaming its own state mapping for a
-///   material the geometry should never have accepted.
+///   needs one. `E_INCOMPATIBLE_MATERIAL`, which stops the build: a whole
+///   block has nowhere to put `facing` / `half` / `shape`, and neither
+///   answer available without the author is acceptable — attaching them
+///   anyway writes a blockstate that does not exist, and substituting the
+///   fallback builds the member out of a material nobody chose. The
+///   fallback is still returned so the rest of the pass has a coherent
+///   palette to finish with; nothing reaches disk, because the finding is
+///   an error.
 ///
 /// A resolved state that carries `properties` is reported and its id still
-/// used: the geometry derives its own states and drops the binding's, which
-/// is a smaller thing than the id being wrong. It is checked *after* the
-/// family, because properties on an id this member is not going to paint
-/// are nothing the author needs to hear about.
-fn geometry_material_id(
+/// used — the member derives its own states and drops the binding's, which
+/// is a smaller thing than the material being the wrong shape. Checked
+/// after the family, because properties on an id the member is not going to
+/// paint are nothing the author needs to hear about.
+fn geometry_material_id<'a>(
     member: &Member,
-    resolved: Option<&BlockState>,
-    fallback: &'static str,
-    subject: &str,
-    requires_stair: bool,
+    scope: Option<&ScopeResolution>,
+    resolved: Option<&'a BlockState>,
+    fallback: &'a str,
+    shape: &MemberShape,
     diagnostics: &mut Vec<Diagnostic>,
-) -> String {
+) -> &'a str {
     let Some(state) = resolved else {
         if member.mat_slot.is_some() {
             diagnostics.push(diag_deferred_member_reason(
                 member,
                 &format!(
-                    "{subject}'s `mat_slot=` did not resolve to a block id; it falls back to `{fallback}`",
+                    "{}'s `mat_slot=` did not resolve to a block id; it falls back to `{fallback}`",
+                    shape.subject,
                 ),
             ));
         }
-        return fallback.to_owned();
+        return fallback;
     };
-    if requires_stair && !is_stair(&state.id) {
-        diagnostics.push(diag_deferred_member_reason(
-            member,
-            &format!(
-                "{subject} derives `facing` / `half` / `shape` from the geometry and `{}` is not a stair, so it has nowhere to put them; it falls back to `{fallback}`",
-                state.id,
-            ),
-        ));
-        return fallback.to_owned();
+    let slot_value = scope
+        .and_then(|scope| scope.members.get(&member.span.start))
+        .and_then(|binding| binding.slot_value.as_ref());
+    if shape.requires_stair && !is_stair(&state.id) {
+        diagnostics.push(diag_incompatible_material(member, state, shape, slot_value));
+        return fallback;
     }
     if !state.properties.is_empty() {
         diagnostics.push(diag_deferred_member_reason(
             member,
             &format!(
-                "{subject} derives `facing` / `half` / `shape` from the geometry; the `mat_slot=` binding to `{}[...]` also carried properties and was not applied verbatim",
+                "{} derives its blockstates from {}; the `mat_slot=` binding to `{}[...]` also carried properties and was not applied verbatim",
+                shape.subject,
+                shape.states_from,
                 state.id,
             ),
         ));
     }
-    state.id.clone()
+    &state.id
+}
+
+/// A member whose geometry attaches blockstates was bound to a material
+/// that cannot carry them.
+///
+/// Anchored on the theme's slot value when there is one, because that line
+/// is where the fix goes — the member itself only names a slot, and every
+/// member reading that slot has the same problem for the same reason.
+fn diag_incompatible_material(
+    member: &Member,
+    state: &BlockState,
+    shape: &MemberShape,
+    slot_value: Option<&ValueWithSpan>,
+) -> Diagnostic {
+    let mut notes = vec![DiagnosticNote {
+        span: None,
+        message: "bind the slot to a `*_stairs` material — the registry pack's \
+                  `roof.dark_wood`, `roof.light_wood`, `roof.warm_wood`, and \
+                  `roof.cool_wood` all resolve to one"
+            .to_owned(),
+    }];
+    if let Some(slot) = &member.mat_slot {
+        notes.push(DiagnosticNote {
+            span: None,
+            message: format!(
+                "reached through `mat_slot={slot}`, so every member reading that slot has it too",
+            ),
+        });
+    }
+    Diagnostic {
+        code: DiagnosticCode::IncompatibleMaterial,
+        span: slot_value.map_or_else(|| member.span.clone(), |v| member_or_slot_span(member, v)),
+        primary: format!(
+            "{} derives `facing` / `half` / `shape` from {} and `{}` is not a stair, so those states have nowhere to go",
+            shape.subject, shape.states_from, state.id,
+        ),
+        notes,
+        data: Some(DiagnosticData::IncompatibleMaterial {
+            id: state.id.clone(),
+            required: "stair".to_owned(),
+            slot: member.mat_slot.clone(),
+            token: slot_value.and_then(|v| match &v.value.kind {
+                ValueKind::Token(token) => Some(token.clone()),
+                // Anything else here was already refused upstream
+                // (`E_UNKNOWN_SLOT_TARGET`), so there is no token to name.
+                _ => None,
+            }),
+        }),
+    }
 }
 
 fn fill_roof_gable(
@@ -2223,10 +2292,10 @@ fn fill_stair(
         ));
         return;
     }
-    // Same three decisions the roof takes, and the same reasons — an eave
-    // band is a row of stairs whose `facing` / `half` / `shape` come from
-    // the member's own arguments rather than from a slope, but they are
-    // still states this pass attaches to whatever it paints.
+    // An eave band is a row of stairs whose `facing` / `half` / `shape`
+    // come from the member's own arguments rather than from a slope, but
+    // they are states this pass attaches to whatever it paints just the
+    // same — so the material has to be able to carry them.
     let resolved = resolve_member_state(
         member,
         ctx.scope,
@@ -2236,13 +2305,19 @@ fn fill_stair(
     );
     let stair_id = geometry_material_id(
         member,
+        ctx.scope,
         resolved.as_ref(),
         STAIR_BASE_ID,
-        "eave `stair`",
-        true,
+        &MemberShape {
+            subject: "eave `stair`".to_owned(),
+            states_from: "its own arguments",
+            // An eave is a row of stairs by construction — `fill_stair`
+            // refuses any `kind=` but `stairs` well above here.
+            requires_stair: true,
+        },
         diagnostics,
     );
-    let idx = palette.intern(stair_state(&stair_id, facing, half, shape));
+    let idx = palette.intern(stair_state(stair_id, facing, half, shape));
     let length = wall_length(side, ctx.interior_w, ctx.interior_h);
     for u in 0..length {
         let Some((wx, _wy, wz)) = wall_local_to_grid(
@@ -3435,6 +3510,38 @@ mod tests {
         }
     }
 
+    /// A registry whose tokens carry blockstates.
+    ///
+    /// [`FakeResolver`] answers with `BlockState::bare`, as the real
+    /// `PackView` does, so the branch that keeps a binding's id while
+    /// dropping its properties had no way to run.
+    struct StatefulResolver {
+        token: &'static str,
+        id: &'static str,
+        properties: Vec<(&'static str, &'static str)>,
+    }
+
+    impl TargetRegistry for StatefulResolver {
+        fn lookup(&self, token: &str) -> Option<BlockState> {
+            (token == self.token).then(|| BlockState {
+                id: format!("minecraft:{}", self.id),
+                properties: self
+                    .properties
+                    .iter()
+                    .map(|(k, v)| ((*k).to_owned(), (*v).to_owned()))
+                    .collect(),
+            })
+        }
+
+        fn known_tokens(&self) -> Vec<String> {
+            vec![self.token.to_owned()]
+        }
+
+        fn block_ids(&self) -> Option<crate::block_array::BlockIdSet<'_>> {
+            None
+        }
+    }
+
     /// A registry with a pinned target, for the `E_UNKNOWN_ID` path.
     ///
     /// Separate from [`FakeResolver`] so the tests above keep running in
@@ -4403,6 +4510,13 @@ mod tests {
             .collect()
     }
 
+    fn refusals(out: &BlockArrayIr) -> Vec<&Diagnostic> {
+        out.diagnostics
+            .iter()
+            .filter(|d| d.code == DiagnosticCode::IncompatibleMaterial)
+            .collect()
+    }
+
     /// A struct whose roof and eave read `slot r`, bound to `material`.
     fn roofed(kind: &str, material: &str) -> String {
         format!(
@@ -4414,17 +4528,15 @@ mod tests {
 
     #[test]
     fn a_sloped_roof_refuses_a_material_that_is_not_a_stair() {
-        // The palette used to carry
-        // `minecraft:cobblestone[facing=south,half=bottom,shape=straight]`
-        // — a blockstate no version of the game has — written into a Java
-        // `.nbt` at exit 0. Bedrock then refused it one layer later and
-        // blamed its own state mapping for a material the geometry should
-        // never have accepted.
+        // A whole block has nowhere to carry `facing` / `half` / `shape`,
+        // so a palette entry pairing them would name a blockstate that does
+        // not exist. Refusing at the binding is the only answer that does
+        // not either write it or silently pick a different material.
         for kind in ["gable", "shed", "hip"] {
             let src = roofed(kind, "cobblestone")
                 .replace("roof kind=shed", "roof slope_to=front kind=shed");
             let out = lowered(&src);
-            let reasons: Vec<&str> = deferrals(&out).iter().map(|d| d.primary.as_str()).collect();
+            let reasons: Vec<&str> = refusals(&out).iter().map(|d| d.primary.as_str()).collect();
             assert!(
                 reasons
                     .iter()
@@ -4454,16 +4566,18 @@ mod tests {
         // hardcoded id.
         let out = lowered(&roofed("gable", "dark_oak_stairs"));
         assert!(
-            deferrals(&out).is_empty(),
+            out.diagnostics.is_empty(),
             "a stair species is a legal roof material, got {:?}",
-            deferrals(&out),
+            out.diagnostics,
         );
+        // `.all()` over the stated ids would also hold if the roof painted
+        // nothing at all, which is the regression the refusal path could
+        // plausibly introduce. Pin the presence first.
+        let stated = ids_carrying_properties(&out);
+        assert!(!stated.is_empty(), "the roof must paint stairs");
         assert!(
-            ids_carrying_properties(&out)
-                .iter()
-                .all(|id| id == "minecraft:dark_oak_stairs"),
-            "the species must be the one bound, got {:?}",
-            ids_carrying_properties(&out),
+            stated.iter().all(|id| id == "minecraft:dark_oak_stairs"),
+            "the species must be the one bound, got {stated:?}",
         );
     }
 
@@ -4473,19 +4587,20 @@ mod tests {
                    struct s size=9x7\n  walls mat_slot=w height=4\n  \
                    roof kind=gable overhang=1\n";
         let out = lowered(src);
-        assert!(deferrals(&out).is_empty(), "got {:?}", deferrals(&out));
+        assert!(out.diagnostics.is_empty(), "got {:?}", out.diagnostics);
+        let stated = ids_carrying_properties(&out);
+        assert!(!stated.is_empty(), "the roof must paint stairs");
         assert!(
-            ids_carrying_properties(&out)
-                .iter()
-                .all(|id| id == STAIR_BASE_ID),
+            stated.iter().all(|id| id == STAIR_BASE_ID),
+            "got {stated:?}",
         );
     }
 
     #[test]
     fn a_roof_whose_binding_resolves_to_nothing_still_says_so() {
-        // The arm that already existed, kept honest while the family check
-        // moved in beside it: this is a different failure with a different
-        // fix, and folding the two messages together would lose that.
+        // A distinct failure from an unusable material, with a distinct
+        // fix: here the slot names nothing at all. Folding the two messages
+        // together would send the author looking for the wrong thing.
         let src = "theme t:\n  slot w -> @cobblestone\n\n\
                    struct s size=9x7\n  walls mat_slot=w height=4\n  \
                    roof kind=gable mat_slot=nosuchslot overhang=1\n";
@@ -4522,11 +4637,10 @@ mod tests {
 
     #[test]
     fn an_eave_stair_refuses_a_material_that_is_not_a_stair() {
-        // The second site. A `stair` member takes its `facing` / `half` /
-        // `shape` from its own arguments rather than from a slope, but it
-        // attaches them to whatever it paints just the same — so fixing
-        // only the roof would leave the same invalid blockstate reachable
-        // one line further down the same file.
+        // A `stair` member takes its `facing` / `half` / `shape` from its
+        // own arguments rather than from a slope, and attaches them to
+        // whatever it paints just the same. The obligation follows the
+        // states, not the member kind.
         let src = "theme t:\n  slot w -> @cobblestone\n  slot r -> @spruce_stairs\n\
                    \x20\x20slot trim -> @cobblestone\n\n\
                    struct s size=9x7\n  walls mat_slot=w height=4\n  \
@@ -4534,16 +4648,41 @@ mod tests {
                    stair id=e kind=stairs mat_slot=trim side=front half=top shape=outer_left\n";
         let out = lowered(src);
         assert!(
-            deferrals(&out)
+            refusals(&out)
                 .iter()
                 .any(|d| d.primary.contains("eave `stair`") && d.primary.contains("is not a stair")),
             "got {:?}",
-            deferrals(&out),
+            out.diagnostics,
         );
         assert!(
             !ids_carrying_properties(&out)
                 .iter()
                 .any(|id| id == "minecraft:cobblestone"),
+        );
+    }
+
+    #[test]
+    fn an_eave_stair_with_no_binding_falls_back_to_the_stair_id() {
+        // No `stair` member without `mat_slot=` exists anywhere else in the
+        // repo, so nothing held this argument to the stair constant — and
+        // the plank one is a plausible slip that would put
+        // `spruce_planks[facing=…]` in a palette, which is the shape this
+        // whole check exists to refuse. The roof binds a *different*
+        // species so the eave's fallback is identifiable in the palette.
+        let src = "theme t:\n  slot w -> @cobblestone\n  slot r -> @dark_oak_stairs\n\n\
+                   struct s size=9x7\n  walls mat_slot=w height=4\n  \
+                   roof kind=gable mat_slot=r overhang=1\n  \
+                   stair id=e kind=stairs side=front half=top shape=outer_left\n";
+        let out = lowered(src);
+        assert!(out.diagnostics.is_empty(), "got {:?}", out.diagnostics);
+        let stated = ids_carrying_properties(&out);
+        assert!(
+            stated.iter().any(|id| id == STAIR_BASE_ID),
+            "the eave wears the stair fallback, got {stated:?}",
+        );
+        assert!(
+            stated.iter().all(|id| is_stair(id)),
+            "nothing outside the family may carry stair states, got {stated:?}",
         );
     }
 
@@ -4566,9 +4705,54 @@ mod tests {
     }
 
     #[test]
+    fn a_binding_inside_the_family_keeps_its_id_and_loses_its_states() {
+        // The geometry derives `facing` / `half` / `shape` and the binding
+        // asked for its own; the id survives and the states do not, which
+        // is a smaller thing than the material being the wrong shape and so
+        // stays a warning.
+        let src = "theme t:\n  slot w -> @cobblestone\n  slot r -> @roof.fancy\n\n\
+                   struct s size=9x7\n  walls mat_slot=w height=4\n  \
+                   roof kind=gable mat_slot=r overhang=1\n";
+        let out = lowered_with_resolver(
+            src,
+            &StatefulResolver {
+                token: "roof.fancy",
+                id: "birch_stairs",
+                properties: vec![("facing", "north")],
+            },
+        );
+        assert!(
+            deferrals(&out)
+                .iter()
+                .any(|d| d.primary.contains("also carried properties")),
+            "got {:?}",
+            out.diagnostics,
+        );
+        assert!(refusals(&out).is_empty(), "got {:?}", out.diagnostics);
+        let stated = ids_carrying_properties(&out);
+        assert!(
+            stated.iter().all(|id| id == "minecraft:birch_stairs"),
+            "the bound id survives, got {stated:?}",
+        );
+        // And the states are the geometry's, not the binding's: a gable
+        // paints both slope facings, which one hardcoded `facing=north`
+        // could not produce.
+        let facings: std::collections::BTreeSet<String> = palette_of(&out)
+            .iter()
+            .filter_map(|e| e.properties.get("facing").cloned())
+            .collect();
+        assert!(
+            facings.len() > 1,
+            "the geometry's facings, not the binding's one: {facings:?}",
+        );
+    }
+
+    #[test]
     fn the_family_is_reported_before_the_properties_it_makes_moot() {
-        // A binding can only carry properties through a registry pack, so
-        // this pairing is not reachable from source today. Pinning the
+        // Not reachable from source today, and the registry pack is not the
+        // way in either — `PackView::lookup` ends in `BlockState::bare`.
+        // The only producer is `canonical_to_block_state`'s bracket
+        // literal, which the grammar has no production for. Pinning the
         // precedence anyway: once the id is refused it is not painted, and
         // reporting that its unused properties were also dropped would ask
         // the author to fix something that is not there.
@@ -4588,15 +4772,24 @@ mod tests {
         let mut diagnostics = Vec::new();
         let id = geometry_material_id(
             member,
+            None,
             Some(&state),
             STAIR_BASE_ID,
-            "`gable` roof",
-            true,
+            &MemberShape {
+                subject: "`gable` roof".to_owned(),
+                states_from: "the geometry",
+                requires_stair: true,
+            },
             &mut diagnostics,
         );
         assert_eq!(id, STAIR_BASE_ID);
         assert_eq!(diagnostics.len(), 1, "one finding, got {diagnostics:?}");
-        assert!(diagnostics[0].primary.contains("is not a stair"));
+        assert_eq!(
+            diagnostics[0].code,
+            DiagnosticCode::IncompatibleMaterial,
+            "got {:?}",
+            diagnostics[0],
+        );
     }
 
     #[test]
@@ -4805,10 +4998,11 @@ mod tests {
 
     #[test]
     fn flat_roof_honours_bound_mat_slot_id() {
-        // A theme binding to something other than the flat kind's canonical
-        // spruce_planks id now lands in the palette verbatim (per-theme
-        // roof species landed alongside level lowering). No warning; the
-        // deck voxel at the roof plane uses the resolved id.
+        // A flat deck attaches no blockstates, so it requires nothing of
+        // the block it names: the binding lands in the palette verbatim,
+        // including a stair id, which is then simply a stair in its
+        // default state. `FLAT_BASE_ID` is what a deck falls back to with
+        // no binding, not a species it is held to.
         let src = "theme t:\n  slot w -> @cobblestone\n  slot r -> @spruce_stairs\n\nstruct s size=5x5\n  walls mat_slot=w height=3\n  roof kind=flat mat_slot=r\n";
         let out = lowered(src);
         assert_eq!(
@@ -4932,10 +5126,10 @@ mod tests {
 
     #[test]
     fn gable_honours_bound_mat_slot_id() {
-        // A theme that binds `slot roof -> @oak_stairs` now lands
-        // oak_stairs on every gable voxel instead of silently getting the
-        // hardcoded spruce_stairs. No deferred warning fires because the
-        // resolved id is used verbatim.
+        // A theme that binds `slot roof -> @oak_stairs` lands oak_stairs on
+        // every gable voxel instead of the hardcoded spruce_stairs.
+        // Nothing is reported: the binding is inside the stair family, so
+        // it is used verbatim, which is what choosing a species means.
         let src = "theme t:\n  slot w -> @cobblestone\n  slot r -> @oak_stairs\n\nstruct s size=5x5\n  walls mat_slot=w height=3\n  roof kind=gable mat_slot=r\n";
         let out = lowered(src);
         assert_eq!(

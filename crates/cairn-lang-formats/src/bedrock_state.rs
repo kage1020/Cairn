@@ -27,6 +27,7 @@
 //! illustrative example uses different `weirdo_direction` values; the
 //! wiki listing is authoritative for the on-disk mapping.
 
+use cairn_lang_core::block_array::is_stair;
 use cairn_lang_nbt::Compound;
 use cairn_lang_nbt::tag::Tag;
 use indexmap::IndexMap;
@@ -105,8 +106,13 @@ const FACING_VALID: &str = "east, west, south, north";
 /// `states` form.
 ///
 /// The `id` must already be a concrete `namespace:identifier` (the backend
-/// rejects abstract tokens separately); the family is keyed off the `_stairs`
-/// suffix on the identifier path.
+/// rejects abstract tokens separately). The whole stair family shares one
+/// Bedrock state vocabulary, so the mapping is keyed off the family rather
+/// than each material id — and off `cairn-lang-core`'s [`is_stair`], because
+/// core asks the same question when it decides whether a roof or eave may
+/// attach stair states to a material. A second copy here could disagree
+/// about an id core paints and this module then has to write, which is a
+/// disagreement with no symptom until a structure file reaches the game.
 ///
 /// # Errors
 ///
@@ -136,18 +142,6 @@ pub fn translate_states(
         })
     }
 }
-
-/// A block is a stair when its identifier path ends in `_stairs`
-/// (`minecraft:oak_stairs`, `minecraft:dark_oak_stairs`, …). The whole stair
-/// family shares one Bedrock state vocabulary, so the mapping is keyed off the
-/// family suffix rather than each material id.
-///
-/// The rule itself lives in `cairn-lang-core`, which asks the same question
-/// when a roof or eave decides whether it may attach stair states to a
-/// material. Two copies could disagree about an id that core paints and this
-/// module then has to write, which is a disagreement with no symptom until a
-/// structure file reaches the game.
-use cairn_lang_core::block_array::is_stair;
 
 fn translate_stair(
     id: &str,

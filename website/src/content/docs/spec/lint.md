@@ -52,6 +52,12 @@ first-class parts of the spec; messages MUST be in a shape that feeds the self-c
     registry pack's materials catalog produced, and the ID a member default falls back to when
     the pack declares no row for it; `data.origin` says which, because only the first is a fix
     the author makes in their own source.
+  - `E_INCOMPATIBLE_MATERIAL` — a member whose geometry attaches blockstates was bound to a
+    material that cannot carry them: a sloped roof or an eave `stair` bound outside the stair
+    family (`spec/compilation.md` §4.3). Raised during block-array lowering, so `cairn compile`
+    and `cairn lower` report it and `cairn check` does not. `data` carries the `slot` the member
+    read and the `token` the theme bound to it, because a dotted token is the registry pack's
+    mapping to correct rather than the author's line.
   - `E_UNKNOWN_KEYWORD` — statement keyword is not in the known-keyword table.
   - `E_MISPLACED_MEMBER` — statement keyword is in the table but the
     enclosing body has no reader for it: a `place` / `connect` in a
@@ -149,6 +155,7 @@ evolving — additions for new codes are strictly additive, so consumers should 
 | `E_UNKNOWN_ID` | `{ "kind": "unknown_id", "id": "minecraft:oak_plank", "registry": "java 1.21.4", "origin": "authored", "suggestion": "minecraft:oak_planks" }` — the ID the pinned target does not declare, the target it was checked against, and who chose it. `origin` is `authored` when the source names the ID, `catalog` when the pack maps a token onto it, and `builtin` when the pack declares no row for a member default and the compiler's own ID was used. `token` accompanies the latter two and is absent for `authored`; `suggestion` is absent when no declared ID is within the typo threshold, which is always the case for a rename. |
 | ↳ `origin: "catalog"` | `{ …, "id": "minecraft:stone_bricks", "registry": "bedrock 1.21.0", "origin": "catalog", "token": "floor.stone.smooth", "suggestion": "minecraft:stonebrick" }` — the author's token is correct and the pack's mapping is not, so the edit does not belong in the source. |
 | ↳ `origin: "builtin"` | `{ …, "id": "minecraft:oak_pressure_plate", "registry": "bedrock 1.21.60", "origin": "builtin", "token": "pressure_plate.default" }` — the pack declares no row for that member default, so the ID compiled into the compiler was used. The pack is what has to grow the row. |
+| `E_INCOMPATIBLE_MATERIAL` | `{ "kind": "incompatible_material", "id": "minecraft:cobblestone", "required": "stair", "slot": "roof", "token": "cobblestone" }` — the material the member was bound to, the family its geometry needs, and where the binding came from. `slot` is the `mat_slot=` name the member read and is absent when it carries no binding; `token` is the theme's slot value as written, and a dotted one (`roof.dark_wood`) means the registry pack's mapping is what to correct rather than the source line. `required` is named rather than implied so a second family added later is a value here and not a second code. |
 | `E_INCOMPLETE_PLACE` | `{ "kind": "incomplete_place", "missing": ["id", "use", "theme"] }` — the keys the `place` row does not declare, without the trailing `=`, in the order the message lists them. Always non-empty. |
 
 Codes not listed above omit `data` entirely; reading `entry.data` returns `undefined` and the JSON

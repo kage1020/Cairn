@@ -209,6 +209,25 @@ pub enum DiagnosticCode {
     /// `cairn check` / `info` / `lower` have no version to check against
     /// and skip the comparison rather than guess one.
     UnknownId,
+    /// A member whose geometry attaches blockstates was bound to a material
+    /// that cannot carry them — a sloped roof or an eave `stair` bound to
+    /// something outside the stair family.
+    ///
+    /// Error, and by the first clause of §11.3 rather than the last. The
+    /// pass is not the incomplete side: `gable` / `shed` / `hip` lowering
+    /// is finished, and what it is being asked for does not exist. Adopting
+    /// the id writes a blockstate no version of the game has; substituting
+    /// the fallback species builds a roof out of a material nobody asked
+    /// for. Both are the silent substitution §10.4 forbids, and a warning
+    /// does not make either loud: no machine-readable surface carries a
+    /// lowering warning — `cairn check` does not lower, the lockfile still
+    /// says `verified: true`, and there is no `--deny-warnings`.
+    ///
+    /// Whose mistake it is rides in `data` (`slot` and `token`), the way
+    /// [`Self::UnknownId`] carries `origin` — a pack that maps a token onto
+    /// the wrong material is not the author's to fix, but it is not less of
+    /// an error for that.
+    IncompatibleMaterial,
     /// A `struct` has no `size=WxH` header, so block-array lowering cannot
     /// derive a voxel extent and skips it.
     StructNoSize,
@@ -388,6 +407,7 @@ impl DiagnosticCode {
             Self::AbstractTokenDeferred => "W_ABSTRACT_TOKEN_DEFERRED",
             Self::UnknownAbstractToken => "E_UNKNOWN_ABSTRACT_TOKEN",
             Self::UnknownId => "E_UNKNOWN_ID",
+            Self::IncompatibleMaterial => "E_INCOMPATIBLE_MATERIAL",
             Self::StructNoSize => "W_STRUCT_NO_SIZE",
             Self::DefNoSize => "W_DEF_NO_SIZE",
             Self::UnresolvedPlaceRef => "E_UNRESOLVED_PLACE_REF",
@@ -457,6 +477,7 @@ impl DiagnosticCode {
             | Self::UnknownSlotTarget
             | Self::UnknownAbstractToken
             | Self::UnknownId
+            | Self::IncompatibleMaterial
             | Self::UnresolvedPlaceRef
             | Self::UnresolvedThemeRef
             | Self::ThemeVariantMissing
@@ -598,6 +619,30 @@ pub enum DiagnosticData {
         /// suggestion cap. Absent from the JSON when there is none.
         #[serde(skip_serializing_if = "Option::is_none")]
         suggestion: Option<String>,
+    },
+    /// Companion payload for [`DiagnosticCode::IncompatibleMaterial`].
+    ///
+    /// Carries where the material came from, because that decides who fixes
+    /// it: a `slot` the source binds directly is the author's line to edit,
+    /// while a dotted `token` is the registry pack's mapping. Same reason
+    /// [`Self::UnknownId`] carries `origin` — the severity does not move,
+    /// only the address does.
+    IncompatibleMaterial {
+        /// The fully namespaced id the member was bound to.
+        id: String,
+        /// Family the member's geometry needs, as a bare noun (`stair`).
+        /// Named rather than implied so a second family added later is a
+        /// value here and not a second code.
+        required: String,
+        /// `mat_slot=` name the member read, when it has one. Absent when
+        /// the member carries no binding at all.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        slot: Option<String>,
+        /// The theme's slot value as written (`@cobblestone`,
+        /// `@roof.dark_wood`). A dotted one is a catalog token, which makes
+        /// the pack's mapping the thing to correct.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        token: Option<String>,
     },
 }
 
@@ -871,6 +916,7 @@ mod tests {
                 "E_DUPLICATE_SELECTOR",
                 "E_DUPLICATE_SIZE",
                 "E_DUPLICATE_SLOT",
+                "E_INCOMPATIBLE_MATERIAL",
                 "E_INCOMPLETE_PLACE",
                 "E_INVALID_PLACE_ID",
                 "E_INVALID_PLACE_ORIGIN",
@@ -926,6 +972,7 @@ mod tests {
                 "E_DUPLICATE_SELECTOR",
                 "E_DUPLICATE_SIZE",
                 "E_DUPLICATE_SLOT",
+                "E_INCOMPATIBLE_MATERIAL",
                 "E_INCOMPLETE_PLACE",
                 "E_INVALID_PLACE_ID",
                 "E_INVALID_PLACE_ORIGIN",

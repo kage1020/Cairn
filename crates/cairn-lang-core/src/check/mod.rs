@@ -150,6 +150,7 @@ mod tests {
             | C::AbstractTokenDeferred
             | C::UnknownAbstractToken
             | C::UnknownId
+            | C::IncompatibleMaterial
             | C::StructNoSize
             | C::DefNoSize
             | C::WalkwayBlocked
@@ -219,7 +220,11 @@ mod tests {
         });
         assert_eq!(
             escapes,
-            ["E_UNKNOWN_ABSTRACT_TOKEN", "E_UNKNOWN_ID"],
+            [
+                "E_INCOMPATIBLE_MATERIAL",
+                "E_UNKNOWN_ABSTRACT_TOKEN",
+                "E_UNKNOWN_ID",
+            ],
             "an Error-severity code raised only during block-array lowering \
              cannot be reported by `cairn check`, so a CI job gating on it \
              goes green on a source `cairn compile` refuses",
