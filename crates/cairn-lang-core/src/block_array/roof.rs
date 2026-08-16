@@ -1159,6 +1159,9 @@ mod tests {
             "minecraft:stairs",
             "mystairs",
             "minecraft:oak_stairs_slab",
+            // The case path-keying exists for: the family word is in the
+            // namespace and the block is not a stair at all.
+            "weird_stairs:cobblestone",
             "create:cogwheel",
             "",
         ] {

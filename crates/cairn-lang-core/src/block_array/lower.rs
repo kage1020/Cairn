@@ -4615,6 +4615,37 @@ mod tests {
     }
 
     #[test]
+    fn a_roof_reading_a_slot_from_a_theme_that_never_bound_says_so_once() {
+        // `geometry_material_id`'s doc claims this arm: the struct already
+        // has `W_NO_THEME_BOUND` against it, and the member-level finding
+        // is what says *which* member wore the fallback. A module with two
+        // logical themes and no `place theme=` binds nothing.
+        let src = "theme a:
+  slot r -> @dark_oak_stairs
+
+theme b:
+  slot r -> @birch_stairs
+
+struct s size=9x7
+  roof kind=gable mat_slot=r overhang=1
+";
+        let out = lowered(src);
+        assert!(
+            deferrals(&out)
+                .iter()
+                .any(|d| d.primary.contains("did not resolve")),
+            "got {:?}",
+            out.diagnostics,
+        );
+        assert!(refusals(&out).is_empty(), "got {:?}", out.diagnostics);
+        let stated = ids_carrying_properties(&out);
+        assert!(
+            !stated.is_empty() && stated.iter().all(|id| id == STAIR_BASE_ID),
+            "the roof wears the fallback, got {stated:?}",
+        );
+    }
+
+    #[test]
     fn a_flat_roof_takes_any_block_because_it_attaches_no_states() {
         // Including a stair id: a flat roof paints `minecraft:oak_stairs`
         // bare, which is a valid blockstate — every property takes its
@@ -4769,10 +4800,15 @@ mod tests {
             .iter()
             .find(|m| m.role == MemberRole::Roof)
             .expect("the roof member");
+        // A real scope, so the payload carries the theme's slot value the
+        // way it does in a build — `None` here would leave `token` empty
+        // and quietly weaken every assertion below it.
+        let resolution = resolve(&ir, None);
+        let scope = resolution.scopes.get("struct::s").expect("scope");
         let mut diagnostics = Vec::new();
         let id = geometry_material_id(
             member,
-            None,
+            Some(scope),
             Some(&state),
             STAIR_BASE_ID,
             &MemberShape {
@@ -4789,6 +4825,27 @@ mod tests {
             DiagnosticCode::IncompatibleMaterial,
             "got {:?}",
             diagnostics[0],
+        );
+        // The payload is the whole reason this is an error rather than a
+        // softer finding: it says where the material came from, so a
+        // consumer can tell a source line from a pack mapping without
+        // parsing the sentence (`spec/lint.md` §11.2).
+        let Some(DiagnosticData::IncompatibleMaterial {
+            id,
+            required,
+            slot,
+            token,
+        }) = &diagnostics[0].data
+        else {
+            panic!("expected the payload, got {:?}", diagnostics[0].data);
+        };
+        assert_eq!(id, "minecraft:cobblestone");
+        assert_eq!(required, "stair");
+        assert_eq!(slot.as_deref(), Some("r"));
+        assert_eq!(
+            token.as_deref(),
+            Some("cobblestone"),
+            "the theme's slot value, so a dotted one reads as a pack mapping",
         );
     }
 
