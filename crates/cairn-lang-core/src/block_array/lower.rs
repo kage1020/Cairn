@@ -4769,6 +4769,24 @@ mod tests {
         assert_eq!(apex_high.properties.get("half").unwrap(), "top");
     }
 
+    #[test]
+    fn even_span_gable_apex_rows_keep_their_own_facing() {
+        // `half=top` is the one property the two apex faces agree on, so
+        // asserting it alone cannot tell them apart — and the two rows
+        // reach the palette through a face → slot table that a single
+        // wrong arm collapses into one entry. `facing` is what separates
+        // them: the low row keeps the low slope's direction and the high
+        // row the high slope's, so a collapsed table caps the ridge with
+        // two stairs pointing the same way.
+        let src = "theme t:\n  slot w -> @cobblestone\n  slot r -> @spruce_stairs\n\nstruct s size=8x4\n  walls mat_slot=w height=4\n  roof kind=gable mat_slot=r\n";
+        let out = lowered(src);
+        let ba = out.structures.get("struct::s").unwrap();
+        let apex_low = block_state_at(ba, 0, 6, 1);
+        let apex_high = block_state_at(ba, 0, 6, 2);
+        assert_eq!(apex_low.properties.get("facing").unwrap(), "south");
+        assert_eq!(apex_high.properties.get("facing").unwrap(), "north");
+    }
+
     // ---- site lowering: per-place IR emission and the coord solver ----
 
     #[test]
