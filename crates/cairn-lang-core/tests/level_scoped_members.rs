@@ -232,6 +232,26 @@ fn a_pressure_plate_under_a_raised_level_lands_at_that_level() {
 }
 
 #[test]
+fn findings_are_reported_in_source_order_not_pass_order() {
+    // Deciding participation during the flatten step means a level-scoped
+    // member is judged before anything the phases look at, including
+    // members written above it. The pass reports in span order so a reader
+    // can work down the file instead of jumping around it.
+    let ir = lowered(&source(
+        "  roof kind=bogus mat_slot=roof\n\n  \
+         level id=upper y=5\n    roof kind=gable mat_slot=roof\n",
+    ));
+
+    assert_eq!(
+        defer_reasons(&ir),
+        vec![
+            "unknown roof `kind=bogus` (expected one of gable, shed, hip, flat)".to_owned(),
+            "level-scoped `roof` is not yet supported".to_owned(),
+        ],
+    );
+}
+
+#[test]
 fn a_placed_def_flattens_its_levels_the_way_a_struct_does() {
     // The flatten happens once, inside the body-lowering helper, so a `def`
     // instantiated by a `place` goes through it too — and its dims feed the

@@ -4846,6 +4846,21 @@ mod tests {
         assert_eq!(apex_high.properties.get("half").unwrap(), "top");
     }
 
+    /// The clip in [`paint_voxel`] is unreachable from source — every
+    /// generator's coordinates come from the dims the volume was built
+    /// against — so the only way to show that it fails loud rather than
+    /// dropping the write is to call it with the disagreement it exists to
+    /// catch. Debug-only because that is where `debug_assert!` lives; a
+    /// release build clips and carries on.
+    #[test]
+    #[cfg(debug_assertions)]
+    #[should_panic(expected = "the dim math and the generator disagree")]
+    fn painting_outside_the_volume_is_not_a_silent_drop() {
+        let dims = Dims { x: 2, y: 2, z: 2 };
+        let mut voxels = vec![PaletteIndex::AIR; dims.volume()];
+        paint_voxel(dims, &mut voxels, (2, 0, 0), || PaletteIndex(1));
+    }
+
     #[test]
     fn even_span_gable_apex_rows_keep_their_own_facing() {
         // The two apex faces agree on `id`, `half`, and `shape`, and differ
