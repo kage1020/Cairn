@@ -6,12 +6,12 @@
 //! `IoU` comparisons, and serialisation hang off this single shape (see
 //! `spec/architecture.md` §3.1).
 //!
-//! The [`lower::lower_to_block_array`] pass handles the cottage example's
-//! roster end-to-end: `floor`, `walls`, `door`, `window`, and
-//! `roof kind=gable`. Other roles (`stair`, `level`, `pressure_plate`, ...),
-//! roof kinds (`hip`, `shed`, ...), and abstract material tokens degrade
-//! to air with a `W_DEFERRED_MEMBER` warning rather than failing, so a
-//! partial build is still inspectable.
+//! The [`lower::lower_to_block_array`] pass handles `floor`, `walls`,
+//! `door`, `window`, `stair`, `pressure_plate`, the `level y=N` grouping,
+//! and all four roof kinds. A role it does not yet voxelise degrades to
+//! air with a `W_DEFERRED_MEMBER` warning rather than failing, so a partial
+//! build is still inspectable; the same warning covers an abstract material
+//! token reached with no registry pack to lift it.
 //!
 //! ## Overhang convention
 //!
@@ -34,6 +34,7 @@ pub use lower::{BUILTIN_BLOCK_IDS, lower_to_block_array};
 pub use material::{
     BlockIdSet, IdOrigin, MaterialDeferred, TargetRegistry, UnknownId, resolve_block_state,
 };
+pub use roof::is_stair;
 pub use walkway::{
     BlockedIndex, RoutePathError, WalkwayLayout, build_walkway_array, l_path, port_world_position,
     route_path,

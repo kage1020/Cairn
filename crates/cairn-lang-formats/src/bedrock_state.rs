@@ -27,6 +27,7 @@
 //! illustrative example uses different `weirdo_direction` values; the
 //! wiki listing is authoritative for the on-disk mapping.
 
+use cairn_lang_core::block_array::is_stair;
 use cairn_lang_nbt::Compound;
 use cairn_lang_nbt::tag::Tag;
 use indexmap::IndexMap;
@@ -105,8 +106,13 @@ const FACING_VALID: &str = "east, west, south, north";
 /// `states` form.
 ///
 /// The `id` must already be a concrete `namespace:identifier` (the backend
-/// rejects abstract tokens separately); the family is keyed off the `_stairs`
-/// suffix on the identifier path.
+/// rejects abstract tokens separately). The whole stair family shares one
+/// Bedrock state vocabulary, so the mapping is keyed off the family rather
+/// than each material id — and off `cairn-lang-core`'s [`is_stair`], because
+/// core asks the same question when it decides whether a roof or eave may
+/// attach stair states to a material. A second copy here could disagree
+/// about an id core paints and this module then has to write, which is a
+/// disagreement with no symptom until a structure file reaches the game.
 ///
 /// # Errors
 ///
@@ -135,15 +141,6 @@ pub fn translate_states(
             properties: join_properties(properties),
         })
     }
-}
-
-/// A block is a stair when its identifier path ends in `_stairs`
-/// (`minecraft:oak_stairs`, `minecraft:dark_oak_stairs`, …). The whole stair
-/// family shares one Bedrock state vocabulary, so the mapping is keyed off the
-/// family suffix rather than each material id.
-fn is_stair(id: &str) -> bool {
-    let path = id.rsplit_once(':').map_or(id, |(_, p)| p);
-    path.ends_with("_stairs")
 }
 
 fn translate_stair(
@@ -314,6 +311,29 @@ mod tests {
         )
         .expect("stair");
         assert!(straight.degraded.is_empty());
+    }
+
+    #[test]
+    fn the_family_test_agrees_with_the_one_that_decided_to_paint_it() {
+        // `minecraft:mystairs` is the id the two plausible spellings of the
+        // stair rule disagree about: its path ends in `stairs` but not in
+        // `_stairs`. `cairn-lang-core` refuses to attach stair states to it,
+        // and this module has to refuse to translate them — a second copy of
+        // the rule that answered "stair" here would translate a blockstate
+        // core never intended to exist, with nothing between it and the
+        // written file.
+        //
+        // Pinned on behaviour rather than by calling the predicate, so the
+        // test still means something if the two ever stop sharing one.
+        let err = translate_states(
+            "minecraft:mystairs",
+            &stair_props("south", "top", "straight"),
+        )
+        .expect_err("not a stair");
+        assert!(matches!(
+            err,
+            BedrockStateError::UnmappableBlock { ref id, .. } if id == "minecraft:mystairs"
+        ));
     }
 
     #[test]

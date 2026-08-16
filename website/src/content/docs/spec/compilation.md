@@ -52,12 +52,28 @@ cairn compile build.crn --edition bedrock --target 1.21.40
 `roof kind=gable [overhang=N] mat_slot=...` lowers to a pair of opposite
 stair slopes meeting at a ridge. The four supported roof kinds —
 `gable`, `shed`, `hip`, and `flat` — share an overhang and wall-top
-convention; the kind-specific layout rules are in §4.3–§4.6 below. Per-theme
-roof materials follow with the registry pack — until then every sloped
-roof emits `minecraft:spruce_stairs` and every flat roof emits
-`minecraft:spruce_planks`; a `mat_slot=` binding that resolves to any
-other id fires `W_DEFERRED_MEMBER` so the user's intent is not silently
-replaced.
+convention; the kind-specific layout rules are in §4.3–§4.6 below.
+
+A sloped roof's material comes from its `mat_slot=` binding and **must be a
+member of the stair family** — an id whose path ends in `_stairs`. The
+geometry derives `facing`, `half`, and `shape` and attaches them to whatever
+it paints, and a whole block has nowhere to put them: the result would be a
+blockstate no version of the game has. The registry pack's four roof species
+(`roof.dark_wood`, `roof.light_wood`, `roof.warm_wood`, `roof.cool_wood`) all
+resolve inside the family, and choosing between them is what the binding is
+for. A binding *outside* the family is `E_INCOMPATIBLE_MATERIAL` and stops
+the build: attaching the states anyway writes a blockstate that does not
+exist, and quietly substituting `minecraft:spruce_stairs` builds the roof
+out of a material nobody chose — both are the silent substitution §10.4
+forbids. With no `mat_slot=` at all that fallback does apply, silently,
+because nothing was asked for.
+
+A binding inside the family that also carries blockstates of its own keeps
+its id and loses those states to the geometry, with `W_DEFERRED_MEMBER`.
+
+The same rule governs an eave `stair kind=stairs` member: it takes its
+states from its own arguments rather than from a slope, but it attaches them
+to its material the same way.
 
 - **Ridge axis.** The ridge runs along the *long* horizontal axis of the
   struct footprint. When the footprint is square (`size=WxW`) the tie
@@ -73,8 +89,8 @@ replaced.
   walls, doors, and windows keep their authored coordinates and are
   shifted inward by `+N` along x and z. The roof spans the full inflated
   bounding box so the eaves and gable ends extend past the wall ring.
-- **Stair orientation.** Each slope row uses `minecraft:spruce_stairs`
-  with `half=bottom, shape=straight`, `facing` pointed toward the ridge:
+- **Stair orientation.** Each slope row sets `half=bottom,
+  shape=straight` with `facing` pointed toward the ridge:
   `south` on the `-z` slope and `north` on the `+z` slope for an x-axis
   ridge; `east` / `west` mirrored for a z-axis ridge. The apex caps with a
   single stair at `half=top` using the low-slope facing.
@@ -83,10 +99,9 @@ replaced.
 
 `roof kind=shed slope_to=front|back|left|right [overhang=N] mat_slot=...`
 lowers to a single stair slope rising toward the wall named in
-`slope_to=`. The slope is the same family as a gable's low slope —
-`minecraft:spruce_stairs` with `half=bottom, shape=straight` — but only
-one of the two slopes is emitted, so the opposite wall stays at its
-authored height (no gable-end fill).
+`slope_to=`. Each row is shaped like a gable's low slope —
+`half=bottom, shape=straight` — but only one of the two slopes is emitted,
+so the opposite wall stays at its authored height (no gable-end fill).
 
 - **Slope axis.** When `slope_to=front|back` the slope rises along `z`;
   when `slope_to=left|right` it rises along `x`. The high edge sits on
@@ -138,10 +153,11 @@ solid blocks at `y = wall_top + 1`. The deck spans the entire inflated
 bounding box (= `dims.x × dims.z`), so an `overhang=N` extends the deck
 past the walls without any extra rules.
 
-- **Material.** Every cell of the deck is `minecraft:spruce_planks`.
-  Per-theme flat-roof materials are deferred to the registry pack
-  catalogue; until then a `mat_slot=` binding that resolves to anything
-  else fires `W_DEFERRED_MEMBER`, matching the sloped-roof contract.
+- **Material.** Every cell of the deck is the `mat_slot=` binding's id,
+  attached to no blockstate, falling back to `minecraft:spruce_planks` when
+  there is no binding. Unlike a sloped roof this constrains nothing: a deck
+  is whole blocks, so every id is as valid as any other and a stair among
+  them is simply a stair in its default state.
 - **Height contribution.** A flat roof adds `1` to `Dims.y` regardless
   of footprint, so a `size=WxH` `walls height=K` plus `roof kind=flat`
   produces `Dims.y = 1 + K + 1`.
