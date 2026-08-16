@@ -320,6 +320,29 @@ mod tests {
     }
 
     #[test]
+    fn the_family_test_agrees_with_the_one_that_decided_to_paint_it() {
+        // `minecraft:mystairs` is the id the two plausible spellings of the
+        // stair rule disagree about: its path ends in `stairs` but not in
+        // `_stairs`. `cairn-lang-core` refuses to attach stair states to it,
+        // and this module has to refuse to translate them — a second copy of
+        // the rule that answered "stair" here would translate a blockstate
+        // core never intended to exist, with nothing between it and the
+        // written file.
+        //
+        // Pinned on behaviour rather than by calling the predicate, so the
+        // test still means something if the two ever stop sharing one.
+        let err = translate_states(
+            "minecraft:mystairs",
+            &stair_props("south", "top", "straight"),
+        )
+        .expect_err("not a stair");
+        assert!(matches!(
+            err,
+            BedrockStateError::UnmappableBlock { ref id, .. } if id == "minecraft:mystairs"
+        ));
+    }
+
+    #[test]
     fn non_stair_with_properties_fails_loud() {
         let err = translate_states("minecraft:oak_door", &props([("facing", "north")]))
             .expect_err("stateful non-stair");
