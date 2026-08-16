@@ -26,9 +26,16 @@
 //! their children before the volume is sized so a nested `walls` / `door`
 //! / `window` / `stair` / `pressure_plate` reaches both the dim math and
 //! its phase with the level's `y=` applied as an authored offset. That one
-//! flattened list is the pass's paint set: what it holds is what the dims
-//! are built to hold, and what it drops costs nothing (see
-//! [`flatten_members`]).
+//! flattened list is the pass's paint set, and what it drops costs nothing
+//! (see [`flatten_members`]).
+//!
+//! Sizing reads that list twice over, in two steps. `walls` and `roof`
+//! shape the volume — the walls set its height, the roof its overhang and
+//! the headroom above the wall top — while `floor`, `door`, `window`,
+//! `stair`, and `pressure_plate` are authored against the volume those two
+//! produce and are checked against it when their phase paints them. So a
+//! member being in the list does not mean the dims read it; it means the
+//! dims and the paint pass are looking at the same members.
 //!
 //! Defs are skipped at this layer: they only concretise via a `site`
 //! `place ... use=def_name` reference, and site lowering arrives with the
@@ -181,6 +188,14 @@ pub fn lower_to_block_array(
         &mut walkways,
         &mut diagnostics,
     );
+
+    // Report in source order, the way `check::Sink::into_sorted` does. This
+    // pass emits in pass order — flatten before dims before phases, scope
+    // after scope — so which finding comes first has never tracked which
+    // line comes first, and a reader working down a file has to jump
+    // around. The sort is stable, so two findings on one span keep the
+    // order the passes raised them in.
+    diagnostics.sort_by_key(|d| (d.span.start, d.span.end));
 
     BlockArrayIr {
         structures,
@@ -1238,8 +1253,9 @@ struct StructCtx<'a> {
     overhang: u32,
     interior_w: u32,
     interior_h: u32,
-    /// Highest wall voxel coordinate (= max `height=` across walls members).
-    /// `0` when no walls are present.
+    /// Highest wall voxel coordinate: the largest `y_offset + height=`
+    /// across the walls members the pass will paint, so a `walls` inside a
+    /// `level y=N` raises it by that `N`. `0` when no walls are present.
     wall_top: u32,
 }
 
@@ -1345,12 +1361,20 @@ fn flatten_members<'a>(
 ///
 /// `walls`, `door`, `window`, `stair`, and `pressure_plate` read the offset
 /// as the base their own geometry is measured from, which is exactly what
-/// `level y=N` asks for — `themed-tower.crn` stacks a second storey out of
-/// them. A `floor` and a `roof` are single planes the struct has one of: a
-/// second floor slab would land in mid-air, and a second roof would cap the
-/// building below its own roof plane. Neither generator has a story for
-/// that yet, so the member is dropped rather than painted somewhere
-/// unexpected — and, being dropped, it contributes nothing to the volume.
+/// `level y=N` asks for — `themed-tower.crn` builds its second storey from
+/// the first three. A `floor` and a `roof` are single planes the struct has
+/// one of: a second floor slab would land in mid-air, and a second roof
+/// would cap the building below its own roof plane. Neither generator has a
+/// story for that yet, so the member is dropped rather than painted
+/// somewhere unexpected — and, being dropped, it contributes nothing to the
+/// volume.
+///
+/// Every variant is spelled out for the reason [`member_phase`] spells its
+/// own out: a role added later must not fall into "lowers the same at any
+/// offset" because that is the arm a wildcard happens to reach. The three
+/// that lower to nothing at any offset are listed with the rest — they
+/// reach the phase buckets and defer there, with a message that names the
+/// role rather than the level.
 fn level_offset_role_defer(role: &MemberRole, y_offset: u32) -> Option<&'static str> {
     if y_offset == 0 {
         return None;
@@ -1358,7 +1382,28 @@ fn level_offset_role_defer(role: &MemberRole, y_offset: u32) -> Option<&'static 
     match role {
         MemberRole::Floor => Some("level-scoped `floor` is not yet supported"),
         MemberRole::Roof => Some("level-scoped `roof` is not yet supported"),
-        _ => None,
+        // The first five measure their geometry from the offset. The rest
+        // paint no voxels at any offset and are listed rather than left to
+        // a wildcard: `place` and `connect` belong to a site body and are
+        // reported as misplaced, `Other` is an unknown keyword, and
+        // `circuit` marks a region for redstone lowering. `circuit` is the
+        // one with something left owing — the region recogniser takes no
+        // `y_offset`, so a level-scoped region is not shifted. That is a
+        // gap on the redstone side rather than something dropping the
+        // member would close: a lost region is not closer to right than an
+        // unshifted one.
+        MemberRole::Walls
+        | MemberRole::Door
+        | MemberRole::Window
+        | MemberRole::Stair
+        | MemberRole::PressurePlate
+        | MemberRole::Circuit
+        | MemberRole::Place
+        | MemberRole::Connect
+        | MemberRole::Other(_) => None,
+        MemberRole::Level => unreachable!(
+            "a nested `level` is dropped by `flatten_members` before this function sees it"
+        ),
     }
 }
 
@@ -1729,15 +1774,46 @@ fn size_value(member: &Member, key: &str) -> Option<(u32, u32)> {
     }
 }
 
+/// Paint one voxel, claiming its palette slot only once the cell is known
+/// to exist.
+///
+/// Every generator derives its coordinates from the same [`Dims`] the volume
+/// was allocated against, so a coordinate outside it means the dim math and
+/// the generator disagree. That disagreement is what a `roof` under
+/// `level y=0` used to be: a full set of stair entries reached the palette
+/// and not one stair reached the structure, with nothing said. The write is
+/// still clipped rather than panicking a release build, and the
+/// `debug_assert!` turns the disagreement into a test failure instead of a
+/// silent drop.
+///
+/// `claim` runs only on a cell that exists, which is what keeps the palette
+/// free of entries no voxel references — the same ordering
+/// [`fill_pressure_plate`] uses. That one site keeps its own `if let`
+/// because it has a diagnostic to raise: its anchor comes from `at=`, so
+/// unlike these coordinates it is the author's to get wrong.
+fn paint_voxel(
+    dims: Dims,
+    voxels: &mut [PaletteIndex],
+    pos: (u32, u32, u32),
+    claim: impl FnOnce() -> PaletteIndex,
+) {
+    if let Some(i) = dims.index(pos.0, pos.1, pos.2) {
+        voxels[i] = claim();
+    } else {
+        debug_assert!(
+            false,
+            "voxel {pos:?} lies outside {dims:?}; the dim math and the generator disagree",
+        );
+    }
+}
+
 fn fill_floor(ctx: &StructCtx<'_>, idx: PaletteIndex, voxels: &mut [PaletteIndex]) {
     let y = 0;
     for z_local in 0..ctx.interior_h {
         for x_local in 0..ctx.interior_w {
             let x = ctx.overhang + x_local;
             let z = ctx.overhang + z_local;
-            if let Some(i) = ctx.dims.index(x, y, z) {
-                voxels[i] = idx;
-            }
+            paint_voxel(ctx.dims, voxels, (x, y, z), || idx);
         }
     }
 }
@@ -1773,9 +1849,7 @@ fn fill_walls(
                 }
                 let x = ctx.overhang + x_local;
                 let z = ctx.overhang + z_local;
-                if let Some(i) = ctx.dims.index(x, y, z) {
-                    voxels[i] = idx;
-                }
+                paint_voxel(ctx.dims, voxels, (x, y, z), || idx);
             }
         }
     }
@@ -1856,13 +1930,13 @@ fn fill_roof_gable(
     let roof_h = ctx.dims.z;
     let ridge_axis = gable_ridge_axis(roof_w, roof_h);
     // One `palette.intern` per face rather than one per voxel — a 99-voxel
-    // cottage roof needs four — but claimed on first use, not up front. A
-    // roof narrow enough to have no high apex (a 3x3 struct leaves a single
-    // ridge voxel) emits three of the four faces, and an entry no voxel
-    // references is not free: it reaches the `.nbt` palette, the
-    // `resolved_ir_hash`, and the per-entry counts `cairn info` reports.
-    // Claiming on demand also means the palette lays out in the order
-    // [`gable_voxels`] first visits each face, which is fixed by the
+    // cottage roof needs four — but claimed on first use, not up front. An
+    // odd ridge span converges on a single row, so a roof that has one (a
+    // 3x3 struct) emits three of the four faces and never the high apex,
+    // and an entry no voxel references is not free: it reaches the `.nbt`
+    // palette, the `resolved_ir_hash`, and the per-entry counts `cairn info`
+    // reports. Claiming on demand also means the palette lays out in the
+    // order [`gable_voxels`] first visits each face, which is fixed by the
     // generator's layer iteration, so the layout stays deterministic.
     let mut face_indices: [Option<PaletteIndex>; 4] = [None; 4];
     for GableVoxel { pos, face } in gable_voxels(roof_w, roof_h, ctx.wall_top) {
@@ -1872,14 +1946,13 @@ fn fill_roof_gable(
             StairFace::ApexLow => 2,
             StairFace::ApexHigh => 3,
         };
-        let idx = *face_indices[slot].get_or_insert_with(|| {
-            let mut state = gable_stair_state(ridge_axis, face);
-            base_id.clone_into(&mut state.id);
-            palette.intern(state)
+        paint_voxel(ctx.dims, voxels, pos, || {
+            *face_indices[slot].get_or_insert_with(|| {
+                let mut state = gable_stair_state(ridge_axis, face);
+                base_id.clone_into(&mut state.id);
+                palette.intern(state)
+            })
         });
-        if let Some(i) = ctx.dims.index(pos.0, pos.1, pos.2) {
-            voxels[i] = idx;
-        }
     }
 }
 
@@ -1895,22 +1968,23 @@ fn fill_roof_shed(
         return;
     };
     // Each face's slot is claimed the first time a voxel needs it, for the
-    // reason spelled out in [`fill_roof_gable`]: a shed shallow enough to
-    // be all slope and no apex must not ship an apex entry.
+    // reason spelled out in [`fill_roof_gable`]. The face that goes missing
+    // here is the slope, not the apex: the layer count is the slope span
+    // floored at one, and the topmost layer is always the apex, so a shed
+    // one deep is a single apex row with no slope under it.
     let mut face_indices: [Option<PaletteIndex>; 2] = [None; 2];
     for ShedVoxel { pos, face } in shed_voxels(ctx.dims.x, ctx.dims.z, ctx.wall_top, slope_to) {
         let slot = match face {
             ShedFace::Slope => 0,
             ShedFace::Apex => 1,
         };
-        let idx = *face_indices[slot].get_or_insert_with(|| {
-            let mut state = shed_stair_state(slope_to, face);
-            base_id.clone_into(&mut state.id);
-            palette.intern(state)
+        paint_voxel(ctx.dims, voxels, pos, || {
+            *face_indices[slot].get_or_insert_with(|| {
+                let mut state = shed_stair_state(slope_to, face);
+                base_id.clone_into(&mut state.id);
+                palette.intern(state)
+            })
         });
-        if let Some(i) = ctx.dims.index(pos.0, pos.1, pos.2) {
-            voxels[i] = idx;
-        }
     }
 }
 
@@ -1936,12 +2010,11 @@ fn fill_roof_hip(
     // possible the moment `HipFace` grew or reordered; folding the
     // intern call into the voxel loop closes that gap.
     for HipVoxel { pos, face } in hip_voxels(roof_w, roof_h, ctx.wall_top) {
-        let mut state = hip_stair_state(ridge_axis, face);
-        base_id.clone_into(&mut state.id);
-        let idx = palette.intern(state);
-        if let Some(i) = ctx.dims.index(pos.0, pos.1, pos.2) {
-            voxels[i] = idx;
-        }
+        paint_voxel(ctx.dims, voxels, pos, || {
+            let mut state = hip_stair_state(ridge_axis, face);
+            base_id.clone_into(&mut state.id);
+            palette.intern(state)
+        });
     }
 }
 
@@ -1951,13 +2024,19 @@ fn fill_roof_flat(
     voxels: &mut [PaletteIndex],
     base_id: &str,
 ) {
-    let mut deck_state = flat_block_state();
-    base_id.clone_into(&mut deck_state.id);
-    let deck_idx = palette.intern(deck_state);
+    // A deck is one material, so a single slot serves the whole layer — but
+    // it is still claimed from inside the first write rather than before
+    // the loop, so the rule "no entry without a voxel" holds at every
+    // generator rather than at three of the four.
+    let mut deck_idx: Option<PaletteIndex> = None;
     for (x, y, z) in flat_voxels(ctx.dims.x, ctx.dims.z, ctx.wall_top) {
-        if let Some(i) = ctx.dims.index(x, y, z) {
-            voxels[i] = deck_idx;
-        }
+        paint_voxel(ctx.dims, voxels, (x, y, z), || {
+            *deck_idx.get_or_insert_with(|| {
+                let mut deck_state = flat_block_state();
+                base_id.clone_into(&mut deck_state.id);
+                palette.intern(deck_state)
+            })
+        });
     }
 }
 
@@ -2102,9 +2181,7 @@ fn carve_door(
         ) else {
             continue;
         };
-        if let Some(i) = ctx.dims.index(x, y, z) {
-            voxels[i] = PaletteIndex::AIR;
-        }
+        paint_voxel(ctx.dims, voxels, (x, y, z), || PaletteIndex::AIR);
     }
 }
 
@@ -2262,9 +2339,7 @@ fn fill_stair(
             continue;
         };
         let (x, z) = shift_outward(side, wx, wz);
-        if let Some(i) = ctx.dims.index(x, y_world, z) {
-            voxels[i] = idx;
-        }
+        paint_voxel(ctx.dims, voxels, (x, y_world, z), || idx);
     }
 }
 
@@ -3061,29 +3136,6 @@ fn fill_window(
         ));
         return;
     }
-    // A window without a `mat_slot=` is an *opening* rather than a fill:
-    // the rectangle is carved to air, giving the `class=arrow_slit`
-    // pattern themed-tower uses a way to punch narrow slits through a
-    // stone wall without also picking a decorative species. Windows with
-    // an explicit `mat_slot=` continue to resolve through the palette;
-    // resolution failure still short-circuits so the resolver's own
-    // diagnostic isn't shadowed here.
-    let idx = if member.mat_slot.is_some() {
-        let Some(idx) = palette_index_for(
-            member,
-            ctx.scope,
-            ctx.registry,
-            palette,
-            diagnostics,
-            ctx.theme_missing,
-        ) else {
-            return;
-        };
-        idx
-    } else {
-        PaletteIndex::AIR
-    };
-
     let len = wall_length(side, ctx.interior_w, ctx.interior_h);
     let span_end = offset
         .saturating_add(step.saturating_mul(repeat.saturating_sub(1)))
@@ -3115,6 +3167,33 @@ fn fill_window(
         ));
         return;
     }
+    // Resolved below the two geometry checks above, not before them: both
+    // return without painting, and a palette entry claimed on the way to
+    // one of them is a block `cairn info` counts and the `.nbt` ships for a
+    // window that was never cut.
+    //
+    // A window without a `mat_slot=` is an *opening* rather than a fill:
+    // the rectangle is carved to air, giving the `class=arrow_slit`
+    // pattern themed-tower uses a way to punch narrow slits through a
+    // stone wall without also picking a decorative species. Windows with
+    // an explicit `mat_slot=` continue to resolve through the palette;
+    // resolution failure still short-circuits so the resolver's own
+    // diagnostic isn't shadowed here.
+    let idx = if member.mat_slot.is_some() {
+        let Some(idx) = palette_index_for(
+            member,
+            ctx.scope,
+            ctx.registry,
+            palette,
+            diagnostics,
+            ctx.theme_missing,
+        ) else {
+            return;
+        };
+        idx
+    } else {
+        PaletteIndex::AIR
+    };
     let base_rect = WindowRect {
         side,
         offset,
@@ -3194,9 +3273,7 @@ fn paint_window_rect(ctx: &StructCtx<'_>, rect: WindowRect, voxels: &mut [Palett
             ) else {
                 continue;
             };
-            if let Some(i) = ctx.dims.index(x, y, z) {
-                voxels[i] = rect.palette_index;
-            }
+            paint_voxel(ctx.dims, voxels, (x, y, z), || rect.palette_index);
         }
     }
 }
@@ -4771,13 +4848,13 @@ mod tests {
 
     #[test]
     fn even_span_gable_apex_rows_keep_their_own_facing() {
-        // `half=top` is the one property the two apex faces agree on, so
-        // asserting it alone cannot tell them apart — and the two rows
-        // reach the palette through a face → slot table that a single
-        // wrong arm collapses into one entry. `facing` is what separates
-        // them: the low row keeps the low slope's direction and the high
-        // row the high slope's, so a collapsed table caps the ridge with
-        // two stairs pointing the same way.
+        // The two apex faces agree on `id`, `half`, and `shape`, and differ
+        // only in `facing`, so a test that asserts `half=top` cannot tell
+        // them apart — and the two rows reach the palette through a face →
+        // slot table that a single wrong arm collapses into one entry. The
+        // low row keeps the low slope's direction and the high row the high
+        // slope's, so a collapsed table caps the ridge with two stairs
+        // pointing the same way.
         let src = "theme t:\n  slot w -> @cobblestone\n  slot r -> @spruce_stairs\n\nstruct s size=8x4\n  walls mat_slot=w height=4\n  roof kind=gable mat_slot=r\n";
         let out = lowered(src);
         let ba = out.structures.get("struct::s").unwrap();

@@ -171,10 +171,14 @@ fn dropping_one_member_of_a_raised_level_keeps_its_siblings() {
 }
 
 #[test]
-fn a_malformed_overhang_on_a_level_scoped_roof_is_reported_exactly_once() {
+fn a_level_scoped_roofs_overhang_is_validated_exactly_once() {
     // The dim pass is the only reader of `overhang=`, so a roof it cannot
-    // see is a roof whose `overhang=` nothing validates. Reading it twice
-    // is the other way to get this wrong.
+    // see is a roof whose `overhang=` nothing validates — that is what this
+    // pins. Reading it twice is the other way to get it wrong.
+    //
+    // The message is the one the shared non-negative-integer reader emits,
+    // recorded here as it stands. It overstates the outcome: the roof is
+    // still drawn, flush with the wall line, rather than deferred.
     let ir = lowered(&source(
         "\n  level id=l0 y=0\n    roof kind=gable mat_slot=roof overhang=nope\n",
     ));
@@ -182,5 +186,83 @@ fn a_malformed_overhang_on_a_level_scoped_roof_is_reported_exactly_once() {
     assert_eq!(
         defer_reasons(&ir),
         vec!["`overhang=` must be a non-negative integer that fits in u32".to_owned()],
+    );
+}
+
+#[test]
+fn a_malformed_overhang_on_a_dropped_roof_is_not_read_at_all() {
+    // A member the pass drops costs nothing, and validating an argument
+    // nothing will use is a cost: it reports a mistake in a line that has
+    // no effect either way.
+    let ir = lowered(&source(
+        "\n  level id=upper y=5\n    roof kind=gable mat_slot=roof overhang=nope\n",
+    ));
+
+    assert_eq!(
+        defer_reasons(&ir),
+        vec!["level-scoped `roof` is not yet supported".to_owned()],
+    );
+}
+
+#[test]
+fn a_pressure_plate_under_a_raised_level_lands_at_that_level() {
+    // `pressure_plate` is on the side of the rule that keeps its lowering
+    // at an offset, and nothing else in this file proves it: a mutant that
+    // moved it to the dropped side, or one that stopped adding the offset,
+    // would be caught by `walls` alone in every other test here.
+    let raised = lowered(&source(
+        "  roof kind=gable mat_slot=roof overhang=1\n\n  \
+         level id=upper y=3\n    pressure_plate at=inside.front mat_slot=deck\n",
+    ));
+    let ground = lowered(&source(
+        "  roof kind=gable mat_slot=roof overhang=1\n  \
+         pressure_plate at=inside.front y=3 mat_slot=deck\n",
+    ));
+
+    assert_eq!(defer_reasons(&raised), Vec::<String>::new());
+    assert_eq!(only_structure(&raised), only_structure(&ground));
+    assert!(
+        only_structure(&raised)
+            .palette
+            .entries
+            .iter()
+            .any(|s| s.id == "minecraft:oak_planks"),
+        "the plate must paint for this comparison to mean anything",
+    );
+}
+
+#[test]
+fn a_placed_def_flattens_its_levels_the_way_a_struct_does() {
+    // The flatten happens once, inside the body-lowering helper, so a `def`
+    // instantiated by a `place` goes through it too — and its dims feed the
+    // placement record that walkway routing collides against, not just the
+    // voxels.
+    let src = concat!(
+        "theme t:\n",
+        "  slot wall -> @cobblestone\n",
+        "  slot roof -> @spruce_stairs\n",
+        "\n",
+        "def hut size=9x7:\n",
+        "  walls mat_slot=wall height=3\n",
+        "\n",
+        "  level id=l0 y=0\n",
+        "    roof kind=gable mat_slot=roof overhang=1\n",
+        "\n",
+        "site s:\n",
+        "  place id=home use=hut theme=t at=origin\n",
+    );
+    let ir = lowered(src);
+    let ba = ir
+        .structures
+        .get("site::s::home")
+        .expect("place lowered under site::s::home");
+    let placement = ir.placements.get("site::s::home").expect("placement");
+
+    assert_eq!(ba.dims.x, 11);
+    assert_eq!(ba.dims.z, 9);
+    assert!(ba.dims.y > 4, "the roof must raise the volume");
+    assert_eq!(
+        placement.dims, ba.dims,
+        "the placement record must carry the dims the voxels were built into",
     );
 }

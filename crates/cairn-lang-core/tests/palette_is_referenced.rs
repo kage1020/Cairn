@@ -6,10 +6,19 @@
 //! voxel references is therefore a block the tooling counts and the artifact
 //! ships for a block that is not in the build.
 //!
-//! Interning a state before knowing whether the generator will emit it is
-//! how one gets there. A gable roof has four stair faces but a 3x3 roof has
-//! no room for a high apex, and a roof whose voxels all landed outside the
-//! volume interned a full set of stairs and painted none of them.
+//! Claiming a slot before knowing whether a voxel will use it is how one
+//! gets there, and there are two ways to be early. A generator can claim a
+//! face its geometry never emits — a gable roof has four stair faces but a
+//! 3x3 roof has no room for a high apex. And a member can claim its
+//! material on the way to a check that refuses to paint it at all, which is
+//! what a window above the wall column and a plate with no exterior cell
+//! both did.
+//!
+//! The palette full of stairs on a structure with no stairs, which is what
+//! `level y=0` used to produce, was neither of those: the roof emitted
+//! every face and every write landed outside a volume sized without it.
+//! That one is closed by the volume being derived from the members that
+//! paint, not by anything here — these tests hold the line once it is.
 
 use std::collections::HashSet;
 use std::path::PathBuf;
@@ -133,6 +142,61 @@ fn a_shed_shallow_enough_to_be_all_apex_does_not_intern_a_slope() {
             .iter()
             .any(|s| s.id == "minecraft:spruce_stairs"),
         "the roof must reach the palette for this test to mean anything",
+    );
+}
+
+#[test]
+fn a_window_that_does_not_fit_the_wall_adds_no_palette_entry() {
+    // The two geometry checks refuse to paint anything, so the material
+    // must not have been resolved into the palette on the way to them.
+    let ir = lower_source(
+        "theme t:\n  \
+         slot wall -> @cobblestone\n  \
+         slot glass -> @glass\n\n\
+         struct t size=5x5\n  \
+         walls mat_slot=wall height=3\n  \
+         window side=front y=9 offset=0 size=2x2 mat_slot=glass\n",
+    );
+
+    assert_eq!(
+        ir.diagnostics.len(),
+        1,
+        "the window must say it was dropped: {:#?}",
+        ir.diagnostics,
+    );
+    let ba = ir.structures.values().next().expect("one structure");
+    let ids: Vec<&str> = ba.palette.entries.iter().map(|s| s.id.as_str()).collect();
+    assert!(
+        !ids.contains(&"minecraft:glass"),
+        "a window that is never cut must not reach the palette, got {ids:?}",
+    );
+    assert_every_entry_is_used("dropped window", &ir);
+}
+
+#[test]
+fn a_window_that_runs_past_the_wall_adds_no_palette_entry() {
+    // The other of the two checks — this one fires on the horizontal span
+    // rather than the vertical one, and they return from different places.
+    let ir = lower_source(
+        "theme t:\n  \
+         slot wall -> @cobblestone\n  \
+         slot glass -> @glass\n\n\
+         struct t size=5x5\n  \
+         walls mat_slot=wall height=3\n  \
+         window side=front y=1 offset=4 size=4x2 mat_slot=glass\n",
+    );
+
+    assert_eq!(
+        ir.diagnostics.len(),
+        1,
+        "the window must say it was dropped: {:#?}",
+        ir.diagnostics,
+    );
+    let ba = ir.structures.values().next().expect("one structure");
+    let ids: Vec<&str> = ba.palette.entries.iter().map(|s| s.id.as_str()).collect();
+    assert!(
+        !ids.contains(&"minecraft:glass"),
+        "a window that is never cut must not reach the palette, got {ids:?}",
     );
 }
 

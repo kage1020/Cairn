@@ -177,9 +177,16 @@ struct has one of — there is no second slab to drop and no second cap to
 place — so under `level y=N` with `N > 0` each fires `W_DEFERRED_MEMBER`
 and lowers to nothing.
 
-A member that lowers to nothing contributes nothing to the derived
-volume: the `overhang=` of a dropped roof does not widen the footprint,
-and its height does not raise `Dims.y`. The converse holds too — every
-member that lowers is one the volume was sized to hold. Those are two
-readings of a single list, which is what keeps a member from painting
-past the end of the array it was handed.
+A member dropped by the rule above contributes nothing to the derived
+volume: the `overhang=` of a level-scoped roof does not widen the
+footprint, and its height does not raise `Dims.y`. The converse holds
+too — every member the pass paints is one the volume was sized to hold.
+Those are two readings of a single list, which is what keeps a member
+from painting past the end of the array it was handed.
+
+The rule is about `level` grouping and does not generalise to every
+member that lowers to nothing. A `roof` with no `kind=` still widens the
+footprint by its `overhang=`, and `walls` whose material does not resolve
+still raise `Dims.y`; both fire `W_DEFERRED_MEMBER` and paint no voxels.
+The volume is derived before those failures are known, so today the extra
+extent is air.
