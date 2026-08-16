@@ -3146,6 +3146,9 @@ mod tests {
         // one variant declares must not error, or a file that compiles
         // cleanly for Bedrock fails `cairn check`.
         let r = resolve(&ir(&placed_reading_a_bedrock_only_slot("shop")), None);
+        // The logical name has to bind first, or "no unresolved slot" would
+        // hold for the uninteresting reason that no scope was built.
+        assert_eq!(placed_scope(&r).bound_theme.as_deref(), Some("shop_java"));
         assert!(
             !r.diagnostics
                 .iter()
@@ -3306,6 +3309,41 @@ mod tests {
         // the slot and not something else about the source.
         let reading = src.replace("floor mat=@stone", "floor mat_slot=floor");
         let r = resolve(&ir(&reading), Some(Edition::Java));
+        assert!(
+            r.diagnostics
+                .iter()
+                .any(|d| d.code == DiagnosticCode::ThemeVariantMissing),
+            "got {:?}",
+            r.diagnostics,
+        );
+    }
+
+    #[test]
+    fn a_slot_read_from_a_nested_member_counts_as_reading_one() {
+        // `level y=N` groups members, so the only `mat_slot=` in a module
+        // can sit one level down. A scan that stops at the top level would
+        // let this file build its floor out of air under a pin that cannot
+        // bind the theme, which is the outcome the finding exists to stop.
+        let src = [
+            "theme shop_bedrock:",
+            "  slot floor -> @dark_oak_planks",
+            "",
+            "struct s size=4x4",
+            "  level y=1",
+            "    floor mat_slot=floor",
+            "",
+        ]
+        .join(
+            "
+",
+        );
+        let module = crate::parse(&src).expect("parses");
+        let intent = crate::lower(&module);
+        assert!(
+            any_member_reads_a_slot(&intent),
+            "premise: the nested member is the only reader in the module",
+        );
+        let r = resolve(&intent, Some(Edition::Java));
         assert!(
             r.diagnostics
                 .iter()
