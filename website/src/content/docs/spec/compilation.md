@@ -163,3 +163,46 @@ past the walls without any extra rules.
   produces `Dims.y = 1 + K + 1`.
 - **No slope arguments.** `slope_to=`, `kind=`-specific facings, and
   ridge axes do not apply.
+
+## 4.7 Level grouping and volume derivation
+
+`level y=N` groups members and places each of them `N` voxels above the
+struct's base plane. It is a grouping construct rather than a member of
+its own: the `level` line lowers to no blocks, and every member under it
+lowers as if it had been written in the body with `N` added to whatever
+vertical coordinate it already carries.
+
+The volume a struct lowers into is derived, never written:
+
+```
+Dims.x = size.W + 2 × overhang
+Dims.z = size.H + 2 × overhang
+Dims.y = 1 + wall_top + roof_extra
+```
+
+`overhang` is the largest `overhang=` on any roof, `wall_top` the largest
+`N + height` over the walls (`N` being the enclosing level's, `0` in the
+body), and `roof_extra` the tallest per-kind contribution from §4.3–§4.6.
+Members inside a `level` count in all three: a struct whose only walls sit
+under `level y=5` is as tall as one that writes them directly.
+
+Not every role has a lowering at a non-zero offset. `walls`, `door`,
+`window`, `stair`, and `pressure_plate` read `N` as the base their own
+geometry is measured from. A `floor` and a `roof` are single planes a
+struct has one of — there is no second slab to drop and no second cap to
+place — so under `level y=N` with `N > 0` each fires `W_DEFERRED_MEMBER`
+and lowers to nothing.
+
+A member dropped by the rule above contributes nothing to the derived
+volume: the `overhang=` of a level-scoped roof does not widen the
+footprint, and its height does not raise `Dims.y`. The converse holds
+too — every member the pass paints is one the volume was sized to hold.
+Those are two readings of a single list, which is what keeps a member
+from painting past the end of the array it was handed.
+
+The rule is about `level` grouping and does not generalise to every
+member that lowers to nothing. A `roof` with no `kind=` still widens the
+footprint by its `overhang=`, and `walls` whose material does not resolve
+still raise `Dims.y`; both fire `W_DEFERRED_MEMBER` and paint no voxels.
+The volume is derived before those failures are known, so today the extra
+extent is air.

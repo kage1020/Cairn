@@ -75,9 +75,17 @@ pub fn wall_length(side: WallSide, interior_w: u32, interior_h: u32) -> u32 {
 ///   compute the back-wall and right-wall mirroring without re-deriving the
 ///   full inflated dimensions.
 ///
-/// Returns `None` if `(u, v)` falls outside the wall's range. The caller
-/// turns that into a `W_DEFERRED_MEMBER` warning that points at the
-/// offending member.
+/// Returns `None` if `(u, v)` falls outside the wall's range.
+///
+/// Callers that ask about a single cell (`plate_voxel_position`) turn that
+/// into a `W_DEFERRED_MEMBER` naming the member, because the cell came from
+/// an `at=` the author wrote. Callers that walk a rectangle or a band
+/// (`carve_door`, `fill_stair`, `paint_window_rect`) skip the cell instead:
+/// each already validated its extents against the wall and would otherwise
+/// report the same member once per cell it asked about. Every one of those
+/// prior checks is what makes the skip unreachable today, so a `None`
+/// reaching them means one of the checks stopped agreeing with this
+/// function.
 #[must_use]
 pub fn wall_local_to_grid(
     side: WallSide,
