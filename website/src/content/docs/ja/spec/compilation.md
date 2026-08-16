@@ -45,3 +45,36 @@ cairn compile build.crn --edition bedrock --target 1.21.40
 - `--target` 単独は **禁止** です。`--edition` は **必須** です。
 - 同じ「1.21」も Java と Bedrock では異なる意味を持ち、Java の DataVersion は Bedrock の block_version
   とは無関係です。
+
+## 4.7 level グループ化と体積の導出
+
+`level y=N` はメンバをグループ化し、その各メンバを struct の基準面から `N`
+ボクセル上に置きます。これ自体はメンバではなくグループ化構文で、`level` の行
+はブロックを一切生みません。配下の各メンバは、それぞれが元から持つ垂直座標に
+`N` を足した上で、本体に直接書かれたのと同じように立体化されます。
+
+struct が立体化される体積は書くものではなく、導出されるものです。
+
+```
+Dims.x = size.W + 2 × overhang
+Dims.z = size.H + 2 × overhang
+Dims.y = 1 + wall_top + roof_extra
+```
+
+`overhang` は全 roof のうち最大の `overhang=`、`wall_top` は全 walls のうち最大
+の `N + height` (`N` は囲っている level の値、本体直下なら `0`)、`roof_extra` は
+§4.3–§4.6 の kind 別の寄与のうち最大のものです。`level` の中のメンバもこの 3 つ
+すべてに数えられます — walls が `level y=5` の下にしかない struct は、それを本体
+に直接書いた struct と同じ高さになります。
+
+オフセットが 0 でないときの立体化規則を、すべてのロールが持つわけではありません。
+`walls` / `door` / `window` / `stair` / `pressure_plate` は `N` を自身のジオメトリ
+の基準として読みます。`floor` と `roof` は struct が 1 枚だけ持つ面で、落とすべき
+2 枚目の床も、置くべき 2 枚目の屋根もありません。したがって `N > 0` の `level y=N`
+の下では `W_DEFERRED_MEMBER` を出し、ブロックを生みません。
+
+何も生まないメンバは導出される体積にも何も寄与しません。落とされた roof の
+`overhang=` は footprint を広げませんし、その高さも `Dims.y` を上げません。逆も
+成り立ちます — 立体化されるメンバは必ず、その体積が収めるつもりで大きさを決めた
+メンバです。この 2 つは 1 つのリストを両側から読んだものであり、渡された配列の外
+にメンバが描き込むことを防いでいるのはこの一致です。

@@ -23,9 +23,12 @@
 //! within a phase source order wins (the last-wins rule for local
 //! overrides). Roles outside the three implemented phases emit
 //! `W_DEFERRED_MEMBER` and skip. `level y=N` blocks are flattened into
-//! their children before bucketing so a nested `walls` / `door` /
-//! `window` / `stair` reaches its phase with the level's `y=` applied
-//! as an authored offset (see [`flatten_members`]).
+//! their children before the volume is sized so a nested `walls` / `door`
+//! / `window` / `stair` / `pressure_plate` reaches both the dim math and
+//! its phase with the level's `y=` applied as an authored offset. That one
+//! flattened list is the pass's paint set: what it holds is what the dims
+//! are built to hold, and what it drops costs nothing (see
+//! [`flatten_members`]).
 //!
 //! Defs are skipped at this layer: they only concretise via a `site`
 //! `place ... use=def_name` reference, and site lowering arrives with the
@@ -1018,22 +1021,22 @@ fn lower_body_to_block_array<'a>(
         ));
     }
 
+    // Flatten `level y=N` grouping once, here. The result is the set of
+    // members this body paints, and everything below reads it: the dim math
+    // (which has to size a volume that holds them) and the phase buckets
+    // (which need each member's y-offset). Deriving the dims from any other
+    // list is how a roof came to paint into a volume too short to hold it.
+    // `flatten_members` also emits the `W_DEFERRED_MEMBER` for every member
+    // it drops, so its side effects need to happen exactly once per call.
+    let flattened = flatten_members(body.members, diagnostics);
     // Inflate the struct's footprint by the maximum `overhang=` across all
     // roof members so the roof's eaves and gable-end overhangs have voxel
     // room outside the wall ring. Floors, walls, doors, and windows are
     // authored against the *interior* size and shifted inward by this
     // amount in their respective fill helpers.
-    let overhang = max_roof_overhang(body.members, diagnostics);
-    // Level blocks contribute their own walls to the struct's tallest wall
-    // voxel and their own roles to every phase. Flatten them once here so
-    // the dim math (which needs the true wall-top including level walls)
-    // and the phase buckets (which need the per-member y-offset) both work
-    // off the same flattened view. `flatten_members` also emits the
-    // `W_DEFERRED_MEMBER` diagnostics for malformed level blocks, so its
-    // side effects need to happen exactly once per call.
-    let flattened = flatten_members(body.members, diagnostics);
+    let overhang = max_roof_overhang(&flattened, diagnostics);
     let max_wall_top = max_wall_top(&flattened);
-    let roof_extra = max_roof_extra_height(body.members, interior_w, interior_h, overhang);
+    let roof_extra = max_roof_extra_height(&flattened, interior_w, interior_h, overhang);
 
     let dims = Dims {
         x: interior_w.saturating_add(overhang.saturating_mul(2)),
@@ -1269,14 +1272,30 @@ fn member_phase(role: &MemberRole) -> Option<Phase> {
 ///
 /// Returns each contributing member paired with the `y_offset` derived from
 /// its enclosing `level y=N` (`0` for members that sit directly under the
-/// struct/def/place body). `level` blocks themselves are consumed and never
-/// reach the returned list; a `level` whose `y=` is missing or non-integer
-/// earns a `W_DEFERRED_MEMBER` diagnostic and its entire body is dropped.
-/// Nested `level` blocks are not yet supported — an inner `level` becomes a
-/// per-child `W_DEFERRED_MEMBER` so the surrounding phase-bucket loop stays
-/// simple. `logic` and `assert` items inside a level body are intentionally
-/// not returned here — they live on the intent IR for the resolver and
-/// redstone passes to consume, unaffected by block-array lowering.
+/// struct/def/place body).
+///
+/// The result is the **paint set**, not the source members with the `level`
+/// wrappers unwrapped. Dimension derivation reads the same list, and the two
+/// have to agree in both directions: a member the dims cannot see paints
+/// into a volume too small to hold it, and a member the paint pass drops
+/// inflates a volume nothing fills. Deciding participation here, once, is
+/// what keeps them from drifting apart — the alternative is the same rule
+/// spelled out twice, one copy per reader.
+///
+/// Dropped here, each with its own `W_DEFERRED_MEMBER`:
+///
+/// - a `level` whose `y=` is missing or is not a non-negative integer,
+///   along with its whole body: there is no offset to place the children at;
+/// - a `level` nested inside another, one diagnostic per direct child, so an
+///   author who wrote deep nesting sees each dropped subtree rather than one
+///   defer that hides how many members went with it;
+/// - a member whose role has no lowering above the ground plane, per
+///   [`level_offset_role_defer`].
+///
+/// `level` blocks themselves are consumed and never reach the returned list.
+/// `logic` and `assert` items inside a level body are intentionally absent
+/// too — they live on the intent IR for the resolver and redstone passes to
+/// consume, unaffected by block-array lowering.
 fn flatten_members<'a>(
     members: &'a [Member],
     diagnostics: &mut Vec<Diagnostic>,
@@ -1308,6 +1327,10 @@ fn flatten_members<'a>(
                     ));
                     continue;
                 }
+                if let Some(reason) = level_offset_role_defer(&child.role, y_offset) {
+                    diagnostics.push(diag_deferred_member_reason(child, reason));
+                    continue;
+                }
                 out.push((y_offset, child));
             }
         } else {
@@ -1315,6 +1338,28 @@ fn flatten_members<'a>(
         }
     }
     out
+}
+
+/// Why a role has no lowering at a non-zero `level y=`, or `None` when the
+/// role means the same thing at any offset.
+///
+/// `walls`, `door`, `window`, `stair`, and `pressure_plate` read the offset
+/// as the base their own geometry is measured from, which is exactly what
+/// `level y=N` asks for — `themed-tower.crn` stacks a second storey out of
+/// them. A `floor` and a `roof` are single planes the struct has one of: a
+/// second floor slab would land in mid-air, and a second roof would cap the
+/// building below its own roof plane. Neither generator has a story for
+/// that yet, so the member is dropped rather than painted somewhere
+/// unexpected — and, being dropped, it contributes nothing to the volume.
+fn level_offset_role_defer(role: &MemberRole, y_offset: u32) -> Option<&'static str> {
+    if y_offset == 0 {
+        return None;
+    }
+    match role {
+        MemberRole::Floor => Some("level-scoped `floor` is not yet supported"),
+        MemberRole::Roof => Some("level-scoped `roof` is not yet supported"),
+        _ => None,
+    }
 }
 
 fn lower_massing_member(
@@ -1327,18 +1372,8 @@ fn lower_massing_member(
 ) {
     match &member.role {
         MemberRole::Floor => {
-            if y_offset > 0 {
-                // A `floor` inside a `level y=N` block would drop a second
-                // slab in mid-air. The current lowering has no story for
-                // per-level floors (the struct's ground-plane floor is the
-                // only slab that goes down), so defer explicitly instead of
-                // silently painting cells at an unexpected height.
-                diagnostics.push(diag_deferred_member_reason(
-                    member,
-                    "level-scoped `floor` is not yet supported",
-                ));
-                return;
-            }
+            // Always the struct's ground plane: `flatten_members` drops a
+            // `floor` at a non-zero offset before it reaches a phase.
             let Some(idx) = palette_index_for(
                 member,
                 ctx.scope,
@@ -1380,20 +1415,9 @@ fn lower_envelope_member(
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     match &member.role {
-        MemberRole::Roof => {
-            if y_offset > 0 {
-                // A `roof` inside a `level` block would paint a second cap
-                // below the struct's roof plane. The current lowering
-                // assumes exactly one roof per struct, so a level-scoped
-                // roof defers explicitly rather than corrupt the envelope.
-                diagnostics.push(diag_deferred_member_reason(
-                    member,
-                    "level-scoped `roof` is not yet supported",
-                ));
-                return;
-            }
-            fill_roof(member, ctx, palette, voxels, diagnostics);
-        }
+        // Always the struct's own roof plane: `flatten_members` drops a
+        // `roof` at a non-zero offset before it reaches a phase.
+        MemberRole::Roof => fill_roof(member, ctx, palette, voxels, diagnostics),
         MemberRole::Stair => fill_stair(member, y_offset, ctx, palette, voxels, diagnostics),
         _ => unreachable!("envelope phase only contains roof/stair"),
     }
@@ -1529,16 +1553,18 @@ fn max_wall_top(flattened: &[(u32, &Member)]) -> u32 {
         .unwrap_or(0)
 }
 
-/// Largest `overhang=` across the scope's roof members.
+/// Largest `overhang=` across the roof members the pass will paint.
 ///
 /// This is the only place `overhang=` is read, so an out-of-range value has
 /// to be diagnosed here or nowhere: treating it as absent silently shrank
 /// the roof back to the wall line with nothing said. Every other `key=`
 /// reaches the author through [`nonneg_int_or_defer`], and this one now
-/// does too.
-fn max_roof_overhang(members: &[Member], diagnostics: &mut Vec<Diagnostic>) -> u32 {
-    members
+/// does too. It walks the flattened list for the same reason — a roof this
+/// function cannot see is a roof whose `overhang=` nothing validates.
+fn max_roof_overhang(flattened: &[(u32, &Member)], diagnostics: &mut Vec<Diagnostic>) -> u32 {
+    flattened
         .iter()
+        .map(|(_, m)| *m)
         .filter(|m| matches!(m.role, MemberRole::Roof))
         .filter_map(|m| match nonneg_int_or_defer(m, "overhang", diagnostics) {
             NonNegRead::Valid(v) => Some(v),
@@ -1548,23 +1574,24 @@ fn max_roof_overhang(members: &[Member], diagnostics: &mut Vec<Diagnostic>) -> u
         .unwrap_or(0)
 }
 
-/// Maximum vertical contribution from any roof member with a
-/// recognisable [`RoofKind`]. Roofs without a recognised kind (missing
+/// Maximum vertical contribution from any roof member the pass will paint
+/// that has a recognisable [`RoofKind`]. Roofs without a recognised kind (missing
 /// `kind=` or a kind outside the supported set) contribute `0` here;
 /// their `W_DEFERRED_MEMBER` warning fires later, during the envelope
 /// phase, against the actual member span. Computing the dim from the
 /// inflated roof bounding box (interior + 2 * overhang on each axis)
 /// keeps the math consistent with each per-kind generator.
 fn max_roof_extra_height(
-    members: &[Member],
+    flattened: &[(u32, &Member)],
     interior_w: u32,
     interior_h: u32,
     overhang: u32,
 ) -> u32 {
     let roof_w = interior_w.saturating_add(overhang.saturating_mul(2));
     let roof_h = interior_h.saturating_add(overhang.saturating_mul(2));
-    members
+    flattened
         .iter()
+        .map(|(_, m)| *m)
         .filter(|m| matches!(m.role, MemberRole::Roof))
         .filter_map(|m| roof_kind_of(m).map(|k| roof_extra_height(k, m, roof_w, roof_h)))
         .max()
@@ -1828,30 +1855,28 @@ fn fill_roof_gable(
     let roof_w = ctx.dims.x;
     let roof_h = ctx.dims.z;
     let ridge_axis = gable_ridge_axis(roof_w, roof_h);
-    // Intern each face's state once so a 99-voxel cottage roof costs four
-    // `palette.intern` calls instead of one per voxel. The face → palette
-    // index table is a small array because [`StairFace`] has four
-    // variants; iteration order pins the palette layout for the lockfile
-    // hash.
-    let face_table = [
-        StairFace::LowSlope,
-        StairFace::HighSlope,
-        StairFace::ApexLow,
-        StairFace::ApexHigh,
-    ];
-    let mut face_indices = [PaletteIndex::AIR; 4];
-    for (slot, face) in face_indices.iter_mut().zip(face_table.iter().copied()) {
-        let mut state = gable_stair_state(ridge_axis, face);
-        base_id.clone_into(&mut state.id);
-        *slot = palette.intern(state);
-    }
+    // One `palette.intern` per face rather than one per voxel — a 99-voxel
+    // cottage roof needs four — but claimed on first use, not up front. A
+    // roof narrow enough to have no high apex (a 3x3 struct leaves a single
+    // ridge voxel) emits three of the four faces, and an entry no voxel
+    // references is not free: it reaches the `.nbt` palette, the
+    // `resolved_ir_hash`, and the per-entry counts `cairn info` reports.
+    // Claiming on demand also means the palette lays out in the order
+    // [`gable_voxels`] first visits each face, which is fixed by the
+    // generator's layer iteration, so the layout stays deterministic.
+    let mut face_indices: [Option<PaletteIndex>; 4] = [None; 4];
     for GableVoxel { pos, face } in gable_voxels(roof_w, roof_h, ctx.wall_top) {
-        let idx = match face {
-            StairFace::LowSlope => face_indices[0],
-            StairFace::HighSlope => face_indices[1],
-            StairFace::ApexLow => face_indices[2],
-            StairFace::ApexHigh => face_indices[3],
+        let slot = match face {
+            StairFace::LowSlope => 0,
+            StairFace::HighSlope => 1,
+            StairFace::ApexLow => 2,
+            StairFace::ApexHigh => 3,
         };
+        let idx = *face_indices[slot].get_or_insert_with(|| {
+            let mut state = gable_stair_state(ridge_axis, face);
+            base_id.clone_into(&mut state.id);
+            palette.intern(state)
+        });
         if let Some(i) = ctx.dims.index(pos.0, pos.1, pos.2) {
             voxels[i] = idx;
         }
@@ -1869,17 +1894,20 @@ fn fill_roof_shed(
     let Some(slope_to) = shed_slope_to(member, diagnostics) else {
         return;
     };
-    let mut slope_state = shed_stair_state(slope_to, ShedFace::Slope);
-    base_id.clone_into(&mut slope_state.id);
-    let slope_idx = palette.intern(slope_state);
-    let mut apex_state = shed_stair_state(slope_to, ShedFace::Apex);
-    base_id.clone_into(&mut apex_state.id);
-    let apex_idx = palette.intern(apex_state);
+    // Each face's slot is claimed the first time a voxel needs it, for the
+    // reason spelled out in [`fill_roof_gable`]: a shed shallow enough to
+    // be all slope and no apex must not ship an apex entry.
+    let mut face_indices: [Option<PaletteIndex>; 2] = [None; 2];
     for ShedVoxel { pos, face } in shed_voxels(ctx.dims.x, ctx.dims.z, ctx.wall_top, slope_to) {
-        let idx = match face {
-            ShedFace::Slope => slope_idx,
-            ShedFace::Apex => apex_idx,
+        let slot = match face {
+            ShedFace::Slope => 0,
+            ShedFace::Apex => 1,
         };
+        let idx = *face_indices[slot].get_or_insert_with(|| {
+            let mut state = shed_stair_state(slope_to, face);
+            base_id.clone_into(&mut state.id);
+            palette.intern(state)
+        });
         if let Some(i) = ctx.dims.index(pos.0, pos.1, pos.2) {
             voxels[i] = idx;
         }
@@ -2392,9 +2420,12 @@ fn fill_pressure_plate(
     let Some(base_id) = resolve_plate_base_id(member, ctx, diagnostics) else {
         return;
     };
-    let idx = palette.intern(BlockState::bare(base_id));
+    // Interned only once the cell is known to exist. `plate_voxel_position`
+    // already rejects every out-of-range anchor it can name, so this arm is
+    // the guard against a future one it cannot — and a guard that leaves a
+    // palette entry behind reports a block the structure does not contain.
     if let Some(i) = ctx.dims.index(x, y_world, z) {
-        voxels[i] = idx;
+        voxels[i] = palette.intern(BlockState::bare(base_id));
     } else {
         diagnostics.push(diag_deferred_member_reason(
             member,

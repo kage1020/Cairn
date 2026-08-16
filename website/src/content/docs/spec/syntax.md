@@ -65,7 +65,9 @@ LLM generation errors. (`room` is not in this list: it is still open — see
 Inside a body, `level y=N` is the only member that groups other members, and only in a `struct` or a
 `def`. A `site` body is a flat list of `place` and `connect` rows with no grouping construct at all.
 An indented body anywhere else produces no blocks — it is not lowered, not placed, and lays no
-walkway — so it is `E_UNSUPPORTED_NESTING` rather than a silent drop.
+walkway — so it is `E_UNSUPPORTED_NESTING` rather than a silent drop. What `y=N` means to each
+grouped member, and which roles have no lowering at a non-zero `N`, is
+[Compilation Model §4.7](compilation#47-level-grouping-and-volume-derivation).
 
 Which keywords a body accepts follows from the same split. A `struct` / `def` body describes one
 building's geometry (`floor`, `walls`, `door`, `window`, `roof`, `stair`, `level`,
