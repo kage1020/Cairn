@@ -141,7 +141,9 @@ mod tests {
             | C::MissingPathMaterial
             | C::InvalidPlaceId
             | C::IncompletePlace
-            | C::DeferredConnect => RaisedBy::Resolver,
+            | C::DeferredConnect
+            | C::ThemeVariantMissing
+            | C::ThemeVariantRebound => RaisedBy::Resolver,
             C::UnknownSlotTarget => RaisedBy::ResolverAndLowering,
             C::DeferredMember
             | C::NoThemeBound

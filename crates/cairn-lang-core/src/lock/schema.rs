@@ -63,7 +63,12 @@ pub struct LockPlacement {
     pub id: PlaceId,
     /// `place use=` target.
     pub def: String,
-    /// `place theme=` target.
+    /// The theme that governed this placement's materials.
+    ///
+    /// Usually the `place theme=` target verbatim, but not always: under a
+    /// `--edition` pin the resolver binds that edition's variant of the
+    /// named theme, which can be a different name (`W_THEME_VARIANT_REBOUND`
+    /// reports it). What the artifact was built from is what is recorded.
     pub theme: String,
     /// Absolute `(x, y, z)` origin in world voxels. Stored as `[i32; 3]` so
     /// `north_of` placements (negative `z`) round-trip without saturation.
