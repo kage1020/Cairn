@@ -657,7 +657,11 @@ fn a_netlist_wider_than_the_reserved_row_is_refused() {
 }
 
 /// The exact-fit boundary. The last cell lands in the same column as the
-/// output pad, which is legal: pads sit at `z >= 1` and cells at `z = 0`.
+/// actuator pad, which is legal while the reservation is deep enough for
+/// the pad to stand beside the cell row rather than on it — the depth
+/// guard is what keeps that true, and
+/// `a_region_one_row_deep_cannot_hold_a_pad_beside_its_cells` covers the
+/// case where it is not.
 #[test]
 fn a_row_exactly_as_wide_as_the_cell_count_places_every_cell() {
     let out = placement_of(&source_with_cells(4, 4, 8, 3));
@@ -683,10 +687,15 @@ fn one_cell_more_than_the_row_holds_is_refused() {
     let out = placement_of(&source_with_cells(5, 4, 8, 3));
 
     assert!(out.scoped.scopes.is_empty());
+    let diagnostic = out
+        .diagnostics
+        .iter()
+        .find(|d| d.code == DiagnosticCode::RouteCongestion)
+        .expect("the overrun must surface");
     assert!(
-        out.diagnostics
-            .iter()
-            .any(|d| d.code == DiagnosticCode::RouteCongestion),
+        diagnostic.primary.contains("only 4 wide"),
+        "one over the row must be refused as a row, not as an area: {}",
+        diagnostic.primary,
     );
 }
 
@@ -708,5 +717,123 @@ fn a_netlist_short_of_volume_but_not_of_row_still_reports_the_area() {
         diagnostic.primary.contains("reserved area"),
         "a volume shortfall must be explained as one: {}",
         diagnostic.primary,
+    );
+}
+
+/// A sensor nothing reads is not a layout. `EditionNetlistIr::is_empty`
+/// wants all three of inputs / outputs / cells empty, so keying elision
+/// on it made a lone `pressure_plate -> sig.step` claim a reservation
+/// for nothing to place — and refuse at byte 0 when there was none. The
+/// predicate is the one routing, delay, and crossing already use.
+#[test]
+fn a_sensor_nothing_reads_is_not_something_to_place() {
+    let source = r"
+theme t:
+  slot wall -> @oak_planks
+
+struct sens size=8x5
+  floor mat_slot=wall
+  pressure_plate id=p at=front.outside offset=0 y=0 -> sig.step
+";
+    let (edition_netlist, intent) = edition_netlist_from_source(source, Edition::Java);
+    let out = compile_placement(&edition_netlist, &intent);
+
+    assert!(
+        out.diagnostics.is_empty(),
+        "a scope with nothing to place must not be refused: {:?}",
+        out.diagnostics,
+    );
+    assert!(out.scoped.scopes.is_empty(), "and must not be emitted");
+}
+
+/// The pads need rows of their own: they step along `z` from 1 and
+/// saturate at `depth - 1`, and the cells hold `z = 0`. At `depth == 1`
+/// the saturation drops the actuator pad onto the last cell, which is
+/// the very collision the row check reasons about — so the row check
+/// cannot be the whole of it.
+#[test]
+fn a_region_one_row_deep_cannot_hold_a_pad_beside_its_cells() {
+    let out = placement_of(&source_with_cells(4, 4, 1, 4));
+
+    assert!(out.scoped.scopes.is_empty());
+    let diagnostic = out
+        .diagnostics
+        .iter()
+        .find(|d| d.code == DiagnosticCode::RouteCongestion)
+        .expect("the shortfall must surface");
+    assert!(
+        diagnostic.primary.contains("only 1 deep"),
+        "the refusal must name the depth: {}",
+        diagnostic.primary,
+    );
+}
+
+/// Pads saturate onto each other one row before they reach the cells,
+/// so the guard is about the count rather than about `depth == 1`.
+#[test]
+fn more_actuators_than_rows_is_refused_before_their_pads_collide() {
+    let source = r"
+theme t:
+  slot wall -> @oak_planks
+  slot door -> @oak_door
+
+struct three size=8x3
+  floor mat_slot=wall
+  door id=d1 side=front at=center mat_slot=door
+  door id=d2 side=back  at=center mat_slot=door
+  door id=d3 side=left  at=center mat_slot=door
+  pressure_plate id=p1 at=front.outside offset=0 y=0 -> sig.a
+  pressure_plate id=p2 at=inside.front  offset=0 y=0 -> sig.b
+  logic sig.f = sig.a and sig.b
+  door[id=d1] opened_by=sig.f
+  door[id=d2] opened_by=sig.f
+  door[id=d3] opened_by=sig.f
+  circuit region=floor void=2
+";
+    let (edition_netlist, intent) = edition_netlist_from_source(source, Edition::Java);
+    let out = compile_placement(&edition_netlist, &intent);
+
+    assert!(
+        out.scoped.scopes.is_empty(),
+        "three actuators do not fit three rows beside a cell row",
+    );
+    assert!(
+        out.diagnostics
+            .iter()
+            .any(|d| d.code == DiagnosticCode::RouteCongestion),
+    );
+}
+
+/// The `E_NO_CIRCUIT_REGION` span for a scope with no cells. Deleting
+/// the fallback leaves it at byte 0, which is a position in the file
+/// that has nothing to do with the binding that needs the reservation.
+#[test]
+fn a_cell_less_scope_reports_its_missing_region_at_the_actuator() {
+    let source = r"
+theme t:
+  slot wall -> @oak_planks
+  slot door -> @oak_door
+
+struct wire size=5x5
+  floor mat_slot=wall
+  pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a
+  door id=d side=front at=center mat_slot=door opened_by=sig.a
+";
+    let (edition_netlist, intent) = edition_netlist_from_source(source, Edition::Java);
+    let out = compile_placement(&edition_netlist, &intent);
+
+    let diagnostic = out
+        .diagnostics
+        .iter()
+        .find(|d| d.code == DiagnosticCode::NoCircuitRegion)
+        .expect("a scope with a pad to place needs a reservation");
+    assert!(
+        diagnostic.span.start > 0,
+        "the finding must point at the actuator binding, not at byte 0",
+    );
+    assert!(
+        source[diagnostic.span.start..diagnostic.span.end].contains("sig.a"),
+        "the span must cover the binding that needs the reservation, got {:?}",
+        &source[diagnostic.span.start..diagnostic.span.end],
     );
 }

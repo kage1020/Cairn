@@ -210,17 +210,16 @@ impl CellCoord {
 /// pass's placement decision — see [`RouteLayer`] for the full
 /// vocabulary and which variants a producer emits today.
 ///
-/// Serialises as `{"port": "<a|b|sel>", "coord": {...}}`, matching the
+/// Serialises as `{"port": "<a|b|sel|out>", "coord": {...}}`, matching the
 /// `{port, ...}` shape [`CellPortDriver`] uses on the netlist side.
 /// The nested `coord` still elides its `layer` field when it stays on
 /// [`RouteLayer::Plane`], so the JSON footprint of a plane buffer stays
 /// compact.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
 pub struct BufferCoord {
-    /// Driver port on the owning cell this buffer sits on the segment
-    /// for. Copies [`CellPortDriver::port`] from the driver the
-    /// crossing pass was walking when it emitted this entry.
-    pub port: PortName,
+    /// Which segment this buffer stands on: a driver port of the owning
+    /// cell, or the wire out to an actuator pad.
+    pub port: BufferSegment,
     /// Coordinate the crossing pass chose for the buffer. The
     /// `layer` field records the placement decision — see
     /// [`RouteLayer`] for the vocabulary.
@@ -228,12 +227,48 @@ pub struct BufferCoord {
 }
 
 impl BufferCoord {
-    /// New `(port, coord)` attribution pair. Mirrors the
+    /// New `(segment, coord)` attribution pair. Mirrors the
     /// [`CellCoord::new`] constructor convention so the crossing pass
     /// and its tests build entries without struct-literal noise.
     #[must_use]
-    pub const fn new(port: PortName, coord: CellCoord) -> Self {
+    pub const fn new(port: BufferSegment, coord: CellCoord) -> Self {
         Self { port, coord }
+    }
+}
+
+/// Which wire a buffer repeater stands on.
+///
+/// Separate from [`PortName`] rather than a variant of it, because a
+/// [`CellPortDriver`] must not be able to say `out`: a cell has no such
+/// input, and public fields plus no validation is all it would take.
+/// Here the two are the same kind of answer — "which segment" — so they
+/// share one flat wire form: `"a"` / `"b"` / `"sel"` for a driver port,
+/// `"out"` for the wire to an actuator.
+///
+/// `#[non_exhaustive]` for the reason [`PortName`] is: a future cell
+/// with more ports, or a future segment kind, is additive.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum BufferSegment {
+    /// A driver port feeding the owning cell. Copies
+    /// [`CellPortDriver::port`] from the driver the crossing pass was
+    /// walking when it emitted the entry.
+    Port(PortName),
+    /// The wire leaving a driver for an actuator's output pad. Has no
+    /// owning cell: it is attributed to the [`PlacedOutputNode`] whose
+    /// pad it runs to.
+    Out,
+}
+
+// Hand-written so the two cases share one flat string vocabulary
+// instead of the externally-tagged shape a derive would give `Port(..)`.
+// The wire form is the contract `BufferCoord`'s doc states.
+impl Serialize for BufferSegment {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        match self {
+            Self::Port(port) => port.serialize(serializer),
+            Self::Out => serializer.serialize_str("out"),
+        }
     }
 }
 
@@ -1191,8 +1226,14 @@ impl PlacedOutputNode {
     /// placement pass and the fixtures build one without struct-literal
     /// noise, and so the starting phase is chosen in one place rather
     /// than at every construction site.
+    ///
+    /// Crate-visible: the pad is the placement pass's to assign, from
+    /// the reservation, and a coordinate handed in from outside is one
+    /// nothing checks against the region. [`PlacedCellNode`] is
+    /// unconstructible from another crate for the same reason — it has
+    /// no constructor and the struct is `#[non_exhaustive]`.
     #[must_use]
-    pub fn new(name: DottedRef, driver: NetRef, pad: CellCoord, span: Span) -> Self {
+    pub(crate) fn new(name: DottedRef, driver: NetRef, pad: CellCoord, span: Span) -> Self {
         Self {
             name,
             driver,
@@ -1451,7 +1492,10 @@ mod tests {
         PlacementPhase::Legalized {
             wire_length: 3,
             delay_ticks: 1,
-            buffer_coords: vec![BufferCoord::new(PortName::A, CellCoord::new(5, 0, 0))],
+            buffer_coords: vec![BufferCoord::new(
+                BufferSegment::Port(PortName::A),
+                CellCoord::new(5, 0, 0),
+            )],
         }
     }
 
@@ -1524,8 +1568,8 @@ mod tests {
             delay_ticks: 3,
         };
         let coords = vec![
-            BufferCoord::new(PortName::A, CellCoord::new(1, 0, 0)),
-            BufferCoord::new(PortName::A, CellCoord::new(2, 0, 0)),
+            BufferCoord::new(BufferSegment::Port(PortName::A), CellCoord::new(1, 0, 0)),
+            BufferCoord::new(BufferSegment::Port(PortName::A), CellCoord::new(2, 0, 0)),
         ];
         phase.legalize(coords.clone());
         assert_eq!(
@@ -1725,7 +1769,10 @@ mod tests {
             wire_length: 12,
             delay_ticks: 3,
         };
-        let coords = vec![BufferCoord::new(PortName::A, CellCoord::new(1, 0, 0))];
+        let coords = vec![BufferCoord::new(
+            BufferSegment::Port(PortName::A),
+            CellCoord::new(1, 0, 0),
+        )];
         phase.legalize_at(coords.clone(), probe_identity(&scope));
         assert_eq!(
             phase,
@@ -1865,7 +1912,10 @@ mod tests {
             wire_length: 12,
             delay_ticks: 3,
         };
-        let coords = vec![BufferCoord::new(PortName::A, CellCoord::new(1, 0, 0))];
+        let coords = vec![BufferCoord::new(
+            BufferSegment::Port(PortName::A),
+            CellCoord::new(1, 0, 0),
+        )];
         assert_eq!(phase.try_legalize(coords.clone()), Ok(()));
         assert_eq!(
             phase,
@@ -2130,7 +2180,10 @@ mod tests {
         assert!(delayed().buffer_coords().is_empty());
         assert_eq!(
             legalized().buffer_coords(),
-            &[BufferCoord::new(PortName::A, CellCoord::new(5, 0, 0))],
+            &[BufferCoord::new(
+                BufferSegment::Port(PortName::A),
+                CellCoord::new(5, 0, 0)
+            )],
         );
     }
 

@@ -90,10 +90,10 @@ use cairn_lang_core::check::Severity;
 
 use crate::delay::{DUST_ATTENUATION_LIMIT, buffer_count_for_segment};
 use crate::diagnostic::{Diagnostic, DiagnosticCode};
-use crate::netlist_ir::{NetRef, PortName};
+use crate::netlist_ir::NetRef;
 use crate::placement_ir::{
-    BufferCoord, CellCoord, CellIdentity, CircuitRegionReservation, PlacementIr, RouteLayer,
-    ScopedPlacementIr, ScopedPlacementIrEntry,
+    BufferCoord, BufferSegment, CellCoord, CellIdentity, CircuitRegionReservation, PlacementIr,
+    RouteLayer, ScopedPlacementIr, ScopedPlacementIrEntry,
 };
 use crate::routing_geometry::{NetTree, collect_nets, input_pad, net_order, net_trees};
 
@@ -317,8 +317,13 @@ enum PlaneOccupant {
     /// would tie two signals together — the cross-net short this pass
     /// exists to keep out of the layout.
     OtherNet(NetRef),
-    /// A buffer an earlier driver already claimed.
+    /// A buffer an earlier driver already claimed for another net.
     Buffer,
+    /// A buffer this same net already claimed. Not an obstruction on a
+    /// Steiner tree's shared prefix: the two sinks past it are fed by
+    /// the one repeater standing there, so a second one would be a
+    /// second block on a strand of dust that has one.
+    OwnBuffer,
 }
 
 /// What holds `candidate` on the plane, or `None` when it is free for
@@ -334,7 +339,7 @@ fn plane_occupant(
     net: NetRef,
     reserved: &HashSet<CellCoord>,
     wire_owners: &HashMap<CellCoord, Vec<NetRef>>,
-    plane_buffers: &HashSet<CellCoord>,
+    plane_buffers: &HashMap<CellCoord, NetRef>,
 ) -> Option<PlaneOccupant> {
     if reserved.contains(&candidate) {
         return Some(PlaneOccupant::Component);
@@ -345,8 +350,12 @@ fn plane_occupant(
     {
         return Some(PlaneOccupant::OtherNet(*other));
     }
-    if plane_buffers.contains(&candidate) {
-        return Some(PlaneOccupant::Buffer);
+    if let Some(owner) = plane_buffers.get(&candidate) {
+        return Some(if *owner == net {
+            PlaneOccupant::OwnBuffer
+        } else {
+            PlaneOccupant::Buffer
+        });
     }
     None
 }
@@ -390,7 +399,7 @@ fn allocate_buffer_coords(
         region,
         wire_owners,
         reserved,
-        plane: HashSet::new(),
+        plane: HashMap::new(),
         bridge: HashSet::new(),
     };
 
@@ -420,7 +429,7 @@ fn allocate_buffer_coords(
             buffers_for_cell.extend(placer.claim(
                 &route,
                 driver.net,
-                driver.port,
+                BufferSegment::Port(driver.port),
                 &|candidate, occupant| {
                     buffer_collision_diagnostic(entry, ir, region, cell_index, candidate, occupant)
                 },
@@ -437,9 +446,10 @@ fn allocate_buffer_coords(
         // downstream voxel lowering would then group buffers under a
         // driver that does not exist.
         debug_assert!(
-            buffers_for_cell
-                .iter()
-                .all(|b| cell.drivers.iter().any(|d| d.port == b.port)),
+            buffers_for_cell.iter().all(|b| matches!(
+                b.port,
+                BufferSegment::Port(port) if cell.drivers.iter().any(|d| d.port == port)
+            )),
             "BufferCoord::port must reference a driver on cells[{cell_index}]",
         );
         per_cell.push(buffers_for_cell);
@@ -449,13 +459,11 @@ fn allocate_buffer_coords(
     // exactly as a segment into a cell is, so stage 4 has to give those
     // buffers coords or the two stages disagree about how many exist.
     //
-    // Same placer, and after the cells, so a cell buffer and an output
-    // buffer cannot claim one coord. Under the v1 single-row layout
-    // they never contend for one: cell buffers fall inside the row and
-    // an actuator's fall past the last cell on the way to the pad. The
-    // pools are shared anyway, because that disjointness is a property
-    // of the layout rather than of this pass, and the layout is the
-    // thing §14.5 marks as the part still to be lifted into 2.5D.
+    // Same placer, and after the cells, so a cell buffer and an actuator
+    // buffer cannot claim one coord. They do contend: `l_shape_path`
+    // walks x before z, so an actuator's route leaves its driver along
+    // the cell row and its candidates land among the cells whenever the
+    // driver is not the last of them.
     let mut per_output: Vec<Vec<BufferCoord>> = Vec::with_capacity(ir.outputs.len());
     for (output_index, output) in ir.outputs.iter().enumerate() {
         let route = trees
@@ -469,10 +477,10 @@ fn allocate_buffer_coords(
                     z = output.pad.z,
                 )
             });
-        per_output.push(placer.claim(
+        let buffers_for_output = placer.claim(
             &route,
             output.driver,
-            PortName::Out,
+            BufferSegment::Out,
             &|candidate, occupant| {
                 buffer_collision_output_diagnostic(
                     entry,
@@ -484,7 +492,17 @@ fn allocate_buffer_coords(
                 )
             },
             &format!("output #{output_index}"),
-        )?);
+        )?;
+        // The mirror of the cell-side contract: a buffer on the wire to
+        // an actuator belongs to no input port, and saying otherwise
+        // would group it under a driver of a cell it is not on.
+        debug_assert!(
+            buffers_for_output
+                .iter()
+                .all(|b| matches!(b.port, BufferSegment::Out)),
+            "a buffer on the wire to outputs[{output_index}] must name the outward segment",
+        );
+        per_output.push(buffers_for_output);
     }
 
     Ok(BufferAllocation {
@@ -505,7 +523,12 @@ struct BufferPlacer<'a> {
     region: &'a CircuitRegionReservation,
     wire_owners: &'a HashMap<CellCoord, Vec<NetRef>>,
     reserved: &'a HashSet<CellCoord>,
-    plane: HashSet<CellCoord>,
+    /// Coord → the net whose repeater stands on it. Keyed by net
+    /// rather than a bare set because a Steiner tree's two sinks
+    /// share their prefix: the candidates for both land on the
+    /// same coords, and the second visit has to recognise its
+    /// own repeater rather than escape around it.
+    plane: HashMap<CellCoord, NetRef>,
     bridge: HashSet<CellCoord>,
 }
 
@@ -527,7 +550,7 @@ impl BufferPlacer<'_> {
         &mut self,
         route: &[CellCoord],
         net: NetRef,
-        port: PortName,
+        port: BufferSegment,
         on_collision: &dyn Fn(CellCoord, PlaneOccupant) -> Diagnostic,
         subject: &str,
     ) -> Result<Vec<BufferCoord>, Diagnostic> {
@@ -548,13 +571,36 @@ impl BufferPlacer<'_> {
                     route.len(),
                 )
             });
-            let Some(occupant) =
-                plane_occupant(candidate, net, self.reserved, self.wire_owners, &self.plane)
-            else {
-                self.plane.insert(candidate);
+            let occupant =
+                plane_occupant(candidate, net, self.reserved, self.wire_owners, &self.plane);
+            let Some(occupant) = occupant else {
+                self.plane.insert(candidate, net);
                 claimed.push(BufferCoord::new(port, candidate));
                 continue;
             };
+            // A Steiner tree's sinks share their prefix, so two segments
+            // of one net compute the same candidates. The repeater
+            // standing there already refreshes the signal for both, and
+            // escaping around it puts a second block on a strand of dust
+            // that has one — which is what turned a fan-out to two
+            // actuators into four stacked repeaters, and refused the
+            // `void=1` layouts that have no layer to stack into.
+            //
+            // Applied to the actuator segments only. The cell segments
+            // reach the same coords the same way and are left exactly as
+            // they were, so this change moves nothing that was already
+            // shipping; the duplication there is real and tracked on its
+            // own, with the fixtures that currently pin it.
+            if matches!(occupant, PlaneOccupant::OwnBuffer) {
+                if matches!(port, BufferSegment::Out) {
+                    claimed.push(BufferCoord::new(port, candidate));
+                    continue;
+                }
+                let bridge = claim_bridge(candidate, self.region, &mut self.bridge)
+                    .ok_or_else(|| on_collision(candidate, PlaneOccupant::Buffer))?;
+                claimed.push(BufferCoord::new(port, bridge));
+                continue;
+            }
             let bridge = claim_bridge(candidate, self.region, &mut self.bridge)
                 .ok_or_else(|| on_collision(candidate, occupant))?;
             claimed.push(BufferCoord::new(port, bridge));
@@ -662,7 +708,7 @@ fn plane_occupant_label(occupant: PlaneOccupant, ir: &PlacementIr) -> String {
     match occupant {
         PlaneOccupant::Component => "a cell body or an I/O pad".to_owned(),
         PlaneOccupant::OtherNet(other) => format!("{}'s wire", net_label(other, ir)),
-        PlaneOccupant::Buffer => "another buffer repeater".to_owned(),
+        PlaneOccupant::Buffer | PlaneOccupant::OwnBuffer => "another buffer repeater".to_owned(),
     }
 }
 
@@ -749,7 +795,7 @@ mod tests {
     use crate::edition_netlist_ir::EditionCell;
     use crate::logic_ir::ScopeKind;
     use crate::netlist_ir::{CellPortDriver, NetRef, PortName};
-    use crate::placement_ir::PlacedOutputNode;
+    use crate::placement_ir::{BufferSegment, PlacedOutputNode};
     use crate::placement_ir::{
         CellCoord, CircuitRegionReservation, PlacedCellNode, PlacementIr, PlacementPhase,
         RouteLayer, ScopedPlacementIr, ScopedPlacementIrEntry,
@@ -892,7 +938,7 @@ mod tests {
         );
         assert_eq!(
             cell.buffer_coords()[0].port,
-            PortName::A,
+            BufferSegment::Port(PortName::A),
             "buffer preserves its driver port on the plane placement path",
         );
         // Pins the `PlacedCellNode` `Serialize` impl's widest path
@@ -1153,10 +1199,13 @@ mod tests {
         for (index, cell) in ir.cells.iter().enumerate() {
             for buffer in cell.buffer_coords() {
                 checked += 1;
+                let BufferSegment::Port(port) = buffer.port else {
+                    panic!("a cell's buffer must name one of its driver ports");
+                };
                 let driver = cell
                     .drivers
                     .iter()
-                    .find(|d| d.port == buffer.port)
+                    .find(|d| d.port == port)
                     .expect("every buffer names a driver of its own cell");
                 let footprint = CellCoord::new(buffer.coord.x, 0, buffer.coord.z);
                 assert!(
@@ -1296,10 +1345,13 @@ mod tests {
         let reserved: HashSet<CellCoord> = [coord].into_iter().collect();
         let owned: HashMap<CellCoord, Vec<NetRef>> =
             [(coord, vec![mine, theirs])].into_iter().collect();
-        let buffers: HashSet<CellCoord> = [coord].into_iter().collect();
+        // Owned by `theirs`: a repeater `mine` already stands on is not
+        // an obstruction to `mine`, so the Buffer arm only reads as one
+        // when the buffer belongs to someone else.
+        let buffers: HashMap<CellCoord, NetRef> = [(coord, theirs)].into_iter().collect();
         let empty_reserved: HashSet<CellCoord> = HashSet::new();
         let empty_owned: HashMap<CellCoord, Vec<NetRef>> = HashMap::new();
-        let empty_buffers: HashSet<CellCoord> = HashSet::new();
+        let empty_buffers: HashMap<CellCoord, NetRef> = HashMap::new();
 
         assert!(matches!(
             plane_occupant(coord, mine, &reserved, &owned, &buffers),
@@ -1320,6 +1372,15 @@ mod tests {
         let ours_only: HashMap<CellCoord, Vec<NetRef>> =
             [(coord, vec![mine])].into_iter().collect();
         assert!(plane_occupant(coord, mine, &empty_reserved, &ours_only, &empty_buffers).is_none(),);
+        // This net's own repeater reads as its own: a Steiner tree's two
+        // sinks share their prefix, so the second walk down it revisits
+        // the coord the first one claimed, and the caller decides what
+        // to do about that.
+        let ours_buffer: HashMap<CellCoord, NetRef> = [(coord, mine)].into_iter().collect();
+        assert!(matches!(
+            plane_occupant(coord, mine, &empty_reserved, &empty_owned, &ours_buffer),
+            Some(PlaneOccupant::OwnBuffer),
+        ));
     }
 
     /// When the coord the route wants belongs to another net and every
@@ -1525,7 +1586,7 @@ mod tests {
         );
         assert_eq!(
             cells[1].buffer_coords()[0].port,
-            PortName::A,
+            BufferSegment::Port(PortName::A),
             "buffer preserves its driver port through the bridge escape",
         );
         // Complements the plane-buffer JSON assertion in
@@ -1546,7 +1607,7 @@ mod tests {
     fn mux_multi_port_carries_each_driver_port_across_plane_and_bridge() {
         // Every other buffer-coord test uses a single driver on
         // `PortName::A`, so a regression that hard-coded
-        // `BufferCoord::new(PortName::A, ..)` at either push site would
+        // `BufferCoord::new(BufferSegment::Port(PortName::A), ..)` at either push site would
         // slip past them. This test forces the crossing pass to walk
         // all three `[Sel, A, B]` drivers on one Mux and pins that
         // (a) each buffer carries its own driver's port,
@@ -1598,15 +1659,19 @@ mod tests {
         assert_eq!(bufs.len(), 3, "one buffer per driver: {bufs:?}");
         assert_eq!(
             bufs[0].port,
-            PortName::Sel,
+            BufferSegment::Port(PortName::Sel),
             "first driver's buffer carries Sel",
         );
         assert_eq!(
             bufs[1].port,
-            PortName::A,
+            BufferSegment::Port(PortName::A),
             "second driver's buffer carries A"
         );
-        assert_eq!(bufs[2].port, PortName::B, "third driver's buffer carries B");
+        assert_eq!(
+            bufs[2].port,
+            BufferSegment::Port(PortName::B),
+            "third driver's buffer carries B",
+        );
         assert_eq!(
             bufs[0].coord.layer,
             RouteLayer::Plane,
@@ -1900,9 +1965,9 @@ mod tests {
         use proptest::prelude::*;
 
         use super::{
-            CellCoord, CellPortDriver, Edition, EditionCell, HashSet, NetRef, PlacedCellNode,
-            PlacementIr, PlacementPhase, PortName, RouteLayer, ScopeKind, Span, collect_nets,
-            compile_crossing, input_pad, net_trees, placed_cell, reservation, scoped,
+            BufferSegment, CellCoord, CellPortDriver, Edition, EditionCell, HashSet, NetRef,
+            PlacedCellNode, PlacementIr, PlacementPhase, PortName, RouteLayer, ScopeKind, Span,
+            collect_nets, compile_crossing, input_pad, net_trees, placed_cell, reservation, scoped,
         };
         use crate::delay::{BUFFER_REPEATER_TICKS, compile_delay};
         use crate::routing::compile_routing;
@@ -2016,10 +2081,13 @@ mod tests {
                     });
                     for cell in &entry.ir.cells {
                         for buffer in cell.buffer_coords() {
+                            let BufferSegment::Port(port) = buffer.port else {
+                                panic!("a cell's buffer must name one of its driver ports");
+                            };
                             let driver = cell
                                 .drivers
                                 .iter()
-                                .find(|d| d.port == buffer.port)
+                                .find(|d| d.port == port)
                                 .expect("every buffer names a driver of its own cell");
                             let dust: HashSet<CellCoord> =
                                 trees[&driver.net].wire_path().into_iter().collect();

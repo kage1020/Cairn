@@ -193,7 +193,7 @@ fn route_scope(entry: &ScopedPlacementIrEntry) -> ScopeRouting {
         // consumer still sees deterministic output.
         debug_assert!(
             source.cells.is_empty() && source.outputs.is_empty(),
-            "route_scope received a PlacementIr with cells or pads but no region — placement should have elided it",
+            "route_scope received a PlacementIr with cells or pads but no region — placement should have refused it",
         );
         return Ok(source.clone());
     };

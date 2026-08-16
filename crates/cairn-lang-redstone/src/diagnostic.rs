@@ -66,7 +66,8 @@ pub enum DiagnosticCode {
     /// synthesised DAG is still valid; an unused signal is usually a typo
     /// on the reference side but occasionally an intentional scratch.
     LogicUnusedSignal,
-    /// A scope has redstone cells to place but the enclosing struct / def
+    /// A scope has redstone cells or actuator pads to place but the
+    /// enclosing struct / def
     /// declared no `circuit region=<label> void=<N>` reservation (or the
     /// enclosing scope had no `size=WxH` for the reservation to sit
     /// inside). Fail-loud per `spec/redstone` §14.5 — silently placing
@@ -121,8 +122,10 @@ pub enum DiagnosticCode {
     /// crossing under `void < 2` fires this, and `void >= 2` accepts
     /// them all. There is nothing downstream for a per-crossing
     /// capacity model to constrain yet — v1 does not lift the wire
-    /// itself, and block-array lowering re-derives the crossings from
-    /// the same Steiner trees. Fix: increase `void`, enlarge the
+    /// itself, and no pass downstream reads the crossing set: the
+    /// block-array lowering does not take the Placement IR at all, so
+    /// whichever pass eventually voxelises these wires will derive the
+    /// crossings itself. Fix: increase `void`, enlarge the
     /// `circuit region=` footprint so fewer wires cross, or split the
     /// logic across multiple `circuit` blocks so each block routes
     /// with fewer overlaps.

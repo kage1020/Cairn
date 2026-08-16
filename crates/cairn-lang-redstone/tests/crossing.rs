@@ -19,7 +19,7 @@ use cairn_lang_core::Edition;
 use cairn_lang_core::check::Severity;
 use cairn_lang_core::{lower, parse};
 use cairn_lang_redstone::{
-    DiagnosticCode, PortName, ScopedPlacementIr, compile_crossing, compile_delay,
+    BufferSegment, DiagnosticCode, RouteLayer, ScopedPlacementIr, compile_crossing, compile_delay,
     compile_edition_netlist, compile_netlist, compile_placement, compile_routing, synthesize,
 };
 
@@ -303,11 +303,13 @@ fn crossing_is_idempotent_on_clean_fixture() {
 /// The exact-fit boundary the placement pass now allows, carried all the
 /// way through legalization.
 ///
-/// Placing a cell in the output pad's column is only safe if nothing
-/// downstream needs that column to itself: `allocate_buffer_coords`
-/// reserves cell bodies and pads before it looks for a buffer coord, so
-/// a layout that is legal at stage 1 and refused at stage 4 would have
-/// moved the failure rather than removed it.
+/// Placing a cell in the actuator pad's column is only safe if nothing
+/// downstream needs that column to itself. Every segment here is under
+/// the dust limit, so the buffer allocator has nothing to place — what
+/// this pins is the occupancy sweep in stages 2 and 4, which is where a
+/// pad sharing a column with a cell would be caught. A layout legal at
+/// stage 1 and refused at stage 4 would have moved the failure rather
+/// than removed it.
 #[test]
 fn a_row_filled_to_its_last_column_survives_legalization() {
     let source = "\
@@ -397,15 +399,16 @@ struct reach size=40x6
         output.delay_ticks(),
     );
     assert_eq!(
-        output.buffer_coords().len(),
-        output.delay_ticks().expect("delayed") as usize,
+        u32::try_from(output.buffer_coords().len()).expect("buffer count fits")
+            * cairn_lang_redstone::BUFFER_REPEATER_TICKS,
+        output.delay_ticks().expect("delayed"),
         "every tick the delay pass counted must have a coord behind it",
     );
     assert!(
         output
             .buffer_coords()
             .iter()
-            .all(|b| b.port == PortName::Out),
+            .all(|b| b.port == BufferSegment::Out),
         "a buffer on the outward wire belongs to no input port: {:?}",
         output.buffer_coords(),
     );
@@ -445,4 +448,132 @@ struct pair size=40x6
         expected as usize,
         "segment {segment} needs {expected} repeaters",
     );
+}
+
+/// One net feeding two actuators shares its Steiner prefix, so both
+/// segments compute the same buffer candidates. One repeater standing
+/// on that strand refreshes the signal for both sinks; giving the
+/// second segment a repeater of its own stacks two blocks on one strand
+/// of dust, and under `void=1` there is no layer to stack into, so the
+/// layout was refused outright.
+#[test]
+fn one_net_feeding_two_actuators_shares_the_repeater_on_their_common_span() {
+    let source = "\
+theme t:
+  slot wall -> @oak_planks
+  slot door -> @oak_door
+
+struct fan size=40x6
+  floor mat_slot=wall
+  door id=d1 side=front at=center mat_slot=door
+  door id=d2 side=back at=center mat_slot=door
+  pressure_plate id=p1 at=front.outside offset=0 y=0 -> sig.a
+  pressure_plate id=p2 at=inside.front offset=0 y=0 -> sig.b
+  logic sig.f = sig.a and sig.b
+  door[id=d1] opened_by=sig.f
+  door[id=d2] opened_by=sig.f
+  circuit region=floor void=1
+";
+    let delayed = delayed_from_source(source, Edition::Java);
+    let out = compile_crossing(&delayed);
+
+    assert!(
+        out.diagnostics.is_empty(),
+        "a shared span needs no second repeater, and `void=1` has nowhere to put one: {:?}",
+        out.diagnostics,
+    );
+    let scope = out.scoped.scopes.first().expect("the scope legalizes");
+    let first = scope.ir.outputs.first().expect("actuator #0");
+    let second = scope.ir.outputs.get(1).expect("actuator #1");
+    assert!(
+        !first.buffer_coords().is_empty(),
+        "the fixture only means something while the shared span needs a repeater",
+    );
+    let shared: Vec<_> = first.buffer_coords().iter().map(|b| b.coord).collect();
+    let other: Vec<_> = second.buffer_coords().iter().map(|b| b.coord).collect();
+    assert_eq!(
+        shared, other,
+        "both actuators are refreshed by the repeaters on the span they share",
+    );
+    assert!(
+        shared.iter().all(|c| c.layer == RouteLayer::Plane),
+        "nothing escapes to a bridge, so `void=1` is enough: {shared:?}",
+    );
+}
+
+/// An identity wire reaches stage 4 as well as stages 1–3: dropping it
+/// at the top of `legalize_scope` would leave its counted repeaters
+/// without coords.
+#[test]
+fn an_identity_wire_is_legalized_like_any_other_segment() {
+    let source = "\
+theme t:
+  slot wall -> @oak_planks
+  slot door -> @oak_door
+
+struct pass size=40x6
+  floor mat_slot=wall
+  door id=d side=front at=center mat_slot=door
+  pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a
+  door[id=d] opened_by=sig.a
+  circuit region=floor void=2
+";
+    let delayed = delayed_from_source(source, Edition::Java);
+    let out = compile_crossing(&delayed);
+    assert!(out.diagnostics.is_empty(), "{:?}", out.diagnostics);
+
+    let scope = out
+        .scoped
+        .scopes
+        .iter()
+        .find(|e| e.name == "pass")
+        .expect("the identity wire reaches stage 4");
+    assert!(scope.ir.cells.is_empty());
+    let output = scope.ir.outputs.first().expect("the actuator");
+    assert_eq!(
+        output.stage(),
+        cairn_lang_redstone::PlacementStage::Crossing
+    );
+    assert_eq!(
+        u32::try_from(output.buffer_coords().len()).expect("buffer count fits")
+            * cairn_lang_redstone::BUFFER_REPEATER_TICKS,
+        output.delay_ticks().expect("delayed"),
+        "every tick counted at stage 3 has a coord at stage 4",
+    );
+}
+
+/// The wire form of a placed actuator, pinned by name. Both `Serialize`
+/// impls are hand-written and adjacent, so a key misspelled in one
+/// pattern and copied into the other is invisible to a comparison
+/// between them.
+#[test]
+fn the_json_for_a_placed_actuator_carries_its_own_keys() {
+    let source = "\
+theme t:
+  slot wall -> @oak_planks
+  slot door -> @oak_door
+
+struct reach size=40x6
+  floor mat_slot=wall
+  door id=front side=front at=center mat_slot=door
+  pressure_plate id=p1 at=front.outside offset=0 y=0 -> sig.a
+  pressure_plate id=p2 at=inside.front offset=0 y=0 -> sig.b
+  logic sig.c = sig.a or sig.b
+  door[id=front] opened_by=sig.c
+  circuit region=floor void=3
+";
+    let delayed = delayed_from_source(source, Edition::Java);
+    let out = compile_crossing(&delayed);
+    let json = serde_json::to_string(&out.scoped).expect("serialise");
+
+    for key in [
+        "\"stage\":\"crossing\"",
+        "\"pad\":",
+        "\"wire_length\":",
+        "\"delay_ticks\":",
+        "\"buffer_coords\":",
+        "\"port\":\"out\"",
+    ] {
+        assert!(json.contains(key), "the dump must carry {key}: {json}");
+    }
 }

@@ -12,6 +12,20 @@
 
 ## [Unreleased]
 
+### 破壊的変更
+
+- *(redstone)* `PlacementIr::outputs` の型が `Vec<NetlistOutput>` から `Vec<PlacedOutputNode>`
+  になりました。アクチュエータは配置される対象です。配置パスが割り当てたパッド座標と、セルと
+  同じ `PlacementPhase` を持つため、routing / delay / crossing の各パスが同じ規則で埋めます。
+  Rust API、Internal ティア。
+- *(redstone)* `cairn synth --stage <placement|route|delay|crossing>` の `outputs[]` の各要素が
+  広がりました。従来はどのステージでも `{name, driver}` でしたが、`{stage, name, driver, pad}`
+  に加えて各ステージが埋める `wire_length` / `delay_ticks` / `buffer_coords` が付きます。`synth`
+  は Evolving で、`--experimental-logic-synth` の背後にあります。
+- *(redstone)* `BufferCoord::port` の型が `PortName` から `BufferSegment` になり、セルの入力
+  ポートに加えてアクチュエータへ出る配線 (`"out"`) を指せるようになりました。ワイヤ形式は
+  1 つのフラットな文字列のままで、`"out"` はこれまで取り得なかった値です。
+
 ### 追加
 
 - `PlacementPhase` の 3 つの遷移に、失敗を値で返すミラーを追加した:
