@@ -34,6 +34,7 @@ pub use lower::{BUILTIN_BLOCK_IDS, lower_to_block_array};
 pub use material::{
     BlockIdSet, IdOrigin, MaterialDeferred, TargetRegistry, UnknownId, resolve_block_state,
 };
+pub use roof::is_stair;
 pub use walkway::{
     BlockedIndex, RoutePathError, WalkwayLayout, build_walkway_array, l_path, port_world_position,
     route_path,

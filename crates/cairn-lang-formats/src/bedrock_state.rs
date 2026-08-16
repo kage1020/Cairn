@@ -141,10 +141,13 @@ pub fn translate_states(
 /// (`minecraft:oak_stairs`, `minecraft:dark_oak_stairs`, …). The whole stair
 /// family shares one Bedrock state vocabulary, so the mapping is keyed off the
 /// family suffix rather than each material id.
-fn is_stair(id: &str) -> bool {
-    let path = id.rsplit_once(':').map_or(id, |(_, p)| p);
-    path.ends_with("_stairs")
-}
+///
+/// The rule itself lives in `cairn-lang-core`, which asks the same question
+/// when a roof or eave decides whether it may attach stair states to a
+/// material. Two copies could disagree about an id that core paints and this
+/// module then has to write, which is a disagreement with no symptom until a
+/// structure file reaches the game.
+use cairn_lang_core::block_array::is_stair;
 
 fn translate_stair(
     id: &str,

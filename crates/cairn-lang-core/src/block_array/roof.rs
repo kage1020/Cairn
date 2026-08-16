@@ -28,28 +28,55 @@
 //!   side ends up on the inward side), `half=bottom`. Apex caps reuse
 //!   the slope facings with `half=top` so the upside-down stair closes
 //!   the peak. Per-theme roof species follow with the registry pack.
-//! - **Material id.** `gable`, `shed`, and `hip` hardcode
-//!   `minecraft:spruce_stairs` (see [`STAIR_BASE_ID`]); `flat` hardcodes
-//!   [`FLAT_BASE_ID`]. A `mat_slot=` binding that resolves to anything
-//!   else fires a `W_DEFERRED_MEMBER` warning in `lower.rs` so the user's
-//!   intent is not silently replaced.
+//! - **Material id.** A `mat_slot=` binding chooses the species. `gable`,
+//!   `shed`, and `hip` require a member of the stair family ([`is_stair`])
+//!   because they attach `facing` / `half` / `shape` to whatever they
+//!   paint, and those states do not exist on a whole block; a binding
+//!   outside the family fires `W_DEFERRED_MEMBER` in `lower.rs` and the
+//!   roof falls back to [`STAIR_BASE_ID`] rather than stapling stair
+//!   states onto an id that has none. `flat` attaches no states and so
+//!   constrains nothing, falling back to [`FLAT_BASE_ID`] only when there
+//!   is no binding to read.
 
 use indexmap::IndexMap;
 
 use super::BlockState;
 use super::openings::WallSide;
 
-/// Vanilla stair id used by `gable`, `shed`, and `hip` roofs. Themed
-/// material slots resolve to this id via `slot roof -> @spruce_stairs` in
-/// the cottage example; per-species roofs land with the registry pack.
-/// `lower.rs` emits a `W_DEFERRED_MEMBER` warning when a `mat_slot=`
-/// binding resolves to a different id, so the user is not silently
-/// overridden.
+/// Stair id a sloped roof falls back to when its `mat_slot=` binds nothing
+/// usable.
+///
+/// Not a ceiling on what a roof may be made of: any member of the stair
+/// family binds, and the registry pack ships four roof species that do
+/// (`roof.dark_wood` → `dark_oak_stairs`, and so on). What the fallback
+/// covers is a roof with no `mat_slot=` at all, and one whose binding
+/// [`is_stair`] refuses — see `lower.rs`.
 pub const STAIR_BASE_ID: &str = "minecraft:spruce_stairs";
 
-/// Vanilla planks id used by `flat` roofs. Same warn-on-mismatch contract
-/// as [`STAIR_BASE_ID`].
+/// Planks id a `flat` roof falls back to when it has no `mat_slot=`.
+///
+/// Unlike [`STAIR_BASE_ID`] this constrains nothing. A flat roof is one
+/// layer of whole blocks with no blockstate attached, so every id is as
+/// valid as this one.
 pub const FLAT_BASE_ID: &str = "minecraft:spruce_planks";
+
+/// Whether `id` names a member of the stair family.
+///
+/// The whole family shares one blockstate vocabulary — `facing`, `half`,
+/// `shape` — which is what makes the family, rather than any one species,
+/// the right unit for a geometry pass to require. Keyed off the identifier
+/// *path* so a namespace cannot smuggle a non-stair through: `mystairs` is
+/// not one, and neither is a `create:cogwheel`.
+///
+/// One owner on purpose. `cairn-lang-formats` asks the same question when
+/// it translates a blockstate for Bedrock, and two copies of this rule
+/// could disagree about an id that this crate paints and that crate then
+/// has to write.
+#[must_use]
+pub fn is_stair(id: &str) -> bool {
+    let path = id.rsplit_once(':').map_or(id, |(_, path)| path);
+    path.ends_with("_stairs")
+}
 
 /// One of the four supported roof kinds.
 ///
@@ -97,14 +124,22 @@ impl RoofKind {
         }
     }
 
-    /// Canonical block id this kind voxelises into. Used by `lower.rs`
-    /// to check a `mat_slot=` binding against the kind's hardcoded
-    /// material.
+    /// Block id this kind paints when no `mat_slot=` binding supplies one.
     #[must_use]
     pub fn base_block_id(self) -> &'static str {
         match self {
             Self::Gable | Self::Shed | Self::Hip => STAIR_BASE_ID,
             Self::Flat => FLAT_BASE_ID,
+        }
+    }
+
+    /// Whether this kind attaches stair blockstates to the block it paints,
+    /// and therefore needs one from the stair family ([`is_stair`]).
+    #[must_use]
+    pub fn paints_stairs(self) -> bool {
+        match self {
+            Self::Gable | Self::Shed | Self::Hip => true,
+            Self::Flat => false,
         }
     }
 }
@@ -1099,6 +1134,48 @@ mod tests {
             assert_eq!(*y, 5, "flat layer sits at wall_top + 1");
             assert!(*x < 11 && *z < 9);
         }
+    }
+
+    #[test]
+    fn the_stair_family_is_keyed_off_the_identifier_path() {
+        // A namespace must not be able to smuggle a non-stair past the
+        // geometry pass, and a bare id with no namespace has to answer the
+        // same question as a namespaced one — a roof that accepted
+        // `mystairs` would put `facing` / `half` / `shape` onto a block
+        // that has none of them.
+        for id in [
+            "minecraft:oak_stairs",
+            "minecraft:dark_oak_stairs",
+            "oak_stairs",
+            "create:brass_stairs",
+        ] {
+            assert!(is_stair(id), "`{id}` is a stair");
+        }
+        for id in [
+            "minecraft:cobblestone",
+            "minecraft:stairs",
+            "mystairs",
+            "minecraft:oak_stairs_slab",
+            "create:cogwheel",
+            "",
+        ] {
+            assert!(!is_stair(id), "`{id}` is not a stair");
+        }
+    }
+
+    #[test]
+    fn only_the_kinds_that_attach_states_require_a_stair() {
+        for kind in [RoofKind::Gable, RoofKind::Shed, RoofKind::Hip] {
+            assert!(kind.paints_stairs(), "{kind:?}");
+            assert!(
+                is_stair(kind.base_block_id()),
+                "{kind:?}: its own fallback must pass the check it imposes",
+            );
+        }
+        assert!(
+            !RoofKind::Flat.paints_stairs(),
+            "a flat deck attaches no states, so every block is as valid as another",
+        );
     }
 
     #[test]
