@@ -93,20 +93,18 @@ pub(crate) fn manhattan(a: CellCoord, b: CellCoord) -> u32 {
 /// `NetRef → source coord` mapping (they differ only in how loud they
 /// are about a hand-built IR that breaks the topological invariant),
 /// but the sink side is this one function.
-pub(crate) fn collect_nets(
-    ir: &PlacementIr,
-    region: &CircuitRegionReservation,
-) -> HashMap<NetRef, Vec<CellCoord>> {
+pub(crate) fn collect_nets(ir: &PlacementIr) -> HashMap<NetRef, Vec<CellCoord>> {
     let mut nets: HashMap<NetRef, Vec<CellCoord>> = HashMap::new();
     for cell in &ir.cells {
         for driver in &cell.drivers {
             nets.entry(driver.net).or_default().push(cell.coord);
         }
     }
-    for (k, output) in ir.outputs.iter().enumerate() {
-        nets.entry(output.driver)
-            .or_default()
-            .push(output_pad(k, region));
+    for output in &ir.outputs {
+        // The pad the placement pass assigned, not a re-derivation of
+        // it: three passes call this function, and a second copy of the
+        // `x = width - 1` rule is a second thing to keep in step.
+        nets.entry(output.driver).or_default().push(output.pad);
     }
     nets
 }
@@ -613,8 +611,8 @@ mod tests {
         use cairn_lang_core::ast::DottedRef;
 
         use crate::edition_netlist_ir::EditionCell;
-        use crate::netlist_ir::{CellPortDriver, NetlistOutput, PortName};
-        use crate::placement_ir::{PlacedCellNode, PlacementIr, PlacementPhase};
+        use crate::netlist_ir::{CellPortDriver, PortName};
+        use crate::placement_ir::{PlacedCellNode, PlacedOutputNode, PlacementIr, PlacementPhase};
 
         let region = reservation(8, 4);
         let mut ir = PlacementIr::new(Edition::Java);
@@ -628,13 +626,14 @@ mod tests {
             phase: PlacementPhase::Unrouted,
             span: Span::default(),
         });
-        ir.outputs.push(NetlistOutput {
-            name: DottedRef::new("sig".into(), vec!["out".into()]),
-            driver: NetRef::Cell(0),
-            span: Span::default(),
-        });
+        ir.outputs.push(PlacedOutputNode::new(
+            DottedRef::new("sig".into(), vec!["out".into()]),
+            NetRef::Cell(0),
+            output_pad(0, &region),
+            Span::default(),
+        ));
 
-        let nets = collect_nets(&ir, &region);
+        let nets = collect_nets(&ir);
         assert_eq!(nets[&NetRef::Input(0)], vec![CellCoord::new(2, 0, 1)]);
         assert_eq!(nets[&NetRef::Cell(0)], vec![output_pad(0, &region)]);
     }

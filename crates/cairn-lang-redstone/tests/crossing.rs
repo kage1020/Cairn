@@ -19,8 +19,8 @@ use cairn_lang_core::Edition;
 use cairn_lang_core::check::Severity;
 use cairn_lang_core::{lower, parse};
 use cairn_lang_redstone::{
-    DiagnosticCode, ScopedPlacementIr, compile_crossing, compile_delay, compile_edition_netlist,
-    compile_netlist, compile_placement, compile_routing, synthesize,
+    DiagnosticCode, PortName, ScopedPlacementIr, compile_crossing, compile_delay,
+    compile_edition_netlist, compile_netlist, compile_placement, compile_routing, synthesize,
 };
 
 mod common;
@@ -342,5 +342,107 @@ struct gen size=4x8
         last.coord.x,
         region.width - 1,
         "the fixture only tests the boundary while the last cell sits in the final column",
+    );
+}
+
+/// A wire to an actuator attenuates like any other wire.
+///
+/// Two sensors and one cell inside a 40-wide region: the cell sits at
+/// `x=0` and its actuator pad at `x=39`, so the segment out to the door
+/// is far past the 15-block dust limit while every segment into the
+/// cell is short. Before the output pad was a placed node, that segment
+/// was measured (the attenuation cap looked at it) but never charged —
+/// zero buffers counted, zero coords materialised — so a driver a
+/// hundred blocks from its actuator reported the same delay as one
+/// beside it.
+#[test]
+fn the_wire_out_to_an_actuator_carries_buffer_repeaters() {
+    let source = "\
+theme t:
+  slot wall -> @oak_planks
+  slot door -> @oak_door
+
+struct reach size=40x6
+  floor mat_slot=wall
+  door id=front side=front at=center mat_slot=door
+  pressure_plate id=p1 at=front.outside offset=0 y=0 -> sig.a
+  pressure_plate id=p2 at=inside.front offset=0 y=0 -> sig.b
+  logic sig.c = sig.a or sig.b
+  door[id=front] opened_by=sig.c
+  circuit region=floor void=3
+";
+    let delayed = delayed_from_source(source, Edition::Java);
+    let out = compile_crossing(&delayed);
+    assert!(out.diagnostics.is_empty(), "{:?}", out.diagnostics);
+
+    let scope = out.scoped.scopes.first().expect("the scope legalizes");
+    let cell = scope.ir.cells.first().expect("the one cell");
+    let output = scope.ir.outputs.first().expect("the actuator");
+
+    // The premise: the outward segment is long and the inward ones are
+    // not, so any buffer here belongs to the wire this test is about.
+    assert!(
+        output.wire_length().expect("routed") > 15,
+        "the fixture only means something while the outward segment is past the dust limit",
+    );
+    assert_eq!(
+        cell.buffer_coords().len(),
+        0,
+        "the inward segments are short"
+    );
+
+    assert!(
+        output.delay_ticks().is_some_and(|ticks| ticks >= 1),
+        "the outward segment must be charged for its repeaters, got {:?}",
+        output.delay_ticks(),
+    );
+    assert_eq!(
+        output.buffer_coords().len(),
+        output.delay_ticks().expect("delayed") as usize,
+        "every tick the delay pass counted must have a coord behind it",
+    );
+    assert!(
+        output
+            .buffer_coords()
+            .iter()
+            .all(|b| b.port == PortName::Out),
+        "a buffer on the outward wire belongs to no input port: {:?}",
+        output.buffer_coords(),
+    );
+}
+
+/// The symmetry the previous test's asymmetry was: a segment of a given
+/// length is charged the same whether it runs into a cell or out to an
+/// actuator.
+#[test]
+fn an_outward_segment_is_charged_like_an_inward_one_of_the_same_length() {
+    let source = "\
+theme t:
+  slot wall -> @oak_planks
+  slot door -> @oak_door
+
+struct pair size=40x6
+  floor mat_slot=wall
+  door id=front side=front at=center mat_slot=door
+  pressure_plate id=p1 at=front.outside offset=0 y=0 -> sig.a
+  pressure_plate id=p2 at=inside.front offset=0 y=0 -> sig.b
+  logic sig.c = sig.a or sig.b
+  door[id=front] opened_by=sig.c
+  circuit region=floor void=3
+";
+    let delayed = delayed_from_source(source, Edition::Java);
+    let out = compile_crossing(&delayed);
+    let scope = out.scoped.scopes.first().expect("the scope legalizes");
+    let output = scope.ir.outputs.first().expect("the actuator");
+
+    // `buffer_count_for_segment` is `(s - 1) / 15`; asserting the pass's
+    // figure against that formula rather than against a literal keeps
+    // the two from being re-derived from each other.
+    let segment = output.wire_length().expect("routed");
+    let expected = (segment - 1) / 15;
+    assert_eq!(
+        output.buffer_coords().len(),
+        expected as usize,
+        "segment {segment} needs {expected} repeaters",
     );
 }

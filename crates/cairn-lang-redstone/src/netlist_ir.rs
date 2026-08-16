@@ -94,6 +94,12 @@ pub enum PortName {
     B,
     /// `Mux` select line.
     Sel,
+    /// Not an input port: the segment leaving a driver for an
+    /// actuator's output pad. A cell's ports name the wires that feed
+    /// it, and that wire needs a name too — it carries buffer
+    /// repeaters like any other, and [`crate::BufferCoord`] attributes
+    /// each buffer to the segment it stands on.
+    Out,
 }
 
 /// One `(port name, driving net)` pair on a [`CellNode`]. Encoded as a

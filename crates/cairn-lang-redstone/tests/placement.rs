@@ -444,14 +444,13 @@ struct simple size=5x5
 }
 
 /// A scope whose Edition Netlist IR carries inputs and outputs but no
-/// cells — a `pressure_plate -> sig.a` bound directly to `door
-/// opened_by=sig.a` with no `logic` line in between — has nothing to
-/// place. The pass elides such scopes cleanly (no panic, no diagnostic,
-/// no orphan `PlacementIr` entry), so the routing pass can re-scan the
-/// Edition Netlist IR for these no-cell wires without a broken
-/// intermediate state.
+/// cells — a `pressure_plate -> sig.a` bound straight to `door
+/// opened_by=sig.a`, which `spec/redstone` §14.2 permits — still has a
+/// layout: the wire from the sensor pad to the actuator pad. It used to
+/// be dropped here, and `--stage placement` onward printed `[]` at exit
+/// 0 for a scope the netlist stage had just described in full.
 #[test]
-fn identity_wire_scope_is_elided_cleanly() {
+fn identity_wire_scope_places_its_actuator_pad() {
     let source = r"
 theme t:
   slot wall -> @oak_planks
@@ -471,9 +470,24 @@ struct wire size=5x5
         "identity-wire scope must not raise diagnostics, got {:?}",
         out.diagnostics,
     );
+    let scope = out
+        .scoped
+        .scopes
+        .iter()
+        .find(|e| e.name == "wire")
+        .expect("identity-wire scope must reach the Placement IR");
+    assert!(scope.ir.cells.is_empty(), "there is no logic to place");
+    assert_eq!(scope.ir.inputs.len(), 1, "the sensor survives");
+    let region = scope.ir.region.as_ref().expect("the reservation survives");
+    let output = scope.ir.outputs.first().expect("the actuator is placed");
+    assert_eq!(
+        output.pad.x,
+        region.width - 1,
+        "the pad sits on the region's right edge",
+    );
     assert!(
-        out.scoped.scopes.iter().all(|e| e.name != "wire"),
-        "identity-wire scope must be elided from the Placement IR",
+        !scope.ir.signal_defs.is_empty(),
+        "the signal table survives so a consumer can join the pad back to `sig.a`",
     );
 }
 

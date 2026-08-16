@@ -290,12 +290,12 @@ fn empty_placement_ir_produces_empty_routing_output() {
     assert!(routed.scoped.scopes.is_empty());
 }
 
-/// AC6 — a scope whose Placement IR carries inputs and outputs but
-/// no cells (a pressure-plate wired straight to a door via `sig.a`)
-/// is elided by `compile_placement` already, so `compile_routing`
-/// never sees it. The routing output must still be diagnostic-clean.
+/// AC6 — a scope whose Placement IR carries inputs and outputs but no
+/// cells (a pressure-plate wired straight to a door via `sig.a`) has
+/// one segment to route: sensor pad to actuator pad. Its length is the
+/// number the delay pass charges buffer repeaters against.
 #[test]
-fn identity_wire_scope_is_elided_before_routing() {
+fn identity_wire_routes_its_sensor_to_actuator_segment() {
     let source = r"
 theme t:
   slot wall -> @oak_planks
@@ -314,9 +314,17 @@ struct wire size=5x5
         "identity-wire scope must not raise routing diagnostics, got {:?}",
         routed.diagnostics,
     );
-    assert!(
-        routed.scoped.scopes.iter().all(|e| e.name != "wire"),
-        "identity-wire scope must stay elided in the routed output",
+    let scope = routed
+        .scoped
+        .scopes
+        .iter()
+        .find(|e| e.name == "wire")
+        .expect("identity-wire scope must reach the routed IR");
+    let output = scope.ir.outputs.first().expect("the actuator is placed");
+    assert_eq!(
+        output.wire_length(),
+        Some(4),
+        "the pads sit at (0,0,1) and (4,0,1) of a 5-wide region",
     );
 }
 

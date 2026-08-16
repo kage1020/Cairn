@@ -110,14 +110,19 @@ pub enum DiagnosticCode {
     /// `circuit` blocks, or pin cell / actuator placement closer to
     /// its drivers.
     AttenuationLimit,
-    /// The crossing-legalization pass ran out of `Bridge` / `Via` layer
-    /// budget while escaping cross-net overlaps. `spec/redstone` §14.5
-    /// stage 4 lifts a wire onto a bridge coord whenever two nets would
+    /// The crossing-legalization pass found a cross-net plane overlap
+    /// and no layer to escape it to. `spec/redstone` §14.5 stage 4
+    /// lifts a wire onto a bridge coord whenever two nets would
     /// otherwise share a `Plane` coord; the escape layer draws from the
     /// same `void=<N>` service-layer height the placement / routing
-    /// passes already consume, and this code fires once every `y` layer
-    /// in the reservation has a wire on it and the pass still needs to
-    /// escape another crossing. Fix: increase `void`, enlarge the
+    /// passes already consume, and a bridge needs at least `y = 1`,
+    /// which needs `void >= 2`. So the v1 test is whether that layer
+    /// exists, not how many crossings it would have to carry: any
+    /// crossing under `void < 2` fires this, and `void >= 2` accepts
+    /// them all. There is nothing downstream for a per-crossing
+    /// capacity model to constrain yet — v1 does not lift the wire
+    /// itself, and block-array lowering re-derives the crossings from
+    /// the same Steiner trees. Fix: increase `void`, enlarge the
     /// `circuit region=` footprint so fewer wires cross, or split the
     /// logic across multiple `circuit` blocks so each block routes
     /// with fewer overlaps.

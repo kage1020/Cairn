@@ -46,9 +46,10 @@ use crate::diagnostic::{Diagnostic, DiagnosticCode};
 use crate::edition_netlist_ir::{EditionNetlistIr, ScopedEditionNetlistIr};
 use crate::logic_ir::ScopeKind;
 use crate::placement_ir::{
-    CellCoord, CircuitRegionReservation, PlacedCellNode, PlacementIr, PlacementPhase,
-    ScopedPlacementIr,
+    CellCoord, CircuitRegionReservation, PlacedCellNode, PlacedOutputNode, PlacementIr,
+    PlacementPhase, ScopedPlacementIr,
 };
+use crate::routing_geometry::output_pad;
 
 /// Per-cell footprint used by the v1 congestion estimate. Four blocks
 /// covers a two-input gate's cell plus its short input tails, and is
@@ -118,23 +119,20 @@ fn compile_scope(
     source: &EditionNetlistIr,
     region: Option<&intent::CircuitRegion>,
 ) -> ScopePlacement {
-    // Identity-wire scopes — inputs/outputs but zero cells, e.g. a
-    // `pressure_plate -> sig.a` bound directly to `door opened_by=sig.a`
-    // with no `logic` line in between — reach the placement pass because
-    // `EditionNetlistIr::is_empty()` requires *all three* of inputs /
-    // outputs / cells to be empty for elision. There is nothing to place
-    // for a scope with no cells, so drop it from the Placement IR at
-    // this stage. The routing pass (M6 follow-up) will consume the
-    // Edition Netlist IR directly for these no-cell wires; nothing in
-    // the placement contract survives without at least one cell to
-    // coordinate.
-    if source.cells.is_empty() {
+    // An identity-wire scope — inputs and outputs but zero cells, e.g. a
+    // `pressure_plate -> sig.a` bound straight to `door opened_by=sig.a`
+    // with no `logic` line between them — is a layout too. `spec/redstone`
+    // §14.2 permits the direct binding, and across a wide footprint that
+    // wire needs the same buffer repeaters any other wire does. What it
+    // has to place is the output pad, which needs the reservation exactly
+    // as a cell does; only a scope with nothing at all in it is nothing
+    // to place.
+    if source.is_empty() {
         return Ok(PlacementIr::new(source.edition));
     }
 
     let mut ir = PlacementIr::new(source.edition);
     ir.inputs.clone_from(&source.inputs);
-    ir.outputs.clone_from(&source.outputs);
     ir.signal_defs.clone_from(&source.signal_defs);
 
     let Some(region) = region else {
@@ -191,15 +189,34 @@ fn compile_scope(
         ir.cells.iter().all(|c| c.cell.edition() == source.edition),
         "compile_scope placed a cell whose edition tag disagrees with the container's",
     );
+
+    // Actuator pads take their coordinate from the same geometry the
+    // routing pass measures against, so the segment out to an actuator
+    // is a placed object rather than something re-derived per pass.
+    for (index, source_output) in source.outputs.iter().enumerate() {
+        ir.outputs.push(PlacedOutputNode::new(
+            source_output.name.clone(),
+            source_output.driver,
+            output_pad(index, &reservation),
+            source_output.span.clone(),
+        ));
+    }
+
     ir.region = Some(reservation);
     Ok(ir)
 }
 
 fn missing_region_diagnostic(source: &EditionNetlistIr) -> Diagnostic {
+    // An identity-wire scope has no cell to point at, so fall through to
+    // the actuator binding that made the scope need a reservation in the
+    // first place. A default span would render the finding at byte 0,
+    // which for the one scope shape that reaches here without a cell is
+    // every time.
     let span = source
         .cells
         .first()
         .map(|c| c.span.clone())
+        .or_else(|| source.outputs.first().map(|o| o.span.clone()))
         .unwrap_or_default();
     Diagnostic::new(
         DiagnosticCode::NoCircuitRegion,

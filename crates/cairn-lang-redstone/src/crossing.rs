@@ -90,12 +90,12 @@ use cairn_lang_core::check::Severity;
 
 use crate::delay::{DUST_ATTENUATION_LIMIT, buffer_count_for_segment};
 use crate::diagnostic::{Diagnostic, DiagnosticCode};
-use crate::netlist_ir::NetRef;
+use crate::netlist_ir::{NetRef, PortName};
 use crate::placement_ir::{
     BufferCoord, CellCoord, CellIdentity, CircuitRegionReservation, PlacementIr, RouteLayer,
     ScopedPlacementIr, ScopedPlacementIrEntry,
 };
-use crate::routing_geometry::{NetTree, collect_nets, input_pad, net_order, net_trees, output_pad};
+use crate::routing_geometry::{NetTree, collect_nets, input_pad, net_order, net_trees};
 
 /// Output of a [`compile_crossing`] run.
 ///
@@ -207,7 +207,7 @@ fn legalize_scope(entry: &ScopedPlacementIrEntry) -> ScopeLegalization {
         }
     };
 
-    let nets = collect_nets(&ir, &region);
+    let nets = collect_nets(&ir);
     let order = net_order(&nets);
     let trees = net_trees(&nets, source_of_net);
 
@@ -223,8 +223,8 @@ fn legalize_scope(entry: &ScopedPlacementIrEntry) -> ScopeLegalization {
     for i in 0..ir.inputs.len() {
         reserved.insert(input_pad(i, &region));
     }
-    for k in 0..ir.outputs.len() {
-        reserved.insert(output_pad(k, &region));
+    for pad in ir.outputs.iter().map(|o| o.pad) {
+        reserved.insert(pad);
     }
 
     // Which nets' dust runs through each non-reserved plane coord,
@@ -277,7 +277,7 @@ fn legalize_scope(entry: &ScopedPlacementIrEntry) -> ScopeLegalization {
         }
     }
 
-    let buffer_coords_per_cell = allocate_buffer_coords(
+    let allocation = allocate_buffer_coords(
         &ir,
         entry,
         &region,
@@ -287,7 +287,7 @@ fn legalize_scope(entry: &ScopedPlacementIrEntry) -> ScopeLegalization {
         &reserved,
     )?;
 
-    for (index, (cell, buffers)) in ir.cells.iter_mut().zip(buffer_coords_per_cell).enumerate() {
+    for (index, (cell, buffers)) in ir.cells.iter_mut().zip(allocation.per_cell).enumerate() {
         // Loud in release too: `PlacementPhase::legalize_at` panics on
         // any non-`Delayed` variant, so a caller who chained
         // `compile_crossing(&legalized.scoped)` (or handed us a
@@ -297,6 +297,11 @@ fn legalize_scope(entry: &ScopedPlacementIrEntry) -> ScopeLegalization {
         // rather than only the phase it tripped on.
         let identity = CellIdentity::new(index, cell.coord, entry);
         cell.phase.legalize_at(buffers, identity);
+    }
+
+    for (index, (output, buffers)) in ir.outputs.iter_mut().zip(allocation.per_output).enumerate() {
+        let identity = CellIdentity::output(index, output.pad, entry);
+        output.phase.legalize_at(buffers, identity);
     }
 
     Ok(ir)
@@ -363,22 +368,15 @@ fn claim_bridge(
     None
 }
 
-/// Buffer coord allocation: for every cell driver, walk the routed
-/// path from the net's source to that cell and pick coords at
-/// `k * DUST_ATTENUATION_LIMIT` (`k = 1..=buffer_count`).
+/// Buffer coord allocation for one scope: every cell driver segment,
+/// then every actuator segment, through one [`BufferPlacer`].
 ///
-/// The path is [`NetTree::route_to`], the dust the signal actually
-/// travels, so a plane buffer always stands on the wire it refreshes.
-/// The count is [`buffer_count_for_segment`] over that same path's
-/// length — the function the delay pass charged ticks for — so stage 3
-/// and stage 4 describe one circuit.
-///
-/// A candidate held by something else ([`plane_occupant`]) escapes to
-/// a [`RouteLayer::Bridge`] layer directly above it; if none is free,
-/// refuse with `E_BUFFER_COORD_COLLISION`. Split out of
-/// `legalize_scope` so the entry function stays under clippy's
-/// `too_many_lines` budget and the allocation strategy reads as a
-/// self-contained table.
+/// The routed path is [`NetTree::route_to`] and the count is
+/// [`buffer_count_for_segment`] over its length — the same function the
+/// delay pass charged ticks with — so stage 3 and stage 4 describe one
+/// circuit. Split out of `legalize_scope` so the entry function stays
+/// under clippy's `too_many_lines` budget and the allocation strategy
+/// reads as a self-contained table.
 fn allocate_buffer_coords(
     ir: &PlacementIr,
     entry: &ScopedPlacementIrEntry,
@@ -387,9 +385,15 @@ fn allocate_buffer_coords(
     trees: &HashMap<NetRef, NetTree>,
     wire_owners: &HashMap<CellCoord, Vec<NetRef>>,
     reserved: &HashSet<CellCoord>,
-) -> Result<Vec<Vec<BufferCoord>>, Diagnostic> {
-    let mut plane_buffers: HashSet<CellCoord> = HashSet::new();
-    let mut bridge_buffers: HashSet<CellCoord> = HashSet::new();
+) -> Result<BufferAllocation, Diagnostic> {
+    let mut placer = BufferPlacer {
+        region,
+        wire_owners,
+        reserved,
+        plane: HashSet::new(),
+        bridge: HashSet::new(),
+    };
+
     let mut per_cell: Vec<Vec<BufferCoord>> = Vec::with_capacity(ir.cells.len());
     for (cell_index, cell) in ir.cells.iter().enumerate() {
         let sink = cell_coords[cell_index];
@@ -413,41 +417,19 @@ fn allocate_buffer_coords(
                         z = sink.z,
                     )
                 });
-            let segment = u32::try_from(route.len().saturating_sub(1)).unwrap_or(u32::MAX);
-            for k in 1..=buffer_count_for_segment(segment) {
-                // `route.len() == segment + 1` and `k * DUST_ATTENUATION_LIMIT
-                // <= buffer_count * DUST_ATTENUATION_LIMIT <= segment - 1`,
-                // so `idx` is always a valid index. Loud in release: a
-                // silent saturating fallback would place the buffer at
-                // the sink coord and let a caller-side bug (segment /
-                // buffer_count / route.len() drift) materialise a
-                // buffer at the cell body without any diagnostic.
-                let idx = (k as usize).saturating_mul(DUST_ATTENUATION_LIMIT as usize);
-                let candidate = *route.get(idx).unwrap_or_else(|| {
-                    panic!(
-                        "buffer index {idx} out of range (route.len()={}) for cell #{cell_index} driver — segment / buffer_count / route.len() invariant broken by caller-side hand-built IR",
-                        route.len(),
-                    )
-                });
-                let Some(occupant) =
-                    plane_occupant(candidate, driver.net, reserved, wire_owners, &plane_buffers)
-                else {
-                    plane_buffers.insert(candidate);
-                    buffers_for_cell.push(BufferCoord::new(driver.port, candidate));
-                    continue;
-                };
-                let bridge =
-                    claim_bridge(candidate, region, &mut bridge_buffers).ok_or_else(|| {
-                        buffer_collision_diagnostic(
-                            entry, ir, region, cell_index, candidate, occupant,
-                        )
-                    })?;
-                buffers_for_cell.push(BufferCoord::new(driver.port, bridge));
-            }
+            buffers_for_cell.extend(placer.claim(
+                &route,
+                driver.net,
+                driver.port,
+                &|candidate, occupant| {
+                    buffer_collision_diagnostic(entry, ir, region, cell_index, candidate, occupant)
+                },
+                &format!("cell #{cell_index} driver"),
+            )?);
         }
         // Producer-side contract on [`BufferCoord::port`]: every entry
         // must name a driver that actually exists on the owning cell.
-        // Trivially true today because both push sites source
+        // Trivially true today because the push site sources
         // `driver.port` from the enclosing `for driver in &cell.drivers`
         // loop, but debug-asserted so a future buffer producer (e.g.
         // fan-out duplication) added elsewhere cannot silently emit a
@@ -462,7 +444,160 @@ fn allocate_buffer_coords(
         );
         per_cell.push(buffers_for_cell);
     }
-    Ok(per_cell)
+
+    // The segment out to an actuator is charged for buffers by stage 3
+    // exactly as a segment into a cell is, so stage 4 has to give those
+    // buffers coords or the two stages disagree about how many exist.
+    // Same placer, and after the cells, so a cell buffer and an output
+    // buffer cannot claim one coord.
+    let mut per_output: Vec<Vec<BufferCoord>> = Vec::with_capacity(ir.outputs.len());
+    for (output_index, output) in ir.outputs.iter().enumerate() {
+        let route = trees
+            .get(&output.driver)
+            .and_then(|tree| tree.route_to(output.pad))
+            .unwrap_or_else(|| {
+                panic!(
+                    "output #{output_index} pad at ({x},{y},{z}) is not a terminal of the net driving it — the output list and the collected nets disagree",
+                    x = output.pad.x,
+                    y = output.pad.y,
+                    z = output.pad.z,
+                )
+            });
+        per_output.push(placer.claim(
+            &route,
+            output.driver,
+            PortName::Out,
+            &|candidate, occupant| {
+                buffer_collision_output_diagnostic(
+                    entry,
+                    ir,
+                    region,
+                    output_index,
+                    candidate,
+                    occupant,
+                )
+            },
+            &format!("output #{output_index}"),
+        )?);
+    }
+
+    Ok(BufferAllocation {
+        per_cell,
+        per_output,
+    })
+}
+
+/// The coords already spoken for by buffers this scope has placed, plus
+/// the immutable picture of what else is in the way.
+///
+/// One placer serves the cell segments and the actuator segments in
+/// turn, which is what keeps two buffers off one coord. Both kinds of
+/// segment go through [`Self::claim`] for the same reason: stage 3
+/// charges them by one rule, so stage 4 has to place them by one rule
+/// or the tick count and the coord list describe different circuits.
+struct BufferPlacer<'a> {
+    region: &'a CircuitRegionReservation,
+    wire_owners: &'a HashMap<CellCoord, Vec<NetRef>>,
+    reserved: &'a HashSet<CellCoord>,
+    plane: HashSet<CellCoord>,
+    bridge: HashSet<CellCoord>,
+}
+
+impl BufferPlacer<'_> {
+    /// Claim a coord for every buffer repeater [`buffer_count_for_segment`]
+    /// implies on `route`, attributing each to `port`.
+    ///
+    /// Candidates sit at `k * DUST_ATTENUATION_LIMIT` along the routed
+    /// path — the dust the signal actually travels, so a plane buffer
+    /// always stands on the wire it refreshes. A candidate held by
+    /// something else ([`plane_occupant`]) escapes to a
+    /// [`RouteLayer::Bridge`] layer directly above it; if none is free,
+    /// `on_collision` builds the refusal, because the two callers name
+    /// the offending segment differently and "cell #3" on a finding
+    /// about an actuator wire sends the reader to the wrong line.
+    /// `subject` names the segment in the panic messages that guard the
+    /// index invariants.
+    fn claim(
+        &mut self,
+        route: &[CellCoord],
+        net: NetRef,
+        port: PortName,
+        on_collision: &dyn Fn(CellCoord, PlaneOccupant) -> Diagnostic,
+        subject: &str,
+    ) -> Result<Vec<BufferCoord>, Diagnostic> {
+        let segment = u32::try_from(route.len().saturating_sub(1)).unwrap_or(u32::MAX);
+        let mut claimed = Vec::new();
+        for k in 1..=buffer_count_for_segment(segment) {
+            // `route.len() == segment + 1` and `k * DUST_ATTENUATION_LIMIT
+            // <= buffer_count * DUST_ATTENUATION_LIMIT <= segment - 1`,
+            // so `idx` is always a valid index. Loud in release: a
+            // silent saturating fallback would place the buffer at the
+            // sink coord and let a caller-side bug (segment /
+            // buffer_count / route.len() drift) materialise a buffer on
+            // top of a component without any diagnostic.
+            let idx = (k as usize).saturating_mul(DUST_ATTENUATION_LIMIT as usize);
+            let candidate = *route.get(idx).unwrap_or_else(|| {
+                panic!(
+                    "buffer index {idx} out of range (route.len()={}) for {subject} — segment / buffer_count / route.len() invariant broken by caller-side hand-built IR",
+                    route.len(),
+                )
+            });
+            let Some(occupant) =
+                plane_occupant(candidate, net, self.reserved, self.wire_owners, &self.plane)
+            else {
+                self.plane.insert(candidate);
+                claimed.push(BufferCoord::new(port, candidate));
+                continue;
+            };
+            let bridge = claim_bridge(candidate, self.region, &mut self.bridge)
+                .ok_or_else(|| on_collision(candidate, occupant))?;
+            claimed.push(BufferCoord::new(port, bridge));
+        }
+        Ok(claimed)
+    }
+}
+
+/// Where every implicit buffer repeater in one scope goes: one entry
+/// per cell, then one per actuator pad. Two vectors rather than one
+/// because the two commit into different nodes, and a single flat list
+/// would need the split re-derived at the commit site.
+struct BufferAllocation {
+    per_cell: Vec<Vec<BufferCoord>>,
+    per_output: Vec<Vec<BufferCoord>>,
+}
+
+/// The output-segment mirror of [`buffer_collision_diagnostic`]. Kept
+/// separate rather than given a cell index it does not have: "cell #3"
+/// on a finding about the wire to an actuator sends the reader to the
+/// wrong line.
+fn buffer_collision_output_diagnostic(
+    entry: &ScopedPlacementIrEntry,
+    ir: &PlacementIr,
+    reservation: &CircuitRegionReservation,
+    output_index: usize,
+    candidate: CellCoord,
+    occupant: PlaneOccupant,
+) -> Diagnostic {
+    let held_by = plane_occupant_label(occupant, ir);
+    let primary = format!(
+        "routed netlist for {kind} `{name}` cannot place an implicit buffer repeater on the wire to actuator #{output_index}: its wire reaches ({x},{y},{z}), which is already {held_by}, and the `void={void}` reservation offers no bridge layer to escape to",
+        kind = entry.kind.label(),
+        name = entry.name,
+        x = candidate.x,
+        y = candidate.y,
+        z = candidate.z,
+        void = reservation.void,
+    );
+    let mut diag = Diagnostic::new(
+        DiagnosticCode::BufferCoordCollision,
+        reservation.span.clone(),
+        primary,
+    );
+    diag = diag.with_footer(
+        "Fix: increase `void` so buffers can fall onto a bridge layer, or enlarge `region=` so buffer candidates have room on the plane",
+    );
+    debug_assert_eq!(diag.severity(), Severity::Error);
+    diag
 }
 
 fn crossing_congestion_diagnostic(
@@ -514,6 +649,17 @@ fn net_label(net: NetRef, ir: &PlacementIr) -> String {
     }
 }
 
+/// What is standing on the coord, in the words the two collision
+/// diagnostics both use. Shared so the cell-side and output-side
+/// findings cannot start describing the same obstruction differently.
+fn plane_occupant_label(occupant: PlaneOccupant, ir: &PlacementIr) -> String {
+    match occupant {
+        PlaneOccupant::Component => "a cell body or an I/O pad".to_owned(),
+        PlaneOccupant::OtherNet(other) => format!("{}'s wire", net_label(other, ir)),
+        PlaneOccupant::Buffer => "another buffer repeater".to_owned(),
+    }
+}
+
 fn buffer_collision_diagnostic(
     entry: &ScopedPlacementIrEntry,
     ir: &PlacementIr,
@@ -522,11 +668,7 @@ fn buffer_collision_diagnostic(
     candidate: CellCoord,
     occupant: PlaneOccupant,
 ) -> Diagnostic {
-    let held_by = match occupant {
-        PlaneOccupant::Component => "a cell body or an I/O pad".to_owned(),
-        PlaneOccupant::OtherNet(other) => format!("{}'s wire", net_label(other, ir)),
-        PlaneOccupant::Buffer => "another buffer repeater".to_owned(),
-    };
+    let held_by = plane_occupant_label(occupant, ir);
     let primary = format!(
         "routed netlist for {kind} `{name}` cannot place an implicit buffer repeater for cell #{cell_index}: its wire reaches ({x},{y},{z}), which is already {held_by}, and the `void={void}` reservation offers no bridge layer to escape to",
         kind = entry.kind.label(),
@@ -600,7 +742,8 @@ mod tests {
     use crate::diagnostic::DiagnosticCode;
     use crate::edition_netlist_ir::EditionCell;
     use crate::logic_ir::ScopeKind;
-    use crate::netlist_ir::{CellPortDriver, NetRef, NetlistOutput, PortName};
+    use crate::netlist_ir::{CellPortDriver, NetRef, PortName};
+    use crate::placement_ir::PlacedOutputNode;
     use crate::placement_ir::{
         CellCoord, CircuitRegionReservation, PlacedCellNode, PlacementIr, PlacementPhase,
         RouteLayer, ScopedPlacementIr, ScopedPlacementIrEntry,
@@ -984,7 +1127,7 @@ mod tests {
         );
         let ir = &legalized.scoped.scopes[0].ir;
         let region = ir.region.clone().expect("fixture carries a region");
-        let nets = collect_nets(ir, &region);
+        let nets = collect_nets(ir);
         assert!(
             nets.len() >= 2,
             "the fixture needs a second net for the cross-net half to run: {nets:?}",
@@ -1563,11 +1706,12 @@ mod tests {
         // long as outputs exist. Should refuse with `NoCircuitRegion`
         // for parity with the delay pass.
         let mut ir = PlacementIr::new(Edition::Java);
-        ir.outputs.push(NetlistOutput {
-            name: cairn_lang_core::ast::DottedRef::new("sig".into(), vec!["x".into()]),
-            driver: NetRef::Input(0),
-            span: Span::default(),
-        });
+        ir.outputs.push(PlacedOutputNode::new(
+            cairn_lang_core::ast::DottedRef::new("sig".into(), vec!["x".into()]),
+            NetRef::Input(0),
+            CellCoord::new(3, 0, 1),
+            Span::default(),
+        ));
         let legalized = compile_crossing(&scoped(ScopeKind::Struct, "outputless", ir));
         assert!(
             legalized
@@ -1857,7 +2001,7 @@ mod tests {
                     // the count holds, which is exactly the shape of
                     // the bug this suite missed.
                     let region = entry.ir.region.clone().expect("fixture carries a region");
-                    let nets = collect_nets(&entry.ir, &region);
+                    let nets = collect_nets(&entry.ir);
                     let cell_coords: Vec<CellCoord> =
                         entry.ir.cells.iter().map(|c| c.coord).collect();
                     let trees = net_trees(&nets, |net| match net {
