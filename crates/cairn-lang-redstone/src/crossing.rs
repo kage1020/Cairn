@@ -448,8 +448,14 @@ fn allocate_buffer_coords(
     // The segment out to an actuator is charged for buffers by stage 3
     // exactly as a segment into a cell is, so stage 4 has to give those
     // buffers coords or the two stages disagree about how many exist.
+    //
     // Same placer, and after the cells, so a cell buffer and an output
-    // buffer cannot claim one coord.
+    // buffer cannot claim one coord. Under the v1 single-row layout
+    // they never contend for one: cell buffers fall inside the row and
+    // an actuator's fall past the last cell on the way to the pad. The
+    // pools are shared anyway, because that disjointness is a property
+    // of the layout rather than of this pass, and the layout is the
+    // thing §14.5 marks as the part still to be lifted into 2.5D.
     let mut per_output: Vec<Vec<BufferCoord>> = Vec::with_capacity(ir.outputs.len());
     for (output_index, output) in ir.outputs.iter().enumerate() {
         let route = trees
