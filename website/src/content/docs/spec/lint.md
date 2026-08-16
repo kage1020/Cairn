@@ -88,8 +88,11 @@ first-class parts of the spec; messages MUST be in a shape that feeds the self-c
   - `E_THEME_VARIANT_MISSING` — the module declares a theme, and the pinned edition can bind none
     of its per-edition variants (`spec/versioning-editions.md` §10.7). Only fires under
     `--edition`: with no pin there is nothing a variant fails to satisfy, and the same source is
-    accepted. Reported once for the module-level pick and once per `place ... theme=` that cannot
-    be honoured, because each is a separate fix site.
+    accepted. Reported **once per logical theme**, however many scopes and `place ... theme=` rows
+    read it — they all ask for the same edit in the same `theme` block. Every placement naming it is
+    still refused; what is deduplicated is the sentence, not the consequence. A module that declares
+    such a theme and never reads a `mat_slot=` from it is not reported at all: nothing is starved,
+    and the build is byte-identical with or without the pin.
   - `E_INCOMPLETE_PLACE` — a `place` row omits `id=`, `use=`, or
     `theme=` (§9.3). The row cannot become a placement without all three,
     so it is dropped from the build; the message names every key the row

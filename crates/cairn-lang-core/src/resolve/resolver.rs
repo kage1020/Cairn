@@ -261,24 +261,36 @@ pub fn resolve(ir: &IntentModule, edition: Option<Edition>) -> Resolution {
     let single_logical = single_logical_theme(&themes);
     let mut scopes: IndexMap<String, ScopeResolution> = IndexMap::new();
     let mut applied_themes: HashSet<String> = HashSet::new();
+    // Logical themes already reported as unbindable under the pin, so the
+    // module-level pick and every `place` naming one say it once between
+    // them rather than once each.
+    let mut reported_missing: HashSet<String> = HashSet::new();
 
     let (auto_picked, auto_siblings) = match single_logical.as_deref() {
         Some(logical) => {
             let picked = pick_variant(&themes, logical, edition).map(str::to_owned);
             // A refusal here is the module-level half of the same finding
             // the site path reports per `place`: the module declares this
-            // theme and the pin can bind none of its variants. Reported
-            // once, against the first variant's declaration, because the
-            // auto-pick is one decision for the whole module — one finding
-            // per struct would repeat a single cause per consumer of it.
+            // theme and the pin can bind none of its variants. Left
+            // unreported it was silent — `bound_theme` stayed `None`, every
+            // `mat_slot=` skipped the branch that would have named a theme,
+            // and the build wrote the requested extent out of air.
             //
-            // Left unreported this was silent: `bound_theme` stayed `None`,
-            // every `mat_slot=` skipped the branch that would have named a
-            // theme, and the build wrote the requested extent out of air.
+            // Which is also the reason it is conditional on a `mat_slot=`
+            // existing to be starved. A module that declares one edition's
+            // theme and never reads a slot from it emits no air, so a pin
+            // the theme cannot satisfy costs that module nothing — and the
+            // build it would have produced is byte-identical either way.
+            //
+            // `reported_missing` carries the finding across to the site
+            // loop, where every `place` naming this theme would otherwise
+            // repeat it verbatim against a different span.
             if picked.is_none()
                 && let Some(pinned) = edition
                 && let Some(first) = themes.values().next()
+                && any_member_reads_a_slot(ir)
             {
+                reported_missing.insert(logical.to_owned());
                 diagnostics.push(theme_variant_missing_diag(
                     logical,
                     pinned,
@@ -328,6 +340,7 @@ pub fn resolve(ir: &IntentModule, edition: Option<Edition>) -> Resolution {
             site,
             &ir.defs,
             edition,
+            &mut reported_missing,
             &mut themes,
             &mut applied_themes,
             &mut scopes,
@@ -418,9 +431,10 @@ fn single_logical_theme(themes: &IndexMap<String, ThemeBinding>) -> Option<Strin
 /// the unsuffixed variant** rather than cross over to the opposite
 /// edition's variant. Binding, say, a `_bedrock` theme under
 /// `--edition java` would silently route Bedrock-only slot values into a
-/// Java `.nbt`; leaving the scope unbound instead surfaces the mismatch
-/// through `E_UNRESOLVED_SLOT` on any `mat_slot=X` reference, which is
-/// the loud outcome spec versioning-editions §10.4 requires.
+/// Java `.nbt`. Returning `None` instead is reported as
+/// `E_THEME_VARIANT_MISSING` by both callers — not as `E_UNRESOLVED_SLOT`,
+/// which needs a bound theme to say the slot is missing from and would
+/// blame a slot that is declared and spelled correctly.
 ///
 /// The `None` case still tolerates a partial file (only one variant
 /// declared): it prefers the unsuffixed theme, then Java, then Bedrock —
@@ -458,18 +472,37 @@ enum ThemeReference<'a> {
     Bound {
         /// The theme actually bound — not necessarily the name written.
         name: &'a str,
-        /// The written name carried an edition suffix and a different
-        /// variant was bound in its place.
-        rebound: bool,
-        /// The reference was written without an edition suffix, so it names
-        /// the logical theme rather than one variant of it.
-        logical_spelling: bool,
+        /// How the reference was spelled, which is what decides whether the
+        /// author asked about one variant or about the logical theme.
+        spelling: Spelling,
     },
     /// Variants of this logical theme are declared, but none can bind under
-    /// the pinned edition.
-    NoVariantForEdition,
-    /// No theme in the module shares this name's logical part.
+    /// the edition this carries.
+    NoVariantForEdition(Edition),
+    /// No theme in the module shares this name's logical part — or the name
+    /// carries a suffix, nothing is declared under it, and no edition is
+    /// pinned to justify picking another variant.
     Unknown,
+}
+
+/// How a `theme=` reference was written.
+///
+/// Two booleans said this before — one for "carried a suffix", one for its
+/// negation — which left `rebound && logical_spelling` expressible and made
+/// the edition behind a rebind reachable only through an `expect`. It was
+/// not a sound one: a suffixed name nothing declares reached it with no
+/// edition pinned, and `cairn check` panicked on a typo.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Spelling {
+    /// Written without an edition suffix, so it names the logical theme.
+    /// Sibling variants may soften its slot diagnostics while no edition is
+    /// picked.
+    Logical,
+    /// Written with an edition suffix, so it names one variant. The author
+    /// asked about that variant's slots and no sibling softens them.
+    /// `rebound_under` is `Some(edition)` when that pin bound a different
+    /// variant than the one named.
+    Variant { rebound_under: Option<Edition> },
 }
 
 /// Resolve a `place ... theme=NAME` reference against the pinned edition.
@@ -487,9 +520,11 @@ enum ThemeReference<'a> {
 /// `shop_bedrock` — before this it was `E_UNRESOLVED_THEME_REF`, so the
 /// spelling the spec prescribes was the one spelling that did not work.
 ///
-/// Without a pin a written name that exists is bound verbatim rather than
-/// re-picked. Nothing argues for another variant there, and re-picking would
-/// let `cairn lower` quietly swap the variant an author named.
+/// Without a pin, nothing re-picks a variant the author named. A declared
+/// name binds verbatim; a *suffixed* name nothing declares is unknown, the
+/// same answer a misspelled theme has always had. Substituting a sibling
+/// there would swap a variant on `cairn lower`'s say-so, which is exactly
+/// what this function exists to stop a pin from doing silently.
 fn resolve_theme_reference<'a>(
     themes: &'a IndexMap<String, ThemeBinding>,
     written: &str,
@@ -502,22 +537,48 @@ fn resolve_theme_reference<'a>(
     {
         return ThemeReference::Unknown;
     }
-    if edition.is_none()
-        && let Some((name, _)) = themes.get_key_value(written)
-    {
-        return ThemeReference::Bound {
-            name: name.as_str(),
-            rebound: false,
-            logical_spelling: written_variant.is_none(),
+    if edition.is_none() {
+        return match themes.get_key_value(written) {
+            Some((name, _)) => ThemeReference::Bound {
+                name: name.as_str(),
+                spelling: match written_variant {
+                    Some(_) => Spelling::Variant {
+                        rebound_under: None,
+                    },
+                    None => Spelling::Logical,
+                },
+            },
+            // A logical name still resolves with no pin — that is the
+            // spelling §10.7 asks for, and `pick_variant`'s unpinned order
+            // is deterministic. A suffixed one does not: it names a variant
+            // the module does not have.
+            None if written_variant.is_some() => ThemeReference::Unknown,
+            None => match pick_variant(themes, logical, None) {
+                Some(name) => ThemeReference::Bound {
+                    name,
+                    spelling: Spelling::Logical,
+                },
+                // Unreachable: the guard above found a variant of `logical`,
+                // and the unpinned arm of `pick_variant` accepts all three.
+                None => ThemeReference::Unknown,
+            },
         };
     }
+    let pinned = edition.expect("the unpinned case returned above");
     match pick_variant(themes, logical, edition) {
         Some(name) => ThemeReference::Bound {
             name,
-            rebound: written_variant.is_some() && name != written,
-            logical_spelling: written_variant.is_none(),
+            spelling: match written_variant {
+                Some(_) if name != written => Spelling::Variant {
+                    rebound_under: Some(pinned),
+                },
+                Some(_) => Spelling::Variant {
+                    rebound_under: None,
+                },
+                None => Spelling::Logical,
+            },
         },
-        None => ThemeReference::NoVariantForEdition,
+        None => ThemeReference::NoVariantForEdition(pinned),
     }
 }
 
@@ -533,6 +594,7 @@ fn bind_place_theme(
     edition: Option<Edition>,
     themes: &IndexMap<String, ThemeBinding>,
     declared_names: &[String],
+    reported_missing: &mut HashSet<String>,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Option<(String, HashSet<String>)> {
     let (logical, _) = strip_edition_suffix(written);
@@ -545,43 +607,44 @@ fn bind_place_theme(
             ));
             None
         }
-        ThemeReference::NoVariantForEdition => {
-            // Only reachable under a pin: `pick_variant` refuses nothing
-            // without one, and the arm above already covered "no variant of
-            // this name at all".
-            let pinned = edition.expect("a variant is only refused under a pinned edition");
-            diagnostics.push(theme_variant_missing_diag(
-                logical,
-                pinned,
-                themes,
-                span.clone(),
-            ));
+        ThemeReference::NoVariantForEdition(pinned) => {
+            // One cause, one report — every `place` naming this theme, and
+            // the module-level pick before them, ask the author for the same
+            // edit in the same `theme` block. The placement is still refused;
+            // what is deduplicated is the sentence, not the consequence.
+            if reported_missing.insert(logical.to_owned()) {
+                diagnostics.push(theme_variant_missing_diag(
+                    logical,
+                    pinned,
+                    themes,
+                    span.clone(),
+                ));
+            }
             None
         }
-        ThemeReference::Bound {
-            name,
-            rebound,
-            logical_spelling,
-        } => {
+        ThemeReference::Bound { name, spelling } => {
             let name = name.to_owned();
-            if rebound {
-                let pinned = edition.expect("a rebind only happens under a pinned edition");
+            if let Spelling::Variant {
+                rebound_under: Some(pinned),
+            } = spelling
+            {
                 diagnostics.push(theme_variant_rebound_diag(
                     written,
                     &name,
                     logical,
                     pinned,
+                    themes.contains_key(written),
                     span.clone(),
                 ));
             }
-            // Sibling-variant slot union applies on exactly the terms the
-            // top-level scope loop uses, and for the same reason: it softens
-            // `E_UNRESOLVED_SLOT` only while no edition has been picked. It
-            // additionally requires the *logical* spelling — having named
-            // one variant, the author asked about that variant's slots, and
-            // softening them against a sibling answers a question they did
-            // not ask.
-            let siblings = if edition.is_none() && logical_spelling {
+            // Sibling-variant slot union applies under the same edition
+            // condition the top-level scope loop uses, and for the same
+            // reason — it softens `E_UNRESOLVED_SLOT` only while no edition
+            // has been picked — plus one this path adds: the reference must
+            // name the logical theme. Having named one variant, the author
+            // asked about that variant's slots, and softening them against a
+            // sibling answers a question they did not ask.
+            let siblings = if edition.is_none() && spelling == Spelling::Logical {
                 sibling_slot_names(themes, logical, &name)
             } else {
                 HashSet::new()
@@ -589,6 +652,22 @@ fn bind_place_theme(
             Some((name, siblings))
         }
     }
+}
+
+/// Whether any struct or def member anywhere in the module reads a
+/// `mat_slot=`.
+///
+/// The module-level auto-pick binds a theme for every struct and def scope,
+/// but a scope only *needs* one to read a slot from. Without this, declaring
+/// a `_bedrock` theme and never using it made `--edition java` a hard error
+/// on a module whose output does not contain a single block of air.
+fn any_member_reads_a_slot(ir: &IntentModule) -> bool {
+    fn any(members: &[Member]) -> bool {
+        members
+            .iter()
+            .any(|m| m.mat_slot.is_some() || any(&m.children.members))
+    }
+    ir.structs.iter().any(|s| any(&s.members)) || ir.defs.iter().any(|d| any(&d.members))
 }
 
 /// Every declared variant of `logical`, in declaration order.
@@ -645,20 +724,29 @@ fn theme_variant_missing_diag(
 }
 
 /// A `theme=` named one variant and the pin bound another.
+///
+/// `declared` separates the two ways that happens: the named variant exists
+/// and the pin preferred its own, or the named variant does not exist at all
+/// and the pin fell back to what it could reach (the unsuffixed theme). The
+/// second reads as a plain mistake and should not be described as a choice
+/// between variants.
 fn theme_variant_rebound_diag(
     written: &str,
     bound: &str,
     logical: &str,
     edition: Edition,
+    declared: bool,
     span: Span,
 ) -> Diagnostic {
+    let named = if declared {
+        format!("`theme={written}` names one edition's variant")
+    } else {
+        format!("`theme={written}` is not a declared theme")
+    };
     Diagnostic {
         code: DiagnosticCode::ThemeVariantRebound,
         span,
-        primary: format!(
-            "`theme={written}` names one edition's variant; this `{}` build bound `{bound}`",
-            edition.as_str(),
-        ),
+        primary: format!("{named}; this `{}` build bound `{bound}`", edition.as_str()),
         notes: vec![DiagnosticNote {
             span: None,
             message: format!(
@@ -723,6 +811,7 @@ fn resolve_site_placements(
     site: &SiteIr,
     defs: &[DefIr],
     edition: Option<Edition>,
+    reported_missing: &mut HashSet<String>,
     themes: &mut IndexMap<String, ThemeBinding>,
     applied_themes: &mut HashSet<String>,
     scopes: &mut IndexMap<String, ScopeResolution>,
@@ -839,6 +928,7 @@ fn resolve_site_placements(
             edition,
             themes,
             &theme_names,
+            reported_missing,
             diagnostics,
         ) else {
             continue;
@@ -1587,12 +1677,13 @@ fn resolve_struct_or_def(
     applied_themes: &mut HashSet<String>,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> ScopeResolution {
-    // Structural invariant: `pick_variant` (the only caller producing an
-    // auto-picked name here) iterates `themes.keys()` to build its
-    // candidates, so any name it returns is guaranteed to be in `themes`.
-    // The site-side branch that hits this with a user-supplied `theme=X`
-    // label filters through `themes.contains_key(theme_name)` up-slope
-    // before calling in. Reaching the `None` arm of `themes.get` would
+    // Structural invariant: every name that reaches here came out of
+    // `themes.keys()`. The module-level auto-pick gets it from
+    // `pick_variant`, which builds its candidates by iterating those keys;
+    // the site-side branch gets it from `bind_place_theme`, which returns
+    // only what `resolve_theme_reference` read from the same map — a
+    // user-supplied `theme=X` label that names nothing there is refused
+    // up-slope instead. Reaching the `None` arm of `themes.get` would
     // mean one of those guarantees broke — asymmetric with `validate_port`,
     // which uses the same shape of loud fallback. `debug_assert!(false)`
     // trips in dev / test builds; a release build silently degrades to
@@ -2699,10 +2790,9 @@ mod tests {
     fn per_edition_java_does_not_fall_back_to_bedrock_variant() {
         // Silent misrouting guard: a file with only `theme t_bedrock:` must
         // leave the scope unbound under `Some(Edition::Java)` rather than
-        // silently binding the Bedrock variant. Any `mat_slot=` reference
-        // then surfaces as `E_UNRESOLVED_SLOT`, which is the loud outcome
-        // spec §10.4 requires — binding across editions would route
-        // Bedrock-only slot values into a Java `.nbt`.
+        // silently binding the Bedrock variant, which would route
+        // Bedrock-only slot values into a Java `.nbt`. The loud outcome
+        // spec §10.4 requires is `E_THEME_VARIANT_MISSING`, asserted below.
         let src = [
             "theme t_bedrock:",
             "  slot floor -> @dark_oak_planks",
@@ -2794,6 +2884,21 @@ mod tests {
 
     fn placed_scope(r: &Resolution) -> &ScopeResolution {
         r.scopes.get("site::s::home").expect("place scope present")
+    }
+
+    /// No finding about variant selection, and no error of any kind.
+    ///
+    /// Narrower than "no diagnostics at all", which these tests used to
+    /// assert: an advisory added later for an unrelated reason would break
+    /// them while saying nothing about the theme reference they are about.
+    fn nothing_said_about_variants(r: &Resolution) -> bool {
+        !r.diagnostics.iter().any(|d| {
+            d.severity() == Severity::Error
+                || matches!(
+                    d.code,
+                    DiagnosticCode::ThemeVariantRebound | DiagnosticCode::ThemeVariantMissing
+                )
+        })
     }
 
     #[test]
@@ -2933,7 +3038,7 @@ mod tests {
             placed_scope(&r).bound_theme.as_deref(),
             Some("shop_bedrock")
         );
-        assert!(r.diagnostics.is_empty(), "got {:?}", r.diagnostics);
+        assert!(nothing_said_about_variants(&r), "got {:?}", r.diagnostics);
     }
 
     #[test]
@@ -2948,7 +3053,7 @@ mod tests {
         ] {
             let r = resolve(&ir(&src), Some(edition));
             assert_eq!(placed_scope(&r).bound_theme.as_deref(), Some(expected));
-            assert!(r.diagnostics.is_empty(), "got {:?}", r.diagnostics);
+            assert!(nothing_said_about_variants(&r), "got {:?}", r.diagnostics);
         }
     }
 
@@ -2975,7 +3080,7 @@ mod tests {
             placed_scope(&r).bound_theme.as_deref(),
             Some("shop_bedrock")
         );
-        assert!(r.diagnostics.is_empty(), "got {:?}", r.diagnostics);
+        assert!(nothing_said_about_variants(&r), "got {:?}", r.diagnostics);
     }
 
     #[test]
@@ -3006,7 +3111,7 @@ mod tests {
                 "edition {edition:?}",
             );
             assert!(
-                r.diagnostics.is_empty(),
+                nothing_said_about_variants(&r),
                 "edition {edition:?}: {:?}",
                 r.diagnostics,
             );
@@ -3074,6 +3179,137 @@ mod tests {
             r.diagnostics
                 .iter()
                 .any(|d| d.code == DiagnosticCode::UnresolvedSlot),
+            "got {:?}",
+            r.diagnostics,
+        );
+    }
+
+    #[test]
+    fn a_variant_the_module_does_not_declare_is_unresolved_without_a_pin() {
+        // The spelling and the declaration set disagree, and no edition is
+        // named to settle it. Re-picking a sibling here would swap a variant
+        // on `cairn lower`'s say-so — the very thing the pinned path is
+        // written to stop doing silently — so the answer is the one a
+        // misspelled theme has always had.
+        //
+        // This shape was missing from the helpers entirely: every source
+        // they built spelled a reference that the variant list contained.
+        for (reference, variants) in [
+            ("shop_java", ["_bedrock"].as_slice()),
+            ("shop_bedrock", ["_java"].as_slice()),
+            ("shop_java", [""].as_slice()),
+        ] {
+            let r = resolve(&ir(&placed_under(reference, variants)), None);
+            assert!(
+                r.diagnostics
+                    .iter()
+                    .any(|d| d.code == DiagnosticCode::UnresolvedThemeRef),
+                "theme={reference} against {variants:?}: {:?}",
+                r.diagnostics,
+            );
+            assert!(
+                r.scopes.get("site::s::home").is_none(),
+                "theme={reference} against {variants:?}: no scope may be built",
+            );
+        }
+    }
+
+    #[test]
+    fn a_pin_falls_back_to_the_unsuffixed_theme_and_says_the_name_was_not_declared() {
+        // `theme=shop_java` with only `theme shop:` declared. The pin has no
+        // `_java` variant to prefer, so it binds the unsuffixed theme — the
+        // rebind is real, but describing it as "names one edition's variant"
+        // would be wrong: that variant is not declared anywhere.
+        let src = placed_under("shop_java", &[""]);
+        let r = resolve(&ir(&src), Some(Edition::Java));
+        assert_eq!(placed_scope(&r).bound_theme.as_deref(), Some("shop"));
+        let diag = r
+            .diagnostics
+            .iter()
+            .find(|d| d.code == DiagnosticCode::ThemeVariantRebound)
+            .unwrap_or_else(|| panic!("expected the notice, got {:?}", r.diagnostics));
+        assert!(
+            diag.primary.contains("is not a declared theme"),
+            "the message must not call an undeclared name a variant: {}",
+            diag.primary,
+        );
+    }
+
+    #[test]
+    fn a_pin_prefers_the_unsuffixed_theme_over_the_other_editions_variant() {
+        // The §10.4 fallback order, exercised through the site path: with
+        // `shop` and `shop_bedrock` declared, a Java build binds `shop` and
+        // does not cross to `shop_bedrock`.
+        let src = placed_under("shop", &["", "_bedrock"]);
+        let r = resolve(&ir(&src), Some(Edition::Java));
+        assert_eq!(placed_scope(&r).bound_theme.as_deref(), Some("shop"));
+        let r = resolve(&ir(&src), Some(Edition::Bedrock));
+        assert_eq!(
+            placed_scope(&r).bound_theme.as_deref(),
+            Some("shop_bedrock")
+        );
+    }
+
+    #[test]
+    fn one_unbindable_theme_is_one_finding_however_many_places_read_it() {
+        // The module-level pick and both placements ask for the same edit in
+        // the same `theme` block, and the three messages were byte-identical
+        // apart from their span.
+        let src = concat!(
+            "theme shop_bedrock:\n  slot floor -> @dark_oak_planks\n\n",
+            "def hut size=4x4:\n  floor mat_slot=floor\n\n",
+            "site s:\n",
+            "  place id=a use=hut theme=shop at=origin\n",
+            "  place id=b use=hut theme=shop east_of=a gap=2\n",
+        );
+        let r = resolve(&ir(src), Some(Edition::Java));
+        assert_eq!(
+            r.diagnostics
+                .iter()
+                .filter(|d| d.code == DiagnosticCode::ThemeVariantMissing)
+                .count(),
+            1,
+            "got {:?}",
+            r.diagnostics,
+        );
+        // Deduplicating the sentence must not smuggle a placement into the
+        // build: both are still refused.
+        assert!(r.scopes.get("site::s::a").is_none());
+        assert!(r.scopes.get("site::s::b").is_none());
+    }
+
+    #[test]
+    fn a_theme_no_member_reads_a_slot_from_is_not_refused_under_a_pin() {
+        // Nothing is starved here — every material is concrete — so the pin
+        // costs this module nothing and the build is byte-identical with or
+        // without it. Refusing would fail a theme-library file, or any
+        // module that does not use `mat_slot=`, on a `--edition` CI job.
+        let src = [
+            "theme shop_bedrock:",
+            "  slot floor -> @dark_oak_planks",
+            "",
+            "struct s size=4x4",
+            "  floor mat=@stone",
+            "",
+        ]
+        .join("\n");
+        let r = resolve(&ir(&src), Some(Edition::Java));
+        assert!(
+            !r.diagnostics
+                .iter()
+                .any(|d| d.code == DiagnosticCode::ThemeVariantMissing),
+            "got {:?}",
+            r.diagnostics,
+        );
+
+        // The same module with one `mat_slot=` is refused, so the gate is
+        // the slot and not something else about the source.
+        let reading = src.replace("floor mat=@stone", "floor mat_slot=floor");
+        let r = resolve(&ir(&reading), Some(Edition::Java));
+        assert!(
+            r.diagnostics
+                .iter()
+                .any(|d| d.code == DiagnosticCode::ThemeVariantMissing),
             "got {:?}",
             r.diagnostics,
         );

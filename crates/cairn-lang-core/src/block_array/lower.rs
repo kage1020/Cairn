@@ -949,7 +949,16 @@ fn lower_site<'a>(
                 site: placement_site,
                 place_id: placement_id,
                 source_def: use_name.to_owned(),
-                theme: theme_name.to_owned(),
+                // The theme that governed the build, not the one the row
+                // spelled. A `--edition` pin can bind a different variant
+                // than the `place` named (`W_THEME_VARIANT_REBOUND`), and
+                // the warning scrolls away while the lockfile is what a
+                // later reader has. Recording the written name there would
+                // name a variant whose materials are not in the artifact.
+                theme: scope
+                    .bound_theme
+                    .clone()
+                    .unwrap_or_else(|| theme_name.to_owned()),
                 origin,
                 dims,
             });

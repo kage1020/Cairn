@@ -243,11 +243,13 @@ pub enum DiagnosticCode {
     /// A `place theme=NAME` named one edition's variant and the pinned
     /// edition bound a different one.
     ///
-    /// Warning, not an error: binding the pinned edition's variant is what
-    /// the author almost certainly wants, and §10.7 asks the semantic layer
-    /// to stay edition-neutral. But an explicit name silently becoming a
-    /// different name is worth one line, and the fix — write the logical
-    /// name — is the spelling §10.7 prescribes.
+    /// Warning, not an error: binding whichever variant the pin selects is
+    /// what the author almost certainly wants — that is the pinned edition's
+    /// variant when the module has one, and the unsuffixed theme when it
+    /// does not — and §10.7 asks the semantic layer to stay edition-neutral
+    /// anyway. But an explicit name silently becoming a different name is
+    /// worth one line, and the fix — write the logical name — is the
+    /// spelling §10.7 prescribes.
     ThemeVariantRebound,
     /// A scope's derived voxel extent exceeds
     /// [`crate::block_array::MAX_STRUCTURE_VOLUME`], so the pass skips it

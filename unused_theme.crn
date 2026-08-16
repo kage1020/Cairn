@@ -1,0 +1,7 @@
+@cairn 2026.06
+
+theme shop_bedrock:
+  slot floor -> @dark_oak_planks
+
+struct s size=4x4
+  floor mat=@stone

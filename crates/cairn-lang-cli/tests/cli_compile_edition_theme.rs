@@ -507,3 +507,91 @@ fn a_place_naming_the_logical_theme_builds_under_both_editions() {
         assert!(!bytes_contain(&body, absent), "--edition {edition}");
     }
 }
+
+#[test]
+fn a_misspelled_variant_is_a_diagnostic_and_not_a_crash() {
+    // `theme=shop_java` against a module that declares only `shop_bedrock`,
+    // with no `--edition`. Routing the reference through variant selection
+    // made this reach a rebind with no edition to name in the message, and
+    // the resolver panicked — turning a typo into exit 101 on `check`, on
+    // `lower` (which has no `--edition` at all), and inside the language
+    // server, whose diagnostics pass calls the resolver with `None`.
+    let tmp = TempDir::new().expect("tempdir");
+    let src = write_source(
+        tmp.path(),
+        "typo.crn",
+        &placed_source("shop_java", &["_bedrock"]),
+    );
+    for args in [
+        vec!["check", src.to_str().unwrap()],
+        vec!["lower", src.to_str().unwrap()],
+    ] {
+        let result = Command::new(cargo_bin())
+            .args(&args)
+            .output()
+            .expect("run cairn");
+        let code = result.status.code();
+        assert_ne!(
+            code,
+            Some(101),
+            "`cairn {}` must not panic; stderr={}",
+            args[0],
+            String::from_utf8_lossy(&result.stderr),
+        );
+        let combined = format!(
+            "{}{}",
+            String::from_utf8_lossy(&result.stdout),
+            String::from_utf8_lossy(&result.stderr),
+        );
+        assert!(
+            combined.contains("E_UNRESOLVED_THEME_REF"),
+            "`cairn {}` must name the undeclared theme; got: {combined}",
+            args[0],
+        );
+    }
+}
+
+#[test]
+fn the_lockfile_names_the_theme_the_artifact_was_built_from() {
+    // A rebind leaves one warning on stderr and nothing else. The lockfile
+    // is the record that survives the terminal, so naming the written
+    // variant there would point a later reader at materials the artifact
+    // does not contain.
+    let tmp = TempDir::new().expect("tempdir");
+    let src = write_source(
+        tmp.path(),
+        "rebound.crn",
+        &placed_source("shop_bedrock", &["_java", "_bedrock"]),
+    );
+    let out_dir = TempDir::new().expect("out tempdir");
+    let result = Command::new(cargo_bin())
+        .args([
+            "compile",
+            src.to_str().unwrap(),
+            "--edition",
+            "java",
+            "--out",
+            out_dir.path().to_str().unwrap(),
+        ])
+        .output()
+        .expect("run cairn");
+    assert!(
+        result.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&result.stderr),
+    );
+
+    let lock = fs::read_to_string(tmp.path().join("rebound.crn.lock")).expect("read lock");
+    assert!(
+        lock.contains("theme: shop_java"),
+        "the lock must name the bound variant; got:\n{lock}",
+    );
+    assert!(
+        !lock.contains("theme: shop_bedrock"),
+        "the lock must not name the variant the build did not use; got:\n{lock}",
+    );
+    // And the artifact agrees with the lock, which is the claim that makes
+    // the field worth anything.
+    let nbt = gunzip(&read_bytes(&out_dir.path().join("home.nbt")));
+    assert!(bytes_contain(&nbt, "minecraft:spruce_planks"));
+}
