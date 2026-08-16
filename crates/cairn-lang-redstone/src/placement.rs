@@ -20,12 +20,16 @@
 //!   to place but the enclosing struct / def declared no
 //!   `circuit region=` line (or no `size=WxH` header for the region to
 //!   sit inside). Sites always fall here because they carry no `size`.
-//! - [`crate::DiagnosticCode::RouteCongestion`] when the netlist needs
-//!   more area than the reservation offers. The v1 area budget uses
-//!   [`CELL_FOOTPRINT`] as a per-cell footprint estimate — deliberately
-//!   pessimistic so a placement that reports "fits" almost never
-//!   flips to a routing failure downstream. Follow-up refinement is
-//!   `#[non_exhaustive]`-safe on both types.
+//! - [`crate::DiagnosticCode::RouteCongestion`] when the netlist does
+//!   not fit the reservation, which it can fail to do in two ways. The
+//!   volume can be short: the v1 area budget uses [`CELL_FOOTPRINT`] as
+//!   a per-cell footprint estimate, deliberately pessimistic so a
+//!   placement that reports "fits" is unlikely to flip to a routing
+//!   failure downstream. Or the *row* can be short, which the area
+//!   budget cannot see — a `size=2x8` scope with `void=3` reserves 48
+//!   cells' worth of volume and two columns of row. Both are checked,
+//!   in that order, and each explains itself in its own terms.
+//!   Follow-up refinement is `#[non_exhaustive]`-safe on both types.
 //!
 //! Scopes whose placement fires an Error-severity diagnostic are
 //! elided from the output list (the diagnostic still surfaces), so a
@@ -155,6 +159,20 @@ fn compile_scope(
     if required_area > reservation.reserved_area() {
         return Err(congestion_diagnostic(&reservation, required_area));
     }
+    // The v1 layout is a single row: cell `i` stands at `x = i`, so the
+    // row has to be at least as long as the cell count. The area test
+    // above cannot see that. A `size=2x8` scope with `void=3` reserves 48
+    // cells' worth of volume and offers a row two columns long, and a
+    // three-cell netlist passes the first and overruns the second by one.
+    //
+    // Nothing downstream would notice either: every later pass reads the
+    // coordinates this one stamps, and `routing_geometry::output_pad`
+    // puts the actuator pad at `width - 1`. A cell past that column sits
+    // to the right of the pad it drives, so the wire runs backwards out
+    // of the reservation the author declared.
+    if cell_count > reservation.width {
+        return Err(row_overflow_diagnostic(&reservation, cell_count));
+    }
 
     for (index, source_cell) in source.cells.iter().enumerate() {
         // Same saturating-cast rationale as `cell_count` above: a
@@ -190,7 +208,7 @@ fn missing_region_diagnostic(source: &EditionNetlistIr) -> Diagnostic {
             .to_owned(),
     )
     .with_footer(
-        "add a `circuit region=<label> void=<N>` line whose `region=` names a member kind that lives in the scope's footprint (a non-empty label) and whose `void=` is an integer >= 1, and give the enclosing scope a `size=WxH` header",
+        "add a `circuit region=<label> void=<N>` line whose `region=` is a non-empty label naming the reservation (`region=floor`, `region=basement` — the name is the author's to choose and is echoed back in diagnostics) and whose `void=` is an integer >= 1, and give the enclosing scope a `size=WxH` header",
     )
 }
 
@@ -220,6 +238,33 @@ fn congestion_diagnostic(reservation: &CircuitRegionReservation, required_area: 
     );
     diag = diag.with_footer(
         "Fix: increase `void`, enlarge region, or split into multiple `circuit` blocks",
+    );
+    debug_assert_eq!(diag.severity(), Severity::Error);
+    diag
+}
+
+/// The reservation has the volume but not the row.
+///
+/// Kept apart from [`congestion_diagnostic`] because the numbers that
+/// explain it are different — a ratio of areas says nothing about a row
+/// that is three columns short — while the code stays
+/// [`DiagnosticCode::RouteCongestion`]: `spec/redstone` §14.5 asks for
+/// one fail-loud when routing does not fit the region, and names area
+/// shortage as the example rather than as the only shape.
+fn row_overflow_diagnostic(reservation: &CircuitRegionReservation, cell_count: u32) -> Diagnostic {
+    let primary = format!(
+        "synthesized netlist needs a row of {cell_count} cells but the reserved region is only {width} wide (region {width}x{depth}, void={void})",
+        width = reservation.width,
+        depth = reservation.depth,
+        void = reservation.void,
+    );
+    let mut diag = Diagnostic::new(
+        DiagnosticCode::RouteCongestion,
+        reservation.span.clone(),
+        primary,
+    );
+    diag = diag.with_footer(
+        "Fix: widen the enclosing `size=WxH` so the region is at least as wide as the cell count, or split into multiple `circuit` blocks. Raising `void` does not help — cells are laid in one row and `void` buys height, not length",
     );
     debug_assert_eq!(diag.severity(), Severity::Error);
     diag

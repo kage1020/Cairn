@@ -71,16 +71,24 @@ pub enum DiagnosticCode {
     /// enclosing scope had no `size=WxH` for the reservation to sit
     /// inside). Fail-loud per `spec/redstone` §14.5 — silently placing
     /// cells "somewhere" would produce voxels outside the author's
-    /// declared footprint. Fix: add a `circuit region=` line whose
-    /// `region=` label names a member kind that lives in the scope's
-    /// footprint, and give the enclosing scope a `size=WxH` header.
+    /// declared footprint. Fix: add a `circuit region=` line with a
+    /// non-empty `region=` label and a `void=` of at least 1, and give
+    /// the enclosing scope a `size=WxH` header. The label names the
+    /// reservation and is the author's to choose — §14.5's own example
+    /// is `region=basement`, which is not a member keyword — so it is
+    /// checked for being present and non-empty, nothing more.
     NoCircuitRegion,
-    /// The synthesised netlist for a scope needs more area than its
-    /// `circuit region=<label> void=<N>` reservation offers.
-    /// `spec/redstone` §14.5's canonical failure: routing cannot be
-    /// confined to the reserved region, so the pass fails loud with the
-    /// self-correction triple ("increase `void`", "enlarge region",
-    /// "split into multiple `circuit` blocks").
+    /// The synthesised netlist for a scope does not fit its
+    /// `circuit region=<label> void=<N>` reservation. `spec/redstone`
+    /// §14.5's canonical failure: routing cannot be confined to the
+    /// reserved region, so the pass fails loud with the self-correction
+    /// triple ("increase `void`", "enlarge region", "split into multiple
+    /// `circuit` blocks"). Two shapes reach it — the reserved volume is
+    /// short of the netlist's estimated footprint, or the reserved row
+    /// is shorter than the cell count the v1 single-row layout needs.
+    /// §14.5 names area shortage as the example rather than as the only
+    /// shape, so both take this code and differ in what they say:
+    /// raising `void` fixes the first and cannot fix the second.
     RouteCongestion,
     /// A routed driver segment (source pad or driver cell → sink coord,
     /// where the sink is either a downstream cell coord or an actuator

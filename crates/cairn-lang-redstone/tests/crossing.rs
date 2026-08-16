@@ -299,3 +299,48 @@ fn crossing_is_idempotent_on_clean_fixture() {
     );
     assert_eq!(first.diagnostics.len(), second.diagnostics.len());
 }
+
+/// The exact-fit boundary the placement pass now allows, carried all the
+/// way through legalization.
+///
+/// Placing a cell in the output pad's column is only safe if nothing
+/// downstream needs that column to itself: `allocate_buffer_coords`
+/// reserves cell bodies and pads before it looks for a buffer coord, so
+/// a layout that is legal at stage 1 and refused at stage 4 would have
+/// moved the failure rather than removed it.
+#[test]
+fn a_row_filled_to_its_last_column_survives_legalization() {
+    let source = "\
+theme t:
+  slot wall -> @oak_planks
+  slot door -> @oak_door
+
+struct gen size=4x8
+  floor mat_slot=wall
+  door id=front side=front at=center mat_slot=door
+  pressure_plate id=p1 at=front.outside offset=0 y=0 -> sig.a
+  pressure_plate id=p2 at=inside.front offset=0 y=0 -> sig.b
+  logic sig.c0 = sig.a or sig.b
+  logic sig.c1 = sig.c0 and sig.b
+  logic sig.c2 = sig.c1 or sig.b
+  logic sig.c3 = sig.c2 and sig.b
+  door[id=front] opened_by=sig.c3
+  circuit region=floor void=3
+";
+    let delayed = delayed_from_source(source, Edition::Java);
+    let out = compile_crossing(&delayed);
+
+    assert!(
+        out.diagnostics.is_empty(),
+        "an exactly-filled row must legalize: {:?}",
+        out.diagnostics,
+    );
+    let scope = out.scoped.scopes.first().expect("the scope legalizes");
+    let region = scope.ir.region.as_ref().expect("reservation");
+    let last = scope.ir.cells.last().expect("last cell");
+    assert_eq!(
+        last.coord.x,
+        region.width - 1,
+        "the fixture only tests the boundary while the last cell sits in the final column",
+    );
+}
