@@ -31,4 +31,4 @@ struct shop size=5x5
   floor  mat_slot=floor
   walls  class=outer mat_slot=wall height=3
   door   side=front at=center
-  window class=display side=front offset=2 y=2 size=1x1 mat_slot=floating_text
+  window class=display side=front offset=2 y=3 size=1x1 mat_slot=floating_text

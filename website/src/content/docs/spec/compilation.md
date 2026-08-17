@@ -20,7 +20,12 @@ massing (shell: floor/walls/volume)
 - A `window` written after `roof` in the source is still applied as an opening in the wall (order
   accidents are eliminated).
 - **Last-wins applies only to local overrides within the same phase.** `raw` (fill, etc.) is the
-  danger zone and is always applied last.
+  danger zone and is always applied last. Two *different* members contesting one voxel inside a
+  phase still resolve that way, and are reported — see §4.8.
+- Membership follows the list above: `floor` and `walls` are massing; `roof` is envelope, and so is
+  `stair`, whose eave is exterior (§4.3); `door` and `window` are openings; `pressure_plate` is a
+  sensor and therefore a fixture. `circuit` marks a routing region for the logic phases and writes
+  no voxel, so it belongs to no phase at all.
 - Redstone logic ([Redstone](redstone)) splits the step right after `fixtures` into three
   phases: only once sensors/actuators are placed in 3D do their I/O port coordinates become fixed,
   enabling placement and routing.
@@ -206,3 +211,32 @@ footprint by its `overhang=`, and `walls` whose material does not resolve
 still raise `Dims.y`; both fire `W_DEFERRED_MEMBER` and paint no voxels.
 The volume is derived before those failures are known, so today the extra
 extent is air.
+
+## 4.8 Within-phase conflicts and the palette
+
+The phase order settles which member wins whenever two of them come from
+different phases: a `door` cut through `walls` is massing followed by
+openings, and the hole is the point. Inside one phase there is nothing left
+to separate two members but the order their lines were written in, which
+§4.1 grants to "local overrides within the same phase".
+
+That grant is for an author restating a member. Two footprints that happen
+to intersect are the same shape to the grid and not the same thing at all,
+so the compiler keeps the last write and emits `W_PHASE_CONFLICT` naming
+both members and how many voxels changed hands. The build is unchanged by
+the warning; what changes is that the author is told a line they could move
+is deciding the result.
+
+A cell whose value does not change is not a conflict — two `walls` of one
+material meeting over the rows they share depend on nothing — and neither is
+a member writing over itself, as the mirrored halves of a `sym=true` window
+do.
+
+The palette of a finished structure lists the blocks the structure contains,
+in the order the phases first painted them, with air at slot `0`. It is not
+a log of what was interned along the way: a material whose last voxel a
+later phase covered is dropped and the remaining slots renumber onto the
+gap. Otherwise the loser would ride into the `.nbt`, be counted by `cairn
+info`, and be covered by `resolved_ir_hash` — so two sources that differ
+only in which member lost would produce different artifacts for the same
+build.

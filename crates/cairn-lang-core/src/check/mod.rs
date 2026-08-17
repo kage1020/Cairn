@@ -156,7 +156,8 @@ mod tests {
             | C::WalkwayBlocked
             | C::DuplicateWalkway
             | C::StructureTooLarge
-            | C::InvalidWalkwayIdent => RaisedBy::LoweringOnly,
+            | C::InvalidWalkwayIdent
+            | C::PhaseConflict => RaisedBy::LoweringOnly,
         }
     }
 
