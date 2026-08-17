@@ -17,15 +17,19 @@
 //!
 //! Two diagnostic codes join the pass:
 //! - [`crate::DiagnosticCode::NoCircuitRegion`] when a scope has cells
-//!   to place but the enclosing struct / def declared no
+//!   or actuator pads to place but the enclosing struct / def declared no
 //!   `circuit region=` line (or no `size=WxH` header for the region to
 //!   sit inside). Sites always fall here because they carry no `size`.
-//! - [`crate::DiagnosticCode::RouteCongestion`] when the netlist needs
-//!   more area than the reservation offers. The v1 area budget uses
-//!   [`CELL_FOOTPRINT`] as a per-cell footprint estimate — deliberately
-//!   pessimistic so a placement that reports "fits" almost never
-//!   flips to a routing failure downstream. Follow-up refinement is
-//!   `#[non_exhaustive]`-safe on both types.
+//! - [`crate::DiagnosticCode::RouteCongestion`] when the netlist does
+//!   not fit the reservation, which it can fail to do in two ways. The
+//!   volume can be short: the v1 area budget uses [`CELL_FOOTPRINT`] as
+//!   a per-cell footprint estimate, deliberately pessimistic so a
+//!   placement that reports "fits" is unlikely to flip to a routing
+//!   failure downstream. Or the *row* can be short, which the area
+//!   budget cannot see — a `size=2x8` scope with `void=3` reserves 48
+//!   cells' worth of volume and two columns of row. Both are checked,
+//!   in that order, and each explains itself in its own terms.
+//!   Follow-up refinement is `#[non_exhaustive]`-safe on both types.
 //!
 //! Scopes whose placement fires an Error-severity diagnostic are
 //! elided from the output list (the diagnostic still surfaces), so a
@@ -42,9 +46,10 @@ use crate::diagnostic::{Diagnostic, DiagnosticCode};
 use crate::edition_netlist_ir::{EditionNetlistIr, ScopedEditionNetlistIr};
 use crate::logic_ir::ScopeKind;
 use crate::placement_ir::{
-    CellCoord, CircuitRegionReservation, PlacedCellNode, PlacementIr, PlacementPhase,
-    ScopedPlacementIr,
+    CellCoord, CircuitRegionReservation, PlacedCellNode, PlacedOutputNode, PlacementIr,
+    PlacementPhase, ScopedPlacementIr,
 };
+use crate::routing_geometry::output_pad;
 
 /// Per-cell footprint used by the v1 congestion estimate. Four blocks
 /// covers a two-input gate's cell plus its short input tails, and is
@@ -114,23 +119,25 @@ fn compile_scope(
     source: &EditionNetlistIr,
     region: Option<&intent::CircuitRegion>,
 ) -> ScopePlacement {
-    // Identity-wire scopes — inputs/outputs but zero cells, e.g. a
-    // `pressure_plate -> sig.a` bound directly to `door opened_by=sig.a`
-    // with no `logic` line in between — reach the placement pass because
-    // `EditionNetlistIr::is_empty()` requires *all three* of inputs /
-    // outputs / cells to be empty for elision. There is nothing to place
-    // for a scope with no cells, so drop it from the Placement IR at
-    // this stage. The routing pass (M6 follow-up) will consume the
-    // Edition Netlist IR directly for these no-cell wires; nothing in
-    // the placement contract survives without at least one cell to
-    // coordinate.
-    if source.cells.is_empty() {
+    // An identity-wire scope — inputs and outputs but zero cells, e.g. a
+    // `pressure_plate -> sig.a` bound straight to `door opened_by=sig.a`
+    // with no `logic` line between them — is a layout too. `spec/redstone`
+    // §14.2 permits the direct binding, and across a wide footprint that
+    // wire needs the same buffer repeaters any other wire does. What it
+    // has to place is the actuator pad, which needs the reservation
+    // exactly as a cell does.
+    //
+    // A sensor nothing reads is the other cell-less shape, and it is not
+    // a layout: there is no wire, because nothing is on the other end.
+    // The predicate is the one the routing, delay, and crossing passes
+    // already spell out — anything else and placement disagrees with its
+    // own siblings about what there is to place.
+    if source.cells.is_empty() && source.outputs.is_empty() {
         return Ok(PlacementIr::new(source.edition));
     }
 
     let mut ir = PlacementIr::new(source.edition);
     ir.inputs.clone_from(&source.inputs);
-    ir.outputs.clone_from(&source.outputs);
     ir.signal_defs.clone_from(&source.signal_defs);
 
     let Some(region) = region else {
@@ -155,6 +162,35 @@ fn compile_scope(
     if required_area > reservation.reserved_area() {
         return Err(congestion_diagnostic(&reservation, required_area));
     }
+    // The v1 layout is a single row: cell `i` stands at `x = i`, so the
+    // row has to be at least as long as the cell count. The area test
+    // above cannot see that. A `size=2x8` scope with `void=3` reserves 48
+    // cells' worth of volume and offers a row two columns long, and a
+    // three-cell netlist passes the first and overruns the second by one.
+    //
+    // Nothing downstream would notice either: every later pass reads the
+    // coordinates this one stamps, and `routing_geometry::output_pad`
+    // puts the actuator pad at `width - 1`. A cell past that column sits
+    // to the right of the pad it drives, so the wire runs backwards out
+    // of the reservation the author declared.
+    if cell_count > reservation.width {
+        return Err(row_overflow_diagnostic(&reservation, cell_count));
+    }
+    // The pads need rows of their own. `input_pad` and `output_pad` step
+    // along z from 1 and saturate at `depth - 1`, and the cells occupy
+    // `z = 0`, so a reservation holds its I/O only while `depth` is at
+    // least one more than the larger of the two pad counts. Below that
+    // the saturation stacks pads on each other, and at `depth == 1` it
+    // drops them onto the cell row — which is the case the row check
+    // above reads as fine, because the pad it reasons about is no longer
+    // where it assumes. Refused here rather than left to the routing
+    // pass's occupancy sweep so stage 1 stops emitting a dump whose
+    // coordinates contradict each other.
+    let pad_rows = source.inputs.len().max(source.outputs.len());
+    let pad_rows = u32::try_from(pad_rows).unwrap_or(u32::MAX);
+    if pad_rows > 0 && reservation.depth <= pad_rows {
+        return Err(pad_row_diagnostic(&reservation, pad_rows));
+    }
 
     for (index, source_cell) in source.cells.iter().enumerate() {
         // Same saturating-cast rationale as `cell_count` above: a
@@ -173,24 +209,43 @@ fn compile_scope(
         ir.cells.iter().all(|c| c.cell.edition() == source.edition),
         "compile_scope placed a cell whose edition tag disagrees with the container's",
     );
+
+    // Actuator pads take their coordinate from the same geometry the
+    // routing pass measures against, so the segment out to an actuator
+    // is a placed object rather than something re-derived per pass.
+    for (index, source_output) in source.outputs.iter().enumerate() {
+        ir.outputs.push(PlacedOutputNode::new(
+            source_output.name.clone(),
+            source_output.driver,
+            output_pad(index, &reservation),
+            source_output.span.clone(),
+        ));
+    }
+
     ir.region = Some(reservation);
     Ok(ir)
 }
 
 fn missing_region_diagnostic(source: &EditionNetlistIr) -> Diagnostic {
+    // An identity-wire scope has no cell to point at, so fall through to
+    // the actuator binding that made the scope need a reservation in the
+    // first place. A default span would render the finding at byte 0,
+    // which for the one scope shape that reaches here without a cell is
+    // every time.
     let span = source
         .cells
         .first()
         .map(|c| c.span.clone())
+        .or_else(|| source.outputs.first().map(|o| o.span.clone()))
         .unwrap_or_default();
     Diagnostic::new(
         DiagnosticCode::NoCircuitRegion,
         span,
-        "this scope has redstone cells to place but no usable `circuit region=<label> void=<N>` reservation is in scope (missing line, malformed `region=` / `void=`, or the enclosing scope has no `size=WxH` header)"
+        "this scope has redstone cells or actuator pads to place but no usable `circuit region=<label> void=<N>` reservation is in scope (missing line, malformed `region=` / `void=`, or the enclosing scope has no `size=WxH` header)"
             .to_owned(),
     )
     .with_footer(
-        "add a `circuit region=<label> void=<N>` line whose `region=` names a member kind that lives in the scope's footprint (a non-empty label) and whose `void=` is an integer >= 1, and give the enclosing scope a `size=WxH` header",
+        "add a `circuit region=<label> void=<N>` line whose `region=` is a non-empty label naming the reservation (`region=floor`, `region=basement` — the name is the author's to choose and is echoed back in diagnostics) and whose `void=` is an integer >= 1, and give the enclosing scope a `size=WxH` header",
     )
 }
 
@@ -220,6 +275,60 @@ fn congestion_diagnostic(reservation: &CircuitRegionReservation, required_area: 
     );
     diag = diag.with_footer(
         "Fix: increase `void`, enlarge region, or split into multiple `circuit` blocks",
+    );
+    debug_assert_eq!(diag.severity(), Severity::Error);
+    diag
+}
+
+/// The reservation has the volume but not the row.
+///
+/// Kept apart from [`congestion_diagnostic`] because the numbers that
+/// explain it are different — a ratio of areas says nothing about a row
+/// that is three columns short — while the code stays
+/// [`DiagnosticCode::RouteCongestion`]: `spec/redstone` §14.5 asks for
+/// one fail-loud when routing does not fit the region, and names area
+/// shortage as the example rather than as the only shape.
+fn row_overflow_diagnostic(reservation: &CircuitRegionReservation, cell_count: u32) -> Diagnostic {
+    let primary = format!(
+        "synthesized netlist needs a row of {cell_count} cells but the reserved region is only {width} wide (region {width}x{depth}, void={void})",
+        width = reservation.width,
+        depth = reservation.depth,
+        void = reservation.void,
+    );
+    let mut diag = Diagnostic::new(
+        DiagnosticCode::RouteCongestion,
+        reservation.span.clone(),
+        primary,
+    );
+    diag = diag.with_footer(
+        "Fix: widen the enclosing `size=WxH` so the region is at least as wide as the cell count, or split into multiple `circuit` blocks. Raising `void` does not help — cells are laid in one row and `void` buys height, not length",
+    );
+    debug_assert_eq!(diag.severity(), Severity::Error);
+    diag
+}
+
+/// The reservation has no room for the I/O pads the scope needs.
+///
+/// Separate from the two footprint refusals because the resource is a
+/// different one again: `void` buys height, the row buys length, and
+/// this buys the rows the pads stand in. Sharing
+/// [`DiagnosticCode::RouteCongestion`] with them keeps `spec/redstone`
+/// §14.5's single fail-loud for "routing does not fit the region".
+fn pad_row_diagnostic(reservation: &CircuitRegionReservation, pad_rows: u32) -> Diagnostic {
+    let primary = format!(
+        "synthesized netlist needs {needed} rows for its cells and I/O pads but the reserved region is only {depth} deep (region {width}x{depth}, void={void})",
+        needed = pad_rows.saturating_add(1),
+        depth = reservation.depth,
+        width = reservation.width,
+        void = reservation.void,
+    );
+    let mut diag = Diagnostic::new(
+        DiagnosticCode::RouteCongestion,
+        reservation.span.clone(),
+        primary,
+    );
+    diag = diag.with_footer(
+        "Fix: deepen the enclosing `size=WxH` so the region has one row per sensor or actuator plus the cell row, or split into multiple `circuit` blocks. Raising `void` does not help — pads stand beside the cells, not above them",
     );
     debug_assert_eq!(diag.severity(), Severity::Error);
     diag

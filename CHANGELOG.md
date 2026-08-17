@@ -10,6 +10,20 @@ and is a separate axis from the Minecraft target version.
 
 ## [Unreleased]
 
+### Breaking changes
+
+- *(redstone)* `PlacementIr::outputs` is now `Vec<PlacedOutputNode>` rather than
+  `Vec<NetlistOutput>`. An actuator is a placed object: it carries the pad coordinate the
+  placement pass assigned and the same `PlacementPhase` a cell does, so the routing, delay,
+  and crossing passes fill it by the same rules. Rust API, Internal tier.
+- *(redstone)* `cairn synth --stage <placement|route|delay|crossing>` emits a wider object per
+  entry of `outputs[]`: `{stage, name, driver, pad}` plus `wire_length`, `delay_ticks`, and
+  `buffer_coords` as each stage fills them, where before it emitted `{name, driver}` at every
+  stage. `synth` is Evolving and gated behind `--experimental-logic-synth`.
+- *(redstone)* `BufferCoord::port` is now a `BufferSegment` rather than a `PortName`, so a
+  buffer can name the wire out to an actuator (`"out"`) as well as a cell's input port. The
+  wire form stays one flat string; `"out"` is a value it could not previously take.
+
 ## 2026.8.2 — 2026-08-01
 
 ### Fixed

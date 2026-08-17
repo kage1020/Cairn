@@ -160,13 +160,16 @@ enum Command {
     /// repeater's `BUFFER_REPEATER_TICKS` contribution over every
     /// driver segment beyond the `DUST_ATTENUATION_LIMIT`;
     /// `--stage crossing` runs crossing legalization over the delayed
-    /// IR, refuses with `E_CROSSING_CONGESTION` when a cross-net
-    /// plane overlap cannot fit inside the `void=<N>` reservation,
-    /// and fills every cell's `buffer_coords` with the concrete
-    /// coord of each implicit buffer repeater (escaping to a
-    /// `RouteLayer::Bridge` y-layer whenever the plane candidate
-    /// collides with a cell / pad / plane crossing / earlier
-    /// buffer). Every cell of the four Placement IR stages carries a
+    /// IR, refuses with `E_CROSSING_CONGESTION` when the layout has
+    /// any cross-net plane overlap at all and `void=<N>` is under 2
+    /// (a bridge needs a y-layer above the plane, so `void=1` offers
+    /// nowhere to escape to; v1 tests for the layer existing, not for
+    /// how many crossings it would have to carry), and fills every
+    /// cell's `buffer_coords` with the concrete coord of each
+    /// implicit buffer repeater (escaping to a `RouteLayer::Bridge`
+    /// y-layer whenever the plane candidate collides with a cell /
+    /// pad / plane crossing / earlier buffer). Every cell of the four
+    /// Placement IR stages carries a
     /// `"stage"` key echoing the flag value that produced the dump
     /// (`placement` / `route` / `delay` / `crossing`), so a consumer
     /// reads the stage off the output instead of inferring it from
@@ -255,9 +258,11 @@ enum SynthStage {
     /// Placement IR against `--edition`. Stage 4 of `spec/redstone`
     /// §14.5's place-and-route pipeline. Detects wire coords two
     /// distinct nets would otherwise share on the ground plane
-    /// (refused with `E_CROSSING_CONGESTION` when the
-    /// `circuit region=<label> void=<N>` reservation offers no
-    /// y-layer to escape to) and materialises the concrete coord of
+    /// (refused with `E_CROSSING_CONGESTION` when `void=<N>` is under
+    /// 2, so the `circuit region=<label> void=<N>` reservation has no
+    /// y-layer above the plane to escape to; the test is whether a
+    /// bridge layer exists, not how many crossings would share it)
+    /// and materialises the concrete coord of
     /// every implicit buffer repeater the delay pass counted into
     /// every cell's `buffer_coords`. A buffer whose plane candidate
     /// collides with a cell / pad / plane crossing / earlier buffer

@@ -66,21 +66,30 @@ pub enum DiagnosticCode {
     /// synthesised DAG is still valid; an unused signal is usually a typo
     /// on the reference side but occasionally an intentional scratch.
     LogicUnusedSignal,
-    /// A scope has redstone cells to place but the enclosing struct / def
+    /// A scope has redstone cells or actuator pads to place but the
+    /// enclosing struct / def
     /// declared no `circuit region=<label> void=<N>` reservation (or the
     /// enclosing scope had no `size=WxH` for the reservation to sit
     /// inside). Fail-loud per `spec/redstone` §14.5 — silently placing
     /// cells "somewhere" would produce voxels outside the author's
-    /// declared footprint. Fix: add a `circuit region=` line whose
-    /// `region=` label names a member kind that lives in the scope's
-    /// footprint, and give the enclosing scope a `size=WxH` header.
+    /// declared footprint. Fix: add a `circuit region=` line with a
+    /// non-empty `region=` label and a `void=` of at least 1, and give
+    /// the enclosing scope a `size=WxH` header. The label names the
+    /// reservation and is the author's to choose — §14.5's own example
+    /// is `region=basement`, which is not a member keyword — so it is
+    /// checked for being present and non-empty, nothing more.
     NoCircuitRegion,
-    /// The synthesised netlist for a scope needs more area than its
-    /// `circuit region=<label> void=<N>` reservation offers.
-    /// `spec/redstone` §14.5's canonical failure: routing cannot be
-    /// confined to the reserved region, so the pass fails loud with the
-    /// self-correction triple ("increase `void`", "enlarge region",
-    /// "split into multiple `circuit` blocks").
+    /// The synthesised netlist for a scope does not fit its
+    /// `circuit region=<label> void=<N>` reservation. `spec/redstone`
+    /// §14.5's canonical failure: routing cannot be confined to the
+    /// reserved region, so the pass fails loud with the self-correction
+    /// triple ("increase `void`", "enlarge region", "split into multiple
+    /// `circuit` blocks"). Two shapes reach it — the reserved volume is
+    /// short of the netlist's estimated footprint, or the reserved row
+    /// is shorter than the cell count the v1 single-row layout needs.
+    /// §14.5 names area shortage as the example rather than as the only
+    /// shape, so both take this code and differ in what they say:
+    /// raising `void` fixes the first and cannot fix the second.
     RouteCongestion,
     /// A routed driver segment (source pad or driver cell → sink coord,
     /// where the sink is either a downstream cell coord or an actuator
@@ -102,14 +111,21 @@ pub enum DiagnosticCode {
     /// `circuit` blocks, or pin cell / actuator placement closer to
     /// its drivers.
     AttenuationLimit,
-    /// The crossing-legalization pass ran out of `Bridge` / `Via` layer
-    /// budget while escaping cross-net overlaps. `spec/redstone` §14.5
-    /// stage 4 lifts a wire onto a bridge coord whenever two nets would
+    /// The crossing-legalization pass found a cross-net plane overlap
+    /// and no layer to escape it to. `spec/redstone` §14.5 stage 4
+    /// lifts a wire onto a bridge coord whenever two nets would
     /// otherwise share a `Plane` coord; the escape layer draws from the
     /// same `void=<N>` service-layer height the placement / routing
-    /// passes already consume, and this code fires once every `y` layer
-    /// in the reservation has a wire on it and the pass still needs to
-    /// escape another crossing. Fix: increase `void`, enlarge the
+    /// passes already consume, and a bridge needs at least `y = 1`,
+    /// which needs `void >= 2`. So the v1 test is whether that layer
+    /// exists, not how many crossings it would have to carry: any
+    /// crossing under `void < 2` fires this, and `void >= 2` accepts
+    /// them all. There is nothing downstream for a per-crossing
+    /// capacity model to constrain yet — v1 does not lift the wire
+    /// itself, and no pass downstream reads the crossing set: the
+    /// block-array lowering does not take the Placement IR at all, so
+    /// whichever pass eventually voxelises these wires will derive the
+    /// crossings itself. Fix: increase `void`, enlarge the
     /// `circuit region=` footprint so fewer wires cross, or split the
     /// logic across multiple `circuit` blocks so each block routes
     /// with fewer overlaps.

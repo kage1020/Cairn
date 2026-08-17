@@ -45,7 +45,7 @@ use serde::{Serialize, Serializer};
 
 use crate::edition_netlist_ir::EditionCell;
 use crate::logic_ir::ScopeKind;
-use crate::netlist_ir::{CellPortDriver, NetRef, NetlistInput, NetlistOutput, PortName};
+use crate::netlist_ir::{CellPortDriver, NetRef, NetlistInput, PortName};
 
 /// Which of `spec/redstone` §14.5's three pseudo-2.5D layers a
 /// coordinate lives on. `Plane` is the ground layer every cell coord
@@ -210,17 +210,16 @@ impl CellCoord {
 /// pass's placement decision — see [`RouteLayer`] for the full
 /// vocabulary and which variants a producer emits today.
 ///
-/// Serialises as `{"port": "<a|b|sel>", "coord": {...}}`, matching the
+/// Serialises as `{"port": "<a|b|sel|out>", "coord": {...}}`, matching the
 /// `{port, ...}` shape [`CellPortDriver`] uses on the netlist side.
 /// The nested `coord` still elides its `layer` field when it stays on
 /// [`RouteLayer::Plane`], so the JSON footprint of a plane buffer stays
 /// compact.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
 pub struct BufferCoord {
-    /// Driver port on the owning cell this buffer sits on the segment
-    /// for. Copies [`CellPortDriver::port`] from the driver the
-    /// crossing pass was walking when it emitted this entry.
-    pub port: PortName,
+    /// Which segment this buffer stands on: a driver port of the owning
+    /// cell, or the wire out to an actuator pad.
+    pub port: BufferSegment,
     /// Coordinate the crossing pass chose for the buffer. The
     /// `layer` field records the placement decision — see
     /// [`RouteLayer`] for the vocabulary.
@@ -228,12 +227,48 @@ pub struct BufferCoord {
 }
 
 impl BufferCoord {
-    /// New `(port, coord)` attribution pair. Mirrors the
+    /// New `(segment, coord)` attribution pair. Mirrors the
     /// [`CellCoord::new`] constructor convention so the crossing pass
     /// and its tests build entries without struct-literal noise.
     #[must_use]
-    pub const fn new(port: PortName, coord: CellCoord) -> Self {
+    pub const fn new(port: BufferSegment, coord: CellCoord) -> Self {
         Self { port, coord }
+    }
+}
+
+/// Which wire a buffer repeater stands on.
+///
+/// Separate from [`PortName`] rather than a variant of it, because a
+/// [`CellPortDriver`] must not be able to say `out`: a cell has no such
+/// input, and public fields plus no validation is all it would take.
+/// Here the two are the same kind of answer — "which segment" — so they
+/// share one flat wire form: `"a"` / `"b"` / `"sel"` for a driver port,
+/// `"out"` for the wire to an actuator.
+///
+/// `#[non_exhaustive]` for the reason [`PortName`] is: a future cell
+/// with more ports, or a future segment kind, is additive.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum BufferSegment {
+    /// A driver port feeding the owning cell. Copies
+    /// [`CellPortDriver::port`] from the driver the crossing pass was
+    /// walking when it emitted the entry.
+    Port(PortName),
+    /// The wire leaving a driver for an actuator's output pad. Has no
+    /// owning cell: it is attributed to the [`PlacedOutputNode`] whose
+    /// pad it runs to.
+    Out,
+}
+
+// Hand-written so the two cases share one flat string vocabulary
+// instead of the externally-tagged shape a derive would give `Port(..)`.
+// The wire form is the contract `BufferCoord`'s doc states.
+impl Serialize for BufferSegment {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        match self {
+            Self::Port(port) => port.serialize(serializer),
+            Self::Out => serializer.serialize_str("out"),
+        }
     }
 }
 
@@ -915,7 +950,28 @@ fn transition_panic(
 pub(crate) struct CellIdentity<'a> {
     index: usize,
     coord: CellCoord,
+    subject: PlacedSubject,
     scope: &'a ScopedPlacementIrEntry,
+}
+
+/// Which list the index in a [`CellIdentity`] indexes into. A panic
+/// that says "cell #0" about an actuator pad sends the reader to the
+/// wrong line of the source, and both lists start at zero.
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum PlacedSubject {
+    /// An entry of [`PlacementIr::cells`].
+    Cell,
+    /// An entry of [`PlacementIr::outputs`].
+    Output,
+}
+
+impl PlacedSubject {
+    const fn label(self) -> &'static str {
+        match self {
+            Self::Cell => "cell",
+            Self::Output => "output",
+        }
+    }
 }
 
 impl<'a> CellIdentity<'a> {
@@ -936,6 +992,22 @@ impl<'a> CellIdentity<'a> {
         Self {
             index,
             coord,
+            subject: PlacedSubject::Cell,
+            scope,
+        }
+    }
+
+    /// Breadcrumb for the actuator pad at position `index`, whose
+    /// placement coord is `pad`.
+    pub(crate) const fn output(
+        index: usize,
+        pad: CellCoord,
+        scope: &'a ScopedPlacementIrEntry,
+    ) -> Self {
+        Self {
+            index,
+            coord: pad,
+            subject: PlacedSubject::Output,
             scope,
         }
     }
@@ -945,7 +1017,8 @@ impl fmt::Display for CellIdentity<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "cell #{index} at ({x},{y},{z}",
+            "{subject} #{index} at ({x},{y},{z}",
+            subject = self.subject.label(),
             index = self.index,
             x = self.coord.x,
             y = self.coord.y,
@@ -1108,12 +1181,155 @@ impl Serialize for PlacedCellNode {
     }
 }
 
+/// An actuator-driven net sink, placed at its output pad.
+///
+/// The placement counterpart of [`crate::netlist_ir::NetlistOutput`],
+/// and the reason it
+/// exists is that the wire from a driver to an actuator is wire like any
+/// other: it attenuates, it needs buffer repeaters past
+/// [`crate::DUST_ATTENUATION_LIMIT`], and those repeaters occupy coords
+/// inside the reservation. Before this node existed, the pass counted
+/// buffers on the segments *into* cells and none on the segment out of
+/// the last one, so a driver sitting a hundred blocks from its actuator
+/// reported the same delay as one sitting next to it.
+///
+/// It carries the same [`PlacementPhase`] the cells do, so the four
+/// stages fill it by the same rules and a dump reads alike on both
+/// sides: `wire_length` after routing, `delay_ticks` after delay
+/// insertion, `buffer_coords` after legalization. `delay_ticks` here is
+/// the wire's own contribution — the buffers standing on the segment —
+/// with no base delay to add, because a pad is not a cell.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct PlacedOutputNode {
+    /// Dotted signal reference the actuator consumes, carried across
+    /// from [`crate::netlist_ir::NetlistOutput::name`].
+    pub name: DottedRef,
+    /// Which net drives this port, carried across from
+    /// [`crate::netlist_ir::NetlistOutput::driver`].
+    pub driver: NetRef,
+    /// Coordinate the placement pass assigned this actuator's pad, per
+    /// the `x = width - 1` convention the routing geometry uses.
+    pub pad: CellCoord,
+    /// Progressive pipeline state — see [`PlacementPhase`]. Crate-
+    /// visible for the same reason [`PlacedCellNode::phase`] is: writes
+    /// go through the transition methods so the illegal shapes stay
+    /// unrepresentable.
+    pub(crate) phase: PlacementPhase,
+    /// Byte range of the originating `opened_by=` argument.
+    pub span: Span,
+}
+
+impl PlacedOutputNode {
+    /// A freshly placed actuator pad, before routing has run. Mirrors
+    /// the [`CellCoord::new`] / [`BufferCoord::new`] convention so the
+    /// placement pass and the fixtures build one without struct-literal
+    /// noise, and so the starting phase is chosen in one place rather
+    /// than at every construction site.
+    ///
+    /// Crate-visible: the pad is the placement pass's to assign, from
+    /// the reservation, and a coordinate handed in from outside is one
+    /// nothing checks against the region. [`PlacedCellNode`] is
+    /// unconstructible from another crate for the same reason — it has
+    /// no constructor and the struct is `#[non_exhaustive]`.
+    #[must_use]
+    pub(crate) fn new(name: DottedRef, driver: NetRef, pad: CellCoord, span: Span) -> Self {
+        Self {
+            name,
+            driver,
+            pad,
+            phase: PlacementPhase::Unrouted,
+            span,
+        }
+    }
+
+    /// Routed length of the segment from this output's driver to its
+    /// pad, once routing has run. See [`PlacementPhase::wire_length`].
+    #[must_use]
+    pub const fn wire_length(&self) -> Option<u32> {
+        self.phase.wire_length()
+    }
+
+    /// Ticks the buffer repeaters on this output's segment add, once
+    /// delay insertion has run. See [`PlacementPhase::delay_ticks`].
+    #[must_use]
+    pub const fn delay_ticks(&self) -> Option<u32> {
+        self.phase.delay_ticks()
+    }
+
+    /// Buffer coordinates once crossing legalization has run. See
+    /// [`PlacementPhase::buffer_coords`].
+    #[must_use]
+    pub fn buffer_coords(&self) -> &[BufferCoord] {
+        self.phase.buffer_coords()
+    }
+
+    /// Which pass last wrote to this output. See
+    /// [`PlacementPhase::stage`].
+    #[must_use]
+    pub const fn stage(&self) -> PlacementStage {
+        self.phase.stage()
+    }
+}
+
+// Hand-written for the same reasons [`PlacedCellNode`]'s is: the derived
+// form would tag the phase enum and reshape the flat wire form, and
+// binary formats rely on the announced field count being exact. Keep the
+// two impls in step — a consumer reading a dump should not have to learn
+// two shapes for "the same stage wrote this".
+impl Serialize for PlacedOutputNode {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let wire_length = self.wire_length();
+        let delay_ticks = self.delay_ticks();
+        let buffer_coords = self.buffer_coords();
+
+        let mut field_count = 4; // stage, name, driver, pad
+        if wire_length.is_some() {
+            field_count += 1;
+        }
+        if delay_ticks.is_some() {
+            field_count += 1;
+        }
+        if !buffer_coords.is_empty() {
+            field_count += 1;
+        }
+
+        let mut state = serializer.serialize_struct("PlacedOutputNode", field_count)?;
+        let mut written = 0_usize;
+        state.serialize_field("stage", &self.stage())?;
+        written += 1;
+        state.serialize_field("name", &self.name)?;
+        written += 1;
+        state.serialize_field("driver", &self.driver)?;
+        written += 1;
+        state.serialize_field("pad", &self.pad)?;
+        written += 1;
+        if let Some(wl) = wire_length {
+            state.serialize_field("wire_length", &wl)?;
+            written += 1;
+        }
+        if let Some(dt) = delay_ticks {
+            state.serialize_field("delay_ticks", &dt)?;
+            written += 1;
+        }
+        if !buffer_coords.is_empty() {
+            state.serialize_field("buffer_coords", buffer_coords)?;
+            written += 1;
+        }
+        debug_assert_eq!(
+            written, field_count,
+            "PlacedOutputNode Serialize: announced field_count ({field_count}) diverges from serialize_field call count ({written}); binary formats such as bincode / postcard would produce malformed output",
+        );
+        state.end()
+    }
+}
+
 /// The Placement IR for one struct/def body.
 ///
 /// One instance per [`crate::edition_netlist_ir::EditionNetlistIr`]
-/// handed to the pass whose scope produced at least one cell. The
-/// target edition is pinned so a JSON dump makes clear which library
-/// the cells were selected from before placement ran.
+/// handed to the pass whose scope produced at least one cell or one
+/// actuator. The target edition is pinned so a JSON dump makes clear
+/// which library the cells were selected from before placement ran.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[non_exhaustive]
 pub struct PlacementIr {
@@ -1130,10 +1346,12 @@ pub struct PlacementIr {
     /// Netlist IR.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub inputs: Vec<NetlistInput>,
-    /// Actuator-driven nets, copied verbatim from the source Edition
-    /// Netlist IR.
+    /// Actuator-driven nets, each placed at its output pad. Carried
+    /// across from the source Edition Netlist IR and given a coordinate
+    /// by the placement pass, so the wire out to an actuator is routed,
+    /// delayed, and buffered by the same rules as the wire into a cell.
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub outputs: Vec<NetlistOutput>,
+    pub outputs: Vec<PlacedOutputNode>,
     /// Placed cells, in the same topological order as the source
     /// [`crate::edition_netlist_ir::EditionNetlistIr::cells`]
     /// (`NetRef::Cell(j)` in `cells[i]` still satisfies `j < i`).
@@ -1274,7 +1492,10 @@ mod tests {
         PlacementPhase::Legalized {
             wire_length: 3,
             delay_ticks: 1,
-            buffer_coords: vec![BufferCoord::new(PortName::A, CellCoord::new(5, 0, 0))],
+            buffer_coords: vec![BufferCoord::new(
+                BufferSegment::Port(PortName::A),
+                CellCoord::new(5, 0, 0),
+            )],
         }
     }
 
@@ -1347,8 +1568,8 @@ mod tests {
             delay_ticks: 3,
         };
         let coords = vec![
-            BufferCoord::new(PortName::A, CellCoord::new(1, 0, 0)),
-            BufferCoord::new(PortName::A, CellCoord::new(2, 0, 0)),
+            BufferCoord::new(BufferSegment::Port(PortName::A), CellCoord::new(1, 0, 0)),
+            BufferCoord::new(BufferSegment::Port(PortName::A), CellCoord::new(2, 0, 0)),
         ];
         phase.legalize(coords.clone());
         assert_eq!(
@@ -1548,7 +1769,10 @@ mod tests {
             wire_length: 12,
             delay_ticks: 3,
         };
-        let coords = vec![BufferCoord::new(PortName::A, CellCoord::new(1, 0, 0))];
+        let coords = vec![BufferCoord::new(
+            BufferSegment::Port(PortName::A),
+            CellCoord::new(1, 0, 0),
+        )];
         phase.legalize_at(coords.clone(), probe_identity(&scope));
         assert_eq!(
             phase,
@@ -1688,7 +1912,10 @@ mod tests {
             wire_length: 12,
             delay_ticks: 3,
         };
-        let coords = vec![BufferCoord::new(PortName::A, CellCoord::new(1, 0, 0))];
+        let coords = vec![BufferCoord::new(
+            BufferSegment::Port(PortName::A),
+            CellCoord::new(1, 0, 0),
+        )];
         assert_eq!(phase.try_legalize(coords.clone()), Ok(()));
         assert_eq!(
             phase,
@@ -1953,7 +2180,10 @@ mod tests {
         assert!(delayed().buffer_coords().is_empty());
         assert_eq!(
             legalized().buffer_coords(),
-            &[BufferCoord::new(PortName::A, CellCoord::new(5, 0, 0))],
+            &[BufferCoord::new(
+                BufferSegment::Port(PortName::A),
+                CellCoord::new(5, 0, 0)
+            )],
         );
     }
 

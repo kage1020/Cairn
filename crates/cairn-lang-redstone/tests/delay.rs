@@ -490,12 +490,13 @@ fn empty_placement_ir_produces_empty_delay_output() {
     assert!(delayed.scoped.scopes.is_empty());
 }
 
-/// AC7 — a scope whose Placement IR carries inputs and outputs but
-/// no cells (identity wire) is elided by `compile_placement` already,
-/// so `compile_delay` never sees it. The delay output must still be
-/// diagnostic-clean.
+/// AC7 — a scope whose Placement IR carries inputs and outputs but no
+/// cells (identity wire) reaches the delay pass now that placement
+/// gives its actuator a pad. Across a 5-wide region the segment is four
+/// blocks, well inside the attenuation limit, so it is charged nothing:
+/// the point is that it is charged at all rather than skipped.
 #[test]
-fn identity_wire_scope_stays_elided_through_delay() {
+fn identity_wire_is_charged_for_its_own_segment() {
     let source = r"
 theme t:
   slot wall -> @oak_planks
@@ -514,9 +515,17 @@ struct wire size=5x5
         "identity-wire scope must not raise delay diagnostics, got {:?}",
         delayed.diagnostics,
     );
-    assert!(
-        delayed.scoped.scopes.iter().all(|e| e.name != "wire"),
-        "identity-wire scope must stay elided in the delay output",
+    let scope = delayed
+        .scoped
+        .scopes
+        .iter()
+        .find(|e| e.name == "wire")
+        .expect("identity-wire scope must reach the delayed IR");
+    let output = scope.ir.outputs.first().expect("the actuator is placed");
+    assert_eq!(
+        output.delay_ticks(),
+        Some(0),
+        "a four-block segment needs no buffer repeater",
     );
 }
 

@@ -93,7 +93,7 @@ use crate::placement_ir::{
     CellCoord, CellIdentity, CircuitRegionReservation, PlacementIr, ScopedPlacementIr,
     ScopedPlacementIrEntry,
 };
-use crate::routing_geometry::{collect_nets, input_pad, net_trees, output_pad};
+use crate::routing_geometry::{collect_nets, input_pad, net_trees};
 
 /// Signal-attenuation ceiling per dust segment (`spec/redstone` §14.5
 /// "signal attenuation limit of 15"). A dust source starts at strength
@@ -267,7 +267,7 @@ fn delay_scope(entry: &ScopedPlacementIrEntry) -> ScopeDelay {
     // for the same reason `source_of_net` above is: a hand-built IR
     // that broke the correspondence would otherwise under-report
     // `delay_ticks` in silence.
-    let nets = collect_nets(&ir, &region);
+    let nets = collect_nets(&ir);
     let trees = net_trees(&nets, source_of_net);
     let segment_of = |net: NetRef, sink: CellCoord| -> u32 {
         let route = trees
@@ -309,8 +309,7 @@ fn delay_scope(entry: &ScopedPlacementIrEntry) -> ScopeDelay {
     // without touching a cell. Same routed-length model; the sink is
     // the output pad coord.
     for (output_index, output) in ir.outputs.iter().enumerate() {
-        let sink = output_pad(output_index, &region);
-        let segment = segment_of(output.driver, sink);
+        let segment = segment_of(output.driver, output.pad);
         if segment > MAX_ATTENUATION_SEGMENT {
             return Err(attenuation_output_diagnostic(
                 entry,
@@ -365,6 +364,20 @@ fn attribute_delay_ticks<F>(
     for (index, (cell, ticks)) in ir.cells.iter_mut().zip(delay_ticks).enumerate() {
         let identity = CellIdentity::new(index, cell.coord, entry);
         cell.phase.delay_at(ticks, identity);
+    }
+
+    // The wire out to an actuator attenuates like the wire into a cell,
+    // so it is charged for its buffers by the same rule. There is no
+    // base delay to add: a pad is not a cell, and the figure here is
+    // the wire's own contribution.
+    let output_ticks: Vec<u32> = ir
+        .outputs
+        .iter()
+        .map(|output| buffer_repeater_ticks_for_segment(segment_of(output.driver, output.pad)))
+        .collect();
+    for (index, (output, ticks)) in ir.outputs.iter_mut().zip(output_ticks).enumerate() {
+        let identity = CellIdentity::output(index, output.pad, entry);
+        output.phase.delay_at(ticks, identity);
     }
 }
 
@@ -560,11 +573,10 @@ mod tests {
                     }],
                 ));
             }
-            ir.outputs.push(crate::netlist_ir::NetlistOutput {
-                name: cairn_lang_core::ast::DottedRef::new("sig".into(), vec!["out".into()]),
-                driver: NetRef::Input(1),
-                span: Span::default(),
-            });
+            ir.outputs.push(routed_output(
+                NetRef::Input(1),
+                CellCoord::new(width - 1, 0, 1),
+            ));
             let delayed = compile_delay(&scoped(ScopeKind::Struct, "wide", ir));
             let fired = delayed
                 .diagnostics
@@ -588,6 +600,21 @@ mod tests {
             ir,
         });
         scoped
+    }
+
+    /// An actuator pad already through routing, matching what
+    /// [`placed_cell`] does for a cell: these fixtures hand the delay
+    /// pass an IR that skipped stages 1 and 2, so both node kinds have
+    /// to arrive in the phase stage 2 would have left them in.
+    fn routed_output(driver: NetRef, pad: CellCoord) -> crate::placement_ir::PlacedOutputNode {
+        let mut output = crate::placement_ir::PlacedOutputNode::new(
+            cairn_lang_core::ast::DottedRef::new("sig".into(), vec!["out".into()]),
+            driver,
+            pad,
+            Span::default(),
+        );
+        output.phase = PlacementPhase::Routed { wire_length: 0 };
+        output
     }
 
     fn placed_cell(

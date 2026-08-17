@@ -101,7 +101,7 @@ use crate::placement_ir::{
     CellCoord, CellIdentity, CircuitRegionReservation, PlacementIr, ScopedPlacementIr,
     ScopedPlacementIrEntry,
 };
-use crate::routing_geometry::{collect_nets, input_pad, net_order, net_trees, output_pad};
+use crate::routing_geometry::{collect_nets, input_pad, net_order, net_trees};
 
 /// Per-cell footprint used by the post-routing congestion budget.
 /// Re-exports [`crate::placement::CELL_FOOTPRINT`] so a scope that
@@ -174,11 +174,13 @@ type ScopeRouting = Result<PlacementIr, Diagnostic>;
 
 fn route_scope(entry: &ScopedPlacementIrEntry) -> ScopeRouting {
     let source = &entry.ir;
-    // Defensive pass-through: a scope with no cells cannot be laid
-    // out further than placement already did. `ScopedPlacementIr::push`
-    // elides these on the input side, so this branch is a
-    // belt-and-braces for hand-built IRs.
-    if source.cells.is_empty() {
+    // Defensive pass-through: a scope with neither cells nor actuator
+    // pads has nothing to lay out. `ScopedPlacementIr::push` elides
+    // these on the input side, so this branch is a belt-and-braces for
+    // hand-built IRs. An identity wire — outputs but no cells — is not
+    // one of them: its segment runs from a sensor pad to an actuator
+    // pad and is routed like any other.
+    if source.cells.is_empty() && source.outputs.is_empty() {
         return Ok(source.clone());
     }
     let Some(region) = source.region.clone() else {
@@ -190,8 +192,8 @@ fn route_scope(entry: &ScopedPlacementIrEntry) -> ScopeRouting {
         // through with a pass-through in release so a downstream
         // consumer still sees deterministic output.
         debug_assert!(
-            source.cells.is_empty(),
-            "route_scope received a PlacementIr with cells but no region — placement should have elided it",
+            source.cells.is_empty() && source.outputs.is_empty(),
+            "route_scope received a PlacementIr with cells or pads but no region — placement should have refused it",
         );
         return Ok(source.clone());
     };
@@ -243,8 +245,7 @@ fn route_scope(entry: &ScopedPlacementIrEntry) -> ScopeRouting {
             return Err(pad_overlap_diagnostic(entry, &region, "input", i, pad));
         }
     }
-    for k in 0..ir.outputs.len() {
-        let pad = output_pad(k, &region);
+    for (k, pad) in ir.outputs.iter().map(|o| o.pad).enumerate() {
         if !occupancy.insert(pad) {
             return Err(pad_overlap_diagnostic(entry, &region, "output", k, pad));
         }
@@ -261,7 +262,7 @@ fn route_scope(entry: &ScopedPlacementIrEntry) -> ScopeRouting {
     // `l_shape_path` picks a fixed axis order — but pins a stable
     // schedule for a follow-up pass that consults occupancy when
     // choosing an elbow.
-    let nets = collect_nets(&ir, &region);
+    let nets = collect_nets(&ir);
     let trees = net_trees(&nets, source_of_net);
     for net in net_order(&nets) {
         for coord in trees[&net].wire_path() {
@@ -354,6 +355,19 @@ fn attribute_wire_lengths<F>(
     for (index, (cell, len)) in ir.cells.iter_mut().zip(wire_lengths).enumerate() {
         let identity = CellIdentity::new(index, cell.coord, entry);
         cell.phase.route_at(len, identity);
+    }
+
+    // An output has exactly one segment — its driver to its pad — so
+    // there is nothing to sum, but it is measured the same way and
+    // recorded in the same field.
+    let output_lengths: Vec<u32> = ir
+        .outputs
+        .iter()
+        .map(|output| segment_of(output.driver, output.pad))
+        .collect();
+    for (index, (output, len)) in ir.outputs.iter_mut().zip(output_lengths).enumerate() {
+        let identity = CellIdentity::output(index, output.pad, entry);
+        output.phase.route_at(len, identity);
     }
 }
 
