@@ -96,6 +96,20 @@ fn the_refused_sensor_leaves_no_input_port_behind() {
         "a refused driver drops its scope: {:#?}",
         out.scoped,
     );
+    // And the refusal is the whole of what this source earns. A losing
+    // sensor that reached `signal_defs` anyway would take the name from
+    // the winner, and the passes downstream would go on to report against
+    // the wrong definition — those findings reach the user even though the
+    // scope does not.
+    assert_eq!(
+        out.diagnostics
+            .iter()
+            .map(|d| d.code.as_str())
+            .collect::<Vec<_>>(),
+        ["E_LOGIC_MULTIPLE_DRIVERS"],
+        "{:#?}",
+        out.diagnostics,
+    );
 }
 
 #[test]

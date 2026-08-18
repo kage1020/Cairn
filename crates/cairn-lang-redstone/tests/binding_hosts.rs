@@ -145,17 +145,34 @@ fn opened_by_on_a_door_still_lowers() {
 
 #[test]
 fn a_binding_on_an_unknown_keyword_is_left_to_the_keyword_finding() {
-    // `lamp` is not in the role table, so `check` already reports the line
-    // as `E_UNKNOWN_KEYWORD`. A second finding here would be about a
-    // component that does not exist.
+    // `widget` is not in the role table, so `check` already reports the
+    // line as `E_UNKNOWN_KEYWORD`. A second finding here would be about a
+    // component that does not exist — and `widget` is deliberately not one
+    // of the four hosts, so what keeps this quiet is the role guard rather
+    // than the keyword happening to match the key's host.
+    let out = synth_source(&source(concat!(
+        "  pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a\n",
+        "  widget id=w1 lit_by=sig.a\n",
+    )));
+    assert!(out.diagnostics.is_empty(), "{:#?}", out.diagnostics);
+}
+
+#[test]
+fn an_unknown_keyword_that_matches_a_future_host_is_still_skipped() {
+    // `lamp` is the component §14.2 pairs with `lit_by=`, so its keyword
+    // string satisfies the host check on its own — but `lamp` is not a
+    // keyword the surface accepts, the member is `E_UNKNOWN_KEYWORD`, and
+    // the front end must not build a port on it. Without the role guard
+    // this line registers a live output on a member that does not exist.
     let out = synth_source(&source(concat!(
         "  pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a\n",
         "  lamp id=l1 lit_by=sig.a\n",
     )));
+    assert!(out.diagnostics.is_empty(), "{:#?}", out.diagnostics);
     assert!(
-        !codes(&out).contains(&"E_LOGIC_MISPLACED_BINDING"),
-        "{:#?}",
-        out.diagnostics,
+        out.scoped.scopes[0].ir.outputs.is_empty(),
+        "a member the role table does not know carries no port: {:#?}",
+        out.scoped.scopes[0].ir.outputs,
     );
 }
 

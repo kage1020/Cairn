@@ -674,9 +674,17 @@ fn check_assert_refs(
 }
 
 /// Register each sensor that won its signal as an [`InputPort`] and its
-/// `signal_defs` entry, in source order. A sensor that lost is not
-/// registered — [`resolve_drivers`] has already reported it, and the error
-/// drops the whole scope, so the IR it would have joined reaches nobody.
+/// `signal_defs` entry, in source order.
+///
+/// A sensor that lost is skipped rather than overwriting the winner's
+/// entry. Nothing observable rests on that today — a losing sensor means
+/// [`resolve_drivers`] raised an error, and `finish_scope` drops the whole
+/// scope on one, so the IR reaches nobody and every finding the later
+/// passes raise names the same signals either way. It is here for the
+/// reason the `failed_lhs` comment in [`lower_all_bindings`] gives: a
+/// change that lets a scope survive an Error would otherwise inherit an
+/// IR where one signal has two input ports and `signal_defs` points at the
+/// one the author was told to remove.
 fn register_sensors(sensors: &[PendingSensor], winners: &Winners, ir: &mut LogicIr) {
     for (index, sensor) in sensors.iter().enumerate() {
         if !winners.sensors.contains(&index) {
