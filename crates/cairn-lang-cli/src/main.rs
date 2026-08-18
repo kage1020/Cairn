@@ -6,6 +6,7 @@ use std::process::ExitCode;
 use cairn_lang_core::CAIRN_VERSION;
 use cairn_lang_core::block_array::{BlockArray, BlockArrayIr, lower_to_block_array};
 use cairn_lang_core::check::LineStarts;
+use cairn_lang_core::error::Span;
 use cairn_lang_core::lock::{
     HashHex, LockEdition, LockInputs, LockPlacement, LockTarget, LockWalkway, Lockfile,
     hash_resolved_ir, hash_source,
@@ -616,9 +617,7 @@ fn run_info(file: &Path, editions: &[String], format: InfoFormat) -> ExitCode {
             d.code.as_str(),
             d.primary,
         );
-        for note in &d.notes {
-            eprintln!("  note: {}", note.message);
-        }
+        report_notes(file, &source, &lines, &d.notes);
         if d.severity() == Severity::Error {
             has_error = true;
         }
@@ -835,9 +834,7 @@ fn run_lower(file: &Path, format: LowerFormat) -> ExitCode {
             d.code.as_str(),
             d.primary,
         );
-        for note in &d.notes {
-            eprintln!("  note: {}", note.message);
-        }
+        report_notes(file, &source, &lines, &d.notes);
         if d.severity() == Severity::Error {
             has_error = true;
         }
@@ -1256,14 +1253,7 @@ fn report_core_diagnostics(
             d.code.as_str(),
             d.primary,
         );
-        for note in &d.notes {
-            if let Some(span) = note.span.as_ref() {
-                let note_pos = lines.position(source, span.start);
-                eprintln!("{}:{}:   note: {}", file.display(), note_pos, note.message);
-            } else {
-                eprintln!("  note: {}", note.message);
-            }
-        }
+        report_notes(file, source, lines, &d.notes);
         if d.severity() == Severity::Error {
             has_error = true;
         }
@@ -1292,14 +1282,7 @@ fn report_synth_diagnostics(
             d.code.as_str(),
             d.primary,
         );
-        for note in &d.notes {
-            if let Some(span) = note.span.as_ref() {
-                let note_pos = lines.position(source, span.start);
-                eprintln!("{}:{}:   note: {}", file.display(), note_pos, note.message);
-            } else {
-                eprintln!("  note: {}", note.message);
-            }
-        }
+        report_notes(file, source, lines, &d.notes);
         if d.severity() == Severity::Error {
             has_error = true;
         }
@@ -1693,6 +1676,59 @@ fn enforce_version_floor(
     Err(ExitCode::from(1))
 }
 
+/// One `note:` line, independent of which crate's `DiagnosticNote` it came
+/// from.
+///
+/// The core and redstone note types are structurally identical and stay
+/// separate for the reason [`report_synth_diagnostics`] gives, so the
+/// renderer below asks for the two fields it prints rather than for either
+/// type.
+trait NoteLine {
+    fn note_span(&self) -> Option<&Span>;
+    fn note_message(&self) -> &str;
+}
+
+impl NoteLine for cairn_lang_core::check::DiagnosticNote {
+    fn note_span(&self) -> Option<&Span> {
+        self.span.as_ref()
+    }
+    fn note_message(&self) -> &str {
+        &self.message
+    }
+}
+
+impl NoteLine for cairn_lang_redstone::DiagnosticNote {
+    fn note_span(&self) -> Option<&Span> {
+        self.span.as_ref()
+    }
+    fn note_message(&self) -> &str {
+        &self.message
+    }
+}
+
+/// Print one finding's `note:` lines under its primary.
+///
+/// A note that carries a span is printed with that position, the way the
+/// primary is: it names a second place in the file the reader has to go
+/// look at, and "declared here" with no *here* is not a note. Shared
+/// rather than copied because five copies of this loop is how three of
+/// them came to drop the position while two kept it.
+fn report_notes(file: &Path, source: &str, lines: &LineStarts, notes: &[impl NoteLine]) {
+    for note in notes {
+        if let Some(span) = note.note_span() {
+            let pos = lines.position(source, span.start);
+            eprintln!(
+                "{}:{}:   note: {}",
+                file.display(),
+                pos,
+                note.note_message()
+            );
+        } else {
+            eprintln!("  note: {}", note.note_message());
+        }
+    }
+}
+
 fn report_lowering_diagnostics(file: &Path, source: &str, block_ir: &BlockArrayIr) -> bool {
     let lines = LineStarts::new(source);
     let mut has_error = false;
@@ -1706,9 +1742,7 @@ fn report_lowering_diagnostics(file: &Path, source: &str, block_ir: &BlockArrayI
             d.code.as_str(),
             d.primary,
         );
-        for note in &d.notes {
-            eprintln!("  note: {}", note.message);
-        }
+        report_notes(file, source, &lines, &d.notes);
         if d.severity() == Severity::Error {
             has_error = true;
         }

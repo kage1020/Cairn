@@ -41,6 +41,9 @@
 - *(redstone)* `cairn synth` はモジュールのスコープを「全 `struct` → 全 `def` → 全 `site`」では
   なくソース順に走査します。3 種類を混在させたモジュールでは、dump の `scopes[]` の並びも診断の
   並びも変わります。
+- *(cli)* `cairn lower` / `cairn info` / `cairn compile` は、note がソース中の別の位置を指す場合に
+  その note 自身の `file:line:col:` を前置するようになりました。`cairn check` と `cairn synth` は
+  既にそうしていました。行頭の `  note:` で note を拾っていたスクレイパは、それらの行を取り逃がします。
 
 ### 追加
 

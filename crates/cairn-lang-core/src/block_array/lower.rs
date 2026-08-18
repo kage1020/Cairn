@@ -15,13 +15,15 @@
 //! massing  (floor, walls)
 //!   → envelope (roof, stair)
 //!   → openings (door, window)
-//!   → fixtures, logic_*, raw
+//!   → fixtures (pressure_plate)
+//!   → logic_*, raw
 //! ```
 //!
-//! The current pass implements the first three (massing, envelope,
-//! openings). Members are bucketed by role and processed phase-by-phase;
-//! within a phase source order wins (the last-wins rule for local
-//! overrides). Roles outside the three implemented phases emit
+//! The current pass implements the first four. Members are bucketed by
+//! role and processed phase-by-phase; within a phase source order wins
+//! (the last-wins rule for local overrides), and two members of one phase
+//! contesting a voxel earn a `W_PHASE_CONFLICT` rather than settling it
+//! silently. Roles outside the four implemented phases emit
 //! `W_DEFERRED_MEMBER` and skip. `level y=N` blocks are flattened into
 //! their children before the volume is sized so a nested `walls` / `door`
 //! / `window` / `stair` / `pressure_plate` reaches both the dim math and
@@ -122,9 +124,9 @@ pub const BUILTIN_BLOCK_IDS: &[&str] = &[BlockState::AIR_ID, STAIR_BASE_ID, FLAT
 /// Pairs each struct with its [`ScopeResolution`] from `resolution` so the
 /// material lookups go through the same theme bindings `cairn check` and
 /// `cairn info` already used. Members are processed in phase order
-/// (massing → envelope → openings), so a `door` written before `walls` in
-/// the source still cuts an opening through the resulting wall. Roles
-/// outside the three implemented phases are reported via
+/// (massing → envelope → openings → fixtures), so a `door` written before
+/// `walls` in the source still cuts an opening through the resulting wall.
+/// Roles outside the four implemented phases are reported via
 /// `W_DEFERRED_MEMBER` and skipped.
 ///
 /// `registry` is the registry-pack-backed view of the compile's target.
@@ -2072,7 +2074,17 @@ impl Canvas {
         let previous = self.owners[i].replace(self.current);
         // A write that changes nothing is not a contest: two `walls`
         // members of one material meeting at a corner leave the same block
-        // whichever order they run in.
+        // whichever order they run in, and a `window` whose `repeat=` /
+        // `step=` stamps overlap covers its own cells with its own
+        // material.
+        //
+        // The member check is the other half of that and is unreachable
+        // from today's generators — none writes one cell to two different
+        // blocks, so a same-member pair never gets past the line above.
+        // It stays because the finding is a statement about two members:
+        // reported against itself it would read "`roof` overwrites 3
+        // voxels that `roof` painted", which is a generator emitting two
+        // faces onto one cell and not something an author can move.
         if before != after
             && let Some(prev) = previous
             && prev.phase == self.current.phase

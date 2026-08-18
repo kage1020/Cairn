@@ -204,3 +204,45 @@ fn lower_6_all_examples_exit_zero() {
         );
     }
 }
+
+#[test]
+fn lower_8_a_note_that_points_at_a_second_line_is_printed_with_its_position() {
+    // `W_PHASE_CONFLICT` names the member that was overwritten in a note,
+    // and a note saying "declared here" without a *here* sends the reader
+    // nowhere. Five copies of the note loop lived in this binary and three
+    // of them dropped `note.span`; they now share one renderer, so the
+    // location travels with every command's notes and not only with
+    // `check`'s.
+    let dir = TempDir::new().expect("tempdir");
+    let path = dir.path().join("conflict.crn");
+    fs::write(
+        &path,
+        concat!(
+            "theme t:\n",
+            "  slot wall -> @cobblestone\n",
+            "  slot glass -> @glass_pane\n",
+            "\n",
+            "struct t size=7x5\n",
+            "  walls mat_slot=wall height=3\n",
+            "  door side=front at=center\n",
+            "  window side=front y=1 offset=3 size=1x2 mat_slot=glass\n",
+        ),
+    )
+    .expect("write source");
+
+    let out = run_lower(&[path.to_str().unwrap()]);
+    assert!(
+        out.status.success(),
+        "a warning must not fail the lower, stderr={}",
+        String::from_utf8_lossy(&out.stderr),
+    );
+    let stderr = String::from_utf8(out.stderr).expect("utf-8");
+    assert!(
+        stderr.contains(":8:3: warning[W_PHASE_CONFLICT]"),
+        "the finding anchors at the `window` on line 8, got: {stderr}",
+    );
+    assert!(
+        stderr.contains(":7:3:   note: overwritten member declared here"),
+        "the note must carry the `door` line's position, got: {stderr}",
+    );
+}

@@ -209,14 +209,33 @@ fn a_door_cutting_through_walls_is_not_a_conflict() {
 
 #[test]
 fn one_member_covering_its_own_cell_twice_is_not_a_conflict() {
-    // `sym=true` stamps a mirrored pair from one member. The mirror of an
-    // odd-width wall's centre column lands on the primary, which the window
-    // lowering coalesces — and even before it does, one member contesting
-    // itself is not two lines fighting.
+    // `repeat=2 step=1` on a 2-wide window stamps columns `1..=2` and then
+    // `2..=3`, so column 2 is written twice by one member. `step=` is only
+    // checked against zero, so this is a shape the lowering accepts rather
+    // than one contrived past a guard. (A `sym=true` window would not do:
+    // its mirror is either disjoint or coalesced away, so it never writes
+    // one cell twice at all.)
     let out = lowered(&source(
-        "  window side=front y=1 offset=3 size=1x1 sym=true mat_slot=glass\n",
+        "  window side=front y=1 offset=1 size=2x1 repeat=2 step=1 mat_slot=glass\n",
     ));
     assert_eq!(conflicts(&out).len(), 0, "{:#?}", conflicts(&out));
+    // Guard: a `W_DEFERRED_MEMBER` here would mean the window never
+    // painted, and a test that passes because nothing happened pins
+    // nothing.
+    assert_eq!(
+        out.diagnostics.len(),
+        0,
+        "the overlapping stamps must lower cleanly: {:#?}",
+        out.diagnostics,
+    );
+    let ba = only_structure(&out);
+    let painted = (1..=3)
+        .filter(|x| {
+            let i = ba.dims.index(*x, 1, 4).expect("front wall cell");
+            ba.palette.entries[usize::from(ba.voxels[i].0)].id == "minecraft:glass_pane"
+        })
+        .count();
+    assert_eq!(painted, 3, "the two stamps cover columns 1..=3");
 }
 
 #[test]

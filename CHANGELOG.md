@@ -39,6 +39,10 @@ and is a separate axis from the Minecraft target version.
 - *(redstone)* `cairn synth` walks a module's scopes in source order rather than every `struct`,
   then every `def`, then every `site`. Both the order of `scopes[]` in a dump and the order of
   the findings change for any module that interleaves the three.
+- *(cli)* `cairn lower`, `cairn info`, and `cairn compile` print a note's own `file:line:col:`
+  prefix when the note points at a second place in the source, which is what `cairn check` and
+  `cairn synth` already did. A scraper matching notes on a leading `  note:` will not see those
+  lines any more.
 
 ## 2026.8.2 — 2026-08-01
 
