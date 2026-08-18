@@ -14,6 +14,29 @@
 
 ### 破壊的変更
 
+- *(redstone)* 1 つの信号が持つドライバは 1 つです。同じ `sig.X` に束ねられた 2 つのセンサは、
+  従来は先頭だけが残り 2 つ目が黙って捨てられていました (ブロックはビルドに残ったまま、電気的には
+  どこにも繋がらない状態)。これが `E_LOGIC_MULTIPLE_DRIVERS` で拒否されます。それぞれ別名に発して
+  `logic sig.a = sig.a1 or sig.a2` で合成してください。
+- *(redstone)* `E_LOGIC_MULTIPLE_DRIVERS` は、センサか `logic` 行かにかかわらず、*後に*
+  書かれた方を指します。センサより上に書かれた `logic` 行が報告されていましたが、これからは
+  下にあるセンサの方が指されます。
+- *(redstone)* `-> sig.X` の末尾はセンサ以外で、各アクチュエータキーは `spec/redstone` §14.2 が
+  対応づけたコンポーネント以外で拒否されます (`E_LOGIC_MISPLACED_BINDING`)。
+  `walls ... powered_by=sig.x` や `window ... -> sig.w` は従来そのままポートになっていました。
+  `lit_by=` / `powered_by=` / `fired_by=` は `lamp` / `piston` / `dispenser` がキーワードになるまで
+  正当なホストが存在しないため、どこに書かれても拒否されます。
+- *(redstone)* `sig.` 名前空間の外にある `logic` の左辺は `E_LOGIC_INVALID_SIGNAL` です。
+  `logic foo.bar = ...` は従来、誰も読めない信号のために実際のゲートを下ろし、配置座標を
+  占有していました。
+- *(redstone)* 値が `sig.` 参照でありながらキーがアクチュエータキーでない引数は
+  `E_LOGIC_UNKNOWN_BINDING_KEY` になり、`did you mean` の note が付きます。
+  `door[id=x] oepend_by=sig.y` は従来アクチュエータを消し、`W_LOGIC_UNUSED_SIGNAL` だけを
+  残していました。
+- *(redstone)* どのセンサも発さずどの `logic` 行も定義しない信号を名指しする `assert` は
+  `E_LOGIC_UNBOUND_SIGNAL` です。これを評価するシミュレータは未実装のままですが、存在しない名前に
+  対するプロパティはシミュレータを待っていたわけではありません。
+
 - *(redstone)* `PlacementIr::outputs` の型が `Vec<NetlistOutput>` から `Vec<PlacedOutputNode>`
   になりました。アクチュエータは配置される対象です。配置パスが割り当てたパッド座標と、セルと
   同じ `PlacementPhase` を持つため、routing / delay / crossing の各パスが同じ規則で埋めます。

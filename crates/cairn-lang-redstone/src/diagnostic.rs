@@ -152,6 +152,40 @@ pub enum DiagnosticCode {
     /// the same graph written that way lowers at any length, because each
     /// reference is already resolved when it is reached.
     LogicNestingTooDeep,
+    /// A member carries a signal binding its kind cannot host: a
+    /// `-> sig.X` sensor tail, or one of the actuator argument keys
+    /// `spec/redstone` §14.2 lists. §14.2 pairs each binding with the
+    /// component that carries it — `opened_by=` with `door`, `lit_by=`
+    /// with `lamp`, `powered_by=` with `piston`, `fired_by=` with
+    /// `dispenser`, and the sensor tail with a sensor — and the front end
+    /// used to read the argument's *value* only, so `walls powered_by=`
+    /// and `window -> sig.x` both became live ports on members with no
+    /// component behind them. Of §14.2's five hosts only `door` and
+    /// `pressure_plate` are keywords the surface accepts today, so the
+    /// three remaining actuator keys have no legal host at all yet. Fix:
+    /// move the binding onto the component that carries it.
+    LogicMisplacedBinding,
+    /// A `logic` line's left-hand side is not a `sig.`-headed name.
+    /// Sensors emit into the `sig.` namespace and actuators consume from
+    /// it, so a binding whose LHS sits outside it defines something
+    /// nothing can ever read — and it was lowered anyway, so a cell took
+    /// a placement coordinate for a signal with no consumer. Fix: name
+    /// the signal `sig.<name>`.
+    LogicInvalidSignal,
+    /// An argument whose value is a `sig.`-headed reference sits under a
+    /// key that is not one of §14.2's actuator keys. The value says the
+    /// author meant to wire a signal; the key means nothing reads it, so
+    /// the actuator silently disappears and only the now-unconsumed
+    /// signal is mentioned. A typo (`oepend_by=`) gets a `did you mean`
+    /// note; a key from another vocabulary entirely gets the list. Fix:
+    /// correct the key, or drop the argument if the member is not an
+    /// actuator.
+    ///
+    /// Deliberately keyed on the value rather than on a per-keyword
+    /// argument schema — no such schema exists yet, and this closes the
+    /// silent-actuator class without one, because no legal non-actuator
+    /// argument takes a `sig.` value.
+    LogicUnknownBindingKey,
 }
 
 impl DiagnosticCode {
@@ -172,6 +206,9 @@ impl DiagnosticCode {
             Self::CrossingCongestion => "E_CROSSING_CONGESTION",
             Self::BufferCoordCollision => "E_BUFFER_COORD_COLLISION",
             Self::LogicNestingTooDeep => "E_LOGIC_NESTING_TOO_DEEP",
+            Self::LogicMisplacedBinding => "E_LOGIC_MISPLACED_BINDING",
+            Self::LogicInvalidSignal => "E_LOGIC_INVALID_SIGNAL",
+            Self::LogicUnknownBindingKey => "E_LOGIC_UNKNOWN_BINDING_KEY",
         }
     }
 
@@ -189,7 +226,10 @@ impl DiagnosticCode {
             | Self::AttenuationLimit
             | Self::CrossingCongestion
             | Self::BufferCoordCollision
-            | Self::LogicNestingTooDeep => Severity::Error,
+            | Self::LogicNestingTooDeep
+            | Self::LogicMisplacedBinding
+            | Self::LogicInvalidSignal
+            | Self::LogicUnknownBindingKey => Severity::Error,
             Self::LogicUnusedSignal => Severity::Warning,
         }
     }

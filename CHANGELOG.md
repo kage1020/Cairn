@@ -12,6 +12,28 @@ and is a separate axis from the Minecraft target version.
 
 ### Breaking changes
 
+- *(redstone)* A signal carries one driver. Two sensors bound to the same `sig.X` used to keep
+  the first and drop the second in silence — the block stayed in the build, wired to nothing —
+  and now refuse with `E_LOGIC_MULTIPLE_DRIVERS`. Write the two into names of their own and
+  combine them with `logic sig.a = sig.a1 or sig.a2`.
+- *(redstone)* `E_LOGIC_MULTIPLE_DRIVERS` anchors at whichever driver is written *later*,
+  whether it is a sensor or a `logic` line. A `logic` line above the sensor it collides with used
+  to be the line reported; now the sensor below it is.
+- *(redstone)* A `-> sig.X` tail is refused on anything but a sensor, and each actuator key on
+  anything but the component `spec/redstone` §14.2 pairs it with, as `E_LOGIC_MISPLACED_BINDING`.
+  `walls ... powered_by=sig.x` and `window ... -> sig.w` used to become live ports. `lit_by=`,
+  `powered_by=`, and `fired_by=` have no legal host until `lamp` / `piston` / `dispenser` become
+  keywords, so they are refused wherever they are written.
+- *(redstone)* A `logic` left-hand side outside the `sig.` namespace is
+  `E_LOGIC_INVALID_SIGNAL`. `logic foo.bar = ...` used to lower a real gate that took a placement
+  coordinate for a signal nothing could read.
+- *(redstone)* An argument whose value is a `sig.` reference under a key that is not an actuator
+  key is `E_LOGIC_UNKNOWN_BINDING_KEY`, with a `did you mean` note. `door[id=x] oepend_by=sig.y`
+  used to make the actuator vanish with only a `W_LOGIC_UNUSED_SIGNAL` left behind.
+- *(redstone)* An `assert` naming a signal no sensor emits and no `logic` line defines is
+  `E_LOGIC_UNBOUND_SIGNAL`. The simulator that evaluates these is still unbuilt; a property over a
+  name that does not exist was never waiting on it.
+
 - *(redstone)* `PlacementIr::outputs` is now `Vec<PlacedOutputNode>` rather than
   `Vec<NetlistOutput>`. An actuator is a placed object: it carries the pad coordinate the
   placement pass assigned and the same `PlacementPhase` a cell does, so the routing, delay,

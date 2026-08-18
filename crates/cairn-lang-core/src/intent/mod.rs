@@ -219,6 +219,28 @@ impl AssertIr {
             Self::Truth { span, .. } | Self::Always { span, .. } => span,
         }
     }
+
+    /// Every signal this property names, in declaration order.
+    ///
+    /// Lives here rather than at the consumer because the enum is
+    /// `#[non_exhaustive]`: a match written in another crate needs a
+    /// wildcard, and a wildcard is where a variant added later would go to
+    /// have its references silently unchecked. Written here the match is
+    /// exhaustive, so the next variant stops the compile until it says
+    /// which of its fields are signals.
+    #[must_use]
+    pub fn signal_refs(&self) -> Vec<&DottedRef> {
+        match self {
+            Self::Truth { inputs, output, .. } => {
+                inputs.iter().chain(std::iter::once(output)).collect()
+            }
+            Self::Always {
+                antecedent,
+                consequent,
+                ..
+            } => vec![antecedent, consequent],
+        }
+    }
 }
 
 /// Which family of Intent IR scope a downstream pass is describing.
