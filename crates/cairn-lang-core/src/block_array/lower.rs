@@ -16,15 +16,19 @@
 //!   → envelope (roof, stair)
 //!   → openings (door, window)
 //!   → fixtures (pressure_plate)
-//!   → logic_*, raw
 //! ```
 //!
-//! The current pass implements the first four. Members are bucketed by
-//! role and processed phase-by-phase; within a phase source order wins
-//! (the last-wins rule for local overrides), and two members of one phase
-//! contesting a voxel earn a `W_PHASE_CONFLICT` rather than settling it
-//! silently. Roles outside the four implemented phases emit
-//! `W_DEFERRED_MEMBER` and skip. `level y=N` blocks are flattened into
+//! The current pass implements those four. §4.1 continues with the three
+//! redstone phases, which `cairn-lang-redstone` owns, and closes with
+//! `raw` — not a keyword the surface accepts yet, so a `raw` line is
+//! `E_UNKNOWN_KEYWORD` from the allowlist pass rather than a phase this
+//! one is missing.
+//!
+//! Members are bucketed by role and processed phase-by-phase; within a
+//! phase source order wins (the last-wins rule for local overrides), and
+//! two members of one phase contesting a voxel earn a
+//! `W_PHASE_CONFLICT` rather than settling it silently. Roles outside the
+//! four implemented phases emit `W_DEFERRED_MEMBER` and skip. `level y=N` blocks are flattened into
 //! their children before the volume is sized so a nested `walls` / `door`
 //! / `window` / `stair` / `pressure_plate` reaches both the dim math and
 //! its phase with the level's `y=` applied as an authored offset. That one
@@ -1070,7 +1074,6 @@ fn lower_body_to_block_array<'a>(
         return None;
     }
     let mut palette = Palette::new_with_air();
-    let mut canvas = Canvas::new(dims);
 
     let ctx = StructCtx {
         scope,
@@ -1088,10 +1091,11 @@ fn lower_body_to_block_array<'a>(
         envelope,
         openings,
         fixtures,
+        phases,
     } = bucket_members(&flattened, diagnostics);
+    let mut canvas = Canvas::new(dims, phases);
 
     run_phase(
-        Phase::Massing,
         massing,
         lower_massing_member,
         &ctx,
@@ -1100,7 +1104,6 @@ fn lower_body_to_block_array<'a>(
         diagnostics,
     );
     run_phase(
-        Phase::Envelope,
         envelope,
         lower_envelope_member,
         &ctx,
@@ -1109,7 +1112,6 @@ fn lower_body_to_block_array<'a>(
         diagnostics,
     );
     run_phase(
-        Phase::Openings,
         openings,
         lower_opening_member,
         &ctx,
@@ -1118,7 +1120,6 @@ fn lower_body_to_block_array<'a>(
         diagnostics,
     );
     run_phase(
-        Phase::Fixtures,
         fixtures,
         lower_fixture_member,
         &ctx,
@@ -1129,12 +1130,18 @@ fn lower_body_to_block_array<'a>(
 
     for ((overridden, overriding), voxels) in &canvas.conflicts {
         diagnostics.push(diag_phase_conflict(
-            flattened[*overridden].1,
-            flattened[*overriding].1,
+            flattened[*overridden as usize].1,
+            flattened[*overriding as usize].1,
             *voxels,
         ));
     }
-    let voxels = prune_unreferenced(&mut palette, &canvas);
+    let (voxels, never_painted) = prune_unreferenced(&mut palette, &canvas);
+    debug_assert!(
+        never_painted.is_empty(),
+        "palette slots {never_painted:?} of `{}` were claimed but no voxel was ever painted \
+         with one; a generator is interning a material for geometry it does not emit",
+        body.scope_label,
+    );
 
     Some(BlockArray {
         dims,
@@ -1149,10 +1156,14 @@ fn lower_body_to_block_array<'a>(
 /// The paint set filed by phase, each entry keeping its position in the
 /// flattened list so the canvas can name it in a finding.
 struct PhaseBuckets<'a> {
-    massing: Vec<(usize, u32, &'a Member)>,
-    envelope: Vec<(usize, u32, &'a Member)>,
-    openings: Vec<(usize, u32, &'a Member)>,
-    fixtures: Vec<(usize, u32, &'a Member)>,
+    massing: Vec<(u32, u32, &'a Member)>,
+    envelope: Vec<(u32, u32, &'a Member)>,
+    openings: Vec<(u32, u32, &'a Member)>,
+    fixtures: Vec<(u32, u32, &'a Member)>,
+    /// One entry per member of the flattened list, in the same order:
+    /// which phase evaluates it, or `None` when none does. Handed to the
+    /// [`Canvas`] so a voxel can carry its writer's index alone.
+    phases: Vec<Option<Phase>>,
 }
 
 /// File every member of the paint set under the phase §4.1 evaluates it in,
@@ -1170,8 +1181,14 @@ fn bucket_members<'a>(
         envelope: Vec::new(),
         openings: Vec::new(),
         fixtures: Vec::new(),
+        phases: Vec::with_capacity(flattened.len()),
     };
     for (index, &(y_offset, member)) in flattened.iter().enumerate() {
+        // `u32` because that is what a voxel stores. A paint set longer
+        // than `u32::MAX` would need a source of `level` blocks measured
+        // in gigabytes, and the volume such a body asks for is refused by
+        // `MAX_STRUCTURE_VOLUME` long before this point.
+        let index = u32::try_from(index).expect("the paint set is far shorter than u32::MAX");
         // Actuator patches (`door[id=X] opened_by=sig.Y`) are metadata
         // overlays on an already-declared physical door — they carry
         // neither `side=` nor `at=` and must not enter the openings
@@ -1181,52 +1198,68 @@ fn bucket_members<'a>(
         // redstone lowering pipeline (spec/redstone.md §14.2).
         if is_actuator_patch(member) {
             recognize_actuator_patch(member, flattened, diagnostics);
+            buckets.phases.push(None);
             continue;
         }
-        match member_phase(&member.role) {
-            Some(Phase::Massing) => buckets.massing.push((index, y_offset, member)),
-            Some(Phase::Envelope) => buckets.envelope.push((index, y_offset, member)),
-            Some(Phase::Openings) => buckets.openings.push((index, y_offset, member)),
-            Some(Phase::Fixtures) => buckets.fixtures.push((index, y_offset, member)),
-            None => match &member.role {
-                // `circuit region=<label> void=<N>` reserves a routing
-                // region for the future `logic_synth → logic_place →
-                // logic_route` passes (spec/redstone.md §14.5 / §14.8).
-                // Nothing lands in the block array from this member; the
-                // recognizer only checks the surface shape so a valid
-                // fixture stays quiet while a malformed one still
-                // surfaces a targeted `W_DEFERRED_MEMBER`.
-                MemberRole::Circuit => recognize_circuit_region(member, diagnostics),
-                _ => diagnostics.push(diag_deferred_member(member)),
-            },
+        let disposition = member_disposition(&member.role);
+        buckets.phases.push(match disposition {
+            MemberDisposition::Paints(phase) => Some(phase),
+            MemberDisposition::Reserves | MemberDisposition::NotLowered => None,
+        });
+        match disposition {
+            MemberDisposition::Paints(Phase::Massing) => {
+                buckets.massing.push((index, y_offset, member));
+            }
+            MemberDisposition::Paints(Phase::Envelope) => {
+                buckets.envelope.push((index, y_offset, member));
+            }
+            MemberDisposition::Paints(Phase::Openings) => {
+                buckets.openings.push((index, y_offset, member));
+            }
+            MemberDisposition::Paints(Phase::Fixtures) => {
+                buckets.fixtures.push((index, y_offset, member));
+            }
+            // `circuit region=<label> void=<N>` reserves a routing region
+            // for the future `logic_synth → logic_place → logic_route`
+            // passes (spec/redstone.md §14.5 / §14.8). Nothing lands in
+            // the block array from this member; the recognizer only checks
+            // the surface shape so a valid fixture stays quiet while a
+            // malformed one still surfaces a targeted `W_DEFERRED_MEMBER`.
+            MemberDisposition::Reserves => recognize_circuit_region(member, diagnostics),
+            MemberDisposition::NotLowered => diagnostics.push(diag_deferred_member(member)),
         }
     }
     buckets
 }
 
-/// Lower one phase's bucket, naming the member each write belongs to
-/// before the generator that makes it runs.
-///
-/// The four buckets differ only in which phase they are and which
-/// `lower_*_member` reads them, and the one thing they must not differ in
-/// is setting [`Canvas::current`] — a bucket that forgot would file its
-/// writes under the previous member and report a conflict against it. One
-/// caller for all four is what keeps that from being a per-bucket habit.
+/// Lower one phase's bucket, opening a [`MemberCanvas`] per member so
+/// every write it makes is filed under it. A bucket cannot forget: the
+/// borrow is the only route to a write, and it closes with the member.
 fn run_phase(
-    phase: Phase,
-    bucket: Vec<(usize, u32, &Member)>,
-    lower: fn(&Member, u32, &StructCtx<'_>, &mut Palette, &mut Canvas, &mut Vec<Diagnostic>),
+    bucket: Vec<(u32, u32, &Member)>,
+    lower: fn(
+        &Member,
+        u32,
+        &StructCtx<'_>,
+        &mut Palette,
+        &mut MemberCanvas<'_>,
+        &mut Vec<Diagnostic>,
+    ),
     ctx: &StructCtx<'_>,
     palette: &mut Palette,
     canvas: &mut Canvas,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     for (index, y_offset, member) in bucket {
-        canvas.current = VoxelOwner {
-            phase,
-            member: index,
-        };
-        lower(member, y_offset, ctx, palette, canvas, diagnostics);
+        let mut member_canvas = canvas.for_member(index);
+        lower(
+            member,
+            y_offset,
+            ctx,
+            palette,
+            &mut member_canvas,
+            diagnostics,
+        );
     }
 }
 
@@ -1256,10 +1289,16 @@ fn diag_phase_conflict(overridden: &Member, overriding: &Member, voxels: u32) ->
             },
             DiagnosticNote {
                 span: None,
-                message: "Fix: move one of the two so their footprints do not meet. \
-                          Members in different phases may overlap freely — a `door` cut \
-                          through a `walls` is the evaluation model working — but inside \
-                          one phase nothing but the line order separates them."
+                message: "If the override is deliberate this is §4.1's local-override \
+                          rule and the later line wins as written. If it is not, move \
+                          one of the two so their footprints do not meet."
+                    .to_owned(),
+            },
+            DiagnosticNote {
+                span: None,
+                message: "Members in different phases may overlap freely — a `door` cut \
+                          through a `walls` is the evaluation model working — so this is \
+                          only reported for two members the same phase evaluates."
                     .to_owned(),
             },
         ],
@@ -1267,39 +1306,43 @@ fn diag_phase_conflict(overridden: &Member, overriding: &Member, voxels: u32) ->
     }
 }
 
-/// Drop palette slots the finished grid does not name, and remap the voxels
+/// Drop the palette slots a later phase covered, and remap the voxels
 /// onto the survivors.
 ///
-/// A member may paint a cell a later phase then covers — a `window` set into
-/// a `walls` ring takes those cells for good — and when a member's last cell
-/// goes its material is left in the palette describing a block the structure
-/// does not contain. That entry is not free: the Java writer emits it into
-/// the `.nbt`, `cairn info` reports a portability row for it, and
-/// `resolved_ir_hash` covers it, so two sources that differ only in which
-/// member lost would hash apart.
+/// A member may paint a cell a later phase then covers — a `window` set
+/// into a `walls` ring takes those cells for good — and when a member's
+/// last cell goes, its material is left in the palette describing a block
+/// the structure does not contain. That entry is not free: the Java writer
+/// emits it into the `.nbt`, `cairn info` reports a portability row for
+/// it, and `resolved_ir_hash` covers it, so two sources that differ only
+/// in which member lost would hash apart.
 ///
 /// Slot 0 stays whatever happens: [`Palette::new_with_air`] puts air there
 /// before any member runs, and a fully paved volume names it nowhere.
 ///
-/// A slot that was never painted at all is the other thing entirely — a
-/// generator claiming a material for geometry it does not emit — and that
-/// keeps failing loud instead of being tidied away here.
-fn prune_unreferenced(palette: &mut Palette, canvas: &Canvas) -> Vec<PaletteIndex> {
+/// A slot that was **never painted at all** is the other thing entirely —
+/// a generator interning a material for geometry it does not emit — and it
+/// is left in the palette rather than swept out here. Dropping it would
+/// delete the only evidence a released build carries: the entry reaches
+/// the artifact, `cairn info` counts it, and `tests/palette_is_referenced`
+/// fails on it, which is the whole watch on that bug class. The slots are
+/// returned instead so the caller can assert on them in a debug build,
+/// where failing a test beats shipping a quieter compiler.
+fn prune_unreferenced(palette: &mut Palette, canvas: &Canvas) -> (Vec<PaletteIndex>, Vec<usize>) {
     let mut referenced = vec![false; palette.entries.len()];
     for v in &canvas.voxels {
         referenced[usize::from(v.0)] = true;
     }
     let mut remap: Vec<PaletteIndex> = vec![PaletteIndex::AIR; palette.entries.len()];
     let mut kept = Vec::with_capacity(palette.entries.len());
+    let mut never_painted = Vec::new();
     for (slot, state) in palette.entries.drain(..).enumerate() {
+        let painted = canvas.painted.get(slot).copied().unwrap_or(false);
         if slot != 0 && !referenced[slot] {
-            debug_assert!(
-                canvas.painted.get(slot).copied().unwrap_or(false),
-                "palette slot {slot} ({}) was claimed but no voxel was ever painted with it; \
-                 a generator is interning a material for geometry it does not emit",
-                state.id,
-            );
-            continue;
+            if painted {
+                continue;
+            }
+            never_painted.push(slot);
         }
         remap[slot] = PaletteIndex(
             u16::try_from(kept.len()).expect("the kept palette is no longer than the original"),
@@ -1307,11 +1350,12 @@ fn prune_unreferenced(palette: &mut Palette, canvas: &Canvas) -> Vec<PaletteInde
         kept.push(state);
     }
     palette.entries = kept;
-    canvas
+    let voxels = canvas
         .voxels
         .iter()
         .map(|v| remap[usize::from(v.0)])
-        .collect()
+        .collect();
+    (voxels, never_painted)
 }
 
 /// The scope asked for more voxels than [`MAX_STRUCTURE_VOLUME`] allows.
@@ -1422,7 +1466,25 @@ enum Phase {
     Fixtures,
 }
 
-/// The phase a member is evaluated in, per `spec/compilation.md` §4.1.
+/// What the phase model does with a member.
+///
+/// Three answers rather than `Option<Phase>`, because "no phase" covered
+/// three different facts and the caller had to take them apart again
+/// behind a catch-all arm — which is the arm a role added later falls
+/// into by accident.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MemberDisposition {
+    /// Evaluated in this phase, and paints voxels there.
+    Paints(Phase),
+    /// Reserves something a later pass reads, and paints nothing. Its
+    /// surface shape is still checked, so a malformed one is reported.
+    Reserves,
+    /// Nothing in this pass lowers it, and it earns a
+    /// `W_DEFERRED_MEMBER` saying so.
+    NotLowered,
+}
+
+/// Where a member's role puts it, per `spec/compilation.md` §4.1.
 ///
 /// The spec's order is `massing (shell: floor/walls/volume) → envelope
 /// (roof/exterior) → openings (door/window) → fixtures (furnishings:
@@ -1437,22 +1499,26 @@ enum Phase {
 /// - `pressure_plate` is a sensor, so it is a fixture. Sharing the openings
 ///   bucket with `window` meant a contested cell went to whichever line came
 ///   last, which is the order accident §4.1 opens by promising away.
-/// - `circuit` reserves a routing region and paints nothing; `place` and
-///   `connect` belong to a site body; `Other` is an unknown keyword. None of
-///   them has a phase because none of them writes a voxel.
-fn member_phase(role: &MemberRole) -> Option<Phase> {
+/// - `circuit` reserves a routing region for the redstone phases and
+///   writes no voxel.
+/// - `place` and `connect` belong to a site body, which this pass does not
+///   lower; `Other` is a keyword the role table does not know, which
+///   includes §4.1's `raw` — not yet a keyword at all, so it is reported
+///   as unknown by the allowlist pass on top of the deferral here.
+fn member_disposition(role: &MemberRole) -> MemberDisposition {
     match role {
-        MemberRole::Floor | MemberRole::Walls => Some(Phase::Massing),
-        MemberRole::Roof | MemberRole::Stair => Some(Phase::Envelope),
-        MemberRole::Door | MemberRole::Window => Some(Phase::Openings),
-        MemberRole::PressurePlate => Some(Phase::Fixtures),
-        // `Level` is consumed by `flatten_members` and never reaches
-        // this function; the arm is exhaustive for the enum but omits
-        // `Level` on purpose so a future call site that forgets to
-        // flatten first fails the compile.
-        MemberRole::Circuit | MemberRole::Place | MemberRole::Connect | MemberRole::Other(_) => {
-            None
+        MemberRole::Floor | MemberRole::Walls => MemberDisposition::Paints(Phase::Massing),
+        MemberRole::Roof | MemberRole::Stair => MemberDisposition::Paints(Phase::Envelope),
+        MemberRole::Door | MemberRole::Window => MemberDisposition::Paints(Phase::Openings),
+        MemberRole::PressurePlate => MemberDisposition::Paints(Phase::Fixtures),
+        MemberRole::Circuit => MemberDisposition::Reserves,
+        MemberRole::Place | MemberRole::Connect | MemberRole::Other(_) => {
+            MemberDisposition::NotLowered
         }
+        // Spelled out rather than folded into the arm above so that a
+        // `Level` reaching here is a loud bug and not a deferral: it means
+        // a caller skipped `flatten_members`, and the members it was
+        // grouping would go missing without a word.
         MemberRole::Level => unreachable!(
             "`Level` members must be flattened before phase-bucketing (see `flatten_members`)"
         ),
@@ -1587,7 +1653,7 @@ fn lower_massing_member(
     y_offset: u32,
     ctx: &StructCtx<'_>,
     palette: &mut Palette,
-    canvas: &mut Canvas,
+    canvas: &mut MemberCanvas<'_>,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     match &member.role {
@@ -1622,7 +1688,27 @@ fn lower_massing_member(
             };
             fill_walls(ctx, height, y_offset, idx, canvas);
         }
-        _ => unreachable!("massing phase only contains floor/walls"),
+        // Spelled out rather than left to a wildcard: `member_disposition`
+        // is the one place that decides which bucket a role lands in, and a
+        // role added there has to fail the compile here rather than reach a
+        // user's source and panic. The `Level` arm is the same rule the
+        // disposition table applies — flattening happens first, so one
+        // arriving means a caller skipped it.
+        MemberRole::Roof
+        | MemberRole::Stair
+        | MemberRole::Door
+        | MemberRole::Window
+        | MemberRole::PressurePlate
+        | MemberRole::Level
+        | MemberRole::Circuit
+        | MemberRole::Place
+        | MemberRole::Connect
+        | MemberRole::Other(_) => {
+            unreachable!(
+                "the massing bucket holds no `{}`",
+                MemberRole::keyword(&member.role)
+            )
+        }
     }
 }
 
@@ -1631,7 +1717,7 @@ fn lower_envelope_member(
     y_offset: u32,
     ctx: &StructCtx<'_>,
     palette: &mut Palette,
-    canvas: &mut Canvas,
+    canvas: &mut MemberCanvas<'_>,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     match &member.role {
@@ -1639,7 +1725,27 @@ fn lower_envelope_member(
         // `roof` at a non-zero offset before it reaches a phase.
         MemberRole::Roof => fill_roof(member, ctx, palette, canvas, diagnostics),
         MemberRole::Stair => fill_stair(member, y_offset, ctx, palette, canvas, diagnostics),
-        _ => unreachable!("envelope phase only contains roof/stair"),
+        // Spelled out rather than left to a wildcard: `member_disposition`
+        // is the one place that decides which bucket a role lands in, and a
+        // role added there has to fail the compile here rather than reach a
+        // user's source and panic. The `Level` arm is the same rule the
+        // disposition table applies — flattening happens first, so one
+        // arriving means a caller skipped it.
+        MemberRole::Floor
+        | MemberRole::Walls
+        | MemberRole::Door
+        | MemberRole::Window
+        | MemberRole::PressurePlate
+        | MemberRole::Level
+        | MemberRole::Circuit
+        | MemberRole::Place
+        | MemberRole::Connect
+        | MemberRole::Other(_) => {
+            unreachable!(
+                "the envelope bucket holds no `{}`",
+                MemberRole::keyword(&member.role)
+            )
+        }
     }
 }
 
@@ -1648,13 +1754,33 @@ fn lower_opening_member(
     y_offset: u32,
     ctx: &StructCtx<'_>,
     palette: &mut Palette,
-    canvas: &mut Canvas,
+    canvas: &mut MemberCanvas<'_>,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     match &member.role {
         MemberRole::Door => carve_door(member, y_offset, ctx, canvas, diagnostics),
         MemberRole::Window => fill_window(member, y_offset, ctx, palette, canvas, diagnostics),
-        _ => unreachable!("openings phase only contains door/window"),
+        // Spelled out rather than left to a wildcard: `member_disposition`
+        // is the one place that decides which bucket a role lands in, and a
+        // role added there has to fail the compile here rather than reach a
+        // user's source and panic. The `Level` arm is the same rule the
+        // disposition table applies — flattening happens first, so one
+        // arriving means a caller skipped it.
+        MemberRole::Floor
+        | MemberRole::Walls
+        | MemberRole::Roof
+        | MemberRole::Stair
+        | MemberRole::PressurePlate
+        | MemberRole::Level
+        | MemberRole::Circuit
+        | MemberRole::Place
+        | MemberRole::Connect
+        | MemberRole::Other(_) => {
+            unreachable!(
+                "the openings bucket holds no `{}`",
+                MemberRole::keyword(&member.role)
+            )
+        }
     }
 }
 
@@ -1663,14 +1789,35 @@ fn lower_fixture_member(
     y_offset: u32,
     ctx: &StructCtx<'_>,
     palette: &mut Palette,
-    canvas: &mut Canvas,
+    canvas: &mut MemberCanvas<'_>,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     match &member.role {
         MemberRole::PressurePlate => {
             fill_pressure_plate(member, y_offset, ctx, palette, canvas, diagnostics);
         }
-        _ => unreachable!("fixtures phase only contains pressure_plate"),
+        // Spelled out rather than left to a wildcard: `member_disposition`
+        // is the one place that decides which bucket a role lands in, and a
+        // role added there has to fail the compile here rather than reach a
+        // user's source and panic. The `Level` arm is the same rule the
+        // disposition table applies — flattening happens first, so one
+        // arriving means a caller skipped it.
+        MemberRole::Floor
+        | MemberRole::Walls
+        | MemberRole::Roof
+        | MemberRole::Stair
+        | MemberRole::Door
+        | MemberRole::Window
+        | MemberRole::Level
+        | MemberRole::Circuit
+        | MemberRole::Place
+        | MemberRole::Connect
+        | MemberRole::Other(_) => {
+            unreachable!(
+                "the fixtures bucket holds no `{}`",
+                MemberRole::keyword(&member.role)
+            )
+        }
     }
 }
 
@@ -1962,22 +2109,6 @@ fn size_value(member: &Member, key: &str) -> Option<(u32, u32)> {
     }
 }
 
-/// Which member last wrote a voxel, and in which phase.
-///
-/// The phase is carried alongside the member rather than looked up from it
-/// because that is the whole question [`Canvas::paint`] asks: a later phase
-/// overwriting an earlier one is the evaluation model working (§4.1's
-/// "order accidents are eliminated"), and two members of one phase doing
-/// it is source order deciding the build.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct VoxelOwner {
-    phase: Phase,
-    /// Position in the flattened paint list — see [`flatten_members`].
-    /// An index rather than a borrow so the canvas does not tie its
-    /// lifetime to the member list it is being painted from.
-    member: usize,
-}
-
 /// The voxel grid under construction, plus the two things the phase model
 /// needs to know about the writes that built it.
 ///
@@ -1996,43 +2127,94 @@ struct VoxelOwner {
 /// mistake: a generator claiming a material for geometry it never emits is
 /// a bug in the generator, while a member painting a cell a later phase
 /// then covers is the layering doing its job. [`prune_unreferenced`] drops
-/// the second and asserts on the first, which is why the flag is kept at
-/// all rather than deriving everything from the finished grid.
+/// the second and leaves the first where the artifact still shows it,
+/// which is why the flag is kept at all rather than deriving everything
+/// from the finished grid.
+///
+/// Nothing paints through a `Canvas` directly: [`Self::for_member`] hands
+/// out a [`MemberCanvas`], and that is the only type with a write on it.
 struct Canvas {
     dims: Dims,
     voxels: Vec<PaletteIndex>,
-    owners: Vec<Option<VoxelOwner>>,
+    /// Per voxel: `0` while nothing has written it, and `n + 1` once the
+    /// member at index `n` of the flattened paint list has.
+    ///
+    /// One `u32` rather than the `(phase, index)` pair this began as. The
+    /// pair is 16 bytes at align 8, which over a volume at the
+    /// [`MAX_STRUCTURE_VOLUME`] cap is 256 MB of bookkeeping against
+    /// 32 MB of voxels — a cap chosen against the grid alone would no
+    /// longer mean what it was set to mean. The phase comes from
+    /// [`Self::phases`] instead, which is one entry per member rather
+    /// than one per cell.
+    owners: Vec<u32>,
+    /// Phase of each member of the flattened paint list, by that member's
+    /// index. `None` for the members no phase evaluates — they never
+    /// paint, so the entry exists only to keep the indices aligned.
+    phases: Vec<Option<Phase>>,
     /// Indexed by palette slot: `true` once a write has named that slot.
     painted: Vec<bool>,
-    /// The member the phase loops are currently lowering. Set once per
-    /// member, so a generator cannot forget to.
-    current: VoxelOwner,
     /// `(overridden, overriding)` member pairs to the number of voxels the
     /// second took from the first. Insertion-ordered so the diagnostics
     /// come out in the order the phases discovered them, then sorted by
     /// span with the rest of the pass's findings.
-    conflicts: IndexMap<(usize, usize), u32>,
+    conflicts: IndexMap<(u32, u32), u32>,
 }
 
 impl Canvas {
-    fn new(dims: Dims) -> Self {
+    fn new(dims: Dims, phases: Vec<Option<Phase>>) -> Self {
         Self {
             dims,
             voxels: vec![PaletteIndex::AIR; dims.volume()],
-            owners: vec![None; dims.volume()],
+            owners: vec![0; dims.volume()],
+            phases,
             painted: vec![false; 1],
-            // Overwritten before the first generator runs; the phase loops
-            // assign it per member. Air is nobody's material, so a stray
-            // write before the first assignment would show up as a
-            // conflict against member 0 rather than pass unnoticed.
-            current: VoxelOwner {
-                phase: Phase::Massing,
-                member: usize::MAX,
-            },
             conflicts: IndexMap::new(),
         }
     }
 
+    /// Borrow the canvas as the member at `index` of the flattened paint
+    /// list sees it.
+    ///
+    /// The only way to reach a write. A generator cannot paint without a
+    /// member to file the write under, and cannot file it under the wrong
+    /// one by forgetting to update a field: [`run_phase`] opens the scope
+    /// once per member and the borrow closes it.
+    fn for_member(&mut self, index: u32) -> MemberCanvas<'_> {
+        debug_assert!(
+            (index as usize) < self.phases.len(),
+            "member {index} is not in the flattened paint list this canvas was built for",
+        );
+        MemberCanvas {
+            canvas: self,
+            member: index,
+        }
+    }
+
+    /// Whether two members of the flattened paint list are evaluated in
+    /// one phase.
+    ///
+    /// A member with no phase never paints, so a `None` on either side
+    /// describes a write that could not have happened; it answers `false`
+    /// rather than letting two of them match each other.
+    fn same_phase(&self, a: u32, b: u32) -> bool {
+        matches!(
+            (
+                self.phases.get(a as usize).copied().flatten(),
+                self.phases.get(b as usize).copied().flatten(),
+            ),
+            (Some(x), Some(y)) if x == y
+        )
+    }
+}
+
+/// The canvas as one member sees it: the same grid, with every write
+/// already attributed.
+struct MemberCanvas<'a> {
+    canvas: &'a mut Canvas,
+    member: u32,
+}
+
+impl MemberCanvas<'_> {
     /// Paint one voxel, claiming its palette slot only once the cell is
     /// known to exist.
     ///
@@ -2049,7 +2231,7 @@ impl Canvas {
             debug_assert!(
                 false,
                 "voxel {pos:?} lies outside {:?}; the dim math and the generator disagree",
-                self.dims,
+                self.canvas.dims,
             );
         }
     }
@@ -2060,24 +2242,28 @@ impl Canvas {
     /// Answers whether the cell existed; `claim` runs only when it did,
     /// which is what keeps the palette free of entries no voxel names.
     fn try_paint(&mut self, pos: (u32, u32, u32), claim: impl FnOnce() -> PaletteIndex) -> bool {
-        let Some(i) = self.dims.index(pos.0, pos.1, pos.2) else {
+        let member = self.member;
+        let canvas = &mut *self.canvas;
+        let Some(i) = canvas.dims.index(pos.0, pos.1, pos.2) else {
             return false;
         };
         let after = claim();
         let slot = usize::from(after.0);
-        if self.painted.len() <= slot {
-            self.painted.resize(slot + 1, false);
+        if canvas.painted.len() <= slot {
+            canvas.painted.resize(slot + 1, false);
         }
-        self.painted[slot] = true;
-        let before = self.voxels[i];
-        self.voxels[i] = after;
-        let previous = self.owners[i].replace(self.current);
+        canvas.painted[slot] = true;
+        let before = canvas.voxels[i];
+        canvas.voxels[i] = after;
+        let previous = std::mem::replace(&mut canvas.owners[i], member + 1);
         // A write that changes nothing is not a contest: two `walls`
         // members of one material meeting at a corner leave the same block
         // whichever order they run in, and a `window` whose `repeat=` /
         // `step=` stamps overlap covers its own cells with its own
         // material.
-        //
+        if before == after || previous == 0 {
+            return true;
+        }
         // The member check is the other half of that and is unreachable
         // from today's generators — none writes one cell to two different
         // blocks, so a same-member pair never gets past the line above.
@@ -2085,21 +2271,15 @@ impl Canvas {
         // reported against itself it would read "`roof` overwrites 3
         // voxels that `roof` painted", which is a generator emitting two
         // faces onto one cell and not something an author can move.
-        if before != after
-            && let Some(prev) = previous
-            && prev.phase == self.current.phase
-            && prev.member != self.current.member
-        {
-            *self
-                .conflicts
-                .entry((prev.member, self.current.member))
-                .or_default() += 1;
+        let overridden = previous - 1;
+        if overridden != member && canvas.same_phase(overridden, member) {
+            *canvas.conflicts.entry((overridden, member)).or_default() += 1;
         }
         true
     }
 }
 
-fn fill_floor(ctx: &StructCtx<'_>, idx: PaletteIndex, canvas: &mut Canvas) {
+fn fill_floor(ctx: &StructCtx<'_>, idx: PaletteIndex, canvas: &mut MemberCanvas<'_>) {
     let y = 0;
     for z_local in 0..ctx.interior_h {
         for x_local in 0..ctx.interior_w {
@@ -2115,7 +2295,7 @@ fn fill_walls(
     height: u32,
     y_offset: u32,
     idx: PaletteIndex,
-    canvas: &mut Canvas,
+    canvas: &mut MemberCanvas<'_>,
 ) {
     // Walls fill y = y_offset+1 .. y_offset+height. Struct-scoped walls run
     // at y_offset=0 (the historical `1..=height` range). A `walls` inside a
@@ -2151,7 +2331,7 @@ fn fill_roof(
     member: &Member,
     ctx: &StructCtx<'_>,
     palette: &mut Palette,
-    canvas: &mut Canvas,
+    canvas: &mut MemberCanvas<'_>,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     let Some(kind) = parse_roof_kind(member, diagnostics) else {
@@ -2320,7 +2500,12 @@ fn diag_incompatible_material(
     }
 }
 
-fn fill_roof_gable(ctx: &StructCtx<'_>, palette: &mut Palette, canvas: &mut Canvas, base_id: &str) {
+fn fill_roof_gable(
+    ctx: &StructCtx<'_>,
+    palette: &mut Palette,
+    canvas: &mut MemberCanvas<'_>,
+    base_id: &str,
+) {
     let roof_w = ctx.dims.x;
     let roof_h = ctx.dims.z;
     let ridge_axis = gable_ridge_axis(roof_w, roof_h);
@@ -2355,7 +2540,7 @@ fn fill_roof_shed(
     member: &Member,
     ctx: &StructCtx<'_>,
     palette: &mut Palette,
-    canvas: &mut Canvas,
+    canvas: &mut MemberCanvas<'_>,
     diagnostics: &mut Vec<Diagnostic>,
     base_id: &str,
 ) {
@@ -2383,7 +2568,12 @@ fn fill_roof_shed(
     }
 }
 
-fn fill_roof_hip(ctx: &StructCtx<'_>, palette: &mut Palette, canvas: &mut Canvas, base_id: &str) {
+fn fill_roof_hip(
+    ctx: &StructCtx<'_>,
+    palette: &mut Palette,
+    canvas: &mut MemberCanvas<'_>,
+    base_id: &str,
+) {
     let roof_w = ctx.dims.x;
     let roof_h = ctx.dims.z;
     // Hip and gable share the same long-axis-wins-with-x-tiebreak ridge
@@ -2408,7 +2598,12 @@ fn fill_roof_hip(ctx: &StructCtx<'_>, palette: &mut Palette, canvas: &mut Canvas
     }
 }
 
-fn fill_roof_flat(ctx: &StructCtx<'_>, palette: &mut Palette, canvas: &mut Canvas, base_id: &str) {
+fn fill_roof_flat(
+    ctx: &StructCtx<'_>,
+    palette: &mut Palette,
+    canvas: &mut MemberCanvas<'_>,
+    base_id: &str,
+) {
     // A deck is one material, so a single slot serves the whole layer — but
     // it is still claimed from inside the first write rather than before
     // the loop, so the rule "no entry without a voxel" holds at every
@@ -2481,7 +2676,7 @@ fn carve_door(
     member: &Member,
     y_offset: u32,
     ctx: &StructCtx<'_>,
-    canvas: &mut Canvas,
+    canvas: &mut MemberCanvas<'_>,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     let Some(side) = side_of(member, diagnostics) else {
@@ -2592,7 +2787,7 @@ fn fill_stair(
     y_offset: u32,
     ctx: &StructCtx<'_>,
     palette: &mut Palette,
-    canvas: &mut Canvas,
+    canvas: &mut MemberCanvas<'_>,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     let Some(raw_kind) = ident_value(member, "kind") else {
@@ -2852,7 +3047,7 @@ fn fill_pressure_plate(
     y_offset: u32,
     ctx: &StructCtx<'_>,
     palette: &mut Palette,
-    canvas: &mut Canvas,
+    canvas: &mut MemberCanvas<'_>,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     let anchor = match plate_anchor_of(member) {
@@ -3432,7 +3627,7 @@ fn fill_window(
     y_offset: u32,
     ctx: &StructCtx<'_>,
     palette: &mut Palette,
-    canvas: &mut Canvas,
+    canvas: &mut MemberCanvas<'_>,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     let Some(side) = side_of(member, diagnostics) else {
@@ -3633,7 +3828,7 @@ struct WindowRect {
     palette_index: PaletteIndex,
 }
 
-fn paint_window_rect(ctx: &StructCtx<'_>, rect: WindowRect, canvas: &mut Canvas) {
+fn paint_window_rect(ctx: &StructCtx<'_>, rect: WindowRect, canvas: &mut MemberCanvas<'_>) {
     for du in 0..rect.width {
         for dv in 0..rect.height {
             let Some((x, y, z)) = wall_local_to_grid(
@@ -5625,17 +5820,29 @@ struct s size=9x7
     /// Pruning must not become the place generator bugs go to be tidied
     /// away. A slot a write named and a later phase covered is the
     /// layering working; a slot no write ever named is a generator
-    /// interning a material for geometry it does not emit, which is the
-    /// bug class the palette-referenced invariant exists for. Debug-only,
-    /// because that is where `debug_assert!` lives.
+    /// interning a material for geometry it does not emit, and it stays in
+    /// the palette where the artifact, `cairn info`, and
+    /// `tests/palette_is_referenced` can all still see it. The caller
+    /// turns the returned list into a `debug_assert!`, which is why this
+    /// asserts on the list rather than on a panic — the behaviour under
+    /// test is what a release build does.
     #[test]
-    #[cfg(debug_assertions)]
-    #[should_panic(expected = "claimed but no voxel was ever painted with it")]
-    fn a_slot_no_write_ever_named_is_not_quietly_pruned() {
+    fn a_slot_no_write_ever_named_is_kept_rather_than_swept_out() {
         let mut palette = Palette::new_with_air();
         palette.intern(BlockState::bare("minecraft:cobblestone"));
-        let canvas = Canvas::new(Dims { x: 1, y: 1, z: 1 });
-        prune_unreferenced(&mut palette, &canvas);
+        let canvas = Canvas::new(Dims { x: 1, y: 1, z: 1 }, vec![None]);
+
+        let (voxels, never_painted) = prune_unreferenced(&mut palette, &canvas);
+        assert_eq!(never_painted, [1]);
+        assert_eq!(
+            palette
+                .entries
+                .iter()
+                .map(|s| s.id.as_str())
+                .collect::<Vec<_>>(),
+            ["minecraft:air", "minecraft:cobblestone"],
+        );
+        assert_eq!(voxels, [PaletteIndex::AIR]);
     }
 
     /// The other half of the pair: the same unreferenced slot, this time
@@ -5646,11 +5853,12 @@ struct s size=9x7
         let mut palette = Palette::new_with_air();
         let covered = palette.intern(BlockState::bare("minecraft:glass_pane"));
         let winner = palette.intern(BlockState::bare("minecraft:cobblestone"));
-        let mut canvas = Canvas::new(Dims { x: 1, y: 1, z: 1 });
-        canvas.paint((0, 0, 0), || covered);
-        canvas.paint((0, 0, 0), || winner);
+        let mut canvas = Canvas::new(Dims { x: 1, y: 1, z: 1 }, vec![Some(Phase::Massing)]);
+        canvas.for_member(0).paint((0, 0, 0), || covered);
+        canvas.for_member(0).paint((0, 0, 0), || winner);
 
-        let voxels = prune_unreferenced(&mut palette, &canvas);
+        let (voxels, never_painted) = prune_unreferenced(&mut palette, &canvas);
+        assert_eq!(never_painted, Vec::<usize>::new());
         assert_eq!(
             palette
                 .entries
@@ -5662,7 +5870,7 @@ struct s size=9x7
         assert_eq!(voxels, [PaletteIndex(1)]);
     }
 
-    /// The clip in [`Canvas::paint`] is unreachable from source — every
+    /// The clip in [`MemberCanvas::paint`] is unreachable from source — every
     /// generator's coordinates come from the dims the volume was built
     /// against — so the only way to show that it fails loud rather than
     /// dropping the write is to call it with the disagreement it exists to
@@ -5672,8 +5880,8 @@ struct s size=9x7
     #[cfg(debug_assertions)]
     #[should_panic(expected = "the dim math and the generator disagree")]
     fn painting_outside_the_volume_is_not_a_silent_drop() {
-        let mut canvas = Canvas::new(Dims { x: 2, y: 2, z: 2 });
-        canvas.paint((2, 0, 0), || PaletteIndex(1));
+        let mut canvas = Canvas::new(Dims { x: 2, y: 2, z: 2 }, vec![Some(Phase::Massing)]);
+        canvas.for_member(0).paint((2, 0, 0), || PaletteIndex(1));
     }
 
     #[test]

@@ -257,3 +257,43 @@ fn tempfile_with_contents(label: &str, contents: &str) -> PathBuf {
     std::fs::write(&path, contents).expect("write tempfile");
     path
 }
+
+#[test]
+fn info_9_a_note_that_points_at_a_second_line_is_printed_with_its_position() {
+    // `cairn info` was one of the three commands whose note loop dropped
+    // `note.span`; all six copies now share one renderer, and each of the
+    // three needs its own end-to-end line or a fold that missed one of
+    // them still passes.
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    let path = tmp.path().join("conflict.crn");
+    std::fs::write(
+        &path,
+        concat!(
+            "theme t:\n",
+            "  slot wall -> @cobblestone\n",
+            "  slot glass -> @glass_pane\n",
+            "\n",
+            "struct t size=7x5\n",
+            "  walls mat_slot=wall height=3\n",
+            "  door side=front at=center\n",
+            "  window side=front y=1 offset=3 size=1x2 mat_slot=glass\n",
+        ),
+    )
+    .expect("write source");
+
+    let out = run_info(&[path.to_str().unwrap()]);
+    assert!(
+        out.status.success(),
+        "a warning must not fail info, stderr={}",
+        String::from_utf8_lossy(&out.stderr),
+    );
+    let stderr = String::from_utf8(out.stderr).expect("utf-8");
+    assert!(
+        stderr.contains(":8:3: warning[W_PHASE_CONFLICT]"),
+        "the finding anchors at the `window` on line 8, got: {stderr}",
+    );
+    assert!(
+        stderr.contains(":7:3:   note: overwritten member declared here"),
+        "the note must carry the `door` line's position, got: {stderr}",
+    );
+}

@@ -89,7 +89,7 @@ pub fn synthesize(module: &IntentModule) -> SynthOutput {
     scopes.extend(module.structs.iter().map(ModuleScope::Struct));
     scopes.extend(module.defs.iter().map(ModuleScope::Def));
     scopes.extend(module.sites.iter().map(ModuleScope::Site));
-    scopes.sort_by_key(ModuleScope::start);
+    scopes.sort_by_key(ModuleScope::span);
 
     let mut out = SynthOutput::default();
     for scope in scopes {
@@ -113,13 +113,16 @@ enum ModuleScope<'a> {
 }
 
 impl ModuleScope<'_> {
-    /// First byte of the `struct` / `def` / `site` line. The sort key, and
-    /// a total one: two scopes cannot begin at the same byte.
-    fn start(&self) -> usize {
+    /// Byte range of the `struct` / `def` / `site` block, as the sort
+    /// key. Two scopes cannot begin at the same byte, so the start alone
+    /// would order them — the end is carried anyway so this key matches
+    /// the one the diagnostic sort uses, and so a tie can never fall back
+    /// on the by-kind order this function exists to undo.
+    fn span(&self) -> (usize, usize) {
         match self {
-            Self::Struct(s) => s.span.start,
-            Self::Def(d) => d.span.start,
-            Self::Site(s) => s.span.start,
+            Self::Struct(s) => (s.span.start, s.span.end),
+            Self::Def(d) => (d.span.start, d.span.end),
+            Self::Site(s) => (s.span.start, s.span.end),
         }
     }
 }
@@ -212,7 +215,7 @@ fn collect_body<'a>(
     // logic vector, so the interleaving the author wrote survives nowhere
     // but in the spans — sorting by them is the reconstruction, not a
     // convenience.
-    out.bindings.sort_by_key(|b| b.span.start);
+    out.bindings.sort_by_key(|b| (b.span.start, b.span.end));
 }
 
 fn collect_member<'a>(m: &'a Member, out: &mut ScopeCollected<'a>) {

@@ -43,6 +43,11 @@ and is a separate axis from the Minecraft target version.
   prefix when the note points at a second place in the source, which is what `cairn check` and
   `cairn synth` already did. A scraper matching notes on a leading `  note:` will not see those
   lines any more.
+- *(redstone)* `cairn_lang_redstone::DiagnosticNote` is a re-export of
+  `cairn_lang_core::check::DiagnosticNote` rather than a second declaration of the same two
+  fields. Source-compatible for anything that only names the path; a consumer that wrote an
+  `impl` for the redstone type now writes it for core's, and one that had both is writing it
+  twice for one type. Rust API, Internal tier.
 
 ## 2026.8.2 — 2026-08-01
 

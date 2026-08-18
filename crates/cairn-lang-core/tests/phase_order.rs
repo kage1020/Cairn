@@ -52,7 +52,9 @@ fn ids(ba: &BlockArray) -> Vec<&str> {
 const PRELUDE: &str = "theme t:\n  \
                        slot wall  -> @cobblestone\n  \
                        slot glass -> @glass_pane\n  \
-                       slot deck  -> @oak_planks\n\n\
+                       slot deck  -> @oak_planks\n  \
+                       slot stone_plate -> @stone_pressure_plate\n  \
+                       slot wood_plate  -> @oak_pressure_plate\n\n\
                        struct t size=7x5\n  \
                        walls mat_slot=wall height=3\n";
 
@@ -119,8 +121,10 @@ fn a_material_covered_by_a_later_phase_leaves_no_palette_entry() {
 fn pruning_keeps_air_at_slot_zero_and_leaves_the_survivors_in_order() {
     // `walls` interns cobblestone, then the window interns glass, then the
     // plate covers the window's one cell. Dropping the middle entry must
-    // renumber the plate down onto it rather than leave a hole, and slot 0
-    // stays air even though this structure has no air cell to name it.
+    // renumber the plate down onto it rather than leave a hole, and air
+    // keeps slot 0 — which this fixture does reference, since a wall ring
+    // leaves the interior empty. The unreferenced-air case is the unit
+    // test in `block_array::lower`.
     let out = lowered(&source(&format!("{PANE}{PLATE}")));
     assert_eq!(
         ids(only_structure(&out)),
@@ -277,4 +281,133 @@ fn the_conflict_warning_does_not_change_which_block_wins() {
     assert_eq!(cell(only_structure(&window_first)), "minecraft:air");
     assert_eq!(conflicts(&door_first).len(), 1);
     assert_eq!(conflicts(&window_first).len(), 1);
+}
+
+#[test]
+fn a_conflict_between_two_fixtures_is_reported_like_any_other() {
+    // Every conflict fixture above lands in Openings, which is the bucket
+    // that already existed. The Fixtures bucket is new, and what is new
+    // with it is the `run_phase` wiring that names the member each write
+    // belongs to — so the phase has to be exercised on the conflict path
+    // too, not only on the "the plate wins" path.
+    //
+    // Two plates on one anchor with different materials. One voxel, so
+    // this is also where the singular wording is pinned.
+    let out = lowered(&source(
+        "  pressure_plate id=a at=front.outside offset=3 y=0 mat_slot=stone_plate -> sig.x\n  \
+         pressure_plate id=b at=front.outside offset=3 y=0 mat_slot=wood_plate -> sig.y\n",
+    ));
+    let found = conflicts(&out);
+    assert_eq!(found.len(), 1, "{found:#?}");
+    assert!(
+        found[0]
+            .primary
+            .contains("`pressure_plate` overwrites 1 voxel that `pressure_plate` painted"),
+        "one contested cell reads as `1 voxel`, not `1 voxels`: {}",
+        found[0].primary,
+    );
+}
+
+#[test]
+fn a_conflict_between_two_massing_members_is_reported_like_any_other() {
+    // The other end of the phase list. A wainscot course is the shape
+    // §4.1's local-override grant is written for, and it is reported for
+    // the same reason every other pair is: the grid cannot tell a
+    // deliberate override from two footprints that happen to meet.
+    let out = lowered(&source("  walls mat_slot=deck height=1\n"));
+    let found = conflicts(&out);
+    assert_eq!(found.len(), 1, "{found:#?}");
+    assert!(
+        found[0]
+            .primary
+            .contains("`walls` overwrites 20 voxels that `walls` painted"),
+        "the wainscot takes the whole ring of its one course: {}",
+        found[0].primary,
+    );
+    assert!(
+        found[0]
+            .notes
+            .iter()
+            .any(|n| n.message.contains("If the override is deliberate")),
+        "the note has to offer the reading §4.1 permits, not only the \
+         accidental one: {:#?}",
+        found[0].notes,
+    );
+}
+
+#[test]
+fn one_member_overwriting_two_others_is_reported_once_per_pair() {
+    // `conflicts` is keyed by the pair, so a member that takes cells from
+    // two different members owes two findings — one naming each — rather
+    // than one finding with the counts added together.
+    let out = lowered(&source(concat!(
+        "  door side=front at=center\n",
+        "  window id=low side=front y=1 offset=3 size=1x1 mat_slot=glass\n",
+        "  window id=high side=front y=2 offset=3 size=1x1 mat_slot=deck\n",
+        "  window id=both side=front y=1 offset=3 size=1x2 mat_slot=wall\n",
+    )));
+    let found = conflicts(&out);
+    let primaries: Vec<&str> = found.iter().map(|d| d.primary.as_str()).collect();
+    // Four pairs, not one finding with the counts added together: the
+    // `door` loses one cell to each of the two single windows, and the
+    // 1x2 window then takes one cell from each of those two in turn.
+    assert_eq!(found.len(), 4, "{primaries:#?}");
+    let overwrote_a_door = primaries
+        .iter()
+        .filter(|p| p.contains("that `door` painted"))
+        .count();
+    assert_eq!(overwrote_a_door, 2, "{primaries:#?}");
+    assert!(
+        primaries
+            .iter()
+            .all(|p| p.contains("`window` overwrites 1 voxel")),
+        "each pair is counted on its own, so no finding adds two cells \
+         together: {primaries:#?}",
+    );
+    // Every finding anchors at whichever of its pair came second.
+    assert!(
+        found
+            .iter()
+            .all(|d| { d.span.start > d.notes[0].span.as_ref().expect("note span").start }),
+        "{primaries:#?}",
+    );
+    // Two of the four share an anchor — the 1x2 window is the later member
+    // of both its pairs — so the span sort alone does not order them. It
+    // is stable, and the pairs were recorded in paint order, so the one
+    // over the lower cell comes first and the pair of findings does not
+    // reshuffle between runs.
+    let overwritten_lines: Vec<usize> = found
+        .iter()
+        .filter(|d| d.span == found[3].span)
+        .map(|d| d.notes[0].span.as_ref().expect("note span").start)
+        .collect();
+    assert_eq!(
+        overwritten_lines.len(),
+        2,
+        "the 1x2 window is the later member of two pairs: {primaries:#?}",
+    );
+    assert!(
+        overwritten_lines[0] < overwritten_lines[1],
+        "the cell it took from the `low` window is painted first, so that          pair is recorded and reported first",
+    );
+}
+
+#[test]
+fn a_conflict_across_a_level_anchors_at_the_member_and_not_the_level() {
+    // `flatten_members` hands the phase buckets the members, not the
+    // `level` that grouped them, so the span the finding carries is the
+    // member's own line — the one an author would move.
+    let src = source(concat!(
+        "  window side=front y=1 offset=3 size=1x1 mat_slot=glass\n",
+        "  level y=1\n",
+        "    window side=front y=0 offset=3 size=1x1 mat_slot=deck\n",
+    ));
+    let out = lowered(&src);
+    let found = conflicts(&out);
+    assert_eq!(found.len(), 1, "{found:#?}");
+    assert!(
+        src[found[0].span.start..found[0].span.end].starts_with("window"),
+        "the finding anchors at the nested `window`, got `{}`",
+        &src[found[0].span.start..found[0].span.end],
+    );
 }

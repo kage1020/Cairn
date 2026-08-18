@@ -44,6 +44,11 @@
 - *(cli)* `cairn lower` / `cairn info` / `cairn compile` は、note がソース中の別の位置を指す場合に
   その note 自身の `file:line:col:` を前置するようになりました。`cairn check` と `cairn synth` は
   既にそうしていました。行頭の `  note:` で note を拾っていたスクレイパは、それらの行を取り逃がします。
+- *(redstone)* `cairn_lang_redstone::DiagnosticNote` は、同じ 2 フィールドを別途宣言するのを
+  やめて `cairn_lang_core::check::DiagnosticNote` の re-export になりました。パスを名前で
+  参照しているだけのコードは互換です。redstone 側の型に `impl` を書いていた場合は core 側の型に
+  書くことになり、両方に書いていた場合は 1 つの型に二重に書くことになります。Rust API、
+  Internal ティア。
 
 ### 追加
 

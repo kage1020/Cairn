@@ -1292,3 +1292,47 @@ fn compile_overwrites_existing_output() {
     let lf = Lockfile::read_from_path(&lock_path).expect("read lock");
     assert!(lf.verified);
 }
+
+#[test]
+fn c30_a_note_that_points_at_a_second_line_is_printed_with_its_position() {
+    // The third of the three commands whose note loop dropped
+    // `note.span`. `cairn compile` reaches it through
+    // `report_lowering_diagnostics`, which `lower` and `info` do not use.
+    let tmp = TempDir::new().expect("tempdir");
+    let src = tmp.path().join("conflict.crn");
+    fs::write(
+        &src,
+        concat!(
+            "theme t:\n",
+            "  slot wall -> @cobblestone\n",
+            "  slot glass -> @glass_pane\n",
+            "\n",
+            "struct t size=7x5\n",
+            "  walls mat_slot=wall height=3\n",
+            "  door side=front at=center\n",
+            "  window side=front y=1 offset=3 size=1x2 mat_slot=glass\n",
+        ),
+    )
+    .expect("write source");
+    let out_dir = TempDir::new().expect("out tempdir");
+
+    let result = run_compile(&[
+        src.to_str().unwrap(),
+        "--edition",
+        "java",
+        "--target",
+        "1.21.4",
+        "--out",
+        out_dir.path().to_str().unwrap(),
+    ]);
+    assert!(
+        result.status.success(),
+        "a warning must not fail the compile, stderr={}",
+        String::from_utf8_lossy(&result.stderr),
+    );
+    let stderr = String::from_utf8(result.stderr).expect("utf-8");
+    assert!(
+        stderr.contains(":7:3:   note: overwritten member declared here"),
+        "the note must carry the `door` line's position, got: {stderr}",
+    );
+}

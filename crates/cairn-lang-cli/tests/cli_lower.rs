@@ -245,4 +245,14 @@ fn lower_8_a_note_that_points_at_a_second_line_is_printed_with_its_position() {
         stderr.contains(":7:3:   note: overwritten member declared here"),
         "the note must carry the `door` line's position, got: {stderr}",
     );
+    // The other branch of the same renderer: a footer points at no second
+    // location, so it stays indented and unprefixed rather than reading as
+    // a second pointer at the primary span.
+    assert!(
+        stderr.contains(
+            "
+  note: If the override is deliberate"
+        ),
+        "a span-less note keeps the bare `  note:` form, got: {stderr}",
+    );
 }

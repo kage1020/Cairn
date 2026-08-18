@@ -204,18 +204,17 @@ impl Serialize for DiagnosticCode {
 }
 
 /// Secondary location attached to a [`Diagnostic`]. Renders as an indented
-/// `note: ...` line under the primary finding. `span` may be `None` when
+/// `note: ...` line under the primary finding, and `span` is `None` when
 /// the note is a footer such as "valid alternatives: sig.step" that does
 /// not point at a distinct byte range.
-#[derive(Debug, Clone, PartialEq, Serialize)]
-pub struct DiagnosticNote {
-    /// Byte range the note refers to, when the note points at a distinct
-    /// secondary location.
-    #[serde(skip)]
-    pub span: Option<Span>,
-    /// Human-readable note text.
-    pub message: String,
-}
+///
+/// `cairn_lang_core`'s type, re-exported rather than declared again. A
+/// note is the same thing on both sides — a message and an optional span,
+/// with the span skipped by `Serialize` — and the copy that used to live
+/// here bought nothing but a second type for every consumer that renders
+/// both crates' findings to write an adapter for. The redstone
+/// [`Diagnostic`] stays its own type because its `code` is.
+pub use cairn_lang_core::check::DiagnosticNote;
 
 /// One finding emitted by the redstone synth pass.
 ///

@@ -229,11 +229,14 @@ is deciding the result.
 
 A cell whose value does not change is not a conflict — two `walls` of one
 material meeting over the rows they share depend on nothing — and neither is
-a member writing over itself, as the mirrored halves of a `sym=true` window
-do.
+a member writing over itself, as a `window` whose `repeat=` / `step=` stamps
+overlap does when it covers its own glass with more of the same.
 
-The palette of a finished structure lists the blocks the structure contains,
-in the order the phases first painted them, with air at slot `0`. It is not
+The palette of a body the phases evaluate — a `struct`, a `def`, and each
+`place` that instantiates one — lists the blocks that body contains, in the
+order the phases first painted them, with air at slot `0`. (A walkway's
+array is laid by the `connect` pass rather than by the phases, and this
+section does not describe it.) It is not
 a log of what was interned along the way: a material whose last voxel a
 later phase covered is dropped and the remaining slots renumber onto the
 gap. Otherwise the loser would ride into the `.nbt`, be counted by `cairn

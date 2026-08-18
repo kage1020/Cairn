@@ -239,3 +239,117 @@ struct tower size=1x1
         out.diagnostics,
     );
 }
+
+/// A module with all three scope kinds, written in an order none of the
+/// three vectors reproduces: `def`, then `site`, then `struct`. The old
+/// walk emitted struct, then def, then site, so this puts every pair the
+/// wrong way round at once.
+///
+/// Each scope carries exactly one finding, on a line of its own. The two
+/// body scopes leave a signal nothing consumes; the site names one nothing
+/// declares, which is all a site body can do — it has no sensor to bind
+/// one.
+const DEF_SITE_STRUCT: &str = concat!(
+    "@cairn 2026.06
+",
+    "
+",
+    "theme t:
+",
+    "  slot wall -> @cobblestone
+",
+    "
+",
+    "def hut size=1x1:
+",
+    "  pressure_plate id=p at=front.outside offset=0 y=0 -> sig.d
+",
+    "  logic sig.dd = sig.d and sig.d
+",
+    "
+",
+    "site plaza:
+",
+    "  place id=one use=hut theme=t at=origin
+",
+    "  logic sig.ss = sig.q and sig.q
+",
+    "
+",
+    "struct tower size=1x1
+",
+    "  pressure_plate id=p at=front.outside offset=0 y=0 -> sig.t
+",
+    "  logic sig.tt = sig.t and sig.t
+",
+);
+
+/// The mirror: the same three scopes, reversed.
+const STRUCT_SITE_DEF: &str = concat!(
+    "@cairn 2026.06
+",
+    "
+",
+    "theme t:
+",
+    "  slot wall -> @cobblestone
+",
+    "
+",
+    "struct tower size=1x1
+",
+    "  pressure_plate id=p at=front.outside offset=0 y=0 -> sig.t
+",
+    "  logic sig.tt = sig.t and sig.t
+",
+    "
+",
+    "site plaza:
+",
+    "  place id=one use=hut theme=t at=origin
+",
+    "  logic sig.ss = sig.q and sig.q
+",
+    "
+",
+    "def hut size=1x1:
+",
+    "  pressure_plate id=p at=front.outside offset=0 y=0 -> sig.d
+",
+    "  logic sig.dd = sig.d and sig.d
+",
+);
+
+fn finding_scopes(source: &str) -> Vec<String> {
+    synth_source(source)
+        .diagnostics
+        .iter()
+        .map(|d| {
+            let label = d.primary.split(':').next().expect("a scope label prefix");
+            format!("{}@{}", label, line_of(source, d.span.start))
+        })
+        .collect()
+}
+
+#[test]
+fn three_scope_kinds_are_walked_in_the_order_the_file_writes_them() {
+    // A `site` body carries no sensor, so its `logic` line can only name
+    // an unbound signal — which is exactly what makes it observable here:
+    // one finding per scope, and the site's has to land between the other
+    // two. The scope list cannot show this, because a scope whose
+    // collection failed is elided from it by design.
+    assert_eq!(
+        finding_scopes(DEF_SITE_STRUCT),
+        ["def=hut@8", "site=plaza@12", "struct=tower@16"],
+    );
+}
+
+#[test]
+fn reversing_the_three_scopes_reverses_the_walk() {
+    // Without the mirror, a rule that happened to emit def, then site,
+    // then struct would satisfy the test above.
+    assert_eq!(
+        finding_scopes(STRUCT_SITE_DEF),
+        ["struct=tower@8", "site=plaza@12", "def=hut@16"],
+    );
+}
