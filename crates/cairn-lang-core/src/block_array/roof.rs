@@ -219,13 +219,15 @@ pub enum StairFace {
     /// x-ridge, `+x` for a z-ridge). `half=bottom`, facing toward the
     /// ridge from the other side.
     HighSlope,
-    /// Apex cap whose facing matches the low slope (used as the single
-    /// cap on odd-span apex rows and as the low-side cap on even-span
-    /// apex rows). `half=top`.
+    /// The single cap on an apex row where the two slopes converge —
+    /// an odd short span. Keeps the low slope's facing, which is the
+    /// facing `spec/compilation.md` §4.3 picks for it. `half=top`.
+    Apex,
+    /// Low-side cap of an even-span apex pair, facing *away* from the
+    /// ridge. `half=top`.
     ApexLow,
-    /// Apex cap whose facing matches the high slope (only emitted on
-    /// even-span apex rows so the closing pair forms an upside-down peak).
-    /// `half=top`.
+    /// High-side cap of an even-span apex pair, facing away from the
+    /// ridge on the other side. `half=top`.
     ApexHigh,
 }
 
@@ -275,24 +277,26 @@ pub fn gable_ridge_axis(roof_w: u32, roof_h: u32) -> Axis {
 /// clone the earlier shape forced.
 #[must_use]
 pub fn gable_stair_state(ridge_axis: Axis, face: StairFace) -> BlockState {
-    // Apex caps reuse the slope facings: an `ApexLow` cap keeps the
-    // low-slope direction (`south` for x-ridge), an `ApexHigh` keeps the
-    // high-slope direction (`north`). Pairing apex with the slope it
-    // covers keeps the cap visually continuous with the slope below it,
-    // and `half=top` (set below) flips it upside-down so the triangle
-    // closes.
+    // A converged apex is one cell wide, so it has no outward direction
+    // of its own and keeps the low slope's facing — §4.3's rule. An
+    // even-span apex is a *pair* straddling the ridge, and each of the
+    // two faces away from it: a `half=top` stair fills the lower half on
+    // its facing side, so a pair facing inward leaves a 0.5 x 0.5
+    // undercut running the length of the roof along each outer face,
+    // where facing outward moves the same void under the ridge and out
+    // of sight.
     let facing = match (ridge_axis, face) {
         // x-ridge: short axis is z. Low slope is on -z; its riser faces
         // toward +z (south) — the upper-step side ends up on the inward
         // side (toward the ridge).
-        (Axis::X, StairFace::LowSlope | StairFace::ApexLow) => Cardinal::South,
-        (Axis::X, StairFace::HighSlope | StairFace::ApexHigh) => Cardinal::North,
+        (Axis::X, StairFace::LowSlope | StairFace::Apex | StairFace::ApexHigh) => Cardinal::South,
+        (Axis::X, StairFace::HighSlope | StairFace::ApexLow) => Cardinal::North,
         // z-ridge: short axis is x. Mirror the same rule onto the x axis.
-        (Axis::Z, StairFace::LowSlope | StairFace::ApexLow) => Cardinal::East,
-        (Axis::Z, StairFace::HighSlope | StairFace::ApexHigh) => Cardinal::West,
+        (Axis::Z, StairFace::LowSlope | StairFace::Apex | StairFace::ApexHigh) => Cardinal::East,
+        (Axis::Z, StairFace::HighSlope | StairFace::ApexLow) => Cardinal::West,
     };
     let half = match face {
-        StairFace::ApexLow | StairFace::ApexHigh => "top",
+        StairFace::Apex | StairFace::ApexLow | StairFace::ApexHigh => "top",
         StairFace::LowSlope | StairFace::HighSlope => "bottom",
     };
     stair_state(STAIR_BASE_ID, facing, half, StairShape::Straight)
@@ -325,55 +329,43 @@ pub fn gable_voxels(roof_w: u32, roof_h: u32, wall_top: u32) -> Vec<GableVoxel> 
     let mut out: Vec<GableVoxel> = Vec::new();
     for layer in 0..layers {
         let y = wall_top.saturating_add(1).saturating_add(layer);
-        let is_apex = layer + 1 == layers;
         let low_index = layer;
         let high_index = span.saturating_sub(1).saturating_sub(layer);
+        let converged = low_index == high_index;
+        // Layer 0 sits directly on the wall top, so it is a slope
+        // (`half=bottom`) whatever else it is. A roof one layer tall —
+        // a short span of 1 or 2 — is both the first layer and the apex,
+        // and capping it instead of seating it left the whole course
+        // `half=top`: a half-block slit running the length of the roof
+        // between the wall and the stone above it. An apex cap only
+        // closes a peak something below it has already raised.
+        let is_apex = layer > 0 && layer + 1 == layers;
 
-        if is_apex && low_index == high_index {
-            // Odd-span apex: the two slopes converge on a single row.
-            emit_gable_row(
-                &mut out,
-                ridge_axis,
-                long_axis_len,
-                y,
-                low_index,
-                StairFace::ApexLow,
-            );
-        } else if is_apex {
-            // Even-span apex: the slopes meet at two adjacent rows. Emit
-            // both as half=top stairs facing outward so the cap closes.
-            emit_gable_row(
-                &mut out,
-                ridge_axis,
-                long_axis_len,
-                y,
-                low_index,
-                StairFace::ApexLow,
-            );
-            emit_gable_row(
-                &mut out,
-                ridge_axis,
-                long_axis_len,
-                y,
-                high_index,
-                StairFace::ApexHigh,
-            );
+        if converged {
+            // The two slopes meet on one row, so it is emitted once. At
+            // the apex that is §4.3's single cap; on layer 0 it is a
+            // short span of 1 — one row of slope, with no ridge to
+            // straddle.
+            let face = if is_apex {
+                StairFace::Apex
+            } else {
+                StairFace::LowSlope
+            };
+            emit_gable_row(&mut out, ridge_axis, long_axis_len, y, low_index, face);
         } else {
-            emit_gable_row(
-                &mut out,
-                ridge_axis,
-                long_axis_len,
-                y,
-                low_index,
-                StairFace::LowSlope,
-            );
+            let (low_face, high_face) = if is_apex {
+                (StairFace::ApexLow, StairFace::ApexHigh)
+            } else {
+                (StairFace::LowSlope, StairFace::HighSlope)
+            };
+            emit_gable_row(&mut out, ridge_axis, long_axis_len, y, low_index, low_face);
             emit_gable_row(
                 &mut out,
                 ridge_axis,
                 long_axis_len,
                 y,
                 high_index,
-                StairFace::HighSlope,
+                high_face,
             );
         }
     }
@@ -628,7 +620,14 @@ pub fn hip_voxels(roof_w: u32, roof_h: u32, wall_top: u32) -> Vec<HipVoxel> {
     let mut out: Vec<HipVoxel> = Vec::new();
     for layer in 0..layers {
         let y = wall_top.saturating_add(1).saturating_add(layer);
-        let is_apex = layer + 1 == layers;
+        // Layer 0 seats on the wall top and is always the inset frame,
+        // even when it is also the last layer — a short span of 1 or 2
+        // gives the roof a single course, and capping that course
+        // instead of framing it dropped the `outer_*` corners and the
+        // per-edge facings and left every cell `half=top`, a half-block
+        // slit running the whole perimeter between the wall and the
+        // roof above it.
+        let is_apex = layer > 0 && layer + 1 == layers;
 
         // After insetting by `layer` on every side, the remaining
         // interior runs from `[layer, roof_w-1-layer]` on x and the same
@@ -878,10 +877,14 @@ mod tests {
         let apex_row: Vec<&GableVoxel> = voxels.iter().filter(|v| v.pos.1 == 9).collect();
         assert_eq!(apex_row.len(), 11);
         for v in &apex_row {
-            assert_eq!(v.face, StairFace::ApexLow);
+            assert_eq!(v.face, StairFace::Apex);
             assert_eq!(v.pos.2, 4);
         }
-        let state = gable_stair_state(Axis::X, StairFace::ApexLow);
+        // A converged cap is one cell wide and has no outward direction of
+        // its own, so it keeps the low slope's facing — the rule
+        // `spec/compilation.md` §4.3 states, and the reason it is a face of
+        // its own rather than the even-span pair's low half.
+        let state = gable_stair_state(Axis::X, StairFace::Apex);
         assert_eq!(state.properties.get("half").unwrap(), "top");
         assert_eq!(state.properties.get("facing").unwrap(), "south");
     }

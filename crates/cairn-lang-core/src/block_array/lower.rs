@@ -78,6 +78,7 @@ use super::walkway::{
     BlockedIndex, ROUTE_AREA_CAP, RoutePathError, WalkwayLayout, build_walkway_array, l_path,
     l_path_area, port_world_position, route_path,
 };
+use super::wall_column::WallColumn;
 use super::{BlockArray, BlockArrayIr, BlockState, Dims, Palette, PaletteIndex};
 
 /// Catalog token a `pressure_plate` member's default material comes from.
@@ -329,8 +330,7 @@ fn lower_connects(
             // means `port_world_position` rejected one of the member's
             // own properties: a missing / non-cardinal `side=`, a door
             // `at=` value outside `center | left | right`, a window
-            // whose `offset + size.w` overflows the wall or whose
-            // `y + size.h` overflows the walls `height=`, or a
+            // whose rectangle leaves the wall on either axis, or a
             // stair / roof role for which port support is reserved.
             // Name the offending side so the user is not pointed at
             // the wrong half of the row.
@@ -358,7 +358,7 @@ fn lower_connects(
                     DiagnosticNote {
                         span: None,
                         message:
-                            "a `window` port requires `side=front|back|left|right`, plus `offset=` / `y=` / `size=WxH` that fit inside the wall (`offset + size.w ≤ wall_length` and `y + size.h ≤ walls.height`)"
+                            "a `window` port requires `side=front|back|left|right`, plus `offset=` / `y=` / `size=WxH` that fit inside the wall (`offset + size.w ≤ wall_length`, and every row `y ..= y + size.h - 1` inside `1 ..= walls.height` — the floor slab owns row 0)"
                                 .to_owned(),
                     },
                     DiagnosticNote {
@@ -1058,6 +1058,7 @@ fn lower_body_to_block_array<'a>(
     // amount in their respective fill helpers.
     let overhang = max_roof_overhang(&flattened, diagnostics);
     let max_wall_top = max_wall_top(&flattened);
+    let wall_column = wall_column(&flattened);
     let roof_extra = max_roof_extra_height(&flattened, interior_w, interior_h, overhang);
 
     let dims = Dims {
@@ -1084,6 +1085,7 @@ fn lower_body_to_block_array<'a>(
         interior_w,
         interior_h,
         wall_top: max_wall_top,
+        wall_column,
     };
 
     let PhaseBuckets {
@@ -1455,7 +1457,17 @@ struct StructCtx<'a> {
     /// Highest wall voxel coordinate: the largest `y_offset + height=`
     /// across the walls members the pass will paint, so a `walls` inside a
     /// `level y=N` raises it by that `N`. `0` when no walls are present.
+    ///
+    /// This is where the roof starts and how tall the volume has to be.
+    /// It is *not* what a member cut into the wall may check itself
+    /// against — see [`StructCtx::wall_column`].
     wall_top: u32,
+    /// Every row the walls members actually paint, gaps and all.
+    ///
+    /// A `window` has to land inside masonry, which `wall_top` cannot
+    /// decide: it says nothing about the rows below the first course and
+    /// nothing about the air between two of them.
+    wall_column: WallColumn,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1931,6 +1943,24 @@ fn max_wall_top(flattened: &[(u32, &Member)]) -> u32 {
         .filter_map(|(y_offset, m)| height_value(m).map(|h| y_offset.saturating_add(h)))
         .max()
         .unwrap_or(0)
+}
+
+/// Every row the walls members the pass will paint actually occupy.
+///
+/// Same walk as [`max_wall_top`] over the same list, keeping the spans
+/// instead of collapsing them to their maximum. The two are separate
+/// because they answer different questions: `max_wall_top` sizes the
+/// volume and seats the roof, while this decides whether a rectangle cut
+/// into the wall lands in masonry. Reading the second off the first is
+/// what let a `window y=0` carve through the floor slab and a window
+/// between two level courses hang glass in open air.
+fn wall_column(flattened: &[(u32, &Member)]) -> WallColumn {
+    WallColumn::from_walls(
+        flattened
+            .iter()
+            .filter(|(_, m)| matches!(m.role, MemberRole::Walls))
+            .filter_map(|(y_offset, m)| height_value(m).map(|h| (*y_offset, h))),
+    )
 }
 
 /// Largest `overhang=` across the roof members the pass will paint.
@@ -2512,19 +2542,20 @@ fn fill_roof_gable(
     // One `palette.intern` per face rather than one per voxel — a 99-voxel
     // cottage roof needs four — but claimed on first use, not up front. An
     // odd ridge span converges on a single row, so a roof that has one (a
-    // 3x3 struct) emits three of the four faces and never the high apex,
+    // 3x3 struct) emits three of the five faces and never the apex pair,
     // and an entry no voxel references is not free: it reaches the `.nbt`
     // palette, the `resolved_ir_hash`, and the per-entry counts `cairn info`
     // reports. Claiming on demand also means the palette lays out in the
     // order [`gable_voxels`] first visits each face, which is fixed by the
     // generator's layer iteration, so the layout stays deterministic.
-    let mut face_indices: [Option<PaletteIndex>; 4] = [None; 4];
+    let mut face_indices: [Option<PaletteIndex>; 5] = [None; 5];
     for GableVoxel { pos, face } in gable_voxels(roof_w, roof_h, ctx.wall_top) {
         let slot = match face {
             StairFace::LowSlope => 0,
             StairFace::HighSlope => 1,
-            StairFace::ApexLow => 2,
-            StairFace::ApexHigh => 3,
+            StairFace::Apex => 2,
+            StairFace::ApexLow => 3,
+            StairFace::ApexHigh => 4,
         };
         canvas.paint(pos, || {
             *face_indices[slot].get_or_insert_with(|| {
@@ -3719,21 +3750,27 @@ fn fill_window(
         ));
         return;
     }
-    // Windows have to fit *inside the wall column*, not just inside the
-    // struct's inflated volume. Gating on `dims.y` alone would let a
-    // mat_slot-less `class=arrow_slit` window carve air past the wall
-    // top and punch a hole through roof voxels the envelope phase
-    // wrote at `y = wall_top + 1` and above. Cap at `wall_top` (the
-    // highest wall voxel) — inclusive, because the top wall row is a
-    // legal window cell.
-    let wall_ceiling = ctx.wall_top;
-    if y_start.saturating_add(sh) > wall_ceiling.saturating_add(1) {
-        diagnostics.push(diag_deferred_member_reason(
-            member,
-            &format!(
-                "window extends above the wall column (y={y_start} size={sw}x{sh}, wall_top={wall_ceiling})",
-            ),
-        ));
+    // A window is a rectangle cut into a wall, so every row it cuts has
+    // to be a row some `walls` member painted — not merely a row below
+    // the roof. The three ways to leave the masonry all cut silently
+    // before this asked the whole question: below the first course the
+    // rectangle carves through the floor slab, above the top course it
+    // punches through the roof voxels the envelope phase wrote at
+    // `y = wall_top + 1`, and between two `level` courses it hangs its
+    // glass in open air.
+    if !ctx.wall_column.contains_rows(y_start, sh) {
+        let reason = if ctx.wall_column.is_empty() {
+            format!(
+                "window at y={y_start} size={sw}x{sh} has no wall to cut into (this struct declares no `walls` with a positive `height=`)",
+            )
+        } else {
+            let last = y_start.saturating_add(sh).saturating_sub(1);
+            format!(
+                "window rows y={y_start}..={last} are not all inside one wall course (size={sw}x{sh}; the walls occupy {})",
+                ctx.wall_column,
+            )
+        };
+        diagnostics.push(diag_deferred_member_reason(member, &reason));
         return;
     }
     // Resolved below the two geometry checks above, not before them: both
@@ -5885,21 +5922,24 @@ struct s size=9x7
     }
 
     #[test]
-    fn even_span_gable_apex_rows_keep_their_own_facing() {
+    fn even_span_gable_apex_rows_face_away_from_the_ridge() {
         // The two apex faces agree on `id`, `half`, and `shape`, and differ
         // only in `facing`, so a test that asserts `half=top` cannot tell
         // them apart — and the two rows reach the palette through a face →
-        // slot table that a single wrong arm collapses into one entry. The
-        // low row keeps the low slope's direction and the high row the high
-        // slope's, so a collapsed table caps the ridge with two stairs
-        // pointing the same way.
+        // slot table that a single wrong arm collapses into one entry.
+        //
+        // The ridge runs between z=1 and z=2, so the low row points -z and
+        // the high row +z: each cap turns its open half under the ridge.
+        // Pointing them inward instead — which is what the table used to
+        // do — leaves that open half on the outer face, a 0.5 x 0.5
+        // undercut running the length of the roof.
         let src = "theme t:\n  slot w -> @cobblestone\n  slot r -> @spruce_stairs\n\nstruct s size=8x4\n  walls mat_slot=w height=4\n  roof kind=gable mat_slot=r\n";
         let out = lowered(src);
         let ba = out.structures.get("struct::s").unwrap();
         let apex_low = block_state_at(ba, 0, 6, 1);
         let apex_high = block_state_at(ba, 0, 6, 2);
-        assert_eq!(apex_low.properties.get("facing").unwrap(), "south");
-        assert_eq!(apex_high.properties.get("facing").unwrap(), "north");
+        assert_eq!(apex_low.properties.get("facing").unwrap(), "north");
+        assert_eq!(apex_high.properties.get("facing").unwrap(), "south");
     }
 
     // ---- site lowering: per-place IR emission and the coord solver ----
@@ -6905,8 +6945,9 @@ struct s size=9x7
         assert!(
             out.diagnostics
                 .iter()
-                .any(|d| d.primary.contains("extends above the wall column")),
-            "expected wall_top-gate defer, got {:?}",
+                .any(|d| d.primary
+                    == "window rows y=3..=4 are not all inside one wall course (size=1x2; the walls occupy y=1..=3)"),
+            "expected wall-column defer, got {:?}",
             out.diagnostics,
         );
     }
