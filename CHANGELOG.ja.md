@@ -25,6 +25,30 @@
 - *(redstone)* `BufferCoord::port` の型が `PortName` から `BufferSegment` になり、セルの入力
   ポートに加えてアクチュエータへ出る配線 (`"out"`) を指せるようになりました。ワイヤ形式は
   1 つのフラットな文字列のままで、`"out"` はこれまで取り得なかった値です。
+- *(core)* `pressure_plate` の評価フェーズが openings から fixtures になりました。
+  `spec/compilation.md` §4.1 がセンサを置いている場所です。同じセルを奪い合う plate と
+  `window` は従来は後に書かれた行が勝ちましたが、これからはどちらの順でも plate が勝ちます。
+- *(core)* 構造のパレットには、そのボクセルが指すブロックだけが並びます。最後の 1 ボクセルを
+  後続フェーズに覆われた材質は削除され、残りのスロットは詰め直されます。該当するビルドでは
+  `.nbt` のパレット、`cairn info` が報告するエントリ単位の行、`resolved_ir_hash` がいずれも
+  変わります。
+- *(core)* 同一フェーズの 2 つのメンバが 1 つのボクセルを別のブロックに書いた場合、
+  `W_PHASE_CONFLICT` を出すようになりました。last-wins 自体は §4.1 の規定どおり変わりませんが、
+  新しい警告を失敗として扱う消費者には、これまで出なかったものが出ます。
+- *(redstone)* `logic` の番号付けと報告がネストをまたいでソース順になりました。`level` の中の
+  binding が、その上に書かれたトップレベルの binding より小さいノード番号を取ることはなくなり
+  ます。これに伴い `E_LOGIC_MULTIPLE_DRIVERS` が指す行も入れ替わります。
+- *(redstone)* `cairn synth` はモジュールのスコープを「全 `struct` → 全 `def` → 全 `site`」では
+  なくソース順に走査します。3 種類を混在させたモジュールでは、dump の `scopes[]` の並びも診断の
+  並びも変わります。
+- *(cli)* `cairn lower` / `cairn info` / `cairn compile` は、note がソース中の別の位置を指す場合に
+  その note 自身の `file:line:col:` を前置するようになりました。`cairn check` と `cairn synth` は
+  既にそうしていました。行頭の `  note:` で note を拾っていたスクレイパは、それらの行を取り逃がします。
+- *(redstone)* `cairn_lang_redstone::DiagnosticNote` は、同じ 2 フィールドを別途宣言するのを
+  やめて `cairn_lang_core::check::DiagnosticNote` の re-export になりました。パスを名前で
+  参照しているだけのコードは互換です。redstone 側の型に `impl` を書いていた場合は core 側の型に
+  書くことになり、両方に書いていた場合は 1 つの型に二重に書くことになります。Rust API、
+  Internal ティア。
 
 ### 追加
 

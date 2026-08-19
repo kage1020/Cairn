@@ -5,7 +5,7 @@ use std::process::ExitCode;
 
 use cairn_lang_core::CAIRN_VERSION;
 use cairn_lang_core::block_array::{BlockArray, BlockArrayIr, lower_to_block_array};
-use cairn_lang_core::check::LineStarts;
+use cairn_lang_core::check::{DiagnosticNote as Note, LineStarts};
 use cairn_lang_core::lock::{
     HashHex, LockEdition, LockInputs, LockPlacement, LockTarget, LockWalkway, Lockfile,
     hash_resolved_ir, hash_source,
@@ -492,18 +492,7 @@ fn run_check(file: &Path, edition: Option<EditionArg>, format: CheckFormat) -> E
                     d.code.as_str(),
                     d.primary,
                 );
-                for note in &d.notes {
-                    if let Some(span) = note.span.as_ref() {
-                        let note_pos = lines.position(&source, span.start);
-                        println!("{}:{}:   note: {}", file.display(), note_pos, note.message);
-                    } else {
-                        // Informational note with no distinct secondary
-                        // location — indent without a file:L:C prefix so the
-                        // output doesn't read as a second pointer at the
-                        // primary span.
-                        println!("  note: {}", note.message);
-                    }
-                }
+                report_notes(Stream::Stdout, file, &source, &lines, &d.notes);
             }
         }
         CheckFormat::Json => {
@@ -616,9 +605,7 @@ fn run_info(file: &Path, editions: &[String], format: InfoFormat) -> ExitCode {
             d.code.as_str(),
             d.primary,
         );
-        for note in &d.notes {
-            eprintln!("  note: {}", note.message);
-        }
+        report_notes(Stream::Stderr, file, &source, &lines, &d.notes);
         if d.severity() == Severity::Error {
             has_error = true;
         }
@@ -835,9 +822,7 @@ fn run_lower(file: &Path, format: LowerFormat) -> ExitCode {
             d.code.as_str(),
             d.primary,
         );
-        for note in &d.notes {
-            eprintln!("  note: {}", note.message);
-        }
+        report_notes(Stream::Stderr, file, &source, &lines, &d.notes);
         if d.severity() == Severity::Error {
             has_error = true;
         }
@@ -1256,14 +1241,7 @@ fn report_core_diagnostics(
             d.code.as_str(),
             d.primary,
         );
-        for note in &d.notes {
-            if let Some(span) = note.span.as_ref() {
-                let note_pos = lines.position(source, span.start);
-                eprintln!("{}:{}:   note: {}", file.display(), note_pos, note.message);
-            } else {
-                eprintln!("  note: {}", note.message);
-            }
-        }
+        report_notes(Stream::Stderr, file, source, lines, &d.notes);
         if d.severity() == Severity::Error {
             has_error = true;
         }
@@ -1272,9 +1250,11 @@ fn report_core_diagnostics(
 }
 
 /// Print redstone synth diagnostics in the same format the core passes
-/// use. Kept as a separate function because the finding type is
-/// crate-local — merging the two would require an `impl` trait bound on
-/// the diagnostic shape that neither side owns.
+/// use. Kept as a separate function because the two `Diagnostic` types
+/// differ in the one field that matters here — their `code` — so a merged
+/// version would take a trait over the finding to read four fields off it.
+/// The notes are already shared: both are
+/// [`cairn_lang_core::check::DiagnosticNote`].
 fn report_synth_diagnostics(
     file: &Path,
     source: &str,
@@ -1292,14 +1272,7 @@ fn report_synth_diagnostics(
             d.code.as_str(),
             d.primary,
         );
-        for note in &d.notes {
-            if let Some(span) = note.span.as_ref() {
-                let note_pos = lines.position(source, span.start);
-                eprintln!("{}:{}:   note: {}", file.display(), note_pos, note.message);
-            } else {
-                eprintln!("  note: {}", note.message);
-            }
-        }
+        report_notes(Stream::Stderr, file, source, lines, &d.notes);
         if d.severity() == Severity::Error {
             has_error = true;
         }
@@ -1693,6 +1666,56 @@ fn enforce_version_floor(
     Err(ExitCode::from(1))
 }
 
+/// Which stream a command's findings go to.
+///
+/// `cairn check` writes its text output to stdout — its findings *are* the
+/// output — and every other command reports to stderr so the IR, the JSON,
+/// or the artifact path stays pipeable. Naming the choice is what lets the
+/// six copies of the note loop become one.
+#[derive(Clone, Copy)]
+enum Stream {
+    Stdout,
+    Stderr,
+}
+
+impl Stream {
+    fn line(self, text: &str) {
+        match self {
+            Self::Stdout => println!("{text}"),
+            Self::Stderr => eprintln!("{text}"),
+        }
+    }
+}
+
+/// Print one finding's `note:` lines under its primary.
+///
+/// A note that carries a span is printed with that position, the way the
+/// primary is: it names a second place in the file the reader has to go
+/// look at, and "declared here" with no *here* is not a note. A note
+/// without one is indented and left unprefixed, so a footer does not read
+/// as a second pointer at the primary span.
+///
+/// Shared rather than copied: this loop existed six times in this file,
+/// and three of the six had dropped the position. Both note types are
+/// `cairn_lang_core::check::DiagnosticNote` — `cairn-lang-redstone`
+/// re-exports it — so one signature covers every caller.
+fn report_notes(stream: Stream, file: &Path, source: &str, lines: &LineStarts, notes: &[Note]) {
+    for note in notes {
+        match note.span.as_ref() {
+            Some(span) => {
+                let pos = lines.position(source, span.start);
+                stream.line(&format!(
+                    "{}:{}:   note: {}",
+                    file.display(),
+                    pos,
+                    note.message
+                ));
+            }
+            None => stream.line(&format!("  note: {}", note.message)),
+        }
+    }
+}
+
 fn report_lowering_diagnostics(file: &Path, source: &str, block_ir: &BlockArrayIr) -> bool {
     let lines = LineStarts::new(source);
     let mut has_error = false;
@@ -1706,9 +1729,7 @@ fn report_lowering_diagnostics(file: &Path, source: &str, block_ir: &BlockArrayI
             d.code.as_str(),
             d.primary,
         );
-        for note in &d.notes {
-            eprintln!("  note: {}", note.message);
-        }
+        report_notes(Stream::Stderr, file, source, &lines, &d.notes);
         if d.severity() == Severity::Error {
             has_error = true;
         }
