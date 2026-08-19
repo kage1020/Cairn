@@ -376,6 +376,16 @@ pub enum DiagnosticCode {
     /// so the user gets a position-anchored signal at the offending span
     /// instead of a vanished walkway.
     ConnectArity,
+    /// Two members evaluated in the same phase wrote one voxel to different
+    /// blocks, so the block the build keeps is the one whose line comes
+    /// last. `spec/compilation.md` §4.1 opens by promising that "order
+    /// accidents are eliminated" and then grants last-wins to "local
+    /// overrides within the same phase" — an author restating a member is
+    /// the case that grant is for, and two footprints that happen to
+    /// intersect is not, yet the grid cannot tell them apart. Warned rather
+    /// than refused for that reason: the resolution the spec mandates still
+    /// happens, it just stops being invisible.
+    PhaseConflict,
 }
 
 impl DiagnosticCode {
@@ -428,6 +438,7 @@ impl DiagnosticCode {
             Self::DeferredConnect => "W_DEFERRED_CONNECT",
             Self::InvalidWalkwayIdent => "W_INVALID_WALKWAY_IDENT",
             Self::ConnectArity => "E_CONNECT_ARITY",
+            Self::PhaseConflict => "W_PHASE_CONFLICT",
         }
     }
 
@@ -504,7 +515,8 @@ impl DiagnosticCode {
             | Self::WalkwayBlocked
             | Self::DuplicateWalkway
             | Self::DeferredConnect
-            | Self::InvalidWalkwayIdent => Severity::Warning,
+            | Self::InvalidWalkwayIdent
+            | Self::PhaseConflict => Severity::Warning,
         }
     }
 }
@@ -944,6 +956,7 @@ mod tests {
                 "W_DUPLICATE_WALKWAY",
                 "W_INVALID_WALKWAY_IDENT",
                 "W_NO_THEME_BOUND",
+                "W_PHASE_CONFLICT",
                 "W_STRUCTURE_TOO_LARGE",
                 "W_STRUCT_NO_SIZE",
                 "W_THEME_VARIANT_REBOUND",
@@ -1005,6 +1018,7 @@ mod tests {
                 "W_DUPLICATE_WALKWAY",
                 "W_INVALID_WALKWAY_IDENT",
                 "W_NO_THEME_BOUND",
+                "W_PHASE_CONFLICT",
                 "W_STRUCTURE_TOO_LARGE",
                 "W_STRUCT_NO_SIZE",
                 "W_THEME_VARIANT_REBOUND",

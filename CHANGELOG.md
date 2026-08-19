@@ -54,6 +54,31 @@ and is a separate axis from the Minecraft target version.
 - *(redstone)* `BufferCoord::port` is now a `BufferSegment` rather than a `PortName`, so a
   buffer can name the wire out to an actuator (`"out"`) as well as a cell's input port. The
   wire form stays one flat string; `"out"` is a value it could not previously take.
+- *(core)* `pressure_plate` is evaluated in the fixtures phase rather than the openings phase,
+  which is where `spec/compilation.md` §4.1 puts a sensor. A plate and a `window` contesting one
+  cell used to resolve by whichever line came last; the plate now wins either way.
+- *(core)* a structure's palette lists only the blocks its voxels name. A material whose last
+  voxel a later phase covered is dropped and the remaining slots renumber, so the `.nbt` palette,
+  the per-entry rows `cairn info` reports, and `resolved_ir_hash` all change for any build that
+  had one.
+- *(core)* two members of one phase writing one voxel to different blocks now emit
+  `W_PHASE_CONFLICT`. Last-wins is unchanged — §4.1 mandates it — but a consumer that treats any
+  new warning as a failure will see one where it saw none.
+- *(redstone)* `logic` bindings are numbered and reported in source order across nesting, so a
+  binding inside a `level` no longer takes a lower node index than one written above it at the
+  top level. `E_LOGIC_MULTIPLE_DRIVERS` consequently swaps which of the two lines it anchors at.
+- *(redstone)* `cairn synth` walks a module's scopes in source order rather than every `struct`,
+  then every `def`, then every `site`. Both the order of `scopes[]` in a dump and the order of
+  the findings change for any module that interleaves the three.
+- *(cli)* `cairn lower`, `cairn info`, and `cairn compile` print a note's own `file:line:col:`
+  prefix when the note points at a second place in the source, which is what `cairn check` and
+  `cairn synth` already did. A scraper matching notes on a leading `  note:` will not see those
+  lines any more.
+- *(redstone)* `cairn_lang_redstone::DiagnosticNote` is a re-export of
+  `cairn_lang_core::check::DiagnosticNote` rather than a second declaration of the same two
+  fields. Source-compatible for anything that only names the path; a consumer that wrote an
+  `impl` for the redstone type now writes it for core's, and one that had both is writing it
+  twice for one type. Rust API, Internal tier.
 
 ## 2026.8.2 — 2026-08-01
 

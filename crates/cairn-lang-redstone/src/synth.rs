@@ -113,17 +113,54 @@ pub struct SynthOutput {
 /// that matters there is `E_UNKNOWN_KEYWORD`, and it is not this pass's
 /// to raise.
 pub fn synthesize(module: &IntentModule) -> SynthOutput {
+    // `IntentModule` files the three scope kinds into three vectors, each
+    // one internally in source order, so walking them one after another
+    // dumps every `struct` before every `def` however the module was
+    // written. Both readers of this walk are documented as source-ordered
+    // — the IR dump reads top-to-bottom the way the file does, and the
+    // findings come out in the order a reader meets the lines — so the
+    // three are merged back by span here instead.
+    let mut scopes: Vec<ModuleScope<'_>> =
+        Vec::with_capacity(module.structs.len() + module.defs.len() + module.sites.len());
+    scopes.extend(module.structs.iter().map(ModuleScope::Struct));
+    scopes.extend(module.defs.iter().map(ModuleScope::Def));
+    scopes.extend(module.sites.iter().map(ModuleScope::Site));
+    scopes.sort_by_key(ModuleScope::span);
+
     let mut out = SynthOutput::default();
-    for s in &module.structs {
-        lower_struct(s, &mut out);
-    }
-    for d in &module.defs {
-        lower_def(d, &mut out);
-    }
-    for s in &module.sites {
-        lower_site(s, &mut out);
+    for scope in scopes {
+        match scope {
+            ModuleScope::Struct(s) => lower_struct(s, &mut out),
+            ModuleScope::Def(d) => lower_def(d, &mut out),
+            ModuleScope::Site(s) => lower_site(s, &mut out),
+        }
     }
     out
+}
+
+/// One top-level scope of a module, whichever of the three kinds it is.
+///
+/// Exists so [`synthesize`] can hold all three in one list long enough to
+/// order them; every other pass reads the kind-specific vectors directly.
+enum ModuleScope<'a> {
+    Struct(&'a StructIr),
+    Def(&'a DefIr),
+    Site(&'a SiteIr),
+}
+
+impl ModuleScope<'_> {
+    /// Byte range of the `struct` / `def` / `site` block, as the sort
+    /// key. Two scopes cannot begin at the same byte, so the start alone
+    /// would order them — the end is carried anyway so this key matches
+    /// the one the diagnostic sort uses, and so a tie can never fall back
+    /// on the by-kind order this function exists to undo.
+    fn span(&self) -> (usize, usize) {
+        match self {
+            Self::Struct(s) => (s.span.start, s.span.end),
+            Self::Def(d) => (d.span.start, d.span.end),
+            Self::Site(s) => (s.span.start, s.span.end),
+        }
+    }
 }
 
 fn lower_struct(s: &StructIr, out: &mut SynthOutput) {
@@ -263,6 +300,23 @@ fn collect_body<'a>(
     for b in logic {
         collect_binding(b, scope, out);
     }
+    // The walk above reaches every `logic` line nested under a member
+    // before it reaches the scope's own, so a binding written later inside
+    // a `level` would otherwise be numbered — and reported — ahead of one
+    // written earlier at the top level. Source order is what both readers
+    // want: the node numbering is documented as reading top-to-bottom the
+    // way the file does, and `E_LOGIC_MULTIPLE_DRIVERS` names the *first*
+    // declaration in its note, which is only true if "first" means first
+    // in the file. `MemberBody` splits a body into a members vector and a
+    // logic vector, so the interleaving the author wrote survives nowhere
+    // but in the spans — sorting by them is the reconstruction, not a
+    // convenience.
+    //
+    // `resolve_drivers` sorts a list of its own for the same reason, and
+    // does not replace this one: that list decides which driver keeps a
+    // signal, while this one is the order the surviving bindings lower in,
+    // which is the order the IR's nodes are numbered in.
+    out.bindings.sort_by_key(|b| (b.span.start, b.span.end));
     out.asserts.extend(asserts);
 }
 

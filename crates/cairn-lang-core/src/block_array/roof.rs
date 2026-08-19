@@ -698,10 +698,14 @@ pub fn hip_voxels(roof_w: u32, roof_h: u32, wall_top: u32) -> Vec<HipVoxel> {
 
 fn emit_hip_frame(out: &mut Vec<HipVoxel>, lo_x: u32, hi_x: u32, lo_z: u32, hi_z: u32, y: u32) {
     // Corners go first so the iteration order is stable and palette
-    // intern order is deterministic. When the frame has collapsed to a
-    // single line on one axis the corner cells still emit (the four
-    // corners coincide with the only two slope cells; the last write at
-    // a given grid position wins, so corner shape ends up applied).
+    // intern order is deterministic. Each of the four is guarded against
+    // the axis it would collapse onto, and the row / column loops start
+    // one cell inside the corners, so no position is emitted twice however
+    // far the frame has collapsed — a frame one cell wide emits its north
+    // and south rows and nothing else. The lowering relies on that: a
+    // member writing one cell to two different blocks would be reported
+    // against itself, which is a finding about two source lines and has
+    // nothing to say about a generator.
     out.push(HipVoxel {
         pos: (lo_x, y, lo_z),
         face: HipFace::CornerNorthWest,
