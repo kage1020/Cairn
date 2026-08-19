@@ -36,6 +36,7 @@ lever      id=sw   side=front offset=2 y=1 -> sig.power
 button     id=bt   side=front               -> sig.ring
 daylight   id=dl   at=..                     -> sig.day
 observer   id=ob   at=.. facing=down         -> sig.tick
+pressure_plate id=pp at=front.outside offset=0 y=0 -> sig.step
 
 # actuator ← signal
 lamp       id=l1   at=..  lit_by=sig.lamps
@@ -49,9 +50,10 @@ to a sensor and each actuator key belongs to the one component that reads
 it, so a binding written anywhere else is `E_LOGIC_MISPLACED_BINDING` —
 `walls ... powered_by=sig.x` describes no circuit, and accepting it would
 put a port in the netlist with no component behind it. Of the components
-above, `door` and `pressure_plate` are the two the surface accepts today,
-so `lit_by=` / `powered_by=` / `fired_by=` have no host yet and are refused
-wherever they are written.
+above, `door` and `pressure_plate` are the two the surface accepts today —
+`lever`, `button`, `daylight`, `observer`, `lamp`, `piston`, and
+`dispenser` are not — so `lit_by=` / `powered_by=` / `fired_by=` have no
+host yet and are refused wherever they are written.
 
 The left-hand side of a `logic` line is a `sig.` name for the same reason:
 sensors emit into that namespace and actuators read from it, so a binding

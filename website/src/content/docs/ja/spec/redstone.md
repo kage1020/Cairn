@@ -34,6 +34,7 @@ lever      id=sw   side=front offset=2 y=1 -> sig.power
 button     id=bt   side=front               -> sig.ring
 daylight   id=dl   at=..                     -> sig.day
 observer   id=ob   at=.. facing=down         -> sig.tick
+pressure_plate id=pp at=front.outside offset=0 y=0 -> sig.step
 
 # アクチュエータ ← 信号
 lamp       id=l1   at=..  lit_by=sig.lamps
@@ -46,8 +47,10 @@ dispenser  id=ds   at=..  fired_by=sig.pulse facing=south
 それを読む 1 つのコンポーネントのものです。したがってそれ以外の場所に書かれたバインディングは
 `E_LOGIC_MISPLACED_BINDING` になります — `walls ... powered_by=sig.x` は回路を何も表しておらず、
 これを受理するとコンポーネントの実体がないポートがネットリストに入ります。上のコンポーネントの
-うち現在サーフェスが受理するのは `door` と `pressure_plate` の 2 つだけなので、`lit_by=` /
-`powered_by=` / `fired_by=` にはまだホストが存在せず、どこに書かれても拒否されます。
+うち現在サーフェスが受理するのは `door` と `pressure_plate` の 2 つだけで、`lever` /
+`button` / `daylight` / `observer` / `lamp` / `piston` / `dispenser` は受理されません。
+したがって `lit_by=` / `powered_by=` / `fired_by=` にはまだホストが存在せず、どこに
+書かれても拒否されます。
 
 `logic` 行の左辺が `sig.` 名であることも同じ理由です。センサはこの名前空間に発し、アクチュエータは
 ここから読むため、外側の名前で定義されたものは誰も消費できません (`E_LOGIC_INVALID_SIGNAL`)。

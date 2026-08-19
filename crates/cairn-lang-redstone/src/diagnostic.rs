@@ -160,10 +160,12 @@ pub enum DiagnosticCode {
     /// `dispenser`, and the sensor tail with a sensor — and the front end
     /// used to read the argument's *value* only, so `walls powered_by=`
     /// and `window -> sig.x` both became live ports on members with no
-    /// component behind them. Of §14.2's five hosts only `door` and
-    /// `pressure_plate` are keywords the surface accepts today, so the
-    /// three remaining actuator keys have no legal host at all yet. Fix:
-    /// move the binding onto the component that carries it.
+    /// component behind them. Of the components §14.2 names, only `door`
+    /// and `pressure_plate` are keywords the surface accepts today;
+    /// `lever`, `button`, `daylight`, `observer`, `lamp`, `piston`, and
+    /// `dispenser` are not, so the three actuator keys other than
+    /// `opened_by=` have no legal host at all yet. Fix: move the binding
+    /// onto the component that carries it.
     LogicMisplacedBinding,
     /// A `logic` line's left-hand side is not a `sig.`-headed name.
     /// Sensors emit into the `sig.` namespace and actuators consume from
@@ -184,7 +186,10 @@ pub enum DiagnosticCode {
     /// Deliberately keyed on the value rather than on a per-keyword
     /// argument schema — no such schema exists yet, and this closes the
     /// silent-actuator class without one, because no legal non-actuator
-    /// argument takes a `sig.` value.
+    /// argument inside a member's `intent_state` takes a `sig.` value. A
+    /// `[...]` selector can carry the same pair and is not walked, and an
+    /// actuator key holding a *non*-`sig.` value is not reached at all;
+    /// both are the value axis rather than this one.
     LogicUnknownBindingKey,
 }
 

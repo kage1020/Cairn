@@ -30,12 +30,21 @@
   `logic foo.bar = ...` は従来、誰も読めない信号のために実際のゲートを下ろし、配置座標を
   占有していました。
 - *(redstone)* 値が `sig.` 参照でありながらキーがアクチュエータキーでない引数は
-  `E_LOGIC_UNKNOWN_BINDING_KEY` になり、`did you mean` の note が付きます。
+  `E_LOGIC_UNKNOWN_BINDING_KEY` になります。キーがタイプミス閾値の内側なら `did you mean` の
+  note が、そうでなければ有効なキーの一覧が付きます。
   `door[id=x] oepend_by=sig.y` は従来アクチュエータを消し、`W_LOGIC_UNUSED_SIGNAL` だけを
   残していました。
 - *(redstone)* どのセンサも発さずどの `logic` 行も定義しない信号を名指しする `assert` は
-  `E_LOGIC_UNBOUND_SIGNAL` です。これを評価するシミュレータは未実装のままですが、存在しない名前に
-  対するプロパティはシミュレータを待っていたわけではありません。
+  `E_LOGIC_UNBOUND_SIGNAL` です。スコープの redstone 要素がその `assert` だけの場合も含みます。
+  これを評価するシミュレータは未実装のままですが、存在しない名前に対するプロパティはシミュレータを
+  待っていたわけではありません。また `assert` は消費側として数えられるようになったため、`assert` が
+  観測している信号は `W_LOGIC_UNUSED_SIGNAL` を受けなくなります。
+- *(redstone)* 信号が誰にも読まれないセンサは `W_LOGIC_UNUSED_SIGNAL` を受けます。
+  `pressure_plate ... -> sig.a` だけのスコープは従来黙って合成されていました — これはビルドに
+  残ったまま何にも繋がっていないプレートです。
+- *(redstone)* `SynthOutput::diagnostics` が span 順にソートされるようになりました (doc が
+  従来から約束していた挙動です)。`cairn synth` は渡された順に出力するため、複数の収集フェーズから
+  findings が出るモジュールでは並びが変わります。
 
 - *(redstone)* `PlacementIr::outputs` の型が `Vec<NetlistOutput>` から `Vec<PlacedOutputNode>`
   になりました。アクチュエータは配置される対象です。配置パスが割り当てたパッド座標と、セルと

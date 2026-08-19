@@ -28,11 +28,20 @@ and is a separate axis from the Minecraft target version.
   `E_LOGIC_INVALID_SIGNAL`. `logic foo.bar = ...` used to lower a real gate that took a placement
   coordinate for a signal nothing could read.
 - *(redstone)* An argument whose value is a `sig.` reference under a key that is not an actuator
-  key is `E_LOGIC_UNKNOWN_BINDING_KEY`, with a `did you mean` note. `door[id=x] oepend_by=sig.y`
-  used to make the actuator vanish with only a `W_LOGIC_UNUSED_SIGNAL` left behind.
+  key is `E_LOGIC_UNKNOWN_BINDING_KEY`, with a `did you mean` note when the key is within the
+  typo threshold and the list of valid keys otherwise. `door[id=x] oepend_by=sig.y` used to make
+  the actuator vanish with only a `W_LOGIC_UNUSED_SIGNAL` left behind.
 - *(redstone)* An `assert` naming a signal no sensor emits and no `logic` line defines is
-  `E_LOGIC_UNBOUND_SIGNAL`. The simulator that evaluates these is still unbuilt; a property over a
-  name that does not exist was never waiting on it.
+  `E_LOGIC_UNBOUND_SIGNAL`, including in a scope whose only redstone content is that `assert`.
+  The simulator that evaluates these is still unbuilt; a property over a name that does not exist
+  was never waiting on it. An `assert` also counts as a consumer, so a signal it observes no
+  longer earns `W_LOGIC_UNUSED_SIGNAL`.
+- *(redstone)* A sensor whose signal nothing reads earns `W_LOGIC_UNUSED_SIGNAL`. A scope whose
+  only content is `pressure_plate ... -> sig.a` used to synthesise in silence, which is a plate in
+  the build wired to nothing.
+- *(redstone)* `SynthOutput::diagnostics` is sorted by span, which is what its doc has always
+  promised. `cairn synth` prints them in the order it is handed, so a module whose findings come
+  from more than one collection phase reports them in a different order than before.
 
 - *(redstone)* `PlacementIr::outputs` is now `Vec<PlacedOutputNode>` rather than
   `Vec<NetlistOutput>`. An actuator is a placed object: it carries the pad coordinate the

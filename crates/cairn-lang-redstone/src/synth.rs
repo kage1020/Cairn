@@ -14,22 +14,29 @@
 //! canonicalise operand order before the CSE lookup so
 //! `sig.a or sig.b` and `sig.b or sig.a` share a node too.
 //!
-//! Detection contract:
-//! - **Sensor**: any member whose surface `-> sig.X` tail parses to a
-//!   [`ValueKind::DotRef`] with head `sig`. The current cairn-lang-core
-//!   `PressurePlate` recognizer is the only sensor role wired up today;
-//!   this pass is intentionally structural so a follow-up recognizer for
-//!   `lever` / `button` / `observer` gets input ports for free.
-//! - **Actuator**: any member carrying one of the argument keys listed in
-//!   [`ACTUATOR_ARG_KEYS`] (`opened_by` / `powered_by` / `lit_by` /
-//!   `fired_by`, per `spec/redstone` §14.2) whose value is `sig.X`.
+//! Detection contract, keyed on the member's role rather than on the
+//! shape of its arguments — `spec/redstone` §14.2 writes each binding on
+//! one component, and a binding elsewhere describes no circuit:
+//! - **Sensor**: a `-> sig.X` tail on a member whose keyword is in
+//!   [`SENSOR_HOSTS`]. A follow-up recognizer for `lever` / `button` /
+//!   `daylight` / `observer` costs one entry in that table.
+//! - **Actuator**: one of the argument keys in [`ACTUATOR_BINDINGS`]
+//!   (`opened_by` / `powered_by` / `lit_by` / `fired_by`) with a `sig.X`
+//!   value, on the component that table pairs the key with.
+//!
+//! Either binding written anywhere else is `E_LOGIC_MISPLACED_BINDING`,
+//! and a `sig.X` value under a key that is no binding at all is
+//! `E_LOGIC_UNKNOWN_BINDING_KEY`.
 //!
 //! Cascade suppression: any signal name that has already produced an
 //! `E_LOGIC_UNBOUND_SIGNAL` (either because a `logic` binding for it
 //! failed to lower or because a raw reference to it was unresolved) is
-//! recorded in `failed_lhs`. Every downstream reference — RHS lookups,
-//! actuator resolution — checks the set before emitting another
-//! diagnostic, so a single root cause produces exactly one finding.
+//! recorded in `failed_lhs`; a name a refused binding would have driven
+//! or consumed is recorded in `ScopeCollected`'s two `refused_*` sets.
+//! Every downstream reference — RHS lookups, actuator resolution, the
+//! `assert` walk, the unused-signal audit — checks those before emitting
+//! another diagnostic, so a single root cause produces exactly one
+//! finding.
 
 use std::collections::{HashMap, HashSet};
 
@@ -94,10 +101,17 @@ pub struct SynthOutput {
 
 /// Lower an [`IntentModule`] to a [`SynthOutput`].
 ///
-/// One [`LogicIr`] entry per struct / def / site whose body carries at
-/// least one sensor, actuator, or `logic` binding. Scopes with none of
-/// those are omitted so the JSON dump stays proportional to redstone
-/// content.
+/// One [`LogicIr`] entry per struct / def / site whose body carries any
+/// redstone content — a sensor, an actuator, a `logic` binding, or an
+/// `assert`. Scopes with none of those are omitted so the JSON dump stays
+/// proportional to redstone content.
+///
+/// Expects the caller to have run `cairn_lang_core::check` and stopped on
+/// its Errors, which `cairn synth` does. This pass reads a member's role
+/// to decide which bindings it may carry, so a member whose keyword the
+/// role table does not know is skipped rather than reported: the finding
+/// that matters there is `E_UNKNOWN_KEYWORD`, and it is not this pass's
+/// to raise.
 pub fn synthesize(module: &IntentModule) -> SynthOutput {
     let mut out = SynthOutput::default();
     for s in &module.structs {
@@ -155,6 +169,35 @@ fn lower_site(s: &SiteIr, out: &mut SynthOutput) {
 /// from [`LogicIr`] because a mid-collection error must never surface a
 /// half-built IR to the caller — the finish step decides whether the
 /// working set becomes an IR or an error report.
+impl ScopeCollected<'_> {
+    /// Whether this scope has anything for the finish step to do.
+    ///
+    /// Destructured rather than written as a list of `is_empty()` calls:
+    /// the list form is a hand-written predicate over a subset of the
+    /// fields, and a field added later lands in the gap silently. That is
+    /// what happened to `asserts` — a scope whose only redstone content
+    /// was an `assert` returned here before anything checked the signals
+    /// it names. Written this way the next field is a compile error.
+    fn has_work(&self) -> bool {
+        let Self {
+            sensors,
+            actuators,
+            bindings,
+            asserts,
+            diagnostics,
+            refused_drivers,
+            refused_consumers,
+        } = self;
+        !(sensors.is_empty()
+            && actuators.is_empty()
+            && bindings.is_empty()
+            && asserts.is_empty()
+            && diagnostics.is_empty()
+            && refused_drivers.is_empty()
+            && refused_consumers.is_empty())
+    }
+}
+
 #[derive(Debug, Default)]
 struct ScopeCollected<'a> {
     /// Findings raised while walking the body. Collection is where a
@@ -227,23 +270,27 @@ fn collect_member<'a>(m: &'a Member, scope: ScopeRef<'_>, out: &mut ScopeCollect
     // A member whose keyword is not in the role table is already
     // `E_UNKNOWN_KEYWORD` from the `check` pass. Reading its bindings
     // could only add a second finding about a component that does not
-    // exist, so the whole member is left to that one.
+    // exist, so the whole member is left to that one — but what it would
+    // have driven or consumed is still recorded, or the author of
+    // `lamp id=l1 lit_by=sig.x` is told that `sig.x` is unconsumed on top
+    // of being told that `lamp` is not a keyword.
     let unknown_keyword = matches!(m.role, MemberRole::Other(_));
 
     // Sensor: `-> sig.X` tail on the surface line.
     if let Some(binding) = &m.binding
         && let ValueKind::DotRef(dr) = &binding.kind
         && dr.head() == SIGNAL_HEAD
-        && !unknown_keyword
     {
-        if SENSOR_HOSTS.contains(&MemberRole::keyword(&m.role)) {
+        if !unknown_keyword && SENSOR_HOSTS.contains(&m.role.keyword()) {
             out.sensors.push(PendingSensor {
                 name: dr.clone(),
                 span: binding.span.clone(),
             });
         } else {
-            out.diagnostics
-                .push(diag_misplaced_sensor(m, binding, scope));
+            if !unknown_keyword {
+                out.diagnostics
+                    .push(diag_misplaced_sensor(m, binding, scope));
+            }
             out.refused_drivers.insert(dr.clone());
         }
     }
@@ -254,25 +301,29 @@ fn collect_member<'a>(m: &'a Member, scope: ScopeRef<'_>, out: &mut ScopeCollect
         let ValueKind::DotRef(dr) = &vspan.value.kind else {
             continue;
         };
-        if dr.head() != SIGNAL_HEAD || unknown_keyword {
+        if dr.head() != SIGNAL_HEAD {
             continue;
         }
         let Some((_, host)) = ACTUATOR_BINDINGS.iter().find(|(k, _)| k == key) else {
             // The value is a signal, so the author meant to wire
             // something; the key is not a binding anyone reads.
-            out.diagnostics
-                .push(diag_unknown_binding_key(m, key, vspan, scope));
+            if !unknown_keyword {
+                out.diagnostics
+                    .push(diag_unknown_binding_key(m, key, vspan, scope));
+            }
             out.refused_consumers.insert(dr.clone());
             continue;
         };
-        if MemberRole::keyword(&m.role) == *host {
+        if !unknown_keyword && m.role.keyword() == *host {
             out.actuators.push(PendingActuator {
                 driver_name: dr.clone(),
                 span: vspan.span.clone(),
             });
         } else {
-            out.diagnostics
-                .push(diag_misplaced_actuator(m, key, host, vspan, scope));
+            if !unknown_keyword {
+                out.diagnostics
+                    .push(diag_misplaced_actuator(m, key, host, vspan, scope));
+            }
             out.refused_consumers.insert(dr.clone());
         }
     }
@@ -319,6 +370,12 @@ fn collect_binding<'a>(b: &'a LogicBinding, scope: ScopeRef<'_>, out: &mut Scope
             )),
         );
         out.refused_drivers.insert(b.lhs.clone());
+        // The left-hand side is what was refused; the right-hand side is
+        // still a list of signals this line reads, and warning that they
+        // are unconsumed would be the same mistake reported twice.
+        let mut refs = HashSet::new();
+        collect_refs(&b.rhs, &mut refs);
+        out.refused_consumers.extend(refs);
         return;
     }
     out.bindings.push(PendingBinding {
@@ -337,7 +394,7 @@ fn diag_misplaced_sensor(m: &Member, binding: &Value, scope: ScopeRef<'_>) -> Di
             "{label} `{keyword}` cannot emit a signal; only a sensor carries a \
              `-> {SIGNAL_HEAD}.<name>` tail",
             label = scope.label(),
-            keyword = MemberRole::keyword(&m.role),
+            keyword = m.role.keyword(),
         ),
     )
     .with_note(m.span.clone(), "declared here")
@@ -372,7 +429,7 @@ fn diag_misplaced_actuator(
             "{label} `{key}=` binds a signal to a `{host}`, and this member is a \
              `{keyword}`",
             label = scope.label(),
-            keyword = MemberRole::keyword(&m.role),
+            keyword = m.role.keyword(),
         ),
     )
     .with_note(m.span.clone(), "declared here")
@@ -419,18 +476,14 @@ fn diag_unknown_binding_key(
 /// warnings that survive alongside a well-formed IR — appends to
 /// `out.diagnostics`. Each step below owns one specific transformation of
 /// the working set so the top-level flow reads as a linear pipeline.
-fn finish_scope(scope: ScopeRef<'_>, collected: ScopeCollected<'_>, out: &mut SynthOutput) {
-    if collected.sensors.is_empty()
-        && collected.actuators.is_empty()
-        && collected.bindings.is_empty()
-        && collected.diagnostics.is_empty()
-    {
+fn finish_scope(scope: ScopeRef<'_>, mut collected: ScopeCollected<'_>, out: &mut SynthOutput) {
+    if !collected.has_work() {
         return;
     }
 
     let ScopeRef { kind, name } = scope;
     let mut ir = LogicIr::new();
-    let mut diagnostics = collected.diagnostics;
+    let mut diagnostics = std::mem::take(&mut collected.diagnostics);
 
     let winners = resolve_drivers(
         &collected.sensors,
@@ -439,9 +492,9 @@ fn finish_scope(scope: ScopeRef<'_>, collected: ScopeCollected<'_>, out: &mut Sy
         &mut diagnostics,
     );
 
-    register_sensors(&collected.sensors, &winners, &mut ir);
+    let bindings_by_lhs = winners.bindings();
 
-    let bindings_by_lhs = winners.bindings;
+    register_sensors(&collected.sensors, &winners, &mut ir);
 
     let failed_lhs = lower_all_bindings(
         &collected.bindings,
@@ -463,9 +516,8 @@ fn finish_scope(scope: ScopeRef<'_>, collected: ScopeCollected<'_>, out: &mut Sy
     );
 
     audit_unused_signals(
-        &collected.bindings,
-        &collected.actuators,
-        &collected.refused_consumers,
+        &collected,
+        &ir,
         &bindings_by_lhs,
         &failed_lhs,
         scope,
@@ -477,9 +529,18 @@ fn finish_scope(scope: ScopeRef<'_>, collected: ScopeCollected<'_>, out: &mut Sy
         &ir,
         &bindings_by_lhs,
         &collected.refused_drivers,
+        &failed_lhs,
         scope,
         &mut diagnostics,
     );
+
+    // Collection raises its findings before the phases run, and each
+    // phase raises in its own order, so which finding comes first has
+    // never tracked which line comes first. `SynthOutput::diagnostics`
+    // promises source order and `cairn synth` prints them in the order it
+    // is handed, so the sort belongs here. Stable, so two findings on one
+    // span keep the order the passes raised them in.
+    diagnostics.sort_by_key(|d| (d.span.start, d.span.end));
 
     let scope_has_error = diagnostics.iter().any(|d| d.severity() == Severity::Error);
     out.diagnostics.extend(diagnostics);
@@ -492,31 +553,58 @@ fn finish_scope(scope: ScopeRef<'_>, collected: ScopeCollected<'_>, out: &mut Sy
     }
 }
 
-/// Which source drives a signal, for the one message that has to name both
-/// sides of a collision.
+/// Which source drives a signal, and where in its list it sits.
+///
+/// The kind and the index travel together because they are one fact: the
+/// index means nothing without knowing which list it points into. Carried
+/// as two fields they read as independent, and the correlation lives in
+/// whoever remembers to check the tag first.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum DriverKind {
-    /// A sensor's `-> sig.X` tail.
-    Sensor,
-    /// A `logic sig.X = ...` left-hand side.
-    Binding,
+enum DriverSource {
+    /// Index into the scope's collected sensors — a `-> sig.X` tail.
+    Sensor(usize),
+    /// Index into the scope's collected bindings — a `logic sig.X = ...`
+    /// left-hand side.
+    Binding(usize),
 }
 
 /// One source that drives one signal.
+#[derive(Debug)]
 struct Driver<'a> {
     name: &'a DottedRef,
-    kind: DriverKind,
+    source: DriverSource,
     span: &'a Span,
-    /// Index into the collected sensors or bindings, by `kind`.
-    index: usize,
 }
 
 /// The single driver each signal keeps, once the collisions are reported.
-struct Winners {
-    /// Indices into the collected sensors that own their signal.
-    sensors: HashSet<usize>,
-    /// LHS name to the index of the binding that owns it.
-    bindings: HashMap<DottedRef, usize>,
+///
+/// One map keyed by the signal, rather than a sensor set beside a binding
+/// map: this PR's whole claim is that a signal carries one driver, and two
+/// containers can hold a name in both at once. Here that state cannot be
+/// written down.
+#[derive(Debug, Default)]
+struct Winners(HashMap<DottedRef, DriverSource>);
+
+impl Winners {
+    /// Whether the sensor at `index` is the one its signal kept.
+    fn owns_sensor(&self, index: usize) -> bool {
+        self.0
+            .values()
+            .any(|source| *source == DriverSource::Sensor(index))
+    }
+
+    /// LHS name to the index of the binding that owns it — the shape the
+    /// lowering passes take, since they test ownership by comparing an
+    /// index against the one the name maps to.
+    fn bindings(&self) -> HashMap<DottedRef, usize> {
+        self.0
+            .iter()
+            .filter_map(|(name, source)| match source {
+                DriverSource::Binding(index) => Some((name.clone(), *index)),
+                DriverSource::Sensor(_) => None,
+            })
+            .collect()
+    }
 }
 
 /// Reduce every source that drives a signal to one, reporting the rest.
@@ -547,15 +635,13 @@ fn resolve_drivers(
     let mut drivers: Vec<Driver<'_>> = Vec::with_capacity(sensors.len() + bindings.len());
     drivers.extend(sensors.iter().enumerate().map(|(index, s)| Driver {
         name: &s.name,
-        kind: DriverKind::Sensor,
+        source: DriverSource::Sensor(index),
         span: &s.span,
-        index,
     }));
     drivers.extend(bindings.iter().enumerate().map(|(index, b)| Driver {
         name: b.lhs,
-        kind: DriverKind::Binding,
+        source: DriverSource::Binding(index),
         span: &b.span,
-        index,
     }));
     // Ordered by where the author wrote them, which is what makes "first
     // declared here" true. `sort_by_key` is stable, so a sensor tail and a
@@ -563,23 +649,13 @@ fn resolve_drivers(
     // they were collected in rather than swapping between runs.
     drivers.sort_by_key(|d| (d.span.start, d.span.end));
 
-    let mut winners = Winners {
-        sensors: HashSet::new(),
-        bindings: HashMap::new(),
-    };
+    let mut winners = Winners::default();
     let mut first: HashMap<&DottedRef, &Driver<'_>> = HashMap::new();
     let mut reported: HashSet<&DottedRef> = HashSet::new();
     for driver in &drivers {
         let Some(incumbent) = first.get(driver.name) else {
             first.insert(driver.name, driver);
-            match driver.kind {
-                DriverKind::Sensor => {
-                    winners.sensors.insert(driver.index);
-                }
-                DriverKind::Binding => {
-                    winners.bindings.insert(driver.name.clone(), driver.index);
-                }
-            }
+            winners.0.insert(driver.name.clone(), driver.source);
             continue;
         };
         // One finding per signal. A third driver adds nothing an author
@@ -601,31 +677,32 @@ fn diag_multiple_drivers(
     first: &Driver<'_>,
     scope: ScopeRef<'_>,
 ) -> Diagnostic {
+    use DriverSource::{Binding, Sensor};
     let label = scope.label();
     let name = later.name;
-    let primary = match (later.kind, first.kind) {
-        (DriverKind::Binding, DriverKind::Binding) => format!(
+    let primary = match (later.source, first.source) {
+        (Binding(_), Binding(_)) => format!(
             "{label} `logic {name} = ...` redefines a signal already driven earlier in this scope",
         ),
-        (DriverKind::Binding, DriverKind::Sensor) => {
+        (Binding(_), Sensor(_)) => {
             format!("{label} `logic {name} = ...` conflicts with a sensor already driving `{name}`")
         }
-        (DriverKind::Sensor, DriverKind::Binding) => {
+        (Sensor(_), Binding(_)) => {
             format!("{label} this sensor emits `{name}`, which a `logic` line already drives")
         }
-        (DriverKind::Sensor, DriverKind::Sensor) => {
+        (Sensor(_), Sensor(_)) => {
             format!("{label} this sensor emits `{name}`, which another sensor already emits")
         }
     };
-    let note = match first.kind {
-        DriverKind::Sensor => "sensor emits this signal here",
-        DriverKind::Binding => "first declared here",
+    let note = match first.source {
+        Sensor(_) => "sensor emits this signal here",
+        Binding(_) => "first declared here",
     };
-    let fix = match (later.kind, first.kind) {
-        (DriverKind::Sensor, DriverKind::Sensor) => format!(
+    let fix = match (later.source, first.source) {
+        (Sensor(_), Sensor(_)) => format!(
             "Fix: a signal carries one driver. Emit the two sensors into names of their own and combine them, e.g. `logic {name} = {name}1 or {name}2`.",
         ),
-        (DriverKind::Binding, DriverKind::Binding) => {
+        (Binding(_), Binding(_)) => {
             "Fix: rename this binding, or delete one of the `logic` lines so the signal has a single driver."
                 .to_owned()
         }
@@ -643,22 +720,36 @@ fn diag_multiple_drivers(
 
 /// Check every signal an `assert` names against the scope's definitions.
 ///
-/// The simulator that would evaluate these is unbuilt, and the spec says
-/// so — but a property over a name nothing emits and nothing defines is not
-/// waiting on the simulator to be wrong. It is the same finding a `logic`
-/// line naming that signal earns, so it is the same code.
+/// The simulator that would evaluate these is unbuilt — `roadmap.md`
+/// schedules it for M6 — but a property over a name nothing emits and
+/// nothing defines is not waiting on the simulator to be wrong. It is the
+/// same finding a `logic` line naming that signal earns, so it is the
+/// same code.
 fn check_assert_refs(
     asserts: &[&AssertIr],
     ir: &LogicIr,
     bindings_by_lhs: &HashMap<DottedRef, usize>,
     refused_drivers: &HashSet<DottedRef>,
+    failed_lhs: &HashSet<DottedRef>,
     scope: ScopeRef<'_>,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
+    let mut reported: HashSet<&DottedRef> = HashSet::new();
     for assertion in asserts {
         let span = assertion.span();
         for name in assertion.signal_refs() {
-            if ir.signal_defs.contains_key(name) || refused_drivers.contains(name) {
+            // `failed_lhs` joins the two sets the rest of the pass
+            // consults: a `logic` line that failed to lower has already
+            // been reported, and its LHS *is* defined by a `logic` line —
+            // saying otherwise here would be false as well as second.
+            // A property may also name one signal twice
+            // (`always(sig.x -> eventually sig.x ...)`), and one name is
+            // one finding.
+            if ir.signal_defs.contains_key(name)
+                || refused_drivers.contains(name)
+                || failed_lhs.contains(name)
+                || !reported.insert(name)
+            {
                 continue;
             }
             diagnostics.push(unbound_signal_diagnostic(
@@ -667,6 +758,7 @@ fn check_assert_refs(
                 span.clone(),
                 ir,
                 bindings_by_lhs,
+                failed_lhs,
                 "an `assert`",
             ));
         }
@@ -687,7 +779,7 @@ fn check_assert_refs(
 /// one the author was told to remove.
 fn register_sensors(sensors: &[PendingSensor], winners: &Winners, ir: &mut LogicIr) {
     for (index, sensor) in sensors.iter().enumerate() {
-        if !winners.sensors.contains(&index) {
+        if !winners.owns_sensor(index) {
             continue;
         }
         let idx = safe_index(ir.inputs.len());
@@ -700,11 +792,17 @@ fn register_sensors(sensors: &[PendingSensor], winners: &Winners, ir: &mut Logic
     }
 }
 
-/// Lower each first-declared binding's RHS into the DAG. Bindings whose
-/// LHS collides with a sensor are already flagged and skipped so the
-/// sensor's `SignalRef` remains the sole definition. Returns the set of
-/// LHS names whose lowering failed — the actuator resolution and unused
-/// audit consult it to suppress cascaded diagnostics.
+/// Lower the RHS of each binding that owns its LHS into the DAG.
+///
+/// Ownership is [`resolve_drivers`]' answer, so a binding that lost its
+/// name — to a sensor or to another `logic` line, whichever came first in
+/// the file — is not in `bindings_by_lhs` and never reaches here. "First"
+/// means first by span rather than first collected, which differ whenever
+/// a `level` block is involved.
+///
+/// Returns the set of LHS names whose lowering failed — the actuator
+/// resolution, the `assert` walk, and the unused audit consult it to
+/// suppress cascaded diagnostics.
 fn lower_all_bindings<'a>(
     bindings: &'a [PendingBinding<'a>],
     bindings_by_lhs: &HashMap<DottedRef, usize>,
@@ -779,6 +877,7 @@ fn resolve_actuators(
                 act.span.clone(),
                 ir,
                 bindings_by_lhs,
+                failed_lhs,
                 "actuator argument",
             )),
         }
@@ -790,14 +889,20 @@ fn resolve_actuators(
 /// bindings (`logic sig.a = sig.b`) that never produced a gate node and
 /// would be invisible to a gate-only reachability walk.
 fn audit_unused_signals(
-    bindings: &[PendingBinding<'_>],
-    actuators: &[PendingActuator],
-    refused_consumers: &HashSet<DottedRef>,
+    collected: &ScopeCollected<'_>,
+    ir: &LogicIr,
     bindings_by_lhs: &HashMap<DottedRef, usize>,
     failed_lhs: &HashSet<DottedRef>,
     scope: ScopeRef<'_>,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
+    let ScopeCollected {
+        bindings,
+        actuators,
+        asserts,
+        refused_consumers,
+        ..
+    } = collected;
     let mut consumed: HashSet<DottedRef> = HashSet::new();
     for b in bindings {
         collect_refs(b.rhs, &mut consumed);
@@ -805,10 +910,43 @@ fn audit_unused_signals(
     for act in actuators {
         consumed.insert(act.driver_name.clone());
     }
+    // A property observes wires — that is what §14.7 is for — so a signal
+    // an `assert` names is read even when no actuator reads it. Checking
+    // an assert's references and then not counting them would warn that a
+    // signal is unused in the one place the author wrote down what it is
+    // for.
+    for assertion in asserts {
+        consumed.extend(assertion.signal_refs().into_iter().cloned());
+    }
     // An actuator the front end refused still says what the author meant
     // to wire. Warning that the signal is unconsumed on top of the finding
     // that took the actuator away is the same mistake reported twice.
     consumed.extend(refused_consumers.iter().cloned());
+
+    // Sensors are audited from the result side rather than by shape: a
+    // scope whose only content is `pressure_plate ... -> sig.a` lowers to
+    // an IR with one input and no output, which is a build with a plate
+    // wired to nothing — the same silence this pass exists to break.
+    for input in &ir.inputs {
+        if !consumed.contains(&input.name) {
+            diagnostics.push(
+                Diagnostic::new(
+                    DiagnosticCode::LogicUnusedSignal,
+                    input.span.clone(),
+                    format!(
+                        "{label} this sensor emits `{name}`, which is never consumed by an \
+                         actuator, downstream logic, or an `assert`",
+                        label = scope.label(),
+                        name = input.name,
+                    ),
+                )
+                .with_footer(
+                    "Fix: wire an actuator to this signal, reference it from a `logic` binding \
+                     or an `assert`, or remove the sensor's `-> sig.<name>` tail.",
+                ),
+            );
+        }
+    }
     for (idx, b) in bindings.iter().enumerate() {
         if bindings_by_lhs.get(b.lhs).copied() != Some(idx) || failed_lhs.contains(b.lhs) {
             continue;
@@ -919,7 +1057,17 @@ fn lower_binding<'a>(
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Result<SignalRef, LoweringFailed> {
     let Some(&binding_idx) = ctx.bindings_by_lhs.get(lhs) else {
-        return Err(LoweringFailed);
+        // `LoweringFailed` is defined as "a diagnostic has been queued",
+        // and there is none to queue here — the caller is asking to lower
+        // a name no binding owns. Both callers check first, so this is
+        // unreachable; returning the error silently instead would put the
+        // name into `failed_lhs` and suppress the report a third caller
+        // owes the user, which is the class this whole pass exists to
+        // close.
+        unreachable!(
+            "lower_binding called for `{lhs}`, which owns no binding — the caller must test \
+             `bindings_by_lhs` first"
+        )
     };
     let binding_span = ctx.bindings[binding_idx].span.clone();
     let rhs = ctx.bindings[binding_idx].rhs;
@@ -1126,6 +1274,7 @@ fn resolve_ref<'a>(
         binding_span.clone(),
         ir,
         ctx.bindings_by_lhs,
+        &ctx.failed_lhs,
         "`logic` binding",
     ));
     ctx.failed_lhs.insert(dr.clone());
@@ -1175,13 +1324,23 @@ fn unbound_signal_diagnostic(
     span: Span,
     ir: &LogicIr,
     bindings_by_lhs: &HashMap<DottedRef, usize>,
+    failed_lhs: &HashSet<DottedRef>,
     source_label: &str,
 ) -> Diagnostic {
+    // A name whose `logic` line failed to lower is a key in
+    // `bindings_by_lhs` and is not a signal anyone can rename to. Offering
+    // it made the finding contradict itself: "no `logic` line defines
+    // `sig.x`" followed by "valid signals in scope: sig.x".
     let mut candidates: Vec<String> = ir
         .inputs
         .iter()
         .map(|p| p.name.to_string())
-        .chain(bindings_by_lhs.keys().map(std::string::ToString::to_string))
+        .chain(
+            bindings_by_lhs
+                .keys()
+                .filter(|lhs| !failed_lhs.contains(*lhs))
+                .map(std::string::ToString::to_string),
+        )
         .collect();
     candidates.sort();
     candidates.dedup();
@@ -1223,8 +1382,6 @@ fn collect_refs(expr: &Expr, out: &mut HashSet<DottedRef>) {
     }
 }
 
-/// Prefix every diagnostic's primary message with the scope kind + name so
-/// a multi-scope module's findings read unambiguously in the CLI dump.
 /// Which scope a pass is working on, as the diagnostics need it.
 ///
 /// Carried as one value rather than the `(kind, name)` pair every function
@@ -1244,6 +1401,8 @@ impl ScopeRef<'_> {
     }
 }
 
+/// Prefix every diagnostic's primary message with the scope kind + name so
+/// a multi-scope module's findings read unambiguously in the CLI dump.
 fn scope_label(kind: ScopeKind, name: &str) -> String {
     let label = match kind {
         ScopeKind::Struct => "struct",

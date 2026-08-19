@@ -253,3 +253,39 @@ fn one_sensor_per_signal_still_lowers_untouched() {
     assert_eq!(entry.ir.inputs.len(), 2);
     assert_eq!(entry.ir.outputs.len(), 1);
 }
+
+#[test]
+fn a_nested_binding_above_a_sensor_is_still_the_first_driver() {
+    // The strongest available evidence for "first means first in the
+    // file": collection is depth-first, so a `logic` line inside a `level`
+    // is collected *after* the members below it, and the span sort is the
+    // only thing that puts it back where the author wrote it.
+    let source = concat!(
+        "@cairn 2026.06
+",
+        "
+",
+        "struct gate size=5x5
+",
+        "  pressure_plate id=q at=inside.front offset=0 y=0 -> sig.b
+",
+        "  level y=0
+",
+        "    logic sig.a = sig.b and sig.b
+",
+        "  pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a
+",
+        "  door id=front side=front at=center
+",
+        "  door[id=front] opened_by=sig.a
+",
+    );
+    let out = synth_source(source);
+    let found = drivers_findings(&out);
+    assert_eq!(found.len(), 1, "{found:#?}");
+    assert_eq!(
+        anchor_and_note(source, found[0]),
+        (7, 6),
+        "the nested `logic` line on line 6 is written above the sensor on          line 7, so the sensor is the redefinition",
+    );
+}
