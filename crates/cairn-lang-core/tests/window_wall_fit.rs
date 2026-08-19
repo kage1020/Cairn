@@ -245,6 +245,28 @@ fn a_window_inside_a_level_is_checked_against_the_rows_it_lands_on() {
     );
 }
 
+#[test]
+fn a_height_on_a_member_that_is_not_a_wall_builds_no_wall() {
+    // `height=` is not a `floor` argument, and the openings pass reads
+    // arguments by name — so a column built from every member that
+    // happens to carry one would let `floor height=3` stand in for the
+    // masonry that is not there and carve a window into open air. The
+    // roles are what make a row a wall row.
+    let src = format!(
+        "{THEME}struct t size=5x5\n  \
+         floor mat_slot=floor height=3\n  \
+         window side=front y=1 offset=2 size=1x2 mat_slot=glass\n",
+    );
+    let out = lowered(&src);
+    assert_eq!(
+        defers(&out),
+        [
+            "window at y=1 size=1x2 has no wall to cut into (this struct declares no `walls` with a positive `height=`)"
+        ],
+    );
+    assert!(!contains_id(only_structure(&out), "minecraft:glass_pane"));
+}
+
 // --------------------------------------------- the walkway port agrees
 
 /// A two-hut site whose walkway anchors on the window `a.top`.

@@ -6936,10 +6936,11 @@ struct s size=9x7
     }
 
     #[test]
-    fn window_carve_cannot_exceed_wall_top() {
-        // walls height=3 → wall_top=3, roof kind=flat → dims.y=5. A mat_slot-less
-        // window at y=3 size=1x2 would reach y=4 (roof deck) without a defer
-        // if the check only gated on dims.y. It must defer.
+    fn window_carve_stops_at_the_top_of_the_wall_not_the_top_of_the_volume() {
+        // walls height=3 fills rows 1..=3, roof kind=flat puts a deck at
+        // y=4 and takes dims.y to 5. A mat_slot-less window at y=3 size=1x2
+        // carves to air, so gating on the volume rather than on the wall
+        // would punch a hole through the deck. It must defer.
         let src = "theme t:\n  slot w -> @cobblestone\n  slot r -> @spruce_stairs\n\nstruct s size=5x5\n  walls mat_slot=w height=3\n  roof kind=flat mat_slot=r\n  window side=front y=3 size=1x2\n";
         let out = lowered(src);
         assert!(
