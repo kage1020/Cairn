@@ -289,3 +289,38 @@ fn a_nested_binding_above_a_sensor_is_still_the_first_driver() {
         "the nested `logic` line on line 6 is written above the sensor on          line 7, so the sensor is the redefinition",
     );
 }
+
+#[test]
+fn a_binding_that_lost_its_name_is_not_lowered() {
+    // Losing the name has to mean losing the lowering, or the pass goes on
+    // to report the RHS of a line it has already told the author to
+    // delete. The sensor and the binding are each the first of their own
+    // list, so a `Winners` that mixed the two index spaces would map
+    // `sig.a` to index 0 and match this binding by accident.
+    let source = concat!(
+        "@cairn 2026.06
+",
+        "
+",
+        "struct gate size=5x5
+",
+        "  pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a
+",
+        "  logic sig.a = not sig.undef
+",
+        "  door id=front side=front at=center
+",
+        "  door[id=front] opened_by=sig.a
+",
+    );
+    let out = synth_source(source);
+    assert_eq!(
+        out.diagnostics
+            .iter()
+            .map(|d| d.code.as_str())
+            .collect::<Vec<_>>(),
+        ["E_LOGIC_MULTIPLE_DRIVERS"],
+        "`sig.undef` belongs to the line that lost, so it is never looked          at: {:#?}",
+        out.diagnostics,
+    );
+}
