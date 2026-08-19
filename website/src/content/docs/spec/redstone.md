@@ -36,6 +36,7 @@ lever      id=sw   side=front offset=2 y=1 -> sig.power
 button     id=bt   side=front               -> sig.ring
 daylight   id=dl   at=..                     -> sig.day
 observer   id=ob   at=.. facing=down         -> sig.tick
+pressure_plate id=pp at=front.outside offset=0 y=0 -> sig.step
 
 # actuator ← signal
 lamp       id=l1   at=..  lit_by=sig.lamps
@@ -43,6 +44,27 @@ piston     id=p1   at=..  powered_by=sig.mem facing=up sticky=true
 door       id=d1   ..     opened_by=sig.power
 dispenser  id=ds   at=..  fired_by=sig.pulse facing=south
 ```
+
+The pairing above is normative, not illustrative. A `-> sig.X` tail belongs
+to a sensor and each actuator key belongs to the one component that reads
+it, so a binding written anywhere else is `E_LOGIC_MISPLACED_BINDING` —
+`walls ... powered_by=sig.x` describes no circuit, and accepting it would
+put a port in the netlist with no component behind it. Of the components
+above, `door` and `pressure_plate` are the two the surface accepts today —
+`lever`, `button`, `daylight`, `observer`, `lamp`, `piston`, and
+`dispenser` are not — so `lit_by=` / `powered_by=` / `fired_by=` have no
+host yet and are refused wherever they are written.
+
+The left-hand side of a `logic` line is a `sig.` name for the same reason:
+sensors emit into that namespace and actuators read from it, so a binding
+named outside it defines something nothing can consume
+(`E_LOGIC_INVALID_SIGNAL`).
+
+An argument whose *value* is a `sig.` reference under a key that is not one
+of the four is `E_LOGIC_UNKNOWN_BINDING_KEY`. The value says a signal was
+meant to be wired and the key says nothing reads it, which is the shape a
+typo takes: `oepend_by=sig.power` used to make the actuator disappear in
+silence.
 
 ## 14.3 The logic layer = a signal dependency graph (DAG)
 The author writes dependencies among signals (boolean combination + macro application). This is a pure,
