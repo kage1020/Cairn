@@ -4,9 +4,16 @@ use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
 
-use cairn_lang_core::CAIRN_VERSION;
 use cairn_lang_core::lock::{HashHex, LockEdition, Lockfile};
 use tempfile::TempDir;
+
+/// The version cargo derived for this crate from `[workspace.package]`.
+///
+/// The lockfile records the compiler that produced it, so the number has to be
+/// the release's, not a constant maintained beside it. Comparing against
+/// `cairn-lang-core`'s `CAIRN_VERSION` would only restate whatever the binary
+/// already wrote.
+const WORKSPACE_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 fn cargo_bin() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_cairn"))
@@ -146,7 +153,7 @@ fn c6_lockfile_records_cairn_version() {
     ]);
     assert!(result.status.success());
     let lf = Lockfile::read_from_path(&lock_path).expect("read lock");
-    assert_eq!(lf.cairn_version, CAIRN_VERSION);
+    assert_eq!(lf.cairn_version, WORKSPACE_VERSION);
 }
 
 #[test]

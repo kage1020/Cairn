@@ -43,4 +43,9 @@ pub use parse::{MAX_EXPR_DEPTH, MAX_NESTING_DEPTH, parse};
 pub use resolve::{Resolution, ThemeBinding, VersionAxes, compute_axes, resolve};
 
 /// The Cairn release version, in date-based versioning (`YYYY.M[.PATCH]`).
-pub const CAIRN_VERSION: &str = "2026.7";
+///
+/// Read from this crate's package version, which is `[workspace.package]`'s,
+/// which is the number the release tooling bumps. Held as a literal it was a
+/// release behind: `cairn --version` and every `cairn_version` a lockfile
+/// recorded named a compiler that had not built them.
+pub const CAIRN_VERSION: &str = env!("CARGO_PKG_VERSION");
