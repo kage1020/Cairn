@@ -3,18 +3,39 @@
 //! Every test finishes with the `shutdown`/`exit` handshake so no server
 //! process outlives its test on CI.
 
-use std::io::{BufRead, BufReader, Read, Write};
-use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
+use std::io::{BufRead, BufReader, Write};
+use std::process::{Child, ChildStdin, Command, Stdio};
+use std::sync::mpsc::{Receiver, RecvTimeoutError, channel};
+use std::thread;
+use std::time::Duration;
 
 const DUPLICATE: &str = include_str!("../../cairn-lang-core/tests/fixtures/check/duplicate.crn");
 const CLEAN: &str = include_str!("../../cairn-lang-core/tests/fixtures/check/clean.crn");
 const TEST_URI: &str = "file:///test.crn";
 
-/// A spawned `cairn-lsp` with framed stdin/stdout access.
+/// How long a test waits for a message before declaring the server stuck.
+///
+/// The regressions here are about messages that never arrive — a request
+/// left unanswered, a notification silently dropped — and a blocking read
+/// turns every one of those into a hang. On CI a hang surfaces as a job
+/// timeout with no failing test name, which is the least useful shape a
+/// failure can take. A bounded wait turns it back into a named assertion.
+const READ_TIMEOUT: Duration = Duration::from_secs(20);
+
+/// A spawned `cairn-lsp` with framed stdin access and its two output
+/// streams drained by threads.
+///
+/// Both streams need a reader of their own: stdout because a blocking
+/// read is what the timeout exists to avoid, and stderr because the drop
+/// paths this crate takes report themselves there and nowhere else — a
+/// test that cannot see stderr cannot tell "ignored, and said so" from
+/// "ignored in silence". Draining stderr also keeps a chatty server from
+/// filling the pipe buffer and blocking on its own log line.
 struct Server {
     child: Child,
     stdin: ChildStdin,
-    reader: BufReader<ChildStdout>,
+    messages: Receiver<serde_json::Value>,
+    stderr: Receiver<String>,
 }
 
 impl Server {
@@ -24,14 +45,39 @@ impl Server {
         let mut child = Command::new(env!("CARGO_BIN_EXE_cairn-lsp"))
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
             .spawn()
             .expect("spawn cairn-lsp");
         let stdin = child.stdin.take().expect("piped stdin");
-        let reader = BufReader::new(child.stdout.take().expect("piped stdout"));
+
+        let (message_tx, messages) = channel();
+        let mut out = BufReader::new(child.stdout.take().expect("piped stdout"));
+        thread::spawn(move || {
+            // Stops on the first short read: the server has exited, and
+            // every pending `recv_timeout` then fails immediately with
+            // `Disconnected` instead of waiting out the timeout.
+            while let Some(message) = read_framed(&mut out) {
+                if message_tx.send(message).is_err() {
+                    return;
+                }
+            }
+        });
+
+        let (stderr_tx, stderr) = channel();
+        let err = BufReader::new(child.stderr.take().expect("piped stderr"));
+        thread::spawn(move || {
+            for line in err.lines().map_while(Result::ok) {
+                if stderr_tx.send(line).is_err() {
+                    return;
+                }
+            }
+        });
+
         let mut server = Self {
             child,
             stdin,
-            reader,
+            messages,
+            stderr,
         };
         server.send(&serde_json::json!({
             "jsonrpc": "2.0",
@@ -56,28 +102,30 @@ impl Server {
         self.stdin.flush().expect("flush server stdin");
     }
 
-    /// Read one Content-Length framed message.
+    /// Take the next message the server sent, or fail the test.
     fn read_message(&mut self) -> serde_json::Value {
-        let mut content_length: Option<usize> = None;
-        loop {
-            let mut line = String::new();
-            self.reader
-                .read_line(&mut line)
-                .expect("read header line from server");
-            let line = line.trim_end();
-            if line.is_empty() {
-                break;
+        match self.messages.recv_timeout(READ_TIMEOUT) {
+            Ok(message) => message,
+            Err(RecvTimeoutError::Timeout) => {
+                panic!(
+                    "server sent nothing within {READ_TIMEOUT:?}; stderr: {:?}",
+                    self.drain_stderr()
+                )
             }
-            if let Some(value) = line.strip_prefix("Content-Length: ") {
-                content_length = Some(value.parse().expect("numeric Content-Length"));
+            Err(RecvTimeoutError::Disconnected) => {
+                panic!(
+                    "server exited without answering; stderr: {:?}",
+                    self.drain_stderr()
+                )
             }
         }
-        let length = content_length.expect("Content-Length header present");
-        let mut body = vec![0_u8; length];
-        self.reader
-            .read_exact(&mut body)
-            .expect("read message body from server");
-        serde_json::from_slice(&body).expect("parse message body as JSON")
+    }
+
+    /// Every stderr line written so far. Non-blocking: the drop paths log
+    /// before the response that follows them, so by the time a test has
+    /// read that response the line is already here.
+    fn drain_stderr(&mut self) -> Vec<String> {
+        self.stderr.try_iter().collect()
     }
 
     /// Read messages until one with the given method arrives, skipping
@@ -110,15 +158,14 @@ impl Server {
         }));
     }
 
-    /// Send a `textDocument/completion` request and return the response
-    /// carrying `id`, skipping interleaved diagnostics pushes.
-    fn request_completion(
-        &mut self,
-        id: i64,
-        uri: &str,
-        line: u32,
-        character: u32,
-    ) -> serde_json::Value {
+    /// Send a `textDocument/completion` request without waiting for it.
+    ///
+    /// Split from [`Server::request_completion`] so a test that cares
+    /// *when* the answer arrives can read the next message itself: the
+    /// skip-until-id loop below would step over an interloping
+    /// `publishDiagnostics`, which is the very thing some of these tests
+    /// are asserting does not happen.
+    fn send_completion(&mut self, id: i64, uri: &str, line: u32, character: u32) {
         self.send(&serde_json::json!({
             "jsonrpc": "2.0",
             "id": id,
@@ -128,12 +175,19 @@ impl Server {
                 "position": { "line": line, "character": character },
             },
         }));
-        loop {
-            let message = self.read_message();
-            if message.get("id") == Some(&serde_json::json!(id)) {
-                break message;
-            }
-        }
+    }
+
+    /// Send a `textDocument/completion` request and return the response
+    /// carrying `id`, skipping interleaved diagnostics pushes.
+    fn request_completion(
+        &mut self,
+        id: i64,
+        uri: &str,
+        line: u32,
+        character: u32,
+    ) -> serde_json::Value {
+        self.send_completion(id, uri, line, character);
+        self.read_response(id)
     }
 
     /// Send `shutdown` and consume its response, asserting the `null`
@@ -179,6 +233,27 @@ impl Server {
         self.request_shutdown();
         self.exit_expecting(0);
     }
+}
+
+/// Read one Content-Length framed message, or `None` at end of stream.
+fn read_framed(reader: &mut impl BufRead) -> Option<serde_json::Value> {
+    let mut content_length: Option<usize> = None;
+    loop {
+        let mut line = String::new();
+        if reader.read_line(&mut line).ok()? == 0 {
+            return None;
+        }
+        let line = line.trim_end();
+        if line.is_empty() {
+            break;
+        }
+        if let Some(value) = line.strip_prefix("Content-Length: ") {
+            content_length = Some(value.parse().expect("numeric Content-Length"));
+        }
+    }
+    let mut body = vec![0_u8; content_length?];
+    reader.read_exact(&mut body).ok()?;
+    serde_json::from_slice(&body).ok()
 }
 
 /// Extract the diagnostics array from a `publishDiagnostics` notification.
@@ -604,6 +679,9 @@ fn lsp_17_a_message_between_shutdown_and_exit_still_exits_zero() {
         let (mut server, _) = Server::start();
         server.did_open(CLEAN, 1);
         server.read_until_method("textDocument/publishDiagnostics");
+        // Printed before the step that can fail, not after: the label is
+        // wanted most in the run that does not get there.
+        eprintln!("interloper: {label}");
         server.request_shutdown();
         server.send(&interloper);
         // The completion request is answered before `exit`; draining it
@@ -611,7 +689,6 @@ fn lsp_17_a_message_between_shutdown_and_exit_still_exits_zero() {
         if interloper.get("id").is_some() {
             server.read_response(7);
         }
-        eprintln!("interloper: {label}");
         server.exit_expecting(0);
     }
 }
@@ -677,15 +754,7 @@ fn lsp_20_a_notification_after_shutdown_publishes_nothing() {
             "contentChanges": [{ "text": "struct s size=2x2 size=3x3\n" }],
         },
     }));
-    server.send(&serde_json::json!({
-        "jsonrpc": "2.0",
-        "id": 33,
-        "method": "textDocument/completion",
-        "params": {
-            "textDocument": { "uri": TEST_URI },
-            "position": { "line": 0, "character": 0 },
-        },
-    }));
+    server.send_completion(33, TEST_URI, 0, 0);
     let next = server.read_message();
     assert_eq!(
         next.get("id"),
@@ -728,15 +797,7 @@ fn lsp_21_did_change_after_did_close_leaves_the_document_closed() {
     // until the id matches, so a publish for the closed document would
     // slide past it unseen. The next message on the wire has to be the
     // answer to the request behind the change.
-    server.send(&serde_json::json!({
-        "jsonrpc": "2.0",
-        "id": 34,
-        "method": "textDocument/completion",
-        "params": {
-            "textDocument": { "uri": TEST_URI },
-            "position": { "line": 0, "character": 0 },
-        },
-    }));
+    server.send_completion(34, TEST_URI, 0, 0);
     let next = server.read_message();
     assert_eq!(
         next.get("id"),
@@ -747,6 +808,14 @@ fn lsp_21_did_change_after_did_close_leaves_the_document_closed() {
         next["error"]["code"],
         serde_json::json!(-32602),
         "the document is closed, so completion has nothing to answer from",
+    );
+    // The drop is not silent: one line names the method and the URI.
+    let logged = server.drain_stderr();
+    assert!(
+        logged.iter().any(|line| line
+            .contains("ignoring `textDocument/didChange` for a document that is not open")
+            && line.contains(TEST_URI)),
+        "the dropped revision should be reported on stderr, got: {logged:?}",
     );
     server.shutdown();
 }
@@ -766,15 +835,7 @@ fn lsp_22_did_change_for_a_never_opened_document_is_ignored() {
             "contentChanges": [{ "text": CLEAN }],
         },
     }));
-    server.send(&serde_json::json!({
-        "jsonrpc": "2.0",
-        "id": 35,
-        "method": "textDocument/completion",
-        "params": {
-            "textDocument": { "uri": OTHER_URI },
-            "position": { "line": 0, "character": 0 },
-        },
-    }));
+    server.send_completion(35, OTHER_URI, 0, 0);
     let next = server.read_message();
     assert_eq!(
         next.get("id"),
@@ -797,4 +858,159 @@ fn lsp_23_a_position_one_line_past_the_document_is_refused() {
     let response = server.request_completion(36, TEST_URI, 1, 0);
     assert_eq!(response["error"]["code"], serde_json::json!(-32602));
     server.shutdown();
+}
+
+#[test]
+fn lsp_24_a_change_whose_did_open_the_server_dropped_is_also_dropped() {
+    // The third way into the not-open guard, and the one the server itself
+    // causes: a `didOpen` whose payload does not match the method's schema
+    // is discarded, so the document never enters the store. A `didChange`
+    // used to re-insert it and diagnostics resumed from that keystroke;
+    // now the file stays unknown until it is opened again.
+    //
+    // That is the cost of the guard, paid only by a client that violated
+    // the protocol on the way in — and it is pinned here rather than left
+    // to be rediscovered, together with the way out.
+    let (mut server, _) = Server::start();
+    server.send(&serde_json::json!({
+        "jsonrpc": "2.0",
+        "method": "textDocument/didOpen",
+        "params": {
+            // No `languageId`: required by the protocol, so this payload
+            // does not deserialise and the notification is dropped.
+            "textDocument": { "uri": TEST_URI, "version": 1, "text": DUPLICATE },
+        },
+    }));
+    server.send(&serde_json::json!({
+        "jsonrpc": "2.0",
+        "method": "textDocument/didChange",
+        "params": {
+            "textDocument": { "uri": TEST_URI, "version": 2 },
+            "contentChanges": [{ "text": DUPLICATE }],
+        },
+    }));
+    server.send_completion(37, TEST_URI, 0, 0);
+    let next = server.read_message();
+    assert_eq!(
+        next["error"]["code"],
+        serde_json::json!(-32602),
+        "neither notification opened the document, got: {next}",
+    );
+    let logged = server.drain_stderr();
+    assert!(
+        logged
+            .iter()
+            .any(|line| line.contains("ignoring malformed `textDocument/didOpen`")),
+        "the dropped open should be reported, got: {logged:?}",
+    );
+
+    // The way out: a well-formed `didOpen` restores the document, and the
+    // diagnostics it publishes are the ones the dropped revisions would
+    // have carried.
+    server.did_open(DUPLICATE, 3);
+    let published = server.read_until_method("textDocument/publishDiagnostics");
+    assert!(
+        !diagnostics_of(&published).is_empty(),
+        "reopening republishes the fixture's findings",
+    );
+    server.shutdown();
+}
+
+#[test]
+fn lsp_25_an_unknown_notification_before_shutdown_is_ignored() {
+    // `$/cancelRequest` overwhelmingly arrives *during* a session rather
+    // than in the shutdown window, and the spec says a server may ignore a
+    // notification it does not implement. The dispatch has always had a
+    // catch-all arm for that; nothing pinned it, so a future arm added
+    // above it could turn a stray notification into an error again.
+    let (mut server, _) = Server::start();
+    server.send(&serde_json::json!({
+        "jsonrpc": "2.0",
+        "method": "$/cancelRequest",
+        "params": { "id": 1 },
+    }));
+    server.did_open(CLEAN, 1);
+    let published = server.read_until_method("textDocument/publishDiagnostics");
+    assert!(diagnostics_of(&published).is_empty());
+    server.shutdown();
+}
+
+#[test]
+fn lsp_26_completion_answers_at_the_end_of_a_newline_terminated_document() {
+    // The invariant that makes refusing an out-of-range line safe, asserted
+    // end to end: a file ending in a newline has a line after it, and the
+    // cursor sitting there — a new file, or the moment before typing the
+    // next line — is an ordinary position, not one past the document.
+    //
+    // Every other fixture in this suite ends mid-line, so without this the
+    // refusal added here would look correct while turning the commonest
+    // cursor position in a real editor into an error.
+    let (mut server, _) = Server::start();
+    server.did_open("struct s size=2x2\n", 1);
+    server.read_until_method("textDocument/publishDiagnostics");
+    let response = server.request_completion(38, TEST_URI, 1, 0);
+    let items = response["result"]
+        .as_array()
+        .unwrap_or_else(|| panic!("expected items at the empty final line, got: {response}"));
+    assert!(!items.is_empty(), "the line exists, so it has candidates");
+    server.shutdown();
+}
+
+#[test]
+fn lsp_27_completion_answers_in_an_empty_document() {
+    // The other end of the same invariant: a document with no text at all
+    // still has line 0, which is where the cursor sits the instant a new
+    // file is opened.
+    let (mut server, _) = Server::start();
+    server.did_open("", 1);
+    server.read_until_method("textDocument/publishDiagnostics");
+    let response = server.request_completion(39, TEST_URI, 0, 0);
+    let items = response["result"]
+        .as_array()
+        .unwrap_or_else(|| panic!("expected items in an empty document, got: {response}"));
+    assert!(!items.is_empty());
+    server.shutdown();
+}
+
+#[test]
+fn lsp_28_closing_stdin_without_exit_says_the_session_ended_abnormally() {
+    // An editor that was killed rather than one that quit. There is nobody
+    // left to answer, so this is not a failure — but reporting success in
+    // silence is the mirror image of the bug this change is about, and the
+    // shutdown flag is what can tell the two apart.
+    let (mut server, _) = Server::start();
+    server.did_open(CLEAN, 1);
+    server.read_until_method("textDocument/publishDiagnostics");
+    drop(server.stdin);
+    let status = server.child.wait().expect("wait for server exit");
+    assert_eq!(
+        status.code(),
+        Some(0),
+        "there is nobody to report an error to"
+    );
+    let logged: Vec<String> = server.stderr.iter().collect();
+    assert!(
+        logged
+            .iter()
+            .any(|line| line.contains("closed stdin without `shutdown`")),
+        "the abnormal end should be on the record, got: {logged:?}",
+    );
+}
+
+#[test]
+fn lsp_29_a_clean_session_says_nothing_on_stderr() {
+    // The control for the line above: it has to be absent from the
+    // handshake it is meant to distinguish, or it says nothing at all.
+    let (mut server, _) = Server::start();
+    server.did_open(CLEAN, 1);
+    server.read_until_method("textDocument/publishDiagnostics");
+    server.request_shutdown();
+    server.send(&serde_json::json!({ "jsonrpc": "2.0", "method": "exit" }));
+    let status = server.child.wait().expect("wait for server exit");
+    assert_eq!(status.code(), Some(0));
+    let logged: Vec<String> = server.stderr.iter().collect();
+    assert!(
+        logged.is_empty(),
+        "a clean session is quiet, got: {logged:?}"
+    );
 }

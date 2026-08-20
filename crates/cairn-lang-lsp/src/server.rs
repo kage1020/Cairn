@@ -80,8 +80,8 @@ pub fn run() -> Result<(), DynError> {
 ///
 /// `shutdown` does not end the loop — it moves the server into a state the
 /// spec describes precisely: further requests are refused with
-/// `InvalidRequest`, further notifications are ignored, and only `exit`
-/// terminates the process. `lsp_server::Connection::handle_shutdown` models
+/// `InvalidRequest`, further notifications are ignored, and `exit` ends
+/// the session. `lsp_server::Connection::handle_shutdown` models
 /// that window as "the very next message is `exit`", which no real client
 /// guarantees: `$/cancelRequest` may arrive at any time, and an editor
 /// closing its last buffer sends `didClose` on the way out. Every one of
@@ -137,6 +137,19 @@ fn main_loop(connection: &Connection) -> Result<(), DynError> {
                 // expected; ignore rather than fail on a confused client.
             }
         }
+    }
+    // The loop also ends when the channel closes, i.e. the client shut
+    // stdin without saying anything — an editor that was killed rather
+    // than one that quit. There is nobody left to answer, so this is not
+    // an error, but it is not the orderly teardown either and the stream
+    // should say which one happened. `shutdown_requested` is the bit that
+    // can tell them apart, and until this loop kept it there was nothing
+    // to ask.
+    if !shutdown_requested {
+        eprintln!(
+            "cairn-lsp: client closed stdin without `{}`; the session ended abnormally",
+            Shutdown::METHOD,
+        );
     }
     Ok(())
 }
@@ -262,22 +275,25 @@ fn handle_notification(
                 return Ok(());
             };
             let uri = params.text_document.uri;
-            let diagnostics = compute_diagnostics(&uri, &change.text);
-            // A revision for a URI the store does not hold describes a
-            // document the client never opened, or one it has already
-            // closed. Recording it would make the store outlive the
-            // client's open set; publishing for it would leave a squiggle
-            // on a file the editor has no buffer for and therefore no way
-            // to clear. Neither happens — the revision is dropped with a
-            // line on stderr, the way a malformed payload is.
-            if !store.change(&uri, change.text) {
+            // Ahead of the diagnostics run, not after it: a revision for a
+            // URI the store does not hold describes a document the client
+            // never opened, one it has already closed, or one whose
+            // `didOpen` this server dropped as malformed. Recording it
+            // would make the store outlive the client's open set;
+            // publishing for it would leave a squiggle on a file the editor
+            // has no buffer for and therefore no way to clear. Neither
+            // happens — the revision is dropped with a line on stderr, the
+            // way a malformed payload is, and the parse that would have
+            // been thrown away with it never runs.
+            let Some(source) = store.change(&uri, change.text) else {
                 eprintln!(
                     "cairn-lsp: ignoring `{}` for a document that is not open: {}",
                     DidChangeTextDocument::METHOD,
                     uri.as_str(),
                 );
                 return Ok(());
-            }
+            };
+            let diagnostics = compute_diagnostics(&uri, source);
             publish(
                 connection,
                 uri,

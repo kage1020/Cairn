@@ -27,21 +27,33 @@ impl DocumentStore {
     }
 
     /// Replace the stored text with a `didChange` revision (FULL sync — the
-    /// notification carries the complete new content), reporting whether
-    /// there was an open document to replace.
+    /// notification carries the complete new content), handing back the
+    /// text now stored, or `None` when the URI names no open document.
     ///
-    /// A URI the store does not hold is refused rather than inserted. The
-    /// store's contract is to mirror the client's open set, and `insert`
-    /// broke it in the one direction that cannot be undone: a `didChange`
-    /// after `didClose` — or for a document never opened at all — put the
-    /// URI back, so the set only ever grew and the server answered
-    /// completion for a buffer the editor no longer has.
-    pub fn change(&mut self, uri: &lsp_types::Uri, text: String) -> bool {
-        let Some(slot) = self.docs.get_mut(uri) else {
-            return false;
-        };
+    /// A URI the store does not hold is refused rather than inserted,
+    /// because the store's contract is to mirror the client's open set and
+    /// `insert` did not: it resurrected a document the client had closed,
+    /// leaving the server answering completion for a buffer the editor no
+    /// longer has.
+    ///
+    /// Three ways to reach the `None`, and the third is the server's own
+    /// doing:
+    ///
+    /// - a `didChange` after `didClose`,
+    /// - a `didChange` for a URI never opened,
+    /// - a `didChange` whose `didOpen` the server itself dropped, because
+    ///   the payload did not match the method's schema. That document
+    ///   stays unknown until the client opens it again — a keystroke no
+    ///   longer revives it — which is a real cost, paid only by a client
+    ///   that violated the protocol on the way in.
+    ///
+    /// The return value is the guard the caller needs, so it is an
+    /// `Option` rather than a `bool`: ignoring it is a warning rather than
+    /// a silently republished document.
+    pub fn change(&mut self, uri: &lsp_types::Uri, text: String) -> Option<&str> {
+        let slot = self.docs.get_mut(uri)?;
         *slot = text;
-        true
+        Some(slot)
     }
 
     /// Forget a document on `didClose`. Closing a URI that was never opened
@@ -83,14 +95,20 @@ mod tests {
     fn change_replaces_the_stored_text() {
         let mut store = DocumentStore::new();
         store.open(uri("file:///a.crn"), "old".to_owned());
-        assert!(store.change(&uri("file:///a.crn"), "new".to_owned()));
+        assert_eq!(
+            store.change(&uri("file:///a.crn"), "new".to_owned()),
+            Some("new"),
+        );
         assert_eq!(store.get(&uri("file:///a.crn")), Some("new"));
     }
 
     #[test]
     fn change_refuses_a_document_that_is_not_open() {
         let mut store = DocumentStore::new();
-        assert!(!store.change(&uri("file:///never.crn"), "text".to_owned()));
+        assert_eq!(
+            store.change(&uri("file:///never.crn"), "text".to_owned()),
+            None
+        );
         assert_eq!(store.get(&uri("file:///never.crn")), None);
     }
 
@@ -100,7 +118,10 @@ mod tests {
         let mut store = DocumentStore::new();
         store.open(uri("file:///a.crn"), "text".to_owned());
         store.close(&uri("file:///a.crn"));
-        assert!(!store.change(&uri("file:///a.crn"), "later".to_owned()));
+        assert_eq!(
+            store.change(&uri("file:///a.crn"), "later".to_owned()),
+            None
+        );
         assert_eq!(store.get(&uri("file:///a.crn")), None);
     }
 

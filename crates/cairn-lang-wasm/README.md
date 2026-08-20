@@ -1,9 +1,10 @@
 # cairn-lang-wasm
 
-WebAssembly bindings for the Cairn compiler. Lets the [website
+WebAssembly bindings for the Cairn compiler. The intent is to let the [website
 playground](../../website/README.md) (and any other browser-hosted tool) parse, compile, and
 serialize Cairn sources without a server, sharing exactly the same
-[`cairn-lang-core`](../cairn-lang-core/README.md) implementation as the CLI.
+[`cairn-lang-core`](../cairn-lang-core/README.md) implementation as the CLI. None of that is
+wired up yet — see **Status**.
 
 ## Status
 
@@ -16,10 +17,10 @@ Skeleton, and not yet buildable as WebAssembly. The crate holds one Rust functio
 ## Build
 
 There is nothing to build for the browser yet. `wasm-pack` refuses a crate that does not depend
-on `wasm-bindgen`, and a plain `cargo build --target wasm32-unknown-unknown` succeeds but
-produces a module with zero exports — `cairn_version` is a plain Rust symbol with no ABI a page
-can call. The `cdylib` in `Cargo.toml` is the shape the crate will need, not a shape it can be
-used in today.
+on `wasm-bindgen`, and a plain `cargo build --target wasm32-unknown-unknown` produces a module
+with no callable export — `cairn_version` is a plain Rust symbol with no ABI a page can reach,
+whatever the linker emits alongside it. The `cdylib` in `Cargo.toml` is the shape the crate will
+need, not a shape it can be used in today.
 
 When the binding layer lands, the command will be:
 

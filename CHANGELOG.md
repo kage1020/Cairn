@@ -15,7 +15,9 @@ and is a separate axis from the Minecraft target version.
 - *(lsp)* A `textDocument/didChange` for a URI that is not open is ignored instead of opening it.
   A change after `didClose` used to re-insert the document and publish a fresh diagnostic set — a
   marker on a file the editor has no buffer left to clear — and one for a URI never opened made
-  completion available for it.
+  completion available for it. This also covers the case where the server itself dropped the
+  `didOpen` because its payload did not match the method's schema: that document now stays
+  unknown until the client opens it again, where a keystroke used to revive it.
 - *(lsp)* Completion offers nothing inside a string literal. `door id="@oa"` used to answer with
   the whole material catalogue and `door label="pick mat_slot=fl"` with the theme's slot names;
   a string is free-form text, which is where the completion module already promised to invent
@@ -124,8 +126,8 @@ and is a separate axis from the Minecraft target version.
   ignored, and `exit` leaves with code 0 (still non-zero without a preceding `shutdown`).
 - *(docs)* `cairn-lang-wasm`'s README documented `wasm-pack build` as working. The crate has no
   `wasm-bindgen` dependency and `cairn_version` carries no export attribute, so wasm-pack refuses
-  it and a plain `wasm32-unknown-unknown` build produces a module with zero exports. The README
-  now says so.
+  it and a plain `wasm32-unknown-unknown` build produces a module with no callable export. The
+  README, the crate docs, and the function's own doc line now say so.
 
 ## 2026.8.2 — 2026-08-01
 

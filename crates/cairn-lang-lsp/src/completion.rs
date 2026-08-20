@@ -129,37 +129,52 @@ fn is_token_char(c: char) -> bool {
     c.is_ascii_alphanumeric() || c == '_' || c == '.'
 }
 
-/// Byte offset of the first `#` in `line` that opens a comment — i.e. sits
-/// outside a string literal. Exact by quote parity: the lexer scans strings
-/// atomically with no escape sequences, and a string cannot span lines, so
-/// counting `"` toggles is the full string grammar.
-fn comment_start(line: &str) -> Option<usize> {
-    let mut in_string = false;
+/// What one pass over a line finds out about where its text ends up.
+///
+/// Both facts come from the same grammar, so they come from the same
+/// scan. Encoding "is this `#` a comment opener" and "is this cursor in a
+/// string" as two walks meant two copies of the string rules, which have
+/// to move together or silently disagree.
+struct LineScan {
+    /// Byte offset of the first `#` that opens a comment — i.e. one that
+    /// sits outside a string literal.
+    comment: Option<usize>,
+    /// Whether the scan ended inside an unterminated string literal.
+    /// `false` once a comment opener is seen: everything past it is
+    /// comment text, quotes included.
+    open_string: bool,
+}
+
+/// Walk `line` far enough to answer both questions in [`LineScan`].
+///
+/// Exact by quote parity, which is the whole string grammar here:
+/// `cairn_lang_core`'s lexer scans a string atomically, interprets no
+/// escape sequences, and rejects a newline inside one — so an odd number
+/// of `"` is precisely "still open". If `\"` ever becomes meaningful this
+/// is the one place that has to learn it.
+fn scan_line(line: &str) -> LineScan {
+    let mut open_string = false;
     for (i, c) in line.char_indices() {
         match c {
-            '"' => in_string = !in_string,
-            '#' if !in_string => return Some(i),
+            '"' => open_string = !open_string,
+            '#' if !open_string => {
+                return LineScan {
+                    comment: Some(i),
+                    open_string: false,
+                };
+            }
             _ => {}
         }
     }
-    None
+    LineScan {
+        comment: None,
+        open_string,
+    }
 }
 
-/// Whether a cursor sitting at the end of `prefix` is inside a string
-/// literal, by the same quote parity [`comment_start`] uses and for the
-/// same reason: strings are atomic, carry no escapes, and never span a
-/// line, so an odd number of `"` before the cursor is exactly "open
-/// string".
-///
-/// A string is free-form text — an `id=`, a `label=` — and the module's
-/// rule is to never invent candidates where the grammar accepts anything.
-/// The `#` check honoured that already; the `@` and `mat_slot=` checks
-/// read the two characters in front of the cursor and did not, so
-/// `id="@oa"` offered the whole material vocabulary inside a quoted name
-/// and `label="pick mat_slot=fl"` offered the theme's slots inside a
-/// sentence.
-fn inside_string(prefix: &str) -> bool {
-    prefix.bytes().filter(|b| *b == b'"').count() % 2 == 1
+/// Byte offset of the first `#` in `line` that opens a comment.
+fn comment_start(line: &str) -> Option<usize> {
+    scan_line(line).comment
 }
 
 /// Classify the cursor's byte offset into a completion [`Context`].
@@ -168,8 +183,14 @@ fn context_at(source: &str, offset: usize) -> Option<Context> {
     let prefix = &source[line_start..offset];
     // A comment opener before the cursor puts it in a comment, and an
     // unclosed quote puts it in a string. Both are positions where the
-    // grammar accepts free-form text, so both offer nothing.
-    if comment_start(prefix).is_some() || inside_string(prefix) {
+    // grammar accepts free-form text — an `id=`, a `label=`, a note to
+    // the reader — and this module's rule is to invent nothing where
+    // anything is legal. The `#` half was honoured already; the `@` and
+    // `mat_slot=` checks below read the two characters in front of the
+    // cursor and ignored quoting, so `id="@oa"` offered the whole
+    // material vocabulary inside a quoted name.
+    let scan = scan_line(prefix);
+    if scan.comment.is_some() || scan.open_string {
         return None;
     }
     let token_start = line_start
@@ -669,9 +690,16 @@ mod tests {
     fn a_mat_slot_key_inside_a_longer_string_offers_nothing() {
         // The same with prose around it and a partial token after it —
         // a sentence in a `label=`, not an argument.
+        // The needle has to reach past `slot floor` on line 1: `at_end_of`
+        // resolves the *first* occurrence, and `fl` occurs there. Aimed at
+        // the wrong line this test passes because `slot ` precedes the
+        // cursor, with nothing to do with the string it is named for.
         let source = "theme a:\n  slot floor -> @oak_planks\n\
                       struct s size=2x2\n  door label=\"pick mat_slot=fl";
-        assert_eq!(completions(source, at_end_of(source, "fl")), Some(vec![]));
+        assert_eq!(
+            completions(source, at_end_of(source, "pick mat_slot=fl")),
+            Some(vec![]),
+        );
     }
 
     #[test]
@@ -775,11 +803,11 @@ mod tests {
         // by the server) instead of candidates fabricated at EOF.
         //
         // One line past the end is refused for the same reason and not as a
-        // near miss. It used to clamp to EOF, which produced four items
-        // whose `textEdit` covered `line 0, 0..2` — a range that does not
-        // contain the requested `1:0`, so an editor discards every one of
-        // them. An answer the client throws away is worse than the error it
-        // can show.
+        // near miss. Clamping it anchored every item's `textEdit` on the
+        // line before, and the protocol requires a completion item's edit
+        // range to contain the position the request named — so the items
+        // were unusable by construction, whatever a given client does with
+        // them.
         let source = "st";
         for line in [1, 99] {
             let position = lsp_types::Position { line, character: 0 };
