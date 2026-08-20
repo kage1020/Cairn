@@ -27,9 +27,21 @@ impl DocumentStore {
     }
 
     /// Replace the stored text with a `didChange` revision (FULL sync — the
-    /// notification carries the complete new content).
-    pub fn change(&mut self, uri: lsp_types::Uri, text: String) {
-        self.docs.insert(uri, text);
+    /// notification carries the complete new content), reporting whether
+    /// there was an open document to replace.
+    ///
+    /// A URI the store does not hold is refused rather than inserted. The
+    /// store's contract is to mirror the client's open set, and `insert`
+    /// broke it in the one direction that cannot be undone: a `didChange`
+    /// after `didClose` — or for a document never opened at all — put the
+    /// URI back, so the set only ever grew and the server answered
+    /// completion for a buffer the editor no longer has.
+    pub fn change(&mut self, uri: &lsp_types::Uri, text: String) -> bool {
+        let Some(slot) = self.docs.get_mut(uri) else {
+            return false;
+        };
+        *slot = text;
+        true
     }
 
     /// Forget a document on `didClose`. Closing a URI that was never opened
@@ -71,8 +83,25 @@ mod tests {
     fn change_replaces_the_stored_text() {
         let mut store = DocumentStore::new();
         store.open(uri("file:///a.crn"), "old".to_owned());
-        store.change(uri("file:///a.crn"), "new".to_owned());
+        assert!(store.change(&uri("file:///a.crn"), "new".to_owned()));
         assert_eq!(store.get(&uri("file:///a.crn")), Some("new"));
+    }
+
+    #[test]
+    fn change_refuses_a_document_that_is_not_open() {
+        let mut store = DocumentStore::new();
+        assert!(!store.change(&uri("file:///never.crn"), "text".to_owned()));
+        assert_eq!(store.get(&uri("file:///never.crn")), None);
+    }
+
+    #[test]
+    fn change_after_close_does_not_reopen_the_document() {
+        // The order that made the store outlive the client's open set.
+        let mut store = DocumentStore::new();
+        store.open(uri("file:///a.crn"), "text".to_owned());
+        store.close(&uri("file:///a.crn"));
+        assert!(!store.change(&uri("file:///a.crn"), "later".to_owned()));
+        assert_eq!(store.get(&uri("file:///a.crn")), None);
     }
 
     #[test]

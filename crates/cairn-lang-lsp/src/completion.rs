@@ -145,12 +145,31 @@ fn comment_start(line: &str) -> Option<usize> {
     None
 }
 
+/// Whether a cursor sitting at the end of `prefix` is inside a string
+/// literal, by the same quote parity [`comment_start`] uses and for the
+/// same reason: strings are atomic, carry no escapes, and never span a
+/// line, so an odd number of `"` before the cursor is exactly "open
+/// string".
+///
+/// A string is free-form text — an `id=`, a `label=` — and the module's
+/// rule is to never invent candidates where the grammar accepts anything.
+/// The `#` check honoured that already; the `@` and `mat_slot=` checks
+/// read the two characters in front of the cursor and did not, so
+/// `id="@oa"` offered the whole material vocabulary inside a quoted name
+/// and `label="pick mat_slot=fl"` offered the theme's slots inside a
+/// sentence.
+fn inside_string(prefix: &str) -> bool {
+    prefix.bytes().filter(|b| *b == b'"').count() % 2 == 1
+}
+
 /// Classify the cursor's byte offset into a completion [`Context`].
 fn context_at(source: &str, offset: usize) -> Option<Context> {
     let line_start = cairn_lang_core::lines::start_of(source, offset);
     let prefix = &source[line_start..offset];
-    // A comment opener before the cursor puts it in a comment.
-    if comment_start(prefix).is_some() {
+    // A comment opener before the cursor puts it in a comment, and an
+    // unclosed quote puts it in a string. Both are positions where the
+    // grammar accepts free-form text, so both offer nothing.
+    if comment_start(prefix).is_some() || inside_string(prefix) {
         return None;
     }
     let token_start = line_start
@@ -619,6 +638,65 @@ mod tests {
     }
 
     #[test]
+    fn a_material_token_inside_a_string_offers_nothing() {
+        // `id=` takes free-form text, so an `@` between quotes is a
+        // character in a name, not the opener of a material token. The
+        // whole registry catalogue used to arrive here.
+        let source = "theme a:\n  slot floor -> @oak_planks\n\
+                      struct s size=2x2\n  door id=\"@oa";
+        // The needle carries the quote: `@oa` alone first matches inside
+        // `@oak_planks` on the slot line above.
+        assert_eq!(
+            completions(source, at_end_of(source, "id=\"@oa")),
+            Some(vec![]),
+        );
+    }
+
+    #[test]
+    fn a_mat_slot_key_inside_a_string_offers_nothing() {
+        // The characters `mat_slot=` inside a quoted value are text. The
+        // key check read the two characters in front of the cursor and
+        // offered the theme's slots inside a name.
+        let source = "theme a:\n  slot floor -> @oak_planks\n\
+                      struct s size=2x2\n  door id=\"mat_slot=";
+        assert_eq!(
+            completions(source, at_end_of(source, "id=\"mat_slot=")),
+            Some(vec![]),
+        );
+    }
+
+    #[test]
+    fn a_mat_slot_key_inside_a_longer_string_offers_nothing() {
+        // The same with prose around it and a partial token after it —
+        // a sentence in a `label=`, not an argument.
+        let source = "theme a:\n  slot floor -> @oak_planks\n\
+                      struct s size=2x2\n  door label=\"pick mat_slot=fl";
+        assert_eq!(completions(source, at_end_of(source, "fl")), Some(vec![]));
+    }
+
+    #[test]
+    fn a_cursor_after_a_closing_quote_still_completes() {
+        // The discriminating case for quote *parity* against "is there a
+        // quote anywhere before the cursor": the string is closed, so the
+        // argument that follows it is an argument again.
+        let source = "theme a:\n  slot floor -> @oak_planks\n\
+                      struct s size=2x2\n  door id=\"front\" mat_slot=";
+        let items = complete(source, "mat_slot=");
+        assert_eq!(labels(&items), vec!["floor"]);
+    }
+
+    #[test]
+    fn an_unterminated_string_suppresses_only_its_own_line() {
+        // A string cannot span lines, which is what makes counting quotes
+        // on the cursor's line exact. A line left open by a typo must not
+        // take the next line's completions down with it.
+        let source = "theme a:\n  slot floor -> @oak_planks\n\
+                      struct s size=2x2\n  door id=\"oops\n  floor mat_slot=";
+        let items = complete(source, "mat_slot=");
+        assert_eq!(labels(&items), vec!["floor"]);
+    }
+
+    #[test]
     fn hash_inside_a_string_literal_is_not_a_comment() {
         // The lexer scans strings atomically (a `#` between quotes is
         // string content, not a comment opener), so completion must not go
@@ -694,21 +772,23 @@ mod tests {
     fn position_far_past_the_document_is_refused() {
         // A position beyond one line past the end is a client bug, not a
         // clampable race: the caller gets `None` (surfaced as InvalidParams
-        // by the server) instead of candidates fabricated at EOF. One line
-        // past the end still clamps — a didChange can land between the
-        // request and its answer.
+        // by the server) instead of candidates fabricated at EOF.
+        //
+        // One line past the end is refused for the same reason and not as a
+        // near miss. It used to clamp to EOF, which produced four items
+        // whose `textEdit` covered `line 0, 0..2` — a range that does not
+        // contain the requested `1:0`, so an editor discards every one of
+        // them. An answer the client throws away is worse than the error it
+        // can show.
         let source = "st";
-        let far = lsp_types::Position {
-            line: 99,
-            character: 0,
-        };
-        assert_eq!(completions(source, far), None);
-        let one_past = lsp_types::Position {
-            line: 1,
-            character: 0,
-        };
-        let items = completions(source, one_past).expect("one line past the end clamps");
-        assert_eq!(labels(&items), vec!["theme", "def", "site", "struct"]);
+        for line in [1, 99] {
+            let position = lsp_types::Position { line, character: 0 };
+            assert_eq!(
+                completions(source, position),
+                None,
+                "line {line} does not exist in a one-line document",
+            );
+        }
     }
 
     #[test]

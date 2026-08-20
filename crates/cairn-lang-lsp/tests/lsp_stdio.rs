@@ -136,30 +136,48 @@ impl Server {
         }
     }
 
-    /// Run the `shutdown`/`exit` handshake and assert the process exits 0.
-    fn shutdown(mut self) {
+    /// Send `shutdown` and consume its response, asserting the `null`
+    /// result the spec requires. Leaves the server running so a test can
+    /// drive the window between `shutdown` and `exit`.
+    fn request_shutdown(&mut self) {
         self.send(&serde_json::json!({
             "jsonrpc": "2.0",
             "id": 99,
             "method": "shutdown",
         }));
-        let response = loop {
-            let message = self.read_message();
-            if message.get("id") == Some(&serde_json::json!(99)) {
-                break message;
-            }
-        };
+        let response = self.read_response(99);
         assert_eq!(
             response.get("result"),
             Some(&serde_json::Value::Null),
             "shutdown should return null, got: {response}",
         );
+    }
+
+    /// Read messages until the response carrying `id` arrives, skipping
+    /// server-initiated notifications.
+    fn read_response(&mut self, id: i64) -> serde_json::Value {
+        loop {
+            let message = self.read_message();
+            if message.get("id") == Some(&serde_json::json!(id)) {
+                return message;
+            }
+        }
+    }
+
+    /// Send `exit` and assert the process leaves with `code`.
+    fn exit_expecting(mut self, code: i32) {
         self.send(&serde_json::json!({
             "jsonrpc": "2.0",
             "method": "exit",
         }));
         let status = self.child.wait().expect("wait for server exit");
-        assert_eq!(status.code(), Some(0), "server should exit cleanly");
+        assert_eq!(status.code(), Some(code), "unexpected exit code");
+    }
+
+    /// Run the `shutdown`/`exit` handshake and assert the process exits 0.
+    fn shutdown(mut self) {
+        self.request_shutdown();
+        self.exit_expecting(0);
     }
 }
 
@@ -525,4 +543,227 @@ fn lsp_16_deeply_nested_document_is_diagnosed_not_fatal() {
         );
         server.shutdown();
     }
+}
+
+// ------------------------------------------ the window between shutdown and exit
+
+/// One message an editor really sends, per row: a cancellation that may
+/// arrive at any time, the `didClose` a closing window emits, a `didChange`
+/// from a buffer being disposed, and a request already in flight.
+fn interlopers() -> Vec<(&'static str, serde_json::Value)> {
+    vec![
+        (
+            "$/cancelRequest",
+            serde_json::json!({
+                "jsonrpc": "2.0",
+                "method": "$/cancelRequest",
+                "params": { "id": 1 },
+            }),
+        ),
+        (
+            "didClose",
+            serde_json::json!({
+                "jsonrpc": "2.0",
+                "method": "textDocument/didClose",
+                "params": { "textDocument": { "uri": TEST_URI } },
+            }),
+        ),
+        (
+            "didChange",
+            serde_json::json!({
+                "jsonrpc": "2.0",
+                "method": "textDocument/didChange",
+                "params": {
+                    "textDocument": { "uri": TEST_URI, "version": 2 },
+                    "contentChanges": [{ "text": "struct s size=3x3\n" }],
+                },
+            }),
+        ),
+        (
+            "completion request",
+            serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": 7,
+                "method": "textDocument/completion",
+                "params": {
+                    "textDocument": { "uri": TEST_URI },
+                    "position": { "line": 0, "character": 0 },
+                },
+            }),
+        ),
+    ]
+}
+
+#[test]
+fn lsp_17_a_message_between_shutdown_and_exit_still_exits_zero() {
+    // `Connection::handle_shutdown` demanded that the very next message be
+    // `exit`; anything else became a protocol error that ended the process
+    // with code 1 *without reading the `exit` behind it*. An editor reads a
+    // non-zero exit as "the language server crashed" and restarts it.
+    for (label, interloper) in interlopers() {
+        let (mut server, _) = Server::start();
+        server.did_open(CLEAN, 1);
+        server.read_until_method("textDocument/publishDiagnostics");
+        server.request_shutdown();
+        server.send(&interloper);
+        // The completion request is answered before `exit`; draining it
+        // here keeps the assertion about the exit code alone.
+        if interloper.get("id").is_some() {
+            server.read_response(7);
+        }
+        eprintln!("interloper: {label}");
+        server.exit_expecting(0);
+    }
+}
+
+#[test]
+fn lsp_18_a_request_after_shutdown_is_refused_as_invalid() {
+    // The spec's own words for this window: answer further requests with
+    // `InvalidRequest` (-32600). Not `MethodNotFound` — the method exists —
+    // and not silence, which leaves the client blocked on the id.
+    let (mut server, _) = Server::start();
+    server.did_open(CLEAN, 1);
+    server.read_until_method("textDocument/publishDiagnostics");
+    server.request_shutdown();
+    server.send(&serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": 31,
+        "method": "textDocument/completion",
+        "params": {
+            "textDocument": { "uri": TEST_URI },
+            "position": { "line": 0, "character": 0 },
+        },
+    }));
+    let response = server.read_response(31);
+    assert_eq!(response["error"]["code"], serde_json::json!(-32600));
+    server.exit_expecting(0);
+}
+
+#[test]
+fn lsp_19_a_second_shutdown_is_refused_rather_than_answered_again() {
+    // The state check runs before the method check, so `shutdown` itself
+    // is a request like any other once the server is shutting down. A
+    // second `result: null` would tell the client the handshake restarted.
+    let (mut server, _) = Server::start();
+    server.request_shutdown();
+    server.send(&serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": 32,
+        "method": "shutdown",
+    }));
+    let response = server.read_response(32);
+    assert_eq!(response["error"]["code"], serde_json::json!(-32600));
+    assert_eq!(response.get("result"), None);
+    server.exit_expecting(0);
+}
+
+#[test]
+fn lsp_20_a_notification_after_shutdown_publishes_nothing() {
+    // "Ignore notifications" is only testable as an ordering claim: send a
+    // `didChange` that would publish, then a request that must be answered,
+    // and require the *next* message on the wire to be that answer. A
+    // `publishDiagnostics` arriving first is the failure signature, and it
+    // is what a flag checked inside the notification handler — after the
+    // diagnostics are computed and pushed — would produce.
+    let (mut server, _) = Server::start();
+    server.did_open(CLEAN, 1);
+    server.read_until_method("textDocument/publishDiagnostics");
+    server.request_shutdown();
+    server.send(&serde_json::json!({
+        "jsonrpc": "2.0",
+        "method": "textDocument/didChange",
+        "params": {
+            "textDocument": { "uri": TEST_URI, "version": 2 },
+            "contentChanges": [{ "text": "struct s size=2x2 size=3x3\n" }],
+        },
+    }));
+    server.send(&serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": 33,
+        "method": "textDocument/completion",
+        "params": {
+            "textDocument": { "uri": TEST_URI },
+            "position": { "line": 0, "character": 0 },
+        },
+    }));
+    let next = server.read_message();
+    assert_eq!(
+        next.get("id"),
+        Some(&serde_json::json!(33)),
+        "nothing may reach the client between the ignored notification and \
+         the refused request, got: {next}",
+    );
+    server.exit_expecting(0);
+}
+
+// ------------------------------------- the store mirrors the client's open set
+
+#[test]
+fn lsp_21_did_change_after_did_close_leaves_the_document_closed() {
+    // `didClose` publishes an empty set so the editor clears its squiggles.
+    // A `didChange` behind it used to re-insert the URI and publish a fresh
+    // set — a permanent marker on a file with no buffer to clear it, and a
+    // store that only ever grew.
+    let (mut server, _) = Server::start();
+    server.did_open(DUPLICATE, 1);
+    let opened = server.read_until_method("textDocument/publishDiagnostics");
+    assert!(!diagnostics_of(&opened).is_empty(), "the fixture is broken");
+    server.send(&serde_json::json!({
+        "jsonrpc": "2.0",
+        "method": "textDocument/didClose",
+        "params": { "textDocument": { "uri": TEST_URI } },
+    }));
+    let closed = server.read_until_method("textDocument/publishDiagnostics");
+    assert!(diagnostics_of(&closed).is_empty(), "close clears the marks");
+    server.send(&serde_json::json!({
+        "jsonrpc": "2.0",
+        "method": "textDocument/didChange",
+        "params": {
+            "textDocument": { "uri": TEST_URI, "version": 2 },
+            "contentChanges": [{ "text": DUPLICATE }],
+        },
+    }));
+    // The ordering assertion again: the next message has to be the answer
+    // to the request behind the change, not a publish for a closed file.
+    let response = server.request_completion(34, TEST_URI, 0, 0);
+    assert_eq!(
+        response["error"]["code"],
+        serde_json::json!(-32602),
+        "the document is closed, so completion has nothing to answer from",
+    );
+    server.shutdown();
+}
+
+#[test]
+fn lsp_22_did_change_for_a_never_opened_document_is_ignored() {
+    // The same rule from the other side: a `didChange` is a revision of a
+    // document, and there is no document. Inserting one made completion
+    // available for a URI the client never opened.
+    const OTHER_URI: &str = "file:///never-opened.crn";
+    let (mut server, _) = Server::start();
+    server.send(&serde_json::json!({
+        "jsonrpc": "2.0",
+        "method": "textDocument/didChange",
+        "params": {
+            "textDocument": { "uri": OTHER_URI, "version": 1 },
+            "contentChanges": [{ "text": CLEAN }],
+        },
+    }));
+    let response = server.request_completion(35, OTHER_URI, 0, 0);
+    assert_eq!(response["error"]["code"], serde_json::json!(-32602));
+    server.shutdown();
+}
+
+#[test]
+fn lsp_23_a_position_one_line_past_the_document_is_refused() {
+    // The clamp that admitted this produced four items anchored on the
+    // previous line: every `textEdit` covered `line 0, 0..2`, a range that
+    // does not contain the requested `1:0`, so an editor discards them all.
+    // Refusing is the answer the client can act on.
+    let (mut server, _) = Server::start();
+    server.did_open("st", 1);
+    server.read_until_method("textDocument/publishDiagnostics");
+    let response = server.request_completion(36, TEST_URI, 1, 0);
+    assert_eq!(response["error"]["code"], serde_json::json!(-32602));
+    server.shutdown();
 }
