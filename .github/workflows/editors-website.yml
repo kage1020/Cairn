@@ -1,0 +1,108 @@
+name: editors + website
+
+# The two Node projects that ship outside crates.io and npm: the VS Code
+# extension under `editors/vscode` and the Astro documentation site under
+# `website`. Neither was referenced anywhere in `.github/workflows` before this
+# file existed, so a TypeScript error in `extension.ts` or a broken Starlight
+# page could reach `canary` without turning a single check red.
+#
+# `Cargo.toml` is in the path filters for the version-parity step's sake. The
+# extension's own CHANGELOG says "Extension versions track the Cairn CLI CalVer
+# tag", but `[workspace.package] version` lives in `Cargo.toml` while the copy
+# it has to agree with lives in `editors/vscode/package.json` — so a release PR
+# that bumps only `Cargo.toml` is precisely the change that breaks parity, and
+# without this path, precisely the change that would not run the job that checks
+# it. tree-sitter.yml's filter carries the same entry for the same reason, and
+# for the same reason it is not hypothetical: when this workflow was added the
+# extension had already been left a release behind by exactly that route.
+
+on:
+  push:
+    branches: [main, canary]
+    paths:
+      - "editors/vscode/**"
+      - "website/**"
+      - "Cargo.toml"
+      - ".github/workflows/editors-website.yml"
+  pull_request:
+    paths:
+      - "editors/vscode/**"
+      - "website/**"
+      - "Cargo.toml"
+      - ".github/workflows/editors-website.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  vscode:
+    name: VS Code extension
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: editors/vscode
+    steps:
+      - uses: actions/checkout@v4
+
+      # Before installing anything: this needs neither Node nor a lockfile, and
+      # it is the check most likely to fail on a release PR.
+      - name: Compare the extension version with the workspace version
+        shell: bash
+        run: |
+          set -euo pipefail
+          workspace=$(awk '
+            /^\[workspace\.package\]/   { in_section = 1; next }
+            /^\[/                       { in_section = 0 }
+            in_section && /^version = / { gsub(/"/, "", $3); print $3; exit }
+          ' ../../Cargo.toml)
+          if [ -z "$workspace" ]; then
+            echo "Could not read version from [workspace.package] in Cargo.toml" >&2
+            exit 1
+          fi
+          extension=$(jq -er '.version' package.json)
+          echo "Cargo [workspace.package]: $workspace"
+          echo "editors/vscode:            $extension"
+          if [ "$workspace" != "$extension" ]; then
+            echo 'The extension resolves cairn-lsp from PATH and is documented as' >&2
+            echo 'tracking the CLI CalVer tag, so the two numbers move together.' >&2
+            echo "release.yml's alignment step is what moves them after a bump." >&2
+            exit 1
+          fi
+
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: editors/vscode/package.json
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: editors/vscode/pnpm-lock.yaml
+
+      - run: pnpm install --frozen-lockfile
+      - name: Type-check
+        run: pnpm run check
+      - name: Bundle
+        run: pnpm run build
+
+  website:
+    name: Documentation site
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: website
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: website/package.json
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: website/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      # `astro build` type-checks the content collections and renders every
+      # page, so a spec page with a broken frontmatter field or a dead relative
+      # link between spec chapters fails here rather than on the deployed site.
+      - run: pnpm run build

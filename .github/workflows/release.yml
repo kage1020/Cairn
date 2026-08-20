@@ -146,12 +146,13 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      # The tree-sitter crate is the one workspace member that also ships to a
-      # registry release-plz knows nothing about: its npm manifest and its
-      # tree-sitter manifest each carry their own copy of the version, and
-      # release-plz rewrites only Cargo.toml. Left alone, a CalVer bump leaves
-      # the npm package advertising the previous month's number against this
-      # month's grammar.
+      # Three manifests outside Cargo's reach carry their own copy of the
+      # version: the tree-sitter crate's npm manifest and tree-sitter manifest,
+      # and the VS Code extension's. release-plz rewrites only Cargo.toml. Left
+      # alone, a CalVer bump leaves the npm package advertising the previous
+      # month's number against this month's grammar, and the extension — which
+      # resolves `cairn-lsp` off PATH and is documented as tracking the CLI's
+      # CalVer tag — claiming to belong to a release it does not.
       #
       # This runs after release-plz rather than before it because the version
       # pre-set above is an *input* to release-plz's decision, not the outcome
@@ -166,7 +167,7 @@ jobs:
       # a manifest-only edit — it invalidates a checked-in generated file, and
       # tree-sitter.yml's generate-check job fails the release PR if the two
       # disagree.
-      - name: Align the tree-sitter manifests with the version release-plz chose
+      - name: Align the non-Cargo manifests with the version release-plz chose
         if: steps.release_pr.outputs.prs_created == 'true'
         env:
           PR: ${{ steps.release_pr.outputs.pr }}
@@ -189,16 +190,21 @@ jobs:
           fi
           echo "release-plz settled on $version"
 
-          cd crates/cairn-lang-tree-sitter
-          # jq rather than sed: `version` is not a unique key in either file once
-          # nested objects are in play, and a path expression cannot drift onto a
-          # dependency's version the way a line-oriented match can.
-          for spec in "package.json:.version" "tree-sitter.json:.metadata.version"; do
+          # jq rather than sed: `version` is not a unique key in any of these
+          # files once nested objects are in play, and a path expression cannot
+          # drift onto a dependency's version the way a line-oriented match can.
+          for spec in \
+            "crates/cairn-lang-tree-sitter/package.json:.version" \
+            "crates/cairn-lang-tree-sitter/tree-sitter.json:.metadata.version" \
+            "editors/vscode/package.json:.version"; do
             file="${spec%%:*}"
             path="${spec#*:}"
             jq --indent 2 --arg v "$version" "$path = \$v" "$file" > "$file.tmp"
             mv "$file.tmp" "$file"
           done
+          # Only the grammar has a generated file to invalidate; the extension's
+          # version reaches nothing but its own manifest.
+          cd crates/cairn-lang-tree-sitter
           pnpm install --frozen-lockfile
           pnpm run generate
           cd ../..
@@ -209,7 +215,7 @@ jobs:
           fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git commit -aqm "chore: align tree-sitter manifests with $version"
+          git commit -aqm "chore: align the non-Cargo manifests with $version"
           git push origin "$branch"
           echo "Pushed the alignment commit. If the release PR's checks were" \
                "created before this push, re-run them before merging."

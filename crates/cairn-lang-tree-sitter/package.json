@@ -24,6 +24,7 @@
   "types": "bindings/node/index.d.ts",
   "files": [
     "grammar.js",
+    "tree-sitter.json",
     "binding.gyp",
     "bindings/node/**",
     "queries/**",

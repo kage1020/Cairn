@@ -4,7 +4,8 @@ name: tree-sitter
 # tests are already covered by ci.yml's `cargo test --workspace` on every push/PR;
 # this workflow only adds what ci.yml doesn't: version parity across the three
 # manifests that carry the version, generated-file drift, the tree-sitter corpus
-# (pnpm), the Node addon smoke build, and the WASM release asset.
+# (pnpm), the Node addon smoke build, what the published tarball actually
+# contains, and the WASM release asset.
 #
 # The WASM asset is reachable two ways. A human pushing a `v*` tag fires the tag
 # trigger below; release-plz cannot, because it pushes its tag with GITHUB_TOKEN
@@ -199,6 +200,74 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm exec node-gyp rebuild --release
       - run: node -e "console.log(require('./bindings/node').name)"
+
+  packed-tarball:
+    name: Packed tarball resolves .crn
+    needs: resolve-ref
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.resolve-ref.outputs.ref }}
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: crates/cairn-lang-tree-sitter/package.json
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: crates/cairn-lang-tree-sitter/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+
+      # Everything below runs from $RUNNER_TEMP, outside the checkout, because
+      # the question is what an editor gets after `npm install tree-sitter-cairn`
+      # — and in the repository tree-sitter.json is on disk whether or not
+      # package.json's `files` ships it, so a check that runs in-tree can only
+      # ever pass. Since tree-sitter CLI 0.24 that file is the sole declaration
+      # of `file-types` and the query paths; without it an editor finds no
+      # language for `.crn` at all. `tree-sitter parse` does not answer the
+      # question either: it falls back to src/grammar.json and works with the
+      # manifest missing, so highlighting is what has to be exercised.
+      - name: Highlight a .crn using only the packed files
+        shell: bash
+        run: |
+          set -euo pipefail
+          work="$RUNNER_TEMP/packed"
+          mkdir -p "$work/parsers"
+          # npm rather than pnpm: npm-publish.yml mints the real tarball with
+          # `npm publish`, so npm's file selection is the one under test.
+          npm pack --pack-destination "$work"
+          tar -xzf "$work"/tree-sitter-cairn-*.tgz -C "$work"
+          # A parser directory is scanned for entries named `tree-sitter-*`;
+          # npm unpacks to `package/`.
+          mv "$work/package" "$work/parsers/tree-sitter-cairn"
+          echo "Packed files:"
+          find "$work/parsers/tree-sitter-cairn" -type f -printf '  %P\n' | sort
+          cp "$GITHUB_WORKSPACE/examples/cottage.crn" "$work/sample.crn"
+          printf '{"parser-directories":["%s/parsers"]}\n' "$work" > "$work/config.json"
+
+          # Leaving the checkout is the whole point, and it has to happen before
+          # the CLI runs, not just before the tarball is unpacked: the working
+          # directory is searched for a grammar ahead of the configured parser
+          # directories, so a run started from the crate resolves `.crn` through
+          # the repository's own tree-sitter.json and passes no matter what the
+          # tarball holds. Measured, not assumed — the check was vacuous until
+          # this line was added.
+          cd "$work"
+
+          # An unresolved extension is a warning, not an error: the CLI exits 0
+          # and writes nothing. The output is the discriminator, not the status,
+          # so `|| true` here loses nothing an exit-code gate would have caught.
+          ts="$GITHUB_WORKSPACE/crates/cairn-lang-tree-sitter/node_modules/.bin/tree-sitter"
+          "$ts" highlight --config-path "$work/config.json" "$work/sample.crn" \
+            > "$work/out.txt" 2> "$work/err.txt" || true
+          cat "$work/err.txt" >&2
+          if [ ! -s "$work/out.txt" ]; then
+            echo 'The packed file set does not resolve .crn to the Cairn grammar.' >&2
+            echo 'Every editor integration installing from npm sees the same thing.' >&2
+            exit 1
+          fi
+          echo "Highlighted $(wc -c < "$work/out.txt") bytes from the packed grammar."
 
   wasm-build:
     name: WASM build (release asset)
