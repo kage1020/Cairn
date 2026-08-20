@@ -12,6 +12,20 @@ and is a separate axis from the Minecraft target version.
 
 ### Breaking changes
 
+- *(lsp)* A `textDocument/didChange` for a URI that is not open is ignored instead of opening it.
+  A change after `didClose` used to re-insert the document and publish a fresh diagnostic set — a
+  marker on a file the editor has no buffer left to clear — and one for a URI never opened made
+  completion available for it. This also covers the case where the server itself dropped the
+  `didOpen` because its payload did not match the method's schema: that document now stays
+  unknown until the client opens it again, where a keystroke used to revive it.
+- *(lsp)* Completion offers nothing inside a string literal. `door id="@oa"` used to answer with
+  the whole material catalogue and `door label="pick mat_slot=fl"` with the theme's slot names;
+  a string is free-form text, which is where the completion module already promised to invent
+  nothing. A cursor past the closing quote completes as before.
+- *(lsp)* A completion position one line past the end of the document is refused with
+  `InvalidParams` instead of clamped to EOF. The clamp anchored every item's `textEdit` on the
+  previous line, producing a range that does not contain the requested position — which editors
+  discard, so the answer was already unusable.
 - *(core)* A `window` is cut only where the walls actually are. Its rows have to lie inside one
   course of `walls` — `walls height=H` under `level y=N` paints the world rows `N+1 … N+H`, and
   courses that abut merge into one — so `window y=0` and a window in the air between two `level`
@@ -101,6 +115,19 @@ and is a separate axis from the Minecraft target version.
   fields. Source-compatible for anything that only names the path; a consumer that wrote an
   `impl` for the redstone type now writes it for core's, and one that had both is writing it
   twice for one type. Rust API, Internal tier.
+
+### Fixed
+
+- *(lsp)* A message arriving between `shutdown` and `exit` no longer kills the server. Anything
+  but `exit` used to be a protocol error that ended the process with code 1 before the `exit`
+  behind it was read, so an editor reported the language server as crashed and restarted it —
+  and `$/cancelRequest` may arrive at any time, while a closing window sends `didClose` on its
+  way out. Requests after `shutdown` are now answered `InvalidRequest`, notifications are
+  ignored, and `exit` leaves with code 0 (still non-zero without a preceding `shutdown`).
+- *(docs)* `cairn-lang-wasm`'s README documented `wasm-pack build` as working. The crate has no
+  `wasm-bindgen` dependency and `cairn_version` carries no export attribute, so wasm-pack refuses
+  it and a plain `wasm32-unknown-unknown` build produces a module with no callable export. The
+  README, the crate docs, and the function's own doc line now say so.
 
 ## 2026.8.2 — 2026-08-01
 

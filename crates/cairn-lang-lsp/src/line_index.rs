@@ -70,7 +70,10 @@ impl LineIndex {
     /// line / Unicode-scalar-value [`CorePosition`] instead of a byte span:
     /// recover the byte offset of that position. Columns past the end of
     /// the line clamp to the line's last byte; lines past the end of the
-    /// source clamp to `source.len()`.
+    /// source clamp to `source.len()` — deliberately unlike
+    /// [`LineIndex::offset_at`], which refuses them. The input here comes
+    /// from the compiler rather than from a client, so there is nobody to
+    /// refuse and an anchor at EOF keeps the diagnostic on screen.
     #[must_use]
     pub fn offset_of(&self, source: &str, pos: CorePosition) -> usize {
         let line_idx = pos.line.get() as usize - 1;
@@ -89,23 +92,28 @@ impl LineIndex {
     /// Inverse of [`LineIndex::position`]: recover the byte offset of a
     /// protocol position (0-based line, UTF-16 code-unit column).
     ///
-    /// Slightly-off coordinates clamp — a request can carry a position one
-    /// keystroke ahead of the last synced revision, and clamping yields the
-    /// nearest valid offset instead of a dead request: a column past the end
-    /// of the line clamps to the line end (before its terminator), a column
-    /// landing between the two UTF-16 units of an astral char clamps down to
-    /// that char's start so the result is always a char boundary, and a line
-    /// exactly one past the last clamps to `source.len()` (the revision race
-    /// can remove at most the lines the change deleted, and answering at EOF
-    /// is right for the common append case). A line further out is not a
-    /// race but a client bug; that returns `None` so the caller can refuse
-    /// the request instead of fabricating an EOF context.
+    /// Columns clamp within a line that exists: a column past the end of
+    /// the line clamps to the line end (before its terminator), and a
+    /// column landing between the two UTF-16 units of an astral char
+    /// clamps down to that char's start so the result is always a char
+    /// boundary. Both keep an off-by-a-keystroke column usable.
+    ///
+    /// A *line* the document does not have returns `None`, so the caller
+    /// can refuse the request rather than answer about a line that is not
+    /// there. Which lines a document has comes from
+    /// [`cairn_lang_core::lines::starts`], and includes the empty line
+    /// after a trailing terminator — `"abc\n"` has lines 0 and 1.
+    ///
+    /// Note the asymmetry with [`LineIndex::offset_of`], which clamps an
+    /// out-of-range line to `source.len()` instead. That one converts a
+    /// position the *compiler* produced, where a line outside the source
+    /// is an internal inconsistency with no client to tell; this one
+    /// converts a position a *client* sent, where saying so is the whole
+    /// point.
     #[must_use]
     pub fn offset_at(&self, source: &str, position: lsp_types::Position) -> Option<usize> {
         let line = position.line as usize;
-        let Some(&line_start) = self.line_starts.get(line) else {
-            return (line == self.line_starts.len()).then_some(source.len());
-        };
+        let &line_start = self.line_starts.get(line)?;
         let line_end = self.line_end(source, line_start);
         let target = position.character as usize;
         let mut units = 0;
@@ -272,6 +280,64 @@ mod tests {
     }
 
     #[test]
+    fn the_empty_line_after_a_trailing_terminator_is_a_line() {
+        // The invariant that makes refusing an out-of-range line safe: a
+        // file ending in a newline has a line *after* the newline, and a
+        // cursor sitting there is the ordinary "start typing at the end of
+        // the file" position. If `lines::starts` ever stopped yielding it,
+        // completion would begin refusing the end of every
+        // newline-terminated document and nothing else here would notice —
+        // the other fixtures in this module all end mid-line.
+        for source in ["abc\n", "abc\r\n", "abc\r"] {
+            let index = LineIndex::new(source);
+            assert_eq!(
+                index.offset_at(
+                    source,
+                    lsp_types::Position {
+                        line: 1,
+                        character: 0,
+                    }
+                ),
+                Some(source.len()),
+                "for {source:?}",
+            );
+            assert_eq!(
+                index.offset_at(
+                    source,
+                    lsp_types::Position {
+                        line: 2,
+                        character: 0,
+                    }
+                ),
+                None,
+                "for {source:?}",
+            );
+        }
+        // An empty document has line 0 and nothing else.
+        let index = LineIndex::new("");
+        assert_eq!(
+            index.offset_at(
+                "",
+                lsp_types::Position {
+                    line: 0,
+                    character: 0,
+                }
+            ),
+            Some(0),
+        );
+        assert_eq!(
+            index.offset_at(
+                "",
+                lsp_types::Position {
+                    line: 1,
+                    character: 0,
+                }
+            ),
+            None,
+        );
+    }
+
+    #[test]
     fn offset_at_round_trips_with_position() {
         // For every char boundary (and EOF), converting the byte offset to
         // an LSP position and back recovers the original offset. Non-ASCII
@@ -306,29 +372,19 @@ mod tests {
             ),
             Some(5),
         );
-        // One line past the end clamps to source.len() — a stale position
-        // from a racing didChange deserves an answer.
-        assert_eq!(
-            index.offset_at(
-                source,
-                lsp_types::Position {
-                    line: 2,
-                    character: 0,
-                },
-            ),
-            Some(source.len()),
-        );
-        // Further out is a client bug, refused rather than clamped.
-        assert_eq!(
-            index.offset_at(
-                source,
-                lsp_types::Position {
-                    line: 3,
-                    character: 0,
-                },
-            ),
-            None,
-        );
+        // A line the document does not have is refused, whether it is one
+        // past the last or far beyond it. Clamping the near miss to
+        // `source.len()` answered with an offset on the *previous* line,
+        // which the completion path then used as the anchor of every
+        // `textEdit` it returned — edits that do not contain the position
+        // the client asked about, which the protocol requires them to.
+        for line in [2, 3, 99] {
+            assert_eq!(
+                index.offset_at(source, lsp_types::Position { line, character: 0 }),
+                None,
+                "line {line} is past the two this source has",
+            );
+        }
         // A column landing between the two UTF-16 units of 😀 clamps down
         // to the char's start so the result is always a char boundary.
         assert_eq!(

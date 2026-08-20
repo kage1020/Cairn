@@ -14,7 +14,7 @@ use lsp_types::notification::{
     DidChangeTextDocument, DidCloseTextDocument, DidOpenTextDocument, Exit, Notification as _,
     PublishDiagnostics,
 };
-use lsp_types::request::{Completion, Request as _};
+use lsp_types::request::{Completion, Request as _, Shutdown};
 
 use crate::completion::completions;
 use crate::diagnostics::compute_diagnostics;
@@ -77,24 +77,59 @@ pub fn run() -> Result<(), DynError> {
 /// Dispatch loop: requests are answered (`shutdown` and `completion` are
 /// known), notifications keep the document store in sync and drive
 /// diagnostics publishing.
+///
+/// `shutdown` does not end the loop — it moves the server into a state the
+/// spec describes precisely: further requests are refused with
+/// `InvalidRequest`, further notifications are ignored, and `exit` ends
+/// the session. `lsp_server::Connection::handle_shutdown` models
+/// that window as "the very next message is `exit`", which no real client
+/// guarantees: `$/cancelRequest` may arrive at any time, and an editor
+/// closing its last buffer sends `didClose` on the way out. Every one of
+/// those became a `ProtocolError` that ended `run()` with an error before
+/// the `exit` behind it was ever read, so the process died with code 1 and
+/// the editor reported the language server as crashed.
 fn main_loop(connection: &Connection) -> Result<(), DynError> {
     let mut store = DocumentStore::new();
+    let mut shutdown_requested = false;
     for message in &connection.receiver {
         match message {
-            Message::Request(request) => {
-                if connection.handle_shutdown(&request)? {
-                    return Ok(());
-                }
-                handle_request(connection, &store, request)?;
+            // Checked before the method, so a second `shutdown` is refused
+            // like any other post-shutdown request rather than answered
+            // twice.
+            Message::Request(request) if shutdown_requested => {
+                let response = Response::new_err(
+                    request.id,
+                    ErrorCode::InvalidRequest as i32,
+                    format!(
+                        "`{}` received after `{}`; the server is shutting down",
+                        request.method,
+                        Shutdown::METHOD,
+                    ),
+                );
+                connection.sender.send(Message::Response(response))?;
             }
+            Message::Request(request) if request.method == Shutdown::METHOD => {
+                shutdown_requested = true;
+                let response = Response::new_ok(request.id, serde_json::Value::Null);
+                connection.sender.send(Message::Response(response))?;
+            }
+            Message::Request(request) => handle_request(connection, &store, request)?,
+            Message::Notification(notification) if notification.method == Exit::METHOD => {
+                // The one message that ends the loop, and only after
+                // `shutdown`: the spec requires an `exit` without one to
+                // terminate the process with a non-zero code.
+                return if shutdown_requested {
+                    Ok(())
+                } else {
+                    Err("exit notification received before shutdown request".into())
+                };
+            }
+            // Dropped here rather than inside `handle_notification`: the
+            // store write and the `publishDiagnostics` push both live down
+            // that path, and a squiggle arriving after `shutdown` is an
+            // observable violation of "notifications are ignored".
+            Message::Notification(_) if shutdown_requested => {}
             Message::Notification(notification) => {
-                // `handle_shutdown` consumes the `exit` that follows a
-                // `shutdown` request, so an `exit` reaching this loop
-                // skipped the handshake — the spec requires that to end
-                // the process with a non-zero code.
-                if notification.method == Exit::METHOD {
-                    return Err("exit notification received before shutdown request".into());
-                }
                 handle_notification(connection, &mut store, notification)?;
             }
             Message::Response(_) => {
@@ -102,6 +137,19 @@ fn main_loop(connection: &Connection) -> Result<(), DynError> {
                 // expected; ignore rather than fail on a confused client.
             }
         }
+    }
+    // The loop also ends when the channel closes, i.e. the client shut
+    // stdin without saying anything — an editor that was killed rather
+    // than one that quit. There is nobody left to answer, so this is not
+    // an error, but it is not the orderly teardown either and the stream
+    // should say which one happened. `shutdown_requested` is the bit that
+    // can tell them apart, and until this loop kept it there was nothing
+    // to ask.
+    if !shutdown_requested {
+        eprintln!(
+            "cairn-lsp: client closed stdin without `{}`; the session ended abnormally",
+            Shutdown::METHOD,
+        );
     }
     Ok(())
 }
@@ -227,8 +275,25 @@ fn handle_notification(
                 return Ok(());
             };
             let uri = params.text_document.uri;
-            let diagnostics = compute_diagnostics(&uri, &change.text);
-            store.change(uri.clone(), change.text);
+            // Ahead of the diagnostics run, not after it: a revision for a
+            // URI the store does not hold describes a document the client
+            // never opened, one it has already closed, or one whose
+            // `didOpen` this server dropped as malformed. Recording it
+            // would make the store outlive the client's open set;
+            // publishing for it would leave a squiggle on a file the editor
+            // has no buffer for and therefore no way to clear. Neither
+            // happens — the revision is dropped with a line on stderr, the
+            // way a malformed payload is, and the parse that would have
+            // been thrown away with it never runs.
+            let Some(source) = store.change(&uri, change.text) else {
+                eprintln!(
+                    "cairn-lsp: ignoring `{}` for a document that is not open: {}",
+                    DidChangeTextDocument::METHOD,
+                    uri.as_str(),
+                );
+                return Ok(());
+            };
+            let diagnostics = compute_diagnostics(&uri, source);
             publish(
                 connection,
                 uri,
