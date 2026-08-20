@@ -128,6 +128,27 @@ and is a separate axis from the Minecraft target version.
   `wasm-bindgen` dependency and `cairn_version` carries no export attribute, so wasm-pack refuses
   it and a plain `wasm32-unknown-unknown` build produces a module with no callable export. The
   README, the crate docs, and the function's own doc line now say so.
+- *(cli, lsp)* `cairn --version`, `cairn-lsp --version`, and every lockfile's `cairn_version`
+  report the release that built them. The number was a hand-maintained constant in
+  `cairn-lang-core` and had fallen a release behind the workspace, so a `2026.8.2` build
+  answered `2026.7` — and wrote that into the one field the lockfile exists to make
+  trustworthy. It is now read from the crate's own package version, and the tests compare it
+  against the version cargo derived for the calling crate, so a constant that stops tracking
+  the workspace fails from the other side of a crate boundary.
+- *(tree-sitter)* The npm package ships `tree-sitter.json`. `package.json`'s `files` array left
+  it out, and since tree-sitter CLI 0.24 that file is the sole declaration of `file-types` and
+  the query paths — so an editor installing `tree-sitter-cairn` from the registry found no
+  language for `.crn` at all. `tree-sitter parse` kept working off `src/grammar.json`, which is
+  why nothing caught it, and nothing running inside the repository could: the file is on disk
+  whether or not it is published. CI now packs the tarball, unpacks it outside the checkout, and
+  highlights a `.crn` through it.
+- *(vscode)* The extension manifest declares the workspace version. Its own changelog says
+  extension versions track the CLI's CalVer tag, but the release pipeline aligned only the
+  tree-sitter manifests, so the extension had been left a release behind. The alignment step now
+  rewrites it too, and a CI job compares the two numbers on any change that can move either.
+- *(ci)* The VS Code extension and the documentation site are built. Neither was referenced
+  anywhere in the workflows, so a TypeScript error in the extension or a Starlight page that
+  fails to render could reach the integration branch without turning a check red.
 
 ## 2026.8.2 — 2026-08-01
 
