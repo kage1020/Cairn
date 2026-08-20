@@ -998,6 +998,29 @@ fn lsp_28_closing_stdin_without_exit_says_the_session_ended_abnormally() {
 }
 
 #[test]
+fn lsp_30_closing_stdin_after_shutdown_is_not_abnormal() {
+    // The discriminating half of the pair. `exit` returns out of the
+    // dispatch loop, so a session that sends it never reaches the check at
+    // the bottom at all — only a closed pipe does. A client that says
+    // `shutdown` and then closes stdin without `exit` reaches it *with the
+    // flag set*, and that is the one arrangement where the check has to
+    // stay quiet. Without this, "always warn" is indistinguishable from
+    // "warn when the teardown skipped `shutdown`".
+    let (mut server, _) = Server::start();
+    server.did_open(CLEAN, 1);
+    server.read_until_method("textDocument/publishDiagnostics");
+    server.request_shutdown();
+    drop(server.stdin);
+    let status = server.child.wait().expect("wait for server exit");
+    assert_eq!(status.code(), Some(0));
+    let logged: Vec<String> = server.stderr.iter().collect();
+    assert!(
+        logged.is_empty(),
+        "the client said `shutdown`, so the teardown was orderly, got: {logged:?}",
+    );
+}
+
+#[test]
 fn lsp_29_a_clean_session_says_nothing_on_stderr() {
     // The control for the line above: it has to be absent from the
     // handshake it is meant to distinguish, or it says nothing at all.

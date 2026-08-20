@@ -659,6 +659,33 @@ mod tests {
     }
 
     #[test]
+    fn the_line_scan_answers_both_questions_from_one_walk() {
+        // `open_string` is read by `context_at` only after `comment` has
+        // been found absent, so nothing at that call site can tell whether
+        // the field means what it says on its own. It has to, because the
+        // next caller may ask it first — measured here rather than left to
+        // the order of an `||`.
+        let cases = [
+            // (line, comment offset, open string at the end)
+            ("door id=front", None, false),
+            ("door id=\"front\"", None, false),
+            ("door id=\"front", None, true),
+            // A `#` inside a string is content, not an opener.
+            ("door id=\"a # b\"", None, false),
+            ("door id=\"a # b", None, true),
+            // Past a comment opener everything is comment text, quotes
+            // included: the scan stops rather than counting them.
+            ("door id=a # say \"hi", Some(10), false),
+            ("# \"", Some(0), false),
+        ];
+        for (line, comment, open_string) in cases {
+            let scan = scan_line(line);
+            assert_eq!(scan.comment, comment, "comment offset for {line:?}");
+            assert_eq!(scan.open_string, open_string, "open string for {line:?}");
+        }
+    }
+
+    #[test]
     fn a_material_token_inside_a_string_offers_nothing() {
         // `id=` takes free-form text, so an `@` between quotes is a
         // character in a name, not the opener of a material token. The
