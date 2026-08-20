@@ -319,6 +319,12 @@ fn the_port_accepts_exactly_the_rectangles_the_openings_pass_carves() {
     // independent lists — the failure mode it guards against is one of
     // the two limits being edited alone, which no test of either side by
     // itself can see.
+    //
+    // Every case here declares `walls` in the def body. That is the whole
+    // set the equivalence holds over, and the test below this one is where
+    // the boundary is written down: port resolution does not walk into a
+    // `level`, so a def that puts its walls there is carved by the
+    // openings pass and refused by the port.
     const WALL_HEIGHT: u32 = 3;
     for (y, height) in [
         (0, 1),
@@ -345,6 +351,45 @@ fn the_port_accepts_exactly_the_rectangles_the_openings_pass_carves() {
              the openings pass carves it = {carved}, the port anchors it = {anchored}",
         );
     }
+}
+
+#[test]
+fn walls_under_a_level_are_carved_into_but_anchor_no_port() {
+    // The one place the two answers diverge, pinned as the limitation it
+    // is. `lower::wall_column` walks the flattened member list and so sees
+    // a `walls` under a `level`; `walkway::wall_column_of` walks the def
+    // body only, because walkway ports have never resolved through a
+    // `level` at all. The window is cut and the walkway is dropped.
+    //
+    // This is unchanged behaviour — the helper this replaced read the same
+    // list — and it is the assertion that fires on the day someone teaches
+    // port resolution about levels, which is when the equivalence above
+    // becomes true of every def rather than of defs that keep their walls
+    // in the body.
+    let src = format!(
+        "{THEME}def hut size=5x5:\n  \
+         level id=up y=0\n    \
+         walls id=w class=outer mat_slot=wall height=3\n  \
+         window id=top side=front offset=1 y=2 size=1x1 mat_slot=glass\n  \
+         door id=e side=front at=center\n\n\
+         site s:\n  \
+         place id=a use=hut theme=t at=origin\n  \
+         place id=b use=hut theme=t east_of=a gap=4\n  \
+         connect a.top to b.e path=@gravel\n",
+    );
+    let out = lowered(&src);
+    let carved = out
+        .structures
+        .values()
+        .any(|ba| contains_id(ba, "minecraft:glass_pane"));
+    assert!(carved, "the openings pass cuts the window");
+    assert!(
+        out.diagnostics
+            .iter()
+            .any(|d| d.primary.contains("was skipped because port")),
+        "the port does not resolve: {:?}",
+        defers(&out),
+    );
 }
 
 #[test]

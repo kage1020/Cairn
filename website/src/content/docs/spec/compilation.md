@@ -86,14 +86,16 @@ to its material the same way.
 - **Ridge height.** A gable rises `ceil(short_span / 2)` voxels above the
   wall top, where `short_span` is the *roof bounding box* extent along the
   short axis (= `min(dims.x, dims.z)` after the overhang inflation below).
-  Layer `0` seats on the wall top and is always a pair of slope rows; each
+  Layer `0` seats on the wall top and is always a pair of slope rows — a
+  single row when `short_span` is 1 and the two converge on it. Each
   layer above it steps inward by one on each side. The topmost layer is
   the apex: odd-span apexes cap with a single `half=top` stair on the
   centre row, even-span apexes cap with two `half=top` stairs on the
   adjacent meeting rows so the ridge does not leave an open V. A
   `short_span` of 1 or 2 rises exactly one layer and therefore has no apex
-  course at all — its slopes meet at the wall top, and capping them there
-  would leave a half-block slit between the wall and the roof above it.
+  course at all — that layer is layer `0`, seated on the wall, and
+  capping it would leave a half-block slit between the wall and the roof
+  above it.
 - **Overhang.** `overhang=N` inflates the voxel grid by `N` on every
   horizontal axis (`Dims.x = size.w + 2N`, `Dims.z = size.h + 2N`). Floors,
   walls, doors, and windows keep their authored coordinates and are
@@ -102,15 +104,17 @@ to its material the same way.
 - **Stair orientation.** Each slope row sets `half=bottom,
   shape=straight` with `facing` pointed toward the ridge:
   `south` on the `-z` slope and `north` on the `+z` slope for an x-axis
-  ridge; `east` / `west` mirrored for a z-axis ridge. An odd span's
-  single-stair apex caps at `half=top` using the low-slope facing — it is
-  one cell wide and has no outward direction of its own. An even span's
+  ridge; `east` / `west` mirrored for a z-axis ridge. An even span's
   two-stair apex straddles the ridge, and each of the pair faces *away*
   from it (`north` on the `-z` row and `south` on the `+z` row for an
-  x-axis ridge): a `half=top` stair fills the lower half on its facing
-  side, so an inward-facing pair would leave a 0.5 x 0.5 undercut along
-  each outer face for the roof's full length, where an outward-facing one
-  moves the same void under the ridge.
+  x-axis ridge): a `half=top` stair fills the upper half of its voxel
+  plus the lower quarter on its facing side, so an inward-facing pair
+  would leave a 0.5 x 0.5 undercut along each outer face for the roof's
+  full length, where an outward-facing one moves the same void under the
+  ridge. An odd span's single-stair apex caps at `half=top` using the
+  low-slope facing: it is one cell wide with two outer faces and a stair
+  serves only one, so the void is unavoidable there and the facing is
+  fixed by this rule rather than by which face to spare.
 
 ## 4.4 Shed roof voxel rules
 
@@ -159,7 +163,8 @@ pyramid: all four walls slope inward toward a centre ridge.
   applies only when `extra_height > 1`; a short span of 1 or 2 rises a
   single layer, which is layer `0` and is therefore the frame. On a square
   footprint the apex is a single `half=top` stair (odd short span) or a
-  `2x2` block of `half=top` stairs (even short span). On a rectangular footprint the apex collapses to a ridge row
+  `2x2` block of `half=top` stairs (even short span). On a rectangular
+  footprint the apex collapses to a ridge row
   along the long axis: `roof_w == roof_h` length cap, otherwise a row
   of `half=top` stairs spanning the inset interior on the long axis.
   Apex facings follow the gable rule (`south` for an x-ridge, `east`

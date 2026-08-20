@@ -277,18 +277,23 @@ pub fn gable_ridge_axis(roof_w: u32, roof_h: u32) -> Axis {
 /// clone the earlier shape forced.
 #[must_use]
 pub fn gable_stair_state(ridge_axis: Axis, face: StairFace) -> BlockState {
-    // A converged apex is one cell wide, so it has no outward direction
-    // of its own and keeps the low slope's facing — §4.3's rule. An
-    // even-span apex is a *pair* straddling the ridge, and each of the
-    // two faces away from it: a `half=top` stair fills the lower half on
-    // its facing side, so a pair facing inward leaves a 0.5 x 0.5
-    // undercut running the length of the roof along each outer face,
-    // where facing outward moves the same void under the ridge and out
-    // of sight.
+    // A `half=top` stair fills the upper half of its voxel plus the lower
+    // quarter on its facing side. An even-span apex is a *pair*
+    // straddling the ridge, so each of the two faces away from it and
+    // puts that quarter on the outer face; facing them inward instead
+    // leaves the quarter empty there — a 0.5 x 0.5 undercut running the
+    // length of the roof along both outer faces.
+    //
+    // A converged apex is one cell wide, so both of its faces are outer
+    // ones and a stair can only serve one. The void is unavoidable
+    // there, and §4.3 settles which side keeps it by naming the low
+    // slope's facing rather than by weighing the two.
     let facing = match (ridge_axis, face) {
         // x-ridge: short axis is z. Low slope is on -z; its riser faces
         // toward +z (south) — the upper-step side ends up on the inward
-        // side (toward the ridge).
+        // side (toward the ridge). `ApexHigh` reaches the same `south`
+        // from the opposite premise: it sits on +z, and +z facing
+        // outward is south too.
         (Axis::X, StairFace::LowSlope | StairFace::Apex | StairFace::ApexHigh) => Cardinal::South,
         (Axis::X, StairFace::HighSlope | StairFace::ApexLow) => Cardinal::North,
         // z-ridge: short axis is x. Mirror the same rule onto the x axis.
@@ -880,10 +885,12 @@ mod tests {
             assert_eq!(v.face, StairFace::Apex);
             assert_eq!(v.pos.2, 4);
         }
-        // A converged cap is one cell wide and has no outward direction of
-        // its own, so it keeps the low slope's facing — the rule
-        // `spec/compilation.md` §4.3 states, and the reason it is a face of
-        // its own rather than the even-span pair's low half.
+        // A converged cap is one cell wide, so both of its faces are outer
+        // ones and a stair serves only one. `spec/compilation.md` §4.3
+        // settles it on the low slope's facing, which is the reason it is
+        // a face of its own rather than the even-span pair's low half —
+        // the pair's outward rule has two sides to choose between and
+        // this has none to spare.
         let state = gable_stair_state(Axis::X, StairFace::Apex);
         assert_eq!(state.properties.get("half").unwrap(), "top");
         assert_eq!(state.properties.get("facing").unwrap(), "south");

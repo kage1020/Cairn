@@ -8,9 +8,9 @@
 //! layer, which made layer 0 the apex layer as well — and the apex
 //! branch ran instead of the frame, so a whole roof came out `half=top`.
 //!
-//! A `half=top` stair fills the upper half of its voxel, so a course of
-//! them one voxel above the wall leaves a half-block slit running the
-//! whole perimeter. For a hip it also drops the four `outer_*` corners
+//! A `half=top` stair fills the upper half of its voxel (plus the lower
+//! quarter on its facing side), so a course of them one voxel above the
+//! wall leaves a half-block slit running the whole perimeter. For a hip it also drops the four `outer_*` corners
 //! and every per-edge facing: sixteen cells that should have been four
 //! corners and two slope rows came out as one repeated state.
 //!
@@ -227,10 +227,11 @@ fn an_even_span_gable_on_a_z_ridge_mirrors_the_outward_pair() {
 #[test]
 fn an_odd_span_gable_keeps_the_low_slope_facing_on_its_single_cap() {
     // §4.3: "The apex caps with a single stair at `half=top` using the
-    // low-slope facing." A converged cap is one cell wide and has no
-    // outward direction of its own, so the outward rule above does not
-    // reach it — which is why it is a face of its own rather than the
-    // pair's low half.
+    // low-slope facing." A converged cap is one cell wide, so both of its
+    // faces are outer ones and a stair serves only one — the outward rule
+    // above has nothing to choose here, and the undercut it removes for a
+    // pair is unavoidable for a single. That is why this is a face of its
+    // own rather than the pair's low half.
     let out = roof("7x5", "gable");
     let ba = structure(&out);
     for x in 0..7 {

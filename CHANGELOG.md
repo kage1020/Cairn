@@ -18,23 +18,22 @@ and is a separate axis from the Minecraft target version.
   courses now earn `W_DEFERRED_MEMBER` instead of carving a hole through the floor slab and
   hanging glass in open sky. The check used to be the highest wall row alone, which could see
   neither fault.
-- *(core)* A `window` port anchors a walkway on exactly the rectangles the openings pass carves.
-  A window flush with the top course used to be cut into the wall and then refused as an anchor,
-  and one on the ground plane was accepted as an anchor for a cut that never happened; both
-  passes now call one predicate. `spec/components-editing-sites.md` §9.3.5 states the rule the
-  compiler applies rather than the one it did.
+- *(core)* For a window over top-level `walls`, the port anchors a walkway on exactly the
+  rectangles the openings pass carves. A window flush with the top course used to be cut into the
+  wall and then refused as an anchor, and one on the ground plane was accepted as an anchor for a
+  cut that never happened; both passes now call one predicate.
+  `spec/components-editing-sites.md` §9.3.5 states the rule the compiler applies rather than the
+  one it did. `walls` under a `level` remain invisible to port resolution, as before — the two
+  passes share the predicate, not the column they apply it to.
 - *(core)* A roof one course tall seats on the wall instead of capping itself. A short span of 1
   or 2 rises a single layer, and treating that layer as the apex left it entirely `half=top` — a
   half-block slit running the length of a gable and the whole perimeter of a hip, with the hip
   also losing its four `outer_*` corners and every per-edge facing.
 - *(core)* An even-span gable's two-stair apex faces away from the ridge, as the generator's own
-  comment already said it did. A `half=top` stair fills the lower half on its facing side, so the
-  inward-facing pair left a 0.5 x 0.5 undercut along each outer face for the roof's full length.
-  An odd span's single cap keeps the low-slope facing (`spec/compilation.md` §4.3) and does not
-  move.
-- *(core)* `block_array::StairFace` gains `Apex`, the converged single cap that `ApexLow` used to
-  serve as well. `ApexLow` / `ApexHigh` are now only the even-span pair, and face outward.
-
+  comment already said it did. A `half=top` stair fills the upper half of its voxel plus the lower
+  quarter on its facing side, so the inward-facing pair left a 0.5 x 0.5 undercut along each outer
+  face for the roof's full length. An odd span's single cap keeps the low-slope facing
+  (`spec/compilation.md` §4.3) and does not move.
 - *(redstone)* A signal carries one driver. Two sensors bound to the same `sig.X` used to keep
   the first and drop the second in silence — the block stayed in the build, wired to nothing —
   and now refuse with `E_LOGIC_MULTIPLE_DRIVERS`. Write the two into names of their own and
