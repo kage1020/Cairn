@@ -106,8 +106,10 @@ parent / role / side / level / offset から導かれ、その本体の外では
 `right` のいずれか — §5.4 参照)、`window` では矩形の幾何中心 (`offset + size.w / 2`) を採用し、
 いずれの場合も placement の overhang ぶんだけ外側にシフトして、ポートは構造外面を超えた overhang
 リング上に着地します。`door` の数値オフセット (`at=N`) は将来拡張用に予約されています。
-`window` は水平方向 (`offset + size.w ≤ wall_length`) と垂直方向
-(`y + size.h ≤ walls.height`) の両方で壁内に収まる必要があり、openings パスがカットを
+`window` は水平方向 (`offset + size.w ≤ wall_length`) と垂直方向の両方で壁内に収まる必要が
+あります。垂直方向は `walls height=H` がワールド座標の `1 … H` 行を塗る (`0` 行は床スラブが
+占める) ため、`y … y + size.h − 1` の各行がそのいずれかであること (`y ≥ 1` かつ
+`y + size.h ≤ H + 1`) を要求します。openings パスがカットを
 deferred 化する window はポートも構築されず、行は `W_DEFERRED_MEMBER` で破棄され、ノートには
 door / window / 予約ロールの契約が順番に列挙されます。`window` の `y=` はポートを地面段から
 持ち上げません — 歩道は 1 voxel 厚の平坦な strip であり、相手側エンドポイントと Y が一致して

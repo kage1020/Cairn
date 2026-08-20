@@ -108,7 +108,9 @@ placement's ground row (`place_origin.1`)" — `front`/`back`/`left`/`right` map
 (`offset + size.w / 2`) for a `window`; either way, the placement's overhang
 shifts the port out into the overhang ring beyond the structure's outer face. Numeric door
 offsets (`at=N`) are reserved for a future extension. A `window` must fit both horizontally
-(`offset + size.w ≤ wall_length`) and vertically (`y + size.h ≤ walls.height`) — a window that
+(`offset + size.w ≤ wall_length`) and vertically: `walls height=H` fills the world rows `1 … H`
+— the floor slab owns row `0` — so every row of `y … y + size.h − 1` has to be one of them
+(`y ≥ 1` and `y + size.h ≤ H + 1`). A window that
 the openings pass would defer cannot anchor a walkway either, and the row drops with a
 `W_DEFERRED_MEMBER` whose notes list the door / window / reserved-role contracts in turn. A
 `window`'s authored `y=` does not lift the port off the ground row — the walkway is a 1-voxel-thick

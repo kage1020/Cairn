@@ -26,6 +26,7 @@ mod material;
 mod openings;
 mod roof;
 mod walkway;
+mod wall_column;
 
 use indexmap::IndexMap;
 use serde::Serialize;
