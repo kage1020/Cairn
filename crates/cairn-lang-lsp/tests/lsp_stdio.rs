@@ -723,11 +723,28 @@ fn lsp_21_did_change_after_did_close_leaves_the_document_closed() {
             "contentChanges": [{ "text": DUPLICATE }],
         },
     }));
-    // The ordering assertion again: the next message has to be the answer
-    // to the request behind the change, not a publish for a closed file.
-    let response = server.request_completion(34, TEST_URI, 0, 0);
+    // The ordering assertion again, and it has to be spelled out rather
+    // than delegated to `request_completion`: that helper skips messages
+    // until the id matches, so a publish for the closed document would
+    // slide past it unseen. The next message on the wire has to be the
+    // answer to the request behind the change.
+    server.send(&serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": 34,
+        "method": "textDocument/completion",
+        "params": {
+            "textDocument": { "uri": TEST_URI },
+            "position": { "line": 0, "character": 0 },
+        },
+    }));
+    let next = server.read_message();
     assert_eq!(
-        response["error"]["code"],
+        next.get("id"),
+        Some(&serde_json::json!(34)),
+        "nothing may be published for a closed document, got: {next}",
+    );
+    assert_eq!(
+        next["error"]["code"],
         serde_json::json!(-32602),
         "the document is closed, so completion has nothing to answer from",
     );
@@ -749,8 +766,22 @@ fn lsp_22_did_change_for_a_never_opened_document_is_ignored() {
             "contentChanges": [{ "text": CLEAN }],
         },
     }));
-    let response = server.request_completion(35, OTHER_URI, 0, 0);
-    assert_eq!(response["error"]["code"], serde_json::json!(-32602));
+    server.send(&serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": 35,
+        "method": "textDocument/completion",
+        "params": {
+            "textDocument": { "uri": OTHER_URI },
+            "position": { "line": 0, "character": 0 },
+        },
+    }));
+    let next = server.read_message();
+    assert_eq!(
+        next.get("id"),
+        Some(&serde_json::json!(35)),
+        "nothing may be published for a document that was never opened, got: {next}",
+    );
+    assert_eq!(next["error"]["code"], serde_json::json!(-32602));
     server.shutdown();
 }
 
