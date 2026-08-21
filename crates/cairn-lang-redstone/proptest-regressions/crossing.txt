@@ -5,3 +5,4 @@
 # It is recommended to check this file in to source control so that
 # everyone who runs the test benefits from these saved cases.
 cc 3564cb2288add5bf6edd0455da9a1df4a4d0139517c5cd8d53c1c98c3272e024 # shrinks to xs = [(30, 0), (1, 1)]
+cc c86c04b255c5f46b2e7baf901930de0e933fb71bd270aae3bf00b78c6b49fdb8 # shrinks to xs = [(87, 2, false), (2, 0, false), (84, 5, true)]

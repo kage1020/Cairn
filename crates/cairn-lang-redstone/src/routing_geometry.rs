@@ -40,7 +40,7 @@
 
 use std::collections::{HashMap, VecDeque};
 
-use crate::netlist_ir::NetRef;
+use crate::netlist_ir::{CellPortDriver, NetRef};
 use crate::placement_ir::{CellCoord, CircuitRegionReservation, PlacementIr};
 
 /// Deterministic net-order key matching the routing pass's tie-break:
@@ -74,6 +74,35 @@ pub(crate) fn output_pad(k: usize, region: &CircuitRegionReservation) -> CellCoo
     let z = raw.min(region.depth.saturating_sub(1));
     let x = region.width.saturating_sub(1);
     CellCoord::new(x, 0, z)
+}
+
+/// Fold `charge` over the distinct nets driving one cell.
+///
+/// Two ports on one net are fed by one strand of dust. The routed
+/// length into a cell is a function of the `(net, sink)` pair, so the
+/// second port re-derives the first port's number: adding them
+/// describes a layout with twice the dust, and a signal that passes
+/// through every repeater on the way in twice.
+///
+/// Shared by the routing pass, which charges blocks of dust into
+/// `wire_length`, and the delay pass, which charges ticks into
+/// `delay_ticks`, so the two cannot disagree about how many strands
+/// feed a cell. The seen-list is a `Vec` because a cell has at most
+/// one driver per port and the scan is shorter than a hash.
+pub(crate) fn sum_over_driving_nets<F>(drivers: &[CellPortDriver], mut charge: F) -> u32
+where
+    F: FnMut(NetRef) -> u32,
+{
+    let mut seen: Vec<NetRef> = Vec::with_capacity(drivers.len());
+    let mut total = 0u32;
+    for driver in drivers {
+        if seen.contains(&driver.net) {
+            continue;
+        }
+        seen.push(driver.net);
+        total = total.saturating_add(charge(driver.net));
+    }
+    total
 }
 
 /// Manhattan (L¹) distance between two cell coordinates.

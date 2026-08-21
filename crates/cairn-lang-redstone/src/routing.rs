@@ -55,13 +55,13 @@
 //!   those, refusing a scope whose `void=<N>` reservation is too
 //!   thin to absorb them with `E_CROSSING_CONGESTION`.
 //! - **`wire_length` attribution.** For every cell, `wire_length =
-//!   sum over drivers of the routed length from that driver's source
-//!   into this cell` —
-//!   `route_to`, the same measure
-//!   stage 3 counts buffer repeaters against. The tree total is not
-//!   attributed per-sink: dust a cell shares with a sibling sink feeds
-//!   both, and the congestion budget below is where the shared total
-//!   is counted once.
+//!   sum over the distinct nets driving it of the routed length from
+//!   that net's source into this cell` — `route_to`, the same measure
+//!   stage 3 counts buffer repeaters against. Distinct nets rather
+//!   than drivers: two ports reading one signal are fed by one strand
+//!   of dust. The tree total is not attributed per-sink either: dust a
+//!   cell shares with a sibling sink feeds both, and the congestion
+//!   budget below is where the shared total is counted once.
 //! - **Congestion.** After every net is laid,
 //!   `cells.len() * CELL_FOOTPRINT + wire_only_coords > reserved_area`
 //!   fires `E_ROUTE_CONGESTION` against the reservation span. The
@@ -101,7 +101,9 @@ use crate::placement_ir::{
     CellCoord, CellIdentity, CircuitRegionReservation, PlacementIr, ScopedPlacementIr,
     ScopedPlacementIrEntry,
 };
-use crate::routing_geometry::{collect_nets, input_pad, net_order, net_trees};
+use crate::routing_geometry::{
+    collect_nets, input_pad, net_order, net_trees, sum_over_driving_nets,
+};
 
 /// Per-cell footprint used by the post-routing congestion budget.
 /// Re-exports [`crate::placement::CELL_FOOTPRINT`] so a scope that
@@ -314,12 +316,15 @@ fn route_scope(entry: &ScopedPlacementIrEntry) -> ScopeRouting {
 }
 
 /// Fill every cell's `wire_length` with the routed length of each of
-/// its driver paths, summed.
+/// the nets driving it, summed.
 ///
-/// Per-driver rather than the Steiner-shared tree total, which is what
+/// Per-net rather than the Steiner-shared tree total, which is what
 /// the congestion budget counts: a cell's figure answers "how much
 /// dust feeds this cell", and dust shared with a sibling sink feeds
-/// both. Routed rather than Manhattan because the two are different
+/// both. Per-net rather than per-driver for the same reason one step
+/// closer in — two ports reading one signal are the same strand
+/// arriving twice; see [`sum_over_driving_nets`]. Routed rather than
+/// Manhattan because the two are different
 /// numbers whenever the tree detours, and a record carrying a
 /// straight-line `wire_length` beside a `delay_ticks` charged for the
 /// routed one describes no single layout.
@@ -346,11 +351,7 @@ fn attribute_wire_lengths<F>(
         .cells
         .iter()
         .zip(cell_coords.iter())
-        .map(|(cell, &sink)| {
-            cell.drivers.iter().fold(0u32, |acc, driver| {
-                acc.saturating_add(segment_of(driver.net, sink))
-            })
-        })
+        .map(|(cell, &sink)| sum_over_driving_nets(&cell.drivers, |net| segment_of(net, sink)))
         .collect();
     for (index, (cell, len)) in ir.cells.iter_mut().zip(wire_lengths).enumerate() {
         let identity = CellIdentity::new(index, cell.coord, entry);
