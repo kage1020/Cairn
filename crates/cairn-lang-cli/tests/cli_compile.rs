@@ -1020,8 +1020,8 @@ fn run_check(args: &[&str]) -> std::process::Output {
 fn c22_unknown_def_in_place_errors_with_suggestion() {
     // `use=cottag` typo → resolver fail-loud with a `did you mean
     // `cottage`?` suggestion via the existing nearest_match helper.
-    // `cairn check` writes diagnostics to stdout (text format) so the
-    // assertions look there, not stderr.
+    // `cairn check` reports its text diagnostics on stderr, like every
+    // other subcommand, so the assertions look there.
     let tmp = TempDir::new().expect("tempdir");
     let src = tmp.path().join("typo_use.crn");
     fs::write(
@@ -1041,18 +1041,18 @@ fn c22_unknown_def_in_place_errors_with_suggestion() {
     )
     .expect("write tmp .crn");
     let result = run_check(&[src.to_str().unwrap()]);
-    let stdout = String::from_utf8(result.stdout).expect("utf-8");
+    let reported = String::from_utf8(result.stderr).expect("utf-8");
     assert!(
         !result.status.success(),
-        "exit should be non-zero; stdout={stdout}",
+        "exit should be non-zero; reported={reported}",
     );
     assert!(
-        stdout.contains("E_UNRESOLVED_PLACE_REF"),
-        "stdout should carry E_UNRESOLVED_PLACE_REF; got: {stdout}",
+        reported.contains("E_UNRESOLVED_PLACE_REF"),
+        "reported should carry E_UNRESOLVED_PLACE_REF; got: {reported}",
     );
     assert!(
-        stdout.contains("did you mean `cottage`?"),
-        "stdout should suggest the closest def name; got: {stdout}",
+        reported.contains("did you mean `cottage`?"),
+        "reported should suggest the closest def name; got: {reported}",
     );
 }
 
@@ -1079,15 +1079,15 @@ fn c23_unknown_theme_in_place_errors_with_suggestion() {
     )
     .expect("write tmp .crn");
     let result = run_check(&[src.to_str().unwrap()]);
-    let stdout = String::from_utf8(result.stdout).expect("utf-8");
-    assert!(!result.status.success(), "stdout={stdout}");
+    let reported = String::from_utf8(result.stderr).expect("utf-8");
+    assert!(!result.status.success(), "reported={reported}");
     assert!(
-        stdout.contains("E_UNRESOLVED_THEME_REF"),
-        "stdout should carry E_UNRESOLVED_THEME_REF; got: {stdout}",
+        reported.contains("E_UNRESOLVED_THEME_REF"),
+        "reported should carry E_UNRESOLVED_THEME_REF; got: {reported}",
     );
     assert!(
-        stdout.contains("did you mean `medieval`?"),
-        "stdout should suggest the closest theme name; got: {stdout}",
+        reported.contains("did you mean `medieval`?"),
+        "reported should suggest the closest theme name; got: {reported}",
     );
 }
 
@@ -1116,11 +1116,11 @@ fn c24_duplicate_place_id_errors() {
     )
     .expect("write tmp .crn");
     let result = run_check(&[src.to_str().unwrap()]);
-    let stdout = String::from_utf8(result.stdout).expect("utf-8");
-    assert!(!result.status.success(), "stdout={stdout}");
+    let reported = String::from_utf8(result.stderr).expect("utf-8");
+    assert!(!result.status.success(), "reported={reported}");
     assert!(
-        stdout.contains("E_DUPLICATE_PLACE_ID"),
-        "stdout should carry E_DUPLICATE_PLACE_ID; got: {stdout}",
+        reported.contains("E_DUPLICATE_PLACE_ID"),
+        "reported should carry E_DUPLICATE_PLACE_ID; got: {reported}",
     );
 }
 
@@ -1148,15 +1148,15 @@ fn c25_east_of_unknown_ref_errors_with_suggestion() {
     )
     .expect("write tmp .crn");
     let result = run_check(&[src.to_str().unwrap()]);
-    let stdout = String::from_utf8(result.stdout).expect("utf-8");
-    assert!(!result.status.success(), "stdout={stdout}");
+    let reported = String::from_utf8(result.stderr).expect("utf-8");
+    assert!(!result.status.success(), "reported={reported}");
     assert!(
-        stdout.contains("E_UNRESOLVED_PLACE_REF"),
-        "stdout should carry E_UNRESOLVED_PLACE_REF; got: {stdout}",
+        reported.contains("E_UNRESOLVED_PLACE_REF"),
+        "reported should carry E_UNRESOLVED_PLACE_REF; got: {reported}",
     );
     assert!(
-        stdout.contains("did you mean `home1`?"),
-        "stdout should suggest the closest prior place id; got: {stdout}",
+        reported.contains("did you mean `home1`?"),
+        "reported should suggest the closest prior place id; got: {reported}",
     );
 }
 

@@ -488,10 +488,18 @@ fn run_check(file: &Path, edition: Option<EditionArg>, format: CheckFormat) -> E
     let lines = LineStarts::new(&source);
 
     match format {
+        // Diagnostics are the report, not the product. Every other
+        // subcommand sends theirs to stderr, and `check` sending its text
+        // form to stdout meant `cairn check f.crn > out` swallowed them
+        // while still exiting 1 — a CI step that captured stdout for
+        // something else saw a bare exit code and no reason.
+        //
+        // `--format json` stays on stdout: that one *is* the product, and a
+        // consumer redirects it deliberately.
         CheckFormat::Text => {
             for d in &diagnostics {
                 let pos = lines.position(&source, d.span.start);
-                println!(
+                eprintln!(
                     "{}:{}: {}[{}]: {}",
                     file.display(),
                     pos,
@@ -499,7 +507,7 @@ fn run_check(file: &Path, edition: Option<EditionArg>, format: CheckFormat) -> E
                     d.code.as_str(),
                     d.primary,
                 );
-                report_notes(Stream::Stdout, file, &source, &lines, &d.notes);
+                report_notes(file, &source, &lines, &d.notes);
             }
         }
         CheckFormat::Json => {
@@ -612,7 +620,7 @@ fn run_info(file: &Path, editions: &[String], format: InfoFormat) -> ExitCode {
             d.code.as_str(),
             d.primary,
         );
-        report_notes(Stream::Stderr, file, &source, &lines, &d.notes);
+        report_notes(file, &source, &lines, &d.notes);
         if d.severity() == Severity::Error {
             has_error = true;
         }
@@ -829,7 +837,7 @@ fn run_lower(file: &Path, format: LowerFormat) -> ExitCode {
             d.code.as_str(),
             d.primary,
         );
-        report_notes(Stream::Stderr, file, &source, &lines, &d.notes);
+        report_notes(file, &source, &lines, &d.notes);
         if d.severity() == Severity::Error {
             has_error = true;
         }
@@ -1248,7 +1256,7 @@ fn report_core_diagnostics(
             d.code.as_str(),
             d.primary,
         );
-        report_notes(Stream::Stderr, file, source, lines, &d.notes);
+        report_notes(file, source, lines, &d.notes);
         if d.severity() == Severity::Error {
             has_error = true;
         }
@@ -1279,7 +1287,7 @@ fn report_synth_diagnostics(
             d.code.as_str(),
             d.primary,
         );
-        report_notes(Stream::Stderr, file, source, lines, &d.notes);
+        report_notes(file, source, lines, &d.notes);
         if d.severity() == Severity::Error {
             has_error = true;
         }
@@ -1673,27 +1681,6 @@ fn enforce_version_floor(
     Err(ExitCode::from(1))
 }
 
-/// Which stream a command's findings go to.
-///
-/// `cairn check` writes its text output to stdout — its findings *are* the
-/// output — and every other command reports to stderr so the IR, the JSON,
-/// or the artifact path stays pipeable. Naming the choice is what lets the
-/// six copies of the note loop become one.
-#[derive(Clone, Copy)]
-enum Stream {
-    Stdout,
-    Stderr,
-}
-
-impl Stream {
-    fn line(self, text: &str) {
-        match self {
-            Self::Stdout => println!("{text}"),
-            Self::Stderr => eprintln!("{text}"),
-        }
-    }
-}
-
 /// Print one finding's `note:` lines under its primary.
 ///
 /// A note that carries a span is printed with that position, the way the
@@ -1706,19 +1693,14 @@ impl Stream {
 /// and three of the six had dropped the position. Both note types are
 /// `cairn_lang_core::check::DiagnosticNote` — `cairn-lang-redstone`
 /// re-exports it — so one signature covers every caller.
-fn report_notes(stream: Stream, file: &Path, source: &str, lines: &LineStarts, notes: &[Note]) {
+fn report_notes(file: &Path, source: &str, lines: &LineStarts, notes: &[Note]) {
     for note in notes {
         match note.span.as_ref() {
             Some(span) => {
                 let pos = lines.position(source, span.start);
-                stream.line(&format!(
-                    "{}:{}:   note: {}",
-                    file.display(),
-                    pos,
-                    note.message
-                ));
+                eprintln!("{}:{}:   note: {}", file.display(), pos, note.message);
             }
-            None => stream.line(&format!("  note: {}", note.message)),
+            None => eprintln!("  note: {}", note.message),
         }
     }
 }
@@ -1736,7 +1718,7 @@ fn report_lowering_diagnostics(file: &Path, source: &str, block_ir: &BlockArrayI
             d.code.as_str(),
             d.primary,
         );
-        report_notes(Stream::Stderr, file, source, &lines, &d.notes);
+        report_notes(file, source, &lines, &d.notes);
         if d.severity() == Severity::Error {
             has_error = true;
         }

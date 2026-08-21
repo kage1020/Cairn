@@ -208,10 +208,9 @@ fn check_edition_flag_wires_strict_variant_pin_through_cli() {
         .args(["check", "--edition", "java", path_str])
         .output()
         .expect("run cairn");
-    // `cairn check` writes diagnostic lines to stdout (matching gcc's
-    // convention for tool integration), reserving stderr for I/O and
-    // parse-level errors that pre-empt the diagnostic pipeline. Look at
-    // stdout for the code assertion.
+    // `cairn check` writes its text diagnostics to stderr, like every other
+    // subcommand, and reserves stdout for the machine payload
+    // (`--format json`). The code assertion below therefore reads stderr.
     assert_eq!(
         out.status.code(),
         Some(1),
@@ -219,10 +218,10 @@ fn check_edition_flag_wires_strict_variant_pin_through_cli() {
         String::from_utf8_lossy(&out.stdout),
         String::from_utf8_lossy(&out.stderr),
     );
-    let stdout = String::from_utf8_lossy(&out.stdout);
+    let reported = String::from_utf8_lossy(&out.stderr);
     assert!(
-        stdout.contains("E_UNRESOLVED_SLOT"),
-        "expected E_UNRESOLVED_SLOT in diagnostics, got stdout={stdout}",
+        reported.contains("E_UNRESOLVED_SLOT"),
+        "expected E_UNRESOLVED_SLOT in diagnostics, got stderr={reported}",
     );
 }
 
@@ -420,9 +419,9 @@ fn check_reports_the_missing_variant_only_when_an_edition_is_pinned() {
         .args(["check", src.to_str().unwrap(), "--edition", "java"])
         .output()
         .expect("run cairn");
-    // `check` renders its diagnostic stream on stdout; the build commands
-    // use stderr because their stdout carries the artifact report.
-    let report = String::from_utf8_lossy(&pinned.stdout);
+    // Every command reports on stderr; a build command's stdout carries
+    // the artifact report instead.
+    let report = String::from_utf8_lossy(&pinned.stderr);
     assert_eq!(pinned.status.code(), Some(1), "report={report}");
     assert!(
         report.contains("E_THEME_VARIANT_MISSING"),
