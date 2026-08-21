@@ -161,6 +161,25 @@ and is a separate axis from the Minecraft target version.
 
 ### Fixed
 
+- *(core)* A theme selector whose attribute holds a list selects the members that carry that list.
+  `ast::Value` compared its source span as well as its kind, and `ValueKind::List` holds `Value`s —
+  so the derived equality recursed through that comparison and two lists spelled identically on two
+  lines were never equal at any depth. A list-valued selector attribute therefore matched no member
+  at all, and the author saw `E_THEME_SELECTOR_UNMATCHED`, which reads as "your filter is too
+  narrow" rather than "this attribute type cannot match anything". Two byte-identical list-valued
+  rows are now also recognised as a duplicate pair by `E_DUPLICATE_SELECTOR`, which inherited the
+  same comparison and under-reported. Equality on `Value` is now its kind's, which is what
+  `#[serde(transparent)]` already said the value was; the types that wrap one carry their own span
+  and compare it, so their equality is unchanged as long as the two spans agree — which they do
+  for everything `lower` builds.
+
+  This is a behaviour change in published API that reaches a consumer without a compile error.
+  `ast::Value` is public and the workspace version is CalVer, so Cargo reads `2026` as the major
+  and a month bump ships inside `>=2026.8.2, <2027.0.0`. Code downstream that compares ASTs with
+  `assert_eq!`, or calls `dedup` / `contains` on a `Vec<Value>`, gets the new answer with no
+  signal. It stays under Fixed because the old answer was the defect: a list that is never equal
+  to the same list written on another line matches no documented contract, and depending on it
+  was depending on the bug.
 - *(lsp)* A message arriving between `shutdown` and `exit` no longer kills the server. Anything
   but `exit` used to be a protocol error that ended the process with code 1 before the `exit`
   behind it was read, so an editor reported the language server as crashed and restarted it —

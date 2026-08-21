@@ -1831,9 +1831,11 @@ pub(crate) fn select_the_same_members(a: &SelectorRule, b: &SelectorRule) -> boo
 /// A label attribute goes through [`value_eq_label`], which takes an
 /// `Ident` or a `Str` carrying the same text; every other key is compared
 /// against an [`crate::intent::IntentState`] entry by [`ValueKind`], where
-/// the two spellings are different values. `ds_5` in
+/// the two spellings are different values.
+/// `ds_*_value_form_matters_exactly_where_the_matcher_says_it_does` in
 /// `tests/check_duplicate_selector.rs` pins that pair of answers from the
-/// outside, by checking `E_THEME_SELECTOR_UNMATCHED` alongside the finding.
+/// outside, by checking `E_THEME_SELECTOR_UNMATCHED` alongside the
+/// finding.
 ///
 /// The `false` for a non-label value under a label key is the accurate
 /// answer rather than a conservative one: [`value_eq_label`] rejects such a
@@ -1841,14 +1843,16 @@ pub(crate) fn select_the_same_members(a: &SelectorRule, b: &SelectorRule) -> boo
 /// take over. Those rows are already an error by a different scope —
 /// `check::type_mismatch` covers the same three keys and reports
 /// `E_TYPE_MISMATCH_LABEL` on each of them — so the gap says nothing that
-/// goes unsaid. `ds_16` pins the pairing.
+/// goes unsaid. `ds_*_a_label_key_holding_a_non_label_value_pairs_with_nothing`
+/// pins the pairing. (Named by its half rather than its number: the `ds_`
+/// numbering in that file is not in file order.)
 ///
-/// The [`ValueKind`] comparison *is* conservative for one shape, and not by
-/// design. [`Value`] derives `PartialEq` over its `span` field, so two
-/// `ValueKind::List`s written identically on two lines compare unequal.
-/// [`member_attr_matches`] inherits that — a list-valued selector attribute
-/// matches no member at all today — and so does this. Both follow one
-/// defect in `Value`'s equality rather than adding a second.
+/// The [`ValueKind`] comparison is by value at every depth, including
+/// inside a `ValueKind::List`: [`Value`]'s equality is its kind's, so two
+/// lists spelled identically on two lines select alike. That is the same
+/// answer [`member_attr_matches`] gives, which is what makes "these two
+/// rows select the same members" and "this row selects this member" agree
+/// about what a value is.
 fn attr_values_select_alike(key: &str, a: &Value, b: &Value) -> bool {
     if label_attr(key).is_none() {
         return a.kind == b.kind;

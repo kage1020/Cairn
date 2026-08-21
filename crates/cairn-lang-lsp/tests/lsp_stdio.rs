@@ -121,11 +121,47 @@ impl Server {
         }
     }
 
-    /// Every stderr line written so far. Non-blocking: the drop paths log
-    /// before the response that follows them, so by the time a test has
-    /// read that response the line is already here.
+    /// Every stderr line that has already reached the channel.
+    ///
+    /// Best-effort, and only for panic messages: a failing test says what
+    /// the server had managed to log, and a snapshot that misses a line
+    /// still in flight costs nothing there. It is not a way to assert
+    /// anything. To wait for a line, use [`Server::read_stderr_until`]; to
+    /// assert a finished session logged nothing, collect the channel
+    /// (`server.stderr.iter().collect()`), which blocks until the reader
+    /// thread disconnects — `child.wait()` returning says nothing about
+    /// whether that thread has finished sending.
     fn drain_stderr(&mut self) -> Vec<String> {
         self.stderr.try_iter().collect()
+    }
+
+    /// Wait for a stderr line containing `needle`, and return every line
+    /// seen up to and including it.
+    ///
+    /// The server writes stderr and stdout down two different pipes, and a
+    /// reader thread carries each to its own channel, so reading a response
+    /// says nothing about whether a line logged *before* it has been
+    /// delivered yet. Taking whatever happened to have arrived made these
+    /// assertions a race that lost on a loaded runner.
+    fn read_stderr_until(&mut self, needle: &str) -> Vec<String> {
+        let mut seen = Vec::new();
+        loop {
+            match self.stderr.recv_timeout(READ_TIMEOUT) {
+                Ok(line) => {
+                    let matched = line.contains(needle);
+                    seen.push(line);
+                    if matched {
+                        return seen;
+                    }
+                }
+                Err(RecvTimeoutError::Timeout) => panic!(
+                    "no stderr line containing {needle:?} within {READ_TIMEOUT:?}; saw: {seen:?}"
+                ),
+                Err(RecvTimeoutError::Disconnected) => {
+                    panic!("the server exited without logging {needle:?}; saw: {seen:?}")
+                }
+            }
+        }
     }
 
     /// Read messages until one with the given method arrives, skipping
@@ -810,12 +846,14 @@ fn lsp_21_did_change_after_did_close_leaves_the_document_closed() {
         "the document is closed, so completion has nothing to answer from",
     );
     // The drop is not silent: one line names the method and the URI.
-    let logged = server.drain_stderr();
+    // `read_stderr_until` returns the matching line last, so asserting on
+    // `last()` keeps both halves on the same line — `any()` would accept a
+    // URI mentioned by some earlier line about a different document.
+    let logged = server
+        .read_stderr_until("ignoring `textDocument/didChange` for a document that is not open");
     assert!(
-        logged.iter().any(|line| line
-            .contains("ignoring `textDocument/didChange` for a document that is not open")
-            && line.contains(TEST_URI)),
-        "the dropped revision should be reported on stderr, got: {logged:?}",
+        logged.last().is_some_and(|line| line.contains(TEST_URI)),
+        "the reported line should name the URI, got: {logged:?}",
     );
     server.shutdown();
 }
@@ -896,13 +934,7 @@ fn lsp_24_a_change_whose_did_open_the_server_dropped_is_also_dropped() {
         serde_json::json!(-32602),
         "neither notification opened the document, got: {next}",
     );
-    let logged = server.drain_stderr();
-    assert!(
-        logged
-            .iter()
-            .any(|line| line.contains("ignoring malformed `textDocument/didOpen`")),
-        "the dropped open should be reported, got: {logged:?}",
-    );
+    server.read_stderr_until("ignoring malformed `textDocument/didOpen`");
 
     // The way out: a well-formed `didOpen` restores the document, and the
     // diagnostics it publishes are the ones the dropped revisions would
