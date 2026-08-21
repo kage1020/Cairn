@@ -140,6 +140,35 @@ fn a_change_of_edition_names_both_editions() {
 }
 
 #[test]
+fn the_verified_side_names_the_field_the_recorded_edition_actually_has() {
+    // The left half of the line names the version integer; Bedrock's is the
+    // block palette's own `version`, not Minecraft's `DataVersion`, and
+    // calling it `DataVersion` would name the Java concept for a number
+    // that is not one. Only a Bedrock lockfile on the *left* shows this —
+    // the edition-change test above has Bedrock on the right, where the
+    // integer is printed bare.
+    let (_tmp_src, src) = cottage_in_tempdir();
+    let out_dir = TempDir::new().expect("out");
+    let lock = out_dir.path().join("cottage.lock");
+
+    compile(&src, out_dir.path(), "bedrock", "1.21.60", Some(&lock));
+    let switched = compile(&src, out_dir.path(), "java", "1.21.4", Some(&lock));
+    let line = switched
+        .stderr
+        .lines()
+        .find(|l| l.starts_with("W_PREVIOUSLY_VERIFIED_TARGET:"))
+        .unwrap_or_else(|| panic!("no warning in: {}", switched.stderr));
+    assert!(
+        line.contains("verified for bedrock 1.21.60/block version 18168865,"),
+        "the verified side should name Bedrock's own version field: {line}",
+    );
+    assert!(
+        line.ends_with("now java 1.21.4/4189."),
+        "the new side prints the integer bare: {line}",
+    );
+}
+
+#[test]
 fn the_sensitivity_list_reported_is_the_one_the_lockfile_recorded() {
     // `member_version_sensitivity` is empty until the constraint-catalog
     // ingest lands, so the compiler cannot produce a populated one — but a

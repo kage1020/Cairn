@@ -483,16 +483,28 @@ fn a_voxel_naming_a_slot_the_palette_does_not_have_is_refused() {
 }
 
 #[test]
-fn the_last_slot_of_the_palette_is_not_out_of_range() {
-    // The boundary the check is written against: `len` is one past the last
-    // valid index, so a comparison written with the wrong operator rejects a
-    // grid every real build produces.
+fn the_check_lands_exactly_on_the_first_index_that_is_not_a_slot() {
+    // Both sides of the boundary, because `len` is the only value at which
+    // `>= len` and `> len` disagree: the last slot is `len - 1` and must
+    // build, and `len` itself is the first index with nothing behind it and
+    // must not. Testing one side alone leaves the operator free.
     let ba = synthetic_cottage();
+    let len = ba.palette.entries.len();
     let highest = ba.voxels.iter().map(|i| i.0).max().expect("non-empty");
     assert_eq!(
         usize::from(highest) + 1,
-        ba.palette.entries.len(),
+        len,
         "fixture should use the last palette slot, or this proves nothing"
     );
     build_structure_tag(&ba, &target_1_21_4()).expect("in-range indices");
+
+    let mut past_the_end = ba;
+    past_the_end.voxels[0] = PaletteIndex(u16::try_from(len).expect("small palette"));
+    let err =
+        build_structure_tag(&past_the_end, &target_1_21_4()).expect_err("one past the last slot");
+    assert!(
+        matches!(err, JavaStructureError::PaletteIndexOutOfRange { index, .. }
+            if usize::from(index) == len),
+        "unexpected error: {err}"
+    );
 }
