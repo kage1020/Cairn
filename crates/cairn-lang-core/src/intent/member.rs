@@ -373,6 +373,12 @@ impl DerefMut for IntentState {
 /// the value out of the AST. Keeping the span next to the value at the IR
 /// level means `check` passes can point at the exact byte range without
 /// re-correlating with the AST.
+///
+/// Equality here *does* include the wrapper's `span`, unlike
+/// [`crate::ast::Value`]'s, whose equality is its kind's. The two agree
+/// for anything `lower` builds, because the wrapper copies the value's own
+/// span — see [`Self::span`] — but they are different questions, and the
+/// field doc below records when they could come apart.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(transparent)]
 pub struct ValueWithSpan {

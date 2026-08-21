@@ -79,12 +79,17 @@ fn the_binding_that_selector_carries_actually_reaches_the_member() {
 #[test]
 fn a_list_that_differs_still_does_not_match() {
     // The other half: the fix is "compare what the value is", not
-    // "compare nothing". A member whose list is a different list, a
-    // shorter list, or a differently ordered list is not selected.
+    // "compare nothing". Each row rules out a different wrong reading —
+    // `shorter` a zip that truncates, `reordered` set or multiset
+    // semantics, and `longer` a containment rule, which is the reading
+    // `tags=` invites ("the selector's tags need only be among the
+    // member's") and the one no other row here can see: `[a,b]` is not
+    // contained in `[a,c]`, `[a]`, or `[b,a]`, so all three pass under it.
     for (label, member_tags) in [
         ("different element", "[a,c]"),
         ("shorter", "[a]"),
         ("reordered", "[b,a]"),
+        ("longer", "[a,b,c]"),
     ] {
         let source = MATCHING.replace("window tags=[a,b]", &format!("window tags={member_tags}"));
         assert_ne!(
@@ -101,9 +106,10 @@ fn a_list_that_differs_still_does_not_match() {
 
 #[test]
 fn a_nested_list_is_compared_by_what_it_holds() {
-    // `ValueKind::List` holds `Value`s, so its derived equality recurses
-    // through the very impl this fixes. One level of nesting proves the
-    // recursion, which a flat list cannot.
+    // A flat list already recurses one level — its elements are `Value`s
+    // too. What nesting adds is that the recursion does not stop after
+    // that level: a list whose element is itself a list is compared all
+    // the way down.
     let source = "\
 theme t:
   slot glass -> @glass_pane
@@ -122,9 +128,9 @@ struct s size=9x7
 #[test]
 fn two_identical_list_valued_rows_are_a_duplicate_pair() {
     // The inherited half. `select_the_same_members` compares the two rows'
-    // attribute values the same way, so while a list never equalled
-    // itself, two byte-identical rows were not recognised as coinciding
-    // and `E_DUPLICATE_SELECTOR` under-reported.
+    // attribute values the same way, so while a list was not equal to the
+    // same list written on another line, two byte-identical rows were not
+    // recognised as coinciding and `E_DUPLICATE_SELECTOR` under-reported.
     let source = "\
 theme t:
   slot glass -> @glass_pane
@@ -134,15 +140,19 @@ theme t:
 struct s size=9x7
   window tags=[a,b] class=small side=front offset=2 y=2 size=2x2 mat_slot=glass
 ";
+    // The exact list, not "contains one": this fixture is what pins the
+    // claim that the matcher and the duplicate pass now give the same
+    // answer about a value. A matcher that regressed would add
+    // `E_THEME_SELECTOR_UNMATCHED` here, which a containment check would
+    // not see.
+    assert_eq!(
+        codes(source),
+        vec![DiagnosticCode::DuplicateSelector.as_str()],
+    );
     let found = diagnose(source);
     let duplicate = found
         .iter()
         .find(|d| d.code == DiagnosticCode::DuplicateSelector)
-        .unwrap_or_else(|| {
-            panic!(
-                "expected E_DUPLICATE_SELECTOR, got {:?}",
-                found.iter().map(|d| d.code.as_str()).collect::<Vec<_>>()
-            )
-        });
+        .expect("asserted above");
     assert_eq!(duplicate.severity(), Severity::Error);
 }

@@ -496,6 +496,8 @@ pub struct Value {
     /// What kind of value this is.
     pub kind: ValueKind,
     /// Byte range covered by this value in the original source.
+    ///
+    /// Not part of equality — see the `PartialEq` impl below.
     #[serde(skip)]
     pub span: Span,
 }
@@ -506,14 +508,26 @@ pub struct Value {
 /// Hand-written rather than derived. The derive compared `span` as well,
 /// and [`ValueKind::List`] holds `Value`s — so `ValueKind`'s own derived
 /// equality recursed back through this impl, and two lists spelled
-/// identically on two lines were never equal at any depth. Every reader
-/// that reaches for `==` here wants to know what the value *is*: a theme
-/// selector asking whether a member carries the attribute it names, and
-/// the duplicate-selector pass asking whether two rows select alike. The
-/// `#[serde(transparent)]` above already says the value is its kind.
+/// identically on two lines were never equal at any depth. The comparisons
+/// this exists for ask what the value *is*: a theme selector asking
+/// whether a member carries the attribute it names, and the
+/// duplicate-selector pass asking whether two rows select alike. The
+/// `#[serde(transparent)]` above already says the value is its kind, and a
+/// caller that needs the position has `span` in hand.
 ///
-/// Nothing compares spans through this type; a caller that needs the
-/// position has `span` in hand.
+/// Two traits are deliberately absent, and stay absent:
+///
+/// - `Hash` must not be derived here. This equality ignores `span`, so a
+///   derived hash would break `k1 == k2 ⇒ hash(k1) == hash(k2)`. Clippy's
+///   `derived_hash_with_manual_eq` catches the derive; a hand-written
+///   `impl Hash` would slip past it.
+/// - `Eq` would hold today — nothing in [`ValueKind`] is a float, so the
+///   relation is a true equivalence — but `ValueKind` is
+///   `#[non_exhaustive]` and the spec already shows a decimal literal
+///   (`scale=2.0`). A later `Float(f64)` would mean withdrawing `Eq`, and
+///   removing a trait impl is a major break where adding one is not.
+///   Nothing needs it: no map is keyed on a `Value`, and `assert_eq!`
+///   wants only `PartialEq`.
 impl PartialEq for Value {
     fn eq(&self, other: &Self) -> bool {
         self.kind == other.kind
@@ -706,7 +720,8 @@ impl<'a> IntoIterator for &'a DottedRef {
 mod tests {
     use super::*;
 
-    /// Build the same value twice at two different offsets.
+    /// A value of `kind` at `offset`, spanning one byte. The offset is
+    /// what varies between two otherwise identical values.
     fn at(offset: usize, kind: ValueKind) -> Value {
         Value::new(kind, offset..offset + 1)
     }
@@ -726,12 +741,24 @@ mod tests {
         assert_eq!(at(0, flat(0)), at(90, flat(90)), "list");
         assert_eq!(at(0, nested(0)), at(90, nested(90)), "list of lists");
 
-        // And still discriminating on what the value says.
+        // And still discriminating on what the value says, to the same
+        // depth: a difference buried inside a nested list is a difference.
         assert_ne!(at(0, ident("a")), at(0, ident("b")), "different idents");
         assert_ne!(
             at(0, ValueKind::List(vec![at(0, ident("a"))])),
             at(0, ValueKind::List(vec![at(0, ident("b"))])),
             "different list contents",
+        );
+        assert_ne!(
+            at(0, nested(0)),
+            at(
+                0,
+                ValueKind::List(vec![at(
+                    1,
+                    ValueKind::List(vec![at(1, ident("a")), at(3, ident("z"))])
+                )])
+            ),
+            "different contents one level down",
         );
     }
 }

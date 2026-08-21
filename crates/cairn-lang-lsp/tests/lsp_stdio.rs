@@ -123,10 +123,14 @@ impl Server {
 
     /// Every stderr line that has already reached the channel.
     ///
-    /// Best-effort, for panic messages and for asserting that a *finished*
-    /// session logged nothing — after the child has exited, the reader
-    /// thread has delivered everything there is. It is not a way to look
-    /// for a specific line: see [`Server::read_stderr_until`].
+    /// Best-effort, and only for panic messages: a failing test says what
+    /// the server had managed to log, and a snapshot that misses a line
+    /// still in flight costs nothing there. It is not a way to assert
+    /// anything. To wait for a line, use [`Server::read_stderr_until`]; to
+    /// assert a finished session logged nothing, collect the channel
+    /// (`server.stderr.iter().collect()`), which blocks until the reader
+    /// thread disconnects — `child.wait()` returning says nothing about
+    /// whether that thread has finished sending.
     fn drain_stderr(&mut self) -> Vec<String> {
         self.stderr.try_iter().collect()
     }
@@ -842,10 +846,13 @@ fn lsp_21_did_change_after_did_close_leaves_the_document_closed() {
         "the document is closed, so completion has nothing to answer from",
     );
     // The drop is not silent: one line names the method and the URI.
+    // `read_stderr_until` returns the matching line last, so asserting on
+    // `last()` keeps both halves on the same line — `any()` would accept a
+    // URI mentioned by some earlier line about a different document.
     let logged = server
         .read_stderr_until("ignoring `textDocument/didChange` for a document that is not open");
     assert!(
-        logged.iter().any(|line| line.contains(TEST_URI)),
+        logged.last().is_some_and(|line| line.contains(TEST_URI)),
         "the reported line should name the URI, got: {logged:?}",
     );
     server.shutdown();
