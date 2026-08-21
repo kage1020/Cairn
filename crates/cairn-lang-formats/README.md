@@ -9,11 +9,13 @@ the parser, lint, and theme machinery in [`cairn-lang-core`](../cairn-lang-core/
 
 ## Status
 
-Java vanilla `.nbt` and Bedrock `.mcstructure` writers ship; the Bedrock
-writer emits **stateless palettes only** — a palette entry carrying
-blockstate properties is a hard error until per-edition state mapping
-lands. Litematica `.litematic` and WorldEdit `.schem` are still to land.
-No reverse-direction (file → IR) backends ship yet.
+Java vanilla `.nbt` and Bedrock `.mcstructure` writers ship. The Bedrock writer
+translates blockstate properties into Bedrock's `states` vocabulary for the block
+families [`bedrock_state`](src/bedrock_state.rs) covers — a property outside that
+vocabulary is a hard error (`BedrockStructureError::State`), and intent Bedrock can
+only approximate (stair `shape`) is dropped with a `W_INTENT_DEGRADED` parity note
+rather than in silence. Litematica `.litematic` and WorldEdit `.schem` are still to
+land. No reverse-direction (file → IR) backends ship yet.
 
 ## Public API
 
@@ -22,10 +24,10 @@ No reverse-direction (file → IR) backends ship yet.
 | `java_structure::build_structure_tag` | `BlockArray` → `Compound` (Java vanilla shape). |
 | `java_structure::write_structure_gzip` | Build + gzip-write in one call. |
 | `java_structure::output_filename` | `struct::cottage` + `OutputExt::Nbt` → `cottage.nbt`; `OutputExt::Mcstructure` → `cottage.mcstructure`. |
-| `java_structure::JavaStructureError` | `Nbt`, `AbstractPaletteEntry`, `DimensionOverflow`. |
-| `bedrock_structure::build_mcstructure_tag` | `BlockArray` → `Compound` (Bedrock `.mcstructure` shape, stateless palette). |
+| `java_structure::JavaStructureError` | `Nbt`, `AbstractPaletteEntry`, `PaletteIndexOutOfRange`, `DimensionOverflow`. |
+| `bedrock_structure::build_mcstructure_tag` | `BlockArray` → `(Compound, Vec<ParityNote>)` (Bedrock `.mcstructure` shape). |
 | `bedrock_structure::write_mcstructure` | Uncompressed little-endian write of a built root. |
-| `bedrock_structure::BedrockStructureError` | `Nbt`, `AbstractPaletteEntry`, `StatefulPaletteEntry`, `DimensionOverflow`. |
+| `bedrock_structure::BedrockStructureError` | `Nbt`, `AbstractPaletteEntry`, `State`, `PaletteIndexOutOfRange`, `DimensionOverflow`. |
 | `data_version::JavaTarget` / `resolve_java_target` | `--target <mc_version>` → `(mc_version, DataVersion)`. |
 | `data_version::BedrockTarget` / `resolve_bedrock_target` | `--target <mc_version>` → `(mc_version, block_version)`. |
 
@@ -34,7 +36,7 @@ No reverse-direction (file → IR) backends ship yet.
 | Format | Edition | Direction | Spec reference |
 |---|---|---|---|
 | `.nbt` (vanilla structure block) | Java | **write (done)**, read | [ecosystem-interop §12.1](https://cairn.kage1020.com/spec/ecosystem-interop/) |
-| `.mcstructure` | Bedrock | **write (stateless done)**, read | [ecosystem-interop §12.1](https://cairn.kage1020.com/spec/ecosystem-interop/) |
+| `.mcstructure` | Bedrock | **write (done)**, read | [ecosystem-interop §12.1](https://cairn.kage1020.com/spec/ecosystem-interop/) |
 | `.litematic` (Litematica) | Java | read / write | [ecosystem-interop §12.1](https://cairn.kage1020.com/spec/ecosystem-interop/), [§12.4](https://cairn.kage1020.com/spec/ecosystem-interop/) |
 | `.schem` (WorldEdit / Sponge) | Java | read / write | [ecosystem-interop §12.1](https://cairn.kage1020.com/spec/ecosystem-interop/) |
 

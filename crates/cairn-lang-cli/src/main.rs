@@ -80,9 +80,12 @@ enum Command {
     },
     /// Report the three version axes (registry-compatible range, edition
     /// portability, semantic-sensitive members) for a .crn source file.
-    /// Exits 0 on success, 1 on parse failure or any other I/O error
-    /// (permission denied, non-UTF-8 contents), 2 when the file cannot be
-    /// located, and rejects an empty `--editions` value with exit 2.
+    /// Exits 0 on success; 1 on a parse failure, on any `Error`-severity
+    /// diagnostic (the check passes run here, and a range derived from a
+    /// file `cairn check` rejects is a confident wrong answer), or on any
+    /// other I/O error (permission denied, non-UTF-8 contents); 2 when the
+    /// file cannot be located, and rejects an empty `--editions` value with
+    /// exit 2.
     Info {
         /// Path to the .crn file to inspect.
         file: PathBuf,
@@ -100,8 +103,10 @@ enum Command {
     /// `cairn compile` writes the same IR out as a Java `.nbt` artifact.
     /// Lowering warnings (deferred members, themeless scopes, abstract
     /// tokens) print to stderr but do not affect the exit code. Exits 0 on
-    /// success, 1 on parse failure or I/O error, 2 when the file cannot be
-    /// located.
+    /// success, 1 on a parse failure, on any `Error`-severity diagnostic
+    /// (`E_UNKNOWN_ABSTRACT_TOKEN` and the rest of the lowering-stage codes
+    /// reach this command), or on an I/O error, and 2 when the file cannot
+    /// be located.
     Lower {
         /// Path to the .crn file to lower.
         file: PathBuf,
@@ -112,14 +117,16 @@ enum Command {
     /// Compile a .crn source file to its edition+version-pinned structure
     /// artifact set and write a lockfile next to the source. `--edition
     /// java` writes gzip `.nbt` structures; `--edition bedrock` writes
-    /// uncompressed `.mcstructure` files. The Bedrock backend emits
-    /// stateless palettes only for now — a palette entry that carries
-    /// blockstate properties is a hard error rather than a silent drop.
-    /// This is also the only command that checks block ids against a
+    /// uncompressed `.mcstructure` files, translating the blockstate
+    /// families it knows into Bedrock `states`; a property it cannot
+    /// translate is a hard error, and intent it can only approximate (stair
+    /// `shape`) is dropped with a `W_INTENT_DEGRADED` warning rather than
+    /// silently. This is also the only command that checks block ids against a
     /// registry (`E_UNKNOWN_ID`): `--target` pins the one version there is
     /// an answer for.
     /// Exits 0 on success, 1 on parse, lowering, or I/O failure (including
-    /// an unsupported `--target` or a stateful Bedrock palette), and 2
+    /// an unsupported `--target` or a Bedrock property with no `states`
+    /// translation), and 2
     /// when the source file cannot be located.
     Compile {
         /// Path to the .crn file to compile.
