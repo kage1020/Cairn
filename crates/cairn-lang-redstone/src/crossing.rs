@@ -536,6 +536,15 @@ fn allocate_buffer_coords(
 /// segment that shares a prefix with an earlier one reaches the same
 /// refresh points and must record the blocks standing there rather
 /// than ask for its own.
+///
+/// Only [`Self::escaped`] changes an answer. A plane repeater always
+/// stands on a coord of its own net's route, and a coord this net's
+/// wire runs through is free for this net, so deleting
+/// [`Self::plane`] would push the same entry by the other path —
+/// measured, not reasoned: the mutation survives the suite. The map
+/// stays because it is what names the decision at the point the
+/// decision is made, and because the honest answer for a foreign
+/// net's repeater is [`PlaneOccupant::Buffer`] rather than "free".
 struct BufferPlacer<'a> {
     region: &'a CircuitRegionReservation,
     wire_owners: &'a HashMap<CellCoord, Vec<NetRef>>,
