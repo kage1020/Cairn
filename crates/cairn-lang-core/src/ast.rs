@@ -490,7 +490,7 @@ pub enum ValueKind {
 /// originating literal in source. The wrapper is `#[serde(transparent)]` over
 /// the kind so the wire shape is identical to serialising the bare
 /// `ValueKind` — `span` does not appear in JSON/YAML output.
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(transparent)]
 pub struct Value {
     /// What kind of value this is.
@@ -498,6 +498,26 @@ pub struct Value {
     /// Byte range covered by this value in the original source.
     #[serde(skip)]
     pub span: Span,
+}
+
+/// Two values are equal when they say the same thing, wherever they were
+/// written.
+///
+/// Hand-written rather than derived. The derive compared `span` as well,
+/// and [`ValueKind::List`] holds `Value`s — so `ValueKind`'s own derived
+/// equality recursed back through this impl, and two lists spelled
+/// identically on two lines were never equal at any depth. Every reader
+/// that reaches for `==` here wants to know what the value *is*: a theme
+/// selector asking whether a member carries the attribute it names, and
+/// the duplicate-selector pass asking whether two rows select alike. The
+/// `#[serde(transparent)]` above already says the value is its kind.
+///
+/// Nothing compares spans through this type; a caller that needs the
+/// position has `span` in hand.
+impl PartialEq for Value {
+    fn eq(&self, other: &Self) -> bool {
+        self.kind == other.kind
+    }
 }
 
 impl Value {
@@ -679,5 +699,39 @@ impl<'a> IntoIterator for &'a DottedRef {
 
     fn into_iter(self) -> Self::IntoIter {
         self.segments.iter()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Build the same value twice at two different offsets.
+    fn at(offset: usize, kind: ValueKind) -> Value {
+        Value::new(kind, offset..offset + 1)
+    }
+
+    #[test]
+    fn a_value_is_equal_to_the_same_value_written_somewhere_else() {
+        // The guard against re-deriving `PartialEq`. The derive compared
+        // `span`, and a list holds `Value`s, so the recursion made two
+        // identically-spelled lists unequal at every depth — which is how
+        // a list-valued theme selector came to match no member at all.
+        let ident = |s: &str| ValueKind::Ident(s.to_owned());
+        let flat =
+            |offset| ValueKind::List(vec![at(offset, ident("a")), at(offset + 2, ident("b"))]);
+        let nested = |offset| ValueKind::List(vec![at(offset, flat(offset + 1))]);
+
+        assert_eq!(at(0, ident("a")), at(90, ident("a")), "scalar");
+        assert_eq!(at(0, flat(0)), at(90, flat(90)), "list");
+        assert_eq!(at(0, nested(0)), at(90, nested(90)), "list of lists");
+
+        // And still discriminating on what the value says.
+        assert_ne!(at(0, ident("a")), at(0, ident("b")), "different idents");
+        assert_ne!(
+            at(0, ValueKind::List(vec![at(0, ident("a"))])),
+            at(0, ValueKind::List(vec![at(0, ident("b"))])),
+            "different list contents",
+        );
     }
 }

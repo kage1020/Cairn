@@ -1843,12 +1843,12 @@ pub(crate) fn select_the_same_members(a: &SelectorRule, b: &SelectorRule) -> boo
 /// `E_TYPE_MISMATCH_LABEL` on each of them — so the gap says nothing that
 /// goes unsaid. `ds_16` pins the pairing.
 ///
-/// The [`ValueKind`] comparison *is* conservative for one shape, and not by
-/// design. [`Value`] derives `PartialEq` over its `span` field, so two
-/// `ValueKind::List`s written identically on two lines compare unequal.
-/// [`member_attr_matches`] inherits that — a list-valued selector attribute
-/// matches no member at all today — and so does this. Both follow one
-/// defect in `Value`'s equality rather than adding a second.
+/// The [`ValueKind`] comparison is by value at every depth, including
+/// inside a `ValueKind::List`: [`Value`]'s equality is its kind's, so two
+/// lists spelled identically on two lines select alike. That is the same
+/// answer [`member_attr_matches`] gives, which is what makes "these two
+/// rows select the same members" and "this row selects this member" agree
+/// about what a value is.
 fn attr_values_select_alike(key: &str, a: &Value, b: &Value) -> bool {
     if label_attr(key).is_none() {
         return a.kind == b.kind;
