@@ -475,10 +475,15 @@ fn the_lockfile_on_disk_ends_with_a_newline() {
 #[test]
 fn compile_is_byte_reproducible() {
     // Two compiles of the same source against the same target must
-    // produce byte-identical `.nbt` files and lockfiles whose
-    // `source_hash` / `resolved_ir_hash` agree. This is the central
-    // promise of the lockfile design — without it the lockfile carries
-    // no useful diff information.
+    // produce byte-identical `.nbt` files and byte-identical lockfiles.
+    // This is the central promise of the lockfile design — without it the
+    // lockfile carries no useful diff information.
+    //
+    // The whole file, not two of its fields. "Regenerating the lockfile is
+    // a no-op" is a statement about the bytes: a field that varies between
+    // runs — an absolute path, an iteration order, a timestamp — is exactly
+    // what a hash-only comparison cannot see, and exactly what would make a
+    // committed lockfile impossible to keep.
     let (_tmp_src, src) = cottage_in_tempdir();
     let out_a = TempDir::new().expect("out a");
     let out_b = TempDir::new().expect("out b");
@@ -502,10 +507,19 @@ fn compile_is_byte_reproducible() {
     let bytes_b = fs::read(out_b.path().join("cottage.nbt")).expect("b");
     assert_eq!(bytes_a, bytes_b, "compile output is not byte-reproducible");
 
+    let lock_bytes_a = fs::read(&lock_a).expect("read a");
+    let lock_bytes_b = fs::read(&lock_b).expect("read b");
+    assert_eq!(
+        String::from_utf8_lossy(&lock_bytes_a),
+        String::from_utf8_lossy(&lock_bytes_b),
+        "regenerating the lockfile is not a no-op",
+    );
+
+    // Read back through the decoder too, so the comparison above cannot
+    // pass on two files that are equally malformed.
     let lf_a = Lockfile::read_from_path(&lock_a).expect("read a");
     let lf_b = Lockfile::read_from_path(&lock_b).expect("read b");
-    assert_eq!(lf_a.source_hash, lf_b.source_hash);
-    assert_eq!(lf_a.resolved_ir_hash, lf_b.resolved_ir_hash);
+    assert_eq!(lf_a, lf_b);
 }
 
 #[test]

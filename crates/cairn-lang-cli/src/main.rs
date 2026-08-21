@@ -1522,7 +1522,106 @@ fn run_compile(
     if let Err(code) = check_lock_path_is_free(&prepared, &lock_path) {
         return code;
     }
+    // Before the file is replaced, not after: the lockfile about to be
+    // overwritten is the only record of what was previously verified.
+    report_previous_target(&lock_path, edition, &target);
     write_artifacts_and_lock(&prepared, &source, &block_ir, edition, &target, &lock_path)
+}
+
+/// Compare the lockfile at `lock_path` with the target being built, and
+/// report the divergence the way `spec/versioning-editions.md` §10.6 does.
+///
+/// The lockfile is the record of what was verified, so a recompile for a
+/// different target is the moment that record stops describing what is on
+/// disk. Nothing here changes the build or the exit code — both lines are
+/// warnings, and a first compile, an unchanged target, or a missing
+/// lockfile all say nothing at all.
+fn report_previous_target(lock_path: &Path, edition: EditionArg, target: &ResolvedTarget) {
+    if !lock_path.exists() {
+        return;
+    }
+    let previous = match Lockfile::read_from_path(lock_path) {
+        Ok(previous) => previous,
+        Err(err) => {
+            // Not an error: the compile is valid, and a corrupt file beside
+            // the source is no reason to refuse to build. But it was being
+            // overwritten in silence, which is how a tampered or stale
+            // lockfile went unnoticed.
+            eprintln!(
+                "warning: {}: the existing lockfile could not be read ({err}); replacing it",
+                lock_path.display(),
+            );
+            return;
+        }
+    };
+    let now = LockTarget {
+        edition: edition.as_lock_edition(),
+        mc_version: target.mc_version().to_owned(),
+        data_version: target.version_int(),
+    };
+    if previous.target == now {
+        return;
+    }
+    // The edition appears only when it changed: two editions number their
+    // releases differently, so `1.21.4` against `1.21.60` reads as noise
+    // without it, and naming it on every line would pad the common case.
+    let name_edition = previous.target.edition != now.edition;
+    eprintln!(
+        "W_PREVIOUSLY_VERIFIED_TARGET: verified for {}, now {}.",
+        describe_verified(&previous.target, name_edition),
+        describe_now(&now, name_edition),
+    );
+    if previous.member_version_sensitivity.is_empty() {
+        return;
+    }
+    let ids: Vec<&str> = previous
+        .member_version_sensitivity
+        .iter()
+        .map(|m| m.id.as_str())
+        .collect();
+    eprintln!(
+        "W_SEMANTIC_SENSITIVITY: {} members may resolve differently: {}",
+        ids.len(),
+        ids.join(", "),
+    );
+}
+
+/// The left half of the warning: `1.20.4/DataVersion 3700`.
+///
+/// The integer is named here and bare on the right, which is the shape
+/// §10.6 prints. Java's is Minecraft's `DataVersion`; Bedrock's is the
+/// block palette's own `version`, and calling both `DataVersion` would name
+/// the Java concept for a number that is not one.
+fn describe_verified(target: &LockTarget, name_edition: bool) -> String {
+    let field = match target.edition {
+        LockEdition::Java => "DataVersion",
+        LockEdition::Bedrock => "block version",
+    };
+    format!(
+        "{}{}/{} {}",
+        edition_prefix(target, name_edition),
+        target.mc_version,
+        field,
+        target.data_version,
+    )
+}
+
+/// The right half of the warning: `1.21.4/4189`.
+fn describe_now(target: &LockTarget, name_edition: bool) -> String {
+    format!(
+        "{}{}/{}",
+        edition_prefix(target, name_edition),
+        target.mc_version,
+        target.data_version,
+    )
+}
+
+fn edition_prefix(target: &LockTarget, name_edition: bool) -> String {
+    if name_edition {
+        format!("{} ", target.edition.as_str())
+    } else {
+        String::new()
+    }
 }
 
 /// A `.crn` read, parsed, resolved, and lowered, plus what the lowering
