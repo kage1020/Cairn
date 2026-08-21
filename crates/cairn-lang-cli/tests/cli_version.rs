@@ -4,11 +4,16 @@
 //! `CAIRN_VERSION` through clap. The comparison here is against the version
 //! cargo derived for *this* crate, which is a second, independent route out of
 //! the same `[workspace.package] version`. That is the point: a constant that
-//! stops tracking the workspace — which is how it came to be a release behind,
-//! with every `--version` line and every lockfile recording the wrong compiler
-//! — disagrees with this assertion from the other side of a crate boundary.
-//! Comparing against `CAIRN_VERSION` itself would restate the constant instead
-//! of checking it.
+//! stops tracking the workspace — which is how it came to answer `2026.7`, a
+//! number no release ever carried, with every `--version` line and every
+//! lockfile recording it — disagrees with this assertion from the other side
+//! of a crate boundary. Comparing against `CAIRN_VERSION` itself would restate
+//! the constant instead of checking it.
+//!
+//! Two things this shape cannot see, both by construction: `[workspace.package]
+//! version` drifting from the tag that was actually released, since both sides
+//! of the comparison move with it; and the constant being reset to a literal
+//! equal to today's number, which only diverges at the next bump.
 
 use std::process::Command;
 

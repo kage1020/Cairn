@@ -130,11 +130,14 @@ and is a separate axis from the Minecraft target version.
   README, the crate docs, and the function's own doc line now say so.
 - *(cli, lsp)* `cairn --version`, `cairn-lsp --version`, and every lockfile's `cairn_version`
   report the release that built them. The number was a hand-maintained constant in
-  `cairn-lang-core` and had fallen a release behind the workspace, so a `2026.8.2` build
-  answered `2026.7` — and wrote that into the one field the lockfile exists to make
-  trustworthy. It is now read from the crate's own package version, and the tests compare it
-  against the version cargo derived for the calling crate, so a constant that stops tracking
-  the workspace fails from the other side of a crate boundary.
+  `cairn-lang-core` and had stopped tracking the workspace altogether: a `2026.8.2` build
+  answered `2026.7`, which is not a released version at all, and wrote that into the one field
+  the lockfile exists to make trustworthy. It is now read from the crate's own package version,
+  and the tests compare it against the version cargo derived for the calling crate, so a
+  constant that stops tracking the workspace fails from the other side of a crate boundary.
+  Two things that shape cannot see: `[workspace.package] version` itself drifting from the tag
+  that was released, since both sides of the comparison move with it, and the constant being
+  reset to a literal equal to today's number, which only diverges at the next bump.
 - *(tree-sitter)* The npm package ships `tree-sitter.json`. `package.json`'s `files` array left
   it out, and since tree-sitter CLI 0.24 that file is the sole declaration of `file-types` and
   the query paths — so an editor installing `tree-sitter-cairn` from the registry found no
@@ -144,8 +147,12 @@ and is a separate axis from the Minecraft target version.
   highlights a `.crn` through it.
 - *(vscode)* The extension manifest declares the workspace version. Its own changelog says
   extension versions track the CLI's CalVer tag, but the release pipeline aligned only the
-  tree-sitter manifests, so the extension had been left a release behind. The alignment step now
-  rewrites it too, and a CI job compares the two numbers on any change that can move either.
+  tree-sitter manifests, so the extension had been left at `2026.7.2` — two releases back. The
+  alignment step now rewrites it too, `release-patch` refuses to publish while any copy of the
+  version disagrees with `[workspace.package]`, and a CI job compares them on an ordinary pull
+  request. The internal crate requirements in `[workspace.dependencies]` were a copy of the same
+  kind, written from the number guessed before release-plz chose one and never corrected; they
+  are aligned and covered too.
 - *(ci)* The VS Code extension and the documentation site are built. Neither was referenced
   anywhere in the workflows, so a TypeScript error in the extension or a Starlight page that
   fails to render could reach the integration branch without turning a check red.

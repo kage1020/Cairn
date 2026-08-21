@@ -45,7 +45,8 @@ pub use resolve::{Resolution, ThemeBinding, VersionAxes, compute_axes, resolve};
 /// The Cairn release version, in date-based versioning (`YYYY.M[.PATCH]`).
 ///
 /// Read from this crate's package version, which is `[workspace.package]`'s,
-/// which is the number the release tooling bumps. Held as a literal it was a
-/// release behind: `cairn --version` and every `cairn_version` a lockfile
-/// recorded named a compiler that had not built them.
+/// which is the number the release tooling bumps. Everything that has to name
+/// the compiler that produced an artefact — `cairn --version`, a lockfile's
+/// `cairn_version` — reads it from here, so it is derived rather than
+/// maintained.
 pub const CAIRN_VERSION: &str = env!("CARGO_PKG_VERSION");
