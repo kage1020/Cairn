@@ -11,13 +11,40 @@ use serde::{Deserialize, Serialize};
 use super::hash::HashHex;
 use crate::ids::{PlaceId, SiteName, WalkwayEndpoint};
 
+/// The lockfile schema this build reads and writes.
+///
+/// Version 1 is the shape that shipped before the number was recorded, so a
+/// document without the field is that version rather than an unknown one —
+/// refusing those would mean refusing files this compiler wrote. A document
+/// declaring anything higher is refused rather than read as if the field
+/// names still meant the same thing.
+pub const LOCK_SCHEMA_VERSION: u32 = 1;
+
+/// Default for a document written before the version was recorded.
+fn assume_unversioned_schema() -> u32 {
+    LOCK_SCHEMA_VERSION
+}
+
 /// The whole lockfile, as written to `build.cairn.lock`.
 ///
 /// `verified: true` is the default after a successful compile; a future
 /// `--no-verify` workflow will flip it to `false` and the same struct
 /// shape will roundtrip without changes.
+///
+/// Every struct in this file denies unknown fields. A lockfile is a claim
+/// about what was built, and one carrying keys the reader silently ignores
+/// is a document whose meaning depends on who is reading it — a tampered
+/// file used to deserialise as `Ok` with `verified: true` alongside
+/// whatever else it liked. Tampering is not confined to the top level, so
+/// neither is the check.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Lockfile {
+    /// Which revision of this schema the document is written in. First
+    /// field so a reader can decide whether it understands the rest without
+    /// parsing it. See [`LOCK_SCHEMA_VERSION`].
+    #[serde(default = "assume_unversioned_schema")]
+    pub lock_schema_version: u32,
     /// sha256 over the raw `.crn` bytes.
     pub source_hash: HashHex,
     /// The Cairn release `CalVer` that produced the lockfile.
@@ -55,6 +82,7 @@ pub struct Lockfile {
 /// coordinate chain without re-walking the source: a downstream consumer can
 /// rebuild the village layout straight from the lockfile.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct LockPlacement {
     /// `site` name the placement belongs to (bare, without the `site::`
     /// IR-key prefix).
@@ -88,6 +116,7 @@ pub struct LockPlacement {
 /// dims)` — same five disk axes, just oriented around the two ports
 /// the row connects.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct LockWalkway {
     /// `site` name the walkway belongs to (bare, no `site::` prefix).
     pub site: SiteName,
@@ -136,6 +165,7 @@ impl LockEdition {
 
 /// `(edition, mc_version, data_version)` triple.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct LockTarget {
     /// Backend edition.
     pub edition: LockEdition,
@@ -148,6 +178,7 @@ pub struct LockTarget {
 
 /// External-input hashes the build depends on.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct LockInputs {
     /// sha256 of the registry pack that resolved the ids. Zero until the
     /// registry pack ingest is wired.
@@ -169,6 +200,7 @@ impl LockInputs {
 
 /// Member id flagged as sensitive to a Minecraft version boundary.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct MemberSensitivity {
     /// Member id from the lowered IR.
     pub id: String,

@@ -194,9 +194,16 @@ whether the version actually being built has it is the question `cairn compile -
   [README](README)) / `target(mc_version + data_version)` / `registry_pack_hash` /
   `constraint_catalog_hash` / **`resolved_ir_hash`** (the core of reproducibility: fixes the IR after
   macro expansion, default filling, and auto-address assignment).
+- The document leads with `lock_schema_version`, the revision of the lockfile schema itself — a
+  reader decides whether it understands the rest before parsing it. Version `1` is the shape above;
+  a document that omits the key is version `1`, and one declaring a higher version is refused
+  rather than read as if the field names still meant the same thing. Keys the schema does not
+  declare are refused wherever they appear, so a lockfile cannot carry a payload the reader
+  silently ignores.
 
 ```yaml
 # build.cairn.lock (compiler-generated)
+lock_schema_version: 1        # revision of this document's own schema
 source_hash: sha256:...
 cairn_version: 2026.06        # the Cairn release's date version (CalVer)
 target: { edition: java, mc_version: 1.20.4, data_version: 3700 }

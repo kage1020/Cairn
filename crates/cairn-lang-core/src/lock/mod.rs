@@ -19,7 +19,8 @@ use std::path::{Path, PathBuf};
 
 pub use hash::{HashError, HashHex, HashParseError, hash_resolved_ir, hash_source};
 pub use schema::{
-    LockEdition, LockInputs, LockPlacement, LockTarget, LockWalkway, Lockfile, MemberSensitivity,
+    LOCK_SCHEMA_VERSION, LockEdition, LockInputs, LockPlacement, LockTarget, LockWalkway, Lockfile,
+    MemberSensitivity,
 };
 
 use thiserror::Error;
@@ -33,6 +34,18 @@ pub enum LockError {
     /// YAML encoder/decoder rejected the contents.
     #[error("lockfile YAML: {0}")]
     Yaml(#[from] serde_yml::Error),
+    /// The document declares a schema revision this build does not know.
+    ///
+    /// Refused rather than read: the field names would be the same, so a
+    /// later format would deserialise into this struct and mean something
+    /// else.
+    #[error("lockfile declares schema version {found}; this build reads {supported}")]
+    UnsupportedSchemaVersion {
+        /// Version the document declared.
+        found: u32,
+        /// Highest version this build understands.
+        supported: u32,
+    },
 }
 
 impl Lockfile {
@@ -101,11 +114,32 @@ impl Lockfile {
     ///
     /// # Errors
     ///
-    /// Propagates I/O failure from reading `path` and YAML decode failure
-    /// when the file's shape does not match [`Lockfile`].
+    /// Propagates I/O failure from reading `path`, and everything
+    /// [`Self::from_yaml`] can return.
     pub fn read_from_path(path: &Path) -> Result<Self, LockError> {
-        let body = fs::read_to_string(path)?;
-        let lf: Lockfile = serde_yml::from_str(&body)?;
+        Self::from_yaml(&fs::read_to_string(path)?)
+    }
+
+    /// Decode the YAML body [`Self::to_yaml`] would have written.
+    ///
+    /// The mirror of [`Self::to_yaml`], and where the schema version is
+    /// enforced — so a caller that already holds the bytes cannot reach a
+    /// `Lockfile` without passing the same gate as one reading a file.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LockError::Yaml`] when the document's shape does not match
+    /// [`Lockfile`] — which includes a key the schema does not declare, at
+    /// any depth — and [`LockError::UnsupportedSchemaVersion`] when it
+    /// declares a revision above [`LOCK_SCHEMA_VERSION`].
+    pub fn from_yaml(body: &str) -> Result<Self, LockError> {
+        let lf: Lockfile = serde_yml::from_str(body)?;
+        if lf.lock_schema_version > LOCK_SCHEMA_VERSION {
+            return Err(LockError::UnsupportedSchemaVersion {
+                found: lf.lock_schema_version,
+                supported: LOCK_SCHEMA_VERSION,
+            });
+        }
         Ok(lf)
     }
 }

@@ -7,8 +7,8 @@ use cairn_lang_core::CAIRN_VERSION;
 use cairn_lang_core::block_array::{BlockArray, BlockArrayIr, lower_to_block_array};
 use cairn_lang_core::check::{DiagnosticNote as Note, LineStarts};
 use cairn_lang_core::lock::{
-    HashHex, LockEdition, LockInputs, LockPlacement, LockTarget, LockWalkway, Lockfile,
-    hash_resolved_ir, hash_source,
+    HashHex, LOCK_SCHEMA_VERSION, LockEdition, LockInputs, LockPlacement, LockTarget, LockWalkway,
+    Lockfile, hash_resolved_ir, hash_source,
 };
 use cairn_lang_core::resolve::{
     EditionPortability, VersionAxes, VersionFloor, compare_versions, compute_axes,
@@ -2280,6 +2280,7 @@ fn build_lockfile(
     target: &ResolvedTarget,
 ) -> Result<Lockfile, cairn_lang_core::lock::HashError> {
     Ok(Lockfile {
+        lock_schema_version: LOCK_SCHEMA_VERSION,
         source_hash: hash_source(source),
         cairn_version: CAIRN_VERSION.to_owned(),
         target: LockTarget {

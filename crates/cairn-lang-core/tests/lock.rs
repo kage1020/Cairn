@@ -3,8 +3,8 @@
 use cairn_lang_core::block_array::BlockArrayIr;
 use cairn_lang_core::block_array::{BlockArray, BlockState, Dims, Palette, PaletteIndex};
 use cairn_lang_core::lock::{
-    HashHex, HashParseError, LockEdition, LockInputs, LockTarget, LockWalkway, Lockfile,
-    MemberSensitivity, hash_resolved_ir, hash_source,
+    HashHex, HashParseError, LOCK_SCHEMA_VERSION, LockEdition, LockError, LockInputs, LockTarget,
+    LockWalkway, Lockfile, MemberSensitivity, hash_resolved_ir, hash_source,
 };
 use cairn_lang_core::{PlaceId, PortId, SiteName, WalkwayEndpoint};
 use indexmap::IndexMap;
@@ -78,6 +78,7 @@ fn l4_hash_resolved_ir_reflects_palette_order() {
 
 fn sample_lockfile() -> Lockfile {
     Lockfile {
+        lock_schema_version: LOCK_SCHEMA_VERSION,
         source_hash: HashHex::from_bytes(b"cottage"),
         cairn_version: "2026.09".to_owned(),
         target: LockTarget {
@@ -108,7 +109,11 @@ fn l5_lockfile_roundtrips_through_yaml() {
 
 #[test]
 fn l6_lockfile_yaml_key_order_matches_spec() {
-    // AC L6: top-level keys appear in the order spec §10.6 prints.
+    // AC L6: top-level keys appear in the order spec §10.6 prints,
+    // `lock_schema_version` first. The AC moved deliberately: a reader that
+    // has to decide whether it understands the document at all cannot be
+    // asked to parse the rest of it first, so the version leads and the
+    // spec sample was updated to match in both languages.
     let body = serde_yml::to_string(&sample_lockfile()).expect("encode");
     let keys: Vec<&str> = body
         .lines()
@@ -121,6 +126,7 @@ fn l6_lockfile_yaml_key_order_matches_spec() {
         })
         .collect();
     let expected = vec![
+        "lock_schema_version",
         "source_hash",
         "cairn_version",
         "target",
@@ -134,6 +140,7 @@ fn l6_lockfile_yaml_key_order_matches_spec() {
 
 fn sample_lockfile_with_walkways() -> Lockfile {
     Lockfile {
+        lock_schema_version: LOCK_SCHEMA_VERSION,
         walkways: vec![LockWalkway {
             site: SiteName::new("hamlet").expect("site"),
             from: WalkwayEndpoint {
@@ -283,6 +290,90 @@ fn lockfile_yaml_with_bad_hash_is_rejected() {
 }
 
 #[test]
+fn the_schema_version_is_the_first_thing_a_reader_sees() {
+    // A consumer that has to decide whether it understands the document at
+    // all should not have to parse the rest of it first, and the field is
+    // useless for recognising an older format if it can move.
+    let body = sample_lockfile().to_yaml().expect("encode");
+    assert!(
+        body.starts_with(&format!("lock_schema_version: {LOCK_SCHEMA_VERSION}\n")),
+        "lockfile does not open with the schema version: {body:?}",
+    );
+}
+
+#[test]
+fn a_document_without_the_field_is_the_version_that_had_none() {
+    // Every lockfile written before the field existed is this shape. It is
+    // the schema this build reads, so absence means version 1 rather than
+    // "unknown" — the alternative is refusing to read files the compiler
+    // itself wrote.
+    let mut lf = sample_lockfile();
+    lf.lock_schema_version = LOCK_SCHEMA_VERSION;
+    let with_field = lf.to_yaml().expect("encode");
+    let mut without_field = String::new();
+    for line in with_field
+        .lines()
+        .filter(|line| !line.starts_with("lock_schema_version:"))
+    {
+        without_field.push_str(line);
+        without_field.push('\n');
+    }
+    let parsed = Lockfile::from_yaml(&without_field).expect("decode a pre-version document");
+    assert_eq!(parsed.lock_schema_version, LOCK_SCHEMA_VERSION);
+    assert_eq!(parsed, lf);
+}
+
+#[test]
+fn a_schema_from_the_future_is_refused_by_name() {
+    // The whole point of recording the version: a later format that reuses
+    // these field names must not be read as if it were this one. Before the
+    // field existed such a document deserialised as `Ok` with
+    // `verified: true`.
+    let body = sample_lockfile().to_yaml().expect("encode").replace(
+        &format!("lock_schema_version: {LOCK_SCHEMA_VERSION}"),
+        "lock_schema_version: 99",
+    );
+    let err = Lockfile::from_yaml(&body).expect_err("a newer schema");
+    assert!(
+        matches!(
+            err,
+            LockError::UnsupportedSchemaVersion { found: 99, supported } if supported == LOCK_SCHEMA_VERSION
+        ),
+        "unexpected error: {err}",
+    );
+    let message = err.to_string();
+    assert!(
+        message.contains("99") && message.contains(&LOCK_SCHEMA_VERSION.to_string()),
+        "the message should name both versions: {message}",
+    );
+}
+
+#[test]
+fn a_key_the_schema_does_not_declare_is_refused_wherever_it_sits() {
+    // A lockfile is a claim about what was built; a document carrying keys
+    // the reader ignores is a document whose meaning depends on who is
+    // reading. Tampering is not confined to the top level, so neither is
+    // the check.
+    let base = sample_lockfile().to_yaml().expect("encode");
+    Lockfile::from_yaml(&base).expect("the untampered document still reads");
+
+    let top_level = format!("{base}attacker_controlled: yes\n");
+    let nested = base.replace("  mc_version:", "  attacker_controlled: yes\n  mc_version:");
+    assert_ne!(
+        nested, base,
+        "the nested fixture did not tamper with anything"
+    );
+    for (label, body) in [("top level", top_level), ("inside target", nested)] {
+        let err = Lockfile::from_yaml(&body).expect_err("unknown key at {label}");
+        let message = err.to_string();
+        assert!(
+            message.contains("attacker_controlled"),
+            "{label}: the error should name the key it refused: {message}",
+        );
+    }
+}
+
+#[test]
 fn an_encoded_lockfile_ends_with_a_newline() {
     // Not cosmetic. A file with no final newline makes `git diff` report
     // `\ No newline at end of file` on every change, `cat` run the next
@@ -301,7 +392,10 @@ fn an_encoded_lockfile_ends_with_a_newline() {
         ("populated trailing sequence", sample_lockfile()),
     ] {
         let body = lf.to_yaml().expect("encode");
-        assert!(body.ends_with('\n'), "{label} does not end with a newline: {body:?}");
+        assert!(
+            body.ends_with('\n'),
+            "{label} does not end with a newline: {body:?}"
+        );
         assert!(
             !body.ends_with("\n\n"),
             "{label} gained a blank line: {body:?}",
