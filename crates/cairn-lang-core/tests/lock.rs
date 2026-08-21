@@ -283,6 +283,33 @@ fn lockfile_yaml_with_bad_hash_is_rejected() {
 }
 
 #[test]
+fn an_encoded_lockfile_ends_with_a_newline() {
+    // Not cosmetic. A file with no final newline makes `git diff` report
+    // `\ No newline at end of file` on every change, `cat` run the next
+    // file's first line onto this one's last, and a `>>` append corrupt the
+    // document.
+    //
+    // The shape that lost it is the ordinary one: `serde_yml` closes an
+    // empty flow sequence (`member_version_sensitivity: []`) without a
+    // break, and that field is last, so every lockfile written for a source
+    // with no sensitivity entries — which is all of them until the
+    // constraint-catalog ingest lands — ended at `]`.
+    let mut without = sample_lockfile();
+    without.member_version_sensitivity.clear();
+    for (label, lf) in [
+        ("empty trailing sequence", without),
+        ("populated trailing sequence", sample_lockfile()),
+    ] {
+        let body = lf.to_yaml().expect("encode");
+        assert!(body.ends_with('\n'), "{label} does not end with a newline: {body:?}");
+        assert!(
+            !body.ends_with("\n\n"),
+            "{label} gained a blank line: {body:?}",
+        );
+    }
+}
+
+#[test]
 fn l8_sample_lockfile_yaml_snapshot() {
     // AC L8: stable YAML snapshot, so a future struct/field reshuffle is
     // caught before downstream tooling that greps the lockfile breaks.

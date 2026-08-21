@@ -447,6 +447,32 @@ fn c13_default_out_dir_is_source_parent() {
 }
 
 #[test]
+fn the_lockfile_on_disk_ends_with_a_newline() {
+    // The encoder is pinned in `cairn-lang-core`; this is the byte that
+    // actually reaches the file, through the temp-file-and-rename writer.
+    let (_tmp_src, src) = cottage_in_tempdir();
+    let out_dir = TempDir::new().expect("out tempdir");
+    let lock_path = out_dir.path().join("newline.lock");
+    let result = run_compile(&[
+        src.to_str().unwrap(),
+        "--edition",
+        "java",
+        "--out",
+        out_dir.path().to_str().unwrap(),
+        "--lock",
+        lock_path.to_str().unwrap(),
+    ]);
+    assert!(result.status.success());
+    let bytes = fs::read(&lock_path).expect("read lock");
+    assert_eq!(
+        bytes.last(),
+        Some(&b'\n'),
+        "lockfile ends with {:?}",
+        bytes.last().map(|b| *b as char),
+    );
+}
+
+#[test]
 fn compile_is_byte_reproducible() {
     // Two compiles of the same source against the same target must
     // produce byte-identical `.nbt` files and lockfiles whose

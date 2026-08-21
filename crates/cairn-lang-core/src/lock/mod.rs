@@ -79,11 +79,22 @@ impl Lockfile {
     /// several files together fail out of the encode without having touched
     /// the filesystem at all.
     ///
+    /// The body always ends with exactly one newline. `serde_yml` closes an
+    /// empty flow sequence without a break, and the last field is one
+    /// (`member_version_sensitivity: []` for every source that declares no
+    /// sensitivity entries), so left alone the file ends mid-line — which
+    /// makes `git diff` report `\ No newline at end of file` on every
+    /// change and an appended byte corrupt the document.
+    ///
     /// # Errors
     ///
     /// Propagates YAML encode failure.
     pub fn to_yaml(&self) -> Result<String, LockError> {
-        Ok(serde_yml::to_string(self)?)
+        let mut body = serde_yml::to_string(self)?;
+        if !body.ends_with('\n') {
+            body.push('\n');
+        }
+        Ok(body)
     }
 
     /// Read a lockfile back from `path`.
