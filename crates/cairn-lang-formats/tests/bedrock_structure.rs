@@ -325,3 +325,21 @@ fn m6_write_mcstructure_is_uncompressed_little_endian() {
     );
     assert_eq!(output_filename("struct::asym", OutputExt::Nbt), "asym.nbt");
 }
+
+#[test]
+fn a_voxel_naming_a_slot_the_palette_does_not_have_is_refused() {
+    // Same hole as the Java backend's, reached the same way: public struct
+    // fields plus a public builder. The index was written into `block_indices`
+    // as an `i32` with nothing to point at.
+    let (mut ba, _) = asymmetric_array();
+    assert_eq!(ba.palette.entries.len(), 2, "fixture palette");
+    ba.voxels[0] = PaletteIndex(7);
+    let err = build_mcstructure_tag(&ba, &target_1_21_60()).expect_err("out-of-range index");
+    assert!(
+        matches!(
+            err,
+            BedrockStructureError::PaletteIndexOutOfRange { index: 7, len: 2 }
+        ),
+        "unexpected error: {err}"
+    );
+}

@@ -38,7 +38,7 @@ use thiserror::Error;
 
 use crate::bedrock_state::{BedrockStateError, translate_states};
 use crate::data_version::BedrockTarget;
-use crate::java_structure::is_concrete_id;
+use crate::java_structure::{first_index_outside_palette, is_concrete_id};
 
 /// A palette entry whose intent was degraded to fit Bedrock — surfaced by the
 /// caller as `W_INTENT_DEGRADED`. The serialiser has no source span (a
@@ -73,6 +73,16 @@ pub enum BedrockStructureError {
     /// self-correction triple so the lint loop can act on it.
     #[error(transparent)]
     State(#[from] BedrockStateError),
+    /// A voxel named a palette slot the palette does not have. Same hole
+    /// as the Java backend's, reached the same way: public struct fields
+    /// plus a public builder.
+    #[error("voxel palette index {index} is outside the {len}-entry palette")]
+    PaletteIndexOutOfRange {
+        /// The index the grid asked for.
+        index: u16,
+        /// How many entries the palette actually has.
+        len: usize,
+    },
     /// A voxel dimension overflowed the `i32` wire width NBT uses.
     #[error("dimension {axis} = {value} exceeds NBT i32 wire limit")]
     DimensionOverflow {
@@ -95,8 +105,11 @@ pub enum BedrockStructureError {
 /// Returns [`BedrockStructureError::AbstractPaletteEntry`] for an
 /// unresolved abstract token, [`BedrockStructureError::State`] for a palette
 /// entry whose properties cannot be mapped to Bedrock (see
-/// [`crate::bedrock_state`]), and [`BedrockStructureError::DimensionOverflow`]
-/// when a dimension does not fit the wire width.
+/// [`crate::bedrock_state`]),
+/// [`BedrockStructureError::PaletteIndexOutOfRange`] when a voxel names a
+/// slot the palette does not have, and
+/// [`BedrockStructureError::DimensionOverflow`] when a dimension does not
+/// fit the wire width.
 pub fn build_mcstructure_tag(
     ba: &BlockArray,
     target: &BedrockTarget,
@@ -120,6 +133,10 @@ pub fn build_mcstructure_tag(
             });
         }
         palette_states.push(translated.states);
+    }
+
+    if let Some((index, len)) = first_index_outside_palette(ba) {
+        return Err(BedrockStructureError::PaletteIndexOutOfRange { index, len });
     }
 
     let size_x = dim_to_i32(ba.dims.x, "x")?;
