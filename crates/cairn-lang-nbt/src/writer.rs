@@ -40,6 +40,19 @@ pub enum NbtIoError {
         /// Actual element type id of the mismatching item.
         actual: u8,
     },
+    /// A [`List`] with no items declared an element type other than
+    /// `TAG_End`.
+    ///
+    /// The spec fixes the id at `0` for an empty list, and the sibling
+    /// check above cannot see this one: it runs inside the item loop,
+    /// which an empty list never enters. `List`'s fields are public, so a
+    /// constructor is a convenience and not a funnel — this is the point
+    /// every byte passes through.
+    #[error("nbt: empty list declared element type {declared}, expected 0 (TAG_End)")]
+    EmptyListWithElementType {
+        /// Declared element type id.
+        declared: u8,
+    },
     /// An NBT length prefix (i32 / u16) overflowed the on-wire width.
     #[error("nbt: {context} length {len} exceeds wire limit {limit}")]
     LengthOverflow {
@@ -201,6 +214,11 @@ fn write_array_len<W: Write>(
 }
 
 fn write_list<W: Write>(w: &mut W, endian: Endian, list: &List) -> Result<(), NbtIoError> {
+    if list.items.is_empty() && list.element_type_id != 0 {
+        return Err(NbtIoError::EmptyListWithElementType {
+            declared: list.element_type_id,
+        });
+    }
     w.write_all(&[list.element_type_id])?;
     write_array_len(w, endian, "list", list.items.len())?;
     for (index, item) in list.items.iter().enumerate() {

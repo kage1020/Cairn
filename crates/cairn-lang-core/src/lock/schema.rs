@@ -11,13 +11,66 @@ use serde::{Deserialize, Serialize};
 use super::hash::HashHex;
 use crate::ids::{PlaceId, SiteName, WalkwayEndpoint};
 
+/// The lockfile schema this build reads and writes.
+///
+/// Version 1 is the shape that shipped before the number was recorded, so a
+/// document without the field is that version rather than an unknown one —
+/// refusing those would mean refusing files this compiler wrote. A document
+/// declaring anything higher is refused rather than read as if the field
+/// names still meant the same thing.
+pub const LOCK_SCHEMA_VERSION: u32 = 1;
+
+/// Default for a document written before the version was recorded.
+///
+/// The literal `1`, not [`LOCK_SCHEMA_VERSION`]: the meaning being pinned
+/// is "the shape that shipped before the field existed", which stays
+/// version 1 forever. Tracking the constant would silently re-read every
+/// v1 document as v2 the day the constant moves.
+fn assume_unversioned_schema() -> u32 {
+    1
+}
+
+/// Just the leading field, read without the strict field check.
+///
+/// `deny_unknown_fields` fails *during* deserialisation, so a realistic
+/// later format — one that adds a key — would be rejected as malformed
+/// YAML before its version was ever compared, and its author told the
+/// document was broken when the truth is that this build is too old.
+/// Reading the version on its own is what makes [`Lockfile`]'s first
+/// field mean what its doc says: a reader decides whether it understands
+/// the rest before parsing the rest.
+#[derive(Deserialize)]
+struct SchemaVersionProbe {
+    #[serde(default = "assume_unversioned_schema")]
+    lock_schema_version: u32,
+}
+
+/// The schema revision `body` declares, whatever else it contains.
+pub(super) fn declared_schema_version(body: &str) -> Result<u32, serde_yml::Error> {
+    let probe: SchemaVersionProbe = serde_yml::from_str(body)?;
+    Ok(probe.lock_schema_version)
+}
+
 /// The whole lockfile, as written to `build.cairn.lock`.
 ///
 /// `verified: true` is the default after a successful compile; a future
 /// `--no-verify` workflow will flip it to `false` and the same struct
 /// shape will roundtrip without changes.
+///
+/// Every struct in this file denies unknown fields. A lockfile is a claim
+/// about what was built, and one carrying keys the reader silently ignores
+/// is a document whose meaning depends on who is reading it — a tampered
+/// file used to deserialise as `Ok` with `verified: true` alongside
+/// whatever else it liked. Tampering is not confined to the top level, so
+/// neither is the check.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Lockfile {
+    /// Which revision of this schema the document is written in. First
+    /// field so a reader can decide whether it understands the rest without
+    /// parsing it. See [`LOCK_SCHEMA_VERSION`].
+    #[serde(default = "assume_unversioned_schema")]
+    pub lock_schema_version: u32,
     /// sha256 over the raw `.crn` bytes.
     pub source_hash: HashHex,
     /// The Cairn release `CalVer` that produced the lockfile.
@@ -55,6 +108,7 @@ pub struct Lockfile {
 /// coordinate chain without re-walking the source: a downstream consumer can
 /// rebuild the village layout straight from the lockfile.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct LockPlacement {
     /// `site` name the placement belongs to (bare, without the `site::`
     /// IR-key prefix).
@@ -88,6 +142,7 @@ pub struct LockPlacement {
 /// dims)` — same five disk axes, just oriented around the two ports
 /// the row connects.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct LockWalkway {
     /// `site` name the walkway belongs to (bare, no `site::` prefix).
     pub site: SiteName,
@@ -136,6 +191,7 @@ impl LockEdition {
 
 /// `(edition, mc_version, data_version)` triple.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct LockTarget {
     /// Backend edition.
     pub edition: LockEdition,
@@ -148,6 +204,7 @@ pub struct LockTarget {
 
 /// External-input hashes the build depends on.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct LockInputs {
     /// sha256 of the registry pack that resolved the ids. Zero until the
     /// registry pack ingest is wired.
@@ -169,6 +226,7 @@ impl LockInputs {
 
 /// Member id flagged as sensitive to a Minecraft version boundary.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct MemberSensitivity {
     /// Member id from the lowered IR.
     pub id: String,

@@ -118,22 +118,43 @@ impl List {
 
     /// Build a `List<TAG_Int>` from a slice of integers. Used for the
     /// `size` and `pos` triples in Java vanilla structure NBT.
+    ///
+    /// An empty input declares `TAG_End`, not `TAG_Int`: the id describes
+    /// the items on the wire, and there are none.
     #[must_use]
     pub fn of_ints(values: impl IntoIterator<Item = i32>) -> Self {
-        Self {
-            element_type_id: 3,
-            items: values.into_iter().map(Tag::Int).collect(),
-        }
+        Self::of_tags(3, values.into_iter().map(Tag::Int).collect())
     }
 
     /// Build a `List<TAG_Compound>` from a vector of [`Compound`]s. Used
     /// for `palette` and `blocks` in Java vanilla structure NBT (and for
     /// `entities` once entity lowering lands).
+    ///
+    /// An empty input declares `TAG_End`, as in [`List::of_ints`].
     #[must_use]
     pub fn of_compounds(items: Vec<Compound>) -> Self {
+        Self::of_tags(10, items.into_iter().map(Tag::Compound).collect())
+    }
+
+    /// Choose the element id from the items, so an empty list cannot
+    /// acquire one by which constructor was called.
+    ///
+    /// `element_type_id` is a wire field a reader is entitled to trust, and
+    /// the spec fixes it at `0` when the list is empty. A constructor knows
+    /// what the items *would* have been, which is not the same as what the
+    /// list declares.
+    ///
+    /// This is a convenience, not a funnel: `List`'s fields are public, so
+    /// a struct literal reaches the same shape. The invariant is enforced
+    /// in the writer, which is the point every byte passes through.
+    #[must_use]
+    pub fn of_tags(element_type_id: u8, items: Vec<Tag>) -> Self {
+        if items.is_empty() {
+            return Self::empty();
+        }
         Self {
-            element_type_id: 10,
-            items: items.into_iter().map(Tag::Compound).collect(),
+            element_type_id,
+            items,
         }
     }
 }
@@ -170,6 +191,24 @@ mod tests {
         let l = List::of_compounds(vec![Compound::new(), Compound::new()]);
         assert_eq!(l.element_type_id, 10);
         assert_eq!(l.items.len(), 2);
+    }
+
+    #[test]
+    fn a_list_built_from_nothing_declares_end_whatever_built_it() {
+        // The element id is a wire field, and for an empty list the spec
+        // fixes it at 0 (`TAG_End`) — the doc above says so and
+        // `List::empty` writes it. A constructor that knows what it *would*
+        // have held still has nothing to declare, so the three routes to an
+        // empty list have to agree; a reader that trusts the id would
+        // otherwise see three different answers for the same list.
+        for (label, list) in [
+            ("empty", List::empty()),
+            ("of_ints", List::of_ints([])),
+            ("of_compounds", List::of_compounds(vec![])),
+        ] {
+            assert!(list.items.is_empty(), "{label} should be empty");
+            assert_eq!(list.element_type_id, 0, "{label} element id");
+        }
     }
 
     #[test]

@@ -299,6 +299,28 @@ impl PaletteIndex {
     pub const AIR: Self = Self(0);
 }
 
+impl BlockArray {
+    /// The first voxel whose index is not a slot of [`Self::palette`], as
+    /// `(index, palette length)`.
+    ///
+    /// [`Palette::intern`] is the only source of a [`PaletteIndex`] inside
+    /// the compiler, so a lowered array always satisfies this — but the
+    /// fields above are public, so a caller assembling one by hand can
+    /// have the grid and the palette disagree. A serialiser that writes
+    /// the index anyway produces a file naming a slot the reader has to
+    /// invent, which is why both backends ask this before they assemble
+    /// anything.
+    #[must_use]
+    pub fn first_index_outside_palette(&self) -> Option<(u16, usize)> {
+        let len = self.palette.entries.len();
+        self.voxels
+            .iter()
+            .map(|index| index.0)
+            .find(|index| usize::from(*index) >= len)
+            .map(|index| (index, len))
+    }
+}
+
 /// Append-only palette with deduplication on insertion. Insertion order is
 /// preserved so the slot at index `0` is always [`BlockState::AIR`].
 #[derive(Debug, Clone, PartialEq, Serialize)]

@@ -188,9 +188,16 @@ recommended test targets: Java min 1.20.0 / latest 1.21.4
   [README](README) 参照) / `target(mc_version + data_version)` / `registry_pack_hash` /
   `constraint_catalog_hash` / **`resolved_ir_hash`** (再現性の核心: マクロ展開、デフォルト充填、自動
   アドレス付与後の IR を固定)。
+- 文書の先頭は `lock_schema_version` — ロックファイルのスキーマ自身のリビジョンです。読み手は
+  残りをパースする前に、その文書を理解できるかどうかを判断できます。バージョン `1` は上記の形で、
+  このキーを持たない文書もバージョン `1` として読みます。それより上を宣言する文書は「フィールド名が
+  同じままである」と仮定して読むのではなく拒否します。スキーマが宣言していないキーは、どの階層に
+  あっても拒否します — 読み手が黙って無視するペイロードをロックファイルが運べないようにするため
+  です。
 
 ```yaml
 # build.cairn.lock (コンパイラ生成)
+lock_schema_version: 1        # この文書自身のスキーマのリビジョン
 source_hash: sha256:...
 cairn_version: 2026.06        # Cairn リリースの日付バージョン (CalVer)
 target: { edition: java, mc_version: 1.20.4, data_version: 3700 }
@@ -204,7 +211,7 @@ member_version_sensitivity: [ { id: yard_water, reason: "cauldron split at 1.17"
 
 ```text
 $ cairn compile build.crn --target 1.21.4 --lock build.cairn.lock
-W_PREVIOUSLY_VERIFIED_TARGET: verified for 1.20.4/DataVersion 3700, now 1.21.4/3955.
+W_PREVIOUSLY_VERIFIED_TARGET: verified for 1.20.4/DataVersion 3700, now 1.21.4/4189.
 W_SEMANTIC_SENSITIVITY: 2 members may resolve differently: yard_water, fence
 ```
 

@@ -199,6 +199,33 @@ fn heterogeneous_list_rejected_with_index_and_actual_type() {
 }
 
 #[test]
+fn an_empty_list_claiming_an_element_type_is_rejected() {
+    // The sibling check above runs inside the item loop, which an empty
+    // list never enters, so this is the shape it cannot see. `List`'s
+    // fields are public — a constructor is a convenience, and the writer
+    // is the point every byte passes through.
+    let mut root = Compound::new();
+    root.insert(
+        "xs",
+        Tag::List(List {
+            element_type_id: 3, // Int, with nothing to be an Int
+            items: vec![],
+        }),
+    );
+    let mut buf = Vec::new();
+    let err = write_java_uncompressed(&mut buf, "", &root).expect_err("empty list, typed");
+    match err {
+        NbtIoError::EmptyListWithElementType { declared } => assert_eq!(declared, 3),
+        other => panic!("expected EmptyListWithElementType, got {other:?}"),
+    }
+    // The spec-shaped empty list still writes.
+    let mut ok_root = Compound::new();
+    ok_root.insert("xs", Tag::List(List::empty()));
+    let mut ok_buf = Vec::new();
+    write_java_uncompressed(&mut ok_buf, "", &ok_root).expect("TAG_End empty list");
+}
+
+#[test]
 fn length_overflow_message_names_the_context() {
     // We can't actually allocate a `Vec<i32>` of `i32::MAX + 1` to trigger
     // the overflow path, so this test only locks down the error's `context`

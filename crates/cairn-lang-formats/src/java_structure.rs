@@ -40,6 +40,23 @@ pub enum JavaStructureError {
         /// Offending id verbatim.
         id: String,
     },
+    /// A voxel named a palette slot the palette does not have.
+    ///
+    /// Unreachable through the compiler, where [`Palette::intern`] is the
+    /// only source of a [`PaletteIndex`] — but [`BlockArray`]'s fields are
+    /// public and so is this builder, so a consumer of the crate can hand
+    /// over a grid and a palette that disagree. Writing the index anyway
+    /// produces a file that names a slot the reader has to invent.
+    ///
+    /// [`Palette::intern`]: cairn_lang_core::block_array::Palette::intern
+    /// [`PaletteIndex`]: cairn_lang_core::block_array::PaletteIndex
+    #[error("voxel palette index {index} is outside the {len}-entry palette")]
+    PaletteIndexOutOfRange {
+        /// The index the grid asked for.
+        index: u16,
+        /// How many entries the palette actually has.
+        len: usize,
+    },
     /// A voxel dimension overflowed the `i32` wire width Java NBT uses.
     /// In practice this can only fire on a structure bigger than `i32::MAX`
     /// blocks along one axis — far beyond what `cairn lower` or any sane
@@ -67,6 +84,10 @@ pub enum JavaStructureError {
 /// abstract tokens before they reach this point, but a `cairn lower` run
 /// without a pack can leak them in and we refuse to write a malformed
 /// structure rather than emit one Minecraft will silently treat as air.
+/// Returns [`JavaStructureError::PaletteIndexOutOfRange`] when a voxel
+/// names a slot the palette does not have, and
+/// [`JavaStructureError::DimensionOverflow`] when a dimension does not fit
+/// the wire width.
 pub fn build_structure_tag(
     ba: &BlockArray,
     target: &JavaTarget,
@@ -77,6 +98,9 @@ pub fn build_structure_tag(
                 id: entry.id.clone(),
             });
         }
+    }
+    if let Some((index, len)) = ba.first_index_outside_palette() {
+        return Err(JavaStructureError::PaletteIndexOutOfRange { index, len });
     }
 
     let size_x = dim_to_i32(ba.dims.x, "x")?;

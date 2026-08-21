@@ -73,6 +73,16 @@ pub enum BedrockStructureError {
     /// self-correction triple so the lint loop can act on it.
     #[error(transparent)]
     State(#[from] BedrockStateError),
+    /// A voxel named a palette slot the palette does not have. Same hole
+    /// as the Java backend's, reached the same way: public struct fields
+    /// plus a public builder.
+    #[error("voxel palette index {index} is outside the {len}-entry palette")]
+    PaletteIndexOutOfRange {
+        /// The index the grid asked for.
+        index: u16,
+        /// How many entries the palette actually has.
+        len: usize,
+    },
     /// A voxel dimension overflowed the `i32` wire width NBT uses.
     #[error("dimension {axis} = {value} exceeds NBT i32 wire limit")]
     DimensionOverflow {
@@ -95,12 +105,22 @@ pub enum BedrockStructureError {
 /// Returns [`BedrockStructureError::AbstractPaletteEntry`] for an
 /// unresolved abstract token, [`BedrockStructureError::State`] for a palette
 /// entry whose properties cannot be mapped to Bedrock (see
-/// [`crate::bedrock_state`]), and [`BedrockStructureError::DimensionOverflow`]
-/// when a dimension does not fit the wire width.
+/// [`crate::bedrock_state`]),
+/// [`BedrockStructureError::PaletteIndexOutOfRange`] when a voxel names a
+/// slot the palette does not have, and
+/// [`BedrockStructureError::DimensionOverflow`] when a dimension does not
+/// fit the wire width.
 pub fn build_mcstructure_tag(
     ba: &BlockArray,
     target: &BedrockTarget,
 ) -> Result<(Compound, Vec<ParityNote>), BedrockStructureError> {
+    // Ahead of the translation loop, as on the Java side: the check does
+    // not depend on anything the loop produces, and a rejected array should
+    // cost nothing beyond the walk.
+    if let Some((index, len)) = ba.first_index_outside_palette() {
+        return Err(BedrockStructureError::PaletteIndexOutOfRange { index, len });
+    }
+
     // Translate every palette entry up front: a mapping failure (abstract
     // token, unmapped stateful block) aborts the whole build before any tree
     // is assembled, mirroring the Java backend's fail-loud contract.
@@ -184,17 +204,13 @@ fn block_indices(ba: &BlockArray) -> List {
         }
     }
     let layer1: Vec<Tag> = vec![Tag::Int(-1); volume];
+    // Through the constructor rather than a struct literal: an empty layer
+    // has to declare `TAG_End`, and the literal spelled `3` unconditionally.
     List {
         element_type_id: 9,
         items: vec![
-            Tag::List(List {
-                element_type_id: 3,
-                items: layer0,
-            }),
-            Tag::List(List {
-                element_type_id: 3,
-                items: layer1,
-            }),
+            Tag::List(List::of_tags(3, layer0)),
+            Tag::List(List::of_tags(3, layer1)),
         ],
     }
 }

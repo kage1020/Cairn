@@ -7,8 +7,8 @@ use cairn_lang_core::CAIRN_VERSION;
 use cairn_lang_core::block_array::{BlockArray, BlockArrayIr, lower_to_block_array};
 use cairn_lang_core::check::{DiagnosticNote as Note, LineStarts};
 use cairn_lang_core::lock::{
-    HashHex, LockEdition, LockInputs, LockPlacement, LockTarget, LockWalkway, Lockfile,
-    hash_resolved_ir, hash_source,
+    HashHex, LOCK_SCHEMA_VERSION, LockEdition, LockError, LockInputs, LockPlacement, LockTarget,
+    LockWalkway, Lockfile, hash_resolved_ir, hash_source,
 };
 use cairn_lang_core::resolve::{
     EditionPortability, VersionAxes, VersionFloor, compare_versions, compute_axes,
@@ -80,9 +80,12 @@ enum Command {
     },
     /// Report the three version axes (registry-compatible range, edition
     /// portability, semantic-sensitive members) for a .crn source file.
-    /// Exits 0 on success, 1 on parse failure or any other I/O error
-    /// (permission denied, non-UTF-8 contents), 2 when the file cannot be
-    /// located, and rejects an empty `--editions` value with exit 2.
+    /// Exits 0 on success; 1 on a parse failure, on any `Error`-severity
+    /// diagnostic (the check passes run here, and a range derived from a
+    /// file `cairn check` rejects is a confident wrong answer), or on any
+    /// other I/O error (permission denied, non-UTF-8 contents); 2 when the
+    /// file cannot be located, and rejects an empty `--editions` value with
+    /// exit 2.
     Info {
         /// Path to the .crn file to inspect.
         file: PathBuf,
@@ -100,8 +103,10 @@ enum Command {
     /// `cairn compile` writes the same IR out as a Java `.nbt` artifact.
     /// Lowering warnings (deferred members, themeless scopes, abstract
     /// tokens) print to stderr but do not affect the exit code. Exits 0 on
-    /// success, 1 on parse failure or I/O error, 2 when the file cannot be
-    /// located.
+    /// success, 1 on a parse failure, on any `Error`-severity diagnostic
+    /// (`E_UNKNOWN_ABSTRACT_TOKEN` among them; `E_UNKNOWN_ID` is not, since
+    /// nothing here pins a target to check ids against), or on an I/O
+    /// error, and 2 when the file cannot be located.
     Lower {
         /// Path to the .crn file to lower.
         file: PathBuf,
@@ -112,14 +117,16 @@ enum Command {
     /// Compile a .crn source file to its edition+version-pinned structure
     /// artifact set and write a lockfile next to the source. `--edition
     /// java` writes gzip `.nbt` structures; `--edition bedrock` writes
-    /// uncompressed `.mcstructure` files. The Bedrock backend emits
-    /// stateless palettes only for now — a palette entry that carries
-    /// blockstate properties is a hard error rather than a silent drop.
-    /// This is also the only command that checks block ids against a
+    /// uncompressed `.mcstructure` files, translating the blockstate
+    /// families it knows into Bedrock `states`; a property it cannot
+    /// translate is a hard error, and intent it can only approximate (stair
+    /// `shape`) is dropped with a `W_INTENT_DEGRADED` warning rather than
+    /// silently. This is also the only command that checks block ids against a
     /// registry (`E_UNKNOWN_ID`): `--target` pins the one version there is
     /// an answer for.
     /// Exits 0 on success, 1 on parse, lowering, or I/O failure (including
-    /// an unsupported `--target` or a stateful Bedrock palette), and 2
+    /// an unsupported `--target` or a Bedrock property with no `states`
+    /// translation), and 2
     /// when the source file cannot be located.
     Compile {
         /// Path to the .crn file to compile.
@@ -481,10 +488,18 @@ fn run_check(file: &Path, edition: Option<EditionArg>, format: CheckFormat) -> E
     let lines = LineStarts::new(&source);
 
     match format {
+        // Diagnostics are the report, not the product. Every other
+        // subcommand sends theirs to stderr, and `check` sending its text
+        // form to stdout meant `cairn check f.crn > out` swallowed them
+        // while still exiting 1 — a CI step that captured stdout for
+        // something else saw a bare exit code and no reason.
+        //
+        // `--format json` stays on stdout: that one *is* the product, and a
+        // consumer redirects it deliberately.
         CheckFormat::Text => {
             for d in &diagnostics {
                 let pos = lines.position(&source, d.span.start);
-                println!(
+                eprintln!(
                     "{}:{}: {}[{}]: {}",
                     file.display(),
                     pos,
@@ -492,7 +507,7 @@ fn run_check(file: &Path, edition: Option<EditionArg>, format: CheckFormat) -> E
                     d.code.as_str(),
                     d.primary,
                 );
-                report_notes(Stream::Stdout, file, &source, &lines, &d.notes);
+                report_notes(file, &source, &lines, &d.notes);
             }
         }
         CheckFormat::Json => {
@@ -605,7 +620,7 @@ fn run_info(file: &Path, editions: &[String], format: InfoFormat) -> ExitCode {
             d.code.as_str(),
             d.primary,
         );
-        report_notes(Stream::Stderr, file, &source, &lines, &d.notes);
+        report_notes(file, &source, &lines, &d.notes);
         if d.severity() == Severity::Error {
             has_error = true;
         }
@@ -822,7 +837,7 @@ fn run_lower(file: &Path, format: LowerFormat) -> ExitCode {
             d.code.as_str(),
             d.primary,
         );
-        report_notes(Stream::Stderr, file, &source, &lines, &d.notes);
+        report_notes(file, &source, &lines, &d.notes);
         if d.severity() == Severity::Error {
             has_error = true;
         }
@@ -1241,7 +1256,7 @@ fn report_core_diagnostics(
             d.code.as_str(),
             d.primary,
         );
-        report_notes(Stream::Stderr, file, source, lines, &d.notes);
+        report_notes(file, source, lines, &d.notes);
         if d.severity() == Severity::Error {
             has_error = true;
         }
@@ -1272,7 +1287,7 @@ fn report_synth_diagnostics(
             d.code.as_str(),
             d.primary,
         );
-        report_notes(Stream::Stderr, file, source, lines, &d.notes);
+        report_notes(file, source, lines, &d.notes);
         if d.severity() == Severity::Error {
             has_error = true;
         }
@@ -1507,7 +1522,120 @@ fn run_compile(
     if let Err(code) = check_lock_path_is_free(&prepared, &lock_path) {
         return code;
     }
+    // Before the file is replaced, not after: the lockfile about to be
+    // overwritten is the only record of what was previously verified.
+    report_previous_target(&lock_path, edition, &target);
     write_artifacts_and_lock(&prepared, &source, &block_ir, edition, &target, &lock_path)
+}
+
+/// Compare the lockfile at `lock_path` with the target being built, and
+/// report the divergence the way `spec/versioning-editions.md` §10.6 does.
+///
+/// The lockfile is the record of what was verified, so a recompile for a
+/// different target is the moment that record stops describing what is on
+/// disk. Nothing here changes the build or the exit code — both lines are
+/// warnings, and a first compile or an unchanged target says nothing at
+/// all. A lockfile that cannot be read says so; only its absence is
+/// silent.
+fn report_previous_target(lock_path: &Path, edition: EditionArg, target: &ResolvedTarget) {
+    let previous = match Lockfile::read_from_path(lock_path) {
+        Ok(previous) => previous,
+        // No lockfile is the ordinary first-compile case, and the only one
+        // that should be silent. Testing `exists()` first would fold a
+        // permission error into it, and leave a window in which the file
+        // vanishes between the check and the read.
+        Err(LockError::Io(err)) if err.kind() == std::io::ErrorKind::NotFound => return,
+        // A document from a newer Cairn is not corrupt, and replacing it
+        // does lose something, so it says so in its own words.
+        Err(LockError::UnsupportedSchemaVersion { found, supported }) => {
+            eprintln!(
+                "warning: {}: the existing lockfile is schema version {found} and this build \
+                 reads {supported}; it was written by a newer Cairn and is being replaced",
+                lock_path.display(),
+            );
+            return;
+        }
+        Err(err) => {
+            // Not an error: the compile is valid, and a corrupt file beside
+            // the source is no reason to refuse to build. But it was being
+            // overwritten in silence, which is how a tampered or stale
+            // lockfile went unnoticed.
+            eprintln!(
+                "warning: {}: the existing lockfile could not be read ({err}); replacing it",
+                lock_path.display(),
+            );
+            return;
+        }
+    };
+    let now = LockTarget {
+        edition: edition.as_lock_edition(),
+        mc_version: target.mc_version().to_owned(),
+        data_version: target.version_int(),
+    };
+    if previous.target == now {
+        return;
+    }
+    // The edition appears only when it changed: two editions number their
+    // releases differently, so `1.21.4` against `1.21.60` reads as noise
+    // without it, and naming it on every line would pad the common case.
+    let name_edition = previous.target.edition != now.edition;
+    eprintln!(
+        "W_PREVIOUSLY_VERIFIED_TARGET: verified for {}, now {}.",
+        describe_verified(&previous.target, name_edition),
+        describe_now(&now, name_edition),
+    );
+    if previous.member_version_sensitivity.is_empty() {
+        return;
+    }
+    let ids: Vec<&str> = previous
+        .member_version_sensitivity
+        .iter()
+        .map(|m| m.id.as_str())
+        .collect();
+    eprintln!(
+        "W_SEMANTIC_SENSITIVITY: {} member{} may resolve differently: {}",
+        ids.len(),
+        if ids.len() == 1 { "" } else { "s" },
+        ids.join(", "),
+    );
+}
+
+/// The left half of the warning: `1.20.4/DataVersion 3700`.
+///
+/// The integer is named here and bare on the right, which is the shape
+/// §10.6 prints. Java's is Minecraft's `DataVersion`; Bedrock's is the
+/// block palette's own `version`, and calling both `DataVersion` would name
+/// the Java concept for a number that is not one.
+fn describe_verified(target: &LockTarget, name_edition: bool) -> String {
+    let field = match target.edition {
+        LockEdition::Java => "DataVersion",
+        LockEdition::Bedrock => "block version",
+    };
+    format!(
+        "{}{}/{} {}",
+        edition_prefix(target, name_edition),
+        target.mc_version,
+        field,
+        target.data_version,
+    )
+}
+
+/// The right half of the warning: `1.21.4/4189`.
+fn describe_now(target: &LockTarget, name_edition: bool) -> String {
+    format!(
+        "{}{}/{}",
+        edition_prefix(target, name_edition),
+        target.mc_version,
+        target.data_version,
+    )
+}
+
+fn edition_prefix(target: &LockTarget, name_edition: bool) -> String {
+    if name_edition {
+        format!("{} ", target.edition.as_str())
+    } else {
+        String::new()
+    }
 }
 
 /// A `.crn` read, parsed, resolved, and lowered, plus what the lowering
@@ -1666,27 +1794,6 @@ fn enforce_version_floor(
     Err(ExitCode::from(1))
 }
 
-/// Which stream a command's findings go to.
-///
-/// `cairn check` writes its text output to stdout — its findings *are* the
-/// output — and every other command reports to stderr so the IR, the JSON,
-/// or the artifact path stays pipeable. Naming the choice is what lets the
-/// six copies of the note loop become one.
-#[derive(Clone, Copy)]
-enum Stream {
-    Stdout,
-    Stderr,
-}
-
-impl Stream {
-    fn line(self, text: &str) {
-        match self {
-            Self::Stdout => println!("{text}"),
-            Self::Stderr => eprintln!("{text}"),
-        }
-    }
-}
-
 /// Print one finding's `note:` lines under its primary.
 ///
 /// A note that carries a span is printed with that position, the way the
@@ -1699,19 +1806,14 @@ impl Stream {
 /// and three of the six had dropped the position. Both note types are
 /// `cairn_lang_core::check::DiagnosticNote` — `cairn-lang-redstone`
 /// re-exports it — so one signature covers every caller.
-fn report_notes(stream: Stream, file: &Path, source: &str, lines: &LineStarts, notes: &[Note]) {
+fn report_notes(file: &Path, source: &str, lines: &LineStarts, notes: &[Note]) {
     for note in notes {
         match note.span.as_ref() {
             Some(span) => {
                 let pos = lines.position(source, span.start);
-                stream.line(&format!(
-                    "{}:{}:   note: {}",
-                    file.display(),
-                    pos,
-                    note.message
-                ));
+                eprintln!("{}:{}:   note: {}", file.display(), pos, note.message);
             }
-            None => stream.line(&format!("  note: {}", note.message)),
+            None => eprintln!("  note: {}", note.message),
         }
     }
 }
@@ -1729,7 +1831,7 @@ fn report_lowering_diagnostics(file: &Path, source: &str, block_ir: &BlockArrayI
             d.code.as_str(),
             d.primary,
         );
-        report_notes(Stream::Stderr, file, source, &lines, &d.notes);
+        report_notes(file, source, &lines, &d.notes);
         if d.severity() == Severity::Error {
             has_error = true;
         }
@@ -2273,6 +2375,7 @@ fn build_lockfile(
     target: &ResolvedTarget,
 ) -> Result<Lockfile, cairn_lang_core::lock::HashError> {
     Ok(Lockfile {
+        lock_schema_version: LOCK_SCHEMA_VERSION,
         source_hash: hash_source(source),
         cairn_version: CAIRN_VERSION.to_owned(),
         target: LockTarget {

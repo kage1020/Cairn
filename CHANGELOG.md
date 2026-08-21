@@ -115,6 +115,49 @@ and is a separate axis from the Minecraft target version.
   fields. Source-compatible for anything that only names the path; a consumer that wrote an
   `impl` for the redstone type now writes it for core's, and one that had both is writing it
   twice for one type. Rust API, Internal tier.
+- *(cli)* `cairn check --format text` writes its diagnostics to stderr. It was the one build
+  command reporting on stdout, so `cairn check f.crn > out` swallowed every finding and left a
+  bare exit code behind. `--format json` stays on stdout: that one is the payload, and it is
+  redirected deliberately. A *parse* failure still reports on stderr in both formats and leaves
+  stdout empty, which this release does not change.
+- *(core)* A lockfile carrying a key the schema does not declare is refused, at every depth
+  rather than only the top level. A document with `attacker_controlled: yes` beside the required
+  fields used to deserialise as `Ok` with `verified: true`; a lockfile is a claim about what was
+  built, and one carrying keys the reader ignores is a document whose meaning depends on who is
+  reading it.
+- *(core)* `Lockfile` declares `lock_schema_version` as its first field, and a document
+  declaring a version above the one a build understands is refused by name rather than read as
+  if the field names still meant the same thing. A document that omits the key is version 1 —
+  the shape that shipped before the field existed — so every lockfile this compiler has written
+  still reads. `spec` §10.6's sample carries the field in both languages, and the field order it
+  pins moved deliberately.
+- *(nbt)* Writing a `List` that has no items but declares an element type other than `TAG_End`
+  is refused. `List`'s fields are public, so a constructor is a convenience rather than a funnel,
+  and the sibling heterogeneity check runs inside the item loop that an empty list never enters —
+  the writer is the one point every byte passes through. `bedrock_structure`'s `block_indices`
+  built exactly that shape from a struct literal.
+- *(formats)* `pack_hash` length-prefixes every field it covers, which moves
+  `inputs.registry_pack_hash` for every pack. Concatenated as it was, the manifest ran straight
+  into the first component name and each component's body straight into the next name, so the
+  same bytes divided one place to the left or right hashed the same — precisely the rename the
+  function's own doc claimed the digest resisted. A separator before the first name would have
+  closed half of it; both collisions are pinned as tests.
+
+### Added
+
+- *(cli)* `cairn compile` reads the lockfile it is about to replace and reports what changed, as
+  `spec` §10.6 describes. A recompile for a different target prints
+  `W_PREVIOUSLY_VERIFIED_TARGET`, naming the edition only when that is what moved — two editions
+  number their releases differently, so the version pair alone reads as noise across them. When
+  the replaced lockfile recorded `member_version_sensitivity` entries, `W_SEMANTIC_SENSITIVITY`
+  names them; it is subordinate to the target change, as `spec` §10.6 introduces it — a recompile
+  for an unchanged target says nothing even when the lockfile records entries. Nothing is
+  synthesised, so the line stays quiet until the constraint-catalog ingest gives it something to
+  say. A lockfile written by a newer Cairn is reported in its own words rather than as a corrupt
+  one: replacing it loses something, and it is not malformed. A lockfile that does not parse, or that declares a schema
+  this build does not read, is reported and replaced instead of discarded in silence. Both are
+  warnings and neither changes the exit code, and the read-back covers the default
+  `<source>.lock` path, not only an explicit `--lock`.
 
 ### Fixed
 
@@ -156,6 +199,29 @@ and is a separate axis from the Minecraft target version.
 - *(ci)* The VS Code extension and the documentation site are built. Neither was referenced
   anywhere in the workflows, so a TypeScript error in the extension or a Starlight page that
   fails to render could reach the integration branch without turning a check red.
+- *(core)* A written lockfile ends with a newline. `serde_yml` closes an empty flow sequence
+  without a line break and `member_version_sensitivity` is the last field, so every lockfile
+  written for a source with no sensitivity entries — which is all of them so far — ended at `]`
+  mid-line, making `git diff` report `\ No newline at end of file` on every change and an
+  appended byte corrupt the document.
+- *(nbt)* `List::of_ints([])` and `List::of_compounds(vec![])` declare `TAG_End`. The element id
+  describes the items on the wire and an empty list has none; `tag.rs` says so and `List::empty`
+  already wrote `0`, so which constructor was called decided what an empty list claimed about
+  itself.
+- *(formats)* Both structure backends refuse a voxel whose palette index is not a slot of the
+  palette, instead of writing it as an `i32` naming a slot the reader has to invent. Unreachable
+  through the CLI, where `Palette::intern` is the only source of an index — but `BlockArray`'s
+  fields and both `build_*_tag` entrypoints are public.
+- *(cli)* `compile --help` no longer says the Bedrock backend emits stateless palettes only and
+  treats a stateful entry as a hard error. The same help page's `--edition bedrock` text already
+  said otherwise, and so does the code: compiling `examples/roof-hip.crn` for Bedrock exits 0,
+  warns `W_INTENT_DEGRADED`, and writes `weirdo_direction` and `upside_down_bit`.
+  `lower --help` and `info --help` now document the exit-1 path for an `Error`-severity
+  diagnostic, which both have always taken.
+- *(docs)* `cairn-lang-formats`'s README listed a `BedrockStructureError::StatefulPaletteEntry`
+  that has never existed and repeated the stateless-palette claim in three places. The crate is
+  published, so a consumer could have written a match arm against a variant they would never
+  receive.
 
 ## 2026.8.2 — 2026-08-01
 

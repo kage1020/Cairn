@@ -457,3 +457,54 @@ fn f13_cottage_end_to_end_size_matches_overhang_inflated_dims() {
         _ => panic!("size is not a List"),
     }
 }
+
+#[test]
+fn a_voxel_naming_a_slot_the_palette_does_not_have_is_refused() {
+    // `Palette::intern` is the only source of a `PaletteIndex` inside the
+    // compiler, so this is unreachable from the CLI — but `BlockArray`'s
+    // fields are public and `build_structure_tag` is public, so a consumer
+    // of this crate can hand over a grid that points past the palette. Left
+    // unchecked the index went out as an `i32` and the file named a palette
+    // slot the reader would have to invent.
+    let mut ba = unit_air();
+    ba.voxels[0] = PaletteIndex(7);
+    let err = build_structure_tag(&ba, &target_1_21_4()).expect_err("out-of-range index");
+    assert!(
+        matches!(
+            err,
+            JavaStructureError::PaletteIndexOutOfRange { index: 7, len: 1 }
+        ),
+        "unexpected error: {err}"
+    );
+    assert!(
+        err.to_string().contains('7') && err.to_string().contains('1'),
+        "the message should name both the index and the palette length: {err}"
+    );
+}
+
+#[test]
+fn the_check_lands_exactly_on_the_first_index_that_is_not_a_slot() {
+    // Both sides of the boundary, because `len` is the only value at which
+    // `>= len` and `> len` disagree: the last slot is `len - 1` and must
+    // build, and `len` itself is the first index with nothing behind it and
+    // must not. Testing one side alone leaves the operator free.
+    let ba = synthetic_cottage();
+    let len = ba.palette.entries.len();
+    let highest = ba.voxels.iter().map(|i| i.0).max().expect("non-empty");
+    assert_eq!(
+        usize::from(highest) + 1,
+        len,
+        "fixture should use the last palette slot, or this proves nothing"
+    );
+    build_structure_tag(&ba, &target_1_21_4()).expect("in-range indices");
+
+    let mut past_the_end = ba;
+    past_the_end.voxels[0] = PaletteIndex(u16::try_from(len).expect("small palette"));
+    let err =
+        build_structure_tag(&past_the_end, &target_1_21_4()).expect_err("one past the last slot");
+    assert!(
+        matches!(err, JavaStructureError::PaletteIndexOutOfRange { index, .. }
+            if usize::from(index) == len),
+        "unexpected error: {err}"
+    );
+}
