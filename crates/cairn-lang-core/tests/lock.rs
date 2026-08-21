@@ -364,7 +364,9 @@ fn a_key_the_schema_does_not_declare_is_refused_wherever_it_sits() {
         "the nested fixture did not tamper with anything"
     );
     for (label, body) in [("top level", top_level), ("inside target", nested)] {
-        let err = Lockfile::from_yaml(&body).expect_err("unknown key at {label}");
+        let Err(err) = Lockfile::from_yaml(&body) else {
+            panic!("an unknown key at the {label} was accepted");
+        };
         let message = err.to_string();
         assert!(
             message.contains("attacker_controlled"),
