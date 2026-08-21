@@ -2,14 +2,21 @@
 //!
 //! The binary is spawned by editors (no arguments — LSP over stdio) and by
 //! users on the command line for support triage. The surface it exposes to
-//! that second audience is: `--version`/`-V` → `cairn-lsp {CAIRN_VERSION}`
-//! and exit 0; `--help`/`-h` → usage string and exit 0; anything else →
-//! exit 2 with a message that lists the valid flags. These tests pin that
-//! contract so a refactor of `main.rs` cannot silently reshape it.
+//! that second audience is: `--version`/`-V` → `cairn-lsp <version>` and
+//! exit 0; `--help`/`-h` → usage string and exit 0; anything else → exit 2
+//! with a message that lists the valid flags. These tests pin that contract so
+//! a refactor of `main.rs` cannot silently reshape it.
+//!
+//! The version is compared against the number cargo derived for this crate
+//! rather than against `cairn-lang-core`'s `CAIRN_VERSION`, which is where the
+//! binary reads it from. Both resolve to `[workspace.package] version`, by two
+//! independent routes, so a constant that stops tracking the workspace shows up
+//! here instead of being restated.
 
 use std::process::Command;
 
-use cairn_lang_core::CAIRN_VERSION;
+/// The version cargo derived for this crate from `[workspace.package]`.
+const WORKSPACE_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 #[test]
 fn version_flag_prints_cairn_version_and_exits_zero() {
@@ -28,7 +35,7 @@ fn version_flag_prints_cairn_version_and_exits_zero() {
     let stdout = String::from_utf8(output.stdout).expect("stdout is utf-8");
     assert_eq!(
         stdout.trim_end(),
-        format!("cairn-lsp {CAIRN_VERSION}"),
+        format!("cairn-lsp {WORKSPACE_VERSION}"),
         "unexpected --version output",
     );
 }
@@ -42,7 +49,7 @@ fn short_version_flag_matches_long() {
 
     assert!(output.status.success(), "cairn-lsp -V exited non-zero");
     let stdout = String::from_utf8(output.stdout).expect("stdout is utf-8");
-    assert_eq!(stdout.trim_end(), format!("cairn-lsp {CAIRN_VERSION}"));
+    assert_eq!(stdout.trim_end(), format!("cairn-lsp {WORKSPACE_VERSION}"));
 }
 
 #[test]

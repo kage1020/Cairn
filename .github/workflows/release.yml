@@ -146,12 +146,15 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      # The tree-sitter crate is the one workspace member that also ships to a
-      # registry release-plz knows nothing about: its npm manifest and its
-      # tree-sitter manifest each carry their own copy of the version, and
-      # release-plz rewrites only Cargo.toml. Left alone, a CalVer bump leaves
-      # the npm package advertising the previous month's number against this
-      # month's grammar.
+      # Four things outside release-plz's reach carry their own copy of the
+      # version: the tree-sitter crate's npm manifest and tree-sitter manifest,
+      # the VS Code extension's manifest, and `[workspace.dependencies]` — which
+      # is in Cargo.toml, but release-plz rewrites only `[workspace.package]`
+      # there. Left alone, a CalVer bump leaves the npm package advertising the
+      # previous month's number against this month's grammar, the extension —
+      # which resolves `cairn-lsp` off PATH and is documented as tracking the
+      # CLI's CalVer tag — claiming to belong to a release it does not, and the
+      # internal crate requirements stuck on the number that was guessed.
       #
       # This runs after release-plz rather than before it because the version
       # pre-set above is an *input* to release-plz's decision, not the outcome
@@ -163,10 +166,16 @@ jobs:
       #
       # `tree-sitter generate` bakes tree-sitter.json's metadata.version into
       # src/parser.c as the TSLanguage major/minor/patch triple, so this is not
-      # a manifest-only edit — it invalidates a checked-in generated file, and
-      # tree-sitter.yml's generate-check job fails the release PR if the two
-      # disagree.
-      - name: Align the tree-sitter manifests with the version release-plz chose
+      # a manifest-only edit — it invalidates a checked-in generated file.
+      #
+      # Nothing about this step is load-bearing as a *check*. A release PR runs
+      # no workflows of its own: it is opened with GITHUB_TOKEN, and events from
+      # that token create none. So generate-check and version-sync do not see
+      # this branch, and if this step fails or is skipped the drift travels into
+      # the merge commit unopposed. `release-patch` asserts parity there, before
+      # publishing, which is the only point on the release path where a check
+      # can still stop something rather than describe it.
+      - name: Align the non-Cargo manifests with the version release-plz chose
         if: steps.release_pr.outputs.prs_created == 'true'
         env:
           PR: ${{ steps.release_pr.outputs.pr }}
@@ -183,36 +192,64 @@ jobs:
             /^\[/                       { in_section = 0 }
             in_section && /^version = / { gsub(/"/, "", $3); print $3; exit }
           ' Cargo.toml)
-          if [ -z "$version" ]; then
-            echo "Could not read the version release-plz wrote to Cargo.toml" >&2
+          # Shape, not just non-emptiness: this value is about to be written
+          # into three manifests and pushed by a bot, and
+          # `version = { workspace = true }` would hand back `{` here.
+          if [[ ! "$version" =~ ^[0-9]{4}\.(0|[1-9][0-9]*)(\.[0-9]+)?$ ]]; then
+            echo "Read '$version' from [workspace.package]; that is not a CalVer number" >&2
             exit 1
           fi
           echo "release-plz settled on $version"
 
-          cd crates/cairn-lang-tree-sitter
-          # jq rather than sed: `version` is not a unique key in either file once
-          # nested objects are in play, and a path expression cannot drift onto a
-          # dependency's version the way a line-oriented match can.
-          for spec in "package.json:.version" "tree-sitter.json:.metadata.version"; do
+          # `[workspace.dependencies]` carries the internal crates' versions and
+          # release-plz does not rewrite them either. The pre-set step above
+          # wrote them from the number it guessed before release-plz ran, which
+          # is exactly the value the comment above calls a guess — so left alone
+          # they keep whatever that guess was. Same expression as the pre-set
+          # step, applied to the settled number.
+          sed -i -E 's/^(cairn-[a-z-]+ = \{ version = )"[^"]*"/\1"'"$version"'"/' Cargo.toml
+
+          # jq rather than sed: `version` is not a unique key in any of these
+          # files once nested objects are in play, and a path expression cannot
+          # drift onto a dependency's version the way a line-oriented match can.
+          for spec in \
+            "crates/cairn-lang-tree-sitter/package.json:.version" \
+            "crates/cairn-lang-tree-sitter/tree-sitter.json:.metadata.version" \
+            "editors/vscode/package.json:.version"; do
             file="${spec%%:*}"
             path="${spec#*:}"
+            # Assignment *creates* a missing path, so without this a renamed
+            # field would grow a second one beside it, leave the real version
+            # stale, and still report a clean alignment.
+            jq -e "$path" "$file" >/dev/null \
+              || { echo "$file has no $path — the manifest schema changed" >&2; exit 1; }
             jq --indent 2 --arg v "$version" "$path = \$v" "$file" > "$file.tmp"
             mv "$file.tmp" "$file"
           done
+          # Only the grammar has a generated file to invalidate; the extension's
+          # version reaches nothing but its own manifest.
+          cd crates/cairn-lang-tree-sitter
           pnpm install --frozen-lockfile
           pnpm run generate
           cd ../..
 
-          if git diff --quiet; then
+          # `git status --porcelain` rather than `git diff`, and `git add -A`
+          # rather than `commit -a`: both of the latter ignore untracked files,
+          # so a new file emitted by `tree-sitter generate` would be dropped
+          # from the commit — or, if the manifests already agreed, reported as
+          # "nothing to push" and left behind entirely.
+          if [ -z "$(git status --porcelain)" ]; then
             echo "manifests already agreed with $version; nothing to push"
             exit 0
           fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git commit -aqm "chore: align tree-sitter manifests with $version"
+          git add -A
+          git commit -qm "chore: align the non-Cargo manifests with $version"
           git push origin "$branch"
-          echo "Pushed the alignment commit. If the release PR's checks were" \
-               "created before this push, re-run them before merging."
+          echo "Pushed the alignment commit. The release PR has no workflow runs" \
+               "of its own to re-run; parity is asserted again in release-patch" \
+               "before anything is published."
 
   release-patch:
     name: Publish merged release
@@ -225,6 +262,62 @@ jobs:
           fetch-depth: 0
           fetch-tags: true
           token: ${{ secrets.GITHUB_TOKEN }}
+
+      # This is the last point at which drift can be stopped rather than
+      # shipped: everything below publishes to crates.io, tags, and dispatches
+      # the npm and binary workflows. The parity jobs that run on a pull request
+      # never see a release PR — release-plz opens it with GITHUB_TOKEN, and a
+      # pull request opened or a branch pushed with that token creates no
+      # workflow runs at all — so the merged commit is the first thing they
+      # could have looked at, and by then the publish is already under way.
+      # Asserting here covers every route the drift could have taken: a failed
+      # alignment push, a hand edit, a merge that resurrected an old manifest.
+      - name: Assert every copy of the version agrees before publishing
+        shell: bash
+        run: |
+          set -euo pipefail
+          version=$(awk '
+            /^\[workspace\.package\]/   { in_section = 1; next }
+            /^\[/                       { in_section = 0 }
+            in_section && /^version = / { gsub(/"/, "", $3); print $3; exit }
+          ' Cargo.toml)
+          if [[ ! "$version" =~ ^[0-9]{4}\.(0|[1-9][0-9]*)(\.[0-9]+)?$ ]]; then
+            echo "Read '$version' from [workspace.package]; that is not a CalVer number" >&2
+            exit 1
+          fi
+          echo "Cargo [workspace.package]: $version"
+          drifted=0
+          compare() {
+            printf '  %-48s %s\n' "$1" "$2"
+            if [ "$2" != "$version" ]; then
+              drifted=1
+            fi
+          }
+          compare "crates/cairn-lang-tree-sitter/package.json" \
+            "$(jq -er '.version' crates/cairn-lang-tree-sitter/package.json)"
+          compare "crates/cairn-lang-tree-sitter/tree-sitter.json" \
+            "$(jq -er '.metadata.version' crates/cairn-lang-tree-sitter/tree-sitter.json)"
+          compare "editors/vscode/package.json" \
+            "$(jq -er '.version' editors/vscode/package.json)"
+          # The internal crate requirements in [workspace.dependencies] are a
+          # copy too, and they live in the same file the number is read from.
+          while read -r name declared; do
+            compare "[workspace.dependencies] $name" "$declared"
+          done < <(awk '
+            /^\[workspace\.dependencies\]/ { in_section = 1; next }
+            /^\[/                           { in_section = 0 }
+            in_section && /^cairn-[a-z-]+ = \{ version = "/ {
+              declared = $0
+              sub(/^.*version = "/, "", declared)
+              sub(/".*$/, "", declared)
+              print $1, declared
+            }
+          ' Cargo.toml)
+          if [ "$drifted" -ne 0 ]; then
+            echo 'A copy of the version disagrees with [workspace.package].' >&2
+            echo 'Refusing to publish: the artefacts would carry different numbers.' >&2
+            exit 1
+          fi
 
       - name: Install Rust toolchain
         run: rustup show
