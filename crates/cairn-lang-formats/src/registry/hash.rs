@@ -4,25 +4,25 @@
 
 use cairn_lang_core::lock::HashHex;
 
-/// Width of the length prefix in [`push_framed`]. Fixed rather than
-/// `usize`, so the digest does not depend on the pointer width of the
-/// machine that computed it.
+/// Width of one length prefix, for sizing the buffer up front. What keeps
+/// the digest independent of the machine's pointer width is
+/// [`push_framed`]'s `u64` conversion, not this constant.
 const LENGTH_PREFIX: usize = size_of::<u64>();
 
 /// Append `bytes` preceded by its length, so no rearrangement of the same
 /// bytes across two fields produces the same stream.
 fn push_framed(buf: &mut Vec<u8>, bytes: &[u8]) {
     // `usize` is at most 64 bits on every target Rust supports, so this
-    // conversion is the identity in practice; `try_from` rather than `as`
-    // says that a length is being written, not narrowed.
-    let len = u64::try_from(bytes.len()).unwrap_or(u64::MAX);
+    // cannot fail. Saturating instead would frame two different lengths
+    // identically, which is the one property the framing exists to give.
+    let len = u64::try_from(bytes.len()).expect("a length fits in u64 on every supported target");
     buf.extend_from_slice(&len.to_le_bytes());
     buf.extend_from_slice(bytes);
 }
 
 /// Hash the manifest body and every referenced component file in declared
-/// order, so two packs produce the same digest exactly when they hold the
-/// same bytes under the same filenames.
+/// order, so two packs produce the same digest only when they hold the
+/// same bytes under the same filenames in the same order.
 ///
 /// Every field is length-prefixed. Concatenation alone is not enough: with
 /// the fields simply run together, the same bytes divided one place to the
@@ -74,6 +74,24 @@ mod tests {
         let one = pack_hash(b"{\"a\":1}", &[("data_versions", body)]);
         let two = pack_hash(b"{\"a\":2}", &[("data_versions", body)]);
         assert_ne!(one, two);
+    }
+
+    #[test]
+    fn the_framing_produces_a_known_digest() {
+        // The two collision tests only assert `!=`, which a half-framed
+        // encoding also satisfies. This is the absolute value, so a change
+        // to how the bytes are laid out has to be made deliberately. The
+        // built-in pack snapshots move whenever the registry data does;
+        // this one moves only when the framing does.
+        //
+        // Derived from the framing rule rather than copied out of a run:
+        // sha256 over
+        // `u64le(2) "{}" u64le(1) "a" u64le(1) "X"`
+        // = 02000000000000007b7d010000000000000061010000000000000058.
+        assert_eq!(
+            pack_hash(b"{}", &[("a", b"X")]).as_str(),
+            "sha256:5587de979011a708a5592e56ccdb3073472266e0c4df7bd8c25171f8018692de",
+        );
     }
 
     #[test]

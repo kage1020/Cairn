@@ -99,7 +99,7 @@ pub fn build_structure_tag(
             });
         }
     }
-    if let Some((index, len)) = first_index_outside_palette(ba) {
+    if let Some((index, len)) = ba.first_index_outside_palette() {
         return Err(JavaStructureError::PaletteIndexOutOfRange { index, len });
     }
 
@@ -273,22 +273,6 @@ pub(crate) fn is_concrete_id(id: &str) -> bool {
     let ns = parts.next().unwrap_or("");
     let path = parts.next();
     matches!(path, Some(p) if !ns.is_empty() && !p.is_empty())
-}
-
-/// The first voxel whose index is not a slot of `palette`, as
-/// `(index, palette length)`.
-///
-/// Shared with the Bedrock backend, which raises its own error from the
-/// same answer. Checked once over the whole grid before either backend
-/// starts assembling a tree, so a rejected array costs nothing beyond the
-/// walk and no half-built structure is ever in hand.
-pub(crate) fn first_index_outside_palette(ba: &BlockArray) -> Option<(u16, usize)> {
-    let len = ba.palette.entries.len();
-    ba.voxels
-        .iter()
-        .map(|index| index.0)
-        .find(|index| usize::from(*index) >= len)
-        .map(|index| (index, len))
 }
 
 fn palette_list(entries: &[BlockState]) -> List {

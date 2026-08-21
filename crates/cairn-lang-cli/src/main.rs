@@ -7,8 +7,8 @@ use cairn_lang_core::CAIRN_VERSION;
 use cairn_lang_core::block_array::{BlockArray, BlockArrayIr, lower_to_block_array};
 use cairn_lang_core::check::{DiagnosticNote as Note, LineStarts};
 use cairn_lang_core::lock::{
-    HashHex, LOCK_SCHEMA_VERSION, LockEdition, LockInputs, LockPlacement, LockTarget, LockWalkway,
-    Lockfile, hash_resolved_ir, hash_source,
+    HashHex, LOCK_SCHEMA_VERSION, LockEdition, LockError, LockInputs, LockPlacement, LockTarget,
+    LockWalkway, Lockfile, hash_resolved_ir, hash_source,
 };
 use cairn_lang_core::resolve::{
     EditionPortability, VersionAxes, VersionFloor, compare_versions, compute_axes,
@@ -104,9 +104,9 @@ enum Command {
     /// Lowering warnings (deferred members, themeless scopes, abstract
     /// tokens) print to stderr but do not affect the exit code. Exits 0 on
     /// success, 1 on a parse failure, on any `Error`-severity diagnostic
-    /// (`E_UNKNOWN_ABSTRACT_TOKEN` and the rest of the lowering-stage codes
-    /// reach this command), or on an I/O error, and 2 when the file cannot
-    /// be located.
+    /// (`E_UNKNOWN_ABSTRACT_TOKEN` among them; `E_UNKNOWN_ID` is not, since
+    /// nothing here pins a target to check ids against), or on an I/O
+    /// error, and 2 when the file cannot be located.
     Lower {
         /// Path to the .crn file to lower.
         file: PathBuf,
@@ -1534,14 +1534,27 @@ fn run_compile(
 /// The lockfile is the record of what was verified, so a recompile for a
 /// different target is the moment that record stops describing what is on
 /// disk. Nothing here changes the build or the exit code — both lines are
-/// warnings, and a first compile, an unchanged target, or a missing
-/// lockfile all say nothing at all.
+/// warnings, and a first compile or an unchanged target says nothing at
+/// all. A lockfile that cannot be read says so; only its absence is
+/// silent.
 fn report_previous_target(lock_path: &Path, edition: EditionArg, target: &ResolvedTarget) {
-    if !lock_path.exists() {
-        return;
-    }
     let previous = match Lockfile::read_from_path(lock_path) {
         Ok(previous) => previous,
+        // No lockfile is the ordinary first-compile case, and the only one
+        // that should be silent. Testing `exists()` first would fold a
+        // permission error into it, and leave a window in which the file
+        // vanishes between the check and the read.
+        Err(LockError::Io(err)) if err.kind() == std::io::ErrorKind::NotFound => return,
+        // A document from a newer Cairn is not corrupt, and replacing it
+        // does lose something, so it says so in its own words.
+        Err(LockError::UnsupportedSchemaVersion { found, supported }) => {
+            eprintln!(
+                "warning: {}: the existing lockfile is schema version {found} and this build \
+                 reads {supported}; it was written by a newer Cairn and is being replaced",
+                lock_path.display(),
+            );
+            return;
+        }
         Err(err) => {
             // Not an error: the compile is valid, and a corrupt file beside
             // the source is no reason to refuse to build. But it was being
@@ -1580,8 +1593,9 @@ fn report_previous_target(lock_path: &Path, edition: EditionArg, target: &Resolv
         .map(|m| m.id.as_str())
         .collect();
     eprintln!(
-        "W_SEMANTIC_SENSITIVITY: {} members may resolve differently: {}",
+        "W_SEMANTIC_SENSITIVITY: {} member{} may resolve differently: {}",
         ids.len(),
+        if ids.len() == 1 { "" } else { "s" },
         ids.join(", "),
     );
 }

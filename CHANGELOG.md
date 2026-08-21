@@ -117,9 +117,9 @@ and is a separate axis from the Minecraft target version.
   twice for one type. Rust API, Internal tier.
 - *(cli)* `cairn check --format text` writes its diagnostics to stderr. It was the one build
   command reporting on stdout, so `cairn check f.crn > out` swallowed every finding and left a
-  bare exit code behind — and `--format json` on an unparsable file wrote nothing to stdout and
-  plain text to stderr, the opposite of what a consumer parsing stdout expects. `--format json`
-  stays on stdout: that one is the payload, and it is redirected deliberately.
+  bare exit code behind. `--format json` stays on stdout: that one is the payload, and it is
+  redirected deliberately. A *parse* failure still reports on stderr in both formats and leaves
+  stdout empty, which this release does not change.
 - *(core)* A lockfile carrying a key the schema does not declare is refused, at every depth
   rather than only the top level. A document with `attacker_controlled: yes` beside the required
   fields used to deserialise as `Ok` with `verified: true`; a lockfile is a claim about what was
@@ -131,6 +131,11 @@ and is a separate axis from the Minecraft target version.
   the shape that shipped before the field existed — so every lockfile this compiler has written
   still reads. `spec` §10.6's sample carries the field in both languages, and the field order it
   pins moved deliberately.
+- *(nbt)* Writing a `List` that has no items but declares an element type other than `TAG_End`
+  is refused. `List`'s fields are public, so a constructor is a convenience rather than a funnel,
+  and the sibling heterogeneity check runs inside the item loop that an empty list never enters —
+  the writer is the one point every byte passes through. `bedrock_structure`'s `block_indices`
+  built exactly that shape from a struct literal.
 - *(formats)* `pack_hash` length-prefixes every field it covers, which moves
   `inputs.registry_pack_hash` for every pack. Concatenated as it was, the manifest ran straight
   into the first component name and each component's body straight into the next name, so the
@@ -145,8 +150,11 @@ and is a separate axis from the Minecraft target version.
   `W_PREVIOUSLY_VERIFIED_TARGET`, naming the edition only when that is what moved — two editions
   number their releases differently, so the version pair alone reads as noise across them. When
   the replaced lockfile recorded `member_version_sensitivity` entries, `W_SEMANTIC_SENSITIVITY`
-  names them; nothing is synthesised, so the line stays quiet until the constraint-catalog
-  ingest gives it something to say. A lockfile that does not parse, or that declares a schema
+  names them; it is subordinate to the target change, as `spec` §10.6 introduces it — a recompile
+  for an unchanged target says nothing even when the lockfile records entries. Nothing is
+  synthesised, so the line stays quiet until the constraint-catalog ingest gives it something to
+  say. A lockfile written by a newer Cairn is reported in its own words rather than as a corrupt
+  one: replacing it loses something, and it is not malformed. A lockfile that does not parse, or that declares a schema
   this build does not read, is reported and replaced instead of discarded in silence. Both are
   warnings and neither changes the exit code, and the read-back covers the default
   `<source>.lock` path, not only an explicit `--lock`.

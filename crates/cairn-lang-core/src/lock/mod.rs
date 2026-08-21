@@ -92,12 +92,15 @@ impl Lockfile {
     /// several files together fail out of the encode without having touched
     /// the filesystem at all.
     ///
-    /// The body always ends with exactly one newline. `serde_yml` closes an
-    /// empty flow sequence without a break, and the last field is one
-    /// (`member_version_sensitivity: []` for every source that declares no
-    /// sensitivity entries), so left alone the file ends mid-line — which
-    /// makes `git diff` report `\ No newline at end of file` on every
-    /// change and an appended byte corrupt the document.
+    /// The body always ends with exactly one newline.
+    ///
+    /// `serde_yml` closes an empty flow sequence without a break, so a
+    /// document whose last-written field is one — the common case, where
+    /// `member_version_sensitivity`, `placements` and `walkways` are all
+    /// empty and the latter two are skipped — ends mid-line. That makes
+    /// `git diff` report `\ No newline at end of file` on every change and
+    /// an appended byte corrupt the document. The contract here is
+    /// unconditional; the shape that used to break it is not.
     ///
     /// # Errors
     ///
@@ -123,23 +126,31 @@ impl Lockfile {
     /// Decode the YAML body [`Self::to_yaml`] would have written.
     ///
     /// The mirror of [`Self::to_yaml`], and where the schema version is
-    /// enforced — so a caller that already holds the bytes cannot reach a
-    /// `Lockfile` without passing the same gate as one reading a file.
+    /// enforced — so a caller that already holds the bytes has the same
+    /// gate available as one reading a file. It is not a chokepoint:
+    /// `Lockfile` is public and derives `Deserialize`, so
+    /// `serde_yml::from_str` reaches one without the version check. This is
+    /// the entry point the compiler uses.
     ///
     /// # Errors
     ///
-    /// Returns [`LockError::Yaml`] when the document's shape does not match
-    /// [`Lockfile`] — which includes a key the schema does not declare, at
-    /// any depth — and [`LockError::UnsupportedSchemaVersion`] when it
-    /// declares a revision above [`LOCK_SCHEMA_VERSION`].
+    /// Returns [`LockError::UnsupportedSchemaVersion`] when the document
+    /// declares a revision above [`LOCK_SCHEMA_VERSION`], and
+    /// [`LockError::Yaml`] when its shape does not match [`Lockfile`] —
+    /// which includes a key the schema does not declare, at any depth.
+    ///
+    /// The version is read first and on its own. Deciding it after the
+    /// full parse would put it behind `deny_unknown_fields`, so any later
+    /// format that adds a key would be reported as malformed rather than
+    /// as newer — and the leading field would not mean what its doc says.
     pub fn from_yaml(body: &str) -> Result<Self, LockError> {
-        let lf: Lockfile = serde_yml::from_str(body)?;
-        if lf.lock_schema_version > LOCK_SCHEMA_VERSION {
+        let found = schema::declared_schema_version(body)?;
+        if found > LOCK_SCHEMA_VERSION {
             return Err(LockError::UnsupportedSchemaVersion {
-                found: lf.lock_schema_version,
+                found,
                 supported: LOCK_SCHEMA_VERSION,
             });
         }
-        Ok(lf)
+        Ok(serde_yml::from_str(body)?)
     }
 }

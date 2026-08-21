@@ -509,10 +509,14 @@ fn compile_is_byte_reproducible() {
 
     let lock_bytes_a = fs::read(&lock_a).expect("read a");
     let lock_bytes_b = fs::read(&lock_b).expect("read b");
+    // Raw bytes, like the `.nbt` comparison above: two differently
+    // malformed sequences both collapsing to U+FFFD would pass a lossy one.
     assert_eq!(
+        lock_bytes_a,
+        lock_bytes_b,
+        "regenerating the lockfile is not a no-op:\n{}\n{}",
         String::from_utf8_lossy(&lock_bytes_a),
         String::from_utf8_lossy(&lock_bytes_b),
-        "regenerating the lockfile is not a no-op",
     );
 
     // Read back through the decoder too, so the comparison above cannot

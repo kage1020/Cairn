@@ -211,7 +211,7 @@ member_version_sensitivity: [ { id: yard_water, reason: "cauldron split at 1.17"
 
 ```text
 $ cairn compile build.crn --target 1.21.4 --lock build.cairn.lock
-W_PREVIOUSLY_VERIFIED_TARGET: verified for 1.20.4/DataVersion 3700, now 1.21.4/3955.
+W_PREVIOUSLY_VERIFIED_TARGET: verified for 1.20.4/DataVersion 3700, now 1.21.4/4189.
 W_SEMANTIC_SENSITIVITY: 2 members may resolve differently: yard_water, fence
 ```
 

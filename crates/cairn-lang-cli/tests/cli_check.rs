@@ -70,6 +70,13 @@ fn cli_1_clean_example_exits_zero_and_says_nothing_on_either_stream() {
         stdout.trim().is_empty(),
         "clean example should produce no stdout, got: {stdout}",
     );
+    // The load-bearing half now that diagnostics live on stderr: a clean
+    // input has nothing to report anywhere.
+    let stderr = String::from_utf8(out.stderr).expect("utf-8");
+    assert!(
+        stderr.trim().is_empty(),
+        "clean example should produce no stderr, got: {stderr}",
+    );
 }
 
 #[test]

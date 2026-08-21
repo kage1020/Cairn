@@ -38,7 +38,7 @@ use thiserror::Error;
 
 use crate::bedrock_state::{BedrockStateError, translate_states};
 use crate::data_version::BedrockTarget;
-use crate::java_structure::{first_index_outside_palette, is_concrete_id};
+use crate::java_structure::is_concrete_id;
 
 /// A palette entry whose intent was degraded to fit Bedrock — surfaced by the
 /// caller as `W_INTENT_DEGRADED`. The serialiser has no source span (a
@@ -114,6 +114,13 @@ pub fn build_mcstructure_tag(
     ba: &BlockArray,
     target: &BedrockTarget,
 ) -> Result<(Compound, Vec<ParityNote>), BedrockStructureError> {
+    // Ahead of the translation loop, as on the Java side: the check does
+    // not depend on anything the loop produces, and a rejected array should
+    // cost nothing beyond the walk.
+    if let Some((index, len)) = ba.first_index_outside_palette() {
+        return Err(BedrockStructureError::PaletteIndexOutOfRange { index, len });
+    }
+
     // Translate every palette entry up front: a mapping failure (abstract
     // token, unmapped stateful block) aborts the whole build before any tree
     // is assembled, mirroring the Java backend's fail-loud contract.
@@ -133,10 +140,6 @@ pub fn build_mcstructure_tag(
             });
         }
         palette_states.push(translated.states);
-    }
-
-    if let Some((index, len)) = first_index_outside_palette(ba) {
-        return Err(BedrockStructureError::PaletteIndexOutOfRange { index, len });
     }
 
     let size_x = dim_to_i32(ba.dims.x, "x")?;
@@ -201,17 +204,13 @@ fn block_indices(ba: &BlockArray) -> List {
         }
     }
     let layer1: Vec<Tag> = vec![Tag::Int(-1); volume];
+    // Through the constructor rather than a struct literal: an empty layer
+    // has to declare `TAG_End`, and the literal spelled `3` unconditionally.
     List {
         element_type_id: 9,
         items: vec![
-            Tag::List(List {
-                element_type_id: 3,
-                items: layer0,
-            }),
-            Tag::List(List {
-                element_type_id: 3,
-                items: layer1,
-            }),
+            Tag::List(List::of_tags(3, layer0)),
+            Tag::List(List::of_tags(3, layer1)),
         ],
     }
 }

@@ -21,8 +21,34 @@ use crate::ids::{PlaceId, SiteName, WalkwayEndpoint};
 pub const LOCK_SCHEMA_VERSION: u32 = 1;
 
 /// Default for a document written before the version was recorded.
+///
+/// The literal `1`, not [`LOCK_SCHEMA_VERSION`]: the meaning being pinned
+/// is "the shape that shipped before the field existed", which stays
+/// version 1 forever. Tracking the constant would silently re-read every
+/// v1 document as v2 the day the constant moves.
 fn assume_unversioned_schema() -> u32 {
-    LOCK_SCHEMA_VERSION
+    1
+}
+
+/// Just the leading field, read without the strict field check.
+///
+/// `deny_unknown_fields` fails *during* deserialisation, so a realistic
+/// later format — one that adds a key — would be rejected as malformed
+/// YAML before its version was ever compared, and its author told the
+/// document was broken when the truth is that this build is too old.
+/// Reading the version on its own is what makes [`Lockfile`]'s first
+/// field mean what its doc says: a reader decides whether it understands
+/// the rest before parsing the rest.
+#[derive(Deserialize)]
+struct SchemaVersionProbe {
+    #[serde(default = "assume_unversioned_schema")]
+    lock_schema_version: u32,
+}
+
+/// The schema revision `body` declares, whatever else it contains.
+pub(super) fn declared_schema_version(body: &str) -> Result<u32, serde_yml::Error> {
+    let probe: SchemaVersionProbe = serde_yml::from_str(body)?;
+    Ok(probe.lock_schema_version)
 }
 
 /// The whole lockfile, as written to `build.cairn.lock`.

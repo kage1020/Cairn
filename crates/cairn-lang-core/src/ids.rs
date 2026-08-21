@@ -441,7 +441,13 @@ pub struct WalkwayScopeKeyParts<'a> {
 /// span-less wire DTO so [`crate::block_array::Walkway`] and
 /// [`crate::lock::LockWalkway`] can both spell the endpoint with the
 /// same type instead of one re-encoding the other as `"PLACE.PORT"`.
+/// Unknown keys are refused here for the same reason as in
+/// [`crate::lock`]'s own structs: this type is a lockfile container two
+/// levels down (`walkways[].from` / `.to`), serde does not cascade the
+/// attribute, and a claim about what was built must not carry a payload
+/// the reader ignores.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct WalkwayEndpoint {
     /// `place id=` value.
     pub place: PlaceId,

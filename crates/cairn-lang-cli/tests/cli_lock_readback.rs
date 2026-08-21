@@ -35,6 +35,7 @@ fn cottage_in_tempdir() -> (TempDir, PathBuf) {
 
 struct Run {
     code: Option<i32>,
+    stdout: String,
     stderr: String,
 }
 
@@ -59,6 +60,7 @@ fn compile(src: &Path, out_dir: &Path, edition: &str, target: &str, lock: Option
         .expect("run cairn compile");
     Run {
         code: out.status.code(),
+        stdout: String::from_utf8(out.stdout).expect("stdout utf-8"),
         stderr: String::from_utf8(out.stderr).expect("stderr utf-8"),
     }
 }
@@ -95,6 +97,13 @@ fn a_recompile_for_another_version_prints_the_shape_the_spec_prints() {
         ),
         "stderr does not carry the spec's line: {}",
         second.stderr,
+    );
+    // Held to the same rule this PR imposes on `check`: a finding is a
+    // report, and stdout carries the artifact lines a pipeline consumes.
+    assert!(
+        !second.stdout.contains("W_PREVIOUSLY_VERIFIED_TARGET"),
+        "the warning must not reach stdout: {}",
+        second.stdout,
     );
 }
 
@@ -200,6 +209,40 @@ fn the_sensitivity_list_reported_is_the_one_the_lockfile_recorded() {
         "stderr does not carry the recorded members: {}",
         second.stderr,
     );
+    assert!(
+        !second.stdout.contains("W_SEMANTIC_SENSITIVITY"),
+        "the warning must not reach stdout: {}",
+        second.stdout,
+    );
+}
+
+#[test]
+fn one_recorded_member_reads_as_one_member() {
+    // Every other line this command prints is pinned verbatim; this one
+    // would have said `1 members`.
+    let (_tmp_src, src) = cottage_in_tempdir();
+    let out_dir = TempDir::new().expect("out");
+    let lock = out_dir.path().join("cottage.lock");
+
+    compile(&src, out_dir.path(), "java", "1.20.4", Some(&lock));
+    let recorded = fs::read_to_string(&lock).expect("read lock");
+    let doctored = recorded.replace(
+        "member_version_sensitivity: []\n",
+        "member_version_sensitivity:\n\
+         - id: yard_water\n  \
+           reason: cauldron split at 1.17\n",
+    );
+    assert_ne!(doctored, recorded, "the fixture did not add any entries");
+    fs::write(&lock, &doctored).expect("write lock");
+
+    let second = compile(&src, out_dir.path(), "java", "1.21.4", Some(&lock));
+    assert!(
+        second
+            .stderr
+            .contains("W_SEMANTIC_SENSITIVITY: 1 member may resolve differently: yard_water"),
+        "stderr: {}",
+        second.stderr,
+    );
 }
 
 #[test]
@@ -266,15 +309,29 @@ fn a_lockfile_from_a_newer_schema_is_reported_rather_than_read() {
 
     let run = compile(&src, out_dir.path(), "java", "1.21.4", Some(&lock));
     assert_eq!(run.code, Some(0), "stderr={}", run.stderr);
+    // Told apart from a corrupt file in words, not only in kind: a document
+    // written by a newer Cairn is not malformed, and replacing it does lose
+    // something.
     assert!(
-        run.stderr.contains("existing lockfile") && run.stderr.contains("99"),
-        "stderr should name the schema it refused: {}",
+        run.stderr
+            .contains("the existing lockfile is schema version 99 and this build reads 1"),
+        "stderr should name the schema it refused, in its own words: {}",
+        run.stderr,
+    );
+    assert!(
+        !run.stderr.contains("could not be read"),
+        "a newer document is not a corrupt one: {}",
         run.stderr,
     );
     assert!(
         !run.stderr.contains("W_PREVIOUSLY_VERIFIED_TARGET"),
         "a document that was not read cannot be compared: {}",
         run.stderr,
+    );
+    let replaced = fs::read_to_string(&lock).expect("read lock");
+    assert!(
+        replaced.starts_with("lock_schema_version: 1\n"),
+        "the lockfile should have been replaced with this build's schema: {replaced}",
     );
 }
 

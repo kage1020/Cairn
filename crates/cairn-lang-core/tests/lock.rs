@@ -3,8 +3,9 @@
 use cairn_lang_core::block_array::BlockArrayIr;
 use cairn_lang_core::block_array::{BlockArray, BlockState, Dims, Palette, PaletteIndex};
 use cairn_lang_core::lock::{
-    HashHex, HashParseError, LOCK_SCHEMA_VERSION, LockEdition, LockError, LockInputs, LockTarget,
-    LockWalkway, Lockfile, MemberSensitivity, hash_resolved_ir, hash_source,
+    HashHex, HashParseError, LOCK_SCHEMA_VERSION, LockEdition, LockError, LockInputs,
+    LockPlacement, LockTarget, LockWalkway, Lockfile, MemberSensitivity, hash_resolved_ir,
+    hash_source,
 };
 use cairn_lang_core::{PlaceId, PortId, SiteName, WalkwayEndpoint};
 use indexmap::IndexMap;
@@ -348,24 +349,81 @@ fn a_schema_from_the_future_is_refused_by_name() {
     );
 }
 
+/// A lockfile with every container populated, so a test can tamper with
+/// each one. `sample_lockfile` leaves `placements` and `walkways` empty,
+/// which is why the endpoint containers never appeared in the YAML to be
+/// tampered with.
+fn lockfile_with_every_container() -> Lockfile {
+    Lockfile {
+        placements: vec![LockPlacement {
+            site: SiteName::new("hamlet").expect("site"),
+            id: PlaceId::new("home1").expect("place"),
+            def: "cottage".to_owned(),
+            theme: "medieval".to_owned(),
+            origin: [0, 0, 0],
+            dims: [9, 5, 7],
+        }],
+        ..sample_lockfile_with_walkways()
+    }
+}
+
+/// Insert `attacker_controlled: yes` into the mapping at `path`, where
+/// each step is a key and a numeric step indexes a sequence.
+fn tamper_at(body: &str, path: &[&str]) -> String {
+    let mut doc: serde_yml::Value = serde_yml::from_str(body).expect("fixture parses");
+    let mut cursor = &mut doc;
+    for step in path {
+        cursor = match step.parse::<usize>() {
+            Ok(index) => cursor
+                .as_sequence_mut()
+                .and_then(|seq| seq.get_mut(index))
+                .unwrap_or_else(|| panic!("no sequence entry at {step}")),
+            Err(_) => cursor
+                .as_mapping_mut()
+                .and_then(|map| map.get_mut(step))
+                .unwrap_or_else(|| panic!("no mapping key {step}")),
+        };
+    }
+    let mapping = cursor.as_mapping_mut().expect("target is a mapping");
+    mapping.insert(
+        "attacker_controlled".to_owned(),
+        serde_yml::Value::String("yes".to_owned()),
+    );
+    serde_yml::to_string(&doc).expect("re-encode")
+}
+
 #[test]
 fn a_key_the_schema_does_not_declare_is_refused_wherever_it_sits() {
     // A lockfile is a claim about what was built; a document carrying keys
     // the reader ignores is a document whose meaning depends on who is
     // reading. Tampering is not confined to the top level, so neither is
-    // the check.
-    let base = sample_lockfile().to_yaml().expect("encode");
+    // the check — and serde does not cascade `deny_unknown_fields`, so
+    // every container has to be listed here or the claim is only true of
+    // the ones that are. `WalkwayEndpoint` is the reason this is a table:
+    // it is the one lockfile container declared outside `lock::schema`,
+    // and it sits two levels down.
+    let base = lockfile_with_every_container()
+        .to_yaml()
+        .expect("encode fixture");
     Lockfile::from_yaml(&base).expect("the untampered document still reads");
 
-    let top_level = format!("{base}attacker_controlled: yes\n");
-    let nested = base.replace("  mc_version:", "  attacker_controlled: yes\n  mc_version:");
-    assert_ne!(
-        nested, base,
-        "the nested fixture did not tamper with anything"
-    );
-    for (label, body) in [("top level", top_level), ("inside target", nested)] {
+    let containers: &[(&str, &[&str])] = &[
+        ("Lockfile", &[]),
+        ("LockTarget", &["target"]),
+        ("LockInputs", &["inputs"]),
+        ("MemberSensitivity", &["member_version_sensitivity", "0"]),
+        ("LockPlacement", &["placements", "0"]),
+        ("LockWalkway", &["walkways", "0"]),
+        ("WalkwayEndpoint", &["walkways", "0", "from"]),
+    ];
+    for (label, path) in containers {
+        let body = tamper_at(&base, path);
+        assert_ne!(
+            body, base,
+            "{label}: the fixture did not tamper with anything"
+        );
         let Err(err) = Lockfile::from_yaml(&body) else {
-            panic!("an unknown key at the {label} was accepted");
+            panic!("an unknown key inside {label} was accepted");
         };
         let message = err.to_string();
         assert!(
@@ -373,6 +431,26 @@ fn a_key_the_schema_does_not_declare_is_refused_wherever_it_sits() {
             "{label}: the error should name the key it refused: {message}",
         );
     }
+}
+
+#[test]
+fn a_newer_schema_is_recognised_even_when_it_brings_new_keys() {
+    // The realistic shape of a later format: a higher version *and* a key
+    // this build has never heard of. Read after the strict parse, the
+    // unknown key would be reported first and the reader told its document
+    // is malformed — when the truth is that this build is too old. That is
+    // the whole reason the version leads the document.
+    let base = sample_lockfile().to_yaml().expect("encode");
+    let body = base.replace(
+        &format!("lock_schema_version: {LOCK_SCHEMA_VERSION}"),
+        "lock_schema_version: 99\nfuture_only_key: 7",
+    );
+    assert_ne!(body, base, "the fixture did not change anything");
+    let err = Lockfile::from_yaml(&body).expect_err("a newer schema");
+    assert!(
+        matches!(err, LockError::UnsupportedSchemaVersion { found: 99, .. }),
+        "a newer schema must be reported as newer, not as malformed: {err}",
+    );
 }
 
 #[test]

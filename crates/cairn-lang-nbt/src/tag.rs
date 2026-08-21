@@ -120,10 +120,10 @@ impl List {
     /// `size` and `pos` triples in Java vanilla structure NBT.
     ///
     /// An empty input declares `TAG_End`, not `TAG_Int`: the id describes
-    /// the items on the wire, and there are none. See [`List::of_tagged`].
+    /// the items on the wire, and there are none.
     #[must_use]
     pub fn of_ints(values: impl IntoIterator<Item = i32>) -> Self {
-        Self::of_tagged(3, values.into_iter().map(Tag::Int).collect())
+        Self::of_tags(3, values.into_iter().map(Tag::Int).collect())
     }
 
     /// Build a `List<TAG_Compound>` from a vector of [`Compound`]s. Used
@@ -133,17 +133,22 @@ impl List {
     /// An empty input declares `TAG_End`, as in [`List::of_ints`].
     #[must_use]
     pub fn of_compounds(items: Vec<Compound>) -> Self {
-        Self::of_tagged(10, items.into_iter().map(Tag::Compound).collect())
+        Self::of_tags(10, items.into_iter().map(Tag::Compound).collect())
     }
 
-    /// The one place a non-empty element id is chosen, so an empty list
-    /// cannot acquire one by which constructor was called.
+    /// Choose the element id from the items, so an empty list cannot
+    /// acquire one by which constructor was called.
     ///
     /// `element_type_id` is a wire field a reader is entitled to trust, and
     /// the spec fixes it at `0` when the list is empty. A constructor knows
     /// what the items *would* have been, which is not the same as what the
     /// list declares.
-    fn of_tagged(element_type_id: u8, items: Vec<Tag>) -> Self {
+    ///
+    /// This is a convenience, not a funnel: `List`'s fields are public, so
+    /// a struct literal reaches the same shape. The invariant is enforced
+    /// in the writer, which is the point every byte passes through.
+    #[must_use]
+    pub fn of_tags(element_type_id: u8, items: Vec<Tag>) -> Self {
         if items.is_empty() {
             return Self::empty();
         }
