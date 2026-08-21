@@ -161,6 +161,16 @@ and is a separate axis from the Minecraft target version.
 
 ### Fixed
 
+- *(core)* A theme selector whose attribute holds a list selects the members that carry that list.
+  `ast::Value` compared its source span as well as its kind, and `ValueKind::List` holds `Value`s —
+  so the derived equality recursed through that comparison and two lists spelled identically on two
+  lines were never equal at any depth. A list-valued selector attribute therefore matched no member
+  at all, and the author saw `E_THEME_SELECTOR_UNMATCHED`, which reads as "your filter is too
+  narrow" rather than "this attribute type cannot match anything". Two byte-identical list-valued
+  rows are now also recognised as a duplicate pair by `E_DUPLICATE_SELECTOR`, which inherited the
+  same comparison and under-reported. Equality on `Value` is now its kind's, which is what
+  `#[serde(transparent)]` already said the value was; the types that contain one each carry their
+  own span, so their equality is unchanged.
 - *(lsp)* A message arriving between `shutdown` and `exit` no longer kills the server. Anything
   but `exit` used to be a protocol error that ended the process with code 1 before the `exit`
   behind it was read, so an editor reported the language server as crashed and restarted it —
