@@ -337,6 +337,11 @@ impl Router {
         coord.x < self.width && coord.y < self.height && coord.z < self.depth
     }
 
+    /// Whether dust may be drawn on `coord`.
+    fn free(&self, coord: CellCoord) -> bool {
+        self.inside(coord) && !self.blocked.contains(&coord)
+    }
+
     /// The coord one [`STEPS`] step away, or `None` when the step
     /// leaves the reservation (including off the `0` edge, which the
     /// unsigned coords cannot represent).
@@ -353,6 +358,68 @@ impl Router {
     /// The path includes both ends; its first coord is the seed it
     /// left from.
     ///
+    /// Two tiers, one answer. [`Self::straight_run`] settles the case
+    /// where the closest pair has nothing between them; only when
+    /// something does is [`Self::search`] asked to find the way round.
+    ///
+    /// `None` when no target can be reached: every route out of the
+    /// tree is walled in by blocks or by the edge of the reservation.
+    fn reach(&self, seeds: &[CellCoord], targets: &[CellCoord]) -> Option<(usize, Vec<CellCoord>)> {
+        self.straight_run(seeds, targets)
+            .or_else(|| self.search(seeds, targets))
+    }
+
+    /// The closest seed/target pair, when the straight line between
+    /// them is clear.
+    ///
+    /// No path is shorter than the straight line between its ends, so a
+    /// clear straight line between the *closest* pair is a shortest
+    /// path to a nearest target and [`Self::search`] cannot better it.
+    /// Answering here is what keeps an unobstructed run linear in its
+    /// own length: a frontier search over open space still has to
+    /// remember every coord it walked past, and a reservation is as
+    /// wide as the `size=WxH` it was cut out of.
+    ///
+    /// Only the closest pair. A clear line to a pair that is *not* the
+    /// closest says nothing — the closer pair might have a way round
+    /// that is shorter still — so a blocked line hands the question on
+    /// rather than looking for the next clear one.
+    fn straight_run(
+        &self,
+        seeds: &[CellCoord],
+        targets: &[CellCoord],
+    ) -> Option<(usize, Vec<CellCoord>)> {
+        let (index, seed) = seeds
+            .iter()
+            .flat_map(|seed| {
+                targets
+                    .iter()
+                    .enumerate()
+                    .map(move |(index, target)| (index, *seed, *target))
+            })
+            .min_by_key(|(_, seed, target)| {
+                (
+                    manhattan(*seed, *target),
+                    (target.x, target.z, target.y),
+                    (seed.x, seed.z, seed.y),
+                )
+            })
+            .map(|(index, seed, _)| (index, seed))?;
+        let target = targets[index];
+        let mut path = vec![seed];
+        let mut current = seed;
+        while current != target {
+            current = step_towards(current, target);
+            if current != target && !self.free(current) {
+                return None;
+            }
+            path.push(current);
+        }
+        Some((index, path))
+    }
+
+    /// The cheapest block-free path when something is in the way.
+    ///
     /// A* over the reservation with the smallest remaining Manhattan
     /// distance as the heuristic — admissible because no clear path is
     /// shorter than the straight line, which is what makes the target
@@ -363,10 +430,11 @@ impl Router {
     /// so no sink is ever expanded past. That is what makes every sink
     /// a leaf of the tree — the property a comparator has and a coil of
     /// dust does not.
-    ///
-    /// `None` when no target can be reached: every route out of the
-    /// tree is walled in by blocks or by the edge of the reservation.
-    fn reach(&self, seeds: &[CellCoord], targets: &[CellCoord]) -> Option<(usize, Vec<CellCoord>)> {
+    fn search(
+        &self,
+        seeds: &[CellCoord],
+        targets: &[CellCoord],
+    ) -> Option<(usize, Vec<CellCoord>)> {
         let heuristic = |coord: CellCoord| -> u32 {
             targets
                 .iter()
@@ -463,6 +531,33 @@ impl Router {
         }
         tree
     }
+}
+
+/// One step from `from` towards `to`, along x, then z, then y — the
+/// axis order [`STEPS`] gives the search, spelled once for the run that
+/// needs no search.
+fn step_towards(from: CellCoord, to: CellCoord) -> CellCoord {
+    let mut next = from;
+    if from.x != to.x {
+        next.x = if from.x < to.x {
+            from.x + 1
+        } else {
+            from.x - 1
+        };
+    } else if from.z != to.z {
+        next.z = if from.z < to.z {
+            from.z + 1
+        } else {
+            from.z - 1
+        };
+    } else if from.y != to.y {
+        next.y = if from.y < to.y {
+            from.y + 1
+        } else {
+            from.y - 1
+        };
+    }
+    CellCoord::routed(next.x, next.y, next.z)
 }
 
 /// The coords from a search root to `coord`, both ends included.
@@ -1231,6 +1326,51 @@ mod tests {
                     for pair in route.windows(2) {
                         prop_assert_eq!(manhattan(pair[0], pair[1]), 1);
                     }
+                }
+            }
+
+            /// The shortcut and the search answer the same question.
+            ///
+            /// `straight_run` is allowed to skip `search` only because
+            /// a clear line between the closest pair is already a
+            /// shortest path. If it ever returned a longer one — a pair
+            /// that is not the closest, a line whose blocks it did not
+            /// check — the router would quietly stop being shortest and
+            /// every buffer coord downstream would move with it.
+            #[test]
+            fn the_shortcut_never_beats_or_loses_to_the_search(
+                (void, source, sinks, loose) in layout()
+            ) {
+                let (router, _) = routed(void, source, &sinks, &loose);
+                let mut seeds = vec![source];
+                let mut targets: Vec<CellCoord> = Vec::new();
+                for sink in &sinks {
+                    if *sink != source && !targets.contains(sink) {
+                        targets.push(*sink);
+                    }
+                }
+                prop_assume!(!targets.is_empty());
+                // A few rounds in, so the shortcut is asked about a
+                // grown tree and not only about a lone source.
+                for _ in 0..3 {
+                    let Some((index, run)) = router.straight_run(&seeds, &targets) else {
+                        break;
+                    };
+                    let searched = router
+                        .search(&seeds, &targets)
+                        .expect("the shortcut found a path, so one exists");
+                    prop_assert_eq!(
+                        run.len(),
+                        searched.1.len(),
+                        "shortcut {:?} against search {:?}",
+                        run,
+                        searched.1,
+                    );
+                    targets.remove(index);
+                    if targets.is_empty() {
+                        break;
+                    }
+                    seeds.extend(run[1..run.len() - 1].iter().copied());
                 }
             }
 
