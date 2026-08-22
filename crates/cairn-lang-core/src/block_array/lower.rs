@@ -3865,8 +3865,14 @@ fn fill_window(
     // glass in open air.
     if !ctx.wall_column.contains_rows(y_start, sh) {
         let reason = if ctx.wall_column.is_empty() {
+            // The column holds the rows the walls will *paint*, so an
+            // empty one means "no walls member puts a block anywhere" —
+            // a `mat_slot=` that does not resolve empties it as surely
+            // as a missing `height=` does, and naming only the height
+            // sends an author who wrote one to the wrong line. Same
+            // reason `carve_door`'s gate says the same thing.
             format!(
-                "window at y={y_start} size={sw}x{sh} has no wall to cut into (this struct declares no `walls` with a positive `height=`)",
+                "window at y={y_start} size={sw}x{sh} has no wall to cut into (this struct declares no `walls` that paints — one with a positive `height=` and a `mat_slot=` that resolves)",
             )
         } else {
             let last = y_start.saturating_add(sh).saturating_sub(1);

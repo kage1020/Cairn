@@ -206,7 +206,7 @@ fn a_window_on_a_struct_with_no_walls_says_there_is_no_wall() {
     assert_eq!(
         defers(&out),
         [
-            "window at y=0 size=1x1 has no wall to cut into (this struct declares no `walls` with a positive `height=`)"
+            "window at y=0 size=1x1 has no wall to cut into (this struct declares no `walls` that paints — one with a positive `height=` and a `mat_slot=` that resolves)"
         ],
     );
     assert!(!contains_id(only_structure(&out), "minecraft:glass_pane"));
@@ -261,7 +261,7 @@ fn a_height_on_a_member_that_is_not_a_wall_builds_no_wall() {
     assert_eq!(
         defers(&out),
         [
-            "window at y=1 size=1x2 has no wall to cut into (this struct declares no `walls` with a positive `height=`)"
+            "window at y=1 size=1x2 has no wall to cut into (this struct declares no `walls` that paints — one with a positive `height=` and a `mat_slot=` that resolves)"
         ],
     );
     assert!(!contains_id(only_structure(&out), "minecraft:glass_pane"));
