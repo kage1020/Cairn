@@ -161,6 +161,38 @@ and is a separate axis from the Minecraft target version.
 
 ### Fixed
 
+- *(core)* The volume a struct lowers into is sized for the members that will paint. Three ways a
+  member could shape the array and put no block in it. A `roof` with no recognisable `kind=` gave
+  its `overhang=` to the footprint and nothing to the height, because one of the two roof walks
+  filtered through the kind table and the other did not — a `5x5` struct with `overhang=3` shipped
+  an `11x4x11` array with the walls moved inward and a ring of air around them, and not one roof
+  voxel in it. `walls` whose `mat_slot=` does not resolve raised `Dims.y` by their full height, so
+  a struct with no theme bound shipped a `3x7x3` array whose palette is air and nothing else. Both
+  walks over the wall list move together: `spec/compilation.md` §4.7 makes the volume and the
+  window carve two readings of one list, and their agreement is what keeps a member from painting
+  past the end of the array it was handed. §4.7's "does not generalise" paragraph is gone with the
+  counterexamples that put it there, replaced by the rule stated per term.
+
+  A `window` or `door` in walls that paint nothing is now reported rather than cutting a hole in
+  air, and a `roof` still draws over them — its material falls back where a wall's does not — now
+  seated on the ground plane instead of on walls that were never there.
+
+  `Dims` reaches the artifact: a `.nbt` is that many blocks in each axis and the lockfile records
+  the figure. Sources on the warning paths — a themeless struct, a `walls` with no `mat_slot=` —
+  therefore ship a smaller structure than they did, with no compile error to mark the change,
+  inside `>=2026.8.2, <2027.0.0` (Cargo reads the CalVer `2026` as the major). Unlike a `synth`
+  stage there is no experimental gate in front of `lower` or `compile`. It stays under Fixed
+  because the extent that goes is extent nothing ever painted: the old array held a building
+  smaller than itself and said nothing about the difference.
+
+- *(core)* `W_IGNORED_ARGUMENT`: a `key=` the lowering pass could not read, on a member it drew
+  anyway. `roof kind=gable overhang=nope` reported `W_DEFERRED_MEMBER`, which says the member did
+  not lower — and the roof was in the build, flush with the wall line, exactly as if the
+  `overhang=` had not been written. The new code says what happened: the value was ignored, the
+  member was drawn. Severity is unchanged from the code it replaces, so no exit code moves;
+  `spec/lint.md` §11.3 would read a dropped value as an error, and promoting it is the same call
+  an unknown argument key is waiting on.
+
 - *(redstone)* One buffer repeater per strand of dust, and one charge for it. A Steiner tree's
   sinks share their prefix, so two segments of one net compute the same repeater candidate: two
   ports of a cell reading one signal, two cells hanging off the same 15-block point, a cell and an

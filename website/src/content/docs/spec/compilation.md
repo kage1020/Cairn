@@ -206,11 +206,15 @@ Dims.z = size.H + 2 × overhang
 Dims.y = 1 + wall_top + roof_extra
 ```
 
-`overhang` is the largest `overhang=` on any roof, `wall_top` the largest
-`N + height` over the walls (`N` being the enclosing level's, `0` in the
+Each term counts the members that will paint, and only those.
+`overhang` is the largest `overhang=` on any roof with a `kind=` the
+compiler can draw, `wall_top` the largest `N + height` over the walls
+whose `mat_slot=` resolves (`N` being the enclosing level's, `0` in the
 body), and `roof_extra` the tallest per-kind contribution from §4.3–§4.6.
-Members inside a `level` count in all three: a struct whose only walls sit
-under `level y=5` is as tall as one that writes them directly.
+The `1` is the base plane, which every struct has and no member
+contributes. Members inside a `level` count in all three: a struct whose
+only walls sit under `level y=5` is as tall as one that writes them
+directly.
 
 Not every role has a lowering at a non-zero offset. `walls`, `door`,
 `window`, `stair`, and `pressure_plate` read `N` as the base their own
@@ -226,12 +230,19 @@ too — every member the pass paints is one the volume was sized to hold.
 Those are two readings of a single list, which is what keeps a member
 from painting past the end of the array it was handed.
 
-The rule is about `level` grouping and does not generalise to every
-member that lowers to nothing. A `roof` with no `kind=` still widens the
-footprint by its `overhang=`, and `walls` whose material does not resolve
-still raise `Dims.y`; both fire `W_DEFERRED_MEMBER` and paint no voxels.
-The volume is derived before those failures are known, so today the extra
-extent is air.
+The rule is about the list rather than about `level`, so it holds
+wherever a member drops out. A `roof` with no `kind=` draws nothing and
+does not widen the footprint; `walls` whose material does not resolve
+paint nothing and do not raise `Dims.y`. A themeless struct is the whole
+of the second case: every `mat_slot=` lowers to air, so nothing bound to
+one shapes the volume either.
+
+The failures have to be known before the volume is derived for this to
+hold, which is why the material question is asked where the extent is
+decided and again where the block is placed — one function, so the two
+cannot answer differently. When they could not, the extra extent was air:
+a ring of it around a building whose walls had moved inward, and an array
+as tall as walls that were never painted.
 
 ## 4.8 Within-phase conflicts and the palette
 
