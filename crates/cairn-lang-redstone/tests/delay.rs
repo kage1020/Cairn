@@ -413,7 +413,7 @@ struct band size=5x5
     );
 }
 
-/// `AC5c` — output-pad Manhattan segment of exactly
+/// `AC5c` — output-pad routed segment of exactly
 /// `MAX_ATTENUATION_SEGMENT` blocks passes cleanly; one more block
 /// fails. Pins the `>` vs `>=` boundary in `delay_scope`'s sanity
 /// check so a future rewrite cannot silently slide the cap by one.

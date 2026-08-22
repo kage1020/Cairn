@@ -35,25 +35,21 @@
 //! A segment is the length of the *routed* path from the net's
 //! source to that sink —
 //! `route_to`, not the
-//! straight-line Manhattan distance. A minimum spanning tree drops the
-//! direct source→sink edge whenever two others are cheaper, and the
-//! signal then detours through the terminal between them. Counting
+//! straight-line Manhattan distance. The two are different numbers
+//! whenever the wire has to go round something: the reservation holds
+//! cell bodies and I/O pads, dust cannot be drawn inside one, and a
+//! sink reached through the trunk laid for a nearer sink travels
+//! further than the line between it and its driver. Counting
 //! against the route is what lets stage 4 put every buffer this stage
 //! paid for onto the dust it refreshes.
 //!
-//! The change is not confined to layouts v1 cannot produce. Cells sit
-//! in one monotone row, but the actuator pads join their driver's net
-//! as terminals too, and a pad on the far edge pulls the tree out of
-//! that row: a scope whose sensor drives both the cell row and an
-//! output pad measures `width + 2` to the pad where the straight line
-//! is `width`. What that does *not* reach is a cell's buffer count —
-//! an exhaustive walk of v1's placement shapes (cells at `(i,0,0)`,
-//! pads on the edge columns, every input / output count up to three
-//! and every output subset) finds no layout where a cell's routed
-//! segment crosses a [`DUST_ATTENUATION_LIMIT`] boundary its Manhattan
-//! distance does not. The reachable difference is the sanity cap on
-//! output segments, which `attenuation_cap_measures_the_routed_output
-//! _segment` pins.
+//! The difference is not confined to layouts v1 cannot produce. The
+//! sensor pads stack in one column at the left edge, so the second
+//! sensor into the cell at the origin comes round the first pad rather
+//! than through it, and a pad on the far edge pulls a segment out of
+//! the cell row. `attenuation_cap_measures_the_routed_output_segment`
+//! pins a segment the cap refuses on its routed length and would let
+//! through on its straight line.
 //!
 //! Buffer repeaters are **counted, not materialised** here. The
 //! routing pass discarded its per-scope occupancy set before yielding
@@ -707,7 +703,7 @@ mod tests {
     #[test]
     fn cell_driver_attenuation_primary_names_cell_and_port() {
         // Two cells wide-spread inside a `size=300x3` reservation so
-        // the cell[1] driver from cell[0] spans a Manhattan segment
+        // the cell[1] driver from cell[0] spans a routed segment
         // over `MAX_ATTENUATION_SEGMENT`. Only reachable by hand-built
         // IR — the placement pass lays cells at `x = topological
         // index`, so producing this shape from a `.crn` would need a

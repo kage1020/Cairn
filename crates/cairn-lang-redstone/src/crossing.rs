@@ -21,8 +21,10 @@
 //!    against a `void < 2` reservation is refused with
 //!    [`crate::DiagnosticCode::CrossingCongestion`]; `void >= 2`
 //!    scopes are accepted on the grounds that the reserved service
-//!    layers are wide enough for a `stage 5` block-array lowering to
-//!    re-derive the same Steiner trees and lift the crossings itself.
+//!    layers leave somewhere for a later pass to lift a crossing onto.
+//!    Nothing does yet, and the routing pass now spends part of that
+//!    budget itself on wire that climbs over a block, so the grounds
+//!    are thinner than the sentence makes them sound.
 //!    The crossing set is used for that refusal alone and is not
 //!    surfaced on the IR. What steers buffer placement is the
 //!    `wire_owners` map it is derived from: a candidate is unusable
@@ -42,12 +44,12 @@
 //!    `k * DUST_ATTENUATION_LIMIT` (`k = 1..=buffer_count`), and the
 //!    count comes from that same path's length through
 //!    `buffer_count_for_segment`, the function the
-//!    delay pass charged ticks for. Walking a fresh
-//!    `l_shape_path(source, sink)` instead is what used to put buffers
-//!    on coords the net does not own: a minimum spanning tree drops
-//!    the direct source→sink edge whenever two others are cheaper, and
-//!    a repeater on the discarded straight line stands either in mid-air
-//!    or on a neighbouring net's dust.
+//!    delay pass charged ticks for. Walking the straight line between
+//!    the two instead is what used to put buffers on coords the net
+//!    does not own: the routed path hangs off the trunk laid for a
+//!    nearer sink and goes round whatever stands in its way, so a
+//!    repeater on the straight line stands either in mid-air or on a
+//!    neighbouring net's dust.
 //!
 //!    A candidate whose coord is a cell body, an I/O pad or another
 //!    net's dust escapes to the first free y-layer inside the
@@ -58,8 +60,8 @@
 //!    holds the coord.
 //!
 //!    A repeater this net already stands on the candidate — or lifted
-//!    off it — is not an obstruction: a Steiner tree's sinks share
-//!    their prefix, so segments of one net reach the same refresh
+//!    off it — is not an obstruction: the sinks of one net share their
+//!    prefix, so segments of one net reach the same refresh
 //!    points, and the block already there refreshes every one of
 //!    them. The segment records that coord instead of asking for a
 //!    layer of its own. Only *distinct* nets can therefore contend for
@@ -487,10 +489,10 @@ fn allocate_buffer_coords(
     // buffers coords or the two stages disagree about how many exist.
     //
     // Same placer, and after the cells, so a cell buffer and an actuator
-    // buffer cannot claim one coord. They do contend: `l_shape_path`
-    // walks x before z, so an actuator's route leaves its driver along
-    // the cell row and its candidates land among the cells whenever the
-    // driver is not the last of them.
+    // buffer cannot claim one coord. They do contend: an actuator's
+    // route leaves its driver along the same trunk a cell's does, so
+    // the two reach the same refresh points whenever they share a
+    // prefix.
     let mut per_output: Vec<Vec<BufferCoord>> = Vec::with_capacity(ir.outputs.len());
     for (output_index, output) in ir.outputs.iter().enumerate() {
         let route = trees
@@ -569,7 +571,7 @@ struct BufferPlacer<'a> {
     wire_owners: &'a HashMap<CellCoord, Vec<NetRef>>,
     reserved: &'a HashSet<CellCoord>,
     /// Coord → the net whose repeater stands on it. Keyed by net
-    /// rather than a bare set because a Steiner tree's two sinks
+    /// rather than a bare set because one net's two sinks
     /// share their prefix: the candidates for both land on the
     /// same coords, and the second visit has to recognise its
     /// own repeater rather than escape around it.
@@ -631,7 +633,7 @@ impl BufferPlacer<'_> {
                 claimed.push(BufferCoord::new(port, candidate));
                 continue;
             };
-            // A Steiner tree's sinks share their prefix, so two
+            // The sinks of one net share their prefix, so two
             // segments of one net compute the same candidates — two
             // ports of one cell, two cells past the same 15-block
             // point, a cell and an actuator. The repeater standing
@@ -824,7 +826,7 @@ mod tests {
     //! Crate-internal unit tests for crossing-legalization behaviours
     //! that `tests/crossing.rs` cannot reach through synth fixtures
     //! alone:
-    //! - the plane-crossing branch (needs two nets whose Steiner
+    //! - the plane-crossing branch (needs two nets whose routed
     //!   trees actually overlap on a non-endpoint coord, which no
     //!   realistic single-scope `.crn` produces yet — the
     //!   `redstone-door` example has one cell and one net);
@@ -847,7 +849,7 @@ mod tests {
 
     use std::collections::{HashMap, HashSet};
 
-    use super::{PlaneOccupant, compile_crossing, plane_occupant};
+    use super::{PlaneOccupant, claim_bridge, compile_crossing, plane_occupant};
     use crate::delay::{BUFFER_REPEATER_TICKS, compile_delay};
     use crate::diagnostic::DiagnosticCode;
     use crate::edition_netlist_ir::EditionCell;
@@ -926,7 +928,7 @@ mod tests {
 
     #[test]
     fn single_net_no_buffer_is_untouched() {
-        // 1 cell driven from Input(0), Manhattan segment <= 15 → no
+        // 1 cell driven from Input(0), routed segment <= 15 → no
         // buffer coord, no crossing. `buffer_coords` stays empty.
         let mut ir = PlacementIr::new(Edition::Java);
         ir.region = Some(reservation(5, 3, 2));
@@ -959,9 +961,9 @@ mod tests {
 
     #[test]
     fn long_segment_places_buffer_on_plane() {
-        // A driver segment of 16 blocks (Manhattan) trips the
+        // A routed driver segment of 16 blocks trips the
         // attenuation limit once → exactly one buffer coord at
-        // `k=1 * DUST_ATTENUATION_LIMIT = 15` steps along the L-shape.
+        // `k=1 * DUST_ATTENUATION_LIMIT = 15` steps along the route.
         // No collision → the buffer sits on `RouteLayer::Plane`.
         let mut ir = PlacementIr::new(Edition::Java);
         ir.region = Some(reservation(20, 3, 2));
@@ -1028,7 +1030,7 @@ mod tests {
 
     #[test]
     fn crossing_congestion_fires_when_void_is_one() {
-        // Two nets whose Steiner trees overlap on a plane coord with
+        // Two nets whose routed trees overlap on a plane coord with
         // `void=1`: no bridge layer to escape to → refuse. Built by
         // hand because a single-scope `.crn` with genuine crossings
         // does not exist in the example set yet.
@@ -1036,9 +1038,9 @@ mod tests {
         // Input pads land at (0, 0, 1) and (0, 0, 2) per
         // `routing_geometry::input_pad` (z = 1 + i, saturating at depth-1).
         // Placing cell 0 at (3, 0, 3) and cell 1 at (3, 0, 1) makes
-        // the two L-shapes (x-then-z-then-y) share the wire coord
-        // (3, 0, 2) — neither cell nor pad, so it counts as a
-        // genuine crossing. void=1 rejects the bridge escape.
+        // the two routes (x before z, nothing in the way) share the
+        // wire coord (3, 0, 2) — neither cell nor pad, so it counts as
+        // a genuine crossing. void=1 rejects the bridge escape.
         let mut ir = PlacementIr::new(Edition::Java);
         ir.region = Some(reservation(5, 5, 1));
         ir.inputs.push(crate::netlist_ir::NetlistInput {
@@ -1423,6 +1425,38 @@ mod tests {
         );
     }
 
+    /// A repeater is never lifted onto a coord a wire already runs
+    /// through.
+    ///
+    /// The routed wire climbs off the ground layer to get past a block
+    /// now, so a bridge column is not empty by construction any more.
+    /// Called directly: reaching a taken bridge layer through
+    /// `compile_crossing` needs a layout where one net climbs over
+    /// exactly the column a second net's repeater is bounced out of,
+    /// and the fixture that arranged it would be describing the search
+    /// rather than the rule.
+    #[test]
+    fn a_bridge_layer_a_wire_runs_through_is_not_free() {
+        let region = reservation(20, 3, 4);
+        let candidate = CellCoord::new(15, 0, 1);
+        let occupied = CellCoord::routed(15, 1, 1);
+        let wire_owners: HashMap<CellCoord, Vec<NetRef>> =
+            [(occupied, vec![NetRef::Input(0)])].into_iter().collect();
+
+        let mut ledger: HashSet<CellCoord> = HashSet::new();
+        assert_eq!(
+            claim_bridge(candidate, &region, &mut ledger, &wire_owners),
+            Some(CellCoord::routed(15, 2, 1)),
+            "the first free layer is the one above the wire",
+        );
+        assert_eq!(
+            claim_bridge(candidate, &region, &mut ledger, &HashMap::new()),
+            Some(CellCoord::routed(15, 1, 1)),
+            "and with no wire there it is the first layer, so the fixture is not \
+             just reading a full ledger",
+        );
+    }
+
     /// The occupant a candidate reports is the first reason in a fixed
     /// order, so a coord that is several things at once always reads
     /// the same way. Called directly: reaching every arm through
@@ -1463,7 +1497,7 @@ mod tests {
         let ours_only: HashMap<CellCoord, Vec<NetRef>> =
             [(coord, vec![mine])].into_iter().collect();
         assert!(plane_occupant(coord, mine, &empty_reserved, &ours_only, &empty_buffers).is_none(),);
-        // This net's own repeater reads as its own: a Steiner tree's two
+        // This net's own repeater reads as its own: one net's two
         // sinks share their prefix, so the second walk down it revisits
         // the coord the first one claimed, and the caller decides what
         // to do about that.
@@ -2246,8 +2280,8 @@ mod tests {
     #[test]
     fn buffer_coord_index_at_kth_boundary() {
         // Pins the mapping `k → path_index = k * DUST_ATTENUATION_LIMIT`
-        // that `allocate_buffer_coords` inlines. A driver segment of 46
-        // blocks (Manhattan) trips the attenuation limit three times, so
+        // that `allocate_buffer_coords` inlines. A routed driver segment
+        // of 46 blocks trips the attenuation limit three times, so
         // three buffer coords land at `k = 1, 2, 3`. The delay pass has
         // a mirrored boundary-row test on the tick side of the same
         // formula (`s → buffers`); this test is its structural mirror
@@ -2255,7 +2289,7 @@ mod tests {
         // `(segment - 1) / DUST_ATTENUATION_LIMIT` derivation trips a
         // dedicated row rather than the aggregate delay total.
         //
-        // L-shape `(0, 0, 1) → (45, 0, 0)` walks x++ 45 steps then
+        // The route `(0, 0, 1) → (45, 0, 0)` walks x++ 45 steps then
         // z-- 1 step, so `path[k * 15]` is `(k * 15, 0, 1)` for
         // `k = 1, 2, 3` (path[45] is the last x-axis step before the
         // final z-- to the sink). No collision → every buffer stays on

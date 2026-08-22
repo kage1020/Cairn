@@ -4,7 +4,7 @@
 //! §14.5 lays out (Placement → Steiner routing → Delay insertion →
 //! Crossing legalization → Edition legalization). Walks every
 //! [`crate::placement_ir::PlacedCellNode`] in each scope's Placement
-//! IR, lays a rectilinear Manhattan Steiner tree per driver net inside
+//! IR, lays a rectilinear Steiner tree per driver net inside
 //! the enclosing scope's [`crate::placement_ir::CircuitRegionReservation`],
 //! and rewrites every cell's [`crate::placement_ir::PlacedCellNode::wire_length`]
 //! from `None` to `Some(sum over the nets driving it of the routed
@@ -29,29 +29,32 @@
 //!   [`input_pad`]) and `NetRef::Cell(j) → cells[j].coord`. Output
 //!   pad coordinates are the right edge, z = 1 + k, saturating
 //!   similarly.
-//! - **Steiner tree.** Rectilinear minimum spanning tree over the
-//!   `{source} ∪ sinks` terminal set — Kruskal with union-find on
-//!   the complete Manhattan graph, then each MST edge is rendered as
-//!   an L-shape (x-then-z-then-y, deterministic for regression
-//!   stability) into the occupancy set. This is the Kou-Markowsky-Berman
-//!   (KMB) approximation truncated at its second stage; the third
-//!   KMB stage (Steiner-point insertion on the drawn edges) is not
-//!   run here. It used to be justified as free — the delay pass
-//!   consumed a per-sink Manhattan sum, so a differently shaped tree
-//!   changed nothing downstream. That is no longer true: stages 3 and
-//!   4 both measure the routed path, so inserting Steiner points would
-//!   move buffer counts, tick totals, and repeater coords. It is a
-//!   decision for whoever takes it, not an omission with no
-//!   consequences.
+//! - **Steiner tree.** Rectilinear tree over the `{source} ∪ sinks`
+//!   terminal set, grown one sink at a time by
+//!   [`crate::routing_geometry::Router`]: the nearest sink still
+//!   unconnected is attached to the wire already laid by the cheapest
+//!   path that runs through no block, and the search behind that is
+//!   what keeps dust out of the cell bodies and pads the reservation
+//!   already holds. Every sink is a leaf, because a component consumes
+//!   the signal that reaches it rather than handing it on. Where
+//!   nothing is in the way the path is the x-then-z-then-y L-shape the
+//!   downstream stages were built around.
+//! - **Unroutable sinks.** A sink with no block-free path from its
+//!   driver — every way out walled in by a component or the edge of the
+//!   reservation — fires `E_ROUTE_CONGESTION` with its own primary
+//!   naming the two coords, and the scope is elided. Refused before the
+//!   area arithmetic below, because the area can be ample and the one
+//!   coord the wire needs still be a cell body.
 //! - **Occupancy.** A per-scope `HashSet<CellCoord>` seeded with
 //!   every cell coord, every input pad, and every output pad, then
-//!   grown by each drawn L-shape. Duplicate visits share (Steiner
-//!   fanout is the whole point). If seeding itself trips a duplicate
+//!   grown by each routed tree. Duplicate visits share (fanout is the
+//!   whole point). If seeding itself trips a duplicate
 //!   — a pad collapsed onto a cell coord or another pad because the
 //!   reservation cannot fit the pad row — the pass fires
 //!   `E_ROUTE_CONGESTION` immediately with a "pad layout" primary
 //!   rather than a silent misroute. Cross-net overlap between
-//!   distinct signals during Steiner draw is tolerated in v1; the
+//!   distinct signals is tolerated in v1 — a net is routed against the
+//!   blocks, never against another net's dust; the
 //!   crossing-legalization pass (stage 4 of §14.5) is what owns
 //!   those, refusing a scope whose `void=<N>` reservation is too
 //!   thin to absorb them with `E_CROSSING_CONGESTION`.
@@ -79,11 +82,15 @@
 //! coordinates the routing pass derives on the fly are not stored, and
 //! would become a `PlacementIr` field (`input_pads` / `output_pads`)
 //! if a consumer ever needs them outside routing — that migration is
-//! `#[non_exhaustive]`-safe on both types. The escape layers are not
-//! such a gap: `RouteLayer::Bridge` has its producer in
-//! [`crate::crossing::compile_crossing`] (stage 4 of §14.5), but only
-//! for implicit buffer-repeater coords — v1 lifts no wire coord onto
-//! an escape layer, and `RouteLayer::Via` has no producer at all.
+//! `#[non_exhaustive]`-safe on both types. `RouteLayer::Bridge` has two
+//! producers: this pass, whose wire climbs off the ground layer to get
+//! past a block, and [`crate::crossing::compile_crossing`] (stage 4 of
+//! §14.5), which lifts a buffer repeater off a coord it cannot have.
+//! Both stamp the layer through
+//! [`crate::placement_ir::CellCoord::routed`], so one voxel has one
+//! key. `RouteLayer::Via` has no producer at all: a climb is a step
+//! between two coords rather than a coord of its own, so there is
+//! nothing for the variant to name.
 //! Attenuation accounting has landed as
 //! [`crate::delay::compile_delay`] (stage 3): the
 //! delay pass re-derives the same per-net routed segments from the
@@ -327,16 +334,16 @@ fn route_scope(entry: &ScopedPlacementIrEntry) -> ScopeRouting {
 /// Fill every cell's `wire_length` with the routed length of each of
 /// the nets driving it, summed.
 ///
-/// Per-net rather than the Steiner-shared tree total, which is what
+/// Per-net rather than the shared tree total, which is what
 /// the congestion budget counts: a cell's figure answers "how much
 /// dust feeds this cell", and dust shared with a sibling sink feeds
 /// both. Per-net rather than per-driver for the same reason one step
 /// closer in — two ports reading one signal are the same strand
 /// arriving twice; see [`sum_over_driving_nets`]. Routed rather than
 /// Manhattan because the two are different
-/// numbers whenever the tree detours, and a record carrying a
-/// straight-line `wire_length` beside a `delay_ticks` charged for the
-/// routed one describes no single layout.
+/// numbers whenever the wire goes round something, and a record
+/// carrying a straight-line `wire_length` beside a `delay_ticks`
+/// charged for the routed one describes no single layout.
 ///
 /// Computes into a side vector first so `ir.cells` can be borrowed
 /// immutably while the driver routes are measured through
@@ -571,6 +578,157 @@ mod tests {
     ///
     /// The blocker drives nothing — a block is all the fixture needs,
     /// and a driver would make it a second sink of the same net.
+    /// No net in the example corpus has dust drawn inside a component.
+    ///
+    /// The property the router exists for, checked against every `.crn`
+    /// that ships rather than against generated layouts: a coord of a
+    /// net's wire is either free space, that net's own source, or one
+    /// of its own sinks. Anything else is a strand of redstone inside a
+    /// comparator or a pressure plate.
+    ///
+    /// A unit test rather than one in `tests/routing.rs` because the
+    /// wire coords are crate-internal — the routed IR carries lengths,
+    /// not paths.
+    #[test]
+    fn no_example_draws_dust_inside_a_component() {
+        use std::collections::HashSet;
+        use std::path::PathBuf;
+
+        use cairn_lang_core::{lower, parse};
+
+        use crate::routing_geometry::{Router, block_sites, collect_nets, input_pad, net_trees};
+
+        let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join("..")
+            .join("examples");
+        let mut checked = 0;
+        for file in std::fs::read_dir(&dir).expect("read examples") {
+            let path = file.expect("dir entry").path();
+            if path.extension().and_then(|e| e.to_str()) != Some("crn") {
+                continue;
+            }
+            let source = std::fs::read_to_string(&path).expect("read example");
+            let Ok(module) = parse(&source) else { continue };
+            let intent = lower(&module);
+            let synth = crate::synth::synthesize(&intent);
+            for edition in [Edition::Java, Edition::Bedrock] {
+                let netlist = crate::netlist::compile_netlist(&synth.scoped);
+                let edition_netlist =
+                    crate::edition_netlist::compile_edition_netlist(&netlist, edition);
+                let placed = crate::placement::compile_placement(&edition_netlist, &intent);
+                let laid = compile_routing(&placed.scoped);
+                for entry in &laid.scoped.scopes {
+                    let ir = &entry.ir;
+                    let Some(region) = ir.region.clone() else {
+                        continue;
+                    };
+                    let coords: Vec<CellCoord> = ir.cells.iter().map(|c| c.coord).collect();
+                    let blocks = block_sites(ir, &region);
+                    let occupied: HashSet<CellCoord> =
+                        blocks.iter().map(|site| site.coord).collect();
+                    let router = Router::new(&region, &blocks);
+                    let nets = collect_nets(ir);
+                    let trees = net_trees(&nets, &router, |net| match net {
+                        NetRef::Input(i) => input_pad(i as usize, &region),
+                        NetRef::Cell(j) => coords[j as usize],
+                    });
+                    for (net, tree) in &trees {
+                        let mine: HashSet<CellCoord> = nets[net]
+                            .iter()
+                            .copied()
+                            .chain(tree.wire_path().first().copied())
+                            .collect();
+                        for coord in tree.wire_path() {
+                            assert!(
+                                !occupied.contains(&coord) || mine.contains(&coord),
+                                "{}: {edition:?} {} `{}` draws {net:?} through {coord:?}",
+                                path.display(),
+                                entry.kind.label(),
+                                entry.name,
+                            );
+                            checked += 1;
+                        }
+                    }
+                }
+            }
+        }
+        assert!(
+            checked > 0,
+            "the corpus has to route something for this to mean anything",
+        );
+    }
+
+    /// A sink the reservation cannot reach is refused here, and the
+    /// later stages handed the same layout answer rather than panic.
+    ///
+    /// Stage 2 elides the scope, so stages 3 and 4 never see one in a
+    /// real run. They recompute the trees from the IR, though, and a
+    /// caller who skipped stage 2 would hand them one — the tree
+    /// answers for an unreachable sink so that path is deterministic
+    /// instead of an `expect` on a missing route.
+    #[test]
+    fn an_unreachable_sink_refuses_here_and_does_not_panic_downstream() {
+        let mut ir = PlacementIr::new(Edition::Java);
+        ir.region = Some(reservation(3, 2, 1));
+        ir.inputs.push(crate::netlist_ir::NetlistInput {
+            name: cairn_lang_core::ast::DottedRef::new("sig".into(), vec!["a".into()]),
+            span: Span::default(),
+        });
+        // The pad lands at (0,0,1). Walling (1,0,0) and (2,0,1) in
+        // leaves the sink at (2,0,0) with no free neighbour, and
+        // `void=1` reserves no layer to come in over the top.
+        for coord in [CellCoord::new(1, 0, 0), CellCoord::new(2, 0, 1)] {
+            ir.cells.push(placed_cell(coord, PlacementPhase::Unrouted));
+        }
+        ir.cells.push(PlacedCellNode {
+            cell: EditionCell::JavaRepeaterOr,
+            drivers: vec![CellPortDriver {
+                port: PortName::A,
+                net: NetRef::Input(0),
+            }],
+            coord: CellCoord::new(2, 0, 0),
+            phase: PlacementPhase::Unrouted,
+            span: Span::default(),
+        });
+
+        let routed = compile_routing(&scoped(ScopeKind::Struct, "boxed", ir.clone()));
+        let refusal = routed
+            .diagnostics
+            .iter()
+            .find(|d| d.code == crate::DiagnosticCode::RouteCongestion)
+            .unwrap_or_else(|| panic!("a walled-in sink must refuse: {:?}", routed.diagnostics));
+        assert!(
+            refusal.primary.contains("cannot reach (2,0,0)")
+                && refusal.primary.contains("from the driver at (0,0,1)"),
+            "the refusal names both ends: {}",
+            refusal.primary,
+        );
+        assert!(refusal.primary.contains("dust does not pass through"));
+        assert!(
+            routed.scoped.scopes.is_empty(),
+            "the failed scope is elided rather than half-attributed",
+        );
+
+        // The same layout handed straight to stage 3, as a caller who
+        // skipped stage 2 would.
+        for cell in &mut ir.cells {
+            cell.phase = PlacementPhase::Routed { wire_length: 0 };
+        }
+        let delayed = crate::delay::compile_delay(&scoped(ScopeKind::Struct, "boxed", ir));
+        assert!(
+            delayed.diagnostics.is_empty(),
+            "the fallback route is one block, well inside every cap: {:?}",
+            delayed.diagnostics,
+        );
+        let legalized = crate::crossing::compile_crossing(&delayed.scoped);
+        assert!(
+            legalized.diagnostics.is_empty(),
+            "{:?}",
+            legalized.diagnostics
+        );
+    }
+
     #[test]
     fn wire_length_counts_the_routed_path() {
         let mut ir = PlacementIr::new(Edition::Java);

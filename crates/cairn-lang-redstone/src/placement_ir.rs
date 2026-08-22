@@ -49,39 +49,43 @@ use crate::netlist_ir::{CellPortDriver, NetRef, NetlistInput, PortName};
 
 /// Which of `spec/redstone` §14.5's three pseudo-2.5D layers a
 /// coordinate lives on. `Plane` is the ground layer every cell coord
-/// and every un-escaped wire segment sits on; `Bridge` is the
-/// horizontal escape layer the crossing-legalization pass lifts a
-/// buffer repeater onto when its plane candidate is taken; `Via` is
-/// the vertical tap between the two.
+/// and every pad sits on; `Bridge` is the horizontal escape layer
+/// above it; `Via` is the vertical tap between the two.
 ///
 /// Cell coords are `Plane` by construction — the placement pass never
-/// stamps `Bridge` / `Via` on a cell body. Buffer-repeater coords the
-/// crossing-legalization pass writes may carry either escape layer;
-/// wire coords themselves are not lifted onto `Bridge` in v1 (a plane
-/// crossing that cannot be absorbed by the buffer-escape path is
-/// refused via [`crate::DiagnosticCode::CrossingCongestion`]).
+/// stamps `Bridge` / `Via` on a cell body. Everything else the
+/// pipeline puts inside the reservation takes its layer from its
+/// height through [`CellCoord::routed`]: routed wire that climbs to
+/// get past a block, and a buffer repeater the
+/// crossing-legalization pass lifts off a coord it cannot have. One
+/// rule for both, so a repeater and a wire at one voxel are one map
+/// key rather than two. A plane crossing between two nets is still
+/// not absorbed by lifting one of them: it is tolerated at
+/// `void >= 2` and refused below that via
+/// [`crate::DiagnosticCode::CrossingCongestion`].
 /// Serialising as the enum's stable lowercase string (`plane` /
 /// `bridge` / `via`) keeps the JSON wire form small and matches the
 /// vocabulary spec §14.5 uses.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum RouteLayer {
-    /// Ground layer — every cell coord and every un-escaped wire
-    /// segment sits here. Default so that any code path which forgets
-    /// to set the layer explicitly defaults to the ground layer rather
-    /// than an escape layer.
+    /// Ground layer — every cell coord, every pad, and every coord
+    /// the router did not have to climb to sits here. Default so that
+    /// any code path which forgets to set the layer explicitly
+    /// defaults to the ground layer rather than an escape layer.
     #[default]
     Plane,
-    /// Horizontal escape layer for buffer repeaters the
+    /// Escape layer above the ground: wire the routing pass had to
+    /// climb to get past a block, and buffer repeaters the
     /// crossing-legalization pass lifted off the `Plane` to avoid a
-    /// collision with a cell / pad / plane crossing.
+    /// collision with another net's dust.
     Bridge,
     /// Reserved for the vertical `Plane` ↔ `Bridge` tap. No producer
-    /// materialises `Via` in v1: buffer repeaters are treated as their
-    /// own `Bridge` cell without an explicit ramp coord, and wire
-    /// bridges themselves are not lifted. Kept in the enum so a
-    /// downstream consumer can match exhaustively against the full
-    /// §14.5 vocabulary; a subsequent pass that grows `Via` producers
-    /// is `#[non_exhaustive]`-safe.
+    /// materialises `Via` in v1: a climb is a step between two coords
+    /// rather than a coord of its own, and a lifted buffer repeater is
+    /// treated as its own `Bridge` block without an explicit ramp.
+    /// Kept in the enum so a downstream consumer can match exhaustively
+    /// against the full §14.5 vocabulary; a subsequent pass that grows
+    /// `Via` producers is `#[non_exhaustive]`-safe.
     Via,
 }
 
@@ -123,9 +127,9 @@ impl Serialize for RouteLayer {
 /// use `x = topological index`, `y = 0`, `z = 0`, [`RouteLayer::Plane`].
 /// Pad coords derived by the routing pass at the reservation edges
 /// use `y = 0` on the plane with `z = 1 + i` (saturating at `depth-1`
-/// for pathological regions); buffer-repeater coords stamped by
-/// [`crate::crossing::compile_crossing`] may use `y >= 1` and
-/// [`RouteLayer::Bridge`] when the plane candidate is taken.
+/// for pathological regions). Routed wire coords and buffer-repeater
+/// coords may use `y >= 1`, and take [`RouteLayer::Bridge`] when they
+/// do — see [`Self::routed`].
 ///
 /// The `layer` field participates in `Eq` and `Hash`, so
 /// `(x, y, z, Plane)` and `(x, y, z, Bridge)` are distinct map keys.
@@ -145,17 +149,18 @@ pub struct CellCoord {
     /// Column along the region's x-axis. Zero at the region's origin.
     pub x: u32,
     /// Row along the region's y-axis. `0` for `Plane` coords; the
-    /// crossing pass may set `y >= 1` for buffer coords lifted onto a
-    /// `Bridge` layer inside the reservation's `void=<N>` budget.
+    /// routing and crossing passes may set `y >= 1` for wire and buffer
+    /// coords lifted onto a `Bridge` layer inside the reservation's
+    /// `void=<N>` budget.
     pub y: u32,
     /// Row along the region's z-axis. `0` for cell coords stamped by
     /// the placement pass; pad and buffer coords may sit at
     /// `z = 1 + i` (saturating at `depth-1`).
     pub z: u32,
     /// Pseudo-2.5D layer this coord lives on. Cell coords are
-    /// [`RouteLayer::Plane`] by construction; the crossing-legalization
-    /// pass may stamp [`RouteLayer::Bridge`] on a buffer-repeater
-    /// coord that collides with a cell / pad / plane crossing.
+    /// [`RouteLayer::Plane`] by construction; anything the routing or
+    /// crossing pass lifts above the ground layer carries
+    /// [`RouteLayer::Bridge`], by the one rule [`Self::routed`] holds.
     /// Serialised only when it differs from the default so a
     /// `Plane` coord's JSON omits the `layer` field.
     #[serde(skip_serializing_if = "RouteLayer::is_plane")]
@@ -221,7 +226,7 @@ impl CellCoord {
 /// one entry per segment per repeater that segment's signal passes
 /// through, so [`Self::coord`] repeats whenever one repeater serves
 /// more than one segment: two ports of a cell reading one signal, two
-/// cells hanging off the same point of a Steiner tree, a cell and an
+/// cells hanging off the same point of the routed tree, a cell and an
 /// actuator on one net. That is the shape the `{port, coord}` pair
 /// asks for — the answer to "which segments does this block serve" is
 /// a list, and the entries carry it one at a time. **A consumer that
@@ -238,8 +243,8 @@ impl CellCoord {
 /// consumer that reads the vector positionally therefore sees driver
 /// 0's buffers before driver 1's, and closer-to-source buffers before
 /// closer-to-sink ones. That order is *not* one x → z → y sweep: the
-/// route is a chain of L-shapes between tree terminals, so it turns as
-/// often as the tree does.
+/// route hangs off the trunk laid for a nearer sink and turns wherever
+/// it has to go round a block.
 ///
 /// **Coord layer.** [`Self::coord`]`.layer` records the crossing
 /// pass's placement decision — see [`RouteLayer`] for the full
@@ -447,7 +452,7 @@ pub enum PlacementPhase {
     /// After Steiner routing: wire length is known, delay and buffers
     /// are not yet.
     Routed {
-        /// Manhattan wire length from every driver into this cell, per
+        /// Routed wire length from every driver into this cell, per
         /// [`crate::routing::compile_routing`].
         wire_length: u32,
     },

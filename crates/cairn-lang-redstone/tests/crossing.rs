@@ -11,7 +11,7 @@
 //! independence when a module carries more than one scope. Fixtures
 //! with genuine plane crossings are exercised in the crate-internal
 //! unit tests (`src/crossing.rs`) because the example set does not yet
-//! contain a `.crn` whose Steiner trees overlap.
+//! contain a `.crn` whose routed trees overlap.
 
 use std::fmt::Write as _;
 use std::path::PathBuf;
@@ -73,12 +73,6 @@ fn delayed_from_source(source: &str, edition: Edition) -> ScopedPlacementIr {
     delay.scoped
 }
 
-/// AC1 — `examples/redstone-door.crn` compiled for Java survives
-/// crossing legalization with zero diagnostics: the sole `RepeaterOr`
-/// cell has no fanout crossing (there is only one net) and both
-/// driver segments (1 and 2 blocks) sit under the dust-attenuation
-/// limit of 15 so no buffer coord materialises. `buffer_coords` stays
-/// empty on the survived cell.
 /// A shared bus of 16 cells legalizes at `void=2`, with one repeater
 /// standing on free wire beside the row.
 ///
@@ -159,6 +153,12 @@ struct chain size=60x5
     );
 }
 
+/// AC1 — `examples/redstone-door.crn` compiled for Java survives
+/// crossing legalization with zero diagnostics: the sole `RepeaterOr`
+/// cell has no fanout crossing (there is only one net) and both
+/// driver segments (1 and 4 blocks) sit under the dust-attenuation
+/// limit of 15 so no buffer coord materialises. `buffer_coords` stays
+/// empty on the survived cell.
 #[test]
 fn redstone_door_java_carries_no_buffers() {
     let source = load_example("redstone-door.crn");

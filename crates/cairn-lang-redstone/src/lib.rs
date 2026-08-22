@@ -21,9 +21,9 @@
 //! of the five-stage place-and-route pipeline §14.5 describes;
 //! [`routing::compile_routing`] runs stage 2 (Steiner routing) over
 //! that layout, filling every [`placement_ir::PlacedCellNode`]'s
-//! `wire_length` with the Manhattan total of the driver→sink Steiner
-//! tree and re-checking `E_ROUTE_CONGESTION` against the actual
-//! post-routing occupancy; [`delay::compile_delay`] runs stage 3
+//! `wire_length` with the routed total of the driver→sink paths
+//! through its Steiner tree and re-checking `E_ROUTE_CONGESTION`
+//! against the actual post-routing occupancy; [`delay::compile_delay`] runs stage 3
 //! (delay insertion) over the routed IR, promoting every cell's
 //! `delay_ticks` from `None` to `Some(base delay + implicit buffer
 //! repeater ticks)` and refusing with `E_ATTENUATION_LIMIT` whenever a
