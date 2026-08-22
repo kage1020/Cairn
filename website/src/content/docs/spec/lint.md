@@ -173,6 +173,11 @@ needs them as the diagnostic surface stabilises.
   `E_UNKNOWN_SLOT_TARGET` is an **error**, because a slot bound to a non-material value lowers every
   member that references it to air; `E_THEME_SELECTOR_UNMATCHED` is a **warning**, because a rule
   that matches nothing overrides nothing and the build is what the rest of the source asked for.
+- `W_IGNORED_ARGUMENT` sits on the line and is currently a **warning**. A `key=` the pass cannot
+  read is dropped and a default put in its place, which is the build differing from the source —
+  but the rule forbids *silent* substitution, and this one is announced. Every source carrying such
+  a value builds today, so promoting it is a breaking change, and the same call decides what an
+  argument key the compiler does not recognise should be. The two are best answered together.
 - Whether autofix is offered is defined by the implementation.
 
 ## 11.4 Constraint catalog

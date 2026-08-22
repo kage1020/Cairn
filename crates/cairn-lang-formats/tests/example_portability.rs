@@ -14,11 +14,15 @@
 //!   declares somewhere, so nothing shipped reports as unsupported;
 //! - the entry count matches the count a pinned build emits, on every
 //!   supported version — the two lowerings may disagree about *which*
-//!   spelling, never about how many intents there are.
+//!   spelling, never about how many intents there are;
+//! - and so does the extent, because the volume counts the members whose
+//!   material resolves and "resolves" is asked against the pinned target.
+//!   A count comparison alone cannot see an array that shortened.
 //!
 //! Whether each pinned build's ids exist in that pinned version is the
 //! neighbouring question, held by `pack_ids_exist.rs`.
 
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use cairn_lang_core::block_array::{BlockArrayIr, BlockState, lower_to_block_array};
@@ -88,6 +92,22 @@ fn lower_for(
     lower_to_block_array(&ir, &resolution, Some(&pack.view(target)))
 }
 
+/// Every structure's extent, keyed by scope so a comparison cannot pass
+/// by two scopes swapping sizes.
+///
+/// The volume counts the members whose material resolves, and "resolves"
+/// is asked against the pinned target — so an id only some versions
+/// declare moves `Dims` as well as the palette. The entry count alone
+/// cannot see that: a wall that stops painting drops one entry *and*
+/// shortens the array, and a comparison of counts is satisfied by the
+/// first half.
+fn extents(ir: &BlockArrayIr) -> BTreeMap<&str, (u32, u32, u32)> {
+    ir.structures
+        .iter()
+        .map(|(key, ba)| (key.as_str(), (ba.dims.x, ba.dims.y, ba.dims.z)))
+        .collect()
+}
+
 fn non_air_entries(ir: &BlockArrayIr) -> usize {
     ir.structures
         .values()
@@ -133,14 +153,12 @@ fn no_shipped_example_reports_an_unsupported_entry() {
 fn the_reported_entry_count_matches_what_a_pinned_build_emits() {
     for (name, source) in &examples() {
         for (edition, pack) in editions() {
-            let reported = {
-                let block_ir = lower_for(source, edition, pack, None);
-                let counts = match edition {
-                    Edition::Java => portability_for_java(&block_ir, &pack.blocks),
-                    Edition::Bedrock => portability_for_bedrock(&block_ir, &pack.blocks),
-                };
-                counts.total()
-            };
+            let unpinned = lower_for(source, edition, pack, None);
+            let reported = match edition {
+                Edition::Java => portability_for_java(&unpinned, &pack.blocks),
+                Edition::Bedrock => portability_for_bedrock(&unpinned, &pack.blocks),
+            }
+            .total();
             for version in supported_versions(pack) {
                 let built = lower_for(source, edition, pack, Some(version));
                 assert!(
@@ -154,6 +172,12 @@ fn the_reported_entry_count_matches_what_a_pinned_build_emits() {
                     "{name}: `info` reports {reported} palette entries for {edition} but a build \
                      pinned to {version} emits {}",
                     non_air_entries(&built),
+                );
+                assert_eq!(
+                    extents(&unpinned),
+                    extents(&built),
+                    "{name}: the extent for {edition} moves between the range-wide lowering and \
+                     a build pinned to {version}",
                 );
             }
         }

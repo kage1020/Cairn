@@ -102,6 +102,7 @@ fn the_corpus_reaches_the_codes_its_prose_assertions_are_written_for() {
         "E_UNRESOLVED_SLOT",
         "E_UNSUPPORTED_NESTING",
         "W_DEFERRED_MEMBER",
+        "W_IGNORED_ARGUMENT",
         "W_STRUCTURE_TOO_LARGE",
         "W_UNUSED_DEF",
     ]

@@ -117,8 +117,10 @@ pub struct WalkwayLayout {
 /// * the window is missing `offset=` / `size=WxH`, or its
 ///   `offset + size.w` exceeds the wall length, or any row of
 ///   `y ..= y + size.h - 1` falls outside the rows the def's `walls`
-///   members paint (so a window that would not even be carved cannot
-///   anchor a walkway either),
+///   members declare (see `wall_column_of`, which reads the declared
+///   rows rather than the painted ones — a window over walls whose
+///   material does not resolve is deferred by the openings pass and
+///   still anchors here),
 /// * the def has no `size=` to bound the wall against,
 /// * an internal arithmetic step (`checked_add` /
 ///   `wall_local_to_grid` bounds / `i32::try_from`) over- or

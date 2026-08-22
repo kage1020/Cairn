@@ -207,8 +207,9 @@ Dims.y = 1 + wall_top + roof_extra
 ```
 
 Each term counts the members that will paint, and only those.
-`overhang` is the largest `overhang=` on any roof with a `kind=` the
-compiler can draw, `wall_top` the largest `N + height` over the walls
+`overhang` is the largest `overhang=` on any roof that will draw — a
+`kind=` the compiler knows, and a `slope_to=` if that kind is `shed` —
+`wall_top` the largest `N + height` over the walls
 whose `mat_slot=` resolves (`N` being the enclosing level's, `0` in the
 body), and `roof_extra` the tallest per-kind contribution from §4.3–§4.6.
 The `1` is the base plane, which every struct has and no member
@@ -231,14 +232,25 @@ Those are two readings of a single list, which is what keeps a member
 from painting past the end of the array it was handed.
 
 The rule is about the list rather than about `level`, so it holds
-wherever a member drops out. A `roof` with no `kind=` draws nothing and
-does not widen the footprint; `walls` whose material does not resolve
-paint nothing and do not raise `Dims.y`. A themeless struct is the whole
-of the second case: every `mat_slot=` lowers to air, so nothing bound to
-one shapes the volume either.
+wherever a member drops out. A `roof` that will not draw — no `kind=`, or
+a `shed` with no `slope_to=` — does not widen the footprint; `walls` whose
+material does not resolve paint nothing and do not raise `Dims.y`.
 
-The failures have to be known before the volume is derived for this to
-hold, which is why the material question is asked where the extent is
+The material half applies to `walls` and not to `roof`, because the two
+fail differently: a roof whose `mat_slot=` does not resolve falls back to
+a material of its own and draws, so it shapes the volume as any drawn roof
+does. A themeless struct is the clearest case of the asymmetry — its walls
+lower to air and reserve nothing, and a `roof kind=gable` over them still
+draws and still seats its ridge above them.
+
+"Does the material resolve" is asked against the target the build is
+pinned to, so a block only some versions declare can change `Dims.y`
+between two `--target` values. Both answers are honest: the array is the
+one that version can build. An id the pinned target does not declare is
+`E_UNKNOWN_ID`, an error, so no artifact ships from that shape.
+
+The failures have to be known before the volume is derived for any of this
+to hold, which is why the material question is asked where the extent is
 decided and again where the block is placed — one function, so the two
 cannot answer differently. When they could not, the extra extent was air:
 a ring of it around a building whose walls had moved inward, and an array

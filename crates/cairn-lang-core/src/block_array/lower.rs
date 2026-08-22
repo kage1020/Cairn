@@ -1057,8 +1057,15 @@ fn lower_body_to_block_array<'a>(
     // authored against the *interior* size and shifted inward by this
     // amount in their respective fill helpers.
     let overhang = max_roof_overhang(&flattened, diagnostics);
-    let max_wall_top = max_wall_top(&flattened, scope, registry, theme_missing);
-    let wall_column = wall_column(&flattened, scope, registry, theme_missing);
+    // One walk over the walls, read twice. `resolve_member_state` is not
+    // free — the abstract-token miss path builds the whole catalogue to
+    // pick a suggestion from — and asking it once per member here is also
+    // what makes "the volume and the carve read one list" true of the
+    // run and not only of the rule.
+    let painting_walls: Vec<(u32, u32)> =
+        painting_walls(&flattened, scope, registry, theme_missing).collect();
+    let max_wall_top = max_wall_top(&painting_walls);
+    let wall_column = WallColumn::from_walls(painting_walls.iter().copied());
     let roof_extra = max_roof_extra_height(&flattened, interior_w, interior_h, overhang);
 
     let dims = Dims {
@@ -1930,10 +1937,16 @@ fn palette_index_for(
 ///
 /// The same question [`palette_index_for`] asks when the massing phase
 /// paints, through the same function, so the volume and the paint cannot
-/// answer differently. The diagnostics are discarded because this is a
-/// question and not a report: the massing phase's own call is what tells
-/// the author that the material did not resolve, and answering it twice
-/// would say it twice.
+/// answer differently.
+///
+/// The diagnostics are discarded because this is a question and not a
+/// report. Two of [`resolve_member_state`]'s arms push one — the abstract
+/// token and the unknown id — and the massing phase's own call pushes it
+/// for real, so keeping this one would say it twice. The other arms push
+/// nothing at all, here or there: a themeless scope is reported once
+/// against the body, an unresolved slot target once by the resolver, and
+/// a member with no `mat_slot=` binding is reported by nobody. That last
+/// silence is a gap of its own and not this function's to fill.
 ///
 /// Sound exactly as long as the walls painter's question stays
 /// [`resolve_member_state`]. A roof already has a painter-side fallback
@@ -1960,18 +1973,14 @@ fn member_will_paint(
 /// `W_DEFERRED_MEMBER` for that member fires later in the massing phase
 /// so a hand-built sizeless `walls` still surfaces its own diagnostic.
 ///
-/// Members whose material will not resolve contribute `0` for the same
-/// reason — see [`member_will_paint`]. A themeless struct used to reserve
-/// the full wall height for walls that lowered to air, so the artifact was
-/// as tall as the building it did not contain.
-fn max_wall_top(
-    flattened: &[(u32, &Member)],
-    scope: Option<&ScopeResolution>,
-    registry: Option<&dyn TargetRegistry>,
-    theme_missing: bool,
-) -> u32 {
-    painting_walls(flattened, scope, registry, theme_missing)
-        .map(|(y_offset, h)| y_offset.saturating_add(h))
+/// Members whose material will not resolve are absent from the list for
+/// the same reason a heightless one is: they paint no row. A themeless
+/// struct used to reserve the full wall height for walls that lowered to
+/// air, so the artifact was as tall as the building it did not contain.
+fn max_wall_top(painting: &[(u32, u32)]) -> u32 {
+    painting
+        .iter()
+        .map(|(y_offset, h)| y_offset.saturating_add(*h))
         .max()
         .unwrap_or(0)
 }
@@ -1979,11 +1988,14 @@ fn max_wall_top(
 /// The `(y_offset, height)` pairs of every walls member that will both
 /// stand and paint.
 ///
-/// One walk behind [`max_wall_top`] and [`wall_column`] because
+/// One list behind both the volume and [`WallColumn`], because
 /// `spec/compilation.md` §4.7 makes them two readings of a single list and
 /// rests the "no member paints past the end of the array" invariant on
 /// their agreeing. Filtering one and not the other would leave the window
-/// carve writing rows the array no longer has.
+/// carve writing rows the array no longer has. `max_wall_top` collapses
+/// the pairs to their maximum, which sizes the volume and seats the roof;
+/// the column keeps the spans, which is what decides whether a rectangle
+/// cut into a wall lands in masonry.
 fn painting_walls<'a>(
     flattened: &'a [(u32, &'a Member)],
     scope: Option<&'a ScopeResolution>,
@@ -1997,34 +2009,15 @@ fn painting_walls<'a>(
         .filter_map(|(y_offset, m)| height_value(m).map(|h| (*y_offset, h)))
 }
 
-/// Every row the walls members the pass will paint actually occupy.
-///
-/// Same walk as [`max_wall_top`] over the same list — [`painting_walls`] —
-/// keeping the spans instead of collapsing them to their maximum. The two
-/// are separate because they answer different questions: `max_wall_top`
-/// sizes the volume and seats the roof, while this decides whether a
-/// rectangle cut into the wall lands in masonry. Reading the second off
-/// the first is what let a `window y=0` carve through the floor slab and a
-/// window between two level courses hang glass in open air.
-fn wall_column(
-    flattened: &[(u32, &Member)],
-    scope: Option<&ScopeResolution>,
-    registry: Option<&dyn TargetRegistry>,
-    theme_missing: bool,
-) -> WallColumn {
-    WallColumn::from_walls(painting_walls(flattened, scope, registry, theme_missing))
-}
-
 /// Largest `overhang=` across the roof members the pass will paint.
 ///
 /// Two concerns over one walk, and they cover different members.
 ///
-/// The **contribution** is filtered through [`roof_kind_of`], the same
-/// filter [`max_roof_extra_height`] applies: a roof with no recognised
-/// `kind=` draws nothing, and a member that draws nothing must not widen
-/// the array. Without the filter it gave the footprint its eaves and the
-/// height nothing, so the walls moved inward and a ring of air surrounded
-/// them.
+/// The **contribution** is filtered through [`roof_draws`], the same
+/// question [`max_roof_extra_height`] asks: a roof that will not draw must
+/// not widen the array. Without the filter it gave the footprint its eaves
+/// and the height nothing, so the walls moved inward and a ring of air
+/// surrounded them.
 ///
 /// The **validation** is not filtered, because this is the only place
 /// `overhang=` is read: a value nothing here looks at is a value nothing
@@ -2037,25 +2030,29 @@ fn max_roof_overhang(flattened: &[(u32, &Member)], diagnostics: &mut Vec<Diagnos
         .map(|(_, m)| *m)
         .filter(|m| matches!(m.role, MemberRole::Roof))
         .filter_map(|m| {
-            let read = nonneg_int_or_ignore(
-                m,
-                "overhang",
-                "the roof is drawn flush with the wall line",
-                diagnostics,
-            );
-            roof_kind_of(m).and(read)
+            // The consequence differs by member, so it is worked out here
+            // rather than written once: a roof that draws is in the build
+            // flush with the wall line, and a roof that does not is
+            // already earning its own finding from the envelope phase.
+            let draws = roof_draws(m);
+            let consequence = if draws.is_some() {
+                "the roof is drawn flush with the wall line"
+            } else {
+                "this roof draws nothing either way — see the finding on the same line"
+            };
+            let read = nonneg_int_or_ignore(m, "overhang", consequence, diagnostics);
+            draws.and(read)
         })
         .max()
         .unwrap_or(0)
 }
 
-/// Maximum vertical contribution from any roof member the pass will paint
-/// that has a recognisable [`RoofKind`]. Roofs without a recognised kind (missing
-/// `kind=` or a kind outside the supported set) contribute `0` here;
-/// their `W_DEFERRED_MEMBER` warning fires later, during the envelope
-/// phase, against the actual member span. Computing the dim from the
-/// inflated roof bounding box (interior + 2 * overhang on each axis)
-/// keeps the math consistent with each per-kind generator.
+/// Maximum vertical contribution from any roof member the pass will draw
+/// ([`roof_draws`]). A roof that draws nothing contributes `0` here; its
+/// `W_DEFERRED_MEMBER` warning fires later, during the envelope phase,
+/// against the actual member span. Computing the dim from the inflated
+/// roof bounding box (interior + 2 * overhang on each axis) keeps the math
+/// consistent with each per-kind generator.
 fn max_roof_extra_height(
     flattened: &[(u32, &Member)],
     interior_w: u32,
@@ -2068,7 +2065,7 @@ fn max_roof_extra_height(
         .iter()
         .map(|(_, m)| *m)
         .filter(|m| matches!(m.role, MemberRole::Roof))
-        .filter_map(|m| roof_kind_of(m).map(|k| roof_extra_height(k, m, roof_w, roof_h)))
+        .filter_map(|m| roof_draws(m).map(|k| roof_extra_height(k, m, roof_w, roof_h)))
         .max()
         .unwrap_or(0)
 }
@@ -2094,6 +2091,31 @@ fn roof_extra_height(kind: RoofKind, member: &Member, roof_w: u32, roof_h: u32) 
         RoofKind::Hip => hip_extra_height(roof_w, roof_h),
         RoofKind::Flat => flat_extra_height(),
     }
+}
+
+/// The kind this roof will actually draw with, or `None` when it will
+/// draw nothing.
+///
+/// Not [`roof_kind_of`], which answers "does the kind table know this
+/// name". A `shed` with no usable `slope_to=` is a name the table knows
+/// and a member [`fill_roof_shed`] returns from without painting a voxel,
+/// and [`roof_extra_height`]'s shed arm already gives it `0`. Both roof
+/// walks go through here so the footprint and the height cannot disagree
+/// about which roofs are real — the disagreement that let a roof widen an
+/// array it put nothing in.
+///
+/// Silent, unlike [`shed_slope_to`]: this is the question, and the answer
+/// is reported by the pass that tries to draw.
+fn roof_draws(member: &Member) -> Option<RoofKind> {
+    let kind = roof_kind_of(member)?;
+    if matches!(kind, RoofKind::Shed)
+        && ident_value(member, "slope_to")
+            .and_then(WallSide::from_ident)
+            .is_none()
+    {
+        return None;
+    }
+    Some(kind)
 }
 
 fn roof_kind_of(member: &Member) -> Option<RoofKind> {
@@ -2981,10 +3003,14 @@ fn fill_stair(
             return;
         }
     };
+    // The gate is the overhang the roof *draws*, not the `overhang=` the
+    // author wrote: a roof that will not draw contributes none, so a
+    // struct with `overhang=2` and no `kind=` arrives here at zero.
+    // Naming only the key would send that author to the wrong line.
     if ctx.overhang == 0 {
         diagnostics.push(diag_deferred_member_reason(
             member,
-            "eave `stair` requires a roof `overhang=` of at least 1 so the band can sit outside the wall",
+            "eave `stair` needs a roof that draws an overhang of at least 1 so the band can sit outside the wall — no roof on this struct contributes one",
         ));
         return;
     }
@@ -3313,7 +3339,7 @@ fn plate_voxel_position(
                 diagnostics.push(diag_deferred_member_reason(
                     member,
                     &format!(
-                        "pressure_plate `at={}.outside` at y={y_world} has no exterior voxel to sit on (the struct has no overhang; the foundation fallback only applies at y=0 so a higher plate would overwrite the wall)",
+                        "pressure_plate `at={}.outside` at y={y_world} has no exterior voxel to sit on (no roof on this struct draws an overhang; the foundation fallback only applies at y=0 so a higher plate would overwrite the wall)",
                         side_name(side),
                     ),
                 ));
@@ -4123,14 +4149,16 @@ fn diag_deferred_member_reason(member: &Member, reason: &str) -> Diagnostic {
 ///
 /// The note carries the consequence rather than the role table
 /// `diag_deferred_member_reason` attaches, because the role is not the
-/// problem: this member lowered, and the author needs to know which value
-/// the pass used instead of the one they wrote.
+/// problem: the value the author wrote was dropped, and what that did to
+/// the output is the caller's to say. The primary stops at "the value was
+/// ignored" for the same reason — whether the member is in the build is
+/// not a fact this function has.
 fn diag_ignored_argument(member: &Member, key: &str, consequence: &str) -> Diagnostic {
     Diagnostic {
         code: DiagnosticCode::IgnoredArgument,
         span: member.span.clone(),
         primary: format!(
-            "`{key}=` must be a non-negative integer that fits in u32; the value was ignored and the member drawn without it",
+            "`{key}=` must be a non-negative integer that fits in u32; the value was ignored",
         ),
         notes: vec![DiagnosticNote {
             span: None,
@@ -6925,17 +6953,33 @@ struct s size=9x7
 
     #[test]
     fn stair_without_overhang_defers() {
-        // A roof with `overhang=0` (or missing overhang) leaves no room
-        // for the eave to sit outside the wall; the defer explains why.
-        let src = "theme t:\n  slot w -> @cobblestone\n  slot r -> @spruce_stairs\n\nstruct s size=5x5\n  walls mat_slot=w height=3\n  roof kind=flat mat_slot=r\n  stair id=e kind=stairs mat_slot=r side=front half=top facing=out\n";
-        let out = lowered(src);
-        assert!(
-            out.diagnostics
+        // Two ways to arrive at an overhang of zero. The first is the
+        // author writing none. The second is a roof that will not draw,
+        // which contributes none however large its `overhang=` — and an
+        // author who wrote `overhang=2` must not be told the key is
+        // missing.
+        for roof in ["roof kind=flat mat_slot=r", "roof mat_slot=r overhang=2"] {
+            let src = format!(
+                "theme t:\n  slot w -> @cobblestone\n  slot r -> @spruce_stairs\n\nstruct s size=5x5\n  walls mat_slot=w height=3\n  {roof}\n  stair id=e kind=stairs mat_slot=r side=front half=top facing=out\n"
+            );
+            let out = lowered(&src);
+            let reason = out
+                .diagnostics
                 .iter()
-                .any(|d| d.primary.contains("overhang=")),
-            "expected defer for overhang=0, got {:?}",
-            out.diagnostics,
-        );
+                .find(|d| d.primary.contains("eave `stair`"))
+                .unwrap_or_else(|| {
+                    panic!(
+                        "expected the eave to defer under `{roof}`, got {:?}",
+                        out.diagnostics
+                    )
+                })
+                .primary
+                .clone();
+            assert!(
+                reason.contains("draws an overhang"),
+                "the reason must name the overhang a roof draws, not the key the author may well have written: {reason}",
+            );
+        }
     }
 
     #[test]

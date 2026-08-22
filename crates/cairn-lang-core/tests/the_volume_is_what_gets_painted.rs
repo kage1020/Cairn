@@ -39,9 +39,10 @@ fn codes(out: &BlockArrayIr) -> Vec<&str> {
 /// The dims `with` produces, and the dims the same source produces with
 /// `line` deleted. A member that contributes nothing makes the two equal.
 fn with_and_without(source: &str, line: &str, key: &str) -> ((u32, u32, u32), (u32, u32, u32)) {
-    assert!(
-        source.contains(line),
-        "the fixture must contain the line it deletes: {line:?}",
+    assert_eq!(
+        source.matches(line).count(),
+        1,
+        "the fixture must contain the line it deletes exactly once: {line:?}",
     );
     let without = source.replace(line, "");
     (
@@ -113,6 +114,94 @@ fn a_roof_that_draws_still_widens_the_footprint() {
     );
     assert_eq!(with.2, without.2 + 4, "and of the z axis");
     assert!(with.1 > without.1, "and a gable is taller than no roof");
+}
+
+/// A `shed` with no `slope_to=` is a kind the table knows and a roof the
+/// pass will not draw.
+///
+/// `roof_kind_of` answers "is this name in the table", which is a
+/// different question from "will this member paint" — `fill_roof_shed`
+/// returns before its first voxel without a `slope_to=`, and the height
+/// walk already gave it `0`. Filtering the footprint on the name alone
+/// left the two roof walks disagreeing for exactly the reason they
+/// disagreed before this change.
+#[test]
+fn a_shed_with_no_slope_to_does_not_widen_the_footprint() {
+    let line = "  roof kind=shed mat_slot=roof overhang=3\n";
+    let source = format!("{THEME}struct s size=5x5\n  walls mat_slot=wall height=3\n{line}");
+    let (with, without) = with_and_without(&source, line, "struct::s");
+    assert_eq!(
+        with, without,
+        "a shed that draws nothing must not widen the array",
+    );
+}
+
+/// The control on the other side: the same shed with a `slope_to=` draws,
+/// and widens.
+#[test]
+fn a_shed_with_a_slope_to_still_widens_the_footprint() {
+    let line = "  roof kind=shed slope_to=front mat_slot=roof overhang=3\n";
+    let source = format!("{THEME}struct s size=5x5\n  walls mat_slot=wall height=3\n{line}");
+    let (with, without) = with_and_without(&source, line, "struct::s");
+    assert_eq!(with.0, without.0 + 6, "three blocks of eave on each side");
+    assert!(with.1 > without.1, "and a slope over the wall top");
+}
+
+/// A `pressure_plate` outside the wall needs an overhang to stand on, and
+/// the overhang it needs is one a roof draws.
+///
+/// The same gate as the eave stair, one member over: a roof with
+/// `overhang=2` and no `kind=` contributes nothing, so the plate has
+/// nowhere to sit — and must not be told the struct has no overhang when
+/// the source says otherwise.
+#[test]
+fn a_plate_outside_a_wall_names_the_overhang_a_roof_draws() {
+    let source = format!(
+        "{THEME}struct s size=5x5\n  walls mat_slot=wall height=3\n  \
+         roof mat_slot=roof overhang=2\n  \
+         pressure_plate id=p at=front.outside offset=0 y=1 mat_slot=wall\n"
+    );
+    let out = lower_source(&source);
+    let reason = out
+        .diagnostics
+        .iter()
+        .find(|d| d.primary.contains("pressure_plate"))
+        .unwrap_or_else(|| panic!("the plate must be reported: {:?}", codes(&out)))
+        .primary
+        .clone();
+    assert!(
+        reason.contains("draws an overhang"),
+        "the reason must name the overhang a roof draws: {reason}",
+    );
+}
+
+/// A struct with one painting course and one that will not paint keeps the
+/// first and drops the second, whichever order they are written in.
+///
+/// The single-`walls` fixtures above cannot see a filter that gives up on
+/// the first miss, or one that keeps the whole list once any member
+/// paints. Both courses are level-scoped so the surviving one is not the
+/// one at offset zero.
+#[test]
+fn a_mixed_wall_column_keeps_only_the_courses_that_paint() {
+    for (first, second) in [
+        ("walls mat_slot=wall height=2", "walls height=2"),
+        ("walls height=2", "walls mat_slot=wall height=2"),
+    ] {
+        let source = format!(
+            "{THEME}struct s size=5x5\n  \
+             level id=lower y=1\n    {first}\n  \
+             level id=upper y=6\n    {second}\n"
+        );
+        let out = lower_source(&source);
+        let (_, y, _) = dims_of(&out, "struct::s");
+        let painting_is_lower = first.contains("mat_slot=");
+        let expected = if painting_is_lower { 1 + 3 } else { 1 + 8 };
+        assert_eq!(
+            y, expected,
+            "only the painting course raises the array (first={first:?})",
+        );
+    }
 }
 
 // --- B. Walls that paint nothing shape nothing ------------------------------
@@ -245,8 +334,12 @@ fn a_roof_still_draws_over_walls_that_paint_nothing() {
     let out = lower_source(source);
     let built = out.structures.get("struct::s").expect("it lowers");
     assert!(
-        built.palette.entries.len() > 1,
-        "the roof still paints: {:?}",
+        built
+            .palette
+            .entries
+            .iter()
+            .any(|s| s.id == "minecraft:spruce_stairs"),
+        "the roof still paints, with the material it falls back to: {:?}",
         built.palette.entries,
     );
 }

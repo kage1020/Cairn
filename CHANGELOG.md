@@ -162,11 +162,12 @@ and is a separate axis from the Minecraft target version.
 ### Fixed
 
 - *(core)* The volume a struct lowers into is sized for the members that will paint. Three ways a
-  member could shape the array and put no block in it. A `roof` with no recognisable `kind=` gave
-  its `overhang=` to the footprint and nothing to the height, because one of the two roof walks
-  filtered through the kind table and the other did not — a `5x5` struct with `overhang=3` shipped
-  an `11x4x11` array with the walls moved inward and a ring of air around them, and not one roof
-  voxel in it. `walls` whose `mat_slot=` does not resolve raised `Dims.y` by their full height, so
+  member could shape the array and put no block in it. A `roof` that will not draw gave its `overhang=` to
+  the footprint and nothing to the height, because one of the two roof walks asked whether the roof
+  would draw and the other only whether the `kind=` was a name it knew — a `5x5` struct with
+  `overhang=3` shipped an `11x4x11` array with the walls moved inward and a ring of air around
+  them, and not one roof voxel in it. That covers a missing `kind=` and a `kind=shed` with no
+  `slope_to=` alike. `walls` whose `mat_slot=` does not resolve raised `Dims.y` by their full height, so
   a struct with no theme bound shipped a `3x7x3` array whose palette is air and nothing else. Both
   walks over the wall list move together: `spec/compilation.md` §4.7 makes the volume and the
   window carve two readings of one list, and their agreement is what keeps a member from painting
@@ -177,19 +178,30 @@ and is a separate axis from the Minecraft target version.
   air, and a `roof` still draws over them — its material falls back where a wall's does not — now
   seated on the ground plane instead of on walls that were never there.
 
-  `Dims` reaches the artifact: a `.nbt` is that many blocks in each axis and the lockfile records
-  the figure. Sources on the warning paths — a themeless struct, a `walls` with no `mat_slot=` —
-  therefore ship a smaller structure than they did, with no compile error to mark the change,
-  inside `>=2026.8.2, <2027.0.0` (Cargo reads the CalVer `2026` as the major). Unlike a `synth`
-  stage there is no experimental gate in front of `lower` or `compile`. It stays under Fixed
-  because the extent that goes is extent nothing ever painted: the old array held a building
-  smaller than itself and said nothing about the difference.
+  `Dims` reaches the artifact: a `.nbt` is that many blocks in each axis, the lockfile records the
+  figure, and a `place`'s walkway origins are derived from it, so site coordinates move with the
+  extent. Sources that were building with a warning ship a smaller structure than they did, with no
+  compile error to mark the change, inside `>=2026.8.2, <2027.0.0` (Cargo reads the CalVer `2026`
+  as the major). Unlike a `synth` stage there is no experimental gate in front of `lower` or
+  `compile`.
 
-- *(core)* `W_IGNORED_ARGUMENT`: a `key=` the lowering pass could not read, on a member it drew
-  anyway. `roof kind=gable overhang=nope` reported `W_DEFERRED_MEMBER`, which says the member did
+  Two shapes reach it, and only one of them says anything. A themeless struct has
+  `W_NO_THEME_BOUND`; a `walls` with no `mat_slot=` at all is reported by no pass, so that source
+  changes size in silence — the missing diagnostic is tracked on its own. The geometry moves as
+  well as the extent: a roof falls back to a material of its own where a wall falls back to air, so
+  `walls height=3` under `roof kind=gable` over a themeless struct goes from a ridge above a
+  six-high box to one seated on the foundation slab, with nothing between the two outputs to mark
+  it.
+
+  It stays under Fixed because the extent that goes is extent nothing ever painted: the old array
+  held a building smaller than itself and said nothing about the difference.
+
+- *(core)* `W_IGNORED_ARGUMENT`: a `key=` the lowering pass could not read, on a member it went on
+  without. `roof kind=gable overhang=nope` reported `W_DEFERRED_MEMBER`, which says the member did
   not lower — and the roof was in the build, flush with the wall line, exactly as if the
-  `overhang=` had not been written. The new code says what happened: the value was ignored, the
-  member was drawn. Severity is unchanged from the code it replaces, so no exit code moves;
+  `overhang=` had not been written. The new code says the value was ignored, and its note says what
+  that did: the roof drawn flush, or nothing at all when the same roof was going to be dropped for
+  another reason. Severity is unchanged from the code it replaces, so no exit code moves;
   `spec/lint.md` §11.3 would read a dropped value as an error, and promoting it is the same call
   an unknown argument key is waiting on.
 

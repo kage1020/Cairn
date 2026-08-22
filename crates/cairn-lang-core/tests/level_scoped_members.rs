@@ -192,7 +192,7 @@ fn a_level_scoped_roofs_overhang_is_validated_exactly_once() {
             .collect::<Vec<_>>(),
         vec![(
             "W_IGNORED_ARGUMENT",
-            "`overhang=` must be a non-negative integer that fits in u32; the value was ignored and the member drawn without it",
+            "`overhang=` must be a non-negative integer that fits in u32; the value was ignored",
         )],
     );
 }

@@ -184,10 +184,10 @@ pub enum DiagnosticCode {
     /// Distinct from [`Self::DeferredMember`], which says the member did
     /// not lower. A roof whose `overhang=` is unusable is in the build,
     /// flush with the wall line, and reporting that as a deferral tells
-    /// the author to look for a member that is not missing. Warning
-    /// severity for the reason `spec/lint.md` §11.3 draws the line at:
-    /// something the author wrote was dropped, and the artifact is not
-    /// what the source describes.
+    /// the author to look for a member that is not missing.
+    ///
+    /// Where it sits against `spec/lint.md` §11.3, and why it is a
+    /// warning, is argued once on [`Self::severity`] rather than twice.
     IgnoredArgument,
     /// A struct/def scope has no theme bound to it, so every `mat_slot=`
     /// member silently degrades to air during block-array lowering.
@@ -474,15 +474,17 @@ impl DiagnosticCode {
     /// incomplete side and `cairn compile` refuses separately rather than
     /// certifying a partial build.
     ///
-    /// `W_IGNORED_ARGUMENT` sits on the line and is left where the code
-    /// it split off from sat. By §11.3's letter it is an error: the value
-    /// the author wrote is dropped and a default substituted, which is the
-    /// build differing from the source. It stays a warning here because it
-    /// replaces a `W_DEFERRED_MEMBER` on the same shapes, so this change
-    /// moves what the finding *says* without moving any exit code.
-    /// Promoting it is the same call an unknown argument key waits on —
-    /// every source carrying one builds today — and the two want one
-    /// decision rather than two.
+    /// `W_IGNORED_ARGUMENT` sits on the line. §11.3's error clause covers
+    /// a value dropped and a default substituted, which is the build
+    /// differing from the source — but the clause forbids *silent*
+    /// substitution, and this code is the announcement, so the letter
+    /// cuts both ways. It is a warning because it replaces a
+    /// `W_DEFERRED_MEMBER` on the same shapes and moves what the finding
+    /// says without moving any exit code. Promoting it is the same call
+    /// an argument key the compiler does not recognise waits on — those
+    /// are unreported outside the actuator-patch keys, and every source
+    /// carrying one builds today — and the two want one decision rather
+    /// than two. §11.3 records the same.
     ///
     /// Two codes sit close to the line and are decided in their variant
     /// docs: `E_UNKNOWN_SLOT_TARGET` is an error because the members

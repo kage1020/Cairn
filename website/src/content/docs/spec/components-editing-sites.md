@@ -110,9 +110,12 @@ shifts the port out into the overhang ring beyond the structure's outer face. Nu
 offsets (`at=N`) are reserved for a future extension. A `window` must fit both horizontally
 (`offset + size.w ≤ wall_length`) and vertically: `walls height=H` fills the world rows `1 … H`
 — the floor slab owns row `0` — so every row of `y … y + size.h − 1` has to be one of them
-(`y ≥ 1` and `y + size.h ≤ H + 1`). A window that
-the openings pass would defer cannot anchor a walkway either, and the row drops with a
-`W_DEFERRED_MEMBER` whose notes list the door / window / reserved-role contracts in turn. A
+(`y ≥ 1` and `y + size.h ≤ H + 1`). A window whose
+rows fall outside the wall cannot anchor a walkway either, and the row drops with a
+`W_DEFERRED_MEMBER` whose notes list the door / window / reserved-role contracts in turn.
+The port reads the rows the `walls` members *declare*, while the openings pass reads the rows
+they will *paint*, so the two currently part company on a `walls` whose `mat_slot=` does not
+resolve: the cut is deferred and the port still anchors. A
 `window`'s authored `y=` does not lift the port off the ground row — the walkway is a 1-voxel-thick
 flat strip whose Y must agree with the other endpoint — and a `sym=true` window contributes a
 single port at the primary `offset` side (the mirrored cut still appears in the wall, but the
