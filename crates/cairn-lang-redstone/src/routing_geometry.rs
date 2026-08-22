@@ -958,8 +958,8 @@ mod tests {
     /// on its own output, not the wire that fed it — so every sink is
     /// a leaf and the trunk runs beside the row.
     ///
-    /// This is the shape `#186` was filed for: the spanning tree used
-    /// to reach the far cell *through* the near ones.
+    /// This is the shape the router was rewritten for: the spanning
+    /// tree it replaced reached the far cell *through* the near ones.
     #[test]
     fn a_row_of_sinks_is_fed_from_beside_it_and_never_through_itself() {
         let region = region(6, 3, 1);
