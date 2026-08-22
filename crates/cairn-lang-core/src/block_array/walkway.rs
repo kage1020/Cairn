@@ -117,8 +117,10 @@ pub struct WalkwayLayout {
 /// * the window is missing `offset=` / `size=WxH`, or its
 ///   `offset + size.w` exceeds the wall length, or any row of
 ///   `y ..= y + size.h - 1` falls outside the rows the def's `walls`
-///   members paint (so a window that would not even be carved cannot
-///   anchor a walkway either),
+///   members declare (see `wall_column_of`, which reads the declared
+///   rows rather than the painted ones — a window over walls whose
+///   material does not resolve is deferred by the openings pass and
+///   still anchors here),
 /// * the def has no `size=` to bound the wall against,
 /// * an internal arithmetic step (`checked_add` /
 ///   `wall_local_to_grid` bounds / `i32::try_from`) over- or
@@ -854,9 +856,14 @@ fn window_world_xz(
 /// is so a window port can be checked against the same masonry the
 /// openings pass cuts.
 ///
-/// Empty when no `walls` member declares a positive `height=`, the same
-/// condition that prevents the openings pass from carving any door or
-/// window. Only top-level `walls` members are considered: `level y=N`
+/// Empty when no `walls` member declares a positive `height=`. That is no
+/// longer the whole of the openings pass's condition: `super::lower`'s
+/// column also drops a `walls` whose `mat_slot=` will not resolve, since
+/// a wall that paints nothing is not masonry to cut. This helper has no
+/// resolution to consult — `port_world_position` is handed a `DefIr` and
+/// nothing else — so a window port over unpaintable walls still anchors
+/// while the cut itself is deferred. Only top-level `walls` members are
+/// considered either: `level y=N`
 /// flattening lives in `lower.rs` and is not integrated with walkway
 /// port resolution yet (walkways currently only match door / window
 /// ports declared directly under the def body). When a port on a

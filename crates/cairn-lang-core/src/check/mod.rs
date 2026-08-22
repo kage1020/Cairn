@@ -146,6 +146,7 @@ mod tests {
             | C::ThemeVariantRebound => RaisedBy::Resolver,
             C::UnknownSlotTarget => RaisedBy::ResolverAndLowering,
             C::DeferredMember
+            | C::IgnoredArgument
             | C::NoThemeBound
             | C::AbstractTokenDeferred
             | C::UnknownAbstractToken

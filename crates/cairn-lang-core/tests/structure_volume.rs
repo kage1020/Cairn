@@ -128,16 +128,17 @@ fn an_ordinary_scope_is_untouched_by_the_bound() {
 fn an_out_of_range_overhang_is_reported_rather_than_shrinking_the_roof() {
     // `overhang=` is read in exactly one place, so an unusable value had
     // nowhere else to surface: it was treated as absent and the roof quietly
-    // came back to the wall line.
+    // came back to the wall line. It still comes back to the wall line —
+    // that is the fallback — and the finding is what says so.
     let source = format!(
         "{THEME}struct t size=9x7\n  walls mat_slot=wall height=3\n\
          \x20\x20roof kind=flat mat_slot=wall overhang=4294967296\n"
     );
     let out = lower_source(&source);
     assert!(
-        out.diagnostics
-            .iter()
-            .any(|d| { d.code.as_str() == "W_DEFERRED_MEMBER" && d.primary.contains("overhang=") }),
+        out.diagnostics.iter().any(|d| {
+            d.code.as_str() == "W_IGNORED_ARGUMENT" && d.primary.contains("overhang=")
+        }),
         "an unusable `overhang=` must be named; got {:?}",
         out.diagnostics
             .iter()

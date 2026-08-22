@@ -109,9 +109,11 @@ parent / role / side / level / offset から導かれ、その本体の外では
 `window` は水平方向 (`offset + size.w ≤ wall_length`) と垂直方向の両方で壁内に収まる必要が
 あります。垂直方向は `walls height=H` がワールド座標の `1 … H` 行を塗る (`0` 行は床スラブが
 占める) ため、`y … y + size.h − 1` の各行がそのいずれかであること (`y ≥ 1` かつ
-`y + size.h ≤ H + 1`) を要求します。openings パスがカットを
-deferred 化する window はポートも構築されず、行は `W_DEFERRED_MEMBER` で破棄され、ノートには
-door / window / 予約ロールの契約が順番に列挙されます。`window` の `y=` はポートを地面段から
+`y + size.h ≤ H + 1`) を要求します。壁の外に出る行を持つ window は
+ポートも構築されず、行は `W_DEFERRED_MEMBER` で破棄され、ノートには door / window /
+予約ロールの契約が順番に列挙されます。ポートが読むのは `walls` が**宣言する**行で、openings
+パスが読むのは**塗られる**行なので、`mat_slot=` が解決しない `walls` では現状 2 つが食い違い
+ます — カットは deferred になり、ポートは依然として固定されます。`window` の `y=` はポートを地面段から
 持ち上げません — 歩道は 1 voxel 厚の平坦な strip であり、相手側エンドポイントと Y が一致して
 いる必要があるためです。`sym=true` の window はプライマリ `offset` 側の中央 1 点だけがポート
 として参照されます (壁面上の鏡像カットは描画されますが、`id=` は単一の座標に解決されます)。

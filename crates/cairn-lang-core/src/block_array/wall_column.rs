@@ -30,8 +30,9 @@ use std::fmt;
 /// inside a wall rather than merely below the roof.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(super) struct WallColumn {
-    /// Disjoint, non-adjacent, ascending. Empty when the struct declares
-    /// no `walls` with a positive `height=`.
+    /// Disjoint, non-adjacent, ascending. Empty when no `walls` member
+    /// will paint a row — no positive `height=`, or a `mat_slot=` that
+    /// does not resolve.
     spans: Vec<(u32, u32)>,
 }
 
