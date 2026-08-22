@@ -87,8 +87,11 @@ pub(crate) fn output_pad(k: usize, region: &CircuitRegionReservation) -> CellCoo
 /// Shared by the routing pass, which charges blocks of dust into
 /// `wire_length`, and the delay pass, which charges ticks into
 /// `delay_ticks`, so the two cannot disagree about how many strands
-/// feed a cell. The seen-list is a `Vec` because a cell has at most
-/// one driver per port and the scan is shorter than a hash.
+/// feed a cell. The seen-list is a `Vec` because a cell carries at
+/// most one driver per port — a producer contract on
+/// [`crate::netlist_ir::CellNode::drivers`], not something checked
+/// here — so the scan is shorter than a hash. A driver list that
+/// broke the contract would still get the right answer, only slower.
 pub(crate) fn sum_over_driving_nets<F>(drivers: &[CellPortDriver], mut charge: F) -> u32
 where
     F: FnMut(NetRef) -> u32,
@@ -397,6 +400,7 @@ mod tests {
     use cairn_lang_core::error::Span;
 
     use super::*;
+    use crate::netlist_ir::PortName;
 
     fn reservation(width: u32, depth: u32) -> CircuitRegionReservation {
         CircuitRegionReservation {
@@ -429,6 +433,49 @@ mod tests {
         assert!(net_ref_key(NetRef::Input(u32::MAX)) < net_ref_key(NetRef::Cell(0)));
         assert!(net_ref_key(NetRef::Input(0)) < net_ref_key(NetRef::Input(1)));
         assert!(net_ref_key(NetRef::Cell(0)) < net_ref_key(NetRef::Cell(1)));
+    }
+
+    /// The fold charges each net once however far apart its ports sit
+    /// in the driver list.
+    ///
+    /// The two passes that call this both reach it with the repeated
+    /// net *adjacent* — a cell whose `a` and `b` read one signal — so
+    /// a seen-list that only remembered the previous driver would
+    /// satisfy every fixture in the crate while charging a Mux shaped
+    /// `[Sel → net 0, A → net 1, B → net 0]` twice for one strand.
+    /// Called directly because that shape has no producer to reach it
+    /// through.
+    #[test]
+    fn each_driving_net_is_charged_once_however_the_ports_are_ordered() {
+        let drivers = vec![
+            CellPortDriver {
+                port: PortName::Sel,
+                net: NetRef::Input(0),
+            },
+            CellPortDriver {
+                port: PortName::A,
+                net: NetRef::Input(1),
+            },
+            CellPortDriver {
+                port: PortName::B,
+                net: NetRef::Input(0),
+            },
+        ];
+        let mut charged: Vec<NetRef> = Vec::new();
+        let total = sum_over_driving_nets(&drivers, |net| {
+            charged.push(net);
+            match net {
+                NetRef::Input(0) => 10,
+                NetRef::Input(1) => 3,
+                other => panic!("no other net drives this cell: {other:?}"),
+            }
+        });
+        assert_eq!(
+            charged,
+            vec![NetRef::Input(0), NetRef::Input(1)],
+            "one call per net, in first-appearance order",
+        );
+        assert_eq!(total, 13, "10 for the repeated net, once, plus 3");
     }
 
     #[test]

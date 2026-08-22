@@ -4,9 +4,9 @@
 //! §14.5 lays out (Placement → Steiner routing → Delay insertion →
 //! Crossing legalization → Edition legalization). Walks every
 //! [`crate::placement_ir::PlacedCellNode`] in each scope's routed
-//! Placement IR, re-derives per-driver segment lengths from the same
-//! `NetTree` the routing pass laid (routing
-//! stored only the driver-sum `wire_length`, deliberately — the trees
+//! Placement IR, re-derives the routed length of each net driving a
+//! cell from the same `NetTree` the routing pass laid (routing
+//! stored only the summed `wire_length`, deliberately — the trees
 //! are cheap to rebuild and would bloat the JSON wire form if stored
 //! twice), and rewrites every cell's
 //! [`crate::placement_ir::PlacedCellNode::delay_ticks`] from `None` to
@@ -19,7 +19,11 @@
 //!   Bedrock two-torch `TorchAnd`, 0 ticks for the Bedrock bare-dust
 //!   `TorchOr`, and a pessimistic sentinel above every pinned base
 //!   delay for the parser-unreachable `*Unpinned` variants.
-//! - **Implicit buffer repeaters** are counted per driver segment.
+//! - **Implicit buffer repeaters** are counted per driving net, not
+//!   per driver: two ports reading one signal are fed by one strand of
+//!   dust and by the repeaters standing on it, so charging the cell
+//!   once per port says the signal passes through each of them more
+//!   than once.
 //!   A dust segment fresh from a source at strength 15 loses one unit
 //!   of signal per block (`spec/redstone` §14.5 "signal attenuation
 //!   limit of 15"), so a segment of `s` blocks needs
@@ -28,8 +32,8 @@
 //!   Each buffer contributes [`BUFFER_REPEATER_TICKS`] (default
 //!   repeater delay, 1 tick).
 //!
-//! A driver's segment is the length of the *routed* path from the
-//! net's source to that sink —
+//! A segment is the length of the *routed* path from the net's
+//! source to that sink —
 //! `route_to`, not the
 //! straight-line Manhattan distance. A minimum spanning tree drops the
 //! direct source→sink edge whenever two others are cheaper, and the
@@ -646,10 +650,12 @@ mod tests {
     ///
     /// The second row is the control that keeps the rule from
     /// collapsing to "charge a cell once": two ports on two nets are
-    /// two segments, and both are charged. `sig.b`'s pad is one row
-    /// further out, so its segment is 17 against `sig.a`'s 16 — the
-    /// two are distinguishable, and a fold that dropped either would
-    /// land on a different number.
+    /// two segments, and both are charged. It lands on two charges
+    /// where the first row lands on one, so a fold that dropped
+    /// either net — or collapsed to one charge per cell — reports a
+    /// different number. (The two segments are 16 and 17 blocks, which
+    /// `buffer_count_for_segment` maps to the same 1: what separates
+    /// the rows is the number of nets, not the lengths.)
     #[test]
     fn a_cell_is_charged_once_per_net_that_drives_it() {
         for (label, port_b_net, expected) in [

@@ -133,13 +133,13 @@ impl EditionCell {
 
     /// Base tick delay contributed by this cell's physical realisation,
     /// exclusive of any implicit buffer repeaters the delay-insertion
-    /// pass adds for driver segments beyond the dust attenuation limit.
+    /// pass adds for segments beyond the dust attenuation limit.
     ///
     /// `spec/redstone` §14.4 ties tick counts to the cell selection
     /// plus the routed wire length. This method exposes the first
     /// half — the constant tick contribution of the physical tile —
     /// so [`crate::delay::compile_delay`] can compose it with the
-    /// per-driver buffer count without re-deriving the edition split
+    /// per-net buffer count without re-deriving the edition split
     /// each time.
     ///
     /// The canonical numbers follow Minecraft's baseline redstone

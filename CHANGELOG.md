@@ -173,19 +173,22 @@ and is a separate axis from the Minecraft target version.
   cell past the 15-block point naming the one repeater.
 
   The three passes that describe a cell's incoming wire also agree now that two ports reading one
-  signal are one strand. `logic sig.s0 = sig.a and sig.a` reported `wire_length: 2` for one block
-  of dust, and `delay_ticks` charged the repeaters on that one strand once per port; both count
-  each driving net once. `BufferCoord`'s doc states the reading its `{port, coord}` shape has
-  always had — the vector is an attribution list, one entry per segment per repeater that segment
-  passes through, so a coord repeats when one block serves several segments and a consumer
-  counting blocks deduplicates by coord.
+  signal are one strand, and both figures count each driving net once. `logic sig.s0 = sig.a and
+  sig.a` reported `wire_length: 2` for the one block of dust between the pad and the cell. On a
+  segment long enough to need a repeater, `delay_ticks` charged that repeater once per port —
+  a cell delayed by three repeaters where one block stands. `BufferCoord`'s doc states the reading
+  its `{port, coord}` shape has always had — the vector is an attribution list, one entry per
+  segment per repeater that segment passes through, so a coord repeats when one block serves
+  several segments and a consumer counting blocks deduplicates by coord.
 
-  These figures are published. `cairn synth --stage route|delay|crossing` prints `wire_length`,
-  `delay_ticks` and `buffer_coords`, and their values change here with no signal to a consumer
-  reading them — inside `>=2026.8.2, <2027.0.0`, because Cargo reads the CalVer `2026` as the
-  major and a month bump ships it. Sources that were refused now exit 0. It stays under Fixed
-  because the old numbers described a layout nobody could build: two blocks standing on one strand
-  of dust, and a signal charged for passing through each of them more than once.
+  These figures are printed, and their values change here with no signal to a consumer reading
+  them: `cairn synth --stage route|delay|crossing` reports `wire_length`, `delay_ticks` and
+  `buffer_coords`, and sources that were refused now exit 0 — inside `>=2026.8.2, <2027.0.0`,
+  because Cargo reads the CalVer `2026` as the major and a month bump ships it. It stays under
+  Fixed for two reasons. The old numbers described a layout nobody could build: two blocks
+  standing on one strand of dust, and a signal charged for passing through each of them more than
+  once. And `cairn synth` refuses to run without `--experimental-logic-synth`, whose whole purpose
+  is that the shape of this output is outside the stable compatibility tier.
 
 - *(core)* A theme selector whose attribute holds a list selects the members that carry that list.
   `ast::Value` compared its source span as well as its kind, and `ValueKind::List` holds `Value`s —

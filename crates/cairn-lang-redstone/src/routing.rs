@@ -7,7 +7,8 @@
 //! IR, lays a rectilinear Manhattan Steiner tree per driver net inside
 //! the enclosing scope's [`crate::placement_ir::CircuitRegionReservation`],
 //! and rewrites every cell's [`crate::placement_ir::PlacedCellNode::wire_length`]
-//! from `None` to `Some(sum of driver-to-cell Manhattan distances)`.
+//! from `None` to `Some(sum over the nets driving it of the routed
+//! length into the cell)`.
 //! [`crate::placement_ir::PlacedCellNode::delay_ticks`] stays `None`
 //! at this stage; the delay-insertion pass
 //! ([`crate::delay::compile_delay`], stage 3 of §14.5) promotes it
@@ -85,7 +86,7 @@
 //! an escape layer, and `RouteLayer::Via` has no producer at all.
 //! Attenuation accounting has landed as
 //! [`crate::delay::compile_delay`] (stage 3): the
-//! delay pass re-derives per-driver Manhattan segments from the same
+//! delay pass re-derives the same per-net routed segments from the
 //! `NetRef → source coord` mapping used here, counts implicit buffer
 //! repeaters for segments beyond the 15-block dust attenuation limit,
 //! and refuses with `E_ATTENUATION_LIMIT` when a single segment
