@@ -62,8 +62,9 @@
 //!    their prefix, so segments of one net reach the same refresh
 //!    points, and the block already there refreshes every one of
 //!    them. The segment records that coord instead of asking for a
-//!    layer of its own. Only two nets can therefore contend for a
-//!    bridge column, which is what the refusal above is left for.
+//!    layer of its own. Only *distinct* nets can therefore contend for
+//!    a bridge column — one net never asks twice — which is what the
+//!    refusal above is left for.
 //!
 //! [`crate::placement_ir::RouteLayer::Via`] has no producer in v1: the
 //! bridge escape is a single coord, not a segment with distinct

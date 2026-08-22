@@ -176,7 +176,7 @@ and is a separate axis from the Minecraft target version.
   signal are one strand, and both figures count each driving net once. `logic sig.s0 = sig.a and
   sig.a` reported `wire_length: 2` for the one block of dust between the pad and the cell. On a
   segment long enough to need a repeater, `delay_ticks` charged that repeater once per port —
-  a cell delayed by three repeaters where one block stands. `BufferCoord`'s doc states the reading
+  for this two-port cell, twice the delay of the one block standing on the wire. `BufferCoord`'s doc states the reading
   its `{port, coord}` shape has always had — the vector is an attribution list, one entry per
   segment per repeater that segment passes through, so a coord repeats when one block serves
   several segments and a consumer counting blocks deduplicates by coord.
