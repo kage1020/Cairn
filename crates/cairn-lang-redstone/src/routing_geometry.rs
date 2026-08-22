@@ -31,10 +31,14 @@
 //! the shortest-path heuristic for a rectilinear Steiner tree, run
 //! inside the obstacle set rather than on an empty plane.
 //!
-//! Where nothing is in the way the search walks x, then z, then y —
-//! the axis order the passes were built around — so a net with a clear
-//! run between its terminals occupies exactly the L-shape it always
-//! did. Only a net that has something to go around moves.
+//! The path itself is settled by [`Router::straight_run`] when the
+//! closest pair has nothing between them and by [`Router::search`]
+//! when it does — one question, and a shortcut that is allowed only
+//! because no path is shorter than the straight line between its ends.
+//! Both walk x, then z, then y, the axis order the passes were built
+//! around, so a net with a clear run between its terminals occupies
+//! exactly the L-shape it always did. Only a net that has something to
+//! go around moves.
 //!
 //! # What the router does not route around
 //!
@@ -270,12 +274,13 @@ const STEPS: [(i64, i64, i64); 6] = [
 /// - `f = g + h` is A*'s estimate, and popping the smallest is what
 ///   makes the path found the shortest one.
 /// - Preferring the *largest* `g` among equal `f` is what keeps the
-///   search linear where nothing is in the way: every coord on a
-///   shortest path shares one `f`, so a search that spread over them
-///   would visit the whole box between the two ends. Diving instead
-///   walks one of those paths straight to the sink.
-/// - The step index breaks the remaining ties by axis, so a clear run
-///   is the x-then-z-then-y L-shape.
+///   open stretches of a search cheap: every coord on a shortest path
+///   shares one `f`, so a search that spread over them would visit the
+///   whole box between the two ends. Diving instead walks one of those
+///   paths and only fans out where a block stops it.
+/// - The step index breaks the remaining ties by axis, so the way round
+///   a block prefers x, then z, then y — the order [`step_towards`]
+///   walks for the run that needs no search.
 /// - The coord is the last resort, so nothing is left to a hash order.
 #[derive(Debug, PartialEq, Eq)]
 struct Frontier {
