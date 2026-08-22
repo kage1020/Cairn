@@ -176,16 +176,24 @@ fn a_level_scoped_roofs_overhang_is_validated_exactly_once() {
     // see is a roof whose `overhang=` nothing validates — that is what this
     // pins. Reading it twice is the other way to get it wrong.
     //
-    // The message is the one the shared non-negative-integer reader emits,
-    // recorded here as it stands. It overstates the outcome: the roof is
-    // still drawn, flush with the wall line, rather than deferred.
+    // The roof is drawn, flush with the wall line, so the finding is the
+    // one for an argument the pass ignored rather than the one for a
+    // member it dropped. The code is asserted alongside the text because
+    // the two used to disagree: the wording said "deferred" about a
+    // member that is in the build.
     let ir = lowered(&source(
         "\n  level id=l0 y=0\n    roof kind=gable mat_slot=roof overhang=nope\n",
     ));
 
     assert_eq!(
-        defer_reasons(&ir),
-        vec!["`overhang=` must be a non-negative integer that fits in u32".to_owned()],
+        ir.diagnostics
+            .iter()
+            .map(|d| (d.code.as_str(), d.primary.as_str()))
+            .collect::<Vec<_>>(),
+        vec![(
+            "W_IGNORED_ARGUMENT",
+            "`overhang=` must be a non-negative integer that fits in u32; the value was ignored and the member drawn without it",
+        )],
     );
 }
 

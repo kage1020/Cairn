@@ -1057,8 +1057,8 @@ fn lower_body_to_block_array<'a>(
     // authored against the *interior* size and shifted inward by this
     // amount in their respective fill helpers.
     let overhang = max_roof_overhang(&flattened, diagnostics);
-    let max_wall_top = max_wall_top(&flattened);
-    let wall_column = wall_column(&flattened);
+    let max_wall_top = max_wall_top(&flattened, scope, registry, theme_missing);
+    let wall_column = wall_column(&flattened, scope, registry, theme_missing);
     let roof_extra = max_roof_extra_height(&flattened, interior_w, interior_h, overhang);
 
     let dims = Dims {
@@ -1926,6 +1926,29 @@ fn palette_index_for(
         .map(|state| palette.intern(state))
 }
 
+/// Will this member put a block anywhere?
+///
+/// The same question [`palette_index_for`] asks when the massing phase
+/// paints, through the same function, so the volume and the paint cannot
+/// answer differently. The diagnostics are discarded because this is a
+/// question and not a report: the massing phase's own call is what tells
+/// the author that the material did not resolve, and answering it twice
+/// would say it twice.
+///
+/// Sound exactly as long as the walls painter's question stays
+/// [`resolve_member_state`]. A roof already has a painter-side fallback
+/// material; if walls ever grow one, they will paint where this says they
+/// will not, and this predicate has to move with it.
+fn member_will_paint(
+    member: &Member,
+    scope: Option<&ScopeResolution>,
+    registry: Option<&dyn TargetRegistry>,
+    theme_missing: bool,
+) -> bool {
+    let mut discarded = Vec::new();
+    resolve_member_state(member, scope, registry, &mut discarded, theme_missing).is_some()
+}
+
 /// Highest wall voxel Y across every walls member the flatten pass surfaced.
 ///
 /// The struct's roof plane must sit above the tallest wall column, and a
@@ -1936,49 +1959,91 @@ fn palette_index_for(
 /// walls. Members without a positive `height=` contribute `0`; the
 /// `W_DEFERRED_MEMBER` for that member fires later in the massing phase
 /// so a hand-built sizeless `walls` still surfaces its own diagnostic.
-fn max_wall_top(flattened: &[(u32, &Member)]) -> u32 {
-    flattened
-        .iter()
-        .filter(|(_, m)| matches!(m.role, MemberRole::Walls))
-        .filter_map(|(y_offset, m)| height_value(m).map(|h| y_offset.saturating_add(h)))
+///
+/// Members whose material will not resolve contribute `0` for the same
+/// reason — see [`member_will_paint`]. A themeless struct used to reserve
+/// the full wall height for walls that lowered to air, so the artifact was
+/// as tall as the building it did not contain.
+fn max_wall_top(
+    flattened: &[(u32, &Member)],
+    scope: Option<&ScopeResolution>,
+    registry: Option<&dyn TargetRegistry>,
+    theme_missing: bool,
+) -> u32 {
+    painting_walls(flattened, scope, registry, theme_missing)
+        .map(|(y_offset, h)| y_offset.saturating_add(h))
         .max()
         .unwrap_or(0)
 }
 
+/// The `(y_offset, height)` pairs of every walls member that will both
+/// stand and paint.
+///
+/// One walk behind [`max_wall_top`] and [`wall_column`] because
+/// `spec/compilation.md` §4.7 makes them two readings of a single list and
+/// rests the "no member paints past the end of the array" invariant on
+/// their agreeing. Filtering one and not the other would leave the window
+/// carve writing rows the array no longer has.
+fn painting_walls<'a>(
+    flattened: &'a [(u32, &'a Member)],
+    scope: Option<&'a ScopeResolution>,
+    registry: Option<&'a dyn TargetRegistry>,
+    theme_missing: bool,
+) -> impl Iterator<Item = (u32, u32)> + 'a {
+    flattened
+        .iter()
+        .filter(|(_, m)| matches!(m.role, MemberRole::Walls))
+        .filter(move |(_, m)| member_will_paint(m, scope, registry, theme_missing))
+        .filter_map(|(y_offset, m)| height_value(m).map(|h| (*y_offset, h)))
+}
+
 /// Every row the walls members the pass will paint actually occupy.
 ///
-/// Same walk as [`max_wall_top`] over the same list, keeping the spans
-/// instead of collapsing them to their maximum. The two are separate
-/// because they answer different questions: `max_wall_top` sizes the
-/// volume and seats the roof, while this decides whether a rectangle cut
-/// into the wall lands in masonry. Reading the second off the first is
-/// what let a `window y=0` carve through the floor slab and a window
-/// between two level courses hang glass in open air.
-fn wall_column(flattened: &[(u32, &Member)]) -> WallColumn {
-    WallColumn::from_walls(
-        flattened
-            .iter()
-            .filter(|(_, m)| matches!(m.role, MemberRole::Walls))
-            .filter_map(|(y_offset, m)| height_value(m).map(|h| (*y_offset, h))),
-    )
+/// Same walk as [`max_wall_top`] over the same list — [`painting_walls`] —
+/// keeping the spans instead of collapsing them to their maximum. The two
+/// are separate because they answer different questions: `max_wall_top`
+/// sizes the volume and seats the roof, while this decides whether a
+/// rectangle cut into the wall lands in masonry. Reading the second off
+/// the first is what let a `window y=0` carve through the floor slab and a
+/// window between two level courses hang glass in open air.
+fn wall_column(
+    flattened: &[(u32, &Member)],
+    scope: Option<&ScopeResolution>,
+    registry: Option<&dyn TargetRegistry>,
+    theme_missing: bool,
+) -> WallColumn {
+    WallColumn::from_walls(painting_walls(flattened, scope, registry, theme_missing))
 }
 
 /// Largest `overhang=` across the roof members the pass will paint.
 ///
-/// This is the only place `overhang=` is read, so an out-of-range value has
-/// to be diagnosed here or nowhere: treating it as absent silently shrank
-/// the roof back to the wall line with nothing said. Every other `key=`
-/// reaches the author through [`nonneg_int_or_defer`], and this one now
-/// does too. It walks the flattened list for the same reason — a roof this
-/// function cannot see is a roof whose `overhang=` nothing validates.
+/// Two concerns over one walk, and they cover different members.
+///
+/// The **contribution** is filtered through [`roof_kind_of`], the same
+/// filter [`max_roof_extra_height`] applies: a roof with no recognised
+/// `kind=` draws nothing, and a member that draws nothing must not widen
+/// the array. Without the filter it gave the footprint its eaves and the
+/// height nothing, so the walls moved inward and a ring of air surrounded
+/// them.
+///
+/// The **validation** is not filtered, because this is the only place
+/// `overhang=` is read: a value nothing here looks at is a value nothing
+/// anywhere reports. It walks the flattened list for the same reason — a
+/// roof this function cannot see is a roof whose `overhang=` nothing
+/// validates.
 fn max_roof_overhang(flattened: &[(u32, &Member)], diagnostics: &mut Vec<Diagnostic>) -> u32 {
     flattened
         .iter()
         .map(|(_, m)| *m)
         .filter(|m| matches!(m.role, MemberRole::Roof))
-        .filter_map(|m| match nonneg_int_or_defer(m, "overhang", diagnostics) {
-            NonNegRead::Valid(v) => Some(v),
-            NonNegRead::Absent | NonNegRead::Deferred => None,
+        .filter_map(|m| {
+            let read = nonneg_int_or_ignore(
+                m,
+                "overhang",
+                "the roof is drawn flush with the wall line",
+                diagnostics,
+            );
+            roof_kind_of(m).and(read)
         })
         .max()
         .unwrap_or(0)
@@ -2090,10 +2155,45 @@ fn nonneg_int(member: &Member, key: &str) -> Option<u32> {
 /// treat as a default vs which case aborts, and closes the
 /// `y="top"`-silently-becomes-`0` gap that the plain [`nonneg_int`]
 /// return type could not.
+///
+/// Every caller keeps the `Deferred` contract: each one returns or
+/// `continue`s, and the `void=` site reads for validation alone. A caller
+/// that means to draw the member anyway wants
+/// [`nonneg_int_or_ignore`], whose finding says so.
 enum NonNegRead {
     Valid(u32),
     Absent,
     Deferred,
+}
+
+/// Read `key=` as a non-negative `u32` for a caller that carries on
+/// without it.
+///
+/// [`NonNegRead::Deferred`] means "the caller must return", and
+/// `W_DEFERRED_MEMBER` says the member did not lower. A caller that falls
+/// back to a default and draws the member anyway needs the other report:
+/// the value was unusable, here is what was used instead, and the member
+/// is in the build. `consequence` is that second half in the caller's own
+/// words, because only the caller knows what its fallback does to the
+/// output.
+///
+/// `None` covers "absent" as well as "unusable", because a caller with a
+/// default treats them alike — the difference is only whether anything is
+/// reported.
+fn nonneg_int_or_ignore(
+    member: &Member,
+    key: &str,
+    consequence: &str,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Option<u32> {
+    if !member.intent_state.contains_key(key) {
+        return None;
+    }
+    if let Some(v) = nonneg_int(member, key) {
+        return Some(v);
+    }
+    diagnostics.push(diag_ignored_argument(member, key, consequence));
+    None
 }
 
 fn nonneg_int_or_defer(
@@ -2713,14 +2813,19 @@ fn carve_door(
     let Some(side) = side_of(member, diagnostics) else {
         return;
     };
-    // A door needs at least one wall row to carve into. Without a positive
-    // wall height there is nothing above the floor to open up; the
-    // envelope phase has already written roof voxels at y=1, and carving
-    // them would punch a gap into the roof.
+    // A door needs at least one wall row to carve into. Without one there
+    // is nothing above the floor to open up; the envelope phase has
+    // already written roof voxels at y=1, and carving them would punch a
+    // gap into the roof.
+    //
+    // `wall_top` counts the walls that paint, so this reads "no walls
+    // member puts a block anywhere" — which a positive `height=` alone no
+    // longer settles. Naming only the height would send an author who
+    // wrote `height=4` over a themeless struct to the wrong line.
     if ctx.wall_top < 1 {
         diagnostics.push(diag_deferred_member_reason(
             member,
-            "door requires a `walls` member with positive `height=` to carve into",
+            "door requires a `walls` member that paints — a positive `height=` and a `mat_slot=` that resolves — to carve into",
         ));
         return;
     }
@@ -4003,6 +4108,27 @@ fn diag_deferred_member_reason(member: &Member, reason: &str) -> Diagnostic {
                       door[id=<name>] opened_by=sig.<name> actuator patches; other roles \
                       will be added as their lowering rules are spec'd"
                 .to_owned(),
+        }],
+        data: None,
+    }
+}
+
+/// The member is in the build; one of its arguments is not.
+///
+/// The note carries the consequence rather than the role table
+/// `diag_deferred_member_reason` attaches, because the role is not the
+/// problem: this member lowered, and the author needs to know which value
+/// the pass used instead of the one they wrote.
+fn diag_ignored_argument(member: &Member, key: &str, consequence: &str) -> Diagnostic {
+    Diagnostic {
+        code: DiagnosticCode::IgnoredArgument,
+        span: member.span.clone(),
+        primary: format!(
+            "`{key}=` must be a non-negative integer that fits in u32; the value was ignored and the member drawn without it",
+        ),
+        notes: vec![DiagnosticNote {
+            span: None,
+            message: consequence.to_owned(),
         }],
         data: None,
     }
