@@ -176,11 +176,32 @@ impl CellCoord {
         }
     }
 
-    /// Coord with an explicit [`RouteLayer`]. Crate-internal: only
-    /// [`crate::crossing::compile_crossing`] needs to stamp a
-    /// non-`Plane` layer, and pinning it to the crate keeps external
-    /// consumers from building bridge / via coords the pipeline does
-    /// not know how to consume.
+    /// The coord a router lays dust on at `(x, y, z)`:
+    /// [`RouteLayer::Plane`] on the ground layer, [`RouteLayer::Bridge`]
+    /// above it.
+    ///
+    /// One rule for both producers of a lifted coord — the routing
+    /// pass, whose wire climbs to get past a block, and the crossing
+    /// pass, whose repeater climbs off a coord it cannot have. Without
+    /// it the two would key past each other: `(x, 1, z, Plane)` and
+    /// `(x, 1, z, Bridge)` are distinct map keys but one voxel, so a
+    /// repeater could be lifted onto a wire that was already there.
+    #[must_use]
+    pub(crate) const fn routed(x: u32, y: u32, z: u32) -> Self {
+        let layer = if y == 0 {
+            RouteLayer::Plane
+        } else {
+            RouteLayer::Bridge
+        };
+        Self { x, y, z, layer }
+    }
+
+    /// Coord with an explicit [`RouteLayer`]. Test-only: production
+    /// code reaches a non-`Plane` layer through [`Self::routed`], which
+    /// derives it from the height, and an assertion written with that
+    /// same rule would agree with a broken rule. This is the
+    /// independent spelling the assertions are written in.
+    #[cfg(test)]
     #[must_use]
     pub(crate) const fn with_layer(x: u32, y: u32, z: u32, layer: RouteLayer) -> Self {
         Self { x, y, z, layer }

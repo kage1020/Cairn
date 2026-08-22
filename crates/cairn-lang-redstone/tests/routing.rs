@@ -57,11 +57,14 @@ fn placement_from_source(source: &str, edition: Edition) -> ScopedPlacementIr {
 }
 
 /// AC1 — `examples/redstone-door.crn` compiled for Java routes its
-/// sole `JavaRepeaterOr` cell with `wire_length = Some(3)`: the sum of
-/// Manhattan distances from each input pad (v1 convention: `(0, 0,
-/// 1+i)`) to the cell coord `(0, 0, 0)` — one step for `sig.step`,
-/// two for `sig.exit`. `delay_ticks` stays `None` (routing does not
-/// insert delay per `spec/redstone` §14.4; that is stage 3).
+/// sole `JavaRepeaterOr` cell with `wire_length = Some(5)`: the sum of
+/// the routed lengths from each input pad (v1 convention: `(0, 0,
+/// 1+i)`) into the cell coord `(0, 0, 0)`. `sig.step`'s pad is next to
+/// the cell, so its strand is one block. `sig.exit`'s pad is on the far
+/// side of `sig.step`'s, and a pressure plate is a block — so its dust
+/// goes round rather than through, and pays four blocks for two of
+/// distance. `delay_ticks` stays `None` (routing does not insert delay
+/// per `spec/redstone` §14.4; that is stage 3).
 #[test]
 fn redstone_door_java_fills_wire_length_from_input_pads() {
     let source = load_example("redstone-door.crn");
@@ -84,8 +87,8 @@ fn redstone_door_java_fills_wire_length_from_input_pads() {
     let cell = &ir.cells[0];
     assert_eq!(
         cell.wire_length(),
-        Some(3),
-        "wire_length must be Manhattan(step→cell) + Manhattan(exit→cell) = 1 + 2 = 3",
+        Some(5),
+        "wire_length must be route(step→cell) + route(exit→cell) = 1 + 4 = 5",
     );
     assert!(
         cell.delay_ticks().is_none(),
@@ -171,12 +174,15 @@ struct sim size=7x5
         .find(|e| e.name == "sim")
         .expect("sim scope");
     assert_eq!(entry.ir.cells.len(), 3);
-    // cell[0] at (0,0,0), input pads at (0,0,1) and (0,0,2).
-    assert_eq!(entry.ir.cells[0].wire_length(), Some(3));
-    // cell[1] at (1,0,0), same input pad pair — L-shape drivers.
+    // cell[0] at (0,0,0), input pads at (0,0,1) and (0,0,2): one block
+    // from the near pad, four round the near pad from the far one.
+    assert_eq!(entry.ir.cells[0].wire_length(), Some(5));
+    // cell[1] at (1,0,0), same input pad pair, both reached along the
+    // free row at z=1 rather than through cell[0].
     assert_eq!(entry.ir.cells[1].wire_length(), Some(5));
     // cell[2] at (2,0,0), driven by cell[0]=(0,0,0) and cell[1]=(1,0,0).
-    assert_eq!(entry.ir.cells[2].wire_length(), Some(3));
+    // cell[1] is next door; cell[0] has to come round cell[1].
+    assert_eq!(entry.ir.cells[2].wire_length(), Some(5));
     for cell in &entry.ir.cells {
         assert!(
             cell.delay_ticks().is_none(),
@@ -263,8 +269,8 @@ struct dup size=20x5
 /// layout.
 #[test]
 fn post_routing_congestion_fires_route_congestion_and_elides_scope() {
-    // 3 cells × 4 blocks = 12 required cell area vs 4 × 3 × 1 = 12
-    // reserved blocks — placement passes at the boundary, routing
+    // 4 cells × 4 blocks = 16 required cell area vs 4 × 3 × 2 = 24
+    // reserved blocks — placement passes with room to spare, routing
     // then adds wire and overflows.
     let source = r"
 theme t:
@@ -279,10 +285,11 @@ struct pack size=4x3
   logic sig.and_ab   = sig.a and sig.b
   logic sig.or_ab    = sig.a or sig.b
   logic sig.combined = sig.and_ab and sig.or_ab
+  logic sig.last     = sig.combined or sig.a
 
-  door id=d side=front at=center mat_slot=wall opened_by=sig.combined
+  door id=d side=front at=center mat_slot=wall opened_by=sig.last
 
-  circuit region=floor void=1
+  circuit region=floor void=2
 ";
     let placement = placement_from_source(source, Edition::Java);
     let routed = compile_routing(&placement);
@@ -311,7 +318,7 @@ struct pack size=4x3
         d.primary,
     );
     assert!(
-        d.primary.contains("void=1"),
+        d.primary.contains("void=2"),
         "primary should quote the reservation shape, got {:?}",
         d.primary,
     );

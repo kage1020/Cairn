@@ -80,15 +80,19 @@ fn delayed_from_source(source: &str, edition: Edition) -> ScopedPlacementIr {
 /// limit of 15 so no buffer coord materialises. `buffer_coords` stays
 /// empty on the survived cell.
 /// A shared bus of 16 cells legalizes at `void=2`, with one repeater
-/// on the point they all hang off.
+/// standing on free wire beside the row.
 ///
-/// Every cell reads `sig.b`, so the tree reaches them through one
-/// another and the 15-step point of the route into each is the same
-/// coord. It is a cell body — `#186`'s first defect, the route running
-/// through the row it feeds — so the repeater is lifted onto the one
-/// bridge layer `void=2` reserves. Each further cell used to ask for a
-/// layer of its own, and the second one exhausted the reservation:
-/// `E_BUFFER_COORD_COLLISION` on a circuit that needs one repeater.
+/// Every cell reads `sig.b`. The trunk that carries it runs along the
+/// free row at `z=1` and each cell taps off it, so the 15-step point of
+/// the route into each of them is the same coord and one repeater
+/// refreshes all of them.
+///
+/// Both halves of that used to be wrong. The tree reached the far cells
+/// *through* the near ones, so the shared point was a comparator's
+/// body and the repeater had to be lifted onto the one bridge layer
+/// `void=2` reserves; and each further cell asked for a layer of its
+/// own, so the second one exhausted the reservation and a circuit
+/// needing one repeater was refused with `E_BUFFER_COORD_COLLISION`.
 ///
 /// Built from source rather than by hand because the claim is about
 /// what a `.crn` a user can write does, and because the shape depends
@@ -142,8 +146,8 @@ struct chain size=60x5
         .collect();
     assert_eq!(
         blocks,
-        [(13, 1, 0)].into_iter().collect(),
-        "one block, over the cell body the route runs through",
+        [(14, 0, 1)].into_iter().collect(),
+        "one block, on the plane, beside the row rather than over it",
     );
     let attributions = cells
         .iter()
@@ -329,13 +333,65 @@ fn json_output_byte_identical_apart_from_stage_tag_with_crossings() {
     );
 }
 
-/// AC — `examples/crossbar.crn` with `void=1` refuses with
-/// `E_CROSSING_CONGESTION`, proving the fixture actually produces
-/// plane overlaps the pass has to see: a fixture without any
-/// overlap would legalize cleanly at `void=1` and the byte-identity
-/// mirror above would still pass by vacuous truth.
+/// AC — two nets crossing on the plane with `void=1` refuse with
+/// `E_CROSSING_CONGESTION`, proving the crossbar fixture above
+/// actually produces plane overlaps the pass has to see: a fixture
+/// without any overlap would legalize cleanly at `void=1` and the
+/// byte-identity mirror above would still pass by vacuous truth.
+///
+/// Not `examples/crossbar.crn` with its `void=` turned down: that
+/// source lays two cells at the head of the row, which walls the first
+/// one in between the second and the sensor pad column. On one service
+/// layer there is nowhere for a wire to go round that, so stage 2
+/// refuses it before any crossing is computed — which the test below
+/// pins. One cell leaves the row open, and the crossing is what is
+/// left: the sensor whose pad sits behind the other one has to come in
+/// through `(1,0,0)`, and that is the coord the cell drives its
+/// actuators out through.
 #[test]
-fn crossbar_void_one_refuses_with_crossing_congestion() {
+fn two_nets_crossing_on_one_layer_refuse_with_crossing_congestion() {
+    let source = "\
+theme cross:
+  slot wall -> @oak_planks
+  slot door -> @oak_door
+
+struct thin size=5x4
+  floor mat_slot=wall
+  door  id=front side=front at=center mat_slot=door
+  door  id=back  side=back  at=center mat_slot=door
+
+  pressure_plate id=plate1 at=front.outside offset=0 y=0 -> sig.a
+  pressure_plate id=plate2 at=inside.front  offset=0 y=0 -> sig.b
+
+  logic sig.f = sig.a and sig.b
+
+  door[id=front] opened_by=sig.f
+  door[id=back]  opened_by=sig.f
+
+  circuit region=floor void=1
+";
+    let delayed = delayed_from_source(source, Edition::Java);
+    let legalized = compile_crossing(&delayed);
+    assert!(
+        legalized
+            .diagnostics
+            .iter()
+            .any(|d| d.code == DiagnosticCode::CrossingCongestion),
+        "void=1 with two nets over one coord must trip E_CROSSING_CONGESTION: {:?}",
+        legalized.diagnostics,
+    );
+    assert!(
+        legalized.scoped.scopes.iter().all(|e| e.name != "thin"),
+        "failed scope must elide from the legalized IR",
+    );
+}
+
+/// AC — `examples/crossbar.crn` with `void=1` never reaches the
+/// crossing pass: its first cell sits in the corner with a sensor pad
+/// on one side and the second cell on the other, and one service layer
+/// leaves the second sensor's signal no way in. Stage 2 says so.
+#[test]
+fn crossbar_void_one_is_refused_before_any_crossing_is_computed() {
     let source = load_example("crossbar.crn");
     let patched = source.replace("void=2", "void=1");
     assert_ne!(
@@ -343,19 +399,26 @@ fn crossbar_void_one_refuses_with_crossing_congestion() {
         "crossbar.crn no longer contains the `void=2` needle — fixture drifted \
          and the void=1 refusal path is not being exercised",
     );
-    let delayed = delayed_from_source(&patched, Edition::Java);
-    let legalized = compile_crossing(&delayed);
+    let module = parse(&patched).expect("parse");
+    let intent = lower(&module);
+    let synth = synthesize(&intent);
+    let netlist = compile_netlist(&synth.scoped);
+    let edition_netlist = compile_edition_netlist(&netlist, Edition::Java);
+    let placement = compile_placement(&edition_netlist, &intent);
+    let routed = compile_routing(&placement.scoped);
+    let refusal = routed
+        .diagnostics
+        .iter()
+        .find(|d| d.code == DiagnosticCode::RouteCongestion)
+        .unwrap_or_else(|| panic!("void=1 crossbar must refuse: {:?}", routed.diagnostics));
     assert!(
-        legalized
-            .diagnostics
-            .iter()
-            .any(|d| d.code == DiagnosticCode::CrossingCongestion),
-        "void=1 crossbar must trip E_CROSSING_CONGESTION: {:?}",
-        legalized.diagnostics,
+        refusal.primary.contains("cannot reach (0,0,0)"),
+        "the refusal names the cell nothing can reach: {}",
+        refusal.primary,
     );
     assert!(
-        legalized.scoped.scopes.iter().all(|e| e.name != "crossbar"),
-        "failed scope must elide from the legalized IR",
+        routed.scoped.scopes.is_empty(),
+        "failed scope must elide from the routed IR",
     );
 }
 
@@ -528,12 +591,12 @@ struct pair size=40x6
     );
 }
 
-/// One net feeding two actuators shares its Steiner prefix, so both
+/// One net feeding two actuators shares its routed prefix, so both
 /// segments compute the same buffer candidates. One repeater standing
 /// on that strand refreshes the signal for both sinks; giving the
-/// second segment a repeater of its own stacks two blocks on one strand
-/// of dust, and under `void=1` there is no layer to stack into, so the
-/// layout was refused outright.
+/// second segment a repeater of its own would stack two blocks on one
+/// strand of dust, and the coords the two actuators name would stop
+/// matching.
 #[test]
 fn one_net_feeding_two_actuators_shares_the_repeater_on_their_common_span() {
     let source = "\
@@ -550,14 +613,14 @@ struct fan size=40x6
   logic sig.f = sig.a and sig.b
   door[id=d1] opened_by=sig.f
   door[id=d2] opened_by=sig.f
-  circuit region=floor void=1
+  circuit region=floor void=2
 ";
     let delayed = delayed_from_source(source, Edition::Java);
     let out = compile_crossing(&delayed);
 
     assert!(
         out.diagnostics.is_empty(),
-        "a shared span needs no second repeater, and `void=1` has nowhere to put one: {:?}",
+        "a shared span needs no second repeater: {:?}",
         out.diagnostics,
     );
     let scope = out.scoped.scopes.first().expect("the scope legalizes");
@@ -575,7 +638,7 @@ struct fan size=40x6
     );
     assert!(
         shared.iter().all(|c| c.layer == RouteLayer::Plane),
-        "nothing escapes to a bridge, so `void=1` is enough: {shared:?}",
+        "the shared span is this net's own wire, so nothing escapes: {shared:?}",
     );
 }
 

@@ -1,7 +1,0 @@
-# Seeds for failure cases proptest has generated in the past. It is
-# automatically read and these particular cases re-run before any
-# novel cases are generated.
-#
-# It is recommended to check this file in to source control so that
-# everyone who runs the test benefits from these saved cases.
-cc 6d57bc9e8c994a58a67b1feb3aa0700584ab6e6f4a978af41075f604562916f4 # shrinks to (source, sinks) = (CellCoord { x: 5, y: 0, z: 0, layer: Plane }, [CellCoord { x: 0, y: 0, z: 9, layer: Plane }, CellCoord { x: 1, y: 0, z: 0, layer: Plane }])

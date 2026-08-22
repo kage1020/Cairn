@@ -103,7 +103,8 @@ use crate::placement_ir::{
     ScopedPlacementIrEntry,
 };
 use crate::routing_geometry::{
-    collect_nets, input_pad, net_order, net_trees, sum_over_driving_nets,
+    BlockKind, BlockSite, Router, block_sites, collect_nets, input_pad, net_order, net_trees,
+    sum_over_driving_nets,
 };
 
 /// Per-cell footprint used by the post-routing congestion budget.
@@ -232,42 +233,49 @@ fn route_scope(entry: &ScopedPlacementIrEntry) -> ScopeRouting {
         }
     };
 
-    // Occupancy seed: every cell coord, then every input pad, then
-    // every output pad. A duplicate insert means the reservation
-    // cannot fit the pad row without collapsing pads onto a cell or
-    // another pad — that is a real overflow the routing pass owns,
-    // not a silent misroute, so fire `E_ROUTE_CONGESTION` with a
-    // "pad layout" primary immediately.
+    // Occupancy seed: every block standing in the reservation, in the
+    // order `block_sites` lists them. A pad landing on a coord already
+    // taken means the reservation cannot fit the pad row without
+    // collapsing it onto a cell or another pad — that is a real
+    // overflow the routing pass owns, not a silent misroute, so fire
+    // `E_ROUTE_CONGESTION` with a "pad layout" primary immediately.
+    // Two cells cannot collide: a cell's x is its topological index.
+    let blocks = block_sites(&ir, &region);
     let mut occupancy: HashSet<CellCoord> = HashSet::with_capacity(ir.cells.len() * 4);
-    for coord in &cell_coords {
-        occupancy.insert(*coord);
-    }
-    for i in 0..ir.inputs.len() {
-        let pad = input_pad(i, &region);
-        if !occupancy.insert(pad) {
-            return Err(pad_overlap_diagnostic(entry, &region, "input", i, pad));
-        }
-    }
-    for (k, pad) in ir.outputs.iter().map(|o| o.pad).enumerate() {
-        if !occupancy.insert(pad) {
-            return Err(pad_overlap_diagnostic(entry, &region, "output", k, pad));
+    for site in &blocks {
+        if !occupancy.insert(site.coord) && site.kind != BlockKind::Cell {
+            return Err(pad_overlap_diagnostic(entry, &region, site));
         }
     }
 
-    // Nets and their Steiner trees come from `routing_geometry`, which
-    // the delay and crossing passes call with the same arguments. The
-    // tree is the only description of where a net's dust runs, so
-    // stage 3's buffer count and stage 4's buffer coords are measured
-    // against the wire this stage actually laid.
+    // Nets and their routed trees come from `routing_geometry`, which
+    // the delay and crossing passes call with the same arguments — the
+    // same blocks, so the same wire. The tree is the only description
+    // of where a net's dust runs, so stage 3's buffer count and stage
+    // 4's buffer coords are measured against the wire this stage
+    // actually laid.
     //
-    // `net_order` is inert against the v1 occupancy model — both
-    // L-shape elbows have identical Manhattan length and
-    // `l_shape_path` picks a fixed axis order — but pins a stable
-    // schedule for a follow-up pass that consults occupancy when
-    // choosing an elbow.
+    // `net_order` does not change any tree: a net is routed against
+    // the blocks alone, never against another net's dust (see the
+    // routing_geometry module doc on why that stays stage 4's
+    // question). It is here so the occupancy set is filled in an order
+    // that does not depend on a `HashMap`'s.
+    let router = Router::new(&region, &blocks);
     let nets = collect_nets(&ir);
-    let trees = net_trees(&nets, source_of_net);
+    let trees = net_trees(&nets, &router, source_of_net);
     for net in net_order(&nets) {
+        // A sink with no block-free route is a layout this reservation
+        // cannot hold, and saying so here is what keeps a wire drawn
+        // through a comparator out of the IR. Refused before the area
+        // arithmetic below, because the area is not what is wrong.
+        if let Some(&sink) = trees[&net].unreachable().first() {
+            return Err(unroutable_diagnostic(
+                entry,
+                &region,
+                source_of_net(net),
+                sink,
+            ));
+        }
         for coord in trees[&net].wire_path() {
             occupancy.insert(coord);
         }
@@ -415,17 +423,17 @@ fn congestion_diagnostic(
 fn pad_overlap_diagnostic(
     entry: &ScopedPlacementIrEntry,
     reservation: &CircuitRegionReservation,
-    pad_kind: &str,
-    pad_index: usize,
-    pad_coord: CellCoord,
+    site: &BlockSite,
 ) -> Diagnostic {
     let primary = format!(
         "routed netlist for {kind} `{name}` cannot fit its {pad_kind} pad #{pad_index} at ({x},{y},{z}) — the reserved area (void={void}, region {width}x{depth}) collapses I/O pads onto a cell coord or another pad",
         kind = entry.kind.label(),
         name = entry.name,
-        x = pad_coord.x,
-        y = pad_coord.y,
-        z = pad_coord.z,
+        pad_kind = site.kind.as_str(),
+        pad_index = site.index,
+        x = site.coord.x,
+        y = site.coord.y,
+        z = site.coord.z,
         void = reservation.void,
         width = reservation.width,
         depth = reservation.depth,
@@ -438,6 +446,44 @@ fn pad_overlap_diagnostic(
     diag = diag.with_footer(
         "Fix: enlarge `size=WxH` so `depth >= max(inputs, outputs) + 1`, or split into multiple `circuit` blocks",
     );
+    debug_assert_eq!(diag.severity(), Severity::Error);
+    diag
+}
+
+/// A sink the router cannot reach without passing through a block.
+///
+/// `E_ROUTE_CONGESTION` because spec §14.5 states the code as "routing
+/// is confined to the `circuit` region; if it does not fit, fail-loud",
+/// and a reservation with no room for a clear path is a reservation the
+/// layout does not fit in. Its own primary, so it does not read as the
+/// area arithmetic: the area can be ample and the one coord the wire
+/// needs still be a cell body.
+fn unroutable_diagnostic(
+    entry: &ScopedPlacementIrEntry,
+    reservation: &CircuitRegionReservation,
+    source: CellCoord,
+    sink: CellCoord,
+) -> Diagnostic {
+    let primary = format!(
+        "routed netlist for {kind} `{name}` cannot reach ({x},{y},{z}) from the driver at ({sx},{sy},{sz}) — every route between them runs through a cell body or an I/O pad, and dust does not pass through a component",
+        kind = entry.kind.label(),
+        name = entry.name,
+        x = sink.x,
+        y = sink.y,
+        z = sink.z,
+        sx = source.x,
+        sy = source.y,
+        sz = source.z,
+    );
+    let mut diag = Diagnostic::new(
+        DiagnosticCode::RouteCongestion,
+        reservation.span.clone(),
+        primary,
+    );
+    diag = diag.with_footer(format!(
+        "Fix: raise `void` above {void} so the wire has a layer to climb over the cell row, enlarge `size=WxH`, or split into multiple `circuit` blocks",
+        void = reservation.void,
+    ));
     debug_assert_eq!(diag.severity(), Severity::Error);
     diag
 }
@@ -518,34 +564,36 @@ mod tests {
 
     /// `wire_length` reports the dust that feeds a cell, so it counts
     /// the routed path and not the straight line between the driver's
-    /// source and the cell. The detour fixture is 24 blocks of dust
-    /// across 14 blocks of distance; a record carrying 14 beside a
-    /// `delay_ticks` charged for 24 describes no single layout.
+    /// source and the cell. The sink here is 14 blocks from its pad
+    /// with something standing halfway, so it is fed by 16 blocks of
+    /// dust; a record carrying 14 beside a `delay_ticks` charged for
+    /// 16 describes no single layout.
     ///
-    /// Hand-built because v1's placement pass lays cells in one row,
-    /// where the two measures coincide for every cell — the difference
-    /// this pins is reachable only once placement goes off-axis.
+    /// The blocker drives nothing — a block is all the fixture needs,
+    /// and a driver would make it a second sink of the same net.
     #[test]
     fn wire_length_counts_the_routed_path() {
         let mut ir = PlacementIr::new(Edition::Java);
-        ir.region = Some(reservation(16, 8, 2));
+        ir.region = Some(reservation(16, 3, 2));
         ir.inputs.push(crate::netlist_ir::NetlistInput {
             name: cairn_lang_core::ast::DottedRef::new("sig".into(), vec!["a".into()]),
             span: Span::default(),
         });
-        for coord in [CellCoord::new(7, 0, 6), CellCoord::new(14, 0, 1)] {
-            ir.cells.push(PlacedCellNode {
-                cell: EditionCell::JavaRepeaterOr,
-                drivers: vec![CellPortDriver {
-                    port: PortName::A,
-                    net: NetRef::Input(0),
-                }],
-                coord,
-                phase: PlacementPhase::Unrouted,
-                span: Span::default(),
-            });
-        }
-        let routed = compile_routing(&scoped(ScopeKind::Struct, "detour", ir));
+        ir.cells.push(placed_cell(
+            CellCoord::new(7, 0, 1),
+            PlacementPhase::Unrouted,
+        ));
+        ir.cells.push(PlacedCellNode {
+            cell: EditionCell::JavaRepeaterOr,
+            drivers: vec![CellPortDriver {
+                port: PortName::A,
+                net: NetRef::Input(0),
+            }],
+            coord: CellCoord::new(14, 0, 1),
+            phase: PlacementPhase::Unrouted,
+            span: Span::default(),
+        });
+        let routed = compile_routing(&scoped(ScopeKind::Struct, "walled", ir));
         assert!(routed.diagnostics.is_empty(), "{:?}", routed.diagnostics);
         let lengths: Vec<Option<u32>> = routed.scoped.scopes[0]
             .ir
@@ -555,8 +603,8 @@ mod tests {
             .collect();
         assert_eq!(
             lengths,
-            vec![Some(12), Some(24)],
-            "the second cell is 14 blocks away and 24 blocks of wire from its driver",
+            vec![Some(0), Some(16)],
+            "the sink is 14 blocks away and 16 blocks of wire from its driver",
         );
     }
 

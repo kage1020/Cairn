@@ -97,7 +97,9 @@ use crate::placement_ir::{
     CellCoord, CellIdentity, CircuitRegionReservation, PlacementIr, ScopedPlacementIr,
     ScopedPlacementIrEntry,
 };
-use crate::routing_geometry::{collect_nets, input_pad, net_trees, sum_over_driving_nets};
+use crate::routing_geometry::{
+    Router, block_sites, collect_nets, input_pad, net_trees, sum_over_driving_nets,
+};
 
 /// Signal-attenuation ceiling per dust segment (`spec/redstone` §14.5
 /// "signal attenuation limit of 15"). A dust source starts at strength
@@ -272,7 +274,8 @@ fn delay_scope(entry: &ScopedPlacementIrEntry) -> ScopeDelay {
     // that broke the correspondence would otherwise under-report
     // `delay_ticks` in silence.
     let nets = collect_nets(&ir);
-    let trees = net_trees(&nets, source_of_net);
+    let router = Router::new(&region, &block_sites(&ir, &region));
+    let trees = net_trees(&nets, &router, source_of_net);
     let segment_of = |net: NetRef, sink: CellCoord| -> u32 {
         let route = trees
             .get(&net)
@@ -558,31 +561,25 @@ mod tests {
     /// would slide past.
     #[test]
     fn attenuation_cap_measures_the_routed_output_segment() {
-        for (width, refuses) in [(254u32, false), (255, true)] {
+        for (width, refuses) in [(255u32, false), (256, true)] {
             let mut ir = PlacementIr::new(Edition::Java);
             ir.region = Some(reservation(width, 4, 2));
-            for name in ["a", "b"] {
-                ir.inputs.push(crate::netlist_ir::NetlistInput {
-                    name: cairn_lang_core::ast::DottedRef::new("sig".into(), vec![name.into()]),
-                    span: Span::default(),
-                });
-            }
-            // Two cells, so the tree reaches the pad through the row
-            // instead of straight from the sensor: with one cell the
-            // direct pad edge is the cheapest and the route collapses
-            // onto the straight line.
-            for x in [0u32, 1] {
-                ir.cells.push(placed_cell(
-                    EditionCell::JavaRepeaterOr,
-                    CellCoord::new(x, 0, 0),
-                    vec![CellPortDriver {
-                        port: PortName::A,
-                        net: NetRef::Input(1),
-                    }],
-                ));
-            }
+            ir.inputs.push(crate::netlist_ir::NetlistInput {
+                name: cairn_lang_core::ast::DottedRef::new("sig".into(), vec!["a".into()]),
+                span: Span::default(),
+            });
+            // Something standing on the straight line, so the route out
+            // to the pad is the two blocks longer that going round it
+            // costs. Without it the route and the straight line are one
+            // number and the fixture cannot tell which the cap was
+            // measured against.
+            ir.cells.push(placed_cell(
+                EditionCell::JavaRepeaterOr,
+                CellCoord::new(10, 0, 1),
+                Vec::new(),
+            ));
             ir.outputs.push(routed_output(
-                NetRef::Input(1),
+                NetRef::Input(0),
                 CellCoord::new(width - 1, 0, 1),
             ));
             let delayed = compile_delay(&scoped(ScopeKind::Struct, "wide", ir));
@@ -593,8 +590,9 @@ mod tests {
             assert_eq!(
                 fired,
                 refuses,
-                "width {width}: straight line {width}, routed {}, cap {MAX_ATTENUATION_SEGMENT}; got {:?}",
-                width + 2,
+                "width {width}: straight line {}, routed {}, cap {MAX_ATTENUATION_SEGMENT}; got {:?}",
+                width - 1,
+                width + 1,
                 delayed.diagnostics,
             );
         }
