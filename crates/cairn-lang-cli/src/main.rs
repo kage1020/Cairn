@@ -165,17 +165,19 @@ enum Command {
     /// over the routed IR and fills every cell's `delay_ticks` with
     /// the sum of the cell's base delay and each implicit buffer
     /// repeater's `BUFFER_REPEATER_TICKS` contribution over every
-    /// driver segment beyond the `DUST_ATTENUATION_LIMIT`;
+    /// driving net's segment beyond the `DUST_ATTENUATION_LIMIT`;
     /// `--stage crossing` runs crossing legalization over the delayed
     /// IR, refuses with `E_CROSSING_CONGESTION` when the layout has
     /// any cross-net plane overlap at all and `void=<N>` is under 2
     /// (a bridge needs a y-layer above the plane, so `void=1` offers
     /// nowhere to escape to; v1 tests for the layer existing, not for
     /// how many crossings it would have to carry), and fills every
-    /// cell's `buffer_coords` with the concrete coord of each
-    /// implicit buffer repeater (escaping to a `RouteLayer::Bridge`
-    /// y-layer whenever the plane candidate collides with a cell /
-    /// pad / plane crossing / earlier buffer). Every cell of the four
+    /// cell's `buffer_coords` with the coord of the buffer repeater
+    /// each driver segment passes through (escaping to a
+    /// `RouteLayer::Bridge` y-layer whenever the plane candidate
+    /// collides with a cell / pad / another net's wire; a repeater
+    /// this net already placed is recorded rather than escaped
+    /// around, so one block can be named by several segments). Every cell of the four
     /// Placement IR stages carries a
     /// `"stage"` key echoing the flag value that produced the dump
     /// (`placement` / `route` / `delay` / `crossing`), so a consumer
@@ -243,9 +245,9 @@ enum SynthStage {
     /// Routed Placement IR: Steiner routing over the Placement IR
     /// against `--edition`. Stage 2 of `spec/redstone` §14.5's
     /// place-and-route pipeline. Fills every cell's `wire_length`
-    /// with the sum of Manhattan distances from each driver source
-    /// into the cell; `delay_ticks` stays `None` until the
-    /// delay-insertion pass (stage 3) runs.
+    /// with the sum, over the nets driving it, of the routed length
+    /// from that net's source into the cell; `delay_ticks` stays
+    /// `None` until the delay-insertion pass (stage 3) runs.
     Route,
     /// Delayed Placement IR: delay insertion over the routed Placement
     /// IR against `--edition`. Stage 3 of `spec/redstone` §14.5's
@@ -254,7 +256,7 @@ enum SynthStage {
     /// ([`cairn_lang_redstone::EditionCell::base_delay_ticks`]) and
     /// each implicit buffer repeater's
     /// [`cairn_lang_redstone::BUFFER_REPEATER_TICKS`] contribution
-    /// implied by driver segments beyond
+    /// implied by each driving net's segment beyond
     /// [`cairn_lang_redstone::DUST_ATTENUATION_LIMIT`]; refuses with
     /// `E_ATTENUATION_LIMIT` when a segment exceeds the v1 sanity cap
     /// [`cairn_lang_redstone::MAX_ATTENUATION_SEGMENT`], the threshold
@@ -269,13 +271,16 @@ enum SynthStage {
     /// 2, so the `circuit region=<label> void=<N>` reservation has no
     /// y-layer above the plane to escape to; the test is whether a
     /// bridge layer exists, not how many crossings would share it)
-    /// and materialises the concrete coord of
-    /// every implicit buffer repeater the delay pass counted into
-    /// every cell's `buffer_coords`. A buffer whose plane candidate
-    /// collides with a cell / pad / plane crossing / earlier buffer
+    /// and materialises the coord of every implicit buffer repeater
+    /// the delay pass counted into every cell's `buffer_coords`, one
+    /// entry per driver segment that passes through it — so a block
+    /// serving several segments is named once per segment and a
+    /// consumer counting blocks deduplicates by coord. A buffer whose
+    /// plane candidate collides with a cell / pad / another net's wire
     /// escapes to the first free `RouteLayer::Bridge` y-layer inside
-    /// the `void=<N>` budget; if every bridge y-layer at that
-    /// `(x, z)` is also taken, refuses with
+    /// the `void=<N>` budget; a repeater this net has already placed
+    /// on the candidate, or lifted off it, is recorded instead. If
+    /// every bridge y-layer at that `(x, z)` is taken, refuses with
     /// `E_BUFFER_COORD_COLLISION`. v1 does not lift the wire
     /// crossing itself onto `Bridge` — the routed wire path is not
     /// carried on the IR, and stage-5 block-array lowering re-runs

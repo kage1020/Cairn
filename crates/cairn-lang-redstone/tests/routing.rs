@@ -186,6 +186,70 @@ struct sim size=7x5
     }
 }
 
+/// A cell whose two ports read one signal is fed by one strand of
+/// dust, and `wire_length` reports that strand once.
+///
+/// `sig.a and sig.a` is how a `.crn` reaches the shape: logic synth
+/// keeps both operands, so the cell arrives at the routing pass with
+/// `a` and `b` both driven by `Input(0)`. The routed length from the
+/// pad at `(0,0,1)` to the cell at `(0,0,0)` is one block, and a
+/// per-port fold reported two — two blocks of dust in a layout that
+/// has one.
+///
+/// The per-net rule is not "one segment per cell":
+/// `multi_cell_scope_pins_wire_length_including_l_shape_nets` above
+/// drives its cells from two distinct pads and pins the sums.
+#[test]
+fn ports_sharing_a_net_are_measured_once() {
+    let source = r"
+theme t:
+  slot wall -> @oak_planks
+
+struct dup size=20x5
+  floor mat_slot=wall
+
+  pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a
+
+  logic sig.s0 = sig.a and sig.a
+
+  door id=d side=front at=center mat_slot=wall opened_by=sig.s0
+
+  circuit region=floor void=2
+";
+    let placement = placement_from_source(source, Edition::Java);
+    let routed = compile_routing(&placement);
+    assert!(
+        routed.diagnostics.is_empty(),
+        "clean fixture must not raise routing diagnostics: {:?}",
+        routed.diagnostics,
+    );
+
+    let entry = routed
+        .scoped
+        .scopes
+        .iter()
+        .find(|e| e.name == "dup")
+        .expect("dup scope");
+    assert_eq!(entry.ir.cells.len(), 1);
+    let cell = &entry.ir.cells[0];
+    assert_eq!(
+        cell.drivers.len(),
+        2,
+        "the fixture needs both ports on one net to mean anything: {:?}",
+        cell.drivers,
+    );
+    assert!(
+        cell.drivers.iter().all(|d| d.net == cell.drivers[0].net),
+        "both ports must read the same net: {:?}",
+        cell.drivers,
+    );
+    assert_eq!(
+        cell.wire_length(),
+        Some(1),
+        "the pad at (0,0,1) is one block from the cell at (0,0,0), laid once",
+    );
+}
+
 /// AC4 — a scope whose synthesised netlist packs cells to the cell-only
 /// budget boundary (`cells.len() * CELL_FOOTPRINT == reserved_area`)
 /// passes placement but fires `E_ROUTE_CONGESTION` once the routing

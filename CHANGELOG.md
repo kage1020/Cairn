@@ -161,6 +161,35 @@ and is a separate axis from the Minecraft target version.
 
 ### Fixed
 
+- *(redstone)* One buffer repeater per strand of dust, and one charge for it. A Steiner tree's
+  sinks share their prefix, so two segments of one net compute the same repeater candidate: two
+  ports of a cell reading one signal, two cells hanging off the same 15-block point, a cell and an
+  actuator. Only the actuator segments recognised the repeater already standing there. A cell
+  segment escaped around it onto a `void=<N>` bridge layer — a second block on a strand of dust
+  that has one — and a candidate that had been *lifted* onto a bridge was recognised by nobody, so
+  the next segment of the same net lifted a second block over the same point and the two together
+  exhausted the reservation. A shared bus of 16 cells was refused outright with
+  `E_BUFFER_COORD_COLLISION` at `void=2`, for layers it did not need; it now legalizes, with every
+  cell past the 15-block point naming the one repeater.
+
+  The three passes that describe a cell's incoming wire also agree now that two ports reading one
+  signal are one strand, and both figures count each driving net once. `logic sig.s0 = sig.a and
+  sig.a` reported `wire_length: 2` for the one block of dust between the pad and the cell. On a
+  segment long enough to need a repeater, `delay_ticks` charged that repeater once per port —
+  for this two-port cell, twice the delay of the one block standing on the wire. `BufferCoord`'s doc states the reading
+  its `{port, coord}` shape has always had — the vector is an attribution list, one entry per
+  segment per repeater that segment passes through, so a coord repeats when one block serves
+  several segments and a consumer counting blocks deduplicates by coord.
+
+  These figures are printed, and their values change here with no signal to a consumer reading
+  them: `cairn synth --stage route|delay|crossing` reports `wire_length`, `delay_ticks` and
+  `buffer_coords`, and sources that were refused now exit 0 — inside `>=2026.8.2, <2027.0.0`,
+  because Cargo reads the CalVer `2026` as the major and a month bump ships it. It stays under
+  Fixed for two reasons. The old numbers described a layout nobody could build: two blocks
+  standing on one strand of dust, and a signal charged for passing through each of them more than
+  once. And `cairn synth` refuses to run without `--experimental-logic-synth`, whose whole purpose
+  is that the shape of this output is outside the stable compatibility tier.
+
 - *(core)* A theme selector whose attribute holds a list selects the members that carry that list.
   `ast::Value` compared its source span as well as its kind, and `ValueKind::List` holds `Value`s —
   so the derived equality recursed through that comparison and two lists spelled identically on two

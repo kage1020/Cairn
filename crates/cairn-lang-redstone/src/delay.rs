@@ -4,9 +4,9 @@
 //! §14.5 lays out (Placement → Steiner routing → Delay insertion →
 //! Crossing legalization → Edition legalization). Walks every
 //! [`crate::placement_ir::PlacedCellNode`] in each scope's routed
-//! Placement IR, re-derives per-driver segment lengths from the same
-//! `NetTree` the routing pass laid (routing
-//! stored only the driver-sum `wire_length`, deliberately — the trees
+//! Placement IR, re-derives the routed length of each net driving a
+//! cell from the same `NetTree` the routing pass laid (routing
+//! stored only the summed `wire_length`, deliberately — the trees
 //! are cheap to rebuild and would bloat the JSON wire form if stored
 //! twice), and rewrites every cell's
 //! [`crate::placement_ir::PlacedCellNode::delay_ticks`] from `None` to
@@ -19,7 +19,11 @@
 //!   Bedrock two-torch `TorchAnd`, 0 ticks for the Bedrock bare-dust
 //!   `TorchOr`, and a pessimistic sentinel above every pinned base
 //!   delay for the parser-unreachable `*Unpinned` variants.
-//! - **Implicit buffer repeaters** are counted per driver segment.
+//! - **Implicit buffer repeaters** are counted per driving net, not
+//!   per driver: two ports reading one signal are fed by one strand of
+//!   dust and by the repeaters standing on it, so charging the cell
+//!   once per port says the signal passes through each of them more
+//!   than once.
 //!   A dust segment fresh from a source at strength 15 loses one unit
 //!   of signal per block (`spec/redstone` §14.5 "signal attenuation
 //!   limit of 15"), so a segment of `s` blocks needs
@@ -28,8 +32,8 @@
 //!   Each buffer contributes [`BUFFER_REPEATER_TICKS`] (default
 //!   repeater delay, 1 tick).
 //!
-//! A driver's segment is the length of the *routed* path from the
-//! net's source to that sink —
+//! A segment is the length of the *routed* path from the net's
+//! source to that sink —
 //! `route_to`, not the
 //! straight-line Manhattan distance. A minimum spanning tree drops the
 //! direct source→sink edge whenever two others are cheaper, and the
@@ -93,7 +97,7 @@ use crate::placement_ir::{
     CellCoord, CellIdentity, CircuitRegionReservation, PlacementIr, ScopedPlacementIr,
     ScopedPlacementIrEntry,
 };
-use crate::routing_geometry::{collect_nets, input_pad, net_trees};
+use crate::routing_geometry::{collect_nets, input_pad, net_trees, sum_over_driving_nets};
 
 /// Signal-attenuation ceiling per dust segment (`spec/redstone` §14.5
 /// "signal attenuation limit of 15"). A dust source starts at strength
@@ -326,10 +330,16 @@ fn delay_scope(entry: &ScopedPlacementIrEntry) -> ScopeDelay {
 }
 
 /// Fill every cell's `delay_ticks` with `base_delay(cell) + Σ buffer
-/// ticks per driver`. Buffers are counted from the routed length of
-/// each driver's path, measured via `segment_of`; the routing pass
-/// stored only the driver-sum `wire_length` so re-derivation is
-/// required here (documented in the pass module doc).
+/// ticks per driving net`. Buffers are counted from the routed length
+/// of each net's path into this cell, measured via `segment_of`; the
+/// routing pass stored only the summed `wire_length` so re-derivation
+/// is required here (documented in the pass module doc).
+///
+/// Per net rather than per driver: two ports reading one signal are
+/// refreshed by the repeaters on one strand of dust, and charging the
+/// cell once per port says the signal passes through each of them
+/// more than once. See [`sum_over_driving_nets`], which stage 2
+/// measures the same cell with.
 ///
 /// Computes into a side vector first so `ir.cells` can be borrowed
 /// immutably while the driver routes are measured through
@@ -353,11 +363,9 @@ fn attribute_delay_ticks<F>(
         .iter()
         .zip(cell_coords.iter())
         .map(|(cell, &sink)| {
-            let buffer_ticks = cell
-                .drivers
-                .iter()
-                .map(|driver| buffer_repeater_ticks_for_segment(segment_of(driver.net, sink)))
-                .fold(0u32, u32::saturating_add);
+            let buffer_ticks = sum_over_driving_nets(&cell.drivers, |net| {
+                buffer_repeater_ticks_for_segment(segment_of(net, sink))
+            });
             cell.cell.base_delay_ticks().saturating_add(buffer_ticks)
         })
         .collect();
@@ -628,6 +636,73 @@ mod tests {
             coord,
             phase: PlacementPhase::Routed { wire_length: 0 },
             span: Span::default(),
+        }
+    }
+
+    /// A cell is charged once per net that drives it, not once per
+    /// port.
+    ///
+    /// Two ports on one net are fed by one strand of dust and by the
+    /// repeaters standing on it: `segment_of` is a function of the
+    /// `(net, sink)` pair, so the second port re-derives the first
+    /// port's number and adding them describes a signal that passes
+    /// through every repeater twice.
+    ///
+    /// The second row is the control that keeps the rule from
+    /// collapsing to "charge a cell once": two ports on two nets are
+    /// two segments, and both are charged. It lands on two charges
+    /// where the first row lands on one, so a fold that dropped
+    /// either net — or collapsed to one charge per cell — reports a
+    /// different number. (The two segments are 16 and 17 blocks, which
+    /// `buffer_count_for_segment` maps to the same 1: what separates
+    /// the rows is the number of nets, not the lengths.)
+    #[test]
+    fn a_cell_is_charged_once_per_net_that_drives_it() {
+        for (label, port_b_net, expected) in [
+            (
+                "both ports on one net",
+                NetRef::Input(0),
+                1 + BUFFER_REPEATER_TICKS,
+            ),
+            (
+                "one port each on two nets",
+                NetRef::Input(1),
+                1 + 2 * BUFFER_REPEATER_TICKS,
+            ),
+        ] {
+            let mut ir = PlacementIr::new(Edition::Java);
+            ir.region = Some(reservation(20, 3, 2));
+            for name in ["a", "b"] {
+                ir.inputs.push(crate::netlist_ir::NetlistInput {
+                    name: cairn_lang_core::ast::DottedRef::new("sig".into(), vec![name.into()]),
+                    span: Span::default(),
+                });
+            }
+            ir.cells.push(placed_cell(
+                EditionCell::JavaComparatorAnd,
+                CellCoord::new(16, 0, 1),
+                vec![
+                    CellPortDriver {
+                        port: PortName::A,
+                        net: NetRef::Input(0),
+                    },
+                    CellPortDriver {
+                        port: PortName::B,
+                        net: port_b_net,
+                    },
+                ],
+            ));
+            let delayed = compile_delay(&scoped(ScopeKind::Struct, "charged", ir));
+            assert!(
+                delayed.diagnostics.is_empty(),
+                "{label}: {:?}",
+                delayed.diagnostics,
+            );
+            assert_eq!(
+                delayed.scoped.scopes[0].ir.cells[0].delay_ticks(),
+                Some(expected),
+                "{label}: base 1 plus one charge per driving net",
+            );
         }
     }
 

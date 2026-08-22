@@ -13,14 +13,16 @@
 //! unit tests (`src/crossing.rs`) because the example set does not yet
 //! contain a `.crn` whose Steiner trees overlap.
 
+use std::fmt::Write as _;
 use std::path::PathBuf;
 
 use cairn_lang_core::Edition;
 use cairn_lang_core::check::Severity;
 use cairn_lang_core::{lower, parse};
 use cairn_lang_redstone::{
-    BufferSegment, DiagnosticCode, RouteLayer, ScopedPlacementIr, compile_crossing, compile_delay,
-    compile_edition_netlist, compile_netlist, compile_placement, compile_routing, synthesize,
+    BufferSegment, DiagnosticCode, PlacedCellNode, RouteLayer, ScopedPlacementIr, compile_crossing,
+    compile_delay, compile_edition_netlist, compile_netlist, compile_placement, compile_routing,
+    synthesize,
 };
 
 mod common;
@@ -77,6 +79,82 @@ fn delayed_from_source(source: &str, edition: Edition) -> ScopedPlacementIr {
 /// driver segments (1 and 2 blocks) sit under the dust-attenuation
 /// limit of 15 so no buffer coord materialises. `buffer_coords` stays
 /// empty on the survived cell.
+/// A shared bus of 16 cells legalizes at `void=2`, with one repeater
+/// on the point they all hang off.
+///
+/// Every cell reads `sig.b`, so the tree reaches them through one
+/// another and the 15-step point of the route into each is the same
+/// coord. It is a cell body — `#186`'s first defect, the route running
+/// through the row it feeds — so the repeater is lifted onto the one
+/// bridge layer `void=2` reserves. Each further cell used to ask for a
+/// layer of its own, and the second one exhausted the reservation:
+/// `E_BUFFER_COORD_COLLISION` on a circuit that needs one repeater.
+///
+/// Built from source rather than by hand because the claim is about
+/// what a `.crn` a user can write does, and because the shape depends
+/// on the placement pass laying cells at `x = topological index`.
+#[test]
+fn a_shared_bus_of_sixteen_cells_needs_one_repeater() {
+    let mut source = String::from(
+        r"
+theme t:
+  slot wall -> @oak_planks
+
+struct chain size=60x5
+  floor mat_slot=wall
+
+  pressure_plate id=pa at=front.outside offset=0 y=0 -> sig.a
+  pressure_plate id=pb at=inside.front  offset=0 y=0 -> sig.b
+
+  logic sig.s0 = sig.a and sig.b
+",
+    );
+    for i in 1..16 {
+        writeln!(
+            source,
+            "  logic sig.s{i} = sig.s{prev} and sig.b",
+            prev = i - 1
+        )
+        .expect("writing to a String cannot fail");
+    }
+    source.push_str(
+        r"
+  door id=d side=front at=center mat_slot=wall opened_by=sig.s15
+
+  circuit region=floor void=2
+",
+    );
+
+    let delayed = delayed_from_source(&source, Edition::Java);
+    let legalized = compile_crossing(&delayed);
+    assert!(
+        legalized.diagnostics.is_empty(),
+        "a bus every cell hangs off needs one repeater, not one per cell: {:?}",
+        legalized.diagnostics,
+    );
+
+    let cells = &legalized.scoped.scopes[0].ir.cells;
+    assert_eq!(cells.len(), 16, "the fixture is the 16-cell chain");
+    let blocks: std::collections::BTreeSet<(u32, u32, u32)> = cells
+        .iter()
+        .flat_map(PlacedCellNode::buffer_coords)
+        .map(|b| (b.coord.x, b.coord.y, b.coord.z))
+        .collect();
+    assert_eq!(
+        blocks,
+        [(13, 1, 0)].into_iter().collect(),
+        "one block, over the cell body the route runs through",
+    );
+    let attributions = cells
+        .iter()
+        .filter(|c| !c.buffer_coords().is_empty())
+        .count();
+    assert!(
+        attributions >= 2,
+        "the sharing is only pinned if more than one cell names it: {attributions}",
+    );
+}
+
 #[test]
 fn redstone_door_java_carries_no_buffers() {
     let source = load_example("redstone-door.crn");

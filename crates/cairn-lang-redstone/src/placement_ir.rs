@@ -196,6 +196,20 @@ impl CellCoord {
 /// consumer can group buffers by their source segment without
 /// recomputing `floor((s - 1) / DUST_ATTENUATION_LIMIT)` from scratch.
 ///
+/// **The vector is an attribution list, not a block list.** There is
+/// one entry per segment per repeater that segment's signal passes
+/// through, so [`Self::coord`] repeats whenever one repeater serves
+/// more than one segment: two ports of a cell reading one signal, two
+/// cells hanging off the same point of a Steiner tree, a cell and an
+/// actuator on one net. That is the shape the `{port, coord}` pair
+/// asks for — the answer to "which segments does this block serve" is
+/// a list, and the entries carry it one at a time. **A consumer that
+/// wants the number of blocks deduplicates by `coord`**; a consumer
+/// that wants a segment's repeaters filters by `port`. The delay pass
+/// charges ticks per driving net for the same reason, so
+/// `delay_ticks - base_delay_ticks` counts the deduplicated blocks
+/// and not the entries.
+///
 /// **Order contract on `Vec<BufferCoord>`** (as returned by
 /// [`PlacedCellNode::buffer_coords`]): entries appear in
 /// [`PlacedCellNode::drivers`] iteration order, and within one
