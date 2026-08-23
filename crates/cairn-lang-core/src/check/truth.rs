@@ -194,6 +194,14 @@ fn repeated_pattern(row: &TruthRow, first: &TruthRow) -> Diagnostic {
 }
 
 /// The combinations no row assigns, or `None` when the table is complete.
+///
+/// Neither subtraction below can underflow, and the guarantee is the
+/// parser's: every pattern in `covered` came off a row, and a row whose
+/// width is not the arity is refused where the arity is in hand, so
+/// `covered` is a set of `arity`-wide patterns and has at most `2^arity`
+/// members. Stated rather than branched on — `IntentModule`'s fields are
+/// `pub`, so a hand-built IR could break it, and this crate documents its
+/// invariants where the next reader looks instead of guarding them.
 fn unassigned_combinations(span: &Span, arity: u32, covered: &HashSet<&str>) -> Option<Diagnostic> {
     let sample = missing_sample(arity, covered);
     if sample.is_empty() {

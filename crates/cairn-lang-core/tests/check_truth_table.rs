@@ -228,6 +228,35 @@ fn a_table_short_of_a_combination_is_a_warning() {
         text.contains('4'),
         "and the number of combinations two inputs have: {text:?}",
     );
+    assert!(
+        !text.contains("more"),
+        "three missing rows are the whole set, not a sample of it: {text:?}",
+    );
+}
+
+/// The sentence says "and N more" only when there is an N, and the
+/// boundary is the cap itself. Three inputs are eight combinations, so a
+/// table covering four leaves exactly the cap and one covering three
+/// leaves one past it — the pair that tells a cap of four from a cap of
+/// three or five, which nothing else here does.
+#[test]
+fn the_sample_says_it_is_a_sample_only_when_it_is_one() {
+    let whole = rendered(&only(&table(
+        "sig.a, sig.b, sig.c",
+        "000->0; 001->0; 010->0; 011->0",
+    )));
+    assert!(
+        !whole.contains("more"),
+        "four missing rows are exactly what the sentence lists: {whole:?}",
+    );
+    let sampled = rendered(&only(&table(
+        "sig.a, sig.b, sig.c",
+        "000->0; 001->0; 010->0",
+    )));
+    assert!(
+        sampled.contains("and 1 more"),
+        "five missing rows are one past what the sentence lists: {sampled:?}",
+    );
 }
 
 /// A repeated row does not fill the slot it repeats, so the two findings
