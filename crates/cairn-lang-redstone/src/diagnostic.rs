@@ -174,9 +174,22 @@ pub enum DiagnosticCode {
     /// the same graph written that way lowers at any length, because each
     /// reference is already resolved when it is reached.
     LogicNestingTooDeep,
-    /// A member carries a signal binding its kind cannot host: a
-    /// `-> sig.X` sensor tail, or one of the actuator argument keys
-    /// `spec/redstone` §14.2 lists. §14.2 pairs each binding with the
+    /// A signal binding is written where nothing reads it — on a member
+    /// whose kind cannot host it, or inside the `[selector]` on a line
+    /// whose binding belongs after the brackets.
+    ///
+    /// The first is a `-> value` sensor tail, or one of the actuator
+    /// argument keys `spec/redstone` §14.2 lists, on the wrong
+    /// component. Asked before the value is looked at: no edit to the
+    /// value makes `walls` carry a tail, so reporting the value first
+    /// would send the author round the loop.
+    ///
+    /// The second is `door[id=front,opened_by=sig.x]`. The brackets pick
+    /// a member that already exists and the binding is written after
+    /// them, which is the shape §14.2 uses;
+    /// `block_array::recognize_actuator_patch` refuses any selector
+    /// attribute but `id=` for the door patch, and this is the same
+    /// answer for every host. §14.2 pairs each binding with the
     /// component that carries it — `opened_by=` with `door`, `lit_by=`
     /// with `lamp`, `powered_by=` with `piston`, `fired_by=` with
     /// `dispenser`, and the sensor tail with a sensor — and the front end
@@ -189,12 +202,22 @@ pub enum DiagnosticCode {
     /// `opened_by=` have no legal host at all yet. Fix: move the binding
     /// onto the component that carries it.
     LogicMisplacedBinding,
-    /// A `logic` line's left-hand side is not a `sig.`-headed name.
-    /// Sensors emit into the `sig.` namespace and actuators consume from
-    /// it, so a binding whose LHS sits outside it defines something
-    /// nothing can ever read — and it was lowered anyway, so a cell took
-    /// a placement coordinate for a signal with no consumer. Fix: name
-    /// the signal `sig.<name>`.
+    /// A position that has to name a signal does not. Sensors emit into
+    /// the `sig.` namespace and actuators consume from it, so a name
+    /// outside it can never be read, and three positions carry one:
+    ///
+    /// - a `logic` line's left-hand side, which was lowered anyway, so a
+    ///   cell took a placement coordinate for a signal with no consumer;
+    /// - a sensor's `-> value` tail;
+    /// - the value under an actuator key on the component that reads it.
+    ///
+    /// The second and third used to be recognised by their value, so a
+    /// value that named no signal entered no branch and the binding was
+    /// dropped in silence — the component reached placement wired to
+    /// nothing. Fix: name the signal `sig.<name>`. Where the value is a
+    /// bare identifier the message offers the spelling, that being the
+    /// one shape with a single reading; `opened_by=3` names nothing that
+    /// adding `sig.` would repair.
     LogicInvalidSignal,
     /// An argument whose value is a `sig.`-headed reference sits under a
     /// key that is not one of §14.2's actuator keys. The value says the
@@ -208,10 +231,15 @@ pub enum DiagnosticCode {
     /// Deliberately keyed on the value rather than on a per-keyword
     /// argument schema — no such schema exists yet, and this closes the
     /// silent-actuator class without one, because no legal non-actuator
-    /// argument inside a member's `intent_state` takes a `sig.` value. A
-    /// `[...]` selector can carry the same pair and is not walked, and an
-    /// actuator key holding a *non*-`sig.` value is not reached at all;
-    /// both are the value axis rather than this one.
+    /// argument inside a member's `intent_state` takes a `sig.` value.
+    /// The two shapes this once said nothing about are both answered
+    /// now, by their own codes. An actuator key holding a *non*-`sig.`
+    /// value is [`Self::LogicInvalidSignal`] *on the component that key
+    /// is paired with* — anywhere else the host fault wins and it is
+    /// [`Self::LogicMisplacedBinding`], and on a keyword the role table
+    /// does not know it is `E_UNKNOWN_KEYWORD` and nothing more. A pair
+    /// inside a `[...]` selector is answered the same three ways, by
+    /// whichever fault moving it out of the brackets would not fix.
     LogicUnknownBindingKey,
 }
 

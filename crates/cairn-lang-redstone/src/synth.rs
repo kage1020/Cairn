@@ -14,19 +14,44 @@
 //! canonicalise operand order before the CSE lookup so
 //! `sig.a or sig.b` and `sig.b or sig.a` share a node too.
 //!
-//! Detection contract, keyed on the member's role rather than on the
-//! shape of its arguments — `spec/redstone` §14.2 writes each binding on
-//! one component, and a binding elsewhere describes no circuit:
-//! - **Sensor**: a `-> sig.X` tail on a member whose keyword is in
+//! Detection contract. `spec/redstone` §14.2 writes each binding on one
+//! component, and a binding elsewhere describes no circuit, so what a
+//! line is *for* is read from the line and then held to that:
+//! - **Sensor**: a `-> value` tail on a member whose keyword is in
 //!   [`SENSOR_HOSTS`]. A follow-up recognizer for `lever` / `button` /
 //!   `daylight` / `observer` costs one entry in that table.
 //! - **Actuator**: one of the argument keys in [`ACTUATOR_BINDINGS`]
-//!   (`opened_by` / `powered_by` / `lit_by` / `fired_by`) with a `sig.X`
-//!   value, on the component that table pairs the key with.
+//!   (`opened_by` / `powered_by` / `lit_by` / `fired_by`) on the
+//!   component that table pairs the key with.
 //!
-//! Either binding written anywhere else is `E_LOGIC_MISPLACED_BINDING`,
-//! and a `sig.X` value under a key that is no binding at all is
-//! `E_LOGIC_UNKNOWN_BINDING_KEY`.
+//! The *claim* comes from either side of a pair and the value is then
+//! checked against it. A tail claims a sensor whatever the value is; an
+//! actuator key claims a wire whatever the value is; and a `sig.X` value
+//! still claims one under a key nothing reads, which is
+//! `E_LOGIC_UNKNOWN_BINDING_KEY`. Reading the claim off the value alone
+//! is what let a well-spelled key with a malformed value fall through
+//! every branch and vanish.
+//!
+//! Three faults, and each is reported by the one finding the other
+//! repairs would not answer:
+//! - the **host** cannot carry this binding — `E_LOGIC_MISPLACED_BINDING`,
+//!   asked first, because no edit to the value makes `walls` carry a tail;
+//! - the **key** is one nothing reads — `E_LOGIC_UNKNOWN_BINDING_KEY`,
+//!   with the nearest key it might be a typo for;
+//! - the **value** names no signal — `E_LOGIC_INVALID_SIGNAL`, the code
+//!   the `logic` left-hand side has always taken, because all three
+//!   positions are the same rule about the same namespace.
+//!
+//! A pair that claims nothing on either side is an argument like any
+//! other. What its *key* means is the per-keyword schema question, which
+//! no pass answers yet, so `hieght=3` is nobody's finding here.
+//!
+//! The `[selector]` carries the same pairs and is never a binding site:
+//! the brackets pick a member that already exists and the binding is
+//! written after them. It is walked, and answered by the same three
+//! faults — a bracketed pair whose only fault *is* the brackets earns
+//! `E_LOGIC_MISPLACED_BINDING` saying so, and one that would still be
+//! wrong outside them is told that instead.
 //!
 //! Cascade suppression: any signal name that has already produced an
 //! `E_LOGIC_UNBOUND_SIGNAL` (either because a `logic` binding for it
@@ -75,7 +100,7 @@ const ACTUATOR_BINDINGS: &[(&str, &str)] = &[
     ("fired_by", "dispenser"),
 ];
 
-/// The component keywords that may carry a `-> sig.X` sensor tail.
+/// The component keywords that may carry a `->` sensor tail.
 ///
 /// §14.2's sensor set is `lever` / `button` / `daylight` / `observer`, none
 /// of which the surface accepts yet; `pressure_plate` is the one sensor the
@@ -330,54 +355,111 @@ fn collect_member<'a>(m: &'a Member, scope: ScopeRef<'_>, out: &mut ScopeCollect
     // of being told that `lamp` is not a keyword.
     let unknown_keyword = matches!(m.role, MemberRole::Other(_));
 
-    // Sensor: `-> sig.X` tail on the surface line.
-    if let Some(binding) = &m.binding
-        && let ValueKind::DotRef(dr) = &binding.kind
-        && dr.head() == SIGNAL_HEAD
-    {
-        if !unknown_keyword && SENSOR_HOSTS.contains(&m.role.keyword()) {
+    // Sensor: a `-> value` tail claims to emit a signal, whatever the
+    // value turns out to be. Reading the claim off the *tail* and not off
+    // the value is what makes `-> a` a mistake rather than a line nobody
+    // looks at: the author who writes one has written a sensor.
+    //
+    // The host is asked first. No edit to the value makes `walls` carry a
+    // tail, so telling that author about the `sig.` namespace would send
+    // them round the loop to be told about the host next time.
+    if let Some(binding) = &m.binding {
+        let named = signal_named_by(binding);
+        if unknown_keyword || !SENSOR_HOSTS.contains(&m.role.keyword()) {
+            if !unknown_keyword {
+                out.diagnostics
+                    .push(diag_misplaced_sensor(m, binding, scope));
+            }
+            if let Some(dr) = named {
+                out.refused_drivers.insert(dr.clone());
+            }
+        } else if let Some(dr) = named {
             out.sensors.push(PendingSensor {
                 name: dr.clone(),
                 span: binding.span.clone(),
             });
         } else {
-            if !unknown_keyword {
-                out.diagnostics
-                    .push(diag_misplaced_sensor(m, binding, scope));
-            }
-            out.refused_drivers.insert(dr.clone());
+            out.diagnostics
+                .push(diag_tail_names_no_signal(m, binding, scope));
         }
     }
 
-    // Actuator: an `opened_by=` / `powered_by=` / ... argument whose value
-    // is a `sig.X` dotted ref, on the component §14.2 pairs that key with.
+    // Actuator: an `opened_by=` / `powered_by=` / ... argument on the
+    // component §14.2 pairs that key with. The key claims the binding on
+    // its own — the value used to have to be a `sig.X` dotted ref for this
+    // loop to look at the field at all, which is how a well-spelled key
+    // with a malformed value went straight past it.
     for (key, vspan) in &m.intent_state.fields {
-        let ValueKind::DotRef(dr) = &vspan.value.kind else {
+        let named = signal_named_by(&vspan.value);
+        let Some(claim) = binding_claim(key, named) else {
+            // Neither side says a binding was meant. What the key *does*
+            // mean is the argument-schema question, which no pass answers
+            // yet.
             continue;
         };
-        if dr.head() != SIGNAL_HEAD {
-            continue;
+        match claim {
+            BindingClaim::UnreadKey => {
+                // The value is a signal, so the author meant to wire
+                // something; the key is not a binding anyone reads.
+                if !unknown_keyword {
+                    out.diagnostics
+                        .push(diag_unknown_binding_key(m, key, vspan, scope));
+                }
+            }
+            BindingClaim::Actuator(host) => {
+                if unknown_keyword || m.role.keyword() != host {
+                    if !unknown_keyword {
+                        out.diagnostics
+                            .push(diag_misplaced_actuator(m, key, host, vspan, scope));
+                    }
+                } else if let Some(dr) = named {
+                    out.actuators.push(PendingActuator {
+                        driver_name: dr.clone(),
+                        span: vspan.span.clone(),
+                    });
+                    continue;
+                } else {
+                    out.diagnostics
+                        .push(diag_argument_names_no_signal(m, key, vspan, scope));
+                }
+            }
         }
-        let Some((_, host)) = ACTUATOR_BINDINGS.iter().find(|(k, _)| k == key) else {
-            // The value is a signal, so the author meant to wire
-            // something; the key is not a binding anyone reads.
-            if !unknown_keyword {
-                out.diagnostics
-                    .push(diag_unknown_binding_key(m, key, vspan, scope));
-            }
+        if let Some(dr) = named {
             out.refused_consumers.insert(dr.clone());
+        }
+    }
+
+    // The `[selector]` carries the same `key=value` pairs and is not a
+    // binding site: §14.2 writes the actuator patch as
+    // `door[id=front] opened_by=sig.x`, with the binding after the
+    // brackets, and `block_array`'s patch recogniser already refuses any
+    // selector attribute but `id=`. Walked here for the same answer in
+    // this pass's vocabulary, and for every host rather than the door
+    // patch alone.
+    for (key, vspan) in m.selector.iter().flatten() {
+        let named = signal_named_by(&vspan.value);
+        let Some(claim) = binding_claim(key, named) else {
             continue;
         };
-        if !unknown_keyword && m.role.keyword() == *host {
-            out.actuators.push(PendingActuator {
-                driver_name: dr.clone(),
-                span: vspan.span.clone(),
+        if !unknown_keyword {
+            // Report whichever fault moving the pair out of the brackets
+            // would not fix, which is the same rule the argument list
+            // follows one level in. `door[id=front,lit_by=sig.a]` moved
+            // out is still a `lit_by=` on a door, and
+            // `door[id=front,oepend_by=sig.a]` moved out is still a key
+            // nothing reads — so telling either author about the
+            // brackets first would be advice that does not work. Only a
+            // key this member does host has the brackets as its one
+            // fault.
+            out.diagnostics.push(match claim {
+                BindingClaim::Actuator(host) if host == m.role.keyword() => {
+                    diag_binding_inside_selector(m, key, vspan, scope)
+                }
+                BindingClaim::Actuator(host) => diag_misplaced_actuator(m, key, host, vspan, scope),
+                BindingClaim::UnreadKey => diag_unknown_binding_key(m, key, vspan, scope),
             });
-        } else {
-            if !unknown_keyword {
-                out.diagnostics
-                    .push(diag_misplaced_actuator(m, key, host, vspan, scope));
-            }
+        }
+        if let Some(dr) = named {
             out.refused_consumers.insert(dr.clone());
         }
     }
@@ -396,6 +478,56 @@ fn collect_member<'a>(m: &'a Member, scope: ScopeRef<'_>, out: &mut ScopeCollect
         collect_binding(b, scope, out);
     }
     out.asserts.extend(asserts);
+}
+
+/// The signal reference a value names, or `None` for a value that names
+/// no signal at all.
+///
+/// One reading of "is this a signal reference" for all three positions
+/// that hold one — the sensor tail, an argument value, and a selector
+/// attribute — so the three cannot start disagreeing about what counts.
+///
+/// Two segments, not just a `sig.` head. `sig.a.b` used to pass here and
+/// register a port whose name the block-array pass then refused
+/// (`must be a two-segment signal reference`), so the front end and the
+/// lowering disagreed about what a signal name is and the front end was
+/// the lenient one.
+fn signal_named_by(value: &Value) -> Option<&DottedRef> {
+    match &value.kind {
+        ValueKind::DotRef(dr) if dr.head() == SIGNAL_HEAD && dr.tail().len() == 1 => Some(dr),
+        _ => None,
+    }
+}
+
+/// Why a `key=value` pair is read as a binding the author meant to write.
+#[derive(Debug, Clone, Copy)]
+enum BindingClaim {
+    /// The key is one of [`ACTUATOR_BINDINGS`], which is a binding whatever
+    /// the value says. Carries the component §14.2 pairs the key with —
+    /// `'static` because it comes from that table and from nowhere else,
+    /// which is what the borrow says and a lifetime parameter would not.
+    Actuator(&'static str),
+    /// The key is not a binding anyone reads, and the value is a signal —
+    /// so the author meant to wire something and put it under a key that
+    /// nothing consumes. Only built when a signal *was* named, which is
+    /// what every caller reads back off `named` rather than off here.
+    UnreadKey,
+}
+
+/// Whether a pair claims to be a binding, from either side.
+///
+/// Either side is the point. Keying only on the value is what let a
+/// well-spelled key with a malformed value fall through; keying only on
+/// the key would lose [`DiagnosticCode::LogicUnknownBindingKey`], which
+/// exists because a `sig.` value says a binding was meant even where the
+/// key does not. A pair that says nothing on either side is an argument
+/// like any other, and what its key means is a question no pass answers
+/// yet.
+fn binding_claim(key: &str, named: Option<&DottedRef>) -> Option<BindingClaim> {
+    if let Some((_, host)) = ACTUATOR_BINDINGS.iter().find(|(k, _)| *k == key) {
+        return Some(BindingClaim::Actuator(host));
+    }
+    named.map(|_| BindingClaim::UnreadKey)
 }
 
 /// Take one `logic` line, or refuse its left-hand side.
@@ -439,7 +571,128 @@ fn collect_binding<'a>(b: &'a LogicBinding, scope: ScopeRef<'_>, out: &mut Scope
     });
 }
 
-/// A `-> sig.X` tail on a member that is not a sensor.
+/// The repair for a value that names no signal, when there is one.
+///
+/// A bare identifier is a name with the namespace left off, so
+/// `opened_by=a` has exactly one reading and the message can offer it.
+/// Every other kind is a value of some other sort standing where a name
+/// belongs — `opened_by=3` names nothing that adding `sig.` would fix —
+/// so the message asks for the shape instead of guessing at a name.
+///
+/// `sig` is the identifier that is not a name: the author wrote the
+/// namespace and stopped, and `sig.sig` is not what they meant. It takes
+/// the shape-only advice with every other kind.
+fn signal_spelling_for(value: &Value) -> Option<String> {
+    match &value.kind {
+        ValueKind::Ident(name) if name != SIGNAL_HEAD => Some(format!("{SIGNAL_HEAD}.{name}")),
+        _ => None,
+    }
+}
+
+/// The `Fix:` line the two value-side refusals share, so the sensor tail
+/// and the actuator argument cannot start offering different repairs for
+/// the same mistake.
+fn signal_value_fix(value: &Value, drop_advice: &str) -> String {
+    match signal_spelling_for(value) {
+        Some(spelling) => format!("Fix: write `{spelling}`, or {drop_advice}"),
+        None => format!("Fix: name a signal as `{SIGNAL_HEAD}.<name>`, or {drop_advice}"),
+    }
+}
+
+/// A `-> value` tail on a sensor whose value names no signal.
+///
+/// The tail is what says a signal was meant; the value is what fails to
+/// name one. Reported at the value, because that is the text to change.
+fn diag_tail_names_no_signal(m: &Member, binding: &Value, scope: ScopeRef<'_>) -> Diagnostic {
+    Diagnostic::new(
+        DiagnosticCode::LogicInvalidSignal,
+        binding.span.clone(),
+        format!(
+            "{label} `{keyword}` emits into a signal, but its `->` tail is \
+             {found} rather than a name in the `{SIGNAL_HEAD}.` namespace \
+             sensors emit into and actuators read from",
+            label = scope.label(),
+            keyword = m.role.keyword(),
+            found = binding.describe(),
+        ),
+    )
+    .with_note(m.span.clone(), "declared here")
+    .with_footer(signal_value_fix(
+        binding,
+        "drop the `->` tail if this sensor drives nothing.",
+    ))
+}
+
+/// An actuator key on its own host whose value names no signal.
+fn diag_argument_names_no_signal(
+    m: &Member,
+    key: &str,
+    vspan: &ValueWithSpan,
+    scope: ScopeRef<'_>,
+) -> Diagnostic {
+    Diagnostic::new(
+        DiagnosticCode::LogicInvalidSignal,
+        vspan.span.clone(),
+        format!(
+            "{label} `{key}=` wires this `{keyword}` to a signal, but names \
+             {found} rather than a name in the `{SIGNAL_HEAD}.` namespace \
+             sensors emit into and actuators read from",
+            label = scope.label(),
+            keyword = m.role.keyword(),
+            found = vspan.value.describe(),
+        ),
+    )
+    .with_note(m.span.clone(), "declared here")
+    .with_footer(signal_value_fix(
+        &vspan.value,
+        "drop the argument if this component is not wired.",
+    ))
+}
+
+/// A binding written inside the `[selector]` rather than after it.
+///
+/// The brackets select a member that already exists; what the line does
+/// to it is written after them. Only reached for a key this member does
+/// host, so the brackets are the one thing wrong with the line and the
+/// `Fix:` can rebuild it verbatim — a key the member cannot host, or one
+/// nothing reads, goes to the finding that owns *that* fault, because
+/// moving it out of the brackets would not answer it.
+fn diag_binding_inside_selector(
+    m: &Member,
+    key: &str,
+    vspan: &ValueWithSpan,
+    scope: ScopeRef<'_>,
+) -> Diagnostic {
+    debug_assert!(
+        ACTUATOR_BINDINGS
+            .iter()
+            .any(|(k, host)| *k == key && *host == m.role.keyword()),
+        "the `Fix:` below rebuilds the line with this key on this member, \
+         which only compiles for a key §14.2 pairs with it",
+    );
+    Diagnostic::new(
+        DiagnosticCode::LogicMisplacedBinding,
+        vspan.span.clone(),
+        format!(
+            "{label} `{key}=` is inside `{keyword}`'s `[selector]`, where \
+             nothing reads it; the brackets pick the member and the binding \
+             is written after them",
+            label = scope.label(),
+            keyword = m.role.keyword(),
+        ),
+    )
+    .with_note(m.span.clone(), "declared here")
+    .with_footer(format!(
+        "Fix: move `{key}=` out of the brackets, as in \
+         `{keyword}[id=<label>] {key}={SIGNAL_HEAD}.<name>`.",
+        keyword = m.role.keyword(),
+    ))
+}
+
+/// A `->` tail on a member that is not a sensor.
+///
+/// Whatever the tail names: the host is asked before the value, so
+/// `walls -> a` reaches here rather than the value-side refusal.
 fn diag_misplaced_sensor(m: &Member, binding: &Value, scope: ScopeRef<'_>) -> Diagnostic {
     Diagnostic::new(
         DiagnosticCode::LogicMisplacedBinding,
