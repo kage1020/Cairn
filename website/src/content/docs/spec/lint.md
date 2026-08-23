@@ -91,6 +91,22 @@ first-class parts of the spec; messages MUST be in a shape that feeds the self-c
     cursor, the offending separator, the offending endpoint, or the run
     of trailing extras. Each endpoint is reported separately: the two
     ends are independent fix sites.
+  - `E_TRUTH_TABLE_EMPTY` — an `assert truth(...)` with no rows. The construct exists to state
+    something about the circuit and a table with no rows states nothing, so no context around it
+    makes it verify anything — the argument `E_INVALID_REQUIRES` makes for a `@requires` the
+    compiler cannot read.
+  - `E_TRUTH_TABLE_CONFLICT` — two rows of one table assign the same input combination different
+    outputs. Reported on the later row, with a note at the first row carrying that pattern. Which
+    of the two an evaluator would read is not stated: the simulator is unbuilt, and the repair is
+    to decide which row is wrong either way.
+  - `W_TRUTH_TABLE_DUPLICATE_ROW` — a row repeats an earlier one and agrees with it. The table
+    asserts the same thing without it, so the repair is to delete either row. Kept apart from
+    `E_TRUTH_TABLE_CONFLICT` because the two ask for different work.
+  - `W_TRUTH_TABLE_PARTIAL` — the rows leave input combinations unassigned. A warning rather than
+    an error: every row present is still a real constraint. A repeated row fills no combination,
+    so one table can earn this and `W_TRUTH_TABLE_DUPLICATE_ROW` together. `data` carries the
+    input count, how many combinations the rows cover, and the lowest few they do not — a sample
+    rather than the set, since twenty inputs have a million combinations.
   - `E_THEME_VARIANT_MISSING` — the module declares a theme, and the pinned edition can bind none
     of its per-edition variants (`spec/versioning-editions.md` §10.7). Only fires under
     `--edition`: with no pin there is nothing a variant fails to satisfy, and the same source is

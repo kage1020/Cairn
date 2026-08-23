@@ -127,6 +127,18 @@ pub fn noisy_sources() -> Vec<String> {
         // Positional values, singular and plural.
         format!("{THEME}struct s size=5x5\n  roof flat mat_slot=wall\n"),
         format!("{THEME}struct s size=5x5\n  window front G 2 2 2x2 mat_slot=wall\n"),
+        // Truth tables that verify less than they look like they do: no
+        // rows, a pattern assigned twice each way, and combinations left
+        // out. One source per shape — the four codes word their repair
+        // differently and a single table would leave three unrendered.
+        format!("{THEME}struct s size=3x3\n  assert truth(sig.a, sig.b -> sig.o) {{ }}\n"),
+        format!(
+            "{THEME}struct s size=3x3\n  assert truth(sig.a, sig.b -> sig.o) {{ 00->0; 00->1; 01->0; 10->0; 11->0 }}\n"
+        ),
+        format!(
+            "{THEME}struct s size=3x3\n  assert truth(sig.a, sig.b -> sig.o) {{ 00->0; 00->0; 01->0; 10->0; 11->0 }}\n"
+        ),
+        format!("{THEME}struct s size=3x3\n  assert truth(sig.a, sig.b -> sig.o) {{ 00->0 }}\n"),
         // A slot bound to something that is not a material token, and a
         // selector that matches nothing.
         format!("theme t:\n  slot floor -> 42\n\nstruct s size=3x3\n  floor mat_slot=floor\n"),

@@ -5,7 +5,7 @@
 //! [`DiagnosticSink`] and the top-level [`check`] runs every pass before
 //! returning. The order `duplicate` → `keyword_allowlist` →
 //! `member_scope` → `connect_arity` → `nesting` → `positional` →
-//! `requires` → `type_mismatch` → [`crate::resolve::resolve`] is fixed so the emitted
+//! `requires` → `truth` → `type_mismatch` → [`crate::resolve::resolve`] is fixed so the emitted
 //! list is stable across runs, but the diagnostics themselves are sorted by
 //! source position once everything has finished collecting.
 //!
@@ -29,6 +29,7 @@ mod nesting;
 mod positional;
 mod requires;
 mod sink;
+mod truth;
 mod type_mismatch;
 
 pub use diagnostic::{
@@ -73,6 +74,7 @@ pub fn check(module: &Module, ir: &IntentModule, edition: Option<Edition>) -> Ve
     nesting::run(ir, &mut sink);
     positional::run(ir, &mut sink);
     requires::run(module, &mut sink);
+    truth::run(ir, &mut sink);
     type_mismatch::run(module, &mut sink);
     for d in crate::resolve::resolve(ir, edition).diagnostics {
         sink.push(d);
@@ -101,7 +103,7 @@ mod tests {
     enum RaisedBy {
         /// `duplicate` / `keyword_allowlist` / `member_scope` /
         /// `connect_arity` / `nesting` / `positional` / `requires` /
-        /// `type_mismatch`, run directly by [`check`].
+        /// `truth` / `type_mismatch`, run directly by [`check`].
         Syntactic,
         /// `crate::resolve::resolve`, whose diagnostics [`check`] merges in.
         Resolver,
@@ -128,7 +130,11 @@ mod tests {
             | C::InvalidRequires
             | C::TypeMismatchLabel
             | C::TypeMismatchSize
-            | C::ConnectArity => RaisedBy::Syntactic,
+            | C::ConnectArity
+            | C::TruthTableEmpty
+            | C::TruthTableConflict
+            | C::TruthTableDuplicateRow
+            | C::TruthTablePartial => RaisedBy::Syntactic,
             C::UnresolvedSlot
             | C::ThemeSelectorUnmatched
             | C::UnresolvedPlaceRef
@@ -194,6 +200,8 @@ mod tests {
                 "E_DUPLICATE_SLOT",
                 "E_INVALID_REQUIRES",
                 "E_MISPLACED_MEMBER",
+                "E_TRUTH_TABLE_CONFLICT",
+                "E_TRUTH_TABLE_EMPTY",
                 "E_TYPE_MISMATCH_LABEL",
                 "E_TYPE_MISMATCH_SIZE",
                 "E_UNEXPECTED_POSITIONAL",
