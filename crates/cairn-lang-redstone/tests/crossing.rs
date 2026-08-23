@@ -446,13 +446,29 @@ struct thin size=5x4
 ";
     let delayed = delayed_from_source(source, Edition::Java);
     let legalized = compile_crossing(&delayed);
+    let refusal = legalized
+        .diagnostics
+        .iter()
+        .find(|d| d.code == DiagnosticCode::CrossingCongestion)
+        .unwrap_or_else(|| {
+            panic!(
+                "void=1 with two nets over one coord must trip \
+                 E_CROSSING_CONGESTION: {:?}",
+                legalized.diagnostics,
+            )
+        });
+    // The one cell here drives both doors, so it has the widest fanout
+    // in the scope and the pass routes it first. A finding is not read
+    // in that order: `sig.b` leads because the IR lists its inputs
+    // before its cells. This fixture is the only one in the repo where
+    // the two orders disagree, so it is the only place the choice is
+    // observable.
     assert!(
-        legalized
-            .diagnostics
-            .iter()
-            .any(|d| d.code == DiagnosticCode::CrossingCongestion),
-        "void=1 with two nets over one coord must trip E_CROSSING_CONGESTION: {:?}",
-        legalized.diagnostics,
+        refusal
+            .primary
+            .contains("including sig.b vs cell #0 at (1,0,0)"),
+        "the pair is named in the order the IR lists its nets: {}",
+        refusal.primary,
     );
     assert!(
         legalized.scoped.scopes.iter().all(|e| e.name != "thin"),

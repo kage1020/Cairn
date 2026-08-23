@@ -1881,6 +1881,32 @@ mod tests {
         }
     }
 
+    /// The refusal counts pairs of nets, the unit the warning half
+    /// counts in, and names the lowest of them.
+    ///
+    /// Three nets over one row is three pairs, and it is the number a
+    /// reader compares against a `void=2` run of the same source — so
+    /// a refusal that counted shared coords instead would report six
+    /// where the warnings report three, and one of the two would be
+    /// describing something else. `sig.a vs sig.b` leads because
+    /// `net_ref_key` puts the inputs first, and `(9,0,1)` is the
+    /// lowest coord that pair shares.
+    #[test]
+    fn the_refusal_counts_pairs_of_nets_and_names_the_lowest() {
+        let legalized = compile_crossing(&two_nets_over_one_coord_scope(1));
+        let diag = legalized
+            .diagnostics
+            .iter()
+            .find(|d| d.code == DiagnosticCode::CrossingCongestion)
+            .expect("crossing must fire");
+        assert!(
+            diag.primary
+                .contains("has 3 wire crossing(s), including sig.a vs sig.b at (9,0,1)"),
+            "three pairs, named lowest first: {}",
+            diag.primary,
+        );
+    }
+
     #[test]
     fn crossing_diagnostic_names_both_conflicting_nets() {
         // Same crossing fixture as the void=1 refusal, this time
