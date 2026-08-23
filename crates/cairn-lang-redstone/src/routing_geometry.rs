@@ -1279,6 +1279,52 @@ mod tests {
         );
     }
 
+    /// A coord reached twice for the same cost keeps the parent that
+    /// got there first.
+    ///
+    /// The search relaxes on a strictly cheaper `g`, so a second route
+    /// arriving at the same price is dropped. Relaxing on a tie instead
+    /// leaves the wire identical — the same coords in the same order —
+    /// and moves the *routes* through it: on this layout the sink at
+    /// `(4,0,1)` would hang off `(2,0,1)` and read six blocks where it
+    /// reads eight here. `wire_length`, `delay_ticks`, and every buffer
+    /// coord are measured along that path, so the tie is not free to
+    /// drift.
+    ///
+    /// Neither answer is shorter wire and neither is wrong; what is
+    /// wrong is the number changing without anyone saying so. Found by
+    /// sweeping the two relaxations over random layouts and diffing the
+    /// routes — 5 of 4000 differ, and no fixture in the crate was one
+    /// of them.
+    #[test]
+    fn a_coord_reached_twice_for_one_price_keeps_the_first_parent() {
+        let region = region(6, 4, 1);
+        let source = CellCoord::new(3, 0, 2);
+        let sinks = [
+            CellCoord::new(4, 0, 1),
+            CellCoord::new(1, 0, 0),
+            CellCoord::new(3, 0, 1),
+            CellCoord::new(4, 0, 2),
+        ];
+        let mut blocks = vec![source];
+        blocks.extend(sinks);
+        let tree = router(&region, &blocks).tree(source, &sinks);
+        assert_eq!(
+            tree.route_to(CellCoord::new(4, 0, 1)),
+            Some(vec![
+                CellCoord::new(3, 0, 2),
+                CellCoord::new(2, 0, 2),
+                CellCoord::new(1, 0, 2),
+                CellCoord::new(1, 0, 1),
+                CellCoord::new(2, 0, 1),
+                CellCoord::new(2, 0, 0),
+                CellCoord::new(3, 0, 0),
+                CellCoord::new(4, 0, 0),
+                CellCoord::new(4, 0, 1),
+            ]),
+        );
+    }
+
     /// The tree is a function of its terminals as a set. Asking for the
     /// same sinks in another order is the same wire, so two passes
     /// walking the same layout cannot disagree about it.
