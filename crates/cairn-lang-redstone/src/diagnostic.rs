@@ -139,10 +139,13 @@ pub enum DiagnosticCode {
     /// which two and where rather than letting the reserved height
     /// imply they were handled.
     ///
-    /// Warning rather than error because the design is not unbuildable
-    /// — the layer it needs is reserved and unused, and the pass that
-    /// will use it is the one this warning is waiting for. The
-    /// `void < 2` half of the same defect has no such layer and takes
+    /// Warning rather than error because the reservation has a layer
+    /// above the plane, so there is somewhere a lift could go and the
+    /// author's `void=` is not what is standing in the way. Not a
+    /// claim that the layers would be enough — nothing counts them
+    /// against the crossings, and the routing pass and the buffer
+    /// escapes draw on the same budget. The `void < 2` half of the
+    /// same defect has no layer at all and takes
     /// [`Self::CrossingCongestion`] instead. Fix: enlarge the
     /// `circuit region=` footprint so fewer wires cross, or split the
     /// logic across multiple `circuit` blocks.

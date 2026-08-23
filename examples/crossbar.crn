@@ -1,12 +1,17 @@
 @cairn 2026.06
 @requires version>=1.20
 
-# A two-net crossing fixture: two independent pressure plates drive
-# two independent gates, whose output signals fan out to two doors on
-# opposite ends of the region. Because both cells route to the far
-# edge on the same plane, their Steiner trees overlap on the plane
-# — genuine crossing coords that the delayed→legalized crossing pass
-# has to fold onto the bridge void.
+# A crossing fixture: two pressure plates feed both gates, whose
+# output signals fan out to two doors at opposite ends of the region.
+# Two pairs of nets end up sharing a wire coord — `sig.a` with `sig.b`
+# at (1,0,1), and `sig.b` with the first gate at (0,1,0). The second of
+# those is on a bridge layer, where two nets that each climbed to clear
+# a block met, so a crossing is not a plane-only event.
+#
+# The crossing pass reports both and repairs neither: it lifts a buffer
+# repeater off a coord it cannot have and never the wire itself, so
+# those signals are one strand of dust in whatever layout these coords
+# describe.
 #
 # Kept intentionally minimal so the wire form pinned by the redstone
 # crate's byte-identity crossing integration test reads at a glance.

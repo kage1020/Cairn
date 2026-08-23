@@ -181,9 +181,12 @@ and is a separate axis from the Minecraft target version.
   raising `void=` is the one thing that could change the answer, and every other crossing is now
   reported with the pair of signals and the coord they meet on. One finding per pair rather than
   per shared coord, so two nets running side by side are one report. Both redstone examples earn
-  one: `--stage crossing` over `redstone-door.crn` and `crossbar.crn` now prints where their
-  signals merge, and exits 0 as before — no coord moves, because the finding is a report and not a
-  repair.
+  findings: `redstone-door.crn` one, and `crossbar.crn` two — the second of which anchors on a
+  bridge coord, where two nets that each climbed to clear a block met, so a crossing is not a
+  plane-only event and the finding is not named for one. Both still exit 0, and no coord moves,
+  because the finding is a report and not a repair. Visible through
+  `cairn synth --stage crossing --experimental-logic-synth` only: the crossing pass has no other
+  caller, so no stage-4 diagnostic reaches `cairn compile` or `cairn check`.
 
 - *(cli)* `cairn compile` reads the lockfile it is about to replace and reports what changed, as
   `spec` §10.6 describes. A recompile for a different target prints

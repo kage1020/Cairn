@@ -836,11 +836,17 @@ fn cli_synth_stage_crossing_java_legalizes_or_cell_scope() {
         announced[0].contains("warning[W_WIRE_CROSSING]"),
         "expected the crossing warning, got: {stderr}",
     );
+    // A note with a span of its own renders as
+    // `{file}:{pos}:   note: ...` rather than starting with the word,
+    // so both shapes count as belonging to the finding — otherwise
+    // this breaks the day the diagnostic grows a note pointing at the
+    // two nets' declarations.
     assert!(
-        stderr
-            .lines()
-            .all(|line| line.contains("warning[W_WIRE_CROSSING]")
-                || line.trim_start().starts_with("note:")),
+        stderr.lines().all(|line| {
+            line.contains("warning[W_WIRE_CROSSING]")
+                || line.trim_start().starts_with("note:")
+                || line.contains(": note: ")
+        }),
         "nothing but that finding and its notes may reach stderr: {stderr}",
     );
     let stdout = String::from_utf8(out.stdout)
@@ -911,11 +917,17 @@ fn cli_synth_stage_crossing_bedrock_legalizes_or_cell_scope() {
         announced[0].contains("warning[W_WIRE_CROSSING]"),
         "expected the crossing warning, got: {stderr}",
     );
+    // A note with a span of its own renders as
+    // `{file}:{pos}:   note: ...` rather than starting with the word,
+    // so both shapes count as belonging to the finding — otherwise
+    // this breaks the day the diagnostic grows a note pointing at the
+    // two nets' declarations.
     assert!(
-        stderr
-            .lines()
-            .all(|line| line.contains("warning[W_WIRE_CROSSING]")
-                || line.trim_start().starts_with("note:")),
+        stderr.lines().all(|line| {
+            line.contains("warning[W_WIRE_CROSSING]")
+                || line.trim_start().starts_with("note:")
+                || line.contains(": note: ")
+        }),
         "nothing but that finding and its notes may reach stderr: {stderr}",
     );
     let stdout = String::from_utf8(out.stdout)

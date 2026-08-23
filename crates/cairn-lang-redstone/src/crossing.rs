@@ -27,11 +27,14 @@
 //!    `void < 2` there is no layer above the plane at all, so the
 //!    scope is refused with
 //!    [`crate::DiagnosticCode::CrossingCongestion`] and its
-//!    `Fix: increase void` is true. With a layer reserved, the design
-//!    is buildable by a pass that does not exist yet, and each
-//!    crossing is raised as a
+//!    `Fix: increase void` is true. With a layer reserved there is
+//!    somewhere a lift could go, so each crossing is raised as a
 //!    [`crate::DiagnosticCode::WireCrossing`] warning that names the
-//!    two nets and the coord while the scope goes on through. Note
+//!    two nets and the coord while the scope goes on through —
+//!    "somewhere it could go" and not "room for all of them": a
+//!    `void=2` reservation holds one layer, the routing pass and the
+//!    buffer escapes spend from it too, and nothing here counts what
+//!    would be left. Note
 //!    that "plane" is the wrong word for the general case: the
 //!    routing pass climbs onto a bridge layer to get past a block,
 //!    and two nets that both climbed can meet up there —
@@ -110,8 +113,6 @@
 use std::collections::HashMap;
 use std::collections::HashSet;
 
-use cairn_lang_core::check::Severity;
-
 use crate::delay::{DUST_ATTENUATION_LIMIT, buffer_count_for_segment};
 use crate::diagnostic::{Diagnostic, DiagnosticCode};
 use crate::netlist_ir::NetRef;
@@ -120,8 +121,8 @@ use crate::placement_ir::{
     ScopedPlacementIr, ScopedPlacementIrEntry,
 };
 use crate::routing_geometry::{
-    NetTree, Router, block_sites, collect_nets, input_pad, net_order, net_ref_key, net_trees,
-    unroutable,
+    NetTree, Router, block_sites, collect_nets, coord_key, input_pad, net_order, net_ref_key,
+    net_trees, unroutable,
 };
 
 /// Output of a [`compile_crossing`] run.
@@ -168,17 +169,16 @@ impl CrossingOutput {
 /// [`DiagnosticCode::BufferCoordCollision`] /
 /// [`DiagnosticCode::NoCircuitRegion`]) are elided from the output so a
 /// partial `buffer_coords` set cannot pollute the downstream
-/// block-array voxel lowering. A scope can also survive carrying
-/// [`DiagnosticCode::WireCrossing`] warnings: those describe a layout
-/// the pass produced faithfully and cannot make correct, so the IR is
-/// kept and the finding travels beside it.
+/// block-array voxel lowering. [`DiagnosticCode::WireCrossing`]
+/// warnings describe a layout the pass produced faithfully and cannot
+/// make correct, so they neither keep a scope nor elide it: they are
+/// reported beside whatever the scope's own outcome turns out to be.
 #[must_use]
 pub fn compile_crossing(delayed: &ScopedPlacementIr) -> CrossingOutput {
     let mut out = CrossingOutput::new();
     for entry in &delayed.scopes {
-        match legalize_scope(entry) {
-            Ok((ir, warnings)) => {
-                out.diagnostics.extend(warnings);
+        match legalize_scope(entry, &mut out.diagnostics) {
+            Ok(ir) => {
                 out.scoped.scopes.push(ScopedPlacementIrEntry {
                     kind: entry.kind,
                     name: entry.name.clone(),
@@ -187,21 +187,33 @@ pub fn compile_crossing(delayed: &ScopedPlacementIr) -> CrossingOutput {
             }
             Err(diagnostic) => out.diagnostics.push(diagnostic),
         }
+        debug_assert!(
+            out.diagnostics
+                .iter()
+                .all(|d| d.severity() == d.code.severity()),
+            "a diagnostic renders with its code's severity: every producer in \
+             this pass has to agree with `DiagnosticCode::severity`, including \
+             one written after the builders below",
+        );
     }
     out
 }
 
-/// Result of legalizing one scope: on success the legalized IR
-/// together with the Warning-severity findings the scope earned but
-/// survived, on failure the single Error-severity diagnostic that
-/// elides it. Warnings ride out with the IR rather than replacing it
-/// because a crossing the reservation has room to lift does not stop
-/// the scope from being legalized — it stops the layout from being
-/// what the coords imply, which is a thing to say, not a thing to
-/// refuse.
-type ScopeLegalization = Result<(PlacementIr, Vec<Diagnostic>), Diagnostic>;
+/// Result of legalizing one scope: the legalized IR on success, the
+/// single Error-severity diagnostic that elides the scope on failure.
+///
+/// Warning-severity findings do not travel in either arm. They are
+/// pushed into the `findings` list as they are raised, so a scope that
+/// goes on to be refused still reports what it had already found — a
+/// crossing and a buffer that has nowhere to stand are two defects,
+/// and answering only the second sends the author round the loop
+/// again to be told about the first.
+type ScopeLegalization = Result<PlacementIr, Diagnostic>;
 
-fn legalize_scope(entry: &ScopedPlacementIrEntry) -> ScopeLegalization {
+fn legalize_scope(
+    entry: &ScopedPlacementIrEntry,
+    findings: &mut Vec<Diagnostic>,
+) -> ScopeLegalization {
     let source = &entry.ir;
     // Same missing-region policy as `delay::compile_delay`: the
     // placement pass elides scopes with cells or output drivers but no
@@ -212,12 +224,12 @@ fn legalize_scope(entry: &ScopedPlacementIrEntry) -> ScopeLegalization {
     // without any redstone survives the crossing pipeline as-is.
     let Some(region) = source.region.clone() else {
         if source.cells.is_empty() && source.outputs.is_empty() {
-            return Ok((source.clone(), Vec::new()));
+            return Ok(source.clone());
         }
         return Err(missing_region_diagnostic(entry));
     };
     if source.cells.is_empty() && source.outputs.is_empty() {
-        return Ok((source.clone(), Vec::new()));
+        return Ok(source.clone());
     }
 
     let mut ir = source.clone();
@@ -301,23 +313,28 @@ fn legalize_scope(entry: &ScopedPlacementIrEntry) -> ScopeLegalization {
     // scope survives.
     let crossings = wire_crossings(&wire_owners);
     if region.void < 2
-        && let Some(anchor) = crossings.first()
+        && let Some(first) = crossings.first()
     {
         return Err(crossing_congestion_diagnostic(
             entry,
             &ir,
             &region,
-            anchor,
+            first,
             crossings.len(),
         ));
     }
     // Nothing is left to warn about under `void < 2`: the refusal
-    // above took every crossing with it, so this maps over an empty
-    // list rather than re-asking the height.
-    let warnings: Vec<Diagnostic> = crossings
-        .iter()
-        .map(|crossing| wire_crossing_diagnostic(entry, &ir, &region, crossing))
-        .collect();
+    // above took every crossing with it, so this extends by nothing
+    // rather than re-asking the height. Raised before the buffer
+    // allocation rather than after it, because the allocation can
+    // refuse the scope and these findings are true either way — they
+    // are read off the routed wires, which is a question already
+    // settled by the time it runs.
+    findings.extend(
+        crossings
+            .iter()
+            .map(|crossing| wire_crossing_diagnostic(entry, &ir, &region, crossing)),
+    );
 
     let allocation = allocate_buffer_coords(
         &ir,
@@ -346,7 +363,7 @@ fn legalize_scope(entry: &ScopedPlacementIrEntry) -> ScopeLegalization {
         output.phase.legalize_at(buffers, identity);
     }
 
-    Ok((ir, warnings))
+    Ok(ir)
 }
 
 /// Two nets that share at least one wire coord.
@@ -360,9 +377,9 @@ struct WireCrossing {
     /// The pair, `nets.0` first under [`net_ref_key`] — inputs before
     /// cells, then by index.
     nets: (NetRef, NetRef),
-    /// Lowest of the coords the two share, in `(x, z, y)` order — the
-    /// same key the rest of this pass anchors on, so the coord a
-    /// message names does not drift between runs of one layout.
+    /// Lowest of the coords the two share under [`coord_key`], so the
+    /// coord a message names does not drift between runs of one
+    /// layout.
     anchor: CellCoord,
     /// How many coords the two share in all.
     coords: usize,
@@ -390,8 +407,15 @@ fn wire_crossings(wire_owners: &HashMap<CellCoord, Vec<NetRef>>) -> Vec<WireCros
                 } else {
                     (*other, *one)
                 };
+                debug_assert_ne!(
+                    net_ref_key(*one),
+                    net_ref_key(*other),
+                    "a coord lists each of its owners once, so a pair is two \
+                     nets — a net paired with itself would print as \
+                     `sig.a and sig.a` and sort ahead of every real crossing",
+                );
                 let entry = folded.entry(pair).or_insert((*coord, 0usize));
-                if (coord.x, coord.z, coord.y) < (entry.0.x, entry.0.z, entry.0.y) {
+                if coord_key(*coord) < coord_key(entry.0) {
                     entry.0 = *coord;
                 }
                 entry.1 += 1;
@@ -823,7 +847,6 @@ fn buffer_collision_output_diagnostic(
     diag = diag.with_footer(
         "Fix: increase `void` so buffers can fall onto a bridge layer, or enlarge `region=` so buffer candidates have room on the plane",
     );
-    debug_assert_eq!(diag.severity(), Severity::Error);
     diag
 }
 
@@ -858,20 +881,28 @@ fn crossing_congestion_diagnostic(
     diag = diag.with_footer(
         "Fix: increase `void` so bridges have a y-layer above the plane, enlarge `region=` so fewer wires cross, or split the logic across multiple `circuit` blocks",
     );
-    debug_assert_eq!(diag.severity(), Severity::Error);
     diag
 }
 
-/// One crossing the reservation has a layer for and no pass lifts.
+/// One crossing the reservation has a layer above the plane for, and
+/// no pass lifts.
 ///
 /// Says what the layout does rather than what the reservation allows:
 /// the height is why this is a warning and not a refusal, so it is the
-/// note and not the headline.
+/// note and not the headline. And the note says how many layers there
+/// are rather than that they are enough — `claim_bridge` walks
+/// `1..void`, so `void=2` reserves one, three nets over a coord are
+/// three pairs wanting two lifts, and the routing pass and the buffer
+/// escapes are already spending from the same budget. Whether a lift
+/// would fit is a question this pass does not ask, so it is not one
+/// the message should answer.
 ///
 /// The suggested fix names splitting the logic first because enlarging
-/// `region=` is not always a remedy — the I/O pads are packed down the
-/// column at `x=0` by index, so two nets that cross on their way out of
-/// that column go on crossing however wide the footprint grows.
+/// `region=` is not always a remedy — the *input* pads are packed down
+/// the column at `x=0` by index, so two nets that cross on their way
+/// out of that column go on crossing however wide the footprint grows.
+/// The output pads sit at `x = width - 1` and do move with it, which is
+/// why the caveat names one side and not both.
 fn wire_crossing_diagnostic(
     entry: &ScopedPlacementIrEntry,
     ir: &PlacementIr,
@@ -901,13 +932,13 @@ fn wire_crossing_diagnostic(
         ));
     }
     diag = diag.with_footer(format!(
-        "the `void={void}` reservation does have a layer above the plane to lift one of them onto — nothing in the v1 pipeline lifts it",
+        "the `void={void}` reservation puts {layers} layer(s) above the plane, which is where a lift would go — nothing in the v1 pipeline lifts a wire onto one, and whether they would be enough is not measured here",
         void = reservation.void,
+        layers = reservation.void.saturating_sub(1),
     ));
     diag = diag.with_footer(
-        "Fix: split the logic across multiple `circuit` blocks so each routes fewer nets, or enlarge `region=` — though a crossing among the I/O pads at `x=0` will not move, since they are packed down that column by index",
+        "Fix: split the logic across multiple `circuit` blocks so each routes fewer nets, or enlarge `region=` — though a crossing among the input pads at `x=0` will not move, since they are packed down that column by index",
     );
-    debug_assert_eq!(diag.severity(), Severity::Warning);
     diag
 }
 
@@ -965,7 +996,6 @@ fn buffer_collision_diagnostic(
     diag = diag.with_footer(
         "Fix: increase `void` so buffers can fall onto a bridge layer, or enlarge `region=` so buffer candidates have room on the plane",
     );
-    debug_assert_eq!(diag.severity(), Severity::Error);
     diag
 }
 
@@ -985,7 +1015,6 @@ fn missing_region_diagnostic(entry: &ScopedPlacementIrEntry) -> Diagnostic {
     diag = diag.with_footer(
         "Fix: add a `circuit region=<label> void=<N>` line to the enclosing scope, or run `--stage placement` first to see the underlying error",
     );
-    debug_assert_eq!(diag.severity(), Severity::Error);
     diag
 }
 
@@ -1017,7 +1046,9 @@ mod tests {
 
     use std::collections::{HashMap, HashSet};
 
-    use super::{PlaneOccupant, Severity, claim_bridge, compile_crossing, plane_occupant};
+    use cairn_lang_core::check::Severity;
+
+    use super::{PlaneOccupant, claim_bridge, compile_crossing, plane_occupant, wire_crossings};
     use crate::delay::{BUFFER_REPEATER_TICKS, compile_delay};
     use crate::diagnostic::{Diagnostic, DiagnosticCode};
     use crate::edition_netlist_ir::EditionCell;
@@ -1046,6 +1077,25 @@ mod tests {
             .iter()
             .filter(|d| d.severity() == Severity::Error)
             .collect()
+    }
+
+    /// Nothing refused the scope, and it reported exactly `crossings`
+    /// wire crossings.
+    ///
+    /// The count is what keeps the `errors(...)` relaxations from
+    /// being a loosening: a fold that went back to one finding per
+    /// shared coord would still refuse nothing, and every one of these
+    /// fixtures would still pass on `errors(...).is_empty()` alone.
+    fn crossings_only(diagnostics: &[Diagnostic], crossings: usize) {
+        assert!(
+            errors(diagnostics).is_empty(),
+            "nothing here refuses the scope: {diagnostics:?}",
+        );
+        assert_eq!(
+            crossing_reports(diagnostics).len(),
+            crossings,
+            "one finding per pair of nets sharing dust: {diagnostics:?}",
+        );
     }
 
     /// The primary line of every `W_WIRE_CROSSING` in a run, in the
@@ -1333,20 +1383,42 @@ mod tests {
             legalized.diagnostics,
         );
         let warning = &legalized.diagnostics[0];
-        assert_eq!(
-            warning.primary,
-            "routed netlist for struct `crossed`: sig.a and sig.b both run \
-             through (2,0,2), so the two signals are one strand of dust in \
-             the layout these coords describe — crossing legalization \
-             escapes buffer repeaters only, and never the wire itself",
+        for fragment in [
+            "struct `crossed`",
+            "sig.a and sig.b both run through (2,0,2)",
+            "one strand of dust",
+            "escapes buffer repeaters only, and never the wire itself",
+        ] {
+            assert!(
+                warning.primary.contains(fragment),
+                "expected {fragment:?} in: {}",
+                warning.primary,
+            );
+        }
+        // Every note, because a note is the only place this diagnostic
+        // says anything actionable and none of them is asserted
+        // anywhere else — a footer could be dropped with the suite
+        // green.
+        let notes: Vec<&str> = warning
+            .notes
+            .iter()
+            .map(|note| note.message.as_str())
+            .collect();
+        assert_eq!(notes.len(), 3, "shared-coord count, height, fix: {notes:?}");
+        assert!(
+            notes[0].contains("the two share 2 coords in all"),
+            "the count of shared coords is what says how far the merge runs: {notes:?}",
         );
         assert!(
-            warning
-                .notes
-                .iter()
-                .any(|note| note.message.contains("the two share 2 coords in all")),
-            "the count of shared coords is what says how far the merge runs: {:?}",
-            warning.notes,
+            notes[1].contains("puts 1 layer(s) above the plane")
+                && notes[1].contains("whether they would be enough is not measured here"),
+            "the height is reported and not vouched for: {notes:?}",
+        );
+        assert!(
+            notes[2].starts_with("Fix: split the logic")
+                && notes[2].contains("a crossing among the input pads at `x=0` will not move"),
+            "splitting leads, and the caveat names the column that does not move — \
+             the output pads at `x = width - 1` do move with `region=`: {notes:?}",
         );
         assert_eq!(legalized.scoped.scopes.len(), 1);
         assert_eq!(legalized.scoped.scopes[0].ir.cells.len(), 2);
@@ -1475,11 +1547,7 @@ mod tests {
     #[test]
     fn every_buffer_stands_on_dust_the_routing_pass_laid() {
         let legalized = compile_crossing(&two_net_walled_scope());
-        assert!(
-            errors(&legalized.diagnostics).is_empty(),
-            "{:?}",
-            legalized.diagnostics
-        );
+        crossings_only(&legalized.diagnostics, 1);
         let ir = &legalized.scoped.scopes[0].ir;
         let region = ir.region.clone().expect("fixture carries a region");
         let nets = collect_nets(ir);
@@ -1637,11 +1705,7 @@ mod tests {
         ));
 
         let legalized = compile_crossing(&scoped(ScopeKind::Struct, "shared", ir));
-        assert!(
-            errors(&legalized.diagnostics).is_empty(),
-            "void=3 leaves a bridge layer free: {:?}",
-            legalized.diagnostics,
-        );
+        crossings_only(&legalized.diagnostics, 1);
         let buffers = legalized.scoped.scopes[0].ir.cells[0].buffer_coords();
         assert_eq!(buffers.len(), 1);
         assert_eq!(
@@ -1799,6 +1863,27 @@ mod tests {
     #[test]
     fn buffer_collision_names_the_net_holding_the_coord() {
         let legalized = compile_crossing(&two_nets_over_one_coord_scope(2));
+        // The scope is refused, and the three crossings it had already
+        // been found to carry are reported anyway. They are not a
+        // cascade off the collision — they are read off the routed
+        // wires, which the allocator does not change — so suppressing
+        // them would send the author back round the loop to be told
+        // about them once the collision was fixed.
+        assert_eq!(
+            legalized
+                .diagnostics
+                .iter()
+                .map(|d| d.code)
+                .collect::<Vec<_>>(),
+            vec![
+                DiagnosticCode::WireCrossing,
+                DiagnosticCode::WireCrossing,
+                DiagnosticCode::WireCrossing,
+                DiagnosticCode::BufferCoordCollision,
+            ],
+            "the findings this scope earned before it was refused: {:?}",
+            legalized.diagnostics,
+        );
         let diag = legalized
             .diagnostics
             .iter()
@@ -1827,11 +1912,7 @@ mod tests {
     #[test]
     fn a_second_net_over_one_coord_takes_the_next_bridge_layer() {
         let legalized = compile_crossing(&two_nets_over_one_coord_scope(3));
-        assert!(
-            errors(&legalized.diagnostics).is_empty(),
-            "void=3 has a layer for each of them: {:?}",
-            legalized.diagnostics,
-        );
+        crossings_only(&legalized.diagnostics, 3);
         let cells = &legalized.scoped.scopes[0].ir.cells;
         assert_eq!(
             cells[1].buffer_coords()[0].coord,
@@ -1842,6 +1923,134 @@ mod tests {
             cells[2].buffer_coords()[0].coord,
             CellCoord::with_layer(15, 2, 1, RouteLayer::Bridge),
             "the second takes the next one up, not the same block",
+        );
+    }
+
+    /// [`wire_crossings`] over an owner map built by hand.
+    ///
+    /// Three things only this reaches. A pair sharing one coord says
+    /// nothing about a count, so the footer that would say "the two
+    /// share N coords" has to stay off. The anchor tie-break is
+    /// [`coord_key`] — x, then z, then *y* last — and every fixture
+    /// that reaches this through the pipeline puts its shared coords on
+    /// one layer, where `(x, z, y)` and `(x, y, z)` agree. And a
+    /// cell-cell pair exercises the swap branch that puts a pair in
+    /// `net_ref_key` order, which the net-order test reaches only for
+    /// an input paired with a cell.
+    #[test]
+    fn the_fold_answers_per_pair_with_the_lowest_coord_of_each() {
+        let mut owners: HashMap<CellCoord, Vec<NetRef>> = HashMap::new();
+        // Two nets over one coord, and nothing else to say about them.
+        owners.insert(
+            CellCoord::new(1, 0, 0),
+            vec![NetRef::Input(0), NetRef::Input(1)],
+        );
+        // A cell-cell pair over three coords. Written `(x,y,z)`, the
+        // two candidates are `(2,2,1)` and `(2,1,3)`: the first wins
+        // under `coord_key`'s x-then-z-then-y and the second wins under
+        // x-then-y-then-z, so the two orders disagree here. The owners
+        // are listed higher-index-first, which is what the swap undoes.
+        for coord in [
+            CellCoord::new(2, 2, 1),
+            CellCoord::new(2, 1, 3),
+            CellCoord::new(3, 0, 0),
+        ] {
+            owners.insert(coord, vec![NetRef::Cell(4), NetRef::Cell(1)]);
+        }
+
+        let crossings = wire_crossings(&owners);
+        assert_eq!(crossings.len(), 2, "two pairs, however many coords");
+
+        assert_eq!(crossings[0].nets, (NetRef::Input(0), NetRef::Input(1)));
+        assert_eq!(crossings[0].anchor, CellCoord::new(1, 0, 0));
+        assert_eq!(crossings[0].coords, 1, "no count to report");
+
+        assert_eq!(
+            crossings[1].nets,
+            (NetRef::Cell(1), NetRef::Cell(4)),
+            "the lower index leads, whichever way the owner list ran",
+        );
+        assert_eq!(
+            crossings[1].anchor,
+            CellCoord::new(2, 2, 1),
+            "x, then z, then y — `(2,1,3)` would win if height came second",
+        );
+        assert_eq!(crossings[1].coords, 3);
+    }
+
+    /// A pair that shares one coord gets no shared-coord note.
+    ///
+    /// The three-note shape asserted for a two-coord pair says nothing
+    /// about whether the count note is conditional, and every other
+    /// crossing fixture in the suite shares more than one coord.
+    #[test]
+    fn a_pair_over_one_coord_is_not_told_how_many_it_shares() {
+        let legalized = compile_crossing(&two_net_walled_scope());
+        crossings_only(&legalized.diagnostics, 1);
+        let notes: Vec<&str> = legalized.diagnostics[0]
+            .notes
+            .iter()
+            .map(|note| note.message.as_str())
+            .collect();
+        assert_eq!(
+            notes.len(),
+            2,
+            "height and fix, and no count for a single coord: {notes:?}",
+        );
+        assert!(
+            notes.iter().all(|note| !note.contains("share")),
+            "nothing to say about how far a one-coord merge runs: {notes:?}",
+        );
+    }
+
+    /// Each scope's findings name that scope.
+    ///
+    /// The module doc claims per-scope independence and no crossing
+    /// fixture had more than one scope, so nothing checked that the
+    /// name in a warning is the scope it came from rather than, say,
+    /// the first one in the module.
+    #[test]
+    fn a_warning_names_the_scope_it_came_from() {
+        let mut scoped = ScopedPlacementIr::new();
+        for name in ["first", "second"] {
+            // The `crossed` shape: two sensors reaching past each
+            // other's row, which overlap on `(2,0,2)`.
+            let mut ir = PlacementIr::new(Edition::Java);
+            ir.region = Some(reservation(5, 5, 2));
+            for signal in ["a", "b"] {
+                ir.inputs.push(crate::netlist_ir::NetlistInput {
+                    name: cairn_lang_core::ast::DottedRef::new("sig".into(), vec![signal.into()]),
+                    span: Span::default(),
+                });
+            }
+            for (index, z) in [3u32, 1].into_iter().enumerate() {
+                ir.cells.push(placed_cell(
+                    EditionCell::JavaRepeaterOr,
+                    CellCoord::new(3, 0, z),
+                    vec![CellPortDriver {
+                        port: PortName::A,
+                        net: NetRef::Input(u32::try_from(index).expect("two cells")),
+                    }],
+                ));
+            }
+            scoped.scopes.push(ScopedPlacementIrEntry {
+                kind: ScopeKind::Struct,
+                name: name.to_owned(),
+                ir,
+            });
+        }
+
+        let legalized = compile_crossing(&scoped);
+        let reports = crossing_reports(&legalized.diagnostics);
+        assert_eq!(
+            reports.len(),
+            2,
+            "the same shape in both scopes: {:?}",
+            legalized.diagnostics,
+        );
+        assert!(
+            reports[0].contains("struct `first`") && reports[1].contains("struct `second`"),
+            "each finding names its own scope, in scope order: {reports:?}",
         );
     }
 
@@ -2223,11 +2432,7 @@ mod tests {
                 ],
             ));
             let legalized = compile_crossing(&scoped(ScopeKind::Struct, "lifted", ir));
-            assert!(
-                errors(&legalized.diagnostics).is_empty(),
-                "void={void}: one lift serves both ports: {:?}",
-                legalized.diagnostics,
-            );
+            crossings_only(&legalized.diagnostics, 1);
             let buffers = legalized.scoped.scopes[0].ir.cells[1].buffer_coords();
             assert_eq!(
                 buffers
@@ -2291,11 +2496,7 @@ mod tests {
             }],
         ));
         let legalized = compile_crossing(&scoped(ScopeKind::Struct, "twice", ir));
-        assert!(
-            errors(&legalized.diagnostics).is_empty(),
-            "each column has its own free layer: {:?}",
-            legalized.diagnostics,
-        );
+        crossings_only(&legalized.diagnostics, 2);
         assert_eq!(
             legalized.scoped.scopes[0].ir.cells[2]
                 .buffer_coords()
@@ -2437,11 +2638,7 @@ mod tests {
             ],
         ));
         let legalized = compile_crossing(&scoped(ScopeKind::Struct, "mux", ir));
-        assert!(
-            errors(&legalized.diagnostics).is_empty(),
-            "void=3 leaves a bridge layer free: {:?}",
-            legalized.diagnostics,
-        );
+        crossings_only(&legalized.diagnostics, 2);
         let bufs = legalized.scoped.scopes[0].ir.cells[1].buffer_coords();
         assert_eq!(
             bufs.iter().map(|b| (b.port, b.coord)).collect::<Vec<_>>(),

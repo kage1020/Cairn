@@ -50,6 +50,27 @@ fn errors(
         .collect()
 }
 
+/// Nothing refused the scope, and it reported exactly `crossings` wire
+/// crossings.
+///
+/// The count is what keeps `errors(...)` from being a loosening: a fold
+/// that went back to one finding per shared coord would refuse nothing
+/// either.
+fn crossings_only(diagnostics: &[cairn_lang_redstone::Diagnostic], crossings: usize) {
+    assert!(
+        errors(diagnostics).is_empty(),
+        "nothing here refuses the scope: {diagnostics:?}",
+    );
+    assert_eq!(
+        diagnostics
+            .iter()
+            .filter(|d| d.code == DiagnosticCode::WireCrossing)
+            .count(),
+        crossings,
+        "one finding per pair of nets sharing dust: {diagnostics:?}",
+    );
+}
+
 fn load_example(name: &str) -> String {
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("..")
@@ -407,11 +428,10 @@ fn json_output_byte_identical_apart_from_stage_tag_with_crossings() {
     );
 }
 
-/// AC — two nets crossing on the plane with `void=1` refuse with
-/// `E_CROSSING_CONGESTION`, proving the crossbar fixture above
-/// actually produces plane overlaps the pass has to see: a fixture
-/// without any overlap would legalize cleanly at `void=1` and the
-/// byte-identity mirror above would still pass by vacuous truth.
+/// AC — two nets over one coord with `void=1` refuse with
+/// `E_CROSSING_CONGESTION`: the same defect the mirror above reports
+/// as a warning, in a reservation with no layer above the plane for a
+/// lift to ever go on.
 ///
 /// Not `examples/crossbar.crn` with its `void=` turned down: that
 /// source lays two cells at the head of the row, which walls the first
@@ -608,8 +628,8 @@ struct reach size=40x6
     let out = compile_crossing(&delayed);
     // Two sensors into one cell, so the second sensor's wire comes
     // round the first sensor's pad and meets the cell's outward run —
-    // a crossing, and not what this fixture is about.
-    assert!(errors(&out.diagnostics).is_empty(), "{:?}", out.diagnostics);
+    // one crossing, and not what this fixture is about.
+    crossings_only(&out.diagnostics, 1);
 
     let scope = out.scoped.scopes.first().expect("the scope legalizes");
     let cell = scope.ir.cells.first().expect("the one cell");
@@ -711,11 +731,8 @@ struct fan size=40x6
     let delayed = delayed_from_source(source, Edition::Java);
     let out = compile_crossing(&delayed);
 
-    assert!(
-        errors(&out.diagnostics).is_empty(),
-        "a shared span needs no second repeater: {:?}",
-        out.diagnostics,
-    );
+    // Same two-sensors-one-cell shape, so the same one crossing.
+    crossings_only(&out.diagnostics, 1);
     let scope = out.scoped.scopes.first().expect("the scope legalizes");
     let first = scope.ir.outputs.first().expect("actuator #0");
     let second = scope.ir.outputs.get(1).expect("actuator #1");
