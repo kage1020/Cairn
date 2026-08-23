@@ -77,6 +77,12 @@ fn a_sensor_tail_that_names_no_signal_is_refused_whatever_it_names() {
         ("a", "identifier `a`"),
         ("3", "integer `3`"),
         ("\"sig.a\"", "string `\"sig.a\"`"),
+        // A Cairn string literal has no escape mechanism — the lexer
+        // takes the raw slice between the quotes — so a backslash is a
+        // backslash and the message has to show the one the author
+        // typed. `Debug` formatting would render this `"a\\b"`, which is
+        // text they did not write and would not parse back the same.
+        ("\"a\\b\"", "string `\"a\\b\"`"),
         ("@tok", "token `@tok`"),
         ("true", "boolean `true`"),
         ("2x2", "size `2x2`"),
