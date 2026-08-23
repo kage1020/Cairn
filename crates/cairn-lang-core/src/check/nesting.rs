@@ -42,9 +42,12 @@
 //!
 //! Scope of the walk: `children.members` only. A `logic` binding in the
 //! same body is read by redstone synthesis at any depth, so it is not
-//! lost. An `assert` is read by nothing at any depth — the evaluator is
-//! not implemented — so a nested one is no worse off than a top-level
-//! one, and reporting it here would blame the indentation for that.
+//! lost. An `assert` is read at any depth as well: [`super::truth`] walks
+//! nested bodies, and redstone synthesis checks the signals a nested one
+//! names. Neither of those is the evaluator, which is still unbuilt — but
+//! a nested `assert` is no worse off than a top-level one either way, so
+//! reporting it here would blame the indentation for a gap the
+//! indentation did not open.
 //!
 //! Without this pass the failure was inverted: `check::connect_arity`
 //! recurses into children, so a *malformed* nested `connect` earned a

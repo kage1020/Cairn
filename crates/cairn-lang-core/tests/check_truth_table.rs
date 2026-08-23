@@ -287,6 +287,22 @@ fn a_table_too_wide_to_count_says_so_symbolically() {
     );
 }
 
+/// The decimal gives way to a power at the boundary the pass chooses, not
+/// at the point where no integer holds the count — those sit 95 inputs
+/// apart, and only a table between them tells the two apart.
+#[test]
+fn the_total_becomes_a_power_before_it_stops_fitting_an_integer() {
+    for (arity, expected, absent) in [(32usize, "4294967296", "2^32"), (33, "2^33", "8589934592")] {
+        let names: Vec<String> = (0..arity).map(|i| format!("sig.a{i}")).collect();
+        let source = table(&names.join(", "), &format!("{}->1", "0".repeat(arity)));
+        let text = rendered(&only(&source));
+        assert!(
+            text.contains(expected) && !text.contains(absent),
+            "{arity} inputs should have their total written as {expected}: {text:?}",
+        );
+    }
+}
+
 // -- where the table sits -------------------------------------------------
 
 /// The findings are about the statement, so indentation does not change
