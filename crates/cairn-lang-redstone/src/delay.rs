@@ -94,7 +94,7 @@ use crate::placement_ir::{
     ScopedPlacementIrEntry,
 };
 use crate::routing_geometry::{
-    Router, block_sites, collect_nets, input_pad, net_trees, sum_over_driving_nets,
+    Router, block_sites, collect_nets, input_pad, net_trees, sum_over_driving_nets, unroutable,
 };
 
 /// Signal-attenuation ceiling per dust segment (`spec/redstone` §14.5
@@ -272,6 +272,14 @@ fn delay_scope(entry: &ScopedPlacementIrEntry) -> ScopeDelay {
     let nets = collect_nets(&ir);
     let router = Router::new(&region, &block_sites(&ir, &region));
     let trees = net_trees(&nets, &router, source_of_net);
+    // Re-checked here for the reason the missing-region branch above
+    // is: a stranded sink's route is one step, which is under every cap
+    // this pass applies, so the ticks it would write describe a circuit
+    // nothing can build. Stage 2 elides such a scope, so this only
+    // catches a caller who skipped it.
+    if let Some(diagnostic) = unroutable(&nets, &trees, entry, &region, source_of_net) {
+        return Err(diagnostic);
+    }
     let segment_of = |net: NetRef, sink: CellCoord| -> u32 {
         let route = trees
             .get(&net)

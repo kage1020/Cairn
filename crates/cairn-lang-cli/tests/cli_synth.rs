@@ -437,10 +437,12 @@ fn cli_synth_stage_edition_requires_edition_flag() {
 fn cli_synth_stage_route_java_fills_wire_length() {
     // `--stage route --edition java` runs Steiner routing over the
     // Placement IR. `redstone-door.crn`'s sole OR cell should carry
-    // `wire_length = 3` (Manhattan(input_pad_0 → cell) + Manhattan(
-    // input_pad_1 → cell) = 1 + 2) in the routed JSON, while
-    // `delay_ticks` stays elided because the delay-insertion pass is
-    // stage 3 of §14.5 and has not landed yet.
+    // `wire_length = 5` — one block from `sig.step`'s pad next door,
+    // and four from `sig.exit`'s, whose dust comes round the near pad
+    // rather than through it — in the routed JSON, while `delay_ticks`
+    // stays elided because this dump stops at stage 2.
+    // `cli_synth_stage_delay_java_fills_delay_ticks` is the stage-3
+    // dump where it appears.
     let path = examples_dir().join("redstone-door.crn");
     let out = run_synth(&[
         "--experimental-logic-synth",

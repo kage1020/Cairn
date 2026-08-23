@@ -163,6 +163,11 @@ and is a separate axis from the Minecraft target version.
     column on the other, and one service layer leaves the second signal no way in. It used to
     compile, with the wire drawn through the pressure plate. The refusal names both coords it
     could not join and points at `void=`.
+  - `E_BUFFER_COORD_COLLISION` keeps one cause of the three it used to name. A buffer repeater
+    stands strictly between the ends of a route, and the router keeps every coord strictly between
+    them off the blocks, so the candidate is never a cell body or a pad any more. What still
+    refuses is another net's dust holding the coord with every bridge layer in that column taken —
+    and the layers can now be taken by wire, not only by an earlier repeater.
 
 ### Added
 

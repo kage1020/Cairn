@@ -129,17 +129,20 @@ fn redstone_door_bedrock_matches_java_wire_length() {
 /// cells at `x = i, y = 0, z = 0`, and input pads land at
 /// `(0, 0, 1+i)`, so the exact sums are:
 ///
-/// - cell[0] `sig.and_ab = sig.a and sig.b`: one block from the pad
-///   next door, and four from the pad behind it — the near pad is a
-///   block, so the far signal comes round rather than through: `1 + 4
-///   = 5`.
+/// cell[0] is the corner case, in both senses: `(1,0,0)` is cell[1]
+/// and `(0,0,1)` is a pad, so it has no free neighbour on the ground
+/// layer at all. Anything that reaches it other than from the pad next
+/// door has to climb, which is what this fixture's `void=3` is for.
+///
+/// - cell[0] `sig.and_ab = sig.a and sig.b`: one block from `sig.a`'s
+///   pad next door, and four from `sig.b`'s — up onto `y=1`, two along
+///   it, and back down into the cell: `1 + 4 = 5`.
 /// - cell[1] `sig.or_ab  = sig.a or sig.b`: same source pair, one
-///   column along, both reached down the free row at `z=1` rather than
-///   through cell[0]: `2 + 3 = 5`.
+///   column along, where the ground layer is open: both come down the
+///   free row rather than through cell[0], `2 + 3 = 5`.
 /// - cell[2] `sig.combined = sig.and_ab and sig.or_ab`: cell-to-cell
-///   drivers. cell[1] is next door; cell[0] is two columns away with
-///   cell[1] standing between them, so its strand goes round: `4 + 1
-///   = 5`.
+///   drivers. cell[1] is next door; cell[0] is boxed in, so its output
+///   climbs to `y=1`, runs two columns, and drops in: `4 + 1 = 5`.
 ///
 /// `delay_ticks` stays `None` at every cell.
 #[test]
@@ -178,13 +181,13 @@ struct sim size=7x5
         .expect("sim scope");
     assert_eq!(entry.ir.cells.len(), 3);
     // cell[0] at (0,0,0), input pads at (0,0,1) and (0,0,2): one block
-    // from the near pad, four round the near pad from the far one.
+    // from the near pad, four over the top from the far one.
     assert_eq!(entry.ir.cells[0].wire_length(), Some(5));
     // cell[1] at (1,0,0), same input pad pair, both reached along the
     // free row at z=1 rather than through cell[0].
     assert_eq!(entry.ir.cells[1].wire_length(), Some(5));
     // cell[2] at (2,0,0), driven by cell[0]=(0,0,0) and cell[1]=(1,0,0).
-    // cell[1] is next door; cell[0] has to come round cell[1].
+    // cell[1] is next door; cell[0] is boxed in and has to climb out.
     assert_eq!(entry.ir.cells[2].wire_length(), Some(5));
     for cell in &entry.ir.cells {
         assert!(

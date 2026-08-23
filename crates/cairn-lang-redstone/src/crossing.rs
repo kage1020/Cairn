@@ -107,7 +107,7 @@ use crate::placement_ir::{
     ScopedPlacementIr, ScopedPlacementIrEntry,
 };
 use crate::routing_geometry::{
-    NetTree, Router, block_sites, collect_nets, input_pad, net_order, net_trees,
+    NetTree, Router, block_sites, collect_nets, input_pad, net_order, net_trees, unroutable,
 };
 
 /// Output of a [`compile_crossing`] run.
@@ -234,9 +234,18 @@ fn legalize_scope(entry: &ScopedPlacementIrEntry) -> ScopeLegalization {
     let order = net_order(&nets);
     let router = Router::new(&region, &blocks);
     let trees = net_trees(&nets, &router, source_of_net);
+    // Same re-check the delay pass makes, for the same reason: a
+    // stranded sink's route is one step, so it asks for no repeater and
+    // the legalized dump would claim a circuit that cannot be wired.
+    if let Some(diagnostic) = unroutable(&nets, &trees, entry, &region, source_of_net) {
+        return Err(diagnostic);
+    }
 
-    // Which nets' dust runs through each non-reserved plane coord,
-    // recorded in `order` so the list at each coord is deterministic.
+    // Which nets' dust runs through each non-reserved coord, recorded
+    // in `order` so the list at each coord is deterministic. Not the
+    // plane alone: the router climbs onto a bridge layer to get past a
+    // block, and a coord it climbed onto is dust like any other — which
+    // is what `claim_bridge` reads to keep a repeater off it.
     // One map answers both questions this pass asks about the routed
     // wires: which coords two nets share (a plane crossing), and
     // whether a buffer candidate would land on dust that is not its
@@ -320,6 +329,15 @@ fn legalize_scope(entry: &ScopedPlacementIrEntry) -> ScopeLegalization {
 enum PlaneOccupant {
     /// A cell body or an I/O pad. A repeater there would displace the
     /// component instead of refreshing the wire running into it.
+    ///
+    /// Answered by this function but not reachable through
+    /// [`legalize_scope`], for the same shape of reason
+    /// [`Self::Buffer`] is not: a candidate sits strictly between the
+    /// ends of a route, and the router keeps every coord strictly
+    /// between them off the blocks. The variant stays because it is
+    /// the honest answer for the inputs, and because it is the first
+    /// question worth asking about a coord — see
+    /// `a_buffer_candidate_is_never_a_cell_body`.
     Component,
     /// Another net's dust runs through the coord. A repeater there
     /// would tie two signals together — the cross-net short this pass
@@ -352,6 +370,11 @@ enum PlaneOccupant {
 /// rather than merely occupied, and an earlier buffer is this pass's
 /// own doing. Only the first is reported, because only one thing has
 /// to be true for the candidate to be unusable.
+///
+/// Of the four, two are reachable through the pass today —
+/// [`PlaneOccupant::OtherNet`] and [`PlaneOccupant::OwnBuffer`]. The
+/// other two are answers this function owes its inputs rather than
+/// states a candidate reaches; each says so on its own variant.
 fn plane_occupant(
     candidate: CellCoord,
     net: NetRef,
@@ -378,14 +401,19 @@ fn plane_occupant(
     None
 }
 
-/// Claim the first free bridge layer above `candidate`, inside the
-/// reservation's `void=<N>` budget. `None` when every layer is taken,
-/// and when `void < 2` leaves no layer above the plane at all.
+/// Claim the first free bridge layer in `candidate`'s column, inside
+/// the reservation's `void=<N>` budget. `None` when every layer is
+/// taken, and when `void < 2` leaves no layer above the plane at all.
+///
+/// The scan runs `y in 1..void` rather than upward from `candidate.y`,
+/// so a candidate that is itself on a bridge layer is offered the
+/// layers below it too. Every candidate the pass builds is a plane
+/// coord today, which makes the two the same scan.
 ///
 /// A layer is taken by an earlier repeater — `bridge_buffers` is that
 /// ledger — or by dust: the router climbs off the plane to get past a
 /// block, and the coord it climbs onto is a wire like any other.
-/// `CellCoord::routed` gives both producers the same key, so a
+/// `CellCoord::new` gives both producers the same key, so a
 /// repeater cannot be dropped onto a wire that was already there.
 fn claim_bridge(
     candidate: CellCoord,
@@ -394,7 +422,7 @@ fn claim_bridge(
     wire_owners: &HashMap<CellCoord, Vec<NetRef>>,
 ) -> Option<CellCoord> {
     for y in 1..region.void {
-        let bridge = CellCoord::routed(candidate.x, y, candidate.z);
+        let bridge = CellCoord::new(candidate.x, y, candidate.z);
         if wire_owners.contains_key(&bridge) {
             continue;
         }
@@ -594,8 +622,8 @@ impl BufferPlacer<'_> {
     /// Candidates sit at `k * DUST_ATTENUATION_LIMIT` along the routed
     /// path — the dust the signal actually travels, so a plane buffer
     /// always stands on the wire it refreshes. A candidate held by
-    /// something else ([`plane_occupant`]) escapes to a
-    /// [`RouteLayer::Bridge`] layer directly above it; if none is free,
+    /// something else ([`plane_occupant`]) escapes to the first free
+    /// [`RouteLayer::Bridge`] layer in its column; if none is free,
     /// `on_collision` builds the refusal, because the two callers name
     /// the offending segment differently and "cell #3" on a finding
     /// about an actuator wire sends the reader to the wrong line.
@@ -648,11 +676,11 @@ impl BufferPlacer<'_> {
                 claimed.push(BufferCoord::new(port, candidate));
                 continue;
             }
-            // The same rule one layer up. A cell body cannot be
-            // refreshed on the plane, so the first segment to reach it
-            // lifts its repeater onto a bridge — and that block sits
-            // over the coord every segment of this net passes through,
-            // so it refreshes all of them. Escaping again would stack
+            // The same rule one layer up. Another net's dust holds
+            // the plane, so the first segment to reach the coord lifts
+            // its repeater onto a bridge — and that block sits over the
+            // coord every segment of this net passes through, so it
+            // refreshes all of them. Escaping again would stack
             // a second block on the same point of the same wire, and
             // exhaust the `void=<N>` budget doing it.
             if let Some(&reused) = self.escaped.get(&(net, candidate)) {
@@ -1188,7 +1216,7 @@ mod tests {
     /// The buffer materialises on the dust the signal actually
     /// travels, at 15 blocks along the 16-block route.
     ///
-    /// The straight line from the pad to this sink is 4 blocks, so
+    /// The straight line from the pad to this sink is 14 blocks, so
     /// measuring it asks for no buffer at all: 16 blocks of dust with
     /// nothing refreshing it, which is the signal never arriving. The
     /// coord is pinned rather than derived so a change to the axis
@@ -1340,7 +1368,7 @@ mod tests {
     /// unobstructed layout is exactly where the straight line and the
     /// route coincide — the invariant held there before this pass read
     /// the route at all. The walled fixture is the discriminating
-    /// case: Manhattan says 4 blocks and no buffer, the route says 16
+    /// case: Manhattan says 14 blocks and no buffer, the route says 16
     /// and one.
     #[test]
     fn the_buffer_count_matches_the_ticks_delay_charged() {
@@ -1439,19 +1467,19 @@ mod tests {
     fn a_bridge_layer_a_wire_runs_through_is_not_free() {
         let region = reservation(20, 3, 4);
         let candidate = CellCoord::new(15, 0, 1);
-        let occupied = CellCoord::routed(15, 1, 1);
+        let occupied = CellCoord::new(15, 1, 1);
         let wire_owners: HashMap<CellCoord, Vec<NetRef>> =
             [(occupied, vec![NetRef::Input(0)])].into_iter().collect();
 
         let mut ledger: HashSet<CellCoord> = HashSet::new();
         assert_eq!(
             claim_bridge(candidate, &region, &mut ledger, &wire_owners),
-            Some(CellCoord::routed(15, 2, 1)),
+            Some(CellCoord::new(15, 2, 1)),
             "the first free layer is the one above the wire",
         );
         assert_eq!(
             claim_bridge(candidate, &region, &mut ledger, &HashMap::new()),
-            Some(CellCoord::routed(15, 1, 1)),
+            Some(CellCoord::new(15, 1, 1)),
             "and with no wire there it is the first layer, so the fixture is not \
              just reading a full ledger",
         );
@@ -1731,23 +1759,22 @@ mod tests {
         }
     }
 
-    /// A buffer candidate is never a component any more.
+    /// A buffer candidate is never a component.
     ///
-    /// This layout used to refuse: `sig.a`'s route ran straight down
-    /// the row and its 15-step point landed inside `sig.b`'s cell, with
-    /// `void=1` reserving no layer to lift the repeater onto. The
-    /// router now goes round the body instead of through it, so the
-    /// candidate is free wire and the scope legalizes on one layer.
+    /// A candidate sits strictly between the ends of a route, and the
+    /// router keeps every coord strictly between them off the blocks —
+    /// so the coord a repeater lands on is wire, never a cell body or a
+    /// pad. [`PlaneOccupant::Component`] is unreachable through this
+    /// pass for that reason. What still refuses is a candidate on
+    /// another net's dust with every bridge layer above it taken, which
+    /// `buffer_collision_names_the_net_holding_the_coord` covers.
     ///
-    /// [`PlaneOccupant::Component`] is unreachable through this pass
-    /// for the same reason: a candidate sits strictly between the ends
-    /// of a route, and every coord strictly between them is one the
-    /// router was free to use. What still refuses is a candidate on
-    /// another net's dust with every bridge layer above it taken,
-    /// which `buffer_collision_names_the_net_holding_the_coord`
-    /// covers.
+    /// The layout below is the one that used to refuse: `sig.a`'s route
+    /// ran straight down the row and its 15-step point landed inside
+    /// `sig.b`'s cell, with `void=1` reserving no layer to lift the
+    /// repeater onto.
     #[test]
-    fn a_candidate_that_used_to_be_a_cell_body_is_now_free_wire() {
+    fn a_buffer_candidate_is_never_a_cell_body() {
         let legalized = compile_crossing(&cell_on_the_fifteen_step_point());
         assert!(
             legalized.diagnostics.is_empty(),
@@ -2464,11 +2491,11 @@ mod tests {
         /// non-zero on most cases and the invariant discriminates.
         ///
         /// `z` varies rather than sitting at 0. A row of collinear
-        /// sinks is the one shape where every MST edge runs along a
-        /// single axis, which makes the two elbows of an edge the same
-        /// coords and hides a route rendered against its edge's
-        /// direction — the bug this suite missed. Off-axis terminals
-        /// are what let the two differ.
+        /// sinks is the one shape where every strand runs along a
+        /// single axis, which is where a route and the straight line
+        /// between its ends coincide — and coinciding is what hid the
+        /// bug this suite missed. Off-axis terminals are what let the
+        /// two differ.
         ///
         /// The `bool` gives a cell a second port on the *same* net.
         /// Without it every cell has one driver, and the block count

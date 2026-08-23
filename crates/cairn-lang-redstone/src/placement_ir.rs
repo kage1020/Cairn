@@ -31,8 +31,9 @@
 //! `circuit region=... void=N` congestion detection (`E_ROUTE_CONGESTION`)
 //! and missing-reservation refusal (`E_NO_CIRCUIT_REGION`) fire here —
 //! this is the first pass with a physical footprint to measure against.
-//! Attenuation limits (dust segments exceeding 15 blocks) belong to the
-//! routing pass and stay a follow-up.
+//! Attenuation limits (dust segments exceeding 15 blocks) belong to
+//! [`crate::delay::compile_delay`], stage 3 of §14.5, which fires
+//! `E_ATTENUATION_LIMIT` against the routed segment length.
 
 use std::fmt;
 
@@ -55,7 +56,7 @@ use crate::netlist_ir::{CellPortDriver, NetRef, NetlistInput, PortName};
 /// Cell coords are `Plane` by construction — the placement pass never
 /// stamps `Bridge` / `Via` on a cell body. Everything else the
 /// pipeline puts inside the reservation takes its layer from its
-/// height through [`CellCoord::routed`]: routed wire that climbs to
+/// height through [`CellCoord::new`]: routed wire that climbs to
 /// get past a block, and a buffer repeater the
 /// crossing-legalization pass lifts off a coord it cannot have. One
 /// rule for both, so a repeater and a wire at one voxel are one map
@@ -129,15 +130,16 @@ impl Serialize for RouteLayer {
 /// use `y = 0` on the plane with `z = 1 + i` (saturating at `depth-1`
 /// for pathological regions). Routed wire coords and buffer-repeater
 /// coords may use `y >= 1`, and take [`RouteLayer::Bridge`] when they
-/// do — see [`Self::routed`].
+/// do — see [`Self::new`].
 ///
 /// The `layer` field participates in `Eq` and `Hash`, so
 /// `(x, y, z, Plane)` and `(x, y, z, Bridge)` are distinct map keys.
-/// This matches the pseudo-2.5D model — a plane wire and a bridge
-/// wire at the same `(x, y, z)` do not collide in the voxel view —
-/// but a downstream consumer that only cares about voxel identity
-/// should compare `(x, y, z)` explicitly rather than relying on the
-/// derived `Eq`.
+/// Nothing the pipeline builds is ever both: [`Self::new`] derives the
+/// layer from the height, so one voxel has one spelling and `Eq` is
+/// voxel identity for every coord a pass produces. The fields are
+/// public, though, so a struct literal can still write a coord the
+/// constructor would not — which is why the geometry module puts
+/// everything it holds through that same rule before comparing it.
 ///
 /// `layer` serialises only when it differs from [`RouteLayer::Plane`]
 /// so a placement / routing / delay JSON dump omits the `layer` key
@@ -160,7 +162,7 @@ pub struct CellCoord {
     /// Pseudo-2.5D layer this coord lives on. Cell coords are
     /// [`RouteLayer::Plane`] by construction; anything the routing or
     /// crossing pass lifts above the ground layer carries
-    /// [`RouteLayer::Bridge`], by the one rule [`Self::routed`] holds.
+    /// [`RouteLayer::Bridge`], by the one rule [`Self::new`] holds.
     /// Serialised only when it differs from the default so a
     /// `Plane` coord's JSON omits the `layer` field.
     #[serde(skip_serializing_if = "RouteLayer::is_plane")]
@@ -168,31 +170,19 @@ pub struct CellCoord {
 }
 
 impl CellCoord {
-    /// [`RouteLayer::Plane`] coord at the given axis position. The
-    /// most common construction path — used by every placement /
-    /// routing / delay call site.
+    /// The coord at `(x, y, z)`: [`RouteLayer::Plane`] on the ground
+    /// layer, [`RouteLayer::Bridge`] above it.
+    ///
+    /// The only constructor, so the layer is a function of the height
+    /// for everything the pipeline builds. Both producers of a lifted
+    /// coord come through it — the routing pass, whose wire climbs to
+    /// get past a block, and the crossing pass, whose repeater climbs
+    /// off a coord it cannot have — and without one rule the two would
+    /// key past each other: `(x, 1, z, Plane)` and `(x, 1, z, Bridge)`
+    /// are distinct map keys but one voxel, so a repeater could be
+    /// lifted onto a wire that was already there.
     #[must_use]
     pub const fn new(x: u32, y: u32, z: u32) -> Self {
-        Self {
-            x,
-            y,
-            z,
-            layer: RouteLayer::Plane,
-        }
-    }
-
-    /// The coord a router lays dust on at `(x, y, z)`:
-    /// [`RouteLayer::Plane`] on the ground layer, [`RouteLayer::Bridge`]
-    /// above it.
-    ///
-    /// One rule for both producers of a lifted coord — the routing
-    /// pass, whose wire climbs to get past a block, and the crossing
-    /// pass, whose repeater climbs off a coord it cannot have. Without
-    /// it the two would key past each other: `(x, 1, z, Plane)` and
-    /// `(x, 1, z, Bridge)` are distinct map keys but one voxel, so a
-    /// repeater could be lifted onto a wire that was already there.
-    #[must_use]
-    pub(crate) const fn routed(x: u32, y: u32, z: u32) -> Self {
         let layer = if y == 0 {
             RouteLayer::Plane
         } else {

@@ -87,7 +87,7 @@
 //! past a block, and [`crate::crossing::compile_crossing`] (stage 4 of
 //! §14.5), which lifts a buffer repeater off a coord it cannot have.
 //! Both stamp the layer through
-//! [`crate::placement_ir::CellCoord::routed`], so one voxel has one
+//! [`crate::placement_ir::CellCoord::new`], so one voxel has one
 //! key. `RouteLayer::Via` has no producer at all: a climb is a step
 //! between two coords rather than a coord of its own, so there is
 //! nothing for the variant to name.
@@ -111,7 +111,7 @@ use crate::placement_ir::{
 };
 use crate::routing_geometry::{
     BlockKind, BlockSite, Router, block_sites, collect_nets, input_pad, net_order, net_trees,
-    sum_over_driving_nets,
+    sum_over_driving_nets, unroutable,
 };
 
 /// Per-cell footprint used by the post-routing congestion budget.
@@ -270,19 +270,14 @@ fn route_scope(entry: &ScopedPlacementIrEntry) -> ScopeRouting {
     let router = Router::new(&region, &blocks);
     let nets = collect_nets(&ir);
     let trees = net_trees(&nets, &router, source_of_net);
+    // A sink with no block-free route is a layout this reservation
+    // cannot hold, and saying so here is what keeps a wire drawn
+    // through a comparator out of the IR. Refused before the area
+    // arithmetic below, because the area is not what is wrong.
+    if let Some(diagnostic) = unroutable(&nets, &trees, entry, &region, source_of_net) {
+        return Err(diagnostic);
+    }
     for net in net_order(&nets) {
-        // A sink with no block-free route is a layout this reservation
-        // cannot hold, and saying so here is what keeps a wire drawn
-        // through a comparator out of the IR. Refused before the area
-        // arithmetic below, because the area is not what is wrong.
-        if let Some(&sink) = trees[&net].unreachable().first() {
-            return Err(unroutable_diagnostic(
-                entry,
-                &region,
-                source_of_net(net),
-                sink,
-            ));
-        }
         for coord in trees[&net].wire_path() {
             occupancy.insert(coord);
         }
@@ -457,44 +452,6 @@ fn pad_overlap_diagnostic(
     diag
 }
 
-/// A sink the router cannot reach without passing through a block.
-///
-/// `E_ROUTE_CONGESTION` because spec §14.5 states the code as "routing
-/// is confined to the `circuit` region; if it does not fit, fail-loud",
-/// and a reservation with no room for a clear path is a reservation the
-/// layout does not fit in. Its own primary, so it does not read as the
-/// area arithmetic: the area can be ample and the one coord the wire
-/// needs still be a cell body.
-fn unroutable_diagnostic(
-    entry: &ScopedPlacementIrEntry,
-    reservation: &CircuitRegionReservation,
-    source: CellCoord,
-    sink: CellCoord,
-) -> Diagnostic {
-    let primary = format!(
-        "routed netlist for {kind} `{name}` cannot reach ({x},{y},{z}) from the driver at ({sx},{sy},{sz}) — every route between them runs through a cell body or an I/O pad, and dust does not pass through a component",
-        kind = entry.kind.label(),
-        name = entry.name,
-        x = sink.x,
-        y = sink.y,
-        z = sink.z,
-        sx = source.x,
-        sy = source.y,
-        sz = source.z,
-    );
-    let mut diag = Diagnostic::new(
-        DiagnosticCode::RouteCongestion,
-        reservation.span.clone(),
-        primary,
-    );
-    diag = diag.with_footer(format!(
-        "Fix: raise `void` above {void} so the wire has a layer to climb over the cell row, enlarge `size=WxH`, or split into multiple `circuit` blocks",
-        void = reservation.void,
-    ));
-    debug_assert_eq!(diag.severity(), Severity::Error);
-    diag
-}
-
 fn zero_reservation_diagnostic(
     entry: &ScopedPlacementIrEntry,
     reservation: &CircuitRegionReservation,
@@ -535,8 +492,8 @@ mod tests {
     use crate::logic_ir::ScopeKind;
     use crate::netlist_ir::{CellPortDriver, NetRef, PortName};
     use crate::placement_ir::{
-        CellCoord, CircuitRegionReservation, PlacedCellNode, PlacementIr, PlacementPhase,
-        ScopedPlacementIr, ScopedPlacementIrEntry,
+        CellCoord, CircuitRegionReservation, PlacedCellNode, PlacedOutputNode, PlacementIr,
+        PlacementPhase, ScopedPlacementIr, ScopedPlacementIrEntry,
     };
 
     fn reservation(width: u32, depth: u32, void: u32) -> CircuitRegionReservation {
@@ -596,13 +553,23 @@ mod tests {
 
         use cairn_lang_core::{lower, parse};
 
-        use crate::routing_geometry::{Router, block_sites, collect_nets, input_pad, net_trees};
+        use crate::routing_geometry::{
+            Router, block_sites, collect_nets, input_pad, manhattan, net_trees,
+        };
 
         let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("..")
             .join("..")
             .join("examples");
-        let mut checked = 0;
+        // What the corpus is worth is what it still routes. A count of
+        // wire coords would stay comfortably positive while an example
+        // slid into `E_ROUTE_CONGESTION` and vanished from the walk, so
+        // the guards below are the scopes placement laid against the
+        // scopes routing kept, and the number of strands that actually
+        // go round something.
+        let mut placed_scopes = 0usize;
+        let mut routed_scopes = 0usize;
+        let mut detours = 0usize;
         for file in std::fs::read_dir(&dir).expect("read examples") {
             let path = file.expect("dir entry").path();
             if path.extension().and_then(|e| e.to_str()) != Some("crn") {
@@ -618,6 +585,8 @@ mod tests {
                     crate::edition_netlist::compile_edition_netlist(&netlist, edition);
                 let placed = crate::placement::compile_placement(&edition_netlist, &intent);
                 let laid = compile_routing(&placed.scoped);
+                placed_scopes += placed.scoped.scopes.len();
+                routed_scopes += laid.scoped.scopes.len();
                 for entry in &laid.scoped.scopes {
                     let ir = &entry.ir;
                     let Some(region) = ir.region.clone() else {
@@ -634,11 +603,9 @@ mod tests {
                         NetRef::Cell(j) => coords[j as usize],
                     });
                     for (net, tree) in &trees {
-                        let mine: HashSet<CellCoord> = nets[net]
-                            .iter()
-                            .copied()
-                            .chain(tree.wire_path().first().copied())
-                            .collect();
+                        let source = tree.wire_path()[0];
+                        let mine: HashSet<CellCoord> =
+                            nets[net].iter().copied().chain([source]).collect();
                         for coord in tree.wire_path() {
                             assert!(
                                 !occupied.contains(&coord) || mine.contains(&coord),
@@ -647,28 +614,218 @@ mod tests {
                                 entry.kind.label(),
                                 entry.name,
                             );
-                            checked += 1;
+                        }
+                        for sink in &nets[net] {
+                            let route = tree.route_to(*sink).expect("a sink of this net");
+                            let walked =
+                                u32::try_from(route.len() - 1).expect("a route fits in u32");
+                            if walked > manhattan(source, *sink) {
+                                detours += 1;
+                            }
                         }
                     }
                 }
             }
         }
+        assert_eq!(
+            routed_scopes, placed_scopes,
+            "routing refused a scope the corpus used to lay out, and this walk \
+             cannot see what it no longer visits",
+        );
         assert!(
-            checked > 0,
-            "the corpus has to route something for this to mean anything",
+            routed_scopes >= 4,
+            "the corpus has to keep placing circuits for this to mean anything: \
+             {routed_scopes} scope(s)",
+        );
+        assert!(
+            detours > 0,
+            "no strand in the corpus goes round anything, so nothing here would \
+             notice a router that drew straight through",
         );
     }
 
-    /// A sink the reservation cannot reach is refused here, and the
-    /// later stages handed the same layout answer rather than panic.
+    /// A pad the reservation cannot fit is refused, and the scope is
+    /// elided rather than routed against a collapsed pad row.
+    ///
+    /// `input_pad` and `output_pad` saturate their z at `depth - 1`, so
+    /// a reservation too shallow for the pad row lands two pads on one
+    /// coord, or a pad on a cell body. Both are tested here as pure
+    /// functions elsewhere; what those functions saturate *into* is
+    /// this refusal, and nothing reached it before — a false negative
+    /// is not a missing diagnostic, it is two nets sharing a source
+    /// coord and a `wire_length` measured against it.
+    ///
+    /// Hand-built because the placement pass refuses a scope whose row
+    /// is short before routing sees it, so the shapes below are only
+    /// reachable through a caller assembling the IR itself.
+    #[test]
+    fn a_pad_row_the_reservation_cannot_fit_is_refused() {
+        /// One shallow reservation, and the pad the refusal has to
+        /// name once its z saturates onto something already there.
+        struct Row {
+            region: CircuitRegionReservation,
+            inputs: usize,
+            kind: &'static str,
+            index: usize,
+            coord: &'static str,
+        }
+
+        let rows = [
+            Row {
+                // depth 2 leaves one z for the pad row, so input #1
+                // saturates onto input #0.
+                region: reservation(4, 2, 1),
+                inputs: 3,
+                kind: "input",
+                index: 1,
+                coord: "(0,0,1)",
+            },
+            Row {
+                // depth 1 leaves none at all, so the actuator pad lands
+                // on the cell at the right-hand edge.
+                region: reservation(2, 1, 1),
+                inputs: 1,
+                kind: "output",
+                index: 0,
+                coord: "(1,0,0)",
+            },
+        ];
+
+        for Row {
+            region,
+            inputs,
+            kind,
+            index,
+            coord,
+        } in rows
+        {
+            let mut ir = PlacementIr::new(Edition::Java);
+            let pad = crate::routing_geometry::output_pad(0, &region);
+            ir.region = Some(region);
+            for name in 0..inputs {
+                ir.inputs.push(crate::netlist_ir::NetlistInput {
+                    name: cairn_lang_core::ast::DottedRef::new(
+                        "sig".into(),
+                        vec![format!("s{name}")],
+                    ),
+                    span: Span::default(),
+                });
+            }
+            ir.cells.push(PlacedCellNode {
+                cell: EditionCell::JavaRepeaterOr,
+                drivers: vec![CellPortDriver {
+                    port: PortName::A,
+                    net: NetRef::Input(0),
+                }],
+                coord: CellCoord::new(1, 0, 0),
+                phase: PlacementPhase::Unrouted,
+                span: Span::default(),
+            });
+            ir.outputs.push(PlacedOutputNode::new(
+                cairn_lang_core::ast::DottedRef::new("sig".into(), vec!["out".into()]),
+                NetRef::Cell(0),
+                pad,
+                Span::default(),
+            ));
+
+            let routed = compile_routing(&scoped(ScopeKind::Struct, "shallow", ir));
+            let refusal = routed
+                .diagnostics
+                .iter()
+                .find(|d| d.code == crate::DiagnosticCode::RouteCongestion)
+                .unwrap_or_else(|| {
+                    panic!(
+                        "a {kind} pad on a taken coord must refuse: {:?}",
+                        routed.diagnostics
+                    )
+                });
+            assert!(
+                refusal.primary.contains(&format!("{kind} pad #{index}")),
+                "the refusal names which pad could not fit: {}",
+                refusal.primary,
+            );
+            assert!(
+                refusal.primary.contains(coord) && refusal.primary.contains("collapses I/O pads"),
+                "and where, and why: {}",
+                refusal.primary,
+            );
+            assert!(
+                routed.scoped.scopes.is_empty(),
+                "the failed scope is elided rather than routed against a collapsed pad row",
+            );
+        }
+    }
+
+    /// A scope with several unwireable sinks says how many, so sizing
+    /// it is one decision rather than a fix-one-recompile loop.
+    ///
+    /// `Router::tree` strands every sink still unconnected the moment
+    /// one round of the search comes back empty, so `unreachable()`
+    /// holds them in batches; naming only the first would send the
+    /// author round again for each.
+    #[test]
+    fn a_scope_with_several_unwireable_sinks_counts_them() {
+        let mut ir = PlacementIr::new(Edition::Java);
+        ir.region = Some(reservation(4, 2, 1));
+        ir.inputs.push(crate::netlist_ir::NetlistInput {
+            name: cairn_lang_core::ast::DottedRef::new("sig".into(), vec!["a".into()]),
+            span: Span::default(),
+        });
+        // The pad lands at (0,0,1). Walling the row at (1,0,0) and the
+        // course above the two sinks leaves them nothing to be fed
+        // from, and `void=1` reserves no layer to come in over.
+        for coord in [
+            CellCoord::new(1, 0, 0),
+            CellCoord::new(2, 0, 1),
+            CellCoord::new(3, 0, 1),
+        ] {
+            ir.cells.push(placed_cell(coord, PlacementPhase::Unrouted));
+        }
+        for coord in [CellCoord::new(2, 0, 0), CellCoord::new(3, 0, 0)] {
+            ir.cells.push(PlacedCellNode {
+                cell: EditionCell::JavaRepeaterOr,
+                drivers: vec![CellPortDriver {
+                    port: PortName::A,
+                    net: NetRef::Input(0),
+                }],
+                coord,
+                phase: PlacementPhase::Unrouted,
+                span: Span::default(),
+            });
+        }
+
+        let routed = compile_routing(&scoped(ScopeKind::Struct, "boxed", ir));
+        let refusal = routed
+            .diagnostics
+            .iter()
+            .find(|d| d.code == crate::DiagnosticCode::RouteCongestion)
+            .unwrap_or_else(|| panic!("two walled-in sinks must refuse: {:?}", routed.diagnostics));
+        assert!(
+            refusal.primary.contains("cannot reach (2,0,0)"),
+            "the first sink in net order is the anchor: {}",
+            refusal.primary,
+        );
+        assert!(
+            refusal
+                .primary
+                .contains("1 more of this scope's sinks cannot be reached either"),
+            "and the rest are counted rather than left for the next run: {}",
+            refusal.primary,
+        );
+    }
+
+    /// A sink the reservation cannot reach is refused by every pass
+    /// that would measure it, naming the same two coords.
     ///
     /// Stage 2 elides the scope, so stages 3 and 4 never see one in a
-    /// real run. They recompute the trees from the IR, though, and a
-    /// caller who skipped stage 2 would hand them one — the tree
-    /// answers for an unreachable sink so that path is deterministic
-    /// instead of an `expect` on a missing route.
+    /// real run. They rebuild the trees from the IR, though, and a
+    /// caller who skipped stage 2 would hand them one. The tree answers
+    /// for a stranded sink — one step, straight to the source — so
+    /// without the check the later stages would not panic; they would
+    /// write a tick count and a buffer list for a circuit that cannot
+    /// be wired, and nothing in the dump would say so.
     #[test]
-    fn an_unreachable_sink_refuses_here_and_does_not_panic_downstream() {
+    fn an_unreachable_sink_is_refused_by_every_pass_that_measures_it() {
         let mut ir = PlacementIr::new(Edition::Java);
         ir.region = Some(reservation(3, 2, 1));
         ir.inputs.push(crate::netlist_ir::NetlistInput {
@@ -710,23 +867,37 @@ mod tests {
             "the failed scope is elided rather than half-attributed",
         );
 
-        // The same layout handed straight to stage 3, as a caller who
-        // skipped stage 2 would.
+        // The same layout handed straight to stage 3, and then to
+        // stage 4, as a caller who skipped stage 2 would. Each rebuilds
+        // the trees, and each has to reach the same verdict: the
+        // alternative is a dump whose ticks and buffer coords describe
+        // a circuit nothing can build.
         for cell in &mut ir.cells {
             cell.phase = PlacementPhase::Routed { wire_length: 0 };
         }
-        let delayed = crate::delay::compile_delay(&scoped(ScopeKind::Struct, "boxed", ir));
-        assert!(
-            delayed.diagnostics.is_empty(),
-            "the fallback route is one block, well inside every cap: {:?}",
-            delayed.diagnostics,
-        );
-        let legalized = crate::crossing::compile_crossing(&delayed.scoped);
-        assert!(
-            legalized.diagnostics.is_empty(),
-            "{:?}",
-            legalized.diagnostics
-        );
+        let delayed = crate::delay::compile_delay(&scoped(ScopeKind::Struct, "boxed", ir.clone()));
+        let delay_refusal = delayed
+            .diagnostics
+            .iter()
+            .find(|d| d.code == crate::DiagnosticCode::RouteCongestion)
+            .unwrap_or_else(|| panic!("stage 3 must refuse too: {:?}", delayed.diagnostics));
+        assert_eq!(delay_refusal.primary, refusal.primary);
+        assert!(delayed.scoped.scopes.is_empty());
+
+        for cell in &mut ir.cells {
+            cell.phase = PlacementPhase::Delayed {
+                wire_length: 0,
+                delay_ticks: 0,
+            };
+        }
+        let legalized = crate::crossing::compile_crossing(&scoped(ScopeKind::Struct, "boxed", ir));
+        let crossing_refusal = legalized
+            .diagnostics
+            .iter()
+            .find(|d| d.code == crate::DiagnosticCode::RouteCongestion)
+            .unwrap_or_else(|| panic!("stage 4 must refuse too: {:?}", legalized.diagnostics));
+        assert_eq!(crossing_refusal.primary, refusal.primary);
+        assert!(legalized.scoped.scopes.is_empty());
     }
 
     #[test]
