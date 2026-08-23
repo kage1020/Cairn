@@ -233,6 +233,24 @@ fn a_selector_binding_with_no_name_leaves_the_signal_unconsumed() {
     );
 }
 
+/// A selector binding on a keyword the role table does not know is left
+/// to `E_UNKNOWN_KEYWORD`, the same way one in the argument list is.
+///
+/// The member does not exist as a component, so saying its binding is in
+/// the wrong brackets would be a second finding about a line whose first
+/// finding is that it names nothing. The argument-list side of this gate
+/// has its own test above; the selector walk is newer and had none.
+#[test]
+fn a_selector_binding_on_an_unknown_keyword_is_left_to_the_keyword_finding() {
+    let out = synth_source(&source(concat!(
+        "  pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a
+",
+        "  widget[id=w1,opened_by=sig.a]
+",
+    )));
+    assert!(out.diagnostics.is_empty(), "{:#?}", out.diagnostics);
+}
+
 /// `id=` and the rest of the selector stay legal.
 #[test]
 fn a_selector_that_binds_nothing_is_left_alone() {
