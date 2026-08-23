@@ -242,26 +242,7 @@ fn is_to_keyword(value: &Value) -> bool {
 /// string's contents unquoted, which reads as the pass rejecting the
 /// very keyword it asked for.
 fn describe(value: &Value) -> String {
-    match surface_form(value) {
-        Some(text) => format!("{} `{text}`", value.kind_name()),
-        None => value.kind_name().to_string(),
-    }
-}
-
-/// Source text that would parse back to `value`, or `None` when the
-/// reconstruction is unbounded — a list nests, and a diagnostic that
-/// grows with the input is not one an editor can render inline.
-fn surface_form(value: &Value) -> Option<String> {
-    match &value.kind {
-        ValueKind::Ident(s) => Some(s.clone()),
-        ValueKind::Str(s) => Some(format!("{s:?}")),
-        ValueKind::Bool(b) => Some(b.to_string()),
-        ValueKind::Int(i) => Some(i.to_string()),
-        ValueKind::Size { w, h } => Some(format!("{w}x{h}")),
-        ValueKind::Token(t) => Some(format!("@{t}")),
-        ValueKind::DotRef(d) => Some(d.to_string()),
-        ValueKind::List(_) => None,
-    }
+    value.describe()
 }
 
 fn zero_width_after(span: &Span) -> Span {

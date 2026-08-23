@@ -12,6 +12,15 @@
 //! The same read is what let a typo vanish: `oepend_by=sig.x` matched no
 //! key, so the actuator silently disappeared and the only trace was a
 //! warning that the signal it would have driven was unconsumed.
+//!
+//! Reading only the value left the mirror of that open. Spell the key
+//! right and the value wrong — `opened_by=a`, `-> foo.bar` — and no
+//! branch was entered at all, so the binding vanished with no trace
+//! whatever. A pair is now read as a binding from either side, and the
+//! tests below cover the value axis: what a value has to be, which fault
+//! is reported when the host is wrong too, and the one place a
+//! well-formed binding is still in the wrong place — inside the
+//! `[selector]`.
 
 use cairn_lang_core::{lower, parse};
 use cairn_lang_redstone::{DiagnosticCode, SynthOutput, synthesize};
@@ -47,6 +56,218 @@ fn source(body: &str) -> String {
 }
 
 // --- sensor tails --------------------------------------------------------
+
+// --- the value axis ------------------------------------------------------
+
+/// Every shape the parser can put where a signal name belongs.
+///
+/// `-> a` is an `Ident`, `-> "sig.a"` a `Str`, `-> 3` an `Int`, `-> @tok` a
+/// `Token`, and `-> foo.bar` a `DotRef` with the wrong head. A check
+/// written as "a `DotRef` whose head is not `sig`" would answer for the
+/// last of the five and let the other four through, which is what the
+/// front end did.
+#[test]
+fn a_sensor_tail_that_names_no_signal_is_refused_whatever_it_names() {
+    for (tail, found) in [
+        ("foo.bar", "reference `foo.bar`"),
+        ("a", "identifier `a`"),
+        ("3", "integer `3`"),
+        ("\"sig.a\"", "string `\"sig.a\"`"),
+        ("@tok", "token `@tok`"),
+    ] {
+        let out = synth_source(&source(&format!(
+            "  pressure_plate id=p at=front.outside offset=0 y=0 -> {tail}\n",
+        )));
+        assert_eq!(
+            codes(&out),
+            ["E_LOGIC_INVALID_SIGNAL"],
+            "tail `-> {tail}` must be refused, once",
+        );
+        let d = only(&out, DiagnosticCode::LogicInvalidSignal);
+        assert!(
+            d.primary.contains(found),
+            "the message says what it found; expected {found:?} in: {}",
+            d.primary,
+        );
+    }
+}
+
+/// The repair is offered only where there is one to offer.
+///
+/// `-> a` is a name with the namespace left off and has a single reading;
+/// `-> 3` names nothing that adding `sig.` would fix, so the message asks
+/// for the shape rather than inventing `sig.3`.
+#[test]
+fn a_bare_name_is_offered_its_namespace_and_a_number_is_not() {
+    let named = synth_source(&source(
+        "  pressure_plate id=p at=front.outside offset=0 y=0 -> a\n",
+    ));
+    let d = only(&named, DiagnosticCode::LogicInvalidSignal);
+    assert!(
+        d.notes.iter().any(|n| n.message.contains("write `sig.a`")),
+        "{:#?}",
+        d.notes,
+    );
+
+    let unnamed = synth_source(&source(
+        "  pressure_plate id=p at=front.outside offset=0 y=0 -> 3\n",
+    ));
+    let d = only(&unnamed, DiagnosticCode::LogicInvalidSignal);
+    assert!(
+        d.notes
+            .iter()
+            .any(|n| n.message.contains("name a signal as `sig.<name>`")),
+        "{:#?}",
+        d.notes,
+    );
+    assert!(
+        !d.notes.iter().any(|n| n.message.contains("sig.3")),
+        "there is no name here to offer: {:#?}",
+        d.notes,
+    );
+}
+
+/// A tail on a member that cannot carry one is a host fault, whatever the
+/// value says.
+///
+/// No edit to the value makes `walls` emit a signal, so reporting the
+/// value first would send the author round the loop to be told about the
+/// host on the next run. One finding, and it is the one that has to be
+/// answered.
+#[test]
+fn a_tail_on_the_wrong_host_is_a_host_fault_even_when_it_names_no_signal() {
+    let out = synth_source(&source("  walls class=inner mat_slot=wall height=1 -> a\n"));
+    assert_eq!(codes(&out), ["E_LOGIC_MISPLACED_BINDING"]);
+    let d = only(&out, DiagnosticCode::LogicMisplacedBinding);
+    assert!(
+        d.primary.contains("`walls` cannot emit a signal"),
+        "{}",
+        d.primary,
+    );
+}
+
+/// An actuator key on its own host, with a value that names no signal.
+///
+/// The key is what claims the binding — the value used to have to be a
+/// `sig.` reference for the field to be looked at at all, which is how
+/// this row reached placement as a door wired to nothing.
+#[test]
+fn an_actuator_argument_that_names_no_signal_is_refused() {
+    for (value, found) in [
+        ("foo.bar", "reference `foo.bar`"),
+        ("a", "identifier `a`"),
+        ("3", "integer `3`"),
+    ] {
+        let out = synth_source(&source(&format!(
+            "  door id=d side=front at=center mat_slot=wall opened_by={value}\n",
+        )));
+        assert_eq!(
+            codes(&out),
+            ["E_LOGIC_INVALID_SIGNAL"],
+            "`opened_by={value}` must be refused, once",
+        );
+        let d = only(&out, DiagnosticCode::LogicInvalidSignal);
+        assert!(
+            d.primary.contains("`opened_by=` wires this `door`") && d.primary.contains(found),
+            "expected the key, the host, and {found:?} in: {}",
+            d.primary,
+        );
+    }
+}
+
+/// An actuator key on the wrong host with a malformed value is the host
+/// fault, for the same reason the sensor tail is.
+#[test]
+fn an_actuator_argument_on_the_wrong_host_is_a_host_fault_even_when_it_names_no_signal() {
+    let out = synth_source(&source(
+        "  window side=front y=1 offset=1 size=2x2 mat_slot=wall opened_by=a\n",
+    ));
+    assert_eq!(codes(&out), ["E_LOGIC_MISPLACED_BINDING"]);
+}
+
+/// A binding inside the `[selector]` is refused, and the signal it names
+/// is not also reported as unconsumed.
+///
+/// The brackets pick a member that already exists; what the line does to
+/// it is written after them. `block_array`'s actuator-patch recogniser
+/// already refuses any selector attribute but `id=`, so this is the same
+/// answer in this pass's vocabulary and for every host rather than the
+/// door patch alone.
+#[test]
+fn a_binding_inside_the_selector_is_refused_and_counts_as_wired() {
+    let out = synth_source(&source(concat!(
+        "  door id=front side=front at=center mat_slot=wall\n",
+        "  pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a\n",
+        "  door[id=front,opened_by=sig.a]\n",
+    )));
+    assert_eq!(
+        codes(&out),
+        ["E_LOGIC_MISPLACED_BINDING"],
+        "the author did wire `sig.a`, so it is not also unconsumed",
+    );
+    let d = only(&out, DiagnosticCode::LogicMisplacedBinding);
+    assert!(
+        d.primary
+            .contains("`opened_by=` is inside `door`'s `[selector]`"),
+        "{}",
+        d.primary,
+    );
+}
+
+/// The key alone puts a binding in the selector, with no `sig.` value to
+/// give it away.
+///
+/// Here there is no name to count as wired, so the sensor's signal is
+/// still unconsumed and says so. The order is the order of the lines.
+#[test]
+fn a_selector_binding_with_no_name_leaves_the_signal_unconsumed() {
+    let out = synth_source(&source(concat!(
+        "  door id=front side=front at=center mat_slot=wall\n",
+        "  pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a\n",
+        "  door[id=front,opened_by=a]\n",
+    )));
+    assert_eq!(
+        codes(&out),
+        ["W_LOGIC_UNUSED_SIGNAL", "E_LOGIC_MISPLACED_BINDING"],
+        "source order again: the sensor is written above the patch",
+    );
+}
+
+/// `id=` and the rest of the selector stay legal.
+#[test]
+fn a_selector_that_binds_nothing_is_left_alone() {
+    let out = synth_source(&source(concat!(
+        "  door id=front side=front at=center mat_slot=wall\n",
+        "  pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a\n",
+        "  door[id=front] opened_by=sig.a\n",
+    )));
+    assert!(out.diagnostics.is_empty(), "{:#?}", codes(&out));
+    let scope = out.scoped.scopes.first().expect("one scope");
+    assert_eq!(scope.ir.outputs.len(), 1, "the door is wired");
+}
+
+/// A malformed value and the signal nothing then consumes are two
+/// findings, in the order the lines were written.
+///
+/// Not one: `refused_consumers` is keyed by signal name, and a value that
+/// names no signal gives it no name to key by. The author who writes
+/// `opened_by=a` is told which line is wrong and, separately, that the
+/// sensor above it now drives nothing — both true, and the second stops
+/// being said the moment the first is fixed.
+#[test]
+fn a_malformed_value_and_the_signal_it_leaves_unconsumed_are_both_reported() {
+    let out = synth_source(&source(concat!(
+        "  pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a\n",
+        "  door id=d side=front at=center mat_slot=wall opened_by=a\n",
+    )));
+    assert_eq!(
+        codes(&out),
+        ["W_LOGIC_UNUSED_SIGNAL", "E_LOGIC_INVALID_SIGNAL"],
+        "source order: the sensor is written first",
+    );
+}
+
+// --- key axis, unchanged -------------------------------------------------
 
 #[test]
 fn a_sensor_tail_on_a_wall_is_refused_and_registers_no_input() {
