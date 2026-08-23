@@ -679,6 +679,11 @@ impl NetTree {
     /// Always non-empty — a caller that discarded an empty return would
     /// drop the degenerate (no sinks, or the only sink is the source)
     /// case where the source still occupies its own coord.
+    ///
+    /// No coord appears twice: a coord enters the tree when it is
+    /// attached, and [`Self::attach`] takes only coords the tree does
+    /// not hold. A caller folding this into a per-coord map therefore
+    /// does not have to ask whether it has seen the pair before.
     pub(crate) fn wire_path(&self) -> Vec<CellCoord> {
         self.order.clone()
     }
@@ -1154,6 +1159,44 @@ mod tests {
             "the far route leaves the near one only at the cell itself",
         );
         assert_eq!(tree.wire_path().len(), 9, "one trunk, not two strands");
+    }
+
+    /// The tree lists each of its coords once.
+    ///
+    /// A consumer that folds `wire_path` into a per-coord map reads
+    /// this as "one net is recorded at one coord once", and stage 4
+    /// does exactly that to find the coords two nets share — a coord a
+    /// net was listed at twice would read as that net crossing itself.
+    /// The layout carries all three ways a coord enters the tree: a
+    /// straight run, a search around a block, and a sink with no way
+    /// in at all, which is attached to the source by a different path
+    /// than the other two.
+    #[test]
+    fn a_tree_lists_each_of_its_coords_once() {
+        let region = region(5, 3, 2);
+        let source = CellCoord::new(0, 0, 1);
+        let near = CellCoord::new(2, 0, 1);
+        let walled = CellCoord::new(4, 0, 0);
+        let blocks = [
+            source,
+            near,
+            walled,
+            CellCoord::new(3, 0, 0),
+            CellCoord::new(4, 0, 1),
+            CellCoord::new(4, 1, 0),
+        ];
+        let tree = router(&region, &blocks).tree(source, &[near, walled]);
+        assert_eq!(
+            tree.unreachable(),
+            [walled],
+            "the fixture only covers the stranded path while one sink is stranded",
+        );
+
+        let path = tree.wire_path();
+        let mut seen: Vec<CellCoord> = path.clone();
+        seen.sort_unstable_by_key(|coord| (coord.x, coord.z, coord.y));
+        seen.dedup();
+        assert_eq!(seen.len(), path.len(), "a coord is listed once: {path:?}");
     }
 
     /// A sink walled in on every side is refused rather than wired

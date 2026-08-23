@@ -280,10 +280,13 @@ fn legalize_scope(entry: &ScopedPlacementIrEntry) -> ScopeLegalization {
             if reserved.contains(&coord) {
                 continue;
             }
-            let owners = wire_owners.entry(coord).or_default();
-            if !owners.contains(net) {
-                owners.push(*net);
-            }
+            // Pushed unconditionally: `wire_path` lists each of its
+            // coords once, so this net is not on this coord's list
+            // already. A membership test here would be a branch no
+            // input can take, and it would hide a tree that broke that
+            // invariant behind a net that looked like it crossed
+            // itself.
+            wire_owners.entry(coord).or_default().push(*net);
         }
     }
 
