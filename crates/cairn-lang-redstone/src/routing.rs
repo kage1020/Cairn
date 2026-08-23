@@ -53,11 +53,13 @@
 //!   reservation cannot fit the pad row — the pass fires
 //!   `E_ROUTE_CONGESTION` immediately with a "pad layout" primary
 //!   rather than a silent misroute. Cross-net overlap between
-//!   distinct signals is tolerated in v1 — a net is routed against the
-//!   blocks, never against another net's dust; the
+//!   distinct signals is left standing here — a net is routed against
+//!   the blocks, never against another net's dust; the
 //!   crossing-legalization pass (stage 4 of §14.5) is what owns
-//!   those, refusing a scope whose `void=<N>` reservation is too
-//!   thin to absorb them with `E_CROSSING_CONGESTION`.
+//!   those, and it reports rather than repairs: `W_WIRE_CROSSING`
+//!   names the two nets and the coord, or `E_CROSSING_CONGESTION`
+//!   refuses the scope outright when its `void=<N>` reservation has
+//!   no layer above the plane at all.
 //! - **`wire_length` attribution.** For every cell, `wire_length =
 //!   sum over the distinct nets driving it of the routed length from
 //!   that net's source into this cell` — `route_to`, the same measure

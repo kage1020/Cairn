@@ -800,11 +800,12 @@ fn cli_synth_unparseable_source_exits_one() {
 #[test]
 fn cli_synth_stage_crossing_java_legalizes_or_cell_scope() {
     // `--stage crossing --edition java` runs the full pipeline
-    // through stage 4. The `redstone-door.crn` fixture has a single
-    // net with short segments, so the legalized IR matches the
-    // delayed IR apart from the `stage` tag (no crossings, no
-    // buffers) — but the stage's JSON round-trip must still succeed
-    // and expose the same scope shape.
+    // through stage 4. Every segment in the `redstone-door.crn`
+    // fixture is short, so the legalized IR matches the delayed IR
+    // apart from the `stage` tag — the crossing it does carry is
+    // reported and not repaired, so it moves no coord — but the
+    // stage's JSON round-trip must still succeed and expose the same
+    // scope shape.
     let path = examples_dir().join("redstone-door.crn");
     let out = run_synth(&[
         "--experimental-logic-synth",
@@ -816,10 +817,37 @@ fn cli_synth_stage_crossing_java_legalizes_or_cell_scope() {
     ]);
     let stderr = String::from_utf8_lossy(&out.stderr).into_owned();
     assert!(out.status.success(), "expected exit 0, stderr={stderr}");
+    // The one finding this example earns, and nothing else. Two
+    // sensors feed the cell, so the second one's wire comes round the
+    // first one's pad and meets the cell's outward run: a crossing v1
+    // reports and does not lift. It is a warning, so the exit code
+    // above stays 0 — and the line-by-line check keeps the original
+    // guarantee that no other notice reaches a user unannounced.
+    let announced: Vec<&str> = stderr
+        .lines()
+        .filter(|line| line.contains("warning[") || line.contains("error["))
+        .collect();
+    assert_eq!(
+        announced.len(),
+        1,
+        "expected exactly the crossing warning, got: {stderr}",
+    );
     assert!(
-        stderr.is_empty(),
-        "a clean fixture must not spill diagnostics on stderr; a future \
-         deprecation notice would otherwise reach users silently. Got: {stderr}",
+        announced[0].contains("warning[W_WIRE_CROSSING]"),
+        "expected the crossing warning, got: {stderr}",
+    );
+    // A note with a span of its own renders as
+    // `{file}:{pos}:   note: ...` rather than starting with the word,
+    // so both shapes count as belonging to the finding — otherwise
+    // this breaks the day the diagnostic grows a note pointing at the
+    // two nets' declarations.
+    assert!(
+        stderr.lines().all(|line| {
+            line.contains("warning[W_WIRE_CROSSING]")
+                || line.trim_start().starts_with("note:")
+                || line.contains(": note: ")
+        }),
+        "nothing but that finding and its notes may reach stderr: {stderr}",
     );
     let stdout = String::from_utf8(out.stdout)
         .unwrap_or_else(|err| panic!("stdout should be utf-8: {err}\nstderr={stderr}"));
@@ -852,9 +880,10 @@ fn cli_synth_stage_crossing_java_legalizes_or_cell_scope() {
 #[test]
 fn cli_synth_stage_crossing_bedrock_legalizes_or_cell_scope() {
     // Everything about crossing legalization on the redstone-door
-    // fixture is edition-independent (single net, short segments —
-    // no crossings, no buffers), so the Bedrock run differs from the
-    // Java run only in the cell tag and the edition field. Mirrors
+    // fixture is edition-independent (short segments, and a crossing
+    // that is reported rather than repaired), so the Bedrock run
+    // differs from the Java run only in the cell tag and the edition
+    // field. Mirrors
     // the placement / route / delay stage's Java+Bedrock pattern so
     // `--stage crossing` gets the same edition-parity coverage the
     // other edition-tagged stages already have.
@@ -869,10 +898,37 @@ fn cli_synth_stage_crossing_bedrock_legalizes_or_cell_scope() {
     ]);
     let stderr = String::from_utf8_lossy(&out.stderr).into_owned();
     assert!(out.status.success(), "expected exit 0, stderr={stderr}");
+    // The one finding this example earns, and nothing else. Two
+    // sensors feed the cell, so the second one's wire comes round the
+    // first one's pad and meets the cell's outward run: a crossing v1
+    // reports and does not lift. It is a warning, so the exit code
+    // above stays 0 — and the line-by-line check keeps the original
+    // guarantee that no other notice reaches a user unannounced.
+    let announced: Vec<&str> = stderr
+        .lines()
+        .filter(|line| line.contains("warning[") || line.contains("error["))
+        .collect();
+    assert_eq!(
+        announced.len(),
+        1,
+        "expected exactly the crossing warning, got: {stderr}",
+    );
     assert!(
-        stderr.is_empty(),
-        "a clean fixture must not spill diagnostics on stderr; a future \
-         deprecation notice would otherwise reach users silently. Got: {stderr}",
+        announced[0].contains("warning[W_WIRE_CROSSING]"),
+        "expected the crossing warning, got: {stderr}",
+    );
+    // A note with a span of its own renders as
+    // `{file}:{pos}:   note: ...` rather than starting with the word,
+    // so both shapes count as belonging to the finding — otherwise
+    // this breaks the day the diagnostic grows a note pointing at the
+    // two nets' declarations.
+    assert!(
+        stderr.lines().all(|line| {
+            line.contains("warning[W_WIRE_CROSSING]")
+                || line.trim_start().starts_with("note:")
+                || line.contains(": note: ")
+        }),
+        "nothing but that finding and its notes may reach stderr: {stderr}",
     );
     let stdout = String::from_utf8(out.stdout)
         .unwrap_or_else(|err| panic!("stdout should be utf-8: {err}\nstderr={stderr}"));
@@ -1030,8 +1086,7 @@ struct crossbar size=5x4
         "expected E_CROSSING_CONGESTION on stderr, got: {stderr}",
     );
     assert!(
-        stderr.contains("routed netlist for struct `crossbar`")
-            && stderr.contains("plane crossing"),
+        stderr.contains("routed netlist for struct `crossbar`") && stderr.contains("wire crossing"),
         "primary should name the crossing-side origin and failed scope, got: {stderr}",
     );
     // Split per upstream code: which one leaked says whether the

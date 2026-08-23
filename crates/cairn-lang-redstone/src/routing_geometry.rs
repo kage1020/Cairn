@@ -42,12 +42,12 @@
 //!
 //! # What the router does not route around
 //!
-//! Another net's dust. Two nets sharing a wire coord is a plane
-//! crossing, which stage 4 owns: it is the crossing pass that decides
-//! whether the reservation can absorb one. Routing each net against
-//! every earlier net's wire would make a tree a function of the order
-//! the nets were walked in, and would decide the crossing question
-//! here by accident. Blocks are the obstacle set; wire is not.
+//! Another net's dust. Two nets sharing a wire coord is a crossing,
+//! which stage 4 owns: it is the crossing pass that says so, and
+//! neither pass moves a wire off it. Routing each net against every
+//! earlier net's wire would make a tree a function of the order the
+//! nets were walked in, and would answer the crossing question here
+//! by accident. Blocks are the obstacle set; wire is not.
 //!
 //! # Layers
 //!
@@ -99,6 +99,18 @@ pub(crate) fn net_ref_key(net: NetRef) -> (u8, u32) {
         NetRef::Input(i) => (0, i),
         NetRef::Cell(j) => (1, j),
     }
+}
+
+/// Deterministic coord order: x, then z, then y.
+///
+/// The same axis order [`STEPS`] gives the search and `step_towards`
+/// walks a clear run in, so a list sorted by this reads in the order
+/// the router laid it. Height comes last because it is the axis a
+/// coord only leaves the ground for, and every pass that anchors a
+/// message on "the lowest coord of these" means the one nearest the
+/// origin of the plane rather than the one nearest the floor.
+pub(crate) fn coord_key(coord: CellCoord) -> (u32, u32, u32) {
+    (coord.x, coord.z, coord.y)
 }
 
 /// v1 input-pad coordinate: left edge (`x=0`), first service layer
@@ -311,13 +323,7 @@ impl Ord for Frontier {
             .cmp(&self.f)
             .then_with(|| self.g.cmp(&other.g))
             .then_with(|| other.step.cmp(&self.step))
-            .then_with(|| {
-                (other.coord.x, other.coord.z, other.coord.y).cmp(&(
-                    self.coord.x,
-                    self.coord.z,
-                    self.coord.y,
-                ))
-            })
+            .then_with(|| coord_key(other.coord).cmp(&coord_key(self.coord)))
     }
 }
 
@@ -436,8 +442,8 @@ impl Router {
             .min_by_key(|(_, seed, target)| {
                 (
                     manhattan(*seed, *target),
-                    (target.x, target.z, target.y),
-                    (seed.x, seed.z, seed.y),
+                    coord_key(*target),
+                    coord_key(*seed),
                 )
             })
             .map(|(index, seed, _)| (index, seed))?;
@@ -679,6 +685,23 @@ impl NetTree {
     /// Always non-empty — a caller that discarded an empty return would
     /// drop the degenerate (no sinks, or the only sink is the source)
     /// case where the source still occupies its own coord.
+    ///
+    /// No coord appears twice, so a caller folding this into a
+    /// per-coord map does not have to ask whether it has seen the pair
+    /// before. Three things hold that up, one per way a coord enters
+    /// the list:
+    ///
+    /// - The source is pushed once, by [`Self::rooted`].
+    /// - A sink is pushed by [`Self::strand`], which takes each
+    ///   remaining terminal once because [`Router::tree`] dedups the
+    ///   terminal list against itself and the source and drains it.
+    /// - Everything else is pushed by [`Self::attach`], off a path the
+    ///   search returned. A coord already on the list is either a
+    ///   terminal — and terminals are blocks, which no path walks
+    ///   through — or a coord the search was seeded from, which it
+    ///   does not expand back onto. `attach`'s own check of this is a
+    ///   `debug_assert!`, so it states the invariant rather than
+    ///   enforcing it in release.
     pub(crate) fn wire_path(&self) -> Vec<CellCoord> {
         self.order.clone()
     }
@@ -1154,6 +1177,44 @@ mod tests {
             "the far route leaves the near one only at the cell itself",
         );
         assert_eq!(tree.wire_path().len(), 9, "one trunk, not two strands");
+    }
+
+    /// The tree lists each of its coords once.
+    ///
+    /// A consumer that folds `wire_path` into a per-coord map reads
+    /// this as "one net is recorded at one coord once", and stage 4
+    /// does exactly that to find the coords two nets share — a coord a
+    /// net was listed at twice would read as that net crossing itself.
+    /// The layout carries all three ways a coord enters the tree: a
+    /// straight run, a search around a block, and a sink with no way
+    /// in at all, which is attached to the source by a different path
+    /// than the other two.
+    #[test]
+    fn a_tree_lists_each_of_its_coords_once() {
+        let region = region(5, 3, 2);
+        let source = CellCoord::new(0, 0, 1);
+        let near = CellCoord::new(2, 0, 1);
+        let walled = CellCoord::new(4, 0, 0);
+        let blocks = [
+            source,
+            near,
+            walled,
+            CellCoord::new(3, 0, 0),
+            CellCoord::new(4, 0, 1),
+            CellCoord::new(4, 1, 0),
+        ];
+        let tree = router(&region, &blocks).tree(source, &[near, walled]);
+        assert_eq!(
+            tree.unreachable(),
+            [walled],
+            "the fixture only covers the stranded path while one sink is stranded",
+        );
+
+        let path = tree.wire_path();
+        let mut seen: Vec<CellCoord> = path.clone();
+        seen.sort_unstable_by_key(|coord| coord_key(*coord));
+        seen.dedup();
+        assert_eq!(seen.len(), path.len(), "a coord is listed once: {path:?}");
     }
 
     /// A sink walled in on every side is refused rather than wired

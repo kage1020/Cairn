@@ -108,6 +108,12 @@ concepts `plane` / `via` / `bridge` internally (not exposed in the DSL).
     limit of 15. A segment is measured along the **routed** path from the driver to that sink, and the
     buffer stands on that path: the route hangs off the trunk laid for a nearer sink and goes round
     whatever is in its way, so the straight line between the two is not always wire.
+  - crossing legalization: the escape above is specified and unbuilt. What the pass lifts onto a
+    `bridge` layer is a buffer repeater whose coord is taken, never the wire itself, so two nets that
+    share a wire coord stay one strand of dust carrying two signals. The pass **says so** rather than
+    passing it over: it names the pair of signals and the coord they meet on, one finding per pair.
+    A reservation with no layer above the plane at all (`void=1`) has nowhere to lift onto even in
+    principle, and the scope is refused instead.
 - Routing is confined to the `circuit` region; if it does not fit, fail-loud (report congestion = area
   shortage). A sink with no clear path from its driver — every way out walled in by a component — is
   the same refusal for a different reason, and says which two coords it could not join.

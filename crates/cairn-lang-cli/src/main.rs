@@ -167,11 +167,12 @@ enum Command {
     /// repeater's `BUFFER_REPEATER_TICKS` contribution over every
     /// driving net's segment beyond the `DUST_ATTENUATION_LIMIT`;
     /// `--stage crossing` runs crossing legalization over the delayed
-    /// IR, refuses with `E_CROSSING_CONGESTION` when the layout has
-    /// any cross-net plane overlap at all and `void=<N>` is under 2
-    /// (a bridge needs a y-layer above the plane, so `void=1` offers
-    /// nowhere to escape to; v1 tests for the layer existing, not for
-    /// how many crossings it would have to carry), and fills every
+    /// IR, reports every pair of nets sharing a wire coord — with
+    /// `W_WIRE_CROSSING`, or with `E_CROSSING_CONGESTION` when
+    /// `void=<N>` is under 2 and the reservation has no y-layer above
+    /// the plane a lift could ever go on (v1 lifts no wire either
+    /// way; the height decides whether raising `void=` could change
+    /// that, not whether the two signals merge), and fills every
     /// cell's `buffer_coords` with the coord of the buffer repeater
     /// each driver segment passes through (escaping to a
     /// `RouteLayer::Bridge` y-layer whenever the plane candidate
@@ -266,12 +267,14 @@ enum SynthStage {
     /// Legalized Placement IR: crossing legalization over the delayed
     /// Placement IR against `--edition`. Stage 4 of `spec/redstone`
     /// §14.5's place-and-route pipeline. Detects wire coords two
-    /// distinct nets would otherwise share on the ground plane
-    /// (refused with `E_CROSSING_CONGESTION` when `void=<N>` is under
-    /// 2, so the `circuit region=<label> void=<N>` reservation has no
-    /// y-layer above the plane to escape to; the test is whether a
-    /// bridge layer exists, not how many crossings would share it)
-    /// and materialises the coord of every implicit buffer repeater
+    /// distinct nets share — on the ground plane or on a bridge layer
+    /// they both climbed to — and reports one finding per pair, as
+    /// `W_WIRE_CROSSING` or, when `void=<N>` is under 2 and the
+    /// `circuit region=<label> void=<N>` reservation has no y-layer
+    /// above the plane at all, as `E_CROSSING_CONGESTION`. The test is
+    /// whether such a layer exists, not how many crossings would share
+    /// it. It also materialises the coord of every implicit buffer
+    /// repeater
     /// the delay pass counted into every cell's `buffer_coords`, one
     /// entry per driver segment that passes through it — so a block
     /// serving several segments is named once per segment and a
@@ -283,8 +286,8 @@ enum SynthStage {
     /// every bridge y-layer at that `(x, z)` is taken, refuses with
     /// `E_BUFFER_COORD_COLLISION`. v1 does not lift the wire
     /// crossing itself onto `Bridge` — the routed wire path is not
-    /// carried on the IR, and stage-5 block-array lowering re-runs
-    /// the routing algorithm to derive the crossings itself. A scope
+    /// carried on the IR, so an escape record would have nowhere to
+    /// attach, and nothing downstream reads the crossing set. A scope
     /// with nothing to legalize emits no `buffer_coords` at all
     /// (the empty vector serde-skips); the `"stage": "crossing"` tag
     /// on every cell, not the presence of that key, is what marks the

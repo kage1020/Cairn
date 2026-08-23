@@ -34,9 +34,10 @@ insertion, promoting each cell's `delay_ticks` from `None` to
 `Some(base delay + implicit buffer repeater ticks)` and refusing with
 `E_ATTENUATION_LIMIT` when a segment exceeds the v1 sanity cap
 (stage 3 of §14.5); and `compile_crossing(&ScopedPlacementIr)` runs
-crossing legalization, detecting plane overlaps between distinct
-nets (refused with `E_CROSSING_CONGESTION` when the `void=<N>`
-reservation offers no bridge layer to escape to) and filling every
+crossing legalization, reporting every pair of nets that share a wire
+coord — with `W_WIRE_CROSSING`, or with `E_CROSSING_CONGESTION` when
+the `void=<N>` reservation offers no layer above the plane a lift
+could ever go on; no wire is lifted either way — and filling every
 cell's `buffer_coords` with the coord of the buffer repeater each
 driver segment passes through — a collision on the plane lifts the
 buffer onto the first free `RouteLayer::Bridge` y-layer inside the

@@ -171,6 +171,23 @@ and is a separate axis from the Minecraft target version.
 
 ### Added
 
+- *(redstone)* `W_WIRE_CROSSING` names two signals that share a coord of dust. Crossing
+  legalization computed those coords already: it refused the scope when the `circuit region=`
+  reservation was one layer high, and dropped them when it was taller, on the grounds that the
+  reserved service layers left somewhere for a later pass to lift a crossing onto. No pass lifts
+  one — and since the routing pass started climbing onto those layers to get past blocks, they are
+  not idle either. The reservation's height does not decide whether the two signals merge, so it no
+  longer decides whether anything is said: the refusal stays where there is no layer at all, since
+  raising `void=` is the one thing that could change the answer, and every other crossing is now
+  reported with the pair of signals and the coord they meet on. One finding per pair rather than
+  per shared coord, so two nets running side by side are one report. Both redstone examples earn
+  findings: `redstone-door.crn` one, and `crossbar.crn` two — the second of which anchors on a
+  bridge coord, where two nets that each climbed to clear a block met, so a crossing is not a
+  plane-only event and the finding is not named for one. Both still exit 0, and no coord moves,
+  because the finding is a report and not a repair. Visible through
+  `cairn synth --stage crossing --experimental-logic-synth` only: the crossing pass has no other
+  caller, so no stage-4 diagnostic reaches `cairn compile` or `cairn check`.
+
 - *(cli)* `cairn compile` reads the lockfile it is about to replace and reports what changed, as
   `spec` §10.6 describes. A recompile for a different target prints
   `W_PREVIOUSLY_VERIFIED_TARGET`, naming the edition only when that is what moved — two editions
