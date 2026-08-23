@@ -437,10 +437,12 @@ fn cli_synth_stage_edition_requires_edition_flag() {
 fn cli_synth_stage_route_java_fills_wire_length() {
     // `--stage route --edition java` runs Steiner routing over the
     // Placement IR. `redstone-door.crn`'s sole OR cell should carry
-    // `wire_length = 3` (Manhattan(input_pad_0 → cell) + Manhattan(
-    // input_pad_1 → cell) = 1 + 2) in the routed JSON, while
-    // `delay_ticks` stays elided because the delay-insertion pass is
-    // stage 3 of §14.5 and has not landed yet.
+    // `wire_length = 5` — one block from `sig.step`'s pad next door,
+    // and four from `sig.exit`'s, whose dust comes round the near pad
+    // rather than through it — in the routed JSON, while `delay_ticks`
+    // stays elided because this dump stops at stage 2.
+    // `cli_synth_stage_delay_java_fills_delay_ticks` is the stage-3
+    // dump where it appears.
     let path = examples_dir().join("redstone-door.crn");
     let out = run_synth(&[
         "--experimental-logic-synth",
@@ -471,7 +473,7 @@ fn cli_synth_stage_route_java_fills_wire_length() {
         cells[0]["stage"], "route",
         "the stage tag must echo the --stage flag that produced the dump: {stdout}",
     );
-    assert_eq!(cells[0]["wire_length"], 3);
+    assert_eq!(cells[0]["wire_length"], 5);
     assert!(
         cells[0].get("delay_ticks").is_none(),
         "delay_ticks must be elided at this stage: {stdout}",
@@ -507,7 +509,7 @@ fn cli_synth_stage_route_bedrock_matches_java_wire_length() {
     let ir = &gatehouse["ir"];
     assert_eq!(ir["edition"], "bedrock");
     assert_eq!(ir["cells"][0]["cell"], "bedrock_torch_or");
-    assert_eq!(ir["cells"][0]["wire_length"], 3);
+    assert_eq!(ir["cells"][0]["wire_length"], 5);
 }
 
 #[test]
@@ -629,7 +631,7 @@ fn cli_synth_stage_delay_java_fills_delay_ticks() {
         cells[0]["stage"], "delay",
         "the stage tag must echo the --stage flag that produced the dump: {stdout}",
     );
-    assert_eq!(cells[0]["wire_length"], 3);
+    assert_eq!(cells[0]["wire_length"], 5);
     assert_eq!(cells[0]["delay_ticks"], 1);
 }
 
@@ -663,7 +665,7 @@ fn cli_synth_stage_delay_bedrock_matches_bedrock_torch_or() {
     let ir = &gatehouse["ir"];
     assert_eq!(ir["edition"], "bedrock");
     assert_eq!(ir["cells"][0]["cell"], "bedrock_torch_or");
-    assert_eq!(ir["cells"][0]["wire_length"], 3);
+    assert_eq!(ir["cells"][0]["wire_length"], 5);
     assert_eq!(ir["cells"][0]["delay_ticks"], 0);
 }
 
@@ -979,25 +981,40 @@ fn cli_synth_stage_crossing_congestion_exits_one() {
     // between the crossing pass and the JSON dump would let a refused
     // scope be printed as a legalized IR.
     //
-    // `crossbar.crn` is the fixture whose two Steiner trees overlap on
-    // the plane. Its shipping `void=2` reserves bridge y-layers wide
-    // enough for a later pass to lift those crossings onto, so the
-    // scope is accepted; `void=1` leaves nowhere to lift them and the
-    // pass refuses. Patching the reservation rather than restating the
-    // geometry keeps the overlap defined in exactly one place.
-    let source = std::fs::read_to_string(examples_dir().join("crossbar.crn"))
-        .expect("read crossbar fixture");
-    assert_eq!(
-        source.matches("void=2").count(),
-        1,
-        "crossbar.crn no longer carries exactly one `void=2` needle — the \
-         fixture drifted, and patching it would either no-op (leaving the \
-         crossing refusal unexercised) or rewrite an unintended second site",
-    );
-    let patched = source.replace("void=2", "void=1");
+    // One cell, two sensors, two actuators, one service layer. The
+    // sensor whose pad sits behind the other one has to come into the
+    // cell through `(1,0,0)`, and that is the coord the cell drives its
+    // actuators out through — two nets over one coord, with no layer to
+    // lift either onto.
+    //
+    // Not `examples/crossbar.crn` with its `void=` turned down, which
+    // is what this fixture used to be: that source lays two cells at
+    // the head of the row, which walls the first one in between the
+    // second and the sensor pad column, and on one service layer
+    // stage 2 refuses that before any crossing is computed.
+    let source = "\
+theme cross:
+  slot wall -> @oak_planks
+  slot door -> @oak_door
+
+struct crossbar size=5x4
+  floor mat_slot=wall
+  door  id=front side=front at=center mat_slot=door
+  door  id=back  side=back  at=center mat_slot=door
+
+  pressure_plate id=plate1 at=front.outside offset=0 y=0 -> sig.a
+  pressure_plate id=plate2 at=inside.front  offset=0 y=0 -> sig.b
+
+  logic sig.f = sig.a and sig.b
+
+  door[id=front] opened_by=sig.f
+  door[id=back]  opened_by=sig.f
+
+  circuit region=floor void=1
+";
     let dir = tempfile::tempdir().expect("temp dir");
     let path = dir.path().join("crossbar.crn");
-    std::fs::write(&path, &patched).expect("write crossing congestion fixture");
+    std::fs::write(&path, source).expect("write crossing congestion fixture");
     let out = run_synth(&[
         "--experimental-logic-synth",
         "--stage",

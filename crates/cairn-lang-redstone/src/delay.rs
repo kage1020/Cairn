@@ -35,25 +35,21 @@
 //! A segment is the length of the *routed* path from the net's
 //! source to that sink —
 //! `route_to`, not the
-//! straight-line Manhattan distance. A minimum spanning tree drops the
-//! direct source→sink edge whenever two others are cheaper, and the
-//! signal then detours through the terminal between them. Counting
+//! straight-line Manhattan distance. The two are different numbers
+//! whenever the wire has to go round something: the reservation holds
+//! cell bodies and I/O pads, dust cannot be drawn inside one, and a
+//! sink reached through the trunk laid for a nearer sink travels
+//! further than the line between it and its driver. Counting
 //! against the route is what lets stage 4 put every buffer this stage
 //! paid for onto the dust it refreshes.
 //!
-//! The change is not confined to layouts v1 cannot produce. Cells sit
-//! in one monotone row, but the actuator pads join their driver's net
-//! as terminals too, and a pad on the far edge pulls the tree out of
-//! that row: a scope whose sensor drives both the cell row and an
-//! output pad measures `width + 2` to the pad where the straight line
-//! is `width`. What that does *not* reach is a cell's buffer count —
-//! an exhaustive walk of v1's placement shapes (cells at `(i,0,0)`,
-//! pads on the edge columns, every input / output count up to three
-//! and every output subset) finds no layout where a cell's routed
-//! segment crosses a [`DUST_ATTENUATION_LIMIT`] boundary its Manhattan
-//! distance does not. The reachable difference is the sanity cap on
-//! output segments, which `attenuation_cap_measures_the_routed_output
-//! _segment` pins.
+//! The difference is not confined to layouts v1 cannot produce. The
+//! sensor pads stack in one column at the left edge, so the second
+//! sensor into the cell at the origin comes round the first pad rather
+//! than through it, and a pad on the far edge pulls a segment out of
+//! the cell row. `attenuation_cap_measures_the_routed_output_segment`
+//! pins a segment the cap refuses on its routed length and would let
+//! through on its straight line.
 //!
 //! Buffer repeaters are **counted, not materialised** here. The
 //! routing pass discarded its per-scope occupancy set before yielding
@@ -97,7 +93,9 @@ use crate::placement_ir::{
     CellCoord, CellIdentity, CircuitRegionReservation, PlacementIr, ScopedPlacementIr,
     ScopedPlacementIrEntry,
 };
-use crate::routing_geometry::{collect_nets, input_pad, net_trees, sum_over_driving_nets};
+use crate::routing_geometry::{
+    Router, block_sites, collect_nets, input_pad, net_trees, sum_over_driving_nets, unroutable,
+};
 
 /// Signal-attenuation ceiling per dust segment (`spec/redstone` §14.5
 /// "signal attenuation limit of 15"). A dust source starts at strength
@@ -272,7 +270,16 @@ fn delay_scope(entry: &ScopedPlacementIrEntry) -> ScopeDelay {
     // that broke the correspondence would otherwise under-report
     // `delay_ticks` in silence.
     let nets = collect_nets(&ir);
-    let trees = net_trees(&nets, source_of_net);
+    let router = Router::new(&region, &block_sites(&ir, &region));
+    let trees = net_trees(&nets, &router, source_of_net);
+    // Re-checked here for the reason the missing-region branch above
+    // is: a stranded sink's route is one step, which is under every cap
+    // this pass applies, so the ticks it would write describe a circuit
+    // nothing can build. Stage 2 elides such a scope, so this only
+    // catches a caller who skipped it.
+    if let Some(diagnostic) = unroutable(&nets, &trees, entry, &region, source_of_net) {
+        return Err(diagnostic);
+    }
     let segment_of = |net: NetRef, sink: CellCoord| -> u32 {
         let route = trees
             .get(&net)
@@ -558,31 +565,25 @@ mod tests {
     /// would slide past.
     #[test]
     fn attenuation_cap_measures_the_routed_output_segment() {
-        for (width, refuses) in [(254u32, false), (255, true)] {
+        for (width, refuses) in [(255u32, false), (256, true)] {
             let mut ir = PlacementIr::new(Edition::Java);
             ir.region = Some(reservation(width, 4, 2));
-            for name in ["a", "b"] {
-                ir.inputs.push(crate::netlist_ir::NetlistInput {
-                    name: cairn_lang_core::ast::DottedRef::new("sig".into(), vec![name.into()]),
-                    span: Span::default(),
-                });
-            }
-            // Two cells, so the tree reaches the pad through the row
-            // instead of straight from the sensor: with one cell the
-            // direct pad edge is the cheapest and the route collapses
-            // onto the straight line.
-            for x in [0u32, 1] {
-                ir.cells.push(placed_cell(
-                    EditionCell::JavaRepeaterOr,
-                    CellCoord::new(x, 0, 0),
-                    vec![CellPortDriver {
-                        port: PortName::A,
-                        net: NetRef::Input(1),
-                    }],
-                ));
-            }
+            ir.inputs.push(crate::netlist_ir::NetlistInput {
+                name: cairn_lang_core::ast::DottedRef::new("sig".into(), vec!["a".into()]),
+                span: Span::default(),
+            });
+            // Something standing on the straight line, so the route out
+            // to the pad is the two blocks longer that going round it
+            // costs. Without it the route and the straight line are one
+            // number and the fixture cannot tell which the cap was
+            // measured against.
+            ir.cells.push(placed_cell(
+                EditionCell::JavaRepeaterOr,
+                CellCoord::new(10, 0, 1),
+                Vec::new(),
+            ));
             ir.outputs.push(routed_output(
-                NetRef::Input(1),
+                NetRef::Input(0),
                 CellCoord::new(width - 1, 0, 1),
             ));
             let delayed = compile_delay(&scoped(ScopeKind::Struct, "wide", ir));
@@ -593,8 +594,9 @@ mod tests {
             assert_eq!(
                 fired,
                 refuses,
-                "width {width}: straight line {width}, routed {}, cap {MAX_ATTENUATION_SEGMENT}; got {:?}",
-                width + 2,
+                "width {width}: straight line {}, routed {}, cap {MAX_ATTENUATION_SEGMENT}; got {:?}",
+                width - 1,
+                width + 1,
                 delayed.diagnostics,
             );
         }
@@ -709,7 +711,7 @@ mod tests {
     #[test]
     fn cell_driver_attenuation_primary_names_cell_and_port() {
         // Two cells wide-spread inside a `size=300x3` reservation so
-        // the cell[1] driver from cell[0] spans a Manhattan segment
+        // the cell[1] driver from cell[0] spans a routed segment
         // over `MAX_ATTENUATION_SEGMENT`. Only reachable by hand-built
         // IR — the placement pass lays cells at `x = topological
         // index`, so producing this shape from a `.crn` would need a

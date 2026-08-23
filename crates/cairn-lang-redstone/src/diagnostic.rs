@@ -121,8 +121,10 @@ pub enum DiagnosticCode {
     /// exists, not how many crossings it would have to carry: any
     /// crossing under `void < 2` fires this, and `void >= 2` accepts
     /// them all. There is nothing downstream for a per-crossing
-    /// capacity model to constrain yet — v1 does not lift the wire
-    /// itself, and no pass downstream reads the crossing set: the
+    /// capacity model to constrain yet — no pass lifts a wire *for a
+    /// crossing* (the routing pass lifts one to clear a block, which is
+    /// a different question), and no pass downstream reads the crossing
+    /// set: the
     /// block-array lowering does not take the Placement IR at all, so
     /// whichever pass eventually voxelises these wires will derive the
     /// crossings itself. Fix: increase `void`, enlarge the
@@ -131,17 +133,19 @@ pub enum DiagnosticCode {
     /// with fewer overlaps.
     CrossingCongestion,
     /// The crossing-legalization pass could not place a required
-    /// implicit buffer repeater — every candidate coord along the
-    /// driver segment already carries a cell, pad, or another buffer,
-    /// and no `Bridge` layer coord was free either. Rare in practice:
+    /// implicit buffer repeater — another net's dust already runs
+    /// through the candidate coord, and every `Bridge` layer in that
+    /// column was taken by an earlier repeater or by wire the router
+    /// had to lift. A candidate is never a cell body or a pad: it sits
+    /// strictly between the ends of a route, and the router keeps every
+    /// coord strictly between them off the blocks. Rare in practice:
     /// the delay pass already caps segments at
-    /// `MAX_ATTENUATION_SEGMENT` (16 buffers) and the routing pass
-    /// caps footprint at the reservation area, so this only fires on a
-    /// pathological packing (a very tight `void=1` region with many
-    /// short cascades where every plane coord is a cell). Fix:
-    /// increase `void` so buffers can fall onto a bridge layer, or
-    /// enlarge the `circuit region=` footprint so buffer candidates
-    /// have room on the plane.
+    /// `MAX_ATTENUATION_SEGMENT` (16 buffers) and the routing pass caps
+    /// footprint at the reservation area, so this needs two nets whose
+    /// routes meet at one of the few coords 15 blocks along both. Fix:
+    /// increase `void` so the column has another layer to lift onto, or
+    /// enlarge the `circuit region=` footprint so the two routes stop
+    /// meeting.
     BufferCoordCollision,
     /// Lowering a `logic` binding descended past
     /// [`crate::synth::MAX_LOWERING_DEPTH`]. A binding is lowered by descending into

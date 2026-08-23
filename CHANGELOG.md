@@ -142,6 +142,32 @@ and is a separate axis from the Minecraft target version.
   same bytes divided one place to the left or right hashed the same — precisely the rename the
   function's own doc claimed the digest resisted. A separator before the first name would have
   closed half of it; both collisions are pinned as tests.
+- *(redstone)* The routing pass draws a net's dust around the components in its way instead of
+  through them. It used to build a spanning tree over `{source} ∪ sinks` and render each edge as
+  an L-shape, which knew nothing about what was already standing in the reservation: the tree
+  reached a far cell *through* the nearer ones — a comparator hands on its own output, not the
+  wire that fed it — and an L-shape crossed whatever lay between its ends, pressure plates
+  included. Every sink is now a leaf, a fanout is a trunk beside the row with a tap into each
+  cell, and no coord of a net's wire is a component that is not one of that net's own ends.
+  Three consequences, all visible:
+  - Every `wire_length`, every `delay_ticks`, and every buffer-repeater coord moves wherever the
+    old wire went through something. `examples/redstone-door.crn` reads `wire_length=5` where it
+    read `3`: the second sensor's pad sits behind the first one, and its dust now comes round
+    rather than through.
+  - A shared bus stops asking for an escape layer it should never have needed. Sixteen cells all
+    reading one sensor used to want their repeater on the body of cell #13 and get it lifted onto
+    a bridge; the trunk now runs beside the row, so one repeater stands on free wire at
+    `(14,0,1)`.
+  - A `void=1` scope with two or more cells whose first cell reads a second sensor is refused with
+    `E_ROUTE_CONGESTION`. Cell #0 sits in the corner with cell #1 on one side and the sensor pad
+    column on the other, and one service layer leaves the second signal no way in. It used to
+    compile, with the wire drawn through the pressure plate. The refusal names both coords it
+    could not join and points at `void=`.
+  - `E_BUFFER_COORD_COLLISION` keeps one cause of the three it used to name. A buffer repeater
+    stands strictly between the ends of a route, and the router keeps every coord strictly between
+    them off the blocks, so the candidate is never a cell body or a pad any more. What still
+    refuses is another net's dust holding the coord with every bridge layer in that column taken —
+    and the layers can now be taken by wire, not only by an earlier repeater.
 
 ### Added
 

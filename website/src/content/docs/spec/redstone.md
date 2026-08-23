@@ -97,13 +97,20 @@ concepts `plane` / `via` / `bridge` internally (not exposed in the DSL).
 - The internal algorithm is five stages: **Placement → Steiner routing → Delay insertion → Crossing
   legalization → Edition legalization**.
   - placement: topological order, left→right.
-  - routing: Manhattan. Crossings escape to a `bridge tile` or a vertical layer. Fanout builds a tree.
+  - routing: Manhattan, **around what is already standing there**. The reservation holds cell bodies
+    and I/O pads; dust cannot be drawn on one, and a signal cannot pass *through* one — a component
+    either emits the signal or consumes it. Every sink is therefore a leaf of its net's tree, and a
+    fanout is a trunk beside the row with a tap into each sink rather than a chain through them.
+    Where nothing is in the way the wire is the straight rectilinear run. A wire that has to get past
+    a block goes round it, or climbs to a `bridge` layer inside the `void=<N>` budget when there is
+    nowhere to go round. Crossings between two nets escape to a `bridge tile` or a vertical layer.
   - delay insertion: insert a repeater as a buffer only where a segment exceeds the signal attenuation
     limit of 15. A segment is measured along the **routed** path from the driver to that sink, and the
-    buffer stands on that path: a Steiner tree drops the direct source→sink edge whenever two others
-    are cheaper, so the straight line between the two is not always wire.
+    buffer stands on that path: the route hangs off the trunk laid for a nearer sink and goes round
+    whatever is in its way, so the straight line between the two is not always wire.
 - Routing is confined to the `circuit` region; if it does not fit, fail-loud (report congestion = area
-  shortage).
+  shortage). A sink with no clear path from its driver — every way out walled in by a component — is
+  the same refusal for a different reason, and says which two coords it could not join.
 ```
 circuit region=basement void=3       # reserve a 3-high service layer; route the synthesized circuit here
 ```

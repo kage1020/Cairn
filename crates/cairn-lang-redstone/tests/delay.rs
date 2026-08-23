@@ -99,7 +99,7 @@ fn redstone_door_java_delay_ticks_equal_base_repeater_delay() {
     );
     assert_eq!(
         cell.wire_length(),
-        Some(3),
+        Some(5),
         "routing's wire_length must survive the delay pass verbatim",
     );
 }
@@ -139,7 +139,7 @@ fn redstone_door_bedrock_delay_ticks_are_zero() {
     );
     assert_eq!(
         cell.wire_length(),
-        Some(3),
+        Some(5),
         "wire_length is edition-independent by construction",
     );
 }
@@ -198,9 +198,9 @@ struct sim size=7x5
     // below, but pinned per-cell here so a divergent field write in
     // `attribute_delay_ticks` trips this test rather than the JSON
     // one).
-    assert_eq!(entry.ir.cells[0].wire_length(), Some(3));
+    assert_eq!(entry.ir.cells[0].wire_length(), Some(5));
     assert_eq!(entry.ir.cells[1].wire_length(), Some(5));
-    assert_eq!(entry.ir.cells[2].wire_length(), Some(3));
+    assert_eq!(entry.ir.cells[2].wire_length(), Some(5));
 }
 
 /// AC4 — a scope whose routed output-pad segment exceeds
@@ -413,7 +413,7 @@ struct band size=5x5
     );
 }
 
-/// `AC5c` — output-pad Manhattan segment of exactly
+/// `AC5c` — output-pad routed segment of exactly
 /// `MAX_ATTENUATION_SEGMENT` blocks passes cleanly; one more block
 /// fails. Pins the `>` vs `>=` boundary in `delay_scope`'s sanity
 /// check so a future rewrite cannot silently slide the cap by one.

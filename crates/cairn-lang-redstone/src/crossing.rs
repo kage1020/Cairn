@@ -21,8 +21,10 @@
 //!    against a `void < 2` reservation is refused with
 //!    [`crate::DiagnosticCode::CrossingCongestion`]; `void >= 2`
 //!    scopes are accepted on the grounds that the reserved service
-//!    layers are wide enough for a `stage 5` block-array lowering to
-//!    re-derive the same Steiner trees and lift the crossings itself.
+//!    layers leave somewhere for a later pass to lift a crossing onto.
+//!    Nothing does yet, and the routing pass now spends part of that
+//!    budget itself on wire that climbs over a block, so the grounds
+//!    are thinner than the sentence makes them sound.
 //!    The crossing set is used for that refusal alone and is not
 //!    surfaced on the IR. What steers buffer placement is the
 //!    `wire_owners` map it is derived from: a candidate is unusable
@@ -42,12 +44,12 @@
 //!    `k * DUST_ATTENUATION_LIMIT` (`k = 1..=buffer_count`), and the
 //!    count comes from that same path's length through
 //!    `buffer_count_for_segment`, the function the
-//!    delay pass charged ticks for. Walking a fresh
-//!    `l_shape_path(source, sink)` instead is what used to put buffers
-//!    on coords the net does not own: a minimum spanning tree drops
-//!    the direct source→sink edge whenever two others are cheaper, and
-//!    a repeater on the discarded straight line stands either in mid-air
-//!    or on a neighbouring net's dust.
+//!    delay pass charged ticks for. Walking the straight line between
+//!    the two instead is what used to put buffers on coords the net
+//!    does not own: the routed path hangs off the trunk laid for a
+//!    nearer sink and goes round whatever stands in its way, so a
+//!    repeater on the straight line stands either in mid-air or on a
+//!    neighbouring net's dust.
 //!
 //!    A candidate whose coord is a cell body, an I/O pad or another
 //!    net's dust escapes to the first free y-layer inside the
@@ -58,8 +60,8 @@
 //!    holds the coord.
 //!
 //!    A repeater this net already stands on the candidate — or lifted
-//!    off it — is not an obstruction: a Steiner tree's sinks share
-//!    their prefix, so segments of one net reach the same refresh
+//!    off it — is not an obstruction: the sinks of one net share their
+//!    prefix, so segments of one net reach the same refresh
 //!    points, and the block already there refreshes every one of
 //!    them. The segment records that coord instead of asking for a
 //!    layer of its own. Only *distinct* nets can therefore contend for
@@ -102,9 +104,11 @@ use crate::diagnostic::{Diagnostic, DiagnosticCode};
 use crate::netlist_ir::NetRef;
 use crate::placement_ir::{
     BufferCoord, BufferSegment, CellCoord, CellIdentity, CircuitRegionReservation, PlacementIr,
-    RouteLayer, ScopedPlacementIr, ScopedPlacementIrEntry,
+    ScopedPlacementIr, ScopedPlacementIrEntry,
 };
-use crate::routing_geometry::{NetTree, collect_nets, input_pad, net_order, net_trees};
+use crate::routing_geometry::{
+    NetTree, Router, block_sites, collect_nets, input_pad, net_order, net_trees, unroutable,
+};
 
 /// Output of a [`compile_crossing`] run.
 ///
@@ -216,28 +220,32 @@ fn legalize_scope(entry: &ScopedPlacementIrEntry) -> ScopeLegalization {
         }
     };
 
-    let nets = collect_nets(&ir);
-    let order = net_order(&nets);
-    let trees = net_trees(&nets, source_of_net);
-
     // Reserved coords are cell bodies and I/O pads — they carry the
     // net's endpoint semantic, not a wire pass-through, so two nets
     // touching the same reserved coord is not a crossing (that is
     // the standard cell → downstream cell chain). Only pure wire
-    // coords participate in crossing detection.
-    let mut reserved: HashSet<CellCoord> = HashSet::new();
-    for coord in &cell_coords {
-        reserved.insert(*coord);
-    }
-    for i in 0..ir.inputs.len() {
-        reserved.insert(input_pad(i, &region));
-    }
-    for pad in ir.outputs.iter().map(|o| o.pad) {
-        reserved.insert(pad);
+    // coords participate in crossing detection. The same list is what
+    // the router routed around, so a wire coord here is a coord the
+    // router was free to use.
+    let blocks = block_sites(&ir, &region);
+    let reserved: HashSet<CellCoord> = blocks.iter().map(|site| site.coord).collect();
+
+    let nets = collect_nets(&ir);
+    let order = net_order(&nets);
+    let router = Router::new(&region, &blocks);
+    let trees = net_trees(&nets, &router, source_of_net);
+    // Same re-check the delay pass makes, for the same reason: a
+    // stranded sink's route is one step, so it asks for no repeater and
+    // the legalized dump would claim a circuit that cannot be wired.
+    if let Some(diagnostic) = unroutable(&nets, &trees, entry, &region, source_of_net) {
+        return Err(diagnostic);
     }
 
-    // Which nets' dust runs through each non-reserved plane coord,
-    // recorded in `order` so the list at each coord is deterministic.
+    // Which nets' dust runs through each non-reserved coord, recorded
+    // in `order` so the list at each coord is deterministic. Not the
+    // plane alone: the router climbs onto a bridge layer to get past a
+    // block, and a coord it climbed onto is dust like any other — which
+    // is what `claim_bridge` reads to keep a repeater off it.
     // One map answers both questions this pass asks about the routed
     // wires: which coords two nets share (a plane crossing), and
     // whether a buffer candidate would land on dust that is not its
@@ -321,6 +329,15 @@ fn legalize_scope(entry: &ScopedPlacementIrEntry) -> ScopeLegalization {
 enum PlaneOccupant {
     /// A cell body or an I/O pad. A repeater there would displace the
     /// component instead of refreshing the wire running into it.
+    ///
+    /// Answered by this function but not reachable through
+    /// [`legalize_scope`], for the same shape of reason
+    /// [`Self::Buffer`] is not: a candidate sits strictly between the
+    /// ends of a route, and the router keeps every coord strictly
+    /// between them off the blocks. The variant stays because it is
+    /// the honest answer for the inputs, and because it is the first
+    /// question worth asking about a coord — see
+    /// `a_buffer_candidate_is_never_a_cell_body`.
     Component,
     /// Another net's dust runs through the coord. A repeater there
     /// would tie two signals together — the cross-net short this pass
@@ -353,6 +370,11 @@ enum PlaneOccupant {
 /// rather than merely occupied, and an earlier buffer is this pass's
 /// own doing. Only the first is reported, because only one thing has
 /// to be true for the candidate to be unusable.
+///
+/// Of the four, two are reachable through the pass today —
+/// [`PlaneOccupant::OtherNet`] and [`PlaneOccupant::OwnBuffer`]. The
+/// other two are answers this function owes its inputs rather than
+/// states a candidate reaches; each says so on its own variant.
 fn plane_occupant(
     candidate: CellCoord,
     net: NetRef,
@@ -379,16 +401,31 @@ fn plane_occupant(
     None
 }
 
-/// Claim the first unused bridge layer above `candidate`, inside the
-/// reservation's `void=<N>` budget. `None` when every layer is taken,
-/// and when `void < 2` leaves no layer above the plane at all.
+/// Claim the first free bridge layer in `candidate`'s column, inside
+/// the reservation's `void=<N>` budget. `None` when every layer is
+/// taken, and when `void < 2` leaves no layer above the plane at all.
+///
+/// The scan runs `y in 1..void` rather than upward from `candidate.y`,
+/// so a candidate that is itself on a bridge layer is offered the
+/// layers below it too. Every candidate the pass builds is a plane
+/// coord today, which makes the two the same scan.
+///
+/// A layer is taken by an earlier repeater — `bridge_buffers` is that
+/// ledger — or by dust: the router climbs off the plane to get past a
+/// block, and the coord it climbs onto is a wire like any other.
+/// `CellCoord::new` gives both producers the same key, so a
+/// repeater cannot be dropped onto a wire that was already there.
 fn claim_bridge(
     candidate: CellCoord,
     region: &CircuitRegionReservation,
     bridge_buffers: &mut HashSet<CellCoord>,
+    wire_owners: &HashMap<CellCoord, Vec<NetRef>>,
 ) -> Option<CellCoord> {
     for y in 1..region.void {
-        let bridge = CellCoord::with_layer(candidate.x, y, candidate.z, RouteLayer::Bridge);
+        let bridge = CellCoord::new(candidate.x, y, candidate.z);
+        if wire_owners.contains_key(&bridge) {
+            continue;
+        }
         if bridge_buffers.insert(bridge) {
             return Some(bridge);
         }
@@ -480,10 +517,10 @@ fn allocate_buffer_coords(
     // buffers coords or the two stages disagree about how many exist.
     //
     // Same placer, and after the cells, so a cell buffer and an actuator
-    // buffer cannot claim one coord. They do contend: `l_shape_path`
-    // walks x before z, so an actuator's route leaves its driver along
-    // the cell row and its candidates land among the cells whenever the
-    // driver is not the last of them.
+    // buffer cannot claim one coord. They do contend: an actuator's
+    // route leaves its driver along the same trunk a cell's does, so
+    // the two reach the same refresh points whenever they share a
+    // prefix.
     let mut per_output: Vec<Vec<BufferCoord>> = Vec::with_capacity(ir.outputs.len());
     for (output_index, output) in ir.outputs.iter().enumerate() {
         let route = trees
@@ -562,7 +599,7 @@ struct BufferPlacer<'a> {
     wire_owners: &'a HashMap<CellCoord, Vec<NetRef>>,
     reserved: &'a HashSet<CellCoord>,
     /// Coord → the net whose repeater stands on it. Keyed by net
-    /// rather than a bare set because a Steiner tree's two sinks
+    /// rather than a bare set because one net's two sinks
     /// share their prefix: the candidates for both land on the
     /// same coords, and the second visit has to recognise its
     /// own repeater rather than escape around it.
@@ -585,8 +622,8 @@ impl BufferPlacer<'_> {
     /// Candidates sit at `k * DUST_ATTENUATION_LIMIT` along the routed
     /// path — the dust the signal actually travels, so a plane buffer
     /// always stands on the wire it refreshes. A candidate held by
-    /// something else ([`plane_occupant`]) escapes to a
-    /// [`RouteLayer::Bridge`] layer directly above it; if none is free,
+    /// something else ([`plane_occupant`]) escapes to the first free
+    /// [`RouteLayer::Bridge`] layer in its column; if none is free,
     /// `on_collision` builds the refusal, because the two callers name
     /// the offending segment differently and "cell #3" on a finding
     /// about an actuator wire sends the reader to the wrong line.
@@ -624,7 +661,7 @@ impl BufferPlacer<'_> {
                 claimed.push(BufferCoord::new(port, candidate));
                 continue;
             };
-            // A Steiner tree's sinks share their prefix, so two
+            // The sinks of one net share their prefix, so two
             // segments of one net compute the same candidates — two
             // ports of one cell, two cells past the same 15-block
             // point, a cell and an actuator. The repeater standing
@@ -639,18 +676,18 @@ impl BufferPlacer<'_> {
                 claimed.push(BufferCoord::new(port, candidate));
                 continue;
             }
-            // The same rule one layer up. A cell body cannot be
-            // refreshed on the plane, so the first segment to reach it
-            // lifts its repeater onto a bridge — and that block sits
-            // over the coord every segment of this net passes through,
-            // so it refreshes all of them. Escaping again would stack
+            // The same rule one layer up. Another net's dust holds
+            // the plane, so the first segment to reach the coord lifts
+            // its repeater onto a bridge — and that block sits over the
+            // coord every segment of this net passes through, so it
+            // refreshes all of them. Escaping again would stack
             // a second block on the same point of the same wire, and
             // exhaust the `void=<N>` budget doing it.
             if let Some(&reused) = self.escaped.get(&(net, candidate)) {
                 claimed.push(BufferCoord::new(port, reused));
                 continue;
             }
-            let bridge = claim_bridge(candidate, self.region, &mut self.bridge)
+            let bridge = claim_bridge(candidate, self.region, &mut self.bridge, self.wire_owners)
                 .ok_or_else(|| on_collision(candidate, occupant))?;
             self.escaped.insert((net, candidate), bridge);
             claimed.push(BufferCoord::new(port, bridge));
@@ -817,7 +854,7 @@ mod tests {
     //! Crate-internal unit tests for crossing-legalization behaviours
     //! that `tests/crossing.rs` cannot reach through synth fixtures
     //! alone:
-    //! - the plane-crossing branch (needs two nets whose Steiner
+    //! - the plane-crossing branch (needs two nets whose routed
     //!   trees actually overlap on a non-endpoint coord, which no
     //!   realistic single-scope `.crn` produces yet — the
     //!   `redstone-door` example has one cell and one net);
@@ -840,7 +877,7 @@ mod tests {
 
     use std::collections::{HashMap, HashSet};
 
-    use super::{PlaneOccupant, compile_crossing, plane_occupant};
+    use super::{PlaneOccupant, claim_bridge, compile_crossing, plane_occupant};
     use crate::delay::{BUFFER_REPEATER_TICKS, compile_delay};
     use crate::diagnostic::DiagnosticCode;
     use crate::edition_netlist_ir::EditionCell;
@@ -852,7 +889,7 @@ mod tests {
         RouteLayer, ScopedPlacementIr, ScopedPlacementIrEntry,
     };
     use crate::routing::compile_routing;
-    use crate::routing_geometry::{collect_nets, input_pad, net_trees};
+    use crate::routing_geometry::{Router, block_sites, collect_nets, input_pad, net_trees};
 
     fn reservation(width: u32, depth: u32, void: u32) -> CircuitRegionReservation {
         CircuitRegionReservation {
@@ -919,7 +956,7 @@ mod tests {
 
     #[test]
     fn single_net_no_buffer_is_untouched() {
-        // 1 cell driven from Input(0), Manhattan segment <= 15 → no
+        // 1 cell driven from Input(0), routed segment <= 15 → no
         // buffer coord, no crossing. `buffer_coords` stays empty.
         let mut ir = PlacementIr::new(Edition::Java);
         ir.region = Some(reservation(5, 3, 2));
@@ -952,9 +989,9 @@ mod tests {
 
     #[test]
     fn long_segment_places_buffer_on_plane() {
-        // A driver segment of 16 blocks (Manhattan) trips the
+        // A routed driver segment of 16 blocks trips the
         // attenuation limit once → exactly one buffer coord at
-        // `k=1 * DUST_ATTENUATION_LIMIT = 15` steps along the L-shape.
+        // `k=1 * DUST_ATTENUATION_LIMIT = 15` steps along the route.
         // No collision → the buffer sits on `RouteLayer::Plane`.
         let mut ir = PlacementIr::new(Edition::Java);
         ir.region = Some(reservation(20, 3, 2));
@@ -1021,7 +1058,7 @@ mod tests {
 
     #[test]
     fn crossing_congestion_fires_when_void_is_one() {
-        // Two nets whose Steiner trees overlap on a plane coord with
+        // Two nets whose routed trees overlap on a plane coord with
         // `void=1`: no bridge layer to escape to → refuse. Built by
         // hand because a single-scope `.crn` with genuine crossings
         // does not exist in the example set yet.
@@ -1029,9 +1066,9 @@ mod tests {
         // Input pads land at (0, 0, 1) and (0, 0, 2) per
         // `routing_geometry::input_pad` (z = 1 + i, saturating at depth-1).
         // Placing cell 0 at (3, 0, 3) and cell 1 at (3, 0, 1) makes
-        // the two L-shapes (x-then-z-then-y) share the wire coord
-        // (3, 0, 2) — neither cell nor pad, so it counts as a
-        // genuine crossing. void=1 rejects the bridge escape.
+        // the two routes (x before z, nothing in the way) share the
+        // wire coord (3, 0, 2) — neither cell nor pad, so it counts as
+        // a genuine crossing. void=1 rejects the bridge escape.
         let mut ir = PlacementIr::new(Edition::Java);
         ir.region = Some(reservation(5, 5, 1));
         ir.inputs.push(crate::netlist_ir::NetlistInput {
@@ -1135,67 +1172,76 @@ mod tests {
         }
     }
 
-    /// A cell whose driver's dust detours through another terminal.
-    /// `source` sits at the input pad, the detour terminal at
-    /// (7,0,6), the sink at (14,0,1): the direct edge is the most
-    /// expensive of the three, so the MST drops it and the signal
-    /// travels 24 blocks along a path whose straight-line distance is
-    /// 14.
-    fn detour_scope(void: u32) -> ScopedPlacementIr {
+    /// A sink fourteen blocks from its driver with something standing
+    /// halfway.
+    ///
+    /// The pad is at `(0,0,1)` and the sink at `(14,0,1)`, so the
+    /// straight line between them is 14 blocks and asks for no buffer
+    /// repeater at all. A block at `(7,0,1)` sends the wire around it,
+    /// and the two blocks that costs put the segment over the
+    /// attenuation limit: 16 blocks of dust, and a repeater 15 along.
+    /// That gap between the straight line and the route is what every
+    /// measurement in this pass has to be taken along.
+    ///
+    /// The blocker drives nothing. A block is all the fixture needs,
+    /// and a driver would make it a sink of the net under test — a
+    /// different layout, and one with wire of its own running through
+    /// the coords the assertions are about.
+    fn walled_scope(void: u32) -> ScopedPlacementIr {
         let mut ir = PlacementIr::new(Edition::Java);
-        ir.region = Some(reservation(16, 8, void));
+        ir.region = Some(reservation(20, 3, void));
         ir.inputs.push(crate::netlist_ir::NetlistInput {
             name: cairn_lang_core::ast::DottedRef::new("sig".into(), vec!["a".into()]),
             span: Span::default(),
         });
-        for coord in [CellCoord::new(7, 0, 6), CellCoord::new(14, 0, 1)] {
-            ir.cells.push(placed_cell(
-                EditionCell::JavaRepeaterOr,
-                coord,
-                vec![CellPortDriver {
-                    port: PortName::A,
-                    net: NetRef::Input(0),
-                }],
-            ));
-        }
-        scoped(ScopeKind::Struct, "detour", ir)
+        ir.cells.push(placed_cell(
+            EditionCell::JavaRepeaterOr,
+            CellCoord::new(7, 0, 1),
+            Vec::new(),
+        ));
+        ir.cells.push(placed_cell(
+            EditionCell::JavaRepeaterOr,
+            CellCoord::new(14, 0, 1),
+            vec![CellPortDriver {
+                port: PortName::A,
+                net: NetRef::Input(0),
+            }],
+        ));
+        scoped(ScopeKind::Struct, "walled", ir)
     }
 
+    /// The index of the sink in [`walled_scope`]'s cell list.
+    const WALLED_SINK: usize = 1;
+
     /// The buffer materialises on the dust the signal actually
-    /// travels, at 15 blocks along the 24-block route.
+    /// travels, at 15 blocks along the 16-block route.
     ///
     /// The straight line from the pad to this sink is 14 blocks, so
-    /// walking it — as this pass did before — asks for no buffer at
-    /// all: 24 blocks of dust with nothing refreshing it, which is the
-    /// signal never arriving. The coord is pinned rather than derived
-    /// so a change to the axis order or the tie-break has to say so
-    /// here.
+    /// measuring it asks for no buffer at all: 16 blocks of dust with
+    /// nothing refreshing it, which is the signal never arriving. The
+    /// coord is pinned rather than derived so a change to the axis
+    /// order or the tie-break has to say so here.
     #[test]
     fn buffer_lands_on_the_routed_path_not_the_straight_line() {
-        let legalized = compile_crossing(&detour_scope(2));
+        let legalized = compile_crossing(&walled_scope(2));
         assert!(
             legalized.diagnostics.is_empty(),
             "the candidate is free wire: {:?}",
             legalized.diagnostics,
         );
         let cells = &legalized.scoped.scopes[0].ir.cells;
-        assert!(
-            cells[0].buffer_coords().is_empty(),
-            "the 12-block leg to the detour terminal needs none: {:?}",
-            cells[0].buffer_coords(),
-        );
-        let buffers = cells[1].buffer_coords();
-        assert_eq!(buffers.len(), 1, "24 blocks of dust need one: {buffers:?}");
-        assert_eq!(buffers[0].coord, CellCoord::new(10, 0, 6));
+        let buffers = cells[WALLED_SINK].buffer_coords();
+        assert_eq!(buffers.len(), 1, "16 blocks of dust need one: {buffers:?}");
+        assert_eq!(buffers[0].coord, CellCoord::new(14, 0, 0));
         assert_eq!(buffers[0].coord.layer, RouteLayer::Plane);
     }
 
-    /// A second net over the detour fixture, so the "no buffer sits on
+    /// A second net over the walled fixture, so the "no buffer sits on
     /// a foreign net's dust" half of `every_buffer_stands_on_dust_the_
     /// routing_pass_laid` has something to reject. `sig.b` runs from
-    /// its own pad across the row the `sig.a` route travels.
-    fn two_net_detour_scope() -> ScopedPlacementIr {
-        let mut scope = detour_scope(2);
+    /// its own pad along the row the `sig.a` route comes back down.
+    fn two_net_walled_scope() -> ScopedPlacementIr {
+        let mut scope = walled_scope(2);
         let ir = &mut scope.scopes[0].ir;
         ir.inputs.push(crate::netlist_ir::NetlistInput {
             name: cairn_lang_core::ast::DottedRef::new("sig".into(), vec!["b".into()]),
@@ -1203,7 +1249,7 @@ mod tests {
         });
         ir.cells.push(placed_cell(
             EditionCell::JavaRepeaterOr,
-            CellCoord::new(12, 0, 7),
+            CellCoord::new(13, 0, 0),
             vec![CellPortDriver {
                 port: PortName::A,
                 net: NetRef::Input(1),
@@ -1213,8 +1259,15 @@ mod tests {
     }
 
     /// Every buffer stands on dust **stage 2 laid** — on the plane, a
-    /// coord of its own net's [`NetTree::wire_path`]; on a bridge, the
-    /// layer directly above one — and never on another net's.
+    /// coord of its own net's [`NetTree::wire_path`]; on a bridge, a
+    /// layer above one in the same column — and never on a coord
+    /// another net's wire runs through, whichever layer that is.
+    ///
+    /// "A layer above one in the same column" rather than "the plane
+    /// coord below it", because the routed wire itself climbs now: a
+    /// candidate the router lifted over a block is a bridge coord, and
+    /// a repeater escaping that stands over a bridge rather than over
+    /// the ground layer.
     ///
     /// Checked against `wire_path` rather than against the `route_to`
     /// the allocator itself reads: comparing the production path to
@@ -1223,7 +1276,7 @@ mod tests {
     /// put in the occupancy set.
     #[test]
     fn every_buffer_stands_on_dust_the_routing_pass_laid() {
-        let legalized = compile_crossing(&two_net_detour_scope());
+        let legalized = compile_crossing(&two_net_walled_scope());
         assert!(
             legalized.diagnostics.is_empty(),
             "{:?}",
@@ -1237,7 +1290,8 @@ mod tests {
             "the fixture needs a second net for the cross-net half to run: {nets:?}",
         );
         let cell_coords: Vec<CellCoord> = ir.cells.iter().map(|c| c.coord).collect();
-        let trees = net_trees(&nets, |net| match net {
+        let router = Router::new(&region, &block_sites(ir, &region));
+        let trees = net_trees(&nets, &router, |net| match net {
             NetRef::Input(i) => input_pad(i as usize, &region),
             NetRef::Cell(j) => cell_coords[j as usize],
         });
@@ -1259,26 +1313,31 @@ mod tests {
                     .iter()
                     .find(|d| d.port == port)
                     .expect("every buffer names a driver of its own cell");
-                let footprint = CellCoord::new(buffer.coord.x, 0, buffer.coord.z);
                 assert!(
-                    owned[&driver.net].contains(&footprint),
+                    owned[&driver.net].iter().any(|dust| {
+                        (dust.x, dust.z) == (buffer.coord.x, buffer.coord.z)
+                            && dust.y <= buffer.coord.y
+                    }),
                     "buffer {:?} on cell #{index} is not over dust the routing pass laid for {:?}",
                     buffer.coord,
                     driver.net,
                 );
-                if buffer.coord.layer == RouteLayer::Plane {
-                    assert_eq!(buffer.coord.y, 0, "a plane buffer sits on the plane");
-                    for (other, dust) in &owned {
-                        if *other == driver.net {
-                            continue;
-                        }
-                        cross_checks += 1;
-                        assert!(
-                            !dust.contains(&buffer.coord),
-                            "buffer {:?} shorts onto {other:?}'s wire",
-                            buffer.coord,
-                        );
+                assert_eq!(
+                    buffer.coord.layer == RouteLayer::Plane,
+                    buffer.coord.y == 0,
+                    "the layer a buffer carries follows its height: {:?}",
+                    buffer.coord,
+                );
+                for (other, dust) in &owned {
+                    if *other == driver.net {
+                        continue;
                     }
+                    cross_checks += 1;
+                    assert!(
+                        !dust.contains(&buffer.coord),
+                        "buffer {:?} shorts onto {other:?}'s wire",
+                        buffer.coord,
+                    );
                 }
             }
         }
@@ -1305,22 +1364,22 @@ mod tests {
     /// is where they come apart.
     ///
     /// `phase4_invariant` already property-tests that agreement, but
-    /// its strategy seeds sinks along one row from one pad, and a
-    /// collinear layout is exactly where the straight line and the
+    /// its strategy seeds sinks along one row from one pad, and an
+    /// unobstructed layout is exactly where the straight line and the
     /// route coincide — the invariant held there before this pass read
-    /// the route at all. The detour fixture is the discriminating
-    /// case: Manhattan says 14 blocks and no buffer, the route says 24
+    /// the route at all. The walled fixture is the discriminating
+    /// case: Manhattan says 14 blocks and no buffer, the route says 16
     /// and one.
     #[test]
     fn the_buffer_count_matches_the_ticks_delay_charged() {
-        let mut routed = detour_scope(2);
+        let mut routed = walled_scope(2);
         for cell in &mut routed.scopes[0].ir.cells {
             cell.phase = PlacementPhase::Routed { wire_length: 0 };
         }
         let delayed = crate::delay::compile_delay(&routed);
         assert!(
             delayed.diagnostics.is_empty(),
-            "24 blocks is inside the sanity cap: {:?}",
+            "16 blocks is inside the sanity cap: {:?}",
             delayed.diagnostics,
         );
         let legalized = compile_crossing(&delayed.scoped);
@@ -1394,6 +1453,38 @@ mod tests {
         );
     }
 
+    /// A repeater is never lifted onto a coord a wire already runs
+    /// through.
+    ///
+    /// The routed wire climbs off the ground layer to get past a block
+    /// now, so a bridge column is not empty by construction any more.
+    /// Called directly: reaching a taken bridge layer through
+    /// `compile_crossing` needs a layout where one net climbs over
+    /// exactly the column a second net's repeater is bounced out of,
+    /// and the fixture that arranged it would be describing the search
+    /// rather than the rule.
+    #[test]
+    fn a_bridge_layer_a_wire_runs_through_is_not_free() {
+        let region = reservation(20, 3, 4);
+        let candidate = CellCoord::new(15, 0, 1);
+        let occupied = CellCoord::new(15, 1, 1);
+        let wire_owners: HashMap<CellCoord, Vec<NetRef>> =
+            [(occupied, vec![NetRef::Input(0)])].into_iter().collect();
+
+        let mut ledger: HashSet<CellCoord> = HashSet::new();
+        assert_eq!(
+            claim_bridge(candidate, &region, &mut ledger, &wire_owners),
+            Some(CellCoord::new(15, 2, 1)),
+            "the first free layer is the one above the wire",
+        );
+        assert_eq!(
+            claim_bridge(candidate, &region, &mut ledger, &HashMap::new()),
+            Some(CellCoord::new(15, 1, 1)),
+            "and with no wire there it is the first layer, so the fixture is not \
+             just reading a full ledger",
+        );
+    }
+
     /// The occupant a candidate reports is the first reason in a fixed
     /// order, so a coord that is several things at once always reads
     /// the same way. Called directly: reaching every arm through
@@ -1434,7 +1525,7 @@ mod tests {
         let ours_only: HashMap<CellCoord, Vec<NetRef>> =
             [(coord, vec![mine])].into_iter().collect();
         assert!(plane_occupant(coord, mine, &empty_reserved, &ours_only, &empty_buffers).is_none(),);
-        // This net's own repeater reads as its own: a Steiner tree's two
+        // This net's own repeater reads as its own: one net's two
         // sinks share their prefix, so the second walk down it revisits
         // the coord the first one claimed, and the caller decides what
         // to do about that.
@@ -1448,12 +1539,16 @@ mod tests {
     /// Two nets want the same 15-block point, and the reservation
     /// decides whether the second one fits.
     ///
-    /// `sig.a` runs left-to-right from its pad and cell #0 drives
-    /// right-to-left from `(30,0,1)`, so the 15-step point of both
-    /// segments is `(15,0,1)` and each is on the other's wire. Cell #1
-    /// asks for it first and is bounced to the first bridge layer;
-    /// cell #2 then finds the plane held by `sig.a`'s wire and the
-    /// layer above it taken.
+    /// `sig.a` runs left-to-right from its pad along `z=1` and cell #0
+    /// drives right-to-left along the same row, so the 15-step point of
+    /// both segments is `(15,0,1)` and each is on the other's wire.
+    /// Cell #1 asks for it first and is bounced to the first bridge
+    /// layer; cell #2 then finds the plane held by `sig.a`'s wire and
+    /// the layer above it taken.
+    ///
+    /// Both sinks sit one row off that shared row so neither cell body
+    /// stands on the other net's route — a block in the way would send
+    /// the router round it, and the two segments would stop meeting.
     ///
     /// Two nets rather than two cells of one net: a net's own
     /// repeater — on the plane or lifted — serves every segment that
@@ -1482,7 +1577,7 @@ mod tests {
         // down the row.
         ir.cells.push(placed_cell(
             EditionCell::JavaRepeaterOr,
-            CellCoord::new(20, 0, 1),
+            CellCoord::new(20, 0, 0),
             vec![CellPortDriver {
                 port: PortName::A,
                 net: NetRef::Input(0),
@@ -1492,7 +1587,7 @@ mod tests {
         // coord, with `sig.a`'s wire on the plane below it.
         ir.cells.push(placed_cell(
             EditionCell::JavaRepeaterOr,
-            CellCoord::new(10, 0, 1),
+            CellCoord::new(10, 0, 2),
             vec![CellPortDriver {
                 port: PortName::A,
                 net: NetRef::Cell(0),
@@ -1664,20 +1759,50 @@ mod tests {
         }
     }
 
-    /// The refusal is still there for a candidate that is not this
-    /// net's own repeater.
+    /// A buffer candidate is never a component.
     ///
-    /// A cell body cannot hold a repeater on the plane — the block
-    /// would displace the component — and `void=1` reserves no layer
-    /// to lift it onto. With a layer available it lifts fine, which is
-    /// what `a_lifted_repeater_serves_every_segment_that_reaches_its_coord`
-    /// covers. The obstruction is a cell rather than another
-    /// net's buffer because a buffer always stands on its own net's
-    /// wire, and a coord carrying two nets' wire answers
-    /// [`PlaneOccupant::OtherNet`] before the buffer map is consulted;
-    /// see [`PlaneOccupant::Buffer`].
+    /// A candidate sits strictly between the ends of a route, and the
+    /// router keeps every coord strictly between them off the blocks —
+    /// so the coord a repeater lands on is wire, never a cell body or a
+    /// pad. [`PlaneOccupant::Component`] is unreachable through this
+    /// pass for that reason. What still refuses is a candidate on
+    /// another net's dust with every bridge layer above it taken, which
+    /// `buffer_collision_names_the_net_holding_the_coord` covers.
+    ///
+    /// The layout below is the one that used to refuse: `sig.a`'s route
+    /// ran straight down the row and its 15-step point landed inside
+    /// `sig.b`'s cell, with `void=1` reserving no layer to lift the
+    /// repeater onto.
     #[test]
-    fn buffer_collision_fires_when_the_candidate_is_a_cell_body() {
+    fn a_buffer_candidate_is_never_a_cell_body() {
+        let legalized = compile_crossing(&cell_on_the_fifteen_step_point());
+        assert!(
+            legalized.diagnostics.is_empty(),
+            "the route goes round the body, so nothing collides: {:?}",
+            legalized.diagnostics,
+        );
+        let cells = &legalized.scoped.scopes[0].ir.cells;
+        let buffers = cells[1].buffer_coords();
+        assert_eq!(
+            buffers.len(),
+            1,
+            "the segment is over 15 blocks: {buffers:?}"
+        );
+        assert_eq!(
+            buffers[0].coord.layer,
+            RouteLayer::Plane,
+            "and it stands on the plane, with no layer needed: {buffers:?}",
+        );
+        assert_ne!(
+            buffers[0].coord,
+            CellCoord::new(15, 0, 1),
+            "the coord it used to want is the cell body",
+        );
+    }
+
+    /// `sig.b`'s cell standing where `sig.a`'s route used to put its
+    /// repeater.
+    fn cell_on_the_fifteen_step_point() -> ScopedPlacementIr {
         let mut ir = PlacementIr::new(Edition::Java);
         ir.region = Some(reservation(20, 3, 1));
         for name in ["a", "b"] {
@@ -1686,8 +1811,6 @@ mod tests {
                 span: Span::default(),
             });
         }
-        // `sig.b`'s cell stands on the 15-step point of `sig.a`'s
-        // route down the row.
         ir.cells.push(placed_cell(
             EditionCell::JavaRepeaterOr,
             CellCoord::new(15, 0, 1),
@@ -1704,26 +1827,7 @@ mod tests {
                 net: NetRef::Input(0),
             }],
         ));
-        let legalized = compile_crossing(&scoped(ScopeKind::Struct, "packed", ir));
-        let diag = legalized
-            .diagnostics
-            .iter()
-            .find(|d| d.code == DiagnosticCode::BufferCoordCollision)
-            .unwrap_or_else(|| {
-                panic!(
-                    "a cell body with no layer to escape to must refuse: {:?}",
-                    legalized.diagnostics,
-                )
-            });
-        assert!(
-            diag.primary.contains("a cell body or an I/O pad"),
-            "the refusal must say what is standing there: {}",
-            diag.primary,
-        );
-        assert!(
-            legalized.scoped.scopes.is_empty(),
-            "failed scope must elide",
-        );
+        scoped(ScopeKind::Struct, "packed", ir)
     }
 
     /// Two ports of one cell on one net are fed by one strand of
@@ -1810,10 +1914,10 @@ mod tests {
     /// segment that reaches the coord it was lifted from.
     ///
     /// The cell's two ports read one signal, so both compute the same
-    /// candidate — and the candidate is another cell's body, which
-    /// cannot hold a repeater on the plane. The first port lifts one
-    /// onto a bridge layer; the second must record that block rather
-    /// than ask for a layer of its own.
+    /// candidate — and the candidate carries another net's dust, which
+    /// cannot hold this net's repeater. The first port lifts one onto a
+    /// bridge layer; the second must record that block rather than ask
+    /// for a layer of its own.
     ///
     /// The two rows fail in different directions without the memo. At
     /// `void=2` there is no second layer, so the scope is refused
@@ -1830,11 +1934,12 @@ mod tests {
                     span: Span::default(),
                 });
             }
-            // Standing on `sig.a`'s 15-step point, so the plane there
-            // is not wire at all.
+            // Its wire comes down the `x=15` column and crosses
+            // `sig.a`'s row at the 15-step point, so the plane there
+            // belongs to somebody else.
             ir.cells.push(placed_cell(
                 EditionCell::JavaRepeaterOr,
-                CellCoord::new(15, 0, 1),
+                CellCoord::new(15, 0, 0),
                 vec![CellPortDriver {
                     port: PortName::A,
                     net: NetRef::Input(1),
@@ -1885,10 +1990,10 @@ mod tests {
     /// that lifted it.
     ///
     /// One segment long enough to want three repeaters, with two of
-    /// its three candidates standing on other cells' bodies. A memo
-    /// keyed on the net alone would hand the second lift the first
-    /// one's coord — a repeater over a point it does not refresh, and
-    /// a block count quietly dropping by one.
+    /// its three candidates carrying another net's dust. A memo keyed
+    /// on the net alone would hand the second lift the first one's
+    /// coord — a repeater over a point it does not refresh, and a block
+    /// count quietly dropping by one.
     #[test]
     fn the_escape_memo_answers_per_coord_and_not_per_net() {
         let mut ir = PlacementIr::new(Edition::Java);
@@ -1899,10 +2004,13 @@ mod tests {
                 span: Span::default(),
             });
         }
+        // Each blocker's wire comes down its own column and crosses
+        // `sig.a`'s row on the way, so two of the three candidates are
+        // held by a net that is not `sig.a`.
         for (x, net) in [(15u32, NetRef::Input(1)), (30, NetRef::Input(2))] {
             ir.cells.push(placed_cell(
                 EditionCell::JavaRepeaterOr,
-                CellCoord::new(x, 0, 1),
+                CellCoord::new(x, 0, 0),
                 vec![CellPortDriver {
                     port: PortName::A,
                     net,
@@ -1948,6 +2056,11 @@ mod tests {
     /// takes the plane coord, and the pad's route reaches it 15 blocks
     /// along as well. The reverse cannot happen, because no cell is
     /// allocated after an output.
+    ///
+    /// The pad's route is longer than the cell's by more than the four
+    /// blocks between them, because the cell is a block on the row and
+    /// the wire out now steps around it — so the pad's segment asks for
+    /// a second repeater of its own past the shared one.
     #[test]
     fn an_actuator_segment_records_the_repeater_a_cell_segment_placed() {
         let mut ir = PlacementIr::new(Edition::Java);
@@ -1999,7 +2112,10 @@ mod tests {
                 .iter()
                 .map(|b| (b.port, b.coord))
                 .collect::<Vec<_>>(),
-            vec![(BufferSegment::Out, shared)],
+            vec![
+                (BufferSegment::Out, shared),
+                (BufferSegment::Out, CellCoord::new(29, 0, 0)),
+            ],
             "the wire to the pad names the block the cell segment put there",
         );
     }
@@ -2191,8 +2307,8 @@ mod tests {
     #[test]
     fn buffer_coord_index_at_kth_boundary() {
         // Pins the mapping `k → path_index = k * DUST_ATTENUATION_LIMIT`
-        // that `allocate_buffer_coords` inlines. A driver segment of 46
-        // blocks (Manhattan) trips the attenuation limit three times, so
+        // that `allocate_buffer_coords` inlines. A routed driver segment
+        // of 46 blocks trips the attenuation limit three times, so
         // three buffer coords land at `k = 1, 2, 3`. The delay pass has
         // a mirrored boundary-row test on the tick side of the same
         // formula (`s → buffers`); this test is its structural mirror
@@ -2200,7 +2316,7 @@ mod tests {
         // `(segment - 1) / DUST_ATTENUATION_LIMIT` derivation trips a
         // dedicated row rather than the aggregate delay total.
         //
-        // L-shape `(0, 0, 1) → (45, 0, 0)` walks x++ 45 steps then
+        // The route `(0, 0, 1) → (45, 0, 0)` walks x++ 45 steps then
         // z-- 1 step, so `path[k * 15]` is `(k * 15, 0, 1)` for
         // `k = 1, 2, 3` (path[45] is the last x-axis step before the
         // final z-- to the sink). No collision → every buffer stays on
@@ -2360,8 +2476,9 @@ mod tests {
 
         use super::{
             BufferSegment, CellCoord, CellPortDriver, Edition, EditionCell, HashSet, NetRef,
-            PlacedCellNode, PlacementIr, PlacementPhase, PortName, RouteLayer, ScopeKind, Span,
-            collect_nets, compile_crossing, input_pad, net_trees, placed_cell, reservation, scoped,
+            PlacedCellNode, PlacementIr, PlacementPhase, PortName, RouteLayer, Router, ScopeKind,
+            Span, block_sites, collect_nets, compile_crossing, input_pad, net_trees, placed_cell,
+            reservation, scoped,
         };
         use crate::delay::{BUFFER_REPEATER_TICKS, compile_delay};
         use crate::routing::compile_routing;
@@ -2374,11 +2491,11 @@ mod tests {
         /// non-zero on most cases and the invariant discriminates.
         ///
         /// `z` varies rather than sitting at 0. A row of collinear
-        /// sinks is the one shape where every MST edge runs along a
-        /// single axis, which makes the two elbows of an edge the same
-        /// coords and hides a route rendered against its edge's
-        /// direction — the bug this suite missed. Off-axis terminals
-        /// are what let the two differ.
+        /// sinks is the one shape where every strand runs along a
+        /// single axis, which is where a route and the straight line
+        /// between its ends coincide — and coinciding is what hid the
+        /// bug this suite missed. Off-axis terminals are what let the
+        /// two differ.
         ///
         /// The `bool` gives a cell a second port on the *same* net.
         /// Without it every cell has one driver, and the block count
@@ -2495,7 +2612,8 @@ mod tests {
                     let nets = collect_nets(&entry.ir);
                     let cell_coords: Vec<CellCoord> =
                         entry.ir.cells.iter().map(|c| c.coord).collect();
-                    let trees = net_trees(&nets, |net| match net {
+                    let router = Router::new(&region, &block_sites(&entry.ir, &region));
+                    let trees = net_trees(&nets, &router, |net| match net {
                         NetRef::Input(i) => input_pad(i as usize, &region),
                         NetRef::Cell(j) => cell_coords[j as usize],
                     });

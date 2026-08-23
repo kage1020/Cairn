@@ -3,8 +3,8 @@
 //! Locks the observable behaviours of the Steiner-routing slice
 //! (`spec/redstone` §14.5, stage 2 of place-and-route): the
 //! `examples/redstone-door.crn` happy path (per edition), single-cell
-//! `wire_length` attribution, multi-cell cascades with L-shape nets
-//! whose `wire_length` values are pinned to exact Manhattan sums,
+//! `wire_length` attribution, multi-cell cascades whose
+//! `wire_length` values are pinned to exact routed sums,
 //! `E_ROUTE_CONGESTION` when the post-routing footprint exceeds the
 //! reservation, pass-through of scopes elided by upstream stages,
 //! the JSON wire form growing a `wire_length` field, and per-scope
@@ -57,11 +57,14 @@ fn placement_from_source(source: &str, edition: Edition) -> ScopedPlacementIr {
 }
 
 /// AC1 — `examples/redstone-door.crn` compiled for Java routes its
-/// sole `JavaRepeaterOr` cell with `wire_length = Some(3)`: the sum of
-/// Manhattan distances from each input pad (v1 convention: `(0, 0,
-/// 1+i)`) to the cell coord `(0, 0, 0)` — one step for `sig.step`,
-/// two for `sig.exit`. `delay_ticks` stays `None` (routing does not
-/// insert delay per `spec/redstone` §14.4; that is stage 3).
+/// sole `JavaRepeaterOr` cell with `wire_length = Some(5)`: the sum of
+/// the routed lengths from each input pad (v1 convention: `(0, 0,
+/// 1+i)`) into the cell coord `(0, 0, 0)`. `sig.step`'s pad is next to
+/// the cell, so its strand is one block. `sig.exit`'s pad is on the far
+/// side of `sig.step`'s, and a pressure plate is a block — so its dust
+/// goes round rather than through, and pays four blocks for two of
+/// distance. `delay_ticks` stays `None` (routing does not insert delay
+/// per `spec/redstone` §14.4; that is stage 3).
 #[test]
 fn redstone_door_java_fills_wire_length_from_input_pads() {
     let source = load_example("redstone-door.crn");
@@ -84,8 +87,8 @@ fn redstone_door_java_fills_wire_length_from_input_pads() {
     let cell = &ir.cells[0];
     assert_eq!(
         cell.wire_length(),
-        Some(3),
-        "wire_length must be Manhattan(step→cell) + Manhattan(exit→cell) = 1 + 2 = 3",
+        Some(5),
+        "wire_length must be route(step→cell) + route(exit→cell) = 1 + 4 = 5",
     );
     assert!(
         cell.delay_ticks().is_none(),
@@ -120,24 +123,30 @@ fn redstone_door_bedrock_matches_java_wire_length() {
 }
 
 /// AC3 — a scope whose logic produces three cascaded cells fills
-/// every cell's `wire_length` with a pinned Manhattan sum, so a
+/// every cell's `wire_length` with a pinned routed sum, so a
 /// regression in either the input-pad coordinate convention or the
 /// per-driver attribution walk trips this test. Cell placement lays
 /// cells at `x = i, y = 0, z = 0`, and input pads land at
 /// `(0, 0, 1+i)`, so the exact sums are:
 ///
-/// - cell[0] `sig.and_ab = sig.a and sig.b`: `M((0,0,1)→(0,0,0)) +
-///   M((0,0,2)→(0,0,0)) = 1 + 2 = 3`.
-/// - cell[1] `sig.or_ab  = sig.a or sig.b`:  same source pair,
-///   different cell coord: `M((0,0,1)→(1,0,0)) + M((0,0,2)→(1,0,0))
-///   = 2 + 3 = 5`. This is the L-shape case (dx=1, dz≥1) that the
-///   `l_shape_path` axis order regression would otherwise sneak past.
+/// cell[0] is the corner case, in both senses: `(1,0,0)` is cell[1]
+/// and `(0,0,1)` is a pad, so it has no free neighbour on the ground
+/// layer at all. Anything that reaches it other than from the pad next
+/// door has to climb, which is what this fixture's `void=3` is for.
+///
+/// - cell[0] `sig.and_ab = sig.a and sig.b`: one block from `sig.a`'s
+///   pad next door, and four from `sig.b`'s — up onto `y=1`, two along
+///   it, and back down into the cell: `1 + 4 = 5`.
+/// - cell[1] `sig.or_ab  = sig.a or sig.b`: same source pair, one
+///   column along, where the ground layer is open: both come down the
+///   free row rather than through cell[0], `2 + 3 = 5`.
 /// - cell[2] `sig.combined = sig.and_ab and sig.or_ab`: cell-to-cell
-///   drivers: `M((0,0,0)→(2,0,0)) + M((1,0,0)→(2,0,0)) = 2 + 1 = 3`.
+///   drivers. cell[1] is next door; cell[0] is boxed in, so its output
+///   climbs to `y=1`, runs two columns, and drops in: `4 + 1 = 5`.
 ///
 /// `delay_ticks` stays `None` at every cell.
 #[test]
-fn multi_cell_scope_pins_wire_length_including_l_shape_nets() {
+fn multi_cell_scope_pins_wire_length_including_detours() {
     let source = r"
 theme t:
   slot wall -> @oak_planks
@@ -171,12 +180,15 @@ struct sim size=7x5
         .find(|e| e.name == "sim")
         .expect("sim scope");
     assert_eq!(entry.ir.cells.len(), 3);
-    // cell[0] at (0,0,0), input pads at (0,0,1) and (0,0,2).
-    assert_eq!(entry.ir.cells[0].wire_length(), Some(3));
-    // cell[1] at (1,0,0), same input pad pair — L-shape drivers.
+    // cell[0] at (0,0,0), input pads at (0,0,1) and (0,0,2): one block
+    // from the near pad, four over the top from the far one.
+    assert_eq!(entry.ir.cells[0].wire_length(), Some(5));
+    // cell[1] at (1,0,0), same input pad pair, both reached along the
+    // free row at z=1 rather than through cell[0].
     assert_eq!(entry.ir.cells[1].wire_length(), Some(5));
     // cell[2] at (2,0,0), driven by cell[0]=(0,0,0) and cell[1]=(1,0,0).
-    assert_eq!(entry.ir.cells[2].wire_length(), Some(3));
+    // cell[1] is next door; cell[0] is boxed in and has to climb out.
+    assert_eq!(entry.ir.cells[2].wire_length(), Some(5));
     for cell in &entry.ir.cells {
         assert!(
             cell.delay_ticks().is_none(),
@@ -197,7 +209,7 @@ struct sim size=7x5
 /// has one.
 ///
 /// The per-net rule is not "one segment per cell":
-/// `multi_cell_scope_pins_wire_length_including_l_shape_nets` above
+/// `multi_cell_scope_pins_wire_length_including_detours` above
 /// drives its cells from two distinct pads and pins the sums.
 #[test]
 fn ports_sharing_a_net_are_measured_once() {
@@ -263,8 +275,8 @@ struct dup size=20x5
 /// layout.
 #[test]
 fn post_routing_congestion_fires_route_congestion_and_elides_scope() {
-    // 3 cells × 4 blocks = 12 required cell area vs 4 × 3 × 1 = 12
-    // reserved blocks — placement passes at the boundary, routing
+    // 4 cells × 4 blocks = 16 required cell area vs 4 × 3 × 2 = 24
+    // reserved blocks — placement passes with room to spare, routing
     // then adds wire and overflows.
     let source = r"
 theme t:
@@ -279,10 +291,11 @@ struct pack size=4x3
   logic sig.and_ab   = sig.a and sig.b
   logic sig.or_ab    = sig.a or sig.b
   logic sig.combined = sig.and_ab and sig.or_ab
+  logic sig.last     = sig.combined or sig.a
 
-  door id=d side=front at=center mat_slot=wall opened_by=sig.combined
+  door id=d side=front at=center mat_slot=wall opened_by=sig.last
 
-  circuit region=floor void=1
+  circuit region=floor void=2
 ";
     let placement = placement_from_source(source, Edition::Java);
     let routed = compile_routing(&placement);
@@ -311,7 +324,7 @@ struct pack size=4x3
         d.primary,
     );
     assert!(
-        d.primary.contains("void=1"),
+        d.primary.contains("void=2"),
         "primary should quote the reservation shape, got {:?}",
         d.primary,
     );
