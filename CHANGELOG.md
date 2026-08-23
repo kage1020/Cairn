@@ -12,6 +12,23 @@ and is a separate axis from the Minecraft target version.
 
 ### Breaking changes
 
+- *(redstone)* A signal binding whose value names no signal is refused. A binding used to be
+  recognised by its *value*, so spelling the key right and the value wrong entered no branch at
+  all: `door ... opened_by=a` reached placement as a door wired to nothing, and
+  `pressure_plate ... -> foo.bar` produced no diagnostic and no scope. A `-> value` tail now says
+  a sensor was meant whatever the value is, and an actuator key says a wire was meant whatever
+  the value is, so the value itself is checked — as `E_LOGIC_INVALID_SIGNAL`, the code the
+  `logic` left-hand side already took, because all three positions are the same rule about the
+  same namespace. All five shapes the parser can put there are covered (`a` is an identifier,
+  `"sig.a"` a string, `3` an integer, `@tok` a token, `foo.bar` a reference with the wrong head),
+  and a bare identifier is offered its namespace, that being the one of the five with a single
+  reading. The host is asked before the value: `walls -> a` is still the host fault and nothing
+  else, since no edit to the value makes `walls` carry a tail. A binding written inside the
+  `[selector]` — `door[id=front,opened_by=sig.x]` — is `E_LOGIC_MISPLACED_BINDING`; §14.2 writes
+  the binding after the brackets, and `cairn compile` already refused that shape for the door
+  patch. A key that is not a binding and a value that is not a signal reference is still nobody's
+  finding: what an unknown argument key means has no answer yet.
+
 - *(lsp)* A `textDocument/didChange` for a URI that is not open is ignored instead of opening it.
   A change after `didClose` used to re-insert the document and publish a fresh diagnostic set — a
   marker on a file the editor has no buffer left to clear — and one for a URI never opened made

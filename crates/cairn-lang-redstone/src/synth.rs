@@ -28,6 +28,26 @@
 //! and a `sig.X` value under a key that is no binding at all is
 //! `E_LOGIC_UNKNOWN_BINDING_KEY`.
 //!
+//! What a line *claims* is read from either side, and the two sides are
+//! then checked against each other. A `-> value` tail claims a sensor
+//! whatever the value is; an actuator key claims a wire whatever the
+//! value is; a `sig.X` value claims one under a key nothing reads. So a
+//! well-spelled key with a value that names no signal is
+//! `E_LOGIC_INVALID_SIGNAL` — the code the `logic` left-hand side has
+//! always taken, because all three are the same rule about the same
+//! namespace. The host is asked first: no edit to the value makes
+//! `walls` carry a tail.
+//!
+//! A pair that claims nothing on either side is an argument like any
+//! other. What its *key* means is the per-keyword schema question, which
+//! no pass answers yet, so `hieght=3` is nobody's finding here.
+//!
+//! The `[selector]` carries the same pairs and is never a binding site:
+//! the brackets pick a member that already exists and the binding is
+//! written after them. A binding claim inside them is
+//! `E_LOGIC_MISPLACED_BINDING` for that reason rather than for the
+//! component's kind.
+//!
 //! Cascade suppression: any signal name that has already produced an
 //! `E_LOGIC_UNBOUND_SIGNAL` (either because a `logic` binding for it
 //! failed to lower or because a raw reference to it was unresolved) is
@@ -543,7 +563,7 @@ fn signal_spelling_for(value: &Value) -> Option<String> {
 fn signal_value_fix(value: &Value, drop_advice: &str) -> String {
     match signal_spelling_for(value) {
         Some(spelling) => format!("Fix: write `{spelling}`, or {drop_advice}"),
-        None => format!("Fix: name a signal as `{SIGNAL_HEAD}.<name>`, or {drop_advice}",),
+        None => format!("Fix: name a signal as `{SIGNAL_HEAD}.<name>`, or {drop_advice}"),
     }
 }
 
