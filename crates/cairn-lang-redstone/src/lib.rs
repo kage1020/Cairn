@@ -29,10 +29,14 @@
 //! repeater ticks)` and refusing with `E_ATTENUATION_LIMIT` whenever a
 //! single driver segment exceeds the v1 sanity cap; and
 //! [`crossing::compile_crossing`] runs stage 4 (crossing legalization)
-//! over the delayed IR, detecting cross-net plane overlaps, escaping
-//! them onto [`placement_ir::RouteLayer::Bridge`] / `Via` layers, and
-//! filling every cell's `buffer_coords` with the coord of each
-//! implicit buffer repeater the delay pass counted. Every
+//! over the delayed IR, filling every cell's `buffer_coords` with the
+//! coord of each implicit buffer repeater the delay pass counted and
+//! escaping a repeater onto a
+//! [`placement_ir::RouteLayer::Bridge`] layer when the coord it wants
+//! is taken. What it does not escape is a crossing between two nets:
+//! v1 reports one with `W_WIRE_CROSSING`, or refuses the scope with
+//! `E_CROSSING_CONGESTION` when the reservation has no layer above
+//! the plane for a future pass to lift onto. Every
 //! [`placement_ir::PlacedCellNode`] names the last of those four
 //! passes to touch it via [`placement_ir::PlacementStage`], which the
 //! JSON dump carries as a `stage` key in the same vocabulary

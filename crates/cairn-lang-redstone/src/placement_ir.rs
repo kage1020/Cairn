@@ -60,10 +60,11 @@ use crate::netlist_ir::{CellPortDriver, NetRef, NetlistInput, PortName};
 /// get past a block, and a buffer repeater the
 /// crossing-legalization pass lifts off a coord it cannot have. One
 /// rule for both, so a repeater and a wire at one voxel are one map
-/// key rather than two. A plane crossing between two nets is still
-/// not absorbed by lifting one of them: it is tolerated at
-/// `void >= 2` and refused below that via
-/// [`crate::DiagnosticCode::CrossingCongestion`].
+/// key rather than two. A crossing between two nets is still not
+/// absorbed by lifting either of them: it is reported at `void >= 2`
+/// via [`crate::DiagnosticCode::WireCrossing`] and refused below that
+/// via [`crate::DiagnosticCode::CrossingCongestion`], and no wire
+/// coord moves in either case.
 /// Serialising as the enum's stable lowercase string (`plane` /
 /// `bridge` / `via`) keeps the JSON wire form small and matches the
 /// vocabulary spec §14.5 uses.

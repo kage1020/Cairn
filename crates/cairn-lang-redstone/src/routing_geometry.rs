@@ -42,12 +42,12 @@
 //!
 //! # What the router does not route around
 //!
-//! Another net's dust. Two nets sharing a wire coord is a plane
-//! crossing, which stage 4 owns: it is the crossing pass that decides
-//! whether the reservation can absorb one. Routing each net against
-//! every earlier net's wire would make a tree a function of the order
-//! the nets were walked in, and would decide the crossing question
-//! here by accident. Blocks are the obstacle set; wire is not.
+//! Another net's dust. Two nets sharing a wire coord is a crossing,
+//! which stage 4 owns: it is the crossing pass that says so, and
+//! neither pass moves a wire off it. Routing each net against every
+//! earlier net's wire would make a tree a function of the order the
+//! nets were walked in, and would answer the crossing question here
+//! by accident. Blocks are the obstacle set; wire is not.
 //!
 //! # Layers
 //!
