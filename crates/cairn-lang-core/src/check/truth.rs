@@ -98,6 +98,9 @@ fn check_table(assertion: &AssertIr, sink: &mut DiagnosticSink) {
     };
     let arity = u32::try_from(inputs.len()).expect("an input list is bounded by the source length");
     if rows.is_empty() {
+        // And nothing else. An empty table is trivially missing every
+        // combination, and a coverage finding beside this one would bill
+        // one repair twice.
         sink.push(empty_table(span, arity));
         return;
     }
@@ -207,7 +210,9 @@ fn unassigned_combinations(span: &Span, arity: u32, covered: &HashSet<&str>) -> 
     // sentence is the honest one.
     let listed = u128::try_from(sample.len()).expect("the sample is capped at a small constant");
     let rows_to_write = match missing_total {
-        Some(total) if total == listed => and_list(&quoted).unwrap_or_else(|| quoted.join(", ")),
+        Some(total) if total == listed => {
+            and_list(&quoted).expect("the sample was checked non-empty above")
+        }
         Some(total) => format!("{}, and {} more", quoted.join(", "), total - listed),
         None => format!("{}, and more beyond those", quoted.join(", ")),
     };
