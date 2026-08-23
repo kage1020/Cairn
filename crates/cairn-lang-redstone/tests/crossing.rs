@@ -8,10 +8,17 @@
 //! coord landed on a non-`Plane` layer (both new fields serde-skip on
 //! default), the tag itself keeping a zero-buffer legalized dump
 //! distinguishable from its delayed input, and per-scope
-//! independence when a module carries more than one scope. Fixtures
-//! with genuine plane crossings are exercised in the crate-internal
-//! unit tests (`src/crossing.rs`) because the example set does not yet
-//! contain a `.crn` whose routed trees overlap.
+//! independence when a module carries more than one scope.
+//!
+//! Both redstone examples cross. The pad column at `x=0` is where:
+//! the pads are packed down it by index, so the second sensor's wire
+//! has to come round the first sensor's pad, and the row it comes
+//! round through is the row the cell drives its actuators out along.
+//! One cell and two sensors is enough — `redstone-door.crn` is that
+//! shape and shares one coord; `crossbar.crn` adds a second cell and
+//! shares two, one of them on the bridge layer a wire climbed to.
+//! Neither is refused: v1 reports the merge rather than lifting
+//! either net off it.
 
 use std::fmt::Write as _;
 use std::path::PathBuf;
@@ -28,6 +35,20 @@ use cairn_lang_redstone::{
 mod common;
 
 use common::normalize_stage_tags;
+
+/// The Error-severity half of a pass's findings.
+///
+/// Every example that carries redstone also carries a crossing, so
+/// "did this scope survive" and "did this scope say nothing" are
+/// different questions here and the tests below ask the first.
+fn errors(
+    diagnostics: &[cairn_lang_redstone::Diagnostic],
+) -> Vec<&cairn_lang_redstone::Diagnostic> {
+    diagnostics
+        .iter()
+        .filter(|d| d.severity() == Severity::Error)
+        .collect()
+}
 
 fn load_example(name: &str) -> String {
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -154,20 +175,45 @@ struct chain size=60x5
 }
 
 /// AC1 — `examples/redstone-door.crn` compiled for Java survives
-/// crossing legalization with zero diagnostics: the sole `RepeaterOr`
-/// cell has no fanout crossing (there is only one net) and both
-/// driver segments (1 and 4 blocks) sit under the dust-attenuation
-/// limit of 15 so no buffer coord materialises. `buffer_coords` stays
-/// empty on the survived cell.
+/// crossing legalization: both driver segments (1 and 4 blocks) sit
+/// under the dust-attenuation limit of 15 so no buffer coord
+/// materialises, and `buffer_coords` stays empty on the survived cell.
+///
+/// It does not survive silently. Three nets run in this scope, not
+/// one: each sensor drives the cell, and the cell drives the door.
+/// `sig.exit`'s pad sits behind `sig.step`'s in the `x=0` column, so
+/// its wire comes round through `(1,0,0)` — which is the first coord
+/// of the cell's own run out to the actuator pad. Those two signals
+/// are one strand of dust there, and the scope is kept with a
+/// `W_WIRE_CROSSING` rather than refused: the reservation has a layer
+/// spare, and lifting a wire onto it is the pass v1 does not have.
 #[test]
 fn redstone_door_java_carries_no_buffers() {
     let source = load_example("redstone-door.crn");
     let delayed = delayed_from_source(&source, Edition::Java);
     let legalized = compile_crossing(&delayed);
     assert!(
-        legalized.diagnostics.is_empty(),
-        "clean example must not raise crossing diagnostics: {:?}",
+        errors(&legalized.diagnostics).is_empty(),
+        "nothing here refuses the scope: {:?}",
         legalized.diagnostics,
+    );
+    assert_eq!(
+        legalized
+            .diagnostics
+            .iter()
+            .map(|d| d.code)
+            .collect::<Vec<_>>(),
+        vec![DiagnosticCode::WireCrossing],
+        "the one crossing this example has, reported once: {:?}",
+        legalized.diagnostics,
+    );
+    assert!(
+        legalized.diagnostics[0]
+            .primary
+            .contains("sig.exit and cell #0 both run through (1,0,0)"),
+        "the merge is between the second sensor's detour and the cell's \
+         output run: {:?}",
+        legalized.diagnostics[0].primary,
     );
     let entry = legalized
         .scoped
@@ -187,18 +233,23 @@ fn redstone_door_java_carries_no_buffers() {
     );
 }
 
-/// AC2 — the same example compiled for Bedrock legalizes identically:
-/// the single-net topology means no crossings regardless of the cell
-/// realisation swap. `wire_length` and `delay_ticks` are preserved
-/// verbatim from the delayed IR.
+/// AC2 — the same example compiled for Bedrock legalizes identically,
+/// down to the crossing: the cell realisation swaps and the geometry
+/// does not, so the same two nets meet on the same coord. `wire_length`
+/// and `delay_ticks` are preserved verbatim from the delayed IR.
 #[test]
 fn redstone_door_bedrock_carries_no_buffers() {
     let source = load_example("redstone-door.crn");
     let delayed = delayed_from_source(&source, Edition::Bedrock);
     let legalized = compile_crossing(&delayed);
-    assert!(
-        legalized.diagnostics.is_empty(),
-        "clean example must not raise crossing diagnostics: {:?}",
+    assert_eq!(
+        legalized
+            .diagnostics
+            .iter()
+            .map(|d| d.code)
+            .collect::<Vec<_>>(),
+        vec![DiagnosticCode::WireCrossing],
+        "the edition does not move the wire: {:?}",
         legalized.diagnostics,
     );
     let entry = legalized
@@ -299,27 +350,50 @@ fn legalized_with_zero_buffers_is_distinguishable_from_delayed() {
 
 /// AC — mirror of
 /// `json_output_byte_identical_apart_from_stage_tag_when_no_crossings_and_no_buffers`
-/// for the `with-crossings` case. `examples/crossbar.crn` produces
-/// genuine plane overlaps between its two cell-driven output-pad
-/// nets, but because the current pipeline does not lift the wire
-/// itself onto the bridge layer (the bridge budget is reserved for
-/// buffer-repeater escapes) and every driver segment on this fixture
-/// sits below `DUST_ATTENUATION_LIMIT`, the legalized JSON must
-/// still equal the delayed JSON apart from the stage tag. Pins two
-/// invariants at once: (a) both gate cells and both door outputs
+/// for the `with-crossings` case. `examples/crossbar.crn` overlaps on
+/// two coords, and reporting them changes no artifact: the pipeline
+/// lifts no wire onto the bridge layer, every driver segment on this
+/// fixture sits below `DUST_ATTENUATION_LIMIT`, and so the legalized
+/// JSON still equals the delayed JSON apart from the stage tag. Pins
+/// three invariants at once: (a) both gate cells and both door outputs
 /// survive legalization intact — a regression that elided the crossed
 /// scope would trip the byte-identity assertion via a shorter left
-/// side; (b) a silently-absorbed crossing does not shift the wire
-/// form.
+/// side; (b) the crossings are reported rather than absorbed; (c) a
+/// reported crossing does not shift the wire form.
+///
+/// The second of the two anchors at `(0,1,0)` — a bridge coord, where
+/// two nets that both climbed to get past a block meet. Reserving a
+/// service layer does not keep the wires apart; the routing pass
+/// spends that layer too.
 #[test]
 fn json_output_byte_identical_apart_from_stage_tag_with_crossings() {
     let source = load_example("crossbar.crn");
     let delayed = delayed_from_source(&source, Edition::Java);
     let legalized = compile_crossing(&delayed);
     assert!(
-        legalized.diagnostics.is_empty(),
-        "crossbar.crn must legalize cleanly at void=2: {:?}",
+        errors(&legalized.diagnostics).is_empty(),
+        "crossbar.crn must survive legalization at void=2: {:?}",
         legalized.diagnostics,
+    );
+    let reported: Vec<&str> = legalized
+        .diagnostics
+        .iter()
+        .filter(|d| d.code == DiagnosticCode::WireCrossing)
+        .map(|d| d.primary.as_str())
+        .collect();
+    assert_eq!(
+        reported.len(),
+        2,
+        "two pairs of nets share dust here: {reported:?}",
+    );
+    assert!(
+        reported[0].contains("sig.a and sig.b both run through (1,0,1)"),
+        "the two sensors meet on the plane: {reported:?}",
+    );
+    assert!(
+        reported[1].contains("sig.b and cell #0 both run through (0,1,0)"),
+        "and a sensor meets a gate on the layer they both climbed to — a \
+         crossing is not a plane-only event: {reported:?}",
     );
 
     let delayed_json = serde_json::to_string_pretty(&delayed).expect("delayed IR serialises");
@@ -329,7 +403,7 @@ fn json_output_byte_identical_apart_from_stage_tag_with_crossings() {
     assert_eq!(
         normalize_stage_tags(&delayed_json),
         normalize_stage_tags(&legalized_json),
-        "silently-absorbed crossings must not shift the wire form of the legalized IR",
+        "reporting a crossing must not shift the wire form of the legalized IR",
     );
 }
 
@@ -516,7 +590,10 @@ struct reach size=40x6
 ";
     let delayed = delayed_from_source(source, Edition::Java);
     let out = compile_crossing(&delayed);
-    assert!(out.diagnostics.is_empty(), "{:?}", out.diagnostics);
+    // Two sensors into one cell, so the second sensor's wire comes
+    // round the first sensor's pad and meets the cell's outward run —
+    // a crossing, and not what this fixture is about.
+    assert!(errors(&out.diagnostics).is_empty(), "{:?}", out.diagnostics);
 
     let scope = out.scoped.scopes.first().expect("the scope legalizes");
     let cell = scope.ir.cells.first().expect("the one cell");
@@ -619,7 +696,7 @@ struct fan size=40x6
     let out = compile_crossing(&delayed);
 
     assert!(
-        out.diagnostics.is_empty(),
+        errors(&out.diagnostics).is_empty(),
         "a shared span needs no second repeater: {:?}",
         out.diagnostics,
     );

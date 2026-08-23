@@ -111,27 +111,42 @@ pub enum DiagnosticCode {
     /// `circuit` blocks, or pin cell / actuator placement closer to
     /// its drivers.
     AttenuationLimit,
-    /// The crossing-legalization pass found a cross-net plane overlap
-    /// and no layer to escape it to. `spec/redstone` §14.5 stage 4
-    /// lifts a wire onto a bridge coord whenever two nets would
-    /// otherwise share a `Plane` coord; the escape layer draws from the
-    /// same `void=<N>` service-layer height the placement / routing
-    /// passes already consume, and a bridge needs at least `y = 1`,
-    /// which needs `void >= 2`. So the v1 test is whether that layer
-    /// exists, not how many crossings it would have to carry: any
-    /// crossing under `void < 2` fires this, and `void >= 2` accepts
-    /// them all. There is nothing downstream for a per-crossing
-    /// capacity model to constrain yet — no pass lifts a wire *for a
-    /// crossing* (the routing pass lifts one to clear a block, which is
-    /// a different question), and no pass downstream reads the crossing
-    /// set: the
-    /// block-array lowering does not take the Placement IR at all, so
-    /// whichever pass eventually voxelises these wires will derive the
-    /// crossings itself. Fix: increase `void`, enlarge the
-    /// `circuit region=` footprint so fewer wires cross, or split the
-    /// logic across multiple `circuit` blocks so each block routes
-    /// with fewer overlaps.
+    /// The crossing-legalization pass found two nets sharing a wire
+    /// coord in a reservation with no layer above the plane at all
+    /// (`void < 2`). Two nets on one coord is one strand of dust
+    /// carrying two signals, and v1 lifts no wire off it — so the only
+    /// thing that separates this from [`Self::WireCrossing`] is whether
+    /// the author's `void=` leaves a layer a future pass could lift
+    /// onto. Under `void < 2` there is none, and no pass at any point
+    /// in the future can make one without the author raising `void=`,
+    /// which is why this half is an error and the other half is a
+    /// warning. The test is whether that layer exists, not how many
+    /// crossings it would have to carry: there is nothing downstream
+    /// for a per-crossing capacity model to constrain yet. Fix:
+    /// increase `void`, enlarge the `circuit region=` footprint so
+    /// fewer wires cross, or split the logic across multiple `circuit`
+    /// blocks so each block routes with fewer overlaps.
     CrossingCongestion,
+    /// Two nets share a wire coord in a reservation that does have a
+    /// layer above the plane (`void >= 2`), and nothing lifted either
+    /// of them off it. `spec/redstone` §14.5 stage 4 specifies the
+    /// escape — a crossing leaves the shared coord for a bridge tile or
+    /// a vertical layer — and v1 implements it for buffer repeaters
+    /// only: the routed wire path is not stored on the IR, so a
+    /// per-net escape segment has nowhere to attach, and the crossing
+    /// set is read by nothing downstream. So the two signals are one
+    /// wire in whatever layout the coords describe, and this says
+    /// which two and where rather than letting the reserved height
+    /// imply they were handled.
+    ///
+    /// Warning rather than error because the design is not unbuildable
+    /// — the layer it needs is reserved and unused, and the pass that
+    /// will use it is the one this warning is waiting for. The
+    /// `void < 2` half of the same defect has no such layer and takes
+    /// [`Self::CrossingCongestion`] instead. Fix: enlarge the
+    /// `circuit region=` footprint so fewer wires cross, or split the
+    /// logic across multiple `circuit` blocks.
+    WireCrossing,
     /// The crossing-legalization pass could not place a required
     /// implicit buffer repeater — another net's dust already runs
     /// through the candidate coord, and every `Bridge` layer in that
@@ -213,6 +228,7 @@ impl DiagnosticCode {
             Self::RouteCongestion => "E_ROUTE_CONGESTION",
             Self::AttenuationLimit => "E_ATTENUATION_LIMIT",
             Self::CrossingCongestion => "E_CROSSING_CONGESTION",
+            Self::WireCrossing => "W_WIRE_CROSSING",
             Self::BufferCoordCollision => "E_BUFFER_COORD_COLLISION",
             Self::LogicNestingTooDeep => "E_LOGIC_NESTING_TOO_DEEP",
             Self::LogicMisplacedBinding => "E_LOGIC_MISPLACED_BINDING",
@@ -239,7 +255,7 @@ impl DiagnosticCode {
             | Self::LogicMisplacedBinding
             | Self::LogicInvalidSignal
             | Self::LogicUnknownBindingKey => Severity::Error,
-            Self::LogicUnusedSignal => Severity::Warning,
+            Self::LogicUnusedSignal | Self::WireCrossing => Severity::Warning,
         }
     }
 }
