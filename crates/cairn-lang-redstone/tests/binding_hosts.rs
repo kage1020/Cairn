@@ -55,25 +55,32 @@ fn source(body: &str) -> String {
     format!("{PRELUDE}{body}")
 }
 
-// --- sensor tails --------------------------------------------------------
-
 // --- the value axis ------------------------------------------------------
 
-/// Every shape the parser can put where a signal name belongs.
+/// Every shape `ValueKind` has, in the position a signal name belongs.
 ///
-/// `-> a` is an `Ident`, `-> "sig.a"` a `Str`, `-> 3` an `Int`, `-> @tok` a
-/// `Token`, and `-> foo.bar` a `DotRef` with the wrong head. A check
-/// written as "a `DotRef` whose head is not `sig`" would answer for the
-/// last of the five and let the other four through, which is what the
-/// front end did.
+/// The tail goes through `parse_value` unrestricted, so all eight land
+/// here — the five a signal name is plausibly mistyped as, and `true` /
+/// `2x2` / `[a,b]`, which are not near-misses but are reachable and so
+/// have to render. A check written as "a `DotRef` whose head is not
+/// `sig`" would answer for one of the eight and let the rest through,
+/// which is what the front end did.
+///
+/// `sig.a.b` is the ninth row and the one that is not about kinds: a
+/// two-segment name is what a signal is, and the block-array pass has
+/// always said so while this one did not.
 #[test]
 fn a_sensor_tail_that_names_no_signal_is_refused_whatever_it_names() {
     for (tail, found) in [
         ("foo.bar", "reference `foo.bar`"),
+        ("sig.a.b", "reference `sig.a.b`"),
         ("a", "identifier `a`"),
         ("3", "integer `3`"),
         ("\"sig.a\"", "string `\"sig.a\"`"),
         ("@tok", "token `@tok`"),
+        ("true", "boolean `true`"),
+        ("2x2", "size `2x2`"),
+        ("[a,b]", "a list"),
     ] {
         let out = synth_source(&source(&format!(
             "  pressure_plate id=p at=front.outside offset=0 y=0 -> {tail}\n",
@@ -96,7 +103,10 @@ fn a_sensor_tail_that_names_no_signal_is_refused_whatever_it_names() {
 ///
 /// `-> a` is a name with the namespace left off and has a single reading;
 /// `-> 3` names nothing that adding `sig.` would fix, so the message asks
-/// for the shape rather than inventing `sig.3`.
+/// for the shape rather than inventing `sig.3`. `-> sig` is the
+/// identifier that is not a name — the author wrote the namespace and
+/// stopped — so it takes the shape-only advice with the numbers rather
+/// than being offered `sig.sig`.
 #[test]
 fn a_bare_name_is_offered_its_namespace_and_a_number_is_not() {
     let named = synth_source(&source(
@@ -109,22 +119,24 @@ fn a_bare_name_is_offered_its_namespace_and_a_number_is_not() {
         d.notes,
     );
 
-    let unnamed = synth_source(&source(
-        "  pressure_plate id=p at=front.outside offset=0 y=0 -> 3\n",
-    ));
-    let d = only(&unnamed, DiagnosticCode::LogicInvalidSignal);
-    assert!(
-        d.notes
-            .iter()
-            .any(|n| n.message.contains("name a signal as `sig.<name>`")),
-        "{:#?}",
-        d.notes,
-    );
-    assert!(
-        !d.notes.iter().any(|n| n.message.contains("sig.3")),
-        "there is no name here to offer: {:#?}",
-        d.notes,
-    );
+    for (tail, absent) in [("3", "sig.3"), ("sig", "sig.sig")] {
+        let unnamed = synth_source(&source(&format!(
+            "  pressure_plate id=p at=front.outside offset=0 y=0 -> {tail}\n",
+        )));
+        let d = only(&unnamed, DiagnosticCode::LogicInvalidSignal);
+        assert!(
+            d.notes
+                .iter()
+                .any(|n| n.message.contains("name a signal as `sig.<name>`")),
+            "`-> {tail}`: {:#?}",
+            d.notes,
+        );
+        assert!(
+            !d.notes.iter().any(|n| n.message.contains(absent)),
+            "there is no name here to offer, least of all {absent:?}: {:#?}",
+            d.notes,
+        );
+    }
 }
 
 /// A tail on a member that cannot carry one is a host fault, whatever the
@@ -155,8 +167,12 @@ fn a_tail_on_the_wrong_host_is_a_host_fault_even_when_it_names_no_signal() {
 fn an_actuator_argument_that_names_no_signal_is_refused() {
     for (value, found) in [
         ("foo.bar", "reference `foo.bar`"),
+        ("sig.a.b", "reference `sig.a.b`"),
         ("a", "identifier `a`"),
         ("3", "integer `3`"),
+        ("true", "boolean `true`"),
+        ("2x2", "size `2x2`"),
+        ("[a,b]", "a list"),
     ] {
         let out = synth_source(&source(&format!(
             "  door id=d side=front at=center mat_slot=wall opened_by={value}\n",
@@ -214,6 +230,71 @@ fn a_binding_inside_the_selector_is_refused_and_counts_as_wired() {
     );
 }
 
+/// A bracketed pair whose fault survives being moved out is told about
+/// that fault instead.
+///
+/// Moving `lit_by=sig.a` out of a door's brackets leaves a `lit_by=` on a
+/// door, and moving `oepend_by=sig.a` out leaves a key nothing reads —
+/// so "move it out of the brackets" would be advice that does not work,
+/// and the finding that owns the surviving fault is the one to raise.
+/// The `did you mean` on the second row is the whole reason: it is
+/// `diag_unknown_binding_key`'s, and a bracket-only answer would not have
+/// it.
+#[test]
+fn a_bracketed_pair_is_answered_by_the_fault_that_survives_unbracketing() {
+    let wrong_host = synth_source(&source(concat!(
+        "  door id=front side=front at=center mat_slot=wall\n",
+        "  pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a\n",
+        "  door[id=front,lit_by=sig.a]\n",
+    )));
+    assert_eq!(codes(&wrong_host), ["E_LOGIC_MISPLACED_BINDING"]);
+    assert!(
+        only(&wrong_host, DiagnosticCode::LogicMisplacedBinding)
+            .primary
+            .contains("binds a signal to a `lamp`"),
+        "the host fault, not the brackets: {}",
+        only(&wrong_host, DiagnosticCode::LogicMisplacedBinding).primary,
+    );
+
+    let typo = synth_source(&source(concat!(
+        "  door id=front side=front at=center mat_slot=wall\n",
+        "  pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a\n",
+        "  door[id=front,oepend_by=sig.a]\n",
+    )));
+    assert_eq!(codes(&typo), ["E_LOGIC_UNKNOWN_BINDING_KEY"]);
+    assert!(
+        only(&typo, DiagnosticCode::LogicUnknownBindingKey)
+            .notes
+            .iter()
+            .any(|n| n.message.contains("did you mean `opened_by=`")),
+        "{:#?}",
+        only(&typo, DiagnosticCode::LogicUnknownBindingKey).notes,
+    );
+}
+
+/// `id=` is the key the brackets do read, so a signal written there is
+/// the unknown-binding-key finding and not a claim about the brackets.
+///
+/// Reached through `synthesize` directly: the CLI path reports
+/// `E_TYPE_MISMATCH_LABEL` for the same line first, which would mask
+/// whatever this pass said about it.
+#[test]
+fn a_signal_under_the_one_key_the_brackets_read_is_not_blamed_on_the_brackets() {
+    let out = synth_source(&source(concat!(
+        "  door id=front side=front at=center mat_slot=wall\n",
+        "  pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a\n",
+        "  door[id=sig.a]\n",
+    )));
+    assert_eq!(codes(&out), ["E_LOGIC_UNKNOWN_BINDING_KEY"]);
+    assert!(
+        !only(&out, DiagnosticCode::LogicUnknownBindingKey)
+            .primary
+            .contains("[selector]"),
+        "`id=` is read where it is written: {}",
+        only(&out, DiagnosticCode::LogicUnknownBindingKey).primary,
+    );
+}
+
 /// The key alone puts a binding in the selector, with no `sig.` value to
 /// give it away.
 ///
@@ -243,12 +324,23 @@ fn a_selector_binding_with_no_name_leaves_the_signal_unconsumed() {
 #[test]
 fn a_selector_binding_on_an_unknown_keyword_is_left_to_the_keyword_finding() {
     let out = synth_source(&source(concat!(
-        "  pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a
-",
-        "  widget[id=w1,opened_by=sig.a]
-",
+        "  pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a\n",
+        "  widget[id=w1,opened_by=sig.a]\n",
     )));
-    assert!(out.diagnostics.is_empty(), "{:#?}", out.diagnostics);
+    assert_eq!(
+        codes(&out),
+        Vec::<&str>::new(),
+        "the selector walk says nothing about a member that is not a component",
+    );
+    // And separately: the author did wire `sig.a`, so the unused-signal
+    // audit counts it as consumed rather than adding a second finding
+    // about the wire they meant to draw. Asserted apart from the line
+    // above so a failure says which of the two broke.
+    assert!(
+        !codes(&out).contains(&"W_LOGIC_UNUSED_SIGNAL"),
+        "{:#?}",
+        out.diagnostics,
+    );
 }
 
 /// `id=` and the rest of the selector stay legal.
@@ -285,7 +377,7 @@ fn a_malformed_value_and_the_signal_it_leaves_unconsumed_are_both_reported() {
     );
 }
 
-// --- key axis, unchanged -------------------------------------------------
+// --- sensor tails --------------------------------------------------------
 
 #[test]
 fn a_sensor_tail_on_a_wall_is_refused_and_registers_no_input() {

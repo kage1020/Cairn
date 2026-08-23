@@ -59,15 +59,23 @@ What a binding *names* is held to the same rule as where it is written.
 Sensors emit into the `sig.` namespace and actuators read from it, so a
 name outside it can never be read — whether it is the left-hand side of a
 `logic` line, a sensor's `->` tail, or the value under an actuator key
-(`E_LOGIC_INVALID_SIGNAL`). `opened_by=a` is not a wire to a signal called
-`a`; it is a door wired to nothing.
+(`E_LOGIC_INVALID_SIGNAL`). A name is `sig.` and one segment after it:
+`opened_by=a` is not a wire to a signal called `a`, and `opened_by=sig.a.b`
+names nothing either. Both are a door wired to nothing.
+
+The host is asked before the value, and only on a component that can host
+the binding does the value rule apply. `walls -> a` is one fault and it is
+the host's: no way of writing the value makes `walls` a sensor.
 
 The binding is written *after* the `[selector]`, never inside it:
 `door[id=front] opened_by=sig.power` binds, and
 `door[id=front,opened_by=sig.power]` does not. The brackets pick the member
-the line acts on, so a binding among them is `E_LOGIC_MISPLACED_BINDING`
-for the same reason one on the wrong component is — nothing reads it where
-it is written.
+the line acts on, so nothing written among them is read as a binding —
+whether it is an actuator key or any key at all carrying a `sig.` value.
+A bracketed pair earns whichever finding still applies once it is moved
+out: `E_LOGIC_MISPLACED_BINDING` naming the brackets when that is the only
+thing wrong, and otherwise the finding for the host or the key, which
+moving it would not have answered.
 
 An argument whose *value* is a `sig.` reference under a key that is not one
 of the four is `E_LOGIC_UNKNOWN_BINDING_KEY`. The value says a signal was

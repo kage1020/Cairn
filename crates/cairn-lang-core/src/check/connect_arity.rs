@@ -101,7 +101,11 @@ fn validate(member: &Member, sink: &mut DiagnosticSink) {
             mid.span.clone(),
             format!(
                 "expected `to` between `<from>.<port>` and `<to>.<port>`, got {}",
-                describe(mid),
+                // Quoted, which is why this reads `` got `"to"` `` rather
+                // than `` got `to` `` for `connect a.entry "to" b.entry` —
+                // a message that printed the string's contents bare read
+                // as the pass rejecting the very keyword it asked for.
+                mid.describe(),
             ),
             vec![example_note()],
         ),
@@ -116,7 +120,11 @@ fn validate(member: &Member, sink: &mut DiagnosticSink) {
             mid.span.clone(),
             format!(
                 "expected `to` between `<from>.<port>` and `<to>.<port>`, got {}",
-                describe(mid),
+                // Quoted, which is why this reads `` got `"to"` `` rather
+                // than `` got `to` `` for `connect a.entry "to" b.entry` —
+                // a message that printed the string's contents bare read
+                // as the pass rejecting the very keyword it asked for.
+                mid.describe(),
             ),
             vec![example_note()],
         ),
@@ -179,8 +187,8 @@ fn validate_endpoint(end: ConnectEnd, value: &Value, sink: &mut DiagnosticSink) 
         // count makes the extra dot visible in a message quoted without
         // the source beside it, where `a.entry.x` and `a.entry` differ
         // by one easily-missed character.
-        ValueKind::DotRef(dot) => format!("{} with {} segments", describe(value), dot.len()),
-        _ => describe(value),
+        ValueKind::DotRef(dot) => format!("{} with {} segments", value.describe(), dot.len()),
+        _ => value.describe(),
     };
     // The placeholder is spelled as the other arms of this pass and the
     // spec's 9.3.5 grammar line spell it; the position keeps two
@@ -231,18 +239,6 @@ fn repair_note(value: &Value) -> Option<String> {
 
 fn is_to_keyword(value: &Value) -> bool {
     matches!(&value.kind, ValueKind::Ident(s) if s == "to")
-}
-
-/// Name a value by kind and, where the reconstruction is bounded, by
-/// the text the author wrote.
-///
-/// The surface form matters most for the shapes that render
-/// identically under a bare `kind_name`: `connect a.entry "to" b.entry`
-/// reported ``expected `to` … got `to` `` for as long as this printed a
-/// string's contents unquoted, which reads as the pass rejecting the
-/// very keyword it asked for.
-fn describe(value: &Value) -> String {
-    value.describe()
 }
 
 fn zero_width_after(span: &Span) -> Span {

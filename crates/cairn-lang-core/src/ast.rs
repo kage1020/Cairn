@@ -566,11 +566,18 @@ impl Value {
     /// Source text that would parse back to this value, or `None` when
     /// the reconstruction is unbounded — a list nests, and a diagnostic
     /// that grows with the input is not one an editor can render inline.
-    #[must_use]
-    pub fn surface_form(&self) -> Option<String> {
+    ///
+    /// A string is quoted and otherwise left alone. Cairn string literals
+    /// have no escape mechanism — the lexer takes the raw slice between
+    /// the quotes, and a newline inside one is an unterminated-string
+    /// error — so `Debug`'s escaping would show the author text they did
+    /// not write and that would not parse back to the same value.
+    /// Private, because the round-trip claim is a contract and `describe`
+    /// is the one caller that has to keep it.
+    fn surface_form(&self) -> Option<String> {
         match &self.kind {
             ValueKind::Ident(s) => Some(s.clone()),
-            ValueKind::Str(s) => Some(format!("{s:?}")),
+            ValueKind::Str(s) => Some(format!("\"{s}\"")),
             ValueKind::Bool(b) => Some(b.to_string()),
             ValueKind::Int(i) => Some(i.to_string()),
             ValueKind::Size { w, h } => Some(format!("{w}x{h}")),
@@ -581,17 +588,23 @@ impl Value {
     }
 
     /// Kind and surface form together, for a message that says what it
-    /// found: `` identifier `a` ``, `` reference `foo.bar` ``, `list`.
+    /// found: `` identifier `a` ``, `` reference `foo.bar` ``, `a list`.
     ///
     /// The surface form matters most for the shapes that render
     /// identically under a bare [`Self::kind_name`]: a message that
     /// printed a string's contents unquoted read as rejecting the very
     /// word it had asked for.
+    ///
+    /// A noun phrase, article included, so it drops into a sentence
+    /// without the caller knowing which arm it took: `names a list`
+    /// rather than `names list`. Only the unbounded kinds reach the
+    /// article — the rest carry their own text and read as a phrase
+    /// already.
     #[must_use]
     pub fn describe(&self) -> String {
         match self.surface_form() {
             Some(text) => format!("{} `{text}`", self.kind_name()),
-            None => self.kind_name().to_owned(),
+            None => format!("a {}", self.kind_name()),
         }
     }
 

@@ -233,9 +233,13 @@ pub enum DiagnosticCode {
     /// silent-actuator class without one, because no legal non-actuator
     /// argument inside a member's `intent_state` takes a `sig.` value.
     /// The two shapes this once said nothing about are both answered
-    /// now, by their own codes: an actuator key holding a *non*-`sig.`
-    /// value is [`Self::LogicInvalidSignal`], and the same pair inside a
-    /// `[...]` selector is [`Self::LogicMisplacedBinding`].
+    /// now, by their own codes. An actuator key holding a *non*-`sig.`
+    /// value is [`Self::LogicInvalidSignal`] *on the component that key
+    /// is paired with* — anywhere else the host fault wins and it is
+    /// [`Self::LogicMisplacedBinding`], and on a keyword the role table
+    /// does not know it is `E_UNKNOWN_KEYWORD` and nothing more. A pair
+    /// inside a `[...]` selector is answered the same three ways, by
+    /// whichever fault moving it out of the brackets would not fix.
     LogicUnknownBindingKey,
 }
 

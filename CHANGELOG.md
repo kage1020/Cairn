@@ -19,15 +19,20 @@ and is a separate axis from the Minecraft target version.
   a sensor was meant whatever the value is, and an actuator key says a wire was meant whatever
   the value is, so the value itself is checked — as `E_LOGIC_INVALID_SIGNAL`, the code the
   `logic` left-hand side already took, because all three positions are the same rule about the
-  same namespace. All five shapes the parser can put there are covered (`a` is an identifier,
-  `"sig.a"` a string, `3` an integer, `@tok` a token, `foo.bar` a reference with the wrong head),
-  and a bare identifier is offered its namespace, that being the one of the five with a single
-  reading. The host is asked before the value: `walls -> a` is still the host fault and nothing
-  else, since no edit to the value makes `walls` carry a tail. A binding written inside the
-  `[selector]` — `door[id=front,opened_by=sig.x]` — is `E_LOGIC_MISPLACED_BINDING`; §14.2 writes
-  the binding after the brackets, and `cairn compile` already refused that shape for the door
-  patch. A key that is not a binding and a value that is not a signal reference is still nobody's
-  finding: what an unknown argument key means has no answer yet.
+  same namespace. Every value kind the parser can put there is covered, the five a name is
+  plausibly mistyped as (`a`, `"sig.a"`, `3`, `@tok`, `foo.bar`) and the three that are not near
+  misses but are reachable (`true`, `2x2`, `[a,b]`), along with `sig.a.b` — a signal name has two
+  segments, which the block-array pass has always required and the front end did not. A bare
+  identifier is offered its namespace, `a` having a single reading; `sig` is not, being the
+  namespace with the name left off rather than the reverse. The host is asked before the value:
+  `walls -> a` is still the host fault and nothing else, since no edit to the value makes `walls`
+  carry a tail. The `[selector]` is walked for the first time, and a bracketed pair is answered by
+  whichever fault moving it out would not fix — the brackets themselves for
+  `door[id=front,opened_by=sig.x]`, the host for `door[id=front,lit_by=sig.x]`, the unknown key
+  (with its `did you mean`) for `door[id=front,oepend_by=sig.x]`. §14.2 writes the binding after
+  the brackets, and `cairn compile` already refused that shape for the door patch. A key that is
+  not a binding and a value that is not a signal reference is still nobody's finding: what an
+  unknown argument key means has no answer yet.
 
 - *(lsp)* A `textDocument/didChange` for a URI that is not open is ignored instead of opening it.
   A change after `didClose` used to re-insert the document and publish a fresh diagnostic set — a
