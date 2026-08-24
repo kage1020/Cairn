@@ -128,10 +128,18 @@ fn no_shipped_example_reports_an_unsupported_entry() {
     for (name, source) in &examples() {
         for (edition, pack) in editions() {
             let block_ir = lower_for(source, edition, pack, None);
-            let counts = match edition {
+            let report = match edition {
                 Edition::Java => portability_for_java(&block_ir, &pack.blocks),
                 Edition::Bedrock => portability_for_bedrock(&block_ir, &pack.blocks),
             };
+            let counts = report.counts;
+            assert_eq!(
+                report.unsupported.len(),
+                counts.unsupported as usize,
+                "{name} on {edition}: the named entries and the figure must count the same                  things, got {:?} against {}",
+                report.unsupported,
+                counts.unsupported,
+            );
             assert_eq!(
                 counts.unsupported, 0,
                 "{name} reports {} unsupported entries on {edition}; every shipped example is \
@@ -158,6 +166,7 @@ fn the_reported_entry_count_matches_what_a_pinned_build_emits() {
                 Edition::Java => portability_for_java(&unpinned, &pack.blocks),
                 Edition::Bedrock => portability_for_bedrock(&unpinned, &pack.blocks),
             }
+            .counts
             .total();
             for version in supported_versions(pack) {
                 let built = lower_for(source, edition, pack, Some(version));

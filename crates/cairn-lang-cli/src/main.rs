@@ -11,8 +11,8 @@ use cairn_lang_core::lock::{
     LockWalkway, Lockfile, hash_resolved_ir, hash_source,
 };
 use cairn_lang_core::resolve::{
-    BuildableTargets, EditionReport, VersionAxes, VersionFloor, compare_versions, compute_axes,
-    declared_version_floor, resolve,
+    BuildableTargets, EditionReport, UnsupportedEntry, UnsupportedReason, VersionAxes,
+    VersionFloor, compare_versions, compute_axes, declared_version_floor, resolve,
 };
 use cairn_lang_core::{Edition, Severity, check, lower, parse};
 use cairn_lang_formats::bedrock_structure::{ParityNote, build_mcstructure_tag, write_mcstructure};
@@ -773,10 +773,11 @@ fn edition_rows(
             }
         }
 
-        let counts = match edition {
+        let portability = match edition {
             Edition::Java => portability_for_java(&block_ir, &pack.blocks),
             Edition::Bedrock => portability_for_bedrock(&block_ir, &pack.blocks),
         };
+        report_unsupported(edition, &portability.unsupported);
         let dropped = dropped_scopes(&resolution, &block_ir);
         if !dropped.is_empty() {
             eprintln!(
@@ -815,9 +816,10 @@ fn edition_rows(
 
         rows.push(EditionReport {
             edition,
-            portable: counts.portable,
-            degraded: counts.degraded,
-            unsupported: counts.unsupported,
+            portable: portability.counts.portable,
+            degraded: portability.counts.degraded,
+            unsupported: portability.counts.unsupported,
+            unsupported_entries: portability.unsupported,
             buildable: verdicts.buildable,
             considered,
         });
@@ -829,6 +831,56 @@ fn edition_rows(
         return Err(ExitCode::from(1));
     }
     Ok(rows)
+}
+
+/// Name the palette entries one edition has no form for, under the figure
+/// that counts them.
+///
+/// On stderr, beside the other notes this command prints: the four stdout
+/// rows are what `--format json` mirrors and what a reader greps, and a
+/// per-entry list is not the shape of a row. A consumer that wants these
+/// structured reads `edition_portability[].unsupported_entries`.
+fn report_unsupported(edition: Edition, entries: &[UnsupportedEntry]) {
+    if entries.is_empty() {
+        return;
+    }
+    eprintln!(
+        "note: what `unsupported: {}` counts on {}:",
+        entries.len(),
+        edition.as_str(),
+    );
+    for entry in entries {
+        eprintln!(
+            "  note: `{}` — {}",
+            entry.id,
+            unsupported_reason(&entry.reason)
+        );
+    }
+}
+
+/// One entry's reason, as the clause that follows its id.
+///
+/// Three sentences for three repairs — change the material, change the
+/// intent, fix the pack — which is what the single figure they fold into
+/// cannot be read as.
+fn unsupported_reason(reason: &UnsupportedReason) -> String {
+    match reason {
+        UnsupportedReason::AbsentFromEdition { suggestion } => {
+            let absent = "no supported version of this edition declares the block";
+            match suggestion {
+                Some(suggestion) => format!("{absent}; did you mean `{suggestion}`?"),
+                None => absent.to_owned(),
+            }
+        }
+        UnsupportedReason::StatesUnrepresentable { states } => format!(
+            "the edition has the block and cannot express `{states}`; bind the slot to a \
+             property-free material, or build for the other edition"
+        ),
+        UnsupportedReason::InvalidState { detail } => format!(
+            "{detail}. The registry pack should have refused this before it reached the \
+             translator, so the repair is the pack's"
+        ),
+    }
 }
 
 /// Scopes the resolver recorded (`struct::NAME`, `site::SITE::PLACE`) that

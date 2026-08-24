@@ -81,6 +81,8 @@ pub struct EditionReport {
     pub degraded: u32,
     /// Palette entries with no representable form on this edition.
     pub unsupported: u32,
+    /// The entries [`Self::unsupported`] counts, named.
+    pub unsupported_entries: Vec<UnsupportedEntry>,
     /// Versions from [`Self::considered`] a build would accept.
     pub buildable: Vec<String>,
     /// Every version the edition's registry pack declares.
@@ -157,6 +159,68 @@ pub struct EditionPortability {
     /// Palette entries with no representable form on this edition: a block
     /// the edition does not have, or states it cannot express.
     pub unsupported: u32,
+    /// The entries [`Self::unsupported`] counts, named and with the reason
+    /// each of them has no form here.
+    ///
+    /// One element per unit of the count, in palette order. The count is
+    /// what the row has always carried and is kept as it is; this is the
+    /// answer to the question a bare integer cannot be read as, since the
+    /// three ways an entry can be unsupported have three different repairs
+    /// and only one of them is the author's.
+    pub unsupported_entries: Vec<UnsupportedEntry>,
+}
+
+/// One palette entry an edition has no form for, and why.
+///
+/// Built by `cairn-lang-formats::portability`, which is where the question
+/// is decided — the Bedrock state translator and the registry pack's id
+/// tables both live there. The type is declared here, beside the row it is
+/// a field of, so there is one shape rather than two identical ones with a
+/// mapping between them to fall out of step.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct UnsupportedEntry {
+    /// The palette entry's block id, verbatim as the lowering interned it.
+    pub id: String,
+    /// Which of the three ways this entry has no form on the edition.
+    #[serde(flatten)]
+    pub reason: UnsupportedReason,
+}
+
+/// Why one palette entry counts as unsupported.
+///
+/// The three variants are three different repairs — change the material,
+/// change the intent, fix the pack — which is the whole reason the figure
+/// they fold into cannot be acted on.
+///
+/// Serialized as an internally tagged union, so a consumer reads
+/// `"reason": "absent_from_edition"` beside the fields that reason carries
+/// and nothing else has to be parsed out of a sentence.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(tag = "reason", rename_all = "snake_case")]
+pub enum UnsupportedReason {
+    /// No supported version of the edition declares the block. The states
+    /// question is not asked — there are none to translate on a block that
+    /// does not exist.
+    AbsentFromEdition {
+        /// The nearest id the edition does declare, when one is close
+        /// enough to be a plausible typo. `None` is the ordinary answer for
+        /// a block that simply belongs to the other edition.
+        suggestion: Option<String>,
+    },
+    /// The edition has the block, and the states the intent put on it have
+    /// no mapping here.
+    StatesUnrepresentable {
+        /// The entry's `key=value` pairs, comma-joined, so the row names
+        /// the states rather than only the block carrying them.
+        states: String,
+    },
+    /// A state the registry pack should have refused reached the
+    /// translator. Not a portability fact about the source: the repair is
+    /// to the pack, and an author cannot make it.
+    InvalidState {
+        /// What the translator refused, in one clause.
+        detail: String,
+    },
 }
 
 /// One semantic-sensitivity finding.
@@ -201,23 +265,22 @@ pub fn compute_axes(
     _resolution: &Resolution,
     editions: Vec<EditionReport>,
 ) -> VersionAxes {
-    let edition_portability = editions
-        .iter()
-        .map(|report| EditionPortability {
+    let mut edition_portability = Vec::with_capacity(editions.len());
+    let mut buildable_targets = Vec::with_capacity(editions.len());
+    for report in editions {
+        edition_portability.push(EditionPortability {
             edition: report.edition,
             portable: report.portable,
             degraded: report.degraded,
             unsupported: report.unsupported,
-        })
-        .collect();
-    let buildable_targets = editions
-        .into_iter()
-        .map(|report| BuildableTargets {
+            unsupported_entries: report.unsupported_entries,
+        });
+        buildable_targets.push(BuildableTargets {
             edition: report.edition,
             buildable: report.buildable,
             considered: report.considered,
-        })
-        .collect();
+        });
+    }
     VersionAxes {
         registry_compat: RegistryRange {
             min: derive_min_version(module),
@@ -316,6 +379,7 @@ mod tests {
                     portable,
                     degraded,
                     unsupported,
+                    unsupported_entries: Vec::new(),
                     buildable: Vec::new(),
                     considered: Vec::new(),
                 },
@@ -382,6 +446,7 @@ mod tests {
                     portable: 3,
                     degraded: 0,
                     unsupported: 0,
+                    unsupported_entries: Vec::new(),
                     buildable: vec!["1.20.4".to_owned()],
                     considered: vec!["1.20.4".to_owned()],
                 },
@@ -390,6 +455,10 @@ mod tests {
                     portable: 1,
                     degraded: 1,
                     unsupported: 1,
+                    unsupported_entries: vec![UnsupportedEntry {
+                        id: "minecraft:oak_sign".to_owned(),
+                        reason: UnsupportedReason::AbsentFromEdition { suggestion: None },
+                    }],
                     buildable: vec!["1.21.0".to_owned()],
                     considered: vec!["1.21.0".to_owned(), "1.21.40".to_owned()],
                 },

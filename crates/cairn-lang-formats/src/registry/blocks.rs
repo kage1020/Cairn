@@ -219,6 +219,22 @@ impl BlocksIndex {
         )
     }
 
+    /// Every id any version declares, version by version in resolution
+    /// order.
+    ///
+    /// The edition-wide companion to [`Self::ids_for`], for a caller that
+    /// reports across the range rather than building for one version — the
+    /// same position [`Self::declared_by_some_version`] answers from. An id
+    /// several versions share is yielded once per version: the only caller
+    /// feeds these to `nearest_match`, which scores each candidate
+    /// independently, and deduplicating would cost an allocation to change
+    /// nothing.
+    pub fn declared_ids(&self) -> impl Iterator<Item = &str> {
+        self.by_version
+            .values()
+            .flat_map(|ids| ids.iter().map(String::as_str))
+    }
+
     /// Every version this index describes, in resolution order.
     pub fn versions(&self) -> impl Iterator<Item = &str> {
         self.by_version.keys().map(String::as_str)
