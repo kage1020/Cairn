@@ -11,7 +11,7 @@ use cairn_lang_core::lock::{
     LockWalkway, Lockfile, hash_resolved_ir, hash_source,
 };
 use cairn_lang_core::resolve::{
-    EditionPortability, VersionAxes, VersionFloor, compare_versions, compute_axes,
+    BuildableTargets, EditionReport, VersionAxes, VersionFloor, compare_versions, compute_axes,
     declared_version_floor, resolve,
 };
 use cairn_lang_core::{Edition, Severity, check, lower, parse};
@@ -637,12 +637,21 @@ fn run_info(file: &Path, editions: &[String], format: InfoFormat) -> ExitCode {
         return ExitCode::from(1);
     }
 
-    let per_edition = match edition_portability(file, &source, &lines, &ir, editions, &combined) {
-        Ok(table) => table,
+    let floor = declared_version_floor(&module);
+    let rows = match edition_rows(
+        file,
+        &source,
+        &lines,
+        &ir,
+        editions,
+        floor.as_ref(),
+        &combined,
+    ) {
+        Ok(rows) => rows,
         Err(code) => return code,
     };
 
-    let axes = compute_axes(&module, &ir, &resolution, per_edition);
+    let axes = compute_axes(&module, &ir, &resolution, rows);
 
     match format {
         InfoFormat::Text => {
@@ -662,8 +671,8 @@ fn run_info(file: &Path, editions: &[String], format: InfoFormat) -> ExitCode {
     }
 }
 
-/// One dry-run lower per requested edition, returning the portability row
-/// for each.
+/// One dry-run lower per requested edition, plus one per supported version
+/// of it, returning the two per-edition rows.
 ///
 /// The resolver's per-edition theme-variant selection can produce a
 /// different palette per edition (the whole point of spec §10.7 hierarchy
@@ -679,22 +688,61 @@ fn run_info(file: &Path, editions: &[String], format: InfoFormat) -> ExitCode {
 /// "this edition simply has fewer structures". A parity report that cannot
 /// show a parity failure is worse than none.
 ///
+/// The version loop is here for the same reason one level down.
+/// Portability asks of the edition, and two palette entries declared by
+/// disjoint sets of versions each answer yes while no single version has
+/// both. Asking each version in turn is the only sound answer, and it
+/// cannot be approximated by intersecting the range-wide palette's id
+/// sets: with no target pinned every material takes its *default*
+/// mapping, so a token the target respells is compared as the wrong id.
+/// A theme binding `@floor.stone.smooth` (default `stone_bricks`,
+/// respelled `stonebrick` at Bedrock 1.21.0) beside a literal
+/// `@stonebrick` has an empty intersection and builds on 1.21.0.
+///
+/// A version counts as buildable when it passes the gates
+/// [`run_compile`] applies to the *source*: the pinned lowering raises no
+/// error, the `@requires` floor is at or below it, and every scope the
+/// source declares lowered. The last two do not depend on the version's id
+/// table, but they decide whether a build happens, and a row that named a
+/// target `compile` refuses would be the same defect this one exists to
+/// remove. The gates after those are about the filesystem — an output
+/// directory, a free lockfile path — and belong to the command that writes.
+///
+/// The loop reports and does not refuse. An entry no version of the
+/// edition has is already a figure rather than a gate here — spec §10.5's
+/// own sample output carries `unsupported: 1` — and a caller that wants a
+/// refusal runs the build. What this row adds is the fact the counters
+/// cannot carry: that the versions disagree about different entries.
+///
+/// Reporting and refusing are different, though, and a row that says
+/// `none` without saying why is not a report. Each pinned lowering's
+/// findings are printed under the version that raised them, because
+/// nothing else in the run will ever show them; the floor and the dropped
+/// scopes get one line each per edition instead, since their reason is the
+/// same for every version and is already on screen — the compat row for
+/// the first, the scope's own warning for the second.
+///
+/// The cost is one lowering per version per edition rather than one per
+/// edition — three versions per edition in the built-in packs — and each
+/// reuses the edition's single `resolve`, which is the expensive half.
+///
 /// `already_reported` is the edition-neutral stream the caller has printed;
 /// only diagnostics absent from it are reported, keyed by code and span, so
 /// the shared findings are not repeated once per edition.
-fn edition_portability(
+fn edition_rows(
     file: &Path,
     source: &str,
     lines: &LineStarts,
     ir: &cairn_lang_core::intent::IntentModule,
     editions: &[String],
+    floor: Option<&VersionFloor>,
     already_reported: &[cairn_lang_core::check::Diagnostic],
-) -> Result<Vec<EditionPortability>, ExitCode> {
+) -> Result<Vec<EditionReport>, ExitCode> {
     let already: std::collections::HashSet<(&str, usize, usize)> = already_reported
         .iter()
         .map(|d| (d.code.as_str(), d.span.start, d.span.end))
         .collect();
-    let mut table: Vec<EditionPortability> = Vec::with_capacity(editions.len());
+    let mut rows: Vec<EditionReport> = Vec::with_capacity(editions.len());
     let mut edition_specific_error = false;
 
     for e in editions {
@@ -729,11 +777,49 @@ fn edition_portability(
             Edition::Java => portability_for_java(&block_ir, &pack.blocks),
             Edition::Bedrock => portability_for_bedrock(&block_ir, &pack.blocks),
         };
-        table.push(EditionPortability {
+        let dropped = dropped_scopes(&resolution, &block_ir);
+        if !dropped.is_empty() {
+            eprintln!(
+                "note: no {} target can build this source: {} produced no voxels, and a partial \
+                 build is not certified",
+                edition.as_str(),
+                dropped
+                    .iter()
+                    .map(|scope| format!("`{scope}`"))
+                    .collect::<Vec<_>>()
+                    .join(", "),
+            );
+        }
+
+        let considered = supported_versions(pack);
+        let verdicts = weigh_versions(ir, &resolution, pack, floor, &considered, &dropped);
+        for (version, refusals) in &verdicts.refused {
+            eprintln!("note: {} {version} refuses this source", edition.as_str());
+            report_core_diagnostics(file, source, lines, refusals);
+        }
+        if let Some(floor) = floor
+            && !verdicts.below_floor.is_empty()
+        {
+            eprintln!(
+                "note: {} {} {} below the `@requires version>={}` floor this file declares",
+                edition.as_str(),
+                verdicts.below_floor.join(", "),
+                if verdicts.below_floor.len() == 1 {
+                    "is"
+                } else {
+                    "are"
+                },
+                floor.version,
+            );
+        }
+
+        rows.push(EditionReport {
             edition,
             portable: counts.portable,
             degraded: counts.degraded,
             unsupported: counts.unsupported,
+            buildable: verdicts.buildable,
+            considered,
         });
     }
 
@@ -742,7 +828,102 @@ fn edition_portability(
     if edition_specific_error {
         return Err(ExitCode::from(1));
     }
-    Ok(table)
+    Ok(rows)
+}
+
+/// Scopes the resolver recorded (`struct::NAME`, `site::SITE::PLACE`) that
+/// the block-array pass did not turn into a structure, in resolver order.
+///
+/// `def::` keys are excluded: a def is a template and lowers to voxels only
+/// through a `place` that instantiates it.
+///
+/// One definition for the two readers. `run_compile` refuses a build that
+/// would leave any of these out, and `edition_rows` reports the same thing
+/// as "no target can build this" — a second copy could drift into
+/// disagreeing about which scopes count.
+fn dropped_scopes(
+    resolution: &cairn_lang_core::Resolution,
+    block_ir: &BlockArrayIr,
+) -> Vec<String> {
+    resolution
+        .scopes
+        .keys()
+        .filter(|key| !key.starts_with("def::"))
+        .filter(|key| !block_ir.structures.contains_key(key.as_str()))
+        .cloned()
+        .collect()
+}
+
+/// Every version a pack declares, in ascending release order.
+///
+/// Sorted here rather than taken as written: `DataVersionTable` documents
+/// its row order as informational, and this list is shown to a reader, so
+/// reordering rows in a pack's JSON must not reorder the output.
+fn supported_versions(pack: &RegistryPack) -> Vec<String> {
+    let mut rows: Vec<&cairn_lang_formats::registry::DataVersionEntry> =
+        pack.data_versions.versions.iter().collect();
+    rows.sort_by_key(|entry| entry.data_version);
+    rows.into_iter()
+        .map(|entry| entry.mc_version.clone())
+        .collect()
+}
+
+/// How each supported version of one edition answered.
+#[derive(Debug, Default)]
+struct VersionVerdicts {
+    /// Versions a build would accept.
+    buildable: Vec<String>,
+    /// Versions whose pinned lowering raised errors, carrying them: the
+    /// caller prints them because nothing else in the run will.
+    refused: Vec<(String, Vec<cairn_lang_core::check::Diagnostic>)>,
+    /// Versions below the `@requires` floor, which are refused without
+    /// being lowered at all — the floor is a relation between the source
+    /// and the target, and no id table changes it.
+    below_floor: Vec<String>,
+}
+
+/// Weigh each supported version against the gates `run_compile` applies to
+/// the source.
+///
+/// `dropped` is the edition's unlowered scopes: non-empty means every
+/// version refuses, so none is lowered a second time to find that out.
+fn weigh_versions(
+    ir: &cairn_lang_core::intent::IntentModule,
+    resolution: &cairn_lang_core::Resolution,
+    pack: &RegistryPack,
+    floor: Option<&VersionFloor>,
+    considered: &[String],
+    dropped: &[String],
+) -> VersionVerdicts {
+    let mut verdicts = VersionVerdicts::default();
+    for version in considered {
+        if floor.is_some_and(|floor| compare_versions(version, &floor.version).is_lt()) {
+            verdicts.below_floor.push(version.clone());
+            continue;
+        }
+        if !dropped.is_empty() {
+            continue;
+        }
+        let pinned = lower_to_block_array(ir, resolution, Some(&pack.view(Some(version))));
+        // Severity rather than a list of codes. `E_UNKNOWN_ID` is the only
+        // finding pinning a target raises today, and naming it here would
+        // keep reporting a version as buildable the day a second one
+        // lands. Nothing is filtered against what the caller already
+        // printed: this is reached only after the edition-neutral gate,
+        // which returns on any Error, so everything already reported is a
+        // warning and no warning refuses a version.
+        let refusals: Vec<_> = pinned
+            .diagnostics
+            .into_iter()
+            .filter(|d| d.severity() == Severity::Error)
+            .collect();
+        if refusals.is_empty() {
+            verdicts.buildable.push(version.clone());
+        } else {
+            verdicts.refused.push((version.clone(), refusals));
+        }
+    }
+    verdicts
 }
 
 fn print_text(axes: &VersionAxes) {
@@ -775,6 +956,23 @@ fn print_text(axes: &VersionAxes) {
     };
     println!("edition portability:     {portability_line}");
 
+    let buildable_line = if axes.buildable_targets.is_empty() {
+        String::from("(no editions requested)")
+    } else {
+        axes.buildable_targets
+            .iter()
+            .map(|bt| {
+                format!(
+                    "{}: {}",
+                    capitalise(bt.edition.as_str()),
+                    buildable_text(bt)
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("   ")
+    };
+    println!("buildable targets:       {buildable_line}");
+
     let semantic_line = if axes.semantic_sensitive.is_empty() {
         String::from("(none)")
     } else {
@@ -785,6 +983,38 @@ fn print_text(axes: &VersionAxes) {
             .join(", ")
     };
     println!("semantic-sensitive:      {semantic_line}");
+}
+
+/// One edition's buildable versions, with the refusing ones named after
+/// them.
+///
+/// The refusals are in the sentence rather than left to be inferred: a bare
+/// `1.21.0` cannot be told apart from an edition whose pack declares only
+/// that one version, and the difference between "one target of three" and
+/// "the only target there is" is the whole point of the row.
+fn buildable_text(targets: &BuildableTargets) -> String {
+    let refused: Vec<&str> = targets
+        .considered
+        .iter()
+        .filter(|version| !targets.buildable.contains(version))
+        .map(String::as_str)
+        .collect();
+    let built = if targets.buildable.is_empty() {
+        String::from("none")
+    } else {
+        targets.buildable.join(", ")
+    };
+    if refused.is_empty() {
+        return built;
+    }
+    let tail = if let [only] = refused.as_slice() {
+        format!("{only} refuses")
+    } else if targets.buildable.is_empty() {
+        format!("{} all refuse", refused.join(", "))
+    } else {
+        format!("{} refuse", refused.join(", "))
+    };
+    format!("{built} ({tail})")
 }
 
 fn capitalise(s: &str) -> String {
@@ -1651,10 +1881,8 @@ fn edition_prefix(target: &LockTarget, name_edition: bool) -> String {
 struct Lowered {
     source: String,
     block_ir: BlockArrayIr,
-    /// Scopes the resolver recorded (`struct::NAME`, `site::SITE::PLACE`)
-    /// that the block-array pass did not turn into a structure, in resolver
-    /// order. `def::` keys are excluded: a def is a template and lowers to
-    /// voxels only through a `place` that instantiates it.
+    /// Scopes the source asked for that produced no voxels, as
+    /// [`dropped_scopes`] collects them.
     dropped_scopes: Vec<String>,
     /// The strictest `@requires` floor the source declares, carried out of
     /// the parse so `compile` can hold `--target` to it without reading the
@@ -1705,13 +1933,7 @@ fn load_and_lower(
         Some(edition.as_edition()),
         std::mem::take(&mut block_ir.diagnostics),
     );
-    let dropped_scopes = resolution
-        .scopes
-        .keys()
-        .filter(|key| !key.starts_with("def::"))
-        .filter(|key| !block_ir.structures.contains_key(key.as_str()))
-        .cloned()
-        .collect();
+    let dropped_scopes = dropped_scopes(&resolution, &block_ir);
     Ok(Lowered {
         version_floor: declared_version_floor(&module),
         source,

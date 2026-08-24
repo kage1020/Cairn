@@ -333,24 +333,45 @@ fn lower_stays_silent_about_ids_because_it_takes_no_target() {
     assert_eq!(out.status.code(), Some(0), "stderr: {}", stderr_of(&out));
 }
 
-/// `cairn info` reports across a pack's whole version range, so it is in
-/// the same position as `check`.
+/// `cairn info` never says an id is unknown without naming the target that
+/// says so.
+///
+/// It used to say nothing about ids at all, and the reason was that it had
+/// no target to be right about: the range-wide pass gets no id table, so
+/// an id valid for part of the range would have been refused against a
+/// version nobody chose. That premise is gone — the `buildable targets`
+/// row pins each supported version in turn — so the rule is now the
+/// narrower one it was always standing in for. What must not appear is a
+/// bare `E_UNKNOWN_ID` about the *source*; what may appear is one about a
+/// named version, which is exactly what `compile --target` would print for
+/// that version.
 #[test]
-fn info_stays_silent_about_ids_for_the_same_reason() {
+fn info_blames_a_named_target_or_says_nothing_about_ids() {
     let fixture = Fixture::new("info", &source_binding("totally_not_a_block"));
     let out = Command::new(cargo_bin())
         .arg("info")
         .arg(fixture.source())
         .output()
         .expect("failed to invoke cairn binary");
-    let combined = format!(
-        "{}{}",
-        String::from_utf8_lossy(&out.stdout),
-        stderr_of(&out),
-    );
+    let stderr = stderr_of(&out);
+    let stdout = String::from_utf8_lossy(&out.stdout).into_owned();
     assert!(
-        !combined.contains("E_UNKNOWN_ID"),
-        "info spans every target in the range, got: {combined}",
+        !stdout.contains("E_UNKNOWN_ID"),
+        "the rows are about the source and carry no id verdict, got: {stdout}",
+    );
+    // Every id finding is introduced by the version it belongs to, and
+    // there are as many introductions as findings.
+    let findings = stderr.matches("E_UNKNOWN_ID").count();
+    let attributions = stderr.matches("refuses this source").count();
+    assert!(findings > 0, "the fixture's id is in no version: {stderr}");
+    assert_eq!(
+        findings, attributions,
+        "each id finding should sit under the target that raised it: {stderr}",
+    );
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "info reports; it does not refuse: {stderr}",
     );
 }
 

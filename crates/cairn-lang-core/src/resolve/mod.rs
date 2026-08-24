@@ -45,6 +45,6 @@ pub use resolver::{
     resolve,
 };
 pub use version_axes::{
-    EditionPortability, RegistryRange, SemanticSensitiveFinding, VersionAxes, VersionFloor,
-    compute_axes, declared_version_floor,
+    BuildableTargets, EditionPortability, EditionReport, RegistryRange, SemanticSensitiveFinding,
+    VersionAxes, VersionFloor, compute_axes, declared_version_floor,
 };

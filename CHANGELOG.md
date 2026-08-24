@@ -12,6 +12,31 @@ and is a separate axis from the Minecraft target version.
 
 ### Breaking changes
 
+- *(cli)* `cairn info` says which supported targets can build the source. The portability
+  counters ask of the *edition* — a block one part of the range spells differently is not missing
+  from it — and two palette entries can be declared by disjoint sets of versions while each
+  answers yes. The row was then `unsupported: 0` for a source every supported target refuses. A
+  new `buildable targets` row answers per version: the supported versions whose pinned lowering
+  raises no error, with the refusing ones named beside them. It is a set rather than a range,
+  because two ids whose version sets interleave leave a gap a range would claim, and it is
+  derived by lowering once per supported version — the check `cairn compile --target` already
+  runs — rather than by intersecting the range-wide palette's id sets. That intersection is
+  unsound in the direction that matters: with no target pinned every material takes its default
+  mapping, so a theme binding `@floor.stone.smooth` (respelled `stonebrick` at Bedrock 1.21.0)
+  beside a literal `@stonebrick` intersects to nothing and builds on 1.21.0. The row reports and
+  does not refuse — `cairn info` still exits 0 for a source no version can build, matching the
+  rule the portability counters already follow, and the build is the command that refuses. Each
+  refusing version's own findings are printed under it, because nothing else in the run would
+  show them and a row that says `none` without saying why is not a report. A version counts as
+  buildable when it passes the gates `cairn compile --target` applies to the source: the pinned
+  lowering raises no error, the `@requires` floor is at or below it, and every scope the source
+  declares lowered — a row naming a target `compile` refuses would be the same defect in a new
+  place. **Breaking**: `compute_axes` now takes one `EditionReport` per requested edition in
+  place of a portability list, so the two per-edition wire rows cannot disagree about length,
+  order, or which edition they describe; `VersionAxes` gains a `buildable_targets` field and is
+  now `#[non_exhaustive]`, so the next axis is not another break. `--format json` gains
+  `buildable_targets`, which is additive for consumers that ignore unknown keys.
+
 - *(core)* A truth table that verifies nothing is reported. `assert truth` exists to check a
   circuit, and three shapes of table checked nothing while reading — in a diff, in a review —
   exactly like one that passes: no rows at all, a pattern assigned twice, and combinations left

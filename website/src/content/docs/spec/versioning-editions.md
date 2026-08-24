@@ -169,22 +169,43 @@ There is no single "for-version". `cairn info` returns three axes:
 
 ```text
 $ cairn info build.crn --editions java,bedrock
-registry compatibility:  Java: 1.20.0 .. latest   Bedrock: 1.21.30 .. latest
-edition portability:     portable: 42  degraded: 3  unsupported: 1
+registry compatibility:  1.21.40 .. latest
+edition portability:     Java: portable: 42  degraded: 0  unsupported: 0   Bedrock: portable: 38  degraded: 3  unsupported: 1
+buildable targets:       Java: none (1.20.4, 1.21, 1.21.4 all refuse)   Bedrock: 1.21.40, 1.21.60 (1.21.0 refuses)
 semantic-sensitive:      yard_water(cauldron split@1.17), fence(wall conn@1.16)
-recommended test targets: Java min 1.20.0 / latest 1.21.4
 ```
+
+Four lines, and every version in them is one the built-in packs declare (§10.4). The file behind
+this output carries `@requires version>=1.21.40`, which is what puts every Java target below the
+floor and Bedrock 1.21.0 with them. A fifth line, `recommended test targets`, belongs to this axis
+and is not emitted by any code path yet.
 
 The `edition portability` row counts palette entries, and an entry is `unsupported` for either of two
 reasons: the edition has no such block at all, or it has the block but no representation for the
 states the intent carries (10.7). The first is a question about IDs and the second about states; only
 the second can produce `degraded`, since a block that does not exist has nothing to lose detail from.
 
-Both are asked of the edition rather than of a version, because this command reports across a whole
+Both are asked of the edition rather than of a version, because **that row** reports across a whole
 compatible range. An ID valid for only part of that range — Bedrock renamed `stonebrick` to
 `stone_bricks` at 1.21.40 — is therefore not `unsupported`: the block exists on the edition, and
 whether the version actually being built has it is the question `cairn compile --target` answers, as
 `E_UNKNOWN_ID` (10.4).
+
+That leaves one thing those counters cannot say. Two entries can be declared by *disjoint* sets of
+versions and each answer "the edition has it", so the row is clean while no single version declares
+both. The `buildable targets` row is the per-version answer: per requested edition, the supported
+versions whose pinned lowering raises no error, with the refusing ones named beside them. It is a
+set rather than a `[Vmin, Vmax]` range, because two IDs whose version sets interleave leave a gap a
+range would claim. It is derived by lowering once per supported version — the same check
+`cairn compile --target` runs — and **not** by intersecting the range-wide palette's ID sets, which
+is unsound: with no target pinned every material takes its *default* mapping, so a token the target
+respells is compared as the wrong ID, and a source one target builds can come out with an empty
+intersection.
+
+Like the counters, this row reports and does not refuse. `cairn info` exits 0 for a source no
+supported version can build; the build is the command that refuses it, and the command that says
+which block is missing. `recommended test targets` answers a different question again — which
+versions are worth testing against, not which ones work.
 
 ## 10.6 Provenance and lock (reproducibility)
 - The `.crn` carries only `@intended_targets` (wish/hint). **`verified:true` + DataVersion + the hashes
