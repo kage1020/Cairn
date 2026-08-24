@@ -169,12 +169,16 @@ There is no single "for-version". `cairn info` returns three axes:
 
 ```text
 $ cairn info build.crn --editions java,bedrock
-registry compatibility:  Java: 1.20.0 .. latest   Bedrock: 1.21.30 .. latest
-edition portability:     portable: 42  degraded: 3  unsupported: 1
-buildable targets:       Java: 1.20.4, 1.21, 1.21.4   Bedrock: 1.21.30 (1.21.0 refuses)
+registry compatibility:  1.21.40 .. latest
+edition portability:     Java: portable: 42  degraded: 0  unsupported: 0   Bedrock: portable: 38  degraded: 3  unsupported: 1
+buildable targets:       Java: none (1.20.4, 1.21, 1.21.4 all refuse)   Bedrock: 1.21.40, 1.21.60 (1.21.0 refuses)
 semantic-sensitive:      yard_water(cauldron split@1.17), fence(wall conn@1.16)
-recommended test targets: Java min 1.20.0 / latest 1.21.4
 ```
+
+Four lines, and every version in them is one the built-in packs declare (§10.4). The file behind
+this output carries `@requires version>=1.21.40`, which is what puts every Java target below the
+floor and Bedrock 1.21.0 with them. A fifth line, `recommended test targets`, belongs to this axis
+and is not emitted by any code path yet.
 
 The `edition portability` row counts palette entries, and an entry is `unsupported` for either of two
 reasons: the edition has no such block at all, or it has the block but no representation for the

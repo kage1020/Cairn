@@ -164,12 +164,16 @@ lowering を走らせないので、`E_UNKNOWN_ABSTRACT_TOKEN` を含め lowerin
 
 ```text
 $ cairn info build.crn --editions java,bedrock
-registry compatibility:  Java: 1.20.0 .. latest   Bedrock: 1.21.30 .. latest
-edition portability:     portable: 42  degraded: 3  unsupported: 1
-buildable targets:       Java: 1.20.4, 1.21, 1.21.4   Bedrock: 1.21.30 (1.21.0 refuses)
+registry compatibility:  1.21.40 .. latest
+edition portability:     Java: portable: 42  degraded: 0  unsupported: 0   Bedrock: portable: 38  degraded: 3  unsupported: 1
+buildable targets:       Java: none (1.20.4, 1.21, 1.21.4 all refuse)   Bedrock: 1.21.40, 1.21.60 (1.21.0 refuses)
 semantic-sensitive:      yard_water(cauldron split@1.17), fence(wall conn@1.16)
-recommended test targets: Java min 1.20.0 / latest 1.21.4
 ```
+
+4 行あり、そこに現れるバージョンはすべて組み込みパックが宣言しているもの (§10.4) です。この出力の
+元になっているファイルは `@requires version>=1.21.40` を持っており、それが Java の全ターゲットと
+Bedrock 1.21.0 を floor の下に置いています。5 行目にあたる `recommended test targets` はこの軸に
+属しますが、まだどのコードパスからも出力されていません。
 
 `edition portability` の行はパレットエントリを数えます。エントリが `unsupported` になる理由は 2 つあり、
 そのエディションにそのブロック自体が存在しないか、ブロックはあっても意図が持つ状態を表現できない

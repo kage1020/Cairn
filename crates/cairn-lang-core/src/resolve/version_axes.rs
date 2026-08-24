@@ -38,7 +38,15 @@ use super::requires_parse::{compare_versions, parse_min_version};
 use super::resolver::Resolution;
 
 /// The three-axis answer to "which version is this `.crn` for?".
+///
+/// `#[non_exhaustive]` because this type is only ever *read* outside the
+/// crate: [`compute_axes`] builds it and the CLI renders it, so a fourth
+/// axis should not be a breaking change. The types the caller *builds* —
+/// [`EditionReport`] — stay exhaustive for the opposite reason: a field
+/// added there is a value the caller has to supply, and the compiler
+/// saying so is the point.
 #[derive(Debug, Clone, PartialEq, Serialize)]
+#[non_exhaustive]
 pub struct VersionAxes {
     /// Axis 1: registry-compatible version range.
     pub registry_compat: RegistryRange,
@@ -49,8 +57,34 @@ pub struct VersionAxes {
     /// Empty until the semantic-sensitivity catalog lands.
     pub semantic_sensitive: Vec<SemanticSensitiveFinding>,
     /// Which supported versions of each requested edition can build the
-    /// source, in the same order as [`Self::edition_portability`].
+    /// source. One entry per entry of [`Self::edition_portability`], in
+    /// the same order and for the same edition — both are fanned out of
+    /// one [`EditionReport`] per edition, so the two cannot disagree.
     pub buildable_targets: Vec<BuildableTargets>,
+}
+
+/// Everything one requested edition contributes to [`VersionAxes`].
+///
+/// The wire shape keeps the portability counts and the buildable versions
+/// in separate lists, because that is what `cairn info --format json` has
+/// always emitted. Taking them from the caller that way would put three
+/// invariants in the API with nothing to enforce them — equal length,
+/// matching order, one row per edition — so the caller builds one of
+/// these per edition and [`compute_axes`] does the fanning out.
+#[derive(Debug, Clone, PartialEq)]
+pub struct EditionReport {
+    /// Target edition this report describes.
+    pub edition: Edition,
+    /// Palette entries that compile straight through.
+    pub portable: u32,
+    /// Palette entries that compile but lose detail.
+    pub degraded: u32,
+    /// Palette entries with no representable form on this edition.
+    pub unsupported: u32,
+    /// Versions from [`Self::considered`] a build would accept.
+    pub buildable: Vec<String>,
+    /// Every version the edition's registry pack declares.
+    pub considered: Vec<String>,
 }
 
 /// Which supported versions of one edition can build the source.
@@ -69,11 +103,18 @@ pub struct VersionAxes {
 pub struct BuildableTargets {
     /// Target edition this row describes.
     pub edition: Edition,
-    /// Versions from [`Self::considered`] whose pinned lowering raises no
-    /// error the range-wide pass had not already reported, in the same
-    /// order. A build against one of these is the one the source is for.
+    /// The versions in [`Self::considered`] a build would accept, in the
+    /// same order.
+    ///
+    /// "Would accept" is the gates `cairn compile --target` applies before
+    /// it writes anything: the pinned lowering raises no error, the
+    /// source's `@requires` floor is at or below the version, and every
+    /// scope the source declares lowered. The gates it applies afterwards
+    /// are about the filesystem rather than about the source, and are not
+    /// asked here.
     pub buildable: Vec<String>,
-    /// Every version the edition's registry pack declares, in pack order.
+    /// Every version the edition's registry pack declares, in ascending
+    /// release order.
     ///
     /// Carried so an empty `buildable` can be read: "no version builds
     /// this" and "the pack declares no versions" are different facts and
@@ -145,23 +186,38 @@ pub struct SemanticSensitiveFinding {
 /// JSON / text shape does not diverge from what the compile backend would
 /// see.
 ///
-/// `buildable_targets` is threaded in the same way and for the same
-/// reason: deciding it means lowering once per supported version against
-/// that version's id table, which is the registry pack's data and so the
-/// caller's to hold.
+/// The buildable versions ride in the same [`EditionReport`] and for the
+/// same reason: deciding them means lowering once per supported version
+/// against that version's id table, which is the registry pack's data and
+/// so the caller's to hold.
 ///
 /// `_resolution` is accepted so future work that needs the resolved binding
 /// (semantic-sensitivity checks per concrete token) can land without an API
-/// change. Currently only `module.headers` and the two per-edition lists
-/// are consumed.
+/// change. Currently only `module.headers` and `editions` are consumed.
 #[must_use]
 pub fn compute_axes(
     module: &Module,
     _ir: &IntentModule,
     _resolution: &Resolution,
-    edition_portability: Vec<EditionPortability>,
-    buildable_targets: Vec<BuildableTargets>,
+    editions: Vec<EditionReport>,
 ) -> VersionAxes {
+    let edition_portability = editions
+        .iter()
+        .map(|report| EditionPortability {
+            edition: report.edition,
+            portable: report.portable,
+            degraded: report.degraded,
+            unsupported: report.unsupported,
+        })
+        .collect();
+    let buildable_targets = editions
+        .into_iter()
+        .map(|report| BuildableTargets {
+            edition: report.edition,
+            buildable: report.buildable,
+            considered: report.considered,
+        })
+        .collect();
     VersionAxes {
         registry_compat: RegistryRange {
             min: derive_min_version(module),
@@ -246,18 +302,22 @@ mod tests {
         (m, i, r)
     }
 
-    /// Fabricate a per-edition portability list matching the shape the CLI
-    /// forwards from `cairn-lang-formats::portability`. Used to keep the
-    /// axis-1 / axis-3 tests independent of the axis-2 data source.
-    fn synthetic_portability(entries: &[(Edition, u32, u32, u32)]) -> Vec<EditionPortability> {
+    /// Fabricate a per-edition report matching the shape the CLI builds
+    /// from `cairn-lang-formats::portability` and its own version loop.
+    /// Used to keep the axis-1 / axis-3 tests independent of the axis-2
+    /// data source; the version lists are left empty because those tests
+    /// are not about them.
+    fn synthetic_portability(entries: &[(Edition, u32, u32, u32)]) -> Vec<EditionReport> {
         entries
             .iter()
             .map(
-                |&(edition, portable, degraded, unsupported)| EditionPortability {
+                |&(edition, portable, degraded, unsupported)| EditionReport {
                     edition,
                     portable,
                     degraded,
                     unsupported,
+                    buildable: Vec::new(),
+                    considered: Vec::new(),
                 },
             )
             .collect()
@@ -272,7 +332,6 @@ mod tests {
             &i,
             &r,
             synthetic_portability(&[(Edition::Java, 0, 0, 0)]),
-            Vec::new(),
         );
         assert_eq!(axes.registry_compat.min, "1.20");
         assert_eq!(axes.registry_compat.max, "latest");
@@ -287,7 +346,6 @@ mod tests {
             &i,
             &r,
             synthetic_portability(&[(Edition::Java, 0, 0, 0)]),
-            Vec::new(),
         );
         assert_eq!(axes.registry_compat.min, "1.21");
     }
@@ -301,7 +359,6 @@ mod tests {
             &i,
             &r,
             synthetic_portability(&[(Edition::Java, 0, 0, 0)]),
-            Vec::new(),
         );
         assert_eq!(axes.registry_compat.min, "0.0");
     }
@@ -319,12 +376,24 @@ mod tests {
             &m,
             &i,
             &r,
-            synthetic_portability(&[(Edition::Java, 3, 0, 0), (Edition::Bedrock, 1, 1, 1)]),
-            vec![BuildableTargets {
-                edition: Edition::Bedrock,
-                buildable: vec!["1.21.0".to_owned()],
-                considered: vec!["1.21.0".to_owned(), "1.21.40".to_owned()],
-            }],
+            vec![
+                EditionReport {
+                    edition: Edition::Java,
+                    portable: 3,
+                    degraded: 0,
+                    unsupported: 0,
+                    buildable: vec!["1.20.4".to_owned()],
+                    considered: vec!["1.20.4".to_owned()],
+                },
+                EditionReport {
+                    edition: Edition::Bedrock,
+                    portable: 1,
+                    degraded: 1,
+                    unsupported: 1,
+                    buildable: vec!["1.21.0".to_owned()],
+                    considered: vec!["1.21.0".to_owned(), "1.21.40".to_owned()],
+                },
+            ],
         );
         assert_eq!(axes.edition_portability.len(), 2);
         assert_eq!(axes.edition_portability[0].edition, Edition::Java);
@@ -341,12 +410,26 @@ mod tests {
         let json = serde_json::to_string(&axes).unwrap();
         assert!(json.contains(r#""edition":"java""#), "got: {json}");
         assert!(json.contains(r#""edition":"bedrock""#), "got: {json}");
-        // The buildable row rides the same forwarding, and carries the
-        // versions it weighed as well as the ones that passed — an empty
+        // The buildable row is fanned out of the same input, so it has
+        // one entry per portability row, in the same order, for the same
+        // edition — the invariant two independent `Vec` parameters could
+        // not carry. It also keeps the versions it weighed: an empty
         // `buildable` says nothing on its own about how many there were.
-        assert_eq!(axes.buildable_targets.len(), 1);
-        assert_eq!(axes.buildable_targets[0].buildable, ["1.21.0"]);
-        assert_eq!(axes.buildable_targets[0].considered, ["1.21.0", "1.21.40"]);
+        assert_eq!(axes.buildable_targets.len(), axes.edition_portability.len());
+        let editions: Vec<Edition> = axes
+            .buildable_targets
+            .iter()
+            .map(|row| row.edition)
+            .collect();
+        assert_eq!(
+            editions,
+            axes.edition_portability
+                .iter()
+                .map(|row| row.edition)
+                .collect::<Vec<_>>(),
+        );
+        assert_eq!(axes.buildable_targets[1].buildable, ["1.21.0"]);
+        assert_eq!(axes.buildable_targets[1].considered, ["1.21.0", "1.21.40"]);
         assert!(json.contains(r#""buildable":["1.21.0"]"#), "got: {json}");
         assert!(
             json.contains(r#""considered":["1.21.0","1.21.40"]"#),
@@ -363,7 +446,6 @@ mod tests {
             &i,
             &r,
             synthetic_portability(&[(Edition::Java, 0, 0, 0)]),
-            Vec::new(),
         );
         assert!(axes.semantic_sensitive.is_empty());
     }

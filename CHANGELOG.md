@@ -25,10 +25,17 @@ and is a separate axis from the Minecraft target version.
   mapping, so a theme binding `@floor.stone.smooth` (respelled `stonebrick` at Bedrock 1.21.0)
   beside a literal `@stonebrick` intersects to nothing and builds on 1.21.0. The row reports and
   does not refuse — `cairn info` still exits 0 for a source no version can build, matching the
-  rule the portability counters already follow, and the build is the command that refuses and
-  says which block is missing. **Breaking**: `compute_axes` takes a fifth argument and
-  `VersionAxes` carries a fifth field; `--format json` gains `buildable_targets`, which is
-  additive for consumers that ignore unknown keys.
+  rule the portability counters already follow, and the build is the command that refuses. Each
+  refusing version's own findings are printed under it, because nothing else in the run would
+  show them and a row that says `none` without saying why is not a report. A version counts as
+  buildable when it passes the gates `cairn compile --target` applies to the source: the pinned
+  lowering raises no error, the `@requires` floor is at or below it, and every scope the source
+  declares lowered — a row naming a target `compile` refuses would be the same defect in a new
+  place. **Breaking**: `compute_axes` now takes one `EditionReport` per requested edition in
+  place of a portability list, so the two per-edition wire rows cannot disagree about length,
+  order, or which edition they describe; `VersionAxes` gains a `buildable_targets` field and is
+  now `#[non_exhaustive]`, so the next axis is not another break. `--format json` gains
+  `buildable_targets`, which is additive for consumers that ignore unknown keys.
 
 - *(core)* A truth table that verifies nothing is reported. `assert truth` exists to check a
   circuit, and three shapes of table checked nothing while reading — in a diff, in a review —

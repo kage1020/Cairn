@@ -84,6 +84,12 @@ fn strings(value: &Value, key: &str) -> Vec<String> {
 }
 
 /// Whether `cairn compile` accepts this source for one pinned target.
+///
+/// `--lock` is pointed inside `out` rather than left to default. Without
+/// it the lockfile lands next to the source, which for a source under
+/// `examples/` means writing into the working tree — and `report_previous_target`
+/// reads that file, so calls would communicate through it and become
+/// order-dependent.
 fn compile_accepts(
     path: &std::path::Path,
     edition: &str,
@@ -100,6 +106,8 @@ fn compile_accepts(
             target,
             "--out",
             out.to_str().unwrap(),
+            "--lock",
+            out.join("build.crn.lock").to_str().unwrap(),
         ])
         .output()
         .expect("run cairn")
@@ -401,23 +409,37 @@ fn a_source_no_supported_version_can_build_says_so() {
         ["1.21.0", "1.21.40", "1.21.60"]
     );
 
-    // And the text row says it rather than leaving it to the JSON.
+    // The premise the test name rests on, asked of the command that
+    // decides it rather than assumed.
+    let out = tmp.path().join("out");
+    for version in ["1.21.0", "1.21.40", "1.21.60"] {
+        assert!(
+            !compile_accepts(&src, "bedrock", version, &out.join(version)),
+            "premise: bedrock {version} should refuse this source",
+        );
+    }
+
+    // And the text row says it rather than leaving it to the JSON. Matched
+    // as a whole line: `none` on its own is in every run's output, under
+    // `semantic-sensitive`.
     let (code, stdout, stderr) = info_raw(&src, "bedrock");
     assert_eq!(
         code,
         Some(0),
-        "info reports; the build refuses. stderr={stderr}"
+        "info reports; the build refuses. stderr={stderr}",
     );
     assert!(
-        stdout.contains("buildable targets:") && stdout.contains("none"),
+        stdout.contains(
+            "buildable targets:       Bedrock: none (1.21.0, 1.21.40, 1.21.60 all refuse)"
+        ),
         "the row must carry the same answer the JSON does, got: {stdout}",
     );
-    for version in ["1.21.0", "1.21.40", "1.21.60"] {
-        assert!(
-            stdout.contains(version),
-            "every version weighed should be named; {version} is not in {stdout}",
-        );
-    }
+    // The reason is printed too, since nothing else in the run would show
+    // it and a bare `none` is not a report.
+    assert!(
+        stderr.contains("E_UNKNOWN_ID") && stderr.contains("pale_moss_block"),
+        "the refusing ids should reach the user: {stderr}",
+    );
 }
 
 /// The intersection of the range-wide palette's id sets is empty for this
@@ -500,11 +522,75 @@ fn every_example_lists_every_supported_target() {
 /// The claim under the row: the set is what `compile --target` accepts.
 /// Asserted against the command rather than against a second copy of the
 /// rule, which is the only way the two cannot drift together.
+///
+/// Fixture-driven rather than corpus-driven. Every shipped example
+/// declares `@requires version>=1.20`, below every supported target on
+/// both editions; none has a scope that fails to lower; and every id they
+/// use is in both packs' base table. So all 24 corpus pairs collapse to
+/// `buildable == considered == accepted`, and a filter that reported every
+/// version unconditionally would pass. Each source below refuses on a
+/// different gate, and the clean one is there so a filter that refuses
+/// everything fails too.
 #[test]
 fn the_buildable_set_is_the_set_of_targets_compile_accepts() {
     let tmp = tempfile::TempDir::new().expect("tempdir");
-    for (name, _) in examples() {
-        let path = examples_dir().join(&name);
+    let fixtures: &[(&str, &str)] = &[
+        // Two blocks Bedrock declares on disjoint parts of its range.
+        (
+            "split.crn",
+            "theme t:\n\
+             \x20\x20slot floor -> @stonebrick\n\
+             \x20\x20slot wall  -> @pale_moss_block\n\n\
+             struct hut size=5x5\n\
+             \x20\x20floor mat_slot=floor\n\
+             \x20\x20walls class=outer mat_slot=wall height=3\n",
+        ),
+        // A default mapping the earliest target respells, beside the
+        // respelling written out.
+        (
+            "mix.crn",
+            "theme t:\n\
+             \x20\x20slot floor -> @floor.stone.smooth\n\
+             \x20\x20slot wall  -> @stonebrick\n\n\
+             struct hut size=5x5\n\
+             \x20\x20floor mat_slot=floor\n\
+             \x20\x20walls class=outer mat_slot=wall height=3\n",
+        ),
+        // A floor above part of the supported range. `E_VERSION_CAP` is
+        // per version, so this is the axis itself.
+        (
+            "floor.crn",
+            "@requires version>=1.21.40\n\n\
+             theme t:\n\
+             \x20\x20slot floor -> @cobblestone\n\n\
+             struct hut size=5x5\n\
+             \x20\x20floor mat_slot=floor\n",
+        ),
+        // A scope that does not lower. Every code that drops one is
+        // Warning severity, so the edition-neutral gate lets it through
+        // and only `E_PARTIAL_BUILD` refuses.
+        (
+            "partial.crn",
+            "theme t:\n\
+             \x20\x20slot floor -> @cobblestone\n\n\
+             struct hut size=5x5\n\
+             \x20\x20floor mat_slot=floor\n\n\
+             struct nosize\n\
+             \x20\x20floor mat_slot=floor\n",
+        ),
+        // And one that builds everywhere, so "refuse everything" fails.
+        (
+            "clean.crn",
+            "theme t:\n\
+             \x20\x20slot floor -> @cobblestone\n\n\
+             struct hut size=5x5\n\
+             \x20\x20floor mat_slot=floor\n",
+        ),
+    ];
+
+    for (name, source) in fixtures {
+        let path = tmp.path().join(name);
+        std::fs::write(&path, source).expect("write fixture");
         let axes = info_json_at(&path, "java,bedrock");
         for edition in ["java", "bedrock"] {
             let entry = buildable_entry(&axes, edition);
@@ -522,6 +608,22 @@ fn the_buildable_set_is_the_set_of_targets_compile_accepts() {
             );
         }
     }
+}
+
+/// Ascending release order, not the order of rows in the pack's JSON,
+/// which `DataVersionTable` documents as informational. The row shows the
+/// list to a reader, so the display order has to be decided here.
+#[test]
+fn the_versions_weighed_are_listed_in_release_order() {
+    let axes = info_json_at(&examples_dir().join("cottage.crn"), "java,bedrock");
+    assert_eq!(
+        strings(buildable_entry(&axes, "java"), "considered"),
+        ["1.20.4", "1.21", "1.21.4"],
+    );
+    assert_eq!(
+        strings(buildable_entry(&axes, "bedrock"), "considered"),
+        ["1.21.0", "1.21.40", "1.21.60"],
+    );
 }
 
 /// Every `.crn` under `examples/`, as `(file name, source)`, with a guard
