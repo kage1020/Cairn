@@ -709,6 +709,39 @@ mod tests {
     }
 
     #[test]
+    fn a_suggestion_is_scored_on_the_path_and_not_on_the_whole_id() {
+        // `nearest_match`'s edit cap scales with input length, and every
+        // vanilla id shares the ten-character `minecraft:` prefix — long
+        // enough to buy an edit the typed part never earned. `ok_dr` is
+        // three edits from `oak_door`, which a five-character input does
+        // not admit and a fifteen-character one would.
+        let ir = one_state_ir(vec![BlockState::bare("minecraft:ok_dr")]);
+        let report = portability_for_java(&ir, &table());
+        assert_eq!(
+            only_reason(&report),
+            &UnsupportedReason::AbsentFromEdition { suggestion: None },
+        );
+    }
+
+    #[test]
+    fn a_suggestion_can_come_from_any_version_the_edition_declares() {
+        // The candidates are every id the edition has, not the oldest
+        // version's list: this axis asks of the edition, and a block added
+        // partway through the range is a block the edition has. `table()`
+        // adds `stone_bricks` in its diff and removes `stonebrick` there,
+        // so the base-only reading has a plausible wrong answer to give
+        // (`stonebrick`, two edits away) rather than no answer at all.
+        let ir = one_state_ir(vec![BlockState::bare("minecraft:stone_brickz")]);
+        let report = portability_for_bedrock(&ir, &table());
+        assert_eq!(
+            only_reason(&report),
+            &UnsupportedReason::AbsentFromEdition {
+                suggestion: Some("minecraft:stone_bricks".to_owned()),
+            },
+        );
+    }
+
+    #[test]
     fn a_suggestion_is_never_drawn_from_the_other_namespace() {
         // `nearest_id` compares paths within one namespace, and so does
         // this: a `mod:oak_plancks` is not repaired by `minecraft:oak_planks`,
