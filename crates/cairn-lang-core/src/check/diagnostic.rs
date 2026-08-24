@@ -397,6 +397,35 @@ pub enum DiagnosticCode {
     /// than refused for that reason: the resolution the spec mandates still
     /// happens, it just stops being invisible.
     PhaseConflict,
+    /// An `assert truth(...)` with no rows at all. The construct exists to
+    /// state something about the circuit, and a table with no rows states
+    /// nothing — no context around it and no pass written later makes it
+    /// verify anything. That is the argument `E_INVALID_REQUIRES` makes
+    /// for a `@requires` the compiler cannot read, and the reason this is
+    /// an error rather than a note: in a diff an empty table reads exactly
+    /// like one that passes.
+    TruthTableEmpty,
+    /// Two rows of one `assert truth(...)` assign the same inputs
+    /// different outputs. No circuit satisfies both, so whatever the table
+    /// was written to verify, it cannot. Reported on the later row with a
+    /// note at the first row carrying that pattern — which of the two is
+    /// wrong is the author's to decide, and no reading of the pair is
+    /// worth less than the other.
+    TruthTableConflict,
+    /// Two rows of one `assert truth(...)` assign the same inputs the same
+    /// output. The table still says exactly what it says, so the repair is
+    /// to delete either row and nothing else changes. Kept apart from
+    /// [`Self::TruthTableConflict`] because the two ask for different
+    /// work — one line to drop against two readings to choose between —
+    /// and because severity is a property of the code.
+    TruthTableDuplicateRow,
+    /// An `assert truth(...)` whose rows leave input combinations
+    /// unassigned. Every row present is still a real constraint, so the
+    /// finding is about coverage rather than about the statement being
+    /// void: a four-input table is sixteen rows, and an author part way
+    /// through writing one is writing something true. `data` carries the
+    /// combinations to write.
+    TruthTablePartial,
 }
 
 impl DiagnosticCode {
@@ -451,6 +480,10 @@ impl DiagnosticCode {
             Self::InvalidWalkwayIdent => "W_INVALID_WALKWAY_IDENT",
             Self::ConnectArity => "E_CONNECT_ARITY",
             Self::PhaseConflict => "W_PHASE_CONFLICT",
+            Self::TruthTableEmpty => "E_TRUTH_TABLE_EMPTY",
+            Self::TruthTableConflict => "E_TRUTH_TABLE_CONFLICT",
+            Self::TruthTableDuplicateRow => "W_TRUTH_TABLE_DUPLICATE_ROW",
+            Self::TruthTablePartial => "W_TRUTH_TABLE_PARTIAL",
         }
     }
 
@@ -459,8 +492,11 @@ impl DiagnosticCode {
     /// **The** severity for the code: every emission site reads it from
     /// here rather than writing a literal, so reclassifying a code is one
     /// edit and cannot leave a pass disagreeing with the ledger. Pinned by
-    /// `tests/diagnostic_severity.rs`, which walks a broad fixture corpus
-    /// and compares each finding against this function.
+    /// `every_code_is_classified_against_spec_11_3` below, which partitions
+    /// the whole enum rather than whatever a corpus happens to reach — with
+    /// [`Diagnostic::severity`] reading this function there is no
+    /// per-finding value left for a fixture to disagree with, which
+    /// `tests/diagnostic_text.rs` records from the other side.
     ///
     /// `spec/lint.md` §11.3 draws the line at the *build*: a finding is an
     /// error when leaving it alone yields something other than what the
@@ -526,7 +562,9 @@ impl DiagnosticCode {
             | Self::ConnectArity
             | Self::DuplicateItem
             | Self::DuplicateHeader
-            | Self::UnsupportedNesting => Severity::Error,
+            | Self::UnsupportedNesting
+            | Self::TruthTableEmpty
+            | Self::TruthTableConflict => Severity::Error,
             Self::StructureTooLarge
             | Self::ThemeSelectorUnmatched
             | Self::ThemeVariantRebound
@@ -541,7 +579,9 @@ impl DiagnosticCode {
             | Self::DuplicateWalkway
             | Self::DeferredConnect
             | Self::InvalidWalkwayIdent
-            | Self::PhaseConflict => Severity::Warning,
+            | Self::PhaseConflict
+            | Self::TruthTableDuplicateRow
+            | Self::TruthTablePartial => Severity::Warning,
         }
     }
 }
@@ -680,6 +720,40 @@ pub enum DiagnosticData {
         /// the pack's mapping the thing to correct.
         #[serde(skip_serializing_if = "Option::is_none")]
         token: Option<String>,
+    },
+    /// Companion payload for [`DiagnosticCode::TruthTablePartial`]. The
+    /// combinations the table leaves unassigned, and the two numbers the
+    /// rest of the count is derived from.
+    ///
+    /// Carried for the reason [`Self::IncompletePlace`] is: "write the
+    /// missing rows" is the obvious quick-fix and it needs the patterns
+    /// themselves, not a sentence to take apart.
+    ///
+    /// `missing` is a **sample rather than the set**, which breaks the
+    /// habit the other payloads here establish and is why it is said
+    /// twice: a twenty-input table has a million combinations, and
+    /// building that list to describe a one-row table would cost more
+    /// than the finding is worth. A consumer that needs the count derives
+    /// it from the other two fields.
+    TruthTablePartial {
+        /// How many signals sit left of the `->`, so the table has
+        /// `2^inputs` combinations in all. Carried instead of that total
+        /// because no integer the compiler holds fits `2^130`, and the
+        /// grammar puts no ceiling on the input list. At least 1: a
+        /// zero-input table does not parse.
+        inputs: u32,
+        /// How many distinct combinations the rows do assign. A pattern
+        /// written twice counts once, which is why one table can be
+        /// reported as both repeating and partial. Invariant: `>= 1` and
+        /// fewer than `2^inputs` — a table with no rows is
+        /// `E_TRUTH_TABLE_EMPTY` instead, and a complete one raises
+        /// nothing.
+        covered: u64,
+        /// The lowest few unassigned patterns, in ascending order, spelled
+        /// as a row spells them: one character per input, leading zeros
+        /// kept. Non-empty, and usually shorter than
+        /// `2^inputs - covered`.
+        missing: Vec<String>,
     },
 }
 
@@ -962,6 +1036,8 @@ mod tests {
                 "E_MISSING_PATH_MATERIAL",
                 "E_THEME_SELECTOR_UNMATCHED",
                 "E_THEME_VARIANT_MISSING",
+                "E_TRUTH_TABLE_CONFLICT",
+                "E_TRUTH_TABLE_EMPTY",
                 "E_TYPE_MISMATCH_LABEL",
                 "E_TYPE_MISMATCH_SIZE",
                 "E_UNEXPECTED_POSITIONAL",
@@ -986,6 +1062,8 @@ mod tests {
                 "W_STRUCTURE_TOO_LARGE",
                 "W_STRUCT_NO_SIZE",
                 "W_THEME_VARIANT_REBOUND",
+                "W_TRUTH_TABLE_DUPLICATE_ROW",
+                "W_TRUTH_TABLE_PARTIAL",
                 "W_UNUSED_DEF",
                 "W_WALKWAY_BLOCKED",
             ],
@@ -1019,6 +1097,8 @@ mod tests {
                 "E_MISPLACED_MEMBER",
                 "E_MISSING_PATH_MATERIAL",
                 "E_THEME_VARIANT_MISSING",
+                "E_TRUTH_TABLE_CONFLICT",
+                "E_TRUTH_TABLE_EMPTY",
                 "E_TYPE_MISMATCH_LABEL",
                 "E_TYPE_MISMATCH_SIZE",
                 "E_UNEXPECTED_POSITIONAL",
@@ -1049,6 +1129,8 @@ mod tests {
                 "W_STRUCTURE_TOO_LARGE",
                 "W_STRUCT_NO_SIZE",
                 "W_THEME_VARIANT_REBOUND",
+                "W_TRUTH_TABLE_DUPLICATE_ROW",
+                "W_TRUTH_TABLE_PARTIAL",
                 "W_UNUSED_DEF",
                 "W_WALKWAY_BLOCKED",
             ],

@@ -1,10 +1,18 @@
-//! Truth-table rows are checked against the table they belong to.
+//! Truth-table rows are checked against the header they sit under.
 //!
 //! `assert truth` exists to verify a circuit, so a row the evaluator
 //! cannot read is worse than no row at all: it looks like coverage. The
-//! parser is where the check belongs, because the input arity — the
+//! parser is where *this* check belongs, because the input arity — the
 //! number of signals left of the arrow — is in hand there and nowhere
 //! downstream keeps it beside the rows.
+//!
+//! What one row cannot see is the table around it. No rows at all, a
+//! pattern assigned twice, combinations left out: those are
+//! `check::truth`, reported as diagnostics rather than as parse errors,
+//! and `check_truth_table.rs` covers them. The split is the reason a
+//! shape refused there still parses here — including the empty table, so
+//! `an_empty_table_still_parses` is a statement about which layer owns
+//! the refusal and not about the table being acceptable.
 
 use cairn_lang_core::parse::parse;
 
@@ -73,12 +81,22 @@ fn a_leading_zero_is_part_of_the_pattern() {
     );
 }
 
-/// An empty table is still allowed — the reference parser's row loop
-/// accepts zero rows, and a table with no rows asserts nothing rather
-/// than asserting something false.
+/// An empty table parses — the reference parser's row loop accepts zero
+/// rows, and the tree-sitter grammar has a `truth_empty` corpus case for
+/// the same shape. It is refused a layer later, by `check::truth`, which
+/// is where a finding can be a warning-or-error diagnostic with a span
+/// and a repair rather than the one hard error a parser can raise.
 #[test]
 fn an_empty_table_still_parses() {
     assert!(parse(&body("", "sig.a")).is_ok());
+}
+
+/// And the table the pass never has to reason about: the input list is
+/// read before the arrow with no way to be empty, so no arity of zero
+/// reaches `check::truth` and `2^0 = 1` is not a case it has to word.
+#[test]
+fn a_table_with_no_inputs_does_not_parse() {
+    assert!(parse("struct s size=3x3\n  assert truth( -> sig.o) { }\n").is_err());
 }
 
 /// A bare identifier is a degenerate dotted ref, and counts as one input

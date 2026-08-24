@@ -12,6 +12,29 @@ and is a separate axis from the Minecraft target version.
 
 ### Breaking changes
 
+- *(core)* A truth table that verifies nothing is reported. `assert truth` exists to check a
+  circuit, and three shapes of table checked nothing while reading — in a diff, in a review —
+  exactly like one that passes: no rows at all, a pattern assigned twice, and combinations left
+  unassigned. Tightening the rows themselves said nothing about the table around them. A table
+  with no rows can never assert anything, whatever is written around it later, so it is
+  `E_TRUTH_TABLE_EMPTY`; two rows assigning one input combination different outputs describe a
+  circuit that cannot exist, so the later of the two is `E_TRUTH_TABLE_CONFLICT`. Both are errors,
+  and both refuse sources that exited 0 before. A row that repeats an earlier one and agrees with
+  it (`W_TRUTH_TABLE_DUPLICATE_ROW`) and a table short of combinations (`W_TRUTH_TABLE_PARTIAL`)
+  are warnings: every row present is still a real constraint, and a four-input table is sixteen
+  rows an author part way through is not blocked on. Each repeat answers to the *first* row
+  carrying its pattern rather than to the one before it, so every finding about a combination
+  sends the author to the same row to compare against — `00->0; 00->1; 00->0` is a conflict and a
+  repeat, and `00->0; 00->1; 00->1` is two conflicts. A repeated row fills no combination, so one
+  table can be reported as both repeating and partial: two repairs, not one said twice. Which of
+  two disagreeing rows would be evaluated is not stated anywhere — the simulator is unbuilt, and
+  the repair is to decide which row is wrong either way. `W_TRUTH_TABLE_PARTIAL` carries the
+  combinations to write as structured data, a sample of the lowest few rather than the whole set:
+  the grammar puts no ceiling on the input list, twenty inputs have a million combinations, and
+  the count is arithmetic so nothing walks that space. A table wider than any integer the compiler
+  carries reports its total as `2^n`. `TruthRow` gained a span for this, which is what lets a
+  finding point at one row and its note at the other.
+
 - *(redstone)* A signal binding whose value names no signal is refused. A binding used to be
   recognised by its *value*, so spelling the key right and the value wrong entered no branch at
   all: `door ... opened_by=a` reached placement as a door wired to nothing, and

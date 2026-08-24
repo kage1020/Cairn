@@ -41,6 +41,16 @@ A truth-table row assigns one bit per input signal, so `truth(a, b -> out)` take
 wide and `{ 2->0 }` or `{ 0->0 }` are refused: a row the evaluator cannot read looks like coverage
 and is worse than no row at all.
 
+The table around those rows is read the same way. A table with no rows verifies nothing and is
+refused (`E_TRUTH_TABLE_EMPTY`), and two rows assigning one input combination different outputs
+describe a circuit that cannot exist, so the later of the two is refused as well
+(`E_TRUTH_TABLE_CONFLICT`). A row that repeats an earlier one and agrees with it
+(`W_TRUTH_TABLE_DUPLICATE_ROW`) and a table that leaves input combinations unassigned
+(`W_TRUTH_TABLE_PARTIAL`) are warnings: both still assert everything their rows say, and a
+four-input table is sixteen rows an author part way through is not blocked on. Which of two
+disagreeing rows would be evaluated is not stated anywhere — the simulator is unbuilt, and the
+repair is to decide which of them is wrong.
+
 Indentation is two spaces per level and opens one level at a time. A width that is not a multiple
 of two and a jump of more than one level are different mistakes with different repairs, and are
 reported as such.

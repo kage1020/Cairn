@@ -57,6 +57,10 @@ additive (既存出力は変えない) なので、未知の `kind` 値は失敗
 | `E_UNKNOWN_ID` | `{ "kind": "unknown_id", "id": "minecraft:oak_plank", "registry": "java 1.21.4", "origin": "authored", "suggestion": "minecraft:oak_planks" }` — ピン留めされたターゲットが宣言していない ID、照合先のターゲット、そして誰がその ID を選んだか。`origin` はソースが直接名指しした場合 `authored`、パックがトークンを対応付けた場合 `catalog`、メンバのデフォルト用の行をパックが持たずコンパイラ組み込みの ID が使われた場合 `builtin` です。`token` は後ろ 2 つに付随し、`authored` では省略されます。`suggestion` はタイポ閾値内の宣言済み ID が無いときは省略され、リネームでは常に省略されます。 |
 | ↳ `origin: "catalog"` | `{ …, "id": "minecraft:stone_bricks", "registry": "bedrock 1.21.0", "origin": "catalog", "token": "floor.stone.smooth", "suggestion": "minecraft:stonebrick" }` — 作者のトークンは正しく、パックの対応付けが誤っているので、修正箇所はソースではありません。 |
 | ↳ `origin: "builtin"` | `{ …, "id": "minecraft:oak_pressure_plate", "registry": "bedrock 1.21.60", "origin": "builtin", "token": "pressure_plate.default" }` — メンバのデフォルト用の行をパックが宣言していないため、コンパイラ組み込みの ID が使われました。直すべきはパックです。 |
+| `E_DUPLICATE_SELECTOR` | `{ "kind": "duplicate_selector", "rebound": ["frame"] }` — このセレクタ行が先行する行から奪う束縛キー。末尾の `=` は含まず、メッセージが並べる順に入ります。常に非空です。 |
+| `E_INCOMPLETE_PLACE` | `{ "kind": "incomplete_place", "missing": ["id", "use", "theme"] }` — `place` 行が宣言していないキー。末尾の `=` は含まず、メッセージが並べる順に入ります。常に非空です。 |
+| `E_INVALID_REQUIRES` | `{ "kind": "invalid_requires", "reason": "unsupported_operator", "found": ">" }` — 式がどう失敗したかと、失敗した文字列。`reason` は `not_a_version_requirement` / `unsupported_operator` / `empty_version` / `component_not_a_number` / `component_too_large` / `trailing_tokens` のいずれかです。1 つのコードが複数の異なる誤りを覆っていて修復もそれぞれ違い、`>` を `>=` に直すのはツールが提示できる 1 文字の編集である一方、スナップショットラベルはそもそも修復できません。失敗が特定の断片を名指ししないときは `found` が空になります。 |
+| `W_TRUTH_TABLE_PARTIAL` | `{ "kind": "truth_table_partial", "inputs": 2, "covered": 1, "missing": ["01", "10", "11"] }` — `->` の左にある信号の本数、行が割り当てている相異なる組の数、そして割り当てていない組のうち小さい方から数件。`missing` は集合そのものではなく **サンプル** です。入力 20 本なら組は 100 万通りあるため、件数は `missing.len()` からではなく `2^inputs - covered` から求めてください。総数ではなく `inputs` を持つのは、入力リストに文法上の上限が無く `2^130` を収める整数が無いためです。 |
 
 上の表に載っていないコードは `data` をまるごと省略します (JSON でも `null` ではなくキーごと存在しません)。
 診断面の安定化に合わせて、`data` の新エントリは対応するコードと同時に追加されます。

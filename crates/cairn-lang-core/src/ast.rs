@@ -7,19 +7,22 @@
 //! type-checking) is the responsibility of downstream layers.
 //!
 //! Source-position propagation: [`Header`], [`Item`], [`Statement`],
-//! [`ThemeRule`], [`Arg`], and [`Value`] each carry a `span` field pointing at
-//! the byte range of the originating source, and [`Item`] carries a second,
-//! narrower `name_span` for the name token alone — a block's `span` reaches to
-//! the end of its indented body, which is too much to underline for a finding
-//! about the name. Diagnostic-collecting passes in
+//! [`ThemeRule`], [`Arg`], [`Value`], and [`TruthRow`] each carry a `span` field
+//! pointing at the byte range of the originating source, and [`Item`] carries a
+//! second, narrower `name_span` for the name token alone — a block's `span`
+//! reaches to the end of its indented body, which is too much to underline for a
+//! finding about the name. Diagnostic-collecting passes in
 //! `crate::check` rely on those spans to point a user at a specific spot in
 //! their `.crn` file. Every span field is tagged `#[serde(skip)]`, including
 //! any added later, so the externally-visible wire shape is unchanged from
-//! before spans were threaded through. The boolean-expression family ([`Expr`], [`TruthRow`],
-//! [`DottedRef`]) is intentionally span-free for now; those nodes only appear
-//! inside `logic`/`assert` lines that the reference-resolution pass will
-//! revisit, and spending the bytes here today would not buy any diagnostic
-//! the current passes need.
+//! before spans were threaded through. The rest of the boolean-expression
+//! family ([`Expr`] and [`DottedRef`]) is intentionally span-free for now;
+//! those nodes only appear inside `logic`/`assert` lines that the
+//! reference-resolution pass will revisit, and spending the bytes there today
+//! would not buy any diagnostic the current passes need. [`TruthRow`] left
+//! that group once `crate::check` began reporting one row against another:
+//! "this row disagrees with an earlier one" names two positions, and neither
+//! of them is the statement's.
 
 use std::num::NonZeroU32;
 
@@ -636,6 +639,12 @@ pub struct TruthRow {
     /// AST stores the value as a plain `bool` rather than a `u8` that could
     /// also represent illegal values like `7`.
     pub output: bool,
+    /// Byte range of `PATTERN -> BIT`, ending at the output bit: the
+    /// separator that follows is punctuation between rows rather than part
+    /// of one, and underlining it would put the caret past the text the
+    /// finding is about.
+    #[serde(skip)]
+    pub span: Span,
 }
 
 /// A boolean expression used inside `logic` lines.

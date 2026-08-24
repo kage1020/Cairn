@@ -91,6 +91,22 @@ first-class parts of the spec; messages MUST be in a shape that feeds the self-c
     cursor, the offending separator, the offending endpoint, or the run
     of trailing extras. Each endpoint is reported separately: the two
     ends are independent fix sites.
+  - `E_TRUTH_TABLE_EMPTY` — an `assert truth(...)` with no rows. The construct exists to state
+    something about the circuit and a table with no rows states nothing, so no context around it
+    makes it verify anything — the argument `E_INVALID_REQUIRES` makes for a `@requires` the
+    compiler cannot read.
+  - `E_TRUTH_TABLE_CONFLICT` — two rows of one table assign the same input combination different
+    outputs. Reported on the later row, with a note at the first row carrying that pattern. Which
+    of the two an evaluator would read is not stated: the simulator is unbuilt, and the repair is
+    to decide which row is wrong either way.
+  - `W_TRUTH_TABLE_DUPLICATE_ROW` — a row repeats an earlier one and agrees with it. The table
+    asserts the same thing without it, so the repair is to delete either row. Kept apart from
+    `E_TRUTH_TABLE_CONFLICT` because the two ask for different work.
+  - `W_TRUTH_TABLE_PARTIAL` — the rows leave input combinations unassigned. A warning rather than
+    an error: every row present is still a real constraint. A repeated row fills no combination,
+    so one table can earn this and `W_TRUTH_TABLE_DUPLICATE_ROW` together. `data` carries the
+    input count, how many combinations the rows cover, and the lowest few they do not — a sample
+    rather than the set, since twenty inputs have a million combinations.
   - `E_THEME_VARIANT_MISSING` — the module declares a theme, and the pinned edition can bind none
     of its per-edition variants (`spec/versioning-editions.md` §10.7). Only fires under
     `--edition`: with no pin there is nothing a variant fails to satisfy, and the same source is
@@ -157,6 +173,8 @@ evolving — additions for new codes are strictly additive, so consumers should 
 | ↳ `origin: "builtin"` | `{ …, "id": "minecraft:oak_pressure_plate", "registry": "bedrock 1.21.60", "origin": "builtin", "token": "pressure_plate.default" }` — the pack declares no row for that member default, so the ID compiled into the compiler was used. The pack is what has to grow the row. |
 | `E_INCOMPATIBLE_MATERIAL` | `{ "kind": "incompatible_material", "id": "minecraft:cobblestone", "required": "stair", "slot": "roof", "token": "cobblestone" }` — the material the member was bound to, the family its geometry needs, and where the binding came from. `slot` is the `mat_slot=` name the member read and is absent when it carries no binding; `token` is the theme's slot value as written, and a dotted one (`roof.dark_wood`) means the registry pack's mapping is what to correct rather than the source line. `required` is named rather than implied so a second family added later is a value here and not a second code. |
 | `E_INCOMPLETE_PLACE` | `{ "kind": "incomplete_place", "missing": ["id", "use", "theme"] }` — the keys the `place` row does not declare, without the trailing `=`, in the order the message lists them. Always non-empty. |
+| `E_INVALID_REQUIRES` | `{ "kind": "invalid_requires", "reason": "unsupported_operator", "found": ">" }` — which way the expression failed and the text that failed. `reason` is one of `not_a_version_requirement`, `unsupported_operator`, `empty_version`, `component_not_a_number`, `component_too_large`, `trailing_tokens`; the code covers several distinct mistakes whose repairs differ, and swapping `>` for `>=` is a one-character edit a tool can offer while a snapshot label is not repairable at all. `found` is empty when the failure names no fragment of its own. |
+| `W_TRUTH_TABLE_PARTIAL` | `{ "kind": "truth_table_partial", "inputs": 2, "covered": 1, "missing": ["01", "10", "11"] }` — how many signals sit left of the `->`, how many distinct combinations the rows assign, and the lowest few they do not. `missing` is a **sample rather than the set**: twenty inputs have a million combinations, so a consumer takes the count from `2^inputs - covered` and never from `missing.len()`. `inputs` is carried instead of that total because the grammar puts no ceiling on the input list and no integer holds `2^130`. |
 
 Codes not listed above omit `data` entirely; reading `entry.data` returns `undefined` and the JSON
 key is absent (it does not serialise as `null`). New `data` entries land alongside the code that

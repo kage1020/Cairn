@@ -191,6 +191,23 @@ const SYNTACTIC_FIXTURES: &[(&str, Source)] = &[
              \x20\x20connect a.entry b.entry path=@gravel\n",
         ),
     ),
+    (
+        "E_TRUTH_TABLE_EMPTY",
+        Source::WithPrologue(
+            "struct s size=5x5\n  floor mat_slot=floor\n\
+             \x20\x20assert truth(sig.a, sig.b -> sig.o) { }\n",
+        ),
+    ),
+    (
+        // Every combination assigned, so the repeat is the only finding:
+        // a table short of a row would add a warning, and the parity
+        // assertions are written per error.
+        "E_TRUTH_TABLE_CONFLICT",
+        Source::WithPrologue(
+            "struct s size=5x5\n  floor mat_slot=floor\n\
+             \x20\x20assert truth(sig.a, sig.b -> sig.o) { 00->0; 00->1; 01->0; 10->0; 11->0 }\n",
+        ),
+    ),
 ];
 
 /// Resolver-origin fixtures. `check` merges the resolver's findings, so

@@ -444,6 +444,7 @@ impl<'a> Parser<'a> {
         let mut rows = Vec::new();
         while !self.peek_is(&TokenKind::RBrace) && !self.at_eof() {
             let pattern_position = self.position();
+            let row_start_byte = self.current_byte();
             let inputs_lex = self.expect_int_lexeme()?;
             // A row assigns one bit per input signal, so the pattern is
             // checked against the list left of the arrow.
@@ -452,11 +453,12 @@ impl<'a> Parser<'a> {
             // keep `inputs` beside `rows` and could check it again: this
             // is where the failure has a position to point at, and where
             // it is checked once instead of by every pass that grows a
-            // reason to care. Nothing reads `AssertIr::Truth` yet — the
-            // evaluator is unimplemented, as `check::nesting` notes — so
-            // "downstream" is a plan, and a table that asserts nothing
-            // would sit in the IR looking exactly like one that passes
-            // until that plan arrives.
+            // reason to care.
+            //
+            // What one row cannot see is the table around it — no rows at
+            // all, a pattern assigned twice, combinations left out. Those
+            // are `check::truth`, which is why each row keeps a span: the
+            // finding there is one row reported against another.
             //
             // A leading zero is data here rather than a numeric quirk,
             // which is why the row keeps the raw lexeme: `01` and `1` are
@@ -496,6 +498,7 @@ impl<'a> Parser<'a> {
             rows.push(TruthRow {
                 inputs: inputs_lex,
                 output,
+                span: row_start_byte..self.last_byte(),
             });
             if self.peek_is(&TokenKind::Semi) {
                 self.advance();

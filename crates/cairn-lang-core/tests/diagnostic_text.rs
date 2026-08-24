@@ -95,6 +95,8 @@ fn the_corpus_reaches_the_codes_its_prose_assertions_are_written_for() {
         "E_INVALID_PLACE_ID",
         "E_MISPLACED_MEMBER",
         "E_THEME_SELECTOR_UNMATCHED",
+        "E_TRUTH_TABLE_CONFLICT",
+        "E_TRUTH_TABLE_EMPTY",
         "E_UNEXPECTED_POSITIONAL",
         "E_UNKNOWN_KEYWORD",
         "E_UNKNOWN_SLOT_TARGET",
@@ -104,6 +106,8 @@ fn the_corpus_reaches_the_codes_its_prose_assertions_are_written_for() {
         "W_DEFERRED_MEMBER",
         "W_IGNORED_ARGUMENT",
         "W_STRUCTURE_TOO_LARGE",
+        "W_TRUTH_TABLE_DUPLICATE_ROW",
+        "W_TRUTH_TABLE_PARTIAL",
         "W_UNUSED_DEF",
     ]
     .into_iter()
