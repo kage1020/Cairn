@@ -291,7 +291,8 @@ fn di_5b_repeated_requires_is_legal_because_its_floors_compose() {
     let module = parse(&src).expect("parse");
     let ir = lower(&module);
     let resolution = resolve(&ir, None);
-    let axes = cairn_lang_core::resolve::compute_axes(&module, &ir, &resolution, Vec::new());
+    let axes =
+        cairn_lang_core::resolve::compute_axes(&module, &ir, &resolution, Vec::new(), Vec::new());
     assert_eq!(
         axes.registry_compat.min, "1.21",
         "the strictest floor must still win",

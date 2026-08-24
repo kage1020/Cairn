@@ -11,8 +11,8 @@ use cairn_lang_core::lock::{
     LockWalkway, Lockfile, hash_resolved_ir, hash_source,
 };
 use cairn_lang_core::resolve::{
-    EditionPortability, VersionAxes, VersionFloor, compare_versions, compute_axes,
-    declared_version_floor, resolve,
+    BuildableTargets, EditionPortability, VersionAxes, VersionFloor, compare_versions,
+    compute_axes, declared_version_floor, resolve,
 };
 use cairn_lang_core::{Edition, Severity, check, lower, parse};
 use cairn_lang_formats::bedrock_structure::{ParityNote, build_mcstructure_tag, write_mcstructure};
@@ -637,12 +637,12 @@ fn run_info(file: &Path, editions: &[String], format: InfoFormat) -> ExitCode {
         return ExitCode::from(1);
     }
 
-    let per_edition = match edition_portability(file, &source, &lines, &ir, editions, &combined) {
-        Ok(table) => table,
+    let rows = match edition_rows(file, &source, &lines, &ir, editions, &combined) {
+        Ok(rows) => rows,
         Err(code) => return code,
     };
 
-    let axes = compute_axes(&module, &ir, &resolution, per_edition);
+    let axes = compute_axes(&module, &ir, &resolution, rows.portability, rows.buildable);
 
     match format {
         InfoFormat::Text => {
@@ -662,8 +662,18 @@ fn run_info(file: &Path, editions: &[String], format: InfoFormat) -> ExitCode {
     }
 }
 
-/// One dry-run lower per requested edition, returning the portability row
-/// for each.
+/// The two per-edition rows `cairn info` prints, built from the same runs.
+#[derive(Debug, Default)]
+struct EditionRows {
+    /// Axis 2, one row per requested edition, in the order requested.
+    portability: Vec<EditionPortability>,
+    /// Which supported versions of each of those editions can build the
+    /// source, in the same order.
+    buildable: Vec<BuildableTargets>,
+}
+
+/// One dry-run lower per requested edition, plus one per supported version
+/// of it, returning the two per-edition rows.
 ///
 /// The resolver's per-edition theme-variant selection can produce a
 /// different palette per edition (the whole point of spec §10.7 hierarchy
@@ -679,22 +689,44 @@ fn run_info(file: &Path, editions: &[String], format: InfoFormat) -> ExitCode {
 /// "this edition simply has fewer structures". A parity report that cannot
 /// show a parity failure is worse than none.
 ///
+/// The version loop is here for the same reason one level down.
+/// Portability asks of the edition, and two palette entries declared by
+/// disjoint sets of versions each answer yes while no single version has
+/// both. Asking each version in turn is the only sound answer, and it
+/// cannot be approximated by intersecting the range-wide palette's id
+/// sets: with no target pinned every material takes its *default*
+/// mapping, so a token the target respells is compared as the wrong id.
+/// A theme binding `@floor.stone.smooth` (default `stone_bricks`,
+/// respelled `stonebrick` at Bedrock 1.21.0) beside a literal
+/// `@stonebrick` has an empty intersection and builds on 1.21.0.
+///
+/// The loop reports and does not refuse. An entry no version of the
+/// edition has is already a figure rather than a gate here — spec §10.5's
+/// own sample output carries `unsupported: 1` — and a caller that wants a
+/// refusal runs the build, which is also the command that says *why* a
+/// version said no. What this row adds is the fact the counters cannot
+/// carry: that the versions disagree about different entries.
+///
+/// The cost is one lowering per version per edition rather than one per
+/// edition — three versions per edition in the built-in packs — and each
+/// reuses the edition's single `resolve`, which is the expensive half.
+///
 /// `already_reported` is the edition-neutral stream the caller has printed;
 /// only diagnostics absent from it are reported, keyed by code and span, so
 /// the shared findings are not repeated once per edition.
-fn edition_portability(
+fn edition_rows(
     file: &Path,
     source: &str,
     lines: &LineStarts,
     ir: &cairn_lang_core::intent::IntentModule,
     editions: &[String],
     already_reported: &[cairn_lang_core::check::Diagnostic],
-) -> Result<Vec<EditionPortability>, ExitCode> {
+) -> Result<EditionRows, ExitCode> {
     let already: std::collections::HashSet<(&str, usize, usize)> = already_reported
         .iter()
         .map(|d| (d.code.as_str(), d.span.start, d.span.end))
         .collect();
-    let mut table: Vec<EditionPortability> = Vec::with_capacity(editions.len());
+    let mut rows = EditionRows::default();
     let mut edition_specific_error = false;
 
     for e in editions {
@@ -729,11 +761,42 @@ fn edition_portability(
             Edition::Java => portability_for_java(&block_ir, &pack.blocks),
             Edition::Bedrock => portability_for_bedrock(&block_ir, &pack.blocks),
         };
-        table.push(EditionPortability {
+        rows.portability.push(EditionPortability {
             edition,
             portable: counts.portable,
             degraded: counts.degraded,
             unsupported: counts.unsupported,
+        });
+
+        let considered: Vec<String> = pack
+            .data_versions
+            .versions
+            .iter()
+            .map(|entry| entry.mc_version.clone())
+            .collect();
+        let buildable: Vec<String> = considered
+            .iter()
+            .filter(|version| {
+                let pinned = lower_to_block_array(ir, &resolution, Some(&pack.view(Some(version))));
+                // Severity rather than a list of codes. `E_UNKNOWN_ID` is
+                // the only finding pinning a target raises today, and
+                // naming it here would keep reporting a version as
+                // buildable the day a second one lands. Nothing is
+                // filtered against what the caller already printed: this
+                // is reached only after the edition-neutral gate, which
+                // returns on any Error, so everything already reported is
+                // a warning and no warning refuses a version.
+                !pinned
+                    .diagnostics
+                    .iter()
+                    .any(|d| d.severity() == Severity::Error)
+            })
+            .cloned()
+            .collect();
+        rows.buildable.push(BuildableTargets {
+            edition,
+            buildable,
+            considered,
         });
     }
 
@@ -742,7 +805,7 @@ fn edition_portability(
     if edition_specific_error {
         return Err(ExitCode::from(1));
     }
-    Ok(table)
+    Ok(rows)
 }
 
 fn print_text(axes: &VersionAxes) {
@@ -775,6 +838,23 @@ fn print_text(axes: &VersionAxes) {
     };
     println!("edition portability:     {portability_line}");
 
+    let buildable_line = if axes.buildable_targets.is_empty() {
+        String::from("(no editions requested)")
+    } else {
+        axes.buildable_targets
+            .iter()
+            .map(|bt| {
+                format!(
+                    "{}: {}",
+                    capitalise(bt.edition.as_str()),
+                    buildable_text(bt)
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("   ")
+    };
+    println!("buildable targets:       {buildable_line}");
+
     let semantic_line = if axes.semantic_sensitive.is_empty() {
         String::from("(none)")
     } else {
@@ -785,6 +865,38 @@ fn print_text(axes: &VersionAxes) {
             .join(", ")
     };
     println!("semantic-sensitive:      {semantic_line}");
+}
+
+/// One edition's buildable versions, with the refusing ones named after
+/// them.
+///
+/// The refusals are in the sentence rather than left to be inferred: a bare
+/// `1.21.0` cannot be told apart from an edition whose pack declares only
+/// that one version, and the difference between "one target of three" and
+/// "the only target there is" is the whole point of the row.
+fn buildable_text(targets: &BuildableTargets) -> String {
+    let refused: Vec<&str> = targets
+        .considered
+        .iter()
+        .filter(|version| !targets.buildable.contains(version))
+        .map(String::as_str)
+        .collect();
+    let built = if targets.buildable.is_empty() {
+        String::from("none")
+    } else {
+        targets.buildable.join(", ")
+    };
+    if refused.is_empty() {
+        return built;
+    }
+    let tail = if let [only] = refused.as_slice() {
+        format!("{only} refuses")
+    } else if targets.buildable.is_empty() {
+        format!("{} all refuse", refused.join(", "))
+    } else {
+        format!("{} refuse", refused.join(", "))
+    };
+    format!("{built} ({tail})")
 }
 
 fn capitalise(s: &str) -> String {

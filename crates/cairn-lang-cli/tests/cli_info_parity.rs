@@ -48,6 +48,65 @@ fn info_json_at(path: &std::path::Path, editions: &str) -> Value {
     serde_json::from_str(&stdout).expect("valid JSON")
 }
 
+/// Run `cairn info` and hand back the exit code with both streams, for the
+/// cases where the command is expected to refuse.
+fn info_raw(path: &std::path::Path, editions: &str) -> (Option<i32>, String, String) {
+    let out = Command::new(cargo_bin())
+        .args(["info", path.to_str().unwrap(), "--editions", editions])
+        .output()
+        .expect("run cairn");
+    (
+        out.status.code(),
+        String::from_utf8_lossy(&out.stdout).into_owned(),
+        String::from_utf8_lossy(&out.stderr).into_owned(),
+    )
+}
+
+/// The `buildable_targets` row for one edition.
+fn buildable_entry<'a>(axes: &'a Value, edition: &str) -> &'a Value {
+    axes["buildable_targets"]
+        .as_array()
+        .expect("buildable_targets is a JSON array")
+        .iter()
+        .find(|e| e["edition"] == edition)
+        .unwrap_or_else(|| panic!("edition `{edition}` missing from the buildable list"))
+}
+
+/// A JSON string array as owned strings, so a failure prints the versions
+/// rather than a `Value`.
+fn strings(value: &Value, key: &str) -> Vec<String> {
+    value[key]
+        .as_array()
+        .unwrap_or_else(|| panic!("`{key}` is not an array in {value}"))
+        .iter()
+        .map(|v| v.as_str().expect("version is a string").to_owned())
+        .collect()
+}
+
+/// Whether `cairn compile` accepts this source for one pinned target.
+fn compile_accepts(
+    path: &std::path::Path,
+    edition: &str,
+    target: &str,
+    out: &std::path::Path,
+) -> bool {
+    Command::new(cargo_bin())
+        .args([
+            "compile",
+            path.to_str().unwrap(),
+            "--edition",
+            edition,
+            "--target",
+            target,
+            "--out",
+            out.to_str().unwrap(),
+        ])
+        .output()
+        .expect("run cairn")
+        .status
+        .success()
+}
+
 fn portability_entry<'a>(axes: &'a Value, edition: &str) -> &'a Value {
     axes["edition_portability"]
         .as_array()
@@ -293,6 +352,200 @@ fn ac5_an_edition_specific_resolve_failure_is_reported_not_counted_away() {
         info.stdout.is_empty(),
         "no portability table should be printed when a figure could not be computed",
     );
+    // The per-version pass runs against the same resolution, so it
+    // re-derives this finding once per target. Reporting it four times
+    // would blame the versions for something that is not about them.
+    assert_eq!(
+        stderr.matches("E_UNRESOLVED_SLOT").count(),
+        1,
+        "a finding the range-wide pass already reported is not repeated per \
+         target; stderr={stderr}",
+    );
+}
+// -- buildable targets ----------------------------------------------------
+
+/// The portability row asks of the *edition*, so a block one part of the
+/// range spells differently is not missing from it. Two entries can each
+/// answer yes while no single version declares both, and the report was
+/// clean for a source every supported target refuses.
+#[test]
+fn a_source_no_supported_version_can_build_says_so() {
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    let src = tmp.path().join("split.crn");
+    std::fs::write(
+        &src,
+        "theme t:\n\
+         \x20\x20slot floor -> @stonebrick\n\
+         \x20\x20slot wall  -> @pale_moss_block\n\n\
+         struct hut size=5x5\n\
+         \x20\x20floor mat_slot=floor\n\
+         \x20\x20walls class=outer mat_slot=wall height=3\n",
+    )
+    .expect("write source");
+
+    // The two counters still answer their own question, and it is not this
+    // one: both blocks exist on Bedrock, each on a different part of its
+    // range.
+    let axes = info_json_at(&src, "bedrock");
+    assert_eq!(
+        as_u64(portability_entry(&axes, "bedrock"), "unsupported"),
+        0
+    );
+    let entry = buildable_entry(&axes, "bedrock");
+    assert!(
+        strings(entry, "buildable").is_empty(),
+        "no supported target builds this source, so none should be listed",
+    );
+    assert_eq!(
+        strings(entry, "considered"),
+        ["1.21.0", "1.21.40", "1.21.60"]
+    );
+
+    // And the text row says it rather than leaving it to the JSON.
+    let (code, stdout, stderr) = info_raw(&src, "bedrock");
+    assert_eq!(
+        code,
+        Some(0),
+        "info reports; the build refuses. stderr={stderr}"
+    );
+    assert!(
+        stdout.contains("buildable targets:") && stdout.contains("none"),
+        "the row must carry the same answer the JSON does, got: {stdout}",
+    );
+    for version in ["1.21.0", "1.21.40", "1.21.60"] {
+        assert!(
+            stdout.contains(version),
+            "every version weighed should be named; {version} is not in {stdout}",
+        );
+    }
+}
+
+/// The intersection of the range-wide palette's id sets is empty for this
+/// source, and one target builds it: with no target pinned every material
+/// takes its default mapping, and `@floor.stone.smooth` is respelled at
+/// 1.21.0. This is the case that separates the sound answer from the cheap
+/// one.
+#[test]
+fn a_palette_whose_default_ids_never_overlap_can_still_have_a_buildable_target() {
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    let src = tmp.path().join("mix.crn");
+    std::fs::write(
+        &src,
+        "theme t:\n\
+         \x20\x20slot floor -> @floor.stone.smooth\n\
+         \x20\x20slot wall  -> @stonebrick\n\n\
+         struct hut size=5x5\n\
+         \x20\x20floor mat_slot=floor\n\
+         \x20\x20walls class=outer mat_slot=wall height=3\n",
+    )
+    .expect("write source");
+
+    let axes = info_json_at(&src, "bedrock");
+    let entry = buildable_entry(&axes, "bedrock");
+    assert_eq!(strings(entry, "buildable"), ["1.21.0"]);
+    assert_eq!(
+        strings(entry, "considered"),
+        ["1.21.0", "1.21.40", "1.21.60"],
+        "the versions weighed are carried too, so an empty set can be read",
+    );
+
+    let out = tmp.path().join("out");
+    assert!(compile_accepts(&src, "bedrock", "1.21.0", &out));
+    assert!(!compile_accepts(&src, "bedrock", "1.21.40", &out));
+}
+
+/// A version is refused for an error, not for a finding. A source that
+/// warns at every target still builds at every target.
+#[test]
+fn a_warning_at_every_version_leaves_every_target_buildable() {
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    let src = tmp.path().join("warned.crn");
+    std::fs::write(
+        &src,
+        "theme t:\n\
+         \x20\x20slot floor -> @cobblestone\n\n\
+         struct hut size=5x5\n\
+         \x20\x20floor mat_slot=floor\n\
+         \x20\x20door  side=front at=center\n",
+    )
+    .expect("write source");
+
+    let axes = info_json_at(&src, "bedrock");
+    let entry = buildable_entry(&axes, "bedrock");
+    assert_eq!(
+        strings(entry, "buildable"),
+        strings(entry, "considered"),
+        "a door with no walls to carve into is a warning, not a refusal",
+    );
+}
+
+/// Nothing shipped is unbuildable, so the row is full for every example on
+/// both editions and `info` still exits 0.
+#[test]
+fn every_example_lists_every_supported_target() {
+    for (name, _) in examples() {
+        let path = examples_dir().join(&name);
+        let axes = info_json_at(&path, "java,bedrock");
+        for edition in ["java", "bedrock"] {
+            let entry = buildable_entry(&axes, edition);
+            assert_eq!(
+                strings(entry, "buildable"),
+                strings(entry, "considered"),
+                "{name} on {edition} should build on every supported target",
+            );
+        }
+    }
+}
+
+/// The claim under the row: the set is what `compile --target` accepts.
+/// Asserted against the command rather than against a second copy of the
+/// rule, which is the only way the two cannot drift together.
+#[test]
+fn the_buildable_set_is_the_set_of_targets_compile_accepts() {
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    for (name, _) in examples() {
+        let path = examples_dir().join(&name);
+        let axes = info_json_at(&path, "java,bedrock");
+        for edition in ["java", "bedrock"] {
+            let entry = buildable_entry(&axes, edition);
+            let reported = strings(entry, "buildable");
+            let accepted: Vec<String> = strings(entry, "considered")
+                .into_iter()
+                .filter(|version| {
+                    let out = tmp.path().join(format!("{name}-{edition}-{version}"));
+                    compile_accepts(&path, edition, version, &out)
+                })
+                .collect();
+            assert_eq!(
+                reported, accepted,
+                "{name} on {edition}: the row and `compile --target` disagree",
+            );
+        }
+    }
+}
+
+/// Every `.crn` under `examples/`, as `(file name, source)`, with a guard
+/// against a loop over nothing.
+fn examples() -> Vec<(String, String)> {
+    let entries = std::fs::read_dir(examples_dir()).expect("read examples dir");
+    let mut found: Vec<(String, String)> = entries
+        .map(|entry| entry.expect("read an entry").path())
+        .filter(|path| path.extension().and_then(|e| e.to_str()) == Some("crn"))
+        .map(|path| {
+            let source = std::fs::read_to_string(&path).expect("read example");
+            (
+                path.file_name().expect("named").to_string_lossy().into(),
+                source,
+            )
+        })
+        .collect();
+    found.sort();
+    assert!(
+        found.len() >= 5,
+        "found only {} examples, which is not the shipped set",
+        found.len(),
+    );
+    found
 }
 
 /// A source whose only material exists on one edition, written out to
@@ -487,6 +740,13 @@ fn an_unsupported_entry_is_a_figure_not_a_gate() {
     assert!(
         stdout.contains("unsupported: 1"),
         "the text row must carry the same figure the JSON does, got: {stdout}",
+    );
+    // The buildable row does not refuse either, and for this source the two
+    // rows agree from different directions: Bedrock has no `oak_sign` at
+    // all, so the entry is unsupported *and* no target builds it.
+    assert!(
+        stdout.contains("buildable targets:       Bedrock: none"),
+        "the buildable row reports too, got: {stdout}",
     );
 }
 

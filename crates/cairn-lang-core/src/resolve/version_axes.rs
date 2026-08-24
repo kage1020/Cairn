@@ -12,6 +12,14 @@
 //!    behavior shifts at a known boundary version (the catalog half of
 //!    `spec/versioning-editions.md` §10.3).
 //!
+//! Beside them sits **buildable targets**, which is not one of the three
+//! but the answer axis (2) deliberately does not give. Portability asks of
+//! the *edition* — a block one part of the range spells differently is not
+//! missing from the edition — and two entries can be declared by disjoint
+//! sets of versions while each answers yes. This row asks of each version
+//! in turn, so a source no supported version can build cannot report
+//! clean.
+//!
 //! Axis (1) is computed from `@requires` headers. Axis (2) is a pure
 //! forwarding of the caller's per-edition figures — the `core` crate does
 //! not itself depend on `cairn-lang-formats`, so the concrete
@@ -40,6 +48,37 @@ pub struct VersionAxes {
     /// Axis 3: members whose meaning shifts at a known boundary version.
     /// Empty until the semantic-sensitivity catalog lands.
     pub semantic_sensitive: Vec<SemanticSensitiveFinding>,
+    /// Which supported versions of each requested edition can build the
+    /// source, in the same order as [`Self::edition_portability`].
+    pub buildable_targets: Vec<BuildableTargets>,
+}
+
+/// Which supported versions of one edition can build the source.
+///
+/// Separate from [`EditionPortability`] because the two ask different
+/// questions and only one of them has a per-version answer: portability
+/// counts palette entries against the edition, and an id that only part of
+/// the range spells that way is not missing from the edition. Every entry
+/// of a source can pass that test while no single version passes all of
+/// them at once, which is the shape this row exists to report.
+///
+/// Not a `[min, max]` range: the answer need not be contiguous — two ids
+/// whose version sets interleave leave a gap in the middle — and a range
+/// would claim the gap.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct BuildableTargets {
+    /// Target edition this row describes.
+    pub edition: Edition,
+    /// Versions from [`Self::considered`] whose pinned lowering raises no
+    /// error the range-wide pass had not already reported, in the same
+    /// order. A build against one of these is the one the source is for.
+    pub buildable: Vec<String>,
+    /// Every version the edition's registry pack declares, in pack order.
+    ///
+    /// Carried so an empty `buildable` can be read: "no version builds
+    /// this" and "the pack declares no versions" are different facts and
+    /// the first one alone cannot tell them apart.
+    pub considered: Vec<String>,
 }
 
 /// Registry-compatible Minecraft version range.
@@ -106,16 +145,22 @@ pub struct SemanticSensitiveFinding {
 /// JSON / text shape does not diverge from what the compile backend would
 /// see.
 ///
+/// `buildable_targets` is threaded in the same way and for the same
+/// reason: deciding it means lowering once per supported version against
+/// that version's id table, which is the registry pack's data and so the
+/// caller's to hold.
+///
 /// `_resolution` is accepted so future work that needs the resolved binding
 /// (semantic-sensitivity checks per concrete token) can land without an API
-/// change. Currently only `module.headers` and `edition_portability` are
-/// consumed.
+/// change. Currently only `module.headers` and the two per-edition lists
+/// are consumed.
 #[must_use]
 pub fn compute_axes(
     module: &Module,
     _ir: &IntentModule,
     _resolution: &Resolution,
     edition_portability: Vec<EditionPortability>,
+    buildable_targets: Vec<BuildableTargets>,
 ) -> VersionAxes {
     VersionAxes {
         registry_compat: RegistryRange {
@@ -124,6 +169,7 @@ pub fn compute_axes(
         },
         edition_portability,
         semantic_sensitive: Vec::new(),
+        buildable_targets,
     }
 }
 
@@ -226,6 +272,7 @@ mod tests {
             &i,
             &r,
             synthetic_portability(&[(Edition::Java, 0, 0, 0)]),
+            Vec::new(),
         );
         assert_eq!(axes.registry_compat.min, "1.20");
         assert_eq!(axes.registry_compat.max, "latest");
@@ -240,6 +287,7 @@ mod tests {
             &i,
             &r,
             synthetic_portability(&[(Edition::Java, 0, 0, 0)]),
+            Vec::new(),
         );
         assert_eq!(axes.registry_compat.min, "1.21");
     }
@@ -253,6 +301,7 @@ mod tests {
             &i,
             &r,
             synthetic_portability(&[(Edition::Java, 0, 0, 0)]),
+            Vec::new(),
         );
         assert_eq!(axes.registry_compat.min, "0.0");
     }
@@ -271,6 +320,11 @@ mod tests {
             &i,
             &r,
             synthetic_portability(&[(Edition::Java, 3, 0, 0), (Edition::Bedrock, 1, 1, 1)]),
+            vec![BuildableTargets {
+                edition: Edition::Bedrock,
+                buildable: vec!["1.21.0".to_owned()],
+                considered: vec!["1.21.0".to_owned(), "1.21.40".to_owned()],
+            }],
         );
         assert_eq!(axes.edition_portability.len(), 2);
         assert_eq!(axes.edition_portability[0].edition, Edition::Java);
@@ -287,6 +341,17 @@ mod tests {
         let json = serde_json::to_string(&axes).unwrap();
         assert!(json.contains(r#""edition":"java""#), "got: {json}");
         assert!(json.contains(r#""edition":"bedrock""#), "got: {json}");
+        // The buildable row rides the same forwarding, and carries the
+        // versions it weighed as well as the ones that passed — an empty
+        // `buildable` says nothing on its own about how many there were.
+        assert_eq!(axes.buildable_targets.len(), 1);
+        assert_eq!(axes.buildable_targets[0].buildable, ["1.21.0"]);
+        assert_eq!(axes.buildable_targets[0].considered, ["1.21.0", "1.21.40"]);
+        assert!(json.contains(r#""buildable":["1.21.0"]"#), "got: {json}");
+        assert!(
+            json.contains(r#""considered":["1.21.0","1.21.40"]"#),
+            "got: {json}",
+        );
     }
 
     #[test]
@@ -298,6 +363,7 @@ mod tests {
             &i,
             &r,
             synthetic_portability(&[(Edition::Java, 0, 0, 0)]),
+            Vec::new(),
         );
         assert!(axes.semantic_sensitive.is_empty());
     }
