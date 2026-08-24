@@ -12,6 +12,25 @@ and is a separate axis from the Minecraft target version.
 
 ### Breaking changes
 
+- *(formats,core,cli)* `cairn info` names the palette entries its `unsupported` figure counts.
+  The figure was one integer over three failures with three different repairs: the edition has no
+  such block at all; it has the block and the states the intent carries have no mapping here; or a
+  state the registry pack should have refused reached the state translator, which is the pack's
+  bug and not the author's. The id, the entry, and the same `did you mean` suggestion
+  `E_UNKNOWN_ID` prints for that id were all in hand where the count was incremented, and all of
+  them were discarded, so a reader who saw `unsupported: 1` had to bisect the source by hand. The
+  counts do not move — this is what they were already counting, named. Entries are listed on
+  stderr under the figure, one per unit of it and in palette order, and the four stdout rows do
+  not change: they are what a pipeline reads, and a per-entry list is not the shape of a row. The
+  Bedrock arm now matches `BedrockStateError` variant by variant instead of folding every failure
+  through a wildcard, so a fourth variant has to be classified here rather than joining whichever
+  bucket a `_` pointed at. **Breaking**: `portability_for_java` / `portability_for_bedrock` return
+  `PortabilityReport { counts, unsupported }` in place of a bare `PortabilityCounts`, keeping one
+  entry point per edition rather than adding a second pair that could answer the same question
+  differently, and `EditionPortability` / `EditionReport` each gain an `unsupported_entries`
+  field. `--format json` gains `edition_portability[].unsupported_entries`, additive for consumers
+  that ignore unknown keys.
+
 - *(cli)* `cairn info` says which supported targets can build the source. The portability
   counters ask of the *edition* — a block one part of the range spells differently is not missing
   from it — and two palette entries can be declared by disjoint sets of versions while each

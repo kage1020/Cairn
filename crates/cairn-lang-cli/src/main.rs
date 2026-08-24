@@ -2721,6 +2721,45 @@ mod tests {
     //! circumstantially, by hard-coding both sides of a pairing.
     use super::*;
 
+    /// Each `unsupported` reason renders the repair it names, including
+    /// the two no `.crn` can reach.
+    ///
+    /// A stateful non-stair material is refused as `E_INCOMPATIBLE_MATERIAL`
+    /// before it can be lowered, and a stair state outside the Java domain
+    /// is refused by the registry pack, so the end-to-end tests can only
+    /// ever produce the absent-id case. The rendering is a pure function of
+    /// the reason, so the other two are asked here rather than left as the
+    /// branches nothing reads.
+    #[test]
+    fn every_unsupported_reason_renders_the_repair_it_names() {
+        let bare = unsupported_reason(&UnsupportedReason::AbsentFromEdition { suggestion: None });
+        assert!(
+            bare.contains("declares the block") && !bare.contains("did you mean"),
+            "no suggestion means no dangling clause, got: {bare}",
+        );
+        let suggested = unsupported_reason(&UnsupportedReason::AbsentFromEdition {
+            suggestion: Some("minecraft:oak_slab".to_owned()),
+        });
+        assert!(
+            suggested.contains("did you mean `minecraft:oak_slab`?"),
+            "got: {suggested}",
+        );
+        let states = unsupported_reason(&UnsupportedReason::StatesUnrepresentable {
+            states: "facing=north".to_owned(),
+        });
+        assert!(
+            states.contains("facing=north") && states.contains("has the block"),
+            "the block exists and the states are what does not, got: {states}",
+        );
+        let leaked = unsupported_reason(&UnsupportedReason::InvalidState {
+            detail: "`facing=up` is not a valid Java `facing`".to_owned(),
+        });
+        assert!(
+            leaked.contains("`facing=up`") && leaked.contains("pack"),
+            "the repair is the pack's and the reader has to be told so, got: {leaked}",
+        );
+    }
+
     /// The four Placement IR stages spell their `--stage` value, the
     /// `--stage <name>` fragment `require_edition` prints, and the
     /// `"stage"` key of the JSON dump the same way. `stage_cli_name`

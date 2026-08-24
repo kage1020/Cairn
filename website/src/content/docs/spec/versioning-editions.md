@@ -180,10 +180,22 @@ this output carries `@requires version>=1.21.40`, which is what puts every Java 
 floor and Bedrock 1.21.0 with them. A fifth line, `recommended test targets`, belongs to this axis
 and is not emitted by any code path yet.
 
-The `edition portability` row counts palette entries, and an entry is `unsupported` for either of two
-reasons: the edition has no such block at all, or it has the block but no representation for the
-states the intent carries (10.7). The first is a question about IDs and the second about states; only
-the second can produce `degraded`, since a block that does not exist has nothing to lose detail from.
+The block above is stdout. What each figure in it is made of goes to stderr as `note:` lines — the
+targets below the floor, the versions that refuse and why, and the palette entries counted as
+`unsupported` — so a pipeline reading the rows sees the same four lines whatever the source does.
+
+The `edition portability` row counts palette entries, and an entry is `unsupported` for one of three
+reasons: the edition has no such block at all; it has the block but no representation for the states
+the intent carries (10.7); or a state the registry pack should have refused reached the state
+translator. The first is a question about IDs and the second about states; only the second can
+produce `degraded`, since a block that does not exist has nothing to lose detail from. The third is
+not a fact about the source at all — the repair is to the pack, and an author cannot make it.
+
+The three have three different repairs, which is why the figure alone cannot be acted on. Each entry
+it counts is named on stderr under it, with its reason and — for the ID case — the same
+`did you mean` suggestion `E_UNKNOWN_ID` prints, drawn from every ID the edition declares.
+`--format json` carries them as `edition_portability[].unsupported_entries`, one element per unit of
+the count and in palette order.
 
 Both are asked of the edition rather than of a version, because **that row** reports across a whole
 compatible range. An ID valid for only part of that range — Bedrock renamed `stonebrick` to
@@ -203,9 +215,11 @@ respells is compared as the wrong ID, and a source one target builds can come ou
 intersection.
 
 Like the counters, this row reports and does not refuse. `cairn info` exits 0 for a source no
-supported version can build; the build is the command that refuses it, and the command that says
-which block is missing. `recommended test targets` answers a different question again — which
-versions are worth testing against, not which ones work.
+supported version can build; the build is the command that refuses it. Which block is missing is
+said either way: `cairn info` prints each refusing version's own findings under that version, so an
+`E_UNKNOWN_ID` is never left standing on its own without the target that raised it.
+`recommended test targets` answers a different question again — which versions are worth testing
+against, not which ones work.
 
 ## 10.6 Provenance and lock (reproducibility)
 - The `.crn` carries only `@intended_targets` (wish/hint). **`verified:true` + DataVersion + the hashes
