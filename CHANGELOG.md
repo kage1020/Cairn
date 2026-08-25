@@ -12,6 +12,33 @@ and is a separate axis from the Minecraft target version.
 
 ### Breaking changes
 
+- *(formats,core,cli)* `cairn info` names the palette entries its `unsupported` figure counts.
+  The figure was one integer over four failures with four different repairs: the edition has no
+  such block at all; it has the block and this compiler maps no states for it yet; a state value
+  outside the Java domain reached the state translator; or a state key the translator does not
+  read reached it, which is the only one of the four the author can act on and the only one whose
+  error already said so. The id and the entry were in hand where the count was incremented and
+  both were discarded, so a reader who saw `unsupported: 1` had to bisect the source by hand. The
+  counts do not move — this is what they were already counting, named. Entries are listed on
+  stderr under the figure, one per unit of it and in palette order, each with a `did you mean`
+  read the way `E_UNKNOWN_ID` reads one (path compared inside a single namespace) but drawn from
+  every id the edition declares rather than one pinned version's table, so the two can name
+  different blocks and each is right about its own question. The four stdout rows do not change:
+  they are the text twin of the JSON's top level, and a per-entry list is not the shape of a row.
+  The Bedrock arm now matches `BedrockStateError` variant by variant instead of folding every
+  failure through a wildcard, so a fourth variant has to be classified here rather than joining
+  whichever bucket a `_` pointed at, and each reason carries the fields of its own answer rather
+  than a rendered sentence — including the `valid` and `handled` lists, which thread out of the
+  translator's own constants so a key or value added there reaches the report without a second
+  edit. **Breaking**: `portability_for_java` / `portability_for_bedrock` return a
+  `PortabilityReport` (private fields, `counts()` / `unsupported()` / `into_unsupported()`) in
+  place of a bare `PortabilityCounts`, keeping one entry point per edition rather than adding a
+  second pair that could answer the same question differently;
+  `BedrockStateError::UnmappableBlock` and `UnknownStairKey` each gain a field naming the set
+  their message lists; and `EditionPortability` / `EditionReport` each gain an
+  `unsupported_entries` field. `--format json` gains
+  `edition_portability[].unsupported_entries`, additive for consumers that ignore unknown keys.
+
 - *(cli)* `cairn info` says which supported targets can build the source. The portability
   counters ask of the *edition* — a block one part of the range spells differently is not missing
   from it — and two palette entries can be declared by disjoint sets of versions while each

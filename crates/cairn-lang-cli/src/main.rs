@@ -11,8 +11,8 @@ use cairn_lang_core::lock::{
     LockWalkway, Lockfile, hash_resolved_ir, hash_source,
 };
 use cairn_lang_core::resolve::{
-    BuildableTargets, EditionReport, VersionAxes, VersionFloor, compare_versions, compute_axes,
-    declared_version_floor, resolve,
+    BuildableTargets, EditionReport, UnsupportedEntry, UnsupportedReason, VersionAxes,
+    VersionFloor, compare_versions, compute_axes, declared_version_floor, resolve,
 };
 use cairn_lang_core::{Edition, Severity, check, lower, parse};
 use cairn_lang_formats::bedrock_structure::{ParityNote, build_mcstructure_tag, write_mcstructure};
@@ -773,10 +773,13 @@ fn edition_rows(
             }
         }
 
-        let counts = match edition {
+        let portability = match edition {
             Edition::Java => portability_for_java(&block_ir, &pack.blocks),
             Edition::Bedrock => portability_for_bedrock(&block_ir, &pack.blocks),
         };
+        for note in unsupported_notes(edition, portability.unsupported()) {
+            eprintln!("{note}");
+        }
         let dropped = dropped_scopes(&resolution, &block_ir);
         if !dropped.is_empty() {
             eprintln!(
@@ -815,9 +818,10 @@ fn edition_rows(
 
         rows.push(EditionReport {
             edition,
-            portable: counts.portable,
-            degraded: counts.degraded,
-            unsupported: counts.unsupported,
+            portable: portability.counts().portable,
+            degraded: portability.counts().degraded,
+            unsupported: portability.counts().unsupported,
+            unsupported_entries: portability.into_unsupported(),
             buildable: verdicts.buildable,
             considered,
         });
@@ -829,6 +833,82 @@ fn edition_rows(
         return Err(ExitCode::from(1));
     }
     Ok(rows)
+}
+
+/// The notes naming the palette entries one edition has no form for, in
+/// the order they print, under the figure that counts them.
+///
+/// Returned rather than printed so a test can read the whole block: the
+/// header carries the figure the stdout row carries, and an assertion on
+/// one line of stderr cannot see that.
+///
+/// The figure is `entries.len()` and that is not a second tally of the
+/// row's: [`PortabilityReport`] raises `unsupported` only beside a push,
+/// and its fields are private, so the length of the list it hands out is
+/// the number the row prints.
+///
+/// Stderr, beside the other notes this command prints. The four stdout
+/// rows are the text twin of the JSON's top level and what a reader greps;
+/// a per-entry list is not the shape of a row, and a consumer that wants
+/// these structured reads `edition_portability[].unsupported_entries`.
+fn unsupported_notes(edition: Edition, entries: &[UnsupportedEntry]) -> Vec<String> {
+    if entries.is_empty() {
+        return Vec::new();
+    }
+    let mut notes = vec![format!(
+        "note: what `unsupported: {}` counts on {}:",
+        entries.len(),
+        edition.as_str(),
+    )];
+    notes.extend(entries.iter().map(|entry| {
+        format!(
+            "  note: `{}` — {}",
+            entry.id,
+            unsupported_reason(&entry.reason)
+        )
+    }));
+    notes
+}
+
+/// One entry's reason, as the clause that follows its id.
+///
+/// Four sentences for four repairs — change the material, wait for the
+/// backend, fix the pack, edit the blockstate — which is what the single
+/// figure they fold into cannot be read as. Each one ends on what the
+/// reader can do, including the two nobody can do anything about, because
+/// "nothing here is yours to fix" is itself the answer that stops them
+/// looking.
+fn unsupported_reason(reason: &UnsupportedReason) -> String {
+    match reason {
+        UnsupportedReason::AbsentFromEdition { suggestion } => {
+            let absent = "no supported version of this edition declares the block";
+            match suggestion {
+                Some(suggestion) => format!("{absent}; did you mean `{suggestion}`?"),
+                None => absent.to_owned(),
+            }
+        }
+        // The edition is not what cannot express these — this backend is,
+        // and only so far. Saying otherwise would send an author to
+        // abandon a design that works, and leave the missing mapping
+        // unreported because nobody was told there was one.
+        UnsupportedReason::StatesUnmapped { states, mapped } => format!(
+            "the edition has the block; this compiler maps states for {mapped} so far, so \
+             `{states}` has no form here yet — bind the slot to a property-free material, or \
+             build for the other edition"
+        ),
+        UnsupportedReason::StateValueUnexpected { key, value, valid } => format!(
+            "`{key}={value}` is not a valid Java `{key}` (valid: {valid}); a registry pack is \
+             expected to reject this and no pack schema can state a value domain yet, so it is \
+             not yours to repair"
+        ),
+        // The one of the four the author can act on, and the error it
+        // comes from says so — that `Fix:` is the reason this is reported
+        // apart from the value case rather than with it.
+        UnsupportedReason::StateKeyUnread { key, handled } => format!(
+            "`{key}` is not a blockstate this compiler reads (it reads {handled}); remove it \
+             from the source blockstate"
+        ),
+    }
 }
 
 /// Scopes the resolver recorded (`struct::NAME`, `site::SITE::PLACE`) that
@@ -2668,6 +2748,118 @@ mod tests {
     //! end-to-end `tests/cli_*.rs` binaries can only assert
     //! circumstantially, by hard-coding both sides of a pairing.
     use super::*;
+
+    /// The whole note block, header included.
+    ///
+    /// Nothing else reads these lines: the end-to-end tests look for an id
+    /// and a clause inside them, which leaves the header, the guard, the
+    /// order and the indent free to change or vanish. The header is the
+    /// part that matters most — it names the figure on stdout that the
+    /// lines below explain, and one that disagreed with the row would be
+    /// worse than no header at all.
+    #[test]
+    fn the_notes_answer_the_figure_they_sit_under() {
+        let entries = vec![
+            UnsupportedEntry {
+                id: "minecraft:oak_sign".to_owned(),
+                reason: UnsupportedReason::AbsentFromEdition {
+                    suggestion: Some("minecraft:oak_log".to_owned()),
+                },
+            },
+            UnsupportedEntry {
+                id: "minecraft:oak_stairs".to_owned(),
+                reason: UnsupportedReason::StateKeyUnread {
+                    key: "waterlogged".to_owned(),
+                    handled: "facing, half, shape".to_owned(),
+                },
+            },
+        ];
+        assert_eq!(
+            unsupported_notes(Edition::Bedrock, &entries),
+            [
+                "note: what `unsupported: 2` counts on bedrock:".to_owned(),
+                format!(
+                    "  note: `minecraft:oak_sign` — {}",
+                    unsupported_reason(&entries[0].reason)
+                ),
+                format!(
+                    "  note: `minecraft:oak_stairs` — {}",
+                    unsupported_reason(&entries[1].reason)
+                ),
+            ],
+        );
+        // A clean source says nothing rather than announcing a count of
+        // nothing, and every edition would otherwise get a block of its
+        // own back to back.
+        assert!(unsupported_notes(Edition::Java, &[]).is_empty());
+    }
+
+    /// Each `unsupported` reason renders the repair it names, including
+    /// the three no `.crn` can reach.
+    ///
+    /// Two paths put blockstate properties on a palette entry, and
+    /// neither reaches these branches. `roof::stair_state` builds them
+    /// from `Cardinal` and `StairShape` and only for a material the
+    /// family check already accepted, so its values are in domain by
+    /// construction; an authored `@id[k=v]` token would carry arbitrary
+    /// ones, and the lexer refuses the bracket. A registry pack cannot
+    /// supply them either — `PackView::lookup` answers with
+    /// `BlockState::bare`. So the end-to-end tests can only ever produce
+    /// the absent-id case. The rendering is a pure function of the reason,
+    /// so the other three are asked here rather than left as the branches
+    /// nothing reads.
+    #[test]
+    fn every_unsupported_reason_renders_the_repair_it_names() {
+        let bare = unsupported_reason(&UnsupportedReason::AbsentFromEdition { suggestion: None });
+        assert!(
+            bare.contains("declares the block") && !bare.contains("did you mean"),
+            "no suggestion means no dangling clause, got: {bare}",
+        );
+        let suggested = unsupported_reason(&UnsupportedReason::AbsentFromEdition {
+            suggestion: Some("minecraft:oak_slab".to_owned()),
+        });
+        assert!(
+            suggested.contains("did you mean `minecraft:oak_slab`?"),
+            "got: {suggested}",
+        );
+        // The block is not missing from the edition and the edition is not
+        // what cannot express the states — this compiler is, so far.
+        let unmapped = unsupported_reason(&UnsupportedReason::StatesUnmapped {
+            states: "facing=north".to_owned(),
+            mapped: "the stair family".to_owned(),
+        });
+        assert!(
+            unmapped.contains("facing=north")
+                && unmapped.contains("has the block")
+                && unmapped.contains("the stair family")
+                && unmapped.contains("so far"),
+            "the gap is this compiler's and it is not permanent, got: {unmapped}",
+        );
+        // Nothing to edit: the value should not have reached the
+        // translator, and saying so is what stops the search.
+        let value = unsupported_reason(&UnsupportedReason::StateValueUnexpected {
+            key: "facing".to_owned(),
+            value: "up".to_owned(),
+            valid: "east, west, south, north".to_owned(),
+        });
+        assert!(
+            value.contains("`facing=up`")
+                && value.contains("east, west, south, north")
+                && value.contains("not yours to repair"),
+            "got: {value}",
+        );
+        // The one the author can act on, so the fix survives the render.
+        let key = unsupported_reason(&UnsupportedReason::StateKeyUnread {
+            key: "waterlogged".to_owned(),
+            handled: "facing, half, shape".to_owned(),
+        });
+        assert!(
+            key.contains("`waterlogged`")
+                && key.contains("facing, half, shape")
+                && key.contains("remove it from the source blockstate"),
+            "the author's repair must survive the rendering, got: {key}",
+        );
+    }
 
     /// The four Placement IR stages spell their `--stage` value, the
     /// `--stage <name>` fragment `require_edition` prints, and the

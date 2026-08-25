@@ -820,6 +820,178 @@ fn a_block_only_part_of_the_range_declares_stays_portable() {
     );
 }
 
+/// Every stdout line `cairn info` prints, so a test can say the rows did
+/// not move rather than that one substring survived.
+fn stdout_rows(stdout: &str) -> Vec<&str> {
+    stdout.lines().filter(|line| !line.is_empty()).collect()
+}
+
+#[test]
+fn the_unsupported_figure_names_the_entry_and_the_reason() {
+    // `unsupported: 1` is one integer over three failures with three
+    // different repairs. Everything needed to say which entry and which
+    // failure is in hand where the count is incremented, so the command
+    // says it.
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    let src = one_slot_source(tmp.path(), "javaonly.crn", "oak_sign");
+    let (code, stdout, stderr) = info_raw(&src, "bedrock");
+    assert_eq!(code, Some(0), "info reports; it does not refuse: {stderr}");
+    assert!(
+        stdout.contains("unsupported: 1"),
+        "premise: the figure is the thing being explained, got: {stdout}",
+    );
+    assert!(
+        stderr.contains("minecraft:oak_sign"),
+        "the entry behind the figure must be named, got: {stderr}",
+    );
+    assert!(
+        stderr.contains("no supported version of this edition declares the block"),
+        "and the reason with it, since the three have three different repairs, got: {stderr}",
+    );
+}
+
+#[test]
+fn naming_the_entry_does_not_move_the_rows() {
+    // The four rows are the stdout contract — `--format json`'s text twin,
+    // and what a reader greps. The names go to stderr beside every other
+    // `note:` this command prints, so nothing that consumes the rows has
+    // to change.
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    let clean = one_slot_source(tmp.path(), "clean.crn", "cobblestone");
+    let named = one_slot_source(tmp.path(), "javaonly.crn", "oak_sign");
+    let (_, clean_out, _) = info_raw(&clean, "bedrock");
+    let (_, named_out, named_err) = info_raw(&named, "bedrock");
+    let labels: Vec<String> = stdout_rows(&clean_out)
+        .iter()
+        .map(|row| row.split(':').next().expect("a label").to_owned())
+        .collect();
+    assert_eq!(
+        labels,
+        [
+            "registry compatibility",
+            "edition portability",
+            "buildable targets",
+            "semantic-sensitive",
+        ],
+        "premise: these are the rows, got: {clean_out}",
+    );
+    assert_eq!(
+        stdout_rows(&named_out).len(),
+        labels.len(),
+        "naming an entry must not add a row, got: {named_out}",
+    );
+    assert!(
+        !named_out.contains("oak_sign"),
+        "the id belongs on stderr with the other notes, got: {named_out}",
+    );
+    assert!(
+        named_err.contains("oak_sign"),
+        "premise: it is on stderr, got: {named_err}",
+    );
+}
+
+#[test]
+fn an_entry_is_named_even_when_no_target_was_weighed() {
+    // The `buildable targets` row already prints `E_UNKNOWN_ID` per
+    // version, which names an absent id in the ordinary case — but only
+    // when a version was lowered at all. A floor above every supported
+    // version skips all of them, and then the portability count is the
+    // only thing left saying anything is wrong. It has to say what.
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    let src = one_slot_source(tmp.path(), "floored.crn", "oak_sign");
+    let body = std::fs::read_to_string(&src).expect("read the probe source back");
+    let floored = body.replace(
+        "@cairn 2026.06\n",
+        "@cairn 2026.06\n@requires version>=1.99\n",
+    );
+    assert_ne!(floored, body, "the floor must actually have been added");
+    std::fs::write(&src, floored).expect("write the floored source");
+    let (code, stdout, stderr) = info_raw(&src, "bedrock");
+    assert_eq!(code, Some(0), "stderr={stderr}");
+    assert!(
+        stdout.contains("unsupported: 1"),
+        "premise: the entry is unsupported, got: {stdout}",
+    );
+    assert!(
+        !stderr.contains("E_UNKNOWN_ID"),
+        "premise: the floor skipped every version, so nothing else named it: {stderr}",
+    );
+    assert!(
+        stderr.contains("minecraft:oak_sign"),
+        "the count is the only report left, so it has to name the entry: {stderr}",
+    );
+}
+
+#[test]
+fn the_json_row_names_exactly_what_its_count_counts() {
+    // A tool reading `--format json` gets the same answer the text does.
+    // The list is asserted against the row's own figure rather than
+    // against a literal, so the two cannot be right about different things.
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    let src = one_slot_source(tmp.path(), "javaonly.crn", "oak_sign");
+    let axes = info_json_at(&src, "java,bedrock");
+    let bedrock = portability_entry(&axes, "bedrock");
+    let entries = bedrock["unsupported_entries"]
+        .as_array()
+        .expect("unsupported_entries is a JSON array");
+    assert_eq!(
+        entries.len() as u64,
+        bedrock["unsupported"].as_u64().expect("a count"),
+        "the list and the figure count the same entries, got: {bedrock}",
+    );
+    assert_eq!(entries[0]["id"], "minecraft:oak_sign");
+    assert_eq!(entries[0]["reason"], "absent_from_edition");
+    // The suggestion is the flattened payload of that reason, and it is
+    // the same string the stderr note offers — one answer rendered twice,
+    // not two lookups that happen to agree.
+    let suggestion = entries[0]["suggestion"]
+        .as_str()
+        .expect("the absent reason carries a suggestion key");
+    let (_, _, stderr) = info_raw(&src, "bedrock");
+    assert!(
+        stderr.contains(&format!("did you mean `{suggestion}`?")),
+        "the note and the JSON must offer the same id, got: {stderr}",
+    );
+    let java = portability_entry(&axes, "java");
+    assert_eq!(java["unsupported"], 0);
+    assert!(
+        java["unsupported_entries"]
+            .as_array()
+            .expect("every row carries the key")
+            .is_empty(),
+        "Java has the block, so its list is empty rather than absent: {java}",
+    );
+}
+
+#[test]
+fn a_source_info_refuses_prints_no_rows_at_all() {
+    // The four rows are a guarantee about a run that finishes, not about
+    // every invocation: a finding the strict per-edition pass raises
+    // returns before `print_text`, and stdout is then empty rather than
+    // short one row. The spec says so, and the two tests either side of
+    // this one compare sources that parse and resolve, so neither could
+    // notice.
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    let src = tmp.path().join("unresolved.crn");
+    std::fs::write(
+        &src,
+        concat!(
+            "@cairn 2026.06\n\n",
+            "theme t:\n  slot floor -> @cobblestone\n\n",
+            "struct hut size=5x5\n  floor mat_slot=floor\n",
+            "  walls class=outer mat_slot=nosuchslot height=3\n",
+        ),
+    )
+    .expect("write fixture");
+    let (code, stdout, stderr) = info_raw(&src, "java,bedrock");
+    assert_eq!(code, Some(1), "stdout={stdout} stderr={stderr}");
+    assert!(stdout.is_empty(), "got: {stdout}");
+    assert!(
+        stderr.contains("E_UNRESOLVED_SLOT"),
+        "premise: the run is refused for a finding, got: {stderr}",
+    );
+}
+
 #[test]
 fn an_unsupported_entry_is_a_figure_not_a_gate() {
     // `info` reports; it does not refuse. Spec §10.5's own example output
