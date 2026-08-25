@@ -20,7 +20,7 @@ use indexmap::IndexMap;
 use crate::ast::ValueKind;
 use crate::intent::ValueWithSpan;
 use crate::resolve::{TokenKind, classify_token};
-use crate::suggest::nearest_match;
+use crate::suggest::{nearest_match, nearest_namespaced_id};
 
 use super::BlockState;
 
@@ -328,29 +328,11 @@ pub(crate) fn check_id(
         return Ok(state);
     }
     Err(MaterialDeferred::UnknownId(UnknownId {
-        suggestion: nearest_id(&state.id, ids),
+        suggestion: nearest_namespaced_id(&state.id, ids.iter()),
         registry: ids.label().to_owned(),
         origin: origin.clone(),
         id: state.id,
     }))
-}
-
-/// The declared id closest to `id`, compared on the path alone.
-///
-/// `nearest_match`'s edit cap scales with input length, and every vanilla
-/// id shares the ten-character `minecraft:` prefix — long enough to buy a
-/// third edit that the meaningful part never earned. Over a table of a
-/// thousand ids that is the difference between suggesting `oak_planks` for
-/// `oak_plank` and suggesting `dirt` for `light`. Comparing paths within
-/// one namespace puts the cap back on the part the author actually typed.
-fn nearest_id(id: &str, ids: BlockIdSet<'_>) -> Option<String> {
-    let (namespace, path) = id.split_once(':')?;
-    let candidates = ids
-        .iter()
-        .filter_map(|known| known.split_once(':'))
-        .filter(|(ns, _)| *ns == namespace)
-        .map(|(_, path)| path);
-    nearest_match(path, candidates).map(|best| format!("{namespace}:{best}"))
 }
 
 /// Turn a canonical token body (`oak_planks`, `oak_log[axis=x]`,

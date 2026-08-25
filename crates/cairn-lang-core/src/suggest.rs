@@ -81,6 +81,43 @@ where
     best.map(|(_, c)| c)
 }
 
+/// The candidate closest to `id`, compared on the path within `id`'s own
+/// namespace.
+///
+/// `id` and every candidate are `namespace:path`. Two rules a bare
+/// [`nearest_match`] over the full strings does not express:
+///
+/// - **Score the path, not the id.** The cap scales with input length, and
+///   every vanilla id shares the ten-character `minecraft:` prefix — long
+///   enough to buy a third edit the meaningful part never earned. Over a
+///   table of a thousand ids that is the difference between suggesting
+///   `oak_planks` for `oak_plank` and suggesting `dirt` for `light`.
+/// - **Stay inside the namespace.** A `mod:` id is not repaired by a
+///   `minecraft:` one — the pack that would have to declare it is the
+///   mod's.
+///
+/// `None` for an id carrying no `namespace:` prefix, and otherwise whatever
+/// [`nearest_match`] answers, re-prefixed.
+///
+/// One definition because both callers make the same suggestion about the
+/// same kind of name: the pinned `E_UNKNOWN_ID` in
+/// `block_array::material`, and the edition-wide one `cairn info`'s
+/// portability row prints. They differ only in where the candidates come
+/// from, which is this function's argument.
+#[must_use]
+pub fn nearest_namespaced_id<'a, I>(id: &str, candidates: I) -> Option<String>
+where
+    I: IntoIterator<Item = &'a str>,
+{
+    let (namespace, path) = id.split_once(':')?;
+    let paths = candidates
+        .into_iter()
+        .filter_map(|known| known.split_once(':'))
+        .filter(|(known_namespace, _)| *known_namespace == namespace)
+        .map(|(_, known_path)| known_path);
+    nearest_match(path, paths).map(|best| format!("{namespace}:{best}"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

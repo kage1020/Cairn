@@ -188,13 +188,17 @@ pub struct UnsupportedEntry {
 
 /// Why one palette entry counts as unsupported.
 ///
-/// The three variants are three different repairs — change the material,
-/// change the intent, fix the pack — which is the whole reason the figure
-/// they fold into cannot be acted on.
+/// Four variants for four different repairs — change the material, wait
+/// for the backend, fix the pack, edit the blockstate — which is the whole
+/// reason the figure they fold into cannot be acted on.
+///
+/// Every variant carries the pieces of its answer rather than a rendered
+/// sentence. The prose belongs to whatever is doing the rendering, and a
+/// consumer that reads the tag should not then have to parse English out
+/// of a field beside it.
 ///
 /// Serialized as an internally tagged union, so a consumer reads
-/// `"reason": "absent_from_edition"` beside the fields that reason carries
-/// and nothing else has to be parsed out of a sentence.
+/// `"reason": "absent_from_edition"` beside the fields that reason carries.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(tag = "reason", rename_all = "snake_case")]
 pub enum UnsupportedReason {
@@ -207,19 +211,38 @@ pub enum UnsupportedReason {
         /// a block that simply belongs to the other edition.
         suggestion: Option<String>,
     },
-    /// The edition has the block, and the states the intent put on it have
-    /// no mapping here.
-    StatesUnrepresentable {
+    /// The edition has the block and this compiler's backend has no
+    /// mapping for the states the intent put on it. A statement about the
+    /// backend, not about the edition: the block may well accept those
+    /// states in the game.
+    StatesUnmapped {
         /// The entry's `key=value` pairs, comma-joined, so the row names
         /// the states rather than only the block carrying them.
         states: String,
+        /// The families the backend does map, as the message lists them.
+        mapped: String,
     },
-    /// A state the registry pack should have refused reached the
-    /// translator. Not a portability fact about the source: the repair is
-    /// to the pack, and an author cannot make it.
-    InvalidState {
-        /// What the translator refused, in one clause.
-        detail: String,
+    /// A state value outside the Java domain reached the translator. The
+    /// registry pack is expected to reject these, so an author reading
+    /// this has nothing to edit — though no pack schema can express a
+    /// value domain today, which is why one got through.
+    StateValueUnexpected {
+        /// The property key carrying the value.
+        key: String,
+        /// The offending value verbatim.
+        value: String,
+        /// Comma-joined valid values for `key`.
+        valid: String,
+    },
+    /// A state key the backend does not read at all. Refused rather than
+    /// ignored so a key handled later cannot retroactively change what
+    /// already-shipped output meant — and unlike the three above, the
+    /// repair is the author's: remove it.
+    StateKeyUnread {
+        /// The unread property key.
+        key: String,
+        /// Comma-joined keys the backend does read.
+        handled: String,
     },
 }
 
@@ -454,11 +477,8 @@ mod tests {
                     edition: Edition::Bedrock,
                     portable: 1,
                     degraded: 1,
-                    unsupported: 1,
-                    unsupported_entries: vec![UnsupportedEntry {
-                        id: "minecraft:oak_sign".to_owned(),
-                        reason: UnsupportedReason::AbsentFromEdition { suggestion: None },
-                    }],
+                    unsupported: 4,
+                    unsupported_entries: one_entry_per_reason(),
                     buildable: vec!["1.21.0".to_owned()],
                     considered: vec!["1.21.0".to_owned(), "1.21.40".to_owned()],
                 },
@@ -472,7 +492,7 @@ mod tests {
         assert_eq!(axes.edition_portability[1].edition, Edition::Bedrock);
         assert_eq!(axes.edition_portability[1].portable, 1);
         assert_eq!(axes.edition_portability[1].degraded, 1);
-        assert_eq!(axes.edition_portability[1].unsupported, 1);
+        assert_eq!(axes.edition_portability[1].unsupported, 4);
         // JSON wire shape must remain unchanged so downstream consumers
         // treating `edition_portability[].edition` as a lowercase string
         // continue to work under the enum-typed field.
@@ -503,6 +523,107 @@ mod tests {
         assert!(
             json.contains(r#""considered":["1.21.0","1.21.40"]"#),
             "got: {json}",
+        );
+        // The named entries ride the same forwarding, and an edition with
+        // nothing unsupported carries an empty list rather than a missing
+        // one.
+        assert_eq!(
+            axes.edition_portability[1].unsupported_entries,
+            one_entry_per_reason(),
+        );
+        assert_eq!(axes.edition_portability[0].unsupported_entries, Vec::new());
+    }
+
+    /// One [`UnsupportedEntry`] per [`UnsupportedReason`] variant, so a
+    /// test asserting something about all of them cannot quietly stop
+    /// covering one.
+    fn one_entry_per_reason() -> Vec<UnsupportedEntry> {
+        vec![
+            UnsupportedEntry {
+                id: "minecraft:oak_sign".to_owned(),
+                reason: UnsupportedReason::AbsentFromEdition {
+                    suggestion: Some("minecraft:oak_log".to_owned()),
+                },
+            },
+            UnsupportedEntry {
+                id: "minecraft:oak_door".to_owned(),
+                reason: UnsupportedReason::StatesUnmapped {
+                    states: "facing=north".to_owned(),
+                    mapped: "the stair family".to_owned(),
+                },
+            },
+            UnsupportedEntry {
+                id: "minecraft:oak_stairs".to_owned(),
+                reason: UnsupportedReason::StateValueUnexpected {
+                    key: "facing".to_owned(),
+                    value: "up".to_owned(),
+                    valid: "east, west, south, north".to_owned(),
+                },
+            },
+            UnsupportedEntry {
+                id: "minecraft:oak_stairs".to_owned(),
+                reason: UnsupportedReason::StateKeyUnread {
+                    key: "waterlogged".to_owned(),
+                    handled: "facing, half, shape".to_owned(),
+                },
+            },
+        ]
+    }
+
+    /// Every reason's JSON, pinned here because three of the four are
+    /// unreachable from a `.crn` and so never pass through a CLI test.
+    ///
+    /// `reason` is the internal tag and every other key is that variant's
+    /// own, flattened beside it: a consumer reads the tag and then reads
+    /// fields, which is the whole reason none of them carries a rendered
+    /// sentence.
+    #[test]
+    fn every_unsupported_reason_carries_its_own_wire_shape() {
+        let entries = serde_json::to_value(one_entry_per_reason()).expect("the entries serialize");
+        assert_eq!(
+            entries,
+            serde_json::json!([
+                {
+                    "id": "minecraft:oak_sign",
+                    "reason": "absent_from_edition",
+                    "suggestion": "minecraft:oak_log",
+                },
+                {
+                    "id": "minecraft:oak_door",
+                    "reason": "states_unmapped",
+                    "states": "facing=north",
+                    "mapped": "the stair family",
+                },
+                {
+                    "id": "minecraft:oak_stairs",
+                    "reason": "state_value_unexpected",
+                    "key": "facing",
+                    "value": "up",
+                    "valid": "east, west, south, north",
+                },
+                {
+                    "id": "minecraft:oak_stairs",
+                    "reason": "state_key_unread",
+                    "key": "waterlogged",
+                    "handled": "facing, half, shape",
+                },
+            ]),
+        );
+        // `suggestion` is present and null rather than absent when there
+        // is no candidate, so a consumer reads one shape per reason
+        // whatever the answer was.
+        let absent = serde_json::to_value(UnsupportedEntry {
+            id: "minecraft:nothing_like_this".to_owned(),
+            reason: UnsupportedReason::AbsentFromEdition { suggestion: None },
+        })
+        .expect("the entry serializes");
+        assert_eq!(
+            absent,
+            serde_json::json!({
+                "id": "minecraft:nothing_like_this",
+                "reason": "absent_from_edition",
+                "suggestion": null,
+            }),
         );
     }
 

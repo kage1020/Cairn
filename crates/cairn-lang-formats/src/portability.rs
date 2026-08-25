@@ -74,7 +74,7 @@
 
 use cairn_lang_core::block_array::{BlockArrayIr, BlockState};
 use cairn_lang_core::resolve::{UnsupportedEntry, UnsupportedReason};
-use cairn_lang_core::suggest::nearest_match;
+use cairn_lang_core::suggest::nearest_namespaced_id;
 
 use crate::bedrock_state::{BedrockStateError, translate_states};
 use crate::registry::BlocksIndex;
@@ -86,12 +86,17 @@ use crate::registry::BlocksIndex;
 /// from a second entry point: the classification decides the category and
 /// the reason in the same step, and two functions answering the same
 /// question is the shape that lets them drift.
+///
+/// The fields are private and the count is only ever raised beside a push,
+/// so the figure and the list describe the same entries for every value of
+/// this type that can exist — including one built outside the crate. Public
+/// fields would have made that a convention of this module rather than a
+/// property of the type: `PortabilityReport { counts: ..unsupported: 7,
+/// unsupported: vec![] }` is a legal literal, and this crate is published.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct PortabilityReport {
-    /// How many entries fall in each category.
-    pub counts: PortabilityCounts,
-    /// The entries `counts.unsupported` counts, in palette order.
-    pub unsupported: Vec<UnsupportedEntry>,
+    counts: PortabilityCounts,
+    unsupported: Vec<UnsupportedEntry>,
 }
 
 /// Palette-entry counts per portability category.
@@ -115,12 +120,42 @@ pub struct PortabilityCounts {
 }
 
 impl PortabilityReport {
-    /// Record one entry the edition has no form for, keeping the count and
-    /// the list in step.
+    /// How many entries fall in each category.
+    #[must_use]
+    pub fn counts(&self) -> PortabilityCounts {
+        self.counts
+    }
+
+    /// The entries [`PortabilityCounts::unsupported`] counts, in palette
+    /// order.
+    #[must_use]
+    pub fn unsupported(&self) -> &[UnsupportedEntry] {
+        &self.unsupported
+    }
+
+    /// Take the entries, for a caller that stores them rather than reading
+    /// them in place.
+    #[must_use]
+    pub fn into_unsupported(self) -> Vec<UnsupportedEntry> {
+        self.unsupported
+    }
+
+    /// Record an entry that compiles straight through.
+    fn count_portable(&mut self) {
+        self.counts.portable = self.counts.portable.saturating_add(1);
+    }
+
+    /// Record an entry that compiles and loses detail.
+    fn count_degraded(&mut self) {
+        self.counts.degraded = self.counts.degraded.saturating_add(1);
+    }
+
+    /// Record one entry the edition has no form for, raising the count
+    /// with it.
     ///
-    /// The single place `unsupported` is incremented, so the figure and
-    /// the names cannot come apart: a caller that pushed without counting
-    /// would publish a list longer than the number it is read against.
+    /// The single place `unsupported` is incremented, which is what makes
+    /// the figure and the names two views of one push rather than two
+    /// tallies that have to agree.
     fn push_unsupported(&mut self, entry: UnsupportedEntry) {
         self.counts.unsupported = self.counts.unsupported.saturating_add(1);
         self.unsupported.push(entry);
@@ -155,7 +190,7 @@ pub fn portability_for_java(ir: &BlockArrayIr, blocks: &BlocksIndex) -> Portabil
             report.push_unsupported(absent_entry(blocks, entry));
             continue;
         }
-        report.counts.portable = report.counts.portable.saturating_add(1);
+        report.count_portable();
     }
     report
 }
@@ -176,10 +211,10 @@ pub fn portability_for_bedrock(ir: &BlockArrayIr, blocks: &BlocksIndex) -> Porta
         }
         match translate_states(&entry.id, &entry.properties) {
             Ok(t) if t.degraded.is_empty() => {
-                report.counts.portable = report.counts.portable.saturating_add(1);
+                report.count_portable();
             }
             Ok(_) => {
-                report.counts.degraded = report.counts.degraded.saturating_add(1);
+                report.count_degraded();
             }
             Err(err) => {
                 report.push_unsupported(UnsupportedEntry {
@@ -200,58 +235,63 @@ pub fn portability_for_bedrock(ir: &BlockArrayIr, blocks: &BlocksIndex) -> Porta
 /// classified here rather than joining whichever bucket a `_` arm points
 /// at. Every one of them counts as `unsupported` all the same — the counts
 /// this row has always published do not move.
+///
+/// Nothing is reworded on the way through. Each field comes off the error
+/// that raised it, including the two lists (`valid`, `handled`) the error
+/// threads from the translator's own constants, so a key or a value added
+/// there reaches this row without a second edit.
 fn refusal_reason(err: BedrockStateError) -> UnsupportedReason {
     match err {
-        // The edition has the block; the intent put states on it that
-        // Bedrock has no mapping for. The repair is the author's.
-        BedrockStateError::UnmappableBlock { properties, .. } => {
-            UnsupportedReason::StatesUnrepresentable { states: properties }
-        }
-        // Both of these are values the registry pack should have refused
-        // one layer up, as `BedrockStateError`'s own docs say. Reported
-        // apart from the case above because the author cannot repair
-        // either of them by editing the source.
+        // The block exists on the edition and this backend has no mapping
+        // for its states yet — `UnmappableBlock`'s own doc says "which does
+        // not exist for this block yet", so the missing mapping is the
+        // fact, not a limit of the game.
+        BedrockStateError::UnmappableBlock {
+            properties, mapped, ..
+        } => UnsupportedReason::StatesUnmapped {
+            states: properties,
+            mapped: mapped.to_owned(),
+        },
+        // A value outside the Java domain. `UnknownStairState`'s doc says
+        // the pack should reject these one layer up — normatively: no pack
+        // schema can express a value domain today, which is how one
+        // arrives here at all.
         BedrockStateError::UnknownStairState {
             key, value, valid, ..
-        } => UnsupportedReason::InvalidState {
-            detail: format!("`{key}={value}` is not a valid Java `{key}` (valid: {valid})"),
+        } => UnsupportedReason::StateValueUnexpected {
+            key: key.to_owned(),
+            value,
+            valid: valid.to_owned(),
         },
-        BedrockStateError::UnknownStairKey { key, .. } => UnsupportedReason::InvalidState {
-            detail: format!(
-                "`{key}` is not a blockstate the translator handles (handled: facing, half, shape)"
-            ),
-        },
+        // A key the backend does not read. This one *is* the author's to
+        // repair — the error's own `Fix:` says "remove it from the source
+        // blockstate" — so it is reported apart from the value case rather
+        // than folded in with it.
+        BedrockStateError::UnknownStairKey { key, handled, .. } => {
+            UnsupportedReason::StateKeyUnread {
+                key,
+                handled: handled.to_owned(),
+            }
+        }
     }
 }
 
 /// The entry for a block the edition's tables refute, with the nearest id
 /// they do declare when one is close enough to be a typo.
+///
+/// The suggestion is `cairn_lang_core::suggest::nearest_namespaced_id`, the
+/// same function `E_UNKNOWN_ID` uses, so the two read a typo the same way.
+/// What differs is the candidate list: a pinned build asks one version's
+/// table, and this axis asks of the edition, so every version's ids are
+/// candidates here. The two can therefore answer differently for the same
+/// id, and each is right about its own question.
 fn absent_entry(blocks: &BlocksIndex, state: &BlockState) -> UnsupportedEntry {
     UnsupportedEntry {
         id: state.id.clone(),
         reason: UnsupportedReason::AbsentFromEdition {
-            suggestion: nearest_declared_id(blocks, &state.id),
+            suggestion: nearest_namespaced_id(&state.id, blocks.declared_ids()),
         },
     }
-}
-
-/// The id the edition declares that is closest to `id`, compared on the
-/// path within one namespace.
-///
-/// Same reading as `E_UNKNOWN_ID`'s suggestion, and for the same reason:
-/// `nearest_match`'s edit cap scales with input length, and the shared
-/// `minecraft:` prefix is long enough to buy an edit the typed part never
-/// earned. Candidates come from every version the edition has, because
-/// that is the question this axis asks — a pinned build asks the narrower
-/// one and gets its own suggestion from its own table.
-fn nearest_declared_id(blocks: &BlocksIndex, id: &str) -> Option<String> {
-    let (namespace, path) = id.split_once(':')?;
-    let candidates = blocks
-        .declared_ids()
-        .filter_map(|known| known.split_once(':'))
-        .filter(|(known_namespace, _)| *known_namespace == namespace)
-        .map(|(_, known_path)| known_path);
-    nearest_match(path, candidates).map(|best| format!("{namespace}:{best}"))
 }
 
 /// Every authored palette entry across the IR's structures, in palette
@@ -608,13 +648,22 @@ mod tests {
             walkways: IndexMap::new(),
             diagnostics: Vec::new(),
         };
+        let report = portability_for_bedrock(&ir, &table());
         assert_eq!(
-            portability_for_bedrock(&ir, &table()).counts,
+            report.counts(),
             PortabilityCounts {
                 portable: 1,
                 degraded: 0,
                 unsupported: 1,
             },
+        );
+        // And the reason, which the figure alone cannot hold: asking the
+        // id question after the states one keeps `unsupported: 1` while
+        // reversing the advice from "this block is not here, did you mean
+        // ...?" to "the block is here and its states are not".
+        assert_eq!(
+            only_reason(&report),
+            &UnsupportedReason::AbsentFromEdition { suggestion: None },
         );
     }
 
@@ -643,12 +692,12 @@ mod tests {
     /// panic naming what it found instead.
     fn only_reason(report: &PortabilityReport) -> &UnsupportedReason {
         assert_eq!(
-            report.unsupported.len(),
+            report.unsupported().len(),
             1,
             "expected exactly one named entry, got {:?}",
-            report.unsupported,
+            report.unsupported(),
         );
-        &report.unsupported[0].reason
+        &report.unsupported()[0].reason
     }
 
     #[test]
@@ -659,8 +708,8 @@ mod tests {
         // test rather than incidental to it.
         let ir = one_state_ir(vec![BlockState::bare("minecraft:oak_planck")]);
         let report = portability_for_java(&ir, &table());
-        assert_eq!(report.counts.unsupported, 1);
-        assert_eq!(report.unsupported[0].id, "minecraft:oak_planck");
+        assert_eq!(report.counts().unsupported, 1);
+        assert_eq!(report.unsupported()[0].id, "minecraft:oak_planck");
         assert_eq!(
             only_reason(&report),
             &UnsupportedReason::AbsentFromEdition {
@@ -681,15 +730,15 @@ mod tests {
             portability_for_java(&ir, &table()),
             portability_for_bedrock(&ir, &table()),
         ] {
-            assert_eq!(report.counts.unsupported, 1);
-            assert_eq!(report.unsupported[0].id, "minecraft:standing_sign");
+            assert_eq!(report.counts().unsupported, 1);
+            assert_eq!(report.unsupported()[0].id, "minecraft:standing_sign");
             assert!(
                 matches!(
                     only_reason(&report),
                     UnsupportedReason::AbsentFromEdition { .. }
                 ),
                 "got {:?}",
-                report.unsupported[0].reason,
+                report.unsupported()[0].reason,
             );
         }
     }
@@ -701,7 +750,7 @@ mod tests {
         // belongs to the other edition entirely.
         let ir = one_state_ir(vec![BlockState::bare("minecraft:totally_not_a_block")]);
         let report = portability_for_bedrock(&ir, &table());
-        assert_eq!(report.unsupported[0].id, "minecraft:totally_not_a_block");
+        assert_eq!(report.unsupported()[0].id, "minecraft:totally_not_a_block");
         assert_eq!(
             only_reason(&report),
             &UnsupportedReason::AbsentFromEdition { suggestion: None },
@@ -731,21 +780,33 @@ mod tests {
         // adds `stone_bricks` in its diff and removes `stonebrick` there,
         // so the base-only reading has a plausible wrong answer to give
         // (`stonebrick`, two edits away) rather than no answer at all.
-        let ir = one_state_ir(vec![BlockState::bare("minecraft:stone_brickz")]);
-        let report = portability_for_bedrock(&ir, &table());
-        assert_eq!(
-            only_reason(&report),
-            &UnsupportedReason::AbsentFromEdition {
-                suggestion: Some("minecraft:stone_bricks".to_owned()),
-            },
-        );
+        //
+        // Asked in both directions. `stone_bricks` is in the diff and not
+        // the base, `stonebrick` is in the base and not the diff, and each
+        // is the nearest candidate to a different typo — so neither a
+        // base-only nor a newest-only reading can pass both halves.
+        for (typo, nearest) in [
+            ("minecraft:stone_brickz", "minecraft:stone_bricks"),
+            ("minecraft:stonebrik", "minecraft:stonebrick"),
+        ] {
+            let ir = one_state_ir(vec![BlockState::bare(typo)]);
+            let report = portability_for_bedrock(&ir, &table());
+            assert_eq!(
+                only_reason(&report),
+                &UnsupportedReason::AbsentFromEdition {
+                    suggestion: Some(nearest.to_owned()),
+                },
+                "for {typo}",
+            );
+        }
     }
 
     #[test]
     fn a_suggestion_is_never_drawn_from_the_other_namespace() {
-        // `nearest_id` compares paths within one namespace, and so does
-        // this: a `mod:oak_plancks` is not repaired by `minecraft:oak_planks`,
-        // because the pack that would have to declare it is the mod's.
+        // `cairn_lang_core::suggest::nearest_namespaced_id` compares paths
+        // within one namespace: a `mod:oak_planck` is not repaired by
+        // `minecraft:oak_planks`, because the pack that would have to
+        // declare it is the mod's.
         let ir = one_state_ir(vec![BlockState::bare("mod:oak_planck")]);
         let report = portability_for_java(&ir, &table());
         assert_eq!(
@@ -755,10 +816,12 @@ mod tests {
     }
 
     #[test]
-    fn a_stateful_block_bedrock_cannot_map_is_named_by_the_states_it_carries() {
-        // The block exists on the edition, so the repair is to the intent
-        // rather than to the material — a different answer from the absent
-        // case, and the states are what says so.
+    fn a_block_the_backend_maps_no_states_for_is_named_by_the_states_it_carries() {
+        // The block exists on the edition, so the repair is not to the
+        // material — a different answer from the absent case, and the
+        // states are what says so. `mapped` comes off the error rather
+        // than being restated here, so the day a second family is mapped
+        // this row follows without an edit.
         let mut properties = IndexMap::new();
         properties.insert("facing".to_owned(), "north".to_owned());
         let ir = one_state_ir(vec![BlockState {
@@ -766,27 +829,43 @@ mod tests {
             properties,
         }]);
         let report = portability_for_bedrock(&ir, &table());
-        assert_eq!(report.counts.unsupported, 1);
-        assert_eq!(report.unsupported[0].id, "minecraft:oak_door");
+        assert_eq!(report.counts().unsupported, 1);
+        assert_eq!(report.unsupported()[0].id, "minecraft:oak_door");
         assert_eq!(
             only_reason(&report),
-            &UnsupportedReason::StatesUnrepresentable {
+            &UnsupportedReason::StatesUnmapped {
                 states: "facing=north".to_owned(),
+                mapped: "the stair family".to_owned(),
             },
         );
     }
 
     #[test]
-    fn a_state_the_pack_should_have_refused_says_so_rather_than_reading_as_portability() {
-        // Both variants are validation leaks: the pack is what should have
-        // refused them, and an author reading `unsupported: 1` cannot make
-        // that repair. They are reported apart from the honest
-        // `StatesUnrepresentable` case for that reason, not because the
-        // count moves — it does not.
+    fn a_value_outside_the_java_domain_is_reported_apart_from_a_key_nothing_reads() {
+        // Two failures that look alike and are not. A value the pack is
+        // expected to reject leaves the author nothing to edit; a key the
+        // backend does not read is theirs to remove, which is what the
+        // error's own `Fix:` says. Folding them together would tell half
+        // the readers to go and wait for someone else.
+        //
+        // The counts do not move either way — both are `unsupported` — so
+        // the reason is the only thing that carries the difference, and
+        // every field of it is asserted for that reason.
         let value_leak = one_state_ir(vec![BlockState {
             id: "minecraft:oak_stairs".to_owned(),
             properties: stair_props("up", "bottom", "straight"),
         }]);
+        let report = portability_for_bedrock(&value_leak, &table());
+        assert_eq!(report.counts().unsupported, 1);
+        assert_eq!(
+            only_reason(&report),
+            &UnsupportedReason::StateValueUnexpected {
+                key: "facing".to_owned(),
+                value: "up".to_owned(),
+                valid: "east, west, south, north".to_owned(),
+            },
+        );
+
         let key_leak = one_state_ir(vec![BlockState {
             id: "minecraft:oak_stairs".to_owned(),
             properties: {
@@ -795,17 +874,15 @@ mod tests {
                 m
             },
         }]);
-        for (ir, needle) in [(value_leak, "facing"), (key_leak, "waterlogged")] {
-            let report = portability_for_bedrock(&ir, &table());
-            assert_eq!(report.counts.unsupported, 1);
-            let UnsupportedReason::InvalidState { detail } = only_reason(&report) else {
-                panic!("got {:?}", report.unsupported[0].reason);
-            };
-            assert!(
-                detail.contains(needle),
-                "the detail must name what was refused, got: {detail}",
-            );
-        }
+        let report = portability_for_bedrock(&key_leak, &table());
+        assert_eq!(report.counts().unsupported, 1);
+        assert_eq!(
+            only_reason(&report),
+            &UnsupportedReason::StateKeyUnread {
+                key: "waterlogged".to_owned(),
+                handled: "facing, half, shape".to_owned(),
+            },
+        );
     }
 
     #[test]
@@ -819,11 +896,11 @@ mod tests {
             properties: stair_props("south", "top", "outer_left"),
         }]);
         let report = portability_for_bedrock(&ir, &table());
-        assert_eq!(report.counts.degraded, 1);
+        assert_eq!(report.counts().degraded, 1);
         assert!(
-            report.unsupported.is_empty(),
+            report.unsupported().is_empty(),
             "got {:?}",
-            report.unsupported,
+            report.unsupported(),
         );
     }
 
@@ -850,7 +927,7 @@ mod tests {
         ]);
         let report = portability_for_bedrock(&ir, &table());
         assert_eq!(
-            report.counts,
+            report.counts(),
             PortabilityCounts {
                 portable: 1,
                 degraded: 1,
@@ -866,6 +943,14 @@ mod tests {
             named,
             ["minecraft:no_such_block_at_all", "minecraft:oak_door"]
         );
+        // The pairing invariant, asked where entries actually exist: over
+        // a palette with none of them, "pushed without counting" and
+        // "counted without pushing" both read as 0 == 0.
+        assert_eq!(
+            report.unsupported().len(),
+            report.counts().unsupported as usize,
+            "the list and the figure count the same entries",
+        );
     }
 
     #[test]
@@ -880,11 +965,11 @@ mod tests {
             portability_for_java(&ir, &none),
             portability_for_bedrock(&ir, &none),
         ] {
-            assert_eq!(report.counts.unsupported, 0);
+            assert_eq!(report.counts().unsupported, 0);
             assert!(
-                report.unsupported.is_empty(),
+                report.unsupported().is_empty(),
                 "got {:?}",
-                report.unsupported
+                report.unsupported()
             );
         }
     }

@@ -941,6 +941,17 @@ fn the_json_row_names_exactly_what_its_count_counts() {
     );
     assert_eq!(entries[0]["id"], "minecraft:oak_sign");
     assert_eq!(entries[0]["reason"], "absent_from_edition");
+    // The suggestion is the flattened payload of that reason, and it is
+    // the same string the stderr note offers — one answer rendered twice,
+    // not two lookups that happen to agree.
+    let suggestion = entries[0]["suggestion"]
+        .as_str()
+        .expect("the absent reason carries a suggestion key");
+    let (_, _, stderr) = info_raw(&src, "bedrock");
+    assert!(
+        stderr.contains(&format!("did you mean `{suggestion}`?")),
+        "the note and the JSON must offer the same id, got: {stderr}",
+    );
     let java = portability_entry(&axes, "java");
     assert_eq!(java["unsupported"], 0);
     assert!(
@@ -949,6 +960,35 @@ fn the_json_row_names_exactly_what_its_count_counts() {
             .expect("every row carries the key")
             .is_empty(),
         "Java has the block, so its list is empty rather than absent: {java}",
+    );
+}
+
+#[test]
+fn a_source_info_refuses_prints_no_rows_at_all() {
+    // The four rows are a guarantee about a run that finishes, not about
+    // every invocation: a finding the strict per-edition pass raises
+    // returns before `print_text`, and stdout is then empty rather than
+    // short one row. The spec says so, and the two tests either side of
+    // this one compare sources that parse and resolve, so neither could
+    // notice.
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    let src = tmp.path().join("unresolved.crn");
+    std::fs::write(
+        &src,
+        concat!(
+            "@cairn 2026.06\n\n",
+            "theme t:\n  slot floor -> @cobblestone\n\n",
+            "struct hut size=5x5\n  floor mat_slot=floor\n",
+            "  walls class=outer mat_slot=nosuchslot height=3\n",
+        ),
+    )
+    .expect("write fixture");
+    let (code, stdout, stderr) = info_raw(&src, "java,bedrock");
+    assert_eq!(code, Some(1), "stdout={stdout} stderr={stderr}");
+    assert!(stdout.is_empty(), "got: {stdout}");
+    assert!(
+        stderr.contains("E_UNRESOLVED_SLOT"),
+        "premise: the run is refused for a finding, got: {stderr}",
     );
 }
 
