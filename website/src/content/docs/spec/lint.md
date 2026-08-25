@@ -2,203 +2,207 @@
 title: "11. Lint and Constraint Validation"
 ---
 
-The compiler returns warnings/errors with line numbers. The form and granularity of error reporting are
-first-class parts of the spec; messages MUST be in a shape that feeds the self-correction loop
-([Evaluation Framework](evaluation)) — "what is wrong / valid candidates in the target / a suggested fix".
+The compiler reports warnings and errors with line numbers. Every message MUST carry the
+self-correction triple — **what is wrong / valid candidates in the target / a suggested fix** — so
+it can feed the loop in [Evaluation Framework](evaluation).
 
-## 11.1 Categories
-- **Syntax**: parse / types / `key=value` validity. Concrete codes shipped
-  in `cairn check` today:
-  - `E_DUPLICATE_SIZE` — header has more than one `size=`.
-  - `E_DUPLICATE_SLOT` — `theme` body declares the same slot twice.
-  - `E_DUPLICATE_SELECTOR` — two selector rows in one `theme` body select
-    the same members and bind the same key, so the earlier binding is read
-    by nothing (§7.1). Sameness is by meaning, not by source text:
-    attribute order does not count, and `class=` / `id=` / `mat_slot=`
-    compare as label text, so `small` and `"small"` are one value. Rows
-    that bind *different* keys are excluded — they compose, every binding
-    reaching every member both rows select — and so are rows whose
-    attributes merely overlap, where a member only the wider row selects
-    still reads its binding.
-  - `E_DUPLICATE_ARG`  — repeated `key=` in the same argument list.
-  - `E_DUPLICATE_ID`   — two members share an `id=` within the same
-    immediate body scope.
-  - `E_DUPLICATE_ITEM` — two top-level items of the same kind share a
-    name. The four kinds (`theme` / `def` / `struct` / `site`) are
-    separate namespaces, so a name reused across kinds is not a
-    collision. For `theme` / `def` / `struct` the name is the binding
-    key, so the **first** declaration is the one that resolves and the
-    rest bind nothing. For `site` the binding key is the per-place
-    `site::NAME::PLACE_ID`, so two blocks of one name merge into a
-    shared place namespace instead of shadowing — every place with a
-    distinct `id=` still builds, only a repeated `id=` collides, and
-    `east_of=` does not reach across the blocks.
-  - `E_DUPLICATE_HEADER` — a single-valued `@directive` (`@cairn`,
-    `@intended_targets`) is declared more than once (§5.3). `@requires`
-    is excluded: its floors compose to the strictest across every line,
-    so a second one adds a constraint rather than displacing the first.
-  - `E_INVALID_REQUIRES` — an `@requires` expression that is not a version
-    floor (§5.3). The accepted shape is `version`, `>=`, and a
-    dotted-decimal version, with whitespace optional between the three; the
-    code covers an operator other than `>=`, a missing version, a component
-    that is not a decimal number or does not fit in a `u32`, and text after
-    the version. Reported rather than dropped, because the directive states
-    one constraint and an expression that states none leaves a floor in the
-    file that no longer reaches the compiler.
-  - `E_UNKNOWN_ID` — a resolved block ID the compile's target does not declare
-    (`spec/versioning-editions.md` §10.4). Raised during block-array lowering, and only when a
-    target is pinned, so `cairn compile --target` is the one command that reports it —
-    `cairn check` does not run lowering at all. Covers an ID the author wrote, an ID the
-    registry pack's materials catalog produced, and the ID a member default falls back to when
-    the pack declares no row for it; `data.origin` says which, because only the first is a fix
-    the author makes in their own source.
-  - `E_INCOMPATIBLE_MATERIAL` — a member whose geometry attaches blockstates was bound to a
-    material that cannot carry them: a sloped roof or an eave `stair` bound outside the stair
-    family (`spec/compilation.md` §4.3). Raised during block-array lowering, so `cairn compile`
-    and `cairn lower` report it and `cairn check` does not. `data` carries the `slot` the member
-    read and the `token` the theme bound to it, because a dotted token is the registry pack's
-    mapping to correct rather than the author's line.
-  - `E_UNKNOWN_KEYWORD` — statement keyword is not in the known-keyword table.
-  - `E_MISPLACED_MEMBER` — statement keyword is in the table but the
-    enclosing body has no reader for it: a `place` / `connect` in a
-    `struct` or `def`, or a geometry keyword among a `site`'s rows
-    (§5.2). Reported once at the offending row; anything indented under
-    it goes with it, and the note counts those lines.
-  - `E_UNEXPECTED_POSITIONAL` — a bare value on a line that reads none
-    (§5.1). `connect FROM.PORT to TO.PORT` is the one exception and is
-    covered by `E_CONNECT_ARITY`. Anchored on the run from the first
-    bare value to the last, which is not necessarily a prefix of the
-    line: a dropped `=` leaves bare values after an argument.
-  - `E_UNSUPPORTED_NESTING` — a member carries an indented body that
-    nothing reads. Only `level y=N` inside a `struct` or `def` groups
-    members; a `site` body is a flat list of `place` and `connect` rows.
-    Anchored on the run of indented members, reported once per dropped
-    subtree at its root.
-  - `E_TYPE_MISMATCH_LABEL` — a label-typed key's value is not a label
-    (identifier or string). The label-typed keys are `id=`, `class=`,
-    `mat_slot=`, `use=`, and `theme=`. For the last two the mistyped
-    value is indistinguishable at the resolver from the key being absent;
-    both are errors, and this is the one that says the key is on the line
-    but unusable (the other is `E_INCOMPLETE_PLACE`).
-  - `E_TYPE_MISMATCH_SIZE`  — `size=` value is not a `WxH` literal.
-  - `E_CONNECT_ARITY` — `connect` row whose positional shape is not
-    `FROM.PORT to TO.PORT`: a half is missing, the literal `to`
-    keyword is missing or replaced by another token, extra
-    positionals trail `TO.PORT`, or an endpoint slot holds something
-    other than a one-dot `PLACE.PORT` reference (a bare identifier, a
-    literal, a `@material` token, a quoted string, a list, or a
-    reference carrying a second dot). Anchored at the missing-positional
-    cursor, the offending separator, the offending endpoint, or the run
-    of trailing extras. Each endpoint is reported separately: the two
-    ends are independent fix sites.
-  - `E_TRUTH_TABLE_EMPTY` — an `assert truth(...)` with no rows. The construct exists to state
-    something about the circuit and a table with no rows states nothing, so no context around it
-    makes it verify anything — the argument `E_INVALID_REQUIRES` makes for a `@requires` the
-    compiler cannot read.
-  - `E_TRUTH_TABLE_CONFLICT` — two rows of one table assign the same input combination different
-    outputs. Reported on the later row, with a note at the first row carrying that pattern. Which
-    of the two an evaluator would read is not stated: the simulator is unbuilt, and the repair is
-    to decide which row is wrong either way.
-  - `W_TRUTH_TABLE_DUPLICATE_ROW` — a row repeats an earlier one and agrees with it. The table
-    asserts the same thing without it, so the repair is to delete either row. Kept apart from
-    `E_TRUTH_TABLE_CONFLICT` because the two ask for different work.
-  - `W_TRUTH_TABLE_PARTIAL` — the rows leave input combinations unassigned. A warning rather than
-    an error: every row present is still a real constraint. A repeated row fills no combination,
-    so one table can earn this and `W_TRUTH_TABLE_DUPLICATE_ROW` together. `data` carries the
-    input count, how many combinations the rows cover, and the lowest few they do not — a sample
-    rather than the set, since twenty inputs have a million combinations.
-  - `E_THEME_VARIANT_MISSING` — the module declares a theme, and the pinned edition can bind none
-    of its per-edition variants (`spec/versioning-editions.md` §10.7). Only fires under
-    `--edition`: with no pin there is nothing a variant fails to satisfy, and the same source is
-    accepted. Reported **once per logical theme**, however many scopes and `place ... theme=` rows
-    read it — they all ask for the same edit in the same `theme` block. Every placement naming it is
-    still refused; what is deduplicated is the sentence, not the consequence. A module that declares
-    such a theme and never reads a `mat_slot=` from it is not reported at all: nothing is starved,
-    and the build is byte-identical with or without the pin.
-  - `E_INCOMPLETE_PLACE` — a `place` row omits `id=`, `use=`, or
-    `theme=` (§9.3). The row cannot become a placement without all three,
-    so it is dropped from the build; the message names every key the row
-    is short of. A key that is *present but mistyped* is
-    `E_TYPE_MISMATCH_LABEL` instead — it is on the line, just not a label.
-- **Geometry**: AABB expansion detecting "window outside the wall", "door hanging in mid-air".
-- **attachment**: whether a frame/painting/sign/button/lever/torch is on a valid attachment face
-  (detect attachment to air).
-- **entity_aabb**: armor_stand/villager/display not clipping into walls/paths, not blocking a door's
-  swing arc, entity cramming (density).
-- **support**: support conditions for hanging lanterns, torches, campfires, and gravity blocks such as
-  gravel.
-- **fluid**: consistency of water source / flow / waterlogged.
-- **version_caps / parity**: whether a state/entity schema is usable in the target
-  ([Versioning and Editions](versioning-editions)).
-- **edit_stability**: whether an `intent_state` change ripples into an unrelated member's
-  `resolved_state`.
-- **redstone**: simulate the synthesized circuit per tick and check it against the declared truth table
-  / temporal assertions; timing conflicts, QC dependence, routing congestion ([Redstone](redstone)).
-- **AABB interference**: on overlap, priority-merge or reject with a lint error. Boundary blockstate
-  re-resolution (inner-corner stairs, etc.) is the IR layer's responsibility.
+## 11.1 Diagnostic codes
 
-Diagnostics that reject an identifier against a closed vocabulary (unknown statement keyword,
-unknown `mat_slot=` name, unknown `--target` version) attach a `did you mean \`X\`?` note when a
-candidate sits within a length-scaled Damerau-Levenshtein cap (≤ 1 edit for 1–3 char inputs, ≤ 2
-for 4–6, ≤ 3 beyond). The closed-set listing (`expected one of: ...`) stays as the fallback so the
-output covers both the targeted fix and the full set of valid candidates.
+### Duplicates
+
+| Code | Meaning |
+|---|---|
+| `E_DUPLICATE_SIZE` | A header declares more than one `size=`. |
+| `E_DUPLICATE_SLOT` | A `theme` body declares the same slot twice. |
+| `E_DUPLICATE_ARG` | A `key=` is repeated in one argument list. |
+| `E_DUPLICATE_ID` | Two members share an `id=` in the same body scope. |
+| `E_DUPLICATE_SELECTOR` | Two selector rows in one `theme` select the same members and bind the same key. |
+| `E_DUPLICATE_ITEM` | Two top-level items of the same kind share a name. |
+| `E_DUPLICATE_HEADER` | A single-valued `@directive` is declared more than once. |
+
+`E_DUPLICATE_SELECTOR` compares selectors by meaning, not by text: attribute order does not count,
+and `class=` / `id=` / `mat_slot=` compare as label text, so `small` and `"small"` are one value.
+Rows that bind *different* keys compose and are not reported. Neither are rows whose attributes
+merely overlap — see [Materials and Themes §7.1](materials-themes).
+
+`E_DUPLICATE_ITEM` treats `theme` / `def` / `struct` / `site` as four separate namespaces, so one
+name may appear once in each. For the first three the first declaration resolves and the rest bind
+nothing. Two `site` blocks of one name instead merge into a shared `site::NAME::PLACE_ID`
+namespace: every place with a distinct `id=` still builds, only a repeated `id=` collides, and
+`east_of=` does not reach across the blocks.
+
+`E_DUPLICATE_HEADER` covers `@cairn` and `@intended_targets`. `@requires` is excluded — its floors
+compose to the strictest across every line, so a second one adds a constraint (§5.3).
+
+### Syntax and structure
+
+| Code | Meaning |
+|---|---|
+| `E_UNKNOWN_KEYWORD` | The statement keyword is not in the known-keyword table. |
+| `E_MISPLACED_MEMBER` | The keyword is known, but the enclosing body has no reader for it. |
+| `E_UNEXPECTED_POSITIONAL` | A bare value on a line that reads none (§5.1). |
+| `E_UNSUPPORTED_NESTING` | A member carries an indented body that nothing reads. |
+| `E_TYPE_MISMATCH_LABEL` | A label-typed key's value is not an identifier or string. |
+| `E_TYPE_MISMATCH_SIZE` | A `size=` value is not a `WxH` literal. |
+| `E_CONNECT_ARITY` | A `connect` row's shape is not `FROM.PORT to TO.PORT`. |
+| `E_INVALID_REQUIRES` | An `@requires` expression that is not a version floor (§5.3). |
+
+`E_MISPLACED_MEMBER` fires on a `place` / `connect` inside a `struct` or `def`, or a geometry
+keyword among a `site`'s rows. It is reported once at the offending row, and anything indented
+under it goes with it.
+
+`E_UNSUPPORTED_NESTING` — only `level y=N` inside a `struct` or `def` groups members; a `site` body
+is a flat list. Reported once per dropped subtree, at its root.
+
+`E_TYPE_MISMATCH_LABEL` — the label-typed keys are `id=`, `class=`, `mat_slot=`, `use=`, and
+`theme=`. For `use=` and `theme=` a mistyped value looks the same as an absent key to the resolver;
+this code says the key is on the line but unusable, and `E_INCOMPLETE_PLACE` says it is missing.
+
+`E_CONNECT_ARITY` — `connect FROM.PORT to TO.PORT` is the one form that reads positionals. The code
+covers a missing half, a missing or replaced `to` keyword, extra trailing positionals, and an
+endpoint that is not a one-dot `PLACE.PORT` reference. The two endpoints are reported separately,
+since they are independent fix sites.
+
+`E_INVALID_REQUIRES` — the accepted shape is `version`, `>=`, and a dotted-decimal version, with
+whitespace optional. The code covers any other operator, a missing version, a component that is not
+a decimal number or does not fit in a `u32`, and text after the version.
+
+### Materials and targets
+
+| Code | Meaning |
+|---|---|
+| `E_UNKNOWN_ID` | A resolved block ID the pinned target does not declare. |
+| `E_INCOMPATIBLE_MATERIAL` | A member whose geometry attaches blockstates is bound to a material that cannot carry them. |
+| `E_THEME_VARIANT_MISSING` | The pinned edition can bind none of a theme's per-edition variants. |
+| `E_INCOMPLETE_PLACE` | A `place` row omits `id=`, `use=`, or `theme=` (§9.3). |
+
+`E_UNKNOWN_ID` and `E_INCOMPATIBLE_MATERIAL` are raised during block-array lowering, so only
+`cairn compile` (and `cairn lower`) report them — `cairn check` does not run lowering.
+`E_UNKNOWN_ID` further needs a pinned target, so `cairn compile --target` is the one command that
+raises it. See [Versioning and Editions §10.4](versioning-editions).
+
+`E_INCOMPATIBLE_MATERIAL` today means a sloped roof or an eave `stair` bound outside the stair
+family ([Compilation Model §4.3](compilation)).
+
+`E_THEME_VARIANT_MISSING` fires only under `--edition`, and is reported **once per logical theme**
+however many scopes read it — they all want the same edit in the same `theme` block. Every
+placement naming it is still refused. A module that declares such a theme but never reads a
+`mat_slot=` from it is not reported: the build is byte-identical with or without the pin.
+
+`E_INCOMPLETE_PLACE` names every key the row is short of, and the row is dropped from the build.
+
+### Truth tables
+
+| Code | Meaning |
+|---|---|
+| `E_TRUTH_TABLE_EMPTY` | An `assert truth(...)` with no rows. |
+| `E_TRUTH_TABLE_CONFLICT` | Two rows assign the same input combination different outputs. |
+| `W_TRUTH_TABLE_DUPLICATE_ROW` | A row repeats an earlier one and agrees with it. |
+| `W_TRUTH_TABLE_PARTIAL` | The rows leave input combinations unassigned. |
+
+`E_TRUTH_TABLE_CONFLICT` is reported on the later row, with a note at the first row carrying that
+pattern. Which of the two an evaluator would read is not specified — the repair is to decide which
+row is wrong.
+
+The two warnings are warnings because every row present is still a real constraint. One table can
+earn both: a repeated row fills no combination.
+
+### Semantic categories
+
+Beyond the codes above, lint covers:
+
+| Category | Checks |
+|---|---|
+| **Geometry** | AABB expansion — a window outside the wall, a door hanging in mid-air. |
+| **attachment** | A frame, painting, sign, button, lever, or torch on a valid attachment face. |
+| **entity_aabb** | Entities not clipping walls or paths, not blocking a door's swing, not cramming. |
+| **support** | Hanging lanterns, torches, campfires, and gravity blocks such as gravel. |
+| **fluid** | Consistency of water source, flow, and `waterlogged`. |
+| **version_caps / parity** | Whether a state or entity schema is usable in the target ([Versioning and Editions](versioning-editions)). |
+| **edit_stability** | Whether an `intent_state` change ripples into an unrelated member's `resolved_state`. |
+| **redstone** | Per-tick simulation against the declared truth table and temporal assertions; timing conflicts, QC dependence, routing congestion ([Redstone](redstone)). |
+| **AABB interference** | On overlap, priority-merge or reject. Boundary blockstate re-resolution is the IR layer's job. |
+
+### "did you mean"
+
+A diagnostic that rejects an identifier against a closed vocabulary — an unknown keyword, an
+unknown `mat_slot=` name, an unknown `--target` version — attaches a ``did you mean `X`?`` note when
+a candidate sits within a length-scaled Damerau-Levenshtein cap: ≤ 1 edit for 1–3 characters, ≤ 2
+for 4–6, ≤ 3 beyond. The closed-set listing (`expected one of: ...`) is always printed as well.
 
 ## 11.2 Machine-readable payload
 
-The `--format json` output renders one object per finding with the following shape:
+`--format json` renders one object per finding:
 
-| Field      | Type     | Notes                                                                 |
-| ---------- | -------- | --------------------------------------------------------------------- |
-| `code`     | string   | Stable `E_*` / `W_*` identifier; same string as the gcc-style format. |
-| `severity` | string   | `"error"` or `"warning"`.                                             |
-| `line`     | integer  | 1-based line of the primary span's first byte.                        |
-| `col`      | integer  | 1-based column of the same byte, counted in Unicode scalar values.    |
-| `end_line` | integer  | 1-based line of the span's last-byte-exclusive boundary.              |
-| `end_col`  | integer  | 1-based column of the same boundary.                                  |
-| `primary`  | string   | Human-readable message printed after the code in the text format.    |
-| `notes`    | array    | `[{line?, col?, message}]`. Optional — omitted entirely when empty.   |
-| `data`     | object   | Structured payload — see below. Optional — omitted when absent.       |
+| Field | Type | Notes |
+|---|---|---|
+| `code` | string | Stable `E_*` / `W_*` identifier; same string as the gcc-style format. |
+| `severity` | string | `"error"` or `"warning"`. |
+| `line` | integer | 1-based line of the primary span's first byte. |
+| `col` | integer | 1-based column of the same byte, in Unicode scalar values. |
+| `end_line` | integer | 1-based line of the span's exclusive end boundary. |
+| `end_col` | integer | 1-based column of the same boundary. |
+| `primary` | string | The human-readable message. |
+| `notes` | array | `[{line?, col?, message}]`. Omitted when empty. |
+| `data` | object | Code-specific payload. Omitted when absent. |
 
-`data` is an open, code-specific object tagged with `kind`. Consumers that depend on a particular
-key set should match on `(code, data.kind)` rather than inspecting `primary`. The shape is
-evolving — additions for new codes are strictly additive, so consumers should ignore unknown
-`kind` values rather than failing on them. Current entries:
+`data` is an open object tagged with `kind`. Match on `(code, data.kind)` rather than parsing
+`primary`. Additions are strictly additive, so ignore unknown `kind` values rather than failing on
+them. Codes not listed below omit `data` entirely — the JSON key is absent, not `null`.
 
-| Code                 | `data` payload                                                   |
-| -------------------- | ---------------------------------------------------------------- |
-| `W_WALKWAY_BLOCKED`  | `{ "kind": "walkway_blocked", "skipped": <u64> }` — number of cells along the fallback L-shaped path that overlapped an existing structure and were dropped from the lay (emitted only when the detour search found no unobstructed route). |
-| `E_DUPLICATE_SELECTOR` | `{ "kind": "duplicate_selector", "rebound": ["frame"] }` — the binding keys this selector row takes over from an earlier one, without the trailing `=`, in the order the message lists them. Always non-empty. |
-| `E_UNKNOWN_ID` | `{ "kind": "unknown_id", "id": "minecraft:oak_plank", "registry": "java 1.21.4", "origin": "authored", "suggestion": "minecraft:oak_planks" }` — the ID the pinned target does not declare, the target it was checked against, and who chose it. `origin` is `authored` when the source names the ID, `catalog` when the pack maps a token onto it, and `builtin` when the pack declares no row for a member default and the compiler's own ID was used. `token` accompanies the latter two and is absent for `authored`; `suggestion` is absent when no declared ID is within the typo threshold, which is always the case for a rename. |
-| ↳ `origin: "catalog"` | `{ …, "id": "minecraft:stone_bricks", "registry": "bedrock 1.21.0", "origin": "catalog", "token": "floor.stone.smooth", "suggestion": "minecraft:stonebrick" }` — the author's token is correct and the pack's mapping is not, so the edit does not belong in the source. |
-| ↳ `origin: "builtin"` | `{ …, "id": "minecraft:oak_pressure_plate", "registry": "bedrock 1.21.60", "origin": "builtin", "token": "pressure_plate.default" }` — the pack declares no row for that member default, so the ID compiled into the compiler was used. The pack is what has to grow the row. |
-| `E_INCOMPATIBLE_MATERIAL` | `{ "kind": "incompatible_material", "id": "minecraft:cobblestone", "required": "stair", "slot": "roof", "token": "cobblestone" }` — the material the member was bound to, the family its geometry needs, and where the binding came from. `slot` is the `mat_slot=` name the member read and is absent when it carries no binding; `token` is the theme's slot value as written, and a dotted one (`roof.dark_wood`) means the registry pack's mapping is what to correct rather than the source line. `required` is named rather than implied so a second family added later is a value here and not a second code. |
-| `E_INCOMPLETE_PLACE` | `{ "kind": "incomplete_place", "missing": ["id", "use", "theme"] }` — the keys the `place` row does not declare, without the trailing `=`, in the order the message lists them. Always non-empty. |
-| `E_INVALID_REQUIRES` | `{ "kind": "invalid_requires", "reason": "unsupported_operator", "found": ">" }` — which way the expression failed and the text that failed. `reason` is one of `not_a_version_requirement`, `unsupported_operator`, `empty_version`, `component_not_a_number`, `component_too_large`, `trailing_tokens`; the code covers several distinct mistakes whose repairs differ, and swapping `>` for `>=` is a one-character edit a tool can offer while a snapshot label is not repairable at all. `found` is empty when the failure names no fragment of its own. |
-| `W_TRUTH_TABLE_PARTIAL` | `{ "kind": "truth_table_partial", "inputs": 2, "covered": 1, "missing": ["01", "10", "11"] }` — how many signals sit left of the `->`, how many distinct combinations the rows assign, and the lowest few they do not. `missing` is a **sample rather than the set**: twenty inputs have a million combinations, so a consumer takes the count from `2^inputs - covered` and never from `missing.len()`. `inputs` is carried instead of that total because the grammar puts no ceiling on the input list and no integer holds `2^130`. |
+| Code | `data` payload |
+|---|---|
+| `W_WALKWAY_BLOCKED` | `{ "kind": "walkway_blocked", "skipped": <u64> }` — cells along the fallback L-shaped path that overlapped an existing structure and were dropped. |
+| `E_DUPLICATE_SELECTOR` | `{ "kind": "duplicate_selector", "rebound": ["frame"] }` — the binding keys this row takes over from an earlier one, without the trailing `=`. Never empty. |
+| `E_UNKNOWN_ID` | `{ "kind": "unknown_id", "id", "registry", "origin", "token"?, "suggestion"? }` — see below. |
+| `E_INCOMPATIBLE_MATERIAL` | `{ "kind": "incompatible_material", "id", "required", "slot"?, "token"? }` — the bound material, the family the geometry needs, and where the binding came from. |
+| `E_INCOMPLETE_PLACE` | `{ "kind": "incomplete_place", "missing": ["id", "use", "theme"] }` — the keys the row does not declare. Never empty. |
+| `E_INVALID_REQUIRES` | `{ "kind": "invalid_requires", "reason", "found" }` — `reason` is one of `not_a_version_requirement`, `unsupported_operator`, `empty_version`, `component_not_a_number`, `component_too_large`, `trailing_tokens`. `found` is empty when the failure names no fragment. |
+| `W_TRUTH_TABLE_PARTIAL` | `{ "kind": "truth_table_partial", "inputs": 2, "covered": 1, "missing": ["01","10","11"] }` — see below. |
 
-Codes not listed above omit `data` entirely; reading `entry.data` returns `undefined` and the JSON
-key is absent (it does not serialise as `null`). New `data` entries land alongside the code that
-needs them as the diagnostic surface stabilises.
+**`E_UNKNOWN_ID.origin`** says who chose the ID, because the repair differs:
+
+| `origin` | Meaning | Where the fix goes |
+|---|---|---|
+| `authored` | The source names the ID. | The author's line. |
+| `catalog` | The registry pack maps a token onto it. | The pack's mapping. |
+| `builtin` | The pack declares no row for a member default, so the compiler's own ID was used. | The pack, which has to grow the row. |
+
+`token` accompanies `catalog` and `builtin` and is absent for `authored`. `suggestion` is absent
+when no declared ID is within the typo threshold, which is always the case for a rename.
+
+`E_INCOMPATIBLE_MATERIAL` follows the same idea: `slot` is the `mat_slot=` name the member read and
+is absent when it carries no binding, and a dotted `token` (`roof.dark_wood`) means the pack's
+mapping is what to correct rather than the source line. `required` is named rather than implied so
+that adding a second family later is a new value here, not a new code.
+
+`W_TRUTH_TABLE_PARTIAL.missing` is a **sample, not the set** — twenty inputs have a million
+combinations. Take the count from `2^inputs - covered`, never from `missing.len()`. `inputs` is
+carried instead of that total because the grammar puts no ceiling on the input list and no integer
+holds `2^130`.
 
 ## 11.3 Error vs warning
-- Things that, left alone, cause unintended results — concept absence, unknown IDs, out-of-domain
-  states — are **errors** (silent substitution and implicit dropping are forbidden).
-- Semantic drift across versions/editions, the non-guarantee of redstone behavior, etc. are
-  **warnings**. So are the partial-build degradations the block-array pass reports (`W_*`), where
-  the compiler rather than the source is the incomplete side and `cairn compile` refuses separately.
-- The `E_` / `W_` prefix is not the severity. `W_` marks a partial-build degradation, and two
-  `E_`-prefixed codes are decided against the rule above rather than by their name:
-  `E_UNKNOWN_SLOT_TARGET` is an **error**, because a slot bound to a non-material value lowers every
-  member that references it to air; `E_THEME_SELECTOR_UNMATCHED` is a **warning**, because a rule
-  that matches nothing overrides nothing and the build is what the rest of the source asked for.
-- `W_IGNORED_ARGUMENT` sits on the line and is currently a **warning**. A `key=` the pass cannot
-  read is dropped and a default put in its place, which is the build differing from the source —
-  but the rule forbids *silent* substitution, and this one is announced. Every source carrying such
-  a value builds today, so promoting it is a breaking change, and the same call decides what an
-  argument key the compiler does not recognise should be. The two are best answered together.
-- Whether autofix is offered is defined by the implementation.
+
+- **Errors** are things that, left alone, produce unintended results: concept absence, unknown IDs,
+  out-of-domain states. Silent substitution and implicit dropping are forbidden.
+- **Warnings** are semantic drift across versions and editions, the non-guarantee of redstone
+  behaviour, and the partial-build degradations the block-array pass reports — cases where the
+  compiler rather than the source is the incomplete side.
+
+The `E_` / `W_` prefix is not the severity. `W_` marks a partial-build degradation, and two
+`E_`-prefixed codes are decided by the rule above rather than by their name:
+
+- `E_UNKNOWN_SLOT_TARGET` is an **error** — a slot bound to a non-material value lowers every
+  member referencing it to air.
+- `E_THEME_SELECTOR_UNMATCHED` is a **warning** — a rule that matches nothing overrides nothing.
+
+`W_IGNORED_ARGUMENT` is currently a **warning**. A `key=` the pass cannot read is dropped and a
+default put in its place, which is the build differing from the source — but the rule forbids
+*silent* substitution, and this one is announced. Every source carrying such a value builds today,
+so promoting it is a breaking change. Whether autofix is offered is up to the implementation.
 
 ## 11.4 Constraint catalog
-In-game constraints (gravity blocks, attachment conditions, fluid flow, disallowed attachment
-combinations, etc.) are cataloged and managed per version ([Versioning and Editions](versioning-editions)).
-A constraint such as "a frame cannot hang on glass" lives here.
+
+In-game constraints — gravity blocks, attachment conditions, fluid flow, disallowed attachment
+combinations — are cataloged and managed per version ([Versioning and Editions](versioning-editions)).
+"A frame cannot hang on glass" lives there.
