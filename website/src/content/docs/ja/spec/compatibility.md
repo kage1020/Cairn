@@ -28,7 +28,7 @@ Stable な面:
 - spec の normative な `.crn` 構文 (キーワード、ヘッダー、ブロック種別、blockstate プリミティブ、
   theme/material プリミティブ、エディションガード)。
 - `build.cairn.lock` のファイルフォーマット (フィールド、ハッシュ入力、
-  [§10.6](/ja/spec/versioning-editions#106-provenance-とロック-再現性) が定める `verified` の意味論)。
+  [§10.6](/ja/spec/versioning-editions#106-provenance-とロック) が定める `verified` の意味論)。
 - `cairn compile`、`cairn check`、`cairn info` のフラグ名、引数の形、JSON 出力スキーマ、プロセス
   終了コード。
 - 正規マテリアル語彙の tier-1 トークン (ユーザーがソースに書く名前)。
@@ -124,5 +124,5 @@ Stable な面ではこれが 2 回目の登場で、1 回目は前リリース�
 - **出力 `.nbt` / `.litematic` / `.schem` / `.mcstructure` のビット一致**はどのティアでも約束
   しない。2 つのリリースが同じソースから構造的に異なるファイルを生成してよく、肝心なのは結果が
   ターゲット `(edition, version)` に対して valid であることと lockfile の `resolved_ir_hash`
-  と一致することです。[§10.6](/ja/spec/versioning-editions#106-provenance-とロック-再現性) を
+  と一致することです。[§10.6](/ja/spec/versioning-editions#106-provenance-とロック) を
   参照。

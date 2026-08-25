@@ -28,7 +28,7 @@ Stable surfaces:
 - `.crn` syntax that is normative in the spec (keywords, headers, block kinds, blockstate
   primitives, theme/material primitives, edition guards).
 - `build.cairn.lock` file format (fields, hash inputs, the `verified` semantics defined in
-  [§10.6](versioning-editions#106-provenance-and-lock-reproducibility)).
+  [§10.6](versioning-editions#106-provenance-and-lock)).
 - `cairn compile`, `cairn check`, `cairn info` — their flag names, argument shapes, JSON
   output schemas, and process exit codes.
 - The canonical material vocabulary's tier-1 tokens (the names users write in source).
@@ -131,4 +131,4 @@ Two classes of change sit outside this matrix entirely:
   promised at any tier. Two releases may produce structurally-different files for the same
   source; what matters is that the result is valid for the target `(edition, version)` and
   matches the lockfile's `resolved_ir_hash`. See
-  [§10.6](versioning-editions#106-provenance-and-lock-reproducibility).
+  [§10.6](versioning-editions#106-provenance-and-lock).
