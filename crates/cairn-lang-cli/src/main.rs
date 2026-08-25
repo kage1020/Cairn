@@ -11,8 +11,8 @@ use cairn_lang_core::lock::{
     LockWalkway, Lockfile, hash_resolved_ir, hash_source,
 };
 use cairn_lang_core::resolve::{
-    BuildableTargets, EditionReport, UnsupportedReason, VersionAxes, VersionFloor,
-    compare_versions, compute_axes, declared_version_floor, resolve,
+    BuildableTargets, EditionReport, UnsupportedEntry, UnsupportedReason, VersionAxes,
+    VersionFloor, compare_versions, compute_axes, declared_version_floor, resolve,
 };
 use cairn_lang_core::{Edition, Severity, check, lower, parse};
 use cairn_lang_formats::bedrock_structure::{ParityNote, build_mcstructure_tag, write_mcstructure};
@@ -22,9 +22,7 @@ use cairn_lang_formats::data_version::{
 use cairn_lang_formats::java_structure::{
     Compound, OutputExt, build_structure_tag, output_filename, write_compound_gzip,
 };
-use cairn_lang_formats::portability::{
-    PortabilityReport, portability_for_bedrock, portability_for_java,
-};
+use cairn_lang_formats::portability::{portability_for_bedrock, portability_for_java};
 use cairn_lang_formats::registry::{RegistryPack, builtin_bedrock, builtin_java};
 use cairn_lang_redstone::{
     PlacementStage, compile_crossing, compile_delay, compile_edition_netlist, compile_netlist,
@@ -779,7 +777,7 @@ fn edition_rows(
             Edition::Java => portability_for_java(&block_ir, &pack.blocks),
             Edition::Bedrock => portability_for_bedrock(&block_ir, &pack.blocks),
         };
-        for note in unsupported_notes(edition, &portability) {
+        for note in unsupported_notes(edition, portability.unsupported()) {
             eprintln!("{note}");
         }
         let dropped = dropped_scopes(&resolution, &block_ir);
@@ -841,25 +839,25 @@ fn edition_rows(
 /// the order they print, under the figure that counts them.
 ///
 /// Returned rather than printed so a test can read the whole block: the
-/// header carries a figure that has to agree with the row on stdout, and
-/// an assertion on one line of stderr cannot see that.
+/// header carries the figure the stdout row carries, and an assertion on
+/// one line of stderr cannot see that.
 ///
-/// The figure is read off the report rather than counted here, so the
-/// header quotes the row's own number instead of a second tally of the
-/// same entries.
+/// The figure is `entries.len()` and that is not a second tally of the
+/// row's: [`PortabilityReport`] raises `unsupported` only beside a push,
+/// and its fields are private, so the length of the list it hands out is
+/// the number the row prints.
 ///
 /// Stderr, beside the other notes this command prints. The four stdout
 /// rows are the text twin of the JSON's top level and what a reader greps;
 /// a per-entry list is not the shape of a row, and a consumer that wants
 /// these structured reads `edition_portability[].unsupported_entries`.
-fn unsupported_notes(edition: Edition, report: &PortabilityReport) -> Vec<String> {
-    let entries = report.unsupported();
+fn unsupported_notes(edition: Edition, entries: &[UnsupportedEntry]) -> Vec<String> {
     if entries.is_empty() {
         return Vec::new();
     }
     let mut notes = vec![format!(
         "note: what `unsupported: {}` counts on {}:",
-        report.counts().unsupported,
+        entries.len(),
         edition.as_str(),
     )];
     notes.extend(entries.iter().map(|entry| {
@@ -2750,6 +2748,51 @@ mod tests {
     //! end-to-end `tests/cli_*.rs` binaries can only assert
     //! circumstantially, by hard-coding both sides of a pairing.
     use super::*;
+
+    /// The whole note block, header included.
+    ///
+    /// Nothing else reads these lines: the end-to-end tests look for an id
+    /// and a clause inside them, which leaves the header, the guard, the
+    /// order and the indent free to change or vanish. The header is the
+    /// part that matters most — it names the figure on stdout that the
+    /// lines below explain, and one that disagreed with the row would be
+    /// worse than no header at all.
+    #[test]
+    fn the_notes_answer_the_figure_they_sit_under() {
+        let entries = vec![
+            UnsupportedEntry {
+                id: "minecraft:oak_sign".to_owned(),
+                reason: UnsupportedReason::AbsentFromEdition {
+                    suggestion: Some("minecraft:oak_log".to_owned()),
+                },
+            },
+            UnsupportedEntry {
+                id: "minecraft:oak_stairs".to_owned(),
+                reason: UnsupportedReason::StateKeyUnread {
+                    key: "waterlogged".to_owned(),
+                    handled: "facing, half, shape".to_owned(),
+                },
+            },
+        ];
+        assert_eq!(
+            unsupported_notes(Edition::Bedrock, &entries),
+            [
+                "note: what `unsupported: 2` counts on bedrock:".to_owned(),
+                format!(
+                    "  note: `minecraft:oak_sign` — {}",
+                    unsupported_reason(&entries[0].reason)
+                ),
+                format!(
+                    "  note: `minecraft:oak_stairs` — {}",
+                    unsupported_reason(&entries[1].reason)
+                ),
+            ],
+        );
+        // A clean source says nothing rather than announcing a count of
+        // nothing, and every edition would otherwise get a block of its
+        // own back to back.
+        assert!(unsupported_notes(Edition::Java, &[]).is_empty());
+    }
 
     /// Each `unsupported` reason renders the repair it names, including
     /// the three no `.crn` can reach.
