@@ -1,19 +1,18 @@
 /* Cairn site theme.
  *
  * Earthy stone palette to match the project's "stacked stones" thesis.
- * Overrides Starlight's CSS variables; do not introduce !important. */
+ * Overrides Starlight's CSS variables; do not introduce !important.
+ *
+ * Starlight's bare :root carries the DARK values and [data-theme="light"] overrides
+ * them, so a token declared on :root alone also lands on the light theme and wins.
+ * Only the accent and background tokens are overridden, once per theme; the text and
+ * gray scales are left to Starlight so they keep inverting correctly. */
 
 :root {
-  --sl-color-accent-low: #f4eee2;
-  --sl-color-accent: #8c6a3c;
-  --sl-color-accent-high: #4a3618;
-  --sl-color-white: #fdfcfa;
-  --sl-color-gray-1: #f1ece1;
-  --sl-color-gray-7: #5a5145;
-  --sl-color-text-accent: #4a3618;
   --sl-font: "Inter", "Hiragino Sans", "Noto Sans JP", system-ui, sans-serif;
 }
 
+:root,
 :root[data-theme="dark"] {
   --sl-color-accent-low: #2a2218;
   --sl-color-accent: #c19a5e;
@@ -21,6 +20,15 @@
   --sl-color-bg: #1a1611;
   --sl-color-bg-nav: #211c14;
   --sl-color-text-accent: #f0d9a6;
+}
+
+:root[data-theme="light"] {
+  --sl-color-accent-low: #f4eee2;
+  --sl-color-accent: #8c6a3c;
+  --sl-color-accent-high: #4a3618;
+  --sl-color-bg: #fdfcfa;
+  --sl-color-bg-nav: #f1ece1;
+  --sl-color-text-accent: #4a3618;
 }
 
 .hero h1 {
