@@ -1,24 +1,32 @@
 ---
-title: "2. Design Principles (P1–P5)"
+title: "2. Design Principles"
 ---
 
-- **P1. Intent/meaning separation (three layers).** The AI declares meaning (intent); blockstate is
-  derived by the compiler by default. Two layers (meaning and blockstate) do not scale to `def`,
-  themes, and multi-building, so the model is extended to a three-layer IR with named members
-  ([Architecture](architecture)).
+## P1 — Separate intent from blockstate
 
-- **P2. Phase-ordered canvas.** Whole-program last-wins (the "paint model") produces order-dependent
-  accidents and is dropped. Commands are auto-sorted into implicit phases and evaluated in a fixed
-  order. Last-wins is restricted to local overrides within the same phase ([Compilation Model](compilation)).
+The author declares meaning; the compiler derives blockstate. Two layers — meaning and blockstate —
+do not scale to `def`, themes, and multi-building, so the model is a three-layer IR with named
+members. See [Architecture](architecture).
 
-- **P3. Small closed vocabulary + escape hatch.** Keep the set of semantic primitives small; the
-  smaller the vocabulary, the more stable LLM generation is and the easier the validator. Missing
-  expressiveness escapes through raw directives.
+## P2 — A phase-ordered canvas
 
-- **P4. Relative, semantic positioning (selectors).** Position by wall selectors and the like rather
-  than absolute coordinates. Blocks, block entities, and entities share one selector grammar
-  ([Syntax](syntax)).
+Whole-program last-wins, the "paint model", produces order-dependent accidents, so it is dropped.
+Commands are sorted into implicit phases and evaluated in a fixed order, and last-wins is restricted
+to local overrides within one phase. See [Compilation Model](compilation).
 
-- **P5. The lint self-correction loop is part of the spec.** The compiler is both a translator and an
-  architectural linter. The form and granularity of error reporting are designed as first-class
-  citizens ([Lint](lint)). Precision is earned through a loop, not one-shot generation.
+## P3 — A small closed vocabulary, with an escape hatch
+
+Keep the set of semantic primitives small. The smaller the vocabulary, the more stable LLM
+generation is and the simpler the validator. Missing expressiveness escapes through `raw`
+directives.
+
+## P4 — Relative, semantic positioning
+
+Position by wall selectors rather than by absolute coordinates. Blocks, block entities, and entities
+share one selector grammar. See [Syntax](syntax).
+
+## P5 — The lint loop is part of the spec
+
+The compiler is both a translator and an architectural linter. The form and granularity of error
+reporting are designed as first-class concerns, because precision is earned through a loop rather
+than through one-shot generation. See [Lint](lint).
