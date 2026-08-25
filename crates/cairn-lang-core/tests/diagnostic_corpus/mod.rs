@@ -141,7 +141,7 @@ pub fn noisy_sources() -> Vec<String> {
         format!("{THEME}struct s size=3x3\n  assert truth(sig.a, sig.b -> sig.o) {{ 00->0 }}\n"),
         // A slot bound to something that is not a material token, and a
         // selector that matches nothing.
-        format!("theme t:\n  slot floor -> 42\n\nstruct s size=3x3\n  floor mat_slot=floor\n"),
+        "theme t:\n  slot floor -> 42\n\nstruct s size=3x3\n  floor mat_slot=floor\n".to_owned(),
         "theme t:\n\
          \x20\x20slot floor -> @oak_planks\n\
          \x20\x20walls[class=nosuchclass] -> mat_slot=floor\n\n\
