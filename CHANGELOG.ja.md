@@ -15,23 +15,29 @@
 ### 破壊的変更
 
 - *(formats,core,cli)* `cairn info` が `unsupported` の数字が数えているパレットエントリを名指しする
-  ようになりました。この数字は、直し方が 3 通りある 3 つの失敗をひとつの整数にまとめたものでした —
-  そのエディションにブロック自体が無い、ブロックはあって意図が持つ状態に対応付けが無い、レジストリ
-  パックが弾くべき状態が state translator まで届いた (これは作者ではなくパックのバグ) の 3 つです。
-  ID も、エントリも、`E_UNKNOWN_ID` が同じ ID に対して出すのと同じ `did you mean` 候補も、カウンタを
-  増やすその場所にすべて揃っていて、すべて捨てられていました。`unsupported: 1` を見た読み手は、
-  ソースを手で二分探索するしかありませんでした。カウントは動きません — もともと数えていたものに
-  名前が付いただけです。エントリは数字の下に stderr で、カウント 1 につき 1 件、パレット順で並びます。
-  stdout の 4 行は変わりません。あれはパイプラインが読むものであり、エントリの一覧は行の形をして
-  いないからです。Bedrock 側はワイルドカードで全失敗を畳むのをやめ、`BedrockStateError` を variant
+  ようになりました。この数字は、直し方が 4 通りある 4 つの失敗をひとつの整数にまとめたものでした —
+  そのエディションにブロック自体が無い、ブロックはあってもこのコンパイラがその状態の対応付けをまだ
+  持たない、Java のドメイン外の状態値が state translator まで届いた、translator が読まない状態キーが
+  届いた、の 4 つです。最後の 1 つだけが作者に直せるもので、エラー自身がすでにそう書いていました。
+  ID もエントリも、カウンタを増やすその場所に揃っていて、どちらも捨てられていました。
+  `unsupported: 1` を見た読み手は、ソースを手で二分探索するしかありませんでした。カウントは動きません
+  — もともと数えていたものに名前が付いただけです。エントリは数字の下に stderr で、カウント 1 につき
+  1 件、パレット順で並び、`E_UNKNOWN_ID` と同じ読み方 (単一の名前空間の中で path を比較する) の
+  `did you mean` が付きます。ただし候補は固定した 1 バージョンの表ではなく、そのエディションが宣言する
+  全 ID から引くので、両者が別のブロックを挙げることがあり、それぞれ自分の問いについては正しい。
+  stdout の 4 行は変わりません。あれは JSON のトップレベルの text 版であり、エントリの一覧は行の形を
+  していないからです。Bedrock 側はワイルドカードで全失敗を畳むのをやめ、`BedrockStateError` を variant
   ごとに照合するようになりました。4 つ目の variant が増えたとき、`_` が指していたバケツに黙って
-  加わるのではなく、ここで分類しなければならなくなります。**破壊的**: `portability_for_java` /
-  `portability_for_bedrock` は `PortabilityCounts` ではなく
-  `PortabilityReport { counts, unsupported }` を返します (同じ問いに別の答えを出しうる 2 組目の
-  入口を増やすのではなく、エディションごとの入口を 1 つに保つため)。`EditionPortability` /
-  `EditionReport` はそれぞれ `unsupported_entries` フィールドを得ます。`--format json` には
-  `edition_portability[].unsupported_entries` が加わります。未知のキーを無視する消費者にとっては
-  追加のみです。
+  加わるのではなく、ここで分類しなければならなくなります。各 reason は組み上がった文ではなく自分の
+  答えのフィールドを持ちます。`valid` と `handled` の一覧も translator 自身の定数から流れてくるので、
+  そこにキーや値が増えれば 2 度目の編集なしにこの報告へ届きます。**破壊的**: `portability_for_java` /
+  `portability_for_bedrock` は `PortabilityCounts` ではなく `PortabilityReport` (フィールドは private、
+  `counts()` / `unsupported()` / `into_unsupported()`) を返します (同じ問いに別の答えを出しうる 2 組目の
+  入口を増やすのではなく、エディションごとの入口を 1 つに保つため)。`BedrockStateError::UnmappableBlock`
+  と `UnknownStairKey` はそれぞれ、メッセージが挙げる集合を持つフィールドを得ます。
+  `EditionPortability` / `EditionReport` はそれぞれ `unsupported_entries` フィールドを得ます。
+  `--format json` には `edition_portability[].unsupported_entries` が加わります。未知のキーを無視する
+  消費者にとっては追加のみです。
 
 - *(cli)* `cairn info` が、どのサポート対象ターゲットならビルドできるかを報告するようになりました。
   ポータビリティのカウンタは **エディション** に対して問うため (範囲の一部で綴りが違うブロックは

@@ -182,20 +182,33 @@ and is not emitted by any code path yet.
 
 The block above is stdout. What each figure in it is made of goes to stderr as `note:` lines — the
 targets below the floor, the versions that refuse and why, and the palette entries counted as
-`unsupported` — so a pipeline reading the rows sees the same four lines whatever the source does.
+`unsupported` — so a pipeline reading the rows sees the same four lines every time `cairn info` runs
+to completion. A run that does not is a different case: a finding refuses the command before any row
+is computed, and stdout is then empty rather than short a line.
 
-The `edition portability` row counts palette entries, and an entry is `unsupported` for one of three
-reasons: the edition has no such block at all; it has the block but no representation for the states
-the intent carries (10.7); or a state the registry pack should have refused reached the state
-translator. The first is a question about IDs and the second about states; only the second can
-produce `degraded`, since a block that does not exist has nothing to lose detail from. The third is
-not a fact about the source at all — the repair is to the pack, and an author cannot make it.
+The `edition portability` row counts palette entries, and an entry is `unsupported` for one of four
+reasons:
 
-The three have three different repairs, which is why the figure alone cannot be acted on. Each entry
-it counts is named on stderr under it, with its reason and — for the ID case — the same
-`did you mean` suggestion `E_UNKNOWN_ID` prints, drawn from every ID the edition declares.
-`--format json` carries them as `edition_portability[].unsupported_entries`, one element per unit of
-the count and in palette order.
+| reason | the repair |
+| --- | --- |
+| the edition has no such block at all | change the material, or the pack's mapping for it |
+| it has the block and this compiler has no mapping for the states the intent carries (10.7) | none yet — the mapping is Cairn's to add |
+| a state value outside the Java domain reached the state translator | none — a pack is expected to reject it, though no pack schema can state a value domain today |
+| a state key the translator does not read reached it | remove the key from the source blockstate |
+
+The first is a question about IDs and the rest about states; only the second can produce `degraded`,
+since a block that does not exist has nothing to lose detail from, and a state the translator refuses
+outright is not a partial loss. The third and fourth are not portability facts: the entry is
+unsupported because something upstream let a blockstate through, not because of anything the edition
+lacks.
+
+Four different repairs is why the figure alone cannot be acted on. Each entry it counts is named on
+stderr under it, with its reason and — for the ID case — a `did you mean` read the way
+`E_UNKNOWN_ID` reads one, path compared inside a single namespace. The candidates differ: a pinned
+build asks one version's table and this row asks every version the edition declares, so the two can
+name different blocks and each is right about its own question. `--format json` carries the entries
+as `edition_portability[].unsupported_entries`, one element per unit of the count and in palette
+order, each with the tag its reason serializes under and that reason's own fields beside it.
 
 Both are asked of the edition rather than of a version, because **that row** reports across a whole
 compatible range. An ID valid for only part of that range — Bedrock renamed `stonebrick` to
