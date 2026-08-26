@@ -151,7 +151,7 @@ Recognized Conventional Commits types in Cairn:
 | `build` | Build system, packaging, Cargo dependencies | Yes |
 | `docs` | Documentation, spec prose, README, examples | No |
 | `test` | Test code only | No |
-| `ci` | GitHub Actions, release-plz, workflow config | No |
+| `ci` | GitHub Actions, release-plz, workflow config, `rust-toolchain.toml` | No |
 | `chore` | Anything else that doesn't ship to users | No |
 | `style` | Formatting / lint-only changes | No |
 
@@ -163,6 +163,44 @@ A scope in parentheses identifies the affected crate or spec area: `feat(core)`,
 Cairn uses date-based versioning (CalVer) `YYYY.M[.PATCH]`. Notable changes are recorded in
 [CHANGELOG.md](CHANGELOG.md). The compatibility contract behind each surface is set by
 [Compatibility Tiers](https://cairn.kage1020.com/spec/compatibility/), not by the version number.
+
+## Toolchain
+
+[`rust-toolchain.toml`](rust-toolchain.toml) names an exact compiler, and every workflow that
+installs Rust does so with `rustup show`, so that file is what decides. A `rustup` on your machine
+picks it up the same way, so you and CI are running the same compiler. Not necessarily the same
+findings: CI runs a three-OS matrix and a lint can be `cfg`-dependent.
+
+This is deliberately not a channel. CI runs `cargo clippy --workspace --all-targets -- -D warnings`,
+so on `stable` a Rust release turns every open branch red on its own: the finding lands on a file
+the branch never touched, in a job its change cannot reach, and the person who reads it first is
+whoever happened to push next. Pinning does not avoid the new lints — it decides when they arrive,
+as a pull request somebody chose to open.
+
+**Bumping it.** Change `channel`, then run what CI runs — the environment is part of the check,
+and a new compiler can introduce a *rustc* warning rather than a clippy lint:
+
+```sh
+cargo fmt --all -- --check
+RUSTFLAGS="-D warnings" cargo clippy --workspace --all-targets -- -D warnings
+RUSTFLAGS="-D warnings" cargo test --workspace --locked
+```
+
+Fix whatever the new release found in the same pull request, and type the commit `ci`. Bumping is
+worth doing on its own rather than inside a feature branch: a diff that is only "new compiler, and
+the lint fixes it asked for" is one a reviewer can read.
+
+**Not the MSRV.** The workspace manifest's `rust-version` is the floor a consumer needs to build
+Cairn; the pin is the single version the project's own checks run under. Raising the pin does not
+raise the floor — `rust-version` moves only when the code actually starts needing a newer compiler,
+because that is a change to who can build the crates.
+
+Only one direction of that is checked. A pin *below* the floor fails on the first build, because
+cargo refuses to build a package whose `rust-version` is above the active compiler. The other
+direction is not checked at all: nothing builds Cairn at 1.95, so code that starts needing a newer
+compiler goes green on the pin while every consumer at the declared floor breaks. `rust-version` is
+a declaration, not a tested guarantee — `cargo +1.95 check --workspace` is what verifies it, and it
+is worth running when a change reaches for a recently stabilised API.
 
 ## Code of Conduct
 

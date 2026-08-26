@@ -174,7 +174,10 @@ jobs:
           cache-dependency-path: crates/cairn-lang-tree-sitter/pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile
       - run: pnpm test
-      - uses: dtolnay/rust-toolchain@stable
+      # Rust comes from rust-toolchain.toml, the same as every workflow
+      # here that installs it.
+      - name: Install Rust toolchain
+        run: rustup show
       - run: cargo test -p cairn-lang-tree-sitter
 
   node-smoke:
