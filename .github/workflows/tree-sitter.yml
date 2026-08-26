@@ -174,11 +174,8 @@ jobs:
           cache-dependency-path: crates/cairn-lang-tree-sitter/pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile
       - run: pnpm test
-      # `rustup show` reads rust-toolchain.toml, the way every other
-      # workflow here installs Rust. An action that names a channel sets
-      # RUSTUP_TOOLCHAIN for the steps after it and so overrides the
-      # pin, which would leave this job on whatever compiler is current —
-      # the one thing the pin exists to stop.
+      # Rust comes from rust-toolchain.toml, the same as every workflow
+      # here that installs it.
       - name: Install Rust toolchain
         run: rustup show
       - run: cargo test -p cairn-lang-tree-sitter

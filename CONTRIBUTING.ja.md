@@ -155,7 +155,7 @@ Cairn で使う Conventional Commits の type:
 | `build` | ビルド、パッケージング、Cargo 依存 | する |
 | `docs` | ドキュメント、spec 散文、README、サンプル | しない |
 | `test` | テストコードのみ | しない |
-| `ci` | GitHub Actions、release-plz、workflow 設定 | しない |
+| `ci` | GitHub Actions、release-plz、workflow 設定、`rust-toolchain.toml` | しない |
 | `chore` | 利用者に届かない雑多な変更 | しない |
 | `style` | フォーマット / lint のみ | しない |
 
@@ -170,9 +170,10 @@ Cairn は日付ベースバージョニング (CalVer) `YYYY.M[.PATCH]` を採�
 
 ## ツールチェーン
 
-[`rust-toolchain.toml`](rust-toolchain.toml) はコンパイラを正確なバージョンで指定し、各ワークフローは
-`rustup show` で Rust を入れるので、決めているのはこのファイルです。手元の `rustup` も同じように読むため、
-ローカルで見える findings は CI が見る findings と同じです。
+[`rust-toolchain.toml`](rust-toolchain.toml) はコンパイラを正確なバージョンで指定し、Rust を入れる
+ワークフローはすべて `rustup show` を使うので、決めているのはこのファイルです。手元の `rustup` も同じ
+ように読むため、**あなたと CI は同じコンパイラで動きます**。findings まで同じとは限りません — CI は
+3 OS のマトリクスで走り、lint には `cfg` 依存のものがあります。
 
 チャンネル指定にしていないのは意図的です。CI は
 `cargo clippy --workspace --all-targets -- -D warnings` を走らせるので、`stable` のままだと Rust の
@@ -180,17 +181,30 @@ Cairn は日付ベースバージョニング (CalVer) `YYYY.M[.PATCH]` を採�
 その変更が到達しないジョブで出て、最初に読むのは次に push した人です。固定しても新しい lint を避けられる
 わけではありません。**いつ来るかを決められる**だけで、誰かが開いた PR として来るようになります。
 
-**上げ方**。`channel` を変え、ローカルで `cargo clippy --workspace --all-targets -- -D warnings`、
-`cargo fmt --all -- --check`、`cargo test --workspace` を回し、新しいリリースが見つけたものを同じ PR で
-直します。コミット種別は `ci` です。feature ブランチの中で上げるより単独の PR にする価値があります —
-「新しいコンパイラと、それが要求した lint 修正だけ」という差分はレビューできるからです。
+**上げ方**。`channel` を変えたら、CI が走らせるものをそのまま走らせます。環境も検査の一部で、新しい
+コンパイラが増やすのは clippy の lint とは限らず rustc の warning のこともあります。
+
+```sh
+cargo fmt --all -- --check
+RUSTFLAGS="-D warnings" cargo clippy --workspace --all-targets -- -D warnings
+RUSTFLAGS="-D warnings" cargo test --workspace --locked
+```
+
+新しいリリースが見つけたものは同じ PR で直し、コミット種別は `ci` にします。feature ブランチの中で
+上げるより単独の PR にする価値があります — 「新しいコンパイラと、それが要求した lint 修正だけ」という
+差分はレビューできるからです。
 
 **MSRV ではありません**。workspace マニフェストの `rust-version` は利用者が Cairn をビルドするのに
 必要な下限で、この pin はプロジェクト自身の検査が走る唯一のバージョンです。pin を上げても下限は上がり
 ません。`rust-version` が動くのはコードが実際に新しいコンパイラを必要とし始めたときだけで、それは誰が
-crate をビルドできるかを変える変更だからです。pin が下限以上であることを別途検査する必要はありません。
-cargo は `rust-version` が動作中のコンパイラより新しい package のビルドを拒否するので、下限を下回る pin
-は最初のビルドで落ちます。
+crate をビルドできるかを変える変更だからです。
+
+検査されているのは片方向だけです。下限を **下回る** pin は最初のビルドで落ちます。cargo が
+`rust-version` より古いコンパイラでの package ビルドを拒否するからです。もう一方は検査されていません。
+1.95 で Cairn をビルドするものはどこにも無いので、新しいコンパイラを必要とし始めたコードは pin では
+緑のまま通り、宣言した下限にいる利用者だけが壊れます。`rust-version` は宣言であって検査済みの保証では
+ありません。確かめるのは `cargo +1.95 check --workspace` で、最近安定化した API に手を伸ばした変更の
+ときは回す価値があります。
 
 ## Code of Conduct
 

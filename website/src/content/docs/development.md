@@ -52,7 +52,7 @@ leaf integrations that nothing depends on. `cairn-lang-formats` is the only crat
 
 | Tool | Pinned by | Notes |
 |---|---|---|
-| Rust 1.98.0 | `rust-toolchain.toml` | An exact version, not a channel. With `rustfmt` and `clippy`. |
+| Rust | `rust-toolchain.toml` | An exact version, not a channel. With `rustfmt` and `clippy`. |
 | Edition 2024, MSRV 1.95 | `Cargo.toml` | Workspace package metadata. |
 | Formatting | `rustfmt.toml` | `max_width = 100`, Unix line endings. |
 | Lints | `[workspace.lints]` in `Cargo.toml` | `unsafe_code = forbid`, `missing_docs = warn`, `clippy::all` + `clippy::pedantic`. |
