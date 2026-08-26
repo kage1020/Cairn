@@ -141,13 +141,13 @@ gap を広げる、構造どうしを近づける) を告げます。`--format j
 `data: { kind: "walkway_blocked", skipped: N }` が付きます。
 
 **マテリアル。** `path=@TOKEN` はメンバのマテリアルと同じ `mat_slot=` パイプラインを通ります。
-`@gravel` のような具体トークンはレジストリパック無しで動き、`@path.gravel` のような抽象トークンは
+`@gravel` のような具体トークンはレジストリパック無しで動きます。`@path.gravel` のような抽象トークンは
 パックの materials カタログを必要とし、外れると `W_ABSTRACT_TOKEN_DEFERRED` か
 `E_UNKNOWN_ABSTRACT_TOKEN` を出します。
 
-**出力。** `connect` 行ごとに site とポートの名前を持つ `.nbt` を 1 つ書き
-(`hamlet_walkway_home1_entry__home2_entry.nbt`)、ロックファイルにワールド原点・寸法・解決済みの経路
-マテリアルを持つ `walkways:` エントリを記録します。
+**出力。** `connect` 行ごとに `.nbt` を 1 つ、site とポートの名前で書きます
+(`hamlet_walkway_home1_entry__home2_entry.nbt`)。ロックファイルには、ワールド原点・寸法・解決済みの
+経路マテリアルを持つ `walkways:` エントリを記録します。
 
 **診断。**
 

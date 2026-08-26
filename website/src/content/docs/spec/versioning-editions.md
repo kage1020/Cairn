@@ -297,9 +297,14 @@ W_INTENT_DEGRADED line 12 id=roof_corner:
 ```
 
 The canonical vocabulary absorbs only ID, state, and serialization differences. **Concept absence
-and game-behaviour differences are not absorbed.** Cases that cannot be: display entities (absent on
-Bedrock), stairs `shape` (no state on Bedrock), armor_stand pose, redstone propagation, item
-components ↔ Bedrock item NBT, light block internal behaviour.
+and game-behaviour differences are not absorbed.** The cases that cannot be:
+
+- display entities (absent on Bedrock)
+- stairs `shape` (no such state on Bedrock)
+- armor_stand pose
+- redstone propagation
+- item components ↔ Bedrock item NBT
+- light block internal behaviour
 
 ### Writing an alternative
 

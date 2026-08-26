@@ -76,10 +76,10 @@ Combining selectors, or using `at=` with anything other than `origin`, is
 ### 9.3.3 Cross-scope references
 
 Every `place` row declares `id=`, `use=`, and `theme=`. A row short of any of them cannot become a
-placement — there is no name for its `.nbt`, no `def` to instantiate, or no theme to resolve its
-`mat_slot=` members against — so it is `E_INCOMPLETE_PLACE`, the message names every missing key,
-and the row is dropped. A key that is present but not a label (`use=3`) is
-`E_TYPE_MISMATCH_LABEL` instead.
+placement: there is no name for its `.nbt`, no `def` to instantiate, or no theme to resolve its
+`mat_slot=` members against. That is `E_INCOMPLETE_PLACE` — the message names every missing key, and
+the row is dropped. A key that is present but not a label (`use=3`) is `E_TYPE_MISMATCH_LABEL`
+instead.
 
 `id=` is required rather than auto-assigned, unlike the geometry members of §9.2, because it is the
 name `east_of=` and `connect` refer to and the name its `.nbt` is written under (§9.3.4).
@@ -142,11 +142,13 @@ When that L would cross an existing structure floor, the compiler searches the g
 detour: the shortest route around the obstacle, and among equal-length routes the one with the
 fewest turns, with deterministic tie-breaking so the same source always lays the same strip.
 
-Only when no unobstructed route exists at all — a port buried under another placement's floor, a
-fully enclosed target, or a site past the router's search-area cap — does the row fall back to the
-straight L with the colliding cells skipped. That earns one `W_WALKWAY_BLOCKED` naming the concrete
-cause and its remedy (move the buried door or window, widen the gap, or bring the structures
-closer), with `data: { kind: "walkway_blocked", skipped: N }` in `--format json`.
+The row falls back to the straight L, with the colliding cells skipped, only when no unobstructed
+route exists at all: a port buried under another placement's floor, a fully enclosed target, or a
+site past the router's search-area cap.
+
+That earns one `W_WALKWAY_BLOCKED` naming the concrete cause and its remedy — move the buried door
+or window, widen the gap, or bring the structures closer. `--format json` carries
+`data: { kind: "walkway_blocked", skipped: N }`.
 
 **Material.** `path=@TOKEN` lifts through the same `mat_slot=` pipeline as member materials.
 Concrete tokens like `@gravel` work without a registry pack; abstract tokens like `@path.gravel`

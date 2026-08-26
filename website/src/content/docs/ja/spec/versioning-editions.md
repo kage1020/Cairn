@@ -287,9 +287,14 @@ W_INTENT_DEGRADED line 12 id=roof_corner:
 ```
 
 正準語彙が吸収できるのは ID / ステート / シリアライズの差だけです。**概念の不在とゲーム挙動の差は吸収
-しません。** 吸収できない代表例: display エンティティ (Bedrock に無い)、階段の `shape` (Bedrock には
-ステートが無い)、armor_stand のポーズ、レッドストーンの伝播、アイテムコンポーネント ↔ Bedrock の
-アイテム NBT、light ブロックの内部挙動。
+しません。** 吸収できない代表例は次のとおりです。
+
+- display エンティティ (Bedrock に無い)
+- 階段の `shape` (Bedrock にはステートが無い)
+- armor_stand のポーズ
+- レッドストーンの伝播
+- アイテムコンポーネント ↔ Bedrock のアイテム NBT
+- light ブロックの内部挙動
 
 ### 代替を書くとき
 
