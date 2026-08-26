@@ -25,8 +25,9 @@ what a member means.
 `logic_*` phases follow `fixtures` because port coordinates are not fixed until sensors and
 actuators are placed in 3D. See [Redstone](redstone).
 
-Last-wins applies only *within* one phase, and `raw` always runs last. Two different members
-contesting a voxel inside a phase resolve the same way and are reported — see §4.8.
+Last-wins applies only to **local overrides within the same phase**, and `raw` always runs last. Two
+different members contesting a voxel inside a phase resolve the same way and are reported — see
+§4.8.
 
 ```
 struct keep size=11x9

@@ -74,6 +74,9 @@ struct keep size=11x9
   walls  id=shell  mat_slot=wall height=5
   roof   id=roof   kind=gable mat_slot=roof overhang=1
 
+  level id=floor1 y=0
+    ...
+
   level id=floor2 y=5
     walls  id=upper class=outer mat_slot=wall height=4
     window class=arrow_slit side=front repeat=3 step=2 y=2 size=1x2 shape=slit
