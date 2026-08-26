@@ -2,8 +2,8 @@
 title: "11. Lint と制約検証"
 ---
 
-コンパイラは行番号付きの警告とエラーを返します。すべてのメッセージは自己修正の三つ組 —
-**何が間違っているか / ターゲットで有効な候補 / 推奨される修正** — を持たなければなりません。
+コンパイラは行番号付きの警告とエラーを返します。すべてのメッセージは自己修正の三つ組、すなわち
+**何が間違っているか / ターゲットで有効な候補 / 推奨される修正** を持たなければなりません。
 [評価フレームワーク](evaluation) のループに乗せるためです。
 
 ## 11.1 診断コード
@@ -31,8 +31,8 @@ title: "11. Lint と制約検証"
 が異なる place はすべてビルドされ、衝突するのは `id=` の重複だけですが、`east_of=` はブロックをまた
 いで届きません。
 
-`E_DUPLICATE_HEADER` の対象は `@cairn` と `@intended_targets` です。`@requires` は除外されます — そ
-の下限はすべての行で最も厳しいものに畳まれるので、2 つ目は制約を追加します ([§5.3](/ja/spec/syntax#53-ヘッダ))。
+`E_DUPLICATE_HEADER` の対象は `@cairn` と `@intended_targets` です。`@requires` は除外されます。その
+下限はすべての行で最も厳しいものに畳まれるので、2 つ目は制約を追加します ([§5.3](/ja/spec/syntax#53-ヘッダ))。
 
 ### 構文と構造
 
@@ -51,18 +51,18 @@ title: "11. Lint と制約検証"
 ジオメトリキーワードで発火します。該当行で 1 回だけ報告され、その下にインデントされたものも一緒に
 落ちます。
 
-`E_UNSUPPORTED_NESTING` — メンバをグループ化するのは `struct` / `def` 内の `level y=N` だけです。
+`E_UNSUPPORTED_NESTING`: メンバをグループ化するのは `struct` / `def` 内の `level y=N` だけです。
 `site` のボディはフラットなリストです。落ちたサブツリーごとに、その根で 1 回報告されます。
 
-`E_TYPE_MISMATCH_LABEL` — ラベル型キーは `id=` / `class=` / `mat_slot=` / `use=` / `theme=` です。
+`E_TYPE_MISMATCH_LABEL`: ラベル型キーは `id=` / `class=` / `mat_slot=` / `use=` / `theme=` です。
 `use=` と `theme=` では、型の合わない値はリゾルバから見るとキーが無いのと区別できません。このコード
 は「キーは行にあるが使えない」、`E_INCOMPLETE_PLACE` は「キーが無い」を意味します。
 
-`E_CONNECT_ARITY` — `connect FROM.PORT to TO.PORT` が位置引数を読む唯一の形です。片側の欠落、`to`
+`E_CONNECT_ARITY`: `connect FROM.PORT to TO.PORT` が位置引数を読む唯一の形です。片側の欠落、`to`
 キーワードの欠落や別トークンへの置き換え、末尾の余分な位置引数、ドット 1 つの `PLACE.PORT` 参照で
 ない端点を対象にします。2 つの端点は独立した修正箇所なので別々に報告されます。
 
-`E_INVALID_REQUIRES` — 受け付ける形は `version`、`>=`、ドット区切り 10 進バージョンの 3 つで、
+`E_INVALID_REQUIRES`: 受け付ける形は `version`、`>=`、ドット区切り 10 進バージョンの 3 つで、
 空白は任意です。それ以外の演算子、バージョンの欠落、10 進数でないか `u32` に収まらない構成要素、
 バージョン後の余分なテキストを対象にします。
 
@@ -73,7 +73,7 @@ title: "11. Lint と制約検証"
 | `E_UNKNOWN_ID` | 固定されたターゲットが宣言していない解決済みブロック ID。 |
 | `E_INCOMPATIBLE_MATERIAL` | ブロックステートを付けるジオメトリを持つメンバが、それを保持できないマテリアルに束縛されている。 |
 | `E_THEME_VARIANT_MISSING` | 固定されたエディションが、テーマのどのエディション別バリアントも束縛できない。 |
-| `E_INCOMPLETE_PLACE` | `place` 行が `id=` / `use=` / `theme=` のいずれかを欠いている ([§9.3](/ja/spec/components-editing-sites#93-複数建築--site))。 |
+| `E_INCOMPLETE_PLACE` | `place` 行が `id=` / `use=` / `theme=` のいずれかを欠いている ([§9.3](/ja/spec/components-editing-sites#93-site-による複数建築))。 |
 
 `E_UNKNOWN_ID` と `E_INCOMPATIBLE_MATERIAL` は block-array lowering 段で発生するので、報告するのは
 `cairn compile` (と `cairn lower`) だけです。`cairn check` は lowering を走らせません。さらに
@@ -111,7 +111,7 @@ title: "11. Lint と制約検証"
 
 | カテゴリ | 検査内容 |
 |---|---|
-| **ジオメトリ** | AABB 展開 — 壁の外の窓、空中に浮くドア。 |
+| **ジオメトリ** | AABB 展開。壁の外の窓、空中に浮くドア。 |
 | **attachment** | 額縁・絵画・看板・ボタン・レバー・松明が有効な取り付け面にあるか。 |
 | **entity_aabb** | エンティティが壁や通路にめり込まないか、ドアの開閉弧を塞がないか、過密でないか。 |
 | **support** | 吊りランタン、松明、キャンプファイア、砂利などの重力ブロックの支持条件。 |
@@ -152,13 +152,13 @@ title: "11. Lint と制約検証"
 
 | コード | `data` ペイロード |
 |---|---|
-| `W_WALKWAY_BLOCKED` | `{ "kind": "walkway_blocked", "skipped": <u64> }` — フォールバックの L 字経路で既存構造と衝突してスキップされたセル数。 |
-| `E_DUPLICATE_SELECTOR` | `{ "kind": "duplicate_selector", "rebound": ["frame"] }` — この行が先行する行から奪う束縛キー。末尾の `=` は含みません。常に非空。 |
-| `E_UNKNOWN_ID` | `{ "kind": "unknown_id", "id", "registry", "origin", "token"?, "suggestion"? }` — 後述。 |
-| `E_INCOMPATIBLE_MATERIAL` | `{ "kind": "incompatible_material", "id", "required", "slot"?, "token"? }` — 束縛されたマテリアル、ジオメトリが必要とするファミリ、束縛の出どころ。 |
-| `E_INCOMPLETE_PLACE` | `{ "kind": "incomplete_place", "missing": ["id", "use", "theme"] }` — 行が宣言していないキー。常に非空。 |
-| `E_INVALID_REQUIRES` | `{ "kind": "invalid_requires", "reason", "found" }` — `reason` は `not_a_version_requirement` / `unsupported_operator` / `empty_version` / `component_not_a_number` / `component_too_large` / `trailing_tokens` のいずれか。失敗が断片を名指ししないとき `found` は空。 |
-| `W_TRUTH_TABLE_PARTIAL` | `{ "kind": "truth_table_partial", "inputs": 2, "covered": 1, "missing": ["01","10","11"] }` — 後述。 |
+| `W_WALKWAY_BLOCKED` | `{ "kind": "walkway_blocked", "skipped": <u64> }`。フォールバックの L 字経路で既存構造と衝突してスキップされたセル数。 |
+| `E_DUPLICATE_SELECTOR` | `{ "kind": "duplicate_selector", "rebound": ["frame"] }`。この行が先行する行から奪う束縛キー。末尾の `=` は含みません。常に非空。 |
+| `E_UNKNOWN_ID` | `{ "kind": "unknown_id", "id", "registry", "origin", "token"?, "suggestion"? }`。後述。 |
+| `E_INCOMPATIBLE_MATERIAL` | `{ "kind": "incompatible_material", "id", "required", "slot"?, "token"? }`。束縛されたマテリアル、ジオメトリが必要とするファミリ、束縛の出どころ。 |
+| `E_INCOMPLETE_PLACE` | `{ "kind": "incomplete_place", "missing": ["id", "use", "theme"] }`。行が宣言していないキー。常に非空。 |
+| `E_INVALID_REQUIRES` | `{ "kind": "invalid_requires", "reason", "found" }`。`reason` は `not_a_version_requirement` / `unsupported_operator` / `empty_version` / `component_not_a_number` / `component_too_large` / `trailing_tokens` のいずれか。失敗が断片を名指ししないとき `found` は空。 |
+| `W_TRUTH_TABLE_PARTIAL` | `{ "kind": "truth_table_partial", "inputs": 2, "covered": 1, "missing": ["01","10","11"] }`。後述。 |
 
 **`E_UNKNOWN_ID.origin`** は誰がその ID を選んだかを示します。修復先が違うからです。
 
@@ -182,7 +182,7 @@ title: "11. Lint と制約検証"
 
 ## 11.3 エラーと警告の区分
 
-- **エラー** は放置すると意図しない結果になるもの — 概念の不在、未知 ID、ドメイン外の状態です。
+- **エラー** は放置すると意図しない結果になるもの、すなわち概念の不在、未知 ID、ドメイン外の状態です。
   サイレント置換と暗黙の削除は禁止です。
 - **警告** はバージョン/エディション間の意味ドリフト、レッドストーン挙動の非保証、そして
   block-array パスが報告する部分ビルドの劣化です。不完全なのがソースではなくコンパイラ側の場合です。
@@ -190,9 +190,9 @@ title: "11. Lint と制約検証"
 `E_` / `W_` の接頭辞は severity ではありません。`W_` は部分ビルドの劣化を表し、`E_` 接頭辞の 2 つは
 名前ではなく上のルールで判定されています。
 
-- `E_UNKNOWN_SLOT_TARGET` は **エラー** — マテリアルでない値に束縛されたスロットは、参照するメンバを
-  すべて空気に落とします。
-- `E_THEME_SELECTOR_UNMATCHED` は **警告** — 何にもマッチしないルールは何も上書きしません。
+- `E_UNKNOWN_SLOT_TARGET` は **エラー** です。マテリアルでない値に束縛されたスロットは、参照する
+  メンバをすべて空気に落とすからです。
+- `E_THEME_SELECTOR_UNMATCHED` は **警告** です。何にもマッチしないルールは何も上書きしません。
 
 `W_IGNORED_ARGUMENT` は現時点では **警告** です。読めなかった `key=` は捨てられ代わりに既定値が入る
 ので、ビルドはソースと食い違います。ただしルールが禁じているのは *サイレント* な置換であり、これは
@@ -201,6 +201,6 @@ autofix を提供するかは実装で定義します。
 
 ## 11.4 制約カタログ
 
-ゲーム内制約 — 重力ブロック、取り付け条件、流体挙動、許容されない組み合わせ — はカタログ化し、
+ゲーム内制約 (重力ブロック、取り付け条件、流体挙動、許容されない組み合わせ) はカタログ化し、
 バージョンごとに管理します ([バージョンとエディション](versioning-editions))。「額縁はガラスに
 掛けられない」のような制約はここに入ります。

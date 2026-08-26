@@ -26,13 +26,13 @@ It is the output target of the forward direction and the input destination of th
 A named member carries `id`, `class`, `role`, `mat_slot`, `intent_state`, and `resolved_state`
 ([Blockstate Model](blockstate)).
 
-A raw import does not produce a valid Intent IR — it reaches one only after a semantic lift. An
+A raw import does not produce a valid Intent IR. It reaches one only after a semantic lift, and an
 artifact's progress along that path is `semantic_level: raw | grouped | lifted`.
 
 ## 3.3 Redstone sub-layers
 
 When redstone is described logically ([Redstone](redstone)), three IR layers with distinct roles sit
-between the Intent IR and the block-array IR — the same separation HDL uses:
+between the Intent IR and the block-array IR, the same separation HDL uses:
 
 ```
 Logic IR      logical expressions, dependency DAG. Edition-neutral, zero delay
@@ -41,7 +41,7 @@ Placement IR  cell coordinates + actual wire length. Delay and ticks determined 
 ```
 
 The logic is edition-neutral; the place-and-route result (tiles, timing) is edition-specific.
-**Delay is not carried in the Logic or Netlist IR** — it is determined in the Placement IR.
+**Delay is not carried in the Logic or Netlist IR.** The Placement IR determines it.
 
 ## 3.4 What the split buys
 

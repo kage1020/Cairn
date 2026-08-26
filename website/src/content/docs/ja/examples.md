@@ -21,9 +21,9 @@ description: 実際の .crn ファイル。言語面だけが画面に残るよ�
 
 | ファイル | 示すもの |
 |---|---|
-| [`roof-shed.crn`](https://github.com/kage1020/Cairn/blob/main/examples/roof-shed.crn) | `kind=shed slope_to=front` — front の壁へ向かって上がる 1 枚のスロープ。 |
-| [`roof-hip.crn`](https://github.com/kage1020/Cairn/blob/main/examples/roof-hip.crn) | 正方形 footprint の `kind=hip` — 4 面が 1 つの頂部に集まる。 |
-| [`roof-flat.crn`](https://github.com/kage1020/Cairn/blob/main/examples/roof-flat.crn) | `kind=flat` — 1 層のデッキと、それを壁の外へ張り出させる overhang。 |
+| [`roof-shed.crn`](https://github.com/kage1020/Cairn/blob/main/examples/roof-shed.crn) | `kind=shed slope_to=front`。front の壁へ向かって上がる 1 枚のスロープ。 |
+| [`roof-hip.crn`](https://github.com/kage1020/Cairn/blob/main/examples/roof-hip.crn) | 正方形 footprint の `kind=hip`。4 面が 1 つの頂部に集まる。 |
+| [`roof-flat.crn`](https://github.com/kage1020/Cairn/blob/main/examples/roof-flat.crn) | `kind=flat`。1 層のデッキと、それを壁の外へ張り出させる overhang。 |
 
 ## walkway とポート
 

@@ -21,12 +21,12 @@ raw         escape hatch
 A `window` written after `roof` is still cut as an opening in the wall. Source order never decides
 what a member means.
 
-`circuit` writes no voxel — it only marks a routing region — so it belongs to no phase. The three
+`circuit` marks a routing region and writes no voxel, so it belongs to no phase. The three
 `logic_*` phases follow `fixtures` because port coordinates are not fixed until sensors and
 actuators are placed in 3D. See [Redstone](redstone).
 
 Last-wins applies only to **local overrides within the same phase**, and `raw` always runs last. Two
-different members contesting a voxel inside a phase resolve the same way and are reported — see
+different members contesting a voxel inside a phase resolve the same way and are reported. See
 [§4.8](#48-within-phase-conflicts-and-the-palette).
 
 ```
@@ -55,7 +55,7 @@ Bedrock, and Java's DataVersion has nothing to do with Bedrock's block_version.
 
 `roof kind=gable [overhang=N] mat_slot=...` lowers to two opposite stair slopes meeting at a ridge.
 
-The four roof kinds — `gable`, `shed`, `hip`, `flat` — share the overhang and wall-top conventions
+The four roof kinds (`gable`, `shed`, `hip`, `flat`) share the overhang and wall-top conventions
 below. Their layouts are this section and the three that follow.
 
 **Material.** A sloped roof takes its material from `mat_slot=` and it MUST be in the stair family
@@ -75,9 +75,9 @@ rule, but takes its states from its own arguments.
 **Ridge height.** A gable rises `ceil(short_span / 2)` voxels above the wall top, where
 `short_span` is `min(dims.x, dims.z)` after the overhang inflation.
 
-**Layers.** Layer `0` seats on the wall top and is a pair of slope rows — one row when `short_span`
-is 1 and the two converge. Each layer above steps inward by one on each side. The topmost layer is
-the apex:
+**Layers.** Layer `0` seats on the wall top and is a pair of slope rows, or one row when
+`short_span` is 1 and the two converge. Each layer above steps inward by one on each side. The
+topmost layer is the apex:
 
 - odd span: one `half=top` stair on the centre row.
 - even span: two `half=top` stairs on the adjacent meeting rows, so the ridge leaves no open V.
@@ -98,7 +98,7 @@ the `+z` row for an x-axis ridge). Facing inward would leave a 0.5 × 0.5 underc
 faces for the roof's whole length; facing outward moves that void under the ridge.
 
 An odd span's single apex stair is `half=top` with the low-slope facing. One cell has two outer
-faces and a stair serves one, so the void is unavoidable and the rule just fixes the choice.
+faces and a stair serves one, so the void is unavoidable and the rule fixes the choice.
 
 ## 4.4 Shed roof voxel rules
 
@@ -109,9 +109,9 @@ authored height.
 
 - **Slope axis.** `slope_to=front|back` rises along `z`; `slope_to=left|right` rises along `x`. The
   high edge sits on the named wall, the low edge on the opposite one.
-- **Height.** A shed rises `slope_span` voxels above the wall top — `dims.z` for `front|back`,
-  `dims.x` for `left|right`, after overhang inflation. Each layer steps inward by 1 from the low
-  edge as `y` rises.
+- **Height.** A shed rises `slope_span` voxels above the wall top: `dims.z` for `front|back` and
+  `dims.x` for `left|right`, both after overhang inflation. Each layer steps inward by 1 from the
+  low edge as `y` rises.
 - **Stair orientation.** Every slope stair points at the high edge: `front` → `facing=south`,
   `back` → `north`, `left` → `west`, `right` → `east`. The top layer is capped with one row at
   `half=top` and the same facing.
@@ -123,7 +123,7 @@ authored height.
 `roof kind=hip [overhang=N] mat_slot=...` lowers to a four-sided stair pyramid: all four walls
 slope inward toward a centre ridge.
 
-- **Ridge axis and height.** As `gable` — long axis, square ties to `x`, `ceil(short_span / 2)`
+- **Ridge axis and height.** As `gable`: long axis, square ties to `x`, `ceil(short_span / 2)`
   above the wall top.
 - **Layer layout.** Layer `L ∈ 0..extra_height` is the inset rectangle frame
   `[L, dims.x − 1 − L] × [L, dims.z − 1 − L]`. Layer `0` seats on the wall top and is always this
@@ -151,8 +151,8 @@ slope inward toward a centre ridge.
 `y = wall_top + 1`, spanning the whole inflated bounding box.
 
 - **Material.** Every deck cell is the `mat_slot=` binding's id with no blockstate, falling back to
-  `minecraft:spruce_planks`. A deck is whole blocks, so unlike a sloped roof any id is valid — a
-  stair among them is just a stair in its default state.
+  `minecraft:spruce_planks`. A deck is whole blocks, so any id is valid where a sloped roof would
+  refuse: a stair among them is a stair in its default state.
 - **Height.** A flat roof adds `1` to `Dims.y` whatever the footprint, so `size=WxH` with
   `walls height=K` gives `Dims.y = 1 + K + 1`.
 - **No slope arguments.** `slope_to=`, kind-specific facings, and ridge axes do not apply.
@@ -171,14 +171,14 @@ Dims.z = size.H + 2 × overhang
 Dims.y = 1 + wall_top + roof_extra
 ```
 
-Each term counts only the members that will actually paint:
+Each term counts only the members that will paint:
 
-- `overhang` — the largest `overhang=` on any roof that will draw (a `kind=` the compiler knows,
+- `overhang`: the largest `overhang=` on any roof that will draw (a `kind=` the compiler knows,
   plus a `slope_to=` if that kind is `shed`).
-- `wall_top` — the largest `N + height` over the walls whose `mat_slot=` resolves, `N` being the
+- `wall_top`: the largest `N + height` over the walls whose `mat_slot=` resolves, `N` being the
   enclosing level's offset and `0` in the body.
-- `roof_extra` — the tallest per-kind contribution from [§4.3](#43-gable-roof-voxel-rules)–[§4.6](#46-flat-roof-voxel-rules).
-- `1` — the base plane, which every struct has.
+- `roof_extra`: the tallest per-kind contribution from [§4.3](#43-gable-roof-voxel-rules)–[§4.6](#46-flat-roof-voxel-rules).
+- `1`: the base plane, which every struct has.
 
 Members inside a `level` count in all three: a struct whose only walls sit under `level y=5` is as
 tall as one that writes them directly.
@@ -208,17 +208,17 @@ Across phases, the phase order decides: a `door` cut through `walls` is massing 
 openings, and the hole is the point. Inside one phase, only source order separates two members,
 which is what [§4.1](#41-phase-evaluation) grants to "local overrides within the same phase".
 
-That grant is for an author restating a member. Two footprints that merely intersect are a
+That grant is for an author restating a member. Two footprints that intersect by accident are a
 different thing, so the compiler keeps the last write and emits `W_PHASE_CONFLICT` naming both
 members and how many voxels changed hands. The build is unchanged; the author is told that a line
 they could move is deciding the result.
 
 Two cases are not conflicts:
 
-- A cell whose value does not change — two `walls` of one material meeting over shared rows.
-- A member writing over itself — a `window` whose `repeat=` / `step=` stamps overlap.
+- A cell whose value does not change, as when two `walls` of one material meet over shared rows.
+- A member writing over itself, as when a `window`'s `repeat=` / `step=` stamps overlap.
 
-**The palette** of an evaluated body — a `struct`, a `def`, and each `place` that instantiates one —
+**The palette** of an evaluated body (a `struct`, a `def`, and each `place` that instantiates one)
 lists the blocks that body contains, in the order the phases first painted them, with air at slot
 `0`. It is not a log of everything interned along the way: a material whose last voxel a later
 phase covered is dropped, and the remaining slots renumber onto the gap. Otherwise two sources

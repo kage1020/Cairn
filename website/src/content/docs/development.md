@@ -19,7 +19,7 @@ language spec rather than the compiler, start at the [Specification](/spec/) and
 | `crates/` | The Rust workspace (below). |
 | `editors/vscode/` | VS Code extension. |
 | `examples/` | Worked `.crn` examples. |
-| `website/` | This site — Astro + Starlight, including the specification. |
+| `website/` | This site: Astro + Starlight, including the specification. |
 
 Each crate maps back to the spec chapter it implements:
 
@@ -43,8 +43,8 @@ leaf integrations that nothing depends on. `cairn-lang-formats` is the only crat
 - **`cairn-lang-core` knows nothing about NBT, file formats, redstone simulation, or editor
   protocols.** The block-array IR is the universal pivot ([Architecture](/spec/architecture/));
   everything beyond it lives in a sibling crate.
-- **`cairn-lang-nbt` is just the byte codec.** Litematica regions, schematic palettes, and Bedrock's
-  `.mcstructure` quirks belong in `cairn-lang-formats`.
+- **`cairn-lang-nbt` is the byte codec and nothing more.** Litematica regions, schematic palettes,
+  and Bedrock's `.mcstructure` quirks belong in `cairn-lang-formats`.
 - **`cairn-lang-redstone` reuses core's sensor and actuator placement** but owns its own IR layers
   ([Redstone §14.8](/spec/redstone#148-connection-to-the-ir-and-phases)).
 
@@ -58,7 +58,7 @@ leaf integrations that nothing depends on. `cairn-lang-formats` is the only crat
 | Lints | `[workspace.lints]` in `Cargo.toml` | `unsafe_code = forbid`, `missing_docs = warn`, `clippy::all` + `clippy::pedantic`. |
 
 `unsafe_code` is forbidden workspace-wide with no escape hatch. If a use case ever needs it, it goes
-through a focused PR that lifts the lint on a single module with documented invariants — never
+through a focused PR that lifts the lint on a single module with documented invariants, never
 `#[allow]` at a call site.
 
 ## Build, test, lint
@@ -88,7 +88,7 @@ wasm-pack build crates/cairn-lang-wasm --target web --release
 ## Conventions for Rust code
 
 - **The spec is the source of truth.** When spec and implementation disagree, fix the
-  implementation. If the spec is genuinely wrong, send a spec PR first.
+  implementation. If the spec is wrong, send a spec PR first.
 - **No linter-ignore directives.** `#[allow(clippy::…)]`, `#[allow(dead_code)]`, and friends are not
   allowed. If a lint fires, the design is the bug.
 - **Lift the spec's terms verbatim.** `IntentState`, `ResolvedState`, `MatSlot`, `CanonicalToken`,
@@ -97,17 +97,17 @@ wasm-pack build crates/cairn-lang-wasm --target web --release
   `//!` block.
 - **No Minecraft target constants.** The `(edition, version)` pair is a CLI parameter and must never
   appear in the language semantics ([Compilation Model §4.2](/spec/compilation#42-target-axes)).
-- **Errors carry the self-correction triple** — what is wrong / valid candidates / suggested fix
+- **Errors carry the self-correction triple:** what is wrong / valid candidates / suggested fix
   ([Lint](/spec/lint/)).
 
 ## TDD discipline
 
-1. **Design** — read the relevant spec chapter and restate the slice you are implementing in plain
+1. **Design.** Read the relevant spec chapter and restate the slice you are implementing in plain
    prose.
-2. **Acceptance criteria** — write them as bullets, before any code.
-3. **Tests** — translate the ACs into `#[test]` functions.
-4. **Implementation** — make them pass.
-5. **Iterate** — keep tests and implementation in lockstep until green.
+2. **Acceptance criteria.** Write them as bullets, before any code.
+3. **Tests.** Translate the ACs into `#[test]` functions.
+4. **Implementation.** Make them pass.
+5. **Iterate.** Keep tests and implementation in lockstep until green.
 
 The spec is compact enough that an AC list almost always fits in a few lines. There is no value in
 skipping ahead.
@@ -139,5 +139,5 @@ Adding to it is a **spec change**. Open a spec PR with:
 ## Where to ask
 
 Open an issue against the relevant spec chapter. Implementation-only questions can reference the
-crate README; design questions — vocabulary, IR shape, error message wording — belong against the
-spec.
+crate README. Design questions about vocabulary, IR shape, or error message wording belong against
+the spec.

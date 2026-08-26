@@ -32,13 +32,13 @@ selector grammar in the DSL. Telling them apart is the compiler's job.
 ## 8.2 Anchor conventions
 
 Paintings, item frames, arch windows, stairwells, and overhanging roofs have a declared size that
-differs from the AABB they actually occupy. Left ambiguous, edit stability, theme swapping, and
+differs from the AABB they occupy. Left ambiguous, edit stability, theme swapping, and
 cross-implementation compatibility all break. This is the top open issue in this chapter.
 
 Every primitive therefore carries four things in the IR: an `anchor` (reference point), a declared
 bbox, an actual bbox, and a host face.
 
-Overlapping AABBs resolve by a rule fixed in the spec — either priority merge or a lint error
+Overlapping AABBs resolve by a rule the spec fixes, either priority merge or a lint error
 ([Lint](lint)). Neighbour-dependent blockstate (stairs, fences) breaks when overwritten without
 interference detection: an inner-corner stair left as an outer corner, hanging in mid-air.
 Re-resolving boundary blockstate is the IR layer's responsibility.
@@ -53,5 +53,5 @@ roof     id=roof     kind=gable footprint=struct overhang=1 bounds=expand
 
 Signs, paintings, item frames, and beds contribute to a build's architectural feel, so they are
 adopted. Chest contents, villager inventory, and other information that does not contribute to
-architectural precision is not structured — it goes to the generic `spawn` `nbt={}` or the escape
+architectural precision is not structured. It goes to the generic `spawn` `nbt={}` or the escape
 hatch.

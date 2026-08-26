@@ -24,8 +24,8 @@ the same version. Bedrock resolves its version strings to an internal monotonic 
 The source is the blueprint; the `.nbt` is a target-pinned build output, the equivalent of a binary.
 To use a build on a new version or another edition, recompile the source.
 
-DataFixerUpper is forward-only, lossy, and incomplete — loss is common in items, signs, paintings,
-and block entities. It is a rescue tool, kept out of the language semantics.
+DataFixerUpper is forward-only, lossy, and incomplete, and loss is common in items, signs,
+paintings, and block entities. It is a rescue tool, kept out of the language semantics.
 
 Some residue is unsolvable and is stated rather than hidden:
 
@@ -40,10 +40,10 @@ Geometrically correct NBT is emitted; the gameplay experience is not guaranteed.
 
 Two sources feed the backend, and they are kept apart.
 
-**Machine-extracted** from the game's `--reports` / registry dumps — the truth about syntax and
-domains: block and entity IDs, blockstate properties and their domains, item and component schemas,
-DataVersion, tags. Taking the game itself as the source of truth, rather than anyone's memory,
-structurally solves the knowledge gap about new versions.
+**Machine-extracted** from the game's `--reports` / registry dumps. This is the truth about syntax
+and domains: block and entity IDs, blockstate properties and their domains, item and component
+schemas, DataVersion, tags. Taking the game itself as the source of truth, rather than anyone's
+memory, closes the knowledge gap about new versions at its root.
 
 **Hand-written, version-tagged constraint catalog** for what the data does not carry: attachment (a
 frame cannot go on glass), gravity and support (gravel, hanging lanterns), fluid behaviour, entity
@@ -83,8 +83,8 @@ The hand-written semantic catalog records only the points that differ.
 
 Unknown IDs, out-of-domain states, and parity gaps are hard errors. Silent substitution and implicit
 dropping are forbidden. An error returns the closed set of candidates valid in the target, the
-minimum version, and a suggested fix — sending the model back to registry-derived candidates rather
-than its memory.
+minimum version, and a suggested fix. That sends the model back to registry-derived candidates
+rather than to its memory.
 
 ```text
 E_UNKNOWN_ID line 12: "minecraft:pale_oak_planks" not in 1.21.4 registry.
@@ -109,14 +109,14 @@ The tables ship in the registry pack's `blocks` component, folded with the `inhe
 of [§10.3](#103-backend--data-tables).
 
 The check therefore runs on `cairn compile --target` and nowhere else. `cairn info` and `cairn
-lower` do lower, but pin no version — `info` deliberately reports across the whole range — so they
+lower` do lower, but pin no version, since `info` reports across the whole range by design. They
 skip the comparison rather than pick a version on the author's behalf. `cairn check` does not run
 block-array lowering at all, so no lowering-stage code reaches it, `E_UNKNOWN_ABSTRACT_TOKEN`
 included.
 
 The suggested fix is a typo finder over the same table: `oak_plank` is answered with `oak_planks`.
-A **rename** is not a typo — Bedrock calling Java's `light` `light_block` is six edits away — so the
-message says outright that it has no candidate rather than offering the nearest unrelated block.
+A **rename** is not a typo. Bedrock calls Java's `light` `light_block`, six edits away, so the
+message says it has no candidate rather than offering the nearest unrelated block.
 Closing that gap needs a per-edition alias table the pack does not carry yet.
 
 The same per-version scoping applies to a pack's own material mappings. An entry may carry
@@ -136,17 +136,18 @@ structure file and no lock. That ordering matters: a lock records what was verif
 never say `verified: true` for a target the source itself rules out.
 
 `E_REQUIRES_CONFLICT` is **reserved**. It is defined as a declared floor contradicting the
-registry-*inferred* range, and no inferred range is derived yet — the pack carries no `since` /
-`until`. It is not a conflict between two `@requires` lines: floors compose by taking the strictest,
-so their intersection is never empty. A constraint needing an upper bound, such as `version<1.20`,
-is not a shape the language accepts; that is `E_INVALID_REQUIRES`.
+registry-*inferred* range, and no inferred range is derived yet, because the pack carries no `since`
+/ `until`. It is not a conflict between two `@requires` lines: floors compose by taking the
+strictest, so their intersection is never empty. A constraint needing an upper bound, such as
+`version<1.20`, is not a shape the language accepts; that is `E_INVALID_REQUIRES`.
 
 ### Ordering, and where it stops
 
 [§10.1](#101-the-target-is-a-compile-time-parameter) makes `DataVersion` the canonical ordering key.
-Version comparison today is **component-wise over dotted decimals** instead — a known shortfall, not
-a second convention. The pack does ship a `DataVersion` table; the obstacle is its coverage, since
-it names only the versions the pack was built for while a floor may name any version.
+Version comparison today is **component-wise over dotted decimals** instead. That is a known
+shortfall, not a second convention. The pack does ship a `DataVersion` table; the obstacle is its
+coverage, since it names only the versions the pack was built for while a floor may name any
+version.
 
 Until a lookup can answer for an arbitrary label, a version Cairn cannot order is refused at the
 directive rather than sorted wrongly later: pre-release, snapshot, and date-based labels
@@ -167,12 +168,12 @@ Two things the convention still gets wrong within what it does accept:
 
 There is no single "for-version". `cairn info` reports three axes:
 
-1. **Registry-compatible range `[Vmin, Vmax]`** — the intersection of `since`/`until` over the used
+1. **Registry-compatible range `[Vmin, Vmax]`**: the intersection of `since`/`until` over the used
    tokens and states.
-2. **Semantic-sensitive members** — where the ID stays valid but meaning, behaviour, or appearance
-   changes. This matters more than the range: behaviour changes far more often than IDs disappear,
-   so deciding Vmax from the registry alone is dangerous. The constraint catalog carries a
-   `semantic_sensitivity` (boundary version + reason) separate from `since`/`until`, and a compile
+2. **Semantic-sensitive members**: cases where the ID stays valid but meaning, behaviour, or
+   appearance changes. This matters more than the range: behaviour changes far more often than IDs
+   disappear, so deciding Vmax from the registry alone is dangerous. The constraint catalog carries
+   a `semantic_sensitivity` (boundary version + reason) separate from `since`/`until`, and a compile
    crossing one warns. Examples: the cauldron split at 1.17, wall connections going bool →
    `none/low/tall` at 1.16, the item format at 1.20.5.
 3. **The verified lock target** ([§10.6](#106-provenance-and-lock)).
@@ -191,8 +192,8 @@ Every version named is one the built-in packs declare. The file behind this outp
 
 The four lines go to stdout; what each figure is made of goes to stderr as `note:` lines. A pipeline
 reading the rows sees the same four lines every time `cairn info` runs to completion. A run that
-does not complete is a different case — a finding refuses the command before any row is computed,
-and stdout is then empty rather than short a line.
+A run that does not complete is a different case. A finding refuses the command before any row is
+computed, so stdout is empty rather than short a line.
 
 ### The `edition portability` row
 
@@ -201,33 +202,34 @@ The row counts palette entries. An entry is `unsupported` for one of four reason
 | Reason | The repair |
 |---|---|
 | The edition has no such block at all. | Change the material, or the pack's mapping for it. |
-| It has the block, but Cairn has no mapping for the states the intent carries ([§10.7](#107-java--bedrock-portability)). | None yet — the mapping is Cairn's to add. |
-| A state value outside the Java domain reached the state translator. | None — a pack is expected to reject it, though no pack schema can state a value domain today. |
+| It has the block, but Cairn has no mapping for the states the intent carries ([§10.7](#107-java--bedrock-portability)). | None yet. The mapping is Cairn's to add. |
+| A state value outside the Java domain reached the state translator. | None. A pack is expected to reject it, though no pack schema can state a value domain today. |
 | A state key the translator does not read reached it. | Remove the key from the source blockstate. |
 
 The first is a question about IDs and the rest about states. Only the second can produce `degraded`:
 a block that does not exist has nothing to lose detail from, and a state the translator refuses
-outright is not a partial loss. The third and fourth are not portability facts at all — something
+outright is not a partial loss. The third and fourth are not portability facts at all: something
 upstream let a blockstate through.
 
 Because four different repairs hide behind one figure, each counted entry is named on stderr with
-its reason, and — for the ID case — a `did you mean` read the way `E_UNKNOWN_ID` reads one.
+its reason. The ID case also gets a `did you mean` read the way `E_UNKNOWN_ID` reads one.
 `--format json` carries them as `edition_portability[].unsupported_entries`, one element per unit of
 the count, in palette order.
 
 Both questions are asked of the *edition* rather than of a version, because this row reports across
-a whole compatible range. An ID valid for only part of that range — Bedrock renaming `stonebrick` to
-`stone_bricks` at 1.21.40 — is therefore not `unsupported`. Whether the version actually being built
-has it is what `cairn compile --target` answers, as `E_UNKNOWN_ID` ([§10.4](#104-fail-loud-and-minimum-version-inference)).
+a whole compatible range. An ID valid for only part of that range is therefore not `unsupported`, as
+when Bedrock renamed `stonebrick` to `stone_bricks` at 1.21.40. Whether the version being built has
+it is what `cairn compile --target` answers, as `E_UNKNOWN_ID` ([§10.4](#104-fail-loud-and-minimum-version-inference)).
 
 ### The `buildable targets` row
 
 Counters cannot say everything: two entries can be declared by *disjoint* sets of versions and each
 answer "the edition has it", leaving the row clean while no single version declares both.
 
-`buildable targets` is the per-version answer — per requested edition, the supported versions whose
-pinned lowering raises no error, with the refusing ones named beside them. It is a set rather than a
-`[Vmin, Vmax]` range, because two IDs whose version sets interleave leave a gap a range would claim.
+`buildable targets` is the per-version answer. Per requested edition, it lists the supported
+versions whose pinned lowering raises no error, with the refusing ones named beside them. It is a
+set rather than a `[Vmin, Vmax]` range, because two IDs whose version sets interleave leave a gap a
+range would claim.
 
 It is derived by lowering once per supported version, the same check `cairn compile --target` runs.
 It is **not** derived by intersecting the range-wide palette's ID sets, which is unsound: with no
@@ -235,12 +237,12 @@ target pinned every material takes its *default* mapping, so a token the target 
 as the wrong ID.
 
 Like the counters, this row reports and does not refuse. `cairn info` exits 0 even for a source no
-supported version can build — the build is the command that refuses it. Each refusing version's own
-findings are printed under that version, so an `E_UNKNOWN_ID` never stands without the target that
-raised it.
+supported version can build, because the build is the command that refuses it. Each refusing
+version's own findings are printed under that version, so an `E_UNKNOWN_ID` never stands without the
+target that raised it.
 
 A fifth line, `recommended test targets`, belongs to this axis and answers a different question
-again — which versions are worth testing against. No code path emits it yet.
+again: which versions are worth testing against. No code path emits it yet.
 
 ## 10.6 Provenance and lock
 
@@ -280,7 +282,7 @@ W_SEMANTIC_SENSITIVITY: 2 members may resolve differently: yard_water, fence
 
 Derivation rules are edition-specific: **`intent_state` is neutral, `resolved_state` is
 per-edition**. The contract is "from the same intent, resolve the nearest legal representation per
-edition" — not "guarantee the same result".
+edition", not "guarantee the same result".
 
 ```yaml
 intent_state: { primitive: stairs, corner: inner_left, facing: east }   # edition-neutral
@@ -314,10 +316,10 @@ down this hierarchy:
 
 1. Use a closed semantic primitive (neutral). If it is not representable, fail loud with
    `E_PARITY_UNSUPPORTED`.
-2. Fall back via **slot + per-edition theme** — resolve a `floating_text` slot to `text_display` on
-   Java and a glowing sign on Bedrock.
-3. Only at the escape-hatch layer, guard with `@edition`. Raw IDs and NBT are inherently
-   edition-specific.
+2. Fall back via **slot + per-edition theme**, resolving a `floating_text` slot to `text_display`
+   on Java and a glowing sign on Bedrock.
+3. Only at the escape-hatch layer, guard with `@edition`. Raw IDs and NBT are edition-specific by
+   nature.
 
 ```
 hologram id=shop_sign text="Weapon" mat_slot=floating_text   # the semantic layer is always neutral
@@ -339,8 +341,8 @@ extent out of air.
 
 `place ... theme=NAME` names the **logical** theme and follows exactly that rule, so one site places
 the same def under whichever variant the build needs. Naming a variant there
-(`theme=shop_bedrock`) still resolves — the pin binds the variant it selects and
-`W_THEME_VARIANT_REBOUND` says which was bound instead — but the neutral spelling is what the
+(`theme=shop_bedrock`) still resolves: the pin binds the variant it selects, and
+`W_THEME_VARIANT_REBOUND` says which was bound instead. The neutral spelling is still what the
 semantic layer is meant to carry.
 
 With no `--edition` pin, nothing re-picks a variant the author named. A declared name binds
@@ -350,7 +352,7 @@ module-level pick uses. A name written *with* a suffix the module does not decla
 
 ### Cross-version application
 
-Asymmetric, and deliberately so:
+Asymmetric by design:
 
 - **Downgrade** (new-version NBT → old-version world) is a hard error. Unknown components cause
   crashes and corruption.

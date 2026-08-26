@@ -5,7 +5,7 @@ title: "7. Materials and Themes"
 ## 7.1 Slots as dependency injection
 
 The structure never writes a concrete block name. It carries `mat_slot` injection points, and a
-`theme` binds values to slots and selectors — CSS, or dependency injection, applied to blocks. That
+`theme` binds values to slots and selectors, the way CSS or dependency injection does. That
 separates structure (where the walls are) from style (which blocks, what detailing).
 
 ```
@@ -23,10 +23,10 @@ theme medieval:
 ```
 
 **The cascade.** A member collects the bindings of every selector row it matches, in source order,
-so when two rows bind the same key the later value wins — the same rule CSS applies to two rules of
+so when two rows bind the same key the later value wins. CSS applies the same rule to two rules of
 equal weight.
 
-Rows whose attributes merely overlap rely on that: `window[class=small,side=front]` refines
+Rows whose attributes partly overlap rely on that: `window[class=small,side=front]` refines
 `window[class=small]` for the members it selects, and the members only the wider row selects keep
 the wider row's binding.
 
@@ -35,7 +35,7 @@ match member for member, so a key they both bind is read by nothing on the earli
 `E_DUPLICATE_SELECTOR` ([Lint §11.1](lint#111-diagnostic-codes)). Sameness is by meaning: attribute
 order does not count, and `class=` / `id=` / `mat_slot=` values compare as label text, so
 `window[class=small]` and `window[class="small"]` are one selector. Rows that coincide but bind
-different keys are not reported — they compose, and splitting a long binding list over two lines is
+different keys are not reported. They compose, and splitting a long binding list over two lines is
 allowed.
 
 `def`, `theme`, and `site` are unified by the same slot-bearing Component mechanism
@@ -52,7 +52,7 @@ Tokens come in two tiers:
 
 | Tier | Example | What it means |
 |---|---|---|
-| **Canonical block token** | `@oak_planks`, `@water_cauldron`, `@oak_log[axis=x]` | A specific meaning in Minecraft. Silent meaning-breaking downgrades are **forbidden** — `@water_cauldron` may never become `cauldron`. |
+| **Canonical block token** | `@oak_planks`, `@water_cauldron`, `@oak_log[axis=x]` | A specific meaning in Minecraft. Silent meaning-breaking downgrades are **forbidden**, so `@water_cauldron` may never become `cauldron`. |
 | **Abstract material token** | `@floor.wood.broadleaf`, `@roof.dark_wood` | An aesthetic choice. Theme policy MAY downgrade these (oak ↔ birch). |
 
 ```

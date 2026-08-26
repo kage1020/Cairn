@@ -61,10 +61,10 @@ title: "用語集"
   あるか) と **スタイル** (どのブロックか) を分離する。
 - **`def`**。スロット保持型 Component 定義 (再利用可能な struct)。再帰は禁止、パラメータ化は許可。
   コンポジットの最小バージョンは構成要素の最大値。
-  [components-editing-sites §9.1](components-editing-sites#91-def--コンポーネント)。
+  [components-editing-sites §9.1](components-editing-sites#91-コンポーネント構文-def)。
 - **`site`**。`def` 由来の構造体を絶対座標ではなくトポロジカルな関係 (`east_of`、`gap=`、`connect`)
   で配置する複数建築コンテナ。
-  [components-editing-sites §9.3](components-editing-sites#93-複数建築--site)。
+  [components-editing-sites §9.3](components-editing-sites#93-site-による複数建築)。
 
 ## コンパイル
 

@@ -1,11 +1,11 @@
 ---
-title: "Specification — 2026.06 (draft)"
+title: "Specification 2026.06 (draft)"
 description: The normative specification of Cairn, an intermediate language for reading and writing Minecraft builds.
 ---
 
 This is the normative specification of **Cairn**, an intermediate language for AI to read and write
-Minecraft builds. It avoids the inefficiency of NBT/SNBT — binary, one record per block — and aligns
-architectural knowledge (walls, roofs, symmetry) with the voxel world. The approach is
+Minecraft builds. It avoids the inefficiency of NBT/SNBT, which is binary and one record per block,
+and aligns architectural knowledge (walls, roofs, symmetry) with the voxel world. The approach is
 **generation-first**, and therefore lossy on purpose.
 
 ## Reading order
@@ -38,13 +38,13 @@ architectural knowledge (walls, roofs, symmetry) with the voxel world. The appro
 
 ## Two version axes
 
-Cairn's own releases use date-based versioning (CalVer) `YYYY.M[.PATCH]` — `2026.7` for a monthly
+Cairn's own releases use date-based versioning (CalVer) `YYYY.M[.PATCH]`: `2026.7` for a monthly
 release, `2026.7.1` for an in-month patch. They sort chronologically as strings. A release bundles
 the language spec, the reference compiler, the standard library, and the `(edition, version)`
 registry and constraint catalogs.
 
 **Minecraft also moved to date-based versions**, so the two cannot be told apart by format. They are
-distinguished by field, flag, or keyword — never by shape:
+distinguished by field, flag, or keyword, never by shape:
 
 | | Cairn's own version | The Minecraft target |
 |---|---|---|
@@ -55,5 +55,5 @@ distinguished by field, flag, or keyword — never by shape:
 In prose, disambiguate with a prefix: `cairn:2026.06` and `mc:1.21.4`.
 
 This document is **2026.6 (draft)**, superseding the former `v0.2` label. A `.crn` file MAY declare
-`@cairn 2026.06` — the language version it was written against. It is provenance only, so a future
+`@cairn 2026.06`, the language version it was written against. It is provenance only, so a future
 compiler can parse and warn correctly. See [Syntax §5.3](syntax#53-headers).

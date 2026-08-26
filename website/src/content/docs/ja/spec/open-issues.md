@@ -4,11 +4,11 @@ title: "15. 未決事項"
 
 ## 15.1 実装時に決める選択
 
-**provenance をどこに置くか** — `.crn` のヘッダか、ロックか。暫定方針は「`.crn` はヒントである
+**provenance をどこに置くか。** `.crn` のヘッダか、ロックか。暫定方針は「`.crn` はヒントである
 `@intended_targets` だけを持ち、`verified` のような記録はコンパイラがロックに書く」です
 ([バージョンとエディション](versioning-editions))。
 
-**逆方向 IR の型** — 縮退できる単一の IR にするか、Intent IR と Raw Geometry IR を別の型にするか。
+**逆方向 IR の型。** 縮退できる単一の IR にするか、Intent IR と Raw Geometry IR を別の型にするか。
 暫定方針は「block-array 層は共有し、その上のメンバ層で型を分ける」です
 ([アーキテクチャ](architecture))。
 
@@ -30,5 +30,5 @@ title: "15. 未決事項"
 
 Cairn が進化する中で破壊的変更をどう扱うかは未決です。選択肢は、Rust 流の「エディション」機構 (年単
 位のオプトイン) か、CHANGELOG でリリースごとに告知するだけにするかです。ここでの「エディション」は既
-に Java / Bedrock を指す語なので、別の用語が必要になります。当面は後者 — CalVer と `@cairn` の
-provenance — で足ります。
+に Java / Bedrock を指す語なので、別の用語が必要になります。当面は後者、すなわち CalVer と `@cairn`
+の provenance で足ります。

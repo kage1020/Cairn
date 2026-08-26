@@ -29,10 +29,10 @@ DSL になったか」** です。
 
 - `block_iou`、`state_accuracy` (facing / shape / waterlogged の一致)、`entity_accuracy`
   (frame / sign / villager / display の保持)。
-- `residual_ratio` — リフト後に残った raw 体積。`compression_ratio` — ボクセル数 ÷ トークン数。
-- `editability_score` — 名前付きメンバ数、slot 化率、安定アドレス率。
-- `theme_extraction_score` — 具体ブロックがインライン化されず slot と theme に分離されたか。
-- `symmetry_score` — `repeat` / `mirror` / `def` に畳まれた割合。`version_portability` — 正準トーク
+- `residual_ratio`: リフト後に残った raw 体積。`compression_ratio`: ボクセル数 ÷ トークン数。
+- `editability_score`: 名前付きメンバ数、slot 化率、安定アドレス率。
+- `theme_extraction_score`: 具体ブロックがインライン化されず slot と theme に分離されたか。
+- `symmetry_score`: `repeat` / `mirror` / `def` に畳まれた割合。`version_portability`: 正準トーク
   ン率。
 
 ## 13.3 運用ルール

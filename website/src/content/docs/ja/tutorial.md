@@ -178,8 +178,8 @@ LLM の算術誤りという最悪のクラスがまるごと消えます。
 
 | したいこと | 読む場所 |
 |---|---|
-| 全部を書き直さずに一部を変える | [編集モデル §9.2](/ja/spec/components-editing-sites#92-編集モデル) — `edit window[class=vent] set shape=arch` |
-| どの Minecraft バージョンで動くか知る | [バージョンとエディション §10.5](/ja/spec/versioning-editions#105-どのバージョン用かには-3-つの答えがある) — `cairn info` の報告 |
-| 既存の schematic を Cairn に取り込む | [エコシステム連携](/ja/spec/ecosystem-interop/) — 写し取り、リフト、voxel-diff |
+| 全部を書き直さずに一部を変える | [編集モデル §9.2](/ja/spec/components-editing-sites#92-編集モデル)。`edit window[class=vent] set shape=arch` |
+| どの Minecraft バージョンで動くか知る | [バージョンとエディション §10.5](/ja/spec/versioning-editions#105-どのバージョン用かには-3-つの答えがある)。`cairn info` の報告 |
+| 既存の schematic を Cairn に取り込む | [エコシステム連携](/ja/spec/ecosystem-interop/)。写し取り、リフト、voxel-diff |
 | 他の屋根の種類を試す | `roof-shed` / `roof-hip` / `roof-flat` の[サンプル](/ja/examples/) |
 | 用語を引く | [用語集](/ja/spec/glossary/) |

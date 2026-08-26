@@ -5,14 +5,14 @@ title: "12. Ecosystem Interop and Reverse Conversion"
 ## 12.1 Forward direction
 
 Serializing the block-array IR emits `.nbt`, `.litematic`, `.schem`, and `.mcstructure`
-([Architecture](architecture)). Each format is just a serializer — existing formats are additional
+([Architecture](architecture)). Each format is a serializer, and existing formats are additional
 backends around the pivot.
 
 ## 12.2 Reverse direction: the compiler transliterates, an LLM lifts
 
 The compiler does not build voxel-to-"this is a wall" computer vision; that becomes unmaintainable.
 It implements a robust faithful transliteration, verification, and voxel-diff. The meaning lift is
-an LLM refactor of the raw-centric DSL — dogfooding the language, and consistent with P5's
+an LLM refactor of the raw-centric DSL. That dogfoods the language and matches P5's
 self-correction loop.
 
 ```text
@@ -40,9 +40,9 @@ Naming is the boundary between transliteration and lift.
 
 | Tier | What it is | Ceiling |
 |---|---|---|
-| **L0 — raw cells** | One voxel per line. Too large for LLM context, so it is an intermediate only. | — |
-| **L1 — spatially compressed** | Fill aggregation, AABB palette compression, `resolved_state` → `intent_state` inversion (`stair facing=east half=top`), symmetry and period folded into `raw_repeat`. **No naming.** | The compiler's ceiling. |
-| **L2 — semantically lifted** | fill → `wall`, repeat → `def` / `use`, concrete block → `mat_slot` + `theme`. | The LLM's ceiling. |
+| **L0, raw cells** | One voxel per line. Too large for LLM context, so it is an intermediate only. | — |
+| **L1, spatially compressed** | Fill aggregation, AABB palette compression, `resolved_state` → `intent_state` inversion (`stair facing=east half=top`), symmetry and period folded into `raw_repeat`. **No naming.** | The compiler's ceiling. |
+| **L2, semantically lifted** | fill → `wall`, repeat → `def` / `use`, concrete block → `mat_slot` + `theme`. | The LLM's ceiling. |
 
 ```
 # L1 — no naming, deterministic
@@ -67,7 +67,7 @@ Other rules:
 - Litematica's multiple regions and sub-region offsets are preserved as provenance rather than
   flattened, and regions map to a `site` or several structs.
 - For entity-bearing schematics, do not mark success on block IoU alone. Keep a separate entity
-  metric and extract only first-class entities ([Entities](entities)) — chest contents and command
+  metric and extract only first-class entities ([Entities](entities)). Chest contents and command
   blocks are dropped.
 - Huge schematics (over 48³, or whole villages) blow up LLM context if lifted at once. They need an
   orchestration of chunk split → per-chunk L1 → per-part lift → join with `site`, over a streaming

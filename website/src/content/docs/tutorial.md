@@ -11,8 +11,8 @@ section assumes the one before it.
 
 ## 1. A cottage
 
-Here is a complete Cairn build —
-[`cottage.crn`](https://github.com/kage1020/Cairn/blob/main/examples/cottage.crn).
+[`cottage.crn`](https://github.com/kage1020/Cairn/blob/main/examples/cottage.crn) is a complete
+Cairn build.
 
 ```
 @cairn 2026.06
@@ -45,7 +45,7 @@ required alongside it. What the source *may* declare is `@requires`, a floor on 
 to support, and `@cairn`, the language version the file was written against.
 
 **The struct says where; the theme says what.** `mat_slot=wall` is an injection point, not a block
-name. The theme binds it. Swap `theme medieval` for another and the geometry never changes — this is
+name. The theme binds it. Swap `theme medieval` for another and the geometry never changes. This is
 the CSS idea, applied to blocks.
 
 **Positions are semantic.** `side=front`, `offset=2`, `y=2`, `at=center` are positions along a wall.
@@ -84,8 +84,8 @@ struct keep size=11x9
     stair  id=eave kind=stairs mat_slot=roof side=front half=top facing=out shape=outer_left
 ```
 
-**Two kinds of token.** `@oak_planks` is a *canonical block token* — a specific meaning that can
-never be silently downgraded. `@floor.wood.broadleaf` is an *abstract material token* — an aesthetic
+**Two kinds of token.** `@oak_planks` is a *canonical block token*, a specific meaning that can
+never be silently downgraded. `@floor.wood.broadleaf` is an *abstract material token*, an aesthetic
 choice a theme may resolve to oak or birch depending on the target.
 
 **`level y=5` gives the upper floor its own `y=0`.** The second-floor window stays at `y=2` from its
@@ -129,11 +129,11 @@ assertion is the only place a number means ticks, because delay is not known unt
 been placed and routed.
 
 **`circuit region=…` reserves space** for place-and-route. If routing does not fit you get
-`E_ROUTE_CONGESTION` with a suggested fix — never a silent overflow.
+`E_ROUTE_CONGESTION` with a suggested fix, never a silent overflow.
 
 **Assertions come in three kinds:** `truth(…)` for combinational logic, `latency(in → out) <= N` for
 bounded delay, and `always(in -> eventually out within N)` for bounded temporal. There is
-deliberately no full LTL — only what a per-tick simulator can decide cheaply.
+no full LTL by design, only what a per-tick simulator can decide cheaply.
 
 **The edition difference is in the cell library, not the language.** The same logic becomes a
 `ComparatorAND` cell on Java and a `TorchAND` on Bedrock. Circuits that depend on quasi-connectivity
@@ -172,7 +172,7 @@ the compiler's job. That removes the single worst class of LLM arithmetic error.
 **Structs expose ports.** `home1.entry` is the door member declared in the `def`, and `connect`
 joins two ports with a walkway.
 
-**The 48³ structure-block limit dissolves.** A village too large for one structure block is just
+**The 48³ structure-block limit dissolves.** A village too large for one structure block is
 several `def`s composed on a `site`.
 
 Read on: [Components, Editing, and Multi-building](/spec/components-editing-sites/).
@@ -181,8 +181,8 @@ Read on: [Components, Editing, and Multi-building](/spec/components-editing-site
 
 | If you want to… | Read |
 |---|---|
-| Change part of a build without rewriting it | [Editing model §9.2](/spec/components-editing-sites#92-editing-model) — `edit window[class=vent] set shape=arch` |
-| Know which Minecraft versions a file works on | [Versioning and Editions §10.5](/spec/versioning-editions#105-which-version-is-it-for-has-three-answers) — the `cairn info` report |
-| Bring an existing schematic into Cairn | [Ecosystem Interop](/spec/ecosystem-interop/) — transliterate, lift, voxel-diff |
+| Change part of a build without rewriting it | [Editing model §9.2](/spec/components-editing-sites#92-editing-model), as in `edit window[class=vent] set shape=arch` |
+| Know which Minecraft versions a file works on | [Versioning and Editions §10.5](/spec/versioning-editions#105-which-version-is-it-for-has-three-answers), the `cairn info` report |
+| Bring an existing schematic into Cairn | [Ecosystem Interop](/spec/ecosystem-interop/): transliterate, lift, voxel-diff |
 | Try the other roof kinds | The `roof-shed`, `roof-hip`, and `roof-flat` [examples](/examples/) |
 | Look up a term | [Glossary](/spec/glossary/) |

@@ -14,10 +14,11 @@ not carried in the language core ([§14.4](#144-time-model)).
 
 ## 14.1 Two tiers, and the v1 boundary
 
-- **Tier 0 — physical placement.** `repeater facing=north delay=2` and the like. You place parts and
-  the blockstate is derived; behaviour is not modeled ([Blockstate Model](blockstate)).
-- **Tier 1 — logic (this chapter).** You declare a signal graph and the compiler turns it into
-  voxels through synthesis → placement → routing.
+- **Tier 0, physical placement.** You write `repeater facing=north delay=2` and the like, placing
+  parts yourself while the compiler derives the blockstate. Behaviour is not modeled
+  ([Blockstate Model](blockstate)).
+- **Tier 1, logic.** This chapter. You declare a signal graph and the compiler turns it into voxels
+  through synthesis → placement → routing.
 
 The only new keywords are `logic`, `circuit`, and `assert`. Logic primitives ship as a built-in
 `def` library, which keeps the vocabulary small and closed (P3).
@@ -59,23 +60,23 @@ with no component behind it.
 `powered_by=`, and `fired_by=` have no host yet and are refused wherever they are written.
 
 **Signal names.** Sensors emit into the `sig.` namespace and actuators read from it, so a name
-outside it can never be read — whether on the left of a `logic` line, in a sensor's `->` tail, or as
+outside it can never be read, whether on the left of a `logic` line, in a sensor's `->` tail, or as
 an actuator key's value. That is `E_LOGIC_INVALID_SIGNAL`. A name is `sig.` and exactly one segment
 after it: `opened_by=a` is not a wire to a signal called `a`, and `opened_by=sig.a.b` names nothing
 either.
 
-The host is checked before the value, so `walls -> a` is one fault and it belongs to the host — no
+The host is checked before the value, so `walls -> a` is one fault and it belongs to the host. No
 way of writing the value makes `walls` a sensor.
 
 **Bindings go after the `[selector]`, never inside it.** `door[id=front] opened_by=sig.power` binds;
 `door[id=front,opened_by=sig.power]` does not. The brackets pick the member the line acts on, so
 nothing written among them is read as a binding. A bracketed pair earns whichever finding still
-applies once it is moved out — `E_LOGIC_MISPLACED_BINDING` naming the brackets when that is the only
-problem, and otherwise the finding for the host or the key.
+applies once it is moved out. `E_LOGIC_MISPLACED_BINDING` names the brackets when that is the only
+problem; otherwise you get the finding for the host or the key.
 
 A `sig.` value under a key that is not one of the four actuator keys is
 `E_LOGIC_UNKNOWN_BINDING_KEY`. The value says a signal was meant to be wired and the key says
-nothing reads it — the shape a typo takes, as in `oepend_by=sig.power`.
+nothing reads it. That is the shape a typo takes, as in `oepend_by=sig.power`.
 
 ## 14.3 The logic layer is a dependency DAG
 
@@ -95,7 +96,7 @@ not a tick value.
 
 ## 14.4 Time model
 
-In v1 only the macros — `delay`, `pulse`, `edge`, `latch`, `counter` — carry time. `delay(3)` is a
+In v1 only the macros carry time: `delay`, `pulse`, `edge`, `latch`, and `counter`. `delay(3)` is a
 cell macro that lowers to three repeaters internally. There is no tick operator to write.
 
 **Delay is carried in neither the Logic IR nor the Netlist IR. It is determined for the first time
@@ -119,27 +120,27 @@ circuit region=basement void=3       # reserve a 3-high service layer; route the
 
 The internal algorithm runs five stages:
 
-1. **Placement** — topological order, left to right.
-2. **Steiner routing** — Manhattan, around what is already standing. Cell bodies and I/O pads are
+1. **Placement.** Topological order, left to right.
+2. **Steiner routing.** Manhattan, around what is already standing. Cell bodies and I/O pads are
    reserved: dust cannot be drawn on one, and a signal cannot pass *through* one, since a component
    either emits or consumes. Every sink is therefore a leaf of its net's tree, and a fanout is a
    trunk beside the row with a tap into each sink rather than a chain through them. Where nothing is
    in the way the wire is a straight rectilinear run; otherwise it goes around, or climbs to a
    `bridge` layer inside the `void=<N>` budget.
-3. **Delay insertion** — a repeater goes in as a buffer only where a segment exceeds the attenuation
+3. **Delay insertion.** A repeater goes in as a buffer only where a segment exceeds the attenuation
    limit of 15. The segment is measured along the **routed** path from driver to sink, and the
    buffer stands on that path, so the straight line between the two is not always wire.
-4. **Crossing legalization** — specified but unbuilt. What the pass lifts onto a `bridge` layer is a
+4. **Crossing legalization.** Specified but unbuilt. What the pass lifts onto a `bridge` layer is a
    buffer repeater whose coordinate is taken, never the wire itself, so two nets sharing a wire
    coordinate stay one strand of dust carrying two signals. The pass **reports** that rather than
    passing it over, naming the pair of signals and the coordinate they meet on, one finding per
    pair. A reservation with no layer above the plane (`void=1`) has nowhere to lift onto, and the
    scope is refused.
-5. **Edition legalization** — see [§14.6](#146-edition-differences).
+5. **Edition legalization.** See [§14.6](#146-edition-differences).
 
 Routing is confined to the `circuit` region. If it does not fit, the compiler fails loud. A sink
-with no clear path from its driver — every way out walled in by a component — is the same refusal
-for a different reason, and says which two coordinates it could not join.
+whose every way out is walled in by a component earns the same refusal for a different reason, and
+the message says which two coordinates it could not join.
 
 ```text
 E_ROUTE_CONGESTION line 21 circuit=basement:
@@ -157,7 +158,8 @@ Logical Cell → Edition Cell → Physical Tile
              → Bedrock: TorchAND      → block array
 ```
 
-- **Absorbed**: repeater, observer, comparator, orientation — cell-implementation differences.
+- **Absorbed**: repeater, observer, comparator, and orientation, all cell-implementation
+  differences.
 - **Not absorbed**: QC (quasi-connectivity), BUD, update order. These depend on the implicit
   semantics of block-update order, for which no portable implementation exists.
 
@@ -172,7 +174,7 @@ E_NO_PORTABLE_IMPL line 15:
 ```
 
 Hand-placed redstone breaks across editions. With a logic description the compiler emits an
-edition-correct circuit instead — the single biggest reason to describe logic rather than parts.
+edition-correct circuit instead. That is the biggest reason to describe logic rather than parts.
 
 ## 14.7 Verification
 
@@ -192,7 +194,7 @@ assert always(sig.button -> eventually sig.door_open within 8)
 
 The self-correction loop (P5) is **synth → sim → diff → patch**, and verification runs per target
 edition. The patch targets place-and-route hints, repeaters, and buffers only. **The Logic IR is
-never rewritten** — self-correction that auto-modifies logic is dangerous.
+never rewritten**, because self-correction that auto-modifies logic is dangerous.
 
 ```text
 E_SIM_ASSERTION_FAILED edition=bedrock:

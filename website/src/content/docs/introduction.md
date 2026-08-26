@@ -1,10 +1,10 @@
 ---
 title: Introduction
-description: What Cairn is, what it deliberately is not, and where to read next.
+description: What Cairn is, what it leaves out on purpose, and where to read next.
 ---
 
-Cairn is a description language for Minecraft builds. You declare intent — walls, roofs, windows,
-symmetry, themes, redstone logic — and the compiler resolves the voxels: blockstates, orientations,
+Cairn is a description language for Minecraft builds. You declare intent (walls, roofs, windows,
+symmetry, themes, redstone logic) and the compiler resolves the voxels: blockstates, orientations,
 coordinate maths, signal routing, and the right block IDs for the edition and version you are
 building for.
 
@@ -13,13 +13,13 @@ that. The name is the thesis.
 
 ## What it solves
 
-Minecraft's NBT/SNBT is inefficient for an AI to read and write — it is binary, and it is one record
+Minecraft's NBT/SNBT is inefficient for an AI to read and write. It is binary, and it is one record
 per block. It is also pitched at the wrong granularity: people and AI reason about walls, roofs, and
 symmetry. Cairn sits between an AI's general architectural knowledge and Minecraft's voxel world.
 
 The portable artifact is always the Cairn source. Emitted NBT and schematics are per-target build
-outputs, the equivalent of a compiled binary — so targeting a new Minecraft version means
-**recompiling the source**, not transcoding the NBT.
+outputs, the equivalent of a compiled binary. Targeting a new Minecraft version means
+**recompiling the source** rather than transcoding the NBT.
 
 ## What it deliberately does not do
 

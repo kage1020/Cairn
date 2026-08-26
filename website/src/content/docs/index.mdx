@@ -1,9 +1,9 @@
 ---
-title: Cairn — a description language for Minecraft builds
-description: Declare intent — walls, roofs, windows, redstone — and the compiler resolves the voxels. Per-edition, per-version, lossy on purpose.
+title: Cairn, a description language for Minecraft builds
+description: Declare intent (walls, roofs, windows, redstone) and the compiler resolves the voxels. Per-edition, per-version, lossy on purpose.
 template: splash
 hero:
-  tagline: A description language for Minecraft builds. Declare intent — walls, roofs, windows, symmetry, redstone — and the compiler resolves the voxels.
+  tagline: A description language for Minecraft builds. Declare intent (walls, roofs, windows, symmetry, redstone) and the compiler resolves the voxels.
   image:
     light: ../../assets/hero.light.svg
     dark: ../../assets/hero.dark.svg
@@ -28,7 +28,7 @@ import { Card, CardGrid } from '@astrojs/starlight/components';
 
 ## Why Cairn
 
-Minecraft's NBT/SNBT is inefficient for AI to handle directly — it's binary, one-record-per-block,
+Minecraft's NBT/SNBT is inefficient for AI to handle directly. It is binary, one record per block,
 and misaligned with how humans and AI reason about architecture (walls, roofs, symmetry). Cairn is
 an **intermediate language that aligns architectural intent with the voxel world**. It is the
 "eyes and hands" an AI uses to see and build.
@@ -43,7 +43,7 @@ Cairn source; emitted NBT/schematics are per-target build outputs.
     compiler; you only override when the value *is* the intent.
   </Card>
   <Card title="Phase-ordered evaluation" icon="list-format">
-    Write commands flat and order-free; the compiler sorts them into fixed phases — massing,
+    Write commands flat and order-free; the compiler sorts them into fixed phases: massing,
     envelope, openings, fixtures, redstone, raw.
   </Card>
   <Card title="CSS-like themes" icon="seti:css">

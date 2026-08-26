@@ -5,7 +5,7 @@ title: "Glossary"
 Defined terms used throughout the specification. Where a term is defined in detail in a chapter,
 that chapter is linked.
 
-This page is **not normative on its own** — the linked chapter is the source of truth — but
+This page is **not normative on its own**, since the linked chapter is the source of truth, but
 implementations and authors SHOULD use these exact spellings. The vocabulary is closed by design
 ([principles P3](principles)); inventing parallel terminology defeats the lint loop.
 
@@ -24,7 +24,7 @@ implementations and authors SHOULD use these exact spellings. The vocabulary is 
   [components-editing-sites](components-editing-sites),
   [materials-themes](materials-themes).
 - **Logic IR / Netlist IR / Placement IR.** The three redstone sub-layers between Intent IR and
-  block-array IR. Delay is **not** carried in Logic/Netlist — only the Placement IR has it. See
+  block-array IR. Delay is **not** carried in Logic/Netlist; only the Placement IR has it. See
   [redstone §14.8](redstone#148-connection-to-the-ir-and-phases),
   [architecture §3.3](architecture#33-redstone-sub-layers).
 - **`semantic_level`.** An imported artifact's progress label: `raw` (one voxel per line) →
@@ -51,8 +51,8 @@ implementations and authors SHOULD use these exact spellings. The vocabulary is 
   be intent is overridable." See
   [blockstate §6.1](blockstate#61-derive-by-default-promote-on-override).
 - **Anchor / bbox.** Every primitive carries an `anchor` (reference point), a declared bbox, an
-  actual bbox, and a host face in the IR — needed because primitives like paintings, item frames,
-  and arch windows have a declared size that differs from the occupied AABB. See
+  actual bbox, and a host face in the IR. Primitives like paintings, item frames, and arch windows
+  have a declared size that differs from the occupied AABB, and these four resolve it. See
   [entities §8.2](entities#82-anchor-conventions).
 
 ## Materials and themes
@@ -69,10 +69,10 @@ implementations and authors SHOULD use these exact spellings. The vocabulary is 
   *structure* (where the walls are) from *style* (which blocks).
 - **`def`.** A slot-bearing Component definition (a reusable struct). Recursion forbidden;
   parameterization allowed. The minimum version of a composite is the max of its parts.
-  See [components-editing-sites §9.1](components-editing-sites#91-def--components).
+  See [components-editing-sites §9.1](components-editing-sites#91-def-the-component-construct).
 - **`site`.** A multi-building container that places `def`-derived structures by topological
   relations (`east_of`, `gap=`, `connect`), not absolute coordinates. See
-  [components-editing-sites §9.3](components-editing-sites#93-multi-building--site).
+  [components-editing-sites §9.3](components-editing-sites#93-multi-building-with-site).
 
 ## Compilation
 
@@ -97,7 +97,7 @@ implementations and authors SHOULD use these exact spellings. The vocabulary is 
 - **`@requires`.** A capability floor on the Minecraft target (e.g. `version>=1.20`). Hard error
   on conflict with the inferred value.
 - **`@intended_targets`.** A hint about which Minecraft versions the file was designed for. Not a
-  verification record — the record lives in the lock.
+  verification record, since the record lives in the lock.
 - **Lock (`*.cairn.lock`).** Compiler-generated reproducibility record. Carries `source_hash`,
   `cairn_version`, `target(mc_version + data_version)`, `registry_pack_hash`,
   `constraint_catalog_hash`, `resolved_ir_hash`, and `verified: true`. See

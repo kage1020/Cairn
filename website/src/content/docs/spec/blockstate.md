@@ -4,12 +4,13 @@ title: "6. Blockstate Model"
 
 ## 6.1 Derive by default, promote on override
 
-By default the compiler derives blockstate from position and neighbours — stair facing, door
+By default the compiler derives blockstate from position and neighbours: stair facing, door
 orientation, glass-pane and fence and wall connections, chest left/right, and so on.
 
 Any blockstate that can be architectural intent is overridable, and **the moment you write it, it is
-promoted to intent**. The strong reading — "if it can be derived, don't let the author write it" —
-is not adopted. The rule is "derive by default; any blockstate that can be intent is overridable".
+promoted to intent**. Cairn does not adopt the strong reading, "if it can be derived, don't let
+the author write it". The rule is "derive by default; any blockstate that can be intent is
+overridable".
 
 Cases that MUST stay overridable, because each can be intent:
 

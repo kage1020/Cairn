@@ -39,9 +39,9 @@ E_DECOMPILE_DIFF: block IoU = 0.962 < threshold 0.985
 
 | 段 | 内容 | 上限 |
 |---|---|---|
-| **L0 — raw cells** | 1 行 1 ボクセル。LLM の文脈には大きすぎるので中間表現のみ。 | — |
-| **L1 — 空間圧縮** | fill 集約、AABB パレット圧縮、`resolved_state` → `intent_state` の逆変換 (`stair facing=east half=top`)、対称性と周期を `raw_repeat` へ畳む。**命名はしません。** | コンパイラの上限。 |
-| **L2 — 意味リフト** | fill → `wall`、repeat → `def` / `use`、具体ブロック → `mat_slot` + `theme`。 | LLM の上限。 |
+| **L0、raw cells** | 1 行 1 ボクセル。LLM の文脈には大きすぎるので中間表現のみ。 | — |
+| **L1、空間圧縮** | fill 集約、AABB パレット圧縮、`resolved_state` → `intent_state` の逆変換 (`stair facing=east half=top`)、対称性と周期を `raw_repeat` へ畳む。**命名はしません。** | コンパイラの上限。 |
+| **L2、意味リフト** | fill → `wall`、repeat → `def` / `use`、具体ブロック → `mat_slot` + `theme`。 | LLM の上限。 |
 
 ```
 # L1 — 命名なし、決定論的

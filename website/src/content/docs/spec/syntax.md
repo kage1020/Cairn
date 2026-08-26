@@ -13,8 +13,8 @@ window front G 2 2 2x2                                            # forbidden (p
 ```
 
 Positional arguments would mean remembering argument order, which an LLM hallucinates and omits.
-Keys like `mat=` and `side=` act as attention anchors and stabilize generation — worth more than the
-tokens they cost.
+Keys like `mat=` and `side=` act as attention anchors and stabilize generation, which is worth
+more than the tokens they cost.
 
 A bare value on a line that reads none is `E_UNEXPECTED_POSITIONAL`. `connect FROM.PORT to TO.PORT`
 is the one form with a reader for positionals, and its shape is checked by `E_CONNECT_ARITY`
@@ -22,12 +22,12 @@ instead.
 
 The parser puts anything that is not `key=`, `-> binding`, or `[selector]` into the positional list,
 so a dropped `=` lands there too. `walls mat_slot=wall height 3` is not a `walls` with a shortened
-height — it is not built at all.
+height. It is not built at all.
 
 ### 5.1.1 Literals and separators
 
-A size literal is exactly two extents, `WxH`. A run that continues past the second — `2x2x9`, or
-`2x2y` — is refused at the literal rather than read as a size followed by something else.
+A size literal is exactly two extents, `WxH`. A run that continues past the second, such as `2x2x9`
+or `2x2y`, is refused at the literal rather than read as a size followed by something else.
 
 Commas are **optional separators**, not structure. `mat=[a, b]` and `mat=[a b]` name the same two
 items, as do `[side=front, y=2]` and `[side=front y=2]`. The two list kinds differ in how much
@@ -50,7 +50,7 @@ The table around those rows is read the same way:
 | A row repeats an earlier one and agrees with it | `W_TRUTH_TABLE_DUPLICATE_ROW` |
 | Some input combinations are unassigned | `W_TRUTH_TABLE_PARTIAL` |
 
-The last two are warnings because the rows that *are* present still assert what they say — a
+The last two are warnings because the rows that *are* present still assert what they say. A
 four-input table is sixteen rows, and an author part way through is not blocked.
 
 Indentation is two spaces per level and opens one level at a time. A width that is not a multiple of
@@ -69,17 +69,17 @@ terminated only by lone `\r` highlights as one long line even though it parses c
 
 ## 5.2 Nesting
 
-Keep nesting shallow — `struct` / `def` / `level` / `theme` / `site`. Deep nesting increases LLM
+Keep nesting shallow: `struct` / `def` / `level` / `theme` / `site`. Deep nesting increases LLM
 generation errors. (`room` is not on this list; it is still open, so writing one today is
 `E_UNKNOWN_KEYWORD`. See [Open Issues](open-issues).)
 
 Inside a body, `level y=N` is the only member that groups other members, and only in a `struct` or a
 `def`. A `site` body is a flat list of `place` and `connect` rows with no grouping construct at all.
-An indented body anywhere else is `E_UNSUPPORTED_NESTING` rather than a silent drop — it lowers to
+An indented body anywhere else is `E_UNSUPPORTED_NESTING` rather than a silent drop. It lowers to
 nothing, places nothing, and lays no walkway.
 
-What `y=N` means to each grouped member is
-[Compilation Model §4.7](compilation#47-level-grouping-and-volume-derivation).
+[Compilation Model §4.7](compilation#47-level-grouping-and-volume-derivation) defines what `y=N`
+means to each grouped member.
 
 **Which keywords a body accepts** follows the same split. A `struct` / `def` body describes one
 building's geometry: `floor`, `walls`, `door`, `window`, `roof`, `stair`, `level`,
@@ -93,9 +93,9 @@ by redstone synthesis from either body, and an `assert` is read by nothing yet.
 **Top-level names are scoped per kind.** `theme` / `def` / `struct` / `site` are four namespaces, so
 one name may appear once in each. Declaring it twice within one kind is `E_DUPLICATE_ITEM`. For
 `theme` / `def` / `struct` the name is what binds, so the first declaration resolves and the repeat
-would otherwise vanish without a signal. Two `site` blocks of one name merge instead — their places
-share one `site::NAME::` namespace — but `east_of=` cannot reach across the blocks, so the merge is
-half a merge and still an error.
+would otherwise vanish without a signal. Two `site` blocks of one name merge instead, sharing one
+`site::NAME::` namespace, but `east_of=` cannot reach across the blocks. The merge is half a merge,
+and still an error.
 
 ## 5.3 Headers
 
@@ -111,7 +111,7 @@ Metadata MAY go in headers rather than in the semantic body:
 headers. It is optional and exists as provenance, so a future compiler can parse and warn correctly.
 
 **`@requires`** is a capability floor. Its expression is the subject `version`, the operator `>=`,
-and a dotted-decimal version, with whitespace optional between the three — `version>=1.21` and
+and a dotted-decimal version, with whitespace optional between the three, so `version>=1.21` and
 `version >= 1.21` are one requirement. `>=` is the only operator, since a floor is the only
 constraint that composes by folding to the strictest. Every other expression is
 `E_INVALID_REQUIRES` rather than a line that quietly declares nothing: a floor that evaporates is
@@ -119,7 +119,7 @@ worse than an absent one, because a reader will still believe it. See
 [Versioning and Editions](versioning-editions).
 
 **`@intended_targets`** says which Minecraft versions the file was designed for. It is not a claim
-of being verified — that record lives only in the lock.
+of being verified. That record lives only in the lock.
 
 `@cairn` and `@intended_targets` appear at most once per module, and a repeat is
 `E_DUPLICATE_HEADER`. `@requires` is the exception: its floors compose, so repeating it adds a
@@ -132,9 +132,9 @@ is measured from the floor (`y = 0`). Inside faces are prefixed: `inside.front`.
 entities, and entities all use one selector grammar.
 
 **`offset` origin.** `offset=0` sits at the wall's left end viewed from outside that wall. The
-`front` and `back` walls anchor at low `x` — `front` from the +z viewpoint, `back` mirrored along x
-so a `sym=true` opening looks symmetric from either side. The `left` and `right` walls anchor at low
-`z` and mirror the same way.
+`front` and `back` walls anchor at low `x`, `front` from the +z viewpoint and `back` mirrored along
+x so a `sym=true` opening looks symmetric from either side. The `left` and `right` walls anchor at
+low `z` and mirror the same way.
 
 `sym=true` mirrors the opening across the wall's midpoint
 (`mirror_offset = wall_length - offset - size_w`). A mirror overlapping the primary rectangle is
