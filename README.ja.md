@@ -75,7 +75,7 @@ cairn compile cottage.crn --edition java --target 1.21.4
 - [チュートリアル](https://cairn.kage1020.com/ja/tutorial/) — [`examples/`](examples/) の
   `.crn` (cottage、themed-tower、redstone-door、village) を順に辿ります。
 - [開発者ガイド](https://cairn.kage1020.com/development/) — Rust ワークスペース構造、
-  クレート依存グラフ、ビルド/テスト/lint コマンド (英語のみ)。
+  依存関係の規則、ビルド/テスト/lint コマンド (英語のみ)。
 
 Markdown ソースは [`website/src/content/docs/`](website/README.md) にあり、コードと同じレビュー
 フローで編集します。`main` への push ごとに Cloudflare Pages の Git 連携が自動デプロイします。
