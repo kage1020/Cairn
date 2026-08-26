@@ -3,14 +3,15 @@ title: Roadmap
 description: Date-driven, small-and-frequent releases. Monthly minor with patches as needed, six named milestones from "source parses" to "redstone simulates".
 ---
 
-Cairn ships **monthly minor releases** under [date-based versioning](spec/versioning-editions#101-the-target-is-a-compile-time-parameter)
+Cairn ships **monthly minor releases** under
+[date-based versioning](spec/versioning-editions#101-the-target-is-a-compile-time-parameter)
 `YYYY.M[.PATCH]`. Each month delivers what is ready; nothing is held back for an arbitrary "1.0".
 Six named milestones cross-cut the monthly schedule so contributors and consumers can plan against
 something more durable than a calendar tick.
 
 > Schedule is a plan, not a promise. The compiler is implemented in the open and slips happen.
 > The [CHANGELOG](https://github.com/kage1020/Cairn/blob/main/CHANGELOG.md) is the source of truth
-> for what actually shipped.
+> for what shipped.
 
 ## Release cadence
 
@@ -19,7 +20,7 @@ something more durable than a calendar tick.
 - **Patches** (`YYYY.M.N`, `N ≥ 1`) are cut on demand from `main` whenever a relevant commit
   lands. Typical triggers: registry/constraint pack updates, regressions, and security fixes.
   No upper bound on patches per month.
-- **Channel:** there is only one — `stable`. Cairn does not run a separate nightly or beta train.
+- **Channel:** there is only one, `stable`. Cairn does not run a separate nightly or beta train.
   Behaviour that is not yet stable is gated by [compatibility tier](spec/compatibility), not by
   release channel.
 - **Backports:** none. The latest release is the supported release. Older `YYYY.M.*` lines do
@@ -33,12 +34,12 @@ the monthly schedule shifts.
 
 | Milestone | Lands by | The thing it earns |
 |---|---|---|
-| **M1 — source parses** | 2026.7.0 | `cairn parse` produces an AST for every example in `examples/` |
-| **M2 — minimal build** | 2026.10.0 | `cairn compile` writes a Java `.nbt` for a single-room structure with floor and walls, plus a lockfile |
-| **M3 — examples work** | 2027.1.0 | `cottage`, `themed-tower`, `village` all round-trip through `cairn compile --edition java` and load in Minecraft |
-| **M4 — Java/Bedrock parity** | 2027.2.0 | Same DSL source emits valid output for both editions; parity table populated; per-edition theme fallbacks work |
-| **M5 — developer experience** | 2027.3.0 | `cairn-lang-lsp` provides diagnostics and completion in at least one editor (VS Code) |
-| **M6 — redstone simulates** | 2027.5.0 | Logical redstone synthesis, place-and-route, and tick simulator land together; `redstone-door` example verifies |
+| **M1, source parses** | 2026.7.0 | `cairn parse` produces an AST for every example in `examples/` |
+| **M2, minimal build** | 2026.10.0 | `cairn compile` writes a Java `.nbt` for a single-room structure with floor and walls, plus a lockfile |
+| **M3, examples work** | 2027.1.0 | `cottage`, `themed-tower`, `village` all round-trip through `cairn compile --edition java` and load in Minecraft |
+| **M4, Java/Bedrock parity** | 2027.2.0 | Same DSL source emits valid output for both editions; parity table populated; per-edition theme fallbacks work |
+| **M5, developer experience** | 2027.3.0 | `cairn-lang-lsp` provides diagnostics and completion in at least one editor (VS Code) |
+| **M6, redstone simulates** | 2027.5.0 | Logical redstone synthesis, place-and-route, and tick simulator land together; `redstone-door` example verifies |
 
 ## Monthly scope
 
@@ -68,8 +69,8 @@ the project is largely complete and the roadmap will be redrawn around real usag
 The release strategy itself is automated:
 
 1. **Monthly minor PR** is opened by a GitHub Actions cron at `17:04 UTC` on the first of each
-   month (deliberately offset from the hour boundary, where GHA crons are most likely to be
-   delayed or skipped).
+   month, offset from the hour boundary on purpose because GHA crons are most likely to be delayed
+   or skipped there.
 2. **Version is computed** from existing tags: no `vYYYY.M.*` tag yet → next is `YYYY.M.0`,
    otherwise the next in-month patch.
 3. **release-plz** generates the version bump and changelog, applies the computed version via

@@ -8,7 +8,7 @@ import { Aside } from '@astrojs/starlight/components';
 <Aside type="caution" title="Not implemented yet">
 The reference compiler is a skeleton. This page is a placeholder for the browser-hosted
 playground that will use the [`cairn-lang-wasm`](https://github.com/kage1020/Cairn/tree/main/crates/cairn-lang-wasm)
-bindings once they exist. The editor below is purely cosmetic — there is nothing to compile yet.
+bindings once they exist. The editor below is cosmetic, since there is nothing to compile yet.
 </Aside>
 
 ## What this page will eventually be
@@ -19,10 +19,10 @@ A two-pane Cairn workbench, all client-side:
   Cairn LSP.
 - A target selector (`--edition java|bedrock`, `--target <version>`) and a compile button.
 - A right-hand pane that flips between:
-  - **Resolved IR** — the block-array IR after phase evaluation.
-  - **Diagnostics** — lint output in the same "what is wrong / valid candidates / suggested
+  - **Resolved IR:** the block-array IR after phase evaluation.
+  - **Diagnostics:** lint output in the same "what is wrong / valid candidates / suggested
     fix" shape used by `cairn` and the LSP ([Lint](/spec/lint/)).
-  - **Bytes** — the per-edition NBT / schematic bytes the compiler would emit.
+  - **Bytes:** the per-edition NBT / schematic bytes the compiler would emit.
 
 The lift loop ([Ecosystem Interop](/spec/ecosystem-interop/)) will live here too: drop a
 `.litematic` or `.mcstructure` file in and watch the compiler produce a raw-centric `.crn`
@@ -46,5 +46,5 @@ struct cottage size=9x7
   roof   kind=gable mat_slot=roof overhang=1
 ```
 
-Track progress on the [Cairn GitHub repository](https://github.com/kage1020/Cairn) — the
+Track progress on the [Cairn GitHub repository](https://github.com/kage1020/Cairn). The
 playground unlocks the moment `cairn-lang-wasm` exposes a `compile()` binding.

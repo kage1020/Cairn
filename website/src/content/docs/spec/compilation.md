@@ -3,200 +3,165 @@ title: "4. Compilation Model"
 ---
 
 ## 4.1 Phase evaluation
-Source MAY be written line-oriented, flat, and order-free. The compiler assigns each command to an
-implicit phase and evaluates them in a **fixed order**:
+
+Write commands flat and in any order. The compiler assigns each one to a phase and evaluates the
+phases in this fixed order:
 
 ```
-massing (shell: floor/walls/volume)
-  → envelope (roof/exterior)
-  → openings (door/window)
-  → fixtures (furnishings: sign/painting/frame/bed/sensors & actuators)
-  → logic_synth (redstone synthesis: Logic IR → Netlist IR)
-  → logic_place (cell placement)
-  → logic_route (routing → Placement IR, delay determined)
-  → raw (escape hatch)
+massing     floor / walls / volume
+envelope    roof / stair
+openings    door / window
+fixtures    sign / painting / frame / bed / sensors / actuators
+logic_synth redstone: Logic IR → Netlist IR
+logic_place cell placement
+logic_route routing → Placement IR, delay determined
+raw         escape hatch
 ```
 
-- A `window` written after `roof` in the source is still applied as an opening in the wall (order
-  accidents are eliminated).
-- **Last-wins applies only to local overrides within the same phase.** `raw` (fill, etc.) is the
-  danger zone and is always applied last. Two *different* members contesting one voxel inside a
-  phase still resolve that way, and are reported — see §4.8.
-- Membership follows the list above: `floor` and `walls` are massing; `roof` is envelope, and so is
-  `stair`, whose eave is exterior (§4.3); `door` and `window` are openings; `pressure_plate` is a
-  sensor and therefore a fixture. `circuit` marks a routing region for the logic phases and writes
-  no voxel, so it belongs to no phase at all.
-- Redstone logic ([Redstone](redstone)) splits the step right after `fixtures` into three
-  phases: only once sensors/actuators are placed in 3D do their I/O port coordinates become fixed,
-  enabling placement and routing.
+A `window` written after `roof` is still cut as an opening in the wall. Source order never decides
+what a member means.
+
+`circuit` marks a routing region and writes no voxel, so it belongs to no phase. The three
+`logic_*` phases follow `fixtures` because port coordinates are not fixed until sensors and
+actuators are placed in 3D. See [Redstone](redstone).
+
+Last-wins applies only to **local overrides within the same phase**, and `raw` always runs last. Two
+different members contesting a voxel inside a phase resolve the same way and are reported. See
+[§4.8](#48-within-phase-conflicts-and-the-palette).
 
 ```
 struct keep size=11x9
 floor  id=base   mat_slot=floor
 walls  id=shell  mat_slot=wall height=5
 roof   id=roof   kind=gable mat_slot=roof overhang=1
-window id=front_windows side=front y=2 offset=2 size=2x2 mat_slot=glass   # opening cut even though after roof
+window id=front_windows side=front y=2 offset=2 size=2x2 mat_slot=glass   # still cut as an opening
 door   id=entry  side=front at=center
 ```
 
 ## 4.2 Target axes
-The target is the **two axes `(edition, version)`**. The version and edition are **not written in the
-DSL source**. The only layer that knows the version/edition is the backend ([Versioning and Editions](versioning-editions)).
+
+The target is the pair `(edition, version)`. Neither is written in the source; only the backend
+knows them. See [Versioning and Editions](versioning-editions).
 
 ```sh
 cairn compile build.crn --edition java    --target 1.21.4
 cairn compile build.crn --edition bedrock --target 1.21.40
 ```
 
-- `--target` alone is **forbidden**; `--edition` is **required**.
-- The same "1.21" means different things on Java and Bedrock, and Java's DataVersion is unrelated to
-  Bedrock's block_version.
+`--edition` is required and `--target` alone is refused. "1.21" means different things on Java and
+Bedrock, and Java's DataVersion has nothing to do with Bedrock's block_version.
 
 ## 4.3 Gable roof voxel rules
 
-`roof kind=gable [overhang=N] mat_slot=...` lowers to a pair of opposite
-stair slopes meeting at a ridge. The four supported roof kinds —
-`gable`, `shed`, `hip`, and `flat` — share an overhang and wall-top
-convention; the kind-specific layout rules are in §4.3–§4.6 below.
+`roof kind=gable [overhang=N] mat_slot=...` lowers to two opposite stair slopes meeting at a ridge.
 
-A sloped roof's material comes from its `mat_slot=` binding and **must be a
-member of the stair family** — an id whose path ends in `_stairs`. The
-geometry derives `facing`, `half`, and `shape` and attaches them to whatever
-it paints, and a whole block has nowhere to put them: the result would be a
-blockstate no version of the game has. The registry pack's four roof species
-(`roof.dark_wood`, `roof.light_wood`, `roof.warm_wood`, `roof.cool_wood`) all
-resolve inside the family, and choosing between them is what the binding is
-for. A binding *outside* the family is `E_INCOMPATIBLE_MATERIAL` and stops
-the build: attaching the states anyway writes a blockstate that does not
-exist, and quietly substituting `minecraft:spruce_stairs` builds the roof
-out of a material nobody chose — both are the silent substitution §10.4
-forbids. With no `mat_slot=` at all that fallback does apply, silently,
-because nothing was asked for.
+The four roof kinds (`gable`, `shed`, `hip`, `flat`) share the overhang and wall-top conventions
+below. Their layouts are this section and the three that follow.
 
-A binding inside the family that also carries blockstates of its own keeps
-its id and loses those states to the geometry, with `W_DEFERRED_MEMBER`.
+**Material.** A sloped roof takes its material from `mat_slot=` and it MUST be in the stair family
+— an id whose path ends in `_stairs`. The geometry attaches `facing`, `half`, and `shape` to
+whatever it paints, and a whole block cannot carry them. A binding outside the family is
+`E_INCOMPATIBLE_MATERIAL` and stops the build. With no `mat_slot=` at all the roof falls back to
+`minecraft:spruce_stairs`. The registry pack's four roof species (`roof.dark_wood`,
+`roof.light_wood`, `roof.warm_wood`, `roof.cool_wood`) all resolve inside the family.
 
-The same rule governs an eave `stair kind=stairs` member: it takes its
-states from its own arguments rather than from a slope, but it attaches them
-to its material the same way.
+A binding inside the family that carries blockstates of its own keeps its id and loses those states
+to the geometry, with `W_DEFERRED_MEMBER`. An eave `stair kind=stairs` follows the same material
+rule, but takes its states from its own arguments.
 
-- **Ridge axis.** The ridge runs along the *long* horizontal axis of the
-  struct footprint. When the footprint is square (`size=WxW`) the tie
-  breaks in favour of `x` (east-west ridge).
-- **Ridge height.** A gable rises `ceil(short_span / 2)` voxels above the
-  wall top, where `short_span` is the *roof bounding box* extent along the
-  short axis (= `min(dims.x, dims.z)` after the overhang inflation below).
-  Layer `0` seats on the wall top and is always a pair of slope rows — a
-  single row when `short_span` is 1 and the two converge on it. Each
-  layer above it steps inward by one on each side. The topmost layer is
-  the apex: odd-span apexes cap with a single `half=top` stair on the
-  centre row, even-span apexes cap with two `half=top` stairs on the
-  adjacent meeting rows so the ridge does not leave an open V. A
-  `short_span` of 1 or 2 rises exactly one layer and therefore has no apex
-  course at all — that layer is layer `0`, seated on the wall, and
-  capping it would leave a half-block slit between the wall and the roof
-  above it.
-- **Overhang.** `overhang=N` inflates the voxel grid by `N` on every
-  horizontal axis (`Dims.x = size.w + 2N`, `Dims.z = size.h + 2N`). Floors,
-  walls, doors, and windows keep their authored coordinates and are
-  shifted inward by `+N` along x and z. The roof spans the full inflated
-  bounding box so the eaves and gable ends extend past the wall ring.
-- **Stair orientation.** Each slope row sets `half=bottom,
-  shape=straight` with `facing` pointed toward the ridge:
-  `south` on the `-z` slope and `north` on the `+z` slope for an x-axis
-  ridge; `east` / `west` mirrored for a z-axis ridge. An even span's
-  two-stair apex straddles the ridge, and each of the pair faces *away*
-  from it (`north` on the `-z` row and `south` on the `+z` row for an
-  x-axis ridge): a `half=top` stair fills the upper half of its voxel
-  plus the lower quarter on its facing side, so an inward-facing pair
-  would leave a 0.5 x 0.5 undercut along each outer face for the roof's
-  full length, where an outward-facing one moves the same void under the
-  ridge. An odd span's single-stair apex caps at `half=top` using the
-  low-slope facing: it is one cell wide with two outer faces and a stair
-  serves only one, so the void is unavoidable there and the facing is
-  fixed by this rule rather than by which face to spare.
+**Ridge axis.** The ridge runs along the long horizontal axis of the footprint. A square footprint
+(`size=WxW`) ties to `x`, giving an east-west ridge.
+
+**Ridge height.** A gable rises `ceil(short_span / 2)` voxels above the wall top, where
+`short_span` is `min(dims.x, dims.z)` after the overhang inflation.
+
+**Layers.** Layer `0` seats on the wall top and is a pair of slope rows, or one row when
+`short_span` is 1 and the two converge. Each layer above steps inward by one on each side. The
+topmost layer is the apex:
+
+- odd span: one `half=top` stair on the centre row.
+- even span: two `half=top` stairs on the adjacent meeting rows, so the ridge leaves no open V.
+
+A `short_span` of 1 or 2 rises exactly one layer, which is layer `0`, and has no apex course.
+
+**Overhang.** `overhang=N` inflates the voxel grid by `N` on both horizontal axes
+(`Dims.x = size.w + 2N`, `Dims.z = size.h + 2N`). Floors, walls, doors, and windows keep their
+authored coordinates and shift inward by `+N`. The roof spans the full inflated box, so eaves and
+gable ends extend past the wall ring.
+
+**Stair orientation.** Slope rows are `half=bottom, shape=straight` with `facing` pointed at the
+ridge: `south` on the `-z` slope and `north` on the `+z` slope for an x-axis ridge, `east` / `west`
+mirrored for a z-axis ridge.
+
+An even span's two apex stairs each face *away* from the ridge (`north` on the `-z` row, `south` on
+the `+z` row for an x-axis ridge). Facing inward would leave a 0.5 × 0.5 undercut along both outer
+faces for the roof's whole length; facing outward moves that void under the ridge.
+
+An odd span's single apex stair is `half=top` with the low-slope facing. One cell has two outer
+faces and a stair serves one, so the void is unavoidable and the rule fixes the choice.
 
 ## 4.4 Shed roof voxel rules
 
-`roof kind=shed slope_to=front|back|left|right [overhang=N] mat_slot=...`
-lowers to a single stair slope rising toward the wall named in
-`slope_to=`. Each row is shaped like a gable's low slope —
-`half=bottom, shape=straight` — but only one of the two slopes is emitted,
-so the opposite wall stays at its authored height (no gable-end fill).
+`roof kind=shed slope_to=front|back|left|right [overhang=N] mat_slot=...` lowers to a single stair
+slope rising toward the wall named in `slope_to=`. Rows are shaped like a gable's low slope
+(`half=bottom, shape=straight`), but only one slope is emitted, so the opposite wall keeps its
+authored height.
 
-- **Slope axis.** When `slope_to=front|back` the slope rises along `z`;
-  when `slope_to=left|right` it rises along `x`. The high edge sits on
-  the wall named in `slope_to`; the low edge sits on the opposite wall.
-- **Height.** A shed roof rises `slope_span` voxels above the wall top,
-  where `slope_span` is the roof bounding-box extent along the slope
-  axis (= `dims.z` for `slope_to=front|back`, `dims.x` for `slope_to=
-  left|right`, after the overhang inflation). Each layer steps inward
-  by 1 voxel from the low edge toward the high edge as `y` rises.
-- **Stair orientation.** Every slope stair points toward the high edge:
-  `slope_to=front` → `facing=south`, `back` → `north`, `left` → `west`,
-  `right` → `east`. The top layer is the apex, capped with one row at
-  `half=top` and the same facing so the peak closes.
-- **Required argument.** `slope_to=` has no default — a `shed` without
-  it surfaces `W_DEFERRED_MEMBER` rather than guessing a direction. An
-  unknown `slope_to=` value reuses the same warning.
+- **Slope axis.** `slope_to=front|back` rises along `z`; `slope_to=left|right` rises along `x`. The
+  high edge sits on the named wall, the low edge on the opposite one.
+- **Height.** A shed rises `slope_span` voxels above the wall top: `dims.z` for `front|back` and
+  `dims.x` for `left|right`, both after overhang inflation. Each layer steps inward by 1 from the
+  low edge as `y` rises.
+- **Stair orientation.** Every slope stair points at the high edge: `front` → `facing=south`,
+  `back` → `north`, `left` → `west`, `right` → `east`. The top layer is capped with one row at
+  `half=top` and the same facing.
+- **`slope_to=` is required.** It has no default. A missing or unknown value is
+  `W_DEFERRED_MEMBER` rather than a guessed direction.
 
 ## 4.5 Hip roof voxel rules
 
-`roof kind=hip [overhang=N] mat_slot=...` lowers to a four-sided stair
-pyramid: all four walls slope inward toward a centre ridge.
+`roof kind=hip [overhang=N] mat_slot=...` lowers to a four-sided stair pyramid: all four walls
+slope inward toward a centre ridge.
 
-- **Ridge axis and height.** Same as a gable — the ridge runs along the
-  long axis (square footprint ties to `x`) and rises
-  `ceil(short_span / 2)` voxels above the wall top.
-- **Layer layout.** Each layer `L ∈ 0..extra_height` is the inset
-  rectangle frame `[L, dims.x − 1 − L] × [L, dims.z − 1 − L]`. Layer `0`
-  seats on the wall top and is always this frame, including when it is
-  also the last layer:
-  - north row (`z = L`): `facing=south, shape=straight`
-  - south row (`z = dims.z − 1 − L`): `facing=north, shape=straight`
-  - west column (`x = L`): `facing=east, shape=straight`
-  - east column (`x = dims.x − 1 − L`): `facing=west, shape=straight`
-  - the four corners use `shape=outer_*` so the diagonal closes:
-    NW = `facing=south, outer_left`; NE = `facing=south, outer_right`;
-    SW = `facing=north, outer_right`; SE = `facing=north, outer_left`.
-- **Apex.** The apex closes what the frames below it have raised, so it
-  applies only when `extra_height > 1`; a short span of 1 or 2 rises a
-  single layer, which is layer `0` and is therefore the frame. On a square
-  footprint the apex is a single `half=top` stair (odd short span) or a
-  `2x2` block of `half=top` stairs (even short span). On a rectangular
-  footprint the apex collapses to a ridge row
-  along the long axis: `roof_w == roof_h` length cap, otherwise a row
-  of `half=top` stairs spanning the inset interior on the long axis.
-  Apex facings follow the gable rule (`south` for an x-ridge, `east`
-  for a z-ridge).
-- **Overhang.** Same as `gable` — inflates the voxel grid by `N` on
-  each horizontal axis; the roof covers the full inflated box.
+- **Ridge axis and height.** As `gable`: long axis, square ties to `x`, `ceil(short_span / 2)`
+  above the wall top.
+- **Layer layout.** Layer `L ∈ 0..extra_height` is the inset rectangle frame
+  `[L, dims.x − 1 − L] × [L, dims.z − 1 − L]`. Layer `0` seats on the wall top and is always this
+  frame, even when it is also the last layer:
+
+  | Edge | States |
+  |---|---|
+  | north row (`z = L`) | `facing=south, shape=straight` |
+  | south row (`z = dims.z − 1 − L`) | `facing=north, shape=straight` |
+  | west column (`x = L`) | `facing=east, shape=straight` |
+  | east column (`x = dims.x − 1 − L`) | `facing=west, shape=straight` |
+  | NW / NE corners | `facing=south` with `outer_left` / `outer_right` |
+  | SW / SE corners | `facing=north` with `outer_right` / `outer_left` |
+
+- **Apex.** The apex closes what the frames below it raised, so it applies only when
+  `extra_height > 1`. A square footprint caps with a single `half=top` stair (odd short span) or a
+  `2x2` block of them (even short span). A rectangular footprint caps with a row of `half=top`
+  stairs spanning the inset interior along the long axis. Apex facings follow the gable rule:
+  `south` for an x-ridge, `east` for a z-ridge.
+- **Overhang.** As `gable`.
 
 ## 4.6 Flat roof voxel rules
 
-`roof kind=flat [overhang=N] mat_slot=...` lowers to a single layer of
-solid blocks at `y = wall_top + 1`. The deck spans the entire inflated
-bounding box (= `dims.x × dims.z`), so an `overhang=N` extends the deck
-past the walls without any extra rules.
+`roof kind=flat [overhang=N] mat_slot=...` lowers to one layer of solid blocks at
+`y = wall_top + 1`, spanning the whole inflated bounding box.
 
-- **Material.** Every cell of the deck is the `mat_slot=` binding's id,
-  attached to no blockstate, falling back to `minecraft:spruce_planks` when
-  there is no binding. Unlike a sloped roof this constrains nothing: a deck
-  is whole blocks, so every id is as valid as any other and a stair among
-  them is simply a stair in its default state.
-- **Height contribution.** A flat roof adds `1` to `Dims.y` regardless
-  of footprint, so a `size=WxH` `walls height=K` plus `roof kind=flat`
-  produces `Dims.y = 1 + K + 1`.
-- **No slope arguments.** `slope_to=`, `kind=`-specific facings, and
-  ridge axes do not apply.
+- **Material.** Every deck cell is the `mat_slot=` binding's id with no blockstate, falling back to
+  `minecraft:spruce_planks`. A deck is whole blocks, so any id is valid where a sloped roof would
+  refuse: a stair among them is a stair in its default state.
+- **Height.** A flat roof adds `1` to `Dims.y` whatever the footprint, so `size=WxH` with
+  `walls height=K` gives `Dims.y = 1 + K + 1`.
+- **No slope arguments.** `slope_to=`, kind-specific facings, and ridge axes do not apply.
 
 ## 4.7 Level grouping and volume derivation
 
-`level y=N` groups members and places each of them `N` voxels above the
-struct's base plane. It is a grouping construct rather than a member of
-its own: the `level` line lowers to no blocks, and every member under it
-lowers as if it had been written in the body with `N` added to whatever
-vertical coordinate it already carries.
+`level y=N` groups members and places each of them `N` voxels above the struct's base plane. The
+`level` line itself lowers to no blocks; every member under it lowers as if written in the body with
+`N` added to its vertical coordinate.
 
 The volume a struct lowers into is derived, never written:
 
@@ -206,84 +171,58 @@ Dims.z = size.H + 2 × overhang
 Dims.y = 1 + wall_top + roof_extra
 ```
 
-Each term counts the members that will paint, and only those.
-`overhang` is the largest `overhang=` on any roof that will draw — a
-`kind=` the compiler knows, and a `slope_to=` if that kind is `shed` —
-`wall_top` the largest `N + height` over the walls
-whose `mat_slot=` resolves (`N` being the enclosing level's, `0` in the
-body), and `roof_extra` the tallest per-kind contribution from §4.3–§4.6.
-The `1` is the base plane, which every struct has and no member
-contributes. Members inside a `level` count in all three: a struct whose
-only walls sit under `level y=5` is as tall as one that writes them
-directly.
+Each term counts only the members that will paint:
 
-Not every role has a lowering at a non-zero offset. `walls`, `door`,
-`window`, `stair`, and `pressure_plate` read `N` as the base their own
-geometry is measured from. A `floor` and a `roof` are single planes a
-struct has one of — there is no second slab to drop and no second cap to
-place — so under `level y=N` with `N > 0` each fires `W_DEFERRED_MEMBER`
-and lowers to nothing.
+- `overhang`: the largest `overhang=` on any roof that will draw (a `kind=` the compiler knows,
+  plus a `slope_to=` if that kind is `shed`).
+- `wall_top`: the largest `N + height` over the walls whose `mat_slot=` resolves, `N` being the
+  enclosing level's offset and `0` in the body.
+- `roof_extra`: the tallest per-kind contribution from [§4.3](#43-gable-roof-voxel-rules)–[§4.6](#46-flat-roof-voxel-rules).
+- `1`: the base plane, which every struct has.
 
-A member dropped by the rule above contributes nothing to the derived
-volume: the `overhang=` of a level-scoped roof does not widen the
-footprint, and its height does not raise `Dims.y`. The converse holds
-too — every member the pass paints is one the volume was sized to hold.
-Those are two readings of a single list, which is what keeps a member
-from painting past the end of the array it was handed.
+Members inside a `level` count in all three: a struct whose only walls sit under `level y=5` is as
+tall as one that writes them directly.
 
-The rule is about the list rather than about `level`, so it holds
-wherever a member drops out. A `roof` that will not draw — no `kind=`, or
-a `shed` with no `slope_to=` — does not widen the footprint; `walls` whose
-material does not resolve paint nothing and do not raise `Dims.y`.
+**Not every role lowers at a non-zero offset.** `walls`, `door`, `window`, `stair`, and
+`pressure_plate` read `N` as the base their geometry is measured from. A `floor` and a `roof` are
+planes a struct has one of, so under `level y=N` with `N > 0` each fires `W_DEFERRED_MEMBER` and
+lowers to nothing.
 
-The material half applies to `walls` and not to `roof`, because the two
-fail differently: a roof whose `mat_slot=` does not resolve falls back to
-a material of its own and draws, so it shapes the volume as any drawn roof
-does. A themeless struct is the clearest case of the asymmetry — its walls
-lower to air and reserve nothing, and a `roof kind=gable` over them still
+**A member that does not paint does not size the volume.** The `overhang=` of a level-scoped roof
+does not widen the footprint, and its height does not raise `Dims.y`. The same holds for every way
+a member drops out: a `roof` with no `kind=` or a `shed` with no `slope_to=` does not widen the
+footprint, and `walls` whose material does not resolve do not raise `Dims.y`.
+
+The material half applies to `walls` and not to `roof`, because a roof whose `mat_slot=` does not
+resolve falls back to a material of its own and still draws. A themeless struct shows the
+asymmetry: its walls lower to air and reserve nothing, while a `roof kind=gable` over them still
 draws and still seats its ridge above them.
 
-"Does the material resolve" is asked against the target the build is
-pinned to, so a block only some versions declare can change `Dims.y`
-between two `--target` values. Both answers are honest: the array is the
-one that version can build. An id the pinned target does not declare is
-`E_UNKNOWN_ID`, an error, so no artifact ships from that shape.
-
-The failures have to be known before the volume is derived for any of this
-to hold, which is why the material question is asked where the extent is
-decided and again where the block is placed — one function, so the two
-cannot answer differently. When they could not, the extra extent was air:
-a ring of it around a building whose walls had moved inward, and an array
-as tall as walls that were never painted.
+"Does the material resolve" is asked against the pinned target, so a block only some versions
+declare can change `Dims.y` between two `--target` values. An id the pinned target does not declare
+is `E_UNKNOWN_ID`, so no artifact ships from that shape.
 
 ## 4.8 Within-phase conflicts and the palette
 
-The phase order settles which member wins whenever two of them come from
-different phases: a `door` cut through `walls` is massing followed by
-openings, and the hole is the point. Inside one phase there is nothing left
-to separate two members but the order their lines were written in, which
-§4.1 grants to "local overrides within the same phase".
+Across phases, the phase order decides: a `door` cut through `walls` is massing followed by
+openings, and the hole is the point. Inside one phase, only source order separates two members,
+which is what [§4.1](#41-phase-evaluation) grants to "local overrides within the same phase".
 
-That grant is for an author restating a member. Two footprints that happen
-to intersect are the same shape to the grid and not the same thing at all,
-so the compiler keeps the last write and emits `W_PHASE_CONFLICT` naming
-both members and how many voxels changed hands. The build is unchanged by
-the warning; what changes is that the author is told a line they could move
-is deciding the result.
+That grant is for an author restating a member. Two footprints that intersect by accident are a
+different thing, so the compiler keeps the last write and emits `W_PHASE_CONFLICT` naming both
+members and how many voxels changed hands. The build is unchanged; the author is told that a line
+they could move is deciding the result.
 
-A cell whose value does not change is not a conflict — two `walls` of one
-material meeting over the rows they share depend on nothing — and neither is
-a member writing over itself, as a `window` whose `repeat=` / `step=` stamps
-overlap does when it covers its own glass with more of the same.
+Two cases are not conflicts:
 
-The palette of a body the phases evaluate — a `struct`, a `def`, and each
-`place` that instantiates one — lists the blocks that body contains, in the
-order the phases first painted them, with air at slot `0`. (A walkway's
-array is laid by the `connect` pass rather than by the phases, and this
-section does not describe it.) It is not
-a log of what was interned along the way: a material whose last voxel a
-later phase covered is dropped and the remaining slots renumber onto the
-gap. Otherwise the loser would ride into the `.nbt`, be counted by `cairn
-info`, and be covered by `resolved_ir_hash` — so two sources that differ
-only in which member lost would produce different artifacts for the same
-build.
+- A cell whose value does not change, as when two `walls` of one material meet over shared rows.
+- A member writing over itself, as when a `window`'s `repeat=` / `step=` stamps overlap.
+
+**The palette** of an evaluated body (a `struct`, a `def`, and each `place` that instantiates one)
+lists the blocks that body contains, in the order the phases first painted them, with air at slot
+`0`. It is not a log of everything interned along the way: a material whose last voxel a later
+phase covered is dropped, and the remaining slots renumber onto the gap. Otherwise two sources
+differing only in which member lost would produce different artifacts for the same build, since the
+loser would reach the `.nbt`, be counted by `cairn info`, and be covered by `resolved_ir_hash`.
+
+A walkway's array is laid by the `connect` pass rather than by the phases, and is not covered here.

@@ -2,32 +2,37 @@
 title: "14. レッドストーン (論理回路)"
 ---
 
-Cairn はレッドストーンを **論理レベル** で記述できます。作者は **信号グラフ (データフロー)** を宣言し、
-コンパイラが実際の dust/repeater/torch/comparator を **合成 → 配置 → 配線 (place-and-route)** して
-ボクセル化します。P1 (意図を宣言し、物理はコンパイラが解決) が最も効くのがこのアプリケーションです。
-信号減衰、クロストーク、ディレイ計算 — AI がボクセル建築よりさらに苦手な物理 — を、論理記述から決定論
-的に導出できます。
+Cairn はレッドストーンを **論理レベル** で記述します。信号グラフを宣言すると、コンパイラが実際の
+ダスト・リピータ・トーチ・コンパレータを合成し、配置し、配線してボクセルに落とします。
 
-**設計の核**: 論理層のファーストクラスのオブジェクトは「挙動」ではなく **信号依存グラフ (IR 化可能な
-データフロー)** です。時間は言語コアに持ちません (14.4)。これが P1/P3/P5 と最もよく整合します。
+P1 の効果が最も大きいのがここです。信号減衰、クロストーク、ディレイ計算は、AI がボクセル建築以上に
+苦手とする物理ですが、いずれも論理記述から決定論的に導出されます。
 
-## 14.1 二層モデルと v1 境界 (旧「非目標」を置換)
-- **Tier 0 物理配置**: `repeater facing=north delay=2` など。作者が部品を置き、ブロックステートは
-  導出。挙動はモデル化しない ([ブロックステート](blockstate))。
-- **Tier 1 論理 (本章)**: 信号グラフを宣言し、合成 → 配置 → 配線でコンパイラがボクセル化。
+論理層のファーストクラスの対象は挙動ではなく **信号依存グラフ** です。時間は言語コアに持ちません
+([§14.4](#144-時間モデル))。
 
-新規キーワードは **`logic` / `circuit` / `assert`** のみです。論理プリミティブは **組み込み `def`
-ライブラリ** として提供され、小さく閉じた語彙 (P3) を保ちます。
+## 14.1 2 つの層と v1 の境界
 
-v1 スコープ (Verilog で言えば `assign` 相当のみ。クロックド代入はなし):
-- **○ 組み合わせ**: `and` / `or` / `not` / `xor` / `nand` / `nor` / `mux`
-- **○ 厳選された順序マクロ**: `latch` / `pulse` / `delay` / `edge_rising` / `edge_falling` / `counter`
-- **× スコープ外 (→ Tier 0 / raw)**: `always` / `process` / `state` / `case` / FSM / クロックド代入 /
-  CPU など一般的な順序合成。
+- **Tier 0、物理配置。** `repeater facing=north delay=2` のように部品を置き、ブロックステートは
+  導出されます。挙動はモデル化しません ([ブロックステート](blockstate))。
+- **Tier 1、論理。** 本章です。信号グラフを宣言し、コンパイラが合成 → 配置 → 配線でボクセルにします。
 
-## 14.2 信号バインディング (センサ → 信号グラフ → アクチュエータ)
-センサが信号を発し、アクチュエータが消費します。両方とも物理メンバで、先のフェーズで配置されます
+新しいキーワードは `logic` / `circuit` / `assert` の 3 つだけです。論理プリミティブは組み込みの
+`def` ライブラリとして提供され、語彙は小さくクローズドなまま保たれます (P3)。
+
+Verilog で言えば、v1 が許すのは `assign` 相当だけで、クロック付き代入は許しません。
+
+| | 範囲 |
+|---|---|
+| **組み合わせ** | `and` / `or` / `not` / `xor` / `nand` / `nor` / `mux` |
+| **厳選した順序マクロ** | `latch` / `pulse` / `delay` / `edge_rising` / `edge_falling` / `counter` |
+| **スコープ外** (→ Tier 0 か `raw`) | `always` / `process` / `state` / `case` / FSM / クロック付き代入 / CPU |
+
+## 14.2 信号バインディング
+
+センサが信号を発し、アクチュエータが消費します。どちらも先行フェーズで配置される物理メンバです
 ([コンポーネント・編集・複数建築](components-editing-sites))。
+
 ```
 # センサ → 信号
 lever      id=sw   side=front offset=2 y=1 -> sig.power
@@ -43,135 +48,144 @@ door       id=d1   ..     opened_by=sig.power
 dispenser  id=ds   at=..  fired_by=sig.pulse facing=south
 ```
 
-上の対応は例示ではなく規定です。`-> sig.X` の末尾はセンサのものであり、各アクチュエータキーは
-それを読む 1 つのコンポーネントのものです。したがってそれ以外の場所に書かれたバインディングは
-`E_LOGIC_MISPLACED_BINDING` になります — `walls ... powered_by=sig.x` は回路を何も表しておらず、
-これを受理するとコンポーネントの実体がないポートがネットリストに入ります。上のコンポーネントの
-うち現在サーフェスが受理するのは `door` と `pressure_plate` の 2 つだけで、`lever` /
-`button` / `daylight` / `observer` / `lamp` / `piston` / `dispenser` は受理されません。
-したがって `lit_by=` / `powered_by=` / `fired_by=` にはまだホストが存在せず、どこに
-書かれても拒否されます。
+この対応は規範です。`-> sig.X` の末尾はセンサのもの、各アクチュエータキーはそれを読む 1 つのコンポー
+ネントのものです。それ以外の場所に書かれたバインディングは `E_LOGIC_MISPLACED_BINDING` です。
+`walls ... powered_by=sig.x` は何の回路も記述しておらず、受け入れればコンポーネントの無いポートがネ
+ットリストに載ります。
 
-バインディングが **何を指すか** も、どこに書かれるかと同じ規則に従います。センサは `sig.`
-名前空間に発し、アクチュエータはここから読むため、その外側の名前は誰にも読めません — `logic`
-行の左辺であれ、センサの `->` 末尾であれ、アクチュエータキーの値であれ同じです
-(`E_LOGIC_INVALID_SIGNAL`)。名前は `sig.` とその後ろの 1 セグメントです。`opened_by=a` は
-`a` という信号への配線ではなく、`opened_by=sig.a.b` も何も指していません。どちらも何にも
-繋がっていないドアです。
+**上記のうち現在受け付けるのは `door` と `pressure_plate` だけです。** `lit_by=` / `powered_by=` /
+`fired_by=` にはまだホストが無く、どこに書かれても拒否されます。
 
-ホストは値より先に問い、値の規則が適用されるのはそのバインディングを持てるコンポーネントの上
-だけです。`walls -> a` の誤りは 1 つ、ホストの側です。値をどう書いても `walls` はセンサに
-なりません。
+**信号名。** センサは `sig.` 名前空間へ発し、アクチュエータはそこから読むので、名前空間の外の名前は
+誰にも読まれません。`logic` 行の左辺でも、センサの `->` の末尾でも、アクチュエータキーの値でも同じで、
+`E_LOGIC_INVALID_SIGNAL` になります。名前は `sig.` とその後ろのセグメント 1 つです。`opened_by=a` は
+`a` という信号への配線ではなく、`opened_by=sig.a.b` も何も指しません。
 
-バインディングは `[selector]` の **後ろ** に書き、中には書きません。
-`door[id=front] opened_by=sig.power` は結線し、`door[id=front,opened_by=sig.power]` は
-結線しません。角括弧はその行が対象とするメンバを選ぶためのものなので、その中に書かれたものは
-バインディングとして読まれません — アクチュエータキーであれ、`sig.` 値を持つ任意のキーであれ
-同じです。角括弧の中の組は、外に出してもなお残る誤りで答えます。角括弧だけが誤りなら
-`E_LOGIC_MISPLACED_BINDING` がそう言い、そうでなければホストの誤りやキーの誤り — 外に出しても
-答えられなかった方 — を報告します。
+値より先にホストが検査されます。`walls -> a` の誤りは 1 つで、それはホストの誤りです。値をどう書いて
+も `walls` はセンサになりません。
 
-*値* が `sig.` 参照でありながらキーが 4 つのいずれでもない引数は `E_LOGIC_UNKNOWN_BINDING_KEY`
-です。値は「信号を配線するつもりだった」と言い、キーは「誰も読まない」と言っている — これが
-タイプミスの形です。`oepend_by=sig.power` は従来、アクチュエータを黙って消していました。
+**バインディングは `[selector]` の後に書き、中には書きません。**
+`door[id=front] opened_by=sig.power` は束縛し、`door[id=front,opened_by=sig.power]` は束縛しません。
+角括弧は行が作用するメンバを選ぶもので、その中に書かれたものはバインディングとして読まれません。括弧
+内の組は、外に出したあとも残る所見を得ます。それだけが問題なら角括弧を名指す
+`E_LOGIC_MISPLACED_BINDING`、そうでなければホストかキーに対する所見です。
 
-## 14.3 論理層 = 信号依存グラフ (DAG)
-作者は信号間の依存 (ブール組み合わせ + マクロ適用) を書きます。これは純粋で時間を持たないデータフロー
-で、コンパイラ内部で Logic IR (DAG) になります。
+4 つのアクチュエータキー以外のキーに `sig.` の値が付いている場合は `E_LOGIC_UNKNOWN_BINDING_KEY` で
+す。値は「信号を配線するつもりだった」と言い、キーは「誰も読まない」と言っている状態で、これはタイポ
+の形です (`oepend_by=sig.power` など)。
+
+## 14.3 論理層は依存 DAG
+
+信号どうしの依存を書きます。ブール結合とマクロ適用です。時間を含まない純粋なデータフローで、
+コンパイラ内部では Logic IR になります。
+
 ```
 logic sig.lamps = sig.power and not sig.day
-logic sig.mem   = latch(set=sig.a, reset=sig.b)   # RS latch (マクロ)
-logic sig.pulse = pulse(sig.ring, 4)              # 単安定: 4 段 (→ 内部で repeater 段に展開)
+logic sig.mem   = latch(set=sig.a, reset=sig.b)   # RS ラッチ (マクロ)
+logic sig.pulse = pulse(sig.ring, 4)              # 単安定: 4 段
 logic sig.fire  = edge_rising(sig.tick)
 logic sig.sel   = mux(sel=sig.s, a=sig.x, b=sig.y)
 ```
-- 論理式自身に時間演算はありません (14.4)。`pulse(sig.ring, 4)` の `4` は **段数** であり、tick 値では
-  ありません。
 
-## 14.4 時間モデル: 言語コアには持たない
-- v1 では **マクロ (`delay`/`pulse`/`edge`/`latch`/`counter`) のみが時間を持ちます**。`delay(3)` は内部で
-  `Repeater×3` に降りるセルマクロです。**tick 演算子を書く DSL ではありません**。
-- **ディレイは Logic IR にも Netlist IR にも持ちません。Placement IR で初めて決まります** (14.8)。
-  `and` は論理的にはゼロディレイですが、tick 数はセル選択 (`and → ComparatorAND(Java)`) と配置後の
-  実ワイヤ長が分かって初めて決まります。
-- 時間 (tick) として数値が現れるのは **検証アサーションだけ** (14.7) です。作者は論理式の中で tick 演算
-  をしません。
+式に時間演算はありません。`pulse(sig.ring, 4)` の `4` は tick 値ではなく **段数** です。
 
-## 14.5 Place-and-route: DSL は 2D、内部は擬似 2.5D
-ユーザに見せるメンタルモデルは 2D ですが、純 2D のフロアプランでは詰まるので、**内部実装は擬似 2.5D
-にし、交差・fanout・ワイヤ長を扱います**。内部に `plane` / `via` / `bridge` の 3 概念を持ちます (DSL には
-出しません)。
-- 純 2D モデルでは扱えない回路クラス: **fanout / bus / 交差 / comparator フィードバック / observer
-  チェーン**。
-- 内部アルゴリズムは 5 段階: **Placement → Steiner routing → Delay insertion → Crossing legalization →
-  Edition legalization**。
-  - placement: トポロジ順、左→右。
-  - routing: マンハッタン、ただし **すでにそこに立っているものを避けて**。確保領域にはセル本体と
-    I/O パッドが立っており、その座標にダストは引けず、信号がそこを **通り抜ける** こともできません
-    — 部品は信号を出すか受け取るかのどちらかです。したがって各シンクはそのネットの木の葉であり、
-    fanout は列を貫く連鎖ではなく、列の脇を走る幹と各シンクへの分岐になります。何も邪魔がなければ
-    配線は直交の直線。ブロックを避ける必要があれば迂回し、迂回できなければ `void=<N>` の予算内の
-    `bridge` 層へ登ります。2 つのネットの交差は `bridge tile` か垂直層に逃がす。
-  - delay insertion: 信号減衰の 15 を超えるセグメントにのみバッファとして repeater を挿入。
-    セグメントはドライバからそのシンクまでの **実配線経路** に沿って測り、バッファはその経路上に
-    置く。経路は近いシンクのために引かれた幹にぶら下がり、邪魔なものを迂回するため、両者を結ぶ
-    直線が配線とは限らない。
-  - crossing legalization: 上記の逃がしは仕様であって未実装です。`bridge` 層へ持ち上げるのは座標を
-    取られたバッファ repeater だけで配線そのものではないため、配線座標を共有する 2 つのネットは
-    2 つの信号を運ぶ 1 本のダストのままになります。このパスは黙って通すのではなく **報告します**
-    — 交差する信号の組と、それらが出会う座標を、組ごとに 1 件。平面より上の層が 1 つもない確保領域
-    (`void=1`) は原理的に持ち上げ先が無いため、報告ではなくスコープごと拒否します。
-- 配線は `circuit` 領域に閉じます。収まらなければ fail-loud (congestion = 領域不足を報告)。
-  ドライバからシンクへ通れる経路が 1 つもない場合 — 出口がすべて部品で塞がれている場合 — も理由の
-  違う同じ拒否で、どの 2 座標を結べなかったかを示します。
+## 14.4 時間モデル
+
+v1 で時間を持つのはマクロ (`delay` / `pulse` / `edge` / `latch` / `counter`) だけです。`delay(3)` は
+内部でリピータ 3 個に落ちるセルマクロで、書くべき tick 演算子はありません。
+
+**ディレイは Logic IR にも Netlist IR にも載りません。Placement IR で初めて確定します** ([§14.8](#148-ir-とフェーズへの接続))。
+`and` は論理的にはゼロディレイですが、tick 数が分かるのはセル選択 (Java なら `and → ComparatorAND`)
+と配置後の実配線長が決まってからです。
+
+数値が tick として現れるのは検証アサーション ([§14.7](#147-検証)) だけです。論理式の中で tick 演算を
+することはありません。
+
+## 14.5 Place-and-route
+
+DSL が見せるのは 2D のメンタルモデルです。純粋な 2D のフロアプランは行き詰まるので、内部実装は
+擬似 2.5D で、`plane` / `via` / `bridge` の概念を持ちます (DSL には露出しません)。純粋な 2D では
+扱えない回路クラス: fanout、バス、交差、コンパレータのフィードバック、オブザーバチェーン。
+
 ```
-circuit region=basement void=3       # 高さ 3 のサービス層を確保し、合成回路をここに配線
+circuit region=basement void=3       # 高さ 3 のサービス層を確保し、ここに回路を配線する
 ```
+
+内部アルゴリズムは 5 段階です。
+
+1. **配置**: トポロジカル順、左から右へ。
+2. **Steiner 配線**: Manhattan で、既に立っているものを避けて。セル本体と I/O パッドは予約されて
+   おり、その上にダストは引けず、信号がその中を *通過* することもできません。コンポーネントは信号を
+   発するか消費するかのどちらかだからです。したがってすべてのシンクはネットの木の葉であり、fanout は
+   シンクを数珠つなぎにするのではなく、行の脇に幹を通して各シンクへ枝を出します。障害物が無ければ
+   配線は直線の矩形経路です。あれば回り込むか、回る場所が無ければ `void=<N>` の予算内で `bridge`
+   層へ登ります。
+3. **ディレイ挿入**: 減衰限界 15 を超えるセグメントにのみバッファとしてリピータを入れます。
+   セグメントはドライバからそのシンクまでの **実配線** 経路で測り、バッファはその経路上に立ちます。
+   2 点間の直線が常に配線とは限りません。
+4. **交差の合法化**: 仕様はありますが未実装です。このパスが `bridge` 層へ持ち上げるのは座標が
+   埋まったバッファのリピータであって配線そのものではないので、配線座標を共有する 2 つのネットは
+   2 つの信号を運ぶ 1 本のダストのままです。パスはそれを見逃さず **報告** し、信号の組と両者が出会う
+   座標を、組ごとに 1 件ずつ名指します。平面の上に層が無い予約 (`void=1`) は原理的に持ち上げ先が
+   無いので、そのスコープは拒否されます。
+5. **エディションの合法化**: [§14.6](#146-エディション差) を参照。
+
+配線は `circuit` 領域に閉じ込められます。収まらなければ fail-loud です。ドライバからの経路がすべて
+コンポーネントで塞がれているシンクも、理由は違えど同じ拒否で、結べなかった 2 つの座標を告げます。
+
 ```text
 E_ROUTE_CONGESTION line 21 circuit=basement:
   synthesized netlist needs ~3.2x the reserved area (void=3, region 9x7).
   Fix: increase `void`, enlarge region, or split into multiple `circuit` blocks.
 ```
 
-## 14.6 エディション差: セルライブラリで吸収。QC/BUD は合成しない
-セルライブラリは 3 段で、**エディション差はライブラリだけに閉じ込めます**:
+## 14.6 エディション差
+
+3 層のセルライブラリが、エディション差をライブラリの中だけに閉じ込めます。
+
 ```
 Logical Cell → Edition Cell → Physical Tile
   AND        → Java:    ComparatorAND → block array
              → Bedrock: TorchAND      → block array
 ```
-- **吸収 (○)**: repeater / observer / comparator / 向き (セル実装差)。
-- **吸収しない (×)**: QC (quasi-connectivity) / BUD / 更新順序 / quasi-connectivity。これらはブロック
-  更新順の暗黙意味論に依存し、可搬実装が存在しません。
-- 論理が更新順意味論を要求する場合は **コンパイルエラー (合成不能)** とします。これは
-  「recompile であり transcode ではない」と整合します (P1 / [バージョンとエディション](versioning-editions))。
+
+- **吸収する**: リピータ、オブザーバ、コンパレータ、向き。いずれもセル実装の差です。
+- **吸収しない**: QC (準接続)、BUD、更新順序。ブロック更新順序の暗黙の意味論に依存し、可搬な実装が
+  存在しません。
+
+更新順序の意味論を要する論理は、サイレントな地雷ではなくコンパイルエラーになります。「recompile で
+あり transcode ではない」と整合します。
+
 ```text
 E_NO_PORTABLE_IMPL line 15:
   this circuit requires update-order (quasi-connectivity / BUD) semantics.
   No portable redstone implementation exists for the target edition.
   Fix: redesign the logic to be order-independent, or drop to Tier 0 with an @edition guard.
 ```
-- 論理はエディション中立、合成回路はエディション固有です。手置きのレッドストーンはエディションを
-  跨ぐと壊れますが、論理記述ならコンパイラがエディション正確な回路を吐けます — 論理記述の最大の
-  動機です。
 
-## 14.7 検証: tick simulator に対して 3 種のアサーションを検査 ([評価フレームワーク](evaluation) を拡張)
-意図を宣言した上で、**合成回路を tick 単位でシミュレート (ヘッドレス)** し検査します。アサーションは
-3 種です:
+手で置いたレッドストーンはエディションをまたぐと壊れます。論理記述であればコンパイラがエディションに
+正しい回路を出せます。部品ではなく論理を書く最大の理由です。
+
+## 14.7 検証
+
+意図を宣言し、合成された回路を tick 単位でヘッドレスにシミュレートして照合します。アサーションは
+3 種類です。
+
 ```
 # 組み合わせ: 真理値表
 assert truth(sig.a, sig.b -> sig.out) { 00->0; 01->1; 10->1; 11->0 }
 
-# レイテンシ (P&R がディレイを変えるので重要)
+# レイテンシ — place-and-route がディレイを変えるので重要
 assert latency(sig.in -> sig.out) <= 4
 
-# 時相 (完全な LTL ではない — 有界 eventually のみ)
+# 時相 — 完全な LTL ではなく有界の eventually のみ
 assert always(sig.button -> eventually sig.door_open within 8)
 ```
-- 自己修正ループ (P5) は **synth → sim → diff → patch**。検証は **ターゲットエディションごと** に
-  走ります。
-- **パッチが書き換えるのは P&R / 配置ヒント、repeater、バッファのみ。論理 (Logic IR) は決して書き換え
-  ません** (論理を自動修正する自己修正は危険)。
+
+自己修正ループ (P5) は **synth → sim → diff → patch** で、検証はターゲットエディションごとに走ります。
+パッチが触るのは place-and-route のヒント、リピータ、バッファだけです。**Logic IR は決して書き換えま
+せん。** 論理を自動改変する自己修正は危険だからです。
+
 ```text
 E_SIM_ASSERTION_FAILED edition=bedrock:
   assert latency(sig.in -> sig.out) <= 4, but measured 6 (extra repeaters from crossing legalization).
@@ -180,28 +194,27 @@ E_SIM_ASSERTION_FAILED edition=bedrock:
 ```
 
 ## 14.8 IR とフェーズへの接続
-論理記述では、Intent と block-array の間に **3 つの IR 層** が入ります
-([アーキテクチャ](architecture))。役割が違うので分離されています (HDL では標準):
+
+Intent IR と block-array IR の間に、HDL と同じ分け方で 3 つの IR 層が入ります。
+
 ```
-Intent IR        (logic 宣言 / circuit 領域 / 信号バインディング)
+Intent IR        logic 宣言 / circuit 領域 / 信号バインディング
    ↓ logic_synth
-Logic IR         (論理式 / 依存 DAG。エディション中立、ゼロディレイ)
+Logic IR         論理式と依存 DAG。エディション中立、ゼロディレイ
    ↓
-Netlist IR       (セル/ネット。Logical Cell 選択。まだディレイなし)
+Netlist IR       セルとネット。Logical Cell の選択。まだディレイ無し
    ↓ logic_place
-Placement IR     (セル座標 + 実ワイヤ長 → ディレイ/tick がここで初めて決まる)
+Placement IR     セル座標 + 実配線長。ここでディレイが確定する
    ↓ logic_route
-block-array IR   (dust/repeater/torch/comparator のボクセル化)
+block-array IR   ダスト・リピータ・トーチ・コンパレータのボクセル実体
 ```
-フェーズモデル ([コンパイルモデル](compilation)) は `fixtures` の直後を 3 段に分けます:
-```
-massing → envelope → openings → fixtures → logic_synth → logic_place → logic_route → raw
-```
-`fixtures` (センサ/アクチュエータ) が 3D に配置されて初めて I/O ポートの絶対座標が確定し、配置と
-配線が可能になります。**ディレイは Logic IR / Netlist IR では持たず、Placement IR で初めて決まります**
-(14.4)。
+
+フェーズモデル ([コンパイルモデル](compilation)) は `fixtures` の直後を
+`logic_synth → logic_place → logic_route` に分割します。センサとアクチュエータが 3D に配置される
+まで I/O ポートの座標が確定しないからです。
 
 ## 14.9 逆方向変換
-v1 では、schematic から取り込んだ手置きレッドストーン ([エコシステム連携](ecosystem-interop))
-は **Tier 0 raw** として保持します。大量の dust から論理を逆合成するのは v1 のスコープ外です
-(generation-first, lossy のアプローチと整合)。
+
+schematic から取り込んだ手作りのレッドストーン ([エコシステム連携](ecosystem-interop)) は、v1 では
+Tier 0 の raw として保持します。ダストの塊から論理を逆合成することはスコープ外です。generation-first
+かつ lossy な方針と整合します。
