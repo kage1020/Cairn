@@ -3,8 +3,8 @@ title: "サンプル"
 description: 実際の .crn ファイル。言語面だけが画面に残るよう、どれも小さく保っています。
 ---
 
-すべて [`examples/`](https://github.com/kage1020/Cairn/tree/main/examples) にあり、意図的に最小限です。
-最初のグループの 4 つは [チュートリアル](/ja/tutorial/) が順に辿ります。
+すべて [`examples/`](https://github.com/kage1020/Cairn/tree/main/examples) にあり、意図的に最小限で
+す。最初のグループの 4 つは [チュートリアル](/ja/tutorial/) が順に辿ります。
 
 > リファレンスコンパイラは未完成なので、これらは今日ビルドできるファイルではなく規範的な例示です。
 

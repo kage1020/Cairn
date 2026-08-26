@@ -54,9 +54,9 @@ past the structure block's 48³ limit are expressed as a composition of several 
 
 ### 9.3.1 Coordinate convention
 
-`east` advances along `+x` and `north` retreats along `-z`. This matches "front is `+z`" from §5.4:
-a building whose `front` faces south sits with its facade on `+z`, and `north_of=X` puts the next
-placement behind it.
+`east` advances along `+x` and `north` retreats along `-z`. This matches "front is `+z`" from
+[§5.4](syntax#54-selectors): a building whose `front` faces south sits with its facade on `+z`, and
+`north_of=X` puts the next placement behind it.
 
 The Y axis is unaffected by topological selectors; every placement currently lands at `y = 0`.
 
@@ -81,8 +81,9 @@ placement: there is no name for its `.nbt`, no `def` to instantiate, or no theme
 the row is dropped. A key that is present but not a label (`use=3`) is `E_TYPE_MISMATCH_LABEL`
 instead.
 
-`id=` is required rather than auto-assigned, unlike the geometry members of §9.2, because it is the
-name `east_of=` and `connect` refer to and the name its `.nbt` is written under (§9.3.4).
+`id=` is required rather than auto-assigned, unlike the geometry members of
+[§9.2](#92-editing-model), because it is the name `east_of=` and `connect` refer to and the name its
+`.nbt` is written under ([§9.3.4](#934-output-naming)).
 
 | Code | Cause |
 |---|---|
@@ -107,11 +108,12 @@ placements within the same `site`.
 exposed on `door` and `window` members of the referenced `def`; stair and roof ports are reserved
 for a future extension.
 
-**Where a port sits.** One block outside the member's `side=` wall, at the placement's ground row
-(`place_origin.1`). `front` / `back` / `left` / `right` map to `+z` / `-z` / `-x` / `+x` (§9.3.1).
+**Where a port sits.** One block outside the member's `side=` wall, at the placement's ground row (`place_origin.1`).
+`front` / `back` / `left` / `right` map to `+z` / `-z` / `-x` / `+x` ([§9.3.1](#931-coordinate-convention)).
 The wall-local offset comes from:
 
-- a `door`'s `at=` value — `center`, `left`, or `right` (§5.4). Numeric offsets are reserved.
+- a `door`'s `at=` value — `center`, `left`, or `right` ([§5.4](syntax#54-selectors)). Numeric
+  offsets are reserved.
 - a `window`'s geometric centre, `offset + size.w / 2`.
 
 The placement's overhang shifts the port out into the overhang ring beyond the outer face. A
@@ -167,6 +169,6 @@ the world origin, dims, and resolved path material.
 | `E_UNRESOLVED_PORT` | The right-of-dot port id does not name a member of the referenced def. Carries a nearest-match note. |
 | `E_AMBIGUOUS_PORT` | The def exposes the same `id=` on more than one member. Rename the collision. |
 | `E_MISSING_PATH_MATERIAL` | The row omits `path=`, so walkway lowering has nothing to lay. |
-| `E_UNRESOLVED_PLACE_REF` | The head place id does not name a prior place in this site (shared with §9.3.3). |
+| `E_UNRESOLVED_PLACE_REF` | The head place id does not name a prior place in this site (shared with [§9.3.3](#933-cross-scope-references)). |
 | `W_WALKWAY_BLOCKED` | No unobstructed route exists; the row falls back to the straight L and the rest of the strip still lays. |
 | `W_DUPLICATE_WALKWAY` | The same `(from, to)` port pair is already laid in this site; the duplicate row is dropped. |

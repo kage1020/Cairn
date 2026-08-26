@@ -11,7 +11,8 @@ section assumes the one before it.
 
 ## 1. A cottage
 
-Here is a complete Cairn build — [`cottage.crn`](https://github.com/kage1020/Cairn/blob/main/examples/cottage.crn).
+Here is a complete Cairn build —
+[`cottage.crn`](https://github.com/kage1020/Cairn/blob/main/examples/cottage.crn).
 
 ```
 @cairn 2026.06
@@ -50,8 +51,8 @@ the CSS idea, applied to blocks.
 **Positions are semantic.** `side=front`, `offset=2`, `y=2`, `at=center` are positions along a wall.
 No absolute coordinates appear anywhere you write.
 
-**Order does not matter.** The `window` is written after the `roof` and is still cut as an opening in
-the wall. The compiler sorts commands into fixed phases before evaluating them, so you can write
+**Order does not matter.** The `window` is written after the `roof` and is still cut as an opening
+in the wall. The compiler sorts commands into fixed phases before evaluating them, so you can write
 lines in whatever order reads best.
 
 **Blockstate is derived.** Nobody writes `facing=south` for the door, `north=tall` for the wall, or
@@ -180,8 +181,8 @@ Read on: [Components, Editing, and Multi-building](/spec/components-editing-site
 
 | If you want to… | Read |
 |---|---|
-| Change part of a build without rewriting it | [Editing model §9.2](/spec/components-editing-sites/) — `edit window[class=vent] set shape=arch` |
-| Know which Minecraft versions a file works on | [Versioning and Editions §10.5](/spec/versioning-editions/) — the `cairn info` report |
+| Change part of a build without rewriting it | [Editing model §9.2](/spec/components-editing-sites#92-editing-model) — `edit window[class=vent] set shape=arch` |
+| Know which Minecraft versions a file works on | [Versioning and Editions §10.5](/spec/versioning-editions#105-which-version-is-it-for-has-three-answers) — the `cairn info` report |
 | Bring an existing schematic into Cairn | [Ecosystem Interop](/spec/ecosystem-interop/) — transliterate, lift, voxel-diff |
 | Try the other roof kinds | The `roof-shed`, `roof-hip`, and `roof-flat` [examples](/examples/) |
 | Look up a term | [Glossary](/spec/glossary/) |

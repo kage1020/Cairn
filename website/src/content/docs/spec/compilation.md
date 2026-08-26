@@ -27,7 +27,7 @@ actuators are placed in 3D. See [Redstone](redstone).
 
 Last-wins applies only to **local overrides within the same phase**, and `raw` always runs last. Two
 different members contesting a voxel inside a phase resolve the same way and are reported — see
-§4.8.
+[§4.8](#48-within-phase-conflicts-and-the-palette).
 
 ```
 struct keep size=11x9
@@ -56,7 +56,7 @@ Bedrock, and Java's DataVersion has nothing to do with Bedrock's block_version.
 `roof kind=gable [overhang=N] mat_slot=...` lowers to two opposite stair slopes meeting at a ridge.
 
 The four roof kinds — `gable`, `shed`, `hip`, `flat` — share the overhang and wall-top conventions
-below; their layouts are §4.3–§4.6.
+below. Their layouts are this section and the three that follow.
 
 **Material.** A sloped roof takes its material from `mat_slot=` and it MUST be in the stair family
 — an id whose path ends in `_stairs`. The geometry attaches `facing`, `half`, and `shape` to
@@ -177,7 +177,7 @@ Each term counts only the members that will actually paint:
   plus a `slope_to=` if that kind is `shed`).
 - `wall_top` — the largest `N + height` over the walls whose `mat_slot=` resolves, `N` being the
   enclosing level's offset and `0` in the body.
-- `roof_extra` — the tallest per-kind contribution from §4.3–§4.6.
+- `roof_extra` — the tallest per-kind contribution from [§4.3](#43-gable-roof-voxel-rules)–[§4.6](#46-flat-roof-voxel-rules).
 - `1` — the base plane, which every struct has.
 
 Members inside a `level` count in all three: a struct whose only walls sit under `level y=5` is as
@@ -206,7 +206,7 @@ is `E_UNKNOWN_ID`, so no artifact ships from that shape.
 
 Across phases, the phase order decides: a `door` cut through `walls` is massing followed by
 openings, and the hole is the point. Inside one phase, only source order separates two members,
-which is what §4.1 grants to "local overrides within the same phase".
+which is what [§4.1](#41-phase-evaluation) grants to "local overrides within the same phase".
 
 That grant is for an author restating a member. Two footprints that merely intersect are a
 different thing, so the compiler keeps the last write and emits `W_PHASE_CONFLICT` naming both

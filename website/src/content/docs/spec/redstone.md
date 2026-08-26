@@ -10,7 +10,7 @@ AI handles even worse than voxel building, and all three are derived determinist
 logic description.
 
 The first-class object of the logic layer is the **signal dependency graph**, not behaviour. Time is
-not carried in the language core (§14.4).
+not carried in the language core ([§14.4](#144-time-model)).
 
 ## 14.1 Two tiers, and the v1 boundary
 
@@ -99,11 +99,12 @@ In v1 only the macros — `delay`, `pulse`, `edge`, `latch`, `counter` — carry
 cell macro that lowers to three repeaters internally. There is no tick operator to write.
 
 **Delay is carried in neither the Logic IR nor the Netlist IR. It is determined for the first time
-in the Placement IR** (§14.8). `and` is logically zero-delay, but the tick count is known only after
-cell selection (`and → ComparatorAND` on Java) and the actual post-placement wire length.
+in the Placement IR** ([§14.8](#148-connection-to-the-ir-and-phases)). `and` is logically
+zero-delay, but the tick count is known only after cell selection (`and → ComparatorAND` on Java)
+and the actual post-placement wire length.
 
-A number appears as ticks only in verification assertions (§14.7). You never do tick arithmetic
-inside a logic expression.
+A number appears as ticks only in verification assertions ([§14.7](#147-verification)). You never do
+tick arithmetic inside a logic expression.
 
 ## 14.5 Place-and-route
 
@@ -134,7 +135,7 @@ The internal algorithm runs five stages:
    passing it over, naming the pair of signals and the coordinate they meet on, one finding per
    pair. A reservation with no layer above the plane (`void=1`) has nowhere to lift onto, and the
    scope is refused.
-5. **Edition legalization** — see §14.6.
+5. **Edition legalization** — see [§14.6](#146-edition-differences).
 
 Routing is confined to the `circuit` region. If it does not fit, the compiler fails loud. A sink
 with no clear path from its driver — every way out walled in by a component — is the same refusal

@@ -59,9 +59,9 @@ two and a jump of more than one level are different mistakes and are reported as
 A UTF-8 byte-order mark at the very start of a file is ignored; one anywhere else is an ordinary
 stray character.
 
-A line ends at `\n`, at `\r\n`, or at a lone `\r`, and all three are the same line break. VS Code and
-Monaco use the same rule, so a diagnostic's line number and the line under the cursor name the same
-row. A position always points at the text that is wrong, so an error at the end of a line is
+A line ends at `\n`, at `\r\n`, or at a lone `\r`, and all three are the same line break. VS Code
+and Monaco use the same rule, so a diagnostic's line number and the line under the cursor name the
+same row. A position always points at the text that is wrong, so an error at the end of a line is
 reported there and never at the first column of the next one.
 
 The tree-sitter grammar is a known exception: its runtime advances the row on `\n` alone, so a file
@@ -148,14 +148,15 @@ rejected with `W_DEFERRED_MEMBER`, and only the primary is painted.
 | `at=left` | The wall-local axis origin, `u = 0`. |
 | `at=right` | The far corner, `u = wall_length - 1`. |
 
-The same column resolves both the openings cut and any `connect` walkway anchored to this door
-(§9.3.5). Numeric offsets (`at=N`) are reserved for a future extension.
+The same column resolves both the openings cut and any `connect` walkway anchored to this door ([§9.3.5](components-editing-sites#935-ports-and-connect)).
+Numeric offsets (`at=N`) are reserved for a future extension.
 
 ## 5.5 IDs, classes, addresses
 
 Important members MAY declare `id=`, and `class=` groups members. Members without an `id=` get a
 stable, meaning-based address assigned by the compiler, derived from parent / role / side / level /
-offset. See [Components, Editing, and Multi-building §9.2](components-editing-sites).
+offset. See
+[Components, Editing, and Multi-building §9.2](components-editing-sites#92-editing-model).
 
 A `place` row is the exception: its `id=` is required, and omitting it is `E_INCOMPLETE_PLACE`. An
 auto-address names nothing outside the body it sits in. A `place`'s `id=` is what `east_of=` and

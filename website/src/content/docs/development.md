@@ -46,7 +46,7 @@ leaf integrations that nothing depends on. `cairn-lang-formats` is the only crat
 - **`cairn-lang-nbt` is just the byte codec.** Litematica regions, schematic palettes, and Bedrock's
   `.mcstructure` quirks belong in `cairn-lang-formats`.
 - **`cairn-lang-redstone` reuses core's sensor and actuator placement** but owns its own IR layers
-  ([Redstone §14.8](/spec/redstone/)).
+  ([Redstone §14.8](/spec/redstone#148-connection-to-the-ir-and-phases)).
 
 ## Toolchain
 
@@ -96,7 +96,7 @@ wasm-pack build crates/cairn-lang-wasm --target web --release
 - **`missing_docs` is a warning everywhere.** Every public item gets a `///` line, and every crate a
   `//!` block.
 - **No Minecraft target constants.** The `(edition, version)` pair is a CLI parameter and must never
-  appear in the language semantics ([Compilation Model §4.2](/spec/compilation/)).
+  appear in the language semantics ([Compilation Model §4.2](/spec/compilation#42-target-axes)).
 - **Errors carry the self-correction triple** — what is wrong / valid candidates / suggested fix
   ([Lint](/spec/lint/)).
 
@@ -119,22 +119,22 @@ Format support lives in `cairn-lang-formats`. A new file type needs three things
 1. A reader from bytes to the block-array IR.
 2. A writer from the block-array IR to bytes.
 3. An `(edition, version)` provenance stamp on import
-   ([Ecosystem Interop §12.4](/spec/ecosystem-interop/)).
+   ([Ecosystem Interop §12.4](/spec/ecosystem-interop#124-import-stamping-and-pitfalls)).
 
 If you find yourself reaching into `cairn-lang-core` to add format-specific fields, the block-array
 IR is leaking format concerns. Discuss before merging.
 
 ## Adding redstone primitives
 
-The v1 vocabulary is closed ([Redstone §14.1](/spec/redstone/)): combinational gates plus `latch`,
-`pulse`, `delay`, `edge_rising`, `edge_falling`, and `counter`. Adding to it is a **spec change**.
-Open a spec PR with:
+The v1 vocabulary is closed ([Redstone §14.1](/spec/redstone#141-two-tiers-and-the-v1-boundary)):
+combinational gates plus `latch`, `pulse`, `delay`, `edge_rising`, `edge_falling`, and `counter`.
+Adding to it is a **spec change**. Open a spec PR with:
 
 - the new primitive's signal-graph semantics,
 - whether it is combinational or sequential,
 - the per-edition cell library entry it lowers to,
 - the truth-table, latency, and temporal assertions it must satisfy in the headless simulator
-  ([Evaluation Framework §13.4](/spec/evaluation/)).
+  ([Evaluation Framework §13.4](/spec/evaluation#134-redstone-verification)).
 
 ## Where to ask
 

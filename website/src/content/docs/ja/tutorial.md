@@ -48,8 +48,8 @@ cairn compile examples/cottage.crn --edition bedrock --target 1.21.40
 ポイントで、それを束縛するのが theme です。`theme medieval` を別のものに差し替えてもジオメトリは
 変わりません。CSS の発想をブロックに適用したものです。
 
-**位置は意味的です。** `side=front` / `offset=2` / `y=2` / `at=center` は壁に沿った位置です。書く側に
-絶対座標は一切出てきません。
+**位置は意味的です。** `side=front` / `offset=2` / `y=2` / `at=center` は壁に沿った位置です。書く側
+に絶対座標は一切出てきません。
 
 **順序は関係ありません。** `window` は `roof` の後に書かれていますが、それでも壁の開口として切られ
 ます。コンパイラは評価前にコマンドを固定フェーズに振り分けるので、読みやすい順に書けます。
@@ -59,8 +59,8 @@ cairn compile examples/cottage.crn --edition bedrock --target 1.21.40
 
 ## 2. 抽象マテリアルとレベル
 
-[`themed-tower.crn`](https://github.com/kage1020/Cairn/blob/main/examples/themed-tower.crn) は同じ形に
-3 つの考えを足します。
+[`themed-tower.crn`](https://github.com/kage1020/Cairn/blob/main/examples/themed-tower.crn) は同じ形
+に 3 つの考えを足します。
 
 ```
 theme keep_dark:
@@ -84,11 +84,11 @@ struct keep size=11x9
 ```
 
 **トークンは 2 種類あります。** `@oak_planks` は *正準ブロックトークン* で、特定の意味を表し、黙って
-格下げされることはありません。`@floor.wood.broadleaf` は *抽象マテリアルトークン* で、ターゲット次第で
-テーマがオークにもシラカバにも解決してよい美的な選択です。
+格下げされることはありません。`@floor.wood.broadleaf` は *抽象マテリアルトークン* で、ターゲット次第
+でテーマがオークにもシラカバにも解決してよい美的な選択です。
 
-**`level y=5` は上階に自前の `y=0` を与えます。** 2 階の窓は地面からではなく、その階の床から `y=2` の
-位置に留まります。
+**`level y=5` は上階に自前の `y=0` を与えます。** 2 階の窓は地面からではなく、その階の床から `y=2`
+の位置に留まります。
 
 **ブロックステートを書くと intent に昇格します。** `stair id=eave` の行は `half=top facing=out
 shape=outer_left` を明示しているので、これらの値はコンパイラのものではなくあなたのものです。規則は
@@ -122,8 +122,8 @@ struct gatehouse size=7x5
 **センサが発し、アクチュエータが受けます。** `-> sig.step` はセンサの出力、`opened_by=sig.open` は
 アクチュエータの入力です。その間の依存を書くのが `logic` です。
 
-**tick 演算はありません。** 論理式は時間をまったく持ちません。アサーションの `within 2` だけが tick を
-意味します。ディレイは回路を配置し配線するまで分からないからです。
+**tick 演算はありません。** 論理式は時間をまったく持ちません。アサーションの `within 2` だけが tick
+を意味します。ディレイは回路を配置し配線するまで分からないからです。
 
 **`circuit region=…` は place-and-route のための領域を確保します。** 収まらなければ
 `E_ROUTE_CONGESTION` が修正案とともに出ます。黙って溢れることはありません。
@@ -166,8 +166,8 @@ site hamlet:
 **配置は関係で書きます。** `east_of=home1 gap=4` は制約であり、座標に落とすのはコンパイラの仕事です。
 LLM の算術誤りという最悪のクラスがまるごと消えます。
 
-**struct はポートを公開します。** `home1.entry` は `def` で宣言されたドアメンバで、`connect` が 2 つの
-ポートを walkway で結びます。
+**struct はポートを公開します。** `home1.entry` は `def` で宣言されたドアメンバで、`connect` が 2 つ
+のポートを walkway で結びます。
 
 **48³ のストラクチャブロック制限は消えます。** 1 つのストラクチャブロックに収まらない村は、`site` の
 上に複数の `def` を合成したものにすぎません。
@@ -178,8 +178,8 @@ LLM の算術誤りという最悪のクラスがまるごと消えます。
 
 | したいこと | 読む場所 |
 |---|---|
-| 全部を書き直さずに一部を変える | [編集モデル §9.2](/ja/spec/components-editing-sites/) — `edit window[class=vent] set shape=arch` |
-| どの Minecraft バージョンで動くか知る | [バージョンとエディション §10.5](/ja/spec/versioning-editions/) — `cairn info` の報告 |
+| 全部を書き直さずに一部を変える | [編集モデル §9.2](/ja/spec/components-editing-sites#92-編集モデル) — `edit window[class=vent] set shape=arch` |
+| どの Minecraft バージョンで動くか知る | [バージョンとエディション §10.5](/ja/spec/versioning-editions#105-どのバージョン用かには-3-つの答えがある) — `cairn info` の報告 |
 | 既存の schematic を Cairn に取り込む | [エコシステム連携](/ja/spec/ecosystem-interop/) — 写し取り、リフト、voxel-diff |
 | 他の屋根の種類を試す | `roof-shed` / `roof-hip` / `roof-flat` の[サンプル](/ja/examples/) |
 | 用語を引く | [用語集](/ja/spec/glossary/) |

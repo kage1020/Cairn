@@ -21,8 +21,8 @@ title: "6. ブロックステート"
 | 個数 | `snow layers`、`candle count` |
 | レッドストーン | `redstone_dust connect`、`repeater delay`、`observer` / `piston` / `dispenser facing`、`note` / `instrument` |
 
-見落としやすい 2 つは intent ではなく導出に属します。`torch` ↔ `wall_torch` と `sign` ↔ `wall_sign` は
-取り付け面によって自動的に置き換わります。
+見落としやすい 2 つは intent ではなく導出に属します。`torch` ↔ `wall_torch` と `sign` ↔ `wall_sign`
+は取り付け面によって自動的に置き換わります。
 
 ```
 stair id=eave   kind=stairs mat_slot=roof side=front half=top facing=out shape=outer_left  # 軒
@@ -42,8 +42,8 @@ member:
   resolved_state: { facing: north, waterlogged: false }  # 導出結果。ペイント由来のステートもここ
 ```
 
-Minecraft の用語である blockstate と衝突しないよう、意図的に別の名前にしています。導出やペイント由来の
-resolved を、作者が書いた intent と混ぜないことが、編集の安定性を作ります。
+Minecraft の用語である blockstate と衝突しないよう、意図的に別の名前にしています。導出やペイント由来
+の resolved を、作者が書いた intent と混ぜないことが、編集の安定性を作ります。
 
 `bed` は IR の型をきれいに保つため、エンティティではなくブロックメンバとして扱います。
 
@@ -53,8 +53,8 @@ resolved を、作者が書いた intent と混ぜないことが、編集の安
 `waterlogged` を立てます。
 
 3 値の `waterlogged=auto|true|false` も使えます。水槽の中に空気の穴を残す (明示的な `false`)、水源と
-流水を区別する、waterlog 可能テーブルのバージョン差に対応する、といった用途のためです。流水は `flow=`
-と `level=` で明示します。
+流水を区別する、waterlog 可能テーブルのバージョン差に対応する、といった用途のためです。流水は
+`flow=` と `level=` で明示します。
 
 ```
 fill fluid=water kind=source from=1,1,1 to=5,3,5    # 重なったフェンス/階段/看板は自動 waterlogged

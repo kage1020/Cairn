@@ -32,10 +32,11 @@ the wider row's binding.
 
 Two rows that select the *same* members are different. Same keyword and same attributes means they
 match member for member, so a key they both bind is read by nothing on the earlier row. That is
-`E_DUPLICATE_SELECTOR` ([Lint §11.1](lint)). Sameness is by meaning: attribute order does not count,
-and `class=` / `id=` / `mat_slot=` values compare as label text, so `window[class=small]` and
-`window[class="small"]` are one selector. Rows that coincide but bind different keys are not
-reported — they compose, and splitting a long binding list over two lines is allowed.
+`E_DUPLICATE_SELECTOR` ([Lint §11.1](lint#111-diagnostic-codes)). Sameness is by meaning: attribute
+order does not count, and `class=` / `id=` / `mat_slot=` values compare as label text, so
+`window[class=small]` and `window[class="small"]` are one selector. Rows that coincide but bind
+different keys are not reported — they compose, and splitting a long binding list over two lines is
+allowed.
 
 `def`, `theme`, and `site` are unified by the same slot-bearing Component mechanism
 ([Components, Editing, and Multi-building](components-editing-sites)).

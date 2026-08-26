@@ -2,10 +2,10 @@
 title: "互換性ティア"
 ---
 
-Cairn は [日付ベースのバージョニング](/ja/spec/versioning-editions#101-ターゲットはコンパイル時パラメータ)
-(`YYYY.M[.PATCH]`) の下で単一のリリーストレインを出します。CalVer には semver の「メジャー」軸が
-ないため、**何を壊してよくて何を壊してはいけないかの範囲**はバージョン番号ではなくこの文書で規定
-します。
+Cairn は
+[日付ベースのバージョニング](/ja/spec/versioning-editions#101-ターゲットはコンパイル時パラメータ) (`YYYY.M[.PATCH]`)
+の下で単一のリリーストレインを出します。CalVer には semver の「メジャー」軸がないため、**何を壊して
+よくて何を壊してはいけないかの範囲**はバージョン番号ではなくこの文書で規定します。
 
 プロジェクトの公開面はすべて **Stable**、**Evolving**、**Internal** の 3 ティアのどれか 1 つに
 属します。ティアがルールを定め、バージョン番号はいつ起こったかを記録するだけです。
@@ -63,8 +63,8 @@ Evolving な面:
 Internal な面:
 
 - ワークスペース全 crate の Rust API (`cairn-lang-core`、`cairn-lang-nbt`、`cairn-lang-formats`、
-  `cairn-lang-redstone`、`cairn-lang-lsp`、`cairn-lang-wasm`)。これらは含まれる最初の月次 minor から crates.io
-  に publish するが、CLI の推移的公開依存ではない項目はすべて `#[doc(hidden)]` を付ける。
+  `cairn-lang-redstone`、`cairn-lang-lsp`、`cairn-lang-wasm`)。これらは含まれる最初の月次 minor から
+  crates.io に publish するが、CLI の推移的公開依存ではない項目はすべて `#[doc(hidden)]` を付ける。
 - コンパイラの中間表現 (Intent IR、Semantic IR、block-array pivot のレイアウト)。
 - 増分ビルドキャッシュのオンディスク形状 (ワークスペース内の `target/` 相当)。
 - 言語サーバーの内部プロトコル (VS Code 等との LSP オンワイヤ仕様は Stable; `cairn-lang-lsp` の

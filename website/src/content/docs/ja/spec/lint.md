@@ -23,16 +23,16 @@ title: "11. Lint と制約検証"
 `E_DUPLICATE_SELECTOR` はセレクタを字面ではなく意味で比較します。属性の順序は関係なく、`class=` /
 `id=` / `mat_slot=` はラベルテキストとして比較されるので `small` と `"small"` は同じ値です。
 *違う* キーを束縛する行は合成されるので報告されません。属性が部分的に重なるだけの行も同様です
-([マテリアルとテーマ §7.1](materials-themes))。
+([マテリアルとテーマ §7.1](materials-themes#71-依存性注入としてのスロット))。
 
-`E_DUPLICATE_ITEM` は `theme` / `def` / `struct` / `site` を 4 つの別々の名前空間として扱うので、
-1 つの名前は各種別に 1 回ずつ現れられます。前 3 つでは最初の宣言が解決し、残りは何も束縛しません。
-同名の `site` ブロック 2 つは代わりに `site::NAME::PLACE_ID` の名前空間を共有してマージされます。
-`id=` が異なる place はすべてビルドされ、衝突するのは `id=` の重複だけですが、`east_of=` はブロックを
-またいで届きません。
+`E_DUPLICATE_ITEM` は `theme` / `def` / `struct` / `site` を 4 つの別々の名前空間として扱うので、 1
+つの名前は各種別に 1 回ずつ現れられます。前 3 つでは最初の宣言が解決し、残りは何も束縛しません。同名
+の `site` ブロック 2 つは代わりに `site::NAME::PLACE_ID` の名前空間を共有してマージされます。 `id=`
+が異なる place はすべてビルドされ、衝突するのは `id=` の重複だけですが、`east_of=` はブロックをまた
+いで届きません。
 
-`E_DUPLICATE_HEADER` の対象は `@cairn` と `@intended_targets` です。`@requires` は除外されます —
-その下限はすべての行で最も厳しいものに畳まれるので、2 つ目は制約を追加します (§5.3)。
+`E_DUPLICATE_HEADER` の対象は `@cairn` と `@intended_targets` です。`@requires` は除外されます — そ
+の下限はすべての行で最も厳しいものに畳まれるので、2 つ目は制約を追加します ([§5.3](/ja/spec/syntax#53-ヘッダ))。
 
 ### 構文と構造
 
@@ -40,12 +40,12 @@ title: "11. Lint と制約検証"
 |---|---|
 | `E_UNKNOWN_KEYWORD` | 文キーワードが既知キーワード表にない。 |
 | `E_MISPLACED_MEMBER` | キーワードは既知だが、囲んでいるボディに読み手がいない。 |
-| `E_UNEXPECTED_POSITIONAL` | 位置引数を読まない行に裸の値がある (§5.1)。 |
+| `E_UNEXPECTED_POSITIONAL` | 位置引数を読まない行に裸の値がある ([§5.1](/ja/spec/syntax#51-字句))。 |
 | `E_UNSUPPORTED_NESTING` | メンバが、誰も読まないインデントされたボディを持っている。 |
 | `E_TYPE_MISMATCH_LABEL` | ラベル型キーの値が識別子でも文字列でもない。 |
 | `E_TYPE_MISMATCH_SIZE` | `size=` の値が `WxH` リテラルでない。 |
 | `E_CONNECT_ARITY` | `connect` 行の形が `FROM.PORT to TO.PORT` でない。 |
-| `E_INVALID_REQUIRES` | `@requires` の式がバージョン下限になっていない (§5.3)。 |
+| `E_INVALID_REQUIRES` | `@requires` の式がバージョン下限になっていない ([§5.3](/ja/spec/syntax#53-ヘッダ))。 |
 
 `E_MISPLACED_MEMBER` は `struct` / `def` 内の `place` / `connect`、あるいは `site` の行に混ざった
 ジオメトリキーワードで発火します。該当行で 1 回だけ報告され、その下にインデントされたものも一緒に
@@ -55,8 +55,8 @@ title: "11. Lint と制約検証"
 `site` のボディはフラットなリストです。落ちたサブツリーごとに、その根で 1 回報告されます。
 
 `E_TYPE_MISMATCH_LABEL` — ラベル型キーは `id=` / `class=` / `mat_slot=` / `use=` / `theme=` です。
-`use=` と `theme=` では、型の合わない値はリゾルバから見るとキーが無いのと区別できません。このコードは
-「キーは行にあるが使えない」、`E_INCOMPLETE_PLACE` は「キーが無い」を意味します。
+`use=` と `theme=` では、型の合わない値はリゾルバから見るとキーが無いのと区別できません。このコード
+は「キーは行にあるが使えない」、`E_INCOMPLETE_PLACE` は「キーが無い」を意味します。
 
 `E_CONNECT_ARITY` — `connect FROM.PORT to TO.PORT` が位置引数を読む唯一の形です。片側の欠落、`to`
 キーワードの欠落や別トークンへの置き換え、末尾の余分な位置引数、ドット 1 つの `PLACE.PORT` 参照で
@@ -73,15 +73,15 @@ title: "11. Lint と制約検証"
 | `E_UNKNOWN_ID` | 固定されたターゲットが宣言していない解決済みブロック ID。 |
 | `E_INCOMPATIBLE_MATERIAL` | ブロックステートを付けるジオメトリを持つメンバが、それを保持できないマテリアルに束縛されている。 |
 | `E_THEME_VARIANT_MISSING` | 固定されたエディションが、テーマのどのエディション別バリアントも束縛できない。 |
-| `E_INCOMPLETE_PLACE` | `place` 行が `id=` / `use=` / `theme=` のいずれかを欠いている (§9.3)。 |
+| `E_INCOMPLETE_PLACE` | `place` 行が `id=` / `use=` / `theme=` のいずれかを欠いている ([§9.3](/ja/spec/components-editing-sites#93-複数建築--site))。 |
 
 `E_UNKNOWN_ID` と `E_INCOMPATIBLE_MATERIAL` は block-array lowering 段で発生するので、報告するのは
 `cairn compile` (と `cairn lower`) だけです。`cairn check` は lowering を走らせません。さらに
-`E_UNKNOWN_ID` は固定されたターゲットを必要とするので、実際に出せるのは `cairn compile --target`
-だけです ([バージョンとエディション §10.4](versioning-editions))。
+`E_UNKNOWN_ID` は固定されたターゲットを必要とするので、実際に出せるのは `cairn compile --target` だ
+けです ([バージョンとエディション §10.4](versioning-editions#104-fail-loud-と最小バージョン推定))。
 
 `E_INCOMPATIBLE_MATERIAL` は現時点では、階段ファミリ外に束縛された傾斜屋根または軒の `stair` を
-意味します ([コンパイルモデル §4.3](compilation))。
+意味します ([コンパイルモデル §4.3](compilation#43-切妻屋根のボクセル規則))。
 
 `E_THEME_VARIANT_MISSING` は `--edition` 指定時のみ発火し、いくつのスコープが読んでいても
 **論理テーマごとに 1 回** 報告されます。修正すべきは同じ `theme` ブロックの同じ 1 箇所だからです。
@@ -99,8 +99,8 @@ title: "11. Lint と制約検証"
 | `W_TRUTH_TABLE_DUPLICATE_ROW` | 行が先行する行を繰り返し、かつ一致している。 |
 | `W_TRUTH_TABLE_PARTIAL` | 行が割り当てていない入力の組がある。 |
 
-`E_TRUTH_TABLE_CONFLICT` は後ろの行で報告され、同じパターンを持つ最初の行に note が付きます。評価器が
-どちらを読むかは規定しません。修復はどちらの行が誤りかを決めることです。
+`E_TRUTH_TABLE_CONFLICT` は後ろの行で報告され、同じパターンを持つ最初の行に note が付きます。評価器
+がどちらを読むかは規定しません。修復はどちらの行が誤りかを決めることです。
 
 2 つの警告が警告なのは、書かれている行はどれも本物の制約だからです。1 つの表が両方を得ることも
 あります。繰り返し行は組を 1 つも埋めないためです。
@@ -126,9 +126,9 @@ title: "11. Lint と制約検証"
 クローズドな語彙に対して識別子を拒絶する診断には、``did you mean `X`?`` の note が付きます。未知の
 キーワード、未知の `mat_slot=` 名、未知の `--target` バージョンが対象です。
 
-候補を出す条件は、入力長でスケールする Damerau-Levenshtein 距離の閾値内にあることです。閾値は 1〜3 文字
-なら 1 編集以下、4〜6 文字なら 2、それ以上は 3 です。候補列挙 (`expected one of: ...`) は常に併せて出力
-されます。
+候補を出す条件は、入力長でスケールする Damerau-Levenshtein 距離の閾値内にあることです。閾値は 1〜3
+文字なら 1 編集以下、4〜6 文字なら 2、それ以上は 3 です。候補列挙 (`expected one of: ...`) は常に併
+せて出力されます。
 
 ## 11.2 機械可読ペイロード
 
@@ -168,13 +168,13 @@ title: "11. Lint と制約検証"
 | `catalog` | レジストリパックがトークンを対応付けた。 | パックの対応付け。 |
 | `builtin` | メンバのデフォルト用の行をパックが持たず、コンパイラ組み込みの ID が使われた。 | 行を追加すべきパック。 |
 
-`token` は `catalog` と `builtin` に付随し、`authored` では省略されます。`suggestion` はタイポ閾値内の
-宣言済み ID が無いときは省略され、リネームでは常に省略されます。
+`token` は `catalog` と `builtin` に付随し、`authored` では省略されます。`suggestion` はタイポ閾値内
+の宣言済み ID が無いときは省略され、リネームでは常に省略されます。
 
-`E_INCOMPATIBLE_MATERIAL` も同じ考えです。`slot` はメンバが読んだ `mat_slot=` 名で、束縛が無ければ
-省略されます。ドット付きの `token` (`roof.dark_wood`) なら、修正すべきはソース行ではなくパックの
-対応付けです。`required` を暗黙にせず名前で持つのは、将来別のファミリが加わったときにコードを増やさず
-ここの値で表せるようにするためです。
+`E_INCOMPATIBLE_MATERIAL` も同じ考えです。`slot` はメンバが読んだ `mat_slot=` 名で、束縛が無ければ省
+略されます。ドット付きの `token` (`roof.dark_wood`) なら、修正すべきはソース行ではなくパックの対応付
+けです。`required` を暗黙にせず名前で持つのは、将来別のファミリが加わったときにコードを増やさずここ
+の値で表せるようにするためです。
 
 `W_TRUTH_TABLE_PARTIAL.missing` は集合そのものではなく **サンプル** です。入力 20 本なら組は 100 万
 通りあります。件数は `missing.len()` ではなく `2^inputs - covered` から求めてください。総数ではなく

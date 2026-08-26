@@ -23,7 +23,7 @@ it can feed the loop in [Evaluation Framework](evaluation).
 `E_DUPLICATE_SELECTOR` compares selectors by meaning, not by text: attribute order does not count,
 and `class=` / `id=` / `mat_slot=` compare as label text, so `small` and `"small"` are one value.
 Rows that bind *different* keys compose and are not reported. Neither are rows whose attributes
-merely overlap — see [Materials and Themes §7.1](materials-themes).
+merely overlap — see [Materials and Themes §7.1](materials-themes#71-slots-as-dependency-injection).
 
 `E_DUPLICATE_ITEM` treats `theme` / `def` / `struct` / `site` as four separate namespaces, so one
 name may appear once in each. For the first three the first declaration resolves and the rest bind
@@ -32,7 +32,7 @@ namespace: every place with a distinct `id=` still builds, only a repeated `id=`
 `east_of=` does not reach across the blocks.
 
 `E_DUPLICATE_HEADER` covers `@cairn` and `@intended_targets`. `@requires` is excluded — its floors
-compose to the strictest across every line, so a second one adds a constraint (§5.3).
+compose to the strictest across every line, so a second one adds a constraint ([§5.3](syntax#53-headers)).
 
 ### Syntax and structure
 
@@ -40,12 +40,12 @@ compose to the strictest across every line, so a second one adds a constraint (�
 |---|---|
 | `E_UNKNOWN_KEYWORD` | The statement keyword is not in the known-keyword table. |
 | `E_MISPLACED_MEMBER` | The keyword is known, but the enclosing body has no reader for it. |
-| `E_UNEXPECTED_POSITIONAL` | A bare value on a line that reads none (§5.1). |
+| `E_UNEXPECTED_POSITIONAL` | A bare value on a line that reads none ([§5.1](syntax#51-lexical)). |
 | `E_UNSUPPORTED_NESTING` | A member carries an indented body that nothing reads. |
 | `E_TYPE_MISMATCH_LABEL` | A label-typed key's value is not an identifier or string. |
 | `E_TYPE_MISMATCH_SIZE` | A `size=` value is not a `WxH` literal. |
 | `E_CONNECT_ARITY` | A `connect` row's shape is not `FROM.PORT to TO.PORT`. |
-| `E_INVALID_REQUIRES` | An `@requires` expression that is not a version floor (§5.3). |
+| `E_INVALID_REQUIRES` | An `@requires` expression that is not a version floor ([§5.3](syntax#53-headers)). |
 
 `E_MISPLACED_MEMBER` fires on a `place` / `connect` inside a `struct` or `def`, or a geometry
 keyword among a `site`'s rows. It is reported once at the offending row, and anything indented
@@ -74,15 +74,16 @@ a decimal number or does not fit in a `u32`, and text after the version.
 | `E_UNKNOWN_ID` | A resolved block ID the pinned target does not declare. |
 | `E_INCOMPATIBLE_MATERIAL` | A member whose geometry attaches blockstates is bound to a material that cannot carry them. |
 | `E_THEME_VARIANT_MISSING` | The pinned edition can bind none of a theme's per-edition variants. |
-| `E_INCOMPLETE_PLACE` | A `place` row omits `id=`, `use=`, or `theme=` (§9.3). |
+| `E_INCOMPLETE_PLACE` | A `place` row omits `id=`, `use=`, or `theme=` ([§9.3](components-editing-sites#93-multi-building--site)). |
 
 `E_UNKNOWN_ID` and `E_INCOMPATIBLE_MATERIAL` are raised during block-array lowering, so only
 `cairn compile` (and `cairn lower`) report them — `cairn check` does not run lowering.
 `E_UNKNOWN_ID` further needs a pinned target, so `cairn compile --target` is the one command that
-raises it. See [Versioning and Editions §10.4](versioning-editions).
+raises it. See
+[Versioning and Editions §10.4](versioning-editions#104-fail-loud-and-minimum-version-inference).
 
 `E_INCOMPATIBLE_MATERIAL` today means a sloped roof or an eave `stair` bound outside the stair
-family ([Compilation Model §4.3](compilation)).
+family ([Compilation Model §4.3](compilation#43-gable-roof-voxel-rules)).
 
 `E_THEME_VARIANT_MISSING` fires only under `--edition`, and is reported **once per logical theme**
 however many scopes read it — they all want the same edit in the same `theme` block. Every

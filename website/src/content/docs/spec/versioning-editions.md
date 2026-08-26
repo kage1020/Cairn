@@ -106,7 +106,7 @@ An ID is checked against the block table for the one `(edition, version)` the co
 against the edition as a whole. Bedrock 1.21.0 spells stone bricks `stonebrick` and 1.21.40 spells
 it `stone_bricks`, so an edition-wide answer would accept both everywhere and catch neither mistake.
 The tables ship in the registry pack's `blocks` component, folded with the `inherits + diffs` rule
-of §10.3.
+of [§10.3](#103-backend--data-tables).
 
 The check therefore runs on `cairn compile --target` and nowhere else. `cairn info` and `cairn
 lower` do lower, but pin no version — `info` deliberately reports across the whole range — so they
@@ -143,10 +143,10 @@ is not a shape the language accepts; that is `E_INVALID_REQUIRES`.
 
 ### Ordering, and where it stops
 
-§10.1 makes `DataVersion` the canonical ordering key. Version comparison today is **component-wise
-over dotted decimals** instead — a known shortfall, not a second convention. The pack does ship a
-`DataVersion` table; the obstacle is its coverage, since it names only the versions the pack was
-built for while a floor may name any version.
+[§10.1](#101-the-target-is-a-compile-time-parameter) makes `DataVersion` the canonical ordering key.
+Version comparison today is **component-wise over dotted decimals** instead — a known shortfall, not
+a second convention. The pack does ship a `DataVersion` table; the obstacle is its coverage, since
+it names only the versions the pack was built for while a floor may name any version.
 
 Until a lookup can answer for an arbitrary label, a version Cairn cannot order is refused at the
 directive rather than sorted wrongly later: pre-release, snapshot, and date-based labels
@@ -154,8 +154,9 @@ directive rather than sorted wrongly later: pre-release, snapshot, and date-base
 
 Two things the convention still gets wrong within what it does accept:
 
-- **A date-based label against a semver one.** This is the transition §10.1 exists to survive, and
-  dotted-decimal comparison does not survive it.
+- **A date-based label against a semver one.** This is the transition
+  [§10.1](#101-the-target-is-a-compile-time-parameter) exists to survive, and dotted-decimal
+  comparison does not survive it.
 - **The two editions' numbering, compared as if it were one.** Java releases run `1.20.4 / 1.21 /
   1.21.4`, Bedrock `1.21.0 / 1.21.40 / 1.21.60`. A floor carries no edition, so
   `@requires version>=1.21.4` reads as satisfied by Bedrock `1.21.40` (`40 > 4`), certifying a build
@@ -174,7 +175,7 @@ There is no single "for-version". `cairn info` reports three axes:
    `semantic_sensitivity` (boundary version + reason) separate from `since`/`until`, and a compile
    crossing one warns. Examples: the cauldron split at 1.17, wall connections going bool →
    `none/low/tall` at 1.16, the item format at 1.20.5.
-3. **The verified lock target** (§10.6).
+3. **The verified lock target** ([§10.6](#106-provenance-and-lock)).
 
 ```text
 $ cairn info build.crn --editions java,bedrock
@@ -200,7 +201,7 @@ The row counts palette entries. An entry is `unsupported` for one of four reason
 | Reason | The repair |
 |---|---|
 | The edition has no such block at all. | Change the material, or the pack's mapping for it. |
-| It has the block, but Cairn has no mapping for the states the intent carries (§10.7). | None yet — the mapping is Cairn's to add. |
+| It has the block, but Cairn has no mapping for the states the intent carries ([§10.7](#107-java--bedrock-portability)). | None yet — the mapping is Cairn's to add. |
 | A state value outside the Java domain reached the state translator. | None — a pack is expected to reject it, though no pack schema can state a value domain today. |
 | A state key the translator does not read reached it. | Remove the key from the source blockstate. |
 
@@ -217,7 +218,7 @@ the count, in palette order.
 Both questions are asked of the *edition* rather than of a version, because this row reports across
 a whole compatible range. An ID valid for only part of that range — Bedrock renaming `stonebrick` to
 `stone_bricks` at 1.21.40 — is therefore not `unsupported`. Whether the version actually being built
-has it is what `cairn compile --target` answers, as `E_UNKNOWN_ID` (§10.4).
+has it is what `cairn compile --target` answers, as `E_UNKNOWN_ID` ([§10.4](#104-fail-loud-and-minimum-version-inference)).
 
 ### The `buildable targets` row
 
@@ -332,8 +333,9 @@ theme shop_bedrock: slot floating_text -> sign glowing=true   # Bedrock fallback
 `theme NAME_java` and `theme NAME_bedrock` declare two variants of the logical theme `NAME`. A
 `--edition` pin binds that edition's variant, falls back to an unsuffixed `NAME`, and stops there.
 Binding the *other* edition's variant would route its slot values into this edition's output, which
-is the silent substitution §10.4 forbids. When neither exists the compile stops with
-`E_THEME_VARIANT_MISSING` rather than building the requested extent out of air.
+is the silent substitution [§10.4](#104-fail-loud-and-minimum-version-inference) forbids. When
+neither exists the compile stops with `E_THEME_VARIANT_MISSING` rather than building the requested
+extent out of air.
 
 `place ... theme=NAME` names the **logical** theme and follows exactly that rule, so one site places
 the same def under whichever variant the build needs. Naming a variant there
