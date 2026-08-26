@@ -38,6 +38,113 @@ pub const KNOWN_KEYWORDS: &[&str] = &[
     "connect",
 ];
 
+/// Argument keys every member accepts, whatever its role.
+///
+/// `id` / `class` / `mat_slot` are hoisted into dedicated [`Member`] fields
+/// by `intent::lower` — but only when the value is a plain label. A second
+/// occurrence of the key, or a value of any other shape, stays in
+/// `intent_state`, where an argument check would otherwise read it as a
+/// word nobody knows. `check::type_mismatch` already reports the value; the
+/// key is not the mistake.
+///
+/// [`Member`]: super::Member
+pub const UNIVERSAL_ARGUMENTS: &[&str] = &["id", "class", "mat_slot"];
+
+impl MemberRole {
+    /// The `key=` arguments this role's vocabulary contains, in the order
+    /// the spec introduces them.
+    ///
+    /// Not the grammar's — the surface parser accepts any `key=value` on
+    /// any line — and not any one pass's either. This is the closed set a
+    /// member of this role may be written with, so a key outside it is a
+    /// word that will be read by nothing however the passes grow, which is
+    /// what makes `E_UNKNOWN_ARGUMENT` an error rather than a note.
+    ///
+    /// Two directions can go wrong, and only one of them is quiet. A key a
+    /// reader reads and this table omits is caught the moment any source
+    /// uses it — the shipped corpus is held to `cairn check` cleanliness,
+    /// and `every_argument_a_pass_reads_is_in_its_role_vocabulary` asks the
+    /// question directly. A key listed here that nothing reads is the
+    /// silent direction, and it is deliberate: `window shape=` is in
+    /// `spec/components-editing-sites` §9.2 and no pass reads it yet, so it
+    /// is accepted and reported as ignored rather than refused. The set
+    /// that is listed-but-unread is [`Self::unread_arguments`].
+    ///
+    /// Matched with no wildcard so a new role has to be answered here
+    /// rather than silently inheriting an empty vocabulary, which would
+    /// report every argument written on it.
+    #[must_use]
+    pub fn arguments(&self) -> &'static [&'static str] {
+        match self {
+            // Paints the whole footprint; takes nothing but the universal
+            // keys.
+            Self::Floor => &[],
+            Self::Walls => &["height"],
+            Self::Door => &["side", "at", "opened_by"],
+            Self::Window => &[
+                "side", "y", "offset", "size", "sym", "repeat", "step", "shape",
+            ],
+            Self::Roof => &["kind", "overhang", "slope_to"],
+            Self::Stair => &["kind", "side", "half", "facing", "shape"],
+            Self::Level => &["y"],
+            Self::PressurePlate => &["at", "offset", "y"],
+            Self::Circuit => &["region", "void"],
+            // `spec/components-editing-sites` §9.3.2 and §9.3.3 fix this
+            // set: a name, what to instantiate, what to resolve materials
+            // against, and exactly one origin selector. §9.1 reserves
+            // parameterisation, which nothing forwards today; the day it
+            // lands this is the arm that opens.
+            Self::Place => &["use", "theme", "at", "east_of", "north_of", "gap"],
+            Self::Connect => &["path"],
+            // The keyword itself is unknown, so there is no vocabulary to
+            // judge its arguments against. `check::keyword_allowlist` owns
+            // the whole line.
+            Self::Other(_) => &[],
+        }
+    }
+
+    /// Arguments in [`Self::arguments`] that no pass reads yet.
+    ///
+    /// Spelled out rather than derived, because "nothing reads it" is not a
+    /// fact any table can compute about itself. Each of these is a key the
+    /// spec defines and the implementation has not reached: the value is
+    /// carried into the IR and dropped, so the member builds without it and
+    /// the author is told so rather than left to notice.
+    #[must_use]
+    pub fn unread_arguments(&self) -> &'static [&'static str] {
+        match self {
+            // `spec/components-editing-sites` §9.2 edits a window's
+            // `shape=`; `fill_window` reads size, offset, repeat, step and
+            // sym, and nothing consults the shape.
+            Self::Window => &["shape"],
+            Self::Floor
+            | Self::Walls
+            | Self::Door
+            | Self::Roof
+            | Self::Stair
+            | Self::Level
+            | Self::PressurePlate
+            | Self::Circuit
+            | Self::Place
+            | Self::Connect
+            | Self::Other(_) => &[],
+        }
+    }
+
+    /// Every key a member of this role may carry, for the closed-set note
+    /// and the `did you mean` candidates.
+    ///
+    /// The universal keys come last so the tie-break on an ambiguous typo
+    /// favours the role's own vocabulary — `sid` on a `door` should answer
+    /// `side`, not `id`.
+    #[must_use]
+    pub fn accepted_arguments(&self) -> Vec<&'static str> {
+        let mut all = self.arguments().to_vec();
+        all.extend_from_slice(UNIVERSAL_ARGUMENTS);
+        all
+    }
+}
+
 /// Return the known-keyword table.
 ///
 /// Public-facing helper so external passes can render the same list this

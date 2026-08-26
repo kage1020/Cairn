@@ -115,6 +115,15 @@ pub enum DiagnosticCode {
     MisplacedMember,
     /// A statement keyword not in the known-keyword table.
     UnknownKeyword,
+    /// A `key=value` argument whose key is outside the vocabulary of the
+    /// member's role.
+    ///
+    /// An error for the same reason [`Self::UnknownKeyword`] is, one level
+    /// down: the key names nothing, so no pass will ever read the value,
+    /// and the member is built without whatever the author was asking for.
+    /// A misspelling of an argument that has a default is the worst of
+    /// them — the build succeeds, silently, at the default.
+    UnknownArgument,
     /// A statement carrying bare positional values in a form that takes
     /// none.
     ///
@@ -445,6 +454,7 @@ impl DiagnosticCode {
             Self::UnsupportedNesting => "E_UNSUPPORTED_NESTING",
             Self::MisplacedMember => "E_MISPLACED_MEMBER",
             Self::UnknownKeyword => "E_UNKNOWN_KEYWORD",
+            Self::UnknownArgument => "E_UNKNOWN_ARGUMENT",
             Self::UnexpectedPositional => "E_UNEXPECTED_POSITIONAL",
             Self::InvalidRequires => "E_INVALID_REQUIRES",
             Self::TypeMismatchLabel => "E_TYPE_MISMATCH_LABEL",
@@ -540,6 +550,7 @@ impl DiagnosticCode {
             | Self::DuplicateId
             | Self::MisplacedMember
             | Self::UnknownKeyword
+            | Self::UnknownArgument
             | Self::UnexpectedPositional
             | Self::InvalidRequires
             | Self::TypeMismatchLabel

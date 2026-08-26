@@ -20,6 +20,7 @@
 //! a hard parse error, so a single `cairn check` invocation reports every
 //! problem in a file rather than only the first one.
 
+mod arguments;
 mod connect_arity;
 mod diagnostic;
 mod duplicate;
@@ -69,6 +70,7 @@ pub fn check(module: &Module, ir: &IntentModule, edition: Option<Edition>) -> Ve
     let mut sink = DiagnosticSink::new();
     duplicate::run(module, ir, &mut sink);
     keyword_allowlist::run(ir, &mut sink);
+    arguments::run(ir, &mut sink);
     member_scope::run(ir, &mut sink);
     connect_arity::run(ir, &mut sink);
     nesting::run(ir, &mut sink);
@@ -126,6 +128,7 @@ mod tests {
             | C::UnsupportedNesting
             | C::MisplacedMember
             | C::UnknownKeyword
+            | C::UnknownArgument
             | C::UnexpectedPositional
             | C::InvalidRequires
             | C::TypeMismatchLabel
