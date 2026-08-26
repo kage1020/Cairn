@@ -168,6 +168,30 @@ Cairn は日付ベースバージョニング (CalVer) `YYYY.M[.PATCH]` を採�
 [CHANGELOG.md](CHANGELOG.md) に記録されます。バージョン番号ではなく
 [互換性ティア](https://cairn.kage1020.com/ja/spec/compatibility/) が各面の互換契約を定めます。
 
+## ツールチェーン
+
+[`rust-toolchain.toml`](rust-toolchain.toml) はコンパイラを正確なバージョンで指定し、各ワークフローは
+`rustup show` で Rust を入れるので、決めているのはこのファイルです。手元の `rustup` も同じように読むため、
+ローカルで見える findings は CI が見る findings と同じです。
+
+チャンネル指定にしていないのは意図的です。CI は
+`cargo clippy --workspace --all-targets -- -D warnings` を走らせるので、`stable` のままだと Rust の
+リリースだけで全ブランチが赤くなります。findings はそのブランチが触っていないファイルに出て、しかも
+その変更が到達しないジョブで出て、最初に読むのは次に push した人です。固定しても新しい lint を避けられる
+わけではありません。**いつ来るかを決められる**だけで、誰かが開いた PR として来るようになります。
+
+**上げ方**。`channel` を変え、ローカルで `cargo clippy --workspace --all-targets -- -D warnings`、
+`cargo fmt --all -- --check`、`cargo test --workspace` を回し、新しいリリースが見つけたものを同じ PR で
+直します。コミット種別は `ci` です。feature ブランチの中で上げるより単独の PR にする価値があります —
+「新しいコンパイラと、それが要求した lint 修正だけ」という差分はレビューできるからです。
+
+**MSRV ではありません**。workspace マニフェストの `rust-version` は利用者が Cairn をビルドするのに
+必要な下限で、この pin はプロジェクト自身の検査が走る唯一のバージョンです。pin を上げても下限は上がり
+ません。`rust-version` が動くのはコードが実際に新しいコンパイラを必要とし始めたときだけで、それは誰が
+crate をビルドできるかを変える変更だからです。pin が下限以上であることを別途検査する必要はありません。
+cargo は `rust-version` が動作中のコンパイラより新しい package のビルドを拒否するので、下限を下回る pin
+は最初のビルドで落ちます。
+
 ## Code of Conduct
 
 本プロジェクトは [Contributor Covenant](CODE_OF_CONDUCT.md) に従います。参加にあたっては本規約の

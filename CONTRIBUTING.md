@@ -164,6 +164,31 @@ Cairn uses date-based versioning (CalVer) `YYYY.M[.PATCH]`. Notable changes are 
 [CHANGELOG.md](CHANGELOG.md). The compatibility contract behind each surface is set by
 [Compatibility Tiers](https://cairn.kage1020.com/spec/compatibility/), not by the version number.
 
+## Toolchain
+
+[`rust-toolchain.toml`](rust-toolchain.toml) names an exact compiler, and every workflow installs
+Rust with `rustup show` so that file is what decides. A `rustup` on your machine picks it up the
+same way, so a finding you see locally is the finding CI sees.
+
+This is deliberately not a channel. CI runs `cargo clippy --workspace --all-targets -- -D warnings`,
+so on `stable` a Rust release turns every open branch red on its own: the finding lands on a file
+the branch never touched, in a job its change cannot reach, and the person who reads it first is
+whoever happened to push next. Pinning does not avoid the new lints — it decides when they arrive,
+as a pull request somebody chose to open.
+
+**Bumping it.** Change `channel`, run `cargo clippy --workspace --all-targets -- -D warnings`,
+`cargo fmt --all -- --check` and `cargo test --workspace` locally, and fix whatever the new release
+found in the same pull request. Type the commit `ci`. Bumping is worth doing on its own rather than
+inside a feature branch: a diff that is only "new compiler, and the lint fixes it asked for" is one
+a reviewer can read.
+
+**Not the MSRV.** The workspace manifest's `rust-version` is the floor a consumer needs to build
+Cairn; the pin is the single version the project's own checks run under. Raising the pin does not
+raise the floor — `rust-version` moves only when the code actually starts needing a newer compiler,
+because that is a change to who can build the crates. Nothing has to check that the pin clears the
+floor: cargo refuses to build a package whose `rust-version` is above the active compiler, so a pin
+below it fails on the first build.
+
 ## Code of Conduct
 
 This project adheres to the [Contributor Covenant](CODE_OF_CONDUCT.md). By participating, you are

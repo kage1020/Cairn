@@ -14,7 +14,7 @@ language spec rather than the compiler, start at the [Specification](/spec/) and
 | Path | Contents |
 |---|---|
 | `Cargo.toml` | Workspace root: shared lints, release profile, MSRV. |
-| `rust-toolchain.toml` | Pinned to stable, with `rustfmt` and `clippy`. |
+| `rust-toolchain.toml` | The exact Rust version CI runs, with `rustfmt` and `clippy`. |
 | `rustfmt.toml` | Edition 2024, `max_width = 100`. |
 | `crates/` | The Rust workspace (below). |
 | `editors/vscode/` | VS Code extension. |
@@ -52,10 +52,16 @@ leaf integrations that nothing depends on. `cairn-lang-formats` is the only crat
 
 | Tool | Pinned by | Notes |
 |---|---|---|
-| Rust stable | `rust-toolchain.toml` | With `rustfmt` and `clippy`. |
+| Rust 1.98.0 | `rust-toolchain.toml` | An exact version, not a channel. With `rustfmt` and `clippy`. |
 | Edition 2024, MSRV 1.95 | `Cargo.toml` | Workspace package metadata. |
 | Formatting | `rustfmt.toml` | `max_width = 100`, Unix line endings. |
 | Lints | `[workspace.lints]` in `Cargo.toml` | `unsafe_code = forbid`, `missing_docs = warn`, `clippy::all` + `clippy::pedantic`. |
+
+The Rust version is exact because CI treats every clippy finding as fatal. On a channel, a Rust
+release turns every open branch red on its own — the finding lands on a file the branch never
+touched. The pin decides when new lints arrive rather than whether: bumping it is its own pull
+request, carrying whatever the new release found. It is not the MSRV; `rust-version` is the floor a
+consumer needs, and raising the pin does not raise it.
 
 `unsafe_code` is forbidden workspace-wide with no escape hatch. If a use case ever needs it, it goes
 through a focused PR that lifts the lint on a single module with documented invariants, never

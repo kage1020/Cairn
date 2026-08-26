@@ -1,3 +1,17 @@
+# The exact compiler CI runs, not a moving channel.
+#
+# `-D warnings` makes every clippy finding fatal, so on `stable` a Rust
+# release turns every open branch red without anyone pushing: the finding
+# lands on a file the branch never touched, in a job its change cannot
+# reach. Pinning moves that from an event to a pull request, where the new
+# lints arrive as a reviewable diff.
+#
+# This is not the MSRV. `rust-version` in the workspace manifest is the
+# floor a consumer needs; this is the one version the project's own checks
+# are run with. Nothing here has to assert that the pin clears the floor —
+# cargo refuses to build a package whose `rust-version` is above the active
+# compiler, so a pin below it fails on the first build rather than quietly.
+# CONTRIBUTING.md says how to move this.
 [toolchain]
-channel = "stable"
+channel = "1.98.0"
 components = ["rustfmt", "clippy"]
