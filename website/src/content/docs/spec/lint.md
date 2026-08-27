@@ -39,6 +39,7 @@ compose to the strictest across every line, so a second one adds a constraint ([
 | Code | Meaning |
 |---|---|
 | `E_UNKNOWN_KEYWORD` | The statement keyword is not in the known-keyword table. |
+| `E_UNKNOWN_ARGUMENT` | A `key=` outside the vocabulary of the member's keyword. |
 | `E_MISPLACED_MEMBER` | The keyword is known, but the enclosing body has no reader for it. |
 | `E_UNEXPECTED_POSITIONAL` | A bare value on a line that reads none ([§5.1](syntax#51-lexical)). |
 | `E_UNSUPPORTED_NESTING` | A member carries an indented body that nothing reads. |
@@ -198,10 +199,21 @@ The `E_` / `W_` prefix is not the severity. `W_` marks a partial-build degradati
 - `E_THEME_SELECTOR_UNMATCHED` is a **warning**, because a rule that matches nothing overrides
   nothing.
 
-`W_IGNORED_ARGUMENT` is currently a **warning**. A `key=` the pass cannot read is dropped and a
-default put in its place, so the build differs from the source. The rule forbids *silent*
-substitution, and this one is announced. Every source carrying such a value builds today,
-so promoting it is a breaking change. Whether autofix is offered is up to the implementation.
+`E_UNKNOWN_ARGUMENT` is an **error** for the same reason `E_UNKNOWN_KEYWORD` is, one level down.
+A key outside the keyword's vocabulary names nothing, so no pass will read the value however the
+compiler grows, and the member is built without whatever was being asked for. A misspelled argument
+that has a default is the worst of them: the build succeeds, at the default, and says nothing.
+
+Each keyword's vocabulary is closed, and a `theme` selector widens the one it names — writing
+`window[tags=...]` in a theme makes `tags=` a key something reads on a window, and on nothing else.
+The reverse direction is `E_THEME_SELECTOR_UNMATCHED`.
+
+`W_IGNORED_ARGUMENT` is a **warning**, and covers two things. A `key=` in the vocabulary whose value
+the pass cannot read is dropped and a default put in its place; and a `key=` this specification
+defines that no pass reads yet — `window shape=` is the one such key today — is carried into the IR
+and never consulted. Both make the build differ from the source. The rule forbids *silent*
+substitution, and both are announced. In the second case the gap is the compiler's rather than the
+source's, which is why it is not a refusal. Whether autofix is offered is up to the implementation.
 
 ## 11.4 Constraint catalog
 
