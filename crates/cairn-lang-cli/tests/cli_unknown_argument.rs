@@ -42,7 +42,7 @@ fn check_refuses_a_source_carrying_a_key_nothing_reads() {
 }
 
 #[test]
-fn compile_reports_the_misspelling_and_not_the_absence_it_causes() {
+fn compile_reports_the_misspelling_before_the_absence_it_causes() {
     let tmp = tempfile::TempDir::new().expect("tempdir");
     let src = fixture(tmp.path());
     let out_dir = tmp.path().join("out");
