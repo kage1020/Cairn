@@ -118,6 +118,19 @@ fn a_nested_member_is_checked_at_any_depth() {
 }
 
 #[test]
+fn a_member_inside_a_def_is_checked_like_any_other() {
+    // A `def` body is walked by a loop of its own, and a `def` is where a
+    // typo costs the most: the component is instantiated once per `place`,
+    // so one misspelled key builds every copy wrong.
+    let src = "def hut size=3x3:\n  walls hieght=3\n\n\
+               theme t:\n  slot m -> @oak_planks\n\n\
+               site v:\n  place id=a use=hut theme=t at=origin\n";
+    let d = only(src);
+    assert_eq!(d.code.as_str(), "E_UNKNOWN_ARGUMENT");
+    assert!(d.primary.contains("`hieght=`"), "got: {}", d.primary);
+}
+
+#[test]
 fn a_theme_selector_widens_the_vocabulary_of_the_keyword_it_names() {
     // `tags=` is read by nothing in the lowering, and it is read: the
     // resolver's selector matcher reads it. The rule is "a word nothing
