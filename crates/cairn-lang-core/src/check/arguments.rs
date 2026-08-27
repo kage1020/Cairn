@@ -8,9 +8,19 @@
 //! arguments against, so this pass leaves it alone and the keyword's own
 //! finding carries the repair.
 //!
-//! Only `intent_state` is in scope. A member's selector (`door[id=front]`),
-//! its `-> value` tail and its positionals are separate fields with checks
-//! of their own, and each answers to a different vocabulary.
+//! Only `intent_state` is in scope. A member's own selector
+//! (`door[id=front]`), its `-> value` tail and its positionals are separate
+//! fields with checks of their own, and each answers to a different
+//! vocabulary.
+//!
+//! A theme selector widens the vocabulary of the keyword it names. `theme t:
+//! window[tags=[a,b]] -> frame=@spruce_wood` makes `tags=` a key something
+//! reads — `resolve`'s selector matcher — on a `window` and on nothing else,
+//! so the member carrying it is not writing a word that will be read by
+//! nothing. That is the whole test this pass applies, and a key the module
+//! never selects on fails it however plausible it looks. The reverse
+//! direction is already covered: a selector matching no member is
+//! `E_THEME_SELECTOR_UNMATCHED`.
 //!
 //! The candidate set is the role's, plus the universal keys. `clas=outer`
 //! is the case that needs the second half: `class` is hoisted into a
@@ -18,51 +28,81 @@
 //! reaches the field, and a suggestion drawn from the role's own arguments
 //! could not offer the word the author meant.
 
+use std::collections::{BTreeSet, HashMap};
+
 use crate::intent::{IntentModule, Member, MemberRole};
 use crate::suggest::nearest_match;
 
 use super::{Diagnostic, DiagnosticCode, DiagnosticNote, DiagnosticSink};
 
+/// Keys the module's theme selectors match on, per keyword they name.
+///
+/// `BTreeSet` rather than a hash set so the closed-set note reads in a
+/// stable order whatever the source did.
+type SelectorKeys<'a> = HashMap<&'a str, BTreeSet<&'a str>>;
+
 pub(super) fn run(ir: &IntentModule, sink: &mut DiagnosticSink) {
+    let selected = selector_keys(ir);
     for s in &ir.structs {
-        walk(&s.members, sink);
+        walk(&s.members, &selected, sink);
     }
     for d in &ir.defs {
-        walk(&d.members, sink);
+        walk(&d.members, &selected, sink);
     }
     for s in &ir.sites {
-        walk(&s.placements, sink);
+        walk(&s.placements, &selected, sink);
     }
 }
 
-fn walk(members: &[Member], sink: &mut DiagnosticSink) {
+/// Every attribute key a theme selector filters on, under the keyword that
+/// selector names.
+///
+/// Per keyword rather than module-wide: `window[tags=...]` says something
+/// reads `tags=` on a window, and says nothing at all about a `door`.
+fn selector_keys(ir: &IntentModule) -> SelectorKeys<'_> {
+    let mut keys: SelectorKeys<'_> = HashMap::new();
+    for theme in &ir.themes {
+        for rule in &theme.selectors {
+            let entry = keys.entry(rule.keyword.as_str()).or_default();
+            for key in rule.attrs.keys() {
+                entry.insert(key.as_str());
+            }
+        }
+    }
+    keys
+}
+
+fn walk(members: &[Member], selected: &SelectorKeys<'_>, sink: &mut DiagnosticSink) {
     for m in members {
-        check_member(m, sink);
-        walk(&m.children.members, sink);
+        check_member(m, selected, sink);
+        walk(&m.children.members, selected, sink);
     }
 }
 
-fn check_member(member: &Member, sink: &mut DiagnosticSink) {
+fn check_member(member: &Member, selected: &SelectorKeys<'_>, sink: &mut DiagnosticSink) {
     // The keyword is the repair; its arguments answer to a vocabulary that
     // does not exist.
-    if matches!(member.role, MemberRole::Other(_)) {
+    let Some(mut accepted) = member.role.accepted_arguments() else {
         return;
+    };
+    let keyword = role_keyword(&member.role);
+    if let Some(extra) = selected.get(keyword) {
+        accepted.extend(extra.iter().copied());
     }
-    let accepted = member.role.accepted_arguments();
     for (key, value) in &member.intent_state.fields {
         if !accepted.contains(&key.as_str()) {
-            sink.push(unknown_argument(member, key, &value.span, &accepted));
+            sink.push(unknown_argument(keyword, key, &value.span, &accepted));
         } else if member.role.unread_arguments().contains(&key.as_str()) {
-            sink.push(unread_argument(member, key, &value.span));
+            sink.push(unread_argument(keyword, key, &value.span));
         }
     }
 }
 
 fn unknown_argument(
-    member: &Member,
+    keyword: &str,
     key: &str,
     span: &crate::error::Span,
-    accepted: &[&'static str],
+    accepted: &[&str],
 ) -> Diagnostic {
     // Suggestion first, closed set second — the same order
     // `E_UNKNOWN_KEYWORD` uses, so a reader who has seen one knows where
@@ -81,22 +121,18 @@ fn unknown_argument(
     Diagnostic {
         code: DiagnosticCode::UnknownArgument,
         span: span.clone(),
-        primary: format!(
-            "`{key}=` is not an argument `{}` reads",
-            role_keyword(&member.role),
-        ),
+        primary: format!("`{key}=` is not an argument `{keyword}` reads"),
         notes,
         data: None,
     }
 }
 
-fn unread_argument(member: &Member, key: &str, span: &crate::error::Span) -> Diagnostic {
+fn unread_argument(keyword: &str, key: &str, span: &crate::error::Span) -> Diagnostic {
     Diagnostic {
         code: DiagnosticCode::IgnoredArgument,
         span: span.clone(),
         primary: format!(
-            "`{key}=` is an argument `{}` takes and no pass reads yet; the value was ignored",
-            role_keyword(&member.role),
+            "`{key}=` is an argument `{keyword}` takes and no pass reads yet; the value was ignored",
         ),
         notes: vec![DiagnosticNote {
             span: None,

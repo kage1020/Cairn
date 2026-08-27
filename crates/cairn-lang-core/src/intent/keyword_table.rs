@@ -70,12 +70,19 @@ impl MemberRole {
     /// is accepted and reported as ignored rather than refused. The set
     /// that is listed-but-unread is [`Self::unread_arguments`].
     ///
+    /// `None` for a keyword the role table does not know — not an empty
+    /// vocabulary but the absence of one, which is a different answer and
+    /// the reason the two are not the same arm. A `floor` takes no
+    /// arguments of its own and writing one on it is a mistake; a
+    /// `torch` has no vocabulary for anything to be a mistake against,
+    /// and `check::keyword_allowlist` owns the whole line.
+    ///
     /// Matched with no wildcard so a new role has to be answered here
     /// rather than silently inheriting an empty vocabulary, which would
     /// report every argument written on it.
     #[must_use]
-    pub fn arguments(&self) -> &'static [&'static str] {
-        match self {
+    pub fn arguments(&self) -> Option<&'static [&'static str]> {
+        Some(match self {
             // Paints the whole footprint; takes nothing but the universal
             // keys.
             Self::Floor => &[],
@@ -96,11 +103,8 @@ impl MemberRole {
             // lands this is the arm that opens.
             Self::Place => &["use", "theme", "at", "east_of", "north_of", "gap"],
             Self::Connect => &["path"],
-            // The keyword itself is unknown, so there is no vocabulary to
-            // judge its arguments against. `check::keyword_allowlist` owns
-            // the whole line.
-            Self::Other(_) => &[],
-        }
+            Self::Other(_) => return None,
+        })
     }
 
     /// Arguments in [`Self::arguments`] that no pass reads yet.
@@ -138,10 +142,10 @@ impl MemberRole {
     /// favours the role's own vocabulary — `sid` on a `door` should answer
     /// `side`, not `id`.
     #[must_use]
-    pub fn accepted_arguments(&self) -> Vec<&'static str> {
-        let mut all = self.arguments().to_vec();
+    pub fn accepted_arguments(&self) -> Option<Vec<&'static str>> {
+        let mut all = self.arguments()?.to_vec();
         all.extend_from_slice(UNIVERSAL_ARGUMENTS);
-        all
+        Some(all)
     }
 }
 

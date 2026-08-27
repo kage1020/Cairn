@@ -208,6 +208,7 @@ mod tests {
                 "E_TYPE_MISMATCH_LABEL",
                 "E_TYPE_MISMATCH_SIZE",
                 "E_UNEXPECTED_POSITIONAL",
+                "E_UNKNOWN_ARGUMENT",
                 "E_UNKNOWN_KEYWORD",
                 "E_UNSUPPORTED_NESTING",
             ],
