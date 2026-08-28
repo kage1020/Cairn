@@ -12,6 +12,34 @@ and is a separate axis from the Minecraft target version.
 
 ### Breaking changes
 
+- *(redstone)* Each net is routed around the dust already laid, so two nets no longer share a
+  wire coordinate. `spec/redstone` §14.5 specifies the escape — "crossings escape to a `bridge`
+  tile or a vertical layer" — and stage 4 performed it for buffer repeaters and never for wire,
+  so any two signals meeting on a coordinate came out of the compiler as one strand of dust
+  carrying both. It was not a crowded-circuit problem: every crossing in the example corpus came
+  from the simplest shape there is, a cell with two inputs, and widening the region did not move
+  one of them.
+
+  Two measurements decided the fix. Changing the pad and cell-column conventions removed no
+  crossing from the corpus and doubled `crossbar.crn`'s. And the reason is arithmetic rather than
+  routing: a cell body is a block, so a net reaches it through a free neighbouring coordinate; a
+  two-input gate has three distinct nets touching it and therefore needs three; and packed at
+  `x = i` against the pad column, an interior cell of a chain has two — at every region size.
+  Lifting the wire onto a bridge layer does not help, because a lifted wire still has to arrive
+  through a face. So the placement pass now lays the row at `x = 1 + 2i`, and the router routes
+  each net around the dust of the nets before it, climbing to a `bridge` layer where there is no
+  way round and refusing the scope where there is no way at all. The escape happens at stage 2,
+  which is what gets it measured: `wire_length` and `delay_ticks` are read off the routed tree.
+
+  **Breaking**: cell coordinates move, so every `wire_length`, `delay_ticks` and `buffer_coords`
+  in a `cairn synth` dump changes; a `circuit` region narrower than twice its cell count is
+  refused by the placement pass, with a message naming the columns the row wants;
+  `W_WIRE_CROSSING`, `E_CROSSING_CONGESTION` and `E_BUFFER_COORD_COLLISION` are removed — the
+  first two because the compiler no longer makes the defect they reported, the third because a
+  repeater now stands on its own net's path and has nothing to contest it for;
+  `examples/crossbar.crn` grows one column, from `size=5x4` to `size=6x4`, because at five the
+  last net has nowhere left to go and the scope is refused rather than shorted.
+
 - *(core)* A `key=` no member of that role reads is refused. A member's arguments were validated
   nowhere: `check` had an allowlist for the statement keyword and nothing for the keys under it,
   so `walls ... hieght=3` exited 0 in silence, and the only thing the author eventually saw was a

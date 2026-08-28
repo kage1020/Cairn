@@ -120,27 +120,38 @@ circuit region=basement void=3       # reserve a 3-high service layer; route the
 
 The internal algorithm runs five stages:
 
-1. **Placement.** Topological order, left to right.
-2. **Steiner routing.** Manhattan, around what is already standing. Cell bodies and I/O pads are
-   reserved: dust cannot be drawn on one, and a signal cannot pass *through* one, since a component
-   either emits or consumes. Every sink is therefore a leaf of its net's tree, and a fanout is a
-   trunk beside the row with a tap into each sink rather than a chain through them. Where nothing is
-   in the way the wire is a straight rectilinear run; otherwise it goes around, or climbs to a
-   `bridge` layer inside the `void=<N>` budget.
+1. **Placement.** Topological order, left to right, one clear column between each pair of cells and
+   one between the row and the input pads. A cell body is a block, so a net reaches it through a
+   neighbouring coordinate; a two-input gate has three distinct nets touching it — its two drivers
+   and its own output — and therefore needs three free neighbours. Packed against each other the
+   cells in the middle of a row have two, at any region size, so a row spaced like this is what
+   makes a crossing-free wiring possible at all. It is not a guarantee of one: a net passing
+   through can still take the last free face, and that scope is refused rather than shorted.
+2. **Steiner routing.** Manhattan, around what is already standing — and around the dust of the
+   nets already laid. Cell bodies and I/O pads are reserved: dust cannot be drawn on one, and a
+   signal cannot pass *through* one, since a component either emits or consumes. Every sink is
+   therefore a leaf of its net's tree, and a fanout is a trunk beside the row with a tap into each
+   sink rather than a chain through them. Where nothing is in the way the wire is a straight
+   rectilinear run; otherwise it goes around, or climbs to a `bridge` layer inside the `void=<N>`
+   budget.
+
+   Two nets on one coordinate would be one strand of dust carrying two signals, so the nets are
+   laid one at a time and each goes round what is already there. That is the crossing escape, and
+   it happens here rather than at stage 4 so the climb is measured: `wire_length` and the delay
+   pass's tick count are both read off the routed tree. The order is fanout descending, then the
+   net's own key — a total order, so one layout has one answer however many passes ask for it.
 3. **Delay insertion.** A repeater goes in as a buffer only where a segment exceeds the attenuation
    limit of 15. The segment is measured along the **routed** path from driver to sink, and the
    buffer stands on that path, so the straight line between the two is not always wire.
-4. **Crossing legalization.** Specified but unbuilt. What the pass lifts onto a `bridge` layer is a
-   buffer repeater whose coordinate is taken, never the wire itself, so two nets sharing a wire
-   coordinate stay one strand of dust carrying two signals. The pass **reports** that rather than
-   passing it over, naming the pair of signals and the coordinate they meet on, one finding per
-   pair. A reservation with no layer above the plane (`void=1`) has nowhere to lift onto, and the
-   scope is refused.
+4. **Crossing legalization.** Assigns the coordinate of every buffer repeater stage 3 counted. The
+   wire needs no legalizing by this point: a repeater stands on its own net's routed path, and that
+   path belongs to that net alone, so there is no crossing to lift and no coordinate to contest.
 5. **Edition legalization.** See [§14.6](#146-edition-differences).
 
 Routing is confined to the `circuit` region. If it does not fit, the compiler fails loud. A sink
-whose every way out is walled in by a component earns the same refusal for a different reason, and
-the message says which two coordinates it could not join.
+whose every way out is walled in — by a component, by an earlier net's dust, or by the edge of the
+reservation — earns the same refusal for a different reason, and the message says which two
+coordinates it could not join.
 
 ```text
 E_ROUTE_CONGESTION line 21 circuit=basement:
