@@ -126,11 +126,19 @@ The internal algorithm runs five stages:
    block, so a net reaches it through a neighbouring coordinate; a two-input gate has three
    distinct nets touching it — its two drivers and its own output — and therefore needs three
    free neighbours. Packed against each other the cells in the middle of a row have two, at any
-   region size, so a row spaced like this is what makes a crossing-free wiring possible at all.
-   It is not a guarantee of one: a net passing through can still take the last free face, and
-   that scope is refused rather than shorted. A region that cannot hold the row — `2n + 1`
-   columns for `n` cells — is refused here rather than left to fail as an unreachable sink two
-   stages later.
+   region size, so a row spaced like this is what makes a short-free wiring possible at all.
+
+   The row also stands one row in from the near edge of the region, and the I/O pads step along
+   `z` from `0`. Dust reads the dust in the coordinate beside it, so a lane of free coordinates
+   carries one net however long it is; a cell against the edge has one lane, and the three nets
+   touching a two-input gate cannot share it. One row in gives every cell a lane on each side.
+   That costs one row for the whole netlist rather than one per cell, so unlike the column
+   spacing it does not grow with the cell count.
+
+   Spacing is not a guarantee of a wiring: a net passing through can still take the last free
+   face, and that scope is refused rather than shorted. A region that cannot hold the row —
+   `2n + 1` columns for `n` cells, and three rows — is refused here rather than left to fail as
+   an unreachable sink two stages later.
 2. **Steiner routing.** Manhattan, around what is already standing — and around the dust of the
    nets already laid. Cell bodies and I/O pads are reserved: dust cannot be drawn on one, and a
    signal cannot pass *through* one, since a component either emits or consumes. Every sink is
@@ -139,23 +147,31 @@ The internal algorithm runs five stages:
    rectilinear run; otherwise it goes around, or climbs to a `bridge` layer inside the `void=<N>`
    budget.
 
-   Two nets on one coordinate would be one strand of dust carrying two signals, so the nets are
-   laid one at a time and each goes round what is already there. That is the crossing escape, and
-   it happens here rather than at stage 4 so the climb is measured: `wire_length` and the delay
-   pass's tick count are both read off the routed tree. The order is fanout descending, then the
-   net's own key — a total order, so one layout has one answer however many passes ask for it.
+   Two nets on one coordinate would be one strand of dust carrying two signals, and so would two
+   nets one coordinate apart in the same plane — dust joins the dust next to it. So the nets are
+   laid one at a time, and each goes round the dust already laid *and* the coordinates beside it.
+   That is the crossing escape, and it happens here rather than at stage 4 so the climb is
+   measured: `wire_length` and the delay pass's tick count are both read off the routed tree. The
+   order is fanout descending, then the net's own key — a total order, so one layout has one
+   answer however many passes ask for it.
+
+   Beside is per-plane. Whether a strand at `y + 1` reads the dust below it depends on what is
+   standing between them, which this model does not carry: the internal model is pseudo-2.5D and
+   the voxel realisation belongs to the physical tile layer, so separating strands that share a
+   column is that layer's obligation rather than the router's.
 3. **Delay insertion.** A repeater goes in as a buffer only where a segment exceeds the attenuation
    limit of 15. The segment is measured along the **routed** path from driver to sink, and the
    buffer stands on that path, so the straight line between the two is not always wire.
 4. **Crossing legalization.** Assigns the coordinate of every buffer repeater stage 3 counted. The
-   wire needs no legalizing by this point: a repeater stands on its own net's routed path, and that
-   path belongs to that net alone, so there is no crossing to lift and no coordinate to contest.
+   wire needs no legalizing by this point: a repeater stands on its own net's routed path, that
+   path belongs to that net alone, and no other net runs within a step of it, so there is no
+   short to lift and no coordinate to contest.
 5. **Edition legalization.** See [§14.6](#146-edition-differences).
 
 Routing is confined to the `circuit` region. If it does not fit, the compiler fails loud. A sink
-whose every way out is walled in — by a component, by an earlier net's dust, or by the edge of the
-reservation — earns the same refusal for a different reason, and the message says which two
-coordinates it could not join.
+whose every way out is walled in — by a component, by an earlier net's dust or the coordinates
+beside it, or by the edge of the reservation — earns the same refusal for a different reason, and
+the message says which two coordinates it could not join and which nets took the faces.
 
 ```text
 E_ROUTE_CONGESTION line 21 circuit=basement:

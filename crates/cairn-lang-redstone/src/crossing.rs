@@ -232,8 +232,8 @@ fn legalize_scope(entry: &ScopedPlacementIrEntry) -> ScopeLegalization {
 
     // Every coord a repeater can be asked to stand on is a coord of
     // its own net's route, and `net_trees` asserts as it builds that no
-    // two nets own one coord of dust — in release, at the point the
-    // coord is claimed. That is what leaves this pass with a coord to
+    // net's dust stands on, or one step from, another's — in release,
+    // at the point the coord is claimed. That is what leaves this pass with a coord to
     // record and no coord to contest, and re-deriving it here would be
     // asking the same function the same question twice.
     let allocation = allocate_buffer_coords(&ir, &trees);
@@ -435,9 +435,9 @@ mod tests {
     //! alone:
     //! - buffer repeaters at all (needs a segment past 15 blocks,
     //!   which no example `.crn` has room for);
-    //! - two nets whose shortest routes want one coord, which is
-    //!   what stage 2 lays apart and what this pass therefore never
-    //!   has to legalize;
+    //! - two nets whose shortest routes want one row, which is what
+    //!   stage 2 lays apart and what this pass therefore never has to
+    //!   legalize;
     //! - the `E_NO_CIRCUIT_REGION` refusal;
     //! - the topological invariant panic mirroring
     //!   [`crate::delay::compile_delay`].

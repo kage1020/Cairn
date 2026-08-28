@@ -33,7 +33,8 @@
 //!   terminal set, grown one sink at a time by
 //!   [`crate::routing_geometry::Router`]: the nearest sink still
 //!   unconnected is attached to the wire already laid by the cheapest
-//!   path that runs through no block and over no other net's dust, and
+//!   path that runs through no block, and neither over another net's
+//!   dust nor one step from it in its own plane, and
 //!   the search behind that is what keeps dust out of the cell bodies
 //!   and pads the reservation already holds. Every sink is a leaf,
 //!   because a component consumes the signal that reaches it rather
@@ -41,16 +42,20 @@
 //!   x-then-z-then-y L-shape the downstream stages were built around.
 //! - **One net at a time.** The nets are laid in
 //!   [`crate::routing_geometry::net_order`], and each goes round the
-//!   dust of the ones before it. Two nets on one coord would be one
-//!   strand of dust carrying two signals; §14.5 calls the way out an
-//!   escape, and here it is the same search climbing to a bridge layer
-//!   that already went round a cell body. Doing it at this stage
+//!   dust of the ones before it and the coords beside that dust. Two
+//!   nets on one coord would be one strand of dust carrying two
+//!   signals, and so would two nets one step apart, because dust joins
+//!   the dust next to it; §14.5 calls the way out an escape, and here
+//!   it is the same search climbing to a bridge layer that already
+//!   went round a cell body. Beside is per-plane: what a strand at
+//!   `y + 1` reads is the physical tile layer's question, not this
+//!   pass's. Doing it at this stage
 //!   rather than at stage 4 is what gets the climb measured: the
 //!   `wire_length` below and the delay pass's tick count are both read
 //!   off the routed tree.
 //! - **Unroutable sinks.** A sink with no free path from its driver —
-//!   every way out walled in by a component, by an earlier net's dust,
-//!   or by the edge of the reservation — fires `E_ROUTE_CONGESTION`
+//!   every way out walled in by a component, by an earlier net's dust
+//!   or the coords beside it, or by the edge of the reservation — fires `E_ROUTE_CONGESTION`
 //!   with its own primary naming the two coords, and the scope is
 //!   elided. Refused before the area arithmetic below, because the area
 //!   can be ample and the one coord the wire needs still be taken. This

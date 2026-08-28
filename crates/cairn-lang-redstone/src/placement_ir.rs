@@ -119,9 +119,9 @@ impl Serialize for RouteLayer {
 ///
 /// `Copy` because a coordinate is a value type consumers pass around
 /// by value. Cell coords stamped by [`crate::placement::compile_placement`]
-/// use `x = 1 + 2 * topological index`, `y = 0`, `z = 0`,
+/// use `x = 1 + 2 * topological index`, `y = 0`, `z = 1`,
 /// [`RouteLayer::Plane`]. Pad coords derived by the routing pass at the
-/// reservation edges use `y = 0` on the plane with `z = 1 + i`
+/// reservation edges use `y = 0` on the plane with `z = i`
 /// (saturating at `depth-1` for pathological regions). Routed wire
 /// coords and buffer-repeater coords may use `y >= 1`, and take
 /// [`RouteLayer::Bridge`] when they do — see [`Self::new`].
