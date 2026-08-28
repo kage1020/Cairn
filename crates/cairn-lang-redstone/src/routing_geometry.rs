@@ -1814,6 +1814,14 @@ mod tests {
             [sink],
             "so a net routed against its own keep-out set has nowhere to go",
         );
+
+        let mut nets: HashMap<NetRef, Vec<CellCoord>> = HashMap::new();
+        nets.insert(NetRef::Input(0), vec![sink]);
+        let trees = net_trees(&nets, &router, |_| source);
+        assert!(
+            trees[&NetRef::Input(0)].unreachable().is_empty(),
+            "and the pass that widens the set for the nets after this one does              not turn it on the net it has just laid",
+        );
     }
 
     /// A clear straight line is not clear when another net is on it,
