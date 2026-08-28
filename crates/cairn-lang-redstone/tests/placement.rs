@@ -660,6 +660,39 @@ fn a_netlist_wider_than_the_reserved_row_is_refused() {
     assert_eq!(diagnostic.severity(), Severity::Error);
 }
 
+/// A region wide enough for the cells and not for the spacing between
+/// them is refused here, not two passes later.
+///
+/// Three cells want six columns; four is more than enough to stand
+/// them in and one short of the row they are laid in. If the check
+/// counted cells rather than columns this would pass placement, put
+/// the last cell outside the reservation, and surface at stage 2 as a
+/// sink no route can reach — of a coord no route could enter, with a
+/// message about components and dust that names nothing true.
+#[test]
+fn a_row_wide_enough_for_the_cells_and_not_the_spacing_is_refused() {
+    let out = placement_of(&source_with_cells(3, 4, 8, 3));
+
+    assert!(
+        out.scoped.scopes.is_empty(),
+        "a scope that does not fit its row must not reach the Placement IR: {:?}",
+        out.scoped.scopes,
+    );
+    let diagnostic = out
+        .diagnostics
+        .iter()
+        .find(|d| d.code == DiagnosticCode::RouteCongestion)
+        .expect("the overrun must surface as E_ROUTE_CONGESTION");
+    assert!(
+        diagnostic
+            .primary
+            .contains("needs 6 columns for a row of 3 cells"),
+        "the refusal must name the columns the row wants, not the cells it \
+         holds: {}",
+        diagnostic.primary,
+    );
+}
+
 /// The exact-fit boundary: a row of `n` cells in exactly `2n` columns.
 /// The last cell lands in the same column as the actuator pad, which is
 /// legal while the reservation is deep enough for the pad to stand
