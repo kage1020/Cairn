@@ -104,8 +104,9 @@ use crate::routing_geometry::{
 /// uniform result type across every stage of the place-and-route
 /// pipeline. The legalized IR is a [`ScopedPlacementIr`] with every
 /// non-failed scope's `buffer_coords` populated with one entry per
-/// implicit buffer repeater the delay pass counted, each tagged with
-/// the [`RouteLayer`] the pass chose. No new IR type; the crossing
+/// implicit buffer repeater the delay pass counted, each carrying the
+/// [`RouteLayer`] of the route coord it stands on. No new IR type; the
+/// crossing
 /// pass is one [`crate::placement_ir::PlacementPhase::legalize`]
 /// transition per cell, per the producer↔variant table on that enum.
 #[derive(Debug, Clone, PartialEq, Default)]

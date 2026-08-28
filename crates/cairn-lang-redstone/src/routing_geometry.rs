@@ -200,7 +200,8 @@ pub(crate) fn manhattan(a: CellCoord, b: CellCoord) -> u32 {
 ///
 /// Names the thing in a diagnostic, and separates the two coords a
 /// pass can be handed twice (pads, whose z saturates) from the one it
-/// cannot (a cell, whose x is its topological index).
+/// cannot (a cell, whose x is derived from its topological index and
+/// so is a column of its own).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum BlockKind {
     /// A placed cell's body.
@@ -240,10 +241,9 @@ pub(crate) struct BlockSite {
 ///
 /// The one derivation of "what is already standing in the reservation".
 /// The routing pass reads it to refuse a pad row that cannot fit, all
-/// three passes hand it to [`Router::new`], and the crossing pass
-/// reads it for the coords whose owners are endpoints rather than wire
-/// pass-throughs. A second list built anywhere else is a second thing
-/// to keep in step.
+/// three passes hand it to [`Router::new`], and [`Router::dust`] reads
+/// it back out of a tree to tell a net's wire from its terminals. A
+/// second list built anywhere else is a second thing to keep in step.
 pub(crate) fn block_sites(ir: &PlacementIr, region: &CircuitRegionReservation) -> Vec<BlockSite> {
     let mut sites = Vec::with_capacity(ir.cells.len() + ir.inputs.len() + ir.outputs.len());
     for (index, cell) in ir.cells.iter().enumerate() {
@@ -849,9 +849,16 @@ pub(crate) fn collect_nets(ir: &PlacementIr) -> HashMap<NetRef, Vec<CellCoord>> 
     nets
 }
 
-/// Deterministic net processing order: fanout descending, ties broken
-/// by [`net_ref_key`] ascending. `HashMap` iteration order never
+/// The order the nets of a scope are laid in: fanout descending, ties
+/// broken by [`net_ref_key`] ascending. `HashMap` iteration order never
 /// reaches an output.
+///
+/// This is geometry, not presentation. [`net_trees`] lays each net
+/// around the dust of the ones before it, so the order decides which
+/// net keeps the direct run and which goes round — and being a total
+/// order over the nets of a scope is what lets the routing, delay and
+/// crossing passes rebuild the same trees. Fanout first because a net
+/// with more sinks has less freedom in where its trunk can run.
 pub(crate) fn net_order(nets: &HashMap<NetRef, Vec<CellCoord>>) -> Vec<NetRef> {
     let mut order: Vec<NetRef> = nets.keys().copied().collect();
     order.sort_by(|a, b| {

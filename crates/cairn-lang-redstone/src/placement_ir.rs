@@ -71,14 +71,13 @@ pub enum RouteLayer {
     #[default]
     Plane,
     /// Escape layer above the ground: wire the routing pass had to
-    /// climb to get past a block, and buffer repeaters the
-    /// crossing-legalization pass lifted off the `Plane` to avoid a
-    /// collision with another net's dust.
+    /// climb to get past a block or past the dust of a net laid before
+    /// it. A buffer repeater standing on such a coord carries the
+    /// layer with it, rather than choosing one of its own.
     Bridge,
     /// Reserved for the vertical `Plane` ↔ `Bridge` tap. No producer
     /// materialises `Via` in v1: a climb is a step between two coords
-    /// rather than a coord of its own, and a lifted buffer repeater is
-    /// treated as its own `Bridge` block without an explicit ramp.
+    /// rather than a coord of its own, so there is no ramp to name.
     /// Kept in the enum so a downstream consumer can match exhaustively
     /// against the full §14.5 vocabulary; a subsequent pass that grows
     /// `Via` producers is `#[non_exhaustive]`-safe.
@@ -120,12 +119,12 @@ impl Serialize for RouteLayer {
 ///
 /// `Copy` because a coordinate is a value type consumers pass around
 /// by value. Cell coords stamped by [`crate::placement::compile_placement`]
-/// use `x = topological index`, `y = 0`, `z = 0`, [`RouteLayer::Plane`].
-/// Pad coords derived by the routing pass at the reservation edges
-/// use `y = 0` on the plane with `z = 1 + i` (saturating at `depth-1`
-/// for pathological regions). Routed wire coords and buffer-repeater
-/// coords may use `y >= 1`, and take [`RouteLayer::Bridge`] when they
-/// do — see [`Self::new`].
+/// use `x = 1 + 2 * topological index`, `y = 0`, `z = 0`,
+/// [`RouteLayer::Plane`]. Pad coords derived by the routing pass at the
+/// reservation edges use `y = 0` on the plane with `z = 1 + i`
+/// (saturating at `depth-1` for pathological regions). Routed wire
+/// coords and buffer-repeater coords may use `y >= 1`, and take
+/// [`RouteLayer::Bridge`] when they do — see [`Self::new`].
 ///
 /// The `layer` field participates in `Eq` and `Hash`, so
 /// `(x, y, z, Plane)` and `(x, y, z, Bridge)` are distinct map keys.
@@ -146,18 +145,18 @@ pub struct CellCoord {
     /// Column along the region's x-axis. Zero at the region's origin.
     pub x: u32,
     /// Row along the region's y-axis. `0` for `Plane` coords; the
-    /// routing and crossing passes may set `y >= 1` for wire and buffer
-    /// coords lifted onto a `Bridge` layer inside the reservation's
-    /// `void=<N>` budget.
+    /// routing pass sets `y >= 1` for wire that climbs onto a `Bridge`
+    /// layer inside the reservation's `void=<N>` budget, and a buffer
+    /// repeater standing on that wire carries the height with it.
     pub y: u32,
     /// Row along the region's z-axis. `0` for cell coords stamped by
     /// the placement pass; pad and buffer coords may sit at
     /// `z = 1 + i` (saturating at `depth-1`).
     pub z: u32,
     /// Pseudo-2.5D layer this coord lives on. Cell coords are
-    /// [`RouteLayer::Plane`] by construction; anything the routing or
-    /// crossing pass lifts above the ground layer carries
-    /// [`RouteLayer::Bridge`], by the one rule [`Self::new`] holds.
+    /// [`RouteLayer::Plane`] by construction; wire the routing pass
+    /// climbs above the ground layer carries [`RouteLayer::Bridge`],
+    /// by the one rule [`Self::new`] holds.
     /// Serialised only when it differs from the default so a
     /// `Plane` coord's JSON omits the `layer` field.
     #[serde(skip_serializing_if = "RouteLayer::is_plane")]
@@ -169,13 +168,14 @@ impl CellCoord {
     /// layer, [`RouteLayer::Bridge`] above it.
     ///
     /// The only constructor, so the layer is a function of the height
-    /// for everything the pipeline builds. Both producers of a lifted
-    /// coord come through it — the routing pass, whose wire climbs to
-    /// get past a block, and the crossing pass, whose repeater climbs
-    /// off a coord it cannot have — and without one rule the two would
-    /// key past each other: `(x, 1, z, Plane)` and `(x, 1, z, Bridge)`
-    /// are distinct map keys but one voxel, so a repeater could be
-    /// lifted onto a wire that was already there.
+    /// for everything the pipeline builds. One rule rather than one
+    /// per producer, because `(x, 1, z, Plane)` and
+    /// `(x, 1, z, Bridge)` are distinct map keys and one voxel: two
+    /// producers with two rules would key past each other and put two
+    /// things in the same place. The lifted coords are the routing
+    /// pass's, whose wire climbs to get past a block or past another
+    /// net; a buffer repeater takes the layer of the route coord it
+    /// stands on rather than choosing one.
     #[must_use]
     pub const fn new(x: u32, y: u32, z: u32) -> Self {
         let layer = if y == 0 {
@@ -962,8 +962,8 @@ fn transition_panic(
 /// [`CellCoord::layer`] renders only when it is not
 /// [`RouteLayer::Plane`], which for a cell coord is never: the
 /// placement pass stamps `Plane` and no later pass moves a cell body
-/// off it — only the buffer coords the crossing pass allocates can be
-/// lifted onto a `Bridge` layer. Suppressing the default rather than
+/// off it — only wire, and the buffer repeaters that stand on it, ever
+/// reach a `Bridge` layer. Suppressing the default rather than
 /// dropping the field outright keeps the common rendering short
 /// without letting a hand-built IR that breaks the invariant print a
 /// coord that silently reads as a plane coord. Enforcing the

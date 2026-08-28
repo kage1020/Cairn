@@ -4,21 +4,21 @@
 //! (`spec/redstone` §14.5, stage 4 of place-and-route): the
 //! `examples/redstone-door.crn` happy path (per edition), empty-module
 //! pass-through, the JSON wire form staying byte-identical to the
-//! delayed IR apart from the `stage` tag when no crossing / buffer
-//! coord landed on a non-`Plane` layer (both new fields serde-skip on
-//! default), the tag itself keeping a zero-buffer legalized dump
-//! distinguishable from its delayed input, and per-scope
-//! independence when a module carries more than one scope.
+//! delayed IR apart from the `stage` tag when no buffer coord landed
+//! (the field serde-skips on its default), the tag itself keeping a
+//! zero-buffer legalized dump distinguishable from its delayed input,
+//! and per-scope independence when a module carries more than one
+//! scope.
 //!
-//! Both redstone examples cross. The pad column at `x=0` is where:
-//! the pads are packed down it by index, so the second sensor's wire
-//! has to come round the first sensor's pad, and the row it comes
-//! round through is the row the cell drives its actuators out along.
-//! One cell and two sensors is enough — `redstone-door.crn` is that
-//! shape and shares one coord; `crossbar.crn` adds a second cell and
-//! shares two, one of them on the bridge layer a wire climbed to.
-//! Neither is refused: v1 reports the merge rather than lifting
-//! either net off it.
+//! Both redstone examples make a net go round another. The pad column
+//! at `x=0` is where: the pads are packed down it by index, so the
+//! second sensor's wire has to come round the first sensor's pad, and
+//! the row it comes round through is the row the cell drives its
+//! actuators out along. One cell and two sensors is enough —
+//! `redstone-door.crn` is that shape, and its cell's outward wire
+//! climbs a layer at its own doorstep rather than merging with the
+//! sensor's. Neither example reaches this pass with anything to
+//! legalize, which is what the assertions here say.
 
 use std::fmt::Write as _;
 use std::path::PathBuf;
@@ -38,9 +38,12 @@ use common::normalize_stage_tags;
 
 /// The Error-severity half of a pass's findings.
 ///
-/// Every example that carries redstone also carries a crossing, so
-/// "did this scope survive" and "did this scope say nothing" are
-/// different questions here and the tests below ask the first.
+/// "Did this scope survive" and "did this scope say nothing" are
+/// different questions, and the tests that ask the first say so by
+/// calling this. Nothing this pass raises is a warning today, so the
+/// two answers agree — the distinction is kept because a future
+/// warning arriving should not silently turn a survival check into a
+/// silence check.
 fn errors(
     diagnostics: &[cairn_lang_redstone::Diagnostic],
 ) -> Vec<&cairn_lang_redstone::Diagnostic> {
@@ -335,17 +338,17 @@ fn legalized_with_zero_buffers_is_distinguishable_from_delayed() {
 
 /// AC — mirror of
 /// `json_output_byte_identical_apart_from_stage_tag_when_no_crossings_and_no_buffers`
-/// for the `with-crossings` case. `examples/crossbar.crn` overlaps on
-/// two coords, and reporting them changes no artifact: the pipeline
-/// lifts no wire onto the bridge layer, every driver segment on this
-/// fixture sits below `DUST_ATTENUATION_LIMIT`, and so the legalized
-/// JSON still equals the delayed JSON apart from the stage tag. Pins
-/// three invariants at once: (a) both gate cells and both door outputs
-/// survive legalization intact — a regression that elided the crossed
+/// for a scope whose nets had to go round each other.
+/// `examples/crossbar.crn` sends one of its sensor signals up onto the
+/// bridge layer to clear the other, and that decision belongs to stage
+/// 2: by the time this pass runs it is in the routed lengths already,
+/// and every driver segment here sits below `DUST_ATTENUATION_LIMIT`,
+/// so the legalized JSON equals the delayed JSON apart from the stage
+/// tag. Pins two invariants at once: both gate cells and both door
+/// outputs survive legalization intact — a regression that elided the
 /// scope would trip the byte-identity assertion via a shorter left
-/// side; (b) the crossings are reported rather than absorbed; (c) a
-/// reported crossing does not shift the wire form.
-///
+/// side — and an escape upstream does not reach this pass as a change
+/// to the wire form.
 #[test]
 fn json_output_byte_identical_apart_from_stage_tag_on_a_scope_with_escapes() {
     let source = load_example("crossbar.crn");
@@ -364,7 +367,7 @@ fn json_output_byte_identical_apart_from_stage_tag_on_a_scope_with_escapes() {
     assert_eq!(
         normalize_stage_tags(&delayed_json),
         normalize_stage_tags(&legalized_json),
-        "reporting a crossing must not shift the wire form of the legalized IR",
+        "an escape laid at stage 2 must reach this pass as wire and not as          work: the legalized wire form is the delayed one",
     );
 }
 
@@ -517,7 +520,7 @@ theme t:
   slot wall -> @oak_planks
   slot door -> @oak_door
 
-struct gen size=8x8
+struct gen size=9x8
   floor mat_slot=wall
   door id=front side=front at=center mat_slot=door
   pressure_plate id=p1 at=front.outside offset=0 y=0 -> sig.a
@@ -542,8 +545,9 @@ struct gen size=8x8
     let last = scope.ir.cells.last().expect("last cell");
     assert_eq!(
         last.coord.x,
-        region.width - 1,
-        "the fixture only tests the boundary while the last cell sits in the final column",
+        region.width - 2,
+        "the fixture only tests the boundary while the last cell sits in the \
+         last column the row has, one short of the actuator pads'",
     );
 }
 

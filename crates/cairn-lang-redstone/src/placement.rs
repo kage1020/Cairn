@@ -19,7 +19,8 @@
 //! # Why the row is spaced
 //!
 //! Cell `i` stands at `x = 1 + 2i`: one column in from the pad column
-//! at `x = 0`, and one clear column between each pair.
+//! at `x = 0`, one clear column between each pair, and one past the
+//! last of them.
 //!
 //! A cell body is a block, so a net reaches it through a neighbouring
 //! coord — dust does not pass through a component, and two nets cannot
@@ -32,6 +33,15 @@
 //! not the router, which cannot lift a wire past the face it has to
 //! arrive through, and not `void`, which buys height above a cell and
 //! not room beside it.
+//!
+//! The column past the end is the same argument at the other end of
+//! the row. `output_pad` puts the actuator pads down the column at
+//! `width - 1`, so a last cell standing there has that column's pad on
+//! one side, the edge of the reservation on the other, and one clear
+//! column left. Under `void=1` that is one face for two nets and the
+//! scope is refused two stages later; above it the last net climbs and
+//! pays for the climb. Neither is what the row check is for, so the
+//! row it measures is `cells * 2 + 1` columns long.
 //!
 //! Enough faces is not the same as a wiring: a net passing through can
 //! still take the last one, and stage 2 refuses that scope rather than
@@ -88,7 +98,9 @@ pub const CELL_FOOTPRINT: u32 = 4;
 /// The spacing is what leaves a two-input gate a free neighbour for
 /// each of the three nets that touch it — see the module doc. Read
 /// here by the row-length refusal and by the coordinate it refuses on
-/// behalf of, so the two cannot drift.
+/// behalf of, so the two cannot drift. The refusal adds one more
+/// column for the end of the row; that one is not per cell, so it is
+/// not folded in here.
 const CELL_SPACING: u32 = 2;
 
 /// Output of a [`compile_placement`] run.
@@ -195,10 +207,11 @@ fn compile_scope(
     }
     // The v1 layout is a single spaced row: cell `i` stands at
     // `x = 1 + 2i`, so the last one sits at `2 * cells - 1` and the row
-    // wants `2 * cells` columns. The area test above cannot see that. A
-    // `size=2x8` scope with `void=3` reserves 48 cells' worth of volume
-    // and offers a row two columns long, and a three-cell netlist passes
-    // the first and overruns the second.
+    // wants a column past it as well — `2 * cells + 1` in all, for the
+    // reason the module doc gives. The area test above cannot see that.
+    // A `size=2x8` scope with `void=3` reserves 48 cells' worth of
+    // volume and offers a row two columns long, and a three-cell
+    // netlist passes the first and overruns the second.
     //
     // Nothing downstream would notice either: every later pass reads the
     // coordinates this one stamps, and `routing_geometry::output_pad`
@@ -208,7 +221,9 @@ fn compile_scope(
     // region entirely is a sink the router cannot reach, which would
     // surface two passes later as a congestion refusal saying every
     // route runs through a component, of a coord no route could enter.
-    let row_columns = u64::from(cell_count) * u64::from(CELL_SPACING);
+    let row_columns = u64::from(cell_count)
+        .saturating_mul(u64::from(CELL_SPACING))
+        .saturating_add(1);
     if row_columns > u64::from(reservation.width) {
         return Err(row_overflow_diagnostic(&reservation, cell_count));
     }
@@ -330,8 +345,10 @@ fn congestion_diagnostic(reservation: &CircuitRegionReservation, required_area: 
 /// shortage as the example rather than as the only shape.
 fn row_overflow_diagnostic(reservation: &CircuitRegionReservation, cell_count: u32) -> Diagnostic {
     let primary = format!(
-        "synthesized netlist needs {columns} columns for a row of {cell_count} cells, one clear column beside each, but the reserved region is only {width} wide (region {width}x{depth}, void={void})",
-        columns = u64::from(cell_count) * u64::from(CELL_SPACING),
+        "synthesized netlist needs {columns} columns for a row of {cell_count} cells, a clear column beside each and one past the end of the row, but the reserved region is only {width} wide (region {width}x{depth}, void={void})",
+        columns = u64::from(cell_count)
+            .saturating_mul(u64::from(CELL_SPACING))
+            .saturating_add(1),
         width = reservation.width,
         depth = reservation.depth,
         void = reservation.void,
@@ -342,7 +359,7 @@ fn row_overflow_diagnostic(reservation: &CircuitRegionReservation, cell_count: u
         primary,
     );
     diag = diag.with_footer(
-        "Fix: widen the enclosing `size=WxH` so the region is at least twice the cell count, or split into multiple `circuit` blocks. Raising `void` does not help — cells are laid in one row and `void` buys height, not length",
+        "Fix: widen the enclosing `size=WxH` past twice the cell count, or split into multiple `circuit` blocks. Raising `void` does not help — cells are laid in one row and `void` buys height, not length",
     );
     debug_assert_eq!(diag.severity(), Severity::Error);
     diag

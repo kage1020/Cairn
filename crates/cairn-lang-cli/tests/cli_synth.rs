@@ -224,11 +224,12 @@ fn cli_synth_stage_netlist_rejects_edition_flag() {
 }
 
 #[test]
-fn cli_synth_stage_placement_java_places_or_cell_at_origin() {
+fn cli_synth_stage_placement_java_places_or_cell_beside_the_pad_column() {
     // `--stage placement --edition java` runs the Edition Netlist IR
     // through the placement pass. `redstone-door.crn`'s sole cell should
-    // land at `{x:0,y:0,z:0}` inside its `circuit region=floor void=2`
-    // reservation (width/depth copied from `size=7x5`). `wire_length`
+    // land at `{x:1,y:0,z:0}` inside its `circuit region=floor void=2`
+    // reservation (width/depth copied from `size=7x5`) — one column in
+    // from the pad column, per the spaced row. `wire_length`
     // and `delay_ticks` are absent from the JSON today because Steiner
     // routing and delay insertion are follow-up passes.
     let path = examples_dir().join("redstone-door.crn");
@@ -543,14 +544,14 @@ fn cli_synth_stage_route_congestion_exits_one() {
     // the earlier stages follow.
     let dir = tempfile::tempdir().expect("temp dir");
     let path = dir.path().join("pack.crn");
-    // Four cells in a row exactly `2 * cells` columns long: the
-    // placement budget is met on the nose, and the first strand of
-    // wire overflows it. One sensor rather than two so the chain
-    // routes — a stranded sink would refuse this a stage earlier, for
-    // a different reason.
+    // Four cells in the shortest row that holds them, and a
+    // reservation two coords deeper than the cells need: the wire
+    // spends more than two and overflows it. One sensor rather than
+    // two so the chain routes — a stranded sink would refuse this a
+    // stage earlier, for a different reason.
     let source = "@cairn 2026.06\n@requires version>=1.20\n\n\
         theme t:\n  slot wall -> @oak_planks\n\n\
-        struct pack size=8x2\n  \
+        struct pack size=9x2\n  \
         floor mat_slot=wall\n  \
         pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a\n  \
         logic sig.c0 = not sig.a\n  \
@@ -708,14 +709,14 @@ fn cli_synth_stage_delay_inherits_upstream_congestion_failure() {
     // would have seen from `--stage route`.
     let dir = tempfile::tempdir().expect("temp dir");
     let path = dir.path().join("pack.crn");
-    // Four cells in a row exactly `2 * cells` columns long: the
-    // placement budget is met on the nose, and the first strand of
-    // wire overflows it. One sensor rather than two so the chain
-    // routes — a stranded sink would refuse this a stage earlier, for
-    // a different reason.
+    // Four cells in the shortest row that holds them, and a
+    // reservation two coords deeper than the cells need: the wire
+    // spends more than two and overflows it. One sensor rather than
+    // two so the chain routes — a stranded sink would refuse this a
+    // stage earlier, for a different reason.
     let source = "@cairn 2026.06\n@requires version>=1.20\n\n\
         theme t:\n  slot wall -> @oak_planks\n\n\
-        struct pack size=8x2\n  \
+        struct pack size=9x2\n  \
         floor mat_slot=wall\n  \
         pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a\n  \
         logic sig.c0 = not sig.a\n  \

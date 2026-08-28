@@ -286,16 +286,16 @@ struct dup size=20x5
 /// layout.
 #[test]
 fn post_routing_congestion_fires_route_congestion_and_elides_scope() {
-    // 4 cells × 4 blocks = 16 required cell area vs 8 × 2 × 1 = 16
-    // reserved blocks — placement passes on the nose, and any wire at
-    // all overflows. One sensor rather than two so the chain routes:
-    // this fixture is about the budget, and a stranded sink would
-    // refuse it one step earlier for a different reason.
+    // 4 cells × 4 blocks = 16 required cell area vs 9 × 2 × 1 = 18
+    // reserved blocks — placement passes with two coords to spare, and
+    // the wire spends more than two. One sensor rather than two so the
+    // chain routes: this fixture is about the budget, and a stranded
+    // sink would refuse it one step earlier for a different reason.
     let source = r"
 theme t:
   slot wall -> @oak_planks
 
-struct pack size=8x2
+struct pack size=9x2
   floor mat_slot=wall
 
   pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a
@@ -341,7 +341,7 @@ struct pack size=8x2
         d.primary,
     );
     assert!(
-        d.primary.contains("8x2"),
+        d.primary.contains("9x2"),
         "primary should quote the region footprint, got {:?}",
         d.primary,
     );

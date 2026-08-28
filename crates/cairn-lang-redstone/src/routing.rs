@@ -89,12 +89,12 @@
 //! coordinates the routing pass derives on the fly are not stored, and
 //! would become a `PlacementIr` field (`input_pads` / `output_pads`)
 //! if a consumer ever needs them outside routing — that migration is
-//! `#[non_exhaustive]`-safe on both types. `RouteLayer::Bridge` has two
-//! producers: this pass, whose wire climbs off the ground layer to get
-//! past a block or past another net, and
-//! [`crate::crossing::compile_crossing`] (stage 4 of §14.5), which
-//! lifts a buffer repeater off a coord it cannot have.
-//! Both stamp the layer through
+//! `#[non_exhaustive]`-safe on both types. `RouteLayer::Bridge` has one
+//! producer, this pass, whose wire climbs off the ground layer to get
+//! past a block or past another net. A buffer repeater the crossing
+//! pass places inherits the layer of the route coord it stands on, so
+//! a lifted repeater is a repeater on lifted wire rather than a second
+//! producer. The layer is stamped through
 //! [`crate::placement_ir::CellCoord::new`], so one voxel has one
 //! key. `RouteLayer::Via` has no producer at all: a climb is a step
 //! between two coords rather than a coord of its own, so there is
@@ -254,7 +254,8 @@ fn route_scope(entry: &ScopedPlacementIrEntry) -> ScopeRouting {
     // collapsing it onto a cell or another pad — that is a real
     // overflow the routing pass owns, not a silent misroute, so fire
     // `E_ROUTE_CONGESTION` with a "pad layout" primary immediately.
-    // Two cells cannot collide: a cell's x is its topological index.
+    // Two cells cannot collide: a cell's x is `1 + 2 * topological
+    // index`, so no two of them are the same column.
     let blocks = block_sites(&ir, &region);
     let mut occupancy: HashSet<CellCoord> = HashSet::with_capacity(ir.cells.len() * 4);
     for site in &blocks {
@@ -270,17 +271,19 @@ fn route_scope(entry: &ScopedPlacementIrEntry) -> ScopeRouting {
     // 4's buffer coords are measured against the wire this stage
     // actually laid.
     //
-    // `net_order` does not change any tree: a net is routed against
-    // the blocks alone, never against another net's dust (see the
-    // routing_geometry module doc on why that stays stage 4's
-    // question). It is here so the occupancy set is filled in an order
-    // that does not depend on a `HashMap`'s.
+    // `net_order` decides the trees: `net_trees` lays the nets in it,
+    // each going round the dust of the ones before it, so the order is
+    // part of the geometry rather than a tidy-up on the way out. It is
+    // a total order over the nets of a scope, which is what lets the
+    // three passes that rebuild the trees be told the same thing.
     let router = Router::new(&region, &blocks);
     let nets = collect_nets(&ir);
     let trees = net_trees(&nets, &router, source_of_net);
-    // A sink with no block-free route is a layout this reservation
-    // cannot hold, and saying so here is what keeps a wire drawn
-    // through a comparator out of the IR. Refused before the area
+    // A sink with no free route — nothing between it and its driver but
+    // blocks and the dust of nets already laid — is a layout this
+    // reservation cannot hold, and saying so here is what keeps a wire
+    // drawn through a comparator, or through another signal, out of
+    // the IR. Refused before the area
     // arithmetic below, because the area is not what is wrong.
     if let Some(diagnostic) = unroutable(&nets, &trees, entry, &region, source_of_net) {
         return Err(diagnostic);
