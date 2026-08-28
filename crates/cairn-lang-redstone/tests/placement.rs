@@ -85,7 +85,7 @@ fn redstone_door_java_places_or_cell_beside_the_pad_column() {
     assert_eq!(cell.cell, EditionCell::JavaRepeaterOr);
     assert_eq!(cell.coord.x, 1);
     assert_eq!(cell.coord.y, 0);
-    assert_eq!(cell.coord.z, 0);
+    assert_eq!(cell.coord.z, 1);
     assert!(
         cell.wire_length().is_none(),
         "wire_length is a follow-up pass output",
@@ -131,7 +131,7 @@ fn redstone_door_bedrock_matches_java_layout_apart_from_cell_tag() {
 
 /// AC3 — a scope whose logic produces three distinct cells lays them
 /// out at `x = 1, 3, 5` in the same topological order the Netlist IR
-/// carried through. `y` and `z` stay `0` for every cell (1D placement).
+/// carried through, on the one row at `y = 0`, `z = 1` (1D placement).
 #[test]
 fn multi_cell_scope_places_in_topological_order() {
     let source = r"
@@ -169,16 +169,16 @@ struct sim size=7x5
         .ir;
     assert_eq!(ir.cells.len(), 3);
     // `1 + 2i`: one column in from the pad column, one clear column
-    // between each pair. Spelled out rather than computed, so the
-    // convention is written somewhere other than in the pass that
-    // implements it.
+    // between each pair, on the row one row in from the near edge.
+    // Spelled out rather than computed, so the convention is written
+    // somewhere other than in the pass that implements it.
     for (i, (cell, expected)) in ir.cells.iter().zip([1u32, 3, 5]).enumerate() {
         assert_eq!(
             cell.coord.x, expected,
             "cell[{i}] should sit at x={expected}",
         );
         assert_eq!(cell.coord.y, 0);
-        assert_eq!(cell.coord.z, 0);
+        assert_eq!(cell.coord.z, 1);
     }
 }
 
@@ -804,30 +804,45 @@ struct sens size=8x5
     assert!(out.scoped.scopes.is_empty(), "and must not be emitted");
 }
 
-/// The pads need rows of their own: they step along `z` from 1 and
-/// saturate at `depth - 1`, and the cells hold `z = 0`. At `depth == 1`
-/// the saturation drops the actuator pad onto the last cell, which is
-/// the very collision the row check reasons about — so the row check
-/// cannot be the whole of it.
+/// The cell row needs a clear row on either side of it, which neither
+/// the volume budget nor the row length can see.
+///
+/// Both sides of the threshold in one test: a number is only pinned by
+/// a pair that straddles it, and two tests that could drift apart would
+/// leave the depth free to move by one in either direction. The region
+/// is wide and its `void` ample in both, so the only thing that changes
+/// between the refusal and the layout is the depth.
 #[test]
-fn a_region_one_row_deep_cannot_hold_a_pad_beside_its_cells() {
-    let out = placement_of(&source_with_cells(4, 9, 1, 4));
+fn a_region_too_shallow_for_a_lane_either_side_of_the_row_is_refused() {
+    let refused = placement_of(&source_with_cells(1, 9, 2, 4));
 
-    assert!(out.scoped.scopes.is_empty());
-    let diagnostic = out
+    assert!(refused.scoped.scopes.is_empty());
+    let diagnostic = refused
         .diagnostics
         .iter()
         .find(|d| d.code == DiagnosticCode::RouteCongestion)
         .expect("the shortfall must surface");
     assert!(
-        diagnostic.primary.contains("only 1 deep"),
-        "the refusal must name the depth: {}",
+        diagnostic.primary.contains("only 2 deep")
+            && diagnostic
+                .primary
+                .contains("clear row on either side of it"),
+        "the refusal must name the depth and what the rows are for: {}",
         diagnostic.primary,
+    );
+
+    let placed = placement_of(&source_with_cells(1, 9, 3, 4));
+    assert!(
+        placed.diagnostics.is_empty() && !placed.scoped.scopes.is_empty(),
+        "one row more is the row with its lanes: {:?}",
+        placed.diagnostics,
     );
 }
 
-/// Pads saturate onto each other one row before they reach the cells,
-/// so the guard is about the count rather than about `depth == 1`.
+/// Pads stand one per row down the edge columns, so the guard is
+/// about their count rather than about a depth the row check would
+/// already have refused: the region below is three rows deep, which is
+/// exactly what the cell row and its two lanes want.
 #[test]
 fn more_actuators_than_rows_is_refused_before_their_pads_collide() {
     let source = r"
@@ -835,17 +850,19 @@ theme t:
   slot wall -> @oak_planks
   slot door -> @oak_door
 
-struct three size=8x3
+struct four size=8x3
   floor mat_slot=wall
   door id=d1 side=front at=center mat_slot=door
   door id=d2 side=back  at=center mat_slot=door
   door id=d3 side=left  at=center mat_slot=door
+  door id=d4 side=right at=center mat_slot=door
   pressure_plate id=p1 at=front.outside offset=0 y=0 -> sig.a
   pressure_plate id=p2 at=inside.front  offset=0 y=0 -> sig.b
   logic sig.f = sig.a and sig.b
   door[id=d1] opened_by=sig.f
   door[id=d2] opened_by=sig.f
   door[id=d3] opened_by=sig.f
+  door[id=d4] opened_by=sig.f
   circuit region=floor void=2
 ";
     let (edition_netlist, intent) = edition_netlist_from_source(source, Edition::Java);
@@ -853,7 +870,7 @@ struct three size=8x3
 
     assert!(
         out.scoped.scopes.is_empty(),
-        "three actuators do not fit three rows beside a cell row",
+        "four actuators do not fit three rows",
     );
     assert!(
         out.diagnostics

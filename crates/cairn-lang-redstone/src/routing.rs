@@ -557,6 +557,7 @@ mod tests {
     /// A unit test rather than one in `tests/routing.rs` because the
     /// wire coords are crate-internal — the routed IR carries lengths,
     /// not paths.
+
     #[test]
     fn no_example_draws_dust_inside_a_component() {
         use std::collections::{HashMap, HashSet};
@@ -701,12 +702,12 @@ mod tests {
 
         let rows = [
             Row {
-                // depth 2 leaves one z for the pad row, so input #1
-                // saturates onto input #0.
+                // depth 2 leaves two rows for the pad column, so
+                // input #2 saturates onto input #1.
                 region: reservation(4, 2, 1),
                 inputs: 3,
                 kind: "input",
-                index: 1,
+                index: 2,
                 coord: "(0,0,1)",
             },
             Row {
@@ -861,7 +862,7 @@ mod tests {
             name: cairn_lang_core::ast::DottedRef::new("sig".into(), vec!["a".into()]),
             span: Span::default(),
         });
-        // The pad lands at (0,0,1). Walling (1,0,0) and (2,0,1) in
+        // The pad lands at (0,0,0). Walling (1,0,0) and (2,0,1) in
         // leaves the sink at (2,0,0) with no free neighbour, and
         // `void=1` reserves no layer to come in over the top.
         for coord in [CellCoord::new(1, 0, 0), CellCoord::new(2, 0, 1)] {
@@ -886,7 +887,7 @@ mod tests {
             .unwrap_or_else(|| panic!("a walled-in sink must refuse: {:?}", routed.diagnostics));
         assert!(
             refusal.primary.contains("cannot reach (2,0,0)")
-                && refusal.primary.contains("from the driver at (0,0,1)"),
+                && refusal.primary.contains("from the driver at (0,0,0)"),
             "the refusal names both ends: {}",
             refusal.primary,
         );
@@ -945,7 +946,7 @@ mod tests {
             span: Span::default(),
         });
         ir.cells.push(placed_cell(
-            CellCoord::new(7, 0, 1),
+            CellCoord::new(7, 0, 0),
             PlacementPhase::Unrouted,
         ));
         ir.cells.push(PlacedCellNode {
@@ -954,7 +955,7 @@ mod tests {
                 port: PortName::A,
                 net: NetRef::Input(0),
             }],
-            coord: CellCoord::new(14, 0, 1),
+            coord: CellCoord::new(14, 0, 0),
             phase: PlacementPhase::Unrouted,
             span: Span::default(),
         });

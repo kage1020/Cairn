@@ -227,9 +227,10 @@ fn cli_synth_stage_netlist_rejects_edition_flag() {
 fn cli_synth_stage_placement_java_places_or_cell_beside_the_pad_column() {
     // `--stage placement --edition java` runs the Edition Netlist IR
     // through the placement pass. `redstone-door.crn`'s sole cell should
-    // land at `{x:1,y:0,z:0}` inside its `circuit region=floor void=2`
+    // land at `{x:1,y:0,z:1}` inside its `circuit region=floor void=2`
     // reservation (width/depth copied from `size=7x5`) — one column in
-    // from the pad column, per the spaced row. `wire_length`
+    // from the pad column and one row in from the near edge, per the
+    // spaced row. `wire_length`
     // and `delay_ticks` are absent from the JSON today because Steiner
     // routing and delay insertion are follow-up passes.
     let path = examples_dir().join("redstone-door.crn");
@@ -270,7 +271,7 @@ fn cli_synth_stage_placement_java_places_or_cell_beside_the_pad_column() {
     let coord = &cells[0]["coord"];
     assert_eq!(coord["x"], 1);
     assert_eq!(coord["y"], 0);
-    assert_eq!(coord["z"], 0);
+    assert_eq!(coord["z"], 1);
     assert!(
         cells[0].get("wire_length").is_none(),
         "wire_length must be elided today: {stdout}",
@@ -438,9 +439,9 @@ fn cli_synth_stage_edition_requires_edition_flag() {
 fn cli_synth_stage_route_java_fills_wire_length() {
     // `--stage route --edition java` runs Steiner routing over the
     // Placement IR. `redstone-door.crn`'s sole OR cell should carry
-    // `wire_length = 5` — one block from `sig.step`'s pad next door,
-    // and four from `sig.exit`'s, whose dust comes round the near pad
-    // rather than through it — in the routed JSON, while `delay_ticks`
+    // `wire_length = 3` — one block from `sig.exit`'s pad, which is
+    // directly beside it, and two from `sig.step`'s, which is at the
+    // corner a row further out — in the routed JSON, while `delay_ticks`
     // stays elided because this dump stops at stage 2.
     // `cli_synth_stage_delay_java_fills_delay_ticks` is the stage-3
     // dump where it appears.
@@ -474,7 +475,7 @@ fn cli_synth_stage_route_java_fills_wire_length() {
         cells[0]["stage"], "route",
         "the stage tag must echo the --stage flag that produced the dump: {stdout}",
     );
-    assert_eq!(cells[0]["wire_length"], 7);
+    assert_eq!(cells[0]["wire_length"], 3);
     assert!(
         cells[0].get("delay_ticks").is_none(),
         "delay_ticks must be elided at this stage: {stdout}",
@@ -510,7 +511,7 @@ fn cli_synth_stage_route_bedrock_matches_java_wire_length() {
     let ir = &gatehouse["ir"];
     assert_eq!(ir["edition"], "bedrock");
     assert_eq!(ir["cells"][0]["cell"], "bedrock_torch_or");
-    assert_eq!(ir["cells"][0]["wire_length"], 7);
+    assert_eq!(ir["cells"][0]["wire_length"], 3);
 }
 
 #[test]
@@ -544,21 +545,19 @@ fn cli_synth_stage_route_congestion_exits_one() {
     // the earlier stages follow.
     let dir = tempfile::tempdir().expect("temp dir");
     let path = dir.path().join("pack.crn");
-    // Four cells in the shortest row that holds them, and a
-    // reservation two coords deeper than the cells need: the wire
-    // spends more than two and overflows it. One sensor rather than
-    // two so the chain routes — a stranded sink would refuse this a
-    // stage earlier, for a different reason.
+    // Two cells in the shortest row that holds them, in the shallowest
+    // region the row fits in: seven coords are left over once the cells
+    // are counted, and the wire spends more than seven. One sensor
+    // rather than two so the chain routes — a stranded sink would
+    // refuse this a stage earlier, for a different reason.
     let source = "@cairn 2026.06\n@requires version>=1.20\n\n\
         theme t:\n  slot wall -> @oak_planks\n\n\
-        struct pack size=9x2\n  \
+        struct pack size=5x3\n  \
         floor mat_slot=wall\n  \
         pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a\n  \
         logic sig.c0 = not sig.a\n  \
-        logic sig.c1 = not sig.c0\n  \
-        logic sig.c2 = not sig.c1\n  \
-        logic sig.c3 = not sig.c2\n  \
-        door id=d side=front at=center mat_slot=wall opened_by=sig.c3\n  \
+        logic sig.c1 = sig.c0 and sig.a\n  \
+        door id=d side=front at=center mat_slot=wall opened_by=sig.c1\n  \
         circuit region=floor void=1\n";
     std::fs::write(&path, source).expect("write congestion fixture");
     let out = run_synth(&[
@@ -637,7 +636,7 @@ fn cli_synth_stage_delay_java_fills_delay_ticks() {
         cells[0]["stage"], "delay",
         "the stage tag must echo the --stage flag that produced the dump: {stdout}",
     );
-    assert_eq!(cells[0]["wire_length"], 7);
+    assert_eq!(cells[0]["wire_length"], 3);
     assert_eq!(cells[0]["delay_ticks"], 1);
 }
 
@@ -671,7 +670,7 @@ fn cli_synth_stage_delay_bedrock_matches_bedrock_torch_or() {
     let ir = &gatehouse["ir"];
     assert_eq!(ir["edition"], "bedrock");
     assert_eq!(ir["cells"][0]["cell"], "bedrock_torch_or");
-    assert_eq!(ir["cells"][0]["wire_length"], 7);
+    assert_eq!(ir["cells"][0]["wire_length"], 3);
     assert_eq!(ir["cells"][0]["delay_ticks"], 0);
 }
 
@@ -709,21 +708,19 @@ fn cli_synth_stage_delay_inherits_upstream_congestion_failure() {
     // would have seen from `--stage route`.
     let dir = tempfile::tempdir().expect("temp dir");
     let path = dir.path().join("pack.crn");
-    // Four cells in the shortest row that holds them, and a
-    // reservation two coords deeper than the cells need: the wire
-    // spends more than two and overflows it. One sensor rather than
-    // two so the chain routes — a stranded sink would refuse this a
-    // stage earlier, for a different reason.
+    // Two cells in the shortest row that holds them, in the shallowest
+    // region the row fits in: seven coords are left over once the cells
+    // are counted, and the wire spends more than seven. One sensor
+    // rather than two so the chain routes — a stranded sink would
+    // refuse this a stage earlier, for a different reason.
     let source = "@cairn 2026.06\n@requires version>=1.20\n\n\
         theme t:\n  slot wall -> @oak_planks\n\n\
-        struct pack size=9x2\n  \
+        struct pack size=5x3\n  \
         floor mat_slot=wall\n  \
         pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a\n  \
         logic sig.c0 = not sig.a\n  \
-        logic sig.c1 = not sig.c0\n  \
-        logic sig.c2 = not sig.c1\n  \
-        logic sig.c3 = not sig.c2\n  \
-        door id=d side=front at=center mat_slot=wall opened_by=sig.c3\n  \
+        logic sig.c1 = sig.c0 and sig.a\n  \
+        door id=d side=front at=center mat_slot=wall opened_by=sig.c1\n  \
         circuit region=floor void=1\n";
     std::fs::write(&path, source).expect("write congestion fixture");
     let out = run_synth(&[
@@ -1000,16 +997,15 @@ fn cli_synth_stage_crossing_two_nets_over_one_coord_exits_one() {
     // be printed as a legalized IR.
     //
     // One cell, two sensors, two actuators, one service layer. The
-    // sensor whose pad sits behind the other one has to come into the
-    // cell round the pad in front of it, and every way round is either
-    // the other sensor's wire or the row the cell drives its actuators
-    // out along.
+    // cell's own output fans out to both doors, so it is laid first and
+    // takes the coords beside the cell; the sensor that drives it has
+    // none left to arrive through and no layer to climb onto.
     let source = "\
 theme cross:
   slot wall -> @oak_planks
   slot door -> @oak_door
 
-struct crossbar size=5x4
+struct crossbar size=4x4
   floor mat_slot=wall
   door  id=front side=front at=center mat_slot=door
   door  id=back  side=back  at=center mat_slot=door
@@ -1043,10 +1039,11 @@ struct crossbar size=5x4
     );
     assert!(
         stderr.contains("routed netlist for struct `crossbar`")
-            && stderr.contains("dust already laid for another net")
-            && stderr.contains("the coords beside it carry cell #0 and sig.a"),
-        "the refusal names the scope, which of the three kinds of obstacle \
-         it means, and the net standing in the way, got: {stderr}",
+            && stderr.contains("another net's dust, on the coord or one step from it")
+            && stderr.contains("the faces it could arrive through are taken by cell #0"),
+        "the refusal names the scope, which of the three kinds of obstacle it \
+         means and how far it reaches, and the net standing in the way, got: \
+         {stderr}",
     );
     // Which other code leaked would say the fixture drifted into an
     // over-long segment rather than into the congestion this is about.

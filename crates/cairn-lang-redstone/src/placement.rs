@@ -11,7 +11,7 @@
 //! topological order (`NetRef::Cell(j)` in `cells[i]` satisfies
 //! `j < i`, an invariant [`crate::netlist::compile_netlist`] carries
 //! across from the Logic IR), so this pass walks them in that order
-//! and stamps one row, `y = 0`, `z = 0`. The 2D / 2.5D lift is the
+//! and stamps one row, `y = 0`, `z = 1`. The 2D / 2.5D lift is the
 //! routing pass's concern — it needs the `plane` / `via` / `bridge`
 //! escape hatches §14.5 mentions for fanout and for one net getting
 //! past another.
@@ -23,10 +23,12 @@
 //! last of them.
 //!
 //! A cell body is a block, so a net reaches it through a neighbouring
-//! coord — dust does not pass through a component, and two nets cannot
-//! share a coord without becoming one strand carrying two signals. A
-//! two-input gate has three distinct nets touching it, its two drivers
-//! and its own output, so it needs three free neighbours. Packed at
+//! coord — dust does not pass through a component, and two nets that
+//! share a coord, or run one step apart in one plane, are one strand
+//! carrying two signals. A two-input gate has three distinct nets
+//! touching it, its two drivers and its own output, so it needs three
+//! free neighbours; any two neighbours of one block are two steps
+//! apart, so three faces are three arrivals and not a short. Packed at
 //! `x = i` against the pad column, an interior cell of a chain has
 //! two: the cells on either side take the other faces, and no region
 //! size gives them back. Spacing the row is the only thing that can —
@@ -43,6 +45,26 @@
 //! pays for the climb. Neither is what the row check is for, so the
 //! row it measures is `cells * 2 + 1` columns long.
 //!
+//! # Why the row is one row in
+//!
+//! The cells stand on `z = 1`, not on the near edge of the
+//! reservation, and `input_pad` / `output_pad` step along `z` from `0`
+//! — the row they used to start below is the row the cells have left.
+//!
+//! Dust reads the dust beside it, so a lane of free coords carries one
+//! net however long the lane is. A cell on `z = 0` has one lane: the
+//! row at `z = 1`, which is the only row its faces open onto that no
+//! other cell of the row stands in. Three nets touch a two-input gate
+//! and they cannot share it. The two-gate `crossbar` example is the
+//! case — with the row on the edge, no order its four nets can be laid
+//! in wires the scope, and widening or deepening the reservation does
+//! not change that; one row in, it wires at `5x3` with `void=2`.
+//!
+//! One row for the whole netlist rather than one per cell, so unlike
+//! the column spacing this does not grow with the cell count: the
+//! reservation needs three rows, the cells' and a clear one either
+//! side, whatever is placed in it.
+//!
 //! Enough faces is not the same as a wiring: a net passing through can
 //! still take the last one, and stage 2 refuses that scope rather than
 //! shorting it.
@@ -53,15 +75,19 @@
 //!   `circuit region=` line (or no `size=WxH` header for the region to
 //!   sit inside). Sites always fall here because they carry no `size`.
 //! - [`crate::DiagnosticCode::RouteCongestion`] when the netlist does
-//!   not fit the reservation, which it can fail to do in two ways. The
-//!   volume can be short: the v1 area budget uses [`CELL_FOOTPRINT`] as
-//!   a per-cell footprint estimate, deliberately pessimistic so a
-//!   placement that reports "fits" is unlikely to flip to a routing
-//!   failure downstream. Or the *row* can be short, which the area
-//!   budget cannot see — a `size=2x8` scope with `void=3` reserves 48
-//!   cells' worth of volume and two columns of row. Both are checked,
-//!   in that order, and each explains itself in its own terms.
-//!   Follow-up refinement is `#[non_exhaustive]`-safe on both types.
+//!   not fit the reservation, which it can fail to do in four ways.
+//!   The volume can be short: the v1 area budget uses
+//!   [`CELL_FOOTPRINT`] as a per-cell footprint estimate, deliberately
+//!   pessimistic so a placement that reports "fits" is unlikely to
+//!   flip to a routing failure downstream. Or the *row* can be short,
+//!   which the area budget cannot see — a `size=2x8` scope with
+//!   `void=3` reserves 48 cells' worth of volume and two columns of
+//!   row. Or the region can be too shallow for the row to have a clear
+//!   row either side of it. Or too shallow for the I/O pads, which
+//!   stand one per row down the two edge columns. All four are
+//!   checked, in that order, and each explains itself in its own
+//!   terms. Follow-up refinement is `#[non_exhaustive]`-safe on both
+//!   types.
 //!
 //! Scopes whose placement fires an Error-severity diagnostic are
 //! elided from the output list (the diagnostic still surfaces), so a
@@ -102,6 +128,15 @@ pub const CELL_FOOTPRINT: u32 = 4;
 /// column for the end of the row; that one is not per cell, so it is
 /// not folded in here.
 const CELL_SPACING: u32 = 2;
+
+/// The row the cells stand on, counted from the near edge of the
+/// reservation.
+///
+/// One row in, so every cell has a clear lane on each side of it rather
+/// than only the one — see the module doc. Read here by the coordinate
+/// and by the depth refusal that reserves the rows it needs, so the two
+/// cannot drift.
+const CELL_ROW: u32 = 1;
 
 /// Output of a [`compile_placement`] run.
 ///
@@ -227,19 +262,29 @@ fn compile_scope(
     if row_columns > u64::from(reservation.width) {
         return Err(row_overflow_diagnostic(&reservation, cell_count));
     }
+    // The row needs a clear row on either side of it, for the reason the
+    // module doc gives: a cell against the edge of the reservation has
+    // one lane beside it, and dust reads the dust beside it, so one lane
+    // carries one net. `CELL_ROW` rows stand before the cells, the cells
+    // take one, and one more has to be clear behind them. Unlike the row
+    // length this does not grow with the netlist — it is the same three
+    // rows for one cell as for a hundred.
+    let row_depth = u64::from(CELL_ROW).saturating_add(2);
+    if row_depth > u64::from(reservation.depth) {
+        return Err(row_depth_diagnostic(&reservation));
+    }
     // The pads need rows of their own. `input_pad` and `output_pad` step
-    // along z from 1 and saturate at `depth - 1`, and the cells occupy
-    // `z = 0`, so a reservation holds its I/O only while `depth` is at
-    // least one more than the larger of the two pad counts. Below that
-    // the saturation stacks pads on each other, and at `depth == 1` it
-    // drops them onto the cell row — which is the case the row check
-    // above reads as fine, because the pad it reasons about is no longer
-    // where it assumes. Refused here rather than left to the routing
-    // pass's occupancy sweep so stage 1 stops emitting a dump whose
-    // coordinates contradict each other.
+    // along z from 0 and saturate at `depth - 1`, so a reservation holds
+    // its I/O only while `depth` is at least the larger of the two pad
+    // counts; below that the saturation stacks pads on one coord. Rows,
+    // not rows past the cell row — a pad stands in the column at `x = 0`
+    // or `x = width - 1`, which no cell occupies, so a pad and a cell
+    // share a row without sharing a coord. Refused here rather than left
+    // to the routing pass's occupancy sweep so stage 1 stops emitting a
+    // dump whose coordinates contradict each other.
     let pad_rows = source.inputs.len().max(source.outputs.len());
     let pad_rows = u32::try_from(pad_rows).unwrap_or(u32::MAX);
-    if pad_rows > 0 && reservation.depth <= pad_rows {
+    if pad_rows > reservation.depth {
         return Err(pad_row_diagnostic(&reservation, pad_rows));
     }
 
@@ -255,7 +300,7 @@ fn compile_scope(
         ir.cells.push(PlacedCellNode {
             cell: source_cell.cell,
             drivers: source_cell.drivers.clone(),
-            coord: CellCoord::new(x, 0, 0),
+            coord: CellCoord::new(x, 0, CELL_ROW),
             phase: PlacementPhase::Unrouted,
             span: source_cell.span.clone(),
         });
@@ -365,17 +410,18 @@ fn row_overflow_diagnostic(reservation: &CircuitRegionReservation, cell_count: u
     diag
 }
 
-/// The reservation has no room for the I/O pads the scope needs.
+/// The reservation has the row but not the rows beside it.
 ///
-/// Separate from the two footprint refusals because the resource is a
-/// different one again: `void` buys height, the row buys length, and
-/// this buys the rows the pads stand in. Sharing
-/// [`DiagnosticCode::RouteCongestion`] with them keeps `spec/redstone`
-/// §14.5's single fail-loud for "routing does not fit the region".
-fn pad_row_diagnostic(reservation: &CircuitRegionReservation, pad_rows: u32) -> Diagnostic {
+/// Kept apart from the two footprint refusals for the reason they are
+/// kept apart from each other: the resource is a different one, and the
+/// numbers that explain a row with nothing beside it say nothing about
+/// a region short of volume. [`DiagnosticCode::RouteCongestion`] is
+/// shared with them, per `spec/redstone` §14.5's single fail-loud for
+/// "routing does not fit the region".
+fn row_depth_diagnostic(reservation: &CircuitRegionReservation) -> Diagnostic {
     let primary = format!(
-        "synthesized netlist needs {needed} rows for its cells and I/O pads but the reserved region is only {depth} deep (region {width}x{depth}, void={void})",
-        needed = pad_rows.saturating_add(1),
+        "synthesized netlist needs {rows} rows for its cell row and a clear row on either side of it, but the reserved region is only {depth} deep (region {width}x{depth}, void={void})",
+        rows = u64::from(CELL_ROW).saturating_add(2),
         depth = reservation.depth,
         width = reservation.width,
         void = reservation.void,
@@ -386,7 +432,34 @@ fn pad_row_diagnostic(reservation: &CircuitRegionReservation, pad_rows: u32) -> 
         primary,
     );
     diag = diag.with_footer(
-        "Fix: deepen the enclosing `size=WxH` so the region has one row per sensor or actuator plus the cell row, or split into multiple `circuit` blocks. Raising `void` does not help — pads stand beside the cells, not above them",
+        "Fix: deepen the enclosing `size=WxH` to at least three rows, or split into multiple `circuit` blocks. Raising `void` does not help — a wire reaches a cell through a face in the cell's own plane, and `void` buys height above it",
+    );
+    debug_assert_eq!(diag.severity(), Severity::Error);
+    diag
+}
+
+/// The reservation has no room for the I/O pads the scope needs.
+///
+/// Separate from the other three because the resource is a different
+/// one again: `void` buys height, the row buys length, the rows beside
+/// the row buy the lanes, and this buys the rows the pads stand in. Sharing
+/// [`DiagnosticCode::RouteCongestion`] with them keeps `spec/redstone`
+/// §14.5's single fail-loud for "routing does not fit the region".
+fn pad_row_diagnostic(reservation: &CircuitRegionReservation, pad_rows: u32) -> Diagnostic {
+    let primary = format!(
+        "synthesized netlist needs {needed} rows for its I/O pads but the reserved region is only {depth} deep (region {width}x{depth}, void={void})",
+        needed = pad_rows,
+        depth = reservation.depth,
+        width = reservation.width,
+        void = reservation.void,
+    );
+    let mut diag = Diagnostic::new(
+        DiagnosticCode::RouteCongestion,
+        reservation.span.clone(),
+        primary,
+    );
+    diag = diag.with_footer(
+        "Fix: deepen the enclosing `size=WxH` so the region has one row per sensor or actuator, or split into multiple `circuit` blocks. Raising `void` does not help — pads stand beside the cells, not above them",
     );
     debug_assert_eq!(diag.severity(), Severity::Error);
     diag

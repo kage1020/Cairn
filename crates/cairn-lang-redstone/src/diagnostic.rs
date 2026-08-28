@@ -84,16 +84,18 @@ pub enum DiagnosticCode {
     /// §14.5's canonical failure: routing cannot be confined to the
     /// reserved region, so the pass fails loud with the self-correction
     /// triple ("increase `void`", "enlarge region", "split into multiple
-    /// `circuit` blocks"). Four shapes reach it — the reserved volume is
-    /// short of the netlist's estimated footprint; the reserved row is
-    /// shorter than the spaced single-row layout needs, which is twice
-    /// the cell count and one more; the reservation is too shallow for
-    /// the I/O pads to stand off the cell row; or a sink has no route
-    /// from its driver that runs through neither a component nor
-    /// another net's dust. §14.5 names area shortage as the example
-    /// rather than as the only shape, so all four take this code and
+    /// `circuit` blocks"). Five shapes reach it — the reserved volume
+    /// is short of the netlist's estimated footprint; the reserved row
+    /// is shorter than the spaced single-row layout needs, which is
+    /// twice the cell count and one more; the reservation is too
+    /// shallow for the cell row to have a clear row either side of it;
+    /// too shallow for the I/O pads, which stand one per row; or a sink
+    /// has no route from its driver that runs through neither a
+    /// component nor another net's dust — nor within one step of that
+    /// dust in its own plane. §14.5 names area shortage as the example
+    /// rather than as the only shape, so all five take this code and
     /// differ in what they say: raising `void` fixes the first and the
-    /// last, and cannot fix the two in between.
+    /// last, and cannot fix the three in between.
     RouteCongestion,
     /// A routed driver segment (source pad or driver cell → sink coord,
     /// where the sink is either a downstream cell coord or an actuator

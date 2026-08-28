@@ -164,7 +164,7 @@ struct chain size=60x5
         .collect();
     assert_eq!(
         blocks,
-        [(14, 0, 1), (29, 0, 1)].into_iter().collect(),
+        [(14, 0, 2), (29, 0, 2)].into_iter().collect(),
         "two blocks, on the plane, beside the row rather than over it — one \
          per refresh point and not one per cell",
     );
@@ -371,14 +371,17 @@ fn json_output_byte_identical_apart_from_stage_tag_on_a_scope_with_escapes() {
     );
 }
 
-/// AC — two nets that want one coord, in a reservation with no layer
-/// above the plane to climb to.
+/// AC — two nets that want the coords beside one cell, in a
+/// reservation with no layer above the plane to climb to.
 ///
 /// The escape §14.5 specifies is "a bridge tile or a vertical layer",
-/// and `void=1` reserves neither. So the second net has to find its
-/// way round on the plane or not at all, and this fixture is the case
-/// where it cannot: the scope is refused rather than shorted, which is
-/// the whole trade this pipeline makes.
+/// and `void=1` reserves neither. So the second net has to find its way
+/// round on the plane or not at all, and this fixture is the case where
+/// it cannot. `sig.f` fans out to two doors, so its own output net is
+/// laid first and takes the faces beside the cell; `sig.a`, which
+/// drives that cell, has none left to arrive through and nowhere to
+/// climb. The scope is refused rather than shorted, which is the whole
+/// trade this pipeline makes.
 #[test]
 fn two_nets_that_want_one_coord_with_no_layer_above_are_refused() {
     let source = "\
@@ -386,7 +389,7 @@ theme cross:
   slot wall -> @oak_planks
   slot door -> @oak_door
 
-struct thin size=5x4
+struct thin size=4x4
   floor mat_slot=wall
   door  id=front side=front at=center mat_slot=door
   door  id=back  side=back  at=center mat_slot=door
@@ -421,15 +424,16 @@ struct thin size=5x4
     assert!(
         refusal
             .primary
-            .contains("dust already laid for another net"),
-        "the refusal says which of the three kinds of obstacle it means: {}",
+            .contains("another net's dust, on the coord or one step from it in the same plane"),
+        "the refusal says which of the three kinds of obstacle it means, and \
+         how far it reaches: {}",
         refusal.primary,
     );
     assert!(
         refusal
             .primary
-            .contains("the coords beside it carry cell #0 and sig.a"),
-        "and names the nets in the way, in net order: {}",
+            .contains("the faces it could arrive through are taken by cell #0"),
+        "and names the net in the way: {}",
         refusal.primary,
     );
     assert!(
@@ -447,10 +451,12 @@ struct thin size=5x4
 }
 
 /// AC — `examples/crossbar.crn` with `void=1` never reaches the
-/// crossing pass. Four nets share the plane, and with no layer above
-/// it the last of them has nowhere to go that the others have not
-/// taken. Stage 2 says so, and says which three sinks it could not
-/// reach rather than only the first.
+/// crossing pass. Four nets share the plane, and with no layer above it
+/// the last of them has nowhere to go that the others have not taken.
+/// Stage 2 says so, and names the nets that took it — two of them here,
+/// in net order, which is the plural the singular case in
+/// `two_nets_that_want_one_coord_with_no_layer_above_are_refused`
+/// cannot show.
 #[test]
 fn crossbar_void_one_is_refused_before_any_crossing_is_computed() {
     let source = load_example("crossbar.crn");
@@ -473,16 +479,15 @@ fn crossbar_void_one_is_refused_before_any_crossing_is_computed() {
         .find(|d| d.code == DiagnosticCode::RouteCongestion)
         .unwrap_or_else(|| panic!("void=1 crossbar must refuse: {:?}", routed.diagnostics));
     assert!(
-        refusal.primary.contains("cannot reach (1,0,0)"),
-        "the refusal names the cell nothing can reach: {}",
+        refusal.primary.contains("cannot reach (5,0,0)"),
+        "the refusal names the pad nothing can reach: {}",
         refusal.primary,
     );
     assert!(
         refusal
             .primary
-            .contains("2 more of this scope's sinks cannot be reached either"),
-        "and the count, so a fix-one-recompile loop is not several rounds of \
-         one sizing decision: {}",
+            .contains("the faces it could arrive through are taken by sig.a and cell #1"),
+        "and names every net that took one, in net order: {}",
         refusal.primary,
     );
     assert!(

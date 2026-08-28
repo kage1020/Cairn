@@ -577,7 +577,7 @@ mod tests {
         });
         ir.cells.push(placed_cell(
             EditionCell::JavaRepeaterOr,
-            CellCoord::new(16, 0, 1),
+            CellCoord::new(16, 0, 0),
             vec![CellPortDriver {
                 port: PortName::A,
                 net: NetRef::Input(0),
@@ -618,7 +618,7 @@ mod tests {
             .expect("legalized scoped IR must serialise cleanly");
         assert!(
             json.contains(
-                "\"buffer_coords\":[{\"port\":\"a\",\"coord\":{\"x\":15,\"y\":0,\"z\":1}}]"
+                "\"buffer_coords\":[{\"port\":\"a\",\"coord\":{\"x\":15,\"y\":0,\"z\":0}}]"
             ),
             "expected buffer_coords entry to appear in JSON verbatim, got {json}",
         );
@@ -635,9 +635,9 @@ mod tests {
     /// A sink fourteen blocks from its driver with something standing
     /// halfway.
     ///
-    /// The pad is at `(0,0,1)` and the sink at `(14,0,1)`, so the
+    /// The pad is at `(0,0,0)` and the sink at `(14,0,0)`, so the
     /// straight line between them is 14 blocks and asks for no buffer
-    /// repeater at all. A block at `(7,0,1)` sends the wire around it,
+    /// repeater at all. A block at `(7,0,0)` sends the wire around it,
     /// and the two blocks that costs put the segment over the
     /// attenuation limit: 16 blocks of dust, and a repeater 15 along.
     /// That gap between the straight line and the route is what every
@@ -656,12 +656,12 @@ mod tests {
         });
         ir.cells.push(placed_cell(
             EditionCell::JavaRepeaterOr,
-            CellCoord::new(7, 0, 1),
+            CellCoord::new(7, 0, 0),
             Vec::new(),
         ));
         ir.cells.push(placed_cell(
             EditionCell::JavaRepeaterOr,
-            CellCoord::new(14, 0, 1),
+            CellCoord::new(14, 0, 0),
             vec![CellPortDriver {
                 port: PortName::A,
                 net: NetRef::Input(0),
@@ -692,7 +692,7 @@ mod tests {
         let cells = &legalized.scoped.scopes[0].ir.cells;
         let buffers = cells[WALLED_SINK].buffer_coords();
         assert_eq!(buffers.len(), 1, "16 blocks of dust need one: {buffers:?}");
-        assert_eq!(buffers[0].coord, CellCoord::new(14, 0, 0));
+        assert_eq!(buffers[0].coord, CellCoord::new(14, 0, 1));
         assert_eq!(buffers[0].coord.layer, RouteLayer::Plane);
     }
 
@@ -1021,7 +1021,7 @@ mod tests {
             for x in 16..16 + sinks {
                 ir.cells.push(placed_cell(
                     EditionCell::JavaRepeaterOr,
-                    CellCoord::new(x, 0, 1),
+                    CellCoord::new(x, 0, 0),
                     vec![CellPortDriver {
                         port: PortName::A,
                         net: NetRef::Input(0),
@@ -1043,7 +1043,7 @@ mod tests {
                 );
                 assert_eq!(
                     buffers[0].coord,
-                    CellCoord::new(15, 0, 1),
+                    CellCoord::new(15, 0, 0),
                     "cell #{index} of {sinks} at void={void} must name the repeater standing on the shared prefix",
                 );
             }
@@ -1154,7 +1154,7 @@ mod tests {
                     net: NetRef::Input(0),
                 },
             ],
-            coord: CellCoord::new(16, 0, 1),
+            coord: CellCoord::new(16, 0, 0),
             phase: PlacementPhase::Unrouted,
             span: Span::default(),
         });
@@ -1170,7 +1170,7 @@ mod tests {
         );
 
         let cell = &legalized.scoped.scopes[0].ir.cells[0];
-        // The pad sits at (0,0,1) and the cell at (16,0,1): 16 blocks
+        // The pad sits at (0,0,0) and the cell at (16,0,0): 16 blocks
         // of dust, laid once.
         assert_eq!(
             cell.wire_length(),
@@ -1194,7 +1194,7 @@ mod tests {
         let distinct: HashSet<CellCoord> = buffers.iter().map(|b| b.coord).collect();
         assert_eq!(
             distinct,
-            [CellCoord::new(15, 0, 1)].into_iter().collect(),
+            [CellCoord::new(15, 0, 0)].into_iter().collect(),
             "both attributions name the one block: {buffers:?}",
         );
     }
@@ -1226,14 +1226,14 @@ mod tests {
                 port: PortName::A,
                 net: NetRef::Input(0),
             }],
-            coord: CellCoord::new(16, 0, 1),
+            coord: CellCoord::new(16, 0, 0),
             phase: PlacementPhase::Unrouted,
             span: Span::default(),
         });
         ir.outputs.push(PlacedOutputNode::new(
             cairn_lang_core::ast::DottedRef::new("sig".into(), vec!["a".into()]),
             NetRef::Input(0),
-            CellCoord::new(29, 0, 1),
+            CellCoord::new(29, 0, 0),
             Span::default(),
         ));
         let routed = compile_routing(&scoped(ScopeKind::Struct, "both", ir));
@@ -1248,7 +1248,7 @@ mod tests {
         );
 
         let ir = &legalized.scoped.scopes[0].ir;
-        let shared = CellCoord::new(15, 0, 1);
+        let shared = CellCoord::new(15, 0, 0);
         assert_eq!(
             ir.cells[0]
                 .buffer_coords()
@@ -1265,7 +1265,7 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec![
                 (BufferSegment::Out, shared),
-                (BufferSegment::Out, CellCoord::new(29, 0, 0)),
+                (BufferSegment::Out, CellCoord::new(29, 0, 1)),
             ],
             "the wire to the pad names the block the cell segment put there",
         );
@@ -1279,12 +1279,15 @@ mod tests {
     /// are three routes rather than one shared prefix, and each port
     /// has to carry its own coord out.
     ///
-    /// `sig.sel` and `sig.blocker` both want the row at `z=1` on their
-    /// way across; `sig.sel` is laid first — same fanout, lower
-    /// [`crate::routing_geometry::net_ref_key`] — and keeps it, and
-    /// `blocker` goes elsewhere. So `Sel`'s repeater stands on the row
-    /// and no port's repeater has to be anywhere but on its own
-    /// route.
+    /// The four nets contend for the rows across the region. `sig.sel`
+    /// is laid first — same fanout, lowest
+    /// [`crate::routing_geometry::net_ref_key`] — and takes the row at
+    /// `z=1`; each net after it is pushed a row further out, until
+    /// `sig.port_b` has no row left and climbs. Every repeater still
+    /// stands on its own port's route, and the one on
+    /// [`RouteLayer::Bridge`] is that rule holding through the escape —
+    /// `CellCoord::new` decides the layer from the height, so the
+    /// comparison below carries it.
     #[test]
     fn mux_ports_each_keep_the_coord_their_own_segment_reaches() {
         let mut ir = PlacementIr::new(Edition::Java);
@@ -1331,9 +1334,9 @@ mod tests {
         assert_eq!(
             bufs.iter().map(|b| (b.port, b.coord)).collect::<Vec<_>>(),
             vec![
-                (BufferSegment::Port(PortName::Sel), CellCoord::new(15, 0, 1),),
-                (BufferSegment::Port(PortName::A), CellCoord::new(15, 0, 3),),
-                (BufferSegment::Port(PortName::B), CellCoord::new(15, 0, 4),),
+                (BufferSegment::Port(PortName::Sel), CellCoord::new(14, 0, 1),),
+                (BufferSegment::Port(PortName::A), CellCoord::new(14, 0, 3),),
+                (BufferSegment::Port(PortName::B), CellCoord::new(14, 1, 3),),
             ],
             "each port keeps its own segment's coord across both push sites",
         );
@@ -1456,10 +1459,10 @@ mod tests {
         // `(segment - 1) / DUST_ATTENUATION_LIMIT` derivation trips a
         // dedicated row rather than the aggregate delay total.
         //
-        // The route `(0, 0, 1) → (45, 0, 0)` walks x++ 45 steps then
-        // z-- 1 step, so `path[k * 15]` is `(k * 15, 0, 1)` for
+        // The route `(0, 0, 0) → (45, 0, 1)` walks x++ 45 steps then
+        // z++ 1 step, so `path[k * 15]` is `(k * 15, 0, 0)` for
         // `k = 1, 2, 3` (path[45] is the last x-axis step before the
-        // final z-- to the sink). No collision → every buffer stays on
+        // final z++ to the sink). No collision → every buffer stays on
         // plane, which is the invariant the boundary formula depends
         // on: if a k-th buffer landed off-formula, the plane candidate
         // would drift too and the layer assertion would trip alongside
@@ -1472,7 +1475,7 @@ mod tests {
         });
         ir.cells.push(placed_cell(
             EditionCell::JavaRepeaterOr,
-            CellCoord::new(45, 0, 0),
+            CellCoord::new(45, 0, 1),
             vec![CellPortDriver {
                 port: PortName::A,
                 net: NetRef::Input(0),
@@ -1492,18 +1495,18 @@ mod tests {
         );
         assert_eq!(
             bufs[0].coord,
-            CellCoord::new(15, 0, 1),
+            CellCoord::new(15, 0, 0),
             "k=1 buffer sits at path[15]",
         );
         assert_eq!(
             bufs[1].coord,
-            CellCoord::new(30, 0, 1),
+            CellCoord::new(30, 0, 0),
             "k=2 buffer sits at path[30]",
         );
         assert_eq!(
             bufs[2].coord,
-            CellCoord::new(45, 0, 1),
-            "k=3 buffer sits at path[45] — the last x-axis step before the final z decrement",
+            CellCoord::new(45, 0, 0),
+            "k=3 buffer sits at path[45] — the last x-axis step before the final z increment",
         );
         for b in bufs {
             assert_eq!(
@@ -1531,7 +1534,7 @@ mod tests {
         });
         ir.cells.push(placed_cell(
             EditionCell::JavaRepeaterOr,
-            CellCoord::new(255, 0, 0),
+            CellCoord::new(255, 0, 1),
             vec![CellPortDriver {
                 port: PortName::A,
                 net: NetRef::Input(0),
@@ -1548,7 +1551,7 @@ mod tests {
         for k in 1..=17u32 {
             assert_eq!(
                 bufs[(k - 1) as usize].coord,
-                CellCoord::new(k * 15, 0, 1),
+                CellCoord::new(k * 15, 0, 0),
                 "k={k} buffer must sit at path[k * 15]",
             );
         }
