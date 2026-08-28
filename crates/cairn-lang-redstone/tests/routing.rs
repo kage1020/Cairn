@@ -129,6 +129,14 @@ fn redstone_door_bedrock_matches_java_wire_length() {
 /// placement lays cells at `x = 1 + 2i, y = 0, z = 0`, and input pads
 /// land at `(0, 0, 1+i)`.
 ///
+/// That it routes at all is the first thing this fixture pins. A cell
+/// body is a block, so a net reaches it through a free neighbouring
+/// coord, and cell[1] has three distinct nets touching it — two
+/// drivers and its own output. Packed at `x = i` it would have two
+/// free neighbours, its siblings holding the rest, and no region size
+/// would give the third back: this chain is unroutable at every width
+/// under that convention, and compiles at every width under this one.
+///
 /// Three of the four nets here have to go round one of the others,
 /// which is what the sums are worth reading for:
 ///
