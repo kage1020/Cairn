@@ -451,6 +451,14 @@ impl Router {
     /// closest says nothing — the closer pair might have a way round
     /// that is shorter still — so a blocked line hands the question on
     /// rather than looking for the next clear one.
+    ///
+    /// A target outside the reservation is not a pair at all. The
+    /// interior check below asks whether a coord is free and the far
+    /// end is exempt from it, so without this a sink the reservation
+    /// does not contain would be walked straight to — and answered as
+    /// wired. [`Self::search`] refuses it already, through
+    /// [`Self::step`]; this is the same answer from the tier that does
+    /// not search.
     fn straight_run(
         &self,
         seeds: &[CellCoord],
@@ -465,6 +473,7 @@ impl Router {
                     .enumerate()
                     .map(move |(index, target)| (index, *seed, *target))
             })
+            .filter(|(_, _, target)| self.inside(*target))
             .min_by_key(|(_, seed, target)| {
                 (
                     manhattan(*seed, *target),
@@ -1873,6 +1882,72 @@ mod tests {
             vec![NetRef::Input(0), NetRef::Cell(0)],
             "and one apiece, so the tie is broken by the key rather than by a \
              fanout one of them does not have",
+        );
+    }
+
+    /// A net is not reported as standing in its own way.
+    ///
+    /// For a sink inside the reservation the question cannot arise: a
+    /// coord of this net's dust one step from the sink is a coord the
+    /// router could have stepped off, so the sink would not be
+    /// stranded. What is left is a sink outside the reservation, which
+    /// a hand-built IR can carry and which `step` refuses to enter —
+    /// and there the net's own dust really can run beside it.
+    ///
+    /// `sig.b` here reaches its first sink along the row and strands on
+    /// a second one past the edge, with the coord it laid at `(3,0,0)`
+    /// next to it. Naming itself would answer "why can `sig.b` not get
+    /// there" with "`sig.b` is in the way".
+    #[test]
+    fn a_stranded_net_is_not_named_as_crowding_its_own_sink() {
+        let region = region(4, 3, 1);
+        let own_source = CellCoord::new(0, 0, 0);
+        let own_sink = CellCoord::new(3, 0, 1);
+        let past_the_edge = CellCoord::new(4, 0, 0);
+        let other_source = CellCoord::new(0, 0, 2);
+        let other_sink = CellCoord::new(2, 0, 2);
+        let router = router(
+            &region,
+            &[
+                own_source,
+                own_sink,
+                past_the_edge,
+                other_source,
+                other_sink,
+            ],
+        );
+
+        let mut nets: HashMap<NetRef, Vec<CellCoord>> = HashMap::new();
+        nets.insert(NetRef::Input(0), vec![other_sink]);
+        nets.insert(NetRef::Cell(0), vec![own_sink, past_the_edge]);
+        let source_of_net = |net: NetRef| match net {
+            NetRef::Input(_) => other_source,
+            NetRef::Cell(_) => own_source,
+        };
+        let trees = net_trees(&nets, &router, source_of_net);
+
+        assert_eq!(
+            trees[&NetRef::Cell(0)].unreachable(),
+            [past_the_edge],
+            "the fixture needs the sink past the edge stranded",
+        );
+        assert!(
+            router
+                .dust(&trees[&NetRef::Cell(0)])
+                .contains(&CellCoord::new(3, 0, 0)),
+            "and its own dust beside that sink",
+        );
+
+        assert_eq!(
+            crowding_nets(
+                &nets,
+                &trees,
+                &source_of_net,
+                NetRef::Cell(0),
+                past_the_edge,
+            ),
+            Vec::<NetRef>::new(),
+            "a net does not stand in its own way",
         );
     }
 
