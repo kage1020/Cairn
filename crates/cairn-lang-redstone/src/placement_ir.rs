@@ -56,15 +56,9 @@ use crate::netlist_ir::{CellPortDriver, NetRef, NetlistInput, PortName};
 /// Cell coords are `Plane` by construction — the placement pass never
 /// stamps `Bridge` / `Via` on a cell body. Everything else the
 /// pipeline puts inside the reservation takes its layer from its
-/// height through [`CellCoord::new`]: routed wire that climbs to
-/// get past a block, and a buffer repeater the
-/// crossing-legalization pass lifts off a coord it cannot have. One
-/// rule for both, so a repeater and a wire at one voxel are one map
-/// key rather than two. A crossing between two nets is still not
-/// absorbed by lifting either of them: it is reported at `void >= 2`
-/// via [`crate::DiagnosticCode::WireCrossing`] and refused below that
-/// via [`crate::DiagnosticCode::CrossingCongestion`], and no wire
-/// coord moves in either case.
+/// height through [`CellCoord::new`]: routed wire that climbs to get
+/// past a block, or past another net's dust. One rule, so two things
+/// at one voxel are one map key rather than two.
 /// Serialising as the enum's stable lowercase string (`plane` /
 /// `bridge` / `via`) keeps the JSON wire form small and matches the
 /// vocabulary spec §14.5 uses.

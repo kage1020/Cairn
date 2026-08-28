@@ -1072,10 +1072,8 @@ mod tests {
     /// A candidate sits strictly between the ends of a route, and the
     /// router keeps every coord strictly between them off the blocks —
     /// so the coord a repeater lands on is wire, never a cell body or a
-    /// pad. [`PlaneOccupant::Component`] is unreachable through this
-    /// pass for that reason. What still refuses is a candidate on
-    /// another net's dust with every bridge layer above it taken, which
-    /// `buffer_collision_names_the_net_holding_the_coord` covers.
+    /// pad. That, together with each net owning its dust alone, is why
+    /// this pass has no coord to contest and no escape to make.
     ///
     /// The layout below is the one that used to refuse: `sig.a`'s route
     /// ran straight down the row and its 15-step point landed inside
