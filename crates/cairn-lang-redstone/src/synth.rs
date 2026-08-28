@@ -93,7 +93,9 @@ use cairn_lang_core::suggest::nearest_match;
 /// other three keys have no legal host yet and are refused wherever they
 /// are written. The table is what changes when those keywords land; the
 /// check does not.
-const ACTUATOR_BINDINGS: &[(&str, &str)] = &[
+/// Public so `tests/actuator_schema.rs` can compare this array against
+/// `MemberRole::arguments` outright rather than against a copy of it.
+pub const ACTUATOR_BINDINGS: &[(&str, &str)] = &[
     ("opened_by", "door"),
     ("powered_by", "piston"),
     ("lit_by", "lamp"),
@@ -107,7 +109,8 @@ const ACTUATOR_BINDINGS: &[(&str, &str)] = &[
 /// role table knows, and it is the only member a tail may sit on. Without
 /// the check a `walls ... -> sig.w` registered an input port and reached
 /// placement as a pad for a signal no component emits.
-const SENSOR_HOSTS: &[&str] = &["pressure_plate"];
+/// Public for the same reason as [`ACTUATOR_BINDINGS`].
+pub const SENSOR_HOSTS: &[&str] = &["pressure_plate"];
 
 /// Successful synth output: the per-scope Logic IR plus every diagnostic
 /// collected across the module. Errors abort the containing scope's IR

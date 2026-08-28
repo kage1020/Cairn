@@ -30,8 +30,9 @@
   `spec/components-editing-sites` §9.2 にあり、どのパスも読まず、それを使う唯一の例はそれ無しで
   建っていました。これは拒否ではなく `W_IGNORED_ARGUMENT` です (コードの意味がすでに「メンバは
   ビルドに入っており、その引数の 1 つは入っていない」)。キーは作者が書いてよいもので、欠けている
-  のは実装の側だからです。**破壊的**: 綴り間違いや未対応の引数キーを持つソースは現在すべて
-  ビルドでき、これからは拒否されます。`MemberRole` は `arguments` / `unread_arguments` /
+  のは実装の側だからです。**破壊的**: 綴り間違いやその他認識されない引数キーを持つソースは
+  現在すべてビルドでき、これからは拒否されます。仕様が定義していてどのパスも読まないキーは
+  ここに含まれず、警告のままです。`MemberRole` は `arguments` / `unread_arguments` /
   `accepted_arguments` を得ます。`examples/themed-tower.crn` は、その arrow-slit window が一度も
   使われないまま持っていた `shape=slit` を落とします。
 

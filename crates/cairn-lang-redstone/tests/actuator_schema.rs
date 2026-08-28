@@ -1,31 +1,18 @@
-//! The one actuator key whose host is a keyword the surface accepts must be
-//! in that keyword's argument vocabulary.
+//! The actuator and sensor tables in `synth`, held against `core`'s
+//! per-role argument vocabularies.
 //!
-//! `ACTUATOR_BINDINGS` in `synth` pairs each `spec/redstone` §14.2 argument
-//! key with the component that carries it, and `MemberRole::arguments` in
-//! `core` is the vocabulary `check` refuses against. Three of the four
-//! hosts — `lamp`, `piston`, `dispenser` — are not keywords yet and so have
-//! no role to be listed on; `door` is, and `opened_by=` has to be writable
-//! on it or `check` refuses a source the redstone front end is built to
-//! read.
+//! `ACTUATOR_BINDINGS` pairs each `spec/redstone` §14.2 argument key with the
+//! component that carries it, and `MemberRole::arguments` is the vocabulary
+//! `check` refuses against. Where both know the keyword they have to agree,
+//! or `check` refuses a source the redstone front end is built to read.
 //!
-//! Asked from this crate because this is where the pairing lives. Merging
-//! the two tables is what this replaces: they answer different questions
-//! (which component carries a key, versus which keys a role reads) and only
-//! overlap where both know the keyword.
+//! Asked from this crate because this is where the pairing lives, and asked
+//! against the constants themselves rather than a copy of them — a local
+//! restatement would go stale on a change to `synth.rs` without failing
+//! here, which is the failure this exists to catch.
 
 use cairn_lang_core::intent::{MemberRole, role_of};
-
-/// `spec/redstone` §14.2's actuator keys and their hosts, as `synth`'s
-/// `ACTUATOR_BINDINGS` spells them. Restated rather than imported because
-/// the constant is private, which is also what makes this test worth
-/// having: the two copies disagreeing is the failure it catches.
-const ACTUATOR_BINDINGS: &[(&str, &str)] = &[
-    ("opened_by", "door"),
-    ("powered_by", "piston"),
-    ("lit_by", "lamp"),
-    ("fired_by", "dispenser"),
-];
+use cairn_lang_redstone::synth::{ACTUATOR_BINDINGS, SENSOR_HOSTS};
 
 #[test]
 fn every_actuator_key_with_a_real_host_is_in_that_host_vocabulary() {
@@ -49,7 +36,24 @@ fn every_actuator_key_with_a_real_host_is_in_that_host_vocabulary() {
     }
     assert_eq!(
         checked, 1,
-        "exactly one actuator host is a keyword today; a second one landing should be \
-         noticed here rather than silently widening what this test covers",
+        "exactly one actuator host is a keyword today; a second one landing should be          noticed here rather than silently widening what this test covers",
     );
+}
+
+#[test]
+fn every_sensor_host_is_a_keyword_the_role_table_knows() {
+    // A tail sits on the member, not on an argument, so there is no
+    // vocabulary entry to check. What must hold is that the host is a real
+    // keyword: `synth` refuses a `->` on anything else, and a host the role
+    // table has never heard of would refuse every source that uses it.
+    assert!(
+        !SENSOR_HOSTS.is_empty(),
+        "an empty host list refuses every tail"
+    );
+    for host in SENSOR_HOSTS {
+        assert!(
+            role_of(host).arguments().is_some(),
+            "`{host}` carries a `->` tail per spec/redstone §14.2 and is not a known keyword",
+        );
+    }
 }

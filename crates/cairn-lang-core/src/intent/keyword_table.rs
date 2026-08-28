@@ -40,12 +40,19 @@ pub const KNOWN_KEYWORDS: &[&str] = &[
 
 /// Argument keys every member accepts, whatever its role.
 ///
-/// `id` / `class` / `mat_slot` are hoisted into dedicated [`Member`] fields
-/// by `intent::lower` — but only when the value is a plain label. A second
-/// occurrence of the key, or a value of any other shape, stays in
-/// `intent_state`, where an argument check would otherwise read it as a
-/// word nobody knows. `check::type_mismatch` already reports the value; the
-/// key is not the mistake.
+/// Two reasons, and they answer different questions.
+///
+/// They are in the **candidate** set because `intent::lower` dispatches on
+/// the key — `match arg.key { "id" | "class" | "mat_slot" => ... }` — so a
+/// misspelled `clas=` is not that key at all and never reaches the
+/// dedicated field. The repair is a word the role's own arguments do not
+/// contain, and a suggestion drawn from them alone could not offer it.
+///
+/// They are in the **accepted** set because the hoist also requires the
+/// value to be a plain label. A second occurrence of the key, or a value of
+/// any other shape, stays in `intent_state`, where an argument check would
+/// otherwise read it as a word nobody knows. `check::type_mismatch` already
+/// reports the value; the key is not the mistake.
 ///
 /// [`Member`]: super::Member
 pub const UNIVERSAL_ARGUMENTS: &[&str] = &["id", "class", "mat_slot"];
@@ -60,15 +67,17 @@ impl MemberRole {
     /// word that will be read by nothing however the passes grow, which is
     /// what makes `E_UNKNOWN_ARGUMENT` an error rather than a note.
     ///
-    /// Two directions can go wrong, and only one of them is quiet. A key a
-    /// reader reads and this table omits is caught the moment any source
-    /// uses it — the shipped corpus is held to `cairn check` cleanliness,
-    /// and `every_argument_a_pass_reads_is_in_its_role_vocabulary` asks the
-    /// question directly. A key listed here that nothing reads is the
-    /// silent direction, and it is deliberate: `window shape=` is in
-    /// `spec/components-editing-sites` §9.2 and no pass reads it yet, so it
-    /// is accepted and reported as ignored rather than refused. The set
-    /// that is listed-but-unread is [`Self::unread_arguments`].
+    /// Two directions can go wrong. A key a reader reads and this table
+    /// omits refuses a source the compiler is built to accept, which is
+    /// what `stair y=` did between two commits of the branch that added
+    /// this table; `the_table_and_the_sweep_agree_key_for_key` in
+    /// `tests/check_arguments.rs` walks every keyword and compares this
+    /// list against a line that writes it, in both directions. A key
+    /// listed here that nothing reads is the other direction, and it is
+    /// deliberate: the specification defines arguments the implementation
+    /// has not reached, and refusing them would make a future lowering
+    /// rule a change from error to legal. They are accepted and reported
+    /// as ignored — see [`Self::unread_arguments`].
     ///
     /// `None` for a keyword the role table does not know — not an empty
     /// vocabulary but the absence of one, which is a different answer and
@@ -89,10 +98,10 @@ impl MemberRole {
             Self::Walls => &["height"],
             Self::Door => &["side", "at", "opened_by"],
             Self::Window => &[
-                "side", "y", "offset", "size", "sym", "repeat", "step", "shape",
+                "side", "y", "offset", "size", "sym", "repeat", "step", "shape", "anchor",
             ],
-            Self::Roof => &["kind", "overhang", "slope_to"],
-            Self::Stair => &["kind", "side", "half", "facing", "shape"],
+            Self::Roof => &["kind", "overhang", "slope_to", "footprint", "bounds"],
+            Self::Stair => &["kind", "side", "half", "facing", "shape", "y"],
             Self::Level => &["y"],
             Self::PressurePlate => &["at", "offset", "y"],
             Self::Circuit => &["region", "void"],
@@ -111,20 +120,29 @@ impl MemberRole {
     ///
     /// Spelled out rather than derived, because "nothing reads it" is not a
     /// fact any table can compute about itself. Each of these is a key the
-    /// spec defines and the implementation has not reached: the value is
-    /// carried into the IR and dropped, so the member builds without it and
-    /// the author is told so rather than left to notice.
+    /// specification defines and the implementation has not reached: the
+    /// value is carried into the IR and dropped, so the member builds
+    /// without it and the author is told so rather than left to notice.
+    ///
+    /// Where the boundary runs: a spec'd key on a keyword the role table
+    /// knows belongs here. A spec'd keyword the table does *not* know —
+    /// `painting`, in the same worked example the three below come from —
+    /// has no row for its arguments to sit in, and `E_UNKNOWN_KEYWORD`
+    /// owns the whole line, the way it does for any other unknown word.
     #[must_use]
     pub fn unread_arguments(&self) -> &'static [&'static str] {
         match self {
-            // `spec/components-editing-sites` §9.2 edits a window's
-            // `shape=`; `fill_window` reads size, offset, repeat, step and
-            // sym, and nothing consults the shape.
-            Self::Window => &["shape"],
+            // `spec/entities` §8.2 writes both on a `window` member line;
+            // `spec/components-editing-sites` §9.2 also sets `shape=`
+            // through the edit DSL. `fill_window` reads side, y, offset,
+            // size, sym, repeat and step, and consults neither of these.
+            Self::Window => &["shape", "anchor"],
+            // `spec/entities` §8.2, on the same `roof` line. `fill_roof`
+            // reads kind, overhang and slope_to.
+            Self::Roof => &["footprint", "bounds"],
             Self::Floor
             | Self::Walls
             | Self::Door
-            | Self::Roof
             | Self::Stair
             | Self::Level
             | Self::PressurePlate

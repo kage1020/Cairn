@@ -30,8 +30,9 @@ and is a separate axis from the Minecraft target version.
   §9.2, no pass reads it, and the one example using it had been building without it. That is
   `W_IGNORED_ARGUMENT`, whose code already means "the member is in the build; one of its arguments
   is not", rather than a refusal: the key is the author's to write and the gap is the
-  implementation's. **Breaking**: every source carrying a misspelled or unsupported argument
-  key compiles today and is refused now; `MemberRole` gains `arguments`, `unread_arguments` and
+  implementation's. **Breaking**: every source carrying a misspelled or otherwise
+  unrecognised argument key compiles today and is refused now — a key the specification
+  defines and no pass reads is *not* among them, and stays a warning; `MemberRole` gains `arguments`, `unread_arguments` and
   `accepted_arguments`; `examples/themed-tower.crn` drops the `shape=slit` its arrow-slit window
   was never built with.
 

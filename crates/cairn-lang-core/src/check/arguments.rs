@@ -8,10 +8,13 @@
 //! arguments against, so this pass leaves it alone and the keyword's own
 //! finding carries the repair.
 //!
-//! Only `intent_state` is in scope. A member's own selector
-//! (`door[id=front]`), its `-> value` tail and its positionals are separate
-//! fields with checks of their own, and each answers to a different
-//! vocabulary.
+//! Only `intent_state` is in scope, and the other three fields are covered
+//! unevenly rather than fully. `check::positional` reads positionals at
+//! every role and depth. A member's own selector (`door[id=front]`) has its
+//! keys read in two narrow places — the `door` actuator-patch recogniser in
+//! `block_array::lower` and redstone's binding-key walk — and nowhere else,
+//! so `window[clas=outer]` is silent. The `-> value` tail is refused by
+//! `synth`'s `diag_misplaced_sensor`, which only `cairn synth` reaches.
 //!
 //! A theme selector widens the vocabulary of the keyword it names. `theme t:
 //! window[tags=[a,b]] -> frame=@spruce_wood` makes `tags=` a key something
@@ -22,6 +25,16 @@
 //! direction is already covered: a selector matching no member is
 //! `E_THEME_SELECTOR_UNMATCHED`.
 //!
+//! The widening admits words the module *coins*, and one edit from an
+//! existing key is not a coinage. `walls[hieght=3]` beside `walls hieght=3`
+//! would otherwise forgive the typo completely — the selector matches, so
+//! nothing anywhere says a word — and that is byte for byte the failure
+//! this pass exists to end. A widened key near-missing the role's own
+//! vocabulary is refused with the suggestion, as though it had never been
+//! widened. The cost is that a deliberate tag one edit from a real key is
+//! refused too; the tie-break favours catching the typo, and renaming the
+//! tag is the escape.
+//!
 //! The candidate set is the role's, plus the universal keys. `clas=outer`
 //! is the case that needs the second half: `class` is hoisted into a
 //! dedicated field only when the value is label-shaped, so the typo never
@@ -30,7 +43,7 @@
 
 use std::collections::{BTreeSet, HashMap};
 
-use crate::intent::{IntentModule, Member, MemberRole};
+use crate::intent::{IntentModule, Member};
 use crate::suggest::nearest_match;
 
 use super::{Diagnostic, DiagnosticCode, DiagnosticNote, DiagnosticSink};
@@ -82,18 +95,39 @@ fn walk(members: &[Member], selected: &SelectorKeys<'_>, sink: &mut DiagnosticSi
 fn check_member(member: &Member, selected: &SelectorKeys<'_>, sink: &mut DiagnosticSink) {
     // The keyword is the repair; its arguments answer to a vocabulary that
     // does not exist.
-    let Some(mut accepted) = member.role.accepted_arguments() else {
+    let Some(own) = member.role.accepted_arguments() else {
         return;
     };
-    let keyword = role_keyword(&member.role);
-    if let Some(extra) = selected.get(keyword) {
-        accepted.extend(extra.iter().copied());
+    let keyword = member.role.keyword();
+    let widened = selected.get(keyword);
+    // Deduplicated, because a key can be both in the role's vocabulary and
+    // selected on, and a closed set naming one word twice reads as two
+    // different things.
+    let mut accepted = own.clone();
+    if let Some(extra) = widened {
+        accepted.extend(extra.iter().copied().filter(|k| !own.contains(k)));
     }
     for (key, value) in &member.intent_state.fields {
+        let coined = widened.is_some_and(|extra| extra.contains(key.as_str()));
         if !accepted.contains(&key.as_str()) {
             sink.push(unknown_argument(keyword, key, &value.span, &accepted));
+        } else if coined && !own.contains(&key.as_str()) {
+            // Widened by a selector. Legal unless it is a near-miss of a
+            // word the role already has, which is a typo written twice
+            // rather than a word the module coined. Candidates are the
+            // role's own vocabulary — feeding the widened set in would let
+            // the key suggest itself.
+            if let Some(suggested) = nearest_match(key, own.iter().copied()) {
+                sink.push(coined_near_miss(keyword, key, &value.span, suggested, &own));
+            }
         } else if member.role.unread_arguments().contains(&key.as_str()) {
-            sink.push(unread_argument(keyword, key, &value.span));
+            // A key the specification defines and nothing reads — unless
+            // the module selects on it, in which case something does, and
+            // "the value was ignored" would be false advice that breaks a
+            // working theme.
+            if !coined {
+                sink.push(unread_argument(keyword, key, &value.span));
+            }
         }
     }
 }
@@ -127,6 +161,42 @@ fn unknown_argument(
     }
 }
 
+/// A selector-widened key that is one edit from the role's own vocabulary.
+///
+/// Reported exactly as if the selector were not there, because a word a
+/// module coins is a word it chose, and this one is a word it nearly typed.
+fn coined_near_miss(
+    keyword: &str,
+    key: &str,
+    span: &crate::error::Span,
+    suggested: &str,
+    own: &[&str],
+) -> Diagnostic {
+    Diagnostic {
+        code: DiagnosticCode::UnknownArgument,
+        span: span.clone(),
+        primary: format!("`{key}=` is not an argument `{keyword}` reads"),
+        notes: vec![
+            DiagnosticNote {
+                span: None,
+                message: format!("did you mean `{suggested}`?"),
+            },
+            DiagnosticNote {
+                span: None,
+                message: format!(
+                    "a `{keyword}[{key}=...]` selector would make this a key of its own, but \
+                     one edit from `{suggested}` reads as a typo written twice",
+                ),
+            },
+            DiagnosticNote {
+                span: None,
+                message: format!("expected one of: {}", own.join(", ")),
+            },
+        ],
+        data: None,
+    }
+}
+
 fn unread_argument(keyword: &str, key: &str, span: &crate::error::Span) -> Diagnostic {
     Diagnostic {
         code: DiagnosticCode::IgnoredArgument,
@@ -141,24 +211,5 @@ fn unread_argument(keyword: &str, key: &str, span: &crate::error::Span) -> Diagn
                 .to_owned(),
         }],
         data: None,
-    }
-}
-
-/// The surface keyword a role is written as, for a message that has to name
-/// it back to the author.
-fn role_keyword(role: &MemberRole) -> &str {
-    match role {
-        MemberRole::Floor => "floor",
-        MemberRole::Walls => "walls",
-        MemberRole::Door => "door",
-        MemberRole::Window => "window",
-        MemberRole::Roof => "roof",
-        MemberRole::Stair => "stair",
-        MemberRole::Level => "level",
-        MemberRole::PressurePlate => "pressure_plate",
-        MemberRole::Circuit => "circuit",
-        MemberRole::Place => "place",
-        MemberRole::Connect => "connect",
-        MemberRole::Other(kw) => kw,
     }
 }
