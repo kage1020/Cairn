@@ -120,13 +120,17 @@ circuit region=basement void=3       # reserve a 3-high service layer; route the
 
 The internal algorithm runs five stages:
 
-1. **Placement.** Topological order, left to right, one clear column between each pair of cells and
-   one between the row and the input pads. A cell body is a block, so a net reaches it through a
-   neighbouring coordinate; a two-input gate has three distinct nets touching it — its two drivers
-   and its own output — and therefore needs three free neighbours. Packed against each other the
-   cells in the middle of a row have two, at any region size, so a row spaced like this is what
-   makes a crossing-free wiring possible at all. It is not a guarantee of one: a net passing
-   through can still take the last free face, and that scope is refused rather than shorted.
+1. **Placement.** Topological order, left to right, one clear column between each pair of cells,
+   one between the row and the input pads, and one past the last cell so the end of the row is
+   not squeezed between the actuator-pad column and the edge of the region. A cell body is a
+   block, so a net reaches it through a neighbouring coordinate; a two-input gate has three
+   distinct nets touching it — its two drivers and its own output — and therefore needs three
+   free neighbours. Packed against each other the cells in the middle of a row have two, at any
+   region size, so a row spaced like this is what makes a crossing-free wiring possible at all.
+   It is not a guarantee of one: a net passing through can still take the last free face, and
+   that scope is refused rather than shorted. A region that cannot hold the row — `2n + 1`
+   columns for `n` cells — is refused here rather than left to fail as an unreachable sink two
+   stages later.
 2. **Steiner routing.** Manhattan, around what is already standing — and around the dust of the
    nets already laid. Cell bodies and I/O pads are reserved: dust cannot be drawn on one, and a
    signal cannot pass *through* one, since a component either emits or consumes. Every sink is

@@ -24,16 +24,18 @@ and is a separate axis from the Minecraft target version.
   crossing from the corpus and doubled `crossbar.crn`'s. And the reason is arithmetic rather than
   routing: a cell body is a block, so a net reaches it through a free neighbouring coordinate; a
   two-input gate has three distinct nets touching it and therefore needs three; and packed at
-  `x = i` against the pad column, an interior cell of a chain has two — at every region size.
-  Lifting the wire onto a bridge layer does not help, because a lifted wire still has to arrive
-  through a face. So the placement pass now lays the row at `x = 1 + 2i`, and the router routes
+  `x = i` against the pad column, an interior cell of a chain has two — at every region size,
+  and the cell at the end of the row has one. Lifting the wire onto a bridge layer does not
+  help, because a lifted wire still has to arrive through a face. So the placement pass now
+  lays the row at `x = 1 + 2i`, keeping a clear column past the last cell as well, and the router routes
   each net around the dust of the nets before it, climbing to a `bridge` layer where there is no
   way round and refusing the scope where there is no way at all. The escape happens at stage 2,
   which is what gets it measured: `wire_length` and `delay_ticks` are read off the routed tree.
 
   **Breaking**: cell coordinates move, so every `wire_length`, `delay_ticks` and `buffer_coords`
-  in a `cairn synth` dump changes; a `circuit` region narrower than twice its cell count is
-  refused by the placement pass, with a message naming the columns the row wants;
+  in a `cairn synth` dump changes; a `circuit` region that cannot hold `2n + 1` columns for
+  its `n` cells — one each, one beside each, and one past the end of the row — is refused by
+  the placement pass, with a message naming the columns the row wants;
   `W_WIRE_CROSSING`, `E_CROSSING_CONGESTION` and `E_BUFFER_COORD_COLLISION` are removed — the
   first two because the compiler no longer makes the defect they reported, the third because a
   repeater now stands on its own net's path and has nothing to contest it for;
