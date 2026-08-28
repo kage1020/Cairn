@@ -157,6 +157,12 @@ const SYNTACTIC_FIXTURES: &[(&str, Source)] = &[
         Source::WithPrologue("struct s size=5x5\n  torch mat_slot=wall\n"),
     ),
     (
+        // The issue's own repro: one letter, and the wall is built
+        // without the height it asked for.
+        "E_UNKNOWN_ARGUMENT",
+        Source::WithPrologue("struct s size=5x5\n  walls class=outer mat_slot=wall hieght=3\n"),
+    ),
+    (
         // `spec/syntax.md` §5.1's own forbidden example.
         "E_UNEXPECTED_POSITIONAL",
         Source::WithPrologue("struct s size=5x5\n  window front G 2 2 2x2 mat_slot=wall\n"),

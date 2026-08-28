@@ -62,7 +62,10 @@ fn tm_4_struct_size_set_to_integer_is_flagged() {
 
 #[test]
 fn tm_5_window_size_with_proper_literal_passes() {
-    let src = "struct s size=4x4\n  window size=2x2 at=center\n";
+    // `at=` is a door anchor (spec syntax §5.4) and a window does not read
+    // it; the second argument is here only so the line under test carries
+    // more than the one key it is about.
+    let src = "struct s size=4x4\n  window size=2x2 side=front\n";
     let diags = diagnose(src);
     assert!(
         diags.is_empty(),

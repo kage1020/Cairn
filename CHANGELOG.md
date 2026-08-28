@@ -12,6 +12,30 @@ and is a separate axis from the Minecraft target version.
 
 ### Breaking changes
 
+- *(core)* A `key=` no member of that role reads is refused. A member's arguments were validated
+  nowhere: `check` had an allowlist for the statement keyword and nothing for the keys under it,
+  so `walls ... hieght=3` exited 0 in silence, and the only thing the author eventually saw was a
+  `W_DEFERRED_MEMBER` naming the argument that is now *absent* rather than the one that is
+  misspelled. `MemberRole::arguments` is the vocabulary, matched with no wildcard so a new role
+  has to be answered rather than inheriting an empty set, and it answers `Option` — an unknown
+  keyword has no vocabulary, which is a different thing from an empty one and the reason
+  `E_UNKNOWN_KEYWORD` keeps the whole line. `E_UNKNOWN_ARGUMENT` is an error for the same reason
+  the keyword code is, one level down: the key names nothing, so no pass will read the value
+  however the compiler grows. `compile` now prints the misspelling and then the deferral it
+  causes, in that order — the repair before its consequence, where before there was only the
+  consequence. A `theme` selector widens the vocabulary of the keyword it names, and of no other:
+  `window[tags=...]` makes `tags=` a key the resolver's selector matcher reads on a window, so a
+  module that selects on a key is a module where writing it is not a mistake. Writing the table
+  down turned up a second, quieter hole — `window shape=` is in `spec/components-editing-sites`
+  §9.2, no pass reads it, and the one example using it had been building without it. That is
+  `W_IGNORED_ARGUMENT`, whose code already means "the member is in the build; one of its arguments
+  is not", rather than a refusal: the key is the author's to write and the gap is the
+  implementation's. **Breaking**: every source carrying a misspelled or otherwise
+  unrecognised argument key compiles today and is refused now — a key the specification
+  defines and no pass reads is *not* among them, and stays a warning; `MemberRole` gains `arguments`, `unread_arguments` and
+  `accepted_arguments`; `examples/themed-tower.crn` drops the `shape=slit` its arrow-slit window
+  was never built with.
+
 - *(formats,core,cli)* `cairn info` names the palette entries its `unsupported` figure counts.
   The figure was one integer over four failures with four different repairs: the edition has no
   such block at all; it has the block and this compiler maps no states for it yet; a state value
