@@ -167,19 +167,11 @@ enum Command {
     /// repeater's `BUFFER_REPEATER_TICKS` contribution over every
     /// driving net's segment beyond the `DUST_ATTENUATION_LIMIT`;
     /// `--stage crossing` runs crossing legalization over the delayed
-    /// IR, reports every pair of nets sharing a wire coord — with
-    /// `W_WIRE_CROSSING`, or with `E_CROSSING_CONGESTION` when
-    /// `void=<N>` is under 2 and the reservation has no y-layer above
-    /// the plane a lift could ever go on (v1 lifts no wire either
-    /// way; the height decides whether raising `void=` could change
-    /// that, not whether the two signals merge), and fills every
-    /// cell's `buffer_coords` with the coord of the buffer repeater
-    /// each driver segment passes through (escaping to a
-    /// `RouteLayer::Bridge` y-layer whenever the plane candidate
-    /// collides with a cell / pad / another net's wire; a repeater
-    /// this net already placed is recorded rather than escaped
-    /// around, so one block can be named by several segments). Every cell of the four
-    /// Placement IR stages carries a
+    /// IR and fills every cell's `buffer_coords` with the coord of the
+    /// buffer repeater each driver segment passes through (a repeater
+    /// this net already placed is recorded rather than duplicated, so
+    /// one block can be named by several segments). Every cell of the
+    /// four Placement IR stages carries a
     /// `"stage"` key echoing the flag value that produced the dump
     /// (`placement` / `route` / `delay` / `crossing`), so a consumer
     /// reads the stage off the output instead of inferring it from
@@ -260,38 +252,28 @@ enum SynthStage {
     /// implied by each driving net's segment beyond
     /// [`cairn_lang_redstone::DUST_ATTENUATION_LIMIT`]; refuses with
     /// `E_ATTENUATION_LIMIT` when a segment exceeds the v1 sanity cap
-    /// [`cairn_lang_redstone::MAX_ATTENUATION_SEGMENT`], the threshold
-    /// past which a stage-4 crossing-legalization escape becomes
-    /// unavoidable.
+    /// [`cairn_lang_redstone::MAX_ATTENUATION_SEGMENT`], past which the
+    /// buffer chain a segment needs is longer than v1 will build.
     Delay,
     /// Legalized Placement IR: crossing legalization over the delayed
     /// Placement IR against `--edition`. Stage 4 of `spec/redstone`
-    /// §14.5's place-and-route pipeline. Detects wire coords two
-    /// distinct nets share — on the ground plane or on a bridge layer
-    /// they both climbed to — and reports one finding per pair, as
-    /// `W_WIRE_CROSSING` or, when `void=<N>` is under 2 and the
-    /// `circuit region=<label> void=<N>` reservation has no y-layer
-    /// above the plane at all, as `E_CROSSING_CONGESTION`. The test is
-    /// whether such a layer exists, not how many crossings would share
-    /// it. It also materialises the coord of every implicit buffer
-    /// repeater
-    /// the delay pass counted into every cell's `buffer_coords`, one
-    /// entry per driver segment that passes through it — so a block
-    /// serving several segments is named once per segment and a
-    /// consumer counting blocks deduplicates by coord. A buffer whose
-    /// plane candidate collides with a cell / pad / another net's wire
-    /// escapes to the first free `RouteLayer::Bridge` y-layer inside
-    /// the `void=<N>` budget; a repeater this net has already placed
-    /// on the candidate, or lifted off it, is recorded instead. If
-    /// every bridge y-layer at that `(x, z)` is taken, refuses with
-    /// `E_BUFFER_COORD_COLLISION`. v1 does not lift the wire
-    /// crossing itself onto `Bridge` — the routed wire path is not
-    /// carried on the IR, so an escape record would have nowhere to
-    /// attach, and nothing downstream reads the crossing set. A scope
-    /// with nothing to legalize emits no `buffer_coords` at all
-    /// (the empty vector serde-skips); the `"stage": "crossing"` tag
-    /// on every cell, not the presence of that key, is what marks the
-    /// dump as having been through this pass.
+    /// §14.5's place-and-route pipeline. Materialises the coord of
+    /// every implicit buffer repeater the delay pass counted into
+    /// every cell's `buffer_coords`, one entry per driver segment that
+    /// passes through it — so a block serving several segments is
+    /// named once per segment and a consumer counting blocks
+    /// deduplicates by coord.
+    ///
+    /// The wire needs no legalizing here. Two nets sharing a wire
+    /// coord would be one strand of dust carrying two signals, and
+    /// stage 2 is where that is prevented: each net is routed around
+    /// the dust of the nets before it, so a scope that reaches this
+    /// stage has no crossing to find and no coord for a repeater to
+    /// contest. A scope with nothing to legalize emits no
+    /// `buffer_coords` at all (the empty vector serde-skips); the
+    /// `"stage": "crossing"` tag on every cell, not the presence of
+    /// that key, is what marks the dump as having been through this
+    /// pass.
     Crossing,
 }
 

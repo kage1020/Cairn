@@ -53,21 +53,21 @@
 //!
 //! Buffer repeaters are **counted, not materialised** here. The
 //! routing pass discarded its per-scope occupancy set before yielding
-//! the routed IR, and stage 4 (crossing legalization) is the natural
-//! owner of buffer coord assignment — it already needs to escape
-//! cross-net overlaps into a `RouteLayer::Bridge` / `Via` layer, so
-//! deferring buffer materialisation to it avoids two passes fighting
-//! over the same free-block set. `delay_ticks` therefore captures the
-//! tick contribution of the buffers this stage decided are needed;
-//! stage 4 will place them without changing the tick count.
+//! the routed IR, and the count is what `delay_ticks` needs — a
+//! repeater contributes its ticks wherever it stands. Stage 4
+//! (crossing legalization) puts them on coords, walking the same
+//! routed paths this pass measured, and changes no tick count doing
+//! it. Two stages rather than one because the tick sum is what
+//! `assert latency(...)` is checked against, and it should not wait on
+//! a coord assignment to be readable.
 //!
 //! `E_ATTENUATION_LIMIT` fires only when a driver segment exceeds the
 //! v1 sanity cap [`MAX_ATTENUATION_SEGMENT`]. Segments in the
 //! `(DUST_ATTENUATION_LIMIT, MAX_ATTENUATION_SEGMENT]` band are normal
-//! and absorbed by implicit buffers; segments beyond the cap need a
-//! stage-4 bridge/via escape that v1 does not implement, so this pass
-//! refuses instead of silently ascribing a delay against an
-//! unrealisable buffer chain. Failed scopes are elided from the
+//! and absorbed by implicit buffers; a segment beyond the cap asks for
+//! a buffer chain longer than v1 will build, so this pass refuses
+//! instead of silently ascribing a delay against a chain nothing
+//! materialises. Failed scopes are elided from the
 //! output for the same reason the routing pass elides congestion
 //! failures — a partial `delay_ticks` set would let the future tick
 //! simulator report a `latency` figure computed against a layout no
@@ -133,10 +133,9 @@ const _: () = assert!(
 
 /// v1 sanity cap on a single driver segment's *routed* length — the
 /// dust the signal travels, not the straight line between its ends. A
-/// segment longer than this needs stage-4 crossing legalization to
-/// escape into a `RouteLayer::Bridge` / `Via` layer — v1 has no such
-/// escape, so the delay pass refuses with `E_ATTENUATION_LIMIT` rather
-/// than count an unrealisable buffer chain into `delay_ticks`.
+/// segment longer than this asks for a buffer chain longer than v1
+/// will build, so the delay pass refuses with `E_ATTENUATION_LIMIT`
+/// rather than count a chain nothing materialises into `delay_ticks`.
 ///
 /// 256 blocks is 17 buffer repeaters (`(256 - 1) / 15`); anything past
 /// that in a single flat segment reads as a placement mistake rather
@@ -433,7 +432,7 @@ fn attenuation_diagnostic(
     segment: u32,
 ) -> Diagnostic {
     let primary = format!(
-        "routed netlist for {kind} `{name}` has a driver segment of {segment} blocks into cell #{cell_index} port #{driver_index} — exceeds the v1 attenuation limit of {cap} blocks (dust decays 1/block, so this segment would need {buffers} buffer repeaters and a stage-4 crossing-legalization escape to materialize)",
+        "routed netlist for {kind} `{name}` has a driver segment of {segment} blocks into cell #{cell_index} port #{driver_index} — exceeds the v1 attenuation limit of {cap} blocks (dust decays 1/block, so this segment would need {buffers} buffer repeaters to materialize)",
         kind = entry.kind.label(),
         name = entry.name,
         cap = MAX_ATTENUATION_SEGMENT,
@@ -458,7 +457,7 @@ fn attenuation_output_diagnostic(
     segment: u32,
 ) -> Diagnostic {
     let primary = format!(
-        "routed netlist for {kind} `{name}` has a driver segment of {segment} blocks into output pad #{output_index} — exceeds the v1 attenuation limit of {cap} blocks (dust decays 1/block, so this segment would need {buffers} buffer repeaters and a stage-4 crossing-legalization escape to materialize)",
+        "routed netlist for {kind} `{name}` has a driver segment of {segment} blocks into output pad #{output_index} — exceeds the v1 attenuation limit of {cap} blocks (dust decays 1/block, so this segment would need {buffers} buffer repeaters to materialize)",
         kind = entry.kind.label(),
         name = entry.name,
         cap = MAX_ATTENUATION_SEGMENT,

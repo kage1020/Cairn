@@ -34,16 +34,13 @@ insertion, promoting each cell's `delay_ticks` from `None` to
 `Some(base delay + implicit buffer repeater ticks)` and refusing with
 `E_ATTENUATION_LIMIT` when a segment exceeds the v1 sanity cap
 (stage 3 of §14.5); and `compile_crossing(&ScopedPlacementIr)` runs
-crossing legalization, reporting every pair of nets that share a wire
-coord — with `W_WIRE_CROSSING`, or with `E_CROSSING_CONGESTION` when
-the `void=<N>` reservation offers no layer above the plane a lift
-could ever go on; no wire is lifted either way — and filling every
-cell's `buffer_coords` with the coord of the buffer repeater each
-driver segment passes through — a collision on the plane lifts the
-buffer onto the first free `RouteLayer::Bridge` y-layer inside the
-`void=<N>` budget, and a repeater this net already placed is recorded
-by every segment that reaches it rather than escaped around, so one
-block can carry several entries (stage 4 of §14.5). Every placed cell
+crossing legalization, filling every cell's `buffer_coords` with the
+coord of the buffer repeater each driver segment passes through — a
+repeater this net already placed is recorded by every segment that
+reaches it rather than duplicated, so one block can carry several
+entries (stage 4 of §14.5). Two nets sharing a wire coord is not
+something it has to legalize: stage 2 routes each net around the dust
+of the nets before it, so the crossing never gets made. Every placed cell
 records which of those four passes last touched it as a
 `PlacementStage`, dumped as a `"stage"` key in the same vocabulary
 `cairn synth --stage <s>` accepts, so a JSON consumer reads the stage

@@ -16,8 +16,8 @@ use cairn_lang_core::Edition;
 use cairn_lang_core::check::Severity;
 use cairn_lang_core::{lower, parse};
 use cairn_lang_redstone::{
-    DiagnosticCode, ScopedPlacementIr, compile_edition_netlist, compile_netlist, compile_placement,
-    compile_routing, synthesize,
+    DiagnosticCode, PlacedCellNode, ScopedPlacementIr, compile_edition_netlist, compile_netlist,
+    compile_placement, compile_routing, synthesize,
 };
 
 mod common;
@@ -87,8 +87,8 @@ fn redstone_door_java_fills_wire_length_from_input_pads() {
     let cell = &ir.cells[0];
     assert_eq!(
         cell.wire_length(),
-        Some(5),
-        "wire_length must be route(step→cell) + route(exit→cell) = 1 + 4 = 5",
+        Some(7),
+        "wire_length must be route(step→cell) + route(exit→cell) = 2 + 5 = 7",
     );
     assert!(
         cell.delay_ticks().is_none(),
@@ -124,25 +124,35 @@ fn redstone_door_bedrock_matches_java_wire_length() {
 
 /// AC3 — a scope whose logic produces three cascaded cells fills
 /// every cell's `wire_length` with a pinned routed sum, so a
-/// regression in either the input-pad coordinate convention or the
-/// per-driver attribution walk trips this test. Cell placement lays
-/// cells at `x = i, y = 0, z = 0`, and input pads land at
-/// `(0, 0, 1+i)`, so the exact sums are:
+/// regression in the input-pad coordinate convention, the cell-row
+/// spacing, or the per-driver attribution walk trips this test. Cell
+/// placement lays cells at `x = 1 + 2i, y = 0, z = 0`, and input pads
+/// land at `(0, 0, 1+i)`.
 ///
-/// cell[0] is the corner case, in both senses: `(1,0,0)` is cell[1]
-/// and `(0,0,1)` is a pad, so it has no free neighbour on the ground
-/// layer at all. Anything that reaches it other than from the pad next
-/// door has to climb, which is what this fixture's `void=3` is for.
+/// That it routes at all is the first thing this fixture pins. A cell
+/// body is a block, so a net reaches it through a free neighbouring
+/// coord, and cell[1] has three distinct nets touching it — two
+/// drivers and its own output. Packed at `x = i` it would have two
+/// free neighbours, its siblings holding the rest, and no region size
+/// would give the third back: this chain is unroutable at every width
+/// under that convention, and compiles at every width under this one.
 ///
-/// - cell[0] `sig.and_ab = sig.a and sig.b`: one block from `sig.a`'s
-///   pad next door, and four from `sig.b`'s — up onto `y=1`, two along
-///   it, and back down into the cell: `1 + 4 = 5`.
-/// - cell[1] `sig.or_ab  = sig.a or sig.b`: same source pair, one
-///   column along, where the ground layer is open: both come down the
-///   free row rather than through cell[0], `2 + 3 = 5`.
+/// Three of the four nets here have to go round one of the others,
+/// which is what the sums are worth reading for:
+///
+/// - cell[0] `sig.and_ab = sig.a and sig.b`: `sig.a` comes round the
+///   corner from its pad next door, two blocks. `sig.b` cannot follow
+///   it — that row is `sig.a`'s dust now — so it climbs to `y=1`,
+///   crosses over and drops in: `2 + 5 = 7`.
+/// - cell[1] `sig.or_ab = sig.a or sig.b`: the same two nets carrying
+///   on down the row they each took, one on the plane and one on the
+///   layer above: `4 + 7 = 11`.
 /// - cell[2] `sig.combined = sig.and_ab and sig.or_ab`: cell-to-cell
-///   drivers. cell[1] is next door; cell[0] is boxed in, so its output
-///   climbs to `y=1`, runs two columns, and drops in: `4 + 1 = 5`.
+///   drivers. cell[1] is two columns away with a clear run between.
+///   cell[0] has `sig.a` on one side and `sig.b` on the layer above,
+///   so its output leaves west, climbs two layers, and runs the length
+///   of the region up there: `10 + 2 = 12`. That is the escape §14.5
+///   specifies, and it is why the fixture reserves `void=3`.
 ///
 /// `delay_ticks` stays `None` at every cell.
 #[test]
@@ -180,15 +190,17 @@ struct sim size=7x5
         .find(|e| e.name == "sim")
         .expect("sim scope");
     assert_eq!(entry.ir.cells.len(), 3);
-    // cell[0] at (0,0,0), input pads at (0,0,1) and (0,0,2): one block
-    // from the near pad, four over the top from the far one.
-    assert_eq!(entry.ir.cells[0].wire_length(), Some(5));
-    // cell[1] at (1,0,0), same input pad pair, both reached along the
-    // free row at z=1 rather than through cell[0].
-    assert_eq!(entry.ir.cells[1].wire_length(), Some(5));
-    // cell[2] at (2,0,0), driven by cell[0]=(0,0,0) and cell[1]=(1,0,0).
-    // cell[1] is next door; cell[0] is boxed in and has to climb out.
-    assert_eq!(entry.ir.cells[2].wire_length(), Some(5));
+    assert_eq!(
+        entry
+            .ir
+            .cells
+            .iter()
+            .map(PlacedCellNode::wire_length)
+            .collect::<Vec<_>>(),
+        vec![Some(7), Some(11), Some(12)],
+        "each cell is charged for the dust into it, detours and climbs \
+         included",
+    );
     for cell in &entry.ir.cells {
         assert!(
             cell.delay_ticks().is_none(),
@@ -204,9 +216,8 @@ struct sim size=7x5
 /// `sig.a and sig.a` is how a `.crn` reaches the shape: logic synth
 /// keeps both operands, so the cell arrives at the routing pass with
 /// `a` and `b` both driven by `Input(0)`. The routed length from the
-/// pad at `(0,0,1)` to the cell at `(0,0,0)` is one block, and a
-/// per-port fold reported two — two blocks of dust in a layout that
-/// has one.
+/// pad at `(0,0,1)` to the cell at `(1,0,0)` is two blocks, and a
+/// per-port fold reported four — twice the dust the layout has.
 ///
 /// The per-net rule is not "one segment per cell":
 /// `multi_cell_scope_pins_wire_length_including_detours` above
@@ -257,8 +268,8 @@ struct dup size=20x5
     );
     assert_eq!(
         cell.wire_length(),
-        Some(1),
-        "the pad at (0,0,1) is one block from the cell at (0,0,0), laid once",
+        Some(2),
+        "the pad at (0,0,1) is two blocks from the cell at (1,0,0), laid once",
     );
 }
 
@@ -275,27 +286,28 @@ struct dup size=20x5
 /// layout.
 #[test]
 fn post_routing_congestion_fires_route_congestion_and_elides_scope() {
-    // 4 cells × 4 blocks = 16 required cell area vs 4 × 3 × 2 = 24
-    // reserved blocks — placement passes with room to spare, routing
-    // then adds wire and overflows.
+    // 4 cells × 4 blocks = 16 required cell area vs 9 × 2 × 1 = 18
+    // reserved blocks — placement passes with two coords to spare, and
+    // the wire spends more than two. One sensor rather than two so the
+    // chain routes: this fixture is about the budget, and a stranded
+    // sink would refuse it one step earlier for a different reason.
     let source = r"
 theme t:
   slot wall -> @oak_planks
 
-struct pack size=4x3
+struct pack size=9x2
   floor mat_slot=wall
 
   pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a
-  pressure_plate id=q at=inside.front  offset=0 y=0 -> sig.b
 
-  logic sig.and_ab   = sig.a and sig.b
-  logic sig.or_ab    = sig.a or sig.b
-  logic sig.combined = sig.and_ab and sig.or_ab
-  logic sig.last     = sig.combined or sig.a
+  logic sig.c0 = not sig.a
+  logic sig.c1 = not sig.c0
+  logic sig.c2 = not sig.c1
+  logic sig.c3 = not sig.c2
 
-  door id=d side=front at=center mat_slot=wall opened_by=sig.last
+  door id=d side=front at=center mat_slot=wall opened_by=sig.c3
 
-  circuit region=floor void=2
+  circuit region=floor void=1
 ";
     let placement = placement_from_source(source, Edition::Java);
     let routed = compile_routing(&placement);
@@ -324,12 +336,12 @@ struct pack size=4x3
         d.primary,
     );
     assert!(
-        d.primary.contains("void=2"),
+        d.primary.contains("void=1"),
         "primary should quote the reservation shape, got {:?}",
         d.primary,
     );
     assert!(
-        d.primary.contains("4x3"),
+        d.primary.contains("9x2"),
         "primary should quote the region footprint, got {:?}",
         d.primary,
     );
@@ -514,7 +526,7 @@ struct alpha size=7x5
   door id=d side=front at=center mat_slot=wall opened_by=sig.open
   circuit region=floor void=2
 
-struct beta size=4x3
+struct beta size=8x3
   floor mat_slot=wall
   pressure_plate id=r at=front.outside offset=0 y=0 -> sig.c
   pressure_plate id=s at=inside.front  offset=0 y=0 -> sig.d
@@ -587,7 +599,7 @@ fn edition_parity_wire_length_matches_across_java_and_bedrock() {
 /// expected substring pins the breadcrumb that spares them that walk.
 #[test]
 #[should_panic(
-    expected = "for cell #0 at (0,0,0) in struct `gatehouse` — routing must run exactly once per placement"
+    expected = "for cell #0 at (1,0,0) in struct `gatehouse` — routing must run exactly once per placement"
 )]
 fn re_running_routing_pass_panics_loudly() {
     let source = load_example("redstone-door.crn");

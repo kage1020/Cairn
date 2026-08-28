@@ -224,11 +224,12 @@ fn cli_synth_stage_netlist_rejects_edition_flag() {
 }
 
 #[test]
-fn cli_synth_stage_placement_java_places_or_cell_at_origin() {
+fn cli_synth_stage_placement_java_places_or_cell_beside_the_pad_column() {
     // `--stage placement --edition java` runs the Edition Netlist IR
     // through the placement pass. `redstone-door.crn`'s sole cell should
-    // land at `{x:0,y:0,z:0}` inside its `circuit region=floor void=2`
-    // reservation (width/depth copied from `size=7x5`). `wire_length`
+    // land at `{x:1,y:0,z:0}` inside its `circuit region=floor void=2`
+    // reservation (width/depth copied from `size=7x5`) — one column in
+    // from the pad column, per the spaced row. `wire_length`
     // and `delay_ticks` are absent from the JSON today because Steiner
     // routing and delay insertion are follow-up passes.
     let path = examples_dir().join("redstone-door.crn");
@@ -267,7 +268,7 @@ fn cli_synth_stage_placement_java_places_or_cell_at_origin() {
         "the stage tag must echo the --stage flag that produced the dump: {stdout}",
     );
     let coord = &cells[0]["coord"];
-    assert_eq!(coord["x"], 0);
+    assert_eq!(coord["x"], 1);
     assert_eq!(coord["y"], 0);
     assert_eq!(coord["z"], 0);
     assert!(
@@ -310,7 +311,7 @@ fn cli_synth_stage_placement_bedrock_matches_java_layout() {
     let ir = &gatehouse["ir"];
     assert_eq!(ir["edition"], "bedrock");
     assert_eq!(ir["cells"][0]["cell"], "bedrock_torch_or");
-    assert_eq!(ir["cells"][0]["coord"]["x"], 0);
+    assert_eq!(ir["cells"][0]["coord"]["x"], 1);
 }
 
 #[test]
@@ -473,7 +474,7 @@ fn cli_synth_stage_route_java_fills_wire_length() {
         cells[0]["stage"], "route",
         "the stage tag must echo the --stage flag that produced the dump: {stdout}",
     );
-    assert_eq!(cells[0]["wire_length"], 5);
+    assert_eq!(cells[0]["wire_length"], 7);
     assert!(
         cells[0].get("delay_ticks").is_none(),
         "delay_ticks must be elided at this stage: {stdout}",
@@ -509,7 +510,7 @@ fn cli_synth_stage_route_bedrock_matches_java_wire_length() {
     let ir = &gatehouse["ir"];
     assert_eq!(ir["edition"], "bedrock");
     assert_eq!(ir["cells"][0]["cell"], "bedrock_torch_or");
-    assert_eq!(ir["cells"][0]["wire_length"], 5);
+    assert_eq!(ir["cells"][0]["wire_length"], 7);
 }
 
 #[test]
@@ -543,16 +544,21 @@ fn cli_synth_stage_route_congestion_exits_one() {
     // the earlier stages follow.
     let dir = tempfile::tempdir().expect("temp dir");
     let path = dir.path().join("pack.crn");
+    // Four cells in the shortest row that holds them, and a
+    // reservation two coords deeper than the cells need: the wire
+    // spends more than two and overflows it. One sensor rather than
+    // two so the chain routes — a stranded sink would refuse this a
+    // stage earlier, for a different reason.
     let source = "@cairn 2026.06\n@requires version>=1.20\n\n\
         theme t:\n  slot wall -> @oak_planks\n\n\
-        struct pack size=4x3\n  \
+        struct pack size=9x2\n  \
         floor mat_slot=wall\n  \
         pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a\n  \
-        pressure_plate id=q at=inside.front  offset=0 y=0 -> sig.b\n  \
-        logic sig.and_ab   = sig.a and sig.b\n  \
-        logic sig.or_ab    = sig.a or sig.b\n  \
-        logic sig.combined = sig.and_ab and sig.or_ab\n  \
-        door id=d side=front at=center mat_slot=wall opened_by=sig.combined\n  \
+        logic sig.c0 = not sig.a\n  \
+        logic sig.c1 = not sig.c0\n  \
+        logic sig.c2 = not sig.c1\n  \
+        logic sig.c3 = not sig.c2\n  \
+        door id=d side=front at=center mat_slot=wall opened_by=sig.c3\n  \
         circuit region=floor void=1\n";
     std::fs::write(&path, source).expect("write congestion fixture");
     let out = run_synth(&[
@@ -631,7 +637,7 @@ fn cli_synth_stage_delay_java_fills_delay_ticks() {
         cells[0]["stage"], "delay",
         "the stage tag must echo the --stage flag that produced the dump: {stdout}",
     );
-    assert_eq!(cells[0]["wire_length"], 5);
+    assert_eq!(cells[0]["wire_length"], 7);
     assert_eq!(cells[0]["delay_ticks"], 1);
 }
 
@@ -665,7 +671,7 @@ fn cli_synth_stage_delay_bedrock_matches_bedrock_torch_or() {
     let ir = &gatehouse["ir"];
     assert_eq!(ir["edition"], "bedrock");
     assert_eq!(ir["cells"][0]["cell"], "bedrock_torch_or");
-    assert_eq!(ir["cells"][0]["wire_length"], 5);
+    assert_eq!(ir["cells"][0]["wire_length"], 7);
     assert_eq!(ir["cells"][0]["delay_ticks"], 0);
 }
 
@@ -703,16 +709,21 @@ fn cli_synth_stage_delay_inherits_upstream_congestion_failure() {
     // would have seen from `--stage route`.
     let dir = tempfile::tempdir().expect("temp dir");
     let path = dir.path().join("pack.crn");
+    // Four cells in the shortest row that holds them, and a
+    // reservation two coords deeper than the cells need: the wire
+    // spends more than two and overflows it. One sensor rather than
+    // two so the chain routes — a stranded sink would refuse this a
+    // stage earlier, for a different reason.
     let source = "@cairn 2026.06\n@requires version>=1.20\n\n\
         theme t:\n  slot wall -> @oak_planks\n\n\
-        struct pack size=4x3\n  \
+        struct pack size=9x2\n  \
         floor mat_slot=wall\n  \
         pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a\n  \
-        pressure_plate id=q at=inside.front  offset=0 y=0 -> sig.b\n  \
-        logic sig.and_ab   = sig.a and sig.b\n  \
-        logic sig.or_ab    = sig.a or sig.b\n  \
-        logic sig.combined = sig.and_ab and sig.or_ab\n  \
-        door id=d side=front at=center mat_slot=wall opened_by=sig.combined\n  \
+        logic sig.c0 = not sig.a\n  \
+        logic sig.c1 = not sig.c0\n  \
+        logic sig.c2 = not sig.c1\n  \
+        logic sig.c3 = not sig.c2\n  \
+        door id=d side=front at=center mat_slot=wall opened_by=sig.c3\n  \
         circuit region=floor void=1\n";
     std::fs::write(&path, source).expect("write congestion fixture");
     let out = run_synth(&[
@@ -802,10 +813,8 @@ fn cli_synth_stage_crossing_java_legalizes_or_cell_scope() {
     // `--stage crossing --edition java` runs the full pipeline
     // through stage 4. Every segment in the `redstone-door.crn`
     // fixture is short, so the legalized IR matches the delayed IR
-    // apart from the `stage` tag — the crossing it does carry is
-    // reported and not repaired, so it moves no coord — but the
-    // stage's JSON round-trip must still succeed and expose the same
-    // scope shape.
+    // apart from the `stage` tag — but the stage's JSON round-trip
+    // must still succeed and expose the same scope shape.
     let path = examples_dir().join("redstone-door.crn");
     let out = run_synth(&[
         "--experimental-logic-synth",
@@ -817,37 +826,13 @@ fn cli_synth_stage_crossing_java_legalizes_or_cell_scope() {
     ]);
     let stderr = String::from_utf8_lossy(&out.stderr).into_owned();
     assert!(out.status.success(), "expected exit 0, stderr={stderr}");
-    // The one finding this example earns, and nothing else. Two
-    // sensors feed the cell, so the second one's wire comes round the
-    // first one's pad and meets the cell's outward run: a crossing v1
-    // reports and does not lift. It is a warning, so the exit code
-    // above stays 0 — and the line-by-line check keeps the original
-    // guarantee that no other notice reaches a user unannounced.
-    let announced: Vec<&str> = stderr
-        .lines()
-        .filter(|line| line.contains("warning[") || line.contains("error["))
-        .collect();
-    assert_eq!(
-        announced.len(),
-        1,
-        "expected exactly the crossing warning, got: {stderr}",
-    );
+    // Nothing at all. Two sensors feed the cell, so the second one's
+    // wire comes round the first one's pad and the cell's outward run
+    // climbs a layer to clear it — a layout the pipeline produces
+    // rather than a defect it announces.
     assert!(
-        announced[0].contains("warning[W_WIRE_CROSSING]"),
-        "expected the crossing warning, got: {stderr}",
-    );
-    // A note with a span of its own renders as
-    // `{file}:{pos}:   note: ...` rather than starting with the word,
-    // so both shapes count as belonging to the finding — otherwise
-    // this breaks the day the diagnostic grows a note pointing at the
-    // two nets' declarations.
-    assert!(
-        stderr.lines().all(|line| {
-            line.contains("warning[W_WIRE_CROSSING]")
-                || line.trim_start().starts_with("note:")
-                || line.contains(": note: ")
-        }),
-        "nothing but that finding and its notes may reach stderr: {stderr}",
+        stderr.is_empty(),
+        "a scope that routes has nothing to say: {stderr}",
     );
     let stdout = String::from_utf8(out.stdout)
         .unwrap_or_else(|err| panic!("stdout should be utf-8: {err}\nstderr={stderr}"));
@@ -898,37 +883,13 @@ fn cli_synth_stage_crossing_bedrock_legalizes_or_cell_scope() {
     ]);
     let stderr = String::from_utf8_lossy(&out.stderr).into_owned();
     assert!(out.status.success(), "expected exit 0, stderr={stderr}");
-    // The one finding this example earns, and nothing else. Two
-    // sensors feed the cell, so the second one's wire comes round the
-    // first one's pad and meets the cell's outward run: a crossing v1
-    // reports and does not lift. It is a warning, so the exit code
-    // above stays 0 — and the line-by-line check keeps the original
-    // guarantee that no other notice reaches a user unannounced.
-    let announced: Vec<&str> = stderr
-        .lines()
-        .filter(|line| line.contains("warning[") || line.contains("error["))
-        .collect();
-    assert_eq!(
-        announced.len(),
-        1,
-        "expected exactly the crossing warning, got: {stderr}",
-    );
+    // Nothing at all. Two sensors feed the cell, so the second one's
+    // wire comes round the first one's pad and the cell's outward run
+    // climbs a layer to clear it — a layout the pipeline produces
+    // rather than a defect it announces.
     assert!(
-        announced[0].contains("warning[W_WIRE_CROSSING]"),
-        "expected the crossing warning, got: {stderr}",
-    );
-    // A note with a span of its own renders as
-    // `{file}:{pos}:   note: ...` rather than starting with the word,
-    // so both shapes count as belonging to the finding — otherwise
-    // this breaks the day the diagnostic grows a note pointing at the
-    // two nets' declarations.
-    assert!(
-        stderr.lines().all(|line| {
-            line.contains("warning[W_WIRE_CROSSING]")
-                || line.trim_start().starts_with("note:")
-                || line.contains(": note: ")
-        }),
-        "nothing but that finding and its notes may reach stderr: {stderr}",
+        stderr.is_empty(),
+        "a scope that routes has nothing to say: {stderr}",
     );
     let stdout = String::from_utf8(out.stdout)
         .unwrap_or_else(|err| panic!("stdout should be utf-8: {err}\nstderr={stderr}"));
@@ -1028,26 +989,21 @@ fn cli_synth_stage_crossing_inherits_upstream_attenuation_failure() {
 }
 
 #[test]
-fn cli_synth_stage_crossing_congestion_exits_one() {
-    // The crossing pass's own Error diagnostics have to reach the
-    // caller the way every earlier stage's do: exit 1 with the code on
-    // stderr and nothing on stdout. The upstream-inheritance test
-    // above cannot stand in for this one — it short-circuits a stage
-    // earlier — so without this case a dropped diagnostic report
-    // between the crossing pass and the JSON dump would let a refused
-    // scope be printed as a legalized IR.
+fn cli_synth_stage_crossing_two_nets_over_one_coord_exits_one() {
+    // Two nets that want one coord, with no layer above the plane to
+    // escape onto. The compiler refuses the scope rather than emitting
+    // a layout in which those two signals are one strand of dust, and
+    // the refusal has to reach the caller through `--stage crossing`
+    // the way every earlier stage's does: exit 1, code on stderr,
+    // nothing on stdout. Without this case a dropped diagnostic report
+    // between the pipeline and the JSON dump would let a refused scope
+    // be printed as a legalized IR.
     //
     // One cell, two sensors, two actuators, one service layer. The
     // sensor whose pad sits behind the other one has to come into the
-    // cell through `(1,0,0)`, and that is the coord the cell drives its
-    // actuators out through — two nets over one coord, with no layer to
-    // lift either onto.
-    //
-    // Not `examples/crossbar.crn` with its `void=` turned down, which
-    // is what this fixture used to be: that source lays two cells at
-    // the head of the row, which walls the first one in between the
-    // second and the sensor pad column, and on one service layer
-    // stage 2 refuses that before any crossing is computed.
+    // cell round the pad in front of it, and every way round is either
+    // the other sensor's wire or the row the cell drives its actuators
+    // out along.
     let source = "\
 theme cross:
   slot wall -> @oak_planks
@@ -1070,7 +1026,7 @@ struct crossbar size=5x4
 ";
     let dir = tempfile::tempdir().expect("temp dir");
     let path = dir.path().join("crossbar.crn");
-    std::fs::write(&path, source).expect("write crossing congestion fixture");
+    std::fs::write(&path, source).expect("write congestion fixture");
     let out = run_synth(&[
         "--experimental-logic-synth",
         "--stage",
@@ -1082,25 +1038,22 @@ struct crossbar size=5x4
     assert_eq!(out.status.code(), Some(1));
     let stderr = String::from_utf8(out.stderr).expect("utf-8");
     assert!(
-        stderr.contains("E_CROSSING_CONGESTION"),
-        "expected E_CROSSING_CONGESTION on stderr, got: {stderr}",
+        stderr.contains("E_ROUTE_CONGESTION"),
+        "expected E_ROUTE_CONGESTION on stderr, got: {stderr}",
     );
     assert!(
-        stderr.contains("routed netlist for struct `crossbar`") && stderr.contains("wire crossing"),
-        "primary should name the crossing-side origin and failed scope, got: {stderr}",
+        stderr.contains("routed netlist for struct `crossbar`")
+            && stderr.contains("dust already laid for another net")
+            && stderr.contains("the coords beside it carry cell #0 and sig.a"),
+        "the refusal names the scope, which of the three kinds of obstacle \
+         it means, and the net standing in the way, got: {stderr}",
     );
-    // Split per upstream code: which one leaked says whether the
-    // fixture drifted into a routing overflow or into an over-long
-    // segment, and the refusal is only this pass's own if neither did.
-    assert!(
-        !stderr.contains("E_ROUTE_CONGESTION"),
-        "the refusal must come from the crossing pass itself, but the fixture \
-         also tripped routing, got: {stderr}",
-    );
+    // Which other code leaked would say the fixture drifted into an
+    // over-long segment rather than into the congestion this is about.
     assert!(
         !stderr.contains("E_ATTENUATION_LIMIT"),
-        "the refusal must come from the crossing pass itself, but the fixture \
-         also tripped delay-side attenuation, got: {stderr}",
+        "the fixture must refuse for want of room, not for segment length, \
+         got: {stderr}",
     );
     assert!(
         out.stdout.is_empty(),

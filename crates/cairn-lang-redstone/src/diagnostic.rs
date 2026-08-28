@@ -84,12 +84,16 @@ pub enum DiagnosticCode {
     /// §14.5's canonical failure: routing cannot be confined to the
     /// reserved region, so the pass fails loud with the self-correction
     /// triple ("increase `void`", "enlarge region", "split into multiple
-    /// `circuit` blocks"). Two shapes reach it — the reserved volume is
-    /// short of the netlist's estimated footprint, or the reserved row
-    /// is shorter than the cell count the v1 single-row layout needs.
-    /// §14.5 names area shortage as the example rather than as the only
-    /// shape, so both take this code and differ in what they say:
-    /// raising `void` fixes the first and cannot fix the second.
+    /// `circuit` blocks"). Four shapes reach it — the reserved volume is
+    /// short of the netlist's estimated footprint; the reserved row is
+    /// shorter than the spaced single-row layout needs, which is twice
+    /// the cell count and one more; the reservation is too shallow for
+    /// the I/O pads to stand off the cell row; or a sink has no route
+    /// from its driver that runs through neither a component nor
+    /// another net's dust. §14.5 names area shortage as the example
+    /// rather than as the only shape, so all four take this code and
+    /// differ in what they say: raising `void` fixes the first and the
+    /// last, and cannot fix the two in between.
     RouteCongestion,
     /// A routed driver segment (source pad or driver cell → sink coord,
     /// where the sink is either a downstream cell coord or an actuator
@@ -99,10 +103,10 @@ pub enum DiagnosticCode {
     /// for implicit buffer-repeater insertion. `spec/redstone` §14.5
     /// stage 3 lets segments longer than the 15-block dust attenuation
     /// limit be covered by buffer repeaters silently; this code fires
-    /// only when the segment is so long that materialising it needs a
-    /// stage-4 crossing-legalization escape (`RouteLayer::Bridge` /
-    /// `Via`) that v1 does not implement, so the pass refuses instead
-    /// of quietly counting an unrealisable buffer chain into
+    /// only when the segment is so long that the buffer chain
+    /// materialising it would be longer than the cap
+    /// [`crate::delay::MAX_ATTENUATION_SEGMENT`] sets, so the pass
+    /// refuses instead of quietly counting an unrealisable chain into
     /// `delay_ticks`. Fires on both driver-to-cell and driver-to-
     /// output-pad segments — a wide `circuit region=` reservation can
     /// trip either edge depending on which side sits farther from the
@@ -111,60 +115,6 @@ pub enum DiagnosticCode {
     /// `circuit` blocks, or pin cell / actuator placement closer to
     /// its drivers.
     AttenuationLimit,
-    /// The crossing-legalization pass found two nets sharing a wire
-    /// coord in a reservation with no layer above the plane at all
-    /// (`void < 2`). Two nets on one coord is one strand of dust
-    /// carrying two signals, and v1 lifts no wire off it — so the only
-    /// thing that separates this from [`Self::WireCrossing`] is whether
-    /// the author's `void=` leaves a layer a future pass could lift
-    /// onto. Under `void < 2` there is none, and no pass at any point
-    /// in the future can make one without the author raising `void=`,
-    /// which is why this half is an error and the other half is a
-    /// warning. The test is whether that layer exists, not how many
-    /// crossings it would have to carry: there is nothing downstream
-    /// for a per-crossing capacity model to constrain yet. Fix:
-    /// increase `void`, enlarge the `circuit region=` footprint so
-    /// fewer wires cross, or split the logic across multiple `circuit`
-    /// blocks so each block routes with fewer overlaps.
-    CrossingCongestion,
-    /// Two nets share a wire coord in a reservation that does have a
-    /// layer above the plane (`void >= 2`), and nothing lifted either
-    /// of them off it. `spec/redstone` §14.5 stage 4 specifies the
-    /// escape — a crossing leaves the shared coord for a bridge tile or
-    /// a vertical layer — and v1 implements it for buffer repeaters
-    /// only: the routed wire path is not stored on the IR, so a
-    /// per-net escape segment has nowhere to attach, and the crossing
-    /// set is read by nothing downstream. So the two signals are one
-    /// wire in whatever layout the coords describe, and this says
-    /// which two and where rather than letting the reserved height
-    /// imply they were handled.
-    ///
-    /// Warning rather than error because the reservation has a layer
-    /// above the plane, so there is somewhere a lift could go and the
-    /// author's `void=` is not what is standing in the way. Not a
-    /// claim that the layers would be enough — nothing counts them
-    /// against the crossings, and the routing pass and the buffer
-    /// escapes draw on the same budget. The `void < 2` half of the
-    /// same defect has no layer at all and takes
-    /// [`Self::CrossingCongestion`] instead. Fix: enlarge the
-    /// `circuit region=` footprint so fewer wires cross, or split the
-    /// logic across multiple `circuit` blocks.
-    WireCrossing,
-    /// The crossing-legalization pass could not place a required
-    /// implicit buffer repeater — another net's dust already runs
-    /// through the candidate coord, and every `Bridge` layer in that
-    /// column was taken by an earlier repeater or by wire the router
-    /// had to lift. A candidate is never a cell body or a pad: it sits
-    /// strictly between the ends of a route, and the router keeps every
-    /// coord strictly between them off the blocks. Rare in practice:
-    /// the delay pass already caps segments at
-    /// `MAX_ATTENUATION_SEGMENT` (16 buffers) and the routing pass caps
-    /// footprint at the reservation area, so this needs two nets whose
-    /// routes meet at one of the few coords 15 blocks along both. Fix:
-    /// increase `void` so the column has another layer to lift onto, or
-    /// enlarge the `circuit region=` footprint so the two routes stop
-    /// meeting.
-    BufferCoordCollision,
     /// Lowering a `logic` binding descended past
     /// [`crate::synth::MAX_LOWERING_DEPTH`]. A binding is lowered by descending into
     /// whatever it references, so a chain declared in the reverse of its
@@ -258,9 +208,6 @@ impl DiagnosticCode {
             Self::NoCircuitRegion => "E_NO_CIRCUIT_REGION",
             Self::RouteCongestion => "E_ROUTE_CONGESTION",
             Self::AttenuationLimit => "E_ATTENUATION_LIMIT",
-            Self::CrossingCongestion => "E_CROSSING_CONGESTION",
-            Self::WireCrossing => "W_WIRE_CROSSING",
-            Self::BufferCoordCollision => "E_BUFFER_COORD_COLLISION",
             Self::LogicNestingTooDeep => "E_LOGIC_NESTING_TOO_DEEP",
             Self::LogicMisplacedBinding => "E_LOGIC_MISPLACED_BINDING",
             Self::LogicInvalidSignal => "E_LOGIC_INVALID_SIGNAL",
@@ -280,13 +227,11 @@ impl DiagnosticCode {
             | Self::NoCircuitRegion
             | Self::RouteCongestion
             | Self::AttenuationLimit
-            | Self::CrossingCongestion
-            | Self::BufferCoordCollision
             | Self::LogicNestingTooDeep
             | Self::LogicMisplacedBinding
             | Self::LogicInvalidSignal
             | Self::LogicUnknownBindingKey => Severity::Error,
-            Self::LogicUnusedSignal | Self::WireCrossing => Severity::Warning,
+            Self::LogicUnusedSignal => Severity::Warning,
         }
     }
 }

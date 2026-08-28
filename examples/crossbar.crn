@@ -1,17 +1,22 @@
 @cairn 2026.06
 @requires version>=1.20
 
-# A crossing fixture: two pressure plates feed both gates, whose
-# output signals fan out to two doors at opposite ends of the region.
-# Two pairs of nets end up sharing a wire coord — `sig.a` with `sig.b`
-# at (1,0,1), and `sig.b` with the first gate at (0,1,0). The second of
-# those is on a bridge layer, where two nets that each climbed to clear
-# a block met, so a crossing is not a plane-only event.
+# An escape fixture: two pressure plates feed both gates, whose output
+# signals fan out to two doors at opposite ends of the region. Four
+# nets over a region this size cannot all take their shortest route —
+# two of them would want one coord, and two nets on one coord is one
+# strand of dust carrying two signals.
 #
-# The crossing pass reports both and repairs neither: it lifts a buffer
-# repeater off a coord it cannot have and never the wire itself, so
-# those signals are one strand of dust in whatever layout these coords
-# describe.
+# So the routing pass lays each net around the dust of the ones before
+# it, and a net with nowhere to go round climbs to a bridge layer
+# inside the `void=` budget. What the wire form below shows is that
+# escape: a strand that leaves the ground layer not to clear a block
+# but to clear another signal.
+#
+# The width is `6` and not `5` for the same reason. At `5` the last net
+# has nowhere left at all, and the compiler refuses the scope rather
+# than shorting it — which is the other half of the same rule, and is
+# what `size=` buys here.
 #
 # Kept intentionally minimal so the wire form pinned by the redstone
 # crate's byte-identity crossing integration test reads at a glance.
@@ -20,7 +25,7 @@ theme cross:
   slot wall -> @oak_planks
   slot door -> @oak_door
 
-struct crossbar size=5x4
+struct crossbar size=6x4
   floor mat_slot=wall
   walls class=outer mat_slot=wall height=3
   door  id=front side=front at=center mat_slot=door

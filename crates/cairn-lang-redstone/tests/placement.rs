@@ -49,13 +49,13 @@ fn edition_netlist_from_source(
 }
 
 /// AC1 — `examples/redstone-door.crn` compiled for Java places its lone
-/// `JavaRepeaterOr` cell at the origin of its `circuit region=floor
-/// void=2` reservation, and the reservation copies the enclosing struct's
-/// `size=7x5` footprint. `wire_length` and `delay_ticks` are absent
-/// today because Steiner routing and delay insertion are follow-up
-/// passes.
+/// `JavaRepeaterOr` cell one column in from the pad column of its
+/// `circuit region=floor void=2` reservation, and the reservation
+/// copies the enclosing struct's `size=7x5` footprint. `wire_length`
+/// and `delay_ticks` are absent today because Steiner routing and
+/// delay insertion are follow-up passes.
 #[test]
-fn redstone_door_java_places_or_cell_at_origin() {
+fn redstone_door_java_places_or_cell_beside_the_pad_column() {
     let source = load_example("redstone-door.crn");
     let (edition_netlist, intent) = edition_netlist_from_source(&source, Edition::Java);
     let out = compile_placement(&edition_netlist, &intent);
@@ -83,7 +83,7 @@ fn redstone_door_java_places_or_cell_at_origin() {
     assert_eq!(ir.cells.len(), 1);
     let cell = &ir.cells[0];
     assert_eq!(cell.cell, EditionCell::JavaRepeaterOr);
-    assert_eq!(cell.coord.x, 0);
+    assert_eq!(cell.coord.x, 1);
     assert_eq!(cell.coord.y, 0);
     assert_eq!(cell.coord.z, 0);
     assert!(
@@ -130,7 +130,7 @@ fn redstone_door_bedrock_matches_java_layout_apart_from_cell_tag() {
 }
 
 /// AC3 — a scope whose logic produces three distinct cells lays them
-/// out at `x = 0, 1, 2` in the same topological order the Netlist IR
+/// out at `x = 1, 3, 5` in the same topological order the Netlist IR
 /// carried through. `y` and `z` stay `0` for every cell (1D placement).
 #[test]
 fn multi_cell_scope_places_in_topological_order() {
@@ -168,8 +168,11 @@ struct sim size=7x5
         .expect("sim scope")
         .ir;
     assert_eq!(ir.cells.len(), 3);
-    for (i, cell) in ir.cells.iter().enumerate() {
-        let expected = u32::try_from(i).expect("small index");
+    // `1 + 2i`: one column in from the pad column, one clear column
+    // between each pair. Spelled out rather than computed, so the
+    // convention is written somewhere other than in the pass that
+    // implements it.
+    for (i, (cell, expected)) in ir.cells.iter().zip([1u32, 3, 5]).enumerate() {
         assert_eq!(
             cell.coord.x, expected,
             "cell[{i}] should sit at x={expected}",
@@ -569,7 +572,7 @@ struct beta size=7x5
         .find(|e| e.name == "alpha")
         .expect("alpha scope survives");
     assert_eq!(alpha.ir.cells[0].cell, EditionCell::BedrockInverterTorch);
-    assert_eq!(alpha.ir.cells[0].coord.x, 0);
+    assert_eq!(alpha.ir.cells[0].coord.x, 1);
 
     // beta has cells but no circuit region → elided with a diagnostic.
     assert!(
@@ -587,12 +590,13 @@ struct beta size=7x5
 
 // ---- the row has to hold the cells (`spec/redstone` §14.5) ----
 //
-// The v1 layout stamps `x = i`, so the reservation's *width* is the
-// resource the cells consume — and the area budget cannot see it. A
-// `size=2x8` scope reserving `void=3` offers 48 cells' worth of volume
-// and a row two columns long, so a three-cell netlist passes the volume
-// test and overruns the row. Every later pass reads these coordinates,
-// and `output_pad` sits at `width - 1`, so a cell past the edge drives a
+// The v1 layout stamps `x = 1 + 2i`, so the reservation's *width* is
+// the resource the cells consume — twice their count and one column
+// more — and the area budget cannot see it. A `size=2x8` scope
+// reserving `void=3` offers 48 cells' worth of volume and a row two
+// columns long, so a three-cell netlist passes the volume test and
+// overruns the row. Every later pass reads these coordinates, and
+// `output_pad` sits at `width - 1`, so a cell past the edge drives a
 // pad standing behind it.
 
 use std::fmt::Write as _;
@@ -633,7 +637,8 @@ fn placement_of(source: &str) -> cairn_lang_redstone::PlacementOutput {
 }
 
 /// The reported repro: `size=2x8 void=3` with three cells. The volume
-/// test passes (12 <= 48) and the row is overrun by one.
+/// test passes (12 <= 48) and the row, which wants six columns, is
+/// overrun by four.
 #[test]
 fn a_netlist_wider_than_the_reserved_row_is_refused() {
     let out = placement_of(&source_with_cells(3, 2, 8, 3));
@@ -656,15 +661,67 @@ fn a_netlist_wider_than_the_reserved_row_is_refused() {
     assert_eq!(diagnostic.severity(), Severity::Error);
 }
 
-/// The exact-fit boundary. The last cell lands in the same column as the
-/// actuator pad, which is legal while the reservation is deep enough for
-/// the pad to stand beside the cell row rather than on it — the depth
-/// guard is what keeps that true, and
-/// `a_region_one_row_deep_cannot_hold_a_pad_beside_its_cells` covers the
-/// case where it is not.
+/// A region wide enough for the cells and not for the spacing between
+/// them is refused here, not two passes later.
+///
+/// Three cells want seven columns; four is more than enough to stand
+/// them in and three short of the row they are laid in. If the check
+/// counted cells rather than columns this would pass placement, put
+/// the last cell outside the reservation, and surface at stage 2 as a
+/// sink no route can reach — of a coord no route could enter, with a
+/// message about components and dust that names nothing true.
 #[test]
-fn a_row_exactly_as_wide_as_the_cell_count_places_every_cell() {
-    let out = placement_of(&source_with_cells(4, 4, 8, 3));
+fn a_row_wide_enough_for_the_cells_and_not_the_spacing_is_refused() {
+    let out = placement_of(&source_with_cells(3, 4, 8, 3));
+
+    assert!(
+        out.scoped.scopes.is_empty(),
+        "a scope that does not fit its row must not reach the Placement IR: {:?}",
+        out.scoped.scopes,
+    );
+    let diagnostic = out
+        .diagnostics
+        .iter()
+        .find(|d| d.code == DiagnosticCode::RouteCongestion)
+        .expect("the overrun must surface as E_ROUTE_CONGESTION");
+    assert!(
+        diagnostic
+            .primary
+            .contains("needs 7 columns for a row of 3 cells"),
+        "the refusal must name the columns the row wants, not the cells it \
+         holds: {}",
+        diagnostic.primary,
+    );
+}
+
+/// The exact-fit boundary, with its neighbour one column down.
+///
+/// A row of `n` cells wants `2n + 1` columns: one for each cell, one
+/// beside each, and one past the last so the cell at the end of the row
+/// is not left with the actuator-pad column on one side and the edge of
+/// the reservation on the other. At `2n` that cell has one free plane
+/// neighbour, and the layout is refused two stages later under `void=1`
+/// or climbs and pays for it above — measured on a four-cell chain:
+/// `2n` refuses at `void=1`, and at `void=3` reports `wire_length` 13
+/// for the last cell where `2n + 1` reports 11.
+///
+/// Both sides are here rather than only the accepting one, because the
+/// number the check compares against is only pinned by a pair that
+/// straddles it: a threshold one column out in either direction passes
+/// a test that names one side alone. The depth guard is what keeps the
+/// actuator pad off the cell row, and
+/// `a_region_one_row_deep_cannot_hold_a_pad_beside_its_cells` covers
+/// the case where it does not.
+#[test]
+fn a_row_of_twice_the_cell_count_plus_one_places_every_cell() {
+    assert!(
+        !placement_of(&source_with_cells(4, 8, 8, 3))
+            .diagnostics
+            .is_empty(),
+        "one column short of the row is refused",
+    );
+
+    let out = placement_of(&source_with_cells(4, 9, 8, 3));
 
     assert!(
         out.diagnostics.is_empty(),
@@ -675,8 +732,9 @@ fn a_row_exactly_as_wide_as_the_cell_count_places_every_cell() {
     assert_eq!(scope.ir.cells.len(), 4);
     assert_eq!(
         scope.ir.cells.last().expect("last cell").coord.x,
-        3,
-        "the last cell must stand in the final column of the row",
+        7,
+        "the last cell must stand in the final column of the row, one short \
+         of the pad column",
     );
 }
 
@@ -753,7 +811,7 @@ struct sens size=8x5
 /// cannot be the whole of it.
 #[test]
 fn a_region_one_row_deep_cannot_hold_a_pad_beside_its_cells() {
-    let out = placement_of(&source_with_cells(4, 4, 1, 4));
+    let out = placement_of(&source_with_cells(4, 9, 1, 4));
 
     assert!(out.scoped.scopes.is_empty());
     let diagnostic = out
