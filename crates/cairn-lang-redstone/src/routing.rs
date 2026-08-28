@@ -614,6 +614,12 @@ mod tests {
                         NetRef::Input(i) => input_pad(i as usize, &region),
                         NetRef::Cell(j) => coords[j as usize],
                     });
+                    let where_it_is = format!(
+                        "{}: {edition:?} {} `{}`",
+                        path.display(),
+                        entry.kind.label(),
+                        entry.name,
+                    );
                     let mut owner: HashMap<CellCoord, NetRef> = HashMap::new();
                     for (net, tree) in &trees {
                         let source = tree.wire_path()[0];
@@ -622,29 +628,10 @@ mod tests {
                         for coord in tree.wire_path() {
                             assert!(
                                 !occupied.contains(&coord) || mine.contains(&coord),
-                                "{}: {edition:?} {} `{}` draws {net:?} through {coord:?}",
-                                path.display(),
-                                entry.kind.label(),
-                                entry.name,
+                                "{where_it_is} draws {net:?} through {coord:?}",
                             );
                         }
-                        // Two nets on one coord is two signals on one
-                        // strand of dust. The proptest in
-                        // `routing_geometry` holds this over generated
-                        // boxes; this holds it over the geometry the
-                        // placement pass actually produces, which is
-                        // where the corpus's crossings used to come
-                        // from.
-                        for coord in router.dust(tree) {
-                            if let Some(other) = owner.insert(coord, *net) {
-                                panic!(
-                                    "{}: {edition:?} {} `{}` runs {net:?} and {other:?} through {coord:?}",
-                                    path.display(),
-                                    entry.kind.label(),
-                                    entry.name,
-                                );
-                            }
-                        }
+                        claim(&mut owner, *net, &router.dust(tree), &where_it_is);
                         for sink in &nets[net] {
                             let route = tree.route_to(*sink).expect("a sink of this net");
                             let walked =
@@ -672,6 +659,43 @@ mod tests {
             "no strand in the corpus goes round anything, so nothing here would \
              notice a router that drew straight through",
         );
+    }
+
+    /// One net's dust, checked against the nets already claimed and
+    /// then added to them.
+    ///
+    /// Two nets on one coord, or one step apart in one plane, are two
+    /// signals on one strand of dust. The proptest in
+    /// `routing_geometry` holds this over generated boxes; the walk
+    /// below holds it over the geometry the placement pass actually
+    /// produces, which is where the corpus's shorts used to come from.
+    ///
+    /// `owner` holds dust and the reach is asked about per coord, so
+    /// two strands two apart — each reaching the coord between them —
+    /// are not mistaken for one.
+    fn claim(
+        owner: &mut std::collections::HashMap<CellCoord, NetRef>,
+        net: NetRef,
+        dust: &[CellCoord],
+        where_it_is: &str,
+    ) {
+        use crate::routing_geometry::beside;
+
+        for coord in dust {
+            for taken in std::iter::once(*coord).chain(beside(*coord)) {
+                if let Some(other) = owner.get(&taken)
+                    && *other != net
+                {
+                    panic!(
+                        "{where_it_is} runs {net:?} through {coord:?}, which \
+                         {other:?} stands on or reaches",
+                    );
+                }
+            }
+        }
+        for coord in dust {
+            owner.insert(*coord, net);
+        }
     }
 
     /// A pad the reservation cannot fit is refused, and the scope is

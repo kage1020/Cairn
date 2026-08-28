@@ -3,20 +3,23 @@
 
 # An escape fixture: two pressure plates feed both gates, whose output
 # signals fan out to two doors at opposite ends of the region. Four
-# nets over a region this size cannot all take their shortest route —
-# two of them would want one coord, and two nets on one coord is one
-# strand of dust carrying two signals.
+# nets over a region this size cannot all take their shortest route.
+# Two of them would want one coord, and dust reads the dust beside it,
+# so two more would want to run in adjacent rows — either way that is
+# one strand carrying two signals.
 #
 # So the routing pass lays each net around the dust of the ones before
-# it, and a net with nowhere to go round climbs to a bridge layer
-# inside the `void=` budget. What the wire form below shows is that
-# escape: a strand that leaves the ground layer not to clear a block
-# but to clear another signal.
+# it and around the coords beside that dust, and a net with nowhere to
+# go round climbs to a bridge layer inside the `void=` budget. What the
+# wire form below shows is that escape: a strand that leaves the ground
+# layer not to clear a block but to clear another signal.
 #
-# The width is `6` and not `5` for the same reason. At `5` the last net
-# has nowhere left at all, and the compiler refuses the scope rather
-# than shorting it — which is the other half of the same rule, and is
-# what `size=` buys here.
+# `void=2` and not `void=1` for the same reason. With no layer above
+# the plane the last net has nowhere left at all, and the compiler
+# refuses the scope rather than shorting it — which is the other half
+# of the same rule, and is what the second layer buys here. The region
+# is wider and deeper than the row strictly needs, so it is the `void`
+# that decides.
 #
 # Kept intentionally minimal so the wire form pinned by the redstone
 # crate's byte-identity crossing integration test reads at a glance.

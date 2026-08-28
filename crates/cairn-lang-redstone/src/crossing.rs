@@ -978,13 +978,20 @@ mod tests {
              coord when each is routed against the blocks alone",
         );
 
-        let mut owner: HashMap<CellCoord, NetRef> = HashMap::new();
-        for (net, tree) in &trees {
-            for coord in router.dust(tree) {
-                assert!(
-                    owner.insert(coord, *net).is_none(),
-                    "{net:?} lays dust on {coord:?}, which another net already owns",
-                );
+        let dust: Vec<(NetRef, Vec<CellCoord>)> = trees
+            .iter()
+            .map(|(net, tree)| (*net, router.dust(tree)))
+            .collect();
+        for (index, (net, mine)) in dust.iter().enumerate() {
+            for (other, theirs) in &dust[index + 1..] {
+                for a in mine {
+                    for b in theirs {
+                        assert!(
+                            a.y != b.y || a.x.abs_diff(b.x) + a.z.abs_diff(b.z) > 1,
+                            "{net:?} lays dust on {a:?} and {other:?} on {b:?},                              which is one strand carrying two signals",
+                        );
+                    }
+                }
             }
         }
     }
