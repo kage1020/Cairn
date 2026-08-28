@@ -559,7 +559,7 @@ mod tests {
     /// not paths.
     #[test]
     fn no_example_draws_dust_inside_a_component() {
-        use std::collections::HashSet;
+        use std::collections::{HashMap, HashSet};
         use std::path::PathBuf;
 
         use cairn_lang_core::{lower, parse};
@@ -613,6 +613,7 @@ mod tests {
                         NetRef::Input(i) => input_pad(i as usize, &region),
                         NetRef::Cell(j) => coords[j as usize],
                     });
+                    let mut owner: HashMap<CellCoord, NetRef> = HashMap::new();
                     for (net, tree) in &trees {
                         let source = tree.wire_path()[0];
                         let mine: HashSet<CellCoord> =
@@ -625,6 +626,23 @@ mod tests {
                                 entry.kind.label(),
                                 entry.name,
                             );
+                        }
+                        // Two nets on one coord is two signals on one
+                        // strand of dust. The proptest in
+                        // `routing_geometry` holds this over generated
+                        // boxes; this holds it over the geometry the
+                        // placement pass actually produces, which is
+                        // where the corpus's crossings used to come
+                        // from.
+                        for coord in router.dust(tree) {
+                            if let Some(other) = owner.insert(coord, *net) {
+                                panic!(
+                                    "{}: {edition:?} {} `{}` runs {net:?} and {other:?} through {coord:?}",
+                                    path.display(),
+                                    entry.kind.label(),
+                                    entry.name,
+                                );
+                            }
                         }
                         for sink in &nets[net] {
                             let route = tree.route_to(*sink).expect("a sink of this net");

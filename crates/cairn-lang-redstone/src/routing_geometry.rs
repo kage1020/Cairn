@@ -833,18 +833,32 @@ impl NetTree {
 /// `NetRef → source coord` mapping (they differ only in how loud they
 /// are about a hand-built IR that breaks the topological invariant),
 /// but the sink side is this one function.
+///
+/// A coord appears once per net however many of that net's drivers end
+/// at it. Two ports of one cell reading one signal are one strand of
+/// dust arriving at one block, and the list's length is read as the
+/// net's fanout by [`net_order`], which decides which net is laid
+/// first and therefore where every net's dust runs. [`Router::tree`]
+/// dedups its terminal list too, so the trees were already right;
+/// what a duplicate moved was the order, and that now moves the wire.
 pub(crate) fn collect_nets(ir: &PlacementIr) -> HashMap<NetRef, Vec<CellCoord>> {
     let mut nets: HashMap<NetRef, Vec<CellCoord>> = HashMap::new();
+    let mut sink = |net: NetRef, coord: CellCoord| {
+        let sinks = nets.entry(net).or_default();
+        if !sinks.contains(&coord) {
+            sinks.push(coord);
+        }
+    };
     for cell in &ir.cells {
         for driver in &cell.drivers {
-            nets.entry(driver.net).or_default().push(cell.coord);
+            sink(driver.net, cell.coord);
         }
     }
     for output in &ir.outputs {
         // The pad the placement pass assigned, not a re-derivation of
         // it: three passes call this function, and a second copy of the
         // `x = width - 1` rule is a second thing to keep in step.
-        nets.entry(output.driver).or_default().push(output.pad);
+        sink(output.driver, output.pad);
     }
     nets
 }
@@ -1831,6 +1845,37 @@ mod tests {
         assert_eq!(nets[&NetRef::Cell(0)], vec![output_pad(0, &region)]);
     }
 
+    /// Two ports of one cell on one net are one sink.
+    ///
+    /// `sig.a and sig.a` reaches the placement IR as a cell with two
+    /// drivers on one net, and one strand of dust arrives at one block.
+    /// The list's length is the fanout [`net_order`] sorts on, so a
+    /// duplicate here would lay this net before one that really does
+    /// feed two sinks — and after this change the order is where every
+    /// net's dust goes.
+    #[test]
+    fn two_ports_of_one_cell_on_one_net_are_one_sink() {
+        let region = reservation(8, 4);
+        let mut ir = one_cell_ir(&region);
+        ir.cells[0].drivers.push(CellPortDriver {
+            port: PortName::B,
+            net: NetRef::Input(0),
+        });
+
+        let nets = collect_nets(&ir);
+        assert_eq!(
+            nets[&NetRef::Input(0)],
+            vec![CellCoord::new(2, 0, 1)],
+            "one cell body, however many of its ports read the net",
+        );
+        assert_eq!(
+            net_order(&nets),
+            vec![NetRef::Input(0), NetRef::Cell(0)],
+            "and one apiece, so the tie is broken by the key rather than by a \
+             fanout one of them does not have",
+        );
+    }
+
     /// `block_sites` is the other half of the same contract: the coords
     /// the router must not draw dust through, in one list so the three
     /// passes cannot disagree about what is standing where.
@@ -2098,26 +2143,38 @@ mod tests {
             /// are one strand of dust carrying two signals, and the
             /// crossing pass no longer looks for that because
             /// [`net_trees`] no longer produces it. Nothing else
-            /// checks it, so it is checked here, over layouts the
-            /// example corpus does not have.
+            /// checks it over arbitrary geometry, so it is checked
+            /// here, over layouts the example corpus does not have.
             ///
-            /// Both nets are drawn from the same block set, which is
+            /// Three nets rather than two, because two only ever
+            /// exercises "avoid the one before me". The third has to
+            /// avoid the union of the two before it, which is the case
+            /// where the accumulating obstacle set could go wrong and
+            /// a per-net one would not.
+            ///
+            /// All three are drawn from the same block set, which is
             /// what makes the case realistic: a scope's nets end at
             /// each other's terminals, and a terminal is not dust.
+            ///
+            /// `prop_assume!` rather than an early return, so a case
+            /// with too few blocks to build three nets from is counted
+            /// as a reject rather than as a pass — the vacuity is in
+            /// proptest's own rejection rate instead of hidden.
             #[test]
             fn no_two_nets_of_a_scope_own_one_coord_of_dust(
                 (void, source, sinks, loose) in layout()
             ) {
+                prop_assume!(loose.len() >= 3);
                 let (router, _) = routed(void, source, &sinks, &loose);
-                let Some((second, rest)) = loose.split_first() else {
-                    return Ok(());
-                };
+                let split = 2 + (loose.len() - 2) / 2;
                 let mut nets: HashMap<NetRef, Vec<CellCoord>> = HashMap::new();
                 nets.insert(NetRef::Input(0), sinks.clone());
-                nets.insert(NetRef::Cell(0), rest.to_vec());
+                nets.insert(NetRef::Cell(0), loose[2..split].to_vec());
+                nets.insert(NetRef::Cell(1), loose[split..].to_vec());
                 let trees = net_trees(&nets, &router, |net| match net {
                     NetRef::Input(_) => source,
-                    NetRef::Cell(_) => *second,
+                    NetRef::Cell(0) => loose[0],
+                    NetRef::Cell(_) => loose[1],
                 });
                 let mut seen: HashSet<CellCoord> = HashSet::new();
                 for (net, tree) in &trees {

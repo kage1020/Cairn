@@ -236,7 +236,7 @@ fn legalize_scope(entry: &ScopedPlacementIrEntry) -> ScopeLegalization {
     // coord is claimed. That is what leaves this pass with a coord to
     // record and no coord to contest, and re-deriving it here would be
     // asking the same function the same question twice.
-    let allocation = allocate_buffer_coords(&ir, &cell_coords, &trees);
+    let allocation = allocate_buffer_coords(&ir, &trees);
 
     for (index, (cell, buffers)) in ir.cells.iter_mut().zip(allocation.per_cell).enumerate() {
         // Loud in release too: `PlacementPhase::legalize_at` panics on
@@ -267,14 +267,10 @@ fn legalize_scope(entry: &ScopedPlacementIrEntry) -> ScopeLegalization {
 /// circuit. Split out of `legalize_scope` so the entry function stays
 /// under clippy's `too_many_lines` budget and the allocation strategy
 /// reads as a self-contained table.
-fn allocate_buffer_coords(
-    ir: &PlacementIr,
-    cell_coords: &[CellCoord],
-    trees: &HashMap<NetRef, NetTree>,
-) -> BufferAllocation {
+fn allocate_buffer_coords(ir: &PlacementIr, trees: &HashMap<NetRef, NetTree>) -> BufferAllocation {
     let mut per_cell: Vec<Vec<BufferCoord>> = Vec::with_capacity(ir.cells.len());
     for (cell_index, cell) in ir.cells.iter().enumerate() {
-        let sink = cell_coords[cell_index];
+        let sink = cell.coord;
         let mut buffers_for_cell: Vec<BufferCoord> = Vec::new();
         for driver in &cell.drivers {
             // `route_to` answers `None` only for a sink that is not a
@@ -1773,10 +1769,13 @@ mod tests {
                                 .expect("every buffer names a driver of its own cell");
                             let dust: HashSet<CellCoord> =
                                 trees[&driver.net].wire_path().into_iter().collect();
-                            let footprint =
-                                CellCoord::new(buffer.coord.x, 0, buffer.coord.z);
+                            // The whole coord, layer included. A
+                            // repeater takes the layer of the route
+                            // coord it stands on, so comparing
+                            // footprints would accept one on the plane
+                            // under wire that had climbed.
                             prop_assert!(
-                                dust.contains(&footprint),
+                                dust.contains(&buffer.coord),
                                 "buffer {:?} is not over dust the routing pass laid for {:?} (xs={:?})",
                                 buffer.coord,
                                 driver.net,
@@ -1796,7 +1795,7 @@ mod tests {
                                 .into_iter()
                                 .collect();
                             prop_assert!(
-                                route.contains(&footprint),
+                                route.contains(&buffer.coord),
                                 "buffer {:?} is not over the route into this cell for {:?} (xs={:?})",
                                 buffer.coord,
                                 driver.net,
