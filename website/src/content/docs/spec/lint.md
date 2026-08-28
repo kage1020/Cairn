@@ -206,12 +206,16 @@ that has a default is the worst of them: the build succeeds, at the default, and
 
 Each keyword's vocabulary is closed, and a `theme` selector widens the one it names — writing
 `window[tags=...]` in a theme makes `tags=` a key something reads on a window, and on nothing else.
-The reverse direction is `E_THEME_SELECTOR_UNMATCHED`.
+The reverse direction is `E_THEME_SELECTOR_UNMATCHED`. A selector coins words; one edit away from a
+word the keyword already has is a typo written twice rather than a coinage, and is refused with the
+suggestion.
 
 `W_IGNORED_ARGUMENT` is a **warning**, and covers two things. A `key=` in the vocabulary whose value
 the pass cannot read is dropped and a default put in its place; and a `key=` this specification
-defines that no pass reads yet — `window shape=` is the one such key today — is carried into the IR
-and never consulted. Both make the build differ from the source. The rule forbids *silent*
+defines that no pass reads yet — `window shape=` / `anchor=` and `roof footprint=` / `bounds=` are
+those keys today — is carried into the IR and never consulted. The boundary is the keyword: a
+spec-defined key on a keyword the compiler knows is reported this way, while a spec-defined
+*keyword* it does not know is `E_UNKNOWN_KEYWORD` and its arguments are not judged at all. Both make the build differ from the source. The rule forbids *silent*
 substitution, and both are announced. In the second case the gap is the compiler's rather than the
 source's, which is why it is not a refusal. Whether autofix is offered is up to the implementation.
 
