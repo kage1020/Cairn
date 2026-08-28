@@ -33,18 +33,29 @@
 //!   terminal set, grown one sink at a time by
 //!   [`crate::routing_geometry::Router`]: the nearest sink still
 //!   unconnected is attached to the wire already laid by the cheapest
-//!   path that runs through no block, and the search behind that is
-//!   what keeps dust out of the cell bodies and pads the reservation
-//!   already holds. Every sink is a leaf, because a component consumes
-//!   the signal that reaches it rather than handing it on. Where
-//!   nothing is in the way the path is the x-then-z-then-y L-shape the
-//!   downstream stages were built around.
-//! - **Unroutable sinks.** A sink with no block-free path from its
-//!   driver — every way out walled in by a component or the edge of the
-//!   reservation — fires `E_ROUTE_CONGESTION` with its own primary
-//!   naming the two coords, and the scope is elided. Refused before the
-//!   area arithmetic below, because the area can be ample and the one
-//!   coord the wire needs still be a cell body.
+//!   path that runs through no block and over no other net's dust, and
+//!   the search behind that is what keeps dust out of the cell bodies
+//!   and pads the reservation already holds. Every sink is a leaf,
+//!   because a component consumes the signal that reaches it rather
+//!   than handing it on. Where nothing is in the way the path is the
+//!   x-then-z-then-y L-shape the downstream stages were built around.
+//! - **One net at a time.** The nets are laid in
+//!   [`crate::routing_geometry::net_order`], and each goes round the
+//!   dust of the ones before it. Two nets on one coord would be one
+//!   strand of dust carrying two signals; §14.5 calls the way out an
+//!   escape, and here it is the same search climbing to a bridge layer
+//!   that already went round a cell body. Doing it at this stage
+//!   rather than at stage 4 is what gets the climb measured: the
+//!   `wire_length` below and the delay pass's tick count are both read
+//!   off the routed tree.
+//! - **Unroutable sinks.** A sink with no free path from its driver —
+//!   every way out walled in by a component, by an earlier net's dust,
+//!   or by the edge of the reservation — fires `E_ROUTE_CONGESTION`
+//!   with its own primary naming the two coords, and the scope is
+//!   elided. Refused before the area arithmetic below, because the area
+//!   can be ample and the one coord the wire needs still be taken. This
+//!   is what a crossing becomes: a layout with nowhere for the second
+//!   net to go is refused rather than shorted.
 //! - **Occupancy.** A per-scope `HashSet<CellCoord>` seeded with
 //!   every cell coord, every input pad, and every output pad, then
 //!   grown by each routed tree. Duplicate visits share (fanout is the
@@ -52,14 +63,8 @@
 //!   — a pad collapsed onto a cell coord or another pad because the
 //!   reservation cannot fit the pad row — the pass fires
 //!   `E_ROUTE_CONGESTION` immediately with a "pad layout" primary
-//!   rather than a silent misroute. Cross-net overlap between
-//!   distinct signals is left standing here — a net is routed against
-//!   the blocks, never against another net's dust; the
-//!   crossing-legalization pass (stage 4 of §14.5) is what owns
-//!   those, and it reports rather than repairs: `W_WIRE_CROSSING`
-//!   names the two nets and the coord, or `E_CROSSING_CONGESTION`
-//!   refuses the scope outright when its `void=<N>` reservation has
-//!   no layer above the plane at all.
+//!   rather than a silent misroute. Between distinct signals there is
+//!   no overlap left to count: the trees are laid around each other.
 //! - **`wire_length` attribution.** For every cell, `wire_length =
 //!   sum over the distinct nets driving it of the routed length from
 //!   that net's source into this cell` — `route_to`, the same measure
@@ -86,8 +91,9 @@
 //! if a consumer ever needs them outside routing — that migration is
 //! `#[non_exhaustive]`-safe on both types. `RouteLayer::Bridge` has two
 //! producers: this pass, whose wire climbs off the ground layer to get
-//! past a block, and [`crate::crossing::compile_crossing`] (stage 4 of
-//! §14.5), which lifts a buffer repeater off a coord it cannot have.
+//! past a block or past another net, and
+//! [`crate::crossing::compile_crossing`] (stage 4 of §14.5), which
+//! lifts a buffer repeater off a coord it cannot have.
 //! Both stamp the layer through
 //! [`crate::placement_ir::CellCoord::new`], so one voxel has one
 //! key. `RouteLayer::Via` has no producer at all: a climb is a step
@@ -863,7 +869,14 @@ mod tests {
             "the refusal names both ends: {}",
             refusal.primary,
         );
-        assert!(refusal.primary.contains("dust does not pass through"));
+        assert!(
+            refusal
+                .primary
+                .contains("a wire passes through none of the three"),
+            "the refusal says why a route cannot be found, not only that one \
+             was not: {}",
+            refusal.primary,
+        );
         assert!(
             routed.scoped.scopes.is_empty(),
             "the failed scope is elided rather than half-attributed",

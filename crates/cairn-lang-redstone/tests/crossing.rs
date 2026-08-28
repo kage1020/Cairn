@@ -50,27 +50,6 @@ fn errors(
         .collect()
 }
 
-/// Nothing refused the scope, and it reported exactly `crossings` wire
-/// crossings.
-///
-/// The count is what keeps `errors(...)` from being a loosening: a fold
-/// that went back to one finding per shared coord would refuse nothing
-/// either.
-fn crossings_only(diagnostics: &[cairn_lang_redstone::Diagnostic], crossings: usize) {
-    assert!(
-        errors(diagnostics).is_empty(),
-        "nothing here refuses the scope: {diagnostics:?}",
-    );
-    assert_eq!(
-        diagnostics
-            .iter()
-            .filter(|d| d.code == DiagnosticCode::WireCrossing)
-            .count(),
-        crossings,
-        "one finding per pair of nets sharing dust: {diagnostics:?}",
-    );
-}
-
 fn load_example(name: &str) -> String {
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("..")
@@ -116,25 +95,25 @@ fn delayed_from_source(source: &str, edition: Edition) -> ScopedPlacementIr {
 }
 
 /// A shared bus of 16 cells legalizes at `void=2`, with one repeater
-/// standing on free wire beside the row.
+/// per refresh point rather than one per cell.
 ///
 /// Every cell reads `sig.b`. The trunk that carries it runs along the
-/// free row at `z=1` and each cell taps off it, so the 15-step point of
-/// the route into each of them is the same coord and one repeater
-/// refreshes all of them.
+/// free row beside the cell row and each cell taps off it, so the
+/// 15-step point of the route into each of them is the same coord and
+/// one repeater refreshes all of them. Two coords rather than one,
+/// because the row is `2 * cells` columns long and the far half of it
+/// is past the second refresh point.
 ///
-/// Both halves of that used to be wrong. The tree reached the far cells
-/// *through* the near ones, so the shared point was a comparator's
-/// body and the repeater had to be lifted onto the one bridge layer
-/// `void=2` reserves; and each further cell asked for a layer of its
-/// own, so the second one exhausted the reservation and a circuit
-/// needing one repeater was refused with `E_BUFFER_COORD_COLLISION`.
+/// That the tree reaches the far cells along a trunk beside the row
+/// and not *through* the near ones is what makes this a small number
+/// at all: a chain threaded through the cell bodies would ask for a
+/// repeater per hop.
 ///
 /// Built from source rather than by hand because the claim is about
 /// what a `.crn` a user can write does, and because the shape depends
-/// on the placement pass laying cells at `x = topological index`.
+/// on where the placement pass lays the cell row.
 #[test]
-fn a_shared_bus_of_sixteen_cells_needs_one_repeater() {
+fn a_shared_bus_of_sixteen_cells_shares_its_repeaters() {
     let mut source = String::from(
         r"
 theme t:
@@ -182,8 +161,9 @@ struct chain size=60x5
         .collect();
     assert_eq!(
         blocks,
-        [(14, 0, 1)].into_iter().collect(),
-        "one block, on the plane, beside the row rather than over it",
+        [(14, 0, 1), (29, 0, 1)].into_iter().collect(),
+        "two blocks, on the plane, beside the row rather than over it — one \
+         per refresh point and not one per cell",
     );
     let attributions = cells
         .iter()
@@ -196,18 +176,18 @@ struct chain size=60x5
 }
 
 /// AC1 — `examples/redstone-door.crn` compiled for Java survives
-/// crossing legalization: both driver segments (1 and 4 blocks) sit
-/// under the dust-attenuation limit of 15 so no buffer coord
-/// materialises, and `buffer_coords` stays empty on the survived cell.
+/// crossing legalization: every driver segment sits under the
+/// dust-attenuation limit of 15 so no buffer coord materialises, and
+/// `buffer_coords` stays empty on the survived cell.
 ///
-/// It does not survive silently. Three nets run in this scope, not
-/// one: each sensor drives the cell, and the cell drives the door.
-/// `sig.exit`'s pad sits behind `sig.step`'s in the `x=0` column, so
-/// its wire comes round through `(1,0,0)` — which is the first coord
-/// of the cell's own run out to the actuator pad. Those two signals
-/// are one strand of dust there, and the scope is kept with a
-/// `W_WIRE_CROSSING` rather than refused: the reservation has a layer
-/// spare, and lifting a wire onto it is the pass v1 does not have.
+/// Three nets run in this scope, not one: each sensor drives the cell,
+/// and the cell drives the door. `sig.exit`'s pad sits behind
+/// `sig.step`'s in the `x=0` column, so its wire has to come round the
+/// pad in front of it, and the row it comes round through is the row
+/// the cell drives its actuator out along. The cell's wire therefore
+/// climbs onto the bridge layer at its own doorstep and runs the
+/// length of the region up there — the escape §14.5 specifies, in the
+/// smallest circuit the corpus has.
 #[test]
 fn redstone_door_java_carries_no_buffers() {
     let source = load_example("redstone-door.crn");
@@ -218,23 +198,12 @@ fn redstone_door_java_carries_no_buffers() {
         "nothing here refuses the scope: {:?}",
         legalized.diagnostics,
     );
-    assert_eq!(
-        legalized
-            .diagnostics
-            .iter()
-            .map(|d| d.code)
-            .collect::<Vec<_>>(),
-        vec![DiagnosticCode::WireCrossing],
-        "the one crossing this example has, reported once: {:?}",
-        legalized.diagnostics,
-    );
     assert!(
-        legalized.diagnostics[0]
-            .primary
-            .contains("sig.exit and cell #0 both run through (1,0,0)"),
-        "the merge is between the second sensor's detour and the cell's \
-         output run: {:?}",
-        legalized.diagnostics[0].primary,
+        legalized.diagnostics.is_empty(),
+        "the second sensor's wire comes round the first sensor's pad and the \
+         cell's outward run goes round that, so there is nothing left to \
+         report: {:?}",
+        legalized.diagnostics,
     );
     let entry = legalized
         .scoped
@@ -254,22 +223,17 @@ fn redstone_door_java_carries_no_buffers() {
     );
 }
 
-/// AC2 — the same example compiled for Bedrock legalizes identically,
-/// down to the crossing: the cell realisation swaps and the geometry
-/// does not, so the same two nets meet on the same coord. `wire_length`
-/// and `delay_ticks` are preserved verbatim from the delayed IR.
+/// AC2 — the same example compiled for Bedrock legalizes identically:
+/// the cell realisation swaps and the geometry does not, so the same
+/// nets take the same coords. `wire_length` and `delay_ticks` are
+/// preserved verbatim from the delayed IR.
 #[test]
 fn redstone_door_bedrock_carries_no_buffers() {
     let source = load_example("redstone-door.crn");
     let delayed = delayed_from_source(&source, Edition::Bedrock);
     let legalized = compile_crossing(&delayed);
-    assert_eq!(
-        legalized
-            .diagnostics
-            .iter()
-            .map(|d| d.code)
-            .collect::<Vec<_>>(),
-        vec![DiagnosticCode::WireCrossing],
+    assert!(
+        legalized.diagnostics.is_empty(),
         "the edition does not move the wire: {:?}",
         legalized.diagnostics,
     );
@@ -382,39 +346,15 @@ fn legalized_with_zero_buffers_is_distinguishable_from_delayed() {
 /// side; (b) the crossings are reported rather than absorbed; (c) a
 /// reported crossing does not shift the wire form.
 ///
-/// The second of the two anchors at `(0,1,0)` — a bridge coord, where
-/// two nets that both climbed to get past a block meet. Reserving a
-/// service layer does not keep the wires apart; the routing pass
-/// spends that layer too.
 #[test]
-fn json_output_byte_identical_apart_from_stage_tag_with_crossings() {
+fn json_output_byte_identical_apart_from_stage_tag_on_a_scope_with_escapes() {
     let source = load_example("crossbar.crn");
     let delayed = delayed_from_source(&source, Edition::Java);
     let legalized = compile_crossing(&delayed);
     assert!(
-        errors(&legalized.diagnostics).is_empty(),
-        "crossbar.crn must survive legalization at void=2: {:?}",
+        legalized.diagnostics.is_empty(),
+        "crossbar.crn must survive legalization: {:?}",
         legalized.diagnostics,
-    );
-    let reported: Vec<&str> = legalized
-        .diagnostics
-        .iter()
-        .filter(|d| d.code == DiagnosticCode::WireCrossing)
-        .map(|d| d.primary.as_str())
-        .collect();
-    assert_eq!(
-        reported.len(),
-        2,
-        "two pairs of nets share dust here: {reported:?}",
-    );
-    assert!(
-        reported[0].contains("sig.a and sig.b both run through (1,0,1)"),
-        "the two sensors meet on the plane: {reported:?}",
-    );
-    assert!(
-        reported[1].contains("sig.b and cell #0 both run through (0,1,0)"),
-        "and a sensor meets a gate on the layer they both climbed to — a \
-         crossing is not a plane-only event: {reported:?}",
     );
 
     let delayed_json = serde_json::to_string_pretty(&delayed).expect("delayed IR serialises");
@@ -428,22 +368,16 @@ fn json_output_byte_identical_apart_from_stage_tag_with_crossings() {
     );
 }
 
-/// AC — two nets over one coord with `void=1` refuse with
-/// `E_CROSSING_CONGESTION`: the same defect the mirror above reports
-/// as a warning, in a reservation with no layer above the plane for a
-/// lift to ever go on.
+/// AC — two nets that want one coord, in a reservation with no layer
+/// above the plane to climb to.
 ///
-/// Not `examples/crossbar.crn` with its `void=` turned down: that
-/// source lays two cells at the head of the row, which walls the first
-/// one in between the second and the sensor pad column. On one service
-/// layer there is nowhere for a wire to go round that, so stage 2
-/// refuses it before any crossing is computed — which the test below
-/// pins. One cell leaves the row open, and the crossing is what is
-/// left: the sensor whose pad sits behind the other one has to come in
-/// through `(1,0,0)`, and that is the coord the cell drives its
-/// actuators out through.
+/// The escape §14.5 specifies is "a bridge tile or a vertical layer",
+/// and `void=1` reserves neither. So the second net has to find its
+/// way round on the plane or not at all, and this fixture is the case
+/// where it cannot: the scope is refused rather than shorted, which is
+/// the whole trade this pipeline makes.
 #[test]
-fn two_nets_crossing_on_one_layer_refuse_with_crossing_congestion() {
+fn two_nets_that_want_one_coord_with_no_layer_above_are_refused() {
     let source = "\
 theme cross:
   slot wall -> @oak_planks
@@ -464,42 +398,49 @@ struct thin size=5x4
 
   circuit region=floor void=1
 ";
-    let delayed = delayed_from_source(source, Edition::Java);
-    let legalized = compile_crossing(&delayed);
-    let refusal = legalized
+    let module = parse(source).expect("parse");
+    let intent = lower(&module);
+    let synth = synthesize(&intent);
+    let netlist = compile_netlist(&synth.scoped);
+    let edition_netlist = compile_edition_netlist(&netlist, Edition::Java);
+    let placement = compile_placement(&edition_netlist, &intent);
+    let routed = compile_routing(&placement.scoped);
+    let refusal = routed
         .diagnostics
         .iter()
-        .find(|d| d.code == DiagnosticCode::CrossingCongestion)
+        .find(|d| d.code == DiagnosticCode::RouteCongestion)
         .unwrap_or_else(|| {
             panic!(
-                "void=1 with two nets over one coord must trip \
-                 E_CROSSING_CONGESTION: {:?}",
-                legalized.diagnostics,
+                "void=1 with two nets wanting one coord must refuse: {:?}",
+                routed.diagnostics,
             )
         });
-    // The one cell here drives both doors, so it has the widest fanout
-    // in the scope and the pass routes it first. A finding is not read
-    // in that order: `sig.b` leads because the IR lists its inputs
-    // before its cells. This fixture is the only one in the repo where
-    // the two orders disagree, so it is the only place the choice is
-    // observable.
     assert!(
         refusal
             .primary
-            .contains("including sig.b vs cell #0 at (1,0,0)"),
-        "the pair is named in the order the IR lists its nets: {}",
+            .contains("dust already laid for another net"),
+        "the refusal says which of the three kinds of obstacle it means: {}",
         refusal.primary,
     );
     assert!(
-        legalized.scoped.scopes.iter().all(|e| e.name != "thin"),
-        "failed scope must elide from the legalized IR",
+        refusal
+            .notes
+            .iter()
+            .any(|n| n.message.contains("raise `void` above 1")),
+        "and the fix names the layer that is missing: {:?}",
+        refusal.notes,
+    );
+    assert!(
+        routed.scoped.scopes.iter().all(|e| e.name != "thin"),
+        "failed scope must elide before anything downstream reads it",
     );
 }
 
 /// AC — `examples/crossbar.crn` with `void=1` never reaches the
-/// crossing pass: its first cell sits in the corner with a sensor pad
-/// on one side and the second cell on the other, and one service layer
-/// leaves the second sensor's signal no way in. Stage 2 says so.
+/// crossing pass. Four nets share the plane, and with no layer above
+/// it the last of them has nowhere to go that the others have not
+/// taken. Stage 2 says so, and says which three sinks it could not
+/// reach rather than only the first.
 #[test]
 fn crossbar_void_one_is_refused_before_any_crossing_is_computed() {
     let source = load_example("crossbar.crn");
@@ -522,8 +463,16 @@ fn crossbar_void_one_is_refused_before_any_crossing_is_computed() {
         .find(|d| d.code == DiagnosticCode::RouteCongestion)
         .unwrap_or_else(|| panic!("void=1 crossbar must refuse: {:?}", routed.diagnostics));
     assert!(
-        refusal.primary.contains("cannot reach (0,0,0)"),
+        refusal.primary.contains("cannot reach (1,0,0)"),
         "the refusal names the cell nothing can reach: {}",
+        refusal.primary,
+    );
+    assert!(
+        refusal
+            .primary
+            .contains("2 more of this scope's sinks cannot be reached either"),
+        "and the count, so a fix-one-recompile loop is not several rounds of \
+         one sizing decision: {}",
         refusal.primary,
     );
     assert!(
@@ -568,7 +517,7 @@ theme t:
   slot wall -> @oak_planks
   slot door -> @oak_door
 
-struct gen size=4x8
+struct gen size=8x8
   floor mat_slot=wall
   door id=front side=front at=center mat_slot=door
   pressure_plate id=p1 at=front.outside offset=0 y=0 -> sig.a
@@ -626,10 +575,11 @@ struct reach size=40x6
 ";
     let delayed = delayed_from_source(source, Edition::Java);
     let out = compile_crossing(&delayed);
-    // Two sensors into one cell, so the second sensor's wire comes
-    // round the first sensor's pad and meets the cell's outward run —
-    // one crossing, and not what this fixture is about.
-    crossings_only(&out.diagnostics, 1);
+    assert!(
+        out.diagnostics.is_empty(),
+        "the fixture legalizes: {:?}",
+        out.diagnostics,
+    );
 
     let scope = out.scoped.scopes.first().expect("the scope legalizes");
     let cell = scope.ir.cells.first().expect("the one cell");
@@ -731,8 +681,11 @@ struct fan size=40x6
     let delayed = delayed_from_source(source, Edition::Java);
     let out = compile_crossing(&delayed);
 
-    // Same two-sensors-one-cell shape, so the same one crossing.
-    crossings_only(&out.diagnostics, 1);
+    assert!(
+        out.diagnostics.is_empty(),
+        "the fixture legalizes: {:?}",
+        out.diagnostics,
+    );
     let scope = out.scoped.scopes.first().expect("the scope legalizes");
     let first = scope.ir.outputs.first().expect("actuator #0");
     let second = scope.ir.outputs.get(1).expect("actuator #1");

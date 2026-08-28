@@ -433,7 +433,7 @@ fn attenuation_diagnostic(
     segment: u32,
 ) -> Diagnostic {
     let primary = format!(
-        "routed netlist for {kind} `{name}` has a driver segment of {segment} blocks into cell #{cell_index} port #{driver_index} — exceeds the v1 attenuation limit of {cap} blocks (dust decays 1/block, so this segment would need {buffers} buffer repeaters and a stage-4 crossing-legalization escape to materialize)",
+        "routed netlist for {kind} `{name}` has a driver segment of {segment} blocks into cell #{cell_index} port #{driver_index} — exceeds the v1 attenuation limit of {cap} blocks (dust decays 1/block, so this segment would need {buffers} buffer repeaters to materialize)",
         kind = entry.kind.label(),
         name = entry.name,
         cap = MAX_ATTENUATION_SEGMENT,
@@ -458,7 +458,7 @@ fn attenuation_output_diagnostic(
     segment: u32,
 ) -> Diagnostic {
     let primary = format!(
-        "routed netlist for {kind} `{name}` has a driver segment of {segment} blocks into output pad #{output_index} — exceeds the v1 attenuation limit of {cap} blocks (dust decays 1/block, so this segment would need {buffers} buffer repeaters and a stage-4 crossing-legalization escape to materialize)",
+        "routed netlist for {kind} `{name}` has a driver segment of {segment} blocks into output pad #{output_index} — exceeds the v1 attenuation limit of {cap} blocks (dust decays 1/block, so this segment would need {buffers} buffer repeaters to materialize)",
         kind = entry.kind.label(),
         name = entry.name,
         cap = MAX_ATTENUATION_SEGMENT,
