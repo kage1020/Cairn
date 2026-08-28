@@ -85,7 +85,6 @@
 //! [`crate::placement_ir::PlacementStage`]).
 
 use std::collections::HashMap;
-use std::collections::HashSet;
 
 use crate::delay::{DUST_ATTENUATION_LIMIT, buffer_count_for_segment};
 use crate::diagnostic::{Diagnostic, DiagnosticCode};
@@ -231,25 +230,12 @@ fn legalize_scope(entry: &ScopedPlacementIrEntry) -> ScopeLegalization {
         return Err(diagnostic);
     }
 
-    // Stated here rather than assumed downstream: every coord a
-    // repeater can be asked to stand on is a coord of its own net's
-    // route, and stage 2 lays each net around the dust of the ones
-    // before it, so no other net can be standing there. That is what
-    // leaves this pass with a coord to record and no coord to
-    // contest.
-    debug_assert!(
-        {
-            let mut dust: HashSet<CellCoord> = HashSet::new();
-            trees
-                .values()
-                .flat_map(|tree| router.dust(tree))
-                .all(|coord| dust.insert(coord))
-        },
-        "two nets share a wire coord: stage 2 routes each net around the dust \
-         of the ones before it, and two signals on one strand is what that \
-         prevents",
-    );
-
+    // Every coord a repeater can be asked to stand on is a coord of
+    // its own net's route, and `net_trees` asserts as it builds that no
+    // two nets own one coord of dust — in release, at the point the
+    // coord is claimed. That is what leaves this pass with a coord to
+    // record and no coord to contest, and re-deriving it here would be
+    // asking the same function the same question twice.
     let allocation = allocate_buffer_coords(&ir, &cell_coords, &trees);
 
     for (index, (cell, buffers)) in ir.cells.iter_mut().zip(allocation.per_cell).enumerate() {

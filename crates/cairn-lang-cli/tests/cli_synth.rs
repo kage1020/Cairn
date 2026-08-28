@@ -1043,9 +1043,10 @@ struct crossbar size=5x4
     );
     assert!(
         stderr.contains("routed netlist for struct `crossbar`")
-            && stderr.contains("dust already laid for another net"),
-        "the refusal names the scope and which of the three kinds of obstacle \
-         it means, got: {stderr}",
+            && stderr.contains("dust already laid for another net")
+            && stderr.contains("the coords beside it carry cell #0 and sig.a"),
+        "the refusal names the scope, which of the three kinds of obstacle \
+         it means, and the net standing in the way, got: {stderr}",
     );
     // Which other code leaked would say the fixture drifted into an
     // over-long segment rather than into the congestion this is about.

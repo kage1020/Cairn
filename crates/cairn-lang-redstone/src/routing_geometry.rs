@@ -894,6 +894,14 @@ pub(crate) fn net_order(nets: &HashMap<NetRef, Vec<CellCoord>>) -> Vec<NetRef> {
 /// names the same one every run, and the count comes with it: the
 /// router strands every remaining sink of a net at once, so a fix-one-
 /// recompile loop would be several rounds of the same sizing decision.
+///
+/// The three causes the primary lists are not equally likely and the
+/// message cannot tell which one applied — the search reports that it
+/// failed, not what it hit last. What it can do is name the nets whose
+/// dust runs beside the sink it could not reach, which is the cause
+/// the author can act on and the only one this pass created. Blocks
+/// beside it are not named: a cell body or a pad beside a cell body is
+/// the layout the author wrote, and saying so adds nothing.
 pub(crate) fn unroutable<F>(
     nets: &HashMap<NetRef, Vec<CellCoord>>,
     trees: &HashMap<NetRef, NetTree>,
@@ -921,6 +929,19 @@ where
         sy = source.y,
         sz = source.z,
     );
+    let crowding = crowding_nets(nets, trees, &source_of_net, net, sink);
+    if !crowding.is_empty() {
+        write!(
+            primary,
+            "; the coords beside it carry {names}",
+            names = crowding
+                .iter()
+                .map(|net| net_label(*net, &entry.ir))
+                .collect::<Vec<_>>()
+                .join(" and "),
+        )
+        .expect("writing to a String cannot fail");
+    }
     if stranded > 1 {
         write!(
             primary,
@@ -935,11 +956,76 @@ where
         primary,
     );
     diag = diag.with_footer(format!(
-        "Fix: raise `void` above {void} so the wire has a layer to climb over the cell row, enlarge `size=WxH`, or split into multiple `circuit` blocks",
+        "Fix: raise `void` above {void} so the wire has a layer to climb onto, enlarge `size=WxH`, or split into multiple `circuit` blocks",
         void = region.void,
     ));
     debug_assert_eq!(diag.severity(), Severity::Error);
     Some(diag)
+}
+
+/// The other nets whose dust runs on a coord next to `sink`, in
+/// [`net_order`].
+///
+/// "Next to" is the six rectilinear steps, the ones a wire could have
+/// come in through. A net's own dust is not counted — it is not what
+/// stopped it — and neither is anything on a terminal, because a
+/// terminal is a block and the message already says blocks are in the
+/// way.
+fn crowding_nets<F>(
+    nets: &HashMap<NetRef, Vec<CellCoord>>,
+    trees: &HashMap<NetRef, NetTree>,
+    source_of_net: &F,
+    stranded: NetRef,
+    sink: CellCoord,
+) -> Vec<NetRef>
+where
+    F: Fn(NetRef) -> CellCoord,
+{
+    let mut terminals: HashSet<CellCoord> = HashSet::new();
+    for (net, sinks) in nets {
+        terminals.insert(keyed(source_of_net(*net)));
+        terminals.extend(sinks.iter().copied().map(keyed));
+    }
+    let beside: HashSet<CellCoord> = STEPS
+        .iter()
+        .filter_map(|(dx, dy, dz)| {
+            let axis = |value: u32, delta: i64| -> Option<u32> {
+                u32::try_from(i64::from(value).checked_add(delta)?).ok()
+            };
+            Some(CellCoord::new(
+                axis(sink.x, *dx)?,
+                axis(sink.y, *dy)?,
+                axis(sink.z, *dz)?,
+            ))
+        })
+        .collect();
+    net_order(nets)
+        .into_iter()
+        .filter(|net| *net != stranded)
+        .filter(|net| {
+            trees[net]
+                .wire_path()
+                .iter()
+                .any(|coord| beside.contains(coord) && !terminals.contains(coord))
+        })
+        .collect()
+}
+
+/// Human-facing name for a net: the sensor's dotted `sig.<name>` when
+/// the scope carries one at that index, `cell #j` for a synthesised
+/// gate, which the Netlist IR has no source-level name for.
+///
+/// The `input pad #i` fall-back is for a hand-built IR whose input row
+/// is shorter than the synthesis path implies; a diagnostic naming
+/// nothing is worse than one naming an index.
+fn net_label(net: NetRef, ir: &PlacementIr) -> String {
+    match net {
+        NetRef::Input(i) => ir
+            .inputs
+            .get(i as usize)
+            .map_or_else(|| format!("input pad #{i}"), |input| input.name.to_string()),
+        NetRef::Cell(j) => format!("cell #{j}"),
+    }
 }
 
 /// The routed tree of every net, keyed by driver.
@@ -965,7 +1051,26 @@ where
     let mut trees: HashMap<NetRef, NetTree> = HashMap::with_capacity(nets.len());
     for net in net_order(nets) {
         let tree = router.tree(source_of_net(net), &nets[&net], &laid);
-        laid.extend(router.dust(&tree));
+        for coord in router.dust(&tree) {
+            // Loud in release, and here rather than downstream. Two
+            // nets on one coord is two signals on one strand of dust,
+            // and there is no diagnostic left that would name it: the
+            // codes that used to are gone, and the routed paths do not
+            // reach the IR, so a consumer of a wrong answer has nothing
+            // to inspect. `HashSet::extend` throws the "was it already
+            // there" bool away; asking for it is one branch per dust
+            // coord at the one place the coord is claimed.
+            assert!(
+                laid.insert(coord),
+                "{net:?} lays dust on ({x},{y},{z}), which another net of this \
+                 scope already owns — the router is asked to go round what is \
+                 already laid, so this is the routing pass disagreeing with \
+                 itself rather than anything the source can express",
+                x = coord.x,
+                y = coord.y,
+                z = coord.z,
+            );
+        }
         trees.insert(net, tree);
     }
     trees

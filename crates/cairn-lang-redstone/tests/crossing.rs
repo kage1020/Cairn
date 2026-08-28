@@ -367,7 +367,7 @@ fn json_output_byte_identical_apart_from_stage_tag_on_a_scope_with_escapes() {
     assert_eq!(
         normalize_stage_tags(&delayed_json),
         normalize_stage_tags(&legalized_json),
-        "an escape laid at stage 2 must reach this pass as wire and not as          work: the legalized wire form is the delayed one",
+        "an escape laid at stage 2 reaches this pass as wire, not as work",
     );
 }
 
@@ -423,6 +423,13 @@ struct thin size=5x4
             .primary
             .contains("dust already laid for another net"),
         "the refusal says which of the three kinds of obstacle it means: {}",
+        refusal.primary,
+    );
+    assert!(
+        refusal
+            .primary
+            .contains("the coords beside it carry cell #0 and sig.a"),
+        "and names the nets in the way, in net order: {}",
         refusal.primary,
     );
     assert!(
