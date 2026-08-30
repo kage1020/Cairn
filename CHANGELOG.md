@@ -385,6 +385,24 @@ and is a separate axis from the Minecraft target version.
 
 ### Fixed
 
+- *(tree-sitter)* A line may end in whitespace. The grammar refused a trailing space before a line
+  break and a blank line made of spaces — three shapes `cairn-lang-core` accepts, and ones an
+  editor without trim-on-save writes by accident, so a `.crn` file that compiles could fail to
+  highlight.
+
+  The external scanner is consulted before tree-sitter skips the `/ +/` extra, so a run of spaces
+  is what it sees wherever one stands. At the start of a line that run is the line's indentation,
+  whose length the indent logic needs; anywhere else it is separator whitespace. The two are told
+  apart by where the line began, which the scanner already records — so the run is now read once
+  and *counted*, and every branch works from the count rather than measuring it back off the
+  column afterwards. That is what lets the run be consumed before the line-break handling instead
+  of standing in front of it.
+
+  Also refused where they were not before: an odd indent, a jump of more than one level, and a tab,
+  on a line the preceding break could not speak for. A declaration header's break is followed by an
+  indent and nothing else, so the blank line after it is crossed by the scanner rather than
+  consumed as a break, and the line it lands on is now measured where it stands.
+
 - *(core)* The volume a struct lowers into is sized for the members that will paint. Three ways a
   member could shape the array and put no block in it. A `roof` that will not draw gave its `overhang=` to
   the footprint and nothing to the height, because one of the two roof walks asked whether the roof

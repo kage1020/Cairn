@@ -56,6 +56,10 @@ four-input table is sixteen rows, and an author part way through is not blocked.
 Indentation is two spaces per level and opens one level at a time. A width that is not a multiple of
 two and a jump of more than one level are different mistakes and are reported as such.
 
+Spaces before a line break are not part of the line, so a row may end in them, and a line holding
+nothing but spaces is a blank line. A blank line's leading spaces are counted like any other line's
+and then discarded with the line, so their width is neither an indent nor a mistake.
+
 A UTF-8 byte-order mark at the very start of a file is ignored; one anywhere else is an ordinary
 stray character.
 
