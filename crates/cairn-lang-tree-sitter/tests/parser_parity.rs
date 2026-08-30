@@ -367,6 +367,33 @@ const FIXTURES: &[(&str, &str, Verdict)] = &[
         Reject,
     ),
     ("tab_indent", "theme t:\n\tslot a -> @b\n", Reject),
+    // The same three refusals, on a line the preceding break could not
+    // speak for. A break is where an illegal indent is normally refused,
+    // one line early — but a header's break is followed by an `_indent`
+    // and nothing else, so no NEWLINE is asked for at the blank line
+    // after it, and the blank line is crossed by the scanner's own
+    // blank-line loop instead. The line the loop lands on is measured
+    // where it stands.
+    (
+        "odd_indent_after_a_blank_line",
+        "struct s size=3x3\n\n   floor a=1\n",
+        Reject,
+    ),
+    (
+        "odd_indent_after_a_comment_line",
+        "struct s size=3x3\n# c\n   floor a=1\n",
+        Reject,
+    ),
+    (
+        "indent_jump_after_a_blank_line",
+        "struct s size=3x3\n\n      floor a=1\n",
+        Reject,
+    ),
+    (
+        "tab_indent_after_a_blank_line",
+        "struct s size=3x3\n\n\tfloor a=1\n",
+        Reject,
+    ),
     ("first_line_indented", "  theme t:\n", Reject),
     ("first_line_indented_odd", " theme t:\n", Reject),
     ("first_line_indented_after_blank", "\n  theme t:\n", Reject),
@@ -749,6 +776,43 @@ fn a_broken_line_does_not_displace_the_lines_after_it() {
         placed,
         vec![(1usize, "floor".to_owned())],
         "recovery placed a member the source does not have there",
+    );
+}
+
+/// A tab-indented line does not close the body it stands in.
+///
+/// Refusing a tab is not what this pins — the `/ +/` extra matches spaces
+/// and nothing else, so a tab reaches tree-sitter's own lexer as a
+/// character no token starts with, and the file is refused whether or not
+/// the scanner declines first. What the scanner's refusal buys is the
+/// indent stack: a tab counts as zero leading spaces, so answering at all
+/// reads the line as a return to level 0 and emits the DEDENTs to match,
+/// closing bodies the author never closed.
+///
+/// The cost lands on the lines after it, which is why it is asserted
+/// here and cannot be asserted in `FIXTURES`: the verdict is `Reject`
+/// either way. Measured, with the tab refusal removed, this source keeps
+/// only its first member — the two behind the tab line are swallowed by
+/// the recovery that follows the bodies being closed under them.
+#[test]
+fn a_tab_indented_line_does_not_close_the_body_around_it() {
+    let mut parser = new_parser();
+    let source = "struct s size=3x3\n  a x=1\n\tb x=2\n  c x=3\n";
+    let tree = parser.parse(source, None).expect("parse produced no tree");
+    assert!(
+        tree.root_node().has_error(),
+        "the fixture is supposed to be malformed; it no longer is",
+    );
+    let mut placed = Vec::new();
+    grammar_members(tree.root_node(), source, 0, &mut placed);
+    assert_eq!(
+        placed,
+        vec![
+            (1usize, "a".to_owned()),
+            (1usize, "b".to_owned()),
+            (1usize, "c".to_owned()),
+        ],
+        "a tab closed the body the rows after it are written in",
     );
 }
 
