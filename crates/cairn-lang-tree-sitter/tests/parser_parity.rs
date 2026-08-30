@@ -758,6 +758,32 @@ const KNOWN_DIVERGENCES: &[(&str, &str, Verdict)] = &[
         "struct s size=3x3\n  floor n=99999999999999999999\n",
         Accept,
     ),
+    // -- a bodyless declaration with nothing but layout behind it -----
+    //
+    // The blank and comment lines after a declaration with no body are
+    // crossed by the `_line_start` in front of whatever follows them. At
+    // the end of a file nothing follows, so nothing asks, and the layout
+    // is left over. A declaration *with* a body absorbs it through that
+    // body's trailing `repeat1($._newline)`, and a directive through its
+    // own, which is why this is the one position where it survives —
+    // `theme empty:\n` parses, and so does a bodyless declaration with
+    // another declaration behind the blank line.
+    //
+    // Closing it means making trailing layout consumable with no
+    // construct behind it. The obvious shape — a `repeat($._newline)` at
+    // the end of `source_file` — is ambiguous against the one at the
+    // start, which owns the same tokens for a file that holds nothing
+    // else, and tree-sitter refuses to generate it.
+    (
+        "bodyless_decl_then_blank_line_at_eof",
+        "theme a:\n\n",
+        Reject,
+    ),
+    (
+        "bodyless_decl_then_comment_line_at_eof",
+        "theme a:\n# c\n",
+        Reject,
+    ),
     // -- a size separator with a space after it -----------------------
     //
     // `2x 2` is two arguments to `parse_command`: `scan_number` reads the
