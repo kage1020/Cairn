@@ -1070,6 +1070,57 @@ mod tests {
 
     use super::*;
 
+    fn position(line: u32, col: u32) -> Position {
+        Position {
+            line: NonZeroU32::new(line).expect("line"),
+            col: NonZeroU32::new(col).expect("col"),
+        }
+    }
+
+    /// Every byte offset survives the trip out to a position and back.
+    ///
+    /// The two conversions are written separately — one walks the line
+    /// starts forward, the other counts characters along a line — so
+    /// nothing but this says they agree. Non-ASCII on both sides of a
+    /// break, because the column counts Unicode scalar values and a
+    /// byte-counting version passes an ASCII-only round trip.
+    #[test]
+    fn a_byte_offset_survives_the_round_trip_through_a_position() {
+        let source = "α\nfoo\nβar\n";
+        let index = LineStarts::new(source);
+        for (offset, _) in source.char_indices() {
+            assert_eq!(
+                index.offset_of(source, index.position(source, offset)),
+                offset,
+                "round trip failed at byte {offset}",
+            );
+        }
+    }
+
+    /// A position from outside the source clamps instead of panicking.
+    ///
+    /// Nothing in this crate can reach it — a `ParseError` reports a
+    /// position into the source it failed on — so the guard exists for the
+    /// caller holding a position from a *different* revision of a
+    /// document, which an editor does between a keystroke and a re-parse.
+    /// Asserted here because there is nowhere else it can be.
+    #[test]
+    fn a_position_from_outside_the_source_clamps() {
+        let source = "ab\ncd";
+        let index = LineStarts::new(source);
+        assert_eq!(
+            index.offset_of(source, position(1, 99)),
+            2,
+            "a column past the end of its line clamps to that line's end, \
+             before the terminator",
+        );
+        assert_eq!(
+            index.offset_of(source, position(9, 1)),
+            source.len(),
+            "a line past the end of the source clamps to its end",
+        );
+    }
+
     /// Stable strings of every code the predicate accepts, sorted.
     ///
     /// The left side comes from `EnumIter`, so the assertions below are

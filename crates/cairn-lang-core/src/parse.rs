@@ -39,14 +39,24 @@ pub fn parse(source: &str) -> Result<Module, ParseError> {
 ///
 /// The span runs from the position the error reports to the end of that
 /// line. A [`ParseError`] carries a position and not a range — the parser
-/// stops *at* a token rather than over a construct — and a zero-width span
-/// renders in an editor as a caret with nothing under it, so the rest of
-/// the line is what gives the finding something to underline. It stops
+/// stops *at* a token rather than over a construct — so the rest of the
+/// line is what gives an error inside one something to underline. It stops
 /// before the line's terminator, so the underline cannot run into the row
 /// below.
+///
+/// The largest class of parse failure gets nothing from that, and is meant
+/// to. `expected X, got end of line` is reported *at* the end of its line,
+/// so the span is empty and an editor draws a caret rather than a
+/// squiggle — which is the right picture: nothing on the line is wrong,
+/// something is missing after it.
+///
+/// Takes the line index rather than building one, which is what
+/// [`LineStarts`]' own documentation asks of a caller that will look up
+/// more than one position: every renderer of this diagnostic needs an
+/// index to put a position in front of the message, so building a second
+/// one here would walk the source twice for one finding.
 #[must_use]
-pub fn diagnose_parse_failure(source: &str, err: &ParseError) -> Diagnostic {
-    let lines = LineStarts::new(source);
+pub fn diagnose_parse_failure(source: &str, lines: &LineStarts, err: &ParseError) -> Diagnostic {
     let start = lines.offset_of(source, err.position());
     let end = lines.line_end(source, start).max(start);
     Diagnostic {

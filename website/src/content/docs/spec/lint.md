@@ -135,12 +135,16 @@ for 4–6, and ≤ 3 beyond. The closed-set listing (`expected one of: ...`) is 
 
 ## 11.2 Machine-readable payload
 
-Every command that takes `--format json` writes exactly one JSON document to stdout, for every
-input it is given. `check`'s document is an array of findings, so a source that does not parse is
+`check` and `info` each write exactly one JSON document to stdout under `--format json`, for every
+input they are given. `check`'s document is an array of findings, so a source that does not parse is
 that array with one `E_PARSE` element. `info`'s is the report; where there is no report — a parse
 failure, or any error-severity finding — it writes `{"diagnostics": [ ... ]}` instead, told apart
 from a report by its keys and by the exit code. Warnings on a run that still has a report are
 reported as text on stderr in both formats.
+
+`parse` and `lower` take the flag too and do **not** hold to that yet: their product is a dump
+rather than a report, and on a source that fails they write nothing to stdout and report the failure
+on stderr. Whether a dump owes a document where it has nothing to dump is open.
 
 `--format json` renders one object per finding:
 

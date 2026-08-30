@@ -15,7 +15,7 @@
 //! wrong line, since VS Code and Monaco both break on `\r\n|\r|\n` and this
 //! index broke on `\n` alone.
 
-use cairn_lang_core::{Position as CorePosition, Span};
+use cairn_lang_core::Span;
 
 /// Precomputed line-start byte offsets for one document revision.
 ///
@@ -64,29 +64,6 @@ impl LineIndex {
             start: self.position(source, span.start),
             end: self.position(source, span.end),
         }
-    }
-
-    /// Inverse conversion for parse/lex errors, which carry a 1-based
-    /// line / Unicode-scalar-value [`CorePosition`] instead of a byte span:
-    /// recover the byte offset of that position. Columns past the end of
-    /// the line clamp to the line's last byte; lines past the end of the
-    /// source clamp to `source.len()` — deliberately unlike
-    /// [`LineIndex::offset_at`], which refuses them. The input here comes
-    /// from the compiler rather than from a client, so there is nobody to
-    /// refuse and an anchor at EOF keeps the diagnostic on screen.
-    #[must_use]
-    pub fn offset_of(&self, source: &str, pos: CorePosition) -> usize {
-        let line_idx = pos.line.get() as usize - 1;
-        let Some(&line_start) = self.line_starts.get(line_idx) else {
-            return source.len();
-        };
-        let line_end = self.line_end(source, line_start);
-        let line = &source[line_start..line_end];
-        let scalar_col = pos.col.get() as usize - 1;
-        line.char_indices()
-            .map(|(i, _)| i)
-            .nth(scalar_col)
-            .map_or(line_end, |rel| line_start + rel)
     }
 
     /// Inverse of [`LineIndex::position`]: recover the byte offset of a
@@ -143,18 +120,7 @@ impl LineIndex {
 
 #[cfg(test)]
 mod tests {
-    use std::num::NonZeroU32;
-
-    use cairn_lang_core::check::position_at;
-
     use super::*;
-
-    fn core_pos(line: u32, col: u32) -> CorePosition {
-        CorePosition {
-            line: NonZeroU32::new(line).expect("line"),
-            col: NonZeroU32::new(col).expect("col"),
-        }
-    }
 
     #[test]
     fn position_is_zero_based_on_ascii_lines() {
@@ -249,34 +215,6 @@ mod tests {
                 character: 3
             }
         );
-    }
-
-    #[test]
-    fn offset_of_round_trips_with_core_position_at() {
-        // For every char boundary, converting the byte offset through
-        // core's `position_at` and back through `offset_of` recovers the
-        // original offset. Non-ASCII chars included so scalar-value column
-        // arithmetic is exercised.
-        let source = "α\nfoo\nβar\n";
-        let index = LineIndex::new(source);
-        for (offset, _) in source.char_indices() {
-            let core = position_at(source, offset);
-            assert_eq!(
-                index.offset_of(source, core),
-                offset,
-                "round trip failed at byte {offset}",
-            );
-        }
-    }
-
-    #[test]
-    fn offset_of_clamps_past_line_and_source_ends() {
-        let source = "ab\ncd";
-        let index = LineIndex::new(source);
-        // Column past the end of line 1 clamps to its line end (byte 2).
-        assert_eq!(index.offset_of(source, core_pos(1, 99)), 2);
-        // Line past the end of the source clamps to source.len().
-        assert_eq!(index.offset_of(source, core_pos(9, 1)), source.len());
     }
 
     #[test]

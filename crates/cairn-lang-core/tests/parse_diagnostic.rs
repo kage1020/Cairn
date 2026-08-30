@@ -8,7 +8,7 @@
 
 use cairn_lang_core::check::LineStarts;
 use cairn_lang_core::error::{LexError, ParseError};
-use cairn_lang_core::{Severity, diagnose_parse_failure, parse};
+use cairn_lang_core::{Diagnostic, Severity, diagnose_parse_failure, parse};
 
 /// One source per shape a parse can fail in.
 ///
@@ -54,6 +54,11 @@ const REFUSED: &[(&str, &str, &str)] = &[
         "InvalidInt",
     ),
     ("syntax", "widget w\n  floor mat_slot=f\n", "Syntax"),
+    // The largest class: the parser reaches the end of a line wanting
+    // something more. It is reported *at* that end, so its span is empty —
+    // the row that keeps the assertions below honest about what "to the
+    // end of its line" is worth when the line has already ended.
+    ("end_of_line", "struct s size=\n", "Syntax"),
 ];
 
 /// A value nested past the parser's depth limit, built rather than written
@@ -101,11 +106,16 @@ fn refusal(source: &str) -> ParseError {
     parse(source).expect_err("the fixture is supposed to be refused; it no longer is")
 }
 
+/// The diagnostic a source's refusal renders as.
+fn diagnose(source: &str) -> Diagnostic {
+    diagnose_parse_failure(source, &LineStarts::new(source), &refusal(source))
+}
+
 /// Every shape a parse fails in renders under one code.
 #[test]
 fn every_refusal_carries_the_parse_code() {
     for (name, source) in rows() {
-        let diagnostic = diagnose_parse_failure(&source, &refusal(&source));
+        let diagnostic = diagnose(&source);
         assert_eq!(
             diagnostic.code.as_str(),
             "E_PARSE",
@@ -137,18 +147,19 @@ fn the_refusals_cover_the_shapes_they_claim() {
     );
 }
 
-/// The diagnostic points where the error says it does, and reaches the end
-/// of the line it starts on.
+/// The diagnostic starts where the error says it does and never crosses a
+/// line break.
 ///
-/// A parse failure has a position and no span — the parser stops at a
-/// token, it does not carry a range for the construct that failed. Giving
-/// the diagnostic the rest of the line is what makes it visible in an
-/// editor: a zero-width range renders as a caret with nothing under it.
+/// Not "and reaches the end of the line", which is what a parse failure's
+/// span is *bounded* by rather than what it always is: an error reported
+/// at the end of a line — `expected X, got end of line`, the largest class
+/// — starts there and ends there, and the `end_of_line` row above is in
+/// the table so that case is measured rather than assumed away.
 #[test]
-fn the_span_runs_from_the_reported_position_to_the_end_of_its_line() {
+fn the_span_starts_where_the_error_does_and_stays_on_its_line() {
     for (name, source) in rows() {
         let err = refusal(&source);
-        let diagnostic = diagnose_parse_failure(&source, &err);
+        let diagnostic = diagnose_parse_failure(&source, &LineStarts::new(&source), &err);
         let lines = LineStarts::new(&source);
         assert_eq!(
             lines.position(&source, diagnostic.span.start),
@@ -177,7 +188,7 @@ fn the_span_runs_from_the_reported_position_to_the_end_of_its_line() {
 fn the_message_is_the_error_without_its_position() {
     for (name, source) in rows() {
         let err = refusal(&source);
-        let diagnostic = diagnose_parse_failure(&source, &err);
+        let diagnostic = diagnose_parse_failure(&source, &LineStarts::new(&source), &err);
         assert_eq!(
             diagnostic.primary,
             err.user_message(),
@@ -191,6 +202,24 @@ fn the_message_is_the_error_without_its_position() {
     }
 }
 
+/// An error reported at the end of a line has an empty span, and that is
+/// the picture it should draw.
+///
+/// A caret where something is missing, rather than a squiggle under text
+/// that is not wrong. Asserted rather than left to the bound above, which
+/// an implementation widening every span to at least one character would
+/// still satisfy.
+#[test]
+fn an_error_at_the_end_of_a_line_underlines_nothing() {
+    let source = "struct s size=\n";
+    let diagnostic = diagnose(source);
+    assert_eq!(
+        diagnostic.span.start, diagnostic.span.end,
+        "an error with nothing after it on the line should draw a caret, \
+         not underline the line it is at the end of",
+    );
+}
+
 /// A parse failure obeys the prose rules every other diagnostic obeys.
 ///
 /// `diagnostic_text.rs` sweeps the check pass's findings, and it cannot
@@ -200,7 +229,7 @@ fn the_message_is_the_error_without_its_position() {
 #[test]
 fn no_refusal_message_breaks_the_line_it_is_rendered_on() {
     for (name, source) in rows() {
-        let text = diagnose_parse_failure(&source, &refusal(&source)).primary;
+        let text = diagnose(&source).primary;
         assert!(
             !text.contains("  "),
             "{name} renders a run of spaces, which is a dropped `\\` line \

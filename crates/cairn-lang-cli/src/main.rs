@@ -5,7 +5,7 @@ use std::process::ExitCode;
 
 use cairn_lang_core::CAIRN_VERSION;
 use cairn_lang_core::block_array::{BlockArray, BlockArrayIr, lower_to_block_array};
-use cairn_lang_core::check::{DiagnosticNote as Note, LineStarts};
+use cairn_lang_core::check::{DiagnosticNote as Note, LineStarts, RenderedDiagnostic};
 use cairn_lang_core::lock::{
     HashHex, LOCK_SCHEMA_VERSION, LockEdition, LockError, LockInputs, LockPlacement, LockTarget,
     LockWalkway, Lockfile, hash_resolved_ir, hash_source,
@@ -438,43 +438,75 @@ fn run_parse(file: &Path, format: Format) -> ExitCode {
     }
 }
 
-/// Report a parse failure on stderr in the shape every other diagnostic
-/// is reported in: `file:line:col: error[CODE]: message`.
+/// Report one diagnostic on stderr, in the gcc-style shape every
+/// subcommand reports its findings in, with its notes under it.
+///
+/// One place rather than seven. The same five lines and the same
+/// `report_notes` call stood in every command that reads a source, which
+/// is how a bare `error:` line with no code survived beside them for the
+/// one finding that had no [`Diagnostic`] to render from.
+///
+/// [`report_synth_diagnostics`] is the eighth copy and stays one: it reads
+/// `cairn_lang_redstone::Diagnostic`, a different type that renders the
+/// same way, and see there for why the two are not merged.
+fn report_diagnostic(file: &Path, source: &str, lines: &LineStarts, d: &Diagnostic) {
+    eprintln!(
+        "{}:{}: {}[{}]: {}",
+        file.display(),
+        lines.position(source, d.span.start),
+        d.severity().as_str(),
+        d.code.as_str(),
+        d.primary,
+    );
+    report_notes(file, source, lines, &d.notes);
+}
+
+/// Report a parse failure the way every other finding is reported.
 ///
 /// Five subcommands read a source, and each rendered this by hand as a
 /// bare `error:` line with no code — the one finding a reader could not
 /// look up in `spec/lint.md`, and the one a grep for `error[E_` missed.
-/// Rendering it from the core diagnostic is what makes the two agree.
 fn report_parse_failure(file: &Path, source: &str, err: &ParseError) {
-    let diagnostic = diagnose_parse_failure(source, err);
     let lines = LineStarts::new(source);
-    eprintln!(
-        "{}:{}: {}[{}]: {}",
-        file.display(),
-        lines.position(source, diagnostic.span.start),
-        diagnostic.severity().as_str(),
-        diagnostic.code.as_str(),
-        diagnostic.primary,
-    );
+    let diagnostic = diagnose_parse_failure(source, &lines, err);
+    report_diagnostic(file, source, &lines, &diagnostic);
 }
 
-/// Serialise `diagnostics` for a `--format json` consumer, or report the
-/// serialisation failure and give the caller an exit code.
-fn rendered_json(source: &str, diagnostics: &[Diagnostic]) -> Result<String, ExitCode> {
-    let lines = LineStarts::new(source);
-    // Render to the `RenderedDiagnostic` form so the JSON output carries
-    // `line` / `col` / `end_line` / `end_col` — without this the
-    // `--format json` contract for downstream tooling would ship only
-    // `code` / `severity` / `primary` / `notes`, with no source position
-    // at all.
-    let rendered: Vec<_> = diagnostics
+/// Render diagnostics into the wire form `--format json` ships.
+///
+/// The `RenderedDiagnostic` form rather than the `Diagnostic` one, because
+/// that is what carries `line` / `col` / `end_line` / `end_col`: serialising
+/// the diagnostic itself would ship `code` / `severity` / `primary` /
+/// `notes` with no source position at all.
+fn rendered(
+    source: &str,
+    lines: &LineStarts,
+    diagnostics: &[Diagnostic],
+) -> Vec<RenderedDiagnostic> {
+    diagnostics
         .iter()
-        .map(|d| d.render(source, &lines))
-        .collect();
-    serde_json::to_string_pretty(&rendered).map_err(|err| {
-        eprintln!("error: failed to serialise diagnostics as JSON: {err}");
-        ExitCode::from(1)
-    })
+        .map(|d| d.render(source, lines))
+        .collect()
+}
+
+/// Write one JSON document to stdout, or report why it could not be
+/// serialised and give the caller an exit code.
+///
+/// Every `--format json` document goes through here rather than being
+/// assembled by hand: a document built by string interpolation indents to
+/// whatever the format string says, which is how two commands came to
+/// pretty-print differently while claiming one contract.
+fn print_json<T: serde::Serialize>(what: &str, value: &T) -> Result<(), ExitCode> {
+    match serde_json::to_string_pretty(value) {
+        Ok(json) => {
+            println!("{json}");
+            Ok(())
+        }
+        Err(err) => {
+            eprintln!("error: failed to serialise {what} as JSON: {err}");
+            Err(ExitCode::from(1))
+        }
+    }
 }
 
 fn run_check(file: &Path, edition: Option<EditionArg>, format: CheckFormat) -> ExitCode {
@@ -503,9 +535,10 @@ fn run_check(file: &Path, edition: Option<EditionArg>, format: CheckFormat) -> E
             match format {
                 CheckFormat::Text => report_parse_failure(file, &source, &err),
                 CheckFormat::Json => {
-                    match rendered_json(&source, &[diagnose_parse_failure(&source, &err)]) {
-                        Ok(json) => println!("{json}"),
-                        Err(code) => return code,
+                    let lines = LineStarts::new(&source);
+                    let one = [diagnose_parse_failure(&source, &lines, &err)];
+                    if let Err(code) = print_json("diagnostics", &rendered(&source, &lines, &one)) {
+                        return code;
                     }
                 }
             }
@@ -532,22 +565,14 @@ fn run_check(file: &Path, edition: Option<EditionArg>, format: CheckFormat) -> E
         // consumer redirects it deliberately.
         CheckFormat::Text => {
             for d in &diagnostics {
-                let pos = lines.position(&source, d.span.start);
-                eprintln!(
-                    "{}:{}: {}[{}]: {}",
-                    file.display(),
-                    pos,
-                    d.severity().as_str(),
-                    d.code.as_str(),
-                    d.primary,
-                );
-                report_notes(file, &source, &lines, &d.notes);
+                report_diagnostic(file, &source, &lines, d);
             }
         }
-        CheckFormat::Json => match rendered_json(&source, &diagnostics) {
-            Ok(json) => println!("{json}"),
-            Err(code) => return code,
-        },
+        CheckFormat::Json => {
+            if let Err(code) = print_json("diagnostics", &rendered(&source, &lines, &diagnostics)) {
+                return code;
+            }
+        }
     }
 
     if has_error {
@@ -555,6 +580,18 @@ fn run_check(file: &Path, edition: Option<EditionArg>, format: CheckFormat) -> E
     } else {
         ExitCode::SUCCESS
     }
+}
+
+/// The document `info --format json` writes where it has no report.
+///
+/// A struct rather than a `serde_json::json!` object or a format string:
+/// both of those render the findings through a second path, and the two
+/// showed it — an interpolated wrapper indents to whatever the format
+/// string says, and a `Value` re-sorts the keys, so the same diagnostic
+/// came out looking different depending on which command emitted it.
+#[derive(serde::Serialize)]
+struct DiagnosticsDocument {
+    diagnostics: Vec<RenderedDiagnostic>,
 }
 
 /// Report the findings that stopped `info` from producing a report, and
@@ -572,26 +609,21 @@ fn report_info_failure(
     format: InfoFormat,
     diagnostics: &[Diagnostic],
 ) -> ExitCode {
+    let lines = LineStarts::new(source);
     match format {
         InfoFormat::Text => {
-            let lines = LineStarts::new(source);
             for d in diagnostics {
-                let pos = lines.position(source, d.span.start);
-                eprintln!(
-                    "{}:{}: {}[{}]: {}",
-                    file.display(),
-                    pos,
-                    d.severity().as_str(),
-                    d.code.as_str(),
-                    d.primary,
-                );
-                report_notes(file, source, &lines, &d.notes);
+                report_diagnostic(file, source, &lines, d);
             }
         }
-        InfoFormat::Json => match rendered_json(source, diagnostics) {
-            Ok(json) => println!("{{\n  \"diagnostics\": {json}\n}}"),
-            Err(code) => return code,
-        },
+        InfoFormat::Json => {
+            let document = DiagnosticsDocument {
+                diagnostics: rendered(source, &lines, diagnostics),
+            };
+            if let Err(code) = print_json("diagnostics", &document) {
+                return code;
+            }
+        }
     }
     ExitCode::from(1)
 }
@@ -630,12 +662,9 @@ fn run_info(file: &Path, editions: &[String], format: InfoFormat) -> ExitCode {
     let module = match parse(&source) {
         Ok(m) => m,
         Err(err) => {
-            return report_info_failure(
-                file,
-                &source,
-                format,
-                &[diagnose_parse_failure(&source, &err)],
-            );
+            let lines = LineStarts::new(&source);
+            let one = [diagnose_parse_failure(&source, &lines, &err)];
+            return report_info_failure(file, &source, format, &one);
         }
     };
     let ir = lower(&module);
@@ -676,16 +705,7 @@ fn run_info(file: &Path, editions: &[String], format: InfoFormat) -> ExitCode {
     // document downstream tooling already reads, which is a breaking
     // change and a decision of its own.
     for d in &combined {
-        let pos = lines.position(&source, d.span.start);
-        eprintln!(
-            "{}:{}: {}[{}]: {}",
-            file.display(),
-            pos,
-            d.severity().as_str(),
-            d.code.as_str(),
-            d.primary,
-        );
-        report_notes(file, &source, &lines, &d.notes);
+        report_diagnostic(file, &source, &lines, d);
     }
 
     let floor = declared_version_floor(&module);
@@ -1192,16 +1212,7 @@ fn run_lower(file: &Path, format: LowerFormat) -> ExitCode {
     let lines = LineStarts::new(&source);
     let mut has_error = false;
     for d in &block_ir.diagnostics {
-        let pos = lines.position(&source, d.span.start);
-        eprintln!(
-            "{}:{}: {}[{}]: {}",
-            file.display(),
-            pos,
-            d.severity().as_str(),
-            d.code.as_str(),
-            d.primary,
-        );
-        report_notes(file, &source, &lines, &d.notes);
+        report_diagnostic(file, &source, &lines, d);
         if d.severity() == Severity::Error {
             has_error = true;
         }
@@ -1606,16 +1617,7 @@ fn report_core_diagnostics(
 ) -> bool {
     let mut has_error = false;
     for d in diagnostics {
-        let pos = lines.position(source, d.span.start);
-        eprintln!(
-            "{}:{}: {}[{}]: {}",
-            file.display(),
-            pos,
-            d.severity().as_str(),
-            d.code.as_str(),
-            d.primary,
-        );
-        report_notes(file, source, lines, &d.notes);
+        report_diagnostic(file, source, lines, d);
         if d.severity() == Severity::Error {
             has_error = true;
         }
@@ -1637,11 +1639,10 @@ fn report_synth_diagnostics(
 ) -> bool {
     let mut has_error = false;
     for d in diagnostics {
-        let pos = lines.position(source, d.span.start);
         eprintln!(
             "{}:{}: {}[{}]: {}",
             file.display(),
-            pos,
+            lines.position(source, d.span.start),
             d.severity().as_str(),
             d.code.as_str(),
             d.primary,
@@ -2168,16 +2169,7 @@ fn report_lowering_diagnostics(file: &Path, source: &str, block_ir: &BlockArrayI
     let lines = LineStarts::new(source);
     let mut has_error = false;
     for d in &block_ir.diagnostics {
-        let pos = lines.position(source, d.span.start);
-        eprintln!(
-            "{}:{}: {}[{}]: {}",
-            file.display(),
-            pos,
-            d.severity().as_str(),
-            d.code.as_str(),
-            d.primary,
-        );
-        report_notes(file, source, &lines, &d.notes);
+        report_diagnostic(file, source, &lines, d);
         if d.severity() == Severity::Error {
             has_error = true;
         }

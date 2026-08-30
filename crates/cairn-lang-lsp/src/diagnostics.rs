@@ -9,6 +9,7 @@
 //! span-carrying notes become `relatedInformation` entries pointing back
 //! into the same document.
 
+use cairn_lang_core::check::LineStarts;
 use cairn_lang_core::{
     Diagnostic as CoreDiagnostic, Severity, check, diagnose_parse_failure, lower, parse,
 };
@@ -35,12 +36,9 @@ pub fn compute_diagnostics(uri: &lsp_types::Uri, source: &str) -> Vec<lsp_types:
     let module = match parse(source) {
         Ok(module) => module,
         Err(err) => {
-            return vec![convert(
-                uri,
-                source,
-                &index,
-                &diagnose_parse_failure(source, &err),
-            )];
+            let lines = LineStarts::new(source);
+            let diagnostic = diagnose_parse_failure(source, &lines, &err);
+            return vec![convert(uri, source, &index, &diagnostic)];
         }
     };
     let ir = lower(&module);
@@ -293,11 +291,10 @@ mod tests {
     /// A parse error lands on the line that has it, and on the same line
     /// whichever way the document ends its lines.
     ///
-    /// Distinct from the check-diagnostic test above: that one goes through
-    /// `LineIndex::range` from a byte span, while a parse error carries a
-    /// line/column and comes back through `offset_of` and `line_end` — a
-    /// different pair of conversions, and the pair the `Newline` token's
-    /// position feeds.
+    /// Distinct from the check-diagnostic test above only in where the span
+    /// comes from: a parse error carries a line/column and core turns it
+    /// back into a span, so this is the conversion the `Newline` token's
+    /// position feeds, arriving here as an ordinary byte range.
     #[test]
     fn a_parse_error_lands_on_its_own_line_whatever_the_line_ending() {
         let base = "struct s size=2x2\n  floor mat_slot=\n  walls height=4\n";
