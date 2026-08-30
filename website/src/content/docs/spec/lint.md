@@ -75,6 +75,7 @@ a decimal number or does not fit in a `u32`, and text after the version.
 |---|---|
 | `E_UNKNOWN_ID` | A resolved block ID the pinned target does not declare. |
 | `E_INCOMPATIBLE_MATERIAL` | A member whose geometry attaches blockstates is bound to a material that cannot carry them. |
+| `E_UNRESOLVED_SLOT` | A member's `mat_slot=` names a slot the bound theme does not declare. |
 | `E_THEME_VARIANT_MISSING` | The pinned edition can bind none of a theme's per-edition variants. |
 | `E_INCOMPLETE_PLACE` | A `place` row omits `id=`, `use=`, or `theme=` ([§9.3](components-editing-sites#93-multi-building-with-site)). |
 
@@ -91,6 +92,13 @@ family ([Compilation Model §4.3](compilation#43-gable-roof-voxel-rules)).
 however many scopes read it, since they all want the same edit in the same `theme` block. Every
 placement naming it is still refused. A module that declares such a theme but never reads a
 `mat_slot=` from it is not reported: the build is byte-identical with or without the pin.
+
+`E_UNRESOLVED_SLOT` is reported **once per member per theme**. A `def` body is resolved once as
+its own scope and once again for every `place` that instantiates it, and each of those
+resolutions binds a theme — the ones that bind the same theme reach the same conclusion about the
+same line, so they are one finding. Two placements naming two themes are two findings: each names
+the theme it is about and each is a separate edit. A `def` nothing places is still resolved,
+against the theme the module picks, so a file of defs and no `site` is still checked.
 
 `E_INCOMPLETE_PLACE` names every key the row is short of, and the row is dropped from the build.
 

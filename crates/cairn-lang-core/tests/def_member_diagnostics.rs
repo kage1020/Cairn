@@ -26,7 +26,9 @@
 //!    reported, because "already said" has to mean said, not walked;
 //! 7. a nested member — the same rule inside a `level` block;
 //! 8. a `struct` — the control. Nothing places a struct, so its count was
-//!    never inflated and must not now deflate.
+//!    never inflated and must not now deflate;
+//! 9. a walk that stayed silent followed by a stricter one — the finding
+//!    the stricter walk owes is still reported.
 
 use cairn_lang_core::check::{Diagnostic, DiagnosticCode};
 use cairn_lang_core::{lower, parse, resolve};
@@ -195,6 +197,45 @@ place id=home use=hut theme=plain at=origin\n"
         found.len(),
         1,
         "the rule has to reach the members a `level` block holds; got {:?}",
+        primaries(&found),
+    );
+}
+
+/// The two resolutions of one def body do not always judge a slot the
+/// same way, which is why "already reported" is recorded where a
+/// diagnostic is pushed rather than where a body is walked.
+///
+/// With no `--edition` pin the module-level pick binds `shop_java` and
+/// unions in the slots its sibling variant declares, so `bedrock_only`
+/// passes. The placement writes the variant name, which asks about that
+/// variant's slots alone — no sibling softens it, and the slot is missing.
+/// A ledger keyed on the walk would let the silent resolution speak for the
+/// strict one and the file would build with an undeclared slot.
+#[test]
+fn a_stricter_later_resolution_still_reports_what_the_softer_one_passed() {
+    const VARIANTS: &str = "theme shop_java:\n  slot floor -> @oak_planks\n\n\
+theme shop_bedrock:\n  \
+slot floor -> @oak_planks\n  \
+slot bedrock_only -> @dark_oak_planks\n\n\
+def hut size=4x4:\n  \
+floor mat_slot=bedrock_only\n";
+
+    // Premise: the module-level resolution alone passes the slot, so the
+    // finding below can only come from the placement.
+    assert!(
+        unresolved(VARIANTS).is_empty(),
+        "premise: an unpinned module unions its sibling variant's slots",
+    );
+
+    let found = unresolved(&format!(
+        "{VARIANTS}\n\
+site s:\n  \
+place id=home use=hut theme=shop_java at=origin\n"
+    ));
+    assert_eq!(
+        found.len(),
+        1,
+        "naming the variant asks about that variant's slots alone; got {:?}",
         primaries(&found),
     );
 }

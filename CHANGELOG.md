@@ -385,6 +385,24 @@ and is a separate axis from the Minecraft target version.
 
 ### Fixed
 
+- *(core)* A `def` member's `E_UNRESOLVED_SLOT` is reported once per member per theme, rather than
+  once per placement plus once more. A def body is resolved once as its own scope and once again
+  for every `place` that instantiates it, so a def placed twice reported the same line, the same
+  code and the same note three times with nothing to tell the copies apart. The count was a fact
+  about the placement list rather than about the source the author has to fix.
+
+  Not a blanket dedup, because the resolutions are not copies of one another. Two placements naming
+  two themes resolve the same `mat_slot=` against two slot maps, each finding names the theme it is
+  about, and both are separate edits — those still both appear. What is recorded is the pair of the
+  member and the theme, and it is recorded at the moment a diagnostic is pushed rather than when a
+  body is walked, so a resolution that bound the slot — or that skipped it because a sibling
+  edition variant declares it — cannot silence a stricter one that comes after.
+
+  A def nothing places keeps its finding, against the theme the module picks. A file of defs and no
+  `site` is a file worth checking, and a placement abandoned before it reaches the body — an absent
+  `theme=`, an origin that does not resolve — leaves the def's own resolution the only one able to
+  report what is inside. `spec/lint` §11.1 now carries the code and the rule.
+
 - *(core,cli,lsp)* A source that does not parse has a diagnostic like every other finding, under a
   new code `E_PARSE`. `--format json` promises a JSON document on stdout and delivered one for
   every input except the ones that fail to parse — the most common way a source fails — where
