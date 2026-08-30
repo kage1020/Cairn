@@ -331,6 +331,16 @@ const FIXTURES: &[(&str, &str, Verdict)] = &[
         "struct s size=9 x 7\n  floor mat_slot=f\n",
         Reject,
     ),
+    // `size_spaced` is refused on the right of the separator, by the
+    // `token.immediate` height, so it says nothing about the left. This
+    // one does: the separator is an external token consulted before any
+    // run of spaces is read, and reading the run first would let a
+    // separator cross one.
+    (
+        "size_space_before_x",
+        "struct s size=9 x7\n  floor mat_slot=f\n",
+        Reject,
+    ),
     // A string ends at the first quote and never spans a line.
     (
         "string_escaped_quote",
@@ -367,13 +377,13 @@ const FIXTURES: &[(&str, &str, Verdict)] = &[
         Reject,
     ),
     ("tab_indent", "theme t:\n\tslot a -> @b\n", Reject),
-    // The same three refusals, on a line the preceding break could not
-    // speak for. A break is where an illegal indent is normally refused,
-    // one line early — but a header's break is followed by an `_indent`
-    // and nothing else, so no NEWLINE is asked for at the blank line
-    // after it, and the blank line is crossed by the scanner's own
-    // blank-line loop instead. The line the loop lands on is measured
-    // where it stands.
+    // Refusals on a line the preceding break could not speak for. A break
+    // is where an illegal indent is normally refused, one line early —
+    // but a header's break is followed by an `_indent` and nothing else,
+    // so no NEWLINE is asked for at the blank line after it, and the
+    // blank line is crossed by the scanner's own blank-line loop instead.
+    // The line the loop lands on is measured where it stands: an odd
+    // count, by two routes, and a jump of more than one level.
     (
         "odd_indent_after_a_blank_line",
         "struct s size=3x3\n\n   floor a=1\n",
@@ -389,6 +399,11 @@ const FIXTURES: &[(&str, &str, Verdict)] = &[
         "struct s size=3x3\n\n      floor a=1\n",
         Reject,
     ),
+    // A tab on the same route is here as a shape rather than as a third
+    // refusal: at level 0 under a level-0 stack, dropping the tab check
+    // leaves the same refusal one branch later. What the check is worth is
+    // asserted on placement, in
+    // `a_tab_indented_line_does_not_close_the_body_around_it`.
     (
         "tab_indent_after_a_blank_line",
         "struct s size=3x3\n\n\tfloor a=1\n",
@@ -411,10 +426,11 @@ const FIXTURES: &[(&str, &str, Verdict)] = &[
     ("no_trailing_newline", "theme t:\n  slot a -> @b", Accept),
     // A lone `\r` ends a line for the reference lexer but not for
     // `get_column()`, which restarts only at `\n`. Every line after the
-    // first is therefore measured against a running column, and the blank
-    // and comment-only lines below are what carry the scanner across a
-    // second break before it measures — the case where the base column it
-    // measures from has to have moved with it.
+    // first therefore stands at a column that has been climbing since the
+    // file began, and the blank and comment-only lines below are what
+    // carry the scanner across a second break before it measures — the
+    // case where the count has to be taken afresh on the line it lands
+    // on, since the column cannot supply it.
     (
         "lone_cr_body_after_blank_line",
         "struct a size=3x3\r\r  floor m=1\r",
@@ -441,6 +457,14 @@ const FIXTURES: &[(&str, &str, Verdict)] = &[
     // run of spaces is what it sees wherever one stands. It reads the run
     // once and carries the length, which is what lets one read serve both
     // a line's indentation and a line's trailing whitespace.
+    //
+    // None of these is a `test/corpus/` case, and not by oversight. The
+    // run is `extras` in every one of them, so no tree moves and a corpus
+    // case would pin what the cases already there pin; a trailing space is
+    // invisible in review and stripped by most editors on save; and
+    // `.gitattributes` normalises every text file to LF, which leaves the
+    // lone-`\r` shapes unwritable in a corpus file at all. An escaped
+    // string is the only place they can live.
     (
         "trailing_space_on_a_header",
         "theme t: \n  slot a -> @b\n",
@@ -498,6 +522,22 @@ const FIXTURES: &[(&str, &str, Verdict)] = &[
     (
         "trailing_space_lone_cr",
         "theme t: \r  slot a -> @b\r",
+        Accept,
+    ),
+    // A line of nothing but spaces under a lone `\r`, where the column has
+    // been climbing since the file began and cannot supply the count. The
+    // first of these is consumed as a break by the NEWLINE branch; the
+    // second is not — a header's break is followed by an `_indent` and
+    // nothing else — so the scanner's blank-line loop crosses it, and the
+    // count for the line it lands on has to be taken afresh there.
+    (
+        "lone_cr_blank_line_of_only_spaces",
+        "theme t:\r  slot a -> @b\r  \r  slot c -> @d\r",
+        Accept,
+    ),
+    (
+        "lone_cr_blank_line_of_spaces_before_a_body",
+        "struct s size=3x3\r  \r  floor a=1\r",
         Accept,
     ),
     // A file of nothing but spaces holds no line for them to indent.
@@ -682,6 +722,21 @@ const KNOWN_DIVERGENCES: &[(&str, &str, Verdict)] = &[
         "theme a:\n# c\nstruct s size=3x3\n  floor a=1\n",
         Reject,
     ),
+    // -- a size separator with a space after it -----------------------
+    //
+    // `2x 2` is two arguments to `parse_command`: `scan_number` reads the
+    // `2`, stops at the `x` because no digit follows it, and the `x` and
+    // the `2` go on as positional values. This grammar cannot stop there.
+    // The separator is an external token consulted before extras are
+    // skipped, and it commits to the `x` on sight — so `size_literal` is
+    // entered and then fails for want of an immediate height, rather than
+    // never being entered. Deciding it needs the character after the `x`,
+    // which that branch does not look at.
+    (
+        "size_separator_before_a_space",
+        "struct s size=3x3\n  floor size=2x 2\n",
+        Reject,
+    ),
     // -- indentation the scanner is never asked about -----------------
     //
     // Both are lines the reference lexer refuses on their indentation and
@@ -691,6 +746,13 @@ const KNOWN_DIVERGENCES: &[(&str, &str, Verdict)] = &[
     // scanner is not consulted and the `/ +/` extra eats the leading
     // spaces. Closing them needs a token that is valid wherever a line
     // may begin, which `_file_start` is the single-position sketch of.
+    //
+    // `indent_after_a_directive` reaches further than it once did, and the
+    // reach is not new breakage. A directive line ending in a space used
+    // to be refused for the space, before its indentation was reached at
+    // all, so the grammar agreed with the reference parser by accident.
+    // Now that such a line parses, the indentation is what decides, and it
+    // decides the way it always decided here.
     (
         "indent_under_a_slot_row",
         "theme t:\n  slot a -> @b\n    slot c -> @d\n",
@@ -779,7 +841,8 @@ fn a_broken_line_does_not_displace_the_lines_after_it() {
     );
 }
 
-/// A tab-indented line does not close the body it stands in.
+/// A tab-indented line does not close the body it stands in, by either
+/// route the scanner reaches one.
 ///
 /// Refusing a tab is not what this pins — the `/ +/` extra matches spaces
 /// and nothing else, so a tab reaches tree-sitter's own lexer as a
@@ -789,31 +852,55 @@ fn a_broken_line_does_not_displace_the_lines_after_it() {
 /// reads the line as a return to level 0 and emits the DEDENTs to match,
 /// closing bodies the author never closed.
 ///
-/// The cost lands on the lines after it, which is why it is asserted
-/// here and cannot be asserted in `FIXTURES`: the verdict is `Reject`
-/// either way. Measured, with the tab refusal removed, this source keeps
-/// only its first member — the two behind the tab line are swallowed by
-/// the recovery that follows the bodies being closed under them.
+/// The cost lands on the lines after it, which is why it is asserted here
+/// and cannot be asserted in `FIXTURES`: the verdict is `Reject` either
+/// way. Measured, with the tab refusal removed, the first source keeps
+/// only its first member and the second keeps two — in both, everything
+/// behind the tab line is swallowed by the recovery that follows the
+/// bodies being closed under it.
+///
+/// Two sources because the tab reaches the check two ways. In the first
+/// the scanner is standing on the tab line itself. In the second it is
+/// not: the tab line follows a comment-only line, which the scanner
+/// crosses in its blank-line loop before measuring, so the tab is what
+/// the loop lands on. A comment-only line and not a blank one, because a
+/// blank line is taken by the NEWLINE branch first and never reaches the
+/// loop.
 #[test]
 fn a_tab_indented_line_does_not_close_the_body_around_it() {
     let mut parser = new_parser();
-    let source = "struct s size=3x3\n  a x=1\n\tb x=2\n  c x=3\n";
-    let tree = parser.parse(source, None).expect("parse produced no tree");
-    assert!(
-        tree.root_node().has_error(),
-        "the fixture is supposed to be malformed; it no longer is",
-    );
-    let mut placed = Vec::new();
-    grammar_members(tree.root_node(), source, 0, &mut placed);
-    assert_eq!(
-        placed,
-        vec![
-            (1usize, "a".to_owned()),
-            (1usize, "b".to_owned()),
-            (1usize, "c".to_owned()),
-        ],
-        "a tab closed the body the rows after it are written in",
-    );
+    let cases = [
+        (
+            "struct s size=3x3\n  a x=1\n\tb x=2\n  c x=3\n",
+            vec![
+                (1usize, "a".to_owned()),
+                (1usize, "b".to_owned()),
+                (1usize, "c".to_owned()),
+            ],
+        ),
+        (
+            "struct s size=3x3\n  a x=1\n    b x=2\n# c\n\td x=4\n    e x=5\n",
+            vec![
+                (1usize, "a".to_owned()),
+                (2usize, "b".to_owned()),
+                (2usize, "d".to_owned()),
+                (2usize, "e".to_owned()),
+            ],
+        ),
+    ];
+    for (source, expected) in cases {
+        let tree = parser.parse(source, None).expect("parse produced no tree");
+        assert!(
+            tree.root_node().has_error(),
+            "the fixture is supposed to be malformed; it no longer is: {source:?}",
+        );
+        let mut placed = Vec::new();
+        grammar_members(tree.root_node(), source, 0, &mut placed);
+        assert_eq!(
+            placed, expected,
+            "a tab closed the body the rows after it are written in: {source:?}",
+        );
+    }
 }
 
 /// Every listed divergence still diverges, in the direction listed.

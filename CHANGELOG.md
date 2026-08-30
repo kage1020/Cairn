@@ -398,11 +398,6 @@ and is a separate axis from the Minecraft target version.
   column afterwards. That is what lets the run be consumed before the line-break handling instead
   of standing in front of it.
 
-  Also refused where they were not before: an odd indent, a jump of more than one level, and a tab,
-  on a line the preceding break could not speak for. A declaration header's break is followed by an
-  indent and nothing else, so the blank line after it is crossed by the scanner rather than
-  consumed as a break, and the line it lands on is now measured where it stands.
-
 - *(core)* The volume a struct lowers into is sized for the members that will paint. Three ways a
   member could shape the array and put no block in it. A `roof` that will not draw gave its `overhang=` to
   the footprint and nothing to the height, because one of the two roof walks asked whether the roof
