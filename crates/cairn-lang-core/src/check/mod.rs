@@ -103,6 +103,11 @@ mod tests {
     /// from.
     #[derive(Debug, PartialEq, Eq)]
     enum RaisedBy {
+        /// `crate::parse`, before any of the passes below run. A source
+        /// that reaches [`check`] parsed, so [`check`] can never produce
+        /// one of these — and the commands that report them build them
+        /// from the [`crate::error::ParseError`] instead.
+        Parser,
         /// `duplicate` / `keyword_allowlist` / `member_scope` /
         /// `connect_arity` / `nesting` / `positional` / `requires` /
         /// `truth` / `type_mismatch`, run directly by [`check`].
@@ -118,6 +123,7 @@ mod tests {
 
     fn raised_by(code: DiagnosticCode) -> RaisedBy {
         match code {
+            C::Parse => RaisedBy::Parser,
             C::DuplicateSize
             | C::DuplicateSlot
             | C::DuplicateSelector
@@ -215,6 +221,22 @@ mod tests {
             "the syntactic Error set changed: add or remove the matching \
              fixture in cairn-lang-cli/tests/cli_check_parity.rs so \
              `cairn lower` / `info` / `compile` stay in step with `cairn check`",
+        );
+    }
+
+    /// A parse failure is the one finding no pass in this crate raises.
+    ///
+    /// It is not a hole the way the lowering-only codes below are: nothing
+    /// downstream of the parser can miss it, because nothing downstream of
+    /// the parser runs at all. Pinned as its own set so a second code ever
+    /// landing here is a decision rather than a slip — the parser produces
+    /// one finding, and every consumer renders that one.
+    #[test]
+    fn exactly_one_code_belongs_to_the_parser() {
+        assert_eq!(
+            codes_where(|c| raised_by(c) == RaisedBy::Parser),
+            ["E_PARSE"],
+            "a parse failure renders under one code, whatever shape it took",
         );
     }
 

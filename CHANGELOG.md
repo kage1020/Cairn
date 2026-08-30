@@ -385,6 +385,28 @@ and is a separate axis from the Minecraft target version.
 
 ### Fixed
 
+- *(core,cli,lsp)* A source that does not parse has a diagnostic like every other finding, under a
+  new code `E_PARSE`. `--format json` promises a JSON document on stdout and delivered one for
+  every input except the ones that fail to parse — the most common way a source fails — where
+  stdout was empty and the reason went to stderr as prose, so a consumer parsing stdout had to
+  guess from the exit code.
+
+  It fell through because a parse failure had no shape: codes are produced by the check and resolve
+  passes, and a parse failure was an error type and nothing else. Every consumer that wanted to
+  show one invented its own — the CLI wrote a bare `error:` line in five copies, and the language
+  server built its diagnostic directly, with no code at all.
+
+  One code covers every shape a parse fails in, with the message saying which; a code per shape
+  would make each future one a line of public contract for a distinction nothing branches on. The
+  span runs from the position the parser reports to the end of that line, because a position alone
+  renders in an editor as a caret with nothing under it.
+
+  `cairn check --format json` emits the array it always did, with one element in it.
+  `cairn info --format json` has a report rather than a diagnostics list as its product, so where
+  there is no report it writes `{"diagnostics": [...]}` instead — told apart from a report by its
+  keys — and it does that for a check-level error too, which was the same silence one pass later.
+  A clean run's report is unchanged.
+
 - *(tree-sitter)* Every line now starts with a token the grammar demands, so indentation is checked
   wherever a line begins rather than only where a level change was already expected. Two shapes the
   grammar accepted and `cairn-lang-core` refuses are refused now: a row indented under a `theme`

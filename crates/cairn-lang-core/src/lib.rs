@@ -39,7 +39,7 @@ pub use intent::{
     lower,
 };
 pub use lex::{Token, TokenKind, lex};
-pub use parse::{MAX_EXPR_DEPTH, MAX_NESTING_DEPTH, parse};
+pub use parse::{MAX_EXPR_DEPTH, MAX_NESTING_DEPTH, diagnose_parse_failure, parse};
 pub use resolve::{Resolution, ThemeBinding, VersionAxes, compute_axes, resolve};
 
 /// The Cairn release version, in date-based versioning (`YYYY.M[.PATCH]`).

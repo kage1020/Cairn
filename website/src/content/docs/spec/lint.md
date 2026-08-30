@@ -38,6 +38,7 @@ compose to the strictest across every line, so a second one adds a constraint ([
 
 | Code | Meaning |
 |---|---|
+| `E_PARSE` | The source did not parse. |
 | `E_UNKNOWN_KEYWORD` | The statement keyword is not in the known-keyword table. |
 | `E_UNKNOWN_ARGUMENT` | A `key=` outside the vocabulary of the member's keyword. |
 | `E_MISPLACED_MEMBER` | The keyword is known, but the enclosing body has no reader for it. |
@@ -134,6 +135,17 @@ for 4–6, and ≤ 3 beyond. The closed-set listing (`expected one of: ...`) is 
 
 ## 11.2 Machine-readable payload
 
+`check` and `info` each write exactly one JSON document to stdout under `--format json`, for every
+input they are given. `check`'s document is an array of findings, so a source that does not parse is
+that array with one `E_PARSE` element. `info`'s is the report; where there is no report — a parse
+failure, or any error-severity finding — it writes `{"diagnostics": [ ... ]}` instead, told apart
+from a report by its keys and by the exit code. Warnings on a run that still has a report are
+reported as text on stderr in both formats.
+
+`parse` and `lower` take the flag too and do **not** hold to that yet: their product is a dump
+rather than a report, and on a source that fails they write nothing to stdout and report the failure
+on stderr. Whether a dump owes a document where it has nothing to dump is open.
+
 `--format json` renders one object per finding:
 
 | Field | Type | Notes |
@@ -198,6 +210,13 @@ The `E_` / `W_` prefix is not the severity. `W_` marks a partial-build degradati
   every member referencing it to air.
 - `E_THEME_SELECTOR_UNMATCHED` is a **warning**, because a rule that matches nothing overrides
   nothing.
+
+`E_PARSE` is one code for every shape a parse fails in — a stray character, an odd indent, an
+integer past `i64`, a keyword where an item was expected — with the message saying which. A code per
+shape would make every future one a line of this table, for a distinction nothing branches on; what
+that costs is that a consumer reads the message to tell them apart. It is also the only code no
+check pass raises: parsing precedes them all, and a source that does not parse reaches none of
+them, so it is the one finding a build reports alone.
 
 `E_UNKNOWN_ARGUMENT` is an **error** for the same reason `E_UNKNOWN_KEYWORD` is, one level down.
 A key outside the keyword's vocabulary names nothing, so no pass will read the value however the
