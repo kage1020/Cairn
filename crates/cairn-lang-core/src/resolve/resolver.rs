@@ -265,6 +265,25 @@ pub fn resolve(ir: &IntentModule, edition: Option<Edition>) -> Resolution {
     // module-level pick and every `place` naming one say it once between
     // them rather than once each.
     let mut reported_missing: HashSet<String> = HashSet::new();
+    // `(member, theme)` pairs a slot diagnostic has already been pushed
+    // for. A def body is walked once as its own scope and once more per
+    // `place` that instantiates it, so without this the same
+    // `E_UNRESOLVED_SLOT` is reported once per placement plus once more,
+    // which is a fact about the placement list rather than about the
+    // source the author has to fix.
+    //
+    // Keyed on the theme as well as the member because the walks are not
+    // copies of one another: two placements naming two themes resolve the
+    // same `mat_slot=` against two slot maps, each finding names the theme
+    // it is about, and both have to be fixed. Keyed on the member rather
+    // than on the slot name for the same reason in the other direction —
+    // two members reading one missing slot are two lines to edit.
+    //
+    // Recorded at the push, not at the walk. A walk that resolved the slot
+    // — or that skipped it because a sibling variant declares it — has
+    // said nothing, and marking it as spoken would let a stricter later
+    // walk go silent. Same shape as `reported_missing` above.
+    let mut diagnosed: HashSet<(usize, String)> = HashSet::new();
 
     let (auto_picked, auto_siblings) = match single_logical.as_deref() {
         Some(logical) => {
@@ -319,9 +338,18 @@ pub fn resolve(ir: &IntentModule, edition: Option<Edition>) -> Resolution {
             &mut themes,
             &mut applied_themes,
             &mut diagnostics,
+            &mut diagnosed,
         );
         scopes.entry(struct_key(s)).or_insert(resolution);
     }
+    // A def is a template, and this walk resolves it against the theme the
+    // module auto-picks even though a `place` below will walk the same body
+    // under the placement's own theme. It stays: a file of defs and no
+    // `site` is a file worth checking, and a placement can be abandoned
+    // before it reaches the body — an absent `theme=`, an origin that does
+    // not resolve — which leaves this the only walk able to report what is
+    // inside. Where a placement does bind the same theme, `diagnosed` makes
+    // the second report cost nothing.
     for d in &ir.defs {
         let resolution = resolve_struct_or_def(
             &d.members,
@@ -330,6 +358,7 @@ pub fn resolve(ir: &IntentModule, edition: Option<Edition>) -> Resolution {
             &mut themes,
             &mut applied_themes,
             &mut diagnostics,
+            &mut diagnosed,
         );
         scopes.entry(def_key(d)).or_insert(resolution);
     }
@@ -347,6 +376,7 @@ pub fn resolve(ir: &IntentModule, edition: Option<Edition>) -> Resolution {
             &mut used_defs,
             &mut connects,
             &mut diagnostics,
+            &mut diagnosed,
         );
     }
     check_unused_defs(&ir.defs, &used_defs, &mut diagnostics);
@@ -818,6 +848,7 @@ fn resolve_site_placements(
     used_defs: &mut HashSet<String>,
     connects: &mut Vec<ValidatedConnect>,
     diagnostics: &mut Vec<Diagnostic>,
+    diagnosed: &mut HashSet<(usize, String)>,
 ) {
     // Local index lets each `east_of=ID` / `north_of=ID` lookup name a
     // *prior* place in source order — re-walking `site.placements` per
@@ -944,6 +975,7 @@ fn resolve_site_placements(
             themes,
             applied_themes,
             diagnostics,
+            diagnosed,
         );
         scopes
             .entry(place_scope_key(&site.name, place_id))
@@ -1676,6 +1708,7 @@ fn resolve_struct_or_def(
     themes: &mut IndexMap<String, ThemeBinding>,
     applied_themes: &mut HashSet<String>,
     diagnostics: &mut Vec<Diagnostic>,
+    diagnosed: &mut HashSet<(usize, String)>,
 ) -> ScopeResolution {
     // Structural invariant: every name that reaches here came out of
     // `themes.keys()`. The module-level auto-pick gets it from
@@ -1688,49 +1721,60 @@ fn resolve_struct_or_def(
     // which uses the same shape of loud fallback. `debug_assert!(false)`
     // trips in dev / test builds; a release build silently degrades to
     // the unbound-theme path rather than panicking on user data.
-    let (theme_name, theme_slots) = if let Some(name) = picked_theme_name {
+    let bound = if let Some(name) = picked_theme_name {
         if let Some(t) = themes.get(name) {
-            (Some(name.to_owned()), Some(t.slots.clone()))
+            Some((name.to_owned(), t.slots.clone()))
         } else {
             debug_assert!(
                 false,
                 "resolve_struct_or_def: picked theme `{name}` is not in the themes map; \
                  pick_variant should only surface names it read from themes.keys()",
             );
-            (None, None)
+            None
         }
     } else {
-        (None, None)
+        None
     };
 
-    if let Some(name) = &theme_name {
+    if let Some((name, _)) = &bound {
         applied_themes.insert(name.clone());
     }
 
     let mut resolution = ScopeResolution {
-        bound_theme: theme_name.clone(),
+        bound_theme: bound.as_ref().map(|(name, _)| name.clone()),
         members: IndexMap::new(),
     };
     resolve_members(
         members,
-        theme_slots.as_ref(),
-        theme_name.as_deref(),
+        bound.as_ref().map(|(name, slots)| (name.as_str(), slots)),
         sibling_slots,
         themes,
         &mut resolution,
         diagnostics,
+        diagnosed,
     );
     resolution
 }
 
+/// Walk `members` under the scope's bound theme, filling `out` and
+/// pushing whatever the walk finds into `diagnostics`.
+///
+/// `bound` carries the theme's name and its slot map together because a
+/// scope has both or neither: an unbound scope resolves no `mat_slot=` and
+/// matches no selector, and splitting the pair let a caller ask for one
+/// half.
+///
+/// `diagnosed` is the say-it-once ledger described in [`resolve`]. It is
+/// consulted only where a diagnostic is about to be pushed, so a walk that
+/// found nothing leaves the next walk free to speak.
 fn resolve_members(
     members: &[Member],
-    theme_slots: Option<&IndexMap<String, ValueWithSpan>>,
-    theme_name: Option<&str>,
+    bound: Option<(&str, &IndexMap<String, ValueWithSpan>)>,
     sibling_slots: &HashSet<String>,
     themes: &mut IndexMap<String, ThemeBinding>,
     out: &mut ScopeResolution,
     diagnostics: &mut Vec<Diagnostic>,
+    diagnosed: &mut HashSet<(usize, String)>,
 ) {
     for member in members {
         let mut binding = ResolvedMemberBinding::default();
@@ -1744,19 +1788,22 @@ fn resolve_members(
         //    concrete binding is edition-specific and comes into scope only
         //    once the compile picks a variant.
         if let Some(slot_name) = &member.mat_slot
-            && let (Some(slots), Some(tname)) = (theme_slots, theme_name)
+            && let Some((tname, slots)) = bound
         {
             match slots.get(slot_name) {
                 Some(v) => binding.slot_value = Some(v.clone()),
                 None if sibling_slots.contains(slot_name) => {}
-                None => diagnostics.push(unresolved_slot_diag(slot_name, tname, member, slots)),
+                None if diagnosed.insert((member.span.start, tname.to_owned())) => {
+                    diagnostics.push(unresolved_slot_diag(slot_name, tname, member, slots));
+                }
+                None => {}
             }
         }
 
         // 2. Selector matching — scoped to the bound theme only. A scope
         //    with `bound_theme=None` (multi-theme file, no auto-pick)
         //    gets no selector_extras, matching the per-theme DI contract.
-        if let Some(tname) = theme_name
+        if let Some((tname, _)) = bound
             && let Some(theme_binding) = themes.get_mut(tname)
         {
             for sel in &mut theme_binding.selectors {
@@ -1778,12 +1825,12 @@ fn resolve_members(
         if !children.is_empty() {
             resolve_members(
                 children,
-                theme_slots,
-                theme_name,
+                bound,
                 sibling_slots,
                 themes,
                 out,
                 diagnostics,
+                diagnosed,
             );
         }
     }
