@@ -286,7 +286,8 @@ fn a_nested_binding_above_a_sensor_is_still_the_first_driver() {
     assert_eq!(
         anchor_and_note(source, found[0]),
         (7, 6),
-        "the nested `logic` line on line 6 is written above the sensor on          line 7, so the sensor is the redefinition",
+        "the nested `logic` line on line 6 is written above the sensor on \
+         line 7, so the sensor is the redefinition",
     );
 }
 
@@ -320,7 +321,8 @@ fn a_binding_that_lost_its_name_is_not_lowered() {
             .map(|d| d.code.as_str())
             .collect::<Vec<_>>(),
         ["E_LOGIC_MULTIPLE_DRIVERS"],
-        "`sig.undef` belongs to the line that lost, so it is never looked          at: {:#?}",
+        "`sig.undef` belongs to the line that lost, so it is never looked \
+         at: {:#?}",
         out.diagnostics,
     );
 }

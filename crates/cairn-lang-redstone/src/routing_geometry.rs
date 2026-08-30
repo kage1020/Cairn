@@ -140,7 +140,7 @@ pub(crate) fn coord_key(coord: CellCoord) -> (u32, u32, u32) {
 /// v1 input-pad coordinate: left edge (`x=0`), first service layer
 /// (`y=0`), z-axis increasing as the input index grows. Saturates at
 /// `depth-1` whenever the input count would push z past the region's
-/// z-extent (`inputs.len() + 1 > depth`); the resulting overlap is
+/// z-extent (`inputs.len() > depth`); the resulting overlap is
 /// caught at seeding time and surfaces as `E_ROUTE_CONGESTION`
 /// rather than a silent misroute. Pinning the coordinate here is a
 /// v1 convention; once a consumer outside this crate needs the pad
@@ -1136,8 +1136,9 @@ where
             );
         }
         // Widened after the whole net is claimed, not as each coord
-        // goes in: a strand runs beside itself at every corner, so
-        // widening on the way would have the claim above trip on this
+        // goes in: consecutive coords of a strand are one step apart by
+        // definition, so a strand runs beside itself the whole way, and
+        // widening as it went would have the claim above trip on this
         // net's own turn.
         keep_out.extend(dust.into_iter().flat_map(beside));
         trees.insert(net, tree);
@@ -1290,6 +1291,9 @@ mod tests {
     fn input_pad_saturates_at_depth_minus_one() {
         let region = reservation(10, 3);
         assert_eq!(input_pad(0, &region), CellCoord::new(0, 0, 0));
+        // Input #1 lands on the cell row, which is where the pads and
+        // the cells share a row without sharing a coord.
+        assert_eq!(input_pad(1, &region), CellCoord::new(0, 0, 1));
         assert_eq!(input_pad(2, &region), CellCoord::new(0, 0, 2));
         // depth-1 = 2 ceilings anything past the third input.
         assert_eq!(input_pad(5, &region), CellCoord::new(0, 0, 2));
@@ -1299,6 +1303,7 @@ mod tests {
     fn output_pad_sits_on_right_edge_and_saturates_z() {
         let region = reservation(4, 3);
         assert_eq!(output_pad(0, &region), CellCoord::new(3, 0, 0));
+        assert_eq!(output_pad(1, &region), CellCoord::new(3, 0, 1));
         assert_eq!(output_pad(2, &region), CellCoord::new(3, 0, 2));
         assert_eq!(output_pad(5, &region), CellCoord::new(3, 0, 2));
     }
@@ -1701,8 +1706,6 @@ mod tests {
         );
     }
 
-    /// `collect_nets` is the sink side every pass shares: a cell driver
-    /// sinks at the cell body, an output driver at the actuator's pad.
     /// What a strand of dust reaches is its own plane.
     ///
     /// The four in-plane steps and no others: up and down are left to
@@ -1820,7 +1823,117 @@ mod tests {
         let trees = net_trees(&nets, &router, |_| source);
         assert!(
             trees[&NetRef::Input(0)].unreachable().is_empty(),
-            "and the pass that widens the set for the nets after this one does              not turn it on the net it has just laid",
+            "and the pass that widens the set for the nets after this one \
+             does not turn it on the net it has just laid",
+        );
+    }
+
+    /// A net is named for taking a face it never stands on.
+    ///
+    /// The refusal asks the question the router routes by: a face is
+    /// unusable when another net's dust is on it *or* [`beside`] it, so
+    /// the nets it can name are two steps from the sink and not only
+    /// one. Without the second half `sig.a` below goes unnamed and the
+    /// message says only that the sink is walled in, leaving the author
+    /// the one net they could have moved.
+    ///
+    /// `sig.a` runs down the far row and never touches a face of the
+    /// sink; what it takes is `(2,0,1)`, the one face two blocks left
+    /// free, by standing one step from it.
+    #[test]
+    fn a_net_that_takes_a_face_without_standing_on_it_is_named() {
+        let region = region(5, 3, 1);
+        let sink = CellCoord::new(2, 0, 0);
+        let driver = CellCoord::new(0, 0, 0);
+        let walls = [CellCoord::new(1, 0, 0), CellCoord::new(3, 0, 0)];
+        let other_source = CellCoord::new(0, 0, 2);
+        let other_sink = CellCoord::new(4, 0, 2);
+        let router = router(
+            &region,
+            &[sink, driver, walls[0], walls[1], other_source, other_sink],
+        );
+
+        let mut nets: HashMap<NetRef, Vec<CellCoord>> = HashMap::new();
+        nets.insert(NetRef::Input(0), vec![other_sink]);
+        nets.insert(NetRef::Cell(0), vec![sink]);
+        let source_of_net = |net: NetRef| match net {
+            NetRef::Input(_) => other_source,
+            NetRef::Cell(_) => driver,
+        };
+        let trees = net_trees(&nets, &router, source_of_net);
+
+        let far_row = router.dust(&trees[&NetRef::Input(0)]);
+        assert!(
+            far_row.contains(&CellCoord::new(2, 0, 2)),
+            "the fixture needs the first net one step from the sink's last \
+             free face: {far_row:?}",
+        );
+        assert!(
+            far_row.iter().all(|coord| manhattan(*coord, sink) > 1),
+            "and on none of its faces, so only the widening can name it: \
+             {far_row:?}",
+        );
+        assert_eq!(
+            trees[&NetRef::Cell(0)].unreachable(),
+            [sink],
+            "and the driver stranded, so there is a refusal to word",
+        );
+
+        assert_eq!(
+            crowding_nets(&nets, &trees, &source_of_net, NetRef::Cell(0), sink),
+            vec![NetRef::Input(0)],
+        );
+    }
+
+    /// Two strands one layer apart are deliberately not kept apart.
+    ///
+    /// This is a decision, not an oversight: whether dust at `y + 1`
+    /// reads the dust below it depends on what is standing between
+    /// them, and the pseudo-2.5D model carries no answer, so
+    /// `spec/redstone` §14.5 makes separating them the physical tile
+    /// layer's obligation. Recorded as a test because the alternative
+    /// is a reader finding [`IN_PLANE`] and taking four steps for an
+    /// oversight of six.
+    ///
+    /// The escape is what produces both shapes. A net climbing to clear
+    /// another lands directly over it once and one step across from it
+    /// twice — the second is a redstone staircase, and it is the more
+    /// common of the two.
+    #[test]
+    fn two_strands_one_layer_apart_are_left_to_the_tile_layer() {
+        let region = region(3, 3, 2);
+        let source = CellCoord::new(1, 0, 0);
+        let sink = CellCoord::new(1, 0, 2);
+        let wall_source = CellCoord::new(0, 0, 1);
+        let wall_sink = CellCoord::new(2, 0, 1);
+        let router = router(&region, &[source, sink, wall_source, wall_sink]);
+
+        let wall = dust_of(&router, wall_source, &[wall_sink]);
+        let climbed = router.dust(&router.tree(
+            source,
+            &[sink],
+            &keep_out(&router, wall_source, &[wall_sink]),
+        ));
+
+        let mut stacked = 0usize;
+        let mut staircase = 0usize;
+        for over in &climbed {
+            for under in &wall {
+                if over.y.abs_diff(under.y) != 1 {
+                    continue;
+                }
+                match over.x.abs_diff(under.x) + over.z.abs_diff(under.z) {
+                    0 => stacked += 1,
+                    1 => staircase += 1,
+                    _ => {}
+                }
+            }
+        }
+        assert_eq!(
+            (stacked, staircase),
+            (1, 2),
+            "the escape lands over the strand it cleared and beside it \
+             twice: {climbed:?} over {wall:?}",
         );
     }
 
@@ -2030,6 +2143,8 @@ mod tests {
         );
     }
 
+    /// `collect_nets` is the sink side every pass shares: a cell driver
+    /// sinks at the cell body, an output driver at the actuator's pad.
     #[test]
     fn collect_nets_maps_cell_drivers_to_bodies_and_outputs_to_pads() {
         let region = reservation(8, 4);

@@ -24,11 +24,10 @@
 //!   set — otherwise a downstream congestion re-check would
 //!   understate the routed area — but they add no net because there
 //!   is nothing to route from them. Source coordinates are
-//!   `NetRef::Input(i) → input_pad(i, region)` (left edge, z = 1 + i,
+//!   `NetRef::Input(i) → input_pad(i, region)` (left edge, z = i,
 //!   saturating at `depth-1` for pathological regions — see
 //!   [`input_pad`]) and `NetRef::Cell(j) → cells[j].coord`. Output
-//!   pad coordinates are the right edge, z = 1 + k, saturating
-//!   similarly.
+//!   pad coordinates are the right edge, z = k, saturating similarly.
 //! - **Steiner tree.** Rectilinear tree over the `{source} ∪ sinks`
 //!   terminal set, grown one sink at a time by
 //!   [`crate::routing_geometry::Router`]: the nearest sink still
@@ -49,18 +48,18 @@
 //!   it is the same search climbing to a bridge layer that already
 //!   went round a cell body. Beside is per-plane: what a strand at
 //!   `y + 1` reads is the physical tile layer's question, not this
-//!   pass's. Doing it at this stage
-//!   rather than at stage 4 is what gets the climb measured: the
-//!   `wire_length` below and the delay pass's tick count are both read
-//!   off the routed tree.
+//!   pass's. Doing it at this stage rather than at stage 4 is what
+//!   gets the climb measured: the `wire_length` below and the delay
+//!   pass's tick count are both read off the routed tree.
 //! - **Unroutable sinks.** A sink with no free path from its driver —
 //!   every way out walled in by a component, by an earlier net's dust
-//!   or the coords beside it, or by the edge of the reservation — fires `E_ROUTE_CONGESTION`
-//!   with its own primary naming the two coords, and the scope is
-//!   elided. Refused before the area arithmetic below, because the area
-//!   can be ample and the one coord the wire needs still be taken. This
-//!   is what a crossing becomes: a layout with nowhere for the second
-//!   net to go is refused rather than shorted.
+//!   or the coords beside it, or by the edge of the reservation —
+//!   fires `E_ROUTE_CONGESTION` with its own primary naming the two
+//!   coords, and the scope is elided. Refused before the area
+//!   arithmetic below, because the area can be ample and the one coord
+//!   the wire needs still be taken. This is what a crossing becomes: a
+//!   layout with nowhere for the second net to go is refused rather
+//!   than shorted.
 //! - **Occupancy.** A per-scope `HashSet<CellCoord>` seeded with
 //!   every cell coord, every input pad, and every output pad, then
 //!   grown by each routed tree. Duplicate visits share (fanout is the
@@ -562,7 +561,6 @@ mod tests {
     /// A unit test rather than one in `tests/routing.rs` because the
     /// wire coords are crate-internal — the routed IR carries lengths,
     /// not paths.
-
     #[test]
     fn no_example_draws_dust_inside_a_component() {
         use std::collections::{HashMap, HashSet};
@@ -587,6 +585,7 @@ mod tests {
         let mut placed_scopes = 0usize;
         let mut routed_scopes = 0usize;
         let mut detours = 0usize;
+        let mut climbs = 0usize;
         for file in std::fs::read_dir(&dir).expect("read examples") {
             let path = file.expect("dir entry").path();
             if path.extension().and_then(|e| e.to_str()) != Some("crn") {
@@ -636,7 +635,9 @@ mod tests {
                                 "{where_it_is} draws {net:?} through {coord:?}",
                             );
                         }
-                        claim(&mut owner, *net, &router.dust(tree), &where_it_is);
+                        let dust = router.dust(tree);
+                        climbs += dust.iter().filter(|coord| coord.y > 0).count();
+                        claim(&mut owner, *net, &dust, &where_it_is);
                         for sink in &nets[net] {
                             let route = tree.route_to(*sink).expect("a sink of this net");
                             let walked =
@@ -663,6 +664,12 @@ mod tests {
             detours > 0,
             "no strand in the corpus goes round anything, so nothing here would \
              notice a router that drew straight through",
+        );
+        assert!(
+            climbs > 0,
+            "no strand in the corpus leaves the ground layer, so the escape is \
+             no longer shown by any `.crn` that ships and the byte-identity \
+             test named for it is measuring a scope without one",
         );
     }
 

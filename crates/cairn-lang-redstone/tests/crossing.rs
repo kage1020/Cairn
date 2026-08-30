@@ -349,6 +349,12 @@ fn legalized_with_zero_buffers_is_distinguishable_from_delayed() {
 /// scope would trip the byte-identity assertion via a shorter left
 /// side — and an escape upstream does not reach this pass as a change
 /// to the wire form.
+///
+/// That there still *is* an escape to be unaffected by is not visible
+/// from here: routed paths do not reach the IR, so this test would stay
+/// green over a corpus that had stopped climbing. `no_example_draws_
+/// dust_inside_a_component` in `routing.rs` counts the coords the
+/// corpus lays above the ground layer and refuses to pass at zero.
 #[test]
 fn json_output_byte_identical_apart_from_stage_tag_on_a_scope_with_escapes() {
     let source = load_example("crossbar.crn");
