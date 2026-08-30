@@ -60,8 +60,11 @@ fn placement_from_source(source: &str, edition: Edition) -> ScopedPlacementIr {
 /// sole `JavaRepeaterOr` cell with `wire_length = Some(3)`: the sum of
 /// the routed lengths from each input pad (v1 convention: `(0, 0, i)`)
 /// into the cell coord `(1, 0, 1)`. `sig.exit`'s pad is directly beside
-/// the cell, so its strand is one block. `sig.step`'s is at the corner
-/// a row further out, and comes in round the corner for two.
+/// the cell, so its route is one step and lays no dust at all — there
+/// is no coord between the two ends to put any on, which is the first
+/// fixture where `wire_length` counting steps rather than blocks of
+/// dust is visible. `sig.step`'s pad is at the corner a row further
+/// out, and comes in round the corner for two.
 /// `delay_ticks` stays `None` (routing does not insert delay per
 /// `spec/redstone` §14.4; that is stage 3).
 #[test]
@@ -140,8 +143,9 @@ fn redstone_door_bedrock_matches_java_wire_length() {
 /// which is what the sums are worth reading for:
 ///
 /// - cell[0] `sig.and_ab = sig.a and sig.b`: `sig.b`'s pad is directly
-///   beside it, one block. `sig.a`'s is at the corner a row further
-///   out and comes in round the corner for two: `2 + 1 = 3`.
+///   beside it, so its route is one step over no dust at all. `sig.a`'s
+///   is at the corner a row further out and comes in round the corner
+///   for two: `2 + 1 = 3`.
 /// - cell[1] `sig.or_ab = sig.a or sig.b`: the same two nets carrying
 ///   on down the row, one along the lane at `z=0` and one along the
 ///   lane at `z=2` — `sig.a` took the first, and `sig.b` cannot run

@@ -135,8 +135,8 @@ The internal algorithm runs five stages:
    That costs one row for the whole netlist rather than one per cell, so unlike the column
    spacing it does not grow with the cell count.
 
-   Spacing is not a guarantee of a wiring: a net passing through can still take the last free
-   face, and that scope is refused rather than shorted. A region that cannot hold the row —
+   Neither spacing is a guarantee of a wiring: a net passing through can still take the last
+   free face, and that scope is refused rather than shorted. A region that cannot hold the row —
    `2n + 1` columns for `n` cells, and three rows — is refused here rather than left to fail as
    an unreachable sink two stages later.
 2. **Steiner routing.** Manhattan, around what is already standing — and around the dust of the
@@ -155,10 +155,12 @@ The internal algorithm runs five stages:
    order is fanout descending, then the net's own key — a total order, so one layout has one
    answer however many passes ask for it.
 
-   Beside is per-plane. Whether a strand at `y + 1` reads the dust below it depends on what is
+   Beside is per-plane. Whether two strands a layer apart read each other depends on what is
    standing between them, which this model does not carry: the internal model is pseudo-2.5D and
-   the voxel realisation belongs to the physical tile layer, so separating strands that share a
-   column is that layer's obligation rather than the router's.
+   the voxel realisation belongs to the physical tile layer. Separating two strands within one
+   step of each other across layers is that layer's obligation rather than the router's — both
+   the stacked pair and the diagonal one, which is a staircase and is the commoner of the two,
+   because an escape climbing to clear a strand lands beside it as often as over it.
 3. **Delay insertion.** A repeater goes in as a buffer only where a segment exceeds the attenuation
    limit of 15. The segment is measured along the **routed** path from driver to sink, and the
    buffer stands on that path, so the straight line between the two is not always wire.

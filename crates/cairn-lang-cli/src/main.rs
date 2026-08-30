@@ -269,8 +269,10 @@ enum SynthStage {
     /// two signals, and stage 2 is where that is prevented: each net is
     /// routed around the dust of the nets before it and around the
     /// coords beside that dust, so a scope that reaches this stage has
-    /// no short to find and no coord for a repeater to contest. A scope with nothing to legalize emits no
-    /// `buffer_coords` at all (the empty vector serde-skips); the
+    /// no short to find and no coord for a repeater to contest.
+    ///
+    /// A scope with nothing to legalize emits no `buffer_coords` at all
+    /// (the empty vector serde-skips); the
     /// `"stage": "crossing"` tag on every cell, not the presence of
     /// that key, is what marks the dump as having been through this
     /// pass.

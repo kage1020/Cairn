@@ -42,8 +42,7 @@ entries (stage 4 of §14.5). Two nets that would be one strand of dust
 is not something it has to legalize: stage 2 routes each net around the
 dust of the nets before it and around the coords beside that dust — dust
 reads the dust one step away in its own plane — so the short never gets
-made. Every placed cell
-records which of those four passes last touched it as a
+made. Every placed cell records which of those four passes last touched it as a
 `PlacementStage`, dumped as a `"stage"` key in the same vocabulary
 `cairn synth --stage <s>` accepts, so a JSON consumer reads the stage
 off the output rather than inferring it from which optional keys are

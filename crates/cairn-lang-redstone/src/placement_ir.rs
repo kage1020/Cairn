@@ -149,9 +149,11 @@ pub struct CellCoord {
     /// layer inside the reservation's `void=<N>` budget, and a buffer
     /// repeater standing on that wire carries the height with it.
     pub y: u32,
-    /// Row along the region's z-axis. `0` for cell coords stamped by
-    /// the placement pass; pad and buffer coords may sit at
-    /// `z = 1 + i` (saturating at `depth-1`).
+    /// Row along the region's z-axis. `1` for cell coords stamped by
+    /// the placement pass — one row in, so every cell has a clear lane
+    /// on each side; pad coords step from `z = i` (saturating at
+    /// `depth-1`), and buffer coords take the row of the wire they
+    /// stand on.
     pub z: u32,
     /// Pseudo-2.5D layer this coord lives on. Cell coords are
     /// [`RouteLayer::Plane`] by construction; wire the routing pass

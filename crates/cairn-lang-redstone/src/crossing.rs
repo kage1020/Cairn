@@ -13,14 +13,15 @@
 //! consumer — and legalizes the coord of every buffer repeater the
 //! delay pass counted.
 //!
-//! The wire itself needs no legalizing here. Two nets sharing a wire
-//! coord is one strand of dust carrying two signals, and stage 2 is
-//! where that is prevented: each net is routed around the dust the
-//! nets before it laid, so a scope that reaches this pass has none to
-//! find. What is left for stage 4 is the crossing a *repeater* would
-//! make by standing on a coord it does not own, which the delay pass
-//! could not see because it counts repeaters before anything knows
-//! where they go.
+//! The wire itself needs no legalizing here. Two nets on one coord,
+//! or one step apart in one plane, are one strand of dust carrying two
+//! signals, and stage 2 is where that is prevented: each net is routed
+//! around the dust the nets before it laid and around the coords beside
+//! that dust, so a scope that reaches this pass has none to find.
+//!
+//! What is left for stage 4 is the crossing a *repeater* would make by
+//! standing on a coord it does not own, which the delay pass could not
+//! see because it counts repeaters before anything knows where they go.
 //!
 //! **Implicit buffer repeater coord assignment.** The delay pass
 //!    counted `floor((s - 1) / DUST_ATTENUATION_LIMIT)` buffer
@@ -233,9 +234,9 @@ fn legalize_scope(entry: &ScopedPlacementIrEntry) -> ScopeLegalization {
     // Every coord a repeater can be asked to stand on is a coord of
     // its own net's route, and `net_trees` asserts as it builds that no
     // net's dust stands on, or one step from, another's — in release,
-    // at the point the coord is claimed. That is what leaves this pass with a coord to
-    // record and no coord to contest, and re-deriving it here would be
-    // asking the same function the same question twice.
+    // at the point the coord is claimed. That is what leaves this pass
+    // with a coord to record and no coord to contest, and re-deriving it
+    // here would be asking the same function the same question twice.
     let allocation = allocate_buffer_coords(&ir, &trees);
 
     for (index, (cell, buffers)) in ir.cells.iter_mut().zip(allocation.per_cell).enumerate() {
@@ -978,6 +979,12 @@ mod tests {
              coord when each is routed against the blocks alone",
         );
 
+        // The third hand-copy of the adjacency rule, and the reason
+        // `routing_geometry`'s doc counts two: this one is an
+        // integration-level check on the pass, so going through
+        // `beside` would let a mutant that empties it pass here as
+        // well as in the sweeps. Widening the rule means editing three
+        // places, not two.
         let dust: Vec<(NetRef, Vec<CellCoord>)> = trees
             .iter()
             .map(|(net, tree)| (*net, router.dust(tree)))
@@ -988,7 +995,8 @@ mod tests {
                     for b in theirs {
                         assert!(
                             a.y != b.y || a.x.abs_diff(b.x) + a.z.abs_diff(b.z) > 1,
-                            "{net:?} lays dust on {a:?} and {other:?} on {b:?},                              which is one strand carrying two signals",
+                            "{net:?} lays dust on {a:?} and {other:?} on {b:?}, \
+                             which is one strand carrying two signals",
                         );
                     }
                 }

@@ -439,9 +439,10 @@ fn cli_synth_stage_edition_requires_edition_flag() {
 fn cli_synth_stage_route_java_fills_wire_length() {
     // `--stage route --edition java` runs Steiner routing over the
     // Placement IR. `redstone-door.crn`'s sole OR cell should carry
-    // `wire_length = 3` — one block from `sig.exit`'s pad, which is
-    // directly beside it, and two from `sig.step`'s, which is at the
-    // corner a row further out — in the routed JSON, while `delay_ticks`
+    // `wire_length = 3` — one step from `sig.exit`'s pad, which is
+    // directly beside it with no coord between them to lay dust on, and
+    // two from `sig.step`'s, which is at the corner a row further out —
+    // in the routed JSON, while `delay_ticks`
     // stays elided because this dump stops at stage 2.
     // `cli_synth_stage_delay_java_fills_delay_ticks` is the stage-3
     // dump where it appears.

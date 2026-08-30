@@ -20,10 +20,13 @@ and is a separate axis from the Minecraft target version.
   `crossbar.crn`, two across one in `redstone-door.crn`, on both editions.
 
   The obstacle set a net routes around now grows from the dust already laid to that dust and the
-  four coordinates beside it in its own plane. In its own plane and no further — whether dust at
-  `y + 1` reads the dust below it depends on what is standing between them, which the pseudo-2.5D
-  model does not carry, so `spec/redstone` §14.5 now says in as many words that separating two
-  strands that share a column is the physical tile layer's obligation rather than the router's.
+  four coordinates beside it in its own plane. In its own plane and no further — whether two
+  strands a layer apart read each other depends on what is standing between them, which the
+  pseudo-2.5D model does not carry, so `spec/redstone` §14.5 now says in as many words that
+  separating two strands within one step of each other *across* layers is the physical tile
+  layer's obligation rather than the router's. Nine such pairs per edition remain in the example
+  corpus after this change, one stacked and eight diagonal, and every one of them is an escape
+  landing on or beside the strand it climbed to clear.
 
   The router cannot own the rule alone, and measuring is what said so. With the cell row on the
   `z = 0` edge, no order `crossbar.crn`'s four nets can be laid in wires the scope — none of the
