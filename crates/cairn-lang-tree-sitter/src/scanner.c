@@ -36,21 +36,26 @@ typedef struct {
   // Levels still to close on the line currently being read. A line that
   // returns from several levels at once owes one `_dedent` per level, and
   // the count has to be carried because only the first of them can be
-  // derived from the source: `scan()` reads a line's indentation off
-  // `get_column()`, and the leading spaces are already behind the lexer
-  // once the first `_dedent` has been produced. Set where the line's
-  // indentation is read and drained one token at a time.
+  // derived from the source: `scan()` counts a line's leading spaces as
+  // it reads past them, and they are already behind the lexer once the
+  // first `_dedent` has been produced. Set where the line's indentation
+  // is read and drained one token at a time.
   uint16_t pending_dedents;
-  // What `get_column()` reports at the start of the line being read.
+  // What `get_column()` reports at the start of the line being read —
+  // except while the blank-line loop in `scan()` is crossing lines, which
+  // leaves it on the line that call started from and says why there.
   //
   // Zero for every line that follows an `\n`, and *not* zero for one that
   // follows a lone `\r`: tree-sitter counts columns from the last `\n`
   // alone, while cairn-lang-core::lex::Lexer::consume_line_break ends a
-  // line on `\r` too. Recording the base where each line break is
-  // consumed lets the indent logic below subtract it and get the leading
-  // space count either way — comparing `get_column()` against 0 instead
-  // silently skips indent handling for every line of a `\r`-terminated
-  // file.
+  // line on `\r` too. Recorded for the file's opening layout by the
+  // FILE_START branch and thereafter wherever a line break is consumed,
+  // it is what lets `scan()` ask whether it is standing where a line
+  // begins — which is the whole question, since a run of spaces is that
+  // line's indentation there and separator whitespace anywhere else.
+  // Comparing `get_column()` against 0 instead would answer that question
+  // correctly for the first line of a `\r`-terminated file, which starts
+  // at column 0 like any other, and wrongly for every line after it.
   uint32_t line_start_column;
   // Set once an end-of-file NEWLINE has been synthesized since the last
   // EOF-path DEDENT. Grammar sites that need "one or more" newlines
@@ -254,9 +259,12 @@ bool tree_sitter_cairn_external_scanner_scan(void *payload, TSLexer *lexer, cons
   // 'x' token can never win the match. The external scanner runs before
   // that machinery and is only ever consulted where the grammar expects
   // this separator, so it can commit to the single `x` character directly.
-  // It is checked before any extras (spaces) are skipped, which is exactly
-  // what enforces immediate adjacency: `9 x 7` must not parse as one size
-  // literal.
+  // It is checked before any extras (spaces) are skipped, and before the
+  // run of spaces the layout section below reads, which is exactly what
+  // enforces immediate adjacency: `9 x 7` must not parse as one size
+  // literal. The right of the separator is held by `token.immediate` in
+  // `grammar.js`; the left is held by nothing but this branch's position,
+  // which `size_space_before_x` in `tests/parser_parity.rs` keeps here.
   if (valid_symbols[SIZE_X] && lexer->lookahead == 'x') {
     advance(lexer);
     lexer->result_symbol = SIZE_X;
@@ -310,6 +318,30 @@ bool tree_sitter_cairn_external_scanner_scan(void *payload, TSLexer *lexer, cons
     s->pending_dedents = 0;
   }
 
+  // Whether the lexer is parked where a line begins, recorded before
+  // anything moves it.
+  //
+  // A run of spaces reaching this scanner means one of two things, and
+  // this is what tells them apart: at the start of a line the run is the
+  // line's indentation, whose length the INDENT and DEDENT branches below
+  // need; anywhere else it is separator whitespace the `/ +/` extra owns.
+  // Asking after the run has been read is what does not work — `skip()`
+  // moves the column past it, so `get_column()` no longer reports where
+  // the line began.
+  bool at_line_start = lexer->get_column(lexer) == s->line_start_column;
+
+  // The run itself, read once here and measured by counting rather than
+  // by subtracting columns afterwards. Reading it up front is what puts
+  // the EOF and NEWLINE branches within reach of a line that ends in a
+  // space: the scanner is consulted before extras are skipped, so without
+  // this read such a line arrives with the space in `lookahead` and no
+  // branch below able to consume one.
+  uint32_t spaces = 0;
+  while (lexer->lookahead == ' ') {
+    skip(lexer);
+    spaces++;
+  }
+
   // At EOF: synthesize the missing NEWLINE first (matches
   // cairn-lang-core::lex::scan_line_body, which emits a Newline token for a
   // final content line with no trailing line break before closing any
@@ -344,15 +376,10 @@ bool tree_sitter_cairn_external_scanner_scan(void *payload, TSLexer *lexer, cons
   // the scanner for no token at all, so at that point there is nothing left
   // to withhold.
   //
-  // A line ending in a space never reaches here with the break in
-  // `lookahead`: tree-sitter consults the external scanner *before* it
-  // skips extras, so the space is what this branch sees, and no branch
-  // below can consume one either. That is the `trailing_space_*` entries
-  // in `tests/parser_parity.rs`. Skipping the run here is not the repair
-  // it looks like — at the start of a line the same run is the line's
-  // indentation, and the two are only distinguishable by reading to the
-  // end of the run, which moves the lexer past an indent the branches
-  // below still need to measure.
+  // Whatever run of spaces stood in front of the break is already behind
+  // the lexer, so a line that ends in one arrives here like any other. A
+  // line holding nothing but spaces arrives here too, and is a break like
+  // any other: the grammar wants one NEWLINE per physical line break.
   if (valid_symbols[NEWLINE] && (lexer->lookahead == '\n' || lexer->lookahead == '\r')) {
     if (lexer->lookahead == '\r') {
       advance(lexer);
@@ -368,36 +395,38 @@ bool tree_sitter_cairn_external_scanner_scan(void *payload, TSLexer *lexer, cons
     return true;
   }
 
-  // Everything below reads a line's leading whitespace, which only means
-  // anything at the start of one. Mid-line the extras rule owns the
-  // spaces.
-  if (lexer->get_column(lexer) != s->line_start_column) return false;
+  // Not where a line begins, so any run read above was separator
+  // whitespace the extras rule owns, and whatever follows it is a token
+  // for tree-sitter's own lexer. Returning false rewinds over it.
+  if (!at_line_start) return false;
   if (!(valid_symbols[INDENT] || valid_symbols[DEDENT])) return false;
 
-  // Skip blank and comment-only lines without shifting indent state.
+  // Skip blank and comment-only lines without shifting indent state, so
+  // the level measured below is the next line that carries one.
   //
-  // `base` tracks where the line the loop lands on begins, because
-  // `get_column()` cannot be asked for it: the column restarts at `\n`
-  // and at nothing else, so every lone `\r` the loop crosses leaves the
-  // count running on from the line before.
+  // Each crossed line restarts `spaces`, which is also why the count is
+  // kept rather than read back off `get_column()` at the end: the column
+  // restarts at `\n` and at nothing else, so every lone `\r` the loop
+  // crosses would leave a column-derived count running on from the line
+  // before.
   //
-  // Local, and deliberately not written back to the scanner. Whichever
-  // token this call produces is followed by that line's own break, and
-  // the NEWLINE branch above records the base for the line after it — so
-  // a write here is overwritten before anything reads it. Confirmed by
-  // measurement rather than by reading: adding the two writes changes no
-  // tree across a sweep of nested and dedenting bodies in all three line
-  // endings.
-  uint32_t base = s->line_start_column;
+  // `line_start_column` is deliberately left describing the line this
+  // call started on. It is read again — `at_line_start` above reads it at
+  // the top of every call — but the next call stands past the indentation
+  // of whatever line this loop lands on, where the stale base and the
+  // true one answer alike; and the NEWLINE branch records the real base
+  // for the line after that. Confirmed by measurement rather than by
+  // reading: adding the write changes no tree across a sweep of nested
+  // and dedenting bodies in all three line endings.
   for (;;) {
-    while (lexer->lookahead == ' ') skip(lexer);
     if (lexer->lookahead == '#') {
       while (!at_line_break(lexer)) skip(lexer);
     }
     if (lexer->lookahead == '\n' || lexer->lookahead == '\r') {
       if (lexer->lookahead == '\r') { skip(lexer); if (lexer->lookahead == '\n') skip(lexer); }
       else { skip(lexer); }
-      base = lexer->get_column(lexer);
+      spaces = 0;
+      while (lexer->lookahead == ' ') { skip(lexer); spaces++; }
       continue;
     }
     break;
@@ -416,12 +445,16 @@ bool tree_sitter_cairn_external_scanner_scan(void *payload, TSLexer *lexer, cons
     return false;
   }
 
-  // Count leading spaces at the beginning of a real line. Tab is an error.
+  // `spaces` now holds the leading run of whatever real line the loop
+  // landed on.
   //
-  // Measured from `base` rather than from `line_start_column`, which
-  // describes the line the loop above started on and not the one it
-  // finished on.
-  uint32_t spaces = lexer->get_column(lexer) - base;
+  // A tab is refused rather than counted as zero. The file is refused
+  // either way — the `/ +/` extra matches spaces alone, so a tab reaches
+  // tree-sitter's own lexer as a character no token starts with — but
+  // answering here reads the line as a return to level 0 and emits the
+  // DEDENTs to match, closing bodies the file never closed and taking the
+  // lines written inside them down with it. No verdict moves, so it is
+  // pinned on placement in `tests/parser_parity.rs` instead.
   if (lexer->lookahead == '\t') return false;
 
   if (spaces & 1u) return false; // odd indent, let LR surface an ERROR

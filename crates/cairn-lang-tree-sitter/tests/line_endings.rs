@@ -66,7 +66,8 @@ fn crlf_source_parses_identically_to_lf() {
 /// `LF_SOURCE` is the right fixture because it already holds a blank line
 /// and a comment-only line, and those are what carry the scanner across a
 /// second line break before it measures the next one — the case where the
-/// base column has to move with it.
+/// count has to be taken afresh on the line it lands on, since the column
+/// cannot supply it.
 #[test]
 fn lone_cr_source_parses_identically_to_lf() {
     let cr = LF_SOURCE.replace('\n', "\r");
