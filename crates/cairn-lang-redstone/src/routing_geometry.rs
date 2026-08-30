@@ -42,13 +42,20 @@
 //!
 //! # The obstacle set grows as the nets are laid
 //!
-//! Blocks, and every coord of dust an earlier net already occupies.
-//! Two nets sharing a wire coord is one strand of dust carrying two
-//! signals, which shorts them, so the second net to be routed treats
-//! the first one's dust the way it treats a cell body: something to go
-//! round, or to climb over. `spec/redstone` §14.5 calls that escape,
-//! and it falls out of the search that was already going round blocks
-//! rather than out of a mechanism of its own.
+//! Blocks; every coord of dust an earlier net already occupies; and
+//! every coord beside that dust in its own plane. Two nets on one
+//! coord is one strand carrying two signals, and so is two nets one
+//! step apart — dust joins the dust next to it — so the second net to
+//! be routed treats both the way it treats a cell body: something to
+//! go round, or to climb over. `spec/redstone` §14.5 calls that
+//! escape, and it falls out of the search that was already going round
+//! blocks rather than out of a mechanism of its own.
+//!
+//! In its own plane, and no further. Whether dust at `y + 1` reads the
+//! dust below it depends on what stands between them, which is a
+//! question about the physical tile layer — §14.5 leaves the voxel
+//! realisation to that layer, and this module holds itself to the
+//! plane it can answer for.
 //!
 //! What it costs is that a tree is a function of the order the nets
 //! were laid in. [`net_trees`] lays them in [`net_order`] — fanout
@@ -61,8 +68,10 @@
 //!
 //! Only dust. A sink is a block, and two nets ending at one cell body
 //! is the ordinary two-input cell — so [`Router::dust`] takes the
-//! blocks back out of a tree before it joins the obstacle set, and
-//! what is left is exactly what shorts.
+//! blocks back out of a tree before [`beside`] widens it, and what is
+//! left is exactly what shorts. Two faces of one block are two steps
+//! apart, so widening it costs a two-input gate nothing: neither
+//! driver keeps the other out.
 //!
 //! # Layers
 //!
@@ -131,14 +140,14 @@ pub(crate) fn coord_key(coord: CellCoord) -> (u32, u32, u32) {
 /// v1 input-pad coordinate: left edge (`x=0`), first service layer
 /// (`y=0`), z-axis increasing as the input index grows. Saturates at
 /// `depth-1` whenever the input count would push z past the region's
-/// z-extent (`inputs.len() + 1 > depth`); the resulting overlap is
+/// z-extent (`inputs.len() > depth`); the resulting overlap is
 /// caught at seeding time and surfaces as `E_ROUTE_CONGESTION`
 /// rather than a silent misroute. Pinning the coordinate here is a
 /// v1 convention; once a consumer outside this crate needs the pad
 /// coords, `input_pads` joins [`crate::placement_ir::PlacementIr`]
 /// as a `#[non_exhaustive]`-safe field.
 pub(crate) fn input_pad(i: usize, region: &CircuitRegionReservation) -> CellCoord {
-    let raw = u32::try_from(i.saturating_add(1)).unwrap_or(u32::MAX);
+    let raw = u32::try_from(i).unwrap_or(u32::MAX);
     let z = raw.min(region.depth.saturating_sub(1));
     CellCoord::new(0, 0, z)
 }
@@ -146,7 +155,7 @@ pub(crate) fn input_pad(i: usize, region: &CircuitRegionReservation) -> CellCoor
 /// v1 output-pad coordinate: right edge (`x=width-1`), same
 /// saturating z-axis convention as [`input_pad`].
 pub(crate) fn output_pad(k: usize, region: &CircuitRegionReservation) -> CellCoord {
-    let raw = u32::try_from(k.saturating_add(1)).unwrap_or(u32::MAX);
+    let raw = u32::try_from(k).unwrap_or(u32::MAX);
     let z = raw.min(region.depth.saturating_sub(1));
     let x = region.width.saturating_sub(1);
     CellCoord::new(x, 0, z)
@@ -299,6 +308,40 @@ const STEPS: [(i64, i64, i64); 6] = [
     (0, 1, 0),
 ];
 
+/// The four of [`STEPS`] that stay in the coord's own plane.
+const IN_PLANE: [(i64, i64, i64); 4] = [(-1, 0, 0), (1, 0, 0), (0, 0, -1), (0, 0, 1)];
+
+/// The coord one step from `from`, or `None` when the step runs off the
+/// `0` edge, which the unsigned coords cannot represent.
+///
+/// Says nothing about the reservation: [`Router::step`] adds that, and
+/// [`beside`] deliberately does not — a coord outside the region is
+/// still a coord no dust of this scope stands on.
+fn stepped(from: CellCoord, (dx, dy, dz): (i64, i64, i64)) -> Option<CellCoord> {
+    let axis = |value: u32, delta: i64| -> Option<u32> {
+        u32::try_from(i64::from(value).checked_add(delta)?).ok()
+    };
+    Some(CellCoord::new(
+        axis(from.x, dx)?,
+        axis(from.y, dy)?,
+        axis(from.z, dz)?,
+    ))
+}
+
+/// The coords a strand of dust on `coord` reaches: the four steps that
+/// keep it in its own plane.
+///
+/// Dust joins the dust beside it, so a second net drawing on one of
+/// these is one strand with the first as surely as a second net drawing
+/// on `coord` itself. Up and down are not here: whether dust at `y + 1`
+/// reads the dust below it depends on what stands between them, and
+/// `spec/redstone` §14.5 leaves that to the physical tile layer.
+pub(crate) fn beside(coord: CellCoord) -> impl Iterator<Item = CellCoord> {
+    IN_PLANE
+        .into_iter()
+        .filter_map(move |delta| stepped(coord, delta))
+}
+
 /// One coord on the search frontier, ordered so that
 /// [`BinaryHeap`]'s max pops the coord to expand next.
 ///
@@ -389,24 +432,21 @@ impl Router {
         coord.x < self.width && coord.y < self.height && coord.z < self.depth
     }
 
-    /// Whether dust may be drawn on `coord` while `laid` is standing.
+    /// Whether dust may be drawn on `coord` while `keep_out` stands.
     ///
     /// The two halves of the obstacle set are asked together so no
-    /// caller can consult one and forget the other: a straight run
-    /// that checked only the blocks would lay this net's dust straight
-    /// over the last net's.
-    fn free(&self, coord: CellCoord, laid: &HashSet<CellCoord>) -> bool {
-        self.inside(coord) && !self.blocked.contains(&coord) && !laid.contains(&coord)
+    /// caller can consult one and forget the other: a straight run that
+    /// checked only the blocks would lay this net's dust over the last
+    /// net's — or one step from it, which is the same short.
+    fn free(&self, coord: CellCoord, keep_out: &HashSet<CellCoord>) -> bool {
+        self.inside(coord) && !self.blocked.contains(&coord) && !keep_out.contains(&coord)
     }
 
     /// The coord one [`STEPS`] step away, or `None` when the step
     /// leaves the reservation (including off the `0` edge, which the
     /// unsigned coords cannot represent).
-    fn step(&self, from: CellCoord, (dx, dy, dz): (i64, i64, i64)) -> Option<CellCoord> {
-        let axis = |value: u32, delta: i64| -> Option<u32> {
-            u32::try_from(i64::from(value).checked_add(delta)?).ok()
-        };
-        let next = CellCoord::new(axis(from.x, dx)?, axis(from.y, dy)?, axis(from.z, dz)?);
+    fn step(&self, from: CellCoord, delta: (i64, i64, i64)) -> Option<CellCoord> {
+        let next = stepped(from, delta)?;
         self.inside(next).then_some(next)
     }
 
@@ -430,10 +470,10 @@ impl Router {
         &self,
         seeds: &[CellCoord],
         targets: &[CellCoord],
-        laid: &HashSet<CellCoord>,
+        keep_out: &HashSet<CellCoord>,
     ) -> Option<(usize, Vec<CellCoord>)> {
-        self.straight_run(seeds, targets, laid)
-            .or_else(|| self.search(seeds, targets, laid))
+        self.straight_run(seeds, targets, keep_out)
+            .or_else(|| self.search(seeds, targets, keep_out))
     }
 
     /// The closest seed/target pair, when the straight line between
@@ -463,7 +503,7 @@ impl Router {
         &self,
         seeds: &[CellCoord],
         targets: &[CellCoord],
-        laid: &HashSet<CellCoord>,
+        keep_out: &HashSet<CellCoord>,
     ) -> Option<(usize, Vec<CellCoord>)> {
         let (index, seed) = seeds
             .iter()
@@ -487,7 +527,7 @@ impl Router {
         let mut current = seed;
         while current != target {
             current = step_towards(current, target);
-            if current != target && !self.free(current, laid) {
+            if current != target && !self.free(current, keep_out) {
                 return None;
             }
             path.push(current);
@@ -511,7 +551,7 @@ impl Router {
         &self,
         seeds: &[CellCoord],
         targets: &[CellCoord],
-        laid: &HashSet<CellCoord>,
+        keep_out: &HashSet<CellCoord>,
     ) -> Option<(usize, Vec<CellCoord>)> {
         let heuristic = |coord: CellCoord| -> u32 {
             targets
@@ -558,7 +598,7 @@ impl Router {
                 // two nets both sink at is a block on both of their
                 // paths and a terminal of both.
                 let target = targets.contains(&next);
-                if !target && !self.free(next, laid) {
+                if !target && !self.free(next, keep_out) {
                     continue;
                 }
                 let g = current.g.saturating_add(1);
@@ -580,7 +620,7 @@ impl Router {
 
     /// One net's routed tree: rooted at `source`, with every distinct
     /// sink attached as a leaf, going round the blocks and round
-    /// `laid`.
+    /// `keep_out`.
     ///
     /// Grown one sink at a time, nearest first, because a sink can only
     /// be reached from wire that already exists: the dust laid for the
@@ -589,14 +629,15 @@ impl Router {
     /// on a path emits except its far end — the sink is a block, and a
     /// block ends the dust that arrives at it.
     ///
-    /// `laid` is the dust of the nets routed before this one — see
-    /// [`Self::dust`] and [`net_trees`]. Empty for the first net of a
-    /// scope, and for a caller routing one net against nothing.
+    /// `keep_out` is what the nets routed before this one have taken:
+    /// their dust, and the coords [`beside`] it — see [`Self::dust`]
+    /// and [`net_trees`]. Empty for the first net of a scope, and for a
+    /// caller routing one net against nothing.
     pub(crate) fn tree(
         &self,
         source: CellCoord,
         sinks: &[CellCoord],
-        laid: &HashSet<CellCoord>,
+        keep_out: &HashSet<CellCoord>,
     ) -> NetTree {
         // Every sink is a block of this router. `search` enforces the
         // leaf property itself — it returns the moment a target is
@@ -623,7 +664,7 @@ impl Router {
             }
         }
         while !remaining.is_empty() {
-            let Some((index, path)) = self.reach(&emitters, &remaining, laid) else {
+            let Some((index, path)) = self.reach(&emitters, &remaining, keep_out) else {
                 for sink in remaining.drain(..) {
                     tree.strand(sink);
                 }
@@ -648,11 +689,12 @@ impl Router {
     /// which makes this a derivation rather than a second list to keep
     /// in step with [`NetTree::wire_path`].
     ///
-    /// This, and not the whole path, is what the next net has to go
+    /// This, widened by [`beside`], is what the next net has to go
     /// round. A cell body is a terminal of every net that drives it,
     /// and two drivers reaching one cell is a two-input gate rather
     /// than a short; keeping the terminals in would leave the second
-    /// driver of every such cell with nowhere to arrive.
+    /// driver of every such cell with nowhere to arrive, and widening
+    /// them would take the faces beside their own.
     pub(crate) fn dust(&self, tree: &NetTree) -> Vec<CellCoord> {
         tree.wire_path()
             .into_iter()
@@ -901,9 +943,9 @@ pub(crate) fn net_order(nets: &HashMap<NetRef, Vec<CellCoord>>) -> Vec<NetRef> {
 /// and a reservation with no room for a clear path is a reservation the
 /// layout does not fit in. Its own primary, so it does not read as the
 /// area arithmetic: the area can be ample and the one coord the wire
-/// needs still be a cell body — or dust an earlier net laid, which is
-/// the common one, because a net going round what is in its way is
-/// what keeps two signals off one strand.
+/// needs still be a cell body — or dust an earlier net laid, or the
+/// coord beside such dust, which is the common one, because a net going
+/// round what is in its way is what keeps two signals off one strand.
 ///
 /// Asked by all three passes rather than by stage 2 alone. Stage 2
 /// elides the scope, so stages 3 and 4 never see one in a real run —
@@ -921,10 +963,10 @@ pub(crate) fn net_order(nets: &HashMap<NetRef, Vec<CellCoord>>) -> Vec<NetRef> {
 /// The three causes the primary lists are not equally likely and the
 /// message cannot tell which one applied — the search reports that it
 /// failed, not what it hit last. What it can do is name the nets whose
-/// dust runs beside the sink it could not reach, which is the cause
-/// the author can act on and the only one this pass created. Blocks
-/// beside it are not named: a cell body or a pad beside a cell body is
-/// the layout the author wrote, and saying so adds nothing.
+/// dust takes the faces of the sink it could not reach, which is the
+/// cause the author can act on and the only one this pass created.
+/// Blocks beside it are not named: a cell body or a pad beside a cell
+/// body is the layout the author wrote, and saying so adds nothing.
 pub(crate) fn unroutable<F>(
     nets: &HashMap<NetRef, Vec<CellCoord>>,
     trees: &HashMap<NetRef, NetTree>,
@@ -942,7 +984,7 @@ where
         .find_map(|net| trees[net].unreachable().first().map(|sink| (*net, *sink)))?;
     let source = source_of_net(net);
     let mut primary = format!(
-        "routed netlist for {kind} `{name}` cannot reach ({x},{y},{z}) from the driver at ({sx},{sy},{sz}) — every route between them is blocked by a cell body, an I/O pad, or dust already laid for another net, and a wire passes through none of the three",
+        "routed netlist for {kind} `{name}` cannot reach ({x},{y},{z}) from the driver at ({sx},{sy},{sz}) — every route between them is blocked by a cell body, an I/O pad, or another net's dust, on the coord or one step from it in the same plane, and a wire passes through none of the three",
         kind = entry.kind.label(),
         name = entry.name,
         x = sink.x,
@@ -956,7 +998,7 @@ where
     if !crowding.is_empty() {
         write!(
             primary,
-            "; the coords beside it carry {names}",
+            "; the faces it could arrive through are taken by {names}",
             names = crowding
                 .iter()
                 .map(|net| net_label(*net, &entry.ir))
@@ -986,14 +1028,16 @@ where
     Some(diag)
 }
 
-/// The other nets whose dust runs on a coord next to `sink`, in
-/// [`net_order`].
+/// The other nets whose dust keeps a wire out of the faces of `sink`,
+/// in [`net_order`].
 ///
-/// "Next to" is the six rectilinear steps, the ones a wire could have
-/// come in through. A net's own dust is not counted — it is not what
-/// stopped it — and neither is anything on a terminal, because a
-/// terminal is a block and the message already says blocks are in the
-/// way.
+/// A face is one of the six rectilinear steps off the sink — the coords
+/// a wire could have arrived through. A net takes one by drawing dust
+/// on it, or by drawing dust [`beside`] it, which is the rule the
+/// router routes by rather than a radius guessed to match it. A net's
+/// own dust is not counted — it is not what stopped it — and neither is
+/// anything on a terminal, because a terminal is a block and the
+/// message already says blocks are in the way.
 fn crowding_nets<F>(
     nets: &HashMap<NetRef, Vec<CellCoord>>,
     trees: &HashMap<NetRef, NetTree>,
@@ -1009,18 +1053,10 @@ where
         terminals.insert(keyed(source_of_net(*net)));
         terminals.extend(sinks.iter().copied().map(keyed));
     }
-    let beside: HashSet<CellCoord> = STEPS
+    let taken: HashSet<CellCoord> = STEPS
         .iter()
-        .filter_map(|(dx, dy, dz)| {
-            let axis = |value: u32, delta: i64| -> Option<u32> {
-                u32::try_from(i64::from(value).checked_add(delta)?).ok()
-            };
-            Some(CellCoord::new(
-                axis(sink.x, *dx)?,
-                axis(sink.y, *dy)?,
-                axis(sink.z, *dz)?,
-            ))
-        })
+        .filter_map(|delta| stepped(sink, *delta))
+        .flat_map(|face| std::iter::once(face).chain(beside(face)))
         .collect();
     net_order(nets)
         .into_iter()
@@ -1029,7 +1065,7 @@ where
             trees[net]
                 .wire_path()
                 .iter()
-                .any(|coord| beside.contains(coord) && !terminals.contains(coord))
+                .any(|coord| taken.contains(coord) && !terminals.contains(coord))
         })
         .collect()
 }
@@ -1054,14 +1090,16 @@ fn net_label(net: NetRef, ir: &PlacementIr) -> String {
 /// The routed tree of every net, keyed by driver.
 ///
 /// Laid in [`net_order`], each net going round the dust of the ones
-/// before it, so no two of the trees share a coord and no two signals
-/// share a strand of dust. The order is a total order over the nets of
+/// before it and the coords [`beside`] that dust, so no two of the
+/// trees run within one step of each other in one plane and no two
+/// signals share a strand. The order is a total order over the nets of
 /// a scope, so the map is one answer for one layout — it has to be,
 /// because the routing, delay and crossing passes each call this and
 /// have to be told the same thing.
 ///
 /// A net with nowhere left to go is stranded rather than laid over the
-/// dust in its way; [`unroutable`] is what turns that into a refusal.
+/// dust in its way, or beside it; [`unroutable`] is what turns that
+/// into a refusal.
 pub(crate) fn net_trees<F>(
     nets: &HashMap<NetRef, Vec<CellCoord>>,
     router: &Router,
@@ -1070,30 +1108,39 @@ pub(crate) fn net_trees<F>(
 where
     F: Fn(NetRef) -> CellCoord,
 {
-    let mut laid: HashSet<CellCoord> = HashSet::new();
+    let mut keep_out: HashSet<CellCoord> = HashSet::new();
     let mut trees: HashMap<NetRef, NetTree> = HashMap::with_capacity(nets.len());
     for net in net_order(nets) {
-        let tree = router.tree(source_of_net(net), &nets[&net], &laid);
-        for coord in router.dust(&tree) {
+        let tree = router.tree(source_of_net(net), &nets[&net], &keep_out);
+        let dust = router.dust(&tree);
+        for coord in &dust {
             // Loud in release, and here rather than downstream. Two
-            // nets on one coord is two signals on one strand of dust,
-            // and there is no diagnostic left that would name it: the
-            // codes that used to are gone, and the routed paths do not
-            // reach the IR, so a consumer of a wrong answer has nothing
-            // to inspect. `HashSet::extend` throws the "was it already
-            // there" bool away; asking for it is one branch per dust
-            // coord at the one place the coord is claimed.
+            // nets one step apart in one plane are two signals on one
+            // strand of dust, and there is no diagnostic left that
+            // would name it: the codes that used to are gone, and the
+            // routed paths do not reach the IR, so a consumer of a
+            // wrong answer has nothing to inspect. `HashSet::extend`
+            // throws the "was it already there" bool away; asking for
+            // it is one branch per dust coord at the one place the
+            // coord is claimed.
             assert!(
-                laid.insert(coord),
+                keep_out.insert(*coord),
                 "{net:?} lays dust on ({x},{y},{z}), which another net of this \
-                 scope already owns — the router is asked to go round what is \
-                 already laid, so this is the routing pass disagreeing with \
-                 itself rather than anything the source can express",
+                 scope already owns or runs beside — the router is asked to go \
+                 round what is already laid and what it reaches, so this is the \
+                 routing pass disagreeing with itself rather than anything the \
+                 source can express",
                 x = coord.x,
                 y = coord.y,
                 z = coord.z,
             );
         }
+        // Widened after the whole net is claimed, not as each coord
+        // goes in: consecutive coords of a strand are one step apart by
+        // definition, so a strand runs beside itself the whole way, and
+        // widening as it went would have the claim above trip on this
+        // net's own turn.
+        keep_out.extend(dust.into_iter().flat_map(beside));
         trees.insert(net, tree);
     }
     trees
@@ -1154,16 +1201,23 @@ mod tests {
     /// subject is the router against the blocks says that it is, and
     /// the tests whose subject is the dust of an earlier net read as
     /// the other case of the same question.
-    fn nothing_laid() -> HashSet<CellCoord> {
+    fn nothing_in_the_way() -> HashSet<CellCoord> {
         HashSet::new()
     }
 
-    /// The dust of a net laid from `source` to `sinks` before the net
-    /// under test — the obstacle set as [`net_trees`] builds it.
-    fn laid(router: &Router, source: CellCoord, sinks: &[CellCoord]) -> HashSet<CellCoord> {
-        router
-            .dust(&router.tree(source, sinks, &nothing_laid()))
-            .into_iter()
+    /// The dust one net lays with nothing in its way.
+    fn dust_of(router: &Router, source: CellCoord, sinks: &[CellCoord]) -> Vec<CellCoord> {
+        router.dust(&router.tree(source, sinks, &nothing_in_the_way()))
+    }
+
+    /// What that dust keeps the next net out of: the dust, and the
+    /// coords [`beside`] it — the obstacle set as [`net_trees`] builds
+    /// it.
+    fn keep_out(router: &Router, source: CellCoord, sinks: &[CellCoord]) -> HashSet<CellCoord> {
+        let dust = dust_of(router, source, sinks);
+        dust.iter()
+            .copied()
+            .chain(dust.iter().copied().flat_map(beside))
             .collect()
     }
 
@@ -1236,17 +1290,21 @@ mod tests {
     #[test]
     fn input_pad_saturates_at_depth_minus_one() {
         let region = reservation(10, 3);
-        assert_eq!(input_pad(0, &region), CellCoord::new(0, 0, 1));
-        assert_eq!(input_pad(1, &region), CellCoord::new(0, 0, 2));
-        // depth-1 = 2 ceilings anything past the second input.
+        assert_eq!(input_pad(0, &region), CellCoord::new(0, 0, 0));
+        // Input #1 lands on the cell row, which is where the pads and
+        // the cells share a row without sharing a coord.
+        assert_eq!(input_pad(1, &region), CellCoord::new(0, 0, 1));
+        assert_eq!(input_pad(2, &region), CellCoord::new(0, 0, 2));
+        // depth-1 = 2 ceilings anything past the third input.
         assert_eq!(input_pad(5, &region), CellCoord::new(0, 0, 2));
     }
 
     #[test]
     fn output_pad_sits_on_right_edge_and_saturates_z() {
         let region = reservation(4, 3);
-        assert_eq!(output_pad(0, &region), CellCoord::new(3, 0, 1));
-        assert_eq!(output_pad(1, &region), CellCoord::new(3, 0, 2));
+        assert_eq!(output_pad(0, &region), CellCoord::new(3, 0, 0));
+        assert_eq!(output_pad(1, &region), CellCoord::new(3, 0, 1));
+        assert_eq!(output_pad(2, &region), CellCoord::new(3, 0, 2));
         assert_eq!(output_pad(5, &region), CellCoord::new(3, 0, 2));
     }
 
@@ -1261,7 +1319,7 @@ mod tests {
         let region = region(4, 3, 2);
         let source = CellCoord::new(0, 0, 0);
         let sink = CellCoord::new(2, 1, 1);
-        let tree = router(&region, &[source, sink]).tree(source, &[sink], &nothing_laid());
+        let tree = router(&region, &[source, sink]).tree(source, &[sink], &nothing_in_the_way());
         assert_eq!(
             tree.route_to(CellCoord::new(2, 1, 1)),
             Some(vec![
@@ -1282,7 +1340,7 @@ mod tests {
         let region = region(4, 3, 1);
         let source = CellCoord::new(3, 0, 2);
         let sink = CellCoord::new(1, 0, 0);
-        let tree = router(&region, &[source, sink]).tree(source, &[sink], &nothing_laid());
+        let tree = router(&region, &[source, sink]).tree(source, &[sink], &nothing_in_the_way());
         assert_eq!(
             tree.route_to(CellCoord::new(1, 0, 0)),
             Some(vec![
@@ -1307,7 +1365,7 @@ mod tests {
 
         assert_eq!(
             blocked
-                .tree(source, &[sink], &nothing_laid())
+                .tree(source, &[sink], &nothing_in_the_way())
                 .route_to(sink),
             Some(vec![
                 CellCoord::new(0, 0, 0),
@@ -1319,7 +1377,7 @@ mod tests {
         );
         assert_eq!(
             router(&region, &[source, sink])
-                .tree(source, &[sink], &nothing_laid())
+                .tree(source, &[sink], &nothing_in_the_way())
                 .route_to(sink)
                 .map(|route| route.len()),
             Some(3),
@@ -1339,7 +1397,7 @@ mod tests {
         let tree = router(&region, &[source, sink, CellCoord::new(1, 0, 0)]).tree(
             source,
             &[sink],
-            &nothing_laid(),
+            &nothing_in_the_way(),
         );
         assert_eq!(
             tree.route_to(sink),
@@ -1365,7 +1423,7 @@ mod tests {
         let region = region(6, 3, 1);
         let source = CellCoord::new(0, 0, 2);
         let row: Vec<CellCoord> = (0..4).map(|x| CellCoord::new(x, 0, 0)).collect();
-        let tree = router(&region, &row).tree(source, &row, &nothing_laid());
+        let tree = router(&region, &row).tree(source, &row, &nothing_in_the_way());
 
         for sink in &row {
             let route = tree.route_to(*sink).expect("a sink of this net");
@@ -1402,7 +1460,7 @@ mod tests {
         let source = CellCoord::new(0, 0, 0);
         let near = CellCoord::new(3, 0, 1);
         let far = CellCoord::new(6, 0, 1);
-        let tree = router(&region, &[near, far]).tree(source, &[far, near], &nothing_laid());
+        let tree = router(&region, &[near, far]).tree(source, &[far, near], &nothing_in_the_way());
 
         let to_near = tree.route_to(near).expect("a sink of this net");
         let to_far = tree.route_to(far).expect("a sink of this net");
@@ -1438,7 +1496,7 @@ mod tests {
             CellCoord::new(4, 0, 1),
             CellCoord::new(4, 1, 0),
         ];
-        let tree = router(&region, &blocks).tree(source, &[near, walled], &nothing_laid());
+        let tree = router(&region, &blocks).tree(source, &[near, walled], &nothing_in_the_way());
         assert_eq!(
             tree.unreachable(),
             [walled],
@@ -1467,7 +1525,7 @@ mod tests {
             CellCoord::new(1, 0, 0),
             CellCoord::new(2, 0, 1),
         ];
-        let tree = router(&region, &walls).tree(source, &[sink], &nothing_laid());
+        let tree = router(&region, &walls).tree(source, &[sink], &nothing_in_the_way());
 
         assert_eq!(tree.unreachable(), [sink]);
         assert_eq!(tree.route_to(sink), Some(vec![source, sink]));
@@ -1491,7 +1549,7 @@ mod tests {
             CellCoord::new(1, 0, 0),
             CellCoord::new(2, 0, 1),
         ];
-        let tree = router(&region, &walls).tree(source, &[sink], &nothing_laid());
+        let tree = router(&region, &walls).tree(source, &[sink], &nothing_in_the_way());
 
         assert!(tree.unreachable().is_empty());
         assert_eq!(
@@ -1516,7 +1574,7 @@ mod tests {
         let sink = CellCoord::new(1, 0, 0);
         assert_eq!(
             router(&region, &[source, sink])
-                .tree(source, &[sink], &nothing_laid())
+                .tree(source, &[sink], &nothing_in_the_way())
                 .route_to(sink),
             Some(vec![source, sink]),
         );
@@ -1526,7 +1584,7 @@ mod tests {
     fn a_net_with_no_sinks_still_occupies_its_source() {
         let region = region(4, 2, 1);
         let source = CellCoord::new(1, 0, 1);
-        let tree = router(&region, &[]).tree(source, &[], &nothing_laid());
+        let tree = router(&region, &[]).tree(source, &[], &nothing_in_the_way());
         assert_eq!(tree.wire_path(), vec![source]);
         assert_eq!(tree.route_to(source), Some(vec![source]));
     }
@@ -1540,7 +1598,7 @@ mod tests {
         let source = CellCoord::new(3, 0, 1);
         let other = CellCoord::new(0, 0, 1);
         let tree =
-            router(&region, &[source, other]).tree(source, &[source, other], &nothing_laid());
+            router(&region, &[source, other]).tree(source, &[source, other], &nothing_in_the_way());
         assert_eq!(tree.route_to(source), Some(vec![source]));
     }
 
@@ -1553,7 +1611,7 @@ mod tests {
         let region = region(6, 3, 1);
         let source = CellCoord::new(0, 0, 0);
         let sink = CellCoord::new(4, 0, 0);
-        let tree = router(&region, &[source, sink]).tree(source, &[sink], &nothing_laid());
+        let tree = router(&region, &[source, sink]).tree(source, &[sink], &nothing_in_the_way());
         assert_eq!(tree.route_to(CellCoord::new(4, 0, 2)), None);
     }
 
@@ -1569,7 +1627,7 @@ mod tests {
         let tree = router(&region, &[source, sink, CellCoord::new(1, 0, 0)]).tree(
             source,
             &[sink],
-            &nothing_laid(),
+            &nothing_in_the_way(),
         );
         let route = tree.route_to(sink).expect("a sink of this net");
         assert_eq!(route.len(), 5, "both ways round cost the same two blocks");
@@ -1609,7 +1667,7 @@ mod tests {
         ];
         let mut blocks = vec![source];
         blocks.extend(sinks);
-        let tree = router(&region, &blocks).tree(source, &sinks, &nothing_laid());
+        let tree = router(&region, &blocks).tree(source, &sinks, &nothing_in_the_way());
         assert_eq!(
             tree.route_to(CellCoord::new(4, 0, 1)),
             Some(vec![
@@ -1639,18 +1697,248 @@ mod tests {
             CellCoord::new(3, 0, 2),
         ];
         let router = router(&region, &sinks);
-        let forward = router.tree(source, &sinks, &nothing_laid());
+        let forward = router.tree(source, &sinks, &nothing_in_the_way());
         let mut backward_sinks = sinks;
         backward_sinks.reverse();
         assert_eq!(
             forward,
-            router.tree(source, &backward_sinks, &nothing_laid())
+            router.tree(source, &backward_sinks, &nothing_in_the_way())
         );
     }
 
-    /// `collect_nets` is the sink side every pass shares: a cell driver
-    /// sinks at the cell body, an output driver at the actuator's pad.
-    /// A clear straight line is not clear when another net is on it.
+    /// What a strand of dust reaches is its own plane.
+    ///
+    /// The four in-plane steps and no others: up and down are left to
+    /// the physical tile layer, because whether dust at `y + 1` reads
+    /// the dust below it depends on what is standing between them and
+    /// the pseudo-2.5D model does not carry that. Spelled out here
+    /// rather than derived from [`STEPS`], so widening the rule to six
+    /// steps has to be written down twice.
+    #[test]
+    fn a_strand_reaches_the_four_coords_in_its_own_plane() {
+        let mut reached: Vec<CellCoord> = beside(CellCoord::new(2, 1, 3)).collect();
+        reached.sort_by_key(|coord| coord_key(*coord));
+        assert_eq!(
+            reached,
+            vec![
+                CellCoord::new(1, 1, 3),
+                CellCoord::new(2, 1, 2),
+                CellCoord::new(2, 1, 4),
+                CellCoord::new(3, 1, 3),
+            ],
+        );
+        assert!(
+            reached.iter().all(|coord| coord.y == 1),
+            "a strand does not reach the layer above or below it: {reached:?}",
+        );
+        assert_eq!(
+            beside(CellCoord::new(0, 0, 0)).count(),
+            2,
+            "and the steps off the `0` edge are not coords at all",
+        );
+    }
+
+    /// A net does not run in the lane beside another net's dust, even
+    /// when that lane is empty.
+    ///
+    /// The coord-disjoint rule would let the second net take the row
+    /// next door and call it wired; two strands one step apart are one
+    /// strand carrying two signals. `void=1`, so the way round is on
+    /// the plane or nowhere — this is about the width of the obstacle
+    /// set, not about the escape.
+    #[test]
+    fn a_net_does_not_run_in_the_lane_beside_another_nets_dust() {
+        let region = region(5, 4, 1);
+        let first_source = CellCoord::new(0, 0, 0);
+        let first_sink = CellCoord::new(4, 0, 0);
+        let second_source = CellCoord::new(0, 0, 1);
+        let second_sink = CellCoord::new(4, 0, 1);
+        let router = router(
+            &region,
+            &[first_source, first_sink, second_source, second_sink],
+        );
+
+        let lane = CellCoord::new(2, 0, 1);
+        let first = dust_of(&router, first_source, &[first_sink]);
+        assert!(
+            !first.contains(&lane),
+            "the fixture needs the second net's own row clear of the first's \
+             dust, so that only the one-step rule keeps it off: {first:?}",
+        );
+
+        let tree = router.tree(
+            second_source,
+            &[second_sink],
+            &keep_out(&router, first_source, &[first_sink]),
+        );
+        let second = router.dust(&tree);
+        assert!(
+            tree.unreachable().is_empty(),
+            "the second net still gets there: {:?}",
+            tree.unreachable(),
+        );
+        assert!(
+            !second.contains(&lane),
+            "but not down the lane beside the first: {second:?}",
+        );
+        assert!(
+            second
+                .iter()
+                .all(|coord| first.iter().all(|other| manhattan(*coord, *other) > 1)),
+            "and no coord of one is a step from a coord of the other: {second:?}",
+        );
+    }
+
+    /// A net is not kept out by its own dust.
+    ///
+    /// The rule is between nets, not inside one: consecutive coords of
+    /// one strand are one step apart by definition, so a strand runs
+    /// beside itself the whole way. That is why [`net_trees`] widens
+    /// the obstacle set once a net is laid rather than as each coord
+    /// goes into it — the second assertion is what widening on the way
+    /// would do to every net there is.
+    #[test]
+    fn a_net_is_not_kept_out_by_its_own_dust() {
+        // One row and one layer, so the keep-out set has nowhere to
+        // send the net that the region still contains.
+        let region = region(5, 1, 1);
+        let source = CellCoord::new(0, 0, 0);
+        let sink = CellCoord::new(4, 0, 0);
+        let router = router(&region, &[source, sink]);
+
+        let dust = dust_of(&router, source, &[sink]);
+        assert!(
+            dust.windows(2).any(|pair| manhattan(pair[0], pair[1]) == 1),
+            "a strand runs beside itself at every step: {dust:?}",
+        );
+        let mine = keep_out(&router, source, &[sink]);
+        assert_eq!(
+            router.tree(source, &[sink], &mine).unreachable(),
+            [sink],
+            "so a net routed against its own keep-out set has nowhere to go",
+        );
+
+        let mut nets: HashMap<NetRef, Vec<CellCoord>> = HashMap::new();
+        nets.insert(NetRef::Input(0), vec![sink]);
+        let trees = net_trees(&nets, &router, |_| source);
+        assert!(
+            trees[&NetRef::Input(0)].unreachable().is_empty(),
+            "and the pass that widens the set for the nets after this one \
+             does not turn it on the net it has just laid",
+        );
+    }
+
+    /// A net is named for taking a face it never stands on.
+    ///
+    /// The refusal asks the question the router routes by: a face is
+    /// unusable when another net's dust is on it *or* [`beside`] it, so
+    /// the nets it can name are two steps from the sink and not only
+    /// one. Without the second half `sig.a` below goes unnamed and the
+    /// message says only that the sink is walled in, leaving the author
+    /// the one net they could have moved.
+    ///
+    /// `sig.a` runs down the far row and never touches a face of the
+    /// sink; what it takes is `(2,0,1)`, the one face two blocks left
+    /// free, by standing one step from it.
+    #[test]
+    fn a_net_that_takes_a_face_without_standing_on_it_is_named() {
+        let region = region(5, 3, 1);
+        let sink = CellCoord::new(2, 0, 0);
+        let driver = CellCoord::new(0, 0, 0);
+        let walls = [CellCoord::new(1, 0, 0), CellCoord::new(3, 0, 0)];
+        let other_source = CellCoord::new(0, 0, 2);
+        let other_sink = CellCoord::new(4, 0, 2);
+        let router = router(
+            &region,
+            &[sink, driver, walls[0], walls[1], other_source, other_sink],
+        );
+
+        let mut nets: HashMap<NetRef, Vec<CellCoord>> = HashMap::new();
+        nets.insert(NetRef::Input(0), vec![other_sink]);
+        nets.insert(NetRef::Cell(0), vec![sink]);
+        let source_of_net = |net: NetRef| match net {
+            NetRef::Input(_) => other_source,
+            NetRef::Cell(_) => driver,
+        };
+        let trees = net_trees(&nets, &router, source_of_net);
+
+        let far_row = router.dust(&trees[&NetRef::Input(0)]);
+        assert!(
+            far_row.contains(&CellCoord::new(2, 0, 2)),
+            "the fixture needs the first net one step from the sink's last \
+             free face: {far_row:?}",
+        );
+        assert!(
+            far_row.iter().all(|coord| manhattan(*coord, sink) > 1),
+            "and on none of its faces, so only the widening can name it: \
+             {far_row:?}",
+        );
+        assert_eq!(
+            trees[&NetRef::Cell(0)].unreachable(),
+            [sink],
+            "and the driver stranded, so there is a refusal to word",
+        );
+
+        assert_eq!(
+            crowding_nets(&nets, &trees, &source_of_net, NetRef::Cell(0), sink),
+            vec![NetRef::Input(0)],
+        );
+    }
+
+    /// Two strands one layer apart are deliberately not kept apart.
+    ///
+    /// This is a decision, not an oversight: whether dust at `y + 1`
+    /// reads the dust below it depends on what is standing between
+    /// them, and the pseudo-2.5D model carries no answer, so
+    /// `spec/redstone` §14.5 makes separating them the physical tile
+    /// layer's obligation. Recorded as a test because the alternative
+    /// is a reader finding [`IN_PLANE`] and taking four steps for an
+    /// oversight of six.
+    ///
+    /// The escape is what produces both shapes. A net climbing to clear
+    /// another lands directly over it once and one step across from it
+    /// twice — the second is a redstone staircase, and it is the more
+    /// common of the two.
+    #[test]
+    fn two_strands_one_layer_apart_are_left_to_the_tile_layer() {
+        let region = region(3, 3, 2);
+        let source = CellCoord::new(1, 0, 0);
+        let sink = CellCoord::new(1, 0, 2);
+        let wall_source = CellCoord::new(0, 0, 1);
+        let wall_sink = CellCoord::new(2, 0, 1);
+        let router = router(&region, &[source, sink, wall_source, wall_sink]);
+
+        let wall = dust_of(&router, wall_source, &[wall_sink]);
+        let climbed = router.dust(&router.tree(
+            source,
+            &[sink],
+            &keep_out(&router, wall_source, &[wall_sink]),
+        ));
+
+        let mut stacked = 0usize;
+        let mut staircase = 0usize;
+        for over in &climbed {
+            for under in &wall {
+                if over.y.abs_diff(under.y) != 1 {
+                    continue;
+                }
+                match over.x.abs_diff(under.x) + over.z.abs_diff(under.z) {
+                    0 => stacked += 1,
+                    1 => staircase += 1,
+                    _ => {}
+                }
+            }
+        }
+        assert_eq!(
+            (stacked, staircase),
+            (1, 2),
+            "the escape lands over the strand it cleared and beside it \
+             twice: {climbed:?} over {wall:?}",
+        );
+    }
+
+    /// A clear straight line is not clear when another net is on it,
+    /// or one step from it.
     ///
     /// The shortcut that answers an unobstructed run without searching
     /// has its own view of what is in the way, so it needs the same
@@ -1670,16 +1958,18 @@ mod tests {
         let router = router(&region, &[source, sink, other_source, other_sink]);
 
         assert_eq!(
-            router.tree(source, &[sink], &nothing_laid()).wire_path(),
+            router
+                .tree(source, &[sink], &nothing_in_the_way())
+                .wire_path(),
             vec![source, CellCoord::new(2, 0, 1), sink],
             "with nothing in the way the run is the straight line",
         );
 
-        let across = laid(&router, other_source, &[other_sink]);
         assert!(
-            across.contains(&CellCoord::new(2, 0, 1)),
-            "the fixture needs the first net across the second's line: {across:?}",
+            dust_of(&router, other_source, &[other_sink]).contains(&CellCoord::new(2, 0, 1)),
+            "the fixture needs the first net across the second's line",
         );
+        let across = keep_out(&router, other_source, &[other_sink]);
         let tree = router.tree(source, &[sink], &across);
         assert!(
             tree.unreachable().is_empty(),
@@ -1687,9 +1977,13 @@ mod tests {
             tree.unreachable(),
         );
         assert!(
-            tree.wire_path().iter().all(|coord| !across.contains(coord)),
-            "by going round rather than over: {:?}",
-            tree.wire_path(),
+            router
+                .dust(&tree)
+                .iter()
+                .all(|coord| !across.contains(coord)),
+            "by going round rather than over, and keeping a coord clear \
+             between the two: {:?}",
+            router.dust(&tree),
         );
     }
 
@@ -1700,6 +1994,11 @@ mod tests {
     /// signal. The layer is what makes the coord `Bridge`, so the
     /// assertion spells the layer rather than reading it off the
     /// height the way the constructor does.
+    ///
+    /// The run at `y=1` passes directly over the wall's dust at
+    /// `(1,0,1)`, which is the per-plane half of the rule in the one
+    /// place it decides an answer: were up and down in [`beside`],
+    /// there would be no escape at all.
     #[test]
     fn a_net_with_no_way_round_climbs_over_the_dust_in_its_way() {
         let region = region(3, 3, 2);
@@ -1709,12 +2008,12 @@ mod tests {
         let wall_sink = CellCoord::new(2, 0, 1);
         let router = router(&region, &[source, sink, wall_source, wall_sink]);
 
-        let wall = laid(&router, wall_source, &[wall_sink]);
         assert_eq!(
-            wall,
-            [CellCoord::new(1, 0, 1)].into_iter().collect(),
-            "the fixture needs the row between the two sealed: {wall:?}",
+            dust_of(&router, wall_source, &[wall_sink]),
+            vec![CellCoord::new(1, 0, 1)],
+            "the fixture needs the row between the two sealed",
         );
+        let wall = keep_out(&router, wall_source, &[wall_sink]);
         let tree = router.tree(source, &[sink], &wall);
         assert_eq!(
             tree.route_to(sink).expect("a sink of this net"),
@@ -1744,12 +2043,12 @@ mod tests {
         let second = CellCoord::new(0, 0, 2);
         let router = router(&region, &[cell, first, second]);
 
-        let dust = laid(&router, first, &[cell]);
+        let dust = dust_of(&router, first, &[cell]);
         assert!(
             !dust.contains(&cell),
             "the cell body is a terminal, not dust: {dust:?}",
         );
-        let tree = router.tree(second, &[cell], &dust);
+        let tree = router.tree(second, &[cell], &keep_out(&router, first, &[cell]));
         assert!(
             tree.unreachable().is_empty(),
             "the second driver has to reach the cell it drives: {:?}",
@@ -1772,7 +2071,7 @@ mod tests {
         let wall_sink = CellCoord::new(2, 0, 1);
         let router = router(&region, &[source, sink, wall_source, wall_sink]);
 
-        let wall = laid(&router, wall_source, &[wall_sink]);
+        let wall = keep_out(&router, wall_source, &[wall_sink]);
         let tree = router.tree(source, &[sink], &wall);
         assert_eq!(
             tree.unreachable(),
@@ -1780,7 +2079,7 @@ mod tests {
             "with no layer above the plane there is nowhere to escape to",
         );
         assert!(
-            tree.wire_path().iter().all(|coord| !wall.contains(coord)),
+            router.dust(&tree).iter().all(|coord| !wall.contains(coord)),
             "and the answer is not to lay it over the wire in the way: {:?}",
             tree.wire_path(),
         );
@@ -1836,7 +2135,7 @@ mod tests {
         let source = CellCoord::new(0, 0, 0);
         let sink = CellCoord::new(3, 0, 0);
         let router = router(&region, &[source, sink]);
-        let tree = router.tree(source, &[sink], &nothing_laid());
+        let tree = router.tree(source, &[sink], &nothing_in_the_way());
         assert_eq!(
             router.dust(&tree),
             vec![CellCoord::new(1, 0, 0), CellCoord::new(2, 0, 0)],
@@ -1844,6 +2143,8 @@ mod tests {
         );
     }
 
+    /// `collect_nets` is the sink side every pass shares: a cell driver
+    /// sinks at the cell body, an output driver at the actuator's pad.
     #[test]
     fn collect_nets_maps_cell_drivers_to_bodies_and_outputs_to_pads() {
         let region = reservation(8, 4);
@@ -1967,8 +2268,8 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec![
                 (BlockKind::Cell, 0, CellCoord::new(2, 0, 1)),
-                (BlockKind::InputPad, 0, CellCoord::new(0, 0, 1)),
-                (BlockKind::OutputPad, 0, CellCoord::new(7, 0, 1)),
+                (BlockKind::InputPad, 0, CellCoord::new(0, 0, 0)),
+                (BlockKind::OutputPad, 0, CellCoord::new(7, 0, 0)),
             ],
         );
     }
@@ -2035,7 +2336,7 @@ mod tests {
 
         use super::{
             BlockKind, BlockSite, CellCoord, CircuitRegionReservation, HashMap, HashSet, NetRef,
-            Router, Span, manhattan, net_trees, nothing_laid,
+            Router, Span, beside, manhattan, net_trees, nothing_in_the_way,
         };
 
         const WIDTH: u32 = 9;
@@ -2110,7 +2411,7 @@ mod tests {
                         if targets.contains(&step) {
                             return Some(distance + 1);
                         }
-                        if !router.free(step, &nothing_laid()) || !seen.insert(step) {
+                        if !router.free(step, &nothing_in_the_way()) || !seen.insert(step) {
                             continue;
                         }
                         next.push(step);
@@ -2130,7 +2431,7 @@ mod tests {
                 (void, source, sinks, loose) in layout()
             ) {
                 let (router, _) = routed(void, source, &sinks, &loose);
-                let tree = router.tree(source, &sinks, &nothing_laid());
+                let tree = router.tree(source, &sinks, &nothing_in_the_way());
                 let owned: HashSet<CellCoord> = tree.wire_path().into_iter().collect();
                 for sink in &sinks {
                     let route = tree.route_to(*sink).expect("a sink of this net");
@@ -2187,7 +2488,7 @@ mod tests {
                 prop_assume!(!targets.is_empty());
                 while !targets.is_empty() {
                     let reference = breadth_first(&router, &seeds, &targets);
-                    let Some((index, path)) = router.reach(&seeds, &targets, &nothing_laid()) else {
+                    let Some((index, path)) = router.reach(&seeds, &targets, &nothing_in_the_way()) else {
                         prop_assert_eq!(
                             reference,
                             None,
@@ -2198,7 +2499,7 @@ mod tests {
                     let walked = u32::try_from(path.len() - 1).expect("a path fits in u32");
                     prop_assert_eq!(Some(walked), reference, "path {:?}", path);
                     let searched = router
-                        .search(&seeds, &targets, &nothing_laid())
+                        .search(&seeds, &targets, &nothing_in_the_way())
                         .expect("a path exists, so the search has to find one");
                     prop_assert_eq!(
                         searched.1.len(),
@@ -2212,14 +2513,21 @@ mod tests {
                 }
             }
 
-            /// No two nets of one scope own the same coord of dust.
+            /// No two nets of one scope run within one step of
+            /// each other in one plane.
             ///
-            /// The whole change rests on this: two nets on one coord
-            /// are one strand of dust carrying two signals, and the
-            /// crossing pass no longer looks for that because
-            /// [`net_trees`] no longer produces it. Nothing else
-            /// checks it over arbitrary geometry, so it is checked
-            /// here, over layouts the example corpus does not have.
+            /// The whole change rests on this: dust joins the dust
+            /// beside it, so two nets one step apart are one strand
+            /// carrying two signals as surely as two nets on one
+            /// coord, and the crossing pass no longer looks for either
+            /// because [`net_trees`] no longer produces them. Nothing
+            /// else checks it over arbitrary geometry, so it is
+            /// checked here, over layouts the example corpus does not
+            /// have.
+            ///
+            /// Up and down are not checked, because the router does
+            /// not claim them: `spec/redstone` §14.5 leaves what a
+            /// strand at `y + 1` reads to the physical tile layer.
             ///
             /// Three nets rather than two, because two only ever
             /// exercises "avoid the one before me". The third has to
@@ -2236,7 +2544,7 @@ mod tests {
             /// as a reject rather than as a pass — the vacuity is in
             /// proptest's own rejection rate instead of hidden.
             #[test]
-            fn no_two_nets_of_a_scope_own_one_coord_of_dust(
+            fn no_two_nets_of_a_scope_run_within_one_step_in_one_plane(
                 (void, source, sinks, loose) in layout()
             ) {
                 prop_assume!(loose.len() >= 3);
@@ -2251,15 +2559,23 @@ mod tests {
                     NetRef::Cell(0) => loose[0],
                     NetRef::Cell(_) => loose[1],
                 });
-                let mut seen: HashSet<CellCoord> = HashSet::new();
+                let mut seen: HashMap<CellCoord, NetRef> = HashMap::new();
                 for (net, tree) in &trees {
                     for coord in router.dust(tree) {
-                        prop_assert!(
-                            seen.insert(coord),
-                            "{:?} lays dust on {:?}, which another net already owns",
-                            net,
-                            coord,
-                        );
+                        for taken in std::iter::once(coord).chain(beside(coord)) {
+                            if let Some(other) = seen.get(&taken)
+                                && other != net
+                            {
+                                return Err(TestCaseError::fail(format!(
+                                    "{net:?} lays dust on {coord:?}, which is \
+                                     {taken:?} or beside it, and {other:?} \
+                                     already has it",
+                                )));
+                            }
+                        }
+                    }
+                    for coord in router.dust(tree) {
+                        seen.insert(coord, *net);
                     }
                 }
             }
@@ -2269,7 +2585,7 @@ mod tests {
                 (void, source, sinks, loose) in layout()
             ) {
                 let (router, blocks) = routed(void, source, &sinks, &loose);
-                let tree = router.tree(source, &sinks, &nothing_laid());
+                let tree = router.tree(source, &sinks, &nothing_in_the_way());
                 for sink in &sinks {
                     if tree.unreachable().contains(sink) {
                         continue;

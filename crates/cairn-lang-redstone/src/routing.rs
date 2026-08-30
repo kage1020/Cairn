@@ -24,16 +24,16 @@
 //!   set — otherwise a downstream congestion re-check would
 //!   understate the routed area — but they add no net because there
 //!   is nothing to route from them. Source coordinates are
-//!   `NetRef::Input(i) → input_pad(i, region)` (left edge, z = 1 + i,
+//!   `NetRef::Input(i) → input_pad(i, region)` (left edge, z = i,
 //!   saturating at `depth-1` for pathological regions — see
 //!   [`input_pad`]) and `NetRef::Cell(j) → cells[j].coord`. Output
-//!   pad coordinates are the right edge, z = 1 + k, saturating
-//!   similarly.
+//!   pad coordinates are the right edge, z = k, saturating similarly.
 //! - **Steiner tree.** Rectilinear tree over the `{source} ∪ sinks`
 //!   terminal set, grown one sink at a time by
 //!   [`crate::routing_geometry::Router`]: the nearest sink still
 //!   unconnected is attached to the wire already laid by the cheapest
-//!   path that runs through no block and over no other net's dust, and
+//!   path that runs through no block, and neither over another net's
+//!   dust nor one step from it in its own plane, and
 //!   the search behind that is what keeps dust out of the cell bodies
 //!   and pads the reservation already holds. Every sink is a leaf,
 //!   because a component consumes the signal that reaches it rather
@@ -41,21 +41,25 @@
 //!   x-then-z-then-y L-shape the downstream stages were built around.
 //! - **One net at a time.** The nets are laid in
 //!   [`crate::routing_geometry::net_order`], and each goes round the
-//!   dust of the ones before it. Two nets on one coord would be one
-//!   strand of dust carrying two signals; §14.5 calls the way out an
-//!   escape, and here it is the same search climbing to a bridge layer
-//!   that already went round a cell body. Doing it at this stage
-//!   rather than at stage 4 is what gets the climb measured: the
-//!   `wire_length` below and the delay pass's tick count are both read
-//!   off the routed tree.
+//!   dust of the ones before it and the coords beside that dust. Two
+//!   nets on one coord would be one strand of dust carrying two
+//!   signals, and so would two nets one step apart, because dust joins
+//!   the dust next to it; §14.5 calls the way out an escape, and here
+//!   it is the same search climbing to a bridge layer that already
+//!   went round a cell body. Beside is per-plane: what a strand at
+//!   `y + 1` reads is the physical tile layer's question, not this
+//!   pass's. Doing it at this stage rather than at stage 4 is what
+//!   gets the climb measured: the `wire_length` below and the delay
+//!   pass's tick count are both read off the routed tree.
 //! - **Unroutable sinks.** A sink with no free path from its driver —
-//!   every way out walled in by a component, by an earlier net's dust,
-//!   or by the edge of the reservation — fires `E_ROUTE_CONGESTION`
-//!   with its own primary naming the two coords, and the scope is
-//!   elided. Refused before the area arithmetic below, because the area
-//!   can be ample and the one coord the wire needs still be taken. This
-//!   is what a crossing becomes: a layout with nowhere for the second
-//!   net to go is refused rather than shorted.
+//!   every way out walled in by a component, by an earlier net's dust
+//!   or the coords beside it, or by the edge of the reservation —
+//!   fires `E_ROUTE_CONGESTION` with its own primary naming the two
+//!   coords, and the scope is elided. Refused before the area
+//!   arithmetic below, because the area can be ample and the one coord
+//!   the wire needs still be taken. This is what a crossing becomes: a
+//!   layout with nowhere for the second net to go is refused rather
+//!   than shorted.
 //! - **Occupancy.** A per-scope `HashSet<CellCoord>` seeded with
 //!   every cell coord, every input pad, and every output pad, then
 //!   grown by each routed tree. Duplicate visits share (fanout is the
@@ -581,6 +585,7 @@ mod tests {
         let mut placed_scopes = 0usize;
         let mut routed_scopes = 0usize;
         let mut detours = 0usize;
+        let mut climbs = 0usize;
         for file in std::fs::read_dir(&dir).expect("read examples") {
             let path = file.expect("dir entry").path();
             if path.extension().and_then(|e| e.to_str()) != Some("crn") {
@@ -613,6 +618,12 @@ mod tests {
                         NetRef::Input(i) => input_pad(i as usize, &region),
                         NetRef::Cell(j) => coords[j as usize],
                     });
+                    let where_it_is = format!(
+                        "{}: {edition:?} {} `{}`",
+                        path.display(),
+                        entry.kind.label(),
+                        entry.name,
+                    );
                     let mut owner: HashMap<CellCoord, NetRef> = HashMap::new();
                     for (net, tree) in &trees {
                         let source = tree.wire_path()[0];
@@ -621,29 +632,12 @@ mod tests {
                         for coord in tree.wire_path() {
                             assert!(
                                 !occupied.contains(&coord) || mine.contains(&coord),
-                                "{}: {edition:?} {} `{}` draws {net:?} through {coord:?}",
-                                path.display(),
-                                entry.kind.label(),
-                                entry.name,
+                                "{where_it_is} draws {net:?} through {coord:?}",
                             );
                         }
-                        // Two nets on one coord is two signals on one
-                        // strand of dust. The proptest in
-                        // `routing_geometry` holds this over generated
-                        // boxes; this holds it over the geometry the
-                        // placement pass actually produces, which is
-                        // where the corpus's crossings used to come
-                        // from.
-                        for coord in router.dust(tree) {
-                            if let Some(other) = owner.insert(coord, *net) {
-                                panic!(
-                                    "{}: {edition:?} {} `{}` runs {net:?} and {other:?} through {coord:?}",
-                                    path.display(),
-                                    entry.kind.label(),
-                                    entry.name,
-                                );
-                            }
-                        }
+                        let dust = router.dust(tree);
+                        climbs += dust.iter().filter(|coord| coord.y > 0).count();
+                        claim(&mut owner, *net, &dust, &where_it_is);
                         for sink in &nets[net] {
                             let route = tree.route_to(*sink).expect("a sink of this net");
                             let walked =
@@ -671,6 +665,49 @@ mod tests {
             "no strand in the corpus goes round anything, so nothing here would \
              notice a router that drew straight through",
         );
+        assert!(
+            climbs > 0,
+            "no strand in the corpus leaves the ground layer, so the escape is \
+             no longer shown by any `.crn` that ships and the byte-identity \
+             test named for it is measuring a scope without one",
+        );
+    }
+
+    /// One net's dust, checked against the nets already claimed and
+    /// then added to them.
+    ///
+    /// Two nets on one coord, or one step apart in one plane, are two
+    /// signals on one strand of dust. The proptest in
+    /// `routing_geometry` holds this over generated boxes; the walk
+    /// below holds it over the geometry the placement pass actually
+    /// produces, which is where the corpus's shorts used to come from.
+    ///
+    /// `owner` holds dust and the reach is asked about per coord, so
+    /// two strands two apart — each reaching the coord between them —
+    /// are not mistaken for one.
+    fn claim(
+        owner: &mut std::collections::HashMap<CellCoord, NetRef>,
+        net: NetRef,
+        dust: &[CellCoord],
+        where_it_is: &str,
+    ) {
+        use crate::routing_geometry::beside;
+
+        for coord in dust {
+            for taken in std::iter::once(*coord).chain(beside(*coord)) {
+                if let Some(other) = owner.get(&taken)
+                    && *other != net
+                {
+                    panic!(
+                        "{where_it_is} runs {net:?} through {coord:?}, which \
+                         {other:?} stands on or reaches",
+                    );
+                }
+            }
+        }
+        for coord in dust {
+            owner.insert(*coord, net);
+        }
     }
 
     /// A pad the reservation cannot fit is refused, and the scope is
@@ -701,12 +738,12 @@ mod tests {
 
         let rows = [
             Row {
-                // depth 2 leaves one z for the pad row, so input #1
-                // saturates onto input #0.
+                // depth 2 leaves two rows for the pad column, so
+                // input #2 saturates onto input #1.
                 region: reservation(4, 2, 1),
                 inputs: 3,
                 kind: "input",
-                index: 1,
+                index: 2,
                 coord: "(0,0,1)",
             },
             Row {
@@ -861,7 +898,7 @@ mod tests {
             name: cairn_lang_core::ast::DottedRef::new("sig".into(), vec!["a".into()]),
             span: Span::default(),
         });
-        // The pad lands at (0,0,1). Walling (1,0,0) and (2,0,1) in
+        // The pad lands at (0,0,0). Walling (1,0,0) and (2,0,1) in
         // leaves the sink at (2,0,0) with no free neighbour, and
         // `void=1` reserves no layer to come in over the top.
         for coord in [CellCoord::new(1, 0, 0), CellCoord::new(2, 0, 1)] {
@@ -886,7 +923,7 @@ mod tests {
             .unwrap_or_else(|| panic!("a walled-in sink must refuse: {:?}", routed.diagnostics));
         assert!(
             refusal.primary.contains("cannot reach (2,0,0)")
-                && refusal.primary.contains("from the driver at (0,0,1)"),
+                && refusal.primary.contains("from the driver at (0,0,0)"),
             "the refusal names both ends: {}",
             refusal.primary,
         );
@@ -945,7 +982,7 @@ mod tests {
             span: Span::default(),
         });
         ir.cells.push(placed_cell(
-            CellCoord::new(7, 0, 1),
+            CellCoord::new(7, 0, 0),
             PlacementPhase::Unrouted,
         ));
         ir.cells.push(PlacedCellNode {
@@ -954,7 +991,7 @@ mod tests {
                 port: PortName::A,
                 net: NetRef::Input(0),
             }],
-            coord: CellCoord::new(14, 0, 1),
+            coord: CellCoord::new(14, 0, 0),
             phase: PlacementPhase::Unrouted,
             span: Span::default(),
         });

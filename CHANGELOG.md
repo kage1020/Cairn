@@ -12,6 +12,37 @@ and is a separate axis from the Minecraft target version.
 
 ### Breaking changes
 
+- *(redstone)* Two nets are kept a step apart, not only off one coordinate. Dust reads the dust
+  in the coordinate beside it, so two nets running down adjacent rows are one strand carrying two
+  signals as surely as two nets on one coordinate are. The router kept them off one coordinate and
+  nothing kept them apart, so every routed scope in the example corpus described a layout with a
+  short in it, at exit 0 and with no diagnostic: six such pairs across three nets in
+  `crossbar.crn`, two across one in `redstone-door.crn`, on both editions.
+
+  The obstacle set a net routes around now grows from the dust already laid to that dust and the
+  four coordinates beside it in its own plane. In its own plane and no further — whether two
+  strands a layer apart read each other depends on what is standing between them, which the
+  pseudo-2.5D model does not carry, so `spec/redstone` §14.5 now says in as many words that
+  separating two strands within one step of each other *across* layers is the physical tile
+  layer's obligation rather than the router's. Nine such pairs per edition remain in the example
+  corpus after this change, one stacked and eight diagonal, and every one of them is an escape
+  landing on or beside the strand it climbed to clear.
+
+  The router cannot own the rule alone, and measuring is what said so. With the cell row on the
+  `z = 0` edge, no order `crossbar.crn`'s four nets can be laid in wires the scope — none of the
+  24, at every region size measured up to `12x8` with `void=3`, and neither a wider cell spacing
+  nor a wider pad spacing changes it. A cell against the edge has one lane beside it, and one lane
+  carries one net once dust reaches its neighbour, while a two-input gate has three nets touching
+  it. So the placement pass lays the row one row in, at `z = 1`, and the I/O pads step along `z`
+  from `0` — the row they were making room for has moved. That is one row for the whole netlist
+  rather than one per cell, so unlike the column spacing it does not grow with the cell count.
+
+  **Breaking**: every cell coordinate, `wire_length`, `delay_ticks` and `buffer_coords` in a
+  `cairn synth` dump changes; input pad `i` is now `(0, 0, i)` and output pad `k` is
+  `(width - 1, 0, k)`; a `circuit` region fewer than three rows deep — the cell row and a clear
+  row either side — is refused by the placement pass; and the pad-row refusal counts rows rather
+  than rows past the cell row, because a pad stands in a column no cell occupies.
+
 - *(redstone)* Each net is routed around the dust already laid, so two nets no longer share a
   wire coordinate. `spec/redstone` §14.5 specifies the escape — "crossings escape to a `bridge`
   tile or a vertical layer" — and stage 4 performed it for buffer repeaters and never for wire,
@@ -39,8 +70,7 @@ and is a separate axis from the Minecraft target version.
   `W_WIRE_CROSSING`, `E_CROSSING_CONGESTION` and `E_BUFFER_COORD_COLLISION` are removed — the
   first two because the compiler no longer makes the defect they reported, the third because a
   repeater now stands on its own net's path and has nothing to contest it for;
-  `examples/crossbar.crn` grows one column, from `size=5x4` to `size=6x4`, because at five the
-  last net has nowhere left to go and the scope is refused rather than shorted.
+  `examples/crossbar.crn` grows one column, from `size=5x4` to `size=6x4`.
 
 - *(core)* A `key=` no member of that role reads is refused. A member's arguments were validated
   nowhere: `check` had an allowlist for the statement keyword and nothing for the keys under it,

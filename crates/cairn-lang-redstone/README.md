@@ -38,10 +38,11 @@ crossing legalization, filling every cell's `buffer_coords` with the
 coord of the buffer repeater each driver segment passes through — a
 repeater this net already placed is recorded by every segment that
 reaches it rather than duplicated, so one block can carry several
-entries (stage 4 of §14.5). Two nets sharing a wire coord is not
-something it has to legalize: stage 2 routes each net around the dust
-of the nets before it, so the crossing never gets made. Every placed cell
-records which of those four passes last touched it as a
+entries (stage 4 of §14.5). Two nets that would be one strand of dust
+is not something it has to legalize: stage 2 routes each net around the
+dust of the nets before it and around the coords beside that dust — dust
+reads the dust one step away in its own plane — so the short never gets
+made. Every placed cell records which of those four passes last touched it as a
 `PlacementStage`, dumped as a `"stage"` key in the same vocabulary
 `cairn synth --stage <s>` accepts, so a JSON consumer reads the stage
 off the output rather than inferring it from which optional keys are

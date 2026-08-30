@@ -578,12 +578,12 @@ mod tests {
             // measured against.
             ir.cells.push(placed_cell(
                 EditionCell::JavaRepeaterOr,
-                CellCoord::new(10, 0, 1),
+                CellCoord::new(10, 0, 0),
                 Vec::new(),
             ));
             ir.outputs.push(routed_output(
                 NetRef::Input(0),
-                CellCoord::new(width - 1, 0, 1),
+                CellCoord::new(width - 1, 0, 0),
             ));
             let delayed = compile_delay(&scoped(ScopeKind::Struct, "wide", ir));
             let fired = delayed

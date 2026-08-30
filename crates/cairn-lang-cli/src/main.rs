@@ -264,13 +264,15 @@ enum SynthStage {
     /// named once per segment and a consumer counting blocks
     /// deduplicates by coord.
     ///
-    /// The wire needs no legalizing here. Two nets sharing a wire
-    /// coord would be one strand of dust carrying two signals, and
-    /// stage 2 is where that is prevented: each net is routed around
-    /// the dust of the nets before it, so a scope that reaches this
-    /// stage has no crossing to find and no coord for a repeater to
-    /// contest. A scope with nothing to legalize emits no
-    /// `buffer_coords` at all (the empty vector serde-skips); the
+    /// The wire needs no legalizing here. Two nets on one coord, or one
+    /// step apart in one plane, would be one strand of dust carrying
+    /// two signals, and stage 2 is where that is prevented: each net is
+    /// routed around the dust of the nets before it and around the
+    /// coords beside that dust, so a scope that reaches this stage has
+    /// no short to find and no coord for a repeater to contest.
+    ///
+    /// A scope with nothing to legalize emits no `buffer_coords` at all
+    /// (the empty vector serde-skips); the
     /// `"stage": "crossing"` tag on every cell, not the presence of
     /// that key, is what marks the dump as having been through this
     /// pass.

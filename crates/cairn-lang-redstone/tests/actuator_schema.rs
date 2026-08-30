@@ -36,7 +36,9 @@ fn every_actuator_key_with_a_real_host_is_in_that_host_vocabulary() {
     }
     assert_eq!(
         checked, 1,
-        "exactly one actuator host is a keyword today; a second one landing should be          noticed here rather than silently widening what this test covers",
+        "exactly one actuator host is a keyword today; a second one landing \
+         should be noticed here rather than silently widening what this test \
+         covers",
     );
 }
 

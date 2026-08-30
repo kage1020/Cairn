@@ -99,7 +99,7 @@ fn redstone_door_java_delay_ticks_equal_base_repeater_delay() {
     );
     assert_eq!(
         cell.wire_length(),
-        Some(7),
+        Some(3),
         "routing's wire_length must survive the delay pass verbatim",
     );
 }
@@ -139,7 +139,7 @@ fn redstone_door_bedrock_delay_ticks_are_zero() {
     );
     assert_eq!(
         cell.wire_length(),
-        Some(7),
+        Some(3),
         "wire_length is edition-independent by construction",
     );
 }
@@ -188,11 +188,11 @@ struct sim size=7x5
         .find(|e| e.name == "sim")
         .expect("sim scope");
     assert_eq!(entry.ir.cells.len(), 3);
-    // JavaComparatorAnd: base 1, segments [1, 2] → 0 buffers.
+    // JavaComparatorAnd: base 1, segments [2, 1] → 0 buffers.
     assert_eq!(entry.ir.cells[0].delay_ticks(), Some(1));
-    // JavaRepeaterOr: base 1, segments [2, 3] → 0 buffers.
+    // JavaRepeaterOr: base 1, segments [4, 5] → 0 buffers.
     assert_eq!(entry.ir.cells[1].delay_ticks(), Some(1));
-    // JavaComparatorAnd: base 1, cell-to-cell segments [2, 1] → 0 buffers.
+    // JavaComparatorAnd: base 1, cell-to-cell segments [6, 2] → 0 buffers.
     assert_eq!(entry.ir.cells[2].delay_ticks(), Some(1));
     // `wire_length` from routing must be preserved verbatim on every
     // cell (locked separately by the byte-identical JSON regression
@@ -206,7 +206,7 @@ struct sim size=7x5
             .iter()
             .map(PlacedCellNode::wire_length)
             .collect::<Vec<_>>(),
-        vec![Some(7), Some(11), Some(12)],
+        vec![Some(3), Some(9), Some(8)],
         "the routed lengths, unchanged",
     );
 }
@@ -425,17 +425,16 @@ struct band size=5x5
 /// fails. Pins the `>` vs `>=` boundary in `delay_scope`'s sanity
 /// check so a future rewrite cannot silently slide the cap by one.
 ///
-/// With `size=255x5` the output pad lands at `(254, 0, 1)` and the
-/// sole cell at `(1, 0, 0)`. The plane row out of the cell is taken by
-/// the second sensor's wire, so the route climbs a layer at the cell's
-/// doorstep, runs the width up there and drops in — exactly the
-/// 256-block cap. `size=256x5` adds a column and the segment becomes
+/// With `size=257x5` the output pad lands at `(256, 0, 0)` and the
+/// sole cell at `(1, 0, 1)`. The wire out runs the length of the cell
+/// row and drops into the pad at the far corner — exactly the
+/// 256-block cap. `size=258x5` adds a column and the segment becomes
 /// 257, one over.
 #[test]
 fn max_attenuation_segment_boundary_at_256_is_inclusive() {
     let at_cap_source = "@cairn 2026.06\n@requires version>=1.20\n\n\
         theme t:\n  slot wall -> @oak_planks\n\n\
-        struct band size=255x5\n  \
+        struct band size=257x5\n  \
         floor mat_slot=wall\n  \
         pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a\n  \
         pressure_plate id=q at=inside.front  offset=0 y=0 -> sig.b\n  \
@@ -462,7 +461,7 @@ fn max_attenuation_segment_boundary_at_256_is_inclusive() {
 fn max_attenuation_segment_boundary_at_257_is_exclusive() {
     let over_cap_source = "@cairn 2026.06\n@requires version>=1.20\n\n\
         theme t:\n  slot wall -> @oak_planks\n\n\
-        struct band size=256x5\n  \
+        struct band size=258x5\n  \
         floor mat_slot=wall\n  \
         pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a\n  \
         pressure_plate id=q at=inside.front  offset=0 y=0 -> sig.b\n  \
@@ -733,7 +732,7 @@ struct wide_pack size=300x5
 /// not at the cell whose `delay_ticks` was already committed.
 #[test]
 #[should_panic(
-    expected = "for cell #0 at (1,0,0) in struct `gatehouse` — delay insertion must run exactly once per routed IR"
+    expected = "for cell #0 at (1,0,1) in struct `gatehouse` — delay insertion must run exactly once per routed IR"
 )]
 fn re_running_delay_pass_panics_loudly() {
     let source = load_example("redstone-door.crn");
