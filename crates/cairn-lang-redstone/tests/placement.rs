@@ -839,18 +839,79 @@ fn a_region_too_shallow_for_a_lane_either_side_of_the_row_is_refused() {
     );
 }
 
-/// Pads stand one per row down the edge columns, so the guard is
-/// about their count rather than about a depth the row check would
-/// already have refused: the region below is three rows deep, which is
-/// exactly what the cell row and its two lanes want.
+/// The lanes belong to the cell row, so a scope with no row does not
+/// want them.
+///
+/// An identity wire — a sensor bound straight to an actuator, with no
+/// `logic` line between them — reaches this pass with pads and no
+/// cells. Refusing it for want of a clear row on either side of a row
+/// it does not have would be the pass contradicting itself, which is
+/// the shape the pad-row refusal below exists to avoid. Both sides at
+/// one depth, so the only thing that differs between the refusal and
+/// the layout is whether there is a cell to make a row of.
 #[test]
-fn more_actuators_than_rows_is_refused_before_their_pads_collide() {
-    let source = r"
+fn a_scope_with_no_cell_row_wants_no_lanes_beside_it() {
+    let refused = placement_of(&source_with_cells(1, 9, 2, 4));
+    assert!(
+        refused.scoped.scopes.is_empty(),
+        "one cell at two rows deep has no lane on one side of it",
+    );
+
+    let placed = placement_of(
+        r"
 theme t:
   slot wall -> @oak_planks
   slot door -> @oak_door
 
-struct four size=8x3
+struct wire size=9x2
+  floor mat_slot=wall
+  door id=d side=front at=center mat_slot=door
+  pressure_plate id=p at=front.outside offset=0 y=0 -> sig.x
+  door[id=d] opened_by=sig.x
+  circuit region=floor void=4
+",
+    );
+    assert!(
+        placed.diagnostics.is_empty(),
+        "an identity wire wants no lanes: {:?}",
+        placed.diagnostics,
+    );
+    let ir = &placed
+        .scoped
+        .scopes
+        .iter()
+        .find(|e| e.name == "wire")
+        .expect("wire scope")
+        .ir;
+    assert!(
+        ir.cells.is_empty(),
+        "the fixture only means something while it has no cell row",
+    );
+    assert_eq!(ir.outputs.len(), 1, "and an actuator pad to route out to");
+}
+
+/// Pads stand one per row down the edge columns, so the guard is
+/// about their count rather than about a depth the row check would
+/// already have refused: the region below is three rows deep, which is
+/// exactly what the cell row and its two lanes want.
+///
+/// Both sides of the count in one test. `pad_rows == depth` is the
+/// accepting side — a pad column of `n` rows fits a region `n` deep,
+/// because the pads start at `z = 0` — and nothing else in the suite
+/// straddles it. The primary is asserted too: all four refusals in this
+/// pass share `E_ROUTE_CONGESTION` and the row-depth check runs first,
+/// so a fixture that drifts out of this branch's window would stay
+/// green while measuring a different one.
+#[test]
+fn more_actuators_than_rows_is_refused_before_their_pads_collide() {
+    let source = |depth: u32| {
+        format!(
+            r"
+theme t:
+  slot wall -> @oak_planks
+  slot door -> @oak_door
+
+struct four size=8x{depth}
   floor mat_slot=wall
   door id=d1 side=front at=center mat_slot=door
   door id=d2 side=back  at=center mat_slot=door
@@ -864,18 +925,33 @@ struct four size=8x3
   door[id=d3] opened_by=sig.f
   door[id=d4] opened_by=sig.f
   circuit region=floor void=2
-";
-    let (edition_netlist, intent) = edition_netlist_from_source(source, Edition::Java);
-    let out = compile_placement(&edition_netlist, &intent);
+"
+        )
+    };
 
+    let refused = placement_of(&source(3));
     assert!(
-        out.scoped.scopes.is_empty(),
+        refused.scoped.scopes.is_empty(),
         "four actuators do not fit three rows",
     );
+    let diagnostic = refused
+        .diagnostics
+        .iter()
+        .find(|d| d.code == DiagnosticCode::RouteCongestion)
+        .expect("the shortfall must surface");
     assert!(
-        out.diagnostics
-            .iter()
-            .any(|d| d.code == DiagnosticCode::RouteCongestion),
+        diagnostic.primary.contains("rows for its I/O pads")
+            && diagnostic.primary.contains("only 3 deep"),
+        "the refusal must name the resource that ran out, so it cannot be \
+         confused with the three that share its code: {}",
+        diagnostic.primary,
+    );
+
+    let placed = placement_of(&source(4));
+    assert!(
+        placed.diagnostics.is_empty() && !placed.scoped.scopes.is_empty(),
+        "one row per pad is enough, because the pad column starts at z=0: {:?}",
+        placed.diagnostics,
     );
 }
 

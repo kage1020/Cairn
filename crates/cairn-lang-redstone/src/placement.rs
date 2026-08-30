@@ -269,8 +269,15 @@ fn compile_scope(
     // take one, and one more has to be clear behind them. Unlike the row
     // length this does not grow with the netlist — it is the same three
     // rows for one cell as for a hundred.
+    //
+    // Only where there is a row. An identity wire has pads and no cells,
+    // so it wants no lanes beside a row it does not have, and refusing
+    // it here would be this pass contradicting itself the way the pad
+    // check below exists to stop: the message would name a cell row the
+    // scope has none of. Its pads run down the two edge columns and the
+    // check after this one is what sizes them.
     let row_depth = u64::from(CELL_ROW).saturating_add(2);
-    if row_depth > u64::from(reservation.depth) {
+    if cell_count > 0 && row_depth > u64::from(reservation.depth) {
         return Err(row_depth_diagnostic(&reservation));
     }
     // The pads need rows of their own. `input_pad` and `output_pad` step
