@@ -24,6 +24,10 @@
             "members": [
               {
                 "type": "SYMBOL",
+                "name": "_line_start"
+              },
+              {
+                "type": "SYMBOL",
                 "name": "directive"
               },
               {
@@ -39,8 +43,17 @@
         {
           "type": "REPEAT",
           "content": {
-            "type": "SYMBOL",
-            "name": "_top_level_decl"
+            "type": "SEQ",
+            "members": [
+              {
+                "type": "SYMBOL",
+                "name": "_line_start"
+              },
+              {
+                "type": "SYMBOL",
+                "name": "_top_level_decl"
+              }
+            ]
           }
         }
       ]
@@ -261,6 +274,10 @@
                 "type": "SEQ",
                 "members": [
                   {
+                    "type": "SYMBOL",
+                    "name": "_line_start"
+                  },
+                  {
                     "type": "CHOICE",
                     "members": [
                       {
@@ -287,8 +304,17 @@
                 ]
               },
               {
-                "type": "SYMBOL",
-                "name": "member_stmt_with_body"
+                "type": "SEQ",
+                "members": [
+                  {
+                    "type": "SYMBOL",
+                    "name": "_line_start"
+                  },
+                  {
+                    "type": "SYMBOL",
+                    "name": "member_stmt_with_body"
+                  }
+                ]
               }
             ]
           }
@@ -999,6 +1025,10 @@
                 "type": "SEQ",
                 "members": [
                   {
+                    "type": "SYMBOL",
+                    "name": "_line_start"
+                  },
+                  {
                     "type": "CHOICE",
                     "members": [
                       {
@@ -1558,6 +1588,10 @@
     {
       "type": "SYMBOL",
       "name": "_size_x"
+    },
+    {
+      "type": "SYMBOL",
+      "name": "_line_start"
     },
     {
       "type": "SYMBOL",

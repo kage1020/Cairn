@@ -409,11 +409,66 @@ const FIXTURES: &[(&str, &str, Verdict)] = &[
         "struct s size=3x3\n\n\tfloor a=1\n",
         Reject,
     ),
+    // A line the break in front of it cannot speak for, because the level
+    // it asks for is legal arithmetic: one deeper than the line above.
+    // Whether a body may open there is the grammar's knowledge and not
+    // the scanner's, so the refusal comes from the line itself — the
+    // token every construct starts with is withheld, and nothing else can
+    // start one.
+    (
+        "indent_under_a_slot_row",
+        "theme t:\n  slot a -> @b\n    slot c -> @d\n",
+        Reject,
+    ),
+    ("indent_after_a_directive", "@cairn 1\n  theme t:\n", Reject),
+    // The same shape one level further in, and the same shape where a
+    // body *is* allowed, so the refusal is the nesting rule and not the
+    // depth.
+    (
+        "indent_under_a_nested_slot_row",
+        "theme t:\n  slot a -> @b\n      slot c -> @d\n",
+        Reject,
+    ),
+    (
+        "indent_under_a_member_row_is_a_body",
+        "struct s size=3x3\n  floor a=1\n    walls b=2\n",
+        Accept,
+    ),
     ("first_line_indented", "  theme t:\n", Reject),
     ("first_line_indented_odd", " theme t:\n", Reject),
     ("first_line_indented_after_blank", "\n  theme t:\n", Reject),
     // -- layout ----------------------------------------------------------
     ("empty_source", "", Accept),
+    // A declaration with no body has no trailing `repeat1($._newline)` to
+    // absorb the blank and comment lines behind it, so the line that
+    // follows them has to start on its own.
+    (
+        "bodyless_decl_then_blank_line",
+        "theme a:\n\nstruct s size=3x3\n  floor a=1\n",
+        Accept,
+    ),
+    (
+        "bodyless_decl_then_comment_line",
+        "theme a:\n# c\nstruct s size=3x3\n  floor a=1\n",
+        Accept,
+    ),
+    (
+        "bodyless_decl_then_decl",
+        "theme a:\nstruct s size=3x3\n  floor a=1\n",
+        Accept,
+    ),
+    // Blank and comment lines behind a declaration that *does* have a
+    // body are eaten by that body instead, and still are.
+    (
+        "decl_with_body_then_blank_line",
+        "theme a:\n  slot x -> @y\n\nstruct s size=3x3\n  floor a=1\n",
+        Accept,
+    ),
+    (
+        "decl_with_body_then_comment_line",
+        "theme a:\n  slot x -> @y\n# c\nstruct s size=3x3\n  floor a=1\n",
+        Accept,
+    ),
     ("blank_lines_only", "\n\n  \n", Accept),
     ("comment_only", "# hello\n", Accept),
     (
@@ -703,25 +758,6 @@ const KNOWN_DIVERGENCES: &[(&str, &str, Verdict)] = &[
         "struct s size=3x3\n  floor n=99999999999999999999\n",
         Accept,
     ),
-    // -- a declaration with no body, followed by more file ------------
-    //
-    // A body absorbs the blank and comment-only lines behind it through
-    // `body()`'s trailing `repeat1($._newline)`. A declaration without
-    // one has nothing to do that, and the obvious repair — letting the
-    // bodyless branch consume them itself — puts two rules in contention
-    // for the same newlines and breaks multi-level dedent instead
-    // (measured: it re-breaks the very bug this crate's depth test
-    // pins). It needs the newline handling reworked rather than patched.
-    (
-        "bodyless_decl_then_blank_line",
-        "theme a:\n\nstruct s size=3x3\n  floor a=1\n",
-        Reject,
-    ),
-    (
-        "bodyless_decl_then_comment_line",
-        "theme a:\n# c\nstruct s size=3x3\n  floor a=1\n",
-        Reject,
-    ),
     // -- a size separator with a space after it -----------------------
     //
     // `2x 2` is two arguments to `parse_command`: `scan_number` reads the
@@ -737,28 +773,6 @@ const KNOWN_DIVERGENCES: &[(&str, &str, Verdict)] = &[
         "struct s size=3x3\n  floor size=2x 2\n",
         Reject,
     ),
-    // -- indentation the scanner is never asked about -----------------
-    //
-    // Both are lines the reference lexer refuses on their indentation and
-    // this grammar takes. `_file_start` covers the same class at the top
-    // of a file, but only there: after a directive, and inside a body
-    // that cannot nest, neither INDENT nor DEDENT is valid, so the
-    // scanner is not consulted and the `/ +/` extra eats the leading
-    // spaces. Closing them needs a token that is valid wherever a line
-    // may begin, which `_file_start` is the single-position sketch of.
-    //
-    // `indent_after_a_directive` reaches further than it once did, and the
-    // reach is not new breakage. A directive line ending in a space used
-    // to be refused for the space, before its indentation was reached at
-    // all, so the grammar agreed with the reference parser by accident.
-    // Now that such a line parses, the indentation is what decides, and it
-    // decides the way it always decided here.
-    (
-        "indent_under_a_slot_row",
-        "theme t:\n  slot a -> @b\n    slot c -> @d\n",
-        Accept,
-    ),
-    ("indent_after_a_directive", "@cairn 1\n  theme t:\n", Accept),
 ];
 
 fn grammar_accepts(parser: &mut Parser, source: &str) -> bool {

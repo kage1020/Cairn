@@ -7,6 +7,7 @@ enum TokenType {
   NEWLINE,
   FILE_START,
   SIZE_X,
+  LINE_START,
   ERROR_SENTINEL,
 };
 
@@ -205,14 +206,12 @@ static bool emit_dedent(Scanner *s, TSLexer *lexer) {
 // refuses: an odd number of spaces (`LexError::OddIndent`), or a jump of
 // more than one level, which that function reports as `OddIndent` too.
 //
-// Both are checked here, one line early, because neither can be refused
-// where it occurs. A line at the level it already sits at asks the
-// scanner for no token, so there is nothing to withhold; and a line two
-// levels deeper asks for an INDENT that this scanner can decline —
-// whereupon tree-sitter falls back to its internal lexer, the `/ +/`
-// extra eats the leading spaces, and the line parses as a sibling one
-// level short. Refusing the preceding NEWLINE is the only lever that
-// stops the file rather than quietly reshaping it.
+// Both are checked here, one line early, so the refusal lands on the
+// break in front of the offending line rather than on the line itself.
+// LINE_START now refuses both where they occur as well — it is withheld
+// for an odd count and for a level the stack cannot reach — so what this
+// buys is where the error is reported and what the recovery around it
+// keeps, not whether the file is refused.
 //
 // Called with the token already marked (see the NEWLINE branch in
 // `scan()`), so the characters read here are lookahead: they are not part
@@ -274,13 +273,14 @@ bool tree_sitter_cairn_external_scanner_scan(void *payload, TSLexer *lexer, cons
   // The file's opening layout, consumed once at offset 0 by the
   // `_file_start` token `source_file` opens with.
   //
-  // It exists because the first content line is the one place indentation
-  // can be wrong with nothing expected to carry the news: the checks below
-  // hang off a line break, and the first line has none in front of it.
-  // Consuming the leading run here puts that line on the same footing as
-  // every other, and refusing to produce the token is what rejects a file
-  // whose first content line is indented — the reference lexer refuses it
-  // too, by handing `parse_item` an `Indent` where it wants an identifier.
+  // What is left to it, now that LINE_START stands in front of every
+  // construct, is the trivia: the blank and comment-only lines a file may
+  // open with, which no line break precedes and which LINE_START declines
+  // rather than crosses. Skipping them here is what puts the first
+  // content line on the same footing as every other. Refusing to produce
+  // the token then rejects a file whose first content line is indented —
+  // the reference lexer refuses it too, by handing `parse_item` an
+  // `Indent` where it wants an identifier.
   if (valid_symbols[FILE_START]) {
     for (;;) {
       uint32_t spaces = 0;
@@ -395,14 +395,38 @@ bool tree_sitter_cairn_external_scanner_scan(void *payload, TSLexer *lexer, cons
     return true;
   }
 
+  // A construct is starting on a line whose leading run is already behind
+  // the lexer, consumed by the INDENT or DEDENT that measured it. The
+  // line has had its verdict; this token is owed no further reading.
+  //
+  // That is the only way LINE_START is asked for away from a line's
+  // beginning: it stands in the grammar directly in front of a construct,
+  // and a construct starts either at column zero of its level or just
+  // past the indent token that opened it.
+  if (valid_symbols[LINE_START] && !at_line_start) {
+    lexer->result_symbol = LINE_START;
+    return true;
+  }
+
   // Not where a line begins, so any run read above was separator
   // whitespace the extras rule owns, and whatever follows it is a token
   // for tree-sitter's own lexer. Returning false rewinds over it.
   if (!at_line_start) return false;
-  if (!(valid_symbols[INDENT] || valid_symbols[DEDENT])) return false;
+  // LINE_START belongs in this gate as much as the indent tokens do: a
+  // declaration following a body is asked for at a position where neither
+  // INDENT nor DEDENT is valid, and without it that line could not start.
+  if (!(valid_symbols[INDENT] || valid_symbols[DEDENT] || valid_symbols[LINE_START])) {
+    return false;
+  }
 
   // Skip blank and comment-only lines without shifting indent state, so
   // the level measured below is the next line that carries one.
+  //
+  // Gated on INDENT and DEDENT because looking past a blank line for the
+  // next level is a question only those two ask. LINE_START must not:
+  // crossing a comment-only line consumes it as whitespace, and the
+  // `comment` extra is what makes it a node — a comment between two
+  // top-level constructs is reached no other way.
   //
   // Each crossed line restarts `spaces`, which is also why the count is
   // kept rather than read back off `get_column()` at the end: the column
@@ -418,18 +442,20 @@ bool tree_sitter_cairn_external_scanner_scan(void *payload, TSLexer *lexer, cons
   // for the line after that. Confirmed by measurement rather than by
   // reading: adding the write changes no tree across a sweep of nested
   // and dedenting bodies in all three line endings.
-  for (;;) {
-    if (lexer->lookahead == '#') {
-      while (!at_line_break(lexer)) skip(lexer);
+  if (valid_symbols[INDENT] || valid_symbols[DEDENT]) {
+    for (;;) {
+      if (lexer->lookahead == '#') {
+        while (!at_line_break(lexer)) skip(lexer);
+      }
+      if (lexer->lookahead == '\n' || lexer->lookahead == '\r') {
+        if (lexer->lookahead == '\r') { skip(lexer); if (lexer->lookahead == '\n') skip(lexer); }
+        else { skip(lexer); }
+        spaces = 0;
+        while (lexer->lookahead == ' ') { skip(lexer); spaces++; }
+        continue;
+      }
+      break;
     }
-    if (lexer->lookahead == '\n' || lexer->lookahead == '\r') {
-      if (lexer->lookahead == '\r') { skip(lexer); if (lexer->lookahead == '\n') skip(lexer); }
-      else { skip(lexer); }
-      spaces = 0;
-      while (lexer->lookahead == ' ') { skip(lexer); spaces++; }
-      continue;
-    }
-    break;
   }
 
   if (lexer->eof(lexer)) {
@@ -444,6 +470,12 @@ bool tree_sitter_cairn_external_scanner_scan(void *payload, TSLexer *lexer, cons
     }
     return false;
   }
+
+  // A comment-only line carries no indentation verdict, and the token
+  // that ends it is the newline behind it rather than this one. Reachable
+  // only where the loop above did not run, since the loop crosses such a
+  // line rather than landing on it.
+  if (lexer->lookahead == '#') return false;
 
   // `spaces` now holds the leading run of whatever real line the loop
   // landed on.
@@ -479,6 +511,16 @@ bool tree_sitter_cairn_external_scanner_scan(void *payload, TSLexer *lexer, cons
     // closes exactly that many.
     s->pending_dedents = (uint16_t)(current - level);
     return emit_dedent(s, lexer);
+  }
+
+  // The level did not change, and LINE_START is the token that says so.
+  // Reaching here is what makes a line legal; every path above that
+  // returns false without producing an indent token withholds it, and a
+  // construct that cannot start is how an illegally indented line is
+  // refused rather than quietly reshaped.
+  if (valid_symbols[LINE_START]) {
+    lexer->result_symbol = LINE_START;
+    return true;
   }
 
   return false;
