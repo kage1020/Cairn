@@ -81,9 +81,10 @@ module.exports = grammar({
   // measure exactly the level the scanner stands in.
   //
   // `_file_start` is not subsumed by it. That token also skips the file's
-  // opening blank and comment lines, which no other position wants — a
-  // comment between two constructs has to reach the `comment` extra to
-  // become a node, and `_line_start` declines on one for that reason.
+  // opening blank and comment lines, and it is the only position that may
+  // skip them outright: everywhere else a comment has to reach the
+  // `comment` extra to become a node, and the scanner hands one back
+  // rather than spending it wherever a `_newline` could carry it.
   //
   // `_error_sentinel` is in no rule, so it is valid only during error
   // recovery, when tree-sitter offers every external token at once. The
@@ -139,11 +140,18 @@ module.exports = grammar({
     // `_top_level_decl` supplies its own: a declaration with a body ends
     // in `$._dedent`, with the blank lines behind it already eaten by that
     // body's trailing `repeat1($._newline)`, so no newline is expected (or,
-    // past EOF, available) right here. A declaration *without* a body has
-    // no such body to do the eating; the `$._line_start` in front of
-    // whatever follows is what crosses those lines instead, since the
-    // scanner reads past blank and comment lines to the next line that
-    // carries a level.
+    // past EOF, available) right here.
+    //
+    // A declaration *without* a body has no such body to do the eating,
+    // and what crosses those lines is not the `$._line_start` in front of
+    // whatever follows — that token crosses nothing on its own. It is
+    // that every declaration's body is `optional()`, so `$._indent` is
+    // still valid at that position, and the scanner's blank-line loop
+    // runs on the strength of it, reading past to the next line that
+    // carries a level. Load-bearing and easy to lose: a construct that
+    // begins a line and has *no* optional body would strand its trailing
+    // layout, exactly as one does at the end of a file, where there is no
+    // construct behind the layout at all.
     source_file: $ => seq(
       $._file_start,
       repeat($._newline),

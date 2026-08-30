@@ -210,13 +210,11 @@ static bool emit_dedent(Scanner *s, TSLexer *lexer) {
 // break in front of the offending line rather than on the line itself.
 // LINE_START refuses both where they occur as well — it is withheld for
 // an odd count and for a level the stack cannot reach — so what this buys
-// is where the error is reported and what the recovery around it keeps,
-// not whether the file is refused. Measured over 4000 random layouts:
-// disabling this changes 237 recovery trees and no verdict at all, and of
-// those 237 it is the *later* refusal that salvages more of the file 70
-// times against 7. Kept rather than removed because that is a decision
-// about error shape with its own blast radius, not a consequence of the
-// token that made it redundant.
+// is no longer whether a file is refused, only where the error is
+// reported and how much of the file the recovery around it keeps. Kept
+// rather than removed because that is a decision about error shape with
+// its own blast radius, not a consequence of the token that made it
+// redundant.
 //
 // Called with the token already marked (see the NEWLINE branch in
 // `scan()`), so the characters read here are lookahead: they are not part
@@ -404,10 +402,13 @@ bool tree_sitter_cairn_external_scanner_scan(void *payload, TSLexer *lexer, cons
   // the lexer, consumed by the INDENT or DEDENT that measured it. The
   // line has had its verdict; this token is owed no further reading.
   //
-  // That is the only way LINE_START is asked for away from a line's
-  // beginning: it stands in the grammar directly in front of a construct,
-  // and a construct starts either at column zero of its level or just
-  // past the indent token that opened it.
+  // Nothing here checks that, and nothing can cheaply: the claim rests on
+  // where `_line_start` is written in `grammar.js`, which is directly in
+  // front of a construct and nowhere else. A construct starts either at
+  // its own level's column, where `at_line_start` holds, or just past the
+  // indent token that opened its line, where it does not. Put
+  // `_line_start` anywhere else in a rule and this branch would grant it
+  // mid-line, without measuring anything.
   if (valid_symbols[LINE_START] && !at_line_start) {
     lexer->result_symbol = LINE_START;
     return true;
@@ -428,10 +429,19 @@ bool tree_sitter_cairn_external_scanner_scan(void *payload, TSLexer *lexer, cons
   // the level measured below is the next line that carries one.
   //
   // Gated on INDENT and DEDENT because looking past a blank line for the
-  // next level is a question only those two ask. LINE_START must not:
-  // crossing a comment-only line consumes it as whitespace, and the
-  // `comment` extra is what makes it a node — a comment between two
-  // top-level constructs is reached no other way.
+  // next level is a question only those two ask.
+  //
+  // Crossing costs something, and `crossed_comment` is what pays it back.
+  // A line crossed here is consumed as whitespace, and a comment line
+  // consumed as whitespace is a comment that never reaches the `comment`
+  // extra and so never becomes a node — invisible in an editor, and
+  // invisible to every test in this crate that compares verdicts. So
+  // where the grammar could take a NEWLINE instead, this call declines
+  // rather than commits: the comment is lexed as an extra, the break
+  // after it is a NEWLINE, and the next call measures the line behind it.
+  // Where no NEWLINE is on offer — between a declaration header and the
+  // body it opens — declining would refuse a file the reference parser
+  // accepts, so the crossing stands and the comment is spent.
   //
   // Each crossed line restarts `spaces`, which is also why the count is
   // kept rather than read back off `get_column()` at the end: the column
@@ -447,9 +457,11 @@ bool tree_sitter_cairn_external_scanner_scan(void *payload, TSLexer *lexer, cons
   // for the line after that. Confirmed by measurement rather than by
   // reading: adding the write changes no tree across a sweep of nested
   // and dedenting bodies in all three line endings.
+  bool crossed_comment = false;
   if (valid_symbols[INDENT] || valid_symbols[DEDENT]) {
     for (;;) {
       if (lexer->lookahead == '#') {
+        crossed_comment = true;
         while (!at_line_break(lexer)) skip(lexer);
       }
       if (lexer->lookahead == '\n' || lexer->lookahead == '\r') {
@@ -475,6 +487,10 @@ bool tree_sitter_cairn_external_scanner_scan(void *payload, TSLexer *lexer, cons
     }
     return false;
   }
+
+  // Hand back a comment the loop crossed, wherever a NEWLINE can carry
+  // the lines it was hidden among. See the loop's own note above.
+  if (crossed_comment && valid_symbols[NEWLINE]) return false;
 
   // A comment-only line carries no indentation verdict, and the token
   // that ends it is the newline behind it rather than this one. Reachable

@@ -117,7 +117,8 @@ struct keep size=5x5
       (slot_binding
         (identifier)
         (material_ref
-          (identifier)))))
+          (identifier)))
+      (comment)))
   (struct_decl
     (identifier)
     (attribute_list

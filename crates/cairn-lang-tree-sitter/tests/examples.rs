@@ -47,6 +47,63 @@ fn all_examples_parse_without_error() {
     assert!(failures.is_empty(), "grammar rejected: {failures:#?}");
 }
 
+/// Every comment line in the corpus reaches the tree as a `comment` node.
+///
+/// The scanner reads past blank and comment-only lines to find the next
+/// line that carries a level, and a line it reads past is consumed as
+/// whitespace — a comment consumed that way never reaches the `comment`
+/// extra, never becomes a node, and is rendered unstyled by
+/// `tree-sitter highlight` while every verdict in the crate stays green.
+/// That is the axis `parser_parity.rs` cannot see, and this is the corpus
+/// standing in for it.
+///
+/// Asserted per row rather than as a count, so a comment that moves is
+/// not paid for by one that appears. A row whose first non-space
+/// character is `#` is a comment-only line; a trailing comment sits on a
+/// row that has other nodes too, so both are covered by asking whether
+/// the row holds a comment at all.
+#[test]
+fn every_comment_line_in_the_corpus_is_a_node() {
+    let mut parser = Parser::new();
+    parser
+        .set_language(&cairn_lang_tree_sitter::LANGUAGE.into())
+        .expect("load cairn language");
+
+    let mut missing = Vec::new();
+    for path in crn_files() {
+        let src = fs::read_to_string(&path).unwrap();
+        let tree = parser.parse(&src, None).expect("parse produced no tree");
+        let mut rows = Vec::new();
+        comment_rows(tree.root_node(), &mut rows);
+        for (row, line) in src.split('\n').enumerate() {
+            if line.trim_start().starts_with('#') && !rows.contains(&row) {
+                missing.push(format!(
+                    "{}:{}: {}",
+                    path.file_name().unwrap().to_string_lossy(),
+                    row + 1,
+                    line.trim(),
+                ));
+            }
+        }
+    }
+    assert!(
+        missing.is_empty(),
+        "comment lines the tree does not hold, so nothing highlights them:\n{}",
+        missing.join("\n"),
+    );
+}
+
+/// The row each `comment` node starts on.
+fn comment_rows(node: tree_sitter::Node<'_>, out: &mut Vec<usize>) {
+    if node.kind() == "comment" {
+        out.push(node.start_position().row);
+    }
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        comment_rows(child, out);
+    }
+}
+
 /// Regression guard for `queries/highlights.scm` and `queries/locals.scm`:
 /// shells out to the locally installed `tree-sitter` CLI (a dev dependency
 /// installed via `pnpm install`) and compares its `highlight` output for

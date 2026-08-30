@@ -399,9 +399,12 @@ and is a separate axis from the Minecraft target version.
   the line already checks, and could not tell a legal level-plus-one from an illegal one, since
   whether a body may open there is the grammar's knowledge and not the scanner's.
 
-  A declaration with no body may now be followed by a blank or a comment-only line, which the token
-  in front of the next construct crosses. That was its own refusal before, and it needed the
-  newline handling reworked rather than patched.
+  A declaration with no body may now be followed by a blank or a comment-only line. What crosses
+  those lines is the scanner reading past them for the next line that carries a level, which it may
+  do there because every declaration's body is optional and so an indent is still expected — not
+  the new token, which crosses nothing on its own. That was its own refusal before, and it needed
+  the newline handling reworked rather than patched. It still is one at the end of a file, where
+  there is no construct behind the layout at all.
 
 - *(tree-sitter)* A line may end in whitespace. The grammar refused a trailing space before a line
   break and a blank line made of spaces — three shapes `cairn-lang-core` accepts, and ones an

@@ -102,3 +102,68 @@ struct keep size=11x9
                     (attribute
                       (identifier)
                       (identifier))))))))))))
+
+==================
+a blank line in front of a nested body
+==================
+
+struct keep size=11x9
+  floor mat_slot=f
+
+  level id=floor1 y=0
+    door id=entry side=front
+    window id=lookout side=front
+
+---
+
+(source_file
+  (struct_decl
+    (identifier)
+    (attribute_list
+      (attribute
+        (identifier)
+        (size_literal
+          (integer)
+          (integer))))
+    (struct_body
+      (member_stmt
+        (member_keyword)
+        (command_arg_list
+          (command_arg
+            (attribute
+              (identifier)
+              (identifier)))))
+      (member_stmt_with_body
+        (member_keyword)
+        (command_arg_list
+          (command_arg
+            (attribute
+              (identifier)
+              (identifier)))
+          (command_arg
+            (attribute
+              (identifier)
+              (integer))))
+        (struct_body
+          (member_stmt
+            (member_keyword)
+            (command_arg_list
+              (command_arg
+                (attribute
+                  (identifier)
+                  (identifier)))
+              (command_arg
+                (attribute
+                  (identifier)
+                  (identifier)))))
+          (member_stmt
+            (member_keyword)
+            (command_arg_list
+              (command_arg
+                (attribute
+                  (identifier)
+                  (identifier)))
+              (command_arg
+                (attribute
+                  (identifier)
+                  (identifier))))))))))
