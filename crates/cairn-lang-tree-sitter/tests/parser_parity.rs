@@ -408,6 +408,71 @@ const FIXTURES: &[(&str, &str, Verdict)] = &[
         "struct a size=3x3\r  level y=0\r    room\r      floor mat_slot=f\r  walls mat_slot=w\r",
         Accept,
     ),
+    // -- whitespace before a line break --------------------------------
+    //
+    // The scanner is consulted before the `/ +/` extra is skipped, so a
+    // run of spaces is what it sees wherever one stands. It reads the run
+    // once and carries the length, which is what lets one read serve both
+    // a line's indentation and a line's trailing whitespace.
+    (
+        "trailing_space_on_a_header",
+        "theme t: \n  slot a -> @b\n",
+        Accept,
+    ),
+    (
+        "trailing_space_on_a_body_row",
+        "theme t:\n  slot a -> @b \n",
+        Accept,
+    ),
+    // The same, on a header whose next line opens a body: the run stands
+    // in front of a break the INDENT is waiting behind.
+    (
+        "trailing_space_before_a_body",
+        "struct s size=3x3 \n  floor a=1\n",
+        Accept,
+    ),
+    // No break behind the run at all.
+    (
+        "trailing_space_at_end_of_file",
+        "theme t:\n  slot a -> @b   ",
+        Accept,
+    ),
+    (
+        "blank_line_of_only_spaces",
+        "theme t:\n  slot a -> @b\n  \n  slot c -> @d\n",
+        Accept,
+    ),
+    // A blank line's leading spaces are counted and then discarded with
+    // the line, so an odd count carries no verdict either.
+    (
+        "blank_line_of_odd_spaces",
+        "theme t:\n  slot a -> @b\n   \n  slot c -> @d\n",
+        Accept,
+    ),
+    // A spaces-only line where no NEWLINE is expected: between a header
+    // and the body it opens, the INDENT is the only token the grammar
+    // wants, so this line is crossed by the blank-line loop rather than
+    // consumed as a break.
+    (
+        "blank_line_of_spaces_before_a_body",
+        "struct s size=3x3\n  \n  floor a=1\n",
+        Accept,
+    ),
+    (
+        "blank_line_of_spaces_before_a_dedent",
+        "struct s size=3x3\n  a x=1\n  \nstruct t size=3x3\n  b x=2\n",
+        Accept,
+    ),
+    (
+        "trailing_space_crlf",
+        "theme t: \r\n  slot a -> @b\r\n",
+        Accept,
+    ),
+    (
+        "trailing_space_lone_cr",
+        "theme t: \r  slot a -> @b\r",
+        Accept,
+    ),
     // A file of nothing but spaces holds no line for them to indent.
     ("spaces_with_no_line_break", "  ", Accept),
     ("blank_line_then_spaces", "\n  ", Accept),
@@ -588,34 +653,6 @@ const KNOWN_DIVERGENCES: &[(&str, &str, Verdict)] = &[
     (
         "bodyless_decl_then_comment_line",
         "theme a:\n# c\nstruct s size=3x3\n  floor a=1\n",
-        Reject,
-    ),
-    // -- whitespace before a line break ------------------------------
-    //
-    // tree-sitter consults the external scanner *before* it skips extras,
-    // so a line ending in a space reaches the NEWLINE branch with the
-    // space in `lookahead` rather than the break, and no branch there can
-    // consume one.
-    //
-    // Skipping the run is not the repair it appears to be: at the start of
-    // a line that same run is the line's indentation, the two are told
-    // apart only by reading to the end of the run, and reading it moves
-    // the lexer past an indent the branches below still have to measure.
-    // Doing it anyway re-breaks multi-level dedent — measured, not
-    // assumed. The repair is a way to inspect a run without consuming it.
-    (
-        "trailing_space_on_a_header",
-        "theme t: \n  slot a -> @b\n",
-        Reject,
-    ),
-    (
-        "trailing_space_on_a_body_row",
-        "theme t:\n  slot a -> @b \n",
-        Reject,
-    ),
-    (
-        "blank_line_of_only_spaces",
-        "theme t:\n  slot a -> @b\n  \n  slot c -> @d\n",
         Reject,
     ),
     // -- indentation the scanner is never asked about -----------------
