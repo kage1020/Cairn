@@ -14,7 +14,9 @@ use cairn_lang_core::resolve::{
     BuildableTargets, EditionReport, UnsupportedEntry, UnsupportedReason, VersionAxes,
     VersionFloor, compare_versions, compute_axes, declared_version_floor, resolve,
 };
-use cairn_lang_core::{Edition, Severity, check, lower, parse};
+use cairn_lang_core::{
+    Diagnostic, Edition, ParseError, Severity, check, diagnose_parse_failure, lower, parse,
+};
 use cairn_lang_formats::bedrock_structure::{ParityNote, build_mcstructure_tag, write_mcstructure};
 use cairn_lang_formats::data_version::{
     BedrockTarget, JavaTarget, resolve_bedrock_target, resolve_java_target,
@@ -414,14 +416,7 @@ fn run_parse(file: &Path, format: Format) -> ExitCode {
     let module = match parse(&source) {
         Ok(m) => m,
         Err(err) => {
-            // gcc/clang style `file:line:col:` so editors can jump.
-            let position = err.position();
-            eprintln!(
-                "error: {}:{}: {}",
-                file.display(),
-                position,
-                err.user_message(),
-            );
+            report_parse_failure(file, &source, &err);
             return ExitCode::from(1);
         }
     };
@@ -443,6 +438,45 @@ fn run_parse(file: &Path, format: Format) -> ExitCode {
     }
 }
 
+/// Report a parse failure on stderr in the shape every other diagnostic
+/// is reported in: `file:line:col: error[CODE]: message`.
+///
+/// Five subcommands read a source, and each rendered this by hand as a
+/// bare `error:` line with no code — the one finding a reader could not
+/// look up in `spec/lint.md`, and the one a grep for `error[E_` missed.
+/// Rendering it from the core diagnostic is what makes the two agree.
+fn report_parse_failure(file: &Path, source: &str, err: &ParseError) {
+    let diagnostic = diagnose_parse_failure(source, err);
+    let lines = LineStarts::new(source);
+    eprintln!(
+        "{}:{}: {}[{}]: {}",
+        file.display(),
+        lines.position(source, diagnostic.span.start),
+        diagnostic.severity().as_str(),
+        diagnostic.code.as_str(),
+        diagnostic.primary,
+    );
+}
+
+/// Serialise `diagnostics` for a `--format json` consumer, or report the
+/// serialisation failure and give the caller an exit code.
+fn rendered_json(source: &str, diagnostics: &[Diagnostic]) -> Result<String, ExitCode> {
+    let lines = LineStarts::new(source);
+    // Render to the `RenderedDiagnostic` form so the JSON output carries
+    // `line` / `col` / `end_line` / `end_col` — without this the
+    // `--format json` contract for downstream tooling would ship only
+    // `code` / `severity` / `primary` / `notes`, with no source position
+    // at all.
+    let rendered: Vec<_> = diagnostics
+        .iter()
+        .map(|d| d.render(source, &lines))
+        .collect();
+    serde_json::to_string_pretty(&rendered).map_err(|err| {
+        eprintln!("error: failed to serialise diagnostics as JSON: {err}");
+        ExitCode::from(1)
+    })
+}
+
 fn run_check(file: &Path, edition: Option<EditionArg>, format: CheckFormat) -> ExitCode {
     let source = match std::fs::read_to_string(file) {
         Ok(s) => s,
@@ -461,12 +495,20 @@ fn run_check(file: &Path, edition: Option<EditionArg>, format: CheckFormat) -> E
     let module = match parse(&source) {
         Ok(m) => m,
         Err(err) => {
-            eprintln!(
-                "error: {}:{}: {}",
-                file.display(),
-                err.position(),
-                err.user_message(),
-            );
+            // The product of `check --format json` is the diagnostics
+            // array, so a parse failure is that array with one element in
+            // it. Nothing about the shape changes; what changes is that
+            // the most common way a source fails stops being the one input
+            // the flag answers with an empty stream.
+            match format {
+                CheckFormat::Text => report_parse_failure(file, &source, &err),
+                CheckFormat::Json => {
+                    match rendered_json(&source, &[diagnose_parse_failure(&source, &err)]) {
+                        Ok(json) => println!("{json}"),
+                        Err(code) => return code,
+                    }
+                }
+            }
             return ExitCode::from(1);
         }
     };
@@ -502,24 +544,10 @@ fn run_check(file: &Path, edition: Option<EditionArg>, format: CheckFormat) -> E
                 report_notes(file, &source, &lines, &d.notes);
             }
         }
-        CheckFormat::Json => {
-            // Render to the `RenderedDiagnostic` form so the JSON output
-            // carries `line` / `col` / `end_line` / `end_col` — without
-            // this the `--format json` contract for downstream tooling
-            // would ship only `code` / `severity` / `primary` / `notes`,
-            // with no source position at all.
-            let rendered: Vec<_> = diagnostics
-                .iter()
-                .map(|d| d.render(&source, &lines))
-                .collect();
-            match serde_json::to_string_pretty(&rendered) {
-                Ok(json) => println!("{json}"),
-                Err(err) => {
-                    eprintln!("error: failed to serialise diagnostics as JSON: {err}");
-                    return ExitCode::from(1);
-                }
-            }
-        }
+        CheckFormat::Json => match rendered_json(&source, &diagnostics) {
+            Ok(json) => println!("{json}"),
+            Err(code) => return code,
+        },
     }
 
     if has_error {
@@ -527,6 +555,45 @@ fn run_check(file: &Path, edition: Option<EditionArg>, format: CheckFormat) -> E
     } else {
         ExitCode::SUCCESS
     }
+}
+
+/// Report the findings that stopped `info` from producing a report, and
+/// give back its exit code.
+///
+/// `info`'s product is the `VersionAxes` document, not a diagnostics list,
+/// so a failure cannot be "the report with a hole in it". Under
+/// `--format json` it is a document of its own — `{"diagnostics": [...]}`,
+/// told apart from a report by its keys and by the exit code — which is
+/// what keeps the flag's promise of one JSON document on stdout for every
+/// input. Under `--format text` the findings read as they always have.
+fn report_info_failure(
+    file: &Path,
+    source: &str,
+    format: InfoFormat,
+    diagnostics: &[Diagnostic],
+) -> ExitCode {
+    match format {
+        InfoFormat::Text => {
+            let lines = LineStarts::new(source);
+            for d in diagnostics {
+                let pos = lines.position(source, d.span.start);
+                eprintln!(
+                    "{}:{}: {}[{}]: {}",
+                    file.display(),
+                    pos,
+                    d.severity().as_str(),
+                    d.code.as_str(),
+                    d.primary,
+                );
+                report_notes(file, source, &lines, &d.notes);
+            }
+        }
+        InfoFormat::Json => match rendered_json(source, diagnostics) {
+            Ok(json) => println!("{{\n  \"diagnostics\": {json}\n}}"),
+            Err(code) => return code,
+        },
+    }
+    ExitCode::from(1)
 }
 
 fn run_info(file: &Path, editions: &[String], format: InfoFormat) -> ExitCode {
@@ -563,13 +630,12 @@ fn run_info(file: &Path, editions: &[String], format: InfoFormat) -> ExitCode {
     let module = match parse(&source) {
         Ok(m) => m,
         Err(err) => {
-            eprintln!(
-                "error: {}:{}: {}",
-                file.display(),
-                err.position(),
-                err.user_message(),
+            return report_info_failure(
+                file,
+                &source,
+                format,
+                &[diagnose_parse_failure(&source, &err)],
             );
-            return ExitCode::from(1);
         }
     };
     let ir = lower(&module);
@@ -601,7 +667,14 @@ fn run_info(file: &Path, editions: &[String], format: InfoFormat) -> ExitCode {
     );
 
     let lines = LineStarts::new(&source);
-    let mut has_error = false;
+    let has_error = combined.iter().any(|d| d.severity() == Severity::Error);
+    if has_error {
+        return report_info_failure(file, &source, format, &combined);
+    }
+    // Warnings on a run that still has a report keep going to stderr as
+    // text, in both formats. Folding them into the report would change a
+    // document downstream tooling already reads, which is a breaking
+    // change and a decision of its own.
     for d in &combined {
         let pos = lines.position(&source, d.span.start);
         eprintln!(
@@ -613,12 +686,6 @@ fn run_info(file: &Path, editions: &[String], format: InfoFormat) -> ExitCode {
             d.primary,
         );
         report_notes(file, &source, &lines, &d.notes);
-        if d.severity() == Severity::Error {
-            has_error = true;
-        }
-    }
-    if has_error {
-        return ExitCode::from(1);
     }
 
     let floor = declared_version_floor(&module);
@@ -1103,12 +1170,7 @@ fn run_lower(file: &Path, format: LowerFormat) -> ExitCode {
     let module = match parse(&source) {
         Ok(m) => m,
         Err(err) => {
-            eprintln!(
-                "error: {}:{}: {}",
-                file.display(),
-                err.position(),
-                err.user_message(),
-            );
+            report_parse_failure(file, &source, &err);
             return ExitCode::from(1);
         }
     };
@@ -1223,12 +1285,7 @@ fn run_synth(
     let module = match parse(&source) {
         Ok(m) => m,
         Err(err) => {
-            eprintln!(
-                "error: {}:{}: {}",
-                file.display(),
-                err.position(),
-                err.user_message(),
-            );
+            report_parse_failure(file, &source, &err);
             return ExitCode::from(1);
         }
     };
@@ -1968,12 +2025,7 @@ fn load_and_lower(
         }
     })?;
     let module = parse(&source).map_err(|err| {
-        eprintln!(
-            "error: {}:{}: {}",
-            file.display(),
-            err.position(),
-            err.user_message(),
-        );
+        report_parse_failure(file, &source, &err);
         ExitCode::from(1)
     })?;
     let ir = lower(&module);

@@ -48,6 +48,23 @@ impl Severity {
 #[cfg_attr(test, derive(strum::EnumIter))]
 #[non_exhaustive]
 pub enum DiagnosticCode {
+    /// The source did not parse.
+    ///
+    /// One code for every shape a parse fails in — a stray character, an
+    /// odd indent, an integer past `i64`, a keyword where an item was
+    /// expected — with the message carrying which. The alternative, a code
+    /// per [`crate::error::ParseError`] and [`crate::error::LexError`]
+    /// variant, would make every future variant of two `#[non_exhaustive]`
+    /// enums a new line of public contract, for a distinction nothing has
+    /// asked to branch on. What it costs is that a consumer cannot tell a
+    /// stray character from an odd indent without reading the message,
+    /// where it can tell `E_UNKNOWN_ARGUMENT` from `E_UNKNOWN_KEYWORD`.
+    ///
+    /// It is the only code no check pass produces: parsing precedes them
+    /// all, and a file that does not parse reaches none of them. See
+    /// [`crate::parse::diagnose_parse_failure`], which is where it is
+    /// built.
+    Parse,
     /// More than one `size=` argument in a struct or def header.
     DuplicateSize,
     /// Repeated `slot NAME` line in a single `theme` block.
@@ -444,6 +461,7 @@ impl DiagnosticCode {
     #[must_use]
     pub fn as_str(self) -> &'static str {
         match self {
+            Self::Parse => "E_PARSE",
             Self::DuplicateSize => "E_DUPLICATE_SIZE",
             Self::DuplicateSlot => "E_DUPLICATE_SLOT",
             Self::DuplicateSelector => "E_DUPLICATE_SELECTOR",
@@ -543,7 +561,8 @@ impl DiagnosticCode {
     #[must_use]
     pub fn severity(self) -> Severity {
         match self {
-            Self::DuplicateSize
+            Self::Parse
+            | Self::DuplicateSize
             | Self::DuplicateSlot
             | Self::DuplicateSelector
             | Self::DuplicateArg
@@ -983,6 +1002,54 @@ impl LineStarts {
             .unwrap_or(NonZeroU32::MIN);
         Position { line, col }
     }
+
+    /// Resolve a 1-based `line:column` back to a byte offset — the inverse
+    /// of [`LineStarts::position`].
+    ///
+    /// Needed by anything holding a [`Position`] and wanting a [`Span`]:
+    /// the parser reports where it stopped, not the range it stopped over,
+    /// so a renderer has to put the two back together.
+    ///
+    /// Out-of-range inputs clamp rather than panic, which is what a
+    /// position from a *different* source than the one indexed here
+    /// amounts to. A line past the end resolves to the end of the source;
+    /// a column past the end of its line resolves to that line's end,
+    /// before the terminator, so the result never lands inside a line
+    /// break or past one.
+    #[must_use]
+    pub fn offset_of(&self, source: &str, position: Position) -> usize {
+        let line_index = position.line.get() as usize - 1;
+        let Some(&line_start) = self.starts.get(line_index) else {
+            return source.len();
+        };
+        let line_end = self.line_end(source, line_start);
+        let mut offset = line_start;
+        for _ in 1..position.col.get() {
+            let Some(c) = source[offset..line_end].chars().next() else {
+                break;
+            };
+            offset += c.len_utf8();
+        }
+        offset
+    }
+
+    /// Byte offset of the end of the line `byte_offset` sits on, before
+    /// that line's terminator.
+    ///
+    /// The terminator is excluded so a span built from this cannot cross
+    /// into the next line — an editor rendering one that did would
+    /// underline the following row's first column.
+    #[must_use]
+    pub fn line_end(&self, source: &str, byte_offset: usize) -> usize {
+        let clamped = byte_offset.min(source.len());
+        // See `position` for why `partition_point` returns the line number:
+        // the starts vector is 1-aligned with 1-based line numbers, so the
+        // entry at that index is the *next* line's start, when there is one.
+        let line_number = self.starts.partition_point(|&s| s <= clamped);
+        self.starts
+            .get(line_number)
+            .map_or(source.len(), |&next| crate::lines::end_before(source, next))
+    }
 }
 
 /// Compute a 1-based `line:column` for a byte offset into `source`.
@@ -1045,6 +1112,7 @@ mod tests {
                 "E_INVALID_REQUIRES",
                 "E_MISPLACED_MEMBER",
                 "E_MISSING_PATH_MATERIAL",
+                "E_PARSE",
                 "E_THEME_SELECTOR_UNMATCHED",
                 "E_THEME_VARIANT_MISSING",
                 "E_TRUTH_TABLE_CONFLICT",
@@ -1108,6 +1176,7 @@ mod tests {
                 "E_INVALID_REQUIRES",
                 "E_MISPLACED_MEMBER",
                 "E_MISSING_PATH_MATERIAL",
+                "E_PARSE",
                 "E_THEME_VARIANT_MISSING",
                 "E_TRUTH_TABLE_CONFLICT",
                 "E_TRUTH_TABLE_EMPTY",

@@ -13,6 +13,7 @@ use crate::ast::{
     Arg, DottedRef, Expr, Header, Item, Module, RawRequirement, RawVersion, Statement, ThemeRule,
     TruthRow, Value, ValueKind,
 };
+use crate::check::{Diagnostic, DiagnosticCode, LineStarts};
 use crate::error::{IntContext, ParseError, Position};
 use crate::lex::{Token, TokenKind, lex};
 
@@ -24,6 +25,44 @@ pub fn parse(source: &str) -> Result<Module, ParseError> {
     let tokens = lex(source)?;
     let mut parser = Parser::new(source, &tokens);
     parser.parse_module()
+}
+
+/// Render a parse failure as a [`Diagnostic`], so it can be reported
+/// beside the findings of every pass that runs after one.
+///
+/// A parse failure is the one finding no `check` pass produces — nothing
+/// runs without an AST — and until it had a shape of its own, every
+/// consumer invented one: the CLI wrote a bare `error:` line that carried
+/// no code, the language server built an LSP diagnostic directly, and
+/// `cairn check --format json` had nothing to put on stdout at all for the
+/// most common way a file fails.
+///
+/// The span runs from the position the error reports to the end of that
+/// line. A [`ParseError`] carries a position and not a range — the parser
+/// stops *at* a token rather than over a construct — and a zero-width span
+/// renders in an editor as a caret with nothing under it, so the rest of
+/// the line is what gives the finding something to underline. It stops
+/// before the line's terminator, so the underline cannot run into the row
+/// below.
+#[must_use]
+pub fn diagnose_parse_failure(source: &str, err: &ParseError) -> Diagnostic {
+    let lines = LineStarts::new(source);
+    let start = lines.offset_of(source, err.position());
+    let end = lines.line_end(source, start).max(start);
+    Diagnostic {
+        code: DiagnosticCode::Parse,
+        span: start..end,
+        // The renderer prints the position in front of the message, from
+        // the span; `ParseError`'s own `Display` prefixes it too, which is
+        // why this reads `user_message` rather than `to_string`.
+        primary: err.user_message(),
+        notes: Vec::new(),
+        // No structured payload. A consumer that wants to branch on which
+        // parse failure it is has the message; giving it a payload means
+        // freezing a shape for two `#[non_exhaustive]` enums, and that can
+        // be added later without breaking anyone.
+        data: None,
+    }
 }
 
 /// Deepest value / expression nesting the parser will descend into.

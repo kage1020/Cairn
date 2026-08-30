@@ -9,7 +9,9 @@
 //! span-carrying notes become `relatedInformation` entries pointing back
 //! into the same document.
 
-use cairn_lang_core::{Diagnostic as CoreDiagnostic, ParseError, Severity, check, lower, parse};
+use cairn_lang_core::{
+    Diagnostic as CoreDiagnostic, Severity, check, diagnose_parse_failure, lower, parse,
+};
 
 use crate::line_index::LineIndex;
 
@@ -18,15 +20,28 @@ use crate::line_index::LineIndex;
 ///
 /// A parse/lex failure pre-empts the check passes (the AST has to be
 /// well-formed before invariant collection can run — same rule as
-/// `cairn check`) and yields exactly one error diagnostic. Edition is left
-/// unpinned (`None`), matching `cairn check` without `--edition`: slot
-/// presence checks union the per-edition theme variants.
+/// `cairn check`) and yields exactly one error diagnostic. It goes through
+/// the same [`convert`] every other finding does, because
+/// [`diagnose_parse_failure`] gives it the same shape: a code, a span, a
+/// message. This file used to build that one by hand — a diagnostic with
+/// no code, in a converter only it could reach — which is how the server
+/// and the CLI came to describe the same failure differently.
+///
+/// Edition is left unpinned (`None`), matching `cairn check` without
+/// `--edition`: slot presence checks union the per-edition theme variants.
 #[must_use]
 pub fn compute_diagnostics(uri: &lsp_types::Uri, source: &str) -> Vec<lsp_types::Diagnostic> {
     let index = LineIndex::new(source);
     let module = match parse(source) {
         Ok(module) => module,
-        Err(err) => return vec![parse_error_diagnostic(source, &index, &err)],
+        Err(err) => {
+            return vec![convert(
+                uri,
+                source,
+                &index,
+                &diagnose_parse_failure(source, &err),
+            )];
+        }
     };
     let ir = lower(&module);
     check(&module, &ir, None)
@@ -84,37 +99,6 @@ fn convert(
                 }
             }
         }),
-        ..lsp_types::Diagnostic::default()
-    }
-}
-
-/// Map a parse/lex failure into a single error diagnostic.
-///
-/// Parse errors carry a 1-based line/column [`cairn_lang_core::Position`]
-/// rather than a byte span, so the range runs from that position to the end
-/// of its line, which is as much as the position supports.
-///
-/// The largest class of parse error — `expected X, got end of line` — is
-/// reported *at* the end of its line, so its range is zero width and the
-/// editor draws a caret there rather than a squiggle. That is the right
-/// picture: nothing on the line is wrong, something is missing after it.
-/// An error inside a line still gets width, from the offending token to the
-/// line's end.
-///
-/// No stable `E_*` code exists for parse failures yet, so `code` stays
-/// unset rather than inventing one outside the core contract.
-fn parse_error_diagnostic(
-    source: &str,
-    index: &LineIndex,
-    err: &ParseError,
-) -> lsp_types::Diagnostic {
-    let start_offset = index.offset_of(source, err.position());
-    let end_offset = index.line_end(source, start_offset).max(start_offset);
-    lsp_types::Diagnostic {
-        range: index.range(source, &(start_offset..end_offset)),
-        severity: Some(lsp_types::DiagnosticSeverity::ERROR),
-        source: Some("cairn".to_owned()),
-        message: err.user_message(),
         ..lsp_types::Diagnostic::default()
     }
 }
@@ -203,8 +187,8 @@ mod tests {
 
     #[test]
     fn parse_error_yields_exactly_one_error_diagnostic() {
-        // Parser-rejected content produces a single
-        // ERROR diagnostic carrying the parse error's own message and a
+        // Parser-rejected content produces a single ERROR diagnostic
+        // carrying the parse error's own message, its code, and a
         // non-empty range on the offending line.
         let source = "struct s size=2x2\n\tfloor\n";
         let err = parse(source).expect_err("tab indent should be rejected");
@@ -213,7 +197,10 @@ mod tests {
         let d = &diagnostics[0];
         assert_eq!(d.severity, Some(lsp_types::DiagnosticSeverity::ERROR));
         assert_eq!(d.message, err.user_message());
-        assert_eq!(d.code, None);
+        // The code is what a client looks the finding up by, and this one
+        // used to have none — the server rendered it through a converter of
+        // its own rather than from a core diagnostic.
+        assert_eq!(code_of(d), "E_PARSE");
         assert_eq!(d.range.start.line, 1);
         assert!(
             d.range.end > d.range.start,
