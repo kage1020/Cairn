@@ -428,8 +428,19 @@ bool tree_sitter_cairn_external_scanner_scan(void *payload, TSLexer *lexer, cons
   // Skip blank and comment-only lines without shifting indent state, so
   // the level measured below is the next line that carries one.
   //
-  // Gated on INDENT and DEDENT because looking past a blank line for the
-  // next level is a question only those two ask.
+  // Gated on INDENT and DEDENT because the read is theirs: looking past a
+  // blank line for the next level is a question only those two ask.
+  // LINE_START rides along where one of them is also on offer, which is
+  // how the layout after a declaration with no rows gets crossed, but it
+  // never opens the read on its own — its own question is about the line
+  // the construct starts on.
+  //
+  // Removing the gate leaves every test in this crate green, and that is
+  // not evidence it is idle: an LINE_START-only position is one between
+  // two top-level constructs, and the layout in front of such a position
+  // has already been eaten by the preceding body's or directive's
+  // trailing `repeat1($._newline)`. There is nothing there to cross, so
+  // no source can tell the two apart.
   //
   // Crossing costs something, and `crossed_comment` is what pays it back.
   // A line crossed here is consumed as whitespace, and a comment line
