@@ -5,6 +5,11 @@
  * `_dedent`. Used by later rules for indent-structured bodies (theme_body,
  * struct_body, ...).
  *
+ * Every item opens with `$._line_start`, the token that says the line it
+ * begins on sits at the level the body is already at. It is what makes an
+ * over-indented row an error rather than a sibling: the scanner withholds
+ * it, and no other rule can start an item.
+ *
  * Two item shapes:
  *  - `lineItem`s are single-line (no body of their own), so *this* rule is
  *    on the hook for their line terminator: each is followed by
@@ -28,8 +33,8 @@
  * additionally account for them.
  */
 function body($, lineItem, selfTerminating) {
-  const alternatives = [seq(lineItem, repeat1($._newline))];
-  if (selfTerminating) alternatives.push(selfTerminating);
+  const alternatives = [seq($._line_start, lineItem, repeat1($._newline))];
+  if (selfTerminating) alternatives.push(seq($._line_start, selfTerminating));
   return seq($._indent, repeat(choice(...alternatives)), $._dedent);
 }
 
@@ -58,11 +63,35 @@ module.exports = grammar({
 
   extras: $ => [/ +/, $.comment],
 
+  // `_line_start` stands in front of every construct that begins a line —
+  // each directive, each top-level declaration, each item of a body. It
+  // is hidden and zero-width, and its only job is to be refusable: where
+  // no external token is expected, tree-sitter's `/ +/` extra eats a
+  // line's leading spaces before the scanner ever sees them, and an
+  // illegally indented line lands somewhere the author did not write it.
+  // A token every construct must start with turns that into a refusal.
+  //
+  // It sits *after* `_indent` and `_dedent`, never before. Before them it
+  // could only re-check what the newline in front of the line already
+  // checks, and could not tell a legal level-plus-one from an illegal one
+  // — whether a body may open there is this grammar's knowledge and not
+  // the scanner's. After them the question needs no such knowledge: the
+  // level either changed, in which case the indent token has consumed the
+  // line's leading run already, or it did not, in which case the run must
+  // measure exactly the level the scanner stands in.
+  //
+  // `_file_start` is not subsumed by it. That token also skips the file's
+  // opening blank and comment lines, and it is the only position that may
+  // skip them outright: everywhere else a comment has to reach the
+  // `comment` extra to become a node, and the scanner hands one back
+  // rather than spending it wherever a `_newline` could carry it.
+  //
   // `_error_sentinel` is in no rule, so it is valid only during error
   // recovery, when tree-sitter offers every external token at once. The
   // scanner tests it and bows out — see the guard at the top of `scan()`.
   externals: $ => [
-    $._indent, $._dedent, $._newline, $._file_start, $._size_x, $._error_sentinel,
+    $._indent, $._dedent, $._newline, $._file_start, $._size_x, $._line_start,
+    $._error_sentinel,
   ],
 
   word: $ => $.identifier,
@@ -111,15 +140,23 @@ module.exports = grammar({
     // `_top_level_decl` supplies its own: a declaration with a body ends
     // in `$._dedent`, with the blank lines behind it already eaten by that
     // body's trailing `repeat1($._newline)`, so no newline is expected (or,
-    // past EOF, available) right here. A declaration *without* a body has
-    // no such body to do the eating, and the blank lines after it go
-    // unconsumed — see the `bodyless_decl_*` entries in
-    // `tests/parser_parity.rs`, which record that as a known divergence.
+    // past EOF, available) right here.
+    //
+    // A declaration *without* a body has no such body to do the eating,
+    // and what crosses those lines is not the `$._line_start` in front of
+    // whatever follows — that token crosses nothing on its own. It is
+    // that every declaration's body is `optional()`, so `$._indent` is
+    // still valid at that position, and the scanner's blank-line loop
+    // runs on the strength of it, reading past to the next line that
+    // carries a level. Load-bearing and easy to lose: a construct that
+    // begins a line and has *no* optional body would strand its trailing
+    // layout, exactly as one does at the end of a file, where there is no
+    // construct behind the layout at all.
     source_file: $ => seq(
       $._file_start,
       repeat($._newline),
-      repeat(seq($.directive, repeat1($._newline))),
-      repeat($._top_level_decl),
+      repeat(seq($._line_start, $.directive, repeat1($._newline))),
+      repeat(seq($._line_start, $._top_level_decl)),
     ),
 
     _top_level_decl: $ => choice(

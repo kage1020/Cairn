@@ -82,6 +82,11 @@ Inside a body, `level y=N` is the only member that groups other members, and onl
 An indented body anywhere else is `E_UNSUPPORTED_NESTING` rather than a silent drop. It lowers to
 nothing, places nothing, and lays no walkway.
 
+That rule is about members, and reaches only bodies that hold them. A `theme` body holds rules,
+which bind materials and open nothing, so a line indented under one is a syntax error and not a
+nesting diagnostic. So is a line indented after a directive: a directive is one line, and the line
+under it belongs to no construct.
+
 [Compilation Model §4.7](compilation#47-level-grouping-and-volume-derivation) defines what `y=N`
 means to each grouped member.
 

@@ -385,6 +385,27 @@ and is a separate axis from the Minecraft target version.
 
 ### Fixed
 
+- *(tree-sitter)* Every line now starts with a token the grammar demands, so indentation is checked
+  wherever a line begins rather than only where a level change was already expected. Two shapes the
+  grammar accepted and `cairn-lang-core` refuses are refused now: a row indented under a `theme`
+  row, which binds a material and opens nothing, and a line indented after a directive. Both were
+  the silent direction — the file parsed, and the over-indented row landed somewhere the author did
+  not write it.
+
+  The token is hidden and zero-width and stands in front of every construct that begins a line:
+  each directive, each top-level declaration, each item of a body. Withholding it is a refusal,
+  because nothing else in the grammar can start a construct. It sits *after* the indent and dedent
+  tokens rather than before them — before them it could only re-check what the break in front of
+  the line already checks, and could not tell a legal level-plus-one from an illegal one, since
+  whether a body may open there is the grammar's knowledge and not the scanner's.
+
+  A declaration with no body may now be followed by a blank or a comment-only line. What crosses
+  those lines is the scanner reading past them for the next line that carries a level, which it may
+  do there because every declaration's body is optional and so an indent is still expected — not
+  the new token, which crosses nothing on its own. That was its own refusal before, and it needed
+  the newline handling reworked rather than patched. It still is one at the end of a file, where
+  there is no construct behind the layout at all.
+
 - *(tree-sitter)* A line may end in whitespace. The grammar refused a trailing space before a line
   break and a blank line made of spaces — three shapes `cairn-lang-core` accepts, and ones an
   editor without trim-on-save writes by accident, so a `.crn` file that compiles could fail to

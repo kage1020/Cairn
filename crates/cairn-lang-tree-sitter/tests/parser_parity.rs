@@ -21,6 +21,8 @@
 //! divergence that gets fixed fails the test that holds it, so the list
 //! shrinks deliberately rather than drifting.
 
+use std::fmt::Write as _;
+
 use tree_sitter::Parser;
 
 /// What both parsers should say about a fixture.
@@ -133,6 +135,16 @@ const FIXTURES: &[(&str, &str, Verdict)] = &[
     (
         "level_with_body",
         "struct s size=3x3\n  level y=0\n    floor mat_slot=f\n",
+        Accept,
+    ),
+    // A grouping member with a blank line in front of it, a sibling
+    // before that, and a second group after. Both parsers accept it
+    // either way; what moves is where the rows land, so only the depth
+    // walk sees it — the group used to end up bodyless with its first row
+    // adopting the second.
+    (
+        "blank_line_before_a_grouping_member",
+        "struct s size=3x3\n  a x=1\n\n  b y=0\n    c x=1\n    d x=2\n\n  e y=5\n    f x=1\n",
         Accept,
     ),
     (
@@ -409,11 +421,66 @@ const FIXTURES: &[(&str, &str, Verdict)] = &[
         "struct s size=3x3\n\n\tfloor a=1\n",
         Reject,
     ),
+    // A line the break in front of it cannot speak for, because the level
+    // it asks for is legal arithmetic: one deeper than the line above.
+    // Whether a body may open there is the grammar's knowledge and not
+    // the scanner's, so the refusal comes from the line itself — the
+    // token every construct starts with is withheld, and nothing else can
+    // start one.
+    (
+        "indent_under_a_slot_row",
+        "theme t:\n  slot a -> @b\n    slot c -> @d\n",
+        Reject,
+    ),
+    ("indent_after_a_directive", "@cairn 1\n  theme t:\n", Reject),
+    // The same shape one level further in, and the same shape where a
+    // body *is* allowed, so the refusal is the nesting rule and not the
+    // depth.
+    (
+        "indent_under_a_nested_slot_row",
+        "theme t:\n  slot a -> @b\n      slot c -> @d\n",
+        Reject,
+    ),
+    (
+        "indent_under_a_member_row_is_a_body",
+        "struct s size=3x3\n  floor a=1\n    walls b=2\n",
+        Accept,
+    ),
     ("first_line_indented", "  theme t:\n", Reject),
     ("first_line_indented_odd", " theme t:\n", Reject),
     ("first_line_indented_after_blank", "\n  theme t:\n", Reject),
     // -- layout ----------------------------------------------------------
     ("empty_source", "", Accept),
+    // A declaration with no body has no trailing `repeat1($._newline)` to
+    // absorb the blank and comment lines behind it, so the line that
+    // follows them has to start on its own.
+    (
+        "bodyless_decl_then_blank_line",
+        "theme a:\n\nstruct s size=3x3\n  floor a=1\n",
+        Accept,
+    ),
+    (
+        "bodyless_decl_then_comment_line",
+        "theme a:\n# c\nstruct s size=3x3\n  floor a=1\n",
+        Accept,
+    ),
+    (
+        "bodyless_decl_then_decl",
+        "theme a:\nstruct s size=3x3\n  floor a=1\n",
+        Accept,
+    ),
+    // Blank and comment lines behind a declaration that *does* have a
+    // body are eaten by that body instead, and still are.
+    (
+        "decl_with_body_then_blank_line",
+        "theme a:\n  slot x -> @y\n\nstruct s size=3x3\n  floor a=1\n",
+        Accept,
+    ),
+    (
+        "decl_with_body_then_comment_line",
+        "theme a:\n  slot x -> @y\n# c\nstruct s size=3x3\n  floor a=1\n",
+        Accept,
+    ),
     ("blank_lines_only", "\n\n  \n", Accept),
     ("comment_only", "# hello\n", Accept),
     (
@@ -703,23 +770,39 @@ const KNOWN_DIVERGENCES: &[(&str, &str, Verdict)] = &[
         "struct s size=3x3\n  floor n=99999999999999999999\n",
         Accept,
     ),
-    // -- a declaration with no body, followed by more file ------------
+    // -- a declaration with nothing but layout behind it --------------
     //
-    // A body absorbs the blank and comment-only lines behind it through
-    // `body()`'s trailing `repeat1($._newline)`. A declaration without
-    // one has nothing to do that, and the obvious repair — letting the
-    // bodyless branch consume them itself — puts two rules in contention
-    // for the same newlines and breaks multi-level dedent instead
-    // (measured: it re-breaks the very bug this crate's depth test
-    // pins). It needs the newline handling reworked rather than patched.
+    // The blank and comment lines after a declaration are crossed on the
+    // way to the construct behind them. At the end of a file there is no
+    // such construct, nothing asks, and the layout is left over. A
+    // declaration whose body has a row absorbs it through that body's
+    // trailing `repeat1($._newline)`, and a directive through its own,
+    // which is why this is the one position where it survives —
+    // `theme empty:\n` parses, and so does a bodyless declaration with
+    // another declaration behind the blank line.
+    //
+    // "Bodyless" is not the whole of it: a header whose body holds
+    // nothing but comment lines has no row to do the absorbing either,
+    // and is left over the same way.
+    //
+    // Closing it means making trailing layout consumable with no
+    // construct behind it. The obvious shape — a `repeat($._newline)` at
+    // the end of `source_file` — is ambiguous against the one at the
+    // start, which owns the same tokens for a file that holds nothing
+    // else, and tree-sitter refuses to generate it.
     (
-        "bodyless_decl_then_blank_line",
-        "theme a:\n\nstruct s size=3x3\n  floor a=1\n",
+        "bodyless_decl_then_blank_line_at_eof",
+        "theme a:\n\n",
         Reject,
     ),
     (
-        "bodyless_decl_then_comment_line",
-        "theme a:\n# c\nstruct s size=3x3\n  floor a=1\n",
+        "bodyless_decl_then_comment_line_at_eof",
+        "theme a:\n# c\n",
+        Reject,
+    ),
+    (
+        "decl_whose_body_is_only_a_comment",
+        "struct s size=3x3\n  # note\n",
         Reject,
     ),
     // -- a size separator with a space after it -----------------------
@@ -737,28 +820,6 @@ const KNOWN_DIVERGENCES: &[(&str, &str, Verdict)] = &[
         "struct s size=3x3\n  floor size=2x 2\n",
         Reject,
     ),
-    // -- indentation the scanner is never asked about -----------------
-    //
-    // Both are lines the reference lexer refuses on their indentation and
-    // this grammar takes. `_file_start` covers the same class at the top
-    // of a file, but only there: after a directive, and inside a body
-    // that cannot nest, neither INDENT nor DEDENT is valid, so the
-    // scanner is not consulted and the `/ +/` extra eats the leading
-    // spaces. Closing them needs a token that is valid wherever a line
-    // may begin, which `_file_start` is the single-position sketch of.
-    //
-    // `indent_after_a_directive` reaches further than it once did, and the
-    // reach is not new breakage. A directive line ending in a space used
-    // to be refused for the space, before its indentation was reached at
-    // all, so the grammar agreed with the reference parser by accident.
-    // Now that such a line parses, the indentation is what decides, and it
-    // decides the way it always decided here.
-    (
-        "indent_under_a_slot_row",
-        "theme t:\n  slot a -> @b\n    slot c -> @d\n",
-        Accept,
-    ),
-    ("indent_after_a_directive", "@cairn 1\n  theme t:\n", Accept),
 ];
 
 fn grammar_accepts(parser: &mut Parser, source: &str) -> bool {
@@ -980,6 +1041,185 @@ fn accepted_sources_place_every_member_at_the_same_depth() {
         }
     }
     assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+}
+
+/// The two properties above, swept over generated layouts rather than
+/// written fixtures.
+///
+/// `FIXTURES` is a hand-written list, so it can only hold shapes someone
+/// thought of. Two of the properties it checks are worth asking about a
+/// corpus nobody chose:
+///
+/// - the grammar never accepts what the reference parser refuses. That is
+///   the *silent* direction — the file parses and a row lands where it was
+///   not written — and it is the direction this crate's design constraint
+///   makes a bug outright.
+/// - among sources both accept, every member lands at the same depth.
+///   Acceptance parity does not imply it: a grammar can take the right
+///   files and nest them wrongly, which is what a blank line in front of a
+///   grouping member used to do.
+///
+/// The other direction is not asserted, and cannot be: the grammar refuses
+/// sources the reference parser accepts on purpose, and `KNOWN_DIVERGENCES`
+/// is where those are written down one shape at a time.
+///
+/// The generator is a fixed seed and a fixed grammar of lines, so the
+/// corpus is the same on every run and on every machine — a failure here
+/// is reproducible by re-running it, not by luck.
+#[test]
+fn generated_layouts_agree_in_the_direction_that_must_hold() {
+    let mut parser = new_parser();
+    let mut generator = Layouts::seeded();
+    let mut accepted_wrongly = Vec::new();
+    let mut misplaced = Vec::new();
+    let mut both_accept = 0usize;
+    for _ in 0..SWEPT_LAYOUTS {
+        let source = generator.next_source();
+        let core = cairn_lang_core::parse::parse(&source);
+        let tree = parser.parse(&source, None).expect("parse produced no tree");
+        let grammar_accepts = !tree.root_node().has_error();
+        let Ok(module) = core else {
+            if grammar_accepts {
+                accepted_wrongly.push(format!("{source:?}"));
+            }
+            continue;
+        };
+        if !grammar_accepts {
+            continue;
+        }
+        both_accept += 1;
+        let mut core_side = Vec::new();
+        core_members(&module, &mut core_side);
+        let mut grammar_side = Vec::new();
+        grammar_members(tree.root_node(), &source, 0, &mut grammar_side);
+        if core_side != grammar_side {
+            misplaced.push(format!(
+                "{source:?}\n  reference parser {core_side:?}\n  grammar          {grammar_side:?}"
+            ));
+        }
+    }
+    // A generator that stopped producing anything both parsers take would
+    // pass both assertions below while measuring nothing.
+    assert!(
+        both_accept > SWEPT_LAYOUTS / 100,
+        "only {both_accept} of {SWEPT_LAYOUTS} generated layouts were accepted by both parsers; \
+         the generator is no longer producing a corpus worth sweeping",
+    );
+    // Reported together rather than one assertion after the other: the
+    // two properties fail for different reasons, and a run that breaks
+    // both should say so once instead of hiding the second behind the
+    // first.
+    let mut report = String::new();
+    if !accepted_wrongly.is_empty() {
+        writeln!(
+            report,
+            "the grammar accepted {} sources the reference parser refuses:\n{}",
+            accepted_wrongly.len(),
+            accepted_wrongly.join("\n"),
+        )
+        .expect("a String never fails to take a write");
+    }
+    if !misplaced.is_empty() {
+        writeln!(
+            report,
+            "{} sources both parsers accept place their members differently:\n{}",
+            misplaced.len(),
+            misplaced.join("\n"),
+        )
+        .expect("a String never fails to take a write");
+    }
+    assert!(report.is_empty(), "of {SWEPT_LAYOUTS} layouts, {report}");
+}
+
+/// How many layouts [`generated_layouts_agree_in_the_direction_that_must_hold`]
+/// sweeps. Large enough that the shapes the properties care about — a blank
+/// line in front of a nested body, a comment line between two rows, a lone
+/// `\r` under an indent — all appear many times over; small enough that the
+/// test stays a test.
+const SWEPT_LAYOUTS: usize = 20_000;
+
+/// A deterministic source of layouts: indentation, blank and comment
+/// lines, and the three line endings mixed within one file.
+///
+/// Lines are drawn from a fixed list rather than generated, because what
+/// is being swept is the layout around them and not the statements
+/// themselves — those are what `FIXTURES` is for.
+struct Layouts(u64);
+
+impl Layouts {
+    /// The seed is arbitrary and fixed. Changing it changes the corpus,
+    /// which is a decision rather than a refresh: do it deliberately, and
+    /// expect the divergences it turns up to be new work.
+    fn seeded() -> Self {
+        Self(0x9E37_79B9_7F4A_7C15)
+    }
+
+    /// xorshift64*, written out rather than pulled in: the sweep needs
+    /// repeatability, not statistical quality.
+    fn bits(&mut self) -> u64 {
+        let mut x = self.0;
+        x ^= x >> 12;
+        x ^= x << 25;
+        x ^= x >> 27;
+        self.0 = x;
+        x.wrapping_mul(0x2545_F491_4F6C_DD1D)
+    }
+
+    fn below(&mut self, n: usize) -> usize {
+        usize::try_from(self.bits() % n as u64).expect("modulus fits")
+    }
+
+    fn next_source(&mut self) -> String {
+        const LINES: &[&str] = &[
+            "@cairn 1",
+            "theme t:",
+            "slot a -> @b",
+            "struct s size=3x3",
+            "def d size=2x2:",
+            "site p:",
+            "floor mat_slot=f",
+            "level y=0",
+            "walls b=2",
+            "logic s.out = a.b and c",
+        ];
+        const ENDINGS: &[&str] = &["\n", "\r\n", "\r"];
+
+        let rows = 1 + self.below(9);
+        let mut out = String::new();
+        // The indent walks rather than being drawn afresh per line: an
+        // independent draw almost never forms a legal nesting, and the
+        // shapes worth sweeping — a body under a member, a row after a
+        // blank line inside one — only exist inside one. A quarter of the
+        // draws leave it alone, which is what puts siblings next to each
+        // other; the odd counts and the jumps the walk cannot make are
+        // covered by `FIXTURES` instead.
+        let mut level = 0usize;
+        for _ in 0..rows {
+            level = match self.below(4) {
+                0 => level + 1,
+                1 => level.saturating_sub(1),
+                _ => level,
+            };
+            for _ in 0..level * 2 {
+                out.push(' ');
+            }
+            match self.below(8) {
+                0 => {}
+                1 => out.push_str("# c"),
+                _ => out.push_str(LINES[self.below(LINES.len())]),
+            }
+            if self.below(8) == 0 {
+                out.push(' ');
+            }
+            out.push_str(ENDINGS[self.below(ENDINGS.len())]);
+        }
+        if self.below(4) == 0 {
+            while out.ends_with('\n') || out.ends_with('\r') {
+                out.pop();
+            }
+        }
+        out
+    }
 }
 
 /// `(depth, keyword)` for every member command in the reference AST, in
