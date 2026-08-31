@@ -98,7 +98,9 @@ its own scope and once again for every `place` that instantiates it, and each of
 resolutions binds a theme — the ones that bind the same theme reach the same conclusion about the
 same line, so they are one finding. Two placements naming two themes are two findings: each names
 the theme it is about and each is a separate edit. A `def` nothing places is still resolved,
-against the theme the module picks, so a file of defs and no `site` is still checked.
+against the theme the module picks, so a file of defs and no `site` is checked as long as the
+module has a single logical theme to pick. Where it declares more than one, no theme binds to the
+def's own scope and its `mat_slot=` names are not judged until a `place` chooses one.
 
 `E_INCOMPLETE_PLACE` names every key the row is short of, and the row is dropped from the build.
 
