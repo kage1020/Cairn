@@ -184,6 +184,57 @@ pub struct ResolvedMemberBinding {
     pub selector_extras: IndexMap<String, ValueWithSpan>,
 }
 
+/// The state every scope resolution reads from and adds to.
+///
+/// Carried as one struct rather than threaded as five positional
+/// arguments, for the reason [`crate::block_array`]'s `StructCtx` and
+/// `cairn-lang-redstone`'s `LoweringCtx` give for the same shape: a new
+/// per-resolution field lands as one field instead of touching every
+/// signature between [`resolve`] and the walk that needs it.
+///
+/// It is also where the two say-it-once ledgers sit together. They are one
+/// device at two levels — a cause with several emission sites, reported
+/// once between them — and keeping them apart made that hard to see.
+struct ResolveCtx<'a> {
+    /// Theme bindings by name. Mutable because selector matching records
+    /// the members each selector bound to.
+    themes: &'a mut IndexMap<String, ThemeBinding>,
+    /// Theme names some scope applied, so [`check_unmatched_selectors`] can
+    /// tell "matched nothing" apart from "never applied to anything".
+    applied_themes: &'a mut HashSet<String>,
+    /// Everything the resolution found, in the order it found it.
+    diagnostics: &'a mut Vec<Diagnostic>,
+    /// Logical theme names already reported as unbindable under the pin, so
+    /// the module-level pick and every `place` naming one say it once
+    /// between them rather than once each.
+    reported_missing: &'a mut HashSet<String>,
+    /// `(member position, slot name, theme name)` triples an
+    /// `E_UNRESOLVED_SLOT` has already been pushed for.
+    ///
+    /// A def body is resolved once as its own scope and once more per
+    /// `place` that instantiates it, so without this the same finding is
+    /// reported once per placement — plus once more when the module can
+    /// auto-pick a theme for the def's own scope. That count is a fact
+    /// about the placement list rather than about the source the author
+    /// has to fix.
+    ///
+    /// The triple is the finding's identity: its span is the member's, and
+    /// its message names the slot and the theme. Two placements naming two
+    /// themes resolve the same `mat_slot=` against two slot maps and earn
+    /// two findings, and two members reading one missing slot earn two as
+    /// well; only a repeat of all three says the same thing twice. The
+    /// slot name is redundant while [`Member::mat_slot`] holds at most one
+    /// name, which is a fact about the member rather than about the rule.
+    ///
+    /// Written where a diagnostic is pushed, never where a body is walked.
+    /// Two resolutions of one body can bind the same theme and still judge
+    /// a slot differently — sibling-variant softening applies to a
+    /// reference that names the logical theme and not to one that names a
+    /// variant — so a resolution that said nothing must leave the next one
+    /// free to speak.
+    diagnosed: &'a mut HashSet<(usize, String, String)>,
+}
+
 /// Resolve theme bindings over the given Intent IR.
 ///
 /// Always returns a [`Resolution`] — every distinct theme name appears in
@@ -261,29 +312,13 @@ pub fn resolve(ir: &IntentModule, edition: Option<Edition>) -> Resolution {
     let single_logical = single_logical_theme(&themes);
     let mut scopes: IndexMap<String, ScopeResolution> = IndexMap::new();
     let mut applied_themes: HashSet<String> = HashSet::new();
-    // Logical themes already reported as unbindable under the pin, so the
-    // module-level pick and every `place` naming one say it once between
-    // them rather than once each.
+    // See [`ResolveCtx::reported_missing`].
     let mut reported_missing: HashSet<String> = HashSet::new();
     // `(member, theme)` pairs a slot diagnostic has already been pushed
     // for. A def body is walked once as its own scope and once more per
-    // `place` that instantiates it, so without this the same
-    // `E_UNRESOLVED_SLOT` is reported once per placement plus once more,
-    // which is a fact about the placement list rather than about the
-    // source the author has to fix.
-    //
-    // Keyed on the theme as well as the member because the walks are not
-    // copies of one another: two placements naming two themes resolve the
-    // same `mat_slot=` against two slot maps, each finding names the theme
-    // it is about, and both have to be fixed. Keyed on the member rather
-    // than on the slot name for the same reason in the other direction —
-    // two members reading one missing slot are two lines to edit.
-    //
-    // Recorded at the push, not at the walk. A walk that resolved the slot
-    // — or that skipped it because a sibling variant declares it — has
-    // said nothing, and marking it as spoken would let a stricter later
-    // walk go silent. Same shape as `reported_missing` above.
-    let mut diagnosed: HashSet<(usize, String)> = HashSet::new();
+    // See [`ResolveCtx::diagnosed`] for what this holds and why it is
+    // written where a diagnostic is pushed.
+    let mut diagnosed: HashSet<(usize, String, String)> = HashSet::new();
 
     let (auto_picked, auto_siblings) = match single_logical.as_deref() {
         Some(logical) => {
@@ -330,16 +365,17 @@ pub fn resolve(ir: &IntentModule, edition: Option<Edition>) -> Resolution {
         None => (None, HashSet::new()),
     };
 
+    let mut ctx = ResolveCtx {
+        themes: &mut themes,
+        applied_themes: &mut applied_themes,
+        diagnostics: &mut diagnostics,
+        reported_missing: &mut reported_missing,
+        diagnosed: &mut diagnosed,
+    };
+
     for s in &ir.structs {
-        let resolution = resolve_struct_or_def(
-            &s.members,
-            auto_picked.as_deref(),
-            &auto_siblings,
-            &mut themes,
-            &mut applied_themes,
-            &mut diagnostics,
-            &mut diagnosed,
-        );
+        let resolution =
+            resolve_struct_or_def(&s.members, auto_picked.as_deref(), &auto_siblings, &mut ctx);
         scopes.entry(struct_key(s)).or_insert(resolution);
     }
     // A def is a template, and this walk resolves it against the theme the
@@ -351,15 +387,8 @@ pub fn resolve(ir: &IntentModule, edition: Option<Edition>) -> Resolution {
     // inside. Where a placement does bind the same theme, `diagnosed` makes
     // the second report cost nothing.
     for d in &ir.defs {
-        let resolution = resolve_struct_or_def(
-            &d.members,
-            auto_picked.as_deref(),
-            &auto_siblings,
-            &mut themes,
-            &mut applied_themes,
-            &mut diagnostics,
-            &mut diagnosed,
-        );
+        let resolution =
+            resolve_struct_or_def(&d.members, auto_picked.as_deref(), &auto_siblings, &mut ctx);
         scopes.entry(def_key(d)).or_insert(resolution);
     }
     let mut used_defs: HashSet<String> = HashSet::new();
@@ -369,14 +398,10 @@ pub fn resolve(ir: &IntentModule, edition: Option<Edition>) -> Resolution {
             site,
             &ir.defs,
             edition,
-            &mut reported_missing,
-            &mut themes,
-            &mut applied_themes,
             &mut scopes,
             &mut used_defs,
             &mut connects,
-            &mut diagnostics,
-            &mut diagnosed,
+            &mut ctx,
         );
     }
     check_unused_defs(&ir.defs, &used_defs, &mut diagnostics);
@@ -836,19 +861,14 @@ pub fn place_scope_key(site_name: &str, place_id: &str) -> String {
     format!("site::{site_name}::{place_id}")
 }
 
-#[allow(clippy::too_many_arguments)]
 fn resolve_site_placements(
     site: &SiteIr,
     defs: &[DefIr],
     edition: Option<Edition>,
-    reported_missing: &mut HashSet<String>,
-    themes: &mut IndexMap<String, ThemeBinding>,
-    applied_themes: &mut HashSet<String>,
     scopes: &mut IndexMap<String, ScopeResolution>,
     used_defs: &mut HashSet<String>,
     connects: &mut Vec<ValidatedConnect>,
-    diagnostics: &mut Vec<Diagnostic>,
-    diagnosed: &mut HashSet<(usize, String)>,
+    ctx: &mut ResolveCtx<'_>,
 ) {
     // Local index lets each `east_of=ID` / `north_of=ID` lookup name a
     // *prior* place in source order — re-walking `site.placements` per
@@ -862,7 +882,7 @@ fn resolve_site_placements(
     // Pre-built name lists so `nearest_match` candidates are stable per site
     // rather than re-allocated per place.
     let def_names: Vec<&str> = defs.iter().map(|d| d.name.as_str()).collect();
-    let theme_names: Vec<String> = themes.keys().cloned().collect();
+    let theme_names: Vec<String> = ctx.themes.keys().cloned().collect();
 
     for member in &site.placements {
         if matches!(member.role, MemberRole::Connect) {
@@ -873,7 +893,7 @@ fn resolve_site_placements(
                 &seen_place_ids,
                 &place_def,
                 connects,
-                diagnostics,
+                ctx.diagnostics,
             );
             continue;
         }
@@ -885,7 +905,7 @@ fn resolve_site_placements(
             continue;
         }
 
-        let Some(place_id) = usable_place_id(member, &site.name, &seen_place_ids, diagnostics)
+        let Some(place_id) = usable_place_id(member, &site.name, &seen_place_ids, ctx.diagnostics)
         else {
             continue;
         };
@@ -901,7 +921,7 @@ fn resolve_site_placements(
             &site.name,
             Some(place_id),
             &seen_place_ids,
-            diagnostics,
+            ctx.diagnostics,
         ) {
             continue;
         }
@@ -930,7 +950,7 @@ fn resolve_site_placements(
             continue;
         };
         let Some(def) = defs.iter().find(|d| d.name == use_name) else {
-            diagnostics.push(unresolved_place_ref_diag(
+            ctx.diagnostics.push(unresolved_place_ref_diag(
                 &format!("`use={use_name}` references an unknown def"),
                 member.span.clone(),
                 use_name,
@@ -957,10 +977,10 @@ fn resolve_site_placements(
             theme_name,
             &member.span,
             edition,
-            themes,
+            ctx.themes,
             &theme_names,
-            reported_missing,
-            diagnostics,
+            ctx.reported_missing,
+            ctx.diagnostics,
         ) else {
             continue;
         };
@@ -968,15 +988,8 @@ fn resolve_site_placements(
         // Cross-scope resolve: run the def's members under the picked theme,
         // even when the file has multiple themes (the per-place `theme=`
         // wins over the single-theme heuristic).
-        let resolution = resolve_struct_or_def(
-            &def.members,
-            Some(bound_theme.as_str()),
-            &siblings,
-            themes,
-            applied_themes,
-            diagnostics,
-            diagnosed,
-        );
+        let resolution =
+            resolve_struct_or_def(&def.members, Some(bound_theme.as_str()), &siblings, ctx);
         scopes
             .entry(place_scope_key(&site.name, place_id))
             .or_insert(resolution);
@@ -1705,10 +1718,7 @@ fn resolve_struct_or_def(
     members: &[Member],
     picked_theme_name: Option<&str>,
     sibling_slots: &HashSet<String>,
-    themes: &mut IndexMap<String, ThemeBinding>,
-    applied_themes: &mut HashSet<String>,
-    diagnostics: &mut Vec<Diagnostic>,
-    diagnosed: &mut HashSet<(usize, String)>,
+    ctx: &mut ResolveCtx<'_>,
 ) -> ScopeResolution {
     // Structural invariant: every name that reaches here came out of
     // `themes.keys()`. The module-level auto-pick gets it from
@@ -1722,7 +1732,7 @@ fn resolve_struct_or_def(
     // trips in dev / test builds; a release build silently degrades to
     // the unbound-theme path rather than panicking on user data.
     let bound = if let Some(name) = picked_theme_name {
-        if let Some(t) = themes.get(name) {
+        if let Some(t) = ctx.themes.get(name) {
             Some((name.to_owned(), t.slots.clone()))
         } else {
             debug_assert!(
@@ -1737,7 +1747,7 @@ fn resolve_struct_or_def(
     };
 
     if let Some((name, _)) = &bound {
-        applied_themes.insert(name.clone());
+        ctx.applied_themes.insert(name.clone());
     }
 
     let mut resolution = ScopeResolution {
@@ -1748,10 +1758,8 @@ fn resolve_struct_or_def(
         members,
         bound.as_ref().map(|(name, slots)| (name.as_str(), slots)),
         sibling_slots,
-        themes,
         &mut resolution,
-        diagnostics,
-        diagnosed,
+        ctx,
     );
     resolution
 }
@@ -1764,17 +1772,12 @@ fn resolve_struct_or_def(
 /// matches no selector, and splitting the pair let a caller ask for one
 /// half.
 ///
-/// `diagnosed` is the say-it-once ledger described in [`resolve`]. It is
-/// consulted only where a diagnostic is about to be pushed, so a walk that
-/// found nothing leaves the next walk free to speak.
 fn resolve_members(
     members: &[Member],
     bound: Option<(&str, &IndexMap<String, ValueWithSpan>)>,
     sibling_slots: &HashSet<String>,
-    themes: &mut IndexMap<String, ThemeBinding>,
     out: &mut ScopeResolution,
-    diagnostics: &mut Vec<Diagnostic>,
-    diagnosed: &mut HashSet<(usize, String)>,
+    ctx: &mut ResolveCtx<'_>,
 ) {
     for member in members {
         let mut binding = ResolvedMemberBinding::default();
@@ -1793,10 +1796,21 @@ fn resolve_members(
             match slots.get(slot_name) {
                 Some(v) => binding.slot_value = Some(v.clone()),
                 None if sibling_slots.contains(slot_name) => {}
-                None if diagnosed.insert((member.span.start, tname.to_owned())) => {
-                    diagnostics.push(unresolved_slot_diag(slot_name, tname, member, slots));
+                // INVARIANT(already-reported): a repeat of the same
+                // finding is dropped, never the finding itself — an
+                // identical triple can only be here because a copy is
+                // already in `ctx.diagnostics`, which is built and
+                // returned by the same call. See
+                // [`ResolveCtx::diagnosed`]; `tests/silent_skip_arms.rs`
+                // carries it in the matrix of resolver arms that drop
+                // something without reporting it.
+                None => {
+                    let said = (member.span.start, slot_name.clone(), tname.to_owned());
+                    if ctx.diagnosed.insert(said) {
+                        ctx.diagnostics
+                            .push(unresolved_slot_diag(slot_name, tname, member, slots));
+                    }
                 }
-                None => {}
             }
         }
 
@@ -1804,7 +1818,7 @@ fn resolve_members(
         //    with `bound_theme=None` (multi-theme file, no auto-pick)
         //    gets no selector_extras, matching the per-theme DI contract.
         if let Some((tname, _)) = bound
-            && let Some(theme_binding) = themes.get_mut(tname)
+            && let Some(theme_binding) = ctx.themes.get_mut(tname)
         {
             for sel in &mut theme_binding.selectors {
                 if selector_matches(sel, member) {
@@ -1823,15 +1837,7 @@ fn resolve_members(
             members: children, ..
         } = &member.children;
         if !children.is_empty() {
-            resolve_members(
-                children,
-                bound,
-                sibling_slots,
-                themes,
-                out,
-                diagnostics,
-                diagnosed,
-            );
+            resolve_members(children, bound, sibling_slots, out, ctx);
         }
     }
 }

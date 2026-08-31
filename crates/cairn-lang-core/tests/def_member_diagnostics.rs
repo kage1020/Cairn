@@ -8,41 +8,65 @@
 //! the author sees the same line, the same code and the same note with
 //! nothing to tell the copies apart.
 //!
-//! What the copies are *not* is redundant. Each walk binds a different
-//! theme when the placements name different ones, and two themes missing
-//! the same slot are two findings an author has to fix separately. So the
-//! rule is per member **and** per theme, and this file pins both halves:
+//! What the copies are *not* is redundant. Each resolution binds a
+//! different theme when the placements name different ones, and two themes
+//! missing the same slot are two findings an author has to fix separately.
+//! So the rule is *at most once per member per bound theme* — which of the
+//! resolutions produced the surviving copy is not promised, because two of
+//! them can bind one theme and still judge the slot differently.
 //!
-//! 1. one placement — the shape the report was filed on;
-//! 2. two placements under one theme — the count that used to scale;
-//! 3. two placements under two themes — both findings survive, each
-//!    naming its own theme;
-//! 4. a def nothing places — still reported, against the theme the module
-//!    auto-picks, because a file of defs and no site is a file worth
-//!    checking;
-//! 5. two defs sharing the bad slot name — two findings, because the rule
-//!    keys on the member and not on the name;
-//! 6. a placement the resolver abandons — the def's own finding is still
-//!    reported, because "already said" has to mean said, not walked;
-//! 7. a nested member — the same rule inside a `level` block;
-//! 8. a `struct` — the control. Nothing places a struct, so its count was
-//!    never inflated and must not now deflate;
-//! 9. a walk that stayed silent followed by a stricter one — the finding
-//!    the stricter walk owes is still reported.
+//!  1. one placement — the shape the report was filed on;
+//!  2. two placements under one theme — the count that used to scale;
+//!  3. two placements under two themes — both findings survive, each
+//!     naming its own theme;
+//!  4. a def nothing places — still reported, against the theme the module
+//!     auto-picks, because a file of defs and no site is a file worth
+//!     checking;
+//!  5. two defs sharing the bad slot name — two findings, because the rule
+//!     keys on the member and not on the name;
+//!  6. a placement the resolver abandons before the body — the def's own
+//!     finding survives, because nothing else is left to report it;
+//!  7. a nested member — the same rule inside a `level` block;
+//!  8. a `struct` — the control. Nothing places a struct, so its count was
+//!     never inflated and must not now deflate;
+//!  9. a resolution that stayed silent followed by a stricter one — the
+//!     finding the stricter one owes is still reported. This is the case
+//!     that says "already reported" has to mean reported, not walked;
+//! 10. the same disagreement between two *placements* rather than between
+//!     the module and a placement — the shape the spec paragraph uses;
+//! 11. an `--edition` pin — the path every build command actually runs,
+//!     and the one where sibling softening does not apply at all;
+//! 12. two `site` blocks placing one def — the ledger spans the whole
+//!     resolution, not one site;
+//! 13. a module with two logical themes, and one with none — the two ends
+//!     the spec paragraph promises silence at;
+//! 14. a selector bound only through a `place` — nothing else in the
+//!     repository covers that route, and it is what a walk-memoising
+//!     rewrite of this rule would break first.
 
 use cairn_lang_core::check::{Diagnostic, DiagnosticCode};
-use cairn_lang_core::{lower, parse, resolve};
+use cairn_lang_core::{Edition, Resolution, lower, parse, resolve};
 
-/// Every `E_UNRESOLVED_SLOT` the resolver reports for `src`, in the order
-/// it reported them.
-fn unresolved(src: &str) -> Vec<Diagnostic> {
+/// Resolve `src` under `edition`.
+fn resolution(src: &str, edition: Option<Edition>) -> Resolution {
     let module = parse(src).expect("parse");
-    let ir = lower(&module);
-    resolve(&ir, None)
+    resolve(&lower(&module), edition)
+}
+
+/// Every `E_UNRESOLVED_SLOT` the resolver reports for `src` under
+/// `edition`, in the order it reported them.
+fn unresolved_under(src: &str, edition: Option<Edition>) -> Vec<Diagnostic> {
+    resolution(src, edition)
         .diagnostics
         .into_iter()
         .filter(|d| d.code == DiagnosticCode::UnresolvedSlot)
         .collect()
+}
+
+/// [`unresolved_under`] with no edition pinned, which is what `cairn check`
+/// runs by default.
+fn unresolved(src: &str) -> Vec<Diagnostic> {
+    unresolved_under(src, None)
 }
 
 /// The primaries of `found`, so a failing count shows what was reported
@@ -156,17 +180,25 @@ place id=b use=shed theme=plain east_of=a gap=5\n"
          are two findings; got {:?}",
         primaries(&found),
     );
-    assert_ne!(
-        found[0].span, found[1].span,
+    let spans: std::collections::HashSet<_> = found.iter().map(|d| d.span.clone()).collect();
+    assert_eq!(
+        spans.len(),
+        2,
         "the two findings must sit on the two members that earned them",
     );
 }
 
+/// A placement with no `theme=` is dropped before the def body is
+/// resolved at all, so the def's own resolution is the only one that can
+/// report what is inside it.
+///
+/// This case says nothing about *when* the ledger is written — there is no
+/// second resolution to be spoken for. What it guards is the decision to
+/// keep resolving a def as its own scope: drop that and this file stops
+/// being checked the moment a `place` mentions it, however broken the
+/// placement is.
 #[test]
 fn a_placement_the_resolver_abandons_does_not_silence_the_def() {
-    // No `theme=`: the placement is reported as incomplete and never
-    // reaches the def body, so the def's own walk is the only one left
-    // that can report the slot.
     let found = unresolved(&format!(
         "{ONE_THEME}\
 def hut size=4x4:\n  \
@@ -177,8 +209,8 @@ place id=home use=hut at=origin\n"
     assert_eq!(
         found.len(),
         1,
-        "a walk that emitted nothing must not count as having said it; \
-         got {:?}",
+        "the placement never reaches the body, so the def's own resolution \
+         must still report it; got {:?}",
         primaries(&found),
     );
 }
@@ -253,5 +285,191 @@ floor mat_slot=missing\n"
         "nothing places a struct, so its count was never inflated; \
          got {:?}",
         primaries(&found),
+    );
+}
+
+/// The two resolutions that disagree can both be placements.
+///
+/// `theme=shop_java` names a variant, so no sibling softens it and the
+/// slot is missing; `theme=shop` names the logical theme, so the sibling's
+/// slots are unioned in and the same member passes. Both bind `shop_java`.
+/// The rule is therefore *at most* once per member per bound theme: which
+/// of the two produced the surviving copy is not something the resolver
+/// decides, and reversing the placements must not change the count.
+#[test]
+fn two_placements_can_bind_one_theme_and_still_disagree() {
+    const VARIANTS: &str = "theme shop_java:\n  slot floor -> @oak_planks\n\n\
+theme shop_bedrock:\n  \
+slot floor -> @oak_planks\n  \
+slot bedrock_only -> @dark_oak_planks\n\n\
+def hut size=4x4:\n  \
+floor mat_slot=bedrock_only\n";
+
+    let strict_first = unresolved(&format!(
+        "{VARIANTS}\n\
+site s:\n  \
+place id=a use=hut theme=shop_java at=origin\n  \
+place id=b use=hut theme=shop east_of=a gap=5\n"
+    ));
+    let softened_first = unresolved(&format!(
+        "{VARIANTS}\n\
+site s:\n  \
+place id=b use=hut theme=shop at=origin\n  \
+place id=a use=hut theme=shop_java east_of=b gap=5\n"
+    ));
+
+    for (order, found) in [
+        ("strict first", &strict_first),
+        ("softened first", &softened_first),
+    ] {
+        assert_eq!(
+            found.len(),
+            1,
+            "{order}: one member, one bound theme, one finding; got {:?}",
+            primaries(found),
+        );
+        assert!(
+            found[0].primary.contains("theme `shop_java`"),
+            "{order}: the finding names the theme both placements bound; got {:?}",
+            primaries(found),
+        );
+    }
+}
+
+/// The `--edition` path, which is what every build command runs and what
+/// the report was filed against.
+///
+/// A pin removes sibling softening on both routes (`resolver.rs`'s
+/// module-level pick and `bind_place_theme` agree on that), so the module
+/// and the placement both have grounds to report — which is exactly the
+/// "once per placement plus once more" shape.
+#[test]
+fn the_count_holds_under_an_edition_pin() {
+    const VARIANTS: &str = "theme shop_java:\n  slot floor -> @oak_planks\n\n\
+theme shop_bedrock:\n  \
+slot floor -> @oak_planks\n  \
+slot bedrock_only -> @dark_oak_planks\n\n\
+def hut size=4x4:\n  \
+floor mat_slot=bedrock_only\n";
+
+    let found = unresolved_under(
+        &format!(
+            "{VARIANTS}\n\
+site s:\n  \
+place id=home use=hut theme=shop at=origin\n"
+        ),
+        Some(Edition::Java),
+    );
+    assert_eq!(
+        found.len(),
+        1,
+        "the pinned path is deduplicated like the unpinned one; got {:?}",
+        primaries(&found),
+    );
+    assert!(
+        found[0].primary.contains("theme `shop_java`"),
+        "the pin decides which variant the finding is about; got {:?}",
+        primaries(&found),
+    );
+}
+
+/// The ledger spans the resolution, not one `site` body.
+///
+/// Two sites placing one def is the arrangement that would still pass
+/// every case above if the ledger were a local of the placement loop.
+#[test]
+fn two_sites_placing_one_def_report_it_once() {
+    let found = unresolved(&format!(
+        "{ONE_THEME}\
+def hut size=4x4:\n  \
+floor mat_slot=missing\n\n\
+site north:\n  \
+place id=home use=hut theme=plain at=origin\n\n\
+site south:\n  \
+place id=home use=hut theme=plain at=origin\n"
+    ));
+    assert_eq!(
+        found.len(),
+        1,
+        "one member and one theme, however many sites reach it; got {:?}",
+        primaries(&found),
+    );
+}
+
+/// Both ends of the case the spec paragraph promises silence at.
+///
+/// A def's own scope is resolved against the theme the module picks, and
+/// the module picks one only when there is exactly one logical theme to
+/// pick. With two, or with none, nothing binds and the slot names are not
+/// judged until a `place` chooses a theme.
+#[test]
+fn an_unplaced_def_is_silent_when_the_module_cannot_pick_a_theme() {
+    let two = unresolved(
+        "theme alpha:\n  slot floor -> @oak_planks\n\n\
+theme beta:\n  slot other -> @stone\n\n\
+def hut size=4x4:\n  \
+floor mat_slot=missing\n",
+    );
+    assert!(
+        two.is_empty(),
+        "two logical themes: no theme binds to the def's own scope; got {:?}",
+        primaries(&two),
+    );
+
+    let none = unresolved("def hut size=4x4:\n  floor mat_slot=missing\n");
+    assert!(
+        none.is_empty(),
+        "no themes at all: there is nothing to judge the slot against; got {:?}",
+        primaries(&none),
+    );
+}
+
+/// A theme selector reaching a def member only through a `place`.
+///
+/// Nothing else in the repository covers this route — every other selector
+/// test uses the `struct` shape, which the module-level pick binds. It is
+/// pinned here because the obvious next step for this rule, memoising the
+/// per-`(def, theme)` walk instead of the finding, would stop
+/// `matched_member_spans` being filled on the second walk and could turn a
+/// matched selector into `E_THEME_SELECTOR_UNMATCHED` with nothing else to
+/// catch it.
+#[test]
+fn a_selector_reached_only_through_a_placement_still_binds() {
+    // Two logical themes, so the module-level pick binds nothing and the
+    // placement is the only route into the def body.
+    let resolved = resolution(
+        "theme alpha:\n  \
+slot wall -> @cobblestone\n  \
+window[class=small] -> frame=@spruce_wood\n\n\
+theme beta:\n  slot other -> @stone\n\n\
+def hut size=6x6:\n  \
+walls mat_slot=wall height=3\n  \
+window class=small side=front\n\n\
+site s:\n  \
+place id=a use=hut theme=alpha at=origin\n",
+        None,
+    );
+
+    let unmatched: Vec<&str> = resolved
+        .diagnostics
+        .iter()
+        .filter(|d| d.code == DiagnosticCode::ThemeSelectorUnmatched)
+        .map(|d| d.primary.as_str())
+        .collect();
+    assert!(
+        unmatched.is_empty(),
+        "the selector matched a member, so it is not unmatched; got {unmatched:?}",
+    );
+
+    let scope = resolved
+        .scopes
+        .get("site::s::a")
+        .expect("the placement builds a scope");
+    assert!(
+        scope
+            .members
+            .values()
+            .any(|m| m.selector_extras.contains_key("frame")),
+        "the selector's bindings reach the member it matched",
     );
 }
