@@ -65,6 +65,15 @@
 //!    the IR no longer carries. Same division of labour as the `connect`
 //!    arms; pinned here so a library caller that skips `check` has the
 //!    skip written down rather than discovered.
+//! 10. **A `mat_slot=` already reported against the same theme** —
+//!     `resolve_members` drops the repeat rather than the finding. This
+//!     one is in the matrix but not in this file, and the difference is
+//!     the point: every other entry defers its signal to a pass that runs
+//!     elsewhere, while this arm's signal is a copy already sitting in the
+//!     `Vec` the same call returns. A library caller that skips `check`
+//!     loses nothing by it. The counting is pinned by
+//!     `tests/def_member_diagnostics.rs`, which the arm's
+//!     `INVARIANT(already-reported)` comment names.
 
 use cairn_lang_core::block_array::{BlockArrayIr, lower_to_block_array};
 use cairn_lang_core::check::{Diagnostic, DiagnosticCode, Severity};
