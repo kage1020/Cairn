@@ -40,9 +40,9 @@
 //!     resolution, not one site;
 //! 13. a module with two logical themes, and one with none — the two ends
 //!     the spec paragraph promises silence at;
-//! 14. a selector bound only through a `place` — nothing else in the
-//!     repository covers that route, and it is what a walk-memoising
-//!     rewrite of this rule would break first.
+//! 14. a theme applied only through a `place` — nothing else in the
+//!     repository covers that route, and it is where a walk-memoising
+//!     rewrite of this rule would drop a finding first.
 
 use cairn_lang_core::check::{Diagnostic, DiagnosticCode};
 use cairn_lang_core::{Edition, Resolution, lower, parse, resolve};
@@ -424,23 +424,26 @@ floor mat_slot=missing\n",
     );
 }
 
-/// A theme selector reaching a def member only through a `place`.
+/// A theme applied only through a `place`, carrying one selector that
+/// matches and one that does not.
 ///
-/// Nothing else in the repository covers this route — every other selector
-/// test uses the `struct` shape, which the module-level pick binds. It is
-/// pinned here because the obvious next step for this rule, memoising the
-/// per-`(def, theme)` walk instead of the finding, would stop
-/// `matched_member_spans` being filled on the second walk and could turn a
-/// matched selector into `E_THEME_SELECTOR_UNMATCHED` with nothing else to
-/// catch it.
+/// Nothing else in the repository takes this route — every other selector
+/// test uses the `struct` shape, which the module-level pick binds. Both
+/// halves matter to the rule here, and the second more than the first:
+/// `check_unmatched_selectors` skips a theme no scope applied, so a
+/// rewrite that resolved each `(def, theme)` pair once and reused the
+/// result would have to keep marking the theme applied on the reused path
+/// or `E_THEME_SELECTOR_UNMATCHED` would stop firing for it — a finding
+/// disappearing with nothing else in the suite to notice.
 #[test]
-fn a_selector_reached_only_through_a_placement_still_binds() {
+fn a_theme_applied_only_through_a_placement_still_judges_its_selectors() {
     // Two logical themes, so the module-level pick binds nothing and the
     // placement is the only route into the def body.
     let resolved = resolution(
         "theme alpha:\n  \
 slot wall -> @cobblestone\n  \
-window[class=small] -> frame=@spruce_wood\n\n\
+window[class=small] -> frame=@spruce_wood\n  \
+door[class=grand] -> frame=@dark_oak_wood\n\n\
 theme beta:\n  slot other -> @stone\n\n\
 def hut size=6x6:\n  \
 walls mat_slot=wall height=3\n  \
@@ -448,17 +451,6 @@ window class=small side=front\n\n\
 site s:\n  \
 place id=a use=hut theme=alpha at=origin\n",
         None,
-    );
-
-    let unmatched: Vec<&str> = resolved
-        .diagnostics
-        .iter()
-        .filter(|d| d.code == DiagnosticCode::ThemeSelectorUnmatched)
-        .map(|d| d.primary.as_str())
-        .collect();
-    assert!(
-        unmatched.is_empty(),
-        "the selector matched a member, so it is not unmatched; got {unmatched:?}",
     );
 
     let scope = resolved
@@ -470,6 +462,22 @@ place id=a use=hut theme=alpha at=origin\n",
             .members
             .values()
             .any(|m| m.selector_extras.contains_key("frame")),
-        "the selector's bindings reach the member it matched",
+        "the matching selector's bindings reach the member it matched",
+    );
+
+    let unmatched: Vec<&str> = resolved
+        .diagnostics
+        .iter()
+        .filter(|d| d.code == DiagnosticCode::ThemeSelectorUnmatched)
+        .map(|d| d.primary.as_str())
+        .collect();
+    assert_eq!(
+        unmatched.len(),
+        1,
+        "the theme was applied, so its selectors are judged; got {unmatched:?}",
+    );
+    assert!(
+        unmatched[0].contains("door[class=grand]"),
+        "and the one reported is the one that matched nothing; got {unmatched:?}",
     );
 }
