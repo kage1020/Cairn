@@ -103,8 +103,8 @@ fn sample_lockfile() -> Lockfile {
 fn l5_lockfile_roundtrips_through_yaml() {
     // AC L5: serialise → deserialise → equal.
     let lf = sample_lockfile();
-    let body = serde_yml::to_string(&lf).expect("encode");
-    let parsed: Lockfile = serde_yml::from_str(&body).expect("decode");
+    let body = serde_norway::to_string(&lf).expect("encode");
+    let parsed: Lockfile = serde_norway::from_str(&body).expect("decode");
     assert_eq!(lf, parsed);
 }
 
@@ -115,7 +115,7 @@ fn l6_lockfile_yaml_key_order_matches_spec() {
     // has to decide whether it understands the document at all cannot be
     // asked to parse the rest of it first, so the version leads and the
     // spec sample was updated to match in both languages.
-    let body = serde_yml::to_string(&sample_lockfile()).expect("encode");
+    let body = serde_norway::to_string(&sample_lockfile()).expect("encode");
     let keys: Vec<&str> = body
         .lines()
         .filter_map(|line| {
@@ -169,12 +169,12 @@ fn lockfile_with_walkways_roundtrips_through_yaml() {
     // `walkways: vec![]` and so skips the section entirely) would not
     // catch it.
     let lf = sample_lockfile_with_walkways();
-    let body = serde_yml::to_string(&lf).expect("encode");
-    let parsed: Lockfile = serde_yml::from_str(&body).expect("decode");
+    let body = serde_norway::to_string(&lf).expect("encode");
+    let parsed: Lockfile = serde_norway::from_str(&body).expect("decode");
     assert_eq!(lf, parsed);
     assert_eq!(parsed.walkways.len(), 1);
     // Assert through the typed structure rather than a substring of the
-    // YAML body so an indentation tweak in `serde_yml` cannot turn a
+    // YAML body so an indentation tweak in `serde_norway` cannot turn a
     // green test into a silent regression on the wire shape.
     let w = &parsed.walkways[0];
     assert_eq!(w.from.place.as_str(), "home1");
@@ -190,7 +190,7 @@ fn lockfile_walkways_yaml_snapshot() {
     // future struct reshuffle is caught here before downstream tooling
     // that greps the lockfile breaks. The `sample_lockfile()` snapshot
     // (`l8_*`) covers the walkway-less case; this is its companion.
-    let body = serde_yml::to_string(&sample_lockfile_with_walkways()).expect("encode");
+    let body = serde_norway::to_string(&sample_lockfile_with_walkways()).expect("encode");
     insta::assert_snapshot!(body);
 }
 
@@ -218,7 +218,8 @@ fn lockfile_yaml_rejects_legacy_string_walkway_endpoint() {
         ),
         zero = HashHex::ZERO_STR,
     );
-    let err = serde_yml::from_str::<Lockfile>(&body).expect_err("legacy string walkway endpoint");
+    let err =
+        serde_norway::from_str::<Lockfile>(&body).expect_err("legacy string walkway endpoint");
     let msg = err.to_string();
     assert!(
         msg.contains("place") || msg.contains("expected") || msg.contains("invalid"),
@@ -270,7 +271,7 @@ fn lockfile_yaml_with_bad_edition_is_rejected() {
         "source_hash: {zero}\ncairn_version: '2026.09'\ntarget:\n  edition: jav\n  mc_version: '1.21.4'\n  data_version: 4189\ninputs:\n  registry_pack_hash: {zero}\n  constraint_catalog_hash: {zero}\nresolved_ir_hash: {zero}\nverified: true\nmember_version_sensitivity: []\n",
         zero = HashHex::ZERO_STR,
     );
-    let err = serde_yml::from_str::<Lockfile>(&body).expect_err("typo edition");
+    let err = serde_norway::from_str::<Lockfile>(&body).expect_err("typo edition");
     assert!(
         err.to_string().contains("jav") || err.to_string().contains("variant"),
         "expected variant error, got {err}",
@@ -283,7 +284,7 @@ fn lockfile_yaml_with_bad_hash_is_rejected() {
         "source_hash: not-a-hash\ncairn_version: '2026.09'\ntarget:\n  edition: java\n  mc_version: '1.21.4'\n  data_version: 4189\ninputs:\n  registry_pack_hash: {zero}\n  constraint_catalog_hash: {zero}\nresolved_ir_hash: {zero}\nverified: true\nmember_version_sensitivity: []\n",
         zero = HashHex::ZERO_STR,
     );
-    let err = serde_yml::from_str::<Lockfile>(&body).expect_err("bad hash");
+    let err = serde_norway::from_str::<Lockfile>(&body).expect_err("bad hash");
     assert!(
         err.to_string().contains("prefix"),
         "expected hash prefix error, got {err}",
@@ -370,7 +371,7 @@ fn lockfile_with_every_container() -> Lockfile {
 /// Insert `attacker_controlled: yes` into the mapping at `path`, where
 /// each step is a key and a numeric step indexes a sequence.
 fn tamper_at(body: &str, path: &[&str]) -> String {
-    let mut doc: serde_yml::Value = serde_yml::from_str(body).expect("fixture parses");
+    let mut doc: serde_norway::Value = serde_norway::from_str(body).expect("fixture parses");
     let mut cursor = &mut doc;
     for step in path {
         cursor = match step.parse::<usize>() {
@@ -386,10 +387,10 @@ fn tamper_at(body: &str, path: &[&str]) -> String {
     }
     let mapping = cursor.as_mapping_mut().expect("target is a mapping");
     mapping.insert(
-        "attacker_controlled".to_owned(),
-        serde_yml::Value::String("yes".to_owned()),
+        serde_norway::Value::String("attacker_controlled".to_owned()),
+        serde_norway::Value::String("yes".to_owned()),
     );
-    serde_yml::to_string(&doc).expect("re-encode")
+    serde_norway::to_string(&doc).expect("re-encode")
 }
 
 #[test]
@@ -460,11 +461,10 @@ fn an_encoded_lockfile_ends_with_a_newline() {
     // file's first line onto this one's last, and a `>>` append corrupt the
     // document.
     //
-    // The shape that lost it is the ordinary one: `serde_yml` closes an
-    // empty flow sequence (`member_version_sensitivity: []`) without a
-    // break, and that field is last, so every lockfile written for a source
-    // with no sensitivity entries — which is all of them until the
-    // constraint-catalog ingest lands — ended at `]`.
+    // Both shapes are exercised because the trailing field is the one at
+    // risk: `member_version_sensitivity` is written last, so an encoder
+    // that closes an empty flow sequence (`[]`) without a break would end
+    // the whole document at `]`.
     let mut without = sample_lockfile();
     without.member_version_sensitivity.clear();
     for (label, lf) in [
@@ -487,6 +487,6 @@ fn an_encoded_lockfile_ends_with_a_newline() {
 fn l8_sample_lockfile_yaml_snapshot() {
     // AC L8: stable YAML snapshot, so a future struct/field reshuffle is
     // caught before downstream tooling that greps the lockfile breaks.
-    let body = serde_yml::to_string(&sample_lockfile()).expect("encode");
+    let body = serde_norway::to_string(&sample_lockfile()).expect("encode");
     insta::assert_snapshot!(body);
 }
