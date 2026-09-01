@@ -49,50 +49,74 @@ pub(super) fn run(ir: &IntentModule, sink: &mut DiagnosticSink) {
 
 fn walk(members: &[Member], sink: &mut DiagnosticSink) {
     for member in members {
-        if member.mat_slot.is_none() && paints_nothing_without_a_material(&member.role) {
+        if member.mat_slot.is_none()
+            && matches!(
+                without_a_material(&member.role),
+                WithoutAMaterial::PaintsNothing
+            )
+        {
             sink.push(diagnose(member));
         }
         walk(&member.children.members, sink);
     }
 }
 
-/// Does a member of this role put nothing anywhere when it carries no
-/// `mat_slot=`?
+/// What a member of one role does to the build when it carries no
+/// `mat_slot=`.
 ///
-/// One answer per role rather than a wildcard, because the answer is a
+/// A value rather than a `bool` because the reason is what a reader needs:
+/// three of these four look the same from the outside — nothing is refused
+/// — and they are not the same fact, so a role that changes category
+/// changes it here rather than in a comment.
+enum WithoutAMaterial {
+    /// Reaches the palette through the theme's slot map and has no default
+    /// block, so it contributes no voxel at all.
+    PaintsNothing,
+    /// Takes blocks away rather than putting them down, which needs no
+    /// material of its own.
+    Carves,
+    /// Paints a default block and needs no `mat_slot=` to do it.
+    PaintsAFallback,
+    /// Never reaches a painter.
+    ReachesNoPainter,
+}
+
+/// Which of those a role is.
+///
+/// One exhaustive match rather than a wildcard, because the answer is a
 /// property of that role's painter and a new role has to say which it is.
 /// `block_array::lower`'s `member_will_paint` documents the same tie from
-/// the other side: a role that grows a fallback material stops belonging
-/// here, and `tests/check_missing_material.rs` measures the pairing rather
-/// than trusting either list.
-fn paints_nothing_without_a_material(role: &MemberRole) -> bool {
+/// the other side: a role that grows a fallback material moves from
+/// [`WithoutAMaterial::PaintsNothing`] to
+/// [`WithoutAMaterial::PaintsAFallback`], and
+/// `tests/check_missing_material.rs` measures the pairing against the
+/// lowered structure rather than trusting either list.
+fn without_a_material(role: &MemberRole) -> WithoutAMaterial {
     match role {
-        // Both paint through the palette and have no default block.
-        MemberRole::Floor | MemberRole::Walls => true,
+        MemberRole::Floor | MemberRole::Walls => WithoutAMaterial::PaintsNothing,
         // A `window` with no `mat_slot=` is an *opening*: the rectangle is
         // carved to air, which is how `examples/themed-tower.crn` punches
         // arrow slits through a stone wall without choosing a species for
-        // them. Refusing it would refuse a feature.
-        MemberRole::Window => false,
-        // A `door` carves its opening; the material it may name is not
-        // what puts the doorway there.
-        MemberRole::Door => false,
-        // Both resolve through `geometry_material_id`, which falls back to
-        // a default block and paints regardless.
-        MemberRole::Roof | MemberRole::Stair => false,
-        // Falls back to the edition's plate id from the registry pack.
-        MemberRole::PressurePlate => false,
-        // Groups its children, which are judged on their own.
-        MemberRole::Level => false,
-        // Reserves a volume for the redstone passes and paints no
-        // material of its own.
-        MemberRole::Circuit => false,
-        // Site rows. Inside a struct body `check::member_scope` refuses
-        // them, and inside a `site` they name no material to begin with.
-        MemberRole::Place | MemberRole::Connect => false,
-        // Not a keyword the role table knows, so no painter is reached and
-        // `E_UNKNOWN_KEYWORD` already carries the line.
-        MemberRole::Other(_) => false,
+        // them. Refusing it would refuse a feature. A `door` carves its
+        // doorway the same way.
+        MemberRole::Window | MemberRole::Door => WithoutAMaterial::Carves,
+        // `roof` and `stair` resolve through `geometry_material_id`, which
+        // falls back to a default block; `pressure_plate` falls back to
+        // the edition's plate id from the registry pack.
+        MemberRole::Roof | MemberRole::Stair | MemberRole::PressurePlate => {
+            WithoutAMaterial::PaintsAFallback
+        }
+        // `level` groups its children, which are judged on their own;
+        // `circuit` reserves a volume for the redstone passes; `place` and
+        // `connect` are site rows, refused inside a struct body by
+        // `check::member_scope` and naming no material inside a `site`;
+        // and a keyword the role table does not know is
+        // `E_UNKNOWN_KEYWORD`'s, with no painter reached.
+        MemberRole::Level
+        | MemberRole::Circuit
+        | MemberRole::Place
+        | MemberRole::Connect
+        | MemberRole::Other(_) => WithoutAMaterial::ReachesNoPainter,
     }
 }
 

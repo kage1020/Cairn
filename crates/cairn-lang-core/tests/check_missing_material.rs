@@ -150,7 +150,7 @@ fn a_module_with_no_theme_still_names_the_missing_material() {
     // all, which is true of a module that declares none and of one that
     // declares ten.
     let src = "struct s size=3x3\n  walls height=4\n";
-    assert_eq!(missing(src).len(), 1, "got {:?}", codes(&findings(src)),);
+    assert_eq!(missing(src).len(), 1, "got {:?}", codes(&findings(src)));
 }
 
 #[test]
@@ -268,15 +268,17 @@ fn every_role_is_either_measured_here_or_paints_nothing() {
             | MemberRole::Roof
             | MemberRole::Stair
             | MemberRole::PressurePlate => true,
-            // Groups its children and paints nothing of its own.
-            MemberRole::Level => false,
-            // Reserves a volume for the redstone passes; never a material.
-            MemberRole::Circuit => false,
-            // Site rows, refused inside a struct body by `member_scope`.
-            MemberRole::Place | MemberRole::Connect => false,
-            // Not a keyword the role table knows; `E_UNKNOWN_KEYWORD`
-            // carries it and no painter is reached.
-            MemberRole::Other(_) => false,
+            // `level` groups its children and paints nothing of its own;
+            // `circuit` reserves a volume for the redstone passes and
+            // never a material; `place` and `connect` are site rows,
+            // refused inside a struct body by `member_scope`; and a
+            // keyword the role table does not know is
+            // `E_UNKNOWN_KEYWORD`'s, with no painter reached.
+            MemberRole::Level
+            | MemberRole::Circuit
+            | MemberRole::Place
+            | MemberRole::Connect
+            | MemberRole::Other(_) => false,
         }
     }
 
