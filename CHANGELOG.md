@@ -52,6 +52,27 @@ and is a separate axis from the Minecraft target version.
 
 ### Breaking changes
 
+- *(core)* A `floor` or `walls` written without a `mat_slot=` is refused, under a new code
+  `E_MISSING_MATERIAL`. Both roles reach the palette through the applied theme's slot map and have
+  no default block, so one written without a slot painted nothing — and nothing anywhere said so.
+  `cairn check` exited 0 and the structure lowered empty, which is exactly the "implicit dropping"
+  `spec/lint` §11.3 forbids.
+
+  **Breaking**: a source carrying such a member compiled before and does not now. The repair is one
+  token — name a slot the applied theme declares. Every shipped example already does.
+
+  The rule covers the roles that put nothing anywhere without one, and only those. A `window` or
+  `door` with no `mat_slot=` is an **opening** — the rectangle is carved to air, which is how
+  `examples/themed-tower.crn` punches arrow slits through a stone wall without choosing a species
+  for them — and a `roof`, `stair` or `pressure_plate` paints a default block. None of those is
+  reported. The report this fixes listed `window` alongside `floor` and `walls`; that part of it
+  was wrong, and the corpus is what says so.
+
+  It is a `check` pass reading the surface key rather than the resolved binding, which is what puts
+  it in front of `cairn check` rather than in the dump, lets a module with no theme still be told
+  which members name no material, and keeps it from colliding with `E_UNRESOLVED_SLOT` — that code
+  needs the key present and unusable, this one needs it absent, and no member earns both.
+
 - *(redstone)* Two nets are kept a step apart, not only off one coordinate. Dust reads the dust
   in the coordinate beside it, so two nets running down adjacent rows are one strand carrying two
   signals as surely as two nets on one coordinate are. The router kept them off one coordinate and

@@ -16,7 +16,7 @@ fn slice<'a>(source: &'a str, diag: &cairn_lang_core::Diagnostic) -> &'a str {
 
 #[test]
 fn dup_1_duplicate_size_flags_second_occurrence_only() {
-    let src = "struct s size=4x4 size=5x5\n  floor\n";
+    let src = "struct s size=4x4 size=5x5\n  floor mat_slot=m\n";
     let diags = diagnose(src);
     assert_eq!(
         diags.len(),
@@ -52,7 +52,7 @@ fn dup_2_duplicate_theme_slot_is_reported() {
 
 #[test]
 fn dup_3_duplicate_arg_inside_statement_args() {
-    let src = "struct s size=1x1\n  walls height=4 height=5\n";
+    let src = "struct s size=1x1\n  walls height=4 height=5 mat_slot=m\n";
     let diags = diagnose(src);
     assert_eq!(diags.len(), 1);
     assert_eq!(diags[0].code, DiagnosticCode::DuplicateArg);
@@ -106,7 +106,7 @@ fn dup_6_duplicate_selector_attribute_is_reported() {
 fn dup_7_duplicate_header_arg_other_than_size_is_arg_not_size() {
     // Header has a repeated non-`size` arg; the code should be the generic
     // `E_DUPLICATE_ARG`, not the size-specific `E_DUPLICATE_SIZE`.
-    let src = "struct s size=1x1 wood=oak wood=birch\n  floor\n";
+    let src = "struct s size=1x1 wood=oak wood=birch\n  floor mat_slot=m\n";
     let diags = diagnose(src);
     assert_eq!(diags.len(), 1, "got {diags:#?}");
     assert_eq!(diags[0].code, DiagnosticCode::DuplicateArg);

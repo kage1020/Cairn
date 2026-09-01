@@ -75,7 +75,7 @@ fn the_suggestion_is_drawn_from_the_role_and_from_the_universal_keys() {
         "got: {}",
         notes(&role_key),
     );
-    let universal = only("struct s size=5x5\n  walls height=3 clas=outer\n");
+    let universal = only("struct s size=5x5\n  walls height=3 clas=outer mat_slot=m\n");
     assert!(
         notes(&universal).contains("did you mean `class`?"),
         "got: {}",
@@ -85,7 +85,7 @@ fn the_suggestion_is_drawn_from_the_role_and_from_the_universal_keys() {
 
 #[test]
 fn a_key_nothing_resembles_is_named_with_the_closed_set_and_no_suggestion() {
-    let d = only("struct s size=5x5\n  floor totally_unrelated=1\n");
+    let d = only("struct s size=5x5\n  floor totally_unrelated=1 mat_slot=m\n");
     let notes = notes(&d);
     assert!(!notes.contains("did you mean"), "got: {notes}");
     // `floor` reads nothing of its own, so the note is the universal keys
@@ -113,7 +113,7 @@ fn an_unknown_keyword_answers_for_its_own_arguments() {
 
 #[test]
 fn a_nested_member_is_checked_at_any_depth() {
-    let d = only("struct s size=5x5\n  level y=0\n    walls hieght=3\n");
+    let d = only("struct s size=5x5\n  level y=0\n    walls hieght=3 mat_slot=m\n");
     assert_eq!(d.code.as_str(), "E_UNKNOWN_ARGUMENT");
 }
 
@@ -122,7 +122,7 @@ fn a_member_inside_a_def_is_checked_like_any_other() {
     // A `def` body is walked by a loop of its own, and a `def` is where a
     // typo costs the most: the component is instantiated once per `place`,
     // so one misspelled key builds every copy wrong.
-    let src = "def hut size=3x3:\n  walls hieght=3\n\n\
+    let src = "def hut size=3x3:\n  walls hieght=3 mat_slot=m\n\n\
                theme t:\n  slot m -> @oak_planks\n\n\
                site v:\n  place id=a use=hut theme=t at=origin\n";
     let d = only(src);
@@ -323,7 +323,7 @@ fn a_selector_does_not_coin_a_word_one_edit_from_a_real_one() {
     // matched, so nothing anywhere said a word, and the only line the author
     // saw was the `W_DEFERRED_MEMBER` about the `height=` that is now
     // absent. That is the failure this whole pass exists to end.
-    let src = "theme t:\n  slot wall -> @wall.stone.cobble\n  walls[hieght=3] -> frame=@spruce_wood\n\nstruct s size=5x5\n  floor\n  walls hieght=3 mat_slot=wall\n";
+    let src = "theme t:\n  slot wall -> @wall.stone.cobble\n  walls[hieght=3] -> frame=@spruce_wood\n\nstruct s size=5x5\n  floor mat_slot=wall\n  walls hieght=3 mat_slot=wall\n";
     let d = only(src);
     assert_eq!(d.code.as_str(), "E_UNKNOWN_ARGUMENT");
     assert!(

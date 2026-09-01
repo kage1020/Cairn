@@ -180,6 +180,13 @@ pub enum DiagnosticCode {
     TypeMismatchLabel,
     /// `size=` whose value is not a `WxH` literal.
     TypeMismatchSize,
+    /// A member whose only route to a block is `mat_slot=` was written
+    /// without one, so it paints nothing.
+    ///
+    /// The absent half of the split [`Self::UnresolvedSlot`] owns the other
+    /// end of: a `mat_slot=` naming a slot no theme declares is that code's,
+    /// and no member earns both.
+    MissingMaterial,
     /// `mat_slot=NAME` references a slot the applied theme does not declare.
     UnresolvedSlot,
     /// `slot NAME -> VALUE` whose VALUE is neither a canonical nor an
@@ -477,6 +484,7 @@ impl DiagnosticCode {
             Self::InvalidRequires => "E_INVALID_REQUIRES",
             Self::TypeMismatchLabel => "E_TYPE_MISMATCH_LABEL",
             Self::TypeMismatchSize => "E_TYPE_MISMATCH_SIZE",
+            Self::MissingMaterial => "E_MISSING_MATERIAL",
             Self::UnresolvedSlot => "E_UNRESOLVED_SLOT",
             Self::UnknownSlotTarget => "E_UNKNOWN_SLOT_TARGET",
             Self::ThemeSelectorUnmatched => "E_THEME_SELECTOR_UNMATCHED",
@@ -574,6 +582,7 @@ impl DiagnosticCode {
             | Self::InvalidRequires
             | Self::TypeMismatchLabel
             | Self::TypeMismatchSize
+            | Self::MissingMaterial
             | Self::UnresolvedSlot
             | Self::UnknownSlotTarget
             | Self::UnknownAbstractToken
@@ -1162,6 +1171,7 @@ mod tests {
                 "E_INVALID_PLACE_ORIGIN",
                 "E_INVALID_REQUIRES",
                 "E_MISPLACED_MEMBER",
+                "E_MISSING_MATERIAL",
                 "E_MISSING_PATH_MATERIAL",
                 "E_PARSE",
                 "E_THEME_SELECTOR_UNMATCHED",
@@ -1226,6 +1236,7 @@ mod tests {
                 "E_INVALID_PLACE_ORIGIN",
                 "E_INVALID_REQUIRES",
                 "E_MISPLACED_MEMBER",
+                "E_MISSING_MATERIAL",
                 "E_MISSING_PATH_MATERIAL",
                 "E_PARSE",
                 "E_THEME_VARIANT_MISSING",
