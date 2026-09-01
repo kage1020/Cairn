@@ -1,59 +1,59 @@
 ---
-title: "Cairn — Minecraft Build DSL Specification 2026.06 (draft)"
+title: "Specification 2026.06 (draft)"
+description: The normative specification of Cairn, an intermediate language for reading and writing Minecraft builds.
 ---
 
-**Cairn** (a cairn is a deliberately stacked pile of stones that marks a place) is the normative
-specification of an intermediate language for AI to read and write Minecraft builds. It avoids the
-inefficiency of NBT/SNBT (binary, one-record-per-block) and aligns architectural knowledge (walls,
-roofs, symmetry) with the voxel world. The approach is **generation-first (lossy)**.
+This is the normative specification of **Cairn**, an intermediate language for AI to read and write
+Minecraft builds. It avoids the inefficiency of NBT/SNBT, which is binary and one record per block,
+and aligns architectural knowledge (walls, roofs, symmetry) with the voxel world. The approach is
+**generation-first**, and therefore lossy on purpose.
 
 ## Reading order
 
 | # | Chapter | Contents |
 |---|---|---|
 | 1 | [Purpose and Scope](overview) | Purpose, scope, non-goals |
-| 2 | [Design Principles](principles) | Design principles P1–P5 |
-| 3 | [Architecture](architecture) | Three-layer IR + block-array universal pivot |
-| 4 | [Compilation Model](compilation) | Phase evaluation, target axes |
-| 5 | [Syntax](syntax) | Lexical, key=value, selectors, headers |
-| 6 | [Blockstate Model](blockstate) | Derivation + override, intent/resolved, waterlogged |
+| 2 | [Design Principles](principles) | P1–P5 |
+| 3 | [Architecture](architecture) | Three-layer IR, block-array pivot |
+| 4 | [Compilation Model](compilation) | Phase evaluation, target axes, roof lowering |
+| 5 | [Syntax](syntax) | Lexical rules, `key=value`, selectors, headers |
+| 6 | [Blockstate Model](blockstate) | Derivation and override, intent vs resolved, waterlogged |
 | 7 | [Materials and Themes](materials-themes) | Slots, canonical vocabulary, themes |
 | 8 | [Entities](entities) | Two-tier entity model, anchor conventions |
-| 9 | [Components, Editing, and Multi-building](components-editing-sites) | def, editing, multi-building |
-| 10 | [Versioning and Editions](versioning-editions) | Version/edition strategy, lock |
-| 11 | [Lint](lint) | Lint and constraint validation |
-| 12 | [Ecosystem Interop](ecosystem-interop) | Ecosystem interop, reverse conversion |
-| 13 | [Evaluation Framework](evaluation) | Evaluation framework |
-| 14 | [Redstone](redstone) | Redstone (logic circuits) |
-| 15 | [Open Issues](open-issues) | Open issues |
-| — | [Compatibility Tiers](compatibility) | Stable / Evolving / Internal contract for every public surface |
-| — | [Glossary](glossary) | Cross-chapter glossary of defined terms |
+| 9 | [Components, Editing, and Multi-building](components-editing-sites) | `def`, editing, `site` |
+| 10 | [Versioning and Editions](versioning-editions) | Target strategy, lock, portability |
+| 11 | [Lint](lint) | Diagnostic codes and constraint validation |
+| 12 | [Ecosystem Interop](ecosystem-interop) | Import, reverse conversion |
+| 13 | [Evaluation Framework](evaluation) | How the spec is iterated |
+| 14 | [Redstone](redstone) | Logic circuits |
+| 15 | [Open Issues](open-issues) | What is still undecided |
+| — | [Compatibility Tiers](compatibility) | Stable / Evolving / Internal, per public surface |
+| — | [Glossary](glossary) | Defined terms, cross-chapter |
 
-## Terminology and conventions
-- Requirement-level words: **MUST / SHOULD / MUST NOT / OPTIONAL** (RFC 2119 sense).
-- The language name is **Cairn**, the CLI tool is `cairn`, and source files use the `.crn` extension.
+## Conventions
+
+- Requirement words **MUST / SHOULD / MUST NOT / OPTIONAL** are used in the RFC 2119 sense.
+- The language is **Cairn**, the CLI is `cairn`, and source files use `.crn`.
 - Design principles are referenced as `P1`–`P5` (see [Design Principles](principles)).
 
-## Versioning
-Cairn's own releases use **date-based versioning (CalVer)** `YYYY.M[.PATCH]`.
-- Examples: `2026.7` (monthly release), `2026.7.1` (in-month patch). Sorts chronologically as a string.
-- This document is **2026.6 (draft)**, superseding the former `v0.2` label.
-- A release bundles "language spec + reference compiler + standard library + `(edition,version)`
-  registry/constraint catalogs". It appears in `cairn --version` and the lock's `cairn_version`
-  (see [Versioning and Editions](versioning-editions)).
+## Two version axes
 
-**Separate axis from the Minecraft target version** (do not conflate):
-- **Cairn version** `2026.06` — the release of the Cairn tool itself.
-- **MC target** — the output Minecraft (`--edition java --target <version>`; see [Versioning and Editions](versioning-editions)).
+Cairn's own releases use date-based versioning (CalVer) `YYYY.M[.PATCH]`: `2026.7` for a monthly
+release, `2026.7.1` for an in-month patch. They sort chronologically as strings. A release bundles
+the language spec, the reference compiler, the standard library, and the `(edition, version)`
+registry and constraint catalogs.
 
-**Minecraft itself moved to date-based versions from its latest release, so the two cannot be told
-apart by format.** Versions are ALWAYS distinguished **by field/flag/keyword**:
-- lock: `cairn_version` vs `mc_version`
-- headers: `@cairn` vs `@requires` / `@intended_targets`
-- CLI: `cairn --version` (Cairn itself) vs `--target` (MC)
+**Minecraft also moved to date-based versions**, so the two cannot be told apart by format. They are
+distinguished by field, flag, or keyword, never by shape:
 
-When ambiguous in prose, use a prefix: `cairn:2026.06` / `mc:<version>`.
+| | Cairn's own version | The Minecraft target |
+|---|---|---|
+| Lock | `cairn_version` | `mc_version` |
+| Headers | `@cairn` | `@requires`, `@intended_targets` |
+| CLI | `cairn --version` | `--target` |
 
-A `.crn` file MAY declare `@cairn 2026.06` (the Cairn language version it was written against). This is
-a separate axis from the MC-version headers `@requires` / `@intended_targets`, and exists as
-provenance so a future compiler can parse/warn correctly (see [Syntax](syntax)).
+In prose, disambiguate with a prefix: `cairn:2026.06` and `mc:1.21.4`.
+
+This document is **2026.6 (draft)**, superseding the former `v0.2` label. A `.crn` file MAY declare
+`@cairn 2026.06`, the language version it was written against. It is provenance only, so a future
+compiler can parse and warn correctly. See [Syntax §5.3](syntax#53-headers).

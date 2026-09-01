@@ -4,9 +4,16 @@ use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
 
-use cairn_lang_core::CAIRN_VERSION;
 use cairn_lang_core::lock::{HashHex, LockEdition, Lockfile};
 use tempfile::TempDir;
+
+/// The version cargo derived for this crate from `[workspace.package]`.
+///
+/// The lockfile records the compiler that produced it, so the number has to be
+/// the release's, not a constant maintained beside it. Comparing against
+/// `cairn-lang-core`'s `CAIRN_VERSION` would only restate whatever the binary
+/// already wrote.
+const WORKSPACE_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 fn cargo_bin() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_cairn"))
@@ -146,7 +153,7 @@ fn c6_lockfile_records_cairn_version() {
     ]);
     assert!(result.status.success());
     let lf = Lockfile::read_from_path(&lock_path).expect("read lock");
-    assert_eq!(lf.cairn_version, CAIRN_VERSION);
+    assert_eq!(lf.cairn_version, WORKSPACE_VERSION);
 }
 
 #[test]
@@ -440,12 +447,43 @@ fn c13_default_out_dir_is_source_parent() {
 }
 
 #[test]
+fn the_lockfile_on_disk_ends_with_a_newline() {
+    // The encoder is pinned in `cairn-lang-core`; this is the byte that
+    // actually reaches the file, through the temp-file-and-rename writer.
+    let (_tmp_src, src) = cottage_in_tempdir();
+    let out_dir = TempDir::new().expect("out tempdir");
+    let lock_path = out_dir.path().join("newline.lock");
+    let result = run_compile(&[
+        src.to_str().unwrap(),
+        "--edition",
+        "java",
+        "--out",
+        out_dir.path().to_str().unwrap(),
+        "--lock",
+        lock_path.to_str().unwrap(),
+    ]);
+    assert!(result.status.success());
+    let bytes = fs::read(&lock_path).expect("read lock");
+    assert_eq!(
+        bytes.last(),
+        Some(&b'\n'),
+        "lockfile ends with {:?}",
+        bytes.last().map(|b| *b as char),
+    );
+}
+
+#[test]
 fn compile_is_byte_reproducible() {
     // Two compiles of the same source against the same target must
-    // produce byte-identical `.nbt` files and lockfiles whose
-    // `source_hash` / `resolved_ir_hash` agree. This is the central
-    // promise of the lockfile design — without it the lockfile carries
-    // no useful diff information.
+    // produce byte-identical `.nbt` files and byte-identical lockfiles.
+    // This is the central promise of the lockfile design — without it the
+    // lockfile carries no useful diff information.
+    //
+    // The whole file, not two of its fields. "Regenerating the lockfile is
+    // a no-op" is a statement about the bytes: a field that varies between
+    // runs — an absolute path, an iteration order, a timestamp — is exactly
+    // what a hash-only comparison cannot see, and exactly what would make a
+    // committed lockfile impossible to keep.
     let (_tmp_src, src) = cottage_in_tempdir();
     let out_a = TempDir::new().expect("out a");
     let out_b = TempDir::new().expect("out b");
@@ -469,10 +507,23 @@ fn compile_is_byte_reproducible() {
     let bytes_b = fs::read(out_b.path().join("cottage.nbt")).expect("b");
     assert_eq!(bytes_a, bytes_b, "compile output is not byte-reproducible");
 
+    let lock_bytes_a = fs::read(&lock_a).expect("read a");
+    let lock_bytes_b = fs::read(&lock_b).expect("read b");
+    // Raw bytes, like the `.nbt` comparison above: two differently
+    // malformed sequences both collapsing to U+FFFD would pass a lossy one.
+    assert_eq!(
+        lock_bytes_a,
+        lock_bytes_b,
+        "regenerating the lockfile is not a no-op:\n{}\n{}",
+        String::from_utf8_lossy(&lock_bytes_a),
+        String::from_utf8_lossy(&lock_bytes_b),
+    );
+
+    // Read back through the decoder too, so the comparison above cannot
+    // pass on two files that are equally malformed.
     let lf_a = Lockfile::read_from_path(&lock_a).expect("read a");
     let lf_b = Lockfile::read_from_path(&lock_b).expect("read b");
-    assert_eq!(lf_a.source_hash, lf_b.source_hash);
-    assert_eq!(lf_a.resolved_ir_hash, lf_b.resolved_ir_hash);
+    assert_eq!(lf_a, lf_b);
 }
 
 #[test]
@@ -987,8 +1038,8 @@ fn run_check(args: &[&str]) -> std::process::Output {
 fn c22_unknown_def_in_place_errors_with_suggestion() {
     // `use=cottag` typo → resolver fail-loud with a `did you mean
     // `cottage`?` suggestion via the existing nearest_match helper.
-    // `cairn check` writes diagnostics to stdout (text format) so the
-    // assertions look there, not stderr.
+    // `cairn check` reports its text diagnostics on stderr, like every
+    // other subcommand, so the assertions look there.
     let tmp = TempDir::new().expect("tempdir");
     let src = tmp.path().join("typo_use.crn");
     fs::write(
@@ -1008,18 +1059,18 @@ fn c22_unknown_def_in_place_errors_with_suggestion() {
     )
     .expect("write tmp .crn");
     let result = run_check(&[src.to_str().unwrap()]);
-    let stdout = String::from_utf8(result.stdout).expect("utf-8");
+    let reported = String::from_utf8(result.stderr).expect("utf-8");
     assert!(
         !result.status.success(),
-        "exit should be non-zero; stdout={stdout}",
+        "exit should be non-zero; reported={reported}",
     );
     assert!(
-        stdout.contains("E_UNRESOLVED_PLACE_REF"),
-        "stdout should carry E_UNRESOLVED_PLACE_REF; got: {stdout}",
+        reported.contains("E_UNRESOLVED_PLACE_REF"),
+        "reported should carry E_UNRESOLVED_PLACE_REF; got: {reported}",
     );
     assert!(
-        stdout.contains("did you mean `cottage`?"),
-        "stdout should suggest the closest def name; got: {stdout}",
+        reported.contains("did you mean `cottage`?"),
+        "reported should suggest the closest def name; got: {reported}",
     );
 }
 
@@ -1046,15 +1097,15 @@ fn c23_unknown_theme_in_place_errors_with_suggestion() {
     )
     .expect("write tmp .crn");
     let result = run_check(&[src.to_str().unwrap()]);
-    let stdout = String::from_utf8(result.stdout).expect("utf-8");
-    assert!(!result.status.success(), "stdout={stdout}");
+    let reported = String::from_utf8(result.stderr).expect("utf-8");
+    assert!(!result.status.success(), "reported={reported}");
     assert!(
-        stdout.contains("E_UNRESOLVED_THEME_REF"),
-        "stdout should carry E_UNRESOLVED_THEME_REF; got: {stdout}",
+        reported.contains("E_UNRESOLVED_THEME_REF"),
+        "reported should carry E_UNRESOLVED_THEME_REF; got: {reported}",
     );
     assert!(
-        stdout.contains("did you mean `medieval`?"),
-        "stdout should suggest the closest theme name; got: {stdout}",
+        reported.contains("did you mean `medieval`?"),
+        "reported should suggest the closest theme name; got: {reported}",
     );
 }
 
@@ -1083,11 +1134,11 @@ fn c24_duplicate_place_id_errors() {
     )
     .expect("write tmp .crn");
     let result = run_check(&[src.to_str().unwrap()]);
-    let stdout = String::from_utf8(result.stdout).expect("utf-8");
-    assert!(!result.status.success(), "stdout={stdout}");
+    let reported = String::from_utf8(result.stderr).expect("utf-8");
+    assert!(!result.status.success(), "reported={reported}");
     assert!(
-        stdout.contains("E_DUPLICATE_PLACE_ID"),
-        "stdout should carry E_DUPLICATE_PLACE_ID; got: {stdout}",
+        reported.contains("E_DUPLICATE_PLACE_ID"),
+        "reported should carry E_DUPLICATE_PLACE_ID; got: {reported}",
     );
 }
 
@@ -1115,15 +1166,15 @@ fn c25_east_of_unknown_ref_errors_with_suggestion() {
     )
     .expect("write tmp .crn");
     let result = run_check(&[src.to_str().unwrap()]);
-    let stdout = String::from_utf8(result.stdout).expect("utf-8");
-    assert!(!result.status.success(), "stdout={stdout}");
+    let reported = String::from_utf8(result.stderr).expect("utf-8");
+    assert!(!result.status.success(), "reported={reported}");
     assert!(
-        stdout.contains("E_UNRESOLVED_PLACE_REF"),
-        "stdout should carry E_UNRESOLVED_PLACE_REF; got: {stdout}",
+        reported.contains("E_UNRESOLVED_PLACE_REF"),
+        "reported should carry E_UNRESOLVED_PLACE_REF; got: {reported}",
     );
     assert!(
-        stdout.contains("did you mean `home1`?"),
-        "stdout should suggest the closest prior place id; got: {stdout}",
+        reported.contains("did you mean `home1`?"),
+        "reported should suggest the closest prior place id; got: {reported}",
     );
 }
 
@@ -1291,4 +1342,48 @@ fn compile_overwrites_existing_output() {
     assert_eq!(&bytes[..2], &[0x1f, 0x8b], "overwritten file is real gzip");
     let lf = Lockfile::read_from_path(&lock_path).expect("read lock");
     assert!(lf.verified);
+}
+
+#[test]
+fn c30_a_note_that_points_at_a_second_line_is_printed_with_its_position() {
+    // The third of the three commands whose note loop dropped
+    // `note.span`. `cairn compile` reaches it through
+    // `report_lowering_diagnostics`, which `lower` and `info` do not use.
+    let tmp = TempDir::new().expect("tempdir");
+    let src = tmp.path().join("conflict.crn");
+    fs::write(
+        &src,
+        concat!(
+            "theme t:\n",
+            "  slot wall -> @cobblestone\n",
+            "  slot glass -> @glass_pane\n",
+            "\n",
+            "struct t size=7x5\n",
+            "  walls mat_slot=wall height=3\n",
+            "  door side=front at=center\n",
+            "  window side=front y=1 offset=3 size=1x2 mat_slot=glass\n",
+        ),
+    )
+    .expect("write source");
+    let out_dir = TempDir::new().expect("out tempdir");
+
+    let result = run_compile(&[
+        src.to_str().unwrap(),
+        "--edition",
+        "java",
+        "--target",
+        "1.21.4",
+        "--out",
+        out_dir.path().to_str().unwrap(),
+    ]);
+    assert!(
+        result.status.success(),
+        "a warning must not fail the compile, stderr={}",
+        String::from_utf8_lossy(&result.stderr),
+    );
+    let stderr = String::from_utf8(result.stderr).expect("utf-8");
+    assert!(
+        stderr.contains(":7:3:   note: overwritten member declared here"),
+        "the note must carry the `door` line's position, got: {stderr}",
+    );
 }

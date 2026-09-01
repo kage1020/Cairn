@@ -12,15 +12,16 @@
 //! strictly line-oriented (one line = one command, spec syntax §5.1), so the
 //! line prefix up to the cursor is grammatically sufficient — and the parser
 //! stops at its first error, which a document mid-keystroke almost always
-//! contains. The one cross-line lookup (which block encloses the cursor
-//! line) walks indentation upward, and `mat_slot=` values are collected by
+//! contains. The one cross-line lookup (which top-level item's body the
+//! cursor line sits in — and so which member keywords have a reader there)
+//! walks upward to the nearest indent-0 line, and `mat_slot=` values are collected by
 //! scanning `slot NAME -> TARGET` lines document-wide; a drift-guard test
 //! asserts that scan agrees with the parser on every shipped example.
 
 use std::collections::HashSet;
 
 use cairn_lang_core::Span;
-use cairn_lang_core::intent::known_keywords;
+use cairn_lang_core::intent::BodyKind;
 use cairn_lang_formats::{builtin_bedrock, builtin_java};
 
 use crate::line_index::LineIndex;
@@ -34,8 +35,19 @@ enum Context {
     /// First word of an indent-0 line: a top-level item keyword.
     TopLevelKeyword { replace: Span },
     /// First word of an indented line inside a `struct`/`def`/`site` (or
-    /// deeper `level`/`room`) body: a member command keyword.
-    MemberKeyword { replace: Span },
+    /// a deeper `level`) body: a member command keyword the enclosing item
+    /// has a reader for.
+    ///
+    /// The keyword table is global but the readers are not: a `place` in a
+    /// `struct` body and a `floor` among a site's rows both classify and
+    /// then reach nothing, which `check::member_scope` reports as
+    /// `E_MISPLACED_MEMBER`. Offering the full table here would put an
+    /// error one keystroke away.
+    MemberKeyword { replace: Span, body: BodyKind },
+    /// First word of an indented line whose enclosing item keyword did not
+    /// resolve — typically a header still being typed. The body kind is
+    /// unknown, so the whole table is offered rather than nothing.
+    UnscopedMemberKeyword { replace: Span },
     /// First word of an indented line inside a `theme` body: `slot` or a
     /// member keyword opening a selector rule.
     ThemeBodyKeyword { replace: Span },
@@ -76,18 +88,33 @@ pub fn completions(
             &replace,
             TOP_LEVEL_KEYWORDS.iter().map(|kw| (*kw, "top-level item")),
         ),
-        Some(Context::MemberKeyword { replace }) => keyword_items(
+        Some(Context::MemberKeyword { replace, body }) => keyword_items(
             &index,
             source,
             &replace,
-            known_keywords().iter().map(|kw| (*kw, "member command")),
+            body.allowed_keywords()
+                .into_iter()
+                .map(|kw| (kw, "member command")),
         ),
+        Some(Context::UnscopedMemberKeyword { replace }) => keyword_items(
+            &index,
+            source,
+            &replace,
+            cairn_lang_core::intent::known_keywords()
+                .iter()
+                .map(|kw| (*kw, "member command")),
+        ),
+        // A theme selector names a member by keyword and is matched
+        // against every body, so its vocabulary is the whole table.
         Some(Context::ThemeBodyKeyword { replace }) => keyword_items(
             &index,
             source,
             &replace,
-            std::iter::once(("slot", "slot binding"))
-                .chain(known_keywords().iter().map(|kw| (*kw, "theme selector"))),
+            std::iter::once(("slot", "slot binding")).chain(
+                cairn_lang_core::intent::known_keywords()
+                    .iter()
+                    .map(|kw| (*kw, "theme selector")),
+            ),
         ),
         Some(Context::SlotName { replace }) => slot_name_items(&index, source, &replace),
         Some(Context::MaterialToken { replace }) => material_items(&index, source, &replace),
@@ -102,28 +129,68 @@ fn is_token_char(c: char) -> bool {
     c.is_ascii_alphanumeric() || c == '_' || c == '.'
 }
 
-/// Byte offset of the first `#` in `line` that opens a comment — i.e. sits
-/// outside a string literal. Exact by quote parity: the lexer scans strings
-/// atomically with no escape sequences, and a string cannot span lines, so
-/// counting `"` toggles is the full string grammar.
-fn comment_start(line: &str) -> Option<usize> {
-    let mut in_string = false;
+/// What one pass over a line finds out about where its text ends up.
+///
+/// Both facts come from the same grammar, so they come from the same
+/// scan. Encoding "is this `#` a comment opener" and "is this cursor in a
+/// string" as two walks meant two copies of the string rules, which have
+/// to move together or silently disagree.
+struct LineScan {
+    /// Byte offset of the first `#` that opens a comment — i.e. one that
+    /// sits outside a string literal.
+    comment: Option<usize>,
+    /// Whether the scan ended inside an unterminated string literal.
+    /// `false` once a comment opener is seen: everything past it is
+    /// comment text, quotes included.
+    open_string: bool,
+}
+
+/// Walk `line` far enough to answer both questions in [`LineScan`].
+///
+/// Exact by quote parity, which is the whole string grammar here:
+/// `cairn_lang_core`'s lexer scans a string atomically, interprets no
+/// escape sequences, and rejects a newline inside one — so an odd number
+/// of `"` is precisely "still open". If `\"` ever becomes meaningful this
+/// is the one place that has to learn it.
+fn scan_line(line: &str) -> LineScan {
+    let mut open_string = false;
     for (i, c) in line.char_indices() {
         match c {
-            '"' => in_string = !in_string,
-            '#' if !in_string => return Some(i),
+            '"' => open_string = !open_string,
+            '#' if !open_string => {
+                return LineScan {
+                    comment: Some(i),
+                    open_string: false,
+                };
+            }
             _ => {}
         }
     }
-    None
+    LineScan {
+        comment: None,
+        open_string,
+    }
+}
+
+/// Byte offset of the first `#` in `line` that opens a comment.
+fn comment_start(line: &str) -> Option<usize> {
+    scan_line(line).comment
 }
 
 /// Classify the cursor's byte offset into a completion [`Context`].
 fn context_at(source: &str, offset: usize) -> Option<Context> {
-    let line_start = source[..offset].rfind('\n').map_or(0, |i| i + 1);
+    let line_start = cairn_lang_core::lines::start_of(source, offset);
     let prefix = &source[line_start..offset];
-    // A comment opener before the cursor puts it in a comment.
-    if comment_start(prefix).is_some() {
+    // A comment opener before the cursor puts it in a comment, and an
+    // unclosed quote puts it in a string. Both are positions where the
+    // grammar accepts free-form text — an `id=`, a `label=`, a note to
+    // the reader — and this module's rule is to invent nothing where
+    // anything is legal. The `#` half was honoured already; the `@` and
+    // `mat_slot=` checks below read the two characters in front of the
+    // cursor and ignored quoting, so `id="@oa"` offered the whole
+    // material vocabulary inside a quoted name.
+    let scan = scan_line(prefix);
+    if scan.comment.is_some() || scan.open_string {
         return None;
     }
     let token_start = line_start
@@ -170,18 +237,36 @@ fn context_at(source: &str, offset: usize) -> Option<Context> {
     if indent == 0 {
         return Some(Context::TopLevelKeyword { replace });
     }
-    match enclosing_block_keyword(source, line_start, indent) {
+    // The *item* keyword, not the nearest block header: a member nested
+    // under a `level` still belongs to the `struct` that opened the body,
+    // and `level` itself names no vocabulary.
+    match enclosing_item_keyword(source, line_start) {
         Some("theme") => Some(Context::ThemeBodyKeyword { replace }),
-        _ => Some(Context::MemberKeyword { replace }),
+        Some("site") => Some(Context::MemberKeyword {
+            replace,
+            body: BodyKind::Site,
+        }),
+        Some("struct" | "def") => Some(Context::MemberKeyword {
+            replace,
+            body: BodyKind::Geometry,
+        }),
+        // The header is mid-keystroke (`stru s size=2x2`) or absent. The
+        // body kind is unresolved, not empty — and an empty list is
+        // indistinguishable from "no candidates", which would read as a
+        // wrong answer rather than a missing one. Offer the union, which
+        // is what this position offered before the split; the scoped set
+        // arrives as soon as the header parses as a keyword.
+        _ => Some(Context::UnscopedMemberKeyword { replace }),
     }
 }
 
-/// First word of the nearest non-blank, non-comment line above `line_start`
-/// with strictly smaller indentation — the block header enclosing the
-/// cursor line.
-fn enclosing_block_keyword(source: &str, line_start: usize, indent: usize) -> Option<&str> {
-    source[..line_start]
-        .lines()
+/// First word of the nearest non-blank, non-comment indent-0 line above
+/// `line_start` — the top-level item whose body the cursor line sits in.
+///
+/// Walks upward, so it stops at the first item header it meets rather than
+/// reading to the top of the document on every keystroke.
+fn enclosing_item_keyword(source: &str, line_start: usize) -> Option<&str> {
+    cairn_lang_core::lines::split(&source[..line_start])
         .rev()
         .filter_map(|line| {
             let trimmed = line.trim_start();
@@ -190,7 +275,7 @@ fn enclosing_block_keyword(source: &str, line_start: usize, indent: usize) -> Op
             }
             Some((line.len() - trimmed.len(), trimmed))
         })
-        .find(|(line_indent, _)| *line_indent < indent)
+        .find(|(line_indent, _)| *line_indent == 0)
         .map(|(_, trimmed)| {
             let end = trimmed
                 .find(|c: char| !is_token_char(c))
@@ -205,7 +290,7 @@ fn enclosing_block_keyword(source: &str, line_start: usize, indent: usize) -> Op
 fn document_slot_names(source: &str) -> Vec<SlotDecl> {
     let mut decls = Vec::new();
     let mut current_theme: Option<String> = None;
-    for raw_line in source.lines() {
+    for raw_line in cairn_lang_core::lines::split(source) {
         let line = comment_start(raw_line).map_or(raw_line, |i| &raw_line[..i]);
         let trimmed = line.trim_start();
         if trimmed.is_empty() {
@@ -454,13 +539,14 @@ mod tests {
     }
 
     #[test]
-    fn member_position_offers_all_known_keywords_with_replace_range() {
-        // Inside a struct body the full member-keyword closed set comes
-        // back (no server-side prefix filter) and every item replaces the
-        // partial token's span.
+    fn member_position_offers_the_bodys_keywords_with_replace_range() {
+        // Inside a struct body the geometry closed set comes back (no
+        // server-side prefix filter) and every item replaces the partial
+        // token's span. `place` / `connect` are absent: they classify here
+        // and then reach nothing, which is `E_MISPLACED_MEMBER`.
         let source = "struct s size=2x2\n  flo";
         let items = complete(source, "flo");
-        assert_eq!(labels(&items), known_keywords().to_vec());
+        assert_eq!(labels(&items), BodyKind::Geometry.allowed_keywords());
         for item in &items {
             assert_eq!(item.kind, Some(lsp_types::CompletionItemKind::KEYWORD));
             assert_eq!(edit_range(item), range(1, 2, 5));
@@ -474,7 +560,7 @@ mod tests {
         // leaves the token's tail glued to the insertion (`structtsam`).
         let source = "struct s size=2x2\n  flotsam";
         let items = complete(source, "  flo");
-        assert_eq!(labels(&items), known_keywords().to_vec());
+        assert_eq!(labels(&items), BodyKind::Geometry.allowed_keywords());
         for item in &items {
             assert_eq!(edit_range(item), range(1, 2, 9));
         }
@@ -493,18 +579,50 @@ mod tests {
             .find(|i| i.label == "window")
             .expect("member keywords offered as selectors");
         assert_eq!(window.detail.as_deref(), Some("theme selector"));
-        assert_eq!(items.len(), 1 + known_keywords().len());
+        assert_eq!(
+            items.len(),
+            1 + cairn_lang_core::intent::known_keywords().len(),
+            "a selector is matched against every body, so its vocabulary stays the whole table",
+        );
     }
 
     #[test]
-    fn nested_block_body_offers_member_keywords() {
-        // Deeper nesting inside a struct (`level`, `room`) still resolves
-        // to the member-command set: the enclosing-block walk stops at the
-        // nearest shallower line, which is not a `theme` header.
+    fn nested_block_body_offers_the_enclosing_items_keywords() {
+        // Deeper nesting inside a struct (`level`) resolves to the same
+        // set as the struct body itself: the walk looks for the enclosing
+        // *item*, so an intervening `level` — which names no vocabulary of
+        // its own — does not change the answer.
         let source = "struct t size=5x5\n  level h=4\n    flo";
         let items = complete(source, "    flo");
-        assert_eq!(labels(&items), known_keywords().to_vec());
+        assert_eq!(labels(&items), BodyKind::Geometry.allowed_keywords());
         assert!(!labels(&items).contains(&"slot"));
+    }
+
+    #[test]
+    fn a_site_body_offers_only_the_rows_it_reads() {
+        let source = "site s:\n  p";
+        let items = complete(source, "\n  p");
+        assert_eq!(labels(&items), BodyKind::Site.allowed_keywords());
+    }
+
+    #[test]
+    fn an_unresolved_header_offers_the_whole_table_rather_than_nothing() {
+        // A header mid-keystroke leaves the body kind unknown. An empty
+        // list reads as "no candidates", which is a wrong answer rather
+        // than a missing one — so the union is offered until the header
+        // parses.
+        for source in [
+            "  flo",
+            "stru s size=2x2
+  flo",
+        ] {
+            let items = complete(source, "flo");
+            assert_eq!(
+                labels(&items),
+                cairn_lang_core::intent::known_keywords().to_vec(),
+                "for {source:?}",
+            );
+        }
     }
 
     #[test]
@@ -541,6 +659,99 @@ mod tests {
     }
 
     #[test]
+    fn the_line_scan_answers_both_questions_from_one_walk() {
+        // `open_string` is read by `context_at` only after `comment` has
+        // been found absent, so nothing at that call site can tell whether
+        // the field means what it says on its own. It has to, because the
+        // next caller may ask it first — measured here rather than left to
+        // the order of an `||`.
+        let cases = [
+            // (line, comment offset, open string at the end)
+            ("door id=front", None, false),
+            ("door id=\"front\"", None, false),
+            ("door id=\"front", None, true),
+            // A `#` inside a string is content, not an opener.
+            ("door id=\"a # b\"", None, false),
+            ("door id=\"a # b", None, true),
+            // Past a comment opener everything is comment text, quotes
+            // included: the scan stops rather than counting them.
+            ("door id=a # say \"hi", Some(10), false),
+            ("# \"", Some(0), false),
+        ];
+        for (line, comment, open_string) in cases {
+            let scan = scan_line(line);
+            assert_eq!(scan.comment, comment, "comment offset for {line:?}");
+            assert_eq!(scan.open_string, open_string, "open string for {line:?}");
+        }
+    }
+
+    #[test]
+    fn a_material_token_inside_a_string_offers_nothing() {
+        // `id=` takes free-form text, so an `@` between quotes is a
+        // character in a name, not the opener of a material token. The
+        // whole registry catalogue used to arrive here.
+        let source = "theme a:\n  slot floor -> @oak_planks\n\
+                      struct s size=2x2\n  door id=\"@oa";
+        // The needle carries the quote: `@oa` alone first matches inside
+        // `@oak_planks` on the slot line above.
+        assert_eq!(
+            completions(source, at_end_of(source, "id=\"@oa")),
+            Some(vec![]),
+        );
+    }
+
+    #[test]
+    fn a_mat_slot_key_inside_a_string_offers_nothing() {
+        // The characters `mat_slot=` inside a quoted value are text. The
+        // key check read the two characters in front of the cursor and
+        // offered the theme's slots inside a name.
+        let source = "theme a:\n  slot floor -> @oak_planks\n\
+                      struct s size=2x2\n  door id=\"mat_slot=";
+        assert_eq!(
+            completions(source, at_end_of(source, "id=\"mat_slot=")),
+            Some(vec![]),
+        );
+    }
+
+    #[test]
+    fn a_mat_slot_key_inside_a_longer_string_offers_nothing() {
+        // The same with prose around it and a partial token after it —
+        // a sentence in a `label=`, not an argument.
+        // The needle has to reach past `slot floor` on line 1: `at_end_of`
+        // resolves the *first* occurrence, and `fl` occurs there. Aimed at
+        // the wrong line this test passes because `slot ` precedes the
+        // cursor, with nothing to do with the string it is named for.
+        let source = "theme a:\n  slot floor -> @oak_planks\n\
+                      struct s size=2x2\n  door label=\"pick mat_slot=fl";
+        assert_eq!(
+            completions(source, at_end_of(source, "pick mat_slot=fl")),
+            Some(vec![]),
+        );
+    }
+
+    #[test]
+    fn a_cursor_after_a_closing_quote_still_completes() {
+        // The discriminating case for quote *parity* against "is there a
+        // quote anywhere before the cursor": the string is closed, so the
+        // argument that follows it is an argument again.
+        let source = "theme a:\n  slot floor -> @oak_planks\n\
+                      struct s size=2x2\n  door id=\"front\" mat_slot=";
+        let items = complete(source, "mat_slot=");
+        assert_eq!(labels(&items), vec!["floor"]);
+    }
+
+    #[test]
+    fn an_unterminated_string_suppresses_only_its_own_line() {
+        // A string cannot span lines, which is what makes counting quotes
+        // on the cursor's line exact. A line left open by a typo must not
+        // take the next line's completions down with it.
+        let source = "theme a:\n  slot floor -> @oak_planks\n\
+                      struct s size=2x2\n  door id=\"oops\n  floor mat_slot=";
+        let items = complete(source, "mat_slot=");
+        assert_eq!(labels(&items), vec!["floor"]);
+    }
+
+    #[test]
     fn hash_inside_a_string_literal_is_not_a_comment() {
         // The lexer scans strings atomically (a `#` between quotes is
         // string content, not a comment opener), so completion must not go
@@ -563,41 +774,76 @@ mod tests {
         assert_eq!(items[1].detail.as_deref(), Some("-> \"#1\" (theme b)"));
     }
 
-    #[test]
-    fn crlf_documents_complete_and_scan_slots() {
-        // CRLF line endings must not shift keyword classification, replace
-        // ranges, or the slot scan.
-        let keyword_source = "struct s size=2x2\r\n  flo";
-        let items = complete(keyword_source, "flo");
-        assert_eq!(labels(&items), known_keywords().to_vec());
-        assert_eq!(edit_range(&items[0]), range(1, 2, 5));
+    /// The same document written the three ways Cairn accepts.
+    fn renderings(lf_source: &str) -> [(&'static str, String); 3] {
+        [
+            ("LF", lf_source.to_owned()),
+            ("CRLF", lf_source.replace('\n', "\r\n")),
+            ("CR", lf_source.replace('\n', "\r")),
+        ]
+    }
 
-        let slot_source = "theme a:\r\n  slot floor -> @oak_planks\r\n\
-                           struct s size=2x2\r\n  floor mat_slot=";
-        let items = complete(slot_source, "mat_slot=");
-        assert_eq!(labels(&items), vec!["floor"]);
-        assert_eq!(items[0].detail.as_deref(), Some("-> @oak_planks (theme a)"));
+    #[test]
+    fn line_endings_do_not_shift_keyword_classification_or_replace_ranges() {
+        // A lone `\r` used to leave every scanner here reading the document
+        // as one line, and the replace range landed on line 0.
+        //
+        // The `theme` above the `struct` is what makes the enclosing-item
+        // scan discriminating: read as one line, the document begins with
+        // `theme` and the cursor is offered a theme body's vocabulary. With
+        // a single-item document the collapsed reading happens to start
+        // with the right keyword and the wrong scan looks right.
+        // `wal`, not `flo`: the cursor is located by the first occurrence
+        // of the needle, and `floor` appears in the slot declaration above.
+        for (label, source) in
+            renderings("theme a:\n  slot floor -> @oak_planks\nstruct s size=2x2\n  wal")
+        {
+            let items = complete(&source, "wal");
+            assert_eq!(
+                labels(&items),
+                BodyKind::Geometry.allowed_keywords(),
+                "{label}"
+            );
+            assert_eq!(edit_range(&items[0]), range(3, 2, 5), "{label}");
+        }
+    }
+
+    #[test]
+    fn line_endings_do_not_shift_the_slot_scan() {
+        for (label, source) in renderings(
+            "theme a:\n  slot floor -> @oak_planks\nstruct s size=2x2\n  floor mat_slot=",
+        ) {
+            let items = complete(&source, "mat_slot=");
+            assert_eq!(labels(&items), vec!["floor"], "{label}");
+            assert_eq!(
+                items[0].detail.as_deref(),
+                Some("-> @oak_planks (theme a)"),
+                "{label}",
+            );
+        }
     }
 
     #[test]
     fn position_far_past_the_document_is_refused() {
         // A position beyond one line past the end is a client bug, not a
         // clampable race: the caller gets `None` (surfaced as InvalidParams
-        // by the server) instead of candidates fabricated at EOF. One line
-        // past the end still clamps — a didChange can land between the
-        // request and its answer.
+        // by the server) instead of candidates fabricated at EOF.
+        //
+        // One line past the end is refused for the same reason and not as a
+        // near miss. Clamping it anchored every item's `textEdit` on the
+        // line before, and the protocol requires a completion item's edit
+        // range to contain the position the request named — so the items
+        // were unusable by construction, whatever a given client does with
+        // them.
         let source = "st";
-        let far = lsp_types::Position {
-            line: 99,
-            character: 0,
-        };
-        assert_eq!(completions(source, far), None);
-        let one_past = lsp_types::Position {
-            line: 1,
-            character: 0,
-        };
-        let items = completions(source, one_past).expect("one line past the end clamps");
-        assert_eq!(labels(&items), vec!["theme", "def", "site", "struct"]);
+        for line in [1, 99] {
+            let position = lsp_types::Position { line, character: 0 };
+            assert_eq!(
+                completions(source, position),
+                None,
+                "line {line} does not exist in a one-line document",
+            );
+        }
     }
 
     #[test]

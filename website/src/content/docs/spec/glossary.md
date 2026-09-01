@@ -5,7 +5,7 @@ title: "Glossary"
 Defined terms used throughout the specification. Where a term is defined in detail in a chapter,
 that chapter is linked.
 
-This page is **not normative on its own** — the linked chapter is the source of truth — but
+This page is **not normative on its own**, since the linked chapter is the source of truth, but
 implementations and authors SHOULD use these exact spellings. The vocabulary is closed by design
 ([principles P3](principles)); inventing parallel terminology defeats the lint loop.
 
@@ -14,20 +14,23 @@ implementations and authors SHOULD use these exact spellings. The vocabulary is 
 - **Block-array IR.** The universal pivot at the bottom of the three-layer IR: a voxel grid +
   palette + block entities + entities, neutral to format, edition, and version. Every format's
   frontend/backend, plus diff/IoU/serialization, meet here. See
-  [architecture §3.1](architecture).
+  [architecture §3.1](architecture#31-the-block-array-ir-is-the-universal-pivot).
 - **Intent IR.** The top layer: named members carrying `id` / `class` / `role` / `mat_slot` /
   `intent_state` / `resolved_state`. Independent type with invariants; not produced directly by
-  schematic ingestion. See [architecture §3.2](architecture).
+  schematic ingestion. See
+  [architecture §3.2](architecture#32-the-intent-ir-is-rich-and-carries-invariants).
 - **Semantic / Component-Theme IR.** The middle layer that resolves themes, components (`def`),
   and multi-building (`site`) into the Intent IR. See
   [components-editing-sites](components-editing-sites),
   [materials-themes](materials-themes).
 - **Logic IR / Netlist IR / Placement IR.** The three redstone sub-layers between Intent IR and
-  block-array IR. Delay is **not** carried in Logic/Netlist — only the Placement IR has it.
-  See [redstone §14.8](redstone), [architecture §3.3](architecture).
+  block-array IR. Delay is **not** carried in Logic/Netlist; only the Placement IR has it. See
+  [redstone §14.8](redstone#148-connection-to-the-ir-and-phases),
+  [architecture §3.3](architecture#33-redstone-sub-layers).
 - **`semantic_level`.** An imported artifact's progress label: `raw` (one voxel per line) →
-  `grouped` (L1 spatial compression) → `lifted` (L2 semantic naming). The compiler reaches L1;
-  L2 is the LLM's job. See [ecosystem-interop §12.3](ecosystem-interop).
+  `grouped` (L1 spatial compression) → `lifted` (L2 semantic naming). The compiler reaches L1; L2 is
+  the LLM's job. See
+  [ecosystem-interop §12.3](ecosystem-interop#123-three-tiers-of-transliteration).
 
 ## Members and blockstate
 
@@ -37,24 +40,26 @@ implementations and authors SHOULD use these exact spellings. The vocabulary is 
 - **`id` / `class` / `role`.** Identity, group, and architectural function tags on a member. Used
   for selectors and stable addresses.
 - **`mat_slot`.** A material injection point on a member; bound by a `theme`. Structure carries
-  slots, themes carry block bindings. See [materials-themes §7.1](materials-themes).
+  slots, themes carry block bindings. See
+  [materials-themes §7.1](materials-themes#71-slots-as-dependency-injection).
 - **`intent_state`.** The author's blockstate intent. Edit diffs look **only** here. See
-  [blockstate §6.2](blockstate).
+  [blockstate §6.2](blockstate#62-intent_state-and-resolved_state).
 - **`resolved_state`.** Compiler-derived blockstate (orientation, connections, waterlogged). Never
   hand-written.
 - **Override-promotion.** Writing a blockstate that *could* be intent promotes it from
-  `resolved_state` to `intent_state`. The spec rule is "derive by default; any blockstate that
-  can be intent is overridable." See [blockstate §6.1](blockstate).
+  `resolved_state` to `intent_state`. The spec rule is "derive by default; any blockstate that can
+  be intent is overridable." See
+  [blockstate §6.1](blockstate#61-derive-by-default-promote-on-override).
 - **Anchor / bbox.** Every primitive carries an `anchor` (reference point), a declared bbox, an
-  actual bbox, and a host face in the IR — needed because primitives like paintings, item frames,
-  and arch windows have a declared size that differs from the occupied AABB. See
-  [entities §8.2](entities).
+  actual bbox, and a host face in the IR. Primitives like paintings, item frames, and arch windows
+  have a declared size that differs from the occupied AABB, and these four resolve it. See
+  [entities §8.2](entities#82-anchor-conventions).
 
 ## Materials and themes
 
 - **Canonical token.** The value bound to a slot or theme selector: a *meaning* token, not a raw
   block ID. The backend resolves the per-`(edition, version)` ID and state names. See
-  [materials-themes §7.2](materials-themes).
+  [materials-themes §7.2](materials-themes#72-canonical-vocabulary).
 - **Canonical block token.** A specific block meaning: `@oak_planks`, `@water_cauldron`,
   `@oak_log[axis=x]`. Silent meaning-breaking downgrades (`@water_cauldron` → `cauldron`) are
   forbidden.
@@ -64,25 +69,26 @@ implementations and authors SHOULD use these exact spellings. The vocabulary is 
   *structure* (where the walls are) from *style* (which blocks).
 - **`def`.** A slot-bearing Component definition (a reusable struct). Recursion forbidden;
   parameterization allowed. The minimum version of a composite is the max of its parts.
-  See [components-editing-sites §9.1](components-editing-sites).
+  See [components-editing-sites §9.1](components-editing-sites#91-def-the-component-construct).
 - **`site`.** A multi-building container that places `def`-derived structures by topological
   relations (`east_of`, `gap=`, `connect`), not absolute coordinates. See
-  [components-editing-sites §9.3](components-editing-sites).
+  [components-editing-sites §9.3](components-editing-sites#93-multi-building-with-site).
 
 ## Compilation
 
 - **Phase.** A fixed evaluation slot the compiler sorts each command into:
   `massing → envelope → openings → fixtures → logic_synth → logic_place → logic_route → raw`.
   Source order is irrelevant; phases enforce semantics
-  ([compilation §4.1](compilation)).
+  ([compilation §4.1](compilation#41-phase-evaluation)).
 - **Last-wins (local).** Within the same phase, a later command overrides an earlier one. The old
   whole-program last-wins ("paint model") is dropped. See [principles P2](principles).
 - **Target axes.** `(edition, version)`: the only layer that knows them is the backend. The DSL
   source never names them. `--edition` is required, `--target` alone is forbidden. See
-  [compilation §4.2](compilation), [versioning-editions](versioning-editions).
+  [compilation §4.2](compilation#42-target-axes), [versioning-editions](versioning-editions).
 - **DataVersion.** Mojang's monotonically increasing integer key for a Java version. Cairn uses it
   as the canonical ordering key so the semver→date-based version transition does not break
-  `since/until` or `@requires`. See [versioning-editions §10.1](versioning-editions).
+  `since/until` or `@requires`. See
+  [versioning-editions §10.1](versioning-editions#101-the-target-is-a-compile-time-parameter).
 
 ## Headers and provenance
 
@@ -91,25 +97,26 @@ implementations and authors SHOULD use these exact spellings. The vocabulary is 
 - **`@requires`.** A capability floor on the Minecraft target (e.g. `version>=1.20`). Hard error
   on conflict with the inferred value.
 - **`@intended_targets`.** A hint about which Minecraft versions the file was designed for. Not a
-  verification record — the record lives in the lock.
+  verification record, since the record lives in the lock.
 - **Lock (`*.cairn.lock`).** Compiler-generated reproducibility record. Carries `source_hash`,
   `cairn_version`, `target(mc_version + data_version)`, `registry_pack_hash`,
   `constraint_catalog_hash`, `resolved_ir_hash`, and `verified: true`. See
-  [versioning-editions §10.6](versioning-editions).
-- **Provenance stamp.** `(edition, version)` recorded onto the block-array IR on import, mapped
-  from the format itself (`.litematic` → java, `.mcstructure` → bedrock,
-  `.schem` → java). See [ecosystem-interop §12.4](ecosystem-interop).
+  [versioning-editions §10.6](versioning-editions#106-provenance-and-lock).
+- **Provenance stamp.** `(edition, version)` recorded onto the block-array IR on import, mapped from
+  the format itself (`.litematic` → java, `.mcstructure` → bedrock, `.schem` → java). See
+  [ecosystem-interop §12.4](ecosystem-interop#124-import-stamping-and-pitfalls).
 
 ## Redstone
 
 - **Logical cell / edition cell / physical tile.** The three-tier cell library. The Logic IR
   selects logical cells; the per-edition cell library lowers them to physical tiles. Confines the
-  Java/Bedrock difference to the library. See [redstone §14.6](redstone).
+  Java/Bedrock difference to the library. See [redstone §14.6](redstone#146-edition-differences).
 - **Combinational vs sequential.** v1 ships closed-set combinational gates and curated sequential
   macros (`latch` / `pulse` / `delay` / `edge_rising` / `edge_falling` / `counter`). Arbitrary
   FSMs / CPUs are out of scope for v1.
 - **Truth / latency / temporal assertion.** The three verification kinds. See
-  [redstone §14.7](redstone). Temporal is bounded `eventually within N` only, not full LTL.
+  [redstone §14.7](redstone#147-verification). Temporal is bounded `eventually within N` only, not
+  full LTL.
 - **QC / BUD.** Quasi-connectivity / block-update-detector behaviors. **Not absorbed** by the cell
   library; a circuit that depends on update-order semantics is an `E_NO_PORTABLE_IMPL` compile
   error.
@@ -122,33 +129,34 @@ implementations and authors SHOULD use these exact spellings. The vocabulary is 
   ([lint](lint)).
 - **Fail-loud.** Silent substitution and implicit dropping of unknown IDs / out-of-domain states
   are forbidden. Errors return the closed set of valid candidates plus a suggested DSL fix.
-  See [versioning-editions §10.4](versioning-editions).
+  See [versioning-editions §10.4](versioning-editions#104-fail-loud-and-minimum-version-inference).
 - **`semantic_sensitivity`.** A constraint-catalog field distinguishing "the ID stays valid but
   meaning/behavior/appearance changed at this version" from `since/until`. Cauldron split @1.17,
   wall connection bool→none/low/tall @1.16, item format @1.20.5 are examples. See
-  [versioning-editions §10.5](versioning-editions).
-- **Block IoU.** Voxel intersection-over-union used for the import self-correction loop.
-  Convergence threshold ≥ 0.985. See [ecosystem-interop §12.2](ecosystem-interop),
-  [evaluation §13.2](evaluation).
+  [versioning-editions §10.5](versioning-editions#105-which-version-is-it-for-has-three-answers).
+- **Block IoU.** Voxel intersection-over-union used for the import self-correction loop. Convergence
+  threshold ≥ 0.985. See
+  [ecosystem-interop §12.2](ecosystem-interop#122-reverse-direction-the-compiler-transliterates-an-llm-lifts),
+  [evaluation §13.2](evaluation#132-reverse-conversion-auxiliary-metrics).
 - **Zero-shot Compile Rate / Fix Convergence Rate / Token Efficiency / Edit Stability.** The four
-  primary spec-iteration metrics. See [evaluation §13.1](evaluation).
+  primary spec-iteration metrics. See [evaluation §13.1](evaluation#131-primary-metrics).
 
 ## Editions and versions
 
 - **Edition.** `java` or `bedrock`. Compile-time only; never present in the DSL semantic layer.
-  See [versioning-editions §10.7](versioning-editions).
+  See [versioning-editions §10.7](versioning-editions#107-java--bedrock-portability).
 - **Cairn version vs MC target.** Two **separate axes** distinguished by field/flag/keyword, never
   by format. `cairn:2026.06` vs `mc:1.21.4` in disambiguating prose. See
   [Specification overview](/spec/), [versioning-editions](versioning-editions).
 - **Recompile, don't transcode.** The language spec does **not** guarantee NBT portability across
   version or edition. To target a new version, recompile the DSL; do not convert the NBT. See
-  [versioning-editions §10.2](versioning-editions).
+  [versioning-editions §10.2](versioning-editions#102-language-contract-recompile-dont-transcode).
 
 ## Ecosystem interop
 
 - **Raw / L1 / L2.** The three tiers of faithful transliteration on import. The compiler reaches
   L1 (spatial compression, no naming); L2 is the LLM's job (naming → `wall`, `mat_slot`,
-  `theme`). See [ecosystem-interop §12.3](ecosystem-interop).
+  `theme`). See [ecosystem-interop §12.3](ecosystem-interop#123-three-tiers-of-transliteration).
 - **`raw_fill` / `raw_block` / `raw_repeat`.** Escape-hatch primitives used by faithful
   transliteration. Import-origin instances carry `origin=imported` so they are not treated as
   first-class design DSL.

@@ -30,9 +30,12 @@ use serde::Serialize;
 use crate::ast::{DottedRef, Expr, Header, TruthRow, ValueKind};
 use crate::error::Span;
 
-pub use self::keyword_table::{known_keywords, role_of};
+pub use self::keyword_table::{UNIVERSAL_ARGUMENTS, known_keywords, role_of};
 pub use self::lower::lower;
-pub use self::member::{IntentState, Member, MemberBody, MemberRole, ResolvedState, ValueWithSpan};
+pub(crate) use self::member::ConnectEnd;
+pub use self::member::{
+    BodyKind, IntentState, Member, MemberBody, MemberRole, ResolvedState, ValueWithSpan,
+};
 pub use self::semantic_level::SemanticLevel;
 
 /// Intent IR for a whole `.crn` module.
@@ -214,6 +217,28 @@ impl AssertIr {
     pub fn span(&self) -> &Span {
         match self {
             Self::Truth { span, .. } | Self::Always { span, .. } => span,
+        }
+    }
+
+    /// Every signal this property names, in declaration order.
+    ///
+    /// Lives here rather than at the consumer because the enum is
+    /// `#[non_exhaustive]`: a match written in another crate needs a
+    /// wildcard, and a wildcard is where a variant added later would go to
+    /// have its references silently unchecked. Written here the match is
+    /// exhaustive, so the next variant stops the compile until it says
+    /// which of its fields are signals.
+    #[must_use]
+    pub fn signal_refs(&self) -> Vec<&DottedRef> {
+        match self {
+            Self::Truth { inputs, output, .. } => {
+                inputs.iter().chain(std::iter::once(output)).collect()
+            }
+            Self::Always {
+                antecedent,
+                consequent,
+                ..
+            } => vec![antecedent, consequent],
         }
     }
 }

@@ -3,7 +3,7 @@
 //! Consumes the token stream from [`crate::lex`] and produces a [`Module`].
 //! The grammar is line-based with indent-driven nesting: a command can carry
 //! `key=value` arguments, an optional bracketed selector, optional bare
-//! positional values (for forms like `connect a to b path=@gravel`), and an
+//! positional values (for forms like `connect a.entry to b.entry path=@gravel`), and an
 //! optional `-> binding` tail.
 //!
 //! Special forms `logic` and `assert` flow into dedicated
@@ -13,6 +13,7 @@ use crate::ast::{
     Arg, DottedRef, Expr, Header, Item, Module, RawRequirement, RawVersion, Statement, ThemeRule,
     TruthRow, Value, ValueKind,
 };
+use crate::check::{Diagnostic, DiagnosticCode, LineStarts};
 use crate::error::{IntContext, ParseError, Position};
 use crate::lex::{Token, TokenKind, lex};
 
@@ -26,10 +27,94 @@ pub fn parse(source: &str) -> Result<Module, ParseError> {
     parser.parse_module()
 }
 
+/// Render a parse failure as a [`Diagnostic`], so it can be reported
+/// beside the findings of every pass that runs after one.
+///
+/// A parse failure is the one finding no `check` pass produces — nothing
+/// runs without an AST — and until it had a shape of its own, every
+/// consumer invented one: the CLI wrote a bare `error:` line that carried
+/// no code, the language server built an LSP diagnostic directly, and
+/// `cairn check --format json` had nothing to put on stdout at all for the
+/// most common way a file fails.
+///
+/// The span runs from the position the error reports to the end of that
+/// line. A [`ParseError`] carries a position and not a range — the parser
+/// stops *at* a token rather than over a construct — so the rest of the
+/// line is what gives an error inside one something to underline. It stops
+/// before the line's terminator, so the underline cannot run into the row
+/// below.
+///
+/// The largest class of parse failure gets nothing from that, and is meant
+/// to. `expected X, got end of line` is reported *at* the end of its line,
+/// so the span is empty and an editor draws a caret rather than a
+/// squiggle — which is the right picture: nothing on the line is wrong,
+/// something is missing after it.
+///
+/// Takes the line index rather than building one, which is what
+/// [`LineStarts`]' own documentation asks of a caller that will look up
+/// more than one position: every renderer of this diagnostic needs an
+/// index to put a position in front of the message, so building a second
+/// one here would walk the source twice for one finding.
+#[must_use]
+pub fn diagnose_parse_failure(source: &str, lines: &LineStarts, err: &ParseError) -> Diagnostic {
+    let start = lines.offset_of(source, err.position());
+    let end = lines.line_end(source, start).max(start);
+    Diagnostic {
+        code: DiagnosticCode::Parse,
+        span: start..end,
+        // The renderer prints the position in front of the message, from
+        // the span; `ParseError`'s own `Display` prefixes it too, which is
+        // why this reads `user_message` rather than `to_string`.
+        primary: err.user_message(),
+        notes: Vec::new(),
+        // No structured payload. A consumer that wants to branch on which
+        // parse failure it is has the message; giving it a payload means
+        // freezing a shape for two `#[non_exhaustive]` enums, and that can
+        // be added later without breaking anyone.
+        data: None,
+    }
+}
+
+/// Deepest value / expression nesting the parser will descend into.
+///
+/// Recursive descent spends native stack per level, and a Rust stack
+/// overflow is an uncatchable abort: it takes the process down, and with it
+/// any embedder — `cairn-lsp` re-parses on every keystroke. Refusing is the
+/// only way to keep that a diagnostic rather than a crash.
+///
+/// Measured on a debug build, the tightest shape (`mat=[[[…`) overflowed at
+/// 287 levels, parenthesised expressions at 380, and `not` chains at 785.
+/// Sitting well under the tightest of those leaves room for a thread with a
+/// smaller stack than the main one, and for the deeper frames a debug build
+/// of a future pass may add.
+///
+/// Real sources come nowhere near: values are scalars and flat lists, and a
+/// `logic` expression this deep would be unreadable long before it got here.
+pub const MAX_NESTING_DEPTH: usize = 64;
+
+/// Deepest boolean-expression tree the parser will hand back.
+///
+/// Separate from [`MAX_NESTING_DEPTH`] because it bounds a different stack.
+/// That one keeps the parser's own descent finite; this one keeps the
+/// *result* finite, because `or` and `and` are parsed iteratively and so
+/// build a left-leaning tree one node deep per term at no cost to the
+/// parser. Every consumer walks that tree recursively — `Serialize`, the
+/// check passes, and `Box`'s recursive `Drop` — so leaving it unbounded
+/// only moves the overflow downstream of the guard.
+///
+/// Measured on a debug build, `cairn parse` (which serialises the AST) died
+/// at roughly 570 terms, so this keeps the same order of margin
+/// [`MAX_NESTING_DEPTH`] holds against its own measurement. A chain past it
+/// splits into intermediate `logic` bindings, which the diagnostic says.
+pub const MAX_EXPR_DEPTH: usize = 128;
+
 struct Parser<'a> {
     source: &'a str,
     tokens: &'a [Token],
     pos: usize,
+    /// How many value / expression levels are currently open, bounded by
+    /// [`MAX_NESTING_DEPTH`].
+    depth: usize,
 }
 
 impl<'a> Parser<'a> {
@@ -38,7 +123,30 @@ impl<'a> Parser<'a> {
             source,
             tokens,
             pos: 0,
+            depth: 0,
         }
+    }
+
+    /// Run `descend` one nesting level deeper, refusing past
+    /// [`MAX_NESTING_DEPTH`].
+    ///
+    /// Every recursive step in a value or expression goes through here, so
+    /// the counter is the single place the bound is enforced — a new
+    /// recursive production cannot reopen the hole by forgetting to check.
+    fn nested<T>(
+        &mut self,
+        descend: impl FnOnce(&mut Self) -> Result<T, ParseError>,
+    ) -> Result<T, ParseError> {
+        if self.depth >= MAX_NESTING_DEPTH {
+            return Err(ParseError::NestingTooDeep {
+                position: self.position(),
+                limit: MAX_NESTING_DEPTH,
+            });
+        }
+        self.depth += 1;
+        let result = descend(self);
+        self.depth -= 1;
+        result
     }
 
     fn parse_module(&mut self) -> Result<Module, ParseError> {
@@ -151,7 +259,7 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_theme_item(&mut self, start_byte: usize) -> Result<Item, ParseError> {
-        let name = self.expect_ident()?;
+        let (name, name_span) = self.expect_ident_spanned()?;
         self.consume_optional_colon();
         self.expect_newline()?;
         let body = if self.peek_is(&TokenKind::Indent) {
@@ -168,7 +276,12 @@ impl<'a> Parser<'a> {
             Vec::new()
         };
         let span = start_byte..self.last_content_byte();
-        Ok(Item::Theme { name, body, span })
+        Ok(Item::Theme {
+            name,
+            name_span,
+            body,
+            span,
+        })
     }
 
     fn parse_theme_rule(&mut self) -> Result<ThemeRule, ParseError> {
@@ -211,7 +324,7 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_def_item(&mut self, start_byte: usize) -> Result<Item, ParseError> {
-        let name = self.expect_ident()?;
+        let (name, name_span) = self.expect_ident_spanned()?;
         let args = self.parse_header_args_until_eol()?;
         self.consume_optional_colon();
         self.expect_newline()?;
@@ -219,6 +332,7 @@ impl<'a> Parser<'a> {
         let span = start_byte..self.last_content_byte();
         Ok(Item::Def {
             name,
+            name_span,
             args,
             body,
             span,
@@ -226,16 +340,21 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_site_item(&mut self, start_byte: usize) -> Result<Item, ParseError> {
-        let name = self.expect_ident()?;
+        let (name, name_span) = self.expect_ident_spanned()?;
         self.consume_optional_colon();
         self.expect_newline()?;
         let body = self.parse_optional_command_body()?;
         let span = start_byte..self.last_content_byte();
-        Ok(Item::Site { name, body, span })
+        Ok(Item::Site {
+            name,
+            name_span,
+            body,
+            span,
+        })
     }
 
     fn parse_struct_item(&mut self, start_byte: usize) -> Result<Item, ParseError> {
-        let name = self.expect_ident()?;
+        let (name, name_span) = self.expect_ident_spanned()?;
         let args = self.parse_header_args_until_eol()?;
         self.consume_optional_colon();
         self.expect_newline()?;
@@ -243,6 +362,7 @@ impl<'a> Parser<'a> {
         let span = start_byte..self.last_content_byte();
         Ok(Item::Struct {
             name,
+            name_span,
             args,
             body,
             span,
@@ -308,7 +428,13 @@ impl<'a> Parser<'a> {
         }
         let span = start_byte..self.last_byte();
         self.expect_newline()?;
-        let children = self.parse_optional_command_body()?;
+        // An indented body is the third recursive production, alongside list
+        // values and expressions: `parse_command` → here → `parse_command`.
+        // Reaching a nested body costs O(n²) source bytes because each level
+        // repeats its own indent, but that is a constant factor, not a
+        // bound — 400 levels is a third of a megabyte and used to abort the
+        // process just as `[[[…` did.
+        let children = self.nested(Self::parse_optional_command_body)?;
         Ok(Statement::Generic {
             keyword,
             selector,
@@ -366,7 +492,47 @@ impl<'a> Parser<'a> {
         self.expect(&TokenKind::LBrace)?;
         let mut rows = Vec::new();
         while !self.peek_is(&TokenKind::RBrace) && !self.at_eof() {
+            let pattern_position = self.position();
+            let row_start_byte = self.current_byte();
             let inputs_lex = self.expect_int_lexeme()?;
+            // A row assigns one bit per input signal, so the pattern is
+            // checked against the list left of the arrow.
+            //
+            // Here rather than downstream, though `AssertIr::Truth` does
+            // keep `inputs` beside `rows` and could check it again: this
+            // is where the failure has a position to point at, and where
+            // it is checked once instead of by every pass that grows a
+            // reason to care.
+            //
+            // What one row cannot see is the table around it — no rows at
+            // all, a pattern assigned twice, combinations left out. Those
+            // are `check::truth`, which is why each row keeps a span: the
+            // finding there is one row reported against another.
+            //
+            // A leading zero is data here rather than a numeric quirk,
+            // which is why the row keeps the raw lexeme: `01` and `1` are
+            // different rows of a two-input table.
+            if let Some(bad) = inputs_lex.chars().find(|c| !matches!(c, '0' | '1')) {
+                return Err(ParseError::Syntax {
+                    position: pattern_position,
+                    message: format!(
+                        "truth-table input pattern `{inputs_lex}` must hold only `0` and `1`, \
+                         got `{bad}`"
+                    ),
+                });
+            }
+            if inputs_lex.chars().count() != inputs.len() {
+                return Err(ParseError::Syntax {
+                    position: pattern_position,
+                    message: format!(
+                        "truth-table input pattern `{inputs_lex}` is {got} bits wide, \
+                         but the table has {want} input{plural}",
+                        got = inputs_lex.chars().count(),
+                        want = inputs.len(),
+                        plural = if inputs.len() == 1 { "" } else { "s" },
+                    ),
+                });
+            }
             self.expect(&TokenKind::Arrow)?;
             let out_lex = self.expect_int_lexeme()?;
             let output = match out_lex.as_str() {
@@ -381,6 +547,7 @@ impl<'a> Parser<'a> {
             rows.push(TruthRow {
                 inputs: inputs_lex,
                 output,
+                span: row_start_byte..self.last_byte(),
             });
             if self.peek_is(&TokenKind::Semi) {
                 self.advance();
@@ -439,40 +606,72 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_expr(&mut self) -> Result<Expr, ParseError> {
-        self.parse_expr_or()
+        Ok(self.parse_expr_or()?.0)
     }
 
-    fn parse_expr_or(&mut self) -> Result<Expr, ParseError> {
-        let mut lhs = self.parse_expr_and()?;
+    /// Refuse a boolean tree deeper than [`MAX_EXPR_DEPTH`].
+    ///
+    /// [`Self::nested`] bounds how deep the *parser* descends, which is a
+    /// different quantity: `or` and `and` iterate, so a flat chain costs the
+    /// parser nothing while still building a left-leaning tree one node deep
+    /// per term. Everything downstream walks that tree recursively —
+    /// `Serialize`, the check passes, and `Box`'s own recursive `Drop` — so
+    /// an unbounded chain moves the overflow out of the parser and into
+    /// whoever touches the result. Measured on a debug build,
+    /// `cairn parse` (which serialises) died at roughly 570 terms.
+    fn charge_expr_depth(&self, depth: usize) -> Result<(), ParseError> {
+        if depth > MAX_EXPR_DEPTH {
+            return Err(ParseError::NestingTooDeep {
+                position: self.position(),
+                limit: MAX_EXPR_DEPTH,
+            });
+        }
+        Ok(())
+    }
+
+    /// Returns the expression and the depth of the tree it built, so an
+    /// iteratively-parsed chain still pays for the shape it produced.
+    fn parse_expr_or(&mut self) -> Result<(Expr, usize), ParseError> {
+        let (mut lhs, mut depth) = self.parse_expr_and()?;
         while self.match_keyword("or") {
-            let rhs = self.parse_expr_and()?;
+            let (rhs, rhs_depth) = self.parse_expr_and()?;
+            depth = depth.max(rhs_depth) + 1;
+            self.charge_expr_depth(depth)?;
             lhs = Expr::Or(Box::new(lhs), Box::new(rhs));
         }
-        Ok(lhs)
+        Ok((lhs, depth))
     }
 
-    fn parse_expr_and(&mut self) -> Result<Expr, ParseError> {
-        let mut lhs = self.parse_expr_not()?;
+    fn parse_expr_and(&mut self) -> Result<(Expr, usize), ParseError> {
+        let (mut lhs, mut depth) = self.parse_expr_not()?;
         while self.match_keyword("and") {
-            let rhs = self.parse_expr_not()?;
+            let (rhs, rhs_depth) = self.parse_expr_not()?;
+            depth = depth.max(rhs_depth) + 1;
+            self.charge_expr_depth(depth)?;
             lhs = Expr::And(Box::new(lhs), Box::new(rhs));
         }
-        Ok(lhs)
+        Ok((lhs, depth))
     }
 
-    fn parse_expr_not(&mut self) -> Result<Expr, ParseError> {
+    /// Both recursive shapes an expression can take — a `not` chain and a
+    /// parenthesised sub-expression — pass through [`Self::nested`], which
+    /// bounds the parser's own descent. Parentheses build no node, so they
+    /// cost descent without costing tree depth; `not` costs both.
+    fn parse_expr_not(&mut self) -> Result<(Expr, usize), ParseError> {
         if self.match_keyword("not") {
-            let inner = self.parse_expr_not()?;
-            return Ok(Expr::Not(Box::new(inner)));
+            let (inner, inner_depth) = self.nested(Self::parse_expr_not)?;
+            let depth = inner_depth + 1;
+            self.charge_expr_depth(depth)?;
+            return Ok((Expr::Not(Box::new(inner)), depth));
         }
         if self.peek_is(&TokenKind::LParen) {
             self.advance();
-            let inner = self.parse_expr_or()?;
+            let inner = self.nested(Self::parse_expr_or)?;
             self.expect(&TokenKind::RParen)?;
             return Ok(inner);
         }
         let dotted = self.parse_dotted_ref()?;
-        Ok(Expr::Ref(dotted))
+        Ok((Expr::Ref(dotted), 1))
     }
 
     fn match_keyword(&mut self, kw: &str) -> bool {
@@ -589,7 +788,7 @@ impl<'a> Parser<'a> {
                 self.advance();
                 let mut items = Vec::new();
                 while !self.peek_is(&TokenKind::RBracket) && !self.at_eof() {
-                    items.push(self.parse_value()?);
+                    items.push(self.nested(Self::parse_value)?);
                     if self.peek_is(&TokenKind::Comma) {
                         self.advance();
                     }
@@ -665,6 +864,16 @@ impl<'a> Parser<'a> {
     }
 
     fn expect_ident(&mut self) -> Result<String, ParseError> {
+        self.expect_ident_spanned().map(|(name, _)| name)
+    }
+
+    /// [`Self::expect_ident`] keeping the identifier's own byte range.
+    ///
+    /// Callers that record a name in the AST need it: the enclosing
+    /// item's span covers the indented body, and reconstructing the
+    /// header line from `span.start` plus the keyword's length assumes a
+    /// single space that `def   hut` does not have.
+    fn expect_ident_spanned(&mut self) -> Result<(String, crate::error::Span), ParseError> {
         let position = self.position();
         let Some(token) = self.peek().cloned() else {
             return Err(ParseError::Syntax {
@@ -674,7 +883,7 @@ impl<'a> Parser<'a> {
         };
         if let TokenKind::Ident(name) = token.kind {
             self.advance();
-            Ok(name)
+            Ok((name, token.span))
         } else {
             Err(ParseError::Syntax {
                 position,

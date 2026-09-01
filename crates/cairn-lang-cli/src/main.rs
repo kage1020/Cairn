@@ -5,13 +5,18 @@ use std::process::ExitCode;
 
 use cairn_lang_core::CAIRN_VERSION;
 use cairn_lang_core::block_array::{BlockArray, BlockArrayIr, lower_to_block_array};
-use cairn_lang_core::check::LineStarts;
+use cairn_lang_core::check::{DiagnosticNote as Note, LineStarts, RenderedDiagnostic};
 use cairn_lang_core::lock::{
-    HashHex, LockEdition, LockInputs, LockPlacement, LockTarget, LockWalkway, Lockfile,
-    hash_resolved_ir, hash_source,
+    HashHex, LOCK_SCHEMA_VERSION, LockEdition, LockError, LockInputs, LockPlacement, LockTarget,
+    LockWalkway, Lockfile, hash_resolved_ir, hash_source,
 };
-use cairn_lang_core::resolve::{EditionPortability, VersionAxes, compute_axes, resolve};
-use cairn_lang_core::{Edition, Severity, check, lower, parse};
+use cairn_lang_core::resolve::{
+    BuildableTargets, EditionReport, UnsupportedEntry, UnsupportedReason, VersionAxes,
+    VersionFloor, compare_versions, compute_axes, declared_version_floor, resolve,
+};
+use cairn_lang_core::{
+    Diagnostic, Edition, ParseError, Severity, check, diagnose_parse_failure, lower, parse,
+};
 use cairn_lang_formats::bedrock_structure::{ParityNote, build_mcstructure_tag, write_mcstructure};
 use cairn_lang_formats::data_version::{
     BedrockTarget, JavaTarget, resolve_bedrock_target, resolve_java_target,
@@ -54,6 +59,11 @@ enum Command {
     /// when nothing is reported, 1 when any `Error`-severity diagnostic is
     /// emitted (or the file fails to parse), 2 when the file cannot be
     /// located.
+    ///
+    /// This command does not run block-array lowering, so no lowering-stage
+    /// finding reaches it — `E_UNKNOWN_ID` and `E_UNKNOWN_ABSTRACT_TOKEN`
+    /// among them. `cairn compile` runs both stages and is the gate that
+    /// sees every code.
     Check {
         /// Path to the .crn file to check.
         file: PathBuf,
@@ -72,9 +82,12 @@ enum Command {
     },
     /// Report the three version axes (registry-compatible range, edition
     /// portability, semantic-sensitive members) for a .crn source file.
-    /// Exits 0 on success, 1 on parse failure or any other I/O error
-    /// (permission denied, non-UTF-8 contents), 2 when the file cannot be
-    /// located, and rejects an empty `--editions` value with exit 2.
+    /// Exits 0 on success; 1 on a parse failure, on any `Error`-severity
+    /// diagnostic (the check passes run here, and a range derived from a
+    /// file `cairn check` rejects is a confident wrong answer), or on any
+    /// other I/O error (permission denied, non-UTF-8 contents); 2 when the
+    /// file cannot be located, and rejects an empty `--editions` value with
+    /// exit 2.
     Info {
         /// Path to the .crn file to inspect.
         file: PathBuf,
@@ -92,8 +105,10 @@ enum Command {
     /// `cairn compile` writes the same IR out as a Java `.nbt` artifact.
     /// Lowering warnings (deferred members, themeless scopes, abstract
     /// tokens) print to stderr but do not affect the exit code. Exits 0 on
-    /// success, 1 on parse failure or I/O error, 2 when the file cannot be
-    /// located.
+    /// success, 1 on a parse failure, on any `Error`-severity diagnostic
+    /// (`E_UNKNOWN_ABSTRACT_TOKEN` among them; `E_UNKNOWN_ID` is not, since
+    /// nothing here pins a target to check ids against), or on an I/O
+    /// error, and 2 when the file cannot be located.
     Lower {
         /// Path to the .crn file to lower.
         file: PathBuf,
@@ -104,11 +119,16 @@ enum Command {
     /// Compile a .crn source file to its edition+version-pinned structure
     /// artifact set and write a lockfile next to the source. `--edition
     /// java` writes gzip `.nbt` structures; `--edition bedrock` writes
-    /// uncompressed `.mcstructure` files. The Bedrock backend emits
-    /// stateless palettes only for now — a palette entry that carries
-    /// blockstate properties is a hard error rather than a silent drop.
+    /// uncompressed `.mcstructure` files, translating the blockstate
+    /// families it knows into Bedrock `states`; a property it cannot
+    /// translate is a hard error, and intent it can only approximate (stair
+    /// `shape`) is dropped with a `W_INTENT_DEGRADED` warning rather than
+    /// silently. This is also the only command that checks block ids against a
+    /// registry (`E_UNKNOWN_ID`): `--target` pins the one version there is
+    /// an answer for.
     /// Exits 0 on success, 1 on parse, lowering, or I/O failure (including
-    /// an unsupported `--target` or a stateful Bedrock palette), and 2
+    /// an unsupported `--target` or a Bedrock property with no `states`
+    /// translation), and 2
     /// when the source file cannot be located.
     Compile {
         /// Path to the .crn file to compile.
@@ -147,15 +167,13 @@ enum Command {
     /// over the routed IR and fills every cell's `delay_ticks` with
     /// the sum of the cell's base delay and each implicit buffer
     /// repeater's `BUFFER_REPEATER_TICKS` contribution over every
-    /// driver segment beyond the `DUST_ATTENUATION_LIMIT`;
+    /// driving net's segment beyond the `DUST_ATTENUATION_LIMIT`;
     /// `--stage crossing` runs crossing legalization over the delayed
-    /// IR, refuses with `E_CROSSING_CONGESTION` when a cross-net
-    /// plane overlap cannot fit inside the `void=<N>` reservation,
-    /// and fills every cell's `buffer_coords` with the concrete
-    /// coord of each implicit buffer repeater (escaping to a
-    /// `RouteLayer::Bridge` y-layer whenever the plane candidate
-    /// collides with a cell / pad / plane crossing / earlier
-    /// buffer). Every cell of the four Placement IR stages carries a
+    /// IR and fills every cell's `buffer_coords` with the coord of the
+    /// buffer repeater each driver segment passes through (a repeater
+    /// this net already placed is recorded rather than duplicated, so
+    /// one block can be named by several segments). Every cell of the
+    /// four Placement IR stages carries a
     /// `"stage"` key echoing the flag value that produced the dump
     /// (`placement` / `route` / `delay` / `crossing`), so a consumer
     /// reads the stage off the output instead of inferring it from
@@ -222,9 +240,9 @@ enum SynthStage {
     /// Routed Placement IR: Steiner routing over the Placement IR
     /// against `--edition`. Stage 2 of `spec/redstone` §14.5's
     /// place-and-route pipeline. Fills every cell's `wire_length`
-    /// with the sum of Manhattan distances from each driver source
-    /// into the cell; `delay_ticks` stays `None` until the
-    /// delay-insertion pass (stage 3) runs.
+    /// with the sum, over the nets driving it, of the routed length
+    /// from that net's source into the cell; `delay_ticks` stays
+    /// `None` until the delay-insertion pass (stage 3) runs.
     Route,
     /// Delayed Placement IR: delay insertion over the routed Placement
     /// IR against `--edition`. Stage 3 of `spec/redstone` §14.5's
@@ -233,34 +251,33 @@ enum SynthStage {
     /// ([`cairn_lang_redstone::EditionCell::base_delay_ticks`]) and
     /// each implicit buffer repeater's
     /// [`cairn_lang_redstone::BUFFER_REPEATER_TICKS`] contribution
-    /// implied by driver segments beyond
+    /// implied by each driving net's segment beyond
     /// [`cairn_lang_redstone::DUST_ATTENUATION_LIMIT`]; refuses with
     /// `E_ATTENUATION_LIMIT` when a segment exceeds the v1 sanity cap
-    /// [`cairn_lang_redstone::MAX_ATTENUATION_SEGMENT`], the threshold
-    /// past which a stage-4 crossing-legalization escape becomes
-    /// unavoidable.
+    /// [`cairn_lang_redstone::MAX_ATTENUATION_SEGMENT`], past which the
+    /// buffer chain a segment needs is longer than v1 will build.
     Delay,
     /// Legalized Placement IR: crossing legalization over the delayed
     /// Placement IR against `--edition`. Stage 4 of `spec/redstone`
-    /// §14.5's place-and-route pipeline. Detects wire coords two
-    /// distinct nets would otherwise share on the ground plane
-    /// (refused with `E_CROSSING_CONGESTION` when the
-    /// `circuit region=<label> void=<N>` reservation offers no
-    /// y-layer to escape to) and materialises the concrete coord of
+    /// §14.5's place-and-route pipeline. Materialises the coord of
     /// every implicit buffer repeater the delay pass counted into
-    /// every cell's `buffer_coords`. A buffer whose plane candidate
-    /// collides with a cell / pad / plane crossing / earlier buffer
-    /// escapes to the first free `RouteLayer::Bridge` y-layer inside
-    /// the `void=<N>` budget; if every bridge y-layer at that
-    /// `(x, z)` is also taken, refuses with
-    /// `E_BUFFER_COORD_COLLISION`. v1 does not lift the wire
-    /// crossing itself onto `Bridge` — the routed wire path is not
-    /// carried on the IR, and stage-5 block-array lowering re-runs
-    /// the routing algorithm to derive the crossings itself. A scope
-    /// with nothing to legalize emits no `buffer_coords` at all
-    /// (the empty vector serde-skips); the `"stage": "crossing"` tag
-    /// on every cell, not the presence of that key, is what marks the
-    /// dump as having been through this pass.
+    /// every cell's `buffer_coords`, one entry per driver segment that
+    /// passes through it — so a block serving several segments is
+    /// named once per segment and a consumer counting blocks
+    /// deduplicates by coord.
+    ///
+    /// The wire needs no legalizing here. Two nets on one coord, or one
+    /// step apart in one plane, would be one strand of dust carrying
+    /// two signals, and stage 2 is where that is prevented: each net is
+    /// routed around the dust of the nets before it and around the
+    /// coords beside that dust, so a scope that reaches this stage has
+    /// no short to find and no coord for a repeater to contest.
+    ///
+    /// A scope with nothing to legalize emits no `buffer_coords` at all
+    /// (the empty vector serde-skips); the
+    /// `"stage": "crossing"` tag on every cell, not the presence of
+    /// that key, is what marks the dump as having been through this
+    /// pass.
     Crossing,
 }
 
@@ -314,6 +331,24 @@ impl EditionArg {
         match self {
             EditionArg::Java => Edition::Java,
             EditionArg::Bedrock => Edition::Bedrock,
+        }
+    }
+
+    /// The built-in registry pack this edition compiles against, whose
+    /// version table is the closed set of `--target` values.
+    fn registry_pack(self) -> &'static RegistryPack {
+        match self {
+            EditionArg::Java => builtin_java(),
+            EditionArg::Bedrock => builtin_bedrock(),
+        }
+    }
+
+    /// Lowercase name, matching the `--edition` spelling and the label
+    /// `UnsupportedTarget` uses, so one message never calls it two things.
+    fn as_str(self) -> &'static str {
+        match self {
+            EditionArg::Java => "java",
+            EditionArg::Bedrock => "bedrock",
         }
     }
 }
@@ -381,14 +416,7 @@ fn run_parse(file: &Path, format: Format) -> ExitCode {
     let module = match parse(&source) {
         Ok(m) => m,
         Err(err) => {
-            // gcc/clang style `file:line:col:` so editors can jump.
-            let position = err.position();
-            eprintln!(
-                "error: {}:{}: {}",
-                file.display(),
-                position,
-                err.user_message(),
-            );
+            report_parse_failure(file, &source, &err);
             return ExitCode::from(1);
         }
     };
@@ -406,6 +434,77 @@ fn run_parse(file: &Path, format: Format) -> ExitCode {
         Format::Debug => {
             println!("{module:#?}");
             ExitCode::SUCCESS
+        }
+    }
+}
+
+/// Report one diagnostic on stderr, in the gcc-style shape every
+/// subcommand reports its findings in, with its notes under it.
+///
+/// One place rather than seven. The same five lines and the same
+/// `report_notes` call stood in every command that reads a source, which
+/// is how a bare `error:` line with no code survived beside them for the
+/// one finding that had no [`Diagnostic`] to render from.
+///
+/// [`report_synth_diagnostics`] is the eighth copy and stays one: it reads
+/// `cairn_lang_redstone::Diagnostic`, a different type that renders the
+/// same way, and see there for why the two are not merged.
+fn report_diagnostic(file: &Path, source: &str, lines: &LineStarts, d: &Diagnostic) {
+    eprintln!(
+        "{}:{}: {}[{}]: {}",
+        file.display(),
+        lines.position(source, d.span.start),
+        d.severity().as_str(),
+        d.code.as_str(),
+        d.primary,
+    );
+    report_notes(file, source, lines, &d.notes);
+}
+
+/// Report a parse failure the way every other finding is reported.
+///
+/// Five subcommands read a source, and each rendered this by hand as a
+/// bare `error:` line with no code — the one finding a reader could not
+/// look up in `spec/lint.md`, and the one a grep for `error[E_` missed.
+fn report_parse_failure(file: &Path, source: &str, err: &ParseError) {
+    let lines = LineStarts::new(source);
+    let diagnostic = diagnose_parse_failure(source, &lines, err);
+    report_diagnostic(file, source, &lines, &diagnostic);
+}
+
+/// Render diagnostics into the wire form `--format json` ships.
+///
+/// The `RenderedDiagnostic` form rather than the `Diagnostic` one, because
+/// that is what carries `line` / `col` / `end_line` / `end_col`: serialising
+/// the diagnostic itself would ship `code` / `severity` / `primary` /
+/// `notes` with no source position at all.
+fn rendered(
+    source: &str,
+    lines: &LineStarts,
+    diagnostics: &[Diagnostic],
+) -> Vec<RenderedDiagnostic> {
+    diagnostics
+        .iter()
+        .map(|d| d.render(source, lines))
+        .collect()
+}
+
+/// Write one JSON document to stdout, or report why it could not be
+/// serialised and give the caller an exit code.
+///
+/// Every `--format json` document goes through here rather than being
+/// assembled by hand: a document built by string interpolation indents to
+/// whatever the format string says, which is how two commands came to
+/// pretty-print differently while claiming one contract.
+fn print_json<T: serde::Serialize>(what: &str, value: &T) -> Result<(), ExitCode> {
+    match serde_json::to_string_pretty(value) {
+        Ok(json) => {
+            println!("{json}");
+            Ok(())
+        }
+        Err(err) => {
+            eprintln!("error: failed to serialise {what} as JSON: {err}");
+            Err(ExitCode::from(1))
         }
     }
 }
@@ -428,18 +527,27 @@ fn run_check(file: &Path, edition: Option<EditionArg>, format: CheckFormat) -> E
     let module = match parse(&source) {
         Ok(m) => m,
         Err(err) => {
-            eprintln!(
-                "error: {}:{}: {}",
-                file.display(),
-                err.position(),
-                err.user_message(),
-            );
+            // The product of `check --format json` is the diagnostics
+            // array, so a parse failure is that array with one element in
+            // it. Nothing about the shape changes; what changes is that
+            // the most common way a source fails stops being the one input
+            // the flag answers with an empty stream.
+            match format {
+                CheckFormat::Text => report_parse_failure(file, &source, &err),
+                CheckFormat::Json => {
+                    let lines = LineStarts::new(&source);
+                    let one = [diagnose_parse_failure(&source, &lines, &err)];
+                    if let Err(code) = print_json("diagnostics", &rendered(&source, &lines, &one)) {
+                        return code;
+                    }
+                }
+            }
             return ExitCode::from(1);
         }
     };
     let ir = lower(&module);
     let diagnostics = check(&module, &ir, edition.map(EditionArg::as_edition));
-    let has_error = diagnostics.iter().any(|d| d.severity == Severity::Error);
+    let has_error = diagnostics.iter().any(|d| d.severity() == Severity::Error);
     // Build the line-start index once and reuse it for every diagnostic /
     // note position lookup. Without this we'd re-walk the entire source for
     // each position computation, which gets expensive when a single file
@@ -447,47 +555,22 @@ fn run_check(file: &Path, edition: Option<EditionArg>, format: CheckFormat) -> E
     let lines = LineStarts::new(&source);
 
     match format {
+        // Diagnostics are the report, not the product. Every other
+        // subcommand sends theirs to stderr, and `check` sending its text
+        // form to stdout meant `cairn check f.crn > out` swallowed them
+        // while still exiting 1 — a CI step that captured stdout for
+        // something else saw a bare exit code and no reason.
+        //
+        // `--format json` stays on stdout: that one *is* the product, and a
+        // consumer redirects it deliberately.
         CheckFormat::Text => {
             for d in &diagnostics {
-                let pos = lines.position(&source, d.span.start);
-                println!(
-                    "{}:{}: {}[{}]: {}",
-                    file.display(),
-                    pos,
-                    d.severity.as_str(),
-                    d.code.as_str(),
-                    d.primary,
-                );
-                for note in &d.notes {
-                    if let Some(span) = note.span.as_ref() {
-                        let note_pos = lines.position(&source, span.start);
-                        println!("{}:{}:   note: {}", file.display(), note_pos, note.message);
-                    } else {
-                        // Informational note with no distinct secondary
-                        // location — indent without a file:L:C prefix so the
-                        // output doesn't read as a second pointer at the
-                        // primary span.
-                        println!("  note: {}", note.message);
-                    }
-                }
+                report_diagnostic(file, &source, &lines, d);
             }
         }
         CheckFormat::Json => {
-            // Render to the `RenderedDiagnostic` form so the JSON output
-            // carries `line` / `col` / `end_line` / `end_col` — without
-            // this the `--format json` contract for downstream tooling
-            // would ship only `code` / `severity` / `primary` / `notes`,
-            // with no source position at all.
-            let rendered: Vec<_> = diagnostics
-                .iter()
-                .map(|d| d.render(&source, &lines))
-                .collect();
-            match serde_json::to_string_pretty(&rendered) {
-                Ok(json) => println!("{json}"),
-                Err(err) => {
-                    eprintln!("error: failed to serialise diagnostics as JSON: {err}");
-                    return ExitCode::from(1);
-                }
+            if let Err(code) = print_json("diagnostics", &rendered(&source, &lines, &diagnostics)) {
+                return code;
             }
         }
     }
@@ -497,6 +580,52 @@ fn run_check(file: &Path, edition: Option<EditionArg>, format: CheckFormat) -> E
     } else {
         ExitCode::SUCCESS
     }
+}
+
+/// The document `info --format json` writes where it has no report.
+///
+/// A struct rather than a `serde_json::json!` object or a format string:
+/// both of those render the findings through a second path, and the two
+/// showed it — an interpolated wrapper indents to whatever the format
+/// string says, and a `Value` re-sorts the keys, so the same diagnostic
+/// came out looking different depending on which command emitted it.
+#[derive(serde::Serialize)]
+struct DiagnosticsDocument {
+    diagnostics: Vec<RenderedDiagnostic>,
+}
+
+/// Report the findings that stopped `info` from producing a report, and
+/// give back its exit code.
+///
+/// `info`'s product is the `VersionAxes` document, not a diagnostics list,
+/// so a failure cannot be "the report with a hole in it". Under
+/// `--format json` it is a document of its own — `{"diagnostics": [...]}`,
+/// told apart from a report by its keys and by the exit code — which is
+/// what keeps the flag's promise of one JSON document on stdout for every
+/// input. Under `--format text` the findings read as they always have.
+fn report_info_failure(
+    file: &Path,
+    source: &str,
+    format: InfoFormat,
+    diagnostics: &[Diagnostic],
+) -> ExitCode {
+    let lines = LineStarts::new(source);
+    match format {
+        InfoFormat::Text => {
+            for d in diagnostics {
+                report_diagnostic(file, source, &lines, d);
+            }
+        }
+        InfoFormat::Json => {
+            let document = DiagnosticsDocument {
+                diagnostics: rendered(source, &lines, diagnostics),
+            };
+            if let Err(code) = print_json("diagnostics", &document) {
+                return code;
+            }
+        }
+    }
+    ExitCode::from(1)
 }
 
 fn run_info(file: &Path, editions: &[String], format: InfoFormat) -> ExitCode {
@@ -533,88 +662,67 @@ fn run_info(file: &Path, editions: &[String], format: InfoFormat) -> ExitCode {
     let module = match parse(&source) {
         Ok(m) => m,
         Err(err) => {
-            eprintln!(
-                "error: {}:{}: {}",
-                file.display(),
-                err.position(),
-                err.user_message(),
-            );
-            return ExitCode::from(1);
+            let lines = LineStarts::new(&source);
+            let one = [diagnose_parse_failure(&source, &lines, &err)];
+            return report_info_failure(file, &source, format, &one);
         }
     };
     let ir = lower(&module);
 
-    // Surface resolver + lowering diagnostics before running the parity
-    // dry-run — the same contract `run_check` / `run_lower` / `run_compile`
-    // already honor. Without this, a `.crn` carrying an
-    // `E_UNRESOLVED_SLOT` (or any other Error-severity finding) would
-    // still get `cairn info` exit 0 with a portability row computed
-    // against a partially unresolved IR, which is a poor CI gate.
+    // Surface the check pass (syntactic + resolver) and lowering
+    // diagnostics before running the parity dry-run — the same contract
+    // `run_check` / `run_lower` / `run_compile` honor. Without this, a
+    // `.crn` carrying an `E_UNRESOLVED_SLOT` (or any other Error-severity
+    // finding) would still get `cairn info` exit 0 with a portability row
+    // computed against a partially unresolved IR, which is a poor CI gate.
     //
-    // The diagnostic set follows `cairn check` semantics — `resolve(ir,
-    // None)` unions slot names across per-edition variants — so a file
-    // whose only "problem" is that one variant declares a slot the other
-    // doesn't still passes here. A per-edition strict pass (`resolve(ir,
-    // Some(edition))`) is what the parity dry-run below runs; its
-    // downstream lowering may add lowering-level diagnostics that are
-    // edition-agnostic in practice.
+    // This gate is edition-neutral — `resolve(ir, None)` unions slot names
+    // across per-edition variants — so a file whose only "problem" is that
+    // one variant declares a slot the other does not still passes here.
+    // The strict per-edition pass runs inside the dry-run below, which
+    // reports whatever only it can see.
     let resolution = resolve(&ir, None);
-    let mut block_ir = lower_to_block_array(&ir, &resolution, Some(&builtin_java().materials));
-    let mut combined = resolution.diagnostics.clone();
-    combined.append(&mut block_ir.diagnostics);
+    // `info` reports across every target in the pack's range, so there is
+    // no single version to check ids against and the view carries no id
+    // table. Guessing one would refuse ids that are fine on the version
+    // the author compiles for; `cairn compile --target` is where the
+    // question has an answer.
+    let mut block_ir = lower_to_block_array(&ir, &resolution, Some(&builtin_java().view(None)));
+    let combined = build_diagnostics(
+        &module,
+        &ir,
+        None,
+        std::mem::take(&mut block_ir.diagnostics),
+    );
 
     let lines = LineStarts::new(&source);
-    let mut has_error = false;
-    for d in &combined {
-        let pos = lines.position(&source, d.span.start);
-        eprintln!(
-            "{}:{}: {}[{}]: {}",
-            file.display(),
-            pos,
-            d.severity.as_str(),
-            d.code.as_str(),
-            d.primary,
-        );
-        for note in &d.notes {
-            eprintln!("  note: {}", note.message);
-        }
-        if d.severity == Severity::Error {
-            has_error = true;
-        }
-    }
+    let has_error = combined.iter().any(|d| d.severity() == Severity::Error);
     if has_error {
-        return ExitCode::from(1);
+        return report_info_failure(file, &source, format, &combined);
+    }
+    // Warnings on a run that still has a report keep going to stderr as
+    // text, in both formats. Folding them into the report would change a
+    // document downstream tooling already reads, which is a breaking
+    // change and a decision of its own.
+    for d in &combined {
+        report_diagnostic(file, &source, &lines, d);
     }
 
-    // One dry-run lower per requested edition: the resolver's per-edition
-    // theme variant selection can produce a different palette per edition
-    // (the whole point of spec §10.7 hierarchy #2), so a single shared
-    // block-array IR would misrepresent the parity axis.
-    //
-    // The lowering never writes files here — it stops at the in-memory
-    // `BlockArrayIr` that `portability_for_*` inspects.
-    let mut per_edition: Vec<EditionPortability> = Vec::with_capacity(editions.len());
-    for e in editions {
-        let edition: Edition = e.parse().expect("validated above");
-        let per_edition_resolution = resolve(&ir, Some(edition));
-        let materials = match edition {
-            Edition::Java => &builtin_java().materials,
-            Edition::Bedrock => &builtin_bedrock().materials,
-        };
-        let per_block_ir = lower_to_block_array(&ir, &per_edition_resolution, Some(materials));
-        let counts = match edition {
-            Edition::Java => portability_for_java(&per_block_ir),
-            Edition::Bedrock => portability_for_bedrock(&per_block_ir),
-        };
-        per_edition.push(EditionPortability {
-            edition,
-            portable: counts.portable,
-            degraded: counts.degraded,
-            unsupported: counts.unsupported,
-        });
-    }
+    let floor = declared_version_floor(&module);
+    let rows = match edition_rows(
+        file,
+        &source,
+        &lines,
+        &ir,
+        editions,
+        floor.as_ref(),
+        &combined,
+    ) {
+        Ok(rows) => rows,
+        Err(code) => return code,
+    };
 
-    let axes = compute_axes(&module, &ir, &resolution, per_edition);
+    let axes = compute_axes(&module, &ir, &resolution, rows);
 
     match format {
         InfoFormat::Text => {
@@ -632,6 +740,341 @@ fn run_info(file: &Path, editions: &[String], format: InfoFormat) -> ExitCode {
             }
         },
     }
+}
+
+/// One dry-run lower per requested edition, plus one per supported version
+/// of it, returning the two per-edition rows.
+///
+/// The resolver's per-edition theme-variant selection can produce a
+/// different palette per edition (the whole point of spec §10.7 hierarchy
+/// #2), so a single shared block-array IR would misrepresent the parity
+/// axis. Nothing is written to disk — the lowering stops at the in-memory
+/// `BlockArrayIr` that `portability_for_*` inspects.
+///
+/// A finding only the strict per-edition pass produces is reported here and
+/// turns into exit 1. Without that, a source `cairn compile --edition
+/// bedrock` refuses with `E_UNRESOLVED_SLOT` was described as
+/// `degraded: 0  unsupported: 0`, with the member that failed to resolve
+/// visible only as a smaller `portable` count — indistinguishable from
+/// "this edition simply has fewer structures". A parity report that cannot
+/// show a parity failure is worse than none.
+///
+/// The version loop is here for the same reason one level down.
+/// Portability asks of the edition, and two palette entries declared by
+/// disjoint sets of versions each answer yes while no single version has
+/// both. Asking each version in turn is the only sound answer, and it
+/// cannot be approximated by intersecting the range-wide palette's id
+/// sets: with no target pinned every material takes its *default*
+/// mapping, so a token the target respells is compared as the wrong id.
+/// A theme binding `@floor.stone.smooth` (default `stone_bricks`,
+/// respelled `stonebrick` at Bedrock 1.21.0) beside a literal
+/// `@stonebrick` has an empty intersection and builds on 1.21.0.
+///
+/// A version counts as buildable when it passes the gates
+/// [`run_compile`] applies to the *source*: the pinned lowering raises no
+/// error, the `@requires` floor is at or below it, and every scope the
+/// source declares lowered. The last two do not depend on the version's id
+/// table, but they decide whether a build happens, and a row that named a
+/// target `compile` refuses would be the same defect this one exists to
+/// remove. The gates after those are about the filesystem — an output
+/// directory, a free lockfile path — and belong to the command that writes.
+///
+/// The loop reports and does not refuse. An entry no version of the
+/// edition has is already a figure rather than a gate here — spec §10.5's
+/// own sample output carries `unsupported: 1` — and a caller that wants a
+/// refusal runs the build. What this row adds is the fact the counters
+/// cannot carry: that the versions disagree about different entries.
+///
+/// Reporting and refusing are different, though, and a row that says
+/// `none` without saying why is not a report. Each pinned lowering's
+/// findings are printed under the version that raised them, because
+/// nothing else in the run will ever show them; the floor and the dropped
+/// scopes get one line each per edition instead, since their reason is the
+/// same for every version and is already on screen — the compat row for
+/// the first, the scope's own warning for the second.
+///
+/// The cost is one lowering per version per edition rather than one per
+/// edition — three versions per edition in the built-in packs — and each
+/// reuses the edition's single `resolve`, which is the expensive half.
+///
+/// `already_reported` is the edition-neutral stream the caller has printed;
+/// only diagnostics absent from it are reported, keyed by code and span, so
+/// the shared findings are not repeated once per edition.
+fn edition_rows(
+    file: &Path,
+    source: &str,
+    lines: &LineStarts,
+    ir: &cairn_lang_core::intent::IntentModule,
+    editions: &[String],
+    floor: Option<&VersionFloor>,
+    already_reported: &[cairn_lang_core::check::Diagnostic],
+) -> Result<Vec<EditionReport>, ExitCode> {
+    let already: std::collections::HashSet<(&str, usize, usize)> = already_reported
+        .iter()
+        .map(|d| (d.code.as_str(), d.span.start, d.span.end))
+        .collect();
+    let mut rows: Vec<EditionReport> = Vec::with_capacity(editions.len());
+    let mut edition_specific_error = false;
+
+    for e in editions {
+        let edition: Edition = e.parse().expect("validated by the caller");
+        let resolution = resolve(ir, Some(edition));
+        let pack = match edition {
+            Edition::Java => builtin_java(),
+            Edition::Bedrock => builtin_bedrock(),
+        };
+        // Same reason as the pass above: no single version, so the lowering
+        // gets no id table and raises no `E_UNKNOWN_ID`. The portability
+        // fold below still reads the pack's tables — it asks the wider
+        // question "does this edition have the block at all", which the
+        // whole range can answer.
+        let block_ir = lower_to_block_array(ir, &resolution, Some(&pack.view(None)));
+
+        let only_here: Vec<_> = resolution
+            .diagnostics
+            .iter()
+            .chain(block_ir.diagnostics.iter())
+            .filter(|d| !already.contains(&(d.code.as_str(), d.span.start, d.span.end)))
+            .cloned()
+            .collect();
+        if !only_here.is_empty() {
+            eprintln!("note: reported for --editions {}", edition.as_str());
+            if report_core_diagnostics(file, source, lines, &only_here) {
+                edition_specific_error = true;
+            }
+        }
+
+        let portability = match edition {
+            Edition::Java => portability_for_java(&block_ir, &pack.blocks),
+            Edition::Bedrock => portability_for_bedrock(&block_ir, &pack.blocks),
+        };
+        for note in unsupported_notes(edition, portability.unsupported()) {
+            eprintln!("{note}");
+        }
+        let dropped = dropped_scopes(&resolution, &block_ir);
+        if !dropped.is_empty() {
+            eprintln!(
+                "note: no {} target can build this source: {} produced no voxels, and a partial \
+                 build is not certified",
+                edition.as_str(),
+                dropped
+                    .iter()
+                    .map(|scope| format!("`{scope}`"))
+                    .collect::<Vec<_>>()
+                    .join(", "),
+            );
+        }
+
+        let considered = supported_versions(pack);
+        let verdicts = weigh_versions(ir, &resolution, pack, floor, &considered, &dropped);
+        for (version, refusals) in &verdicts.refused {
+            eprintln!("note: {} {version} refuses this source", edition.as_str());
+            report_core_diagnostics(file, source, lines, refusals);
+        }
+        if let Some(floor) = floor
+            && !verdicts.below_floor.is_empty()
+        {
+            eprintln!(
+                "note: {} {} {} below the `@requires version>={}` floor this file declares",
+                edition.as_str(),
+                verdicts.below_floor.join(", "),
+                if verdicts.below_floor.len() == 1 {
+                    "is"
+                } else {
+                    "are"
+                },
+                floor.version,
+            );
+        }
+
+        rows.push(EditionReport {
+            edition,
+            portable: portability.counts().portable,
+            degraded: portability.counts().degraded,
+            unsupported: portability.counts().unsupported,
+            unsupported_entries: portability.into_unsupported(),
+            buildable: verdicts.buildable,
+            considered,
+        });
+    }
+
+    // Every requested edition is walked before returning, so one bad edition
+    // does not hide a second one's findings.
+    if edition_specific_error {
+        return Err(ExitCode::from(1));
+    }
+    Ok(rows)
+}
+
+/// The notes naming the palette entries one edition has no form for, in
+/// the order they print, under the figure that counts them.
+///
+/// Returned rather than printed so a test can read the whole block: the
+/// header carries the figure the stdout row carries, and an assertion on
+/// one line of stderr cannot see that.
+///
+/// The figure is `entries.len()` and that is not a second tally of the
+/// row's: [`PortabilityReport`] raises `unsupported` only beside a push,
+/// and its fields are private, so the length of the list it hands out is
+/// the number the row prints.
+///
+/// Stderr, beside the other notes this command prints. The four stdout
+/// rows are the text twin of the JSON's top level and what a reader greps;
+/// a per-entry list is not the shape of a row, and a consumer that wants
+/// these structured reads `edition_portability[].unsupported_entries`.
+fn unsupported_notes(edition: Edition, entries: &[UnsupportedEntry]) -> Vec<String> {
+    if entries.is_empty() {
+        return Vec::new();
+    }
+    let mut notes = vec![format!(
+        "note: what `unsupported: {}` counts on {}:",
+        entries.len(),
+        edition.as_str(),
+    )];
+    notes.extend(entries.iter().map(|entry| {
+        format!(
+            "  note: `{}` — {}",
+            entry.id,
+            unsupported_reason(&entry.reason)
+        )
+    }));
+    notes
+}
+
+/// One entry's reason, as the clause that follows its id.
+///
+/// Four sentences for four repairs — change the material, wait for the
+/// backend, fix the pack, edit the blockstate — which is what the single
+/// figure they fold into cannot be read as. Each one ends on what the
+/// reader can do, including the two nobody can do anything about, because
+/// "nothing here is yours to fix" is itself the answer that stops them
+/// looking.
+fn unsupported_reason(reason: &UnsupportedReason) -> String {
+    match reason {
+        UnsupportedReason::AbsentFromEdition { suggestion } => {
+            let absent = "no supported version of this edition declares the block";
+            match suggestion {
+                Some(suggestion) => format!("{absent}; did you mean `{suggestion}`?"),
+                None => absent.to_owned(),
+            }
+        }
+        // The edition is not what cannot express these — this backend is,
+        // and only so far. Saying otherwise would send an author to
+        // abandon a design that works, and leave the missing mapping
+        // unreported because nobody was told there was one.
+        UnsupportedReason::StatesUnmapped { states, mapped } => format!(
+            "the edition has the block; this compiler maps states for {mapped} so far, so \
+             `{states}` has no form here yet — bind the slot to a property-free material, or \
+             build for the other edition"
+        ),
+        UnsupportedReason::StateValueUnexpected { key, value, valid } => format!(
+            "`{key}={value}` is not a valid Java `{key}` (valid: {valid}); a registry pack is \
+             expected to reject this and no pack schema can state a value domain yet, so it is \
+             not yours to repair"
+        ),
+        // The one of the four the author can act on, and the error it
+        // comes from says so — that `Fix:` is the reason this is reported
+        // apart from the value case rather than with it.
+        UnsupportedReason::StateKeyUnread { key, handled } => format!(
+            "`{key}` is not a blockstate this compiler reads (it reads {handled}); remove it \
+             from the source blockstate"
+        ),
+    }
+}
+
+/// Scopes the resolver recorded (`struct::NAME`, `site::SITE::PLACE`) that
+/// the block-array pass did not turn into a structure, in resolver order.
+///
+/// `def::` keys are excluded: a def is a template and lowers to voxels only
+/// through a `place` that instantiates it.
+///
+/// One definition for the two readers. `run_compile` refuses a build that
+/// would leave any of these out, and `edition_rows` reports the same thing
+/// as "no target can build this" — a second copy could drift into
+/// disagreeing about which scopes count.
+fn dropped_scopes(
+    resolution: &cairn_lang_core::Resolution,
+    block_ir: &BlockArrayIr,
+) -> Vec<String> {
+    resolution
+        .scopes
+        .keys()
+        .filter(|key| !key.starts_with("def::"))
+        .filter(|key| !block_ir.structures.contains_key(key.as_str()))
+        .cloned()
+        .collect()
+}
+
+/// Every version a pack declares, in ascending release order.
+///
+/// Sorted here rather than taken as written: `DataVersionTable` documents
+/// its row order as informational, and this list is shown to a reader, so
+/// reordering rows in a pack's JSON must not reorder the output.
+fn supported_versions(pack: &RegistryPack) -> Vec<String> {
+    let mut rows: Vec<&cairn_lang_formats::registry::DataVersionEntry> =
+        pack.data_versions.versions.iter().collect();
+    rows.sort_by_key(|entry| entry.data_version);
+    rows.into_iter()
+        .map(|entry| entry.mc_version.clone())
+        .collect()
+}
+
+/// How each supported version of one edition answered.
+#[derive(Debug, Default)]
+struct VersionVerdicts {
+    /// Versions a build would accept.
+    buildable: Vec<String>,
+    /// Versions whose pinned lowering raised errors, carrying them: the
+    /// caller prints them because nothing else in the run will.
+    refused: Vec<(String, Vec<cairn_lang_core::check::Diagnostic>)>,
+    /// Versions below the `@requires` floor, which are refused without
+    /// being lowered at all — the floor is a relation between the source
+    /// and the target, and no id table changes it.
+    below_floor: Vec<String>,
+}
+
+/// Weigh each supported version against the gates `run_compile` applies to
+/// the source.
+///
+/// `dropped` is the edition's unlowered scopes: non-empty means every
+/// version refuses, so none is lowered a second time to find that out.
+fn weigh_versions(
+    ir: &cairn_lang_core::intent::IntentModule,
+    resolution: &cairn_lang_core::Resolution,
+    pack: &RegistryPack,
+    floor: Option<&VersionFloor>,
+    considered: &[String],
+    dropped: &[String],
+) -> VersionVerdicts {
+    let mut verdicts = VersionVerdicts::default();
+    for version in considered {
+        if floor.is_some_and(|floor| compare_versions(version, &floor.version).is_lt()) {
+            verdicts.below_floor.push(version.clone());
+            continue;
+        }
+        if !dropped.is_empty() {
+            continue;
+        }
+        let pinned = lower_to_block_array(ir, resolution, Some(&pack.view(Some(version))));
+        // Severity rather than a list of codes. `E_UNKNOWN_ID` is the only
+        // finding pinning a target raises today, and naming it here would
+        // keep reporting a version as buildable the day a second one
+        // lands. Nothing is filtered against what the caller already
+        // printed: this is reached only after the edition-neutral gate,
+        // which returns on any Error, so everything already reported is a
+        // warning and no warning refuses a version.
+        let refusals: Vec<_> = pinned
+            .diagnostics
+            .into_iter()
+            .filter(|d| d.severity() == Severity::Error)
+            .collect();
+        if refusals.is_empty() {
+            verdicts.buildable.push(version.clone());
+        } else {
+            verdicts.refused.push((version.clone(), refusals));
+        }
+    }
+    verdicts
 }
 
 fn print_text(axes: &VersionAxes) {
@@ -664,6 +1107,23 @@ fn print_text(axes: &VersionAxes) {
     };
     println!("edition portability:     {portability_line}");
 
+    let buildable_line = if axes.buildable_targets.is_empty() {
+        String::from("(no editions requested)")
+    } else {
+        axes.buildable_targets
+            .iter()
+            .map(|bt| {
+                format!(
+                    "{}: {}",
+                    capitalise(bt.edition.as_str()),
+                    buildable_text(bt)
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("   ")
+    };
+    println!("buildable targets:       {buildable_line}");
+
     let semantic_line = if axes.semantic_sensitive.is_empty() {
         String::from("(none)")
     } else {
@@ -674,6 +1134,38 @@ fn print_text(axes: &VersionAxes) {
             .join(", ")
     };
     println!("semantic-sensitive:      {semantic_line}");
+}
+
+/// One edition's buildable versions, with the refusing ones named after
+/// them.
+///
+/// The refusals are in the sentence rather than left to be inferred: a bare
+/// `1.21.0` cannot be told apart from an edition whose pack declares only
+/// that one version, and the difference between "one target of three" and
+/// "the only target there is" is the whole point of the row.
+fn buildable_text(targets: &BuildableTargets) -> String {
+    let refused: Vec<&str> = targets
+        .considered
+        .iter()
+        .filter(|version| !targets.buildable.contains(version))
+        .map(String::as_str)
+        .collect();
+    let built = if targets.buildable.is_empty() {
+        String::from("none")
+    } else {
+        targets.buildable.join(", ")
+    };
+    if refused.is_empty() {
+        return built;
+    }
+    let tail = if let [only] = refused.as_slice() {
+        format!("{only} refuses")
+    } else if targets.buildable.is_empty() {
+        format!("{} all refuse", refused.join(", "))
+    } else {
+        format!("{} refuse", refused.join(", "))
+    };
+    format!("{built} ({tail})")
 }
 
 fn capitalise(s: &str) -> String {
@@ -698,60 +1190,52 @@ fn run_lower(file: &Path, format: LowerFormat) -> ExitCode {
     let module = match parse(&source) {
         Ok(m) => m,
         Err(err) => {
-            eprintln!(
-                "error: {}:{}: {}",
-                file.display(),
-                err.position(),
-                err.user_message(),
-            );
+            report_parse_failure(file, &source, &err);
             return ExitCode::from(1);
         }
     };
     let ir = lower(&module);
     let resolution = resolve(&ir, None);
-    let mut block_ir = lower_to_block_array(&ir, &resolution, Some(&builtin_java().materials));
-    // Mirror `load_and_lower`: semantic findings produced by the resolver
-    // belong on the same diagnostic stream as the lowering deferrals they
-    // tend to cascade into.
-    let mut combined = resolution.diagnostics;
-    combined.append(&mut block_ir.diagnostics);
-    block_ir.diagnostics = combined;
+    // `lower` takes no `--target` at all, so there is no version to
+    // check ids against; see the note in `run_info`.
+    let mut block_ir = lower_to_block_array(&ir, &resolution, Some(&builtin_java().view(None)));
+    // Mirror `load_and_lower`: the check pass gates the pipeline, and the
+    // lowering deferrals its findings tend to cascade into follow on the
+    // same stream.
+    block_ir.diagnostics = build_diagnostics(
+        &module,
+        &ir,
+        None,
+        std::mem::take(&mut block_ir.diagnostics),
+    );
 
     let lines = LineStarts::new(&source);
     let mut has_error = false;
     for d in &block_ir.diagnostics {
-        let pos = lines.position(&source, d.span.start);
-        eprintln!(
-            "{}:{}: {}[{}]: {}",
-            file.display(),
-            pos,
-            d.severity.as_str(),
-            d.code.as_str(),
-            d.primary,
-        );
-        for note in &d.notes {
-            eprintln!("  note: {}", note.message);
-        }
-        if d.severity == Severity::Error {
+        report_diagnostic(file, &source, &lines, d);
+        if d.severity() == Severity::Error {
             has_error = true;
         }
     }
 
-    let success_exit = if has_error {
-        ExitCode::from(1)
-    } else {
-        ExitCode::SUCCESS
-    };
+    // Refuse before printing, the way `run_info` and `run_compile` do. The
+    // exit code alone does not protect a redirect: `cairn lower f.crn
+    // --format json > ir.json` creates the file before the process ends, so
+    // emitting the IR anyway hands a pipeline a well-formed artifact built
+    // from a source `cairn check` rejects.
+    if has_error {
+        return ExitCode::from(1);
+    }
 
     match format {
         LowerFormat::Ascii => {
             print_block_ir_ascii(&block_ir);
-            success_exit
+            ExitCode::SUCCESS
         }
         LowerFormat::Json => match serde_json::to_string_pretty(&block_ir) {
             Ok(json) => {
                 println!("{json}");
-                success_exit
+                ExitCode::SUCCESS
             }
             Err(err) => {
                 eprintln!("error: failed to serialise block-array IR as JSON: {err}");
@@ -760,7 +1244,7 @@ fn run_lower(file: &Path, format: LowerFormat) -> ExitCode {
         },
         LowerFormat::Debug => {
             println!("{block_ir:#?}");
-            success_exit
+            ExitCode::SUCCESS
         }
     }
 }
@@ -812,30 +1296,21 @@ fn run_synth(
     let module = match parse(&source) {
         Ok(m) => m,
         Err(err) => {
-            eprintln!(
-                "error: {}:{}: {}",
-                file.display(),
-                err.position(),
-                err.user_message(),
-            );
+            report_parse_failure(file, &source, &err);
             return ExitCode::from(1);
         }
     };
     let ir = lower(&module);
     let lines = LineStarts::new(&source);
 
-    // Mirror `run_check` / `run_lower` / `run_compile`: surface
-    // resolver + check diagnostics before running the redstone synth. A
-    // `.crn` whose only problem is `E_UNRESOLVED_SLOT` or a typo caught
-    // by `check` would otherwise exit 0 through the synth path with a
-    // partially resolved IR, which is a poor CI gate.
-    let resolution = resolve(&ir, None);
-    let mut has_error = report_core_diagnostics(file, &source, &lines, &resolution.diagnostics);
-    let check_diagnostics = check(&module, &ir, None);
-    if report_core_diagnostics(file, &source, &lines, &check_diagnostics) {
-        has_error = true;
-    }
-    if has_error {
+    // Mirror `run_check` / `run_lower` / `run_compile`: surface the check
+    // diagnostics before running the redstone synth. A `.crn` whose only
+    // problem is `E_UNRESOLVED_SLOT` or a typo caught by `check` would
+    // otherwise exit 0 through the synth path with a partially resolved
+    // IR, which is a poor CI gate. Synth does not lower to block arrays,
+    // so there are no lowering diagnostics to append here.
+    let diagnostics = build_diagnostics(&module, &ir, None, Vec::new());
+    if report_core_diagnostics(file, &source, &lines, &diagnostics) {
         return ExitCode::from(1);
     }
 
@@ -1110,6 +1585,30 @@ fn require_edition(edition: Option<EditionArg>, stage_name: &str) -> Result<Edit
 /// Print `cairn-lang-core::check::Diagnostic`s in gcc-style, returning
 /// `true` when any Error-severity finding was seen. Shared between
 /// `run_synth`'s resolve + check pre-passes.
+/// Every diagnostic a command must report, in one stream, in the order the
+/// passes ran.
+///
+/// [`check`] runs the syntactic passes **and** merges the resolver's
+/// findings (see `cairn_lang_core::check::check`), so a caller must not
+/// append `Resolution::diagnostics` on top of it. Doing so printed every
+/// resolver finding twice, and — because [`check`] returns span-sorted
+/// output while the resolver emits in discovery order — the second copy
+/// walked the file backwards.
+///
+/// `lowering` carries the block-array pass's own diagnostics, which
+/// [`check`] never sees; pass an empty vector from a command that does not
+/// lower.
+fn build_diagnostics(
+    module: &cairn_lang_core::ast::Module,
+    ir: &cairn_lang_core::intent::IntentModule,
+    edition: Option<Edition>,
+    lowering: Vec<cairn_lang_core::check::Diagnostic>,
+) -> Vec<cairn_lang_core::check::Diagnostic> {
+    let mut combined = check(module, ir, edition);
+    combined.extend(lowering);
+    combined
+}
+
 fn report_core_diagnostics(
     file: &Path,
     source: &str,
@@ -1118,24 +1617,8 @@ fn report_core_diagnostics(
 ) -> bool {
     let mut has_error = false;
     for d in diagnostics {
-        let pos = lines.position(source, d.span.start);
-        eprintln!(
-            "{}:{}: {}[{}]: {}",
-            file.display(),
-            pos,
-            d.severity.as_str(),
-            d.code.as_str(),
-            d.primary,
-        );
-        for note in &d.notes {
-            if let Some(span) = note.span.as_ref() {
-                let note_pos = lines.position(source, span.start);
-                eprintln!("{}:{}:   note: {}", file.display(), note_pos, note.message);
-            } else {
-                eprintln!("  note: {}", note.message);
-            }
-        }
-        if d.severity == Severity::Error {
+        report_diagnostic(file, source, lines, d);
+        if d.severity() == Severity::Error {
             has_error = true;
         }
     }
@@ -1143,9 +1626,11 @@ fn report_core_diagnostics(
 }
 
 /// Print redstone synth diagnostics in the same format the core passes
-/// use. Kept as a separate function because the finding type is
-/// crate-local — merging the two would require an `impl` trait bound on
-/// the diagnostic shape that neither side owns.
+/// use. Kept as a separate function because the two `Diagnostic` types
+/// differ in the one field that matters here — their `code` — so a merged
+/// version would take a trait over the finding to read four fields off it.
+/// The notes are already shared: both are
+/// [`cairn_lang_core::check::DiagnosticNote`].
 fn report_synth_diagnostics(
     file: &Path,
     source: &str,
@@ -1154,24 +1639,16 @@ fn report_synth_diagnostics(
 ) -> bool {
     let mut has_error = false;
     for d in diagnostics {
-        let pos = lines.position(source, d.span.start);
         eprintln!(
             "{}:{}: {}[{}]: {}",
             file.display(),
-            pos,
-            d.severity.as_str(),
+            lines.position(source, d.span.start),
+            d.severity().as_str(),
             d.code.as_str(),
             d.primary,
         );
-        for note in &d.notes {
-            if let Some(span) = note.span.as_ref() {
-                let note_pos = lines.position(source, span.start);
-                eprintln!("{}:{}:   note: {}", file.display(), note_pos, note.message);
-            } else {
-                eprintln!("  note: {}", note.message);
-            }
-        }
-        if d.severity == Severity::Error {
+        report_notes(file, source, lines, &d.notes);
+        if d.severity() == Severity::Error {
             has_error = true;
         }
     }
@@ -1330,18 +1807,66 @@ fn run_compile(
     out: Option<&Path>,
     lock: Option<&Path>,
 ) -> ExitCode {
-    let (source, block_ir) = match load_and_lower(file, edition) {
-        Ok(pair) => pair,
+    // Resolved before lowering because lowering checks every block id
+    // against the pinned version's table, and reported below rather than
+    // here — see `resolve_target`. A target that does not resolve leaves
+    // lowering with nothing to check against, which is the same "no target
+    // pinned" mode `cairn check` runs in.
+    let resolved_target = resolve_target(edition, target);
+    let pinned = resolved_target
+        .as_ref()
+        .ok()
+        .map(ResolvedTarget::mc_version);
+    let Lowered {
+        source,
+        block_ir,
+        dropped_scopes,
+        version_floor,
+    } = match load_and_lower(file, edition, pinned) {
+        Ok(lowered) => lowered,
         Err(code) => return code,
     };
     if report_lowering_diagnostics(file, &source, &block_ir) {
         return ExitCode::from(1);
     }
+    // A lockfile records that a specific resolved IR was built for a
+    // specific target, so it must not certify a build that is missing part
+    // of what the source asked for. Every code that drops a scope
+    // (`W_STRUCT_NO_SIZE`, `W_DEF_NO_SIZE`, ...) is Warning severity, so
+    // without this the exit code stays 0 and the lockfile still reads
+    // `verified: true` — the same shape of defect as compiling a source
+    // `cairn check` rejects.
+    //
+    // Declaring nothing is not the same as losing something: a source that
+    // is only templates and themes requests no scopes, produces none, and
+    // still compiles (see
+    // `c26_bare_def_without_place_emits_w_unused_def_and_no_nbt`).
+    if !dropped_scopes.is_empty() {
+        eprintln!(
+            "error[E_PARTIAL_BUILD]: {}: {} of {} requested scopes did not lower; \
+             refusing to certify a partial build",
+            file.display(),
+            dropped_scopes.len(),
+            dropped_scopes.len() + block_ir.structures.len(),
+        );
+        for scope in &dropped_scopes {
+            eprintln!("  note: `{scope}` produced no voxels");
+        }
+        return ExitCode::from(1);
+    }
 
-    let target = match resolve_target(edition, target) {
+    let target = match resolved_target {
         Ok(t) => t,
-        Err(code) => return code,
+        Err(err) => {
+            eprintln!("error: {err}");
+            return ExitCode::from(1);
+        }
     };
+    if let Err(code) =
+        enforce_version_floor(file, &source, version_floor.as_ref(), edition, &target)
+    {
+        return code;
+    }
 
     let out_dir = match prepare_out_dir(file, out) {
         Ok(d) => d,
@@ -1354,10 +1879,145 @@ fn run_compile(
     };
 
     let lock_path = lock.map_or_else(|| default_lock_path(file), Path::to_path_buf);
+    if let Err(code) = check_lock_path_is_free(&prepared, &lock_path) {
+        return code;
+    }
+    // Before the file is replaced, not after: the lockfile about to be
+    // overwritten is the only record of what was previously verified.
+    report_previous_target(&lock_path, edition, &target);
     write_artifacts_and_lock(&prepared, &source, &block_ir, edition, &target, &lock_path)
 }
 
-fn load_and_lower(file: &Path, edition: EditionArg) -> Result<(String, BlockArrayIr), ExitCode> {
+/// Compare the lockfile at `lock_path` with the target being built, and
+/// report the divergence the way `spec/versioning-editions.md` §10.6 does.
+///
+/// The lockfile is the record of what was verified, so a recompile for a
+/// different target is the moment that record stops describing what is on
+/// disk. Nothing here changes the build or the exit code — both lines are
+/// warnings, and a first compile or an unchanged target says nothing at
+/// all. A lockfile that cannot be read says so; only its absence is
+/// silent.
+fn report_previous_target(lock_path: &Path, edition: EditionArg, target: &ResolvedTarget) {
+    let previous = match Lockfile::read_from_path(lock_path) {
+        Ok(previous) => previous,
+        // No lockfile is the ordinary first-compile case, and the only one
+        // that should be silent. Testing `exists()` first would fold a
+        // permission error into it, and leave a window in which the file
+        // vanishes between the check and the read.
+        Err(LockError::Io(err)) if err.kind() == std::io::ErrorKind::NotFound => return,
+        // A document from a newer Cairn is not corrupt, and replacing it
+        // does lose something, so it says so in its own words.
+        Err(LockError::UnsupportedSchemaVersion { found, supported }) => {
+            eprintln!(
+                "warning: {}: the existing lockfile is schema version {found} and this build \
+                 reads {supported}; it was written by a newer Cairn and is being replaced",
+                lock_path.display(),
+            );
+            return;
+        }
+        Err(err) => {
+            // Not an error: the compile is valid, and a corrupt file beside
+            // the source is no reason to refuse to build. But it was being
+            // overwritten in silence, which is how a tampered or stale
+            // lockfile went unnoticed.
+            eprintln!(
+                "warning: {}: the existing lockfile could not be read ({err}); replacing it",
+                lock_path.display(),
+            );
+            return;
+        }
+    };
+    let now = LockTarget {
+        edition: edition.as_lock_edition(),
+        mc_version: target.mc_version().to_owned(),
+        data_version: target.version_int(),
+    };
+    if previous.target == now {
+        return;
+    }
+    // The edition appears only when it changed: two editions number their
+    // releases differently, so `1.21.4` against `1.21.60` reads as noise
+    // without it, and naming it on every line would pad the common case.
+    let name_edition = previous.target.edition != now.edition;
+    eprintln!(
+        "W_PREVIOUSLY_VERIFIED_TARGET: verified for {}, now {}.",
+        describe_verified(&previous.target, name_edition),
+        describe_now(&now, name_edition),
+    );
+    if previous.member_version_sensitivity.is_empty() {
+        return;
+    }
+    let ids: Vec<&str> = previous
+        .member_version_sensitivity
+        .iter()
+        .map(|m| m.id.as_str())
+        .collect();
+    eprintln!(
+        "W_SEMANTIC_SENSITIVITY: {} member{} may resolve differently: {}",
+        ids.len(),
+        if ids.len() == 1 { "" } else { "s" },
+        ids.join(", "),
+    );
+}
+
+/// The left half of the warning: `1.20.4/DataVersion 3700`.
+///
+/// The integer is named here and bare on the right, which is the shape
+/// §10.6 prints. Java's is Minecraft's `DataVersion`; Bedrock's is the
+/// block palette's own `version`, and calling both `DataVersion` would name
+/// the Java concept for a number that is not one.
+fn describe_verified(target: &LockTarget, name_edition: bool) -> String {
+    let field = match target.edition {
+        LockEdition::Java => "DataVersion",
+        LockEdition::Bedrock => "block version",
+    };
+    format!(
+        "{}{}/{} {}",
+        edition_prefix(target, name_edition),
+        target.mc_version,
+        field,
+        target.data_version,
+    )
+}
+
+/// The right half of the warning: `1.21.4/4189`.
+fn describe_now(target: &LockTarget, name_edition: bool) -> String {
+    format!(
+        "{}{}/{}",
+        edition_prefix(target, name_edition),
+        target.mc_version,
+        target.data_version,
+    )
+}
+
+fn edition_prefix(target: &LockTarget, name_edition: bool) -> String {
+    if name_edition {
+        format!("{} ", target.edition.as_str())
+    } else {
+        String::new()
+    }
+}
+
+/// A `.crn` read, parsed, resolved, and lowered, plus what the lowering
+/// failed to produce.
+struct Lowered {
+    source: String,
+    block_ir: BlockArrayIr,
+    /// Scopes the source asked for that produced no voxels, as
+    /// [`dropped_scopes`] collects them.
+    dropped_scopes: Vec<String>,
+    /// The strictest `@requires` floor the source declares, carried out of
+    /// the parse so `compile` can hold `--target` to it without reading the
+    /// file a second time. `None` when the source declares none, which is
+    /// the ordinary case.
+    version_floor: Option<VersionFloor>,
+}
+
+fn load_and_lower(
+    file: &Path,
+    edition: EditionArg,
+    mc_version: Option<&str>,
+) -> Result<Lowered, ExitCode> {
     let source = std::fs::read_to_string(file).map_err(|err| {
         eprintln!("error: cannot read `{}`: {err}", file.display());
         match err.kind() {
@@ -1366,74 +2026,172 @@ fn load_and_lower(file: &Path, edition: EditionArg) -> Result<(String, BlockArra
         }
     })?;
     let module = parse(&source).map_err(|err| {
-        eprintln!(
-            "error: {}:{}: {}",
-            file.display(),
-            err.position(),
-            err.user_message(),
-        );
+        report_parse_failure(file, &source, &err);
         ExitCode::from(1)
     })?;
     let ir = lower(&module);
     let resolution = resolve(&ir, Some(edition.as_edition()));
-    // The materials catalog is edition-specific: an abstract `@token`
-    // resolves through the pack whose backend will serialise it, so a
-    // future per-edition block vocabulary lowers correctly without a
-    // second lowering pass.
-    let materials = match edition {
-        EditionArg::Java => &builtin_java().materials,
-        EditionArg::Bedrock => &builtin_bedrock().materials,
+    // The pack is edition-specific: an abstract `@token` resolves through
+    // the pack whose backend will serialise it, and the id table it is
+    // checked against belongs to the one version that pack was pinned to.
+    // `mc_version: None` (no `--target` resolved) leaves the id check off
+    // rather than running it against a version nobody chose.
+    let registry = edition.registry_pack().view(mc_version);
+    let mut block_ir = lower_to_block_array(&ir, &resolution, Some(&registry));
+    // The check pass is the gate `cairn check` exposes; running it here is
+    // what keeps `compile` from accepting a source that `check` rejects. It
+    // used to be skipped, so an `E_DUPLICATE_ID` would compile to artifacts
+    // plus a `verified: true` lockfile at exit 0. Resolver findings such as
+    // a `place use=cottag` typo (`E_UNRESOLVED_PLACE_REF`) reach the stream
+    // through the same call — `check` merges them.
+    block_ir.diagnostics = build_diagnostics(
+        &module,
+        &ir,
+        Some(edition.as_edition()),
+        std::mem::take(&mut block_ir.diagnostics),
+    );
+    let dropped_scopes = dropped_scopes(&resolution, &block_ir);
+    Ok(Lowered {
+        version_floor: declared_version_floor(&module),
+        source,
+        block_ir,
+        dropped_scopes,
+    })
+}
+
+/// Refuse a `--target` below the floor the source declares.
+///
+/// `@requires version>=X` is the source's own statement of what it needs.
+/// It was rendered by `cairn info` and enforced nowhere, so compiling
+/// against a lower target succeeded and wrote a lockfile reading
+/// `verified: true` for a version the file itself rules out. A lock records
+/// what was checked; certifying a target the source disowns is the one
+/// thing it must not do.
+///
+/// Checked here rather than in `check()`: the constraint is a relation
+/// between the source and `--target`, and `cairn check` has no target. It
+/// runs before any artifact is prepared, so a refusal leaves nothing on
+/// disk.
+///
+/// Spec §10.4 shows this code on a different comparison — a *material*
+/// introduced after the target, from the registry's `since` data. That data
+/// is not in the pack yet; when it arrives it joins this code rather than
+/// getting its own, because both answer "the target is below a floor".
+///
+/// The comparison is `cairn-lang-core`'s dotted-decimal one, which does not
+/// know that the two editions number releases differently. A Java-shaped
+/// floor of `1.21.4` reads as satisfied by Bedrock `1.21.40` on `40 > 4`;
+/// the spec's "Ordering, and where it stops" records that, and whether
+/// `@requires` is edition-neutral at all is an open language question
+/// rather than something to settle here.
+///
+/// # Errors
+///
+/// Returns exit code 1 when the target is below the floor.
+fn enforce_version_floor(
+    file: &Path,
+    source: &str,
+    floor: Option<&VersionFloor>,
+    edition: EditionArg,
+    target: &ResolvedTarget,
+) -> Result<(), ExitCode> {
+    let Some(floor) = floor else {
+        return Ok(());
     };
-    let mut block_ir = lower_to_block_array(&ir, &resolution, Some(materials));
-    // Resolver diagnostics (`E_UNRESOLVED_PLACE_REF`, `E_UNRESOLVED_SLOT`,
-    // `W_UNUSED_DEF`, ...) are produced before lowering and must still reach
-    // the CLI's diagnostic stream — otherwise a `place use=cottag` typo
-    // (which the resolver flags as an Error) would silently produce zero
-    // `.nbt` files at exit 0. Prepend so semantic problems read above the
-    // lowering deferrals that may have cascaded from them.
-    let mut combined = resolution.diagnostics;
-    combined.append(&mut block_ir.diagnostics);
-    block_ir.diagnostics = combined;
-    Ok((source, block_ir))
+    if !compare_versions(target.mc_version(), &floor.version).is_lt() {
+        return Ok(());
+    }
+    let position = LineStarts::new(source).position(source, floor.span.start);
+    eprintln!(
+        "error[E_VERSION_CAP]: {}:{}: this file requires version>={} (target {}).",
+        file.display(),
+        position,
+        floor.version,
+        target.mc_version(),
+    );
+    // `spec/lint.md` §11.2 makes the closed set of candidates valid in the
+    // target part of the message, not an extra. Naming the floor alone
+    // sends an author to `--target >=99.0`, which is a second error and no
+    // closer to a build; whether *any* supported target satisfies the floor
+    // is the fact that decides what they do next.
+    let supported = edition.registry_pack().supported_list();
+    let usable: Vec<&str> = supported
+        .split(", ")
+        .filter(|candidate| {
+            *candidate != "latest" && !compare_versions(candidate, &floor.version).is_lt()
+        })
+        .collect();
+    if usable.is_empty() {
+        eprintln!(
+            "  no supported {} target satisfies it: {supported}",
+            edition.as_str(),
+        );
+        eprintln!("  fix: lower the `@requires` floor, or build against another edition");
+    } else {
+        eprintln!(
+            "  valid {} targets: {}",
+            edition.as_str(),
+            usable.join(", ")
+        );
+        eprintln!(
+            "  fix: --target {}, or lower the `@requires` floor",
+            usable[0],
+        );
+    }
+    Err(ExitCode::from(1))
+}
+
+/// Print one finding's `note:` lines under its primary.
+///
+/// A note that carries a span is printed with that position, the way the
+/// primary is: it names a second place in the file the reader has to go
+/// look at, and "declared here" with no *here* is not a note. A note
+/// without one is indented and left unprefixed, so a footer does not read
+/// as a second pointer at the primary span.
+///
+/// Shared rather than copied: this loop existed six times in this file,
+/// and three of the six had dropped the position. Both note types are
+/// `cairn_lang_core::check::DiagnosticNote` — `cairn-lang-redstone`
+/// re-exports it — so one signature covers every caller.
+fn report_notes(file: &Path, source: &str, lines: &LineStarts, notes: &[Note]) {
+    for note in notes {
+        match note.span.as_ref() {
+            Some(span) => {
+                let pos = lines.position(source, span.start);
+                eprintln!("{}:{}:   note: {}", file.display(), pos, note.message);
+            }
+            None => eprintln!("  note: {}", note.message),
+        }
+    }
 }
 
 fn report_lowering_diagnostics(file: &Path, source: &str, block_ir: &BlockArrayIr) -> bool {
     let lines = LineStarts::new(source);
     let mut has_error = false;
     for d in &block_ir.diagnostics {
-        let pos = lines.position(source, d.span.start);
-        eprintln!(
-            "{}:{}: {}[{}]: {}",
-            file.display(),
-            pos,
-            d.severity.as_str(),
-            d.code.as_str(),
-            d.primary,
-        );
-        for note in &d.notes {
-            eprintln!("  note: {}", note.message);
-        }
-        if d.severity == Severity::Error {
+        report_diagnostic(file, source, &lines, d);
+        if d.severity() == Severity::Error {
             has_error = true;
         }
     }
     has_error
 }
 
-fn resolve_target(edition: EditionArg, target: &str) -> Result<ResolvedTarget, ExitCode> {
+/// Resolve `--target` against the pack for `--edition`.
+///
+/// Returns the failure instead of printing it: `run_compile` resolves the
+/// target before it lowers (block-array lowering needs the pinned version
+/// to check block ids against) but reports the failure where it always
+/// did, after the parse and lowering diagnostics. A command-line mistake
+/// that jumped ahead of a syntax error would change which problem a user
+/// is told about first.
+fn resolve_target(
+    edition: EditionArg,
+    target: &str,
+) -> Result<ResolvedTarget, cairn_lang_formats::data_version::UnsupportedTarget> {
     match edition {
-        EditionArg::Java => resolve_java_target(target)
-            .map(ResolvedTarget::Java)
-            .map_err(|err| {
-                eprintln!("error: {err}");
-                ExitCode::from(1)
-            }),
-        EditionArg::Bedrock => resolve_bedrock_target(target)
-            .map(ResolvedTarget::Bedrock)
-            .map_err(|err| {
-                eprintln!("error: {err}");
-                ExitCode::from(1)
-            }),
+        EditionArg::Java => resolve_java_target(target).map(ResolvedTarget::Java),
+        EditionArg::Bedrock => resolve_bedrock_target(target).map(ResolvedTarget::Bedrock),
     }
 }
 
@@ -1500,10 +2258,55 @@ fn prepare_artifacts(
     Ok(prepared)
 }
 
-/// Write the prepared structure files and the lockfile, rolling back
-/// every already-written file (and the lockfile) on any failure so the
-/// on-disk state stays consistent — either every artifact + the lock, or
-/// none.
+/// Refuse a `--lock` that would land on a path the artifacts already own.
+///
+/// `prepare_artifacts` checks the artifacts against each other, and the
+/// lockfile was never folded into that check, so `--lock out/home1.nbt` put
+/// two entries with the same destination into one set. They staged over each
+/// other's bytes, and during the commit the second one deleted the backup
+/// the first had just taken — destroying the previous build's artifact with
+/// no copy left anywhere. That is the failure this whole path exists to
+/// prevent, reachable through an argument the CLI accepted without comment.
+///
+/// The scratch names count too: `--lock out/home1.nbt.tmp` collides during
+/// staging rather than during the commit, and is just as unrecoverable.
+fn check_lock_path_is_free(
+    prepared: &[(PathBuf, Compound)],
+    lock_path: &Path,
+) -> Result<(), ExitCode> {
+    let taken: std::collections::HashSet<PathBuf> = prepared
+        .iter()
+        .flat_map(|(path, _)| staging::reserved_paths(path))
+        .collect();
+    for reserved in staging::reserved_paths(lock_path) {
+        if taken.contains(&reserved) {
+            eprintln!(
+                "error: lockfile path `{}` collides with an artifact this build writes (`{}`)",
+                lock_path.display(),
+                reserved.display(),
+            );
+            eprintln!(
+                "  note: pass a `--lock` outside `--out`, or rename the struct whose artifact \
+                 shares the name"
+            );
+            return Err(ExitCode::from(1));
+        }
+    }
+    Ok(())
+}
+
+/// Write the prepared structure files and the lockfile as one set: either
+/// every artifact plus the lock, or the directory exactly as it was.
+///
+/// Two phases. Staging writes each file beside where it belongs, so every
+/// way the encode or the write can fail happens while the previous build is
+/// still untouched. Committing is renames only; [`staging::StagedSet::commit`]
+/// describes what makes that step recoverable.
+///
+/// What the phases buy is a place to fail from. The single-phase version
+/// wrote each artifact atomically but *individually*, so by the time the
+/// lockfile failed some destinations had already been overwritten, and the
+/// only undo available was deleting them.
 fn write_artifacts_and_lock(
     prepared: &[(PathBuf, Compound)],
     source: &str,
@@ -1512,35 +2315,370 @@ fn write_artifacts_and_lock(
     target: &ResolvedTarget,
     lock_path: &Path,
 ) -> ExitCode {
-    let mut written: Vec<PathBuf> = Vec::with_capacity(prepared.len());
+    // Phase 1 — stage. Nothing a previous build produced is touched, so a
+    // failure here costs only our own scratch.
+    let mut staged = staging::StagedSet::default();
     for (path, tag) in prepared {
-        if let Err(err) = write_tag_atomically(path, tag, target) {
-            rollback(&written, None);
+        if let Err(err) = staged.stage(path, staging::Kind::Artifact, |file| {
+            target.write_tag(file, tag)
+        }) {
+            staged.discard();
             eprintln!("error: writing `{}`: {err}", path.display());
             return ExitCode::from(1);
         }
-        written.push(path.clone());
     }
 
-    let lockfile = match build_lockfile(source, block_ir, edition, target) {
-        Ok(lf) => lf,
+    // Encode before touching the filesystem: a hash or YAML failure has to
+    // be indistinguishable from never having started.
+    let lock_body = match build_lockfile(source, block_ir, edition, target)
+        .map_err(|err| err.to_string())
+        .and_then(|lockfile| lockfile.to_yaml().map_err(|err| err.to_string()))
+    {
+        Ok(body) => body,
         Err(err) => {
-            rollback(&written, None);
+            staged.discard();
             eprintln!("error: {err}");
             return ExitCode::from(1);
         }
     };
-    if let Err(err) = lockfile.write_to_path(lock_path) {
-        rollback(&written, None);
+    if let Err(err) = staged.stage(lock_path, staging::Kind::Lockfile, |file| {
+        std::io::Write::write_all(file, lock_body.as_bytes())
+    }) {
+        staged.discard();
         eprintln!("error: writing lockfile `{}`: {err}", lock_path.display());
         return ExitCode::from(1);
     }
 
-    for path in &written {
-        println!("wrote {}", path.display());
+    // Phase 2 — commit. Renames only, each keeping what it replaces until
+    // the whole set has landed.
+    match staged.commit() {
+        Ok(written) => {
+            for path in written {
+                println!("wrote {}", path.display());
+            }
+            ExitCode::SUCCESS
+        }
+        Err(failure) => {
+            eprintln!("error: {failure}");
+            ExitCode::from(1)
+        }
     }
-    println!("wrote {}", lock_path.display());
-    ExitCode::SUCCESS
+}
+
+/// Staging a set of output files and committing them together.
+///
+/// A module rather than loose functions so the invariant that makes the
+/// commit recoverable — a staged file is only ever reachable through the
+/// scratch path this code chose — is enforced by privacy instead of by
+/// convention. `main.rs` has no other modules, so without one the fields
+/// below would be visible to every line in the file.
+mod staging {
+    use std::fmt;
+    use std::fs;
+    use std::io;
+    use std::path::{Path, PathBuf};
+
+    /// What a staged file is going to become, so a failure can name it.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub enum Kind {
+        Artifact,
+        Lockfile,
+    }
+
+    impl fmt::Display for Kind {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            match self {
+                Self::Artifact => f.write_str("artifact"),
+                Self::Lockfile => f.write_str("lockfile"),
+            }
+        }
+    }
+
+    /// Which half of the commit failed.
+    ///
+    /// The two call for different fixes and point at different paths, so a
+    /// single "writing `X`" message for both sent the operator after the
+    /// wrong file: a stale `X.bak` directory blocks the *displace* step
+    /// while the error named `X`.
+    #[derive(Debug, Clone, Copy)]
+    enum Step {
+        /// Moving what is already at the destination out of the way.
+        Displace,
+        /// Renaming the staged file into the destination.
+        Place,
+    }
+
+    /// A commit that could not complete. The directory has been put back.
+    #[derive(Debug)]
+    pub struct CommitFailure {
+        kind: Kind,
+        step: Step,
+        /// The path the failing rename touched — the backup for a displace,
+        /// the destination for a place.
+        path: PathBuf,
+        source: io::Error,
+    }
+
+    impl fmt::Display for CommitFailure {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            let Self {
+                kind,
+                step,
+                path,
+                source,
+            } = self;
+            match step {
+                Step::Displace => write!(
+                    f,
+                    "the existing {kind} could not be moved aside to `{}`: {source}",
+                    path.display(),
+                ),
+                Step::Place => write!(f, "writing {kind} `{}`: {source}", path.display()),
+            }
+        }
+    }
+
+    /// A file written beside its destination, waiting to be renamed there.
+    struct Staged {
+        kind: Kind,
+        /// Where it belongs once every file in the set has been written.
+        final_path: PathBuf,
+        /// Where it is now.
+        tmp_path: PathBuf,
+    }
+
+    /// A destination that already held something, moved aside for the
+    /// duration of the commit so a failure part-way can put it back.
+    struct Displaced {
+        final_path: PathBuf,
+        backup_path: PathBuf,
+    }
+
+    /// Output files written but not yet in place.
+    #[derive(Default)]
+    pub struct StagedSet {
+        entries: Vec<Staged>,
+    }
+
+    /// `path` with `suffix` appended to the whole file name.
+    ///
+    /// Not `Path::with_extension`, which replaces the extension rather than
+    /// extending it: a lockfile at `village.crn.lock` would stage to
+    /// `village.crn.tmp`, colliding with any other `village.crn.*` scratch
+    /// and losing the `.lock` that names it.
+    fn suffixed(path: &Path, suffix: &str) -> PathBuf {
+        let mut raw = path.as_os_str().to_owned();
+        raw.push(suffix);
+        PathBuf::from(raw)
+    }
+
+    /// Every path this set will create or rename, staging scratch included.
+    ///
+    /// Callers check these against each other before staging starts: two
+    /// entries sharing a destination would stage over each other's bytes and
+    /// then fight over the same backup during the commit.
+    pub fn reserved_paths(final_path: &Path) -> [PathBuf; 3] {
+        [
+            final_path.to_path_buf(),
+            suffixed(final_path, ".tmp"),
+            suffixed(final_path, ".bak"),
+        ]
+    }
+
+    /// What is sitting at a destination right now.
+    enum Occupant {
+        /// Nothing — the commit will create the file.
+        Vacant,
+        /// A file or symlink, which `rename` can move aside and put back.
+        Movable,
+        /// A directory. `rename` cannot replace one with a file, so this is
+        /// not something to back up; it is the reason the place step below
+        /// is about to fail, and it fails with the directory named.
+        Directory,
+    }
+
+    /// Deliberately `symlink_metadata` rather than `Path::is_file`, which
+    /// folds every metadata error into `false`. A `false` here means "no
+    /// backup needed", so a transient stat failure would let the commit
+    /// overwrite a file it could not restore — the exact loss this whole
+    /// module exists to prevent. An unreadable destination is a hard error
+    /// instead.
+    fn occupant(path: &Path) -> io::Result<Occupant> {
+        match fs::symlink_metadata(path) {
+            Ok(meta) if meta.is_dir() => Ok(Occupant::Directory),
+            Ok(_) => Ok(Occupant::Movable),
+            Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(Occupant::Vacant),
+            Err(err) => Err(err),
+        }
+    }
+
+    impl StagedSet {
+        /// Write one file beside `final_path`.
+        ///
+        /// # Errors
+        ///
+        /// Propagates the I/O failure. The partial scratch file is removed
+        /// before returning: a failed entry is never added to the set, so
+        /// [`Self::discard`] has no way to reach it afterwards.
+        pub fn stage(
+            &mut self,
+            final_path: &Path,
+            kind: Kind,
+            write: impl FnOnce(&mut fs::File) -> io::Result<()>,
+        ) -> io::Result<()> {
+            use std::io::Write as _;
+
+            let tmp_path = suffixed(final_path, ".tmp");
+            let result = (|| {
+                let mut file = fs::File::create(&tmp_path)?;
+                write(&mut file)?;
+                file.flush()?;
+                // The commit below is a rename, which is only atomic with
+                // respect to the directory entry — without this the bytes
+                // can still be in flight when the rename publishes the name,
+                // so a crash leaves a correctly-named, half-written file.
+                file.sync_all()
+            })();
+            if let Err(err) = result {
+                let _ = fs::remove_file(&tmp_path);
+                return Err(err);
+            }
+            self.entries.push(Staged {
+                kind,
+                final_path: final_path.to_path_buf(),
+                tmp_path,
+            });
+            Ok(())
+        }
+
+        /// Throw the staged files away without touching any destination.
+        pub fn discard(self) {
+            for entry in &self.entries {
+                let _ = fs::remove_file(&entry.tmp_path);
+            }
+        }
+
+        /// Move every staged file into place, or leave the directory as it
+        /// was, and return the paths written.
+        ///
+        /// A rename consumes whatever is already at the destination, so each
+        /// one moves that file aside first and only deletes the backup once
+        /// the whole set has landed. Deleting eagerly is what made a failure
+        /// on the last file take the previous build with it: a list of "files
+        /// we wrote" mixes ones this run created with ones it replaced, and
+        /// undoing it deleted both.
+        ///
+        /// Consuming `self` so the set cannot be committed twice, nor
+        /// discarded after its scratch files have been renamed away.
+        ///
+        /// # Errors
+        ///
+        /// Returns the first rename that failed, after undoing the ones
+        /// before it.
+        pub fn commit(self) -> Result<Vec<PathBuf>, CommitFailure> {
+            let mut displaced: Vec<Displaced> = Vec::new();
+            let mut committed: Vec<PathBuf> = Vec::new();
+
+            for entry in &self.entries {
+                match occupant(&entry.final_path) {
+                    Ok(Occupant::Movable) => {
+                        let backup_path = suffixed(&entry.final_path, ".bak");
+                        if let Err(err) = fs::rename(&entry.final_path, &backup_path) {
+                            undo(&displaced, &committed);
+                            self.discard_scratch();
+                            return Err(CommitFailure {
+                                kind: entry.kind,
+                                step: Step::Displace,
+                                path: backup_path,
+                                source: err,
+                            });
+                        }
+                        displaced.push(Displaced {
+                            final_path: entry.final_path.clone(),
+                            backup_path,
+                        });
+                    }
+                    Ok(Occupant::Vacant | Occupant::Directory) => {}
+                    Err(err) => {
+                        undo(&displaced, &committed);
+                        self.discard_scratch();
+                        return Err(CommitFailure {
+                            kind: entry.kind,
+                            step: Step::Displace,
+                            path: entry.final_path.clone(),
+                            source: err,
+                        });
+                    }
+                }
+                if let Err(err) = fs::rename(&entry.tmp_path, &entry.final_path) {
+                    undo(&displaced, &committed);
+                    self.discard_scratch();
+                    return Err(CommitFailure {
+                        kind: entry.kind,
+                        step: Step::Place,
+                        path: entry.final_path.clone(),
+                        source: err,
+                    });
+                }
+                committed.push(entry.final_path.clone());
+            }
+
+            for entry in &displaced {
+                if let Err(err) = fs::remove_file(&entry.backup_path) {
+                    // The build succeeded, so this is not a failure — but
+                    // the leftover is a copy of the previous build under a
+                    // name that looks like scratch, and nothing later will
+                    // come back for it.
+                    eprintln!(
+                        "warning: `{}` was left behind after replacing `{}`: {err}",
+                        entry.backup_path.display(),
+                        entry.final_path.display(),
+                    );
+                }
+            }
+            Ok(committed)
+        }
+
+        /// `discard` by reference, for the undo paths that still need the
+        /// entry list afterwards.
+        fn discard_scratch(&self) {
+            for entry in &self.entries {
+                let _ = fs::remove_file(&entry.tmp_path);
+            }
+        }
+    }
+
+    /// Put the directory back the way the commit found it.
+    ///
+    /// Every step is reported on failure rather than swallowed. A half-
+    /// restored directory the operator knows about beats one they do not,
+    /// and the delete loop in particular has no later step that would
+    /// surface its failure: an entry that was created rather than replaced
+    /// appears in `committed` and never in `displaced`, so nothing touches
+    /// its path again. On Windows that is not hypothetical — deleting a file
+    /// another process holds open fails, while renaming onto a vacant name
+    /// succeeds regardless.
+    fn undo(displaced: &[Displaced], committed: &[PathBuf]) {
+        for path in committed {
+            if let Err(err) = fs::remove_file(path) {
+                eprintln!(
+                    "error: `{}` was written by a build that then failed, and could not be \
+                     removed: {err}",
+                    path.display(),
+                );
+            }
+        }
+        for entry in displaced {
+            let _ = fs::remove_file(&entry.final_path);
+            if let Err(err) = fs::rename(&entry.backup_path, &entry.final_path) {
+                eprintln!(
+                    "error: `{}` could not be restored from `{}`: {err}",
+                    entry.final_path.display(),
+                    entry.backup_path.display(),
+                );
+            }
+        }
+    }
 }
 
 fn resolve_out_dir(source: &Path, requested: Option<&Path>) -> Option<PathBuf> {
@@ -1556,46 +2694,6 @@ fn resolve_out_dir(source: &Path, requested: Option<&Path>) -> Option<PathBuf> {
     } else {
         parent.to_path_buf()
     })
-}
-
-fn write_tag_atomically(
-    final_path: &Path,
-    tag: &Compound,
-    target: &ResolvedTarget,
-) -> Result<(), std::io::Error> {
-    use std::io::Write as _;
-
-    // Write to a sibling `.tmp` file then rename so an interrupted write
-    // (process kill, disk full mid-stream) never leaves a half-encoded
-    // structure at the real path.
-    let mut tmp_path = final_path.as_os_str().to_owned();
-    tmp_path.push(".tmp");
-    let tmp_path = PathBuf::from(tmp_path);
-
-    // Any failure before the rename must clean up the partial `.tmp` so a
-    // retry does not accumulate orphans (and the caller's rollback, which
-    // only knows the final paths, cannot reach it).
-    let result = (|| {
-        let mut f = std::fs::File::create(&tmp_path)?;
-        target.write_tag(&mut f, tag)?;
-        f.flush()?;
-        f.sync_all()?;
-        drop(f);
-        std::fs::rename(&tmp_path, final_path)
-    })();
-    if result.is_err() {
-        let _ = std::fs::remove_file(&tmp_path);
-    }
-    result
-}
-
-fn rollback(written: &[PathBuf], lock_path: Option<&Path>) {
-    for path in written {
-        let _ = std::fs::remove_file(path);
-    }
-    if let Some(p) = lock_path {
-        let _ = std::fs::remove_file(p);
-    }
 }
 
 /// Append a `.lock` suffix to the source file name so multiple `.crn`
@@ -1615,6 +2713,7 @@ fn build_lockfile(
     target: &ResolvedTarget,
 ) -> Result<Lockfile, cairn_lang_core::lock::HashError> {
     Ok(Lockfile {
+        lock_schema_version: LOCK_SCHEMA_VERSION,
         source_hash: hash_source(source),
         cairn_version: CAIRN_VERSION.to_owned(),
         target: LockTarget {
@@ -1677,6 +2776,118 @@ mod tests {
     //! end-to-end `tests/cli_*.rs` binaries can only assert
     //! circumstantially, by hard-coding both sides of a pairing.
     use super::*;
+
+    /// The whole note block, header included.
+    ///
+    /// Nothing else reads these lines: the end-to-end tests look for an id
+    /// and a clause inside them, which leaves the header, the guard, the
+    /// order and the indent free to change or vanish. The header is the
+    /// part that matters most — it names the figure on stdout that the
+    /// lines below explain, and one that disagreed with the row would be
+    /// worse than no header at all.
+    #[test]
+    fn the_notes_answer_the_figure_they_sit_under() {
+        let entries = vec![
+            UnsupportedEntry {
+                id: "minecraft:oak_sign".to_owned(),
+                reason: UnsupportedReason::AbsentFromEdition {
+                    suggestion: Some("minecraft:oak_log".to_owned()),
+                },
+            },
+            UnsupportedEntry {
+                id: "minecraft:oak_stairs".to_owned(),
+                reason: UnsupportedReason::StateKeyUnread {
+                    key: "waterlogged".to_owned(),
+                    handled: "facing, half, shape".to_owned(),
+                },
+            },
+        ];
+        assert_eq!(
+            unsupported_notes(Edition::Bedrock, &entries),
+            [
+                "note: what `unsupported: 2` counts on bedrock:".to_owned(),
+                format!(
+                    "  note: `minecraft:oak_sign` — {}",
+                    unsupported_reason(&entries[0].reason)
+                ),
+                format!(
+                    "  note: `minecraft:oak_stairs` — {}",
+                    unsupported_reason(&entries[1].reason)
+                ),
+            ],
+        );
+        // A clean source says nothing rather than announcing a count of
+        // nothing, and every edition would otherwise get a block of its
+        // own back to back.
+        assert!(unsupported_notes(Edition::Java, &[]).is_empty());
+    }
+
+    /// Each `unsupported` reason renders the repair it names, including
+    /// the three no `.crn` can reach.
+    ///
+    /// Two paths put blockstate properties on a palette entry, and
+    /// neither reaches these branches. `roof::stair_state` builds them
+    /// from `Cardinal` and `StairShape` and only for a material the
+    /// family check already accepted, so its values are in domain by
+    /// construction; an authored `@id[k=v]` token would carry arbitrary
+    /// ones, and the lexer refuses the bracket. A registry pack cannot
+    /// supply them either — `PackView::lookup` answers with
+    /// `BlockState::bare`. So the end-to-end tests can only ever produce
+    /// the absent-id case. The rendering is a pure function of the reason,
+    /// so the other three are asked here rather than left as the branches
+    /// nothing reads.
+    #[test]
+    fn every_unsupported_reason_renders_the_repair_it_names() {
+        let bare = unsupported_reason(&UnsupportedReason::AbsentFromEdition { suggestion: None });
+        assert!(
+            bare.contains("declares the block") && !bare.contains("did you mean"),
+            "no suggestion means no dangling clause, got: {bare}",
+        );
+        let suggested = unsupported_reason(&UnsupportedReason::AbsentFromEdition {
+            suggestion: Some("minecraft:oak_slab".to_owned()),
+        });
+        assert!(
+            suggested.contains("did you mean `minecraft:oak_slab`?"),
+            "got: {suggested}",
+        );
+        // The block is not missing from the edition and the edition is not
+        // what cannot express the states — this compiler is, so far.
+        let unmapped = unsupported_reason(&UnsupportedReason::StatesUnmapped {
+            states: "facing=north".to_owned(),
+            mapped: "the stair family".to_owned(),
+        });
+        assert!(
+            unmapped.contains("facing=north")
+                && unmapped.contains("has the block")
+                && unmapped.contains("the stair family")
+                && unmapped.contains("so far"),
+            "the gap is this compiler's and it is not permanent, got: {unmapped}",
+        );
+        // Nothing to edit: the value should not have reached the
+        // translator, and saying so is what stops the search.
+        let value = unsupported_reason(&UnsupportedReason::StateValueUnexpected {
+            key: "facing".to_owned(),
+            value: "up".to_owned(),
+            valid: "east, west, south, north".to_owned(),
+        });
+        assert!(
+            value.contains("`facing=up`")
+                && value.contains("east, west, south, north")
+                && value.contains("not yours to repair"),
+            "got: {value}",
+        );
+        // The one the author can act on, so the fix survives the render.
+        let key = unsupported_reason(&UnsupportedReason::StateKeyUnread {
+            key: "waterlogged".to_owned(),
+            handled: "facing, half, shape".to_owned(),
+        });
+        assert!(
+            key.contains("`waterlogged`")
+                && key.contains("facing, half, shape")
+                && key.contains("remove it from the source blockstate"),
+            "the author's repair must survive the rendering, got: {key}",
+        );
+    }
 
     /// The four Placement IR stages spell their `--stage` value, the
     /// `--stage <name>` fragment `require_edition` prints, and the

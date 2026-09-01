@@ -8,32 +8,40 @@
 //! struct/def/site bodies. For theme selectors the lowering step keeps
 //! the raw keyword string, so this pass re-checks it directly via
 //! [`role_of`](crate::intent::role_of).
+//!
+//! The candidate set is the enclosing body's, not the whole table. A
+//! diagnostic that offers a repair has to offer one that works: answering
+//! `plce` in a `struct` body with ``did you mean `place`?`` walks the
+//! author into [`super::member_scope`]'s `E_MISPLACED_MEMBER` on the very
+//! line this note told them to write. A theme selector is the exception —
+//! it is matched against members of every body, so its vocabulary stays
+//! the whole table.
 
-use crate::intent::{IntentModule, Member, MemberRole, known_keywords, role_of};
+use crate::intent::{BodyKind, IntentModule, Member, MemberRole, known_keywords, role_of};
 use crate::suggest::nearest_match;
 
 use super::{Diagnostic, DiagnosticCode, DiagnosticNote, DiagnosticSink};
 
 pub(super) fn run(ir: &IntentModule, sink: &mut DiagnosticSink) {
     for s in &ir.structs {
-        walk(&s.members, sink);
+        walk(&s.members, BodyKind::Geometry, sink);
     }
     for d in &ir.defs {
-        walk(&d.members, sink);
+        walk(&d.members, BodyKind::Geometry, sink);
     }
     for s in &ir.sites {
-        walk(&s.placements, sink);
+        walk(&s.placements, BodyKind::Site, sink);
     }
     for theme in &ir.themes {
         for rule in &theme.selectors {
             if matches!(role_of(&rule.keyword), MemberRole::Other(_)) && !rule.keyword.is_empty() {
-                push_unknown_keyword(&rule.keyword, &rule.span, sink);
+                push_unknown_keyword(&rule.keyword, &rule.span, known_keywords(), sink);
             }
         }
     }
 }
 
-fn walk(members: &[Member], sink: &mut DiagnosticSink) {
+fn walk(members: &[Member], body: BodyKind, sink: &mut DiagnosticSink) {
     for m in members {
         if let MemberRole::Other(kw) = &m.role {
             // The synthetic `placeholder_member_carrying` in `intent::lower`
@@ -42,21 +50,26 @@ fn walk(members: &[Member], sink: &mut DiagnosticSink) {
             // case keeps a hypothetical future bug there from manifesting
             // as a confusing ``unknown keyword `` `` diagnostic.
             if !kw.is_empty() {
-                push_unknown_keyword(kw, &m.span, sink);
+                push_unknown_keyword(kw, &m.span, &body.allowed_keywords(), sink);
             }
         }
-        walk(&m.children.members, sink);
+        walk(&m.children.members, body, sink);
     }
 }
 
-fn push_unknown_keyword(keyword: &str, span: &crate::error::Span, sink: &mut DiagnosticSink) {
+fn push_unknown_keyword(
+    keyword: &str,
+    span: &crate::error::Span,
+    candidates: &[&'static str],
+    sink: &mut DiagnosticSink,
+) {
     // Suggestion goes *before* the candidate list so a user reading top-down
     // sees the targeted fix first; the closed-set listing stays as the
     // fallback when the typo is too far from any keyword to suggest.
     // Informational notes — no distinct secondary location, so renderers
     // skip the `file:L:C:` prefix and just print `note: ...`.
     let mut notes = Vec::with_capacity(2);
-    if let Some(suggested) = nearest_match(keyword, known_keywords().iter().copied()) {
+    if let Some(suggested) = nearest_match(keyword, candidates.iter().copied()) {
         notes.push(DiagnosticNote {
             span: None,
             message: format!("did you mean `{suggested}`?"),
@@ -64,11 +77,10 @@ fn push_unknown_keyword(keyword: &str, span: &crate::error::Span, sink: &mut Dia
     }
     notes.push(DiagnosticNote {
         span: None,
-        message: format!("expected one of: {}", known_keywords().join(", ")),
+        message: format!("expected one of: {}", candidates.join(", ")),
     });
     sink.push(Diagnostic {
         code: DiagnosticCode::UnknownKeyword,
-        severity: DiagnosticCode::UnknownKeyword.severity(),
         span: span.clone(),
         primary: format!("unknown keyword `{keyword}`"),
         notes,

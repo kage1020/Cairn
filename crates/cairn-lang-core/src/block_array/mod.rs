@@ -6,12 +6,12 @@
 //! `IoU` comparisons, and serialisation hang off this single shape (see
 //! `spec/architecture.md` §3.1).
 //!
-//! The [`lower::lower_to_block_array`] pass handles the cottage example's
-//! roster end-to-end: `floor`, `walls`, `door`, `window`, and
-//! `roof kind=gable`. Other roles (`stair`, `level`, `pressure_plate`, ...),
-//! roof kinds (`hip`, `shed`, ...), and abstract material tokens degrade
-//! to air with a `W_DEFERRED_MEMBER` warning rather than failing, so a
-//! partial build is still inspectable.
+//! The [`lower::lower_to_block_array`] pass handles `floor`, `walls`,
+//! `door`, `window`, `stair`, `pressure_plate`, the `level y=N` grouping,
+//! and all four roof kinds. A role it does not yet voxelise degrades to
+//! air with a `W_DEFERRED_MEMBER` warning rather than failing, so a partial
+//! build is still inspectable; the same warning covers an abstract material
+//! token reached with no registry pack to lift it.
 //!
 //! ## Overhang convention
 //!
@@ -26,12 +26,16 @@ mod material;
 mod openings;
 mod roof;
 mod walkway;
+mod wall_column;
 
 use indexmap::IndexMap;
 use serde::Serialize;
 
-pub use lower::lower_to_block_array;
-pub use material::{AbstractMaterialResolver, MaterialDeferred, resolve_block_state};
+pub use lower::{BUILTIN_BLOCK_IDS, lower_to_block_array};
+pub use material::{
+    BlockIdSet, IdOrigin, MaterialDeferred, TargetRegistry, UnknownId, resolve_block_state,
+};
+pub use roof::is_stair;
 pub use walkway::{
     BlockedIndex, RoutePathError, WalkwayLayout, build_walkway_array, l_path, port_world_position,
     route_path,
@@ -199,12 +203,71 @@ impl Footprint {
     }
 }
 
+/// Largest voxel volume the lowering pass will build for one scope.
+///
+/// A 256-cube. It exists to turn an arithmetic accident into a diagnostic,
+/// not to constrain anything anyone writes: the largest shipped example is
+/// under 2500 voxels, while `size=100000x100000` asks for 10^10 and
+/// `walls height=2147483647` for more again. Every one of those numbers is
+/// a valid `u32` on its own, so no per-key range check catches them — only
+/// the product does.
+///
+/// A structure at the bound already costs 32 MB for the index vector alone
+/// (`PaletteIndex` is two bytes), so the ceiling is well past where the
+/// output stops being useful and well below where the allocator gives up.
+///
+/// Per scope, not per module: a source declaring a thousand structs can
+/// still ask for a thousand times this. Bounding the total would need a
+/// budget threaded through the whole pass, and nothing today streams
+/// scopes to disk as they finish, so the two would have to land together.
+pub const MAX_STRUCTURE_VOLUME: usize = 256 * 256 * 256;
+
+// Walkways are the other thing the pass allocates, and they are bounded by
+// `walkway::ROUTE_AREA_CAP` instead — a cell count over a one-block-thick
+// plane, so it is directly comparable. Keeping it under the volume bound is
+// what makes `Dims::volume`'s claim below true of every array this pass
+// produces, walkways included.
+const _: () = assert!(
+    crate::block_array::walkway::ROUTE_AREA_CAP <= MAX_STRUCTURE_VOLUME as u64,
+    "a walkway inside the router's area cap must also be inside the structure volume bound",
+);
+
 impl Dims {
-    /// Total voxel count. Returns `usize` rather than `u32` because
-    /// downstream allocations index a `Vec`.
+    /// Total voxel count, or `None` when the product overflows `usize`.
+    ///
+    /// The only honest way to ask: `size=4294967295x4294967295` overflows
+    /// the multiplication itself, which panics in a debug build and — worse
+    /// — wraps in a release one, handing back a small number that then
+    /// disagrees with [`Self::index`] and turns into an out-of-bounds write.
+    #[must_use]
+    pub fn checked_volume(self) -> Option<usize> {
+        (self.x as usize)
+            .checked_mul(self.y as usize)?
+            .checked_mul(self.z as usize)
+    }
+
+    /// Whether this extent is within [`MAX_STRUCTURE_VOLUME`].
+    ///
+    /// Callers that are about to allocate must ask this first; the lowering
+    /// pass reports [`crate::check::DiagnosticCode::StructureTooLarge`] and
+    /// skips the scope when it says no.
+    #[must_use]
+    pub fn fits_volume_budget(self) -> bool {
+        self.checked_volume()
+            .is_some_and(|volume| volume <= MAX_STRUCTURE_VOLUME)
+    }
+
+    /// Total voxel count, saturating at `usize::MAX`.
+    ///
+    /// Safe to call on any [`Dims`], but only meaningful on one that has
+    /// already passed [`Self::fits_volume_budget`] — which every
+    /// [`BlockArray`] the lowering pass produces has, so readers of a built
+    /// array can use it directly.
     #[must_use]
     pub fn volume(self) -> usize {
-        (self.x as usize) * (self.y as usize) * (self.z as usize)
+        (self.x as usize)
+            .saturating_mul(self.y as usize)
+            .saturating_mul(self.z as usize)
     }
 
     /// Linear offset of `(x, y, z)` into a `(y, z, x)`-ordered flat array.
@@ -234,6 +297,28 @@ impl PaletteIndex {
     /// Index reserved for air. Used by [`Palette::new_with_air`] and by the
     /// lowering pass to leave a cell empty.
     pub const AIR: Self = Self(0);
+}
+
+impl BlockArray {
+    /// The first voxel whose index is not a slot of [`Self::palette`], as
+    /// `(index, palette length)`.
+    ///
+    /// [`Palette::intern`] is the only source of a [`PaletteIndex`] inside
+    /// the compiler, so a lowered array always satisfies this — but the
+    /// fields above are public, so a caller assembling one by hand can
+    /// have the grid and the palette disagree. A serialiser that writes
+    /// the index anyway produces a file naming a slot the reader has to
+    /// invent, which is why both backends ask this before they assemble
+    /// anything.
+    #[must_use]
+    pub fn first_index_outside_palette(&self) -> Option<(u16, usize)> {
+        let len = self.palette.entries.len();
+        self.voxels
+            .iter()
+            .map(|index| index.0)
+            .find(|index| usize::from(*index) >= len)
+            .map(|index| (index, len))
+    }
 }
 
 /// Append-only palette with deduplication on insertion. Insertion order is

@@ -2,31 +2,34 @@
 //! `resolve::resolver::resolve_site_placements` and the cascade
 //! `W_DEFERRED_CONNECT` warning in `validate_port`.
 //!
-//! Three `place`-level arms intentionally `continue` without emitting a
-//! diagnostic when a row lacks `id=`, `use=`, or `theme=`. A fourth arm
-//! in `resolve_connect_row` returns when the `connect` line is missing
-//! its `to` positional. The risk that previously sat on these arms was
-//! that a downstream `connect` referencing the silent place would drop
-//! its walkway with no visible signal at all — exactly the failure
-//! mode `W_DEFERRED_MEMBER` already covers for endpoint cascades in
+//! One arm in `resolve_connect_row` returns when the `connect` line is
+//! missing its `to` positional, and several endpoint shapes take the same
+//! return. The risk that sits on these arms is that a row the author wrote
+//! drops its walkway with no visible signal — the failure mode
+//! `W_DEFERRED_MEMBER` already covers for endpoint cascades in
 //! `block_array::lower`.
+//!
+//! The three `place`-level arms this file used to open with are no longer
+//! silent: `E_INCOMPLETE_PLACE` names an absent `id=` / `use=` / `theme=`
+//! at the row. What is still worth pinning about them is the *cascade* —
+//! a `connect` naming such a place still says so itself, rather than
+//! leaving the author to infer which walkway went missing.
 //!
 //! Coverage matrix:
 //!
 //! 1. **Baseline** — a well-formed `connect` lays exactly one walkway
 //!    and emits zero diagnostics. Pins the negative space so the
-//!    silent-arm cases are interpretable.
-//! 2. **Missing `use=`** — the cascade emits exactly one
-//!    `W_DEFERRED_CONNECT`, no walkway, no errors. Pins the
-//!    refactor-safety net: a future bug that drops a normal-path
-//!    `place_def.insert` would surface as a wave of these warnings
-//!    instead of silently breaking every walkway.
-//! 3. **Missing `theme=`** — same cascade shape; multi-theme files
-//!    where `theme=` is currently a known silent-gap input still
-//!    surface their downstream `connect` failures through this code.
+//!    remaining cases are interpretable.
+//! 2. **Missing `use=`** — one `E_INCOMPLETE_PLACE` at the `place` row
+//!    *and* one `W_DEFERRED_CONNECT` at the `connect` row, no walkway.
+//!    The pairing is the same one an unresolved `use=DEF` already
+//!    produces, and the cascade is the refactor-safety net: a future bug
+//!    that drops a normal-path `place_def.insert` would surface as a wave
+//!    of these warnings instead of silently breaking every walkway.
+//! 3. **Missing `theme=`** — same pairing.
 //! 4. **Missing `id=`** — unreachable from any `connect` by
-//!    construction (no name to dot-ref), so the only contract worth
-//!    pinning is "no spurious diagnostics from the silent arm itself".
+//!    construction (no name to dot-ref), so what is pinned is that the
+//!    row is reported once and the cascade does not fire.
 //! 5. **`connect` rows with a non-`FROM.PORT to TO.PORT` shape** —
 //!    three entries to the same silent return at the resolver, all
 //!    pinned together so a future guard refactor cannot split their
@@ -40,6 +43,37 @@
 //!    keep the defensive behaviour, while
 //!    `tests/check_connect_arity.rs` pins the user-facing diagnostic
 //!    on the full pipeline.
+//! 6. **`connect` rows whose endpoints are not one-dot references** —
+//!    the same silent return, reached through the endpoint slot
+//!    instead of the positional count. The extra-segment case is the
+//!    one that was not silent but *wrong*: the resolver read
+//!    `tail()[0]` and laid the walkway the author would have got by
+//!    deleting the trailing segments.
+//! 7. **`connect` rows carrying a fourth positional** — the count
+//!    bound, which the endpoint and separator cases do not exercise
+//!    because they all pass exactly three.
+//! 8. **`use=` / `theme=` present but not label-shaped** — the same
+//!    resolver arm as the absent case, because `as_label_str` answers
+//!    `None` for both, but a *different* code above it:
+//!    `E_TYPE_MISMATCH_LABEL` rather than `E_INCOMPLETE_PLACE`. Pinned
+//!    here because the resolver still cannot tell the two apart — the
+//!    completeness check reads the surface key, not the lifted value —
+//!    so a guard that starts distinguishing them has to say so.
+//! 9. **Top-level names declared twice** — `resolve` binds the first and
+//!    skips the rest without a diagnostic, because `check::duplicate`
+//!    owns `E_DUPLICATE_ITEM` and can anchor it on the name token, which
+//!    the IR no longer carries. Same division of labour as the `connect`
+//!    arms; pinned here so a library caller that skips `check` has the
+//!    skip written down rather than discovered.
+//! 10. **A `mat_slot=` already reported against the same theme** —
+//!     `resolve_members` drops the repeat rather than the finding. This
+//!     one is in the matrix but not in this file, and the difference is
+//!     the point: every other entry defers its signal to a pass that runs
+//!     elsewhere, while this arm's signal is a copy already sitting in the
+//!     `Vec` the same call returns. A library caller that skips `check`
+//!     loses nothing by it. The counting is pinned by
+//!     `tests/def_member_diagnostics.rs`, which the arm's
+//!     `INVARIANT(already-reported)` comment names.
 
 use cairn_lang_core::block_array::{BlockArrayIr, lower_to_block_array};
 use cairn_lang_core::check::{Diagnostic, DiagnosticCode, Severity};
@@ -70,7 +104,7 @@ fn count(diagnostics: &[Diagnostic], code: DiagnosticCode) -> usize {
 fn errors(diagnostics: &[Diagnostic]) -> usize {
     diagnostics
         .iter()
-        .filter(|d| d.severity == Severity::Error)
+        .filter(|d| d.severity() == Severity::Error)
         .count()
 }
 
@@ -137,23 +171,21 @@ connect anchor.entry to silent.entry path=@gravel\n"
         "a connect targeting a `use=`-less place must drop its walkway",
     );
     assert_eq!(
-        errors(&outcome.diagnostics),
-        0,
-        "missing `use=` is a known silent input; no errors should surface, got: {:#?}",
+        count(&outcome.diagnostics, DiagnosticCode::IncompletePlace),
+        1,
+        "the `place` row names its own problem, got: {:#?}",
         outcome.diagnostics,
     );
     assert_eq!(
         count(&outcome.diagnostics, DiagnosticCode::DeferredConnect),
         1,
-        "exactly one `W_DEFERRED_CONNECT` must cascade from the missing `use=`",
+        "and the `connect` row still says which walkway went with it",
     );
 }
 
-/// Mirror test for missing `theme=`. The multi-theme case is the known
-/// silent gap; this single-theme fixture exercises the cascade shape
-/// identically by suppressing the per-site heuristic (no theme name on
-/// the placement is treated as a structural skip regardless of how
-/// many themes the file declares — see the resolver doc).
+/// Mirror test for missing `theme=`. The theme count is irrelevant: the
+/// arm returns before any scope is built, so the single-theme heuristic
+/// in `resolve_struct_or_def` never gets a chance to default it.
 #[test]
 fn missing_theme_cascades_w_deferred_connect_with_no_walkway() {
     let src = format!(
@@ -169,25 +201,25 @@ connect anchor.entry to themeless.entry path=@gravel\n"
         "a connect targeting a `theme=`-less place must drop its walkway",
     );
     assert_eq!(
-        errors(&outcome.diagnostics),
-        0,
-        "missing `theme=` is a known silent input; no errors should surface, got: {:#?}",
+        count(&outcome.diagnostics, DiagnosticCode::IncompletePlace),
+        1,
+        "the `place` row names its own problem, got: {:#?}",
         outcome.diagnostics,
     );
     assert_eq!(
         count(&outcome.diagnostics, DiagnosticCode::DeferredConnect),
         1,
-        "exactly one `W_DEFERRED_CONNECT` must cascade from the missing `theme=`",
+        "and the `connect` row still says which walkway went with it",
     );
 }
 
 /// An unnamed `place` row is unreachable from any `connect` row by
-/// construction (no `id=` for the dot-ref left side), so the silent
-/// arm cannot cascade. The contract worth pinning is that the silent
-/// arm itself does not produce diagnostics and the surrounding site
-/// still lowers without errors.
+/// construction (no `id=` for the dot-ref left side), so nothing can
+/// cascade from it. The contract worth pinning is that it is reported
+/// exactly once, at the row, and that the absence of a cascade is not
+/// mistaken for the absence of a finding.
 #[test]
-fn place_without_id_skips_silently_without_diagnostics() {
+fn place_without_id_is_reported_once_and_cannot_cascade() {
     let src = format!(
         "{PROLOGUE}\
 site duo:\n  \
@@ -196,9 +228,9 @@ place           use=hut theme=plain east_of=anchor gap=4\n"
     );
     let outcome = run(&src);
     assert_eq!(
-        errors(&outcome.diagnostics),
-        0,
-        "an unnamed `place` must not push any error, got: {:#?}",
+        count(&outcome.diagnostics, DiagnosticCode::IncompletePlace),
+        1,
+        "an unnamed `place` is reported once, got: {:#?}",
         outcome.diagnostics,
     );
     assert_eq!(
@@ -279,8 +311,8 @@ connect anchor.entry to\n"
 /// is not the literal `to` keyword) used to slip through the resolver
 /// guard because `positional.get(2)` is `Some`. The strengthened
 /// guard now rejects it on shape-mismatch; this test pins that
-/// behaviour so a regression that softens the guard re-introduces
-/// the silent-misinterpretation hole the C1 review caught.
+/// behaviour so a regression that softens the guard cannot quietly
+/// re-open the silent-misinterpretation hole.
 #[test]
 fn connect_with_wrong_separator_silently_returns_without_diagnostics() {
     let src = format!(
@@ -306,4 +338,260 @@ connect anchor.entry xxx peer.entry path=@gravel\n"
         0,
         "the cascade fires from `validate_port`, which is never reached when the guard rejects the shape upstream",
     );
+}
+
+/// Site prologue plus two placed huts, so a `connect` row can be
+/// appended with both endpoints resolvable when their shape is right.
+fn duo(connect_row: &str) -> String {
+    format!(
+        "{PROLOGUE}\
+site duo:\n  \
+place id=anchor use=hut theme=plain at=origin\n  \
+place id=peer   use=hut theme=plain east_of=anchor gap=4\n  \
+{connect_row}\n"
+    )
+}
+
+/// An endpoint that is not a dotted reference at all takes the same
+/// silent return as a missing positional. `check::connect_arity` owns
+/// the user-facing `E_CONNECT_ARITY`; what the resolver owes a library
+/// caller is that no walkway is laid from a row it could not read.
+///
+/// The shapes here are the parser-reachable non-reference kinds that
+/// differ in how they could plausibly be typed: a bare place id with
+/// the port forgotten (on either end, since the two ends are separate
+/// call sites), a quoted reference (the author reached for string
+/// syntax), a material token (copied from `path=`), and a literal.
+/// They share one resolver arm, so they are pinned together — a future
+/// guard that special-cases one of them shows up here.
+#[test]
+fn connect_with_non_reference_endpoint_silently_returns_without_diagnostics() {
+    for row in [
+        "connect anchor to peer.entry path=@gravel",
+        "connect anchor.entry to peer path=@gravel",
+        "connect \"anchor.entry\" to peer.entry path=@gravel",
+        "connect @gravel to peer.entry path=@gravel",
+        "connect 1 to 2 path=@gravel",
+    ] {
+        let outcome = run(&duo(row));
+        assert_eq!(
+            outcome.walkways, 0,
+            "`{row}` must not lay a walkway through the resolver-only path",
+        );
+        assert_eq!(
+            errors(&outcome.diagnostics),
+            0,
+            "endpoint enforcement is owned by `check::connect_arity`; the resolver-only path stays silent for `{row}`, got: {:#?}",
+            outcome.diagnostics,
+        );
+    }
+}
+
+/// A row carrying more than three positionals must not lay a walkway
+/// through the resolver-only path.
+///
+/// The resolver used to read `positional.first()` and
+/// `positional.get(2)`, which accepts any longer row and quietly
+/// ignores the tail. That made the two layers disagree about what is
+/// well-formed rather than merely about how loudly to say so: `check`
+/// calls `connect a.entry to b.entry c.exit` an error while
+/// `resolve(ir)` laid its walkway. The exact-length slice pattern is
+/// what holds the count, so this pins it — the endpoint and separator
+/// tests above would all still pass with the count bound removed.
+#[test]
+fn connect_with_extra_positionals_lays_no_walkway() {
+    let outcome = run(&duo(
+        "connect anchor.entry to peer.entry c.exit path=@gravel",
+    ));
+    assert_eq!(
+        outcome.walkways, 0,
+        "an over-arity row must not lay a walkway through the resolver-only path",
+    );
+    assert_eq!(
+        errors(&outcome.diagnostics),
+        0,
+        "arity enforcement is owned by `check::connect_arity`; the resolver-only path stays silent, got: {:#?}",
+        outcome.diagnostics,
+    );
+}
+
+/// An endpoint carrying a second dot must not lay a walkway either.
+/// This is the shape that made the defect worse than a silent drop:
+/// the resolver read `dot.tail()[0]` and ignored everything after it,
+/// so `anchor.entry.typo` produced exactly the walkway
+/// `anchor.entry` would have produced. A mistyped port compiled into a
+/// build that looked correct.
+#[test]
+fn connect_with_extra_segment_endpoint_lays_no_walkway() {
+    for row in [
+        "connect anchor.entry.x to peer.entry path=@gravel",
+        "connect anchor.entry to peer.entry.x path=@gravel",
+        "connect anchor.entry.x to peer.entry.y path=@gravel",
+    ] {
+        let outcome = run(&duo(row));
+        assert_eq!(
+            outcome.walkways, 0,
+            "`{row}` must not lay the walkway that truncating the extra segment would produce",
+        );
+        assert_eq!(
+            errors(&outcome.diagnostics),
+            0,
+            "endpoint enforcement is owned by `check::connect_arity`; the resolver-only path stays silent for `{row}`, got: {:#?}",
+            outcome.diagnostics,
+        );
+    }
+}
+
+/// A duplicate top-level name binds once and says nothing about it
+/// through the resolver-only path.
+///
+/// `check::duplicate` owns the diagnostic and every CLI command gates
+/// on it, so this is not a hole a user reaches. It *is* a hole a
+/// library caller reaches — `resolve` and `lower_to_block_array` are
+/// public, and the latter's own doc invites callers who assemble the
+/// pipeline themselves. Pinning it here makes the silence a decision
+/// rather than an accident, and puts the fact next to the other arms
+/// that share it.
+#[test]
+fn duplicate_item_names_bind_once_and_stay_silent_through_resolve() {
+    let src = format!(
+        "{PROLOGUE}def lodge size=9x9:
+  floor id=floor mat_slot=floor
+
+def lodge size=3x3:
+  floor id=floor mat_slot=floor
+
+site duo:
+  place id=anchor use=lodge theme=plain at=origin
+"
+    );
+    let module = parse(&src).expect("parse");
+    let ir = lower(&module);
+    let resolution = resolve(&ir, None);
+    assert_eq!(
+        errors(&resolution.diagnostics),
+        0,
+        "name collisions are owned by `check::duplicate`; the resolver-only path stays silent, got: {:#?}",
+        resolution.diagnostics,
+    );
+    assert_eq!(
+        resolution
+            .scopes
+            .keys()
+            .filter(|k| *k == "def::lodge")
+            .count(),
+        1,
+        "the name must bind exactly once",
+    );
+    let out: BlockArrayIr = lower_to_block_array(&ir, &resolution, None);
+    assert_eq!(
+        errors(&out.diagnostics),
+        0,
+        "lowering must not report the collision either, got: {:#?}",
+        out.diagnostics,
+    );
+    let placement = out
+        .placements
+        .get("site::duo::anchor")
+        .expect("the placement resolves");
+    assert_eq!(
+        (placement.dims.x, placement.dims.z),
+        (9, 9),
+        "the first declaration is the one that binds",
+    );
+}
+
+/// A `use=` / `theme=` that is *present but not label-shaped* takes the
+/// same resolver arm as one that is absent: `Value::as_label_str`
+/// answers `None` either way, so the row is dropped and this layer says
+/// nothing about it.
+///
+/// Both are errors, reported above by different codes — an absent key by
+/// `E_INCOMPLETE_PLACE`, a mistyped one by `E_TYPE_MISMATCH_LABEL`. The
+/// completeness check reads the surface key rather than the lifted
+/// value, which is what keeps `use=3` from being reported as a key the
+/// author forgot to write. What is pinned here is the layer below: the
+/// resolver still treats the two identically, so a guard that starts
+/// distinguishing them shows up as a deliberate change.
+///
+/// The rows carry all three keys apart from the mistyped one, so a
+/// stray `E_INCOMPLETE_PLACE` here would mean the check had started
+/// reading values instead of keys.
+#[test]
+fn non_label_use_or_theme_takes_the_same_silent_arm_as_an_absent_one() {
+    for row in [
+        "place id=silent use=3    theme=plain east_of=anchor gap=4",
+        "place id=silent use=hut  theme=7     east_of=anchor gap=4",
+        "place id=silent use=@oak theme=plain east_of=anchor gap=4",
+    ] {
+        let src = format!(
+            "{PROLOGUE}\
+site duo:\n  \
+place id=anchor use=hut theme=plain at=origin\n  \
+{row}\n  \
+connect anchor.entry to silent.entry path=@gravel\n"
+        );
+        let outcome = run(&src);
+        assert_eq!(
+            outcome.walkways, 0,
+            "`{row}` must drop the placement, and the walkway with it",
+        );
+        assert_eq!(
+            errors(&outcome.diagnostics),
+            0,
+            "the mistyped value is owned by `check::type_mismatch`; the \
+             resolver-only path stays silent for `{row}`, got: {:#?}",
+            outcome.diagnostics,
+        );
+        assert_eq!(
+            count(&outcome.diagnostics, DiagnosticCode::IncompletePlace),
+            0,
+            "and it is not reported as an absent key for `{row}` — the key is \
+             on the line, so asking for it again would be advice the author \
+             has already followed",
+        );
+        assert_eq!(
+            count(&outcome.diagnostics, DiagnosticCode::DeferredConnect),
+            1,
+            "the same cascade an absent `use=` produces must fire for `{row}`",
+        );
+    }
+}
+
+/// A `@requires` expression the grammar refuses declares no floor, and
+/// `declared_version_floor` skips it without a word.
+///
+/// That skip is what keeps a caller from being held to half of an
+/// expression already called a mistake, and it is safe *only* because
+/// `check::requires` reports the same header at `Error` severity — every
+/// CLI path runs `check` before it reads a floor. A library caller that
+/// resolves version axes without running `check` gets the skip and no
+/// signal, which is the shape this file exists to write down.
+#[test]
+fn a_refused_requirement_is_skipped_silently_by_the_floor_derivation() {
+    let source = "@requires version<1.20\n@requires nonsense\nstruct s size=2x2\n";
+    let module = cairn_lang_core::parse(source).expect("the headers parse");
+
+    assert_eq!(
+        cairn_lang_core::resolve::declared_version_floor(&module),
+        None,
+        "neither expression is a floor, so none is derived",
+    );
+
+    // And the signal the skip depends on: two headers, two errors, from
+    // the pass the CLI runs first.
+    let ir = cairn_lang_core::lower(&module);
+    let reported = cairn_lang_core::check(&module, &ir, None);
+    let invalid: Vec<_> = reported
+        .iter()
+        .filter(|d| d.code == DiagnosticCode::InvalidRequires)
+        .collect();
+    assert_eq!(invalid.len(), 2, "{reported:#?}");
+    for diagnostic in invalid {
+        assert_eq!(
+            diagnostic.code.severity(),
+            cairn_lang_core::Severity::Error,
+            "a warning would let a compile proceed with no floor at all",
+        );
+    }
 }

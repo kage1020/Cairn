@@ -33,19 +33,25 @@ pub fn lower(module: &Module) -> IntentModule {
 
     for item in &module.items {
         match item {
-            Item::Theme { name, body, span } => themes.push(lower_theme(name, body, span.clone())),
+            Item::Theme {
+                name, body, span, ..
+            } => themes.push(lower_theme(name, body, span.clone())),
             Item::Def {
                 name,
                 args,
                 body,
                 span,
+                ..
             } => defs.push(lower_def(name, args, body, span.clone())),
-            Item::Site { name, body, span } => sites.push(lower_site(name, body, span.clone())),
+            Item::Site {
+                name, body, span, ..
+            } => sites.push(lower_site(name, body, span.clone())),
             Item::Struct {
                 name,
                 args,
                 body,
                 span,
+                ..
             } => structs.push(lower_struct(name, args, body, span.clone())),
         }
     }

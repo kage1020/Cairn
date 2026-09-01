@@ -61,7 +61,7 @@ fn redstone_door_java_maps_or_to_java_repeater_or() {
         synth
             .diagnostics
             .iter()
-            .all(|d| d.severity != Severity::Error),
+            .all(|d| d.severity() != Severity::Error),
         "clean example must not raise errors: {:?}",
         synth.diagnostics,
     );

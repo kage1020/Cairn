@@ -3,8 +3,16 @@
   "theme" "struct" "def" "site" "slot" "logic" "assert"
 ] @keyword
 
+; A member command's keyword is any identifier — `floor`, `walls`, and the
+; rest are not reserved words, they are the names the compiler happens to
+; know (see `member_keyword` in grammar.js). The node exists so this
+; pattern can reach the one identifier that opens a statement without also
+; matching the arguments that follow it.
 (member_keyword) @keyword
-(nested_scope keyword: (identifier) @keyword)
+
+; A theme selector row names the member kind it filters, in the same
+; keyword position and reading as the same word.
+(selector keyword: (identifier) @keyword)
 
 "truth" @keyword.operator
 "always" @keyword.operator
@@ -16,9 +24,13 @@
 
 ; directives
 (directive_name) @keyword.directive
+; `@cairn` / `@requires` keep their value as one opaque run to end of line
+; (the reference parser does not read it either), so it highlights as a
+; single literal rather than being split into operator and number.
+(directive_literal) @string.special
 
 ; operators
-["->" "=" ">=" "<=" ">" "<"] @operator
+["->" "="] @operator
 
 ; punctuation
 ["[" "]" "(" ")" "{" "}"] @punctuation.bracket
@@ -27,7 +39,7 @@
 ; literals
 (string) @string
 (integer) @number
-(bit_pattern) @number
+(bit) @number
 (size_literal) @number.special
 (boolean) @constant.builtin
 

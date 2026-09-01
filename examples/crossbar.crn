@@ -1,12 +1,25 @@
 @cairn 2026.06
 @requires version>=1.20
 
-# A two-net crossing fixture: two independent pressure plates drive
-# two independent gates, whose output signals fan out to two doors on
-# opposite ends of the region. Because both cells route to the far
-# edge on the same plane, their Steiner trees overlap on the plane
-# — genuine crossing coords that the delayed→legalized crossing pass
-# has to fold onto the bridge void.
+# An escape fixture: two pressure plates feed both gates, whose output
+# signals fan out to two doors at opposite ends of the region. Four
+# nets over a region this size cannot all take their shortest route.
+# Two of them would want one coord, and dust reads the dust beside it,
+# so two more would want to run in adjacent rows — either way that is
+# one strand carrying two signals.
+#
+# So the routing pass lays each net around the dust of the ones before
+# it and around the coords beside that dust, and a net with nowhere to
+# go round climbs to a bridge layer inside the `void=` budget. What the
+# wire form below shows is that escape: a strand that leaves the ground
+# layer not to clear a block but to clear another signal.
+#
+# `void=2` and not `void=1` for the same reason. With no layer above
+# the plane the last net has nowhere left at all, and the compiler
+# refuses the scope rather than shorting it — which is the other half
+# of the same rule, and is what the second layer buys here. The region
+# is wider and deeper than the row strictly needs, so it is the `void`
+# that decides.
 #
 # Kept intentionally minimal so the wire form pinned by the redstone
 # crate's byte-identity crossing integration test reads at a glance.
@@ -15,7 +28,7 @@ theme cross:
   slot wall -> @oak_planks
   slot door -> @oak_door
 
-struct crossbar size=5x4
+struct crossbar size=6x4
   floor mat_slot=wall
   walls class=outer mat_slot=wall height=3
   door  id=front side=front at=center mat_slot=door

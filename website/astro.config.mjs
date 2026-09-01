@@ -152,6 +152,10 @@ export default defineConfig({
       description:
         "A description language for Minecraft builds. Declare intent — walls, roofs, windows, redstone — and the compiler resolves the voxels.",
       favicon: "/favicon.svg",
+      logo: {
+        light: "./src/assets/logo.light.svg",
+        dark: "./src/assets/logo.dark.svg",
+      },
       social: [{ icon: "github", label: "GitHub", href: githubRepo }],
       editLink: { baseUrl: `${githubRepo}/edit/main/website/src/content/docs/` },
       defaultLocale: "root",

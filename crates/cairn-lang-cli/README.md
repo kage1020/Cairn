@@ -19,7 +19,7 @@ normative document can never drift.
 |---|---|---|
 | `cairn compile <file.crn> --edition <e> --target <v>` | Compile a `.crn` source to NBT / schematic output for `(edition, version)` | [compilation §4.2](https://cairn.kage1020.com/spec/compilation/), [versioning-editions](https://cairn.kage1020.com/spec/versioning-editions/) |
 | `cairn import <schematic> --mode raw\|l1` | Faithful transliteration of `.nbt` / `.litematic` / `.schem` / `.mcstructure` into raw-centric `.crn` | [ecosystem-interop §12.2](https://cairn.kage1020.com/spec/ecosystem-interop/) |
-| `cairn info <file.crn> --editions java,bedrock` | Report registry compatibility window, semantic-sensitive members, and recommended test targets | [versioning-editions §10.5](https://cairn.kage1020.com/spec/versioning-editions/) |
+| `cairn info <file.crn> --editions java,bedrock` | Report registry compatibility window, per-edition portability, which supported targets can build the source, and semantic-sensitive members | [versioning-editions §10.5](https://cairn.kage1020.com/spec/versioning-editions/) |
 | `cairn diff-blocks <schematic> <file.crn>` | Voxel XOR + state diff for the self-correction loop | [ecosystem-interop §12.2](https://cairn.kage1020.com/spec/ecosystem-interop/), [evaluation](https://cairn.kage1020.com/spec/evaluation/) |
 
 ## Targeting rules

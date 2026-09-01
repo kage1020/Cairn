@@ -17,8 +17,9 @@ and the website playground.
 
 - A `grammar.js` that parses every construct produced by `cairn-lang-core`'s
   reference lexer and parser: directives, `theme` / `struct` / `def` / `site`
-  declarations, member commands, nested `level` / `room` scopes, logic
-  declarations, and `assert` forms (truth tables and temporal assertions).
+  declarations, member commands (`level` and `room` among them — they
+  are ordinary keywords, see §4), logic declarations, and `assert` forms
+  (truth tables and temporal assertions).
 - An external scanner in C that emits synthetic `_indent` / `_dedent` /
   `_newline` tokens matching `cairn-lang-core::lex` (2-space indent, one level
   per step, tab-indent is an error, blank and comment-only lines do not shift
@@ -101,17 +102,24 @@ crates/cairn-lang-tree-sitter/
     locals.scm
     injections.scm            # empty (no embedded languages today)
   test/
-    corpus/
+    corpus/                   # one file per rule cluster
+      assert.txt
+      comments.txt
       directives.txt
-      theme.txt
-      struct.txt
-      nested.txt
-      redstone.txt
-      errors.txt
-      size_literal.txt
+      indent.txt
       indent_errors.txt
+      logic.txt
+      member_keywords.txt
+      nested.txt
+      size_literal.txt
+      struct.txt
+      theme.txt
+      values.txt
   tests/
-    examples.rs
+    examples.rs               # examples/*.crn parse + highlight golden
+    parser_parity.rs          # accept/reject against cairn-lang-core
+    field_labels.rs           # every declared field is labelled somewhere
+    line_endings.rs           # LF / CRLF / lone CR agree
     data/
       cottage.ansi             # golden output of `tree-sitter highlight`
 ```
@@ -128,95 +136,139 @@ The rule set targets the token vocabulary in
 `crates/cairn-lang-core/src/parse.rs`.
 
 ```
-source_file       : directive* top_level_decl*
+source_file       : file_start directive* top_level_decl*
 
-directive         : "@cairn" version_expr
-                  | "@requires" version_expr
-                  | "@intended_targets" value_list
+directive         : "@cairn" directive_literal
+                  | "@requires" directive_literal
+                  | "@intended_targets" string_list
 
 top_level_decl    : theme_decl | struct_decl | def_decl | site_decl
 
-theme_decl        : "theme" identifier ":" block_of<theme_body_item>
+theme_decl        : "theme" identifier ":"? block_of<theme_body_item>?
 theme_body_item   : slot_binding | selector_rule
-slot_binding      : "slot" identifier "->" material_ref
-selector_rule     : selector ("->" attribute_list)?
+slot_binding      : "slot" identifier "->" value
+selector_rule     : selector "->" attribute_list?
+selector          : identifier selector_filter
+selector_filter   : "[" filter_list? "]"
 
-struct_decl       : "struct" identifier attribute_list block_of<struct_body_item>
-def_decl          : "def"    identifier attribute_list block_of<struct_body_item>
-site_decl         : "site"   identifier attribute_list block_of<struct_body_item>
+struct_decl       : "struct" identifier attribute_list? ":"? block_of<struct_body_item>?
+def_decl          : "def"    identifier attribute_list? ":"? block_of<struct_body_item>?
+site_decl         : "site"   identifier                ":"? block_of<struct_body_item>?
 
 struct_body_item  : member_stmt
-                  | nested_scope
+                  | member_stmt_with_body
                   | logic_decl
                   | assert_stmt
 
-member_stmt       : member_keyword attribute_list ("->" signal_ref)?
-member_keyword    : "floor" | "walls" | "door"  | "window"
-                  | "roof"  | "stair" | "pressure_plate"
-                  | "circuit" | "place" | "connect"
+member_stmt       : member_keyword selector_filter? command_arg_list?
+                    ("->" value command_arg_list?)?
+member_keyword    : identifier          # any, `logic` / `assert` aside
+command_arg_list  : command_arg+
+command_arg       : attribute | value
 
-nested_scope      : ("level" | "room") attribute_list
-                    block_of<struct_body_item>
-
-logic_decl        : "logic" signal_ref "=" bool_expr
+logic_decl        : "logic" dotted_ref "=" bool_expr
 
 assert_stmt       : "assert" (truth_form | temporal_form)
-truth_form        : "truth" "(" signal_list "->" signal_ref ")"
-                    "{" truth_row (";" truth_row)* ";"? "}"
-truth_row         : bit_pattern "->" bit
+truth_form        : "truth" "(" signal_list "->" dotted_ref ")"
+                    "{" (truth_row ";"?)* "}"
+truth_row         : integer "->" bit
+bit               : /[01]/                          # exactly `0` or `1`
 temporal_form     : "always" "(" temporal_expr ")"
-temporal_expr     : signal_expr "->" "eventually" signal_ref
-                    ("within" integer)?
+temporal_expr     : dotted_ref "->" "eventually" dotted_ref "within" integer
 
-attribute_list    : attribute*
+attribute_list    : attribute+                      # no commas
+filter_list       : attribute ("," ? attribute)*    # commas are optional
 attribute         : identifier "=" value
 value             : integer | boolean | string
                   | size_literal | material_ref | signal_ref
                   | identifier | value_list
-value_list        : "[" (value ("," value)*)? "]"
+value_list        : "[" (value ","?)* "]"
+string_list       : "[" (string ","?)* "]"
 
-selector          : identifier ("[" attribute_list "]")?
-                              ("." identifier)*     # e.g. inside.front
 material_ref      : "@" identifier ("." identifier)*
 signal_ref        : identifier ("." identifier)+    # sig.step, inside.front
+dotted_ref        : signal_ref | identifier
 size_literal      : integer "x" integer             # 9x7, no whitespace
-bit_pattern       : /[01]+/                         # truth-table row bits
-version_expr      : (">=" | "<=" | ">" | "<" | "=")? version_literal
+directive_literal : /[^#\r\n \t]+( +[^#\r\n \t]+)*/  # opaque to end of line
 
 bool_expr         : logical_or
 logical_or        : logical_and ("or" logical_and)*
 logical_and       : unary ("and" unary)*
 unary             : "not"? primary
-primary           : signal_ref
-                  | boolean
+primary           : dotted_ref
                   | "(" bool_expr ")"
 ```
+
+Three of these are shaped by the reference parser rather than by what
+reads well as a grammar, and the difference is load-bearing:
+
+- **`member_keyword` is any identifier.** `parse_command` reads one with
+  `expect_ident` and dispatches only `logic` and `assert` elsewhere;
+  whether the word names a member the compiler knows is
+  `E_UNKNOWN_KEYWORD`'s question, asked after parsing. `level` and `room`
+  have no rule of their own for the same reason — they are ordinary
+  keywords whose body happens to be the one the geometry passes read, and
+  the parser lets any member carry children.
+- **A bracket right after a member keyword is always the selector.**
+  `parse_command` tests for `[` before it enters the argument loop, so
+  `place [1,2]` is a selector holding `1` where an attribute is required,
+  and is refused. That is why a bare list may not be a command's first
+  argument.
+- **`@cairn` / `@requires` values are opaque.** `parse_header` keeps the
+  raw source slice to the end of the line and leaves version syntax to a
+  later pass, so `@cairn draft` parses. `@intended_targets` is the
+  exception: its value is re-lexed and must be a list of strings.
+
+`true` and `false` are the language's only reserved words. The reference
+lexer turns them into `Bool` tokens in `scan_ident`, before anything asks
+what was expected, so they can never stand as an identifier — which is
+what refuses `logic s.out = true`.
 
 `block_of<T>` expands to `_indent T (_newline T)* _newline? _dedent`. The
 external scanner injects `_indent`, `_dedent`, and `_newline` tokens.
 
 ### 4.1 Anonymous vs named nodes
 
-- `@`, `->`, `=`, `>=`, `<=`, `>`, `<`, `[`, `]`, `(`, `)`, `{`, `}`, `,`,
-  `;`, `:`, `.` are anonymous. Highlight queries capture them by their string
-  literal.
-- Keywords (`theme`, `struct`, `def`, `site`, `slot`, `level`, `room`,
-  `logic`, `assert`, every member keyword, `or`, `and`, `not`, `truth`,
-  `always`, `eventually`, `within`) are also anonymous string literals; the
+- `@`, `->`, `=`, `[`, `]`, `(`, `)`, `{`, `}`, `,`, `;`, `:`, `.` are
+  anonymous. Highlight queries capture them by their string literal.
+- The keywords the grammar knows by position (`theme`, `struct`, `def`,
+  `site`, `slot`, `logic`, `assert`, `or`, `and`, `not`, `truth`,
+  `always`, `eventually`, `within`) are anonymous string literals; the
   highlight query maps them to `@keyword`.
+- A member command's keyword is *not* one of those — it is an `identifier`
+  aliased to `member_keyword`, because the reference parser accepts any
+  word there (§4). The node exists so a highlight query can reach the one
+  identifier that opens a statement; which words the compiler recognises
+  is not the grammar's to say. `level` and `room` reach it the same way,
+  which is why neither appears as a literal above.
 - Every rule listed above becomes a named node. Container rules
-  (`argument_list`, `block`, `attribute_list`) are named for query
-  ergonomics.
+  (`command_arg_list`, `attribute_list`, `filter_list`) are named for
+  query ergonomics.
+- `selector` appears in two shapes, because the two sites that use it
+  carry the keyword differently. A theme row's is the whole thing —
+  `keyword` plus `filter` — while a member command's keyword belongs to
+  the statement, so `_member_stmt_head` aliases the bracket part alone
+  (`alias($.selector_filter, $.selector)`). A query that wants only the
+  theme-row form must therefore match on the `keyword` field's presence,
+  as `highlights.scm` does; matching the node name alone catches both.
 
 ## 5. External scanner
 
 `src/scanner.c` implements the tree-sitter external scanner ABI (v14 or the
 version pinned by the tree-sitter CLI we install). It tracks:
 
-- `indent_stack`: a `uint32_t` stack whose bottom sentinel is `0`, matching
+- `indent_stack`: a `uint16_t` stack whose bottom sentinel is `0`, matching
   `Lexer::indent_stack` in `cairn-lang-core::lex`.
-- Pending `_dedent` count for the current line (a single dedented line may
-  emit multiple `_dedent` tokens).
+- `pending_dedents`: levels the current line still owes. A line returning
+  from several levels at once emits one `_dedent` per level, and only the
+  first can be read off the source — by the time the second is asked for,
+  the leading spaces are behind the lexer. The count is set where the
+  line's indentation is read and drained one token at a time.
+- `line_start_column`: what `get_column()` reports at the start of the
+  line being read. Zero after an `\n`, non-zero after a lone `\r`, because
+  tree-sitter counts columns from `\n` alone while the reference lexer
+  ends a line on `\r` too. Subtracting it gives the leading-space count
+  either way.
 
 Behaviour, mirroring `cairn-lang-core::lex`:
 
@@ -227,13 +279,32 @@ Behaviour, mirroring `cairn-lang-core::lex`:
    state — the scanner consumes them and continues.
 3. If `spaces / 2` is greater than the top of `indent_stack` by exactly one,
    push it and emit `_indent`. A jump of more than one level is an error.
-4. If it is less than the top, pop while greater and emit one `_dedent` per
-   pop. If the level does not match after popping, emit `ERROR`.
+4. If it is less than the top, pop while greater and emit one `_dedent`
+   per pop. The level always matches after popping — levels only ever
+   rise by one (see 3), so the stack holds every level between the two —
+   which is what lets the scanner set the owed count once, from
+   `current - level`, instead of re-deriving it per token.
 5. `\n`, `\r\n`, and lone `\r` all count as one line break and produce
    `_newline`. EOF closes any remaining open indents with `_dedent` tokens.
+6. An odd leading-space count is an error wherever it appears, including
+   where the level does not change — which is a line that asks the scanner
+   for no token at all, so there is nothing left to withhold at the line
+   itself. The refusal is made one token earlier instead: the `_newline`
+   branch reads the next line ahead of the token it is about to produce
+   and declines to produce it, and nothing else in the grammar can consume
+   a line break.
+7. `_file_start`, which `source_file` opens with, consumes the file's
+   leading blank and comment-only lines and is withheld when the first
+   content line is indented. It exists because that line is the one place
+   an indentation error has no preceding line break to hang off.
 
-Serialisation (for tree-sitter's incremental parsing) writes
-`indent_stack.len` and the stack entries as little-endian `uint32_t`s.
+Serialisation (for tree-sitter's incremental parsing) writes, in order:
+`indent_stack.len` as a `uint16_t`, that many `uint16_t` stack entries,
+`pending_dedents` as a `uint16_t`, `line_start_column` as a `uint32_t`,
+and `eof_newline_used` as one byte. `MAX_INDENT_DEPTH` is derived from
+exactly that layout, so a field added here without adjusting it would let
+`serialize()` overrun — which tree-sitter reads back as "no state" rather
+than as an error.
 
 ## 6. Highlight queries
 
@@ -243,24 +314,30 @@ Serialisation (for tree-sitter's incremental parsing) writes
 | Capture | Node / literal |
 | --- | --- |
 | `@comment` | `comment` node, declared as an `extras` rule in `grammar.js` matching `/#[^\r\n]*/`; the scanner skips comment-only lines during indent counting so they do not shift the indent state, but in-line comments are picked up by the LR grammar's extras stream |
-| `@keyword` | `theme`, `struct`, `def`, `site`, `slot`, `level`, `room`, `logic`, `assert`, every member keyword |
+| `@keyword` | `theme`, `struct`, `def`, `site`, `slot`, `logic`, `assert`, the `member_keyword` node, a `selector`'s `keyword` field |
 | `@keyword.directive` | `@cairn`, `@requires`, `@intended_targets` |
 | `@keyword.operator` | `or`, `and`, `not`, `eventually`, `within`, `truth`, `always` |
-| `@operator` | `->`, `=`, `>=`, `<=`, `>`, `<` |
+| `@operator` | `->`, `=` (comparison operators live inside `directive_literal`, which the grammar keeps opaque) |
 | `@type` | `material_ref` |
 | `@variable.parameter` | `attribute` name |
 | `@variable.member` | segments after the first `.` in `signal_ref` and `inside.<side>` |
 | `@constant.builtin` | `true`, `false` |
 | `@string` | double-quoted strings |
-| `@number` | integer, `bit_pattern` |
+| `@number` | `integer`, `bit` |
 | `@number.special` | `size_literal` |
+| `@string.special` | `directive_literal` |
 | `@punctuation.bracket` | `[]`, `()`, `{}` |
 | `@punctuation.delimiter` | `,`, `;`, `.`, `:` |
 
 `queries/locals.scm` binds `id=<ident>` attributes as
-`@local.definition.member` and every attribute value that references an id
-(`opened_by=`, `mat_slot=`, and any bare `identifier` value inside an
-`attribute`) as `@local.reference`.
+`@local.definition.member` and emits **no** `@local.reference`. Capturing
+every non-`id` identifier value was tried and removed: most attribute
+values are enum literals (`side=`, `class=`, `mat_slot=`, ...), so the
+pattern tagged coincidental text matches — `side=front` as a reference to
+an unrelated `id=front` — and the grammar has no list of keys that
+reliably hold an id (`opened_by=` takes a signal ref, not an id). A narrow
+pattern keyed on specific attribute names can be added once those names
+are identified.
 
 `queries/injections.scm` is empty for the initial release.
 
@@ -375,10 +452,29 @@ package root and is committed.
 4. **Node smoke** (CI only, no Node test framework). Loading the module and
    asserting the language object is enough — behavioural coverage lives in
    the Rust and tree-sitter test suites.
-5. Property-based cross-check with `cairn-lang-core::lex::lex` is
-   **deferred**. It is the ideal future guardrail (accepted-source parity,
-   rejected-source parity) but is out of scope for the initial release; the
-   examples + corpus combination is enough for launch.
+5. **Differential parity** (`tests/parser_parity.rs`). One fixture set is
+   fed to both this grammar and `cairn-lang-core::parse`, and their
+   verdicts must agree — with the expected verdict written down too, so a
+   fixture that flips in both parsers still fails. Constraint 1 makes this
+   the guardrail the rest of the suite cannot be: `examples.rs` only
+   checks one direction over twelve valid files, and `test/corpus/` pins
+   trees without consulting the reference parser at all.
+
+   A second assertion compares *where* each member lands — every keyword
+   in document order with the depth it sits at. Acceptance parity alone is
+   satisfied by a grammar that accepts the right files and nests them
+   wrongly, which is what a multi-level dedent did: the file parsed, and
+   the member after the dedent sat a level too deep. Maximum depth does
+   not move when a sibling sinks into a body that already exists, so the
+   comparison has to be per member.
+
+   Two divergences are deliberate and listed in the test with their
+   reason: the reference parser refuses a zero size extent and an integer
+   that overflows `i64`, both from value-range checks (`NonZeroU32::new`,
+   `str::parse`) applied to tokens that are lexically well-formed. A
+   grammar can only approximate those by digit count, which would
+   mis-refuse a valid literal one digit longer. They are asserted rather
+   than skipped, so the list cannot quietly grow.
 
 ## 11. Open questions
 

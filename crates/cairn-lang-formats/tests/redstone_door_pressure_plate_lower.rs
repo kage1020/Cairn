@@ -14,7 +14,7 @@ use std::path::PathBuf;
 use cairn_lang_core::block_array::{BlockArrayIr, lower_to_block_array};
 use cairn_lang_core::check::DiagnosticCode;
 use cairn_lang_core::{lower, parse, resolve};
-use cairn_lang_formats::registry::builtin_java;
+use cairn_lang_formats::registry::{RegistryPack, builtin_bedrock, builtin_java};
 
 fn examples_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -24,13 +24,16 @@ fn examples_dir() -> PathBuf {
 }
 
 fn lower_redstone_door() -> BlockArrayIr {
+    lower_redstone_door_with(builtin_java(), &builtin_java().data_versions.latest)
+}
+
+fn lower_redstone_door_with(pack: &RegistryPack, mc_version: &str) -> BlockArrayIr {
     let source = std::fs::read_to_string(examples_dir().join("redstone-door.crn"))
         .expect("redstone-door.crn readable");
     let module = parse(&source).expect("parse redstone-door");
     let ir = lower(&module);
     let resolution = resolve(&ir, None);
-    let pack = builtin_java();
-    lower_to_block_array(&ir, &resolution, Some(&pack.materials))
+    lower_to_block_array(&ir, &resolution, Some(&pack.view(Some(mc_version))))
 }
 
 #[test]
@@ -56,6 +59,32 @@ fn redstone_door_palette_contains_oak_pressure_plate() {
         ids.contains(&"minecraft:oak_pressure_plate"),
         "palette missing oak_pressure_plate; got {ids:?}",
     );
+}
+
+/// The plate id is edition-specific, and lowering has no edition of its
+/// own — it reads the pack's `pressure_plate.default`.
+///
+/// Bedrock has never had `oak_pressure_plate`, so a lowering that ignored
+/// the pack and used its hardcoded Java default would put an id into the
+/// `.mcstructure` palette that the game loads as air. Asserting the pack
+/// *declares* the right id is not enough: this is the test that the
+/// lowering pass actually reads it.
+#[test]
+fn the_bedrock_pack_plates_with_the_bedrock_id_on_every_supported_target() {
+    let pack = builtin_bedrock();
+    for version in pack.data_versions.versions.iter().map(|e| &e.mc_version) {
+        let out = lower_redstone_door_with(pack, version);
+        let ba = out.structures.get("struct::gatehouse").unwrap();
+        let ids: Vec<&str> = ba.palette.entries.iter().map(|s| s.id.as_str()).collect();
+        assert!(
+            ids.contains(&"minecraft:wooden_pressure_plate"),
+            "bedrock {version} palette missing wooden_pressure_plate; got {ids:?}",
+        );
+        assert!(
+            !ids.contains(&"minecraft:oak_pressure_plate"),
+            "bedrock {version} palette carries the Java-only oak_pressure_plate; got {ids:?}",
+        );
+    }
 }
 
 #[test]
@@ -177,7 +206,11 @@ fn redstone_door_actuator_patch_bad_id_emits_actuator_shaped_primary() {
     let ir = cairn_lang_core::lower(&module);
     let resolution = cairn_lang_core::resolve(&ir, None);
     let pack = builtin_java();
-    let out = lower_to_block_array(&ir, &resolution, Some(&pack.materials));
+    let out = lower_to_block_array(
+        &ir,
+        &resolution,
+        Some(&pack.view(Some(&pack.data_versions.latest))),
+    );
 
     let actuator_defers: Vec<&cairn_lang_core::check::Diagnostic> = out
         .diagnostics

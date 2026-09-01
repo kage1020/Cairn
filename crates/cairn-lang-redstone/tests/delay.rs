@@ -18,7 +18,7 @@ use cairn_lang_core::Edition;
 use cairn_lang_core::check::Severity;
 use cairn_lang_core::{lower, parse};
 use cairn_lang_redstone::{
-    DiagnosticCode, MAX_ATTENUATION_SEGMENT, ScopedPlacementIr, compile_delay,
+    DiagnosticCode, MAX_ATTENUATION_SEGMENT, PlacedCellNode, ScopedPlacementIr, compile_delay,
     compile_edition_netlist, compile_netlist, compile_placement, compile_routing, synthesize,
 };
 
@@ -43,7 +43,7 @@ fn routed_from_source(source: &str, edition: Edition) -> ScopedPlacementIr {
         synth
             .diagnostics
             .iter()
-            .all(|d| d.severity != Severity::Error),
+            .all(|d| d.severity() != Severity::Error),
         "fixture must synth cleanly: {:?}",
         synth.diagnostics,
     );
@@ -148,10 +148,11 @@ fn redstone_door_bedrock_delay_ticks_are_zero() {
 /// every cell's `delay_ticks` with a pinned tick sum. Same 3-cell
 /// fixture the routing suite pins: `sig.and_ab = sig.a and sig.b`,
 /// `sig.or_ab = sig.a or sig.b`, `sig.combined = sig.and_ab and
-/// sig.or_ab`. Cell coords are `x = 0, 1, 2` per the placement pass,
+/// sig.or_ab`. Cell coords are `x = 1, 3, 5` per the placement pass,
 /// input pads sit at `(0, 0, 1)` and `(0, 0, 2)`, so every driver
-/// segment is ≤ 5 blocks and no cell needs an implicit buffer. Each
-/// cell's `delay_ticks` therefore equals its base tick count alone.
+/// segment is well under the dust limit and no cell needs an implicit
+/// buffer. Each cell's `delay_ticks` therefore equals its base tick
+/// count alone.
 #[test]
 fn multi_cell_scope_pins_delay_ticks_from_base_only() {
     let source = r"
@@ -187,20 +188,27 @@ struct sim size=7x5
         .find(|e| e.name == "sim")
         .expect("sim scope");
     assert_eq!(entry.ir.cells.len(), 3);
-    // JavaComparatorAnd: base 1, segments [1, 2] → 0 buffers.
+    // JavaComparatorAnd: base 1, segments [2, 1] → 0 buffers.
     assert_eq!(entry.ir.cells[0].delay_ticks(), Some(1));
-    // JavaRepeaterOr: base 1, segments [2, 3] → 0 buffers.
+    // JavaRepeaterOr: base 1, segments [4, 5] → 0 buffers.
     assert_eq!(entry.ir.cells[1].delay_ticks(), Some(1));
-    // JavaComparatorAnd: base 1, cell-to-cell segments [2, 1] → 0 buffers.
+    // JavaComparatorAnd: base 1, cell-to-cell segments [6, 2] → 0 buffers.
     assert_eq!(entry.ir.cells[2].delay_ticks(), Some(1));
     // `wire_length` from routing must be preserved verbatim on every
     // cell (locked separately by the byte-identical JSON regression
     // below, but pinned per-cell here so a divergent field write in
     // `attribute_delay_ticks` trips this test rather than the JSON
     // one).
-    assert_eq!(entry.ir.cells[0].wire_length(), Some(3));
-    assert_eq!(entry.ir.cells[1].wire_length(), Some(5));
-    assert_eq!(entry.ir.cells[2].wire_length(), Some(3));
+    assert_eq!(
+        entry
+            .ir
+            .cells
+            .iter()
+            .map(PlacedCellNode::wire_length)
+            .collect::<Vec<_>>(),
+        vec![Some(3), Some(9), Some(8)],
+        "the routed lengths, unchanged",
+    );
 }
 
 /// AC4 — a scope whose routed output-pad segment exceeds
@@ -242,7 +250,7 @@ struct wide_pack size=300x5
         delayed.diagnostics,
     );
     let d = attenuation[0];
-    assert_eq!(d.severity, Severity::Error);
+    assert_eq!(d.severity(), Severity::Error);
     assert!(
         d.primary.starts_with("routed netlist for "),
         "primary should mark the delay-side origin, got {:?}",
@@ -289,18 +297,17 @@ struct wide_pack size=300x5
 /// [`MAX_ATTENUATION_SEGMENT`] gets `delay_ticks` bumped by the
 /// implicit-buffer contribution. Every cell in the chain shares
 /// `sig.b` as one of its drivers, so `cell[i]` (placed at
-/// `x = i, y = 0, z = 0`) sees a `sig.b` segment of
-/// `manhattan((0, 0, 2), (i, 0, 0)) = i + 2` blocks; the previous cell
-/// contributes a segment of 1 block. `cell[i]`'s implicit buffer
-/// count is `(segment - 1) / DUST_ATTENUATION_LIMIT` summed across
-/// drivers.
+/// `x = 1 + 2i, y = 0, z = 0`) sees a `sig.b` segment that grows with
+/// the column it stands in; the previous cell contributes a short one.
+/// `cell[i]`'s implicit buffer count is
+/// `(segment - 1) / DUST_ATTENUATION_LIMIT` summed across drivers.
 #[test]
 fn cascaded_and_chain_records_implicit_buffer_ticks() {
     let source = r"
 theme t:
   slot wall -> @oak_planks
 
-struct chain size=20x5
+struct chain size=40x5
   floor mat_slot=wall
 
   pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a
@@ -343,19 +350,19 @@ struct chain size=20x5
         .expect("chain scope");
     // cell[0] .. cell[15] map to `sig.c0` .. `sig.c15`, all
     // `JavaComparatorAnd` with base_delay = 1. Each cell has two
-    // drivers: the previous cell (segment 1 block, no buffer) and
-    // shared `sig.b` (segment i + 2 blocks — the input pad at
-    // `(0, 0, 2)` reaches `(i, 0, 0)`). For i ≤ 13 the long segment
-    // ≤ 15 so no buffer ticks accrue and `delay_ticks = 1`; at i = 14
-    // it crosses the attenuation limit and `(16 - 1) / 15 = 1` buffer
-    // is added, so `delay_ticks = 2` from that cell onward. Values
-    // are hardcoded per index (not derived from the formula the
+    // drivers: the previous cell, next door but one, and shared
+    // `sig.b`, whose trunk runs the length of the row. The row is
+    // spaced, so cell `i` stands at `x = 1 + 2i` and the `sig.b`
+    // segment into it grows twice as fast as the index — which is why
+    // the first buffer arrives at i = 7 and the second at i = 14.
+    // Values are hardcoded per index (not derived from the formula the
     // implementation itself uses) so a self-referential off-by-one in
     // `buffer_repeater_ticks_for_segment` cannot slide past the test.
     assert_eq!(entry.ir.cells.len(), 16);
     let expected: [u32; 16] = [
-        1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, // i = 0..=13, segment ≤ 15
-        2, 2, // i = 14 (segment 16), i = 15 (segment 17)
+        1, 1, 1, 1, 1, 1, 1, // i = 0..=6, segment ≤ 15
+        2, 2, 2, 2, 2, 2, 2, // i = 7..=13, one buffer
+        3, 3, // i = 14..=15, two
     ];
     for (i, cell) in entry.ir.cells.iter().enumerate() {
         assert_eq!(
@@ -413,20 +420,21 @@ struct band size=5x5
     );
 }
 
-/// `AC5c` — output-pad Manhattan segment of exactly
+/// `AC5c` — output-pad routed segment of exactly
 /// `MAX_ATTENUATION_SEGMENT` blocks passes cleanly; one more block
 /// fails. Pins the `>` vs `>=` boundary in `delay_scope`'s sanity
 /// check so a future rewrite cannot silently slide the cap by one.
 ///
-/// With `size=256x5` the output pad lands at `(255, 0, 1)` and the
-/// sole cell at `(0, 0, 0)`, so the output segment is exactly 256
-/// blocks — matching the cap. `size=257x5` bumps the pad to
-/// `(256, 0, 1)` and the segment to 257, one over the cap.
+/// With `size=257x5` the output pad lands at `(256, 0, 0)` and the
+/// sole cell at `(1, 0, 1)`. The wire out runs the length of the cell
+/// row and drops into the pad at the far corner — exactly the
+/// 256-block cap. `size=258x5` adds a column and the segment becomes
+/// 257, one over.
 #[test]
 fn max_attenuation_segment_boundary_at_256_is_inclusive() {
     let at_cap_source = "@cairn 2026.06\n@requires version>=1.20\n\n\
         theme t:\n  slot wall -> @oak_planks\n\n\
-        struct band size=256x5\n  \
+        struct band size=257x5\n  \
         floor mat_slot=wall\n  \
         pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a\n  \
         pressure_plate id=q at=inside.front  offset=0 y=0 -> sig.b\n  \
@@ -453,7 +461,7 @@ fn max_attenuation_segment_boundary_at_256_is_inclusive() {
 fn max_attenuation_segment_boundary_at_257_is_exclusive() {
     let over_cap_source = "@cairn 2026.06\n@requires version>=1.20\n\n\
         theme t:\n  slot wall -> @oak_planks\n\n\
-        struct band size=257x5\n  \
+        struct band size=258x5\n  \
         floor mat_slot=wall\n  \
         pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a\n  \
         pressure_plate id=q at=inside.front  offset=0 y=0 -> sig.b\n  \
@@ -490,12 +498,13 @@ fn empty_placement_ir_produces_empty_delay_output() {
     assert!(delayed.scoped.scopes.is_empty());
 }
 
-/// AC7 — a scope whose Placement IR carries inputs and outputs but
-/// no cells (identity wire) is elided by `compile_placement` already,
-/// so `compile_delay` never sees it. The delay output must still be
-/// diagnostic-clean.
+/// AC7 — a scope whose Placement IR carries inputs and outputs but no
+/// cells (identity wire) reaches the delay pass now that placement
+/// gives its actuator a pad. Across a 5-wide region the segment is four
+/// blocks, well inside the attenuation limit, so it is charged nothing:
+/// the point is that it is charged at all rather than skipped.
 #[test]
-fn identity_wire_scope_stays_elided_through_delay() {
+fn identity_wire_is_charged_for_its_own_segment() {
     let source = r"
 theme t:
   slot wall -> @oak_planks
@@ -514,9 +523,17 @@ struct wire size=5x5
         "identity-wire scope must not raise delay diagnostics, got {:?}",
         delayed.diagnostics,
     );
-    assert!(
-        delayed.scoped.scopes.iter().all(|e| e.name != "wire"),
-        "identity-wire scope must stay elided in the delay output",
+    let scope = delayed
+        .scoped
+        .scopes
+        .iter()
+        .find(|e| e.name == "wire")
+        .expect("identity-wire scope must reach the delayed IR");
+    let output = scope.ir.outputs.first().expect("the actuator is placed");
+    assert_eq!(
+        output.delay_ticks(),
+        Some(0),
+        "a four-block segment needs no buffer repeater",
     );
 }
 
@@ -715,7 +732,7 @@ struct wide_pack size=300x5
 /// not at the cell whose `delay_ticks` was already committed.
 #[test]
 #[should_panic(
-    expected = "for cell #0 at (0,0,0) in struct `gatehouse` — delay insertion must run exactly once per routed IR"
+    expected = "for cell #0 at (1,0,1) in struct `gatehouse` — delay insertion must run exactly once per routed IR"
 )]
 fn re_running_delay_pass_panics_loudly() {
     let source = load_example("redstone-door.crn");

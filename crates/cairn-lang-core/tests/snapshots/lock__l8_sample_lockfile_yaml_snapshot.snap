@@ -1,8 +1,8 @@
 ---
 source: crates/cairn-lang-core/tests/lock.rs
-assertion_line: 140
 expression: body
 ---
+lock_schema_version: 1
 source_hash: "sha256:11102e6ea692987aa6358753f9d02cae6e853a53df3202b0bfdac11ecdcb6a31"
 cairn_version: "2026.09"
 target:

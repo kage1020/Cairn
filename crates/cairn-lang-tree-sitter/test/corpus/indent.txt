@@ -12,8 +12,14 @@ theme keep:
   (theme_decl
     (identifier)
     (theme_body
-      (slot_binding (identifier) (material_ref (identifier)))
-      (slot_binding (identifier) (material_ref (identifier))))))
+      (slot_binding
+        (identifier)
+        (material_ref
+          (identifier)))
+      (slot_binding
+        (identifier)
+        (material_ref
+          (identifier))))))
 
 ==================
 Blank line between struct body members
@@ -30,14 +36,30 @@ struct keep size=5x5
   (struct_decl
     (identifier)
     (attribute_list
-      (attribute (identifier) (size_literal (integer) (integer))))
+      (attribute
+        (identifier)
+        (size_literal
+          (integer)
+          (integer))))
     (struct_body
-      (member_stmt (member_keyword)
-        (command_arg_list (command_arg (attribute (identifier) (identifier)))))
-      (member_stmt (member_keyword)
+      (member_stmt
+        (member_keyword)
         (command_arg_list
-          (command_arg (attribute (identifier) (identifier)))
-          (command_arg (attribute (identifier) (integer))))))))
+          (command_arg
+            (attribute
+              (identifier)
+              (identifier)))))
+      (member_stmt
+        (member_keyword)
+        (command_arg_list
+          (command_arg
+            (attribute
+              (identifier)
+              (identifier)))
+          (command_arg
+            (attribute
+              (identifier)
+              (integer))))))))
 
 ==================
 Blank line between top-level declarations
@@ -55,14 +77,26 @@ struct keep size=5x5
   (theme_decl
     (identifier)
     (theme_body
-      (slot_binding (identifier) (material_ref (identifier)))))
+      (slot_binding
+        (identifier)
+        (material_ref
+          (identifier)))))
   (struct_decl
     (identifier)
     (attribute_list
-      (attribute (identifier) (size_literal (integer) (integer))))
+      (attribute
+        (identifier)
+        (size_literal
+          (integer)
+          (integer))))
     (struct_body
-      (member_stmt (member_keyword)
-        (command_arg_list (command_arg (attribute (identifier) (identifier))))))))
+      (member_stmt
+        (member_keyword)
+        (command_arg_list
+          (command_arg
+            (attribute
+              (identifier)
+              (identifier))))))))
 
 ==================
 Comment-only line between top-level declarations
@@ -80,11 +114,24 @@ struct keep size=5x5
   (theme_decl
     (identifier)
     (theme_body
-      (slot_binding (identifier) (material_ref (identifier)))))
+      (slot_binding
+        (identifier)
+        (material_ref
+          (identifier)))
+      (comment)))
   (struct_decl
     (identifier)
     (attribute_list
-      (attribute (identifier) (size_literal (integer) (integer))))
+      (attribute
+        (identifier)
+        (size_literal
+          (integer)
+          (integer))))
     (struct_body
-      (member_stmt (member_keyword)
-        (command_arg_list (command_arg (attribute (identifier) (identifier))))))))
+      (member_stmt
+        (member_keyword)
+        (command_arg_list
+          (command_arg
+            (attribute
+              (identifier)
+              (identifier))))))))

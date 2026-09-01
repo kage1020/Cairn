@@ -3,8 +3,8 @@
 //! Locks the observable behaviours of the Steiner-routing slice
 //! (`spec/redstone` §14.5, stage 2 of place-and-route): the
 //! `examples/redstone-door.crn` happy path (per edition), single-cell
-//! `wire_length` attribution, multi-cell cascades with L-shape nets
-//! whose `wire_length` values are pinned to exact Manhattan sums,
+//! `wire_length` attribution, multi-cell cascades whose
+//! `wire_length` values are pinned to exact routed sums,
 //! `E_ROUTE_CONGESTION` when the post-routing footprint exceeds the
 //! reservation, pass-through of scopes elided by upstream stages,
 //! the JSON wire form growing a `wire_length` field, and per-scope
@@ -16,8 +16,8 @@ use cairn_lang_core::Edition;
 use cairn_lang_core::check::Severity;
 use cairn_lang_core::{lower, parse};
 use cairn_lang_redstone::{
-    DiagnosticCode, ScopedPlacementIr, compile_edition_netlist, compile_netlist, compile_placement,
-    compile_routing, synthesize,
+    DiagnosticCode, PlacedCellNode, ScopedPlacementIr, compile_edition_netlist, compile_netlist,
+    compile_placement, compile_routing, synthesize,
 };
 
 mod common;
@@ -41,7 +41,7 @@ fn placement_from_source(source: &str, edition: Edition) -> ScopedPlacementIr {
         synth
             .diagnostics
             .iter()
-            .all(|d| d.severity != Severity::Error),
+            .all(|d| d.severity() != Severity::Error),
         "fixture must synth cleanly: {:?}",
         synth.diagnostics,
     );
@@ -58,10 +58,15 @@ fn placement_from_source(source: &str, edition: Edition) -> ScopedPlacementIr {
 
 /// AC1 — `examples/redstone-door.crn` compiled for Java routes its
 /// sole `JavaRepeaterOr` cell with `wire_length = Some(3)`: the sum of
-/// Manhattan distances from each input pad (v1 convention: `(0, 0,
-/// 1+i)`) to the cell coord `(0, 0, 0)` — one step for `sig.step`,
-/// two for `sig.exit`. `delay_ticks` stays `None` (routing does not
-/// insert delay per `spec/redstone` §14.4; that is stage 3).
+/// the routed lengths from each input pad (v1 convention: `(0, 0, i)`)
+/// into the cell coord `(1, 0, 1)`. `sig.exit`'s pad is directly beside
+/// the cell, so its route is one step and lays no dust at all — there
+/// is no coord between the two ends to put any on, which is the first
+/// fixture where `wire_length` counting steps rather than blocks of
+/// dust is visible. `sig.step`'s pad is at the corner a row further
+/// out, and comes in round the corner for two.
+/// `delay_ticks` stays `None` (routing does not insert delay per
+/// `spec/redstone` §14.4; that is stage 3).
 #[test]
 fn redstone_door_java_fills_wire_length_from_input_pads() {
     let source = load_example("redstone-door.crn");
@@ -85,7 +90,7 @@ fn redstone_door_java_fills_wire_length_from_input_pads() {
     assert_eq!(
         cell.wire_length(),
         Some(3),
-        "wire_length must be Manhattan(step→cell) + Manhattan(exit→cell) = 1 + 2 = 3",
+        "wire_length must be route(step→cell) + route(exit→cell) = 2 + 1 = 3",
     );
     assert!(
         cell.delay_ticks().is_none(),
@@ -120,24 +125,42 @@ fn redstone_door_bedrock_matches_java_wire_length() {
 }
 
 /// AC3 — a scope whose logic produces three cascaded cells fills
-/// every cell's `wire_length` with a pinned Manhattan sum, so a
-/// regression in either the input-pad coordinate convention or the
-/// per-driver attribution walk trips this test. Cell placement lays
-/// cells at `x = i, y = 0, z = 0`, and input pads land at
-/// `(0, 0, 1+i)`, so the exact sums are:
+/// every cell's `wire_length` with a pinned routed sum, so a
+/// regression in the input-pad coordinate convention, the cell-row
+/// spacing, or the per-driver attribution walk trips this test. Cell
+/// placement lays cells at `x = 1 + 2i, y = 0, z = 1`, and input pads
+/// land at `(0, 0, i)`.
 ///
-/// - cell[0] `sig.and_ab = sig.a and sig.b`: `M((0,0,1)→(0,0,0)) +
-///   M((0,0,2)→(0,0,0)) = 1 + 2 = 3`.
-/// - cell[1] `sig.or_ab  = sig.a or sig.b`:  same source pair,
-///   different cell coord: `M((0,0,1)→(1,0,0)) + M((0,0,2)→(1,0,0))
-///   = 2 + 3 = 5`. This is the L-shape case (dx=1, dz≥1) that the
-///   `l_shape_path` axis order regression would otherwise sneak past.
+/// That it routes at all is the first thing this fixture pins. A cell
+/// body is a block, so a net reaches it through a free neighbouring
+/// coord, and cell[1] has three distinct nets touching it — two
+/// drivers and its own output. Packed at `x = i` it would have two
+/// free neighbours, its siblings holding the rest, and no region size
+/// would give the third back: this chain is unroutable at every width
+/// under that convention, and compiles at every width under this one.
+///
+/// Three of the four nets here have to go round one of the others,
+/// which is what the sums are worth reading for:
+///
+/// - cell[0] `sig.and_ab = sig.a and sig.b`: `sig.b`'s pad is directly
+///   beside it, so its route is one step over no dust at all. `sig.a`'s
+///   is at the corner a row further out and comes in round the corner
+///   for two: `2 + 1 = 3`.
+/// - cell[1] `sig.or_ab = sig.a or sig.b`: the same two nets carrying
+///   on down the row, one along the lane at `z=0` and one along the
+///   lane at `z=2` — `sig.a` took the first, and `sig.b` cannot run
+///   beside it, so it takes the other: `4 + 5 = 9`.
 /// - cell[2] `sig.combined = sig.and_ab and sig.or_ab`: cell-to-cell
-///   drivers: `M((0,0,0)→(2,0,0)) + M((1,0,0)→(2,0,0)) = 2 + 1 = 3`.
+///   drivers. cell[1] is two columns away with a clear run between it
+///   and cell[2]. cell[0] has a lane taken on either side of it and
+///   the row itself is one strand wide, so its output climbs to `y=1`
+///   at its own doorstep, runs the length of the row up there and
+///   drops in: `6 + 2 = 8`. That is the escape §14.5 specifies, and it
+///   is why the fixture reserves `void=3`.
 ///
 /// `delay_ticks` stays `None` at every cell.
 #[test]
-fn multi_cell_scope_pins_wire_length_including_l_shape_nets() {
+fn multi_cell_scope_pins_wire_length_including_detours() {
     let source = r"
 theme t:
   slot wall -> @oak_planks
@@ -171,12 +194,17 @@ struct sim size=7x5
         .find(|e| e.name == "sim")
         .expect("sim scope");
     assert_eq!(entry.ir.cells.len(), 3);
-    // cell[0] at (0,0,0), input pads at (0,0,1) and (0,0,2).
-    assert_eq!(entry.ir.cells[0].wire_length(), Some(3));
-    // cell[1] at (1,0,0), same input pad pair — L-shape drivers.
-    assert_eq!(entry.ir.cells[1].wire_length(), Some(5));
-    // cell[2] at (2,0,0), driven by cell[0]=(0,0,0) and cell[1]=(1,0,0).
-    assert_eq!(entry.ir.cells[2].wire_length(), Some(3));
+    assert_eq!(
+        entry
+            .ir
+            .cells
+            .iter()
+            .map(PlacedCellNode::wire_length)
+            .collect::<Vec<_>>(),
+        vec![Some(3), Some(9), Some(8)],
+        "each cell is charged for the dust into it, detours and climbs \
+         included",
+    );
     for cell in &entry.ir.cells {
         assert!(
             cell.delay_ticks().is_none(),
@@ -184,6 +212,69 @@ struct sim size=7x5
             cell.delay_ticks(),
         );
     }
+}
+
+/// A cell whose two ports read one signal is fed by one strand of
+/// dust, and `wire_length` reports that strand once.
+///
+/// `sig.a and sig.a` is how a `.crn` reaches the shape: logic synth
+/// keeps both operands, so the cell arrives at the routing pass with
+/// `a` and `b` both driven by `Input(0)`. The routed length from the
+/// pad at `(0,0,1)` to the cell at `(1,0,0)` is two blocks, and a
+/// per-port fold reported four — twice the dust the layout has.
+///
+/// The per-net rule is not "one segment per cell":
+/// `multi_cell_scope_pins_wire_length_including_detours` above
+/// drives its cells from two distinct pads and pins the sums.
+#[test]
+fn ports_sharing_a_net_are_measured_once() {
+    let source = r"
+theme t:
+  slot wall -> @oak_planks
+
+struct dup size=20x5
+  floor mat_slot=wall
+
+  pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a
+
+  logic sig.s0 = sig.a and sig.a
+
+  door id=d side=front at=center mat_slot=wall opened_by=sig.s0
+
+  circuit region=floor void=2
+";
+    let placement = placement_from_source(source, Edition::Java);
+    let routed = compile_routing(&placement);
+    assert!(
+        routed.diagnostics.is_empty(),
+        "clean fixture must not raise routing diagnostics: {:?}",
+        routed.diagnostics,
+    );
+
+    let entry = routed
+        .scoped
+        .scopes
+        .iter()
+        .find(|e| e.name == "dup")
+        .expect("dup scope");
+    assert_eq!(entry.ir.cells.len(), 1);
+    let cell = &entry.ir.cells[0];
+    assert_eq!(
+        cell.drivers.len(),
+        2,
+        "the fixture needs both ports on one net to mean anything: {:?}",
+        cell.drivers,
+    );
+    assert!(
+        cell.drivers.iter().all(|d| d.net == cell.drivers[0].net),
+        "both ports must read the same net: {:?}",
+        cell.drivers,
+    );
+    assert_eq!(
+        cell.wire_length(),
+        Some(2),
+        "the pad at (0,0,1) is two blocks from the cell at (1,0,0), laid once",
+    );
 }
 
 /// AC4 — a scope whose synthesised netlist packs cells to the cell-only
@@ -199,24 +290,26 @@ struct sim size=7x5
 /// layout.
 #[test]
 fn post_routing_congestion_fires_route_congestion_and_elides_scope() {
-    // 3 cells × 4 blocks = 12 required cell area vs 4 × 3 × 1 = 12
-    // reserved blocks — placement passes at the boundary, routing
-    // then adds wire and overflows.
+    // 2 cells × 4 blocks = 8 required cell area vs 5 × 3 × 1 = 15
+    // reserved blocks — placement passes with seven coords to spare,
+    // and the wire spends more than seven: the sensor feeds both cells
+    // and the second cell's own driver runs the length of the row
+    // between them. One sensor rather than two so the chain routes:
+    // this fixture is about the budget, and a stranded sink would
+    // refuse it one step earlier for a different reason.
     let source = r"
 theme t:
   slot wall -> @oak_planks
 
-struct pack size=4x3
+struct pack size=5x3
   floor mat_slot=wall
 
   pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a
-  pressure_plate id=q at=inside.front  offset=0 y=0 -> sig.b
 
-  logic sig.and_ab   = sig.a and sig.b
-  logic sig.or_ab    = sig.a or sig.b
-  logic sig.combined = sig.and_ab and sig.or_ab
+  logic sig.c0 = not sig.a
+  logic sig.c1 = sig.c0 and sig.a
 
-  door id=d side=front at=center mat_slot=wall opened_by=sig.combined
+  door id=d side=front at=center mat_slot=wall opened_by=sig.c1
 
   circuit region=floor void=1
 ";
@@ -235,7 +328,7 @@ struct pack size=4x3
         routed.diagnostics,
     );
     let d = congestion[0];
-    assert_eq!(d.severity, Severity::Error);
+    assert_eq!(d.severity(), Severity::Error);
     assert!(
         d.primary.starts_with("routed netlist for "),
         "primary should mark the routing-side origin, got {:?}",
@@ -252,7 +345,7 @@ struct pack size=4x3
         d.primary,
     );
     assert!(
-        d.primary.contains("4x3"),
+        d.primary.contains("5x3"),
         "primary should quote the region footprint, got {:?}",
         d.primary,
     );
@@ -290,12 +383,12 @@ fn empty_placement_ir_produces_empty_routing_output() {
     assert!(routed.scoped.scopes.is_empty());
 }
 
-/// AC6 — a scope whose Placement IR carries inputs and outputs but
-/// no cells (a pressure-plate wired straight to a door via `sig.a`)
-/// is elided by `compile_placement` already, so `compile_routing`
-/// never sees it. The routing output must still be diagnostic-clean.
+/// AC6 — a scope whose Placement IR carries inputs and outputs but no
+/// cells (a pressure-plate wired straight to a door via `sig.a`) has
+/// one segment to route: sensor pad to actuator pad. Its length is the
+/// number the delay pass charges buffer repeaters against.
 #[test]
-fn identity_wire_scope_is_elided_before_routing() {
+fn identity_wire_routes_its_sensor_to_actuator_segment() {
     let source = r"
 theme t:
   slot wall -> @oak_planks
@@ -314,9 +407,17 @@ struct wire size=5x5
         "identity-wire scope must not raise routing diagnostics, got {:?}",
         routed.diagnostics,
     );
-    assert!(
-        routed.scoped.scopes.iter().all(|e| e.name != "wire"),
-        "identity-wire scope must stay elided in the routed output",
+    let scope = routed
+        .scoped
+        .scopes
+        .iter()
+        .find(|e| e.name == "wire")
+        .expect("identity-wire scope must reach the routed IR");
+    let output = scope.ir.outputs.first().expect("the actuator is placed");
+    assert_eq!(
+        output.wire_length(),
+        Some(4),
+        "the pads sit at (0,0,1) and (4,0,1) of a 5-wide region",
     );
 }
 
@@ -429,7 +530,7 @@ struct alpha size=7x5
   door id=d side=front at=center mat_slot=wall opened_by=sig.open
   circuit region=floor void=2
 
-struct beta size=4x3
+struct beta size=8x3
   floor mat_slot=wall
   pressure_plate id=r at=front.outside offset=0 y=0 -> sig.c
   pressure_plate id=s at=inside.front  offset=0 y=0 -> sig.d
@@ -502,7 +603,7 @@ fn edition_parity_wire_length_matches_across_java_and_bedrock() {
 /// expected substring pins the breadcrumb that spares them that walk.
 #[test]
 #[should_panic(
-    expected = "for cell #0 at (0,0,0) in struct `gatehouse` — routing must run exactly once per placement"
+    expected = "for cell #0 at (1,0,1) in struct `gatehouse` — routing must run exactly once per placement"
 )]
 fn re_running_routing_pass_panics_loudly() {
     let source = load_example("redstone-door.crn");

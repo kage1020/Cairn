@@ -1,0 +1,124 @@
+name: editors + website
+
+# The two Node projects that ship outside crates.io and npm: the VS Code
+# extension under `editors/vscode` and the Astro documentation site under
+# `website`. Neither was referenced anywhere in `.github/workflows` before this
+# file existed, so a TypeScript error in `extension.ts` or a Starlight page that
+# fails to render could reach `canary` without turning a single check red.
+#
+# `Cargo.toml` is in the path filters because `[workspace.package] version` lives
+# there while the copy the extension has to agree with lives in
+# `editors/vscode/package.json` — a change that touches only `Cargo.toml` is the
+# one that moves the two apart, and without this path it would not run the job
+# that notices.
+#
+# What that does *not* cover is the release PR, and not because of the filter:
+# release-plz opens it with `secrets.GITHUB_TOKEN`, and a pull request opened —
+# or a branch pushed — with that token creates no workflow runs at all, so a
+# release PR has nothing for any filter to select. release.yml records the same
+# rule for tags at its dispatch step. The release path is gated inside
+# `release-patch` instead, which asserts parity on the merged commit before
+# `release-plz release` publishes anything.
+
+on:
+  push:
+    branches: [main, canary]
+    paths:
+      - "editors/vscode/**"
+      - "website/**"
+      - "Cargo.toml"
+      - ".github/workflows/editors-website.yml"
+  pull_request:
+    paths:
+      - "editors/vscode/**"
+      - "website/**"
+      - "Cargo.toml"
+      - ".github/workflows/editors-website.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  vscode:
+    name: VS Code extension
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: editors/vscode
+    steps:
+      - uses: actions/checkout@v4
+
+      # Before installing anything: this needs neither Node nor a lockfile, and
+      # it is the check most likely to fail on a version bump.
+      - name: Compare the extension version with the workspace version
+        shell: bash
+        run: |
+          set -euo pipefail
+          workspace=$(awk '
+            /^\[workspace\.package\]/   { in_section = 1; next }
+            /^\[/                       { in_section = 0 }
+            in_section && /^version = / { gsub(/"/, "", $3); print $3; exit }
+          ' ../../Cargo.toml)
+          # Shape, not just non-emptiness. `version = { workspace = true }` would
+          # hand back `{` here, which is non-empty and would otherwise sail
+          # through and be compared against — or, in release.yml, written into —
+          # three manifests. Same CalVer gate tree-sitter.yml applies to a tag.
+          if [[ ! "$workspace" =~ ^[0-9]{4}\.(0|[1-9][0-9]*)(\.[0-9]+)?$ ]]; then
+            echo "Read '$workspace' from [workspace.package]; that is not a CalVer number" >&2
+            exit 1
+          fi
+          extension=$(jq -er '.version' package.json)
+          echo "Cargo [workspace.package]: $workspace"
+          echo "editors/vscode:            $extension"
+          if [ "$workspace" != "$extension" ]; then
+            echo 'The extension resolves cairn-lsp from PATH and is documented as' >&2
+            echo 'tracking the CLI CalVer tag, so the two numbers move together.' >&2
+            echo "release.yml's alignment step is what moves them after a bump." >&2
+            exit 1
+          fi
+
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: editors/vscode/package.json
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: editors/vscode/pnpm-lock.yaml
+
+      - run: pnpm install --frozen-lockfile
+
+      # `package` rather than `check` + `build` because it is the command that
+      # actually ships: `tsc --noEmit`, the minified bundle, and `vsce package`.
+      # That last one is the only thing that validates the extension manifest,
+      # which makes it the one step a workflow about keeping that manifest
+      # trustworthy cannot leave out. The `.vsix` it writes is discarded; the
+      # exit status is the product.
+      - name: Type-check, bundle, and package
+        run: pnpm run package
+
+  website:
+    name: Documentation site
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: website
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: website/package.json
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: website/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      # `astro build` renders every page, so a content-collection frontmatter
+      # violation and a sidebar `slug:` pointing at a page that does not exist
+      # both fail here. It is not a link checker and not a type checker: a dead
+      # relative link between spec chapters builds green (measured), and there is
+      # no `astro check` in this project, so `.astro`/`.ts` type errors do not
+      # surface either.
+      - run: pnpm run build

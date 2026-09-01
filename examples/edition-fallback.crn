@@ -27,8 +27,14 @@ theme shop_bedrock:
   slot wall           -> @wall.stone.cobble
   slot floating_text  -> @sign.oak_wall
 
+# The display window sits on the course above the door's opening, not in
+# it: `door at=center` and `offset=2` share the front wall's middle column
+# and `door` cuts `y = 1..=2`, so `y=2` put the sign inside the doorway.
+# Both are openings, so nothing but the line order decided which of them
+# the cell kept (`W_PHASE_CONFLICT`).
+
 struct shop size=5x5
   floor  mat_slot=floor
   walls  class=outer mat_slot=wall height=3
   door   side=front at=center
-  window class=display side=front offset=2 y=2 size=1x1 mat_slot=floating_text
+  window class=display side=front offset=2 y=3 size=1x1 mat_slot=floating_text

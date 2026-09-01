@@ -72,7 +72,7 @@ The site at <https://cairn.kage1020.com/> is the canonical home for the project'
 - [Tutorial](https://cairn.kage1020.com/tutorial/) — walks through the worked
   [`examples/`](examples/) (`cottage`, `themed-tower`, `redstone-door`, `village`).
 - [Developer Guide](https://cairn.kage1020.com/development/) — the Rust workspace layout,
-  crate dependency graph, build/test/lint commands.
+  dependency rules, and the build/test/lint commands.
 - 日本語版 — every page above is mirrored at `/ja/<path>/`.
 
 The site Markdown source lives in [`website/src/content/docs/`](website/README.md); edits there

@@ -202,10 +202,6 @@ items:
                   value:
                     w: 1
                     h: 2
-              - key: shape
-                value:
-                  kind: Ident
-                  value: slit
           - kind: Generic
             keyword: stair
             args:

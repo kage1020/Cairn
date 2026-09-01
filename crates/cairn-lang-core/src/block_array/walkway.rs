@@ -40,6 +40,7 @@ use crate::ids::{PortId, WalkwayScopeKey};
 use crate::intent::{DefIr, Member, MemberRole};
 
 use super::openings::{WallSide, wall_length, wall_local_to_grid};
+use super::wall_column::WallColumn;
 use super::{BlockArray, BlockState, Dims, Palette, PaletteIndex};
 
 /// Wall-local `v` coordinate where a port anchors. Walkways are flat
@@ -114,9 +115,12 @@ pub struct WalkwayLayout {
 /// * the door is missing `at=` or carries a value other than
 ///   `center` / `left` / `right`,
 /// * the window is missing `offset=` / `size=WxH`, or its
-///   `offset + size.w` exceeds the wall length, or its
-///   `y + size.h` exceeds the def's walls `height=` (so a window
-///   that would not even be carved cannot anchor a walkway either),
+///   `offset + size.w` exceeds the wall length, or any row of
+///   `y ..= y + size.h - 1` falls outside the rows the def's `walls`
+///   members declare (see `wall_column_of`, which reads the declared
+///   rows rather than the painted ones — a window over walls whose
+///   material does not resolve is deferred by the openings pass and
+///   still anchors here),
 /// * the def has no `size=` to bound the wall against,
 /// * an internal arithmetic step (`checked_add` /
 ///   `wall_local_to_grid` bounds / `i32::try_from`) over- or
@@ -160,12 +164,12 @@ pub fn port_world_position(
             // def's walls — otherwise the window cut itself is
             // deferred and a walkway anchored to a non-existent
             // window would land the user with a strip leading into
-            // a solid wall. `wall_height_of` returns `None` when no
-            // walls member declares a positive `height=`, which is
-            // the same condition that prevents the window from
-            // being voxelised.
-            let wall_height = wall_height_of(def)?;
-            let u = window_center_offset(member, len, wall_height)?;
+            // a solid wall. `wall_column_of` is empty when no walls
+            // member declares a positive `height=`, which is the
+            // same condition that prevents the window from being
+            // voxelised.
+            let wall_column = wall_column_of(def);
+            let u = window_center_offset(member, len, &wall_column)?;
             window_world_xz(
                 side,
                 u,
@@ -205,6 +209,10 @@ pub fn port_world_position(
 /// Y for the whole strip.
 #[must_use]
 pub fn l_path(from: (i32, i32, i32), to: (i32, i32, i32)) -> Vec<(i32, i32, i32)> {
+    debug_assert!(
+        l_path_area(from, to) <= ROUTE_AREA_CAP,
+        "l_path called past the cap; callers must ask `l_path_area` first",
+    );
     let y = from.1;
     let mut voxels: Vec<(i32, i32, i32)> = Vec::new();
     let (x0, z0) = (from.0, from.2);
@@ -252,7 +260,31 @@ pub fn l_path(from: (i32, i32, i32), to: (i32, i32, i32)) -> Vec<(i32, i32, i32)
 /// The cap only exists so a pathological source (two ports megametres
 /// apart with a pebble between them) degrades to the skip-and-warn
 /// fallback instead of allocating the world.
-const ROUTE_AREA_CAP: u64 = 4_000_000;
+pub const ROUTE_AREA_CAP: u64 = 4_000_000;
+
+/// Ground-plane cells the straight L between these two ports would span,
+/// as a bounding-box area.
+///
+/// Area, not path length, because area is what gets allocated:
+/// `build_walkway_array` sizes its voxel buffer from the bounding box, and
+/// `route_path` measures the same quantity against the same cap. A pair
+/// `2_000_000` cells apart on each axis has a path length of 4M — inside a
+/// length-based bound — and a bounding box of 4x10^12.
+///
+/// [`ROUTE_AREA_CAP`]'s doc has always described this case ("two ports
+/// megametres apart"), but only `route_path` consulted it, and `route_path`
+/// runs second and only when something is in the way. An unobstructed pair
+/// walked straight past: two `place` rows chained with `east_of=` and
+/// `north_of=` at `gap=30000` spent 32 seconds on roughly 1.8 GB.
+///
+/// Saturates at `u64::MAX` if the product overflows, which is the sentinel
+/// [`RoutePathError::AreaCapExceeded`] already documents for that field.
+#[must_use]
+pub fn l_path_area(from: (i32, i32, i32), to: (i32, i32, i32)) -> u64 {
+    let dx = u128::from(from.0.abs_diff(to.0)) + 1;
+    let dz = u128::from(from.2.abs_diff(to.2)) + 1;
+    u64::try_from(dx * dz).unwrap_or(u64::MAX)
+}
 
 /// Direction of travel between two 4-neighbour ground-plane cells.
 /// Carried in the search state so the cost function can count turns:
@@ -723,12 +755,37 @@ fn door_world_xz(
     let w_i = i32::try_from(interior_w).ok()?;
     let h_i = i32::try_from(interior_h).ok()?;
     let o = i32::try_from(overhang).ok()?;
-    Some(match side {
-        WallSide::Front => (origin.0 + o + u_i, origin.2 + o + h_i - 1),
-        WallSide::Back => (origin.0 + o + (w_i - 1 - u_i), origin.2 + o),
-        WallSide::Left => (origin.0 + o, origin.2 + o + u_i),
-        WallSide::Right => (origin.0 + o + w_i - 1, origin.2 + o + (h_i - 1 - u_i)),
-    })
+    // Composed with `checked_*`, matching `window_world_xz` and the `None`
+    // contract `port_world_position` documents for both. Guarding only the
+    // individual conversions left the sum unguarded, so a `place` far enough
+    // out — `gap=2147483647` reaches it — panicked in a debug build and
+    // wrapped in a release one, sending the router billions of cells the
+    // other way.
+    let (x, z) = match side {
+        WallSide::Front => (
+            origin.0.checked_add(o)?.checked_add(u_i)?,
+            origin.2.checked_add(o)?.checked_add(h_i)?.checked_sub(1)?,
+        ),
+        WallSide::Back => (
+            origin
+                .0
+                .checked_add(o)?
+                .checked_add(w_i.checked_sub(1)?.checked_sub(u_i)?)?,
+            origin.2.checked_add(o)?,
+        ),
+        WallSide::Left => (
+            origin.0.checked_add(o)?,
+            origin.2.checked_add(o)?.checked_add(u_i)?,
+        ),
+        WallSide::Right => (
+            origin.0.checked_add(o)?.checked_add(w_i)?.checked_sub(1)?,
+            origin
+                .2
+                .checked_add(o)?
+                .checked_add(h_i.checked_sub(1)?.checked_sub(u_i)?)?,
+        ),
+    };
+    Some((x, z))
 }
 
 /// Window port wall-local centre offset: `offset + size.w / 2`, with
@@ -740,13 +797,18 @@ fn door_world_xz(
 /// case (`==`) is intentionally accepted — a window whose right edge
 /// touches the wall's right corner still fits.
 ///
-/// Vertical bound: `y + size.h ≤ wall_height`. The window must fit
-/// inside the walls that carry it; otherwise the openings pass would
-/// already defer the cut, and a walkway port for a non-existent
-/// window cut would lead the strip into a solid wall. The equality
-/// case is again accepted so a full-height window flush with the wall
-/// top stays valid.
-fn window_center_offset(member: &Member, len: u32, wall_height: u32) -> Option<u32> {
+/// Vertical bound: every row of the rectangle, `y ..= y + size.h - 1`,
+/// lies inside one course of the def's [`WallColumn`]. A `walls
+/// height=H` fills the world rows `1 ..= H` — the floor slab owns row
+/// `0` — so a window flush with the top course (`y + size.h == H + 1`)
+/// is inside the wall and one starting on the ground plane (`y == 0`)
+/// is not.
+///
+/// This is the predicate [`super::lower`] cuts the window with, called
+/// on the column that pass builds, so a rectangle that anchors a
+/// walkway and a rectangle the openings pass carves are the same set by
+/// construction rather than by two limits agreeing.
+fn window_center_offset(member: &Member, len: u32, wall_column: &WallColumn) -> Option<u32> {
     let offset = nonneg_int_value(member, "offset")?;
     let (sw, sh) = size_member(member, "size")?;
     let y = nonneg_int_value(member, "y")?;
@@ -754,8 +816,7 @@ fn window_center_offset(member: &Member, len: u32, wall_height: u32) -> Option<u
     if horizontal_end > len {
         return None;
     }
-    let vertical_end = y.checked_add(sh)?;
-    if vertical_end > wall_height {
+    if !wall_column.contains_rows(y, sh) {
         return None;
     }
     Some(offset + sw / 2)
@@ -790,24 +851,33 @@ fn window_world_xz(
     Some((origin.0.checked_add(grid_x)?, origin.2.checked_add(grid_z)?))
 }
 
-/// Largest `height=` declared on a `walls` member of the def, mirroring
-/// the intent behind `super::lower::max_wall_top` — the port needs to
-/// know how tall the wall is so a window port can fit vertically.
-/// Returns `None` when no `walls` member declares a positive `height=`
-/// (the same condition that prevents the openings pass from carving any
-/// door or window). Only top-level `walls` members are considered:
-/// `level y=N` flattening lives in `lower.rs` and is not integrated
-/// with walkway port resolution yet (walkways currently only match
-/// door / window ports declared directly under the def body). When a
-/// port on a level-scoped door / window lands, this helper will need
-/// to walk `member.children` too.
-fn wall_height_of(def: &DefIr) -> Option<u32> {
-    def.members
-        .iter()
-        .filter(|m| matches!(m.role, MemberRole::Walls))
-        .filter_map(|m| nonneg_int_value(m, "height"))
-        .filter(|h| *h > 0)
-        .max()
+/// The rows the def's `walls` members occupy, mirroring
+/// `super::lower::wall_column` — the port needs to know where the wall
+/// is so a window port can be checked against the same masonry the
+/// openings pass cuts.
+///
+/// Empty when no `walls` member declares a positive `height=`. That is no
+/// longer the whole of the openings pass's condition: `super::lower`'s
+/// column also drops a `walls` whose `mat_slot=` will not resolve, since
+/// a wall that paints nothing is not masonry to cut. This helper has no
+/// resolution to consult — `port_world_position` is handed a `DefIr` and
+/// nothing else — so a window port over unpaintable walls still anchors
+/// while the cut itself is deferred. Only top-level `walls` members are
+/// considered either: `level y=N`
+/// flattening lives in `lower.rs` and is not integrated with walkway
+/// port resolution yet (walkways currently only match door / window
+/// ports declared directly under the def body). When a port on a
+/// level-scoped door / window lands, this helper will need to walk
+/// `member.children` too — and every such member carries the level's
+/// `y=N` as its span offset, which is why the column is built from
+/// `(offset, height)` pairs rather than from heights alone.
+fn wall_column_of(def: &DefIr) -> WallColumn {
+    WallColumn::from_walls(
+        def.members
+            .iter()
+            .filter(|m| matches!(m.role, MemberRole::Walls))
+            .filter_map(|m| nonneg_int_value(m, "height").map(|h| (0, h))),
+    )
 }
 
 /// Strict non-negative integer reader — unlike `super::lower::nonneg_int`
@@ -1607,11 +1677,11 @@ mod tests {
     }
 
     #[test]
-    fn port_world_position_window_accepts_boundary_y_plus_size_equal_wall_height() {
-        // Pin the acceptance edge of the *vertical* bound.
-        // `y + size.h == walls.height` (here 2 + 1 == 3) must resolve.
-        // A regression that tightens to `>=` would land the port at
-        // `None` and silently drop the walkway.
+    fn port_world_position_window_accepts_a_rectangle_inside_the_wall() {
+        // Pin the acceptance side of the *vertical* bound with a rectangle
+        // strictly inside the wall (rows 2..=2 of 1..=3), so the
+        // flush-with-the-top case is pinned by a test of its own and the
+        // two edges cannot be re-pinned together by accident.
         let src = concat!(
             "def cottage size=3x3:\n",
             "  walls mat_slot=w height=3\n",
@@ -1627,21 +1697,21 @@ mod tests {
     }
 
     #[test]
-    fn port_world_position_window_returns_none_when_y_plus_size_overflows_wall_height() {
-        // The window cut itself would be deferred when its top edge
-        // pierces the walls (`y + size.h > walls.height`). Anchoring a
-        // walkway to a non-existent cut would leave the user with a
-        // strip running into a solid wall, so the port must defer too.
+    fn port_world_position_window_returns_none_when_the_top_edge_pierces_the_wall() {
+        // The window cut itself would be deferred when its top row is
+        // above the wall. Anchoring a walkway to a non-existent cut would
+        // leave the user with a strip running into a solid wall, so the
+        // port must defer too.
         let src = concat!(
             "def cottage size=3x3:\n",
             "  walls mat_slot=w height=2\n",
-            "  window id=light side=front y=1 offset=0 size=1x2 mat_slot=g\n",
+            "  window id=light side=front y=2 offset=0 size=1x2 mat_slot=g\n",
         );
         let module = crate::parse(src).expect("parse");
         let ir = crate::lower(&module);
         let def = ir.defs.first().expect("def lowered");
         let dims = Dims { x: 3, y: 1, z: 3 };
-        // `y + size.h = 1 + 2 = 3 > walls.height = 2` → None.
+        // `walls height=2` paints rows 1..=2; the rectangle wants 2..=3.
         assert!(port_world_position((0, 0, 0), dims, def, &pid("light")).is_none());
     }
 

@@ -1,6 +1,6 @@
 {
   "name": "tree-sitter-cairn",
-  "version": "2026.8.2",
+  "version": "2026.9.0",
   "description": "tree-sitter grammar for the Cairn build description language",
   "keywords": [
     "parser",
@@ -24,6 +24,7 @@
   "types": "bindings/node/index.d.ts",
   "files": [
     "grammar.js",
+    "tree-sitter.json",
     "binding.gyp",
     "bindings/node/**",
     "queries/**",

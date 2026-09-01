@@ -90,12 +90,20 @@ jobs:
       - uses: pnpm/action-setup@v4
         with:
           package_json_file: crates/cairn-lang-tree-sitter/package.json
+      # Deliberately no `registry-url`. Setting it makes setup-node write an
+      # .npmrc containing `//registry.npmjs.org/:_authToken=${NODE_AUTH_TOKEN}`
+      # and export NODE_AUTH_TOKEN as a placeholder. npm then sees auth as
+      # already configured, never starts the OIDC exchange, and sends the
+      # placeholder as a credential — which the registry answers with a 404 on
+      # the PUT rather than a 403, because it will not confirm that a package it
+      # won't let you touch exists (actions/setup-node#1551). Trusted Publishing
+      # only engages when nothing has configured a token, and registry.npmjs.org
+      # is npm's default registry anyway, so there is nothing to point at.
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: pnpm
           cache-dependency-path: crates/cairn-lang-tree-sitter/pnpm-lock.yaml
-          registry-url: https://registry.npmjs.org
 
       - run: pnpm install --frozen-lockfile
 
@@ -111,6 +119,27 @@ jobs:
       # bundled with Node 22 on the runner images.
       - name: Install a Trusted-Publishing-capable npm
         run: npm install -g npm@latest
+
+      # tree-sitter.yml's packed-tarball job exercises the published file set
+      # end to end, but it cannot hold this publish back: release.yml dispatches
+      # the three tag-triggered workflows in one fire-and-forget loop, so a red
+      # job there is an artifact to re-run rather than a gate. The narrow
+      # question the publish itself turns on is whether the manifest that
+      # declares `file-types` and the query paths is in the tarball at all —
+      # without it an editor installing this package finds no language for
+      # `.crn`. Same shape of re-check as the tag/manifest match and the
+      # generated parser above: verified here rather than assumed covered.
+      - name: Ensure the tarball carries the tree-sitter manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm pack --pack-destination "$RUNNER_TEMP"
+          tarball=$(ls "$RUNNER_TEMP"/tree-sitter-cairn-*.tgz)
+          if ! tar -tzf "$tarball" | grep -qx 'package/tree-sitter.json'; then
+            echo 'tree-sitter.json is not in the tarball: package.json files[] dropped it.' >&2
+            echo 'Publishing it would ship a grammar no editor can resolve .crn to.' >&2
+            exit 1
+          fi
 
       # --provenance is passed explicitly even though npm documents it as
       # automatic under Trusted Publishing; it is a no-op when the attestation

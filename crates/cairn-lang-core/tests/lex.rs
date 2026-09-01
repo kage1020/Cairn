@@ -124,8 +124,23 @@ fn odd_indent_is_rejected() {
 #[test]
 fn double_indent_is_rejected() {
     // Going from 0 to 4 spaces in one step is an indent of 2 levels.
+    //
+    // Its own variant rather than `OddIndent`, whose message ("must be a
+    // multiple of 2 spaces") states a rule that 4 already satisfies.
+    // `tests/lex_refusals.rs` carries the rest, including what the
+    // message has to name for the repair to be actionable.
     let err = lex("struct keep\n    floor mat_slot=floor\n").unwrap_err();
-    assert!(matches!(err, LexError::OddIndent { got: 4, .. }));
+    assert!(
+        matches!(
+            err,
+            LexError::IndentJump {
+                got: 4,
+                expected: 2,
+                ..
+            }
+        ),
+        "{err:?}",
+    );
 }
 
 #[test]

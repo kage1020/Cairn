@@ -9,7 +9,10 @@
 //! span-carrying notes become `relatedInformation` entries pointing back
 //! into the same document.
 
-use cairn_lang_core::{Diagnostic as CoreDiagnostic, ParseError, Severity, check, lower, parse};
+use cairn_lang_core::check::LineStarts;
+use cairn_lang_core::{
+    Diagnostic as CoreDiagnostic, Severity, check, diagnose_parse_failure, lower, parse,
+};
 
 use crate::line_index::LineIndex;
 
@@ -18,15 +21,25 @@ use crate::line_index::LineIndex;
 ///
 /// A parse/lex failure pre-empts the check passes (the AST has to be
 /// well-formed before invariant collection can run — same rule as
-/// `cairn check`) and yields exactly one error diagnostic. Edition is left
-/// unpinned (`None`), matching `cairn check` without `--edition`: slot
-/// presence checks union the per-edition theme variants.
+/// `cairn check`) and yields exactly one error diagnostic. It goes through
+/// the same [`convert`] every other finding does, because
+/// [`diagnose_parse_failure`] gives it the same shape: a code, a span, a
+/// message. This file used to build that one by hand — a diagnostic with
+/// no code, in a converter only it could reach — which is how the server
+/// and the CLI came to describe the same failure differently.
+///
+/// Edition is left unpinned (`None`), matching `cairn check` without
+/// `--edition`: slot presence checks union the per-edition theme variants.
 #[must_use]
 pub fn compute_diagnostics(uri: &lsp_types::Uri, source: &str) -> Vec<lsp_types::Diagnostic> {
     let index = LineIndex::new(source);
     let module = match parse(source) {
         Ok(module) => module,
-        Err(err) => return vec![parse_error_diagnostic(source, &index, &err)],
+        Err(err) => {
+            let lines = LineStarts::new(source);
+            let diagnostic = diagnose_parse_failure(source, &lines, &err);
+            return vec![convert(uri, source, &index, &diagnostic)];
+        }
     };
     let ir = lower(&module);
     check(&module, &ir, None)
@@ -42,7 +55,7 @@ fn convert(
     index: &LineIndex,
     diagnostic: &CoreDiagnostic,
 ) -> lsp_types::Diagnostic {
-    let severity = match diagnostic.severity {
+    let severity = match diagnostic.severity() {
         Severity::Error => lsp_types::DiagnosticSeverity::ERROR,
         Severity::Warning => lsp_types::DiagnosticSeverity::WARNING,
     };
@@ -84,31 +97,6 @@ fn convert(
                 }
             }
         }),
-        ..lsp_types::Diagnostic::default()
-    }
-}
-
-/// Map a parse/lex failure into a single error diagnostic.
-///
-/// Parse errors carry a 1-based line/column [`cairn_lang_core::Position`]
-/// rather than a byte span, so the range runs from that position to the end
-/// of its line — wide enough for an editor squiggle to be visible — falling
-/// back to the position's own point when the line remainder is empty (the
-/// editor renders a zero-width range as a caret-width marker). No stable
-/// `E_*` code exists for parse failures yet, so `code` stays unset rather
-/// than inventing one outside the core contract.
-fn parse_error_diagnostic(
-    source: &str,
-    index: &LineIndex,
-    err: &ParseError,
-) -> lsp_types::Diagnostic {
-    let start_offset = index.offset_of(source, err.position());
-    let end_offset = index.line_end(source, start_offset).max(start_offset);
-    lsp_types::Diagnostic {
-        range: index.range(source, &(start_offset..end_offset)),
-        severity: Some(lsp_types::DiagnosticSeverity::ERROR),
-        source: Some("cairn".to_owned()),
-        message: err.user_message(),
         ..lsp_types::Diagnostic::default()
     }
 }
@@ -197,8 +185,8 @@ mod tests {
 
     #[test]
     fn parse_error_yields_exactly_one_error_diagnostic() {
-        // Parser-rejected content produces a single
-        // ERROR diagnostic carrying the parse error's own message and a
+        // Parser-rejected content produces a single ERROR diagnostic
+        // carrying the parse error's own message, its code, and a
         // non-empty range on the offending line.
         let source = "struct s size=2x2\n\tfloor\n";
         let err = parse(source).expect_err("tab indent should be rejected");
@@ -207,7 +195,10 @@ mod tests {
         let d = &diagnostics[0];
         assert_eq!(d.severity, Some(lsp_types::DiagnosticSeverity::ERROR));
         assert_eq!(d.message, err.user_message());
-        assert_eq!(d.code, None);
+        // The code is what a client looks the finding up by, and this one
+        // used to have none — the server rendered it through a converter of
+        // its own rather than from a core diagnostic.
+        assert_eq!(code_of(d), "E_PARSE");
         assert_eq!(d.range.start.line, 1);
         assert!(
             d.range.end > d.range.start,
@@ -248,5 +239,93 @@ mod tests {
             dup.range.start.character,
             u32::try_from(utf16_col).expect("fits u32"),
         );
+    }
+
+    /// The text a diagnostic covers does not depend on how the author's
+    /// editor ends its lines.
+    ///
+    /// The reported break: a document with a lone `\r` in it published the
+    /// `walls` finding at line 2 — the `struct t` line — because the index
+    /// had not counted the `\r` as a break while the editor had. Asserting
+    /// on the *text* the range selects rather than on the line number is
+    /// what makes the three renderings directly comparable, and it is also
+    /// what the reader sees: a highlight over the wrong words.
+    #[test]
+    fn a_diagnostic_covers_the_same_text_whatever_the_line_ending() {
+        let base = "struct s size=2x2\n  floor\n  wals height=4\nstruct t size=3x3 size=4x4\n";
+        let mut selected = Vec::new();
+        for rendering in [
+            base.to_owned(),
+            base.replace('\n', "\r\n"),
+            base.replace('\n', "\r"),
+        ] {
+            let source = rendering.as_str();
+            let index = LineIndex::new(source);
+            let covered: Vec<(String, String)> = compute_diagnostics(&uri(), source)
+                .iter()
+                .map(|d| {
+                    let start = index
+                        .offset_at(source, d.range.start)
+                        .expect("range start is inside the document");
+                    let end = index
+                        .offset_at(source, d.range.end)
+                        .expect("range end is inside the document");
+                    (code_of(d).to_owned(), source[start..end].to_owned())
+                })
+                .collect();
+            selected.push(covered);
+        }
+        assert_eq!(selected[1], selected[0], "CRLF disagrees with LF");
+        assert_eq!(selected[2], selected[0], "lone CR disagrees with LF");
+        // And the covered text is the offending token, not a neighbouring
+        // line's — the failure mode the line numbers alone would hide.
+        assert!(
+            selected[0]
+                .iter()
+                .any(|(code, text)| code == "E_UNKNOWN_KEYWORD" && text == "wals height=4"),
+            "expected the unknown keyword itself to be covered, got {:?}",
+            selected[0],
+        );
+    }
+
+    /// A parse error lands on the line that has it, and on the same line
+    /// whichever way the document ends its lines.
+    ///
+    /// Distinct from the check-diagnostic test above only in where the span
+    /// comes from: a parse error carries a line/column and core turns it
+    /// back into a span, so this is the conversion the `Newline` token's
+    /// position feeds, arriving here as an ordinary byte range.
+    #[test]
+    fn a_parse_error_lands_on_its_own_line_whatever_the_line_ending() {
+        let base = "struct s size=2x2\n  floor mat_slot=\n  walls height=4\n";
+        for rendering in [
+            base.to_owned(),
+            base.replace('\n', "\r\n"),
+            base.replace('\n', "\r"),
+        ] {
+            let source = rendering.as_str();
+            let diagnostics = compute_diagnostics(&uri(), source);
+            assert_eq!(diagnostics.len(), 1, "{source:?}");
+            let range = diagnostics[0].range;
+            // Line 1 is `  floor mat_slot=`, whose value is missing. The
+            // error belongs at its end, not at the start of line 2.
+            assert_eq!(range.start.line, 1, "{source:?}");
+            assert_eq!(range.start.character, 17, "{source:?}");
+            // End of line, so nothing on the line is under the marker.
+            assert_eq!(range.end, range.start, "{source:?}");
+        }
+    }
+
+    /// An error the parser reaches *inside* a line keeps a visible width,
+    /// so the zero-width case above is a property of end-of-line errors and
+    /// not of every parse failure.
+    #[test]
+    fn a_parse_error_inside_a_line_covers_the_rest_of_it() {
+        let source = "struct s size=2x2\n\tfloor\n";
+        let diagnostics = compute_diagnostics(&uri(), source);
+        assert_eq!(diagnostics.len(), 1);
+        let range = diagnostics[0].range;
+        assert_eq!(range.start.line, 1);
+        assert!(range.end > range.start, "{range:?}");
     }
 }

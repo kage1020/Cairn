@@ -38,6 +38,135 @@ pub const KNOWN_KEYWORDS: &[&str] = &[
     "connect",
 ];
 
+/// Argument keys every member accepts, whatever its role.
+///
+/// Two reasons, and they answer different questions.
+///
+/// They are in the **candidate** set because `intent::lower` dispatches on
+/// the key — `match arg.key { "id" | "class" | "mat_slot" => ... }` — so a
+/// misspelled `clas=` is not that key at all and never reaches the
+/// dedicated field. The repair is a word the role's own arguments do not
+/// contain, and a suggestion drawn from them alone could not offer it.
+///
+/// They are in the **accepted** set because the hoist also requires the
+/// value to be a plain label. A second occurrence of the key, or a value of
+/// any other shape, stays in `intent_state`, where an argument check would
+/// otherwise read it as a word nobody knows. `check::type_mismatch` already
+/// reports the value; the key is not the mistake.
+///
+/// [`Member`]: super::Member
+pub const UNIVERSAL_ARGUMENTS: &[&str] = &["id", "class", "mat_slot"];
+
+impl MemberRole {
+    /// The `key=` arguments this role's vocabulary contains, in the order
+    /// the spec introduces them.
+    ///
+    /// Not the grammar's — the surface parser accepts any `key=value` on
+    /// any line — and not any one pass's either. This is the closed set a
+    /// member of this role may be written with, so a key outside it is a
+    /// word that will be read by nothing however the passes grow, which is
+    /// what makes `E_UNKNOWN_ARGUMENT` an error rather than a note.
+    ///
+    /// Two directions can go wrong. A key a reader reads and this table
+    /// omits refuses a source the compiler is built to accept, which is
+    /// what `stair y=` did between two commits of the branch that added
+    /// this table; `the_table_and_the_sweep_agree_key_for_key` in
+    /// `tests/check_arguments.rs` walks every keyword and compares this
+    /// list against a line that writes it, in both directions. A key
+    /// listed here that nothing reads is the other direction, and it is
+    /// deliberate: the specification defines arguments the implementation
+    /// has not reached, and refusing them would make a future lowering
+    /// rule a change from error to legal. They are accepted and reported
+    /// as ignored — see [`Self::unread_arguments`].
+    ///
+    /// `None` for a keyword the role table does not know — not an empty
+    /// vocabulary but the absence of one, which is a different answer and
+    /// the reason the two are not the same arm. A `floor` takes no
+    /// arguments of its own and writing one on it is a mistake; a
+    /// `torch` has no vocabulary for anything to be a mistake against,
+    /// and `check::keyword_allowlist` owns the whole line.
+    ///
+    /// Matched with no wildcard so a new role has to be answered here
+    /// rather than silently inheriting an empty vocabulary, which would
+    /// report every argument written on it.
+    #[must_use]
+    pub fn arguments(&self) -> Option<&'static [&'static str]> {
+        Some(match self {
+            // Paints the whole footprint; takes nothing but the universal
+            // keys.
+            Self::Floor => &[],
+            Self::Walls => &["height"],
+            Self::Door => &["side", "at", "opened_by"],
+            Self::Window => &[
+                "side", "y", "offset", "size", "sym", "repeat", "step", "shape", "anchor",
+            ],
+            Self::Roof => &["kind", "overhang", "slope_to", "footprint", "bounds"],
+            Self::Stair => &["kind", "side", "half", "facing", "shape", "y"],
+            Self::Level => &["y"],
+            Self::PressurePlate => &["at", "offset", "y"],
+            Self::Circuit => &["region", "void"],
+            // `spec/components-editing-sites` §9.3.2 and §9.3.3 fix this
+            // set: a name, what to instantiate, what to resolve materials
+            // against, and exactly one origin selector. §9.1 reserves
+            // parameterisation, which nothing forwards today; the day it
+            // lands this is the arm that opens.
+            Self::Place => &["use", "theme", "at", "east_of", "north_of", "gap"],
+            Self::Connect => &["path"],
+            Self::Other(_) => return None,
+        })
+    }
+
+    /// Arguments in [`Self::arguments`] that no pass reads yet.
+    ///
+    /// Spelled out rather than derived, because "nothing reads it" is not a
+    /// fact any table can compute about itself. Each of these is a key the
+    /// specification defines and the implementation has not reached: the
+    /// value is carried into the IR and dropped, so the member builds
+    /// without it and the author is told so rather than left to notice.
+    ///
+    /// Where the boundary runs: a spec'd key on a keyword the role table
+    /// knows belongs here. A spec'd keyword the table does *not* know —
+    /// `painting`, in the same worked example the three below come from —
+    /// has no row for its arguments to sit in, and `E_UNKNOWN_KEYWORD`
+    /// owns the whole line, the way it does for any other unknown word.
+    #[must_use]
+    pub fn unread_arguments(&self) -> &'static [&'static str] {
+        match self {
+            // `spec/entities` §8.2 writes both on a `window` member line;
+            // `spec/components-editing-sites` §9.2 also sets `shape=`
+            // through the edit DSL. `fill_window` reads side, y, offset,
+            // size, sym, repeat and step, and consults neither of these.
+            Self::Window => &["shape", "anchor"],
+            // `spec/entities` §8.2, on the same `roof` line. `fill_roof`
+            // reads kind, overhang and slope_to.
+            Self::Roof => &["footprint", "bounds"],
+            Self::Floor
+            | Self::Walls
+            | Self::Door
+            | Self::Stair
+            | Self::Level
+            | Self::PressurePlate
+            | Self::Circuit
+            | Self::Place
+            | Self::Connect
+            | Self::Other(_) => &[],
+        }
+    }
+
+    /// Every key a member of this role may carry, for the closed-set note
+    /// and the `did you mean` candidates.
+    ///
+    /// The universal keys come last so the tie-break on an ambiguous typo
+    /// favours the role's own vocabulary — `sid` on a `door` should answer
+    /// `side`, not `id`.
+    #[must_use]
+    pub fn accepted_arguments(&self) -> Option<Vec<&'static str>> {
+        let mut all = self.arguments()?.to_vec();
+        all.extend_from_slice(UNIVERSAL_ARGUMENTS);
+        Some(all)
+    }
+}
+
 /// Return the known-keyword table.
 ///
 /// Public-facing helper so external passes can render the same list this
@@ -90,5 +219,21 @@ mod tests {
     #[test]
     fn unknown_keyword_falls_through_to_other() {
         assert_eq!(role_of("mystery"), MemberRole::Other("mystery".to_owned()));
+    }
+
+    /// `MemberRole::keyword` is the inverse of [`role_of`], and
+    /// diagnostics quote it back to the author. A role added here
+    /// without its keyword arm would render as some other member's
+    /// word, which is worse than rendering nothing.
+    #[test]
+    fn every_known_keyword_survives_the_round_trip_through_its_role() {
+        for kw in KNOWN_KEYWORDS {
+            assert_eq!(
+                role_of(kw).keyword(),
+                *kw,
+                "`{kw}` should come back out of its role unchanged",
+            );
+        }
+        assert_eq!(role_of("mystery").keyword(), "mystery");
     }
 }

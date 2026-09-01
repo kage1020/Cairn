@@ -54,14 +54,15 @@ use indexmap::IndexMap;
 use serde::Serialize;
 
 use crate::ast::{Value, ValueKind};
-use crate::check::{Diagnostic, DiagnosticCode, DiagnosticNote, Severity};
+use crate::check::{Diagnostic, DiagnosticCode, DiagnosticData, DiagnosticNote};
 use crate::edition::Edition;
 use crate::error::Span;
-use crate::ids::{PlaceId, PortId, SiteName};
+use crate::ids::{IdError, PlaceId, PortId, SiteName};
 use crate::intent::{
-    DefIr, IntentModule, Member, MemberBody, MemberRole, SiteIr, StructIr, ThemeIr, ValueWithSpan,
-    role_of,
+    ConnectEnd, DefIr, IntentModule, Member, MemberBody, MemberRole, SelectorRule, SiteIr,
+    StructIr, ThemeIr, ValueWithSpan, role_of,
 };
+use crate::prose::{and_list, selector_text};
 use crate::suggest::nearest_match;
 
 use super::binding::{SelectorMatch, ThemeBinding, TokenKind, classify_token};
@@ -171,9 +172,16 @@ pub struct ScopeResolution {
 #[derive(Debug, Clone, PartialEq, Default, Serialize)]
 pub struct ResolvedMemberBinding {
     /// The value bound to this member's `mat_slot=` via the applied theme,
-    /// when both ends matched. `None` if the member has no `mat_slot=`, no
-    /// theme was bound to the scope, or the slot was not declared in the
-    /// theme (in which case `E_UNRESOLVED_SLOT` was emitted).
+    /// when both ends matched.
+    ///
+    /// `None` covers four different situations, each reported by someone
+    /// else: the member carries no `mat_slot=` at all
+    /// (`E_MISSING_MATERIAL`, from `check::material`, for the roles that
+    /// paint nothing without one); no theme was bound to the scope
+    /// (`W_NO_THEME_BOUND`); the slot was not declared in the theme
+    /// (`E_UNRESOLVED_SLOT`); or only a sibling edition variant declares
+    /// it, which is deferred until a pin picks one. A reader that treats
+    /// them as one case will report a member twice or not at all.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub slot_value: Option<ValueWithSpan>,
     /// Extra `key=value` bindings injected by a matching theme selector,
@@ -183,11 +191,101 @@ pub struct ResolvedMemberBinding {
     pub selector_extras: IndexMap<String, ValueWithSpan>,
 }
 
+/// The state every scope resolution reads from and adds to.
+///
+/// Carried as one struct rather than threaded as five positional
+/// arguments, for the reason [`crate::block_array`]'s `StructCtx` and
+/// `cairn-lang-redstone`'s `LoweringCtx` give for the same shape: a new
+/// per-resolution field lands as one field instead of touching every
+/// signature between [`resolve`] and the walk that needs it.
+///
+/// It is also where the two say-it-once ledgers sit together. They are one
+/// device at two levels — a cause with several emission sites, reported
+/// once between them — and keeping them apart made that hard to see.
+struct ResolveCtx<'a> {
+    /// Theme bindings by name. Mutable because selector matching records
+    /// the members each selector bound to.
+    themes: &'a mut IndexMap<String, ThemeBinding>,
+    /// Theme names some scope applied, so [`check_unmatched_selectors`] can
+    /// tell "matched nothing" apart from "never applied to anything".
+    applied_themes: &'a mut HashSet<String>,
+    /// Everything the resolution found, in the order it found it.
+    diagnostics: &'a mut Vec<Diagnostic>,
+    /// Logical theme names already reported as unbindable under the pin, so
+    /// the module-level pick and every `place` naming one say it once
+    /// between them rather than once each.
+    reported_missing: &'a mut HashSet<String>,
+    /// `(member position, slot name, theme name)` triples an
+    /// `E_UNRESOLVED_SLOT` has already been pushed for.
+    ///
+    /// A def body is resolved once as its own scope and once more per
+    /// `place` that instantiates it, so without this the same finding is
+    /// reported once per placement — plus once more when the module can
+    /// auto-pick a theme for the def's own scope. That count is a fact
+    /// about the placement list rather than about the source the author
+    /// has to fix.
+    ///
+    /// The triple is the finding's identity: its span is the member's, and
+    /// its message names the slot and the theme. Two placements naming two
+    /// themes resolve the same `mat_slot=` against two slot maps and earn
+    /// two findings, and two members reading one missing slot earn two as
+    /// well; only a repeat of all three says the same thing twice. The
+    /// slot name is redundant while [`Member::mat_slot`] holds at most one
+    /// name, which is a fact about the member rather than about the rule.
+    ///
+    /// Written where a diagnostic is pushed, never where a body is walked.
+    /// Two resolutions of one body can bind the same theme and still judge
+    /// a slot differently — sibling-variant softening applies to a
+    /// reference that names the logical theme and not to one that names a
+    /// variant — so a resolution that said nothing must leave the next one
+    /// free to speak.
+    diagnosed: &'a mut HashSet<(usize, String, String)>,
+}
+
 /// Resolve theme bindings over the given Intent IR.
 ///
-/// Always returns a [`Resolution`] — every theme appears in `.themes`, every
-/// struct/def/site appears in `.scopes`, and any problems encountered are
-/// collected into `.diagnostics`.
+/// Always returns a [`Resolution`] — every distinct theme name appears in
+/// `.themes`, every distinct scope key appears in `.scopes`, and any
+/// problems encountered are collected into `.diagnostics`.
+///
+/// INVARIANT(`FIRST_BINDING_WINS`): when two declarations produce the
+/// same binding key, the first one binds and the later ones are skipped.
+///
+/// The binding key is not always the item name. It is the name for
+/// `theme`, `struct::NAME` for a struct and `def::NAME` for a def — but
+/// `site::NAME::PLACE_ID` for a placement, which includes the place id.
+/// Two `site` blocks of one name therefore do not shadow each other:
+/// their places land in one shared namespace and every place with a
+/// distinct `id=` binds. Only a place id repeated across those blocks
+/// collides, and there the first wins like everywhere else.
+///
+/// The direction has to be picked because the collision is real, and
+/// picking it uniformly is what keeps the resolution readable — a `def`
+/// whose placement is sized from one body and whose members resolve
+/// from another is a wrong build, not a stylistic difference. `first`
+/// is the one `defs.iter().find` (the `place use=` lookup) already
+/// takes, and the one `E_DUPLICATE_ITEM` tells the author about.
+/// `tests/check_duplicate_items.rs` records the shape that made the
+/// choice necessary.
+///
+/// INVARIANT(upstream-diagnosed): a skipped binding is not reported from
+/// here. `check::duplicate` has already pushed `E_DUPLICATE_ITEM` into
+/// the same sink for every repeated name, so a user running `cairn
+/// check` — or any build command, all of which gate on it — sees a
+/// position-anchored signal. Re-pushing would report one mistake twice,
+/// and the pass that owns it can anchor on the name token, which the IR
+/// no longer carries. This is the same division of labour the silent
+/// arms in [`resolve_connect_row`] follow, and it is pinned the same
+/// way, by `tests/silent_skip_arms.rs` for the resolver-only path and
+/// `tests/check_duplicate_items.rs` for the full pipeline. A
+/// `debug_assert` on the skip is deliberately absent: the condition is
+/// ordinary malformed input, and aborting on it would take down the LSP
+/// on a file the author is halfway through editing.
+///
+/// Skipping is only about the *binding*. Each duplicate body is still
+/// walked and still contributes its own body-local diagnostics, so an
+/// author fixing the collision sees the problems inside both bodies in
+/// the same run.
 ///
 /// The `edition` argument drives per-edition theme-variant selection
 /// (spec versioning-editions §10.7 hierarchy #2): when the file declares
@@ -202,22 +300,65 @@ pub struct ResolvedMemberBinding {
 pub fn resolve(ir: &IntentModule, edition: Option<Edition>) -> Resolution {
     let mut diagnostics: Vec<Diagnostic> = Vec::new();
     let mut themes: IndexMap<String, ThemeBinding> = IndexMap::new();
+    // Every declared body, including one whose name lost the binding.
+    // The map holds one entry per name, so it is not the right thing to
+    // walk for findings that are local to a body — a bad slot value in a
+    // shadowed `theme` is still a bad slot value, and the author should
+    // not have to fix the name first to be told about it.
+    let mut declared: Vec<ThemeBinding> = Vec::with_capacity(ir.themes.len());
     for theme in &ir.themes {
         let binding = build_theme_binding(theme);
-        // Last-write-wins on duplicate theme names (the `duplicate` pass in
-        // `check` is the authority on flagging the collision). Keeping the
-        // map insertion-ordered means downstream consumers see the same
-        // theme order the source declared.
-        themes.insert(binding.name.clone(), binding);
+        declared.push(binding.clone());
+        // First-write-wins on duplicate names, as everywhere else in this
+        // function (see `FIRST_BINDING_WINS`). Keeping the map
+        // insertion-ordered means downstream consumers see the same theme
+        // order the source declared.
+        themes.entry(binding.name.clone()).or_insert(binding);
     }
 
     let single_logical = single_logical_theme(&themes);
     let mut scopes: IndexMap<String, ScopeResolution> = IndexMap::new();
     let mut applied_themes: HashSet<String> = HashSet::new();
+    // See [`ResolveCtx::reported_missing`].
+    let mut reported_missing: HashSet<String> = HashSet::new();
+    // `(member, theme)` pairs a slot diagnostic has already been pushed
+    // for. A def body is walked once as its own scope and once more per
+    // See [`ResolveCtx::diagnosed`] for what this holds and why it is
+    // written where a diagnostic is pushed.
+    let mut diagnosed: HashSet<(usize, String, String)> = HashSet::new();
 
     let (auto_picked, auto_siblings) = match single_logical.as_deref() {
         Some(logical) => {
             let picked = pick_variant(&themes, logical, edition).map(str::to_owned);
+            // A refusal here is the module-level half of the same finding
+            // the site path reports per `place`: the module declares this
+            // theme and the pin can bind none of its variants. Left
+            // unreported it was silent — `bound_theme` stayed `None`, every
+            // `mat_slot=` skipped the branch that would have named a theme,
+            // and the build wrote the requested extent out of air.
+            //
+            // Which is also the reason it is conditional on a `mat_slot=`
+            // existing to be starved. A module that declares one edition's
+            // theme and never reads a slot from it emits no air, so a pin
+            // the theme cannot satisfy costs that module nothing — and the
+            // build it would have produced is byte-identical either way.
+            //
+            // `reported_missing` carries the finding across to the site
+            // loop, where every `place` naming this theme would otherwise
+            // repeat it verbatim against a different span.
+            if picked.is_none()
+                && let Some(pinned) = edition
+                && let Some(first) = themes.values().next()
+                && any_member_reads_a_slot(ir)
+            {
+                reported_missing.insert(logical.to_owned());
+                diagnostics.push(theme_variant_missing_diag(
+                    logical,
+                    pinned,
+                    &themes,
+                    first.span.clone(),
+                ));
+            }
             let siblings = match (&picked, edition) {
                 // Sibling slots only gate `E_UNRESOLVED_SLOT` under the
                 // no-edition-yet case — a Some(edition) compile binds one
@@ -231,27 +372,31 @@ pub fn resolve(ir: &IntentModule, edition: Option<Edition>) -> Resolution {
         None => (None, HashSet::new()),
     };
 
+    let mut ctx = ResolveCtx {
+        themes: &mut themes,
+        applied_themes: &mut applied_themes,
+        diagnostics: &mut diagnostics,
+        reported_missing: &mut reported_missing,
+        diagnosed: &mut diagnosed,
+    };
+
     for s in &ir.structs {
-        let resolution = resolve_struct_or_def(
-            &s.members,
-            auto_picked.as_deref(),
-            &auto_siblings,
-            &mut themes,
-            &mut applied_themes,
-            &mut diagnostics,
-        );
-        scopes.insert(struct_key(s), resolution);
+        let resolution =
+            resolve_struct_or_def(&s.members, auto_picked.as_deref(), &auto_siblings, &mut ctx);
+        scopes.entry(struct_key(s)).or_insert(resolution);
     }
+    // A def is a template, and this walk resolves it against the theme the
+    // module auto-picks even though a `place` below will walk the same body
+    // under the placement's own theme. It stays: a file of defs and no
+    // `site` is a file worth checking, and a placement can be abandoned
+    // before it reaches the body — an absent `theme=`, an origin that does
+    // not resolve — which leaves this the only walk able to report what is
+    // inside. Where a placement does bind the same theme, `diagnosed` makes
+    // the second report cost nothing.
     for d in &ir.defs {
-        let resolution = resolve_struct_or_def(
-            &d.members,
-            auto_picked.as_deref(),
-            &auto_siblings,
-            &mut themes,
-            &mut applied_themes,
-            &mut diagnostics,
-        );
-        scopes.insert(def_key(d), resolution);
+        let resolution =
+            resolve_struct_or_def(&d.members, auto_picked.as_deref(), &auto_siblings, &mut ctx);
+        scopes.entry(def_key(d)).or_insert(resolution);
     }
     let mut used_defs: HashSet<String> = HashSet::new();
     let mut connects: Vec<ValidatedConnect> = Vec::new();
@@ -259,17 +404,16 @@ pub fn resolve(ir: &IntentModule, edition: Option<Edition>) -> Resolution {
         resolve_site_placements(
             site,
             &ir.defs,
-            &mut themes,
-            &mut applied_themes,
+            edition,
             &mut scopes,
             &mut used_defs,
             &mut connects,
-            &mut diagnostics,
+            &mut ctx,
         );
     }
     check_unused_defs(&ir.defs, &used_defs, &mut diagnostics);
 
-    check_slot_targets(&themes, &mut diagnostics);
+    check_slot_targets(&declared, &mut diagnostics);
     check_unmatched_selectors(&themes, &applied_themes, &mut diagnostics);
 
     Resolution {
@@ -349,9 +493,10 @@ fn single_logical_theme(themes: &IndexMap<String, ThemeBinding>) -> Option<Strin
 /// the unsuffixed variant** rather than cross over to the opposite
 /// edition's variant. Binding, say, a `_bedrock` theme under
 /// `--edition java` would silently route Bedrock-only slot values into a
-/// Java `.nbt`; leaving the scope unbound instead surfaces the mismatch
-/// through `E_UNRESOLVED_SLOT` on any `mat_slot=X` reference, which is
-/// the loud outcome spec versioning-editions §10.4 requires.
+/// Java `.nbt`. Returning `None` instead is reported as
+/// `E_THEME_VARIANT_MISSING` by both callers — not as `E_UNRESOLVED_SLOT`,
+/// which needs a bound theme to say the slot is missing from and would
+/// blame a slot that is declared and spelled correctly.
 ///
 /// The `None` case still tolerates a partial file (only one variant
 /// declared): it prefers the unsuffixed theme, then Java, then Bedrock —
@@ -380,6 +525,298 @@ fn pick_variant<'a>(
         Some(Edition::Java) => java.or(unsuffixed),
         Some(Edition::Bedrock) => bedrock.or(unsuffixed),
         None => unsuffixed.or(java).or(bedrock),
+    }
+}
+
+/// What a `place ... theme=NAME` reference resolves to under `edition`.
+enum ThemeReference<'a> {
+    /// Bind this theme.
+    Bound {
+        /// The theme actually bound — not necessarily the name written.
+        name: &'a str,
+        /// How the reference was spelled, which is what decides whether the
+        /// author asked about one variant or about the logical theme.
+        spelling: Spelling,
+    },
+    /// Variants of this logical theme are declared, but none can bind under
+    /// the edition this carries.
+    NoVariantForEdition(Edition),
+    /// No theme in the module shares this name's logical part — or the name
+    /// carries a suffix, nothing is declared under it, and no edition is
+    /// pinned to justify picking another variant.
+    Unknown,
+}
+
+/// How a `theme=` reference was written.
+///
+/// Two booleans said this before — one for "carried a suffix", one for its
+/// negation — which left `rebound && logical_spelling` expressible and made
+/// the edition behind a rebind reachable only through an `expect`. It was
+/// not a sound one: a suffixed name nothing declares reached it with no
+/// edition pinned, and `cairn check` panicked on a typo.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Spelling {
+    /// Written without an edition suffix, so it names the logical theme.
+    /// Sibling variants may soften its slot diagnostics while no edition is
+    /// picked.
+    Logical,
+    /// Written with an edition suffix, so it names one variant. The author
+    /// asked about that variant's slots and no sibling softens them.
+    /// `rebound_under` is `Some(edition)` when that pin bound a different
+    /// variant than the one named.
+    Variant { rebound_under: Option<Edition> },
+}
+
+/// Resolve a `place ... theme=NAME` reference against the pinned edition.
+///
+/// The site path used to bind `NAME` verbatim whenever the module declared
+/// it, which made it the one route into a scope that [`pick_variant`] did
+/// not guard: `theme=shop_bedrock` bound under `--edition java` and wrote
+/// Bedrock-only slot values into a Java `.nbt`. Every reference now goes
+/// through the same variant selection the module-level auto-pick uses, so a
+/// pin means the same thing wherever the theme was chosen.
+///
+/// A reference is read as naming the *logical* theme, which is what spec
+/// versioning-editions §10.7 asks the semantic layer to name. `theme=shop`
+/// consequently resolves in a module that declares only `shop_java` and
+/// `shop_bedrock` — before this it was `E_UNRESOLVED_THEME_REF`, so the
+/// spelling the spec prescribes was the one spelling that did not work.
+///
+/// Without a pin, nothing re-picks a variant the author named. A declared
+/// name binds verbatim; a *suffixed* name nothing declares is unknown, the
+/// same answer a misspelled theme has always had. Substituting a sibling
+/// there would swap a variant on `cairn lower`'s say-so, which is exactly
+/// what this function exists to stop a pin from doing silently.
+fn resolve_theme_reference<'a>(
+    themes: &'a IndexMap<String, ThemeBinding>,
+    written: &str,
+    edition: Option<Edition>,
+) -> ThemeReference<'a> {
+    let (logical, written_variant) = strip_edition_suffix(written);
+    if !themes
+        .keys()
+        .any(|name| strip_edition_suffix(name).0 == logical)
+    {
+        return ThemeReference::Unknown;
+    }
+    if edition.is_none() {
+        return match themes.get_key_value(written) {
+            Some((name, _)) => ThemeReference::Bound {
+                name: name.as_str(),
+                spelling: match written_variant {
+                    Some(_) => Spelling::Variant {
+                        rebound_under: None,
+                    },
+                    None => Spelling::Logical,
+                },
+            },
+            // A logical name still resolves with no pin — that is the
+            // spelling §10.7 asks for, and `pick_variant`'s unpinned order
+            // is deterministic. A suffixed one does not: it names a variant
+            // the module does not have.
+            None if written_variant.is_some() => ThemeReference::Unknown,
+            None => match pick_variant(themes, logical, None) {
+                Some(name) => ThemeReference::Bound {
+                    name,
+                    spelling: Spelling::Logical,
+                },
+                // Unreachable: the guard above found a variant of `logical`,
+                // and the unpinned arm of `pick_variant` accepts all three.
+                None => ThemeReference::Unknown,
+            },
+        };
+    }
+    let pinned = edition.expect("the unpinned case returned above");
+    match pick_variant(themes, logical, edition) {
+        Some(name) => ThemeReference::Bound {
+            name,
+            spelling: match written_variant {
+                Some(_) if name != written => Spelling::Variant {
+                    rebound_under: Some(pinned),
+                },
+                Some(_) => Spelling::Variant {
+                    rebound_under: None,
+                },
+                None => Spelling::Logical,
+            },
+        },
+        None => ThemeReference::NoVariantForEdition(pinned),
+    }
+}
+
+/// Resolve a `place ... theme=NAME` to the theme to bind and the sibling
+/// slots that may soften its diagnostics, reporting whichever way it failed.
+///
+/// `None` means the placement cannot be built and the reason is already in
+/// `diagnostics`; the caller skips the scope so the lowering pass does not
+/// emit an artifact for a placement whose materials were never decided.
+fn bind_place_theme(
+    written: &str,
+    span: &Span,
+    edition: Option<Edition>,
+    themes: &IndexMap<String, ThemeBinding>,
+    declared_names: &[String],
+    reported_missing: &mut HashSet<String>,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Option<(String, HashSet<String>)> {
+    let (logical, _) = strip_edition_suffix(written);
+    match resolve_theme_reference(themes, written, edition) {
+        ThemeReference::Unknown => {
+            diagnostics.push(unresolved_theme_ref_diag(
+                written,
+                span.clone(),
+                declared_names.iter().map(String::as_str),
+            ));
+            None
+        }
+        ThemeReference::NoVariantForEdition(pinned) => {
+            // One cause, one report — every `place` naming this theme, and
+            // the module-level pick before them, ask the author for the same
+            // edit in the same `theme` block. The placement is still refused;
+            // what is deduplicated is the sentence, not the consequence.
+            if reported_missing.insert(logical.to_owned()) {
+                diagnostics.push(theme_variant_missing_diag(
+                    logical,
+                    pinned,
+                    themes,
+                    span.clone(),
+                ));
+            }
+            None
+        }
+        ThemeReference::Bound { name, spelling } => {
+            let name = name.to_owned();
+            if let Spelling::Variant {
+                rebound_under: Some(pinned),
+            } = spelling
+            {
+                diagnostics.push(theme_variant_rebound_diag(
+                    written,
+                    &name,
+                    logical,
+                    pinned,
+                    themes.contains_key(written),
+                    span.clone(),
+                ));
+            }
+            // Sibling-variant slot union applies under the same edition
+            // condition the top-level scope loop uses, and for the same
+            // reason — it softens `E_UNRESOLVED_SLOT` only while no edition
+            // has been picked — plus one this path adds: the reference must
+            // name the logical theme. Having named one variant, the author
+            // asked about that variant's slots, and softening them against a
+            // sibling answers a question they did not ask.
+            let siblings = if edition.is_none() && spelling == Spelling::Logical {
+                sibling_slot_names(themes, logical, &name)
+            } else {
+                HashSet::new()
+            };
+            Some((name, siblings))
+        }
+    }
+}
+
+/// Whether any struct or def member anywhere in the module reads a
+/// `mat_slot=`.
+///
+/// The module-level auto-pick binds a theme for every struct and def scope,
+/// but a scope only *needs* one to read a slot from. Without this, declaring
+/// a `_bedrock` theme and never using it made `--edition java` a hard error
+/// on a module whose output does not contain a single block of air.
+fn any_member_reads_a_slot(ir: &IntentModule) -> bool {
+    fn any(members: &[Member]) -> bool {
+        members
+            .iter()
+            .any(|m| m.mat_slot.is_some() || any(&m.children.members))
+    }
+    ir.structs.iter().any(|s| any(&s.members)) || ir.defs.iter().any(|d| any(&d.members))
+}
+
+/// Every declared variant of `logical`, in declaration order.
+fn declared_variants<'a>(
+    themes: &'a IndexMap<String, ThemeBinding>,
+    logical: &str,
+) -> Vec<&'a str> {
+    themes
+        .keys()
+        .filter(|name| strip_edition_suffix(name).0 == logical)
+        .map(String::as_str)
+        .collect()
+}
+
+/// The pinned edition has no variant of `logical` it can bind.
+fn theme_variant_missing_diag(
+    logical: &str,
+    edition: Edition,
+    themes: &IndexMap<String, ThemeBinding>,
+    span: Span,
+) -> Diagnostic {
+    let declared = declared_variants(themes, logical);
+    let listed = declared.join("`, `");
+    Diagnostic {
+        code: DiagnosticCode::ThemeVariantMissing,
+        span,
+        primary: format!(
+            "theme `{logical}` has no variant that can bind for `{}`",
+            edition.as_str(),
+        ),
+        notes: vec![
+            DiagnosticNote {
+                span: None,
+                message: format!("the module declares `{listed}`"),
+            },
+            DiagnosticNote {
+                span: None,
+                message: format!(
+                    "add `theme {logical}_{}:`, or drop the suffix from a variant that is \
+                     edition-neutral so `{logical}` binds for either edition",
+                    edition.as_str(),
+                ),
+            },
+            DiagnosticNote {
+                span: None,
+                message: "binding the other edition's variant would route its slot values into \
+                          this edition's output, which is the silent substitution \
+                          spec/versioning-editions.md §10.4 forbids"
+                    .to_owned(),
+            },
+        ],
+        data: None,
+    }
+}
+
+/// A `theme=` named one variant and the pin bound another.
+///
+/// `declared` separates the two ways that happens: the named variant exists
+/// and the pin preferred its own, or the named variant does not exist at all
+/// and the pin fell back to what it could reach (the unsuffixed theme). The
+/// second reads as a plain mistake and should not be described as a choice
+/// between variants.
+fn theme_variant_rebound_diag(
+    written: &str,
+    bound: &str,
+    logical: &str,
+    edition: Edition,
+    declared: bool,
+    span: Span,
+) -> Diagnostic {
+    let named = if declared {
+        format!("`theme={written}` names one edition's variant")
+    } else {
+        format!("`theme={written}` is not a declared theme")
+    };
+    Diagnostic {
+        code: DiagnosticCode::ThemeVariantRebound,
+        span,
+        primary: format!("{named}; this `{}` build bound `{bound}`", edition.as_str()),
+        notes: vec![DiagnosticNote {
+            span: None,
+            message: format!(
+                "write `theme={logical}` — spec/versioning-editions.md §10.7 keeps the semantic \
+                 layer edition-neutral and lets the variant follow the build",
+            ),
+        }],
+        data: None,
     }
 }
 
@@ -431,16 +868,14 @@ pub fn place_scope_key(site_name: &str, place_id: &str) -> String {
     format!("site::{site_name}::{place_id}")
 }
 
-#[allow(clippy::too_many_arguments)]
 fn resolve_site_placements(
     site: &SiteIr,
     defs: &[DefIr],
-    themes: &mut IndexMap<String, ThemeBinding>,
-    applied_themes: &mut HashSet<String>,
+    edition: Option<Edition>,
     scopes: &mut IndexMap<String, ScopeResolution>,
     used_defs: &mut HashSet<String>,
     connects: &mut Vec<ValidatedConnect>,
-    diagnostics: &mut Vec<Diagnostic>,
+    ctx: &mut ResolveCtx<'_>,
 ) {
     // Local index lets each `east_of=ID` / `north_of=ID` lookup name a
     // *prior* place in source order — re-walking `site.placements` per
@@ -454,7 +889,7 @@ fn resolve_site_placements(
     // Pre-built name lists so `nearest_match` candidates are stable per site
     // rather than re-allocated per place.
     let def_names: Vec<&str> = defs.iter().map(|d| d.name.as_str()).collect();
-    let theme_names: Vec<String> = themes.keys().cloned().collect();
+    let theme_names: Vec<String> = ctx.themes.keys().cloned().collect();
 
     for member in &site.placements {
         if matches!(member.role, MemberRole::Connect) {
@@ -465,38 +900,22 @@ fn resolve_site_placements(
                 &seen_place_ids,
                 &place_def,
                 connects,
-                diagnostics,
+                ctx.diagnostics,
             );
             continue;
         }
         if !matches!(member.role, MemberRole::Place) {
-            // Other site-local members (logic, assert) are out of scope here.
+            // Everything that reaches here is a member a `site` body has no
+            // reader for — `logic` and `assert` are not members at all and
+            // live in `SiteIr`'s own fields. `check::member_scope` reports
+            // this row as `E_MISPLACED_MEMBER`; this arm is why it had to.
             continue;
         }
 
-        // INVARIANT(structural): `id=` is intentionally optional on `place`.
-        // An unnamed placement has no scope key to register, cannot be
-        // referenced by `east_of` / `north_of`, and is unreachable from
-        // any `connect` row (dot-ref needs a name on the left side). No
-        // `check` pass — `keyword_allowlist`, `duplicate`, or
-        // `type_mismatch` — currently treats a missing `id=` as a
-        // structural failure, so the silent skip is by design rather
-        // than a missing upstream diagnostic. If `id=` ever becomes
-        // mandatory the new `check` pass owns the error and this arm
-        // becomes unreachable.
-        let Some(place_id) = member.id.as_deref() else {
+        let Some(place_id) = usable_place_id(member, &site.name, &seen_place_ids, ctx.diagnostics)
+        else {
             continue;
         };
-
-        if let Some(first) = seen_place_ids.get(place_id) {
-            diagnostics.push(duplicate_place_id_diag(
-                &site.name,
-                place_id,
-                first,
-                &member.span,
-            ));
-            continue;
-        }
         seen_place_ids.insert(place_id.to_owned(), member.span.clone());
 
         // Validate origin selectors before any cross-scope lookup so the
@@ -504,7 +923,13 @@ fn resolve_site_placements(
         // the rest of the placement unsalvageable — skip the def/theme
         // resolution and the scope insert so the lowering pass does not
         // emit a `.nbt` for a structurally rejected placement.
-        if !validate_place_origin(member, &site.name, place_id, &seen_place_ids, diagnostics) {
+        if !validate_place_origin(
+            member,
+            &site.name,
+            Some(place_id),
+            &seen_place_ids,
+            ctx.diagnostics,
+        ) {
             continue;
         }
 
@@ -517,77 +942,64 @@ fn resolve_site_placements(
             .get("theme")
             .and_then(|v| v.value.as_label_str());
 
-        // INVARIANT(structural): `use=` is intentionally optional in the
-        // surface grammar — a `place` row may declare just an `id=`
-        // without committing to a def (e.g. as a deliberate
-        // work-in-progress marker). No `check` pass currently requires
-        // `use=`, so emitting a resolver-level error here would tighten
-        // the language without an M3 motivation. Skipping the rest of
-        // the pipeline prevents `place_def` and the scope map from
-        // carrying a half-built entry, so the lowering pass below does
-        // not emit a `.nbt` for a placement with no def. Downstream
-        // `connect` rows that target this place surface the gap via
-        // `validate_port`'s `place_def` miss arm, which emits
-        // `W_DEFERRED_CONNECT` so the user sees *why* the walkway was
-        // not laid instead of watching it vanish silently.
+        // Both inputs that reach this arm are already reported, and by
+        // different owners: an absent `use=` by `incomplete_place_diag`
+        // above, a present-but-not-label-shaped one (`use=3`, which
+        // `as_label_str` also answers `None` for) by
+        // `check::type_mismatch`'s `E_TYPE_MISMATCH_LABEL`. Calling the
+        // second one missing would be a lie, which is why the completeness
+        // check keys on the *key* rather than on the lifted value.
+        //
+        // Skipping the rest of the pipeline prevents `place_def` and the
+        // scope map from carrying a half-built entry, so the lowering pass
+        // below does not emit a `.nbt` for a placement with no def.
         let Some(use_name) = use_target else {
             continue;
         };
-        let def = defs.iter().find(|d| d.name == use_name);
-        if def.is_none() {
-            diagnostics.push(unresolved_place_ref_diag(
+        let Some(def) = defs.iter().find(|d| d.name == use_name) else {
+            ctx.diagnostics.push(unresolved_place_ref_diag(
                 &format!("`use={use_name}` references an unknown def"),
                 member.span.clone(),
                 use_name,
                 def_names.iter().copied(),
             ));
             continue;
-        }
-        let def = def.expect("checked is_none above");
+        };
         used_defs.insert(def.name.clone());
 
-        // INVARIANT(structural): `theme=` is intentionally optional on a
-        // per-place basis only for single-theme files — the site-wide
-        // heuristic in `resolve_struct_or_def` defaults to the lone
-        // theme there, so the user can omit `theme=` without losing
-        // coverage. On multi-theme files an omitted `theme=` is a known
-        // silent gap: no `check` pass requires it and no targeted
-        // diagnostic exists yet (an `E_PLACE_THEME_REQUIRED` pass would
-        // be the correct long-term home and is tracked separately).
-        // Skipping the rest of the pipeline here leaves `place_def`
-        // unset for this place; downstream `connect` rows targeting it
-        // surface the gap via the `W_DEFERRED_CONNECT` cascade in
-        // `validate_port`, which keeps the multi-theme silent skip
-        // visible until the dedicated check pass lands.
+        // Same split as `use=` above: absent is `incomplete_place_diag`'s,
+        // mistyped is `check::type_mismatch`'s. The single-theme heuristic
+        // in `resolve_struct_or_def` does not rescue an omitted `theme=`
+        // here — it defaults a *scope*, and this arm returns before any
+        // scope is built.
+        //
+        // Skipping the rest of the pipeline here leaves `place_def` unset
+        // for this place; a downstream `connect` targeting it additionally
+        // earns the `W_DEFERRED_CONNECT` cascade in `validate_port`, the
+        // same pairing an unresolved `use=DEF` already produces.
         let Some(theme_name) = theme_target else {
             continue;
         };
-        if !themes.contains_key(theme_name) {
-            diagnostics.push(unresolved_theme_ref_diag(
-                theme_name,
-                member.span.clone(),
-                theme_names.iter().map(String::as_str),
-            ));
+        let Some((bound_theme, siblings)) = bind_place_theme(
+            theme_name,
+            &member.span,
+            edition,
+            ctx.themes,
+            &theme_names,
+            ctx.reported_missing,
+            ctx.diagnostics,
+        ) else {
             continue;
-        }
+        };
 
         // Cross-scope resolve: run the def's members under the picked theme,
         // even when the file has multiple themes (the per-place `theme=`
-        // wins over the single-theme heuristic). Sibling-variant slot union
-        // does not apply here — the author explicitly named one theme via
-        // `theme=`, so unresolved slots on that specific theme are real
-        // errors, not the multi-variant softening the top-level scope loop
-        // uses under `cairn check`.
-        let no_siblings: HashSet<String> = HashSet::new();
-        let resolution = resolve_struct_or_def(
-            &def.members,
-            Some(theme_name),
-            &no_siblings,
-            themes,
-            applied_themes,
-            diagnostics,
-        );
-        scopes.insert(place_scope_key(&site.name, place_id), resolution);
+        // wins over the single-theme heuristic).
+        let resolution =
+            resolve_struct_or_def(&def.members, Some(bound_theme.as_str()), &siblings, ctx);
+        scopes
+            .entry(place_scope_key(&site.name, place_id))
+            .or_insert(resolution);
         // Record this place's def so a later `connect` row can look up
         // the def's members without re-walking the site body.
         place_def.insert(place_id.to_owned(), use_name.to_owned());
@@ -625,37 +1037,39 @@ fn resolve_connect_row(
     //   positional[0] = DotRef(from.port)
     //   positional[1] = Ident("to")
     //   positional[2] = DotRef(to.port)
-    let from_value = member.positional.first();
-    let to_value = member.positional.get(2);
-    let middle_is_to = matches!(
-        member.positional.get(1),
-        Some(v) if matches!(&v.kind, ValueKind::Ident(s) if s == "to"),
-    );
-    let (Some(from_value), Some(to_value), true) = (from_value, to_value, middle_is_to) else {
-        // INVARIANT(upstream-diagnosed): inside the top-level `check`
-        // pipeline, `check::connect_arity` has already pushed
-        // `E_CONNECT_ARITY` into the same sink for any row whose
-        // positional shape is not `FROM.PORT to TO.PORT`, so a user
-        // running `cairn check` always sees a position-anchored
-        // signal even when this arm fires. The arm survives for
-        // library callers that invoke `resolve(ir)` directly (LSP
-        // fast paths, ad-hoc tooling): the silent return keeps
-        // walkway voxelisation from picking up a half-formed or
-        // misshapen row instead of panicking on a partial parse.
-        //
-        // The guard rejects both the missing-half cases
-        // (`positional.len() < 3`) and the wrong-separator case
-        // (`positional[1] != Ident("to")`), so `connect a.entry xxx
-        // b.entry` does not slip through to validation either. Pinned
-        // by `tests/silent_skip_arms.rs` (resolver-only) and
-        // `tests/check_connect_arity.rs` (full pipeline).
+    //
+    // INVARIANT(upstream-diagnosed): inside the top-level `check`
+    // pipeline, `check::connect_arity` has already pushed
+    // `E_CONNECT_ARITY` into the same sink for any row whose positional
+    // shape is not `FROM.PORT to TO.PORT`, so a user running `cairn
+    // check` always sees a position-anchored signal even when these
+    // guards fire. The guards survive for library callers that invoke
+    // `resolve(ir)` directly (LSP fast paths, ad-hoc tooling): the
+    // silent return keeps walkway voxelisation from picking up a
+    // half-formed or misshapen row instead of panicking on a partial
+    // parse.
+    //
+    // The slice pattern rejects the missing-half cases and the
+    // over-arity case together, and the separator test rejects
+    // `connect a.entry xxx b.entry`. Matching an exact-length slice
+    // rather than indexing is what keeps the count bound here: reading
+    // `positional[0..3]` accepted `connect a.entry to b.entry c.exit`
+    // and laid a walkway for a row `check` calls an error, which is a
+    // disagreement about well-formedness between the two layers rather
+    // than a difference in how loudly they say so. Pinned by
+    // `tests/silent_skip_arms.rs` (resolver-only) and
+    // `tests/check_connect_arity.rs` (full pipeline).
+    let [from_value, separator, to_value] = member.positional.as_slice() else {
         return;
     };
+    if !matches!(&separator.kind, ValueKind::Ident(keyword) if keyword == "to") {
+        return;
+    }
     // Lift both ends before short-circuiting so a row with two broken
     // halves earns two diagnostics, not just the first. `validate_port`
     // already follows the same accumulate-then-decide pattern below.
-    let from = port_ref_from_value(from_value, "from", seen_place_ids, diagnostics);
-    let to = port_ref_from_value(to_value, "to", seen_place_ids, diagnostics);
+    let from = port_ref_from_value(from_value, ConnectEnd::From, seen_place_ids, diagnostics);
+    let to = port_ref_from_value(to_value, ConnectEnd::To, seen_place_ids, diagnostics);
     let (Some(from), Some(to)) = (from, to) else {
         return;
     };
@@ -672,7 +1086,6 @@ fn resolve_connect_row(
     let Some(path) = path else {
         diagnostics.push(Diagnostic {
             code: DiagnosticCode::MissingPathMaterial,
-            severity: Severity::Error,
             span: member.span.clone(),
             primary: "`connect` requires a `path=` material to lay the walkway".to_owned(),
             notes: vec![DiagnosticNote {
@@ -694,7 +1107,6 @@ fn resolve_connect_row(
     if !matches!(path.value.kind, ValueKind::Token(_)) {
         diagnostics.push(Diagnostic {
             code: DiagnosticCode::MissingPathMaterial,
-            severity: Severity::Error,
             span: path.span.clone(),
             primary: format!(
                 "`connect path=` must be a material token like `@gravel`, got {}",
@@ -724,57 +1136,56 @@ fn resolve_connect_row(
 
 /// Lift one positional [`Value`] into a [`PortRef`], emitting
 /// `E_UNRESOLVED_PLACE_REF` if the head segment does not name a prior
-/// place in the same site and returning `None` on any non-`DotRef`
-/// shape. `side` ("from" / "to") goes into the primary diagnostic so
-/// the user can tell the two ends apart at a glance.
+/// place in the same site and returning `None` for any shape other than
+/// a one-dot `<place>.<port>` reference. `end` goes into the primary
+/// diagnostic so the user can tell the two ends apart at a glance.
 fn port_ref_from_value(
     raw: &Value,
-    side: &str,
+    end: ConnectEnd,
     seen_place_ids: &IndexMap<String, Span>,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Option<PortRef> {
+    // INVARIANT(upstream-diagnosed): inside the top-level `check`
+    // pipeline, `check::connect_arity` has already pushed
+    // `E_CONNECT_ARITY` into the same sink for any endpoint that is not
+    // a one-dot reference, so a user running `cairn check` always sees
+    // a position-anchored signal even when these guards fire. Re-pushing
+    // here would report one mistake twice.
+    //
+    // The guards survive for library callers that invoke `resolve(ir)`
+    // directly (LSP fast paths, ad-hoc tooling), mirroring the guards on
+    // `resolve_connect_row` above: returning `None` keeps walkway
+    // voxelisation from picking up a row whose endpoints name nothing.
+    //
+    // What each guard actually catches differs by origin. The parser
+    // builds a `DotRef` only when a `.` follows the head token, so a
+    // parsed reference always carries at least one tail segment: from
+    // source, the first guard catches every non-reference value
+    // (`connect a to b` arrives as `Ident`) and the second catches only
+    // `place.port.extra`. An empty tail is reachable just by hand-built
+    // IR, and takes the same silent path. An `E_UNRESOLVED_PORT` arm
+    // used to sit on that empty-tail case with a "missing a port id"
+    // message; it could not fire from parsed source, and the author
+    // who writes `connect a to b` now gets that advice from
+    // `check::connect_arity`, anchored on the value itself.
+    //
+    // Pinned by `tests/silent_skip_arms.rs` (resolver-only) and
+    // `tests/check_connect_arity.rs` (full pipeline).
     let ValueKind::DotRef(dot) = &raw.kind else {
-        // INVARIANT(upstream-diagnosed): `connect <from> to <to>` only
-        // accepts a `Value` whose `ValueKind` is `DotRef`. Any other shape
-        // — bare literal, token, call — fails the surface grammar at parse
-        // time or the connect-member discriminator in `intent::lower`,
-        // which emits its own structural diagnostic before this row
-        // reaches the resolver. Re-pushing here would double-count a
-        // single malformed row. Verification of the upstream emission is
-        // parser-level and cannot be checked from inside this
-        // `Vec<Diagnostic>`-scoped pass, so the contract is enforced by
-        // the doc comment plus the grammar tests in `tests/parse_*.rs`
-        // (a debug_assert here would tangle the resolver's API with the
-        // parser's diagnostic timing, which is intentionally kept
-        // outside this pass's responsibility).
         return None;
     };
-    if dot.tail().is_empty() {
-        // `connect home1 to ...` — the user named a place but no port.
-        // Treat it as an unresolved port so the diagnostic carries the
-        // same `did you mean` shape a typo would have on the right side
-        // of the dot. Suggestion pool is empty because we have no def
-        // yet (the head place itself may still be unknown), so the user
-        // just gets the missing-port message.
-        diagnostics.push(Diagnostic {
-            code: DiagnosticCode::UnresolvedPort,
-            severity: Severity::Error,
-            span: raw.span.clone(),
-            primary: format!(
-                "`{side}` is missing a port id: write `{place}.PORT` to name a member of the placed def",
-                place = dot.head(),
-            ),
-            notes: vec![],
-            data: None,
-        });
+    let [port] = dot.tail() else {
         return None;
-    }
+    };
     let place_str = dot.head();
-    let port_str = dot.tail()[0].as_str();
+    let port_str = port.as_str();
     if !seen_place_ids.contains_key(place_str) {
         let prior: Vec<&str> = seen_place_ids.keys().map(String::as_str).collect();
         diagnostics.push(unresolved_place_ref_diag(
-            &format!("`{side}={place_str}.{port_str}` does not name a prior place in this site"),
+            &format!(
+                "the `{end}` endpoint `{place_str}.{port_str}` does not name a prior place in this site",
+                end = end.label(),
+            ),
             raw.span.clone(),
             place_str,
             prior.iter().copied(),
@@ -810,40 +1221,33 @@ fn validate_port(
     let Some(def_name) = place_def.get(port.place.as_str()) else {
         // `port_ref_from_value` already gates the lift on
         // `seen_place_ids`, so reaching here means `port.place_id` is
-        // registered but its `place_def` entry never landed. The arms
-        // in `resolve_site_placements` that skip the insert split into
-        // two camps:
+        // registered but its `place_def` entry never landed. Every arm in
+        // `resolve_site_placements` that skips the insert reports the row
+        // itself: an absent `use=` / `theme=` (`E_INCOMPLETE_PLACE`), a
+        // mistyped one (`E_TYPE_MISMATCH_LABEL`), a failed origin selector
+        // (`E_INVALID_PLACE_ORIGIN`), a `use=` naming an unknown def
+        // (`E_UNRESOLVED_PLACE_REF`), a `theme=` naming an unknown theme
+        // (`E_UNRESOLVED_THEME_REF`). There is no silent camp left.
         //
-        // - upstream-diagnosed: `validate_place_origin` failure
-        //   (`E_INVALID_PLACE_ORIGIN`), duplicate id
-        //   (`E_DUPLICATE_PLACE_ID`), `use=` naming an unknown def
-        //   (`E_UNRESOLVED_PLACE_REF`), `theme=` naming an unknown
-        //   theme (`E_UNRESOLVED_THEME_REF`). The user already sees a
-        //   targeted error for these.
-        // - intentionally silent: missing `use=` / missing `theme=`
-        //   (multi-theme files). The surface grammar accepts both and
-        //   no `check` pass requires either today.
-        //
-        // Either way the walkway would vanish from the build. Emit a
-        // cascade `W_DEFERRED_CONNECT` so the silent arms surface as
-        // an explicit signal — mirroring the `W_DEFERRED_MEMBER` cascade
-        // used for walkway endpoint cascades in `block_array::lower` —
-        // and so a future refactor that drops a normal-path
-        // `place_def.insert` cannot silently break every walkway.
+        // The cascade is not a duplicate of any of them. Each says which
+        // row is broken; this says which walkway went with it, which
+        // nothing else does — mirroring the `W_DEFERRED_MEMBER` cascade
+        // used for walkway endpoints in `block_array::lower`. It also keeps
+        // a future refactor that drops a normal-path `place_def.insert`
+        // from silently breaking every walkway.
         diagnostics.push(Diagnostic {
             code: DiagnosticCode::DeferredConnect,
-            severity: DiagnosticCode::DeferredConnect.severity(),
             span: port.span.clone(),
             primary: format!(
-                "`connect` target `{place_id}.{port_id}` references a place with no resolved \
-                 def/theme; no walkway laid",
+                "`connect` target `{place_id}.{port_id}` names a `place` row that did not \
+                 resolve; no walkway laid",
                 place_id = port.place,
                 port_id = port.port,
             ),
             notes: vec![DiagnosticNote {
                 span: None,
-                message: "add `use=DEF` and `theme=NAME` to the referenced `place`, or remove \
-                          this `connect` row"
+                message: "that row carries its own diagnostic saying what is wrong with it; \
+                          fixing it is what lays this walkway"
                     .to_owned(),
             }],
             data: None,
@@ -896,7 +1300,6 @@ fn validate_port(
             });
             diagnostics.push(Diagnostic {
                 code: DiagnosticCode::UnresolvedPort,
-                severity: Severity::Error,
                 span: port.span.clone(),
                 primary: format!(
                     "port `{port_id}` is not declared by `def {def_name}` (used by `place {place_id}`)",
@@ -913,7 +1316,6 @@ fn validate_port(
         n => {
             diagnostics.push(Diagnostic {
                 code: DiagnosticCode::AmbiguousPort,
-                severity: Severity::Error,
                 span: port.span.clone(),
                 primary: format!(
                     "port `{port_id}` matches {n} members of `def {def_name}`; the reference is ambiguous",
@@ -938,10 +1340,15 @@ fn validate_port(
 /// `E_INVALID_PLACE_ORIGIN` or `E_UNRESOLVED_PLACE_REF` (target reference)
 /// was emitted — the caller must skip the rest of the placement so the
 /// lowering pass does not voxelise a structurally rejected `place`.
+/// `place_id` is `None` for a row that declared no `id=`. Such a row is
+/// already reported as incomplete and can never be referenced, but its
+/// origin selector is checked anyway so every problem on the line surfaces
+/// together — the same reason the missing-key finding lists all three keys
+/// at once.
 fn validate_place_origin(
     member: &Member,
     site_name: &str,
-    place_id: &str,
+    place_id: Option<&str>,
     seen_place_ids: &IndexMap<String, Span>,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> bool {
@@ -995,13 +1402,13 @@ fn validate_place_origin(
             ok = false;
             continue;
         };
-        if !seen_place_ids.contains_key(target) || target == place_id {
+        if !seen_place_ids.contains_key(target) || Some(target) == place_id {
             // Suggestion pool is *prior* place ids only — pointing at a
             // later place would let cycles slip in. The same-site exclusion
             // keeps `east_of=self` from showing up as a viable suggestion.
             let prior: Vec<&str> = seen_place_ids
                 .keys()
-                .filter(|id| id.as_str() != place_id)
+                .filter(|id| Some(id.as_str()) != place_id)
                 .map(String::as_str)
                 .collect();
             diagnostics.push(unresolved_place_ref_diag_with_ordering_note(
@@ -1023,7 +1430,6 @@ fn check_unused_defs(defs: &[DefIr], used: &HashSet<String>, diagnostics: &mut V
         }
         diagnostics.push(Diagnostic {
             code: DiagnosticCode::UnusedDef,
-            severity: Severity::Warning,
             span: def.span.clone(),
             primary: format!(
                 "def `{name}` is never referenced by a `place use={name}`",
@@ -1054,7 +1460,6 @@ fn unresolved_place_ref_diag<'a>(
     }
     Diagnostic {
         code: DiagnosticCode::UnresolvedPlaceRef,
-        severity: Severity::Error,
         span,
         primary: primary.to_owned(),
         notes,
@@ -1097,12 +1502,158 @@ fn unresolved_theme_ref_diag<'a>(
     }
     Diagnostic {
         code: DiagnosticCode::UnresolvedThemeRef,
-        severity: Severity::Error,
         span,
         primary: format!("`theme={theme}` is not a declared theme"),
         notes,
         data: None,
     }
+}
+
+/// Validate everything about a `place` row that can be judged from the row
+/// alone, and yield the id the rest of the loop keys on.
+///
+/// `None` means the row cannot become a placement and every reason has been
+/// reported. Split out from `resolve_site_placements` because it is the one
+/// stretch that needs nothing but the row and the ids seen before it — the
+/// cross-scope work below needs the def list, the theme map, and three
+/// output maps besides.
+///
+/// Ordering is load-bearing. The completeness check runs first so the
+/// author sees every key the row is short of before any consequence of one
+/// of them, and the origin selector is checked on both paths out: without
+/// that, adding the `id=` this function just asked for would surface a
+/// *new* error on the line the author had only now fixed, which is the
+/// re-run cycle listing all three keys at once exists to avoid.
+fn usable_place_id<'a>(
+    member: &'a Member,
+    site_name: &str,
+    seen_place_ids: &IndexMap<String, Span>,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Option<&'a str> {
+    if let Some(diagnostic) = incomplete_place_diag(member, site_name) {
+        diagnostics.push(diagnostic);
+    }
+
+    // An unnamed placement has nothing to register, cannot be referenced by
+    // `east_of` / `north_of`, and is unreachable from any `connect` row (a
+    // dot-ref needs a name on the left side), so there is nothing further to
+    // do with it once its own line has been judged.
+    let Some(place_id) = member.id.as_deref() else {
+        validate_place_origin(member, site_name, None, seen_place_ids, diagnostics);
+        return None;
+    };
+
+    // Validate before the id becomes half of a scope key. `PlaceId` states
+    // the invariants, and `place_scope_key` joins on `::`, so an id carrying
+    // `.` or `:` produces a key nothing can parse back — which is where the
+    // lowering pass used to `expect` and panic.
+    if let Err(err) = PlaceId::new(place_id) {
+        diagnostics.push(invalid_place_id_diag(
+            place_id,
+            site_name,
+            member.span.clone(),
+            &err,
+        ));
+        return None;
+    }
+    if let Some(first) = seen_place_ids.get(place_id) {
+        diagnostics.push(duplicate_place_id_diag(
+            site_name,
+            place_id,
+            first,
+            &member.span,
+        ));
+        return None;
+    }
+    Some(place_id)
+}
+
+/// Keys a `place` row must declare, paired with what each one is for.
+///
+/// Ordered as an author writes them, and the order is load-bearing twice
+/// over: it fixes both the sentence the message builds and the `missing`
+/// list in the structured payload, so the same source always renders the
+/// same text.
+///
+/// Carrying the purpose here rather than in a `match` on the key is what
+/// keeps a fourth required key (`at=` is the realistic candidate) from
+/// inheriting some other key's note through a wildcard arm.
+const REQUIRED_PLACE_KEYS: &[(&str, &str)] = &[
+    (
+        "id",
+        "`id=` is the name every `east_of=` and `connect` refers to, and the name this placement's `.nbt` is written under — the compiler has no name to invent for it",
+    ),
+    (
+        "use",
+        "`use=DEF` names the `def` this placement instantiates",
+    ),
+    (
+        "theme",
+        "`theme=NAME` names the theme this placement's `mat_slot=` members resolve against",
+    ),
+];
+
+/// Whether the row carries `key=` at all, regardless of what its value is.
+///
+/// `intent::lower` hoists a label-shaped `id=` out of `intent_state` onto
+/// [`Member::id`], so `id=b` lands in one of the two and `id=3` — not
+/// label-shaped, so not hoisted — lands in the other. Every other `place`
+/// key stays in `intent_state` either way. Asking both is what keeps a
+/// mistyped key from being reported as an absent one, which would send the
+/// author to add a key already on the line.
+fn declares(member: &Member, key: &str) -> bool {
+    member.intent_state.contains_key(key) || (key == "id" && member.id.is_some())
+}
+
+/// Report a `place` row missing any of the keys it needs to become a
+/// placement, or `None` when it declares all three.
+///
+/// `id=` names the `.nbt` the compiler writes for this placement
+/// (`spec/components-editing-sites.md` §9.3.4) and is the name `east_of=`
+/// and `connect` refer to — so it cannot be auto-assigned the way
+/// `spec/components-editing-sites.md` §9.2 auto-assigns a geometry
+/// member's address, which derives from parent / role / side / level /
+/// offset and names nothing outside the body it sits in. `use=` names the
+/// `def` the placement instantiates and `theme=` the theme its `mat_slot=`
+/// members resolve against; without either there is no volume to voxelise.
+fn incomplete_place_diag(member: &Member, site_name: &str) -> Option<Diagnostic> {
+    let missing: Vec<&(&str, &str)> = REQUIRED_PLACE_KEYS
+        .iter()
+        .filter(|(key, _)| !declares(member, key))
+        .collect();
+    let quoted: Vec<String> = missing.iter().map(|(key, _)| format!("`{key}=`")).collect();
+    // Returning through `and_list`'s `None` rather than an early `is_empty`
+    // guard keeps the "nothing missing" exit and the "nothing to join" exit
+    // as one branch — and keeps a `place` constructor from panicking while
+    // reporting somebody else's error.
+    let listed = and_list(&quoted)?;
+    // Named when the row has one, matching `E_INVALID_PLACE_ORIGIN` and
+    // `E_DUPLICATE_PLACE_ID`: two incomplete rows in one site would
+    // otherwise render byte-identical primaries.
+    let subject = member
+        .id
+        .as_deref()
+        .map_or_else(|| "`place`".to_owned(), |id| format!("`place id={id}`"));
+    Some(Diagnostic {
+        code: DiagnosticCode::IncompletePlace,
+        span: member.span.clone(),
+        primary: format!(
+            "{subject} in site `{site_name}` is missing {listed}, so no placement is built for it",
+        ),
+        notes: missing
+            .iter()
+            .map(|(_, purpose)| DiagnosticNote {
+                span: None,
+                message: (*purpose).to_owned(),
+            })
+            .collect(),
+        // The key set is what a quick-fix needs, and `spec/lint.md` §11.2
+        // asks consumers to match on `(code, data.kind)` rather than parse
+        // the prose it is also rendered into.
+        data: Some(DiagnosticData::IncompletePlace {
+            missing: missing.iter().map(|(key, _)| (*key).to_owned()).collect(),
+        }),
+    })
 }
 
 fn duplicate_place_id_diag(
@@ -1113,7 +1664,6 @@ fn duplicate_place_id_diag(
 ) -> Diagnostic {
     Diagnostic {
         code: DiagnosticCode::DuplicatePlaceId,
-        severity: Severity::Error,
         span: second.clone(),
         primary: format!("duplicate `id={place_id}` in site `{site_name}`"),
         notes: vec![DiagnosticNote {
@@ -1124,12 +1674,39 @@ fn duplicate_place_id_diag(
     }
 }
 
-fn invalid_place_origin_diag(place_id: &str, span: Span, message: &str) -> Diagnostic {
+fn invalid_place_id_diag(place_id: &str, site_name: &str, span: Span, err: &IdError) -> Diagnostic {
+    let reason = match err {
+        IdError::Empty => "it is empty".to_owned(),
+        IdError::ForbiddenChar { ch, .. } => format!("it contains `{ch}`"),
+    };
+    Diagnostic {
+        code: DiagnosticCode::InvalidPlaceId,
+        span,
+        primary: format!(
+            "`place id={place_id}` in site `{site_name}` is not a usable id: {reason}"
+        ),
+        notes: vec![DiagnosticNote {
+            span: None,
+            message: "a place id becomes part of the `site::<site>::<place>` scope key, \
+                      so it must be non-empty and free of `.`, `:`, and whitespace"
+                .to_owned(),
+        }],
+        data: None,
+    }
+}
+
+fn invalid_place_origin_diag(place_id: Option<&str>, span: Span, message: &str) -> Diagnostic {
+    // A row with no `id=` is already reported as incomplete; it still gets
+    // this finding, and quoting a name it does not have would be worse than
+    // quoting none.
+    let subject = place_id.map_or_else(
+        || "`place`".to_owned(),
+        |place_id| format!("`place id={place_id}`"),
+    );
     Diagnostic {
         code: DiagnosticCode::InvalidPlaceOrigin,
-        severity: Severity::Error,
         span,
-        primary: format!("invalid origin selector on `place id={place_id}`: {message}"),
+        primary: format!("invalid origin selector on {subject}: {message}"),
         notes: vec![],
         data: None,
     }
@@ -1148,63 +1725,66 @@ fn resolve_struct_or_def(
     members: &[Member],
     picked_theme_name: Option<&str>,
     sibling_slots: &HashSet<String>,
-    themes: &mut IndexMap<String, ThemeBinding>,
-    applied_themes: &mut HashSet<String>,
-    diagnostics: &mut Vec<Diagnostic>,
+    ctx: &mut ResolveCtx<'_>,
 ) -> ScopeResolution {
-    // Structural invariant: `pick_variant` (the only caller producing an
-    // auto-picked name here) iterates `themes.keys()` to build its
-    // candidates, so any name it returns is guaranteed to be in `themes`.
-    // The site-side branch that hits this with a user-supplied `theme=X`
-    // label filters through `themes.contains_key(theme_name)` up-slope
-    // before calling in. Reaching the `None` arm of `themes.get` would
+    // Structural invariant: every name that reaches here came out of
+    // `themes.keys()`. The module-level auto-pick gets it from
+    // `pick_variant`, which builds its candidates by iterating those keys;
+    // the site-side branch gets it from `bind_place_theme`, which returns
+    // only what `resolve_theme_reference` read from the same map — a
+    // user-supplied `theme=X` label that names nothing there is refused
+    // up-slope instead. Reaching the `None` arm of `themes.get` would
     // mean one of those guarantees broke — asymmetric with `validate_port`,
     // which uses the same shape of loud fallback. `debug_assert!(false)`
     // trips in dev / test builds; a release build silently degrades to
     // the unbound-theme path rather than panicking on user data.
-    let (theme_name, theme_slots) = if let Some(name) = picked_theme_name {
-        if let Some(t) = themes.get(name) {
-            (Some(name.to_owned()), Some(t.slots.clone()))
+    let bound = if let Some(name) = picked_theme_name {
+        if let Some(t) = ctx.themes.get(name) {
+            Some((name.to_owned(), t.slots.clone()))
         } else {
             debug_assert!(
                 false,
                 "resolve_struct_or_def: picked theme `{name}` is not in the themes map; \
                  pick_variant should only surface names it read from themes.keys()",
             );
-            (None, None)
+            None
         }
     } else {
-        (None, None)
+        None
     };
 
-    if let Some(name) = &theme_name {
-        applied_themes.insert(name.clone());
+    if let Some((name, _)) = &bound {
+        ctx.applied_themes.insert(name.clone());
     }
 
     let mut resolution = ScopeResolution {
-        bound_theme: theme_name.clone(),
+        bound_theme: bound.as_ref().map(|(name, _)| name.clone()),
         members: IndexMap::new(),
     };
     resolve_members(
         members,
-        theme_slots.as_ref(),
-        theme_name.as_deref(),
+        bound.as_ref().map(|(name, slots)| (name.as_str(), slots)),
         sibling_slots,
-        themes,
         &mut resolution,
-        diagnostics,
+        ctx,
     );
     resolution
 }
 
+/// Walk `members` under the scope's bound theme, filling `out` and
+/// pushing whatever the walk finds into `diagnostics`.
+///
+/// `bound` carries the theme's name and its slot map together because a
+/// scope has both or neither: an unbound scope resolves no `mat_slot=` and
+/// matches no selector, and splitting the pair let a caller ask for one
+/// half.
+///
 fn resolve_members(
     members: &[Member],
-    theme_slots: Option<&IndexMap<String, ValueWithSpan>>,
-    theme_name: Option<&str>,
+    bound: Option<(&str, &IndexMap<String, ValueWithSpan>)>,
     sibling_slots: &HashSet<String>,
-    themes: &mut IndexMap<String, ThemeBinding>,
     out: &mut ScopeResolution,
-    diagnostics: &mut Vec<Diagnostic>,
+    ctx: &mut ResolveCtx<'_>,
 ) {
     for member in members {
         let mut binding = ResolvedMemberBinding::default();
@@ -1218,20 +1798,34 @@ fn resolve_members(
         //    concrete binding is edition-specific and comes into scope only
         //    once the compile picks a variant.
         if let Some(slot_name) = &member.mat_slot
-            && let (Some(slots), Some(tname)) = (theme_slots, theme_name)
+            && let Some((tname, slots)) = bound
         {
             match slots.get(slot_name) {
                 Some(v) => binding.slot_value = Some(v.clone()),
                 None if sibling_slots.contains(slot_name) => {}
-                None => diagnostics.push(unresolved_slot_diag(slot_name, tname, member, slots)),
+                // INVARIANT(already-reported): a repeat of the same
+                // finding is dropped, never the finding itself — an
+                // identical triple can only be here because a copy is
+                // already in `ctx.diagnostics`, which is built and
+                // returned by the same call. See
+                // [`ResolveCtx::diagnosed`]; `tests/silent_skip_arms.rs`
+                // carries it in the matrix of resolver arms that drop
+                // something without reporting it.
+                None => {
+                    let said = (member.span.start, slot_name.clone(), tname.to_owned());
+                    if ctx.diagnosed.insert(said) {
+                        ctx.diagnostics
+                            .push(unresolved_slot_diag(slot_name, tname, member, slots));
+                    }
+                }
             }
         }
 
         // 2. Selector matching — scoped to the bound theme only. A scope
         //    with `bound_theme=None` (multi-theme file, no auto-pick)
         //    gets no selector_extras, matching the per-theme DI contract.
-        if let Some(tname) = theme_name
-            && let Some(theme_binding) = themes.get_mut(tname)
+        if let Some((tname, _)) = bound
+            && let Some(theme_binding) = ctx.themes.get_mut(tname)
         {
             for sel in &mut theme_binding.selectors {
                 if selector_matches(sel, member) {
@@ -1250,16 +1844,85 @@ fn resolve_members(
             members: children, ..
         } = &member.children;
         if !children.is_empty() {
-            resolve_members(
-                children,
-                theme_slots,
-                theme_name,
-                sibling_slots,
-                themes,
-                out,
-                diagnostics,
-            );
+            resolve_members(children, bound, sibling_slots, out, ctx);
         }
+    }
+}
+
+/// Whether two selector rows pick out the same members — in this file and
+/// in any other.
+///
+/// [`selector_matches`] cannot tell two rows apart when they carry the same
+/// keyword (the comparison is string equality against `MemberRole::keyword`)
+/// and attribute maps with the same keys whose values are interchangeable
+/// under [`member_attr_matches`]. Interchangeability is per key rather than
+/// per value: `class=small` and `class="small"` name one label and select
+/// alike, while `side=front` and `side="front"` are two [`ValueKind`]s and
+/// select disjoint sets.
+///
+/// The relation is symmetric and transitive but **not** reflexive: a
+/// label key holding a non-label value takes the `false` arm of
+/// [`attr_values_select_alike`], so `select_the_same_members(r, r)` is
+/// false for `window[id=5]`. A partial equivalence is all the grouping in
+/// `check::duplicate` needs — symmetry and transitivity are what let a new
+/// row be compared against one representative instead of every row in the
+/// group, and a row unrelated to itself opens a group nothing ever joins,
+/// which reports nothing. A reader who takes "equivalence" at face value
+/// and optimises on it (swapping the representative for an arbitrary
+/// member, short-circuiting the self-comparison) would be relying on a
+/// property this does not have.
+///
+/// Lives beside the matcher rather than in the pass that reports duplicate
+/// rows, so the answer stays derived from the rule it is about.
+pub(crate) fn select_the_same_members(a: &SelectorRule, b: &SelectorRule) -> bool {
+    a.keyword == b.keyword
+        && a.attrs.len() == b.attrs.len()
+        && a.attrs.iter().all(|(key, value)| {
+            b.attrs
+                .get(key)
+                .is_some_and(|other| attr_values_select_alike(key, &value.value, &other.value))
+        })
+}
+
+/// Whether swapping one selector attribute value for the other leaves
+/// [`member_attr_matches`] answering the same for every member under `key`.
+///
+/// The split is [`LABEL_ATTRS`], the same table that function reads.
+/// A label attribute goes through [`value_eq_label`], which takes an
+/// `Ident` or a `Str` carrying the same text; every other key is compared
+/// against an [`crate::intent::IntentState`] entry by [`ValueKind`], where
+/// the two spellings are different values.
+/// `ds_*_value_form_matters_exactly_where_the_matcher_says_it_does` in
+/// `tests/check_duplicate_selector.rs` pins that pair of answers from the
+/// outside, by checking `E_THEME_SELECTOR_UNMATCHED` alongside the
+/// finding.
+///
+/// The `false` for a non-label value under a label key is the accurate
+/// answer rather than a conservative one: [`value_eq_label`] rejects such a
+/// value for every member, so neither row binds anything the other could
+/// take over. Those rows are already an error by a different scope —
+/// `check::type_mismatch` covers the same three keys and reports
+/// `E_TYPE_MISMATCH_LABEL` on each of them — so the gap says nothing that
+/// goes unsaid. `ds_*_a_label_key_holding_a_non_label_value_pairs_with_nothing`
+/// pins the pairing. (Named by its half rather than its number: the `ds_`
+/// numbering in that file is not in file order.)
+///
+/// The [`ValueKind`] comparison is by value at every depth, including
+/// inside a `ValueKind::List`: [`Value`]'s equality is its kind's, so two
+/// lists spelled identically on two lines select alike. That is the same
+/// answer [`member_attr_matches`] gives, which is what makes "these two
+/// rows select the same members" and "this row selects this member" agree
+/// about what a value is.
+fn attr_values_select_alike(key: &str, a: &Value, b: &Value) -> bool {
+    if label_attr(key).is_none() {
+        return a.kind == b.kind;
+    }
+    match (&a.kind, &b.kind) {
+        (
+            ValueKind::Ident(left) | ValueKind::Str(left),
+            ValueKind::Ident(right) | ValueKind::Str(right),
+        ) => left == right,
+        _ => false,
     }
 }
 
@@ -1272,47 +1935,57 @@ fn selector_matches(sel: &SelectorMatch, member: &Member) -> bool {
         .all(|(key, expected)| member_attr_matches(member, key, &expected.value))
 }
 
+/// Whether a selector's keyword names this member's role.
+///
+/// `MemberRole::keyword` is the inverse of `intent::role_of`, so the
+/// comparison is the identity it looks like — including the `Other`
+/// case, where the role carries the author's own word.
 fn keyword_matches_role(keyword: &str, role: &MemberRole) -> bool {
-    matches!(
-        (keyword, role),
-        ("floor", MemberRole::Floor)
-            | ("walls", MemberRole::Walls)
-            | ("door", MemberRole::Door)
-            | ("window", MemberRole::Window)
-            | ("roof", MemberRole::Roof)
-            | ("stair", MemberRole::Stair)
-            | ("level", MemberRole::Level)
-            | ("pressure_plate", MemberRole::PressurePlate)
-            | ("circuit", MemberRole::Circuit)
-            | ("place", MemberRole::Place)
-            | ("connect", MemberRole::Connect)
-    ) || matches!(role, MemberRole::Other(other) if other == keyword)
+    role.keyword() == keyword
+}
+
+/// Reads the [`Member`] field one label selector attribute filters on.
+/// The elided lifetime is the higher-ranked one, so the borrow of the
+/// returned label is the borrow of the member it came off.
+type LabelField = fn(&Member) -> Option<&str>;
+
+/// The selector attributes lowering lifts out of
+/// [`crate::intent::IntentState`] and onto [`Member`]'s own fields, paired
+/// with the field each one filters on.
+///
+/// One table rather than one list per reader. [`member_attr_matches`] wants
+/// the accessor and [`attr_values_select_alike`] wants the membership; a key
+/// added to only one of them would let the duplicate check disagree with the
+/// matcher it is derived from. (`check::type_mismatch`'s `LABEL_KEYS` is a
+/// third list and a deliberate superset — it also covers `use=` and
+/// `theme=`, which are not selector attributes at all.)
+const LABEL_ATTRS: [(&str, LabelField); 3] = [
+    ("id", |member| member.id.as_deref()),
+    ("class", |member| member.class.as_deref()),
+    ("mat_slot", |member| member.mat_slot.as_deref()),
+];
+
+/// The accessor for `key`, or `None` when `key` is an ordinary
+/// `key=value` living in [`crate::intent::IntentState`].
+fn label_attr(key: &str) -> Option<LabelField> {
+    LABEL_ATTRS
+        .iter()
+        .find(|(name, _)| *name == key)
+        .map(|(_, field)| *field)
 }
 
 /// Compare a selector attribute's expected value against the corresponding
-/// member field. `id`, `class`, and `mat_slot` live as their own
-/// `Option<String>` fields on [`Member`] so the comparison is string-vs-
-/// `Ident`/`Str`; everything else is a generic `key=value` arg that lives
-/// in [`crate::intent::IntentState`] and compares by [`ValueKind`].
+/// member field. A [`LABEL_ATTRS`] key is compared string-vs-`Ident`/`Str`;
+/// everything else is a generic `key=value` arg that lives in
+/// [`crate::intent::IntentState`] and compares by [`ValueKind`].
 fn member_attr_matches(member: &Member, key: &str, expected: &Value) -> bool {
-    match key {
-        "id" => member
-            .id
-            .as_deref()
-            .is_some_and(|v| value_eq_label(expected, v)),
-        "class" => member
-            .class
-            .as_deref()
-            .is_some_and(|v| value_eq_label(expected, v)),
-        "mat_slot" => member
-            .mat_slot
-            .as_deref()
-            .is_some_and(|v| value_eq_label(expected, v)),
-        _ => member
+    let Some(field) = label_attr(key) else {
+        return member
             .intent_state
             .get(key)
-            .is_some_and(|actual| actual.value.kind == expected.kind),
-    }
+            .is_some_and(|actual| actual.value.kind == expected.kind);
+    };
+    field(member).is_some_and(|actual| value_eq_label(expected, actual))
 }
 
 fn value_eq_label(expected: &Value, raw: &str) -> bool {
@@ -1347,7 +2020,6 @@ fn unresolved_slot_diag(
     });
     Diagnostic {
         code: DiagnosticCode::UnresolvedSlot,
-        severity: Severity::Error,
         span: member.span.clone(),
         primary: format!("`mat_slot={slot}` is not declared in theme `{theme_name}`"),
         notes,
@@ -1355,13 +2027,18 @@ fn unresolved_slot_diag(
     }
 }
 
-fn check_slot_targets(themes: &IndexMap<String, ThemeBinding>, diagnostics: &mut Vec<Diagnostic>) {
-    for theme in themes.values() {
+/// Flag slot values that are not material tokens.
+///
+/// Takes every *declared* theme rather than the bound map: the check is
+/// local to one body and needs no resolution, so a body whose name lost
+/// the binding still gets its findings. Selector matching is the
+/// opposite case — see [`check_unmatched_selectors`].
+fn check_slot_targets(themes: &[ThemeBinding], diagnostics: &mut Vec<Diagnostic>) {
+    for theme in themes {
         for (slot_name, v) in &theme.slots {
             if classify_token(&v.value) == TokenKind::NotAToken {
                 diagnostics.push(Diagnostic {
                     code: DiagnosticCode::UnknownSlotTarget,
-                    severity: Severity::Warning,
                     span: v.span.clone(),
                     primary: format!(
                         "slot `{slot}` in theme `{theme}` does not bind to a canonical or abstract material token",
@@ -1380,6 +2057,13 @@ fn check_slot_targets(themes: &IndexMap<String, ThemeBinding>, diagnostics: &mut
     }
 }
 
+/// Flag theme selectors that matched no member.
+///
+/// Takes the bound map, not every declared body. "Matched nothing" is a
+/// statement about a resolution this selector took part in, and a body
+/// whose name lost the binding never got to take part — reporting its
+/// selectors would blame them for a name collision reported elsewhere.
+/// The body-local counterpart is [`check_slot_targets`].
 fn check_unmatched_selectors(
     themes: &IndexMap<String, ThemeBinding>,
     applied_themes: &HashSet<String>,
@@ -1405,11 +2089,10 @@ fn check_unmatched_selectors(
             if sel.matched_member_spans.is_empty() {
                 diagnostics.push(Diagnostic {
                     code: DiagnosticCode::ThemeSelectorUnmatched,
-                    severity: Severity::Warning,
                     span: sel.source_span.clone(),
                     primary: format!(
-                        "theme selector `{kw}[...]` in `{theme}` does not match any member",
-                        kw = sel.keyword,
+                        "theme selector `{selector}` in `{theme}` does not match any member",
+                        selector = selector_text(&sel.keyword, &sel.attrs),
                         theme = theme.name,
                     ),
                     notes: vec![DiagnosticNote {
@@ -1426,6 +2109,7 @@ fn check_unmatched_selectors(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::check::Severity;
     use crate::{lower, parse};
 
     fn ir(source: &str) -> IntentModule {
@@ -1453,9 +2137,9 @@ mod tests {
         let src = "theme t:\n  slot wall -> @cobblestone\n\nstruct s size=4x4\n  walls mat_slot=floor height=3\n";
         let r = resolve(&ir(src), None);
         assert!(
-            r.diagnostics
-                .iter()
-                .any(|d| d.code == DiagnosticCode::UnresolvedSlot && d.severity == Severity::Error),
+            r.diagnostics.iter().any(
+                |d| d.code == DiagnosticCode::UnresolvedSlot && d.severity() == Severity::Error
+            ),
             "expected E_UNRESOLVED_SLOT, got {:?}",
             r.diagnostics,
         );
@@ -1537,7 +2221,34 @@ mod tests {
             r.diagnostics
                 .iter()
                 .any(|d| d.code == DiagnosticCode::ThemeSelectorUnmatched
-                    && d.severity == Severity::Warning),
+                    && d.severity() == Severity::Warning),
+        );
+    }
+
+    /// The warning names the row's attributes rather than eliding them to
+    /// `[...]`. One theme can hold several rows on one keyword, and a
+    /// message that cannot tell them apart makes the reader match spans by
+    /// hand. `check::duplicate` renders the same way, through the same
+    /// helper, so two findings on one row spell the selector alike.
+    #[test]
+    fn unmatched_selector_names_the_attributes_it_filtered_on() {
+        let src = "theme t:\n  slot wall -> @cobblestone\n  \
+             walls[class=does_not_exist] -> trim=@a\n  \
+             walls[class=\"nor_this\",side=front] -> trim=@b\n\n\
+             struct s size=4x4\n  walls class=outer mat_slot=wall height=3\n";
+        let r = resolve(&ir(src), None);
+        let primaries: Vec<&str> = r
+            .diagnostics
+            .iter()
+            .filter(|d| d.code == DiagnosticCode::ThemeSelectorUnmatched)
+            .map(|d| d.primary.as_str())
+            .collect();
+        assert_eq!(
+            primaries,
+            [
+                "theme selector `walls[class=does_not_exist]` in `t` does not match any member",
+                "theme selector `walls[class=\"nor_this\",side=front]` in `t` does not match any member",
+            ],
         );
     }
 
@@ -1604,7 +2315,9 @@ mod tests {
         );
         let r = resolve(&ir(src), None);
         assert!(
-            !r.diagnostics.iter().any(|d| d.severity == Severity::Error),
+            !r.diagnostics
+                .iter()
+                .any(|d| d.severity() == Severity::Error),
             "no errors expected, got {:?}",
             r.diagnostics,
         );
@@ -1641,7 +2354,7 @@ mod tests {
             .iter()
             .find(|d| d.code == DiagnosticCode::UnresolvedPort)
             .unwrap_or_else(|| panic!("expected E_UNRESOLVED_PORT, got {:?}", r.diagnostics));
-        assert_eq!(diag.severity, Severity::Error);
+        assert_eq!(diag.severity(), Severity::Error);
         assert!(
             diag.notes.iter().any(|n| n.message.contains("a.entry")),
             "expected nearest-match note pointing at a.entry, got {:?}",
@@ -1740,7 +2453,7 @@ mod tests {
             .iter()
             .find(|d| d.code == DiagnosticCode::MissingPathMaterial)
             .unwrap_or_else(|| panic!("expected E_MISSING_PATH_MATERIAL, got {:?}", r.diagnostics));
-        assert_eq!(diag.severity, Severity::Error);
+        assert_eq!(diag.severity(), Severity::Error);
         assert!(
             diag.primary.contains("token") && diag.primary.contains("identifier"),
             "expected the message to call out the kind mismatch, got: {}",
@@ -1846,7 +2559,7 @@ mod tests {
             .iter()
             .find(|d| d.code == DiagnosticCode::UnresolvedPort)
             .unwrap_or_else(|| panic!("expected E_UNRESOLVED_PORT, got {:?}", r.diagnostics));
-        assert_eq!(diag.severity, Severity::Error);
+        assert_eq!(diag.severity(), Severity::Error);
         assert!(
             diag.notes.iter().any(|n| n.message.contains("b.entry")),
             "expected nearest-match note pointing at b.entry, got {:?}",
@@ -1915,12 +2628,15 @@ mod tests {
         assert!(r.connects.is_empty(), "broken connect must not resolve");
     }
 
+    /// A slot bound to something that is not a material token is an
+    /// error, not advisory: `walls mat_slot=wall` below lowers to air, so
+    /// a `cairn check` that exited 0 would certify a hollow build.
     #[test]
-    fn unknown_slot_target_emits_warning() {
+    fn unknown_slot_target_emits_error() {
         let src = "theme t:\n  slot wall -> plain_ident\n\nstruct s size=4x4\n  walls mat_slot=wall height=3\n";
         let r = resolve(&ir(src), None);
         assert!(r.diagnostics.iter().any(
-            |d| d.code == DiagnosticCode::UnknownSlotTarget && d.severity == Severity::Warning
+            |d| d.code == DiagnosticCode::UnknownSlotTarget && d.severity() == Severity::Error
         ),);
     }
 
@@ -2138,10 +2854,9 @@ mod tests {
     fn per_edition_java_does_not_fall_back_to_bedrock_variant() {
         // Silent misrouting guard: a file with only `theme t_bedrock:` must
         // leave the scope unbound under `Some(Edition::Java)` rather than
-        // silently binding the Bedrock variant. Any `mat_slot=` reference
-        // then surfaces as `E_UNRESOLVED_SLOT`, which is the loud outcome
-        // spec §10.4 requires — binding across editions would route
-        // Bedrock-only slot values into a Java `.nbt`.
+        // silently binding the Bedrock variant, which would route
+        // Bedrock-only slot values into a Java `.nbt`. The loud outcome
+        // spec §10.4 requires is `E_THEME_VARIANT_MISSING`, asserted below.
         let src = [
             "theme t_bedrock:",
             "  slot floor -> @dark_oak_planks",
@@ -2158,16 +2873,23 @@ mod tests {
             "Some(Java) with only `_bedrock` variant must not bind, got {:?}",
             scope.bound_theme,
         );
-        // The unresolved-slot diagnostic is skipped here because no theme
-        // is bound at all — matching the multi-theme "no auto-pick" branch
-        // in `multiple_themes_leave_struct_unbound`. That branch is the
-        // authority on unbound-scope semantics; the AC to pin under a
-        // downstream compile is that lowering treats an unbound scope's
-        // `mat_slot` as an unresolved abstract material.
+        // Not `E_UNRESOLVED_SLOT`: the slot is declared and spelled
+        // correctly, and that message has to name the theme the slot is
+        // missing from — of which there is none, because the pin refused
+        // the only one. The theme is what cannot be honoured, so the
+        // finding names the theme. Reporting nothing at all is what let a
+        // build write the requested extent out of air at exit 0.
         assert!(
             !r.diagnostics
                 .iter()
                 .any(|d| d.code == DiagnosticCode::UnresolvedSlot),
+        );
+        assert!(
+            r.diagnostics
+                .iter()
+                .any(|d| d.code == DiagnosticCode::ThemeVariantMissing),
+            "the refusal must be reported, got {:?}",
+            r.diagnostics,
         );
     }
 
@@ -2187,6 +2909,512 @@ mod tests {
         let r = resolve(&ir(&src), Some(Edition::Bedrock));
         let scope = r.scopes.get("struct::s").unwrap();
         assert!(scope.bound_theme.is_none());
+        assert!(
+            r.diagnostics
+                .iter()
+                .any(|d| d.code == DiagnosticCode::ThemeVariantMissing),
+            "got {:?}",
+            r.diagnostics,
+        );
+    }
+
+    // ------------------------------------------------------------------
+    // A pin the module cannot satisfy, and a pin the site path ignored.
+    // ------------------------------------------------------------------
+
+    /// One logical theme `shop` in the given variants, plus a def and a
+    /// site that places it under `theme={reference}`.
+    fn placed_under(reference: &str, variants: &[&str]) -> String {
+        use std::fmt::Write as _;
+
+        let mut declarations = String::new();
+        for variant in variants {
+            let value = match *variant {
+                "_bedrock" => "dark_oak_planks",
+                "_java" => "spruce_planks",
+                _ => "oak_planks",
+            };
+            write!(
+                declarations,
+                "theme shop{variant}:\n  slot floor -> @{value}\n\n"
+            )
+            .expect("writing to a String cannot fail");
+        }
+        format!(
+            "{declarations}def hut size=4x4:\n  floor mat_slot=floor\n\nsite s:\n  \
+             place id=home use=hut theme={reference} at=origin\n"
+        )
+    }
+
+    fn placed_scope(r: &Resolution) -> &ScopeResolution {
+        r.scopes.get("site::s::home").expect("place scope present")
+    }
+
+    /// No finding about variant selection, and no error of any kind.
+    ///
+    /// Narrower than "no diagnostics at all", which these tests used to
+    /// assert: an advisory added later for an unrelated reason would break
+    /// them while saying nothing about the theme reference they are about.
+    fn nothing_said_about_variants(r: &Resolution) -> bool {
+        !r.diagnostics.iter().any(|d| {
+            d.severity() == Severity::Error
+                || matches!(
+                    d.code,
+                    DiagnosticCode::ThemeVariantRebound | DiagnosticCode::ThemeVariantMissing
+                )
+        })
+    }
+
+    #[test]
+    fn refuses_a_module_whose_only_variant_is_for_the_other_edition() {
+        let src = [
+            "theme shop_bedrock:",
+            "  slot floor -> @dark_oak_planks",
+            "",
+            "struct s size=4x4",
+            "  floor mat_slot=floor",
+            "",
+        ]
+        .join("\n");
+        let r = resolve(&ir(&src), Some(Edition::Java));
+        let diag = r
+            .diagnostics
+            .iter()
+            .find(|d| d.code == DiagnosticCode::ThemeVariantMissing)
+            .unwrap_or_else(|| panic!("expected the refusal, got {:?}", r.diagnostics));
+        assert_eq!(diag.severity(), Severity::Error);
+        assert!(
+            diag.primary.contains("shop") && diag.primary.contains("java"),
+            "the message must name the theme and the pin: {}",
+            diag.primary,
+        );
+        let notes = diag
+            .notes
+            .iter()
+            .map(|n| n.message.as_str())
+            .collect::<Vec<_>>()
+            .join(" | ");
+        assert!(
+            notes.contains("shop_bedrock"),
+            "the notes must say which variants do exist: {notes}",
+        );
+        assert!(
+            notes.contains("shop_java") && notes.contains("drop the suffix"),
+            "the notes must give both fixes: {notes}",
+        );
+    }
+
+    #[test]
+    fn a_module_variant_is_only_refused_once_however_many_scopes_read_it() {
+        // The auto-pick is one decision for the whole module, so repeating
+        // the finding per struct would report one cause N times.
+        let src = [
+            "theme shop_bedrock:",
+            "  slot floor -> @dark_oak_planks",
+            "",
+            "struct a size=4x4",
+            "  floor mat_slot=floor",
+            "",
+            "struct b size=4x4",
+            "  floor mat_slot=floor",
+            "",
+        ]
+        .join("\n");
+        let r = resolve(&ir(&src), Some(Edition::Java));
+        assert_eq!(
+            r.diagnostics
+                .iter()
+                .filter(|d| d.code == DiagnosticCode::ThemeVariantMissing)
+                .count(),
+            1,
+        );
+    }
+
+    #[test]
+    fn an_unpinned_resolve_refuses_nothing_about_variants() {
+        // The same module is fine for `cairn check` and `cairn lower`: with
+        // no edition named there is nothing the variant fails to satisfy.
+        let src = [
+            "theme shop_bedrock:",
+            "  slot floor -> @dark_oak_planks",
+            "",
+            "struct s size=4x4",
+            "  floor mat_slot=floor",
+            "",
+        ]
+        .join("\n");
+        let r = resolve(&ir(&src), None);
+        assert_eq!(
+            r.scopes
+                .get("struct::s")
+                .expect("scope")
+                .bound_theme
+                .as_deref(),
+            Some("shop_bedrock"),
+        );
+        assert!(
+            !r.diagnostics
+                .iter()
+                .any(|d| d.code == DiagnosticCode::ThemeVariantMissing),
+            "got {:?}",
+            r.diagnostics,
+        );
+    }
+
+    #[test]
+    fn a_place_naming_the_other_editions_variant_binds_this_editions() {
+        // The defect: `theme=shop_bedrock` bound verbatim under a Java
+        // build, so Bedrock-only slot values reached a Java `.nbt` while
+        // `pick_variant` — the guard written to prevent exactly that — was
+        // never consulted on this path.
+        let src = placed_under("shop_bedrock", &["_java", "_bedrock"]);
+        let r = resolve(&ir(&src), Some(Edition::Java));
+        assert_eq!(placed_scope(&r).bound_theme.as_deref(), Some("shop_java"));
+    }
+
+    #[test]
+    fn a_rebound_place_theme_says_which_variant_it_bound() {
+        let src = placed_under("shop_bedrock", &["_java", "_bedrock"]);
+        let r = resolve(&ir(&src), Some(Edition::Java));
+        let diag = r
+            .diagnostics
+            .iter()
+            .find(|d| d.code == DiagnosticCode::ThemeVariantRebound)
+            .unwrap_or_else(|| panic!("expected the notice, got {:?}", r.diagnostics));
+        assert_eq!(diag.severity(), Severity::Warning);
+        assert!(
+            diag.primary.contains("shop_bedrock") && diag.primary.contains("shop_java"),
+            "both the written and the bound name belong in the message: {}",
+            diag.primary,
+        );
+        assert!(
+            diag.notes.iter().any(|n| n.message.contains("theme=shop")),
+            "the note must offer the neutral spelling: {:?}",
+            diag.notes,
+        );
+    }
+
+    #[test]
+    fn a_place_naming_this_editions_variant_binds_it_without_comment() {
+        let src = placed_under("shop_bedrock", &["_java", "_bedrock"]);
+        let r = resolve(&ir(&src), Some(Edition::Bedrock));
+        assert_eq!(
+            placed_scope(&r).bound_theme.as_deref(),
+            Some("shop_bedrock")
+        );
+        assert!(nothing_said_about_variants(&r), "got {:?}", r.diagnostics);
+    }
+
+    #[test]
+    fn a_place_naming_the_logical_theme_binds_the_pinned_variant() {
+        // The spelling spec versioning-editions §10.7 asks for. Before the
+        // reference went through variant selection it was the one spelling
+        // that did not resolve, because no theme is named plain `shop`.
+        let src = placed_under("shop", &["_java", "_bedrock"]);
+        for (edition, expected) in [
+            (Edition::Java, "shop_java"),
+            (Edition::Bedrock, "shop_bedrock"),
+        ] {
+            let r = resolve(&ir(&src), Some(edition));
+            assert_eq!(placed_scope(&r).bound_theme.as_deref(), Some(expected));
+            assert!(nothing_said_about_variants(&r), "got {:?}", r.diagnostics);
+        }
+    }
+
+    #[test]
+    fn a_place_naming_no_declared_theme_is_still_unresolved() {
+        let src = placed_under("barn", &["_java", "_bedrock"]);
+        let r = resolve(&ir(&src), Some(Edition::Java));
+        assert!(
+            r.diagnostics
+                .iter()
+                .any(|d| d.code == DiagnosticCode::UnresolvedThemeRef),
+            "a name no variant shares is a typo, not an edition problem: {:?}",
+            r.diagnostics,
+        );
+    }
+
+    #[test]
+    fn a_place_theme_binds_verbatim_without_a_pin() {
+        // Nothing argues for another variant here, and re-picking would let
+        // `cairn lower` silently swap the variant the author named.
+        let src = placed_under("shop_bedrock", &["_java", "_bedrock"]);
+        let r = resolve(&ir(&src), None);
+        assert_eq!(
+            placed_scope(&r).bound_theme.as_deref(),
+            Some("shop_bedrock")
+        );
+        assert!(nothing_said_about_variants(&r), "got {:?}", r.diagnostics);
+    }
+
+    #[test]
+    fn a_place_is_refused_when_the_pin_has_no_variant_to_bind() {
+        let src = placed_under("shop_bedrock", &["_bedrock"]);
+        let r = resolve(&ir(&src), Some(Edition::Java));
+        assert!(
+            r.diagnostics
+                .iter()
+                .any(|d| d.code == DiagnosticCode::ThemeVariantMissing),
+            "got {:?}",
+            r.diagnostics,
+        );
+        assert!(
+            r.scopes.get("site::s::home").is_none(),
+            "a placement whose theme cannot bind must not become a scope",
+        );
+    }
+
+    #[test]
+    fn an_unsuffixed_theme_binds_under_every_pin_and_says_nothing() {
+        let src = placed_under("shop", &[""]);
+        for edition in [None, Some(Edition::Java), Some(Edition::Bedrock)] {
+            let r = resolve(&ir(&src), edition);
+            assert_eq!(
+                placed_scope(&r).bound_theme.as_deref(),
+                Some("shop"),
+                "edition {edition:?}",
+            );
+            assert!(
+                nothing_said_about_variants(&r),
+                "edition {edition:?}: {:?}",
+                r.diagnostics,
+            );
+        }
+    }
+
+    /// A def whose member reads a slot only the Bedrock variant declares,
+    /// placed under `theme={reference}`.
+    ///
+    /// The unrelated `barn` theme is load-bearing. A def is resolved twice —
+    /// once as its own top-level scope, once per placement — so with `shop`
+    /// as the module's only logical theme the def's own scope auto-picks a
+    /// variant and reports the slot itself. Every assertion below would then
+    /// hold whatever the placement path did with its siblings. A second
+    /// logical theme suppresses the auto-pick, leaving the `theme=` on the
+    /// `place` as the only thing that can bind this member at all.
+    fn placed_reading_a_bedrock_only_slot(reference: &str) -> String {
+        format!(
+            "theme shop_java:\n  slot floor -> @oak_planks\n\n\
+             theme shop_bedrock:\n  slot floor -> @oak_planks\n  \
+             slot bedrock_only -> @dark_oak_planks\n\n\
+             theme barn:\n  slot floor -> @hay_block\n\n\
+             def hut size=4x4:\n  floor mat_slot=bedrock_only\n\nsite s:\n  \
+             place id=home use=hut theme={reference} at=origin\n"
+        )
+    }
+
+    #[test]
+    fn a_logical_place_theme_is_softened_by_its_siblings_without_a_pin() {
+        // Opening the site path to logical names re-opens the door the
+        // sibling union exists to hold: with no edition picked, a slot only
+        // one variant declares must not error, or a file that compiles
+        // cleanly for Bedrock fails `cairn check`.
+        let r = resolve(&ir(&placed_reading_a_bedrock_only_slot("shop")), None);
+        // The logical name has to bind first, or "no unresolved slot" would
+        // hold for the uninteresting reason that no scope was built.
+        assert_eq!(placed_scope(&r).bound_theme.as_deref(), Some("shop_java"));
+        assert!(
+            !r.diagnostics
+                .iter()
+                .any(|d| d.code == DiagnosticCode::UnresolvedSlot),
+            "got {:?}",
+            r.diagnostics,
+        );
+    }
+
+    #[test]
+    fn a_pin_makes_a_logical_place_theme_authoritative() {
+        let r = resolve(
+            &ir(&placed_reading_a_bedrock_only_slot("shop")),
+            Some(Edition::Java),
+        );
+        assert!(
+            r.diagnostics
+                .iter()
+                .any(|d| d.code == DiagnosticCode::UnresolvedSlot),
+            "a pin binds one variant and its slots are the whole answer: {:?}",
+            r.diagnostics,
+        );
+    }
+
+    #[test]
+    fn naming_a_variant_explicitly_keeps_its_slots_strict_without_a_pin() {
+        // The author asked about `shop_java`'s slots. Softening them
+        // against a sibling would answer a question they did not ask.
+        let r = resolve(&ir(&placed_reading_a_bedrock_only_slot("shop_java")), None);
+        assert!(
+            r.diagnostics
+                .iter()
+                .any(|d| d.code == DiagnosticCode::UnresolvedSlot),
+            "got {:?}",
+            r.diagnostics,
+        );
+    }
+
+    #[test]
+    fn a_variant_the_module_does_not_declare_is_unresolved_without_a_pin() {
+        // The spelling and the declaration set disagree, and no edition is
+        // named to settle it. Re-picking a sibling here would swap a variant
+        // on `cairn lower`'s say-so — the very thing the pinned path is
+        // written to stop doing silently — so the answer is the one a
+        // misspelled theme has always had.
+        //
+        // This shape was missing from the helpers entirely: every source
+        // they built spelled a reference that the variant list contained.
+        for (reference, variants) in [
+            ("shop_java", ["_bedrock"].as_slice()),
+            ("shop_bedrock", ["_java"].as_slice()),
+            ("shop_java", [""].as_slice()),
+        ] {
+            let r = resolve(&ir(&placed_under(reference, variants)), None);
+            assert!(
+                r.diagnostics
+                    .iter()
+                    .any(|d| d.code == DiagnosticCode::UnresolvedThemeRef),
+                "theme={reference} against {variants:?}: {:?}",
+                r.diagnostics,
+            );
+            assert!(
+                r.scopes.get("site::s::home").is_none(),
+                "theme={reference} against {variants:?}: no scope may be built",
+            );
+        }
+    }
+
+    #[test]
+    fn a_pin_falls_back_to_the_unsuffixed_theme_and_says_the_name_was_not_declared() {
+        // `theme=shop_java` with only `theme shop:` declared. The pin has no
+        // `_java` variant to prefer, so it binds the unsuffixed theme — the
+        // rebind is real, but describing it as "names one edition's variant"
+        // would be wrong: that variant is not declared anywhere.
+        let src = placed_under("shop_java", &[""]);
+        let r = resolve(&ir(&src), Some(Edition::Java));
+        assert_eq!(placed_scope(&r).bound_theme.as_deref(), Some("shop"));
+        let diag = r
+            .diagnostics
+            .iter()
+            .find(|d| d.code == DiagnosticCode::ThemeVariantRebound)
+            .unwrap_or_else(|| panic!("expected the notice, got {:?}", r.diagnostics));
+        assert!(
+            diag.primary.contains("is not a declared theme"),
+            "the message must not call an undeclared name a variant: {}",
+            diag.primary,
+        );
+    }
+
+    #[test]
+    fn a_pin_prefers_the_unsuffixed_theme_over_the_other_editions_variant() {
+        // The §10.4 fallback order, exercised through the site path: with
+        // `shop` and `shop_bedrock` declared, a Java build binds `shop` and
+        // does not cross to `shop_bedrock`.
+        let src = placed_under("shop", &["", "_bedrock"]);
+        let r = resolve(&ir(&src), Some(Edition::Java));
+        assert_eq!(placed_scope(&r).bound_theme.as_deref(), Some("shop"));
+        let r = resolve(&ir(&src), Some(Edition::Bedrock));
+        assert_eq!(
+            placed_scope(&r).bound_theme.as_deref(),
+            Some("shop_bedrock")
+        );
+    }
+
+    #[test]
+    fn one_unbindable_theme_is_one_finding_however_many_places_read_it() {
+        // The module-level pick and both placements ask for the same edit in
+        // the same `theme` block, and the three messages were byte-identical
+        // apart from their span.
+        let src = concat!(
+            "theme shop_bedrock:\n  slot floor -> @dark_oak_planks\n\n",
+            "def hut size=4x4:\n  floor mat_slot=floor\n\n",
+            "site s:\n",
+            "  place id=a use=hut theme=shop at=origin\n",
+            "  place id=b use=hut theme=shop east_of=a gap=2\n",
+        );
+        let r = resolve(&ir(src), Some(Edition::Java));
+        assert_eq!(
+            r.diagnostics
+                .iter()
+                .filter(|d| d.code == DiagnosticCode::ThemeVariantMissing)
+                .count(),
+            1,
+            "got {:?}",
+            r.diagnostics,
+        );
+        // Deduplicating the sentence must not smuggle a placement into the
+        // build: both are still refused.
+        assert!(r.scopes.get("site::s::a").is_none());
+        assert!(r.scopes.get("site::s::b").is_none());
+    }
+
+    #[test]
+    fn a_theme_no_member_reads_a_slot_from_is_not_refused_under_a_pin() {
+        // Nothing is starved here — every material is concrete — so the pin
+        // costs this module nothing and the build is byte-identical with or
+        // without it. Refusing would fail a theme-library file, or any
+        // module that does not use `mat_slot=`, on a `--edition` CI job.
+        let src = [
+            "theme shop_bedrock:",
+            "  slot floor -> @dark_oak_planks",
+            "",
+            "struct s size=4x4",
+            "  floor mat=@stone",
+            "",
+        ]
+        .join("\n");
+        let r = resolve(&ir(&src), Some(Edition::Java));
+        assert!(
+            !r.diagnostics
+                .iter()
+                .any(|d| d.code == DiagnosticCode::ThemeVariantMissing),
+            "got {:?}",
+            r.diagnostics,
+        );
+
+        // The same module with one `mat_slot=` is refused, so the gate is
+        // the slot and not something else about the source.
+        let reading = src.replace("floor mat=@stone", "floor mat_slot=floor");
+        let r = resolve(&ir(&reading), Some(Edition::Java));
+        assert!(
+            r.diagnostics
+                .iter()
+                .any(|d| d.code == DiagnosticCode::ThemeVariantMissing),
+            "got {:?}",
+            r.diagnostics,
+        );
+    }
+
+    #[test]
+    fn a_slot_read_from_a_nested_member_counts_as_reading_one() {
+        // `level y=N` groups members, so the only `mat_slot=` in a module
+        // can sit one level down. A scan that stops at the top level would
+        // let this file build its floor out of air under a pin that cannot
+        // bind the theme, which is the outcome the finding exists to stop.
+        let src = [
+            "theme shop_bedrock:",
+            "  slot floor -> @dark_oak_planks",
+            "",
+            "struct s size=4x4",
+            "  level y=1",
+            "    floor mat_slot=floor",
+            "",
+        ]
+        .join(
+            "
+",
+        );
+        let module = crate::parse(&src).expect("parses");
+        let intent = crate::lower(&module);
+        assert!(
+            any_member_reads_a_slot(&intent),
+            "premise: the nested member is the only reader in the module",
+        );
+        let r = resolve(&intent, Some(Edition::Java));
+        assert!(
+            r.diagnostics
+                .iter()
+                .any(|d| d.code == DiagnosticCode::ThemeVariantMissing),
+            "got {:?}",
+            r.diagnostics,
+        );
     }
 
     #[test]

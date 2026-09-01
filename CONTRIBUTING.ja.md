@@ -155,7 +155,7 @@ Cairn で使う Conventional Commits の type:
 | `build` | ビルド、パッケージング、Cargo 依存 | する |
 | `docs` | ドキュメント、spec 散文、README、サンプル | しない |
 | `test` | テストコードのみ | しない |
-| `ci` | GitHub Actions、release-plz、workflow 設定 | しない |
+| `ci` | GitHub Actions、release-plz、workflow 設定、`rust-toolchain.toml` | しない |
 | `chore` | 利用者に届かない雑多な変更 | しない |
 | `style` | フォーマット / lint のみ | しない |
 
@@ -167,6 +167,44 @@ Cairn で使う Conventional Commits の type:
 Cairn は日付ベースバージョニング (CalVer) `YYYY.M[.PATCH]` を採用します。主要な変更は
 [CHANGELOG.md](CHANGELOG.md) に記録されます。バージョン番号ではなく
 [互換性ティア](https://cairn.kage1020.com/ja/spec/compatibility/) が各面の互換契約を定めます。
+
+## ツールチェーン
+
+[`rust-toolchain.toml`](rust-toolchain.toml) はコンパイラを正確なバージョンで指定し、Rust を入れる
+ワークフローはすべて `rustup show` を使うので、決めているのはこのファイルです。手元の `rustup` も同じ
+ように読むため、**あなたと CI は同じコンパイラで動きます**。findings まで同じとは限りません — CI は
+3 OS のマトリクスで走り、lint には `cfg` 依存のものがあります。
+
+チャンネル指定にしていないのは意図的です。CI は
+`cargo clippy --workspace --all-targets -- -D warnings` を走らせるので、`stable` のままだと Rust の
+リリースだけで全ブランチが赤くなります。findings はそのブランチが触っていないファイルに出て、しかも
+その変更が到達しないジョブで出て、最初に読むのは次に push した人です。固定しても新しい lint を避けられる
+わけではありません。**いつ来るかを決められる**だけで、誰かが開いた PR として来るようになります。
+
+**上げ方**。`channel` を変えたら、CI が走らせるものをそのまま走らせます。環境も検査の一部で、新しい
+コンパイラが増やすのは clippy の lint とは限らず rustc の warning のこともあります。
+
+```sh
+cargo fmt --all -- --check
+RUSTFLAGS="-D warnings" cargo clippy --workspace --all-targets -- -D warnings
+RUSTFLAGS="-D warnings" cargo test --workspace --locked
+```
+
+新しいリリースが見つけたものは同じ PR で直し、コミット種別は `ci` にします。feature ブランチの中で
+上げるより単独の PR にする価値があります — 「新しいコンパイラと、それが要求した lint 修正だけ」という
+差分はレビューできるからです。
+
+**MSRV ではありません**。workspace マニフェストの `rust-version` は利用者が Cairn をビルドするのに
+必要な下限で、この pin はプロジェクト自身の検査が走る唯一のバージョンです。pin を上げても下限は上がり
+ません。`rust-version` が動くのはコードが実際に新しいコンパイラを必要とし始めたときだけで、それは誰が
+crate をビルドできるかを変える変更だからです。
+
+検査されているのは片方向だけです。下限を **下回る** pin は最初のビルドで落ちます。cargo が
+`rust-version` より古いコンパイラでの package ビルドを拒否するからです。もう一方は検査されていません。
+1.95 で Cairn をビルドするものはどこにも無いので、新しいコンパイラを必要とし始めたコードは pin では
+緑のまま通り、宣言した下限にいる利用者だけが壊れます。`rust-version` は宣言であって検査済みの保証では
+ありません。確かめるのは `cargo +1.95 check --workspace` で、最近安定化した API に手を伸ばした変更の
+ときは回す価値があります。
 
 ## Code of Conduct
 

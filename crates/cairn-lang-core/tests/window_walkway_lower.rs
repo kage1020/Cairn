@@ -87,8 +87,9 @@ fn window_walkway_endpoints_pin_door_and_window_ports() {
 #[test]
 fn window_walkway_block_array_paints_ten_gravel_cells() {
     // A pure x-leg of 10 cells at z=5 (x = 2..=11). An off-by-one or an
-    // unintended Y lift (e.g. honouring window.y=2) would shift the
-    // strip into a blocked floor cell and drop the gravel count.
+    // unintended Y lift (honouring the window's authored `y=`, whatever
+    // course it sits on) would shift the strip into a blocked floor cell
+    // and drop the gravel count.
     let out = lower_window_walkway();
     let ba = out
         .structures
@@ -133,6 +134,20 @@ fn window_walkway_emits_no_deferred_or_blocked_warnings() {
         blocked.is_empty(),
         "window-walkway must not collide with placements, got {blocked:#?}",
     );
+    // The window sits one course above the door's opening, and the wall
+    // carries the extra course so it still fits inside. Put the window
+    // back in the doorway and `door` and `window` — both openings — decide
+    // the cell by line order. The example's header says why; this is the
+    // assertion that holds it, next to the comment.
+    let contested: Vec<_> = out
+        .diagnostics
+        .iter()
+        .filter(|d| d.code == DiagnosticCode::PhaseConflict)
+        .collect();
+    assert!(
+        contested.is_empty(),
+        "window-walkway's openings must not contest a cell, got {contested:#?}",
+    );
 }
 
 #[test]
@@ -141,7 +156,7 @@ fn window_walkway_emits_no_resolver_errors() {
     let errors: Vec<_> = out
         .diagnostics
         .iter()
-        .filter(|d| d.severity == Severity::Error)
+        .filter(|d| d.severity() == Severity::Error)
         .collect();
     assert!(
         errors.is_empty(),

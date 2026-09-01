@@ -15,8 +15,10 @@ pub mod error;
 pub mod ids;
 pub mod intent;
 pub mod lex;
+pub mod lines;
 pub mod lock;
 pub mod parse;
+pub(crate) mod prose;
 pub mod resolve;
 pub mod suggest;
 
@@ -37,8 +39,14 @@ pub use intent::{
     lower,
 };
 pub use lex::{Token, TokenKind, lex};
-pub use parse::parse;
+pub use parse::{MAX_EXPR_DEPTH, MAX_NESTING_DEPTH, diagnose_parse_failure, parse};
 pub use resolve::{Resolution, ThemeBinding, VersionAxes, compute_axes, resolve};
 
 /// The Cairn release version, in date-based versioning (`YYYY.M[.PATCH]`).
-pub const CAIRN_VERSION: &str = "2026.7";
+///
+/// Read from this crate's package version, which is `[workspace.package]`'s,
+/// which is the number the release tooling bumps. Everything that has to name
+/// the compiler that produced an artefact — `cairn --version`, a lockfile's
+/// `cairn_version` — reads it from here, so it is derived rather than
+/// maintained.
+pub const CAIRN_VERSION: &str = env!("CARGO_PKG_VERSION");

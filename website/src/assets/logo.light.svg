@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-labelledby="cairn-logo-title">
+  <title id="cairn-logo-title">Cairn</title>
+  <g fill="#17427E" shape-rendering="crispEdges">
+    <rect x="28" y="16" width="8" height="8" />
+    <rect x="20" y="24" width="24" height="8" />
+    <rect x="12" y="32" width="40" height="8" />
+    <rect x="4" y="40" width="56" height="8" />
+  </g>
+</svg>

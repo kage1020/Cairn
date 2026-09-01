@@ -28,20 +28,21 @@ edition-tagged cells out inside each scope's `circuit region=`
 reservation (stage 1 of `spec/redstone` §14.5's five-stage
 place-and-route); `compile_routing(&ScopedPlacementIr)` runs Steiner
 routing over that layout, filling every cell's `wire_length` with the
-sum of Manhattan distances from each driver source into the cell
-(stage 2 of §14.5); `compile_delay(&ScopedPlacementIr)` runs delay
+sum, over the nets driving it, of the routed length from that net's
+source into the cell (stage 2 of §14.5); `compile_delay(&ScopedPlacementIr)` runs delay
 insertion, promoting each cell's `delay_ticks` from `None` to
 `Some(base delay + implicit buffer repeater ticks)` and refusing with
-`E_ATTENUATION_LIMIT` when a driver segment exceeds the v1 sanity cap
+`E_ATTENUATION_LIMIT` when a segment exceeds the v1 sanity cap
 (stage 3 of §14.5); and `compile_crossing(&ScopedPlacementIr)` runs
-crossing legalization, detecting plane overlaps between distinct
-nets (refused with `E_CROSSING_CONGESTION` when the `void=<N>`
-reservation offers no bridge layer to escape to) and filling every
-cell's `buffer_coords` with the concrete coord of each implicit
-buffer repeater the delay pass counted — a collision on the plane
-lifts the buffer onto the first free `RouteLayer::Bridge` y-layer
-inside the `void=<N>` budget (stage 4 of §14.5). Every placed cell
-records which of those four passes last touched it as a
+crossing legalization, filling every cell's `buffer_coords` with the
+coord of the buffer repeater each driver segment passes through — a
+repeater this net already placed is recorded by every segment that
+reaches it rather than duplicated, so one block can carry several
+entries (stage 4 of §14.5). Two nets that would be one strand of dust
+is not something it has to legalize: stage 2 routes each net around the
+dust of the nets before it and around the coords beside that dust — dust
+reads the dust one step away in its own plane — so the short never gets
+made. Every placed cell records which of those four passes last touched it as a
 `PlacementStage`, dumped as a `"stage"` key in the same vocabulary
 `cairn synth --stage <s>` accepts, so a JSON consumer reads the stage
 off the output rather than inferring it from which optional keys are

@@ -1,5 +1,5 @@
-[38;5;56m@cairn[0m 2026.06
-[38;5;56m@requires[0m version[1m[38;5;239m>=[0m1.20
+[38;5;56m@cairn[0m [38;5;30m2026.06[0m
+[38;5;56m@requires[0m [38;5;30mversion>=1.20[0m
 
 [3m[38;5;245m# A minimum useful Cairn build.[0m
 [3m[38;5;245m# Demonstrates: struct, mat_slot, theme binding, wall selectors, derive-by-default blockstate.[0m
@@ -9,7 +9,7 @@
   [38;5;56mslot[0m wall  [1m[38;5;239m->[0m [38;5;23m@cobblestone[0m
   [38;5;56mslot[0m roof  [1m[38;5;239m->[0m [38;5;23m@spruce_stairs[0m
   [38;5;56mslot[0m glass [1m[38;5;239m->[0m [38;5;23m@glass_pane[0m
-  window[38;5;239m[[0m[4m[38;5;252mclass[0m[1m[38;5;239m=[0msmall[38;5;239m][0m [1m[38;5;239m->[0m [4m[38;5;252mframe[0m[1m[38;5;239m=[0m[38;5;23m@spruce_wood[0m
+  [38;5;56mwindow[0m[38;5;239m[[0m[4m[38;5;252mclass[0m[1m[38;5;239m=[0msmall[38;5;239m][0m [1m[38;5;239m->[0m [4m[38;5;252mframe[0m[1m[38;5;239m=[0m[38;5;23m@spruce_wood[0m
 
 [38;5;56mstruct[0m cottage [4m[38;5;252msize[0m[1m[38;5;239m=[0m[1m[38;5;94m9[0m[1m[38;5;94mx[0m[1m[38;5;94m7[0m
   [38;5;56mfloor[0m  [4m[38;5;252mmat_slot[0m[1m[38;5;239m=[0mfloor

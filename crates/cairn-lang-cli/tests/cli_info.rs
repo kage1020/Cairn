@@ -173,7 +173,10 @@ fn info_7_empty_editions_value_is_rejected_with_exit_two() {
 
 #[test]
 fn info_8_file_without_requires_defaults_min_to_zero_zero() {
-    let path = tempfile_with_contents("struct s size=4x4\n  walls height=3\n");
+    let path = tempfile_with_contents(
+        "no_requires",
+        "theme t:\n  slot m -> @oak_planks\n\nstruct s size=4x4\n  walls height=3 mat_slot=m\n",
+    );
     let out = run_info(&[path.to_str().unwrap(), "--format", "json"]);
     assert!(out.status.success());
     let stdout = String::from_utf8(out.stdout).expect("utf-8");
@@ -181,10 +184,119 @@ fn info_8_file_without_requires_defaults_min_to_zero_zero() {
     assert_eq!(parsed["registry_compat"]["min"], "0.0");
 }
 
-fn tempfile_with_contents(contents: &str) -> PathBuf {
+/// The floor reaches `registry_compat.min` however the author spaced the
+/// operator.
+///
+/// `version >= 1.21` used to leave `min` at `0.0` — the constraint was
+/// dropped between the directive and the axis, and this is the command
+/// where that was visible. Pinned at the CLI surface because that is where
+/// it was seen; the library half is `cairn-lang-core`'s `check_requires`.
+#[test]
+fn info_9_requires_floor_reaches_the_registry_range_however_it_is_spaced() {
+    for (label, header) in [
+        ("tight", "@requires version>=1.21\n"),
+        ("spaced", "@requires version >= 1.21\n"),
+        ("left", "@requires version >=1.21\n"),
+        ("right", "@requires version>= 1.21\n"),
+    ] {
+        let path = tempfile_with_contents(label, &format!("{header}struct s size=4x4\n"));
+        let out = run_info(&[path.to_str().unwrap(), "--format", "json"]);
+        assert!(
+            out.status.success(),
+            "{label}: stderr={}",
+            String::from_utf8_lossy(&out.stderr),
+        );
+        let stdout = String::from_utf8(out.stdout).expect("utf-8");
+        let parsed: serde_json::Value = serde_json::from_str(&stdout).expect("valid JSON");
+        assert_eq!(parsed["registry_compat"]["min"], "1.21", "{label}");
+    }
+}
+
+/// A requirement `cairn check` rejects stops `cairn info` too, in both
+/// output formats.
+///
+/// This is a contract change: the same file used to exit 0 and report
+/// `min: "0.0"`. `info` runs the check passes, so a new `Error`-severity
+/// code reaches it — and reporting a version range derived from a file
+/// whose version declaration is itself a mistake is the confident-wrong
+/// answer the code exists to stop.
+#[test]
+fn info_10_a_rejected_requirement_stops_info_in_both_formats() {
+    let path = tempfile_with_contents(
+        "bad_requires",
+        "@requires version<1.20\nstruct s size=4x4\n",
+    );
+    let text = run_info(&[path.to_str().unwrap()]);
+    assert_eq!(text.status.code(), Some(1));
+    assert!(
+        String::from_utf8_lossy(&text.stdout).contains("E_INVALID_REQUIRES")
+            || String::from_utf8_lossy(&text.stderr).contains("E_INVALID_REQUIRES"),
+        "stdout={} stderr={}",
+        String::from_utf8_lossy(&text.stdout),
+        String::from_utf8_lossy(&text.stderr),
+    );
+
+    let json = run_info(&[path.to_str().unwrap(), "--format", "json"]);
+    assert_eq!(json.status.code(), Some(1));
+    assert!(
+        serde_json::from_slice::<serde_json::Value>(&json.stdout)
+            .ok()
+            .and_then(|v| v.get("registry_compat").cloned())
+            .is_none(),
+        "a refused file must not also report a range: {}",
+        String::from_utf8_lossy(&json.stdout),
+    );
+}
+
+/// Write a transient `.crn` under the system temp dir.
+///
+/// `label` distinguishes concurrent callers: the harness runs these as
+/// threads of one process, so the pid alone would have two of them writing
+/// and reading the same path.
+fn tempfile_with_contents(label: &str, contents: &str) -> PathBuf {
     let mut path = std::env::temp_dir();
     let pid = std::process::id();
-    path.push(format!("cairn-cli-info-{pid}.crn"));
+    path.push(format!("cairn-cli-info-{pid}-{label}.crn"));
     std::fs::write(&path, contents).expect("write tempfile");
     path
+}
+
+#[test]
+fn info_9_a_note_that_points_at_a_second_line_is_printed_with_its_position() {
+    // `cairn info` was one of the three commands whose note loop dropped
+    // `note.span`; all six copies now share one renderer, and each of the
+    // three needs its own end-to-end line or a fold that missed one of
+    // them still passes.
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    let path = tmp.path().join("conflict.crn");
+    std::fs::write(
+        &path,
+        concat!(
+            "theme t:\n",
+            "  slot wall -> @cobblestone\n",
+            "  slot glass -> @glass_pane\n",
+            "\n",
+            "struct t size=7x5\n",
+            "  walls mat_slot=wall height=3\n",
+            "  door side=front at=center\n",
+            "  window side=front y=1 offset=3 size=1x2 mat_slot=glass\n",
+        ),
+    )
+    .expect("write source");
+
+    let out = run_info(&[path.to_str().unwrap()]);
+    assert!(
+        out.status.success(),
+        "a warning must not fail info, stderr={}",
+        String::from_utf8_lossy(&out.stderr),
+    );
+    let stderr = String::from_utf8(out.stderr).expect("utf-8");
+    assert!(
+        stderr.contains(":8:3: warning[W_PHASE_CONFLICT]"),
+        "the finding anchors at the `window` on line 8, got: {stderr}",
+    );
+    assert!(
+        stderr.contains(":7:3:   note: overwritten member declared here"),
+        "the note must carry the `door` line's position, got: {stderr}",
+    );
 }

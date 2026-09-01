@@ -9,7 +9,7 @@
 //! 2. **selector matches** — each `KEYWORD[attrs] -> bindings` row in a theme
 //!    is paired with the member(s) it actually matches in the file;
 //! 3. **diagnostics** — `E_UNRESOLVED_SLOT` (Error) for `mat_slot=NAME` that
-//!    no theme provides, `E_UNKNOWN_SLOT_TARGET` (Warning) for theme slot
+//!    no theme provides, `E_UNKNOWN_SLOT_TARGET` (Error) for theme slot
 //!    targets that look like neither a canonical nor an abstract material
 //!    token, and `E_THEME_SELECTOR_UNMATCHED` (Warning) for selectors that
 //!    don't bind to anything.
@@ -36,11 +36,16 @@ mod resolver;
 mod version_axes;
 
 pub use binding::{SelectorMatch, ThemeBinding, TokenKind, classify_token};
-pub use requires_parse::{compare_versions, parse_min_version};
+pub use requires_parse::{
+    RequirementError, compare_versions, parse_min_version, parse_requirement,
+};
+pub(crate) use resolver::select_the_same_members;
 pub use resolver::{
     PortRef, Resolution, ResolvedMemberBinding, ScopeResolution, ValidatedConnect, place_scope_key,
     resolve,
 };
 pub use version_axes::{
-    EditionPortability, RegistryRange, SemanticSensitiveFinding, VersionAxes, compute_axes,
+    BuildableTargets, EditionPortability, EditionReport, RegistryRange, SemanticSensitiveFinding,
+    UnsupportedEntry, UnsupportedReason, VersionAxes, VersionFloor, compute_axes,
+    declared_version_floor,
 };

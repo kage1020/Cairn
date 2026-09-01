@@ -134,9 +134,6 @@ structs:
                   value:
                     w: 1
                     h: 2
-                shape:
-                  kind: Ident
-                  value: slit
             - id: eave
               role:
                 kind: Stair

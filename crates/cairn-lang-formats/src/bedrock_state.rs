@@ -27,6 +27,7 @@
 //! illustrative example uses different `weirdo_direction` values; the
 //! wiki listing is authoritative for the on-disk mapping.
 
+use cairn_lang_core::block_array::is_stair;
 use cairn_lang_nbt::Compound;
 use cairn_lang_nbt::tag::Tag;
 use indexmap::IndexMap;
@@ -56,7 +57,7 @@ pub enum BedrockStateError {
     /// block yet.
     #[error(
         "block `{id}[{properties}]` carries blockstate properties the Bedrock backend cannot map \
-         (only the stair family is mapped so far). Valid: a bare block id (e.g. \
+         (only {mapped} is mapped so far). Valid: a bare block id (e.g. \
          `minecraft:oak_planks`), or a `*_stairs` block. Fix: bind the member's mat_slot to a \
          property-free material, or compile with `--edition java`"
     )]
@@ -65,6 +66,8 @@ pub enum BedrockStateError {
         id: String,
         /// The entry's `key=value` pairs, comma-joined for the message.
         properties: String,
+        /// The block families this backend does map states for.
+        mapped: &'static str,
     },
     /// A stair carried a property value outside the Java domain (e.g.
     /// `facing=up`). The registry pack should reject these one layer up; a
@@ -87,26 +90,50 @@ pub enum BedrockStateError {
     /// (not ignored) so a future key cannot retroactively change the meaning
     /// of already-shipped output.
     #[error(
-        "stair `{id}` carries unknown blockstate `{key}`. Handled: facing, half, shape. Fix: \
-         remove it from the source blockstate, or compile with `--edition java`"
+        "stair `{id}` carries unknown blockstate `{key}`. Handled: {handled}. Fix: remove it \
+         from the source blockstate, or compile with `--edition java`"
     )]
     UnknownStairKey {
         /// Offending id verbatim.
         id: String,
         /// The unhandled property key.
         key: String,
+        /// Comma-joined keys this backend does handle.
+        handled: &'static str,
     },
 }
 
 /// Valid Java `facing` values, in the order the message lists them.
 const FACING_VALID: &str = "east, west, south, north";
 
+/// Block families [`translate_states`] has a state mapping for.
+///
+/// Carried on the error for the same reason [`STAIR_KEYS_HANDLED`] is: the
+/// day a second family is mapped, every message naming the set has to
+/// follow, and a set spelled at each of those places goes stale one at a
+/// time.
+const MAPPED_FAMILIES: &str = "the stair family";
+
+/// Stair property keys [`translate_stair`] reads, in the order its match
+/// arms take them.
+///
+/// Carried on the error rather than restated wherever one is rendered, the
+/// way [`FACING_VALID`] already is: a fourth key handled here has to reach
+/// every message that lists them, and a list spelled at each of those
+/// places goes stale one at a time.
+const STAIR_KEYS_HANDLED: &str = "facing, half, shape";
+
 /// Translate a Java palette entry's `(id, properties)` into its Bedrock
 /// `states` form.
 ///
 /// The `id` must already be a concrete `namespace:identifier` (the backend
-/// rejects abstract tokens separately); the family is keyed off the `_stairs`
-/// suffix on the identifier path.
+/// rejects abstract tokens separately). The whole stair family shares one
+/// Bedrock state vocabulary, so the mapping is keyed off the family rather
+/// than each material id — and off `cairn-lang-core`'s [`is_stair`], because
+/// core asks the same question when it decides whether a roof or eave may
+/// attach stair states to a material. A second copy here could disagree
+/// about an id core paints and this module then has to write, which is a
+/// disagreement with no symptom until a structure file reaches the game.
 ///
 /// # Errors
 ///
@@ -133,17 +160,9 @@ pub fn translate_states(
         Err(BedrockStateError::UnmappableBlock {
             id: id.to_owned(),
             properties: join_properties(properties),
+            mapped: MAPPED_FAMILIES,
         })
     }
-}
-
-/// A block is a stair when its identifier path ends in `_stairs`
-/// (`minecraft:oak_stairs`, `minecraft:dark_oak_stairs`, …). The whole stair
-/// family shares one Bedrock state vocabulary, so the mapping is keyed off the
-/// family suffix rather than each material id.
-fn is_stair(id: &str) -> bool {
-    let path = id.rsplit_once(':').map_or(id, |(_, p)| p);
-    path.ends_with("_stairs")
 }
 
 fn translate_stair(
@@ -176,6 +195,7 @@ fn translate_stair(
                 return Err(BedrockStateError::UnknownStairKey {
                     id: id.to_owned(),
                     key: other.to_owned(),
+                    handled: STAIR_KEYS_HANDLED,
                 });
             }
         }
@@ -314,6 +334,29 @@ mod tests {
         )
         .expect("stair");
         assert!(straight.degraded.is_empty());
+    }
+
+    #[test]
+    fn the_family_test_agrees_with_the_one_that_decided_to_paint_it() {
+        // `minecraft:mystairs` is the id the two plausible spellings of the
+        // stair rule disagree about: its path ends in `stairs` but not in
+        // `_stairs`. `cairn-lang-core` refuses to attach stair states to it,
+        // and this module has to refuse to translate them — a second copy of
+        // the rule that answered "stair" here would translate a blockstate
+        // core never intended to exist, with nothing between it and the
+        // written file.
+        //
+        // Pinned on behaviour rather than by calling the predicate, so the
+        // test still means something if the two ever stop sharing one.
+        let err = translate_states(
+            "minecraft:mystairs",
+            &stair_props("south", "top", "straight"),
+        )
+        .expect_err("not a stair");
+        assert!(matches!(
+            err,
+            BedrockStateError::UnmappableBlock { ref id, .. } if id == "minecraft:mystairs"
+        ));
     }
 
     #[test]

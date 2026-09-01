@@ -1,25 +1,34 @@
 # cairn-lang-wasm
 
-WebAssembly bindings for the Cairn compiler. Lets the [website
+WebAssembly bindings for the Cairn compiler. The intent is to let the [website
 playground](../../website/README.md) (and any other browser-hosted tool) parse, compile, and
 serialize Cairn sources without a server, sharing exactly the same
-[`cairn-lang-core`](../cairn-lang-core/README.md) implementation as the CLI.
+[`cairn-lang-core`](../cairn-lang-core/README.md) implementation as the CLI. None of that is
+wired up yet — see **Status**.
 
 ## Status
 
-Skeleton. The crate currently re-exports [`cairn_version`](src/lib.rs); the parser/compiler
-bindings will come online as `cairn-lang-core` lands them.
+Skeleton, and not yet buildable as WebAssembly. The crate holds one Rust function,
+[`cairn_version`](src/lib.rs), and nothing that exposes it to a JavaScript caller: there is no
+`wasm-bindgen` dependency, and the function carries neither `#[wasm_bindgen]` nor
+`#[unsafe(no_mangle)] extern "C"`. The parser/compiler bindings will come online as
+`cairn-lang-core` lands them, and the binding layer arrives with the first of them.
 
 ## Build
 
-The crate is configured as both `cdylib` and `rlib`, so the standard
-[`wasm-pack`](https://rustwasm.github.io/wasm-pack/) toolchain works:
+There is nothing to build for the browser yet. `wasm-pack` refuses a crate that does not depend
+on `wasm-bindgen`, and a plain `cargo build --target wasm32-unknown-unknown` produces a module
+with no callable export — `cairn_version` is a plain Rust symbol with no ABI a page can reach,
+whatever the linker emits alongside it. The `cdylib` in `Cargo.toml` is the shape the crate will
+need, not a shape it can be used in today.
+
+When the binding layer lands, the command will be:
 
 ```sh
 wasm-pack build crates/cairn-lang-wasm --target web --release
 ```
 
-The artifact is consumed by the website playground; integration is documented in
+and the artifact will be consumed by the website playground; integration is documented in
 [`website/README.md`](../../website/README.md) once it is bootstrapped.
 
 ## API shape

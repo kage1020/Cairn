@@ -32,7 +32,32 @@ fn run_check(args: &[&str]) -> std::process::Output {
 }
 
 #[test]
-fn cli_1_clean_example_exits_zero_with_empty_stdout() {
+fn text_diagnostics_go_where_every_other_subcommand_sends_them() {
+    // `lower`, `info`, `compile` and `synth` all report on stderr, so
+    // `cairn check f.crn > out` was the one build command whose findings a
+    // redirect could swallow: stdout carried them, and a pipeline capturing
+    // stdout for something else saw nothing at all.
+    //
+    // Only the text format moves. `--format json` is the machine payload
+    // and belongs on stdout, where a consumer redirects it deliberately —
+    // pinned separately below.
+    let path = fixtures_dir().join("duplicate.crn");
+    let out = run_check(&[path.to_str().unwrap()]);
+    assert_eq!(out.status.code(), Some(1));
+    let stdout = String::from_utf8(out.stdout).expect("utf-8");
+    let stderr = String::from_utf8(out.stderr).expect("utf-8");
+    assert!(
+        stdout.is_empty(),
+        "text diagnostics must not reach stdout, got: {stdout}",
+    );
+    assert!(
+        stderr.contains("E_DUPLICATE_SIZE"),
+        "stderr should carry the diagnostics, got: {stderr}",
+    );
+}
+
+#[test]
+fn cli_1_clean_example_exits_zero_and_says_nothing_on_either_stream() {
     let path = examples_dir().join("cottage.crn");
     let out = run_check(&[path.to_str().unwrap()]);
     assert!(
@@ -45,6 +70,13 @@ fn cli_1_clean_example_exits_zero_with_empty_stdout() {
         stdout.trim().is_empty(),
         "clean example should produce no stdout, got: {stdout}",
     );
+    // The load-bearing half now that diagnostics live on stderr: a clean
+    // input has nothing to report anywhere.
+    let stderr = String::from_utf8(out.stderr).expect("utf-8");
+    assert!(
+        stderr.trim().is_empty(),
+        "clean example should produce no stderr, got: {stderr}",
+    );
 }
 
 #[test]
@@ -52,21 +84,21 @@ fn cli_2_broken_fixture_exits_one_with_position_anchored_output() {
     let path = fixtures_dir().join("duplicate.crn");
     let out = run_check(&[path.to_str().unwrap()]);
     assert_eq!(out.status.code(), Some(1));
-    let stdout = String::from_utf8(out.stdout).expect("utf-8");
+    let reported = String::from_utf8(out.stderr).expect("utf-8");
     assert!(
-        stdout.contains("E_DUPLICATE_SIZE"),
-        "expected E_DUPLICATE_SIZE in output, got: {stdout}",
+        reported.contains("E_DUPLICATE_SIZE"),
+        "expected E_DUPLICATE_SIZE in output, got: {reported}",
     );
     assert!(
-        stdout.contains("E_DUPLICATE_ARG"),
-        "expected E_DUPLICATE_ARG in output, got: {stdout}",
+        reported.contains("E_DUPLICATE_ARG"),
+        "expected E_DUPLICATE_ARG in output, got: {reported}",
     );
     assert!(
-        stdout.contains("E_DUPLICATE_ID"),
-        "expected E_DUPLICATE_ID in output, got: {stdout}",
+        reported.contains("E_DUPLICATE_ID"),
+        "expected E_DUPLICATE_ID in output, got: {reported}",
     );
     // gcc-style: `<file>:<line>:<col>: error[<CODE>]: <msg>` on every line.
-    for line in stdout.lines().filter(|l| l.contains("E_")) {
+    for line in reported.lines().filter(|l| l.contains("E_")) {
         assert!(
             line.contains(':'),
             "diagnostic line should be gcc-style, got: {line}",
@@ -103,8 +135,8 @@ fn cli_4_clean_fixture_json_output_is_empty_array() {
 fn cli_5_parse_failure_exits_one_with_parse_style_message() {
     // A file the parser rejects must still hand the user a gcc-style
     // location, just like `cairn parse` does today.
-    let bad_path = tempfile_with_contents("@unknown_directive nope\n");
-    let out = run_check(&[bad_path.to_str().unwrap()]);
+    let bad = tempfile_with_contents("directive", "@unknown_directive nope\n");
+    let out = run_check(&[bad.arg()]);
     assert_eq!(out.status.code(), Some(1));
     let stderr = String::from_utf8(out.stderr).expect("utf-8");
     assert!(
@@ -113,21 +145,48 @@ fn cli_5_parse_failure_exits_one_with_parse_style_message() {
     );
 }
 
+/// A parse error at the end of a line names that line, in the output the
+/// user actually reads.
+///
+/// The layer below is covered by `cairn-lang-core`'s `line_positions`
+/// tests; this one exists because the file the CLI is handed is the one an
+/// editor wrote, terminator and all. The whole of `def foo bar\n` is on
+/// line 1, and the gcc-style prefix used to read `:2:1` — sending a reader,
+/// or a model repairing its own output, to a line holding none of it.
+#[test]
+fn cli_end_of_line_parse_error_names_the_line_that_has_it() {
+    for (label, source) in [
+        ("lf", "def foo bar\n"),
+        ("crlf", "def foo bar\r\n"),
+        ("cr", "def foo bar\r"),
+        ("none", "def foo bar"),
+    ] {
+        let file = tempfile_with_contents(label, source);
+        let out = run_check(&[file.arg()]);
+        assert_eq!(out.status.code(), Some(1), "{label}");
+        let stderr = String::from_utf8(out.stderr).expect("utf-8");
+        assert!(
+            stderr.contains(":1:12: "),
+            "{label}: expected the error at 1:12, got: {stderr}",
+        );
+    }
+}
+
 #[test]
 fn cli_unknown_keyword_fixture_lists_known_keywords_in_a_note() {
     let path = fixtures_dir().join("unknown_keyword.crn");
     let out = run_check(&[path.to_str().unwrap()]);
     assert_eq!(out.status.code(), Some(1));
-    let stdout = String::from_utf8(out.stdout).expect("utf-8");
-    assert!(stdout.contains("E_UNKNOWN_KEYWORD"));
+    let reported = String::from_utf8(out.stderr).expect("utf-8");
+    assert!(reported.contains("E_UNKNOWN_KEYWORD"));
     assert!(
-        stdout.contains("note:") && stdout.contains("floor"),
-        "expected a known-keywords note, got: {stdout}",
+        reported.contains("note:") && reported.contains("floor"),
+        "expected a known-keywords note, got: {reported}",
     );
     // The informational note must not re-print the same `file:L:C:`
     // prefix as the primary diagnostic — that was the bug fixed when
     // `DiagnosticNote.span` became `Option<Span>`.
-    let primary_prefix = stdout
+    let primary_prefix = reported
         .lines()
         .find(|l| l.contains("E_UNKNOWN_KEYWORD"))
         .expect("expected a primary line")
@@ -138,8 +197,8 @@ fn cli_unknown_keyword_fixture_lists_known_keywords_in_a_note() {
         })
         .expect("expected gcc-style prefix");
     assert!(
-        !stdout.contains(&format!(":{primary_prefix}:   note:")),
-        "informational note must not duplicate the primary's file:L:C prefix, got: {stdout}",
+        !reported.contains(&format!(":{primary_prefix}:   note:")),
+        "informational note must not duplicate the primary's file:L:C prefix, got: {reported}",
     );
 }
 
@@ -173,7 +232,7 @@ fn cli_json_output_carries_line_and_col_for_every_diagnostic() {
             "code should be the E_-prefixed string, got: {}",
             entry["code"],
         );
-        // AC3 from issue #40: codes without a structured payload must
+        // Codes without a structured payload must
         // omit the `data` key entirely so the JSON contract stays
         // additive for consumers that pin a fixed key set. The
         // `duplicate.crn` fixture only triggers `E_DUPLICATE_*` codes,
@@ -213,19 +272,44 @@ fn cli_type_mismatch_fixture_reports_both_label_and_size_codes() {
     let path = fixtures_dir().join("type_mismatch.crn");
     let out = run_check(&[path.to_str().unwrap()]);
     assert_eq!(out.status.code(), Some(1));
-    let stdout = String::from_utf8(out.stdout).expect("utf-8");
-    assert!(stdout.contains("E_TYPE_MISMATCH_LABEL"));
-    assert!(stdout.contains("E_TYPE_MISMATCH_SIZE"));
+    let reported = String::from_utf8(out.stderr).expect("utf-8");
+    assert!(reported.contains("E_TYPE_MISMATCH_LABEL"));
+    assert!(reported.contains("E_TYPE_MISMATCH_SIZE"));
 }
 
-/// Write a transient `.crn` file under the system temp dir, returning its
-/// path. Used by [`cli_5_parse_failure_exits_one_with_parse_style_message`]
-/// so the test does not depend on a checked-in fixture intentionally
-/// broken at the parse layer.
-fn tempfile_with_contents(contents: &str) -> PathBuf {
+/// Write a transient `.crn` file under the system temp dir, removing it
+/// when the returned handle drops. Lets a test depend on a source that is
+/// intentionally broken at the parse layer without checking one in, and
+/// without leaving one behind on every run.
+///
+/// `label` distinguishes concurrent callers: the harness runs these tests
+/// as threads of one process, so the pid alone would have two of them
+/// writing and reading the same path.
+fn tempfile_with_contents(label: &str, contents: &str) -> TempSource {
     let mut path = std::env::temp_dir();
     let pid = std::process::id();
-    path.push(format!("cairn-cli-check-{pid}.crn"));
+    path.push(format!("cairn-cli-check-{pid}-{label}.crn"));
     std::fs::write(&path, contents).expect("write tempfile");
-    path
+    TempSource { path }
+}
+
+/// A `.crn` file that exists for the length of one test.
+struct TempSource {
+    /// Where it was written; `Drop` removes it.
+    path: PathBuf,
+}
+
+impl TempSource {
+    /// The path as the CLI wants it on its argument list.
+    fn arg(&self) -> &str {
+        self.path.to_str().expect("temp path is utf-8")
+    }
+}
+
+impl Drop for TempSource {
+    fn drop(&mut self) {
+        // Best effort: a test that has already failed should report that
+        // failure, not a cleanup error on top of it.
+        let _ = std::fs::remove_file(&self.path);
+    }
 }

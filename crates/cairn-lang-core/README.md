@@ -35,8 +35,9 @@ overview](https://cairn.kage1020.com/development/).
 
 ## Versioning
 
-`cairn-lang-core` exposes [`CAIRN_VERSION`] (`"2026.7"`), the date-based version of the Cairn release
-this build belongs to. This is **not** the Minecraft target version; see
+`cairn-lang-core` exposes [`CAIRN_VERSION`], the date-based version of the Cairn release this build
+belongs to, read from the crate's own package version so that it cannot fall behind the workspace.
+This is **not** the Minecraft target version; see
 [versioning-editions](https://cairn.kage1020.com/spec/versioning-editions/) for how the two axes are kept separate.
 
 ## License

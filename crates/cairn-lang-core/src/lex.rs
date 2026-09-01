@@ -7,12 +7,19 @@
 //!
 //! Line endings: `\n`, `\r\n`, and lone `\r` are all accepted as a single
 //! logical newline so files written on Windows (`core.autocrlf=true`) lex the
-//! same as files written on Linux.
+//! same as files written on Linux. The rule itself lives in
+//! [`crate::lines`], shared with every layer that resolves a byte offset
+//! into a `line:column` after the fact — a `Newline` here and a diagnostic
+//! there have to name the same row.
 //!
 //! Indent/Dedent asymmetry: only one `Indent` token may be emitted per indent
-//! step (the lexer rejects multi-level jumps as `OddIndent`), but a single
+//! step (the lexer rejects multi-level jumps as `IndentJump`), but a single
 //! dedented line emits *one `Dedent` per level closed*. Parsers can therefore
 //! rely on `Dedent` counts to know how many scopes ended on that line.
+//!
+//! A byte-order mark at the very start of the file is skipped, since that
+//! is what a default Windows editor writes and it is not part of the text.
+//! One anywhere else is an ordinary stray character.
 //!
 //! Comments (`#` to end-of-line), blank lines, and trailing whitespace are
 //! discarded silently; everything else either becomes a token or fails with a
@@ -25,6 +32,14 @@ use crate::error::{IntContext, LexError, Position, Span};
 /// zero sentinel is never popped. The `expect` calls below document that
 /// invariant rather than hiding it behind an `unwrap_or(&0)` default.
 const INDENT_STACK_NONEMPTY: &str = "indent_stack invariant: bottom 0 sentinel is never popped";
+
+/// Leading spaces per indentation level.
+///
+/// Named because the number appears in three roles that a bare `2` does
+/// not distinguish: the divisor turning a space count into a level, the
+/// parity a width must satisfy, and the multiplier turning a level back
+/// into the width a diagnostic asks for.
+const SPACES_PER_LEVEL: u32 = 2;
 
 /// One lexical token.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -150,14 +165,32 @@ struct Lexer<'src> {
     out: Vec<Token>,
 }
 
+/// U+FEFF, the byte-order mark, as it appears in UTF-8.
+const BOM: &str = "\u{feff}";
+
 impl<'src> Lexer<'src> {
     fn new(src: &'src str) -> Self {
+        // A leading BOM is metadata about the encoding, not text. Skipped
+        // by advancing `pos` rather than by trimming `src`, so every span
+        // stays an offset into the string the caller handed us — an
+        // editor highlighting a diagnostic indexes the same bytes.
+        //
+        // `col` counts it, though it occupies no column an author can
+        // see. Not counting it would be the friendlier number in
+        // isolation, but it is not the only one reported: every
+        // span-derived position — `LineStarts::position` here,
+        // `LineIndex` in the LSP — resolves a column by counting
+        // characters from the line's start, and both count the mark.
+        // A lexer that skipped it would put its own errors one column
+        // left of every other layer's, on the first line of exactly the
+        // files a Windows editor produces.
+        let has_bom = src.starts_with(BOM);
         Self {
             src,
             bytes: src.as_bytes(),
-            pos: 0,
+            pos: if has_bom { BOM.len() } else { 0 },
             line: 1,
-            col: 1,
+            col: if has_bom { 2 } else { 1 },
             indent_stack: vec![0],
             out: Vec::new(),
         }
@@ -202,20 +235,27 @@ impl<'src> Lexer<'src> {
                 return Ok(());
             }
 
-            if spaces % 2 != 0 {
+            if spaces % SPACES_PER_LEVEL != 0 {
                 return Err(LexError::OddIndent {
                     position: start_position,
                     got: spaces,
                 });
             }
-            let level = spaces / 2;
+            let level = spaces / SPACES_PER_LEVEL;
             let current = *self.indent_stack.last().expect(INDENT_STACK_NONEMPTY);
             if level > current {
                 // Only allow one level of indent increase at a time.
+                //
+                // Its own variant rather than `OddIndent`: 4 spaces is a
+                // multiple of 2, so "indentation must be a multiple of 2"
+                // describes a rule the line already satisfies. `expected`
+                // carries the one width that opens exactly one level from
+                // here, which is what the author has to write.
                 if level != current + 1 {
-                    return Err(LexError::OddIndent {
+                    return Err(LexError::IndentJump {
                         position: start_position,
                         got: spaces,
+                        expected: (current + 1) * SPACES_PER_LEVEL,
                     });
                 }
                 self.indent_stack.push(level);
@@ -266,8 +306,17 @@ impl<'src> Lexer<'src> {
                 return Ok(());
             };
             if b == b'\n' || b == b'\r' {
+                // Recorded before the break is consumed. A `Newline` is
+                // where a line *ends*, and the parser reports "expected X,
+                // got end of line" at the position of the token it stopped
+                // at — so a position taken after the break sends the reader
+                // to the first column of the next line, which holds none of
+                // the text that is wrong and, after the last break in a
+                // file, holds no text at all.
+                let start = self.pos;
+                let position = self.position();
                 self.consume_line_break();
-                self.push_synthetic(TokenKind::Newline);
+                self.push_at(TokenKind::Newline, start..self.pos, position);
                 return Ok(());
             }
             if b == b'#' {
@@ -417,6 +466,29 @@ impl<'src> Lexer<'src> {
             }
             let w_str = &self.src[start..lexeme_end];
             let h_str = &self.src[h_start..self.pos];
+            // A `Size` holds two extents. If the run continues into a
+            // third (`2x2x9`) or into a word (`2x2y`), the author wrote
+            // something this token cannot carry, and splitting it into a
+            // `Size` plus an identifier reports the wrong thing in the
+            // wrong place: the identifier lands among the parser's
+            // positional values, where `check::positional` eventually
+            // reports it as a stray argument — a true statement about a
+            // token the author never wrote, pointing past the literal
+            // that produced it. In a declaration header there is no
+            // positional list at all, so the parser fails at the end of
+            // the line instead.
+            //
+            // Refusing here also reaches the consumers that never run
+            // `check`: the tree-sitter grammar, an editor's scan path, a
+            // formatter. `check::positional` is the only guard today, and
+            // it sits downstream of all of them.
+            if let Some(found) = self.peek().filter(|b| is_ident_continue(*b)) {
+                return Err(LexError::TrailingSizeSegment {
+                    position,
+                    literal: self.src[start..self.pos].to_owned(),
+                    found: char::from(found),
+                });
+            }
             let w = w_str.parse::<u32>().map_err(|err| LexError::InvalidInt {
                 position,
                 context: IntContext::SizeWidth,
@@ -496,25 +568,18 @@ impl<'src> Lexer<'src> {
 
     /// Consume one line break (`\n`, `\r\n`, or lone `\r`) if present and bump
     /// the line counter. Returns `true` if any input was consumed.
+    ///
+    /// Which byte sequences count is [`crate::lines::terminator_len`]'s to
+    /// say, so that this lexer and every layer that resolves a byte offset
+    /// into a `line:column` after the fact split the source the same way.
     fn consume_line_break(&mut self) -> bool {
-        match self.peek() {
-            Some(b'\r') => {
-                self.pos += 1;
-                if self.peek() == Some(b'\n') {
-                    self.pos += 1;
-                }
-                self.line += 1;
-                self.col = 1;
-                true
-            }
-            Some(b'\n') => {
-                self.pos += 1;
-                self.line += 1;
-                self.col = 1;
-                true
-            }
-            _ => false,
-        }
+        let Some(len) = crate::lines::terminator_len(self.src, self.pos) else {
+            return false;
+        };
+        self.pos += len;
+        self.line += 1;
+        self.col = 1;
+        true
     }
 
     fn position(&self) -> Position {

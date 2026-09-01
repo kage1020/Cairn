@@ -23,33 +23,63 @@
 //! - **Wall top.** The lowest roof voxel sits at `y = wall_top + 1`.
 //!   `wall_top` is the max `height=` across walls members; without
 //!   walls, the roof starts at `y = 1`.
-//! - **Stair facing.** Sloped roof voxels are `minecraft:spruce_stairs`
-//!   with `facing` pointed *toward the ridge* (the riser's upper-step
-//!   side ends up on the inward side), `half=bottom`. Apex caps reuse
-//!   the slope facings with `half=top` so the upside-down stair closes
-//!   the peak. Per-theme roof species follow with the registry pack.
-//! - **Material id.** `gable`, `shed`, and `hip` hardcode
-//!   `minecraft:spruce_stairs` (see [`STAIR_BASE_ID`]); `flat` hardcodes
-//!   [`FLAT_BASE_ID`]. A `mat_slot=` binding that resolves to anything
-//!   else fires a `W_DEFERRED_MEMBER` warning in `lower.rs` so the user's
-//!   intent is not silently replaced.
+//! - **Stair facing.** Sloped roof voxels take `facing` pointed *toward
+//!   the ridge* (the riser's upper-step side ends up on the inward side)
+//!   and `half=bottom`. Apex caps reuse the slope facings with `half=top`
+//!   so the upside-down stair closes the peak. Which stair species wears
+//!   them is the `mat_slot=` binding's to choose — see the next bullet.
+//! - **Material id.** A `mat_slot=` binding chooses the species. `gable`,
+//!   `shed`, and `hip` require a member of the stair family ([`is_stair`])
+//!   because they attach `facing` / `half` / `shape` to whatever they
+//!   paint, and those states do not exist on a whole block; a binding
+//!   outside the family fires `W_DEFERRED_MEMBER` in `lower.rs` and the
+//!   roof falls back to [`STAIR_BASE_ID`] rather than stapling stair
+//!   states onto an id that has none. `flat` attaches no states and so
+//!   constrains nothing, falling back to [`FLAT_BASE_ID`] only when there
+//!   is no binding to read.
 
 use indexmap::IndexMap;
 
 use super::BlockState;
 use super::openings::WallSide;
 
-/// Vanilla stair id used by `gable`, `shed`, and `hip` roofs. Themed
-/// material slots resolve to this id via `slot roof -> @spruce_stairs` in
-/// the cottage example; per-species roofs land with the registry pack.
-/// `lower.rs` emits a `W_DEFERRED_MEMBER` warning when a `mat_slot=`
-/// binding resolves to a different id, so the user is not silently
-/// overridden.
+/// Stair id a sloped roof falls back to when its `mat_slot=` binds nothing
+/// usable.
+///
+/// Not a ceiling on what a roof may be made of: any member of the stair
+/// family binds, and the registry pack ships four roof species that do
+/// (`roof.dark_wood` → `dark_oak_stairs`, and so on). What the fallback
+/// covers is a roof with no `mat_slot=` at all, and one whose binding
+/// [`is_stair`] refuses — see `lower.rs`.
 pub const STAIR_BASE_ID: &str = "minecraft:spruce_stairs";
 
-/// Vanilla planks id used by `flat` roofs. Same warn-on-mismatch contract
-/// as [`STAIR_BASE_ID`].
+/// Planks id a `flat` roof falls back to when it has no `mat_slot=`.
+///
+/// Unlike [`STAIR_BASE_ID`] this constrains nothing. A flat roof is one
+/// layer of whole blocks with no blockstate attached, so every id is as
+/// valid as this one.
 pub const FLAT_BASE_ID: &str = "minecraft:spruce_planks";
+
+/// Whether `id` names a member of the stair family.
+///
+/// The whole family shares one blockstate vocabulary — `facing`, `half`,
+/// `shape` — which is what makes the family, rather than any one species,
+/// the right unit for a geometry pass to require.
+///
+/// Two rules, doing different work. The `_stairs` suffix is what rejects
+/// `mystairs`. Reading it off the *path* rather than the whole identifier is
+/// what rejects `weird_stairs:cobblestone`, where the family word sits in
+/// the namespace and the block is not a stair at all.
+///
+/// One owner on purpose. `cairn-lang-formats` asks the same question when
+/// it translates a blockstate for Bedrock, and two copies of this rule
+/// could disagree about an id that this crate paints and that crate then
+/// has to write.
+#[must_use]
+pub fn is_stair(id: &str) -> bool {
+    let path = id.rsplit_once(':').map_or(id, |(_, path)| path);
+    path.ends_with("_stairs")
+}
 
 /// One of the four supported roof kinds.
 ///
@@ -97,14 +127,22 @@ impl RoofKind {
         }
     }
 
-    /// Canonical block id this kind voxelises into. Used by `lower.rs`
-    /// to check a `mat_slot=` binding against the kind's hardcoded
-    /// material.
+    /// Block id this kind paints when no `mat_slot=` binding supplies one.
     #[must_use]
     pub fn base_block_id(self) -> &'static str {
         match self {
             Self::Gable | Self::Shed | Self::Hip => STAIR_BASE_ID,
             Self::Flat => FLAT_BASE_ID,
+        }
+    }
+
+    /// Whether this kind attaches stair blockstates to the block it paints,
+    /// and therefore needs one from the stair family ([`is_stair`]).
+    #[must_use]
+    pub fn paints_stairs(self) -> bool {
+        match self {
+            Self::Gable | Self::Shed | Self::Hip => true,
+            Self::Flat => false,
         }
     }
 }
@@ -181,13 +219,15 @@ pub enum StairFace {
     /// x-ridge, `+x` for a z-ridge). `half=bottom`, facing toward the
     /// ridge from the other side.
     HighSlope,
-    /// Apex cap whose facing matches the low slope (used as the single
-    /// cap on odd-span apex rows and as the low-side cap on even-span
-    /// apex rows). `half=top`.
+    /// The single cap on an apex row where the two slopes converge —
+    /// an odd short span. Keeps the low slope's facing, which is the
+    /// facing `spec/compilation.md` §4.3 picks for it. `half=top`.
+    Apex,
+    /// Low-side cap of an even-span apex pair, facing *away* from the
+    /// ridge. `half=top`.
     ApexLow,
-    /// Apex cap whose facing matches the high slope (only emitted on
-    /// even-span apex rows so the closing pair forms an upside-down peak).
-    /// `half=top`.
+    /// High-side cap of an even-span apex pair, facing away from the
+    /// ridge on the other side. `half=top`.
     ApexHigh,
 }
 
@@ -237,24 +277,31 @@ pub fn gable_ridge_axis(roof_w: u32, roof_h: u32) -> Axis {
 /// clone the earlier shape forced.
 #[must_use]
 pub fn gable_stair_state(ridge_axis: Axis, face: StairFace) -> BlockState {
-    // Apex caps reuse the slope facings: an `ApexLow` cap keeps the
-    // low-slope direction (`south` for x-ridge), an `ApexHigh` keeps the
-    // high-slope direction (`north`). Pairing apex with the slope it
-    // covers keeps the cap visually continuous with the slope below it,
-    // and `half=top` (set below) flips it upside-down so the triangle
-    // closes.
+    // A `half=top` stair fills the upper half of its voxel plus the lower
+    // quarter on its facing side. An even-span apex is a *pair*
+    // straddling the ridge, so each of the two faces away from it and
+    // puts that quarter on the outer face; facing them inward instead
+    // leaves the quarter empty there — a 0.5 x 0.5 undercut running the
+    // length of the roof along both outer faces.
+    //
+    // A converged apex is one cell wide, so both of its faces are outer
+    // ones and a stair can only serve one. The void is unavoidable
+    // there, and §4.3 settles which side keeps it by naming the low
+    // slope's facing rather than by weighing the two.
     let facing = match (ridge_axis, face) {
         // x-ridge: short axis is z. Low slope is on -z; its riser faces
         // toward +z (south) — the upper-step side ends up on the inward
-        // side (toward the ridge).
-        (Axis::X, StairFace::LowSlope | StairFace::ApexLow) => Cardinal::South,
-        (Axis::X, StairFace::HighSlope | StairFace::ApexHigh) => Cardinal::North,
+        // side (toward the ridge). `ApexHigh` reaches the same `south`
+        // from the opposite premise: it sits on +z, and +z facing
+        // outward is south too.
+        (Axis::X, StairFace::LowSlope | StairFace::Apex | StairFace::ApexHigh) => Cardinal::South,
+        (Axis::X, StairFace::HighSlope | StairFace::ApexLow) => Cardinal::North,
         // z-ridge: short axis is x. Mirror the same rule onto the x axis.
-        (Axis::Z, StairFace::LowSlope | StairFace::ApexLow) => Cardinal::East,
-        (Axis::Z, StairFace::HighSlope | StairFace::ApexHigh) => Cardinal::West,
+        (Axis::Z, StairFace::LowSlope | StairFace::Apex | StairFace::ApexHigh) => Cardinal::East,
+        (Axis::Z, StairFace::HighSlope | StairFace::ApexLow) => Cardinal::West,
     };
     let half = match face {
-        StairFace::ApexLow | StairFace::ApexHigh => "top",
+        StairFace::Apex | StairFace::ApexLow | StairFace::ApexHigh => "top",
         StairFace::LowSlope | StairFace::HighSlope => "bottom",
     };
     stair_state(STAIR_BASE_ID, facing, half, StairShape::Straight)
@@ -287,55 +334,43 @@ pub fn gable_voxels(roof_w: u32, roof_h: u32, wall_top: u32) -> Vec<GableVoxel> 
     let mut out: Vec<GableVoxel> = Vec::new();
     for layer in 0..layers {
         let y = wall_top.saturating_add(1).saturating_add(layer);
-        let is_apex = layer + 1 == layers;
         let low_index = layer;
         let high_index = span.saturating_sub(1).saturating_sub(layer);
+        let converged = low_index == high_index;
+        // Layer 0 sits directly on the wall top, so it is a slope
+        // (`half=bottom`) whatever else it is. A roof one layer tall —
+        // a short span of 1 or 2 — is both the first layer and the apex,
+        // and capping it instead of seating it left the whole course
+        // `half=top`: a half-block slit running the length of the roof
+        // between the wall and the stone above it. An apex cap only
+        // closes a peak something below it has already raised.
+        let is_apex = layer > 0 && layer + 1 == layers;
 
-        if is_apex && low_index == high_index {
-            // Odd-span apex: the two slopes converge on a single row.
-            emit_gable_row(
-                &mut out,
-                ridge_axis,
-                long_axis_len,
-                y,
-                low_index,
-                StairFace::ApexLow,
-            );
-        } else if is_apex {
-            // Even-span apex: the slopes meet at two adjacent rows. Emit
-            // both as half=top stairs facing outward so the cap closes.
-            emit_gable_row(
-                &mut out,
-                ridge_axis,
-                long_axis_len,
-                y,
-                low_index,
-                StairFace::ApexLow,
-            );
-            emit_gable_row(
-                &mut out,
-                ridge_axis,
-                long_axis_len,
-                y,
-                high_index,
-                StairFace::ApexHigh,
-            );
+        if converged {
+            // The two slopes meet on one row, so it is emitted once. At
+            // the apex that is §4.3's single cap; on layer 0 it is a
+            // short span of 1 — one row of slope, with no ridge to
+            // straddle.
+            let face = if is_apex {
+                StairFace::Apex
+            } else {
+                StairFace::LowSlope
+            };
+            emit_gable_row(&mut out, ridge_axis, long_axis_len, y, low_index, face);
         } else {
-            emit_gable_row(
-                &mut out,
-                ridge_axis,
-                long_axis_len,
-                y,
-                low_index,
-                StairFace::LowSlope,
-            );
+            let (low_face, high_face) = if is_apex {
+                (StairFace::ApexLow, StairFace::ApexHigh)
+            } else {
+                (StairFace::LowSlope, StairFace::HighSlope)
+            };
+            emit_gable_row(&mut out, ridge_axis, long_axis_len, y, low_index, low_face);
             emit_gable_row(
                 &mut out,
                 ridge_axis,
                 long_axis_len,
                 y,
                 high_index,
-                StairFace::HighSlope,
+                high_face,
             );
         }
     }
@@ -590,7 +625,14 @@ pub fn hip_voxels(roof_w: u32, roof_h: u32, wall_top: u32) -> Vec<HipVoxel> {
     let mut out: Vec<HipVoxel> = Vec::new();
     for layer in 0..layers {
         let y = wall_top.saturating_add(1).saturating_add(layer);
-        let is_apex = layer + 1 == layers;
+        // Layer 0 seats on the wall top and is always the inset frame,
+        // even when it is also the last layer — a short span of 1 or 2
+        // gives the roof a single course, and capping that course
+        // instead of framing it dropped the `outer_*` corners and the
+        // per-edge facings and left every cell `half=top`, a half-block
+        // slit running the whole perimeter between the wall and the
+        // roof above it.
+        let is_apex = layer > 0 && layer + 1 == layers;
 
         // After insetting by `layer` on every side, the remaining
         // interior runs from `[layer, roof_w-1-layer]` on x and the same
@@ -660,10 +702,14 @@ pub fn hip_voxels(roof_w: u32, roof_h: u32, wall_top: u32) -> Vec<HipVoxel> {
 
 fn emit_hip_frame(out: &mut Vec<HipVoxel>, lo_x: u32, hi_x: u32, lo_z: u32, hi_z: u32, y: u32) {
     // Corners go first so the iteration order is stable and palette
-    // intern order is deterministic. When the frame has collapsed to a
-    // single line on one axis the corner cells still emit (the four
-    // corners coincide with the only two slope cells; the last write at
-    // a given grid position wins, so corner shape ends up applied).
+    // intern order is deterministic. Each of the four is guarded against
+    // the axis it would collapse onto, and the row / column loops start
+    // one cell inside the corners, so no position is emitted twice however
+    // far the frame has collapsed — a frame one cell wide emits its north
+    // and south rows and nothing else. The lowering relies on that: a
+    // member writing one cell to two different blocks would be reported
+    // against itself, which is a finding about two source lines and has
+    // nothing to say about a generator.
     out.push(HipVoxel {
         pos: (lo_x, y, lo_z),
         face: HipFace::CornerNorthWest,
@@ -836,10 +882,16 @@ mod tests {
         let apex_row: Vec<&GableVoxel> = voxels.iter().filter(|v| v.pos.1 == 9).collect();
         assert_eq!(apex_row.len(), 11);
         for v in &apex_row {
-            assert_eq!(v.face, StairFace::ApexLow);
+            assert_eq!(v.face, StairFace::Apex);
             assert_eq!(v.pos.2, 4);
         }
-        let state = gable_stair_state(Axis::X, StairFace::ApexLow);
+        // A converged cap is one cell wide, so both of its faces are outer
+        // ones and a stair serves only one. `spec/compilation.md` §4.3
+        // settles it on the low slope's facing, which is the reason it is
+        // a face of its own rather than the even-span pair's low half —
+        // the pair's outward rule has two sides to choose between and
+        // this has none to spare.
+        let state = gable_stair_state(Axis::X, StairFace::Apex);
         assert_eq!(state.properties.get("half").unwrap(), "top");
         assert_eq!(state.properties.get("facing").unwrap(), "south");
     }
@@ -1099,6 +1151,51 @@ mod tests {
             assert_eq!(*y, 5, "flat layer sits at wall_top + 1");
             assert!(*x < 11 && *z < 9);
         }
+    }
+
+    #[test]
+    fn the_stair_family_is_keyed_off_the_identifier_path() {
+        // A namespace must not be able to smuggle a non-stair past the
+        // geometry pass, and a bare id with no namespace has to answer the
+        // same question as a namespaced one — a roof that accepted
+        // `mystairs` would put `facing` / `half` / `shape` onto a block
+        // that has none of them.
+        for id in [
+            "minecraft:oak_stairs",
+            "minecraft:dark_oak_stairs",
+            "oak_stairs",
+            "create:brass_stairs",
+        ] {
+            assert!(is_stair(id), "`{id}` is a stair");
+        }
+        for id in [
+            "minecraft:cobblestone",
+            "minecraft:stairs",
+            "mystairs",
+            "minecraft:oak_stairs_slab",
+            // The case path-keying exists for: the family word is in the
+            // namespace and the block is not a stair at all.
+            "weird_stairs:cobblestone",
+            "create:cogwheel",
+            "",
+        ] {
+            assert!(!is_stair(id), "`{id}` is not a stair");
+        }
+    }
+
+    #[test]
+    fn only_the_kinds_that_attach_states_require_a_stair() {
+        for kind in [RoofKind::Gable, RoofKind::Shed, RoofKind::Hip] {
+            assert!(kind.paints_stairs(), "{kind:?}");
+            assert!(
+                is_stair(kind.base_block_id()),
+                "{kind:?}: its own fallback must pass the check it imposes",
+            );
+        }
+        assert!(
+            !RoofKind::Flat.paints_stairs(),
+            "a flat deck attaches no states, so every block is as valid as another",
+        );
     }
 
     #[test]
