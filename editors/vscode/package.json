@@ -2,7 +2,7 @@
   "name": "cairn-lang",
   "displayName": "Cairn",
   "description": "Language support for Cairn (.crn) — a Minecraft build description language.",
-  "version": "2026.8.2",
+  "version": "2026.9.0",
   "publisher": "kage1020",
   "license": "Apache-2.0",
   "repository": {
