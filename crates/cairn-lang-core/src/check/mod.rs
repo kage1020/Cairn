@@ -111,9 +111,10 @@ mod tests {
         /// one of these — and the commands that report them build them
         /// from the [`crate::error::ParseError`] instead.
         Parser,
-        /// `duplicate` / `keyword_allowlist` / `member_scope` /
-        /// `connect_arity` / `nesting` / `positional` / `requires` /
-        /// `truth` / `type_mismatch`, run directly by [`check`].
+        /// `duplicate` / `keyword_allowlist` / `arguments` / `material` /
+        /// `member_scope` / `connect_arity` / `nesting` / `positional` /
+        /// `requires` / `truth` / `type_mismatch`, run directly by
+        /// [`check`].
         Syntactic,
         /// `crate::resolve::resolve`, whose diagnostics [`check`] merges in.
         Resolver,

@@ -141,10 +141,12 @@ const SYNTACTIC_FIXTURES: &[(&str, Source)] = &[
         ),
     ),
     (
-        // The member names no material at all, so it paints nothing. The
-        // one shape in this table whose artifact comes out *empty* rather
-        // than wrong, which is why it has to be refused before the build
-        // commands run rather than noticed in the dump.
+        // The member names no material at all, so it paints nothing: an
+        // artifact that comes out *empty* rather than wrong, which is why
+        // it has to be refused before the build commands emit anything
+        // rather than noticed in the dump. (`run_lower` lowers first and
+        // merges the check findings in afterwards; what is ordered is the
+        // output, not the passes.)
         "E_MISSING_MATERIAL",
         Source::WithPrologue("struct s size=5x5\n  walls class=outer height=3\n"),
     ),

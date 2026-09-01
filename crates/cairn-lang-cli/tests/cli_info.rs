@@ -175,7 +175,7 @@ fn info_7_empty_editions_value_is_rejected_with_exit_two() {
 fn info_8_file_without_requires_defaults_min_to_zero_zero() {
     let path = tempfile_with_contents(
         "no_requires",
-        "struct s size=4x4\n  walls height=3 mat_slot=m\n",
+        "theme t:\n  slot m -> @oak_planks\n\nstruct s size=4x4\n  walls height=3 mat_slot=m\n",
     );
     let out = run_info(&[path.to_str().unwrap(), "--format", "json"]);
     assert!(out.status.success());

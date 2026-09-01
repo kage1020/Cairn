@@ -101,10 +101,10 @@ and `E_TYPE_MISMATCH_LABEL` draw on a `place` row.
 
 `E_MISSING_MATERIAL` applies to the roles that put nothing anywhere without one. `floor` and
 `walls` reach the palette through the applied theme's slot map and have no default block, so a
-bare one contributes no voxel. A `window` or `door` without a `mat_slot=` is an **opening**,
-carved to air, and is not reported — that is how a narrow slit is punched through a wall without
-choosing a species for it. A `roof`, `stair` or `pressure_plate` paints a default block and is not
-reported either. `cairn check` raises it, before any lowering, and it needs no theme: a module
+bare one contributes no voxel. A `window` without a `mat_slot=` is an **opening**, carved to air,
+and is not reported — that is how a narrow slit is punched through a wall without choosing a
+species for it; a `door` is always a carve and reads no material at all. A `roof`, `stair` or
+`pressure_plate` paints a default block and is not reported either. `cairn check` raises it, before any lowering, and it needs no theme: a module
 that declares none is still told which of its members name no material.
 
 `E_UNRESOLVED_SLOT` is reported **at most once per member per bound theme**. A `def` body is
@@ -256,7 +256,9 @@ them, so it is the one finding a build reports alone.
 `E_MISSING_MATERIAL` is an **error** by the first rule above rather than the second: the member is
 dropped from the build and nothing is put in its place, which is implicit dropping and not a
 partial-build degradation. The incomplete side is the source, which named no material, and not
-the compiler.
+the compiler. The drop does not stop at the member either — a dropped `walls` lowers the wall
+height the volume is derived from, so the structure shrinks and every `door` and `window` that
+was to be cut into it is deferred as well.
 
 `E_UNKNOWN_ARGUMENT` is an **error** for the same reason `E_UNKNOWN_KEYWORD` is, one level down.
 A key outside the keyword's vocabulary names nothing, so no pass will read the value however the
