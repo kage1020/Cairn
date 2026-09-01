@@ -1874,6 +1874,21 @@ fn resolve_member_state(
     }
     let scope = scope?;
     let binding = scope.members.get(&member.span.start)?;
+    // INVARIANT(upstream-diagnosed): every reason `slot_value` is `None`
+    // has a reporter on the same diagnostic stream, and that stream is
+    // gated before anything is emitted — which is the guarantee, rather
+    // than any ordering between the two passes. `W_NO_THEME_BOUND` is
+    // pushed from *inside* this pass, and the CLI runs lowering before it
+    // merges `check`'s findings in, so "reported first" would be false in
+    // two different ways. `ResolvedMemberBinding::slot_value` names the
+    // four causes and who owns each; the one that used to have no owner is
+    // a member carrying no `mat_slot=` at all, now `check::material`'s for
+    // the roles that paint nothing without one.
+    //
+    // Scoped to this `?` alone. The two above it are different questions —
+    // a scope that was never built, and a member missing from one that
+    // was — and `lower.rs`'s own comment on the `place` path admits the
+    // first is reported by neither layer.
     let slot_value: &ValueWithSpan = binding.slot_value.as_ref()?;
     match resolve_block_state(slot_value, registry) {
         Ok(state) => Some(state),
@@ -1940,18 +1955,25 @@ fn palette_index_for(
 /// answer differently.
 ///
 /// The diagnostics are discarded because this is a question and not a
-/// report. Two of [`resolve_member_state`]'s arms push one — the abstract
-/// token and the unknown id — and the massing phase's own call pushes it
-/// for real, so keeping this one would say it twice. The other arms push
+/// report. Three of [`resolve_member_state`]'s arms push one — the
+/// deferred abstract token, the unknown abstract token and the unknown id
+/// — and the massing phase's own call pushes it for real, so keeping this
+/// one would say it twice. The other arms push
 /// nothing at all, here or there: a themeless scope is reported once
-/// against the body, an unresolved slot target once by the resolver, and
-/// a member with no `mat_slot=` binding is reported by nobody. That last
-/// silence is a gap of its own and not this function's to fill.
+/// against the body, an unresolved slot target once by the resolver, and a
+/// member with no `mat_slot=` at all once by `check::material`, before
+/// lowering runs.
 ///
 /// Sound exactly as long as the walls painter's question stays
 /// [`resolve_member_state`]. A roof already has a painter-side fallback
 /// material; if walls ever grow one, they will paint where this says they
-/// will not, and this predicate has to move with it.
+/// will not, and this predicate has to move with it — as does
+/// `check::material`'s `without_a_material`, which answers the same
+/// question one stage earlier. `tests/check_missing_material.rs` measures
+/// the two against each other, on the one question they share: *whether*
+/// a role paints without a `mat_slot=`. It says nothing about *what* it
+/// paints, so [`geometry_material_id`] substituting its fallback silently
+/// passes that test untouched.
 fn member_will_paint(
     member: &Member,
     scope: Option<&ScopeResolution>,

@@ -15,7 +15,7 @@ fn slice<'a>(source: &'a str, diag: &cairn_lang_core::Diagnostic) -> &'a str {
 
 #[test]
 fn tm_1_id_set_to_token_is_flagged_as_label_mismatch() {
-    let src = "struct s size=1x1\n  walls id=@oak\n";
+    let src = "struct s size=1x1\n  walls id=@oak mat_slot=m\n";
     let diags = diagnose(src);
     assert_eq!(diags.len(), 1, "got {diags:#?}");
     assert_eq!(diags[0].code, DiagnosticCode::TypeMismatchLabel);
@@ -29,7 +29,7 @@ fn tm_1_id_set_to_token_is_flagged_as_label_mismatch() {
 
 #[test]
 fn tm_2_class_set_to_dotted_ref_is_flagged() {
-    let src = "struct s size=1x1\n  walls class=foo.bar\n";
+    let src = "struct s size=1x1\n  walls class=foo.bar mat_slot=m\n";
     let diags = diagnose(src);
     assert_eq!(diags.len(), 1, "got {diags:#?}");
     assert_eq!(diags[0].code, DiagnosticCode::TypeMismatchLabel);
@@ -48,7 +48,7 @@ fn tm_3_mat_slot_string_value_is_accepted() {
 
 #[test]
 fn tm_4_struct_size_set_to_integer_is_flagged() {
-    let src = "struct s size=5\n  floor\n";
+    let src = "struct s size=5\n  floor mat_slot=m\n";
     let diags = diagnose(src);
     assert_eq!(diags.len(), 1, "got {diags:#?}");
     assert_eq!(diags[0].code, DiagnosticCode::TypeMismatchSize);
