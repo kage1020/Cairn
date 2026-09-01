@@ -141,6 +141,14 @@ const SYNTACTIC_FIXTURES: &[(&str, Source)] = &[
         ),
     ),
     (
+        // The member names no material at all, so it paints nothing. The
+        // one shape in this table whose artifact comes out *empty* rather
+        // than wrong, which is why it has to be refused before the build
+        // commands run rather than noticed in the dump.
+        "E_MISSING_MATERIAL",
+        Source::WithPrologue("struct s size=5x5\n  walls class=outer height=3\n"),
+    ),
+    (
         // The site half of this code. It is the half that had no reporter
         // at either stage — a geometry row among a site's placements
         // produced neither voxels nor a diagnostic — so it is the one

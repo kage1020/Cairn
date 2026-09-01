@@ -3,7 +3,7 @@
 //!
 //! Each pass is non-fatal: passes accumulate findings into a
 //! [`DiagnosticSink`] and the top-level [`check`] runs every pass before
-//! returning. The order `duplicate` → `keyword_allowlist` →
+//! returning. The order `duplicate` → `keyword_allowlist` → `material` →
 //! `member_scope` → `connect_arity` → `nesting` → `positional` →
 //! `requires` → `truth` → `type_mismatch` → [`crate::resolve::resolve`] is fixed so the emitted
 //! list is stable across runs, but the diagnostics themselves are sorted by
@@ -25,6 +25,7 @@ mod connect_arity;
 mod diagnostic;
 mod duplicate;
 mod keyword_allowlist;
+mod material;
 mod member_scope;
 mod nesting;
 mod positional;
@@ -71,6 +72,7 @@ pub fn check(module: &Module, ir: &IntentModule, edition: Option<Edition>) -> Ve
     duplicate::run(module, ir, &mut sink);
     keyword_allowlist::run(ir, &mut sink);
     arguments::run(ir, &mut sink);
+    material::run(ir, &mut sink);
     member_scope::run(ir, &mut sink);
     connect_arity::run(ir, &mut sink);
     nesting::run(ir, &mut sink);
@@ -143,7 +145,8 @@ mod tests {
             | C::TruthTableEmpty
             | C::TruthTableConflict
             | C::TruthTableDuplicateRow
-            | C::TruthTablePartial => RaisedBy::Syntactic,
+            | C::TruthTablePartial
+            | C::MissingMaterial => RaisedBy::Syntactic,
             C::UnresolvedSlot
             | C::ThemeSelectorUnmatched
             | C::UnresolvedPlaceRef
@@ -209,6 +212,7 @@ mod tests {
                 "E_DUPLICATE_SLOT",
                 "E_INVALID_REQUIRES",
                 "E_MISPLACED_MEMBER",
+                "E_MISSING_MATERIAL",
                 "E_TRUTH_TABLE_CONFLICT",
                 "E_TRUTH_TABLE_EMPTY",
                 "E_TYPE_MISMATCH_LABEL",
