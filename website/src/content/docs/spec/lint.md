@@ -75,6 +75,7 @@ a decimal number or does not fit in a `u32`, and text after the version.
 |---|---|
 | `E_UNKNOWN_ID` | A resolved block ID the pinned target does not declare. |
 | `E_INCOMPATIBLE_MATERIAL` | A member whose geometry attaches blockstates is bound to a material that cannot carry them. |
+| `E_MISSING_MATERIAL` | A member whose only route to a block is `mat_slot=` was written without one. |
 | `E_UNRESOLVED_SLOT` | A member's `mat_slot=` names a slot the bound theme does not declare. |
 | `E_THEME_VARIANT_MISSING` | The pinned edition can bind none of a theme's per-edition variants. |
 | `E_INCOMPLETE_PLACE` | A `place` row omits `id=`, `use=`, or `theme=` ([§9.3](components-editing-sites#93-multi-building-with-site)). |
@@ -92,6 +93,19 @@ family ([Compilation Model §4.3](compilation#43-gable-roof-voxel-rules)).
 however many scopes read it, since they all want the same edit in the same `theme` block. Every
 placement naming it is still refused. A module that declares such a theme but never reads a
 `mat_slot=` from it is not reported: the build is byte-identical with or without the pin.
+
+`E_MISSING_MATERIAL` and `E_UNRESOLVED_SLOT` are the two halves of one split, and no member
+earns both: the key is absent for the first and present-but-unusable for the second. They have
+different repairs, which is why they are different codes — the same division `E_INCOMPLETE_PLACE`
+and `E_TYPE_MISMATCH_LABEL` draw on a `place` row.
+
+`E_MISSING_MATERIAL` applies to the roles that put nothing anywhere without one. `floor` and
+`walls` reach the palette through the applied theme's slot map and have no default block, so a
+bare one contributes no voxel. A `window` or `door` without a `mat_slot=` is an **opening**,
+carved to air, and is not reported — that is how a narrow slit is punched through a wall without
+choosing a species for it. A `roof`, `stair` or `pressure_plate` paints a default block and is not
+reported either. `cairn check` raises it, before any lowering, and it needs no theme: a module
+that declares none is still told which of its members name no material.
 
 `E_UNRESOLVED_SLOT` is reported **at most once per member per bound theme**. A `def` body is
 resolved once as its own scope and once again for every `place` that instantiates it, and each of
@@ -238,6 +252,11 @@ shape would make every future one a line of this table, for a distinction nothin
 that costs is that a consumer reads the message to tell them apart. It is also the only code no
 check pass raises: parsing precedes them all, and a source that does not parse reaches none of
 them, so it is the one finding a build reports alone.
+
+`E_MISSING_MATERIAL` is an **error** by the first rule above rather than the second: the member is
+dropped from the build and nothing is put in its place, which is implicit dropping and not a
+partial-build degradation. The incomplete side is the source, which named no material, and not
+the compiler.
 
 `E_UNKNOWN_ARGUMENT` is an **error** for the same reason `E_UNKNOWN_KEYWORD` is, one level down.
 A key outside the keyword's vocabulary names nothing, so no pass will read the value however the

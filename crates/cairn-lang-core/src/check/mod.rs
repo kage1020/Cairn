@@ -3,11 +3,12 @@
 //!
 //! Each pass is non-fatal: passes accumulate findings into a
 //! [`DiagnosticSink`] and the top-level [`check`] runs every pass before
-//! returning. The order `duplicate` → `keyword_allowlist` → `material` →
-//! `member_scope` → `connect_arity` → `nesting` → `positional` →
-//! `requires` → `truth` → `type_mismatch` → [`crate::resolve::resolve`] is fixed so the emitted
-//! list is stable across runs, but the diagnostics themselves are sorted by
-//! source position once everything has finished collecting.
+//! returning. The order `duplicate` → `keyword_allowlist` → `arguments` →
+//! `material` → `member_scope` → `connect_arity` → `nesting` →
+//! `positional` → `requires` → `truth` → `type_mismatch` →
+//! [`crate::resolve::resolve`] is fixed so the emitted list is stable
+//! across runs, but the diagnostics themselves are sorted by source
+//! position once everything has finished collecting.
 //!
 //! Block-array lowering is *not* among those passes, so an `Error` it
 //! raises never reaches `cairn check`. `check::tests` pins which codes that

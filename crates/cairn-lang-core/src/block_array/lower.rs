@@ -1874,6 +1874,12 @@ fn resolve_member_state(
     }
     let scope = scope?;
     let binding = scope.members.get(&member.span.start)?;
+    // INVARIANT(upstream-diagnosed): every reason this is `None` is either
+    // reported before lowering runs or deliberate — `ResolvedMemberBinding`
+    // names the four and who owns each. The one that used to be neither is
+    // a member carrying no `mat_slot=` at all, which `check::material` now
+    // refuses for the roles that paint nothing without one and leaves alone
+    // for the roles that carve or fall back.
     let slot_value: &ValueWithSpan = binding.slot_value.as_ref()?;
     match resolve_block_state(slot_value, registry) {
         Ok(state) => Some(state),
@@ -1944,14 +1950,17 @@ fn palette_index_for(
 /// token and the unknown id — and the massing phase's own call pushes it
 /// for real, so keeping this one would say it twice. The other arms push
 /// nothing at all, here or there: a themeless scope is reported once
-/// against the body, an unresolved slot target once by the resolver, and
-/// a member with no `mat_slot=` binding is reported by nobody. That last
-/// silence is a gap of its own and not this function's to fill.
+/// against the body, an unresolved slot target once by the resolver, and a
+/// member with no `mat_slot=` at all once by `check::material`, before
+/// lowering runs.
 ///
 /// Sound exactly as long as the walls painter's question stays
 /// [`resolve_member_state`]. A roof already has a painter-side fallback
 /// material; if walls ever grow one, they will paint where this says they
-/// will not, and this predicate has to move with it.
+/// will not, and this predicate has to move with it — as does
+/// `check::material`'s `without_a_material`, which answers the same
+/// question one stage earlier. `tests/check_missing_material.rs` measures
+/// the two against each other rather than trusting either.
 fn member_will_paint(
     member: &Member,
     scope: Option<&ScopeResolution>,

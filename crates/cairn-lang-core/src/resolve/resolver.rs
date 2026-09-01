@@ -172,9 +172,16 @@ pub struct ScopeResolution {
 #[derive(Debug, Clone, PartialEq, Default, Serialize)]
 pub struct ResolvedMemberBinding {
     /// The value bound to this member's `mat_slot=` via the applied theme,
-    /// when both ends matched. `None` if the member has no `mat_slot=`, no
-    /// theme was bound to the scope, or the slot was not declared in the
-    /// theme (in which case `E_UNRESOLVED_SLOT` was emitted).
+    /// when both ends matched.
+    ///
+    /// `None` covers four different situations, each reported by someone
+    /// else: the member carries no `mat_slot=` at all
+    /// (`E_MISSING_MATERIAL`, from `check::material`, for the roles that
+    /// paint nothing without one); no theme was bound to the scope
+    /// (`W_NO_THEME_BOUND`); the slot was not declared in the theme
+    /// (`E_UNRESOLVED_SLOT`); or only a sibling edition variant declares
+    /// it, which is deferred until a pin picks one. A reader that treats
+    /// them as one case will report a member twice or not at all.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub slot_value: Option<ValueWithSpan>,
     /// Extra `key=value` bindings injected by a matching theme selector,
