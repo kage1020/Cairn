@@ -10,6 +10,46 @@ and is a separate axis from the Minecraft target version.
 
 ## [Unreleased]
 
+## 2026.9.0 — 2026-09-01
+
+### Added
+- *(core,cli,lsp)* give a file that does not parse a diagnostic like every other ([#275](https://github.com/kage1020/Cairn/pull/275))
+
+### Fixed
+- *(core)* report a def member's slot finding once per theme, not once per placement ([#277](https://github.com/kage1020/Cairn/pull/277))
+- *(core)* [**breaking**] refuse a `key=` no member of that role reads ([#262](https://github.com/kage1020/Cairn/pull/262))
+- *(formats,core,cli)* [**breaking**] name the palette entries the unsupported figure counts ([#254](https://github.com/kage1020/Cairn/pull/254))
+- *(cli)* [**breaking**] say which supported targets can build the source ([#252](https://github.com/kage1020/Cairn/pull/252))
+- *(core)* [**breaking**] report a truth table that verifies nothing ([#249](https://github.com/kage1020/Cairn/pull/249))
+- *(redstone)* [**breaking**] refuse a binding that names no signal ([#248](https://github.com/kage1020/Cairn/pull/248))
+- *(core)* size the volume for the members that will paint ([#242](https://github.com/kage1020/Cairn/pull/242))
+- *(core)* compare a value by what it says, not by where it was written ([#236](https://github.com/kage1020/Cairn/pull/236))
+- *(core,cli,formats,nbt)* [**breaking**] read the lockfile back, and make the rest of the reproducibility story true ([#234](https://github.com/kage1020/Cairn/pull/234))
+- *(core,tree-sitter,ci)* one version number for every manifest, and a gate on the file editors resolve `.crn` through ([#231](https://github.com/kage1020/Cairn/pull/231))
+- *(core)* cut a window into the wall it names, and seat a one-layer roof on the wall ([#227](https://github.com/kage1020/Cairn/pull/227))
+- *(redstone)* give every signal one driver, and every binding a component to sit on ([#224](https://github.com/kage1020/Cairn/pull/224))
+- *(core,redstone)* evaluate a member in the phase the spec puts it in, and collect in source order ([#220](https://github.com/kage1020/Cairn/pull/220))
+- *(core)* size the volume from the members the pass will actually paint ([#216](https://github.com/kage1020/Cairn/pull/216))
+- *(core)* stop stapling stair states onto a block that has none ([#214](https://github.com/kage1020/Cairn/pull/214))
+- *(core)* make a --edition pin mean the same thing wherever a theme is picked ([#212](https://github.com/kage1020/Cairn/pull/212))
+- *(formats)* count a block the edition does not have as unsupported ([#207](https://github.com/kage1020/Cairn/pull/207))
+- *(formats)* check every block id against the target that will load it ([#206](https://github.com/kage1020/Cairn/pull/206))
+- *(core)* enforce the version floor the source declares ([#200](https://github.com/kage1020/Cairn/pull/200))
+- *(core)* report the line the error is on, whichever way the file ends its lines ([#197](https://github.com/kage1020/Cairn/pull/197))
+- *(core)* refuse the text the lexer cannot represent ([#193](https://github.com/kage1020/Cairn/pull/193))
+- *(core)* report two theme selector rows that select the same members ([#183](https://github.com/kage1020/Cairn/pull/183))
+- *(core)* report a `place` row that cannot become a placement ([#182](https://github.com/kage1020/Cairn/pull/182))
+- *(core)* [**breaking**] report members and values the enclosing body never reads ([#181](https://github.com/kage1020/Cairn/pull/181))
+- *(core)* report an indented body that nothing reads ([#179](https://github.com/kage1020/Cairn/pull/179))
+- *(core)* report duplicate top-level names and header directives ([#177](https://github.com/kage1020/Cairn/pull/177))
+- *(core)* reject connect endpoints that are not `<place>.<port>` ([#175](https://github.com/kage1020/Cairn/pull/175))
+- *(cli)* refuse a --lock that lands on an artifact, and name what blocked
+- *(cli)* commit a build as one set instead of deleting on failure
+- *(core)* bound the walkway by area, which is what gets allocated
+- *(core)* bound derived extents and stop trusting source text as an id
+- *(core)* guard block nesting and bound the expression tree
+- *(core)* bound value and expression nesting in the parser
+
 ### Breaking changes
 
 - *(redstone)* Two nets are kept a step apart, not only off one coordinate. Dust reads the dust
