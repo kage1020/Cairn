@@ -1220,6 +1220,15 @@ fn lower_body_to_block_array<'a>(
 /// the same buckets that are about to be painted onto it, and handing
 /// the two to a caller separately is an order for the caller to get
 /// right.
+///
+/// Only one of the three adjacent swaps is observable today. Massing
+/// before openings is what carves an opening rather than filling one
+/// back in, and the corpus says so loudly. Envelope against openings is
+/// not: every roof voxel starts at `wall_top + 1` and every opening is
+/// cut at or below `wall_top`, so the two phases never contest a cell.
+/// That is a fact about the generators rather than about the order —
+/// the order here is the spec's, which is what a generator that grows
+/// into the other's rows will need it to be.
 fn paint_phases(
     buckets: PhaseBuckets<'_>,
     ctx: &StructCtx<'_>,
