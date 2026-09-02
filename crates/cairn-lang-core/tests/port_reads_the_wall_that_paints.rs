@@ -36,6 +36,15 @@ fn port_defer(out: &BlockArrayIr) -> Option<&Diagnostic> {
         .find(|d| d.primary.contains("was skipped because port"))
 }
 
+/// Every `W_DEFERRED_MEMBER` primary, the member-side ones included.
+fn defers(out: &BlockArrayIr) -> Vec<&str> {
+    out.diagnostics
+        .iter()
+        .filter(|d| d.code == DiagnosticCode::DeferredMember)
+        .map(|d| d.primary.as_str())
+        .collect()
+}
+
 fn walkway_keys(out: &BlockArrayIr) -> Vec<String> {
     out.walkways.keys().map(ToString::to_string).collect()
 }
@@ -138,6 +147,21 @@ fn a_def_with_no_walls_anchors_neither_a_door_nor_a_window() {
 }
 
 #[test]
+fn a_door_in_level_scoped_walls_anchors_its_port() {
+    // AC3's other half. The door gate asks the same column, so a `def`
+    // that keeps its walls in a `level` has to anchor a doorway port for
+    // the same reason it anchors a window one — a gate that regressed to
+    // "are there top-level walls" would refuse it and send the author to
+    // move a door already in masonry.
+    let out = lowered(&pair("storeyed", "home1.entry to home2.entry"));
+    assert_eq!(
+        walkway_keys(&out),
+        vec!["walkway::pair::home1.entry__home2.entry".to_owned()],
+        "a door in level-scoped masonry anchors its port",
+    );
+}
+
+#[test]
 fn a_window_cut_into_level_scoped_walls_anchors_its_port() {
     // AC3. The other direction: the openings pass cuts this window,
     // because the flattened list carries the `level`'s walls. The port
@@ -193,6 +217,15 @@ fn the_deferral_states_the_masonry_contract() {
     assert!(
         masonry.contains("says so on its own line"),
         "the masonry note sends the author to the member finding: {masonry}",
+    );
+    // …and the line it sends the author to has a finding on it. A note
+    // pointing at a member that says nothing is worse than no note.
+    assert!(
+        defers(&out)
+            .iter()
+            .any(|d| d.contains("has no wall to cut into")),
+        "the window that could not be cut says so itself: {:?}",
+        defers(&out),
     );
 }
 
@@ -277,6 +310,14 @@ fn a_window_hanging_in_the_gap_between_two_courses_anchors_no_port() {
         walkway_keys(&out).is_empty(),
         "a window in open air is not a port, got {:?}",
         walkway_keys(&out),
+    );
+    // Asserted alongside, so a fixture that stops resolving upstream
+    // cannot pass this by leaving the walkway map empty for a reason
+    // that has nothing to do with the wall.
+    assert!(
+        port_defer(&out).is_some(),
+        "the row says why no strip was laid: {:?}",
+        defers(&out),
     );
 }
 

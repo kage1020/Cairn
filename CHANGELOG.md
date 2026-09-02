@@ -32,7 +32,7 @@ and is a separate axis from the Minecraft target version.
   and an unresolvable material change the port's verdict because they changed the wall, not because
   a second copy of the rule was taught about them. The row's `W_DEFERRED_MEMBER` gains a fourth
   note for the masonry contract, and it is the only one of the four whose repair is on another
-  line — so it says that the member that could not be built states the rows on its own.
+  line — so it says that the member that could not be built says so on its own line.
 
 ## 2026.9.0 — 2026-09-01
 

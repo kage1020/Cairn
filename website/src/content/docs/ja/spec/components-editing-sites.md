@@ -124,8 +124,10 @@ offset + size.w ≤ wall_length                    # 水平
 y … y + size.h - 1 の全段が 1 つの層の中             # 垂直
 ```
 
-`level y=N` の下の `walls height=H` メンバはワールドの段 `N + 1 … N + H` を塗り、その level の基底
-段は床スラブのものです。接する層は 1 つに融合するので、`walls height=5` と `level y=5 walls
+`level y=N` の下の `walls height=H` メンバはワールドの段 `N + 1 … N + H` を塗ります。その level の
+基底段は、その level の床スラブが置かれるはずの段です — ただし level スコープの `floor` は現時点で
+保留されるので、実際に塗られるのは struct 自身のスラブが持つ段 `0` だけです。接する層は 1 つに融合
+するので、`walls height=5` と `level y=5 walls
 height=4` は段 1 から 9 までの 1 枚の壁になり、継ぎ目をまたぐ窓もその中にあります。間に空気がある層
 は融合せず、その隙間に吊られた窓はどの層の中にもありません。
 

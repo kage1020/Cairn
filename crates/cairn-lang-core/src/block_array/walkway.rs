@@ -169,11 +169,18 @@ pub(super) fn port_world_position(
         MemberRole::Door => {
             // A doorway is a hole in a wall, so a body that paints no
             // wall row has no doorway for a strip to arrive at:
-            // `super::lower::carve_door` defers on the same question,
-            // spelled `wall_top < 1` there because a `walls` member
-            // reaches either figure only with a positive `height=`.
-            // Without this the strip was laid to a doorway that was
-            // never carved.
+            // `super::lower::carve_door` asks this same column the same
+            // question before it carves. Without this the strip was laid
+            // to a doorway that was never carved.
+            //
+            // Only *whether*, where the window below asks *where*. A
+            // def whose walls live only above a `level` has a column
+            // that starts above row 1, and `carve_door` carves rows
+            // 1..=2 into air there without a word — so the two passes
+            // agree, at the weaker of the two questions. Making both ask
+            // `contains_rows` is a change of behaviour rather than of
+            // agreement, and belongs with the deferral it would start
+            // emitting.
             if walls.is_empty() {
                 return None;
             }
@@ -906,8 +913,10 @@ mod tests {
         PortId::new(name).expect("valid port id")
     }
 
-    /// The column the fixtures below declare: one span per top-level
-    /// `walls height=H`, all of them painting.
+    /// The column the fixtures below declare — a single span reaching
+    /// the tallest declared `height=`, since every top-level `walls`
+    /// starts at row 1 and `WallColumn::from_walls` merges runs that
+    /// touch.
     ///
     /// The cases here are about coordinates, so they hand the port the
     /// wall their own source spells. What a body actually paints — which

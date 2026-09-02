@@ -230,9 +230,13 @@ pub fn lower_to_block_array(
 /// shape that produces it — the resolver refuses the duplicate, the
 /// second body still lowers, and only the first is kept.
 ///
-/// Deliberately not a field on [`Placement`]: that record is serialised
-/// into the lockfile, where the rows a wall occupies are not something a
-/// later reader has any use for.
+/// Deliberately not a field on [`Placement`]. That record goes into
+/// `lock::hash_resolved_ir` with the rest of [`BlockArrayIr`], so a field
+/// added there moves every source's `resolved_ir_hash`; the rows a wall
+/// occupies are not worth that, and the lockfile's own `LockPlacement`
+/// is a named projection that would not carry them anyway. [`WallColumn`]
+/// also derives no `Serialize`, so the question would not compile before
+/// it could be decided.
 struct PlacedBody {
     placement: Placement,
     /// The rows this body's `walls` painted — the value the openings
@@ -286,9 +290,15 @@ fn collect_floor_cells(
 ///
 /// Bundled because the `connect` pass is the one place in this file that
 /// needs the whole finished site at once — every placement, the masonry
-/// each of them lowered with, and the floor plan they occupy — and six
-/// positional references is how a caller comes to hand the `to` end the
-/// `from` end's wall.
+/// each of them lowered with, and the floor plan they occupy — and
+/// naming them is what let this function's argument list come back under
+/// `clippy::too_many_arguments` rather than keep an allow for it.
+///
+/// It is not what keeps the two ends of a row apart. That hazard lives
+/// at the [`port_world_position`] call sites, where `from` and `to` are
+/// spelled four times each; what narrows it is [`PlacedBody`] carrying a
+/// placement and its column together, so there is one name to get right
+/// per end rather than two.
 struct ConnectInputs<'a> {
     resolution: &'a Resolution,
     defs: &'a [DefIr],
@@ -302,10 +312,13 @@ struct ConnectInputs<'a> {
 }
 
 /// Lower every resolved `connect` row into a walkway `BlockArray` and
-/// a matching [`Walkway`] metadata record. Skips rows whose ports do
-/// not resolve to a [`MemberRole::Door`] (other roles are not yet
-/// modelled as ports) and emits a `W_DUPLICATE_WALKWAY` when the same
-/// `(from, to)` pair has already been laid in the same site.
+/// a matching [`Walkway`] metadata record.
+///
+/// Skips a row whose port resolves to neither [`MemberRole::Door`] nor
+/// [`MemberRole::Window`] (no other role is modelled as a port yet), and
+/// one whose endpoint paints no masonry for the opening to have been cut
+/// through. Emits a `W_DUPLICATE_WALKWAY` when the same `(from, to)`
+/// pair has already been laid in the same site.
 #[allow(clippy::too_many_lines)] // one linear resolve-route-and-lay chain per row
 fn lower_connects(
     inputs: &ConnectInputs<'_>,
@@ -1221,14 +1234,22 @@ fn lower_body_to_block_array<'a>(
 /// the two to a caller separately is an order for the caller to get
 /// right.
 ///
-/// Only one of the three adjacent swaps is observable today. Massing
-/// before openings is what carves an opening rather than filling one
-/// back in, and the corpus says so loudly. Envelope against openings is
-/// not: every roof voxel starts at `wall_top + 1` and every opening is
-/// cut at or below `wall_top`, so the two phases never contest a cell.
-/// That is a fact about the generators rather than about the order —
-/// the order here is the spec's, which is what a generator that grows
-/// into the other's rows will need it to be.
+/// None of the three adjacent swaps — massing/envelope,
+/// envelope/openings, openings/fixtures — is observable with today's
+/// generators, because no two neighbouring phases write the same cell.
+/// A roof starts at `wall_top + 1` and an eave `stair` is shifted a
+/// voxel outside the wall line into an overhang it defers without, while
+/// every opening is cut into the wall ring at or below `wall_top`; a
+/// `pressure_plate` is shifted a voxel in or out for the same reason;
+/// and a `floor` is the single interior plane at row 0, which no opening
+/// reaches. Separation in y for some of those pairs, in x/z for the
+/// others.
+///
+/// What the corpus does see is massing running after openings — a
+/// two-step move rather than a swap — which fills a carved opening back
+/// in. So the order here is the spec's, held by the argument above
+/// rather than by a test, which is what a generator that grows into a
+/// neighbour's cells will change.
 fn paint_phases(
     buckets: PhaseBuckets<'_>,
     ctx: &StructCtx<'_>,
@@ -2982,11 +3003,15 @@ fn carve_door(
     // already written roof voxels at y=1, and carving them would punch a
     // gap into the roof.
     //
-    // `wall_top` counts the walls that paint, so this reads "no walls
-    // member puts a block anywhere" — which a positive `height=` alone no
-    // longer settles. Naming only the height would send an author who
-    // wrote `height=4` over a themeless struct to the wrong line.
-    if ctx.wall_top < 1 {
+    // The column holds the rows the walls will *paint*, so this reads
+    // "no walls member puts a block anywhere" — which a positive
+    // `height=` alone no longer settles. Naming only the height would
+    // send an author who wrote `height=4` over a themeless struct to the
+    // wrong line. Asked of the column rather than of `wall_top`, which is
+    // the same predicate by way of `height_value` admitting only positive
+    // heights, so that a reader and `walkway::port_world_position` are
+    // looking at one value instead of proving two agree.
+    if ctx.wall_column.is_empty() {
         diagnostics.push(diag_deferred_member_reason(
             member,
             "door requires a `walls` member that paints — a positive `height=` and a `mat_slot=` that resolves — to carve into",

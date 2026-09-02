@@ -131,8 +131,9 @@ offset + size.w ≤ wall_length                    # horizontal
 every row of y … y + size.h - 1 in one course    # vertical
 ```
 
-A `walls height=H` member under `level y=N` paints world rows `N + 1 … N + H`; the floor slab owns
-the level's base row. Courses that touch merge, so `walls height=5` plus a `level y=5 walls
+A `walls height=H` member under `level y=N` paints world rows `N + 1 … N + H` — one above the
+level's base row, which is where that level's floor slab would go, though a level-scoped `floor` is
+deferred today and the struct's own slab owns row `0`. Courses that touch merge, so `walls height=5` plus a `level y=5 walls
 height=4` is one wall from row 1 to row 9 and a window spanning the seam is inside it; courses with
 air between them do not, and a window hung in the gap is outside every one of them.
 
