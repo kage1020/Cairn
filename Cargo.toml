@@ -29,7 +29,7 @@ publish = true
 
 [workspace.dependencies]
 cairn-lang-core = { version = "2026.9.2", path = "crates/cairn-lang-core" }
-cairn-lang-nbt = { version = "2026.9.1", path = "crates/cairn-lang-nbt" }
+cairn-lang-nbt = { version = "2026.9.2", path = "crates/cairn-lang-nbt" }
 cairn-lang-formats = { version = "2026.9.2", path = "crates/cairn-lang-formats" }
 
 [workspace.lints.rust]
