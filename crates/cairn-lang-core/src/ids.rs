@@ -504,7 +504,7 @@ mod tests {
 
     #[test]
     fn ident_serializes_transparently() {
-        // `serde_yml` emits the scalar with no extra structure, matching
+        // `serde_norway` emits the scalar with no extra structure, matching
         // what a bare `String` would produce — the `#[serde(transparent)]`
         // wrapper does not add a tag.
         let json = serde_json::to_string(&PlaceId::new("home1").unwrap()).unwrap();
@@ -513,9 +513,9 @@ mod tests {
 
     #[test]
     fn ident_deserializes_through_validation() {
-        let ok: PortId = serde_yml::from_str("entry").unwrap();
+        let ok: PortId = serde_norway::from_str("entry").unwrap();
         assert_eq!(ok.as_str(), "entry");
-        let err = serde_yml::from_str::<PortId>("foo.bar").unwrap_err();
+        let err = serde_norway::from_str::<PortId>("foo.bar").unwrap_err();
         assert!(err.to_string().contains("forbidden character"));
     }
 

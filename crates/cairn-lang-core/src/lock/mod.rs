@@ -33,7 +33,7 @@ pub enum LockError {
     Io(#[from] std::io::Error),
     /// YAML encoder/decoder rejected the contents.
     #[error("lockfile YAML: {0}")]
-    Yaml(#[from] serde_yml::Error),
+    Yaml(#[from] serde_norway::Error),
     /// The document declares a schema revision this build does not know.
     ///
     /// Refused rather than read: the field names would be the same, so a
@@ -94,19 +94,17 @@ impl Lockfile {
     ///
     /// The body always ends with exactly one newline.
     ///
-    /// `serde_yml` closes an empty flow sequence without a break, so a
-    /// document whose last-written field is one — the common case, where
-    /// `member_version_sensitivity`, `placements` and `walkways` are all
-    /// empty and the latter two are skipped — ends mid-line. That makes
-    /// `git diff` report `\ No newline at end of file` on every change and
-    /// an appended byte corrupt the document. The contract here is
-    /// unconditional; the shape that used to break it is not.
+    /// A body that stops mid-line makes `git diff` report `\ No newline at
+    /// end of file` on every change and an appended byte corrupt the
+    /// document. The guard is unconditional so the contract holds whatever
+    /// the encoder does with the last field — the one at risk being
+    /// `member_version_sensitivity`, written last and often empty.
     ///
     /// # Errors
     ///
     /// Propagates YAML encode failure.
     pub fn to_yaml(&self) -> Result<String, LockError> {
-        let mut body = serde_yml::to_string(self)?;
+        let mut body = serde_norway::to_string(self)?;
         if !body.ends_with('\n') {
             body.push('\n');
         }
@@ -129,7 +127,7 @@ impl Lockfile {
     /// enforced — so a caller that already holds the bytes has the same
     /// gate available as one reading a file. It is not a chokepoint:
     /// `Lockfile` is public and derives `Deserialize`, so
-    /// `serde_yml::from_str` reaches one without the version check. This is
+    /// `serde_norway::from_str` reaches one without the version check. This is
     /// the entry point the compiler uses.
     ///
     /// # Errors
@@ -151,6 +149,6 @@ impl Lockfile {
                 supported: LOCK_SCHEMA_VERSION,
             });
         }
-        Ok(serde_yml::from_str(body)?)
+        Ok(serde_norway::from_str(body)?)
     }
 }

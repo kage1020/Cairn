@@ -69,9 +69,9 @@ dependencies = [
 
 [[package]]
 name = "anyhow"
-version = "1.0.102"
+version = "1.0.104"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7f202df86484c868dbad7eaa557ef785d5c66295e41b460ef922eca0723b842c"
+checksum = "330a5ed07fa54e4702c9d6c4174f74427fc0ef6e214bbd677ae50a5099946470"
 
 [[package]]
 name = "autocfg"
@@ -117,7 +117,7 @@ dependencies = [
 
 [[package]]
 name = "cairn-lang-cli"
-version = "2026.9.0"
+version = "2026.9.2"
 dependencies = [
  "cairn-lang-core",
  "cairn-lang-formats",
@@ -131,13 +131,13 @@ dependencies = [
 
 [[package]]
 name = "cairn-lang-core"
-version = "2026.9.0"
+version = "2026.9.2"
 dependencies = [
  "indexmap",
  "insta",
  "serde",
  "serde_json",
- "serde_yml",
+ "serde_norway",
  "sha2",
  "strsim",
  "strum",
@@ -146,7 +146,7 @@ dependencies = [
 
 [[package]]
 name = "cairn-lang-formats"
-version = "2026.9.0"
+version = "2026.9.2"
 dependencies = [
  "cairn-lang-core",
  "cairn-lang-nbt",
@@ -159,7 +159,7 @@ dependencies = [
 
 [[package]]
 name = "cairn-lang-lsp"
-version = "2026.9.0"
+version = "2026.9.2"
 dependencies = [
  "cairn-lang-core",
  "cairn-lang-formats",
@@ -171,7 +171,7 @@ dependencies = [
 
 [[package]]
 name = "cairn-lang-nbt"
-version = "2026.9.0"
+version = "2026.9.2"
 dependencies = [
  "flate2",
  "indexmap",
@@ -181,7 +181,7 @@ dependencies = [
 
 [[package]]
 name = "cairn-lang-redstone"
-version = "2026.9.0"
+version = "2026.9.2"
 dependencies = [
  "cairn-lang-core",
  "indexmap",
@@ -193,7 +193,7 @@ dependencies = [
 
 [[package]]
 name = "cairn-lang-tree-sitter"
-version = "2026.9.0"
+version = "2026.9.2"
 dependencies = [
  "cairn-lang-core",
  "cc",
@@ -204,7 +204,7 @@ dependencies = [
 
 [[package]]
 name = "cairn-lang-wasm"
-version = "2026.9.0"
+version = "2026.9.2"
 dependencies = [
  "cairn-lang-core",
 ]
@@ -571,19 +571,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "noyalib"
-version = "0.0.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e493c05128df7a83b9676b709d590e0ebc285c7ed3152bc679668e8c1e506af5"
-dependencies = [
- "indexmap",
- "memchr",
- "rustc-hash",
- "serde",
- "smallvec",
-]
-
-[[package]]
 name = "num-traits"
 version = "0.2.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -746,12 +733,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d6f6ff9a378485b298a5286656da665ba74413d36db0979633275d2e708145d4"
 
 [[package]]
-name = "rustc-hash"
-version = "2.1.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "94300abf3f1ae2e2b8ffb7b58043de3d399c73fa6f4b73826402a5c457614dbe"
-
-[[package]]
 name = "rustix"
 version = "1.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -775,6 +756,12 @@ dependencies = [
  "tempfile",
  "wait-timeout",
 ]
+
+[[package]]
+name = "ryu"
+version = "1.0.23"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9774ba4a74de5f7b1c1451ed6cd5285a32eddb5cccb8cc655a4e50009e06477f"
 
 [[package]]
 name = "semver"
@@ -827,6 +814,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "serde_norway"
+version = "0.9.42"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e408f29489b5fd500fab51ff1484fc859bb655f32c671f307dcd733b72e8168c"
+dependencies = [
+ "indexmap",
+ "itoa",
+ "ryu",
+ "serde",
+ "unsafe-libyaml-norway",
+]
+
+[[package]]
 name = "serde_repr"
 version = "0.1.20"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -835,16 +835,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.117",
-]
-
-[[package]]
-name = "serde_yml"
-version = "0.0.13"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "909764a65f86829ccdb5eea9ab355843aa02c019a7bfd47465092953565caa05"
-dependencies = [
- "noyalib",
- "serde",
 ]
 
 [[package]]
@@ -875,12 +865,6 @@ name = "similar"
 version = "2.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bbbb5d9659141646ae647b42fe094daf6c6192d1620870b449d9557f748b2daa"
-
-[[package]]
-name = "smallvec"
-version = "1.15.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8ed6a63f02c8539c91a8685a86f4099661ba3da017932f6ebbea6de3f0fa7c90"
 
 [[package]]
 name = "streaming-iterator"
@@ -1013,6 +997,12 @@ name = "unicode-xid"
 version = "0.2.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ebc1c04c71510c7f702b52b7c350734c9ff1295c464a03335b00bb84fc54f853"
+
+[[package]]
+name = "unsafe-libyaml-norway"
+version = "0.2.15"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b39abd59bf32521c7f2301b52d05a6a2c975b6003521cbd0c6dc1582f0a22104"
 
 [[package]]
 name = "utf8parse"
