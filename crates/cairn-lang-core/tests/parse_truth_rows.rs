@@ -106,3 +106,25 @@ fn bare_identifiers_count_as_inputs() {
     assert!(parse(&body("00->1", "a, b")).is_ok());
     assert!(parse(&body("0->1", "a, b")).is_err());
 }
+
+/// A pattern is digits, not a number, so nothing about the width of an
+/// integer bounds it.
+///
+/// Twenty ones used to be an overflow: the row reached the parser as an
+/// `Int` token whose value the lexer had already parsed into an `i64`, so
+/// a table of twenty inputs was refused with a message about integer
+/// range — and value-dependently at that, since the all-zero row of the
+/// same table fit. Both rows are asserted here for that reason: passing
+/// the ones alone would not distinguish the fix from a wider integer.
+#[test]
+fn a_row_wider_than_an_i64_is_a_row_like_any_other() {
+    let inputs: Vec<String> = (0..20).map(|i| format!("sig.s{i}")).collect();
+    let inputs = inputs.join(", ");
+    for pattern in ["1".repeat(20), "0".repeat(20)] {
+        let source = body(&format!("{pattern}->1"), &inputs);
+        assert!(parse(&source).is_ok(), "{source:?} should parse");
+    }
+    // The arity check still applies at that width — the ceiling is gone,
+    // not the rule it was masking.
+    assert!(parse(&body(&format!("{}->1", "1".repeat(21)), &inputs)).is_err());
+}

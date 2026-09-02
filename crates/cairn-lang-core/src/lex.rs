@@ -58,11 +58,21 @@ pub struct Token {
 pub enum TokenKind {
     /// Bare identifier: `[A-Za-z_][A-Za-z0-9_]*`.
     Ident(String),
-    /// Integer literal, also used for bit patterns in truth-table rows.
-    /// The raw source lexeme is preserved so callers can distinguish e.g. `00` from `0`.
+    /// A run of decimal digits, carried verbatim.
+    ///
+    /// Not yet a number. The lexer cannot tell an integer literal from a
+    /// truth-table row's bit pattern — both are digits, and only the
+    /// grammar around them says which — so it does not decide: the token
+    /// holds the digits and whoever needs a value parses them into the
+    /// type that position actually takes (`i64` for a value, `u32` for a
+    /// `within` bound). Interpreting here would put an `i64` ceiling on
+    /// every digit run in the language, including the patterns that are
+    /// not numbers at all: a twenty-input truth table whose row reads
+    /// `11111111111111111111` is a legal table, not an overflow.
+    ///
+    /// The lexeme is the whole token for the same reason `01` and `1`
+    /// have to stay different rows: leading zeros are data here.
     Int {
-        /// Parsed integer value.
-        value: i64,
         /// Raw source lexeme (preserves leading zeros).
         lexeme: String,
     },
@@ -119,7 +129,7 @@ impl std::fmt::Display for TokenKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Ident(name) => write!(f, "identifier `{name}`"),
-            Self::Int { lexeme, .. } => write!(f, "integer `{lexeme}`"),
+            Self::Int { lexeme } => write!(f, "integer `{lexeme}`"),
             Self::Bool(b) => write!(f, "`{b}`"),
             Self::Str(_) => f.write_str("string literal"),
             Self::Size(w, h) => write!(f, "size `{w}x{h}`"),
@@ -504,14 +514,12 @@ impl<'src> Lexer<'src> {
             self.push_at(TokenKind::Size(w, h), start..self.pos, position);
             return Ok(());
         }
+        // Digits only, no value: see `TokenKind::Int`. A `Size` above is
+        // the other way round because `WxH` can only be two extents —
+        // there is no position in the language where `9x7` is anything
+        // but a size, so the lexer is entitled to build one.
         let lexeme = self.src[start..lexeme_end].to_owned();
-        let value = lexeme.parse::<i64>().map_err(|err| LexError::InvalidInt {
-            position,
-            context: IntContext::IntLiteral,
-            lexeme: lexeme.clone(),
-            kind: *err.kind(),
-        })?;
-        self.push_at(TokenKind::Int { value, lexeme }, start..self.pos, position);
+        self.push_at(TokenKind::Int { lexeme }, start..self.pos, position);
         Ok(())
     }
 

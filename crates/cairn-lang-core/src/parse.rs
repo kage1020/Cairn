@@ -760,8 +760,21 @@ impl<'a> Parser<'a> {
                 })?;
                 Ok(Value::new(ValueKind::Size { w, h }, size_span))
             }
-            TokenKind::Int { value, .. } => {
+            TokenKind::Int { lexeme } => {
                 self.advance();
+                // The token is digits; a value position is where they are
+                // asked to be an `i64`, so this is where the ceiling
+                // belongs. `assert truth`'s row patterns take the same
+                // token and never ask, which is why a twenty-bit row is
+                // no longer an overflow.
+                let value = lexeme
+                    .parse::<i64>()
+                    .map_err(|err: std::num::ParseIntError| ParseError::InvalidInt {
+                        position,
+                        context: IntContext::IntLiteral,
+                        lexeme: lexeme.clone(),
+                        kind: *err.kind(),
+                    })?;
                 Ok(Value::new(ValueKind::Int(value), token.span))
             }
             TokenKind::Str(s) => {
@@ -900,7 +913,7 @@ impl<'a> Parser<'a> {
                 message: "expected integer literal, got end of input".into(),
             });
         };
-        if let TokenKind::Int { lexeme, .. } = token.kind {
+        if let TokenKind::Int { lexeme } = token.kind {
             self.advance();
             Ok(lexeme)
         } else {

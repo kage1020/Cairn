@@ -292,6 +292,15 @@ const FIXTURES: &[(&str, &str, Verdict)] = &[
         "struct s size=3x3\n  assert truth(a.b, c.d -> e.f) { 01 -> 1 }\n",
         Accept,
     ),
+    // A row's pattern is pattern data, not a number, so its width is
+    // bounded by the input arity and nothing else. Twenty ones used to
+    // overflow the `i64` the token was parsed into on the way through the
+    // lexer, which this grammar never did.
+    (
+        "truth_row_wider_than_i64",
+        "struct s size=3x3\n  assert truth(a, b, c, d, e, f, g, h, i, j, k, l, m, n, o, p, q, r, s, t -> z) { 11111111111111111111 -> 1 }\n",
+        Accept,
+    ),
     (
         "truth_multi_digit_output",
         "struct s size=3x3\n  assert truth(a.b -> c.d) { 0 -> 10 }\n",
@@ -704,16 +713,16 @@ const FIXTURES: &[(&str, &str, Verdict)] = &[
 const KNOWN_DIVERGENCES: &[(&str, &str, Verdict)] = &[
     // -- value ranges, which no grammar can express -------------------
     //
-    // `NonZeroU32::new` in `parse_value` refuses a zero extent after the
-    // token is built, and `str::parse::<i64>` refuses an integer past
-    // `i64` while building one — the latter in the lexer (`scan_number`),
-    // as `LexError::InvalidInt`, so it is a lex error rather than a value
-    // check on a finished token. A grammar can only
-    // approximate either by digit count, which would mis-refuse a valid
-    // literal one digit longer — and a narrower `size_literal` pattern
-    // collides with `integer` at the same position, so every bare `1` in
-    // value position would start a size literal and fail for want of an
-    // `x`.
+    // Both are `parse_value`'s: `NonZeroU32::new` refuses a zero extent,
+    // and `str::parse::<i64>` refuses an integer past `i64`. The token
+    // itself is lexically well-formed in each case — the digits of an
+    // out-of-range literal only become a number where a value is asked
+    // for, which is why the same digits are legal as a truth row's
+    // pattern. A grammar can only approximate either by digit count,
+    // which would mis-refuse a valid literal one digit longer — and a
+    // narrower `size_literal` pattern collides with `integer` at the same
+    // position, so every bare `1` in value position would start a size
+    // literal and fail for want of an `x`.
     (
         "size_zero_extent",
         "struct s size=0x3\n  floor mat_slot=f\n",
@@ -739,19 +748,6 @@ const KNOWN_DIVERGENCES: &[(&str, &str, Verdict)] = &[
     (
         "size_running_into_a_word",
         "struct s size=3x3\n  floor mat_slot=f size=2x2y\n",
-        Accept,
-    ),
-    // -- a truth row wider than `i64` -----------------------------------
-    //
-    // A row's pattern reaches the parser as an `Int` token, so `lex.rs`
-    // parses it as `i64` on the way through and a 20-bit row of ones
-    // overflows. The digits are pattern data rather than a number — the
-    // parser keeps the lexeme precisely because `01` and `1` differ — so
-    // the ceiling is an artefact of the token type, not a rule. This
-    // grammar's `bit_pattern` has no such ceiling and accepts the row.
-    (
-        "truth_row_wider_than_i64",
-        "struct s size=3x3\n  assert truth(a, b, c, d, e, f, g, h, i, j, k, l, m, n, o, p, q, r, s, t -> z) { 11111111111111111111 -> 1 }\n",
         Accept,
     ),
     // -- a truth row of the wrong width --------------------------------
