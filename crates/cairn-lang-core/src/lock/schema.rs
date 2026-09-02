@@ -1,6 +1,6 @@
 //! `build.cairn.lock` YAML schema.
 //!
-//! Field order in [`Lockfile`] is deliberate: `serde_yml` writes structs in
+//! Field order in [`Lockfile`] is deliberate: `serde_norway` writes structs in
 //! declaration order, so this matches the sample in
 //! `spec/versioning-editions.md` §10.6 byte-for-byte. Changing the order
 //! breaks downstream tools that grep the lockfile, so it is also
@@ -46,8 +46,8 @@ struct SchemaVersionProbe {
 }
 
 /// The schema revision `body` declares, whatever else it contains.
-pub(super) fn declared_schema_version(body: &str) -> Result<u32, serde_yml::Error> {
-    let probe: SchemaVersionProbe = serde_yml::from_str(body)?;
+pub(super) fn declared_schema_version(body: &str) -> Result<u32, serde_norway::Error> {
+    let probe: SchemaVersionProbe = serde_norway::from_str(body)?;
     Ok(probe.lock_schema_version)
 }
 

@@ -531,7 +531,7 @@ fn compile_rolls_back_on_lockfile_failure() {
     // If the lockfile write fails, the `.nbt` files already written must
     // be removed so the on-disk state stays consistent (either every
     // artifact + lock, or none). We force the failure by pointing
-    // `--lock` at a directory that exists; `serde_yml::to_string` +
+    // `--lock` at a directory that exists; `serde_norway::to_string` +
     // `fs::write` then fails with "is a directory".
     let (_tmp_src, src) = cottage_in_tempdir();
     let out_dir = TempDir::new().expect("out tempdir");
@@ -953,7 +953,7 @@ fn c19_village_lockfile_records_placements() {
 #[test]
 fn c20_village_lockfile_round_trips_through_yaml() {
     // Pin that the new `placements` section survives a YAML round-trip:
-    // serde_yml must encode and decode every field the schema declares so a
+    // serde_norway must encode and decode every field the schema declares so a
     // CI annotator or LSP that reads the file gets the same record the
     // compiler wrote.
     let (_tmp_src, src) = example_in_tempdir("village.crn");
