@@ -122,20 +122,28 @@ flat strip whose Y must agree with the other endpoint. A `sym=true` window contr
 at the primary `offset` side. The mirrored cut still appears in the wall, but the `id=` resolves to
 one coordinate.
 
-**A window has to fit its wall** to anchor a port, horizontally and vertically:
+**A port is somewhere a wall was opened.** Both port roles are openings cut through masonry, so a
+placement that paints no wall row anchors neither: a `door` needs one course to carve, and a
+`window` needs its whole rectangle inside one.
 
 ```
-offset + size.w ≤ wall_length            # horizontal
-y ≥ 1  and  y + size.h ≤ H + 1           # vertical, for walls height=H
+offset + size.w ≤ wall_length                    # horizontal
+every row of y … y + size.h - 1 in one course    # vertical
 ```
 
-`walls height=H` fills world rows `1 … H`; the floor slab owns row `0`. A window whose rows fall
-outside the wall cannot anchor a walkway, and the row drops with a `W_DEFERRED_MEMBER` whose notes
-list the door, window, and reserved-role contracts in turn.
+A `walls height=H` member under `level y=N` paints world rows `N + 1 … N + H` — one above the
+level's base row, which is where that level's floor slab would go, though a level-scoped `floor` is
+deferred today and the struct's own slab owns row `0`. Courses that touch merge, so `walls height=5` plus a `level y=5 walls
+height=4` is one wall from row 1 to row 9 and a window spanning the seam is inside it; courses with
+air between them do not, and a window hung in the gap is outside every one of them.
 
-One case where the port and the opening disagree today: the port reads the rows the `walls` members
-*declare*, while the openings pass reads the rows they will *paint*. On `walls` whose `mat_slot=`
-does not resolve, the cut is deferred and the port still anchors.
+The rows a port is judged against are the rows the placement **painted**, which is the same value
+the openings pass cut against — not a second reading of the `def`. A `walls` whose `mat_slot=` does
+not resolve paints nothing, so the cut is deferred and the port is refused with it; a `walls`
+declared inside a `level` paints its rows, so the cut happens and the port stands on it. A port
+that cannot be placed drops its row with a `W_DEFERRED_MEMBER` whose notes list the door, window,
+masonry, and reserved-role contracts in turn; when the masonry is what is missing, the member that
+could not be built says so on its own line.
 
 **How the path runs.** A Manhattan L, x-axis leg then z-axis leg, at the two ports' shared Y. 3D
 path search over staircases and multi-level walkways is out of scope by design.

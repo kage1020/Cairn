@@ -16,11 +16,8 @@
 //! isolation. Two checks that agree today drift apart the moment one of
 //! them is edited alone; a matrix that compares them fails when they do.
 
-use cairn_lang_core::block_array::{
-    BlockArray, BlockArrayIr, Dims, lower_to_block_array, port_world_position,
-};
+use cairn_lang_core::block_array::{BlockArray, BlockArrayIr, lower_to_block_array};
 use cairn_lang_core::check::DiagnosticCode;
-use cairn_lang_core::ids::PortId;
 use cairn_lang_core::{lower, parse, resolve};
 
 const THEME: &str = "theme t:\n  \
@@ -320,11 +317,11 @@ fn the_port_accepts_exactly_the_rectangles_the_openings_pass_carves() {
     // the two limits being edited alone, which no test of either side by
     // itself can see.
     //
-    // Every case here declares `walls` in the def body. That is the whole
-    // set the equivalence holds over, and the test below this one is where
-    // the boundary is written down: port resolution does not walk into a
-    // `level`, so a def that puts its walls there is carved by the
-    // openings pass and refused by the port.
+    // Every case here declares `walls` in the def body. The two tests
+    // below carry the cases that used to fall outside the equivalence —
+    // walls under a `level`, and walls whose material does not resolve —
+    // because the port now reads the column the body was lowered with
+    // rather than deriving its own from the `def`.
     const WALL_HEIGHT: u32 = 3;
     for (y, height) in [
         (0, 1),
@@ -354,18 +351,12 @@ fn the_port_accepts_exactly_the_rectangles_the_openings_pass_carves() {
 }
 
 #[test]
-fn walls_under_a_level_are_carved_into_but_anchor_no_port() {
-    // The one place the two answers diverge, pinned as the limitation it
-    // is. `lower::wall_column` walks the flattened member list and so sees
-    // a `walls` under a `level`; `walkway::wall_column_of` walks the def
-    // body only, because walkway ports have never resolved through a
-    // `level` at all. The window is cut and the walkway is dropped.
-    //
-    // This is unchanged behaviour — the helper this replaced read the same
-    // list — and it is the assertion that fires on the day someone teaches
-    // port resolution about levels, which is when the equivalence above
-    // becomes true of every def rather than of defs that keep their walls
-    // in the body.
+fn walls_under_a_level_are_carved_into_and_anchor_a_port() {
+    // The equivalence used to stop at the def body: the openings pass
+    // read the flattened member list and so saw a `walls` under a
+    // `level`, while port resolution walked the body only. The window was
+    // cut and the walkway was dropped, so the author was told to move a
+    // window that was already in masonry.
     let src = format!(
         "{THEME}def hut size=5x5:\n  \
          level id=up y=0\n    \
@@ -384,12 +375,13 @@ fn walls_under_a_level_are_carved_into_but_anchor_no_port() {
         .any(|ba| contains_id(ba, "minecraft:glass_pane"));
     assert!(carved, "the openings pass cuts the window");
     assert!(
-        out.diagnostics
+        !out.diagnostics
             .iter()
             .any(|d| d.primary.contains("was skipped because port")),
-        "the port does not resolve: {:?}",
+        "the port resolves against the same masonry: {:?}",
         defers(&out),
     );
+    assert_eq!(out.walkways.len(), 1, "the strip is laid");
 }
 
 #[test]
@@ -411,31 +403,43 @@ fn the_port_contract_note_states_the_rule_the_port_applies() {
         note,
         "a `window` port requires `side=front|back|left|right`, plus `offset=` / `y=` / \
          `size=WxH` that fit inside the wall (`offset + size.w \u{2264} wall_length`, and every \
-         row `y ..= y + size.h - 1` inside `1 ..= walls.height` — the floor slab owns row 0)",
+         row `y ..= y + size.h - 1` inside one course of the masonry — `walls height=H` under \
+         `level y=N` fills rows `N + 1 ..= N + H`, and the floor slab owns row 0)",
     );
 }
 
 #[test]
-fn a_def_with_no_walls_anchors_no_window_port() {
-    // The empty column has to refuse rather than accept-everything: with
-    // no `walls` member the openings pass carves nothing, so there is no
-    // cut for a strip to run into.
-    let src = concat!(
-        "def cottage size=3x3:\n",
-        "  window id=light side=front y=0 offset=0 size=1x1 mat_slot=g\n",
-    );
-    let module = parse(src).expect("parse");
-    let ir = lower(&module);
-    let def = ir.defs.first().expect("def lowered");
-    let dims = Dims { x: 3, y: 1, z: 3 };
+fn walls_that_paint_nothing_are_masonry_to_neither_pass() {
+    // The other case that used to fall outside the equivalence. The wall
+    // is declared with a positive `height=`, and its material is an
+    // abstract token that no registry pack is here to lift — so the pass
+    // paints no wall row, defers the cut, and the port has to agree.
+    let src = "theme t:\n  \
+               slot floor -> @oak_planks\n  \
+               slot wall  -> @wall.stone.cobble\n  \
+               slot glass -> @glass_pane\n  \
+               slot gravel -> @gravel\n\n\
+               def hut size=5x5:\n  \
+               walls id=w class=outer mat_slot=wall height=3\n  \
+               window id=top side=front offset=1 y=2 size=1x1 mat_slot=glass\n  \
+               door id=e side=front at=center\n\n\
+               site s:\n  \
+               place id=a use=hut theme=t at=origin\n  \
+               place id=b use=hut theme=t east_of=a gap=4\n  \
+               connect a.top to b.e path=@gravel\n";
+    let out = lowered(src);
     assert!(
-        port_world_position(
-            (0, 0, 0),
-            dims,
-            def,
-            &PortId::new("light").expect("valid port id")
-        )
-        .is_none(),
-        "a window with no wall behind it is not a port",
+        !out.structures
+            .values()
+            .any(|ba| contains_id(ba, "minecraft:glass_pane")),
+        "the openings pass cuts nothing into a wall that paints nothing",
     );
+    assert!(
+        out.diagnostics
+            .iter()
+            .any(|d| d.primary.contains("was skipped because port")),
+        "the port refuses it too: {:?}",
+        defers(&out),
+    );
+    assert!(out.walkways.is_empty(), "and no strip is laid");
 }

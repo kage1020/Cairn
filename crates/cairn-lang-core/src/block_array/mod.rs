@@ -36,9 +36,12 @@ pub use material::{
     BlockIdSet, IdOrigin, MaterialDeferred, TargetRegistry, UnknownId, resolve_block_state,
 };
 pub use roof::is_stair;
+// `port_world_position` is deliberately not re-exported: it can only be
+// asked correctly with the wall column the body was lowered against,
+// which nothing outside this module holds. Exporting it invited the
+// second derivation the port used to carry.
 pub use walkway::{
-    BlockedIndex, RoutePathError, WalkwayLayout, build_walkway_array, l_path, port_world_position,
-    route_path,
+    BlockedIndex, RoutePathError, WalkwayLayout, build_walkway_array, l_path, route_path,
 };
 
 use crate::check::Diagnostic;
