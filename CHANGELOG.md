@@ -12,6 +12,25 @@ and is a separate axis from the Minecraft target version.
 
 ### Breaking changes
 
+- *(core)* `TokenKind::Int` carries its `lexeme` only; the `value: i64` field is gone. The lexer
+  cannot tell an integer literal from a truth-table row's bit pattern — both are digits, and only
+  the grammar around them says which — so it no longer parses either into a number. Whoever needs
+  a value parses it into the type that position actually takes: `i64` in `parse_value`, `u32` for
+  a `within` bound. This is what lifts the ceiling that refused a truth table of twenty inputs
+  whose row read `11111111111111111111`, with a message about integer range for a table holding
+  no integers.
+
+  **Breaking**: `TokenKind` is re-exported from the crate root, and `#[non_exhaustive]` sits on the
+  enum rather than on the variant, so an external `TokenKind::Int { value, .. }` pattern no longer
+  compiles. The Rust API is Internal tier (compatibility C.2), so no deprecation window is owed —
+  the entry is here because C.3 requires one regardless of tier.
+
+  A digit run past `i64` in value position is still `E_PARSE` with the same `IntContext`, lexeme,
+  overflow kind and position; it is raised a layer later. Outside value position it now gets the
+  message for the position it is in — a `within` bound says "invalid `within` bound", a truth row
+  says the pattern holds only `0` and `1`, and `struct 99999999999999999999` says an identifier was
+  expected — instead of one message about integer range for all of them.
+
 - *(core)* A `connect` row anchors its ports to the masonry the placement actually painted, so the
   strip and the opening it runs to are decided by one answer instead of two. `walkway` used to
   rebuild its own wall column from the `def`'s top-level `walls` members and their `height=`, and

@@ -106,3 +106,45 @@ fn bare_identifiers_count_as_inputs() {
     assert!(parse(&body("00->1", "a, b")).is_ok());
     assert!(parse(&body("0->1", "a, b")).is_err());
 }
+
+/// A row's pattern is bounded by the input arity and by nothing else.
+///
+/// Twenty ones used to be an overflow: `scan_number` parsed every digit
+/// run into an `i64`, so the table failed during lexing with a message
+/// about integer range and no row ever reached the parser. The refusal
+/// was value-dependent, which the all-zero row records — same width,
+/// same table, and it parsed.
+///
+/// Forty ones is the assertion that the ceiling is *gone* rather than
+/// raised: it is past `u128::MAX`, so no integer type this crate could
+/// reach for would accept it. Twenty alone would not say that much —
+/// `11111111111111111111` still fits in a `u64`.
+#[test]
+fn a_row_wider_than_an_i64_is_a_row_like_any_other() {
+    for width in [20, 40] {
+        let inputs: Vec<String> = (0..width).map(|i| format!("sig.s{i}")).collect();
+        let inputs = inputs.join(", ");
+        for bit in ['1', '0'] {
+            let pattern: String = std::iter::repeat_n(bit, width).collect();
+            let source = body(&format!("{pattern}->1"), &inputs);
+            assert!(parse(&source).is_ok(), "{source:?} should parse");
+        }
+    }
+}
+
+/// And the rule the ceiling was masking still applies at that width.
+///
+/// Asserted through the message rather than through `is_err()`: twenty-one
+/// ones is past `i64` too, so a bare `is_err()` was already true before
+/// the ceiling came off and said nothing about arity. Both numbers and
+/// their roles, as in `an_input_pattern_is_as_wide_as_the_input_list` —
+/// a message that swapped them would read just as plausibly.
+#[test]
+fn a_row_past_the_arity_is_refused_by_the_arity_and_not_by_a_ceiling() {
+    let inputs: Vec<String> = (0..20).map(|i| format!("sig.s{i}")).collect();
+    let text = refusal(&body(&format!("{}->1", "1".repeat(21)), &inputs.join(", ")));
+    assert!(
+        text.contains("21 bits wide") && text.contains("20 inputs"),
+        "the row should be refused for its width against the table, not for its value: {text}",
+    );
+}

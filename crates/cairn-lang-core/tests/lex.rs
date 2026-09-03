@@ -35,10 +35,7 @@ fn lexes_simple_command() {
             TokenKind::Ident("wall".into()),
             TokenKind::Ident("height".into()),
             TokenKind::Eq,
-            TokenKind::Int {
-                value: 4,
-                lexeme: "4".into()
-            },
+            TokenKind::Int { lexeme: "4".into() },
             TokenKind::Newline,
         ]
     );
@@ -58,7 +55,6 @@ fn lexes_header_and_at_token() {
     assert_eq!(
         kinds[2],
         TokenKind::Int {
-            value: 2026,
             lexeme: "2026".into()
         }
     );
@@ -66,7 +62,6 @@ fn lexes_header_and_at_token() {
     assert_eq!(
         kinds[4],
         TokenKind::Int {
-            value: 6,
             lexeme: "06".into()
         }
     );

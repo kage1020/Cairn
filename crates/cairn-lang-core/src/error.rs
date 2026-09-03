@@ -37,6 +37,29 @@ impl Position {
         line: NonZeroU32::MIN,
         col: NonZeroU32::MIN,
     };
+
+    /// Translate a position measured inside a detached slice onto the source
+    /// that slice was cut from.
+    ///
+    /// `self` counts from the start of the slice; `base` is where the slice
+    /// begins in the whole file. Only the first line of the slice sits at a
+    /// column offset — every line after it starts at column 1 in both
+    /// coordinate systems, so only its line number shifts.
+    ///
+    /// `@intended_targets` is the one directive that re-lexes its value as a
+    /// detached string, and every diagnostic from that sub-parse has to come
+    /// back through here: without it the caret lands on line 1 of the file
+    /// rather than on the directive.
+    #[must_use]
+    pub(crate) fn rebased(self, base: Position) -> Self {
+        let line = base.line.saturating_add(self.line.get() - 1);
+        let col = if self.line == NonZeroU32::MIN {
+            base.col.saturating_add(self.col.get() - 1)
+        } else {
+            self.col
+        };
+        Position { line, col }
+    }
 }
 
 impl std::fmt::Display for Position {
@@ -317,6 +340,24 @@ impl LexError {
         full.split_once(": ")
             .map_or(full.clone(), |(_, rest)| rest.to_owned())
     }
+
+    /// The same error with its position translated onto the enclosing
+    /// source. See [`Position::rebased`].
+    #[must_use]
+    pub(crate) fn rebased(mut self, base: Position) -> Self {
+        let position = match &mut self {
+            Self::TabIndent { position }
+            | Self::OddIndent { position, .. }
+            | Self::IndentJump { position, .. }
+            | Self::UnmatchedDedent { position }
+            | Self::UnterminatedString { position }
+            | Self::UnexpectedChar { position, .. }
+            | Self::TrailingSizeSegment { position, .. }
+            | Self::InvalidInt { position, .. } => position,
+        };
+        *position = position.rebased(base);
+        self
+    }
 }
 
 impl ParseError {
@@ -344,6 +385,34 @@ impl ParseError {
                 kind,
                 ..
             } => render_invalid_int(*context, lexeme, *kind),
+        }
+    }
+
+    /// The same error with its position translated onto the enclosing
+    /// source. See [`Position::rebased`].
+    #[must_use]
+    pub(crate) fn rebased(self, base: Position) -> Self {
+        match self {
+            Self::Lex(err) => Self::Lex(err.rebased(base)),
+            Self::Syntax { position, message } => Self::Syntax {
+                position: position.rebased(base),
+                message,
+            },
+            Self::NestingTooDeep { position, limit } => Self::NestingTooDeep {
+                position: position.rebased(base),
+                limit,
+            },
+            Self::InvalidInt {
+                position,
+                context,
+                lexeme,
+                kind,
+            } => Self::InvalidInt {
+                position: position.rebased(base),
+                context,
+                lexeme,
+                kind,
+            },
         }
     }
 }
