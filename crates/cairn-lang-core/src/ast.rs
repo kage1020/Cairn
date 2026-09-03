@@ -34,15 +34,17 @@ use crate::error::Span;
 ///
 /// Wrapping the raw string in a newtype prevents callers from confusing it
 /// with arbitrary identifiers, requirement expressions, or other free-form
-/// labels. Validation of the `YYYY.M[.PATCH]` shape is the responsibility of
-/// the semantic layer; this type only fixes the source provenance.
+/// labels. Validation of the `YYYY.M[.PATCH]` shape is not done here: this
+/// type fixes the source provenance and nothing else.
 ///
-/// The semantic layer is expected to introduce a distinct `Version` type that
-/// wraps a *parsed* `CalVer`, leaving `RawVersion` to mean "verbatim from
-/// source" only. `#[non_exhaustive]` keeps room to add validated constructors
-/// (e.g. `RawVersion::from_validated`) without a breaking change, and forces
-/// external callers to go through [`RawVersion::new`] rather than depending
-/// on the tuple-struct shape.
+/// The parsed form is [`crate::calver::LanguageVersion`], produced by
+/// [`crate::calver::parse_language_version`] and consumed by
+/// `check::cairn_version`, which is the one pass that reads the value. It
+/// is deliberately not held here — the header is provenance, so the string
+/// as the author wrote it is what every consumer wants, and a parsed copy
+/// beside it would be a second answer to keep in step. `#[non_exhaustive]`
+/// forces external callers through [`RawVersion::new`] rather than letting
+/// them depend on the tuple-struct shape.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
 #[serde(transparent)]
 #[non_exhaustive]

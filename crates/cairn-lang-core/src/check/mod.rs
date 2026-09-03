@@ -22,6 +22,7 @@
 //! problem in a file rather than only the first one.
 
 mod arguments;
+mod cairn_version;
 mod connect_arity;
 mod diagnostic;
 mod duplicate;
@@ -70,6 +71,7 @@ use crate::intent::IntentModule;
 #[must_use]
 pub fn check(module: &Module, ir: &IntentModule, edition: Option<Edition>) -> Vec<Diagnostic> {
     let mut sink = DiagnosticSink::new();
+    cairn_version::run(module, &mut sink);
     duplicate::run(module, ir, &mut sink);
     keyword_allowlist::run(ir, &mut sink);
     arguments::run(ir, &mut sink);
@@ -111,10 +113,10 @@ mod tests {
         /// one of these — and the commands that report them build them
         /// from the [`crate::error::ParseError`] instead.
         Parser,
-        /// `duplicate` / `keyword_allowlist` / `arguments` / `material` /
-        /// `member_scope` / `connect_arity` / `nesting` / `positional` /
-        /// `requires` / `truth` / `type_mismatch`, run directly by
-        /// [`check`].
+        /// `cairn_version` / `duplicate` / `keyword_allowlist` /
+        /// `arguments` / `material` / `member_scope` / `connect_arity` /
+        /// `nesting` / `positional` / `requires` / `truth` /
+        /// `type_mismatch`, run directly by [`check`].
         Syntactic,
         /// `crate::resolve::resolve`, whose diagnostics [`check`] merges in.
         Resolver,
@@ -141,6 +143,8 @@ mod tests {
             | C::UnknownArgument
             | C::UnexpectedPositional
             | C::InvalidRequires
+            | C::InvalidCairnVersion
+            | C::FutureCairnVersion
             | C::TypeMismatchLabel
             | C::TypeMismatchSize
             | C::ConnectArity

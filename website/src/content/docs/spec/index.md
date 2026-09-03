@@ -56,4 +56,5 @@ In prose, disambiguate with a prefix: `cairn:2026.06` and `mc:1.21.4`.
 
 This document is **2026.6 (draft)**, superseding the former `v0.2` label. A `.crn` file MAY declare
 `@cairn 2026.06`, the language version it was written against. It is provenance only, so a future
-compiler can parse and warn correctly. See [Syntax §5.3](syntax#53-headers).
+compiler can parse and warn correctly — which is why the value is checked to be a `CalVer` even
+though no pass branches on it. See [Syntax §5.3](syntax#53-headers).

@@ -10,6 +10,35 @@ and is a separate axis from the Minecraft target version.
 
 ## [Unreleased]
 
+### Added
+
+- *(core)* The `@cairn` header's value is read as a language version, under two new codes.
+  `W_INVALID_CAIRN_VERSION` when the value is not `YYYY.M[.PATCH]`, and `W_FUTURE_CAIRN_VERSION`
+  when it names a version later than the compiler reading it. Every one of `@cairn banana`,
+  `@cairn 2026.06.1.2`, `@cairn 2026.13` and `@cairn 9999.1` was accepted in silence, because
+  nothing in the pipeline had ever looked at the string: it was wrapped verbatim at parse time and
+  read once afterwards, by the duplicate-header pass, which only wanted a name.
+
+  The header exists so a later compiler can parse and warn correctly, and provenance that no
+  compiler can read cannot do that job. The future-version code is the other half of it, and the
+  one thing an older build can usefully say about a file written against a newer language: syntax
+  added after this build is reported as `E_UNKNOWN_KEYWORD` or `E_UNKNOWN_ARGUMENT`, and only the
+  header knows those findings may be about the gap rather than about the lines they name.
+
+  Both are **warnings** rather than errors, which is the opposite call from `@requires`. `spec/lint`
+  §11.3 makes a finding an error when leaving it alone yields something other than what the source
+  asked for; `@cairn banana` builds byte-for-byte what `@cairn 2026.06` builds. `@requires` is an
+  error on the same test because its floor is an input — it sets `cairn info`'s compatible range
+  and the bound `cairn compile --target` is held to, so a floor that evaporates accepts a target it
+  should not. No source that compiles today stops compiling.
+
+  The accepted shape is a four-digit year, a month `1 … 12`, and an optional patch. A leading zero
+  on the month is accepted and does not change it, so `2026.06` — what every shipped `.crn` and the
+  spec itself write, calver.org's `YYYY.0M` — and `2026.6` are one version. That is stricter than
+  the dotted decimal `@requires` reads, deliberately: that one orders a label out of Mojang's
+  namespace, while this one names Cairn's own version, where `2026.13` is a month that does not
+  exist and `1.2` is a semver rather than a year.
+
 ### Breaking changes
 
 - *(core)* `TokenKind::Int` carries its `lexeme` only; the `value: i64` field is gone. The lexer
