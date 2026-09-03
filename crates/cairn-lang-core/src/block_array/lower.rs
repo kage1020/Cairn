@@ -167,7 +167,7 @@ pub fn lower_to_block_array(
         }
     }
 
-    let mut placements: IndexMap<String, Placement> = IndexMap::new();
+    let mut placed: IndexMap<String, PlacedBody> = IndexMap::new();
     let mut walkways: IndexMap<WalkwayScopeKey, Walkway> = IndexMap::new();
     for site in &intent.sites {
         lower_site(
@@ -176,7 +176,7 @@ pub fn lower_to_block_array(
             resolution,
             registry,
             &mut structures,
-            &mut placements,
+            &mut placed,
             &mut diagnostics,
         );
     }
@@ -185,13 +185,15 @@ pub fn lower_to_block_array(
     // the strip might cross. Connects survive site boundaries — the
     // resolver tags each `ValidatedConnect` with the `site` name so we
     // can pair it back to the right `placements` lookup here.
-    let blocked = collect_floor_cells(&structures, &placements);
+    let blocked = collect_floor_cells(&structures, &placed);
     lower_connects(
-        resolution,
-        &intent.defs,
-        registry,
-        &placements,
-        &blocked,
+        &ConnectInputs {
+            resolution,
+            defs: &intent.defs,
+            registry,
+            placed: &placed,
+            blocked: &blocked,
+        },
         &mut structures,
         &mut walkways,
         &mut diagnostics,
@@ -207,10 +209,40 @@ pub fn lower_to_block_array(
 
     BlockArrayIr {
         structures,
-        placements,
+        // The wall columns stop here: they exist so the `connect` pass
+        // can ask a placement's masonry the question the openings phase
+        // asked it, and that pass has run.
+        placements: placed
+            .into_iter()
+            .map(|(key, body)| (key, body.placement))
+            .collect(),
         walkways,
         diagnostics,
     }
+}
+
+/// One `place` row that lowered, and the masonry its body lowered with.
+///
+/// The column travels beside the placement rather than in a map of its
+/// own so the two cannot disagree about which bodies exist: a key in one
+/// and not the other would be a `connect` port judged against a body
+/// that is in no artifact, and two `place` rows sharing an `id=` is the
+/// shape that produces it — the resolver refuses the duplicate, the
+/// second body still lowers, and only the first is kept.
+///
+/// Deliberately not a field on [`Placement`]. That record goes into
+/// `lock::hash_resolved_ir` with the rest of [`BlockArrayIr`], so a field
+/// added there moves every source's `resolved_ir_hash`; the rows a wall
+/// occupies are not worth that, and the lockfile's own `LockPlacement`
+/// is a named projection that would not carry them anyway. [`WallColumn`]
+/// also derives no `Serialize`, so the question would not compile before
+/// it could be decided.
+struct PlacedBody {
+    placement: Placement,
+    /// The rows this body's `walls` painted — the value the openings
+    /// phase cut against. A `connect` row anchoring a port here reads
+    /// it, so the port and the cut ask the wall one question.
+    walls: WallColumn,
 }
 
 /// World-space `(x, y, z)` of every non-air voxel on the y=0 plane of
@@ -220,10 +252,10 @@ pub fn lower_to_block_array(
 /// air and the row earns a `W_WALKWAY_BLOCKED` warning.
 fn collect_floor_cells(
     structures: &IndexMap<String, BlockArray>,
-    placements: &IndexMap<String, Placement>,
+    placed: &IndexMap<String, PlacedBody>,
 ) -> HashSet<(i32, i32, i32)> {
     let mut out: HashSet<(i32, i32, i32)> = HashSet::new();
-    for (key, placement) in placements {
+    for (key, PlacedBody { placement, .. }) in placed {
         let Some(ba) = structures.get(key) else {
             continue;
         };
@@ -254,22 +286,53 @@ fn collect_floor_cells(
     out
 }
 
+/// What laying the walkways reads.
+///
+/// Bundled because the `connect` pass is the one place in this file that
+/// needs the whole finished site at once — every placement, the masonry
+/// each of them lowered with, and the floor plan they occupy — and
+/// naming them is what let this function's argument list come back under
+/// `clippy::too_many_arguments` rather than keep an allow for it.
+///
+/// It is not what keeps the two ends of a row apart. That hazard lives
+/// at the [`port_world_position`] call sites, where `from` and `to` are
+/// spelled four times each; what narrows it is [`PlacedBody`] carrying a
+/// placement and its column together, so there is one name to get right
+/// per end rather than two.
+struct ConnectInputs<'a> {
+    resolution: &'a Resolution,
+    defs: &'a [DefIr],
+    registry: Option<&'a dyn TargetRegistry>,
+    /// Every `place` row that lowered, under its `site::SITE::PLACE_ID`
+    /// key.
+    placed: &'a IndexMap<String, PlacedBody>,
+    /// World cells on the walk plane already occupied by a placement
+    /// floor.
+    blocked: &'a HashSet<(i32, i32, i32)>,
+}
+
 /// Lower every resolved `connect` row into a walkway `BlockArray` and
-/// a matching [`Walkway`] metadata record. Skips rows whose ports do
-/// not resolve to a [`MemberRole::Door`] (other roles are not yet
-/// modelled as ports) and emits a `W_DUPLICATE_WALKWAY` when the same
-/// `(from, to)` pair has already been laid in the same site.
-#[allow(clippy::too_many_arguments, clippy::too_many_lines)]
+/// a matching [`Walkway`] metadata record.
+///
+/// Skips a row whose port resolves to neither [`MemberRole::Door`] nor
+/// [`MemberRole::Window`] (no other role is modelled as a port yet), and
+/// one whose endpoint paints no masonry for the opening to have been cut
+/// through. Emits a `W_DUPLICATE_WALKWAY` when the same `(from, to)`
+/// pair has already been laid in the same site.
+#[allow(clippy::too_many_lines)] // one linear resolve-route-and-lay chain per row
 fn lower_connects(
-    resolution: &Resolution,
-    defs: &[DefIr],
-    registry: Option<&dyn TargetRegistry>,
-    placements: &IndexMap<String, Placement>,
-    blocked: &HashSet<(i32, i32, i32)>,
+    inputs: &ConnectInputs<'_>,
     structures: &mut IndexMap<String, BlockArray>,
     walkways: &mut IndexMap<WalkwayScopeKey, Walkway>,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
+    let &ConnectInputs {
+        resolution,
+        defs,
+        registry,
+        placed,
+        blocked,
+    } = inputs;
     let mut seen_pairs: HashSet<(SiteName, PlaceId, PortId, PlaceId, PortId)> = HashSet::new();
     // Index the blocked set once for every row: the router needs the
     // per-plane bounding rectangle, and deriving it per row would
@@ -281,9 +344,9 @@ fn lower_connects(
     for connect in &resolution.connects {
         let from_key = place_scope_key(connect.site.as_str(), connect.from.place.as_str());
         let to_key = place_scope_key(connect.site.as_str(), connect.to.place.as_str());
-        let from_placement = placements.get(&from_key);
-        let to_placement = placements.get(&to_key);
-        let (Some(from_placement), Some(to_placement)) = (from_placement, to_placement) else {
+        let from_body = placed.get(&from_key);
+        let to_body = placed.get(&to_key);
+        let (Some(from_body), Some(to_body)) = (from_body, to_body) else {
             // At least one placement was rejected upstream (sizeless def,
             // unresolved theme, broken origin chain). The connect itself
             // resolved, so without a follow-up warning the walkway would
@@ -292,13 +355,15 @@ fn lower_connects(
             // strip was not laid.
             diagnostics.push(diag_walkway_endpoint_skipped(
                 connect,
-                from_placement.is_none(),
-                to_placement.is_none(),
+                from_body.is_none(),
+                to_body.is_none(),
             ));
             continue;
         };
-        let from_def = defs.iter().find(|d| d.name == from_placement.source_def);
-        let to_def = defs.iter().find(|d| d.name == to_placement.source_def);
+        let from_def = defs
+            .iter()
+            .find(|d| d.name == from_body.placement.source_def);
+        let to_def = defs.iter().find(|d| d.name == to_body.placement.source_def);
         let (Some(from_def), Some(to_def)) = (from_def, to_def) else {
             // Invariant: `lower_site` only inserts a `Placement` after
             // resolving its `use=DEF` against `defs`, so a placement
@@ -314,16 +379,18 @@ fn lower_connects(
         };
 
         let from_pos = port_world_position(
-            from_placement.origin,
-            from_placement.dims,
+            from_body.placement.origin,
+            from_body.placement.dims,
             from_def,
             &connect.from.port,
+            &from_body.walls,
         );
         let to_pos = port_world_position(
-            to_placement.origin,
-            to_placement.dims,
+            to_body.placement.origin,
+            to_body.placement.dims,
             to_def,
             &connect.to.port,
+            &to_body.walls,
         );
         let (Some(from_pos), Some(to_pos)) = (from_pos, to_pos) else {
             // The resolver already validated the port id, so this miss
@@ -358,7 +425,13 @@ fn lower_connects(
                     DiagnosticNote {
                         span: None,
                         message:
-                            "a `window` port requires `side=front|back|left|right`, plus `offset=` / `y=` / `size=WxH` that fit inside the wall (`offset + size.w ≤ wall_length`, and every row `y ..= y + size.h - 1` inside `1 ..= walls.height` — the floor slab owns row 0)"
+                            "a `window` port requires `side=front|back|left|right`, plus `offset=` / `y=` / `size=WxH` that fit inside the wall (`offset + size.w ≤ wall_length`, and every row `y ..= y + size.h - 1` inside one course of the masonry — `walls height=H` under `level y=N` fills rows `N + 1 ..= N + H`, and the floor slab owns row 0)"
+                                .to_owned(),
+                    },
+                    DiagnosticNote {
+                        span: None,
+                        message:
+                            "both roles are cut into masonry, so the port's `def` needs a `walls` member that paints — a positive `height=` and a `mat_slot=` that resolves — and a `window` needs its rows inside one course of it; when that is what is missing, the member that cannot be built says so on its own line"
                                 .to_owned(),
                     },
                     DiagnosticNote {
@@ -801,7 +874,9 @@ fn lower_struct<'a>(
         diagnostics.push(diag_struct_no_size(s));
         return None;
     };
-    lower_body_to_block_array(
+    // A struct is never placed, so nothing ever anchors a port to it and
+    // its wall column has no second reader.
+    let lowered = lower_body_to_block_array(
         BodyDescriptor {
             kind: VoxelSource::Struct,
             scope_label: &s.name,
@@ -813,7 +888,8 @@ fn lower_struct<'a>(
         scope,
         registry,
         diagnostics,
-    )
+    )?;
+    Some(lowered.array)
 }
 
 /// Lower every `place` in `site` into its own per-place [`BlockArray`] and a
@@ -841,7 +917,7 @@ fn lower_site<'a>(
     resolution: &'a Resolution,
     registry: Option<&'a dyn TargetRegistry>,
     structures: &mut IndexMap<String, BlockArray>,
-    placements: &mut IndexMap<String, Placement>,
+    placed: &mut IndexMap<String, PlacedBody>,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     for member in &site.placements {
@@ -931,7 +1007,7 @@ fn lower_site<'a>(
         // `E_UNRESOLVED_PLACE_REF`); falling back to `(0, 0, 0)` would
         // silently stack the placement on top of `home1`, so we surface a
         // deferred warning and skip the row instead.
-        let Some(origin) = resolve_place_origin(member, placements, &site.name) else {
+        let Some(origin) = resolve_place_origin(member, placed, &site.name) else {
             diagnostics.push(diag_deferred_member_reason(
                 member,
                 "the prior place referenced by `east_of=`/`north_of=` did not lower, so this placement's origin cannot be resolved",
@@ -939,7 +1015,7 @@ fn lower_site<'a>(
             continue;
         };
 
-        let Some(ba) = lower_body_to_block_array(
+        let Some(LoweredBody { array, walls }) = lower_body_to_block_array(
             BodyDescriptor {
                 kind: VoxelSource::Place,
                 scope_label: place_id,
@@ -957,37 +1033,44 @@ fn lower_site<'a>(
             // would leave the lockfile pointing at nothing.
             continue;
         };
-        // `ba.source_scope` now owns the IR key — read it back so the two
-        // map inserts share that one allocation as their canonical key
-        // (one extra clone for `placements`, one move into `structures`).
-        let dims = ba.dims;
+        // `array.source_scope` now owns the IR key — read it back so the
+        // two map inserts share that one allocation as their canonical
+        // key (one extra clone for `placed`, one move into
+        // `structures`).
+        let dims = array.dims;
         // First-write-wins, as above. Two `site` blocks of one name put
         // their `place id=` rows into one `site::NAME::` namespace, so
         // only a repeated `id=` collides — and the resolver has already
-        // bound the first of those. `placements` and `structures` share
-        // the key here, and the lockfile reads a placement's dims beside
-        // the structure it names, so the two must agree on which body
-        // won.
-        placements
-            .entry(ba.source_scope.clone())
-            .or_insert(Placement {
-                site: placement_site,
-                place_id: placement_id,
-                source_def: use_name.to_owned(),
-                // The theme that governed the build, not the one the row
-                // spelled. A `--edition` pin can bind a different variant
-                // than the `place` named (`W_THEME_VARIANT_REBOUND`), and
-                // the warning scrolls away while the lockfile is what a
-                // later reader has. Recording the written name there would
-                // name a variant whose materials are not in the artifact.
-                theme: scope
-                    .bound_theme
-                    .clone()
-                    .unwrap_or_else(|| theme_name.to_owned()),
-                origin,
-                dims,
+        // bound the first of those. `placed` and `structures` share the
+        // key here, and the lockfile reads a placement's dims beside the
+        // structure it names, so the two must agree on which body won.
+        placed
+            .entry(array.source_scope.clone())
+            .or_insert(PlacedBody {
+                walls,
+                placement: Placement {
+                    site: placement_site,
+                    place_id: placement_id,
+                    source_def: use_name.to_owned(),
+                    // The theme that governed the build, not the one the
+                    // row spelled. A `--edition` pin can bind a different
+                    // variant than the `place` named
+                    // (`W_THEME_VARIANT_REBOUND`), and the warning
+                    // scrolls away while the lockfile is what a later
+                    // reader has. Recording the written name there would
+                    // name a variant whose materials are not in the
+                    // artifact.
+                    theme: scope
+                        .bound_theme
+                        .clone()
+                        .unwrap_or_else(|| theme_name.to_owned()),
+                    origin,
+                    dims,
+                },
             });
-        structures.entry(ba.source_scope.clone()).or_insert(ba);
+        structures
+            .entry(array.source_scope.clone())
+            .or_insert(array);
     }
 }
 
@@ -1020,6 +1103,20 @@ struct BodyDescriptor<'a> {
     source_scope: String,
 }
 
+/// What lowering one body produced: the voxels, and the wall column they
+/// were painted against.
+///
+/// The column comes back out because the `connect` pass asks a
+/// placement's masonry the same question the openings phase asked it,
+/// and one answer is what keeps them from disagreeing. Deriving it a
+/// second time from the `def` would be this rule written twice — which
+/// is how a strip came to be laid to a window the openings phase had
+/// deferred, and refused to one it had cut.
+struct LoweredBody {
+    array: BlockArray,
+    walls: WallColumn,
+}
+
 /// Lower one struct or place body into voxels.
 ///
 /// `None` means the extent the body asks for is past
@@ -1030,7 +1127,7 @@ fn lower_body_to_block_array<'a>(
     scope: Option<&'a ScopeResolution>,
     registry: Option<&'a dyn TargetRegistry>,
     diagnostics: &mut Vec<Diagnostic>,
-) -> Option<BlockArray> {
+) -> Option<LoweredBody> {
     let interior_w = body.size.w.get();
     let interior_h = body.size.h.get();
 
@@ -1095,47 +1192,8 @@ fn lower_body_to_block_array<'a>(
         wall_column,
     };
 
-    let PhaseBuckets {
-        massing,
-        envelope,
-        openings,
-        fixtures,
-        phases,
-    } = bucket_members(&flattened, diagnostics);
-    let mut canvas = Canvas::new(dims, phases);
-
-    run_phase(
-        massing,
-        lower_massing_member,
-        &ctx,
-        &mut palette,
-        &mut canvas,
-        diagnostics,
-    );
-    run_phase(
-        envelope,
-        lower_envelope_member,
-        &ctx,
-        &mut palette,
-        &mut canvas,
-        diagnostics,
-    );
-    run_phase(
-        openings,
-        lower_opening_member,
-        &ctx,
-        &mut palette,
-        &mut canvas,
-        diagnostics,
-    );
-    run_phase(
-        fixtures,
-        lower_fixture_member,
-        &ctx,
-        &mut palette,
-        &mut canvas,
-        diagnostics,
-    );
+    let buckets = bucket_members(&flattened, diagnostics);
+    let canvas = paint_phases(buckets, &ctx, &mut palette, diagnostics);
 
     for ((overridden, overriding), voxels) in &canvas.conflicts {
         diagnostics.push(diag_phase_conflict(
@@ -1152,14 +1210,93 @@ fn lower_body_to_block_array<'a>(
         body.scope_label,
     );
 
-    Some(BlockArray {
-        dims,
-        palette,
-        voxels,
-        block_entities: Vec::new(),
-        entities: Vec::new(),
-        source_scope: body.source_scope,
+    Some(LoweredBody {
+        array: BlockArray {
+            dims,
+            palette,
+            voxels,
+            block_entities: Vec::new(),
+            entities: Vec::new(),
+            source_scope: body.source_scope,
+        },
+        walls: ctx.wall_column,
     })
+}
+
+/// Paint one body's members onto a fresh canvas, phase by phase in the
+/// order `spec/compilation.md` §4.1 fixes.
+///
+/// That order is the whole content of this helper: a `door` written
+/// before `walls` in the source still cuts through the resulting wall
+/// because openings run after massing, whatever the lines say. It owns
+/// the canvas because a canvas outlives no phase — it is created from
+/// the same buckets that are about to be painted onto it, and handing
+/// the two to a caller separately is an order for the caller to get
+/// right.
+///
+/// None of the three adjacent swaps — massing/envelope,
+/// envelope/openings, openings/fixtures — is observable with today's
+/// generators, because no two neighbouring phases write the same cell.
+/// A roof starts at `wall_top + 1` and an eave `stair` is shifted a
+/// voxel outside the wall line into an overhang it defers without, while
+/// every opening is cut into the wall ring at or below `wall_top`; a
+/// `pressure_plate` is shifted a voxel in or out for the same reason;
+/// and a `floor` is the single interior plane at row 0, which no opening
+/// reaches. Separation in y for some of those pairs, in x/z for the
+/// others.
+///
+/// What the corpus does see is massing running after openings — a
+/// two-step move rather than a swap — which fills a carved opening back
+/// in. So the order here is the spec's, held by the argument above
+/// rather than by a test, which is what a generator that grows into a
+/// neighbour's cells will change.
+fn paint_phases(
+    buckets: PhaseBuckets<'_>,
+    ctx: &StructCtx<'_>,
+    palette: &mut Palette,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Canvas {
+    let PhaseBuckets {
+        massing,
+        envelope,
+        openings,
+        fixtures,
+        phases,
+    } = buckets;
+    let mut canvas = Canvas::new(ctx.dims, phases);
+    run_phase(
+        massing,
+        lower_massing_member,
+        ctx,
+        palette,
+        &mut canvas,
+        diagnostics,
+    );
+    run_phase(
+        envelope,
+        lower_envelope_member,
+        ctx,
+        palette,
+        &mut canvas,
+        diagnostics,
+    );
+    run_phase(
+        openings,
+        lower_opening_member,
+        ctx,
+        palette,
+        &mut canvas,
+        diagnostics,
+    );
+    run_phase(
+        fixtures,
+        lower_fixture_member,
+        ctx,
+        palette,
+        &mut canvas,
+        diagnostics,
+    );
+    canvas
 }
 
 /// The paint set filed by phase, each entry keeping its position in the
@@ -1403,7 +1540,7 @@ fn diag_structure_too_large(body: &BodyDescriptor<'_>, dims: Dims) -> Diagnostic
 /// convention.
 fn resolve_place_origin(
     member: &Member,
-    placements: &IndexMap<String, Placement>,
+    placed: &IndexMap<String, PlacedBody>,
     site_name: &str,
 ) -> Option<(i32, i32, i32)> {
     if let Some(value) = member.intent_state.get("at")
@@ -1423,7 +1560,9 @@ fn resolve_place_origin(
         .intent_state
         .get("east_of")
         .and_then(|v| v.value.as_label_str())
-        && let Some(prev) = placements.get(&place_scope_key(site_name, target))
+        && let Some(PlacedBody {
+            placement: prev, ..
+        }) = placed.get(&place_scope_key(site_name, target))
     {
         let next_x = prev
             .origin
@@ -1436,7 +1575,9 @@ fn resolve_place_origin(
         .intent_state
         .get("north_of")
         .and_then(|v| v.value.as_label_str())
-        && let Some(prev) = placements.get(&place_scope_key(site_name, target))
+        && let Some(PlacedBody {
+            placement: prev, ..
+        }) = placed.get(&place_scope_key(site_name, target))
     {
         let next_z = prev
             .origin
@@ -2862,11 +3003,15 @@ fn carve_door(
     // already written roof voxels at y=1, and carving them would punch a
     // gap into the roof.
     //
-    // `wall_top` counts the walls that paint, so this reads "no walls
-    // member puts a block anywhere" — which a positive `height=` alone no
-    // longer settles. Naming only the height would send an author who
-    // wrote `height=4` over a themeless struct to the wrong line.
-    if ctx.wall_top < 1 {
+    // The column holds the rows the walls will *paint*, so this reads
+    // "no walls member puts a block anywhere" — which a positive
+    // `height=` alone no longer settles. Naming only the height would
+    // send an author who wrote `height=4` over a themeless struct to the
+    // wrong line. Asked of the column rather than of `wall_top`, which is
+    // the same predicate by way of `height_value` admitting only positive
+    // heights, so that a reader and `walkway::port_world_position` are
+    // looking at one value instead of proving two agree.
+    if ctx.wall_column.is_empty() {
         diagnostics.push(diag_deferred_member_reason(
             member,
             "door requires a `walls` member that paints — a positive `height=` and a `mat_slot=` that resolves — to carve into",

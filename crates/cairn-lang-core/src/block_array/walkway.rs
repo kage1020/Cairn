@@ -13,7 +13,11 @@
 //!    `at=center | left | right` positions, windows at the rectangle's
 //!    geometric centre (`offset + size.w / 2`). Other roles (stair,
 //!    roof, …) lower silently to `None` so the caller can decide
-//!    whether to fail with `W_DEFERRED_MEMBER`.
+//!    whether to fail with `W_DEFERRED_MEMBER`. Both roles are
+//!    openings, so the caller hands over the [`WallColumn`] the body
+//!    was lowered with: a port is somewhere a wall was opened, and
+//!    asking the `def` a second time is what let the strip and the cut
+//!    disagree.
 //! 2. [`l_path`] walks a Manhattan L (x-axis first, then z-axis) between
 //!    two world voxels at a constant Y, deduplicating the corner cell so
 //!    every coordinate appears once. When the L collides with an
@@ -82,6 +86,13 @@ pub struct WalkwayLayout {
 /// `(dims.x - interior_w) / 2` derivation is the inverse of the
 /// inflation [`super::lower`] does up front.
 ///
+/// `walls` is the column [`super::lower`] painted this body against,
+/// handed over rather than re-derived. Both port roles are openings cut
+/// through masonry, so a port is only where the openings phase could
+/// cut one — and that phase reads the rows the `walls` members
+/// *painted*, which a walk over the `def` cannot see: it knows neither
+/// which materials resolved nor which walls a `level` block carries.
+///
 /// Ports anchor on two member roles:
 ///
 /// * [`MemberRole::Door`] — wall-local `u` taken from `at=`. Three
@@ -110,17 +121,16 @@ pub struct WalkwayLayout {
 /// * the member's role is not [`MemberRole::Door`] or
 ///   [`MemberRole::Window`] (stair / roof / other roles short-circuit
 ///   silently — port support is reserved for a future extension),
+/// * `walls` is empty, so the body paints no masonry for either role's
+///   opening to be cut through,
 /// * the member is missing a `side=` argument or its value is not one
 ///   of `front` / `back` / `left` / `right`,
 /// * the door is missing `at=` or carries a value other than
 ///   `center` / `left` / `right`,
 /// * the window is missing `offset=` / `size=WxH`, or its
-///   `offset + size.w` exceeds the wall length, or any row of
-///   `y ..= y + size.h - 1` falls outside the rows the def's `walls`
-///   members declare (see `wall_column_of`, which reads the declared
-///   rows rather than the painted ones — a window over walls whose
-///   material does not resolve is deferred by the openings pass and
-///   still anchors here),
+///   `offset + size.w` exceeds the wall length, or its rows
+///   `y ..= y + size.h - 1` do not all lie inside one course of
+///   `walls`,
 /// * the def has no `size=` to bound the wall against,
 /// * an internal arithmetic step (`checked_add` /
 ///   `wall_local_to_grid` bounds / `i32::try_from`) over- or
@@ -132,11 +142,12 @@ pub struct WalkwayLayout {
 /// machinery, and the diagnostic anchor lives on the `connect` row
 /// where the user can act on it.
 #[must_use]
-pub fn port_world_position(
+pub(super) fn port_world_position(
     place_origin: (i32, i32, i32),
     place_dims: Dims,
     def: &DefIr,
     port_id: &PortId,
+    walls: &WallColumn,
 ) -> Option<(i32, i32, i32)> {
     let member = def
         .members
@@ -156,20 +167,31 @@ pub fn port_world_position(
     let len = wall_length(side, interior_w, interior_h);
     let (wall_x, wall_z) = match member.role {
         MemberRole::Door => {
+            // A doorway is a hole in a wall, so a body that paints no
+            // wall row has no doorway for a strip to arrive at:
+            // `super::lower::carve_door` asks this same column the same
+            // question before it carves. Without this the strip was laid
+            // to a doorway that was never carved.
+            //
+            // Only *whether*, where the window below asks *where*. A
+            // def whose walls live only above a `level` has a column
+            // that starts above row 1, and `carve_door` carves rows
+            // 1..=2 into air there without a word — so the two passes
+            // agree, at the weaker of the two questions. Making both ask
+            // `contains_rows` is a change of behaviour rather than of
+            // agreement, and belongs with the deferral it would start
+            // emitting.
+            if walls.is_empty() {
+                return None;
+            }
             let u = door_anchor_offset(member, len)?;
             door_world_xz(side, u, overhang, interior_w, interior_h, place_origin)?
         }
         MemberRole::Window => {
-            // Window port also has to fit *vertically* within the
-            // def's walls — otherwise the window cut itself is
-            // deferred and a walkway anchored to a non-existent
-            // window would land the user with a strip leading into
-            // a solid wall. `wall_column_of` is empty when no walls
-            // member declares a positive `height=`, which is the
-            // same condition that prevents the window from being
-            // voxelised.
-            let wall_column = wall_column_of(def);
-            let u = window_center_offset(member, len, &wall_column)?;
+            // A window port also has to fit *vertically* inside the
+            // masonry — otherwise the cut itself is deferred and the
+            // strip leads into a solid wall.
+            let u = window_center_offset(member, len, walls)?;
             window_world_xz(
                 side,
                 u,
@@ -851,35 +873,6 @@ fn window_world_xz(
     Some((origin.0.checked_add(grid_x)?, origin.2.checked_add(grid_z)?))
 }
 
-/// The rows the def's `walls` members occupy, mirroring
-/// `super::lower::wall_column` — the port needs to know where the wall
-/// is so a window port can be checked against the same masonry the
-/// openings pass cuts.
-///
-/// Empty when no `walls` member declares a positive `height=`. That is no
-/// longer the whole of the openings pass's condition: `super::lower`'s
-/// column also drops a `walls` whose `mat_slot=` will not resolve, since
-/// a wall that paints nothing is not masonry to cut. This helper has no
-/// resolution to consult — `port_world_position` is handed a `DefIr` and
-/// nothing else — so a window port over unpaintable walls still anchors
-/// while the cut itself is deferred. Only top-level `walls` members are
-/// considered either: `level y=N`
-/// flattening lives in `lower.rs` and is not integrated with walkway
-/// port resolution yet (walkways currently only match door / window
-/// ports declared directly under the def body). When a port on a
-/// level-scoped door / window lands, this helper will need to walk
-/// `member.children` too — and every such member carries the level's
-/// `y=N` as its span offset, which is why the column is built from
-/// `(offset, height)` pairs rather than from heights alone.
-fn wall_column_of(def: &DefIr) -> WallColumn {
-    WallColumn::from_walls(
-        def.members
-            .iter()
-            .filter(|m| matches!(m.role, MemberRole::Walls))
-            .filter_map(|m| nonneg_int_value(m, "height").map(|h| (0, h))),
-    )
-}
-
 /// Strict non-negative integer reader — unlike `super::lower::nonneg_int`
 /// this propagates `i64 → u32` overflow as `None` rather than clamping
 /// to `u32::MAX`. The clamp is harmless for floor / wall sizing where
@@ -918,6 +911,26 @@ mod tests {
 
     fn pid(name: &str) -> PortId {
         PortId::new(name).expect("valid port id")
+    }
+
+    /// The column the fixtures below declare — a single span reaching
+    /// the tallest declared `height=`, since every top-level `walls`
+    /// starts at row 1 and `WallColumn::from_walls` merges runs that
+    /// touch.
+    ///
+    /// The cases here are about coordinates, so they hand the port the
+    /// wall their own source spells. What a body actually paints — which
+    /// materials resolved, which walls a `level` block carries — is
+    /// [`super::super::lower`]'s answer, and the tests that pin the port
+    /// against *that* drive the whole pass
+    /// (`tests/port_reads_the_wall_that_paints.rs`).
+    fn declared_column(def: &DefIr) -> WallColumn {
+        WallColumn::from_walls(
+            def.members
+                .iter()
+                .filter(|m| matches!(m.role, MemberRole::Walls))
+                .filter_map(|m| nonneg_int_value(m, "height").map(|h| (0, h))),
+        )
     }
 
     /// Manhattan distance between two ground-plane cells — the minimal
@@ -1356,14 +1369,15 @@ mod tests {
         // direction → (11, 0, 23).
         let src = concat!(
             "def cottage size=3x3:\n",
+            "  walls mat_slot=w height=3\n",
             "  door id=entry side=front at=center\n",
         );
         let module = crate::parse(src).expect("parse");
         let ir = crate::lower(&module);
         let def = ir.defs.first().expect("def lowered");
         let dims = Dims { x: 3, y: 1, z: 3 };
-        let pos =
-            port_world_position((10, 0, 20), dims, def, &pid("entry")).expect("port resolves");
+        let pos = port_world_position((10, 0, 20), dims, def, &pid("entry"), &declared_column(def))
+            .expect("port resolves");
         assert_eq!(pos, (11, 0, 23));
     }
 
@@ -1376,14 +1390,15 @@ mod tests {
         // port one block beyond the eave → (12, 0, 24).
         let src = concat!(
             "def cottage size=3x3:\n",
+            "  walls mat_slot=w height=3\n",
             "  door id=entry side=front at=center\n",
         );
         let module = crate::parse(src).expect("parse");
         let ir = crate::lower(&module);
         let def = ir.defs.first().expect("def lowered");
         let dims = Dims { x: 5, y: 1, z: 5 };
-        let pos =
-            port_world_position((10, 0, 20), dims, def, &pid("entry")).expect("port resolves");
+        let pos = port_world_position((10, 0, 20), dims, def, &pid("entry"), &declared_column(def))
+            .expect("port resolves");
         assert_eq!(pos, (12, 0, 24));
     }
 
@@ -1394,14 +1409,15 @@ mod tests {
         // Normal step is (0, -1) → port (11, 0, 19).
         let src = concat!(
             "def cottage size=3x3:\n",
+            "  walls mat_slot=w height=3\n",
             "  door id=entry side=back at=center\n",
         );
         let module = crate::parse(src).expect("parse");
         let ir = crate::lower(&module);
         let def = ir.defs.first().expect("def lowered");
         let dims = Dims { x: 3, y: 1, z: 3 };
-        let pos =
-            port_world_position((10, 0, 20), dims, def, &pid("entry")).expect("port resolves");
+        let pos = port_world_position((10, 0, 20), dims, def, &pid("entry"), &declared_column(def))
+            .expect("port resolves");
         assert_eq!(pos, (11, 0, 19));
     }
 
@@ -1412,14 +1428,15 @@ mod tests {
         // Normal step is (-1, 0) → port (9, 0, 21).
         let src = concat!(
             "def cottage size=3x3:\n",
+            "  walls mat_slot=w height=3\n",
             "  door id=entry side=left at=center\n",
         );
         let module = crate::parse(src).expect("parse");
         let ir = crate::lower(&module);
         let def = ir.defs.first().expect("def lowered");
         let dims = Dims { x: 3, y: 1, z: 3 };
-        let pos =
-            port_world_position((10, 0, 20), dims, def, &pid("entry")).expect("port resolves");
+        let pos = port_world_position((10, 0, 20), dims, def, &pid("entry"), &declared_column(def))
+            .expect("port resolves");
         assert_eq!(pos, (9, 0, 21));
     }
 
@@ -1430,14 +1447,15 @@ mod tests {
         // Normal step is (+1, 0) → port (13, 0, 21).
         let src = concat!(
             "def cottage size=3x3:\n",
+            "  walls mat_slot=w height=3\n",
             "  door id=entry side=right at=center\n",
         );
         let module = crate::parse(src).expect("parse");
         let ir = crate::lower(&module);
         let def = ir.defs.first().expect("def lowered");
         let dims = Dims { x: 3, y: 1, z: 3 };
-        let pos =
-            port_world_position((10, 0, 20), dims, def, &pid("entry")).expect("port resolves");
+        let pos = port_world_position((10, 0, 20), dims, def, &pid("entry"), &declared_column(def))
+            .expect("port resolves");
         assert_eq!(pos, (13, 0, 21));
     }
 
@@ -1456,8 +1474,8 @@ mod tests {
         let ir = crate::lower(&module);
         let def = ir.defs.first().expect("def lowered");
         let dims = Dims { x: 3, y: 1, z: 3 };
-        let pos =
-            port_world_position((10, 0, 20), dims, def, &pid("light")).expect("port resolves");
+        let pos = port_world_position((10, 0, 20), dims, def, &pid("light"), &declared_column(def))
+            .expect("port resolves");
         assert_eq!(pos, (10, 0, 23));
     }
 
@@ -1476,8 +1494,8 @@ mod tests {
         let ir = crate::lower(&module);
         let def = ir.defs.first().expect("def lowered");
         let dims = Dims { x: 3, y: 1, z: 3 };
-        let pos =
-            port_world_position((10, 0, 20), dims, def, &pid("light")).expect("port resolves");
+        let pos = port_world_position((10, 0, 20), dims, def, &pid("light"), &declared_column(def))
+            .expect("port resolves");
         assert_eq!(pos, (11, 0, 19));
     }
 
@@ -1496,8 +1514,8 @@ mod tests {
         let ir = crate::lower(&module);
         let def = ir.defs.first().expect("def lowered");
         let dims = Dims { x: 3, y: 1, z: 3 };
-        let pos =
-            port_world_position((10, 0, 20), dims, def, &pid("light")).expect("port resolves");
+        let pos = port_world_position((10, 0, 20), dims, def, &pid("light"), &declared_column(def))
+            .expect("port resolves");
         assert_eq!(pos, (9, 0, 21));
     }
 
@@ -1516,8 +1534,8 @@ mod tests {
         let ir = crate::lower(&module);
         let def = ir.defs.first().expect("def lowered");
         let dims = Dims { x: 3, y: 1, z: 3 };
-        let pos =
-            port_world_position((10, 0, 20), dims, def, &pid("light")).expect("port resolves");
+        let pos = port_world_position((10, 0, 20), dims, def, &pid("light"), &declared_column(def))
+            .expect("port resolves");
         assert_eq!(pos, (13, 0, 21));
     }
 
@@ -1537,8 +1555,8 @@ mod tests {
         let ir = crate::lower(&module);
         let def = ir.defs.first().expect("def lowered");
         let dims = Dims { x: 5, y: 1, z: 5 };
-        let pos =
-            port_world_position((10, 0, 20), dims, def, &pid("light")).expect("port resolves");
+        let pos = port_world_position((10, 0, 20), dims, def, &pid("light"), &declared_column(def))
+            .expect("port resolves");
         assert_eq!(pos, (11, 0, 24));
     }
 
@@ -1559,7 +1577,8 @@ mod tests {
         let ir = crate::lower(&module);
         let def = ir.defs.first().expect("def lowered");
         let dims = Dims { x: 11, y: 1, z: 9 };
-        let pos = port_world_position((0, 0, 0), dims, def, &pid("front")).expect("port resolves");
+        let pos = port_world_position((0, 0, 0), dims, def, &pid("front"), &declared_column(def))
+            .expect("port resolves");
         assert_eq!(pos, (4, 0, 8));
     }
 
@@ -1575,7 +1594,10 @@ mod tests {
         let ir = crate::lower(&module);
         let def = ir.defs.first().expect("def lowered");
         let dims = Dims { x: 3, y: 1, z: 3 };
-        assert!(port_world_position((0, 0, 0), dims, def, &pid("light")).is_none());
+        assert!(
+            port_world_position((0, 0, 0), dims, def, &pid("light"), &declared_column(def))
+                .is_none()
+        );
     }
 
     #[test]
@@ -1594,8 +1616,8 @@ mod tests {
         let ir = crate::lower(&module);
         let def = ir.defs.first().expect("def lowered");
         let dims = Dims { x: 3, y: 1, z: 3 };
-        let pos =
-            port_world_position((10, 0, 20), dims, def, &pid("light")).expect("port resolves");
+        let pos = port_world_position((10, 0, 20), dims, def, &pid("light"), &declared_column(def))
+            .expect("port resolves");
         assert_eq!(pos, (10, 0, 23));
     }
 
@@ -1620,8 +1642,8 @@ mod tests {
         // the `place_origin.1` lift, so the full `(x, y, z)` triple is
         // pinned: a regression that honours `window.y` would land the
         // port at `(10, 11, 23)` instead of `(10, 7, 23)`.
-        let pos =
-            port_world_position((10, 7, 20), dims, def, &pid("light")).expect("port resolves");
+        let pos = port_world_position((10, 7, 20), dims, def, &pid("light"), &declared_column(def))
+            .expect("port resolves");
         assert_eq!(pos, (10, 7, 23));
     }
 
@@ -1637,7 +1659,9 @@ mod tests {
         let ir = crate::lower(&module);
         let def = ir.defs.first().expect("def lowered");
         let dims = Dims { x: 3, y: 1, z: 3 };
-        assert!(port_world_position((0, 0, 0), dims, def, &pid("top")).is_none());
+        assert!(
+            port_world_position((0, 0, 0), dims, def, &pid("top"), &declared_column(def)).is_none()
+        );
     }
 
     #[test]
@@ -1648,7 +1672,9 @@ mod tests {
         let ir = crate::lower(&module);
         let def = ir.defs.first().expect("def lowered");
         let dims = Dims { x: 3, y: 1, z: 3 };
-        assert!(port_world_position((0, 0, 0), dims, def, &pid("up")).is_none());
+        assert!(
+            port_world_position((0, 0, 0), dims, def, &pid("up"), &declared_column(def)).is_none()
+        );
     }
 
     #[test]
@@ -1671,8 +1697,8 @@ mod tests {
         let ir = crate::lower(&module);
         let def = ir.defs.first().expect("def lowered");
         let dims = Dims { x: 3, y: 1, z: 3 };
-        let pos =
-            port_world_position((10, 0, 20), dims, def, &pid("light")).expect("port resolves");
+        let pos = port_world_position((10, 0, 20), dims, def, &pid("light"), &declared_column(def))
+            .expect("port resolves");
         assert_eq!(pos, (12, 0, 23));
     }
 
@@ -1691,8 +1717,8 @@ mod tests {
         let ir = crate::lower(&module);
         let def = ir.defs.first().expect("def lowered");
         let dims = Dims { x: 3, y: 1, z: 3 };
-        let pos =
-            port_world_position((10, 0, 20), dims, def, &pid("light")).expect("port resolves");
+        let pos = port_world_position((10, 0, 20), dims, def, &pid("light"), &declared_column(def))
+            .expect("port resolves");
         assert_eq!(pos, (10, 0, 23));
     }
 
@@ -1712,7 +1738,10 @@ mod tests {
         let def = ir.defs.first().expect("def lowered");
         let dims = Dims { x: 3, y: 1, z: 3 };
         // `walls height=2` paints rows 1..=2; the rectangle wants 2..=3.
-        assert!(port_world_position((0, 0, 0), dims, def, &pid("light")).is_none());
+        assert!(
+            port_world_position((0, 0, 0), dims, def, &pid("light"), &declared_column(def))
+                .is_none()
+        );
     }
 
     #[test]
@@ -1730,7 +1759,10 @@ mod tests {
         let ir = crate::lower(&module);
         let def = ir.defs.first().expect("def lowered");
         let dims = Dims { x: 3, y: 1, z: 3 };
-        assert!(port_world_position((0, 0, 0), dims, def, &pid("light")).is_none());
+        assert!(
+            port_world_position((0, 0, 0), dims, def, &pid("light"), &declared_column(def))
+                .is_none()
+        );
     }
 
     #[test]
@@ -1751,8 +1783,8 @@ mod tests {
         let ir = crate::lower(&module);
         let def = ir.defs.first().expect("def lowered");
         let dims = Dims { x: 5, y: 1, z: 5 };
-        let pos =
-            port_world_position((10, 0, 20), dims, def, &pid("light")).expect("port resolves");
+        let pos = port_world_position((10, 0, 20), dims, def, &pid("light"), &declared_column(def))
+            .expect("port resolves");
         assert_eq!(pos, (13, 0, 20));
     }
 
@@ -1772,8 +1804,8 @@ mod tests {
         let ir = crate::lower(&module);
         let def = ir.defs.first().expect("def lowered");
         let dims = Dims { x: 5, y: 1, z: 5 };
-        let pos =
-            port_world_position((10, 0, 20), dims, def, &pid("light")).expect("port resolves");
+        let pos = port_world_position((10, 0, 20), dims, def, &pid("light"), &declared_column(def))
+            .expect("port resolves");
         assert_eq!(pos, (14, 0, 23));
     }
 
@@ -1781,13 +1813,17 @@ mod tests {
     fn port_world_position_returns_none_for_unknown_port_id() {
         let src = concat!(
             "def cottage size=3x3:\n",
+            "  walls mat_slot=w height=3\n",
             "  door id=entry side=front at=center\n",
         );
         let module = crate::parse(src).expect("parse");
         let ir = crate::lower(&module);
         let def = ir.defs.first().expect("def lowered");
         let dims = Dims { x: 3, y: 1, z: 3 };
-        assert!(port_world_position((0, 0, 0), dims, def, &pid("nope")).is_none());
+        assert!(
+            port_world_position((0, 0, 0), dims, def, &pid("nope"), &declared_column(def))
+                .is_none()
+        );
     }
 
     #[test]
@@ -1797,14 +1833,15 @@ mod tests {
         // = (10, _, 22); +1 in the +z normal step → port (10, 0, 23).
         let src = concat!(
             "def cottage size=3x3:\n",
+            "  walls mat_slot=w height=3\n",
             "  door id=entry side=front at=left\n",
         );
         let module = crate::parse(src).expect("parse");
         let ir = crate::lower(&module);
         let def = ir.defs.first().expect("def lowered");
         let dims = Dims { x: 3, y: 1, z: 3 };
-        let pos =
-            port_world_position((10, 0, 20), dims, def, &pid("entry")).expect("port resolves");
+        let pos = port_world_position((10, 0, 20), dims, def, &pid("entry"), &declared_column(def))
+            .expect("port resolves");
         assert_eq!(pos, (10, 0, 23));
     }
 
@@ -1815,14 +1852,15 @@ mod tests {
         // 22); +1 in the +z normal step → port (12, 0, 23).
         let src = concat!(
             "def cottage size=3x3:\n",
+            "  walls mat_slot=w height=3\n",
             "  door id=entry side=front at=right\n",
         );
         let module = crate::parse(src).expect("parse");
         let ir = crate::lower(&module);
         let def = ir.defs.first().expect("def lowered");
         let dims = Dims { x: 3, y: 1, z: 3 };
-        let pos =
-            port_world_position((10, 0, 20), dims, def, &pid("entry")).expect("port resolves");
+        let pos = port_world_position((10, 0, 20), dims, def, &pid("entry"), &declared_column(def))
+            .expect("port resolves");
         assert_eq!(pos, (12, 0, 23));
     }
 
@@ -1835,14 +1873,15 @@ mod tests {
         // (10, 0, 19).
         let src = concat!(
             "def cottage size=3x3:\n",
+            "  walls mat_slot=w height=3\n",
             "  door id=entry side=back at=left\n",
         );
         let module = crate::parse(src).expect("parse");
         let ir = crate::lower(&module);
         let def = ir.defs.first().expect("def lowered");
         let dims = Dims { x: 3, y: 1, z: 3 };
-        let pos =
-            port_world_position((10, 0, 20), dims, def, &pid("entry")).expect("port resolves");
+        let pos = port_world_position((10, 0, 20), dims, def, &pid("entry"), &declared_column(def))
+            .expect("port resolves");
         assert_eq!(pos, (12, 0, 19));
     }
 
@@ -1853,14 +1892,15 @@ mod tests {
         // x = origin.x; -1 in the -x normal step → port (9, 0, 22).
         let src = concat!(
             "def cottage size=3x3:\n",
+            "  walls mat_slot=w height=3\n",
             "  door id=entry side=left at=right\n",
         );
         let module = crate::parse(src).expect("parse");
         let ir = crate::lower(&module);
         let def = ir.defs.first().expect("def lowered");
         let dims = Dims { x: 3, y: 1, z: 3 };
-        let pos =
-            port_world_position((10, 0, 20), dims, def, &pid("entry")).expect("port resolves");
+        let pos = port_world_position((10, 0, 20), dims, def, &pid("entry"), &declared_column(def))
+            .expect("port resolves");
         assert_eq!(pos, (9, 0, 22));
     }
 
@@ -1873,14 +1913,15 @@ mod tests {
         // land at z = 20 instead.
         let src = concat!(
             "def cottage size=3x3:\n",
+            "  walls mat_slot=w height=3\n",
             "  door id=entry side=right at=left\n",
         );
         let module = crate::parse(src).expect("parse");
         let ir = crate::lower(&module);
         let def = ir.defs.first().expect("def lowered");
         let dims = Dims { x: 3, y: 1, z: 3 };
-        let pos =
-            port_world_position((10, 0, 20), dims, def, &pid("entry")).expect("port resolves");
+        let pos = port_world_position((10, 0, 20), dims, def, &pid("entry"), &declared_column(def))
+            .expect("port resolves");
         assert_eq!(pos, (13, 0, 22));
     }
 
@@ -1893,15 +1934,35 @@ mod tests {
         // overhang shift would land inside the eave at z = 23.
         let src = concat!(
             "def cottage size=3x3:\n",
+            "  walls mat_slot=w height=3\n",
             "  door id=entry side=front at=left\n",
         );
         let module = crate::parse(src).expect("parse");
         let ir = crate::lower(&module);
         let def = ir.defs.first().expect("def lowered");
         let dims = Dims { x: 5, y: 1, z: 5 };
-        let pos =
-            port_world_position((10, 0, 20), dims, def, &pid("entry")).expect("port resolves");
+        let pos = port_world_position((10, 0, 20), dims, def, &pid("entry"), &declared_column(def))
+            .expect("port resolves");
         assert_eq!(pos, (11, 0, 24));
+    }
+
+    #[test]
+    fn port_world_position_door_returns_none_when_the_body_paints_no_wall() {
+        // A doorway is a hole in a wall. `super::super::lower::carve_door`
+        // defers on the same question, so a port that did not ask it laid
+        // a strip to a doorway that was never carved.
+        let src = concat!(
+            "def cottage size=3x3:\n",
+            "  door id=entry side=front at=center\n",
+        );
+        let module = crate::parse(src).expect("parse");
+        let ir = crate::lower(&module);
+        let def = ir.defs.first().expect("def lowered");
+        let dims = Dims { x: 3, y: 1, z: 3 };
+        assert!(
+            port_world_position((0, 0, 0), dims, def, &pid("entry"), &WallColumn::default())
+                .is_none()
+        );
     }
 
     #[test]
@@ -1911,12 +1972,16 @@ mod tests {
         // silently rounded to a centre value.
         let src = concat!(
             "def cottage size=3x3:\n",
+            "  walls mat_slot=w height=3\n",
             "  door id=entry side=front at=middle\n",
         );
         let module = crate::parse(src).expect("parse");
         let ir = crate::lower(&module);
         let def = ir.defs.first().expect("def lowered");
         let dims = Dims { x: 3, y: 1, z: 3 };
-        assert!(port_world_position((0, 0, 0), dims, def, &pid("entry")).is_none());
+        assert!(
+            port_world_position((0, 0, 0), dims, def, &pid("entry"), &declared_column(def))
+                .is_none()
+        );
     }
 }

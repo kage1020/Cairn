@@ -10,6 +10,29 @@ and is a separate axis from the Minecraft target version.
 
 ## [Unreleased]
 
+### Breaking changes
+
+- *(core)* A `connect` row anchors its ports to the masonry the placement actually painted, so the
+  strip and the opening it runs to are decided by one answer instead of two. `walkway` used to
+  rebuild its own wall column from the `def`'s top-level `walls` members and their `height=`, and
+  the two readings disagreed in both directions: over `walls` whose `mat_slot=` did not resolve the
+  openings pass deferred the cut and the strip was laid anyway — a path to a window that was never
+  cut, and to a doorway that was never carved, because the door branch consulted no column at all
+  — while `walls` declared inside a `level` were painted, cut into, and then refused as an anchor,
+  which told an author to move a window that was already in masonry.
+
+  **Breaking**: a source whose walls paint nothing loses walkways it used to get, alongside the
+  `W_DEFERRED_MEMBER` the member already earned; one whose walls sit in a `level` gains walkways it
+  used to be refused. `port_world_position` is also no longer exported from `cairn_lang_core`: it
+  can only be asked correctly with the column the body was lowered against, which nothing outside
+  the pass holds, and exporting it is what invited the second derivation.
+
+  The column now travels beside the placement, from the phase that painted it to the pass that
+  reads it. Nothing derives it twice, so the rule has nowhere left to drift: a level-scoped wall
+  and an unresolvable material change the port's verdict because they changed the wall, not because
+  a second copy of the rule was taught about them. The row's `W_DEFERRED_MEMBER` gains a fourth
+  note for the masonry contract, and it is the only one of the four whose repair is on another
+  line — so it says that the member that could not be built says so on its own line.
 
 
 
