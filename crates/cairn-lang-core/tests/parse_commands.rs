@@ -488,6 +488,77 @@ fn int_literal_overflow_surfaces_invalid_int_variant() {
     assert_eq!(kind, IntErrorKind::PosOverflow);
 }
 
+/// The `within` bound is the one site whose `IntContext` this layering
+/// changed, and it needs a bound past `i64` to reach.
+///
+/// `within_overflow_surfaces_invalid_int_variant` above uses `4294967296`
+/// — past `u32` but inside `i64` — so the lexer built a token for it and
+/// `parse_assert_always` reported it either way. A bound past `i64` used
+/// to be refused by the lexer first, as a bare `IntLiteral`; now it
+/// reaches the site that knows what the digits were for and says
+/// "invalid `within` bound" instead. The better phrasing, pinned as a
+/// deliberate outcome rather than left as an unremarked side effect.
+#[test]
+fn a_within_bound_past_i64_is_a_within_bound_error_not_a_literal_one() {
+    let err = parse("struct s\n  assert always(a -> eventually b within 99999999999999999999)\n")
+        .expect_err("overflow");
+    let ParseError::InvalidInt {
+        context,
+        lexeme,
+        kind,
+        ..
+    } = err
+    else {
+        panic!("expected ParseError::InvalidInt, got {err:?}");
+    };
+    assert_eq!(context, IntContext::WithinBound);
+    assert_eq!(lexeme, "99999999999999999999");
+    assert_eq!(kind, IntErrorKind::PosOverflow);
+}
+
+/// A diagnostic from inside `@intended_targets` names the line the
+/// directive is on.
+///
+/// The directive re-lexes its value as a detached slice, so the
+/// sub-parse counts from its own 1:1 and every position out of it has to
+/// be rebased. Nothing checked that while the only reachable failures
+/// were `Syntax`; moving the integer range check out of the lexer put
+/// `InvalidInt` on that path too, and it arrived pointing at line 1.
+#[test]
+fn an_error_inside_intended_targets_points_at_the_directive() {
+    let source = "@cairn 2026.06\n@intended_targets [\"a\", 99999999999999999999]\n";
+    let err = parse(source).expect_err("overflow");
+    // Column 25 of line 2 is the first `9`: `@intended_targets ` is 18
+    // characters, the list opens at 19, and the element starts 6 further in.
+    assert_eq!(err.position(), pos(2, 25));
+    assert_eq!(
+        source.lines().nth(1).and_then(|l| l.chars().nth(24)),
+        Some('9'),
+        "the asserted column should land on the offending literal",
+    );
+}
+
+/// And the line offset is a line offset, not a constant: the same
+/// directive further down the file reports further down the file.
+#[test]
+fn a_rebased_position_tracks_the_directives_own_line() {
+    let err = parse(
+        "@cairn 2026.06\n@requires version>=1.20\n@intended_targets [\"a\", 99999999999999999999]\n",
+    )
+    .expect_err("overflow");
+    assert_eq!(err.position(), pos(3, 25));
+}
+
+/// The same path carried a wrong position before this layering touched
+/// it — a zero extent is `parse_value`'s refusal too — so the rebase
+/// fixes that case at the same time rather than only the one that
+/// regressed.
+#[test]
+fn a_zero_extent_inside_intended_targets_is_located_too() {
+    let err = parse("@cairn 2026.06\n@intended_targets [\"a\", 0x3]\n").expect_err("zero extent");
+    assert_eq!(err.position(), pos(2, 25));
+}
+
 #[test]
 fn invalid_int_carries_position() {
     let err = parse("struct s\n  assert always(a -> eventually b within 4294967296)\n")

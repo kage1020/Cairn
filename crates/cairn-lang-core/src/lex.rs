@@ -129,7 +129,7 @@ impl std::fmt::Display for TokenKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Ident(name) => write!(f, "identifier `{name}`"),
-            Self::Int { lexeme } => write!(f, "integer `{lexeme}`"),
+            Self::Int { lexeme, .. } => write!(f, "integer `{lexeme}`"),
             Self::Bool(b) => write!(f, "`{b}`"),
             Self::Str(_) => f.write_str("string literal"),
             Self::Size(w, h) => write!(f, "size `{w}x{h}`"),
@@ -515,9 +515,12 @@ impl<'src> Lexer<'src> {
             return Ok(());
         }
         // Digits only, no value: see `TokenKind::Int`. A `Size` above is
-        // the other way round because `WxH` can only be two extents —
-        // there is no position in the language where `9x7` is anything
-        // but a size, so the lexer is entitled to build one.
+        // the other way round because no production today reads
+        // digits-`x`-digits as anything but a size, so the lexer is
+        // entitled to build one. That is a fact about the current
+        // grammar rather than a guarantee — a truth-table don't-care bit
+        // spelled `x` would make `1x0 -> 1` a `Size(1, 0)`, and this is
+        // the branch that would have to learn about it.
         let lexeme = self.src[start..lexeme_end].to_owned();
         self.push_at(TokenKind::Int { lexeme }, start..self.pos, position);
         Ok(())

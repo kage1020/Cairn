@@ -201,9 +201,19 @@ impl<'a> Parser<'a> {
             }),
             "intended_targets" => {
                 // Re-parse the raw value as a list of strings.
-                let sub_tokens = lex(&raw)?;
+                //
+                // The slice is detached from the file, so the sub-parse
+                // counts from its own 1:1 and every diagnostic out of it
+                // has to be rebased onto `value_start_pos` before it
+                // reaches a caller. Without that a bad element is
+                // reported on line 1 of the file whatever line the
+                // directive is on.
+                let sub_tokens =
+                    lex(&raw).map_err(|err| ParseError::from(err).rebased(value_start_pos))?;
                 let mut p = Parser::new(&raw, &sub_tokens);
-                let value = p.parse_value()?;
+                let value = p
+                    .parse_value()
+                    .map_err(|err| err.rebased(value_start_pos))?;
                 // Reject trailing tokens — `@intended_targets [..] junk` should fail.
                 if !matches!(p.peek().map(|t| &t.kind), None | Some(TokenKind::Newline),) {
                     return Err(ParseError::Syntax {
@@ -760,13 +770,10 @@ impl<'a> Parser<'a> {
                 })?;
                 Ok(Value::new(ValueKind::Size { w, h }, size_span))
             }
-            TokenKind::Int { lexeme } => {
+            TokenKind::Int { lexeme, .. } => {
                 self.advance();
-                // The token is digits; a value position is where they are
-                // asked to be an `i64`, so this is where the ceiling
-                // belongs. `assert truth`'s row patterns take the same
-                // token and never ask, which is why a twenty-bit row is
-                // no longer an overflow.
+                // Where the digits are asked to be a number, so where the
+                // `i64` ceiling belongs. See `TokenKind::Int`.
                 let value = lexeme
                     .parse::<i64>()
                     .map_err(|err: std::num::ParseIntError| ParseError::InvalidInt {
@@ -913,7 +920,7 @@ impl<'a> Parser<'a> {
                 message: "expected integer literal, got end of input".into(),
             });
         };
-        if let TokenKind::Int { lexeme } = token.kind {
+        if let TokenKind::Int { lexeme, .. } = token.kind {
             self.advance();
             Ok(lexeme)
         } else {
