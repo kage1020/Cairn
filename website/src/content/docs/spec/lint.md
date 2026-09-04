@@ -65,15 +65,20 @@ covers a missing half, a missing or replaced `to` keyword, extra trailing positi
 endpoint that is not a one-dot `PLACE.PORT` reference. The two endpoints are reported separately,
 since they are independent fix sites.
 
-`E_INVALID_REQUIRES`: the accepted shape is `version`, `>=`, and a dotted-decimal version, with
-whitespace optional. The code covers any other operator, a missing version, a component that is not
-a decimal number or does not fit in a `u32`, and text after the version.
+`E_INVALID_REQUIRES`: the accepted shape is an optional edition, `version`, `>=`, and a version
+label, with whitespace optional. The code covers a word before `version` that is not an edition,
+any other operator, a missing version, a component that does not begin with a digit or does not fit
+in a `u32`, a `-` with no readable pre-release tag after it, and text after the version. It does
+*not* cover a well-formed label the target edition has no `DataVersion` for — that is
+`E_REQUIRES_UNORDERABLE`, and it is not a syntax fact.
 
 ### Materials and targets
 
 | Code | Meaning |
 |---|---|
 | `E_UNKNOWN_ID` | A resolved block ID the pinned target does not declare. |
+| `E_VERSION_CAP` | `--target` is below an `@requires` floor the source declares ([versioning-editions §10.4](versioning-editions)). |
+| `E_REQUIRES_UNORDERABLE` | An `@requires` floor names a version the target edition's `DataVersion` table cannot place ([versioning-editions §10.4](versioning-editions)). |
 | `E_INCOMPATIBLE_MATERIAL` | A member whose geometry attaches blockstates is bound to a material that cannot carry them. |
 | `E_MISSING_MATERIAL` | A member whose only route to a block is `mat_slot=` was written without one. |
 | `E_UNRESOLVED_SLOT` | A member's `mat_slot=` names a slot the bound theme does not declare. |
@@ -206,7 +211,7 @@ them. Codes not listed below omit `data` entirely, so the JSON key is absent rat
 | `E_UNKNOWN_ID` | `{ "kind": "unknown_id", "id", "registry", "origin", "token"?, "suggestion"? }`. See below. |
 | `E_INCOMPATIBLE_MATERIAL` | `{ "kind": "incompatible_material", "id", "required", "slot"?, "token"? }`. The bound material, the family the geometry needs, and where the binding came from. |
 | `E_INCOMPLETE_PLACE` | `{ "kind": "incomplete_place", "missing": ["id", "use", "theme"] }`. The keys the row does not declare. Never empty. |
-| `E_INVALID_REQUIRES` | `{ "kind": "invalid_requires", "reason", "found" }`. `reason` is one of `not_a_version_requirement`, `unsupported_operator`, `empty_version`, `component_not_a_number`, `component_too_large`, `trailing_tokens`. `found` is empty when the failure names no fragment. |
+| `E_INVALID_REQUIRES` | `{ "kind": "invalid_requires", "reason", "found" }`. `reason` is one of `not_a_version_requirement`, `unknown_edition_scope`, `unsupported_operator`, `empty_version`, `component_not_a_number`, `component_too_large`, `prerelease_not_a_tag`, `trailing_tokens`. `found` is empty when the failure names no fragment. |
 | `W_TRUTH_TABLE_PARTIAL` | `{ "kind": "truth_table_partial", "inputs": 2, "covered": 1, "missing": ["01","10","11"] }`. See below. |
 
 **`E_UNKNOWN_ID.origin`** says who chose the ID, because the repair differs:

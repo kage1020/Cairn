@@ -53,9 +53,40 @@ and is a separate axis from the Minecraft target version.
   note for the masonry contract, and it is the only one of the four whose repair is on another
   line — so it says that the member that could not be built says so on its own line.
 
+- *(core, cli)* `@requires` floors are ordered by `DataVersion` in the target edition's version
+  table, the key `spec/versioning-editions.md` §10.1 makes canonical, instead of by comparing
+  version labels component-wise as dotted decimals. That comparison had no way to tell two
+  editions' numbering apart: Java ships `1.20.4 / 1.21 / 1.21.4` and Bedrock
+  `1.21.0 / 1.21.40 / 1.21.60`, so `@requires version>=1.21.4` read as satisfied by Bedrock
+  `1.21.40` on `40 > 4` and wrote a lock saying `verified: true` for a target the source rules out
+  — the same defect enforcing the floor exists to remove, one edition to the left.
 
+  A floor may now name the edition it is written in — `@requires java version>=1.21.4` — which
+  constrains that edition's build and is inert in the other's. An unscoped floor is a floor on
+  whichever edition is built and is resolved in that edition's table, so `@requires version>=1.21`
+  still means Java's `1.21` and Bedrock's `1.21.0`.
 
+  A floor the table cannot place — inside its span, naming no row, which is what a floor in the
+  other edition's numbering is — is the new `E_REQUIRES_UNORDERABLE` rather than a guess. A floor
+  below every row is met by every target and one above every row by none, since those two answers
+  hold whatever key each row carries.
 
+  **Breaking**: `resolve::declared_version_floor` is replaced by `declared_version_floors(module,
+  edition)`, which returns every floor that edition's build is held to instead of the strictest of
+  them — picking the strictest needs an ordering, and the ordering is now per edition.
+  `parse_requirement` / `parse_min_version` return a `Requirement` carrying the edition scope
+  rather than a bare `&str`. A Bedrock build of a source declaring a Java-shaped floor now fails
+  where it used to succeed, which is the point.
+
+- *(core)* `@requires` accepts every version-label shape `spec/versioning-editions.md` §10.1 says
+  will exist: the pre-release `1.21.4-rc1`, a snapshot `24w14a`, and whatever a date-based scheme
+  spells. A `-` is now a token rather than a lexer error, so the suffix reaches the directive at
+  all — a header's value is the raw source between its tokens, so a character the lexer refuses
+  never reaches the pass that would accept it. A pre-release sorts below the release it names.
+  Accepting a label is not a claim that it can be ordered: that is the target edition's table's
+  answer, given at `cairn compile --target`. `RequirementError` gains `UnknownEditionScope` and
+  `PreRelease`, and `E_INVALID_REQUIRES`'s `reason` payload gains `unknown_edition_scope` and
+  `prerelease_not_a_tag`.
 
 ## 2026.9.0 — 2026-09-01
 

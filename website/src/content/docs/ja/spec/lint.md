@@ -64,15 +64,19 @@ title: "11. Lint と制約検証"
 キーワードの欠落や別トークンへの置き換え、末尾の余分な位置引数、ドット 1 つの `PLACE.PORT` 参照で
 ない端点を対象にします。2 つの端点は独立した修正箇所なので別々に報告されます。
 
-`E_INVALID_REQUIRES`: 受け付ける形は `version`、`>=`、ドット区切り 10 進バージョンの 3 つで、
-空白は任意です。それ以外の演算子、バージョンの欠落、10 進数でないか `u32` に収まらない構成要素、
-バージョン後の余分なテキストを対象にします。
+`E_INVALID_REQUIRES`: 受け付ける形は任意のエディション、`version`、`>=`、バージョンラベルで、空白は
+任意です。`version` の前にあるエディションでない語、それ以外の演算子、バージョンの欠落、数字で始まら
+ないか `u32` に収まらない構成要素、`-` の後に読めるプレリリースタグが無いもの、バージョン後の余分な
+テキストを対象にします。ターゲットのエディションが `DataVersion` を持たない整形式のラベルは対象では
+**ありません**。それは `E_REQUIRES_UNORDERABLE` で、構文の問題ではないからです。
 
 ### マテリアルとターゲット
 
 | コード | 意味 |
 |---|---|
 | `E_UNKNOWN_ID` | 固定されたターゲットが宣言していない解決済みブロック ID。 |
+| `E_VERSION_CAP` | `--target` がソースの宣言する `@requires` の下限を下回る ([versioning-editions §10.4](/ja/spec/versioning-editions))。 |
+| `E_REQUIRES_UNORDERABLE` | `@requires` の下限が、ターゲットのエディションの `DataVersion` 表で位置づけられないバージョンを名指す ([versioning-editions §10.4](/ja/spec/versioning-editions))。 |
 | `E_INCOMPATIBLE_MATERIAL` | ブロックステートを付けるジオメトリを持つメンバが、それを保持できないマテリアルに束縛されている。 |
 | `E_MISSING_MATERIAL` | ブロックへの唯一の経路が `mat_slot=` であるメンバが、それを持たずに書かれている。 |
 | `E_UNRESOLVED_SLOT` | メンバの `mat_slot=` が、束縛されたテーマの宣言していないスロットを指している。 |
@@ -206,7 +210,7 @@ placement が同じテーマを束縛しながら 1 つのスロットについ�
 | `E_UNKNOWN_ID` | `{ "kind": "unknown_id", "id", "registry", "origin", "token"?, "suggestion"? }`。後述。 |
 | `E_INCOMPATIBLE_MATERIAL` | `{ "kind": "incompatible_material", "id", "required", "slot"?, "token"? }`。束縛されたマテリアル、ジオメトリが必要とするファミリ、束縛の出どころ。 |
 | `E_INCOMPLETE_PLACE` | `{ "kind": "incomplete_place", "missing": ["id", "use", "theme"] }`。行が宣言していないキー。常に非空。 |
-| `E_INVALID_REQUIRES` | `{ "kind": "invalid_requires", "reason", "found" }`。`reason` は `not_a_version_requirement` / `unsupported_operator` / `empty_version` / `component_not_a_number` / `component_too_large` / `trailing_tokens` のいずれか。失敗が断片を名指ししないとき `found` は空。 |
+| `E_INVALID_REQUIRES` | `{ "kind": "invalid_requires", "reason", "found" }`。`reason` は `not_a_version_requirement` / `unknown_edition_scope` / `unsupported_operator` / `empty_version` / `component_not_a_number` / `component_too_large` / `prerelease_not_a_tag` / `trailing_tokens` のいずれか。失敗が断片を名指ししないとき `found` は空。 |
 | `W_TRUTH_TABLE_PARTIAL` | `{ "kind": "truth_table_partial", "inputs": 2, "covered": 1, "missing": ["01","10","11"] }`。後述。 |
 
 **`E_UNKNOWN_ID.origin`** は誰がその ID を選んだかを示します。修復先が違うからです。

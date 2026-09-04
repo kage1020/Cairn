@@ -315,20 +315,51 @@ pub fn compute_axes(
     }
 }
 
+/// The `registry compatibility` row's lower edge, as text.
+///
+/// Only the floors that carry no edition feed it. The row is
+/// edition-neutral — one range for a file `cairn info` may be reporting
+/// against both editions at once — and a floor written in one edition's
+/// numbering has no meaning in the other's, so it belongs to the
+/// per-edition `buildable targets` row instead.
+///
+/// The strictest of several is picked with [`compare_versions`], which is
+/// the label comparison rather than the `DataVersion` key. That is sound
+/// here and nowhere else: this row renders a version the *author* wrote,
+/// with no edition and so no table to resolve it in, and picking the wrong
+/// one of two floors an author declared changes which line is echoed
+/// rather than which targets build.
 fn derive_min_version(module: &Module) -> String {
-    declared_version_floor(module).map_or_else(|| "0.0".to_owned(), |floor| floor.version)
+    declared_version_floors(module, None)
+        .into_iter()
+        .reduce(|best, next| {
+            if compare_versions(&next.version, &best.version).is_gt() {
+                next
+            } else {
+                best
+            }
+        })
+        .map_or_else(|| "0.0".to_owned(), |floor| floor.version)
 }
 
-/// The strictest version floor `module` declares, and the directive that
-/// declared it.
+/// Every version floor `module` declares that a build of `edition` is held
+/// to, in source order.
 ///
-/// `@requires` floors compose by taking the maximum: each line adds a
+/// `@requires` floors compose by taking the intersection: each line adds a
 /// constraint rather than displacing the one before (spec syntax §5.3), and
-/// `[a, ∞) ∩ [b, ∞)` is `[max(a, b), ∞)`. Two lines naming the *same*
-/// version — `version>=1.21` and `version>=1.21.0` — leave the maximum
-/// undecided, and the first one wins, so a diagnostic points at the line
-/// that has been there longest rather than moving when an equivalent one is
-/// appended below it.
+/// `[a, ∞) ∩ [b, ∞)` is `[max(a, b), ∞)`. They are returned as a list
+/// rather than folded to that maximum here, because the fold needs an
+/// ordering and the ordering is `DataVersion` — a per-edition table this
+/// crate does not hold. A caller that has one weighs each floor against
+/// the target and reports the first that refuses it, which reaches the
+/// same answer without ever comparing two floors to each other.
+///
+/// `edition` says which build is asking. `Some(e)` collects the floors
+/// scoped to `e` and the unscoped ones, since an unscoped floor is a floor
+/// on whatever is being built. `None` is the edition-neutral question and
+/// collects only the unscoped floors: a floor written in Java's numbering
+/// says nothing about a file's Bedrock range, and reading it as if it did
+/// is the defect the scope exists to remove.
 ///
 /// Requirements the grammar refuses declare nothing and are skipped here.
 /// They are reported by `check::requires` at `Error` severity, which is
@@ -336,29 +367,36 @@ fn derive_min_version(module: &Module) -> String {
 /// has already been called a mistake — see
 /// `crates/cairn-lang-core/tests/silent_skip_arms.rs` for the caller that
 /// bypasses `check` and what it gets instead.
-///
-/// Returns `None` when the module declares no usable floor, which is the
-/// ordinary case: the constraint is optional. Callers wanting the
-/// `cairn info` rendering of that (`"0.0"`) should ask [`compute_axes`].
 #[must_use]
-pub fn declared_version_floor(module: &Module) -> Option<VersionFloor> {
-    let mut best: Option<VersionFloor> = None;
+pub fn declared_version_floors(module: &Module, edition: Option<Edition>) -> Vec<VersionFloor> {
+    let mut floors = Vec::new();
     for header in &module.headers {
         if let Header::Requires { requirement, span } = header
-            && let Some(version) = parse_min_version(requirement.as_str())
+            && let Some(parsed) = parse_min_version(requirement.as_str())
+            && applies_to(parsed.edition, edition)
         {
-            let strictest = best
-                .as_ref()
-                .is_none_or(|prev| compare_versions(version, &prev.version).is_gt());
-            if strictest {
-                best = Some(VersionFloor {
-                    version: version.to_owned(),
-                    span: span.clone(),
-                });
-            }
+            floors.push(VersionFloor {
+                version: parsed.version.to_owned(),
+                edition: parsed.edition,
+                span: span.clone(),
+            });
         }
     }
-    best
+    floors
+}
+
+/// Whether a floor scoped to `declared` is part of a build of `asked`.
+///
+/// An unscoped floor is in every build. A scoped one is in its own
+/// edition's build and inert in the other's — not violated by it, which is
+/// the reading that would make a file declaring a floor per edition
+/// unbuildable everywhere.
+fn applies_to(declared: Option<Edition>, asked: Option<Edition>) -> bool {
+    match (declared, asked) {
+        (None, _) => true,
+        (Some(_), None) => false,
+        (Some(declared), Some(asked)) => declared == asked,
+    }
 }
 
 /// A version floor a module declares, with the directive it came from.
@@ -369,8 +407,12 @@ pub fn declared_version_floor(module: &Module) -> Option<VersionFloor> {
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct VersionFloor {
-    /// The version as written, already known to be dotted decimal.
+    /// The version label as written, already known to be shaped like a
+    /// version. Whether it names one the target edition ships is the
+    /// [`super::VersionOrder`]'s answer, not this type's.
     pub version: String,
+    /// The edition the directive scoped the floor to, when it named one.
+    pub edition: Option<Edition>,
     /// Byte range of the `@requires` directive that declared it.
     pub span: Span,
 }

@@ -1,0 +1,394 @@
+//! Ordering Minecraft versions by `DataVersion`, per edition.
+//!
+//! `spec/versioning-editions.md` §10.1 makes `DataVersion` — the
+//! monotonically increasing integer Mojang assigns — the canonical
+//! ordering key, precisely so ordering survives the move from semver-ish
+//! (`1.21.4`) to date-based labels. This module is that key, applied to
+//! the one question `@requires` asks: does a target sit at or above the
+//! floor a source declares?
+//!
+//! The table it orders against ships in the registry pack
+//! (`registry-data/{java,bedrock}/data_versions.json`) and is handed in by
+//! the caller, because `core` does not depend on `cairn-lang-formats` —
+//! the same arrangement the per-edition portability counts use.
+//!
+//! # Why a floor needs more than a lookup
+//!
+//! A table names the versions the pack was built for. A floor may name any
+//! version: `@requires version>=1.19` is an ordinary thing to write and is
+//! in no table Cairn ships. A pure lookup could not answer for it, and
+//! answering by comparing the label text is the convention §10.1 exists to
+//! get away from.
+//!
+//! What resolves that is a distinction between the questions a table
+//! *cannot* be wrong about and the ones it can:
+//!
+//! - A label naming a row is that row's key. Exact.
+//! - A label naming a *pre-release* of a row sits directly below it, and
+//!   no release ships between the two, so against a table of releases it
+//!   answers the same as the row it precedes.
+//! - A label below every row is satisfied by every target, and one above
+//!   every row by none — whichever key each row happens to carry. Placing
+//!   it there is a comparison of labels, so it is only trusted between
+//!   labels in one numbering scheme ([`is_dotted_decimal`]); a dotted
+//!   decimal against a date-based row is exactly the comparison this
+//!   module exists to avoid.
+//! - Anything else — a label inside the table's span that names no row —
+//!   has no key and cannot be given one. It is [`FloorPlacement::Unplaceable`],
+//!   and the caller refuses the build rather than guessing.
+//!
+//! That last case is not a rare corner. It is where the cross-edition
+//! defect lives: `@requires version>=1.21.4` against Bedrock, whose
+//! releases run `1.21.0 / 1.21.40 / 1.21.60`. Java's newest release names
+//! no Bedrock version, sits inside Bedrock's span, and the dotted-decimal
+//! comparison this replaced read it as satisfied by `1.21.40` on `40 > 4`
+//! — certifying a build against a version below the floor. Here it is
+//! unplaceable, and the repair is the edition scope the directive now
+//! accepts.
+
+use super::requires_parse::{compare_versions, is_dotted_decimal};
+
+/// One edition's `(version label, DataVersion)` table, as an ordering.
+///
+/// Holds rows in ascending key order, which is the order §10.1 defines and
+/// not necessarily the order the JSON file lists them in. Every question
+/// below is answered from the keys; the labels are consulted only for the
+/// exact lookup and for the two boundary comparisons the module doc names.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VersionOrder {
+    /// Rows, ascending by [`VersionRow::key`].
+    rows: Vec<VersionRow>,
+}
+
+/// One row of a [`VersionOrder`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct VersionRow {
+    /// Human-facing label, e.g. `"1.21.4"`.
+    label: String,
+    /// The edition's version integer: Java's `DataVersion`, Bedrock's
+    /// block-palette `version`. Only ever compared within one edition's
+    /// table, which is what lets two different meanings share the column.
+    key: i64,
+}
+
+/// Where a floor's label sits in a [`VersionOrder`].
+///
+/// Four answers rather than an `Option<i64>`, because "below every row"
+/// and "above every row" are answers — every target satisfies the floor,
+/// and none does — while "cannot be placed" is the absence of one. Folding
+/// the three together would leave the caller unable to tell a floor every
+/// target meets from a floor nothing can be said about.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum FloorPlacement {
+    /// The label names a row, or the pre-release of one. Holds that row's
+    /// key.
+    At(i64),
+    /// The label sits below every row the table carries.
+    BelowEvery,
+    /// The label sits above every row the table carries.
+    AboveEvery,
+    /// The table cannot place the label: it names no row, and no
+    /// comparison this module trusts puts it outside the rows either.
+    Unplaceable,
+}
+
+/// What one floor says about one target.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum FloorVerdict {
+    /// The target is at or above the floor.
+    Satisfied,
+    /// The target is below the floor.
+    Below,
+    /// The floor cannot be placed in this edition's table, so neither
+    /// answer can be given. Distinct from [`Self::Below`]: a build refused
+    /// for this reason is refused because the *floor* names no version
+    /// here, and telling its author to raise `--target` would send them
+    /// after a version that does not exist.
+    Unplaceable,
+}
+
+impl VersionOrder {
+    /// Build an ordering from a pack's `(label, key)` rows.
+    ///
+    /// Sorted here rather than trusted from the caller: the JSON file's
+    /// row order is documented as informational, and every answer below
+    /// reads the first and last rows as the table's bounds.
+    #[must_use]
+    pub fn new(rows: impl IntoIterator<Item = (String, i64)>) -> Self {
+        let mut rows: Vec<VersionRow> = rows
+            .into_iter()
+            .map(|(label, key)| VersionRow { label, key })
+            .collect();
+        rows.sort_by_key(|row| row.key);
+        Self { rows }
+    }
+
+    /// The table's `(label, key)` rows, ascending by key.
+    ///
+    /// The key rides along rather than being looked up again by label,
+    /// because a caller weighing several floors at once — which is what a
+    /// module declaring more than one `@requires` line needs — would
+    /// otherwise re-find each row it is already holding, through a lookup
+    /// that has to be told it cannot miss.
+    pub fn rows(&self) -> impl Iterator<Item = (&str, i64)> {
+        self.rows.iter().map(|row| (row.label.as_str(), row.key))
+    }
+
+    /// The key a label names, when it names a row.
+    ///
+    /// Matched with [`compare_versions`] rather than by string equality,
+    /// so a row is found through the one difference between two spellings
+    /// of one version that carries no information: its trailing zeros.
+    /// Bedrock's earliest supported release is `1.21.0` and a floor of
+    /// `1.21` is that release, not a version between two others. Every
+    /// other way two labels can differ leaves them unequal under that
+    /// comparison, so this stays a lookup rather than becoming the
+    /// text-ordering the module doc refuses.
+    #[must_use]
+    pub fn key_of(&self, label: &str) -> Option<i64> {
+        self.rows
+            .iter()
+            .find(|row| compare_versions(&row.label, label).is_eq())
+            .map(|row| row.key)
+    }
+
+    /// Place a floor's label against the table.
+    #[must_use]
+    pub fn place(&self, label: &str) -> FloorPlacement {
+        if let Some(key) = self.key_of(label) {
+            return FloorPlacement::At(key);
+        }
+        let (Some(lowest), Some(highest)) = (self.rows.first(), self.rows.last()) else {
+            // An empty table places nothing. Reachable only through a pack
+            // whose version component is empty, which is not a pack any
+            // build can pin a target in either.
+            return FloorPlacement::Unplaceable;
+        };
+        let (core, pre_release) = match label.split_once('-') {
+            Some((core, _)) => (core, true),
+            None => (label, false),
+        };
+        // A pre-release of a known release answers as that release does.
+        // The two differ only for a target between them, and Minecraft
+        // ships none: `1.21.4-rc1` is the candidate *for* `1.21.4`.
+        if pre_release && let Some(key) = self.key_of(core) {
+            return FloorPlacement::At(key);
+        }
+        if !is_dotted_decimal(core) {
+            return FloorPlacement::Unplaceable;
+        }
+        // Below the lowest row: `core < lowest`, and a pre-release of
+        // `core` is lower still. `core == lowest` cannot reach here, since
+        // both lookups above would have caught it.
+        if is_dotted_decimal(&lowest.label) && compare_versions(core, &lowest.label).is_lt() {
+            return FloorPlacement::BelowEvery;
+        }
+        // Above the highest row: a pre-release of a `core` above every row
+        // is above them too, since the release it precedes is the next one
+        // to ship and the table's newest row is older than that.
+        if is_dotted_decimal(&highest.label) && compare_versions(core, &highest.label).is_gt() {
+            return FloorPlacement::AboveEvery;
+        }
+        FloorPlacement::Unplaceable
+    }
+
+    /// Weigh a floor against a target's key.
+    ///
+    /// The target is given as its key rather than as a label because every
+    /// caller resolved it through this same table to pin a build, and
+    /// passing the label back to be looked up again would make an
+    /// unresolvable target expressible here — a state no caller has.
+    #[must_use]
+    pub fn verdict(&self, floor: &str, target_key: i64) -> FloorVerdict {
+        match self.place(floor) {
+            FloorPlacement::At(key) => {
+                if target_key >= key {
+                    FloorVerdict::Satisfied
+                } else {
+                    FloorVerdict::Below
+                }
+            }
+            FloorPlacement::BelowEvery => FloorVerdict::Satisfied,
+            FloorPlacement::AboveEvery => FloorVerdict::Below,
+            FloorPlacement::Unplaceable => FloorVerdict::Unplaceable,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The Java rows the built-in pack ships, so the unit tests here and
+    /// the CLI's behaviour are talking about the same table.
+    fn java() -> VersionOrder {
+        VersionOrder::new([
+            ("1.20.4".to_owned(), 3700),
+            ("1.21".to_owned(), 3953),
+            ("1.21.4".to_owned(), 4189),
+        ])
+    }
+
+    /// The labels one floor admits, which is what a refusal offers as the
+    /// closed set of targets that would work. The caller doing this for
+    /// real folds several floors into one such list.
+    fn satisfying<'a>(order: &'a VersionOrder, floor: &str) -> Vec<&'a str> {
+        order
+            .rows()
+            .filter(|&(_, key)| order.verdict(floor, key) == FloorVerdict::Satisfied)
+            .map(|(label, _)| label)
+            .collect()
+    }
+
+    /// And Bedrock's, whose numbering is the reason the edition scope
+    /// exists.
+    fn bedrock() -> VersionOrder {
+        VersionOrder::new([
+            ("1.21.0".to_owned(), 18_153_472),
+            ("1.21.40".to_owned(), 18_163_712),
+            ("1.21.60".to_owned(), 18_168_865),
+        ])
+    }
+
+    #[test]
+    fn a_label_naming_a_row_is_that_row() {
+        assert_eq!(java().place("1.21"), FloorPlacement::At(3953));
+        assert_eq!(java().verdict("1.21", 3953), FloorVerdict::Satisfied);
+        assert_eq!(java().verdict("1.21", 4189), FloorVerdict::Satisfied);
+        assert_eq!(java().verdict("1.21", 3700), FloorVerdict::Below);
+    }
+
+    /// **The ordering key is the `DataVersion`, not the label.** A table
+    /// whose label order disagrees with its key order is the shape the
+    /// semver → date-based transition produces, and it is the only shape
+    /// that can tell the two conventions apart: on every table Cairn ships
+    /// today they agree, so a test built on those rows would pass under
+    /// either.
+    ///
+    /// Here `1.9` is the *newer* release and `1.21.4` the older one.
+    /// Component-wise over dotted decimals, `1.21.4 > 1.9` and a target of
+    /// `1.9` is below the floor. By `DataVersion` it is above it.
+    #[test]
+    fn the_key_decides_when_the_labels_disagree_with_it() {
+        let order = VersionOrder::new([("1.21.4".to_owned(), 4189), ("1.9".to_owned(), 5000)]);
+        assert!(
+            compare_versions("1.9", "1.21.4").is_lt(),
+            "the premise: the labels say the newer release is the lower one",
+        );
+        assert_eq!(order.verdict("1.21.4", 5000), FloorVerdict::Satisfied);
+        assert_eq!(
+            satisfying(&order, "1.21.4"),
+            vec!["1.21.4", "1.9"],
+            "and the rows come back in key order, not label order",
+        );
+        // And the older one is still below the floor, so the key is being
+        // read rather than the comparison merely being skipped.
+        assert_eq!(order.verdict("1.9", 4189), FloorVerdict::Below);
+    }
+
+    /// A floor below everything the table names is satisfied by
+    /// everything. `version>=1.19` is an ordinary line and no table Cairn
+    /// ships carries it.
+    #[test]
+    fn a_floor_below_every_row_is_met_by_every_target() {
+        assert_eq!(java().place("1.19"), FloorPlacement::BelowEvery);
+        assert_eq!(java().verdict("1.19", 3700), FloorVerdict::Satisfied);
+        assert_eq!(
+            satisfying(&java(), "1.19"),
+            vec!["1.20.4", "1.21", "1.21.4"],
+        );
+    }
+
+    /// And one above everything is met by nothing, which is a refusal that
+    /// can name the whole supported set rather than a target to try.
+    #[test]
+    fn a_floor_above_every_row_is_met_by_no_target() {
+        assert_eq!(java().place("99.0"), FloorPlacement::AboveEvery);
+        assert_eq!(java().verdict("99.0", 4189), FloorVerdict::Below);
+        assert!(satisfying(&java(), "99.0").is_empty());
+    }
+
+    /// The defect this module exists to remove. Java's newest release
+    /// names no Bedrock version and sits between two that exist, so it has
+    /// no key and cannot be given one — where the dotted-decimal
+    /// comparison read `1.21.40` as satisfying it on `40 > 4`.
+    #[test]
+    fn a_java_shaped_floor_cannot_be_placed_in_bedrock_numbering() {
+        assert_eq!(bedrock().place("1.21.4"), FloorPlacement::Unplaceable);
+        assert_eq!(
+            bedrock().verdict("1.21.4", 18_163_712),
+            FloorVerdict::Unplaceable,
+        );
+        assert!(
+            compare_versions("1.21.40", "1.21.4").is_gt(),
+            "the premise: the labels alone say the Bedrock release is above the floor",
+        );
+    }
+
+    /// A pre-release is the candidate for the release it names, and
+    /// nothing ships between them, so it answers as that release does.
+    #[test]
+    fn a_pre_release_of_a_known_release_places_at_it() {
+        assert_eq!(java().place("1.21.4-rc1"), FloorPlacement::At(4189));
+        assert_eq!(java().verdict("1.21.4-rc1", 4189), FloorVerdict::Satisfied);
+        assert_eq!(java().verdict("1.21.4-rc1", 3953), FloorVerdict::Below);
+        // A pre-release of an unknown release is placed by its release.
+        assert_eq!(java().place("1.19-rc1"), FloorPlacement::BelowEvery);
+        assert_eq!(java().place("99.0-rc1"), FloorPlacement::AboveEvery);
+        assert_eq!(bedrock().place("1.21.4-rc1"), FloorPlacement::Unplaceable);
+    }
+
+    /// Trailing zeros are padding, not a version between two others.
+    /// Bedrock's earliest supported release is `1.21.0`, and
+    /// `@requires version>=1.21` is that release rather than a label
+    /// inside the table's span that names no row.
+    #[test]
+    fn a_row_is_found_through_its_trailing_zeros() {
+        assert_eq!(bedrock().place("1.21"), FloorPlacement::At(18_153_472));
+        assert_eq!(
+            bedrock().verdict("1.21", 18_153_472),
+            FloorVerdict::Satisfied,
+        );
+        assert_eq!(java().place("1.21.0"), FloorPlacement::At(3953));
+        // And it is only zeros: `1.21.4` is still a different version.
+        assert_eq!(bedrock().place("1.21.4"), FloorPlacement::Unplaceable);
+    }
+
+    /// A label in another scheme is not compared against one in this
+    /// scheme, even to place it outside the rows. That comparison is the
+    /// one §10.1 makes `DataVersion` canonical to avoid, and trusting it
+    /// at the boundary would be trusting it everywhere the boundary moves.
+    #[test]
+    fn a_label_in_another_scheme_is_not_placed_by_its_text() {
+        assert_eq!(java().place("24w14a"), FloorPlacement::Unplaceable);
+        // Including when the rows are the ones in the other scheme.
+        let dated = VersionOrder::new([("26w01a".to_owned(), 4500), ("26w02a".to_owned(), 4510)]);
+        assert_eq!(dated.place("1.21.4"), FloorPlacement::Unplaceable);
+        // A row it names exactly is still exact, whatever the scheme.
+        assert_eq!(dated.place("26w02a"), FloorPlacement::At(4510));
+    }
+
+    /// The rows decide the bounds by key, not by the order the pack lists
+    /// them in — which `data_versions.json` documents as informational.
+    #[test]
+    fn rows_are_ordered_by_key_whatever_order_they_arrive_in() {
+        let shuffled =
+            VersionOrder::new([("1.21.4".to_owned(), 4189), ("1.20.4".to_owned(), 3700)]);
+        assert_eq!(
+            shuffled.rows().map(|(label, _)| label).collect::<Vec<_>>(),
+            ["1.20.4", "1.21.4"],
+        );
+        assert_eq!(shuffled.place("1.19"), FloorPlacement::BelowEvery);
+    }
+
+    /// An empty table has no bounds to place anything against, and says so
+    /// rather than reading `first()` and `last()` off nothing.
+    #[test]
+    fn an_empty_table_places_nothing() {
+        let empty = VersionOrder::new([]);
+        assert_eq!(empty.place("1.21"), FloorPlacement::Unplaceable);
+        assert!(satisfying(&empty, "1.21").is_empty());
+    }
+}

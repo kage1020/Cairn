@@ -130,10 +130,11 @@ max of its parts. Module-level `@requires` is implemented; the member-level form
 
 ### The declared floor is enforced
 
-A module's `@requires` floor is the strictest of its `@requires` lines. `cairn compile --target`
-below it is `E_VERSION_CAP`, reported before any artifact is prepared, so a refused build leaves no
-structure file and no lock. That ordering matters: a lock records what was verified, and it must
-never say `verified: true` for a target the source itself rules out.
+A module's floors compose by intersection: `cairn compile --target` is held to every `@requires`
+line that applies to the build, and a target below any of them is `E_VERSION_CAP`, reported before
+any artifact is prepared, so a refused build leaves no structure file and no lock. That ordering
+matters: a lock records what was verified, and it must never say `verified: true` for a target the
+source itself rules out.
 
 `E_REQUIRES_CONFLICT` is **reserved**. It is defined as a declared floor contradicting the
 registry-*inferred* range, and no inferred range is derived yet, because the pack carries no `since`
@@ -141,28 +142,61 @@ registry-*inferred* range, and no inferred range is derived yet, because the pac
 strictest, so their intersection is never empty. A constraint needing an upper bound, such as
 `version<1.20`, is not a shape the language accepts; that is `E_INVALID_REQUIRES`.
 
-### Ordering, and where it stops
+### Ordering is by DataVersion, per edition
 
-[§10.1](#101-the-target-is-a-compile-time-parameter) makes `DataVersion` the canonical ordering key.
-Version comparison today is **component-wise over dotted decimals** instead. That is a known
-shortfall, not a second convention. The pack does ship a `DataVersion` table; the obstacle is its
-coverage, since it names only the versions the pack was built for while a floor may name any
-version.
+[§10.1](#101-the-target-is-a-compile-time-parameter) makes `DataVersion` the canonical ordering key,
+and `@requires` uses it. A floor is placed in the **target edition's** version table
+(`registry-data/{java,bedrock}/data_versions.json`) and weighed against the target's own
+`DataVersion`. Two version labels are never compared as text to decide a build.
 
-Until a lookup can answer for an arbitrary label, a version Cairn cannot order is refused at the
-directive rather than sorted wrongly later: pre-release, snapshot, and date-based labels
-(`1.21.4-rc1`, `24w14a`) are not accepted in `@requires`.
+A table names the versions the pack was built for, and a floor may name any version, so placing one
+is not a bare lookup. Four answers, and only the first is exact:
 
-Two things the convention still gets wrong within what it does accept:
+| The floor | Placed as | Because |
+|---|---|---|
+| Names a row (trailing zeros ignored: `1.21` is Bedrock's `1.21.0`) | That row's `DataVersion` | Exact. |
+| Names a pre-release of a row (`1.21.4-rc1`) | That row's `DataVersion` | Nothing ships between a release candidate and its release, so no supported target lies between them either. |
+| Sits below every row, or above every one | Met by every target, or by none | True whatever key each row carries. Decided by comparing labels, so it is only trusted between labels in one numbering scheme — a dotted decimal against a date-based row is not placed this way. |
+| Anything else — inside the table's span, naming no row | Not placed at all | It has no `DataVersion`, and there is none to give it. `E_REQUIRES_UNORDERABLE`. |
 
-- **A date-based label against a semver one.** This is the transition
-  [§10.1](#101-the-target-is-a-compile-time-parameter) exists to survive, and dotted-decimal
-  comparison does not survive it.
-- **The two editions' numbering, compared as if it were one.** Java releases run `1.20.4 / 1.21 /
-  1.21.4`, Bedrock `1.21.0 / 1.21.40 / 1.21.60`. A floor carries no edition, so
-  `@requires version>=1.21.4` reads as satisfied by Bedrock `1.21.40` (`40 > 4`), certifying a build
-  against a version that is below the floor in Java's numbering. Whether `@requires` is
-  edition-neutral at all is an open question.
+The last row is a refusal, not a guess. `@requires version>=1.21.4` against Bedrock is exactly it:
+Java's newest release names no Bedrock release and sits between `1.21.0` and `1.21.40`. Comparing
+the labels read it as satisfied on `40 > 4` and certified a Bedrock build against a version below
+the floor — the same defect enforcing the floor exists to remove, one edition to the left.
+
+### A floor may name its edition
+
+Java releases run `1.20.4 / 1.21 / 1.21.4` and Bedrock `1.21.0 / 1.21.40 / 1.21.60`. The two are
+different scales, and a floor written in one of them means nothing in the other. So a floor may say
+which it is written in:
+
+```
+@requires java    version>=1.21.4
+@requires bedrock version>=1.21.40
+```
+
+A **scoped** floor constrains its own edition's build and is inert in the other's — inert, not
+violated, so the pair above builds on both. An **unscoped** floor is a floor on whatever is being
+built, and is resolved in that edition's table like any other. That makes `@requires version>=1.21`
+a floor both editions can honour (Java's `1.21`, Bedrock's `1.21.0`), and makes a floor that names
+one edition's release and not the other's the error above rather than a silent pass.
+
+The `registry compatibility` row of `cairn info` ([§10.5](#105-which-version-is-it-for-has-three-answers))
+reads only the unscoped floors. It is one row for a file that may be reported against both editions
+at once, and a floor in Java's numbering says nothing about the file's Bedrock range; the
+per-edition answer is the `buildable targets` row.
+
+### Which labels a floor may use
+
+Every label shape [§10.1](#101-the-target-is-a-compile-time-parameter) says will exist is accepted
+by the directive: the semver-ish `1.21.4`, the pre-release `1.21.4-rc1`, a snapshot `24w14a`, and
+whatever a date-based scheme spells. The shape rule is dot-separated components that each begin
+with a digit and carry only letters and digits, with an optional `-` and a pre-release tag of the
+same. `1.a` and `x` name no version in any scheme and are `E_INVALID_REQUIRES`.
+
+Accepting a label is not claiming it can be ordered. Whether a given label has a `DataVersion` is
+the table's answer, given per edition at `cairn compile --target` — which is the one command that
+pins both. `cairn check` pins neither and does not ask.
 
 ## 10.5 "Which version is it for?" has three answers
 

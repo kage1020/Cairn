@@ -34,10 +34,11 @@ mod binding;
 mod requires_parse;
 mod resolver;
 mod version_axes;
+mod version_order;
 
 pub use binding::{SelectorMatch, ThemeBinding, TokenKind, classify_token};
 pub use requires_parse::{
-    RequirementError, compare_versions, parse_min_version, parse_requirement,
+    Requirement, RequirementError, compare_versions, parse_min_version, parse_requirement,
 };
 pub(crate) use resolver::select_the_same_members;
 pub use resolver::{
@@ -47,5 +48,6 @@ pub use resolver::{
 pub use version_axes::{
     BuildableTargets, EditionPortability, EditionReport, RegistryRange, SemanticSensitiveFinding,
     UnsupportedEntry, UnsupportedReason, VersionAxes, VersionFloor, compute_axes,
-    declared_version_floor,
+    declared_version_floors,
 };
+pub use version_order::{FloorPlacement, FloorVerdict, VersionOrder};
