@@ -57,6 +57,24 @@ fn text_diagnostics_go_where_every_other_subcommand_sends_them() {
 }
 
 #[test]
+fn a_header_that_names_no_version_is_reported_without_refusing_the_file() {
+    // `@cairn` is provenance: the value reaches no pass, so a value no
+    // compiler can read costs the build nothing and the finding is a
+    // warning. The exit code is the part worth pinning end to end —
+    // promoting the code would turn every file carrying a typo'd header
+    // into a refused build, and the severity table alone does not say
+    // what `cairn check` does with it.
+    let path = fixtures_dir().join("cairn_version.crn");
+    let out = run_check(&[path.to_str().unwrap()]);
+    let stderr = String::from_utf8(out.stderr).expect("utf-8");
+    assert_eq!(out.status.code(), Some(0), "stderr={stderr}");
+    assert!(
+        stderr.contains("W_INVALID_CAIRN_VERSION"),
+        "the warning still reaches the author: {stderr}",
+    );
+}
+
+#[test]
 fn cli_1_clean_example_exits_zero_and_says_nothing_on_either_stream() {
     let path = examples_dir().join("cottage.crn");
     let out = run_check(&[path.to_str().unwrap()]);

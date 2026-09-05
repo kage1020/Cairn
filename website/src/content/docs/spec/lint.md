@@ -48,6 +48,8 @@ compose to the strictest across every line, so a second one adds a constraint ([
 | `E_TYPE_MISMATCH_SIZE` | A `size=` value is not a `WxH` literal. |
 | `E_CONNECT_ARITY` | A `connect` row's shape is not `FROM.PORT to TO.PORT`. |
 | `E_INVALID_REQUIRES` | A `requires` expression that is not a version floor, written as the `@requires` header or as a `def` / `theme` body line ([§5.3](syntax#53-headers)). |
+| `W_INVALID_CAIRN_VERSION` | An `@cairn` value that is not a `YYYY.M[.PATCH]` language version ([§5.3](syntax#53-headers)). |
+| `W_FUTURE_CAIRN_VERSION` | An `@cairn` value naming a language version later than the compiler reading it. |
 
 `E_MISPLACED_MEMBER` fires on a `place` / `connect` inside a `struct` or `def`, or a geometry
 keyword among a `site`'s rows. It is reported once at the offending row, and anything indented
@@ -74,6 +76,31 @@ in a `u32`, a `-` with no readable pre-release tag after it, and text after the 
 by the same rule: the `@requires` header, and the member-level `requires` line a `def` or a `theme`
 may carry ([§10.4](versioning-editions#a-part-may-declare-its-own-floor)). A part no build
 instantiates is checked too — the mistake is in the line, not in whether anything reads it.
+
+`W_INVALID_CAIRN_VERSION`: the accepted shape is `YYYY.M` or `YYYY.M.PATCH` — a four-digit year, a
+month `1 … 12`, and an optional patch, every component decimal digits. A leading zero on the month
+is accepted and does not change it: `2026.06` and `2026.6` are one version, the first being
+calver.org's `YYYY.0M` and the second the `YYYY.M` a Cargo `version` field can carry. The code
+covers a value that is not two or three components, a component that is empty or not digits, a
+year that is not four digits, a month outside the calendar, a patch past `u32`, and a second word
+after the version — the header value is a whole line, so `@cairn 2026.6 draft` names a version and
+then something else.
+
+This is deliberately stricter than `@requires`, which reads a Minecraft label out of Mojang's
+namespace and only has to order it, so a component there need only *begin* with a digit and a
+pre-release tag is a label too. `@cairn` names Cairn's own version, so every component is digits,
+`2026.13` is a month that does not exist and `1.2` is a semver rather than a year.
+
+`W_FUTURE_CAIRN_VERSION` is the one thing a compiler can usefully say about a file written against
+a language newer than itself: a keyword or argument added after this build is reported as
+`E_UNKNOWN_KEYWORD` or `E_UNKNOWN_ARGUMENT`, and only the header knows those findings may be about
+the version gap rather than about the lines they name. That reaches what a later language adds
+*within* the shapes this one has. A whole new syntactic form — a directive, a top-level item — is
+`E_PARSE`, and parsing precedes every check pass ([§11.3](#113-error-vs-warning)), so this finding
+does not appear at all in the case the version gap explains best.
+
+The two codes never both fire on one directive — a value that is not read as a version has no
+version to compare.
 
 ### Materials and targets
 
@@ -236,6 +263,8 @@ them. Codes not listed below omit `data` entirely, so the JSON key is absent rat
 | `E_INCOMPATIBLE_MATERIAL` | `{ "kind": "incompatible_material", "id", "required", "slot"?, "token"? }`. The bound material, the family the geometry needs, and where the binding came from. |
 | `E_INCOMPLETE_PLACE` | `{ "kind": "incomplete_place", "missing": ["id", "use", "theme"] }`. The keys the row does not declare. Never empty. |
 | `E_INVALID_REQUIRES` | `{ "kind": "invalid_requires", "reason", "found" }`. `reason` is one of `not_a_version_requirement`, `unknown_edition_scope`, `unsupported_operator`, `empty_version`, `component_not_a_number`, `component_too_large`, `prerelease_not_a_tag`, `trailing_tokens`. `found` is empty when the failure names no fragment. |
+| `W_INVALID_CAIRN_VERSION` | `{ "kind": "invalid_cairn_version", "reason", "found" }`. `reason` is one of `component_count`, `component_not_a_number`, `year_not_four_digits`, `month_out_of_range`, `patch_too_large`, `trailing_tokens`. `found` is the component the reason is about, and is empty when the failure names no fragment — `component_count`, and `component_not_a_number` on a value whose component is itself empty (`2026.`). |
+| `W_FUTURE_CAIRN_VERSION` | `{ "kind": "future_cairn_version", "declared", "compiler" }`. Both verbatim: `declared` is the string in the file, `compiler` is the build that reported it. |
 | `W_TRUTH_TABLE_PARTIAL` | `{ "kind": "truth_table_partial", "inputs": 2, "covered": 1, "missing": ["01","10","11"] }`. See below. |
 | The three `@intended_targets` codes | `{ "kind": "intended_targets", "edition", "targets": ["1.20.4"], "floor"? }`. The versions this finding is about, in source order, and the edition that weighed them. `floor` is the first one that refuses them, as written; absent for `W_INTENDED_TARGET_UNSUPPORTED`, which is not about a floor. |
 
@@ -268,8 +297,10 @@ holds `2^130`.
   behaviour, and the partial-build degradations the block-array pass reports. In those the compiler
   rather than the source is the incomplete side.
 
-The `E_` / `W_` prefix is not the severity. `W_` marks a partial-build degradation, and two
-`E_`-prefixed codes are decided by the rule above rather than by their name:
+The `E_` / `W_` prefix is not the severity, in either direction. Most `W_` codes mark a
+partial-build degradation, but `W_UNUSED_DEF`, `W_TRUTH_TABLE_PARTIAL` and the two `@cairn` codes
+are warnings without being one; and two `E_`-prefixed codes are decided by the rule above rather
+than by their name:
 
 - `E_UNKNOWN_SLOT_TARGET` is an **error**, because a slot bound to a non-material value lowers
   every member referencing it to air.
@@ -289,6 +320,15 @@ partial-build degradation. The incomplete side is the source, which named no mat
 the compiler. The drop does not stop at the member either — a dropped `walls` lowers the wall
 height the volume is derived from, so the structure shrinks and every `door` and `window` that
 was to be cut into it is deferred as well.
+
+The two `@cairn` codes are **warnings** by the same rule read the other way. The header is
+provenance: no pass branches on it, no palette entry comes from it, and the lockfile's
+`cairn_version` records the compiler rather than the file. `@cairn banana` builds byte-for-byte
+what `@cairn 2026.06` builds, so nothing about the result is unintended. What is lost is the
+header's own job — being readable by a later compiler — which is worth a word and not worth
+refusing the file over. `@requires` is an error on the same test because its floor *is* an input:
+it sets `cairn info`'s compatible range and the bound `cairn compile --target` is held to, so a
+floor that evaporates accepts a target it should not.
 
 `E_UNKNOWN_ARGUMENT` is an **error** for the same reason `E_UNKNOWN_KEYWORD` is, one level down.
 A key outside the keyword's vocabulary names nothing, so no pass will read the value however the
