@@ -202,7 +202,7 @@ three ways:
 | The version | The finding |
 |---|---|
 | No `--target` of the edition names it: a release the pack ships no block data for (`1.19` on Java), or a label the table cannot place at all (`1.21.40` on Java) | `W_INTENDED_TARGET_UNSUPPORTED` |
-| A version the edition builds, below a floor the file declares | `E_INTENDED_TARGET_CAP` when *every* named version is, `W_INTENDED_TARGET_CAP` when only some are |
+| A version the edition builds, below a floor the file declares | `E_INTENDED_TARGET_CAP` when *every buildable* one is, `W_INTENDED_TARGET_CAP` when only some are |
 | A version the edition builds, at or above every floor | Nothing |
 
 The order is deliberate: a version the compiler cannot build is reported as that whatever the floors
@@ -212,6 +212,12 @@ reach rather than kind. Nothing the file says it is for can be built is the stro
 contradiction between two declarations gets, and no author meant it; a list that reaches past the
 floor at one end is a wish stated too widely, and what it names above the floor still builds.
 
+**"Every" counts the versions the edition can build.** A name no `--target` of it carries answers
+for none of the list, so `@intended_targets ["1.20.4", "1.19"]` under `version>=1.21` is the first
+case and not the second: Java builds exactly one of the two, and the floor refuses it. Counting
+`1.19` would let a version that was never buildable report a file nothing can build as half a
+problem — and it is separately reported as the unsupported case, which is where its own repair is.
+
 Which floors count is the composite fold [§10.4](#a-part-may-declare-its-own-floor) already
 defines — the file's `@requires` lines plus every part the build instantiates — so a `def` in a
 library can refuse the intent of the file that places it, and the finding names the part. A floor
@@ -219,10 +225,18 @@ scoped to the other edition is inert here as everywhere, and a floor this editio
 place refuses nothing: that is `E_REQUIRES_UNORDERABLE`, whose repair is on the `requires` line
 rather than on the intent.
 
-`cairn check` reports the two cap codes with or without `--edition`: without one, both editions
-weigh the header and a finding either reaches is reported, since the contradiction is between two
-lines of the file however it is later built. `W_INTENDED_TARGET_UNSUPPORTED` needs the pin, because
-a version Java cannot build is routinely the Bedrock target the author means.
+Every command that gates on `cairn check` reports the two cap codes — `check`, `info`, `lower`,
+`compile`, `synth` — and each weighs the header in the tables of the editions it is about: the one
+`--edition` names, the ones `cairn info --editions` lists, or both where the command names none. A
+finding either edition reaches is reported, since the contradiction is between two lines of the file
+however it is later built, and one span carries one cap finding: two editions disagreeing about how
+far it reaches report the error, because one of them finding part of the list still buildable does
+not make the other's "none of it is" less true.
+
+`W_INTENDED_TARGET_UNSUPPORTED` waits until exactly one edition is in scope, because a version Java
+cannot build is routinely the Bedrock target the author means. `cairn info --editions bedrock` is
+one edition in scope, and is weighed in Bedrock's table alone — a report scoped to one edition is
+not refused by the other's answer.
 
 `E_REQUIRES_CONFLICT` is **reserved**. It is defined as a declared floor contradicting the
 registry-*inferred* range, and no inferred range is derived yet, because the pack carries no `since`

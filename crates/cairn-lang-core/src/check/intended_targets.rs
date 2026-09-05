@@ -39,14 +39,21 @@
 //! - buildable, at or above every floor, which is the ordinary case and
 //!   raises nothing.
 //!
-//! The second splits by reach rather than by kind. Every version below a
-//! floor is `E_INTENDED_TARGET_CAP`: the file can be built for nothing it
-//! says it is for, which is the strongest reading a contradiction between
-//! two declarations gets and the one an author cannot have meant. *Some*
-//! of them is `W_INTENDED_TARGET_CAP`, because `spec/syntax.md` §5.3 calls
-//! this header "a hint, not a verification record" — a list that reaches
-//! past the floor at one end is a wish stated too widely, and the versions
-//! it names above the floor still build.
+//! The second splits by reach rather than by kind, counted over the
+//! versions the edition can build rather than over everything the header
+//! names. Every one of them below a floor is `E_INTENDED_TARGET_CAP`: the
+//! file can be built for nothing it says it is for, which is the
+//! strongest reading a contradiction between two declarations gets and
+//! the one an author cannot have meant. *Some* of them is
+//! `W_INTENDED_TARGET_CAP`, because `spec/syntax.md` §5.3 calls this
+//! header "a hint, not a verification record" — a list that reaches past
+//! the floor at one end is a wish stated too widely, and the versions it
+//! names above the floor still build.
+//!
+//! Counting the unbuildable names in that denominator would demote the
+//! first case with a name that was never buildable: `["1.20.4", "1.19"]`
+//! under `version>=1.21` builds on no Java version at all, and `1.19`
+//! answering for half the list made it read as half a problem.
 
 use crate::ast::{Header, Module};
 use crate::edition::Edition;
@@ -71,11 +78,13 @@ use super::{Diagnostic, DiagnosticCode, DiagnosticData, DiagnosticNote};
 /// the module doc), so the caller merges them into whatever stream it is
 /// already reporting.
 ///
-/// # Panics
-///
-/// If a `targetable` entry names no row of `order`. Both come from one
-/// registry pack, where the buildable versions are a subset of the release
-/// table by construction.
+/// A `targetable` entry `order` cannot place is dropped rather than
+/// panicked on. The two come from one registry pack, where the buildable
+/// versions are a subset of the release table by construction, so nothing
+/// in this repository can produce one — but this is a public entry point,
+/// and a pack assembled elsewhere should get an answer rather than an
+/// abort. Dropping errs the safe way: such a version is one no `--target`
+/// could be ordered against either.
 #[must_use]
 pub fn weigh_intended_targets(
     module: &Module,
@@ -140,10 +149,16 @@ fn weigh<'a>(
     order: &VersionOrder,
     targetable: &[String],
 ) -> Verdict<'a> {
-    let Some(row) = targetable
+    // The key rather than the label, once a row is found: a version is
+    // weighed against a floor by its `DataVersion` and never by its text.
+    // A row the table cannot place falls through to the arm below rather
+    // than aborting — see the entry point's note on a pack assembled
+    // outside this repository.
+    let buildable = targetable
         .iter()
         .find(|row| compare_versions(row, label).is_eq())
-    else {
+        .and_then(|row| order.key_of(row));
+    let Some(key) = buildable else {
         // Placed rather than merely absent from the buildable list: a
         // release the pack can order and one it has never heard of are
         // different news to the author, and only the first has a version
@@ -155,9 +170,6 @@ fn weigh<'a>(
             | FloorPlacement::Unplaceable => Verdict::NoSuchRelease,
         };
     };
-    let key = order
-        .key_of(row)
-        .expect("`targetable` is this pack's own version list");
     floors
         .iter()
         .find(|floor| order.verdict(&floor.version, key) == FloorVerdict::Below)
@@ -190,7 +202,20 @@ fn capped(
     // makes, so an equivalent line appended below an existing one does not
     // move what the message names.
     let (_, first_floor) = *below.first()?;
-    let every = below.len() == weighed.len();
+    // Against the versions this edition can build, not against everything
+    // the header names. A version no `--target` names is reported by
+    // `unsupported` and is not a version a floor has anything to say
+    // about, so counting it here demoted the file that can be built for
+    // nothing it says it is for — `@intended_targets ["1.20.4", "1.19"]`
+    // under `version>=1.21` — to a warning, on the strength of a name
+    // that was never buildable. `below` is non-empty by the line above,
+    // so the denominator is at least one and "every" cannot mean "of
+    // nothing".
+    let buildable = weighed
+        .iter()
+        .filter(|(_, verdict)| matches!(verdict, Verdict::Buildable | Verdict::BelowFloor(_)))
+        .count();
+    let every = below.len() == buildable;
     let named = below
         .iter()
         .map(|(target, _)| *target)

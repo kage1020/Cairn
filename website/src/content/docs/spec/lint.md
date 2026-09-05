@@ -171,19 +171,24 @@ The three `@intended_targets` codes weigh the file's stated intent against its o
 ([versioning-editions §10.4](versioning-editions#the-hint-is-weighed-against-the-floor)). A version
 the edition cannot build is `W_INTENDED_TARGET_UNSUPPORTED` and is not also weighed against a floor:
 "this target does not exist here" is what the author acts on, and a cap beside it would send them to
-edit a line that is not what stops the build. Of the rest, *every* one below a floor is
-`E_INTENDED_TARGET_CAP` — the file can be built for nothing it says it is for, and the first
-`cairn compile --target` naming any of them is `E_VERSION_CAP` — while *some* of them is
-`W_INTENDED_TARGET_CAP`, because the header is a hint ([§5.3](syntax#53-headers)) and the versions
-above the floor still build. One header can earn the last two codes at once; the versions it names
-are not all wrong in the same way.
+edit a line that is not what stops the build. The rest — the versions the edition *can* build — are
+counted among themselves: *every* one of them below a floor is `E_INTENDED_TARGET_CAP`, since the
+file can then be built for nothing it says it is for and the first `cairn compile --target` naming
+any of them is `E_VERSION_CAP`, while *some* of them is `W_INTENDED_TARGET_CAP`, because the header
+is a hint ([§5.3](syntax#53-headers)) and the versions above the floor still build. A version that
+was never buildable is not in that count either way: it answers for none of the list, and letting it
+would report a file nothing can build as half a problem. One header can earn a cap code and the
+unsupported code at once; the versions it names are not all wrong in the same way.
 
 All three are per-edition answers, since a floor and a target label are ordered in one edition's
-`DataVersion` table. `cairn check --edition`, `cairn info` and `cairn compile` report the two cap
-codes; without a pin both editions weigh the header and a finding either of them reaches is
-reported, deduplicated, because the contradiction is between two lines of the file however it is
-later built. `W_INTENDED_TARGET_UNSUPPORTED` needs the pin: a version Java cannot build is routinely
-the Bedrock target the author means, so unpinned the question has not been asked.
+`DataVersion` table. Every command that gates on `cairn check` reports the two cap codes — `check`,
+`info`, `lower`, `compile`, `synth` — each weighing the header in the tables of the editions it is
+about: the one `--edition` names, the ones `cairn info --editions` lists, or both where the command
+names none. A finding either edition reaches is reported, because the contradiction is between two
+lines of the file however it is later built; one span carries one cap finding, and two editions
+disagreeing about how far it reaches report the error. `W_INTENDED_TARGET_UNSUPPORTED` waits until
+exactly one edition is in scope: a version Java cannot build is routinely the Bedrock target the
+author means, so with both in scope the question has not been asked.
 
 ### Truth tables
 

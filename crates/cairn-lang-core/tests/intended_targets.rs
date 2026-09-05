@@ -207,10 +207,43 @@ fn an_unbuildable_version_below_the_floor_is_not_also_a_cap() {
 
 /// One header can earn both: the versions it names are not all wrong in
 /// the same way, and the two have different repairs.
+///
+/// The cap half is the *error*, which is the whole point of counting the
+/// reach over what the edition can build. Java builds exactly one of
+/// these two names and the floor refuses it, so the file can be built for
+/// nothing it says it is for — `1.19` is a second mistake beside that,
+/// not a reason to call the first one half a problem.
 #[test]
 fn a_capped_version_beside_an_unbuildable_one_is_two_findings() {
     assert_eq!(
         codes("@requires version>=1.21\n@intended_targets [\"1.20.4\",\"1.19\"]\n"),
+        ["E_INTENDED_TARGET_CAP", "W_INTENDED_TARGET_UNSUPPORTED"],
+    );
+}
+
+/// The denominator is the versions the edition can build, and nothing
+/// else. A name that was never buildable answers for none of the list, so
+/// putting one beside a capped version must not move the finding.
+#[test]
+fn an_unbuildable_name_does_not_demote_the_cap() {
+    let capped = "@requires version>=1.21\n@intended_targets [\"1.20.4\"]\n";
+    let with_a_name_nothing_builds =
+        "@requires version>=1.21\n@intended_targets [\"1.20.4\",\"1.19\",\"1.21.40\"]\n";
+    assert_eq!(codes(capped)[0], "E_INTENDED_TARGET_CAP");
+    assert_eq!(
+        codes(with_a_name_nothing_builds)[0],
+        "E_INTENDED_TARGET_CAP",
+        "two unbuildable names beside one capped version leave the cap \
+         exactly as far-reaching as it was",
+    );
+}
+
+/// The warning is still the answer when a version the edition can build
+/// survives the floor, which is what tells the two reaches apart.
+#[test]
+fn a_buildable_version_above_the_floor_keeps_the_finding_a_warning() {
+    assert_eq!(
+        codes("@requires version>=1.21\n@intended_targets [\"1.20.4\",\"1.21.4\",\"1.19\"]\n"),
         ["W_INTENDED_TARGET_CAP", "W_INTENDED_TARGET_UNSUPPORTED"],
     );
 }

@@ -148,9 +148,9 @@ here. See [Versioning and Editions](versioning-editions).
 of being verified. That record lives only in the lock.
 
 A hint is still weighed against the floor beside it. A file whose `@requires` refuses every version
-its `@intended_targets` names states an intention the compiler will refuse the moment anyone acts on
-it, and that is `E_INTENDED_TARGET_CAP`; a list only partly below the floor is
-`W_INTENDED_TARGET_CAP`, and a version the target edition cannot build at all is
+its `@intended_targets` names that the target edition can build states an intention the compiler
+will refuse the moment anyone acts on it, and that is `E_INTENDED_TARGET_CAP`; a list only partly
+below the floor is `W_INTENDED_TARGET_CAP`, and a version the target edition cannot build at all is
 `W_INTENDED_TARGET_UNSUPPORTED`. See
 [Versioning and Editions §10.4](versioning-editions#the-hint-is-weighed-against-the-floor).
 

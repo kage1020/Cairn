@@ -55,11 +55,18 @@ and is a separate axis from the Minecraft target version.
   `--target` of the edition builds is `W_INTENDED_TARGET_UNSUPPORTED` — a release the pack ships no
   block data for, or a label the table cannot place at all, which is what the other edition's
   numbering looks like — and is not also weighed against a floor, because "this target does not
-  exist here" is what the author acts on. Of the rest, *every* one below a floor is
-  `E_INTENDED_TARGET_CAP`: the file can be built for nothing it says it is for. *Some* of them is
+  exist here" is what the author acts on. The rest, the versions the edition *can* build, are
+  counted among themselves: every one of them below a floor is `E_INTENDED_TARGET_CAP`, since the
+  file can then be built for nothing it says it is for, and some of them is
   `W_INTENDED_TARGET_CAP`, because the header is a hint (`spec/syntax.md` §5.3) and the versions
   above the floor still build. The floors are the composite fold, so a `def` in a library can
   refuse the intent of the file that places it, and the finding names the part.
+
+  Each command weighs the header in the tables of the editions it is about — the one `--edition`
+  names, the ones `cairn info --editions` lists, or both where the command names none — so a report
+  scoped to one edition is not refused by the other's answer. One span carries one cap finding, and
+  two editions disagreeing about how far it reaches report the error.
+  `W_INTENDED_TARGET_UNSUPPORTED` waits until exactly one edition is in scope.
 
   `cairn info` grew an `intended targets` row, beside the `buildable targets` it can contradict.
   The report used to leave the header out entirely, so the one declaration that names versions was

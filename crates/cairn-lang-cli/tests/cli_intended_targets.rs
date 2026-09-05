@@ -123,12 +123,12 @@ fn part_of_the_list_below_the_floor_is_a_warning_and_exits_zero() {
 }
 
 /// A version no `--target` names is a question about one edition's pack,
-/// so it is asked only by a command that named an edition. Unpinned, a
+/// so it is answered only when one edition is in scope. With both, a
 /// version Java cannot build is routinely the Bedrock target the author
 /// means, and answering anyway would report every cross-edition list as a
 /// mistake.
 #[test]
-fn a_version_no_target_names_is_reported_only_under_a_pin() {
+fn a_version_no_target_names_is_reported_only_with_one_edition_in_scope() {
     let fixture = Fixture::new("unsupported", "@intended_targets [\"1.19\"]\n");
     let (bare_code, _, bare_err) = run("check", &fixture, &[]);
     assert_eq!(bare_code, Some(0), "got: {bare_err}");
@@ -297,6 +297,72 @@ fn a_header_both_editions_judge_alike_is_reported_once() {
     assert_eq!(
         findings.len(),
         1,
-        "1.20 is below the floor in both editions' tables: {stdout}",
+        "1.21 is below the floor in both editions' tables: {stdout}",
+    );
+}
+
+/// Two editions can disagree about *reach* rather than about whether
+/// there is a contradiction at all, and the span still gets one answer.
+/// Java keeps a buildable version above its floor and earns the warning;
+/// Bedrock has nothing left and earns the error. Printing both would put
+/// a warning and an error on one line, one of them saying the other is
+/// too weak.
+#[test]
+fn two_editions_disagreeing_about_reach_report_the_error() {
+    let fixture = Fixture::new(
+        "reach",
+        "@requires java version>=1.21.4\n@requires bedrock version>=1.21.60\n\
+         @intended_targets [\"1.20.4\",\"1.21.4\",\"1.21.40\"]\n",
+    );
+    let (code, stdout, _) = run("check", &fixture, &["--format", "json"]);
+    assert_eq!(code, Some(1));
+    let parsed: serde_json::Value = serde_json::from_str(&stdout).expect("valid JSON");
+    let findings = parsed.as_array().expect("an array of findings");
+    assert_eq!(findings.len(), 1, "one line, one answer: {stdout}");
+    assert_eq!(findings[0]["code"], "E_INTENDED_TARGET_CAP");
+    assert_eq!(findings[0]["data"]["edition"], "bedrock");
+}
+
+/// A report scoped to one edition is weighed in that edition's table and
+/// no other. `--editions bedrock` used to be refused outright by a
+/// finding only Java's table reached — stdout empty, not one row
+/// computed, for a file Bedrock has nothing to say against.
+#[test]
+fn info_scoped_to_one_edition_is_not_refused_by_the_other() {
+    let fixture = Fixture::new(
+        "scoped",
+        "@requires version>=1.21\n@intended_targets [\"1.20.4\"]\n",
+    );
+    let (bedrock, stdout, stderr) = run("info", &fixture, &["--editions", "bedrock"]);
+    assert_eq!(bedrock, Some(0), "got: {stderr}");
+    assert!(
+        stdout.contains("buildable targets:"),
+        "the report has to be produced: {stdout}",
+    );
+    assert!(
+        stderr.contains("W_INTENDED_TARGET_UNSUPPORTED"),
+        "and one edition in scope is one edition asked, so the version \
+         Bedrock cannot build is named: {stderr}",
+    );
+    // The same file, with Java in scope, is the contradiction it always was.
+    let (java, _, java_err) = run("info", &fixture, &["--editions", "java"]);
+    assert_eq!(java, Some(1), "got: {java_err}");
+    assert!(
+        java_err.contains("E_INTENDED_TARGET_CAP"),
+        "got: {java_err}"
+    );
+}
+
+/// The default `--editions java,bedrock` keeps both in scope, so the
+/// version one of them cannot build stays unreported: it is routinely the
+/// other's target, and nobody has said which is being asked.
+#[test]
+fn info_across_both_editions_does_not_name_an_unbuildable_version() {
+    let fixture = Fixture::new("bothscope", "@intended_targets [\"1.20.4\"]\n");
+    let (code, _, stderr) = run("info", &fixture, &[]);
+    assert_eq!(code, Some(0), "got: {stderr}");
+    assert!(
+        !stderr.contains("W_INTENDED_TARGET_UNSUPPORTED"),
+        "got: {stderr}",
     );
 }

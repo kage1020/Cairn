@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use cairn_lang_core::CAIRN_VERSION;
+use cairn_lang_core::ast::Header;
 use cairn_lang_core::block_array::{BlockArray, BlockArrayIr, lower_to_block_array};
 use cairn_lang_core::check::{
     DiagnosticNote as Note, LineStarts, RenderedDiagnostic, weigh_intended_targets,
@@ -84,8 +85,9 @@ enum Command {
         /// weighed in. Without one both editions weigh it, since a floor
         /// refusing every version the same file says it is for is a
         /// mistake either way; `W_INTENDED_TARGET_UNSUPPORTED` is the one
-        /// finding that waits for the pin, because a version Java cannot
-        /// build is routinely the Bedrock target the author means.
+        /// finding that waits until a single edition is in scope, because
+        /// a version Java cannot build is routinely the Bedrock target
+        /// the author means.
         #[arg(long, value_enum)]
         edition: Option<EditionArg>,
         /// Output format for the diagnostics.
@@ -574,12 +576,8 @@ fn run_check(file: &Path, edition: Option<EditionArg>, format: CheckFormat) -> E
     // `check` directly: `cairn check` runs no lowering, but it does see
     // both version headers, and the `@intended_targets` findings are the
     // one part of its report that `check` cannot produce on its own.
-    let diagnostics = build_diagnostics(
-        &module,
-        &ir,
-        edition.map(EditionArg::as_edition),
-        Vec::new(),
-    );
+    let pin = edition.map(EditionArg::as_edition);
+    let diagnostics = build_diagnostics(&module, &ir, pin, &weighed_editions(pin), Vec::new());
     let has_error = diagnostics.iter().any(|d| d.severity() == Severity::Error);
     // Build the line-start index once and reuse it for every diagnostic /
     // note position lookup. Without this we'd re-walk the entire source for
@@ -721,10 +719,17 @@ fn run_info(file: &Path, editions: &[String], format: InfoFormat) -> ExitCode {
     // the author compiles for; `cairn compile --target` is where the
     // question has an answer.
     let mut block_ir = lower_to_block_array(&ir, &resolution, Some(&builtin_java().view(None)));
+    // The editions this report covers, not both by default: `--editions
+    // bedrock` asks for a Bedrock report, and a finding only Java's table
+    // reaches would refuse the command before a single row was computed.
+    // The resolver stays unpinned regardless — that gate is edition-neutral
+    // by design, and the strict per-edition pass runs inside the dry-run.
+    let asked: Vec<Edition> = requested_editions(editions);
     let combined = build_diagnostics(
         &module,
         &ir,
         None,
+        &asked,
         std::mem::take(&mut block_ir.diagnostics),
     );
 
@@ -1367,6 +1372,7 @@ fn run_lower(file: &Path, format: LowerFormat) -> ExitCode {
         &module,
         &ir,
         None,
+        &weighed_editions(None),
         std::mem::take(&mut block_ir.diagnostics),
     );
 
@@ -1470,7 +1476,7 @@ fn run_synth(
     // otherwise exit 0 through the synth path with a partially resolved
     // IR, which is a poor CI gate. Synth does not lower to block arrays,
     // so there are no lowering diagnostics to append here.
-    let diagnostics = build_diagnostics(&module, &ir, None, Vec::new());
+    let diagnostics = build_diagnostics(&module, &ir, None, &weighed_editions(None), Vec::new());
     if report_core_diagnostics(file, &source, &lines, &diagnostics) {
         return ExitCode::from(1);
     }
@@ -1759,10 +1765,19 @@ fn require_edition(edition: Option<EditionArg>, stage_name: &str) -> Result<Edit
 /// `lowering` carries the block-array pass's own diagnostics, which
 /// [`check`] never sees; pass an empty vector from a command that does not
 /// lower.
+///
+/// `edition` and `asked` are two different questions and are answered
+/// separately. `edition` pins the *resolver*, where `None` means "no
+/// target picked yet" and softens per-edition theme variants together.
+/// `asked` is the set of editions the command is reporting about, which
+/// is what [`intended_target_findings`] weighs `@intended_targets` in: a
+/// `cairn info --editions bedrock` pins no resolver and still must not be
+/// refused by a finding that is only true of Java.
 fn build_diagnostics(
     module: &cairn_lang_core::ast::Module,
     ir: &cairn_lang_core::intent::IntentModule,
     edition: Option<Edition>,
+    asked: &[Edition],
     lowering: Vec<cairn_lang_core::check::Diagnostic>,
 ) -> Vec<cairn_lang_core::check::Diagnostic> {
     let mut combined = check(module, ir, edition);
@@ -1771,7 +1786,7 @@ fn build_diagnostics(
     // below it reads as a second file. The lowering half is still
     // appended, as it always has been — it is a different stage, and the
     // commands that show it show it under its own heading.
-    for finding in intended_target_findings(module, edition) {
+    for finding in intended_target_findings(module, asked) {
         let at = combined.partition_point(|kept| {
             (kept.span.start, kept.span.end) <= (finding.span.start, finding.span.end)
         });
@@ -1781,53 +1796,127 @@ fn build_diagnostics(
     combined
 }
 
-/// Weigh `@intended_targets` against the file's own floors, for every
-/// edition the command is about.
+/// Weigh `@intended_targets` against the file's own floors, in the table
+/// of every edition the command is reporting about.
 ///
-/// The pass itself needs one edition's release table
-/// ([`weigh_intended_targets`]), and the commands that call this do not
-/// all have a pin: `cairn compile` names an edition, `cairn check` may,
-/// and `cairn info` reports across both. An unpinned run asks both and
-/// reports what either answers, because the contradiction is *inside the
-/// file* — a floor refusing every version the same file says it is for is
-/// a mistake in one of the two lines however the author later builds it,
-/// and reporting it only under a pin would leave the bare `cairn check` —
-/// the run an author makes most — silent on it.
+/// The pass itself asks one edition at a time
+/// ([`weigh_intended_targets`]), and the commands that call this are
+/// about different sets: `cairn compile` names one, `cairn check` may,
+/// `cairn info --editions` names the ones its rows cover, and the rest
+/// are about both. `asked` is that set, so a report scoped to one edition
+/// is not refused by the other's answer.
 ///
-/// `W_INTENDED_TARGET_UNSUPPORTED` is the exception and is dropped without
-/// a pin. "No `--target` names this version" is a question about one
+/// A contradiction either edition reaches is reported, rather than only
+/// one both agree on: it is *inside the file* — a floor refusing every
+/// version the same file says it is for is a mistake in one of the two
+/// lines however the author later builds it — and reporting it only under
+/// a pin would leave the bare `cairn check`, the run an author makes
+/// most, silent on it.
+///
+/// `W_INTENDED_TARGET_UNSUPPORTED` waits until exactly one edition is
+/// asked. "No `--target` names this version" is a question about one
 /// edition's pack, and a version Java cannot build is routinely the
-/// Bedrock target the author means: unpinned, the answer is not that the
-/// header is wrong but that nobody has said which edition is being asked.
+/// Bedrock target the author means: with two editions in scope the answer
+/// is not that the header is wrong but that nobody has said which one is
+/// being asked.
 ///
-/// Findings are deduplicated by code and span, so a header both editions
-/// judge the same way is reported once rather than twice — the file has
-/// one line to fix either way.
+/// One header is one line to fix, so one span carries one cap finding.
+/// Two editions reaching the same code collapse to the first, and two
+/// reaching *different* cap codes collapse to the error — otherwise a
+/// header earned a warning and an error at one position, one of them
+/// saying the other is too weak.
 fn intended_target_findings(
     module: &cairn_lang_core::ast::Module,
-    edition: Option<Edition>,
+    asked: &[Edition],
 ) -> Vec<cairn_lang_core::check::Diagnostic> {
-    let editions = edition.map_or_else(|| vec![Edition::Java, Edition::Bedrock], |one| vec![one]);
+    // Before either pack is touched: the packs are embedded JSON that is
+    // parsed and validated on first use, and `cairn check` is the command
+    // run most. A file with no such header asks none of the questions
+    // below, and used to pay for both tables to find that out.
+    if !module
+        .headers
+        .iter()
+        .any(|header| matches!(header, Header::IntendedTargets { .. }))
+    {
+        return Vec::new();
+    }
     let mut findings: Vec<cairn_lang_core::check::Diagnostic> = Vec::new();
-    for asked in editions {
-        let pack = match asked {
+    for edition in asked {
+        let pack = match edition {
             Edition::Java => builtin_java(),
             Edition::Bedrock => builtin_bedrock(),
         };
         let targetable = supported_versions(pack);
-        for finding in weigh_intended_targets(module, asked, &version_order(pack), &targetable) {
-            if edition.is_none() && finding.code == DiagnosticCode::IntendedTargetUnsupported {
+        for finding in weigh_intended_targets(module, *edition, &version_order(pack), &targetable) {
+            if asked.len() > 1 && finding.code == DiagnosticCode::IntendedTargetUnsupported {
                 continue;
             }
-            if !findings
-                .iter()
-                .any(|kept| kept.code == finding.code && kept.span == finding.span)
-            {
-                findings.push(finding);
+            let clash = findings.iter().position(|kept| {
+                kept.span == finding.span
+                    && (kept.code == finding.code
+                        || (is_intended_target_cap(kept.code)
+                            && is_intended_target_cap(finding.code)))
+            });
+            match clash {
+                // The error, whichever edition reached it: one edition
+                // finding part of the list still buildable does not make
+                // the other's "none of it is" less true.
+                Some(at) if findings[at].code == DiagnosticCode::IntendedTargetCapPartial => {
+                    if finding.code == DiagnosticCode::IntendedTargetCap {
+                        findings[at] = finding;
+                    }
+                }
+                Some(_) => {}
+                None => findings.push(finding),
             }
         }
     }
     findings
+}
+
+/// The distinct editions an `--editions` list names, in the order it
+/// names them.
+///
+/// Deduplicated because the list is a user's, and `--editions java,java`
+/// asks about Java once: a repeat that reached the fanout would report
+/// one header's finding twice, and would make `--editions java,java` read
+/// as two editions in scope, which is what decides whether
+/// `W_INTENDED_TARGET_UNSUPPORTED` has been asked for at all.
+///
+/// # Panics
+///
+/// If an entry does not parse. The caller validates the list and exits 2
+/// before reaching here.
+fn requested_editions(editions: &[String]) -> Vec<Edition> {
+    let mut asked: Vec<Edition> = Vec::with_capacity(editions.len());
+    for name in editions {
+        let edition: Edition = name.parse().expect("validated by the caller");
+        if !asked.contains(&edition) {
+            asked.push(edition);
+        }
+    }
+    asked
+}
+
+/// The editions a command with a single optional pin is about.
+///
+/// A pin names one; without one the command is about both, because a
+/// source that has not chosen an edition may still be built for either.
+fn weighed_editions(pin: Option<Edition>) -> Vec<Edition> {
+    pin.map_or_else(|| vec![Edition::Java, Edition::Bedrock], |one| vec![one])
+}
+
+/// Whether a code is one of the two `@intended_targets` cap findings.
+///
+/// The pair is one defect reported at two reaches, so they are one code
+/// for the purpose of "this span already has an answer". Written as a
+/// predicate rather than inlined because a third reach would have to be
+/// added here and nowhere else.
+fn is_intended_target_cap(code: DiagnosticCode) -> bool {
+    matches!(
+        code,
+        DiagnosticCode::IntendedTargetCap | DiagnosticCode::IntendedTargetCapPartial
+    )
 }
 
 fn report_core_diagnostics(
@@ -2273,6 +2362,7 @@ fn load_and_lower(
         &module,
         &ir,
         Some(edition.as_edition()),
+        &weighed_editions(Some(edition.as_edition())),
         std::mem::take(&mut block_ir.diagnostics),
     );
     let dropped_scopes = dropped_scopes(&resolution, &block_ir);
