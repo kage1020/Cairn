@@ -126,10 +126,17 @@ pub struct BuildableTargets {
 
 /// Registry-compatible Minecraft version range.
 ///
-/// `min` is derived from `@requires version>=X` (the max across all such
-/// headers; `"0.0"` when no `@requires` line is present). `max` is the
-/// literal string `"latest"` until the registry pack provides a real upper
-/// bound.
+/// `min` is derived from the **unscoped** `@requires version>=X` headers:
+/// the strictest of them, or `"0.0"` when the file declares none that feed
+/// this row. `max` is the literal string `"latest"` until the registry
+/// pack provides a real upper bound.
+///
+/// `"0.0"` therefore has two causes — no `@requires` line at all, and only
+/// floors scoped to an edition — and the row cannot tell them apart,
+/// because it is one row for a file that may be reported against both
+/// editions at once. `cairn info` prints a note naming the scoped floors
+/// it left out, so the reader is not left to infer it from a `0.0` beside
+/// a `buildable targets` row that refuses versions.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct RegistryRange {
     /// Lower bound (inclusive).
@@ -324,11 +331,20 @@ pub fn compute_axes(
 /// per-edition `buildable targets` row instead.
 ///
 /// The strictest of several is picked with [`compare_versions`], which is
-/// the label comparison rather than the `DataVersion` key. That is sound
-/// here and nowhere else: this row renders a version the *author* wrote,
-/// with no edition and so no table to resolve it in, and picking the wrong
-/// one of two floors an author declared changes which line is echoed
-/// rather than which targets build.
+/// the label comparison rather than the `DataVersion` key. There is no key
+/// available: the row is edition-neutral and the tables are per edition,
+/// so the only thing left to order two unscoped floors by is their text.
+/// That is sound here and nowhere else, because this row *renders* a
+/// version the author wrote and decides no build — every gate that does
+/// (`E_VERSION_CAP`, `buildable targets`) weighs each floor against the
+/// target edition's table separately and never compares two floors at all.
+///
+/// The comparison's arbitrary half shows here and only here: a label it
+/// cannot read as a number sorts above every one it can, so a file
+/// declaring both `version>=1.21.4` and `version>=24w14a` reports the
+/// snapshot as its lower edge. Fixed rather than meaningful, which is
+/// what a total order promises; the row is a rendering of the file, and
+/// `buildable targets` is the answer that is weighed.
 fn derive_min_version(module: &Module) -> String {
     unscoped_version_floors(module)
         .into_iter()

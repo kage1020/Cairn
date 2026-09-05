@@ -721,6 +721,7 @@ fn run_info(file: &Path, editions: &[String], format: InfoFormat) -> ExitCode {
         report_diagnostic(file, &source, &lines, d);
     }
 
+    report_floors_left_out_of_the_neutral_row(file, &source, &lines, &module);
     let rows = match edition_rows(file, &source, &lines, &module, &ir, editions, &combined) {
         Ok(rows) => rows,
         Err(code) => return code,
@@ -2356,6 +2357,37 @@ fn report_unplaceable_floor(
         );
     } else {
         eprintln!("  fix: name a {} release", edition.as_str());
+    }
+}
+
+/// Name the floors the `registry compatibility` row does not read.
+///
+/// That row is edition-neutral, so only the unscoped floors feed it, and a
+/// file whose floors are all scoped reports `0.0 .. latest` — which reads
+/// as "no constraint" beside a `buildable targets` row that refuses
+/// versions. The two lines are both right and disagree on their face, so
+/// the reason goes on stderr rather than being left for the reader to
+/// work out.
+fn report_floors_left_out_of_the_neutral_row(
+    file: &Path,
+    source: &str,
+    lines: &LineStarts,
+    module: &Module,
+) {
+    let scoped: Vec<VersionFloor> = [Edition::Java, Edition::Bedrock]
+        .into_iter()
+        .flat_map(|edition| declared_version_floors(module, edition))
+        .filter(|floor| floor.edition.is_some())
+        .collect();
+    for floor in &scoped {
+        eprintln!(
+            "note: {}:{}: `{}` is scoped to one edition, so it is not part of the \
+             `registry compatibility` row, which is edition-neutral; `buildable targets` is \
+             where it is weighed",
+            file.display(),
+            lines.position(source, floor.span.start),
+            render_floor(floor),
+        );
     }
 }
 

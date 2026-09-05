@@ -310,6 +310,40 @@ fn info_9d_the_floor_note_names_the_line_that_refused() {
     );
 }
 
+/// `registry compatibility: 0.0` beside a `buildable targets` row that
+/// refuses versions is two true lines that disagree on their face.
+///
+/// The row is edition-neutral so only unscoped floors feed it, and `0.0`
+/// therefore has two causes — no `@requires` line, and only scoped ones.
+/// The reader is told which, rather than left to work it out.
+#[test]
+fn info_9e_a_scoped_only_file_says_why_the_neutral_row_is_empty() {
+    let path = tempfile_with_contents(
+        "scoped_only",
+        "@requires java version>=1.21.4\nstruct s size=4x4\n",
+    );
+    let out = run_info(&[path.to_str().unwrap(), "--editions", "java"]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stdout = String::from_utf8(out.stdout).expect("utf-8");
+    assert!(
+        stdout.contains("registry compatibility:  0.0 .. latest"),
+        "the neutral row reads only unscoped floors: {stdout}",
+    );
+    let stderr = String::from_utf8(out.stderr).expect("utf-8");
+    assert!(
+        stderr.contains("is scoped to one edition"),
+        "and says so, at the line that scoped it: {stderr}",
+    );
+    assert!(
+        stderr.contains(":1:1:"),
+        "with the position, like every other note that names a line: {stderr}",
+    );
+}
+
 /// A requirement `cairn check` rejects stops `cairn info` too, in both
 /// output formats.
 ///
