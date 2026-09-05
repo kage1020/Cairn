@@ -136,8 +136,8 @@ fn no_shipped_example_reports_an_unsupported_entry() {
         for (edition, pack) in editions() {
             let block_ir = lower_for(source, edition, pack, None);
             let counts = match edition {
-                Edition::Java => portability_for_java(&block_ir, &pack.blocks),
-                Edition::Bedrock => portability_for_bedrock(&block_ir, &pack.blocks),
+                Edition::Java => portability_for_java(&block_ir, &pack.blocks, &pack.aliases),
+                Edition::Bedrock => portability_for_bedrock(&block_ir, &pack.blocks, &pack.aliases),
             }
             .counts();
             assert_eq!(
@@ -163,8 +163,8 @@ fn the_reported_entry_count_matches_what_a_pinned_build_emits() {
         for (edition, pack) in editions() {
             let unpinned = lower_for(source, edition, pack, None);
             let reported = match edition {
-                Edition::Java => portability_for_java(&unpinned, &pack.blocks),
-                Edition::Bedrock => portability_for_bedrock(&unpinned, &pack.blocks),
+                Edition::Java => portability_for_java(&unpinned, &pack.blocks, &pack.aliases),
+                Edition::Bedrock => portability_for_bedrock(&unpinned, &pack.blocks, &pack.aliases),
             }
             .counts()
             .total();

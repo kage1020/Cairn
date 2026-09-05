@@ -179,24 +179,68 @@ fn a_typo_is_answered_with_the_id_the_target_does_spell() {
     );
 }
 
-/// The suggestion is a typo finder, not a rename map.
+/// A rename is answered from the pack's alias table, which is the case a
+/// typo finder structurally cannot reach.
 ///
-/// Bedrock calling Java's `light` `light_block` is six edits away, past
-/// `nearest_match`'s cap, and no amount of searching the id table turns
-/// that into a suggestion. What the message must not do is go silent about
-/// it: the note has to say there is no candidate and what to do instead.
+/// Bedrock spells Java's `light` `light_block_0` … `light_block_15`, eight
+/// edits away and sixteen ids wide. No distance threshold that keeps
+/// `oak_plank` → `oak_planks` honest will ever connect the two, so the
+/// answer has to come from a table that states outright that these names
+/// are one block.
 #[test]
-fn a_rename_says_plainly_that_it_has_no_candidate() {
+fn a_rename_is_answered_with_the_name_the_target_uses() {
     let fixture = Fixture::new("rename", &source_binding("light"));
+    let out = compile(&fixture, "bedrock", "1.21.60");
+    assert_eq!(out.status.code(), Some(1), "stderr: {}", stderr_of(&out));
+    let stderr = stderr_of(&out);
+    assert!(
+        stderr.contains("minecraft:light_block_0") && stderr.contains("alias table"),
+        "expected the alias answer, got: {stderr}",
+    );
+    assert!(
+        !stderr.contains("is near enough to suggest"),
+        "the no-candidate note is what this replaces, got: {stderr}",
+    );
+}
+
+/// The table is symmetric because a group carries no direction: which
+/// spelling is the local one is a question about the target, and the
+/// target's own id table answers it.
+#[test]
+fn the_same_group_answers_from_either_edition() {
+    let on_bedrock = Fixture::new("sign-bedrock", &source_binding("oak_sign"));
+    let out = compile(&on_bedrock, "bedrock", "1.21.60");
+    assert_eq!(out.status.code(), Some(1), "stderr: {}", stderr_of(&out));
+    assert!(
+        stderr_of(&out).contains("minecraft:standing_sign"),
+        "bedrock spells the oak sign `standing_sign`, got: {}",
+        stderr_of(&out),
+    );
+
+    let on_java = Fixture::new("sign-java", &source_binding("standing_sign"));
+    let out = compile(&on_java, "java", "1.21.4");
+    assert_eq!(out.status.code(), Some(1), "stderr: {}", stderr_of(&out));
+    assert!(
+        stderr_of(&out).contains("minecraft:oak_sign"),
+        "java spells the same block `oak_sign`, got: {}",
+        stderr_of(&out),
+    );
+}
+
+/// An id no group names still says plainly that it has no candidate.
+///
+/// The alias table is not a second guess at what an author meant — it
+/// answers where the pack knows the block under another name and says
+/// nothing where it does not, which leaves the original message intact for
+/// an id that is simply not a block.
+#[test]
+fn an_id_no_group_names_still_says_it_has_no_candidate() {
+    let fixture = Fixture::new("no-group", &source_binding("totally_not_a_block"));
     let out = compile(&fixture, "bedrock", "1.21.60");
     let stderr = stderr_of(&out);
     assert!(
-        stderr.contains("is near enough to suggest"),
+        stderr.contains("is near enough to suggest") && !stderr.contains("alias table"),
         "expected the no-candidate note, got: {stderr}",
-    );
-    assert!(
-        !stderr.contains("spells the nearest block"),
-        "a rename must not be dressed up as a typo suggestion, got: {stderr}",
     );
 }
 

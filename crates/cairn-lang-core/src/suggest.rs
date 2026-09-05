@@ -118,6 +118,40 @@ where
     nearest_match(path, paths).map(|best| format!("{namespace}:{best}"))
 }
 
+/// How many candidates [`candidate_list`] prints before counting the
+/// rest.
+///
+/// A registry-pack alias group runs to sixteen ids where one spelling was
+/// split into a family (`light_block_0` … `_15`), and a note that prints
+/// all of them buries the line saying what went wrong.
+pub const CANDIDATES_SHOWN: usize = 4;
+
+/// Render a closed candidate set as the fragment a diagnostic note reads,
+/// in the order given and truncated to [`CANDIDATES_SHOWN`].
+///
+/// One definition because the truncation is a presentation rule about the
+/// same kind of list in two commands — the `E_UNKNOWN_ID` note and `cairn
+/// info`'s unsupported-entry rows — and a cap that differed between them
+/// would be a difference nobody chose.
+///
+/// Truncating at all is a claim only about the sentence. Where a consumer
+/// needs the closed set spec `versioning-editions.md` §10.4 asks an error
+/// to return, it reads the diagnostic's `data` payload, which carries every
+/// candidate.
+#[must_use]
+pub fn candidate_list(candidates: &[String]) -> String {
+    let listed = candidates
+        .iter()
+        .take(CANDIDATES_SHOWN)
+        .map(|c| format!("`{c}`"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    match candidates.len().saturating_sub(CANDIDATES_SHOWN) {
+        0 => listed,
+        rest => format!("{listed} and {rest} more"),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -197,6 +231,38 @@ mod tests {
         // A 3-char input gets cap 1; a 2-edit candidate must not be picked.
         let cands: &[&str] = &["abcdef"];
         assert!(nearest_match("abc", cands.iter().copied()).is_none());
+    }
+
+    fn owned(ids: &[&str]) -> Vec<String> {
+        ids.iter().map(|id| (*id).to_owned()).collect()
+    }
+
+    #[test]
+    fn a_short_candidate_list_is_printed_whole() {
+        assert_eq!(
+            candidate_list(&owned(&["minecraft:oak_sign", "minecraft:spruce_sign"])),
+            "`minecraft:oak_sign`, `minecraft:spruce_sign`",
+        );
+    }
+
+    #[test]
+    fn a_long_candidate_list_counts_the_rest() {
+        let ids: Vec<String> = (0..16)
+            .map(|i| format!("minecraft:light_block_{i}"))
+            .collect();
+        assert_eq!(
+            candidate_list(&ids),
+            "`minecraft:light_block_0`, `minecraft:light_block_1`, \
+             `minecraft:light_block_2`, `minecraft:light_block_3` and 12 more",
+        );
+    }
+
+    #[test]
+    fn an_empty_candidate_list_renders_empty() {
+        // Callers ask whether the set is empty before rendering it, so this
+        // is the shape of a bug rather than of a message — it must not come
+        // out as a stray "and 0 more".
+        assert_eq!(candidate_list(&[]), "");
     }
 
     #[test]

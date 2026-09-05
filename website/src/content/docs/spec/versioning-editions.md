@@ -114,11 +114,31 @@ skip the comparison rather than pick a version on the author's behalf. `cairn ch
 block-array lowering at all, so no lowering-stage code reaches it, `E_UNKNOWN_ABSTRACT_TOKEN`
 included.
 
-The suggested fix is a typo finder over the same table: `oak_plank` is answered with `oak_planks`.
-A **rename** is not a typo. Bedrock 1.21.0 calls Java's `light` `light_block`, six edits away, and
-1.21.40 spells it `light_block_0` … `light_block_15`, further still, so the message says it has no
-candidate rather than offering the nearest unrelated block.
-Closing that gap needs a per-edition alias table the pack does not carry yet.
+The suggested fix has two halves, because a wrong ID arrives two ways. A **typo** is answered by a
+distance search over the same table: `oak_plank` is answered with `oak_planks`. A **rename** is not
+a typo — Bedrock spells Java's `light` `light_block_0` … `light_block_15`, eight edits away — and no
+threshold that keeps the typo finder honest will ever connect the two. Renames are answered from
+the registry pack's `aliases` component instead, and only where the pack has a row; where it does
+not, the message says it has no candidate rather than offering the nearest unrelated block.
+
+An `aliases` row is a **group of spellings**: the names one block has worn, across editions and
+across one edition's own range, including the several IDs one old spelling split into.
+
+```json
+{ "spellings": ["light", "light_block", "light_block_0", "light_block_1"] }
+```
+
+Nothing in the row says which spelling belongs to which `(edition, version)`. The `blocks`
+component already knows that, per version, so a lookup is "take the group, keep the members the
+pinned target declares" — which is what lets one set of rows answer Java → Bedrock
+(`oak_sign` → `standing_sign`) and Bedrock 1.21.0 → 1.21.40 (`stonebrick` → `stone_bricks`) alike.
+An answer is the closed set §10.4 asks for, never a pick from it: `@light` on Bedrock 1.21.60 is
+answered with all sixteen light levels, because choosing one would be the silent substitution this
+section forbids.
+
+What the key cannot express is a spelling both editions declare meaning different blocks — Bedrock's
+`snow` is Java's `snow_block` while Java's `snow` is Bedrock's `snow_layer`. Such a pair gets no
+row, and the typo search still runs behind it.
 
 The same per-version scoping applies to a pack's own material mappings. An entry may carry
 `overrides` naming the versions that spell it differently, which is what lets one
@@ -380,7 +400,13 @@ outright is not a partial loss. The third and fourth are not portability facts a
 upstream let a blockstate through.
 
 Because four different repairs hide behind one figure, each counted entry is named on stderr with
-its reason. The ID case also gets a `did you mean` read the way `E_UNKNOWN_ID` reads one.
+its reason. The ID case is answered the way `E_UNKNOWN_ID` answers one, and by the same two halves:
+the `aliases` component where it has a row, so an entry this edition has under another name is
+reported as that name rather than as a dead end (`standing_sign` on Java is `oak_sign`), and a
+`did you mean` where it has none. They are alternatives, not a sequence — a row is the pack's word
+about which block this is, and printing a distance guess beside it would ask the reader to choose
+between them. The alias question is asked of the edition here too: a spelling *some* supported
+version declares is an answer, where a pinned build would keep only its own version's.
 `--format json` carries them as `edition_portability[].unsupported_entries`, one element per unit of
 the count, in palette order.
 
@@ -511,11 +537,11 @@ spelling.
 Bedrock's light block is that case, and it is why the snippet above carries a floor. 1.21.0 spells
 the block `light_block` and carries the level beside it as a `block_light_level` state; 1.21.40
 promoted the level into the id, so 1.21.40 and 1.21.60 spell the same block `light_block_0` …
-`light_block_15` and have no id named `light_block` at all. The alias table
-[§10.4](#104-fail-loud-and-minimum-version-inference) wants for the cross-edition rename would not
-settle this one: the pair differs by version rather than by edition, and one shape carries a state
-the other has nowhere to put. A branch is therefore written for one of the two, and the floor is
-what says which. Being scoped, it is inert on the Java build
+`light_block_15` and have no id named `light_block` at all. The `aliases` row that holds all of
+those spellings together ([§10.4](#104-fail-loud-and-minimum-version-inference)) answers the
+diagnostic and not the source: it hands back the spellings the pinned target declares, and picking
+one of them is the author's to do — which is what writing the branch for one of the two shapes is.
+The floor is what says which shape that is. Being scoped, it is inert on the Java build
 ([§10.4](#a-floor-may-name-its-edition)), which the other branch serves.
 
 Leaving the floor off is loud rather than wrong: `light_block_15` against Bedrock 1.21.0 is
