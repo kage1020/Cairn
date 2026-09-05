@@ -469,8 +469,12 @@ fn a_java_shaped_floor_is_not_evaluated_against_bedrock_numbering() {
 /// The refusal has to be actionable, and the action is on the `@requires`
 /// line: name the edition the floor is written in, or name a release of
 /// the one being built.
+///
+/// The advice is followed all the way to a build rather than only matched
+/// as text. A message that reads right and leads nowhere is the failure
+/// mode this shape of test exists to catch.
 #[test]
-fn the_unorderable_refusal_offers_the_scope_and_the_releases() {
+fn the_unorderable_refusal_offers_a_scope_that_works() {
     let fixture = Fixture::new("cross_msg", &format!("@requires version>=1.21.4\n{BUILD}"));
     let stderr =
         String::from_utf8(compile_as(&fixture, "bedrock", "1.21.40").stderr).expect("utf-8");
@@ -479,16 +483,103 @@ fn the_unorderable_refusal_offers_the_scope_and_the_releases() {
         "should offer the edition scope: {stderr}",
     );
     assert!(
-        stderr.contains("1.21.0, 1.21.40, 1.21.60"),
-        "should list the releases it could name instead: {stderr}",
-    );
-    assert!(
         stderr.contains(":1:1:"),
         "should point at the `@requires` line: {stderr}",
     );
+    // The two releases it falls between, rather than the whole table: the
+    // pack names every Bedrock release now, and dozens of them say no more
+    // than these two do.
+    assert!(
+        stderr.contains("1.21.0 and then 1.21.20"),
+        "should name the releases it falls between: {stderr}",
+    );
+
+    // Now take the advice, and check it builds.
+    let repaired = Fixture::new(
+        "cross_msg_fixed",
+        &format!("@requires java version>=1.21.4\n{BUILD}"),
+    );
+    let out = compile_as(&repaired, "bedrock", "1.21.40");
+    assert!(
+        out.status.success(),
+        "the offered repair has to build: {}",
+        String::from_utf8_lossy(&out.stderr),
+    );
 }
 
-/// And the scope is the repair, so it has to work: the same floor, scoped
+/// The scope is only offered when the *other* edition can place the label.
+///
+/// Offering it otherwise recommends a guess: scoped to an edition that
+/// cannot place it either, the floor goes inert there and the constraint
+/// the author wrote evaporates into a `verified: true` build.
+#[test]
+fn a_label_no_edition_can_place_is_not_answered_with_a_scope() {
+    let fixture = Fixture::new(
+        "snapshot_label",
+        &format!("@requires version>=24w14a\n{BUILD}"),
+    );
+    let stderr =
+        String::from_utf8(compile_as(&fixture, "bedrock", "1.21.60").stderr).expect("utf-8");
+    assert!(stderr.contains("E_REQUIRES_UNORDERABLE"), "{stderr}");
+    assert!(
+        !stderr.contains("@requires java"),
+        "no edition can place a snapshot label, so none may be recommended: {stderr}",
+    );
+    assert!(
+        stderr.contains("fix: name a bedrock release"),
+        "the one repair left has to be named: {stderr}",
+    );
+}
+
+/// A floor naming a real release of the edition being built is ordered
+/// against it, even when the pack cannot build for that release.
+///
+/// `1.21.1` is a Java release the pack ships no block table for. Ordering
+/// it and building for it are different questions, and answering the first
+/// with the second is what made this refuse a build that `canary` accepted.
+#[test]
+fn a_floor_naming_a_release_the_pack_cannot_build_for_still_orders() {
+    let fixture = Fixture::new(
+        "unbuildable_row",
+        &format!("@requires version>=1.21.1\n{BUILD}"),
+    );
+    let out = compile(&fixture, "1.21.4");
+    assert!(
+        out.status.success(),
+        "1.21.4 is above 1.21.1 by DataVersion: {}",
+        String::from_utf8_lossy(&out.stderr),
+    );
+    // And below it is still below it.
+    let below = compile(&fixture, "1.21");
+    assert_eq!(below.status.code(), Some(1));
+    assert!(
+        String::from_utf8_lossy(&below.stderr).contains("E_VERSION_CAP"),
+        "{}",
+        String::from_utf8_lossy(&below.stderr),
+    );
+}
+
+/// A floor above every release the pack can *build* for, but below ones it
+/// can order against, says no supported target satisfies it — it must not
+/// offer a release as a `--target` the pack would then refuse.
+#[test]
+fn an_orderable_but_unbuildable_release_is_not_offered_as_a_target() {
+    let fixture = Fixture::new(
+        "unbuildable_floor",
+        &format!("@requires version>=1.21.11\n{BUILD}"),
+    );
+    let stderr = String::from_utf8(compile(&fixture, "1.21.4").stderr).expect("utf-8");
+    assert!(
+        stderr.contains("no supported java target satisfies it"),
+        "{stderr}",
+    );
+    assert!(
+        !stderr.contains("--target 1.21.11") && !stderr.contains("--target 26."),
+        "a release the pack cannot build for is not a target: {stderr}",
+    );
+}
+
+/// And the scope is the repair, so it has to work/// And the scope is the repair, so it has to work: the same floor, scoped
 /// to Java, builds Bedrock because it says nothing about Bedrock.
 #[test]
 fn a_java_scoped_floor_is_inert_on_a_bedrock_build() {

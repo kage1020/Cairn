@@ -14,11 +14,13 @@
 //!
 //! # Why a floor needs more than a lookup
 //!
-//! A table names the versions the pack was built for. A floor may name any
-//! version: `@requires version>=1.19` is an ordinary thing to write and is
-//! in no table Cairn ships. A pure lookup could not answer for it, and
-//! answering by comparing the label text is the convention §10.1 exists to
-//! get away from.
+//! The table names every *release* of its edition — which is not the same
+//! set as the versions the pack can build for, and is the set that matters
+//! here: it is what lets "inside the table's span, naming no row" mean
+//! "not a release of this edition" rather than "not one of the three the
+//! pack ships block data for". A floor may still name something no table
+//! carries — a snapshot, a version newer than the pack, a label that is
+//! not a version at all — so placing one is more than a lookup.
 //!
 //! What resolves that is a distinction between the questions a table
 //! *cannot* be wrong about and the ones it can:
@@ -28,23 +30,33 @@
 //!   no release ships between the two, so against a table of releases it
 //!   answers the same as the row it precedes.
 //! - A label below every row is satisfied by every target, and one above
-//!   every row by none — whichever key each row happens to carry. Placing
-//!   it there is a comparison of labels, so it is only trusted between
-//!   labels in one numbering scheme ([`is_dotted_decimal`]); a dotted
-//!   decimal against a date-based row is exactly the comparison this
-//!   module exists to avoid.
+//!   every row by none. That answer is reached by comparing the floor's
+//!   label against the first and last rows' *labels*, while "first" and
+//!   "last" are decided by their *keys* — so it holds exactly when the
+//!   table's labels sort the same way by text as by key. That is a real
+//!   condition rather than a restatement of "one numbering scheme": two
+//!   dotted decimals whose keys ran the other way would break it. The
+//!   registry pack loader checks it at load time
+//!   (`validate_version_order`), so every table that reaches this module
+//!   satisfies it. The label itself still has to be a dotted decimal
+//!   ([`is_dotted_decimal`]) to be compared at all.
 //! - Anything else — a label inside the table's span that names no row —
 //!   has no key and cannot be given one. It is [`FloorPlacement::Unplaceable`],
 //!   and the caller refuses the build rather than guessing.
 //!
 //! That last case is not a rare corner. It is where the cross-edition
-//! defect lives: `@requires version>=1.21.4` against Bedrock, whose
-//! releases run `1.21.0 / 1.21.40 / 1.21.60`. Java's newest release names
-//! no Bedrock version, sits inside Bedrock's span, and the dotted-decimal
-//! comparison this replaced read it as satisfied by `1.21.40` on `40 > 4`
-//! — certifying a build against a version below the floor. Here it is
-//! unplaceable, and the repair is the edition scope the directive now
-//! accepts.
+//! defect lives: `@requires version>=1.21.4` against Bedrock. Bedrock
+//! numbers its patch releases in tens — `1.21.0`, `1.21.20`, `1.21.40` —
+//! so Java's `1.21.4` names no Bedrock release, sits between two that
+//! exist, and the dotted-decimal comparison this replaced read it as
+//! satisfied by `1.21.40` on `40 > 4`, certifying a build against a
+//! version below the floor. Here it is unplaceable, and the repair is the
+//! edition scope the directive now accepts.
+//!
+//! The two editions' release-label sets are disjoint, which is what makes
+//! that answer available: no label names a release of both, so a label
+//! this edition's table cannot place and the other's can is a floor
+//! written in the other's numbering, and the CLI says so.
 
 use super::requires_parse::{compare_versions, is_dotted_decimal};
 
@@ -78,8 +90,12 @@ struct VersionRow {
 /// and none does — while "cannot be placed" is the absence of one. Folding
 /// the three together would leave the caller unable to tell a floor every
 /// target meets from a floor nothing can be said about.
+/// Not `#[non_exhaustive]`: the four answers are a closed set — a label
+/// is a row, below them all, above them all, or none of those — and the
+/// callers compare the value with `==`. A fifth variant would compile
+/// against those callers and answer wrongly, which is the opposite of
+/// what the attribute is for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[non_exhaustive]
 pub enum FloorPlacement {
     /// The label names a row, or the pre-release of one. Holds that row's
     /// key.
@@ -94,8 +110,11 @@ pub enum FloorPlacement {
 }
 
 /// What one floor says about one target.
+///
+/// Closed for the same reason as [`FloorPlacement`], of which it is a
+/// total function: the target is at or above the floor, below it, or the
+/// floor cannot be placed at all.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[non_exhaustive]
 pub enum FloorVerdict {
     /// The target is at or above the floor.
     Satisfied,
@@ -139,8 +158,9 @@ impl VersionOrder {
     /// The key a label names, when it names a row.
     ///
     /// Matched with [`compare_versions`] rather than by string equality,
-    /// so a row is found through the one difference between two spellings
-    /// of one version that carries no information: its trailing zeros.
+    /// so a row is found through the differences between two spellings of
+    /// one version that carry no information: its trailing zeros, and the
+    /// leading zeros of any component (`1.020` finds the `1.20` row).
     /// Bedrock's earliest supported release is `1.21.0` and a floor of
     /// `1.21` is that release, not a version between two others. Every
     /// other way two labels can differ leaves them unequal under that
@@ -192,6 +212,31 @@ impl VersionOrder {
             return FloorPlacement::AboveEvery;
         }
         FloorPlacement::Unplaceable
+    }
+
+    /// The rows a label falls between, when it falls between two.
+    ///
+    /// `(None, _)` when nothing the table carries is below it, `(_, None)`
+    /// when nothing is above — so a caller can tell "between two releases"
+    /// from "off one end", which are different things to say to an author.
+    /// Labels this comparison cannot place against get `(None, None)`.
+    #[must_use]
+    pub fn neighbours(&self, label: &str) -> (Option<&str>, Option<&str>) {
+        if !is_dotted_decimal(label.split_once('-').map_or(label, |(core, _)| core)) {
+            return (None, None);
+        }
+        let below = self
+            .rows
+            .iter()
+            .rev()
+            .find(|row| compare_versions(&row.label, label).is_lt())
+            .map(|row| row.label.as_str());
+        let above = self
+            .rows
+            .iter()
+            .find(|row| compare_versions(&row.label, label).is_gt())
+            .map(|row| row.label.as_str());
+        (below, above)
     }
 
     /// Weigh a floor against a target's key.
@@ -260,16 +305,22 @@ mod tests {
         assert_eq!(java().verdict("1.21", 3700), FloorVerdict::Below);
     }
 
-    /// **The ordering key is the `DataVersion`, not the label.** A table
-    /// whose label order disagrees with its key order is the shape the
-    /// semver → date-based transition produces, and it is the only shape
-    /// that can tell the two conventions apart: on every table Cairn ships
-    /// today they agree, so a test built on those rows would pass under
-    /// either.
+    /// **The ordering key is the `DataVersion`, not the label.**
+    ///
+    /// A table whose label order disagrees with its key order is the only
+    /// shape that can tell the two conventions apart: on every table Cairn
+    /// ships the two agree, so a test built on those rows would pass under
+    /// either. It is not a table the loader would accept — that is what
+    /// `validate_version_order` refuses — which is exactly why the
+    /// distinction has to be made here, where a `VersionOrder` can be
+    /// built directly.
     ///
     /// Here `1.9` is the *newer* release and `1.21.4` the older one.
     /// Component-wise over dotted decimals, `1.21.4 > 1.9` and a target of
-    /// `1.9` is below the floor. By `DataVersion` it is above it.
+    /// `1.9` is below the floor. By `DataVersion` it is above it. Every
+    /// assertion below goes through an exact row, so what it pins is the
+    /// lookup and the comparison of keys — the boundary paths are the
+    /// neighbouring tests.
     #[test]
     fn the_key_decides_when_the_labels_disagree_with_it() {
         let order = VersionOrder::new([("1.21.4".to_owned(), 4189), ("1.9".to_owned(), 5000)]);

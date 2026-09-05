@@ -88,6 +88,33 @@ and is a separate axis from the Minecraft target version.
   `PreRelease`, and `E_INVALID_REQUIRES`'s `reason` payload gains `unknown_edition_scope` and
   `prerelease_not_a_tag`.
 
+- *(formats)!* The registry pack's version table names every **release** of its edition, not only
+  the versions the pack can build for. A row says which it is with a new `targetable` column, and
+  `data_versions.schema_version` moves to `2` for it — a `schema_version: 1` table still loads and
+  still means what it meant, since every row of one was a buildable target and the column defaults
+  to `true`.
+
+  Ordering an `@requires` floor and building for a version are different questions, and answering
+  the first with the three-row sample the second needs is what made a floor naming a real release
+  the pack does not ship — `version>=1.21.1` on Java — indistinguishable from one naming another
+  edition's release. It refused a build that used to work, with a message that said `1.21.1` is not
+  a Java release. It is; the pack simply had no `DataVersion` for it. Both are fixed: the floor is
+  ordered, and the same shape of label that genuinely names no release of the edition being built
+  is still `E_REQUIRES_UNORDERABLE`.
+
+  The Java rows are the game's own version metadata (releases only, 1.14 onward, via
+  `misode/mcmeta`'s machine-generated summary); the Bedrock rows are Mojang's own
+  `bedrock-samples` release list, with the palette integer computed as
+  `(major << 24) | (minor << 16) | (patch << 8) | revision` of that build — a formula the three
+  rows already shipped confirm exactly. `data_versions.json` records where its rows came from in a
+  new `source` field. The loader now also refuses a table whose keys are not unique and ascending,
+  or whose labels do not sort the same way by text as by key — the property placing a floor
+  *outside* the table's span actually rests on, which was previously stated in a doc comment as
+  "whatever key each row carries" and is not that.
+
+  `--target`, `cairn info`'s `buildable targets`, and the supported-target lists are unchanged:
+  they read the targetable rows.
+
 ## 2026.9.0 — 2026-09-01
 
 ### Added

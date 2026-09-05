@@ -344,6 +344,18 @@ impl EditionArg {
         }
     }
 
+    /// The edition this one is not.
+    ///
+    /// Asked when a floor this edition cannot place might be a release of
+    /// the other one, which is the difference between offering an edition
+    /// scope and guessing at one.
+    fn other(self) -> Self {
+        match self {
+            EditionArg::Java => EditionArg::Bedrock,
+            EditionArg::Bedrock => EditionArg::Java,
+        }
+    }
+
     /// Lowercase name, matching the `--edition` spelling and the label
     /// `UnsupportedTarget` uses, so one message never calls it two things.
     fn as_str(self) -> &'static str {
@@ -1014,14 +1026,23 @@ fn dropped_scopes(
         .collect()
 }
 
-/// Every version a pack declares, in ascending release order.
+/// Every version a pack can build for, in ascending release order.
+///
+/// The buildable rows, not every row: the table also carries the releases
+/// the pack can order an `@requires` floor against but has no block table
+/// for, and offering one of those as a `--target` would pin a compile to a
+/// version whose id check cannot run.
 ///
 /// Sorted here rather than taken as written: `DataVersionTable` documents
 /// its row order as informational, and this list is shown to a reader, so
 /// reordering rows in a pack's JSON must not reorder the output.
 fn supported_versions(pack: &RegistryPack) -> Vec<String> {
-    let mut rows: Vec<&cairn_lang_formats::registry::DataVersionEntry> =
-        pack.data_versions.versions.iter().collect();
+    let mut rows: Vec<&cairn_lang_formats::registry::DataVersionEntry> = pack
+        .data_versions
+        .versions
+        .iter()
+        .filter(|entry| entry.targetable)
+        .collect();
     rows.sort_by_key(|entry| entry.data_version);
     rows.into_iter()
         .map(|entry| entry.mc_version.clone())
@@ -1044,9 +1065,17 @@ fn render_floor(floor: &VersionFloor) -> String {
 /// One pack's version table, as the `DataVersion` ordering
 /// `spec/versioning-editions.md` §10.1 makes canonical.
 ///
-/// Built per call rather than cached: it is three rows, and a cache would
-/// have to be keyed by pack to stay correct once `--registry-pack` can
-/// supply one.
+/// **Every** row, including the ones `--target` may not name. Ordering a
+/// floor and building for a version are different questions: the pack has
+/// block data for three versions per edition and knows where every release
+/// sits, and it is the second set that decides whether a floor can be
+/// placed at all. A table holding only the buildable rows is what made a
+/// floor naming a real release the pack does not ship — `1.21.1` on Java —
+/// indistinguishable from one naming another edition's release.
+///
+/// Built per call rather than cached: it is a few dozen rows, and a cache
+/// would have to be keyed by pack to stay correct once `--registry-pack`
+/// can supply one.
 fn version_order(pack: &RegistryPack) -> VersionOrder {
     VersionOrder::new(
         pack.data_versions
@@ -2238,14 +2267,22 @@ fn enforce_version_floor(
     // Every floor, not the one being reported. A candidate that clears this
     // floor and trips the next one is the same second error in a different
     // spelling — the offer has to be a target that builds.
-    let usable: Vec<&str> = order
-        .rows()
-        .filter(|&(_, key)| {
-            floors
-                .iter()
-                .all(|floor| order.verdict(&floor.version, key) == FloorVerdict::Satisfied)
+    //
+    // And "builds" means the buildable rows, not every row the order
+    // carries: the table also names the releases the pack can only order
+    // against, and offering one of those sends the author to `unsupported
+    // target` — the second error this list exists to prevent.
+    let buildable = supported_versions(edition.registry_pack());
+    let usable: Vec<&str> = buildable
+        .iter()
+        .filter(|label| {
+            order.key_of(label).is_some_and(|key| {
+                floors
+                    .iter()
+                    .all(|floor| order.verdict(&floor.version, key) == FloorVerdict::Satisfied)
+            })
         })
-        .map(|(label, _)| label)
+        .map(String::as_str)
         .collect();
     if usable.is_empty() {
         eprintln!(
@@ -2291,27 +2328,45 @@ fn report_unplaceable_floor(
         render_floor(floor),
         edition.as_str(),
     );
-    eprintln!(
-        "  {} releases: {}",
-        edition.as_str(),
-        order
-            .rows()
-            .map(|(label, _)| label)
-            .collect::<Vec<_>>()
-            .join(", "),
-    );
-    eprintln!(
-        "  Cairn orders versions by DataVersion, and a floor between two releases of an edition \
-         that names neither has no DataVersion to order by."
-    );
-    // The scope is only offered when it would change the answer. A floor
-    // already scoped to this edition is refused *by* this edition's table,
-    // and telling its author to scope it to the edition it is already
-    // scoped to is advice that leads nowhere.
-    if floor.edition.is_none() {
+    // The two releases it falls between, not the whole table. The table
+    // names every release of the edition now, so printing it is dozens of
+    // versions where two say the same thing: where the label would sit if
+    // it were one of them, and that it is not.
+    match order.neighbours(&floor.version) {
+        (Some(below), Some(above)) => eprintln!(
+            "  {edition_name} ships {below} and then {above}, and nothing between them; \
+             Cairn orders versions by DataVersion and a label that names no release has none",
+            edition_name = edition.as_str(),
+        ),
+        _ => eprintln!(
+            "  {} releases: {}",
+            edition.as_str(),
+            order
+                .rows()
+                .map(|(label, _)| label)
+                .collect::<Vec<_>>()
+                .join(", "),
+        ),
+    }
+    // The scope is offered only when it would change the answer, and what
+    // decides that is whether the *other* edition can place the label —
+    // not whether this floor carries a scope already. Recommending one
+    // without checking is recommending a guess: scoped to an edition that
+    // cannot place it either, the floor goes inert there and the
+    // constraint the author wrote evaporates.
+    let other = edition.other();
+    let elsewhere = floor.edition.is_none()
+        && version_order(other.registry_pack()).place(&floor.version)
+            != FloorPlacement::Unplaceable;
+    if elsewhere {
         eprintln!(
-            "  fix: scope the floor to the edition it is written in \
-             (`@requires java version>={}`), or name a {} release",
+            "  `{}` is a {} release; if that is the numbering this floor is written in, say so",
+            floor.version,
+            other.as_str(),
+        );
+        eprintln!(
+            "  fix: `@requires {} version>={}`, or name a {} release",
+            other.as_str(),
             floor.version,
             edition.as_str(),
         );

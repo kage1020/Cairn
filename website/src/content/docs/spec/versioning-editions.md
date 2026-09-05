@@ -147,22 +147,37 @@ strictest, so their intersection is never empty. A constraint needing an upper b
 [§10.1](#101-the-target-is-a-compile-time-parameter) makes `DataVersion` the canonical ordering key,
 and `@requires` uses it. A floor is placed in the **target edition's** version table
 (`registry-data/{java,bedrock}/data_versions.json`) and weighed against the target's own
-`DataVersion`. Two version labels are never compared as text to decide a build.
+`DataVersion`.
 
-A table names the versions the pack was built for, and a floor may name any version, so placing one
-is not a bare lookup. Four answers, and only the first is exact:
+That table names every **release** of its edition, which is a different set from the versions the
+pack can *build* for — three per edition, the ones it ships block and material data for. A row says
+which it is (`targetable`). Keeping the two apart is what lets "inside the table's span, naming no
+row" mean "not a release of this edition": a floor of `1.21.1` is a Java release the pack cannot
+build for and can order perfectly well, while `1.21.4` names no Bedrock release at all, because
+Bedrock numbers its patch releases in tens (`1.21.0`, `1.21.20`, `1.21.40`). The two editions'
+release-label sets are disjoint.
+
+A floor may still name something no table carries, so placing one is not a bare lookup. Four
+answers, and only the first is exact:
 
 | The floor | Placed as | Because |
 |---|---|---|
 | Names a row (trailing zeros ignored: `1.21` is Bedrock's `1.21.0`) | That row's `DataVersion` | Exact. |
 | Names a pre-release of a row (`1.21.4-rc1`) | That row's `DataVersion` | Nothing ships between a release candidate and its release, so no supported target lies between them either. |
-| Sits below every row, or above every one | Met by every target, or by none | True whatever key each row carries. Decided by comparing labels, so it is only trusted between labels in one numbering scheme — a dotted decimal against a date-based row is not placed this way. |
+| Sits below every row, or above every one | Met by every target, or by none | Reached by comparing the floor's label against the first and last rows' *labels*, while which rows those are is decided by their *keys* — so it holds exactly when the table's labels sort the same way by text as by key. The registry pack loader checks that at load time. The floor's own label must be a dotted decimal to be compared at all. |
 | Anything else — inside the table's span, naming no row | Not placed at all | It has no `DataVersion`, and there is none to give it. `E_REQUIRES_UNORDERABLE`. |
 
 The last row is a refusal, not a guess. `@requires version>=1.21.4` against Bedrock is exactly it:
-Java's newest release names no Bedrock release and sits between `1.21.0` and `1.21.40`. Comparing
-the labels read it as satisfied on `40 > 4` and certified a Bedrock build against a version below
-the floor — the same defect enforcing the floor exists to remove, one edition to the left.
+Java's release names no Bedrock release and sits between `1.21.0` and `1.21.20`. Comparing the
+labels read it as satisfied on `40 > 4` and certified a Bedrock build against a version below the
+floor — the same defect enforcing the floor exists to remove, one edition to the left.
+
+Because the label sets are disjoint, the refusal can say more than "no". A label this edition
+cannot place that the *other* edition can is a floor written in the other's numbering, and
+`E_REQUIRES_UNORDERABLE` names it and offers the scope. A label neither can place — a snapshot, a
+version newer than the pack — gets no scope offered, because recommending one would be recommending
+a guess: scoped to an edition that cannot place it either, the floor goes inert there and the
+constraint disappears.
 
 ### A floor may name its edition
 
@@ -195,8 +210,9 @@ with a digit and carry only letters and digits, with an optional `-` and a pre-r
 same. `1.a` and `x` name no version in any scheme and are `E_INVALID_REQUIRES`.
 
 Accepting a label is not claiming it can be ordered. Whether a given label has a `DataVersion` is
-the table's answer, given per edition at `cairn compile --target` — which is the one command that
-pins both. `cairn check` pins neither and does not ask.
+the table's answer, and it is asked per edition: `cairn compile --target` refuses the build, and
+`cairn info --editions` reports the edition as having no buildable target and says why. `cairn
+check` pins no edition and does not ask.
 
 ## 10.5 "Which version is it for?" has three answers
 

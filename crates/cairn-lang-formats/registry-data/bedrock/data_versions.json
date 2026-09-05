@@ -1,9 +1,196 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "latest": "1.21.60",
+  "source": "Release list from Mojang/bedrock-samples `version.json`; the palette integer is (major<<24)|(minor<<16)|(patch<<8)|revision of that build.",
   "versions": [
-    { "mc_version": "1.21.0", "data_version": 18153472 },
-    { "mc_version": "1.21.40", "data_version": 18163712 },
-    { "mc_version": "1.21.60", "data_version": 18168865 }
+    {
+      "mc_version": "1.19.30",
+      "data_version": 18030080,
+      "released": "2022-09-21",
+      "targetable": false
+    },
+    {
+      "mc_version": "1.19.40",
+      "data_version": 18032640,
+      "released": "2022-10-25",
+      "targetable": false
+    },
+    {
+      "mc_version": "1.19.50",
+      "data_version": 18035200,
+      "released": "2022-11-29",
+      "targetable": false
+    },
+    {
+      "mc_version": "1.19.60",
+      "data_version": 18037760,
+      "released": "2023-02-07",
+      "targetable": false
+    },
+    {
+      "mc_version": "1.19.70",
+      "data_version": 18040320,
+      "released": "2023-03-14",
+      "targetable": false
+    },
+    {
+      "mc_version": "1.19.80",
+      "data_version": 18042880,
+      "released": "2023-04-26",
+      "targetable": false
+    },
+    {
+      "mc_version": "1.20.0",
+      "data_version": 18087936,
+      "released": "2023-06-07",
+      "targetable": false
+    },
+    {
+      "mc_version": "1.20.10",
+      "data_version": 18090496,
+      "released": "2023-07-11",
+      "targetable": false
+    },
+    {
+      "mc_version": "1.20.30",
+      "data_version": 18095616,
+      "released": "2023-09-19",
+      "targetable": false
+    },
+    {
+      "mc_version": "1.20.40",
+      "data_version": 18098176,
+      "released": "2023-10-24",
+      "targetable": false
+    },
+    {
+      "mc_version": "1.20.50",
+      "data_version": 18100736,
+      "released": "2023-12-05",
+      "targetable": false
+    },
+    {
+      "mc_version": "1.20.60",
+      "data_version": 18103296,
+      "released": "2024-02-06",
+      "targetable": false
+    },
+    {
+      "mc_version": "1.20.70",
+      "data_version": 18105856,
+      "released": "2024-03-12",
+      "targetable": false
+    },
+    {
+      "mc_version": "1.20.80",
+      "data_version": 18108416,
+      "released": "2024-04-23",
+      "targetable": false
+    },
+    {
+      "mc_version": "1.21.0",
+      "data_version": 18153472,
+      "released": "2024-06-13"
+    },
+    {
+      "mc_version": "1.21.20",
+      "data_version": 18158592,
+      "released": "2024-08-13",
+      "targetable": false
+    },
+    {
+      "mc_version": "1.21.30",
+      "data_version": 18161152,
+      "released": "2024-09-17",
+      "targetable": false
+    },
+    {
+      "mc_version": "1.21.40",
+      "data_version": 18163712,
+      "released": "2024-10-22"
+    },
+    {
+      "mc_version": "1.21.50",
+      "data_version": 18166272,
+      "released": "2024-12-03",
+      "targetable": false
+    },
+    {
+      "mc_version": "1.21.60",
+      "data_version": 18168865,
+      "released": "2025-02-11"
+    },
+    {
+      "mc_version": "1.21.70",
+      "data_version": 18171392,
+      "released": "2025-03-25",
+      "targetable": false
+    },
+    {
+      "mc_version": "1.21.80",
+      "data_version": 18173952,
+      "released": "2025-05-06",
+      "targetable": false
+    },
+    {
+      "mc_version": "1.21.90",
+      "data_version": 18176512,
+      "released": "2025-06-17",
+      "targetable": false
+    },
+    {
+      "mc_version": "1.21.100",
+      "data_version": 18179072,
+      "released": "2025-08-05",
+      "targetable": false
+    },
+    {
+      "mc_version": "1.21.110",
+      "data_version": 18181632,
+      "released": "2025-09-30",
+      "targetable": false
+    },
+    {
+      "mc_version": "1.21.120",
+      "data_version": 18184192,
+      "released": "2025-10-28",
+      "targetable": false
+    },
+    {
+      "mc_version": "1.21.130",
+      "data_version": 18186752,
+      "released": "2025-12-09",
+      "targetable": false
+    },
+    {
+      "mc_version": "1.26.0",
+      "data_version": 18481152,
+      "released": "2026-02-10",
+      "targetable": false
+    },
+    {
+      "mc_version": "1.26.10",
+      "data_version": 18483712,
+      "released": "2026-03-24",
+      "targetable": false
+    },
+    {
+      "mc_version": "1.26.20",
+      "data_version": 18486272,
+      "released": "2026-05-05",
+      "targetable": false
+    },
+    {
+      "mc_version": "1.26.30",
+      "data_version": 18488832,
+      "released": "2026-06-16",
+      "targetable": false
+    },
+    {
+      "mc_version": "1.26.40",
+      "data_version": 18491392,
+      "released": "2026-08-04",
+      "targetable": false
+    }
   ]
 }
