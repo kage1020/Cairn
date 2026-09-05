@@ -1,5 +1,6 @@
 //! Cairn command-line entry point.
 
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
@@ -11,9 +12,9 @@ use cairn_lang_core::lock::{
     LockWalkway, Lockfile, hash_resolved_ir, hash_source,
 };
 use cairn_lang_core::resolve::{
-    BuildableTargets, EditionReport, FloorPlacement, FloorVerdict, UnsupportedEntry,
+    BuildableTargets, EditionReport, FloorOrigin, FloorPlacement, FloorVerdict, UnsupportedEntry,
     UnsupportedReason, VersionAxes, VersionFloor, VersionOrder, compute_axes,
-    declared_version_floors, resolve,
+    declared_version_floors, resolve, unscoped_version_floors,
 };
 use cairn_lang_core::{
     Diagnostic, Edition, Module, ParseError, Severity, check, diagnose_parse_failure, lower, parse,
@@ -1035,6 +1036,61 @@ fn render_floor(floor: &VersionFloor) -> String {
         Some(edition) => format!("{edition} version>={}", floor.version),
         None => format!("version>={}", floor.version),
     }
+}
+
+/// How to name the line a floor was written on, as a repair points at it.
+///
+/// The two spellings are `@requires` on a module header and `requires`
+/// inside a `def` or `theme` body. A fix line that names the wrong one
+/// sends its reader looking for a line the file does not contain.
+fn floor_keyword(floor: &VersionFloor) -> &'static str {
+    match floor.origin {
+        FloorOrigin::Module => "`@requires`",
+        FloorOrigin::Def(_) | FloorOrigin::Theme(_) => "`requires`",
+    }
+}
+
+/// Who declared a floor, as the subject of a sentence about it.
+///
+/// "this file" for a header, and the part for a member-level floor: "this
+/// file requires ..." for a floor the file inherited from one of its parts
+/// is the reading the composite rule exists to correct. Used by every
+/// sentence that has a floor for its subject — the two refusals' primaries
+/// and `cairn info`'s notes — so they cannot hold the same sentence to two
+/// standards.
+fn floor_declarer(floor: &VersionFloor) -> String {
+    floor.origin.part().map_or_else(
+        || "this file".to_owned(),
+        |(keyword, name)| format!("`{keyword} {name}`"),
+    )
+}
+
+/// The line naming which part of the module imposed a floor, when a part
+/// did.
+///
+/// `None` for an `@requires` header. The message it would sit under already
+/// carries the position of the line, and that line is the file's own, so a
+/// note saying "the file declares it" adds a sentence and no fact.
+///
+/// A member-level floor is the case this exists for. `spec/versioning-editions.md`
+/// §10.4 makes the minimum version of a composite the max of its parts, and
+/// a target refused by a floor written inside a `def` in a library is not
+/// actionable as a bare version number: the reader has to be told whose
+/// floor it is and by what route this build inherited it, because the
+/// repair is at the other end of that route.
+fn floor_origin_note(floor: &VersionFloor) -> Option<String> {
+    // Exhaustive, and deliberately not routed through `part()`: the clause
+    // is what differs between the routes, and a wildcard here would give a
+    // fourth route the prose of one of these three.
+    let inherited_by = match &floor.origin {
+        FloorOrigin::Module => return None,
+        FloorOrigin::Def(name) => format!("every `place use={name}` inherits it"),
+        FloorOrigin::Theme(_) => "every scope that binds the theme inherits it".to_owned(),
+    };
+    Some(format!(
+        "  {} declares it, and {inherited_by}",
+        floor_declarer(floor),
+    ))
 }
 
 /// One pack's version table, as the `DataVersion` ordering
@@ -2237,12 +2293,16 @@ fn enforce_version_floor(
     };
     let position = LineStarts::new(source).position(source, floor.span.start);
     eprintln!(
-        "error[E_VERSION_CAP]: {}:{}: this file requires {} (target {}).",
+        "error[E_VERSION_CAP]: {}:{}: {} requires {} (target {}).",
         file.display(),
         position,
+        floor_declarer(floor),
         render_floor(floor),
         target.mc_version(),
     );
+    if let Some(note) = floor_origin_note(floor) {
+        eprintln!("{note}");
+    }
     // `spec/versioning-editions.md` §10.4 makes the closed set of
     // candidates valid in the target part of the message, not an extra. Naming the floor alone
     // sends an author to `--target >=99.0`, which is a second error and no
@@ -2275,7 +2335,10 @@ fn enforce_version_floor(
             edition.as_str(),
             edition.registry_pack().supported_list(),
         );
-        eprintln!("  fix: lower the `@requires` floor, or build against another edition");
+        eprintln!(
+            "  fix: lower the {} floor, or build against another edition",
+            floor_keyword(floor),
+        );
     } else {
         eprintln!(
             "  valid {} targets: {}",
@@ -2283,8 +2346,9 @@ fn enforce_version_floor(
             usable.join(", ")
         );
         eprintln!(
-            "  fix: --target {}, or lower the `@requires` floor",
+            "  fix: --target {}, or lower the {} floor",
             usable[0],
+            floor_keyword(floor),
         );
     }
     Err(ExitCode::from(1))
@@ -2307,12 +2371,16 @@ fn report_unplaceable_floor(
 ) {
     let position = LineStarts::new(source).position(source, floor.span.start);
     eprintln!(
-        "error[E_REQUIRES_UNORDERABLE]: {}:{}: this file requires {}, which names no {} release.",
+        "error[E_REQUIRES_UNORDERABLE]: {}:{}: {} requires {}, which names no {} release.",
         file.display(),
         position,
+        floor_declarer(floor),
         render_floor(floor),
         edition.as_str(),
     );
+    if let Some(note) = floor_origin_note(floor) {
+        eprintln!("{note}");
+    }
     // The two releases it falls between, not the whole table. The table
     // names every release of the edition now, so printing it is dozens of
     // versions where two say the same thing: where the label would sit if
@@ -2362,42 +2430,69 @@ fn report_unplaceable_floor(
 
 /// Name the floors the `registry compatibility` row does not read.
 ///
-/// That row is edition-neutral, so only the unscoped floors feed it, and a
-/// file whose floors are all scoped reports `0.0 .. latest` — which reads
-/// as "no constraint" beside a `buildable targets` row that refuses
-/// versions. The two lines are both right and disagree on their face, so
-/// the reason goes on stderr rather than being left for the reader to
-/// work out.
+/// That row is edition-neutral, so a file whose floors it all leaves out
+/// reports `0.0 .. latest` — which reads as "no constraint" beside a
+/// `buildable targets` row that refuses versions. The two lines are both
+/// right and disagree on their face, so the reason goes on stderr rather
+/// than being left for the reader to work out.
+///
+/// Two reasons a floor is left out, and the note says which. A floor that
+/// names an edition means nothing in the other's numbering. A floor a
+/// `theme` declares is left out when the two editions bind different
+/// variants of that theme, because then only one of them inherits it —
+/// a case that arrived with the member-level floor and that a filter on
+/// the floor's own scope cannot see, since such a floor names no edition.
+///
+/// Derived by difference rather than by re-deciding either rule: whatever
+/// a build of either edition is held to and the neutral row does not read
+/// is, by construction, exactly what this has to name.
 fn report_floors_left_out_of_the_neutral_row(
     file: &Path,
     source: &str,
     lines: &LineStarts,
     module: &Module,
 ) {
-    let scoped: Vec<VersionFloor> = [Edition::Java, Edition::Bedrock]
-        .into_iter()
-        .flat_map(|edition| declared_version_floors(module, edition))
-        .filter(|floor| floor.edition.is_some())
-        .collect();
-    for floor in &scoped {
-        eprintln!(
-            "note: {}:{}: `{}` is scoped to one edition, so it is not part of the \
-             `registry compatibility` row, which is edition-neutral; `buildable targets` is \
-             where it is weighed",
-            file.display(),
-            lines.position(source, floor.span.start),
-            render_floor(floor),
-        );
+    let neutral = unscoped_version_floors(module);
+    let read_by_the_row = |floor: &VersionFloor| {
+        neutral
+            .iter()
+            .any(|kept| kept.span == floor.span && kept.version == floor.version)
+    };
+    let mut said = HashSet::new();
+    for edition in [Edition::Java, Edition::Bedrock] {
+        for floor in declared_version_floors(module, edition) {
+            if read_by_the_row(&floor) || !said.insert((floor.span.clone(), floor.edition)) {
+                continue;
+            }
+            let reason = if floor.edition.is_some() {
+                "is scoped to one edition".to_owned()
+            } else {
+                format!(
+                    "is declared by {}, and the two editions bind different variants of it",
+                    floor_declarer(&floor),
+                )
+            };
+            eprintln!(
+                "note: {}:{}: `{}` {}, so it is not part of the \
+                 `registry compatibility` row, which is edition-neutral; `buildable targets` is \
+                 where it is weighed",
+                file.display(),
+                lines.position(source, floor.span.start),
+                render_floor(&floor),
+                reason,
+            );
+        }
     }
 }
 
 /// The `note:` lines under one edition's `buildable targets` entry.
 ///
 /// Extracted from [`edition_rows`] so the loop there reads as the five
-/// steps it is. Both notes name the `@requires` line they came from, at
-/// the position `E_VERSION_CAP` would print for the same floor: a report
-/// that says which versions are out without saying which line put them
-/// there is half a report.
+/// steps it is. Both notes name the `requires` line they came from — and
+/// the part that declared it, when a part did — at the position
+/// `E_VERSION_CAP` would print for the same floor: a report that says which
+/// versions are out without saying which line put them there is half a
+/// report.
 fn report_version_notes(
     file: &Path,
     source: &str,
@@ -2417,6 +2512,9 @@ fn report_version_notes(
             edition.as_str(),
             edition.as_str(),
         );
+        if let Some(note) = floor_origin_note(floor) {
+            eprintln!("{note}");
+        }
         eprintln!(
             "  note: {} builds against {}",
             edition.as_str(),
@@ -2425,7 +2523,7 @@ fn report_version_notes(
     }
     for floor in &verdicts.refusing_floors {
         eprintln!(
-            "note: {}:{}: {} {} {} below the `{}` this file declares",
+            "note: {}:{}: {} {} {} below the `{}` {} declares",
             file.display(),
             lines.position(source, floor.span.start),
             edition.as_str(),
@@ -2436,6 +2534,7 @@ fn report_version_notes(
                 "are"
             },
             render_floor(floor),
+            floor_declarer(floor),
         );
     }
 }

@@ -7,7 +7,8 @@
 //! type-checking) is the responsibility of downstream layers.
 //!
 //! Source-position propagation: [`Header`], [`Item`], [`Statement`],
-//! [`ThemeRule`], [`Arg`], [`Value`], and [`TruthRow`] each carry a `span` field
+//! [`ThemeRule`], [`MemberRequires`], [`Arg`], [`Value`], and [`TruthRow`] each
+//! carry a `span` field
 //! pointing at the byte range of the originating source, and [`Item`] carries a
 //! second, narrower `name_span` for the name token alone — a block's `span`
 //! reaches to the end of its indented body, which is too much to underline for a
@@ -86,6 +87,50 @@ impl RawRequirement {
     }
 }
 
+/// One `requires version>=X` line inside a `def` or `theme` body.
+///
+/// The member-level twin of [`Header::Requires`] (`spec/versioning-editions.md`
+/// §10.4). It carries the same verbatim expression, read by the same
+/// `parse_requirement`, and differs only in what it constrains: a module-level
+/// `@requires` is a floor on the file, while this one is a floor on the part
+/// that declares it and therefore on every build that instantiates that part.
+///
+/// Held on the item rather than in its body statements because the word is
+/// not a member keyword and must not become one. `crate::intent`'s role
+/// table has no arm for it, so a `requires` line left among the statements
+/// lowers to `MemberRole::Other("requires")` and `check::keyword_allowlist`
+/// reports every one of them as `E_UNKNOWN_KEYWORD`. Lifting it is what
+/// keeps the floor out of the member vocabulary; the alternative was not a
+/// line the geometry passes skip but a new role for four passes to learn.
+///
+/// What it holds is one line's expression, verbatim — the same slice
+/// `@requires` keeps, and shaped no further. `E_INVALID_REQUIRES` is what
+/// reads it, and it says which part of the expression is wrong and carries
+/// the fragment for a quick-fix; a shape gate here would replace that with
+/// `E_PARSE` and no fragment, and would hold the two spellings of one
+/// constraint to two different grammars. The one thing the parser does
+/// refuse is an empty expression, because there is nothing there for either
+/// to report on.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[non_exhaustive]
+pub struct MemberRequires {
+    /// Requirement expression captured verbatim from the source, without
+    /// the leading `requires` keyword. Known to be non-empty; not known to
+    /// be a version floor.
+    pub requirement: RawRequirement,
+    /// Byte range of the whole `requires ...` line.
+    #[serde(skip)]
+    pub span: Span,
+}
+
+impl MemberRequires {
+    /// Wrap a raw requirement expression and the line it was written on.
+    #[must_use]
+    pub fn new(requirement: RawRequirement, span: Span) -> Self {
+        Self { requirement, span }
+    }
+}
+
 /// A whole `.crn` source file: a sequence of leading directives followed by
 /// top-level items, both kept in source order.
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -149,12 +194,24 @@ impl Header {
 #[non_exhaustive]
 pub enum Item {
     /// `theme NAME[:]` block — slot/selector bindings.
+    ///
+    /// `#[non_exhaustive]` on the variant, not only on the enum: the enum's
+    /// own attribute makes adding a *variant* non-breaking and does nothing
+    /// for a field added to an existing one, which is what the `requires`
+    /// field was. This variant and [`Self::Def`] carry it because this
+    /// change already broke their struct patterns, so the next field costs
+    /// nothing; [`Self::Site`] and [`Self::Struct`] do not, because giving
+    /// it to them would be a breakage this change does not need.
+    #[non_exhaustive]
     Theme {
         /// Theme name following the `theme` keyword.
         name: String,
         /// Byte range of the name token alone.
         #[serde(skip)]
         name_span: Span,
+        /// `requires version>=X` lines the body declares, in source order.
+        #[serde(skip_serializing_if = "Vec::is_empty")]
+        requires: Vec<MemberRequires>,
         /// Body rules in source order.
         body: Vec<ThemeRule>,
         /// Byte range covering the whole `theme ...` block including its
@@ -163,6 +220,9 @@ pub enum Item {
         span: Span,
     },
     /// `def NAME[ ARGS][:]` block — reusable parameterised component.
+    ///
+    /// `#[non_exhaustive]`, for the reason given on [`Self::Theme`].
+    #[non_exhaustive]
     Def {
         /// Definition name following the `def` keyword.
         name: String,
@@ -171,6 +231,9 @@ pub enum Item {
         name_span: Span,
         /// Inline `key=value` arguments on the definition header.
         args: Vec<Arg>,
+        /// `requires version>=X` lines the body declares, in source order.
+        #[serde(skip_serializing_if = "Vec::is_empty")]
+        requires: Vec<MemberRequires>,
         /// Indented body statements in source order.
         body: Vec<Statement>,
         /// Byte range covering the whole `def ...` block including its
@@ -293,6 +356,22 @@ impl Item {
             | Self::Def { name_span, .. }
             | Self::Site { name_span, .. }
             | Self::Struct { name_span, .. } => name_span,
+        }
+    }
+
+    /// The `requires version>=X` lines this item declares.
+    ///
+    /// Empty for `site` and `struct`, which refuse a line that reads as a
+    /// floor — `spec/versioning-editions.md` §10.4 gives it to `def` and
+    /// `theme`, the two kinds a build instantiates rather than *is*. An
+    /// empty slice rather than an `Option`, because a caller folding
+    /// floors over every item asks the same question of all four and the
+    /// answer for the other two is "none", not "not applicable".
+    #[must_use]
+    pub fn requires(&self) -> &[MemberRequires] {
+        match self {
+            Self::Theme { requires, .. } | Self::Def { requires, .. } => requires,
+            Self::Site { .. } | Self::Struct { .. } => &[],
         }
     }
 }

@@ -125,8 +125,60 @@ The same per-version scoping applies to a pack's own material mappings. An entry
 deferred: the tables record which IDs a version *has*, not which version first introduced one, so
 the `E_VERSION_CAP` example above is an `@requires` floor rather than registry-inferred.
 
-`def` and `theme` may declare `requires version>=X`, and the minimum version of a composite is the
-max of its parts. Module-level `@requires` is implemented; the member-level form is not yet parsed.
+### A part may declare its own floor
+
+`def` and `theme` may declare `requires version>=X` on a line of their own, and the minimum version
+of a composite is the max of its parts:
+
+```
+def cottage size=9x7:
+  requires version>=1.21.4
+  walls mat_slot=wall height=4
+```
+
+The expression is the one `@requires` takes, edition scope and all — the two spellings differ in
+what they constrain, not in what they say. A module-level `@requires` is a floor on the *file*; this
+one is a floor on the *part*, so a `place use=cottage` inherits it and a library of templates
+carries its own requirements instead of every consumer restating them.
+
+**Which parts a build inherits from.** A `def` a `place use=` names, and a `theme` a scope binds. A
+part nothing instantiates contributes nothing: a `def` no `place` names builds no voxels (and is
+already `W_UNUSED_DEF`), so refusing a target over it would be refusing over a template the author
+left in the file.
+
+**A theme's floor applies when the theme is bound**, whether or not a member reads a slot from it.
+Binding a theme is the act of taking on what it declares. The alternative — charge the floor only
+once one of its rules fires — makes the floor depend on which selectors matched and which variant
+the pin picked, so one source could require `1.21` on Java and nothing on Bedrock for a reason that
+is not about editions; and it errs in the unsafe direction, since an over-applied floor is reported
+against the line that set it and is one edit away, while an under-applied one certifies a build the
+file itself rules out.
+
+Two things bind a theme, and both of them are a scope a build lowers: a `place ... theme=NAME`
+reference — which is also what instantiates the `def` it places, since `theme=` is required on a
+`place` — and the module-level auto-pick, read for a `struct`, the one scope a build lowers without
+a placement. The auto-pick also binds the sole theme to every `def` scope, and a floor does *not*
+follow it there: a `def` no `place` names builds nothing, so charging a theme's floor because such a
+`def` exists would read one `def` as instantiated enough to take on a theme's floor and not
+instantiated enough to be charged its own. A `def` that is placed reaches the theme through its
+placement's own `theme=` instead.
+
+`struct` and `site` take no such line. Neither is instantiated by anything — each *is* the build —
+so a floor written inside one constrains exactly the file it is in, which is what `@requires`
+already says. The same goes for a member's own indented children: the floor belongs to the part, and
+a `walls` line is not a part. The two refusals are different messages, because the repairs differ:
+one points at `@requires`, the other at a dedent. Neither refuses on the word alone: `requires` is
+an ordinary keyword in a body that reads no floors, so a member line spelled that way parses in a
+`struct`, a `site`, or under a member exactly as it did before this line existed.
+
+A `def` or `theme` body is the other half of that, and takes the word whatever follows it: the line
+is a floor, and an expression that reads as none is `E_INVALID_REQUIRES` rather than a member. That
+costs nothing — `requires` has never been a member keyword, so the same line was `E_UNKNOWN_KEYWORD`
+before.
+
+`E_VERSION_CAP` names the part that imposed the floor, not only the number. A target refused by a
+floor written inside a template is not actionable as a bare version, because the repair is at the
+other end of the `place use=` that inherited it.
 
 ### The declared floor is enforced
 
@@ -200,6 +252,14 @@ The `registry compatibility` row of `cairn info` ([§10.5](#105-which-version-is
 reads only the unscoped floors. It is one row for a file that may be reported against both editions
 at once, and a floor in Java's numbering says nothing about the file's Bedrock range; the
 per-edition answer is the `buildable targets` row.
+
+A floor a `theme` declares is held to the same test, and for the *part* it is inherited through
+rather than for the words on the line. Per-edition theme variants ([§10.7](#107-java--bedrock-portability))
+mean the two editions can bind different themes for one `theme=` reference, so a theme feeds this
+row only when both bind the same one — otherwise the floor is a per-edition fact wearing no edition
+scope. A `def` needs no such test: a `place use=NAME` names one def and not a family of variants.
+Whatever the row leaves out is named on stderr with the reason, so a `0.0` beside a `buildable
+targets` row that refuses versions is never left to be inferred.
 
 ### Which labels a floor may use
 

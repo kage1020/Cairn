@@ -8,14 +8,85 @@
 //!
 //! Special forms `logic` and `assert` flow into dedicated
 //! [`crate::ast::Statement`] variants rather than the generic command shape.
+//! `requires` is a third special form, and the only one that leaves the body
+//! entirely: it declares a version floor rather than anything to build, so it
+//! is lifted onto the `def` / `theme` that carries it
+//! ([`crate::ast::MemberRequires`]).
 
 use crate::ast::{
-    Arg, DottedRef, Expr, Header, Item, Module, RawRequirement, RawVersion, Statement, ThemeRule,
-    TruthRow, Value, ValueKind,
+    Arg, DottedRef, Expr, Header, Item, MemberRequires, Module, RawRequirement, RawVersion,
+    Statement, ThemeRule, TruthRow, Value, ValueKind,
 };
 use crate::check::{Diagnostic, DiagnosticCode, LineStarts};
 use crate::error::{IntContext, ParseError, Position};
 use crate::lex::{Token, TokenKind, lex};
+use crate::resolve::parse_requirement;
+
+/// The word that introduces a version floor, as a directive name after the
+/// `@` and as a body line without one.
+///
+/// The sigil is what marks a *file* directive; the bare word on a body line
+/// is a floor on the part. Named once so the two sites that test for it —
+/// [`Parser::parse_header`] and [`Parser::requires_line_here`], which every
+/// body of the language goes through — cannot drift apart. The refusal
+/// messages spell it inside prose and are not among them.
+const REQUIRES: &str = "requires";
+
+/// Whether the body being parsed may carry `requires version>=X` lines,
+/// and what to say when it may not.
+///
+/// `spec/versioning-editions.md` §10.4 gives the member-level floor to `def`
+/// and `theme`, the two kinds a build instantiates rather than *is*. Every
+/// body of the language passes one of these, `theme` included — the
+/// decision about which words are reserved where is written down once, and
+/// a body that did not pass through it would be a route around the rule.
+///
+/// The two refusing variants exist because they have different repairs, and
+/// one message for both asserts something false about half the files that
+/// reach it. Neither refuses on the word alone: only a line whose
+/// expression reads as a version floor is refused, since `requires` is an
+/// ordinary identifier in a body that reads no floors.
+///
+/// An accepting body is the other half of that, and takes the word whatever
+/// follows it: the line is lifted onto the item without the expression being
+/// consulted, so `requires foo=1` in a `def` body is a floor that states
+/// nothing (`E_INVALID_REQUIRES`) rather than a member line. That is the
+/// coherent reading once a floor may stand there, and it costs nothing —
+/// the same line was `E_UNKNOWN_KEYWORD` before, since the word has never
+/// been a member keyword.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RequiresPolicy {
+    /// A `def` or `theme` body: lift the line onto the item, whatever
+    /// follows the word.
+    Accepted,
+    /// A `struct` or `site` body. Neither is instantiated by anything — each
+    /// *is* the build — so a floor written inside one constrains exactly the
+    /// file it is in, which is what `@requires` already says.
+    NotAPart,
+    /// A member's own indented children. The floor is the part's and a
+    /// `walls` line is not a part, so the repair is one dedent rather than a
+    /// different directive.
+    NotThisLevel,
+}
+
+impl RequiresPolicy {
+    /// The refusal for a floor written where this policy holds, or `None`
+    /// where one may stand.
+    fn refusal(self) -> Option<&'static str> {
+        match self {
+            Self::Accepted => None,
+            Self::NotAPart => Some(
+                "a `struct` or a `site` may not declare `requires version>=X`: it is the build \
+                 rather than a part of one, so the floor on it is the whole file's and is \
+                 written `@requires version>=X` at the top of the file",
+            ),
+            Self::NotThisLevel => Some(
+                "a member may not declare `requires version>=X`: the floor belongs to the whole \
+                 part, so it goes at the `def` or `theme` body's own level",
+            ),
+        }
+    }
+}
 
 /// Parse a `.crn` source string into a [`Module`].
 ///
@@ -195,7 +266,7 @@ impl<'a> Parser<'a> {
                 version: RawVersion::new(raw),
                 span,
             }),
-            "requires" => Ok(Header::Requires {
+            REQUIRES => Ok(Header::Requires {
                 requirement: RawRequirement::new(raw),
                 span,
             }),
@@ -272,10 +343,15 @@ impl<'a> Parser<'a> {
         let (name, name_span) = self.expect_ident_spanned()?;
         self.consume_optional_colon();
         self.expect_newline()?;
+        let mut requires = Vec::new();
         let body = if self.peek_is(&TokenKind::Indent) {
             self.advance();
             let mut rules = Vec::new();
             while !self.peek_is(&TokenKind::Dedent) && !self.at_eof() {
+                if let Some(line) = self.requires_line_here(RequiresPolicy::Accepted)? {
+                    requires.push(line);
+                    continue;
+                }
                 rules.push(self.parse_theme_rule()?);
             }
             if self.peek_is(&TokenKind::Dedent) {
@@ -289,6 +365,7 @@ impl<'a> Parser<'a> {
         Ok(Item::Theme {
             name,
             name_span,
+            requires,
             body,
             span,
         })
@@ -338,12 +415,13 @@ impl<'a> Parser<'a> {
         let args = self.parse_header_args_until_eol()?;
         self.consume_optional_colon();
         self.expect_newline()?;
-        let body = self.parse_optional_command_body()?;
+        let (requires, body) = self.parse_optional_command_body(RequiresPolicy::Accepted)?;
         let span = start_byte..self.last_content_byte();
         Ok(Item::Def {
             name,
             name_span,
             args,
+            requires,
             body,
             span,
         })
@@ -353,7 +431,7 @@ impl<'a> Parser<'a> {
         let (name, name_span) = self.expect_ident_spanned()?;
         self.consume_optional_colon();
         self.expect_newline()?;
-        let body = self.parse_optional_command_body()?;
+        let (_, body) = self.parse_optional_command_body(RequiresPolicy::NotAPart)?;
         let span = start_byte..self.last_content_byte();
         Ok(Item::Site {
             name,
@@ -368,7 +446,7 @@ impl<'a> Parser<'a> {
         let args = self.parse_header_args_until_eol()?;
         self.consume_optional_colon();
         self.expect_newline()?;
-        let body = self.parse_optional_command_body()?;
+        let (_, body) = self.parse_optional_command_body(RequiresPolicy::NotAPart)?;
         let span = start_byte..self.last_content_byte();
         Ok(Item::Struct {
             name,
@@ -379,19 +457,147 @@ impl<'a> Parser<'a> {
         })
     }
 
-    fn parse_optional_command_body(&mut self) -> Result<Vec<Statement>, ParseError> {
+    /// Parse an indented body, splitting `requires` lines out of it.
+    ///
+    /// The two halves come back separately because they are different
+    /// things that happen to share an indentation level: a `requires` line
+    /// declares a version floor on the enclosing part and builds nothing.
+    /// Left among the statements it would not be skipped, it would be
+    /// refused: `intent::keyword_table` has no arm for the word, so the
+    /// line lowers to `MemberRole::Other("requires")` and
+    /// `check::keyword_allowlist` reports every one of them as
+    /// `E_UNKNOWN_KEYWORD`.
+    ///
+    /// `policy` is which bodies may carry one, and is forwarded to
+    /// [`Self::requires_line_here`]. It is a parameter rather than a second
+    /// copy of this loop because the refusal has to happen where the
+    /// offending line's position is still in hand — a caller handed an
+    /// empty statement list back has nothing left to underline.
+    fn parse_optional_command_body(
+        &mut self,
+        policy: RequiresPolicy,
+    ) -> Result<(Vec<MemberRequires>, Vec<Statement>), ParseError> {
         if !self.peek_is(&TokenKind::Indent) {
-            return Ok(Vec::new());
+            return Ok((Vec::new(), Vec::new()));
         }
         self.advance();
+        let mut requires = Vec::new();
         let mut commands = Vec::new();
         while !self.peek_is(&TokenKind::Dedent) && !self.at_eof() {
+            if let Some(line) = self.requires_line_here(policy)? {
+                requires.push(line);
+                continue;
+            }
             commands.push(self.parse_command()?);
         }
         if self.peek_is(&TokenKind::Dedent) {
             self.advance();
         }
-        Ok(commands)
+        Ok((requires, commands))
+    }
+
+    /// Read a `requires` line at the current position, if one stands there
+    /// and `policy` lets it.
+    ///
+    /// `Ok(None)` means the caller should read the line as an ordinary body
+    /// item. Under a refusing policy that covers both "the next line does
+    /// not open with the word" and "it does, but declares no floor": a body
+    /// that reads no floors leaves the word an ordinary one, so a member
+    /// spelled that way parses there exactly as it did before the line
+    /// existed. Deciding the second needs the whole expression, so the line
+    /// is read and then rewound — `pos` is the only state to restore, since
+    /// [`Self::parse_requires_line`] never opens a nesting level.
+    fn requires_line_here(
+        &mut self,
+        policy: RequiresPolicy,
+    ) -> Result<Option<MemberRequires>, ParseError> {
+        if !self.peek_is_ident(REQUIRES) {
+            return Ok(None);
+        }
+        // Under `Accepted` the expression is never consulted: the word is
+        // reserved at that level and an unreadable expression is a floor
+        // that states nothing. Only a refusing policy asks, and only so
+        // that a body reading no floors leaves the word an ordinary one.
+        let position = self.position();
+        let mark = self.pos;
+        match self.parse_requires_line() {
+            Ok(line) => match policy.refusal() {
+                None => Ok(Some(line)),
+                // Refused, and the line reads as a floor: say which repair
+                // this body needs. Anything else would leave the author
+                // with `unexpected `>=` in value position` three tokens
+                // along, which names the token and not the mistake.
+                Some(message) if parse_requirement(line.requirement.as_str()).is_ok() => {
+                    Err(ParseError::Syntax {
+                        position,
+                        message: message.to_owned(),
+                    })
+                }
+                Some(_) => {
+                    self.pos = mark;
+                    Ok(None)
+                }
+            },
+            // An accepting body owns its failures — `requires` with nothing
+            // after it is a floor that states nothing, and the message says
+            // that. A refusing body rewinds instead, because a bare
+            // `requires` there is a member line with no arguments and has
+            // always parsed.
+            Err(error) if policy == RequiresPolicy::Accepted => Err(error),
+            Err(_) => {
+                self.pos = mark;
+                Ok(None)
+            }
+        }
+    }
+
+    /// Read one `requires <expression>` line.
+    ///
+    /// The expression is taken verbatim to end of line, exactly as
+    /// [`Self::parse_header`] takes `@requires`\'s. That is what lets the
+    /// two share one `parse_requirement`, and what keeps version labels the
+    /// lexer has no token for — `24w14a` lexes as an integer and an
+    /// identifier, `1.21.4-rc1` as five tokens — out of the grammar\'s way.
+    fn parse_requires_line(&mut self) -> Result<MemberRequires, ParseError> {
+        // The keyword's own position, not the value's. An empty expression
+        // has no token to point at but the newline, and its column is one
+        // past the end of the line — a caret nothing is under.
+        let keyword_position = self.position();
+        let start_byte = self.current_byte();
+        self.advance();
+        let value_start_byte = self.peek().map_or(self.source.len(), |t| t.span.start);
+        let mut value_end_byte = value_start_byte;
+        while let Some(t) = self.peek() {
+            if matches!(t.kind, TokenKind::Newline) {
+                break;
+            }
+            value_end_byte = t.span.end;
+            self.advance();
+        }
+        let raw = self.source[value_start_byte..value_end_byte]
+            .trim()
+            .to_owned();
+        let span = start_byte..value_end_byte;
+        self.expect_newline()?;
+        if raw.is_empty() {
+            return Err(ParseError::Syntax {
+                position: keyword_position,
+                message: "`requires` requires a value".into(),
+            });
+        }
+        // A floor is one line. Left to the body loop this reaches
+        // `parse_theme_rule` or `parse_command` and comes back as
+        // `expected identifier, got indent`, which names the token the
+        // parser met and not the thing the author wrote.
+        if self.peek_is(&TokenKind::Indent) {
+            return Err(ParseError::Syntax {
+                position: self.position(),
+                message: "a `requires` floor takes no indented body: it declares one constraint \
+                          and nothing is nested under it"
+                    .into(),
+            });
+        }
+        Ok(MemberRequires::new(RawRequirement::new(raw), span))
     }
 
     fn parse_command(&mut self) -> Result<Statement, ParseError> {
@@ -444,7 +650,10 @@ impl<'a> Parser<'a> {
         // repeats its own indent, but that is a constant factor, not a
         // bound — 400 levels is a third of a megabyte and used to abort the
         // process just as `[[[…` did.
-        let children = self.nested(Self::parse_optional_command_body)?;
+        // A member's children are members. The floor belongs to the part
+        // as a whole, so it is read one level up and refused here.
+        let (_, children) =
+            self.nested(|p| p.parse_optional_command_body(RequiresPolicy::NotThisLevel))?;
         Ok(Statement::Generic {
             keyword,
             selector,
@@ -682,6 +891,16 @@ impl<'a> Parser<'a> {
         }
         let dotted = self.parse_dotted_ref()?;
         Ok((Expr::Ref(dotted), 1))
+    }
+
+    /// Is the next token the bare identifier `name`?
+    ///
+    /// [`Self::match_keyword`] answers the same question and consumes the
+    /// token; the `requires` dispatch needs the answer without the
+    /// consumption, because the line it hands off to re-reads the keyword
+    /// to fix its own span.
+    fn peek_is_ident(&self, name: &str) -> bool {
+        matches!(self.peek(), Some(t) if matches!(&t.kind, TokenKind::Ident(ident) if ident == name))
     }
 
     fn match_keyword(&mut self, kw: &str) -> bool {

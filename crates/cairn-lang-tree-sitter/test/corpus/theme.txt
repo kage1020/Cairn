@@ -187,3 +187,24 @@ theme t:
       (slot_binding
         (identifier)
         (integer)))))
+
+==================
+A theme may declare a version floor of its own
+==================
+
+theme t:
+  requires version>=1.21.4
+  slot floor -> @oak_planks
+
+---
+
+(source_file
+  (theme_decl
+    (identifier)
+    (theme_body
+      (requires_stmt
+        (directive_literal))
+      (slot_binding
+        (identifier)
+        (material_ref
+          (identifier))))))

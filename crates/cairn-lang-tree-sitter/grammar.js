@@ -40,21 +40,26 @@ function body($, lineItem, selfTerminating) {
 
 /**
  * Build a `struct`/`def` declaration rule: `keyword name [args] [:]`,
- * newline-terminated, followed by an indented `struct_body`. The trailing
- * colon is optional, matching
+ * newline-terminated, followed by an indented body. The trailing colon is
+ * optional, matching
  * cairn-lang-core::parse::Parser::consume_optional_colon, called after
  * struct/def headers exactly as it is after `theme` — real-world `.crn`
  * files use it inconsistently (e.g. `struct cottage size=9x7` vs.
  * `def cottage size=3x3:`).
+ *
+ * `bodyRule` differs between the two because only a `def` may carry a
+ * `requires version>=X` line: cairn-lang-core::parse::RequiresPolicy gives
+ * the member-level floor to `def` and `theme` and refuses it everywhere
+ * else, so the two kinds no longer share one body rule.
  */
-function declOf(keyword) {
+function declOf(keyword, bodyRule) {
   return $ => seq(
     keyword,
     field('name', $.identifier),
     optional(field('args', $.attribute_list)),
     optional(':'),
     $._newline,
-    optional(field('body', $.struct_body)),
+    optional(field('body', $[bodyRule])),
   );
 }
 
@@ -166,8 +171,8 @@ module.exports = grammar({
       $.site_decl,
     ),
 
-    struct_decl: declOf('struct'),
-    def_decl:    declOf('def'),
+    struct_decl: declOf('struct', 'struct_body'),
+    def_decl:    declOf('def', 'def_body'),
 
     // `site_decl` diverges from struct/def: cairn-lang-core::parse::parse_site_item
     // does not call parse_header_args_until_eol, so `site foo:` accepts no
@@ -188,6 +193,28 @@ module.exports = grammar({
       choice($.member_stmt, $.logic_decl, $.assert_stmt),
       $.member_stmt_with_body,
     ),
+
+    // A `def` body is a `struct_body` plus the one line a `def` may carry
+    // that a `struct` may not. It is a rule of its own rather than an
+    // `optional()` inside `struct_body`, because the difference is per
+    // *kind* and not per body: a member's own indented children are a
+    // `struct_body` wherever they appear, `def` included, which is what
+    // refuses a floor written on a `walls` line.
+    def_body: $ => body(
+      $,
+      choice($.requires_stmt, $.member_stmt, $.logic_decl, $.assert_stmt),
+      $.member_stmt_with_body,
+    ),
+
+    // The member-level version floor of `spec/versioning-editions.md`
+    // §10.4, a floor on the part rather than on the file.
+    //
+    // Its argument is the same opaque rest-of-line literal `@requires`
+    // takes, because cairn-lang-core::parse::Parser::parse_requires_line
+    // reads it the same way — token by token to the newline, keeping the
+    // raw slice — so `24w14a` and `1.21.4-rc1`, neither of which is one
+    // token to either lexer, are as much a parse here as `1.21` is.
+    requires_stmt: $ => seq('requires', field('arg', $.directive_literal)),
 
     assert_stmt: $ => seq('assert', choice($.truth_form, $.temporal_form)),
 
@@ -363,7 +390,7 @@ module.exports = grammar({
       optional(field('body', $.theme_body)),
     ),
 
-    theme_body: $ => body($, choice($.slot_binding, $.selector_rule)),
+    theme_body: $ => body($, choice($.requires_stmt, $.slot_binding, $.selector_rule)),
 
     // The target is a full value, not only a material reference:
     // cairn-lang-core::parse::Parser::parse_theme_rule calls `parse_value`

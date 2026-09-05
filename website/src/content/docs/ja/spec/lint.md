@@ -47,7 +47,7 @@ title: "11. Lint と制約検証"
 | `E_TYPE_MISMATCH_LABEL` | ラベル型キーの値が識別子でも文字列でもない。 |
 | `E_TYPE_MISMATCH_SIZE` | `size=` の値が `WxH` リテラルでない。 |
 | `E_CONNECT_ARITY` | `connect` 行の形が `FROM.PORT to TO.PORT` でない。 |
-| `E_INVALID_REQUIRES` | `@requires` の式がバージョン下限になっていない ([§5.3](/ja/spec/syntax#53-ヘッダ))。 |
+| `E_INVALID_REQUIRES` | `requires` の式がバージョン下限になっていない。`@requires` ヘッダと `def` / `theme` の本体行の両方が対象 ([§5.3](/ja/spec/syntax#53-ヘッダ))。 |
 
 `E_MISPLACED_MEMBER` は `struct` / `def` 内の `place` / `connect`、あるいは `site` の行に混ざった
 ジオメトリキーワードで発火します。該当行で 1 回だけ報告され、その下にインデントされたものも一緒に
@@ -68,7 +68,10 @@ title: "11. Lint と制約検証"
 任意です。`version` の前にあるエディションでない語、それ以外の演算子、バージョンの欠落、数字で始まら
 ないか `u32` に収まらない構成要素、`-` の後に読めるプレリリースタグが無いもの、バージョン後の余分な
 テキストを対象にします。ターゲットのエディションが `DataVersion` を持たない整形式のラベルは対象では
-**ありません**。それは `E_REQUIRES_UNORDERABLE` で、構文の問題ではないからです。
+**ありません**。それは `E_REQUIRES_UNORDERABLE` で、構文の問題ではないからです。下限の 2 つの綴り —
+`@requires` ヘッダと、`def` / `theme` が持てるメンバレベルの `requires` 行
+([§10.4](versioning-editions#構成要素は自身の下限を宣言できる)) — は同じ規則で検査されます。どのビルドもインスタンス化しない構成要素も検査対象です。誤りは行そのものにあり、それを読むものが
+あるかどうかではありません。
 
 ### マテリアルとターゲット
 
