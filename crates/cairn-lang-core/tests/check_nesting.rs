@@ -276,10 +276,11 @@ fn ne_7_a_level_inside_a_level_is_reported_by_check_not_left_to_lowering() {
 /// a construct that does.
 #[test]
 fn ne_7b_a_level_without_a_usable_offset_is_reported() {
-    // No negative case: the lexer rejects `-` outright, so a negative
-    // `y=` never reaches a check pass. The overflow case does reach it,
-    // and is the reason the reader is `u32::try_from` rather than a
-    // cast.
+    // No negative case: `-` lexes (a version label's pre-release suffix
+    // needs it to) but no value position reads one, so `y=-3` fails in
+    // the parser and never reaches a check pass. The overflow case does
+    // reach it, and is the reason the reader is `u32::try_from` rather
+    // than a cast.
     for y in ["", " y=abc", " y=99999999999", " y=plain"] {
         let src = format!(
             "{PRELUDE}struct s size=5x5\n  floor mat_slot=floor\n  \

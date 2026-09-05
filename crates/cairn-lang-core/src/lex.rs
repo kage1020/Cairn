@@ -87,6 +87,20 @@ pub enum TokenKind {
     At,
     /// `->` arrow.
     Arrow,
+    /// `-` on its own.
+    ///
+    /// No construct in the language reads one. It is lexed rather than
+    /// refused so a version label carrying a pre-release suffix —
+    /// `@requires version>=1.21.4-rc1`, a shape
+    /// `spec/versioning-editions.md` §10.4 ("Which labels a floor may
+    /// use") and `spec/syntax.md` §5.3 accept — survives to
+    /// the directive that knows what to do with it: a header's value is
+    /// the raw source between its tokens, so a character the lexer refuses
+    /// never reaches the reader that would accept it. Everywhere else the
+    /// parser reports it as an unexpected token, which names the `-` it
+    /// found in the position it found it rather than the character offset
+    /// the lexer would have named.
+    Minus,
     /// `=` (key/value or `logic =`).
     Eq,
     /// `>=`.
@@ -135,6 +149,7 @@ impl std::fmt::Display for TokenKind {
             Self::Size(w, h) => write!(f, "size `{w}x{h}`"),
             Self::At => f.write_str("`@`"),
             Self::Arrow => f.write_str("`->`"),
+            Self::Minus => f.write_str("`-`"),
             Self::Eq => f.write_str("`=`"),
             Self::GreaterEq => f.write_str("`>=`"),
             Self::LessEq => f.write_str("`<=`"),
@@ -354,6 +369,10 @@ impl<'src> Lexer<'src> {
                 self.advance();
                 self.advance();
                 self.push_at(TokenKind::Arrow, start..self.pos, position);
+            }
+            b'-' => {
+                self.advance();
+                self.push_at(TokenKind::Minus, start..self.pos, position);
             }
             b'=' => {
                 self.advance();

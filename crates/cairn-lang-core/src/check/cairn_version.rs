@@ -10,9 +10,17 @@
 //! - the value is not a `CalVer` at all, so the header declares nothing;
 //! - the value is a later version than this build, which is the one thing
 //!   an older compiler can usefully say about a file written against a
-//!   newer language. Every unknown keyword and unknown argument in the
-//!   rest of the file might be about the gap rather than about the source,
-//!   and only the header knows.
+//!   newer language. An unknown keyword or argument anywhere in the file
+//!   might be about the gap rather than about the source, and only the
+//!   header knows.
+//!
+//! The second reaches the cases a later language adds *within* the
+//! existing shapes. A whole new syntactic form does not get here at all:
+//! an unrecognised `@directive` and an unrecognised top-level item are
+//! both `E_PARSE`, and `spec/lint` §11.3 says what follows — parsing
+//! precedes every check pass, so a source that does not parse reaches
+//! none of them. The version gap is the whole explanation there and this
+//! finding is the one thing that cannot say so.
 //!
 //! Both are warnings. `spec/lint` §11.3 makes a finding an error when
 //! leaving it alone yields something other than what the source asked for;
@@ -90,7 +98,7 @@ fn future_diag(declared: &str, span: &Span) -> Diagnostic {
             DiagnosticNote {
                 span: None,
                 message:
-                    "syntax added after this build is reported as an unknown keyword or argument, so another finding in this file may be about the version gap rather than about the line it names"
+                    "a keyword or argument added after this build is reported as unknown; a whole new syntactic form — a directive, a top-level item — is a parse error instead, and no check pass runs then, this one included; another finding in this file may be about the version gap rather than about the line it names"
                         .to_owned(),
             },
             DiagnosticNote {

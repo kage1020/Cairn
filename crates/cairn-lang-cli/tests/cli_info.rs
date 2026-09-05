@@ -212,6 +212,138 @@ fn info_9_requires_floor_reaches_the_registry_range_however_it_is_spaced() {
     }
 }
 
+/// The `buildable targets` row is per edition, and so is the floor it is
+/// weighed against.
+///
+/// `1.21.4` is Java's newest release and names no Bedrock release at all
+/// — Bedrock ships `1.21.0 / 1.21.40 / 1.21.60`. The dotted-decimal
+/// comparison this replaced read `1.21.40` as satisfying the floor on
+/// `40 > 4` and reported two Bedrock targets as buildable; ordering by
+/// `DataVersion` has no answer here and reports none, with the reason on
+/// stderr rather than an empty row nobody can read.
+#[test]
+fn info_9b_a_floor_naming_no_release_of_an_edition_makes_none_of_it_buildable() {
+    let path = tempfile_with_contents(
+        "cross_edition_floor",
+        "@requires version>=1.21.4\nstruct s size=4x4\n",
+    );
+    let out = run_info(&[path.to_str().unwrap(), "--editions", "java,bedrock"]);
+    assert!(
+        out.status.success(),
+        "info reports and does not refuse: stderr={}",
+        String::from_utf8_lossy(&out.stderr),
+    );
+    let stdout = String::from_utf8(out.stdout).expect("utf-8");
+    let row = stdout
+        .lines()
+        .find(|line| line.starts_with("buildable targets:"))
+        .expect("the row is printed");
+    assert!(
+        row.contains("Java: 1.21.4") && row.contains("Bedrock: none"),
+        "the floor is Java's newest release and no Bedrock release: {row}",
+    );
+    let stderr = String::from_utf8(out.stderr).expect("utf-8");
+    assert!(
+        stderr.contains("names no bedrock release"),
+        "`none` without a reason is not a report: {stderr}",
+    );
+}
+
+/// And a floor scoped to one edition leaves the other alone.
+#[test]
+fn info_9c_a_scoped_floor_is_weighed_only_against_its_own_edition() {
+    let path = tempfile_with_contents(
+        "scoped_floor",
+        "@requires java version>=1.21.4\nstruct s size=4x4\n",
+    );
+    let out = run_info(&[path.to_str().unwrap(), "--editions", "java,bedrock"]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stdout = String::from_utf8(out.stdout).expect("utf-8");
+    let row = stdout
+        .lines()
+        .find(|line| line.starts_with("buildable targets:"))
+        .expect("the row is printed");
+    assert!(
+        row.contains("Java: 1.21.4") && row.contains("Bedrock: 1.21.0, 1.21.40, 1.21.60"),
+        "a Java-scoped floor says nothing about Bedrock: {row}",
+    );
+    // And the edition-neutral row takes only the unscoped floors, so a
+    // floor written in one edition's numbering does not become the file's
+    // range.
+    let json = run_info(&[path.to_str().unwrap(), "--format", "json"]);
+    let parsed: serde_json::Value =
+        serde_json::from_str(&String::from_utf8(json.stdout).expect("utf-8")).expect("valid JSON");
+    assert_eq!(parsed["registry_compat"]["min"], "0.0");
+}
+
+/// The note under `buildable targets` names the floor that refused, not
+/// only the versions it refused.
+///
+/// A module may declare several floors and only one of them refuse. "These
+/// versions are below the floor this file declares" then leaves the reader
+/// to work out which line they have to edit, which is the half of the
+/// report they can act on.
+#[test]
+fn info_9d_the_floor_note_names_the_line_that_refused() {
+    let path = tempfile_with_contents(
+        "two_floors",
+        "@requires version>=1.20.4\n@requires java version>=1.21.4\nstruct s size=4x4\n",
+    );
+    let out = run_info(&[path.to_str().unwrap(), "--editions", "java"]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stderr = String::from_utf8(out.stderr).expect("utf-8");
+    assert!(
+        stderr.contains("`java version>=1.21.4`"),
+        "the refusing floor has to be named, with its scope: {stderr}",
+    );
+    assert!(
+        !stderr.contains("version>=1.20.4`"),
+        "and the floor every target clears is not part of that news: {stderr}",
+    );
+}
+
+/// `registry compatibility: 0.0` beside a `buildable targets` row that
+/// refuses versions is two true lines that disagree on their face.
+///
+/// The row is edition-neutral so only unscoped floors feed it, and `0.0`
+/// therefore has two causes — no `@requires` line, and only scoped ones.
+/// The reader is told which, rather than left to work it out.
+#[test]
+fn info_9e_a_scoped_only_file_says_why_the_neutral_row_is_empty() {
+    let path = tempfile_with_contents(
+        "scoped_only",
+        "@requires java version>=1.21.4\nstruct s size=4x4\n",
+    );
+    let out = run_info(&[path.to_str().unwrap(), "--editions", "java"]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stdout = String::from_utf8(out.stdout).expect("utf-8");
+    assert!(
+        stdout.contains("registry compatibility:  0.0 .. latest"),
+        "the neutral row reads only unscoped floors: {stdout}",
+    );
+    let stderr = String::from_utf8(out.stderr).expect("utf-8");
+    assert!(
+        stderr.contains("is scoped to one edition"),
+        "and says so, at the line that scoped it: {stderr}",
+    );
+    assert!(
+        stderr.contains(":1:1:"),
+        "with the position, like every other note that names a line: {stderr}",
+    );
+}
+
 /// A requirement `cairn check` rejects stops `cairn info` too, in both
 /// output formats.
 ///

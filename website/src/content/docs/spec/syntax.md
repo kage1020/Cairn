@@ -124,13 +124,25 @@ version. Anything else is `W_INVALID_CAIRN_VERSION`, and a version later than th
 it is `W_FUTURE_CAIRN_VERSION` — provenance that cannot be read by a later compiler is not doing
 the job the header exists for.
 
-**`@requires`** is a capability floor. Its expression is the subject `version`, the operator `>=`,
-and a dotted-decimal version, with whitespace optional between the three, so `version>=1.21` and
-`version >= 1.21` are one requirement. `>=` is the only operator, since a floor is the only
-constraint that composes by folding to the strictest. Every other expression is
+**`@requires`** is a capability floor. Its expression is an optional edition, the subject
+`version`, the operator `>=`, and a version label, with whitespace optional between them, so
+`version>=1.21` and `version >= 1.21` are one requirement. `>=` is the only operator, since a floor
+is the only constraint that composes by folding to the strictest. Every other expression is
 `E_INVALID_REQUIRES` rather than a line that quietly declares nothing: a floor that evaporates is
-worse than an absent one, because a reader will still believe it. See
-[Versioning and Editions](versioning-editions).
+worse than an absent one, because a reader will still believe it.
+
+```
+@requires version>=1.21                  # a floor on whichever edition is built
+@requires java version>=1.21.4           # a floor in Java's numbering, inert on a Bedrock build
+@requires bedrock version>=1.21.40
+```
+
+The edition is there because Java releases run `1.20.4 / 1.21 / 1.21.4` and Bedrock `1.21.0 /
+1.21.40 / 1.21.60`: `1.21.4` is Java's newest release and names no Bedrock release at all. A label
+is dot-separated components that each begin with a digit and carry only letters and digits, with an
+optional `-` and a pre-release tag of the same — `1.21.4`, `1.21.4-rc1`, and `24w14a` are all
+labels. Which of them the *target edition* can order is not a syntax question and is not answered
+here. See [Versioning and Editions](versioning-editions).
 
 **`@intended_targets`** says which Minecraft versions the file was designed for. It is not a claim
 of being verified. That record lives only in the lock.

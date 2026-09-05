@@ -174,11 +174,13 @@ pub enum DiagnosticCode {
     /// string. `data` names which component failed and what it held.
     InvalidCairnVersion,
     /// The `@cairn` header names a language version later than the build
-    /// reading it. A warning by `spec/lint` §11.3's version-drift clause,
-    /// with the compiler as the incomplete side: syntax added after this
-    /// build surfaces as [`Self::UnknownKeyword`] or
-    /// [`Self::UnknownArgument`], and this is the only finding that can
-    /// say those may be about the gap rather than about the line.
+    /// reading it. A warning for the reason [`Self::InvalidCairnVersion`]
+    /// is — the header is provenance, so the build is the same either
+    /// way — and the only finding that can say an unknown keyword or
+    /// argument elsewhere in the file may be about the version gap rather
+    /// than about the line it names. A whole new syntactic form is
+    /// [`Self::Parse`] instead, and no check pass runs then, so the gap
+    /// goes unsaid in exactly the case it explains best.
     FutureCairnVersion,
     /// A label-typed key whose value is not a label (identifier or
     /// string): `id=`, `class=`, `mat_slot=`, `use=`, or `theme=`.
@@ -727,11 +729,13 @@ pub enum DiagnosticData {
         /// Stable name of the failure, from
         /// [`crate::calver::LanguageVersionError::kind`]:
         /// `component_count`, `component_not_a_number`,
-        /// `year_not_four_digits`, `month_out_of_range`, or
-        /// `patch_too_large`.
+        /// `year_not_four_digits`, `month_out_of_range`,
+        /// `patch_too_large`, or `trailing_tokens`.
         reason: String,
-        /// The component the reason is about, as written. Empty for
-        /// `component_count`, which is about the whole value.
+        /// The component the reason is about, as written. Empty when the
+        /// failure names no fragment of its own: `component_count` is
+        /// about the whole value, and `component_not_a_number` reports an
+        /// empty component when that is what the value has (`2026.`).
         found: String,
     },
     /// Companion payload for [`DiagnosticCode::FutureCairnVersion`]. The
@@ -1333,11 +1337,11 @@ mod tests {
                 "W_UNUSED_DEF",
                 "W_WALKWAY_BLOCKED",
             ],
-            "the `W_` prefix marks a partial-build degradation, which is a \
-             claim about what the compiler did rather than about severity, so \
-             an `E_`-prefixed warning is not by itself a misclassification — \
-             but it is the shape worth re-reading against §11.3 whenever one \
-             lands",
+            "the prefix is not the severity: `E_THEME_SELECTOR_UNMATCHED` is a \
+             warning and most `W_` codes are partial-build degradations without \
+             that being what the letter means, so neither shape is by itself a \
+             misclassification — but both are worth re-reading against §11.3 \
+             whenever one lands",
         );
     }
 

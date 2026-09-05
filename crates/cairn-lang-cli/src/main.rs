@@ -11,11 +11,12 @@ use cairn_lang_core::lock::{
     LockWalkway, Lockfile, hash_resolved_ir, hash_source,
 };
 use cairn_lang_core::resolve::{
-    BuildableTargets, EditionReport, UnsupportedEntry, UnsupportedReason, VersionAxes,
-    VersionFloor, compare_versions, compute_axes, declared_version_floor, resolve,
+    BuildableTargets, EditionReport, FloorPlacement, FloorVerdict, UnsupportedEntry,
+    UnsupportedReason, VersionAxes, VersionFloor, VersionOrder, compute_axes,
+    declared_version_floors, resolve,
 };
 use cairn_lang_core::{
-    Diagnostic, Edition, ParseError, Severity, check, diagnose_parse_failure, lower, parse,
+    Diagnostic, Edition, Module, ParseError, Severity, check, diagnose_parse_failure, lower, parse,
 };
 use cairn_lang_formats::bedrock_structure::{ParityNote, build_mcstructure_tag, write_mcstructure};
 use cairn_lang_formats::data_version::{
@@ -340,6 +341,18 @@ impl EditionArg {
         match self {
             EditionArg::Java => builtin_java(),
             EditionArg::Bedrock => builtin_bedrock(),
+        }
+    }
+
+    /// The edition this one is not.
+    ///
+    /// Asked when a floor this edition cannot place might be a release of
+    /// the other one, which is the difference between offering an edition
+    /// scope and guessing at one.
+    fn other(self) -> Self {
+        match self {
+            EditionArg::Java => EditionArg::Bedrock,
+            EditionArg::Bedrock => EditionArg::Java,
         }
     }
 
@@ -708,16 +721,8 @@ fn run_info(file: &Path, editions: &[String], format: InfoFormat) -> ExitCode {
         report_diagnostic(file, &source, &lines, d);
     }
 
-    let floor = declared_version_floor(&module);
-    let rows = match edition_rows(
-        file,
-        &source,
-        &lines,
-        &ir,
-        editions,
-        floor.as_ref(),
-        &combined,
-    ) {
+    report_floors_left_out_of_the_neutral_row(file, &source, &lines, &module);
+    let rows = match edition_rows(file, &source, &lines, &module, &ir, editions, &combined) {
         Ok(rows) => rows,
         Err(code) => return code,
     };
@@ -804,9 +809,9 @@ fn edition_rows(
     file: &Path,
     source: &str,
     lines: &LineStarts,
+    module: &Module,
     ir: &cairn_lang_core::intent::IntentModule,
     editions: &[String],
-    floor: Option<&VersionFloor>,
     already_reported: &[cairn_lang_core::check::Diagnostic],
 ) -> Result<Vec<EditionReport>, ExitCode> {
     let already: std::collections::HashSet<(&str, usize, usize)> = already_reported
@@ -865,27 +870,18 @@ fn edition_rows(
             );
         }
 
+        // The floors are collected per edition rather than once for the
+        // file: an unscoped floor is in every edition's build and a scoped
+        // one only in its own, so the set a Bedrock row is weighed against
+        // is not the set a Java row is.
+        let floors = declared_version_floors(module, edition);
         let considered = supported_versions(pack);
-        let verdicts = weigh_versions(ir, &resolution, pack, floor, &considered, &dropped);
+        let verdicts = weigh_versions(ir, &resolution, pack, &floors, &considered, &dropped);
         for (version, refusals) in &verdicts.refused {
             eprintln!("note: {} {version} refuses this source", edition.as_str());
             report_core_diagnostics(file, source, lines, refusals);
         }
-        if let Some(floor) = floor
-            && !verdicts.below_floor.is_empty()
-        {
-            eprintln!(
-                "note: {} {} {} below the `@requires version>={}` floor this file declares",
-                edition.as_str(),
-                verdicts.below_floor.join(", "),
-                if verdicts.below_floor.len() == 1 {
-                    "is"
-                } else {
-                    "are"
-                },
-                floor.version,
-            );
-        }
+        report_version_notes(file, source, lines, edition, &verdicts, &considered);
 
         rows.push(EditionReport {
             edition,
@@ -1005,23 +1001,74 @@ fn dropped_scopes(
         .collect()
 }
 
-/// Every version a pack declares, in ascending release order.
+/// Every version a pack can build for, in ascending release order.
+///
+/// The buildable rows, not every row: the table also carries the releases
+/// the pack can order an `@requires` floor against but has no block table
+/// for, and offering one of those as a `--target` would pin a compile to a
+/// version whose id check cannot run.
 ///
 /// Sorted here rather than taken as written: `DataVersionTable` documents
 /// its row order as informational, and this list is shown to a reader, so
 /// reordering rows in a pack's JSON must not reorder the output.
 fn supported_versions(pack: &RegistryPack) -> Vec<String> {
-    let mut rows: Vec<&cairn_lang_formats::registry::DataVersionEntry> =
-        pack.data_versions.versions.iter().collect();
+    let mut rows: Vec<&cairn_lang_formats::registry::DataVersionEntry> = pack
+        .data_versions
+        .versions
+        .iter()
+        .filter(|entry| entry.targetable)
+        .collect();
     rows.sort_by_key(|entry| entry.data_version);
     rows.into_iter()
         .map(|entry| entry.mc_version.clone())
         .collect()
 }
 
+/// One floor as the author wrote it, scope and all.
+///
+/// Shared by the four places that echo a floor back — the two refusals and
+/// `cairn info`'s two notes — because a floor quoted without its scope
+/// reads as a different floor than the line it came from, and the scope is
+/// the half the repair usually touches.
+fn render_floor(floor: &VersionFloor) -> String {
+    match floor.edition {
+        Some(edition) => format!("{edition} version>={}", floor.version),
+        None => format!("version>={}", floor.version),
+    }
+}
+
+/// One pack's version table, as the `DataVersion` ordering
+/// `spec/versioning-editions.md` §10.1 makes canonical.
+///
+/// **Every** row, including the ones `--target` may not name. Ordering a
+/// floor and building for a version are different questions: the pack has
+/// block data for three versions per edition and knows where every release
+/// sits, and it is the second set that decides whether a floor can be
+/// placed at all. A table holding only the buildable rows is what made a
+/// floor naming a real release the pack does not ship — `1.21.1` on Java —
+/// indistinguishable from one naming another edition's release.
+///
+/// Built per call rather than cached: it is a few dozen rows, and a cache
+/// would have to be keyed by pack to stay correct once `--registry-pack`
+/// can supply one.
+fn version_order(pack: &RegistryPack) -> VersionOrder {
+    VersionOrder::new(
+        pack.data_versions
+            .versions
+            .iter()
+            .map(|entry| (entry.mc_version.clone(), i64::from(entry.data_version))),
+    )
+}
+
 /// How each supported version of one edition answered.
+///
+/// Borrows the floors it names rather than carrying them rendered. Two
+/// floors on different lines can render alike — `@requires version>=1.21`
+/// twice is a file a reader has to be pointed at, not deduplicated for —
+/// and the rendered text drops the span, so a note built from it cannot
+/// print the position the matching `E_VERSION_CAP` prints.
 #[derive(Debug, Default)]
-struct VersionVerdicts {
+struct VersionVerdicts<'a> {
     /// Versions a build would accept.
     buildable: Vec<String>,
     /// Versions whose pinned lowering raised errors, carrying them: the
@@ -1031,6 +1078,23 @@ struct VersionVerdicts {
     /// being lowered at all — the floor is a relation between the source
     /// and the target, and no id table changes it.
     below_floor: Vec<String>,
+    /// The floors that put them there, in source order and without
+    /// repeats.
+    ///
+    /// Carried rather than left to the reader to infer: a module may
+    /// declare several floors and only one of them refuse, so a note that
+    /// names the versions without naming the line is a report the reader
+    /// cannot act on.
+    refusing_floors: Vec<&'a VersionFloor>,
+    /// Floors this edition's version table cannot place.
+    ///
+    /// Not a per-version answer, because it is not a per-version fact: a
+    /// floor naming no release of the edition can be weighed against none
+    /// of them. Kept apart from [`Self::below_floor`] because the two are
+    /// different news — "this target is too low" points at `--target`, and
+    /// "this floor is not in this edition's numbering" points at the
+    /// `@requires` line.
+    unplaceable_floors: Vec<&'a VersionFloor>,
 }
 
 /// Weigh each supported version against the gates `run_compile` applies to
@@ -1038,18 +1102,56 @@ struct VersionVerdicts {
 ///
 /// `dropped` is the edition's unlowered scopes: non-empty means every
 /// version refuses, so none is lowered a second time to find that out.
-fn weigh_versions(
+///
+/// The floors are weighed by `DataVersion` through the pack's own table
+/// (`spec/versioning-editions.md` §10.1), which is why the order is built
+/// here from `pack` rather than passed in: every version in `considered`
+/// is a row of that same table, so the key lookup below cannot miss.
+fn weigh_versions<'a>(
     ir: &cairn_lang_core::intent::IntentModule,
     resolution: &cairn_lang_core::Resolution,
     pack: &RegistryPack,
-    floor: Option<&VersionFloor>,
+    floors: &'a [VersionFloor],
     considered: &[String],
     dropped: &[String],
-) -> VersionVerdicts {
-    let mut verdicts = VersionVerdicts::default();
+) -> VersionVerdicts<'a> {
+    let order = version_order(pack);
+    let mut verdicts = VersionVerdicts {
+        unplaceable_floors: floors
+            .iter()
+            .filter(|floor| order.place(&floor.version) == FloorPlacement::Unplaceable)
+            .collect(),
+        ..VersionVerdicts::default()
+    };
+    // One unplaceable floor answers for every version at once, and it
+    // answers before the id tables matter — so the loop is skipped
+    // entirely rather than run to fill `below_floor` with a verdict that
+    // was never reached.
+    if !verdicts.unplaceable_floors.is_empty() {
+        return verdicts;
+    }
     for version in considered {
-        if floor.is_some_and(|floor| compare_versions(version, &floor.version).is_lt()) {
+        let key = order
+            .key_of(version)
+            .expect("`considered` is this pack's own version list");
+        let refusing: Vec<&VersionFloor> = floors
+            .iter()
+            .filter(|floor| order.verdict(&floor.version, key) == FloorVerdict::Below)
+            .collect();
+        if !refusing.is_empty() {
             verdicts.below_floor.push(version.clone());
+            for floor in refusing {
+                // By span, not by text: two `@requires` lines naming the
+                // same version are two lines, and a reader sent to one of
+                // them has to be sent to the right one.
+                if !verdicts
+                    .refusing_floors
+                    .iter()
+                    .any(|kept| kept.span == floor.span)
+                {
+                    verdicts.refusing_floors.push(floor);
+                }
+            }
             continue;
         }
         if !dropped.is_empty() {
@@ -1821,7 +1923,7 @@ fn run_compile(
         source,
         block_ir,
         dropped_scopes,
-        version_floor,
+        version_floors,
     } = match load_and_lower(file, edition, pinned) {
         Ok(lowered) => lowered,
         Err(code) => return code,
@@ -1862,9 +1964,7 @@ fn run_compile(
             return ExitCode::from(1);
         }
     };
-    if let Err(code) =
-        enforce_version_floor(file, &source, version_floor.as_ref(), edition, &target)
-    {
+    if let Err(code) = enforce_version_floor(file, &source, &version_floors, edition, &target) {
         return code;
     }
 
@@ -2006,11 +2106,17 @@ struct Lowered {
     /// Scopes the source asked for that produced no voxels, as
     /// [`dropped_scopes`] collects them.
     dropped_scopes: Vec<String>,
-    /// The strictest `@requires` floor the source declares, carried out of
-    /// the parse so `compile` can hold `--target` to it without reading the
-    /// file a second time. `None` when the source declares none, which is
-    /// the ordinary case.
-    version_floor: Option<VersionFloor>,
+    /// The `@requires` floors this edition's build is held to, carried out
+    /// of the parse so `compile` can hold `--target` to them without
+    /// reading the file a second time. Empty when the source declares
+    /// none, which is the ordinary case.
+    ///
+    /// Every applicable floor rather than the strictest of them: picking
+    /// the strictest means ordering two floors against each other, and the
+    /// order is the target edition's `DataVersion` table — which the
+    /// enforcement below already consults once per floor, reaching the
+    /// same answer without the extra comparison.
+    version_floors: Vec<VersionFloor>,
 }
 
 fn load_and_lower(
@@ -2052,14 +2158,14 @@ fn load_and_lower(
     );
     let dropped_scopes = dropped_scopes(&resolution, &block_ir);
     Ok(Lowered {
-        version_floor: declared_version_floor(&module),
+        version_floors: declared_version_floors(&module, edition.as_edition()),
         source,
         block_ir,
         dropped_scopes,
     })
 }
 
-/// Refuse a `--target` below the floor the source declares.
+/// Refuse a `--target` the floors the source declares rule out.
 ///
 /// `@requires version>=X` is the source's own statement of what it needs.
 /// It was rendered by `cairn info` and enforced nowhere, so compiling
@@ -2078,53 +2184,96 @@ fn load_and_lower(
 /// is not in the pack yet; when it arrives it joins this code rather than
 /// getting its own, because both answer "the target is below a floor".
 ///
-/// The comparison is `cairn-lang-core`'s dotted-decimal one, which does not
-/// know that the two editions number releases differently. A Java-shaped
-/// floor of `1.21.4` reads as satisfied by Bedrock `1.21.40` on `40 > 4`;
-/// the spec's "Ordering, and where it stops" records that, and whether
-/// `@requires` is edition-neutral at all is an open language question
-/// rather than something to settle here.
+/// The ordering key is the target edition's `DataVersion` table
+/// ([§10.1](https://cairn-lang.dev/spec/versioning-editions)), which is
+/// what keeps the two editions' numbering apart: Java ships `1.20.4 /
+/// 1.21 / 1.21.4` and Bedrock `1.21.0 / 1.21.40 / 1.21.60`, so a floor of
+/// `1.21.4` names Java's newest release and no Bedrock release at all. A
+/// floor the table cannot place is refused as its own failure rather than
+/// compared by its text, which is what read `1.21.40` as satisfying
+/// `version>=1.21.4` on `40 > 4` and certified a Bedrock build against a
+/// version below the floor.
+///
+/// Every applicable floor is weighed, and the first that refuses the
+/// target is reported. Floors compose by intersection, so any one of them
+/// refusing is the build refused; reporting the first in source order
+/// means an equivalent line appended below an existing one does not move
+/// the diagnostic.
 ///
 /// # Errors
 ///
-/// Returns exit code 1 when the target is below the floor.
+/// Returns exit code 1 when a floor refuses the target, or names a version
+/// this edition's table cannot place.
 fn enforce_version_floor(
     file: &Path,
     source: &str,
-    floor: Option<&VersionFloor>,
+    floors: &[VersionFloor],
     edition: EditionArg,
     target: &ResolvedTarget,
 ) -> Result<(), ExitCode> {
-    let Some(floor) = floor else {
-        return Ok(());
-    };
-    if !compare_versions(target.mc_version(), &floor.version).is_lt() {
+    if floors.is_empty() {
         return Ok(());
     }
+    let order = version_order(edition.registry_pack());
+    // The unplaceable floor comes first even when a later one also refuses
+    // the target, for the reason `E_INVALID_REQUIRES` precedes
+    // `E_VERSION_CAP`: it is the line the author can act on, and a cap
+    // reported beside it would tell them to raise `--target` when the
+    // mistake is that the floor names no version of what they are
+    // building.
+    if let Some(floor) = floors
+        .iter()
+        .find(|floor| order.place(&floor.version) == FloorPlacement::Unplaceable)
+    {
+        report_unplaceable_floor(file, source, floor, edition, &order);
+        return Err(ExitCode::from(1));
+    }
+    let target_key = i64::from(target.version_int());
+    let Some(floor) = floors
+        .iter()
+        .find(|floor| order.verdict(&floor.version, target_key) == FloorVerdict::Below)
+    else {
+        return Ok(());
+    };
     let position = LineStarts::new(source).position(source, floor.span.start);
     eprintln!(
-        "error[E_VERSION_CAP]: {}:{}: this file requires version>={} (target {}).",
+        "error[E_VERSION_CAP]: {}:{}: this file requires {} (target {}).",
         file.display(),
         position,
-        floor.version,
+        render_floor(floor),
         target.mc_version(),
     );
-    // `spec/lint.md` §11.2 makes the closed set of candidates valid in the
-    // target part of the message, not an extra. Naming the floor alone
+    // `spec/versioning-editions.md` §10.4 makes the closed set of
+    // candidates valid in the target part of the message, not an extra. Naming the floor alone
     // sends an author to `--target >=99.0`, which is a second error and no
     // closer to a build; whether *any* supported target satisfies the floor
     // is the fact that decides what they do next.
-    let supported = edition.registry_pack().supported_list();
-    let usable: Vec<&str> = supported
-        .split(", ")
-        .filter(|candidate| {
-            *candidate != "latest" && !compare_versions(candidate, &floor.version).is_lt()
+    //
+    // Every floor, not the one being reported. A candidate that clears this
+    // floor and trips the next one is the same second error in a different
+    // spelling — the offer has to be a target that builds.
+    //
+    // And "builds" means the buildable rows, not every row the order
+    // carries: the table also names the releases the pack can only order
+    // against, and offering one of those sends the author to `unsupported
+    // target` — the second error this list exists to prevent.
+    let buildable = supported_versions(edition.registry_pack());
+    let usable: Vec<&str> = buildable
+        .iter()
+        .filter(|label| {
+            order.key_of(label).is_some_and(|key| {
+                floors
+                    .iter()
+                    .all(|floor| order.verdict(&floor.version, key) == FloorVerdict::Satisfied)
+            })
         })
+        .map(String::as_str)
         .collect();
     if usable.is_empty() {
         eprintln!(
-            "  no supported {} target satisfies it: {supported}",
+            "  no supported {} target satisfies it: {}",
             edition.as_str(),
+            edition.registry_pack().supported_list(),
         );
         eprintln!("  fix: lower the `@requires` floor, or build against another edition");
     } else {
@@ -2139,6 +2288,156 @@ fn enforce_version_floor(
         );
     }
     Err(ExitCode::from(1))
+}
+
+/// Report a floor the target edition's table cannot place.
+///
+/// Its own code rather than `E_VERSION_CAP`, because it is not a cap: no
+/// `--target` satisfies this floor and none violates it either. The
+/// build's edition numbers its releases in a scheme the floor is not
+/// written in, so the repair is on the `@requires` line — either the
+/// edition scope that says which scheme it meant, or a version of the one
+/// being built.
+fn report_unplaceable_floor(
+    file: &Path,
+    source: &str,
+    floor: &VersionFloor,
+    edition: EditionArg,
+    order: &VersionOrder,
+) {
+    let position = LineStarts::new(source).position(source, floor.span.start);
+    eprintln!(
+        "error[E_REQUIRES_UNORDERABLE]: {}:{}: this file requires {}, which names no {} release.",
+        file.display(),
+        position,
+        render_floor(floor),
+        edition.as_str(),
+    );
+    // The two releases it falls between, not the whole table. The table
+    // names every release of the edition now, so printing it is dozens of
+    // versions where two say the same thing: where the label would sit if
+    // it were one of them, and that it is not.
+    match order.neighbours(&floor.version) {
+        (Some(below), Some(above)) => eprintln!(
+            "  {edition_name} ships {below} and then {above}, and nothing between them; \
+             Cairn orders versions by DataVersion and a label that names no release has none",
+            edition_name = edition.as_str(),
+        ),
+        _ => eprintln!(
+            "  {} releases: {}",
+            edition.as_str(),
+            order
+                .rows()
+                .map(|(label, _)| label)
+                .collect::<Vec<_>>()
+                .join(", "),
+        ),
+    }
+    // The scope is offered only when it would change the answer, and what
+    // decides that is whether the *other* edition can place the label —
+    // not whether this floor carries a scope already. Recommending one
+    // without checking is recommending a guess: scoped to an edition that
+    // cannot place it either, the floor goes inert there and the
+    // constraint the author wrote evaporates.
+    let other = edition.other();
+    let elsewhere = floor.edition.is_none()
+        && version_order(other.registry_pack()).place(&floor.version)
+            != FloorPlacement::Unplaceable;
+    if elsewhere {
+        eprintln!(
+            "  `{}` is a {} release; if that is the numbering this floor is written in, say so",
+            floor.version,
+            other.as_str(),
+        );
+        eprintln!(
+            "  fix: `@requires {} version>={}`, or name a {} release",
+            other.as_str(),
+            floor.version,
+            edition.as_str(),
+        );
+    } else {
+        eprintln!("  fix: name a {} release", edition.as_str());
+    }
+}
+
+/// Name the floors the `registry compatibility` row does not read.
+///
+/// That row is edition-neutral, so only the unscoped floors feed it, and a
+/// file whose floors are all scoped reports `0.0 .. latest` — which reads
+/// as "no constraint" beside a `buildable targets` row that refuses
+/// versions. The two lines are both right and disagree on their face, so
+/// the reason goes on stderr rather than being left for the reader to
+/// work out.
+fn report_floors_left_out_of_the_neutral_row(
+    file: &Path,
+    source: &str,
+    lines: &LineStarts,
+    module: &Module,
+) {
+    let scoped: Vec<VersionFloor> = [Edition::Java, Edition::Bedrock]
+        .into_iter()
+        .flat_map(|edition| declared_version_floors(module, edition))
+        .filter(|floor| floor.edition.is_some())
+        .collect();
+    for floor in &scoped {
+        eprintln!(
+            "note: {}:{}: `{}` is scoped to one edition, so it is not part of the \
+             `registry compatibility` row, which is edition-neutral; `buildable targets` is \
+             where it is weighed",
+            file.display(),
+            lines.position(source, floor.span.start),
+            render_floor(floor),
+        );
+    }
+}
+
+/// The `note:` lines under one edition's `buildable targets` entry.
+///
+/// Extracted from [`edition_rows`] so the loop there reads as the five
+/// steps it is. Both notes name the `@requires` line they came from, at
+/// the position `E_VERSION_CAP` would print for the same floor: a report
+/// that says which versions are out without saying which line put them
+/// there is half a report.
+fn report_version_notes(
+    file: &Path,
+    source: &str,
+    lines: &LineStarts,
+    edition: Edition,
+    verdicts: &VersionVerdicts<'_>,
+    considered: &[String],
+) {
+    for floor in &verdicts.unplaceable_floors {
+        eprintln!(
+            "note: {}:{}: no {} target can build this source: `{}` names no {} release, \
+             so no {} version can be weighed against it",
+            file.display(),
+            lines.position(source, floor.span.start),
+            edition.as_str(),
+            render_floor(floor),
+            edition.as_str(),
+            edition.as_str(),
+        );
+        eprintln!(
+            "  note: {} builds against {}",
+            edition.as_str(),
+            considered.join(", "),
+        );
+    }
+    for floor in &verdicts.refusing_floors {
+        eprintln!(
+            "note: {}:{}: {} {} {} below the `{}` this file declares",
+            file.display(),
+            lines.position(source, floor.span.start),
+            edition.as_str(),
+            verdicts.below_floor.join(", "),
+            if verdicts.below_floor.len() == 1 {
+                "is"
+            } else {
+                "are"
+            },
+            render_floor(floor),
+        );
+    }
 }
 
 /// Print one finding's `note:` lines under its primary.

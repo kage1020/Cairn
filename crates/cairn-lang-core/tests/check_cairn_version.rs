@@ -85,6 +85,7 @@ fn a_value_that_is_not_a_calver_is_reported() {
         ("@cairn 2026.13\n", "1 and 12"),
         ("@cairn 2026.0\n", "1 and 12"),
         ("@cairn 2026.6.99999999999999999999\n", "too large"),
+        ("@cairn 2026.06 draft\n", "follows the version"),
     ] {
         let found = only(header, DiagnosticCode::InvalidCairnVersion);
         assert_eq!(found.severity(), Severity::Warning, "{header:?}");
@@ -94,6 +95,33 @@ fn a_value_that_is_not_a_calver_is_reported() {
             found.primary,
         );
     }
+}
+
+#[test]
+fn an_empty_component_is_described_rather_than_quoted() {
+    // The message reaches an author, and `` `` `` in a sentence tells
+    // them nothing about which part of the line to fix.
+    let found = only("@cairn 2026.\n", DiagnosticCode::InvalidCairnVersion);
+    assert!(
+        found.primary.contains("empty component") && !found.primary.contains("``"),
+        "the empty component is described: {}",
+        found.primary,
+    );
+}
+
+#[test]
+fn a_second_word_on_the_line_is_reported_as_one() {
+    // `@cairn` takes the rest of the line, so an interior space is the
+    // one way a second word arrives. It used to travel into the payload
+    // as a "component" of `06 draft`, which a quick-fix consumer would
+    // have used as a replacement range.
+    let found = only(
+        "@cairn 2026.06 draft\n",
+        DiagnosticCode::InvalidCairnVersion,
+    );
+    let json = serde_json::to_value(found.data.expect("a payload")).expect("serialises");
+    assert_eq!(json["reason"], "trailing_tokens");
+    assert_eq!(json["found"], "draft");
 }
 
 #[test]

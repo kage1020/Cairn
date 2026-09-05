@@ -21,9 +21,11 @@ and is a separate axis from the Minecraft target version.
 
   The header exists so a later compiler can parse and warn correctly, and provenance that no
   compiler can read cannot do that job. The future-version code is the other half of it, and the
-  one thing an older build can usefully say about a file written against a newer language: syntax
-  added after this build is reported as `E_UNKNOWN_KEYWORD` or `E_UNKNOWN_ARGUMENT`, and only the
-  header knows those findings may be about the gap rather than about the lines they name.
+  one thing an older build can usefully say about a file written against a newer language: a
+  keyword or argument added after this build is reported as `E_UNKNOWN_KEYWORD` or
+  `E_UNKNOWN_ARGUMENT`, and only the header knows those findings may be about the gap rather than
+  about the lines they name. A whole new syntactic form is `E_PARSE` instead, and no check pass
+  runs then, so the gap goes unsaid in the case it explains best.
 
   Both are **warnings** rather than errors, which is the opposite call from `@requires`. `spec/lint`
   §11.3 makes a finding an error when leaving it alone yields something other than what the source
@@ -32,12 +34,14 @@ and is a separate axis from the Minecraft target version.
   and the bound `cairn compile --target` is held to, so a floor that evaporates accepts a target it
   should not. No source that compiles today stops compiling.
 
-  The accepted shape is a four-digit year, a month `1 … 12`, and an optional patch. A leading zero
-  on the month is accepted and does not change it, so `2026.06` — what every shipped `.crn` and the
-  spec itself write, calver.org's `YYYY.0M` — and `2026.6` are one version. That is stricter than
-  the dotted decimal `@requires` reads, deliberately: that one orders a label out of Mojang's
-  namespace, while this one names Cairn's own version, where `2026.13` is a month that does not
-  exist and `1.2` is a semver rather than a year.
+  The accepted shape is a four-digit year, a month `1 … 12`, and an optional patch, plus nothing
+  after it — the header value is a whole line, so `@cairn 2026.6 draft` names a version and then
+  something else. A leading zero on the month is accepted and does not change it, so `2026.06` —
+  what every shipped `.crn` and the spec itself write, calver.org's `YYYY.0M` — and `2026.6` are
+  one version. That is stricter than the label `@requires` reads, deliberately: that one orders a
+  label out of Mojang's namespace, where a component need only begin with a digit and a
+  pre-release tag is a label too, while this one names Cairn's own version, where every component
+  is digits, `2026.13` is a month that does not exist and `1.2` is a semver rather than a year.
 
 ### Breaking changes
 
@@ -82,9 +86,67 @@ and is a separate axis from the Minecraft target version.
   note for the masonry contract, and it is the only one of the four whose repair is on another
   line — so it says that the member that could not be built says so on its own line.
 
+- *(core, cli)* `@requires` floors are ordered by `DataVersion` in the target edition's version
+  table, the key `spec/versioning-editions.md` §10.1 makes canonical, instead of by comparing
+  version labels component-wise as dotted decimals. That comparison had no way to tell two
+  editions' numbering apart: Java ships `1.20.4 / 1.21 / 1.21.4` and Bedrock
+  `1.21.0 / 1.21.40 / 1.21.60`, so `@requires version>=1.21.4` read as satisfied by Bedrock
+  `1.21.40` on `40 > 4` and wrote a lock saying `verified: true` for a target the source rules out
+  — the same defect enforcing the floor exists to remove, one edition to the left.
 
+  A floor may now name the edition it is written in — `@requires java version>=1.21.4` — which
+  constrains that edition's build and is inert in the other's. An unscoped floor is a floor on
+  whichever edition is built and is resolved in that edition's table, so `@requires version>=1.21`
+  still means Java's `1.21` and Bedrock's `1.21.0`.
 
+  A floor the table cannot place — inside its span, naming no row, which is what a floor in the
+  other edition's numbering is — is the new `E_REQUIRES_UNORDERABLE` rather than a guess. A floor
+  below every row is met by every target and one above every row by none, since those two answers
+  hold whatever key each row carries.
 
+  **Breaking**: `resolve::declared_version_floor` is replaced by `declared_version_floors(module,
+  edition)`, which returns every floor that edition's build is held to instead of the strictest of
+  them — picking the strictest needs an ordering, and the ordering is now per edition.
+  `parse_requirement` / `parse_min_version` return a `Requirement` carrying the edition scope
+  rather than a bare `&str`. A Bedrock build of a source declaring a Java-shaped floor now fails
+  where it used to succeed, which is the point.
+
+- *(core)* `@requires` accepts every version-label shape `spec/versioning-editions.md` §10.1 says
+  will exist: the pre-release `1.21.4-rc1`, a snapshot `24w14a`, and whatever a date-based scheme
+  spells. A `-` is now a token rather than a lexer error, so the suffix reaches the directive at
+  all — a header's value is the raw source between its tokens, so a character the lexer refuses
+  never reaches the pass that would accept it. A pre-release sorts below the release it names.
+  Accepting a label is not a claim that it can be ordered: that is the target edition's table's
+  answer, given at `cairn compile --target`. `RequirementError` gains `UnknownEditionScope` and
+  `PreRelease`, and `E_INVALID_REQUIRES`'s `reason` payload gains `unknown_edition_scope` and
+  `prerelease_not_a_tag`.
+
+- *(formats)!* The registry pack's version table names every **release** of its edition, not only
+  the versions the pack can build for. A row says which it is with a new `targetable` column, and
+  `data_versions.schema_version` moves to `2` for it — a `schema_version: 1` table still loads and
+  still means what it meant, since every row of one was a buildable target and the column defaults
+  to `true`.
+
+  Ordering an `@requires` floor and building for a version are different questions, and answering
+  the first with the three-row sample the second needs is what made a floor naming a real release
+  the pack does not ship — `version>=1.21.1` on Java — indistinguishable from one naming another
+  edition's release. It refused a build that used to work, with a message that said `1.21.1` is not
+  a Java release. It is; the pack simply had no `DataVersion` for it. Both are fixed: the floor is
+  ordered, and the same shape of label that genuinely names no release of the edition being built
+  is still `E_REQUIRES_UNORDERABLE`.
+
+  The Java rows are the game's own version metadata (releases only, 1.14 onward, via
+  `misode/mcmeta`'s machine-generated summary); the Bedrock rows are Mojang's own
+  `bedrock-samples` release list, with the palette integer computed as
+  `(major << 24) | (minor << 16) | (patch << 8) | revision` of that build — a formula the three
+  rows already shipped confirm exactly. `data_versions.json` records where its rows came from in a
+  new `source` field. The loader now also refuses a table whose keys are not unique and ascending,
+  or whose labels do not sort the same way by text as by key — the property placing a floor
+  *outside* the table's span actually rests on, which was previously stated in a doc comment as
+  "whatever key each row carries" and is not that.
+
+  `--target`, `cairn info`'s `buildable targets`, and the supported-target lists are unchanged:
+  they read the targetable rows.
 
 ## 2026.9.0 — 2026-09-01
 

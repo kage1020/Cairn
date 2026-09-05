@@ -66,31 +66,43 @@ title: "11. Lint と制約検証"
 キーワードの欠落や別トークンへの置き換え、末尾の余分な位置引数、ドット 1 つの `PLACE.PORT` 参照で
 ない端点を対象にします。2 つの端点は独立した修正箇所なので別々に報告されます。
 
-`E_INVALID_REQUIRES`: 受け付ける形は `version`、`>=`、ドット区切り 10 進バージョンの 3 つで、
-空白は任意です。それ以外の演算子、バージョンの欠落、10 進数でないか `u32` に収まらない構成要素、
-バージョン後の余分なテキストを対象にします。
+`E_INVALID_REQUIRES`: 受け付ける形は任意のエディション、`version`、`>=`、バージョンラベルで、空白は
+任意です。`version` の前にあるエディションでない語、それ以外の演算子、バージョンの欠落、数字で始まら
+ないか `u32` に収まらない構成要素、`-` の後に読めるプレリリースタグが無いもの、バージョン後の余分な
+テキストを対象にします。ターゲットのエディションが `DataVersion` を持たない整形式のラベルは対象では
+**ありません**。それは `E_REQUIRES_UNORDERABLE` で、構文の問題ではないからです。
 
 `W_INVALID_CAIRN_VERSION`: 受け付ける形は `YYYY.M` または `YYYY.M.PATCH` です。4 桁の年、`1 … 12`
 の月、省略可能なパッチで、いずれの構成要素も 10 進数字だけです。月の先頭のゼロは受け付けられ、値を
 変えません。`2026.06` と `2026.6` は同じバージョンで、前者は calver.org の `YYYY.0M`、後者は Cargo
-の `version` フィールドが持てる `YYYY.M` です。構成要素が 2 つでも 3 つでもない値、数字でない構成
-要素、4 桁でない年、暦に無い月、`u32` を超えるパッチを対象にします。
+の `version` フィールドが持てる `YYYY.M` です。構成要素が 2 つでも 3 つでもない値、空または数字で
+ない構成要素、4 桁でない年、暦に無い月、`u32` を超えるパッチ、そしてバージョンの後に続く 2 つ目の
+語を対象にします。ヘッダの値は行まるごとなので、`@cairn 2026.6 draft` はバージョンとそれ以外の何か
+を書いていることになります。
 
 `@requires` より意図的に厳しくしてあります。あちらは Mojang の名前空間にある Minecraft のラベルを
-読み、順序が付けばよいだけです。`@cairn` は Cairn 自身のバージョンを指すので、`2026.13` は存在しない
-月であり、`1.2` は年ではなく semver です。
+読み、順序が付けばよいだけなので、構成要素は数字で *始まれば* よく、プレリリースタグもラベルです。
+`@cairn` は Cairn 自身のバージョンを指すので、構成要素はすべて数字であり、`2026.13` は存在しない月、
+`1.2` は年ではなく semver です。
 
 `W_FUTURE_CAIRN_VERSION` は、自分より新しい言語で書かれたファイルについてコンパイラが言える唯一の
-有用なことです。このビルドより後に追加された構文は `E_UNKNOWN_KEYWORD` や `E_UNKNOWN_ARGUMENT` として
-報告されるので、それらがその行についてではなくバージョン差についての指摘かもしれない、と知っている
-のはヘッダだけです。1 つのディレクティブが両方のコードを受け取ることはありません。バージョンとして
-読めない値には、比較するバージョンが無いからです。
+有用なことです。このビルドより後に追加されたキーワードや引数は `E_UNKNOWN_KEYWORD` /
+`E_UNKNOWN_ARGUMENT` として報告されるので、それらがその行についてではなくバージョン差についての指摘
+かもしれない、と知っているのはヘッダだけです。これが届くのは、後の言語が「今ある形の中に」足したもの
+です。まったく新しい構文形式 — ディレクティブ、トップレベル項目 — は `E_PARSE` であり、パースは
+すべての check パスに先行するので ([§11.3](#113-エラーと警告))、バージョン差が最も説明になる場面で
+この指摘は現れません。
+
+1 つのディレクティブが両方のコードを受け取ることはありません。バージョンとして読めない値には、
+比較するバージョンが無いからです。
 
 ### マテリアルとターゲット
 
 | コード | 意味 |
 |---|---|
 | `E_UNKNOWN_ID` | 固定されたターゲットが宣言していない解決済みブロック ID。 |
+| `E_VERSION_CAP` | `--target` がソースの宣言する `@requires` の下限を下回る ([versioning-editions §10.4](/ja/spec/versioning-editions))。 |
+| `E_REQUIRES_UNORDERABLE` | `@requires` の下限が、ターゲットのエディションの `DataVersion` 表で位置づけられないバージョンを名指す ([versioning-editions §10.4](/ja/spec/versioning-editions))。 |
 | `E_INCOMPATIBLE_MATERIAL` | ブロックステートを付けるジオメトリを持つメンバが、それを保持できないマテリアルに束縛されている。 |
 | `E_MISSING_MATERIAL` | ブロックへの唯一の経路が `mat_slot=` であるメンバが、それを持たずに書かれている。 |
 | `E_UNRESOLVED_SLOT` | メンバの `mat_slot=` が、束縛されたテーマの宣言していないスロットを指している。 |
@@ -224,8 +236,8 @@ placement が同じテーマを束縛しながら 1 つのスロットについ�
 | `E_UNKNOWN_ID` | `{ "kind": "unknown_id", "id", "registry", "origin", "token"?, "suggestion"? }`。後述。 |
 | `E_INCOMPATIBLE_MATERIAL` | `{ "kind": "incompatible_material", "id", "required", "slot"?, "token"? }`。束縛されたマテリアル、ジオメトリが必要とするファミリ、束縛の出どころ。 |
 | `E_INCOMPLETE_PLACE` | `{ "kind": "incomplete_place", "missing": ["id", "use", "theme"] }`。行が宣言していないキー。常に非空。 |
-| `E_INVALID_REQUIRES` | `{ "kind": "invalid_requires", "reason", "found" }`。`reason` は `not_a_version_requirement` / `unsupported_operator` / `empty_version` / `component_not_a_number` / `component_too_large` / `trailing_tokens` のいずれか。失敗が断片を名指ししないとき `found` は空。 |
-| `W_INVALID_CAIRN_VERSION` | `{ "kind": "invalid_cairn_version", "reason", "found" }`。`reason` は `component_count` / `component_not_a_number` / `year_not_four_digits` / `month_out_of_range` / `patch_too_large` のいずれか。`found` はその理由が指す構成要素で、`component_count` のときは空。 |
+| `E_INVALID_REQUIRES` | `{ "kind": "invalid_requires", "reason", "found" }`。`reason` は `not_a_version_requirement` / `unknown_edition_scope` / `unsupported_operator` / `empty_version` / `component_not_a_number` / `component_too_large` / `prerelease_not_a_tag` / `trailing_tokens` のいずれか。失敗が断片を名指ししないとき `found` は空。 |
+| `W_INVALID_CAIRN_VERSION` | `{ "kind": "invalid_cairn_version", "reason", "found" }`。`reason` は `component_count` / `component_not_a_number` / `year_not_four_digits` / `month_out_of_range` / `patch_too_large` / `trailing_tokens` のいずれか。`found` はその理由が指す構成要素で、失敗が断片を名指ししないときは空 — `component_count` と、構成要素そのものが空の値 (`2026.`) に対する `component_not_a_number` です。 |
 | `W_FUTURE_CAIRN_VERSION` | `{ "kind": "future_cairn_version", "declared", "compiler" }`。どちらも書かれたまま。`declared` はファイル中の文字列、`compiler` は報告したビルド。 |
 | `W_TRUTH_TABLE_PARTIAL` | `{ "kind": "truth_table_partial", "inputs": 2, "covered": 1, "missing": ["01","10","11"] }`。後述。 |
 
@@ -256,7 +268,9 @@ placement が同じテーマを束縛しながら 1 つのスロットについ�
 - **警告** はバージョン/エディション間の意味ドリフト、レッドストーン挙動の非保証、そして
   block-array パスが報告する部分ビルドの劣化です。不完全なのがソースではなくコンパイラ側の場合です。
 
-`E_` / `W_` の接頭辞は severity ではありません。`W_` は部分ビルドの劣化を表し、`E_` 接頭辞の 2 つは
+`E_` / `W_` の接頭辞は severity ではありません。これは両方向に言えます。多くの `W_` コードは部分
+ビルドの劣化を表しますが、`W_UNUSED_DEF` / `W_TRUTH_TABLE_PARTIAL` と `@cairn` の 2 コードは劣化では
+ないまま警告です。そして `E_` 接頭辞の 2 つは
 名前ではなく上のルールで判定されています。
 
 - `E_UNKNOWN_SLOT_TARGET` は **エラー** です。マテリアルでない値に束縛されたスロットは、参照する
@@ -283,10 +297,6 @@ placement が同じテーマを束縛しながら 1 つのスロットについ�
 読めること — であり、一言添える価値はあってもファイルを拒否する価値はありません。`@requires` が同じ
 判定でエラーなのは、その下限が入力そのものだからです。`cairn info` の互換範囲を決め、
 `cairn compile --target` がそれに縛られるので、蒸発した下限は通してはいけないターゲットを通します。
-
-この 2 つの `W_` 接頭辞は、部分ビルドではなく警告であることを示します。`W_UNUSED_DEF` と
-`W_TRUTH_TABLE_PARTIAL` も同様です。「劣化」の読みが成り立つのは block-array のコードで、規則という
-より多数派です。
 
 `E_UNKNOWN_ARGUMENT` は **エラー** です。理由は 1 段上の `E_UNKNOWN_KEYWORD` と同じで、キーワードの
 語彙に無いキーは何も指しておらず、コンパイラがどう育っても値を読むパスは現れず、メンバは求められた

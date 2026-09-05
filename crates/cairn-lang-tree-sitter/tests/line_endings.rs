@@ -224,6 +224,36 @@ fn node_positions_match_the_reference_lexer_for_lf_and_crlf() {
 /// every node stays on the first row and its column keeps climbing across
 /// what should have been a line break.
 ///
+/// Both halves of that were read rather than assumed, because "the grammar
+/// cannot close the gap" is the kind of claim worth checking before someone
+/// spends a day trying. Checked against 0.26.11 — the runtime this crate's
+/// tests link, per the lockfile — and against 0.27.0, the newest release at
+/// the time:
+///
+/// - The row is incremented in exactly one place in the runtime's
+///   `lib/src/lexer.c`, under a `lookahead == '\n'` test (the `column = 0`
+///   beside it is the same branch). Every other write to the lexer's
+///   position copies a point the caller handed in — an included range's
+///   `start_point` or `end_point` — or repositions to a `Length` the lexer
+///   computed earlier. Ranges are set by whoever calls the parser, not by
+///   the grammar.
+/// - `TSLexer`, the whole of the external-scanner surface in `parser.h`,
+///   carries `lookahead`, `result_symbol`, `advance`, `mark_end`,
+///   `get_column`, `is_at_included_range_start`, `eof` and `log`. There is
+///   no accessor for the point, so a scanner cannot set the row either.
+///
+/// A caller *can* fake the rows, by splitting the source into one included
+/// range per line so that the range-transition copy hands each `\r` a fresh
+/// `start_point`. Nothing in this repository is that caller: only tests
+/// build a `tree_sitter::Parser`, and the crate exports the language and its
+/// queries and nothing else. The editors that drive highlighting from this
+/// grammar hand their runtime the buffer as one range.
+///
+/// So there is nothing here to reach for: a lone `\r` cannot be spelled in a
+/// way the runtime counts as a line. The fix is upstream — the runtime
+/// widening its line rule, or exposing the point to scanners — and the
+/// paragraph in the syntax spec recording the divergence stands until then.
+///
 /// Pinned rather than left implicit: if a future runtime widens its line
 /// rule this test fails, which is the signal to delete it and fold the CR
 /// case into the parity test above.
