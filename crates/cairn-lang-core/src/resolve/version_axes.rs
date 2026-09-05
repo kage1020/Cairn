@@ -222,6 +222,16 @@ pub enum UnsupportedReason {
         /// enough to be a plausible typo. `None` is the ordinary answer for
         /// a block that simply belongs to the other edition.
         suggestion: Option<String>,
+        /// The ids this edition does declare for the same block, from the
+        /// registry pack's alias table. This is the answer for the case
+        /// `suggestion` structurally cannot reach: an edition that has the
+        /// block under another name is not one edit away from it, and
+        /// `oak_sign` → `standing_sign` is seven.
+        ///
+        /// Empty when the pack names none — which is also the whole of
+        /// what a pack shipping no alias table can say — and then the
+        /// entry really is a block this edition does not have.
+        aliases: Vec<String>,
     },
     /// The edition has the block and this compiler's backend has no
     /// mapping for the states the intent put on it. A statement about the
@@ -942,6 +952,7 @@ mod tests {
                 id: "minecraft:oak_sign".to_owned(),
                 reason: UnsupportedReason::AbsentFromEdition {
                     suggestion: Some("minecraft:oak_log".to_owned()),
+                    aliases: vec!["minecraft:standing_sign".to_owned()],
                 },
             },
             UnsupportedEntry {
@@ -986,6 +997,7 @@ mod tests {
                     "id": "minecraft:oak_sign",
                     "reason": "absent_from_edition",
                     "suggestion": "minecraft:oak_log",
+                    "aliases": ["minecraft:standing_sign"],
                 },
                 {
                     "id": "minecraft:oak_door",
@@ -1009,11 +1021,15 @@ mod tests {
             ]),
         );
         // `suggestion` is present and null rather than absent when there
-        // is no candidate, so a consumer reads one shape per reason
-        // whatever the answer was.
+        // is no candidate, and `aliases` is present and empty on the same
+        // terms, so a consumer reads one shape per reason whatever the
+        // answer was.
         let absent = serde_json::to_value(UnsupportedEntry {
             id: "minecraft:nothing_like_this".to_owned(),
-            reason: UnsupportedReason::AbsentFromEdition { suggestion: None },
+            reason: UnsupportedReason::AbsentFromEdition {
+                suggestion: None,
+                aliases: Vec::new(),
+            },
         })
         .expect("the entry serializes");
         assert_eq!(
@@ -1022,6 +1038,7 @@ mod tests {
                 "id": "minecraft:nothing_like_this",
                 "reason": "absent_from_edition",
                 "suggestion": null,
+                "aliases": [],
             }),
         );
     }

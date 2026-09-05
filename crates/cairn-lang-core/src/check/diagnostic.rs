@@ -790,6 +790,19 @@ pub enum DiagnosticData {
         /// suggestion cap. Absent from the JSON when there is none.
         #[serde(skip_serializing_if = "Option::is_none")]
         suggestion: Option<String>,
+        /// Every id the target declares for the same block, from the
+        /// registry pack's alias table — the closed set of candidates a
+        /// rename has and a typo search cannot find. Absent from the JSON
+        /// when the pack names none, which is also the whole of what an
+        /// older pack, carrying no alias table, can say.
+        ///
+        /// Beside `suggestion` rather than merged with it because the two
+        /// are different claims: an alias is the pack stating that two
+        /// names are one block, a suggestion is a guess from a string
+        /// distance. A quick-fix can apply the first unasked and should
+        /// not the second.
+        #[serde(skip_serializing_if = "Vec::is_empty")]
+        aliases: Vec<String>,
     },
     /// Companion payload for [`DiagnosticCode::IncompatibleMaterial`].
     ///
@@ -1395,6 +1408,7 @@ mod tests {
             origin: "authored".to_owned(),
             token: None,
             suggestion: None,
+            aliases: Vec::new(),
         })
         .expect("serialise payload");
         assert_eq!(
@@ -1413,6 +1427,7 @@ mod tests {
             origin: "catalog".to_owned(),
             token: Some("floor.stone.smooth".to_owned()),
             suggestion: Some("minecraft:stonebrick".to_owned()),
+            aliases: vec!["minecraft:stonebrick".to_owned()],
         })
         .expect("serialise payload");
         assert_eq!(
@@ -1424,6 +1439,7 @@ mod tests {
                 "origin": "catalog",
                 "token": "floor.stone.smooth",
                 "suggestion": "minecraft:stonebrick",
+                "aliases": ["minecraft:stonebrick"],
             }),
         );
     }

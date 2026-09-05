@@ -59,6 +59,34 @@ pub trait TargetRegistry {
     /// picking one on the caller's behalf would refuse ids that are fine on
     /// the version they actually compile against.
     fn block_ids(&self) -> Option<BlockIdSet<'_>>;
+
+    /// The ids **the pinned target declares** that name the same block as
+    /// `id`, in the registry's own order.
+    ///
+    /// This is the rename half of a refused id, and the one a distance
+    /// search cannot reach: `minecraft:light` and
+    /// `minecraft:light_block_0` are eight edits apart and the same block,
+    /// so no threshold that keeps `oak_plank` → `oak_planks` honest will
+    /// ever connect them. A registry answers from a table that says so
+    /// outright.
+    ///
+    /// Returning several is normal rather than exceptional — one old
+    /// spelling routinely splits into a family — and the order is the
+    /// registry's, since it is the one an author reads.
+    ///
+    /// Called only on the miss path, beside [`Self::known_tokens`] and on
+    /// the same terms: allocating per miss is intentional, because misses
+    /// are rare and the caller needs owned candidates anyway.
+    ///
+    /// The default is "this registry has no alias table", which is what a
+    /// pack shipping no `aliases` component amounts to and what every
+    /// registry did before the component existed. An implementation that
+    /// has one overrides it; one that does not is not obliged to say so.
+    fn aliases_for(&self, id: &str) -> Vec<String> {
+        // A registry with no alias table has the same answer for every id.
+        let _ = id;
+        Vec::new()
+    }
 }
 
 /// The block ids valid in one pinned `(edition, version)` target.
@@ -174,6 +202,18 @@ pub struct UnknownId {
     /// Closest id the target does declare, when one is within
     /// `nearest_match`'s edit cap.
     pub suggestion: Option<String>,
+    /// The ids this target declares for the same block, from the registry's
+    /// alias table. Empty when the pack has no alias table, no group names
+    /// the refused id, or the group's other spellings are all absent from
+    /// this target too.
+    ///
+    /// Kept apart from [`Self::suggestion`] rather than folded into it
+    /// because the two are different claims about the same span. A
+    /// suggestion is a guess from a string distance and can be wrong about
+    /// which block was meant; an alias is a statement out of the pack's
+    /// table that these names are one block. A consumer that offered them
+    /// as one list would be offering a quick-fix it cannot stand behind.
+    pub aliases: Vec<String>,
 }
 
 /// Who chose the id that turned out not to exist.
@@ -327,8 +367,17 @@ pub(crate) fn check_id(
     if ids.contains(&state.id) {
         return Ok(state);
     }
+    // Both answers are collected, and neither stands in for the other: the
+    // alias table says what this target calls the block, the distance
+    // search guesses which block was meant. A rename has the first and not
+    // the second, a typo the second and not the first, and a typo *of* a
+    // renamed id can have both — `stone_brick` on Bedrock 1.21.0 is one
+    // edit from `stone_bricks`, which that version renamed to
+    // `stonebrick`.
+    let aliases = registry.map_or_else(Vec::new, |registry| registry.aliases_for(&state.id));
     Err(MaterialDeferred::UnknownId(UnknownId {
         suggestion: nearest_namespaced_id(&state.id, ids.iter()),
+        aliases,
         registry: ids.label().to_owned(),
         origin: origin.clone(),
         id: state.id,
@@ -415,6 +464,10 @@ mod tests {
         /// Sorted, fully namespaced ids the pinned target declares. Empty
         /// means "no target pinned", matching a `blocks`-less pack.
         ids: Vec<String>,
+        /// One alias group: every spelling of one block, as a pack's
+        /// `aliases` component declares it. Empty means "no alias table",
+        /// which is what a pack without the component amounts to.
+        group: Vec<String>,
     }
 
     impl FakeResolver {
@@ -422,6 +475,7 @@ mod tests {
             Self {
                 entries,
                 ids: Vec::new(),
+                group: Vec::new(),
             }
         }
 
@@ -429,6 +483,12 @@ mod tests {
         fn pinned(mut self, ids: &[&str]) -> Self {
             self.ids = ids.iter().map(|id| (*id).to_owned()).collect();
             self.ids.sort();
+            self
+        }
+
+        /// Declare one alias group, in the order a pack wrote it.
+        fn aliasing(mut self, group: &[&str]) -> Self {
+            self.group = group.iter().map(|id| (*id).to_owned()).collect();
             self
         }
     }
@@ -447,6 +507,17 @@ mod tests {
 
         fn block_ids(&self) -> Option<BlockIdSet<'_>> {
             (!self.ids.is_empty()).then(|| BlockIdSet::new("test 1.0", &self.ids))
+        }
+
+        fn aliases_for(&self, id: &str) -> Vec<String> {
+            if !self.group.iter().any(|spelling| spelling == id) {
+                return Vec::new();
+            }
+            self.group
+                .iter()
+                .filter(|spelling| self.ids.binary_search(spelling).is_ok())
+                .cloned()
+                .collect()
         }
     }
 
@@ -542,24 +613,122 @@ mod tests {
                 registry: "test 1.0".into(),
                 origin: IdOrigin::Authored,
                 suggestion: Some("minecraft:oak_planks".into()),
+                aliases: Vec::new(),
             }),
         );
     }
 
     #[test]
-    fn a_rename_is_refused_without_a_suggestion_because_it_is_not_a_typo() {
+    fn a_rename_is_answered_from_the_alias_table_and_not_by_distance() {
         // Bedrock 1.21.0 spells the Java `light` block `light_block`, six
         // edits away — past `nearest_match`'s cap. (From 1.21.40 it is
-        // `light_block_0` … `_15`, which is further still.) The suggestion
-        // is a typo finder, not a rename map, and claiming otherwise here
-        // would need per-edition id aliases the pack does not carry.
-        let registry = FakeResolver::new(vec![]).pinned(&["minecraft:light_block"]);
+        // `light_block_0` … `_15`, which is further still.) No threshold
+        // that keeps `oak_plank` → `oak_planks` honest reaches it, so the
+        // answer has to come from a table that states the two are one
+        // block.
+        let registry = FakeResolver::new(vec![])
+            .pinned(&["minecraft:light_block"])
+            .aliasing(&["minecraft:light", "minecraft:light_block"]);
         let err = resolve_block_state(&token("light"), Some(&registry)).unwrap_err();
         match err {
             MaterialDeferred::UnknownId(unknown) => {
                 assert_eq!(unknown.id, "minecraft:light");
-                assert!(unknown.suggestion.is_none());
+                assert_eq!(unknown.aliases, ["minecraft:light_block".to_owned()]);
+                assert!(
+                    unknown.suggestion.is_none(),
+                    "the distance search still has nothing to say about a rename",
+                );
             }
+            other => panic!("expected UnknownId, got {other:?}"),
+        }
+    }
+
+    /// A group answers with every spelling the target declares, not with
+    /// one of them.
+    ///
+    /// Bedrock 1.21.40 split the single `light_block` into sixteen ids by
+    /// light level. Picking one on the author's behalf would be a silent
+    /// substitution of a light level they never chose; the closed set is
+    /// the honest answer, and choosing from it is theirs.
+    #[test]
+    fn a_split_answers_with_every_spelling_the_target_has() {
+        let registry = FakeResolver::new(vec![])
+            .pinned(&[
+                "minecraft:light_block_0",
+                "minecraft:light_block_1",
+                "minecraft:light_block_2",
+            ])
+            .aliasing(&[
+                "minecraft:light",
+                "minecraft:light_block_0",
+                "minecraft:light_block_1",
+                "minecraft:light_block_2",
+            ]);
+        let err = resolve_block_state(&token("light"), Some(&registry)).unwrap_err();
+        match err {
+            MaterialDeferred::UnknownId(unknown) => assert_eq!(
+                unknown.aliases,
+                [
+                    "minecraft:light_block_0".to_owned(),
+                    "minecraft:light_block_1".to_owned(),
+                    "minecraft:light_block_2".to_owned(),
+                ],
+            ),
+            other => panic!("expected UnknownId, got {other:?}"),
+        }
+    }
+
+    /// An alias the target does not declare either is not an answer.
+    ///
+    /// The group is edition-wide and version-free by construction, so it
+    /// holds spellings from versions this compile is not building for.
+    /// Offering one of those would refuse an id and then suggest another
+    /// the same target also refuses.
+    #[test]
+    fn an_alias_the_target_lacks_is_not_offered() {
+        let registry = FakeResolver::new(vec![])
+            .pinned(&["minecraft:cobblestone"])
+            .aliasing(&["minecraft:light", "minecraft:light_block"]);
+        let err = resolve_block_state(&token("light"), Some(&registry)).unwrap_err();
+        match err {
+            MaterialDeferred::UnknownId(unknown) => assert!(
+                unknown.aliases.is_empty(),
+                "`light_block` is no more declared here than `light` is",
+            ),
+            other => panic!("expected UnknownId, got {other:?}"),
+        }
+    }
+
+    /// A typo *of* a renamed id carries both answers, and they are
+    /// different claims about it.
+    ///
+    /// `stone_brick` on a target spelling the block `stonebrick` is one
+    /// edit from the alias and one edit from nothing else, so the two
+    /// happen to agree here — what matters is that each field is filled by
+    /// its own rule rather than one being derived from the other.
+    #[test]
+    fn a_typo_of_a_renamed_id_carries_both_answers() {
+        let registry = FakeResolver::new(vec![])
+            .pinned(&["minecraft:stonebrick"])
+            .aliasing(&["minecraft:stone_bricks", "minecraft:stonebrick"]);
+        let err = resolve_block_state(&token("stone_bricks"), Some(&registry)).unwrap_err();
+        match err {
+            MaterialDeferred::UnknownId(unknown) => {
+                assert_eq!(unknown.aliases, ["minecraft:stonebrick".to_owned()]);
+                assert_eq!(unknown.suggestion.as_deref(), Some("minecraft:stonebrick"));
+            }
+            other => panic!("expected UnknownId, got {other:?}"),
+        }
+    }
+
+    /// A registry with no alias table answers exactly as every registry
+    /// did before the component existed.
+    #[test]
+    fn a_registry_with_no_alias_table_answers_no_alias() {
+        let registry = FakeResolver::new(vec![]).pinned(&["minecraft:light_block"]);
+        let err = resolve_block_state(&token("light"), Some(&registry)).unwrap_err();
+        match err {
+            MaterialDeferred::UnknownId(unknown) => assert!(unknown.aliases.is_empty()),
             other => panic!("expected UnknownId, got {other:?}"),
         }
     }
@@ -633,6 +802,7 @@ mod tests {
                     token: "floor.stone.smooth".into(),
                 },
                 suggestion: Some("minecraft:stonebrick".into()),
+                aliases: Vec::new(),
             }),
         );
     }

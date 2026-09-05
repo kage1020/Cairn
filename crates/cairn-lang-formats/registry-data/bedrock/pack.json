@@ -2,10 +2,11 @@
   "schema_version": 1,
   "edition": "bedrock",
   "name": "cairn-builtin-bedrock",
-  "description": "Built-in Bedrock registry pack bundled with the Cairn reference compiler. Material block ids are the flattened Bedrock identifiers; some match their Java spelling (planks, cobblestone, stairs) and some do not (standing_sign, wall_sign, wooden_pressure_plate), so each one is checked against the block table rather than assumed. The per-version block tables come from PrismarineJS/minecraft-data (data/bedrock/{1.21.0,1.21.42,1.21.60}/blocks.json, retrieved 2026-08-12); 1.21.42 is the patch release of the 1.21.40 line. Blockstate details still come from wiki.bedrock.dev.",
+  "description": "Built-in Bedrock registry pack bundled with the Cairn reference compiler. Material block ids are the flattened Bedrock identifiers; some match their Java spelling (planks, cobblestone, stairs) and some do not (standing_sign, wall_sign, wooden_pressure_plate), so each one is checked against the block table rather than assumed. The per-version block tables come from PrismarineJS/minecraft-data (data/bedrock/{1.21.0,1.21.42,1.21.60}/blocks.json, retrieved 2026-08-12); 1.21.42 is the patch release of the 1.21.40 line. Blockstate details still come from wiki.bedrock.dev. The `aliases` groups are hand-written: the spellings one block has worn, so a refused id can be answered with the name this target does use. They cover the Java/Bedrock spelling splits an author most often walks into and the ids Bedrock's own 1.21.40 flattening wave retired. Two cases are deliberately absent, both because a group is keyed on the spelling alone: a spelling both editions declare meaning different blocks (`snow`), and the numbered pre-flattening slab ids, whose old name carries the family in a state value rather than in the id.",
   "files": {
     "data_versions": "data_versions.json",
     "materials": "materials.json",
-    "blocks": "blocks.json"
+    "blocks": "blocks.json",
+    "aliases": "aliases.json"
   }
 }

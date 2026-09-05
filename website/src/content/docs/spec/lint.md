@@ -238,7 +238,7 @@ them. Codes not listed below omit `data` entirely, so the JSON key is absent rat
 |---|---|
 | `W_WALKWAY_BLOCKED` | `{ "kind": "walkway_blocked", "skipped": <u64> }`. Cells along the fallback L-shaped path that overlapped an existing structure and were dropped. |
 | `E_DUPLICATE_SELECTOR` | `{ "kind": "duplicate_selector", "rebound": ["frame"] }`. The binding keys this row takes over from an earlier one, without the trailing `=`. Never empty. |
-| `E_UNKNOWN_ID` | `{ "kind": "unknown_id", "id", "registry", "origin", "token"?, "suggestion"? }`. See below. |
+| `E_UNKNOWN_ID` | `{ "kind": "unknown_id", "id", "registry", "origin", "token"?, "suggestion"?, "aliases"? }`. See below. |
 | `E_INCOMPATIBLE_MATERIAL` | `{ "kind": "incompatible_material", "id", "required", "slot"?, "token"? }`. The bound material, the family the geometry needs, and where the binding came from. |
 | `E_INCOMPLETE_PLACE` | `{ "kind": "incomplete_place", "missing": ["id", "use", "theme"] }`. The keys the row does not declare. Never empty. |
 | `E_INVALID_REQUIRES` | `{ "kind": "invalid_requires", "reason", "found" }`. `reason` is one of `not_a_version_requirement`, `unknown_edition_scope`, `unsupported_operator`, `empty_version`, `component_not_a_number`, `component_too_large`, `prerelease_not_a_tag`, `trailing_tokens`. `found` is empty when the failure names no fragment. |
@@ -256,6 +256,14 @@ them. Codes not listed below omit `data` entirely, so the JSON key is absent rat
 
 `token` accompanies `catalog` and `builtin` and is absent for `authored`. `suggestion` is absent
 when no declared ID is within the typo threshold, which is always the case for a rename.
+
+`aliases` is the other half, and the two are different claims about the same ID. A suggestion is a
+guess from a string distance; an alias is the registry pack's `aliases` component stating that two
+names are one block, so a quick-fix may apply an alias unasked and should not apply a suggestion.
+It holds every ID the target declares for that block — the closed set, never a pick from it — in
+the pack's own order, and is absent when the pack names none. The rendered note prints the first
+few and counts the rest; the payload is where the whole set lives. See
+[Versioning and Editions §10.4](versioning-editions#104-fail-loud-and-minimum-version-inference).
 
 `E_INCOMPATIBLE_MATERIAL` follows the same idea: `slot` is the `mat_slot=` name the member read and
 is absent when it carries no binding, and a dotted `token` (`roof.dark_wood`) means the pack's

@@ -236,7 +236,7 @@ placement が同じテーマを束縛しながら 1 つのスロットについ�
 |---|---|
 | `W_WALKWAY_BLOCKED` | `{ "kind": "walkway_blocked", "skipped": <u64> }`。フォールバックの L 字経路で既存構造と衝突してスキップされたセル数。 |
 | `E_DUPLICATE_SELECTOR` | `{ "kind": "duplicate_selector", "rebound": ["frame"] }`。この行が先行する行から奪う束縛キー。末尾の `=` は含みません。常に非空。 |
-| `E_UNKNOWN_ID` | `{ "kind": "unknown_id", "id", "registry", "origin", "token"?, "suggestion"? }`。後述。 |
+| `E_UNKNOWN_ID` | `{ "kind": "unknown_id", "id", "registry", "origin", "token"?, "suggestion"?, "aliases"? }`。後述。 |
 | `E_INCOMPATIBLE_MATERIAL` | `{ "kind": "incompatible_material", "id", "required", "slot"?, "token"? }`。束縛されたマテリアル、ジオメトリが必要とするファミリ、束縛の出どころ。 |
 | `E_INCOMPLETE_PLACE` | `{ "kind": "incomplete_place", "missing": ["id", "use", "theme"] }`。行が宣言していないキー。常に非空。 |
 | `E_INVALID_REQUIRES` | `{ "kind": "invalid_requires", "reason", "found" }`。`reason` は `not_a_version_requirement` / `unknown_edition_scope` / `unsupported_operator` / `empty_version` / `component_not_a_number` / `component_too_large` / `prerelease_not_a_tag` / `trailing_tokens` のいずれか。失敗が断片を名指ししないとき `found` は空。 |
@@ -254,6 +254,15 @@ placement が同じテーマを束縛しながら 1 つのスロットについ�
 
 `token` は `catalog` と `builtin` に付随し、`authored` では省略されます。`suggestion` はタイポ閾値内
 の宣言済み ID が無いときは省略され、リネームでは常に省略されます。
+
+`aliases` がもう半分で、この 2 つは同じ ID に対する別種の主張です。`suggestion` は文字列距離からの推
+測ですが、`aliases` はレジストリパックの `aliases` コンポーネントが「2 つの名前は同じブロックだ」と述
+べたものです。したがってクイックフィックスは `aliases` なら無断で適用してよく、`suggestion` は適用す
+べきではありません。中身はターゲットがそのブロックに対して宣言する ID すべて (閉じた候補集合であって、
+そこからの選択ではありません) をパック自身の順で保持し、パックが 1 つも名指ししないときは省略されます。
+表示されるノートは先頭のいくつかを並べて残りを数え、集合全体はペイロードにあります。
+[バージョンとエディション §10.4](versioning-editions#104-fail-loud-と最小バージョン推定) を参照して
+ください。
 
 `E_INCOMPATIBLE_MATERIAL` も同じ考えです。`slot` はメンバが読んだ `mat_slot=` 名で、束縛が無ければ省
 略されます。ドット付きの `token` (`roof.dark_wood`) なら、修正すべきはソース行ではなくパックの対応付

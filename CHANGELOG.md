@@ -45,6 +45,54 @@ and is a separate axis from the Minecraft target version.
 
 ### Breaking changes
 
+- *(core,formats,cli)* `E_UNKNOWN_ID` answers a **rename**, not only a typo. The registry pack grew
+  an `aliases` component — groups of the spellings one block has worn — and a refused id is now
+  reported with the name the pinned target actually uses:
+
+  ```
+  $ cairn compile s.crn --edition bedrock --target 1.21.60   # slot floor -> @light
+  s.crn:2:17: error[E_UNKNOWN_ID]: `minecraft:light` is not a block in `bedrock 1.21.60`
+    note: `bedrock 1.21.60` spells this block `minecraft:light_block_0`,
+          `minecraft:light_block_1`, `minecraft:light_block_2`, `minecraft:light_block_3`
+          and 12 more, per the registry pack's alias table
+  ```
+
+  The suggestion was a Damerau-Levenshtein search over the target's own block table, capped at three
+  edits for a path of seven characters or more. That catches `oak_plank` → `oak_planks` and nothing
+  else, and every rename is well past the cap: `oak_sign` → `standing_sign` is seven edits,
+  `light` → `light_block_0` is eight. So the message an author was most likely to hit was the one
+  that said it had no candidate — honest, and no help at all against a table of a thousand ids.
+  `spec/versioning-editions.md` §10.4 asks an error to return "the closed set of candidates valid in
+  the target", and a distance search structurally cannot produce that set for two spellings that are
+  not textually related.
+
+  The real work was deciding what a row is keyed on. Java ids as the base, with Bedrock as
+  overriding diffs, is the obvious first cut and answers only half of it — it says nothing about
+  Bedrock 1.21.0 → 1.21.40, which is the same class of problem inside one edition. So a row is keyed
+  on nothing: it is a **group of spellings**, and which of them belongs to which
+  `(edition, version)` is a question the `blocks` tables already answer per version. A lookup keeps
+  the members the pinned target declares, and the same rows therefore answer Java → Bedrock and
+  Bedrock 1.21.0 → 1.21.40 alike. What the key cannot express is a spelling both editions declare
+  meaning different blocks — Bedrock's `snow` is Java's `snow_block` while Java's `snow` is
+  Bedrock's `snow_layer` — and such a pair gets no row rather than a wrong one.
+
+  An answer is the closed set and never a pick from it: `@light` on Bedrock 1.21.60 is reported with
+  all sixteen light levels, because choosing one would be the silent substitution §10.4 forbids. The
+  note prints the first four and counts the rest; the whole set is in the diagnostic's `data`
+  payload, under a new `aliases` key beside `suggestion`. The two stay apart because they are
+  different claims about the same span — an alias is the pack stating that two names are one block,
+  a suggestion is a guess from a string distance — so a quick-fix may apply the first unasked and
+  should not apply the second. `cairn info`'s `edition portability` row reads the same table, and an
+  entry the edition has under another name now names it instead of reporting a dead end.
+
+  The typo search is unchanged and still runs wherever the alias table says nothing, which includes
+  every pack that ships no `aliases` component: the message such a pack produces today is the one it
+  produced before. The built-in packs cover the Java/Bedrock spelling splits an author most often
+  walks into and the ids Bedrock's own 1.21.40 flattening wave retired. Breaking for API consumers:
+  `portability_for_java` / `portability_for_bedrock` take the pack's `AliasIndex` as a third
+  argument, and `UnsupportedReason::AbsentFromEdition` and `DiagnosticData::UnknownId` each carry
+  one more field.
+
 - *(core,cli)* A `def` and a `theme` may declare `requires version>=X` on a line of their own, and
   the minimum version of a composite is the max of its parts. `spec/versioning-editions.md` §10.4
   has always said so; neither spelling parsed, so the sentence described a feature that existed at

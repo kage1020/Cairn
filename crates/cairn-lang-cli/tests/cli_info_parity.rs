@@ -869,8 +869,15 @@ fn the_unsupported_figure_names_the_entry_and_the_reason() {
         "the entry behind the figure must be named, got: {stderr}",
     );
     assert!(
-        stderr.contains("no supported version of this edition declares the block"),
+        stderr.contains("no supported version of this edition declares that id"),
         "and the reason with it, since the three have three different repairs, got: {stderr}",
+    );
+    // This fixture's block is one Bedrock has under another name, so the
+    // reason ends on the edit rather than on the dead end: the row is
+    // there to be acted on.
+    assert!(
+        stderr.contains("it spells the block `minecraft:standing_sign`"),
+        "the reason must end on what this edition calls the block, got: {stderr}",
     );
 }
 
@@ -965,15 +972,19 @@ fn the_json_row_names_exactly_what_its_count_counts() {
     );
     assert_eq!(entries[0]["id"], "minecraft:oak_sign");
     assert_eq!(entries[0]["reason"], "absent_from_edition");
-    // The suggestion is the flattened payload of that reason, and it is
-    // the same string the stderr note offers — one answer rendered twice,
-    // not two lookups that happen to agree.
-    let suggestion = entries[0]["suggestion"]
-        .as_str()
-        .expect("the absent reason carries a suggestion key");
+    // `aliases` is the flattened payload of that reason, and it holds the
+    // same strings the stderr note offers — one answer rendered twice, not
+    // two lookups that happen to agree.
+    let aliases = entries[0]["aliases"]
+        .as_array()
+        .expect("the absent reason carries an aliases key");
+    let alias = aliases
+        .first()
+        .and_then(serde_json::Value::as_str)
+        .expect("Bedrock has this block under another name");
     let (_, _, stderr) = info_raw(&src, "bedrock");
     assert!(
-        stderr.contains(&format!("did you mean `{suggestion}`?")),
+        stderr.contains(&format!("it spells the block `{alias}`")),
         "the note and the JSON must offer the same id, got: {stderr}",
     );
     let java = portability_entry(&axes, "java");
