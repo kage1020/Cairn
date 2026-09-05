@@ -116,9 +116,21 @@ title: "11. Lint と制約検証"
 | `E_INCOMPLETE_PLACE` | `place` 行が `id=` / `use=` / `theme=` のいずれかを欠いている ([§9.3](/ja/spec/components-editing-sites#93-site-による複数建築))。 |
 
 `E_UNKNOWN_ID` と `E_INCOMPATIBLE_MATERIAL` は block-array lowering 段で発生するので、報告するのは
-`cairn compile` (と `cairn lower`) だけです。`cairn check` は lowering を走らせません。さらに
-`E_UNKNOWN_ID` は固定されたターゲットを必要とするので、実際に出せるのは `cairn compile --target` だ
-けです ([バージョンとエディション §10.4](versioning-editions#104-fail-loud-と最小バージョン推定))。
+lowering を走らせるコマンド — `cairn compile`、`cairn lower`、`cairn check --target` — だけです。
+さらに `E_UNKNOWN_ID` は固定されたターゲットを必要とするので、実際に出せるのは `cairn compile
+--target` と `cairn check --edition E --target V` の 2 つです。`--target` なしの `cairn check` は
+lowering を走らせないので、どちらのコードにも到達しません。
+
+`cairn check --target` があるのは、CI ジョブが check コマンドで門番をしつつ、compile が拒否するもの
+を見られるようにするためです。ターゲットが宣言していない ID は `check` を終了コード 0 で通過し、
+`cairn compile` を終了コード 1 で止めていました。それを決める情報 — ただ 1 つの `(エディション,
+バージョン)` の組 — が `check` のコマンドラインになかったからです。このフラグは
+[コンパイルモデル §4.2](compilation#42-ターゲット軸) が `--target` 単独を拒否するのと同じ理由で
+`--edition` を必要とし、compile と同じテーブルに対して同じ lowering パスを走らせ、そして何も書きま
+せん。成果物もロックファイルも作らず、`@requires` のフロア強制も行いません — ロックはビルドを証明す
+るものであり、`--target` をフロアに突き合わせるのはそれを生成するコマンドだけの仕事だからです。フラ
+グを付けなければ従来どおりの挙動なので、今日通っているソースが落ち始めることはありません
+([バージョンとエディション §10.4](versioning-editions#104-fail-loud-と最小バージョン推定))。
 
 `E_INCOMPATIBLE_MATERIAL` は現時点では、階段ファミリ外に束縛された傾斜屋根または軒の `stair` を
 意味します ([コンパイルモデル §4.3](compilation#43-切妻屋根のボクセル規則))。

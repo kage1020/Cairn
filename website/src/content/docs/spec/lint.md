@@ -118,10 +118,21 @@ version to compare.
 | `E_THEME_VARIANT_MISSING` | The pinned edition can bind none of a theme's per-edition variants. |
 | `E_INCOMPLETE_PLACE` | A `place` row omits `id=`, `use=`, or `theme=` ([§9.3](components-editing-sites#93-multi-building-with-site)). |
 
-`E_UNKNOWN_ID` and `E_INCOMPATIBLE_MATERIAL` are raised during block-array lowering, so only
-`cairn compile` (and `cairn lower`) report them. `cairn check` does not run lowering at all.
-`E_UNKNOWN_ID` further needs a pinned target, so `cairn compile --target` is the one command that
-raises it. See
+`E_UNKNOWN_ID` and `E_INCOMPATIBLE_MATERIAL` are raised during block-array lowering, so only the
+commands that lower report them: `cairn compile`, `cairn lower`, and `cairn check --target`.
+`E_UNKNOWN_ID` further needs a pinned target, so the two commands that raise it are `cairn compile
+--target` and `cairn check --edition E --target V`. A bare `cairn check` runs no lowering at all
+and reaches neither code.
+
+`cairn check --target` exists so a CI job can gate on the check command and still see what a
+compile would refuse: an id the target does not declare passed `check` at exit 0 and stopped
+`cairn compile` at exit 1, and the information that decides it — the one `(edition, version)` pair
+— was not on `check`'s command line. It requires `--edition` for the reason
+[Compilation Model §4.2](compilation#42-target-axes) refuses `--target` alone, runs the same
+lowering pass against the same table `compile` does, and writes nothing: no artifact, no lockfile,
+and no `@requires` floor enforcement — a lock certifies a build, and only the command that
+produces one holds `--target` to the floors. Leaving the flag off is unchanged behaviour, so no
+source that passes today starts failing. See
 [Versioning and Editions §10.4](versioning-editions#104-fail-loud-and-minimum-version-inference).
 
 `E_INCOMPATIBLE_MATERIAL` today means a sloped roof or an eave `stair` bound outside the stair

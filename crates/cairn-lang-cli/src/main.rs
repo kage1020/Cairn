@@ -64,13 +64,18 @@ enum Command {
     },
     /// Run syntactic validation passes against a .crn source file. Exits 0
     /// when nothing is reported, 1 when any `Error`-severity diagnostic is
-    /// emitted (or the file fails to parse), 2 when the file cannot be
-    /// located.
+    /// emitted (or the file fails to parse, or `--target` names no version
+    /// the pinned edition ships), 2 when the file cannot be located.
     ///
-    /// This command does not run block-array lowering, so no lowering-stage
-    /// finding reaches it — `E_UNKNOWN_ID` and `E_UNKNOWN_ABSTRACT_TOKEN`
-    /// among them. `cairn compile` runs both stages and is the gate that
-    /// sees every code.
+    /// Without `--target` this command runs no block-array lowering, so no
+    /// lowering-stage finding reaches it — `E_UNKNOWN_ID` and
+    /// `E_UNKNOWN_ABSTRACT_TOKEN` among them. `--edition E --target V`
+    /// pins the one `(edition, version)` those findings are answers about
+    /// and runs the lowering pass too, which is what lets a CI job gate on
+    /// `cairn check` and see what `cairn compile` would refuse. Nothing is
+    /// written either way — `compile` remains the command that produces
+    /// artifacts and the lockfile, and the only one that holds `--target`
+    /// to the file's `@requires` floors.
     Check {
         /// Path to the .crn file to check.
         file: PathBuf,
@@ -91,6 +96,24 @@ enum Command {
         /// the author means.
         #[arg(long, value_enum)]
         edition: Option<EditionArg>,
+        /// Optional Minecraft version pin, resolved against the pinned
+        /// edition's data table exactly as `cairn compile --target` is;
+        /// `latest` aliases the newest version the backend knows about.
+        ///
+        /// Requires `--edition`, mirroring spec §4.2's rule that
+        /// `--target` alone is forbidden: "1.21" names different releases
+        /// on Java and Bedrock, and an id table belongs to one
+        /// `(edition, version)` pair rather than to a version string.
+        ///
+        /// Setting it runs block-array lowering, so the lowering stage's
+        /// findings join the report — `E_UNKNOWN_ID` above all, which
+        /// exists only where a target is pinned: `stone_bricks` is a block
+        /// on Bedrock 1.21.40 and not on Bedrock 1.21.0, so with no
+        /// version chosen there is no question to answer. Leaving it off
+        /// keeps the check a syntax-and-resolution gate, and no source
+        /// that passes today starts failing.
+        #[arg(long, requires = "edition")]
+        target: Option<String>,
         /// Output format for the diagnostics.
         #[arg(long, value_enum, default_value_t = CheckFormat::Text)]
         format: CheckFormat,
@@ -398,8 +421,9 @@ fn main() -> ExitCode {
         Some(Command::Check {
             file,
             edition,
+            target,
             format,
-        }) => run_check(&file, edition, format),
+        }) => run_check(&file, edition, target.as_deref(), format),
         Some(Command::Info {
             file,
             editions,
@@ -536,7 +560,73 @@ fn print_json<T: serde::Serialize>(what: &str, value: &T) -> Result<(), ExitCode
     }
 }
 
-fn run_check(file: &Path, edition: Option<EditionArg>, format: CheckFormat) -> ExitCode {
+/// What [`check_lowering`] found, and why it found nothing where it did.
+struct CheckLowering {
+    /// The block-array pass's findings, empty when no target was pinned
+    /// and nothing lowered.
+    diagnostics: Vec<Diagnostic>,
+    /// The `--target` that did not resolve, if that is why there are none.
+    unsupported: Option<cairn_lang_formats::data_version::UnsupportedTarget>,
+}
+
+/// Lower far enough to check block ids, or not at all.
+///
+/// `cairn check --target` is the only run of the check gate that lowers.
+/// The id check needs the one `(edition, version)` pair an id either
+/// exists in or does not, and lowering is where the palette is built, so
+/// the two arrive together: pinning a target turns the pass on, and every
+/// other lowering-stage finding comes with it rather than being filtered
+/// back out — a report that saw `E_INCOMPATIBLE_MATERIAL` and said
+/// nothing would be the same silence this flag exists to end.
+///
+/// A `--target` the edition's table cannot resolve is carried back
+/// unreported, the way [`resolve_target`] hands one to `run_compile`: the
+/// findings in the file are printed first, and a command-line mistake
+/// that jumped ahead of a syntax error would change which problem the
+/// author is told about.
+fn check_lowering(
+    ir: &cairn_lang_core::intent::IntentModule,
+    edition: Option<EditionArg>,
+    target: Option<&str>,
+) -> CheckLowering {
+    // Both or neither: `--target` requires `--edition` at the clap layer
+    // (spec §4.2), so the pair is what turns the pass on and the `let
+    // else` is unreachable rather than a policy of its own.
+    let (Some(edition), Some(target)) = (edition, target) else {
+        return CheckLowering {
+            diagnostics: Vec::new(),
+            unsupported: None,
+        };
+    };
+    let resolved = match resolve_target(edition, target) {
+        Ok(resolved) => resolved,
+        Err(err) => {
+            return CheckLowering {
+                diagnostics: Vec::new(),
+                unsupported: Some(err),
+            };
+        }
+    };
+    // Pinned to the same edition the id table belongs to, matching
+    // `load_and_lower`: a theme's per-edition variant decides which id a
+    // `mat_slot=` reaches, so resolving the file edition-neutrally and
+    // then checking the ids against one edition's table would ask the
+    // question of a palette the build never has.
+    let resolution = resolve(ir, Some(edition.as_edition()));
+    let registry = edition.registry_pack().view(Some(resolved.mc_version()));
+    let block_ir = lower_to_block_array(ir, &resolution, Some(&registry));
+    CheckLowering {
+        diagnostics: block_ir.diagnostics,
+        unsupported: None,
+    }
+}
+
+fn run_check(
+    file: &Path,
+    edition: Option<EditionArg>,
+    target: Option<&str>,
+    format: CheckFormat,
+) -> ExitCode {
     let source = match std::fs::read_to_string(file) {
         Ok(s) => s,
         Err(err) => {
@@ -573,12 +663,17 @@ fn run_check(file: &Path, edition: Option<EditionArg>, format: CheckFormat) -> E
         }
     };
     let ir = lower(&module);
-    // Through `build_diagnostics` with an empty lowering list rather than
-    // `check` directly: `cairn check` runs no lowering, but it does see
-    // both version headers, and the `@intended_targets` findings are the
-    // one part of its report that `check` cannot produce on its own.
+    // Through `build_diagnostics` rather than `check` directly: `cairn
+    // check` sees both version headers, and the `@intended_targets`
+    // findings are the one part of its report that `check` cannot produce
+    // on its own. The lowering list it merges is empty unless `--target`
+    // pinned a version to lower against.
     let pin = edition.map(EditionArg::as_edition);
-    let diagnostics = build_diagnostics(&module, &ir, pin, &weighed_editions(pin), Vec::new());
+    let CheckLowering {
+        diagnostics: lowering,
+        unsupported,
+    } = check_lowering(&ir, edition, target);
+    let diagnostics = build_diagnostics(&module, &ir, pin, &weighed_editions(pin), lowering);
     let has_error = diagnostics.iter().any(|d| d.severity() == Severity::Error);
     // Build the line-start index once and reuse it for every diagnostic /
     // note position lookup. Without this we'd re-walk the entire source for
@@ -605,6 +700,15 @@ fn run_check(file: &Path, edition: Option<EditionArg>, format: CheckFormat) -> E
                 return code;
             }
         }
+    }
+
+    // After the report, not before it: the file's own findings are what
+    // the author edits, and a `--target` typo printed above them would
+    // bury the line that has to change. It is still a refusal — a check
+    // that could not check the ids it was asked to must not exit 0.
+    if let Some(err) = unsupported {
+        eprintln!("error: {err}");
+        return ExitCode::from(1);
     }
 
     if has_error {

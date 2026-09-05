@@ -108,11 +108,17 @@ it `stone_bricks`, so an edition-wide answer would accept both everywhere and ca
 The tables ship in the registry pack's `blocks` component, folded with the `inherits + diffs` rule
 of [§10.3](#103-backend--data-tables).
 
-The check therefore runs on `cairn compile --target` and nowhere else. `cairn info` and `cairn
-lower` do lower, but pin no version, since `info` reports across the whole range by design. They
-skip the comparison rather than pick a version on the author's behalf. `cairn check` does not run
-block-array lowering at all, so no lowering-stage code reaches it, `E_UNKNOWN_ABSTRACT_TOKEN`
-included.
+The check therefore runs where a version is pinned and nowhere else: on `cairn compile --target`,
+and on `cairn check --edition E --target V`, which pins the same pair to run the same pass without
+writing anything. `cairn info` and `cairn lower` do lower, but pin no version, since `info` reports
+across the whole range by design. They skip the comparison rather than pick a version on the
+author's behalf. A `cairn check` with no `--target` does not run block-array lowering at all, so no
+lowering-stage code reaches it, `E_UNKNOWN_ABSTRACT_TOKEN` included.
+
+Checking against *every* version the edition ships and refusing only the ids valid in none of them
+would need no flag, and would answer the wrong question: `stone_bricks` is valid somewhere on
+Bedrock, so a build pinned to 1.21.0 would still be told nothing. The pin is what makes the answer
+true of the build being made.
 
 The suggested fix has two halves, because a wrong ID arrives two ways. A **typo** is answered by a
 distance search over the same table: `oak_plank` is answered with `oak_planks`. A **rename** is not
@@ -413,7 +419,9 @@ the count, in palette order.
 Both questions are asked of the *edition* rather than of a version, because this row reports across
 a whole compatible range. An ID valid for only part of that range is therefore not `unsupported`, as
 when Bedrock renamed `stonebrick` to `stone_bricks` at 1.21.40. Whether the version being built has
-it is what `cairn compile --target` answers, as `E_UNKNOWN_ID` ([§10.4](#104-fail-loud-and-minimum-version-inference)).
+it is what a pinned target answers, as `E_UNKNOWN_ID` — `cairn compile --target`, or `cairn check
+--edition E --target V` for the same answer without a build
+([§10.4](#104-fail-loud-and-minimum-version-inference)).
 
 ### The `buildable targets` row
 
