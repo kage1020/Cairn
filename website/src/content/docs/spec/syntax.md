@@ -151,6 +151,11 @@ of being verified. That record lives only in the lock.
 `E_DUPLICATE_HEADER`. `@requires` is the exception: its floors compose, so repeating it adds a
 constraint rather than displacing one.
 
+A `def` or a `theme` may carry the same expression as a body line, spelled `requires` without the
+`@` — a floor on that part rather than on the file, inherited by every build that instantiates it.
+The sigil is what marks a file directive, and a part's floor is not one. See
+[Versioning and Editions](versioning-editions).
+
 ## 5.4 Selectors
 
 Wall selectors are `front` (+z), `back`, `left`, and `right`. `offset` runs along the wall, and `y`

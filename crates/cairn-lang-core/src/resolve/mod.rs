@@ -33,6 +33,7 @@
 mod binding;
 mod requires_parse;
 mod resolver;
+mod theme_variant;
 mod version_axes;
 mod version_order;
 
@@ -46,8 +47,8 @@ pub use resolver::{
     resolve,
 };
 pub use version_axes::{
-    BuildableTargets, EditionPortability, EditionReport, RegistryRange, SemanticSensitiveFinding,
-    UnsupportedEntry, UnsupportedReason, VersionAxes, VersionFloor, compute_axes,
-    declared_version_floors, unscoped_version_floors,
+    BuildableTargets, EditionPortability, EditionReport, FloorOrigin, RegistryRange,
+    SemanticSensitiveFinding, UnsupportedEntry, UnsupportedReason, VersionAxes, VersionFloor,
+    compute_axes, declared_version_floors, unscoped_version_floors,
 };
 pub use version_order::{FloorPlacement, FloorVerdict, VersionOrder};

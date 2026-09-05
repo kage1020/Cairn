@@ -47,7 +47,7 @@ compose to the strictest across every line, so a second one adds a constraint ([
 | `E_TYPE_MISMATCH_LABEL` | A label-typed key's value is not an identifier or string. |
 | `E_TYPE_MISMATCH_SIZE` | A `size=` value is not a `WxH` literal. |
 | `E_CONNECT_ARITY` | A `connect` row's shape is not `FROM.PORT to TO.PORT`. |
-| `E_INVALID_REQUIRES` | An `@requires` expression that is not a version floor ([§5.3](syntax#53-headers)). |
+| `E_INVALID_REQUIRES` | A `requires` expression that is not a version floor, written as the `@requires` header or as a `def` / `theme` body line ([§5.3](syntax#53-headers)). |
 | `W_INVALID_CAIRN_VERSION` | An `@cairn` value that is not a `YYYY.M[.PATCH]` language version ([§5.3](syntax#53-headers)). |
 | `W_FUTURE_CAIRN_VERSION` | An `@cairn` value naming a language version later than the compiler reading it. |
 
@@ -72,7 +72,10 @@ label, with whitespace optional. The code covers a word before `version` that is
 any other operator, a missing version, a component that does not begin with a digit or does not fit
 in a `u32`, a `-` with no readable pre-release tag after it, and text after the version. It does
 *not* cover a well-formed label the target edition has no `DataVersion` for — that is
-`E_REQUIRES_UNORDERABLE`, and it is not a syntax fact.
+`E_REQUIRES_UNORDERABLE`, and it is not a syntax fact. Both spellings of the floor are checked, and
+by the same rule: the `@requires` header, and the member-level `requires` line a `def` or a `theme`
+may carry ([§10.4](versioning-editions#a-part-may-declare-its-own-floor)). A part no build
+instantiates is checked too — the mistake is in the line, not in whether anything reads it.
 
 `W_INVALID_CAIRN_VERSION`: the accepted shape is `YYYY.M` or `YYYY.M.PATCH` — a four-digit year, a
 month `1 … 12`, and an optional patch, every component decimal digits. A leading zero on the month
