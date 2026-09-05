@@ -48,6 +48,8 @@ title: "11. Lint と制約検証"
 | `E_TYPE_MISMATCH_SIZE` | `size=` の値が `WxH` リテラルでない。 |
 | `E_CONNECT_ARITY` | `connect` 行の形が `FROM.PORT to TO.PORT` でない。 |
 | `E_INVALID_REQUIRES` | `requires` の式がバージョン下限になっていない。`@requires` ヘッダと `def` / `theme` の本体行の両方が対象 ([§5.3](/ja/spec/syntax#53-ヘッダ))。 |
+| `W_INVALID_CAIRN_VERSION` | `@cairn` の値が `YYYY.M[.PATCH]` の言語バージョンになっていない ([§5.3](/ja/spec/syntax#53-ヘッダ))。 |
+| `W_FUTURE_CAIRN_VERSION` | `@cairn` の値が、読んでいるコンパイラより新しい言語バージョンを指している。 |
 
 `E_MISPLACED_MEMBER` は `struct` / `def` 内の `place` / `connect`、あるいは `site` の行に混ざった
 ジオメトリキーワードで発火します。該当行で 1 回だけ報告され、その下にインデントされたものも一緒に
@@ -72,6 +74,30 @@ title: "11. Lint と制約検証"
 `@requires` ヘッダと、`def` / `theme` が持てるメンバレベルの `requires` 行
 ([§10.4](versioning-editions#構成要素は自身の下限を宣言できる)) — は同じ規則で検査されます。どのビルドもインスタンス化しない構成要素も検査対象です。誤りは行そのものにあり、それを読むものが
 あるかどうかではありません。
+
+`W_INVALID_CAIRN_VERSION`: 受け付ける形は `YYYY.M` または `YYYY.M.PATCH` です。4 桁の年、`1 … 12`
+の月、省略可能なパッチで、いずれの構成要素も 10 進数字だけです。月の先頭のゼロは受け付けられ、値を
+変えません。`2026.06` と `2026.6` は同じバージョンで、前者は calver.org の `YYYY.0M`、後者は Cargo
+の `version` フィールドが持てる `YYYY.M` です。構成要素が 2 つでも 3 つでもない値、空または数字で
+ない構成要素、4 桁でない年、暦に無い月、`u32` を超えるパッチ、そしてバージョンの後に続く 2 つ目の
+語を対象にします。ヘッダの値は行まるごとなので、`@cairn 2026.6 draft` はバージョンとそれ以外の何か
+を書いていることになります。
+
+`@requires` より意図的に厳しくしてあります。あちらは Mojang の名前空間にある Minecraft のラベルを
+読み、順序が付けばよいだけなので、構成要素は数字で *始まれば* よく、プレリリースタグもラベルです。
+`@cairn` は Cairn 自身のバージョンを指すので、構成要素はすべて数字であり、`2026.13` は存在しない月、
+`1.2` は年ではなく semver です。
+
+`W_FUTURE_CAIRN_VERSION` は、自分より新しい言語で書かれたファイルについてコンパイラが言える唯一の
+有用なことです。このビルドより後に追加されたキーワードや引数は `E_UNKNOWN_KEYWORD` /
+`E_UNKNOWN_ARGUMENT` として報告されるので、それらがその行についてではなくバージョン差についての指摘
+かもしれない、と知っているのはヘッダだけです。これが届くのは、後の言語が「今ある形の中に」足したもの
+です。まったく新しい構文形式 — ディレクティブ、トップレベル項目 — は `E_PARSE` であり、パースは
+すべての check パスに先行するので ([§11.3](#113-エラーと警告))、バージョン差が最も説明になる場面で
+この指摘は現れません。
+
+1 つのディレクティブが両方のコードを受け取ることはありません。バージョンとして読めない値には、
+比較するバージョンが無いからです。
 
 ### マテリアルとターゲット
 
@@ -214,6 +240,8 @@ placement が同じテーマを束縛しながら 1 つのスロットについ�
 | `E_INCOMPATIBLE_MATERIAL` | `{ "kind": "incompatible_material", "id", "required", "slot"?, "token"? }`。束縛されたマテリアル、ジオメトリが必要とするファミリ、束縛の出どころ。 |
 | `E_INCOMPLETE_PLACE` | `{ "kind": "incomplete_place", "missing": ["id", "use", "theme"] }`。行が宣言していないキー。常に非空。 |
 | `E_INVALID_REQUIRES` | `{ "kind": "invalid_requires", "reason", "found" }`。`reason` は `not_a_version_requirement` / `unknown_edition_scope` / `unsupported_operator` / `empty_version` / `component_not_a_number` / `component_too_large` / `prerelease_not_a_tag` / `trailing_tokens` のいずれか。失敗が断片を名指ししないとき `found` は空。 |
+| `W_INVALID_CAIRN_VERSION` | `{ "kind": "invalid_cairn_version", "reason", "found" }`。`reason` は `component_count` / `component_not_a_number` / `year_not_four_digits` / `month_out_of_range` / `patch_too_large` / `trailing_tokens` のいずれか。`found` はその理由が指す構成要素で、失敗が断片を名指ししないときは空 — `component_count` と、構成要素そのものが空の値 (`2026.`) に対する `component_not_a_number` です。 |
+| `W_FUTURE_CAIRN_VERSION` | `{ "kind": "future_cairn_version", "declared", "compiler" }`。どちらも書かれたまま。`declared` はファイル中の文字列、`compiler` は報告したビルド。 |
 | `W_TRUTH_TABLE_PARTIAL` | `{ "kind": "truth_table_partial", "inputs": 2, "covered": 1, "missing": ["01","10","11"] }`。後述。 |
 
 **`E_UNKNOWN_ID.origin`** は誰がその ID を選んだかを示します。修復先が違うからです。
@@ -243,7 +271,9 @@ placement が同じテーマを束縛しながら 1 つのスロットについ�
 - **警告** はバージョン/エディション間の意味ドリフト、レッドストーン挙動の非保証、そして
   block-array パスが報告する部分ビルドの劣化です。不完全なのがソースではなくコンパイラ側の場合です。
 
-`E_` / `W_` の接頭辞は severity ではありません。`W_` は部分ビルドの劣化を表し、`E_` 接頭辞の 2 つは
+`E_` / `W_` の接頭辞は severity ではありません。これは両方向に言えます。多くの `W_` コードは部分
+ビルドの劣化を表しますが、`W_UNUSED_DEF` / `W_TRUTH_TABLE_PARTIAL` と `@cairn` の 2 コードは劣化では
+ないまま警告です。そして `E_` 接頭辞の 2 つは
 名前ではなく上のルールで判定されています。
 
 - `E_UNKNOWN_SLOT_TARGET` は **エラー** です。マテリアルでない値に束縛されたスロットは、参照する
@@ -262,6 +292,14 @@ placement が同じテーマを束縛しながら 1 つのスロットについ�
 ありません。不完全なのはマテリアルを名指ししなかったソースの側で、コンパイラの側ではありません。
 しかも drop はそのメンバで止まりません。`walls` が落ちると体積の導出に使う壁の高さが下がるため、
 構造そのものが縮み、そこに開けるはずだった `door` や `window` も併せて deferred になります。
+
+`@cairn` の 2 つのコードは、同じルールを逆から読んで **警告** です。このヘッダは provenance で、
+どのパスも分岐に使わず、パレットのエントリもここからは来ず、lockfile の `cairn_version` はファイル
+ではなくコンパイラを記録します。`@cairn banana` は `@cairn 2026.06` とバイト単位で同じものを建てる
+ので、結果について意図しないことは何も起きません。失われるのはヘッダ自身の仕事 — 後のコンパイラに
+読めること — であり、一言添える価値はあってもファイルを拒否する価値はありません。`@requires` が同じ
+判定でエラーなのは、その下限が入力そのものだからです。`cairn info` の互換範囲を決め、
+`cairn compile --target` がそれに縛られるので、蒸発した下限は通してはいけないターゲットを通します。
 
 `E_UNKNOWN_ARGUMENT` は **エラー** です。理由は 1 段上の `E_UNKNOWN_KEYWORD` と同じで、キーワードの
 語彙に無いキーは何も指しておらず、コンパイラがどう育っても値を読むパスは現れず、メンバは求められた

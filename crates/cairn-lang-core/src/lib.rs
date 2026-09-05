@@ -9,6 +9,7 @@
 
 pub mod ast;
 pub mod block_array;
+pub mod calver;
 pub mod check;
 pub mod edition;
 pub mod error;

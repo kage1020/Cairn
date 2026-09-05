@@ -118,6 +118,11 @@ Metadata MAY go in headers rather than in the semantic body:
 
 **`@cairn`** is the version of the Cairn language itself, a separate axis from the two Minecraft
 headers. It is optional and exists as provenance, so a future compiler can parse and warn correctly.
+No pass branches on the value, but it is read: `YYYY.M` or `YYYY.M.PATCH`, with a four-digit year
+and a month `1 … 12`. A leading zero on the month is accepted, so `2026.06` and `2026.6` are one
+version. Anything else is `W_INVALID_CAIRN_VERSION`, and a version later than the compiler reading
+it is `W_FUTURE_CAIRN_VERSION` — provenance that cannot be read by a later compiler is not doing
+the job the header exists for.
 
 **`@requires`** is a capability floor. Its expression is an optional edition, the subject
 `version`, the operator `>=`, and a version label, with whitespace optional between them, so

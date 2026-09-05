@@ -166,6 +166,22 @@ pub enum DiagnosticCode {
     /// range. No such range is derived yet, so that code has nothing to
     /// compare against and is not defined here.
     InvalidRequires,
+    /// The `@cairn` header's value is not a `YYYY.M[.PATCH]` language
+    /// version. The directive is provenance rather than an input, so the
+    /// build is unaffected and this is a warning — but provenance whose
+    /// whole job is to be readable by a later compiler has to be
+    /// readable, and nothing else in the pipeline ever looks at the
+    /// string. `data` names which component failed and what it held.
+    InvalidCairnVersion,
+    /// The `@cairn` header names a language version later than the build
+    /// reading it. A warning for the reason [`Self::InvalidCairnVersion`]
+    /// is — the header is provenance, so the build is the same either
+    /// way — and the only finding that can say an unknown keyword or
+    /// argument elsewhere in the file may be about the version gap rather
+    /// than about the line it names. A whole new syntactic form is
+    /// [`Self::Parse`] instead, and no check pass runs then, so the gap
+    /// goes unsaid in exactly the case it explains best.
+    FutureCairnVersion,
     /// A label-typed key whose value is not a label (identifier or
     /// string): `id=`, `class=`, `mat_slot=`, `use=`, or `theme=`.
     ///
@@ -482,6 +498,8 @@ impl DiagnosticCode {
             Self::UnknownArgument => "E_UNKNOWN_ARGUMENT",
             Self::UnexpectedPositional => "E_UNEXPECTED_POSITIONAL",
             Self::InvalidRequires => "E_INVALID_REQUIRES",
+            Self::InvalidCairnVersion => "W_INVALID_CAIRN_VERSION",
+            Self::FutureCairnVersion => "W_FUTURE_CAIRN_VERSION",
             Self::TypeMismatchLabel => "E_TYPE_MISMATCH_LABEL",
             Self::TypeMismatchSize => "E_TYPE_MISMATCH_SIZE",
             Self::MissingMaterial => "E_MISSING_MATERIAL",
@@ -604,7 +622,9 @@ impl DiagnosticCode {
             | Self::UnsupportedNesting
             | Self::TruthTableEmpty
             | Self::TruthTableConflict => Severity::Error,
-            Self::StructureTooLarge
+            Self::InvalidCairnVersion
+            | Self::FutureCairnVersion
+            | Self::StructureTooLarge
             | Self::ThemeSelectorUnmatched
             | Self::ThemeVariantRebound
             | Self::DeferredMember
@@ -695,6 +715,41 @@ pub enum DiagnosticData {
         /// written, the offending component, or the trailing text. Empty
         /// when the failure names no fragment of its own.
         found: String,
+    },
+    /// Companion payload for [`DiagnosticCode::InvalidCairnVersion`].
+    /// Which way the value failed, and the text that failed.
+    ///
+    /// Carried for the reason [`Self::InvalidRequires`] is, and shaped the
+    /// same way so a consumer handling both version headers handles them
+    /// alike: the repairs differ between a month of `13` and a
+    /// four-component string, and telling them apart from the rendered
+    /// sentence is the prose-parsing `spec/lint.md` §11.2 tells consumers
+    /// to avoid.
+    InvalidCairnVersion {
+        /// Stable name of the failure, from
+        /// [`crate::calver::LanguageVersionError::kind`]:
+        /// `component_count`, `component_not_a_number`,
+        /// `year_not_four_digits`, `month_out_of_range`,
+        /// `patch_too_large`, or `trailing_tokens`.
+        reason: String,
+        /// The component the reason is about, as written. Empty when the
+        /// failure names no fragment of its own: `component_count` is
+        /// about the whole value, and `component_not_a_number` reports an
+        /// empty component when that is what the value has (`2026.`).
+        found: String,
+    },
+    /// Companion payload for [`DiagnosticCode::FutureCairnVersion`]. The
+    /// two versions, each as its own side spells it.
+    ///
+    /// Both are verbatim rather than normalised: `declared` is the string
+    /// the author has to edit, and `compiler` is the build a bug report
+    /// has to name. `2026.06` and `2026.6` are one version to the
+    /// comparison and two strings to whoever reads the finding.
+    FutureCairnVersion {
+        /// The `@cairn` value, as written.
+        declared: String,
+        /// [`crate::CAIRN_VERSION`], the build that reported this.
+        compiler: String,
     },
     /// Companion payload for [`DiagnosticCode::DuplicateSelector`]. The
     /// binding keys this selector row takes over from an earlier row,
@@ -1196,7 +1251,9 @@ mod tests {
                 "W_DEFERRED_MEMBER",
                 "W_DEF_NO_SIZE",
                 "W_DUPLICATE_WALKWAY",
+                "W_FUTURE_CAIRN_VERSION",
                 "W_IGNORED_ARGUMENT",
+                "W_INVALID_CAIRN_VERSION",
                 "W_INVALID_WALKWAY_IDENT",
                 "W_NO_THEME_BOUND",
                 "W_PHASE_CONFLICT",
@@ -1266,7 +1323,9 @@ mod tests {
                 "W_DEFERRED_MEMBER",
                 "W_DEF_NO_SIZE",
                 "W_DUPLICATE_WALKWAY",
+                "W_FUTURE_CAIRN_VERSION",
                 "W_IGNORED_ARGUMENT",
+                "W_INVALID_CAIRN_VERSION",
                 "W_INVALID_WALKWAY_IDENT",
                 "W_NO_THEME_BOUND",
                 "W_PHASE_CONFLICT",
@@ -1278,11 +1337,11 @@ mod tests {
                 "W_UNUSED_DEF",
                 "W_WALKWAY_BLOCKED",
             ],
-            "the `W_` prefix marks a partial-build degradation, which is a \
-             claim about what the compiler did rather than about severity, so \
-             an `E_`-prefixed warning is not by itself a misclassification — \
-             but it is the shape worth re-reading against §11.3 whenever one \
-             lands",
+            "the prefix is not the severity: `E_THEME_SELECTOR_UNMATCHED` is a \
+             warning and most `W_` codes are partial-build degradations without \
+             that being what the letter means, so neither shape is by itself a \
+             misclassification — but both are worth re-reading against §11.3 \
+             whenever one lands",
         );
     }
 
