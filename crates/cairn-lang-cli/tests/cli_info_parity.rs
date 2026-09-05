@@ -876,8 +876,8 @@ fn the_unsupported_figure_names_the_entry_and_the_reason() {
 
 #[test]
 fn naming_the_entry_does_not_move_the_rows() {
-    // The four rows are the stdout contract — `--format json`'s text twin,
-    // and what a reader greps. The names go to stderr beside every other
+    // The rows are the stdout contract — `--format json`'s text twin, and
+    // what a reader greps. The names go to stderr beside every other
     // `note:` this command prints, so nothing that consumes the rows has
     // to change.
     let tmp = tempfile::TempDir::new().expect("tempdir");
@@ -895,6 +895,7 @@ fn naming_the_entry_does_not_move_the_rows() {
             "registry compatibility",
             "edition portability",
             "buildable targets",
+            "intended targets",
             "semantic-sensitive",
         ],
         "premise: these are the rows, got: {clean_out}",

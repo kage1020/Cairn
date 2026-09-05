@@ -41,6 +41,7 @@ use crate::intent::IntentModule;
 use super::requires_parse::{compare_versions, parse_min_version};
 use super::resolver::Resolution;
 use super::theme_variant::{bound_theme_name, pick_variant, single_logical_theme};
+use super::version_order::{FloorVerdict, VersionOrder};
 
 /// The three-axis answer to "which version is this `.crn` for?".
 ///
@@ -66,6 +67,22 @@ pub struct VersionAxes {
     /// the same order and for the same edition — both are fanned out of
     /// one [`EditionReport`] per edition, so the two cannot disagree.
     pub buildable_targets: Vec<BuildableTargets>,
+    /// The versions `@intended_targets` names, verbatim and in source
+    /// order.
+    ///
+    /// Not an axis and not a computed answer: it is the file's own
+    /// statement of what it was designed for, reported beside
+    /// [`Self::buildable_targets`] because that is the row it can
+    /// contradict. The report used to leave it out entirely, which made a
+    /// file whose floor refuses its every intended target read as an
+    /// ordinary one — the declaration that names versions was the one the
+    /// output never mentioned.
+    ///
+    /// Verbatim, including a label no edition ships: whether a version
+    /// exists is `buildable targets`' answer and the
+    /// `W_INTENDED_TARGET_UNSUPPORTED` finding's, and a row that quietly
+    /// dropped one would be a rendering of the file that is not the file.
+    pub intended_targets: Vec<String>,
 }
 
 /// Everything one requested edition contributes to [`VersionAxes`].
@@ -324,7 +341,26 @@ pub fn compute_axes(
         edition_portability,
         semantic_sensitive: Vec::new(),
         buildable_targets,
+        intended_targets: declared_intended_targets(module),
     }
+}
+
+/// The versions every `@intended_targets` header names, in source order.
+///
+/// Concatenated rather than "the first header wins": a second one is
+/// `E_DUPLICATE_HEADER` and the file is refused before this row renders,
+/// so there is no case where the choice decides anything, and appending
+/// keeps this a rendering of the file rather than a rule about it.
+fn declared_intended_targets(module: &Module) -> Vec<String> {
+    module
+        .headers
+        .iter()
+        .filter_map(|header| match header {
+            Header::IntendedTargets { targets, .. } => Some(targets.iter().cloned()),
+            Header::Cairn { .. } | Header::Requires { .. } => None,
+        })
+        .flatten()
+        .collect()
 }
 
 /// The `registry compatibility` row's lower edge, as text.
@@ -722,6 +758,71 @@ pub struct VersionFloor {
     /// Byte range of the `@requires` directive or `requires` line that
     /// declared it.
     pub span: Span,
+}
+
+impl VersionFloor {
+    /// The floor as the author wrote it, scope and all.
+    ///
+    /// Every sentence that quotes a floor back reads it from here — the
+    /// two refusals `cairn compile` raises, `cairn info`'s notes, and the
+    /// `@intended_targets` findings — because a floor quoted without its
+    /// scope reads as a different floor than the line it came from, and
+    /// the scope is the half the repair usually touches.
+    #[must_use]
+    pub fn rendered(&self) -> String {
+        match self.edition {
+            Some(edition) => format!("{edition} version>={}", self.version),
+            None => format!("version>={}", self.version),
+        }
+    }
+
+    /// Who declared the floor, as the subject of a sentence about it.
+    ///
+    /// "this file" for a header, and the part for a member-level floor:
+    /// "this file requires ..." for a floor the file inherited from one of
+    /// its parts is the reading the composite rule
+    /// (`spec/versioning-editions.md` §10.4) exists to correct.
+    #[must_use]
+    pub fn declarer(&self) -> String {
+        self.origin.part().map_or_else(
+            || "this file".to_owned(),
+            |(keyword, name)| format!("`{keyword} {name}`"),
+        )
+    }
+}
+
+/// The candidates in `considered` that satisfy every floor at once.
+///
+/// Every floor rather than the one a caller is reporting: a candidate that
+/// clears that floor and trips the next one is a second refusal in a
+/// different spelling, and the closed set `spec/lint.md` §11.1 asks every
+/// message to carry has to be a set that builds.
+///
+/// A floor this edition's table cannot place refuses nothing here. It is
+/// its own refusal (`E_REQUIRES_UNORDERABLE`), reported against the
+/// `requires` line rather than against a target, and folding it in would
+/// answer "no target works" for a file whose repair is on that line.
+///
+/// Shared by the two callers that offer the list — `cairn compile`'s
+/// `E_VERSION_CAP` and the `@intended_targets` findings — so the offer
+/// cannot come out different depending on which one made it.
+#[must_use]
+pub fn versions_satisfying<'a>(
+    order: &VersionOrder,
+    floors: &[VersionFloor],
+    considered: &'a [String],
+) -> Vec<&'a str> {
+    considered
+        .iter()
+        .filter(|label| {
+            order.key_of(label).is_some_and(|key| {
+                floors
+                    .iter()
+                    .all(|floor| order.verdict(&floor.version, key) == FloorVerdict::Satisfied)
+            })
+        })
+        .map(String::as_str)
+        .collect()
 }
 
 /// Which part of a module a [`VersionFloor`] came from.

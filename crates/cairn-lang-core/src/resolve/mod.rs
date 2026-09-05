@@ -49,6 +49,6 @@ pub use resolver::{
 pub use version_axes::{
     BuildableTargets, EditionPortability, EditionReport, FloorOrigin, RegistryRange,
     SemanticSensitiveFinding, UnsupportedEntry, UnsupportedReason, VersionAxes, VersionFloor,
-    compute_axes, declared_version_floors, unscoped_version_floors,
+    compute_axes, declared_version_floors, unscoped_version_floors, versions_satisfying,
 };
 pub use version_order::{FloorPlacement, FloorVerdict, VersionOrder};

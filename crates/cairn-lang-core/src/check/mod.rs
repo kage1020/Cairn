@@ -14,6 +14,13 @@
 //! raises never reaches `cairn check`. `check::tests` pins which codes that
 //! covers.
 //!
+//! Neither is [`weigh_intended_targets`], for a different reason: every
+//! question it asks is answered by the target edition's `DataVersion`
+//! table, which lives in the registry pack and reaches this crate only as
+//! a [`crate::resolve::VersionOrder`] its caller builds. [`check`] takes
+//! no pack, so a caller that has one runs that pass beside this one and
+//! merges the findings.
+//!
 //! The boundary with lowering is intentional: `crate::intent::lower` is a
 //! total function (see its module doc) and never rejects input. Any
 //! "structural surprise" — an unknown keyword, a duplicate `size=`, an `id=`
@@ -26,6 +33,7 @@ mod cairn_version;
 mod connect_arity;
 mod diagnostic;
 mod duplicate;
+mod intended_targets;
 mod keyword_allowlist;
 mod material;
 mod member_scope;
@@ -40,6 +48,7 @@ pub use diagnostic::{
     Diagnostic, DiagnosticCode, DiagnosticData, DiagnosticNote, LineStarts, RenderedDiagnostic,
     RenderedNote, Severity, position_at,
 };
+pub use intended_targets::weigh_intended_targets;
 pub use sink::DiagnosticSink;
 
 use crate::ast::Module;
@@ -125,6 +134,13 @@ mod tests {
         ResolverAndLowering,
         /// `crate::block_array` only. [`check`] never runs that pass.
         LoweringOnly,
+        /// [`weigh_intended_targets`], which [`check`] cannot run: the
+        /// pass needs the target edition's version table, and this crate
+        /// holds no registry pack to read one from. A caller that has one
+        /// runs it and merges the findings, which is every `cairn`
+        /// subcommand that gates on [`check`] — and nothing that calls
+        /// [`check`] alone.
+        NeedsVersionTable,
     }
 
     fn raised_by(code: DiagnosticCode) -> RaisedBy {
@@ -183,6 +199,9 @@ mod tests {
             | C::StructureTooLarge
             | C::InvalidWalkwayIdent
             | C::PhaseConflict => RaisedBy::LoweringOnly,
+            C::IntendedTargetCap | C::IntendedTargetCapPartial | C::IntendedTargetUnsupported => {
+                RaisedBy::NeedsVersionTable
+            }
         }
     }
 
@@ -231,6 +250,29 @@ mod tests {
             "the syntactic Error set changed: add or remove the matching \
              fixture in cairn-lang-cli/tests/cli_check_parity.rs so \
              `cairn lower` / `info` / `compile` stay in step with `cairn check`",
+        );
+    }
+
+    /// The codes a version table is the only way to reach.
+    ///
+    /// Pinned as a set rather than left implied, because every entry is a
+    /// finding [`check`] returns without: a consumer calling [`check`] and
+    /// nothing else — the LSP, the wasm surface — sees none of them, and a
+    /// fourth landing here should be a decision about that rather than a
+    /// side effect. The CLI is what closes the gap, once per edition the
+    /// command is about.
+    #[test]
+    fn the_intended_target_codes_are_the_ones_check_cannot_reach() {
+        assert_eq!(
+            codes_where(|c| raised_by(c) == RaisedBy::NeedsVersionTable),
+            [
+                "E_INTENDED_TARGET_CAP",
+                "W_INTENDED_TARGET_CAP",
+                "W_INTENDED_TARGET_UNSUPPORTED",
+            ],
+            "a code whose pass needs a registry pack's version table is \
+             invisible to `check`, so a caller that only calls `check` \
+             reports a source clean that a build refuses",
         );
     }
 
