@@ -72,7 +72,16 @@ fn redstone_door_palette_contains_oak_pressure_plate() {
 #[test]
 fn the_bedrock_pack_plates_with_the_bedrock_id_on_every_supported_target() {
     let pack = builtin_bedrock();
-    for version in pack.data_versions.versions.iter().map(|e| &e.mc_version) {
+    // The buildable rows only: the table also carries the releases the
+    // pack can order a floor against but has no block data for, and
+    // pinning a lowering to one of those checks nothing.
+    for version in pack
+        .data_versions
+        .versions
+        .iter()
+        .filter(|e| e.targetable)
+        .map(|e| &e.mc_version)
+    {
         let out = lower_redstone_door_with(pack, version);
         let ba = out.structures.get("struct::gatehouse").unwrap();
         let ids: Vec<&str> = ba.palette.entries.iter().map(|s| s.id.as_str()).collect();

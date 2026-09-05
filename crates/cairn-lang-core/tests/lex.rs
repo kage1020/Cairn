@@ -244,3 +244,42 @@ fn dedent_emits_per_level_closed() {
         .count();
     assert_eq!(dedents, 2);
 }
+
+/// A `-` that is not the head of an `->` is a token of its own.
+///
+/// It used to be an `UnexpectedChar`, which put a version label's
+/// pre-release suffix out of reach of the directive that reads it: a
+/// header's value is the raw source between its tokens, so a character the
+/// lexer refuses never reaches the pass that would accept it, and
+/// `@requires version>=1.21.4-rc1` died on the `-` before any check pass
+/// saw it. See `spec/versioning-editions.md` §10.1 for why that label
+/// shape has to be readable.
+#[test]
+fn a_lone_dash_lexes_as_a_token_rather_than_failing() {
+    let suffixed = kinds("@requires version>=1.21.4-rc1\n");
+    assert!(
+        suffixed.contains(&TokenKind::Minus),
+        "the `-` should be a token: {suffixed:?}",
+    );
+    assert!(
+        !suffixed.contains(&TokenKind::Arrow),
+        "and not half an arrow: {suffixed:?}",
+    );
+    // The arrow still wins where it is one.
+    let arrow = kinds("  slot floor -> @oak_planks\n");
+    assert!(arrow.contains(&TokenKind::Arrow), "{arrow:?}");
+    assert!(!arrow.contains(&TokenKind::Minus), "{arrow:?}");
+}
+
+/// No value position reads a `-`, so lexing one does not make a negative
+/// integer a value. The parser names the token it found, which is a better
+/// answer than a character offset.
+#[test]
+fn a_lone_dash_is_still_refused_where_no_grammar_reads_one() {
+    let err = cairn_lang_core::parse("struct s size=2x2\n  level y=-3\n")
+        .expect_err("no value position reads a `-`");
+    assert!(
+        err.to_string().contains('-'),
+        "the message should name what it found: {err}",
+    );
+}

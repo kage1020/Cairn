@@ -46,9 +46,11 @@ pub(super) fn run(module: &Module, sink: &mut DiagnosticSink) {
 /// something to replace that the author never wrote.
 fn offending_text(error: &RequirementError) -> String {
     match error {
+        RequirementError::UnknownEditionScope(scope) => scope.clone(),
         RequirementError::UnsupportedOperator(operator) => operator.clone(),
         RequirementError::Component { component, .. }
         | RequirementError::ComponentTooLarge { component, .. } => component.clone(),
+        RequirementError::PreRelease { tag, .. } => tag.clone(),
         RequirementError::TrailingTokens(rest) => rest.clone(),
         _ => String::new(),
     }

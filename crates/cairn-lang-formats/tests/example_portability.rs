@@ -30,11 +30,18 @@ use cairn_lang_core::{Edition, lower, parse, resolve};
 use cairn_lang_formats::portability::{portability_for_bedrock, portability_for_java};
 use cairn_lang_formats::registry::{RegistryPack, builtin_bedrock, builtin_java};
 
-/// Every version the pack supports, as the `--target` strings a user types.
+/// Every version the pack can build for, as the `--target` strings a user
+/// types.
+///
+/// The `targetable` rows only. The table also names the releases the pack
+/// can order an `@requires` floor against and has no block data for, and
+/// walking those here would assert a pinned lowering against a version no
+/// `--target` accepts.
 fn supported_versions(pack: &RegistryPack) -> Vec<&str> {
     pack.data_versions
         .versions
         .iter()
+        .filter(|e| e.targetable)
         .map(|e| e.mc_version.as_str())
         .collect()
 }

@@ -578,6 +578,30 @@ fn the_buildable_set_is_the_set_of_targets_compile_accepts() {
              struct nosize\n\
              \x20\x20floor mat_slot=floor\n",
         ),
+        // A floor no edition's table can place. It is the one gate that
+        // answers for every version at once — `weigh_versions` returns
+        // before it lowers anything — so the row is empty for a reason
+        // the loop below never reaches, and `compile --target` has to
+        // agree on every version rather than on none of them.
+        (
+            "unorderable.crn",
+            "@requires version>=24w14a\n\n\
+             theme t:\n\
+             \x20\x20slot floor -> @cobblestone\n\n\
+             struct hut size=5x5\n\
+             \x20\x20floor mat_slot=floor\n",
+        ),
+        // The same shape one edition *can* place, so the two editions
+        // disagree in one run: Java orders `1.21.4` exactly and Bedrock
+        // has no release by that name.
+        (
+            "cross_edition.crn",
+            "@requires version>=1.21.4\n\n\
+             theme t:\n\
+             \x20\x20slot floor -> @cobblestone\n\n\
+             struct hut size=5x5\n\
+             \x20\x20floor mat_slot=floor\n",
+        ),
         // And one that builds everywhere, so "refuse everything" fails.
         (
             "clean.crn",

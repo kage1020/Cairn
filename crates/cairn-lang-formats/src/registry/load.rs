@@ -42,7 +42,13 @@ const BUILTIN_BEDROCK_BLOCKS: &str = include_str!("../../registry-data/bedrock/b
 /// Highest manifest `schema_version` this Cairn build understands.
 pub const SUPPORTED_MANIFEST_SCHEMA: u32 = 1;
 /// Highest `data_versions.schema_version` this Cairn build understands.
-pub const SUPPORTED_DATA_VERSIONS_SCHEMA: u32 = 1;
+///
+/// Bumped to 2 by the `targetable` column. A `schema_version: 1` table
+/// still loads and still means what it meant — every row of one was a
+/// buildable target and the column defaults to `true` — but a v1 *reader*
+/// handed a v2 table would offer its ordering rows as `--target` values,
+/// so the version had to move.
+pub const SUPPORTED_DATA_VERSIONS_SCHEMA: u32 = 2;
 
 /// Where a [`RegistryPack`] came from. Surfaced in diagnostics so a
 /// `--registry-pack` user can tell at a glance which directory was read.
@@ -174,13 +180,29 @@ pub enum RegistryError {
     /// a confusing "unsupported target" later.
     #[error("registry pack `data_versions.versions` is empty")]
     EmptyVersionTable,
-    /// `data_versions.latest` did not appear in `versions`. A dangling
-    /// `latest` would resolve `--target latest` to nothing, which is a
-    /// pack-author bug rather than a user error.
-    #[error("registry pack `data_versions.latest` = `{latest}` not in versions")]
+    /// `data_versions.latest` did not name a **targetable** row of
+    /// `versions`. A dangling `latest` would resolve `--target latest` to
+    /// nothing; one naming an ordering row would resolve it to a version
+    /// the pack cannot build for. Both are pack-author bugs rather than
+    /// user errors.
+    #[error("registry pack `data_versions.latest` = `{latest}` is not a targetable version")]
     LatestNotInTable {
         /// Verbatim `latest` value.
         latest: String,
+    },
+    /// Every row of `data_versions.versions` is an ordering row, so the
+    /// pack can order a floor and build for nothing. Refused here rather
+    /// than at the first `--target`, which would report every version the
+    /// table names as unsupported and none as valid.
+    #[error("registry pack `data_versions.versions` has no targetable version")]
+    NoTargetableVersion,
+    /// The version table's rows are not ordered the way every lookup in
+    /// this module assumes. Holds the row pair and which of the two
+    /// properties they break.
+    #[error("registry pack `data_versions.versions` is not a usable ordering: {reason}")]
+    VersionOrderBroken {
+        /// Which rows disagree, and about what.
+        reason: String,
     },
     /// The manifest declared an edition that does not match the slot the
     /// pack was loaded into (e.g. a Bedrock pack handed to the Java
@@ -253,10 +275,18 @@ impl From<BlocksError> for RegistryError {
 /// Look up one row of a [`DataVersionTable`] by `mc_version`, returning
 /// the owned `(mc_version, data_version)` pair the per-edition target
 /// types are built from.
+/// The buildable row a `--target` value names.
+///
+/// Only `targetable` rows are candidates. The table also carries the
+/// releases the pack can *order against* but has no block data for, and
+/// resolving `--target` to one of those would pin a compile to a version
+/// whose id table is absent — which turns the `E_UNKNOWN_ID` check off
+/// rather than running it, the silent-substitution hazard §10.4 forbids.
 fn entry_for(table: &DataVersionTable, mc_version: &str) -> Option<(String, i32)> {
     table
         .versions
         .iter()
+        .filter(|e| e.targetable)
         .find(|e| e.mc_version == mc_version)
         .map(|e| (e.mc_version.clone(), e.data_version))
 }
@@ -379,6 +409,7 @@ impl RegistryPack {
             .data_versions
             .versions
             .iter()
+            .filter(|e| e.targetable)
             .map(|e| e.mc_version.as_str())
             .chain(std::iter::once("latest"));
         nearest_match(requested, pool).map(str::to_owned)
@@ -454,6 +485,7 @@ impl RegistryPack {
             .data_versions
             .versions
             .iter()
+            .filter(|e| e.targetable)
             .map(|e| e.mc_version.clone())
             .collect();
         entries.push("latest".to_owned());
@@ -730,6 +762,12 @@ fn validate_material_overrides(
 /// compiles with nothing checked and looks exactly like a clean build,
 /// and an id table for a version `--target` cannot name is dead data
 /// nobody will notice going stale.
+///
+/// The versions compared are the **targetable** ones. An ordering row is
+/// there to place an `@requires` floor against and is never pinned, so it
+/// has no id table to be missing — which is the whole reason the column
+/// exists. The `extra` half stays every row, because an id table for a
+/// version the table does not name at all is still dead data.
 fn validate_blocks_cover_versions(
     blocks: &BlocksIndex,
     data_versions: &DataVersionTable,
@@ -740,6 +778,7 @@ fn validate_blocks_cover_versions(
     let missing: Vec<&str> = data_versions
         .versions
         .iter()
+        .filter(|e| e.targetable)
         .map(|e| e.mc_version.as_str())
         .filter(|v| blocks.ids_for(v).is_none())
         .collect();
@@ -796,10 +835,69 @@ fn validate_data_versions(table: &DataVersionTable) -> Result<(), RegistryError>
     if table.versions.is_empty() {
         return Err(RegistryError::EmptyVersionTable);
     }
-    if !table.versions.iter().any(|e| e.mc_version == table.latest) {
+    if !table
+        .versions
+        .iter()
+        .any(|e| e.targetable && e.mc_version == table.latest)
+    {
         return Err(RegistryError::LatestNotInTable {
             latest: table.latest.clone(),
         });
+    }
+    if !table.versions.iter().any(|e| e.targetable) {
+        return Err(RegistryError::NoTargetableVersion);
+    }
+    validate_version_order(table)?;
+    Ok(())
+}
+
+/// The two properties every answer `VersionOrder` gives rests on.
+///
+/// **Keys are unique and ascending.** `DataVersion` is the ordering key,
+/// so two rows sharing one are two versions the compiler cannot tell
+/// apart, and a row out of order would make "the first row" something
+/// other than the oldest release.
+///
+/// **Labels in one numbering order the same way by text as by key.** This
+/// is the property that makes placing a floor *outside* the table's span
+/// sound: that answer is reached by comparing the floor's label against
+/// the first and last rows' labels, so the text has to agree with the keys
+/// about which rows those are. It is not implied by "one numbering
+/// scheme" — two dotted decimals whose keys run the other way would break
+/// it — and every table Cairn ships satisfies it, so it is checked here
+/// rather than assumed in a doc comment.
+///
+/// Labels are compared with `cairn_lang_core`'s label comparison, so two
+/// spellings of one version (`1.21` and `1.21.0`) count as a duplicate:
+/// the lookup treats them as the same row, and a table carrying both
+/// would evaluate a floor against whichever came first.
+fn validate_version_order(table: &DataVersionTable) -> Result<(), RegistryError> {
+    use cairn_lang_core::resolve::compare_versions;
+
+    let mut previous: Option<&super::data_versions::DataVersionEntry> = None;
+    for entry in &table.versions {
+        if let Some(previous) = previous {
+            if entry.data_version <= previous.data_version {
+                return Err(RegistryError::VersionOrderBroken {
+                    reason: format!(
+                        "`{}` has data_version {} but follows `{}` with {}; keys must ascend                          and be unique",
+                        entry.mc_version,
+                        entry.data_version,
+                        previous.mc_version,
+                        previous.data_version,
+                    ),
+                });
+            }
+            if !compare_versions(&entry.mc_version, &previous.mc_version).is_gt() {
+                return Err(RegistryError::VersionOrderBroken {
+                    reason: format!(
+                        "`{}` does not sort above `{}` by label, but its data_version is                          higher; placing a floor outside the table reads the labels",
+                        entry.mc_version, previous.mc_version,
+                    ),
+                });
+            }
+        }
+        previous = Some(entry);
     }
     Ok(())
 }
