@@ -82,6 +82,9 @@ instantiates is checked too — the mistake is in the line, not in whether anyth
 | `E_UNKNOWN_ID` | A resolved block ID the pinned target does not declare. |
 | `E_VERSION_CAP` | `--target` is below an `@requires` floor the source declares ([versioning-editions §10.4](versioning-editions)). |
 | `E_REQUIRES_UNORDERABLE` | An `@requires` floor names a version the target edition's `DataVersion` table cannot place ([versioning-editions §10.4](versioning-editions)). |
+| `E_INTENDED_TARGET_CAP` | Every version `@intended_targets` names is below a floor the same file declares. |
+| `W_INTENDED_TARGET_CAP` | Some, not all, of them are. |
+| `W_INTENDED_TARGET_UNSUPPORTED` | `@intended_targets` names a version no `--target` of the edition can build. |
 | `E_INCOMPATIBLE_MATERIAL` | A member whose geometry attaches blockstates is bound to a material that cannot carry them. |
 | `E_MISSING_MATERIAL` | A member whose only route to a block is `mat_slot=` was written without one. |
 | `E_UNRESOLVED_SLOT` | A member's `mat_slot=` names a slot the bound theme does not declare. |
@@ -136,6 +139,24 @@ declares more than one — or none at all — no theme binds to the def's own sc
 `mat_slot=` names are not judged until a `place` chooses one.
 
 `E_INCOMPLETE_PLACE` names every key the row is short of, and the row is dropped from the build.
+
+The three `@intended_targets` codes weigh the file's stated intent against its own floor
+([versioning-editions §10.4](versioning-editions#the-hint-is-weighed-against-the-floor)). A version
+the edition cannot build is `W_INTENDED_TARGET_UNSUPPORTED` and is not also weighed against a floor:
+"this target does not exist here" is what the author acts on, and a cap beside it would send them to
+edit a line that is not what stops the build. Of the rest, *every* one below a floor is
+`E_INTENDED_TARGET_CAP` — the file can be built for nothing it says it is for, and the first
+`cairn compile --target` naming any of them is `E_VERSION_CAP` — while *some* of them is
+`W_INTENDED_TARGET_CAP`, because the header is a hint ([§5.3](syntax#53-headers)) and the versions
+above the floor still build. One header can earn the last two codes at once; the versions it names
+are not all wrong in the same way.
+
+All three are per-edition answers, since a floor and a target label are ordered in one edition's
+`DataVersion` table. `cairn check --edition`, `cairn info` and `cairn compile` report the two cap
+codes; without a pin both editions weigh the header and a finding either of them reaches is
+reported, deduplicated, because the contradiction is between two lines of the file however it is
+later built. `W_INTENDED_TARGET_UNSUPPORTED` needs the pin: a version Java cannot build is routinely
+the Bedrock target the author means, so unpinned the question has not been asked.
 
 ### Truth tables
 
@@ -216,6 +237,7 @@ them. Codes not listed below omit `data` entirely, so the JSON key is absent rat
 | `E_INCOMPLETE_PLACE` | `{ "kind": "incomplete_place", "missing": ["id", "use", "theme"] }`. The keys the row does not declare. Never empty. |
 | `E_INVALID_REQUIRES` | `{ "kind": "invalid_requires", "reason", "found" }`. `reason` is one of `not_a_version_requirement`, `unknown_edition_scope`, `unsupported_operator`, `empty_version`, `component_not_a_number`, `component_too_large`, `prerelease_not_a_tag`, `trailing_tokens`. `found` is empty when the failure names no fragment. |
 | `W_TRUTH_TABLE_PARTIAL` | `{ "kind": "truth_table_partial", "inputs": 2, "covered": 1, "missing": ["01","10","11"] }`. See below. |
+| The three `@intended_targets` codes | `{ "kind": "intended_targets", "edition", "targets": ["1.20.4"], "floor"? }`. The versions this finding is about, in source order, and the edition that weighed them. `floor` is the first one that refuses them, as written; absent for `W_INTENDED_TARGET_UNSUPPORTED`, which is not about a floor. |
 
 **`E_UNKNOWN_ID.origin`** says who chose the ID, because the repair differs:
 

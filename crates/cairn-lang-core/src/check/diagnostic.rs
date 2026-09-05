@@ -459,6 +459,47 @@ pub enum DiagnosticCode {
     /// through writing one is writing something true. `data` carries the
     /// combinations to write.
     TruthTablePartial,
+    /// Every version `@intended_targets` names is below a version floor
+    /// the same file declares, so the file can be built for nothing it
+    /// says it is for.
+    ///
+    /// The two headers are one statement of intent and one constraint on
+    /// it, and a file whose constraint refuses its whole intent is a file
+    /// whose author meant one of the two lines differently. An error
+    /// rather than the warning [`Self::IntendedTargetCapPartial`] carries,
+    /// because there is nothing left that the declaration and the floor
+    /// agree on: the first `cairn compile --target` naming any version the
+    /// header asks for is `E_VERSION_CAP`.
+    ///
+    /// A version the edition cannot build at all is
+    /// [`Self::IntendedTargetUnsupported`] instead and is not counted
+    /// here, which is what keeps this code on the one shape it names — a
+    /// list of buildable versions the file's own floor rules out.
+    IntendedTargetCap,
+    /// Some, not all, of the versions `@intended_targets` names are below
+    /// a version floor the same file declares.
+    ///
+    /// A warning because the header is "a hint, not a verification record"
+    /// (`spec/syntax.md` §5.3) and the versions above the floor still
+    /// build: the list reaches past the floor at one end, which is a wish
+    /// stated too widely rather than a file that cannot be built. Shares
+    /// its name with [`Self::IntendedTargetCap`] because it is the same
+    /// contradiction — what differs is how much of the intent survives it.
+    IntendedTargetCapPartial,
+    /// `@intended_targets` names a version no `--target` of the edition
+    /// can build.
+    ///
+    /// Two shapes reach it: a release the registry pack ships no block
+    /// data for (`1.19` on Java), and a label the edition's table cannot
+    /// place at all — which is what a version written in the *other*
+    /// edition's numbering looks like (`1.21.40` on Java). One code
+    /// because the repair is the same edit to the same line, and the note
+    /// says which of the two it was.
+    ///
+    /// A warning, and only under a pinned edition: without one, a version
+    /// this edition cannot build may be exactly the target the author
+    /// means on the other.
+    IntendedTargetUnsupported,
 }
 
 impl DiagnosticCode {
@@ -520,6 +561,9 @@ impl DiagnosticCode {
             Self::TruthTableConflict => "E_TRUTH_TABLE_CONFLICT",
             Self::TruthTableDuplicateRow => "W_TRUTH_TABLE_DUPLICATE_ROW",
             Self::TruthTablePartial => "W_TRUTH_TABLE_PARTIAL",
+            Self::IntendedTargetCap => "E_INTENDED_TARGET_CAP",
+            Self::IntendedTargetCapPartial => "W_INTENDED_TARGET_CAP",
+            Self::IntendedTargetUnsupported => "W_INTENDED_TARGET_UNSUPPORTED",
         }
     }
 
@@ -603,6 +647,7 @@ impl DiagnosticCode {
             | Self::DuplicateHeader
             | Self::UnsupportedNesting
             | Self::TruthTableEmpty
+            | Self::IntendedTargetCap
             | Self::TruthTableConflict => Severity::Error,
             Self::StructureTooLarge
             | Self::ThemeSelectorUnmatched
@@ -620,6 +665,8 @@ impl DiagnosticCode {
             | Self::InvalidWalkwayIdent
             | Self::PhaseConflict
             | Self::TruthTableDuplicateRow
+            | Self::IntendedTargetCapPartial
+            | Self::IntendedTargetUnsupported
             | Self::TruthTablePartial => Severity::Warning,
         }
     }
@@ -793,6 +840,33 @@ pub enum DiagnosticData {
         /// kept. Non-empty, and usually shorter than
         /// `2^inputs - covered`.
         missing: Vec<String>,
+    },
+    /// Companion payload for the three `@intended_targets` codes
+    /// ([`DiagnosticCode::IntendedTargetCap`],
+    /// [`DiagnosticCode::IntendedTargetCapPartial`],
+    /// [`DiagnosticCode::IntendedTargetUnsupported`]).
+    ///
+    /// Carried for the reason [`Self::IncompletePlace`] is: the obvious
+    /// quick-fix rewrites the list, and which of its entries the finding
+    /// is about should not have to be recovered from a sentence naming
+    /// several of them. The edition rides along because every one of these
+    /// findings is a per-edition answer — the same header earns different
+    /// ones from a Java and a Bedrock build — and nothing else in the
+    /// payload says which build asked.
+    IntendedTargets {
+        /// Which edition weighed the header, as
+        /// [`crate::edition::Edition::as_str`] spells it.
+        edition: String,
+        /// The versions this finding is about, in the order the header
+        /// lists them. A subset of the header's list, and non-empty: a
+        /// header with nothing to report raises nothing.
+        targets: Vec<String>,
+        /// The floor that refuses the first of them, as the author wrote
+        /// it (scope included). Absent for
+        /// [`DiagnosticCode::IntendedTargetUnsupported`], which is not
+        /// about a floor at all.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        floor: Option<String>,
     },
 }
 
@@ -1167,6 +1241,7 @@ mod tests {
                 "E_DUPLICATE_SLOT",
                 "E_INCOMPATIBLE_MATERIAL",
                 "E_INCOMPLETE_PLACE",
+                "E_INTENDED_TARGET_CAP",
                 "E_INVALID_PLACE_ID",
                 "E_INVALID_PLACE_ORIGIN",
                 "E_INVALID_REQUIRES",
@@ -1197,6 +1272,8 @@ mod tests {
                 "W_DEF_NO_SIZE",
                 "W_DUPLICATE_WALKWAY",
                 "W_IGNORED_ARGUMENT",
+                "W_INTENDED_TARGET_CAP",
+                "W_INTENDED_TARGET_UNSUPPORTED",
                 "W_INVALID_WALKWAY_IDENT",
                 "W_NO_THEME_BOUND",
                 "W_PHASE_CONFLICT",
@@ -1232,6 +1309,7 @@ mod tests {
                 "E_DUPLICATE_SLOT",
                 "E_INCOMPATIBLE_MATERIAL",
                 "E_INCOMPLETE_PLACE",
+                "E_INTENDED_TARGET_CAP",
                 "E_INVALID_PLACE_ID",
                 "E_INVALID_PLACE_ORIGIN",
                 "E_INVALID_REQUIRES",
@@ -1267,6 +1345,8 @@ mod tests {
                 "W_DEF_NO_SIZE",
                 "W_DUPLICATE_WALKWAY",
                 "W_IGNORED_ARGUMENT",
+                "W_INTENDED_TARGET_CAP",
+                "W_INTENDED_TARGET_UNSUPPORTED",
                 "W_INVALID_WALKWAY_IDENT",
                 "W_NO_THEME_BOUND",
                 "W_PHASE_CONFLICT",

@@ -97,7 +97,8 @@ implementations and authors SHOULD use these exact spellings. The vocabulary is 
 - **`@requires`.** A capability floor on the Minecraft target (e.g. `version>=1.20`). Hard error
   on conflict with the inferred value.
 - **`@intended_targets`.** A hint about which Minecraft versions the file was designed for. Not a
-  verification record, since the record lives in the lock.
+  verification record, since the record lives in the lock. Still weighed against the file's own
+  floor: an intent the floor refuses is reported rather than left to be discovered at compile time.
 - **Lock (`*.cairn.lock`).** Compiler-generated reproducibility record. Carries `source_hash`,
   `cairn_version`, `target(mc_version + data_version)`, `registry_pack_hash`,
   `constraint_catalog_hash`, `resolved_ir_hash`, and `verified: true`. See

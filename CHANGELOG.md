@@ -12,6 +12,32 @@ and is a separate axis from the Minecraft target version.
 
 ### Breaking changes
 
+- *(core,cli)* `@intended_targets` is weighed against the version floors the same file declares.
+  The two headers used to be two inert statements, so `@requires version>=1.21` beside
+  `@intended_targets ["1.20.4"]` passed `cairn check` at exit 0 — while `cairn compile --target
+  1.20.4` refused it with `E_VERSION_CAP`. One of the two declarations decides a build and the
+  other decided nothing, and the ignored one was the header that reads like an instruction.
+
+  Each version the header names is now placed in the target edition's `DataVersion` table. One no
+  `--target` of the edition builds is `W_INTENDED_TARGET_UNSUPPORTED` — a release the pack ships no
+  block data for, or a label the table cannot place at all, which is what the other edition's
+  numbering looks like — and is not also weighed against a floor, because "this target does not
+  exist here" is what the author acts on. Of the rest, *every* one below a floor is
+  `E_INTENDED_TARGET_CAP`: the file can be built for nothing it says it is for. *Some* of them is
+  `W_INTENDED_TARGET_CAP`, because the header is a hint (`spec/syntax.md` §5.3) and the versions
+  above the floor still build. The floors are the composite fold, so a `def` in a library can
+  refuse the intent of the file that places it, and the finding names the part.
+
+  `cairn info` grew an `intended targets` row, beside the `buildable targets` it can contradict.
+  The report used to leave the header out entirely, so the one declaration that names versions was
+  the one the output never mentioned.
+
+  **Breaking**: a source declaring both headers in a way that cannot hold now exits 1 from
+  `cairn check`, `cairn info` and `cairn compile` where it exited 0. `VersionAxes` carries a new
+  `intended_targets` field, and `cairn info --format json` a matching key, which is additive on the
+  wire and a new field for anyone constructing the struct — it is `#[non_exhaustive]`, so the
+  addition compiles. `cairn info --format text` prints five rows where it printed four.
+
 - *(core,cli)* A `def` and a `theme` may declare `requires version>=X` on a line of their own, and
   the minimum version of a composite is the max of its parts. `spec/versioning-editions.md` §10.4
   has always said so; neither spelling parsed, so the sentence described a feature that existed at
