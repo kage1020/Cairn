@@ -343,11 +343,13 @@ outright is not a partial loss. The third and fourth are not portability facts a
 upstream let a blockstate through.
 
 Because four different repairs hide behind one figure, each counted entry is named on stderr with
-its reason. The ID case is answered the way `E_UNKNOWN_ID` answers one: the `aliases` component
-first, so an entry this edition has under another name is reported as that name rather than as a
-dead end (`standing_sign` on Java is `oak_sign`), and a `did you mean` behind it. The alias question
-is asked of the edition here too — a spelling *some* supported version declares is an answer, where
-a pinned build would keep only its own version's.
+its reason. The ID case is answered the way `E_UNKNOWN_ID` answers one, and by the same two halves:
+the `aliases` component where it has a row, so an entry this edition has under another name is
+reported as that name rather than as a dead end (`standing_sign` on Java is `oak_sign`), and a
+`did you mean` where it has none. They are alternatives, not a sequence — a row is the pack's word
+about which block this is, and printing a distance guess beside it would ask the reader to choose
+between them. The alias question is asked of the edition here too: a spelling *some* supported
+version declares is an answer, where a pinned build would keep only its own version's.
 `--format json` carries them as `edition_portability[].unsupported_entries`, one element per unit of
 the count, in palette order.
 

@@ -87,8 +87,10 @@
   タイポ検索は変わっておらず、エイリアス表が何も言わないところでは今も走ります。`aliases` コンポーネン
   トを持たないパックもそこに含まれ、そうしたパックが出すメッセージは以前と同じです。組み込みパックは、
   作者が最も踏みやすい Java/Bedrock の綴りの分岐と、Bedrock 自身の 1.21.40 のフラット化で退役した ID
-  を収録しています。API 利用者にとっての破壊的変更: `portability_for_java` /
-  `portability_for_bedrock` は第 3 引数にパックの `AliasIndex` を取り、
+  を収録しています。破壊的変更のうち最初のものは、API に一切触れない人にも届きます。組み込みパックが
+  どちらもコンポーネントを 1 つ得たので `inputs.registry_pack_hash` が変わり、古いビルドが書いた
+  ロックファイルは、このビルドが読むパックとは別のパックを記録していることになります。API 利用者向けに
+  は、`portability_for_java` / `portability_for_bedrock` が第 3 引数にパックの `AliasIndex` を取り、
   `UnsupportedReason::AbsentFromEdition` と `DiagnosticData::UnknownId` はそれぞれフィールドが 1 つ
   増えました。
 

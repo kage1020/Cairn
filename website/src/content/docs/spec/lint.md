@@ -255,7 +255,8 @@ them. Codes not listed below omit `data` entirely, so the JSON key is absent rat
 | `builtin` | The pack declares no row for a member default, so the compiler's own ID was used. | The pack, which has to grow the row. |
 
 `token` accompanies `catalog` and `builtin` and is absent for `authored`. `suggestion` is absent
-when no declared ID is within the typo threshold, which is always the case for a rename.
+when no declared ID is within the typo threshold. A rename is normally past it, but the two fields
+are filled by independent rules and a renamed ID near its replacement carries both.
 
 `aliases` is the other half, and the two are different claims about the same ID. A suggestion is a
 guess from a string distance; an alias is the registry pack's `aliases` component stating that two

@@ -88,10 +88,13 @@ and is a separate axis from the Minecraft target version.
   The typo search is unchanged and still runs wherever the alias table says nothing, which includes
   every pack that ships no `aliases` component: the message such a pack produces today is the one it
   produced before. The built-in packs cover the Java/Bedrock spelling splits an author most often
-  walks into and the ids Bedrock's own 1.21.40 flattening wave retired. Breaking for API consumers:
-  `portability_for_java` / `portability_for_bedrock` take the pack's `AliasIndex` as a third
-  argument, and `UnsupportedReason::AbsentFromEdition` and `DiagnosticData::UnknownId` each carry
-  one more field.
+  walks into and the ids Bedrock's own 1.21.40 flattening wave retired. Breaking, and the first of
+  these reaches someone who never touches the API: both built-in packs gained a component, so
+  `inputs.registry_pack_hash` moves and a lockfile written by an older build records a different
+  pack than the one this build reads. For API consumers, `portability_for_java` /
+  `portability_for_bedrock` take the pack's `AliasIndex` as a third argument, and
+  `UnsupportedReason::AbsentFromEdition` and `DiagnosticData::UnknownId` each carry one more
+  field.
 
 - *(core,cli)* A `def` and a `theme` may declare `requires version>=X` on a line of their own, and
   the minimum version of a composite is the max of its parts. `spec/versioning-editions.md` §10.4

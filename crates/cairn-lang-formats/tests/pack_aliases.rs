@@ -62,25 +62,31 @@ fn every_spelling_is_an_id_some_supported_version_declares() {
     }
 }
 
-/// Every group answers on at least one version the pack can build for.
+/// Every group answers a question some version of this pack can actually
+/// be asked.
 ///
-/// The loader's rule is weaker — some version declares some member — and
-/// that admits a group whose members are all declared by every version,
-/// which can never be reached: an alias is asked for only about an id the
-/// target refused.
+/// The asking id is one the target *refused*, so the spelling has to be
+/// absent from that version for the row to be reachable — and a lookup
+/// returns the queried id itself when the target declares it, which makes
+/// "the answer is non-empty" true of every loaded group and a test of
+/// nothing. The loader's own rule is weaker still (some version declares
+/// some member), so this is the property it cannot state: a group whose
+/// members are all declared by every version loads fine and can never be
+/// reached.
 #[test]
 fn every_group_answers_somewhere_in_its_own_range() {
     for pack in [builtin_java(), builtin_bedrock()] {
         for group in pack.aliases.groups() {
             let answers = supported_versions(pack).into_iter().any(|version| {
-                group
-                    .iter()
-                    .any(|spelling| !aliases_at(pack, version, spelling).is_empty())
+                let declared = pack.blocks.ids_for(version).unwrap_or(&[]);
+                group.iter().any(|spelling| {
+                    !declared.contains(spelling) && !aliases_at(pack, version, spelling).is_empty()
+                })
             });
             assert!(
                 answers,
-                "the {} pack's group [{}] answers on no version it supports, so nothing can \
-                 ever read it",
+                "the {} pack's group [{}] answers no version it supports about a spelling that \
+                 version lacks, so nothing can ever read it",
                 pack.manifest.edition.label(),
                 group.join(", "),
             );
@@ -160,6 +166,36 @@ fn the_java_pack_answers_a_bedrock_spelling() {
             aliases_at(java, version, "minecraft:standing_sign"),
             ["minecraft:oak_sign".to_owned()],
             "java {version} spells the same block `oak_sign`",
+        );
+    }
+}
+
+/// The Java pack's groups are the Bedrock pack's, minus the ones no Java
+/// version can answer.
+///
+/// The two files are hand-written and hold the same rows, because a group
+/// carries no direction: `oak_sign` ↔ `standing_sign` is one fact, and a
+/// pack that has it in one file and not the other answers in one direction
+/// only. Nothing else would notice — each pack validates against its own
+/// tables — so the drift is checked here.
+///
+/// Subset rather than equality: the Bedrock pack carries rows for blocks
+/// Java has never had (the education chemistry tables, the two split
+/// coloured torches), and `validate_aliases_answerable` would refuse those
+/// inside a Java pack.
+#[test]
+fn the_java_groups_are_a_subset_of_the_bedrock_ones() {
+    let bedrock: Vec<Vec<String>> = builtin_bedrock()
+        .aliases
+        .groups()
+        .map(<[String]>::to_vec)
+        .collect();
+    for group in builtin_java().aliases.groups() {
+        assert!(
+            bedrock.iter().any(|other| other == group),
+            "the Java pack's group [{}] is in no Bedrock group, so the two packs disagree \
+             about a rename that has no direction",
+            group.join(", "),
         );
     }
 }

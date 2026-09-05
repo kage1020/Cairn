@@ -369,11 +369,12 @@ pub(crate) fn check_id(
     }
     // Both answers are collected, and neither stands in for the other: the
     // alias table says what this target calls the block, the distance
-    // search guesses which block was meant. A rename has the first and not
-    // the second, a typo the second and not the first, and a typo *of* a
-    // renamed id can have both — `stone_brick` on Bedrock 1.21.0 is one
-    // edit from `stone_bricks`, which that version renamed to
-    // `stonebrick`.
+    // search guesses which block was meant. A rename has the first and a
+    // typo the second — `aliases_for` is group membership and nothing
+    // else, so a misspelling no group names can never carry an alias. Both
+    // are filled when a renamed id also happens to sit inside the edit cap
+    // of a spelling this target declares: `stone_bricks` on Bedrock 1.21.0
+    // is a group member *and* two edits from `stonebrick`.
     let aliases = registry.map_or_else(Vec::new, |registry| registry.aliases_for(&state.id));
     Err(MaterialDeferred::UnknownId(UnknownId {
         suggestion: nearest_namespaced_id(&state.id, ids.iter()),
@@ -699,15 +700,17 @@ mod tests {
         }
     }
 
-    /// A typo *of* a renamed id carries both answers, and they are
-    /// different claims about it.
+    /// A renamed id near its replacement carries both answers, and they
+    /// are different claims about it.
     ///
-    /// `stone_brick` on a target spelling the block `stonebrick` is one
-    /// edit from the alias and one edit from nothing else, so the two
-    /// happen to agree here — what matters is that each field is filled by
-    /// its own rule rather than one being derived from the other.
+    /// The two agree here by coincidence: `stone_bricks` is a group member,
+    /// which is what fills `aliases`, and it is also two edits from
+    /// `stonebrick`, which is what fills `suggestion`. What matters is that
+    /// each field is filled by its own rule rather than one being derived
+    /// from the other. A misspelling *of* a renamed id — `stone_brick`,
+    /// which no group names — carries the second and never the first.
     #[test]
-    fn a_typo_of_a_renamed_id_carries_both_answers() {
+    fn a_renamed_id_near_its_replacement_carries_both_answers() {
         let registry = FakeResolver::new(vec![])
             .pinned(&["minecraft:stonebrick"])
             .aliasing(&["minecraft:stone_bricks", "minecraft:stonebrick"]);
@@ -715,6 +718,27 @@ mod tests {
         match err {
             MaterialDeferred::UnknownId(unknown) => {
                 assert_eq!(unknown.aliases, ["minecraft:stonebrick".to_owned()]);
+                assert_eq!(unknown.suggestion.as_deref(), Some("minecraft:stonebrick"));
+            }
+            other => panic!("expected UnknownId, got {other:?}"),
+        }
+    }
+
+    /// A misspelling no group names carries the distance guess alone.
+    ///
+    /// The other half of the test above: `aliases_for` is group membership
+    /// and nothing else, so a typo is never an alias however near a group
+    /// member it lands. `stone_brick` is one edit from the `stone_bricks`
+    /// the group does carry, and still gets nothing from it.
+    #[test]
+    fn a_misspelling_no_group_names_carries_no_alias() {
+        let registry = FakeResolver::new(vec![])
+            .pinned(&["minecraft:stonebrick"])
+            .aliasing(&["minecraft:stone_bricks", "minecraft:stonebrick"]);
+        let err = resolve_block_state(&token("stone_brick"), Some(&registry)).unwrap_err();
+        match err {
+            MaterialDeferred::UnknownId(unknown) => {
+                assert!(unknown.aliases.is_empty());
                 assert_eq!(unknown.suggestion.as_deref(), Some("minecraft:stonebrick"));
             }
             other => panic!("expected UnknownId, got {other:?}"),
