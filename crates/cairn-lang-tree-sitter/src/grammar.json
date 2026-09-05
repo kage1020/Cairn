@@ -199,7 +199,7 @@
               "name": "body",
               "content": {
                 "type": "SYMBOL",
-                "name": "struct_body"
+                "name": "def_body"
               }
             },
             {
@@ -322,6 +322,94 @@
         {
           "type": "SYMBOL",
           "name": "_dedent"
+        }
+      ]
+    },
+    "def_body": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "SYMBOL",
+          "name": "_indent"
+        },
+        {
+          "type": "REPEAT",
+          "content": {
+            "type": "CHOICE",
+            "members": [
+              {
+                "type": "SEQ",
+                "members": [
+                  {
+                    "type": "SYMBOL",
+                    "name": "_line_start"
+                  },
+                  {
+                    "type": "CHOICE",
+                    "members": [
+                      {
+                        "type": "SYMBOL",
+                        "name": "requires_stmt"
+                      },
+                      {
+                        "type": "SYMBOL",
+                        "name": "member_stmt"
+                      },
+                      {
+                        "type": "SYMBOL",
+                        "name": "logic_decl"
+                      },
+                      {
+                        "type": "SYMBOL",
+                        "name": "assert_stmt"
+                      }
+                    ]
+                  },
+                  {
+                    "type": "REPEAT1",
+                    "content": {
+                      "type": "SYMBOL",
+                      "name": "_newline"
+                    }
+                  }
+                ]
+              },
+              {
+                "type": "SEQ",
+                "members": [
+                  {
+                    "type": "SYMBOL",
+                    "name": "_line_start"
+                  },
+                  {
+                    "type": "SYMBOL",
+                    "name": "member_stmt_with_body"
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "type": "SYMBOL",
+          "name": "_dedent"
+        }
+      ]
+    },
+    "requires_stmt": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "STRING",
+          "value": "requires"
+        },
+        {
+          "type": "FIELD",
+          "name": "arg",
+          "content": {
+            "type": "SYMBOL",
+            "name": "directive_literal"
+          }
         }
       ]
     },
@@ -1031,6 +1119,10 @@
                   {
                     "type": "CHOICE",
                     "members": [
+                      {
+                        "type": "SYMBOL",
+                        "name": "requires_stmt"
+                      },
                       {
                         "type": "SYMBOL",
                         "name": "slot_binding"

@@ -20,22 +20,27 @@
 //! in turn, so a source no supported version can build cannot report
 //! clean.
 //!
-//! Axis (1) is computed from `@requires` headers. Axis (2) is a pure
+//! Axis (1) is computed from the module's declared version floors — its
+//! `@requires` headers and the member-level `requires` lines of every part
+//! the build instantiates (`spec/versioning-editions.md` §10.4). Axis (2) is a pure
 //! forwarding of the caller's per-edition figures — the `core` crate does
 //! not itself depend on `cairn-lang-formats`, so the concrete
 //! `translate_states` lookup happens one crate up and is handed in as a
 //! `Vec<EditionPortability>`. Axis (3) remains structurally present but
 //! empty until the semantic-sensitivity catalog lands.
 
+use std::collections::HashSet;
+
 use serde::Serialize;
 
-use crate::ast::{Header, Module};
+use crate::ast::{Arg, Header, Item, ItemKind, Module, RawRequirement, Statement};
 use crate::edition::Edition;
 use crate::error::Span;
 use crate::intent::IntentModule;
 
 use super::requires_parse::{compare_versions, parse_min_version};
 use super::resolver::Resolution;
+use super::theme_variant::{bound_theme_name, pick_variant, single_logical_theme};
 
 /// The three-axis answer to "which version is this `.crn` for?".
 ///
@@ -361,8 +366,8 @@ fn derive_min_version(module: &Module) -> String {
 /// Every version floor `module` declares that a build of `edition` is held
 /// to, in source order.
 ///
-/// `@requires` floors compose by taking the intersection: each line adds a
-/// constraint rather than displacing the one before (spec syntax §5.3), and
+/// Floors compose by taking the intersection: each line adds a constraint
+/// rather than displacing the one before (spec syntax §5.3), and
 /// `[a, ∞) ∩ [b, ∞)` is `[max(a, b), ∞)`. They are returned as a list
 /// rather than folded to that maximum here, because the fold needs an
 /// ordering and the ordering is `DataVersion` — a per-edition table this
@@ -370,9 +375,26 @@ fn derive_min_version(module: &Module) -> String {
 /// the target and reports the first that refuses it, which reaches the
 /// same answer without ever comparing two floors to each other.
 ///
+/// **The list is the composite's, not the file header's.**
+/// `spec/versioning-editions.md` §10.4 gives a `def` and a `theme` a floor
+/// of their own, and says the minimum version of a composite is the max of
+/// its parts. So the walk is the module's `@requires` headers plus every
+/// part the build instantiates: a `def` some `place use=` names, and a
+/// `theme` some scope binds. That is what lets a library of templates carry
+/// its own requirements instead of every consumer restating them — a
+/// module-level `@requires` cannot, because it applies to the whole file
+/// rather than to the template.
+///
+/// A part nothing instantiates contributes nothing. A `def` no `place`
+/// names builds no voxels (and earns `W_UNUSED_DEF`), and holding a build
+/// to a floor for geometry it does not contain would refuse targets over a
+/// template the author left in the file.
+///
 /// `edition` says which build is asking: the floors scoped to it and the
 /// unscoped ones, since an unscoped floor is a floor on whatever is being
-/// built. The edition-neutral question is a different function
+/// built. It also decides which per-edition theme variant a `theme=`
+/// reference binds, through the same [`super::theme_variant`] rule the
+/// resolver uses. The edition-neutral question is a different function
 /// ([`unscoped_version_floors`]) rather than a `None` here, because
 /// `Option<Edition>` would then carry two opposite senses in one API — a
 /// floor's own `None` means "every edition" and the argument's would mean
@@ -390,7 +412,7 @@ pub fn declared_version_floors(module: &Module, edition: Edition) -> Vec<Version
     // edition's build and inert in the other's — inert, not violated,
     // which is the reading that would make a file declaring one floor per
     // edition unbuildable everywhere.
-    collect_floors(module, |declared| {
+    collect_floors(module, Some(edition), |declared| {
         declared.is_none_or(|declared| declared == edition)
     })
 }
@@ -403,27 +425,195 @@ pub fn declared_version_floors(module: &Module, edition: Edition) -> Vec<Version
 /// feed it. A floor written in Java's numbering says nothing about the
 /// file's Bedrock range, and reading it as if it did is the defect the
 /// scope exists to remove.
+///
+/// The composite fold is the same one [`declared_version_floors`] runs, and
+/// it is run with no edition pinned — the question `cairn check` asks, and
+/// the only honest one for a row that is about neither edition. Where a
+/// module declares both variants of a logical theme, that leaves the
+/// variant picked by [`super::theme_variant::pick_variant`]'s unpinned
+/// order rather than by the build. The row is a rendering of what the file
+/// says and gates nothing; every row that *is* a gate — `buildable
+/// targets`, `E_VERSION_CAP` — asks per edition and picks the variant that
+/// build binds.
 #[must_use]
 pub fn unscoped_version_floors(module: &Module) -> Vec<VersionFloor> {
-    collect_floors(module, |declared| declared.is_none())
+    collect_floors(module, None, |declared| declared.is_none())
 }
 
-/// Walk the headers once, keeping the floors a predicate accepts.
-fn collect_floors(module: &Module, applies: impl Fn(Option<Edition>) -> bool) -> Vec<VersionFloor> {
+/// Walk the module's headers and its instantiated parts once, keeping the
+/// floors a predicate accepts.
+///
+/// Source order, which is headers before items: a caller reporting "the
+/// first floor that refuses the target" reports the one an author reading
+/// top to bottom would reach first.
+fn collect_floors(
+    module: &Module,
+    edition: Option<Edition>,
+    applies: impl Fn(Option<Edition>) -> bool,
+) -> Vec<VersionFloor> {
+    let instantiated = InstantiatedParts::of(module, edition);
     let mut floors = Vec::new();
-    for header in &module.headers {
-        if let Header::Requires { requirement, span } = header
-            && let Some(parsed) = parse_min_version(requirement.as_str())
+    let mut push = |requirement: &RawRequirement, span: &Span, origin: &FloorOrigin| {
+        if let Some(parsed) = parse_min_version(requirement.as_str())
             && applies(parsed.edition)
         {
             floors.push(VersionFloor {
                 version: parsed.version.to_owned(),
                 edition: parsed.edition,
+                origin: origin.clone(),
                 span: span.clone(),
             });
         }
+    };
+    for header in &module.headers {
+        if let Header::Requires { requirement, span } = header {
+            push(requirement, span, &FloorOrigin::Module);
+        }
+    }
+    for item in &module.items {
+        // A part declared twice is `E_DUPLICATE_ITEM` and the file is
+        // refused before any of this is weighed, so both copies are walked
+        // rather than replaying the resolver's first-binding-wins rule for
+        // a case that never reaches a build.
+        let origin = match item {
+            Item::Def { name, .. } if instantiated.defs.contains(name.as_str()) => {
+                FloorOrigin::Def(name.clone())
+            }
+            Item::Theme { name, .. } if instantiated.themes.contains(name.as_str()) => {
+                FloorOrigin::Theme(name.clone())
+            }
+            _ => continue,
+        };
+        for line in item.requires() {
+            push(&line.requirement, &line.span, &origin);
+        }
     }
     floors
+}
+
+/// The parts of a module a build actually instantiates.
+///
+/// Both sets hold *declared* names, so a `use=` or `theme=` naming nothing
+/// is absent rather than present-and-unmatched. Those are already
+/// `E_UNRESOLVED_PLACE_REF` and `E_UNRESOLVED_THEME_REF`.
+struct InstantiatedParts<'a> {
+    /// Defs some `place use=NAME` in a `site` names.
+    defs: HashSet<&'a str>,
+    /// Themes some scope binds — see [`Self::of`] for what binds one.
+    themes: HashSet<&'a str>,
+}
+
+impl<'a> InstantiatedParts<'a> {
+    /// Read the placements out of `module`'s `site` bodies.
+    ///
+    /// **A theme's floor applies when the theme is bound, whether or not a
+    /// member reads a slot from it.** The alternative — charge the floor
+    /// only once a rule fires — was rejected on two counts. It makes the
+    /// floor depend on which selectors matched and which variant the pin
+    /// picked, so one source could require 1.21 on Java and nothing on
+    /// Bedrock for a reason that is not about editions; and it errs in the
+    /// unsafe direction, since an over-applied floor is reported against
+    /// the line that set it and is one edit away, while an under-applied
+    /// one certifies a build the file itself rules out, which is the defect
+    /// `E_VERSION_CAP` exists to remove. Binding a theme is the act of
+    /// taking on what it declares.
+    ///
+    /// Two things bind one: a `place ... theme=NAME` reference, and the
+    /// module-level auto-pick, which binds the sole logical theme of a file
+    /// to every `struct` and `def` scope in it. The second is why a file
+    /// with one theme and one `struct` — no `site` at all — still inherits
+    /// that theme's floor, and why a file of nothing but themes does not:
+    /// the auto-pick binds to scopes, and a module with none has nothing
+    /// for it to bind to.
+    fn of(module: &'a Module, edition: Option<Edition>) -> Self {
+        let declared_defs: HashSet<&str> = module
+            .items
+            .iter()
+            .filter(|item| item.kind() == ItemKind::Def)
+            .map(Item::name)
+            .collect();
+        let declared_themes: Vec<&str> = module
+            .items
+            .iter()
+            .filter(|item| item.kind() == ItemKind::Theme)
+            .map(Item::name)
+            .collect();
+
+        let mut parts = Self {
+            defs: HashSet::new(),
+            themes: HashSet::new(),
+        };
+        let has_a_scope_to_bind_to = module
+            .items
+            .iter()
+            .any(|item| matches!(item.kind(), ItemKind::Struct | ItemKind::Def));
+        if has_a_scope_to_bind_to
+            && let Some(logical) = single_logical_theme(declared_themes.iter().copied())
+            && let Some(name) = pick_variant(declared_themes.iter().copied(), logical, edition)
+        {
+            parts.themes.insert(name);
+        }
+        for item in &module.items {
+            let Item::Site { body, .. } = item else {
+                continue;
+            };
+            parts.walk(body, &declared_defs, &declared_themes, edition);
+        }
+        parts
+    }
+
+    /// Collect the `place` lines of one body, and of the bodies under it.
+    ///
+    /// Recursive because `Statement::Generic` may carry children anywhere:
+    /// where a `place` is legal is `check::member_scope`'s question, and a
+    /// walk that assumed the answer would silently drop a floor from a file
+    /// that is otherwise about to be refused for a different reason.
+    fn walk(
+        &mut self,
+        body: &'a [Statement],
+        declared_defs: &HashSet<&'a str>,
+        declared_themes: &[&'a str],
+        edition: Option<Edition>,
+    ) {
+        for statement in body {
+            let Statement::Generic {
+                keyword,
+                args,
+                children,
+                ..
+            } = statement
+            else {
+                continue;
+            };
+            self.walk(children, declared_defs, declared_themes, edition);
+            if keyword != "place" {
+                continue;
+            }
+            if let Some(name) = label_arg(args, "use")
+                && let Some(declared) = declared_defs.get(name)
+            {
+                self.defs.insert(declared);
+            }
+            if let Some(written) = label_arg(args, "theme")
+                && let Some(bound) =
+                    bound_theme_name(declared_themes.iter().copied(), written, edition)
+            {
+                self.themes.insert(bound);
+            }
+        }
+    }
+}
+
+/// The label value of `key` among `args`, when it has one.
+///
+/// `None` covers both an absent key and one whose value is not label-shaped
+/// (`use=3`); the second is `E_TYPE_MISMATCH_LABEL`, reported by
+/// `check::type_mismatch`, and reading it as a name here would invent a
+/// part the author did not reference.
+fn label_arg<'a>(args: &'a [Arg], key: &str) -> Option<&'a str> {
+    args.iter()
+        .find(|arg| arg.key == key)
+        .and_then(|arg| arg.value.as_label_str())
 }
 
 /// A version floor a module declares, with the directive it came from.
@@ -440,8 +630,55 @@ pub struct VersionFloor {
     pub version: String,
     /// The edition the directive scoped the floor to, when it named one.
     pub edition: Option<Edition>,
-    /// Byte range of the `@requires` directive that declared it.
+    /// Which part of the module declared it.
+    pub origin: FloorOrigin,
+    /// Byte range of the `@requires` directive or `requires` line that
+    /// declared it.
     pub span: Span,
+}
+
+/// Which part of a module a [`VersionFloor`] came from.
+///
+/// Carried because the whole value of a composite floor is knowing which
+/// piece of the build wants it: a target refused by a floor five `def`s
+/// deep in a library is not actionable as a bare version number, and the
+/// span alone answers "which line" without answering "whose".
+///
+/// Holds the part's name rather than a rendered sentence, so the prose
+/// belongs to whatever is rendering — the CLI writes one phrasing under
+/// `E_VERSION_CAP` and another under a `cairn info` note.
+///
+/// Exhaustive, unlike the rows of [`VersionAxes`] beside it. Each variant
+/// is a different route by which a build inherited the floor, and each
+/// route has its own repair at its own end; a renderer that met a fourth
+/// one through a wildcard would print the three-route prose for it. Adding
+/// a variant should break every caller, which is what says the new route
+/// has been answered rather than absorbed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FloorOrigin {
+    /// An `@requires` header: a floor on the file itself.
+    Module,
+    /// A `requires` line in `def NAME`, inherited by every `place use=NAME`.
+    Def(String),
+    /// A `requires` line in `theme NAME`, inherited by every scope that
+    /// binds the theme.
+    Theme(String),
+}
+
+impl FloorOrigin {
+    /// The part as `kind NAME`, or `None` for a module-level floor.
+    ///
+    /// `None` rather than `"the module"`: a caller printing a note about
+    /// where a floor came from has nothing to add for the header form —
+    /// the span already points at the line, and the line is the file's.
+    #[must_use]
+    pub fn part(&self) -> Option<String> {
+        match self {
+            Self::Module => None,
+            Self::Def(name) => Some(format!("def {name}")),
+            Self::Theme(name) => Some(format!("theme {name}")),
+        }
+    }
 }
 
 #[cfg(test)]

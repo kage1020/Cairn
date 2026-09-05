@@ -432,3 +432,40 @@ fn info_9_a_note_that_points_at_a_second_line_is_printed_with_its_position() {
         "the note must carry the `door` line's position, got: {stderr}",
     );
 }
+
+/// The `registry compatibility` row is the composite's, not the header's.
+///
+/// `spec/versioning-editions.md` §10.4 makes the minimum version of a
+/// composite the max of its parts, so a floor a `def` declares reaches the
+/// row of every module that places it. Reading only the file's own
+/// `@requires` lines reported `0.0 .. latest` beside a `buildable targets`
+/// row that refuses versions — two true lines that disagree on their face.
+#[test]
+fn info_9f_the_neutral_row_reads_a_floor_a_placed_def_declares() {
+    let path = tempfile_with_contents(
+        "def_floor",
+        "theme t:\n  slot floor -> @oak_planks\n\
+         \ndef cottage size=4x4:\n  requires version>=1.21.4\n  floor mat_slot=floor\n\
+         \nsite hamlet:\n  place id=a use=cottage theme=t at=origin\n",
+    );
+    let out = run_info(&[path.to_str().unwrap(), "--editions", "java"]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stdout = String::from_utf8(out.stdout).expect("utf-8");
+    assert!(
+        stdout.contains("registry compatibility:  1.21.4 .. latest"),
+        "{stdout}",
+    );
+    assert!(
+        stdout.contains("buildable targets:       Java: 1.21.4"),
+        "and the per-edition row is held to it too: {stdout}",
+    );
+    let stderr = String::from_utf8(out.stderr).expect("utf-8");
+    assert!(
+        stderr.contains("below the `version>=1.21.4` `def cottage` declares"),
+        "the note names the part, not `this file`: {stderr}",
+    );
+}

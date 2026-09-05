@@ -7,7 +7,8 @@
 //! type-checking) is the responsibility of downstream layers.
 //!
 //! Source-position propagation: [`Header`], [`Item`], [`Statement`],
-//! [`ThemeRule`], [`Arg`], [`Value`], and [`TruthRow`] each carry a `span` field
+//! [`ThemeRule`], [`MemberRequires`], [`Arg`], [`Value`], and [`TruthRow`] each
+//! carry a `span` field
 //! pointing at the byte range of the originating source, and [`Item`] carries a
 //! second, narrower `name_span` for the name token alone — a block's `span`
 //! reaches to the end of its indented body, which is too much to underline for a
@@ -86,6 +87,37 @@ impl RawRequirement {
     }
 }
 
+/// One `requires version>=X` line inside a `def` or `theme` body.
+///
+/// The member-level twin of [`Header::Requires`] (`spec/versioning-editions.md`
+/// §10.4). It carries the same verbatim expression, read by the same
+/// `parse_requirement`, and differs only in what it constrains: a module-level
+/// `@requires` is a floor on the file, while this one is a floor on the part
+/// that declares it and therefore on every build that instantiates that part.
+///
+/// Held on the item rather than in its body statements because it is not a
+/// member: nothing about it is placed, painted, or lowered, and leaving it in
+/// the statement list would put a line every geometry pass has to skip in
+/// front of every geometry pass.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[non_exhaustive]
+pub struct MemberRequires {
+    /// Requirement expression captured verbatim from the source, without
+    /// the leading `requires` keyword.
+    pub requirement: RawRequirement,
+    /// Byte range of the whole `requires ...` line.
+    #[serde(skip)]
+    pub span: Span,
+}
+
+impl MemberRequires {
+    /// Wrap a raw requirement expression and the line it was written on.
+    #[must_use]
+    pub fn new(requirement: RawRequirement, span: Span) -> Self {
+        Self { requirement, span }
+    }
+}
+
 /// A whole `.crn` source file: a sequence of leading directives followed by
 /// top-level items, both kept in source order.
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -155,6 +187,9 @@ pub enum Item {
         /// Byte range of the name token alone.
         #[serde(skip)]
         name_span: Span,
+        /// `requires version>=X` lines the body declares, in source order.
+        #[serde(skip_serializing_if = "Vec::is_empty")]
+        requires: Vec<MemberRequires>,
         /// Body rules in source order.
         body: Vec<ThemeRule>,
         /// Byte range covering the whole `theme ...` block including its
@@ -171,6 +206,9 @@ pub enum Item {
         name_span: Span,
         /// Inline `key=value` arguments on the definition header.
         args: Vec<Arg>,
+        /// `requires version>=X` lines the body declares, in source order.
+        #[serde(skip_serializing_if = "Vec::is_empty")]
+        requires: Vec<MemberRequires>,
         /// Indented body statements in source order.
         body: Vec<Statement>,
         /// Byte range covering the whole `def ...` block including its
@@ -293,6 +331,22 @@ impl Item {
             | Self::Def { name_span, .. }
             | Self::Site { name_span, .. }
             | Self::Struct { name_span, .. } => name_span,
+        }
+    }
+
+    /// The `requires version>=X` lines this item declares.
+    ///
+    /// Empty for `site` and `struct`, which the grammar refuses the line
+    /// on — `spec/versioning-editions.md` §10.4 gives it to `def` and
+    /// `theme`, the two kinds a build instantiates rather than *is*. An
+    /// empty slice rather than an `Option`, because a caller folding
+    /// floors over every item asks the same question of all four and the
+    /// answer for the other two is "none", not "not applicable".
+    #[must_use]
+    pub fn requires(&self) -> &[MemberRequires] {
+        match self {
+            Self::Theme { requires, .. } | Self::Def { requires, .. } => requires,
+            Self::Site { .. } | Self::Struct { .. } => &[],
         }
     }
 }

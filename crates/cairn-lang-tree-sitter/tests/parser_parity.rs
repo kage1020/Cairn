@@ -133,6 +133,66 @@ const FIXTURES: &[(&str, &str, Verdict)] = &[
         Reject,
     ),
     ("theme_no_body", "theme empty:\n", Accept),
+    // -- member-level version floors ----------------------------------
+    //
+    // `spec/versioning-editions.md` §10.4 gives `def` and `theme` a floor
+    // of their own. Its expression is the opaque rest-of-line slice
+    // `@requires` takes, so the grammar\'s job here is *where* the line may
+    // stand, not what is on it.
+    (
+        "def_member_requires",
+        "def d size=2x2:\n  requires version>=1.21\n",
+        Accept,
+    ),
+    (
+        "def_member_requires_scoped",
+        "def d size=2x2:\n  requires java version>=1.21.4\n",
+        Accept,
+    ),
+    // The expression is opaque to both parsers, so an unreadable one is
+    // `E_INVALID_REQUIRES` from `check` rather than a syntax error — the
+    // same division `@requires mc>=1.20` is already under.
+    (
+        "def_member_requires_nonsense",
+        "def d size=2x2:\n  requires a=1\n",
+        Accept,
+    ),
+    (
+        "def_member_requires_no_value",
+        "def d size=2x2:\n  requires\n",
+        Reject,
+    ),
+    (
+        "theme_member_requires",
+        "theme t:\n  requires version>=1.21\n  slot floor -> @oak\n",
+        Accept,
+    ),
+    // A `struct` and a `site` are the build rather than a part of one, so
+    // the floor on them is the file\'s and is spelled `@requires`.
+    (
+        "struct_member_requires",
+        "struct s size=3x3\n  requires version>=1.21\n",
+        Reject,
+    ),
+    (
+        "site_member_requires",
+        "site p:\n  requires version>=1.21\n",
+        Reject,
+    ),
+    // Nor may a member carry one: the floor belongs to the part, and a
+    // `walls` line is not a part.
+    (
+        "member_child_requires",
+        "def d size=2x2:\n  walls height=3\n    requires version>=1.21\n",
+        Reject,
+    ),
+    // `requires` is an ordinary word everywhere the line is not legal, so
+    // a member may still be called one where no floor may stand.
+    (
+        "struct_member_named_requires",
+        "struct s size=3x3\n  requires a=1\n",
+        Accept,
+    ),
     // -- member commands ---------------------------------------------
     (
         "struct_member",
@@ -1290,10 +1350,16 @@ fn grammar_members(
         // the depth recorded here is the one already accumulated.
         out.push((depth, keyword.to_owned()));
         depth
-    } else if node.kind() == "struct_body" {
-        // Only `struct_body` counts a level: a theme body holds rules
-        // rather than member commands, so it contributes nothing to walk
-        // and `core_members` skips it on the other side too.
+    } else if node.kind() == "struct_body" || node.kind() == "def_body" {
+        // The two member-carrying bodies count a level. They are separate
+        // rules only because a `def` body may also hold a `requires` line
+        // — the members inside them are the same members, so a walk that
+        // counted one and not the other would report every member of a
+        // `def` one level shallower than the reference parser puts it.
+        //
+        // A theme body is deliberately absent: it holds rules rather than
+        // member commands, so it contributes nothing to walk and
+        // `core_members` skips it on the other side too.
         depth + 1
     } else {
         depth

@@ -11,7 +11,7 @@ use cairn_lang_core::lock::{
     LockWalkway, Lockfile, hash_resolved_ir, hash_source,
 };
 use cairn_lang_core::resolve::{
-    BuildableTargets, EditionReport, FloorPlacement, FloorVerdict, UnsupportedEntry,
+    BuildableTargets, EditionReport, FloorOrigin, FloorPlacement, FloorVerdict, UnsupportedEntry,
     UnsupportedReason, VersionAxes, VersionFloor, VersionOrder, compute_axes,
     declared_version_floors, resolve,
 };
@@ -1034,6 +1034,56 @@ fn render_floor(floor: &VersionFloor) -> String {
     match floor.edition {
         Some(edition) => format!("{edition} version>={}", floor.version),
         None => format!("version>={}", floor.version),
+    }
+}
+
+/// How to name the line a floor was written on, as a repair points at it.
+///
+/// The two spellings are `@requires` on a module header and `requires`
+/// inside a `def` or `theme` body. A fix line that names the wrong one
+/// sends its reader looking for a line the file does not contain.
+fn floor_keyword(floor: &VersionFloor) -> &'static str {
+    match floor.origin {
+        FloorOrigin::Module => "`@requires`",
+        FloorOrigin::Def(_) | FloorOrigin::Theme(_) => "`requires`",
+    }
+}
+
+/// Who declared a floor, as the subject of a sentence about it.
+///
+/// "this file" for a header, and the part for a member-level floor: the
+/// note it appears in is read beside a `buildable targets` row, and "this
+/// file" for a floor the file inherited from one of its parts is the
+/// reading the composite rule exists to correct.
+fn floor_declarer(floor: &VersionFloor) -> String {
+    floor
+        .origin
+        .part()
+        .map_or_else(|| "this file".to_owned(), |part| format!("`{part}`"))
+}
+
+/// The line naming which part of the module imposed a floor, when a part
+/// did.
+///
+/// `None` for an `@requires` header. The message it would sit under already
+/// carries the position of the line, and that line is the file's own, so a
+/// note saying "the file declares it" adds a sentence and no fact.
+///
+/// A member-level floor is the case this exists for. `spec/versioning-editions.md`
+/// §10.4 makes the minimum version of a composite the max of its parts, and
+/// a target refused by a floor written inside a `def` in a library is not
+/// actionable as a bare version number: the reader has to be told whose
+/// floor it is and by what route this build inherited it, because the
+/// repair is at the other end of that route.
+fn floor_origin_note(floor: &VersionFloor) -> Option<String> {
+    match &floor.origin {
+        FloorOrigin::Module => None,
+        FloorOrigin::Def(name) => Some(format!(
+            "  `def {name}` declares it, and every `place use={name}` inherits it"
+        )),
+        FloorOrigin::Theme(name) => Some(format!(
+            "  `theme {name}` declares it, and every scope that binds the theme inherits it"
+        )),
     }
 }
 
@@ -2243,6 +2293,9 @@ fn enforce_version_floor(
         render_floor(floor),
         target.mc_version(),
     );
+    if let Some(note) = floor_origin_note(floor) {
+        eprintln!("{note}");
+    }
     // `spec/versioning-editions.md` §10.4 makes the closed set of
     // candidates valid in the target part of the message, not an extra. Naming the floor alone
     // sends an author to `--target >=99.0`, which is a second error and no
@@ -2275,7 +2328,10 @@ fn enforce_version_floor(
             edition.as_str(),
             edition.registry_pack().supported_list(),
         );
-        eprintln!("  fix: lower the `@requires` floor, or build against another edition");
+        eprintln!(
+            "  fix: lower the {} floor, or build against another edition",
+            floor_keyword(floor),
+        );
     } else {
         eprintln!(
             "  valid {} targets: {}",
@@ -2283,8 +2339,9 @@ fn enforce_version_floor(
             usable.join(", ")
         );
         eprintln!(
-            "  fix: --target {}, or lower the `@requires` floor",
+            "  fix: --target {}, or lower the {} floor",
             usable[0],
+            floor_keyword(floor),
         );
     }
     Err(ExitCode::from(1))
@@ -2313,6 +2370,9 @@ fn report_unplaceable_floor(
         render_floor(floor),
         edition.as_str(),
     );
+    if let Some(note) = floor_origin_note(floor) {
+        eprintln!("{note}");
+    }
     // The two releases it falls between, not the whole table. The table
     // names every release of the edition now, so printing it is dozens of
     // versions where two say the same thing: where the label would sit if
@@ -2394,10 +2454,11 @@ fn report_floors_left_out_of_the_neutral_row(
 /// The `note:` lines under one edition's `buildable targets` entry.
 ///
 /// Extracted from [`edition_rows`] so the loop there reads as the five
-/// steps it is. Both notes name the `@requires` line they came from, at
-/// the position `E_VERSION_CAP` would print for the same floor: a report
-/// that says which versions are out without saying which line put them
-/// there is half a report.
+/// steps it is. Both notes name the `requires` line they came from — and
+/// the part that declared it, when a part did — at the position
+/// `E_VERSION_CAP` would print for the same floor: a report that says which
+/// versions are out without saying which line put them there is half a
+/// report.
 fn report_version_notes(
     file: &Path,
     source: &str,
@@ -2417,6 +2478,9 @@ fn report_version_notes(
             edition.as_str(),
             edition.as_str(),
         );
+        if let Some(note) = floor_origin_note(floor) {
+            eprintln!("{note}");
+        }
         eprintln!(
             "  note: {} builds against {}",
             edition.as_str(),
@@ -2425,7 +2489,7 @@ fn report_version_notes(
     }
     for floor in &verdicts.refusing_floors {
         eprintln!(
-            "note: {}:{}: {} {} {} below the `{}` this file declares",
+            "note: {}:{}: {} {} {} below the `{}` {} declares",
             file.display(),
             lines.position(source, floor.span.start),
             edition.as_str(),
@@ -2436,6 +2500,7 @@ fn report_version_notes(
                 "are"
             },
             render_floor(floor),
+            floor_declarer(floor),
         );
     }
 }

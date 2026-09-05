@@ -241,7 +241,7 @@ def cottage size=1x1
         value: (size_literal
           (integer)
           (integer))))
-    body: (struct_body
+    body: (def_body
       (member_stmt
         keyword: (member_keyword)
         args: (command_arg_list
@@ -345,7 +345,7 @@ site plaza:
         (size_literal
           (integer)
           (integer))))
-    (struct_body
+    (def_body
       (member_stmt
         (member_keyword)
         (command_arg_list
@@ -375,3 +375,43 @@ site plaza kind=town
 ---
 
 
+
+==================
+def with a member-level version floor (field labels)
+==================
+
+def cottage size=1x1:
+  requires java version>=1.21.4
+  floor mat_slot=x
+
+---
+
+(source_file
+  (def_decl
+    name: (identifier)
+    args: (attribute_list
+      (attribute
+        key: (identifier)
+        value: (size_literal
+          (integer)
+          (integer))))
+    body: (def_body
+      (requires_stmt
+        arg: (directive_literal))
+      (member_stmt
+        keyword: (member_keyword)
+        args: (command_arg_list
+          (command_arg
+            (attribute
+              key: (identifier)
+              value: (identifier))))))))
+
+==================
+a version floor is not a member line, so a struct refuses it
+:error
+==================
+
+struct s size=1x1
+  requires version>=1.21
+
+---

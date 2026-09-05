@@ -125,8 +125,45 @@ The same per-version scoping applies to a pack's own material mappings. An entry
 deferred: the tables record which IDs a version *has*, not which version first introduced one, so
 the `E_VERSION_CAP` example above is an `@requires` floor rather than registry-inferred.
 
-`def` and `theme` may declare `requires version>=X`, and the minimum version of a composite is the
-max of its parts. Module-level `@requires` is implemented; the member-level form is not yet parsed.
+### A part may declare its own floor
+
+`def` and `theme` may declare `requires version>=X` on a line of their own, and the minimum version
+of a composite is the max of its parts:
+
+```
+def cottage size=9x7:
+  requires version>=1.21.4
+  walls mat_slot=wall height=4
+```
+
+The expression is the one `@requires` takes, edition scope and all — the two spellings differ in
+what they constrain, not in what they say. A module-level `@requires` is a floor on the *file*; this
+one is a floor on the *part*, so a `place use=cottage` inherits it and a library of templates
+carries its own requirements instead of every consumer restating them.
+
+**Which parts a build inherits from.** A `def` a `place use=` names, and a `theme` a scope binds. A
+part nothing instantiates contributes nothing: a `def` no `place` names builds no voxels (and is
+already `W_UNUSED_DEF`), so refusing a target over it would be refusing over a template the author
+left in the file.
+
+**A theme's floor applies when the theme is bound**, whether or not a member reads a slot from it.
+Binding a theme is the act of taking on what it declares. The alternative — charge the floor only
+once one of its rules fires — makes the floor depend on which selectors matched and which variant
+the pin picked, so one source could require `1.21` on Java and nothing on Bedrock for a reason that
+is not about editions; and it errs in the unsafe direction, since an over-applied floor is reported
+against the line that set it and is one edit away, while an under-applied one certifies a build the
+file itself rules out. Two things bind a theme: a `place ... theme=NAME` reference, and the
+module-level auto-pick, which binds the sole logical theme of a file to every `struct` and `def`
+scope in it.
+
+`struct` and `site` take no such line. Neither is instantiated by anything — each *is* the build —
+so a floor written inside one constrains exactly the file it is in, which is what `@requires`
+already says. The same goes for a member's own indented children: the floor belongs to the part, and
+a `walls` line is not a part.
+
+`E_VERSION_CAP` names the part that imposed the floor, not only the number. A target refused by a
+floor written inside a template is not actionable as a bare version, because the repair is at the
+other end of the `place use=` that inherited it.
 
 ### The declared floor is enforced
 
