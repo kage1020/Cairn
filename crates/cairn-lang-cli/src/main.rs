@@ -6,7 +6,9 @@ use std::process::ExitCode;
 
 use cairn_lang_core::CAIRN_VERSION;
 use cairn_lang_core::block_array::{BlockArray, BlockArrayIr, lower_to_block_array};
-use cairn_lang_core::check::{DiagnosticNote as Note, LineStarts, RenderedDiagnostic};
+use cairn_lang_core::check::{
+    DiagnosticNote as Note, LineStarts, RenderedDiagnostic, weigh_intended_targets,
+};
 use cairn_lang_core::lock::{
     HashHex, LOCK_SCHEMA_VERSION, LockEdition, LockError, LockInputs, LockPlacement, LockTarget,
     LockWalkway, Lockfile, hash_resolved_ir, hash_source,
@@ -14,10 +16,11 @@ use cairn_lang_core::lock::{
 use cairn_lang_core::resolve::{
     BuildableTargets, EditionReport, FloorOrigin, FloorPlacement, FloorVerdict, UnsupportedEntry,
     UnsupportedReason, VersionAxes, VersionFloor, VersionOrder, compute_axes,
-    declared_version_floors, resolve, unscoped_version_floors,
+    declared_version_floors, resolve, unscoped_version_floors, versions_satisfying,
 };
 use cairn_lang_core::{
-    Diagnostic, Edition, Module, ParseError, Severity, check, diagnose_parse_failure, lower, parse,
+    Diagnostic, DiagnosticCode, Edition, Module, ParseError, Severity, check,
+    diagnose_parse_failure, lower, parse,
 };
 use cairn_lang_formats::bedrock_structure::{ParityNote, build_mcstructure_tag, write_mcstructure};
 use cairn_lang_formats::data_version::{
@@ -76,6 +79,13 @@ enum Command {
         /// omitted, the resolver unions slot names across both variants
         /// of one logical theme so the file passes `check` regardless of
         /// which edition it ends up compiling for.
+        ///
+        /// The pin also names the version table `@intended_targets` is
+        /// weighed in. Without one both editions weigh it, since a floor
+        /// refusing every version the same file says it is for is a
+        /// mistake either way; `W_INTENDED_TARGET_UNSUPPORTED` is the one
+        /// finding that waits for the pin, because a version Java cannot
+        /// build is routinely the Bedrock target the author means.
         #[arg(long, value_enum)]
         edition: Option<EditionArg>,
         /// Output format for the diagnostics.
@@ -560,7 +570,16 @@ fn run_check(file: &Path, edition: Option<EditionArg>, format: CheckFormat) -> E
         }
     };
     let ir = lower(&module);
-    let diagnostics = check(&module, &ir, edition.map(EditionArg::as_edition));
+    // Through `build_diagnostics` with an empty lowering list rather than
+    // `check` directly: `cairn check` runs no lowering, but it does see
+    // both version headers, and the `@intended_targets` findings are the
+    // one part of its report that `check` cannot produce on its own.
+    let diagnostics = build_diagnostics(
+        &module,
+        &ir,
+        edition.map(EditionArg::as_edition),
+        Vec::new(),
+    );
     let has_error = diagnostics.iter().any(|d| d.severity() == Severity::Error);
     // Build the line-start index once and reuse it for every diagnostic /
     // note position lookup. Without this we'd re-walk the entire source for
@@ -1025,19 +1044,6 @@ fn supported_versions(pack: &RegistryPack) -> Vec<String> {
         .collect()
 }
 
-/// One floor as the author wrote it, scope and all.
-///
-/// Shared by the four places that echo a floor back — the two refusals and
-/// `cairn info`'s two notes — because a floor quoted without its scope
-/// reads as a different floor than the line it came from, and the scope is
-/// the half the repair usually touches.
-fn render_floor(floor: &VersionFloor) -> String {
-    match floor.edition {
-        Some(edition) => format!("{edition} version>={}", floor.version),
-        None => format!("version>={}", floor.version),
-    }
-}
-
 /// How to name the line a floor was written on, as a repair points at it.
 ///
 /// The two spellings are `@requires` on a module header and `requires`
@@ -1048,21 +1054,6 @@ fn floor_keyword(floor: &VersionFloor) -> &'static str {
         FloorOrigin::Module => "`@requires`",
         FloorOrigin::Def(_) | FloorOrigin::Theme(_) => "`requires`",
     }
-}
-
-/// Who declared a floor, as the subject of a sentence about it.
-///
-/// "this file" for a header, and the part for a member-level floor: "this
-/// file requires ..." for a floor the file inherited from one of its parts
-/// is the reading the composite rule exists to correct. Used by every
-/// sentence that has a floor for its subject — the two refusals' primaries
-/// and `cairn info`'s notes — so they cannot hold the same sentence to two
-/// standards.
-fn floor_declarer(floor: &VersionFloor) -> String {
-    floor.origin.part().map_or_else(
-        || "this file".to_owned(),
-        |(keyword, name)| format!("`{keyword} {name}`"),
-    )
 }
 
 /// The line naming which part of the module imposed a floor, when a part
@@ -1089,7 +1080,7 @@ fn floor_origin_note(floor: &VersionFloor) -> Option<String> {
     };
     Some(format!(
         "  {} declares it, and {inherited_by}",
-        floor_declarer(floor),
+        floor.declarer(),
     ))
 }
 
@@ -1281,6 +1272,18 @@ fn print_text(axes: &VersionAxes) {
             .join("   ")
     };
     println!("buildable targets:       {buildable_line}");
+
+    // Beside the row it can contradict, and not folded into it: one is
+    // what the file says it was designed for and the other what this
+    // compiler can build it for, and a reader comparing them is doing the
+    // comparison `E_INTENDED_TARGET_CAP` automates for the half of it that
+    // is decidable.
+    let intended_line = if axes.intended_targets.is_empty() {
+        String::from("(none declared)")
+    } else {
+        axes.intended_targets.join(", ")
+    };
+    println!("intended targets:        {intended_line}");
 
     let semantic_line = if axes.semantic_sensitive.is_empty() {
         String::from("(none)")
@@ -1763,8 +1766,68 @@ fn build_diagnostics(
     lowering: Vec<cairn_lang_core::check::Diagnostic>,
 ) -> Vec<cairn_lang_core::check::Diagnostic> {
     let mut combined = check(module, ir, edition);
+    // Merged by span rather than appended: `check` returns its half
+    // sorted, and a header finding printed after a finding forty lines
+    // below it reads as a second file. The lowering half is still
+    // appended, as it always has been — it is a different stage, and the
+    // commands that show it show it under its own heading.
+    for finding in intended_target_findings(module, edition) {
+        let at = combined.partition_point(|kept| {
+            (kept.span.start, kept.span.end) <= (finding.span.start, finding.span.end)
+        });
+        combined.insert(at, finding);
+    }
     combined.extend(lowering);
     combined
+}
+
+/// Weigh `@intended_targets` against the file's own floors, for every
+/// edition the command is about.
+///
+/// The pass itself needs one edition's release table
+/// ([`weigh_intended_targets`]), and the commands that call this do not
+/// all have a pin: `cairn compile` names an edition, `cairn check` may,
+/// and `cairn info` reports across both. An unpinned run asks both and
+/// reports what either answers, because the contradiction is *inside the
+/// file* — a floor refusing every version the same file says it is for is
+/// a mistake in one of the two lines however the author later builds it,
+/// and reporting it only under a pin would leave the bare `cairn check` —
+/// the run an author makes most — silent on it.
+///
+/// `W_INTENDED_TARGET_UNSUPPORTED` is the exception and is dropped without
+/// a pin. "No `--target` names this version" is a question about one
+/// edition's pack, and a version Java cannot build is routinely the
+/// Bedrock target the author means: unpinned, the answer is not that the
+/// header is wrong but that nobody has said which edition is being asked.
+///
+/// Findings are deduplicated by code and span, so a header both editions
+/// judge the same way is reported once rather than twice — the file has
+/// one line to fix either way.
+fn intended_target_findings(
+    module: &cairn_lang_core::ast::Module,
+    edition: Option<Edition>,
+) -> Vec<cairn_lang_core::check::Diagnostic> {
+    let editions = edition.map_or_else(|| vec![Edition::Java, Edition::Bedrock], |one| vec![one]);
+    let mut findings: Vec<cairn_lang_core::check::Diagnostic> = Vec::new();
+    for asked in editions {
+        let pack = match asked {
+            Edition::Java => builtin_java(),
+            Edition::Bedrock => builtin_bedrock(),
+        };
+        let targetable = supported_versions(pack);
+        for finding in weigh_intended_targets(module, asked, &version_order(pack), &targetable) {
+            if edition.is_none() && finding.code == DiagnosticCode::IntendedTargetUnsupported {
+                continue;
+            }
+            if !findings
+                .iter()
+                .any(|kept| kept.code == finding.code && kept.span == finding.span)
+            {
+                findings.push(finding);
+            }
+        }
+    }
+    findings
 }
 
 fn report_core_diagnostics(
@@ -2296,8 +2359,8 @@ fn enforce_version_floor(
         "error[E_VERSION_CAP]: {}:{}: {} requires {} (target {}).",
         file.display(),
         position,
-        floor_declarer(floor),
-        render_floor(floor),
+        floor.declarer(),
+        floor.rendered(),
         target.mc_version(),
     );
     if let Some(note) = floor_origin_note(floor) {
@@ -2318,17 +2381,7 @@ fn enforce_version_floor(
     // against, and offering one of those sends the author to `unsupported
     // target` — the second error this list exists to prevent.
     let buildable = supported_versions(edition.registry_pack());
-    let usable: Vec<&str> = buildable
-        .iter()
-        .filter(|label| {
-            order.key_of(label).is_some_and(|key| {
-                floors
-                    .iter()
-                    .all(|floor| order.verdict(&floor.version, key) == FloorVerdict::Satisfied)
-            })
-        })
-        .map(String::as_str)
-        .collect();
+    let usable = versions_satisfying(&order, floors, &buildable);
     if usable.is_empty() {
         eprintln!(
             "  no supported {} target satisfies it: {}",
@@ -2374,8 +2427,8 @@ fn report_unplaceable_floor(
         "error[E_REQUIRES_UNORDERABLE]: {}:{}: {} requires {}, which names no {} release.",
         file.display(),
         position,
-        floor_declarer(floor),
-        render_floor(floor),
+        floor.declarer(),
+        floor.rendered(),
         edition.as_str(),
     );
     if let Some(note) = floor_origin_note(floor) {
@@ -2469,7 +2522,7 @@ fn report_floors_left_out_of_the_neutral_row(
             } else {
                 format!(
                     "is declared by {}, and the two editions bind different variants of it",
-                    floor_declarer(&floor),
+                    floor.declarer(),
                 )
             };
             eprintln!(
@@ -2478,7 +2531,7 @@ fn report_floors_left_out_of_the_neutral_row(
                  where it is weighed",
                 file.display(),
                 lines.position(source, floor.span.start),
-                render_floor(&floor),
+                floor.rendered(),
                 reason,
             );
         }
@@ -2508,7 +2561,7 @@ fn report_version_notes(
             file.display(),
             lines.position(source, floor.span.start),
             edition.as_str(),
-            render_floor(floor),
+            floor.rendered(),
             edition.as_str(),
             edition.as_str(),
         );
@@ -2533,8 +2586,8 @@ fn report_version_notes(
             } else {
                 "are"
             },
-            render_floor(floor),
-            floor_declarer(floor),
+            floor.rendered(),
+            floor.declarer(),
         );
     }
 }

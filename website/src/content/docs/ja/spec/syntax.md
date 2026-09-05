@@ -141,6 +141,12 @@ Monaco と同じ規則なので、診断の行番号とカーソル位置の行�
 **`@intended_targets`** はどの Minecraft バージョン向けに設計されたかを示します。検証済みだという主
 張ではありません。その記録はロックにのみ存在します。
 
+ヒントであっても、隣の下限には照らされます。`@requires` が `@intended_targets` の名指すバージョンをす
+べて拒否するファイルは、誰かがそれに従って動いた瞬間にコンパイラが拒否する意図を表明しており、それが
+`E_INTENDED_TARGET_CAP` です。一部だけが下限を下回るリストは `W_INTENDED_TARGET_CAP`、ターゲットのエ
+ディションがそもそもビルドできないバージョンは `W_INTENDED_TARGET_UNSUPPORTED` になります。
+[バージョンとエディション §10.4](versioning-editions#ヒントは下限に照らされる) を参照してください。
+
 `@cairn` と `@intended_targets` はモジュールにつき最大 1 回で、繰り返しは `E_DUPLICATE_HEADER` です。
 `@requires` は例外で、下限は合成されるため、繰り返しは置き換えではなく制約の追加になります。
 

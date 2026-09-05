@@ -106,6 +106,9 @@ title: "11. Lint と制約検証"
 | `E_UNKNOWN_ID` | 固定されたターゲットが宣言していない解決済みブロック ID。 |
 | `E_VERSION_CAP` | `--target` がソースの宣言する `@requires` の下限を下回る ([versioning-editions §10.4](/ja/spec/versioning-editions))。 |
 | `E_REQUIRES_UNORDERABLE` | `@requires` の下限が、ターゲットのエディションの `DataVersion` 表で位置づけられないバージョンを名指す ([versioning-editions §10.4](/ja/spec/versioning-editions))。 |
+| `E_INTENDED_TARGET_CAP` | `@intended_targets` が名指すバージョンが、同じファイルの宣言する下限をすべて下回る。 |
+| `W_INTENDED_TARGET_CAP` | そのうちの一部だけが下回る。 |
+| `W_INTENDED_TARGET_UNSUPPORTED` | `@intended_targets` が、そのエディションのどの `--target` でもビルドできないバージョンを名指す。 |
 | `E_INCOMPATIBLE_MATERIAL` | ブロックステートを付けるジオメトリを持つメンバが、それを保持できないマテリアルに束縛されている。 |
 | `E_MISSING_MATERIAL` | ブロックへの唯一の経路が `mat_slot=` であるメンバが、それを持たずに書かれている。 |
 | `E_UNRESOLVED_SLOT` | メンバの `mat_slot=` が、束縛されたテーマの宣言していないスロットを指している。 |
@@ -160,6 +163,24 @@ placement が同じテーマを束縛しながら 1 つのスロットについ�
 その `mat_slot=` は `place` がテーマを選ぶまで判定されません。
 
 `E_INCOMPLETE_PLACE` は欠けているキーをすべて列挙し、その行はビルドから落とされます。
+
+`@intended_targets` の 3 つのコードは、ファイルが表明した意図を、そのファイル自身の下限に照らします
+([versioning-editions §10.4](/ja/spec/versioning-editions#ヒントは下限に照らされる))。そのエディション
+がビルドできないバージョンは `W_INTENDED_TARGET_UNSUPPORTED` であって、下限には照らされません。作者が
+まず動くのは「そのターゲットはここに存在しない」という事実であり、その隣に cap を並べれば、ビルドを止
+めているのではない行を編集させることになるからです。残りのうち、下限を下回るものが *すべて* であれば
+`E_INTENDED_TARGET_CAP` です。ファイルは、自分が対象だと言っているどのバージョン向けにもビルドできず、
+そのいずれかを `cairn compile --target` に渡した瞬間に `E_VERSION_CAP` になります。*一部* であれば
+`W_INTENDED_TARGET_CAP` です。このヘッダはヒントであり ([§5.3](/ja/spec/syntax#53-ヘッダ))、下限より
+上のバージョンは変わらずビルドできるからです。1 つのヘッダが後者 2 つを同時に得ることもあります。名指
+されたバージョンの誤り方が同じとは限らないからです。
+
+3 つともエディションごとの答えです。下限とターゲットのラベルは、あるエディションの `DataVersion` 表の
+中で順序づけられるからです。2 つの cap コードは `cairn check --edition` / `cairn info` /
+`cairn compile` が報告し、ピンがない場合は両エディションがヘッダを照らして、どちらかが到達した所見を
+重複排除のうえ報告します。矛盾は、後でどう建てるかに関わらずファイルの 2 行の間にあるからです。
+`W_INTENDED_TARGET_UNSUPPORTED` はピンを必要とします。Java がビルドできないバージョンは、作者が意図
+した Bedrock のターゲットであることが普通にあるので、ピンがなければその問いはまだ立てられていません。
 
 ### 真理値表
 
@@ -243,6 +264,7 @@ placement が同じテーマを束縛しながら 1 つのスロットについ�
 | `W_INVALID_CAIRN_VERSION` | `{ "kind": "invalid_cairn_version", "reason", "found" }`。`reason` は `component_count` / `component_not_a_number` / `year_not_four_digits` / `month_out_of_range` / `patch_too_large` / `trailing_tokens` のいずれか。`found` はその理由が指す構成要素で、失敗が断片を名指ししないときは空 — `component_count` と、構成要素そのものが空の値 (`2026.`) に対する `component_not_a_number` です。 |
 | `W_FUTURE_CAIRN_VERSION` | `{ "kind": "future_cairn_version", "declared", "compiler" }`。どちらも書かれたまま。`declared` はファイル中の文字列、`compiler` は報告したビルド。 |
 | `W_TRUTH_TABLE_PARTIAL` | `{ "kind": "truth_table_partial", "inputs": 2, "covered": 1, "missing": ["01","10","11"] }`。後述。 |
+| `@intended_targets` の 3 コード | `{ "kind": "intended_targets", "edition", "targets": ["1.20.4"], "floor"? }`。所見の対象となるバージョンをソース順に、そして照らしたエディション。`floor` はそれらを最初に拒否する下限を書かれたまま持ち、下限の話ではない `W_INTENDED_TARGET_UNSUPPORTED` では省かれる。 |
 
 **`E_UNKNOWN_ID.origin`** は誰がその ID を選んだかを示します。修復先が違うからです。
 

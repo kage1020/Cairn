@@ -147,6 +147,13 @@ here. See [Versioning and Editions](versioning-editions).
 **`@intended_targets`** says which Minecraft versions the file was designed for. It is not a claim
 of being verified. That record lives only in the lock.
 
+A hint is still weighed against the floor beside it. A file whose `@requires` refuses every version
+its `@intended_targets` names states an intention the compiler will refuse the moment anyone acts on
+it, and that is `E_INTENDED_TARGET_CAP`; a list only partly below the floor is
+`W_INTENDED_TARGET_CAP`, and a version the target edition cannot build at all is
+`W_INTENDED_TARGET_UNSUPPORTED`. See
+[Versioning and Editions §10.4](versioning-editions#the-hint-is-weighed-against-the-floor).
+
 `@cairn` and `@intended_targets` appear at most once per module, and a repeat is
 `E_DUPLICATE_HEADER`. `@requires` is the exception: its floors compose, so repeating it adds a
 constraint rather than displacing one.
