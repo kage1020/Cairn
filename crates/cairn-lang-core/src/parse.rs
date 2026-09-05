@@ -45,10 +45,19 @@ const REQUIRES: &str = "requires";
 /// one message for both asserts something false about half the files that
 /// reach it. Neither refuses on the word alone: only a line whose
 /// expression reads as a version floor is refused, since `requires` is an
-/// ordinary identifier everywhere it declares nothing.
+/// ordinary identifier in a body that reads no floors.
+///
+/// An accepting body is the other half of that, and takes the word whatever
+/// follows it: the line is lifted onto the item without the expression being
+/// consulted, so `requires foo=1` in a `def` body is a floor that states
+/// nothing (`E_INVALID_REQUIRES`) rather than a member line. That is the
+/// coherent reading once a floor may stand there, and it costs nothing —
+/// the same line was `E_UNKNOWN_KEYWORD` before, since the word has never
+/// been a member keyword.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum RequiresPolicy {
-    /// A `def` or `theme` body: lift the line onto the item.
+    /// A `def` or `theme` body: lift the line onto the item, whatever
+    /// follows the word.
     Accepted,
     /// A `struct` or `site` body. Neither is instantiated by anything — each
     /// *is* the build — so a floor written inside one constrains exactly the
@@ -491,12 +500,12 @@ impl<'a> Parser<'a> {
     /// and `policy` lets it.
     ///
     /// `Ok(None)` means the caller should read the line as an ordinary body
-    /// item. That covers both "the next line does not open with the word"
-    /// and "it does, but declares no floor": the word is reserved only
-    /// where it means something, so a member whose keyword happens to be
-    /// spelled that way parses in every body it parsed in before the line
-    /// existed. Deciding that needs the whole expression, so the line is
-    /// read and then rewound — `pos` is the only state to restore, since
+    /// item. Under a refusing policy that covers both "the next line does
+    /// not open with the word" and "it does, but declares no floor": a body
+    /// that reads no floors leaves the word an ordinary one, so a member
+    /// spelled that way parses there exactly as it did before the line
+    /// existed. Deciding the second needs the whole expression, so the line
+    /// is read and then rewound — `pos` is the only state to restore, since
     /// [`Self::parse_requires_line`] never opens a nesting level.
     fn requires_line_here(
         &mut self,
@@ -505,6 +514,10 @@ impl<'a> Parser<'a> {
         if !self.peek_is_ident(REQUIRES) {
             return Ok(None);
         }
+        // Under `Accepted` the expression is never consulted: the word is
+        // reserved at that level and an unreadable expression is a floor
+        // that states nothing. Only a refusing policy asks, and only so
+        // that a body reading no floors leaves the word an ordinary one.
         let position = self.position();
         let mark = self.pos;
         match self.parse_requires_line() {

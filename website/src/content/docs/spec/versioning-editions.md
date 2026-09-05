@@ -167,9 +167,14 @@ placement's own `theme=` instead.
 so a floor written inside one constrains exactly the file it is in, which is what `@requires`
 already says. The same goes for a member's own indented children: the floor belongs to the part, and
 a `walls` line is not a part. The two refusals are different messages, because the repairs differ:
-one points at `@requires`, the other at a dedent. Neither refuses on the word alone — `requires` is
-an ordinary keyword wherever it declares nothing, so a member line spelled that way parses in every
-body it parsed in before this line existed.
+one points at `@requires`, the other at a dedent. Neither refuses on the word alone: `requires` is
+an ordinary keyword in a body that reads no floors, so a member line spelled that way parses in a
+`struct`, a `site`, or under a member exactly as it did before this line existed.
+
+A `def` or `theme` body is the other half of that, and takes the word whatever follows it: the line
+is a floor, and an expression that reads as none is `E_INVALID_REQUIRES` rather than a member. That
+costs nothing — `requires` has never been a member keyword, so the same line was `E_UNKNOWN_KEYWORD`
+before.
 
 `E_VERSION_CAP` names the part that imposed the floor, not only the number. A target refused by a
 floor written inside a template is not actionable as a bare version, because the repair is at the
