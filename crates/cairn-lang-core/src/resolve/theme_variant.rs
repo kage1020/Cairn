@@ -10,8 +10,15 @@
 //! now ask it. The resolver asks in order to walk a body under the right slot
 //! map; [`super::version_axes`] asks in order to decide whose version floors
 //! a build inherits, and it works from the surface AST, where no
-//! `ThemeBinding` exists yet. One copy of the rule, so a reference cannot bind
-//! one variant for the build and a different one for the floor it is held to.
+//! `ThemeBinding` exists yet. One copy of the rule, so the same names and the
+//! same pin cannot bind differently in two places — which is what makes
+//! `E_VERSION_CAP` and `buildable targets` weigh the floor of the variant the
+//! build actually binds.
+//!
+//! The guarantee is about the rule, not about every question asked of it.
+//! `cairn info`'s edition-neutral row asks with *no* pin, and reads a theme
+//! only when both editions bind the same one — see
+//! [`super::unscoped_version_floors`], which owns that caveat.
 
 use crate::edition::Edition;
 

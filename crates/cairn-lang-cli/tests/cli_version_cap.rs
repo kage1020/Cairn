@@ -701,9 +701,15 @@ fn a_floor_a_def_declares_refuses_the_target_and_names_the_def() {
     assert_eq!(out.status.code(), Some(1));
     let stderr = String::from_utf8(out.stderr).expect("utf-8");
     assert!(stderr.contains("E_VERSION_CAP"), "{stderr}");
+    // The primary says whose floor it is, not "this file": a floor the file
+    // inherited from a part is the reading the composite rule corrects.
+    assert!(
+        stderr.contains("`def cottage` requires version>=1.21.4"),
+        "the primary has to name the part: {stderr}",
+    );
     assert!(
         stderr.contains("`def cottage` declares it, and every `place use=cottage` inherits it"),
-        "the refusal has to name the part: {stderr}",
+        "the refusal has to name the route: {stderr}",
     );
     // And the repair points at the line the floor is on, which is not the
     // directive.
@@ -729,6 +735,54 @@ fn a_floor_a_bound_theme_declares_refuses_the_target() {
     assert!(
         stderr.contains("`theme t` declares it, and every scope that binds the theme inherits it"),
         "{stderr}",
+    );
+}
+
+/// Where a header floor and an inherited one both apply and only the
+/// inherited one refuses, the refusal reports the one that refused.
+///
+/// Floors compose by intersection, so any one of them refusing is the build
+/// refused; naming the wrong line sends the author to edit a floor every
+/// target already clears.
+#[test]
+fn the_refusal_names_the_floor_that_refused_not_the_first_one() {
+    let fixture = Fixture::new(
+        "header-and-part",
+        "@requires version>=1.20.4\ntheme t:\n  slot floor -> @oak_planks\n\
+         \ndef cottage size=2x2:\n  requires version>=1.21.4\n  floor mat_slot=floor\n\
+         \nsite hamlet:\n  place id=a use=cottage theme=t at=origin\n",
+    );
+    let out = compile(&fixture, "1.21");
+    assert_eq!(out.status.code(), Some(1));
+    let stderr = String::from_utf8(out.stderr).expect("utf-8");
+    assert!(
+        stderr.contains("`def cottage` requires version>=1.21.4"),
+        "{stderr}",
+    );
+    assert!(
+        !stderr.contains("version>=1.20.4 (target"),
+        "the floor every target clears is not the news: {stderr}",
+    );
+}
+
+/// A theme bound only through a `def` no `place` names refuses nothing.
+///
+/// The auto-pick binds the module's sole theme to every `struct` and `def`
+/// scope, and the floor fold follows it only for the `struct`. Otherwise
+/// this file and the one below — identical but for which part carries the
+/// floor, neither building a voxel — would disagree about the same target.
+#[test]
+fn a_theme_bound_only_by_an_unplaced_def_refuses_nothing() {
+    let fixture = Fixture::new(
+        "unplaced-def-theme-floor",
+        "theme t:\n  requires version>=1.21.4\n  slot floor -> @oak_planks\n\
+         \ndef cottage size=2x2:\n  floor mat_slot=floor\n",
+    );
+    let out = compile(&fixture, "1.20.4");
+    assert!(
+        out.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&out.stderr),
     );
 }
 

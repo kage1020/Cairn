@@ -12,6 +12,42 @@ and is a separate axis from the Minecraft target version.
 
 ### Breaking changes
 
+- *(core,cli)* A `def` and a `theme` may declare `requires version>=X` on a line of their own, and
+  the minimum version of a composite is the max of its parts. `spec/versioning-editions.md` §10.4
+  has always said so; neither spelling parsed, so the sentence described a feature that existed at
+  no layer. A `def` is a template instantiated by `place`, so a floor on the `def` is a floor on
+  every site that uses it — which is how a library of templates carries its own requirements
+  instead of every consumer restating them. Module-level `@requires` cannot say that: it applies to
+  the whole file, not to the template.
+
+  The expression is the one `@requires` takes, edition scope and all, read by the same
+  `parse_requirement` and taken verbatim to end of line — so `24w14a` and `1.21.4-rc1` parse here as
+  they do there. `declared_version_floors` now walks the composite: the module's headers plus every
+  part the build instantiates, which is a `def` a `place use=` names and a `theme` a scope binds.
+  `cairn info`'s `registry compatibility` row runs the same fold, and `E_VERSION_CAP` names the part
+  that imposed the floor rather than only the number, because a target refused by a floor written
+  inside a template is not actionable as a bare version.
+
+  A `struct` and a `site` take no such line: each *is* the build rather than a part of one, so a
+  floor written inside one says what `@requires` already says. Nor does a member's own indented
+  child, whose repair is a dedent. Neither refusal fires on the word alone — `requires` stays an
+  ordinary keyword wherever it declares nothing.
+
+  **Breaking**: `ast::Item`'s `Def` and `Theme` variants each carry a new `requires` field, and
+  `resolve::VersionFloor` a new `origin`, so an external pattern naming every field of one of them
+  no longer compiles; adding `..` is the migration. Those two variants are now
+  `#[non_exhaustive]` themselves, so the next field costs no second break — the attribute on the
+  enum only ever covered adding a variant. The Rust API is Internal tier (compatibility C.2), so no
+  deprecation window is owed; the entry is here because C.3 requires one regardless of tier. The
+  serialized shape is unchanged: `requires` is skipped when empty and `VersionFloor` is not
+  `Serialize`, so `cairn parse`'s AST JSON and `cairn info`'s wire shape are byte-identical for any
+  source that does not use the new line.
+
+  One `.crn` source that parsed before does not: `requires` alone on a line in a `def` body was a
+  member with no arguments and is now `E_PARSE`, since a body that reads floors owns the failure of
+  a floor that states nothing. It was `E_UNKNOWN_KEYWORD` from `cairn check` either way; what
+  changes is that `cairn parse` now refuses it too.
+
 - *(core)* `TokenKind::Int` carries its `lexeme` only; the `value: i64` field is gone. The lexer
   cannot tell an integer literal from a truth-table row's bit pattern — both are digits, and only
   the grammar around them says which — so it no longer parses either into a number. Whoever needs

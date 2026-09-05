@@ -469,3 +469,43 @@ fn info_9f_the_neutral_row_reads_a_floor_a_placed_def_declares() {
         "the note names the part, not `this file`: {stderr}",
     );
 }
+
+/// A theme the two editions bind differently is left out of the neutral
+/// row, and stderr says so.
+///
+/// `registry compatibility` is one row for a file it may be reporting
+/// against both editions at once, so a floor only one of them inherits
+/// cannot feed it. Picking a variant by the unpinned order instead put a
+/// floor no Bedrock build is held to onto the row, contradicting the
+/// `buildable targets` line beside it — and, in the mirror case, left
+/// `0.0` on a file a Java build *is* held to, which `--format json`
+/// carries as `registry_compat.min` with nothing on the row to correct it.
+#[test]
+fn info_9g_a_theme_bound_per_edition_is_left_out_of_the_neutral_row() {
+    let path = tempfile_with_contents(
+        "variant_floor",
+        "theme shop:\n  requires version>=1.21.4\n  slot floor -> @oak_planks\n\
+         \ntheme shop_bedrock:\n  slot floor -> @oak_planks\n\
+         \nstruct s size=4x4\n  floor mat_slot=floor\n",
+    );
+    let out = run_info(&[path.to_str().unwrap(), "--editions", "bedrock"]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stdout = String::from_utf8(out.stdout).expect("utf-8");
+    assert!(
+        stdout.contains("registry compatibility:  0.0 .. latest"),
+        "a floor Bedrock does not inherit must not set the row's edge: {stdout}",
+    );
+    assert!(
+        stdout.contains("buildable targets:       Bedrock: 1.21.0, 1.21.40, 1.21.60"),
+        "and the per-edition row refuses nothing, so the two agree: {stdout}",
+    );
+    let stderr = String::from_utf8(out.stderr).expect("utf-8");
+    assert!(
+        stderr.contains("the two editions bind different variants of it"),
+        "`0.0` beside a floor in the file needs its reason: {stderr}",
+    );
+}

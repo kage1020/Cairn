@@ -408,13 +408,7 @@ fn derive_min_version(module: &Module) -> String {
 /// bypasses `check` and what it gets instead.
 #[must_use]
 pub fn declared_version_floors(module: &Module, edition: Edition) -> Vec<VersionFloor> {
-    // An unscoped floor is in every build; a scoped one is in its own
-    // edition's build and inert in the other's — inert, not violated,
-    // which is the reading that would make a file declaring one floor per
-    // edition unbuildable everywhere.
-    collect_floors(module, Some(edition), |declared| {
-        declared.is_none_or(|declared| declared == edition)
-    })
+    collect_floors(module, FloorScope::Pinned(edition))
 }
 
 /// The floors that constrain the file without naming an edition.
@@ -426,36 +420,70 @@ pub fn declared_version_floors(module: &Module, edition: Edition) -> Vec<Version
 /// file's Bedrock range, and reading it as if it did is the defect the
 /// scope exists to remove.
 ///
-/// The composite fold is the same one [`declared_version_floors`] runs, and
-/// it is run with no edition pinned — the question `cairn check` asks, and
-/// the only honest one for a row that is about neither edition. Where a
-/// module declares both variants of a logical theme, that leaves the
-/// variant picked by [`super::theme_variant::pick_variant`]'s unpinned
-/// order rather than by the build. The row is a rendering of what the file
-/// says and gates nothing; every row that *is* a gate — `buildable
-/// targets`, `E_VERSION_CAP` — asks per edition and picks the variant that
-/// build binds.
+/// A floor a *part* declares is held to the same test, and for the part it
+/// is inherited through rather than for the words on the line. A `theme`
+/// contributes here only when both editions bind the same one — see
+/// [`InstantiatedParts::of`]. Picking a variant by the unpinned order
+/// instead put a floor no build is held to into this row, in both
+/// directions: `theme shop` (with a floor) beside `theme shop_bedrock`
+/// (without) reported a lower edge a Bedrock build does not have, and the
+/// reverse pairing reported `0.0` for a Java build that is held to one —
+/// which `--format json` carries as `registry_compat.min` with nothing on
+/// the row to correct it.
+///
+/// A `def` needs no such test. It is instantiated by a `place use=NAME`,
+/// which names one def and not a family of per-edition variants, so the
+/// same def is inherited whichever edition is being built.
 #[must_use]
 pub fn unscoped_version_floors(module: &Module) -> Vec<VersionFloor> {
-    collect_floors(module, None, |declared| declared.is_none())
+    collect_floors(module, FloorScope::Neutral)
+}
+
+/// Which build is asking for a module's floors.
+///
+/// One value rather than an `Option<Edition>` beside a predicate. The two
+/// used to be separate arguments, which made
+/// `collect_floors(module, Some(Java), |declared| declared.is_none())`
+/// type-check — "bind Java's theme variants, then keep only the floors that
+/// name no edition", a question nothing asks. Both halves are decided by
+/// the same fact, so they are read off one value.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FloorScope {
+    /// A build of one edition. Keeps the floors scoped to it and the
+    /// unscoped ones, since an unscoped floor is a floor on whatever is
+    /// being built, and binds the theme variants that build binds.
+    Pinned(Edition),
+    /// The edition-neutral row. Keeps only the floors that name no edition,
+    /// and only the parts both editions inherit alike.
+    Neutral,
+}
+
+impl FloorScope {
+    /// Whether a floor scoped to `declared` constrains this build.
+    ///
+    /// A scoped floor is in its own edition's build and inert in the
+    /// other's — inert, not violated, which is the reading that would make
+    /// a file declaring one floor per edition unbuildable everywhere.
+    fn keeps(self, declared: Option<Edition>) -> bool {
+        match self {
+            Self::Pinned(edition) => declared.is_none_or(|declared| declared == edition),
+            Self::Neutral => declared.is_none(),
+        }
+    }
 }
 
 /// Walk the module's headers and its instantiated parts once, keeping the
-/// floors a predicate accepts.
+/// floors `scope` accepts.
 ///
 /// Source order, which is headers before items: a caller reporting "the
 /// first floor that refuses the target" reports the one an author reading
 /// top to bottom would reach first.
-fn collect_floors(
-    module: &Module,
-    edition: Option<Edition>,
-    applies: impl Fn(Option<Edition>) -> bool,
-) -> Vec<VersionFloor> {
-    let instantiated = InstantiatedParts::of(module, edition);
+fn collect_floors(module: &Module, scope: FloorScope) -> Vec<VersionFloor> {
+    let instantiated = InstantiatedParts::of(module, scope);
     let mut floors = Vec::new();
     let mut push = |requirement: &RawRequirement, span: &Span, origin: &FloorOrigin| {
         if let Some(parsed) = parse_min_version(requirement.as_str())
-            && applies(parsed.edition)
+            && scope.keeps(parsed.edition)
         {
             floors.push(VersionFloor {
                 version: parsed.version.to_owned(),
@@ -518,14 +546,29 @@ impl<'a> InstantiatedParts<'a> {
     /// `E_VERSION_CAP` exists to remove. Binding a theme is the act of
     /// taking on what it declares.
     ///
-    /// Two things bind one: a `place ... theme=NAME` reference, and the
-    /// module-level auto-pick, which binds the sole logical theme of a file
-    /// to every `struct` and `def` scope in it. The second is why a file
-    /// with one theme and one `struct` — no `site` at all — still inherits
-    /// that theme's floor, and why a file of nothing but themes does not:
-    /// the auto-pick binds to scopes, and a module with none has nothing
-    /// for it to bind to.
-    fn of(module: &'a Module, edition: Option<Edition>) -> Self {
+    /// Two things bind one, and both of them are a scope a build lowers:
+    ///
+    /// - a `place ... theme=NAME` reference, which is also what instantiates
+    ///   the `def` it places (`theme=` is required on a `place`, so a
+    ///   placement always names the theme its body resolves against);
+    /// - the module-level auto-pick, read here only for a `struct`, which
+    ///   is the one scope a build lowers without a placement.
+    ///
+    /// The auto-pick binds to `def` scopes too, and this deliberately does
+    /// not follow it there. A `def` no `place` names builds no voxels, so
+    /// charging a theme's floor because such a `def` exists would read the
+    /// same `def` as instantiated enough to take on a theme's floor and not
+    /// instantiated enough to be charged its own — the reading "a part
+    /// nothing instantiates contributes nothing" exists to rule out. A
+    /// `def` that *is* placed reaches the theme through its placement's own
+    /// `theme=` instead, so nothing is lost by not following it.
+    ///
+    /// Under [`FloorScope::Neutral`] a theme has one more test to pass:
+    /// both editions must bind the same one. A row that is about neither
+    /// edition cannot read a floor only one of them inherits, and the
+    /// unpinned variant order corresponds to no value of `--editions` — see
+    /// [`unscoped_version_floors`].
+    fn of(module: &'a Module, scope: FloorScope) -> Self {
         let declared_defs: HashSet<&str> = module
             .items
             .iter()
@@ -543,37 +586,48 @@ impl<'a> InstantiatedParts<'a> {
             defs: HashSet::new(),
             themes: HashSet::new(),
         };
-        let has_a_scope_to_bind_to = module
+        let declares_a_struct = module
             .items
             .iter()
-            .any(|item| matches!(item.kind(), ItemKind::Struct | ItemKind::Def));
-        if has_a_scope_to_bind_to
+            .any(|item| item.kind() == ItemKind::Struct);
+        if declares_a_struct
             && let Some(logical) = single_logical_theme(declared_themes.iter().copied())
-            && let Some(name) = pick_variant(declared_themes.iter().copied(), logical, edition)
+            && let Some(name) = bound_alike(
+                &declared_themes,
+                logical,
+                scope,
+                |names, logical, edition| pick_variant(names.iter().copied(), logical, edition),
+            )
         {
             parts.themes.insert(name);
         }
         for item in &module.items {
             let Item::Site { body, .. } = item else {
+                // A `place` outside a `site` body is `E_MISPLACED_MEMBER`,
+                // an Error, so the file is refused before any floor is
+                // weighed and the placement it writes instantiates nothing.
                 continue;
             };
-            parts.walk(body, &declared_defs, &declared_themes, edition);
+            parts.walk(body, &declared_defs, &declared_themes, scope);
         }
         parts
     }
 
     /// Collect the `place` lines of one body, and of the bodies under it.
     ///
-    /// Recursive because `Statement::Generic` may carry children anywhere:
-    /// where a `place` is legal is `check::member_scope`'s question, and a
-    /// walk that assumed the answer would silently drop a floor from a file
-    /// that is otherwise about to be refused for a different reason.
+    /// The recursion over-collects rather than under-collects: a `place`
+    /// nested under a member is `E_UNSUPPORTED_NESTING`, and the resolver
+    /// reads a site's placements flat, so nothing a nested `place` names is
+    /// ever instantiated. It is walked anyway because the alternative is a
+    /// walk that decides where a `place` may stand, which is
+    /// `check::member_scope`'s question and not this one's; over-collecting
+    /// on a file that is already refused costs nothing.
     fn walk(
         &mut self,
         body: &'a [Statement],
         declared_defs: &HashSet<&'a str>,
         declared_themes: &[&'a str],
-        edition: Option<Edition>,
+        scope: FloorScope,
     ) {
         for statement in body {
             let Statement::Generic {
@@ -585,7 +639,7 @@ impl<'a> InstantiatedParts<'a> {
             else {
                 continue;
             };
-            self.walk(children, declared_defs, declared_themes, edition);
+            self.walk(children, declared_defs, declared_themes, scope);
             if keyword != "place" {
                 continue;
             }
@@ -595,11 +649,44 @@ impl<'a> InstantiatedParts<'a> {
                 self.defs.insert(declared);
             }
             if let Some(written) = label_arg(args, "theme")
-                && let Some(bound) =
-                    bound_theme_name(declared_themes.iter().copied(), written, edition)
+                && let Some(bound) = bound_alike(
+                    declared_themes,
+                    written,
+                    scope,
+                    |names, written, edition| {
+                        bound_theme_name(names.iter().copied(), written, edition)
+                    },
+                )
             {
                 self.themes.insert(bound);
             }
+        }
+    }
+}
+
+/// The theme `bind` selects under `scope`, or `None`.
+///
+/// A pinned scope is the build's own answer. A neutral one asks both
+/// editions and keeps the answer only when they agree: a theme one edition
+/// binds and the other does not is a per-edition fact, and a row about
+/// neither edition has no business reading a floor from it.
+///
+/// `bind` is the selection rule the caller is asking about —
+/// [`pick_variant`] for the module-level auto-pick, [`bound_theme_name`]
+/// for a written `theme=` reference — so the neutral test is the same test
+/// in both places rather than two spellings of it.
+fn bound_alike<'a>(
+    names: &[&'a str],
+    written: &str,
+    scope: FloorScope,
+    bind: impl Fn(&[&'a str], &str, Option<Edition>) -> Option<&'a str>,
+) -> Option<&'a str> {
+    match scope {
+        FloorScope::Pinned(edition) => bind(names, written, Some(edition)),
+        FloorScope::Neutral => {
+            let java = bind(names, written, Some(Edition::Java))?;
+            let bedrock = bind(names, written, Some(Edition::Bedrock))?;
+            (java == bedrock).then_some(java)
         }
     }
 }
@@ -666,17 +753,23 @@ pub enum FloorOrigin {
 }
 
 impl FloorOrigin {
-    /// The part as `kind NAME`, or `None` for a module-level floor.
+    /// The part as `(keyword, name)`, or `None` for a module-level floor.
+    ///
+    /// A pair rather than a rendered `"def cottage"`, because this type
+    /// holds the part rather than prose about it, and because the keyword
+    /// is [`ItemKind`]'s to spell — the surface word for a kind is written
+    /// down once, and a renderer that hand-wrote it here would be a second
+    /// copy to fall out of step.
     ///
     /// `None` rather than `"the module"`: a caller printing a note about
     /// where a floor came from has nothing to add for the header form —
     /// the span already points at the line, and the line is the file's.
     #[must_use]
-    pub fn part(&self) -> Option<String> {
+    pub fn part(&self) -> Option<(&'static str, &str)> {
         match self {
             Self::Module => None,
-            Self::Def(name) => Some(format!("def {name}")),
-            Self::Theme(name) => Some(format!("theme {name}")),
+            Self::Def(name) => Some((ItemKind::Def.keyword(), name)),
+            Self::Theme(name) => Some((ItemKind::Theme.keyword(), name)),
         }
     }
 }
