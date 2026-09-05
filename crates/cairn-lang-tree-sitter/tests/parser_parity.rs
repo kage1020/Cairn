@@ -56,6 +56,20 @@ const FIXTURES: &[(&str, &str, Verdict)] = &[
     ),
     ("requires_other_prefix", "@requires mc>=1.20\n", Accept),
     ("requires_bare", "@requires 1.20\n", Accept),
+    // A pre-release label carries a `-`, which the reference lexer used to
+    // refuse outright while `directive_literal` (`[^#\r\n \t]+`) has always
+    // taken it — a live divergence that was never in `KNOWN_DIVERGENCES`
+    // because no fixture held a `-` outside an `->`. Both accept it now.
+    (
+        "requires_prerelease",
+        "@requires version>=1.21.4-rc1\n",
+        Accept,
+    ),
+    (
+        "requires_edition_scope",
+        "@requires java version>=1.21.4\n",
+        Accept,
+    ),
     (
         "intended_targets",
         "@intended_targets [\"1.20.4\",\"1.21.4\"]\n",
@@ -335,6 +349,16 @@ const FIXTURES: &[(&str, &str, Verdict)] = &[
     // declaration header refuses *any* trailing bare token, so
     // `size=2x2 junk` fails here identically. The size rule is not
     // consulted, which is why the real case lives in
+    // The other half of the `-` pair: it lexes, and no value position
+    // reads one. Tree-sitter's `identifier` is `[A-Za-z_][A-Za-z0-9_]*` so
+    // the grammar stops at `a`, and the reference parser now lexes `a`,
+    // `Minus`, `b` and refuses the token. They agree on the answer for
+    // different reasons, which is what this suite is for.
+    (
+        "a_dash_in_a_value_is_refused",
+        "theme t:\n  slot a-b -> @c\n",
+        Reject,
+    ),
     // `KNOWN_DIVERGENCES` — see `size_with_a_third_extent`.
     (
         "a_header_refuses_a_trailing_token",

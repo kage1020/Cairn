@@ -330,7 +330,7 @@ pub fn compute_axes(
 /// one of two floors an author declared changes which line is echoed
 /// rather than which targets build.
 fn derive_min_version(module: &Module) -> String {
-    declared_version_floors(module, None)
+    unscoped_version_floors(module)
         .into_iter()
         .reduce(|best, next| {
             if compare_versions(&next.version, &best.version).is_gt() {
@@ -354,12 +354,13 @@ fn derive_min_version(module: &Module) -> String {
 /// the target and reports the first that refuses it, which reaches the
 /// same answer without ever comparing two floors to each other.
 ///
-/// `edition` says which build is asking. `Some(e)` collects the floors
-/// scoped to `e` and the unscoped ones, since an unscoped floor is a floor
-/// on whatever is being built. `None` is the edition-neutral question and
-/// collects only the unscoped floors: a floor written in Java's numbering
-/// says nothing about a file's Bedrock range, and reading it as if it did
-/// is the defect the scope exists to remove.
+/// `edition` says which build is asking: the floors scoped to it and the
+/// unscoped ones, since an unscoped floor is a floor on whatever is being
+/// built. The edition-neutral question is a different function
+/// ([`unscoped_version_floors`]) rather than a `None` here, because
+/// `Option<Edition>` would then carry two opposite senses in one API — a
+/// floor's own `None` means "every edition" and the argument's would mean
+/// "no edition".
 ///
 /// Requirements the grammar refuses declare nothing and are skipped here.
 /// They are reported by `check::requires` at `Error` severity, which is
@@ -368,12 +369,36 @@ fn derive_min_version(module: &Module) -> String {
 /// `crates/cairn-lang-core/tests/silent_skip_arms.rs` for the caller that
 /// bypasses `check` and what it gets instead.
 #[must_use]
-pub fn declared_version_floors(module: &Module, edition: Option<Edition>) -> Vec<VersionFloor> {
+pub fn declared_version_floors(module: &Module, edition: Edition) -> Vec<VersionFloor> {
+    // An unscoped floor is in every build; a scoped one is in its own
+    // edition's build and inert in the other's — inert, not violated,
+    // which is the reading that would make a file declaring one floor per
+    // edition unbuildable everywhere.
+    collect_floors(module, |declared| {
+        declared.is_none_or(|declared| declared == edition)
+    })
+}
+
+/// The floors that constrain the file without naming an edition.
+///
+/// The edition-neutral question, which `cairn info`'s `registry
+/// compatibility` row asks: one row for a file it may be reporting against
+/// both editions at once, so only a floor that means something in both can
+/// feed it. A floor written in Java's numbering says nothing about the
+/// file's Bedrock range, and reading it as if it did is the defect the
+/// scope exists to remove.
+#[must_use]
+pub fn unscoped_version_floors(module: &Module) -> Vec<VersionFloor> {
+    collect_floors(module, |declared| declared.is_none())
+}
+
+/// Walk the headers once, keeping the floors a predicate accepts.
+fn collect_floors(module: &Module, applies: impl Fn(Option<Edition>) -> bool) -> Vec<VersionFloor> {
     let mut floors = Vec::new();
     for header in &module.headers {
         if let Header::Requires { requirement, span } = header
             && let Some(parsed) = parse_min_version(requirement.as_str())
-            && applies_to(parsed.edition, edition)
+            && applies(parsed.edition)
         {
             floors.push(VersionFloor {
                 version: parsed.version.to_owned(),
@@ -383,20 +408,6 @@ pub fn declared_version_floors(module: &Module, edition: Option<Edition>) -> Vec
         }
     }
     floors
-}
-
-/// Whether a floor scoped to `declared` is part of a build of `asked`.
-///
-/// An unscoped floor is in every build. A scoped one is in its own
-/// edition's build and inert in the other's — not violated by it, which is
-/// the reading that would make a file declaring a floor per edition
-/// unbuildable everywhere.
-fn applies_to(declared: Option<Edition>, asked: Option<Edition>) -> bool {
-    match (declared, asked) {
-        (None, _) => true,
-        (Some(_), None) => false,
-        (Some(declared), Some(asked)) => declared == asked,
-    }
 }
 
 /// A version floor a module declares, with the directive it came from.

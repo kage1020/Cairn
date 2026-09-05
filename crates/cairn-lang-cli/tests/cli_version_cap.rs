@@ -434,8 +434,8 @@ fn a_bedrock_target_equal_to_the_floor_but_for_a_trailing_zero_compiles() {
 
 /// A floor written in Java's numbering is not evaluated against Bedrock's.
 ///
-/// Bedrock `1.21.40` is two releases *below* the edition's latest, while
-/// Java `1.21.4` is its latest — different scales entirely. The
+/// Bedrock numbers its patch releases in tens — `1.21.0`, `1.21.20`,
+/// `1.21.40` — so Java's `1.21.4` names no Bedrock release at all. The
 /// dotted-decimal comparison this replaced saw `40 > 4` and let the build
 /// through, so a file declaring `version>=1.21.4` compiled to a Bedrock
 /// structure and a lock reading `verified: true` for a target the source

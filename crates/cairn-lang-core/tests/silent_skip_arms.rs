@@ -559,7 +559,7 @@ connect anchor.entry to silent.entry path=@gravel\n"
 }
 
 /// A `@requires` expression the grammar refuses declares no floor, and
-/// `declared_version_floor` skips it without a word.
+/// `unscoped_version_floors` skips it without a word.
 ///
 /// That skip is what keeps a caller from being held to half of an
 /// expression already called a mistake, and it is safe *only* because
@@ -573,7 +573,7 @@ fn a_refused_requirement_is_skipped_silently_by_the_floor_derivation() {
     let module = cairn_lang_core::parse(source).expect("the headers parse");
 
     assert_eq!(
-        cairn_lang_core::resolve::declared_version_floors(&module, None),
+        cairn_lang_core::resolve::unscoped_version_floors(&module),
         Vec::new(),
         "neither expression is a floor, so none is derived",
     );

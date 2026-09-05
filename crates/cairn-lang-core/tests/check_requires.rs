@@ -73,7 +73,10 @@ fn floors_for(
 ) -> Vec<cairn_lang_core::resolve::VersionFloor> {
     let source = format!("{header}{BODY}");
     let module = parse(&source).expect("parse");
-    cairn_lang_core::resolve::declared_version_floors(&module, edition)
+    match edition {
+        Some(edition) => cairn_lang_core::resolve::declared_version_floors(&module, edition),
+        None => cairn_lang_core::resolve::unscoped_version_floors(&module),
+    }
 }
 
 /// The version labels of those floors, which is what most of the tests

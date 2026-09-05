@@ -134,6 +134,17 @@ impl VersionOrder {
     /// Sorted here rather than trusted from the caller: the JSON file's
     /// row order is documented as informational, and every answer below
     /// reads the first and last rows as the table's bounds.
+    ///
+    /// Infallible, and the answers below are only meaningful on rows that
+    /// are a version table: labels distinct under [`compare_versions`],
+    /// keys distinct, and — for the boundary answers — labels sorting the
+    /// same way by text as by key. Those are checked where a table is
+    /// *read*, by the registry pack loader, rather than here, for the same
+    /// reason `RegistryPack` cannot be built without going through
+    /// validation: a caller assembling rows by hand (a test, a future
+    /// `--registry-pack`) gets a total function and an arbitrary answer
+    /// rather than a panic, and a pack that reached this constructor
+    /// passed the checks already.
     #[must_use]
     pub fn new(rows: impl IntoIterator<Item = (String, i64)>) -> Self {
         let mut rows: Vec<VersionRow> = rows
@@ -241,10 +252,13 @@ impl VersionOrder {
 
     /// Weigh a floor against a target's key.
     ///
-    /// The target is given as its key rather than as a label because every
-    /// caller resolved it through this same table to pin a build, and
-    /// passing the label back to be looked up again would make an
-    /// unresolvable target expressible here — a state no caller has.
+    /// The target is given as its key rather than as a label because the
+    /// callers hold one already: one looked the target up in this table,
+    /// the other took it from the resolved target the backend will stamp,
+    /// which is the same integer for the same version. Taking a label back
+    /// would mean looking up something already in hand, through a lookup
+    /// that would then need an answer for a target that does not resolve —
+    /// a state no caller has.
     #[must_use]
     pub fn verdict(&self, floor: &str, target_key: i64) -> FloorVerdict {
         match self.place(floor) {
