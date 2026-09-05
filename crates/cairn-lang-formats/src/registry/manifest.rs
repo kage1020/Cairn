@@ -72,6 +72,14 @@ pub struct PackFiles {
     /// what has to grow the table.
     #[serde(default)]
     pub blocks: Option<String>,
+    /// Relative filename of the `aliases` group catalog JSON. Optional on
+    /// the same terms as `blocks`: a pack without it loads, and the loader
+    /// fills [`crate::registry::AliasIndex::empty`] in its place. An
+    /// `E_UNKNOWN_ID` against such a pack falls back to the typo search
+    /// alone, which is where every pack stood before this component
+    /// existed.
+    #[serde(default)]
+    pub aliases: Option<String>,
 }
 
 #[cfg(test)]
@@ -94,6 +102,7 @@ mod tests {
         assert_eq!(m.files.data_versions, "data_versions.json");
         assert!(m.files.materials.is_none(), "materials defaults to None");
         assert!(m.files.blocks.is_none(), "blocks defaults to None");
+        assert!(m.files.aliases.is_none(), "aliases defaults to None");
     }
 
     #[test]
@@ -110,6 +119,23 @@ mod tests {
         }"#;
         let m: PackManifest = serde_json::from_str(src).expect("deserialise manifest");
         assert_eq!(m.files.blocks.as_deref(), Some("blocks.json"));
+    }
+
+    #[test]
+    fn manifest_with_aliases_component_roundtrips() {
+        let src = r#"{
+            "schema_version": 1,
+            "edition": "bedrock",
+            "name": "cairn-builtin-bedrock",
+            "description": "test",
+            "files": {
+                "data_versions": "data_versions.json",
+                "blocks": "blocks.json",
+                "aliases": "aliases.json"
+            }
+        }"#;
+        let m: PackManifest = serde_json::from_str(src).expect("deserialise manifest");
+        assert_eq!(m.files.aliases.as_deref(), Some("aliases.json"));
     }
 
     #[test]

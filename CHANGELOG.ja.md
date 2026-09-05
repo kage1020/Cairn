@@ -46,6 +46,52 @@
 
 ### 破壊的変更
 
+- *(core,formats,cli)* `E_UNKNOWN_ID` がタイポだけでなく **リネーム** にも答えるようになりました。
+  レジストリパックに `aliases` コンポーネント (1 つのブロックがまとってきた綴りのグループ) が加わり、
+  拒否された ID は固定したターゲットが実際に使う名前とともに報告されます。
+
+  ```
+  $ cairn compile s.crn --edition bedrock --target 1.21.60   # slot floor -> @light
+  s.crn:2:17: error[E_UNKNOWN_ID]: `minecraft:light` is not a block in `bedrock 1.21.60`
+    note: `bedrock 1.21.60` spells this block `minecraft:light_block_0`,
+          `minecraft:light_block_1`, `minecraft:light_block_2`, `minecraft:light_block_3`
+          and 12 more, per the registry pack's alias table
+  ```
+
+  これまでの提案は、ターゲット自身のブロック表に対する Damerau-Levenshtein 検索で、7 文字以上のパスな
+  ら 3 編集が上限でした。これが捕まえるのは `oak_plank` → `oak_planks` のようなタイポだけで、リネーム
+  はすべて上限のはるか外です (`oak_sign` → `standing_sign` は 7 編集、`light` → `light_block_0` は
+  8 編集)。つまり作者が最も踏みやすいケースで出るのは「候補は無い」というメッセージで、正直ではあって
+  も、1000 件の ID 表を前にした人には何の助けにもなりませんでした。`spec/versioning-editions.md`
+  §10.4 はエラーに「ターゲットで有効な閉じた候補集合」を返すことを求めており、テキスト上で関係のない
+  2 つの綴りに対して、距離検索は構造的にその集合を作れません。
+
+  本当に難しいのは、行を何で鍵付けるかでした。Java の ID を基底に Bedrock を差分とするのは真っ先に思
+  い付く案ですが、答えられるのは半分だけです。1 つのエディション内部で同じ問題が起きる Bedrock
+  1.21.0 → 1.21.40 について何も言えません。そこで行は何でも鍵付けないことにしました。行は **綴りのグ
+  ループ** であり、どの綴りがどの `(edition, version)` のものかは、すでに `blocks` の表がバージョン単
+  位で答えている問いだからです。照合は固定したターゲットが宣言するメンバーだけを残すので、同じ行が
+  Java → Bedrock にも Bedrock 1.21.0 → 1.21.40 にも答えます。この鍵で表現できないのは、両エディション
+  が宣言していて意味が異なる綴りです (Bedrock の `snow` は Java の `snow_block`、Java の `snow` は
+  Bedrock の `snow_layer`)。その組には誤った行を与えるのではなく、行を与えません。
+
+  答えは閉じた候補集合であって、そこからの選択ではありません。Bedrock 1.21.60 の `@light` には 16 段
+  階の明度すべてが報告されます。1 つを選ぶことは §10.4 が禁じる暗黙の置換だからです。ノートは先頭 4 件
+  を並べて残りを数え、集合全体は診断の `data` ペイロードの、`suggestion` と並ぶ新しい `aliases` キーに
+  入ります。この 2 つを分けたままにしているのは、同じ範囲に対する別種の主張だからです。`aliases` は
+  「2 つの名前は同じブロックだ」というパックの言明で、`suggestion` は文字列距離からの推測です。だから
+  クイックフィックスは前者を無断で適用してよく、後者は適用すべきではありません。`cairn info` の
+  `edition portability` 行も同じ表を読み、そのエディションが別名で持っているエントリは行き止まりでは
+  なくその名前を示すようになりました。
+
+  タイポ検索は変わっておらず、エイリアス表が何も言わないところでは今も走ります。`aliases` コンポーネン
+  トを持たないパックもそこに含まれ、そうしたパックが出すメッセージは以前と同じです。組み込みパックは、
+  作者が最も踏みやすい Java/Bedrock の綴りの分岐と、Bedrock 自身の 1.21.40 のフラット化で退役した ID
+  を収録しています。API 利用者にとっての破壊的変更: `portability_for_java` /
+  `portability_for_bedrock` は第 3 引数にパックの `AliasIndex` を取り、
+  `UnsupportedReason::AbsentFromEdition` と `DiagnosticData::UnknownId` はそれぞれフィールドが 1 つ
+  増えました。
+
 - *(core,cli)* `def` と `theme` が独立した行として `requires version>=X` を宣言できるようになり、
   合成物の最小バージョンは構成要素の最大値になりました。`spec/versioning-editions.md` §10.4 は
   以前からそう述べていましたが、どちらの綴りもパースされず、仕様の一文はどの層にも存在しない機能を

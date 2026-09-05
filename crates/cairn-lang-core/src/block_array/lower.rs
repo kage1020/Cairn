@@ -60,6 +60,7 @@ use crate::intent::{
     DefIr, IntentModule, Member, MemberRole, SiteIr, Size, StructIr, ValueWithSpan,
 };
 use crate::resolve::{Resolution, ScopeResolution, place_scope_key};
+use crate::suggest::candidate_list;
 
 use super::{Footprint, MAX_STRUCTURE_VOLUME, Placement, Walkway};
 
@@ -823,6 +824,7 @@ fn diag_unknown_id(span: Span, unknown: &UnknownId) -> Diagnostic {
         registry,
         origin,
         suggestion,
+        aliases,
     } = unknown;
     let mut notes = Vec::with_capacity(2);
     match origin {
@@ -840,12 +842,23 @@ fn diag_unknown_id(span: Span, unknown: &UnknownId) -> Diagnostic {
             ),
         }),
     }
+    // One note, and the alias table wins it when it has anything to say.
+    // The two answers are not additive: a reader handed "this target calls
+    // it X" and "the nearest spelling is Y" has to work out which of the
+    // two the compiler believes, and the answer is always the first. The
+    // payload still carries both, for a consumer that can show them apart.
     notes.push(DiagnosticNote {
         span: None,
-        message: match suggestion {
-            Some(candidate) => format!("`{registry}` spells the nearest block `{candidate}`"),
-            None => format!(
+        message: match (aliases.as_slice(), suggestion) {
+            ([], None) => format!(
                 "no block in `{registry}` is near enough to suggest; compile against a target that declares `{id}`, or pick a block this one has",
+            ),
+            ([], Some(candidate)) => {
+                format!("`{registry}` spells the nearest block `{candidate}`")
+            }
+            (spellings, _) => format!(
+                "`{registry}` spells this block {}, per the registry pack's alias table",
+                candidate_list(spellings),
             ),
         },
     });
@@ -860,6 +873,7 @@ fn diag_unknown_id(span: Span, unknown: &UnknownId) -> Diagnostic {
             origin: origin.kind().to_owned(),
             token: origin.token().map(str::to_owned),
             suggestion: suggestion.clone(),
+            aliases: aliases.clone(),
         }),
     }
 }
@@ -4494,13 +4508,26 @@ mod tests {
         entries: Vec<(&'static str, &'static str)>,
         /// Sorted, fully namespaced ids the pinned target declares.
         ids: Vec<String>,
+        /// One alias group, in the order a pack wrote it. Empty for a pack
+        /// shipping no `aliases` component.
+        group: Vec<String>,
     }
 
     impl PinnedRegistry {
         fn new(entries: Vec<(&'static str, &'static str)>, ids: &[&str]) -> Self {
             let mut ids: Vec<String> = ids.iter().map(|id| (*id).to_owned()).collect();
             ids.sort();
-            Self { entries, ids }
+            Self {
+                entries,
+                ids,
+                group: Vec::new(),
+            }
+        }
+
+        /// Declare one alias group over the same ids.
+        fn aliasing(mut self, group: &[&str]) -> Self {
+            self.group = group.iter().map(|id| (*id).to_owned()).collect();
+            self
         }
     }
 
@@ -4519,6 +4546,17 @@ mod tests {
         fn block_ids(&self) -> Option<crate::block_array::BlockIdSet<'_>> {
             Some(crate::block_array::BlockIdSet::new("test 1.0", &self.ids))
         }
+
+        fn aliases_for(&self, id: &str) -> Vec<String> {
+            if !self.group.iter().any(|spelling| spelling == id) {
+                return Vec::new();
+            }
+            self.group
+                .iter()
+                .filter(|spelling| self.ids.binary_search(spelling).is_ok())
+                .cloned()
+                .collect()
+        }
     }
 
     struct UnknownIdPayload {
@@ -4527,6 +4565,7 @@ mod tests {
         origin: String,
         token: Option<String>,
         suggestion: Option<String>,
+        aliases: Vec<String>,
     }
 
     fn unknown_id_payload(out: &BlockArrayIr) -> UnknownIdPayload {
@@ -4551,12 +4590,14 @@ mod tests {
                 origin,
                 token,
                 suggestion,
+                aliases,
             }) => UnknownIdPayload {
                 id,
                 registry,
                 origin,
                 token,
                 suggestion,
+                aliases,
             },
             other => panic!("expected an UnknownId payload, got {other:?}"),
         }
@@ -4648,6 +4689,88 @@ mod tests {
                 .map(|d| d.primary.as_str())
                 .collect::<Vec<_>>(),
         );
+    }
+
+    /// A rename reaches the message as a statement, and a typo as a
+    /// guess, and the note says which it is holding.
+    ///
+    /// The wording is the load-bearing part: "spells this block" is the
+    /// pack asserting two names are one block, "spells the nearest block"
+    /// is a distance search offering its best candidate, and an author who
+    /// cannot tell them apart has to go and check either way.
+    #[test]
+    fn a_rename_and_a_typo_read_as_different_claims() {
+        let renamed = PinnedRegistry::new(vec![], &["minecraft:standing_sign"])
+            .aliasing(&["minecraft:oak_sign", "minecraft:standing_sign"]);
+        let out = lowered_with_resolver(
+            "theme t:\n  slot floor -> @oak_sign\nstruct s size=2x2\n  floor mat_slot=floor\n",
+            &renamed,
+        );
+        let payload = unknown_id_payload(&out);
+        assert_eq!(payload.aliases, ["minecraft:standing_sign".to_owned()]);
+        let note = unknown_id_note(&out);
+        assert!(
+            note.contains("spells this block `minecraft:standing_sign`")
+                && note.contains("alias table"),
+            "the note must name the alias table it is quoting, got: {note}",
+        );
+
+        let typo = PinnedRegistry::new(vec![], &["minecraft:oak_planks"]);
+        let out = lowered_with_resolver(
+            "theme t:\n  slot floor -> @oak_plank\nstruct s size=2x2\n  floor mat_slot=floor\n",
+            &typo,
+        );
+        let note = unknown_id_note(&out);
+        assert!(
+            note.contains("spells the nearest block") && !note.contains("alias table"),
+            "a distance guess must not be dressed up as the pack's word, got: {note}",
+        );
+    }
+
+    /// A split lists the first few candidates and counts the rest, and the
+    /// payload keeps all of them.
+    ///
+    /// The truncation is about the sentence a person reads; spec
+    /// versioning-editions §10.4 asks the error to return the closed set of
+    /// candidates, and the `data` payload is where a consumer finds it
+    /// whole.
+    #[test]
+    fn a_split_is_summarised_in_the_note_and_kept_whole_in_the_payload() {
+        let ids: Vec<String> = (0..16)
+            .map(|i| format!("minecraft:light_block_{i}"))
+            .collect();
+        let mut group = vec!["minecraft:light".to_owned()];
+        group.extend(ids.iter().cloned());
+        let refs: Vec<&str> = ids.iter().map(String::as_str).collect();
+        let group_refs: Vec<&str> = group.iter().map(String::as_str).collect();
+        let registry = PinnedRegistry::new(vec![], &refs).aliasing(&group_refs);
+        let out = lowered_with_resolver(
+            "theme t:\n  slot floor -> @light\nstruct s size=2x2\n  floor mat_slot=floor\n",
+            &registry,
+        );
+        let payload = unknown_id_payload(&out);
+        assert_eq!(payload.aliases.len(), 16, "every candidate reaches a tool");
+        let note = unknown_id_note(&out);
+        assert!(
+            note.contains("and 12 more"),
+            "the sentence counts what it does not list, got: {note}",
+        );
+    }
+
+    /// The one note the `E_UNKNOWN_ID` finding carries about candidates —
+    /// the last one, after the origin note the two pack-chosen origins add.
+    fn unknown_id_note(out: &BlockArrayIr) -> String {
+        let found = out
+            .diagnostics
+            .iter()
+            .find(|d| d.code == DiagnosticCode::UnknownId)
+            .expect("an E_UNKNOWN_ID finding");
+        found
+            .notes
+            .last()
+            .expect("the candidate note")
+            .message
+            .clone()
     }
 
     fn block_id(ba: &BlockArray, x: u32, y: u32, z: u32) -> &str {

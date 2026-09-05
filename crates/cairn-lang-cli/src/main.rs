@@ -16,6 +16,7 @@ use cairn_lang_core::resolve::{
     UnsupportedReason, VersionAxes, VersionFloor, VersionOrder, compute_axes,
     declared_version_floors, resolve, unscoped_version_floors,
 };
+use cairn_lang_core::suggest::candidate_list;
 use cairn_lang_core::{
     Diagnostic, Edition, Module, ParseError, Severity, check, diagnose_parse_failure, lower, parse,
 };
@@ -851,8 +852,8 @@ fn edition_rows(
         }
 
         let portability = match edition {
-            Edition::Java => portability_for_java(&block_ir, &pack.blocks),
-            Edition::Bedrock => portability_for_bedrock(&block_ir, &pack.blocks),
+            Edition::Java => portability_for_java(&block_ir, &pack.blocks, &pack.aliases),
+            Edition::Bedrock => portability_for_bedrock(&block_ir, &pack.blocks, &pack.aliases),
         };
         for note in unsupported_notes(edition, portability.unsupported()) {
             eprintln!("{note}");
@@ -948,11 +949,23 @@ fn unsupported_notes(edition: Edition, entries: &[UnsupportedEntry]) -> Vec<Stri
 /// looking.
 fn unsupported_reason(reason: &UnsupportedReason) -> String {
     match reason {
-        UnsupportedReason::AbsentFromEdition { suggestion } => {
+        UnsupportedReason::AbsentFromEdition {
+            suggestion,
+            aliases,
+        } => {
             let absent = "no supported version of this edition declares the block";
-            match suggestion {
-                Some(suggestion) => format!("{absent}; did you mean `{suggestion}`?"),
-                None => absent.to_owned(),
+            // The alias table answers first where it has anything to say:
+            // it is the pack stating that this edition has the block under
+            // another name, which a distance over the id text cannot find
+            // and which turns the row from a dead end into an edit.
+            match (aliases.as_slice(), suggestion) {
+                ([], None) => absent.to_owned(),
+                ([], Some(suggestion)) => format!("{absent}; did you mean `{suggestion}`?"),
+                (spellings, _) => format!(
+                    "no supported version of this edition declares that id; it spells the \
+                     block {}",
+                    candidate_list(spellings),
+                ),
             }
         }
         // The edition is not what cannot express these — this backend is,
@@ -3190,6 +3203,7 @@ mod tests {
                 id: "minecraft:oak_sign".to_owned(),
                 reason: UnsupportedReason::AbsentFromEdition {
                     suggestion: Some("minecraft:oak_log".to_owned()),
+                    aliases: Vec::new(),
                 },
             },
             UnsupportedEntry {
@@ -3236,17 +3250,33 @@ mod tests {
     /// nothing reads.
     #[test]
     fn every_unsupported_reason_renders_the_repair_it_names() {
-        let bare = unsupported_reason(&UnsupportedReason::AbsentFromEdition { suggestion: None });
+        let bare = unsupported_reason(&UnsupportedReason::AbsentFromEdition {
+            suggestion: None,
+            aliases: Vec::new(),
+        });
         assert!(
             bare.contains("declares the block") && !bare.contains("did you mean"),
             "no suggestion means no dangling clause, got: {bare}",
         );
         let suggested = unsupported_reason(&UnsupportedReason::AbsentFromEdition {
             suggestion: Some("minecraft:oak_slab".to_owned()),
+            aliases: Vec::new(),
         });
         assert!(
             suggested.contains("did you mean `minecraft:oak_slab`?"),
             "got: {suggested}",
+        );
+        // An edition that has the block under another name is not missing
+        // it, and the row says so instead of offering a typo guess beside
+        // a spelling the pack knows to be the answer.
+        let renamed = unsupported_reason(&UnsupportedReason::AbsentFromEdition {
+            suggestion: Some("minecraft:oak_slab".to_owned()),
+            aliases: vec!["minecraft:standing_sign".to_owned()],
+        });
+        assert!(
+            renamed.contains("it spells the block `minecraft:standing_sign`")
+                && !renamed.contains("did you mean"),
+            "got: {renamed}",
         );
         // The block is not missing from the edition and the edition is not
         // what cannot express the states — this compiler is, so far.

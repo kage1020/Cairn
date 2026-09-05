@@ -13,6 +13,7 @@ use cairn_lang_core::lock::HashHex;
 use cairn_lang_core::suggest::nearest_match;
 use thiserror::Error;
 
+use super::aliases::{AliasCatalog, AliasError, AliasIndex};
 use super::blocks::{BlocksCatalog, BlocksError, BlocksIndex};
 use super::data_versions::DataVersionTable;
 use super::hash::pack_hash;
@@ -28,6 +29,8 @@ const BUILTIN_JAVA_DATA_VERSIONS: &str =
 const BUILTIN_JAVA_MATERIALS: &str = include_str!("../../registry-data/java/materials.json");
 /// Built-in Java `blocks.json` bytes, statically embedded at compile time.
 const BUILTIN_JAVA_BLOCKS: &str = include_str!("../../registry-data/java/blocks.json");
+/// Built-in Java `aliases.json` bytes, statically embedded at compile time.
+const BUILTIN_JAVA_ALIASES: &str = include_str!("../../registry-data/java/aliases.json");
 
 /// Built-in Bedrock `pack.json` bytes, statically embedded at compile time.
 const BUILTIN_BEDROCK_MANIFEST: &str = include_str!("../../registry-data/bedrock/pack.json");
@@ -38,6 +41,8 @@ const BUILTIN_BEDROCK_DATA_VERSIONS: &str =
 const BUILTIN_BEDROCK_MATERIALS: &str = include_str!("../../registry-data/bedrock/materials.json");
 /// Built-in Bedrock `blocks.json` bytes, statically embedded at compile time.
 const BUILTIN_BEDROCK_BLOCKS: &str = include_str!("../../registry-data/bedrock/blocks.json");
+/// Built-in Bedrock `aliases.json` bytes, statically embedded at compile time.
+const BUILTIN_BEDROCK_ALIASES: &str = include_str!("../../registry-data/bedrock/aliases.json");
 
 /// Highest manifest `schema_version` this Cairn build understands.
 pub const SUPPORTED_MANIFEST_SCHEMA: u32 = 1;
@@ -84,6 +89,10 @@ pub struct RegistryPack {
     /// component, which turns id validation off rather than making every
     /// id invalid.
     pub blocks: BlocksIndex,
+    /// Groups of spellings one block has worn. Empty when the pack omits
+    /// the component, which leaves a refused id answered by the typo
+    /// search alone.
+    pub aliases: AliasIndex,
     /// `sha256:<hex>` over the manifest + component bytes in declared order.
     /// Lands in the lockfile under `inputs.registry_pack_hash`.
     pub bytes_hash: HashHex,
@@ -103,6 +112,10 @@ pub struct RegistryPack {
 pub struct PackView<'a> {
     /// The pack's abstract-token catalog.
     materials: &'a MaterialsIndex,
+    /// The pack's alias groups. Edition-wide and version-free by design —
+    /// the pinned version's id table below is what narrows a group to the
+    /// spellings this target actually declares.
+    aliases: &'a AliasIndex,
     /// The pinned version, or `None` when the run pinned none. Read by
     /// both halves of the view: a token may be respelled at this version,
     /// and the id table belongs to it.
@@ -128,6 +141,27 @@ impl TargetRegistry for PackView<'_> {
 
     fn block_ids(&self) -> Option<BlockIdSet<'_>> {
         self.ids.map(|ids| BlockIdSet::new(&self.label, ids))
+    }
+
+    fn aliases_for(&self, id: &str) -> Vec<String> {
+        // No pinned version means no table to filter the group by, and an
+        // unfiltered group is a list of spellings from other versions and
+        // the other edition — the silent-substitution hazard read out as a
+        // suggestion. The commands in that position (`lower`, `info`) do
+        // not raise `E_UNKNOWN_ID` at all, so the answer costs them
+        // nothing.
+        let Some(ids) = self.ids else {
+            return Vec::new();
+        };
+        self.aliases
+            .spellings_of(id)
+            .iter()
+            .filter(|spelling| {
+                ids.binary_search_by(|known| known.as_str().cmp(spelling.as_str()))
+                    .is_ok()
+            })
+            .cloned()
+            .collect()
     }
 }
 
@@ -239,6 +273,28 @@ pub enum RegistryError {
         #[source]
         source: BlocksError,
     },
+    /// The pack's `aliases` catalog failed to validate.
+    #[error("registry pack `aliases`: {source}")]
+    Aliases {
+        /// Underlying validation error from the alias catalog.
+        #[source]
+        source: AliasError,
+    },
+    /// An alias group named no id any version of the pack's own `blocks`
+    /// tables declares.
+    ///
+    /// Such a group can never answer: a lookup keeps the members the
+    /// pinned target declares, and this one has none to keep in any
+    /// target. It is what a misspelt spelling looks like from the loader's
+    /// side, and the symptom without this check is a rename that goes on
+    /// being reported as having no candidate.
+    #[error(
+        "registry pack aliases group [{spellings}] names no id any version of `blocks` declares"
+    )]
+    AliasGroupUnanswerable {
+        /// The group's spellings, comma-joined.
+        spellings: String,
+    },
     /// The `blocks` component and the `data_versions` table describe
     /// different sets of versions.
     ///
@@ -269,6 +325,12 @@ impl From<MaterialsError> for RegistryError {
 impl From<BlocksError> for RegistryError {
     fn from(source: BlocksError) -> Self {
         Self::Blocks { source }
+    }
+}
+
+impl From<AliasError> for RegistryError {
+    fn from(source: AliasError) -> Self {
+        Self::Aliases { source }
     }
 }
 
@@ -467,6 +529,7 @@ impl RegistryPack {
         });
         PackView {
             materials: &self.materials,
+            aliases: &self.aliases,
             mc_version,
             ids,
             label: match mc_version {
@@ -527,6 +590,7 @@ pub fn load_builtin_java() -> Result<RegistryPack, RegistryError> {
         BUILTIN_JAVA_DATA_VERSIONS,
         BUILTIN_JAVA_MATERIALS,
         BUILTIN_JAVA_BLOCKS,
+        BUILTIN_JAVA_ALIASES,
     )
 }
 
@@ -560,6 +624,7 @@ pub fn load_builtin_bedrock() -> Result<RegistryPack, RegistryError> {
         BUILTIN_BEDROCK_DATA_VERSIONS,
         BUILTIN_BEDROCK_MATERIALS,
         BUILTIN_BEDROCK_BLOCKS,
+        BUILTIN_BEDROCK_ALIASES,
     )
 }
 
@@ -572,6 +637,7 @@ fn load_builtin(
     data_versions_src: &'static str,
     materials_src: &'static str,
     blocks_src: &'static str,
+    aliases_src: &'static str,
 ) -> Result<RegistryPack, RegistryError> {
     let manifest = parse_manifest(manifest_src)?;
     validate_manifest(&manifest, edition)?;
@@ -588,8 +654,14 @@ fn load_builtin(
     } else {
         BlocksIndex::empty()
     };
+    let aliases = if manifest.files.aliases.is_some() {
+        AliasIndex::from_catalog(parse_aliases(aliases_src)?)?
+    } else {
+        AliasIndex::empty()
+    };
     validate_material_overrides(&materials, &data_versions)?;
     validate_blocks_cover_versions(&blocks, &data_versions)?;
+    validate_aliases_answerable(&aliases, &blocks)?;
     let mut components: Vec<(&str, &[u8])> = vec![(
         manifest.files.data_versions.as_str(),
         data_versions_src.as_bytes(),
@@ -600,12 +672,16 @@ fn load_builtin(
     if let Some(name) = manifest.files.blocks.as_deref() {
         components.push((name, blocks_src.as_bytes()));
     }
+    if let Some(name) = manifest.files.aliases.as_deref() {
+        components.push((name, aliases_src.as_bytes()));
+    }
     let bytes_hash = pack_hash(manifest_src.as_bytes(), &components);
     Ok(RegistryPack {
         manifest,
         data_versions,
         materials,
         blocks,
+        aliases,
         bytes_hash,
         source: PackSource::Builtin,
     })
@@ -684,8 +760,25 @@ fn load_from_dir_inner(
         }
         None => (BlocksIndex::empty(), None),
     };
+
+    let (aliases, aliases_bytes) = match manifest.files.aliases.as_deref() {
+        Some(name) => {
+            let path = dir.join(name);
+            let bytes = std::fs::read(&path).map_err(|source| RegistryError::Io {
+                path: path.clone(),
+                source,
+            })?;
+            let text = std::str::from_utf8(&bytes).map_err(|err| RegistryError::Io {
+                path: path.clone(),
+                source: std::io::Error::new(std::io::ErrorKind::InvalidData, err),
+            })?;
+            (AliasIndex::from_catalog(parse_aliases(text)?)?, Some(bytes))
+        }
+        None => (AliasIndex::empty(), None),
+    };
     validate_material_overrides(&materials, &data_versions)?;
     validate_blocks_cover_versions(&blocks, &data_versions)?;
+    validate_aliases_answerable(&aliases, &blocks)?;
 
     let mut components: Vec<(&str, &[u8])> = vec![(
         manifest.files.data_versions.as_str(),
@@ -700,12 +793,17 @@ fn load_from_dir_inner(
     if let (Some(name), Some(bytes)) = (manifest.files.blocks.as_deref(), blocks_bytes.as_deref()) {
         components.push((name, bytes));
     }
+    if let (Some(name), Some(bytes)) = (manifest.files.aliases.as_deref(), aliases_bytes.as_deref())
+    {
+        components.push((name, bytes));
+    }
     let bytes_hash = pack_hash(&manifest_bytes, &components);
     Ok(RegistryPack {
         manifest,
         data_versions,
         materials,
         blocks,
+        aliases,
         bytes_hash,
         source: PackSource::Path(dir.to_path_buf()),
     })
@@ -727,6 +825,49 @@ fn parse_blocks(s: &str) -> Result<BlocksCatalog, RegistryError> {
         file: "blocks".to_owned(),
         source,
     })
+}
+
+fn parse_aliases(s: &str) -> Result<AliasCatalog, RegistryError> {
+    serde_json::from_str(s).map_err(|source| RegistryError::File {
+        file: "aliases".to_owned(),
+        source,
+    })
+}
+
+/// Refuse an alias group none of the pack's own block tables can answer
+/// with.
+///
+/// A group is resolved by keeping the members the pinned target declares,
+/// so a group naming no id any version has is dead in every target — the
+/// shape a misspelt spelling takes. A pack with no `blocks` component is
+/// exempt for the same reason it is exempt from
+/// [`validate_blocks_cover_versions`]: there is nothing to check against,
+/// and reading that as "no group is answerable" would refuse every pack
+/// that ships aliases without tables.
+///
+/// The rule is "some id in the group", not "every id": a group exists
+/// precisely to hold the spellings this edition does *not* use beside the
+/// ones it does, and a Java pack listing Bedrock's `standing_sign` is the
+/// component working, not a mistake.
+fn validate_aliases_answerable(
+    aliases: &AliasIndex,
+    blocks: &BlocksIndex,
+) -> Result<(), RegistryError> {
+    if blocks.is_empty() {
+        return Ok(());
+    }
+    for group in aliases.groups() {
+        if group
+            .iter()
+            .any(|id| blocks.declared_by_some_version(id) == Some(true))
+        {
+            continue;
+        }
+        return Err(RegistryError::AliasGroupUnanswerable {
+            spellings: group.join(", "),
+        });
+    }
+    Ok(())
 }
 
 /// Refuse a materials override naming a version the pack does not support.
@@ -984,6 +1125,50 @@ mod tests {
         }"#
     }
 
+    /// A pack carrying every component including `aliases`, for the tests
+    /// that are about renames rather than about ids.
+    fn write_pack_with_aliases(
+        tmp: &Path,
+        data_versions_json: &str,
+        blocks_json: &str,
+        aliases_json: &str,
+    ) {
+        write_full_pack(
+            tmp,
+            manifest_with_aliases(),
+            data_versions_json,
+            &one_material(r#"{ "token": "a.b", "block": "oak_planks" }"#),
+            blocks_json,
+        );
+        std::fs::write(tmp.join("aliases.json"), aliases_json).expect("write aliases");
+    }
+
+    fn manifest_with_aliases() -> &'static str {
+        r#"{
+            "schema_version": 1,
+            "edition": "java",
+            "name": "test",
+            "description": "test",
+            "files": {
+                "data_versions": "data_versions.json",
+                "materials": "materials.json",
+                "blocks": "blocks.json",
+                "aliases": "aliases.json"
+            }
+        }"#
+    }
+
+    /// One group over `good_blocks`: the id `1.21.4` added, beside a
+    /// spelling no version of this pack declares. That is the shape of a
+    /// cross-edition row, and it is answerable because one member is here.
+    fn good_aliases() -> &'static str {
+        r#"{
+            "schema_version": 1,
+            "namespace": "minecraft",
+            "groups": [{ "spellings": ["pale_oak_planks", "paleoak_planks"] }]
+        }"#
+    }
+
     fn one_material(body: &str) -> String {
         format!(r#"{{ "schema_version": 1, "namespace": "minecraft", "entries": [{body}] }}"#)
     }
@@ -1175,6 +1360,138 @@ mod tests {
             TargetRegistry::lookup(&pack.view(Some("1.21.4")), "a.b").map(|s| s.id),
             Some("minecraft:oak_planks".to_owned()),
         );
+    }
+
+    #[test]
+    fn a_pack_without_an_aliases_component_loads_and_names_no_rename() {
+        // Every pack written before this component looks like this, and it
+        // has to keep answering exactly as it did: no rename, and the typo
+        // search behind it untouched.
+        let pack = load_from_dir_or_die("no-aliases", |dir| {
+            write_full_pack(
+                dir,
+                manifest_with_blocks(),
+                good_data_versions(),
+                &one_material(r#"{ "token": "a.b", "block": "oak_planks" }"#),
+                good_blocks(),
+            );
+        });
+        assert!(pack.aliases.is_empty());
+        assert!(
+            pack.view(Some("1.21.4"))
+                .aliases_for("minecraft:paleoak_planks")
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn an_alias_answers_with_the_spellings_the_pinned_version_declares() {
+        let pack = load_from_dir_or_die("aliases", |dir| {
+            write_pack_with_aliases(dir, good_data_versions(), good_blocks(), good_aliases());
+        });
+        assert_eq!(pack.aliases.len(), 1);
+        // `1.21.4` is the version that added `pale_oak_planks`, so the same
+        // group answers there and stays silent on `1.20.4` — the version
+        // scoping lives in the block tables, not in the row.
+        assert_eq!(
+            pack.view(Some("1.21.4"))
+                .aliases_for("minecraft:paleoak_planks"),
+            ["minecraft:pale_oak_planks".to_owned()],
+        );
+        assert!(
+            pack.view(Some("1.20.4"))
+                .aliases_for("minecraft:paleoak_planks")
+                .is_empty(),
+            "1.20.4 has neither spelling, so the group has nothing to offer it",
+        );
+    }
+
+    #[test]
+    fn a_view_with_no_version_pinned_names_no_rename() {
+        // Nothing narrows the group without a pinned table, and an
+        // unfiltered group is a list of spellings from other versions and
+        // the other edition offered as if this build could use them.
+        let pack = load_from_dir_or_die("aliases-unpinned", |dir| {
+            write_pack_with_aliases(dir, good_data_versions(), good_blocks(), good_aliases());
+        });
+        assert!(
+            pack.view(None)
+                .aliases_for("minecraft:paleoak_planks")
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn an_alias_group_no_version_declares_is_refused() {
+        // Such a group can never answer, whatever the target — the shape a
+        // misspelt spelling takes, and one whose only symptom otherwise is
+        // a rename that goes on saying it has no candidate.
+        let err = load_from_dir_err("aliases-dead", |dir| {
+            write_pack_with_aliases(
+                dir,
+                good_data_versions(),
+                good_blocks(),
+                r#"{
+                    "schema_version": 1,
+                    "namespace": "minecraft",
+                    "groups": [{ "spellings": ["standing_sign", "oak_sign"] }]
+                }"#,
+            );
+        });
+        let RegistryError::AliasGroupUnanswerable { spellings } = err else {
+            panic!("expected AliasGroupUnanswerable, got {err:?}");
+        };
+        assert_eq!(spellings, "minecraft:standing_sign, minecraft:oak_sign");
+    }
+
+    #[test]
+    fn a_malformed_alias_catalog_is_refused_with_its_own_error() {
+        let err = load_from_dir_err("aliases-bad", |dir| {
+            write_pack_with_aliases(
+                dir,
+                good_data_versions(),
+                good_blocks(),
+                r#"{
+                    "schema_version": 1,
+                    "namespace": "minecraft",
+                    "groups": [{ "spellings": ["pale_oak_planks"] }]
+                }"#,
+            );
+        });
+        assert!(
+            matches!(
+                err,
+                RegistryError::Aliases {
+                    source: super::super::aliases::AliasError::GroupTooSmall { .. }
+                }
+            ),
+            "expected the catalog error to surface intact, got {err:?}",
+        );
+    }
+
+    #[test]
+    fn the_aliases_bytes_reach_the_pack_hash() {
+        // Same reasoning as the blocks half: the digest lands in the
+        // lockfile, and two builds resolved against different rename
+        // tables are two different sets of inputs. The manifest is shared
+        // between the two packs so nothing but the component bytes can
+        // separate them.
+        let one = load_from_dir_or_die("alias-hash-one", |dir| {
+            write_pack_with_aliases(dir, good_data_versions(), good_blocks(), good_aliases());
+        });
+        let other = load_from_dir_or_die("alias-hash-other", |dir| {
+            write_pack_with_aliases(
+                dir,
+                good_data_versions(),
+                good_blocks(),
+                r#"{
+                    "schema_version": 1,
+                    "namespace": "minecraft",
+                    "groups": [{ "spellings": ["pale_oak_planks", "paleoak_plank"] }]
+                }"#,
+            );
+        });
+        assert_ne!(one.bytes_hash, other.bytes_hash);
     }
 
     #[test]
