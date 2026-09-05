@@ -77,7 +77,7 @@ use cairn_lang_core::resolve::{UnsupportedEntry, UnsupportedReason};
 use cairn_lang_core::suggest::nearest_namespaced_id;
 
 use crate::bedrock_state::{BedrockStateError, translate_states};
-use crate::registry::BlocksIndex;
+use crate::registry::{AliasIndex, BlocksIndex};
 
 /// One edition's portability answer: the counts, and the entries behind
 /// the `unsupported` one.
@@ -181,13 +181,19 @@ impl PortabilityCounts {
 /// `blocks` is the Java pack's id table: an entry naming a block no
 /// supported Java version has is `unsupported` here for the same reason it
 /// would be on Bedrock. That is not hypothetical — a theme resolving a slot
-/// to a Bedrock-only spelling puts one straight into a Java palette.
+/// to a Bedrock-only spelling puts one straight into a Java palette, and
+/// `aliases` is the same pack's table of what Java calls that block, which
+/// is what makes such a row actionable rather than a dead end.
 #[must_use]
-pub fn portability_for_java(ir: &BlockArrayIr, blocks: &BlocksIndex) -> PortabilityReport {
+pub fn portability_for_java(
+    ir: &BlockArrayIr,
+    blocks: &BlocksIndex,
+    aliases: &AliasIndex,
+) -> PortabilityReport {
     let mut report = PortabilityReport::default();
     for entry in non_air_entries(ir) {
         if absent_from_edition(blocks, entry) {
-            report.push_unsupported(absent_entry(blocks, entry));
+            report.push_unsupported(absent_entry(blocks, aliases, entry));
             continue;
         }
         report.count_portable();
@@ -202,11 +208,15 @@ pub fn portability_for_java(ir: &BlockArrayIr, blocks: &BlocksIndex) -> Portabil
 /// `translate_states`, which answers about states and would report a
 /// stateless unknown id as a clean translation.
 #[must_use]
-pub fn portability_for_bedrock(ir: &BlockArrayIr, blocks: &BlocksIndex) -> PortabilityReport {
+pub fn portability_for_bedrock(
+    ir: &BlockArrayIr,
+    blocks: &BlocksIndex,
+    aliases: &AliasIndex,
+) -> PortabilityReport {
     let mut report = PortabilityReport::default();
     for entry in non_air_entries(ir) {
         if absent_from_edition(blocks, entry) {
-            report.push_unsupported(absent_entry(blocks, entry));
+            report.push_unsupported(absent_entry(blocks, aliases, entry));
             continue;
         }
         match translate_states(&entry.id, &entry.properties) {
@@ -276,20 +286,33 @@ fn refusal_reason(err: BedrockStateError) -> UnsupportedReason {
     }
 }
 
-/// The entry for a block the edition's tables refute, with the nearest id
-/// they do declare when one is close enough to be a typo.
+/// The entry for a block the edition's tables refute, carrying both
+/// answers the pack can give about it: what this edition calls the same
+/// block, and the nearest id it declares when one is close enough to be a
+/// typo.
 ///
-/// The suggestion is `cairn_lang_core::suggest::nearest_namespaced_id`, the
-/// same function `E_UNKNOWN_ID` uses, so the two read a typo the same way.
-/// What differs is the candidate list: a pinned build asks one version's
-/// table, and this axis asks of the edition, so every version's ids are
-/// candidates here. The two can therefore answer differently for the same
-/// id, and each is right about its own question.
-fn absent_entry(blocks: &BlocksIndex, state: &BlockState) -> UnsupportedEntry {
+/// Both are the functions `E_UNKNOWN_ID` uses — the alias groups and
+/// `cairn_lang_core::suggest::nearest_namespaced_id` — so the two commands
+/// read a rename and a typo the same way. What differs is the scope: a
+/// pinned build asks one version's table, and this axis asks of the
+/// edition, so every version's ids are candidates here and an alias is kept
+/// when *some* version declares it. The two can therefore answer
+/// differently for the same id, and each is right about its own question.
+fn absent_entry(
+    blocks: &BlocksIndex,
+    aliases: &AliasIndex,
+    state: &BlockState,
+) -> UnsupportedEntry {
     UnsupportedEntry {
         id: state.id.clone(),
         reason: UnsupportedReason::AbsentFromEdition {
             suggestion: nearest_namespaced_id(&state.id, blocks.declared_ids()),
+            aliases: aliases
+                .spellings_of(&state.id)
+                .iter()
+                .filter(|spelling| blocks.declared_by_some_version(spelling) == Some(true))
+                .cloned()
+                .collect(),
         },
     }
 }
@@ -330,7 +353,14 @@ mod tests {
     };
     use indexmap::IndexMap;
 
-    use crate::registry::BlocksCatalog;
+    use crate::registry::{AliasCatalog, BlocksCatalog};
+
+    /// A pack shipping no `aliases` component — every test that is not
+    /// about renames uses this, so a group added to one of them is a
+    /// deliberate change to what that test asks.
+    fn no_aliases() -> AliasIndex {
+        AliasIndex::empty()
+    }
 
     /// A table shaped like a real edition's: two versions with a rename
     /// between them, so an id valid for only part of the range is available
@@ -418,7 +448,7 @@ mod tests {
                 },
             },
         ]);
-        let counts = portability_for_bedrock(&ir, &table()).counts;
+        let counts = portability_for_bedrock(&ir, &table(), &no_aliases()).counts;
         assert_eq!(
             counts,
             PortabilityCounts {
@@ -450,7 +480,7 @@ mod tests {
                 },
             },
         ]);
-        let counts = portability_for_java(&ir, &table()).counts;
+        let counts = portability_for_java(&ir, &table(), &no_aliases()).counts;
         assert_eq!(
             counts,
             PortabilityCounts {
@@ -467,11 +497,11 @@ mod tests {
         // count it as an authored intent.
         let ir = one_state_ir(Vec::new());
         assert_eq!(
-            portability_for_java(&ir, &table()).counts,
+            portability_for_java(&ir, &table(), &no_aliases()).counts,
             PortabilityCounts::default()
         );
         assert_eq!(
-            portability_for_bedrock(&ir, &table()).counts,
+            portability_for_bedrock(&ir, &table(), &no_aliases()).counts,
             PortabilityCounts::default()
         );
     }
@@ -488,7 +518,7 @@ mod tests {
         ]);
         let blocks = table();
         assert_eq!(
-            portability_for_bedrock(&ir, &blocks).counts,
+            portability_for_bedrock(&ir, &blocks, &no_aliases()).counts,
             PortabilityCounts {
                 portable: 1,
                 degraded: 0,
@@ -496,7 +526,7 @@ mod tests {
             },
         );
         assert_eq!(
-            portability_for_java(&ir, &blocks).counts,
+            portability_for_java(&ir, &blocks, &no_aliases()).counts,
             PortabilityCounts {
                 portable: 1,
                 degraded: 0,
@@ -517,7 +547,7 @@ mod tests {
         ]);
         let blocks = table();
         assert_eq!(
-            portability_for_bedrock(&ir, &blocks).counts,
+            portability_for_bedrock(&ir, &blocks, &no_aliases()).counts,
             PortabilityCounts {
                 portable: 2,
                 degraded: 0,
@@ -525,7 +555,7 @@ mod tests {
             },
         );
         assert_eq!(
-            portability_for_java(&ir, &blocks).counts,
+            portability_for_java(&ir, &blocks, &no_aliases()).counts,
             PortabilityCounts {
                 portable: 2,
                 degraded: 0,
@@ -550,7 +580,7 @@ mod tests {
             id: "minecraft:spruce_door".to_owned(),
             properties,
         }]);
-        let counts = portability_for_bedrock(&ir, &table()).counts;
+        let counts = portability_for_bedrock(&ir, &table(), &no_aliases()).counts;
         assert_eq!(
             counts,
             PortabilityCounts {
@@ -581,7 +611,7 @@ mod tests {
             properties,
         }]);
         assert_eq!(
-            portability_for_bedrock(&ir, &table()).counts,
+            portability_for_bedrock(&ir, &table(), &no_aliases()).counts,
             PortabilityCounts {
                 portable: 0,
                 degraded: 0,
@@ -603,7 +633,7 @@ mod tests {
         ]);
         let none = BlocksIndex::empty();
         assert_eq!(
-            portability_for_java(&ir, &none).counts,
+            portability_for_java(&ir, &none, &no_aliases()).counts,
             PortabilityCounts {
                 portable: 2,
                 degraded: 0,
@@ -611,7 +641,7 @@ mod tests {
             },
         );
         assert_eq!(
-            portability_for_bedrock(&ir, &none).counts,
+            portability_for_bedrock(&ir, &none, &no_aliases()).counts,
             PortabilityCounts {
                 portable: 2,
                 degraded: 0,
@@ -648,7 +678,7 @@ mod tests {
             walkways: IndexMap::new(),
             diagnostics: Vec::new(),
         };
-        let report = portability_for_bedrock(&ir, &table());
+        let report = portability_for_bedrock(&ir, &table(), &no_aliases());
         assert_eq!(
             report.counts(),
             PortabilityCounts {
@@ -663,7 +693,10 @@ mod tests {
         // ...?" to "the block is here and its states are not".
         assert_eq!(
             only_reason(&report),
-            &UnsupportedReason::AbsentFromEdition { suggestion: None },
+            &UnsupportedReason::AbsentFromEdition {
+                suggestion: None,
+                aliases: Vec::new(),
+            },
         );
     }
 
@@ -679,11 +712,11 @@ mod tests {
             diagnostics: Vec::new(),
         };
         assert_eq!(
-            portability_for_java(&ir, &table()).counts,
+            portability_for_java(&ir, &table(), &no_aliases()).counts,
             PortabilityCounts::default()
         );
         assert_eq!(
-            portability_for_bedrock(&ir, &table()).counts,
+            portability_for_bedrock(&ir, &table(), &no_aliases()).counts,
             PortabilityCounts::default()
         );
     }
@@ -707,13 +740,14 @@ mod tests {
         // one the edit cap admits, so the suggestion is the point of the
         // test rather than incidental to it.
         let ir = one_state_ir(vec![BlockState::bare("minecraft:oak_planck")]);
-        let report = portability_for_java(&ir, &table());
+        let report = portability_for_java(&ir, &table(), &no_aliases());
         assert_eq!(report.counts().unsupported, 1);
         assert_eq!(report.unsupported()[0].id, "minecraft:oak_planck");
         assert_eq!(
             only_reason(&report),
             &UnsupportedReason::AbsentFromEdition {
                 suggestion: Some("minecraft:oak_planks".to_owned()),
+                aliases: Vec::new(),
             },
         );
     }
@@ -727,8 +761,8 @@ mod tests {
         // Java palette is the way it gets asked in practice.
         let ir = one_state_ir(vec![BlockState::bare("minecraft:standing_sign")]);
         for report in [
-            portability_for_java(&ir, &table()),
-            portability_for_bedrock(&ir, &table()),
+            portability_for_java(&ir, &table(), &no_aliases()),
+            portability_for_bedrock(&ir, &table(), &no_aliases()),
         ] {
             assert_eq!(report.counts().unsupported, 1);
             assert_eq!(report.unsupported()[0].id, "minecraft:standing_sign");
@@ -743,17 +777,128 @@ mod tests {
         }
     }
 
+    /// The alias table for [`table`]: the one rename it describes, plus
+    /// the cross-edition spelling of a block the table has under another
+    /// name.
+    fn aliases() -> AliasIndex {
+        let catalog: AliasCatalog = serde_json::from_str(
+            r#"{
+            "schema_version": 1,
+            "namespace": "minecraft",
+            "groups": [
+                { "spellings": ["stonebrick", "stone_bricks"] },
+                { "spellings": ["standing_sign", "oak_sign"] }
+            ]
+        }"#,
+        )
+        .expect("test catalog parses as JSON");
+        AliasIndex::from_catalog(catalog).expect("test catalog folds")
+    }
+
+    /// An id this edition has under another name is reported with that
+    /// name, which is the answer the distance search cannot reach.
+    ///
+    /// `standing_sign` is seven edits from `oak_sign` and the same block.
+    /// Without the alias table the row says the edition does not have it
+    /// and stops; that sentence is true about the id and useless about the
+    /// build.
+    #[test]
+    fn a_renamed_id_is_reported_with_the_name_this_edition_uses() {
+        let ir = one_state_ir(vec![BlockState::bare("minecraft:standing_sign")]);
+        let with_table = portability_for_java(&ir, &table_with_oak_sign(), &aliases());
+        assert_eq!(
+            only_reason(&with_table),
+            &UnsupportedReason::AbsentFromEdition {
+                suggestion: None,
+                aliases: vec!["minecraft:oak_sign".to_owned()],
+            },
+        );
+    }
+
+    /// The alias question is asked of the edition, not of one version.
+    ///
+    /// `stonebrick` is declared by `1.0` alone and `stone_bricks` by `1.1`
+    /// alone, and this axis reports across the range — so each is the
+    /// other's answer here, where a pinned build would answer with only the
+    /// one its own version has.
+    #[test]
+    fn an_alias_any_version_declares_counts_for_the_edition() {
+        let ir = one_state_ir(vec![BlockState::bare("minecraft:chiseled_stone_bricks")]);
+        let catalog: AliasCatalog = serde_json::from_str(
+            r#"{
+            "schema_version": 1,
+            "namespace": "minecraft",
+            "groups": [{
+                "spellings": ["chiseled_stone_bricks", "stonebrick", "stone_bricks"]
+            }]
+        }"#,
+        )
+        .expect("test catalog parses as JSON");
+        let index = AliasIndex::from_catalog(catalog).expect("test catalog folds");
+        let report = portability_for_java(&ir, &table(), &index);
+        assert_eq!(
+            only_reason(&report),
+            &UnsupportedReason::AbsentFromEdition {
+                suggestion: None,
+                aliases: vec![
+                    "minecraft:stonebrick".to_owned(),
+                    "minecraft:stone_bricks".to_owned(),
+                ],
+            },
+            "both spellings are the edition's, one version each",
+        );
+    }
+
+    /// A group whose other spellings this edition does not have either is
+    /// no answer, and the row falls back to what it said before.
+    #[test]
+    fn an_alias_this_edition_lacks_is_not_offered() {
+        let ir = one_state_ir(vec![BlockState::bare("minecraft:standing_sign")]);
+        let report = portability_for_java(&ir, &table(), &aliases());
+        assert_eq!(
+            only_reason(&report),
+            &UnsupportedReason::AbsentFromEdition {
+                suggestion: None,
+                aliases: Vec::new(),
+            },
+            "`oak_sign` is no more in this table than `standing_sign` is",
+        );
+    }
+
+    /// [`table`] plus the one id the alias tests need it to declare.
+    fn table_with_oak_sign() -> BlocksIndex {
+        let catalog: BlocksCatalog = serde_json::from_str(
+            r#"{
+            "schema_version": 1,
+            "namespace": "minecraft",
+            "base": {
+                "mc_version": "1.0",
+                "blocks": ["oak_planks", "oak_stairs", "oak_door", "oak_sign", "stonebrick"]
+            },
+            "diffs": [
+                { "mc_version": "1.1", "inherits": "1.0",
+                  "added": ["stone_bricks"], "removed": ["stonebrick"] }
+            ]
+        }"#,
+        )
+        .expect("test catalog parses as JSON");
+        BlocksIndex::from_catalog(catalog).expect("test catalog folds")
+    }
+
     #[test]
     fn an_id_nothing_resembles_is_named_without_a_suggestion() {
         // Failing to find a suggestion must not cost the name. An id this
         // far from every candidate is the ordinary case for a block that
         // belongs to the other edition entirely.
         let ir = one_state_ir(vec![BlockState::bare("minecraft:totally_not_a_block")]);
-        let report = portability_for_bedrock(&ir, &table());
+        let report = portability_for_bedrock(&ir, &table(), &no_aliases());
         assert_eq!(report.unsupported()[0].id, "minecraft:totally_not_a_block");
         assert_eq!(
             only_reason(&report),
-            &UnsupportedReason::AbsentFromEdition { suggestion: None },
+            &UnsupportedReason::AbsentFromEdition {
+                suggestion: None,
+                aliases: Vec::new(),
+            },
         );
     }
 
@@ -765,10 +910,13 @@ mod tests {
         // three edits from `oak_door`, which a five-character input does
         // not admit and a fifteen-character one would.
         let ir = one_state_ir(vec![BlockState::bare("minecraft:ok_dr")]);
-        let report = portability_for_java(&ir, &table());
+        let report = portability_for_java(&ir, &table(), &no_aliases());
         assert_eq!(
             only_reason(&report),
-            &UnsupportedReason::AbsentFromEdition { suggestion: None },
+            &UnsupportedReason::AbsentFromEdition {
+                suggestion: None,
+                aliases: Vec::new(),
+            },
         );
     }
 
@@ -790,11 +938,12 @@ mod tests {
             ("minecraft:stonebrik", "minecraft:stonebrick"),
         ] {
             let ir = one_state_ir(vec![BlockState::bare(typo)]);
-            let report = portability_for_bedrock(&ir, &table());
+            let report = portability_for_bedrock(&ir, &table(), &no_aliases());
             assert_eq!(
                 only_reason(&report),
                 &UnsupportedReason::AbsentFromEdition {
                     suggestion: Some(nearest.to_owned()),
+                    aliases: Vec::new(),
                 },
                 "for {typo}",
             );
@@ -808,10 +957,13 @@ mod tests {
         // `minecraft:oak_planks`, because the pack that would have to
         // declare it is the mod's.
         let ir = one_state_ir(vec![BlockState::bare("mod:oak_planck")]);
-        let report = portability_for_java(&ir, &table());
+        let report = portability_for_java(&ir, &table(), &no_aliases());
         assert_eq!(
             only_reason(&report),
-            &UnsupportedReason::AbsentFromEdition { suggestion: None },
+            &UnsupportedReason::AbsentFromEdition {
+                suggestion: None,
+                aliases: Vec::new(),
+            },
         );
     }
 
@@ -828,7 +980,7 @@ mod tests {
             id: "minecraft:oak_door".to_owned(),
             properties,
         }]);
-        let report = portability_for_bedrock(&ir, &table());
+        let report = portability_for_bedrock(&ir, &table(), &no_aliases());
         assert_eq!(report.counts().unsupported, 1);
         assert_eq!(report.unsupported()[0].id, "minecraft:oak_door");
         assert_eq!(
@@ -855,7 +1007,7 @@ mod tests {
             id: "minecraft:oak_stairs".to_owned(),
             properties: stair_props("up", "bottom", "straight"),
         }]);
-        let report = portability_for_bedrock(&value_leak, &table());
+        let report = portability_for_bedrock(&value_leak, &table(), &no_aliases());
         assert_eq!(report.counts().unsupported, 1);
         assert_eq!(
             only_reason(&report),
@@ -874,7 +1026,7 @@ mod tests {
                 m
             },
         }]);
-        let report = portability_for_bedrock(&key_leak, &table());
+        let report = portability_for_bedrock(&key_leak, &table(), &no_aliases());
         assert_eq!(report.counts().unsupported, 1);
         assert_eq!(
             only_reason(&report),
@@ -895,7 +1047,7 @@ mod tests {
             id: "minecraft:oak_stairs".to_owned(),
             properties: stair_props("south", "top", "outer_left"),
         }]);
-        let report = portability_for_bedrock(&ir, &table());
+        let report = portability_for_bedrock(&ir, &table(), &no_aliases());
         assert_eq!(report.counts().degraded, 1);
         assert!(
             report.unsupported().is_empty(),
@@ -925,7 +1077,7 @@ mod tests {
                 },
             },
         ]);
-        let report = portability_for_bedrock(&ir, &table());
+        let report = portability_for_bedrock(&ir, &table(), &no_aliases());
         assert_eq!(
             report.counts(),
             PortabilityCounts {
@@ -962,8 +1114,8 @@ mod tests {
         let ir = one_state_ir(vec![BlockState::bare("minecraft:totally_not_a_block")]);
         let none = BlocksIndex::empty();
         for report in [
-            portability_for_java(&ir, &none),
-            portability_for_bedrock(&ir, &none),
+            portability_for_java(&ir, &none, &no_aliases()),
+            portability_for_bedrock(&ir, &none, &no_aliases()),
         ] {
             assert_eq!(report.counts().unsupported, 0);
             assert!(
