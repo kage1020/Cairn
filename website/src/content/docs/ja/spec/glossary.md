@@ -87,7 +87,8 @@ title: "用語集"
 - **`@requires`**。Minecraft ターゲットへの capability の下限 (例: `version>=1.20`)。推定値との衝突
   でハードエラー。
 - **`@intended_targets`**。どの Minecraft バージョン向けに設計したかのヒント。検証記録ではない (検証
-  はロックに記録)。
+  はロックに記録)。ただしファイル自身の下限には照らされる。下限が拒否する意図は、コンパイル時に発覚
+  するのではなく報告される。
 - **ロック (`*.cairn.lock`)**。コンパイラ生成の再現性記録。`source_hash`、`cairn_version`、
   `target(mc_version + data_version)`、`registry_pack_hash`、`constraint_catalog_hash`、
   `resolved_ir_hash`、`verified: true` を持つ。
