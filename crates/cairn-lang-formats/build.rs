@@ -1,3 +1,6 @@
+//! Re-run the build whenever a built-in registry pack file changes, so the
+//! bytes `include_str!` embeds cannot lag behind `registry-data/`.
+
 fn main() {
     let pack_files = [
         "registry-data/java/pack.json",
