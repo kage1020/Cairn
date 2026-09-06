@@ -516,13 +516,44 @@ down this hierarchy:
    nature.
 
 ```
+@requires bedrock version>=1.21.40   # the Bedrock branch below is spelled for the flattened ids
+
 hologram id=shop_sign text="Weapon" mat_slot=floating_text   # the semantic layer is always neutral
 theme shop_java:    slot floating_text -> text_display scale=2.0
 theme shop_bedrock: slot floating_text -> sign glowing=true   # Bedrock fallback
 
 @edition java    { raw_block mat=minecraft:light[level=15] at=4,3,2 }
-@edition bedrock { raw_block mat=minecraft:light_block["block_light_level"=15] at=4,3,2 }
+@edition bedrock { raw_block mat=minecraft:light_block_15 at=4,3,2 }
 ```
+
+### `@edition` pins an edition, not a version
+
+The guard settles which branch is built and nothing else. The id inside it is still checked against
+the one `(edition, version)` the compile pinned
+([§10.4](#104-fail-loud-and-minimum-version-inference)), so where an edition respells a block
+inside its own supported range, `@edition bedrock` names the branch and the file's floor names the
+spelling.
+
+Bedrock's light block is that case, and it is why the snippet above carries a floor. 1.21.0 spells
+the block `light_block` and carries the level beside it as a `block_light_level` state; 1.21.40
+promoted the level into the id, so 1.21.40 and 1.21.60 spell the same block `light_block_0` …
+`light_block_15` and have no id named `light_block` at all. The `aliases` row holding all of those
+spellings together ([§10.4](#104-fail-loud-and-minimum-version-inference)) answers the diagnostic
+and not the source. Its answer is the closed set the pinned target declares — `light` against
+Bedrock 1.21.60 comes back as all sixteen levels — and a set of sixteen is not a spelling: picking
+one of them is the silent substitution that section forbids, so it stays the author's to do.
+Writing the branch for one of the two shapes is doing it, and the floor is what says which shape
+that is. Being scoped, it is inert on the Java build ([§10.4](#a-floor-may-name-its-edition)),
+which the other branch serves.
+
+Leaving the floor off is loud rather than wrong: `light_block_15` against Bedrock 1.21.0 is
+`E_UNKNOWN_ID`, since the check is per version. What the floor adds is not a different refusal but
+a declaration — the version half of what the branch is for, written where the rest of the file's
+constraints are, and the half the other headers can be read against. A file floored at 1.21.40
+whose `@intended_targets` names 1.21.0 is `E_INTENDED_TARGET_CAP` at `cairn check`
+([§10.4](#the-hint-is-weighed-against-the-floor)), before any target is picked; the same file
+without the floor says nothing until one is. A build that must serve both spellings is two builds:
+there is no version conditional to pair with `@edition`.
 
 ### The build picks the variant, not the source
 

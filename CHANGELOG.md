@@ -43,6 +43,24 @@ and is a separate axis from the Minecraft target version.
   pre-release tag is a label too, while this one names Cairn's own version, where every component
   is digits, `2026.13` is a month that does not exist and `1.2` is a semver rather than a year.
 
+### Fixed
+
+- *(docs)* `spec/versioning-editions.md` §10.7 illustrated the `@edition` escape hatch with
+  `minecraft:light_block["block_light_level"=15]`, an id that exists on Bedrock 1.21.0 and on
+  neither of the other two targets the registry pack ships: 1.21.40 promoted the level into the id,
+  so 1.21.40 and 1.21.60 spell that block `light_block_0` … `light_block_15` and carry no
+  `light_block` at all. The section is the one place the spec names an id to show that Bedrock
+  spells things differently, so the wrong spelling there is the spelling a reader carries away —
+  and a source copied from it is refused with `E_UNKNOWN_ID` on two of the three targets.
+
+  The branch is now written for the flattened ids, beside the edition-scoped floor that says which
+  of the two shapes it is for, and a new subsection says why the floor belongs there: `@edition`
+  picks an edition and not a version, while the id inside it is checked against the one
+  `(edition, version)` the compile pinned. Where an edition respells a block inside its own
+  supported range, the guard alone does not pin a spelling — and the `aliases` row holding those
+  spellings together answers the diagnostic rather than the source, since an answer is the closed
+  set and never a pick from it.
+
 ### Breaking changes
 
 - *(core,cli)* `@intended_targets` is weighed against the version floors the same file declares.

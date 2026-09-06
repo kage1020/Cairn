@@ -505,13 +505,42 @@ W_INTENT_DEGRADED line 12 id=roof_corner:
 3. エスケープハッチ層でのみ `@edition` でガードする。生の ID や NBT は本質的にエディション固有です。
 
 ```
+@requires bedrock version>=1.21.40   # 下の Bedrock 分岐は平坦化後の ID で書かれている
+
 hologram id=shop_sign text="Weapon" mat_slot=floating_text   # 意味層は常に中立
 theme shop_java:    slot floating_text -> text_display scale=2.0
 theme shop_bedrock: slot floating_text -> sign glowing=true   # Bedrock フォールバック
 
 @edition java    { raw_block mat=minecraft:light[level=15] at=4,3,2 }
-@edition bedrock { raw_block mat=minecraft:light_block["block_light_level"=15] at=4,3,2 }
+@edition bedrock { raw_block mat=minecraft:light_block_15 at=4,3,2 }
 ```
+
+### `@edition` が固定するのはエディションであってバージョンではない
+
+ガードが決めるのはどちらの分岐を建てるかだけです。その中の ID は、コンパイルが固定した 1 つの
+`(edition, version)` に対して照合されます ([§10.4](#104-fail-loud-と最小バージョン推定))。したがっ
+て、エディションが自身のサポート範囲の中でブロックを綴り直している場合、分岐を名指すのは
+`@edition bedrock` で、綴りを決めるのはファイルの下限です。
+
+Bedrock の light ブロックがまさにその例で、上のスニペットが下限を持つ理由でもあります。1.21.0 はこの
+ブロックを `light_block` と綴り、明るさは `block_light_level` ステートとして横に持ちます。1.21.40 は
+その明るさを ID の中に繰り上げたので、1.21.40 と 1.21.60 は同じブロックを `light_block_0` …
+`light_block_15` と綴り、`light_block` という ID はもう持ちません。これらの綴りをひとまとめにしてい
+る `aliases` の行 ([§10.4](#104-fail-loud-と最小バージョン推定)) が答えるのは診断であってソースでは
+ありません。その答えは固定されたターゲットが宣言している閉じた集合です (Bedrock 1.21.60 に対する
+`light` は 16 段階すべてが返ります)。16 個の集合は綴りではなく、そこから 1 つを選ぶことこそ同節が禁
+じるサイレント置換なので、選ぶのは作者の仕事のままです。分岐を 2 つの形のどちらかに向けて書くとは、ま
+さにそれをやることです。どちらの形なのかを述べるのが下限です。下限はスコープ付きなので Java のビルド
+では不活性で ([§10.4](#下限はエディションを名乗れる))、そちらはもう一方の分岐が担います。
+
+下限を省いても間違いにはならず、うるさく落ちます。Bedrock 1.21.0 に対する `light_block_15` は
+`E_UNKNOWN_ID` です。検査はバージョン単位だからです。下限が足すのは別の拒否ではなく宣言です。分岐が
+どのバージョンに向けたものかという半分を、ファイルの他の制約と同じ場所に書き、他のヘッダがそれに照ら
+される半分でもあります。1.21.40 の下限を宣言したファイルの `@intended_targets` が 1.21.0 を名指せば、
+ターゲットを選ぶ前に `cairn check` の時点で `E_INTENDED_TARGET_CAP` になります
+([§10.4](#ヒントは下限に照らされる))。下限の無い同じファイルは、ターゲットを選ぶまで何も言いません。
+両方の綴りを賄わなければならないビルドは 2 つのビルドです。`@edition` と組にできるバージョン条件分岐
+はありません。
 
 ### バリアントを選ぶのはビルドであってソースではない
 
