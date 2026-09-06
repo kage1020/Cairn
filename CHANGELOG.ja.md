@@ -112,6 +112,49 @@
 
 ### 破壊的変更
 
+- *(formats,core,cli)* レジストリパックが拒否すべきだったブロックステートを、通常の可搬性として数え
+  ることをやめました。`cairn info` の Bedrock 側の畳み込みは `translate_states` の失敗をワイルドカード
+  で丸ごと `unsupported` に送っていましたが、3 つの失敗は同じ意味ではありません。`UnmappableBlock` は
+  可搬性の事実です。エディションはそのブロックを持っていて、その上のステートに対する Bedrock 対応を
+  このコンパイラが持っていないという、ビルドでも同じくぶつかる事実です。残り 2 つはそうではなく、それ
+  ぞれの doc 自身がそう述べています。Java のドメイン外の値 (「レジストリパックが 1 つ上の層で弾くべ
+  き」) と、変換器が読まないキーです。どちらも、検証済みのパックには作れないはずのブロックステートが
+  それでも変換器まで届いた、という意味です。
+
+  数えてしまうと、この漏れは `unsupported: 1` として出ます。Bedrock に単にステートが無いだけの角の階
+  段と見分けが付かず、読み手を、パックの不具合ではなくマテリアルの変更へと向かわせます。
+  `portability_for_bedrock` は `Result<PortabilityReport, InvalidPalette>` を返すようになりました。
+  パレットは最後まで歩くので 1 回の実行で最初の 1 件ではなく全件を名指しし、そのうえで、存在しないは
+  ずのパレットの上で数字を公表するのではなくレポートごと拒否します。
+
+  ```
+  error: the bedrock palette carries blockstates a registry pack is expected to refuse, so this edition gets no portability figure:
+    error: stair `minecraft:oak_stairs` has `facing=up`, which is not a valid Java `facing`. Valid `facing`: east, west, south, north. Fix: correct the source blockstate, or compile with `--edition java`
+    note: none of that is the source's to repair — a validated pack cannot produce these, so the leak is the pack's or this compiler's. The figure is withheld rather than counting a validation gap as ordinary portability
+  exit=1
+  ```
+
+  各件は変換器自身の言葉のまま出るので、同じエントリを拒否するビルドと同じに読めます。最後の note が
+  あるのは、それらの文がいずれも、どのソースにも書けないブロックステートの作者に宛てた `Fix:` で終わ
+  るからです。`cairn info` は行を 1 つも出さずに 1 で終了します。行が計算される前にコマンドを拒否する
+  findings と同じ形です。残りのエディションは先に歩き切るので、片方の拒否がもう片方の findings を隠す
+  ことはありません。
+
+  ワイルドカードは網羅性検査も消していました。3 つのバリアントは 1 つずつ照合するようにしたので、4 つ
+  目は `_` の指す先に紛れ込むのではなく、畳み込みの場所で分類しなければコンパイルが通りません。
+
+  Rust の呼び出し側にとって破壊的です (tier Internal)。`portability_for_bedrock` は `Result` を返し、
+  `UnsupportedReason` は `StateValueUnexpected` と `StateKeyUnread` を失います。今やそれらを作るもの
+  は無く、エントリが unsupported である理由の列挙が、理由ではない 2 つを持つべきではないからです。
+  `--format json` の `edition_portability[].unsupported_entries` も、対応して
+  `"reason": "state_value_unexpected"` / `"state_key_unread"` を運ぶことはなくなります。
+
+  今日これに到達できる `.crn` は無いので、今数字が出ているソースが出なくなることはありません。階段の
+  プロパティは `Cardinal` と `StairShape` から作られるので構成上ドメイン内で、書かれた `@id[k=v]` は
+  レキサが拒否し、パックの `PackView::lookup` は `BlockState::bare` を返します。同梱のコーパスもそれ
+  に縛られていて、どちらのエディションでも 1 件でも漏れれば `example_portability.rs` が実行を失敗させ
+  ます。
+
 - *(core,cli)* `@intended_targets` を、同じファイルが宣言するバージョン下限に照らすようになりました。
   2 つのヘッダはこれまで 2 つの不活性な文で、`@requires version>=1.21` の隣に
   `@intended_targets ["1.20.4"]` があっても `cairn check` は 0 で通り、一方

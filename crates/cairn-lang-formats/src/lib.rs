@@ -26,7 +26,8 @@ pub use java_structure::{
     write_compound_gzip, write_structure_gzip,
 };
 pub use portability::{
-    PortabilityCounts, PortabilityReport, portability_for_bedrock, portability_for_java,
+    InvalidPalette, PortabilityCounts, PortabilityReport, portability_for_bedrock,
+    portability_for_java,
 };
 pub use registry::{
     PackEdition, PackFiles, PackManifest, PackSource, RegistryError, RegistryPack, builtin_bedrock,

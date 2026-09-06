@@ -112,6 +112,53 @@ and is a separate axis from the Minecraft target version.
 
 ### Breaking changes
 
+- *(formats,core,cli)* A blockstate the registry pack was expected to refuse no longer counts as
+  ordinary portability. `cairn info`'s Bedrock fold sent every `translate_states` failure into
+  `unsupported` through a wildcard, and the three failures do not mean the same thing.
+  `UnmappableBlock` is a portability fact: the edition has the block and this compiler has no
+  Bedrock mapping for the states on it, which is what a build would hit as well. The other two are
+  not, and their own docs say so — a value outside the Java domain ("the registry pack should
+  reject these one layer up") and a key the translator does not read. Both mean a blockstate no
+  validated pack can produce reached the translator anyway.
+
+  Counted, such a leak printed as `unsupported: 1`: indistinguishable from a stair whose corner
+  shape Bedrock simply has no state for, and pointing the reader at a material to change rather
+  than at the pack bug it is. `portability_for_bedrock` now answers
+  `Result<PortabilityReport, InvalidPalette>`. The palette is walked to the end, so one run names
+  every leak rather than the first, and then the whole report is refused rather than published over
+  a palette that should not exist:
+
+  ```
+  error: the bedrock palette carries blockstates a registry pack is expected to refuse, so this edition gets no portability figure:
+    error: stair `minecraft:oak_stairs` has `facing=up`, which is not a valid Java `facing`. Valid `facing`: east, west, south, north. Fix: correct the source blockstate, or compile with `--edition java`
+    note: none of that is the source's to repair — a validated pack cannot produce these, so the leak is the pack's or this compiler's. The figure is withheld rather than counting a validation gap as ordinary portability
+  exit=1
+  ```
+
+  Each leak keeps the translator's own words, so it reads the same from the report as from the
+  build that would refuse the same entry, and the closing note is there because every one of those
+  sentences ends on a `Fix:` addressed to the author of a blockstate no source can carry.
+  `cairn info` exits 1 with no rows at all, which is the shape it already had for a finding that
+  refuses the command before a row is computed; the remaining editions are still walked first, so
+  one refusal does not hide another's findings.
+
+  The wildcard also removed the exhaustiveness check. The three variants are matched one by one, so
+  a fourth has to be classified at the fold rather than joining whichever bucket a `_` arm pointed
+  at.
+
+  Breaking for Rust callers (tier Internal): `portability_for_bedrock` returns a `Result`, and
+  `UnsupportedReason` loses `StateValueUnexpected` and `StateKeyUnread`. Nothing produces those
+  now, and an enum of reasons an entry is unsupported should not carry two that are not reasons an
+  entry is unsupported; `--format json` correspondingly never carries `"reason":
+  "state_value_unexpected"` or `"state_key_unread"` in
+  `edition_portability[].unsupported_entries`.
+
+  No `.crn` reaches any of this today, so nothing that reports figures now stops reporting them:
+  stair properties are built from `Cardinal` and `StairShape` and are in domain by construction,
+  the lexer refuses an authored `@id[k=v]`, and a pack's `PackView::lookup` answers with
+  `BlockState::bare`. The shipped corpus is held to that — `example_portability.rs` fails the run
+  if any example on either edition ever leaks one.
+
 - *(core,cli)* `@intended_targets` is weighed against the version floors the same file declares.
   The two headers used to be two inert statements, so `@requires version>=1.21` beside
   `@intended_targets ["1.20.4"]` passed `cairn check` at exit 0 — while `cairn compile --target
