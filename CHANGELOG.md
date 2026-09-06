@@ -31,14 +31,24 @@ and is a separate axis from the Minecraft target version.
   it there. It requires `--edition` for the reason spec §4.2 forbids `--target` alone — "1.21"
   names different releases on Java and Bedrock — and resolves against the same data table `compile`
   does, `latest` included; a version the edition does not ship is the same refusal `compile` gives,
-  printed after the file's own findings so a command-line typo does not bury a syntax error.
+  printed after the file's own findings so a command-line typo does not bury a syntax error, and
+  the file is lowered against the unpinned view first so every finding that needs no id table is
+  reported rather than waiting for a second run with the flag spelled right.
 
   Pinning a version is what turns block-array lowering on, so the rest of that stage's findings —
   `E_UNKNOWN_ABSTRACT_TOKEN`, `E_INCOMPATIBLE_MATERIAL` — come with it rather than being filtered
   back out: a report that ran the pass, saw them, and said nothing would be the same silence the
-  flag exists to end. What does not come with it is anything `compile` writes. No artifact, no
-  lockfile, and no `@requires` floor enforcement: a lockfile certifies a build, and holding
+  flag exists to end. A scope the lowering loses earns the same `E_PARTIAL_BUILD` refusal
+  `compile` gives it, for the same reason and in different words: the compile must not certify a
+  partial build, and the check certifies nothing but must not pass a source the compile at that
+  pin refuses. What does not come with it is anything `compile` writes. No artifact, no lockfile,
+  and no `@requires` floor enforcement (`E_VERSION_CAP`): a lockfile certifies a build, and holding
   `--target` to the floors belongs to the command that produces one.
+
+  Neither run-level refusal — the unshipped target, the lost scope — is an element of the
+  `--format json` array. Neither is a finding at a span, and giving one a line number would put a
+  position on a fact that has none; both are stderr and an exit code, which is the shape `compile`
+  gives them too.
 
   Checking against every version the edition ships would have needed no flag and answered a
   different question: `stone_bricks` is a block on Bedrock 1.21.40 and not on Bedrock 1.21.0, so an

@@ -116,7 +116,7 @@ author's behalf. A `cairn check` with no `--target` does not run block-array low
 lowering-stage code reaches it, `E_UNKNOWN_ABSTRACT_TOKEN` included.
 
 Checking against *every* version the edition ships and refusing only the ids valid in none of them
-would need no flag, and would answer the wrong question: `stone_bricks` is valid somewhere on
+would need no flag, and would answer a different question: `stone_bricks` is valid somewhere on
 Bedrock, so a build pinned to 1.21.0 would still be told nothing. The pin is what makes the answer
 true of the build being made.
 

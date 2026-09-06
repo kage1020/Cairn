@@ -116,20 +116,22 @@ title: "11. Lint と制約検証"
 | `E_INCOMPLETE_PLACE` | `place` 行が `id=` / `use=` / `theme=` のいずれかを欠いている ([§9.3](/ja/spec/components-editing-sites#93-site-による複数建築))。 |
 
 `E_UNKNOWN_ID` と `E_INCOMPATIBLE_MATERIAL` は block-array lowering 段で発生するので、報告するのは
-lowering を走らせるコマンド — `cairn compile`、`cairn lower`、`cairn check --target` — だけです。
-さらに `E_UNKNOWN_ID` は固定されたターゲットを必要とするので、実際に出せるのは `cairn compile
---target` と `cairn check --edition E --target V` の 2 つです。`--target` なしの `cairn check` は
-lowering を走らせないので、どちらのコードにも到達しません。
+lowering を走らせるコマンド — `cairn compile`、`cairn lower`、`cairn info`、
+`cairn check --edition E --target V` — だけです。さらに `E_UNKNOWN_ID` は固定されたターゲットを必要
+とするので、実際に出せるのは `cairn compile --target` と `cairn check --edition E --target V` の 2
+つです (`info` と `lower` はバージョンを固定せずに lowering します)。`--target` なしの
+`cairn check` は lowering を走らせないので、どちらのコードにも到達しません。
 
-`cairn check --target` があるのは、CI ジョブが check コマンドで門番をしつつ、compile が拒否するもの
-を見られるようにするためです。ターゲットが宣言していない ID は `check` を終了コード 0 で通過し、
-`cairn compile` を終了コード 1 で止めていました。それを決める情報 — ただ 1 つの `(エディション,
-バージョン)` の組 — が `check` のコマンドラインになかったからです。このフラグは
+`cairn check --target` があるのは、CI ジョブが check コマンドをゲートにしつつ、compile が拒否する
+lowering 段の指摘を見られるようにするためです。ターゲットが宣言していない ID は `check` を終了コード
+0 で通過し、`cairn compile` を終了コード 1 で止めていました。それを決める情報 — ただ 1 つの
+`(edition, version)` の組 — が `check` のコマンドラインになかったからです。このフラグは
 [コンパイルモデル §4.2](compilation#42-ターゲット軸) が `--target` 単独を拒否するのと同じ理由で
-`--edition` を必要とし、compile と同じテーブルに対して同じ lowering パスを走らせ、そして何も書きま
-せん。成果物もロックファイルも作らず、`@requires` のフロア強制も行いません — ロックはビルドを証明す
-るものであり、`--target` をフロアに突き合わせるのはそれを生成するコマンドだけの仕事だからです。フラ
-グを付けなければ従来どおりの挙動なので、今日通っているソースが落ち始めることはありません
+`--edition` を必要とし、compile と同じテーブルに対して同じ lowering パスを走らせるので、スコープを
+失えば同じ `E_PARTIAL_BUILD` を出します。行わないのは `compile` が書くことすべてです。成果物もロック
+ファイルも作らず、`@requires` の下限の強制も行いません — ロックはビルドを保証する記録であり、
+`--target` を下限に突き合わせるのはそれを生成するコマンドだけの仕事だからです (`E_VERSION_CAP`)。
+フラグを付けなければ従来どおりの挙動なので、今日通っているソースが落ち始めることはありません
 ([バージョンとエディション §10.4](versioning-editions#104-fail-loud-と最小バージョン推定))。
 
 `E_INCOMPATIBLE_MATERIAL` は現時点では、階段ファミリ外に束縛された傾斜屋根または軒の `stair` を
@@ -248,6 +250,12 @@ placement が同じテーマを束縛しながら 1 つのスロットについ�
 パース失敗、あるいは error 深刻度の finding があるとき — は代わりに `{"diagnostics": [ ... ]}` を
 書きます。キーと終了コードでレポートと区別できます。レポートが出せる実行における警告は、どちらの
 フォーマットでも stderr にテキストで報告されます。
+
+実行レベルの拒否は `check` の配列の要素にはなりません。出荷されていない `--target` と、スコープを
+失った lowering (`E_PARTIAL_BUILD`) は、ファイル中のスパンに紐づく指摘ではなくコマンドラインとビルド
+についての事実なので、どちらの形式でも stderr と終了コードで報告します。`compile` がそれらに与えて
+いる形と同じです。配列には実行が到達した指摘がすべて入るので、空の文書ではなく「何が検査されたか」の
+レポートになります。
 
 `parse` と `lower` も同じフラグを取りますが、まだこれを満たして**いません**。成果物がレポートでは
 なくダンプであり、失敗するソースに対しては stdout に何も書かず、失敗は stderr に報告します。ダンプ

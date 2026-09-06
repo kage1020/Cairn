@@ -119,20 +119,22 @@ version to compare.
 | `E_INCOMPLETE_PLACE` | A `place` row omits `id=`, `use=`, or `theme=` ([§9.3](components-editing-sites#93-multi-building-with-site)). |
 
 `E_UNKNOWN_ID` and `E_INCOMPATIBLE_MATERIAL` are raised during block-array lowering, so only the
-commands that lower report them: `cairn compile`, `cairn lower`, and `cairn check --target`.
-`E_UNKNOWN_ID` further needs a pinned target, so the two commands that raise it are `cairn compile
---target` and `cairn check --edition E --target V`. A bare `cairn check` runs no lowering at all
-and reaches neither code.
+commands that lower report them: `cairn compile`, `cairn lower`, `cairn info`, and `cairn check
+--edition E --target V`. `E_UNKNOWN_ID` further needs a pinned target, so the two commands that
+raise it are `cairn compile --target` and `cairn check --edition E --target V` — `info` and
+`lower` lower against no version. A `cairn check` with no `--target` runs no lowering at all and
+reaches neither code.
 
-`cairn check --target` exists so a CI job can gate on the check command and still see what a
-compile would refuse: an id the target does not declare passed `check` at exit 0 and stopped
-`cairn compile` at exit 1, and the information that decides it — the one `(edition, version)` pair
-— was not on `check`'s command line. It requires `--edition` for the reason
-[Compilation Model §4.2](compilation#42-target-axes) refuses `--target` alone, runs the same
-lowering pass against the same table `compile` does, and writes nothing: no artifact, no lockfile,
-and no `@requires` floor enforcement — a lock certifies a build, and only the command that
-produces one holds `--target` to the floors. Leaving the flag off is unchanged behaviour, so no
-source that passes today starts failing. See
+`cairn check --target` exists so a CI job can gate on the check command and still see the
+lowering-stage findings a compile would refuse on: an id the target does not declare passed
+`check` at exit 0 and stopped `cairn compile` at exit 1, and the information that decides it — the
+one `(edition, version)` pair — was not on `check`'s command line. It requires `--edition` for the
+reason [Compilation Model §4.2](compilation#42-target-axes) refuses `--target` alone, and runs the
+same lowering pass against the same table `compile` does, so a lost scope earns the same
+`E_PARTIAL_BUILD`. What it does not do is anything `compile` writes: no artifact, no lockfile, and
+no `@requires` floor enforcement — a lock certifies a build, and only the command that produces
+one holds `--target` to the floors (`E_VERSION_CAP`). Leaving the flag off is unchanged behaviour,
+so no source that passes today starts failing. See
 [Versioning and Editions §10.4](versioning-editions#104-fail-loud-and-minimum-version-inference).
 
 `E_INCOMPATIBLE_MATERIAL` today means a sloped roof or an eave `stair` bound outside the stair
@@ -248,6 +250,12 @@ that array with one `E_PARSE` element. `info`'s is the report; where there is no
 failure, or any error-severity finding — it writes `{"diagnostics": [ ... ]}` instead, told apart
 from a report by its keys and by the exit code. Warnings on a run that still has a report are
 reported as text on stderr in both formats.
+
+A run-level refusal is not an element of `check`'s array: an unshipped `--target` and a lowering
+that lost a scope (`E_PARTIAL_BUILD`) are facts about the command line and about the build rather
+than findings at a span, so both are reported on stderr and by the exit code in either format —
+the shape `compile` gives them. The array still carries every finding the run did reach, so it is
+a report of what was checked rather than an empty document.
 
 `parse` and `lower` take the flag too and do **not** hold to that yet: their product is a dump
 rather than a report, and on a source that fails they write nothing to stdout and report the failure
