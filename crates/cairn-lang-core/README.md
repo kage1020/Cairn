@@ -1,22 +1,16 @@
 # cairn-lang-core
 
-Core of the Cairn language: the parser, the three-layer IR, and the compiler that resolves *intent*
-into a block-array IR.
+Core of the Cairn language: the parser, the three-layer IR, and the compiler that resolves *intent* into a block-array IR.
 
-This crate is the dependency root of every other Cairn crate. It is intentionally backend-free — it
-knows nothing about NBT, edition file formats, redstone simulation, the LSP, or WASM bindings. Those
-live in sibling crates so that the canonical compile pipeline stays small and testable.
+This crate is the dependency root of every other Cairn crate. It is intentionally backend-free — it knows nothing about NBT, edition file formats, redstone simulation, the LSP, or WASM bindings. Those live in sibling crates so that the canonical compile pipeline stays small and testable.
 
 ## Status
 
-Skeleton. The implementation is still a stub: it exposes only the [`CAIRN_VERSION`] constant. The
-parser, IR types, and resolver pipeline are being filled in chapter by chapter, in lockstep with the
-[normative specification](https://cairn.kage1020.com/spec/).
+Skeleton. The implementation is still a stub: it exposes only the [`CAIRN_VERSION`] constant. The parser, IR types, and resolver pipeline are being filled in chapter by chapter, in lockstep with the [normative specification](https://cairn.kage1020.com/spec/).
 
 ## What lives here
 
-The crate maps directly onto the architecture described in
-[`spec/architecture.md`](https://cairn.kage1020.com/spec/architecture/):
+The crate maps directly onto the architecture described in [`spec/architecture.md`](https://cairn.kage1020.com/spec/architecture/):
 
 | Pipeline stage | Spec reference | Future module |
 |---|---|---|
@@ -29,16 +23,11 @@ The crate maps directly onto the architecture described in
 | Editing & patch DSL | [components-editing-sites §9.2](https://cairn.kage1020.com/spec/components-editing-sites/) | `edit` |
 | Provenance + lockfile | [versioning-editions §10.6](https://cairn.kage1020.com/spec/versioning-editions/) | `provenance`, `lock` |
 
-Everything beyond the block-array IR — NBT codec, schematic format backends, redstone synthesis,
-LSP, WASM — is implemented in the sibling crates listed in [the workspace
-overview](https://cairn.kage1020.com/development/).
+Everything beyond the block-array IR — NBT codec, schematic format backends, redstone synthesis, LSP, WASM — is implemented in the sibling crates listed in [the workspace overview](https://cairn.kage1020.com/development/).
 
 ## Versioning
 
-`cairn-lang-core` exposes [`CAIRN_VERSION`], the date-based version of the Cairn release this build
-belongs to, read from the crate's own package version so that it cannot fall behind the workspace.
-This is **not** the Minecraft target version; see
-[versioning-editions](https://cairn.kage1020.com/spec/versioning-editions/) for how the two axes are kept separate.
+`cairn-lang-core` exposes [`CAIRN_VERSION`], the date-based version of the Cairn release this build belongs to, read from the crate's own package version so that it cannot fall behind the workspace. This is **not** the Minecraft target version; see [versioning-editions](https://cairn.kage1020.com/spec/versioning-editions/) for how the two axes are kept separate.
 
 ## License
 

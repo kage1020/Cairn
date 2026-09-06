@@ -1,11 +1,5 @@
 name: Publish
 
-# Tag-triggered binary build and sigstore signing.
-# release.yml (release-plz) publishes crates and creates the GitHub Release and the
-# `v*` tag. This workflow picks up the tag, cross-compiles the `cairn` binary for
-# six OS/arch combinations, signs each archive with keyless sigstore, and uploads
-# everything to the GitHub Release.
-
 on:
   push:
     tags:
@@ -33,9 +27,6 @@ jobs:
       tag: ${{ steps.v.outputs.tag }}
       version: ${{ steps.v.outputs.version }}
     steps:
-      # Bind the untrusted ref / dispatch input to env vars, then reject anything
-      # that does not match the CalVer tag shape. Downstream jobs only ever read
-      # the validated outputs.
       - id: v
         shell: bash
         env:
@@ -65,11 +56,6 @@ jobs:
             runner: ubuntu-24.04-arm
             archive: tar.gz
             ext: ""
-          # macos-latest (= macos-14, Apple Silicon) cross-compiles cleanly to
-          # x86_64-apple-darwin via the x86_64 slice Xcode ships. Using
-          # macos-13 (Intel) instead sits in GitHub's queue for hours: Intel
-          # macOS runners are scarce compared to the M-series pool and get
-          # serialized on any account that isn't running its own runner farm.
           - target: x86_64-apple-darwin
             runner: macos-latest
             archive: tar.gz
@@ -87,7 +73,7 @@ jobs:
             archive: zip
             ext: ".exe"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           ref: ${{ needs.validate-tag.outputs.tag }}
 
@@ -111,11 +97,6 @@ jobs:
         env:
           CARGO_TERM_COLOR: always
           TARGET: ${{ matrix.target }}
-        # Ship both binaries in one archive per target. `cairn-lsp` is the
-        # language-server backend the VS Code extension (M5-PR3) spawns; the
-        # extension always runs against the CLI it was released alongside, so
-        # pairing them keeps versions in lockstep and avoids a second sigstore
-        # roundtrip per target.
         run: cargo build --release --locked --bin cairn --bin cairn-lsp --target "$TARGET"
 
       - name: Stage binaries
@@ -172,15 +153,11 @@ jobs:
             echo "path=$ZIP_PATH" >> "$GITHUB_OUTPUT"
           fi
 
-      # sigstore/cosign-installer@v3 has no Windows/ARM64 build, so skip signing
-      # on that leg. The .zip and .sha256 still upload; the missing .sigstore
-      # is documented in the release notes and downstream verifiers should fall
-      # back to SHA-256 for this platform until cosign ships an ARM64 binary.
       - name: Install cosign
         if: matrix.target != 'aarch64-pc-windows-msvc'
-        uses: sigstore/cosign-installer@v3
+        uses: sigstore/cosign-installer@v4
 
-      - name: Sign archive (keyless sigstore)
+      - name: Sign archive
         if: matrix.target != 'aarch64-pc-windows-msvc'
         shell: bash
         env:
@@ -208,13 +185,6 @@ jobs:
           TAG: ${{ needs.validate-tag.outputs.tag }}
           ARCHIVE: ${{ steps.archive.outputs.path }}
         shell: bash
-        # Create the release on demand if it doesn't already exist. release-plz
-        # creates one at publish time via the `cairn-lang-cli` git_release_enable
-        # setting, but under recovery paths (manual workflow_dispatch, one crate
-        # publish failing mid-batch) the release may be missing. Creating it here
-        # avoids "release not found" upload failures and lets the six binary
-        # matrix jobs race to `gh release create` — the first wins, the rest see
-        # the release already exists and fall through to upload.
         run: |
           set -euo pipefail
           if ! gh release view "$TAG" >/dev/null 2>&1; then
@@ -235,7 +205,7 @@ jobs:
     needs: validate-tag
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           ref: ${{ needs.validate-tag.outputs.tag }}
 
@@ -251,24 +221,10 @@ jobs:
       - name: Install cargo-cyclonedx
         run: cargo install cargo-cyclonedx --locked
 
-      # cargo-cyclonedx writes per-crate SBOMs into each crate directory (or
-      # target/) rather than a single workspace-root file, so
-      # `--override-filename cairn-sbom` alone leaves cosign with nothing to
-      # sign. Generate the per-crate files, then aggregate the newest one at
-      # the workspace root. We pick `cairn-lang-cli` — it transitively depends
-      # on every workspace crate, so its SBOM covers the full graph.
       - name: Generate SBOM
         shell: bash
         run: |
           set -euo pipefail
-          # cargo-cyclonedx v0.5.x has no `-p <package>` flag — it selects the
-          # crate via `--manifest-path`. Without one, running bare in a
-          # workspace root is a silent no-op. Point it at `cairn-lang-cli`
-          # because it transitively depends on every other workspace crate,
-          # so its SBOM covers the full dependency graph. Output lands next
-          # to that Cargo.toml as `cairn-sbom.json` (v0.5.x uses a `.json`
-          # extension, not `.cdx.json`); copy it to workspace root under the
-          # `.cdx.json` name that cosign and the release upload step expect.
           cargo cyclonedx \
             --format json \
             --manifest-path crates/cairn-lang-cli/Cargo.toml \
@@ -284,7 +240,7 @@ jobs:
           ls -la cairn-sbom.cdx.json
 
       - name: Install cosign
-        uses: sigstore/cosign-installer@v3
+        uses: sigstore/cosign-installer@v4
 
       - name: Sign SBOM
         env:
@@ -295,8 +251,6 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ needs.validate-tag.outputs.tag }}
-        # Same on-demand release creation as the binaries job — SBOM must not
-        # fail just because it ran ahead of the first binary matrix leg.
         run: |
           set -euo pipefail
           if ! gh release view "$TAG" >/dev/null 2>&1; then

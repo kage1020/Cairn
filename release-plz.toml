@@ -1,68 +1,21 @@
-# release-plz configuration for Cairn.
-#
-# Cairn uses CalVer `YYYY.M[.PATCH]` (see CHANGELOG.md and spec/versioning-editions).
-# release-plz does not natively understand CalVer, so the version is forced from CI
-# (workflow `compute-version` job + `release-plz set-version`). This file controls
-# everything *other* than the version number: changelog template, tag/release shape,
-# commit grouping.
-
 [workspace]
-# CalVer has no semver "major" axis, so the API-break detector is meaningless here.
-# Tier-based breakage promises live in spec/compatibility, not in semver_check.
 semver_check = false
 
-# One workspace, one CalVer, one tag. Per-crate tags would pollute the history with
-# seven tags per release.
 git_tag_enable = false
 git_release_enable = false
 
-# Single root changelog for the whole bundle.
 changelog_path = "./CHANGELOG.md"
 changelog_update = true
 
-# The workflow pre-sets the workspace version before invoking release-plz, so the
-# tree is "dirty" by release-plz's reckoning. Allow it.
 allow_dirty = true
 publish_allow_dirty = true
 publish_timeout = "10m"
 
-# Patch path (push trigger) opens a PR only when at least one commit matches.
-# Docs-only / ci-only / test-only changes do not earn a patch release.
-# The monthly cron path bypasses this by pre-setting the workspace version.
 release_commits = "^(feat|fix|perf|refactor|build)(\\(.+\\))?(!)?:"
 
-# PR shape.
 pr_branch_prefix = "release-plz-"
 pr_labels = ["release"]
 
-# Pin one crate as the anchor for the single workspace tag + GitHub Release.
-# `cairn-lang-cli` is the user-facing binary (installs the `cairn` command),
-# so the tag rides on it.
-#
-# `publish` here must mirror `[workspace.package].publish` in Cargo.toml —
-# release-plz refuses to start when the two disagree. Both are `true` so the
-# monthly cron path can open a release PR; `cargo publish` only fires when a
-# release PR is merged, and the version at that point is decided by the
-# workflow's pre-set step, not by release-plz's own bump logic.
-#
-# Authentication to crates.io uses Trusted Publishing (OIDC), not a stored
-# `CARGO_REGISTRY_TOKEN`. Each cairn-lang-* crate has this repository +
-# `.github/workflows/release.yml` registered as a Trusted Publisher on
-# crates.io. The exchange happens in `release.yml` via the
-# `rust-lang/crates-io-auth-action` step; no long-lived registry secret is
-# read anywhere in this repo.
-#
-# Adding a new publishable workspace member takes one manual step before it can
-# ride this automation. A Trusted Publishing token cannot create a crate that
-# does not exist yet — crates.io has no pending-publisher concept, and refuses
-# the upload with "Trusted Publishing tokens do not support creating new crates.
-# Publish the crate manually, first". So the first version of a new crate goes
-# out with `cargo publish -p <crate>` from a machine holding a crates.io token,
-# and the Trusted Publisher entry is attached to the crate afterwards. Until
-# that is done, every push to canary fails at `release-plz release`, because it
-# tries to publish the crate whose version is not yet on the registry. The npm
-# side of `cairn-lang-tree-sitter` has the identical constraint; see
-# `.github/workflows/npm-publish.yml`.
 [[package]]
 name = "cairn-lang-cli"
 publish = true
@@ -71,18 +24,9 @@ git_release_enable = true
 git_tag_name = "v{{ version }}"
 
 [changelog]
-# Existing CHANGELOG.md content is preserved by release-plz on insertion. This
-# header is only used when the file is created fresh; the live header lives in
-# CHANGELOG.md and follows Keep a Changelog 1.1.0 with an `[Unreleased]` marker.
 header = """# Changelog
 
 > Language: **English** ([日本語](CHANGELOG.ja.md))
-
-All notable changes to Cairn are documented here. The format follows
-[Keep a Changelog](https://keepachangelog.com/en/1.1.0/) so `release-plz` can append release
-entries cleanly. Cairn uses date-based versioning (CalVer) `YYYY.M[.PATCH]`. This is the version
-of the language + reference compiler + standard library + registry/constraint packs as a bundle,
-and is a separate axis from the Minecraft target version.
 
 ## [Unreleased]
 
@@ -114,10 +58,6 @@ commit_parsers = [
   { message = "^ci", group = "ci", skip = true },
   { message = "^test", group = "test", skip = true },
   { message = "^style", group = "style", skip = true },
-  # release-plz's own release commit is `chore: release vX.Y.Z` — no
-  # `(release)` scope — so match both shapes to stop the merge of a release
-  # PR from being re-classified as a fresh patch-worthy commit and cascading
-  # into a v(patch+1) PR on the very next canary push.
   { message = "^chore(\\(release\\))?: release", skip = true },
   { message = "^chore\\(release\\)", skip = true },
   { message = "^chore", group = "chore", skip = true },

@@ -1,18 +1,10 @@
 # cairn-lang-lsp
 
-Language Server Protocol implementation for Cairn editors. Surfaces parser and lint diagnostics from
-[`cairn-lang-core`](../cairn-lang-core/README.md), autocompletes canonical material tokens, and exposes the
-self-correction loop described in [lint](https://cairn.kage1020.com/spec/lint/) and
-[evaluation](https://cairn.kage1020.com/spec/evaluation/) in a form an editor (or an LLM acting through an editor) can
-consume incrementally.
+Language Server Protocol implementation for Cairn editors. Surfaces parser and lint diagnostics from [`cairn-lang-core`](../cairn-lang-core/README.md), autocompletes canonical material tokens, and exposes the self-correction loop described in [lint](https://cairn.kage1020.com/spec/lint/) and [evaluation](https://cairn.kage1020.com/spec/evaluation/) in a form an editor (or an LLM acting through an editor) can consume incrementally.
 
 ## Status
 
-The `cairn-lsp` binary speaks standard LSP over stdio: it negotiates full-content document sync at
-`initialize`, pushes `textDocument/publishDiagnostics` — computed by the same
-`parse → lower → check` pipeline as `cairn check` — on every `didOpen`/`didChange`, clearing them
-on `didClose`, and answers `textDocument/completion` from the closed vocabularies. Hover and code
-actions are not yet wired.
+The `cairn-lsp` binary speaks standard LSP over stdio: it negotiates full-content document sync at `initialize`, pushes `textDocument/publishDiagnostics` — computed by the same `parse → lower → check` pipeline as `cairn check` — on every `didOpen`/`didChange`, clearing them on `didClose`, and answers `textDocument/completion` from the closed vocabularies. Hover and code actions are not yet wired.
 
 ## Shipped capabilities
 
@@ -33,21 +25,14 @@ actions are not yet wired.
 
 ## Design notes
 
-- Lint messages are designed to feed the self-correction loop verbatim
-  ([lint §11](https://cairn.kage1020.com/spec/lint/)). The LSP layer must preserve the "what is wrong / valid
-  candidates / suggested fix" triple intact so a coding agent can act on it without prose
-  paraphrasing.
-- Autocomplete is **closed-set first** ([principles P3](https://cairn.kage1020.com/spec/principles/)): the registry
-  table is the source of truth, not a learned vocabulary, so suggestions cannot hallucinate IDs
-  that do not exist in the target `(edition, version)`.
+- Lint messages are designed to feed the self-correction loop verbatim ([lint §11](https://cairn.kage1020.com/spec/lint/)). The LSP layer must preserve the "what is wrong / valid candidates / suggested fix" triple intact so a coding agent can act on it without prose paraphrasing.
+- Autocomplete is **closed-set first** ([principles P3](https://cairn.kage1020.com/spec/principles/)): the registry table is the source of truth, not a learned vocabulary, so suggestions cannot hallucinate IDs that do not exist in the target `(edition, version)`.
 
 ## Dependencies
 
 - [`cairn-lang-core`](../cairn-lang-core/README.md) for the parser, IR, and lint engine.
-- [`cairn-lang-formats`](../cairn-lang-formats/README.md) for the built-in registry packs backing
-  material-token completion.
-- [`lsp-server`](https://crates.io/crates/lsp-server) / [`lsp-types`](https://crates.io/crates/lsp-types)
-  for the synchronous stdio transport and protocol types (no async runtime).
+- [`cairn-lang-formats`](../cairn-lang-formats/README.md) for the built-in registry packs backing material-token completion.
+- [`lsp-server`](https://crates.io/crates/lsp-server) / [`lsp-types`](https://crates.io/crates/lsp-types) for the synchronous stdio transport and protocol types (no async runtime).
 
 ## License
 
