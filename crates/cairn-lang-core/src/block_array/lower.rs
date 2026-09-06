@@ -1224,15 +1224,23 @@ fn lower_body_to_block_array<'a>(
         body.scope_label,
     );
 
+    let mut array = BlockArray {
+        dims,
+        palette,
+        voxels,
+        block_entities: Vec::new(),
+        entities: Vec::new(),
+        source_scope: body.source_scope,
+    };
+    // Last, and after the prune: the grid is finished, so this is the
+    // point where the palette can be a rendering of what the body
+    // contains instead of a log of the order the paints ran in. Doing it
+    // before the prune would sort entries that are about to be dropped
+    // and renumber twice for the same answer.
+    array.canonicalize_palette();
+
     Some(LoweredBody {
-        array: BlockArray {
-            dims,
-            palette,
-            voxels,
-            block_entities: Vec::new(),
-            entities: Vec::new(),
-            source_scope: body.source_scope,
-        },
+        array,
         walls: ctx.wall_column,
     })
 }

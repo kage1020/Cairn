@@ -7,10 +7,13 @@
 //! only of the paint order. The phase a member lands in has to be the one
 //! §4.1 names, or two members that belong to different phases end up in one
 //! bucket where the later line simply wins. And the palette has to describe
-//! the finished grid rather than the sequence of writes that produced it,
-//! or the loser's material rides along into the `.nbt` and the
-//! `resolved_ir_hash`, and permuting two lines changes the artifact even
-//! when it does not change a single voxel.
+//! the finished grid rather than the sequence of writes that produced it —
+//! both in *which* entries it holds, or the material of a member whose last
+//! cell was covered rides along into the `.nbt` and the `resolved_ir_hash`,
+//! and in what order it holds them, or two members that share no voxel at
+//! all still number the palette by which of their lines was written first.
+//! Either way, permuting two lines changes the artifact when it does not
+//! change a single voxel.
 //!
 //! Inside one phase §4.1 does grant last-wins, to "local overrides within
 //! the same phase". An author restating a member is what that grant is for;
@@ -125,6 +128,10 @@ fn pruning_keeps_air_at_slot_zero_and_leaves_the_survivors_in_order() {
     // keeps slot 0 — which this fixture does reference, since a wall ring
     // leaves the interior empty. The unreferenced-air case is the unit
     // test in `block_array::lower`.
+    //
+    // The two survivors are already in ascending order here, so this pins
+    // the prune and not the sort; `the_palette_is_sorted_…` below is the
+    // one that separates them.
     let out = lowered(&source(&format!("{PANE}{PLATE}")));
     assert_eq!(
         ids(only_structure(&out)),
@@ -138,9 +145,10 @@ fn pruning_keeps_air_at_slot_zero_and_leaves_the_survivors_in_order() {
 
 #[test]
 fn every_palette_entry_of_a_permuted_pair_survives_the_permutation() {
-    // The palette is not only a set here: two members that never contest a
-    // cell still intern in the order their phases run, so a permutation
-    // that leaves the voxels alone must leave the entry order alone too.
+    // Two members in different phases. Whichever line comes first, the
+    // palette has to name the same blocks in the same slots — and it does
+    // so by sorting them, not by recording that massing painted before
+    // openings.
     let a = lowered(&source(
         "  window side=front y=1 offset=1 size=1x1 mat_slot=glass\n  floor mat_slot=deck\n",
     ));
@@ -153,10 +161,79 @@ fn every_palette_entry_of_a_permuted_pair_survives_the_permutation() {
         [
             "minecraft:air",
             "minecraft:cobblestone",
-            "minecraft:oak_planks",
             "minecraft:glass_pane",
+            "minecraft:oak_planks",
         ],
-        "massing before openings, whichever line was written first",
+        "air at slot 0, the rest ascending by id",
+    );
+}
+
+#[test]
+fn permuting_two_members_of_one_phase_that_share_no_voxel_leaves_the_array_equal() {
+    // Two windows on opposite walls: same phase, and not one cell in
+    // common, so nothing about the finished grid depends on their order.
+    // The palette used to record it anyway — `intern` appends on first
+    // use, and inside a phase first use follows the lines — so swapping
+    // them moved `glass_pane` and `oak_planks` past each other in every
+    // `.nbt` byte, `cairn info` row, and `resolved_ir_hash` derived from
+    // the array. Comparing the whole `BlockArray` is the point: an
+    // assertion on the voxels alone passed the whole time.
+    let glass_first = lowered(&source(concat!(
+        "  window side=front y=1 offset=1 size=1x1 mat_slot=glass\n",
+        "  window side=back  y=1 offset=1 size=1x1 mat_slot=deck\n",
+    )));
+    let deck_first = lowered(&source(concat!(
+        "  window side=back  y=1 offset=1 size=1x1 mat_slot=deck\n",
+        "  window side=front y=1 offset=1 size=1x1 mat_slot=glass\n",
+    )));
+    assert_eq!(only_structure(&glass_first), only_structure(&deck_first));
+    assert_eq!(
+        ids(only_structure(&glass_first)),
+        [
+            "minecraft:air",
+            "minecraft:cobblestone",
+            "minecraft:glass_pane",
+            "minecraft:oak_planks",
+        ],
+    );
+    // Guard: two windows that never painted would compare equal too.
+    assert_eq!(
+        glass_first.diagnostics.len(),
+        0,
+        "both windows must lower cleanly: {:#?}",
+        glass_first.diagnostics,
+    );
+}
+
+#[test]
+fn the_palette_is_sorted_rather_than_left_in_the_order_the_phases_painted() {
+    // The permutation tests above pin that the two orders agree; they do
+    // not pin *which* order is canonical, and a compiler that simply kept
+    // paint order would pass them whenever the paint order happened to be
+    // sorted. Name it with a body whose paint order is not: massing paints
+    // the `spruce_planks` floor and the `cobblestone` walls before the
+    // openings phase reaches the `birch_fence` window, and `birch_fence`
+    // sorts ahead of both.
+    let out = lowered(concat!(
+        "theme t:\n",
+        "  slot wall  -> @cobblestone\n",
+        "  slot floor -> @spruce_planks\n",
+        "  slot bars  -> @birch_fence\n",
+        "\n",
+        "struct t size=7x5\n",
+        "  walls mat_slot=wall height=3\n",
+        "  floor mat_slot=floor\n",
+        "  window side=front y=1 offset=1 size=1x1 mat_slot=bars\n",
+    ));
+    assert_eq!(
+        ids(only_structure(&out)),
+        [
+            "minecraft:air",
+            "minecraft:birch_fence",
+            "minecraft:cobblestone",
+            "minecraft:spruce_planks",
+        ],
+        "the opening's material sorts first even though massing painted first",
     );
 }
 

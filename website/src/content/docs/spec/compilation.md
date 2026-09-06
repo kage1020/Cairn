@@ -19,7 +19,9 @@ raw         escape hatch
 ```
 
 A `window` written after `roof` is still cut as an opening in the wall. Source order never decides
-what a member means.
+what a member means — nor, per [§4.8](#48-within-phase-conflicts-and-the-palette), what the artifact
+is: permuting two members that share no voxel leaves the whole `BlockArray` equal, palette
+numbering included, and not only the voxels.
 
 `circuit` marks a routing region and writes no voxel, so it belongs to no phase. The three
 `logic_*` phases follow `fixtures` because port coordinates are not fixed until sensors and
@@ -219,10 +221,24 @@ Two cases are not conflicts:
 - A member writing over itself, as when a `window`'s `repeat=` / `step=` stamps overlap.
 
 **The palette** of an evaluated body (a `struct`, a `def`, and each `place` that instantiates one)
-lists the blocks that body contains, in the order the phases first painted them, with air at slot
-`0`. It is not a log of everything interned along the way: a material whose last voxel a later
-phase covered is dropped, and the remaining slots renumber onto the gap. Otherwise two sources
-differing only in which member lost would produce different artifacts for the same build, since the
-loser would reach the `.nbt`, be counted by `cairn info`, and be covered by `resolved_ir_hash`.
+is a *set with a canonical rendering*, not a log of the writes that filled it. It lists exactly the
+blocks that body contains, and it lists them in one fixed order: air at slot `0`, then every other
+entry ascending by `(id, properties)` — the id first, then the state properties compared by name.
+
+Two rules follow, and both exist because the numbering reaches the `.nbt`, `cairn info`'s per-entry
+rows, and `resolved_ir_hash`:
+
+- A material whose last voxel a later phase covered is **dropped**, and the remaining slots renumber
+  onto the gap. Otherwise two sources differing only in which member lost would produce different
+  artifacts for the same build.
+- Two members that share no voxel do not order each other. Nothing about the finished grid depends
+  on which of their lines came first, so nothing about the artifact may either — which is what §4.1
+  opens by promising, and it is a claim about the bytes and not only about the voxels. Sorting is
+  what makes it true: the palette is derived from the finished grid alone, so any permutation of the
+  source that leaves the grid alone leaves the whole `BlockArray` alone.
+
+The sort is over the resolved state, so it is stable across editions and versions in the sense that
+matters: it does not consult source spans, member ids, phases, or paint order. It is not a claim
+that two targets agree on the palette, because two targets need not agree on the ids in it.
 
 A walkway's array is laid by the `connect` pass rather than by the phases, and is not covered here.
