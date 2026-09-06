@@ -537,12 +537,14 @@ spelling.
 Bedrock's light block is that case, and it is why the snippet above carries a floor. 1.21.0 spells
 the block `light_block` and carries the level beside it as a `block_light_level` state; 1.21.40
 promoted the level into the id, so 1.21.40 and 1.21.60 spell the same block `light_block_0` …
-`light_block_15` and have no id named `light_block` at all. The `aliases` row that holds all of
-those spellings together ([§10.4](#104-fail-loud-and-minimum-version-inference)) answers the
-diagnostic and not the source: it hands back the spellings the pinned target declares, and picking
-one of them is the author's to do — which is what writing the branch for one of the two shapes is.
-The floor is what says which shape that is. Being scoped, it is inert on the Java build
-([§10.4](#a-floor-may-name-its-edition)), which the other branch serves.
+`light_block_15` and have no id named `light_block` at all. The `aliases` row holding all of those
+spellings together ([§10.4](#104-fail-loud-and-minimum-version-inference)) answers the diagnostic
+and not the source. Its answer is the closed set the pinned target declares — `light` against
+Bedrock 1.21.60 comes back as all sixteen levels — and a set of sixteen is not a spelling: picking
+one of them is the silent substitution that section forbids, so it stays the author's to do.
+Writing the branch for one of the two shapes is doing it, and the floor is what says which shape
+that is. Being scoped, it is inert on the Java build ([§10.4](#a-floor-may-name-its-edition)),
+which the other branch serves.
 
 Leaving the floor off is loud rather than wrong: `light_block_15` against Bedrock 1.21.0 is
 `E_UNKNOWN_ID`, since the check is per version. What the floor adds is not a different refusal but
