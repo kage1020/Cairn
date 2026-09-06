@@ -419,8 +419,8 @@ fn slot_name_items(
 /// (java ∪ bedrock, java order first) — abstract tokens with their resolved
 /// canonical id as detail, then the deduplicated canonical ids themselves.
 /// The canonical list is the catalog's value column, not a full block
-/// vocabulary: a complete canonical set needs a blocks table the registry
-/// packs do not carry yet.
+/// vocabulary: a complete canonical set means reading the packs' blocks
+/// table too, which this pass does not consult.
 fn material_items(
     index: &LineIndex,
     source: &str,

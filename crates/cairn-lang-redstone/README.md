@@ -1,6 +1,6 @@
 # cairn-lang-redstone
 
-Redstone for Cairn: turns a *signal graph* into voxels, then verifies the result with a headless per-tick simulator.
+Redstone for Cairn: turns a *signal graph* into voxels, and will verify the result with a headless per-tick simulator.
 
 Per [redstone](https://cairn.kage1020.com/spec/redstone/), the logical redstone surface is where Cairn's "declare intent, the compiler resolves the physics" thesis pays off most. Signal attenuation, crosstalk, delay, and the Java/Bedrock divergence — all things an LLM handles poorly — are derived deterministically from a small dataflow description.
 
@@ -53,7 +53,7 @@ Out of scope for v1, and dropped to plain placement or `raw`: general FSMs, CPU-
 
 ## Verification loop
 
-`synth → sim → diff → patch`. The patch may rewrite placement hints, routing, and buffer repeaters only; **the Logic IR is never auto-modified** ([redstone §14.7](https://cairn.kage1020.com/spec/redstone/)). The simulator runs per target edition, so one declaration is checked against both the Java and the Bedrock implementation.
+`synth → sim → diff → patch`. The patch may rewrite placement hints, routing, and buffer repeaters only; **the Logic IR is never auto-modified** ([redstone §14.7](https://cairn.kage1020.com/spec/redstone/)). The simulator is to run per target edition, so one declaration gets checked against both the Java and the Bedrock implementation. Only the synthesis half of that loop exists today.
 
 ## Dependencies
 

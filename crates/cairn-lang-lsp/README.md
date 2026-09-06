@@ -11,14 +11,14 @@ The `cairn-lsp` binary speaks standard LSP over stdio: it negotiates full-conten
 | Capability | Notes |
 |---|---|
 | `textDocument/publishDiagnostics` (push) | Stable `E_*`/`W_*` strings in `code`, `source: "cairn"`, span notes as `relatedInformation`, spanless notes folded into `message` as `note:` lines, structured payloads in `data`. Positions are 0-based lines with UTF-16 code-unit columns (the protocol default). |
-| `textDocument/completion` | Four closed-vocabulary contexts, detected line-locally so completion works while the document fails to parse: line-opening keywords (top-level items, member commands, `slot` + selector keywords in theme bodies), `mat_slot=` values (union of slot names declared by the document's themes — edition variants union naturally, matching unpinned `cairn check`), and `@` material tokens from the built-in registry union (java ∪ bedrock): abstract tokens with their resolved canonical id as detail, plus the deduplicated canonical ids from the catalog's value column. The full canonical vocabulary waits on a blocks table the registry packs do not carry yet. Trigger characters: `@`, `=`, `.`. |
+| `textDocument/completion` | Four closed-vocabulary contexts, detected line-locally so completion works while the document fails to parse: line-opening keywords (top-level items, member commands, `slot` + selector keywords in theme bodies), `mat_slot=` values (union of slot names declared by the document's themes — edition variants union naturally, matching unpinned `cairn check`), and `@` material tokens from the built-in registry union (java ∪ bedrock): abstract tokens with their resolved canonical id as detail, plus the deduplicated canonical ids from the catalog's value column. The full canonical vocabulary is not offered yet: completion reads the materials catalog, not the blocks table the registry packs also carry and `E_UNKNOWN_ID` answers from. Trigger characters: `@`, `=`, `.`. |
 
 ## Planned capabilities
 
 | Capability | Spec reference |
 |---|---|
 | `textDocument/diagnostic` (pull) — syntax, geometry, attachment, support, fluid, version_caps, edit_stability, redstone | [lint](https://cairn.kage1020.com/spec/lint/) |
-| `textDocument/completion` over a full canonical block vocabulary (needs a registry blocks table) | [materials-themes §7.2](https://cairn.kage1020.com/spec/materials-themes/) |
+| `textDocument/completion` over the full canonical block vocabulary, by reading the registry packs' blocks table as well as the materials catalog | [materials-themes §7.2](https://cairn.kage1020.com/spec/materials-themes/) |
 | `textDocument/hover` — block primitive docs, blockstate intent vs resolved view | [blockstate §6.2](https://cairn.kage1020.com/spec/blockstate/) |
 | `textDocument/codeAction` — apply the "Suggested fix:" payloads from lint messages | [lint](https://cairn.kage1020.com/spec/lint/), [versioning-editions §10.4](https://cairn.kage1020.com/spec/versioning-editions/) |
 | `workspace/executeCommand` — `cairn.info`, `cairn.diffBlocks` | [versioning-editions §10.5](https://cairn.kage1020.com/spec/versioning-editions/), [ecosystem-interop §12.2](https://cairn.kage1020.com/spec/ecosystem-interop/) |
