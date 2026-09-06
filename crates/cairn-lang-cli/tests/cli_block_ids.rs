@@ -290,12 +290,15 @@ fn a_material_token_follows_the_rename_across_its_editions_range() {
     }
 }
 
-/// `cairn check` does not run block-array lowering at all, so no
+/// A `cairn check` that pins no target runs no block-array lowering, so no
 /// lowering-stage code reaches it — `E_UNKNOWN_ID` included. A source
-/// `compile` refuses for an unknown id therefore still passes `check`.
+/// `compile` refuses for an unknown id therefore still passes it.
 ///
 /// Worth pinning rather than leaving implicit: it is a real hole for
-/// anyone gating CI on `cairn check`, and it widened by one code here.
+/// anyone gating CI on the unpinned command, and it widened by one code
+/// here. `cairn check --edition E --target V` is the invocation that
+/// closes it — `cli_check_target.rs` pins that half — and this test is
+/// what says the default did not move with it.
 #[test]
 fn check_stays_silent_about_ids_because_it_does_not_lower() {
     let fixture = Fixture::new("check", &source_binding("totally_not_a_block"));

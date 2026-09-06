@@ -121,6 +121,42 @@ fn a_target_below_the_declared_floor_is_refused() {
     );
 }
 
+/// `cairn check --target` names a target too and is deliberately not held
+/// to the floors.
+///
+/// The decision, not an oversight: a floor bounds what a *lockfile* may
+/// certify, and a check writes none. Pinned here because it is the one
+/// asymmetry between the two commands' `--target` that reads like a bug —
+/// someone taking `check --target` for "compile without writing" would
+/// close it, and this says the difference was chosen. See
+/// `enforce_version_floor`, whose single caller is `run_compile`.
+#[test]
+fn a_pinned_check_is_not_held_to_the_floor_the_compile_is_held_to() {
+    let fixture = Fixture::new("check-floor", &format!("@requires version>=1.21\n{BUILD}"));
+    let refused = compile(&fixture, "1.20.4");
+    let stderr = String::from_utf8(refused.stderr).expect("utf-8");
+    assert_eq!(refused.status.code(), Some(1), "premise: {stderr}");
+    assert!(stderr.contains("E_VERSION_CAP"), "premise: {stderr}");
+
+    let checked = Command::new(cargo_bin())
+        .args([
+            "check",
+            fixture.source().to_str().unwrap(),
+            "--edition",
+            "java",
+            "--target",
+            "1.20.4",
+        ])
+        .output()
+        .expect("run cairn");
+    let stderr = String::from_utf8(checked.stderr).expect("utf-8");
+    assert_eq!(checked.status.code(), Some(0), "stderr={stderr}");
+    assert!(
+        !stderr.contains("E_VERSION_CAP"),
+        "the cap belongs to the command that writes the lock, got: {stderr}",
+    );
+}
+
 /// Exiting non-zero while leaving a lock behind would still leave
 /// `verified: true` on disk for the next reader.
 ///

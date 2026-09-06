@@ -63,14 +63,36 @@ enum Command {
         format: Format,
     },
     /// Run syntactic validation passes against a .crn source file. Exits 0
-    /// when nothing is reported, 1 when any `Error`-severity diagnostic is
-    /// emitted (or the file fails to parse), 2 when the file cannot be
-    /// located.
+    /// when nothing `Error`-severity is reported, 1 when any
+    /// `Error`-severity diagnostic is emitted (or the file fails to parse,
+    /// or cannot be read for a reason other than absence, or `--target`
+    /// names no version the pinned edition ships, or a pinned run loses a
+    /// scope), 2 when the file cannot be located or `--target` is given
+    /// without `--edition`.
     ///
-    /// This command does not run block-array lowering, so no lowering-stage
-    /// finding reaches it — `E_UNKNOWN_ID` and `E_UNKNOWN_ABSTRACT_TOKEN`
-    /// among them. `cairn compile` runs both stages and is the gate that
-    /// sees every code.
+    /// Without `--target` this command runs no block-array lowering, so no
+    /// lowering-stage finding reaches it — `E_UNKNOWN_ID` and
+    /// `E_UNKNOWN_ABSTRACT_TOKEN` among them. `--edition E --target V`
+    /// pins the one `(edition, version)` those findings are answers about
+    /// and runs the lowering pass too, which is what lets a CI job gate on
+    /// `cairn check` and see the lowering-stage findings `cairn compile`
+    /// would refuse on, plus the `E_PARTIAL_BUILD` a lost scope earns.
+    /// Nothing is written either way — `compile` remains the command that
+    /// produces artifacts and the lockfile, and the only one that holds
+    /// `--target` to the file's `@requires` floors (`E_VERSION_CAP`).
+    ///
+    /// The two run-level refusals — an unshipped `--target` and a lost
+    /// scope — are reported on stderr and by the exit code in both
+    /// formats, never as elements of the `--format json` array: neither is
+    /// a finding at a span in the file, and inventing one would put a line
+    /// number on a fact that has none. This is `compile`'s shape for both,
+    /// and the exit code is what a JSON consumer reads them from.
+    ///
+    /// `compile`'s `--target` defaults to `latest`, so a compile always
+    /// pins a version while `cairn check --edition java` — the mirror a CI
+    /// job naturally writes — still runs the unpinned gate. The default is
+    /// deliberately not copied here: it would refuse ids on a version
+    /// nobody chose, which is the guess spec §10.4 rules out.
     Check {
         /// Path to the .crn file to check.
         file: PathBuf,
@@ -91,6 +113,29 @@ enum Command {
         /// the author means.
         #[arg(long, value_enum)]
         edition: Option<EditionArg>,
+        /// Optional Minecraft version pin, resolved against the pinned
+        /// edition's data table exactly as `cairn compile --target` is.
+        /// `latest` aliases the version that table names as its `latest`
+        /// row, which is not necessarily the newest row it carries (see
+        /// `DataVersionTable::latest`).
+        ///
+        /// Requires `--edition`, mirroring spec §4.2's rule that
+        /// `--target` alone is forbidden: "1.21" names different releases
+        /// on Java and Bedrock, and an id table belongs to one
+        /// `(edition, version)` pair rather than to a version string.
+        ///
+        /// Setting it runs block-array lowering, so the lowering stage's
+        /// findings join the report — `E_UNKNOWN_ID` above all, which
+        /// exists only where a target is pinned: `stone_bricks` is a block
+        /// on Bedrock 1.21.40 and not on Bedrock 1.21.0, so with no
+        /// version chosen there is no question to answer. A version the
+        /// edition does not ship still lowers, against the same unpinned
+        /// view `cairn lower` uses, so every finding that needs no id
+        /// table is reported before the target is refused. Leaving the
+        /// flag off keeps the check a syntax-and-resolution gate, and no
+        /// source that passes today starts failing.
+        #[arg(long, requires = "edition")]
+        target: Option<String>,
         /// Output format for the diagnostics.
         #[arg(long, value_enum, default_value_t = CheckFormat::Text)]
         format: CheckFormat,
@@ -138,9 +183,10 @@ enum Command {
     /// families it knows into Bedrock `states`; a property it cannot
     /// translate is a hard error, and intent it can only approximate (stair
     /// `shape`) is dropped with a `W_INTENT_DEGRADED` warning rather than
-    /// silently. This is also the only command that checks block ids against a
-    /// registry (`E_UNKNOWN_ID`): `--target` pins the one version there is
-    /// an answer for.
+    /// silently. `--target` pins the one version a block id has an answer
+    /// for, which is what lets the compile check them (`E_UNKNOWN_ID`);
+    /// `cairn check --edition E --target V` pins the same pair to reach
+    /// the same finding without building anything.
     /// Exits 0 on success, 1 on parse, lowering, or I/O failure (including
     /// an unsupported `--target` or a Bedrock property with no `states`
     /// translation), and 2
@@ -153,8 +199,10 @@ enum Command {
         #[arg(long, value_enum)]
         edition: EditionArg,
         /// Minecraft version string. Resolved against the backend's data
-        /// table; opaque label per spec §10.1. `latest` aliases the newest
-        /// version the backend knows about.
+        /// table; opaque label per spec §10.1. `latest` aliases the
+        /// version that table names as its `latest` row, which is not
+        /// necessarily the newest row it carries (see
+        /// `DataVersionTable::latest`).
         #[arg(long, default_value = "latest")]
         target: String,
         /// Output directory for the generated `.nbt` files. Created if
@@ -398,8 +446,9 @@ fn main() -> ExitCode {
         Some(Command::Check {
             file,
             edition,
+            target,
             format,
-        }) => run_check(&file, edition, format),
+        }) => run_check(&file, edition, target.as_deref(), format),
         Some(Command::Info {
             file,
             editions,
@@ -536,7 +585,89 @@ fn print_json<T: serde::Serialize>(what: &str, value: &T) -> Result<(), ExitCode
     }
 }
 
-fn run_check(file: &Path, edition: Option<EditionArg>, format: CheckFormat) -> ExitCode {
+/// What [`check_lowering`] found, and what the run owes a refusal for.
+struct CheckLowering {
+    /// The block-array pass's findings. Empty when no target was pinned
+    /// and nothing lowered, or when lowering ran and reported nothing; a
+    /// target that did not resolve still lowers, so `unsupported` being
+    /// set says nothing about this field.
+    diagnostics: Vec<Diagnostic>,
+    /// Scopes the source asked for that produced no voxels, as
+    /// [`dropped_scopes`] collects them. Empty on a run that pinned no
+    /// target, which lowers nothing and so loses nothing.
+    dropped_scopes: Vec<String>,
+    /// How many scopes did lower, so the refusal can say "1 of 2".
+    built_scopes: usize,
+    /// The failure report for a `--target` that did not resolve — the
+    /// edition, the version asked for, the nearest suggestion and the
+    /// supported list — or `None` when the target resolved or none was
+    /// given.
+    unsupported: Option<cairn_lang_formats::data_version::UnsupportedTarget>,
+}
+
+/// Lower far enough to check block ids, or not at all.
+///
+/// `cairn check --target` is the only run of the check gate that lowers.
+/// The id check needs the one `(edition, version)` pair an id either
+/// exists in or does not, and lowering is where the palette is built, so
+/// the two arrive together: pinning a target turns the pass on, and every
+/// other lowering-stage finding comes with it rather than being filtered
+/// back out — a report that saw `E_INCOMPATIBLE_MATERIAL` and said
+/// nothing would be the same silence this flag exists to end.
+///
+/// A `--target` the edition's table cannot resolve is carried back for
+/// `run_check` to print after the file's own findings, for the reason
+/// [`resolve_target`] gives. Lowering still runs, exactly as it does in
+/// [`load_and_lower`], against the unpinned view: only the id check needs
+/// the version, so refusing to lower at all would hide every finding that
+/// does not — and send the author back for a second run once the flag is
+/// spelled right.
+fn check_lowering(
+    ir: &cairn_lang_core::intent::IntentModule,
+    edition: Option<EditionArg>,
+    target: Option<&str>,
+) -> CheckLowering {
+    // `--target` without `--edition` cannot reach here — clap's `requires`
+    // refuses it (spec §4.2), which is what
+    // `target_without_edition_is_refused_as_a_usage_error` guards. Every
+    // other combination can: a bare `check` and `check --edition E` both
+    // take the `let else` and lower nothing, which is the ordinary
+    // no-target run rather than an edge case.
+    let (Some(edition), Some(target)) = (edition, target) else {
+        return CheckLowering {
+            diagnostics: Vec::new(),
+            dropped_scopes: Vec::new(),
+            built_scopes: 0,
+            unsupported: None,
+        };
+    };
+    let resolved = resolve_target(edition, target);
+    // `None` where the target did not resolve, which is the same "no
+    // version pinned" mode `cairn lower` runs in: the id check is left off
+    // rather than run against a version nobody chose.
+    let pinned = resolved.as_ref().ok().map(ResolvedTarget::mc_version);
+    // Pinned to the same edition the id table belongs to, matching
+    // `load_and_lower`: a theme's per-edition variant decides which id a
+    // `mat_slot=` reaches, so resolving the file edition-neutrally and
+    // then checking the ids against one edition's table would ask the
+    // question of a palette the build never has.
+    let resolution = resolve(ir, Some(edition.as_edition()));
+    let registry = edition.registry_pack().view(pinned);
+    let block_ir = lower_to_block_array(ir, &resolution, Some(&registry));
+    CheckLowering {
+        dropped_scopes: dropped_scopes(&resolution, &block_ir),
+        built_scopes: block_ir.structures.len(),
+        diagnostics: block_ir.diagnostics,
+        unsupported: resolved.err(),
+    }
+}
+
+fn run_check(
+    file: &Path,
+    edition: Option<EditionArg>,
+    target: Option<&str>,
+    format: CheckFormat,
+) -> ExitCode {
     let source = match std::fs::read_to_string(file) {
         Ok(s) => s,
         Err(err) => {
@@ -573,12 +704,19 @@ fn run_check(file: &Path, edition: Option<EditionArg>, format: CheckFormat) -> E
         }
     };
     let ir = lower(&module);
-    // Through `build_diagnostics` with an empty lowering list rather than
-    // `check` directly: `cairn check` runs no lowering, but it does see
-    // both version headers, and the `@intended_targets` findings are the
-    // one part of its report that `check` cannot produce on its own.
+    // Through `build_diagnostics` rather than `check` directly: `cairn
+    // check` sees both version headers, and the `@intended_targets`
+    // findings are the one part of its report that `check` cannot produce
+    // on its own. The lowering list it merges is empty unless `--target`
+    // pinned a version to lower against.
     let pin = edition.map(EditionArg::as_edition);
-    let diagnostics = build_diagnostics(&module, &ir, pin, &weighed_editions(pin), Vec::new());
+    let CheckLowering {
+        diagnostics: lowering,
+        dropped_scopes,
+        built_scopes,
+        unsupported,
+    } = check_lowering(&ir, edition, target);
+    let diagnostics = build_diagnostics(&module, &ir, pin, &weighed_editions(pin), lowering);
     let has_error = diagnostics.iter().any(|d| d.severity() == Severity::Error);
     // Build the line-start index once and reuse it for every diagnostic /
     // note position lookup. Without this we'd re-walk the entire source for
@@ -605,6 +743,30 @@ fn run_check(file: &Path, edition: Option<EditionArg>, format: CheckFormat) -> E
                 return code;
             }
         }
+    }
+
+    // Both refusals come after the report, not before it: the file's own
+    // findings are what the author edits, and a run-level failure printed
+    // above them would bury the line that has to change. Neither joins the
+    // `--format json` array — see the `Check` doc — so both are stderr in
+    // both formats, which is the shape `compile` gives them.
+    //
+    // A lost scope first, in `run_compile`'s order: it is a fact about the
+    // file, and the target that could not be resolved is a fact about the
+    // command line.
+    if !dropped_scopes.is_empty() {
+        report_partial_build(
+            file,
+            &dropped_scopes,
+            built_scopes,
+            "`cairn compile` at this target would refuse the build",
+        );
+        return ExitCode::from(1);
+    }
+    // A check that could not check the ids it was asked to must not exit 0.
+    if let Some(err) = unsupported {
+        eprintln!("error: {err}");
+        return ExitCode::from(1);
     }
 
     if has_error {
@@ -1037,6 +1199,27 @@ fn dropped_scopes(
         .filter(|key| !block_ir.structures.contains_key(key.as_str()))
         .cloned()
         .collect()
+}
+
+/// Report the scopes a lowering lost, as `E_PARTIAL_BUILD`.
+///
+/// One message for the two commands that refuse over it, because the
+/// count and the per-scope notes are the part an author reads and two
+/// copies of them drift. `because` is the half that cannot be shared: a
+/// compile refuses because a lockfile must not certify a build missing
+/// part of what the source asked for, and `cairn check --target` certifies
+/// nothing — it refuses because the compile at that pin would, which is
+/// the whole promise of the flag.
+fn report_partial_build(file: &Path, dropped: &[String], built: usize, because: &str) {
+    eprintln!(
+        "error[E_PARTIAL_BUILD]: {}: {} of {} requested scopes did not lower; {because}",
+        file.display(),
+        dropped.len(),
+        dropped.len() + built,
+    );
+    for scope in dropped {
+        eprintln!("  note: `{scope}` produced no voxels");
+    }
 }
 
 /// Every version a pack can build for, in ascending release order.
@@ -2165,16 +2348,12 @@ fn run_compile(
     // still compiles (see
     // `c26_bare_def_without_place_emits_w_unused_def_and_no_nbt`).
     if !dropped_scopes.is_empty() {
-        eprintln!(
-            "error[E_PARTIAL_BUILD]: {}: {} of {} requested scopes did not lower; \
-             refusing to certify a partial build",
-            file.display(),
-            dropped_scopes.len(),
-            dropped_scopes.len() + block_ir.structures.len(),
+        report_partial_build(
+            file,
+            &dropped_scopes,
+            block_ir.structures.len(),
+            "refusing to certify a partial build",
         );
-        for scope in &dropped_scopes {
-            eprintln!("  note: `{scope}` produced no voxels");
-        }
         return ExitCode::from(1);
     }
 
@@ -2397,9 +2576,12 @@ fn load_and_lower(
 /// thing it must not do.
 ///
 /// Checked here rather than in `check()`: the constraint is a relation
-/// between the source and `--target`, and `cairn check` has no target. It
-/// runs before any artifact is prepared, so a refusal leaves nothing on
-/// disk.
+/// between the source and `--target`, and the lockfile is what must not
+/// certify a target the source disowns. `cairn check --target` names a
+/// target too and is deliberately not held to the floors — it writes no
+/// lock, so there is nothing to falsify, and refusing there would turn a
+/// gate into a second build command. It runs before any artifact is
+/// prepared, so a refusal leaves nothing on disk.
 ///
 /// Spec §10.4 shows this code on a different comparison — a *material*
 /// introduced after the target, from the registry's `since` data. That data

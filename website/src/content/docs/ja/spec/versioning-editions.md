@@ -107,10 +107,17 @@ ID はエディション全体ではなく、コンパイルが固定した 1 �
 `blocks` コンポーネントに入り、[§10.3](#103-バックエンド--データテーブル) の `inherits + diffs` で畳
 み込まれます。
 
-したがってこの検査が走るのは `cairn compile --target` だけです。`cairn info` と `cairn lower` は
-lowering はしますがバージョンを固定しません (`info` は意図的に範囲全体を報告します)。作者に代わって
-バージョンを選ぶことはせず、比較を飛ばします。`cairn check` は block-array lowering 自体を走らせない
-ので、 `E_UNKNOWN_ABSTRACT_TOKEN` を含む lowering 段の診断はそもそも届きません。
+したがってこの検査が走るのはバージョンを固定した場所だけです。すなわち `cairn compile --target` と、
+同じ組を固定して同じパスを走らせつつ何も書かない `cairn check --edition E --target V` の 2 つです。
+`cairn info` と `cairn lower` は lowering はしますがバージョンを固定しません (`info` は意図的に範囲
+全体を報告します)。作者に代わってバージョンを選ぶことはせず、比較を飛ばします。`--target` の無い
+`cairn check` は block-array lowering 自体を走らせないので、 `E_UNKNOWN_ABSTRACT_TOKEN` を含む
+lowering 段の診断はそもそも届きません。
+
+エディションが出荷する *すべて* のバージョンに照合し、どれにも存在しない ID だけを拒否する方式なら
+フラグは要りませんが、それは別の問いへの答えです。`stone_bricks` は Bedrock のどこかには存在するので、
+1.21.0 に固定したビルドは何も知らされないままになります。固定こそが、答えを「いま作っているビルドに
+ついて真」にするものです。
 
 誤った ID の届き方は 2 通りあるので、推奨修正にも 2 つの半分があります。**タイポ** は同じ表に対する
 距離検索が答えます (`oak_plank` には `oak_planks` を返します)。**リネーム** はタイポではありません。
@@ -405,7 +412,9 @@ ID のケースは `E_UNKNOWN_ID` と同じ答え方を、同じ 2 つの半分�
 どちらの問いもバージョンではなく *エディション* に対して発せられます。この行が互換範囲全体にわたって
 報告するものだからです。範囲の一部でしか有効でない ID (Bedrock が 1.21.40 で `stonebrick` を
 `stone_bricks` にリネームした件) は `unsupported` にはなりません。実際にビルドされるバージョンがそれ
-を持つかは `cairn compile --target` が `E_UNKNOWN_ID` として答える問いです ([§10.4](#104-fail-loud-と最小バージョン推定))。
+を持つかは、固定されたターゲットが `E_UNKNOWN_ID` として答える問いです。`cairn compile --target`、
+またはビルドせずに同じ答えを得る `cairn check --edition E --target V` です
+([§10.4](#104-fail-loud-と最小バージョン推定))。
 
 ### `buildable targets` の行
 

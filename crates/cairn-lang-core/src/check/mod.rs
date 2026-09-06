@@ -11,8 +11,12 @@
 //! position once everything has finished collecting.
 //!
 //! Block-array lowering is *not* among those passes, so an `Error` it
-//! raises never reaches `cairn check`. `check::tests` pins which codes that
-//! covers.
+//! raises never reaches [`check`]. `check::tests` pins which codes that
+//! covers. The `cairn check` *command* is a wider thing than this
+//! function: given `--edition E --target V` it runs the lowering pass
+//! beside this one and merges both streams, which is how `E_UNKNOWN_ID`
+//! reaches a command whose gate this function is. Unpinned — the ordinary
+//! invocation — it is exactly this function's findings.
 //!
 //! Neither is [`weigh_intended_targets`], for a different reason: every
 //! question it asks is answered by the target edition's `DataVersion`
@@ -108,8 +112,11 @@ mod tests {
     ///
     /// [`check`] runs the syntactic passes and merges `resolve`'s output. It
     /// does **not** run block-array lowering, so a code raised only there is
-    /// invisible to `cairn check` no matter its severity — the asymmetry
+    /// invisible to this function no matter its severity — the asymmetry
     /// `check_sees_every_error_code_except_the_lowering_only_ones` pins.
+    /// A caller holding a registry pack can lower beside it and merge, as
+    /// `cairn check --edition E --target V` does; the classification below
+    /// says which codes only that second stream carries.
     ///
     /// The match is exhaustive on purpose. `DiagnosticCode` is
     /// `#[non_exhaustive]` for downstream crates but not in-crate, so a new
@@ -293,14 +300,19 @@ mod tests {
     }
 
     /// `cairn check` is documented and used as the gate the build commands
-    /// sit behind, but it does not lower, so an `Error` raised during
-    /// block-array lowering escapes it: `cairn check` exits 0 and
-    /// `cairn compile` then exits 1 on the same file.
+    /// sit behind, but this function does not lower, so an `Error` raised
+    /// during block-array lowering escapes it: an unpinned `cairn check`
+    /// exits 0 and `cairn compile` then exits 1 on the same file.
     ///
     /// This pins the size of that hole rather than leaving it implied. A new
-    /// entry here means another way for `cairn check` to pass a source the
-    /// build refuses, so it should be a deliberate decision, not a side
-    /// effect.
+    /// entry here means another way for an unpinned `cairn check` to pass a
+    /// source the build refuses, so it should be a deliberate decision, not
+    /// a side effect.
+    ///
+    /// The hole is per-invocation, not per-command: `cairn check --edition
+    /// E --target V` runs the lowering pass itself and merges it, so every
+    /// code listed here does reach that run. The list is what the CLI
+    /// closes by lowering, which is why it is worth keeping exact.
     #[test]
     fn check_sees_every_error_code_except_the_lowering_only_ones() {
         let escapes = codes_where(|c| {

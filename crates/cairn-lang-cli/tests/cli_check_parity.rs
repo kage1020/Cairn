@@ -11,6 +11,15 @@
 //! The build commands report `check`'s findings verbatim and in order, then
 //! append their own lowering diagnostics; anything else (a dropped code, a
 //! duplicated one, a reordered one) is a regression these tests catch.
+//!
+//! Most of that is a *prefix* assertion, because the unpinned `cairn check`
+//! those tests invoke runs no lowering and so has nothing to compare the
+//! appended half against. `parity_8` is the one that closes it: `cairn
+//! check --edition java --target latest` runs the same two stages at the
+//! same pin `cairn compile` does, so its stream is compared **equal**
+//! rather than prefixed — which is what keeps `check_lowering` and
+//! `load_and_lower` from drifting as two hand-written copies of the same
+//! `resolve` + `view` + `lower_to_block_array` sequence.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -631,4 +640,71 @@ fn parity_7_every_example_still_passes_all_four_commands() {
         }
     }
     assert!(seen > 0, "no examples found — the corpus path is wrong");
+}
+
+#[test]
+fn parity_8_a_pinned_check_reports_exactly_what_the_compile_reports() {
+    // Equality in both directions. A dropped lowering finding fails it, and
+    // so does a compile-only one — the two commands run the same passes
+    // against the same table, so a code either of them reaches alone is a
+    // divergence to explain rather than to discover later.
+    //
+    // `--target latest` on the check side because `compile --target`
+    // defaults to `latest`; naming a version here would compare two
+    // different pins and call the difference parity.
+    let tmp = TempDir::new().expect("tempdir");
+    for (index, (code, body)) in all_fixtures().enumerate() {
+        let path = write_fixture(tmp.path(), index, body);
+        let source = path.to_str().unwrap();
+        let out_dir = path.parent().expect("fixture dir").join("out");
+
+        let checked = run(&[
+            "check",
+            source,
+            "--edition",
+            "java",
+            "--target",
+            "latest",
+            "--format",
+            "json",
+        ]);
+        let checked_code = exit_code(&checked);
+        let stdout = String::from_utf8(checked.stdout).expect("utf-8");
+        let parsed: serde_json::Value = serde_json::from_str(&stdout).expect("valid JSON");
+        let expected: Vec<Reported> = parsed
+            .as_array()
+            .expect("array of diagnostics")
+            .iter()
+            .map(|d| {
+                (
+                    d["line"].as_u64().expect("line"),
+                    d["col"].as_u64().expect("col"),
+                    d["severity"].as_str().expect("severity").to_owned(),
+                    d["code"].as_str().expect("code").to_owned(),
+                )
+            })
+            .collect();
+        assert!(!expected.is_empty(), "{code}: pinned check reports nothing");
+
+        let out = run(&[
+            "compile",
+            source,
+            "--edition",
+            "java",
+            "--out",
+            out_dir.to_str().unwrap(),
+        ]);
+        let stderr = String::from_utf8_lossy(&out.stderr).into_owned();
+        assert_eq!(
+            stderr_stream(&stderr),
+            expected,
+            "{code}: the pinned check and the compile must report the same \
+             stream\n  check: {expected:?}\n  compile stderr:\n{stderr}",
+        );
+        assert_eq!(
+            checked_code,
+            exit_code(&out),
+            "{code}: and refuse the same source\n  compile stderr:\n{stderr}",
+        );
+    }
 }

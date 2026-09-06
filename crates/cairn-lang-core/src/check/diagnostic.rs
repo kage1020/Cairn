@@ -265,9 +265,10 @@ pub enum DiagnosticCode {
     /// that `(edition, version)`, whether the author or the pack's catalog
     /// chose it.
     ///
-    /// Only raised when the run pinned a target (`cairn compile --target`).
-    /// `cairn check` / `info` / `lower` have no version to check against
-    /// and skip the comparison rather than guess one.
+    /// Only raised when the run pinned a target — `cairn compile --target`
+    /// and `cairn check --edition E --target V`. `cairn info`, `cairn
+    /// lower` and an unpinned `cairn check` have no version to check
+    /// against and skip the comparison rather than guess one.
     UnknownId,
     /// A member whose geometry attaches blockstates was bound to a material
     /// that cannot carry them — a sloped roof or an eave `stair` bound to
@@ -279,9 +280,11 @@ pub enum DiagnosticCode {
     /// the id writes a blockstate no version of the game has; substituting
     /// the fallback species builds a roof out of a material nobody asked
     /// for. Both are the silent substitution §10.4 forbids, and a warning
-    /// does not make either loud: no machine-readable surface carries a
-    /// lowering warning — `cairn check` does not lower, the lockfile still
-    /// says `verified: true`, and there is no `--deny-warnings`.
+    /// does not make either loud: the lockfile still says `verified: true`,
+    /// there is no `--deny-warnings`, and the one machine-readable surface
+    /// that carries a lowering finding at all is `cairn check --target
+    /// --format json`, which an unpinned check — the invocation a CI job
+    /// writes by default — is not.
     ///
     /// Whose mistake it is rides in `data` (`slot` and `token`), the way
     /// [`Self::UnknownId`] carries `origin` — a pack that maps a token onto
