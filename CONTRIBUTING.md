@@ -2,138 +2,173 @@
 
 > Language: **English** ([日本語](CONTRIBUTING.ja.md))
 
-Thanks for your interest in Cairn! The project is at the **design stage**: there is a normative [specification](https://cairn.kage1020.com/spec/) (source under [`website/src/content/docs/spec/`](website/src/content/docs/spec/)) and not yet a reference implementation. The most valuable contributions right now are design critique, concrete proposals, and worked examples.
+Cairn is a working compiler with a normative [specification](https://cairn.kage1020.com/spec/)
+behind it. Both are still moving, and both take contributions.
 
-## Ways to contribute
+## Ways to help
 
-- **Design discussion.** Challenge a decision in the spec, surface a missing case, or propose an alternative. Open an issue that points at the specific chapter/section.
-- **Worked examples.** Write `.crn` snippets for real builds and note where the language is awkward, ambiguous, or insufficient. These drive the vocabulary.
-- **Spec edits.** Fix errors, clarify wording, improve examples. Keep each chapter self-contained and cross-link with relative links.
-- **Prior art.** Pointers to redstone compilers, schematic formats, voxel/CAD place-and-route, and HDL synthesis are welcome in design discussions.
+- **Bug reports.** A `.crn` file, the command you ran, and what you expected. A file that compiles
+  to the wrong blocks is as valuable as one that crashes.
+- **Examples.** Write real builds and say where the language got awkward, ambiguous, or ran out.
+  This is what drives the vocabulary. Small files exercising one member each live alongside the big
+  ones in [`examples/`](examples/).
+- **Code.** Parser, lowering, backends, redstone, LSP, tooling. Pick something off the
+  [roadmap](https://cairn.kage1020.com/roadmap/) or scratch your own itch.
+- **Spec edits.** Fix errors, clarify wording, improve examples. Keep each chapter self-contained
+  and cross-link with relative links.
+- **Design critique.** Challenge a decision, surface a missing case, propose an alternative. Open an
+  issue pointing at the specific chapter and section.
+- **Prior art.** Redstone compilers, schematic formats, voxel and CAD place-and-route, HDL
+  synthesis — pointers are welcome in design discussions.
 
-## Working language
+English is the source of truth for the spec and documentation. Translations are welcome as clearly
+labelled secondary copies.
 
-The canonical language of the specification and project documentation is **English**. Translations are welcome as clearly-labeled secondary copies, but English is the source of truth.
+## Getting set up
 
-## Conventions
-
-- The spec is the source of truth. Do not introduce session-specific identifiers, issue/PR numbers, or references that require external context to understand a passage later.
-- Use the defined terminology (`intent_state` / `resolved_state`, `mat_slot`, canonical token, etc.) consistently. Introduce new terms in the relevant chapter, not ad hoc.
-- Reference design principles as `P1`–`P5` (see [Design Principles](https://cairn.kage1020.com/spec/principles/)).
-- Keep examples concrete and minimal. Error messages should be in the "what is wrong / valid alternatives / suggested fix" shape so they can feed the self-correction loop.
-
-### Milestone and PR tag scope
-
-The session-specific identifier ban above has a small set of deliberate exceptions, listed here so the call does not get re-invented per review. The split follows the role each surface plays: [CHANGELOG.md](CHANGELOG.md) and the [Compatibility Tiers](https://cairn.kage1020.com/spec/compatibility/) §C.2 table hold the project's historical and roadmap-aligned vocabulary, while Rust source and spec prose describe the *implemented* behaviour and so must read independently of any one PR.
-
-**Allowed to carry `MN-PRk`, `pre-MN`, `later PR`, or specific `YYYY.MM.0` references:**
-
-- [CHANGELOG.md](CHANGELOG.md) / [CHANGELOG.ja.md](CHANGELOG.ja.md), including the `[Unreleased]` section. `release-plz` only appends to these files; existing tags stay untouched.
-- The [Roadmap](https://cairn.kage1020.com/roadmap/) (`website/src/content/docs/roadmap.md` and the `ja/` mirror) — the roadmap is the milestone vocabulary.
-- The C.2 milestone columns of [`spec/compatibility.md`](website/src/content/docs/spec/compatibility.md) (`Today (pre-M1) | At M2 (minimal build) | At M3 (examples work) | At M5 (DX) | At M6 (redstone)`) and the matching `ja/spec/compatibility.md` header. These are the table's axis labels.
-- Git release tags (`v2026.MM.0`) and `release-plz.toml`.
-
-**Must not carry these tags:**
-
-- Rust source under `crates/**/*.rs` (comments and docstrings).
-- Spec body under `website/src/content/docs/spec/**/*.md` and the `ja/` mirror, with the single C.2 header exception above.
-- [`examples/`](examples/) `.crn` files.
-- README, this file, and any other docs body.
-
-**Rewriting guide.** Replace the PR coordinate with the implementation fact it stood in for:
-
-- Before: `// M3-PR4 only exposes ports on door members (window / stair / roof ports land in a later PR).`
-- After: `// Ports are currently exposed only on door members. Window / stair / roof ports are reserved for a future extension.`
-
-The rule of thumb is "describe what the code does now, plus what is intentionally not yet covered," not "name the PR that delivered it." When a comment turns stale (the deferred feature has since landed), update the comment in the same PR that lands the feature.
-
-**Enforcement.** Reviewers (human or otherwise) should run
+[`rust-toolchain.toml`](rust-toolchain.toml) pins an exact compiler and `rustup` picks it up
+automatically, so a checkout and a `cargo build` gets you the toolchain CI runs.
 
 ```sh
-rg '\bM[1-6]\b|M[0-9]-PR[0-9]+|pre-M[0-9]|\blater PR\b|\bfuture PR\b' \
-  --glob '!CHANGELOG*' \
-  --glob '!CONTRIBUTING*' \
-  --glob '!**/compatibility.md' \
-  --glob '!**/roadmap.md' \
-  --glob '!target/**'
+cargo build --workspace
+cargo test --workspace
+cargo run -p cairn-lang-cli -- compile examples/cottage.crn --edition java --target 1.21.4
 ```
 
-before approving. An empty result is the contract. The `\bM[1-6]\b` arm catches bare milestone labels (`M2`, `M3`, ...) — these belong to the roadmap and compatibility table only; in Rust source and spec body, replace them with the implementation fact they stood in for ("the keyword table", "the lowering pass", "reserved for a future extension"). This is not wired into CI yet; the repository is small enough that human review is sufficient.
-
-## Proposing a change to a settled decision
-
-Several decisions are deliberately settled (e.g. key=value over positional args, phase-ordered evaluation, recompile-don't-transcode, fail-loud over silent substitution). To revisit one, open an issue that:
-
-1. States the decision and where it lives in the spec.
-2. Gives the concrete case it fails to handle.
-3. Proposes an alternative with syntax/IR/message examples.
-4. Notes the impact on the evaluation metrics (see [Evaluation Framework](https://cairn.kage1020.com/spec/evaluation/)).
-
-## Branching and pull requests
-
-Cairn uses a **`canary` trunk + `main` release pointer** layout. All ongoing work lives on `canary`; `main` is updated automatically only when a release is published, so its history is exactly the list of public releases.
-
-### Branches
-
-| Branch | Purpose | Lifetime |
-|---|---|---|
-| `canary` | The trunk. All feature work, fixes, docs, and the `release-plz-*` rolling release PR land here. Protected. | Permanent |
-| `main` | The released state. Fast-forwarded to `canary` automatically right after each successful release. Protected. No direct pushes, no PRs. | Permanent |
-| `<type>/<short-kebab>` | Working branch for a single change. Targets `canary`. | Until PR merge, then deleted |
-| `release-plz-*` | Opened automatically by `release-plz` against `canary`, for monthly minors and patches. | Until PR merge |
-
-Use the same `<type>` as the Conventional Commits type the work will land under (`feat/parser-lexer`, `fix/wall-corner-shape`, `docs/roadmap-2027`, `refactor/ir-pivot`).
-
-### Pull requests
-
-- **All PRs target `canary`.** PRs against `main` are not accepted; `main` is updated only by the release pipeline.
-- **PR title MUST be a [Conventional Commits](https://www.conventionalcommits.org/) line.** Examples: `feat(core): add lexer`, `fix(formats): correct big-endian NBT length`, `docs(spec): clarify §6.3`, `feat(redstone)!: rewrite tick simulator`. Individual commits on a feature branch are free-form.
-- **Squash merge is the only allowed merge mode.** The PR title becomes the commit message on `canary`, which `release-plz` parses (`release_commits` regex in `release-plz.toml`) to decide whether a patch release is needed.
-- Use the `!` suffix (e.g. `feat(core)!: replace lexer`) for breaking changes; this routes them to the `Breaking changes` section per [Compatibility Tiers](https://cairn.kage1020.com/spec/compatibility/) §C.3.
-- One approval from a maintainer is required before merging. CI (fmt + clippy + test on Linux, macOS, Windows) must be green.
-- The release PR (`release-plz-*` → `canary`) follows the same review rules. The monthly minor PR is opened by cron on the 1st of each month and merged after human review. Merging it triggers publish *and* fast-forwards `main`.
-
-Recognized Conventional Commits types in Cairn:
-
-| Type | When | Triggers a patch release? |
-|---|---|---|
-| `feat` | New feature, new public API, new subcommand | Yes |
-| `fix` | Bug fix aligning behaviour with the spec | Yes |
-| `perf` | Performance improvement | Yes |
-| `refactor` | Internal restructuring without behaviour change | Yes |
-| `build` | Build system, packaging, Cargo dependencies | Yes |
-| `docs` | Documentation, spec prose, README, examples | No |
-| `test` | Test code only | No |
-| `ci` | GitHub Actions, release-plz, workflow config, `rust-toolchain.toml` | No |
-| `chore` | Anything else that doesn't ship to users | No |
-| `style` | Formatting / lint-only changes | No |
-
-A scope in parentheses identifies the affected crate or spec area: `feat(core)`, `fix(nbt)`, `docs(spec)`, `build(deps)`.
-
-## Versioning
-
-Cairn uses date-based versioning (CalVer) `YYYY.M[.PATCH]`. Notable changes are recorded in [CHANGELOG.md](CHANGELOG.md). The compatibility contract behind each surface is set by [Compatibility Tiers](https://cairn.kage1020.com/spec/compatibility/), not by the version number.
-
-## Toolchain
-
-[`rust-toolchain.toml`](rust-toolchain.toml) names an exact compiler, and every workflow that installs Rust does so with `rustup show`, so that file is what decides. A `rustup` on your machine picks it up the same way, so you and CI are running the same compiler. Not necessarily the same findings: CI runs a three-OS matrix and a lint can be `cfg`-dependent.
-
-This is deliberately not a channel. CI runs `cargo clippy --workspace --all-targets -- -D warnings`, so on `stable` a Rust release turns every open branch red on its own: the finding lands on a file the branch never touched, in a job its change cannot reach, and the person who reads it first is whoever happened to push next. Pinning does not avoid the new lints — it decides when they arrive, as a pull request somebody chose to open.
-
-**Bumping it.** Change `channel`, then run what CI runs — the environment is part of the check, and a new compiler can introduce a *rustc* warning rather than a clippy lint:
+Before opening a PR, run what CI runs — the same three commands on Linux, macOS, and Windows:
 
 ```sh
 cargo fmt --all -- --check
-RUSTFLAGS="-D warnings" cargo clippy --workspace --all-targets -- -D warnings
-RUSTFLAGS="-D warnings" cargo test --workspace --locked
+cargo clippy --workspace --all-targets -- -D warnings
+cargo test --workspace --locked
 ```
 
-Fix whatever the new release found in the same pull request, and type the commit `ci`. Bumping is worth doing on its own rather than inside a feature branch: a diff that is only "new compiler, and the lint fixes it asked for" is one a reviewer can read.
+### The repository
 
-**Not the MSRV.** The workspace manifest's `rust-version` is the floor a consumer needs to build Cairn; the pin is the single version the project's own checks run under. Raising the pin does not raise the floor — `rust-version` moves only when the code actually starts needing a newer compiler, because that is a change to who can build the crates.
+| Path | What lives there |
+|---|---|
+| `crates/cairn-lang-core` | Lexer, parser, Intent IR, check passes, resolution, block-array lowering |
+| `crates/cairn-lang-nbt` | NBT codec — Java big-endian, Bedrock little-endian |
+| `crates/cairn-lang-formats` | Structure writers (`.nbt`, `.mcstructure`), registry packs, portability |
+| `crates/cairn-lang-redstone` | Logic IR, netlist, placement, routing, delay, crossing legalization |
+| `crates/cairn-lang-cli` | The `cairn` binary |
+| `crates/cairn-lang-lsp` | The `cairn-lsp` language server |
+| `crates/cairn-lang-tree-sitter` | tree-sitter grammar, published to npm as `tree-sitter-cairn` |
+| `crates/cairn-lang-wasm` | Browser bindings behind the playground |
+| `editors/vscode` | VS Code extension — a thin client over `cairn-lsp` |
+| `website` | Astro + Starlight docs site: spec, tutorial, developer guide, in English and 日本語 |
+| `examples` | `.crn` sources and their lockfiles |
 
-Only one direction of that is checked. A pin *below* the floor fails on the first build, because cargo refuses to build a package whose `rust-version` is above the active compiler. The other direction is not checked at all: nothing builds Cairn at 1.95, so code that starts needing a newer compiler goes green on the pin while every consumer at the declared floor breaks. `rust-version` is a declaration, not a tested guarantee — `cargo +1.95 check --workspace` is what verifies it, and it is worth running when a change reaches for a recently stabilised API.
+The [Developer Guide](https://cairn.kage1020.com/development/) covers the dependency rules between
+crates in more detail.
+
+## Writing style
+
+The habit is **how** in the code, **what** in the commit message, and the minimum **why** in
+comments.
+
+- The spec is the source of truth. Use its terminology (`intent_state` / `resolved_state`,
+  `mat_slot`, canonical token) rather than inventing synonyms, and introduce a new term in the
+  chapter it belongs to.
+- Design principles are cited as `P1`–`P5`, from
+  [Design Principles](https://cairn.kage1020.com/spec/principles/).
+- Error messages take the shape *what is wrong / what would be valid / suggested fix*. That shape is
+  what makes the write-check-fix loop work, so it earns the extra sentence.
+- Keep examples concrete and minimal.
+
+### No session-local references
+
+Rust source, spec body, examples, and docs have to read on their own years from now. No issue or PR
+numbers, no `M3-PR4` coordinates, no bare milestone labels, no "a later PR will…". Replace the
+coordinate with the fact it stood in for:
+
+> Before: `// M3-PR4 only exposes ports on door members (window / stair / roof ports land later).`
+>
+> After: `// Ports are currently exposed only on door members. Window / stair / roof ports are reserved for a future extension.`
+
+When the deferred thing lands, update the comment in the same PR.
+
+Three surfaces are exempt, because milestone vocabulary is what they are *for*:
+[CHANGELOG.md](CHANGELOG.md), the [roadmap](https://cairn.kage1020.com/roadmap/), and the milestone
+columns of the [compatibility](https://cairn.kage1020.com/spec/compatibility/) table. Reviewers can
+check the rest with:
+
+```sh
+rg '\bM[1-6]\b|M[0-9]-PR[0-9]+|pre-M[0-9]|\blater PR\b|\bfuture PR\b' \
+  --glob '!CHANGELOG*' --glob '!CONTRIBUTING*' \
+  --glob '!**/compatibility.md' --glob '!**/roadmap.md' --glob '!target/**'
+```
+
+An empty result is the contract.
+
+## Branches and pull requests
+
+`canary` is the trunk. `main` is the released state, fast-forwarded automatically after each
+release, so its history is exactly the list of public releases.
+
+| Branch | Purpose |
+|---|---|
+| `canary` | All feature work, fixes, and docs land here. Protected. |
+| `main` | Updated only by the release pipeline. No direct pushes, no PRs. |
+| `<type>/<short-kebab>` | One change, targeting `canary`. Deleted after merge. |
+| `release-plz-*` | Opened automatically for monthly minors and patches. |
+
+Name the branch after the Conventional Commits type the work will land under:
+`feat/parser-lexer`, `fix/wall-corner-shape`, `docs/roadmap-2027`.
+
+**The PR title must be a [Conventional Commits](https://www.conventionalcommits.org/) line.** Squash
+merge is the only merge mode, so that title becomes the commit on `canary` and is what `release-plz`
+reads to decide whether a patch release is due. Commits on your own branch are free-form. Add `!`
+for a breaking change (`feat(core)!: replace lexer`); the scope names the crate or spec area
+(`feat(core)`, `fix(nbt)`, `docs(spec)`, `build(deps)`).
+
+| Type | When | Cuts a patch release? |
+|---|---|---|
+| `feat` | New feature, public API, subcommand | Yes |
+| `fix` | Behaviour brought back in line with the spec | Yes |
+| `perf` | Performance | Yes |
+| `refactor` | Internal restructuring, no behaviour change | Yes |
+| `build` | Build system, packaging, Cargo dependencies | Yes |
+| `docs` | Documentation, spec prose, README, examples | No |
+| `test` | Test code only | No |
+| `ci` | Workflows, release-plz, `rust-toolchain.toml` | No |
+| `chore` | Anything that doesn't ship to users | No |
+| `style` | Formatting or lint-only changes | No |
+
+Every PR targets `canary`; PRs against `main` are not accepted. One maintainer approval and green CI
+are required. The release PR follows the same rules — merging it publishes and fast-forwards `main`.
+
+## Revisiting a settled decision
+
+Some decisions are deliberately closed: `key=value` over positional arguments, phase-ordered
+evaluation, recompile-don't-transcode, fail-loud over silent substitution. To reopen one, file an
+issue that states the decision and where it lives in the spec, gives the concrete case it fails,
+proposes an alternative with syntax/IR/message examples, and notes the effect on the
+[evaluation metrics](https://cairn.kage1020.com/spec/evaluation/).
+
+## Bumping the toolchain
+
+The pin is deliberately not a channel. On `stable`, a Rust release turns every open branch red at
+once, with findings on files the branch never touched. Pinning does not avoid new lints — it decides
+that they arrive as a pull request somebody chose to open.
+
+Change `channel`, run the three CI commands above (a new compiler can produce a *rustc* warning, not
+just a clippy lint), fix what it found in the same PR, and type the commit `ci`. A diff that is only
+"new compiler, plus the fixes it asked for" is one a reviewer can actually read.
+
+The pin is not the MSRV. `rust-version` in the workspace manifest is the floor a consumer needs to
+build Cairn, and it moves only when the code genuinely starts requiring a newer compiler. Nothing in
+CI builds at that floor, so a change reaching for a recently stabilised API goes green on the pin
+while consumers at the declared floor break. `cargo +<floor> check --workspace` is what catches it,
+and is worth running when you touch a new API.
+
+## Versioning
+
+Date-based, `YYYY.M[.PATCH]`. Notable changes go in [CHANGELOG.md](CHANGELOG.md). What a bump is
+allowed to break is set by [Compatibility Tiers](https://cairn.kage1020.com/spec/compatibility/),
+not by the number itself.
 
 ## Code of Conduct
 
-This project adheres to the [Contributor Covenant](CODE_OF_CONDUCT.md). By participating, you are expected to uphold it.
+This project follows the [Contributor Covenant](CODE_OF_CONDUCT.md). By participating, you agree to
+uphold it.
