@@ -1,10 +1,12 @@
 # cairn-lang-wasm
 
-WebAssembly bindings for the Cairn compiler. The intent is to let the [website playground](../../website/README.md) (and any other browser-hosted tool) parse, compile, and serialize Cairn sources without a server, sharing exactly the same [`cairn-lang-core`](../cairn-lang-core/README.md) implementation as the CLI. None of that is wired up yet — see **Status**.
+WebAssembly bindings for the Cairn compiler. The intent is to let the [website playground](../../website/README.md) — and any other browser-hosted tool — parse, compile, and serialize Cairn sources without a server, sharing exactly the same [`cairn-lang-core`](../cairn-lang-core/README.md) implementation as the CLI. None of that is wired up yet; see **Status**.
 
 ## Status
 
-Skeleton, and not yet buildable as WebAssembly. The crate holds one Rust function, [`cairn_version`](src/lib.rs), and nothing that exposes it to a JavaScript caller: there is no `wasm-bindgen` dependency, and the function carries neither `#[wasm_bindgen]` nor `#[unsafe(no_mangle)] extern "C"`. The parser/compiler bindings will come online as `cairn-lang-core` lands them, and the binding layer arrives with the first of them.
+A placeholder, and not buildable as WebAssembly. The crate holds one Rust function, [`cairn_version`](src/lib.rs), and nothing that exposes it to a JavaScript caller: there is no `wasm-bindgen` dependency, and the function carries neither `#[wasm_bindgen]` nor `#[unsafe(no_mangle)] extern "C"`. The binding layer arrives with the first export that needs it.
+
+Consequently the playground page on the documentation site is a placeholder too. Nothing on it compiles anything.
 
 ## Build
 
@@ -16,7 +18,7 @@ When the binding layer lands, the command will be:
 wasm-pack build crates/cairn-lang-wasm --target web --release
 ```
 
-and the artifact will be consumed by the website playground; integration is documented in [`website/README.md`](../../website/README.md) once it is bootstrapped.
+and the artifact will be consumed by the website playground.
 
 ## API shape
 
@@ -29,7 +31,7 @@ A minimal browser-friendly surface is planned:
 | `info(source, editions[])` | Mirrors `cairn info` ([versioning-editions §10.5](https://cairn.kage1020.com/spec/versioning-editions/)). |
 | `import_raw(bytes, format)` | Faithful transliteration to raw-centric `.crn` ([ecosystem-interop §12.2](https://cairn.kage1020.com/spec/ecosystem-interop/)). |
 
-Because the playground is a teaching surface as much as a compile surface, every export returns diagnostics in the same "what is wrong / valid candidates / suggested fix" shape used by the CLI and LSP ([lint](https://cairn.kage1020.com/spec/lint/)).
+Because the playground is a teaching surface as much as a compile surface, every export returns diagnostics in the same "what is wrong / valid candidates / suggested fix" shape the CLI and the LSP use ([lint](https://cairn.kage1020.com/spec/lint/)).
 
 ## Dependencies
 
