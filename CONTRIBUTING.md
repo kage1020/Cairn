@@ -32,12 +32,17 @@ automatically, so a checkout and a `cargo build` gets you the toolchain CI runs.
 ```sh
 cargo build --workspace
 cargo test --workspace
-cargo run -p cairn-lang-cli -- compile examples/cottage.crn --edition java --target 1.21.4
+cargo run -p cairn-lang-cli -- check examples/cottage.crn --edition java --target 1.21.4
 ```
 
-Before opening a PR, run what CI runs — the same three commands on Linux, macOS, and Windows:
+`check` writes nothing. `compile` writes structure files and a lockfile next to the source, so
+point it at `--out` and `--lock` outside the tree if you don't want build output in `examples/`.
+
+Before opening a PR, run what CI runs — the same three commands on Linux, macOS, and Windows,
+with `RUSTFLAGS=-D warnings` set for all of them:
 
 ```sh
+export RUSTFLAGS="-D warnings"
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace --locked
@@ -53,11 +58,11 @@ cargo test --workspace --locked
 | `crates/cairn-lang-redstone` | Logic IR, netlist, placement, routing, delay, crossing legalization |
 | `crates/cairn-lang-cli` | The `cairn` binary |
 | `crates/cairn-lang-lsp` | The `cairn-lsp` language server |
-| `crates/cairn-lang-tree-sitter` | tree-sitter grammar, published to npm as `tree-sitter-cairn` |
-| `crates/cairn-lang-wasm` | Browser bindings behind the playground |
+| `crates/cairn-lang-tree-sitter` | tree-sitter grammar, packaged for npm as `tree-sitter-cairn` |
+| `crates/cairn-lang-wasm` | Browser bindings for the future playground — a placeholder so far |
 | `editors/vscode` | VS Code extension — a thin client over `cairn-lsp` |
 | `website` | Astro + Starlight docs site: spec, tutorial, developer guide, in English and 日本語 |
-| `examples` | `.crn` sources and their lockfiles |
+| `examples` | `.crn` sources (lockfiles are generated output and stay untracked) |
 
 The [Developer Guide](https://cairn.kage1020.com/development/) covers the dependency rules between
 crates in more detail.

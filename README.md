@@ -4,8 +4,8 @@
 
 Cairn is a description language for Minecraft builds. You write what you want — a 9×7 cottage
 with cobblestone walls, a gable roof, windows across the front — and the compiler works out the
-blocks: stair facing, door hinges, pane connections, coordinate math, and the block IDs each
-edition and version actually uses.
+blocks: which way each roof stair faces, where the openings land, the coordinate math, and the
+block IDs each edition and version actually uses.
 
 A cairn is a stack of stones raised to mark a place. So is a Minecraft build.
 
@@ -97,8 +97,7 @@ semantic-sensitive:      (none)
 - Themes with slots, selectors, and per-edition variants.
 - A per-source lockfile, and registry packs carrying per-version block IDs and rename aliases.
 - `cairn-lsp` with diagnostics and completion, plus a [VS Code extension](editors/vscode/).
-- A tree-sitter grammar and WebAssembly bindings (the latter powers the
-  [playground](https://cairn.kage1020.com/playground/)).
+- A tree-sitter grammar, for editors that want highlighting without the language server.
 
 **Experimental.** `cairn synth --experimental-logic-synth` takes a `logic` graph through
 synthesis, netlist construction, edition selection, placement, routing, delay insertion, and
@@ -106,12 +105,14 @@ crossing legalization, printing each stage as JSON. Redstone does not reach comp
 yet, and the output shape is free to change.
 
 **Not yet.** `.litematic` and `.schem` writers, importing existing schematics, redstone in
-compiled output, and the tick simulator that verifies it.
+compiled output and the tick simulator that verifies it, and the browser playground (the
+`cairn-lang-wasm` crate is still a placeholder with no exports).
 
 ## Key ideas
 
-- **Declare intent, not blockstate.** Stair facing, door orientation, pane connections, and bed
-  head/foot are derived. You override only when the value *is* the intent.
+- **Declare intent, not blockstate.** A gable roof knows which way its stairs face and whether
+  each one sits top or bottom half; you never write `facing=` for it. Blockstate is derived, and
+  you override only when the value *is* the intent.
 - **Order doesn't matter.** Write members in any order; the compiler sorts them into fixed phases
   (massing → envelope → openings → fixtures → redstone → raw).
 - **Themes separate "where" from "what".** Structure carries `mat_slot`s; a theme binds those
@@ -140,8 +141,8 @@ Site source lives in [`website/src/content/docs/`](website/README.md) and is rev
 
 ## Versioning
 
-Releases use date-based versioning, `YYYY.M[.PATCH]`, covering the language, compiler, standard
-library, and registry packs as one bundle. That is a different axis from the Minecraft version you
+Releases use date-based versioning, `YYYY.M[.PATCH]`, covering the language, the compiler, and the
+registry packs as one bundle. That is a different axis from the Minecraft version you
 pass to `--target`; the two are always told apart by flag or keyword, never by format.
 
 What a version bump is allowed to break is set by

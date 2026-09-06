@@ -31,12 +31,17 @@ Cairn は、規範的な[仕様](https://cairn.kage1020.com/ja/spec/)を背後�
 ```sh
 cargo build --workspace
 cargo test --workspace
-cargo run -p cairn-lang-cli -- compile examples/cottage.crn --edition java --target 1.21.4
+cargo run -p cairn-lang-cli -- check examples/cottage.crn --edition java --target 1.21.4
 ```
 
-PR を出す前に、CI と同じものを回してください。Linux・macOS・Windows で走るのはこの 3 コマンドです。
+`check` は何も書き出しません。`compile` はソースの隣に構造ファイルとロックファイルを書くので、
+`examples/` にビルド成果物を残したくなければ `--out` と `--lock` をツリーの外に向けてください。
+
+PR を出す前に、CI と同じものを回してください。Linux・macOS・Windows で走るのはこの 3 コマンドで、
+いずれも `RUSTFLAGS=-D warnings` の下で実行されます。
 
 ```sh
+export RUSTFLAGS="-D warnings"
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace --locked
@@ -52,11 +57,11 @@ cargo test --workspace --locked
 | `crates/cairn-lang-redstone` | Logic IR、ネットリスト、配置、配線、遅延、交差の合法化 |
 | `crates/cairn-lang-cli` | `cairn` バイナリ |
 | `crates/cairn-lang-lsp` | 言語サーバー `cairn-lsp` |
-| `crates/cairn-lang-tree-sitter` | tree-sitter 文法。npm には `tree-sitter-cairn` として公開 |
-| `crates/cairn-lang-wasm` | プレイグラウンドを支えるブラウザ向けバインディング |
+| `crates/cairn-lang-tree-sitter` | tree-sitter 文法。npm 向けには `tree-sitter-cairn` として梱包 |
+| `crates/cairn-lang-wasm` | 将来のプレイグラウンド向けブラウザバインディング。現状はプレースホルダ |
 | `editors/vscode` | VS Code 拡張 — `cairn-lsp` の薄いクライアント |
 | `website` | Astro + Starlight のドキュメントサイト。仕様・チュートリアル・開発者ガイドを英語と日本語で |
-| `examples` | `.crn` ソースとそのロックファイル |
+| `examples` | `.crn` ソース (ロックファイルは生成物で、追跡していません) |
 
 クレート間の依存ルールは[開発者ガイド](https://cairn.kage1020.com/development/) (英語のみ) が詳しく
 扱っています。
