@@ -221,9 +221,22 @@ Two cases are not conflicts:
 - A member writing over itself, as when a `window`'s `repeat=` / `step=` stamps overlap.
 
 **The palette** of an evaluated body (a `struct`, a `def`, and each `place` that instantiates one)
-is a *set with a canonical rendering*, not a log of the writes that filled it. It lists exactly the
-blocks that body contains, and it lists them in one fixed order: air at slot `0`, then every other
-entry ascending by `(id, properties)` — the id first, then the state properties compared by name.
+is a *set with a canonical rendering*, not a log of the writes that filled it. It lists the blocks
+that body contains, and it lists them in one fixed order: air at slot `0`, then every other entry
+ascending by `(id, properties)`.
+
+The id decides first. When two entries share an id, each one's properties are sorted by name and the
+two lists are then compared pair by pair, so the **value** decides once the names agree
+(`facing=north` before `facing=south`), and a shorter bag sorts before a longer one that begins with
+it (`oak_stairs[facing=north]` before `oak_stairs[facing=north,half=top]`). Sorting the names is what
+makes the order independent of how a state literal happens to spell its properties:
+`@oak_stairs[half=top,facing=north]` and `@oak_stairs[facing=north,half=top]` name one block, and
+which of them a theme wrote first must not move a slot.
+
+Slot `0` is the one exception to "the blocks that body contains": air holds it whatever happens, so a
+fully paved volume still carries the entry. A slot that was never painted at all is the other, and it
+is kept on purpose — dropping it would delete the only evidence a released build carries that a
+generator interned a material for geometry it does not emit.
 
 Two rules follow, and both exist because the numbering reaches the `.nbt`, `cairn info`'s per-entry
 rows, and `resolved_ir_hash`:

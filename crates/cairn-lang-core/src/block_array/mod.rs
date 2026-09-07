@@ -147,10 +147,14 @@ pub struct BlockArray {
     /// `size=WxH` literal becomes `(W, _, H)` here; the Y extent is derived
     /// from member contributions.
     pub dims: Dims,
-    /// Block states referenced by the [`voxels`] grid, in the canonical
-    /// order [`Palette::canonicalize`] fixes: air at slot `0`, the rest
-    /// ascending by `(id, properties)`. Index `0` is always
+    /// Block states referenced by the [`voxels`] grid. Index `0` is always
     /// [`BlockState::AIR`]; [`Palette::intern`] preserves that invariant.
+    ///
+    /// Every array the lowering and walkway passes produce carries this in
+    /// the canonical order [`Palette::canonicalize`] fixes — air at slot
+    /// `0`, the rest ascending by `(id, properties)`. The field is public,
+    /// so an array assembled by hand (the format backends' tests do) holds
+    /// whatever order its author put there; nothing here enforces it.
     pub palette: Palette,
     /// Palette indices in `(y, z, x)` order: `voxels[((y * dims.z) + z) *
     /// dims.x + x]`. Y-major lets ASCII renderers walk one slice at a time
@@ -418,42 +422,38 @@ impl Palette {
     ///
     /// # Panics
     ///
-    /// Panics if the palette holds more than `u16::MAX` entries, which
-    /// [`Self::intern`] refuses to build in the first place — the two
-    /// share [`PaletteIndex`]'s width.
+    /// Panics on a palette longer than 65536 entries. [`Self::intern`]
+    /// cannot build one — it refuses the 65537th — so this is reachable
+    /// only from a palette assembled by hand past the width
+    /// [`PaletteIndex`] can name.
     #[must_use]
     pub fn canonicalize(&mut self) -> Vec<PaletteIndex> {
-        // Sort a permutation rather than the entries, because the map back
-        // to the old numbering is the half the caller needs and sorting
-        // the entries in place throws it away.
-        let mut order: Vec<usize> = (1..self.entries.len()).collect();
-        order.sort_by(|a, b| {
-            self.entries[*a]
-                .canonical_key()
-                .cmp(&self.entries[*b].canonical_key())
-        });
-        let mut remap = vec![PaletteIndex::AIR; self.entries.len()];
-        for (new_slot, old_slot) in order.iter().enumerate() {
+        // Slot 0 is reserved rather than guaranteed: `new_with_air` seeds
+        // it, but the field is public and a hand-assembled palette may be
+        // empty, which `drain(1..)` would panic on. Nothing to reorder
+        // and nothing to renumber, so answer with the empty map.
+        if self.entries.is_empty() {
+            return Vec::new();
+        }
+        // Each entry travels with the slot it came from, so the map back
+        // to the old numbering falls out of the sort instead of having to
+        // be reconstructed from a separately sorted permutation.
+        let mut tagged: Vec<(usize, BlockState)> = self
+            .entries
+            .drain(1..)
+            .enumerate()
+            .map(|(i, state)| (i + 1, state))
+            .collect();
+        tagged.sort_by(|a, b| a.1.canonical_key().cmp(&b.1.canonical_key()));
+
+        let mut remap = vec![PaletteIndex::AIR; tagged.len() + 1];
+        for (new_slot, (old_slot, _)) in tagged.iter().enumerate() {
             remap[*old_slot] = PaletteIndex(
                 u16::try_from(new_slot + 1).expect("a reordering is no longer than the original"),
             );
         }
-        let mut entries = Vec::with_capacity(self.entries.len());
-        // `swap_remove`-free: take the air slot first, then walk `order`,
-        // which is a permutation of `1..len`, so every entry moves exactly
-        // once and none is cloned.
-        let mut taken: Vec<Option<BlockState>> = self.entries.drain(..).map(Some).collect();
-        if let Some(air) = taken.first_mut().and_then(Option::take) {
-            entries.push(air);
-        }
-        for old_slot in order {
-            entries.push(
-                taken[old_slot]
-                    .take()
-                    .expect("each slot appears once in the permutation"),
-            );
-        }
-        self.entries = entries;
+        self.entries
+            .extend(tagged.into_iter().map(|(_, state)| state));
         remap
     }
 }
@@ -662,34 +662,32 @@ mod tests {
 
     #[test]
     fn canonicalize_reads_properties_in_name_order_not_insertion_order() {
-        // `IndexMap` compares as a map, so these two are `==` and `intern`
-        // would fold them onto one slot — the palettes below are built by
-        // hand for that reason. Their iteration orders differ, so a key
-        // that read the pairs in place would order the two palettes
-        // differently while they describe the same block.
-        let mut one = Palette {
-            entries: vec![
-                BlockState::air(),
-                state(
-                    "minecraft:oak_stairs",
-                    &[("facing", "north"), ("half", "top")],
-                ),
-                BlockState::bare("minecraft:oak_planks"),
-            ],
-        };
-        let mut other = Palette {
-            entries: vec![
-                BlockState::air(),
-                state(
-                    "minecraft:oak_stairs",
-                    &[("half", "top"), ("facing", "north")],
-                ),
-                BlockState::bare("minecraft:oak_planks"),
-            ],
-        };
-        let _ = one.canonicalize();
-        let _ = other.canonicalize();
-        assert_eq!(ids(&one), ids(&other));
+        // Same id on both, so the property bag is the whole decision.
+        // `half` is written first in one bag and second in the other, so a
+        // key that read the pairs in place would compare `half=top`
+        // against `facing=south` and order the two by which property the
+        // author happened to write first.
+        //
+        // Reachable from source, not only by hand: `parse_state_literal`
+        // fills the `IndexMap` in the order the literal spells its
+        // properties, so `@oak_stairs[half=top,facing=north]` beside
+        // `@oak_stairs[facing=south,half=bottom]` is a pair of theme slots
+        // someone can write.
+        let mut p = Palette::new_with_air();
+        p.intern(state(
+            "minecraft:oak_stairs",
+            &[("half", "top"), ("facing", "north")],
+        ));
+        p.intern(state(
+            "minecraft:oak_stairs",
+            &[("facing", "south"), ("half", "bottom")],
+        ));
+        let _ = p.canonicalize();
+        let facings: Vec<&str> = p.entries[1..]
+            .iter()
+            .map(|s| s.properties["facing"].as_str())
+            .collect();
+        assert_eq!(facings, ["north", "south"]);
     }
 
     #[test]

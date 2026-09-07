@@ -150,7 +150,10 @@
   1 スロットに畳まれており、そのまま読めばタイブレークからソース順依存が戻ってきてしまうからです。
 
   **破壊的**: Cairn が出力するすべての構造でパレットの順序が変わり、それに伴って `.nbt` のバイト列、
-  `cairn info` の可搬性の行の並び、`resolved_ir_hash` が変わります。`cottage.crn` は
+  `cairn info` の可搬性の行の並び、`resolved_ir_hash`、そして `cairn lower` の ASCII プレビューが
+  描く文字が変わります。プレビューのグリフはパレット添字から決まるので、`cottage.crn` は
+  `#` oak_planks・`a` cobblestone だったものが `#` cobblestone・`a` glass_pane・`b` oak_planks に
+  なります。`cottage.crn` のパレットは
   `[air, oak_planks, cobblestone, spruce_stairs…, glass_pane]` から
   `[air, cobblestone, glass_pane, oak_planks, spruce_stairs…]` になりました。したがって既存の
   `*.crn.lock` は、古いコンパイラで作られたビルドに対して不一致を報告するので再生成が必要です

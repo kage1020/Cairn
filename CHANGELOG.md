@@ -150,9 +150,12 @@ and is a separate axis from the Minecraft target version.
   put the source-order dependence back in through the tie-break.
 
   **Breaking**: the palette order of every structure Cairn emits changes, and with it the `.nbt`
-  bytes, the order of `cairn info`'s portability rows, and `resolved_ir_hash`. `cottage.crn` went
-  from `[air, oak_planks, cobblestone, spruce_stairs…, glass_pane]` to `[air, cobblestone,
-  glass_pane, oak_planks, spruce_stairs…]`. Every `*.crn.lock` therefore reports a mismatch against
+  bytes, the order of `cairn info`'s portability rows, `resolved_ir_hash`, and the letters
+  `cairn lower`'s ASCII preview draws — its glyphs come off the palette index, so `cottage.crn` now
+  reads `#` cobblestone, `a` glass_pane, `b` oak_planks where it read `#` oak_planks,
+  `a` cobblestone. `cottage.crn`'s palette went from
+  `[air, oak_planks, cobblestone, spruce_stairs…, glass_pane]` to `[air, cobblestone, glass_pane,
+  oak_planks, spruce_stairs…]`. Every `*.crn.lock` therefore reports a mismatch against
   a build made with an older compiler and has to be regenerated; no example lockfile is committed to
   this repository, so there was nothing here to refresh. The blocks in the file and where they sit
   are unchanged — this moves numbering, not geometry, and a structure loaded into the game is the
