@@ -709,7 +709,7 @@ pub fn build_walkway_array<S: BuildHasher>(
             voxels[i] = mat_idx;
         }
     }
-    let array = BlockArray {
+    let mut array = BlockArray {
         dims,
         palette,
         voxels,
@@ -717,6 +717,12 @@ pub fn build_walkway_array<S: BuildHasher>(
         entities: Vec::new(),
         source_scope: scope_key.as_str().to_owned(),
     };
+    // A one-material walkway is already in canonical order, so this is a
+    // no-op today. It is here so the order `BlockArray::palette` claims
+    // holds of every array the pass produces by construction rather than
+    // by that argument, and so a walkway that grows a second material
+    // (kerbs, railings) does not have to remember to ask.
+    array.canonicalize_palette();
     WalkwayLayout {
         array,
         origin,

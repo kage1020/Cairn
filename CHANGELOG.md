@@ -112,6 +112,57 @@ and is a separate axis from the Minecraft target version.
 
 ### Breaking changes
 
+- *(core)* The palette is a **set with a canonical rendering**, not an insertion log. Slot `0` is
+  still air; every other entry is now placed by `(id, properties)` — the id, then the state
+  properties compared by name — and the voxel grid is renumbered onto the result.
+
+  `spec/compilation.md` §4.1 opens by promising that source may be written "flat and order-free".
+  The phase buckets close that across phases and the palette prune closes it for a member whose last
+  cell another one took, but neither reaches two members in one phase that share no voxel at all:
+  `Palette::intern` appends on first use, first use is a paint, and inside a phase the paints run in
+  the order the lines are written. So two windows on opposite walls interned in line order —
+
+  ```
+  struct t size=7x5
+    walls  mat_slot=wall height=3
+    window side=front y=1 offset=1 size=1x1 mat_slot=glass
+    window side=back  y=1 offset=1 size=1x1 mat_slot=deck
+  ```
+
+  — and swapping those two lines moved `oak_planks` past `glass_pane` in a palette the `.nbt` emits
+  verbatim, in the portability rows `cairn info` prints one per entry, and inside the
+  `resolved_ir_hash` that covers the whole array. Every voxel was identical and the artifact was
+  not, so a build cache keyed on that hash missed on an edit that changed nothing.
+
+  §4.1's grant of last-wins to "local overrides within the same phase" does not cover it, because
+  that grant is about *which block wins a cell* and these two members do not share a cell. Nothing
+  about the result depended on their order; only the numbering did. The two ways out were to sort,
+  or to say the palette order is part of what the source describes and that "order-free" is a claim
+  about voxels rather than about bytes. §4.8 now takes the first: the palette is derived from the
+  finished grid alone, so any permutation of the source that leaves the grid alone leaves the whole
+  `BlockArray` alone — which is the stronger reading §4.1 already reads as.
+
+  The sort consults the resolved state and nothing else — no spans, member ids, phases, or paint
+  order — so it is not a claim that two targets agree on the palette, only that one target's palette
+  does not depend on how the source was arranged. Property bags are compared by name rather than in
+  iteration order, because `IndexMap` compares as a map: two states carrying the same pairs in
+  different orders are already equal and fold onto one slot, and reading them in place would have
+  put the source-order dependence back in through the tie-break.
+
+  **Breaking**: the palette order of every structure Cairn emits changes, and with it the `.nbt`
+  bytes, the order of `cairn info`'s portability rows, `resolved_ir_hash`, and the letters
+  `cairn lower`'s ASCII preview draws — its glyphs come off the palette index, so `cottage.crn` now
+  reads `#` cobblestone, `a` glass_pane, `b` oak_planks where it read `#` oak_planks,
+  `a` cobblestone. `cottage.crn`'s palette went from
+  `[air, oak_planks, cobblestone, spruce_stairs…, glass_pane]` to `[air, cobblestone, glass_pane,
+  oak_planks, spruce_stairs…]`. Every `*.crn.lock` therefore reports a mismatch against
+  a build made with an older compiler and has to be regenerated; no example lockfile is committed to
+  this repository, so there was nothing here to refresh. The blocks in the file and where they sit
+  are unchanged — this moves numbering, not geometry, and a structure loaded into the game is the
+  same structure. `Palette::canonicalize` and `BlockArray::canonicalize_palette` are new and public
+  for anyone assembling an array outside the lowering pass; `BlockState::canonical_key` exposes the
+  order itself.
+
 - *(formats,core,cli)* A blockstate the registry pack was expected to refuse no longer counts as
   ordinary portability. `cairn info`'s Bedrock fold sent every `translate_states` failure into
   `unsupported` through a wildcard, and the three failures do not mean the same thing.
