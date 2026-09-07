@@ -146,12 +146,13 @@ and is a separate axis from the Minecraft target version.
   a fourth has to be classified at the fold rather than joining whichever bucket a `_` arm pointed
   at.
 
-  Breaking for Rust callers (tier Internal): `portability_for_bedrock` returns a `Result`, and
-  `UnsupportedReason` loses `StateValueUnexpected` and `StateKeyUnread`. Nothing produces those
-  now, and an enum of reasons an entry is unsupported should not carry two that are not reasons an
-  entry is unsupported; `--format json` correspondingly never carries `"reason":
-  "state_value_unexpected"` or `"state_key_unread"` in
-  `edition_portability[].unsupported_entries`.
+  Two surfaces move. `portability_for_bedrock` returns a `Result` and `UnsupportedReason` loses
+  `StateValueUnexpected` and `StateKeyUnread` — the Rust API, tier Internal. Nothing produces
+  those two now, and an enum of reasons an entry is unsupported should not carry two that are not
+  reasons an entry is unsupported. Dropping them also takes `"reason": "state_value_unexpected"`
+  and `"state_key_unread"` out of `edition_portability[].unsupported_entries`, and that is the
+  command output, tier Evolving. Neither tag has ever appeared in a real run, so the wire shape a
+  consumer has actually seen is unchanged.
 
   No `.crn` reaches any of this today, so nothing that reports figures now stops reporting them:
   stair properties are built from `Cardinal` and `StairShape` and are in domain by construction,

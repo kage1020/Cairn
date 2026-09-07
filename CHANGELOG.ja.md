@@ -143,11 +143,13 @@
   ワイルドカードは網羅性検査も消していました。3 つのバリアントは 1 つずつ照合するようにしたので、4 つ
   目は `_` の指す先に紛れ込むのではなく、畳み込みの場所で分類しなければコンパイルが通りません。
 
-  Rust の呼び出し側にとって破壊的です (tier Internal)。`portability_for_bedrock` は `Result` を返し、
-  `UnsupportedReason` は `StateValueUnexpected` と `StateKeyUnread` を失います。今やそれらを作るもの
-  は無く、エントリが unsupported である理由の列挙が、理由ではない 2 つを持つべきではないからです。
-  `--format json` の `edition_portability[].unsupported_entries` も、対応して
-  `"reason": "state_value_unexpected"` / `"state_key_unread"` を運ぶことはなくなります。
+  動く表面は 2 つです。`portability_for_bedrock` が `Result` を返し、`UnsupportedReason` が
+  `StateValueUnexpected` と `StateKeyUnread` を失うのは Rust API、Internal ティアです。今やその 2 つ
+  を作るものは無く、エントリが unsupported である理由の列挙が、理由ではない 2 つを持つべきではないか
+  らです。これを落とすことで `edition_portability[].unsupported_entries` から
+  `"reason": "state_value_unexpected"` / `"state_key_unread"` も消えますが、そちらはコマンド出力、
+  Evolving ティアです。どちらのタグも実際の実行で出たことはないので、利用者が実際に見てきたワイヤ形状
+  は変わりません。
 
   今日これに到達できる `.crn` は無いので、今数字が出ているソースが出なくなることはありません。階段の
   プロパティは `Cardinal` と `StairShape` から作られるので構成上ドメイン内で、書かれた `@id[k=v]` は

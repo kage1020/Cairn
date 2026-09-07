@@ -150,7 +150,8 @@ fn report_for(
         Edition::Bedrock => portability_for_bedrock(ir, &pack.blocks, &pack.aliases)
             .unwrap_or_else(|invalid| {
                 panic!(
-                    "{name} leaked a blockstate the pack was expected to refuse on {edition}:                      {:?}",
+                    "{name} leaked a blockstate the pack was expected to refuse on \
+                     {edition}: {:?}",
                     invalid.leaks(),
                 )
             }),

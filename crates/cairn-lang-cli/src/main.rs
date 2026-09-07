@@ -946,13 +946,18 @@ fn run_info(file: &Path, editions: &[String], format: InfoFormat) -> ExitCode {
 /// axis. Nothing is written to disk — the lowering stops at the in-memory
 /// `BlockArrayIr` that `portability_for_*` inspects.
 ///
-/// A finding only the strict per-edition pass produces is reported here and
-/// turns into exit 1. Without that, a source `cairn compile --edition
-/// bedrock` refuses with `E_UNRESOLVED_SLOT` was described as
-/// `degraded: 0  unsupported: 0`, with the member that failed to resolve
-/// visible only as a smaller `portable` count — indistinguishable from
-/// "this edition simply has fewer structures". A parity report that cannot
-/// show a parity failure is worse than none.
+/// Two things here turn into exit 1. The first is a finding only the
+/// strict per-edition pass produces. Without it, a source
+/// `cairn compile --edition bedrock` refuses with `E_UNRESOLVED_SLOT` was
+/// described as `degraded: 0  unsupported: 0`, with the member that failed
+/// to resolve visible only as a smaller `portable` count —
+/// indistinguishable from "this edition simply has fewer structures". A
+/// parity report that cannot show a parity failure is worse than none.
+///
+/// The second is a palette the registry pack was expected to refuse, which
+/// [`portability_for_bedrock`] answers with rather than counting. Both are
+/// walked to the end of every requested edition before the exit code is
+/// returned, so neither hides what the other editions found.
 ///
 /// The version loop is here for the same reason one level down.
 /// Portability asks of the edition, and two palette entries declared by
@@ -974,11 +979,20 @@ fn run_info(file: &Path, editions: &[String], format: InfoFormat) -> ExitCode {
 /// remove. The gates after those are about the filesystem — an output
 /// directory, a free lockfile path — and belong to the command that writes.
 ///
-/// The loop reports and does not refuse. An entry no version of the
-/// edition has is already a figure rather than a gate here — spec §10.5's
-/// own sample output carries `unsupported: 1` — and a caller that wants a
-/// refusal runs the build. What this row adds is the fact the counters
-/// cannot carry: that the versions disagree about different entries.
+/// The loop reports and does not refuse *about the source*. An entry no
+/// version of the edition has is a figure rather than a gate here — spec
+/// §10.5's own sample output carries `unsupported: 1` — and a caller that
+/// wants a refusal runs the build. What this row adds is the fact the
+/// counters cannot carry: that the versions disagree about different
+/// entries.
+///
+/// A leaked blockstate is the one gate on this row, and it is not a
+/// judgement about the source: it says the palette is one no validated
+/// pack could have produced, so there is no figure to report rather than a
+/// bad figure to report. That edition loses its row and nothing else — the
+/// dropped scopes and every version's findings are computed from the
+/// resolution and the pinned lowerings, so a leak has no bearing on them
+/// and does not suppress them.
 ///
 /// Reporting and refusing are different, though, and a row that says
 /// `none` without saying why is not a report. Each pinned lowering's
@@ -1044,22 +1058,32 @@ fn edition_rows(
             Edition::Bedrock => portability_for_bedrock(&block_ir, &pack.blocks, &pack.aliases),
         };
         let portability = match portability {
-            Ok(portability) => portability,
+            Ok(portability) => Some(portability),
             // A palette the pack was supposed to have refused. There is no
             // portability figure to print over it — the counts would read
             // as ordinary portability — so this edition contributes no row
-            // and the run exits 1. The loop goes on so a second edition's
-            // findings are not hidden by this one's.
+            // and the run exits 1.
+            //
+            // What it does not do is leave the edition. The rest of this
+            // body reads the resolution and the pinned lowerings, not the
+            // palette, so the dropped scopes and each version's refusals
+            // are findings the leak has nothing to do with — and stderr is
+            // the only place they can appear, since the report is
+            // discarded. Skipping them here would hide within one edition
+            // exactly what walking every edition exists to prevent between
+            // two.
             Err(invalid) => {
                 for line in invalid_palette_report(edition, &invalid) {
                     eprintln!("{line}");
                 }
                 edition_specific_error = true;
-                continue;
+                None
             }
         };
-        for note in unsupported_notes(edition, portability.unsupported()) {
-            eprintln!("{note}");
+        if let Some(portability) = &portability {
+            for note in unsupported_notes(edition, portability.unsupported()) {
+                eprintln!("{note}");
+            }
         }
         let dropped = dropped_scopes(&resolution, &block_ir);
         if !dropped.is_empty() {
@@ -1088,15 +1112,22 @@ fn edition_rows(
         }
         report_version_notes(file, source, lines, edition, &verdicts, &considered);
 
-        rows.push(EditionReport {
-            edition,
-            portable: portability.counts().portable,
-            degraded: portability.counts().degraded,
-            unsupported: portability.counts().unsupported,
-            unsupported_entries: portability.into_unsupported(),
-            buildable: verdicts.buildable,
-            considered,
-        });
+        // The one thing a refused palette does cost this edition: with no
+        // counts there is no row to build. The run exits 1 below and the
+        // list is dropped either way, so what this guards is the shape
+        // rather than the output — a row whose figures came off a palette
+        // no validated pack could have produced.
+        if let Some(portability) = portability {
+            rows.push(EditionReport {
+                edition,
+                portable: portability.counts().portable,
+                degraded: portability.counts().degraded,
+                unsupported: portability.counts().unsupported,
+                unsupported_entries: portability.into_unsupported(),
+                buildable: verdicts.buildable,
+                considered,
+            });
+        }
     }
 
     // Every requested edition is walked before returning, so one bad edition

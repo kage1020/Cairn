@@ -153,6 +153,11 @@ pub struct PortabilityCounts {
 /// prints the same sentence a build would have printed for the same entry.
 /// Every one of them is carried rather than the first: they are all one
 /// bug's symptoms, and a reader who fixes the pack wants the whole list.
+///
+/// The [`Display`](std::fmt::Display) impl below is what [`std::error::Error`]
+/// requires and not the message a reader sees: the answer is the list, and
+/// a caller renders it with its own framing. Nothing should grow a second
+/// wording here to keep in step with that one.
 #[derive(Debug, Error)]
 #[error(
     "the palette carries blockstates the registry pack was expected to refuse ({} of them)",
