@@ -391,21 +391,17 @@ stdout is empty rather than short a line.
 
 ### The `edition portability` row
 
-The row counts palette entries. An entry is `unsupported` for one of four reasons:
+The row counts palette entries. An entry is `unsupported` for one of two reasons:
 
 | Reason | The repair |
 |---|---|
 | The edition has no such block at all. | Change the material, or the pack's mapping for it. |
 | It has the block, but Cairn has no mapping for the states the intent carries ([§10.7](#107-java--bedrock-portability)). | None yet. The mapping is Cairn's to add. |
-| A state value outside the Java domain reached the state translator. | None. A pack is expected to reject it, though no pack schema can state a value domain today. |
-| A state key the translator does not read reached it. | Remove the key from the source blockstate. |
 
-The first is a question about IDs and the rest about states. Only the second can produce `degraded`:
-a block that does not exist has nothing to lose detail from, and a state the translator refuses
-outright is not a partial loss. The third and fourth are not portability facts at all: something
-upstream let a blockstate through.
+The first is a question about IDs and the second about states. Only the second can produce
+`degraded`: a block that does not exist has nothing to lose detail from.
 
-Because four different repairs hide behind one figure, each counted entry is named on stderr with
+Because two different repairs hide behind one figure, each counted entry is named on stderr with
 its reason. The ID case is answered the way `E_UNKNOWN_ID` answers one, and by the same two halves:
 the `aliases` component where it has a row, so an entry this edition has under another name is
 reported as that name rather than as a dead end (`standing_sign` on Java is `oak_sign`), and a
@@ -422,6 +418,27 @@ when Bedrock renamed `stonebrick` to `stone_bricks` at 1.21.40. Whether the vers
 it is what a pinned target answers, as `E_UNKNOWN_ID` — `cairn compile --target`, or `cairn check
 --edition E --target V` for the same answer without a build
 ([§10.4](#104-fail-loud-and-minimum-version-inference)).
+
+#### A blockstate the pack should have refused is not a figure
+
+Two further failures can reach the state translator: a state value outside the Java domain
+(`facing=up` on a stair), and a state key the translator does not read. Neither is an answer about
+the edition. Both say that a blockstate no validated registry pack can produce reached the
+translator anyway, which is a defect in the pack or in Cairn and not a property of the build being
+reported on.
+
+So they are not a third and fourth reason for `unsupported`. `cairn info` reports **no** portability
+figures for an edition whose palette carries one: the counts would still be computable, and they
+would read as ordinary portability — a leaked `facing=up` counted as `unsupported: 1` is
+indistinguishable from a stair whose corner shape Bedrock simply has no state for, which is the one
+conclusion the reader must not draw. The command names every leaked entry on stderr with the
+translator's own message, says the repair belongs to the pack or to Cairn rather than to the source,
+and exits non-zero without a row, the way any other finding that refuses the command does.
+
+The state translator is the only place this can be observed, so the rule is stated for the states
+question alone. It is not a licence to answer `unsupported` for a validation gap elsewhere: a figure
+computed over a palette a validated pack could not have produced is not a portability answer,
+whatever produced it.
 
 ### The `buildable targets` row
 

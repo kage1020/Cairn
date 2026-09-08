@@ -27,7 +27,9 @@ use std::path::PathBuf;
 
 use cairn_lang_core::block_array::{BlockArrayIr, BlockState, lower_to_block_array};
 use cairn_lang_core::{Edition, lower, parse, resolve};
-use cairn_lang_formats::portability::{portability_for_bedrock, portability_for_java};
+use cairn_lang_formats::portability::{
+    PortabilityReport, portability_for_bedrock, portability_for_java,
+};
 use cairn_lang_formats::registry::{RegistryPack, builtin_bedrock, builtin_java};
 
 /// Every version the pack can build for, as the `--target` strings a user
@@ -130,16 +132,38 @@ fn editions() -> [(Edition, &'static RegistryPack); 2] {
     ]
 }
 
+/// The edition's report, refusing the whole test if the palette carries a
+/// blockstate the registry pack was expected to reject.
+///
+/// A shipped example that leaked one would be the strongest possible case
+/// of the bug the refusal exists for, so it is asserted here rather than
+/// unwrapped silently: the corpus is the only place a leak could ever be
+/// found against real pack data.
+fn report_for(
+    edition: Edition,
+    pack: &RegistryPack,
+    ir: &BlockArrayIr,
+    name: &str,
+) -> PortabilityReport {
+    match edition {
+        Edition::Java => portability_for_java(ir, &pack.blocks, &pack.aliases),
+        Edition::Bedrock => portability_for_bedrock(ir, &pack.blocks, &pack.aliases)
+            .unwrap_or_else(|invalid| {
+                panic!(
+                    "{name} leaked a blockstate the pack was expected to refuse on \
+                     {edition}: {:?}",
+                    invalid.leaks(),
+                )
+            }),
+    }
+}
+
 #[test]
 fn no_shipped_example_reports_an_unsupported_entry() {
     for (name, source) in &examples() {
         for (edition, pack) in editions() {
             let block_ir = lower_for(source, edition, pack, None);
-            let counts = match edition {
-                Edition::Java => portability_for_java(&block_ir, &pack.blocks, &pack.aliases),
-                Edition::Bedrock => portability_for_bedrock(&block_ir, &pack.blocks, &pack.aliases),
-            }
-            .counts();
+            let counts = report_for(edition, pack, &block_ir, name).counts();
             assert_eq!(
                 counts.unsupported, 0,
                 "{name} reports {} unsupported entries on {edition}; every shipped example is \
@@ -162,12 +186,7 @@ fn the_reported_entry_count_matches_what_a_pinned_build_emits() {
     for (name, source) in &examples() {
         for (edition, pack) in editions() {
             let unpinned = lower_for(source, edition, pack, None);
-            let reported = match edition {
-                Edition::Java => portability_for_java(&unpinned, &pack.blocks, &pack.aliases),
-                Edition::Bedrock => portability_for_bedrock(&unpinned, &pack.blocks, &pack.aliases),
-            }
-            .counts()
-            .total();
+            let reported = report_for(edition, pack, &unpinned, name).counts().total();
             for version in supported_versions(pack) {
                 let built = lower_for(source, edition, pack, Some(version));
                 assert!(
