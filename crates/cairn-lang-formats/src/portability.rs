@@ -57,9 +57,26 @@
 //!   intent compiles but loses detail — e.g. a corner stair `shape` that
 //!   Bedrock has no state for; the `.mcstructure` writer surfaces this as
 //!   `W_INTENT_DEGRADED`).
-//! - `Err(BedrockStateError)` → **unsupported** (no representation on
-//!   Bedrock — an unmapped stateful family or an out-of-domain value that
-//!   the writer would refuse).
+//! - `Err(BedrockStateError::UnmappableBlock)` → **unsupported** (the
+//!   edition has the block, and this backend has no mapping for the states
+//!   the intent put on it, so the `.mcstructure` writer would refuse the
+//!   entry).
+//!
+//! The translator's other two refusals are not answers about portability
+//! at all, and their own docs say so. `UnknownStairState` is a value
+//! outside the Java domain — "the registry pack should reject these one
+//! layer up" — and `UnknownStairKey` a key the backend does not read.
+//! Neither names anything the edition lacks; both name a blockstate that
+//! should never have reached the translator.
+//!
+//! Counting one as `unsupported` would publish a validation gap as an
+//! ordinary portability figure, indistinguishable from a stair whose
+//! corner shape Bedrock simply has no state for. So the fold refuses
+//! instead: [`portability_for_bedrock`] answers with [`InvalidPalette`],
+//! naming every entry that leaked, and the caller reports the pack bug
+//! rather than a count taken over a palette that should not exist. The
+//! whole palette is walked before refusing, so one run names every leak
+//! rather than the first.
 //!
 //! The counting granularity is per palette entry, matching the atomic unit
 //! `translate_states` already exposes. A member whose lowering interns
@@ -75,6 +92,8 @@
 use cairn_lang_core::block_array::{BlockArrayIr, BlockState};
 use cairn_lang_core::resolve::{UnsupportedEntry, UnsupportedReason};
 use cairn_lang_core::suggest::nearest_namespaced_id;
+
+use thiserror::Error;
 
 use crate::bedrock_state::{BedrockStateError, translate_states};
 use crate::registry::{AliasIndex, BlocksIndex};
@@ -114,9 +133,46 @@ pub struct PortabilityCounts {
     /// writer would emit `W_INTENT_DEGRADED` for these).
     pub degraded: u32,
     /// Palette entries with no representation on this edition: a block no
-    /// supported version of the edition declares, an unmapped stateful
-    /// family, or a state value outside the Java domain.
+    /// supported version of the edition declares, or a stateful family
+    /// this backend has no Bedrock mapping for.
     pub unsupported: u32,
+}
+
+/// A palette carrying blockstates the registry pack was expected to
+/// refuse, and every entry that proves it.
+///
+/// Returned instead of counts because a figure taken over such a palette
+/// is not an answer to the question the row asks. "How much of this ports
+/// to Bedrock?" presumes the palette is one a build could have produced;
+/// an entry the translator refuses for a state value outside the Java
+/// domain, or for a key it does not read, says the palette is not. The
+/// count would still be printable, and it would read as ordinary
+/// portability — which is the one thing the reader must not conclude.
+///
+/// The leaks are the translator's own errors, unreworded, so a caller
+/// prints the same sentence a build would have printed for the same entry.
+/// Every one of them is carried rather than the first: they are all one
+/// bug's symptoms, and a reader who fixes the pack wants the whole list.
+///
+/// The [`Display`](std::fmt::Display) impl below is what [`std::error::Error`]
+/// requires and not the message a reader sees: the answer is the list, and
+/// a caller renders it with its own framing. Nothing should grow a second
+/// wording here to keep in step with that one.
+#[derive(Debug, Error)]
+#[error(
+    "the palette carries blockstates the registry pack was expected to refuse ({} of them)",
+    .leaks.len()
+)]
+pub struct InvalidPalette {
+    leaks: Vec<BedrockStateError>,
+}
+
+impl InvalidPalette {
+    /// The refusals, in palette order.
+    #[must_use]
+    pub fn leaks(&self) -> &[BedrockStateError] {
+        &self.leaks
+    }
 }
 
 impl PortabilityReport {
@@ -207,18 +263,32 @@ pub fn portability_for_java(
 /// An entry Bedrock does not declare is `unsupported` without reaching
 /// `translate_states`, which answers about states and would report a
 /// stateless unknown id as a clean translation.
-#[must_use]
+///
+/// # Errors
+///
+/// [`InvalidPalette`] when an entry reaches the translator carrying a
+/// blockstate no validated pack can produce — a value outside the Java
+/// domain, or a key the backend does not read. Neither is a fact about
+/// Bedrock, so neither has a category here, and a report built over the
+/// rest of the palette would present a validation gap as a portability
+/// figure. The whole palette is still walked, so the refusal names every
+/// such entry rather than the first.
 pub fn portability_for_bedrock(
     ir: &BlockArrayIr,
     blocks: &BlocksIndex,
     aliases: &AliasIndex,
-) -> PortabilityReport {
+) -> Result<PortabilityReport, InvalidPalette> {
     let mut report = PortabilityReport::default();
+    let mut leaks = Vec::new();
     for entry in non_air_entries(ir) {
         if absent_from_edition(blocks, entry) {
             report.push_unsupported(absent_entry(blocks, aliases, entry));
             continue;
         }
+        // Matched variant by variant rather than through a wildcard: the
+        // three refusals do not describe the same kind of failure, and a
+        // fourth added later must be classified here rather than joining
+        // whichever bucket a `_` arm points at.
         match translate_states(&entry.id, &entry.properties) {
             Ok(t) if t.degraded.is_empty() => {
                 report.count_portable();
@@ -226,63 +296,40 @@ pub fn portability_for_bedrock(
             Ok(_) => {
                 report.count_degraded();
             }
-            Err(err) => {
+            // The edition has the block and this backend has no mapping
+            // for its states yet — `UnmappableBlock`'s own doc says "which
+            // does not exist for this block yet", so the missing mapping
+            // is the fact, and it is one a build would hit. Nothing is
+            // reworded on the way through: both lists come off the error,
+            // which threads them from the translator's own constants, so a
+            // family added there reaches this row without a second edit.
+            Err(BedrockStateError::UnmappableBlock {
+                properties, mapped, ..
+            }) => {
                 report.push_unsupported(UnsupportedEntry {
                     id: entry.id.clone(),
-                    reason: refusal_reason(err),
+                    reason: UnsupportedReason::StatesUnmapped {
+                        states: properties,
+                        mapped: mapped.to_owned(),
+                    },
                 });
+            }
+            // The two the pack was supposed to have refused one layer up.
+            // Collected rather than counted, and collected rather than
+            // returned on the spot, so the refusal below carries the whole
+            // list.
+            Err(
+                err @ (BedrockStateError::UnknownStairState { .. }
+                | BedrockStateError::UnknownStairKey { .. }),
+            ) => {
+                leaks.push(err);
             }
         }
     }
-    report
-}
-
-/// Why the Bedrock state translator refused an entry, in the terms
-/// `cairn info` reports.
-///
-/// Matched variant by variant rather than through a wildcard: the three do
-/// not describe the same kind of failure, and a fourth added later must be
-/// classified here rather than joining whichever bucket a `_` arm points
-/// at. Every one of them counts as `unsupported` all the same — the counts
-/// this row has always published do not move.
-///
-/// Nothing is reworded on the way through. Each field comes off the error
-/// that raised it, including the two lists (`valid`, `handled`) the error
-/// threads from the translator's own constants, so a key or a value added
-/// there reaches this row without a second edit.
-fn refusal_reason(err: BedrockStateError) -> UnsupportedReason {
-    match err {
-        // The block exists on the edition and this backend has no mapping
-        // for its states yet — `UnmappableBlock`'s own doc says "which does
-        // not exist for this block yet", so the missing mapping is the
-        // fact, not a limit of the game.
-        BedrockStateError::UnmappableBlock {
-            properties, mapped, ..
-        } => UnsupportedReason::StatesUnmapped {
-            states: properties,
-            mapped: mapped.to_owned(),
-        },
-        // A value outside the Java domain. `UnknownStairState`'s doc says
-        // the pack should reject these one layer up — normatively: no pack
-        // schema can express a value domain today, which is how one
-        // arrives here at all.
-        BedrockStateError::UnknownStairState {
-            key, value, valid, ..
-        } => UnsupportedReason::StateValueUnexpected {
-            key: key.to_owned(),
-            value,
-            valid: valid.to_owned(),
-        },
-        // A key the backend does not read. This one *is* the author's to
-        // repair — the error's own `Fix:` says "remove it from the source
-        // blockstate" — so it is reported apart from the value case rather
-        // than folded in with it.
-        BedrockStateError::UnknownStairKey { key, handled, .. } => {
-            UnsupportedReason::StateKeyUnread {
-                key,
-                handled: handled.to_owned(),
-            }
-        }
+    if leaks.is_empty() {
+        Ok(report)
+    } else {
+        Err(InvalidPalette { leaks })
     }
 }
 
@@ -360,6 +407,21 @@ mod tests {
     /// deliberate change to what that test asks.
     fn no_aliases() -> AliasIndex {
         AliasIndex::empty()
+    }
+
+    /// The Bedrock report for a palette every test but the leak ones
+    /// expects to be valid.
+    ///
+    /// Named rather than `.expect(..)` at thirty call sites: a leak is not
+    /// a variation on a count, so a test asking about counts should not be
+    /// able to be read as also asking about that.
+    fn bedrock_report(
+        ir: &BlockArrayIr,
+        blocks: &BlocksIndex,
+        aliases: &AliasIndex,
+    ) -> PortabilityReport {
+        portability_for_bedrock(ir, blocks, aliases)
+            .expect("the palette carries no blockstate a pack would have refused")
     }
 
     /// A table shaped like a real edition's: two versions with a rename
@@ -448,7 +510,7 @@ mod tests {
                 },
             },
         ]);
-        let counts = portability_for_bedrock(&ir, &table(), &no_aliases()).counts;
+        let counts = bedrock_report(&ir, &table(), &no_aliases()).counts;
         assert_eq!(
             counts,
             PortabilityCounts {
@@ -501,7 +563,7 @@ mod tests {
             PortabilityCounts::default()
         );
         assert_eq!(
-            portability_for_bedrock(&ir, &table(), &no_aliases()).counts,
+            bedrock_report(&ir, &table(), &no_aliases()).counts,
             PortabilityCounts::default()
         );
     }
@@ -518,7 +580,7 @@ mod tests {
         ]);
         let blocks = table();
         assert_eq!(
-            portability_for_bedrock(&ir, &blocks, &no_aliases()).counts,
+            bedrock_report(&ir, &blocks, &no_aliases()).counts,
             PortabilityCounts {
                 portable: 1,
                 degraded: 0,
@@ -547,7 +609,7 @@ mod tests {
         ]);
         let blocks = table();
         assert_eq!(
-            portability_for_bedrock(&ir, &blocks, &no_aliases()).counts,
+            bedrock_report(&ir, &blocks, &no_aliases()).counts,
             PortabilityCounts {
                 portable: 2,
                 degraded: 0,
@@ -580,7 +642,7 @@ mod tests {
             id: "minecraft:spruce_door".to_owned(),
             properties,
         }]);
-        let counts = portability_for_bedrock(&ir, &table(), &no_aliases()).counts;
+        let counts = bedrock_report(&ir, &table(), &no_aliases()).counts;
         assert_eq!(
             counts,
             PortabilityCounts {
@@ -611,7 +673,7 @@ mod tests {
             properties,
         }]);
         assert_eq!(
-            portability_for_bedrock(&ir, &table(), &no_aliases()).counts,
+            bedrock_report(&ir, &table(), &no_aliases()).counts,
             PortabilityCounts {
                 portable: 0,
                 degraded: 0,
@@ -641,7 +703,7 @@ mod tests {
             },
         );
         assert_eq!(
-            portability_for_bedrock(&ir, &none, &no_aliases()).counts,
+            bedrock_report(&ir, &none, &no_aliases()).counts,
             PortabilityCounts {
                 portable: 2,
                 degraded: 0,
@@ -678,7 +740,7 @@ mod tests {
             walkways: IndexMap::new(),
             diagnostics: Vec::new(),
         };
-        let report = portability_for_bedrock(&ir, &table(), &no_aliases());
+        let report = bedrock_report(&ir, &table(), &no_aliases());
         assert_eq!(
             report.counts(),
             PortabilityCounts {
@@ -716,7 +778,7 @@ mod tests {
             PortabilityCounts::default()
         );
         assert_eq!(
-            portability_for_bedrock(&ir, &table(), &no_aliases()).counts,
+            bedrock_report(&ir, &table(), &no_aliases()).counts,
             PortabilityCounts::default()
         );
     }
@@ -762,7 +824,7 @@ mod tests {
         let ir = one_state_ir(vec![BlockState::bare("minecraft:standing_sign")]);
         for report in [
             portability_for_java(&ir, &table(), &no_aliases()),
-            portability_for_bedrock(&ir, &table(), &no_aliases()),
+            bedrock_report(&ir, &table(), &no_aliases()),
         ] {
             assert_eq!(report.counts().unsupported, 1);
             assert_eq!(report.unsupported()[0].id, "minecraft:standing_sign");
@@ -891,7 +953,7 @@ mod tests {
         // far from every candidate is the ordinary case for a block that
         // belongs to the other edition entirely.
         let ir = one_state_ir(vec![BlockState::bare("minecraft:totally_not_a_block")]);
-        let report = portability_for_bedrock(&ir, &table(), &no_aliases());
+        let report = bedrock_report(&ir, &table(), &no_aliases());
         assert_eq!(report.unsupported()[0].id, "minecraft:totally_not_a_block");
         assert_eq!(
             only_reason(&report),
@@ -938,7 +1000,7 @@ mod tests {
             ("minecraft:stonebrik", "minecraft:stonebrick"),
         ] {
             let ir = one_state_ir(vec![BlockState::bare(typo)]);
-            let report = portability_for_bedrock(&ir, &table(), &no_aliases());
+            let report = bedrock_report(&ir, &table(), &no_aliases());
             assert_eq!(
                 only_reason(&report),
                 &UnsupportedReason::AbsentFromEdition {
@@ -980,7 +1042,7 @@ mod tests {
             id: "minecraft:oak_door".to_owned(),
             properties,
         }]);
-        let report = portability_for_bedrock(&ir, &table(), &no_aliases());
+        let report = bedrock_report(&ir, &table(), &no_aliases());
         assert_eq!(report.counts().unsupported, 1);
         assert_eq!(report.unsupported()[0].id, "minecraft:oak_door");
         assert_eq!(
@@ -993,32 +1055,35 @@ mod tests {
     }
 
     #[test]
-    fn a_value_outside_the_java_domain_is_reported_apart_from_a_key_nothing_reads() {
-        // Two failures that look alike and are not. A value the pack is
-        // expected to reject leaves the author nothing to edit; a key the
-        // backend does not read is theirs to remove, which is what the
-        // error's own `Fix:` says. Folding them together would tell half
-        // the readers to go and wait for someone else.
-        //
-        // The counts do not move either way — both are `unsupported` — so
-        // the reason is the only thing that carries the difference, and
-        // every field of it is asserted for that reason.
-        let value_leak = one_state_ir(vec![BlockState {
+    fn a_state_value_outside_the_java_domain_refuses_the_report() {
+        // A value the pack was expected to reject is not a fact about
+        // Bedrock. Counting it would put a validation gap in the same
+        // figure as a stair whose corner shape Bedrock has no state for,
+        // where the two have nothing in common but the number they land
+        // in — so the palette is refused and no figure is offered for it.
+        let ir = one_state_ir(vec![BlockState {
             id: "minecraft:oak_stairs".to_owned(),
             properties: stair_props("up", "bottom", "straight"),
         }]);
-        let report = portability_for_bedrock(&value_leak, &table(), &no_aliases());
-        assert_eq!(report.counts().unsupported, 1);
+        let invalid = portability_for_bedrock(&ir, &table(), &no_aliases())
+            .expect_err("a leaked state value refuses the report");
         assert_eq!(
-            only_reason(&report),
-            &UnsupportedReason::StateValueUnexpected {
-                key: "facing".to_owned(),
+            invalid.leaks(),
+            [BedrockStateError::UnknownStairState {
+                id: "minecraft:oak_stairs".to_owned(),
+                key: "facing",
                 value: "up".to_owned(),
-                valid: "east, west, south, north".to_owned(),
-            },
+                valid: "east, west, south, north",
+            }],
         );
+    }
 
-        let key_leak = one_state_ir(vec![BlockState {
+    #[test]
+    fn a_state_key_the_backend_does_not_read_refuses_the_report() {
+        // The neighbouring leak, asked separately: the two arrive through
+        // different translator branches, and one arm folded into the other
+        // would leave a variant no test could tell apart from its sibling.
+        let ir = one_state_ir(vec![BlockState {
             id: "minecraft:oak_stairs".to_owned(),
             properties: {
                 let mut m = stair_props("north", "bottom", "straight");
@@ -1026,15 +1091,99 @@ mod tests {
                 m
             },
         }]);
-        let report = portability_for_bedrock(&key_leak, &table(), &no_aliases());
-        assert_eq!(report.counts().unsupported, 1);
+        let invalid = portability_for_bedrock(&ir, &table(), &no_aliases())
+            .expect_err("a leaked state key refuses the report");
         assert_eq!(
-            only_reason(&report),
-            &UnsupportedReason::StateKeyUnread {
+            invalid.leaks(),
+            [BedrockStateError::UnknownStairKey {
+                id: "minecraft:oak_stairs".to_owned(),
                 key: "waterlogged".to_owned(),
-                handled: "facing, half, shape".to_owned(),
+                handled: "facing, half, shape",
+            }],
+        );
+    }
+
+    #[test]
+    fn a_leak_refuses_the_whole_palette_and_names_every_one_of_them() {
+        // Two things at once, because they are the same decision. The
+        // palette's other entries classify perfectly well — a portable
+        // block, a degraded stair, and an entry that really is
+        // unsupported — and none of those counts is reported, because a
+        // figure over a palette this one entry proves invalid is not an
+        // answer to "how much of this ports".
+        //
+        // And the walk does not stop at the first leak. They are one
+        // bug's symptoms, and a reader repairing the pack wants the whole
+        // list rather than one per run.
+        let ir = one_state_ir(vec![
+            BlockState::bare("minecraft:oak_planks"),
+            BlockState {
+                id: "minecraft:oak_stairs".to_owned(),
+                properties: stair_props("south", "top", "outer_left"),
+            },
+            BlockState::bare("minecraft:nothing_like_this"),
+            BlockState {
+                id: "minecraft:oak_stairs".to_owned(),
+                properties: stair_props("up", "bottom", "straight"),
+            },
+            BlockState {
+                id: "minecraft:oak_stairs".to_owned(),
+                properties: {
+                    let mut m = stair_props("north", "top", "straight");
+                    m.insert("waterlogged".to_owned(), "true".to_owned());
+                    m
+                },
+            },
+        ]);
+        let invalid = portability_for_bedrock(&ir, &table(), &no_aliases())
+            .expect_err("one leak refuses the palette however well the rest classifies");
+        let leaked: Vec<String> = invalid.leaks().iter().map(ToString::to_string).collect();
+        assert_eq!(
+            leaked.len(),
+            2,
+            "every leak is named, not the first: {leaked:?}",
+        );
+        assert!(
+            leaked[0].contains("facing=up") && leaked[1].contains("waterlogged"),
+            "in palette order, unreworded: {leaked:?}",
+        );
+        // The premise: without the two leaked entries the same palette
+        // classifies into all three categories, so the refusal is what
+        // withheld them rather than there being nothing to withhold.
+        let clean = one_state_ir(vec![
+            BlockState::bare("minecraft:oak_planks"),
+            BlockState {
+                id: "minecraft:oak_stairs".to_owned(),
+                properties: stair_props("south", "top", "outer_left"),
+            },
+            BlockState::bare("minecraft:nothing_like_this"),
+        ]);
+        assert_eq!(
+            bedrock_report(&clean, &table(), &no_aliases()).counts(),
+            PortabilityCounts {
+                portable: 1,
+                degraded: 1,
+                unsupported: 1,
             },
         );
+    }
+
+    #[test]
+    fn a_block_the_backend_maps_no_states_for_is_not_a_leak() {
+        // The third refusal is the one that stays a count. The block is
+        // on the edition and the states have no Bedrock form *yet* — a
+        // fact about this backend that a build would hit and that no pack
+        // validation could have prevented, which is what separates it
+        // from the two above.
+        let mut properties = IndexMap::new();
+        properties.insert("facing".to_owned(), "north".to_owned());
+        let ir = one_state_ir(vec![BlockState {
+            id: "minecraft:oak_door".to_owned(),
+            properties,
+        }]);
+        let report = portability_for_bedrock(&ir, &table(), &no_aliases())
+            .expect("an unmapped family is a portability answer, not a leak");
+        assert_eq!(report.counts().unsupported, 1);
     }
 
     #[test]
@@ -1047,7 +1196,7 @@ mod tests {
             id: "minecraft:oak_stairs".to_owned(),
             properties: stair_props("south", "top", "outer_left"),
         }]);
-        let report = portability_for_bedrock(&ir, &table(), &no_aliases());
+        let report = bedrock_report(&ir, &table(), &no_aliases());
         assert_eq!(report.counts().degraded, 1);
         assert!(
             report.unsupported().is_empty(),
@@ -1077,7 +1226,7 @@ mod tests {
                 },
             },
         ]);
-        let report = portability_for_bedrock(&ir, &table(), &no_aliases());
+        let report = bedrock_report(&ir, &table(), &no_aliases());
         assert_eq!(
             report.counts(),
             PortabilityCounts {
@@ -1115,7 +1264,7 @@ mod tests {
         let none = BlocksIndex::empty();
         for report in [
             portability_for_java(&ir, &none, &no_aliases()),
-            portability_for_bedrock(&ir, &none, &no_aliases()),
+            bedrock_report(&ir, &none, &no_aliases()),
         ] {
             assert_eq!(report.counts().unsupported, 0);
             assert!(

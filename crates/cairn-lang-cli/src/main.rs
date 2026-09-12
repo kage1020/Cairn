@@ -31,7 +31,9 @@ use cairn_lang_formats::data_version::{
 use cairn_lang_formats::java_structure::{
     Compound, OutputExt, build_structure_tag, output_filename, write_compound_gzip,
 };
-use cairn_lang_formats::portability::{portability_for_bedrock, portability_for_java};
+use cairn_lang_formats::portability::{
+    InvalidPalette, portability_for_bedrock, portability_for_java,
+};
 use cairn_lang_formats::registry::{RegistryPack, builtin_bedrock, builtin_java};
 use cairn_lang_redstone::{
     PlacementStage, compile_crossing, compile_delay, compile_edition_netlist, compile_netlist,
@@ -944,13 +946,18 @@ fn run_info(file: &Path, editions: &[String], format: InfoFormat) -> ExitCode {
 /// axis. Nothing is written to disk — the lowering stops at the in-memory
 /// `BlockArrayIr` that `portability_for_*` inspects.
 ///
-/// A finding only the strict per-edition pass produces is reported here and
-/// turns into exit 1. Without that, a source `cairn compile --edition
-/// bedrock` refuses with `E_UNRESOLVED_SLOT` was described as
-/// `degraded: 0  unsupported: 0`, with the member that failed to resolve
-/// visible only as a smaller `portable` count — indistinguishable from
-/// "this edition simply has fewer structures". A parity report that cannot
-/// show a parity failure is worse than none.
+/// Two things here turn into exit 1. The first is a finding only the
+/// strict per-edition pass produces. Without it, a source
+/// `cairn compile --edition bedrock` refuses with `E_UNRESOLVED_SLOT` was
+/// described as `degraded: 0  unsupported: 0`, with the member that failed
+/// to resolve visible only as a smaller `portable` count —
+/// indistinguishable from "this edition simply has fewer structures". A
+/// parity report that cannot show a parity failure is worse than none.
+///
+/// The second is a palette the registry pack was expected to refuse, which
+/// [`portability_for_bedrock`] answers with rather than counting. Both are
+/// walked to the end of every requested edition before the exit code is
+/// returned, so neither hides what the other editions found.
 ///
 /// The version loop is here for the same reason one level down.
 /// Portability asks of the edition, and two palette entries declared by
@@ -972,11 +979,20 @@ fn run_info(file: &Path, editions: &[String], format: InfoFormat) -> ExitCode {
 /// remove. The gates after those are about the filesystem — an output
 /// directory, a free lockfile path — and belong to the command that writes.
 ///
-/// The loop reports and does not refuse. An entry no version of the
-/// edition has is already a figure rather than a gate here — spec §10.5's
-/// own sample output carries `unsupported: 1` — and a caller that wants a
-/// refusal runs the build. What this row adds is the fact the counters
-/// cannot carry: that the versions disagree about different entries.
+/// The loop reports and does not refuse *about the source*. An entry no
+/// version of the edition has is a figure rather than a gate here — spec
+/// §10.5's own sample output carries `unsupported: 1` — and a caller that
+/// wants a refusal runs the build. What this row adds is the fact the
+/// counters cannot carry: that the versions disagree about different
+/// entries.
+///
+/// A leaked blockstate is the one gate on this row, and it is not a
+/// judgement about the source: it says the palette is one no validated
+/// pack could have produced, so there is no figure to report rather than a
+/// bad figure to report. That edition loses its row and nothing else — the
+/// dropped scopes and every version's findings are computed from the
+/// resolution and the pinned lowerings, so a leak has no bearing on them
+/// and does not suppress them.
 ///
 /// Reporting and refusing are different, though, and a row that says
 /// `none` without saying why is not a report. Each pinned lowering's
@@ -1038,11 +1054,36 @@ fn edition_rows(
         }
 
         let portability = match edition {
-            Edition::Java => portability_for_java(&block_ir, &pack.blocks, &pack.aliases),
+            Edition::Java => Ok(portability_for_java(&block_ir, &pack.blocks, &pack.aliases)),
             Edition::Bedrock => portability_for_bedrock(&block_ir, &pack.blocks, &pack.aliases),
         };
-        for note in unsupported_notes(edition, portability.unsupported()) {
-            eprintln!("{note}");
+        let portability = match portability {
+            Ok(portability) => Some(portability),
+            // A palette the pack was supposed to have refused. There is no
+            // portability figure to print over it — the counts would read
+            // as ordinary portability — so this edition contributes no row
+            // and the run exits 1.
+            //
+            // What it does not do is leave the edition. The rest of this
+            // body reads the resolution and the pinned lowerings, not the
+            // palette, so the dropped scopes and each version's refusals
+            // are findings the leak has nothing to do with — and stderr is
+            // the only place they can appear, since the report is
+            // discarded. Skipping them here would hide within one edition
+            // exactly what walking every edition exists to prevent between
+            // two.
+            Err(invalid) => {
+                for line in invalid_palette_report(edition, &invalid) {
+                    eprintln!("{line}");
+                }
+                edition_specific_error = true;
+                None
+            }
+        };
+        if let Some(portability) = &portability {
+            for note in unsupported_notes(edition, portability.unsupported()) {
+                eprintln!("{note}");
+            }
         }
         let dropped = dropped_scopes(&resolution, &block_ir);
         if !dropped.is_empty() {
@@ -1071,15 +1112,22 @@ fn edition_rows(
         }
         report_version_notes(file, source, lines, edition, &verdicts, &considered);
 
-        rows.push(EditionReport {
-            edition,
-            portable: portability.counts().portable,
-            degraded: portability.counts().degraded,
-            unsupported: portability.counts().unsupported,
-            unsupported_entries: portability.into_unsupported(),
-            buildable: verdicts.buildable,
-            considered,
-        });
+        // The one thing a refused palette does cost this edition: with no
+        // counts there is no row to build. The run exits 1 below and the
+        // list is dropped either way, so what this guards is the shape
+        // rather than the output — a row whose figures came off a palette
+        // no validated pack could have produced.
+        if let Some(portability) = portability {
+            rows.push(EditionReport {
+                edition,
+                portable: portability.counts().portable,
+                degraded: portability.counts().degraded,
+                unsupported: portability.counts().unsupported,
+                unsupported_entries: portability.into_unsupported(),
+                buildable: verdicts.buildable,
+                considered,
+            });
+        }
     }
 
     // Every requested edition is walked before returning, so one bad edition
@@ -1125,14 +1173,48 @@ fn unsupported_notes(edition: Edition, entries: &[UnsupportedEntry]) -> Vec<Stri
     notes
 }
 
+/// The lines refusing one edition's portability row, in the order they
+/// print.
+///
+/// Returned rather than printed for the same reason [`unsupported_notes`]
+/// is: the header carries the decision, and an assertion on one line of
+/// stderr cannot see it.
+///
+/// Three parts, and each is there for a different reader. The header says
+/// which edition lost its row and why. The entries are the translator's
+/// own sentences, unreworded, so a leak reads here exactly as it would
+/// from the build that refused the same entry. The closing note says whose
+/// bug it is — every one of those sentences ends on a `Fix:` addressed to
+/// the author of a blockstate, and no path from a `.crn` can mint one of
+/// these, so the author would be sent looking for text that is not there.
+fn invalid_palette_report(edition: Edition, invalid: &InvalidPalette) -> Vec<String> {
+    let mut lines = vec![format!(
+        "error: the {} palette carries blockstates a registry pack is expected to refuse, so \
+         this edition gets no portability figure:",
+        edition.as_str(),
+    )];
+    lines.extend(
+        invalid
+            .leaks()
+            .iter()
+            .map(|leak| format!("  error: {leak}")),
+    );
+    lines.push(
+        "  note: none of that is the source's to repair — a validated pack cannot produce these, \
+         so the leak is the pack's or this compiler's. The figure is withheld rather than \
+         counting a validation gap as ordinary portability"
+            .to_owned(),
+    );
+    lines
+}
+
 /// One entry's reason, as the clause that follows its id.
 ///
-/// Four sentences for four repairs — change the material, wait for the
-/// backend, fix the pack, edit the blockstate — which is what the single
-/// figure they fold into cannot be read as. Each one ends on what the
-/// reader can do, including the two nobody can do anything about, because
-/// "nothing here is yours to fix" is itself the answer that stops them
-/// looking.
+/// Two sentences for two repairs — change the material, or wait for the
+/// backend to map the states — which is what the single figure they fold
+/// into cannot be read as. Each one ends on what the reader can do,
+/// including the one nobody can do anything about, because "nothing here
+/// is yours to fix" is itself the answer that stops them looking.
 fn unsupported_reason(reason: &UnsupportedReason) -> String {
     match reason {
         UnsupportedReason::AbsentFromEdition {
@@ -1162,18 +1244,6 @@ fn unsupported_reason(reason: &UnsupportedReason) -> String {
             "the edition has the block; this compiler maps states for {mapped} so far, so \
              `{states}` has no form here yet — bind the slot to a property-free material, or \
              build for the other edition"
-        ),
-        UnsupportedReason::StateValueUnexpected { key, value, valid } => format!(
-            "`{key}={value}` is not a valid Java `{key}` (valid: {valid}); a registry pack is \
-             expected to reject this and no pack schema can state a value domain yet, so it is \
-             not yours to repair"
-        ),
-        // The one of the four the author can act on, and the error it
-        // comes from says so — that `Fix:` is the reason this is reported
-        // apart from the value case rather than with it.
-        UnsupportedReason::StateKeyUnread { key, handled } => format!(
-            "`{key}` is not a blockstate this compiler reads (it reads {handled}); remove it \
-             from the source blockstate"
         ),
     }
 }
@@ -3532,10 +3602,10 @@ mod tests {
                 },
             },
             UnsupportedEntry {
-                id: "minecraft:oak_stairs".to_owned(),
-                reason: UnsupportedReason::StateKeyUnread {
-                    key: "waterlogged".to_owned(),
-                    handled: "facing, half, shape".to_owned(),
+                id: "minecraft:oak_door".to_owned(),
+                reason: UnsupportedReason::StatesUnmapped {
+                    states: "facing=north".to_owned(),
+                    mapped: "the stair family".to_owned(),
                 },
             },
         ];
@@ -3548,7 +3618,7 @@ mod tests {
                     unsupported_reason(&entries[0].reason)
                 ),
                 format!(
-                    "  note: `minecraft:oak_stairs` — {}",
+                    "  note: `minecraft:oak_door` — {}",
                     unsupported_reason(&entries[1].reason)
                 ),
             ],
@@ -3559,20 +3629,81 @@ mod tests {
         assert!(unsupported_notes(Edition::Java, &[]).is_empty());
     }
 
-    /// Each `unsupported` reason renders the repair it names, including
-    /// the three no `.crn` can reach.
+    /// The block that stands in for a row an edition does not get.
     ///
-    /// Two paths put blockstate properties on a palette entry, and
-    /// neither reaches these branches. `roof::stair_state` builds them
-    /// from `Cardinal` and `StairShape` and only for a material the
-    /// family check already accepted, so its values are in domain by
+    /// Built through `portability_for_bedrock` rather than from a
+    /// hand-made error, so the test also holds the premise it rests on:
+    /// that a leaked blockstate refuses the report instead of landing in
+    /// the `unsupported` figure beside the ordinary answers.
+    ///
+    /// No `.crn` reaches this, which is why the entry is interned into a
+    /// real lowering rather than written in a source. `roof::stair_state`
+    /// builds stair properties from `Cardinal` and `StairShape`, so its
+    /// values are in domain by construction; an authored `@id[k=v]` token
+    /// would carry arbitrary ones and the lexer refuses the bracket; and a
+    /// registry pack answers `PackView::lookup` with `BlockState::bare`.
+    /// Injecting one is the only way to ask what the command prints when
+    /// the impossible happens.
+    #[test]
+    fn a_refused_palette_says_which_edition_lost_its_row_and_whose_bug_it_is() {
+        use cairn_lang_core::block_array::BlockState;
+
+        let module = parse("struct probe size=3x3\n  walls height=2\n").expect("the probe parses");
+        let ir = lower(&module);
+        let resolution = resolve(&ir, Some(Edition::Bedrock));
+        let pack = builtin_bedrock();
+        let mut block_ir = lower_to_block_array(&ir, &resolution, Some(&pack.view(None)));
+        let mut leaked = BlockState::bare("minecraft:oak_stairs");
+        leaked
+            .properties
+            .insert("facing".to_owned(), "up".to_owned());
+        block_ir
+            .structures
+            .values_mut()
+            .next()
+            .expect("the probe lowers to one structure")
+            .palette
+            .intern(leaked);
+
+        let invalid = portability_for_bedrock(&block_ir, &pack.blocks, &pack.aliases)
+            .expect_err("a value outside the Java domain is not a portability figure");
+
+        let lines = invalid_palette_report(Edition::Bedrock, &invalid);
+        assert_eq!(lines.len(), 3, "header, one leak, closing note: {lines:?}");
+        assert!(
+            lines[0].starts_with("error: the bedrock ") && lines[0].contains("no portability"),
+            "the header names the edition and what it is not getting, got: {}",
+            lines[0],
+        );
+        // The translator's own sentence, so the same leak reads the same
+        // from `info` as from the build that would refuse the same entry.
+        assert_eq!(
+            lines[1],
+            format!("  error: {}", invalid.leaks()[0]),
+            "the leak is quoted, not reworded",
+        );
+        assert!(
+            lines[2].contains("the source's to repair"),
+            "every leak ends on a `Fix:` the author cannot act on, so the block has to say so \
+             itself, got: {}",
+            lines[2],
+        );
+    }
+
+    /// Each `unsupported` reason renders the repair it names, including
+    /// the one no `.crn` can reach.
+    ///
+    /// Two paths put blockstate properties on a palette entry, and neither
+    /// reaches the states branch. `roof::stair_state` builds them from
+    /// `Cardinal` and `StairShape` and only for a material the family
+    /// check already accepted, so its values are in domain by
     /// construction; an authored `@id[k=v]` token would carry arbitrary
     /// ones, and the lexer refuses the bracket. A registry pack cannot
     /// supply them either — `PackView::lookup` answers with
     /// `BlockState::bare`. So the end-to-end tests can only ever produce
     /// the absent-id case. The rendering is a pure function of the reason,
-    /// so the other three are asked here rather than left as the branches
-    /// nothing reads.
+    /// so the other is asked here rather than left as the branch nothing
+    /// reads.
     #[test]
     fn every_unsupported_reason_renders_the_repair_it_names() {
         let bare = unsupported_reason(&UnsupportedReason::AbsentFromEdition {
@@ -3615,30 +3746,6 @@ mod tests {
                 && unmapped.contains("the stair family")
                 && unmapped.contains("so far"),
             "the gap is this compiler's and it is not permanent, got: {unmapped}",
-        );
-        // Nothing to edit: the value should not have reached the
-        // translator, and saying so is what stops the search.
-        let value = unsupported_reason(&UnsupportedReason::StateValueUnexpected {
-            key: "facing".to_owned(),
-            value: "up".to_owned(),
-            valid: "east, west, south, north".to_owned(),
-        });
-        assert!(
-            value.contains("`facing=up`")
-                && value.contains("east, west, south, north")
-                && value.contains("not yours to repair"),
-            "got: {value}",
-        );
-        // The one the author can act on, so the fix survives the render.
-        let key = unsupported_reason(&UnsupportedReason::StateKeyUnread {
-            key: "waterlogged".to_owned(),
-            handled: "facing, half, shape".to_owned(),
-        });
-        assert!(
-            key.contains("`waterlogged`")
-                && key.contains("facing, half, shape")
-                && key.contains("remove it from the source blockstate"),
-            "the author's repair must survive the rendering, got: {key}",
         );
     }
 

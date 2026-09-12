@@ -194,8 +194,8 @@ pub struct EditionPortability {
     /// One element per unit of the count, in palette order. The count is
     /// what the row has always carried and is kept as it is; this is the
     /// answer to the question a bare integer cannot be read as, since the
-    /// three ways an entry can be unsupported have three different repairs
-    /// and only one of them is the author's.
+    /// two ways an entry can be unsupported have two different repairs and
+    /// only one of them is the author's.
     pub unsupported_entries: Vec<UnsupportedEntry>,
 }
 
@@ -210,16 +210,25 @@ pub struct EditionPortability {
 pub struct UnsupportedEntry {
     /// The palette entry's block id, verbatim as the lowering interned it.
     pub id: String,
-    /// Which of the three ways this entry has no form on the edition.
+    /// Which of the two ways this entry has no form on the edition.
     #[serde(flatten)]
     pub reason: UnsupportedReason,
 }
 
 /// Why one palette entry counts as unsupported.
 ///
-/// Four variants for four different repairs — change the material, wait
-/// for the backend, fix the pack, edit the blockstate — which is the whole
-/// reason the figure they fold into cannot be acted on.
+/// Two variants for two different repairs — change the material, or wait
+/// for the backend to map the states — which is the whole reason the
+/// figure they fold into cannot be acted on.
+///
+/// Two more failures reach the Bedrock state translator and are not here:
+/// a value outside the Java domain, and a key the translator does not
+/// read. Neither says anything about the edition — both say a blockstate
+/// the registry pack was expected to refuse got through — so neither is a
+/// reason an entry is unsupported. `cairn-lang-formats::portability`
+/// refuses to report figures over such a palette rather than giving them a
+/// category here, which is what keeps this enum a list of portability
+/// answers.
 ///
 /// Every variant carries the pieces of its answer rather than a rendered
 /// sentence. The prose belongs to whatever is doing the rendering, and a
@@ -260,28 +269,6 @@ pub enum UnsupportedReason {
         states: String,
         /// The families the backend does map, as the message lists them.
         mapped: String,
-    },
-    /// A state value outside the Java domain reached the translator. The
-    /// registry pack is expected to reject these, so an author reading
-    /// this has nothing to edit — though no pack schema can express a
-    /// value domain today, which is why one got through.
-    StateValueUnexpected {
-        /// The property key carrying the value.
-        key: String,
-        /// The offending value verbatim.
-        value: String,
-        /// Comma-joined valid values for `key`.
-        valid: String,
-    },
-    /// A state key the backend does not read at all. Refused rather than
-    /// ignored so a key handled later cannot retroactively change what
-    /// already-shipped output meant — and unlike the three above, the
-    /// repair is the author's: remove it.
-    StateKeyUnread {
-        /// The unread property key.
-        key: String,
-        /// Comma-joined keys the backend does read.
-        handled: String,
     },
 }
 
@@ -1063,26 +1050,11 @@ mod tests {
                     mapped: "the stair family".to_owned(),
                 },
             },
-            UnsupportedEntry {
-                id: "minecraft:oak_stairs".to_owned(),
-                reason: UnsupportedReason::StateValueUnexpected {
-                    key: "facing".to_owned(),
-                    value: "up".to_owned(),
-                    valid: "east, west, south, north".to_owned(),
-                },
-            },
-            UnsupportedEntry {
-                id: "minecraft:oak_stairs".to_owned(),
-                reason: UnsupportedReason::StateKeyUnread {
-                    key: "waterlogged".to_owned(),
-                    handled: "facing, half, shape".to_owned(),
-                },
-            },
         ]
     }
 
-    /// Every reason's JSON, pinned here because three of the four are
-    /// unreachable from a `.crn` and so never pass through a CLI test.
+    /// Every reason's JSON, pinned here because one of the two is
+    /// unreachable from a `.crn` and so never passes through a CLI test.
     ///
     /// `reason` is the internal tag and every other key is that variant's
     /// own, flattened beside it: a consumer reads the tag and then reads
@@ -1105,19 +1077,6 @@ mod tests {
                     "reason": "states_unmapped",
                     "states": "facing=north",
                     "mapped": "the stair family",
-                },
-                {
-                    "id": "minecraft:oak_stairs",
-                    "reason": "state_value_unexpected",
-                    "key": "facing",
-                    "value": "up",
-                    "valid": "east, west, south, north",
-                },
-                {
-                    "id": "minecraft:oak_stairs",
-                    "reason": "state_key_unread",
-                    "key": "waterlogged",
-                    "handled": "facing, half, shape",
                 },
             ]),
         );
