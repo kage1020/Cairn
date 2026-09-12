@@ -197,6 +197,11 @@ jobs:
           test -s "$work/sample.crn"
           printf '{"parser-directories":["%s/parsers"]}\n' "$work" > "$work/config.json"
 
+          # The CLI must not run from the checkout. Measured: the working
+          # directory is searched for a grammar ahead of the configured
+          # parser-directories, so a run started inside the crate resolves
+          # `.crn` through the repository's own tree-sitter.json and passes
+          # whatever the tarball actually holds.
           cd "$work"
 
           ts="$GITHUB_WORKSPACE/crates/cairn-lang-tree-sitter/node_modules/.bin/tree-sitter"

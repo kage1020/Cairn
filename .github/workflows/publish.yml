@@ -153,15 +153,20 @@ jobs:
             echo "path=$ZIP_PATH" >> "$GITHUB_OUTPUT"
           fi
 
+      # Pinned to a real tag: cosign-installer publishes a moving major tag only
+      # up to v3, so `@v4` is an unresolvable ref and fails the job at startup.
+      # Skipped on Windows/ARM64, which cosign ships no binary for — that leg
+      # uploads the archive and its .sha256 and no .sigstore.
       - name: Install cosign
         if: matrix.target != 'aarch64-pc-windows-msvc'
-        uses: sigstore/cosign-installer@v4
+        uses: sigstore/cosign-installer@v4.1.2
 
+      # cosign 3 signs keyless by default and writes the new-format Sigstore
+      # bundle, so verifying needs `cosign >= 3 verify-blob --bundle`.
       - name: Sign archive
         if: matrix.target != 'aarch64-pc-windows-msvc'
         shell: bash
         env:
-          COSIGN_EXPERIMENTAL: "1"
           ARCHIVE: ${{ steps.archive.outputs.path }}
         run: |
           set -euo pipefail
@@ -221,6 +226,12 @@ jobs:
       - name: Install cargo-cyclonedx
         run: cargo install cargo-cyclonedx --locked
 
+      # cargo-cyclonedx selects the crate through `--manifest-path`, not `-p`:
+      # run bare in a workspace root it is a silent no-op. It is pointed at
+      # `cairn-lang-cli` because that crate depends transitively on every other
+      # one, so its SBOM covers the whole graph, and it writes into the crate
+      # directory rather than the workspace root, which is why the file is moved
+      # up afterwards.
       - name: Generate SBOM
         shell: bash
         run: |
@@ -240,11 +251,9 @@ jobs:
           ls -la cairn-sbom.cdx.json
 
       - name: Install cosign
-        uses: sigstore/cosign-installer@v4
+        uses: sigstore/cosign-installer@v4.1.2
 
       - name: Sign SBOM
-        env:
-          COSIGN_EXPERIMENTAL: "1"
         run: cosign sign-blob --yes --bundle cairn-sbom.cdx.json.sigstore cairn-sbom.cdx.json
 
       - name: Upload SBOM to GitHub Release

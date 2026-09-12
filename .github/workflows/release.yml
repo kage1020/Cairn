@@ -288,7 +288,7 @@ jobs:
               --base main \
               --head canary \
               --title "chore: promote canary to main for $release_tag" \
-              --body "Fast-forward promote created by release.yml after release-plz published $release_tag. Approve to fire auto-merge; required status checks were already satisfied on canary." \
+              --body "Promote created by release.yml after release-plz published $release_tag. Approve to fire auto-merge; required status checks were already satisfied on canary." \
               | grep -oE '[0-9]+$')
             echo "Opened promote PR #$pr_number"
           fi

@@ -26,8 +26,6 @@ git_tag_name = "v{{ version }}"
 [changelog]
 header = """# Changelog
 
-> Language: **English** ([日本語](CHANGELOG.ja.md))
-
 ## [Unreleased]
 
 """

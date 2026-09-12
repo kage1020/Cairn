@@ -19,6 +19,10 @@ license = "Apache-2.0"
 repository = "https://github.com/kage1020/Cairn"
 homepage = "https://github.com/kage1020/Cairn"
 authors = ["kage1020 and the Cairn authors"]
+# On so release-plz's monthly minor path can open a release PR at all: it treats
+# `publish = false` crates as excluded from release automation and silently
+# no-ops. The workflow's pre-set version step is what decides the CalVer number,
+# so this does not risk a 0.0.0 push.
 publish = true
 
 [workspace.dependencies]

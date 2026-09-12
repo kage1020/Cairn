@@ -60,7 +60,12 @@ jobs:
       - uses: pnpm/action-setup@v6
         with:
           package_json_file: crates/cairn-lang-tree-sitter/package.json
-      - uses: actions/setup-node@v4
+      # Deliberately no `registry-url`. Setting it makes setup-node write an
+      # .npmrc with a placeholder `_authToken`, npm then sees auth as already
+      # configured, never starts the OIDC exchange, and the PUT comes back 404
+      # (actions/setup-node#1551). Trusted Publishing engages only when nothing
+      # has configured a token, and registry.npmjs.org is the default anyway.
+      - uses: actions/setup-node@v6
         with:
           node-version: 22
           cache: pnpm
@@ -73,6 +78,9 @@ jobs:
         run: git diff --exit-code src/parser.c src/grammar.json src/node-types.json
       - run: pnpm test
 
+      # Trusted Publishing needs npm >= 11.5.1, newer than the npm bundled with
+      # Node 22 on the runner images. The upload uses npm rather than pnpm
+      # because pnpm's OIDC support is still open upstream.
       - name: Install a Trusted-Publishing-capable npm
         run: npm install -g npm@latest
 
@@ -88,4 +96,9 @@ jobs:
             exit 1
           fi
 
+      # OIDC, no NPM_TOKEN: this repository and this workflow file are registered
+      # as the package's trusted publisher. A package's *first* publish can never
+      # use OIDC — npm has no pending-publisher concept, so the package has to
+      # exist before a trusted publisher can be attached. That one was done by
+      # hand; every one since runs here.
       - run: npm publish --access public --provenance
