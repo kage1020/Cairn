@@ -22,17 +22,19 @@ website/
 │   │       ├── development.md
 │   │       ├── examples.md
 │   │       ├── playground.mdx
+│   │       ├── roadmap.md
 │   │       ├── spec/
 │   │       │   ├── index.md
 │   │       │   ├── overview.md
 │   │       │   ├── principles.md
-│   │       │   └── …            # 14 spec chapters + glossary
+│   │       │   └── …            # 16 spec chapters + glossary
 │   │       └── ja/
 │   │           ├── index.mdx        # landing (日本語)
 │   │           ├── introduction.md
 │   │           ├── tutorial.md
 │   │           ├── examples.md
 │   │           ├── playground.mdx
+│   │           ├── roadmap.md
 │   │           └── spec/
 │   │               └── …            # Japanese spec chapters
 │   └── styles/
@@ -46,7 +48,7 @@ English is the source of truth for the specification; Japanese pages are seconda
 
 ```sh
 pnpm install        # once
-pnpm dev            # astro dev at http://localhost:4321/Cairn/
+pnpm dev            # astro dev at http://localhost:4321/
 pnpm build          # astro build → ./dist
 pnpm preview        # serves ./dist
 ```
@@ -72,7 +74,7 @@ Cloudflare Pages project settings:
 | Node.js version | `22` (also pinned via [`.nvmrc`](.nvmrc) and [`package.json#engines`](package.json)) |
 | Compatibility date | `2026-06-14` (in [`wrangler.jsonc`](wrangler.jsonc)) |
 
-Custom domain `cairn.kage1020.com` is wired in the Cloudflare dashboard; the default `cairn.pages.dev` URL also resolves. There is no GitHub Actions workflow — deletion is intentional, as Cloudflare's Git integration owns the build.
+Custom domain `cairn.kage1020.com` is wired in the Cloudflare dashboard; the default `cairn.pages.dev` URL also resolves. Deployment is Cloudflare's Git integration, not a workflow. The `Documentation site` job in [`editors-website.yml`](../.github/workflows/editors-website.yml) only builds the site on `website/**` changes, so a broken build fails a PR instead of reaching the deploy.
 
 To deploy a one-off preview from the CLI:
 

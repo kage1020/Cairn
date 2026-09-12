@@ -1,6 +1,6 @@
 # cairn-lang-cli
 
-The `cairn` command-line interface. This is the only Cairn crate that ships an executable; it wires the [`cairn-lang-core`](../cairn-lang-core/README.md) compiler, the format backends in [`cairn-lang-formats`](../cairn-lang-formats/README.md), and the redstone synthesizer in [`cairn-lang-redstone`](../cairn-lang-redstone/README.md) into the subcommands an author actually types.
+The `cairn` command-line interface. One of the two Cairn crates that ship an executable — `cairn` here, `cairn-lsp` in [`cairn-lang-lsp`](../cairn-lang-lsp/README.md) — it wires the [`cairn-lang-core`](../cairn-lang-core/README.md) compiler, the format backends in [`cairn-lang-formats`](../cairn-lang-formats/README.md), and the redstone synthesizer in [`cairn-lang-redstone`](../cairn-lang-redstone/README.md) into the subcommands an author actually types.
 
 ```sh
 cargo install cairn-lang-cli
@@ -15,7 +15,7 @@ Prebuilt archives are attached to each [release](https://github.com/kage1020/Cai
 |---|---|
 | `cairn parse <file.crn>` | Lex and parse, printing the AST. `--format json\|debug`. Runs no check passes. |
 | `cairn check <file.crn>` | Run the validation passes and print diagnostics. `--format text\|json`. Writes nothing. |
-| `cairn info <file.crn>` | Report the registry-compatible version range, per-edition portability, buildable targets, and semantic-sensitive members. `--editions java,bedrock`, `--format text\|json`. |
+| `cairn info <file.crn>` | Report the registry-compatible version range, per-edition portability, buildable targets, declared intended targets, and semantic-sensitive members. `--editions java,bedrock`, `--format text\|json`. |
 | `cairn lower <file.crn>` | Lower all the way to the block-array IR and print it. `--format ascii\|json\|debug`. A debugging surface for the universal voxel pivot. |
 | `cairn compile <file.crn> --edition <e>` | Write the structure artifacts and a lockfile. `--target`, `--out`, `--lock`. |
 | `cairn synth <file.crn>` | Print one redstone pipeline stage as JSON. Experimental; see below. |

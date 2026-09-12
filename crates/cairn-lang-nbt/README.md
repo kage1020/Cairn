@@ -23,9 +23,9 @@ The streaming reader is still to land. It is what the reverse direction needs â€
 | `java::write_java_uncompressed` | Raw big-endian payload, no gzip. |
 | `java::write_java_gzip` | Gzip-wrapped big-endian output at `Compression::default()`. |
 | `bedrock::write_bedrock_uncompressed` | Raw little-endian payload (the `.mcstructure` form). |
-| `java::NbtIoError` | `InvalidString`, `HeterogeneousList`, `LengthOverflow`, `Io`. |
+| `java::NbtIoError` | `InvalidString`, `HeterogeneousList`, `EmptyListWithElementType`, `LengthOverflow`, `Io`. |
 
-Tag types covered: `End`, `Byte`, `Short`, `Int`, `Long`, `Float`, `Double`, `ByteArray`, `String`, `List`, `Compound`, `IntArray`, `LongArray`.
+Tag types covered: `Byte`, `Short`, `Int`, `Long`, `Float`, `Double`, `ByteArray`, `String`, `List`, `Compound`, `IntArray`, `LongArray`. `TAG_End` has no variant â€” it is implicit in `Compound` termination, so a caller cannot construct a stray end marker.
 
 ## Out of scope
 

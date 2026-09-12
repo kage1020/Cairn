@@ -12,7 +12,7 @@ Cairn は Minecraft の建築物を記述するための言語です。作りた
 cargo install cairn-lang-cli
 ```
 
-これで `cairn` コマンドが入ります。Linux・macOS・Windows (`x86_64` と `aarch64`) 向けの署名済みビルド済みアーカイブは各[リリース](https://github.com/kage1020/Cairn/releases)に添付されており、 `cairn` と言語サーバー `cairn-lsp` の両方が含まれています。チェックアウトから直接ビルドする場合は `cargo build --release` で両方が `target/release/` に出力されます。
+これで `cairn` コマンドが入ります。Linux・macOS・Windows (`x86_64` と `aarch64`) 向けのビルド済みアーカイブは各[リリース](https://github.com/kage1020/Cairn/releases)に添付されており、`cairn` と言語サーバー `cairn-lsp` の両方が含まれています。sigstore 署名は、cosign がバイナリを提供していない Windows `aarch64` を除くすべてに付きます。チェックアウトから直接ビルドする場合は `cargo build --release` で両方が `target/release/` に出力されます。
 
 ## はじめかた
 
@@ -55,11 +55,13 @@ cairn compile cottage.crn --edition bedrock --target 1.21.60
 
 ## ビルドする前に
 
-`cairn check` は何も書き出さずに同じ解析だけを実行します。ブロック名を打ち間違えれば、意図していたであろうブロックを名指しして指摘します。
+`cairn check` は何も書き出さずに同じ解析だけを実行します。エディションとターゲットを指定すればブロック ID まで検査し、意図していたであろうブロックを名指しします。
 
 ```
+$ cairn check cottage.crn --edition java --target 1.21.4
 cottage.crn:6:17: error[E_UNKNOWN_ID]: `minecraft:cobblestoen` is not a block in `java 1.21.4`
   note: `java 1.21.4` spells the nearest block `minecraft:cobblestone`
+…
 ```
 
 診断は「何が誤りか」と「妥当な値は何か」の両方を示すので、ビルドが失敗したときに次に何を打てばよいかがそのまま分かります。`--format json` を付ければ同じ内容が機械可読な形で出てくるので、「書く → チェックする → 直す」のループが実用的に回せます。手作業でも、ツール経由でも同じです。
@@ -92,14 +94,14 @@ semantic-sensitive:      (none)
 ## 核となる考え方
 
 - **ブロックステートではなく意図を書く。** 切妻屋根は、自分の階段がどちらを向き、それぞれが上下どちらの半分に座るかを知っています。`facing=` を書く必要はありません。ブロックステートは導出されるもので、上書きするのは、その値自体が意図であるときだけです。
-- **順序は問わない。** メンバーはどの順に書いても構いません。コンパイラが固定のフェーズ (マッシング → 外皮 → 開口部 → 什器 → レッドストーン → raw) に並べ替えます。
+- **順序は問わない。** メンバーはどの順に書いても構いません。コンパイラが固定のフェーズ (massing → envelope → openings → fixtures → redstone → raw) に並べ替えます。
 - **テーマが「どこ」と「なに」を分ける。** 構造は `mat_slot` を持ち、テーマがそのスロットを素材に束ねます。スタイルシートがクラスに束ねるのと同じ関係です。
 - **変換ではなく再コンパイル。** 可搬な成果物は `.crn` ソースです。構造ファイルは特定のエディションとバージョンに固定されたビルド出力で、バイナリと同じ位置づけです。
 - **黙って代替しない。** 未知のブロック、解決できないスロット、意図を表現できないターゲットはエラーか、名前の付いた劣化 (degradation) として報告されます。
 
 ## ドキュメント
 
-<https://cairn.kage1020.com/ja/> がプロジェクトの文章の正規の置き場所です。英語版は `/<path>/`、日本語版は `/ja/<path>/` に対応しています。
+プロジェクトの文章の正典は英語版 <https://cairn.kage1020.com/> で、日本語版 <https://cairn.kage1020.com/ja/> はそのミラーです。英語版は `/<path>/`、日本語版は `/ja/<path>/` に対応しています。
 
 - [チュートリアル](https://cairn.kage1020.com/ja/tutorial/) — インストールからワールドに構造ファイルを置くまでの最短経路。
 - [サンプル](examples/) — `cottage` / `themed-tower` / `village` / `redstone-door` と、メンバーをひとつずつ扱う小さなファイル群。
@@ -117,7 +119,7 @@ semantic-sensitive:      (none)
 
 ## コントリビュート
 
-バグ報告、隙を突くサンプル、仕様への批判、そしてコード。どれも歓迎します。 [CONTRIBUTING.ja.md](CONTRIBUTING.ja.md) と[行動規範](CODE_OF_CONDUCT.md)をご覧ください。
+バグ報告、隙を突くサンプル、仕様への批判、そしてコード。どれも歓迎します。[CONTRIBUTING.ja.md](CONTRIBUTING.ja.md) と[行動規範](CODE_OF_CONDUCT.md)をご覧ください。
 
 ## ライセンス
 

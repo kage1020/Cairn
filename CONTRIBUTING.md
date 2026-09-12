@@ -27,12 +27,13 @@ cargo run -p cairn-lang-cli -- check examples/cottage.crn --edition java --targe
 
 `check` writes nothing. `compile` writes structure files and a lockfile next to the source, so point it at `--out` and `--lock` outside the tree if you don't want build output in `examples/`.
 
-Before opening a PR, run what CI runs — the same three commands on Linux, macOS, and Windows, with `RUSTFLAGS=-D warnings` set for all of them:
+Before opening a PR, run what CI runs — the same four commands on Linux, macOS, and Windows, with `RUSTFLAGS=-D warnings` set for all of them:
 
 ```sh
 export RUSTFLAGS="-D warnings"
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
+cargo build --workspace --locked
 cargo test --workspace --locked
 ```
 
@@ -76,7 +77,7 @@ When the deferred thing lands, update the comment in the same PR.
 Three surfaces are exempt, because milestone vocabulary is what they are *for*: [CHANGELOG.md](CHANGELOG.md), the [roadmap](https://cairn.kage1020.com/roadmap/), and the milestone columns of the [compatibility](https://cairn.kage1020.com/spec/compatibility/) table. Reviewers can check the rest with:
 
 ```sh
-rg '\bM[1-6]\b|M[0-9]-PR[0-9]+|pre-M[0-9]|\blater PR\b|\bfuture PR\b' \
+rg '\bM[1-6]\b|M[0-9]-PR[0-9]+|pre-M[0-9]|\bPR[0-9]+\b|\blater PR\b|\bfuture PR\b' \
   --glob '!CHANGELOG*' --glob '!CONTRIBUTING*' \
   --glob '!**/compatibility.md' --glob '!**/roadmap.md' --glob '!target/**'
 ```
@@ -85,12 +86,12 @@ An empty result is the contract.
 
 ## Branches and pull requests
 
-`canary` is the trunk. `main` is the released state, fast-forwarded automatically after each release, so its history is exactly the list of public releases.
+`canary` is the trunk. `main` is the released state: after each publish the pipeline opens a promote-to-main PR from `canary` and turns on auto-merge, so `main` moves one approved merge commit per release and never runs ahead of one.
 
 | Branch | Purpose |
 |---|---|
 | `canary` | All feature work, fixes, and docs land here. Protected. |
-| `main` | Updated only by the release pipeline. No direct pushes, no PRs. |
+| `main` | Moved only by the pipeline's promote-to-main PR, which a maintainer approves. No direct pushes; contributors never open a PR against it. |
 | `<type>/<short-kebab>` | One change, targeting `canary`. Deleted after merge. |
 | `release-plz-*` | Opened automatically for monthly minors and patches. |
 
@@ -111,7 +112,7 @@ Name the branch after the Conventional Commits type the work will land under: `f
 | `chore` | Anything that doesn't ship to users | No |
 | `style` | Formatting or lint-only changes | No |
 
-Every PR targets `canary`; PRs against `main` are not accepted. One maintainer approval and green CI are required. The release PR follows the same rules — merging it publishes and fast-forwards `main`.
+Every PR you open targets `canary`; the only PR against `main` is the pipeline's own promote-to-main. One maintainer approval and green CI are required. The release PR follows the same rules — merging it publishes and fast-forwards `main`.
 
 ## Revisiting a settled decision
 

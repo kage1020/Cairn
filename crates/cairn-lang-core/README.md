@@ -2,7 +2,7 @@
 
 Core of the Cairn language: the lexer, the parser, the IR layers above the surface syntax, and the passes that resolve *intent* into a block-array IR.
 
-This crate is the dependency root of every other Cairn crate. It is intentionally backend-free — it knows nothing about NBT byte layout, edition file formats, redstone simulation, the LSP, or WASM bindings. Those live in sibling crates so the compile pipeline stays small and testable.
+This crate is the dependency root of every crate above the byte layer; [`cairn-lang-nbt`](../cairn-lang-nbt/README.md) and the tree-sitter grammar stand on their own. It is intentionally backend-free — it knows nothing about NBT byte layout, edition file formats, redstone simulation, the LSP, or WASM bindings. Those live in sibling crates so the compile pipeline stays small and testable.
 
 ## Modules
 

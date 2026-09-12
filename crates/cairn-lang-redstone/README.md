@@ -1,6 +1,6 @@
 # cairn-lang-redstone
 
-Redstone for Cairn: turns a *signal graph* into voxels, and will verify the result with a headless per-tick simulator.
+Redstone for Cairn: lowers a *signal graph* toward voxels, and will verify the result with a headless per-tick simulator. The crate stops at a placed and routed layout today — emitting the blocks and simulating them are both still ahead.
 
 Per [redstone](https://cairn.kage1020.com/spec/redstone/), the logical redstone surface is where Cairn's "declare intent, the compiler resolves the physics" thesis pays off most. Signal attenuation, crosstalk, delay, and the Java/Bedrock divergence — all things an LLM handles poorly — are derived deterministically from a small dataflow description.
 
@@ -46,8 +46,8 @@ The cell library is three-tier (`Logical Cell → Edition Cell → Physical Tile
 ## v1 scope
 
 - **Combinational**: `and` / `or` / `not` are synthesised end to end. `xor` / `nand` / `nor` / `mux` are reserved on the Logic IR and Netlist IR enums, but no surface syntax produces them yet.
-- **Curated sequential macros**: `latch` / `pulse` / `delay` / `edge_rising` / `edge_falling` / `counter`.
-- **Verification**: truth-table, latency, and bounded-eventually temporal assertions ([redstone §14.7](https://cairn.kage1020.com/spec/redstone/)).
+- **Curated sequential macros**: `latch` / `pulse` / `delay` / `edge_rising` / `edge_falling` / `counter`. Named in the spec, implemented nowhere yet.
+- **Verification**: truth-table, latency, and bounded-eventually temporal assertions ([redstone §14.7](https://cairn.kage1020.com/spec/redstone/)). An `assert` is checked for shape and for signals it names that nothing defines; evaluating one waits on the simulator.
 
 Out of scope for v1, and dropped to plain placement or `raw`: general FSMs, CPU-class clocked assignment, and quasi-connectivity / BUD / update-order sensitive circuits ([redstone §14.6](https://cairn.kage1020.com/spec/redstone/)).
 

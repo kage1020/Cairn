@@ -23,7 +23,7 @@ Requires Node.js ≥ 20 and `pnpm`.
 
 ```sh
 pnpm install
-pnpm build            # tsc → dist/
+pnpm build            # esbuild → dist/extension.js
 pnpm watch            # rebuild on save while developing
 pnpm package          # produces cairn-lang-<version>.vsix
 ```

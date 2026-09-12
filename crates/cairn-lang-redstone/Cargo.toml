@@ -1,6 +1,6 @@
 [package]
 name = "cairn-lang-redstone"
-description = "Redstone logic synthesis, place-and-route, and a headless tick simulator"
+description = "Redstone logic synthesis and place-and-route for the Cairn language"
 version.workspace = true
 publish.workspace = true
 edition.workspace = true

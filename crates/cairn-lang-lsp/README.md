@@ -4,14 +4,14 @@ Language Server Protocol implementation for Cairn editors. It puts the parser an
 
 ## Status
 
-The `cairn-lsp` binary speaks standard LSP over stdio: it negotiates full-content document sync at `initialize`, pushes `textDocument/publishDiagnostics` — computed by the same `parse → lower → check` pipeline as `cairn check` — on every `didOpen`/`didChange`, clearing them on `didClose`, and answers `textDocument/completion` from the closed vocabularies. Hover and code actions are not yet wired.
+The `cairn-lsp` binary speaks standard LSP over stdio: it negotiates full-content document sync at `initialize`, pushes `textDocument/publishDiagnostics` — a subset of what `cairn check` reports: the same `parse → lower → check` passes, without the `@intended_targets` findings the CLI merges in — on every `didOpen`/`didChange`, clearing them on `didClose`, and answers `textDocument/completion` from the closed vocabularies. Hover and code actions are not yet wired.
 
 ## Shipped capabilities
 
 | Capability | Notes |
 |---|---|
 | `textDocument/publishDiagnostics` (push) | Stable `E_*`/`W_*` strings in `code`, `source: "cairn"`, span notes as `relatedInformation`, spanless notes folded into `message` as `note:` lines, structured payloads in `data`. Positions are 0-based lines with UTF-16 code-unit columns (the protocol default). |
-| `textDocument/completion` | Four closed-vocabulary contexts, detected line-locally so completion works while the document fails to parse: line-opening keywords (top-level items, member commands, `slot` + selector keywords in theme bodies), `mat_slot=` values (union of slot names declared by the document's themes — edition variants union naturally, matching unpinned `cairn check`), and `@` material tokens from the built-in registry union (java ∪ bedrock): abstract tokens with their resolved canonical id as detail, plus the deduplicated canonical ids from the catalog's value column. The full canonical vocabulary is not offered yet: completion reads the materials catalog, not the blocks table the registry packs also carry and `E_UNKNOWN_ID` answers from. Trigger characters: `@`, `=`, `.`. |
+| `textDocument/completion` | Three closed-vocabulary contexts, detected line-locally so completion works while the document fails to parse: line-opening keywords (top-level items, member commands, `slot` + selector keywords in theme bodies), `mat_slot=` values (union of slot names declared by the document's themes — edition variants union naturally, matching unpinned `cairn check`), and `@` material tokens from the built-in registry union (java ∪ bedrock): abstract tokens with their resolved canonical id as detail, plus the deduplicated canonical ids from the catalog's value column. The full canonical vocabulary is not offered yet: completion reads the materials catalog, not the blocks table the registry packs also carry and `E_UNKNOWN_ID` answers from. Trigger characters: `@`, `=`, `.`. |
 
 ## Planned capabilities
 

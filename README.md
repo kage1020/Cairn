@@ -12,7 +12,7 @@ A cairn is a stack of stones raised to mark a place. So is a Minecraft build.
 cargo install cairn-lang-cli
 ```
 
-That installs the `cairn` binary. Signed prebuilt archives for Linux, macOS, and Windows (`x86_64` and `aarch64`) are attached to every [release](https://github.com/kage1020/Cairn/releases); each contains `cairn` and the `cairn-lsp` language server. From a checkout, `cargo build --release` puts both in `target/release/`.
+That installs the `cairn` binary. Prebuilt archives for Linux, macOS, and Windows (`x86_64` and `aarch64`) are attached to every [release](https://github.com/kage1020/Cairn/releases); each contains `cairn` and the `cairn-lsp` language server, and each carries a sigstore bundle except the Windows `aarch64` one, which cosign ships no binary for. From a checkout, `cargo build --release` puts both in `target/release/`.
 
 ## Quick start
 
@@ -55,11 +55,13 @@ This writes `cottage.mcstructure`. Nothing in the source changed — the edition
 
 ## Before you build
 
-`cairn check` runs the same analysis without writing anything. Misspell a block and it says so, naming the block you meant:
+`cairn check` runs the same analysis without writing anything. Pin an edition and a target and it checks block ids too, naming the block you meant:
 
 ```
+$ cairn check cottage.crn --edition java --target 1.21.4
 cottage.crn:6:17: error[E_UNKNOWN_ID]: `minecraft:cobblestoen` is not a block in `java 1.21.4`
   note: `java 1.21.4` spells the nearest block `minecraft:cobblestone`
+…
 ```
 
 Diagnostics name what is wrong and what a valid value looks like, so a failed build tells you what to type next. `--format json` emits the same findings machine-readable, which is what makes a write-check-fix loop practical — by hand or by tooling.

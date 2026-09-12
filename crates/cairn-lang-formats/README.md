@@ -25,7 +25,8 @@ Litematica `.litematic` and WorldEdit `.schem` are still to land, and no reverse
 | `data_version::JavaTarget` / `resolve_java_target` | `--target <mc_version>` → `(mc_version, DataVersion)`. |
 | `data_version::BedrockTarget` / `resolve_bedrock_target` | `--target <mc_version>` → `(mc_version, block_version)`. |
 | `portability::portability_for_java` / `_for_bedrock` | Per-edition `PortabilityReport`: how many palette entries are portable, degraded, or unsupported, and which. |
-| `registry::builtin_java` / `builtin_bedrock` / `load_from_dir` | The block, alias, material, and data-version tables for one edition, built in or loaded from a pack directory. |
+| `registry::builtin_java` / `builtin_bedrock` | The block, alias, material, and data-version tables for one edition, built in. |
+| `registry::load_from_dir` | The same tables from an external pack directory. Loads it as a Java pack; there is no Bedrock equivalent yet. |
 
 ## Registry packs
 
