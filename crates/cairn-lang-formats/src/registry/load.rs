@@ -81,9 +81,9 @@ pub struct RegistryPack {
     pub manifest: PackManifest,
     /// `(mc_version, data_version)` table.
     pub data_versions: DataVersionTable,
-    /// Abstract material catalog. Empty when the pack omits the component
-    /// (older packs, or a `--registry-pack` directory that has not been
-    /// ported to PR2's schema).
+    /// Abstract material catalog. Empty when the pack's manifest declares
+    /// no `materials` component, which an older pack or a hand-written
+    /// `--registry-pack` directory may not.
     pub materials: MaterialsIndex,
     /// Per-version block-id tables. Empty when the pack omits the
     /// component, which turns id validation off rather than making every

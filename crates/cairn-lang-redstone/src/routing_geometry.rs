@@ -4,9 +4,9 @@
 //! The three passes (`spec/redstone` §14.5 stages 2, 3, and 4) all
 //! need the same pad-coordinate convention, deterministic net-order
 //! key, and the same answer to "where does this net's dust run".
-//! Keeping the primitives in one module guarantees that a future PR
-//! touching the axis order, the search's tie-break, or the [`NetRef`]
-//! sort key updates every downstream consumer in one place — the JSON
+//! Keeping the primitives in one module guarantees that a change to
+//! the axis order, the search's tie-break, or the [`NetRef`]
+//! sort key reaches every downstream consumer at once — the JSON
 //! dumps compared byte-for-byte by
 //! `crates/cairn-lang-redstone/tests/routing.rs` and the crossing /
 //! delay integration tests catch any drift.
