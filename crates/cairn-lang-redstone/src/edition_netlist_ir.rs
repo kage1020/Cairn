@@ -164,8 +164,8 @@ impl EditionCell {
     /// value also makes the pinning migration observable in delay
     /// dumps: an `_Unpinned` cell with `delay_ticks =
     /// UNPINNED_BASE_DELAY_TICKS` is visibly different from a pinned
-    /// 2-tick cell, so a future PR that flips `JavaXorUnpinned` to
-    /// `JavaXorComparatorPair` and hard-codes 2 ticks shifts every
+    /// 2-tick cell, so pinning `JavaXorUnpinned` to
+    /// `JavaXorComparatorPair` with a hard-coded 2 ticks will shift every
     /// downstream regression that was silently accepting the sentinel.
     #[must_use]
     pub const fn base_delay_ticks(self) -> u32 {

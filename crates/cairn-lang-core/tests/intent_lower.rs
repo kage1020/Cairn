@@ -214,7 +214,7 @@ fn token_and_dotref_are_not_hoisted_into_label_fields() {
     );
     assert!(
         member.intent_state.contains_key("id") && member.intent_state.contains_key("class"),
-        "unhoisted id/class values must stay in intent_state for the PR2 mismatch pass"
+        "unhoisted id/class values must stay in intent_state for the selector mismatch pass"
     );
 }
 

@@ -90,9 +90,9 @@ struct MaterialMapping {
 }
 
 impl MaterialsIndex {
-    /// Catalog with no entries. Used when a registry pack omits the
-    /// `materials` component (older packs, or a `--registry-pack` that has
-    /// not been ported to PR2's schema yet). Lookups always miss.
+    /// Catalog with no entries. Used when a registry pack's manifest
+    /// declares no `materials` component, which an older pack or a
+    /// hand-written `--registry-pack` may not. Lookups always miss.
     #[must_use]
     pub fn empty() -> Self {
         Self {

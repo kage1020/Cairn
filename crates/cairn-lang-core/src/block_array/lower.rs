@@ -5239,8 +5239,8 @@ mod tests {
     fn actuator_patch_unknown_intent_key_defers() {
         // `door[id=front] opened_by=sig.x powered_by=sig.y` — the
         // recogniser accepts only `opened_by=` today. Silently allowing
-        // a `powered_by=` on doors would let a future PR that lands
-        // `powered_by=` on doors silently change the meaning of source
+        // a `powered_by=` on doors would let a later extension that
+        // gives the key a meaning silently change the meaning of source
         // that shipped meanwhile. Reject the shape now with a primary
         // that names the offending key(s) and points at
         // spec/redstone.md §14.2.

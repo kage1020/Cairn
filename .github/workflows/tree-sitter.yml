@@ -1,27 +1,6 @@
 name: tree-sitter
 
-# tree-sitter-specific gates for crates/cairn-lang-tree-sitter/. The crate's Rust
-# tests are already covered by ci.yml's `cargo test --workspace` on every push/PR;
-# this workflow only adds what ci.yml doesn't: version parity across the three
-# manifests that carry the version, generated-file drift, the tree-sitter corpus
-# (pnpm), the Node addon smoke build, what the published tarball actually
-# contains, and the WASM release asset.
-#
-# The WASM asset is reachable two ways. A human pushing a `v*` tag fires the tag
-# trigger below; release-plz cannot, because it pushes its tag with GITHUB_TOKEN
-# and GitHub's recursion guard stops a token-made push from firing another
-# workflow's `on: push: tags:`. release.yml therefore dispatches this workflow
-# explicitly with the tag it just created, the same way it already does for
-# publish.yml. Both paths converge on `resolve-ref`, the one place the tag is
-# validated and turned into the ref every other job checks out.
-
 on:
-  # `Cargo.toml` is in the filter for the version-sync job's sake. The workspace
-  # version lives there while the two copies it has to agree with live under the
-  # crate, so a release PR that bumps only Cargo.toml is precisely the change
-  # that can break parity — and, without this path, precisely the change that
-  # would not run the job that checks it. That is not hypothetical: the release
-  # PR for v2026.8.0 merged green and left the npm manifests a version behind.
   push:
     branches: [main, canary]
     tags: ["v*"]
@@ -56,8 +35,6 @@ jobs:
       ref: ${{ steps.resolve.outputs.ref }}
       tag: ${{ steps.resolve.outputs.tag }}
     steps:
-      # Nothing is checked out here, so the workflow-level working-directory
-      # would point at a path that does not exist yet. Run at the workspace root.
       - id: resolve
         working-directory: .
         shell: bash
@@ -65,19 +42,11 @@ jobs:
           RAW_TAG: ${{ github.event.inputs.tag || (github.ref_type == 'tag' && github.ref_name) || '' }}
         run: |
           set -euo pipefail
-          # Branch pushes and pull requests release nothing: leave both outputs
-          # empty so actions/checkout falls back to its own default ref and
-          # wasm-build stays skipped.
           if [ -z "$RAW_TAG" ]; then
             echo "ref=" >> "$GITHUB_OUTPUT"
             echo "tag=" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          # Same CalVer gate publish.yml applies to its own tag input. Every
-          # downstream job checks this value out and the release asset is
-          # uploaded under it, so an unvalidated dispatch input must reach
-          # neither. `v*` in the push filter is broad enough to let a malformed
-          # tag through, so the check covers that path too.
           if [[ ! "$RAW_TAG" =~ ^v[0-9]{4}\.(0|[1-9][0-9]*)(\.[0-9]+)?$ ]]; then
             echo "Refusing to build untrusted tag: $RAW_TAG" >&2
             exit 1
@@ -90,16 +59,10 @@ jobs:
     needs: resolve-ref
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           ref: ${{ needs.resolve-ref.outputs.ref }}
 
-      # The crate's Cargo.toml says `version.workspace = true`, so the Rust side
-      # of the version is whatever `[workspace.package]` holds. The npm package
-      # and the tree-sitter manifest each carry their own copy, and release-plz
-      # rewrites only Cargo.toml — it has no npm support. This job is what stops
-      # the three from drifting apart after a CalVer bump; release.yml's "Set
-      # workspace version" step is what keeps them moving together.
       - name: Compare the three version declarations
         shell: bash
         env:
@@ -111,10 +74,6 @@ jobs:
             /^\[/                       { in_section = 0 }
             in_section && /^version = / { gsub(/"/, "", $3); print $3; exit }
           ' ../../Cargo.toml)
-          # Shape, not just non-emptiness. `version = { workspace = true }`
-          # would hand back `{`, which is non-empty and would be compared
-          # against the manifests as if it were a version. Same CalVer gate
-          # `resolve-ref` applies to a tag.
           if [[ ! "$workspace" =~ ^[0-9]{4}\.(0|[1-9][0-9]*)(\.[0-9]+)?$ ]]; then
             echo "Read '$workspace' from [workspace.package]; that is not a CalVer number" >&2
             exit 1
@@ -128,8 +87,6 @@ jobs:
             echo "Version declarations disagree. All three move together." >&2
             exit 1
           fi
-          # On a release ref the tag is a fourth copy of the same number, and the
-          # one the published artifacts are named after.
           if [ -n "$TAG" ] && [ "$workspace" != "${TAG#v}" ]; then
             echo "Tag $TAG does not match the declared version $workspace" >&2
             exit 1
@@ -140,13 +97,13 @@ jobs:
     needs: resolve-ref
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           ref: ${{ needs.resolve-ref.outputs.ref }}
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         with:
           package_json_file: crates/cairn-lang-tree-sitter/package.json
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: 22
           cache: pnpm
@@ -161,21 +118,19 @@ jobs:
     needs: resolve-ref
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           ref: ${{ needs.resolve-ref.outputs.ref }}
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         with:
           package_json_file: crates/cairn-lang-tree-sitter/package.json
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: 22
           cache: pnpm
           cache-dependency-path: crates/cairn-lang-tree-sitter/pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile
       - run: pnpm test
-      # Rust comes from rust-toolchain.toml, the same as every workflow
-      # here that installs it.
       - name: Install Rust toolchain
         run: rustup show
       - run: cargo test -p cairn-lang-tree-sitter
@@ -187,19 +142,16 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
-        # Node 20 is intentionally excluded: node-gyp 13 depends on undici
-        # APIs (webidl.util.markAsUncloneable) that only exist from Node 22+.
-        # Node 20 is also being deprecated on GitHub Actions runners.
         node: [22]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           ref: ${{ needs.resolve-ref.outputs.ref }}
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         with:
           package_json_file: crates/cairn-lang-tree-sitter/package.json
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: ${{ matrix.node }}
           cache: pnpm
@@ -213,67 +165,43 @@ jobs:
     needs: resolve-ref
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           ref: ${{ needs.resolve-ref.outputs.ref }}
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         with:
           package_json_file: crates/cairn-lang-tree-sitter/package.json
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: 22
           cache: pnpm
           cache-dependency-path: crates/cairn-lang-tree-sitter/pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile
 
-      # What this examines is the unpacked tarball in $RUNNER_TEMP and nothing
-      # else, because the question is what an editor gets after
-      # `npm install tree-sitter-cairn` — and in the repository tree-sitter.json
-      # is on disk whether or not package.json's `files` ships it. Since
-      # tree-sitter CLI 0.24 that file is the sole declaration of `file-types`
-      # and the query paths; without it an editor finds no language for `.crn`
-      # at all. `tree-sitter parse` does not answer the question either: it
-      # falls back to src/grammar.json and works with the manifest missing, so
-      # highlighting is what has to be exercised.
-      #
-      # The commands themselves still run inside the checkout — the
-      # workflow-level `working-directory` above is in force, and `npm pack`
-      # needs it. Leaving it matters only for the CLI invocation; see the
-      # comment on the `cd` below, which is where that reasoning lives.
       - name: Highlight a .crn using only the packed files
         shell: bash
         run: |
           set -euo pipefail
           work="$RUNNER_TEMP/packed"
           mkdir -p "$work/parsers"
-          # npm rather than pnpm: npm-publish.yml mints the real tarball with
-          # `npm publish`, so npm's file selection is the one under test.
           npm pack --pack-destination "$work"
           tar -xzf "$work"/tree-sitter-cairn-*.tgz -C "$work"
-          # A parser directory is scanned for entries named `tree-sitter-*`;
-          # npm unpacks to `package/`.
           mv "$work/package" "$work/parsers/tree-sitter-cairn"
           echo "Packed files:"
           find "$work/parsers/tree-sitter-cairn" -type f -printf '  %P\n' | sort
-          # Printing the file set is not checking it. The regression this job
-          # exists for is one entry missing from package.json's `files`, so say
-          # that outright rather than leaving it to be inferred from an empty
-          # output file further down.
           if [ ! -f "$work/parsers/tree-sitter-cairn/tree-sitter.json" ]; then
             echo 'tree-sitter.json is not in the npm tarball: package.json files[] dropped it.' >&2
             exit 1
           fi
           cp "$GITHUB_WORKSPACE/examples/cottage.crn" "$work/sample.crn"
-          # An empty sample would land in the "no output" branch below and be
-          # reported as a packaging fault.
           test -s "$work/sample.crn"
           printf '{"parser-directories":["%s/parsers"]}\n' "$work" > "$work/config.json"
 
-          # The CLI must not be started from the checkout. Measured, not
-          # assumed: the working directory is searched for a grammar ahead of
-          # the configured parser directories, so a run started from the crate
-          # resolves `.crn` through the repository's own tree-sitter.json and
-          # succeeds no matter what the tarball holds.
+          # The CLI must not run from the checkout. Measured: the working
+          # directory is searched for a grammar ahead of the configured
+          # parser-directories, so a run started inside the crate resolves
+          # `.crn` through the repository's own tree-sitter.json and passes
+          # whatever the tarball actually holds.
           cd "$work"
 
           ts="$GITHUB_WORKSPACE/crates/cairn-lang-tree-sitter/node_modules/.bin/tree-sitter"
@@ -284,13 +212,6 @@ jobs:
           set -e
           cat "$work/err.txt" >&2
 
-          # The two failure modes are told apart because they have different
-          # causes and only one of them is about packaging. An unresolved
-          # extension is a `Warning:`, not an error: the CLI exits 0 and writes
-          # nothing, so the output is what carries that answer. A non-zero exit
-          # is the tool or the environment — a missing binary is 127, a query
-          # error in the packed `queries/**` is 1 — and reporting either of
-          # those as a packaging fault sends the reader to the wrong file.
           if [ "$status" -ne 0 ]; then
             echo "tree-sitter highlight exited $status. An unresolved extension exits 0," >&2
             echo 'so this is a tool or environment failure, not a packaging one.' >&2
@@ -309,29 +230,26 @@ jobs:
     needs: [resolve-ref, version-sync, generate-check, tree-sitter-test]
     runs-on: ubuntu-latest
     permissions:
-      # softprops/action-gh-release attaches the artifact to the GitHub Release.
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           ref: ${{ needs.resolve-ref.outputs.ref }}
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         with:
           package_json_file: crates/cairn-lang-tree-sitter/package.json
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: 22
           cache: pnpm
           cache-dependency-path: crates/cairn-lang-tree-sitter/pnpm-lock.yaml
-      - uses: mymindstorm/setup-emsdk@v14
+      - uses: mymindstorm/setup-emsdk@v16
       - run: pnpm install --frozen-lockfile
       - run: pnpm exec tree-sitter build --wasm --output tree-sitter-cairn.wasm
       - name: Verify WASM artifact
         run: |
           test -s tree-sitter-cairn.wasm
           file tree-sitter-cairn.wasm | grep -q "WebAssembly"
-      # tag_name is explicit because on the dispatch path github.ref points at a
-      # branch, leaving the action with no tag to attach the asset to.
       - uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ needs.resolve-ref.outputs.tag }}

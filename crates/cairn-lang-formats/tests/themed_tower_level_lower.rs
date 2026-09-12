@@ -7,8 +7,8 @@
 //! introducing a cycle. Pins the dim math (with per-level walls extending
 //! the tower to two stories), the palette (four resolved theme slots plus
 //! air), the eave stair band, and the `repeat=/step=` arrow-slit window
-//! pattern. Zero `W_DEFERRED_MEMBER` is the top-level M3 contract this
-//! file replaces the older `c14b` "at least one deferred" pin with.
+//! pattern. Zero `W_DEFERRED_MEMBER` at the top level is what this file
+//! pins, replacing an older "at least one deferred" expectation.
 
 use std::path::PathBuf;
 
