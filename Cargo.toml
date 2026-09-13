@@ -43,6 +43,11 @@ module_name_repetitions = "allow"
 must_use_candidate = "allow"
 
 [profile.release]
-lto = "thin"
+# Sized for the release archives rather than build time; CI only builds this
+# profile on the publish matrix.
+lto = "fat"
 codegen-units = 1
 strip = "symbols"
+# A panic aborts the shipped binaries instead of exiting 101. Tests are
+# unaffected: Cargo builds test targets with unwinding regardless.
+panic = "abort"
