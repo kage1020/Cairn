@@ -530,10 +530,13 @@ fn a_misspelled_variant_is_a_diagnostic_and_not_a_crash() {
             .output()
             .expect("run cairn");
         let code = result.status.code();
-        assert_ne!(
-            code,
-            Some(101),
-            "`cairn {}` must not panic; stderr={}",
+        // Not `assert_ne!(code, Some(101))`: the release profile builds this
+        // binary with `panic = "abort"`, so a panic arrives as a signal and
+        // `code` is `None` — which that comparison would have accepted. Assert
+        // the process exited on its own terms, then that the code is not 101.
+        assert!(
+            matches!(code, Some(c) if c != 101),
+            "`cairn {}` must not panic; exit={code:?} stderr={}",
             args[0],
             String::from_utf8_lossy(&result.stderr),
         );

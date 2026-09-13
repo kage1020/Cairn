@@ -43,29 +43,11 @@ module_name_repetitions = "allow"
 must_use_candidate = "allow"
 
 [profile.release]
-# Tuned for the size of what actually ships: publish.yml builds `cairn` and
-# `cairn-lsp` for six targets and uploads each as a `.tar.gz`/`.zip`, so the
-# gzip figures below are the download, not the on-disk ones.
-#
-#                       cairn                cairn-lsp
-#   thin, unwind    2,848,688 (gz 1,231,897)  1,460,016 (gz 643,755)
-#   fat,  abort     2,464,560 (gz 1,085,777)  1,214,424 (gz 544,791)
-#                      -13.5% (gz    -11.9%)     -16.8% (gz  -15.4%)
-#
-# `fat` over `thin` costs release build time and nothing else; ci.yml builds and
-# tests the dev profile only, so the extra minutes land on publish.yml, which is
-# already a six-way matrix that runs once per tag.
+# Sized for the release archives rather than build time; CI only builds this
+# profile on the publish matrix.
 lto = "fat"
 codegen-units = 1
 strip = "symbols"
-# Unwinding exists here only to be caught by tests: 30 `#[should_panic]` cases
-# across `cairn-lang-redstone` / `cairn-lang-core`, plus the `catch_unwind`
-# helper in `placement_ir.rs` that reads a transition's panic payload back. None
-# of them run in this profile — ci.yml runs `cargo test --workspace` on the dev
-# profile, where unwinding stays on — so the landing pads are dead weight in a
-# release binary that has no `catch_unwind` on any live path.
-#
-# The trade is that `cargo test --release` aborts instead of reporting those
-# tests. Nothing in .github/workflows or CONTRIBUTING invokes it; run the tests
-# on the dev profile (`cargo test --workspace`), which is what CI asserts.
+# A panic aborts the shipped binaries instead of exiting 101. Tests are
+# unaffected: Cargo builds test targets with unwinding regardless.
 panic = "abort"
