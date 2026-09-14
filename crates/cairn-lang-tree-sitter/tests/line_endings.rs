@@ -251,12 +251,30 @@ fn node_positions_match_the_reference_lexer_for_lf_and_crlf() {
 ///
 /// So there is nothing here to reach for: a lone `\r` cannot be spelled in a
 /// way the runtime counts as a line. The fix is upstream — the runtime
-/// widening its line rule, or exposing the point to scanners — and the
-/// paragraph in the syntax spec recording the divergence stands until then.
+/// widening its line rule, or exposing the point to scanners — and neither
+/// is on its way. The ask has already been filed, as
+/// <https://github.com/tree-sitter/tree-sitter/issues/4467>, which reports
+/// this exact defect from the other end — a CR-only file, every node left on
+/// row 0, against a different grammar — and it was closed as not planned.
+///
+/// That is worth having written down, because it changes what this comment
+/// is recording: not a fix in flight, but a standing upstream decision. The
+/// note here before it, and the issue that prompted that note, both read as
+/// though the widening were merely unfiled and waiting for someone to ask.
+/// It was asked. The paragraph in the syntax spec recording the limitation
+/// stands with it, and a CR-only file keeps highlighting as one long line in
+/// every editor that hands its runtime the buffer whole.
+///
+/// Re-checked 2026-09-14 against `tree-sitter/tree-sitter@master`, and again
+/// against 0.26.11 and 0.27.0 — still the newest release: one
+/// `extent.row++`, still under a `lookahead == '\n'` test, and a `TSLexer`
+/// still carrying no accessor for the point. (`parser.h` has moved to
+/// `lib/src/parser.h` on trunk; the struct itself is unchanged.)
 ///
 /// Pinned rather than left implicit: if a future runtime widens its line
 /// rule this test fails, which is the signal to delete it and fold the CR
-/// case into the parity test above.
+/// case into the parity test above. Closed as not planned is a decision and
+/// not a guarantee, so the tripwire stays armed.
 #[test]
 fn a_lone_carriage_return_leaves_every_node_on_the_first_row() {
     let cr = LF_SOURCE.replace('\n', "\r");
