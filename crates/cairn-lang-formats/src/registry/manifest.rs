@@ -58,8 +58,8 @@ pub struct PackFiles {
     /// Relative filename of the `DataVersionTable` JSON.
     pub data_versions: String,
     /// Relative filename of the abstract `materials` catalog JSON. Optional
-    /// for backwards compatibility: a pack written before PR2 lacks this
-    /// component, and the loader fills [`crate::registry::MaterialsIndex::empty`]
+    /// for backwards compatibility: a pack predating the component lacks it,
+    /// and the loader fills [`crate::registry::MaterialsIndex::empty`]
     /// in its place.
     #[serde(default)]
     pub materials: Option<String>,

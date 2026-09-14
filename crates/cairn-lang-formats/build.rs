@@ -1,10 +1,5 @@
-//! Re-run the build whenever a built-in registry pack file changes.
-//!
-//! `include_str!` in `src/registry/load.rs` pulls these JSON files in at
-//! compile time, but Cargo only watches Rust source by default — without
-//! this hook, editing `registry-data/java/*.json` would not trigger a
-//! rebuild and the embedded bytes would silently lag behind the on-disk
-//! source of truth.
+//! Re-run the build whenever a built-in registry pack file changes, so the
+//! bytes `include_str!` embeds cannot lag behind `registry-data/`.
 
 fn main() {
     let pack_files = [

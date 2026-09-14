@@ -24,8 +24,8 @@
 //! that repeats one already written and agrees with it, where the repair
 //! is to delete a line and nothing else moves.
 //!
-//! Nothing evaluates a truth table yet — the simulator `roadmap.md`
-//! schedules for M6 is unbuilt — and none of this waits on it. Which of
+//! Nothing evaluates a truth table yet — the tick simulator is unbuilt
+//! — and none of this waits on it. Which of
 //! two disagreeing rows an evaluator would read is the one thing these
 //! messages will not say: there is no evaluator to describe, and the
 //! author's next action is to decide which row is wrong either way.

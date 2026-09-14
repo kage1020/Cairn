@@ -10,7 +10,7 @@ Cairn は [日付ベースのバージョニング](/ja/spec/versioning-editions
 
 > スケジュールは計画であって約束ではありません。コンパイラはオープンに実装されており、遅延は起こり
 > ます。実際に何がリリースされたかの一次情報は
-> [CHANGELOG](https://github.com/kage1020/Cairn/blob/main/CHANGELOG.ja.md) です。
+> [CHANGELOG](https://github.com/kage1020/Cairn/blob/main/CHANGELOG.md) です (英語)。
 
 ## リリースサイクル
 

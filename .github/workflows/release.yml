@@ -1,23 +1,5 @@
 name: Release
 
-# Opens release PRs and (on merge) publishes.
-#
-# Branch model: `canary` is the trunk, `main` holds only released state.
-# - Monthly minor: cron at 04:17 UTC on the 1st (offset from the hour to avoid
-#   GitHub Actions cron congestion). Computes YYYY.M.0, pre-sets the workspace
-#   version on canary, then runs release-plz to generate the changelog and PR.
-#   This is the ONLY path that opens a release PR under the monthly cadence.
-# - Push to canary: does NOT open a new release PR. It only runs `release-plz
-#   release` to detect an already-merged release PR and publish + tag it. A
-#   feature/fix commit landing on canary between monthly cycles is queued for
-#   the next monthly PR, not turned into a patch release on the spot.
-# - Manual: workflow_dispatch with optional `version` input. Same shape as the
-#   monthly cron path (opens a release PR).
-#
-# When release-plz publishes (a release PR was merged into canary), this workflow
-# detects the newly-created `v*` tag at HEAD and fast-forwards `main` to canary.
-# That `v*` tag then triggers publish.yml for binaries.
-
 on:
   schedule:
     - cron: "17 4 1 * *"
@@ -33,13 +15,7 @@ on:
 permissions:
   contents: write
   pull-requests: write
-  # Needed by the "Dispatch Publish workflow" step (`gh workflow run publish.yml`);
-  # `gh` calls the workflow-dispatches REST endpoint which is gated on this scope.
   actions: write
-  # Needed by `rust-lang/crates-io-auth-action` to mint an OIDC token that
-  # crates.io exchanges for a short-lived, crate-scoped registry token. Without
-  # this scope release-plz `release` fails with "ensure the 'id-token' permission
-  # is set to 'write'" before it even reaches cargo publish.
   id-token: write
 
 concurrency:
@@ -54,7 +30,7 @@ jobs:
     outputs:
       version: ${{ steps.calc.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           ref: canary
           fetch-depth: 0
@@ -67,8 +43,6 @@ jobs:
         run: |
           set -euo pipefail
           if [ -n "$OVERRIDE" ]; then
-            # Reject anything that is not a CalVer string. This is what makes
-            # the downstream `sed` of Cargo.toml safe in the release-minor job.
             if [[ ! "$OVERRIDE" =~ ^[0-9]{4}\.(0|[1-9][0-9]*)(\.[0-9]+)?$ ]]; then
               echo "Refusing invalid override: $OVERRIDE" >&2
               exit 1
@@ -78,8 +52,6 @@ jobs:
             exit 0
           fi
           year=$(date -u +%Y)
-          # Unpadded month so the version is SemVer-valid (Cargo rejects a
-          # leading zero in the minor position — e.g. "2026.07.0" fails to parse).
           month=$(date -u +%-m)
           prefix="v${year}.${month}"
           patches=$(git tag --list "${prefix}.*" | sed -E "s/^${prefix}\.//" | sort -n)
@@ -99,7 +71,7 @@ jobs:
     needs: compute-version
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           ref: canary
           fetch-depth: 0
@@ -120,18 +92,16 @@ jobs:
           NEW_VERSION: ${{ needs.compute-version.outputs.version }}
         run: |
           set -euo pipefail
-          # workspace.package.version (inside the [workspace.package] section).
           sed -i -E '/^\[workspace\.package\]/,/^\[/ s/^version = ".*"/version = "'"$NEW_VERSION"'"/' Cargo.toml
-          # workspace.dependencies internal crate versions.
           sed -i -E 's/^(cairn-[a-z-]+ = \{ version = )"[^"]*"/\1"'"$NEW_VERSION"'"/' Cargo.toml
           cargo update --workspace
           echo "--- Cargo.toml [workspace.package] + [workspace.dependencies] ---"
           awk '/^\[workspace\.(package|dependencies)\]/,/^$/' Cargo.toml
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         with:
           package_json_file: crates/cairn-lang-tree-sitter/package.json
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: 22
           cache: pnpm
@@ -146,35 +116,6 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      # Four things outside release-plz's reach carry their own copy of the
-      # version: the tree-sitter crate's npm manifest and tree-sitter manifest,
-      # the VS Code extension's manifest, and `[workspace.dependencies]` — which
-      # is in Cargo.toml, but release-plz rewrites only `[workspace.package]`
-      # there. Left alone, a CalVer bump leaves the npm package advertising the
-      # previous month's number against this month's grammar, the extension —
-      # which resolves `cairn-lsp` off PATH and is documented as tracking the
-      # CLI's CalVer tag — claiming to belong to a release it does not, and the
-      # internal crate requirements stuck on the number that was guessed.
-      #
-      # This runs after release-plz rather than before it because the version
-      # pre-set above is an *input* to release-plz's decision, not the outcome
-      # of it. release-plz kept the pre-set number for 2026.8.0 and then chose
-      # 2026.8.2 over a pre-set 2026.8.1 for the next one, which is enough to
-      # say that writing the manifests from the pre-set value is writing them
-      # from a guess. Read the number back off the branch release-plz actually
-      # produced instead, so the manifests follow whatever it decided.
-      #
-      # `tree-sitter generate` bakes tree-sitter.json's metadata.version into
-      # src/parser.c as the TSLanguage major/minor/patch triple, so this is not
-      # a manifest-only edit — it invalidates a checked-in generated file.
-      #
-      # Nothing about this step is load-bearing as a *check*. A release PR runs
-      # no workflows of its own: it is opened with GITHUB_TOKEN, and events from
-      # that token create none. So generate-check and version-sync do not see
-      # this branch, and if this step fails or is skipped the drift travels into
-      # the merge commit unopposed. `release-patch` asserts parity there, before
-      # publishing, which is the only point on the release path where a check
-      # can still stop something rather than describe it.
       - name: Align the non-Cargo manifests with the version release-plz chose
         if: steps.release_pr.outputs.prs_created == 'true'
         env:
@@ -183,8 +124,6 @@ jobs:
           set -euo pipefail
           branch=$(jq -er '.head_branch' <<<"$PR")
           git fetch origin "$branch"
-          # -f discards the dirty tree the pre-set steps left behind; everything
-          # worth keeping is already committed on the branch.
           git checkout -f -B "$branch" "origin/$branch"
 
           version=$(awk '
@@ -192,52 +131,30 @@ jobs:
             /^\[/                       { in_section = 0 }
             in_section && /^version = / { gsub(/"/, "", $3); print $3; exit }
           ' Cargo.toml)
-          # Shape, not just non-emptiness: this value is about to be written
-          # into three manifests and pushed by a bot, and
-          # `version = { workspace = true }` would hand back `{` here.
           if [[ ! "$version" =~ ^[0-9]{4}\.(0|[1-9][0-9]*)(\.[0-9]+)?$ ]]; then
             echo "Read '$version' from [workspace.package]; that is not a CalVer number" >&2
             exit 1
           fi
           echo "release-plz settled on $version"
 
-          # `[workspace.dependencies]` carries the internal crates' versions and
-          # release-plz does not rewrite them either. The pre-set step above
-          # wrote them from the number it guessed before release-plz ran, which
-          # is exactly the value the comment above calls a guess — so left alone
-          # they keep whatever that guess was. Same expression as the pre-set
-          # step, applied to the settled number.
           sed -i -E 's/^(cairn-[a-z-]+ = \{ version = )"[^"]*"/\1"'"$version"'"/' Cargo.toml
 
-          # jq rather than sed: `version` is not a unique key in any of these
-          # files once nested objects are in play, and a path expression cannot
-          # drift onto a dependency's version the way a line-oriented match can.
           for spec in \
             "crates/cairn-lang-tree-sitter/package.json:.version" \
             "crates/cairn-lang-tree-sitter/tree-sitter.json:.metadata.version" \
             "editors/vscode/package.json:.version"; do
             file="${spec%%:*}"
             path="${spec#*:}"
-            # Assignment *creates* a missing path, so without this a renamed
-            # field would grow a second one beside it, leave the real version
-            # stale, and still report a clean alignment.
             jq -e "$path" "$file" >/dev/null \
               || { echo "$file has no $path — the manifest schema changed" >&2; exit 1; }
             jq --indent 2 --arg v "$version" "$path = \$v" "$file" > "$file.tmp"
             mv "$file.tmp" "$file"
           done
-          # Only the grammar has a generated file to invalidate; the extension's
-          # version reaches nothing but its own manifest.
           cd crates/cairn-lang-tree-sitter
           pnpm install --frozen-lockfile
           pnpm run generate
           cd ../..
 
-          # `git status --porcelain` rather than `git diff`, and `git add -A`
-          # rather than `commit -a`: both of the latter ignore untracked files,
-          # so a new file emitted by `tree-sitter generate` would be dropped
-          # from the commit — or, if the manifests already agreed, reported as
-          # "nothing to push" and left behind entirely.
           if [ -z "$(git status --porcelain)" ]; then
             echo "manifests already agreed with $version; nothing to push"
             exit 0
@@ -247,31 +164,19 @@ jobs:
           git add -A
           git commit -qm "chore: align the non-Cargo manifests with $version"
           git push origin "$branch"
-          echo "Pushed the alignment commit. The release PR has no workflow runs" \
-               "of its own to re-run; parity is asserted again in release-patch" \
-               "before anything is published."
 
   release-patch:
     name: Publish merged release
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           ref: canary
           fetch-depth: 0
           fetch-tags: true
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      # This is the last point at which drift can be stopped rather than
-      # shipped: everything below publishes to crates.io, tags, and dispatches
-      # the npm and binary workflows. The parity jobs that run on a pull request
-      # never see a release PR — release-plz opens it with GITHUB_TOKEN, and a
-      # pull request opened or a branch pushed with that token creates no
-      # workflow runs at all — so the merged commit is the first thing they
-      # could have looked at, and by then the publish is already under way.
-      # Asserting here covers every route the drift could have taken: a failed
-      # alignment push, a hand edit, a merge that resurrected an old manifest.
       - name: Assert every copy of the version agrees before publishing
         shell: bash
         run: |
@@ -293,14 +198,9 @@ jobs:
               drifted=1
             fi
           }
-          compare "crates/cairn-lang-tree-sitter/package.json" \
-            "$(jq -er '.version' crates/cairn-lang-tree-sitter/package.json)"
-          compare "crates/cairn-lang-tree-sitter/tree-sitter.json" \
-            "$(jq -er '.metadata.version' crates/cairn-lang-tree-sitter/tree-sitter.json)"
-          compare "editors/vscode/package.json" \
-            "$(jq -er '.version' editors/vscode/package.json)"
-          # The internal crate requirements in [workspace.dependencies] are a
-          # copy too, and they live in the same file the number is read from.
+          compare "crates/cairn-lang-tree-sitter/package.json" "$(jq -er '.version' crates/cairn-lang-tree-sitter/package.json)"
+          compare "crates/cairn-lang-tree-sitter/tree-sitter.json" "$(jq -er '.metadata.version' crates/cairn-lang-tree-sitter/tree-sitter.json)"
+          compare "editors/vscode/package.json" "$(jq -er '.version' editors/vscode/package.json)"
           while read -r name declared; do
             compare "[workspace.dependencies] $name" "$declared"
           done < <(awk '
@@ -328,16 +228,6 @@ jobs:
           shared-key: release-patch
           save-if: ${{ github.ref == 'refs/heads/canary' }}
 
-      # Only `release` runs on the push path: it publishes + tags whatever
-      # release PR just got merged into canary. No `release-pr` here — patch
-      # PRs on every qualifying push would violate the monthly cadence, and
-      # the queued commits get folded into the next monthly cron PR anyway.
-      # Exchange the workflow's OIDC token for a short-lived, crate-scoped
-      # crates.io token. This is the crates.io Trusted Publishing flow: each
-      # cairn-lang-* crate has this repo + this workflow file registered as a
-      # Trusted Publisher on crates.io, so no static `CARGO_REGISTRY_TOKEN`
-      # secret is read. The token only actually gets spent by the `release`
-      # sub-command below when there's something to publish.
       - name: Authenticate to crates.io via OIDC
         id: cratesio-auth
         uses: rust-lang/crates-io-auth-action@v1
@@ -351,21 +241,6 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CARGO_REGISTRY_TOKEN: ${{ steps.cratesio-auth.outputs.token }}
 
-      # Auto-dispatch the tag-triggered workflows for the just-released tag. Tag
-      # pushes made with GITHUB_TOKEN don't trigger `on: push: tags:` in other
-      # workflows (GitHub's recursion guard), so without this step they sit idle
-      # until someone runs them manually. `workflow_dispatch` explicitly bypasses
-      # the recursion guard, so `gh workflow run` from inside this job fires them
-      # cleanly. Same tag-detection shape as the promote step below.
-      #
-      # - publish.yml builds and signs the `cairn` / `cairn-lsp` binaries.
-      # - tree-sitter.yml builds `tree-sitter-cairn.wasm` and attaches it to the
-      #   release; the website pins that asset URL at build time.
-      # - npm-publish.yml ships the same grammar to npm, so the npm package and
-      #   the crates.io crate always come from one tag.
-      #
-      # Each is dispatched independently: a failure in one is a missing artifact
-      # to re-dispatch by hand, not a reason to withhold the other two.
       - name: Dispatch tag-triggered workflows for the new tag
         if: steps.release_plz.outputs.releases_created == 'true'
         env:
@@ -389,17 +264,6 @@ jobs:
             exit 1
           fi
 
-      # Open a canary → main promote PR only when release-plz reports it
-      # actually published in this run. The `releases_created` output is the
-      # trust anchor — gating on "is there a v* tag at HEAD" alone would let
-      # any pre-existing tag at HEAD trigger a promote.
-      #
-      # Direct `git push origin HEAD:refs/heads/main` is blocked by the
-      # `main protection` ruleset: the GitHub Actions bot cannot be added as a
-      # bypass actor on a personal (non-org) repository, so promotion has to
-      # go through a PR. Auto-merge is enabled here so once the reviewer
-      # approves in the UI the merge fires without further manual action;
-      # required status checks are the ones canary already passed.
       - name: Open promote-to-main PR on release
         if: steps.release_plz.outputs.releases_created == 'true'
         env:
@@ -408,11 +272,6 @@ jobs:
         run: |
           set -euo pipefail
           git fetch origin --tags --prune
-          # `--merged HEAD` covers the release-plz merge-commit shape: the tag
-          # points at the "chore: release" commit that lives on the merged-in
-          # branch, and HEAD is the merge commit that pulled that branch in.
-          # `--points-at HEAD` only matches tags at the exact commit and misses
-          # this case, leading to a false "no v* tag points at HEAD" abort.
           new_tags=$(git tag --merged HEAD --list 'v*' --sort=-version:refname | head -n1 || true)
           if [ -z "$new_tags" ]; then
             echo "release-plz reported a release but no v* tag is reachable from HEAD; refusing to promote." >&2
@@ -420,8 +279,6 @@ jobs:
           fi
           release_tag="$new_tags"
           echo "Detected release tag reachable from HEAD: $release_tag"
-          # Reuse an already-open promote PR if the previous run left one
-          # behind; `gh pr create` would otherwise error on the duplicate.
           existing=$(gh pr list --base main --head canary --state open --json number --jq '.[0].number' 2>/dev/null || true)
           if [ -n "$existing" ]; then
             pr_number="$existing"
@@ -431,11 +288,8 @@ jobs:
               --base main \
               --head canary \
               --title "chore: promote canary to main for $release_tag" \
-              --body "Fast-forward promote created by release.yml after release-plz published $release_tag. Approve to fire auto-merge; required status checks were already satisfied on canary." \
+              --body "Promote created by release.yml after release-plz published $release_tag. Approve to fire auto-merge; required status checks were already satisfied on canary." \
               | grep -oE '[0-9]+$')
             echo "Opened promote PR #$pr_number"
           fi
-          # Best-effort auto-merge. Fails harmlessly if the PR already has
-          # auto-merge on or if the repo has auto-merge disabled at the
-          # settings level; the reviewer can still merge manually from the UI.
           gh pr merge "$pr_number" --auto --merge || echo "auto-merge could not be enabled; reviewer can merge manually"

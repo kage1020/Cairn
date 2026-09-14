@@ -2,14 +2,12 @@
 //!
 //! The grammar in this crate is a second implementation of the language
 //! `cairn-lang-core` defines, so any source the two disagree about is a
-//! bug in one of them — and by [the design doc's constraint 1][design],
-//! the reference parser is the one that is right. Nothing else in the
-//! crate compares them: `tests/examples.rs` checks the grammar accepts
-//! every file in `examples/`, which is one direction over a corpus of
-//! twelve valid files, and `test/corpus/` pins trees this grammar builds
-//! without consulting the other side at all.
-//!
-//! [design]: ../../../docs/superpowers/specs/2026-07-23-tree-sitter-cairn-design.md
+//! bug in one of them — and the reference parser is by design the one
+//! that is right. Nothing else in the crate compares them:
+//! `tests/examples.rs` checks the grammar accepts every file in
+//! `examples/`, which is one direction over a corpus of twelve valid
+//! files, and `test/corpus/` pins trees this grammar builds without
+//! consulting the other side at all.
 //!
 //! Every fixture below is fed to both parsers and their verdicts compared.
 //! The expected verdict is written out too, so a fixture that silently

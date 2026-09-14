@@ -1030,8 +1030,8 @@ fn diag_multiple_drivers(
 
 /// Check every signal an `assert` names against the scope's definitions.
 ///
-/// The simulator that would evaluate these is unbuilt — `roadmap.md`
-/// schedules it for M6 — but a property over a name nothing emits and
+/// The tick simulator that would evaluate these is unbuilt, but a
+/// property over a name nothing emits and
 /// nothing defines is not waiting on the simulator to be wrong. It is the
 /// same finding a `logic` line naming that signal earns, so it is the
 /// same code.
