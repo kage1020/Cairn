@@ -63,7 +63,7 @@
 //! nets of a scope and the same one all three passes walk, so the map
 //! is one answer per layout rather than one per `HashMap` iteration.
 //! What it buys is that the escape is measured: it happens before
-//! `wire_length` and `delay_ticks` are read off the tree, so a net
+//! `wire_length` and `local_delay_ticks` are read off the tree, so a net
 //! that had to climb is charged for the climb.
 //!
 //! Only dust. A sink is a block, and two nets ending at one cell body
@@ -171,7 +171,7 @@ pub(crate) fn output_pad(k: usize, region: &CircuitRegionReservation) -> CellCoo
 ///
 /// Shared by the routing pass, which charges blocks of dust into
 /// `wire_length`, and the delay pass, which charges ticks into
-/// `delay_ticks`, so the two cannot disagree about how many strands
+/// `local_delay_ticks`, so the two cannot disagree about how many strands
 /// feed a cell. The seen-list is a `Vec` because a cell carries at
 /// most one driver per port — a producer contract on
 /// [`crate::netlist_ir::CellNode::drivers`], not something checked
@@ -1646,7 +1646,7 @@ mod tests {
     /// leaves the wire identical — the same coords in the same order —
     /// and moves the *routes* through it: on this layout the sink at
     /// `(4,0,1)` would hang off `(2,0,1)` and read six blocks where it
-    /// reads eight here. `wire_length`, `delay_ticks`, and every buffer
+    /// reads eight here. `wire_length`, `local_delay_ticks`, and every buffer
     /// coord are measured along that path, so the tie is not free to
     /// drift.
     ///

@@ -229,7 +229,7 @@ enum Command {
     /// Placement IR; `--stage route` runs Steiner routing over the
     /// Placement IR and prints the routed layout with every cell's
     /// `wire_length` populated; `--stage delay` runs delay insertion
-    /// over the routed IR and fills every cell's `delay_ticks` with
+    /// over the routed IR and fills every cell's `local_delay_ticks` with
     /// the sum of the cell's base delay and each implicit buffer
     /// repeater's `BUFFER_REPEATER_TICKS` contribution over every
     /// driving net's segment beyond the `DUST_ATTENUATION_LIMIT`;
@@ -298,7 +298,7 @@ enum SynthStage {
     Edition,
     /// Placement IR: 1D coordinate assignment over the Edition Netlist
     /// IR against `--edition`. Stage 1 of `spec/redstone` §14.5's
-    /// place-and-route pipeline. `wire_length` and `delay_ticks` are
+    /// place-and-route pipeline. `wire_length` and `local_delay_ticks` are
     /// reserved as `Option`s and stay `None` until the routing and
     /// delay-insertion follow-up passes land.
     Placement,
@@ -306,12 +306,12 @@ enum SynthStage {
     /// against `--edition`. Stage 2 of `spec/redstone` §14.5's
     /// place-and-route pipeline. Fills every cell's `wire_length`
     /// with the sum, over the nets driving it, of the routed length
-    /// from that net's source into the cell; `delay_ticks` stays
+    /// from that net's source into the cell; `local_delay_ticks` stays
     /// `None` until the delay-insertion pass (stage 3) runs.
     Route,
     /// Delayed Placement IR: delay insertion over the routed Placement
     /// IR against `--edition`. Stage 3 of `spec/redstone` §14.5's
-    /// place-and-route pipeline. Fills every cell's `delay_ticks`
+    /// place-and-route pipeline. Fills every cell's `local_delay_ticks`
     /// with the sum of the cell's physical base delay
     /// ([`cairn_lang_redstone::EditionCell::base_delay_ticks`]) and
     /// each implicit buffer repeater's
@@ -321,6 +321,13 @@ enum SynthStage {
     /// `E_ATTENUATION_LIMIT` when a segment exceeds the v1 sanity cap
     /// [`cairn_lang_redstone::MAX_ATTENUATION_SEGMENT`], past which the
     /// buffer chain a segment needs is longer than v1 will build.
+    ///
+    /// The figure is the cost of the wires feeding a cell, not the
+    /// tick its output settles on: a cell settles when the last of
+    /// its inputs arrives, so an arrival time maxes over the incoming
+    /// nets where this sums over them. Nothing computes arrival yet —
+    /// `assert latency(...)` (`spec/redstone` §14.7) waits on the
+    /// headless per-tick simulator, which is not built.
     Delay,
     /// Legalized Placement IR: crossing legalization over the delayed
     /// Placement IR against `--edition`. Stage 4 of `spec/redstone`

@@ -231,7 +231,7 @@ fn cli_synth_stage_placement_java_places_or_cell_beside_the_pad_column() {
     // reservation (width/depth copied from `size=7x5`) — one column in
     // from the pad column and one row in from the near edge, per the
     // spaced row. `wire_length`
-    // and `delay_ticks` are absent from the JSON today because Steiner
+    // and `local_delay_ticks` are absent from the JSON today because Steiner
     // routing and delay insertion are follow-up passes.
     let path = examples_dir().join("redstone-door.crn");
     let out = run_synth(&[
@@ -277,8 +277,8 @@ fn cli_synth_stage_placement_java_places_or_cell_beside_the_pad_column() {
         "wire_length must be elided today: {stdout}",
     );
     assert!(
-        cells[0].get("delay_ticks").is_none(),
-        "delay_ticks must be elided today: {stdout}",
+        cells[0].get("local_delay_ticks").is_none(),
+        "local_delay_ticks must be elided today: {stdout}",
     );
 }
 
@@ -442,9 +442,9 @@ fn cli_synth_stage_route_java_fills_wire_length() {
     // `wire_length = 3` — one step from `sig.exit`'s pad, which is
     // directly beside it with no coord between them to lay dust on, and
     // two from `sig.step`'s, which is at the corner a row further out —
-    // in the routed JSON, while `delay_ticks`
+    // in the routed JSON, while `local_delay_ticks`
     // stays elided because this dump stops at stage 2.
-    // `cli_synth_stage_delay_java_fills_delay_ticks` is the stage-3
+    // `cli_synth_stage_delay_java_fills_local_delay_ticks` is the stage-3
     // dump where it appears.
     let path = examples_dir().join("redstone-door.crn");
     let out = run_synth(&[
@@ -478,8 +478,8 @@ fn cli_synth_stage_route_java_fills_wire_length() {
     );
     assert_eq!(cells[0]["wire_length"], 3);
     assert!(
-        cells[0].get("delay_ticks").is_none(),
-        "delay_ticks must be elided at this stage: {stdout}",
+        cells[0].get("local_delay_ticks").is_none(),
+        "local_delay_ticks must be elided at this stage: {stdout}",
     );
 }
 
@@ -600,10 +600,10 @@ fn cli_synth_stage_route_rejects_missing_edition_when_stage_neutral() {
 }
 
 #[test]
-fn cli_synth_stage_delay_java_fills_delay_ticks() {
+fn cli_synth_stage_delay_java_fills_local_delay_ticks() {
     // `--stage delay --edition java` runs delay insertion over the
     // routed IR. `redstone-door.crn`'s sole `JavaRepeaterOr` cell
-    // picks up `delay_ticks = 1` (base 1 tick, no implicit buffer
+    // picks up `local_delay_ticks = 1` (base 1 tick, no implicit buffer
     // repeater because both driver segments sit under the 15-block
     // attenuation limit) and `wire_length` survives from the routing
     // stage.
@@ -638,13 +638,13 @@ fn cli_synth_stage_delay_java_fills_delay_ticks() {
         "the stage tag must echo the --stage flag that produced the dump: {stdout}",
     );
     assert_eq!(cells[0]["wire_length"], 3);
-    assert_eq!(cells[0]["delay_ticks"], 1);
+    assert_eq!(cells[0]["local_delay_ticks"], 1);
 }
 
 #[test]
 fn cli_synth_stage_delay_bedrock_matches_bedrock_torch_or() {
-    // BedrockTorchOr is a bare dust merge, so `delay_ticks = 0` on
-    // Bedrock even though the same DSL source yields `delay_ticks = 1`
+    // BedrockTorchOr is a bare dust merge, so `local_delay_ticks = 0` on
+    // Bedrock even though the same DSL source yields `local_delay_ticks = 1`
     // on Java. Pins the "delay is edition-specific by cell choice"
     // split into the CLI surface.
     let path = examples_dir().join("redstone-door.crn");
@@ -672,7 +672,7 @@ fn cli_synth_stage_delay_bedrock_matches_bedrock_torch_or() {
     assert_eq!(ir["edition"], "bedrock");
     assert_eq!(ir["cells"][0]["cell"], "bedrock_torch_or");
     assert_eq!(ir["cells"][0]["wire_length"], 3);
-    assert_eq!(ir["cells"][0]["delay_ticks"], 0);
+    assert_eq!(ir["cells"][0]["local_delay_ticks"], 0);
 }
 
 #[test]

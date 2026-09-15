@@ -228,7 +228,7 @@ fn redstone_door_java_carries_no_buffers() {
 
 /// AC2 — the same example compiled for Bedrock legalizes identically:
 /// the cell realisation swaps and the geometry does not, so the same
-/// nets take the same coords. `wire_length` and `delay_ticks` are
+/// nets take the same coords. `wire_length` and `local_delay_ticks` are
 /// preserved verbatim from the delayed IR.
 #[test]
 fn redstone_door_bedrock_carries_no_buffers() {
@@ -252,7 +252,7 @@ fn redstone_door_bedrock_carries_no_buffers() {
         .first()
         .expect("gatehouse must have a placed cell");
     assert_eq!(
-        cell.delay_ticks(),
+        cell.local_delay_ticks(),
         Some(0),
         "delay ticks preserved from stage 3",
     );
@@ -620,14 +620,14 @@ struct reach size=40x6
     );
 
     assert!(
-        output.delay_ticks().is_some_and(|ticks| ticks >= 1),
+        output.local_delay_ticks().is_some_and(|ticks| ticks >= 1),
         "the outward segment must be charged for its repeaters, got {:?}",
-        output.delay_ticks(),
+        output.local_delay_ticks(),
     );
     assert_eq!(
         u32::try_from(output.buffer_coords().len()).expect("buffer count fits")
             * cairn_lang_redstone::BUFFER_REPEATER_TICKS,
-        output.delay_ticks().expect("delayed"),
+        output.local_delay_ticks().expect("delayed"),
         "every tick the delay pass counted must have a coord behind it",
     );
     assert!(
@@ -763,7 +763,7 @@ struct pass size=40x6
     assert_eq!(
         u32::try_from(output.buffer_coords().len()).expect("buffer count fits")
             * cairn_lang_redstone::BUFFER_REPEATER_TICKS,
-        output.delay_ticks().expect("delayed"),
+        output.local_delay_ticks().expect("delayed"),
         "every tick counted at stage 3 has a coord at stage 4",
     );
 }
@@ -796,7 +796,7 @@ struct reach size=40x6
         "\"stage\":\"crossing\"",
         "\"pad\":",
         "\"wire_length\":",
-        "\"delay_ticks\":",
+        "\"local_delay_ticks\":",
         "\"buffer_coords\":",
         "\"port\":\"out\"",
     ] {
