@@ -16,9 +16,9 @@
 //! `spec/redstone` §14.4 delay is determined "for the first time in
 //! the Placement IR" once wire length is known; wire length is the
 //! output of the routing pass (Steiner routing, stage 2 of §14.5) and
-//! is folded into `delay_ticks` by the delay-insertion pass
+//! is folded into `local_delay_ticks` by the delay-insertion pass
 //! ([`crate::delay::compile_delay`], stage 3), so
-//! [`PlacedCellNode::wire_length`] and [`PlacedCellNode::delay_ticks`]
+//! [`PlacedCellNode::wire_length`] and [`PlacedCellNode::local_delay_ticks`]
 //! are reserved as `Option`s that the placement pass leaves `None`.
 //! Adding values in a follow-up pass is a field-write, not a schema
 //! change, so downstream JSON consumers see a stable wire shape. Which
@@ -220,8 +220,8 @@ impl CellCoord {
 /// wants the number of blocks deduplicates by `coord`**; a consumer
 /// that wants a segment's repeaters filters by `port`. The delay pass
 /// charges ticks per driving net for the same reason, so
-/// `delay_ticks - base_delay_ticks` counts the deduplicated blocks
-/// and not the entries.
+/// `local_delay_ticks - base_delay_ticks` is `BUFFER_REPEATER_TICKS`
+/// per deduplicated block and not per entry.
 ///
 /// **Order contract on `Vec<BufferCoord>`** (as returned by
 /// [`PlacedCellNode::buffer_coords`]): entries appear in
@@ -399,21 +399,21 @@ impl Serialize for PlacementStage {
 /// insertion → Crossing legalization → Edition legalization; the
 /// fifth stage is future work and does not yet have a variant).
 ///
-/// Every legal `(wire_length, delay_ticks, buffer_coords)` combination
+/// Every legal `(wire_length, local_delay_ticks, buffer_coords)` combination
 /// the pipeline can produce is one of these variants:
 ///
 /// | Producer                                             | Variant                                                                     | `stage` tag   |
 /// |------------------------------------------------------|-----------------------------------------------------------------------------|---------------|
 /// | [`crate::placement::compile_placement`] (Stage 1)    | [`Self::Unrouted`]                                                          | `placement`   |
 /// | [`crate::routing::compile_routing`]     (Stage 2)    | [`Self::Routed`] `{ wire_length }`                                          | `route`       |
-/// | [`crate::delay::compile_delay`]         (Stage 3)    | [`Self::Delayed`] `{ wire_length, delay_ticks }`                            | `delay`       |
-/// | [`crate::crossing::compile_crossing`]   (Stage 4)    | [`Self::Legalized`] `{ wire_length, delay_ticks, buffer_coords }`           | `crossing`    |
+/// | [`crate::delay::compile_delay`]         (Stage 3)    | [`Self::Delayed`] `{ wire_length, local_delay_ticks }`                      | `delay`       |
+/// | [`crate::crossing::compile_crossing`]   (Stage 4)    | [`Self::Legalized`] `{ wire_length, local_delay_ticks, buffer_coords }`     | `crossing`    |
 ///
 /// The rightmost column is [`Self::stage`] — see [`PlacementStage`]
 /// for why the JSON dump names its stage outright instead of leaving
 /// a consumer to infer it from which optional keys are present.
 ///
-/// Illegal shapes such as "have `delay_ticks` but no `wire_length`" or
+/// Illegal shapes such as "have `local_delay_ticks` but no `wire_length`" or
 /// "carry `buffer_coords` before the delay pass has run" are
 /// unrepresentable — each transition is expressed by the mutation
 /// methods [`Self::route`], [`Self::delay`], and [`Self::legalize`],
@@ -448,9 +448,12 @@ pub enum PlacementPhase {
     Delayed {
         /// Preserved from [`Self::Routed`].
         wire_length: u32,
-        /// Tick count implied by the routed wire length + this cell's
-        /// physical realisation per `spec/redstone` §14.4.
-        delay_ticks: u32,
+        /// The owning node's base delay (`spec/redstone` §14.4; zero
+        /// for an actuator pad) plus `BUFFER_REPEATER_TICKS` per
+        /// implicit buffer repeater on each distinct net feeding it.
+        /// A local wire cost, not an arrival time — see the
+        /// [`crate::delay`] module doc.
+        local_delay_ticks: u32,
     },
     /// After crossing legalization: buffer coordinates for the implicit
     /// repeaters the delay pass counted have been materialised, per
@@ -459,7 +462,7 @@ pub enum PlacementPhase {
         /// Preserved from [`Self::Routed`].
         wire_length: u32,
         /// Preserved from [`Self::Delayed`].
-        delay_ticks: u32,
+        local_delay_ticks: u32,
         /// One entry per implicit buffer repeater the delay pass
         /// counted; the crossing pass populates each entry with the
         /// coord it chose and the driver port that buffer belongs to.
@@ -483,14 +486,19 @@ impl PlacementPhase {
         }
     }
 
-    /// Delay ticks once delay insertion has run, `None` otherwise.
+    /// Local delay ticks once delay insertion has run, `None`
+    /// otherwise. See the `local_delay_ticks` field on
+    /// [`Self::Delayed`].
     #[must_use]
-    pub const fn delay_ticks(&self) -> Option<u32> {
+    pub const fn local_delay_ticks(&self) -> Option<u32> {
         match self {
             Self::Unrouted | Self::Routed { .. } => None,
-            Self::Delayed { delay_ticks, .. } | Self::Legalized { delay_ticks, .. } => {
-                Some(*delay_ticks)
+            Self::Delayed {
+                local_delay_ticks, ..
             }
+            | Self::Legalized {
+                local_delay_ticks, ..
+            } => Some(*local_delay_ticks),
         }
     }
 
@@ -624,12 +632,12 @@ impl PlacementPhase {
     ///
     /// Panics if the phase is not [`Self::Routed`]. Delay insertion
     /// must run exactly once per routed IR, and the producer↔variant
-    /// table on this enum forbids re-writing a `delay_ticks` that was
+    /// table on this enum forbids re-writing a `local_delay_ticks` that was
     /// already committed. See [`Self::try_delay`] for the fallible
     /// mirror.
     #[track_caller]
-    pub fn delay(&mut self, delay_ticks: u32) {
-        self.delay_inner(delay_ticks, None);
+    pub fn delay(&mut self, local_delay_ticks: u32) {
+        self.delay_inner(local_delay_ticks, None);
     }
 
     /// [`Self::Routed`] → [`Self::Delayed`], naming `context` in the
@@ -640,8 +648,8 @@ impl PlacementPhase {
     ///
     /// Panics under exactly the conditions [`Self::delay`] does.
     #[track_caller]
-    pub fn delay_at(&mut self, delay_ticks: u32, context: impl fmt::Display) {
-        self.delay_inner(delay_ticks, Some(&context));
+    pub fn delay_at(&mut self, local_delay_ticks: u32, context: impl fmt::Display) {
+        self.delay_inner(local_delay_ticks, Some(&context));
     }
 
     /// [`Self::Routed`] → [`Self::Delayed`], refusing an out-of-order
@@ -654,7 +662,10 @@ impl PlacementPhase {
     /// Returns [`PlacementPhaseTransitionError::DelayOnNonRouted`],
     /// carrying the phase it found, whenever the phase is not
     /// [`Self::Routed`].
-    pub fn try_delay(&mut self, delay_ticks: u32) -> Result<(), PlacementPhaseTransitionError> {
+    pub fn try_delay(
+        &mut self,
+        local_delay_ticks: u32,
+    ) -> Result<(), PlacementPhaseTransitionError> {
         let wire_length = match self {
             Self::Routed { wire_length } => *wire_length,
             Self::Unrouted | Self::Delayed { .. } | Self::Legalized { .. } => {
@@ -665,15 +676,15 @@ impl PlacementPhase {
         };
         *self = Self::Delayed {
             wire_length,
-            delay_ticks,
+            local_delay_ticks,
         };
         Ok(())
     }
 
     /// See [`Self::route_inner`] for why the panicking forms delegate.
     #[track_caller]
-    fn delay_inner(&mut self, delay_ticks: u32, context: Option<&dyn fmt::Display>) {
-        if let Err(error) = self.try_delay(delay_ticks) {
+    fn delay_inner(&mut self, local_delay_ticks: u32, context: Option<&dyn fmt::Display>) {
+        if let Err(error) = self.try_delay(local_delay_ticks) {
             transition_panic(&error, context);
         }
     }
@@ -728,11 +739,11 @@ impl PlacementPhase {
         &mut self,
         buffer_coords: Vec<BufferCoord>,
     ) -> Result<(), PlacementPhaseTransitionError> {
-        let (wire_length, delay_ticks) = match self {
+        let (wire_length, local_delay_ticks) = match self {
             Self::Delayed {
                 wire_length,
-                delay_ticks,
-            } => (*wire_length, *delay_ticks),
+                local_delay_ticks,
+            } => (*wire_length, *local_delay_ticks),
             Self::Unrouted | Self::Routed { .. } | Self::Legalized { .. } => {
                 return Err(PlacementPhaseTransitionError::LegalizeOnNonDelayed {
                     current: self.clone(),
@@ -741,7 +752,7 @@ impl PlacementPhase {
         };
         *self = Self::Legalized {
             wire_length,
-            delay_ticks,
+            local_delay_ticks,
             buffer_coords,
         };
         Ok(())
@@ -771,7 +782,7 @@ impl PlacementPhase {
 ///
 /// The whole offending phase is carried rather than just its variant
 /// name: a consumer diagnosing a stale cache entry or a malformed IR
-/// dump wants the `wire_length` / `delay_ticks` the phase got as far
+/// dump wants the `wire_length` / `local_delay_ticks` the phase got as far
 /// as, and it is what lets [`fmt::Display`] reproduce the panic
 /// wording exactly.
 ///
@@ -1067,19 +1078,19 @@ impl fmt::Display for CellIdentity<'_> {
 /// inside the reservation.
 ///
 /// The progressive fields the routing, delay-insertion, and
-/// crossing-legalization passes produce (`wire_length`, `delay_ticks`,
+/// crossing-legalization passes produce (`wire_length`, `local_delay_ticks`,
 /// `buffer_coords`) live inside [`Self::phase`] as a
 /// [`PlacementPhase`] — see that enum's docstring for the four
 /// legitimate states and the transition methods each pass calls.
 /// Read-only convenience accessors [`Self::wire_length`],
-/// [`Self::delay_ticks`], and [`Self::buffer_coords`] project the
+/// [`Self::local_delay_ticks`], and [`Self::buffer_coords`] project the
 /// phase back onto the three flat fields the JSON wire form exposes,
 /// so consumers that only care about the values do not need to match
 /// on the phase enum; [`Self::stage`] projects the discriminant
 /// itself.
 ///
 /// The custom [`Serialize`] impl flattens [`Self::phase`] onto
-/// `{stage, cell, drivers, coord[, wire_length][, delay_ticks][, buffer_coords]}`.
+/// `{stage, cell, drivers, coord[, wire_length][, local_delay_ticks][, buffer_coords]}`.
 /// The three optionals carry the shape earlier revisions of this
 /// struct produced via `skip_serializing_if`, so the JSON dump of a
 /// stage-N output is an additive subset of the stage-(N+1) dump *apart
@@ -1124,11 +1135,11 @@ impl PlacedCellNode {
         self.phase.wire_length()
     }
 
-    /// Delay ticks once delay insertion has run. See
-    /// [`PlacementPhase::delay_ticks`].
+    /// Local delay ticks once delay insertion has run. See
+    /// [`PlacementPhase::local_delay_ticks`].
     #[must_use]
-    pub const fn delay_ticks(&self) -> Option<u32> {
-        self.phase.delay_ticks()
+    pub const fn local_delay_ticks(&self) -> Option<u32> {
+        self.phase.local_delay_ticks()
     }
 
     /// Buffer coordinates once crossing legalization has run. See
@@ -1161,14 +1172,14 @@ impl PlacedCellNode {
 impl Serialize for PlacedCellNode {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         let wire_length = self.wire_length();
-        let delay_ticks = self.delay_ticks();
+        let local_delay_ticks = self.local_delay_ticks();
         let buffer_coords = self.buffer_coords();
 
         let mut field_count = 4; // stage, cell, drivers, coord
         if wire_length.is_some() {
             field_count += 1;
         }
-        if delay_ticks.is_some() {
+        if local_delay_ticks.is_some() {
             field_count += 1;
         }
         if !buffer_coords.is_empty() {
@@ -1192,8 +1203,8 @@ impl Serialize for PlacedCellNode {
             state.serialize_field("wire_length", &wl)?;
             written += 1;
         }
-        if let Some(dt) = delay_ticks {
-            state.serialize_field("delay_ticks", &dt)?;
+        if let Some(dt) = local_delay_ticks {
+            state.serialize_field("local_delay_ticks", &dt)?;
             written += 1;
         }
         if !buffer_coords.is_empty() {
@@ -1222,8 +1233,8 @@ impl Serialize for PlacedCellNode {
 ///
 /// It carries the same [`PlacementPhase`] the cells do, so the four
 /// stages fill it by the same rules and a dump reads alike on both
-/// sides: `wire_length` after routing, `delay_ticks` after delay
-/// insertion, `buffer_coords` after legalization. `delay_ticks` here is
+/// sides: `wire_length` after routing, `local_delay_ticks` after delay
+/// insertion, `buffer_coords` after legalization. `local_delay_ticks` here is
 /// the wire's own contribution — the buffers standing on the segment —
 /// with no base delay to add, because a pad is not a cell.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1278,10 +1289,10 @@ impl PlacedOutputNode {
     }
 
     /// Ticks the buffer repeaters on this output's segment add, once
-    /// delay insertion has run. See [`PlacementPhase::delay_ticks`].
+    /// delay insertion has run. See [`PlacementPhase::local_delay_ticks`].
     #[must_use]
-    pub const fn delay_ticks(&self) -> Option<u32> {
-        self.phase.delay_ticks()
+    pub const fn local_delay_ticks(&self) -> Option<u32> {
+        self.phase.local_delay_ticks()
     }
 
     /// Buffer coordinates once crossing legalization has run. See
@@ -1307,14 +1318,14 @@ impl PlacedOutputNode {
 impl Serialize for PlacedOutputNode {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         let wire_length = self.wire_length();
-        let delay_ticks = self.delay_ticks();
+        let local_delay_ticks = self.local_delay_ticks();
         let buffer_coords = self.buffer_coords();
 
         let mut field_count = 4; // stage, name, driver, pad
         if wire_length.is_some() {
             field_count += 1;
         }
-        if delay_ticks.is_some() {
+        if local_delay_ticks.is_some() {
             field_count += 1;
         }
         if !buffer_coords.is_empty() {
@@ -1335,8 +1346,8 @@ impl Serialize for PlacedOutputNode {
             state.serialize_field("wire_length", &wl)?;
             written += 1;
         }
-        if let Some(dt) = delay_ticks {
-            state.serialize_field("delay_ticks", &dt)?;
+        if let Some(dt) = local_delay_ticks {
+            state.serialize_field("local_delay_ticks", &dt)?;
             written += 1;
         }
         if !buffer_coords.is_empty() {
@@ -1508,7 +1519,7 @@ mod tests {
     fn delayed() -> PlacementPhase {
         PlacementPhase::Delayed {
             wire_length: 3,
-            delay_ticks: 1,
+            local_delay_ticks: 1,
         }
     }
 
@@ -1518,7 +1529,7 @@ mod tests {
         // the buffer-coord vector's shape and identity round-trip.
         PlacementPhase::Legalized {
             wire_length: 3,
-            delay_ticks: 1,
+            local_delay_ticks: 1,
             buffer_coords: vec![BufferCoord::new(
                 BufferSegment::Port(PortName::A),
                 CellCoord::new(5, 0, 0),
@@ -1562,7 +1573,7 @@ mod tests {
             phase,
             PlacementPhase::Delayed {
                 wire_length: 9,
-                delay_ticks: 4,
+                local_delay_ticks: 4,
             },
         );
     }
@@ -1592,7 +1603,7 @@ mod tests {
     fn legalize_from_delayed_transitions_and_preserves_prior_fields() {
         let mut phase = PlacementPhase::Delayed {
             wire_length: 12,
-            delay_ticks: 3,
+            local_delay_ticks: 3,
         };
         let coords = vec![
             BufferCoord::new(BufferSegment::Port(PortName::A), CellCoord::new(1, 0, 0)),
@@ -1603,7 +1614,7 @@ mod tests {
             phase,
             PlacementPhase::Legalized {
                 wire_length: 12,
-                delay_ticks: 3,
+                local_delay_ticks: 3,
                 buffer_coords: coords,
             },
         );
@@ -1616,7 +1627,7 @@ mod tests {
         // mean "not yet legalized".
         let mut phase = PlacementPhase::Delayed {
             wire_length: 4,
-            delay_ticks: 0,
+            local_delay_ticks: 0,
         };
         phase.legalize(Vec::new());
         assert!(matches!(
@@ -1754,7 +1765,7 @@ mod tests {
             phase,
             PlacementPhase::Delayed {
                 wire_length: 9,
-                delay_ticks: 4,
+                local_delay_ticks: 4,
             },
         );
     }
@@ -1794,7 +1805,7 @@ mod tests {
         let scope = probe_scope();
         let mut phase = PlacementPhase::Delayed {
             wire_length: 12,
-            delay_ticks: 3,
+            local_delay_ticks: 3,
         };
         let coords = vec![BufferCoord::new(
             BufferSegment::Port(PortName::A),
@@ -1805,7 +1816,7 @@ mod tests {
             phase,
             PlacementPhase::Legalized {
                 wire_length: 12,
-                delay_ticks: 3,
+                local_delay_ticks: 3,
                 buffer_coords: coords,
             },
         );
@@ -1928,7 +1939,7 @@ mod tests {
             phase,
             PlacementPhase::Delayed {
                 wire_length: 9,
-                delay_ticks: 4,
+                local_delay_ticks: 4,
             },
         );
     }
@@ -1937,7 +1948,7 @@ mod tests {
     fn try_legalize_from_delayed_transitions_and_preserves_prior_fields() {
         let mut phase = PlacementPhase::Delayed {
             wire_length: 12,
-            delay_ticks: 3,
+            local_delay_ticks: 3,
         };
         let coords = vec![BufferCoord::new(
             BufferSegment::Port(PortName::A),
@@ -1948,7 +1959,7 @@ mod tests {
             phase,
             PlacementPhase::Legalized {
                 wire_length: 12,
-                delay_ticks: 3,
+                local_delay_ticks: 3,
                 buffer_coords: coords,
             },
         );
@@ -1961,7 +1972,7 @@ mod tests {
     fn try_legalize_from_delayed_with_empty_buffers_stays_legalized() {
         let mut phase = PlacementPhase::Delayed {
             wire_length: 4,
-            delay_ticks: 0,
+            local_delay_ticks: 0,
         };
         assert_eq!(phase.try_legalize(Vec::new()), Ok(()));
         assert!(matches!(
@@ -2037,7 +2048,7 @@ mod tests {
             phase,
             PlacementPhase::Delayed {
                 wire_length: 3,
-                delay_ticks: 2,
+                local_delay_ticks: 2,
             },
         );
     }
@@ -2193,11 +2204,11 @@ mod tests {
     }
 
     #[test]
-    fn delay_ticks_accessor_covers_every_variant() {
-        assert_eq!(PlacementPhase::Unrouted.delay_ticks(), None);
-        assert_eq!(routed().delay_ticks(), None);
-        assert_eq!(delayed().delay_ticks(), Some(1));
-        assert_eq!(legalized().delay_ticks(), Some(1));
+    fn local_delay_ticks_accessor_covers_every_variant() {
+        assert_eq!(PlacementPhase::Unrouted.local_delay_ticks(), None);
+        assert_eq!(routed().local_delay_ticks(), None);
+        assert_eq!(delayed().local_delay_ticks(), Some(1));
+        assert_eq!(legalized().local_delay_ticks(), Some(1));
     }
 
     #[test]
@@ -2230,7 +2241,7 @@ mod tests {
     fn legalized_with_zero_buffers_still_reports_the_crossing_stage() {
         let empty = PlacementPhase::Legalized {
             wire_length: 3,
-            delay_ticks: 1,
+            local_delay_ticks: 1,
             buffer_coords: Vec::new(),
         };
         assert_eq!(empty.stage(), PlacementStage::Crossing);
@@ -2296,7 +2307,7 @@ mod tests {
             serde_json::to_string(&probe_cell(delayed())).expect("delayed cell serialises");
         let legalized_json = serde_json::to_string(&probe_cell(PlacementPhase::Legalized {
             wire_length: 3,
-            delay_ticks: 1,
+            local_delay_ticks: 1,
             buffer_coords: Vec::new(),
         }))
         .expect("legalized cell serialises");
@@ -2318,8 +2329,9 @@ mod tests {
             "empty buffer_coords must still serde-skip: {legalized_json}",
         );
         // Rewriting the tag's key/value pair — not the bare word
-        // `"delay"`, which also prefixes the `delay_ticks` key — turns
-        // one dump into the other exactly, so nothing else moved.
+        // `delay`, which also sits inside the `local_delay_ticks`
+        // key — turns one dump into the other exactly, so nothing
+        // else moved.
         assert_eq!(
             delayed_json.replace("\"stage\":\"delay\"", "\"stage\":\"crossing\""),
             legalized_json,

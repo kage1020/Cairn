@@ -52,8 +52,8 @@ fn edition_netlist_from_source(
 /// `JavaRepeaterOr` cell one column in from the pad column of its
 /// `circuit region=floor void=2` reservation, and the reservation
 /// copies the enclosing struct's `size=7x5` footprint. `wire_length`
-/// and `delay_ticks` are absent today because Steiner routing and
-/// delay insertion are follow-up passes.
+/// and `local_delay_ticks` are absent at `--stage placement`, which
+/// runs neither routing nor delay insertion.
 #[test]
 fn redstone_door_java_places_or_cell_beside_the_pad_column() {
     let source = load_example("redstone-door.crn");
@@ -91,8 +91,8 @@ fn redstone_door_java_places_or_cell_beside_the_pad_column() {
         "wire_length is a follow-up pass output",
     );
     assert!(
-        cell.delay_ticks().is_none(),
-        "delay_ticks is a follow-up pass output",
+        cell.local_delay_ticks().is_none(),
+        "local_delay_ticks is a follow-up pass output",
     );
 }
 
@@ -329,7 +329,7 @@ fn empty_edition_netlist_produces_no_placement_entry() {
 /// AC7 — the JSON dump carries `edition`, a `region` object with the
 /// four reservation fields, a per-cell `coord` object, and the
 /// `stage` tag naming the pass that produced it. `wire_length` and
-/// `delay_ticks` are absent (the phase this stage stamps carries
+/// `local_delay_ticks` are absent (the phase this stage stamps carries
 /// neither) so the wire form does not carry future-only fields today.
 #[test]
 fn json_dump_carries_stage_region_and_coord_and_omits_reserved_fields() {
@@ -361,8 +361,8 @@ fn json_dump_carries_stage_region_and_coord_and_omits_reserved_fields() {
         "wire_length must be elided today: {json}",
     );
     assert!(
-        !json.contains("\"delay_ticks\""),
-        "delay_ticks must be elided today: {json}",
+        !json.contains("\"local_delay_ticks\""),
+        "local_delay_ticks must be elided today: {json}",
     );
 }
 

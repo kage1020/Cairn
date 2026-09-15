@@ -65,7 +65,7 @@ fn placement_from_source(source: &str, edition: Edition) -> ScopedPlacementIr {
 /// fixture where `wire_length` counting steps rather than blocks of
 /// dust is visible. `sig.step`'s pad is at the corner a row further
 /// out, and comes in round the corner for two.
-/// `delay_ticks` stays `None` (routing does not insert delay per
+/// `local_delay_ticks` stays `None` (routing does not insert delay per
 /// `spec/redstone` §14.4; that is stage 3).
 #[test]
 fn redstone_door_java_fills_wire_length_from_input_pads() {
@@ -93,8 +93,8 @@ fn redstone_door_java_fills_wire_length_from_input_pads() {
         "wire_length must be route(step→cell) + route(exit→cell) = 2 + 1 = 3",
     );
     assert!(
-        cell.delay_ticks().is_none(),
-        "delay_ticks stays None: Stage 3 (delay insertion) is a follow-up",
+        cell.local_delay_ticks().is_none(),
+        "local_delay_ticks stays None: Stage 3 (delay insertion) is a follow-up",
     );
 }
 
@@ -158,7 +158,7 @@ fn redstone_door_bedrock_matches_java_wire_length() {
 ///   drops in: `6 + 2 = 8`. That is the escape §14.5 specifies, and it
 ///   is why the fixture reserves `void=3`.
 ///
-/// `delay_ticks` stays `None` at every cell.
+/// `local_delay_ticks` stays `None` at every cell.
 #[test]
 fn multi_cell_scope_pins_wire_length_including_detours() {
     let source = r"
@@ -207,9 +207,9 @@ struct sim size=7x5
     );
     for cell in &entry.ir.cells {
         assert!(
-            cell.delay_ticks().is_none(),
-            "delay_ticks must not appear (stage 3 is future work), got {:?}",
-            cell.delay_ticks(),
+            cell.local_delay_ticks().is_none(),
+            "local_delay_ticks must not appear before delay insertion runs, got {:?}",
+            cell.local_delay_ticks(),
         );
     }
 }
@@ -422,13 +422,13 @@ struct wire size=5x5
 }
 
 /// AC7 — the JSON dump of a routed Placement IR carries a
-/// `"wire_length": N` field on every cell object, while `delay_ticks`
+/// `"wire_length": N` field on every cell object, while `local_delay_ticks`
 /// stays elided (`skip_serializing_if = "Option::is_none"`). Pins the
 /// wire-form contract that distinguishes `--stage placement` (no
 /// `wire_length`) from `--stage route` (`wire_length` present)
 /// output.
 #[test]
-fn json_dump_carries_wire_length_and_omits_delay_ticks() {
+fn json_dump_carries_wire_length_and_omits_local_delay_ticks() {
     let source = load_example("redstone-door.crn");
     let placement = placement_from_source(&source, Edition::Java);
     let routed = compile_routing(&placement);
@@ -443,8 +443,8 @@ fn json_dump_carries_wire_length_and_omits_delay_ticks() {
         "wire_length must appear in routed JSON: {json}",
     );
     assert!(
-        !json.contains("\"delay_ticks\""),
-        "delay_ticks must be elided at this stage: {json}",
+        !json.contains("\"local_delay_ticks\""),
+        "local_delay_ticks must be elided at this stage: {json}",
     );
     // Sanity: the region and coord shapes carried across from
     // placement stay intact after routing.

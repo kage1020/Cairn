@@ -109,7 +109,7 @@ pub enum DiagnosticCode {
     /// materialising it would be longer than the cap
     /// [`crate::delay::MAX_ATTENUATION_SEGMENT`] sets, so the pass
     /// refuses instead of quietly counting an unrealisable chain into
-    /// `delay_ticks`. Fires on both driver-to-cell and driver-to-
+    /// `local_delay_ticks`. Fires on both driver-to-cell and driver-to-
     /// output-pad segments — a wide `circuit region=` reservation can
     /// trip either edge depending on which side sits farther from the
     /// driver. Fix: enlarge the `circuit region=` footprint so no

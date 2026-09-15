@@ -228,7 +228,7 @@ fn redstone_door_java_carries_no_buffers() {
 
 /// AC2 — the same example compiled for Bedrock legalizes identically:
 /// the cell realisation swaps and the geometry does not, so the same
-/// nets take the same coords. `wire_length` and `delay_ticks` are
+/// nets take the same coords. `wire_length` and `local_delay_ticks` are
 /// preserved verbatim from the delayed IR.
 #[test]
 fn redstone_door_bedrock_carries_no_buffers() {
@@ -252,7 +252,7 @@ fn redstone_door_bedrock_carries_no_buffers() {
         .first()
         .expect("gatehouse must have a placed cell");
     assert_eq!(
-        cell.delay_ticks(),
+        cell.local_delay_ticks(),
         Some(0),
         "delay ticks preserved from stage 3",
     );
@@ -620,14 +620,14 @@ struct reach size=40x6
     );
 
     assert!(
-        output.delay_ticks().is_some_and(|ticks| ticks >= 1),
+        output.local_delay_ticks().is_some_and(|ticks| ticks >= 1),
         "the outward segment must be charged for its repeaters, got {:?}",
-        output.delay_ticks(),
+        output.local_delay_ticks(),
     );
     assert_eq!(
         u32::try_from(output.buffer_coords().len()).expect("buffer count fits")
             * cairn_lang_redstone::BUFFER_REPEATER_TICKS,
-        output.delay_ticks().expect("delayed"),
+        output.local_delay_ticks().expect("delayed"),
         "every tick the delay pass counted must have a coord behind it",
     );
     assert!(
@@ -763,7 +763,7 @@ struct pass size=40x6
     assert_eq!(
         u32::try_from(output.buffer_coords().len()).expect("buffer count fits")
             * cairn_lang_redstone::BUFFER_REPEATER_TICKS,
-        output.delay_ticks().expect("delayed"),
+        output.local_delay_ticks().expect("delayed"),
         "every tick counted at stage 3 has a coord at stage 4",
     );
 }
@@ -792,14 +792,37 @@ struct reach size=40x6
     let out = compile_crossing(&delayed);
     let json = serde_json::to_string(&out.scoped).expect("serialise");
 
+    // The output node's own object, not the whole dump: a cell emits
+    // `wire_length` and `local_delay_ticks` too, so a substring search
+    // over the dump passes even when the actuator serialises a key of
+    // its own under the wrong name.
+    let value: serde_json::Value = serde_json::from_str(&json).expect("dump parses");
+    let output = value
+        .as_array()
+        .and_then(|scopes| scopes.iter().find(|s| s["name"] == "reach"))
+        .map(|scope| &scope["ir"]["outputs"][0])
+        .expect("the reach scope carries one actuator");
+
     for key in [
-        "\"stage\":\"crossing\"",
-        "\"pad\":",
-        "\"wire_length\":",
-        "\"delay_ticks\":",
-        "\"buffer_coords\":",
-        "\"port\":\"out\"",
+        "name",
+        "driver",
+        "pad",
+        "stage",
+        "wire_length",
+        "local_delay_ticks",
+        "buffer_coords",
     ] {
-        assert!(json.contains(key), "the dump must carry {key}: {json}");
+        assert!(
+            output.get(key).is_some(),
+            "the actuator's own object must carry {key}: {output}",
+        );
     }
+    assert_eq!(output["stage"], "crossing");
+    // A pad's buffers name the wire out rather than one of the driver
+    // ports a cell's do.
+    assert_eq!(output["buffer_coords"][0]["port"], "out");
+    assert!(
+        output.get("delay_ticks").is_none(),
+        "the actuator must not carry the pre-rename key: {output}",
+    );
 }

@@ -9,7 +9,7 @@
 //! and rewrites every cell's [`crate::placement_ir::PlacedCellNode::wire_length`]
 //! from `None` to `Some(sum over the nets driving it of the routed
 //! length into the cell)`.
-//! [`crate::placement_ir::PlacedCellNode::delay_ticks`] stays `None`
+//! [`crate::placement_ir::PlacedCellNode::local_delay_ticks`] stays `None`
 //! at this stage; the delay-insertion pass
 //! ([`crate::delay::compile_delay`], stage 3 of §14.5) promotes it
 //! to `Some(_)`.
@@ -87,7 +87,9 @@
 //!   `wire_length` never reaches the delay-insertion pass — a partial
 //!   attribution would let stage 3 compute delays against a layout
 //!   that no downstream stage can materialise into voxels, silently
-//!   corrupting `assert latency(...)` verification per §14.7.
+//!   corrupting every tick figure derived from it — including the
+//!   `assert latency(...)` verification of §14.7, once the pass that
+//!   evaluates it exists.
 //!
 //! One intentional gap is left here: the input / output pad
 //! coordinates the routing pass derives on the fly are not stored, and
@@ -352,7 +354,7 @@ fn route_scope(entry: &ScopedPlacementIrEntry) -> ScopeRouting {
 /// arriving twice; see [`sum_over_driving_nets`]. Routed rather than
 /// Manhattan because the two are different
 /// numbers whenever the wire goes round something, and a record
-/// carrying a straight-line `wire_length` beside a `delay_ticks`
+/// carrying a straight-line `wire_length` beside a `local_delay_ticks`
 /// charged for the routed one describes no single layout.
 ///
 /// Computes into a side vector first so `ir.cells` can be borrowed
@@ -545,7 +547,7 @@ mod tests {
     /// the routed path and not the straight line between the driver's
     /// source and the cell. The sink here is 14 blocks from its pad
     /// with something standing halfway, so it is fed by 16 blocks of
-    /// dust; a record carrying 14 beside a `delay_ticks` charged for
+    /// dust; a record carrying 14 beside a `local_delay_ticks` charged for
     /// 16 describes no single layout.
     ///
     /// The blocker drives nothing — a block is all the fixture needs,
@@ -960,7 +962,7 @@ mod tests {
         for cell in &mut ir.cells {
             cell.phase = PlacementPhase::Delayed {
                 wire_length: 0,
-                delay_ticks: 0,
+                local_delay_ticks: 0,
             };
         }
         let legalized = crate::crossing::compile_crossing(&scoped(ScopeKind::Struct, "boxed", ir));

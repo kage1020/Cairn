@@ -162,7 +162,7 @@ impl EditionCell {
     /// [`crate::edition_netlist::compile_edition_netlist`] uses for
     /// their variants. Keeping the sentinel distinct from any real
     /// value also makes the pinning migration observable in delay
-    /// dumps: an `_Unpinned` cell with `delay_ticks =
+    /// dumps: an `_Unpinned` cell with `local_delay_ticks =
     /// UNPINNED_BASE_DELAY_TICKS` is visibly different from a pinned
     /// 2-tick cell, so pinning `JavaXorUnpinned` to
     /// `JavaXorComparatorPair` with a hard-coded 2 ticks will shift every

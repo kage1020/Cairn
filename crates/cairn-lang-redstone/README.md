@@ -15,7 +15,7 @@ The synthesis half of the pipeline is in place; the verification half is not. No
 | Edition selection | `compile_edition_netlist(&ScopedNetlistIr, Edition)` | The target-edition realisation of each cell — Java `ComparatorAnd` / `RepeaterOr` / `InverterTorch`, Bedrock `TorchAnd` / `TorchOr` / `InverterTorch` |
 | Placement | `compile_placement(&ScopedEditionNetlistIr, &IntentModule)` | Cell coordinates inside each scope's `circuit region=` reservation |
 | Routing | `compile_routing(&ScopedPlacementIr)` | Steiner trees per net, filling each cell's `wire_length` |
-| Delay insertion | `compile_delay(&ScopedPlacementIr)` | Each cell's `delay_ticks`, base delay plus the implicit buffer repeaters; refuses with `E_ATTENUATION_LIMIT` past the v1 sanity cap |
+| Delay insertion | `compile_delay(&ScopedPlacementIr)` | Each cell's `local_delay_ticks`, base delay plus the implicit buffer repeaters on every net feeding it; refuses with `E_ATTENUATION_LIMIT` past the v1 sanity cap |
 | Crossing legalization | `compile_crossing(&ScopedPlacementIr)` | Each cell's `buffer_coords`, the repeater every driver segment passes through |
 
 Two nets that would merge into one strand of dust never need legalizing: routing already goes around the dust laid by earlier nets *and* around the coords beside it, since dust reads the dust one step away in its own plane. The short is not made in the first place.
@@ -23,6 +23,8 @@ Two nets that would merge into one strand of dust never need legalizing: routing
 Every placed cell records which of the last four passes touched it as a `PlacementStage`, dumped as a `"stage"` key in the same vocabulary `cairn synth --stage <s>` accepts, so a JSON consumer reads the stage off the output rather than inferring it from which optional keys are present.
 
 Still to come: edition legalization, the tick simulator, and the QC/BUD refusal (`E_NO_PORTABLE_IMPL`).
+
+`local_delay_ticks` is a local cost, not a path latency: that cell's base delay plus the buffer repeaters on every net that drives it, summed, which is what crossing legalization's buffer blocks are checked against. A combinational cell settles when the *last* of its inputs arrives, so an arrival time maxes over the incoming nets and walks back through the upstream cells; nothing computes it yet, since `assert latency(sig.in -> sig.out)` ([redstone §14.7](https://cairn.kage1020.com/spec/redstone/)) is neither parsed nor evaluated.
 
 ## Pipeline
 

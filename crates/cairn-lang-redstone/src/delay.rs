@@ -9,7 +9,7 @@
 //! stored only the summed `wire_length`, deliberately — the trees
 //! are cheap to rebuild and would bloat the JSON wire form if stored
 //! twice), and rewrites every cell's
-//! [`crate::placement_ir::PlacedCellNode::delay_ticks`] from `None` to
+//! [`crate::placement_ir::PlacedCellNode::local_delay_ticks`] from `None` to
 //! `Some(base + implicit buffer contribution)`:
 //!
 //! - **Base delay** comes from the cell's physical realisation via
@@ -53,13 +53,57 @@
 //!
 //! Buffer repeaters are **counted, not materialised** here. The
 //! routing pass discarded its per-scope occupancy set before yielding
-//! the routed IR, and the count is what `delay_ticks` needs — a
+//! the routed IR, and the count is what `local_delay_ticks` needs — a
 //! repeater contributes its ticks wherever it stands. Stage 4
 //! (crossing legalization) puts them on coords, walking the same
 //! routed paths this pass measured, and changes no tick count doing
-//! it. Two stages rather than one because the tick sum is what
-//! `assert latency(...)` is checked against, and it should not wait on
-//! a coord assignment to be readable.
+//! it. Two stages because §14.5 lists them as two; they agree by
+//! construction through `buffer_count_for_segment`, and
+//! `phase4_buffer_tick_invariant_holds` and
+//! `two_distinct_nets_charge_a_cell_for_every_buffer_under_it` check
+//! that they do.
+//!
+//! **`local_delay_ticks` is a local cost, not an arrival time.** The
+//! figure this pass writes is the cell's own base delay plus the
+//! implicit buffer repeaters standing on *every* net that feeds it,
+//! summed. That is what the wires into this cell cost, and it is the
+//! number stage 4 is held to: `local_delay_ticks - base_delay_ticks`
+//! equals `BUFFER_REPEATER_TICKS` per block in the cell's
+//! deduplicated `buffer_coords`. `phase4_buffer_tick_invariant_holds`
+//! asserts that identity over generated single-net scopes and
+//! `two_distinct_nets_charge_a_cell_for_every_buffer_under_it` over
+//! the multi-net shape, which is the one where a sum and a max part
+//! company.
+//!
+//! It is deliberately **not** the tick at which the cell's output
+//! settles. A combinational cell settles when the *last* of its
+//! inputs arrives, so an arrival time is a `max` over the incoming
+//! nets and a walk back through the upstream cells:
+//!
+//! ```text
+//! arrival(cell) = base_delay(cell)
+//!               + max over nets n driving cell of
+//!                     arrival(source(n)) + buffer_ticks(segment(n, cell))
+//! ```
+//!
+//! The two part company whenever more than one incoming net carries a
+//! buffer, or any driver is itself a cell: a cell whose `a` port
+//! arrives over a segment with one buffer and whose `b` port arrives
+//! over one with two is charged `base + 3` here and settles at
+//! `base + 2`. The figure is off in both directions, not just high —
+//! it counts the buffers on every incoming net where only the slowest
+//! matters, and it leaves out everything upstream of the cell.
+//! `local_delay_is_the_wire_cost_not_the_arrival_time` derives both
+//! numbers from one fixture so the gap stays recorded rather than
+//! rediscovered.
+//!
+//! Arrival time is not computed anywhere in this crate, and nothing
+//! should read `local_delay_ticks` as if it were one.
+//! `assert latency(sig.in -> sig.out)` (`spec/redstone` §14.7) is a
+//! *path* latency across the DAG; it belongs to the pass that
+//! evaluates it against the headless per-tick simulator §14.7
+//! describes, and neither of those is built — `assert latency(...)`
+//! is not even parsed today.
 //!
 //! `E_ATTENUATION_LIMIT` fires only when a driver segment exceeds the
 //! v1 sanity cap [`MAX_ATTENUATION_SEGMENT`]. Segments in the
@@ -69,17 +113,17 @@
 //! instead of silently ascribing a delay against a chain nothing
 //! materialises. Failed scopes are elided from the
 //! output for the same reason the routing pass elides congestion
-//! failures — a partial `delay_ticks` set would let the future tick
-//! simulator report a `latency` figure computed against a layout no
-//! downstream stage can materialise.
+//! failures — a partial `local_delay_ticks` set would let a
+//! downstream reader report a tick figure computed against a layout
+//! no stage can materialise.
 //!
 //! The delay pass is one `PlacementPhase::delay` transition per cell,
 //! per the producer↔variant table on that enum; no new IR type is
-//! introduced, and `PlacedCellNode::delay_ticks` is the read-only
+//! introduced, and `PlacedCellNode::local_delay_ticks` is the read-only
 //! projection of the resulting variant rather than a field the pass
 //! assigns.
-//! `--stage route` JSON keeps every key it had because `delay_ticks`
-//! is serde-skipped on `None` and appended as `,"delay_ticks":N`
+//! `--stage route` JSON keeps every key it had because `local_delay_ticks`
+//! is serde-skipped on `None` and appended as `,"local_delay_ticks":N`
 //! (after `wire_length` in the hand-written `Serialize` impl's
 //! emission order, matching serde's compact-JSON layout) when this
 //! pass writes it. The one value that moves is the `stage` tag, which
@@ -113,7 +157,7 @@ pub const BUFFER_REPEATER_TICKS: u32 = 1;
 /// cannot delay by less than one tick — if this constant is ever set
 /// to zero, `buffer_repeater_ticks_for_segment` would report zero
 /// implicit-buffer contribution for any segment length, silently
-/// under-reporting `delay_ticks` on every fixture that crosses the
+/// under-reporting `local_delay_ticks` on every fixture that crosses the
 /// 15-block attenuation limit. Assert forces the value ≥ 1 so a
 /// future edit cannot slide past this without deliberate intent.
 const _: () = assert!(
@@ -135,7 +179,7 @@ const _: () = assert!(
 /// dust the signal travels, not the straight line between its ends. A
 /// segment longer than this asks for a buffer chain longer than v1
 /// will build, so the delay pass refuses with `E_ATTENUATION_LIMIT`
-/// rather than count a chain nothing materialises into `delay_ticks`.
+/// rather than count a chain nothing materialises into `local_delay_ticks`.
 ///
 /// 256 blocks is 17 buffer repeaters (`(256 - 1) / 15`); anything past
 /// that in a single flat segment reads as a placement mistake rather
@@ -147,7 +191,7 @@ pub const MAX_ATTENUATION_SEGMENT: u32 = 256;
 /// Mirrors [`crate::routing::RoutingOutput`]'s shape so callers see a
 /// uniform result type across every stage of the place-and-route
 /// pipeline. The delayed IR is a [`ScopedPlacementIr`] with every
-/// non-failed scope's `delay_ticks` promoted from `None` to `Some(_)` —
+/// non-failed scope's `local_delay_ticks` promoted from `None` to `Some(_)` —
 /// no new IR type; the delay pass is one
 /// [`crate::placement_ir::PlacementPhase::delay`] transition per cell,
 /// per the producer↔variant table on that enum.
@@ -155,7 +199,7 @@ pub const MAX_ATTENUATION_SEGMENT: u32 = 256;
 #[non_exhaustive]
 pub struct DelayOutput {
     /// Placement IR for every scope whose delay insertion succeeded,
-    /// with every cell's `delay_ticks` field populated.
+    /// with every cell's `local_delay_ticks` field populated.
     pub scoped: ScopedPlacementIr,
     /// Findings raised by the pass, in scope order.
     pub diagnostics: Vec<Diagnostic>,
@@ -180,7 +224,7 @@ impl DelayOutput {
 /// One entry per non-empty [`PlacementIr`] whose delay insertion
 /// succeeded; scopes that raise an Error-severity diagnostic (today,
 /// only `E_ATTENUATION_LIMIT`) are elided from the output so a partial
-/// `delay_ticks` set cannot pollute a future tick simulator.
+/// `local_delay_ticks` set cannot pollute a downstream reader.
 #[must_use]
 pub fn compile_delay(routed: &ScopedPlacementIr) -> DelayOutput {
     let mut out = DelayOutput::new();
@@ -214,11 +258,11 @@ fn delay_scope(entry: &ScopedPlacementIrEntry) -> ScopeDelay {
     // module without any redstone survives the delay pipeline as-is.
     // Stricter than routing's belt-and-braces `debug_assert! +
     // Ok(source.clone())` fall-through by design: delay writes
-    // `delay_ticks`, and the producer↔variant table on
+    // `local_delay_ticks`, and the producer↔variant table on
     // `PlacementPhase` promises
     // `(Some, Some)` after this stage — silently returning `(None,
-    // None)` on a partial IR would let a future tick simulator read a
-    // Stage-1 shape from a Stage-3 output.
+    // None)` on a partial IR would let a downstream reader take a
+    // Stage-1 shape for a Stage-3 output.
     let Some(region) = source.region.clone() else {
         if source.cells.is_empty() && source.outputs.is_empty() {
             return Ok(source.clone());
@@ -246,7 +290,7 @@ fn delay_scope(entry: &ScopedPlacementIrEntry) -> ScopeDelay {
     // out-of-range access here means the caller handed in a
     // hand-built IR that skipped synthesis, in which case panicking
     // loud beats silently sinking into a fall-back coord and under-
-    // reporting `delay_ticks`. Stricter than routing's `debug_assert
+    // reporting `local_delay_ticks`. Stricter than routing's `debug_assert
     // + last-cell fallback` by the same phase-table-contract argument
     // that hardens the missing-region branch above.
     let source_of_net = |net: NetRef| -> CellCoord {
@@ -267,7 +311,7 @@ fn delay_scope(entry: &ScopedPlacementIrEntry) -> ScopeDelay {
     // list it built is the terminal list the tree was grown from. Loud
     // for the same reason `source_of_net` above is: a hand-built IR
     // that broke the correspondence would otherwise under-report
-    // `delay_ticks` in silence.
+    // `local_delay_ticks` in silence.
     let nets = collect_nets(&ir);
     let router = Router::new(&region, &block_sites(&ir, &region));
     let trees = net_trees(&nets, &router, source_of_net);
@@ -295,7 +339,7 @@ fn delay_scope(entry: &ScopedPlacementIrEntry) -> ScopeDelay {
     };
 
     // First pass: refuse if any driver segment exceeds the v1 sanity
-    // cap. Done before writing `delay_ticks` so a failed scope leaves
+    // cap. Done before writing `local_delay_ticks` so a failed scope leaves
     // no partial attribution behind — `delay_scope`'s `Err` return
     // makes `compile_delay` elide the whole scope.
     for (cell_index, cell) in ir.cells.iter().enumerate() {
@@ -330,12 +374,12 @@ fn delay_scope(entry: &ScopedPlacementIrEntry) -> ScopeDelay {
         }
     }
 
-    attribute_delay_ticks(&mut ir, entry, &cell_coords, &segment_of);
+    attribute_local_delay_ticks(&mut ir, entry, &cell_coords, &segment_of);
 
     Ok(ir)
 }
 
-/// Fill every cell's `delay_ticks` with `base_delay(cell) + Σ buffer
+/// Fill every cell's `local_delay_ticks` with `base_delay(cell) + Σ buffer
 /// ticks per driving net`. Buffers are counted from the routed length
 /// of each net's path into this cell, measured via `segment_of`; the
 /// routing pass stored only the summed `wire_length` so re-derivation
@@ -347,6 +391,10 @@ fn delay_scope(entry: &ScopedPlacementIrEntry) -> ScopeDelay {
 /// more than once. See [`sum_over_driving_nets`], which stage 2
 /// measures the same cell with.
 ///
+/// Summed over those nets rather than maxed over them: the figure is
+/// a local wire cost and not the tick the cell's output settles on.
+/// See the module doc.
+///
 /// Computes into a side vector first so `ir.cells` can be borrowed
 /// immutably while the driver routes are measured through
 /// `segment_of`, then commits in a mutable pass. The commit is loud
@@ -356,7 +404,7 @@ fn delay_scope(entry: &ScopedPlacementIrEntry) -> ScopeDelay {
 /// `PlacementPhase` forbids it. `entry` is threaded in purely so that panic can name
 /// the offending cell instead of leaving the operator to walk back
 /// from the backtrace.
-fn attribute_delay_ticks<F>(
+fn attribute_local_delay_ticks<F>(
     ir: &mut PlacementIr,
     entry: &ScopedPlacementIrEntry,
     cell_coords: &[CellCoord],
@@ -364,7 +412,7 @@ fn attribute_delay_ticks<F>(
 ) where
     F: Fn(NetRef, CellCoord) -> u32,
 {
-    let delay_ticks: Vec<u32> = ir
+    let local_delay_ticks: Vec<u32> = ir
         .cells
         .iter()
         .zip(cell_coords.iter())
@@ -375,7 +423,7 @@ fn attribute_delay_ticks<F>(
             cell.cell.base_delay_ticks().saturating_add(buffer_ticks)
         })
         .collect();
-    for (index, (cell, ticks)) in ir.cells.iter_mut().zip(delay_ticks).enumerate() {
+    for (index, (cell, ticks)) in ir.cells.iter_mut().zip(local_delay_ticks).enumerate() {
         let identity = CellIdentity::new(index, cell.coord, entry);
         cell.phase.delay_at(ticks, identity);
     }
@@ -510,9 +558,9 @@ mod tests {
     //! - the cell-driver branch of `attenuation_diagnostic` (needs a
     //!   segment past 256 blocks between two cells, which no realistic
     //!   `.crn` produces);
-    //! - the missing-region refusal introduced by Critical 4, which
-    //!   can only be built by hand-constructing a `PlacementIr`
-    //!   because `compile_placement` already elides that shape;
+    //! - the missing-region refusal, which can only be built by
+    //!   hand-constructing a `PlacementIr` because
+    //!   `compile_placement` already elides that shape;
     //! - `buffer_repeater_ticks_for_segment` at multiple boundary
     //!   segment lengths (0, 15, 16, 30, 31, cap) so a formula change
     //!   trips per-boundary rather than by aggregate.
@@ -528,7 +576,8 @@ mod tests {
 
     use super::{
         BUFFER_REPEATER_TICKS, DUST_ATTENUATION_LIMIT, MAX_ATTENUATION_SEGMENT,
-        buffer_repeater_ticks_for_segment, compile_delay,
+        attribute_local_delay_ticks, buffer_count_for_segment, buffer_repeater_ticks_for_segment,
+        compile_delay,
     };
     use crate::diagnostic::DiagnosticCode;
     use crate::edition_netlist_ir::EditionCell;
@@ -657,6 +706,11 @@ mod tests {
     /// different number. (The two segments are 16 and 17 blocks, which
     /// `buffer_count_for_segment` maps to the same 1: what separates
     /// the rows is the number of nets, not the lengths.)
+    ///
+    /// Both rows are wire costs, not arrival times — two nets each
+    /// carrying one buffer cost two buffers and arrive after one.
+    /// `local_delay_is_the_wire_cost_not_the_arrival_time` is where
+    /// that distinction is pinned.
     #[test]
     fn a_cell_is_charged_once_per_net_that_drives_it() {
         for (label, port_b_net, expected) in [
@@ -700,11 +754,102 @@ mod tests {
                 delayed.diagnostics,
             );
             assert_eq!(
-                delayed.scoped.scopes[0].ir.cells[0].delay_ticks(),
+                delayed.scoped.scopes[0].ir.cells[0].local_delay_ticks(),
                 Some(expected),
                 "{label}: base 1 plus one charge per driving net",
             );
         }
+    }
+
+    /// `local_delay_ticks` is the wire cost of every net feeding a
+    /// cell, summed — not the tick the cell's output settles on.
+    ///
+    /// A cell whose `a` port arrives over a segment carrying one
+    /// buffer and whose `b` port over one carrying two is charged for
+    /// three buffers here, because three buffer blocks stand on the
+    /// wires that feed it and stage 4 lays all three —
+    /// `two_distinct_nets_charge_a_cell_for_every_buffer_under_it` is
+    /// where that end-to-end identity is pinned.
+    ///
+    /// Its output settles at `base + 2`, because a combinational cell
+    /// settles when the *last* of its inputs arrives. So an arrival
+    /// time maxes where this sums. Both figures are derived here from
+    /// the same two segment lengths — the recorded one through the
+    /// fold, the arrival one through the same `max` an arrival walk
+    /// would take — so a fold that switched to a max collapses the
+    /// two and trips the assert, rather than the assert restating a
+    /// constant written twice.
+    ///
+    /// Calls the fold directly with a stand-in `segment_of` rather
+    /// than routing a layout: what is pinned is how the per-net
+    /// charges combine, and two segments whose buffer counts differ
+    /// by one are three lines here and a placement puzzle through the
+    /// router. `a_cell_is_charged_once_per_net_that_drives_it` is
+    /// where real routed input segments are measured.
+    #[test]
+    fn local_delay_is_the_wire_cost_not_the_arrival_time() {
+        // One buffer on the short segment, two on the long one.
+        const SHORT: u32 = DUST_ATTENUATION_LIMIT + 1;
+        const LONG: u32 = 2 * DUST_ATTENUATION_LIMIT + 1;
+        assert_eq!(buffer_count_for_segment(SHORT), 1);
+        assert_eq!(buffer_count_for_segment(LONG), 2);
+
+        // No region and no inputs: the fold walks `ir.cells` and
+        // reaches the nets only through the stand-in `segment_of`, so
+        // carrying geometry here would suggest it mattered.
+        let mut ir = PlacementIr::new(Edition::Java);
+        ir.cells.push(placed_cell(
+            EditionCell::JavaComparatorAnd,
+            CellCoord::new(4, 0, 1),
+            vec![
+                CellPortDriver {
+                    port: PortName::A,
+                    net: NetRef::Input(0),
+                },
+                CellPortDriver {
+                    port: PortName::B,
+                    net: NetRef::Input(1),
+                },
+            ],
+        ));
+
+        let entry = ScopedPlacementIrEntry {
+            kind: ScopeKind::Struct,
+            name: "arrival".to_owned(),
+            ir: ir.clone(),
+        };
+        let cell_coords: Vec<CellCoord> = ir.cells.iter().map(|c| c.coord).collect();
+        let segment_of = |net: NetRef, _sink: CellCoord| -> u32 {
+            match net {
+                NetRef::Input(0) => SHORT,
+                NetRef::Input(1) => LONG,
+                other => panic!("no other net drives this cell: {other:?}"),
+            }
+        };
+        attribute_local_delay_ticks(&mut ir, &entry, &cell_coords, &segment_of);
+
+        let base = EditionCell::JavaComparatorAnd.base_delay_ticks();
+        let recorded = ir.cells[0]
+            .local_delay_ticks()
+            .expect("delay insertion writes Some(_)");
+        let ticks = |segment| buffer_count_for_segment(segment) * BUFFER_REPEATER_TICKS;
+        assert_eq!(
+            recorded,
+            base + ticks(SHORT) + ticks(LONG),
+            "the wire cost is every buffer on every net feeding the cell",
+        );
+
+        // What the cell's output actually settles on — the longer of
+        // the two segments, not both of them — and what no pass in
+        // this crate computes yet. Derived from the same two lengths
+        // through the `max` an arrival walk would take, so a fold
+        // that became a max would make the two figures equal.
+        let arrival = base + ticks(SHORT).max(ticks(LONG));
+        assert_eq!(
+            recorded - arrival,
+            ticks(SHORT),
+            "the wire cost sits above the arrival time by the buffers on the shorter segment",
+        );
     }
 
     #[test]
@@ -755,9 +900,9 @@ mod tests {
     #[test]
     fn missing_region_with_cells_fires_no_circuit_region() {
         // A hand-built `PlacementIr` with cells but no region reaches
-        // delay because it skipped placement. Critical 4 hardens this
-        // path to refuse instead of silently passing through with a
-        // `(None, None)` phase-table violation.
+        // delay because it skipped placement. The pass refuses
+        // instead of silently passing through with a `(None, None)`
+        // phase-table violation.
         let mut ir = PlacementIr::new(Edition::Java);
         ir.cells.push(placed_cell(
             EditionCell::JavaComparatorAnd,
@@ -811,10 +956,10 @@ mod tests {
     #[should_panic(expected = "topological invariant broken")]
     fn out_of_range_net_ref_cell_panics_loudly() {
         // A hand-built IR with `NetRef::Cell(u32::MAX)` violates the
-        // synthesis-side topological invariant. Critical 3 hardens
-        // this from "silent last-cell fallback" to a loud release
-        // panic so a caller-side bug cannot produce silently wrong
-        // `delay_ticks`.
+        // synthesis-side topological invariant. The release-mode
+        // panic turns a silent last-cell fallback into a loud
+        // failure, so a caller-side bug cannot produce silently wrong
+        // `local_delay_ticks`.
         let mut ir = PlacementIr::new(Edition::Java);
         ir.region = Some(reservation(5, 3, 2));
         ir.cells.push(placed_cell(
@@ -854,7 +999,7 @@ mod tests {
         );
         already_delayed.phase = PlacementPhase::Delayed {
             wire_length: 0,
-            delay_ticks: 0,
+            local_delay_ticks: 0,
         };
         ir.cells.push(already_delayed);
         let _ = compile_delay(&scoped(ScopeKind::Struct, "mixed", ir));
