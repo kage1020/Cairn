@@ -60,9 +60,16 @@ fn routed_from_source(source: &str, edition: Edition) -> ScopedPlacementIr {
         placement.diagnostics,
     );
     let routing = compile_routing(&placement.scoped);
+    // Warnings ride through: a scope whose nets climbed past each other
+    // carries `W_ROUTE_CROSS_LAYER_CLEARANCE`, which names the pairs
+    // for the physical tile layer and elides nothing. A refusal would
+    // take the scope out of the IR these tests read.
     assert!(
-        routing.diagnostics.is_empty(),
-        "fixture must route cleanly (delay tests are downstream of routing): {:?}",
+        routing
+            .diagnostics
+            .iter()
+            .all(|d| d.severity() != Severity::Error),
+        "fixture must route without a refusal (delay tests are downstream of routing): {:?}",
         routing.diagnostics,
     );
     routing.scoped

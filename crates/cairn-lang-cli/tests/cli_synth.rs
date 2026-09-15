@@ -1004,6 +1004,45 @@ fn cli_synth_stage_crossing_inherits_upstream_attenuation_failure() {
 }
 
 #[test]
+fn cli_synth_stage_route_reports_cross_layer_clearance_and_exits_zero() {
+    // `examples/crossbar.crn` routes: its nets climb past each other,
+    // and what an escape leaves a layer apart is the physical tile
+    // layer's to separate rather than the router's. The finding that
+    // names those pairs is advisory, so it has to reach the caller the
+    // way a refusal does — code and coords on stderr — while the IR
+    // still reaches stdout and the exit code stays 0. A warning
+    // promoted to a refusal by accident would show up here as an empty
+    // stdout and an exit of 1.
+    let path = examples_dir().join("crossbar.crn");
+    let out = run_synth(&[
+        "--experimental-logic-synth",
+        "--stage",
+        "route",
+        "--edition",
+        "java",
+        path.to_str().unwrap(),
+    ]);
+    assert_eq!(out.status.code(), Some(0));
+    let stderr = String::from_utf8(out.stderr).expect("utf-8");
+    assert!(
+        stderr.contains("warning[W_ROUTE_CROSS_LAYER_CLEARANCE]"),
+        "expected the advisory on stderr, got: {stderr}",
+    );
+    assert!(
+        stderr.contains("within one step of each other across layers")
+            && stderr.contains("stands directly over")
+            && stderr.contains("the physical tile layer\'s obligation"),
+        "the finding says what is left a layer apart, names a pair, and says \
+         whose obligation separating them is, got: {stderr}",
+    );
+    let stdout = String::from_utf8(out.stdout).expect("utf-8");
+    assert!(
+        stdout.contains("\"name\": \"crossbar\""),
+        "an advisory elides nothing — the routed IR still reaches stdout, got: {stdout}",
+    );
+}
+
+#[test]
 fn cli_synth_stage_crossing_two_nets_over_one_coord_exits_one() {
     // Two nets that want one coord, with no layer above the plane to
     // escape onto. The compiler refuses the scope rather than emitting

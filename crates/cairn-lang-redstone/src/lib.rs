@@ -22,8 +22,10 @@
 //! [`routing::compile_routing`] runs stage 2 (Steiner routing) over
 //! that layout, filling every [`placement_ir::PlacedCellNode`]'s
 //! `wire_length` with the routed total of the driver→sink paths
-//! through its Steiner tree and re-checking `E_ROUTE_CONGESTION`
-//! against the actual post-routing occupancy; [`delay::compile_delay`] runs stage 3
+//! through its Steiner tree, re-checking `E_ROUTE_CONGESTION`
+//! against the actual post-routing occupancy, and naming with
+//! `W_ROUTE_CROSS_LAYER_CLEARANCE` the strands its escape left a layer
+//! apart, which §14.5 makes the physical tile layer's to separate; [`delay::compile_delay`] runs stage 3
 //! (delay insertion) over the routed IR, promoting every cell's
 //! `local_delay_ticks` from `None` to `Some(base delay + implicit buffer
 //! repeater ticks)` — a local wire cost, not an arrival time, as

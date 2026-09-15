@@ -147,7 +147,26 @@ circuit region=basement void=3       # 高さ 3 のサービス層を確保し�
    かで決まり、このモデルはそれを持ちません。内部モデルは疑似 2.5D で、ボクセルへの実現は物理
    タイル層の担当です。層をまたいで 1 歩以内にある 2 本を隔てるのは、ルータではなくその層の義務
    になります — 真上に重なった対も、1 歩ずれた対も。後者は redstone の階段であり、避けるために
-   登った脱出は真上に載るのと同じくらい隣に着地するので、こちらのほうが多く出ます。
+   登った脱出は真上に載るのと同じくらい隣に着地するので、こちらのほうが多く出ます。タイル層は
+   これを `bridge` 座標が何として実現されうるかの要件として負います
+   ([§14.6](#146-エディション差))。
+
+   義務は推測させず、名指しします。脱出がそうした対を残したスコープには
+   `W_ROUTE_CROSS_LAYER_CLEARANCE` が出て、座標とネットを列挙します。どの対をタイル層に渡した
+   かが、レイアウトから導出するものではなく読み取れるものになります。これは助言であり、何も
+   削りません。レイアウトに落ち度は無く、ルータがここで発明した規則は、自分のモデルでは確かめ
+   ようのない理由でレイアウトを拒否することになるからです。対を無くすのは領域を広げることで、
+   ネットが登らずに平面で回り込む余地ができます。
+
+   ```text
+   W_ROUTE_CROSS_LAYER_CLEARANCE line 46 circuit=floor:
+     routed netlist for struct `crossbar` leaves 9 pairs of dust within one step of each other
+     across layers (1 stacked, 8 staircase).
+     note: (4,1,1) on cell #0 stands directly over (4,0,1) on cell #1
+     note: (1,1,1) on cell #0 stands a layer over, and one step across from, (1,0,0) on sig.a
+     Fix: none required of the source — enlarge `size=WxH` to give the nets room to go round
+     rather than climb.
+   ```
 3. **ディレイ挿入**: 減衰限界 15 を超えるセグメントにのみバッファとしてリピータを入れます。
    セグメントはドライバからそのシンクまでの **実配線** 経路で測り、バッファはその経路上に立ちます。
    2 点間の直線が常に配線とは限りません。
@@ -176,6 +195,13 @@ Logical Cell → Edition Cell → Physical Tile
   AND        → Java:    ComparatorAND → block array
              → Bedrock: TorchAND      → block array
 ```
+
+タイル層は、place-and-route 由来の義務をひとつ自分で負います。`bridge` 座標は、その真下の座標に
+も、斜め下の座標にも導通しないタイルとして実現されます。段階 2
+([§14.5](#145-place-and-route)) は 2 つのネットを同一平面で 1 歩以上離して保ち、回り込めない
+ものは登って避けるので、ある 1 本が別の 1 本の真上に来るのは必ず脱出の結果であり、その 2 本を
+隔てるのはタイルの仕事です。作者ではなくカタログへの要件であり、あるレイアウトがどの対を渡した
+のかは `W_ROUTE_CROSS_LAYER_CLEARANCE` が名指しします。
 
 - **吸収する**: リピータ、オブザーバ、コンパレータ、向き。いずれもセル実装の差です。
 - **吸収しない**: QC (準接続)、BUD、更新順序。ブロック更新順序の暗黙の意味論に依存し、可搬な実装が

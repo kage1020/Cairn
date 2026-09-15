@@ -160,7 +160,26 @@ The internal algorithm runs five stages:
    the voxel realisation belongs to the physical tile layer. Separating two strands within one
    step of each other across layers is that layer's obligation rather than the router's — both
    the stacked pair and the diagonal one, which is a staircase and is the commoner of the two,
-   because an escape climbing to clear a strand lands beside it as often as over it.
+   because an escape climbing to clear a strand lands beside it as often as over it. The tile
+   tier carries it as a requirement on what a `bridge` coordinate may render as
+   ([§14.6](#146-edition-differences)).
+
+   Named, not inferred. A scope whose escape leaves such a pair earns
+   `W_ROUTE_CROSS_LAYER_CLEARANCE`, which lists the coordinates and the nets, so the pairs a
+   layout hands to the tile layer are readable from the layout rather than derived from it. It is
+   advisory and elides nothing: the layout is not at fault, and a rule the router invented here
+   would refuse layouts for a reason nothing in its model can check. A wider region is what
+   removes the pairs, by giving the nets room to go round on the plane rather than climb.
+
+   ```text
+   W_ROUTE_CROSS_LAYER_CLEARANCE line 46 circuit=floor:
+     routed netlist for struct `crossbar` leaves 9 pairs of dust within one step of each other
+     across layers (1 stacked, 8 staircase).
+     note: (4,1,1) on cell #0 stands directly over (4,0,1) on cell #1
+     note: (1,1,1) on cell #0 stands a layer over, and one step across from, (1,0,0) on sig.a
+     Fix: none required of the source — enlarge `size=WxH` to give the nets room to go round
+     rather than climb.
+   ```
 3. **Delay insertion.** A repeater goes in as a buffer only where a segment exceeds the attenuation
    limit of 15. The segment is measured along the **routed** path from driver to sink, and the
    buffer stands on that path, so the straight line between the two is not always wire.
@@ -190,6 +209,13 @@ Logical Cell → Edition Cell → Physical Tile
   AND        → Java:    ComparatorAND → block array
              → Bedrock: TorchAND      → block array
 ```
+
+The tile tier carries one place-and-route obligation of its own: a `bridge` coordinate renders as
+a tile that conducts to neither the coordinate below it nor the ones diagonally below it. Stage 2
+([§14.5](#145-place-and-route)) keeps two nets one step apart in their own plane and climbs to
+clear what it cannot go round, so every strand a layer above another is the escape's doing and
+separating the two is the tile's. It is a requirement on the catalogue rather than on the author:
+which pairs a given layout hands over is what `W_ROUTE_CROSS_LAYER_CLEARANCE` names.
 
 - **Absorbed**: repeater, observer, comparator, and orientation, all cell-implementation
   differences.

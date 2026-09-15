@@ -51,6 +51,14 @@
 //!   pass's. Doing it at this stage rather than at stage 4 is what
 //!   gets the climb measured: the `wire_length` below and the delay
 //!   pass's tick count are both read off the routed tree.
+//! - **The pairs the escape leaves.** A net that climbs to clear
+//!   another lands over it, or one step across from it a layer up —
+//!   the staircase, and the commoner of the two. Separating those is
+//!   §14.5's obligation on the physical tile layer rather than this
+//!   pass's, so they are named rather than refused:
+//!   `W_ROUTE_CROSS_LAYER_CLEARANCE` lists the coords and the nets, and
+//!   the scope routes. Said once, here, because this is the stage that
+//!   made them.
 //! - **Unroutable sinks.** A sink with no free path from its driver —
 //!   every way out walled in by a component, by an earlier net's dust
 //!   or the coords beside it, or by the edge of the reservation —
@@ -125,7 +133,7 @@ use crate::placement_ir::{
 };
 use crate::routing_geometry::{
     BlockKind, BlockSite, Router, block_sites, collect_nets, input_pad, net_order, net_trees,
-    sum_over_driving_nets, unroutable,
+    sum_over_driving_nets, tile_layer_clearance, unroutable,
 };
 
 /// Per-cell footprint used by the post-routing congestion budget.
@@ -180,7 +188,8 @@ pub fn compile_routing(placement: &ScopedPlacementIr) -> RoutingOutput {
     let mut out = RoutingOutput::new();
     for entry in &placement.scopes {
         match route_scope(entry) {
-            Ok(ir) => {
+            Ok((ir, advisories)) => {
+                out.diagnostics.extend(advisories);
                 out.scoped.scopes.push(ScopedPlacementIrEntry {
                     kind: entry.kind,
                     name: entry.name.clone(),
@@ -193,9 +202,15 @@ pub fn compile_routing(placement: &ScopedPlacementIr) -> RoutingOutput {
     out
 }
 
-/// Result of routing one scope: the routed IR on success, a single
-/// Error-severity diagnostic on failure.
-type ScopeRouting = Result<PlacementIr, Diagnostic>;
+/// Result of routing one scope: the routed IR plus whatever the
+/// layout is advised of on success, a single Error-severity diagnostic
+/// on failure.
+///
+/// The advisories ride with the IR rather than being collected
+/// alongside it because a refused scope has none: it is elided, and
+/// what an elided scope leaves the tile layer is not an obligation
+/// anything will be asked to discharge.
+type ScopeRouting = Result<(PlacementIr, Vec<Diagnostic>), Diagnostic>;
 
 fn route_scope(entry: &ScopedPlacementIrEntry) -> ScopeRouting {
     let source = &entry.ir;
@@ -206,7 +221,7 @@ fn route_scope(entry: &ScopedPlacementIrEntry) -> ScopeRouting {
     // one of them: its segment runs from a sensor pad to an actuator
     // pad and is routed like any other.
     if source.cells.is_empty() && source.outputs.is_empty() {
-        return Ok(source.clone());
+        return Ok((source.clone(), Vec::new()));
     }
     let Some(region) = source.region.clone() else {
         // The upstream placement pass fires `E_NO_CIRCUIT_REGION` and
@@ -220,7 +235,7 @@ fn route_scope(entry: &ScopedPlacementIrEntry) -> ScopeRouting {
             source.cells.is_empty() && source.outputs.is_empty(),
             "route_scope received a PlacementIr with cells or pads but no region — placement should have refused it",
         );
-        return Ok(source.clone());
+        return Ok((source.clone(), Vec::new()));
     };
 
     let mut ir = source.clone();
@@ -294,6 +309,13 @@ fn route_scope(entry: &ScopedPlacementIrEntry) -> ScopeRouting {
     if let Some(diagnostic) = unroutable(&nets, &trees, entry, &region, source_of_net) {
         return Err(diagnostic);
     }
+    // Every net is wired, and some of them climbed to stay off each
+    // other. Said once, here, because this is the stage that made the
+    // pairs: stages 3 and 4 rebuild the same trees and would repeat
+    // the finding against the same layout.
+    let advisories: Vec<Diagnostic> = tile_layer_clearance(&nets, &trees, &router, entry, &region)
+        .into_iter()
+        .collect();
     for net in net_order(&nets) {
         for coord in trees[&net].wire_path() {
             occupancy.insert(coord);
@@ -340,7 +362,7 @@ fn route_scope(entry: &ScopedPlacementIrEntry) -> ScopeRouting {
         return Err(congestion_diagnostic(entry, &region, used));
     }
 
-    Ok(ir)
+    Ok((ir, advisories))
 }
 
 /// Fill every cell's `wire_length` with the routed length of each of

@@ -97,6 +97,24 @@ pub enum DiagnosticCode {
     /// differ in what they say: raising `void` fixes the first and the
     /// last, and cannot fix the three in between.
     RouteCongestion,
+    /// Two of a scope's nets run within one step of each other across
+    /// layers — one strand directly over another, or over it and one
+    /// step across, which is the staircase dust climbs. Advisory
+    /// because it is not a fault in the layout: the routing pass keeps
+    /// two nets one step apart *in one plane*, and `spec/redstone`
+    /// §14.5 makes separating two a layer apart the physical tile
+    /// layer's obligation, because whether the upper strand reads the
+    /// lower one depends on what is standing between them and the
+    /// pseudo-2.5D model carries no answer. The escape is what makes
+    /// the pairs: a net climbing to clear another lands over it, or
+    /// beside it a layer up. Named here so the obligation is owed by
+    /// something a reader can see — the finding lists the coords and
+    /// the nets, which is what the tile catalogue has to separate and
+    /// what an author reading a dump would otherwise have to derive.
+    /// Fix: nothing in the source is wrong; a larger `size=WxH` gives
+    /// the nets room to go round on the plane rather than climb, which
+    /// is what removes the pairs.
+    RouteCrossLayerClearance,
     /// A routed driver segment (source pad or driver cell → sink coord,
     /// where the sink is either a downstream cell coord or an actuator
     /// output-pad coord, measured along the routed path rather than as
@@ -209,6 +227,7 @@ impl DiagnosticCode {
             Self::LogicUnusedSignal => "W_LOGIC_UNUSED_SIGNAL",
             Self::NoCircuitRegion => "E_NO_CIRCUIT_REGION",
             Self::RouteCongestion => "E_ROUTE_CONGESTION",
+            Self::RouteCrossLayerClearance => "W_ROUTE_CROSS_LAYER_CLEARANCE",
             Self::AttenuationLimit => "E_ATTENUATION_LIMIT",
             Self::LogicNestingTooDeep => "E_LOGIC_NESTING_TOO_DEEP",
             Self::LogicMisplacedBinding => "E_LOGIC_MISPLACED_BINDING",
@@ -233,7 +252,7 @@ impl DiagnosticCode {
             | Self::LogicMisplacedBinding
             | Self::LogicInvalidSignal
             | Self::LogicUnknownBindingKey => Severity::Error,
-            Self::LogicUnusedSignal => Severity::Warning,
+            Self::LogicUnusedSignal | Self::RouteCrossLayerClearance => Severity::Warning,
         }
     }
 }
