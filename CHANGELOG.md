@@ -105,27 +105,28 @@
 ### Breaking changes
 
 - *(redstone,cli)* The per-cell figure delay insertion writes is renamed `delay_ticks` →
-  `local_delay_ticks`: on the `PlacementPhase::Delayed` / `Legalized` variants, on the
-  `PlacedCellNode` / `PlacedOutputNode` accessors, and as the JSON key in the
-  `cairn synth --stage delay` and `--stage crossing` dumps.
+  `local_delay_ticks`: on the `PlacementPhase::Delayed` / `Legalized` variants, on
+  `PlacementPhase::delay_ticks()` and the `PlacedCellNode` / `PlacedOutputNode` accessors of the
+  same name, and as the JSON key in the `cairn synth --stage delay` and `--stage crossing` dumps.
 
   The old name claimed something the number is not. It is the cell's base delay plus the implicit
   buffer repeaters standing on every net that drives it, **summed over those nets** — what the wires
   feeding one cell cost. A combinational cell's output is ready when the *last* of its inputs
   settles, not after the sum of their arrivals, so a cell whose `a` port comes in over a segment
   carrying one buffer and whose `b` port over one carrying two is recorded at `base + 3` and settles
-  at `base + 2`. Read as a latency the figure runs one tick high per extra net, and the gap grows
-  with the fan-in.
+  at `base + 2`. Read as a latency the figure is off in both directions: it counts the buffers on
+  every incoming net where only the slowest matters, and it leaves out everything upstream of the
+  cell.
 
   The sum is kept and the name corrected rather than the other way round, because the sum is what
-  stage 4 is held to: `local_delay_ticks - base_delay_ticks` is exactly the buffer blocks crossing
-  legalization lays under that cell, and that identity is the only check the two passes have on each
-  other. A `max` would leave the buffers on every shorter segment in no tick figure at all, and
-  those blocks are real. Path latency — `assert latency(sig.in -> sig.out)`, spec §14.7 — maxes over
-  the incoming nets and walks back through the upstream cells; it belongs to the pass that evaluates
-  the assertion against the headless per-tick simulator, and neither that pass nor that simulator is
-  built. Nothing read the figure as a latency, so no compiled artifact changes: what moves is the
-  name, the accessors, and one key in the stage dumps.
+  stage 4 is held to: `local_delay_ticks - base_delay_ticks` is `BUFFER_REPEATER_TICKS` per block in
+  that cell's deduplicated `buffer_coords`, and that identity is the only check the two passes have
+  on each other. A `max` would leave the buffers on every shorter segment in no tick figure at all,
+  and those blocks are real. Path latency — `assert latency(sig.in -> sig.out)`, spec §14.7 — maxes
+  over the incoming nets and walks back through the upstream cells; it belongs to the pass that
+  evaluates the assertion against the headless per-tick simulator, and neither is built. The
+  assertion form is not parsed today either. The redstone stages reach no compiled artifact; what moves is the name, the accessors, and
+  one key in the stage dumps.
 
 - *(core)* The palette is a **set with a canonical rendering**, not an insertion log. Slot `0` is
   still air; every other entry is now placed by `(id, properties)` — the id, then the state

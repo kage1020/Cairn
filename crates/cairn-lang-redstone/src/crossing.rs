@@ -1149,6 +1149,114 @@ mod tests {
     /// `sig.s0 = sig.a and sig.a` is how a `.crn` reaches this shape —
     /// see `ports_sharing_a_net_are_measured_once` in
     /// `tests/routing.rs`.
+    /// A cell fed by two *distinct* nets is charged for every buffer
+    /// standing on both of them.
+    ///
+    /// `phase4_buffer_tick_invariant_holds` generates every cell from
+    /// one net, so on its cases a sum over the driving nets and a max
+    /// over them are the same number and the proptest cannot tell
+    /// them apart. This is the shape where they differ, and it is the
+    /// shape the stage-3 / stage-4 identity is actually load-bearing
+    /// on: `sig.a` reaches the comparator over 42 blocks of dust and
+    /// two buffers, the upstream cell over 20 blocks and one, so the
+    /// figure is `base + 3` where a max would write `base + 2` and
+    /// leave the block on the shorter segment standing under no tick
+    /// at all.
+    ///
+    /// Threaded through routing → delay → crossing rather than handed
+    /// a `Delayed` fixture, for the reason
+    /// `ports_sharing_a_net_share_the_repeater_the_charge_and_the_dust`
+    /// is: the tick figure and the blocks it is checked against are
+    /// written by two different passes, and a fixture that skipped
+    /// one would check a pass against itself. `cells[0]` drives the
+    /// comparator without being driven itself, which is what makes
+    /// its segment short while `sig.a` runs the width of the region.
+    #[test]
+    fn two_distinct_nets_charge_a_cell_for_every_buffer_under_it() {
+        let mut ir = PlacementIr::new(Edition::Java);
+        ir.region = Some(reservation(48, 3, 2));
+        ir.inputs.push(crate::netlist_ir::NetlistInput {
+            name: cairn_lang_core::ast::DottedRef::new("sig".into(), vec!["a".into()]),
+            span: Span::default(),
+        });
+        ir.cells.push(PlacedCellNode {
+            cell: EditionCell::JavaRepeaterOr,
+            drivers: Vec::new(),
+            coord: CellCoord::new(20, 0, 2),
+            phase: PlacementPhase::Unrouted,
+            span: Span::default(),
+        });
+        ir.cells.push(PlacedCellNode {
+            cell: EditionCell::JavaComparatorAnd,
+            drivers: vec![
+                CellPortDriver {
+                    port: PortName::A,
+                    net: NetRef::Cell(0),
+                },
+                CellPortDriver {
+                    port: PortName::B,
+                    net: NetRef::Input(0),
+                },
+            ],
+            coord: CellCoord::new(40, 0, 2),
+            phase: PlacementPhase::Unrouted,
+            span: Span::default(),
+        });
+        let routed = compile_routing(&scoped(ScopeKind::Struct, "two-nets", ir));
+        assert!(routed.diagnostics.is_empty(), "{:?}", routed.diagnostics);
+        let delayed = compile_delay(&routed.scoped);
+        assert!(delayed.diagnostics.is_empty(), "{:?}", delayed.diagnostics);
+        let legalized = compile_crossing(&delayed.scoped);
+        assert!(
+            legalized.diagnostics.is_empty(),
+            "three repeaters on free wire need no escape: {:?}",
+            legalized.diagnostics,
+        );
+
+        let cell = &legalized.scoped.scopes[0].ir.cells[1];
+        let buffers = cell.buffer_coords();
+        let per_port = |port| {
+            buffers
+                .iter()
+                .filter(|b| b.port == BufferSegment::Port(port))
+                .count()
+        };
+        // The counts, not just the total: equal counts would make the
+        // sum and the max differ by an amount this fixture could not
+        // attribute to either net.
+        assert_eq!(
+            (per_port(PortName::A), per_port(PortName::B)),
+            (1, 2),
+            "one buffer on the cell segment, two on the sensor's: {buffers:?}",
+        );
+        let distinct: HashSet<CellCoord> = buffers.iter().map(|b| b.coord).collect();
+        assert_eq!(
+            distinct.len(),
+            3,
+            "two distinct nets share no repeater: {buffers:?}",
+        );
+
+        let base = EditionCell::JavaComparatorAnd.base_delay_ticks();
+        let ticks = cell
+            .local_delay_ticks()
+            .expect("legalized cells carry Some(local_delay_ticks)");
+        let blocks = u32::try_from(distinct.len()).expect("three blocks fit in u32");
+        assert_eq!(
+            ticks - base,
+            blocks * BUFFER_REPEATER_TICKS,
+            "every block stage 4 laid is a tick stage 3 charged",
+        );
+        // And the figure a max would have written, so the test fails
+        // rather than narrows if the fold ever changes.
+        let widest = u32::try_from(per_port(PortName::A).max(per_port(PortName::B)))
+            .expect("two buffers fit in u32");
+        assert_ne!(
+            ticks - base,
+            widest * BUFFER_REPEATER_TICKS,
+            "a max over the driving nets would drop the shorter segment's block",
+        );
+    }
+
     #[test]
     fn ports_sharing_a_net_share_the_repeater_the_charge_and_the_dust() {
         let mut ir = PlacementIr::new(Edition::Java);
@@ -1704,13 +1812,15 @@ mod tests {
             /// assertion rather than each pass's own boundary rows
             /// in isolation.
             ///
-            /// This identity is why stage 3 sums a cell's incoming
-            /// segments rather than maxing over them: every buffer
-            /// block this pass lays under a cell has to appear in
-            /// that cell's figure, and a `max` would drop the blocks
-            /// standing on every shorter segment. The figure is a
-            /// wire cost, not the tick the cell's output settles on;
-            /// see the [`crate::delay`] module doc.
+            /// Every cell this strategy builds is driven by one net
+            /// (`Input(0)`, sometimes on both ports), so a sum over
+            /// the driving nets and a max over them agree on every
+            /// case it generates and this proptest cannot tell them
+            /// apart — changing the fold to a max leaves it green.
+            /// `two_distinct_nets_charge_a_cell_for_every_buffer_under_it`
+            /// covers the multi-net shape, which is where the two
+            /// part company and where this identity is what keeps
+            /// stage 3 a sum.
             ///
             /// Uses hand-built `Unrouted` cells threaded through
             /// `compile_routing → compile_delay → compile_crossing`.

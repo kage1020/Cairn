@@ -57,17 +57,23 @@
 //! repeater contributes its ticks wherever it stands. Stage 4
 //! (crossing legalization) puts them on coords, walking the same
 //! routed paths this pass measured, and changes no tick count doing
-//! it. Two stages rather than one because the tick figure is what
-//! stage 4's coords are checked against, and it should not wait on a
-//! coord assignment to be readable.
+//! it. Two stages because §14.5 lists them as two; they agree by
+//! construction through `buffer_count_for_segment`, and
+//! `phase4_buffer_tick_invariant_holds` and
+//! `two_distinct_nets_charge_a_cell_for_every_buffer_under_it` check
+//! that they do.
 //!
 //! **`local_delay_ticks` is a local cost, not an arrival time.** The
 //! figure this pass writes is the cell's own base delay plus the
 //! implicit buffer repeaters standing on *every* net that feeds it,
-//! summed. That is what the wires into this cell cost, and it is
-//! the number stage 4 is held to — one tick per buffer block standing
-//! under the cell, which is the identity
-//! `phase4_buffer_tick_invariant_holds` asserts.
+//! summed. That is what the wires into this cell cost, and it is the
+//! number stage 4 is held to: `local_delay_ticks - base_delay_ticks`
+//! equals `BUFFER_REPEATER_TICKS` per block in the cell's
+//! deduplicated `buffer_coords`. `phase4_buffer_tick_invariant_holds`
+//! asserts that identity over generated single-net scopes and
+//! `two_distinct_nets_charge_a_cell_for_every_buffer_under_it` over
+//! the multi-net shape, which is the one where a sum and a max part
+//! company.
 //!
 //! It is deliberately **not** the tick at which the cell's output
 //! settles. A combinational cell settles when the *last* of its
@@ -80,12 +86,15 @@
 //!                     arrival(source(n)) + buffer_ticks(segment(n, cell))
 //! ```
 //!
-//! The two part company as soon as one cell is driven by two nets
-//! carrying different buffer counts: a cell whose `a` port arrives
-//! over a segment with one buffer and whose `b` port arrives over one
-//! with two is charged `base + 3` here and settles at `base + 2`.
-//! `local_delay_is_the_wire_cost_not_the_arrival_time` pins both
-//! numbers side by side so the gap stays recorded rather than
+//! The two part company whenever more than one incoming net carries a
+//! buffer, or any driver is itself a cell: a cell whose `a` port
+//! arrives over a segment with one buffer and whose `b` port arrives
+//! over one with two is charged `base + 3` here and settles at
+//! `base + 2`. The figure is off in both directions, not just high —
+//! it counts the buffers on every incoming net where only the slowest
+//! matters, and it leaves out everything upstream of the cell.
+//! `local_delay_is_the_wire_cost_not_the_arrival_time` derives both
+//! numbers from one fixture so the gap stays recorded rather than
 //! rediscovered.
 //!
 //! Arrival time is not computed anywhere in this crate, and nothing
@@ -93,11 +102,8 @@
 //! `assert latency(sig.in -> sig.out)` (`spec/redstone` §14.7) is a
 //! *path* latency across the DAG; it belongs to the pass that
 //! evaluates it against the headless per-tick simulator §14.7
-//! describes, and neither that pass nor that simulator is built.
-//! Keeping this figure
-//! local is what lets stages 3 and 4 stay checkable against each
-//! other: a `max` would drop the buffers on every shorter segment,
-//! and those blocks are real and stand under the cell.
+//! describes, and neither of those is built — `assert latency(...)`
+//! is not even parsed today.
 //!
 //! `E_ATTENUATION_LIMIT` fires only when a driver segment exceeds the
 //! v1 sanity cap [`MAX_ATTENUATION_SEGMENT`]. Segments in the
@@ -218,7 +224,7 @@ impl DelayOutput {
 /// One entry per non-empty [`PlacementIr`] whose delay insertion
 /// succeeded; scopes that raise an Error-severity diagnostic (today,
 /// only `E_ATTENUATION_LIMIT`) are elided from the output so a partial
-/// `local_delay_ticks` set cannot pollute a future tick simulator.
+/// `local_delay_ticks` set cannot pollute a downstream reader.
 #[must_use]
 pub fn compile_delay(routed: &ScopedPlacementIr) -> DelayOutput {
     let mut out = DelayOutput::new();
@@ -255,8 +261,8 @@ fn delay_scope(entry: &ScopedPlacementIrEntry) -> ScopeDelay {
     // `local_delay_ticks`, and the producer↔variant table on
     // `PlacementPhase` promises
     // `(Some, Some)` after this stage — silently returning `(None,
-    // None)` on a partial IR would let a future tick simulator read a
-    // Stage-1 shape from a Stage-3 output.
+    // None)` on a partial IR would let a downstream reader take a
+    // Stage-1 shape for a Stage-3 output.
     let Some(region) = source.region.clone() else {
         if source.cells.is_empty() && source.outputs.is_empty() {
             return Ok(source.clone());
@@ -385,13 +391,9 @@ fn delay_scope(entry: &ScopedPlacementIrEntry) -> ScopeDelay {
 /// more than once. See [`sum_over_driving_nets`], which stage 2
 /// measures the same cell with.
 ///
-/// Summed over those nets rather than maxed over them, because the
-/// figure is the buffer cost of the wires feeding this cell and every
-/// one of those buffers is a block stage 4 lays. It is not the tick
-/// the cell's output settles on — that is a `max` and a walk back
-/// through the upstream cells, and nothing computes it yet. The
-/// module doc states the distinction in full;
-/// `local_delay_is_the_wire_cost_not_the_arrival_time` pins it.
+/// Summed over those nets rather than maxed over them: the figure is
+/// a local wire cost and not the tick the cell's output settles on.
+/// See the module doc.
 ///
 /// Computes into a side vector first so `ir.cells` can be borrowed
 /// immutably while the driver routes are measured through
@@ -556,9 +558,9 @@ mod tests {
     //! - the cell-driver branch of `attenuation_diagnostic` (needs a
     //!   segment past 256 blocks between two cells, which no realistic
     //!   `.crn` produces);
-    //! - the missing-region refusal introduced by Critical 4, which
-    //!   can only be built by hand-constructing a `PlacementIr`
-    //!   because `compile_placement` already elides that shape;
+    //! - the missing-region refusal, which can only be built by
+    //!   hand-constructing a `PlacementIr` because
+    //!   `compile_placement` already elides that shape;
     //! - `buffer_repeater_ticks_for_segment` at multiple boundary
     //!   segment lengths (0, 15, 16, 30, 31, cap) so a formula change
     //!   trips per-boundary rather than by aggregate.
@@ -765,42 +767,37 @@ mod tests {
     /// A cell whose `a` port arrives over a segment carrying one
     /// buffer and whose `b` port over one carrying two is charged for
     /// three buffers here, because three buffer blocks stand on the
-    /// wires that feed it and stage 4 lays all three. That is the
-    /// identity `phase4_buffer_tick_invariant_holds` holds the two
-    /// stages to, and it is why this fold is a sum.
+    /// wires that feed it and stage 4 lays all three —
+    /// `two_distinct_nets_charge_a_cell_for_every_buffer_under_it` is
+    /// where that end-to-end identity is pinned.
     ///
-    /// Its output settles two ticks after its inputs, because a
-    /// combinational cell settles when the *last* of them arrives. So
-    /// an arrival time maxes where this sums, and the two numbers
-    /// differ by the buffer on the shorter segment — a real block,
-    /// which a `max` would leave in no tick figure at all. Both
-    /// numbers are asserted so the gap stays a recorded decision
-    /// rather than something a later reader re-derives and mistakes
-    /// for arithmetic gone wrong.
+    /// Its output settles at `base + 2`, because a combinational cell
+    /// settles when the *last* of its inputs arrives. So an arrival
+    /// time maxes where this sums. Both figures are derived here from
+    /// the same two segment lengths — the recorded one through the
+    /// fold, the arrival one through the same `max` an arrival walk
+    /// would take — so a fold that switched to a max collapses the
+    /// two and trips the assert, rather than the assert restating a
+    /// constant written twice.
     ///
     /// Calls the fold directly with a stand-in `segment_of` rather
     /// than routing a layout: what is pinned is how the per-net
     /// charges combine, and two segments whose buffer counts differ
     /// by one are three lines here and a placement puzzle through the
-    /// router. `attenuation_cap_measures_the_routed_output_segment`
-    /// is where the geometry those lengths stand for is pinned.
+    /// router. `a_cell_is_charged_once_per_net_that_drives_it` is
+    /// where real routed input segments are measured.
     #[test]
     fn local_delay_is_the_wire_cost_not_the_arrival_time() {
-        // One buffer on the short segment, two on the long one. What
-        // separates them is the counts, not the lengths.
+        // One buffer on the short segment, two on the long one.
         const SHORT: u32 = DUST_ATTENUATION_LIMIT + 1;
         const LONG: u32 = 2 * DUST_ATTENUATION_LIMIT + 1;
         assert_eq!(buffer_count_for_segment(SHORT), 1);
         assert_eq!(buffer_count_for_segment(LONG), 2);
 
+        // No region and no inputs: the fold walks `ir.cells` and
+        // reaches the nets only through the stand-in `segment_of`, so
+        // carrying geometry here would suggest it mattered.
         let mut ir = PlacementIr::new(Edition::Java);
-        ir.region = Some(reservation(8, 3, 2));
-        for name in ["a", "b"] {
-            ir.inputs.push(crate::netlist_ir::NetlistInput {
-                name: cairn_lang_core::ast::DottedRef::new("sig".into(), vec![name.into()]),
-                span: Span::default(),
-            });
-        }
         ir.cells.push(placed_cell(
             EditionCell::JavaComparatorAnd,
             CellCoord::new(4, 0, 1),
@@ -835,20 +832,23 @@ mod tests {
         let recorded = ir.cells[0]
             .local_delay_ticks()
             .expect("delay insertion writes Some(_)");
+        let ticks = |segment| buffer_count_for_segment(segment) * BUFFER_REPEATER_TICKS;
         assert_eq!(
             recorded,
-            base + 3 * BUFFER_REPEATER_TICKS,
+            base + ticks(SHORT) + ticks(LONG),
             "the wire cost is every buffer on every net feeding the cell",
         );
 
         // What the cell's output actually settles on — the longer of
         // the two segments, not both of them — and what no pass in
-        // this crate computes yet.
-        let arrival = base + 2 * BUFFER_REPEATER_TICKS;
+        // this crate computes yet. Derived from the same two lengths
+        // through the `max` an arrival walk would take, so a fold
+        // that became a max would make the two figures equal.
+        let arrival = base + ticks(SHORT).max(ticks(LONG));
         assert_eq!(
-            recorded,
-            arrival + BUFFER_REPEATER_TICKS,
-            "the wire cost sits one buffer above the arrival time: the buffer on the shorter segment",
+            recorded - arrival,
+            ticks(SHORT),
+            "the wire cost sits above the arrival time by the buffers on the shorter segment",
         );
     }
 
@@ -900,9 +900,9 @@ mod tests {
     #[test]
     fn missing_region_with_cells_fires_no_circuit_region() {
         // A hand-built `PlacementIr` with cells but no region reaches
-        // delay because it skipped placement. Critical 4 hardens this
-        // path to refuse instead of silently passing through with a
-        // `(None, None)` phase-table violation.
+        // delay because it skipped placement. The pass refuses
+        // instead of silently passing through with a `(None, None)`
+        // phase-table violation.
         let mut ir = PlacementIr::new(Edition::Java);
         ir.cells.push(placed_cell(
             EditionCell::JavaComparatorAnd,
@@ -956,9 +956,9 @@ mod tests {
     #[should_panic(expected = "topological invariant broken")]
     fn out_of_range_net_ref_cell_panics_loudly() {
         // A hand-built IR with `NetRef::Cell(u32::MAX)` violates the
-        // synthesis-side topological invariant. Critical 3 hardens
-        // this from "silent last-cell fallback" to a loud release
-        // panic so a caller-side bug cannot produce silently wrong
+        // synthesis-side topological invariant. The release-mode
+        // panic turns a silent last-cell fallback into a loud
+        // failure, so a caller-side bug cannot produce silently wrong
         // `local_delay_ticks`.
         let mut ir = PlacementIr::new(Edition::Java);
         ir.region = Some(reservation(5, 3, 2));

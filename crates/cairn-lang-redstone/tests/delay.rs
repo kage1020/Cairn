@@ -12,11 +12,9 @@
 //! per-scope independence when
 //! a module carries more than one scope.
 //!
-//! Every figure asserted here is the wire cost of the nets feeding a
-//! cell — that cell's base delay plus the buffers on all of them,
-//! summed — and not the tick the cell's output settles on. The unit
-//! test `local_delay_is_the_wire_cost_not_the_arrival_time` is where
-//! the two are pinned apart.
+//! Every figure asserted here is a local wire cost, not an arrival
+//! time; the `cairn_lang_redstone::delay` module doc sets out the
+//! difference.
 
 use std::path::PathBuf;
 

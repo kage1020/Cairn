@@ -298,9 +298,9 @@ enum SynthStage {
     Edition,
     /// Placement IR: 1D coordinate assignment over the Edition Netlist
     /// IR against `--edition`. Stage 1 of `spec/redstone` §14.5's
-    /// place-and-route pipeline. `wire_length` and `local_delay_ticks` are
-    /// reserved as `Option`s and stay `None` until the routing and
-    /// delay-insertion follow-up passes land.
+    /// place-and-route pipeline. `wire_length` and `local_delay_ticks`
+    /// stay `None` at this stage; `--stage route` and `--stage delay`
+    /// fill them.
     Placement,
     /// Routed Placement IR: Steiner routing over the Placement IR
     /// against `--edition`. Stage 2 of `spec/redstone` §14.5's
@@ -312,7 +312,8 @@ enum SynthStage {
     /// Delayed Placement IR: delay insertion over the routed Placement
     /// IR against `--edition`. Stage 3 of `spec/redstone` §14.5's
     /// place-and-route pipeline. Fills every cell's `local_delay_ticks`
-    /// with the sum of the cell's physical base delay
+    /// with the sum (a per-cell wire cost, not an arrival time) of
+    /// the cell's physical base delay
     /// ([`cairn_lang_redstone::EditionCell::base_delay_ticks`]) and
     /// each implicit buffer repeater's
     /// [`cairn_lang_redstone::BUFFER_REPEATER_TICKS`] contribution
@@ -321,13 +322,6 @@ enum SynthStage {
     /// `E_ATTENUATION_LIMIT` when a segment exceeds the v1 sanity cap
     /// [`cairn_lang_redstone::MAX_ATTENUATION_SEGMENT`], past which the
     /// buffer chain a segment needs is longer than v1 will build.
-    ///
-    /// The figure is the cost of the wires feeding a cell, not the
-    /// tick its output settles on: a cell settles when the last of
-    /// its inputs arrives, so an arrival time maxes over the incoming
-    /// nets where this sums over them. Nothing computes arrival yet —
-    /// `assert latency(...)` (`spec/redstone` §14.7) waits on the
-    /// headless per-tick simulator, which is not built.
     Delay,
     /// Legalized Placement IR: crossing legalization over the delayed
     /// Placement IR against `--edition`. Stage 4 of `spec/redstone`

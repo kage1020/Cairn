@@ -24,10 +24,7 @@ Every placed cell records which of the last four passes touched it as a `Placeme
 
 Still to come: edition legalization, the tick simulator, and the QC/BUD refusal (`E_NO_PORTABLE_IMPL`).
 
-`local_delay_ticks` is a local cost, not a path latency.
-It is what the wires feeding one cell cost — that cell's base delay plus the buffer repeaters standing on every net that drives it, summed over those nets — which is what makes it checkable against the buffer blocks crossing legalization lays under the same cell.
-A combinational cell's output settles when the *last* of its inputs arrives, so an arrival time maxes over the incoming nets and walks back through the upstream ones.
-Nothing computes arrival yet: `assert latency(sig.in -> sig.out)` ([redstone §14.7](https://cairn.kage1020.com/spec/redstone/)) waits on the headless per-tick simulator, and so does the pass that would evaluate it.
+`local_delay_ticks` is a local cost, not a path latency: that cell's base delay plus the buffer repeaters on every net that drives it, summed, which is what crossing legalization's buffer blocks are checked against. A combinational cell settles when the *last* of its inputs arrives, so an arrival time maxes over the incoming nets and walks back through the upstream cells; nothing computes it yet, since `assert latency(sig.in -> sig.out)` ([redstone §14.7](https://cairn.kage1020.com/spec/redstone/)) is neither parsed nor evaluated.
 
 ## Pipeline
 

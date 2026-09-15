@@ -220,8 +220,8 @@ impl CellCoord {
 /// wants the number of blocks deduplicates by `coord`**; a consumer
 /// that wants a segment's repeaters filters by `port`. The delay pass
 /// charges ticks per driving net for the same reason, so
-/// `local_delay_ticks - base_delay_ticks` counts the deduplicated blocks
-/// and not the entries.
+/// `local_delay_ticks - base_delay_ticks` is `BUFFER_REPEATER_TICKS`
+/// per deduplicated block and not per entry.
 ///
 /// **Order contract on `Vec<BufferCoord>`** (as returned by
 /// [`PlacedCellNode::buffer_coords`]): entries appear in
@@ -448,17 +448,11 @@ pub enum PlacementPhase {
     Delayed {
         /// Preserved from [`Self::Routed`].
         wire_length: u32,
-        /// This cell's own base delay (`spec/redstone` §14.4) plus
-        /// the implicit buffer repeaters standing on every net that
-        /// feeds it, summed over those nets.
-        ///
-        /// A **local cost**, not an arrival time: it is what the
-        /// wires into this cell cost, and `local_delay_ticks -
-        /// base_delay_ticks` is exactly the buffer blocks stage 4
-        /// lays under the cell. The tick its output settles on is a
-        /// `max` over the incoming nets and a walk back through the
-        /// upstream cells — see the [`crate::delay`] module doc — and
-        /// nothing in this crate computes it yet.
+        /// The owning node's base delay (`spec/redstone` §14.4; zero
+        /// for an actuator pad) plus `BUFFER_REPEATER_TICKS` per
+        /// implicit buffer repeater on each distinct net feeding it.
+        /// A local wire cost, not an arrival time — see the
+        /// [`crate::delay`] module doc.
         local_delay_ticks: u32,
     },
     /// After crossing legalization: buffer coordinates for the implicit
@@ -494,8 +488,7 @@ impl PlacementPhase {
 
     /// Local delay ticks once delay insertion has run, `None`
     /// otherwise. See the `local_delay_ticks` field on
-    /// [`Self::Delayed`] for what the figure covers, and the
-    /// [`crate::delay`] module doc for why it is not an arrival time.
+    /// [`Self::Delayed`].
     #[must_use]
     pub const fn local_delay_ticks(&self) -> Option<u32> {
         match self {
@@ -1142,9 +1135,7 @@ impl PlacedCellNode {
         self.phase.wire_length()
     }
 
-    /// This cell's base delay plus the buffer repeaters on the wires
-    /// feeding it, once delay insertion has run — a local cost, not
-    /// the tick its output settles on. See
+    /// Local delay ticks once delay insertion has run. See
     /// [`PlacementPhase::local_delay_ticks`].
     #[must_use]
     pub const fn local_delay_ticks(&self) -> Option<u32> {

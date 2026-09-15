@@ -230,9 +230,9 @@ fn cli_synth_stage_placement_java_places_or_cell_beside_the_pad_column() {
     // land at `{x:1,y:0,z:1}` inside its `circuit region=floor void=2`
     // reservation (width/depth copied from `size=7x5`) — one column in
     // from the pad column and one row in from the near edge, per the
-    // spaced row. `wire_length`
-    // and `local_delay_ticks` are absent from the JSON today because Steiner
-    // routing and delay insertion are follow-up passes.
+    // spaced row. `wire_length` and `local_delay_ticks` are absent at
+    // `--stage placement`, which runs neither routing nor delay
+    // insertion.
     let path = examples_dir().join("redstone-door.crn");
     let out = run_synth(&[
         "--experimental-logic-synth",
@@ -639,6 +639,12 @@ fn cli_synth_stage_delay_java_fills_local_delay_ticks() {
     );
     assert_eq!(cells[0]["wire_length"], 3);
     assert_eq!(cells[0]["local_delay_ticks"], 1);
+    // The rename is a breaking change to this dump, so the old key
+    // has to be gone and not merely joined by the new one.
+    assert!(
+        cells[0].get("delay_ticks").is_none(),
+        "the pre-rename key must not survive alongside local_delay_ticks: {stdout}",
+    );
 }
 
 #[test]
@@ -673,6 +679,10 @@ fn cli_synth_stage_delay_bedrock_matches_bedrock_torch_or() {
     assert_eq!(ir["cells"][0]["cell"], "bedrock_torch_or");
     assert_eq!(ir["cells"][0]["wire_length"], 3);
     assert_eq!(ir["cells"][0]["local_delay_ticks"], 0);
+    assert!(
+        ir["cells"][0].get("delay_ticks").is_none(),
+        "the pre-rename key must not survive alongside local_delay_ticks: {stdout}",
+    );
 }
 
 #[test]
@@ -857,6 +867,13 @@ fn cli_synth_stage_crossing_java_legalizes_or_cell_scope() {
     assert!(
         cells[0]["coord"].get("layer").is_none(),
         "plane cell coord must serde-skip its layer field: {stdout}",
+    );
+    // Stage 4 carries stage 3's figure forward, under stage 3's new
+    // name and not its old one.
+    assert_eq!(cells[0]["local_delay_ticks"], 1);
+    assert!(
+        cells[0].get("delay_ticks").is_none(),
+        "the pre-rename key must not survive alongside local_delay_ticks: {stdout}",
     );
 }
 

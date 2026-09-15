@@ -52,8 +52,8 @@ fn edition_netlist_from_source(
 /// `JavaRepeaterOr` cell one column in from the pad column of its
 /// `circuit region=floor void=2` reservation, and the reservation
 /// copies the enclosing struct's `size=7x5` footprint. `wire_length`
-/// and `local_delay_ticks` are absent today because Steiner routing and
-/// delay insertion are follow-up passes.
+/// and `local_delay_ticks` are absent at `--stage placement`, which
+/// runs neither routing nor delay insertion.
 #[test]
 fn redstone_door_java_places_or_cell_beside_the_pad_column() {
     let source = load_example("redstone-door.crn");

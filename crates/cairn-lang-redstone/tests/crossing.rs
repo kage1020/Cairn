@@ -792,14 +792,37 @@ struct reach size=40x6
     let out = compile_crossing(&delayed);
     let json = serde_json::to_string(&out.scoped).expect("serialise");
 
+    // The output node's own object, not the whole dump: a cell emits
+    // `wire_length` and `local_delay_ticks` too, so a substring search
+    // over the dump passes even when the actuator serialises a key of
+    // its own under the wrong name.
+    let value: serde_json::Value = serde_json::from_str(&json).expect("dump parses");
+    let output = value
+        .as_array()
+        .and_then(|scopes| scopes.iter().find(|s| s["name"] == "reach"))
+        .map(|scope| &scope["ir"]["outputs"][0])
+        .expect("the reach scope carries one actuator");
+
     for key in [
-        "\"stage\":\"crossing\"",
-        "\"pad\":",
-        "\"wire_length\":",
-        "\"local_delay_ticks\":",
-        "\"buffer_coords\":",
-        "\"port\":\"out\"",
+        "name",
+        "driver",
+        "pad",
+        "stage",
+        "wire_length",
+        "local_delay_ticks",
+        "buffer_coords",
     ] {
-        assert!(json.contains(key), "the dump must carry {key}: {json}");
+        assert!(
+            output.get(key).is_some(),
+            "the actuator's own object must carry {key}: {output}",
+        );
     }
+    assert_eq!(output["stage"], "crossing");
+    // A pad's buffers name the wire out rather than one of the driver
+    // ports a cell's do.
+    assert_eq!(output["buffer_coords"][0]["port"], "out");
+    assert!(
+        output.get("delay_ticks").is_none(),
+        "the actuator must not carry the pre-rename key: {output}",
+    );
 }

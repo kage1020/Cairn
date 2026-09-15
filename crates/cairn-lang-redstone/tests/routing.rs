@@ -208,7 +208,7 @@ struct sim size=7x5
     for cell in &entry.ir.cells {
         assert!(
             cell.local_delay_ticks().is_none(),
-            "local_delay_ticks must not appear (stage 3 is future work), got {:?}",
+            "local_delay_ticks must not appear before delay insertion runs, got {:?}",
             cell.local_delay_ticks(),
         );
     }

@@ -26,10 +26,9 @@
 //! against the actual post-routing occupancy; [`delay::compile_delay`] runs stage 3
 //! (delay insertion) over the routed IR, promoting every cell's
 //! `local_delay_ticks` from `None` to `Some(base delay + implicit buffer
-//! repeater ticks)` — the cost of the wires feeding a cell, summed
-//! over the nets that drive it, and not the tick the cell's output
-//! settles on — and refusing with `E_ATTENUATION_LIMIT` whenever a
-//! single driver segment exceeds the v1 sanity cap; and
+//! repeater ticks)` — a local wire cost, not an arrival time, as
+//! [`delay`] sets out — and refusing with `E_ATTENUATION_LIMIT`
+//! whenever a single driver segment exceeds the v1 sanity cap; and
 //! [`crossing::compile_crossing`] runs stage 4 (crossing legalization)
 //! over the delayed IR, filling every cell's `buffer_coords` with the
 //! coord of each implicit buffer repeater the delay pass counted. The
