@@ -123,19 +123,22 @@ at the primary `offset` side. The mirrored cut still appears in the wall, but th
 one coordinate.
 
 **A port is somewhere a wall was opened.** Both port roles are openings cut through masonry, so a
-placement that paints no wall row anchors neither: a `door` needs one course to carve, and a
-`window` needs its whole rectangle inside one.
+placement whose walls do not reach the rows the opening needs anchors neither: a `door` needs the
+row it opens at inside one course, and a `window` needs its whole rectangle inside one.
 
 ```
-offset + size.w ≤ wall_length                    # horizontal
-every row of y … y + size.h - 1 in one course    # vertical
+row 1 in one course                              # door
+offset + size.w ≤ wall_length                    # window, horizontal
+every row of y … y + size.h - 1 in one course    # window, vertical
 ```
 
 A `walls height=H` member under `level y=N` paints world rows `N + 1 … N + H` — one above the
 level's base row, which is where that level's floor slab would go, though a level-scoped `floor` is
 deferred today and the struct's own slab owns row `0`. Courses that touch merge, so `walls height=5` plus a `level y=5 walls
 height=4` is one wall from row 1 to row 9 and a window spanning the seam is inside it; courses with
-air between them do not, and a window hung in the gap is outside every one of them.
+air between them do not, and a window hung in the gap is outside every one of them. A `door` member
+of the `def` body opens at row `1`, so a placement whose only masonry is a `level y=6 walls` is a
+wall the doorway never reaches — the same body's `window` is refused for the same reason.
 
 The rows a port is judged against are the rows the placement **painted**, which is the same value
 the openings pass cut against — not a second reading of the `def`. A `walls` whose `mat_slot=` does

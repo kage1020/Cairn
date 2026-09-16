@@ -93,9 +93,25 @@ impl WallColumn {
         let Some(y_end) = y_start.checked_add(last_offset) else {
             return false;
         };
+        self.course_top_at(y_start)
+            .is_some_and(|course_top| y_end <= course_top)
+    }
+
+    /// The last row of the course that holds `y`, or `None` when no
+    /// course does.
+    ///
+    /// The question a `door` asks: it opens at one row and takes what
+    /// the course above that row will give it, so the answer has to be
+    /// the top of *that* course rather than the top of the tallest one.
+    /// A `window` asks the same column [`Self::contains_rows`], which is
+    /// this answer plus "and the rectangle ends at or below it" — one
+    /// implementation, so the two members cannot come to disagree about
+    /// where the masonry is.
+    pub(super) fn course_top_at(&self, y: u32) -> Option<u32> {
         self.spans
             .iter()
-            .any(|(start, end)| *start <= y_start && y_end <= *end)
+            .find(|(start, end)| *start <= y && y <= *end)
+            .map(|(_, end)| *end)
     }
 }
 
@@ -202,6 +218,26 @@ mod tests {
         assert_eq!(column.to_string(), format!("y=3..={}", u32::MAX));
         assert!(column.contains_rows(3, 1));
         assert!(column.contains_rows(u32::MAX, 1));
+    }
+
+    #[test]
+    fn the_course_a_row_sits_in_is_the_one_that_caps_what_opens_there() {
+        // `walls height=2` plus `level y=6 walls height=2`: a door
+        // opening at row 1 is capped by row 2, not by row 8 — the second
+        // course is a different wall, with four rows of air below it.
+        let column = WallColumn::from_walls([(0, 2), (6, 2)]);
+        assert_eq!(column.course_top_at(1), Some(2));
+        assert_eq!(column.course_top_at(2), Some(2));
+        assert_eq!(column.course_top_at(7), Some(8));
+        assert_eq!(column.course_top_at(3), None, "the gap holds no course");
+        assert_eq!(column.course_top_at(0), None, "the floor slab owns row 0");
+        assert_eq!(column.course_top_at(9), None);
+    }
+
+    #[test]
+    fn a_row_in_no_course_at_all_has_no_top() {
+        let column = WallColumn::from_walls([]);
+        assert_eq!(column.course_top_at(1), None);
     }
 
     #[test]

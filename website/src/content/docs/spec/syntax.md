@@ -189,6 +189,14 @@ rejected with `W_DEFERRED_MEMBER`, and only the primary is painted.
 The same column resolves both the openings cut and any `connect` walkway anchored to this door ([§9.3.5](components-editing-sites#935-ports-and-connect)).
 Numeric offsets (`at=N`) are reserved for a future extension.
 
+**Which rows a door opens.** A door under `level y=N` opens at row `N + 1`, the row above that
+level's base plane, and takes the two rows a doorway wants or as much of that row's wall course as
+there is above it — so a door under a one-row course opens one row rather than cutting into the
+roof. The row it opens at MUST be inside a course of the masonry; a door written against walls that
+do not reach it is `W_DEFERRED_MEMBER` and cuts nothing, the same finding the `window` on that body
+earns ([§9.3.5](components-editing-sites#935-ports-and-connect) states the courses a `walls`
+paints).
+
 ## 5.5 IDs, classes, addresses
 
 Important members MAY declare `id=`, and `class=` groups members. Members without an `id=` get a

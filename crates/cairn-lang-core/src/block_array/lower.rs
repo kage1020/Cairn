@@ -105,6 +105,16 @@ const PRESSURE_PLATE_TOKEN: &str = "pressure_plate.default";
 /// no blockstates, so it has nothing to require of the block it names.
 const PRESSURE_PLATE_BASE_ID: &str = "minecraft:oak_pressure_plate";
 
+/// Rows a doorway opens when the course it is cut into has room for
+/// them: the head height of a Minecraft door, counted from the row above
+/// the level's base plane.
+///
+/// A ceiling rather than a size. A door under a course with only one row
+/// left above its base row opens that row and stops, because the row
+/// over a short course is either roof or the air above the wall — see
+/// [`carve_door`].
+const DOOR_HEIGHT: u32 = 2;
+
 /// Block ids lowering can put in a palette that no pack can redirect.
 ///
 /// These are compiled into this crate, so nothing checks them against the
@@ -420,7 +430,7 @@ fn lower_connects(
                     DiagnosticNote {
                         span: None,
                         message:
-                            "a `door` port requires `side=front|back|left|right` and `at=center|left|right`"
+                            "a `door` port requires `side=front|back|left|right` and `at=center|left|right`, with the row it opens at — `y=1`, the row above the floor slab — inside one course of the masonry"
                                 .to_owned(),
                     },
                     DiagnosticNote {
@@ -432,7 +442,7 @@ fn lower_connects(
                     DiagnosticNote {
                         span: None,
                         message:
-                            "both roles are cut into masonry, so the port's `def` needs a `walls` member that paints — a positive `height=` and a `mat_slot=` that resolves — and a `window` needs its rows inside one course of it; when that is what is missing, the member that cannot be built says so on its own line"
+                            "both roles are cut into masonry, so the port's `def` needs a `walls` member that paints — a positive `height=` and a `mat_slot=` that resolves — and both need to land inside one course of it: a `door` the row it opens at, a `window` every row of its rectangle; when that is what is missing, the member that cannot be built says so on its own line"
                                 .to_owned(),
                     },
                     DiagnosticNote {
@@ -3020,26 +3030,47 @@ fn carve_door(
     let Some(side) = side_of(member, diagnostics) else {
         return;
     };
-    // A door needs at least one wall row to carve into. Without one there
-    // is nothing above the floor to open up; the envelope phase has
-    // already written roof voxels at y=1, and carving them would punch a
-    // gap into the roof.
+    // A door opens at the row just above its level's base plane — the
+    // floor slab owns the plane itself — so that row has to be one a
+    // `walls` member paints. Where a door under a struct's own walls
+    // carves into the ground course, one under `level y=6` carves into
+    // whatever stands at y=7, and a struct whose walls start seven rows
+    // up has nothing at all at y=1.
     //
-    // The column holds the rows the walls will *paint*, so this reads
-    // "no walls member puts a block anywhere" — which a positive
-    // `height=` alone no longer settles. Naming only the height would
-    // send an author who wrote `height=4` over a themeless struct to the
-    // wrong line. Asked of the column rather than of `wall_top`, which is
-    // the same predicate by way of `height_value` admitting only positive
-    // heights, so that a reader and `walkway::port_world_position` are
-    // looking at one value instead of proving two agree.
-    if ctx.wall_column.is_empty() {
-        diagnostics.push(diag_deferred_member_reason(
-            member,
-            "door requires a `walls` member that paints — a positive `height=` and a `mat_slot=` that resolves — to carve into",
-        ));
+    // *Where* rather than *whether*, which is the question `fill_window`
+    // asks of its rectangle: a column that holds some row somewhere says
+    // nothing about the row this door opens at, so a gate reading
+    // `is_empty` let a door under walls that start above it paint AIR
+    // over air — carving nothing and reporting nothing, on a body whose
+    // window side names the same mistake.
+    //
+    // The course holding that row is also the cap. A doorway wants two
+    // rows and takes what the course has above its base row, so a short
+    // course yields a one-row opening rather than an opening that runs
+    // past the masonry: the envelope phase writes roof voxels at
+    // `wall_top + 1`, and rows above a course that is not the tallest
+    // are the air of the gap over it. Capping against the struct's
+    // highest wall row instead is how that air came to be carved — one
+    // course's height standing in for another's.
+    let base_row = y_offset.saturating_add(1);
+    let Some(course_top) = ctx.wall_column.course_top_at(base_row) else {
+        // The column holds the rows the walls will *paint*, so an empty
+        // one means "no walls member puts a block anywhere" — which a
+        // positive `height=` alone does not settle. Naming only the
+        // height would send an author who wrote `height=4` over a
+        // themeless struct to the wrong line. Same split, and the same
+        // two sentences, as `fill_window`'s.
+        let reason = if ctx.wall_column.is_empty() {
+            "door requires a `walls` member that paints — a positive `height=` and a `mat_slot=` that resolves — to carve into".to_owned()
+        } else {
+            format!(
+                "door opens at y={base_row}, which is not inside any wall course (the walls occupy {})",
+                ctx.wall_column,
+            )
+        };
+        diagnostics.push(diag_deferred_member_reason(member, &reason));
         return;
-    }
+    };
     let len = wall_length(side, ctx.interior_w, ctx.interior_h);
     // Three named anchors are accepted: `center` (`len / 2`, round-down
     // on even widths — documented in spec/syntax.md §5.4), `left` (`0`,
@@ -3072,31 +3103,17 @@ fn carve_door(
             return;
         }
     };
-    // Doors carve a 1-wide opening starting at v_local=1 (the row just
-    // above the floor of whichever level this door belongs to), capped
-    // at the wall column above this door so a short-wall door cannot
-    // overwrite roof voxels written in the envelope phase. The cap
-    // subtracts the level's `y_offset` from the struct's `wall_top` so a
-    // level-scoped door never punches past its own wall column — using
-    // `wall_top` directly (which now aggregates every level's walls)
-    // would let a `level y=8 door` carve at world y=9, 10 when the wall
-    // above only reaches y=9. Deferring instead of clamping to 0 when
-    // the level sits at or above `wall_top` keeps the failure loud: the
-    // author almost certainly wrote the door against a missing wall.
-    // The door block itself (`oak_door`, hinge / half / facing / open)
-    // is not yet placed; that landed deferred along with per-theme door
-    // materials.
-    let effective_top = ctx.wall_top.saturating_sub(y_offset);
-    if effective_top < 1 {
-        diagnostics.push(diag_deferred_member_reason(
-            member,
-            "door needs at least one wall voxel above its level to carve into",
-        ));
-        return;
-    }
-    let door_height = effective_top.min(2);
-    for v_local in 1..=door_height {
-        let v = v_local.saturating_add(y_offset);
+    // Doors carve a 1-wide opening from `base_row` up through as much of
+    // that row's course as a doorway wants, so the rows carved are world
+    // rows the walls painted and nothing above them. The door block
+    // itself (`oak_door`, hinge / half / facing / open) is not yet
+    // placed; that landed deferred along with per-theme door materials.
+    let door_height = course_top
+        .saturating_sub(base_row)
+        .saturating_add(1)
+        .min(DOOR_HEIGHT);
+    for v_local in 0..door_height {
+        let v = base_row.saturating_add(v_local);
         let Some((x, y, z)) = wall_local_to_grid(
             side,
             at,
@@ -7427,21 +7444,20 @@ struct s size=9x7
         );
     }
 
-    // --- carve_door level cap regression (C2) -------------------------------
+    // --- carve_door course cap ----------------------------------------------
 
     #[test]
-    fn door_defers_when_level_sits_at_or_above_wall_top() {
-        // struct walls height=3 (top=3) with a door inside `level y=3`:
-        // the door would try to carve at world y=4, 5 which are outside
-        // any wall column. The cap `wall_top - y_offset < 1` fires the
-        // "no wall above this level" defer instead of silently painting.
+    fn door_defers_when_its_level_sits_at_or_above_the_wall_it_would_carve() {
+        // struct walls height=3 (rows 1..=3) with a door inside `level
+        // y=3`: the door opens at world y=4, which is above the course
+        // and inside no other. The defer names the row and the rows the
+        // walls do occupy instead of silently painting AIR over air.
         let src = "theme t:\n  slot w -> @cobblestone\n\nstruct s size=5x5\n  walls mat_slot=w height=3\n  level id=roofline y=3\n    door id=hole side=front at=center\n";
         let out = lowered(src);
         assert!(
-            out.diagnostics
-                .iter()
-                .any(|d| d.primary.contains("at least one wall voxel above")),
-            "expected level-cap defer, got {:?}",
+            out.diagnostics.iter().any(|d| d.primary
+                == "door opens at y=4, which is not inside any wall course (the walls occupy y=1..=3)"),
+            "expected a wall-course defer, got {:?}",
             out.diagnostics,
         );
     }

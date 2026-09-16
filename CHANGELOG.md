@@ -86,6 +86,33 @@
 
 ### Fixed
 
+- *(core)* A `door` asked the wall column *whether* it held any row, where a `window` asked it
+  *where*. The two questions differ on one shape, and on that shape the door carved nothing and
+  said nothing:
+
+  ```
+  struct hut size=5x5
+    floor mat_slot=floor
+    level id=upper y=6
+      walls id=w mat_slot=wall height=4
+    door  id=e side=front at=center
+  ```
+
+  The walls paint rows 7…10; the door opens at row 1 and painted `AIR` over two rows that were
+  already air. The `window` written beside it on the same body was deferred with "the walls occupy
+  y=7..=10" quoted back — so the compiler both knew where the masonry was and agreed with a door
+  written into a building whose walls start a storey up.
+
+  `carve_door` now asks the column for the course holding the row it opens at, `y_offset + 1`. A
+  row inside no course is `W_DEFERRED_MEMBER` naming the row and the rows the walls do occupy, in
+  the shape the window's finding already had; a struct with no walls at all keeps its own sentence,
+  because "nowhere" and "not here" are different findings. That course is also the cap, replacing
+  the check against the struct's highest wall row: a doorway takes two rows where its own course
+  has them and one where it does not, so the row above a short course is no longer carved on the
+  strength of a taller course elsewhere in the struct. The walkway port asks the same question, as
+  `spec/components-editing-sites.md` §9.3.5 requires, so a strip is refused to exactly the doorways
+  the openings pass refuses to cut.
+
 - *(docs)* `spec/versioning-editions.md` §10.7 illustrated the `@edition` escape hatch with
   `minecraft:light_block["block_light_level"=15]`, an id that exists on Bedrock 1.21.0 and on
   neither of the other two targets the registry pack ships: 1.21.40 promoted the level into the id,
