@@ -55,6 +55,20 @@ use super::{BlockArray, BlockState, Dims, Palette, PaletteIndex};
 /// rather than a stray `0` literal at the call site.
 const PORT_GROUND_V: u32 = 0;
 
+/// World row a door port's doorway opens at: one above the base plane,
+/// which the floor slab owns.
+///
+/// A port names a member of the `def` body, so no `level y=N` has
+/// shifted it and the row is `super::lower::carve_door`'s `y_offset + 1`
+/// with `y_offset = 0`. That is an invariant of port *resolution*, not of
+/// this module: a door nested under a `level` is refused as a port
+/// outright, which `tests/door_wall_fit.rs` pins, because a lookup that
+/// walked the flattened members would resolve one and leave this
+/// constant disagreeing with the row `carve_door` asks about. It is
+/// where the masonry has to be, not where the strip lands — that is
+/// [`PORT_GROUND_V`], one row below.
+const DOOR_PORT_BASE_V: u32 = 1;
+
 /// Output of [`build_walkway_array`].
 ///
 /// Bundles the lowered [`BlockArray`], the world-space origin the array
@@ -121,8 +135,9 @@ pub struct WalkwayLayout {
 /// * the member's role is not [`MemberRole::Door`] or
 ///   [`MemberRole::Window`] (stair / roof / other roles short-circuit
 ///   silently — port support is reserved for a future extension),
-/// * `walls` is empty, so the body paints no masonry for either role's
-///   opening to be cut through,
+/// * `walls` paints no row the role's opening is cut through — for a
+///   `door` the row above the base plane, for a `window` every row of
+///   its rectangle,
 /// * the member is missing a `side=` argument or its value is not one
 ///   of `front` / `back` / `left` / `right`,
 /// * the door is missing `at=` or carries a value other than
@@ -167,23 +182,23 @@ pub(super) fn port_world_position(
     let len = wall_length(side, interior_w, interior_h);
     let (wall_x, wall_z) = match member.role {
         MemberRole::Door => {
-            // A doorway is a hole in a wall, so a body that paints no
-            // wall row has no doorway for a strip to arrive at:
+            // A doorway is a hole in a wall, so a row no `walls` member
+            // paints has no doorway for a strip to arrive at:
             // `super::lower::carve_door` asks this same column the same
-            // question before it carves. Without this the strip was laid
-            // to a doorway that was never carved.
+            // question before it carves, and defers when the answer is
+            // `None`. Without this the strip was laid to a doorway that
+            // was never carved.
             //
-            // Only *whether*, where the window below asks *where*. A
-            // def whose walls live only above a `level` has a column
-            // that starts above row 1, and `carve_door` carves rows
-            // 1..=2 into air there without a word — so the two passes
-            // agree, at the weaker of the two questions. Making both ask
-            // `contains_rows` is a change of behaviour rather than of
-            // agreement, and belongs with the deferral it would start
-            // emitting.
-            if walls.is_empty() {
-                return None;
-            }
+            // *Where*, like the window below, rather than merely
+            // *whether*: a def whose walls live only above a `level` has
+            // a column that starts above the row a door opens at, and a
+            // port that asked only whether the column held anything
+            // anchored a strip to the doorway that row never got.
+            //
+            // The row is `DOOR_PORT_BASE_V` because a port names a
+            // member of the def body, which no `level y=N` has shifted —
+            // `carve_door` asks after adding its member's level offset.
+            walls.course_top_at(DOOR_PORT_BASE_V)?;
             let u = door_anchor_offset(member, len)?;
             door_world_xz(side, u, overhang, interior_w, interior_h, place_origin)?
         }
@@ -1969,6 +1984,34 @@ mod tests {
             port_world_position((0, 0, 0), dims, def, &pid("entry"), &WallColumn::default())
                 .is_none()
         );
+    }
+
+    #[test]
+    fn port_world_position_door_returns_none_when_the_walls_start_above_the_doorway() {
+        // The column holds rows 7..=10 — a `level y=6 walls height=4` —
+        // and the doorway opens at row 1, which is open air. A port that
+        // asked only whether the column held anything answered "yes" and
+        // anchored a strip to a doorway `carve_door` refuses to cut.
+        let src = concat!(
+            "def cottage size=3x3:\n",
+            "  door id=entry side=front at=center\n",
+        );
+        let module = crate::parse(src).expect("parse");
+        let ir = crate::lower(&module);
+        let def = ir.defs.first().expect("def lowered");
+        let dims = Dims { x: 3, y: 1, z: 3 };
+        let upper_storey = WallColumn::from_walls([(6, 4)]);
+        assert!(port_world_position((0, 0, 0), dims, def, &pid("entry"), &upper_storey).is_none());
+        // …and the same column with a ground course under it anchors the
+        // port, so the refusal is about the row and not about the level.
+        let both_storeys = WallColumn::from_walls([(0, 3), (6, 4)]);
+        assert!(port_world_position((0, 0, 0), dims, def, &pid("entry"), &both_storeys).is_some());
+        // A course of exactly that one row is enough: the port asks
+        // where the doorway opens, not where it ends, so a column of
+        // `1..=1` anchors it. Asked one row higher — which is what a
+        // constant off by one would do — this answers `None`.
+        let one_row = WallColumn::from_walls([(0, 1)]);
+        assert!(port_world_position((0, 0, 0), dims, def, &pid("entry"), &one_row).is_some());
     }
 
     #[test]

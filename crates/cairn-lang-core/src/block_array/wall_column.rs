@@ -8,18 +8,21 @@
 //! as open air between the two courses.
 //!
 //! The lowering used to carry that set as one number, the highest row any
-//! wall reached. A number cannot answer the question a `window` has to ask
-//! — "is every row I cut into a wall?" — in either direction: it says
-//! nothing about the rows below the first course (so a `window y=0` carved
-//! a hole through the floor slab) and nothing about the gap between two
-//! courses (so a `window` between them hung glass in open air). Both cut
+//! wall reached. A number cannot answer the question an opening has to
+//! ask — a `window`'s "is every row I cut into a wall?", a `door`'s "is
+//! the row I open at one?" — in either direction: it says nothing about
+//! the rows below the first course (so a `window y=0` carved a hole
+//! through the floor slab) and nothing about the gap between two courses
+//! (so a `window` between them hung glass in open air, and a `door` under
+//! walls that start a storey up carved air over air). All of them cut
 //! silently, because a check that cannot see the fault cannot report it.
 //!
 //! [`WallColumn`] is that set, kept as sorted inclusive spans with
 //! overlapping *and adjacent* runs merged. Merging adjacency is what makes
 //! a level-on-level tower read as one wall: `walls height=5` plus
-//! `level y=5 walls height=4` is `1..=9`, and a window spanning the seam
-//! is cut into masonry the whole way up.
+//! `level y=5 walls height=4` is `1..=9`, a window spanning the seam is
+//! cut into masonry the whole way up, and a doorway at the foot of it
+//! opens its two rows across the two members that paint them.
 
 use std::fmt;
 
@@ -93,9 +96,25 @@ impl WallColumn {
         let Some(y_end) = y_start.checked_add(last_offset) else {
             return false;
         };
+        self.course_top_at(y_start)
+            .is_some_and(|course_top| y_end <= course_top)
+    }
+
+    /// The last row of the course that holds `y`, or `None` when no
+    /// course does.
+    ///
+    /// The question a `door` asks: it opens at one row and takes what
+    /// the course above that row will give it, so the answer has to be
+    /// the top of *that* course rather than the top of the tallest one.
+    /// A `window` asks the same column [`Self::contains_rows`], which is
+    /// this answer plus "and the rectangle ends at or below it" — one
+    /// implementation, so the two members cannot come to disagree about
+    /// where the masonry is.
+    pub(super) fn course_top_at(&self, y: u32) -> Option<u32> {
         self.spans
             .iter()
-            .any(|(start, end)| *start <= y_start && y_end <= *end)
+            .find(|(start, end)| *start <= y && y <= *end)
+            .map(|(_, end)| *end)
     }
 }
 
@@ -202,6 +221,37 @@ mod tests {
         assert_eq!(column.to_string(), format!("y=3..={}", u32::MAX));
         assert!(column.contains_rows(3, 1));
         assert!(column.contains_rows(u32::MAX, 1));
+    }
+
+    #[test]
+    fn the_course_a_row_sits_in_is_the_one_that_caps_what_opens_there() {
+        // `walls height=2` plus `level y=6 walls height=2`: a door
+        // opening at row 1 is capped by row 2, not by row 8 — the second
+        // course is a different wall, with four rows of air below it.
+        let column = WallColumn::from_walls([(0, 2), (6, 2)]);
+        assert_eq!(column.course_top_at(1), Some(2));
+        assert_eq!(column.course_top_at(2), Some(2));
+        assert_eq!(column.course_top_at(7), Some(8));
+        assert_eq!(column.course_top_at(3), None, "the gap holds no course");
+        assert_eq!(column.course_top_at(0), None, "the floor slab owns row 0");
+        assert_eq!(column.course_top_at(9), None);
+    }
+
+    #[test]
+    fn a_row_in_merged_courses_is_capped_by_the_merge_and_not_by_its_member() {
+        // `walls height=1` plus `level y=1 walls height=3`: rows 1..=1 and
+        // 2..=4 abut, so row 1 is capped at 4 and a doorway there opens
+        // the two rows it wants although the member it stands on paints
+        // one of them.
+        let column = WallColumn::from_walls([(0, 1), (1, 3)]);
+        assert_eq!(column.to_string(), "y=1..=4");
+        assert_eq!(column.course_top_at(1), Some(4));
+    }
+
+    #[test]
+    fn a_row_in_no_course_at_all_has_no_top() {
+        let column = WallColumn::from_walls([]);
+        assert_eq!(column.course_top_at(1), None);
     }
 
     #[test]
