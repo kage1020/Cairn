@@ -58,7 +58,9 @@ Bedrock, and Java's DataVersion has nothing to do with Bedrock's block_version.
 `roof kind=gable [overhang=N] mat_slot=...` lowers to two opposite stair slopes meeting at a ridge.
 
 The four roof kinds (`gable`, `shed`, `hip`, `flat`) share the overhang and wall-top conventions
-below. Their layouts are this section and the three that follow.
+below. Their layouts are this section and the three that follow. `overhang=` is read whatever the
+kind; `slope_to=` belongs to `shed` alone, and written on any other kind it is read by nothing and
+reported as `W_IGNORED_ARGUMENT` ([Lint §11.3](lint#113-error-vs-warning)).
 
 **Material.** A sloped roof takes its material from `mat_slot=` and it MUST be in the stair family
 — an id whose path ends in `_stairs`. The geometry attaches `facing`, `half`, and `shape` to

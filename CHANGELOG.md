@@ -86,6 +86,49 @@
 
 ### Fixed
 
+- *(core)* An argument in a keyword's vocabulary could still be read by nothing, depending on the
+  value of a sibling argument on the same line. `E_UNKNOWN_ARGUMENT` closed the case where a `key=`
+  is outside the vocabulary; one level down, a key that *is* in it routed past its reader in
+  silence:
+
+  ```
+  struct s size=9x9
+    roof kind=gable mat_slot=roof slope_to=north
+  ```
+
+  `slope_to=` is a `roof` argument and lints clean. `fill_roof` dispatches on `kind=` and only the
+  `shed` arm consults the direction, so on a gable the value was carried into the IR and dropped —
+  exactly the way a misspelled key used to be. The author got a roof that ignored the way they
+  pointed it.
+
+  The vocabulary now has a second axis, closed per keyword *and* per the value of the argument that
+  selects the lowering rule (`MemberRole::conditional_arguments`), and the `arguments` check pass
+  reports a key the selected rule does not read as `W_IGNORED_ARGUMENT`:
+
+  ```
+  s.crn:2:42: warning[W_IGNORED_ARGUMENT]: `slope_to=` is an argument `roof` reads only under `kind=shed`, and this one is `kind=gable`; the value was ignored
+    note: either argument may be the repair — write `kind=shed` to have the `slope_to=` read, or drop `slope_to=` and keep the `gable` roof the line already asks for
+  ```
+
+  A warning rather than the refusal `E_UNKNOWN_ARGUMENT` is, because a key outside the vocabulary
+  has one repair site and this has two: the author meant the rule that reads the key, or meant this
+  rule and the key is left over. The message names both and picks neither — `spec/lint.md` §11.3
+  records the same reasoning.
+
+  Where the selecting argument names no rule at all — `roof slope_to=north` with no `kind=`, or a
+  `kind=` the dispatch does not know — nothing is reported here: the member does not lower, its
+  `W_DEFERRED_MEMBER` carries the whole repair, and a second finding would bill one repair twice.
+  The `stair` row of the table is the other half of the shape and reports nothing today:
+  `kind=stairs` is the only kind `fill_stair` accepts, and every key it reads is read under that
+  one value.
+
+  "Nothing reads it" is not a fact a table can check about itself, so the table is held to the
+  dispatch it describes by building each pair twice, with the argument and without it: an arm listed
+  as reading the key has to build different voxels, and an arm listed as not reading it has to build
+  the same ones. A key made inert by a *count* rather than by a rule — `window step=` at
+  `repeat=1`, which the stamp loop consults only from the second instance on — is a different
+  shape and is still unreported.
+
 - *(core)* A `door` asked the wall column *whether* it held any row, where a `window` asked it
   *where*. The two questions differ on one shape, and on that shape the door carved nothing and
   said nothing:

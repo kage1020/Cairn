@@ -184,6 +184,85 @@ fn an_argument_the_spec_defines_and_nothing_reads_is_reported_as_ignored() {
 }
 
 #[test]
+fn a_key_a_sibling_argument_routed_past_is_reported_as_ignored() {
+    // The issue's own repro. `slope_to=` is a `roof` argument and lints
+    // clean against the vocabulary; `fill_roof` only consults it for
+    // `kind=shed`, so on a gable the direction reaches the IR and is
+    // dropped — a roof that ignores the way the author pointed it.
+    let d = only("struct s size=9x9\n  roof kind=gable slope_to=north\n");
+    assert_eq!(d.code.as_str(), "W_IGNORED_ARGUMENT");
+    assert!(d.primary.contains("`slope_to=`"), "got: {}", d.primary);
+    assert!(d.primary.contains("`kind=shed`"), "got: {}", d.primary);
+    assert!(d.primary.contains("`kind=gable`"), "got: {}", d.primary);
+}
+
+#[test]
+fn the_conditional_finding_names_both_repair_sites() {
+    // Either argument may be the mistake — the author meant a shed, or the
+    // `slope_to=` is left over from one — which is the whole reason this is
+    // a warning and not a refusal. A message naming one of them would pick
+    // for the author.
+    let d = only("struct s size=9x9\n  roof kind=flat slope_to=front\n");
+    let notes = notes(&d);
+    assert!(notes.contains("write `kind=shed`"), "got: {notes}");
+    assert!(notes.contains("drop `slope_to=`"), "got: {notes}");
+}
+
+#[test]
+fn the_conditional_finding_points_at_the_value_it_is_about() {
+    // Not at the `kind=` that routed past it: the repair the author is most
+    // likely to make is on the argument that was ignored, and the message
+    // quotes the selector so the other site is one word away.
+    let src = "struct s size=9x9\n  roof kind=hip slope_to=left\n";
+    let d = only(src);
+    assert_eq!(&src[d.span.clone()], "left");
+}
+
+#[test]
+fn the_rule_that_reads_the_argument_lints_clean() {
+    let src = "theme t:\n  slot roof -> @spruce_stairs\n\nstruct s size=9x9\n  roof kind=shed slope_to=front mat_slot=roof\n";
+    assert_eq!(codes(src), Vec::<&str>::new(), "source:\n{src}");
+}
+
+/// A selector value naming no lowering rule is one repair, and gets one
+/// finding.
+///
+/// `check` does not run block-array lowering, so the pass under test is the
+/// only one with anything to say here — and what it says is nothing.
+/// `the_member_that_does_not_lower_is_billed_once` in
+/// `tests/conditional_arguments.rs` holds the other half: that the
+/// `W_DEFERRED_MEMBER` this defers to is actually raised.
+#[test]
+fn a_selector_that_names_no_rule_is_not_billed_twice() {
+    // Absent: already `W_DEFERRED_MEMBER` from the lowering.
+    assert_eq!(
+        codes("struct s size=9x9\n  roof slope_to=north\n"),
+        Vec::<&str>::new(),
+    );
+    // Present and outside the dispatch table: the same deferral.
+    assert_eq!(
+        codes("struct s size=9x9\n  roof kind=dome slope_to=north\n"),
+        Vec::<&str>::new(),
+    );
+    // Present and not a word at all. `check::type_mismatch` does not cover
+    // `kind=`, so a second finding here would again be the only one the
+    // author sees about a member that lowers to nothing.
+    assert_eq!(
+        codes("struct s size=9x9\n  roof kind=2 slope_to=north\n"),
+        Vec::<&str>::new(),
+    );
+}
+
+#[test]
+fn a_selector_matched_conditional_key_is_not_reported() {
+    // The same widening the unread branch honours: a module that selects on
+    // `slope_to=` has something that reads it, whatever `fill_roof` does,
+    // and advising removal would break the override.
+    let src = "theme t:\n  slot roof -> @spruce_stairs\n  roof[slope_to=north] -> frame=@spruce_wood\n\nstruct s size=9x9\n  roof kind=gable slope_to=north mat_slot=roof\n";
+    assert_eq!(codes(src), Vec::<&str>::new(), "source:\n{src}");
+}
+
+#[test]
 fn place_takes_the_closed_set_the_spec_fixes_and_nothing_else() {
     // `spec/components-editing-sites` §9.3.2 / §9.3.3: a name, what to
     // instantiate, what to resolve materials against, and exactly one
@@ -430,8 +509,9 @@ fn every_argument_in_every_role_vocabulary_is_written_by_some_clean_source() {
     assert_eq!(codes(&site), Vec::<&str>::new(), "source:\n{site}");
 }
 
-/// The three invariants the vocabulary tables hold about each other:
-/// `unread` is a subset of the vocabulary, no role restates a universal key,
+/// The invariants the vocabulary tables hold about each other: `unread` is a
+/// subset of the vocabulary, no role restates a universal key, the
+/// conditional table's selectors and keys are arguments the role accepts,
 /// and only an unknown keyword declines to answer.
 #[test]
 fn the_vocabulary_tables_are_consistent_with_each_other() {
@@ -452,6 +532,54 @@ fn the_vocabulary_tables_are_consistent_with_each_other() {
             assert!(
                 !UNIVERSAL_ARGUMENTS.contains(key),
                 "`{keyword}` lists the universal key `{key}` a second time",
+            );
+        }
+    }
+    // The conditional table answers to the same vocabulary: a selector and
+    // every key an arm reads have to be arguments the role accepts, or the
+    // finding would quote the author a word their keyword does not take.
+    for keyword in known_keywords() {
+        let role = role_of(keyword);
+        let vocabulary = role
+            .arguments()
+            .unwrap_or_else(|| panic!("`{keyword}` is in the table, so it has a vocabulary"));
+        for axis in role.conditional_arguments() {
+            assert!(
+                vocabulary.contains(&axis.selector),
+                "`{keyword}` dispatches on `{}`, which is not one of its arguments",
+                axis.selector,
+            );
+            let mut seen: Vec<&str> = Vec::new();
+            for arm in axis.arms {
+                assert!(
+                    !seen.contains(&arm.value),
+                    "`{keyword}` lists `{}={}` twice",
+                    axis.selector,
+                    arm.value,
+                );
+                seen.push(arm.value);
+                for key in arm.reads {
+                    assert!(
+                        vocabulary.contains(key),
+                        "`{keyword}` says `{}={}` reads `{key}`, which is not one of its arguments",
+                        axis.selector,
+                        arm.value,
+                    );
+                    // A key *nothing* reads is the other finding, and one
+                    // key cannot be both: `unread_arguments` says no rule
+                    // consults it, and an arm here says one does.
+                    assert!(
+                        !role.unread_arguments().contains(key),
+                        "`{keyword}` calls `{key}` unread and has `{}={}` read it",
+                        axis.selector,
+                        arm.value,
+                    );
+                }
+            }
+            assert!(
+                !axis.is_conditional(axis.selector),
+                "`{keyword}`'s `{}` selects the rule, so no arm reads it as a conditional key",
+                axis.selector,
             );
         }
     }

@@ -57,6 +57,86 @@ pub const KNOWN_KEYWORDS: &[&str] = &[
 /// [`Member`]: super::Member
 pub const UNIVERSAL_ARGUMENTS: &[&str] = &["id", "class", "mat_slot"];
 
+/// A `key=` one lowering rule reads and another does not, together with the
+/// sibling argument whose value picks between them.
+///
+/// The vocabulary's second axis. [`MemberRole::arguments`] is a flat list
+/// per keyword, and it answers the question a misspelled key asks: is this
+/// a word any member of this role may carry. One level down, a key that
+/// *is* in the list can still be read by nothing on the line it is written
+/// on, because the pass that would read it only runs for some values of
+/// another argument. `roof slope_to=` is the instance: `fill_roof`
+/// dispatches on `kind=` and only the `shed` arm consults the direction, so
+/// `kind=gable slope_to=north` carries it into the IR and drops it — the
+/// same silence a key outside the vocabulary used to build in.
+///
+/// A relation between two keys does not fit in a flat list, which is why
+/// this is a table of its own rather than a flag on the vocabulary.
+///
+/// Where the boundary runs: the selector is an argument whose value picks
+/// a *lowering rule*, and its arms are the values that name one. A key
+/// another key makes inert without selecting a rule — `window step=`,
+/// which the stamp loop consults only from the second instance on, so
+/// `repeat=1 step=3` drops the spacing — is a condition on a count rather
+/// than on a rule, and is not this table's shape.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SelectorAxis {
+    /// The argument whose value selects the lowering rule.
+    pub selector: &'static str,
+    /// One arm per value of [`Self::selector`] a lowering rule exists for,
+    /// in the order the dispatch writes them.
+    ///
+    /// A value *outside* this list is deliberately absent rather than
+    /// listed with an empty [`SelectorArm::reads`]: a selector naming no
+    /// rule lowers to nothing at all and is already a `W_DEFERRED_MEMBER`,
+    /// and a second finding about the argument it routed past would be a
+    /// second bill for one repair. Missing entirely is the same case.
+    pub arms: &'static [SelectorArm],
+}
+
+impl SelectorAxis {
+    /// The arm a selector value names, or `None` when no lowering rule
+    /// answers to it.
+    #[must_use]
+    pub fn arm(&self, value: &str) -> Option<&'static SelectorArm> {
+        self.arms.iter().find(|arm| arm.value == value)
+    }
+
+    /// Whether `key` is conditional on this axis at all — some arm reads
+    /// it, so some other arm may not.
+    ///
+    /// Derived from the arms rather than listed beside them, so a key every
+    /// rule reads before the dispatch (`roof overhang=`) is simply absent
+    /// from all of them. Writing it under each arm to say "not conditional"
+    /// would put that claim in as many places as there are rules.
+    #[must_use]
+    pub fn is_conditional(&self, key: &str) -> bool {
+        self.arms.iter().any(|arm| arm.reads.contains(&key))
+    }
+
+    /// The selector values whose rule reads `key`, in table order.
+    #[must_use]
+    pub fn read_when(&self, key: &str) -> Vec<&'static str> {
+        self.arms
+            .iter()
+            .filter(|arm| arm.reads.contains(&key))
+            .map(|arm| arm.value)
+            .collect()
+    }
+}
+
+/// One value of a [`SelectorAxis`]'s selector, and the conditional
+/// arguments the rule it selects reads.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SelectorArm {
+    /// The selector value, spelled as the source writes it.
+    pub value: &'static str,
+    /// The keys this rule reads that another rule on the same axis does
+    /// not. Arguments read before the dispatch, by every rule, are not
+    /// listed — see [`SelectorAxis::is_conditional`].
+    pub reads: &'static [&'static str],
+}
+
 impl MemberRole {
     /// The `key=` arguments this role's vocabulary contains, in the order
     /// the spec introduces them.
@@ -78,6 +158,12 @@ impl MemberRole {
     /// has not reached, and refusing them would make a future lowering
     /// rule a change from error to legal. They are accepted and reported
     /// as ignored — see [`Self::unread_arguments`].
+    ///
+    /// Membership here is per keyword and says nothing about the line the
+    /// key is written on: a key this list contains can still be read by
+    /// nothing on one particular member, because a sibling argument's value
+    /// chose a lowering rule that does not consult it. That is
+    /// [`Self::conditional_arguments`], and it is reported as ignored too.
     ///
     /// `None` for a keyword the role table does not know — not an empty
     /// vocabulary but the absence of one, which is a different answer and
@@ -144,6 +230,85 @@ impl MemberRole {
             | Self::Walls
             | Self::Door
             | Self::Stair
+            | Self::Level
+            | Self::PressurePlate
+            | Self::Circuit
+            | Self::Place
+            | Self::Connect
+            | Self::Other(_) => &[],
+        }
+    }
+
+    /// The axes on which one of this role's arguments is read by one
+    /// lowering rule and not by another.
+    ///
+    /// Spelled out rather than derived, for the reason
+    /// [`Self::unread_arguments`] is: which pass reads what is not a fact
+    /// any table can compute about itself. What holds it to the dispatch it
+    /// describes is `tests/conditional_arguments.rs`, which writes each
+    /// pair at a value a reader would notice and lowers the source twice,
+    /// with the argument and without it. An arm this table says reads the
+    /// key has to build something different; an arm it says does not has to
+    /// build the same voxels. Both directions fail there rather than in a
+    /// silent build.
+    ///
+    /// A slice, because nothing says a role has only one axis: `kind=` is
+    /// the selector both of today's rows dispatch on, and a second selector
+    /// on the same keyword is another entry here rather than a second shape
+    /// of table. Empty for a role whose vocabulary has no conditional key —
+    /// [`Self::Other`] among them, whose whole line belongs to
+    /// `check::keyword_allowlist` and whose arguments are judged against no
+    /// vocabulary at all.
+    #[must_use]
+    pub fn conditional_arguments(&self) -> &'static [SelectorAxis] {
+        match self {
+            // `fill_roof` dispatches on `kind=` and hands each kind its own
+            // generator. Three of the four take the inflated footprint and
+            // the wall top and nothing else; `shed` is the one with a
+            // direction to be told. `overhang=` is read before the
+            // dispatch, by every kind, which is why it is in none of the
+            // arms — the axis is not "everything after `kind=`".
+            Self::Roof => &[SelectorAxis {
+                selector: "kind",
+                arms: &[
+                    SelectorArm {
+                        value: "gable",
+                        reads: &[],
+                    },
+                    SelectorArm {
+                        value: "shed",
+                        reads: &["slope_to"],
+                    },
+                    SelectorArm {
+                        value: "hip",
+                        reads: &[],
+                    },
+                    SelectorArm {
+                        value: "flat",
+                        reads: &[],
+                    },
+                ],
+            }],
+            // `fill_stair` checks `kind=stairs` before it reads anything
+            // else, so every argument it goes on to read is read under that
+            // one value — which is why the arm lists all five rather than
+            // the three that shape the blockstate. Nothing is reported
+            // today, because a `kind=` outside the arm lowers to nothing
+            // and its own `W_DEFERRED_MEMBER` carries the repair. The row
+            // is the shape of the answer for the day a second stair kind
+            // lands: whichever of these it does not read is asked about
+            // here rather than dropped in silence.
+            Self::Stair => &[SelectorAxis {
+                selector: "kind",
+                arms: &[SelectorArm {
+                    value: "stairs",
+                    reads: &["side", "half", "facing", "shape", "y"],
+                }],
+            }],
+            Self::Floor
+            | Self::Walls
+            | Self::Door
+            | Self::Window
             | Self::Level
             | Self::PressurePlate
             | Self::Circuit

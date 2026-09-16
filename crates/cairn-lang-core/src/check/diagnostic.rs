@@ -227,13 +227,26 @@ pub enum DiagnosticCode {
     /// (door/window/roof/...). Surfaces during `cairn lower` so a partial
     /// build is still inspectable, rather than failing the whole module.
     DeferredMember,
-    /// A `key=` the lowering pass could not read, on a member it drew
-    /// anyway with the default in place of the value.
+    /// A `key=` no pass read, on a member that was drawn anyway with the
+    /// default in place of the value.
+    ///
+    /// Three shapes, one finding. The lowering pass could not read the
+    /// value; or the specification defines the key and no pass reads it yet
+    /// (`crate::intent::MemberRole::unread_arguments`); or a sibling
+    /// argument's value picked a lowering rule that does not consult the
+    /// key, which `crate::intent::MemberRole::conditional_arguments`
+    /// records and `roof kind=gable slope_to=north` is the instance of. The
+    /// build differs from the source the same way in all three, and the
+    /// difference is announced rather than silent.
     ///
     /// Distinct from [`Self::DeferredMember`], which says the member did
     /// not lower. A roof whose `overhang=` is unusable is in the build,
     /// flush with the wall line, and reporting that as a deferral tells
-    /// the author to look for a member that is not missing.
+    /// the author to look for a member that is not missing. The reverse
+    /// boundary holds too: where the member does not lower at all — a
+    /// `kind=` the dispatch does not know, or none — the deferral carries
+    /// the whole repair and this code stays quiet rather than billing the
+    /// argument that rule would not have read.
     ///
     /// Where it sits against `spec/lint.md` §11.3, and why it is a
     /// warning, is argued once on [`Self::severity`] rather than twice.
@@ -622,6 +635,13 @@ impl DiagnosticCode {
     /// are unreported outside the actuator-patch keys, and every source
     /// carrying one builds today — and the two want one decision rather
     /// than two. §11.3 records the same.
+    ///
+    /// Its third shape lands on the warning side by a second argument as
+    /// well. A key outside the vocabulary names nothing and has one repair
+    /// site, which is what makes `E_UNKNOWN_ARGUMENT` a refusal; a key a
+    /// sibling's value routed past names something real, and the repair is
+    /// either argument — the rule the author meant, or the leftover key.
+    /// Refusing would pick one of them.
     ///
     /// Two codes sit close to the line and are decided in their variant
     /// docs: `E_UNKNOWN_SLOT_TARGET` is an error because the members

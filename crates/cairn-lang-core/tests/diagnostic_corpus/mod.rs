@@ -30,6 +30,14 @@ pub fn noisy_sources() -> Vec<String> {
             "{THEME}struct t size=9x7\n  walls mat_slot=wall height=3\n\
              \x20\x20roof kind=flat mat_slot=wall overhang=4294967296\n"
         ),
+        // A key the roof's `kind=` routed past: in the vocabulary, on a
+        // member that builds, and read by nobody on this line. The
+        // ignored-argument prose has a branch per shape, and this one names
+        // two arguments where the others name one.
+        format!(
+            "{THEME}struct t size=9x7\n  walls mat_slot=wall height=3\n\
+             \x20\x20roof kind=gable mat_slot=wall slope_to=front\n"
+        ),
         // Place ids, unresolved refs, unused defs.
         format!("{THEME}{HUT}site s:\n  place id=\"home.1\" use=hut theme=t at=origin\n"),
         format!("{THEME}{HUT}site s:\n  place id=a use=nosuchdef theme=t at=origin\n"),
