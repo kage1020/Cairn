@@ -181,9 +181,21 @@ struct sim size=7x5
 ";
     let placement = placement_from_source(source, Edition::Java);
     let routed = compile_routing(&placement);
-    assert!(
-        routed.diagnostics.is_empty(),
-        "clean fixture must not raise routing diagnostics: {:?}",
+    // Its nets climb past each other, so it carries the advisory that
+    // names the pairs for the physical tile layer — exactly one of
+    // them, and nothing else. What this fixture is about is the
+    // lengths that climb is charged into, and those are only read off
+    // a scope the pass kept; asserting the code rather than the
+    // severity is what keeps the advisory itself from going missing
+    // here, since no other test measures this scope.
+    assert_eq!(
+        routed
+            .diagnostics
+            .iter()
+            .map(|d| d.code)
+            .collect::<Vec<_>>(),
+        vec![DiagnosticCode::RouteCrossLayerClearance],
+        "the climbing fixture carries the advisory and no refusal: {:?}",
         routed.diagnostics,
     );
 
@@ -609,4 +621,87 @@ fn re_running_routing_pass_panics_loudly() {
     let source = load_example("redstone-door.crn");
     let routed = compile_routing(&placement_from_source(&source, Edition::Java));
     let _twice = compile_routing(&routed.scoped);
+}
+
+/// AC11 — `examples/crossbar.crn` earns
+/// `W_ROUTE_CROSS_LAYER_CLEARANCE`, and the finding names the pairs
+/// the physical tile layer has to separate.
+///
+/// The router keeps two nets one step apart in one plane, and the
+/// escape that enforces it is what puts a strand a layer above
+/// another: `spec/redstone` §14.5 leaves separating *those* to the
+/// physical tile layer, because whether the upper one reads the lower
+/// depends on what is standing between them and the pseudo-2.5D model
+/// carries no answer. What this pass owes is saying which pairs carry
+/// that obligation rather than leaving it owed by nobody.
+///
+/// Advisory, so the scope is routed rather than elided — a refusal
+/// here would be the router applying a rule it cannot check. Both
+/// editions, because the shape is the placement's and the cell library
+/// does not change it: one stacked pair and eight staircases, the
+/// second being the one that shorts by the same mechanism an in-plane
+/// pair does. Eight to one rather than a near-even split because
+/// `cell #0`'s run climbed to clear the two sensor lanes and then
+/// travels *alongside* them the length of the region, one step across
+/// from each, crossing over dust exactly once.
+///
+/// The notes are pinned whole rather than searched. What the finding
+/// says is the whole of what this pass hands the tile layer, so the
+/// cap on how many pairs are named, the tally of the rest, the order
+/// they come in — which is a sort over what is otherwise `HashMap`
+/// order — and which net is named as the upper of each pair are all
+/// part of the contract, and none of them fails an `any(...)` search.
+#[test]
+fn crossbar_names_the_pairs_the_tile_layer_has_to_separate() {
+    let source = load_example("crossbar.crn");
+    for edition in [Edition::Java, Edition::Bedrock] {
+        let routed = compile_routing(&placement_from_source(&source, edition));
+        let findings: Vec<_> = routed
+            .diagnostics
+            .iter()
+            .filter(|d| d.code == DiagnosticCode::RouteCrossLayerClearance)
+            .collect();
+        assert_eq!(
+            findings.len(),
+            1,
+            "{edition:?}: one finding per scope, not one per pair: {:?}",
+            routed.diagnostics,
+        );
+        let finding = findings[0];
+        assert_eq!(
+            finding.severity(),
+            Severity::Warning,
+            "{edition:?}: the pairs are what the escape costs, not a fault in the layout",
+        );
+        assert!(
+            finding.primary.contains(
+                "leaves 9 pairs of dust within one step of each other across layers (1 stacked, 8 staircase)"
+            ),
+            "{edition:?}: the primary counts both shapes: {}",
+            finding.primary,
+        );
+        let notes: Vec<&str> = finding.notes.iter().map(|n| n.message.as_str()).collect();
+        assert_eq!(
+            notes,
+            vec![
+                "(4,1,1) on cell #0 stands directly over (4,0,1) on cell #1",
+                "(1,1,1) on cell #0 stands a layer over, and one step across from, (1,0,0) on sig.a",
+                "(1,1,1) on cell #0 stands a layer over, and one step across from, (1,0,2) on sig.b",
+                "and 6 more of the same two shapes",
+                "`spec/redstone` §14.5 makes separating them the physical tile layer's obligation, \
+                 and §14.6 states it: a `bridge` coord renders as a tile that conducts to neither \
+                 another net's coord under it nor another net's coords diagonally under it — its \
+                 own net's coord under it is the climb, and has to conduct",
+                "Fix: nothing in the source is wrong — the pairs are what the escape costs, and \
+                 enlarging the region is not a remedy: where a net has to climb at its own \
+                 doorstep, more room only lengthens the run it then makes on the upper layer",
+            ],
+            "{edition:?}: both shapes named, the rest tallied, the coords in a settled order, \
+             and each pair read upper-first",
+        );
+        assert!(
+            routed.scoped.scopes.iter().any(|e| e.name == "crossbar"),
+            "{edition:?}: an advisory elides nothing — the scope routes",
+        );
+    }
 }

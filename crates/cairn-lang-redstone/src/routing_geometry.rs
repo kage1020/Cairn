@@ -57,6 +57,17 @@
 //! realisation to that layer, and this module holds itself to the
 //! plane it can answer for.
 //!
+//! What it can do is say which pairs that layer is being handed.
+//! [`tile_layer_pairs`] lists every two strands of different nets a
+//! layer apart and within one step of each other — the pair directly
+//! over another, and the staircase one step across from it, which a
+//! run that climbed to clear a lane and then travels alongside it
+//! makes the more numerous of the two — and
+//! [`tile_layer_clearance`] is the advisory the routing pass raises
+//! for them. An advisory rather than an obstacle: a rule invented here
+//! would refuse layouts for a reason nothing in this model can check,
+//! which is worse than an obligation written down and named.
+//!
 //! What it costs is that a tree is a function of the order the nets
 //! were laid in. [`net_trees`] lays them in [`net_order`] — fanout
 //! descending, then [`net_ref_key`] — which is a total order over the
@@ -339,6 +350,24 @@ fn stepped(from: CellCoord, (dx, dy, dz): (i64, i64, i64)) -> Option<CellCoord> 
 pub(crate) fn beside(coord: CellCoord) -> impl Iterator<Item = CellCoord> {
     IN_PLANE
         .into_iter()
+        .filter_map(move |delta| stepped(coord, delta))
+}
+
+/// The coords one layer under `coord` that are within one step of it:
+/// the one directly under it, and the four diagonally under it.
+///
+/// Not an obstacle — [`beside`] is what the router routes by, and this
+/// is what nothing routes by. Two strands a layer apart are separated
+/// by the physical tile layer rather than by stage 2, so what this
+/// names is the pair that layer is obliged to keep apart, and
+/// [`tile_layer_pairs`] is where the obligation gets written down.
+///
+/// Derived from [`IN_PLANE`] rather than listed, so the rule the
+/// router routes by and the rule the tile layer is handed cannot come
+/// to mean different widths.
+fn under(coord: CellCoord) -> impl Iterator<Item = CellCoord> {
+    std::iter::once((0, -1, 0))
+        .chain(IN_PLANE.map(|(dx, _, dz)| (dx, -1, dz)))
         .filter_map(move |delta| stepped(coord, delta))
 }
 
@@ -1146,6 +1175,188 @@ where
     trees
 }
 
+/// Two strands of dust a layer apart and within one step of each
+/// other: the pair `spec/redstone` §14.5 hands to the physical tile
+/// layer.
+///
+/// `over` is the upper coord and `under` the lower. A pair of coords
+/// is one entry rather than two — the walk that finds them looks down
+/// only — and reads in the direction the block between them would be
+/// placed. Two strands running alongside each other for several coords
+/// are several pairs, because each of those coords is its own place
+/// for a tile to conduct or not.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct TileLayerPair {
+    /// The upper coord, and the net whose dust it is.
+    pub(crate) over: (CellCoord, NetRef),
+    /// The lower coord, and its net — never the same net as `over`:
+    /// one strand climbing is the wire, not two signals.
+    pub(crate) under: (CellCoord, NetRef),
+}
+
+impl TileLayerPair {
+    /// `true` when the two sit on one column — dust directly over
+    /// dust, rather than over and one step across.
+    fn stacked(self) -> bool {
+        self.over.0.x == self.under.0.x && self.over.0.z == self.under.0.z
+    }
+}
+
+/// Every pair of strands the physical tile layer has to separate, in
+/// [`coord_key`] order over the upper coord and then the lower.
+///
+/// The router lays no two nets within one step of each other in one
+/// plane, so the pairs here are all made by the escape: a net that
+/// climbs to clear another runs over it, or one step across from it a
+/// layer up — the staircase dust climbs, which shorts by the same
+/// mechanism an in-plane pair does.
+///
+/// The diagonal is the one that piles up, and not because a climb
+/// chooses it: a coord has one coord directly under it and four
+/// diagonally under it, and a run that climbed to clear a lane then
+/// travels *alongside* that lane, one step across from it for as long
+/// as the two run parallel, crossing over it once.
+///
+/// Dust only, per [`Router::dust`]: a terminal is a block, and a block
+/// under a strand is what a wire climbs over rather than something two
+/// signals share — the ordinary way past a component. The obligation
+/// `spec/redstone` §14.6 puts on the tile is wider than this list, and
+/// does not need the list to enumerate it: a `bridge` tile conducts to
+/// no coord of another net below it, whether dust or block.
+pub(crate) fn tile_layer_pairs(
+    nets: &HashMap<NetRef, Vec<CellCoord>>,
+    trees: &HashMap<NetRef, NetTree>,
+    router: &Router,
+) -> Vec<TileLayerPair> {
+    // One owner per coord: `net_trees` asserts that no two nets claim
+    // one, so the map loses nothing, and looking a coord up beats
+    // walking every other net's dust for each strand.
+    let mut owner: HashMap<CellCoord, NetRef> = HashMap::new();
+    for net in net_order(nets) {
+        for coord in router.dust(&trees[&net]) {
+            owner.insert(coord, net);
+        }
+    }
+    let mut pairs: Vec<TileLayerPair> = Vec::new();
+    for (over, over_net) in &owner {
+        for below in under(*over) {
+            match owner.get(&below) {
+                Some(under_net) if under_net != over_net => pairs.push(TileLayerPair {
+                    over: (*over, *over_net),
+                    under: (below, *under_net),
+                }),
+                _ => {}
+            }
+        }
+    }
+    // `HashMap` iteration order never reaches a message: the walk above
+    // is over a map, so the order the pairs were found in is not an
+    // order at all.
+    pairs.sort_by_key(|pair| (coord_key(pair.over.0), coord_key(pair.under.0)));
+    pairs
+}
+
+/// How many pairs *of each shape* the finding names one by one.
+///
+/// A dump reader wants somewhere to start reading and the shape of the
+/// obligation, not a census — the count in the primary is the census.
+/// Per shape rather than over the whole list because the two are
+/// separated by different tiles — the one under a strand and the ones
+/// diagonally under it — and a layout is lopsided towards the diagonal
+/// often enough for a flat cap to name one shape only. A count of the
+/// corpus's split belongs in a test, where it fails when it drifts;
+/// here it would be a number nothing checks.
+const NAMED_PER_SHAPE: usize = 2;
+
+/// The advisory a scope earns for the strands its escape left a layer
+/// apart, or `None` when no two nets run within one step of each other
+/// across layers.
+///
+/// `W_ROUTE_CROSS_LAYER_CLEARANCE`, and a warning rather than a
+/// refusal: the pairs are not a fault in the layout. `spec/redstone`
+/// §14.5 keeps two nets one step apart in one plane and makes
+/// separating two a layer apart the physical tile layer's obligation,
+/// because whether the upper strand reads the lower one depends on
+/// what is standing between them and the pseudo-2.5D model carries no
+/// answer. A rule invented here would refuse layouts for a reason
+/// nothing can check.
+///
+/// What is left is that the obligation was owed by nobody a reader
+/// could see. This names the pairs that carry it, so an author reading
+/// a dump — and whoever writes the tile catalogue — can find them.
+pub(crate) fn tile_layer_clearance(
+    nets: &HashMap<NetRef, Vec<CellCoord>>,
+    trees: &HashMap<NetRef, NetTree>,
+    router: &Router,
+    entry: &ScopedPlacementIrEntry,
+    region: &CircuitRegionReservation,
+) -> Option<Diagnostic> {
+    let pairs = tile_layer_pairs(nets, trees, router);
+    if pairs.is_empty() {
+        return None;
+    }
+    let stacked = pairs.iter().filter(|pair| pair.stacked()).count();
+    let primary = format!(
+        "routed netlist for {kind} `{name}` leaves {total} {pair} of dust within one step of each other across layers ({stacked} stacked, {staircase} staircase) — the router keeps two nets apart in one plane, and whether a strand reads the one a layer below it depends on what is standing between them",
+        kind = entry.kind.label(),
+        name = entry.name,
+        total = pairs.len(),
+        pair = if pairs.len() == 1 { "pair" } else { "pairs" },
+        staircase = pairs.len() - stacked,
+    );
+    let mut diag = Diagnostic::new(
+        DiagnosticCode::RouteCrossLayerClearance,
+        region.span.clone(),
+        primary,
+    );
+    let named = pairs
+        .iter()
+        .filter(|pair| pair.stacked())
+        .take(NAMED_PER_SHAPE)
+        .chain(
+            pairs
+                .iter()
+                .filter(|pair| !pair.stacked())
+                .take(NAMED_PER_SHAPE),
+        );
+    let mut named_count = 0usize;
+    for pair in named {
+        named_count += 1;
+        let (over, over_net) = pair.over;
+        let (below, under_net) = pair.under;
+        diag = diag.with_footer(format!(
+            "({x},{y},{z}) on {over_name} stands {relation} ({ux},{uy},{uz}) on {under_name}",
+            x = over.x,
+            y = over.y,
+            z = over.z,
+            over_name = net_label(over_net, &entry.ir),
+            relation = if pair.stacked() {
+                "directly over"
+            } else {
+                "a layer over, and one step across from,"
+            },
+            ux = below.x,
+            uy = below.y,
+            uz = below.z,
+            under_name = net_label(under_net, &entry.ir),
+        ));
+    }
+    if pairs.len() > named_count {
+        diag = diag.with_footer(format!(
+            "and {rest} more of the same two shapes",
+            rest = pairs.len() - named_count,
+        ));
+    }
+    diag = diag.with_footer(
+        "`spec/redstone` §14.5 makes separating them the physical tile layer's obligation, and §14.6 states it: a `bridge` coord renders as a tile that conducts to neither another net's coord under it nor another net's coords diagonally under it — its own net's coord under it is the climb, and has to conduct",
+    );
+    diag = diag.with_footer(
+        "Fix: nothing in the source is wrong — the pairs are what the escape costs, and enlarging the region is not a remedy: where a net has to climb at its own doorstep, more room only lengthens the run it then makes on the upper layer",
+    );
+    debug_assert_eq!(diag.severity(), Severity::Warning);
+    Some(diag)
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::HashSet;
@@ -1738,6 +1949,39 @@ mod tests {
         );
     }
 
+    /// What the tile layer is handed is one layer down, and five
+    /// coords wide.
+    ///
+    /// The depth is the half [`beside`]'s own test cannot see: every
+    /// fixture in this crate fits inside `void=2`, so a rule reaching
+    /// two layers down would name the same pairs in all of them and
+    /// nothing would fail. Spelled out as coords rather than derived
+    /// from the deltas, for the reason the [`beside`] test is: the
+    /// rule the tile layer is handed has to be written down twice
+    /// before it can change.
+    #[test]
+    fn the_layer_handed_to_the_tile_layer_is_the_one_directly_under() {
+        let mut reached: Vec<CellCoord> = under(CellCoord::new(2, 3, 3)).collect();
+        reached.sort_by_key(|coord| coord_key(*coord));
+        assert_eq!(
+            reached,
+            vec![
+                CellCoord::new(1, 2, 3),
+                CellCoord::new(2, 2, 2),
+                CellCoord::new(2, 2, 3),
+                CellCoord::new(2, 2, 4),
+                CellCoord::new(3, 2, 3),
+            ],
+            "the coord under it and the four diagonally under it, and nothing \
+             two layers down",
+        );
+        assert_eq!(
+            under(CellCoord::new(0, 0, 0)).count(),
+            0,
+            "and there is no layer under the floor",
+        );
+    }
+
     /// A net does not run in the lane beside another net's dust, even
     /// when that lane is empty.
     ///
@@ -1885,22 +2129,28 @@ mod tests {
         );
     }
 
-    /// Two strands one layer apart are deliberately not kept apart.
+    /// Two strands one layer apart are named rather than kept apart.
     ///
-    /// This is a decision, not an oversight: whether dust at `y + 1`
-    /// reads the dust below it depends on what is standing between
-    /// them, and the pseudo-2.5D model carries no answer, so
-    /// `spec/redstone` §14.5 makes separating them the physical tile
-    /// layer's obligation. Recorded as a test because the alternative
-    /// is a reader finding [`IN_PLANE`] and taking four steps for an
-    /// oversight of six.
+    /// Not keeping them apart is a decision, not an oversight: whether
+    /// dust at `y + 1` reads the dust below it depends on what is
+    /// standing between them, and the pseudo-2.5D model carries no
+    /// answer, so `spec/redstone` §14.5 makes separating them the
+    /// physical tile layer's obligation. Recorded as a test because the
+    /// alternative is a reader finding [`IN_PLANE`] and taking four
+    /// steps for an oversight of six.
+    ///
+    /// What the pass owes is saying which pairs carry the obligation,
+    /// and [`tile_layer_pairs`] is that list. Counted here twice over —
+    /// once by hand off the two nets' dust, once by the function the
+    /// finding is built from — because a list checked against itself
+    /// would agree with any rule at all.
     ///
     /// The escape is what produces both shapes. A net climbing to clear
     /// another lands directly over it once and one step across from it
     /// twice — the second is a redstone staircase, and it is the more
     /// common of the two.
     #[test]
-    fn two_strands_one_layer_apart_are_left_to_the_tile_layer() {
+    fn two_strands_one_layer_apart_are_named_rather_than_kept_apart() {
         let region = region(3, 3, 2);
         let source = CellCoord::new(1, 0, 0);
         let sink = CellCoord::new(1, 0, 2);
@@ -1908,12 +2158,19 @@ mod tests {
         let wall_sink = CellCoord::new(2, 0, 1);
         let router = router(&region, &[source, sink, wall_source, wall_sink]);
 
-        let wall = dust_of(&router, wall_source, &[wall_sink]);
-        let climbed = router.dust(&router.tree(
-            source,
-            &[sink],
-            &keep_out(&router, wall_source, &[wall_sink]),
-        ));
+        // Laid through `net_trees` rather than by hand so the wire is
+        // the one the routing pass would lay: equal fanout, so
+        // `net_order` puts `Input(0)` first and the second net is the
+        // one that has to climb.
+        let mut nets: HashMap<NetRef, Vec<CellCoord>> = HashMap::new();
+        nets.insert(NetRef::Input(0), vec![wall_sink]);
+        nets.insert(NetRef::Cell(0), vec![sink]);
+        let trees = net_trees(&nets, &router, |net| match net {
+            NetRef::Input(_) => wall_source,
+            NetRef::Cell(_) => source,
+        });
+        let wall = router.dust(&trees[&NetRef::Input(0)]);
+        let climbed = router.dust(&trees[&NetRef::Cell(0)]);
 
         let mut stacked = 0usize;
         let mut staircase = 0usize;
@@ -1934,6 +2191,125 @@ mod tests {
             (1, 2),
             "the escape lands over the strand it cleared and beside it \
              twice: {climbed:?} over {wall:?}",
+        );
+
+        let pairs = tile_layer_pairs(&nets, &trees, &router);
+        assert_eq!(
+            (
+                pairs.iter().filter(|pair| pair.stacked()).count(),
+                pairs.iter().filter(|pair| !pair.stacked()).count(),
+            ),
+            (stacked, staircase),
+            "and the list handed to the tile layer is those same pairs: {pairs:?}",
+        );
+        assert!(
+            pairs
+                .iter()
+                .all(|pair| pair.over.0.y.abs_diff(pair.under.0.y) == 1
+                    && pair.over.0.y > pair.under.0.y),
+            "each recorded once, upper coord first: {pairs:?}",
+        );
+        assert!(
+            pairs
+                .iter()
+                .all(|pair| pair.over.1 == NetRef::Cell(0) && pair.under.1 == NetRef::Input(0)),
+            "and the net that climbed is the upper of every pair, which is what \
+             a message naming them the other way round would get wrong: {pairs:?}",
+        );
+
+        let entry = entry_for(&nets, "climb");
+        let finding = tile_layer_clearance(&nets, &trees, &router, &entry, &region)
+            .expect("three pairs are a finding");
+        assert_eq!(finding.code, DiagnosticCode::RouteCrossLayerClearance);
+        assert!(
+            finding
+                .primary
+                .contains("leaves 3 pairs of dust within one step of each other across layers (1 stacked, 2 staircase)"),
+            "the primary counts both shapes: {}",
+            finding.primary,
+        );
+        let notes: Vec<&str> = finding.notes.iter().map(|n| n.message.as_str()).collect();
+        assert_eq!(
+            notes[..3],
+            [
+                "(1,1,1) on cell #0 stands directly over (1,0,1) on sig.a",
+                "(1,1,0) on cell #0 stands a layer over, and one step across from, (1,0,1) on sig.a",
+                "(1,1,2) on cell #0 stands a layer over, and one step across from, (1,0,1) on sig.a",
+            ],
+            "every pair named, upper coord and climbing net first: {notes:?}",
+        );
+        assert!(
+            !notes.iter().any(|note| note.starts_with("and ")),
+            "and nothing tallied, because nothing was left out — a finding that \
+             named `and 0 more` would be counting the cap rather than the \
+             pairs: {notes:?}",
+        );
+    }
+
+    /// A scope entry a finding can name nets out of: one sensor input,
+    /// one cell, and no geometry — [`net_label`] reads the input row
+    /// and nothing else.
+    fn entry_for(nets: &HashMap<NetRef, Vec<CellCoord>>, name: &str) -> ScopedPlacementIrEntry {
+        use cairn_lang_core::Edition;
+        use cairn_lang_core::ast::DottedRef;
+
+        use crate::logic_ir::ScopeKind;
+        use crate::netlist_ir::NetlistInput;
+
+        let mut ir = PlacementIr::new(Edition::Java);
+        // `sig.a`, `sig.b`, ... one per net of the scope, which is more
+        // inputs than any of them drives — `net_label` reads the row by
+        // index and asks for nothing else.
+        for letter in "abcdefghijklmnopqrstuvwxyz".chars().take(nets.len()) {
+            ir.inputs.push(NetlistInput {
+                name: DottedRef::new("sig".into(), vec![letter.to_string()]),
+                span: Span::default(),
+            });
+        }
+        ScopedPlacementIrEntry {
+            kind: ScopeKind::Struct,
+            name: name.to_owned(),
+            ir,
+        }
+    }
+
+    /// A net that climbs over its own dust is a wire, not a pair.
+    ///
+    /// Every climb puts one of a net's own coords a layer under
+    /// another, so counting those would report an obligation on every
+    /// escape in the corpus and bury the two-signal pairs the tile
+    /// layer actually has to separate. One net, one signal: there is
+    /// nothing to keep apart.
+    #[test]
+    fn a_strand_that_climbs_over_its_own_dust_is_not_a_pair() {
+        // One row deep, so the way past the block in the middle of the
+        // run is up and back down rather than round.
+        let region = region(5, 1, 2);
+        let source = CellCoord::new(0, 0, 0);
+        let sink = CellCoord::new(4, 0, 0);
+        let wall = CellCoord::new(2, 0, 0);
+        let router = router(&region, &[source, sink, wall]);
+
+        let mut nets: HashMap<NetRef, Vec<CellCoord>> = HashMap::new();
+        nets.insert(NetRef::Input(0), vec![sink]);
+        let trees = net_trees(&nets, &router, |_| source);
+        let dust = router.dust(&trees[&NetRef::Input(0)]);
+        assert!(
+            dust.iter().any(|coord| coord.y > 0),
+            "the fixture needs the net to climb: {dust:?}",
+        );
+        assert!(
+            dust.iter()
+                .any(|over| dust.iter().any(|under| over.y.abs_diff(under.y) == 1
+                    && over.x.abs_diff(under.x) + over.z.abs_diff(under.z) <= 1)),
+            "and to pass within one step of itself across layers, or there is \
+             nothing here for the rule to exclude: {dust:?}",
+        );
+
+        assert_eq!(
+            tile_layer_pairs(&nets, &trees, &router),
+            vec![],
+            "one net's own climb is the wire: {dust:?}",
         );
     }
 
