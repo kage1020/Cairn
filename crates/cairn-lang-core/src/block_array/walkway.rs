@@ -60,8 +60,13 @@ const PORT_GROUND_V: u32 = 0;
 ///
 /// A port names a member of the `def` body, so no `level y=N` has
 /// shifted it and the row is `super::lower::carve_door`'s `y_offset + 1`
-/// with `y_offset = 0`. It is where the masonry has to be, not where the
-/// strip lands — that is [`PORT_GROUND_V`], one row below.
+/// with `y_offset = 0`. That is an invariant of port *resolution*, not of
+/// this module: a door nested under a `level` is refused as a port
+/// outright, which `tests/door_wall_fit.rs` pins, because a lookup that
+/// walked the flattened members would resolve one and leave this
+/// constant disagreeing with the row `carve_door` asks about. It is
+/// where the masonry has to be, not where the strip lands — that is
+/// [`PORT_GROUND_V`], one row below.
 const DOOR_PORT_BASE_V: u32 = 1;
 
 /// Output of [`build_walkway_array`].
@@ -2001,6 +2006,12 @@ mod tests {
         // port, so the refusal is about the row and not about the level.
         let both_storeys = WallColumn::from_walls([(0, 3), (6, 4)]);
         assert!(port_world_position((0, 0, 0), dims, def, &pid("entry"), &both_storeys).is_some());
+        // A course of exactly that one row is enough: the port asks
+        // where the doorway opens, not where it ends, so a column of
+        // `1..=1` anchors it. Asked one row higher — which is what a
+        // constant off by one would do — this answers `None`.
+        let one_row = WallColumn::from_walls([(0, 1)]);
+        assert!(port_world_position((0, 0, 0), dims, def, &pid("entry"), &one_row).is_some());
     }
 
     #[test]

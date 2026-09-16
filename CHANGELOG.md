@@ -113,6 +113,13 @@
   `spec/components-editing-sites.md` §9.3.5 requires, so a strip is refused to exactly the doorways
   the openings pass refuses to cut.
 
+  That last part is the one place output changes on disk rather than only in the report. Where a
+  `connect` row anchored on such a door, the strip was laid to a doorway that was never carved: its
+  `<site>_walkway_<from>__<to>.nbt` is no longer written, the lockfile loses the `walkways:` entry
+  for it, and `resolved_ir_hash` moves with the IR. Every `.nbt` for a struct or placement is
+  byte-identical — the carve painted air over air — so a rebuild changes nothing an author placed
+  in a world except the strip that led nowhere.
+
 - *(docs)* `spec/versioning-editions.md` §10.7 illustrated the `@edition` escape hatch with
   `minecraft:light_block["block_light_level"=15]`, an id that exists on Bedrock 1.21.0 and on
   neither of the other two targets the registry pack ships: 1.21.40 promoted the level into the id,

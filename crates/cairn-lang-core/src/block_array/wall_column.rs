@@ -8,18 +8,21 @@
 //! as open air between the two courses.
 //!
 //! The lowering used to carry that set as one number, the highest row any
-//! wall reached. A number cannot answer the question a `window` has to ask
-//! — "is every row I cut into a wall?" — in either direction: it says
-//! nothing about the rows below the first course (so a `window y=0` carved
-//! a hole through the floor slab) and nothing about the gap between two
-//! courses (so a `window` between them hung glass in open air). Both cut
+//! wall reached. A number cannot answer the question an opening has to
+//! ask — a `window`'s "is every row I cut into a wall?", a `door`'s "is
+//! the row I open at one?" — in either direction: it says nothing about
+//! the rows below the first course (so a `window y=0` carved a hole
+//! through the floor slab) and nothing about the gap between two courses
+//! (so a `window` between them hung glass in open air, and a `door` under
+//! walls that start a storey up carved air over air). All of them cut
 //! silently, because a check that cannot see the fault cannot report it.
 //!
 //! [`WallColumn`] is that set, kept as sorted inclusive spans with
 //! overlapping *and adjacent* runs merged. Merging adjacency is what makes
 //! a level-on-level tower read as one wall: `walls height=5` plus
-//! `level y=5 walls height=4` is `1..=9`, and a window spanning the seam
-//! is cut into masonry the whole way up.
+//! `level y=5 walls height=4` is `1..=9`, a window spanning the seam is
+//! cut into masonry the whole way up, and a doorway at the foot of it
+//! opens its two rows across the two members that paint them.
 
 use std::fmt;
 
@@ -232,6 +235,17 @@ mod tests {
         assert_eq!(column.course_top_at(3), None, "the gap holds no course");
         assert_eq!(column.course_top_at(0), None, "the floor slab owns row 0");
         assert_eq!(column.course_top_at(9), None);
+    }
+
+    #[test]
+    fn a_row_in_merged_courses_is_capped_by_the_merge_and_not_by_its_member() {
+        // `walls height=1` plus `level y=1 walls height=3`: rows 1..=1 and
+        // 2..=4 abut, so row 1 is capped at 4 and a doorway there opens
+        // the two rows it wants although the member it stands on paints
+        // one of them.
+        let column = WallColumn::from_walls([(0, 1), (1, 3)]);
+        assert_eq!(column.to_string(), "y=1..=4");
+        assert_eq!(column.course_top_at(1), Some(4));
     }
 
     #[test]

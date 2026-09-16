@@ -11,10 +11,10 @@
 //! and the silent one belonged to the member an author is most likely to
 //! write first.
 //!
-//! The course holding that row is also what caps the opening: a doorway
-//! takes two rows where the course has them and one where it does not,
-//! rather than running into the roof above a short wall or into the air
-//! above a short course.
+//! The gate is what ends the silence. The course it finds is also the
+//! cap — a doorway takes two rows where that course has them and one
+//! where it does not — which keeps the opening inside the masonry it was
+//! cut from rather than running into the roof over a short wall.
 //!
 //! `spec/components-editing-sites.md` §9.3.5 requires the walkway port to
 //! draw the same line as the openings pass, so the last group here
@@ -27,6 +27,7 @@ use cairn_lang_core::{lower, parse, resolve};
 const THEME: &str = "theme t:\n  \
                      slot floor -> @oak_planks\n  \
                      slot wall  -> @cobblestone\n  \
+                     slot roof  -> @spruce_stairs\n  \
                      slot gravel -> @gravel\n\n";
 
 fn lowered(source: &str) -> BlockArrayIr {
@@ -48,6 +49,19 @@ fn defers(ir: &BlockArrayIr) -> Vec<&str> {
         .filter(|d| d.code == DiagnosticCode::DeferredMember)
         .map(|d| d.primary.as_str())
         .collect()
+}
+
+/// Nothing at all was reported — not a deferral and not a refusal.
+///
+/// A case that expects the carve to happen asserts on the whole list
+/// rather than on [`defers`], which filters to `W_DEFERRED_MEMBER` and so
+/// would let an `E_INCOMPATIBLE_MATERIAL` on the source pass unseen.
+fn assert_clean(ir: &BlockArrayIr) {
+    assert!(
+        ir.diagnostics.is_empty(),
+        "expected a source that compiles clean, got {:?}",
+        ir.diagnostics,
+    );
 }
 
 fn block_id(ba: &BlockArray, x: u32, y: u32, z: u32) -> &str {
@@ -114,7 +128,7 @@ fn a_door_inside_the_level_whose_walls_it_opens_is_carved() {
          door  id=e side=front at=center\n",
     );
     let out = lowered(&src);
-    assert_eq!(defers(&out), [] as [&str; 0]);
+    assert_clean(&out);
     let ba = only_structure(&out);
     for y in 7..=8 {
         assert_eq!(block_id(ba, 2, y, 4), "minecraft:air", "row y={y}");
@@ -149,8 +163,35 @@ fn a_door_is_checked_against_its_own_course_and_not_the_tallest_one() {
         ],
     );
     let out = lowered(&two_courses(6));
-    assert_eq!(defers(&out), [] as [&str; 0]);
+    assert_clean(&out);
     assert_eq!(block_id(only_structure(&out), 2, 7, 4), "minecraft:air");
+}
+
+#[test]
+fn two_courses_that_touch_are_one_wall_to_the_doorway_too() {
+    // `walls height=1` paints row 1 and `level y=1 walls height=3` paints
+    // 2..=4; they abut, so the struct has one wall from 1 to 4 and the
+    // door opens the two rows a doorway wants — although the member it
+    // opens into paints one of them. The cap is the course's, and a
+    // course is what the merge says it is; reading the door's own
+    // `walls` member instead would make a legal opening depend on where
+    // the author put a `level` line.
+    let src = format!(
+        "{THEME}struct hut size=5x5\n  \
+         walls id=lower mat_slot=wall height=1\n  \
+         level id=up y=1\n    \
+         walls id=w mat_slot=wall height=3\n  \
+         door id=e side=front at=center\n",
+    );
+    let out = lowered(&src);
+    assert_clean(&out);
+    let ba = only_structure(&out);
+    for y in 1..=2 {
+        assert_eq!(block_id(ba, 2, y, 4), "minecraft:air", "row y={y}");
+    }
+    for y in 3..=4 {
+        assert_eq!(block_id(ba, 2, y, 4), "minecraft:cobblestone", "row y={y}");
+    }
 }
 
 #[test]
@@ -176,15 +217,19 @@ fn a_door_on_a_struct_with_no_walls_says_there_is_no_wall() {
 fn a_door_under_a_one_row_course_opens_that_row_and_stops() {
     // `walls height=1` paints row 1 only, and the gable's front eave sits
     // at row 2. The opening is the one row the course has; the row above
-    // it stays the roof it was.
+    // it stays the roof it was. A sloped roof reads `facing` / `half` /
+    // `shape` off the geometry, so its slot has to be a stair family —
+    // pointed at the wall's cobblestone this source is
+    // `E_INCOMPATIBLE_MATERIAL` and the gable only draws at all through
+    // its own fallback.
     let src = format!(
         "{THEME}struct hut size=5x5\n  \
          walls mat_slot=wall height=1\n  \
-         roof kind=gable mat_slot=wall\n  \
+         roof kind=gable mat_slot=roof\n  \
          door id=e side=front at=center\n",
     );
     let out = lowered(&src);
-    assert_eq!(defers(&out), [] as [&str; 0]);
+    assert_clean(&out);
     let ba = only_structure(&out);
     assert_eq!(block_id(ba, 2, 1, 4), "minecraft:air");
     assert_eq!(block_id(ba, 2, 2, 4), "minecraft:spruce_stairs");
@@ -245,6 +290,40 @@ fn the_port_anchors_exactly_the_doorways_the_openings_pass_carves() {
              the openings pass carves the doorway = {carved}, the port anchors it = {anchored}",
         );
     }
+}
+
+#[test]
+fn a_door_under_a_level_is_not_a_port_at_all() {
+    // The invariant the port side's base row rests on. Port resolution
+    // walks the `def` body only — both the resolver's port check and
+    // `port_world_position`'s member lookup — so the door a port names
+    // has never been shifted by a `level`, and the row it opens at is
+    // always `1`. Pinned here because that is what makes one constant on
+    // the port side answer the same question as `carve_door`'s
+    // `y_offset + 1`: were port lookup ever to walk the flattened
+    // members, a door under `level y=6` would resolve, and the two
+    // would disagree about the row — the fault this file exists for.
+    let src = format!(
+        "{THEME}def hut size=5x5:\n  \
+         walls id=w mat_slot=wall height=4\n  \
+         level id=up y=0\n    \
+         door id=e side=front at=center\n\n\
+         site s:\n  \
+         place id=a use=hut theme=t at=origin\n  \
+         place id=b use=hut theme=t east_of=a gap=4\n  \
+         connect a.e to b.e path=@gravel\n",
+    );
+    let module = parse(&src).expect("parse");
+    let ir = lower(&module);
+    let resolution = resolve(&ir, None);
+    assert!(
+        resolution
+            .diagnostics
+            .iter()
+            .any(|d| d.code == DiagnosticCode::UnresolvedPort),
+        "a door nested under a `level` has to be refused as a port: {:?}",
+        resolution.diagnostics,
+    );
 }
 
 #[test]

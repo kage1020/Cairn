@@ -120,7 +120,8 @@ placement の overhang はポートを外面の外側、overhang のリングま
 の中に、`window` は矩形全体が 1 つの層の中に収まっていなければなりません。
 
 ```
-段 1 が 1 つの層の中                                 # door
+段 1 が 1 つの層の中                                 # door (ポートのドアは def 本体のメンバなので、
+                                                 #       開く段は常に 1)
 offset + size.w ≤ wall_length                    # window、水平
 y … y + size.h - 1 の全段が 1 つの層の中             # window、垂直
 ```

@@ -127,7 +127,8 @@ placement whose walls do not reach the rows the opening needs anchors neither: a
 row it opens at inside one course, and a `window` needs its whole rectangle inside one.
 
 ```
-row 1 in one course                              # door
+row 1 in one course                              # door (a port's door is a def-body member,
+                                                 #       so the row it opens at is always 1)
 offset + size.w ≤ wall_length                    # window, horizontal
 every row of y … y + size.h - 1 in one course    # window, vertical
 ```
