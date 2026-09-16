@@ -111,9 +111,10 @@ pub enum DiagnosticCode {
     /// something a reader can see — the finding lists the coords and
     /// the nets, which is what the tile catalogue has to separate and
     /// what an author reading a dump would otherwise have to derive.
-    /// Fix: nothing in the source is wrong; a larger `size=WxH` gives
-    /// the nets room to go round on the plane rather than climb, which
-    /// is what removes the pairs.
+    /// Fix: nothing in the source is wrong, and enlarging the region is
+    /// not a remedy — where a net has to climb at its own doorstep,
+    /// more room only lengthens the run it then makes on the upper
+    /// layer.
     RouteCrossLayerClearance,
     /// A routed driver segment (source pad or driver cell → sink coord,
     /// where the sink is either a downstream cell coord or an actuator

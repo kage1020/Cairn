@@ -83,17 +83,19 @@ fn delayed_from_source(source: &str, edition: Edition) -> ScopedPlacementIr {
         placement.diagnostics,
     );
     let routing = compile_routing(&placement.scoped);
-    // Warnings are allowed through: a scope whose nets had to climb
-    // past each other earns `W_ROUTE_CROSS_LAYER_CLEARANCE`, which
-    // names the pairs the physical tile layer has to separate and
-    // elides nothing. A refusal is what these fixtures must not hit —
-    // it would take the scope out of the IR the pass below is reading.
+    // One warning is allowed through, by code rather than by severity:
+    // a scope whose nets had to climb past each other earns
+    // `W_ROUTE_CROSS_LAYER_CLEARANCE`, which names the pairs the
+    // physical tile layer has to separate and elides nothing. Anything
+    // else — a refusal, which would take the scope out of the IR the
+    // pass below reads, or a warning routing has yet to grow — is this
+    // fixture set saying something new, and worth failing on.
     assert!(
         routing
             .diagnostics
             .iter()
-            .all(|d| d.severity() != Severity::Error),
-        "fixture must route without a refusal: {:?}",
+            .all(|d| d.code == DiagnosticCode::RouteCrossLayerClearance),
+        "fixture must route with nothing but the cross-layer advisory: {:?}",
         routing.diagnostics,
     );
     let delay = compile_delay(&routing.scoped);

@@ -182,15 +182,20 @@ struct sim size=7x5
     let placement = placement_from_source(source, Edition::Java);
     let routed = compile_routing(&placement);
     // Its nets climb past each other, so it carries the advisory that
-    // names the pairs for the physical tile layer. What this fixture
-    // is about is the lengths that climb is charged into, and those
-    // are only read off a scope the pass kept.
-    assert!(
+    // names the pairs for the physical tile layer — exactly one of
+    // them, and nothing else. What this fixture is about is the
+    // lengths that climb is charged into, and those are only read off
+    // a scope the pass kept; asserting the code rather than the
+    // severity is what keeps the advisory itself from going missing
+    // here, since no other test measures this scope.
+    assert_eq!(
         routed
             .diagnostics
             .iter()
-            .all(|d| d.severity() != Severity::Error),
-        "clean fixture must not be refused: {:?}",
+            .map(|d| d.code)
+            .collect::<Vec<_>>(),
+        vec![DiagnosticCode::RouteCrossLayerClearance],
+        "the climbing fixture carries the advisory and no refusal: {:?}",
         routed.diagnostics,
     );
 
@@ -635,8 +640,17 @@ fn re_running_routing_pass_panics_loudly() {
 /// editions, because the shape is the placement's and the cell library
 /// does not change it: one stacked pair and eight staircases, the
 /// second being the one that shorts by the same mechanism an in-plane
-/// pair does, and the commoner because a climbing net lands beside its
-/// obstacle as often as over it.
+/// pair does. Eight to one rather than a near-even split because
+/// `cell #0`'s run climbed to clear the two sensor lanes and then
+/// travels *alongside* them the length of the region, one step across
+/// from each, crossing over dust exactly once.
+///
+/// The notes are pinned whole rather than searched. What the finding
+/// says is the whole of what this pass hands the tile layer, so the
+/// cap on how many pairs are named, the tally of the rest, the order
+/// they come in — which is a sort over what is otherwise `HashMap`
+/// order — and which net is named as the upper of each pair are all
+/// part of the contract, and none of them fails an `any(...)` search.
 #[test]
 fn crossbar_names_the_pairs_the_tile_layer_has_to_separate() {
     let source = load_example("crossbar.crn");
@@ -667,21 +681,23 @@ fn crossbar_names_the_pairs_the_tile_layer_has_to_separate() {
             finding.primary,
         );
         let notes: Vec<&str> = finding.notes.iter().map(|n| n.message.as_str()).collect();
-        assert!(
-            notes.iter().any(|n| n.contains("stands directly over")),
-            "{edition:?}: and the notes name a stacked pair: {notes:?}",
-        );
-        assert!(
-            notes
-                .iter()
-                .any(|n| n.contains("stands a layer over, and one step across from,")),
-            "{edition:?}: and a staircase: {notes:?}",
-        );
-        assert!(
-            notes
-                .iter()
-                .any(|n| n.contains("the physical tile layer's obligation")),
-            "{edition:?}: and say whose obligation the pairs are: {notes:?}",
+        assert_eq!(
+            notes,
+            vec![
+                "(4,1,1) on cell #0 stands directly over (4,0,1) on cell #1",
+                "(1,1,1) on cell #0 stands a layer over, and one step across from, (1,0,0) on sig.a",
+                "(1,1,1) on cell #0 stands a layer over, and one step across from, (1,0,2) on sig.b",
+                "and 6 more of the same two shapes",
+                "`spec/redstone` §14.5 makes separating them the physical tile layer's obligation, \
+                 and §14.6 states it: a `bridge` coord renders as a tile that conducts to neither \
+                 another net's coord under it nor another net's coords diagonally under it — its \
+                 own net's coord under it is the climb, and has to conduct",
+                "Fix: nothing in the source is wrong — the pairs are what the escape costs, and \
+                 enlarging the region is not a remedy: where a net has to climb at its own \
+                 doorstep, more room only lengthens the run it then makes on the upper layer",
+            ],
+            "{edition:?}: both shapes named, the rest tallied, the coords in a settled order, \
+             and each pair read upper-first",
         );
         assert!(
             routed.scoped.scopes.iter().any(|e| e.name == "crossbar"),

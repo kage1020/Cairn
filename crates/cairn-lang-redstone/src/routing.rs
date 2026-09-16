@@ -52,8 +52,10 @@
 //!   gets the climb measured: the `wire_length` below and the delay
 //!   pass's tick count are both read off the routed tree.
 //! - **The pairs the escape leaves.** A net that climbs to clear
-//!   another lands over it, or one step across from it a layer up —
-//!   the staircase, and the commoner of the two. Separating those is
+//!   another runs over it, or one step across from it a layer up —
+//!   the staircase, and the more numerous of the two, because a run
+//!   that climbed to clear a lane travels alongside that lane and
+//!   crosses over it once. Separating those is
 //!   §14.5's obligation on the physical tile layer rather than this
 //!   pass's, so they are named rather than refused:
 //!   `W_ROUTE_CROSS_LAYER_CLEARANCE` lists the coords and the nets, and
@@ -207,9 +209,10 @@ pub fn compile_routing(placement: &ScopedPlacementIr) -> RoutingOutput {
 /// on failure.
 ///
 /// The advisories ride with the IR rather than being collected
-/// alongside it because a refused scope has none: it is elided, and
-/// what an elided scope leaves the tile layer is not an obligation
-/// anything will be asked to discharge.
+/// alongside it because a refused scope has none: the finding is asked
+/// for after the last refusal, so a scope this pass elides is never
+/// measured for pairs — what an elided scope would have left the tile
+/// layer is not an obligation anything will be asked to discharge.
 type ScopeRouting = Result<(PlacementIr, Vec<Diagnostic>), Diagnostic>;
 
 fn route_scope(entry: &ScopedPlacementIrEntry) -> ScopeRouting {
@@ -309,13 +312,6 @@ fn route_scope(entry: &ScopedPlacementIrEntry) -> ScopeRouting {
     if let Some(diagnostic) = unroutable(&nets, &trees, entry, &region, source_of_net) {
         return Err(diagnostic);
     }
-    // Every net is wired, and some of them climbed to stay off each
-    // other. Said once, here, because this is the stage that made the
-    // pairs: stages 3 and 4 rebuild the same trees and would repeat
-    // the finding against the same layout.
-    let advisories: Vec<Diagnostic> = tile_layer_clearance(&nets, &trees, &router, entry, &region)
-        .into_iter()
-        .collect();
     for net in net_order(&nets) {
         for coord in trees[&net].wire_path() {
             occupancy.insert(coord);
@@ -361,6 +357,17 @@ fn route_scope(entry: &ScopedPlacementIrEntry) -> ScopeRouting {
     if used > reserved {
         return Err(congestion_diagnostic(entry, &region, used));
     }
+
+    // Every net is wired, the scope fits, and some of the nets climbed
+    // to stay off each other. Below the refusals rather than beside the
+    // trees it reads, so that a scope this pass elides carries no
+    // advisory rather than one computed and dropped. Said once, here,
+    // because this is the stage that made the pairs: stages 3 and 4
+    // rebuild the same trees and would repeat the finding against the
+    // same layout.
+    let advisories: Vec<Diagnostic> = tile_layer_clearance(&nets, &trees, &router, entry, &region)
+        .into_iter()
+        .collect();
 
     Ok((ir, advisories))
 }

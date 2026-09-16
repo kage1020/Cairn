@@ -60,8 +60,9 @@
 //! What it can do is say which pairs that layer is being handed.
 //! [`tile_layer_pairs`] lists every two strands of different nets a
 //! layer apart and within one step of each other — the pair directly
-//! over another, and the staircase one step across from it, which the
-//! escape makes the more often of the two — and
+//! over another, and the staircase one step across from it, which a
+//! run that climbed to clear a lane and then travels alongside it
+//! makes the more numerous of the two — and
 //! [`tile_layer_clearance`] is the advisory the routing pass raises
 //! for them. An advisory rather than an obstacle: a rule invented here
 //! would refuse layouts for a reason nothing in this model can check,
@@ -1206,13 +1207,22 @@ impl TileLayerPair {
 ///
 /// The router lays no two nets within one step of each other in one
 /// plane, so the pairs here are all made by the escape: a net that
-/// climbs to clear another lands over it or, more often, beside it a
+/// climbs to clear another runs over it, or one step across from it a
 /// layer up — the staircase dust climbs, which shorts by the same
 /// mechanism an in-plane pair does.
 ///
+/// The diagonal is the one that piles up, and not because a climb
+/// chooses it: a coord has one coord directly under it and four
+/// diagonally under it, and a run that climbed to clear a lane then
+/// travels *alongside* that lane, one step across from it for as long
+/// as the two run parallel, crossing over it once.
+///
 /// Dust only, per [`Router::dust`]: a terminal is a block, and a block
 /// under a strand is what a wire climbs over rather than something two
-/// signals share.
+/// signals share — the ordinary way past a component. The obligation
+/// `spec/redstone` §14.6 puts on the tile is wider than this list, and
+/// does not need the list to enumerate it: a `bridge` tile conducts to
+/// no coord of another net below it, whether dust or block.
 pub(crate) fn tile_layer_pairs(
     nets: &HashMap<NetRef, Vec<CellCoord>>,
     trees: &HashMap<NetRef, NetTree>,
@@ -1252,9 +1262,10 @@ pub(crate) fn tile_layer_pairs(
 /// obligation, not a census — the count in the primary is the census.
 /// Per shape rather than over the whole list because the two are
 /// separated by different tiles — the one under a strand and the ones
-/// diagonally under it — and a layout is usually lopsided enough for a
-/// flat cap to name one shape only: `examples/crossbar.crn` has eight
-/// staircases to one stacked pair.
+/// diagonally under it — and a layout is lopsided towards the diagonal
+/// often enough for a flat cap to name one shape only. A count of the
+/// corpus's split belongs in a test, where it fails when it drifts;
+/// here it would be a number nothing checks.
 const NAMED_PER_SHAPE: usize = 2;
 
 /// The advisory a scope earns for the strands its escape left a layer
@@ -1337,10 +1348,10 @@ pub(crate) fn tile_layer_clearance(
         ));
     }
     diag = diag.with_footer(
-        "`spec/redstone` §14.5 makes separating them the physical tile layer's obligation: a `bridge` coord renders as a tile that conducts to neither the coord under it nor the ones diagonally under it",
+        "`spec/redstone` §14.5 makes separating them the physical tile layer's obligation, and §14.6 states it: a `bridge` coord renders as a tile that conducts to neither another net's coord under it nor another net's coords diagonally under it — its own net's coord under it is the climb, and has to conduct",
     );
     diag = diag.with_footer(
-        "Fix: nothing in the source is wrong — enlarge `size=WxH` so the nets have room to go round on the plane rather than climb, if you would rather the layout carried no such pair",
+        "Fix: nothing in the source is wrong — the pairs are what the escape costs, and enlarging the region is not a remedy: where a net has to climb at its own doorstep, more room only lengthens the run it then makes on the upper layer",
     );
     debug_assert_eq!(diag.severity(), Severity::Warning);
     Some(diag)
@@ -1938,6 +1949,39 @@ mod tests {
         );
     }
 
+    /// What the tile layer is handed is one layer down, and five
+    /// coords wide.
+    ///
+    /// The depth is the half [`beside`]'s own test cannot see: every
+    /// fixture in this crate fits inside `void=2`, so a rule reaching
+    /// two layers down would name the same pairs in all of them and
+    /// nothing would fail. Spelled out as coords rather than derived
+    /// from the deltas, for the reason the [`beside`] test is: the
+    /// rule the tile layer is handed has to be written down twice
+    /// before it can change.
+    #[test]
+    fn the_layer_handed_to_the_tile_layer_is_the_one_directly_under() {
+        let mut reached: Vec<CellCoord> = under(CellCoord::new(2, 3, 3)).collect();
+        reached.sort_by_key(|coord| coord_key(*coord));
+        assert_eq!(
+            reached,
+            vec![
+                CellCoord::new(1, 2, 3),
+                CellCoord::new(2, 2, 2),
+                CellCoord::new(2, 2, 3),
+                CellCoord::new(2, 2, 4),
+                CellCoord::new(3, 2, 3),
+            ],
+            "the coord under it and the four diagonally under it, and nothing \
+             two layers down",
+        );
+        assert_eq!(
+            under(CellCoord::new(0, 0, 0)).count(),
+            0,
+            "and there is no layer under the floor",
+        );
+    }
+
     /// A net does not run in the lane beside another net's dust, even
     /// when that lane is empty.
     ///
@@ -2165,6 +2209,68 @@ mod tests {
                     && pair.over.0.y > pair.under.0.y),
             "each recorded once, upper coord first: {pairs:?}",
         );
+        assert!(
+            pairs
+                .iter()
+                .all(|pair| pair.over.1 == NetRef::Cell(0) && pair.under.1 == NetRef::Input(0)),
+            "and the net that climbed is the upper of every pair, which is what \
+             a message naming them the other way round would get wrong: {pairs:?}",
+        );
+
+        let entry = entry_for(&nets, "climb");
+        let finding = tile_layer_clearance(&nets, &trees, &router, &entry, &region)
+            .expect("three pairs are a finding");
+        assert_eq!(finding.code, DiagnosticCode::RouteCrossLayerClearance);
+        assert!(
+            finding
+                .primary
+                .contains("leaves 3 pairs of dust within one step of each other across layers (1 stacked, 2 staircase)"),
+            "the primary counts both shapes: {}",
+            finding.primary,
+        );
+        let notes: Vec<&str> = finding.notes.iter().map(|n| n.message.as_str()).collect();
+        assert_eq!(
+            notes[..3],
+            [
+                "(1,1,1) on cell #0 stands directly over (1,0,1) on sig.a",
+                "(1,1,0) on cell #0 stands a layer over, and one step across from, (1,0,1) on sig.a",
+                "(1,1,2) on cell #0 stands a layer over, and one step across from, (1,0,1) on sig.a",
+            ],
+            "every pair named, upper coord and climbing net first: {notes:?}",
+        );
+        assert!(
+            !notes.iter().any(|note| note.starts_with("and ")),
+            "and nothing tallied, because nothing was left out — a finding that \
+             named `and 0 more` would be counting the cap rather than the \
+             pairs: {notes:?}",
+        );
+    }
+
+    /// A scope entry a finding can name nets out of: one sensor input,
+    /// one cell, and no geometry — [`net_label`] reads the input row
+    /// and nothing else.
+    fn entry_for(nets: &HashMap<NetRef, Vec<CellCoord>>, name: &str) -> ScopedPlacementIrEntry {
+        use cairn_lang_core::Edition;
+        use cairn_lang_core::ast::DottedRef;
+
+        use crate::logic_ir::ScopeKind;
+        use crate::netlist_ir::NetlistInput;
+
+        let mut ir = PlacementIr::new(Edition::Java);
+        // `sig.a`, `sig.b`, ... one per net of the scope, which is more
+        // inputs than any of them drives — `net_label` reads the row by
+        // index and asks for nothing else.
+        for letter in "abcdefghijklmnopqrstuvwxyz".chars().take(nets.len()) {
+            ir.inputs.push(NetlistInput {
+                name: DottedRef::new("sig".into(), vec![letter.to_string()]),
+                span: Span::default(),
+            });
+        }
+        ScopedPlacementIrEntry {
+            kind: ScopeKind::Struct,
+            name: name.to_owned(),
+            ir,
+        }
     }
 
     /// A net that climbs over its own dust is a wire, not a pair.
