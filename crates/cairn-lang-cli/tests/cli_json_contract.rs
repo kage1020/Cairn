@@ -137,21 +137,39 @@ fn info_json_on_a_clean_source_is_still_the_report() {
 #[test]
 fn an_unreadable_source_is_still_told_apart_from_an_unparsable_one() {
     // A missing file is the caller's mistake and exits 2; a file that does
-    // not parse is the source's and exits 1. Neither should have moved.
-    for sub in ["check", "info"] {
-        let missing = cairn(sub, &["definitely-not-a-file.crn", "--format", "json"]);
+    // not parse is the source's and exits 1. Neither should have moved, and
+    // every subcommand that reads a source draws the line in the same
+    // place — each row carries the flags the subcommand insists on.
+    let out_dir = TempDir::new().expect("out tempdir");
+    let out_arg = out_dir.path().to_str().expect("utf-8 path");
+    let subcommands: [(&str, &[&str]); 6] = [
+        ("parse", &[]),
+        ("check", &["--format", "json"]),
+        ("info", &["--format", "json"]),
+        ("lower", &[]),
+        ("synth", &["--experimental-logic-synth"]),
+        ("compile", &["--edition", "java", "--out", out_arg]),
+    ];
+    for (sub, flags) in subcommands {
+        let mut args = vec!["definitely-not-a-file.crn"];
+        args.extend_from_slice(flags);
+        let missing = cairn(sub, &args);
         assert_eq!(
             missing.status.code(),
             Some(2),
-            "{sub} should still exit 2 for a missing file",
+            "{sub} should still exit 2 for a missing file, stderr={}",
+            String::from_utf8_lossy(&missing.stderr),
         );
         let tmp = TempDir::new().expect("tempdir");
         let bad = unparsable(&tmp);
-        let out = cairn(sub, &[bad.to_str().unwrap(), "--format", "json"]);
+        let mut args = vec![bad.to_str().unwrap()];
+        args.extend_from_slice(flags);
+        let out = cairn(sub, &args);
         assert_eq!(
             out.status.code(),
             Some(1),
-            "{sub} should still exit 1 for an unparsable file",
+            "{sub} should still exit 1 for an unparsable file, stderr={}",
+            String::from_utf8_lossy(&out.stderr),
         );
     }
 }

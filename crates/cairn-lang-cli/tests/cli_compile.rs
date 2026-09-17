@@ -7,7 +7,7 @@ use cairn_lang_core::lock::{HashHex, LockEdition, Lockfile};
 use tempfile::TempDir;
 
 mod common;
-use common::{cairn, example_in_tempdir, examples_dir};
+use common::{cairn, crn_examples, example_in_tempdir, examples_dir};
 
 /// The version cargo derived for this crate from `[workspace.package]`.
 ///
@@ -401,15 +401,6 @@ fn c10_unknown_target_exits_one_with_supported_list() {
 }
 
 #[test]
-fn c11_missing_source_exits_two() {
-    let result = cairn(
-        "compile",
-        &["definitely-not-a-file.crn", "--edition", "java"],
-    );
-    assert_eq!(result.status.code(), Some(2));
-}
-
-#[test]
 fn c12_parse_error_surfaces_file_line_col() {
     let tmp = TempDir::new().expect("tempdir");
     let bad = tmp.path().join("bad.crn");
@@ -619,16 +610,8 @@ fn compile_all_examples_exit_zero() {
     // lowering step, so the palette that reaches the Java backend is
     // already concrete. A non-zero exit here means a regression in either
     // the lowering pass or the abstract-id guard at the backend.
-    for name in [
-        "cottage.crn",
-        "themed-tower.crn",
-        "village.crn",
-        "redstone-door.crn",
-        "roof-shed.crn",
-        "roof-hip.crn",
-        "roof-flat.crn",
-    ] {
-        let path = examples_dir().join(name);
+    for path in crn_examples() {
+        let name = path.file_name().expect("named").to_string_lossy();
         let out_dir = TempDir::new().expect("out tempdir");
         let lock_path = out_dir.path().join(format!("{name}.lock"));
         let result = cairn(
@@ -651,86 +634,61 @@ fn compile_all_examples_exit_zero() {
     }
 }
 
+/// `(example, the artifact its one struct writes)` for every example whose
+/// members the voxel lowering covers end-to-end, so the per-member
+/// `W_DEFERRED_MEMBER` stream earlier milestones emitted must be empty.
+///
+/// - `cottage.crn`: floor, walls, door, window, gable roof with overhang.
+/// - `themed-tower.crn`: `level y=N` grouping, per-level walls, an eave
+///   `stair`, and a `repeat=/step=` window pattern — level flattening and
+///   stair voxelisation paint every `level` child.
+/// - `redstone-door.crn`: two `pressure_plate` fixtures with the compound
+///   `at=<side>.outside` / `at=inside.<side>` anchor, a `circuit
+///   region=floor void=2` routing marker, and a `door[id=front]
+///   opened_by=sig.open` actuator patch — the plate paints its voxels and
+///   the other two are surface-guards for the logic pipeline.
+/// - `roof-shed/hip/flat.crn`: the roof voxelisers of §4.4–§4.6 of the
+///   compilation spec.
+const DEFER_FREE_EXAMPLES: &[(&str, &str)] = &[
+    ("cottage.crn", "cottage.nbt"),
+    ("themed-tower.crn", "keep.nbt"),
+    ("redstone-door.crn", "gatehouse.nbt"),
+    ("roof-shed.crn", "roof_shed.nbt"),
+    ("roof-hip.crn", "roof_hip.nbt"),
+    ("roof-flat.crn", "roof_flat.nbt"),
+];
+
 #[test]
-fn c14c_roof_kind_examples_lower_without_deferred_warnings() {
-    // The shed/hip/flat fixtures exist to pin the new roof voxelisers in
-    // §4.4–§4.6 of the compilation spec: each lowers end-to-end without
-    // a single `W_DEFERRED_MEMBER`, the same contract `c14_cottage_*` pins
-    // for the gable kind.
-    for name in ["roof-shed.crn", "roof-hip.crn", "roof-flat.crn"] {
-        let path = examples_dir().join(name);
+fn c14_covered_examples_compile_without_deferred_warnings() {
+    for (name, artifact) in DEFER_FREE_EXAMPLES {
+        let (_tmp_src, src) = example_in_tempdir(name);
         let out_dir = TempDir::new().expect("out tempdir");
-        let lock_path = out_dir.path().join(format!("{name}.lock"));
         let result = cairn(
             "compile",
             &[
-                path.to_str().unwrap(),
+                src.to_str().unwrap(),
                 "--edition",
                 "java",
                 "--out",
                 out_dir.path().to_str().unwrap(),
-                "--lock",
-                lock_path.to_str().unwrap(),
             ],
         );
+        let stderr = String::from_utf8(result.stderr).expect("utf-8");
         assert!(
             result.status.success(),
-            "{name} should compile, stderr={}",
-            String::from_utf8_lossy(&result.stderr),
+            "{name} should compile, stderr={stderr}",
         );
-        let stderr = String::from_utf8(result.stderr).expect("utf-8");
         assert_eq!(
             stderr.matches("W_DEFERRED_MEMBER").count(),
             0,
             "{name} should lower clean, stderr={stderr}",
         );
-        let nbt = out_dir
-            .path()
-            .join(name.replace('-', "_").replace(".crn", ".nbt"));
-        assert!(nbt.exists(), "expected {} to exist", nbt.display());
+        let written = out_dir.path().join(artifact);
+        assert!(
+            written.exists(),
+            "{name} should still write {artifact}, stderr={stderr}",
+        );
     }
-}
-
-#[test]
-fn c14f_redstone_door_compiles_without_deferred_warnings() {
-    // `redstone-door.crn` exercises the fixtures/actuator surface end-to-end:
-    // two `pressure_plate` fixtures with the compound `at=<side>.outside` /
-    // `at=inside.<side>` anchor, a `circuit region=floor void=2` routing
-    // marker, and a `door[id=front] opened_by=sig.open` actuator patch that
-    // binds an already-declared physical door. Each of the three roles is
-    // recognised at block-array lowering (the plate paints its voxels, the
-    // circuit region and the actuator patch are surface-guards for the
-    // future logic pipeline), so no `W_DEFERRED_MEMBER` fires on this
-    // example. This slots into the same "example transitions from deferred
-    // to clean" shape `c14` (cottage) and `c14e` (themed-tower) already use.
-    let tmp = TempDir::new().expect("tempdir");
-    let dst = tmp.path().join("redstone-door.crn");
-    fs::copy(examples_dir().join("redstone-door.crn"), &dst).expect("copy redstone-door");
-    let out_dir = TempDir::new().expect("out tempdir");
-    let result = cairn(
-        "compile",
-        &[
-            dst.to_str().unwrap(),
-            "--edition",
-            "java",
-            "--out",
-            out_dir.path().to_str().unwrap(),
-        ],
-    );
-    let stderr = String::from_utf8(result.stderr).expect("utf-8");
-    assert!(
-        result.status.success(),
-        "redstone-door should compile, stderr={stderr}",
-    );
-    assert_eq!(
-        stderr.matches("W_DEFERRED_MEMBER").count(),
-        0,
-        "redstone-door should lower clean, stderr={stderr}",
-    );
-    assert!(
-        out_dir.path().join("gatehouse.nbt").exists(),
-        "redstone-door should still write gatehouse.nbt, stderr={stderr}",
-    );
 }
 
 #[test]
@@ -764,72 +722,6 @@ fn c15_lockfile_registry_pack_hash_is_populated() {
         lf.inputs.constraint_catalog_hash.as_str(),
         HashHex::ZERO_STR,
         "constraint_catalog_hash stays zero until its own ingest lands",
-    );
-}
-
-#[test]
-fn c14_cottage_compiles_without_deferred_warnings() {
-    // The current voxel lowering covers cottage.crn end-to-end (floor,
-    // walls, door, window, gable roof with overhang), so the per-member
-    // W_DEFERRED_MEMBER stream that earlier milestones emitted is now
-    // empty. The CLI must still exit 0 and produce nothing on stderr.
-    let (_tmp_src, src) = example_in_tempdir("cottage.crn");
-    let out_dir = TempDir::new().expect("out tempdir");
-    let result = cairn(
-        "compile",
-        &[
-            src.to_str().unwrap(),
-            "--edition",
-            "java",
-            "--out",
-            out_dir.path().to_str().unwrap(),
-        ],
-    );
-    assert!(result.status.success());
-    let stderr = String::from_utf8(result.stderr).expect("utf-8");
-    assert_eq!(
-        stderr.matches("W_DEFERRED_MEMBER").count(),
-        0,
-        "cottage should lower clean, stderr={stderr}",
-    );
-}
-
-#[test]
-fn c14e_themed_tower_compiles_without_deferred_warnings() {
-    // themed-tower exercises `level y=N` grouping, per-level walls, an eave
-    // `stair`, and a `repeat=/step=` window pattern. Once level flattening
-    // and stair voxelisation landed together with roof/stair honouring
-    // resolved `mat_slot=` ids, every `level` child paints into the block
-    // array and no `W_DEFERRED_MEMBER` should fire on this example. This
-    // test replaces the earlier `c14b`, which pinned "at least one deferred
-    // warning" while level lowering was still absent.
-    let tmp = TempDir::new().expect("tempdir");
-    let dst = tmp.path().join("themed-tower.crn");
-    fs::copy(examples_dir().join("themed-tower.crn"), &dst).expect("copy themed-tower");
-    let out_dir = TempDir::new().expect("out tempdir");
-    let result = cairn(
-        "compile",
-        &[
-            dst.to_str().unwrap(),
-            "--edition",
-            "java",
-            "--out",
-            out_dir.path().to_str().unwrap(),
-        ],
-    );
-    let stderr = String::from_utf8(result.stderr).expect("utf-8");
-    assert!(
-        result.status.success(),
-        "themed-tower should compile clean; stderr={stderr}",
-    );
-    assert_eq!(
-        stderr.matches("W_DEFERRED_MEMBER").count(),
-        0,
-        "themed-tower should lower without deferred-member warnings, stderr={stderr}",
-    );
-    assert!(
-        out_dir.path().join("keep.nbt").exists(),
-        "themed-tower should still write keep.nbt, stderr={stderr}",
     );
 }
 

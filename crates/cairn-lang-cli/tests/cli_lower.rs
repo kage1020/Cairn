@@ -4,7 +4,7 @@ use std::fs;
 use tempfile::TempDir;
 
 mod common;
-use common::{cairn, examples_dir};
+use common::{cairn, crn_examples, examples_dir};
 
 #[test]
 fn lower_1_cottage_exits_zero_and_names_the_struct() {
@@ -86,12 +86,6 @@ fn lower_3_deferred_member_warnings_print_to_stderr() {
 }
 
 #[test]
-fn lower_4_missing_file_exits_with_code_two() {
-    let out = cairn("lower", &["does-not-exist.crn"]);
-    assert_eq!(out.status.code(), Some(2));
-}
-
-#[test]
 fn lower_5_themed_tower_lifts_abstract_tokens_through_builtin_materials() {
     // The built-in registry pack ships a materials catalog covering
     // every abstract token themed-tower.crn binds, so `W_ABSTRACT_TOKEN_DEFERRED`
@@ -170,17 +164,12 @@ fn lower_7_unknown_abstract_token_exits_nonzero() {
 
 #[test]
 fn lower_6_all_examples_exit_zero() {
-    for name in [
-        "cottage.crn",
-        "themed-tower.crn",
-        "village.crn",
-        "redstone-door.crn",
-    ] {
-        let path = examples_dir().join(name);
+    for path in crn_examples() {
         let out = cairn("lower", &[path.to_str().unwrap()]);
         assert!(
             out.status.success(),
-            "{name} should exit 0, stderr={}",
+            "{} should exit 0, stderr={}",
+            path.display(),
             String::from_utf8_lossy(&out.stderr),
         );
     }

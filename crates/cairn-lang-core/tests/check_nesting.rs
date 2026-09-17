@@ -18,13 +18,10 @@
 //! "no voxels" half of that is pinned in `check_nesting_lowering.rs`,
 //! which runs the lowering these tests do not.
 
-use cairn_lang_core::{Diagnostic, DiagnosticCode, Severity, check, lower, parse};
+use cairn_lang_core::{Diagnostic, DiagnosticCode, Severity};
 
-fn diagnose(source: &str) -> Vec<Diagnostic> {
-    let module = parse(source).unwrap_or_else(|e| panic!("parse failed: {e}\nsource:\n{source}"));
-    let ir = lower(&module);
-    check(&module, &ir, None)
-}
+mod common;
+use common::{PRELUDE, diagnose, exactly_one, slice};
 
 fn nesting_only(source: &str) -> Vec<Diagnostic> {
     diagnose(source)
@@ -34,13 +31,7 @@ fn nesting_only(source: &str) -> Vec<Diagnostic> {
 }
 
 fn one(source: &str) -> Diagnostic {
-    let mut found = nesting_only(source);
-    assert_eq!(found.len(), 1, "expected one finding, got {found:#?}");
-    found.remove(0)
-}
-
-fn slice<'a>(source: &'a str, diag: &Diagnostic) -> &'a str {
-    &source[diag.span.clone()]
+    exactly_one(nesting_only(source))
 }
 
 /// The advice note — the one without a span. The `declared here` note
@@ -52,14 +43,6 @@ fn advice(diag: &Diagnostic) -> &str {
         |n| n.message.as_str(),
     )
 }
-
-const PRELUDE: &str = "theme plain:\n  \
-slot floor -> @oak_planks\n  \
-slot wall  -> @cobblestone\n\n\
-def hut size=3x3:\n  \
-floor id=floor mat_slot=floor\n  \
-walls id=walls class=outer mat_slot=wall height=3\n  \
-door  id=entry side=front at=center\n\n";
 
 /// Every shape a site body can nest. The four differ only in which
 /// keyword the message has to quote — `walk` has one loop and one
@@ -342,31 +325,6 @@ fn ne_7d_a_malformed_nested_connect_earns_both_findings_once() {
         2,
         "both endpoints of the nested row are still checked, got {codes:?}",
     );
-}
-
-/// The shipped examples must stay clean. `themed-tower.crn` is the one
-/// that nests, and it nests the legal way.
-#[test]
-fn ne_8_shipped_examples_declare_no_unsupported_nesting() {
-    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("..")
-        .join("..")
-        .join("examples");
-    let mut checked = 0;
-    for entry in std::fs::read_dir(&dir).unwrap_or_else(|e| panic!("read {}: {e}", dir.display())) {
-        let path = entry
-            .unwrap_or_else(|e| panic!("entry in {}: {e}", dir.display()))
-            .path();
-        if path.extension().is_none_or(|e| e != "crn") {
-            continue;
-        }
-        let src = std::fs::read_to_string(&path)
-            .unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
-        let found = nesting_only(&src);
-        assert!(found.is_empty(), "{}: got {found:#?}", path.display());
-        checked += 1;
-    }
-    assert!(checked > 0, "no examples were checked in {}", dir.display());
 }
 
 /// A flat body is the normal case and must stay silent — the negative

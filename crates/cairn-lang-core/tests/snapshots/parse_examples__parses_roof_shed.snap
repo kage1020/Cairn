@@ -1,0 +1,75 @@
+---
+source: crates/cairn-lang-core/tests/parse_examples.rs
+expression: module
+---
+headers:
+  - kind: Cairn
+    version: "2026.06"
+  - kind: Requires
+    requirement: version>=1.20
+items:
+  - kind: Theme
+    name: cabin
+    body:
+      - kind: Slot
+        slot: floor
+        value:
+          kind: Token
+          value: oak_planks
+      - kind: Slot
+        slot: wall
+        value:
+          kind: Token
+          value: cobblestone
+      - kind: Slot
+        slot: roof
+        value:
+          kind: Token
+          value: spruce_stairs
+  - kind: Struct
+    name: roof_shed
+    args:
+      - key: size
+        value:
+          kind: Size
+          value:
+            w: 5
+            h: 4
+    body:
+      - kind: Generic
+        keyword: floor
+        args:
+          - key: mat_slot
+            value:
+              kind: Ident
+              value: floor
+      - kind: Generic
+        keyword: walls
+        args:
+          - key: mat_slot
+            value:
+              kind: Ident
+              value: wall
+          - key: height
+            value:
+              kind: Int
+              value: 3
+      - kind: Generic
+        keyword: roof
+        args:
+          - key: kind
+            value:
+              kind: Ident
+              value: shed
+          - key: slope_to
+            value:
+              kind: Ident
+              value: front
+          - key: mat_slot
+            value:
+              kind: Ident
+              value: roof
+          - key: overhang
+            value:
+              kind: Int
+              value: 1

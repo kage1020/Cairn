@@ -10,19 +10,13 @@
 //! pattern. Zero `W_DEFERRED_MEMBER` at the top level is what this file
 //! pins, replacing an older "at least one deferred" expectation.
 
-use std::path::PathBuf;
-
 use cairn_lang_core::block_array::{BlockArrayIr, lower_to_block_array};
 use cairn_lang_core::check::DiagnosticCode;
 use cairn_lang_core::{lower, parse, resolve};
 use cairn_lang_formats::registry::builtin_java;
 
-fn examples_dir() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("..")
-        .join("..")
-        .join("examples")
-}
+mod common;
+use common::examples_dir;
 
 fn lower_themed_tower() -> BlockArrayIr {
     let source = std::fs::read_to_string(examples_dir().join("themed-tower.crn"))

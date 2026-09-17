@@ -21,25 +21,11 @@
 //! them apart. So the resolution stays last-wins and stops being silent —
 //! `W_PHASE_CONFLICT` names both members and how many voxels changed hands.
 
-use cairn_lang_core::block_array::{BlockArray, BlockArrayIr, lower_to_block_array};
+use cairn_lang_core::block_array::{BlockArray, BlockArrayIr};
 use cairn_lang_core::check::DiagnosticCode;
-use cairn_lang_core::{lower, parse, resolve};
 
-fn lowered(source: &str) -> BlockArrayIr {
-    let module = parse(source).expect("parse");
-    let ir = lower(&module);
-    let resolution = resolve(&ir, None);
-    lower_to_block_array(&ir, &resolution, None)
-}
-
-fn only_structure(ir: &BlockArrayIr) -> &BlockArray {
-    assert_eq!(
-        ir.structures.len(),
-        1,
-        "these sources declare exactly one struct",
-    );
-    ir.structures.values().next().expect("one structure")
-}
+mod common;
+use common::{lowered, only_structure};
 
 fn conflicts(ir: &BlockArrayIr) -> Vec<&cairn_lang_core::check::Diagnostic> {
     ir.diagnostics

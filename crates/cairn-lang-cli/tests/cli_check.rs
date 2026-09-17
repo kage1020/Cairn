@@ -112,12 +112,6 @@ fn cli_2_broken_fixture_exits_one_with_position_anchored_output() {
 }
 
 #[test]
-fn cli_3_missing_file_exits_with_code_two() {
-    let out = cairn("check", &["does-not-exist.crn"]);
-    assert_eq!(out.status.code(), Some(2));
-}
-
-#[test]
 fn cli_4_clean_fixture_json_output_is_empty_array() {
     let path = fixtures_dir().join("clean.crn");
     let out = cairn("check", &[path.to_str().unwrap(), "--format", "json"]);

@@ -16,27 +16,17 @@
 //! isolation. Two checks that agree today drift apart the moment one of
 //! them is edited alone; a matrix that compares them fails when they do.
 
-use cairn_lang_core::block_array::{BlockArray, BlockArrayIr, lower_to_block_array};
+use cairn_lang_core::block_array::{BlockArray, BlockArrayIr};
 use cairn_lang_core::check::DiagnosticCode;
-use cairn_lang_core::{lower, parse, resolve};
+
+mod common;
+use common::{lowered, only_structure};
 
 const THEME: &str = "theme t:\n  \
                      slot floor -> @oak_planks\n  \
                      slot wall  -> @cobblestone\n  \
                      slot glass -> @glass_pane\n  \
                      slot gravel -> @gravel\n\n";
-
-fn lowered(source: &str) -> BlockArrayIr {
-    let module = parse(source).expect("parse");
-    let ir = lower(&module);
-    let resolution = resolve(&ir, None);
-    lower_to_block_array(&ir, &resolution, None)
-}
-
-fn only_structure(ir: &BlockArrayIr) -> &BlockArray {
-    assert_eq!(ir.structures.len(), 1, "these sources declare one struct");
-    ir.structures.values().next().expect("one structure")
-}
 
 /// Every `W_DEFERRED_MEMBER` message, in the order the pass raised them.
 fn defers(ir: &BlockArrayIr) -> Vec<&str> {

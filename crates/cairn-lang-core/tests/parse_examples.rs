@@ -2,37 +2,19 @@
 //!
 //! The shipped examples are the "source parses" acceptance surface: if any
 //! one of them stops parsing, the parser has lost coverage of input the
-//! project promises to support.
+//! project promises to support. One snapshot per example, named
+//! `parses_<stem>` so the fixture a diff belongs to is in its file name.
 
 use cairn_lang_core::parse;
 
-fn parse_example(filename: &str) -> cairn_lang_core::ast::Module {
-    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("..")
-        .join("..")
-        .join("examples")
-        .join(filename);
-    let source =
-        std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
-    parse(&source).unwrap_or_else(|e| panic!("parse {filename}: {e}"))
-}
+mod common;
+use common::examples;
 
 #[test]
-fn parses_cottage() {
-    insta::assert_yaml_snapshot!(parse_example("cottage.crn"));
-}
-
-#[test]
-fn parses_themed_tower() {
-    insta::assert_yaml_snapshot!(parse_example("themed-tower.crn"));
-}
-
-#[test]
-fn parses_village() {
-    insta::assert_yaml_snapshot!(parse_example("village.crn"));
-}
-
-#[test]
-fn parses_redstone_door() {
-    insta::assert_yaml_snapshot!(parse_example("redstone-door.crn"));
+fn every_shipped_example_parses_to_its_snapshot() {
+    for (name, source) in examples() {
+        let module = parse(&source).unwrap_or_else(|e| panic!("parse {name}: {e}"));
+        let stem = name.trim_end_matches(".crn").replace('-', "_");
+        insta::assert_yaml_snapshot!(format!("parses_{stem}"), module);
+    }
 }

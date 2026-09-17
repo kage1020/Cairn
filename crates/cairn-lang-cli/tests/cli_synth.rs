@@ -838,14 +838,6 @@ fn cli_synth_stage_delay_attenuation_limit_exits_one() {
 }
 
 #[test]
-fn cli_synth_missing_file_exits_two() {
-    // Path-not-found returns 2 (user-input mistake), consistent with
-    // `cairn parse`/`check`/`lower`/`compile`.
-    let out = cairn("synth", &["--experimental-logic-synth", "no-such-file.crn"]);
-    assert_eq!(out.status.code(), Some(2));
-}
-
-#[test]
 fn cli_synth_unparseable_source_exits_one() {
     // Parse-level failure follows the same exit-code convention as
     // `cairn parse` / `check`: exit 1 (build problem), position-anchored

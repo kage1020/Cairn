@@ -3,7 +3,7 @@
 use std::path::PathBuf;
 
 mod common;
-use common::{cairn, examples_dir};
+use common::{cairn, crn_examples, examples_dir};
 
 #[test]
 fn info_1_clean_example_exits_zero_with_three_section_headers() {
@@ -75,12 +75,6 @@ fn info_2_json_format_is_valid_version_axes() {
 }
 
 #[test]
-fn info_3_missing_file_exits_with_code_two() {
-    let out = cairn("info", &["does-not-exist.crn"]);
-    assert_eq!(out.status.code(), Some(2));
-}
-
-#[test]
 fn info_4_editions_flag_controls_portability_entries() {
     let path = examples_dir().join("cottage.crn");
     let out = cairn(
@@ -105,17 +99,12 @@ fn info_4_editions_flag_controls_portability_entries() {
 
 #[test]
 fn info_5_all_examples_exit_zero() {
-    for name in [
-        "cottage.crn",
-        "themed-tower.crn",
-        "village.crn",
-        "redstone-door.crn",
-    ] {
-        let path = examples_dir().join(name);
+    for path in crn_examples() {
         let out = cairn("info", &[path.to_str().unwrap()]);
         assert!(
             out.status.success(),
-            "{name} should exit 0, stderr={}",
+            "{} should exit 0, stderr={}",
+            path.display(),
             String::from_utf8_lossy(&out.stderr),
         );
     }

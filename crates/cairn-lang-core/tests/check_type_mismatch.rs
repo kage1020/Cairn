@@ -1,17 +1,10 @@
 //! Acceptance tests for the `type_mismatch` pass of
 //! `cairn_lang_core::check`.
 
-use cairn_lang_core::{DiagnosticCode, check, lower, parse};
+use cairn_lang_core::DiagnosticCode;
 
-fn diagnose(source: &str) -> Vec<cairn_lang_core::Diagnostic> {
-    let module = parse(source).unwrap_or_else(|e| panic!("parse failed: {e}"));
-    let ir = lower(&module);
-    check(&module, &ir, None)
-}
-
-fn slice<'a>(source: &'a str, diag: &cairn_lang_core::Diagnostic) -> &'a str {
-    &source[diag.span.clone()]
-}
+mod common;
+use common::{diagnose, slice};
 
 #[test]
 fn tm_1_id_set_to_token_is_flagged_as_label_mismatch() {

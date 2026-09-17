@@ -10,51 +10,13 @@
 //! the JSON wire form growing a `wire_length` field, and per-scope
 //! independence when a module carries more than one scope.
 
-use std::path::PathBuf;
-
 use cairn_lang_core::Edition;
 use cairn_lang_core::check::Severity;
-use cairn_lang_core::{lower, parse};
-use cairn_lang_redstone::{
-    DiagnosticCode, PlacedCellNode, ScopedPlacementIr, compile_edition_netlist, compile_netlist,
-    compile_placement, compile_routing, synthesize,
-};
+use cairn_lang_redstone::{DiagnosticCode, PlacedCellNode, ScopedPlacementIr, compile_routing};
 
 mod common;
 
-use common::normalize_stage_tags;
-
-fn load_example(name: &str) -> String {
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("..")
-        .join("..")
-        .join("examples")
-        .join(name);
-    std::fs::read_to_string(&path).unwrap_or_else(|err| panic!("read {}: {err}", path.display()))
-}
-
-fn placement_from_source(source: &str, edition: Edition) -> ScopedPlacementIr {
-    let module = parse(source).expect("parse");
-    let intent = lower(&module);
-    let synth = synthesize(&intent);
-    assert!(
-        synth
-            .diagnostics
-            .iter()
-            .all(|d| d.severity() != Severity::Error),
-        "fixture must synth cleanly: {:?}",
-        synth.diagnostics,
-    );
-    let netlist = compile_netlist(&synth.scoped);
-    let edition_netlist = compile_edition_netlist(&netlist, edition);
-    let placement = compile_placement(&edition_netlist, &intent);
-    assert!(
-        placement.diagnostics.is_empty(),
-        "fixture must place cleanly (routing tests are downstream of placement): {:?}",
-        placement.diagnostics,
-    );
-    placement.scoped
-}
+use common::{load_example, normalize_stage_tags, placement_from_source};
 
 /// AC1 — `examples/redstone-door.crn` compiled for Java routes its
 /// sole `JavaRepeaterOr` cell with `wire_length = Some(3)`: the sum of

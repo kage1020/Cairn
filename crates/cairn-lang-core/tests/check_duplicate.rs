@@ -1,18 +1,9 @@
 //! Acceptance tests for the `duplicate` pass of `cairn_lang_core::check`.
 
-use cairn_lang_core::{DiagnosticCode, check, lower, parse};
+use cairn_lang_core::DiagnosticCode;
 
-fn diagnose(source: &str) -> Vec<cairn_lang_core::Diagnostic> {
-    let module = parse(source).unwrap_or_else(|e| panic!("parse failed: {e}"));
-    let ir = lower(&module);
-    check(&module, &ir, None)
-}
-
-/// Convenience: pull `&source[span]` so AC tables can assert what text the
-/// diagnostic actually points at.
-fn slice<'a>(source: &'a str, diag: &cairn_lang_core::Diagnostic) -> &'a str {
-    &source[diag.span.clone()]
-}
+mod common;
+use common::{diagnose, slice};
 
 #[test]
 fn dup_1_duplicate_size_flags_second_occurrence_only() {
