@@ -1,9 +1,10 @@
 //! Sentence fragments shared by the diagnostic builders.
 //!
-//! Crate-level rather than inside `check` because two of the three callers
-//! are in `resolve`. One copy per fragment: the arity branches are where a
-//! joined list goes wrong, and the middle arity is the one nobody writes a
-//! test for first — the unbranched `format!("{}, and {last}", head.join(", "))`
+//! Crate-level rather than inside `check` because the callers are split
+//! across `check` and `resolve`. One copy per fragment: the arity branches
+//! are where a joined list goes wrong, and the middle arity is the one
+//! nobody writes a test for first — the unbranched
+//! `format!("{}, and {last}", head.join(", "))`
 //! renders two items as `` `a`, and `b` ``, a serial comma with nothing to
 //! serialise.
 
@@ -23,6 +24,20 @@ pub(crate) fn and_list(items: &[String]) -> Option<String> {
         (last, []) => last.clone(),
         (last, [only]) => format!("{only} and {last}"),
         (last, head) => format!("{}, and {last}", head.join(", ")),
+    })
+}
+
+/// Render `items` as an English alternation — `a`, `a or b`, `a, b, or c`.
+///
+/// [`and_list`]'s arities with the other conjunction. Separate rather than
+/// parameterised on the word: a caller picks the conjunction because of what
+/// its sentence claims, and reading `or_list` at the call site is what makes
+/// that claim visible.
+pub(crate) fn or_list(items: &[String]) -> Option<String> {
+    Some(match items.split_last()? {
+        (last, []) => last.clone(),
+        (last, [only]) => format!("{only} or {last}"),
+        (last, head) => format!("{}, or {last}", head.join(", ")),
     })
 }
 
@@ -66,12 +81,17 @@ fn value_text(value: &Value) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{and_list, selector_text, value_text};
+    use super::{and_list, or_list, selector_text, value_text};
     use crate::{lower, parse};
 
     fn of(items: &[&str]) -> Option<String> {
         let owned: Vec<String> = items.iter().map(|s| (*s).to_owned()).collect();
         and_list(&owned)
+    }
+
+    fn either_of(items: &[&str]) -> Option<String> {
+        let owned: Vec<String> = items.iter().map(|s| (*s).to_owned()).collect();
+        or_list(&owned)
     }
 
     #[test]
@@ -81,6 +101,14 @@ mod tests {
         assert_eq!(of(&["a", "b"]).as_deref(), Some("a and b"));
         assert_eq!(of(&["a", "b", "c"]).as_deref(), Some("a, b, and c"));
         assert_eq!(of(&["a", "b", "c", "d"]).as_deref(), Some("a, b, c, and d"));
+    }
+
+    #[test]
+    fn every_arity_reads_with_the_other_conjunction() {
+        assert_eq!(either_of(&[]), None);
+        assert_eq!(either_of(&["a"]).as_deref(), Some("a"));
+        assert_eq!(either_of(&["a", "b"]).as_deref(), Some("a or b"));
+        assert_eq!(either_of(&["a", "b", "c"]).as_deref(), Some("a, b, or c"));
     }
 
     /// Every `ValueKind`, through the parser so the rendered text is

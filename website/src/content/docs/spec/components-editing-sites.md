@@ -73,6 +73,11 @@ Each `place` carries **exactly one** of `at`, `east_of`, `north_of`:
 Combining selectors, or using `at=` with anything other than `origin`, is
 `E_INVALID_PLACE_ORIGIN`.
 
+`gap=` belongs to the two relative selectors. An `at=origin` row is anchored absolutely and reads
+no distance, so a `gap=` written beside it is read by nothing and reported as `W_IGNORED_ARGUMENT`
+([Lint §11.3](lint#113-error-vs-warning)) — the argument is real, and which of the two the author
+meant is theirs to say.
+
 ### 9.3.3 Cross-scope references
 
 Every `place` row declares `id=`, `use=`, and `theme=`. A row short of any of them cannot become a

@@ -4,6 +4,64 @@
 
 ### Added
 
+- *(core)* An argument in a keyword's vocabulary could still be read by nothing, depending on how
+  a sibling argument on the same line was written. `E_UNKNOWN_ARGUMENT` closed the case where a
+  `key=` is outside the vocabulary; one level down, a key that *is* in it routed past its reader in
+  silence:
+
+  ```
+  struct s size=9x9
+    roof kind=gable mat_slot=roof slope_to=front
+  ```
+
+  `slope_to=` is a `roof` argument and lints clean. `fill_roof` dispatches on `kind=` and only the
+  `shed` arm consults the direction, so on a gable the value was carried into the IR and dropped —
+  exactly the way a misspelled key used to be. The author got a roof that ignored the way they
+  pointed it. `place gap=` was the same defect on the other side of the language: an `at=origin`
+  row is anchored absolutely and `resolve_place_origin` returns before it reads a distance, so
+  `at=origin gap=5` built and said nothing.
+
+  The vocabulary now has a second axis, closed per keyword *and* per the way the argument that
+  selects the lowering rule is written (`MemberRole::conditional_arguments`), and the `arguments`
+  check pass reports a key the selected rule does not read as `W_IGNORED_ARGUMENT`:
+
+  ```
+  s.crn:2:42: warning[W_IGNORED_ARGUMENT]: `slope_to=` is an argument `roof` reads only with `kind=shed`, and this one is `kind=gable`; the value was ignored
+    note: either argument may be the repair — write `kind=shed` to have the `slope_to=` read, or drop `slope_to=` and keep the `gable` roof the line already asks for
+  ```
+
+  An arm of that axis can be the selector's *absence*, where the absence is itself a rule: a
+  `place` with no `at=` is the relative placement that reads `gap=`, so the finding on
+  `at=origin gap=5` offers dropping the `at=` as one of its two repairs.
+
+  A warning rather than the refusal `E_UNKNOWN_ARGUMENT` is, because a key outside the vocabulary
+  has one repair site and this has two: the author meant the rule that reads the key, or meant this
+  rule and the key is left over. The message names both and picks neither — `spec/lint.md` §11.3
+  records the same reasoning.
+
+  Where the *selector* names no rule — a `kind=` the dispatch does not know, or, on an axis with no
+  absent arm, none at all — nothing is reported here: the member does not lower, its
+  `W_DEFERRED_MEMBER` carries the whole repair, and a second finding would bill one repair twice.
+  That deferral comes from block-array lowering, so a `cairn check` with no `--edition` /
+  `--target` reports neither; the case that is always reported is the one where the member builds.
+  The `stair` row of the table is the other half of the shape and reports nothing today:
+  `kind=stairs` is the only kind `fill_stair` accepts, so every key it reads is read under that
+  one value.
+
+  "Nothing reads it" is not a fact a table can check about itself, so the table is held to the
+  dispatch from both sides. Each pair is built twice, at two values a reader would tell apart: an
+  arm listed as reading the key has to build different blocks, an arm listed as not reading it the
+  same ones, and each build has to paint more than the same body without the member — two empty
+  builds compare equal. From the other side, `RoofKind::ALL` and the table's arms are required to
+  name the same kinds, so a kind added to the dispatch alone fails rather than going quiet. A key
+  made inert by a *count* rather than by a rule — `window step=` at `repeat=1`, which the stamp
+  loop consults only from the second instance on — is a different shape and is still unreported.
+
+  `roof kind=` written as something other than an identifier now names the shape it got rather than
+  repeating the closed set: `kind="shed"` spells a kind that is in the set, and being told the set
+  again answers a question the author did not ask. That message is the whole repair for such a
+  line, since the check pass defers to it.
+
 - *(cli)* `cairn check` takes `--target <version>`, and with it reports `E_UNKNOWN_ID`. The command
   took `--edition` and no version, so it pinned no target — and a block id either exists in a
   version or it does not, so with nothing pinned the check was skipped rather than run against a

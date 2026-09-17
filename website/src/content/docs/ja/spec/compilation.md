@@ -57,7 +57,9 @@ Java の DataVersion は Bedrock の block_version とは無関係です。
 `roof kind=gable [overhang=N] mat_slot=...` は、棟で出会う 2 枚の対向スロープに落ちます。
 
 屋根の 4 種類 (`gable` / `shed` / `hip` / `flat`) は以下の overhang と壁天端の規約を共有します。
-レイアウトはこの節と、続く 3 つの節にあります。
+レイアウトはこの節と、続く 3 つの節にあります。`overhang=` は kind を問わず読まれます。`slope_to=` は
+`shed` だけのもので、他の kind に書いても何も読まず、`W_IGNORED_ARGUMENT` で報告されます
+([Lint §11.3](lint#113-エラーと警告の区分))。
 
 **マテリアル。** 傾斜屋根は `mat_slot=` から材質を取り、それは階段ファミリ (パスが `_stairs` で
 終わる id) でなければなりません。ジオメトリが `facing` / `half` / `shape` を塗る対象に付けるので、

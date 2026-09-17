@@ -227,13 +227,30 @@ pub enum DiagnosticCode {
     /// (door/window/roof/...). Surfaces during `cairn lower` so a partial
     /// build is still inspectable, rather than failing the whole module.
     DeferredMember,
-    /// A `key=` the lowering pass could not read, on a member it drew
-    /// anyway with the default in place of the value.
+    /// A `key=` no pass read on the line it was written on.
+    ///
+    /// Three shapes, one finding. **Unreadable value**: the lowering pass
+    /// could not read it, dropped it, and put the default in its place.
+    /// **Unreached key**: the specification defines it and no pass reads it
+    /// yet (`crate::intent::MemberRole::unread_arguments`). **Routed past**:
+    /// a sibling argument picked a lowering rule that does not consult it,
+    /// which `crate::intent::MemberRole::conditional_arguments` records and
+    /// `roof kind=gable slope_to=front` is the instance of — that one has no
+    /// default to substitute, and fires whether or not the member went on to
+    /// build. The build differs from the source in all three, and the
+    /// difference is announced rather than silent.
     ///
     /// Distinct from [`Self::DeferredMember`], which says the member did
     /// not lower. A roof whose `overhang=` is unusable is in the build,
     /// flush with the wall line, and reporting that as a deferral tells
-    /// the author to look for a member that is not missing.
+    /// the author to look for a member that is not missing. The boundary
+    /// the routed-past shape draws is about the *selector* rather than the
+    /// member: where the selector names no rule — a `kind=` the dispatch
+    /// does not know, or, on an axis with no absent arm, none at all — the
+    /// deferral carries the whole repair and this code stays quiet rather
+    /// than billing the argument that rule would not have read. A member
+    /// that fails to lower for any other reason still gets both findings,
+    /// because they are then two repairs.
     ///
     /// Where it sits against `spec/lint.md` §11.3, and why it is a
     /// warning, is argued once on [`Self::severity`] rather than twice.
@@ -622,6 +639,13 @@ impl DiagnosticCode {
     /// are unreported outside the actuator-patch keys, and every source
     /// carrying one builds today — and the two want one decision rather
     /// than two. §11.3 records the same.
+    ///
+    /// Its routed-past shape lands on the warning side by a second argument
+    /// as well. A key outside the vocabulary names nothing and has one
+    /// repair site, which is what makes `E_UNKNOWN_ARGUMENT` a refusal; a
+    /// key a sibling routed past names something real, and the repair is
+    /// either argument — the rule the author meant, or the leftover key.
+    /// Refusing would pick one of them.
     ///
     /// Two codes sit close to the line and are decided in their variant
     /// docs: `E_UNKNOWN_SLOT_TARGET` is an error because the members

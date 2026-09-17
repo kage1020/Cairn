@@ -100,6 +100,17 @@ pub enum RoofKind {
 }
 
 impl RoofKind {
+    /// Every kind the roof dispatch has a generator for.
+    ///
+    /// The enum is closed, so this is the whole set a `kind=` can name and
+    /// lower. Held as a constant because a table elsewhere has to be
+    /// compared against it: `MemberRole::conditional_arguments` says which
+    /// of these read `slope_to=`, and a kind added here without a row there
+    /// would go back to dropping the direction in silence.
+    /// `every_roof_kind_the_dispatch_knows_has_an_arm` below is what fails
+    /// instead.
+    pub const ALL: [Self; 4] = [Self::Gable, Self::Shed, Self::Hip, Self::Flat];
+
     /// Parse a `kind=` identifier value into a [`RoofKind`].
     ///
     /// Returns `None` for any other identifier; the caller turns that into
@@ -114,6 +125,19 @@ impl RoofKind {
             "flat" => Some(Self::Flat),
             _ => None,
         }
+    }
+
+    /// Every kind name, as a message lists them: `gable, shed, hip, flat`.
+    ///
+    /// Derived from [`Self::ALL`] so the closed set a refusal quotes cannot
+    /// fall behind the set it is refusing against.
+    #[must_use]
+    pub fn names() -> String {
+        Self::ALL
+            .iter()
+            .map(|kind| kind.name())
+            .collect::<Vec<_>>()
+            .join(", ")
     }
 
     /// Lowercase kind name, matching the source `kind=` identifier.
@@ -819,7 +843,55 @@ pub(super) fn stair_state(id: &str, facing: Cardinal, half: &str, shape: StairSh
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeSet;
+
     use super::*;
+    use crate::intent::MemberRole;
+
+    /// The dispatch side of the conditional-argument table.
+    ///
+    /// `tests/conditional_arguments.rs` holds the table to the lowering by
+    /// building each pair twice, but every enumeration it makes starts from
+    /// the table — so it catches a row edited into a lie and not a kind
+    /// added here with no row at all. That kind would take the
+    /// `arm(...) == None` path in `check::arguments` and go back to
+    /// dropping `slope_to=` in silence, which is the defect the table
+    /// exists to end.
+    ///
+    /// Here rather than beside the other guards because this is the one
+    /// assertion that needs [`RoofKind`], which is this module's and not
+    /// part of the crate's public surface. `stair` gets no equivalent: its
+    /// kinds are a string literal in `fill_stair` rather than a closed
+    /// type, so there is nothing to enumerate until that changes.
+    #[test]
+    fn every_roof_kind_the_dispatch_knows_has_an_arm() {
+        let conditional = MemberRole::Roof.conditional_arguments();
+        let [axis] = conditional else {
+            panic!("`roof` dispatches on one selector, got {conditional:?}");
+        };
+        let from_dispatch: BTreeSet<&str> = RoofKind::ALL.iter().map(|kind| kind.name()).collect();
+        let from_table: BTreeSet<&str> = axis
+            .arms
+            .iter()
+            .map(|arm| {
+                arm.value
+                    .ident()
+                    .expect("every `kind=` arm names an identifier; a roof with none defers")
+            })
+            .collect();
+        assert_eq!(
+            from_dispatch, from_table,
+            "`RoofKind` and `MemberRole::Roof.conditional_arguments()` disagree about the kinds",
+        );
+        // And every arm names a kind the parser accepts, so the two cannot
+        // agree on a set and disagree on a spelling.
+        for name in from_table {
+            assert!(
+                RoofKind::from_ident(name).is_some(),
+                "`kind={name}` has an arm and is not a kind `from_ident` knows",
+            );
+        }
+    }
 
     // -------- gable --------
 

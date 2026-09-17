@@ -77,6 +77,27 @@ fn no_diagnostic_text_is_empty_or_padded() {
 /// file, are not all represented. Severity is deliberately not among the
 /// properties guarded here: `Diagnostic::severity` reads the ledger, so
 /// there is no per-diagnostic value left for a fixture to catch.
+/// The codes are a floor and not the whole story: one code can render
+/// several different sentences, and a fixture that stops reaching one of
+/// them takes its prose out of the checks above without changing the code
+/// set at all.
+///
+/// `W_IGNORED_ARGUMENT` is the one that has three, and the two-repair-site
+/// branch is the one this pins: it is the only finding in the set that
+/// names a second argument, so its sentence is the one a subset check over
+/// codes cannot see go missing.
+#[test]
+fn the_corpus_reaches_the_two_repair_site_branch_of_the_ignored_argument_prose() {
+    let reached = rendered_strings().into_iter().any(|(origin, text)| {
+        origin.starts_with("W_IGNORED_ARGUMENT")
+            && text.contains("either argument may be the repair")
+    });
+    assert!(
+        reached,
+        "no fixture reaches the branch of `W_IGNORED_ARGUMENT` that names both repair sites",
+    );
+}
+
 #[test]
 fn the_corpus_reaches_the_codes_its_prose_assertions_are_written_for() {
     let mut seen: BTreeSet<&'static str> = BTreeSet::new();
