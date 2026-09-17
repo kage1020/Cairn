@@ -18,6 +18,19 @@
 
 use strsim::damerau_levenshtein;
 
+use crate::check::DiagnosticNote;
+
+/// The "did you mean X?" note every unknown-identifier diagnostic
+/// attaches, with `suggested` already spelled the way the source would
+/// write it (`@token`, `place.port`, a bare keyword).
+#[must_use]
+pub fn did_you_mean_note(suggested: &str) -> DiagnosticNote {
+    DiagnosticNote {
+        span: None,
+        message: format!("did you mean `{suggested}`?"),
+    }
+}
+
 /// Maximum Damerau-Levenshtein distance allowed for a suggestion, scaled by
 /// the user's input length. The cut-offs (3 / 6 chars) are picked so a
 /// 2-3 char identifier admits at most one edit, mid-length identifiers two,
@@ -57,7 +70,7 @@ where
     if input.is_empty() {
         return None;
     }
-    let cap = max_distance(input.chars().count());
+    let max_edits = max_distance(input.chars().count());
     let mut best: Option<(usize, &'a str)> = None;
     for cand in candidates {
         if cand == input {
@@ -67,15 +80,15 @@ where
             // `did you mean \`walls\`?` next to the user's literal `walls`.
             return None;
         }
-        let d = damerau_levenshtein(input, cand);
-        if d > cap {
+        let distance = damerau_levenshtein(input, cand);
+        if distance > max_edits {
             continue;
         }
         match best {
             // Strict `<` keeps the tie-break "first wins": the candidate
             // iterator's order is the contract surface for ambiguous cases.
-            Some((bd, _)) if d >= bd => {}
-            _ => best = Some((d, cand)),
+            Some((best_distance, _)) if distance >= best_distance => {}
+            _ => best = Some((distance, cand)),
         }
     }
     best.map(|(_, c)| c)

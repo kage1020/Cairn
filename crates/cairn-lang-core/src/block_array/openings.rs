@@ -45,6 +45,17 @@ impl WallSide {
             _ => None,
         }
     }
+
+    /// Unit step `(dx, dz)` from the wall toward the outside of the struct.
+    #[must_use]
+    pub fn outward_normal(self) -> (i32, i32) {
+        match self {
+            Self::Front => (0, 1),
+            Self::Back => (0, -1),
+            Self::Left => (-1, 0),
+            Self::Right => (1, 0),
+        }
+    }
 }
 
 /// Length of the wall along its `offset` axis, in voxels.

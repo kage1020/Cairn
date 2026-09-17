@@ -316,7 +316,7 @@ pub fn resolve_block_state(
                 unreachable!("classify_token reports Canonical only for ValueKind::Token");
             };
             let state = canonical_to_block_state(inner);
-            check_id(state, registry, &IdOrigin::Authored)
+            validated_id(state, registry, &IdOrigin::Authored)
         }
         TokenKind::Abstract => {
             let ValueKind::Token(inner) = &slot.value.kind else {
@@ -326,7 +326,7 @@ pub fn resolve_block_state(
                 return Err(MaterialDeferred::Abstract(inner.clone()));
             };
             if let Some(state) = registry.lookup(inner) {
-                return check_id(
+                return validated_id(
                     state,
                     Some(registry),
                     &IdOrigin::Catalog {
@@ -356,7 +356,7 @@ pub fn resolve_block_state(
 /// id reaches a palette: a member whose default material comes from the
 /// pack (`pressure_plate`) resolves outside [`resolve_block_state`] and
 /// would otherwise be the one id in the build that nothing checks.
-pub(crate) fn check_id(
+pub(crate) fn validated_id(
     state: BlockState,
     registry: Option<&dyn TargetRegistry>,
     origin: &IdOrigin,

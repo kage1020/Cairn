@@ -209,7 +209,7 @@ impl MemberRole {
     /// accepts every keyword in every body, so this is the only place the
     /// distinction is written down.
     ///
-    /// * Geometry — `block_array`'s `member_phase` buckets `floor`,
+    /// * Geometry — `block_array`'s `member_disposition` buckets `floor`,
     ///   `walls`, `roof`, `stair`, `door`, `window`, and `pressure_plate`;
     ///   `recognize_circuit_region` reads `circuit`; `flatten_members`
     ///   unwraps `level`.

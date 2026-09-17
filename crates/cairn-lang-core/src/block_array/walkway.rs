@@ -43,6 +43,7 @@ use crate::ast::ValueKind;
 use crate::ids::{PortId, WalkwayScopeKey};
 use crate::intent::{DefIr, Member, MemberRole};
 
+use super::lower::size_value;
 use super::openings::{WallSide, wall_length, wall_local_to_grid};
 use super::wall_column::WallColumn;
 use super::{BlockArray, BlockState, Dims, Palette, PaletteIndex};
@@ -101,61 +102,21 @@ pub struct WalkwayLayout {
 /// inflation [`super::lower`] does up front.
 ///
 /// `walls` is the column [`super::lower`] painted this body against,
-/// handed over rather than re-derived. Both port roles are openings cut
-/// through masonry, so a port is only where the openings phase could
-/// cut one — and that phase reads the rows the `walls` members
-/// *painted*, which a walk over the `def` cannot see: it knows neither
-/// which materials resolved nor which walls a `level` block carries.
+/// handed over rather than re-derived: a port is only where the openings
+/// phase could cut one, and that phase reads the rows the `walls` members
+/// *painted*, which a walk over the `def` cannot see.
 ///
-/// Ports anchor on two member roles:
+/// Ports anchor on [`MemberRole::Door`] (wall-local `u` from `at=`, see
+/// [`door_anchor_offset`]) and [`MemberRole::Window`] (`u` at the
+/// rectangle's centre, `offset + size.w / 2`; `sym=` and `y=` do not
+/// move it, since the strip is flat and one-voxel thick). Both sit on
+/// the ground row.
 ///
-/// * [`MemberRole::Door`] — wall-local `u` taken from `at=`. Three
-///   named anchors are accepted: `center` (`wall_length / 2` — odd
-///   widths have a unique geometric centre; even widths land at the
-///   column one cell `+u` of the midpoint, the convention spec
-///   `syntax.md` §5.4 names "round-half-up" and that
-///   `super::lower::carve_door` uses when cutting the opening),
-///   `left` (`0`, the wall-local axis origin), and `right`
-///   (`wall_length - 1`, the far corner). Numeric offsets are
-///   reserved for a future extension.
-/// * [`MemberRole::Window`] — wall-local `u` is the rectangle's
-///   geometric centre (`offset + size.w / 2`). Even-width windows
-///   take the column one cell `+u` of the midpoint by the same
-///   integer-division convention doors use. `sym=true` does not
-///   move the port: it is taken from the primary `offset` side, which
-///   is the only one whose `id=` is referenced from a `connect` row.
-///   `y=` does not lift the port off the ground row either, because
-///   the walkway is a 1-voxel-thick flat strip whose Y must match the
-///   other endpoint (3D path search is out of scope, see module
-///   doc-comment).
-///
-/// Returns `None` when:
-///
-/// * the port id does not name a member of the def,
-/// * the member's role is not [`MemberRole::Door`] or
-///   [`MemberRole::Window`] (stair / roof / other roles short-circuit
-///   silently — port support is reserved for a future extension),
-/// * `walls` paints no row the role's opening is cut through — for a
-///   `door` the row above the base plane, for a `window` every row of
-///   its rectangle,
-/// * the member is missing a `side=` argument or its value is not one
-///   of `front` / `back` / `left` / `right`,
-/// * the door is missing `at=` or carries a value other than
-///   `center` / `left` / `right`,
-/// * the window is missing `offset=` / `size=WxH`, or its
-///   `offset + size.w` exceeds the wall length, or its rows
-///   `y ..= y + size.h - 1` do not all lie inside one course of
-///   `walls`,
-/// * the def has no `size=` to bound the wall against,
-/// * an internal arithmetic step (`checked_add` /
-///   `wall_local_to_grid` bounds / `i32::try_from`) over- or
-///   under-flows.
-///
-/// The caller is expected to map all of these into one
-/// `W_DEFERRED_MEMBER` warning per `connect` row — surfacing them as
-/// resolver errors would lose the resolver's nearest-match suggestion
-/// machinery, and the diagnostic anchor lives on the `connect` row
-/// where the user can act on it.
+/// Returns `None` when the port id, the member's role, its `side=` /
+/// `at=` / `offset=` / `size=` arguments, or the `walls` rows behind it
+/// make no opening — the cases `super::lower`'s `W_DEFERRED_MEMBER`
+/// note on the `connect` row spells out for the author — and on any
+/// coordinate over- or under-flow.
 #[must_use]
 pub(super) fn port_world_position(
     place_origin: (i32, i32, i32),
@@ -168,7 +129,7 @@ pub(super) fn port_world_position(
         .members
         .iter()
         .find(|m| m.id.as_deref() == Some(port_id.as_str()))?;
-    let side = ident_value(member, "side").and_then(WallSide::from_ident)?;
+    let side = member.ident_value("side").and_then(WallSide::from_ident)?;
     let def_size = def.size.as_ref()?;
     let interior_w = def_size.w.get();
     let interior_h = def_size.h.get();
@@ -232,7 +193,7 @@ pub(super) fn port_world_position(
         | MemberRole::Connect
         | MemberRole::Other(_) => return None,
     };
-    let (nx, nz) = normal_step(side);
+    let (nx, nz) = side.outward_normal();
     Some((wall_x + nx, place_origin.1, wall_z + nz))
 }
 
@@ -307,12 +268,6 @@ pub const ROUTE_AREA_CAP: u64 = 4_000_000;
 /// `route_path` measures the same quantity against the same cap. A pair
 /// `2_000_000` cells apart on each axis has a path length of 4M — inside a
 /// length-based bound — and a bounding box of 4x10^12.
-///
-/// [`ROUTE_AREA_CAP`]'s doc has always described this case ("two ports
-/// megametres apart"), but only `route_path` consulted it, and `route_path`
-/// runs second and only when something is in the way. An unobstructed pair
-/// walked straight past: two `place` rows chained with `east_of=` and
-/// `north_of=` at `gap=30000` spent 32 seconds on roughly 1.8 GB.
 ///
 /// Saturates at `u64::MAX` if the product overflows, which is the sentinel
 /// [`RoutePathError::AreaCapExceeded`] already documents for that field.
@@ -745,14 +700,6 @@ pub fn build_walkway_array<S: BuildHasher>(
     }
 }
 
-fn ident_value<'a>(member: &'a Member, key: &str) -> Option<&'a str> {
-    let raw = member.intent_state.get(key)?;
-    match &raw.value.kind {
-        ValueKind::Ident(name) => Some(name.as_str()),
-        _ => None,
-    }
-}
-
 /// Wall-local `u` anchor for a door port. Accepts the three named
 /// anchors the spec defines for `at=`:
 ///
@@ -852,9 +799,9 @@ fn door_world_xz(
 /// walkway and a rectangle the openings pass carves are the same set by
 /// construction rather than by two limits agreeing.
 fn window_center_offset(member: &Member, len: u32, wall_column: &WallColumn) -> Option<u32> {
-    let offset = nonneg_int_value(member, "offset")?;
-    let (sw, sh) = size_member(member, "size")?;
-    let y = nonneg_int_value(member, "y")?;
+    let offset = member.nonneg_u32("offset")?;
+    let (sw, sh) = size_value(member, "size")?;
+    let y = member.nonneg_u32("y")?;
     let horizontal_end = offset.checked_add(sw)?;
     if horizontal_end > len {
         return None;
@@ -894,38 +841,6 @@ fn window_world_xz(
     Some((origin.0.checked_add(grid_x)?, origin.2.checked_add(grid_z)?))
 }
 
-/// Strict non-negative integer reader — unlike `super::lower::nonneg_int`
-/// this propagates `i64 → u32` overflow as `None` rather than clamping
-/// to `u32::MAX`. The clamp is harmless for floor / wall sizing where
-/// the lowered ceiling is then capped by the volume's own dims, but it
-/// would be a silent-wrong-answer here: a window written with
-/// `offset = 2^33` would resolve to `offset = u32::MAX` and land the
-/// port at an arithmetic-overflow-or-wraparound world cell.
-fn nonneg_int_value(member: &Member, key: &str) -> Option<u32> {
-    let raw = member.intent_state.get(key)?;
-    match &raw.value.kind {
-        ValueKind::Int(v) if *v >= 0 => u32::try_from(*v).ok(),
-        _ => None,
-    }
-}
-
-fn size_member(member: &Member, key: &str) -> Option<(u32, u32)> {
-    let raw = member.intent_state.get(key)?;
-    match &raw.value.kind {
-        ValueKind::Size { w, h } => Some((w.get(), h.get())),
-        _ => None,
-    }
-}
-
-fn normal_step(side: WallSide) -> (i32, i32) {
-    match side {
-        WallSide::Front => (0, 1),
-        WallSide::Back => (0, -1),
-        WallSide::Left => (-1, 0),
-        WallSide::Right => (1, 0),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -950,7 +865,7 @@ mod tests {
             def.members
                 .iter()
                 .filter(|m| matches!(m.role, MemberRole::Walls))
-                .filter_map(|m| nonneg_int_value(m, "height").map(|h| (0, h))),
+                .filter_map(|m| m.nonneg_u32("height").map(|h| (0, h))),
         )
     }
 
