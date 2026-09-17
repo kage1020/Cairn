@@ -1,0 +1,53 @@
+---
+source: crates/cairn-lang-core/tests/intent_lower.rs
+expression: lower_source(&source)
+---
+semantic_level: grouped
+headers:
+  - kind: Cairn
+    version: "2026.06"
+  - kind: Requires
+    requirement: version>=1.20
+themes:
+  - name: pavilion
+    slots:
+      floor:
+        kind: Token
+        value: oak_planks
+      wall:
+        kind: Token
+        value: cobblestone
+      roof:
+        kind: Token
+        value: spruce_stairs
+    selectors: []
+defs: []
+sites: []
+structs:
+  - name: roof_hip
+    size:
+      w: 5
+      h: 5
+    args: {}
+    members:
+      - role:
+          kind: Floor
+        mat_slot: floor
+        intent_state: {}
+      - role:
+          kind: Walls
+        mat_slot: wall
+        intent_state:
+          height:
+            kind: Int
+            value: 3
+      - role:
+          kind: Roof
+        mat_slot: roof
+        intent_state:
+          kind:
+            kind: Ident
+            value: hip
+          overhang:
+            kind: Int
+            value: 1

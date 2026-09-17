@@ -20,12 +20,9 @@
 //!
 //! A palette entry can name a block the edition has never had: an authored
 //! `@oak_sign` lowers verbatim on either edition, and Bedrock spells that
-//! block `standing_sign`. Until
-//! the registry pack grew per-version id tables there was nothing to ask
-//! the question with, so a stateless id counted as portable whichever
-//! edition it came from. An id no supported version of the edition declares
-//! counts as **unsupported**, and the state question below is not asked —
-//! there are no states to translate on a block that does not exist.
+//! block `standing_sign`. An id no supported version of the edition
+//! declares counts as **unsupported**, and the state question below is not
+//! asked — there are no states to translate on a block that does not exist.
 //!
 //! The tables are per version while this axis is per edition, so the
 //! question is "some version", not "every version". A rename inside an
@@ -400,6 +397,7 @@ mod tests {
     };
     use indexmap::IndexMap;
 
+    use crate::bedrock_state::stair_props;
     use crate::registry::{AliasCatalog, BlocksCatalog};
 
     /// A pack shipping no `aliases` component — every test that is not
@@ -444,16 +442,6 @@ mod tests {
         )
         .expect("test catalog parses as JSON");
         BlocksIndex::from_catalog(catalog).expect("test catalog folds")
-    }
-
-    fn stair_props(facing: &str, half: &str, shape: &str) -> IndexMap<String, String> {
-        // Same insertion order the lowering uses so the palette entries
-        // resemble what `translate_states` sees at runtime.
-        let mut m = IndexMap::new();
-        m.insert("facing".to_owned(), facing.to_owned());
-        m.insert("half".to_owned(), half.to_owned());
-        m.insert("shape".to_owned(), shape.to_owned());
-        m
     }
 
     fn one_block_array(scope: &str, states: Vec<BlockState>) -> BlockArray {

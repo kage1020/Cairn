@@ -21,20 +21,18 @@
 //! legalize, which is what the assertions here say.
 
 use std::fmt::Write as _;
-use std::path::PathBuf;
 
 use cairn_lang_core::Edition;
 use cairn_lang_core::check::Severity;
 use cairn_lang_core::{lower, parse};
 use cairn_lang_redstone::{
-    BufferSegment, DiagnosticCode, PlacedCellNode, RouteLayer, ScopedPlacementIr, compile_crossing,
-    compile_delay, compile_edition_netlist, compile_netlist, compile_placement, compile_routing,
-    synthesize,
+    BufferSegment, DiagnosticCode, PlacedCellNode, RouteLayer, compile_crossing,
+    compile_edition_netlist, compile_netlist, compile_placement, compile_routing, synthesize,
 };
 
 mod common;
 
-use common::normalize_stage_tags;
+use common::{delayed_from_source, load_example, normalize_stage_tags};
 
 /// The Error-severity half of a pass's findings.
 ///
@@ -51,60 +49,6 @@ fn errors(
         .iter()
         .filter(|d| d.severity() == Severity::Error)
         .collect()
-}
-
-fn load_example(name: &str) -> String {
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("..")
-        .join("..")
-        .join("examples")
-        .join(name);
-    std::fs::read_to_string(&path).unwrap_or_else(|err| panic!("read {}: {err}", path.display()))
-}
-
-fn delayed_from_source(source: &str, edition: Edition) -> ScopedPlacementIr {
-    let module = parse(source).expect("parse");
-    let intent = lower(&module);
-    let synth = synthesize(&intent);
-    assert!(
-        synth
-            .diagnostics
-            .iter()
-            .all(|d| d.severity() != Severity::Error),
-        "fixture must synth cleanly: {:?}",
-        synth.diagnostics,
-    );
-    let netlist = compile_netlist(&synth.scoped);
-    let edition_netlist = compile_edition_netlist(&netlist, edition);
-    let placement = compile_placement(&edition_netlist, &intent);
-    assert!(
-        placement.diagnostics.is_empty(),
-        "fixture must place cleanly: {:?}",
-        placement.diagnostics,
-    );
-    let routing = compile_routing(&placement.scoped);
-    // One warning is allowed through, by code rather than by severity:
-    // a scope whose nets had to climb past each other earns
-    // `W_ROUTE_CROSS_LAYER_CLEARANCE`, which names the pairs the
-    // physical tile layer has to separate and elides nothing. Anything
-    // else — a refusal, which would take the scope out of the IR the
-    // pass below reads, or a warning routing has yet to grow — is this
-    // fixture set saying something new, and worth failing on.
-    assert!(
-        routing
-            .diagnostics
-            .iter()
-            .all(|d| d.code == DiagnosticCode::RouteCrossLayerClearance),
-        "fixture must route with nothing but the cross-layer advisory: {:?}",
-        routing.diagnostics,
-    );
-    let delay = compile_delay(&routing.scoped);
-    assert!(
-        delay.diagnostics.is_empty(),
-        "fixture must delay cleanly: {:?}",
-        delay.diagnostics,
-    );
-    delay.scoped
 }
 
 /// A shared bus of 16 cells legalizes at `void=2`, with one repeater
@@ -267,19 +211,6 @@ fn redstone_door_bedrock_carries_no_buffers() {
         "delay ticks preserved from stage 3",
     );
     assert!(cell.buffer_coords().is_empty(), "no buffer expected");
-}
-
-/// AC3 — empty module (no scopes with redstone) passes through
-/// unchanged. Mirrors the pipeline-wide fail-loud policy: pass-through
-/// on empty, refuse on partial-but-broken.
-#[test]
-fn empty_module_passes_through() {
-    // Minimal `.crn` with a theme but no logic. Handled by delaying an
-    // upstream-empty scoped IR: `ScopedPlacementIr::new()` starts
-    // empty and every stage leaves it empty.
-    let legalized = compile_crossing(&ScopedPlacementIr::new());
-    assert!(legalized.diagnostics.is_empty());
-    assert!(legalized.scoped.scopes.is_empty());
 }
 
 /// AC4 — apart from the `stage` tag, the JSON wire form of the

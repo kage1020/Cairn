@@ -9,44 +9,13 @@
 //! the enclosing scope), empty-scope elision, the JSON wire form, and
 //! per-scope independence when a module carries more than one scope.
 
-use std::path::PathBuf;
-
 use cairn_lang_core::Edition;
 use cairn_lang_core::check::Severity;
 use cairn_lang_core::{lower, parse};
-use cairn_lang_redstone::{
-    DiagnosticCode, EditionCell, ScopedEditionNetlistIr, compile_edition_netlist, compile_netlist,
-    compile_placement, synthesize,
-};
+use cairn_lang_redstone::{DiagnosticCode, EditionCell, ScopedEditionNetlistIr, compile_placement};
 
-fn load_example(name: &str) -> String {
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("..")
-        .join("..")
-        .join("examples")
-        .join(name);
-    std::fs::read_to_string(&path).unwrap_or_else(|err| panic!("read {}: {err}", path.display()))
-}
-
-fn edition_netlist_from_source(
-    source: &str,
-    edition: Edition,
-) -> (ScopedEditionNetlistIr, cairn_lang_core::IntentModule) {
-    let module = parse(source).expect("parse");
-    let intent = lower(&module);
-    let synth = synthesize(&intent);
-    assert!(
-        synth
-            .diagnostics
-            .iter()
-            .all(|d| d.severity() != Severity::Error),
-        "fixture must synth cleanly: {:?}",
-        synth.diagnostics,
-    );
-    let netlist = compile_netlist(&synth.scoped);
-    let edition_netlist = compile_edition_netlist(&netlist, edition);
-    (edition_netlist, intent)
-}
+mod common;
+use common::{edition_netlist_from_source, load_example};
 
 /// AC1 — `examples/redstone-door.crn` compiled for Java places its lone
 /// `JavaRepeaterOr` cell one column in from the pad column of its

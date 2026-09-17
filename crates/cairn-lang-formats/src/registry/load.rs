@@ -5,44 +5,53 @@
 //! loader exists for tests in this module and for a future
 //! `--registry-pack <dir>` CLI flag.
 
+use std::borrow::Cow;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
 use cairn_lang_core::block_array::{BlockIdSet, BlockState, TargetRegistry};
 use cairn_lang_core::lock::HashHex;
 use cairn_lang_core::suggest::nearest_match;
+use serde::de::DeserializeOwned;
 use thiserror::Error;
 
-use super::aliases::{AliasCatalog, AliasError, AliasIndex};
-use super::blocks::{BlocksCatalog, BlocksError, BlocksIndex};
+use super::aliases::{AliasError, AliasIndex};
+use super::blocks::{BlocksError, BlocksIndex};
 use super::data_versions::DataVersionTable;
 use super::hash::pack_hash;
 use super::manifest::{PackEdition, PackManifest};
-use super::materials::{MaterialsCatalog, MaterialsError, MaterialsIndex};
+use super::materials::{MaterialsError, MaterialsIndex};
+use crate::data_version::UnsupportedTarget;
 
-/// Built-in Java `pack.json` bytes, statically embedded at compile time.
-const BUILTIN_JAVA_MANIFEST: &str = include_str!("../../registry-data/java/pack.json");
-/// Built-in Java `data_versions.json` bytes, statically embedded at compile time.
-const BUILTIN_JAVA_DATA_VERSIONS: &str =
-    include_str!("../../registry-data/java/data_versions.json");
-/// Built-in Java `materials.json` bytes, statically embedded at compile time.
-const BUILTIN_JAVA_MATERIALS: &str = include_str!("../../registry-data/java/materials.json");
-/// Built-in Java `blocks.json` bytes, statically embedded at compile time.
-const BUILTIN_JAVA_BLOCKS: &str = include_str!("../../registry-data/java/blocks.json");
-/// Built-in Java `aliases.json` bytes, statically embedded at compile time.
-const BUILTIN_JAVA_ALIASES: &str = include_str!("../../registry-data/java/aliases.json");
+/// One embedded pack's files, included at compile time so the Cairn
+/// binary never has to find a data file at runtime.
+#[derive(Clone, Copy)]
+struct BuiltinFiles {
+    manifest: &'static str,
+    data_versions: &'static str,
+    materials: &'static str,
+    blocks: &'static str,
+    aliases: &'static str,
+}
 
-/// Built-in Bedrock `pack.json` bytes, statically embedded at compile time.
-const BUILTIN_BEDROCK_MANIFEST: &str = include_str!("../../registry-data/bedrock/pack.json");
-/// Built-in Bedrock `data_versions.json` bytes, statically embedded at compile time.
-const BUILTIN_BEDROCK_DATA_VERSIONS: &str =
-    include_str!("../../registry-data/bedrock/data_versions.json");
-/// Built-in Bedrock `materials.json` bytes, statically embedded at compile time.
-const BUILTIN_BEDROCK_MATERIALS: &str = include_str!("../../registry-data/bedrock/materials.json");
-/// Built-in Bedrock `blocks.json` bytes, statically embedded at compile time.
-const BUILTIN_BEDROCK_BLOCKS: &str = include_str!("../../registry-data/bedrock/blocks.json");
-/// Built-in Bedrock `aliases.json` bytes, statically embedded at compile time.
-const BUILTIN_BEDROCK_ALIASES: &str = include_str!("../../registry-data/bedrock/aliases.json");
+macro_rules! builtin_files {
+    ($dir:literal) => {
+        BuiltinFiles {
+            manifest: include_str!(concat!("../../registry-data/", $dir, "/pack.json")),
+            data_versions: include_str!(concat!(
+                "../../registry-data/",
+                $dir,
+                "/data_versions.json"
+            )),
+            materials: include_str!(concat!("../../registry-data/", $dir, "/materials.json")),
+            blocks: include_str!(concat!("../../registry-data/", $dir, "/blocks.json")),
+            aliases: include_str!(concat!("../../registry-data/", $dir, "/aliases.json")),
+        }
+    };
+}
+
+const BUILTIN_JAVA: BuiltinFiles = builtin_files!("java");
+const BUILTIN_BEDROCK: BuiltinFiles = builtin_files!("bedrock");
 
 /// Highest manifest `schema_version` this Cairn build understands.
 pub const SUPPORTED_MANIFEST_SCHEMA: u32 = 1;
@@ -334,17 +343,16 @@ impl From<AliasError> for RegistryError {
     }
 }
 
-/// Look up one row of a [`DataVersionTable`] by `mc_version`, returning
-/// the owned `(mc_version, data_version)` pair the per-edition target
-/// types are built from.
-/// The buildable row a `--target` value names.
+/// The buildable row a `--target` value names, as the owned
+/// `(mc_version, data_version)` pair the per-edition target types are
+/// built from.
 ///
 /// Only `targetable` rows are candidates. The table also carries the
 /// releases the pack can *order against* but has no block data for, and
 /// resolving `--target` to one of those would pin a compile to a version
 /// whose id table is absent — which turns the `E_UNKNOWN_ID` check off
 /// rather than running it, the silent-substitution hazard §10.4 forbids.
-fn entry_for(table: &DataVersionTable, mc_version: &str) -> Option<(String, i32)> {
+fn targetable_row_for(table: &DataVersionTable, mc_version: &str) -> Option<(String, i32)> {
     table
         .versions
         .iter()
@@ -354,43 +362,51 @@ fn entry_for(table: &DataVersionTable, mc_version: &str) -> Option<(String, i32)
 }
 
 impl RegistryPack {
-    /// Resolve a CLI `--target` value against this pack's
-    /// `DataVersionTable`, returning the raw `(mc_version, data_version)`
-    /// row. The literal `"latest"` aliases the row named by
-    /// `DataVersionTable::latest`. The per-edition wrappers
-    /// ([`Self::resolve_java_target`] / [`Self::resolve_bedrock_target`])
-    /// stamp the pair into their edition's target type.
+    /// Resolve a CLI `--target` value against this pack's version table,
+    /// returning the raw `(mc_version, data_version)` row. The literal
+    /// `"latest"` aliases the row named by `DataVersionTable::latest`; the
+    /// per-edition wrappers stamp the pair into their edition's target
+    /// type.
     ///
     /// # Errors
     ///
-    /// Returns [`crate::data_version::UnsupportedTarget`] when the
-    /// requested string is neither the `"latest"` alias nor an exact
-    /// `mc_version` match.
+    /// Returns [`UnsupportedTarget`] when the requested string is neither
+    /// the `"latest"` alias nor an exact `mc_version` match.
     ///
     /// # Panics
     ///
-    /// Panics if the pack passed [`validate_data_versions`] but its
-    /// `latest` field nonetheless does not point at a row in `versions`.
-    /// That branch is dead by construction: validation rejects exactly
-    /// this case at load time, and `RegistryPack` cannot be constructed
-    /// without going through validation.
+    /// Panics when the pack is not of `edition`. Both editions share the
+    /// `data_version` column with different meanings, so resolving against
+    /// the wrong pack would return a plausible-but-wrong integer — a §10.4
+    /// silent-substitution hazard. A full `assert!` rather than a
+    /// `debug_assert!`: resolution runs once per compile, and the guard
+    /// must survive release builds once `--registry-pack` can supply a pack.
+    ///
+    /// Also panics if the pack passed [`validate_data_versions`] but its
+    /// `latest` field nonetheless names no row in `versions`. That branch is
+    /// dead by construction: validation rejects exactly this case at load
+    /// time, and `RegistryPack` cannot be constructed without going through
+    /// validation.
     fn resolve_target_row(
         &self,
+        edition: PackEdition,
         requested: &str,
-    ) -> Result<(String, i32), crate::data_version::UnsupportedTarget> {
+    ) -> Result<(String, i32), UnsupportedTarget> {
+        assert_eq!(
+            self.manifest.edition, edition,
+            "{edition:?} target resolution against a non-{edition:?} pack is a caller bug",
+        );
         if requested == "latest" {
-            // `latest` was validated at load time against `versions`, so
-            // the lookup here cannot miss.
-            return Ok(entry_for(&self.data_versions, &self.data_versions.latest)
-                .expect("latest validated at load time"));
+            return Ok(
+                targetable_row_for(&self.data_versions, &self.data_versions.latest)
+                    .expect("latest validated at load time"),
+            );
         }
-        entry_for(&self.data_versions, requested).ok_or_else(|| {
-            crate::data_version::UnsupportedTarget {
-                edition: self.manifest.edition.label(),
-                requested: requested.to_owned(),
-                suggestion: self.suggestion_for(requested),
-                supported: self.supported_list(),
-            }
+        targetable_row_for(&self.data_versions, requested).ok_or_else(|| UnsupportedTarget {
+            edition: self.manifest.edition.label(),
+            requested: requested.to_owned(),
+            suggestion: self.suggestion_for(requested),
+            supported: self.supported_list(),
         })
     }
 
@@ -398,9 +414,8 @@ impl RegistryPack {
     ///
     /// # Errors
     ///
-    /// Returns [`crate::data_version::UnsupportedTarget`] when the
-    /// requested string is neither the `"latest"` alias nor an exact
-    /// `mc_version` match.
+    /// Returns [`UnsupportedTarget`] when the requested string is neither
+    /// the `"latest"` alias nor an exact `mc_version` match.
     ///
     /// # Panics
     ///
@@ -411,19 +426,8 @@ impl RegistryPack {
     pub fn resolve_java_target(
         &self,
         requested: &str,
-    ) -> Result<crate::data_version::JavaTarget, crate::data_version::UnsupportedTarget> {
-        // A full `assert!` (not `debug_assert!`): both editions share the
-        // `data_version` column with different meanings, so resolving
-        // against the wrong pack would return a plausible-but-wrong integer
-        // — a §10.4 silent-substitution hazard. Resolution runs once per
-        // compile, so the guard's cost is irrelevant and it must survive
-        // release builds (e.g. once `--registry-pack` can supply a pack).
-        assert_eq!(
-            self.manifest.edition,
-            PackEdition::Java,
-            "Java target resolution against a non-Java pack is a caller bug",
-        );
-        let (mc_version, data_version) = self.resolve_target_row(requested)?;
+    ) -> Result<crate::data_version::JavaTarget, UnsupportedTarget> {
+        let (mc_version, data_version) = self.resolve_target_row(PackEdition::Java, requested)?;
         Ok(crate::data_version::JavaTarget {
             mc_version,
             data_version,
@@ -436,9 +440,8 @@ impl RegistryPack {
     ///
     /// # Errors
     ///
-    /// Returns [`crate::data_version::UnsupportedTarget`] when the
-    /// requested string is neither the `"latest"` alias nor an exact
-    /// `mc_version` match.
+    /// Returns [`UnsupportedTarget`] when the requested string is neither
+    /// the `"latest"` alias nor an exact `mc_version` match.
     ///
     /// # Panics
     ///
@@ -447,14 +450,9 @@ impl RegistryPack {
     pub fn resolve_bedrock_target(
         &self,
         requested: &str,
-    ) -> Result<crate::data_version::BedrockTarget, crate::data_version::UnsupportedTarget> {
-        // See `resolve_java_target` for why this is a full `assert!`.
-        assert_eq!(
-            self.manifest.edition,
-            PackEdition::Bedrock,
-            "Bedrock target resolution against a non-Bedrock pack is a caller bug",
-        );
-        let (mc_version, block_version) = self.resolve_target_row(requested)?;
+    ) -> Result<crate::data_version::BedrockTarget, UnsupportedTarget> {
+        let (mc_version, block_version) =
+            self.resolve_target_row(PackEdition::Bedrock, requested)?;
         Ok(crate::data_version::BedrockTarget {
             mc_version,
             block_version,
@@ -568,9 +566,29 @@ impl RegistryPack {
 /// — so a failure here means the build artefact itself is broken; the
 /// `expect` surfaces that rather than papering it over.
 pub fn builtin_java() -> &'static RegistryPack {
-    static PACK: OnceLock<RegistryPack> = OnceLock::new();
-    PACK.get_or_init(|| {
-        load_builtin_java()
+    builtin(PackEdition::Java)
+}
+
+/// Built-in Bedrock pack, parsed once per process. The mirror of
+/// [`builtin_java`] for `--edition bedrock` compiles.
+///
+/// # Panics
+///
+/// Panics if the embedded JSON fails to parse or validate, for the same
+/// build-invariant reason as [`builtin_java`].
+pub fn builtin_bedrock() -> &'static RegistryPack {
+    builtin(PackEdition::Bedrock)
+}
+
+fn builtin(edition: PackEdition) -> &'static RegistryPack {
+    static JAVA: OnceLock<RegistryPack> = OnceLock::new();
+    static BEDROCK: OnceLock<RegistryPack> = OnceLock::new();
+    let cell = match edition {
+        PackEdition::Java => &JAVA,
+        PackEdition::Bedrock => &BEDROCK,
+    };
+    cell.get_or_init(|| {
+        load_builtin(edition)
             .expect("built-in registry pack failed to load — this is a build invariant")
     })
 }
@@ -584,29 +602,7 @@ pub fn builtin_java() -> &'static RegistryPack {
 /// of these would mean the bundled `registry-data/java/*.json` files have
 /// been corrupted, which is a release-process bug.
 pub fn load_builtin_java() -> Result<RegistryPack, RegistryError> {
-    load_builtin(
-        PackEdition::Java,
-        BUILTIN_JAVA_MANIFEST,
-        BUILTIN_JAVA_DATA_VERSIONS,
-        BUILTIN_JAVA_MATERIALS,
-        BUILTIN_JAVA_BLOCKS,
-        BUILTIN_JAVA_ALIASES,
-    )
-}
-
-/// Built-in Bedrock pack, parsed once per process. The mirror of
-/// [`builtin_java`] for `--edition bedrock` compiles.
-///
-/// # Panics
-///
-/// Panics if the embedded JSON fails to parse or validate, for the same
-/// build-invariant reason as [`builtin_java`].
-pub fn builtin_bedrock() -> &'static RegistryPack {
-    static PACK: OnceLock<RegistryPack> = OnceLock::new();
-    PACK.get_or_init(|| {
-        load_builtin_bedrock()
-            .expect("built-in registry pack failed to load — this is a build invariant")
-    })
+    load_builtin(PackEdition::Java)
 }
 
 /// Parse the built-in Bedrock pack from its embedded bytes.
@@ -618,73 +614,16 @@ pub fn builtin_bedrock() -> &'static RegistryPack {
 /// of these would mean the bundled `registry-data/bedrock/*.json` files
 /// have been corrupted, which is a release-process bug.
 pub fn load_builtin_bedrock() -> Result<RegistryPack, RegistryError> {
-    load_builtin(
-        PackEdition::Bedrock,
-        BUILTIN_BEDROCK_MANIFEST,
-        BUILTIN_BEDROCK_DATA_VERSIONS,
-        BUILTIN_BEDROCK_MATERIALS,
-        BUILTIN_BEDROCK_BLOCKS,
-        BUILTIN_BEDROCK_ALIASES,
-    )
+    load_builtin(PackEdition::Bedrock)
 }
 
-/// Shared parse + validate + hash path for the embedded packs. Keeping
-/// one implementation means a validation rule added for one edition can
-/// never silently miss the other.
-fn load_builtin(
-    edition: PackEdition,
-    manifest_src: &'static str,
-    data_versions_src: &'static str,
-    materials_src: &'static str,
-    blocks_src: &'static str,
-    aliases_src: &'static str,
-) -> Result<RegistryPack, RegistryError> {
-    let manifest = parse_manifest(manifest_src)?;
-    validate_manifest(&manifest, edition)?;
-    let data_versions = parse_data_versions(data_versions_src)?;
-    validate_data_versions(&data_versions)?;
-    let materials = if manifest.files.materials.is_some() {
-        let catalog = parse_materials(materials_src)?;
-        MaterialsIndex::from_catalog(catalog)?
-    } else {
-        MaterialsIndex::empty()
+/// Run the embedded files of `edition` through [`load_pack`].
+fn load_builtin(edition: PackEdition) -> Result<RegistryPack, RegistryError> {
+    let files = match edition {
+        PackEdition::Java => BUILTIN_JAVA,
+        PackEdition::Bedrock => BUILTIN_BEDROCK,
     };
-    let blocks = if manifest.files.blocks.is_some() {
-        BlocksIndex::from_catalog(parse_blocks(blocks_src)?)?
-    } else {
-        BlocksIndex::empty()
-    };
-    let aliases = if manifest.files.aliases.is_some() {
-        AliasIndex::from_catalog(parse_aliases(aliases_src)?)?
-    } else {
-        AliasIndex::empty()
-    };
-    validate_material_overrides(&materials, &data_versions)?;
-    validate_blocks_cover_versions(&blocks, &data_versions)?;
-    validate_aliases_answerable(&aliases, &blocks)?;
-    let mut components: Vec<(&str, &[u8])> = vec![(
-        manifest.files.data_versions.as_str(),
-        data_versions_src.as_bytes(),
-    )];
-    if let Some(name) = manifest.files.materials.as_deref() {
-        components.push((name, materials_src.as_bytes()));
-    }
-    if let Some(name) = manifest.files.blocks.as_deref() {
-        components.push((name, blocks_src.as_bytes()));
-    }
-    if let Some(name) = manifest.files.aliases.as_deref() {
-        components.push((name, aliases_src.as_bytes()));
-    }
-    let bytes_hash = pack_hash(manifest_src.as_bytes(), &components);
-    Ok(RegistryPack {
-        manifest,
-        data_versions,
-        materials,
-        blocks,
-        aliases,
-        bytes_hash,
-        source: PackSource::Builtin,
-    })
+    load_pack(&files, edition)
 }
 
 /// Load a pack from a directory laid out the same way as the built-in
@@ -695,109 +634,137 @@ fn load_builtin(
 /// Returns [`RegistryError`] on I/O failure, JSON parse failure, unsupported
 /// schema versions, or validation failure of the loaded data.
 pub fn load_from_dir(dir: &Path) -> Result<RegistryPack, RegistryError> {
-    load_from_dir_inner(dir, PackEdition::Java)
+    load_pack(&PackDir(dir), PackEdition::Java)
 }
 
-fn load_from_dir_inner(
-    dir: &Path,
-    expected_edition: PackEdition,
-) -> Result<RegistryPack, RegistryError> {
-    let manifest_path = dir.join("pack.json");
-    let manifest_bytes = std::fs::read(&manifest_path).map_err(|source| RegistryError::Io {
-        path: manifest_path.clone(),
-        source,
-    })?;
-    let manifest_text = std::str::from_utf8(&manifest_bytes).map_err(|err| RegistryError::Io {
-        path: manifest_path.clone(),
-        source: std::io::Error::new(std::io::ErrorKind::InvalidData, err),
-    })?;
-    let manifest = parse_manifest(manifest_text)?;
-    validate_manifest(&manifest, expected_edition)?;
+/// The manifest and the four component files it can name.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Component {
+    Manifest,
+    DataVersions,
+    Materials,
+    Blocks,
+    Aliases,
+}
 
-    let data_versions_path = dir.join(&manifest.files.data_versions);
-    let data_versions_bytes =
-        std::fs::read(&data_versions_path).map_err(|source| RegistryError::Io {
-            path: data_versions_path.clone(),
+impl Component {
+    /// The `file` a [`RegistryError::File`] reports.
+    fn label(self) -> &'static str {
+        match self {
+            Component::Manifest => "manifest",
+            Component::DataVersions => "data_versions",
+            Component::Materials => "materials",
+            Component::Blocks => "blocks",
+            Component::Aliases => "aliases",
+        }
+    }
+}
+
+/// Where [`load_pack`] reads each file from. The embedded packs and a
+/// directory on disk share one parse → validate → hash pipeline through
+/// this, so a validation rule added for one can never silently miss the
+/// other.
+trait ComponentSource {
+    /// Text of `component`, which the manifest names `file`.
+    fn read_text(&self, component: Component, file: &str) -> Result<Cow<'_, str>, RegistryError>;
+
+    /// The [`PackSource`] a pack read from here reports.
+    fn provenance(&self) -> PackSource;
+}
+
+impl ComponentSource for BuiltinFiles {
+    fn read_text(&self, component: Component, _file: &str) -> Result<Cow<'_, str>, RegistryError> {
+        Ok(Cow::Borrowed(match component {
+            Component::Manifest => self.manifest,
+            Component::DataVersions => self.data_versions,
+            Component::Materials => self.materials,
+            Component::Blocks => self.blocks,
+            Component::Aliases => self.aliases,
+        }))
+    }
+
+    fn provenance(&self) -> PackSource {
+        PackSource::Builtin
+    }
+}
+
+/// A pack directory: `pack.json` plus the files it names.
+struct PackDir<'a>(&'a Path);
+
+impl ComponentSource for PackDir<'_> {
+    fn read_text(&self, _component: Component, file: &str) -> Result<Cow<'_, str>, RegistryError> {
+        let path = self.0.join(file);
+        let bytes = std::fs::read(&path).map_err(|source| RegistryError::Io {
+            path: path.clone(),
             source,
         })?;
+        String::from_utf8(bytes)
+            .map(Cow::Owned)
+            .map_err(|err| RegistryError::Io {
+                path,
+                source: std::io::Error::new(std::io::ErrorKind::InvalidData, err.utf8_error()),
+            })
+    }
+
+    fn provenance(&self) -> PackSource {
+        PackSource::Path(self.0.to_path_buf())
+    }
+}
+
+/// Parse, validate and hash one pack from `source`.
+fn load_pack(
+    source: &impl ComponentSource,
+    expected_edition: PackEdition,
+) -> Result<RegistryPack, RegistryError> {
+    let manifest_text = source.read_text(Component::Manifest, "pack.json")?;
+    let manifest: PackManifest = parse_component(&manifest_text, Component::Manifest)?;
+    validate_manifest(&manifest, expected_edition)?;
+
     let data_versions_text =
-        std::str::from_utf8(&data_versions_bytes).map_err(|err| RegistryError::Io {
-            path: data_versions_path.clone(),
-            source: std::io::Error::new(std::io::ErrorKind::InvalidData, err),
-        })?;
-    let data_versions = parse_data_versions(data_versions_text)?;
+        source.read_text(Component::DataVersions, &manifest.files.data_versions)?;
+    let data_versions: DataVersionTable =
+        parse_component(&data_versions_text, Component::DataVersions)?;
     validate_data_versions(&data_versions)?;
 
-    let (materials, materials_bytes) = match manifest.files.materials.as_deref() {
-        Some(name) => {
-            let path = dir.join(name);
-            let bytes = std::fs::read(&path).map_err(|source| RegistryError::Io {
-                path: path.clone(),
-                source,
-            })?;
-            let text = std::str::from_utf8(&bytes).map_err(|err| RegistryError::Io {
-                path: path.clone(),
-                source: std::io::Error::new(std::io::ErrorKind::InvalidData, err),
-            })?;
-            let catalog = parse_materials(text)?;
-            (MaterialsIndex::from_catalog(catalog)?, Some(bytes))
-        }
-        None => (MaterialsIndex::empty(), None),
-    };
-
-    let (blocks, blocks_bytes) = match manifest.files.blocks.as_deref() {
-        Some(name) => {
-            let path = dir.join(name);
-            let bytes = std::fs::read(&path).map_err(|source| RegistryError::Io {
-                path: path.clone(),
-                source,
-            })?;
-            let text = std::str::from_utf8(&bytes).map_err(|err| RegistryError::Io {
-                path: path.clone(),
-                source: std::io::Error::new(std::io::ErrorKind::InvalidData, err),
-            })?;
-            (BlocksIndex::from_catalog(parse_blocks(text)?)?, Some(bytes))
-        }
-        None => (BlocksIndex::empty(), None),
-    };
-
-    let (aliases, aliases_bytes) = match manifest.files.aliases.as_deref() {
-        Some(name) => {
-            let path = dir.join(name);
-            let bytes = std::fs::read(&path).map_err(|source| RegistryError::Io {
-                path: path.clone(),
-                source,
-            })?;
-            let text = std::str::from_utf8(&bytes).map_err(|err| RegistryError::Io {
-                path: path.clone(),
-                source: std::io::Error::new(std::io::ErrorKind::InvalidData, err),
-            })?;
-            (AliasIndex::from_catalog(parse_aliases(text)?)?, Some(bytes))
-        }
-        None => (AliasIndex::empty(), None),
-    };
+    let (materials, materials_text) = optional_component(
+        source,
+        Component::Materials,
+        manifest.files.materials.as_deref(),
+        MaterialsIndex::from_catalog,
+        MaterialsIndex::empty,
+    )?;
+    let (blocks, blocks_text) = optional_component(
+        source,
+        Component::Blocks,
+        manifest.files.blocks.as_deref(),
+        BlocksIndex::from_catalog,
+        BlocksIndex::empty,
+    )?;
+    let (aliases, aliases_text) = optional_component(
+        source,
+        Component::Aliases,
+        manifest.files.aliases.as_deref(),
+        AliasIndex::from_catalog,
+        AliasIndex::empty,
+    )?;
     validate_material_overrides(&materials, &data_versions)?;
     validate_blocks_cover_versions(&blocks, &data_versions)?;
     validate_aliases_answerable(&aliases, &blocks)?;
 
     let mut components: Vec<(&str, &[u8])> = vec![(
         manifest.files.data_versions.as_str(),
-        data_versions_bytes.as_slice(),
+        data_versions_text.as_bytes(),
     )];
-    if let (Some(name), Some(bytes)) = (
-        manifest.files.materials.as_deref(),
-        materials_bytes.as_deref(),
-    ) {
-        components.push((name, bytes));
+    for (file, text) in [
+        (&manifest.files.materials, &materials_text),
+        (&manifest.files.blocks, &blocks_text),
+        (&manifest.files.aliases, &aliases_text),
+    ] {
+        if let (Some(file), Some(text)) = (file, text) {
+            components.push((file.as_str(), text.as_bytes()));
+        }
     }
-    if let (Some(name), Some(bytes)) = (manifest.files.blocks.as_deref(), blocks_bytes.as_deref()) {
-        components.push((name, bytes));
-    }
-    if let (Some(name), Some(bytes)) = (manifest.files.aliases.as_deref(), aliases_bytes.as_deref())
-    {
-        components.push((name, bytes));
-    }
-    let bytes_hash = pack_hash(&manifest_bytes, &components);
+    let bytes_hash = pack_hash(manifest_text.as_bytes(), &components);
     Ok(RegistryPack {
         manifest,
         data_versions,
@@ -805,32 +772,42 @@ fn load_from_dir_inner(
         blocks,
         aliases,
         bytes_hash,
-        source: PackSource::Path(dir.to_path_buf()),
+        source: source.provenance(),
     })
 }
 
-fn parse_manifest(s: &str) -> Result<PackManifest, RegistryError> {
-    serde_json::from_str(s).map_err(|source| RegistryError::Manifest { source })
+/// Read, parse and index one optional component, or hand back its empty
+/// index when the manifest names no file for it. The text comes back too,
+/// because the pack hash covers it.
+fn optional_component<'s, C, I, E>(
+    source: &'s impl ComponentSource,
+    component: Component,
+    file: Option<&str>,
+    index: impl FnOnce(C) -> Result<I, E>,
+    empty: impl FnOnce() -> I,
+) -> Result<(I, Option<Cow<'s, str>>), RegistryError>
+where
+    C: DeserializeOwned,
+    RegistryError: From<E>,
+{
+    let Some(file) = file else {
+        return Ok((empty(), None));
+    };
+    let text = source.read_text(component, file)?;
+    let catalog: C = parse_component(&text, component)?;
+    Ok((index(catalog)?, Some(text)))
 }
 
-fn parse_data_versions(s: &str) -> Result<DataVersionTable, RegistryError> {
-    serde_json::from_str(s).map_err(|source| RegistryError::File {
-        file: "data_versions".to_owned(),
-        source,
-    })
-}
-
-fn parse_blocks(s: &str) -> Result<BlocksCatalog, RegistryError> {
-    serde_json::from_str(s).map_err(|source| RegistryError::File {
-        file: "blocks".to_owned(),
-        source,
-    })
-}
-
-fn parse_aliases(s: &str) -> Result<AliasCatalog, RegistryError> {
-    serde_json::from_str(s).map_err(|source| RegistryError::File {
-        file: "aliases".to_owned(),
-        source,
+fn parse_component<T: DeserializeOwned>(
+    text: &str,
+    component: Component,
+) -> Result<T, RegistryError> {
+    serde_json::from_str(text).map_err(|source| match component {
+        Component::Manifest => RegistryError::Manifest { source },
+        file => RegistryError::File {
+            file: file.label().to_owned(),
+            source,
+        },
     })
 }
 
@@ -941,13 +918,6 @@ fn validate_blocks_cover_versions(
     })
 }
 
-fn parse_materials(s: &str) -> Result<MaterialsCatalog, RegistryError> {
-    serde_json::from_str(s).map_err(|source| RegistryError::File {
-        file: "materials".to_owned(),
-        source,
-    })
-}
-
 fn validate_manifest(manifest: &PackManifest, expected: PackEdition) -> Result<(), RegistryError> {
     if manifest.schema_version > SUPPORTED_MANIFEST_SCHEMA {
         return Err(RegistryError::UnsupportedSchemaVersion {
@@ -1021,7 +991,7 @@ fn validate_version_order(table: &DataVersionTable) -> Result<(), RegistryError>
             if entry.data_version <= previous.data_version {
                 return Err(RegistryError::VersionOrderBroken {
                     reason: format!(
-                        "`{}` has data_version {} but follows `{}` with {}; keys must ascend                          and be unique",
+                        "`{}` has data_version {} but follows `{}` with {}; keys must ascend and be unique",
                         entry.mc_version,
                         entry.data_version,
                         previous.mc_version,
@@ -1032,7 +1002,7 @@ fn validate_version_order(table: &DataVersionTable) -> Result<(), RegistryError>
             if !compare_versions(&entry.mc_version, &previous.mc_version).is_gt() {
                 return Err(RegistryError::VersionOrderBroken {
                     reason: format!(
-                        "`{}` does not sort above `{}` by label, but its data_version is                          higher; placing a floor outside the table reads the labels",
+                        "`{}` does not sort above `{}` by label, but its data_version is higher; placing a floor outside the table reads the labels",
                         entry.mc_version, previous.mc_version,
                     ),
                 });

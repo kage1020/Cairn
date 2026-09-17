@@ -1,0 +1,214 @@
+---
+source: crates/cairn-lang-core/tests/parse_examples.rs
+expression: module
+---
+headers:
+  - kind: Cairn
+    version: "2026.06"
+  - kind: Requires
+    requirement: version>=1.20
+items:
+  - kind: Theme
+    name: cross
+    body:
+      - kind: Slot
+        slot: wall
+        value:
+          kind: Token
+          value: oak_planks
+      - kind: Slot
+        slot: door
+        value:
+          kind: Token
+          value: oak_door
+  - kind: Struct
+    name: crossbar
+    args:
+      - key: size
+        value:
+          kind: Size
+          value:
+            w: 6
+            h: 4
+    body:
+      - kind: Generic
+        keyword: floor
+        args:
+          - key: mat_slot
+            value:
+              kind: Ident
+              value: wall
+      - kind: Generic
+        keyword: walls
+        args:
+          - key: class
+            value:
+              kind: Ident
+              value: outer
+          - key: mat_slot
+            value:
+              kind: Ident
+              value: wall
+          - key: height
+            value:
+              kind: Int
+              value: 3
+      - kind: Generic
+        keyword: door
+        args:
+          - key: id
+            value:
+              kind: Ident
+              value: front
+          - key: side
+            value:
+              kind: Ident
+              value: front
+          - key: at
+            value:
+              kind: Ident
+              value: center
+          - key: mat_slot
+            value:
+              kind: Ident
+              value: door
+      - kind: Generic
+        keyword: door
+        args:
+          - key: id
+            value:
+              kind: Ident
+              value: back
+          - key: side
+            value:
+              kind: Ident
+              value: back
+          - key: at
+            value:
+              kind: Ident
+              value: center
+          - key: mat_slot
+            value:
+              kind: Ident
+              value: door
+      - kind: Generic
+        keyword: pressure_plate
+        args:
+          - key: id
+            value:
+              kind: Ident
+              value: plate1
+          - key: at
+            value:
+              kind: DotRef
+              value:
+                - front
+                - outside
+          - key: offset
+            value:
+              kind: Int
+              value: 0
+          - key: y
+            value:
+              kind: Int
+              value: 0
+        binding:
+          kind: DotRef
+          value:
+            - sig
+            - a
+      - kind: Generic
+        keyword: pressure_plate
+        args:
+          - key: id
+            value:
+              kind: Ident
+              value: plate2
+          - key: at
+            value:
+              kind: DotRef
+              value:
+                - inside
+                - front
+          - key: offset
+            value:
+              kind: Int
+              value: 0
+          - key: y
+            value:
+              kind: Int
+              value: 0
+        binding:
+          kind: DotRef
+          value:
+            - sig
+            - b
+      - kind: Logic
+        lhs:
+          - sig
+          - f1
+        rhs:
+          kind: And
+          value:
+            - kind: Ref
+              value:
+                - sig
+                - a
+            - kind: Ref
+              value:
+                - sig
+                - b
+      - kind: Logic
+        lhs:
+          - sig
+          - f2
+        rhs:
+          kind: Or
+          value:
+            - kind: Ref
+              value:
+                - sig
+                - a
+            - kind: Ref
+              value:
+                - sig
+                - b
+      - kind: Generic
+        keyword: door
+        selector:
+          - key: id
+            value:
+              kind: Ident
+              value: front
+        args:
+          - key: opened_by
+            value:
+              kind: DotRef
+              value:
+                - sig
+                - f1
+      - kind: Generic
+        keyword: door
+        selector:
+          - key: id
+            value:
+              kind: Ident
+              value: back
+        args:
+          - key: opened_by
+            value:
+              kind: DotRef
+              value:
+                - sig
+                - f2
+      - kind: Generic
+        keyword: circuit
+        args:
+          - key: region
+            value:
+              kind: Ident
+              value: floor
+          - key: void
+            value:
+              kind: Int
+              value: 2

@@ -22,27 +22,16 @@
 //!    `resolve` records why that direction was picked.
 
 use cairn_lang_core::block_array::{BlockArrayIr, lower_to_block_array};
-use cairn_lang_core::{Diagnostic, DiagnosticCode, Severity, check, lower, parse, resolve};
+use cairn_lang_core::{Diagnostic, DiagnosticCode, Severity, lower, parse, resolve};
 
-fn diagnose(source: &str) -> Vec<Diagnostic> {
-    let module = parse(source).unwrap_or_else(|e| panic!("parse failed: {e}"));
-    let ir = lower(&module);
-    check(&module, &ir, None)
-}
-
-fn codes(source: &str) -> Vec<&'static str> {
-    diagnose(source).iter().map(|d| d.code.as_str()).collect()
-}
+mod common;
+use common::{codes, diagnose, slice};
 
 fn of_code(source: &str, code: DiagnosticCode) -> Vec<Diagnostic> {
     diagnose(source)
         .into_iter()
         .filter(|d| d.code == code)
         .collect()
-}
-
-fn slice<'a>(source: &'a str, diag: &Diagnostic) -> &'a str {
-    &source[diag.span.clone()]
 }
 
 /// Byte offset of the `n`th (0-based) occurrence of `needle`.
@@ -307,36 +296,6 @@ fn di_6_distinct_header_directives_are_not_duplicates() {
     );
     let found = of_code(&src, DiagnosticCode::DuplicateHeader);
     assert!(found.is_empty(), "got {found:#?}");
-}
-
-/// The shipped examples must stay clean. They are the corpus a
-/// false-positive here would break loudest.
-#[test]
-fn di_7_shipped_examples_declare_no_duplicates() {
-    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("..")
-        .join("..")
-        .join("examples");
-    let mut checked = 0;
-    for entry in std::fs::read_dir(&dir).expect("read examples dir") {
-        let path = entry.expect("dir entry").path();
-        if path.extension().is_none_or(|e| e != "crn") {
-            continue;
-        }
-        let src = std::fs::read_to_string(&path).expect("read example");
-        let found: Vec<_> = diagnose(&src)
-            .into_iter()
-            .filter(|d| {
-                matches!(
-                    d.code,
-                    DiagnosticCode::DuplicateItem | DiagnosticCode::DuplicateHeader
-                )
-            })
-            .collect();
-        assert!(found.is_empty(), "{}: got {found:#?}", path.display());
-        checked += 1;
-    }
-    assert!(checked > 0, "no examples were checked in {}", dir.display());
 }
 
 fn resolved(source: &str) -> (cairn_lang_core::resolve::Resolution, BlockArrayIr) {

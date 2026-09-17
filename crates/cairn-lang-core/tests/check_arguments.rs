@@ -5,18 +5,11 @@
 //! author eventually saw was a `W_DEFERRED_MEMBER` naming the argument that
 //! is now absent rather than the one that is wrong.
 
+use cairn_lang_core::Diagnostic;
 use cairn_lang_core::intent::{MemberRole, UNIVERSAL_ARGUMENTS, known_keywords, role_of};
-use cairn_lang_core::{Diagnostic, check, lower, parse};
 
-fn diagnose(source: &str) -> Vec<Diagnostic> {
-    let module = parse(source).unwrap_or_else(|e| panic!("parse failed: {e}\nsource:\n{source}"));
-    let ir = lower(&module);
-    check(&module, &ir, None)
-}
-
-fn codes(source: &str) -> Vec<&'static str> {
-    diagnose(source).iter().map(|d| d.code.as_str()).collect()
-}
+mod common;
+use common::{codes, diagnose};
 
 /// The one finding `source` is expected to raise, or a panic naming what it
 /// raised instead.

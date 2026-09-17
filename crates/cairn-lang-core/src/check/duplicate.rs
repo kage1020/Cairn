@@ -53,7 +53,7 @@ pub(super) fn run(module: &Module, ir: &IntentModule, sink: &mut DiagnosticSink)
         match item {
             Item::Theme { body, .. } => check_theme_body(body, sink),
             Item::Def { args, body, .. } | Item::Struct { args, body, .. } => {
-                check_header_args(args, sink);
+                check_arg_keys(args, ArgScope::Header, sink);
                 check_body(body, sink);
             }
             Item::Site { body, .. } => check_body(body, sink),
@@ -104,10 +104,7 @@ fn check_headers(headers: &[Header], sink: &mut DiagnosticSink) {
                 span,
                 primary: format!("`{directive}` is declared more than once"),
                 notes: vec![
-                    DiagnosticNote {
-                        span: Some(first_span.clone()),
-                        message: "first declaration here".into(),
-                    },
+                    first_declaration_note(first_span),
                     DiagnosticNote {
                         span: None,
                         message: format!(
@@ -147,10 +144,7 @@ fn check_item_names(items: &[Item], sink: &mut DiagnosticSink) {
                 span,
                 primary: format!("`{keyword} {name}` is declared more than once"),
                 notes: vec![
-                    DiagnosticNote {
-                        span: Some(first_span.clone()),
-                        message: "first declaration here".into(),
-                    },
+                    first_declaration_note(first_span),
                     DiagnosticNote {
                         span: None,
                         message: repair_advice(kind, name),
@@ -196,10 +190,7 @@ fn check_theme_body(body: &[ThemeRule], sink: &mut DiagnosticSink) {
                         code: DiagnosticCode::DuplicateSlot,
                         span: span.clone(),
                         primary: format!("`slot {slot}` is declared more than once"),
-                        notes: vec![DiagnosticNote {
-                            span: Some(first_span.clone()),
-                            message: "first declaration here".into(),
-                        }],
+                        notes: vec![first_declaration_note(first_span)],
                         data: None,
                     });
                 } else {
@@ -209,8 +200,8 @@ fn check_theme_body(body: &[ThemeRule], sink: &mut DiagnosticSink) {
             ThemeRule::Selector {
                 attrs, bindings, ..
             } => {
-                check_arg_list(attrs, sink);
-                check_arg_list(bindings, sink);
+                check_arg_keys(attrs, ArgScope::List, sink);
+                check_arg_keys(bindings, ArgScope::List, sink);
             }
         }
     }
@@ -240,7 +231,7 @@ struct SelectorGroup<'a> {
 /// What the IR adds is the shape `resolve` matches on, so "these two rows
 /// select the same members" is answered by the matcher's own rule instead
 /// of a second copy of it written over `Vec<Arg>`. A key repeated *inside*
-/// one row is a different scope and stays with [`check_arg_list`], which
+/// one row is a different scope and stays with [`check_arg_keys`], which
 /// runs over the same rows from the AST side.
 ///
 /// Where the rest of the pass points its note at the *first* declaration,
@@ -348,51 +339,53 @@ fn duplicate_selector_diag(
     }
 }
 
-/// Header-args scope: emit `E_DUPLICATE_SIZE` for repeated `size=`, and
-/// `E_DUPLICATE_ARG` for any other repeated key.
-fn check_header_args(args: &[Arg], sink: &mut DiagnosticSink) {
+/// Which arg list a repeated key sits in, which decides how it is reported.
+#[derive(Clone, Copy)]
+enum ArgScope {
+    /// A `struct` / `def` header: repeated `size=` is `E_DUPLICATE_SIZE`,
+    /// any other repeated key `E_DUPLICATE_ARG`.
+    Header,
+    /// Any other arg list: every repeated key is `E_DUPLICATE_ARG`.
+    List,
+}
+
+fn check_arg_keys(args: &[Arg], scope: ArgScope, sink: &mut DiagnosticSink) {
     let mut seen: IndexMap<String, Span> = IndexMap::new();
     for arg in args {
-        if let Some(first_span) = seen.get(&arg.key) {
-            let code = if arg.key == "size" {
-                DiagnosticCode::DuplicateSize
-            } else {
-                DiagnosticCode::DuplicateArg
-            };
-            sink.push(Diagnostic {
-                code,
-                span: arg.span.clone(),
-                primary: format!("`{}=` is declared more than once in this header", arg.key),
-                notes: vec![DiagnosticNote {
-                    span: Some(first_span.clone()),
-                    message: "first declaration here".into(),
-                }],
-                data: None,
-            });
-        } else {
+        let Some(first_span) = seen.get(&arg.key) else {
             seen.insert(arg.key.clone(), arg.span.clone());
-        }
+            continue;
+        };
+        let (code, primary) = match scope {
+            ArgScope::Header => (
+                if arg.key == "size" {
+                    DiagnosticCode::DuplicateSize
+                } else {
+                    DiagnosticCode::DuplicateArg
+                },
+                format!("`{}=` is declared more than once in this header", arg.key),
+            ),
+            ArgScope::List => (
+                DiagnosticCode::DuplicateArg,
+                format!("`{}=` is declared more than once", arg.key),
+            ),
+        };
+        sink.push(Diagnostic {
+            code,
+            span: arg.span.clone(),
+            primary,
+            notes: vec![first_declaration_note(first_span)],
+            data: None,
+        });
     }
 }
 
-/// Non-header arg list scope: every duplicate key is `E_DUPLICATE_ARG`.
-fn check_arg_list(args: &[Arg], sink: &mut DiagnosticSink) {
-    let mut seen: IndexMap<String, Span> = IndexMap::new();
-    for arg in args {
-        if let Some(first_span) = seen.get(&arg.key) {
-            sink.push(Diagnostic {
-                code: DiagnosticCode::DuplicateArg,
-                span: arg.span.clone(),
-                primary: format!("`{}=` is declared more than once", arg.key),
-                notes: vec![DiagnosticNote {
-                    span: Some(first_span.clone()),
-                    message: "first declaration here".into(),
-                }],
-                data: None,
-            });
-        } else {
-            seen.insert(arg.key.clone(), arg.span.clone());
-        }
+/// The note every duplicate in this pass carries, pointing at the
+/// occurrence that stands.
+fn first_declaration_note(first_span: &Span) -> DiagnosticNote {
+    DiagnosticNote {
+        span: Some(first_span.clone()),
+        message: "first declaration here".into(),
     }
 }
 
@@ -405,13 +398,12 @@ fn check_body(body: &[Statement], sink: &mut DiagnosticSink) {
             args,
             selector,
             children,
-            span,
             ..
         } = stmt
         {
-            check_arg_list(args, sink);
+            check_arg_keys(args, ArgScope::List, sink);
             if let Some(attrs) = selector {
-                check_arg_list(attrs, sink);
+                check_arg_keys(attrs, ArgScope::List, sink);
             }
             // Hoist the id value (and its span) out of args / selector and
             // diagnose duplicates within this scope. Both kinds of id-bearing
@@ -422,10 +414,7 @@ fn check_body(body: &[Statement], sink: &mut DiagnosticSink) {
                         code: DiagnosticCode::DuplicateId,
                         span: id_span,
                         primary: format!("`id={id}` is declared more than once in this scope"),
-                        notes: vec![DiagnosticNote {
-                            span: Some(first_span.clone()),
-                            message: "first declaration here".into(),
-                        }],
+                        notes: vec![first_declaration_note(first_span)],
                         data: None,
                     });
                 } else {
@@ -433,7 +422,6 @@ fn check_body(body: &[Statement], sink: &mut DiagnosticSink) {
                 }
             }
             // Nested body has its own scope — both for `id=` and for args.
-            let _ = span;
             check_body(children, sink);
         }
     }
@@ -452,10 +440,11 @@ fn extract_id(stmt: &Statement) -> Option<(String, Span)> {
     let Statement::Generic { args, .. } = stmt else {
         return None;
     };
-    args.iter().find_map(label_id)
+    args.iter().find_map(id_declaration)
 }
 
-fn label_id(arg: &Arg) -> Option<(String, Span)> {
+/// The `(label, span)` an `id=` arg declares, or `None` for any other arg.
+fn id_declaration(arg: &Arg) -> Option<(String, Span)> {
     if arg.key != "id" {
         return None;
     }

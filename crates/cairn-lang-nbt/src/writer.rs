@@ -78,48 +78,30 @@ pub(crate) enum Endian {
     Little,
 }
 
-impl Endian {
-    fn write_u16<W: Write>(self, w: &mut W, v: u16) -> std::io::Result<()> {
-        match self {
-            Endian::Big => w.write_all(&v.to_be_bytes()),
-            Endian::Little => w.write_all(&v.to_le_bytes()),
+/// One `write_<scalar>` method per multi-byte scalar type, each emitting
+/// the value in `self`'s byte order.
+macro_rules! scalar_writers {
+    ($($name:ident: $ty:ty),* $(,)?) => {
+        impl Endian {
+            $(
+                fn $name<W: Write>(self, w: &mut W, v: $ty) -> std::io::Result<()> {
+                    match self {
+                        Endian::Big => w.write_all(&v.to_be_bytes()),
+                        Endian::Little => w.write_all(&v.to_le_bytes()),
+                    }
+                }
+            )*
         }
-    }
+    };
+}
 
-    fn write_i16<W: Write>(self, w: &mut W, v: i16) -> std::io::Result<()> {
-        match self {
-            Endian::Big => w.write_all(&v.to_be_bytes()),
-            Endian::Little => w.write_all(&v.to_le_bytes()),
-        }
-    }
-
-    fn write_i32<W: Write>(self, w: &mut W, v: i32) -> std::io::Result<()> {
-        match self {
-            Endian::Big => w.write_all(&v.to_be_bytes()),
-            Endian::Little => w.write_all(&v.to_le_bytes()),
-        }
-    }
-
-    fn write_i64<W: Write>(self, w: &mut W, v: i64) -> std::io::Result<()> {
-        match self {
-            Endian::Big => w.write_all(&v.to_be_bytes()),
-            Endian::Little => w.write_all(&v.to_le_bytes()),
-        }
-    }
-
-    fn write_f32<W: Write>(self, w: &mut W, v: f32) -> std::io::Result<()> {
-        match self {
-            Endian::Big => w.write_all(&v.to_be_bytes()),
-            Endian::Little => w.write_all(&v.to_le_bytes()),
-        }
-    }
-
-    fn write_f64<W: Write>(self, w: &mut W, v: f64) -> std::io::Result<()> {
-        match self {
-            Endian::Big => w.write_all(&v.to_be_bytes()),
-            Endian::Little => w.write_all(&v.to_le_bytes()),
-        }
-    }
+scalar_writers! {
+    write_u16: u16,
+    write_i16: i16,
+    write_i32: i32,
+    write_i64: i64,
+    write_f32: f32,
+    write_f64: f64,
 }
 
 /// Write a root-level named compound in the given byte order.
@@ -238,9 +220,9 @@ fn write_list<W: Write>(w: &mut W, endian: Endian, list: &List) -> Result<(), Nb
 fn write_compound_body<W: Write>(
     w: &mut W,
     endian: Endian,
-    c: &Compound,
+    compound: &Compound,
 ) -> Result<(), NbtIoError> {
-    for (name, tag) in &c.entries {
+    for (name, tag) in &compound.entries {
         write_tag_id(w, tag.type_id())?;
         write_string(w, endian, name)?;
         write_payload(w, endian, tag)?;

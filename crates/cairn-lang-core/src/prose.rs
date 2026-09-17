@@ -20,24 +20,19 @@ use crate::intent::ValueWithSpan;
 /// something was listed, so there is no message to build from nothing, and
 /// the empty string would put that claim in front of the user anyway.
 pub(crate) fn and_list(items: &[String]) -> Option<String> {
-    Some(match items.split_last()? {
-        (last, []) => last.clone(),
-        (last, [only]) => format!("{only} and {last}"),
-        (last, head) => format!("{}, and {last}", head.join(", ")),
-    })
+    join_list(items, "and")
 }
 
 /// Render `items` as an English alternation — `a`, `a or b`, `a, b, or c`.
-///
-/// [`and_list`]'s arities with the other conjunction. Separate rather than
-/// parameterised on the word: a caller picks the conjunction because of what
-/// its sentence claims, and reading `or_list` at the call site is what makes
-/// that claim visible.
 pub(crate) fn or_list(items: &[String]) -> Option<String> {
+    join_list(items, "or")
+}
+
+fn join_list(items: &[String], conjunction: &str) -> Option<String> {
     Some(match items.split_last()? {
         (last, []) => last.clone(),
-        (last, [only]) => format!("{only} or {last}"),
-        (last, head) => format!("{}, or {last}", head.join(", ")),
+        (last, [only]) => format!("{only} {conjunction} {last}"),
+        (last, head) => format!("{}, {conjunction} {last}", head.join(", ")),
     })
 }
 

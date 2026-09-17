@@ -1,0 +1,165 @@
+---
+source: crates/cairn-lang-core/tests/intent_lower.rs
+expression: lower_source(&source)
+---
+semantic_level: grouped
+headers:
+  - kind: Cairn
+    version: "2026.06"
+  - kind: Requires
+    requirement: version>=1.20
+themes:
+  - name: cross
+    slots:
+      wall:
+        kind: Token
+        value: oak_planks
+      door:
+        kind: Token
+        value: oak_door
+    selectors: []
+defs: []
+sites: []
+structs:
+  - name: crossbar
+    size:
+      w: 6
+      h: 4
+    args: {}
+    members:
+      - role:
+          kind: Floor
+        mat_slot: wall
+        intent_state: {}
+      - class: outer
+        role:
+          kind: Walls
+        mat_slot: wall
+        intent_state:
+          height:
+            kind: Int
+            value: 3
+      - id: front
+        role:
+          kind: Door
+        mat_slot: door
+        intent_state:
+          side:
+            kind: Ident
+            value: front
+          at:
+            kind: Ident
+            value: center
+      - id: back
+        role:
+          kind: Door
+        mat_slot: door
+        intent_state:
+          side:
+            kind: Ident
+            value: back
+          at:
+            kind: Ident
+            value: center
+      - id: plate1
+        role:
+          kind: PressurePlate
+        binding:
+          kind: DotRef
+          value:
+            - sig
+            - a
+        intent_state:
+          at:
+            kind: DotRef
+            value:
+              - front
+              - outside
+          offset:
+            kind: Int
+            value: 0
+          y:
+            kind: Int
+            value: 0
+      - id: plate2
+        role:
+          kind: PressurePlate
+        binding:
+          kind: DotRef
+          value:
+            - sig
+            - b
+        intent_state:
+          at:
+            kind: DotRef
+            value:
+              - inside
+              - front
+          offset:
+            kind: Int
+            value: 0
+          y:
+            kind: Int
+            value: 0
+      - role:
+          kind: Door
+        selector:
+          id:
+            kind: Ident
+            value: front
+        intent_state:
+          opened_by:
+            kind: DotRef
+            value:
+              - sig
+              - f1
+      - role:
+          kind: Door
+        selector:
+          id:
+            kind: Ident
+            value: back
+        intent_state:
+          opened_by:
+            kind: DotRef
+            value:
+              - sig
+              - f2
+      - role:
+          kind: Circuit
+        intent_state:
+          region:
+            kind: Ident
+            value: floor
+          void:
+            kind: Int
+            value: 2
+    logic:
+      - lhs:
+          - sig
+          - f1
+        rhs:
+          kind: And
+          value:
+            - kind: Ref
+              value:
+                - sig
+                - a
+            - kind: Ref
+              value:
+                - sig
+                - b
+      - lhs:
+          - sig
+          - f2
+        rhs:
+          kind: Or
+          value:
+            - kind: Ref
+              value:
+                - sig
+                - a
+            - kind: Ref
+              value:
+                - sig
+                - b

@@ -38,6 +38,7 @@ use thiserror::Error;
 
 use crate::bedrock_state::{BedrockStateError, translate_states};
 use crate::data_version::BedrockTarget;
+use crate::dims::dims_to_i32;
 use crate::java_structure::is_concrete_id;
 
 /// A palette entry whose intent was degraded to fit Bedrock — surfaced by the
@@ -93,6 +94,14 @@ pub enum BedrockStructureError {
     },
 }
 
+impl From<crate::dims::DimensionOverflow> for BedrockStructureError {
+    fn from(
+        crate::dims::DimensionOverflow { axis, value }: crate::dims::DimensionOverflow,
+    ) -> Self {
+        Self::DimensionOverflow { axis, value }
+    }
+}
+
 /// Build the unnamed root [`Compound`] for a `.mcstructure` file from a
 /// lowered [`BlockArray`], alongside any [`ParityNote`]s raised while
 /// translating blockstate properties to Bedrock's `states` vocabulary.
@@ -111,22 +120,22 @@ pub enum BedrockStructureError {
 /// [`BedrockStructureError::DimensionOverflow`] when a dimension does not
 /// fit the wire width.
 pub fn build_mcstructure_tag(
-    ba: &BlockArray,
+    block_array: &BlockArray,
     target: &BedrockTarget,
 ) -> Result<(Compound, Vec<ParityNote>), BedrockStructureError> {
     // Ahead of the translation loop, as on the Java side: the check does
     // not depend on anything the loop produces, and a rejected array should
     // cost nothing beyond the walk.
-    if let Some((index, len)) = ba.first_index_outside_palette() {
+    if let Some((index, len)) = block_array.first_index_outside_palette() {
         return Err(BedrockStructureError::PaletteIndexOutOfRange { index, len });
     }
 
     // Translate every palette entry up front: a mapping failure (abstract
     // token, unmapped stateful block) aborts the whole build before any tree
     // is assembled, mirroring the Java backend's fail-loud contract.
-    let mut palette_states: Vec<Compound> = Vec::with_capacity(ba.palette.entries.len());
+    let mut palette_states: Vec<Compound> = Vec::with_capacity(block_array.palette.entries.len());
     let mut notes: Vec<ParityNote> = Vec::new();
-    for entry in &ba.palette.entries {
+    for entry in &block_array.palette.entries {
         if !is_concrete_id(&entry.id) {
             return Err(BedrockStructureError::AbstractPaletteEntry {
                 id: entry.id.clone(),
@@ -142,21 +151,19 @@ pub fn build_mcstructure_tag(
         palette_states.push(translated.states);
     }
 
-    let size_x = dim_to_i32(ba.dims.x, "x")?;
-    let size_y = dim_to_i32(ba.dims.y, "y")?;
-    let size_z = dim_to_i32(ba.dims.z, "z")?;
+    let size = dims_to_i32(&block_array.dims)?;
 
     let mut structure = Compound::new();
-    structure.insert("block_indices", Tag::List(block_indices(ba)));
+    structure.insert("block_indices", Tag::List(block_indices(block_array)));
     structure.insert("entities", Tag::List(List::empty()));
     structure.insert(
         "palette",
-        Tag::Compound(palette_compound(ba, target, palette_states)),
+        Tag::Compound(palette_compound(block_array, target, palette_states)),
     );
 
     let mut root = Compound::new();
     root.insert("format_version", Tag::Int(1));
-    root.insert("size", Tag::List(List::of_ints([size_x, size_y, size_z])));
+    root.insert("size", Tag::List(List::of_ints(size)));
     root.insert("structure", Tag::Compound(structure));
     root.insert(
         "structure_world_origin",
@@ -182,30 +189,27 @@ pub fn write_mcstructure<W: std::io::Write>(
     write_bedrock_uncompressed(writer, "", root)
 }
 
-fn dim_to_i32(value: u32, axis: &'static str) -> Result<i32, BedrockStructureError> {
-    i32::try_from(value).map_err(|_| BedrockStructureError::DimensionOverflow { axis, value })
-}
-
 /// The two `block_indices` layers. Layer 0 is the palette index per
 /// voxel; layer 1 is the co-located (waterlog) layer, `-1`-filled because
 /// Cairn's lowering never authors co-located blocks today.
-fn block_indices(ba: &BlockArray) -> List {
-    let volume = ba.dims.volume();
+fn block_indices(block_array: &BlockArray) -> List {
+    let volume = block_array.dims.volume();
     let mut layer0: Vec<Tag> = Vec::with_capacity(volume);
-    for x in 0..ba.dims.x {
-        for y in 0..ba.dims.y {
-            for z in 0..ba.dims.z {
-                let i = ba
+    for x in 0..block_array.dims.x {
+        for y in 0..block_array.dims.y {
+            for z in 0..block_array.dims.z {
+                let i = block_array
                     .dims
                     .index(x, y, z)
                     .expect("voxel coordinate in dims by construction");
-                layer0.push(Tag::Int(i32::from(ba.voxels[i].0)));
+                layer0.push(Tag::Int(i32::from(block_array.voxels[i].0)));
             }
         }
     }
     let layer1: Vec<Tag> = vec![Tag::Int(-1); volume];
-    // Through the constructor rather than a struct literal: an empty layer
-    // has to declare `TAG_End`, and the literal spelled `3` unconditionally.
+    // The outer list always has two items, so a literal is safe; each layer
+    // goes through `List::of_tags` because an empty one must declare
+    // `TAG_End` rather than `3`.
     List {
         element_type_id: 9,
         items: vec![
@@ -216,24 +220,24 @@ fn block_indices(ba: &BlockArray) -> List {
 }
 
 fn palette_compound(
-    ba: &BlockArray,
+    block_array: &BlockArray,
     target: &BedrockTarget,
     palette_states: Vec<Compound>,
 ) -> Compound {
-    let entries: Vec<Compound> = ba
+    let entries: Vec<Compound> = block_array
         .palette
         .entries
         .iter()
         .zip(palette_states)
         .map(|(state, states)| {
-            let mut c = Compound::new();
-            c.insert("name", Tag::String(state.id.clone()));
+            let mut compound = Compound::new();
+            compound.insert("name", Tag::String(state.id.clone()));
             // Bedrock `states` translated from the Java properties by
             // `build_mcstructure_tag`; an empty compound for a bare block
             // (the game still expects the key).
-            c.insert("states", Tag::Compound(states));
-            c.insert("version", Tag::Int(target.block_version));
-            c
+            compound.insert("states", Tag::Compound(states));
+            compound.insert("version", Tag::Int(target.block_version));
+            compound
         })
         .collect();
 

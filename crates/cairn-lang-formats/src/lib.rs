@@ -9,6 +9,7 @@
 pub mod bedrock_state;
 pub mod bedrock_structure;
 pub mod data_version;
+mod dims;
 pub mod java_structure;
 pub mod portability;
 pub mod registry;

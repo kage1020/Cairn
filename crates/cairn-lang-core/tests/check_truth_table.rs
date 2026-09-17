@@ -15,8 +15,11 @@
 //! describe a circuit that cannot exist, so that is an error again, while
 //! two that agree cost nothing but the line.
 
+use cairn_lang_core::Diagnostic;
 use cairn_lang_core::check::{DiagnosticData, Severity};
-use cairn_lang_core::{Diagnostic, check, lower, parse};
+
+mod common;
+use common::{codes, diagnose};
 
 fn table(inputs: &str, rows: &str) -> String {
     format!("struct s size=3x3\n  assert truth({inputs} -> sig.o) {{ {rows} }}\n")
@@ -28,20 +31,10 @@ fn complete_plus(extra: &str) -> String {
     table("sig.a, sig.b", &format!("{extra}; 01->0; 10->0; 11->0"))
 }
 
-fn findings(source: &str) -> Vec<Diagnostic> {
-    let module = parse(source).expect("the fixtures all parse");
-    let ir = lower(&module);
-    check(&module, &ir, None)
-}
-
-fn codes(source: &str) -> Vec<&'static str> {
-    findings(source).iter().map(|d| d.code.as_str()).collect()
-}
-
 /// The one finding a source is expected to raise, with nothing else
 /// alongside it — the count is part of what these tests pin.
 fn only(source: &str) -> Diagnostic {
-    let found = findings(source);
+    let found = diagnose(source);
     assert_eq!(
         found.len(),
         1,
@@ -186,7 +179,7 @@ fn a_pattern_assigned_the_same_output_twice_is_a_warning() {
 #[test]
 fn a_repeat_is_judged_against_the_first_row_with_its_pattern() {
     let source = complete_plus("00->0; 00->1; 00->0");
-    let found = findings(&source);
+    let found = diagnose(&source);
     assert_eq!(
         found.iter().map(|d| d.code.as_str()).collect::<Vec<_>>(),
         ["E_TRUTH_TABLE_CONFLICT", "W_TRUTH_TABLE_DUPLICATE_ROW"],
@@ -267,7 +260,7 @@ fn the_sample_says_it_is_a_sample_only_when_it_is_one() {
 /// inside the range of the table-level one.
 #[test]
 fn a_repeated_row_leaves_the_combination_it_repeats_uncovered() {
-    let found = findings(&table("sig.a, sig.b", "00->0; 00->0"));
+    let found = diagnose(&table("sig.a, sig.b", "00->0; 00->0"));
     assert_eq!(
         found.iter().map(|d| d.code.as_str()).collect::<Vec<_>>(),
         ["W_TRUTH_TABLE_PARTIAL", "W_TRUTH_TABLE_DUPLICATE_ROW"],

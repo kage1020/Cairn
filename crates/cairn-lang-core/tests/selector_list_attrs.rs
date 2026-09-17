@@ -11,17 +11,10 @@
 //! too narrow" rather than "this attribute type cannot match".
 
 use cairn_lang_core::ast::ValueKind;
-use cairn_lang_core::{DiagnosticCode, Severity, check, lower, parse, resolve};
+use cairn_lang_core::{DiagnosticCode, Severity, lower, parse, resolve};
 
-fn diagnose(source: &str) -> Vec<cairn_lang_core::Diagnostic> {
-    let module = parse(source).unwrap_or_else(|e| panic!("parse failed: {e}\nsource:\n{source}"));
-    let ir = lower(&module);
-    check(&module, &ir, None)
-}
-
-fn codes(source: &str) -> Vec<&'static str> {
-    diagnose(source).iter().map(|d| d.code.as_str()).collect()
-}
+mod common;
+use common::{codes, diagnose};
 
 /// The `key=value` bindings a matching theme selector injected, for every
 /// member of every scope.

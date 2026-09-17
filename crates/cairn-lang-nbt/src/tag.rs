@@ -173,41 +173,28 @@ mod tests {
     }
 
     #[test]
-    fn empty_list_carries_end_element_id() {
-        let l = List::empty();
-        assert_eq!(l.element_type_id, 0);
-        assert!(l.items.is_empty());
-    }
-
-    #[test]
-    fn of_ints_sets_int_element_id() {
-        let l = List::of_ints([1, 2, 3]);
-        assert_eq!(l.element_type_id, 3);
-        assert_eq!(l.items.len(), 3);
-    }
-
-    #[test]
-    fn of_compounds_sets_compound_element_id() {
-        let l = List::of_compounds(vec![Compound::new(), Compound::new()]);
-        assert_eq!(l.element_type_id, 10);
-        assert_eq!(l.items.len(), 2);
-    }
-
-    #[test]
-    fn a_list_built_from_nothing_declares_end_whatever_built_it() {
-        // The element id is a wire field, and for an empty list the spec
+    fn a_list_declares_the_element_id_of_what_built_it() {
+        // The element id is a wire field. Given items, each constructor
+        // declares the id of what it holds. For an empty list the spec
         // fixes it at 0 (`TAG_End`) — the doc above says so and
-        // `List::empty` writes it. A constructor that knows what it *would*
-        // have held still has nothing to declare, so the three routes to an
-        // empty list have to agree; a reader that trusts the id would
-        // otherwise see three different answers for the same list.
-        for (label, list) in [
-            ("empty", List::empty()),
-            ("of_ints", List::of_ints([])),
-            ("of_compounds", List::of_compounds(vec![])),
+        // `List::empty` writes it — and a constructor that knows what it
+        // *would* have held still has nothing to declare, so the three
+        // routes to an empty list have to agree; a reader that trusts the
+        // id would otherwise see three different answers for the same list.
+        for (label, list, element_type_id, len) in [
+            ("empty", List::empty(), 0, 0),
+            ("of_ints of nothing", List::of_ints([]), 0, 0),
+            ("of_compounds of nothing", List::of_compounds(vec![]), 0, 0),
+            ("of_ints", List::of_ints([1, 2, 3]), 3, 3),
+            (
+                "of_compounds",
+                List::of_compounds(vec![Compound::new(), Compound::new()]),
+                10,
+                2,
+            ),
         ] {
-            assert!(list.items.is_empty(), "{label} should be empty");
-            assert_eq!(list.element_type_id, 0, "{label} element id");
+            assert_eq!(list.element_type_id, element_type_id, "{label} element id");
+            assert_eq!(list.items.len(), len, "{label} length");
         }
     }
 

@@ -7,27 +7,11 @@
 //! per primitive, topological ordering across out-of-order declarations,
 //! and cascade-suppression so a single root cause fires one diagnostic.
 
-use std::path::PathBuf;
-
 use cairn_lang_core::check::Severity;
-use cairn_lang_core::{lower, parse};
-use cairn_lang_redstone::{DiagnosticCode, GateKind, ScopeKind, SignalRef, synthesize};
+use cairn_lang_redstone::{DiagnosticCode, GateKind, ScopeKind, SignalRef};
 
-/// Load `examples/<name>` relative to the workspace root.
-fn load_example(name: &str) -> String {
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("..")
-        .join("..")
-        .join("examples")
-        .join(name);
-    std::fs::read_to_string(&path).unwrap_or_else(|err| panic!("read {}: {err}", path.display()))
-}
-
-fn synth_source(source: &str) -> cairn_lang_redstone::SynthOutput {
-    let module = parse(source).expect("parse");
-    let intent = lower(&module);
-    synthesize(&intent)
-}
+mod common;
+use common::{load_example, synth_source};
 
 fn count_code(out: &cairn_lang_redstone::SynthOutput, code: DiagnosticCode) -> usize {
     out.diagnostics.iter().filter(|d| d.code == code).count()

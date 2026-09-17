@@ -246,21 +246,24 @@ fn join_properties(properties: &IndexMap<String, String>) -> String {
 }
 
 #[cfg(test)]
+pub(crate) fn props<const N: usize>(pairs: [(&str, &str); N]) -> IndexMap<String, String> {
+    pairs
+        .into_iter()
+        .map(|(k, v)| (k.to_owned(), v.to_owned()))
+        .collect()
+}
+
+/// Stair properties in the `facing` / `half` / `shape` insertion order the
+/// lowering uses, so `translate_states` sees the same key stream as at
+/// runtime.
+#[cfg(test)]
+pub(crate) fn stair_props(facing: &str, half: &str, shape: &str) -> IndexMap<String, String> {
+    props([("facing", facing), ("half", half), ("shape", shape)])
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
-
-    fn props<const N: usize>(pairs: [(&str, &str); N]) -> IndexMap<String, String> {
-        pairs
-            .into_iter()
-            .map(|(k, v)| (k.to_owned(), v.to_owned()))
-            .collect()
-    }
-
-    fn stair_props(facing: &str, half: &str, shape: &str) -> IndexMap<String, String> {
-        // Preserve the facing / half / shape insertion order the lowering
-        // uses so `translate_states` sees the same key stream at runtime.
-        props([("facing", facing), ("half", half), ("shape", shape)])
-    }
 
     #[test]
     fn bare_block_has_empty_states_and_no_degradation() {

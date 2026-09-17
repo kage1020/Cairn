@@ -1,0 +1,156 @@
+---
+source: crates/cairn-lang-core/tests/parse_examples.rs
+expression: module
+---
+headers:
+  - kind: Cairn
+    version: "2026.06"
+  - kind: Requires
+    requirement: version>=1.20
+items:
+  - kind: Def
+    name: cottage
+    args:
+      - key: size
+        value:
+          kind: Size
+          value:
+            w: 3
+            h: 3
+    body:
+      - kind: Generic
+        keyword: floor
+        args:
+          - key: id
+            value:
+              kind: Ident
+              value: floor
+          - key: mat_slot
+            value:
+              kind: Ident
+              value: floor
+      - kind: Generic
+        keyword: walls
+        args:
+          - key: id
+            value:
+              kind: Ident
+              value: walls
+          - key: class
+            value:
+              kind: Ident
+              value: outer
+          - key: mat_slot
+            value:
+              kind: Ident
+              value: wall
+          - key: height
+            value:
+              kind: Int
+              value: 3
+      - kind: Generic
+        keyword: door
+        args:
+          - key: id
+            value:
+              kind: Ident
+              value: east_corner
+          - key: side
+            value:
+              kind: Ident
+              value: front
+          - key: at
+            value:
+              kind: Ident
+              value: right
+      - kind: Generic
+        keyword: door
+        args:
+          - key: id
+            value:
+              kind: Ident
+              value: west_corner
+          - key: side
+            value:
+              kind: Ident
+              value: front
+          - key: at
+            value:
+              kind: Ident
+              value: left
+  - kind: Theme
+    name: medieval
+    body:
+      - kind: Slot
+        slot: floor
+        value:
+          kind: Token
+          value: oak_planks
+      - kind: Slot
+        slot: wall
+        value:
+          kind: Token
+          value: cobblestone
+  - kind: Site
+    name: duo
+    body:
+      - kind: Generic
+        keyword: place
+        args:
+          - key: id
+            value:
+              kind: Ident
+              value: west
+          - key: use
+            value:
+              kind: Ident
+              value: cottage
+          - key: theme
+            value:
+              kind: Ident
+              value: medieval
+          - key: at
+            value:
+              kind: Ident
+              value: origin
+      - kind: Generic
+        keyword: place
+        args:
+          - key: id
+            value:
+              kind: Ident
+              value: east
+          - key: use
+            value:
+              kind: Ident
+              value: cottage
+          - key: theme
+            value:
+              kind: Ident
+              value: medieval
+          - key: east_of
+            value:
+              kind: Ident
+              value: west
+          - key: gap
+            value:
+              kind: Int
+              value: 5
+      - kind: Generic
+        keyword: connect
+        positional:
+          - kind: DotRef
+            value:
+              - west
+              - east_corner
+          - kind: Ident
+            value: to
+          - kind: DotRef
+            value:
+              - east
+              - west_corner
+        args:
+          - key: path
+            value:
+              kind: Token
+              value: gravel

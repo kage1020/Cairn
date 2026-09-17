@@ -18,19 +18,10 @@
 //! come in mirrored pairs because a rule that always blames the sensor,
 //! or always blames the `logic` line, would satisfy either half alone.
 
-use cairn_lang_core::{lower, parse};
-use cairn_lang_redstone::{Diagnostic, DiagnosticCode, SynthOutput, synthesize};
+use cairn_lang_redstone::{Diagnostic, DiagnosticCode, SynthOutput};
 
-fn synth_source(source: &str) -> SynthOutput {
-    let module = parse(source).expect("parse");
-    let intent = lower(&module);
-    synthesize(&intent)
-}
-
-/// 1-based line of a byte offset, counted the way the source reads.
-fn line_of(source: &str, offset: usize) -> usize {
-    source[..offset].bytes().filter(|b| *b == b'\n').count() + 1
-}
+mod common;
+use common::{line_of, synth_source};
 
 fn drivers_findings(out: &SynthOutput) -> Vec<&Diagnostic> {
     out.diagnostics

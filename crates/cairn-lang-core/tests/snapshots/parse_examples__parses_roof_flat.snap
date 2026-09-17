@@ -1,0 +1,71 @@
+---
+source: crates/cairn-lang-core/tests/parse_examples.rs
+expression: module
+---
+headers:
+  - kind: Cairn
+    version: "2026.06"
+  - kind: Requires
+    requirement: version>=1.20
+items:
+  - kind: Theme
+    name: outpost
+    body:
+      - kind: Slot
+        slot: floor
+        value:
+          kind: Token
+          value: oak_planks
+      - kind: Slot
+        slot: wall
+        value:
+          kind: Token
+          value: cobblestone
+      - kind: Slot
+        slot: roof
+        value:
+          kind: Token
+          value: spruce_planks
+  - kind: Struct
+    name: roof_flat
+    args:
+      - key: size
+        value:
+          kind: Size
+          value:
+            w: 6
+            h: 6
+    body:
+      - kind: Generic
+        keyword: floor
+        args:
+          - key: mat_slot
+            value:
+              kind: Ident
+              value: floor
+      - kind: Generic
+        keyword: walls
+        args:
+          - key: mat_slot
+            value:
+              kind: Ident
+              value: wall
+          - key: height
+            value:
+              kind: Int
+              value: 4
+      - kind: Generic
+        keyword: roof
+        args:
+          - key: kind
+            value:
+              kind: Ident
+              value: flat
+          - key: mat_slot
+            value:
+              kind: Ident
+              value: roof
+          - key: overhang
+            value:
+              kind: Int
+              value: 1

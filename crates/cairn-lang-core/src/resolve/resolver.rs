@@ -63,7 +63,7 @@ use crate::intent::{
     StructIr, ThemeIr, ValueWithSpan, role_of,
 };
 use crate::prose::{and_list, selector_text};
-use crate::suggest::nearest_match;
+use crate::suggest::{did_you_mean_note, nearest_match};
 
 use super::binding::{SelectorMatch, ThemeBinding, TokenKind, classify_token};
 
@@ -321,10 +321,7 @@ pub fn resolve(ir: &IntentModule, edition: Option<Edition>) -> Resolution {
     let mut applied_themes: HashSet<String> = HashSet::new();
     // See [`ResolveCtx::reported_missing`].
     let mut reported_missing: HashSet<String> = HashSet::new();
-    // `(member, theme)` pairs a slot diagnostic has already been pushed
-    // for. A def body is walked once as its own scope and once more per
-    // See [`ResolveCtx::diagnosed`] for what this holds and why it is
-    // written where a diagnostic is pushed.
+    // See [`ResolveCtx::diagnosed`].
     let mut diagnosed: HashSet<(usize, String, String)> = HashSet::new();
 
     let (auto_picked, auto_siblings) = match single_logical.as_deref() {
@@ -586,9 +583,11 @@ fn bind_place_theme(
     let (logical, _) = strip_edition_suffix(written);
     match resolve_theme_reference(themes, written, edition) {
         ThemeReference::Unknown => {
-            diagnostics.push(unresolved_theme_ref_diag(
-                written,
+            diagnostics.push(unresolved_ref_diag(
+                DiagnosticCode::UnresolvedThemeRef,
+                &format!("`theme={written}` is not a declared theme"),
                 span.clone(),
+                written,
                 declared_names.iter().map(String::as_str),
             ));
             None
@@ -881,7 +880,8 @@ fn resolve_site_placements(
             continue;
         };
         let Some(def) = defs.iter().find(|d| d.name == use_name) else {
-            ctx.diagnostics.push(unresolved_place_ref_diag(
+            ctx.diagnostics.push(unresolved_ref_diag(
+                DiagnosticCode::UnresolvedPlaceRef,
                 &format!("`use={use_name}` references an unknown def"),
                 member.span.clone(),
                 use_name,
@@ -998,12 +998,12 @@ fn resolve_connect_row(
         return;
     };
 
-    let mut ok = true;
+    let mut all_ports_valid = true;
     if !validate_port(&from, defs, place_def, diagnostics) {
-        ok = false;
+        all_ports_valid = false;
     }
     if !validate_port(&to, defs, place_def, diagnostics) {
-        ok = false;
+        all_ports_valid = false;
     }
 
     let path = member.intent_state.get("path").cloned();
@@ -1045,7 +1045,7 @@ fn resolve_connect_row(
         });
         return;
     }
-    if !ok {
+    if !all_ports_valid {
         return;
     }
 
@@ -1105,7 +1105,8 @@ fn port_ref_from_value(
     let port_str = port.as_str();
     if !seen_place_ids.contains_key(place_str) {
         let prior: Vec<&str> = seen_place_ids.keys().map(String::as_str).collect();
-        diagnostics.push(unresolved_place_ref_diag(
+        diagnostics.push(unresolved_ref_diag(
+            DiagnosticCode::UnresolvedPlaceRef,
             &format!(
                 "the `{end}` endpoint `{place_str}.{port_str}` does not name a prior place in this site",
                 end = end.label(),
@@ -1182,7 +1183,7 @@ fn validate_port(
         // INVARIANT(structural): `resolve_site_placements` only inserts
         // a `use_name` into `place_def` *after* `defs.iter().find(|d|
         // d.name == use_name)` already returned `Some` in its
-        // `unresolved_place_ref_diag` arm (which `continue`s on miss).
+        // `unresolved_ref_diag` arm (which `continue`s on miss).
         // By construction, every `def_name` reachable here is therefore
         // present in `defs`. A miss is a contract break in
         // `resolve_site_placements`, not an upstream-diagnosed input —
@@ -1208,12 +1209,10 @@ fn validate_port(
         0 => {
             let pool: Vec<&str> = def.members.iter().filter_map(|m| m.id.as_deref()).collect();
             let mut notes = Vec::with_capacity(2);
-            if let Some(suggested) = nearest_match(port.port.as_str(), pool.iter().copied()) {
-                notes.push(DiagnosticNote {
-                    span: None,
-                    message: format!("did you mean `{}.{suggested}`?", port.place),
-                });
-            }
+            notes.extend(
+                nearest_match(port.port.as_str(), pool.iter().copied())
+                    .map(|suggested| did_you_mean_note(&format!("{}.{suggested}", port.place))),
+            );
             notes.push(DiagnosticNote {
                 span: None,
                 message: format!(
@@ -1312,7 +1311,7 @@ fn validate_place_origin(
 
     // Cross-place reference validation: the target must appear before this
     // place in source order so cycles cannot form.
-    let mut ok = true;
+    let mut origin_is_usable = true;
     for (key, value) in [("east_of", east_of), ("north_of", north_of)] {
         let Some(value) = value else {
             continue;
@@ -1323,7 +1322,7 @@ fn validate_place_origin(
                 value.span.clone(),
                 &format!("`{key}=` expects a place id label"),
             ));
-            ok = false;
+            origin_is_usable = false;
             continue;
         };
         if !seen_place_ids.contains_key(target) || Some(target) == place_id {
@@ -1341,10 +1340,10 @@ fn validate_place_origin(
                 target,
                 prior.iter().copied(),
             ));
-            ok = false;
+            origin_is_usable = false;
         }
     }
-    ok
+    origin_is_usable
 }
 
 fn check_unused_defs(defs: &[DefIr], used: &HashSet<String>, diagnostics: &mut Vec<Diagnostic>) {
@@ -1369,21 +1368,19 @@ fn check_unused_defs(defs: &[DefIr], used: &HashSet<String>, diagnostics: &mut V
     }
 }
 
-fn unresolved_place_ref_diag<'a>(
+/// An unresolved reference to a declared name, with a nearest-match
+/// suggestion drawn from `candidates`.
+fn unresolved_ref_diag<'a>(
+    code: DiagnosticCode,
     primary: &str,
     span: Span,
     typo: &str,
     candidates: impl IntoIterator<Item = &'a str>,
 ) -> Diagnostic {
     let mut notes = Vec::new();
-    if let Some(suggested) = nearest_match(typo, candidates) {
-        notes.push(DiagnosticNote {
-            span: None,
-            message: format!("did you mean `{suggested}`?"),
-        });
-    }
+    notes.extend(nearest_match(typo, candidates).map(did_you_mean_note));
     Diagnostic {
-        code: DiagnosticCode::UnresolvedPlaceRef,
+        code,
         span,
         primary: primary.to_owned(),
         notes,
@@ -1391,7 +1388,7 @@ fn unresolved_place_ref_diag<'a>(
     }
 }
 
-/// Same as [`unresolved_place_ref_diag`] but appends an ordering-only note
+/// `E_UNRESOLVED_PLACE_REF` with an appended ordering-only note
 /// for `east_of=` / `north_of=` failures. The nearest-match candidate pool
 /// is restricted to *earlier* place ids in the same site so cycles cannot
 /// form; without the note an ordering miss looks like the suggestion engine
@@ -1402,7 +1399,13 @@ fn unresolved_place_ref_diag_with_ordering_note<'a>(
     typo: &str,
     candidates: impl IntoIterator<Item = &'a str>,
 ) -> Diagnostic {
-    let mut diag = unresolved_place_ref_diag(primary, span, typo, candidates);
+    let mut diag = unresolved_ref_diag(
+        DiagnosticCode::UnresolvedPlaceRef,
+        primary,
+        span,
+        typo,
+        candidates,
+    );
     diag.notes.push(DiagnosticNote {
         span: None,
         message:
@@ -1410,27 +1413,6 @@ fn unresolved_place_ref_diag_with_ordering_note<'a>(
                 .to_owned(),
     });
     diag
-}
-
-fn unresolved_theme_ref_diag<'a>(
-    theme: &str,
-    span: Span,
-    candidates: impl IntoIterator<Item = &'a str>,
-) -> Diagnostic {
-    let mut notes = Vec::new();
-    if let Some(suggested) = nearest_match(theme, candidates) {
-        notes.push(DiagnosticNote {
-            span: None,
-            message: format!("did you mean `{suggested}`?"),
-        });
-    }
-    Diagnostic {
-        code: DiagnosticCode::UnresolvedThemeRef,
-        span,
-        primary: format!("`theme={theme}` is not a declared theme"),
-        notes,
-        data: None,
-    }
 }
 
 /// Validate everything about a `place` row that can be judged from the row
@@ -1525,7 +1507,7 @@ const REQUIRED_PLACE_KEYS: &[(&str, &str)] = &[
 /// key stays in `intent_state` either way. Asking both is what keeps a
 /// mistyped key from being reported as an absent one, which would send the
 /// author to add a key already on the line.
-fn declares(member: &Member, key: &str) -> bool {
+fn member_declares(member: &Member, key: &str) -> bool {
     member.intent_state.contains_key(key) || (key == "id" && member.id.is_some())
 }
 
@@ -1543,7 +1525,7 @@ fn declares(member: &Member, key: &str) -> bool {
 fn incomplete_place_diag(member: &Member, site_name: &str) -> Option<Diagnostic> {
     let missing: Vec<&(&str, &str)> = REQUIRED_PLACE_KEYS
         .iter()
-        .filter(|(key, _)| !declares(member, key))
+        .filter(|(key, _)| !member_declares(member, key))
         .collect();
     let quoted: Vec<String> = missing.iter().map(|(key, _)| format!("`{key}=`")).collect();
     // Returning through `and_list`'s `None` rather than an early `is_empty`
@@ -1930,12 +1912,9 @@ fn unresolved_slot_diag(
     // themes, and proposing a slot from a different theme would point the
     // user at code that wouldn't help.
     let mut notes = Vec::with_capacity(2);
-    if let Some(suggested) = nearest_match(slot, available_slots.keys().map(String::as_str)) {
-        notes.push(DiagnosticNote {
-            span: None,
-            message: format!("did you mean `{suggested}`?"),
-        });
-    }
+    notes.extend(
+        nearest_match(slot, available_slots.keys().map(String::as_str)).map(did_you_mean_note),
+    );
     notes.push(DiagnosticNote {
         span: None,
         message: format!(

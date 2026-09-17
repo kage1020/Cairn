@@ -13,40 +13,22 @@ use cairn_lang_core::ast::ValueKind;
 use cairn_lang_core::intent::{MemberRole, SemanticLevel};
 use cairn_lang_core::{lower, parse};
 
+mod common;
+use common::examples;
+
 fn lower_source(src: &str) -> cairn_lang_core::IntentModule {
     let module = parse(src).unwrap_or_else(|e| panic!("parse failed: {e}"));
     lower(&module)
 }
 
-fn lower_example(filename: &str) -> cairn_lang_core::IntentModule {
-    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("..")
-        .join("..")
-        .join("examples")
-        .join(filename);
-    let source =
-        std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
-    lower_source(&source)
-}
-
+/// One snapshot per shipped example, named `lowers_<stem>` so the fixture
+/// a diff belongs to is in its file name.
 #[test]
-fn lowers_cottage() {
-    insta::assert_yaml_snapshot!(lower_example("cottage.crn"));
-}
-
-#[test]
-fn lowers_themed_tower() {
-    insta::assert_yaml_snapshot!(lower_example("themed-tower.crn"));
-}
-
-#[test]
-fn lowers_village() {
-    insta::assert_yaml_snapshot!(lower_example("village.crn"));
-}
-
-#[test]
-fn lowers_redstone_door() {
-    insta::assert_yaml_snapshot!(lower_example("redstone-door.crn"));
+fn every_shipped_example_lowers_to_its_snapshot() {
+    for (name, source) in examples() {
+        let stem = name.trim_end_matches(".crn").replace('-', "_");
+        insta::assert_yaml_snapshot!(format!("lowers_{stem}"), lower_source(&source));
+    }
 }
 
 #[test]

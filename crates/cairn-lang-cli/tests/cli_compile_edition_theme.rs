@@ -13,16 +13,8 @@ use std::process::Command;
 use flate2::read::GzDecoder;
 use tempfile::TempDir;
 
-fn cargo_bin() -> PathBuf {
-    PathBuf::from(env!("CARGO_BIN_EXE_cairn"))
-}
-
-fn examples_dir() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("..")
-        .join("..")
-        .join("examples")
-}
+mod common;
+use common::{cargo_bin, examples_dir, write_source};
 
 /// Copy `examples/edition-fallback.crn` into a fresh temp dir so a test can
 /// rely on the source's parent being writable and avoid polluting the repo
@@ -310,12 +302,6 @@ fn placed_source(reference: &str, variants: &[&str]) -> String {
          def hut size=4x4:\n\x20\x20floor mat_slot=floor\n\nsite s:\n\
          \x20\x20place id=home use=hut theme={reference} at=origin\n"
     )
-}
-
-fn write_source(dir: &Path, name: &str, body: &str) -> PathBuf {
-    let path = dir.join(name);
-    fs::write(&path, body).expect("write source");
-    path
 }
 
 #[test]

@@ -44,16 +44,23 @@ impl LineIndex {
     /// the final position.
     #[must_use]
     pub fn position(&self, source: &str, byte_offset: usize) -> lsp_types::Position {
-        let clamped = byte_offset.min(source.len());
-        // partition_point returns the count of line starts at or before the
-        // offset; the containing line is the last of those, i.e. count - 1.
-        let line_idx = self.line_starts.partition_point(|&s| s <= clamped) - 1;
+        let (line_idx, clamped) = self.line_of(source, byte_offset);
         let line_start = self.line_starts[line_idx];
         let character = source[line_start..clamped].encode_utf16().count();
         lsp_types::Position {
             line: u32::try_from(line_idx).unwrap_or(u32::MAX),
             character: u32::try_from(character).unwrap_or(u32::MAX),
         }
+    }
+
+    /// The 0-based line containing `byte_offset` (clamped to the end of
+    /// `source`), and the clamped offset.
+    fn line_of(&self, source: &str, byte_offset: usize) -> (usize, usize) {
+        let clamped = byte_offset.min(source.len());
+        // partition_point returns the count of line starts at or before the
+        // offset; the containing line is the last of those, i.e. count - 1.
+        let line_idx = self.line_starts.partition_point(|&s| s <= clamped) - 1;
+        (line_idx, clamped)
     }
 
     /// Convert both ends of a core byte [`Span`] into an
@@ -81,7 +88,8 @@ impl LineIndex {
     /// [`cairn_lang_core::lines::starts`], and includes the empty line
     /// after a trailing terminator — `"abc\n"` has lines 0 and 1.
     ///
-    /// Note the asymmetry with [`LineIndex::offset_of`], which clamps an
+    /// Note the asymmetry with `LineStarts::offset_of` in
+    /// `cairn-lang-core`, which clamps an
     /// out-of-range line to `source.len()` instead. That one converts a
     /// position the *compiler* produced, where a line outside the source
     /// is an internal inconsistency with no client to tell; this one
@@ -105,10 +113,8 @@ impl LineIndex {
 
     /// Byte offset of the end of the line containing `byte_offset` — the
     /// first byte of its terminator, or `source.len()` for the final line.
-    #[must_use]
-    pub fn line_end(&self, source: &str, byte_offset: usize) -> usize {
-        let clamped = byte_offset.min(source.len());
-        let line_idx = self.line_starts.partition_point(|&s| s <= clamped) - 1;
+    fn line_end(&self, source: &str, byte_offset: usize) -> usize {
+        let (line_idx, _) = self.line_of(source, byte_offset);
         // The last line has no terminator to stop before.
         self.line_starts
             .get(line_idx + 1)
@@ -445,8 +451,7 @@ mod tests {
         ] {
             let index = LineIndex::new(source);
             for (offset, _) in source.char_indices().chain([(source.len(), ' ')]) {
-                let start =
-                    index.line_starts[index.line_starts.partition_point(|&s| s <= offset) - 1];
+                let start = index.line_starts[index.line_of(source, offset).0];
                 let end = index.line_end(source, offset);
                 assert!(
                     (start..=source.len()).contains(&end),

@@ -1,17 +1,10 @@
 //! Acceptance tests for the `keyword_allowlist` pass of
 //! `cairn_lang_core::check`.
 
-use cairn_lang_core::{DiagnosticCode, check, lower, parse};
+use cairn_lang_core::DiagnosticCode;
 
-fn diagnose(source: &str) -> Vec<cairn_lang_core::Diagnostic> {
-    let module = parse(source).unwrap_or_else(|e| panic!("parse failed: {e}"));
-    let ir = lower(&module);
-    check(&module, &ir, None)
-}
-
-fn slice<'a>(source: &'a str, diag: &cairn_lang_core::Diagnostic) -> &'a str {
-    &source[diag.span.clone()]
-}
+mod common;
+use common::{diagnose, slice};
 
 #[test]
 fn kw_1_unknown_top_level_keyword_emits_e_unknown_keyword() {

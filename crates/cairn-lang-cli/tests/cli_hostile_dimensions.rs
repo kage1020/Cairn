@@ -22,9 +22,8 @@ use std::time::{Duration, Instant};
 
 use tempfile::TempDir;
 
-fn cargo_bin() -> PathBuf {
-    PathBuf::from(env!("CARGO_BIN_EXE_cairn"))
-}
+mod common;
+use common::cargo_bin;
 
 /// Generous next to the sub-second every legitimate source takes, tight
 /// next to the minutes the unbounded shapes ran for.

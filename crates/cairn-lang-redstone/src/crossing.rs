@@ -2,101 +2,57 @@
 //! legalization).
 //!
 //! Stage 4 of the five-stage place-and-route pipeline `spec/redstone`
-//! §14.5 lays out (Placement → Steiner routing → Delay insertion →
-//! Crossing legalization → Edition legalization). Walks every
-//! [`crate::placement_ir::PlacedCellNode`] in each scope's delayed
-//! Placement IR, rebuilds every net's Steiner tree through
-//! `net_trees` — the same call the routing
-//! and delay passes make, because the routing pass discards its
-//! per-scope occupancy set before yielding the routed IR and storing
-//! wire coords in the shared IR would bloat every JSON dump for every
-//! consumer — and legalizes the coord of every buffer repeater the
-//! delay pass counted.
+//! §14.5 lays out. Rebuilds every net's Steiner tree through the same
+//! call the routing and delay passes make, and fills every cell's and
+//! actuator pad's [`crate::placement_ir::PlacedCellNode::buffer_coords`]
+//! with the coord of each implicit buffer repeater the delay pass
+//! counted.
 //!
-//! The wire itself needs no legalizing here. Two nets on one coord,
-//! or one step apart in one plane, are one strand of dust carrying two
-//! signals, and stage 2 is where that is prevented: each net is routed
-//! around the dust the nets before it laid and around the coords beside
-//! that dust, so a scope that reaches this pass has none to find.
+//! The wire itself needs no legalizing here: stage 2 lays each net round
+//! the dust of the nets before it and the coords beside that dust, so a
+//! scope that reaches this pass has no two signals on one strand. What
+//! is left is the crossing a *repeater* would make by standing on a
+//! coord it does not own, which the delay pass could not see because it
+//! counts repeaters before anything knows where they go.
 //!
-//! What is left for stage 4 is the crossing a *repeater* would make by
-//! standing on a coord it does not own, which the delay pass could not
-//! see because it counts repeaters before anything knows where they go.
-//!
-//! **Implicit buffer repeater coord assignment.** The delay pass
-//!    counted `floor((s - 1) / DUST_ATTENUATION_LIMIT)` buffer
-//!    repeaters per driver segment of length `s` and folded their tick
-//!    contribution into `local_delay_ticks`; this pass materialises the
-//!    concrete coord of each one into
-//!    [`crate::placement_ir::PlacedCellNode::buffer_coords`].
-//!
-//!    A repeater refreshes the dust it stands on, so each one is
-//!    picked off
-//!    `route_to` — the routed path
-//!    from the net's source to *this* sink — at
-//!    `k * DUST_ATTENUATION_LIMIT` (`k = 1..=buffer_count`), and the
-//!    count comes from that same path's length through
-//!    `buffer_count_for_segment`, the function the
-//!    delay pass charged ticks for. Walking the straight line between
-//!    the two instead is what used to put buffers on coords the net
-//!    does not own: the routed path hangs off the trunk laid for a
-//!    nearer sink and goes round whatever stands in its way, so a
-//!    repeater on the straight line stands either in mid-air or on a
-//!    neighbouring net's dust.
-//!
-//!    A candidate is never contested. It is a coord of its own net's
-//!    route, strictly between the two blocks the route runs between,
-//!    and stage 2 gives each net its dust alone — so there is no cell
-//!    body, no pad and no other net's wire for a repeater to land on,
-//!    and nothing for this pass to escape from.
-//!
-//!    Two segments of one net do reach the same candidate: the sinks
-//!    of one net share their prefix, so a coord 15 blocks along one
-//!    route is 15 blocks along the other. Both record it. One
-//!    repeater standing there refreshes both, and
-//!    [`crate::placement_ir::PlacedCellNode::buffer_coords`] is an
-//!    attribution list rather than a block list.
+//! A repeater refreshes the dust it stands on, so each one is picked off
+//! `route_to` — the routed path from the net's source to *this* sink —
+//! at `k * DUST_ATTENUATION_LIMIT`, with the count from that path's
+//! length through `buffer_count_for_segment`, the function the delay
+//! pass charged ticks with. A candidate is never contested: it is a coord
+//! of its own net's route, strictly between the route's ends, and stage
+//! 2 gave that net its dust alone. Two segments of one net do reach the
+//! same candidate (their routes share a prefix); both record it, because
+//! `buffer_coords` is an attribution list rather than a block list.
 //!
 //! Neither [`crate::placement_ir::RouteLayer::Bridge`] nor
-//! [`crate::placement_ir::RouteLayer::Via`] has a producer in this
-//! pass. Bridge coords reach the legalized IR from the routing pass,
-//! whose wire climbs to get past a block or past another net; `Via`
-//! has no producer anywhere, because a climb is a step between two
-//! coords rather than a coord of its own. Both are kept in the enum
-//! for exhaustive matches against §14.5's full vocabulary.
+//! [`crate::placement_ir::RouteLayer::Via`] has a producer here: bridge
+//! coords reach the legalized IR from the routing pass, and `Via` has no
+//! producer anywhere.
 //!
-//! Failed scopes are elided from the output so a `stage 5` consumer
-//! never reads a partially-populated `buffer_coords` — the same
-//! fail-loud policy the routing and delay passes use.
-//!
-//! The crossing pass is one
+//! Failed scopes are elided from the output so a stage-5 consumer never
+//! reads a partially populated `buffer_coords`. The pass is one
 //! [`crate::placement_ir::PlacementPhase::legalize`] transition per
-//! cell, per the producer↔variant table on that enum, carrying the
-//! buffer coords it allocated (each stamped with a
-//! [`crate::placement_ir::CellCoord::layer`]); no new IR type is
-//! introduced, and
-//! [`crate::placement_ir::PlacedCellNode::buffer_coords`] is the
-//! read-only projection of the resulting variant. Both the layer and
-//! the coord vector
-//! serde-skip on their defaults, so a scope whose crossing pass
-//! writes nothing dumps as the JSON its delay-pass input did apart
-//! from the `stage` tag — which is exactly why that tag exists: it
-//! is the only thing telling a consumer this pass ran at all when
-//! there was nothing to legalize (see
-//! [`crate::placement_ir::PlacementStage`]).
+//! cell; no new IR type. Both the layer and the coord vector serde-skip
+//! on their defaults, so a scope with nothing to legalize dumps as its
+//! delay-pass input did apart from the `stage` tag — which is why that
+//! tag exists (see [`crate::placement_ir::PlacementStage`]).
 
 use std::collections::HashMap;
 
 use crate::delay::{DUST_ATTENUATION_LIMIT, buffer_count_for_segment};
-use crate::diagnostic::{Diagnostic, DiagnosticCode};
+use crate::diagnostic::Diagnostic;
 use crate::netlist_ir::NetRef;
+use crate::pass::{
+    OpenScope, Skipped, lay_nets, lower_scopes, missing_region_diagnostic, open_scope,
+    source_of_net,
+};
 use crate::placement_ir::{
     BufferCoord, BufferSegment, CellCoord, CellIdentity, PlacementIr, ScopedPlacementIr,
     ScopedPlacementIrEntry,
 };
-use crate::routing_geometry::{
-    NetTree, Router, block_sites, collect_nets, input_pad, net_trees, unroutable,
-};
+use crate::routing_geometry::{NetTree, Router};
+use crate::saturating_index;
 
 /// Output of a [`compile_crossing`] run.
 ///
@@ -146,28 +102,21 @@ impl CrossingOutput {
 /// outlives one.
 #[must_use]
 pub fn compile_crossing(delayed: &ScopedPlacementIr) -> CrossingOutput {
-    let mut out = CrossingOutput::new();
-    for entry in &delayed.scopes {
-        match legalize_scope(entry) {
-            Ok(ir) => {
-                out.scoped.scopes.push(ScopedPlacementIrEntry {
-                    kind: entry.kind,
-                    name: entry.name.clone(),
-                    ir,
-                });
-            }
-            Err(diagnostic) => out.diagnostics.push(diagnostic),
-        }
-        debug_assert!(
-            out.diagnostics
-                .iter()
-                .all(|d| d.severity() == d.code.severity()),
-            "a diagnostic renders with its code's severity: every producer in \
-             this pass has to agree with `DiagnosticCode::severity`, including \
-             one written after the builders below",
-        );
+    let (scoped, diagnostics) = lower_scopes(delayed, |entry| {
+        legalize_scope(entry).map(|ir| (ir, Vec::new()))
+    });
+    debug_assert!(
+        diagnostics
+            .iter()
+            .all(|d| d.severity() == d.code.severity()),
+        "a diagnostic renders with its code's severity: every producer in \
+         this pass has to agree with `DiagnosticCode::severity`, including \
+         one written after the builders below",
+    );
+    CrossingOutput {
+        scoped,
+        diagnostics,
     }
-    out
 }
 
 /// Result of legalizing one scope: the legalized IR on success, the
@@ -179,74 +128,43 @@ type ScopeLegalization = Result<PlacementIr, Diagnostic>;
 
 fn legalize_scope(entry: &ScopedPlacementIrEntry) -> ScopeLegalization {
     let source = &entry.ir;
-    // Same missing-region policy as `delay::compile_delay`: the
-    // placement pass elides scopes with cells or output drivers but no
-    // region, so a hand-built IR reaching here in that shape is a
-    // caller-side bug — refuse loud with `E_NO_CIRCUIT_REGION` so
-    // downstream consumers see a consistent taxonomy. Scopes with
-    // neither cells nor outputs still pass through so a module
-    // without any redstone survives the crossing pipeline as-is.
-    let Some(region) = source.region.clone() else {
-        if source.cells.is_empty() && source.outputs.is_empty() {
-            return Ok(source.clone());
+    let OpenScope {
+        mut ir,
+        region,
+        cell_coords,
+        blocks,
+    } = match open_scope(entry) {
+        Err(Skipped::Empty) => return Ok(source.clone()),
+        // Same policy as the delay pass: this pass writes `buffer_coords`,
+        // which the phase table promises after stage 4.
+        Err(Skipped::MissingRegion) => {
+            return Err(missing_region_diagnostic(
+                entry,
+                "delayed",
+                "crossing legalization",
+            ));
         }
-        return Err(missing_region_diagnostic(entry));
-    };
-    if source.cells.is_empty() && source.outputs.is_empty() {
-        return Ok(source.clone());
-    }
-
-    let mut ir = source.clone();
-    let cell_coords: Vec<CellCoord> = ir.cells.iter().map(|c| c.coord).collect();
-
-    // Netlist synthesis guarantees the topological invariant
-    // (`NetRef::Cell(j)` inside `cells[i]` satisfies `j < i`), so
-    // panicking loud on an out-of-range access beats silently
-    // sinking into a fall-back coord. Same reasoning as the delay
-    // pass's stricter branch — this pass writes `buffer_coords`, and
-    // the producer↔variant table on `PlacementPhase` promises populated
-    // `buffer_coords` after stage 4, so a silent under-population
-    // would let the downstream voxel lowering read a stage-3 shape
-    // from a stage-4 output.
-    let source_of_net = |net: NetRef| -> CellCoord {
-        match net {
-            NetRef::Input(i) => input_pad(i as usize, &region),
-            NetRef::Cell(j) => *cell_coords.get(j as usize).unwrap_or_else(|| {
-                panic!(
-                    "NetRef::Cell({j}) out of range (cells.len()={}) — topological invariant broken by caller-side hand-built IR",
-                    cell_coords.len(),
-                )
-            }),
-        }
+        Ok(scope) => scope,
     };
 
-    let blocks = block_sites(&ir, &region);
-    let nets = collect_nets(&ir);
     let router = Router::new(&region, &blocks);
-    let trees = net_trees(&nets, &router, source_of_net);
-    // Same re-check the delay pass makes, for the same reason: a
-    // stranded sink's route is one step, so it asks for no repeater and
-    // the legalized dump would claim a circuit that cannot be wired.
-    if let Some(diagnostic) = unroutable(&nets, &trees, entry, &region, source_of_net) {
-        return Err(diagnostic);
-    }
+    let nets = lay_nets(
+        &ir,
+        &router,
+        entry,
+        &region,
+        source_of_net(&region, &cell_coords),
+    )?;
 
-    // Every coord a repeater can be asked to stand on is a coord of
-    // its own net's route, and `net_trees` asserts as it builds that no
-    // net's dust stands on, or one step from, another's — in release,
-    // at the point the coord is claimed. That is what leaves this pass
-    // with a coord to record and no coord to contest, and re-deriving it
-    // here would be asking the same function the same question twice.
-    let allocation = allocate_buffer_coords(&ir, &trees);
+    // Every coord a repeater can be asked to stand on is a coord of its
+    // own net's route, and `net_trees` asserts as it builds that no
+    // net's dust stands on, or one step from, another's. That is what
+    // leaves this pass with a coord to record and no coord to contest.
+    let allocation = allocate_buffer_coords(&ir, &nets.trees);
 
     for (index, (cell, buffers)) in ir.cells.iter_mut().zip(allocation.per_cell).enumerate() {
-        // Loud in release too: `PlacementPhase::legalize_at` panics on
-        // any non-`Delayed` variant, so a caller who chained
-        // `compile_crossing(&legalized.scoped)` (or handed us a
-        // still-`Unrouted` / `Routed` cell) trips a release-panic here
-        // rather than silently producing a stale-but-plausible IR. The
-        // identity rides along so that panic names the offending cell
-        // rather than only the phase it tripped on.
+        // Loud in release too: `legalize_at` panics on any non-`Delayed`
+        // variant, naming the cell that tripped it.
         let identity = CellIdentity::new(index, cell.coord, entry);
         cell.phase.legalize_at(buffers, identity);
     }
@@ -379,7 +297,7 @@ fn allocate_buffer_coords(ir: &PlacementIr, trees: &HashMap<NetRef, NetTree>) ->
 /// block list. `subject` names the segment in the panic message that
 /// guards the index invariant.
 fn buffers_along(route: &[CellCoord], port: BufferSegment, subject: &str) -> Vec<BufferCoord> {
-    let segment = u32::try_from(route.len().saturating_sub(1)).unwrap_or(u32::MAX);
+    let segment = saturating_index(route.len().saturating_sub(1));
     let mut claimed = Vec::new();
     for k in 1..=buffer_count_for_segment(segment) {
         // `route.len() == segment + 1` and `k * DUST_ATTENUATION_LIMIT
@@ -410,44 +328,11 @@ struct BufferAllocation {
     per_output: Vec<Vec<BufferCoord>>,
 }
 
-fn missing_region_diagnostic(entry: &ScopedPlacementIrEntry) -> Diagnostic {
-    let span = entry
-        .ir
-        .cells
-        .first()
-        .map(|c| c.span.clone())
-        .unwrap_or_default();
-    let primary = format!(
-        "delayed netlist for {kind} `{name}` reached crossing legalization carrying cells or output drivers but no `circuit region=<label> void=<N>` reservation — the placement pass should have elided this scope",
-        kind = entry.kind.label(),
-        name = entry.name,
-    );
-    let mut diag = Diagnostic::new(DiagnosticCode::NoCircuitRegion, span, primary);
-    diag = diag.with_footer(
-        "Fix: add a `circuit region=<label> void=<N>` line to the enclosing scope, or run `--stage placement` first to see the underlying error",
-    );
-    diag
-}
-
 #[cfg(test)]
 mod tests {
-    //! Crate-internal unit tests for crossing-legalization behaviours
-    //! that `tests/crossing.rs` cannot reach through synth fixtures
-    //! alone:
-    //! - buffer repeaters at all (needs a segment past 15 blocks,
-    //!   which no example `.crn` has room for);
-    //! - two nets whose shortest routes want one row, which is what
-    //!   stage 2 lays apart and what this pass therefore never has to
-    //!   legalize;
-    //! - the `E_NO_CIRCUIT_REGION` refusal;
-    //! - the topological invariant panic mirroring
-    //!   [`crate::delay::compile_delay`].
-    //!
-    //! Uses crate-internal struct construction (all `PlacedCellNode` /
-    //! `PlacementIr` / `CircuitRegionReservation` fields are `pub`;
-    //! `#[non_exhaustive]` blocks only external crates), keeping the
-    //! integration-test surface in `tests/crossing.rs` focused on
-    //! synth fixtures.
+    //! Crossing-legalization behaviours `tests/crossing.rs` cannot reach
+    //! through synth fixtures: shapes only a hand-built `PlacementIr`
+    //! produces, such as a segment long enough to need a buffer.
 
     use cairn_lang_core::Edition;
     use cairn_lang_core::error::Span;
@@ -462,31 +347,11 @@ mod tests {
     use crate::netlist_ir::{CellPortDriver, NetRef, PortName};
     use crate::placement_ir::{BufferSegment, PlacedOutputNode};
     use crate::placement_ir::{
-        CellCoord, CircuitRegionReservation, PlacedCellNode, PlacementIr, PlacementPhase,
-        RouteLayer, ScopedPlacementIr, ScopedPlacementIrEntry,
+        CellCoord, PlacedCellNode, PlacementIr, PlacementPhase, RouteLayer, ScopedPlacementIr,
     };
     use crate::routing::compile_routing;
     use crate::routing_geometry::{Router, block_sites, collect_nets, input_pad, net_trees};
-
-    fn reservation(width: u32, depth: u32, void: u32) -> CircuitRegionReservation {
-        CircuitRegionReservation {
-            label: "floor".to_owned(),
-            void,
-            width,
-            depth,
-            span: Span::default(),
-        }
-    }
-
-    fn scoped(kind: ScopeKind, name: &str, ir: PlacementIr) -> ScopedPlacementIr {
-        let mut scoped = ScopedPlacementIr::new();
-        scoped.scopes.push(ScopedPlacementIrEntry {
-            kind,
-            name: name.to_owned(),
-            ir,
-        });
-        scoped
-    }
+    use crate::test_fixtures::{reservation, scoped};
 
     fn placed_cell(
         cell: EditionCell,
@@ -1743,8 +1608,8 @@ mod tests {
         use super::{
             BufferSegment, CellCoord, CellPortDriver, Edition, EditionCell, HashSet, NetRef,
             PlacedCellNode, PlacementIr, PlacementPhase, PortName, RouteLayer, Router, ScopeKind,
-            Span, block_sites, collect_nets, compile_crossing, input_pad, net_trees, placed_cell,
-            reservation, scoped,
+            Span, block_sites, collect_nets, compile_crossing, input_pad, net_trees, reservation,
+            scoped,
         };
         use crate::delay::{BUFFER_REPEATER_TICKS, compile_delay};
         use crate::routing::compile_routing;
@@ -1777,20 +1642,6 @@ mod tests {
         /// before the shape changes.
         fn phase4_scope_strategy() -> impl Strategy<Value = Vec<(u32, u32, bool)>> {
             prop::collection::vec((1u32..=99u32, 0u32..8u32, prop::bool::ANY), 1..=3)
-        }
-
-        /// Placate an unused-import lint when the outer `mod tests`
-        /// re-exports items the inner `super::*` glob would otherwise
-        /// re-import; keeps `placed_cell` alive as an intentional
-        /// symbol import for future cases that want the shorter
-        /// helper.
-        #[allow(dead_code)]
-        fn _keep_placed_cell_alive() -> PlacedCellNode {
-            placed_cell(
-                EditionCell::JavaRepeaterOr,
-                CellCoord::new(0, 0, 0),
-                Vec::new(),
-            )
         }
 
         proptest! {

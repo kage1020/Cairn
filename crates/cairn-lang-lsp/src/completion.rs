@@ -193,13 +193,7 @@ fn context_at(source: &str, offset: usize) -> Option<Context> {
     if scan.comment.is_some() || scan.open_string {
         return None;
     }
-    let token_start = line_start
-        + prefix
-            .char_indices()
-            .rev()
-            .take_while(|(_, c)| is_token_char(*c))
-            .last()
-            .map_or(prefix.len(), |(i, _)| i);
+    let token_start = line_start + token_start_of(prefix);
     // The token continues past the cursor: replace all of it, or accepting
     // an item would leave the token's tail glued to the inserted text.
     let token_end = offset
@@ -217,13 +211,7 @@ fn context_at(source: &str, offset: usize) -> Option<Context> {
         return Some(Context::MaterialToken { replace });
     }
     if let Some(head) = before_token.strip_suffix('=') {
-        let key_start = head
-            .char_indices()
-            .rev()
-            .take_while(|(_, c)| is_token_char(*c))
-            .last()
-            .map_or(head.len(), |(i, _)| i);
-        return match &head[key_start..] {
+        return match &head[token_start_of(head)..] {
             "mat_slot" => Some(Context::SlotName { replace }),
             // Other keys take free-form or not-yet-tabled values; offering
             // anything would be an invented vocabulary.
@@ -332,10 +320,20 @@ fn document_slot_names(source: &str) -> Vec<SlotDecl> {
     decls
 }
 
+/// Byte offset where the token that ends `text` begins (`text.len()` when
+/// `text` does not end in a token character).
+fn token_start_of(text: &str) -> usize {
+    text.char_indices()
+        .rev()
+        .take_while(|(_, c)| is_token_char(*c))
+        .last()
+        .map_or(text.len(), |(i, _)| i)
+}
+
 /// Build one [`lsp_types::CompletionItem`] replacing `replace` with `label`.
 /// `order` freezes the server's candidate order against client re-sorting —
 /// closed sets are curated (declaration / catalog order), not alphabetical.
-fn item(
+fn completion_item(
     index: &LineIndex,
     source: &str,
     replace: &Span,
@@ -369,7 +367,7 @@ fn keyword_items<'a>(
     candidates
         .enumerate()
         .map(|(order, (label, detail))| {
-            item(
+            completion_item(
                 index,
                 source,
                 replace,
@@ -402,7 +400,7 @@ fn slot_name_items(
                 Some(theme) => format!("-> {} (theme {theme})", decl.target),
                 None => format!("-> {}", decl.target),
             };
-            item(
+            completion_item(
                 index,
                 source,
                 replace,
@@ -431,6 +429,7 @@ fn material_items(
     let mut items = Vec::new();
     let mut order = 0;
     let mut seen = HashSet::new();
+    let mut resolved_ids = Vec::new();
     for token in java.tokens().chain(bedrock.tokens()) {
         if !seen.insert(token) {
             continue;
@@ -441,7 +440,8 @@ fn material_items(
         let Some(id) = java.lookup_id(token).or_else(|| bedrock.lookup_id(token)) else {
             continue;
         };
-        items.push(item(
+        resolved_ids.push(id);
+        items.push(completion_item(
             index,
             source,
             replace,
@@ -453,10 +453,6 @@ fn material_items(
         order += 1;
     }
     let mut seen_ids = HashSet::new();
-    let resolved_ids = java
-        .tokens()
-        .filter_map(|t| java.lookup_id(t))
-        .chain(bedrock.tokens().filter_map(|t| bedrock.lookup_id(t)));
     for id in resolved_ids {
         if !seen_ids.insert(id) {
             continue;
@@ -464,7 +460,7 @@ fn material_items(
         // The DSL writes built-in canonical tokens without the default
         // namespace (`@oak_planks`); ids from another namespace keep it.
         let label = id.strip_prefix("minecraft:").unwrap_or(id);
-        items.push(item(
+        items.push(completion_item(
             index,
             source,
             replace,
