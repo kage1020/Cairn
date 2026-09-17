@@ -1,23 +1,15 @@
-//! The crate README's subcommand table must name exactly the subcommands the
+//! The crate README's subcommand table names exactly the subcommands the
 //! binary dispatches.
 //!
-//! The README is the front page a crates.io visitor reads, and for a while it
-//! read as a skeleton: a Status line saying every real subcommand returned a
-//! "not implemented yet" error, over a heading that called the table below it
-//! "Subcommands (planned)". By then `parse`, `check`, `info`, `lower`,
-//! `compile`, and `synth` all did their work and several hundred assertions in
-//! this directory held them to it. Nothing failed when each one landed,
-//! because prose has no compiler, and the front page went on telling readers
-//! the compiler did not exist.
+//! Holding the table to that is the point: a subcommand can land without
+//! anything failing, because prose has no compiler, and the front page went on
+//! calling the table "planned" long after the commands under it worked.
 //!
-//! So the table is held to the one fact it is a table *of*, and against the
-//! binary rather than against the `Command` enum: `--help` is the same list a
-//! user sees, arrived at through clap, so a variant that is declared but never
-//! reachable does not count as shipped here either.
-//!
-//! What the row *says* stays prose and stays unchecked — this cannot tell
-//! whether "Runs no check passes" is still true of `cairn parse`. It holds the
-//! inventory, which is the half that went wrong.
+//! The comparison is against `cairn --help` rather than against the `Command`
+//! enum, so a variant that is declared but never reachable does not count as
+//! shipped here either. What a row *says* stays unchecked: nothing here can
+//! tell whether "Runs no check passes" is still true of `cairn parse`. This
+//! holds the inventory, not the prose.
 
 use std::collections::BTreeSet;
 use std::path::PathBuf;
@@ -29,10 +21,14 @@ const BUILTIN: &str = "help";
 
 /// The subcommand names `cairn --help` lists.
 ///
-/// clap prints them one per line under `Commands:`, indented, with the
-/// description following on the same line — descriptions here run to several
-/// hundred characters and wrap, so a continuation line is any line indented
-/// past the name column.
+/// clap prints them under `Commands:`, one per line, indented two spaces, with
+/// the description following on the same line however long it runs — the
+/// `synth` description is a single line of some two thousand characters, since
+/// clap only wraps with its `wrap_help` feature and this crate takes
+/// `features = ["derive"]`. The indent filter therefore matches every line in
+/// the block today, and is kept for the case `wrap_help` is switched on later,
+/// where it is what keeps a wrapped description from being read as a
+/// subcommand.
 fn subcommands_the_binary_offers() -> BTreeSet<String> {
     let output = Command::new(env!("CARGO_BIN_EXE_cairn"))
         .arg("--help")
@@ -53,9 +49,7 @@ fn subcommands_the_binary_offers() -> BTreeSet<String> {
         .lines()
         .filter_map(|line| {
             let indent = line.len() - line.trim_start().len();
-            // clap indents a subcommand by two spaces and wraps its
-            // description well past that.
-            (indent == 2).then(|| line.split_whitespace().next())?
+            line.split_whitespace().next().filter(|_| indent == 2)
         })
         .map(str::to_owned)
         .filter(|name| name != BUILTIN)

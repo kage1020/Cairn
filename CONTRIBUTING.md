@@ -86,26 +86,11 @@ An empty result is the contract.
 
 ### Crate READMEs
 
-Each crate's `README.md` is what crates.io shows, so it is the front page for
-anyone who has never seen the repository. When a stage lands, update that
-crate's README in the same PR — a stage is not shipped while the front page
-still says it is coming.
+Each crate's `README.md` is what crates.io shows, so it is the front page for anyone who has never seen the repository. When a stage lands, update that crate's README in the same PR — a stage is not shipped while the front page still says it is coming.
 
-Two crates keep an inventory the code can be compared against, and both are
-held to it by a test rather than by review: `cairn-lang-core`'s module table
-against the crate's `pub mod` declarations, and `cairn-lang-cli`'s subcommand
-table against what `cairn --help` lists. Add a `pub mod` or a subcommand
-without adding its row and `cargo test --workspace` fails, naming the missing
-one.
+Four crate READMEs keep an inventory the code could be compared against, and two of them are held to it by a test rather than by review: `cairn-lang-core`'s module table against the crate's `pub mod` declarations, and `cairn-lang-cli`'s subcommand table against what `cairn --help` lists. Add a `pub mod` or a subcommand without adding its row and `cargo test --workspace` fails, naming the missing one. The other two — the `## Public API` tables in `cairn-lang-nbt` and `cairn-lang-formats` — are not guarded, so keeping those current is still a matter of remembering.
 
-What those tests cannot read is the prose. A row's description, a "Status"
-paragraph, a heading calling a table *planned*, a "Not yet here" list — all of
-it stayed true only because someone remembered, and for two published crates it
-went on describing an unimplemented skeleton long after the compiler worked.
-When you move something out of "not yet", move it out of the README too. Say
-what ships today; keep what is still ahead in a section of its own, so a reader
-can tell the two apart without running the code.
-
+What no test reads is the prose. A row's description, a "Status" paragraph, a heading calling a table *planned*, a "Not yet here" list — all of it stayed true only because someone remembered, and for two published crates it went on describing an unimplemented skeleton long after the compiler worked. When you move something out of "not yet", move it out of the README too. Say what ships today; keep what is still ahead in a section of its own, so a reader can tell the two apart without running the code.
 
 ## Branches and pull requests
 
