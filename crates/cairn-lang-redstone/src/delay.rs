@@ -22,7 +22,7 @@
 //! wire goes round something, and counting against the route is what
 //! lets stage 4 put every buffer this stage paid for onto the dust it
 //! refreshes. Buffers are counted here and given coords by stage 4; the
-//! two agree by construction through [`buffer_count_for_segment`].
+//! two agree by construction through `buffer_count_for_segment`.
 //!
 //! **`local_delay_ticks` is a local wire cost, not an arrival time.** It
 //! sums the buffers on every net feeding the cell; an arrival time would

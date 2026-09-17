@@ -18,7 +18,7 @@
 //! A repeater refreshes the dust it stands on, so each one is picked off
 //! `route_to` — the routed path from the net's source to *this* sink —
 //! at `k * DUST_ATTENUATION_LIMIT`, with the count from that path's
-//! length through [`buffer_count_for_segment`], the function the delay
+//! length through `buffer_count_for_segment`, the function the delay
 //! pass charged ticks with. A candidate is never contested: it is a coord
 //! of its own net's route, strictly between the route's ends, and stage
 //! 2 gave that net its dust alone. Two segments of one net do reach the
