@@ -23,6 +23,7 @@ use cairn_lang_nbt::{NbtIoError, write_java_gzip};
 use thiserror::Error;
 
 use crate::data_version::JavaTarget;
+use crate::dims::{dim_to_i32, dims_to_i32};
 
 /// Errors raised while serialising a [`BlockArray`] to a Java structure.
 #[derive(Debug, Error)]
@@ -71,6 +72,14 @@ pub enum JavaStructureError {
     },
 }
 
+impl From<crate::dims::DimensionOverflow> for JavaStructureError {
+    fn from(
+        crate::dims::DimensionOverflow { axis, value }: crate::dims::DimensionOverflow,
+    ) -> Self {
+        Self::DimensionOverflow { axis, value }
+    }
+}
+
 /// Build the root [`Compound`] for a Java vanilla structure file from a
 /// lowered [`BlockArray`].
 ///
@@ -89,35 +98,32 @@ pub enum JavaStructureError {
 /// [`JavaStructureError::DimensionOverflow`] when a dimension does not fit
 /// the wire width.
 pub fn build_structure_tag(
-    ba: &BlockArray,
+    block_array: &BlockArray,
     target: &JavaTarget,
 ) -> Result<Compound, JavaStructureError> {
-    for entry in &ba.palette.entries {
+    for entry in &block_array.palette.entries {
         if !is_concrete_id(&entry.id) {
             return Err(JavaStructureError::AbstractPaletteEntry {
                 id: entry.id.clone(),
             });
         }
     }
-    if let Some((index, len)) = ba.first_index_outside_palette() {
+    if let Some((index, len)) = block_array.first_index_outside_palette() {
         return Err(JavaStructureError::PaletteIndexOutOfRange { index, len });
     }
 
-    let size_x = dim_to_i32(ba.dims.x, "x")?;
-    let size_y = dim_to_i32(ba.dims.y, "y")?;
-    let size_z = dim_to_i32(ba.dims.z, "z")?;
+    let size = dims_to_i32(&block_array.dims)?;
 
     let mut root = Compound::new();
-    root.insert("size", Tag::List(List::of_ints([size_x, size_y, size_z])));
-    root.insert("palette", Tag::List(palette_list(&ba.palette.entries)));
-    root.insert("blocks", Tag::List(blocks_list(ba)?));
+    root.insert("size", Tag::List(List::of_ints(size)));
+    root.insert(
+        "palette",
+        Tag::List(palette_list(&block_array.palette.entries)),
+    );
+    root.insert("blocks", Tag::List(blocks_list(block_array)?));
     root.insert("entities", Tag::List(List::empty()));
     root.insert("DataVersion", Tag::Int(target.data_version));
     Ok(root)
-}
-
-fn dim_to_i32(value: u32, axis: &'static str) -> Result<i32, JavaStructureError> {
-    i32::try_from(value).map_err(|_| JavaStructureError::DimensionOverflow { axis, value })
 }
 
 /// Build + gzip-write a [`BlockArray`] to the given writer in one step.
@@ -128,10 +134,10 @@ fn dim_to_i32(value: u32, axis: &'static str) -> Result<i32, JavaStructureError>
 /// gzip encoder raises.
 pub fn write_structure_gzip<W: std::io::Write>(
     writer: &mut W,
-    ba: &BlockArray,
+    block_array: &BlockArray,
     target: &JavaTarget,
 ) -> Result<(), JavaStructureError> {
-    let root = build_structure_tag(ba, target)?;
+    let root = build_structure_tag(block_array, target)?;
     write_compound_gzip(writer, &root)?;
     Ok(())
 }
@@ -194,61 +200,39 @@ impl OutputExt {
 #[must_use]
 pub fn output_filename(source_scope: &str, ext: OutputExt) -> String {
     let ext = ext.as_str();
-    // A canonical walkway scope key carries the full
-    // `walkway::SITE::PLACE.PORT__PLACE.PORT` shape. Detect that here so
-    // we can tell two cases apart:
-    //
-    // - a wire-validated key constructed by `WalkwayScopeKey::from_parts`,
-    //   which must always parse — a parse failure on a `walkway::SITE::...`
-    //   prefix is a contract break in the lowering pass and is surfaced as
-    //   a debug-time panic so the breakage cannot reach `.nbt` filenames
-    //   silently;
-    // - a non-canonical synthetic prefix such as the test fixture
-    //   `walkway::no_site` (no `::SITE::` segment, used to pin the
-    //   generic fallback shape), which falls through to the `.nbt`
-    //   default below alongside any other unrecognised scope.
+    // Only a canonical `walkway::SITE::PLACE.PORT__PLACE.PORT` key is
+    // parsed; a synthetic `walkway::no_site` fixture falls through to the
+    // generic name below with every other unrecognised scope.
     if let Some(rest) = source_scope.strip_prefix("walkway::")
         && rest.contains("::")
     {
         match cairn_lang_core::WalkwayScopeKey::parse(source_scope) {
             Ok(key) => {
-                // Flatten `place.port` separators to `_` for portable
-                // filenames. Going through `WalkwayScopeKey::parts`
-                // rather than a raw `split_once('.')` means the segments
-                // come from the same validated source the lowering pass
-                // uses to construct the key, closing the `port_id`
-                // containing `.` (and `__`) ambiguity at the type
-                // boundary. Known hazard: Cairn ids allow `_`, so two
-                // distinct scopes can still collapse to the same
-                // on-disk name once the `.` separator is replaced with
-                // `_` — `a_b.c__d_e.f` and `a.b_c__d.e_f` both flatten
-                // to `a_b_c__d_e_f.nbt`. Walkway dedup at the IR layer
-                // (`lower_connects` `seen_pairs`) only catches
-                // reversed-endpoint duplicates, not this collision.
-                // Detecting it requires a write-time pass over all
-                // emitted filenames; that lives in the CLI's compile
-                // pipeline. The flatten itself stays here because every
-                // backend (Java now, Bedrock later) shares the same
-                // naming contract.
-                let p = key.parts();
+                // `parts()` splits on the same validated boundaries the
+                // lowering pass built the key from, so a `.` inside a port
+                // id cannot be mistaken for the place/port separator.
+                // Known hazard: ids allow `_`, so `a_b.c__d_e.f` and
+                // `a.b_c__d.e_f` still flatten to one filename; catching
+                // that needs a write-time pass in the CLI.
+                let parts = key.parts();
                 return format!(
                     "{site}_walkway_{from_place}_{from_port}__{to_place}_{to_port}.{ext}",
-                    site = p.site,
-                    from_place = p.from_place,
-                    from_port = p.from_port,
-                    to_place = p.to_place,
-                    to_port = p.to_port,
+                    site = parts.site,
+                    from_place = parts.from_place,
+                    from_port = parts.from_port,
+                    to_place = parts.to_place,
+                    to_port = parts.to_port,
                 );
             }
             Err(e) => {
+                // A canonical prefix that fails to parse is a lowering-pass
+                // contract break; release builds fall through rather than
+                // panic.
                 debug_assert!(
                     false,
                     "output_filename received a `walkway::SITE::*` key that failed to parse \
                      ({source_scope:?}): {e}",
                 );
-                // Release builds: fall through to the generic
-                // `{source_scope}.nbt` below so we never panic in the
-                // wild; the IR contract is a debug-time invariant.
             }
         }
     }
@@ -281,42 +265,40 @@ fn palette_list(entries: &[BlockState]) -> List {
 }
 
 fn palette_entry(state: &BlockState) -> Compound {
-    let mut c = Compound::new();
-    c.insert("Name", Tag::String(state.id.clone()));
+    let mut compound = Compound::new();
+    compound.insert("Name", Tag::String(state.id.clone()));
     if !state.properties.is_empty() {
         let mut props = Compound::new();
         for (k, v) in &state.properties {
             props.insert(k.clone(), Tag::String(v.clone()));
         }
-        c.insert("Properties", Tag::Compound(props));
+        compound.insert("Properties", Tag::Compound(props));
     }
-    c
+    compound
 }
 
-fn blocks_list(ba: &BlockArray) -> Result<List, JavaStructureError> {
+fn blocks_list(block_array: &BlockArray) -> Result<List, JavaStructureError> {
     // The IR stores voxels in (y, z, x) order; emit blocks in the same
     // order so successive compiles produce byte-identical output. AIR cells
     // are included — vanilla mojang structure block output keeps them, and
     // site placement needs them to distinguish "void" from "explicit air"
     // cells.
     //
-    // The per-axis bounds were already validated by `dim_to_i32` in the
-    // caller, so the per-voxel `try_from` here only re-fires when `dims`
-    // itself was already over the wire limit, which we've rejected. We
-    // still surface a `DimensionOverflow` rather than `expect` so a future
-    // direct caller of `blocks_list` cannot panic.
-    let mut entries: Vec<Compound> = Vec::with_capacity(ba.dims.volume());
-    for y in 0..ba.dims.y {
+    // The caller already checked `dims` fits, so these per-voxel
+    // conversions cannot fail; they stay fallible rather than `expect` so
+    // a direct caller of `blocks_list` cannot panic.
+    let mut entries: Vec<Compound> = Vec::with_capacity(block_array.dims.volume());
+    for y in 0..block_array.dims.y {
         let yi = dim_to_i32(y, "y")?;
-        for z in 0..ba.dims.z {
+        for z in 0..block_array.dims.z {
             let zi = dim_to_i32(z, "z")?;
-            for x in 0..ba.dims.x {
+            for x in 0..block_array.dims.x {
                 let xi = dim_to_i32(x, "x")?;
-                let i = ba
+                let i = block_array
                     .dims
                     .index(x, y, z)
                     .expect("voxel coordinate in dims by construction");
-                let palette_index = ba.voxels[i];
+                let palette_index = block_array.voxels[i];
                 let mut entry = Compound::new();
                 entry.insert("state", Tag::Int(i32::from(palette_index.0)));
                 entry.insert("pos", Tag::List(List::of_ints([xi, yi, zi])));
