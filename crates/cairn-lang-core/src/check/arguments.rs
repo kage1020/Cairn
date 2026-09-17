@@ -42,23 +42,29 @@
 //! could not offer the word the author meant.
 //!
 //! The third finding is the vocabulary's second axis. A key the role's list
-//! contains is still read by nothing when a sibling argument's value chose
-//! a lowering rule that does not consult it — `roof kind=gable
-//! slope_to=north` is the instance, and it built a roof that ignored the
-//! direction exactly the way a misspelled key did. It is a warning rather
-//! than a refusal: the key names something real, the rule that reads it is
-//! real, and which of the two arguments the author meant is not this pass's
-//! to decide, so the message names both repair sites.
+//! contains is still read by nothing when a sibling argument chose a
+//! lowering rule that does not consult it — `roof kind=gable
+//! slope_to=front` is the instance, and it built a roof that ignored the
+//! direction exactly the way a misspelled key did. The message names both
+//! repair sites, because which of the two arguments the author meant is not
+//! this pass's to decide; why that makes it a warning where an unknown key
+//! is a refusal is argued once, on [`DiagnosticCode::severity`].
 //!
-//! A selector value naming no rule at all — absent, of another shape, or a
-//! word the dispatch does not know — is not reported here. The member does
-//! not lower, `W_DEFERRED_MEMBER` already says so, and a second finding
-//! about the argument it routed past would be a second bill for one repair.
+//! Where the *selector* names no rule — a word the dispatch does not know,
+//! a value of another shape, or, on an axis with no absent arm, not written
+//! at all — nothing is reported here. That member lowers to nothing and the
+//! pass that tried to draw it says so with `W_DEFERRED_MEMBER`, which is
+//! the same repair; a finding here would bill it twice. It is worth being
+//! exact about which stream that is: the deferral is raised by block-array
+//! lowering, so a `cairn check` with no `--edition` / `--target` runs none
+//! of it and reports nothing at all on such a line. Pinning one of the two
+//! and dropping the other would be the wrong trade — the case the author
+//! most needs told is the one where the member *does* build.
 
 use std::collections::{BTreeSet, HashMap};
 
 use crate::ast::ValueKind;
-use crate::intent::{IntentModule, Member, SelectorArm, SelectorAxis};
+use crate::intent::{IntentModule, Member, SelectorValue};
 use crate::prose::or_list;
 use crate::suggest::nearest_match;
 
@@ -156,80 +162,120 @@ fn check_member(member: &Member, selected: &SelectorKeys<'_>, sink: &mut Diagnos
     }
 }
 
-/// A key in the role's vocabulary that this member's own sibling argument
-/// routed past, if it has one.
+/// A key in the role's vocabulary that this member's own selector routed
+/// past, if it has one.
 ///
 /// `None` covers three different silences, and all three are wanted. The
 /// key may be conditional on no axis, which is the ordinary case. The
 /// selector may name a rule that does read it, which is the working source.
-/// Or the selector may name no rule at all — missing, of another shape, or
-/// a word the dispatch does not know — and then the member lowers to
-/// nothing and `W_DEFERRED_MEMBER` carries the whole repair.
+/// Or the selector may name no rule at all — a word the dispatch does not
+/// know, a value of another shape, or, on an axis with no
+/// [`SelectorValue::Absent`] arm, not written at all — and then the member
+/// lowers to nothing and the `W_DEFERRED_MEMBER` from the pass that tried
+/// to draw it carries the whole repair.
 fn routed_past(member: &Member, key: &str, span: &crate::error::Span) -> Option<Diagnostic> {
     for axis in member.role.conditional_arguments() {
         if !axis.is_conditional(key) {
             continue;
         }
-        let Some(chosen) = member.intent_state.get(axis.selector) else {
-            continue;
+        // Absent is a value here rather than a reason to stop: an axis may
+        // have a rule for the selector not being written, and on a `place`
+        // that rule is the one that reads `gap=`.
+        let written = match member.intent_state.get(axis.selector) {
+            None => None,
+            Some(value) => match &value.value.kind {
+                ValueKind::Ident(name) => Some(name.as_str()),
+                // Written as something that is not an identifier, so it
+                // names no rule however it is spelled.
+                _ => continue,
+            },
         };
-        let ValueKind::Ident(value) = &chosen.value.kind else {
-            continue;
-        };
-        let Some(arm) = axis.arm(value) else {
+        let Some(arm) = axis.arm(written) else {
             continue;
         };
         if arm.reads.contains(&key) {
             continue;
         }
+        // Both renderings are built here, where the arms that read the key
+        // are still in hand, so the message has no invariant left to assert
+        // about a list being non-empty.
+        let reading = axis.read_when(key);
+        let alternatives: Vec<String> = reading
+            .iter()
+            .map(|value| written_as(axis.selector, *value))
+            .collect();
+        let repairs: Vec<String> = reading
+            .iter()
+            .map(|value| repair_phrase(axis.selector, *value))
+            .collect();
+        let (Some(alternatives), Some(repair)) = (or_list(&alternatives), or_list(&repairs)) else {
+            continue;
+        };
         return Some(routed_past_argument(
             member.role.keyword(),
             key,
             span,
-            axis,
-            arm,
+            axis.selector,
+            arm.value,
+            &alternatives,
+            &repair,
         ));
     }
     None
 }
 
-/// A key the role reads under some values of its selector and not under the
-/// one this member wrote.
+/// How the author reaches a rule that reads the key: `` write `kind=shed` ``
+/// for a value, `` drop the `at=` `` for the rule that answers to the
+/// selector not being written at all.
+fn repair_phrase(selector: &str, value: SelectorValue) -> String {
+    match value.ident() {
+        Some(ident) => format!("write `{selector}={ident}`"),
+        None => format!("drop the `{selector}=`"),
+    }
+}
+
+/// How the line reads today, for the clause that quotes it back.
+fn written_as(selector: &str, value: SelectorValue) -> String {
+    match value.ident() {
+        Some(ident) => format!("`{selector}={ident}`"),
+        None => format!("no `{selector}=` at all"),
+    }
+}
+
+/// Build the finding for a key the selected rule does not read.
 ///
-/// Both arguments are named, because either one may be the mistake: the
-/// author meant the rule that reads the key, or meant this rule and the key
-/// is left over. An unknown key has one repair site and this has two, which
-/// is the whole reason it is a warning and not a refusal.
+/// `alternatives` and `repair` arrive already rendered because the arms
+/// that read the key are the caller's to walk; this function turns one arm
+/// and one key into the two sentences the author sees.
 fn routed_past_argument(
     keyword: &str,
     key: &str,
     span: &crate::error::Span,
-    axis: &SelectorAxis,
-    arm: &SelectorArm,
+    selector: &str,
+    chosen: SelectorValue,
+    alternatives: &str,
+    repair: &str,
 ) -> Diagnostic {
-    let selector = axis.selector;
-    let reading: Vec<String> = axis
-        .read_when(key)
-        .iter()
-        .map(|value| format!("`{selector}={value}`"))
-        .collect();
-    // `is_conditional` gated the call, so some arm reads the key and the
-    // list is never empty.
-    let reads = or_list(&reading).unwrap_or_default();
+    // Both repair sites are named because either argument may be the
+    // mistake — which is the reason `DiagnosticCode::severity` gives for
+    // this being a warning where an unknown key is a refusal.
+    let kept = match chosen.ident() {
+        Some(ident) => format!("`{ident}` {keyword}"),
+        None => format!("`{keyword}`"),
+    };
     Diagnostic {
         code: DiagnosticCode::IgnoredArgument,
         span: span.clone(),
         primary: format!(
-            "`{key}=` is an argument `{keyword}` reads only under {reads}, and this one is \
-             `{selector}={}`; the value was ignored",
-            arm.value,
+            "`{key}=` is an argument `{keyword}` reads only with {alternatives}, and this one \
+             is {}; the value was ignored",
+            written_as(selector, chosen),
         ),
         notes: vec![DiagnosticNote {
             span: None,
             message: format!(
-                "either argument may be the repair — write {reads} to have the `{key}=` read, \
-                 or drop `{key}=` and keep the `{}` {keyword} the line already asks for",
-                arm.value,
+                "either argument may be the repair — {repair} to have the `{key}=` read, or \
+                 drop `{key}=` and keep the {kept} the line already asks for",
             ),
         }],
         data: None,

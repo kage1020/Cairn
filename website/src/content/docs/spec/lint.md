@@ -374,23 +374,24 @@ The reverse direction is `E_THEME_SELECTOR_UNMATCHED`. A selector coins words; o
 word the keyword already has is a typo written twice rather than a coinage, and is refused with the
 suggestion.
 
-`W_IGNORED_ARGUMENT` is a **warning**, and covers three things. A `key=` in the vocabulary whose
-value the pass cannot read is dropped and a default put in its place; a `key=` this specification
-defines that no pass reads yet — `window shape=` / `anchor=` and `roof footprint=` / `bounds=` are
-those keys today — is carried into the IR and never consulted; and a `key=` the keyword reads only
-under some values of a sibling argument, on a member whose sibling names another one. The boundary
-is the keyword: a spec-defined key on a keyword the compiler knows is reported this way, while a
-spec-defined *keyword* it does not know is `E_UNKNOWN_KEYWORD` and its arguments are not judged at
-all. All three make the build differ from the source. The rule forbids *silent* substitution, and
-all three are announced. In the second case the gap is the compiler's rather than the source's,
-which is why it is not a refusal. Whether autofix is offered is up to the implementation.
+`W_IGNORED_ARGUMENT` is a **warning**, and covers three things. An **unreadable value**: a `key=`
+in the vocabulary whose value the pass cannot read is dropped and a default put in its place. An
+**unreached key**: a `key=` this specification defines that no pass reads yet — `window shape=` /
+`anchor=` and `roof footprint=` / `bounds=` are those keys today — is carried into the IR and never
+consulted. And a key **routed past**: one the keyword reads only under some ways of writing a
+sibling argument, on a member that writes it another way. The boundary is the keyword: a
+spec-defined key on a keyword the compiler knows is reported this way, while a spec-defined
+*keyword* it does not know is `E_UNKNOWN_KEYWORD` and its arguments are not judged at all. All three
+make the build differ from the source. The rule forbids *silent* substitution, and all three are
+announced. For the unreached key the gap is the compiler's rather than the source's, which is why
+it is not a refusal. Whether autofix is offered is up to the implementation.
 
-The third is the vocabulary's second axis: closed per keyword *and* per the value of the argument
-that selects the lowering rule. `roof slope_to=` is read by the `kind=shed` rule and by none of the
-others, so
+The routed-past shape is the vocabulary's second axis: closed per keyword *and* per the way the
+argument that selects the lowering rule is written. `roof slope_to=` is read by the `kind=shed`
+rule and by none of the others, so
 
 ```
-roof kind=gable slope_to=north
+roof kind=gable slope_to=front
 ```
 
 builds a roof that ignores the direction it was pointed in — the same silent drop a key outside the
@@ -399,11 +400,19 @@ vocabulary makes, one argument down. It stays a warning rather than becoming the
 keyword that reads it, and either the `kind=` is the argument that was meant or the `slope_to=` is
 left over. The message names both sites and picks neither.
 
-Where the selecting argument names no rule at all — absent, or a value the dispatch does not know —
-the member does not lower and `W_DEFERRED_MEMBER` carries the whole repair; a second finding about
-the argument that rule would not have read bills one repair twice. A key another key makes inert
-*without* selecting a rule is a different shape and is not reported today: `window step=` at
-`repeat=1` is a condition on a count rather than on a rule.
+An arm of that axis can also be the selector's *absence*, where that is itself a rule rather than a
+mistake. `place gap=` is the case: a row with no `at=` is placed relative to another and reads the
+distance, and `at=origin` is anchored absolutely and does not, so `at=origin gap=5` is the same
+silent drop ([§9.3.2](components-editing-sites#932-origin-selectors)).
+
+Where the **selector** names no rule at all — a value the dispatch does not know, or, on an axis
+with no absent arm, nothing written — no finding is raised here: that member lowers to nothing and
+`W_DEFERRED_MEMBER` is the whole repair, so a second finding about the argument that rule would not
+have read bills one repair twice. That deferral is raised during block-array lowering, so a `cairn
+check` with no `--edition` / `--target` reports neither ([§11.1](#111-diagnostic-codes)); the case
+that is always reported is the one where the member builds. A key another key makes inert *without*
+selecting a rule is a different shape again and is not reported today: `window step=` at `repeat=1`
+is a condition on a count rather than on a rule.
 
 ## 11.4 Constraint catalog
 

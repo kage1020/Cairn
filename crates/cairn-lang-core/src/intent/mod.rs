@@ -31,7 +31,7 @@ use crate::ast::{DottedRef, Expr, Header, TruthRow, ValueKind};
 use crate::error::Span;
 
 pub use self::keyword_table::{
-    SelectorArm, SelectorAxis, UNIVERSAL_ARGUMENTS, known_keywords, role_of,
+    SelectorArm, SelectorAxis, SelectorValue, UNIVERSAL_ARGUMENTS, known_keywords, role_of,
 };
 pub use self::lower::lower;
 pub(crate) use self::member::ConnectEnd;

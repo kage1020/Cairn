@@ -40,8 +40,7 @@ fn notes(d: &Diagnostic) -> String {
 
 #[test]
 fn a_key_the_role_does_not_read_is_refused() {
-    // The issue's own repro. One letter, and the wall is built without the
-    // height it asked for.
+    // One letter, and the wall is built without the height it asked for.
     let d = only("struct s size=5x5\n  walls class=outer mat_slot=wall hieght=3\n");
     assert_eq!(d.code.as_str(), "E_UNKNOWN_ARGUMENT");
     assert!(d.primary.contains("`hieght=`"), "got: {}", d.primary);
@@ -185,11 +184,11 @@ fn an_argument_the_spec_defines_and_nothing_reads_is_reported_as_ignored() {
 
 #[test]
 fn a_key_a_sibling_argument_routed_past_is_reported_as_ignored() {
-    // The issue's own repro. `slope_to=` is a `roof` argument and lints
-    // clean against the vocabulary; `fill_roof` only consults it for
+    // `slope_to=` is a `roof` argument and lints clean against the
+    // vocabulary; `fill_roof` only consults it for
     // `kind=shed`, so on a gable the direction reaches the IR and is
     // dropped — a roof that ignores the way the author pointed it.
-    let d = only("struct s size=9x9\n  roof kind=gable slope_to=north\n");
+    let d = only("struct s size=9x9\n  roof kind=gable slope_to=front\n");
     assert_eq!(d.code.as_str(), "W_IGNORED_ARGUMENT");
     assert!(d.primary.contains("`slope_to=`"), "got: {}", d.primary);
     assert!(d.primary.contains("`kind=shed`"), "got: {}", d.primary);
@@ -236,19 +235,21 @@ fn the_rule_that_reads_the_argument_lints_clean() {
 fn a_selector_that_names_no_rule_is_not_billed_twice() {
     // Absent: already `W_DEFERRED_MEMBER` from the lowering.
     assert_eq!(
-        codes("struct s size=9x9\n  roof slope_to=north\n"),
+        codes("struct s size=9x9\n  roof slope_to=front\n"),
         Vec::<&str>::new(),
     );
-    // Present and outside the dispatch table: the same deferral.
+    // Present and outside the dispatch table: the same deferral. Spelled
+    // as a word no roof kind could take, so the case cannot quietly become
+    // a known kind the day the dispatch grows one.
     assert_eq!(
-        codes("struct s size=9x9\n  roof kind=dome slope_to=north\n"),
+        codes("struct s size=9x9\n  roof kind=not_a_roof_kind slope_to=front\n"),
         Vec::<&str>::new(),
     );
     // Present and not a word at all. `check::type_mismatch` does not cover
     // `kind=`, so a second finding here would again be the only one the
     // author sees about a member that lowers to nothing.
     assert_eq!(
-        codes("struct s size=9x9\n  roof kind=2 slope_to=north\n"),
+        codes("struct s size=9x9\n  roof kind=2 slope_to=front\n"),
         Vec::<&str>::new(),
     );
 }
@@ -258,7 +259,7 @@ fn a_selector_matched_conditional_key_is_not_reported() {
     // The same widening the unread branch honours: a module that selects on
     // `slope_to=` has something that reads it, whatever `fill_roof` does,
     // and advising removal would break the override.
-    let src = "theme t:\n  slot roof -> @spruce_stairs\n  roof[slope_to=north] -> frame=@spruce_wood\n\nstruct s size=9x9\n  roof kind=gable slope_to=north mat_slot=roof\n";
+    let src = "theme t:\n  slot roof -> @spruce_stairs\n  roof[slope_to=front] -> frame=@spruce_wood\n\nstruct s size=9x9\n  roof kind=gable slope_to=front mat_slot=roof\n";
     assert_eq!(codes(src), Vec::<&str>::new(), "source:\n{src}");
 }
 
@@ -549,30 +550,32 @@ fn the_vocabulary_tables_are_consistent_with_each_other() {
                 "`{keyword}` dispatches on `{}`, which is not one of its arguments",
                 axis.selector,
             );
-            let mut seen: Vec<&str> = Vec::new();
+            let mut seen: Vec<Option<&str>> = Vec::new();
             for arm in axis.arms {
-                assert!(
-                    !seen.contains(&arm.value),
-                    "`{keyword}` lists `{}={}` twice",
-                    axis.selector,
-                    arm.value,
+                // `Absent` is one arm like any other: two of them would be
+                // two rules for the same line.
+                let written = arm.value.ident();
+                let spelled = written.map_or_else(
+                    || format!("no `{}=`", axis.selector),
+                    |value| format!("`{}={value}`", axis.selector),
                 );
-                seen.push(arm.value);
+                assert!(
+                    !seen.contains(&written),
+                    "`{keyword}` lists {spelled} twice",
+                );
+                seen.push(written);
                 for key in arm.reads {
                     assert!(
                         vocabulary.contains(key),
-                        "`{keyword}` says `{}={}` reads `{key}`, which is not one of its arguments",
-                        axis.selector,
-                        arm.value,
+                        "`{keyword}` says {spelled} reads `{key}`, which is not one of its \
+                         arguments",
                     );
                     // A key *nothing* reads is the other finding, and one
                     // key cannot be both: `unread_arguments` says no rule
                     // consults it, and an arm here says one does.
                     assert!(
                         !role.unread_arguments().contains(key),
-                        "`{keyword}` calls `{key}` unread and has `{}={}` read it",
-                        axis.selector,
-                        arm.value,
+                        "`{keyword}` calls `{key}` unread and has {spelled} read it",
                     );
                 }
             }

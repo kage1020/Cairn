@@ -2434,12 +2434,11 @@ fn nonneg_int_or_defer(
     }
 }
 
+/// Free-function spelling of [`Member::ident_value`], which owns what
+/// counts as an identifier value. Kept so the twenty-odd call sites below
+/// read like their `nonneg_int` / `bool_value` neighbours.
 fn ident_value<'a>(member: &'a Member, key: &str) -> Option<&'a str> {
-    let raw = member.intent_state.get(key)?;
-    match &raw.value.kind {
-        ValueKind::Ident(name) => Some(name.as_str()),
-        _ => None,
-    }
+    member.ident_value(key)
 }
 
 fn bool_value(member: &Member, key: &str) -> Option<bool> {
@@ -2978,12 +2977,22 @@ fn fill_roof_flat(
 /// diagnostic phrasing here lets each side stay self-contained.
 fn parse_roof_kind(member: &Member, diagnostics: &mut Vec<Diagnostic>) -> Option<RoofKind> {
     let Some(raw) = ident_value(member, "kind") else {
-        let reason = if member.intent_state.contains_key("kind") {
-            "roof `kind=` must be one of gable, shed, hip, flat"
-        } else {
-            "missing `kind=` (expected one of gable, shed, hip, flat)"
+        // A value of the wrong shape is named by its shape, not by the
+        // closed set: `kind="shed"` spells a kind that is in the set, and
+        // being told the set again answers a question the author did not
+        // ask. `recognize_circuit_region` words the same case the same way.
+        // It matters more since `check::arguments` began deferring to this
+        // finding — a `kind=` naming no rule is where the conditional
+        // argument check stays quiet, so this is the whole repair.
+        let reason = match member.intent_state.get("kind") {
+            Some(raw) => format!(
+                "roof `kind=` must be an identifier naming one of {}, got {}",
+                RoofKind::names(),
+                raw.value.kind_name(),
+            ),
+            None => format!("missing `kind=` (expected one of {})", RoofKind::names()),
         };
-        diagnostics.push(diag_deferred_member_reason(member, reason));
+        diagnostics.push(diag_deferred_member_reason(member, &reason));
         return None;
     };
     if let Some(k) = RoofKind::from_ident(raw) {
@@ -2991,7 +3000,10 @@ fn parse_roof_kind(member: &Member, diagnostics: &mut Vec<Diagnostic>) -> Option
     }
     diagnostics.push(diag_deferred_member_reason(
         member,
-        &format!("unknown roof `kind={raw}` (expected one of gable, shed, hip, flat)"),
+        &format!(
+            "unknown roof `kind={raw}` (expected one of {})",
+            RoofKind::names(),
+        ),
     ));
     None
 }

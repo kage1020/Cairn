@@ -1,9 +1,10 @@
 //! Sentence fragments shared by the diagnostic builders.
 //!
-//! Crate-level rather than inside `check` because two of the three callers
-//! are in `resolve`. One copy per fragment: the arity branches are where a
-//! joined list goes wrong, and the middle arity is the one nobody writes a
-//! test for first — the unbranched `format!("{}, and {last}", head.join(", "))`
+//! Crate-level rather than inside `check` because the callers are split
+//! across `check` and `resolve`. One copy per fragment: the arity branches
+//! are where a joined list goes wrong, and the middle arity is the one
+//! nobody writes a test for first — the unbranched
+//! `format!("{}, and {last}", head.join(", "))`
 //! renders two items as `` `a`, and `b` ``, a serial comma with nothing to
 //! serialise.
 

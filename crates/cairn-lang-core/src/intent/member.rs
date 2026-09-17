@@ -138,6 +138,23 @@ impl Member {
             _ => None,
         }
     }
+
+    /// Read `key=` as a bare identifier, or `None` when the argument is
+    /// absent or its value is of any other shape.
+    ///
+    /// Shared for the same reason [`Self::nonneg_u32`] is. A `kind=` picks
+    /// which lowering rule runs, and `check::arguments` decides from the
+    /// same value which of that rule's arguments it will read — so "what
+    /// counts as naming a rule" has to be one answer. A quoted `kind="shed"`
+    /// is not that identifier in either place: the member does not lower,
+    /// and the check pass leaves the whole line to the deferral.
+    #[must_use]
+    pub fn ident_value(&self, key: &str) -> Option<&str> {
+        match &self.intent_state.get(key)?.value.kind {
+            ValueKind::Ident(name) => Some(name.as_str()),
+            _ => None,
+        }
+    }
 }
 
 /// Which top-level body a member sits in, and so which roles the later

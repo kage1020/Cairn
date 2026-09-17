@@ -67,39 +67,49 @@ pub const UNIVERSAL_ARGUMENTS: &[&str] = &["id", "class", "mat_slot"];
 /// on, because the pass that would read it only runs for some values of
 /// another argument. `roof slope_to=` is the instance: `fill_roof`
 /// dispatches on `kind=` and only the `shed` arm consults the direction, so
-/// `kind=gable slope_to=north` carries it into the IR and drops it — the
+/// `kind=gable slope_to=front` carries it into the IR and drops it — the
 /// same silence a key outside the vocabulary used to build in.
 ///
 /// A relation between two keys does not fit in a flat list, which is why
 /// this is a table of its own rather than a flag on the vocabulary.
 ///
-/// Where the boundary runs: the selector is an argument whose value picks
-/// a *lowering rule*, and its arms are the values that name one. A key
-/// another key makes inert without selecting a rule — `window step=`,
+/// Where the boundary runs: the selector is an argument that picks a
+/// *lowering rule*, and its arms are the ways of writing it that name one.
+/// A key another key makes inert without selecting a rule — `window step=`,
 /// which the stamp loop consults only from the second instance on, so
 /// `repeat=1 step=3` drops the spacing — is a condition on a count rather
 /// than on a rule, and is not this table's shape.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SelectorAxis {
-    /// The argument whose value selects the lowering rule.
+    /// The argument that selects the lowering rule.
     pub selector: &'static str,
-    /// One arm per value of [`Self::selector`] a lowering rule exists for,
-    /// in the order the dispatch writes them.
+    /// One arm per way of writing [`Self::selector`] that a lowering rule
+    /// exists for, in the order the dispatch writes them.
     ///
-    /// A value *outside* this list is deliberately absent rather than
-    /// listed with an empty [`SelectorArm::reads`]: a selector naming no
-    /// rule lowers to nothing at all and is already a `W_DEFERRED_MEMBER`,
-    /// and a second finding about the argument it routed past would be a
-    /// second bill for one repair. Missing entirely is the same case.
+    /// A selector value *outside* this list is deliberately absent rather
+    /// than listed with an empty [`SelectorArm::reads`]: it names no rule,
+    /// so the member lowers to nothing and already earns a
+    /// `W_DEFERRED_MEMBER` from the pass that tried to draw it, and a
+    /// second finding about the argument that rule would not have read
+    /// would be a second bill for one repair.
+    ///
+    /// Absence is not automatically that case, which is why
+    /// [`SelectorValue::Absent`] is an arm rather than the lack of one. On
+    /// a `roof`, no `kind=` means no rule and the deferral owns the line;
+    /// on a `place`, no `at=` is the relative-placement rule, which is
+    /// where `gap=` is read.
     pub arms: &'static [SelectorArm],
 }
 
 impl SelectorAxis {
-    /// The arm a selector value names, or `None` when no lowering rule
+    /// The arm a written selector names, or `None` when no lowering rule
     /// answers to it.
+    ///
+    /// `None` for the value means the selector is not on the line at all,
+    /// which some axes have a rule for and others do not.
     #[must_use]
-    pub fn arm(&self, value: &str) -> Option<&'static SelectorArm> {
-        self.arms.iter().find(|arm| arm.value == value)
+    pub fn arm(&self, value: Option<&str>) -> Option<&'static SelectorArm> {
+        self.arms.iter().find(|arm| arm.value.matches(value))
     }
 
     /// Whether `key` is conditional on this axis at all — some arm reads
@@ -114,9 +124,10 @@ impl SelectorAxis {
         self.arms.iter().any(|arm| arm.reads.contains(&key))
     }
 
-    /// The selector values whose rule reads `key`, in table order.
+    /// The ways of writing the selector whose rule reads `key`, in table
+    /// order.
     #[must_use]
-    pub fn read_when(&self, key: &str) -> Vec<&'static str> {
+    pub fn read_when(&self, key: &str) -> Vec<SelectorValue> {
         self.arms
             .iter()
             .filter(|arm| arm.reads.contains(&key))
@@ -125,16 +136,58 @@ impl SelectorAxis {
     }
 }
 
-/// One value of a [`SelectorAxis`]'s selector, and the conditional
+/// One way of writing a [`SelectorAxis`]'s selector, and the conditional
 /// arguments the rule it selects reads.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SelectorArm {
-    /// The selector value, spelled as the source writes it.
-    pub value: &'static str,
-    /// The keys this rule reads that another rule on the same axis does
-    /// not. Arguments read before the dispatch, by every rule, are not
+    /// How the selector is written to reach this rule.
+    pub value: SelectorValue,
+    /// The keys this rule reads inside itself: everything it consults once
+    /// the dispatch has picked it, whether or not a sibling arm exists.
+    /// Arguments read *before* the dispatch, by every rule alike, are not
     /// listed — see [`SelectorAxis::is_conditional`].
+    ///
+    /// On a one-arm axis that makes every key the rule reads conditional
+    /// on a selector nothing else answers to, so `is_conditional` says
+    /// `true` and the finding can still never fire: any other selector
+    /// value names no rule, and the deferral carries that line. The row is
+    /// written anyway, because the arm that lands beside it is where a key
+    /// this one reads would otherwise go missing in silence.
     pub reads: &'static [&'static str],
+}
+
+/// How a [`SelectorArm`]'s selector is written on the line.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SelectorValue {
+    /// The selector carries this identifier — `kind=shed`.
+    Ident(&'static str),
+    /// The selector is not written at all, and that is itself a rule the
+    /// lowering has: a `place` with no `at=` is placed relative to another,
+    /// which is the only rule that reads `gap=`.
+    Absent,
+}
+
+impl SelectorValue {
+    /// Whether a member that writes `written` (or nothing, for `None`)
+    /// reaches this arm.
+    #[must_use]
+    pub fn matches(self, written: Option<&str>) -> bool {
+        match (self, written) {
+            (Self::Ident(value), Some(name)) => value == name,
+            (Self::Absent, None) => true,
+            _ => false,
+        }
+    }
+
+    /// The identifier this arm answers to, or `None` for
+    /// [`Self::Absent`].
+    #[must_use]
+    pub fn ident(self) -> Option<&'static str> {
+        match self {
+            Self::Ident(value) => Some(value),
+            Self::Absent => None,
+        }
+    }
 }
 
 impl MemberRole {
@@ -252,10 +305,10 @@ impl MemberRole {
     /// build the same voxels. Both directions fail there rather than in a
     /// silent build.
     ///
-    /// A slice, because nothing says a role has only one axis: `kind=` is
-    /// the selector both of today's rows dispatch on, and a second selector
-    /// on the same keyword is another entry here rather than a second shape
-    /// of table. Empty for a role whose vocabulary has no conditional key —
+    /// A slice, because nothing says a role has only one axis: a second
+    /// selector on the same keyword is another entry here rather than a
+    /// second shape of table. Empty for a role whose vocabulary has no
+    /// conditional key —
     /// [`Self::Other`] among them, whose whole line belongs to
     /// `check::keyword_allowlist` and whose arguments are judged against no
     /// vocabulary at all.
@@ -272,19 +325,19 @@ impl MemberRole {
                 selector: "kind",
                 arms: &[
                     SelectorArm {
-                        value: "gable",
+                        value: SelectorValue::Ident("gable"),
                         reads: &[],
                     },
                     SelectorArm {
-                        value: "shed",
+                        value: SelectorValue::Ident("shed"),
                         reads: &["slope_to"],
                     },
                     SelectorArm {
-                        value: "hip",
+                        value: SelectorValue::Ident("hip"),
                         reads: &[],
                     },
                     SelectorArm {
-                        value: "flat",
+                        value: SelectorValue::Ident("flat"),
                         reads: &[],
                     },
                 ],
@@ -301,9 +354,32 @@ impl MemberRole {
             Self::Stair => &[SelectorAxis {
                 selector: "kind",
                 arms: &[SelectorArm {
-                    value: "stairs",
+                    value: SelectorValue::Ident("stairs"),
                     reads: &["side", "half", "facing", "shape", "y"],
                 }],
+            }],
+            // `resolve_place_origin` answers `at=origin` with the world
+            // origin and returns before it reads anything else, so `gap=`
+            // belongs to the other rule: the relative placement a row with
+            // no `at=` asks for. The two origin selectors it reads there,
+            // `east_of=` and `north_of=`, are not listed — writing one
+            // beside `at=` is two origin selectors, which
+            // `E_INVALID_PLACE_ORIGIN` already refuses, and this would be
+            // the second finding for that one repair. `gap=` is not an
+            // origin selector, so nothing else has anything to say about
+            // it.
+            Self::Place => &[SelectorAxis {
+                selector: "at",
+                arms: &[
+                    SelectorArm {
+                        value: SelectorValue::Ident("origin"),
+                        reads: &[],
+                    },
+                    SelectorArm {
+                        value: SelectorValue::Absent,
+                        reads: &["gap"],
+                    },
+                ],
             }],
             Self::Floor
             | Self::Walls
@@ -312,7 +388,6 @@ impl MemberRole {
             | Self::Level
             | Self::PressurePlate
             | Self::Circuit
-            | Self::Place
             | Self::Connect
             | Self::Other(_) => &[],
         }
