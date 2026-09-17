@@ -70,6 +70,7 @@ use crate::logic_ir::{
     GateKind, GateNode, InputPort, LogicIr, OutputPort, ScopeKind, ScopedLogicIr,
     ScopedLogicIrEntry, SignalRef,
 };
+use crate::saturating_index;
 use cairn_lang_core::ast::{DottedRef, Expr, SIGNAL_HEAD, Value, ValueKind};
 use cairn_lang_core::check::Severity;
 use cairn_lang_core::error::Span;
@@ -157,11 +158,7 @@ pub fn synthesize(module: &IntentModule) -> SynthOutput {
 
     let mut out = SynthOutput::default();
     for scope in scopes {
-        match scope {
-            ModuleScope::Struct(s) => lower_struct(s, &mut out),
-            ModuleScope::Def(d) => lower_def(d, &mut out),
-            ModuleScope::Site(s) => lower_site(s, &mut out),
-        }
+        scope.lower(&mut out);
     }
     out
 }
@@ -184,50 +181,47 @@ impl ModuleScope<'_> {
     /// on the by-kind order this function exists to undo.
     fn span(&self) -> (usize, usize) {
         match self {
-            Self::Struct(s) => (s.span.start, s.span.end),
-            Self::Def(d) => (d.span.start, d.span.end),
-            Self::Site(s) => (s.span.start, s.span.end),
+            Self::Struct(struct_ir) => (struct_ir.span.start, struct_ir.span.end),
+            Self::Def(def_ir) => (def_ir.span.start, def_ir.span.end),
+            Self::Site(site_ir) => (site_ir.span.start, site_ir.span.end),
         }
     }
-}
 
-fn lower_struct(s: &StructIr, out: &mut SynthOutput) {
-    let scope = ScopeRef {
-        kind: ScopeKind::Struct,
-        name: &s.name,
-    };
-    let mut collected = ScopeCollected::default();
-    collect_body(&s.members, &s.logic, &s.asserts, scope, &mut collected);
-    finish_scope(scope, collected, out);
-}
-
-fn lower_def(d: &DefIr, out: &mut SynthOutput) {
-    let scope = ScopeRef {
-        kind: ScopeKind::Def,
-        name: &d.name,
-    };
-    let mut collected = ScopeCollected::default();
-    collect_body(&d.members, &d.logic, &d.asserts, scope, &mut collected);
-    finish_scope(scope, collected, out);
-}
-
-fn lower_site(s: &SiteIr, out: &mut SynthOutput) {
-    let mut collected = ScopeCollected::default();
-    // A site body carries `place` / `connect` rows, which never emit sensor
-    // bindings themselves, so in practice only `s.logic` contributes here.
-    // The walk still descends because `collect_body` is shared with the two
-    // scopes that do have members — not because a site may host a fixture:
-    // `check::member_scope` reports `pressure_plate` / `door` written among
-    // a site's rows as `E_MISPLACED_MEMBER`, since nothing lowers them into
-    // a block and a sensor with no block behind it senses nothing. Letting
-    // a site host fixtures for real is a lowering change, and this walk
-    // would already be ready for it.
-    let scope = ScopeRef {
-        kind: ScopeKind::Site,
-        name: &s.name,
-    };
-    collect_body(&s.placements, &s.logic, &s.asserts, scope, &mut collected);
-    finish_scope(scope, collected, out);
+    /// Collect the scope's body and finish it into `out`.
+    ///
+    /// A site's `place` / `connect` rows never emit sensor bindings, so
+    /// only its `logic` contributes; the walk still descends because
+    /// `check::member_scope` is what refuses a fixture written among a
+    /// site's rows, not this pass.
+    fn lower(&self, out: &mut SynthOutput) {
+        let (kind, name, members, logic, asserts) = match self {
+            Self::Struct(struct_ir) => (
+                ScopeKind::Struct,
+                &struct_ir.name,
+                &struct_ir.members,
+                &struct_ir.logic,
+                &struct_ir.asserts,
+            ),
+            Self::Def(def_ir) => (
+                ScopeKind::Def,
+                &def_ir.name,
+                &def_ir.members,
+                &def_ir.logic,
+                &def_ir.asserts,
+            ),
+            Self::Site(site_ir) => (
+                ScopeKind::Site,
+                &site_ir.name,
+                &site_ir.placements,
+                &site_ir.logic,
+                &site_ir.asserts,
+            ),
+        };
+        let scope = ScopeRef { kind, name };
+        let mut collected = ScopeCollected::default();
+        collect_body(members, logic, asserts, scope, &mut collected);
+        finish_scope(scope, collected, out);
+    }
 }
 
 /// Per-scope working set built during the collection pass. Kept separate
@@ -606,50 +600,59 @@ fn signal_value_fix(value: &Value, drop_advice: &str) -> String {
 ///
 /// The tail is what says a signal was meant; the value is what fails to
 /// name one. Reported at the value, because that is the text to change.
-fn diag_tail_names_no_signal(m: &Member, binding: &Value, scope: ScopeRef<'_>) -> Diagnostic {
-    Diagnostic::new(
-        DiagnosticCode::LogicInvalidSignal,
-        binding.span.clone(),
+fn diag_tail_names_no_signal(member: &Member, binding: &Value, scope: ScopeRef<'_>) -> Diagnostic {
+    diag_names_no_signal(
+        member,
+        binding,
         format!(
             "{label} `{keyword}` emits into a signal, but its `->` tail is \
              {found} rather than a name in the `{SIGNAL_HEAD}.` namespace \
              sensors emit into and actuators read from",
             label = scope.label(),
-            keyword = m.role.keyword(),
+            keyword = member.role.keyword(),
             found = binding.describe(),
         ),
-    )
-    .with_note(m.span.clone(), "declared here")
-    .with_footer(signal_value_fix(
-        binding,
         "drop the `->` tail if this sensor drives nothing.",
-    ))
+    )
 }
 
 /// An actuator key on its own host whose value names no signal.
 fn diag_argument_names_no_signal(
-    m: &Member,
+    member: &Member,
     key: &str,
     vspan: &ValueWithSpan,
     scope: ScopeRef<'_>,
 ) -> Diagnostic {
-    Diagnostic::new(
-        DiagnosticCode::LogicInvalidSignal,
-        vspan.span.clone(),
+    diag_names_no_signal(
+        member,
+        &vspan.value,
         format!(
             "{label} `{key}=` wires this `{keyword}` to a signal, but names \
              {found} rather than a name in the `{SIGNAL_HEAD}.` namespace \
              sensors emit into and actuators read from",
             label = scope.label(),
-            keyword = m.role.keyword(),
+            keyword = member.role.keyword(),
             found = vspan.value.describe(),
         ),
-    )
-    .with_note(m.span.clone(), "declared here")
-    .with_footer(signal_value_fix(
-        &vspan.value,
         "drop the argument if this component is not wired.",
-    ))
+    )
+}
+
+/// The two value-side refusals: reported at the value, noted at the
+/// member, and repaired by [`signal_value_fix`].
+fn diag_names_no_signal(
+    member: &Member,
+    value: &Value,
+    primary: String,
+    drop_advice: &str,
+) -> Diagnostic {
+    Diagnostic::new(
+        DiagnosticCode::LogicInvalidSignal,
+        value.span.clone(),
+        primary,
+    )
+    .with_note(member.span.clone(), "declared here")
+    .with_footer(signal_value_fix(value, drop_advice))
 }
 
 /// A binding written inside the `[selector]` rather than after it.
@@ -661,7 +664,7 @@ fn diag_argument_names_no_signal(
 /// nothing reads, goes to the finding that owns *that* fault, because
 /// moving it out of the brackets would not answer it.
 fn diag_binding_inside_selector(
-    m: &Member,
+    member: &Member,
     key: &str,
     vspan: &ValueWithSpan,
     scope: ScopeRef<'_>,
@@ -669,7 +672,7 @@ fn diag_binding_inside_selector(
     debug_assert!(
         ACTUATOR_BINDINGS
             .iter()
-            .any(|(k, host)| *k == key && *host == m.role.keyword()),
+            .any(|(k, host)| *k == key && *host == member.role.keyword()),
         "the `Fix:` below rebuilds the line with this key on this member, \
          which only compiles for a key §14.2 pairs with it",
     );
@@ -681,14 +684,14 @@ fn diag_binding_inside_selector(
              nothing reads it; the brackets pick the member and the binding \
              is written after them",
             label = scope.label(),
-            keyword = m.role.keyword(),
+            keyword = member.role.keyword(),
         ),
     )
-    .with_note(m.span.clone(), "declared here")
+    .with_note(member.span.clone(), "declared here")
     .with_footer(format!(
         "Fix: move `{key}=` out of the brackets, as in \
          `{keyword}[id=<label>] {key}={SIGNAL_HEAD}.<name>`.",
-        keyword = m.role.keyword(),
+        keyword = member.role.keyword(),
     ))
 }
 
@@ -696,7 +699,7 @@ fn diag_binding_inside_selector(
 ///
 /// Whatever the tail names: the host is asked before the value, so
 /// `walls -> a` reaches here rather than the value-side refusal.
-fn diag_misplaced_sensor(m: &Member, binding: &Value, scope: ScopeRef<'_>) -> Diagnostic {
+fn diag_misplaced_sensor(member: &Member, binding: &Value, scope: ScopeRef<'_>) -> Diagnostic {
     Diagnostic::new(
         DiagnosticCode::LogicMisplacedBinding,
         binding.span.clone(),
@@ -704,10 +707,10 @@ fn diag_misplaced_sensor(m: &Member, binding: &Value, scope: ScopeRef<'_>) -> Di
             "{label} `{keyword}` cannot emit a signal; only a sensor carries a \
              `-> {SIGNAL_HEAD}.<name>` tail",
             label = scope.label(),
-            keyword = m.role.keyword(),
+            keyword = member.role.keyword(),
         ),
     )
-    .with_note(m.span.clone(), "declared here")
+    .with_note(member.span.clone(), "declared here")
     .with_footer(format!(
         "Fix: move the tail onto a sensor. `{hosts}` {verb} the sensor {noun} the surface \
          accepts today; `spec/redstone` §14.2 also lists `lever`, `button`, `daylight`, \
@@ -725,7 +728,7 @@ fn diag_misplaced_sensor(m: &Member, binding: &Value, scope: ScopeRef<'_>) -> Di
 /// An actuator key on a member that is not the component §14.2 pairs it
 /// with.
 fn diag_misplaced_actuator(
-    m: &Member,
+    member: &Member,
     key: &str,
     host: &str,
     vspan: &ValueWithSpan,
@@ -739,10 +742,10 @@ fn diag_misplaced_actuator(
             "{label} `{key}=` binds a signal to a `{host}`, and this member is a \
              `{keyword}`",
             label = scope.label(),
-            keyword = m.role.keyword(),
+            keyword = member.role.keyword(),
         ),
     )
-    .with_note(m.span.clone(), "declared here")
+    .with_note(member.span.clone(), "declared here")
     .with_footer(if known {
         format!("Fix: move the `{key}=` argument onto the `{host}` it drives.")
     } else {
@@ -756,7 +759,7 @@ fn diag_misplaced_actuator(
 
 /// An argument whose value is a signal, under a key nothing reads.
 fn diag_unknown_binding_key(
-    m: &Member,
+    member: &Member,
     key: &str,
     vspan: &ValueWithSpan,
     scope: ScopeRef<'_>,
@@ -771,7 +774,7 @@ fn diag_unknown_binding_key(
             label = scope.label(),
         ),
     )
-    .with_note(m.span.clone(), "declared here");
+    .with_note(member.span.clone(), "declared here");
     match nearest_match(key, keys.iter().copied()) {
         Some(near) => diag.with_footer(format!("did you mean `{near}=`?")),
         None => diag.with_footer(format!(
@@ -1092,7 +1095,7 @@ fn register_sensors(sensors: &[PendingSensor], winners: &Winners, ir: &mut Logic
         if !winners.owns_sensor(index) {
             continue;
         }
-        let idx = safe_index(ir.inputs.len());
+        let idx = saturating_index(ir.inputs.len());
         ir.inputs.push(InputPort {
             name: sensor.name.clone(),
             span: sensor.span.clone(),
@@ -1603,7 +1606,7 @@ fn intern_gate(
     if let Some(&idx) = ctx.cse.get(&kind) {
         return SignalRef::Gate(idx);
     }
-    let idx = safe_index(ir.nodes.len());
+    let idx = saturating_index(ir.nodes.len());
     ir.nodes.push(GateNode { kind, span });
     ctx.cse.insert(kind, idx);
     SignalRef::Gate(idx)
@@ -1720,13 +1723,4 @@ fn scope_label(kind: ScopeKind, name: &str) -> String {
         ScopeKind::Site => "site",
     };
     format!("{label}={name}:")
-}
-
-/// Saturating cast of a `usize` length into the `u32` index space used by
-/// [`SignalRef`]. A `.crn` large enough to hit `u32::MAX` ports or gates
-/// is well past any Cairn build the compiler can practically finish; the
-/// value is clamped rather than panicking so a malicious input cannot use
-/// this arithmetic path as a denial-of-service vector.
-fn safe_index(len: usize) -> u32 {
-    u32::try_from(len).unwrap_or(u32::MAX)
 }

@@ -1,145 +1,58 @@
 //! Routed Placement IR → delayed Placement IR lowering (delay insertion).
 //!
 //! Stage 3 of the five-stage place-and-route pipeline `spec/redstone`
-//! §14.5 lays out (Placement → Steiner routing → Delay insertion →
-//! Crossing legalization → Edition legalization). Walks every
-//! [`crate::placement_ir::PlacedCellNode`] in each scope's routed
-//! Placement IR, re-derives the routed length of each net driving a
-//! cell from the same `NetTree` the routing pass laid (routing
-//! stored only the summed `wire_length`, deliberately — the trees
-//! are cheap to rebuild and would bloat the JSON wire form if stored
-//! twice), and rewrites every cell's
-//! [`crate::placement_ir::PlacedCellNode::local_delay_ticks`] from `None` to
-//! `Some(base + implicit buffer contribution)`:
+//! §14.5 lays out. Rebuilds every net's routed tree (the routing pass
+//! stores only the summed `wire_length`; the trees are cheap to rebuild
+//! and would bloat the JSON if stored) and rewrites every cell's
+//! [`crate::placement_ir::PlacedCellNode::local_delay_ticks`] from `None`
+//! to `Some(base delay + implicit buffer ticks)`:
 //!
-//! - **Base delay** comes from the cell's physical realisation via
-//!   [`crate::edition_netlist_ir::EditionCell::base_delay_ticks`] —
-//!   1 tick for the pinned Java `ComparatorAnd` / `RepeaterOr` /
-//!   `InverterTorch` and the Bedrock `InverterTorch`, 2 ticks for the
-//!   Bedrock two-torch `TorchAnd`, 0 ticks for the Bedrock bare-dust
-//!   `TorchOr`, and a pessimistic sentinel above every pinned base
-//!   delay for the parser-unreachable `*Unpinned` variants.
-//! - **Implicit buffer repeaters** are counted per driving net, not
-//!   per driver: two ports reading one signal are fed by one strand of
-//!   dust and by the repeaters standing on it, so charging the cell
-//!   once per port says the signal passes through each of them more
-//!   than once.
-//!   A dust segment fresh from a source at strength 15 loses one unit
-//!   of signal per block (`spec/redstone` §14.5 "signal attenuation
-//!   limit of 15"), so a segment of `s` blocks needs
-//!   `floor((s - 1) / DUST_ATTENUATION_LIMIT)` buffer repeaters to
-//!   refresh the signal to strength 15 before it reaches the sink.
-//!   Each buffer contributes [`BUFFER_REPEATER_TICKS`] (default
-//!   repeater delay, 1 tick).
+//! - **Base delay** is the cell's
+//!   [`crate::edition_netlist_ir::EditionCell::base_delay_ticks`]; an
+//!   actuator pad has none.
+//! - **Implicit buffer repeaters** are counted per driving net, not per
+//!   driver: two ports reading one signal are fed by one strand of dust
+//!   and by the repeaters standing on it. Dust loses one unit of signal
+//!   per block from strength 15, so a segment of `s` blocks needs
+//!   `floor((s - 1) / DUST_ATTENUATION_LIMIT)` repeaters, each worth
+//!   [`BUFFER_REPEATER_TICKS`].
 //!
-//! A segment is the length of the *routed* path from the net's
-//! source to that sink —
-//! `route_to`, not the
-//! straight-line Manhattan distance. The two are different numbers
-//! whenever the wire has to go round something: the reservation holds
-//! cell bodies and I/O pads, dust cannot be drawn inside one, and a
-//! sink reached through the trunk laid for a nearer sink travels
-//! further than the line between it and its driver. Counting
-//! against the route is what lets stage 4 put every buffer this stage
-//! paid for onto the dust it refreshes.
+//! A segment is the *routed* path from the net's source to the sink
+//! (`route_to`), not the Manhattan distance: the two differ whenever the
+//! wire goes round something, and counting against the route is what
+//! lets stage 4 put every buffer this stage paid for onto the dust it
+//! refreshes. Buffers are counted here and given coords by stage 4; the
+//! two agree by construction through [`buffer_count_for_segment`].
 //!
-//! The difference is not confined to layouts v1 cannot produce. The
-//! sensor pads stack in one column at the left edge, so the second
-//! sensor into the cell at the origin comes round the first pad rather
-//! than through it, and a pad on the far edge pulls a segment out of
-//! the cell row. `attenuation_cap_measures_the_routed_output_segment`
-//! pins a segment the cap refuses on its routed length and would let
-//! through on its straight line.
+//! **`local_delay_ticks` is a local wire cost, not an arrival time.** It
+//! sums the buffers on every net feeding the cell; an arrival time would
+//! take the max over those nets and add the arrival of each upstream
+//! driver, so the two part company whenever more than one incoming net
+//! carries a buffer or any driver is itself a cell. Nothing in this crate
+//! computes an arrival time, and nothing should read this field as one —
+//! `assert latency(...)` (§14.7) is a path latency for the simulator pass
+//! to evaluate.
 //!
-//! Buffer repeaters are **counted, not materialised** here. The
-//! routing pass discarded its per-scope occupancy set before yielding
-//! the routed IR, and the count is what `local_delay_ticks` needs — a
-//! repeater contributes its ticks wherever it stands. Stage 4
-//! (crossing legalization) puts them on coords, walking the same
-//! routed paths this pass measured, and changes no tick count doing
-//! it. Two stages because §14.5 lists them as two; they agree by
-//! construction through `buffer_count_for_segment`, and
-//! `phase4_buffer_tick_invariant_holds` and
-//! `two_distinct_nets_charge_a_cell_for_every_buffer_under_it` check
-//! that they do.
+//! `E_ATTENUATION_LIMIT` fires when a single segment exceeds the v1
+//! sanity cap [`MAX_ATTENUATION_SEGMENT`]: it asks for a buffer chain
+//! longer than v1 will build. Failed scopes are elided so a partial
+//! `local_delay_ticks` set never reaches a downstream reader.
 //!
-//! **`local_delay_ticks` is a local cost, not an arrival time.** The
-//! figure this pass writes is the cell's own base delay plus the
-//! implicit buffer repeaters standing on *every* net that feeds it,
-//! summed. That is what the wires into this cell cost, and it is the
-//! number stage 4 is held to: `local_delay_ticks - base_delay_ticks`
-//! equals `BUFFER_REPEATER_TICKS` per block in the cell's
-//! deduplicated `buffer_coords`. `phase4_buffer_tick_invariant_holds`
-//! asserts that identity over generated single-net scopes and
-//! `two_distinct_nets_charge_a_cell_for_every_buffer_under_it` over
-//! the multi-net shape, which is the one where a sum and a max part
-//! company.
-//!
-//! It is deliberately **not** the tick at which the cell's output
-//! settles. A combinational cell settles when the *last* of its
-//! inputs arrives, so an arrival time is a `max` over the incoming
-//! nets and a walk back through the upstream cells:
-//!
-//! ```text
-//! arrival(cell) = base_delay(cell)
-//!               + max over nets n driving cell of
-//!                     arrival(source(n)) + buffer_ticks(segment(n, cell))
-//! ```
-//!
-//! The two part company whenever more than one incoming net carries a
-//! buffer, or any driver is itself a cell: a cell whose `a` port
-//! arrives over a segment with one buffer and whose `b` port arrives
-//! over one with two is charged `base + 3` here and settles at
-//! `base + 2`. The figure is off in both directions, not just high —
-//! it counts the buffers on every incoming net where only the slowest
-//! matters, and it leaves out everything upstream of the cell.
-//! `local_delay_is_the_wire_cost_not_the_arrival_time` derives both
-//! numbers from one fixture so the gap stays recorded rather than
-//! rediscovered.
-//!
-//! Arrival time is not computed anywhere in this crate, and nothing
-//! should read `local_delay_ticks` as if it were one.
-//! `assert latency(sig.in -> sig.out)` (`spec/redstone` §14.7) is a
-//! *path* latency across the DAG; it belongs to the pass that
-//! evaluates it against the headless per-tick simulator §14.7
-//! describes, and neither of those is built — `assert latency(...)`
-//! is not even parsed today.
-//!
-//! `E_ATTENUATION_LIMIT` fires only when a driver segment exceeds the
-//! v1 sanity cap [`MAX_ATTENUATION_SEGMENT`]. Segments in the
-//! `(DUST_ATTENUATION_LIMIT, MAX_ATTENUATION_SEGMENT]` band are normal
-//! and absorbed by implicit buffers; a segment beyond the cap asks for
-//! a buffer chain longer than v1 will build, so this pass refuses
-//! instead of silently ascribing a delay against a chain nothing
-//! materialises. Failed scopes are elided from the
-//! output for the same reason the routing pass elides congestion
-//! failures — a partial `local_delay_ticks` set would let a
-//! downstream reader report a tick figure computed against a layout
-//! no stage can materialise.
-//!
-//! The delay pass is one `PlacementPhase::delay` transition per cell,
-//! per the producer↔variant table on that enum; no new IR type is
-//! introduced, and `PlacedCellNode::local_delay_ticks` is the read-only
-//! projection of the resulting variant rather than a field the pass
-//! assigns.
-//! `--stage route` JSON keeps every key it had because `local_delay_ticks`
-//! is serde-skipped on `None` and appended as `,"local_delay_ticks":N`
-//! (after `wire_length` in the hand-written `Serialize` impl's
-//! emission order, matching serde's compact-JSON layout) when this
-//! pass writes it. The one value that moves is the `stage` tag, which
-//! goes from `route` to `delay`.
+//! The pass is one `PlacementPhase::delay` transition per cell; no new
+//! IR type. `--stage route` JSON keeps every key it had, gains
+//! `local_delay_ticks` after `wire_length`, and its `stage` tag moves
+//! from `route` to `delay`.
 
-use cairn_lang_core::check::Severity;
-
-use crate::diagnostic::{Diagnostic, DiagnosticCode};
+use crate::diagnostic::{Diagnostic, DiagnosticCode, error_with_footer};
 use crate::netlist_ir::NetRef;
+use crate::pass::{
+    OpenScope, Skipped, attribute_nodes, lay_nets, lower_scopes, missing_region_diagnostic,
+    open_scope, source_of_net,
+};
 use crate::placement_ir::{
-    CellCoord, CellIdentity, CircuitRegionReservation, PlacementIr, ScopedPlacementIr,
-    ScopedPlacementIrEntry,
+    CellCoord, CircuitRegionReservation, PlacementIr, ScopedPlacementIr, ScopedPlacementIrEntry,
 };
-use crate::routing_geometry::{
-    Router, block_sites, collect_nets, input_pad, net_trees, sum_over_driving_nets, unroutable,
-};
+use crate::routing_geometry::{Router, sum_over_driving_nets};
 
 /// Signal-attenuation ceiling per dust segment (`spec/redstone` §14.5
 /// "signal attenuation limit of 15"). A dust source starts at strength
@@ -227,20 +140,13 @@ impl DelayOutput {
 /// `local_delay_ticks` set cannot pollute a downstream reader.
 #[must_use]
 pub fn compile_delay(routed: &ScopedPlacementIr) -> DelayOutput {
-    let mut out = DelayOutput::new();
-    for entry in &routed.scopes {
-        match delay_scope(entry) {
-            Ok(ir) => {
-                out.scoped.scopes.push(ScopedPlacementIrEntry {
-                    kind: entry.kind,
-                    name: entry.name.clone(),
-                    ir,
-                });
-            }
-            Err(diagnostic) => out.diagnostics.push(diagnostic),
-        }
+    let (scoped, diagnostics) = lower_scopes(routed, |entry| {
+        delay_scope(entry).map(|ir| (ir, Vec::new()))
+    });
+    DelayOutput {
+        scoped,
+        diagnostics,
     }
-    out
 }
 
 /// Result of delaying one scope: the delayed IR on success, a single
@@ -249,103 +155,40 @@ type ScopeDelay = Result<PlacementIr, Diagnostic>;
 
 fn delay_scope(entry: &ScopedPlacementIrEntry) -> ScopeDelay {
     let source = &entry.ir;
-    // Region absence with any placed cells or output drivers is a
-    // caller-side hand-built-IR bug: the placement pass fires
-    // `E_NO_CIRCUIT_REGION` and elides such scopes before they can
-    // reach delay insertion. Refuse with the same diagnostic code so
-    // a downstream caller sees a consistent error surface; scopes
-    // with neither cells nor output drivers still pass through so a
-    // module without any redstone survives the delay pipeline as-is.
-    // Stricter than routing's belt-and-braces `debug_assert! +
-    // Ok(source.clone())` fall-through by design: delay writes
-    // `local_delay_ticks`, and the producer↔variant table on
-    // `PlacementPhase` promises
-    // `(Some, Some)` after this stage — silently returning `(None,
-    // None)` on a partial IR would let a downstream reader take a
-    // Stage-1 shape for a Stage-3 output.
-    let Some(region) = source.region.clone() else {
-        if source.cells.is_empty() && source.outputs.is_empty() {
-            return Ok(source.clone());
+    let OpenScope {
+        mut ir,
+        region,
+        cell_coords,
+        blocks,
+    } = match open_scope(entry) {
+        Err(Skipped::Empty) => return Ok(source.clone()),
+        // Refused rather than passed through as routing does: this pass
+        // writes `local_delay_ticks`, and the producer↔variant table on
+        // `PlacementPhase` promises it after this stage.
+        Err(Skipped::MissingRegion) => {
+            return Err(missing_region_diagnostic(
+                entry,
+                "routed",
+                "delay insertion",
+            ));
         }
-        return Err(missing_region_diagnostic(entry));
-    };
-    if source.cells.is_empty() && source.outputs.is_empty() {
-        return Ok(source.clone());
-    }
-
-    let mut ir = source.clone();
-
-    // Snapshot cell coords up front so the `wire_length`-style rewrite
-    // that follows can index into `ir.cells` mutably without
-    // re-borrowing across the `source_of_net` helper. Duplicated (not
-    // extracted) from the routing pass because the closure is 10
-    // lines and its `debug_assert!` invariants are pass-local; a
-    // shared helper would need to carry `cell_coords` in a struct
-    // that saves no runtime work.
-    let cell_coords: Vec<CellCoord> = ir.cells.iter().map(|c| c.coord).collect();
-
-    // Netlist synthesis guarantees the topological invariant
-    // (`NetRef::Cell(j)` inside `cells[i]` satisfies `j < i`), so
-    // `.expect(...)` is safe on both debug and release paths — an
-    // out-of-range access here means the caller handed in a
-    // hand-built IR that skipped synthesis, in which case panicking
-    // loud beats silently sinking into a fall-back coord and under-
-    // reporting `local_delay_ticks`. Stricter than routing's `debug_assert
-    // + last-cell fallback` by the same phase-table-contract argument
-    // that hardens the missing-region branch above.
-    let source_of_net = |net: NetRef| -> CellCoord {
-        match net {
-            NetRef::Input(i) => input_pad(i as usize, &region),
-            NetRef::Cell(j) => *cell_coords.get(j as usize).unwrap_or_else(|| {
-                panic!(
-                    "NetRef::Cell({j}) out of range (cells.len()={}) — topological invariant broken by caller-side hand-built IR",
-                    cell_coords.len(),
-                )
-            }),
-        }
+        Ok(scope) => scope,
     };
 
-    // The routed length from a driver's source to one of its sinks.
-    // `route_to` answers `None` only for a sink that is not a terminal
-    // of the net, which `collect_nets` makes unreachable — the sink
-    // list it built is the terminal list the tree was grown from. Loud
-    // for the same reason `source_of_net` above is: a hand-built IR
-    // that broke the correspondence would otherwise under-report
-    // `local_delay_ticks` in silence.
-    let nets = collect_nets(&ir);
-    let router = Router::new(&region, &block_sites(&ir, &region));
-    let trees = net_trees(&nets, &router, source_of_net);
-    // Re-checked here for the reason the missing-region branch above
-    // is: a stranded sink's route is one step, which is under every cap
-    // this pass applies, so the ticks it would write describe a circuit
-    // nothing can build. Stage 2 elides such a scope, so this only
-    // catches a caller who skipped it.
-    if let Some(diagnostic) = unroutable(&nets, &trees, entry, &region, source_of_net) {
-        return Err(diagnostic);
-    }
-    let segment_of = |net: NetRef, sink: CellCoord| -> u32 {
-        let route = trees
-            .get(&net)
-            .and_then(|tree| tree.route_to(sink))
-            .unwrap_or_else(|| {
-                panic!(
-                    "sink ({x},{y},{z}) is not a terminal of the net driving it — the driver list and the collected nets disagree",
-                    x = sink.x,
-                    y = sink.y,
-                    z = sink.z,
-                )
-            });
-        u32::try_from(route.len().saturating_sub(1)).unwrap_or(u32::MAX)
-    };
+    let router = Router::new(&region, &blocks);
+    let nets = lay_nets(
+        &ir,
+        &router,
+        entry,
+        &region,
+        source_of_net(&region, &cell_coords),
+    )?;
 
-    // First pass: refuse if any driver segment exceeds the v1 sanity
-    // cap. Done before writing `local_delay_ticks` so a failed scope leaves
-    // no partial attribution behind — `delay_scope`'s `Err` return
-    // makes `compile_delay` elide the whole scope.
+    // Refuse before writing `local_delay_ticks`, so a failed scope leaves
+    // no partial attribution behind.
     for (cell_index, cell) in ir.cells.iter().enumerate() {
-        let sink = cell_coords[cell_index];
         for (driver_index, driver) in cell.drivers.iter().enumerate() {
-            let segment = segment_of(driver.net, sink);
+            let segment = nets.segment(driver.net, cell.coord);
             if segment > MAX_ATTENUATION_SEGMENT {
                 return Err(attenuation_diagnostic(
                     entry,
@@ -357,13 +200,10 @@ fn delay_scope(entry: &ScopedPlacementIrEntry) -> ScopeDelay {
             }
         }
     }
-
-    // Also flag output driver segments: an actuator wired straight to
-    // a sensor across a wide region can hit the same sanity cap
-    // without touching a cell. Same routed-length model; the sink is
-    // the output pad coord.
+    // An actuator wired straight to a sensor across a wide region hits
+    // the same cap without touching a cell.
     for (output_index, output) in ir.outputs.iter().enumerate() {
-        let segment = segment_of(output.driver, output.pad);
+        let segment = nets.segment(output.driver, output.pad);
         if segment > MAX_ATTENUATION_SEGMENT {
             return Err(attenuation_output_diagnostic(
                 entry,
@@ -374,73 +214,37 @@ fn delay_scope(entry: &ScopedPlacementIrEntry) -> ScopeDelay {
         }
     }
 
-    attribute_local_delay_ticks(&mut ir, entry, &cell_coords, &segment_of);
+    attribute_local_delay_ticks(&mut ir, entry, &|net, sink| nets.segment(net, sink));
 
     Ok(ir)
 }
 
 /// Fill every cell's `local_delay_ticks` with `base_delay(cell) + Σ buffer
-/// ticks per driving net`. Buffers are counted from the routed length
-/// of each net's path into this cell, measured via `segment_of`; the
-/// routing pass stored only the summed `wire_length` so re-derivation
-/// is required here (documented in the pass module doc).
+/// ticks per driving net`, and every actuator pad's with the buffer
+/// ticks on its own segment (a pad is not a cell, so no base delay).
 ///
-/// Per net rather than per driver: two ports reading one signal are
-/// refreshed by the repeaters on one strand of dust, and charging the
-/// cell once per port says the signal passes through each of them
-/// more than once. See [`sum_over_driving_nets`], which stage 2
-/// measures the same cell with.
-///
-/// Summed over those nets rather than maxed over them: the figure is
-/// a local wire cost and not the tick the cell's output settles on.
-/// See the module doc.
-///
-/// Computes into a side vector first so `ir.cells` can be borrowed
-/// immutably while the driver routes are measured through
-/// `segment_of`, then commits in a mutable pass. The commit is loud
-/// in release too: `PlacementPhase::delay_at` panics on any
-/// non-`Routed` variant, which is what a caller who ran delay
-/// insertion twice hands us — the producer↔variant table on
-/// `PlacementPhase` forbids it. `entry` is threaded in purely so that panic can name
-/// the offending cell instead of leaving the operator to walk back
-/// from the backtrace.
+/// Per net rather than per driver — see [`sum_over_driving_nets`] — and
+/// summed rather than maxed, because the figure is a local wire cost
+/// and not the tick the cell's output settles on (see the module doc).
 fn attribute_local_delay_ticks<F>(
     ir: &mut PlacementIr,
     entry: &ScopedPlacementIrEntry,
-    cell_coords: &[CellCoord],
     segment_of: &F,
 ) where
     F: Fn(NetRef, CellCoord) -> u32,
 {
-    let local_delay_ticks: Vec<u32> = ir
-        .cells
-        .iter()
-        .zip(cell_coords.iter())
-        .map(|(cell, &sink)| {
+    attribute_nodes(
+        ir,
+        entry,
+        |cell| {
             let buffer_ticks = sum_over_driving_nets(&cell.drivers, |net| {
-                buffer_repeater_ticks_for_segment(segment_of(net, sink))
+                buffer_repeater_ticks_for_segment(segment_of(net, cell.coord))
             });
             cell.cell.base_delay_ticks().saturating_add(buffer_ticks)
-        })
-        .collect();
-    for (index, (cell, ticks)) in ir.cells.iter_mut().zip(local_delay_ticks).enumerate() {
-        let identity = CellIdentity::new(index, cell.coord, entry);
-        cell.phase.delay_at(ticks, identity);
-    }
-
-    // The wire out to an actuator attenuates like the wire into a cell,
-    // so it is charged for its buffers by the same rule. There is no
-    // base delay to add: a pad is not a cell, and the figure here is
-    // the wire's own contribution.
-    let output_ticks: Vec<u32> = ir
-        .outputs
-        .iter()
-        .map(|output| buffer_repeater_ticks_for_segment(segment_of(output.driver, output.pad)))
-        .collect();
-    for (index, (output, ticks)) in ir.outputs.iter_mut().zip(output_ticks).enumerate() {
-        let identity = CellIdentity::output(index, output.pad, entry);
-        output.phase.delay_at(ticks, identity);
-    }
+        },
+        |output| buffer_repeater_ticks_for_segment(segment_of(output.driver, output.pad)),
+        |phase, ticks, identity| phase.delay_at(ticks, identity),
+    );
 }
 
 /// Buffer repeaters needed to keep `segment` blocks of dust at
@@ -448,17 +252,13 @@ fn attribute_local_delay_ticks<F>(
 ///
 /// A source at strength 15 loses one unit per block, so segments of
 /// at most `DUST_ATTENUATION_LIMIT` blocks reach the sink without a
-/// buffer (`(15 - 1) / 15 = 0`); a 16-block segment needs one buffer;
-/// each further `DUST_ATTENUATION_LIMIT` blocks bumps the count by
-/// one. Saturating arithmetic keeps a pathological segment (e.g.
-/// `u32::MAX` from a hand-built IR that skips the sanity check) from
-/// overflowing — the sanity cap in `delay_scope` already prevents
-/// that path in practice.
+/// buffer; a 16-block segment needs one; each further
+/// `DUST_ATTENUATION_LIMIT` blocks bumps the count by one. Saturating
+/// so a pathological segment from a hand-built IR cannot overflow.
 ///
 /// `crate::crossing` calls this with the same routed length to decide
 /// how many coords to materialise, so the ticks this pass writes and
-/// the `buffer_coords` stage 4 emits are one number by construction
-/// rather than two that happen to agree.
+/// the `buffer_coords` stage 4 emits are one number by construction.
 pub(crate) fn buffer_count_for_segment(segment: u32) -> u32 {
     if segment <= DUST_ATTENUATION_LIMIT {
         return 0;
@@ -486,16 +286,12 @@ fn attenuation_diagnostic(
         cap = MAX_ATTENUATION_SEGMENT,
         buffers = buffer_repeater_ticks_for_segment(segment) / BUFFER_REPEATER_TICKS.max(1),
     );
-    let mut diag = Diagnostic::new(
+    error_with_footer(
         DiagnosticCode::AttenuationLimit,
         reservation.span.clone(),
         primary,
-    );
-    diag = diag.with_footer(
         "Fix: enlarge `region=` so no driver→cell segment exceeds the cap, split into multiple `circuit` blocks, or pin cell placement closer to its drivers",
-    );
-    debug_assert_eq!(diag.severity(), Severity::Error);
-    diag
+    )
 }
 
 fn attenuation_output_diagnostic(
@@ -511,65 +307,18 @@ fn attenuation_output_diagnostic(
         cap = MAX_ATTENUATION_SEGMENT,
         buffers = buffer_repeater_ticks_for_segment(segment) / BUFFER_REPEATER_TICKS.max(1),
     );
-    let mut diag = Diagnostic::new(
+    error_with_footer(
         DiagnosticCode::AttenuationLimit,
         reservation.span.clone(),
         primary,
-    );
-    diag = diag.with_footer(
         "Fix: enlarge `region=` so no driver→sink segment exceeds the cap, split into multiple `circuit` blocks, or pin actuator placement closer to its drivers",
-    );
-    debug_assert_eq!(diag.severity(), Severity::Error);
-    diag
-}
-
-/// Refuse a scope that reached delay insertion carrying cells or
-/// output drivers but no `circuit region=` reservation. Reuses
-/// `E_NO_CIRCUIT_REGION` because the failure mode is the same the
-/// placement pass catches; a downstream reader that matches on the
-/// code sees a consistent taxonomy across stages. The span anchors on
-/// the first placed cell's span (mirroring the placement-pass
-/// helper), falling back to a default span when the scope carries
-/// only outputs and no cells to hang the span on.
-fn missing_region_diagnostic(entry: &ScopedPlacementIrEntry) -> Diagnostic {
-    let span = entry
-        .ir
-        .cells
-        .first()
-        .map(|c| c.span.clone())
-        .unwrap_or_default();
-    let primary = format!(
-        "routed netlist for {kind} `{name}` reached delay insertion carrying cells or output drivers but no `circuit region=<label> void=<N>` reservation — the placement pass should have elided this scope",
-        kind = entry.kind.label(),
-        name = entry.name,
-    );
-    let mut diag = Diagnostic::new(DiagnosticCode::NoCircuitRegion, span, primary);
-    diag = diag.with_footer(
-        "Fix: add a `circuit region=<label> void=<N>` line to the enclosing scope, or run `--stage placement` first to see the underlying error",
-    );
-    debug_assert_eq!(diag.severity(), Severity::Error);
-    diag
+    )
 }
 
 #[cfg(test)]
 mod tests {
-    //! Crate-internal unit tests for delay-pass behaviours that
-    //! `tests/delay.rs` cannot reach through synth fixtures alone:
-    //! - the cell-driver branch of `attenuation_diagnostic` (needs a
-    //!   segment past 256 blocks between two cells, which no realistic
-    //!   `.crn` produces);
-    //! - the missing-region refusal, which can only be built by
-    //!   hand-constructing a `PlacementIr` because
-    //!   `compile_placement` already elides that shape;
-    //! - `buffer_repeater_ticks_for_segment` at multiple boundary
-    //!   segment lengths (0, 15, 16, 30, 31, cap) so a formula change
-    //!   trips per-boundary rather than by aggregate.
-    //!
-    //! Uses crate-internal struct construction (all `PlacedCellNode` /
-    //! `PlacementIr` / `CircuitRegionReservation` fields are `pub`;
-    //! `#[non_exhaustive]` blocks only external crates), keeping the
-    //! integration-test surface in `tests/delay.rs` focused on synth
-    //! fixtures.
+    //! Delay-pass behaviours `tests/delay.rs` cannot reach through synth
+    //! fixtures: shapes only a hand-built `PlacementIr` produces.
 
     use cairn_lang_core::Edition;
     use cairn_lang_core::error::Span;
@@ -584,19 +333,9 @@ mod tests {
     use crate::logic_ir::ScopeKind;
     use crate::netlist_ir::{CellPortDriver, NetRef, PortName};
     use crate::placement_ir::{
-        CellCoord, CircuitRegionReservation, PlacedCellNode, PlacementIr, PlacementPhase,
-        ScopedPlacementIr, ScopedPlacementIrEntry,
+        CellCoord, PlacedCellNode, PlacementIr, PlacementPhase, ScopedPlacementIrEntry,
     };
-
-    fn reservation(width: u32, depth: u32, void: u32) -> CircuitRegionReservation {
-        CircuitRegionReservation {
-            label: "floor".to_owned(),
-            void,
-            width,
-            depth,
-            span: Span::default(),
-        }
-    }
+    use crate::test_fixtures::{reservation, scoped};
 
     /// The sanity cap counts the dust, not the distance.
     ///
@@ -648,16 +387,6 @@ mod tests {
                 delayed.diagnostics,
             );
         }
-    }
-
-    fn scoped(kind: ScopeKind, name: &str, ir: PlacementIr) -> ScopedPlacementIr {
-        let mut scoped = ScopedPlacementIr::new();
-        scoped.scopes.push(ScopedPlacementIrEntry {
-            kind,
-            name: name.to_owned(),
-            ir,
-        });
-        scoped
     }
 
     /// An actuator pad already through routing, matching what
@@ -818,7 +547,6 @@ mod tests {
             name: "arrival".to_owned(),
             ir: ir.clone(),
         };
-        let cell_coords: Vec<CellCoord> = ir.cells.iter().map(|c| c.coord).collect();
         let segment_of = |net: NetRef, _sink: CellCoord| -> u32 {
             match net {
                 NetRef::Input(0) => SHORT,
@@ -826,7 +554,7 @@ mod tests {
                 other => panic!("no other net drives this cell: {other:?}"),
             }
         };
-        attribute_local_delay_ticks(&mut ir, &entry, &cell_coords, &segment_of);
+        attribute_local_delay_ticks(&mut ir, &entry, &segment_of);
 
         let base = EditionCell::JavaComparatorAnd.base_delay_ticks();
         let recorded = ir.cells[0]

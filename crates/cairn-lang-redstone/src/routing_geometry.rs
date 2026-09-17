@@ -1,119 +1,68 @@
 //! Shared rectilinear-geometry helpers for the routing / delay /
-//! crossing passes.
-//!
-//! The three passes (`spec/redstone` §14.5 stages 2, 3, and 4) all
-//! need the same pad-coordinate convention, deterministic net-order
-//! key, and the same answer to "where does this net's dust run".
-//! Keeping the primitives in one module guarantees that a change to
-//! the axis order, the search's tie-break, or the [`NetRef`]
-//! sort key reaches every downstream consumer at once — the JSON
-//! dumps compared byte-for-byte by
-//! `crates/cairn-lang-redstone/tests/routing.rs` and the crossing /
-//! delay integration tests catch any drift.
+//! crossing passes (`spec/redstone` §14.5 stages 2, 3, and 4): the pad
+//! coordinate convention, the deterministic net order, and the one
+//! answer to "where does this net's dust run". A change to the axis
+//! order, the search's tie-break, or the [`NetRef`] sort key reaches
+//! every pass at once, and the byte-for-byte JSON comparisons in the
+//! integration tests catch any drift.
 //!
 //! # The reservation is not empty space
 //!
-//! A `circuit region=<label> void=<N>` reservation is a box
-//! `x ∈ [0,width) × y ∈ [0,void) × z ∈ [0,depth)`, and some of its
-//! coords already hold blocks: cell bodies, input pads, actuator pads.
-//! Dust cannot occupy a block's coord, and a signal cannot pass
-//! *through* one — a block either emits (it is the net's source) or
-//! consumes (it is one of the net's sinks). A comparator on the way to
-//! a further cell does not hand the signal on; what leaves it is its
-//! own output.
+//! A reservation is a box `x ∈ [0,width) × y ∈ [0,void) × z ∈ [0,depth)`
+//! some of whose coords already hold blocks: cell bodies, input pads,
+//! actuator pads. Dust cannot occupy a block's coord, and a signal cannot
+//! pass *through* one — a block either emits (the net's source) or
+//! consumes (one of its sinks).
 //!
-//! [`Router`] holds that block set for one scope and answers the
-//! question the three passes ask: given a source and a set of sinks,
-//! which coords does the net's dust occupy, and which of them does the
-//! signal into *this* sink travel along. It grows a tree out of the
-//! source, attaching the nearest sink still unconnected by the
-//! cheapest block-free path, until every sink is a leaf of it. That is
-//! the shortest-path heuristic for a rectilinear Steiner tree, run
-//! inside the obstacle set rather than on an empty plane.
-//!
-//! The path itself is settled by [`Router::straight_run`] when the
-//! closest pair has nothing between them and by [`Router::search`]
-//! when it does — one question, and a shortcut that is allowed only
-//! because no path is shorter than the straight line between its ends.
-//! Both walk x, then z, then y, the axis order the passes were built
-//! around, so a net with a clear run between its terminals occupies
-//! exactly the L-shape it always did. Only a net that has something to
-//! go around moves.
+//! [`Router`] holds that block set for one scope and grows a tree out of
+//! each net's source, attaching the nearest sink still unconnected by
+//! the cheapest block-free path until every sink is a leaf: the
+//! shortest-path heuristic for a rectilinear Steiner tree, run inside the
+//! obstacle set. [`Router::straight_run`] settles a pair with nothing
+//! between them and [`Router::search`] a pair with something; both walk
+//! x, then z, then y, so a net with a clear run occupies exactly the
+//! L-shape the passes were built around.
 //!
 //! # The obstacle set grows as the nets are laid
 //!
-//! Blocks; every coord of dust an earlier net already occupies; and
-//! every coord beside that dust in its own plane. Two nets on one
-//! coord is one strand carrying two signals, and so is two nets one
-//! step apart — dust joins the dust next to it — so the second net to
-//! be routed treats both the way it treats a cell body: something to
-//! go round, or to climb over. `spec/redstone` §14.5 calls that
-//! escape, and it falls out of the search that was already going round
-//! blocks rather than out of a mechanism of its own.
+//! Blocks; every coord of dust an earlier net occupies; and every coord
+//! [`beside`] that dust in its own plane, because two nets one step apart
+//! are one strand carrying two signals. The second net goes round, or
+//! climbs over — §14.5's escape, falling out of the same search. In its
+//! own plane only: whether dust at `y + 1` reads the dust below it is
+//! the physical tile layer's question, so [`tile_layer_pairs`] lists the
+//! strands a layer apart and [`tile_layer_clearance`] names them as an
+//! advisory rather than refusing them.
 //!
-//! In its own plane, and no further. Whether dust at `y + 1` reads the
-//! dust below it depends on what stands between them, which is a
-//! question about the physical tile layer — §14.5 leaves the voxel
-//! realisation to that layer, and this module holds itself to the
-//! plane it can answer for.
+//! A tree is therefore a function of the order the nets were laid in.
+//! [`net_trees`] lays them in [`net_order`] — fanout descending, then
+//! [`net_ref_key`] — a total order all three passes walk, so the map is
+//! one answer per layout. The escape happens before `wire_length` and
+//! `local_delay_ticks` are read off the tree, so a net that climbed is
+//! charged for the climb.
 //!
-//! What it can do is say which pairs that layer is being handed.
-//! [`tile_layer_pairs`] lists every two strands of different nets a
-//! layer apart and within one step of each other — the pair directly
-//! over another, and the staircase one step across from it, which a
-//! run that climbed to clear a lane and then travels alongside it
-//! makes the more numerous of the two — and
-//! [`tile_layer_clearance`] is the advisory the routing pass raises
-//! for them. An advisory rather than an obstacle: a rule invented here
-//! would refuse layouts for a reason nothing in this model can check,
-//! which is worse than an obligation written down and named.
-//!
-//! What it costs is that a tree is a function of the order the nets
-//! were laid in. [`net_trees`] lays them in [`net_order`] — fanout
-//! descending, then [`net_ref_key`] — which is a total order over the
-//! nets of a scope and the same one all three passes walk, so the map
-//! is one answer per layout rather than one per `HashMap` iteration.
-//! What it buys is that the escape is measured: it happens before
-//! `wire_length` and `local_delay_ticks` are read off the tree, so a net
-//! that had to climb is charged for the climb.
-//!
-//! Only dust. A sink is a block, and two nets ending at one cell body
-//! is the ordinary two-input cell — so [`Router::dust`] takes the
-//! blocks back out of a tree before [`beside`] widens it, and what is
-//! left is exactly what shorts. Two faces of one block are two steps
-//! apart, so widening it costs a two-input gate nothing: neither
-//! driver keeps the other out.
+//! Only dust is widened: a sink is a block, and two nets ending at one
+//! cell body is the ordinary two-input cell, so [`Router::dust`] takes
+//! the terminals back out of a tree before [`beside`] widens it.
 //!
 //! # Layers
 //!
-//! Dust that has to leave the ground layer to get past a block, or
-//! past another net, is stamped [`RouteLayer::Bridge`], the same layer
-//! the crossing pass stamps on a repeater it lifts. One rule —
-//! [`CellCoord::new`] — decides the layer from the height, so the two
-//! cannot key past each other and a repeater cannot be lifted onto a
-//! coord a wire already runs through.
+//! Dust that leaves the ground layer is stamped [`RouteLayer::Bridge`],
+//! the same layer the crossing pass stamps on a repeater it lifts. One
+//! rule — [`CellCoord::new`] — decides the layer from the height, so the
+//! two cannot key past each other.
 //!
 //! # Two projections that cannot disagree
 //!
-//! [`NetTree`] is a tree of coords with a parent link on each, rooted
-//! at the source. [`NetTree::wire_path`] lists them; [`NetTree::route_to`]
-//! walks the parent links back from one sink. The second is a subset of
-//! the first by construction rather than by agreement between two
-//! renderings — which is what used to fail: an L-shape is
-//! direction-asymmetric, so drawing an edge `a → b` for the wire and
-//! `b → a` for the route picked opposite elbows and put buffer
-//! repeaters beside the dust they were meant to refresh.
-//!
-//! Stage 2 drains [`NetTree::wire_path`] into its occupancy set, stage
-//! 3 measures [`NetTree::route_to`] to count buffer repeaters, and
-//! stage 4 walks the same route to place them.
-//!
-//! The trees are recomputed per stage rather than stored on
-//! [`crate::placement_ir::PlacementIr`]. They are a pure function of
-//! the cells, outputs, and reservation the IR already carries, so a
-//! stored copy would be a cache with a staleness mode this has not,
-//! and it would put every coord of every net into the JSON dump each
-//! stage emits.
+//! [`NetTree`] is a tree of coords with a parent link on each, rooted at
+//! the source. [`NetTree::wire_path`] lists them; [`NetTree::route_to`]
+//! walks the parent links back from one sink, so a route is a subset of
+//! the wire by construction. Stage 2 drains `wire_path` into its
+//! occupancy set, stage 3 measures `route_to` to count buffer repeaters,
+//! and stage 4 walks the same route to place them. The trees are
+//! recomputed per stage rather than stored on the IR: they are a pure
+//! function of what the IR already carries, and a stored copy would put
+//! every coord of every net into every JSON dump.
 
 use std::cmp::Ordering;
 use std::collections::{BinaryHeap, HashMap, HashSet};
@@ -121,11 +70,12 @@ use std::fmt::Write as _;
 
 use cairn_lang_core::check::Severity;
 
-use crate::diagnostic::{Diagnostic, DiagnosticCode};
+use crate::diagnostic::{Diagnostic, DiagnosticCode, error_with_footer};
 use crate::netlist_ir::{CellPortDriver, NetRef};
 use crate::placement_ir::{
     CellCoord, CircuitRegionReservation, PlacementIr, ScopedPlacementIrEntry,
 };
+use crate::saturating_index;
 
 /// Deterministic net-order key matching the routing pass's tie-break:
 /// `Input(_)` sorts before `Cell(_)`, then by index ascending.
@@ -150,25 +100,22 @@ pub(crate) fn coord_key(coord: CellCoord) -> (u32, u32, u32) {
 
 /// v1 input-pad coordinate: left edge (`x=0`), first service layer
 /// (`y=0`), z-axis increasing as the input index grows. Saturates at
-/// `depth-1` whenever the input count would push z past the region's
-/// z-extent (`inputs.len() > depth`); the resulting overlap is
-/// caught at seeding time and surfaces as `E_ROUTE_CONGESTION`
-/// rather than a silent misroute. Pinning the coordinate here is a
-/// v1 convention; once a consumer outside this crate needs the pad
-/// coords, `input_pads` joins [`crate::placement_ir::PlacementIr`]
-/// as a `#[non_exhaustive]`-safe field.
+/// `depth-1` when the input count would push z past the region; the
+/// resulting overlap is caught at seeding time and surfaces as
+/// `E_ROUTE_CONGESTION` rather than a silent misroute.
 pub(crate) fn input_pad(i: usize, region: &CircuitRegionReservation) -> CellCoord {
-    let raw = u32::try_from(i).unwrap_or(u32::MAX);
-    let z = raw.min(region.depth.saturating_sub(1));
-    CellCoord::new(0, 0, z)
+    edge_pad(i, 0, region)
 }
 
 /// v1 output-pad coordinate: right edge (`x=width-1`), same
 /// saturating z-axis convention as [`input_pad`].
 pub(crate) fn output_pad(k: usize, region: &CircuitRegionReservation) -> CellCoord {
-    let raw = u32::try_from(k).unwrap_or(u32::MAX);
-    let z = raw.min(region.depth.saturating_sub(1));
-    let x = region.width.saturating_sub(1);
+    edge_pad(k, region.width.saturating_sub(1), region)
+}
+
+/// The `index`th pad down the edge column at `x`.
+fn edge_pad(index: usize, x: u32, region: &CircuitRegionReservation) -> CellCoord {
+    let z = saturating_index(index).min(region.depth.saturating_sub(1));
     CellCoord::new(x, 0, z)
 }
 
@@ -738,25 +685,22 @@ impl Router {
 fn step_towards(from: CellCoord, to: CellCoord) -> CellCoord {
     let mut next = from;
     if from.x != to.x {
-        next.x = if from.x < to.x {
-            from.x + 1
-        } else {
-            from.x - 1
-        };
+        next.x = toward(from.x, to.x);
     } else if from.z != to.z {
-        next.z = if from.z < to.z {
-            from.z + 1
-        } else {
-            from.z - 1
-        };
+        next.z = toward(from.z, to.z);
     } else if from.y != to.y {
-        next.y = if from.y < to.y {
-            from.y + 1
-        } else {
-            from.y - 1
-        };
+        next.y = toward(from.y, to.y);
     }
     CellCoord::new(next.x, next.y, next.z)
+}
+
+/// `a` moved one towards `b`; `a` itself when they are equal.
+fn toward(a: u32, b: u32) -> u32 {
+    match a.cmp(&b) {
+        Ordering::Less => a + 1,
+        Ordering::Greater => a - 1,
+        Ordering::Equal => a,
+    }
 }
 
 /// The coords from a search root to `coord`, both ends included.
@@ -822,28 +766,8 @@ impl NetTree {
     }
 
     /// Every coord the net occupies, source first and then in the
-    /// order the search laid them.
-    ///
-    /// Always non-empty — a caller that discarded an empty return would
-    /// drop the degenerate (no sinks, or the only sink is the source)
-    /// case where the source still occupies its own coord.
-    ///
-    /// No coord appears twice, so a caller folding this into a
-    /// per-coord map does not have to ask whether it has seen the pair
-    /// before. Three things hold that up, one per way a coord enters
-    /// the list:
-    ///
-    /// - The source is pushed once, by [`Self::rooted`].
-    /// - A sink is pushed by [`Self::strand`], which takes each
-    ///   remaining terminal once because [`Router::tree`] dedups the
-    ///   terminal list against itself and the source and drains it.
-    /// - Everything else is pushed by [`Self::attach`], off a path the
-    ///   search returned. A coord already on the list is either a
-    ///   terminal — and terminals are blocks, which no path walks
-    ///   through — or a coord the search was seeded from, which it
-    ///   does not expand back onto. `attach`'s own check of this is a
-    ///   `debug_assert!`, so it states the invariant rather than
-    ///   enforcing it in release.
+    /// order the search laid them. Always non-empty (the source occupies
+    /// its own coord), and no coord appears twice.
     pub(crate) fn wire_path(&self) -> Vec<CellCoord> {
         self.order.clone()
     }
@@ -967,35 +891,12 @@ pub(crate) fn net_order(nets: &HashMap<NetRef, Vec<CellCoord>>) -> Vec<NetRef> {
 /// The refusal a scope earns when the reservation cannot wire one of
 /// its sinks, or `None` when every sink has a clear path.
 ///
-/// `E_ROUTE_CONGESTION` because spec §14.5 states the code as "routing
-/// is confined to the `circuit` region; if it does not fit, fail-loud",
-/// and a reservation with no room for a clear path is a reservation the
-/// layout does not fit in. Its own primary, so it does not read as the
+/// `E_ROUTE_CONGESTION` with its own primary, so it does not read as the
 /// area arithmetic: the area can be ample and the one coord the wire
-/// needs still be a cell body — or dust an earlier net laid, or the
-/// coord beside such dust, which is the common one, because a net going
-/// round what is in its way is what keeps two signals off one strand.
-///
-/// Asked by all three passes rather than by stage 2 alone. Stage 2
-/// elides the scope, so stages 3 and 4 never see one in a real run —
-/// but they rebuild the trees from the IR, and an in-crate caller that
-/// skipped stage 2 would hand them a stranded sink whose route is one
-/// step: under every cap, worth no repeater, and indistinguishable in
-/// the dump from a circuit that works. The delay pass already re-checks
-/// the missing-region case on the same argument.
-///
-/// Reported in [`net_order`], so a scope with several unwireable sinks
-/// names the same one every run, and the count comes with it: the
-/// router strands every remaining sink of a net at once, so a fix-one-
-/// recompile loop would be several rounds of the same sizing decision.
-///
-/// The three causes the primary lists are not equally likely and the
-/// message cannot tell which one applied — the search reports that it
-/// failed, not what it hit last. What it can do is name the nets whose
-/// dust takes the faces of the sink it could not reach, which is the
-/// cause the author can act on and the only one this pass created.
-/// Blocks beside it are not named: a cell body or a pad beside a cell
-/// body is the layout the author wrote, and saying so adds nothing.
+/// needs still be taken. Reported in [`net_order`] so the anchor sink is
+/// the same every run, with the count of the rest so sizing is one
+/// decision, and naming the nets whose dust takes the sink's faces —
+/// the cause the author can act on.
 pub(crate) fn unroutable<F>(
     nets: &HashMap<NetRef, Vec<CellCoord>>,
     trees: &HashMap<NetRef, NetTree>,
@@ -1044,17 +945,15 @@ where
         )
         .expect("writing to a String cannot fail");
     }
-    let mut diag = Diagnostic::new(
+    Some(error_with_footer(
         DiagnosticCode::RouteCongestion,
         region.span.clone(),
         primary,
-    );
-    diag = diag.with_footer(format!(
-        "Fix: raise `void` above {void} so the wire has a layer to climb onto, enlarge `size=WxH`, or split into multiple `circuit` blocks",
-        void = region.void,
-    ));
-    debug_assert_eq!(diag.severity(), Severity::Error);
-    Some(diag)
+        format!(
+            "Fix: raise `void` above {void} so the wire has a layer to climb onto, enlarge `size=WxH`, or split into multiple `circuit` blocks",
+            void = region.void,
+        ),
+    ))
 }
 
 /// The other nets whose dust keeps a wire out of the faces of `sink`,
@@ -1210,12 +1109,6 @@ impl TileLayerPair {
 /// climbs to clear another runs over it, or one step across from it a
 /// layer up — the staircase dust climbs, which shorts by the same
 /// mechanism an in-plane pair does.
-///
-/// The diagonal is the one that piles up, and not because a climb
-/// chooses it: a coord has one coord directly under it and four
-/// diagonally under it, and a run that climbed to clear a lane then
-/// travels *alongside* that lane, one step across from it for as long
-/// as the two run parallel, crossing over it once.
 ///
 /// Dust only, per [`Router::dust`]: a terminal is a block, and a block
 /// under a strand is what a wire climbs over rather than something two
