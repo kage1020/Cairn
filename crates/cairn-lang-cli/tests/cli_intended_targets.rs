@@ -10,9 +10,8 @@
 use std::path::PathBuf;
 use std::process::Command;
 
-fn cargo_bin() -> PathBuf {
-    PathBuf::from(env!("CARGO_BIN_EXE_cairn"))
-}
+mod common;
+use common::cargo_bin;
 
 /// A source in a directory of its own, removed when the test ends.
 struct Fixture {

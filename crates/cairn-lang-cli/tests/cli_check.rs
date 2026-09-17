@@ -1,18 +1,9 @@
 //! End-to-end tests for `cairn check <file>`.
 
 use std::path::PathBuf;
-use std::process::Command;
 
-fn cargo_bin() -> PathBuf {
-    PathBuf::from(env!("CARGO_BIN_EXE_cairn"))
-}
-
-fn examples_dir() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("..")
-        .join("..")
-        .join("examples")
-}
+mod common;
+use common::{cairn, examples_dir};
 
 fn fixtures_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -21,14 +12,6 @@ fn fixtures_dir() -> PathBuf {
         .join("tests")
         .join("fixtures")
         .join("check")
-}
-
-fn run_check(args: &[&str]) -> std::process::Output {
-    Command::new(cargo_bin())
-        .arg("check")
-        .args(args)
-        .output()
-        .expect("failed to invoke cairn binary")
 }
 
 #[test]
@@ -42,7 +25,7 @@ fn text_diagnostics_go_where_every_other_subcommand_sends_them() {
     // and belongs on stdout, where a consumer redirects it deliberately —
     // pinned separately below.
     let path = fixtures_dir().join("duplicate.crn");
-    let out = run_check(&[path.to_str().unwrap()]);
+    let out = cairn("check", &[path.to_str().unwrap()]);
     assert_eq!(out.status.code(), Some(1));
     let stdout = String::from_utf8(out.stdout).expect("utf-8");
     let stderr = String::from_utf8(out.stderr).expect("utf-8");
@@ -65,7 +48,7 @@ fn a_header_that_names_no_version_is_reported_without_refusing_the_file() {
     // into a refused build, and the severity table alone does not say
     // what `cairn check` does with it.
     let path = fixtures_dir().join("cairn_version.crn");
-    let out = run_check(&[path.to_str().unwrap()]);
+    let out = cairn("check", &[path.to_str().unwrap()]);
     let stderr = String::from_utf8(out.stderr).expect("utf-8");
     assert_eq!(out.status.code(), Some(0), "stderr={stderr}");
     assert!(
@@ -77,7 +60,7 @@ fn a_header_that_names_no_version_is_reported_without_refusing_the_file() {
 #[test]
 fn cli_1_clean_example_exits_zero_and_says_nothing_on_either_stream() {
     let path = examples_dir().join("cottage.crn");
-    let out = run_check(&[path.to_str().unwrap()]);
+    let out = cairn("check", &[path.to_str().unwrap()]);
     assert!(
         out.status.success(),
         "stderr={}",
@@ -100,7 +83,7 @@ fn cli_1_clean_example_exits_zero_and_says_nothing_on_either_stream() {
 #[test]
 fn cli_2_broken_fixture_exits_one_with_position_anchored_output() {
     let path = fixtures_dir().join("duplicate.crn");
-    let out = run_check(&[path.to_str().unwrap()]);
+    let out = cairn("check", &[path.to_str().unwrap()]);
     assert_eq!(out.status.code(), Some(1));
     let reported = String::from_utf8(out.stderr).expect("utf-8");
     assert!(
@@ -130,14 +113,14 @@ fn cli_2_broken_fixture_exits_one_with_position_anchored_output() {
 
 #[test]
 fn cli_3_missing_file_exits_with_code_two() {
-    let out = run_check(&["does-not-exist.crn"]);
+    let out = cairn("check", &["does-not-exist.crn"]);
     assert_eq!(out.status.code(), Some(2));
 }
 
 #[test]
 fn cli_4_clean_fixture_json_output_is_empty_array() {
     let path = fixtures_dir().join("clean.crn");
-    let out = run_check(&[path.to_str().unwrap(), "--format", "json"]);
+    let out = cairn("check", &[path.to_str().unwrap(), "--format", "json"]);
     assert!(
         out.status.success(),
         "stderr={}",
@@ -154,7 +137,7 @@ fn cli_5_parse_failure_exits_one_with_parse_style_message() {
     // A file the parser rejects must still hand the user a gcc-style
     // location, just like `cairn parse` does today.
     let bad = tempfile_with_contents("directive", "@unknown_directive nope\n");
-    let out = run_check(&[bad.arg()]);
+    let out = cairn("check", &[bad.arg()]);
     assert_eq!(out.status.code(), Some(1));
     let stderr = String::from_utf8(out.stderr).expect("utf-8");
     assert!(
@@ -180,7 +163,7 @@ fn cli_end_of_line_parse_error_names_the_line_that_has_it() {
         ("none", "def foo bar"),
     ] {
         let file = tempfile_with_contents(label, source);
-        let out = run_check(&[file.arg()]);
+        let out = cairn("check", &[file.arg()]);
         assert_eq!(out.status.code(), Some(1), "{label}");
         let stderr = String::from_utf8(out.stderr).expect("utf-8");
         assert!(
@@ -193,7 +176,7 @@ fn cli_end_of_line_parse_error_names_the_line_that_has_it() {
 #[test]
 fn cli_unknown_keyword_fixture_lists_known_keywords_in_a_note() {
     let path = fixtures_dir().join("unknown_keyword.crn");
-    let out = run_check(&[path.to_str().unwrap()]);
+    let out = cairn("check", &[path.to_str().unwrap()]);
     assert_eq!(out.status.code(), Some(1));
     let reported = String::from_utf8(out.stderr).expect("utf-8");
     assert!(reported.contains("E_UNKNOWN_KEYWORD"));
@@ -227,7 +210,7 @@ fn cli_json_output_carries_line_and_col_for_every_diagnostic() {
     // Without `line` / `col` the JSON form would be useless to anything
     // that wants to underline the offending range.
     let path = fixtures_dir().join("duplicate.crn");
-    let out = run_check(&[path.to_str().unwrap(), "--format", "json"]);
+    let out = cairn("check", &[path.to_str().unwrap(), "--format", "json"]);
     assert_eq!(out.status.code(), Some(1));
     let stdout = String::from_utf8(out.stdout).expect("utf-8");
     let parsed: serde_json::Value = serde_json::from_str(&stdout).expect("valid JSON");
@@ -288,7 +271,7 @@ fn cli_json_output_carries_line_and_col_for_every_diagnostic() {
 #[test]
 fn cli_type_mismatch_fixture_reports_both_label_and_size_codes() {
     let path = fixtures_dir().join("type_mismatch.crn");
-    let out = run_check(&[path.to_str().unwrap()]);
+    let out = cairn("check", &[path.to_str().unwrap()]);
     assert_eq!(out.status.code(), Some(1));
     let reported = String::from_utf8(out.stderr).expect("utf-8");
     assert!(reported.contains("E_TYPE_MISMATCH_LABEL"));

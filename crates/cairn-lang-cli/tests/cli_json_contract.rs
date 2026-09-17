@@ -8,28 +8,11 @@
 
 use std::fs;
 use std::path::PathBuf;
-use std::process::Command;
 
 use tempfile::TempDir;
 
-fn cargo_bin() -> PathBuf {
-    PathBuf::from(env!("CARGO_BIN_EXE_cairn"))
-}
-
-fn examples_dir() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("..")
-        .join("..")
-        .join("examples")
-}
-
-fn run(sub: &str, args: &[&str]) -> std::process::Output {
-    Command::new(cargo_bin())
-        .arg(sub)
-        .args(args)
-        .output()
-        .expect("failed to invoke cairn binary")
-}
+mod common;
+use common::{cairn, examples_dir};
 
 /// A source no lexer pass will take: `%` is in no token.
 fn unparsable(dir: &TempDir) -> PathBuf {
@@ -53,7 +36,7 @@ fn unresolved(dir: &TempDir) -> PathBuf {
 fn check_json_renders_a_parse_failure_as_a_diagnostic() {
     let tmp = TempDir::new().expect("tempdir");
     let path = unparsable(&tmp);
-    let out = run("check", &[path.to_str().unwrap(), "--format", "json"]);
+    let out = cairn("check", &[path.to_str().unwrap(), "--format", "json"]);
     assert_eq!(out.status.code(), Some(1));
     let stdout = String::from_utf8(out.stdout).expect("utf-8");
     let parsed: serde_json::Value = serde_json::from_str(&stdout)
@@ -77,7 +60,7 @@ fn check_text_renders_a_parse_failure_like_every_other_finding() {
     // grep for `error[E_` did not match.
     let tmp = TempDir::new().expect("tempdir");
     let path = unparsable(&tmp);
-    let out = run("check", &[path.to_str().unwrap()]);
+    let out = cairn("check", &[path.to_str().unwrap()]);
     assert_eq!(out.status.code(), Some(1));
     let stderr = String::from_utf8(out.stderr).expect("utf-8");
     let stdout = String::from_utf8(out.stdout).expect("utf-8");
@@ -99,7 +82,7 @@ fn check_text_renders_a_parse_failure_like_every_other_finding() {
 fn info_json_renders_a_parse_failure_as_a_document_of_its_own() {
     let tmp = TempDir::new().expect("tempdir");
     let path = unparsable(&tmp);
-    let out = run("info", &[path.to_str().unwrap(), "--format", "json"]);
+    let out = cairn("info", &[path.to_str().unwrap(), "--format", "json"]);
     assert_eq!(out.status.code(), Some(1));
     let stdout = String::from_utf8(out.stdout).expect("utf-8");
     let parsed: serde_json::Value = serde_json::from_str(&stdout)
@@ -124,7 +107,7 @@ fn info_json_renders_a_check_failure_the_same_way() {
     // the flag honest for one kind of failure and silent for the other.
     let tmp = TempDir::new().expect("tempdir");
     let path = unresolved(&tmp);
-    let out = run("info", &[path.to_str().unwrap(), "--format", "json"]);
+    let out = cairn("info", &[path.to_str().unwrap(), "--format", "json"]);
     assert_eq!(out.status.code(), Some(1));
     let stdout = String::from_utf8(out.stdout).expect("utf-8");
     let parsed: serde_json::Value = serde_json::from_str(&stdout)
@@ -143,7 +126,7 @@ fn info_json_on_a_clean_source_is_still_the_report() {
     // The failure document is additive: a source that has a report still
     // gets exactly the report, with no `diagnostics` key grafted on.
     let path = examples_dir().join("cottage.crn");
-    let out = run("info", &[path.to_str().unwrap(), "--format", "json"]);
+    let out = cairn("info", &[path.to_str().unwrap(), "--format", "json"]);
     assert!(out.status.success());
     let stdout = String::from_utf8(out.stdout).expect("utf-8");
     let parsed: serde_json::Value = serde_json::from_str(&stdout).expect("valid JSON");
@@ -156,7 +139,7 @@ fn an_unreadable_source_is_still_told_apart_from_an_unparsable_one() {
     // A missing file is the caller's mistake and exits 2; a file that does
     // not parse is the source's and exits 1. Neither should have moved.
     for sub in ["check", "info"] {
-        let missing = run(sub, &["definitely-not-a-file.crn", "--format", "json"]);
+        let missing = cairn(sub, &["definitely-not-a-file.crn", "--format", "json"]);
         assert_eq!(
             missing.status.code(),
             Some(2),
@@ -164,7 +147,7 @@ fn an_unreadable_source_is_still_told_apart_from_an_unparsable_one() {
         );
         let tmp = TempDir::new().expect("tempdir");
         let bad = unparsable(&tmp);
-        let out = run(sub, &[bad.to_str().unwrap(), "--format", "json"]);
+        let out = cairn(sub, &[bad.to_str().unwrap(), "--format", "json"]);
         assert_eq!(
             out.status.code(),
             Some(1),

@@ -10,18 +10,9 @@
 //! `compile` runs, against the same table, writing nothing.
 
 use std::path::PathBuf;
-use std::process::Command;
 
-fn cargo_bin() -> PathBuf {
-    PathBuf::from(env!("CARGO_BIN_EXE_cairn"))
-}
-
-fn examples_dir() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("..")
-        .join("..")
-        .join("examples")
-}
+mod common;
+use common::{cairn, examples_dir};
 
 /// The repro this flag was added for: a theme slot bound to a block no
 /// version has.
@@ -73,25 +64,20 @@ fn fixture(dir: &std::path::Path, source: &str) -> PathBuf {
     path
 }
 
-fn run_check(args: &[&str]) -> std::process::Output {
-    Command::new(cargo_bin())
-        .arg("check")
-        .args(args)
-        .output()
-        .expect("failed to invoke cairn binary")
-}
-
 #[test]
 fn a_pinned_target_reports_an_id_that_target_does_not_declare() {
     let tmp = tempfile::TempDir::new().expect("tempdir");
     let src = fixture(tmp.path(), UNKNOWN_ID);
-    let out = run_check(&[
-        src.to_str().unwrap(),
-        "--edition",
-        "java",
-        "--target",
-        "1.21.4",
-    ]);
+    let out = cairn(
+        "check",
+        &[
+            src.to_str().unwrap(),
+            "--edition",
+            "java",
+            "--target",
+            "1.21.4",
+        ],
+    );
     let stderr = String::from_utf8(out.stderr).expect("utf-8");
     assert_eq!(out.status.code(), Some(1), "stderr={stderr}");
     assert!(
@@ -114,13 +100,13 @@ fn without_a_target_the_same_source_still_passes() {
     // on the target the author actually compiles for.
     let tmp = tempfile::TempDir::new().expect("tempdir");
     let src = fixture(tmp.path(), UNKNOWN_ID);
-    let out = run_check(&[src.to_str().unwrap()]);
+    let out = cairn("check", &[src.to_str().unwrap()]);
     let stderr = String::from_utf8(out.stderr).expect("utf-8");
     assert_eq!(out.status.code(), Some(0), "stderr={stderr}");
     // And an `--edition` pin alone is still not a version: it picks theme
     // variants and the table `@intended_targets` is weighed in, neither of
     // which is an id table.
-    let out = run_check(&[src.to_str().unwrap(), "--edition", "java"]);
+    let out = cairn("check", &[src.to_str().unwrap(), "--edition", "java"]);
     let stderr = String::from_utf8(out.stderr).expect("utf-8");
     assert_eq!(out.status.code(), Some(0), "stderr={stderr}");
 }
@@ -134,13 +120,16 @@ fn a_renamed_id_is_judged_per_version_not_per_edition() {
     let tmp = tempfile::TempDir::new().expect("tempdir");
     let src = fixture(tmp.path(), RENAMED_ID);
 
-    let refused = run_check(&[
-        src.to_str().unwrap(),
-        "--edition",
-        "bedrock",
-        "--target",
-        "1.21.0",
-    ]);
+    let refused = cairn(
+        "check",
+        &[
+            src.to_str().unwrap(),
+            "--edition",
+            "bedrock",
+            "--target",
+            "1.21.0",
+        ],
+    );
     let stderr = String::from_utf8(refused.stderr).expect("utf-8");
     assert_eq!(refused.status.code(), Some(1), "stderr={stderr}");
     assert!(
@@ -154,13 +143,16 @@ fn a_renamed_id_is_judged_per_version_not_per_edition() {
         "the older spelling is the repair, got: {stderr}",
     );
 
-    let accepted = run_check(&[
-        src.to_str().unwrap(),
-        "--edition",
-        "bedrock",
-        "--target",
-        "1.21.40",
-    ]);
+    let accepted = cairn(
+        "check",
+        &[
+            src.to_str().unwrap(),
+            "--edition",
+            "bedrock",
+            "--target",
+            "1.21.40",
+        ],
+    );
     let stderr = String::from_utf8(accepted.stderr).expect("utf-8");
     assert_eq!(accepted.status.code(), Some(0), "stderr={stderr}");
 }
@@ -173,15 +165,18 @@ fn the_json_report_carries_the_unknown_id_payload() {
     // makes the documented shape observable.
     let tmp = tempfile::TempDir::new().expect("tempdir");
     let src = fixture(tmp.path(), UNKNOWN_ID);
-    let out = run_check(&[
-        src.to_str().unwrap(),
-        "--edition",
-        "java",
-        "--target",
-        "1.21.4",
-        "--format",
-        "json",
-    ]);
+    let out = cairn(
+        "check",
+        &[
+            src.to_str().unwrap(),
+            "--edition",
+            "java",
+            "--target",
+            "1.21.4",
+            "--format",
+            "json",
+        ],
+    );
     assert_eq!(out.status.code(), Some(1));
     let stdout = String::from_utf8(out.stdout).expect("utf-8");
     let parsed: serde_json::Value = serde_json::from_str(&stdout).expect("one JSON document");
@@ -207,7 +202,7 @@ fn target_without_edition_is_refused_as_a_usage_error() {
     // read.
     let tmp = tempfile::TempDir::new().expect("tempdir");
     let src = fixture(tmp.path(), UNKNOWN_ID);
-    let out = run_check(&[src.to_str().unwrap(), "--target", "1.21.4"]);
+    let out = cairn("check", &[src.to_str().unwrap(), "--target", "1.21.4"]);
     let stderr = String::from_utf8(out.stderr).expect("utf-8");
     assert_eq!(out.status.code(), Some(2), "stderr={stderr}");
     assert!(
@@ -223,13 +218,16 @@ fn a_target_the_edition_does_not_ship_refuses_the_run() {
     // does not exist" is not an answer that clears the file.
     let tmp = tempfile::TempDir::new().expect("tempdir");
     let src = fixture(tmp.path(), UNKNOWN_ID);
-    let out = run_check(&[
-        src.to_str().unwrap(),
-        "--edition",
-        "java",
-        "--target",
-        "9.9.9",
-    ]);
+    let out = cairn(
+        "check",
+        &[
+            src.to_str().unwrap(),
+            "--edition",
+            "java",
+            "--target",
+            "9.9.9",
+        ],
+    );
     let stderr = String::from_utf8(out.stderr).expect("utf-8");
     assert_eq!(out.status.code(), Some(1), "stderr={stderr}");
     assert!(
@@ -248,13 +246,16 @@ fn a_target_that_does_not_resolve_still_lowers_the_file() {
     // findings that were true the first time.
     let tmp = tempfile::TempDir::new().expect("tempdir");
     let src = fixture(tmp.path(), ABSTRACT_TOKEN_TYPO);
-    let out = run_check(&[
-        src.to_str().unwrap(),
-        "--edition",
-        "java",
-        "--target",
-        "9.9.9",
-    ]);
+    let out = cairn(
+        "check",
+        &[
+            src.to_str().unwrap(),
+            "--edition",
+            "java",
+            "--target",
+            "9.9.9",
+        ],
+    );
     let stderr = String::from_utf8(out.stderr).expect("utf-8");
     assert_eq!(out.status.code(), Some(1), "stderr={stderr}");
     let finding = stderr
@@ -283,15 +284,18 @@ fn the_json_report_of_an_unshipped_target_is_the_findings_and_the_exit_code() {
     // is a truthful report of what was checked rather than an empty one.
     let tmp = tempfile::TempDir::new().expect("tempdir");
     let src = fixture(tmp.path(), ABSTRACT_TOKEN_TYPO);
-    let out = run_check(&[
-        src.to_str().unwrap(),
-        "--edition",
-        "java",
-        "--target",
-        "9.9.9",
-        "--format",
-        "json",
-    ]);
+    let out = cairn(
+        "check",
+        &[
+            src.to_str().unwrap(),
+            "--edition",
+            "java",
+            "--target",
+            "9.9.9",
+            "--format",
+            "json",
+        ],
+    );
     let stdout = String::from_utf8(out.stdout).expect("utf-8");
     let stderr = String::from_utf8(out.stderr).expect("utf-8");
     assert_eq!(out.status.code(), Some(1), "stderr={stderr}");
@@ -321,13 +325,16 @@ fn a_lowering_finding_that_is_not_an_id_verdict_reaches_a_pinned_check() {
     let tmp = tempfile::TempDir::new().expect("tempdir");
 
     let token = fixture(tmp.path(), ABSTRACT_TOKEN_TYPO);
-    let out = run_check(&[
-        token.to_str().unwrap(),
-        "--edition",
-        "java",
-        "--target",
-        "1.21.4",
-    ]);
+    let out = cairn(
+        "check",
+        &[
+            token.to_str().unwrap(),
+            "--edition",
+            "java",
+            "--target",
+            "1.21.4",
+        ],
+    );
     let stderr = String::from_utf8(out.stderr).expect("utf-8");
     assert_eq!(out.status.code(), Some(1), "stderr={stderr}");
     assert!(
@@ -337,13 +344,16 @@ fn a_lowering_finding_that_is_not_an_id_verdict_reaches_a_pinned_check() {
 
     let roof = tmp.path().join("hut.crn");
     std::fs::write(&roof, ROOF_OUTSIDE_THE_STAIR_FAMILY).expect("write fixture");
-    let out = run_check(&[
-        roof.to_str().unwrap(),
-        "--edition",
-        "java",
-        "--target",
-        "1.21.4",
-    ]);
+    let out = cairn(
+        "check",
+        &[
+            roof.to_str().unwrap(),
+            "--edition",
+            "java",
+            "--target",
+            "1.21.4",
+        ],
+    );
     let stderr = String::from_utf8(out.stderr).expect("utf-8");
     assert_eq!(out.status.code(), Some(1), "stderr={stderr}");
     assert!(stderr.contains("E_INCOMPATIBLE_MATERIAL"), "got: {stderr}");
@@ -357,13 +367,16 @@ fn a_lost_scope_refuses_the_pinned_check_as_it_refuses_the_compile() {
     // source the flag was written against.
     let tmp = tempfile::TempDir::new().expect("tempdir");
     let src = fixture(tmp.path(), ONE_SCOPE_WITHOUT_A_SIZE);
-    let out = run_check(&[
-        src.to_str().unwrap(),
-        "--edition",
-        "java",
-        "--target",
-        "1.21.4",
-    ]);
+    let out = cairn(
+        "check",
+        &[
+            src.to_str().unwrap(),
+            "--edition",
+            "java",
+            "--target",
+            "1.21.4",
+        ],
+    );
     let stderr = String::from_utf8(out.stderr).expect("utf-8");
     assert_eq!(out.status.code(), Some(1), "stderr={stderr}");
     assert!(
@@ -381,7 +394,7 @@ fn a_lost_scope_refuses_the_pinned_check_as_it_refuses_the_compile() {
     );
     // And the unpinned run is unchanged: no lowering, so nothing is lost
     // and the warning alone does not fail the gate.
-    let out = run_check(&[src.to_str().unwrap()]);
+    let out = cairn("check", &[src.to_str().unwrap()]);
     let stderr = String::from_utf8(out.stderr).expect("utf-8");
     assert_eq!(out.status.code(), Some(0), "stderr={stderr}");
     assert!(!stderr.contains("E_PARTIAL_BUILD"), "got: {stderr}");
@@ -395,13 +408,16 @@ fn latest_pins_a_version_like_any_other_target() {
     // id check runs and names the version it resolved to.
     let tmp = tempfile::TempDir::new().expect("tempdir");
     let src = fixture(tmp.path(), UNKNOWN_ID);
-    let out = run_check(&[
-        src.to_str().unwrap(),
-        "--edition",
-        "java",
-        "--target",
-        "latest",
-    ]);
+    let out = cairn(
+        "check",
+        &[
+            src.to_str().unwrap(),
+            "--edition",
+            "java",
+            "--target",
+            "latest",
+        ],
+    );
     let stderr = String::from_utf8(out.stderr).expect("utf-8");
     assert_eq!(out.status.code(), Some(1), "stderr={stderr}");
     assert!(stderr.contains("E_UNKNOWN_ID"), "got: {stderr}");
@@ -423,13 +439,16 @@ fn a_bad_target_is_reported_after_the_findings_in_the_file() {
         tmp.path(),
         "struct s size=2x2 size=3x3\n  floor mat_slot=floor\n",
     );
-    let out = run_check(&[
-        src.to_str().unwrap(),
-        "--edition",
-        "java",
-        "--target",
-        "9.9.9",
-    ]);
+    let out = cairn(
+        "check",
+        &[
+            src.to_str().unwrap(),
+            "--edition",
+            "java",
+            "--target",
+            "9.9.9",
+        ],
+    );
     let stderr = String::from_utf8(out.stderr).expect("utf-8");
     assert_eq!(out.status.code(), Some(1), "stderr={stderr}");
     let finding = stderr
@@ -459,13 +478,16 @@ fn every_shipped_example_passes_the_pinned_check_on_both_editions() {
             continue;
         }
         for edition in ["java", "bedrock"] {
-            let out = run_check(&[
-                path.to_str().unwrap(),
-                "--edition",
-                edition,
-                "--target",
-                "latest",
-            ]);
+            let out = cairn(
+                "check",
+                &[
+                    path.to_str().unwrap(),
+                    "--edition",
+                    edition,
+                    "--target",
+                    "latest",
+                ],
+            );
             let stderr = String::from_utf8(out.stderr).expect("utf-8");
             assert_eq!(
                 out.status.code(),
@@ -489,13 +511,16 @@ fn a_clean_example_passes_the_pinned_check_and_writes_nothing() {
     let tmp = tempfile::TempDir::new().expect("tempdir");
     let src = tmp.path().join("cottage.crn");
     std::fs::copy(examples_dir().join("cottage.crn"), &src).expect("copy example");
-    let out = run_check(&[
-        src.to_str().unwrap(),
-        "--edition",
-        "java",
-        "--target",
-        "1.21.4",
-    ]);
+    let out = cairn(
+        "check",
+        &[
+            src.to_str().unwrap(),
+            "--edition",
+            "java",
+            "--target",
+            "1.21.4",
+        ],
+    );
     let stderr = String::from_utf8(out.stderr).expect("utf-8");
     assert_eq!(out.status.code(), Some(0), "stderr={stderr}");
     assert!(stderr.trim().is_empty(), "nothing to report, got: {stderr}");

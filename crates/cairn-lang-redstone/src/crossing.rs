@@ -1743,8 +1743,8 @@ mod tests {
         use super::{
             BufferSegment, CellCoord, CellPortDriver, Edition, EditionCell, HashSet, NetRef,
             PlacedCellNode, PlacementIr, PlacementPhase, PortName, RouteLayer, Router, ScopeKind,
-            Span, block_sites, collect_nets, compile_crossing, input_pad, net_trees, placed_cell,
-            reservation, scoped,
+            Span, block_sites, collect_nets, compile_crossing, input_pad, net_trees, reservation,
+            scoped,
         };
         use crate::delay::{BUFFER_REPEATER_TICKS, compile_delay};
         use crate::routing::compile_routing;
@@ -1777,20 +1777,6 @@ mod tests {
         /// before the shape changes.
         fn phase4_scope_strategy() -> impl Strategy<Value = Vec<(u32, u32, bool)>> {
             prop::collection::vec((1u32..=99u32, 0u32..8u32, prop::bool::ANY), 1..=3)
-        }
-
-        /// Placate an unused-import lint when the outer `mod tests`
-        /// re-exports items the inner `super::*` glob would otherwise
-        /// re-import; keeps `placed_cell` alive as an intentional
-        /// symbol import for future cases that want the shorter
-        /// helper.
-        #[allow(dead_code)]
-        fn _keep_placed_cell_alive() -> PlacedCellNode {
-            placed_cell(
-                EditionCell::JavaRepeaterOr,
-                CellCoord::new(0, 0, 0),
-                Vec::new(),
-            )
         }
 
         proptest! {

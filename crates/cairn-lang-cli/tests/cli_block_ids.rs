@@ -10,9 +10,8 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-fn cargo_bin() -> PathBuf {
-    PathBuf::from(env!("CARGO_BIN_EXE_cairn"))
-}
+mod common;
+use common::cargo_bin;
 
 /// A source plus the directory its artifacts would land in, both removed
 /// when the test ends.

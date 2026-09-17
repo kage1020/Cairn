@@ -6,27 +6,8 @@
 //! parse failures exit 1 with a gcc-style diagnostic on stderr, and a
 //! missing file exits 2.
 
-use std::path::PathBuf;
-use std::process::Command;
-
-fn cargo_bin() -> PathBuf {
-    PathBuf::from(env!("CARGO_BIN_EXE_cairn"))
-}
-
-fn examples_dir() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("..")
-        .join("..")
-        .join("examples")
-}
-
-fn run_synth(args: &[&str]) -> std::process::Output {
-    Command::new(cargo_bin())
-        .arg("synth")
-        .args(args)
-        .output()
-        .expect("failed to invoke cairn binary")
-}
+mod common;
+use common::{cairn, examples_dir};
 
 #[test]
 fn cli_synth_requires_experimental_flag() {
@@ -34,7 +15,7 @@ fn cli_synth_requires_experimental_flag() {
     // opt-in flag must exit 2 with a usage hint on stderr so the gate
     // cannot be missed silently.
     let path = examples_dir().join("redstone-door.crn");
-    let out = run_synth(&[path.to_str().unwrap()]);
+    let out = cairn("synth", &[path.to_str().unwrap()]);
     assert_eq!(out.status.code(), Some(2));
     let stderr = String::from_utf8(out.stderr).expect("utf-8");
     assert!(
@@ -50,7 +31,10 @@ fn cli_synth_redstone_door_emits_or_gate_json() {
     // unit test locks. Together they pin both the API (LogicIr shape)
     // and the wire form (JSON serialisation).
     let path = examples_dir().join("redstone-door.crn");
-    let out = run_synth(&["--experimental-logic-synth", path.to_str().unwrap()]);
+    let out = cairn(
+        "synth",
+        &["--experimental-logic-synth", path.to_str().unwrap()],
+    );
     assert!(
         out.status.success(),
         "expected exit 0, stderr={}",
@@ -84,12 +68,15 @@ fn cli_synth_stage_netlist_emits_or_cell_json() {
     // `LogicalCell`, and drivers become `NetRef`s. Pins the JSON shape
     // the Netlist IR stage exposes.
     let path = examples_dir().join("redstone-door.crn");
-    let out = run_synth(&[
-        "--experimental-logic-synth",
-        "--stage",
-        "netlist",
-        path.to_str().unwrap(),
-    ]);
+    let out = cairn(
+        "synth",
+        &[
+            "--experimental-logic-synth",
+            "--stage",
+            "netlist",
+            path.to_str().unwrap(),
+        ],
+    );
     assert!(
         out.status.success(),
         "expected exit 0, stderr={}",
@@ -122,14 +109,17 @@ fn cli_synth_stage_edition_java_maps_or_cell_to_java_repeater_or() {
     // Netlist IR cell. `redstone-door.crn`'s sole Or cell should surface
     // as `java_repeater_or` and the scope should carry `edition: "java"`.
     let path = examples_dir().join("redstone-door.crn");
-    let out = run_synth(&[
-        "--experimental-logic-synth",
-        "--stage",
-        "edition",
-        "--edition",
-        "java",
-        path.to_str().unwrap(),
-    ]);
+    let out = cairn(
+        "synth",
+        &[
+            "--experimental-logic-synth",
+            "--stage",
+            "edition",
+            "--edition",
+            "java",
+            path.to_str().unwrap(),
+        ],
+    );
     assert!(
         out.status.success(),
         "expected exit 0, stderr={}",
@@ -161,14 +151,17 @@ fn cli_synth_stage_edition_bedrock_maps_or_cell_to_bedrock_torch_or() {
     // edition-independent and should match the Java run byte-for-byte
     // apart from the cell tag and the edition field.
     let path = examples_dir().join("redstone-door.crn");
-    let out = run_synth(&[
-        "--experimental-logic-synth",
-        "--stage",
-        "edition",
-        "--edition",
-        "bedrock",
-        path.to_str().unwrap(),
-    ]);
+    let out = cairn(
+        "synth",
+        &[
+            "--experimental-logic-synth",
+            "--stage",
+            "edition",
+            "--edition",
+            "bedrock",
+            path.to_str().unwrap(),
+        ],
+    );
     assert!(
         out.status.success(),
         "expected exit 0, stderr={}",
@@ -193,14 +186,17 @@ fn cli_synth_stage_logic_rejects_edition_flag() {
     // would leave the caller believing it took effect), refuse the run
     // with exit 2. Same policy applies to `--stage netlist`.
     let path = examples_dir().join("redstone-door.crn");
-    let out = run_synth(&[
-        "--experimental-logic-synth",
-        "--stage",
-        "logic",
-        "--edition",
-        "java",
-        path.to_str().unwrap(),
-    ]);
+    let out = cairn(
+        "synth",
+        &[
+            "--experimental-logic-synth",
+            "--stage",
+            "logic",
+            "--edition",
+            "java",
+            path.to_str().unwrap(),
+        ],
+    );
     assert_eq!(out.status.code(), Some(2));
     let stderr = String::from_utf8(out.stderr).expect("utf-8");
     assert!(
@@ -212,14 +208,17 @@ fn cli_synth_stage_logic_rejects_edition_flag() {
 #[test]
 fn cli_synth_stage_netlist_rejects_edition_flag() {
     let path = examples_dir().join("redstone-door.crn");
-    let out = run_synth(&[
-        "--experimental-logic-synth",
-        "--stage",
-        "netlist",
-        "--edition",
-        "bedrock",
-        path.to_str().unwrap(),
-    ]);
+    let out = cairn(
+        "synth",
+        &[
+            "--experimental-logic-synth",
+            "--stage",
+            "netlist",
+            "--edition",
+            "bedrock",
+            path.to_str().unwrap(),
+        ],
+    );
     assert_eq!(out.status.code(), Some(2));
 }
 
@@ -234,14 +233,17 @@ fn cli_synth_stage_placement_java_places_or_cell_beside_the_pad_column() {
     // `--stage placement`, which runs neither routing nor delay
     // insertion.
     let path = examples_dir().join("redstone-door.crn");
-    let out = run_synth(&[
-        "--experimental-logic-synth",
-        "--stage",
-        "placement",
-        "--edition",
-        "java",
-        path.to_str().unwrap(),
-    ]);
+    let out = cairn(
+        "synth",
+        &[
+            "--experimental-logic-synth",
+            "--stage",
+            "placement",
+            "--edition",
+            "java",
+            path.to_str().unwrap(),
+        ],
+    );
     assert!(
         out.status.success(),
         "expected exit 0, stderr={}",
@@ -289,14 +291,17 @@ fn cli_synth_stage_placement_bedrock_matches_java_layout() {
     // contract, so only the `cell` tag and `edition` field differ from
     // the Java run.
     let path = examples_dir().join("redstone-door.crn");
-    let out = run_synth(&[
-        "--experimental-logic-synth",
-        "--stage",
-        "placement",
-        "--edition",
-        "bedrock",
-        path.to_str().unwrap(),
-    ]);
+    let out = cairn(
+        "synth",
+        &[
+            "--experimental-logic-synth",
+            "--stage",
+            "placement",
+            "--edition",
+            "bedrock",
+            path.to_str().unwrap(),
+        ],
+    );
     assert!(
         out.status.success(),
         "expected exit 0, stderr={}",
@@ -322,12 +327,15 @@ fn cli_synth_stage_placement_requires_edition_flag() {
     // running without a target would silently pick a default the
     // caller did not choose. Exit 2 with a usage hint instead.
     let path = examples_dir().join("redstone-door.crn");
-    let out = run_synth(&[
-        "--experimental-logic-synth",
-        "--stage",
-        "placement",
-        path.to_str().unwrap(),
-    ]);
+    let out = cairn(
+        "synth",
+        &[
+            "--experimental-logic-synth",
+            "--stage",
+            "placement",
+            path.to_str().unwrap(),
+        ],
+    );
     assert_eq!(out.status.code(), Some(2));
     let stderr = String::from_utf8(out.stderr).expect("utf-8");
     assert!(
@@ -358,14 +366,17 @@ fn cli_synth_stage_placement_missing_region_exits_one() {
         logic sig.open = sig.a or sig.b\n  \
         door id=d side=front at=center mat_slot=wall opened_by=sig.open\n";
     std::fs::write(&path, source).expect("write missing-region fixture");
-    let out = run_synth(&[
-        "--experimental-logic-synth",
-        "--stage",
-        "placement",
-        "--edition",
-        "java",
-        path.to_str().unwrap(),
-    ]);
+    let out = cairn(
+        "synth",
+        &[
+            "--experimental-logic-synth",
+            "--stage",
+            "placement",
+            "--edition",
+            "java",
+            path.to_str().unwrap(),
+        ],
+    );
     assert_eq!(out.status.code(), Some(1));
     let stderr = String::from_utf8(out.stderr).expect("utf-8");
     assert!(
@@ -394,14 +405,17 @@ fn cli_synth_stage_placement_congestion_exits_one() {
         door id=d side=front at=center mat_slot=wall opened_by=sig.combined\n  \
         circuit region=floor void=1\n";
     std::fs::write(&path, source).expect("write congestion fixture");
-    let out = run_synth(&[
-        "--experimental-logic-synth",
-        "--stage",
-        "placement",
-        "--edition",
-        "java",
-        path.to_str().unwrap(),
-    ]);
+    let out = cairn(
+        "synth",
+        &[
+            "--experimental-logic-synth",
+            "--stage",
+            "placement",
+            "--edition",
+            "java",
+            path.to_str().unwrap(),
+        ],
+    );
     assert_eq!(out.status.code(), Some(1));
     let stderr = String::from_utf8(out.stderr).expect("utf-8");
     assert!(
@@ -416,12 +430,15 @@ fn cli_synth_stage_edition_requires_edition_flag() {
     // a script that forgets the flag cannot silently emit a default
     // Java-tagged IR the caller did not ask for.
     let path = examples_dir().join("redstone-door.crn");
-    let out = run_synth(&[
-        "--experimental-logic-synth",
-        "--stage",
-        "edition",
-        path.to_str().unwrap(),
-    ]);
+    let out = cairn(
+        "synth",
+        &[
+            "--experimental-logic-synth",
+            "--stage",
+            "edition",
+            path.to_str().unwrap(),
+        ],
+    );
     assert_eq!(out.status.code(), Some(2));
     let stderr = String::from_utf8(out.stderr).expect("utf-8");
     assert!(
@@ -447,14 +464,17 @@ fn cli_synth_stage_route_java_fills_wire_length() {
     // `cli_synth_stage_delay_java_fills_local_delay_ticks` is the stage-3
     // dump where it appears.
     let path = examples_dir().join("redstone-door.crn");
-    let out = run_synth(&[
-        "--experimental-logic-synth",
-        "--stage",
-        "route",
-        "--edition",
-        "java",
-        path.to_str().unwrap(),
-    ]);
+    let out = cairn(
+        "synth",
+        &[
+            "--experimental-logic-synth",
+            "--stage",
+            "route",
+            "--edition",
+            "java",
+            path.to_str().unwrap(),
+        ],
+    );
     assert!(
         out.status.success(),
         "expected exit 0, stderr={}",
@@ -489,14 +509,17 @@ fn cli_synth_stage_route_bedrock_matches_java_wire_length() {
     // and pad coordinates are the same on Java and Bedrock), so
     // routing must produce the same `wire_length` on both editions.
     let path = examples_dir().join("redstone-door.crn");
-    let out = run_synth(&[
-        "--experimental-logic-synth",
-        "--stage",
-        "route",
-        "--edition",
-        "bedrock",
-        path.to_str().unwrap(),
-    ]);
+    let out = cairn(
+        "synth",
+        &[
+            "--experimental-logic-synth",
+            "--stage",
+            "route",
+            "--edition",
+            "bedrock",
+            path.to_str().unwrap(),
+        ],
+    );
     assert!(
         out.status.success(),
         "expected exit 0, stderr={}",
@@ -520,12 +543,15 @@ fn cli_synth_stage_route_requires_edition_flag() {
     // `--stage route` without `--edition` is a usage mistake symmetric
     // to `--stage placement` / `--stage edition`: exit 2 with a hint.
     let path = examples_dir().join("redstone-door.crn");
-    let out = run_synth(&[
-        "--experimental-logic-synth",
-        "--stage",
-        "route",
-        path.to_str().unwrap(),
-    ]);
+    let out = cairn(
+        "synth",
+        &[
+            "--experimental-logic-synth",
+            "--stage",
+            "route",
+            path.to_str().unwrap(),
+        ],
+    );
     assert_eq!(out.status.code(), Some(2));
     let stderr = String::from_utf8(out.stderr).expect("utf-8");
     assert!(
@@ -561,14 +587,17 @@ fn cli_synth_stage_route_congestion_exits_one() {
         door id=d side=front at=center mat_slot=wall opened_by=sig.c1\n  \
         circuit region=floor void=1\n";
     std::fs::write(&path, source).expect("write congestion fixture");
-    let out = run_synth(&[
-        "--experimental-logic-synth",
-        "--stage",
-        "route",
-        "--edition",
-        "java",
-        path.to_str().unwrap(),
-    ]);
+    let out = cairn(
+        "synth",
+        &[
+            "--experimental-logic-synth",
+            "--stage",
+            "route",
+            "--edition",
+            "java",
+            path.to_str().unwrap(),
+        ],
+    );
     assert_eq!(out.status.code(), Some(1));
     let stderr = String::from_utf8(out.stderr).expect("utf-8");
     assert!(
@@ -588,14 +617,17 @@ fn cli_synth_stage_route_rejects_missing_edition_when_stage_neutral() {
     // `--edition` on `--stage netlist` still exits 2 even after
     // `route` joins the accept list.
     let path = examples_dir().join("redstone-door.crn");
-    let out = run_synth(&[
-        "--experimental-logic-synth",
-        "--stage",
-        "netlist",
-        "--edition",
-        "java",
-        path.to_str().unwrap(),
-    ]);
+    let out = cairn(
+        "synth",
+        &[
+            "--experimental-logic-synth",
+            "--stage",
+            "netlist",
+            "--edition",
+            "java",
+            path.to_str().unwrap(),
+        ],
+    );
     assert_eq!(out.status.code(), Some(2));
 }
 
@@ -608,14 +640,17 @@ fn cli_synth_stage_delay_java_fills_local_delay_ticks() {
     // attenuation limit) and `wire_length` survives from the routing
     // stage.
     let path = examples_dir().join("redstone-door.crn");
-    let out = run_synth(&[
-        "--experimental-logic-synth",
-        "--stage",
-        "delay",
-        "--edition",
-        "java",
-        path.to_str().unwrap(),
-    ]);
+    let out = cairn(
+        "synth",
+        &[
+            "--experimental-logic-synth",
+            "--stage",
+            "delay",
+            "--edition",
+            "java",
+            path.to_str().unwrap(),
+        ],
+    );
     assert!(
         out.status.success(),
         "expected exit 0, stderr={}",
@@ -654,14 +689,17 @@ fn cli_synth_stage_delay_bedrock_matches_bedrock_torch_or() {
     // on Java. Pins the "delay is edition-specific by cell choice"
     // split into the CLI surface.
     let path = examples_dir().join("redstone-door.crn");
-    let out = run_synth(&[
-        "--experimental-logic-synth",
-        "--stage",
-        "delay",
-        "--edition",
-        "bedrock",
-        path.to_str().unwrap(),
-    ]);
+    let out = cairn(
+        "synth",
+        &[
+            "--experimental-logic-synth",
+            "--stage",
+            "delay",
+            "--edition",
+            "bedrock",
+            path.to_str().unwrap(),
+        ],
+    );
     assert!(
         out.status.success(),
         "expected exit 0, stderr={}",
@@ -690,12 +728,15 @@ fn cli_synth_stage_delay_requires_edition_flag() {
     // `--stage delay` without `--edition` is a usage mistake symmetric
     // to `--stage route`: exit 2 with a hint naming the tripped stage.
     let path = examples_dir().join("redstone-door.crn");
-    let out = run_synth(&[
-        "--experimental-logic-synth",
-        "--stage",
-        "delay",
-        path.to_str().unwrap(),
-    ]);
+    let out = cairn(
+        "synth",
+        &[
+            "--experimental-logic-synth",
+            "--stage",
+            "delay",
+            path.to_str().unwrap(),
+        ],
+    );
     assert_eq!(out.status.code(), Some(2));
     let stderr = String::from_utf8(out.stderr).expect("utf-8");
     assert!(
@@ -734,14 +775,17 @@ fn cli_synth_stage_delay_inherits_upstream_congestion_failure() {
         door id=d side=front at=center mat_slot=wall opened_by=sig.c1\n  \
         circuit region=floor void=1\n";
     std::fs::write(&path, source).expect("write congestion fixture");
-    let out = run_synth(&[
-        "--experimental-logic-synth",
-        "--stage",
-        "delay",
-        "--edition",
-        "java",
-        path.to_str().unwrap(),
-    ]);
+    let out = cairn(
+        "synth",
+        &[
+            "--experimental-logic-synth",
+            "--stage",
+            "delay",
+            "--edition",
+            "java",
+            path.to_str().unwrap(),
+        ],
+    );
     assert_eq!(out.status.code(), Some(1));
     let stderr = String::from_utf8(out.stderr).expect("utf-8");
     assert!(
@@ -770,14 +814,17 @@ fn cli_synth_stage_delay_attenuation_limit_exits_one() {
         door id=d side=front at=center mat_slot=wall opened_by=sig.out\n  \
         circuit region=floor void=3\n";
     std::fs::write(&path, source).expect("write attenuation fixture");
-    let out = run_synth(&[
-        "--experimental-logic-synth",
-        "--stage",
-        "delay",
-        "--edition",
-        "java",
-        path.to_str().unwrap(),
-    ]);
+    let out = cairn(
+        "synth",
+        &[
+            "--experimental-logic-synth",
+            "--stage",
+            "delay",
+            "--edition",
+            "java",
+            path.to_str().unwrap(),
+        ],
+    );
     assert_eq!(out.status.code(), Some(1));
     let stderr = String::from_utf8(out.stderr).expect("utf-8");
     assert!(
@@ -794,7 +841,7 @@ fn cli_synth_stage_delay_attenuation_limit_exits_one() {
 fn cli_synth_missing_file_exits_two() {
     // Path-not-found returns 2 (user-input mistake), consistent with
     // `cairn parse`/`check`/`lower`/`compile`.
-    let out = run_synth(&["--experimental-logic-synth", "no-such-file.crn"]);
+    let out = cairn("synth", &["--experimental-logic-synth", "no-such-file.crn"]);
     assert_eq!(out.status.code(), Some(2));
 }
 
@@ -807,7 +854,10 @@ fn cli_synth_unparseable_source_exits_one() {
     let dir = tempfile::tempdir().expect("temp dir");
     let path = dir.path().join("broken.crn");
     std::fs::write(&path, "@cairn 2026.06\n\nstruct 3xnot-a-size\n").expect("write scratch file");
-    let out = run_synth(&["--experimental-logic-synth", path.to_str().unwrap()]);
+    let out = cairn(
+        "synth",
+        &["--experimental-logic-synth", path.to_str().unwrap()],
+    );
     assert_eq!(out.status.code(), Some(1));
     let stderr = String::from_utf8(out.stderr).expect("utf-8");
     assert!(
@@ -824,14 +874,17 @@ fn cli_synth_stage_crossing_java_legalizes_or_cell_scope() {
     // apart from the `stage` tag — but the stage's JSON round-trip
     // must still succeed and expose the same scope shape.
     let path = examples_dir().join("redstone-door.crn");
-    let out = run_synth(&[
-        "--experimental-logic-synth",
-        "--stage",
-        "crossing",
-        "--edition",
-        "java",
-        path.to_str().unwrap(),
-    ]);
+    let out = cairn(
+        "synth",
+        &[
+            "--experimental-logic-synth",
+            "--stage",
+            "crossing",
+            "--edition",
+            "java",
+            path.to_str().unwrap(),
+        ],
+    );
     let stderr = String::from_utf8_lossy(&out.stderr).into_owned();
     assert!(out.status.success(), "expected exit 0, stderr={stderr}");
     // Nothing at all. Two sensors feed the cell, so the second one's
@@ -888,14 +941,17 @@ fn cli_synth_stage_crossing_bedrock_legalizes_or_cell_scope() {
     // `--stage crossing` gets the same edition-parity coverage the
     // other edition-tagged stages already have.
     let path = examples_dir().join("redstone-door.crn");
-    let out = run_synth(&[
-        "--experimental-logic-synth",
-        "--stage",
-        "crossing",
-        "--edition",
-        "bedrock",
-        path.to_str().unwrap(),
-    ]);
+    let out = cairn(
+        "synth",
+        &[
+            "--experimental-logic-synth",
+            "--stage",
+            "crossing",
+            "--edition",
+            "bedrock",
+            path.to_str().unwrap(),
+        ],
+    );
     let stderr = String::from_utf8_lossy(&out.stderr).into_owned();
     assert!(out.status.success(), "expected exit 0, stderr={stderr}");
     // Nothing at all. Two sensors feed the cell, so the second one's
@@ -948,12 +1004,15 @@ fn cli_synth_stage_crossing_requires_edition_flag() {
     // required flag. The crossing pass reads edition-tagged cells, so
     // the flag is not optional.
     let path = examples_dir().join("redstone-door.crn");
-    let out = run_synth(&[
-        "--experimental-logic-synth",
-        "--stage",
-        "crossing",
-        path.to_str().unwrap(),
-    ]);
+    let out = cairn(
+        "synth",
+        &[
+            "--experimental-logic-synth",
+            "--stage",
+            "crossing",
+            path.to_str().unwrap(),
+        ],
+    );
     assert_eq!(out.status.code(), Some(2));
     let stderr = String::from_utf8(out.stderr).expect("utf-8");
     assert!(
@@ -987,14 +1046,17 @@ fn cli_synth_stage_crossing_inherits_upstream_attenuation_failure() {
         door id=d side=front at=center mat_slot=wall opened_by=sig.out\n  \
         circuit region=floor void=3\n";
     std::fs::write(&path, source).expect("write attenuation fixture");
-    let out = run_synth(&[
-        "--experimental-logic-synth",
-        "--stage",
-        "crossing",
-        "--edition",
-        "java",
-        path.to_str().unwrap(),
-    ]);
+    let out = cairn(
+        "synth",
+        &[
+            "--experimental-logic-synth",
+            "--stage",
+            "crossing",
+            "--edition",
+            "java",
+            path.to_str().unwrap(),
+        ],
+    );
     assert_eq!(out.status.code(), Some(1));
     let stderr = String::from_utf8(out.stderr).expect("utf-8");
     assert!(
@@ -1014,14 +1076,17 @@ fn cli_synth_stage_route_reports_cross_layer_clearance_and_exits_zero() {
     // promoted to a refusal by accident would show up here as an empty
     // stdout and an exit of 1.
     let path = examples_dir().join("crossbar.crn");
-    let out = run_synth(&[
-        "--experimental-logic-synth",
-        "--stage",
-        "route",
-        "--edition",
-        "java",
-        path.to_str().unwrap(),
-    ]);
+    let out = cairn(
+        "synth",
+        &[
+            "--experimental-logic-synth",
+            "--stage",
+            "route",
+            "--edition",
+            "java",
+            path.to_str().unwrap(),
+        ],
+    );
     assert_eq!(out.status.code(), Some(0));
     let stderr = String::from_utf8(out.stderr).expect("utf-8");
     assert!(
@@ -1080,14 +1145,17 @@ struct crossbar size=4x4
     let dir = tempfile::tempdir().expect("temp dir");
     let path = dir.path().join("crossbar.crn");
     std::fs::write(&path, source).expect("write congestion fixture");
-    let out = run_synth(&[
-        "--experimental-logic-synth",
-        "--stage",
-        "crossing",
-        "--edition",
-        "java",
-        path.to_str().unwrap(),
-    ]);
+    let out = cairn(
+        "synth",
+        &[
+            "--experimental-logic-synth",
+            "--stage",
+            "crossing",
+            "--edition",
+            "java",
+            path.to_str().unwrap(),
+        ],
+    );
     assert_eq!(out.status.code(), Some(1));
     let stderr = String::from_utf8(out.stderr).expect("utf-8");
     assert!(
@@ -1125,7 +1193,7 @@ struct crossbar size=4x4
 /// on one line — steadier to parse than the `--help` block, where each
 /// value carries a paragraph of prose.
 fn stage_values() -> Vec<String> {
-    let out = run_synth(&["--stage", "not-a-stage", "unused.crn"]);
+    let out = cairn("synth", &["--stage", "not-a-stage", "unused.crn"]);
     assert_eq!(
         out.status.code(),
         Some(2),
@@ -1161,12 +1229,15 @@ fn cli_synth_missing_edition_reports_only_the_usage_error() {
     let path = examples_dir().join("redstone-door.crn");
     let mut gated = 0;
     for stage in stage_values() {
-        let out = run_synth(&[
-            "--experimental-logic-synth",
-            "--stage",
-            &stage,
-            path.to_str().unwrap(),
-        ]);
+        let out = cairn(
+            "synth",
+            &[
+                "--experimental-logic-synth",
+                "--stage",
+                &stage,
+                path.to_str().unwrap(),
+            ],
+        );
         let stderr = String::from_utf8(out.stderr).expect("utf-8");
         match out.status.code() {
             Some(2) => {

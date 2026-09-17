@@ -12,9 +12,8 @@
 use std::path::PathBuf;
 use std::process::Command;
 
-fn cargo_bin() -> PathBuf {
-    PathBuf::from(env!("CARGO_BIN_EXE_cairn"))
-}
+mod common;
+use common::cargo_bin;
 
 /// The issue's repro: one letter, and the wall is built without the height
 /// it asked for.

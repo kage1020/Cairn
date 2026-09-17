@@ -1,31 +1,14 @@
 //! End-to-end tests for `cairn info <file>`.
 
 use std::path::PathBuf;
-use std::process::Command;
 
-fn cargo_bin() -> PathBuf {
-    PathBuf::from(env!("CARGO_BIN_EXE_cairn"))
-}
-
-fn examples_dir() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("..")
-        .join("..")
-        .join("examples")
-}
-
-fn run_info(args: &[&str]) -> std::process::Output {
-    Command::new(cargo_bin())
-        .arg("info")
-        .args(args)
-        .output()
-        .expect("failed to invoke cairn binary")
-}
+mod common;
+use common::{cairn, examples_dir};
 
 #[test]
 fn info_1_clean_example_exits_zero_with_three_section_headers() {
     let path = examples_dir().join("cottage.crn");
-    let out = run_info(&[path.to_str().unwrap()]);
+    let out = cairn("info", &[path.to_str().unwrap()]);
     assert!(
         out.status.success(),
         "stderr={}",
@@ -47,7 +30,7 @@ fn info_1_clean_example_exits_zero_with_three_section_headers() {
 #[test]
 fn info_2_json_format_is_valid_version_axes() {
     let path = examples_dir().join("cottage.crn");
-    let out = run_info(&[path.to_str().unwrap(), "--format", "json"]);
+    let out = cairn("info", &[path.to_str().unwrap(), "--format", "json"]);
     assert!(
         out.status.success(),
         "stderr={}",
@@ -93,20 +76,23 @@ fn info_2_json_format_is_valid_version_axes() {
 
 #[test]
 fn info_3_missing_file_exits_with_code_two() {
-    let out = run_info(&["does-not-exist.crn"]);
+    let out = cairn("info", &["does-not-exist.crn"]);
     assert_eq!(out.status.code(), Some(2));
 }
 
 #[test]
 fn info_4_editions_flag_controls_portability_entries() {
     let path = examples_dir().join("cottage.crn");
-    let out = run_info(&[
-        path.to_str().unwrap(),
-        "--editions",
-        "java",
-        "--format",
-        "json",
-    ]);
+    let out = cairn(
+        "info",
+        &[
+            path.to_str().unwrap(),
+            "--editions",
+            "java",
+            "--format",
+            "json",
+        ],
+    );
     assert!(out.status.success());
     let stdout = String::from_utf8(out.stdout).expect("utf-8");
     let parsed: serde_json::Value = serde_json::from_str(&stdout).expect("valid JSON");
@@ -126,7 +112,7 @@ fn info_5_all_examples_exit_zero() {
         "redstone-door.crn",
     ] {
         let path = examples_dir().join(name);
-        let out = run_info(&[path.to_str().unwrap()]);
+        let out = cairn("info", &[path.to_str().unwrap()]);
         assert!(
             out.status.success(),
             "{name} should exit 0, stderr={}",
@@ -142,7 +128,7 @@ fn info_6_registry_compatibility_renders_as_single_range_line() {
     // not duplicate it per edition — that misled reviewers into reading
     // a per-edition divergence that the data does not carry.
     let path = examples_dir().join("cottage.crn");
-    let out = run_info(&[path.to_str().unwrap()]);
+    let out = cairn("info", &[path.to_str().unwrap()]);
     assert!(out.status.success());
     let stdout = String::from_utf8(out.stdout).expect("utf-8");
     let line = stdout
@@ -165,9 +151,12 @@ fn info_6_registry_compatibility_renders_as_single_range_line() {
 #[test]
 fn info_7_empty_editions_value_is_rejected_with_exit_two() {
     let path = examples_dir().join("cottage.crn");
-    let out = run_info(&[path.to_str().unwrap(), "--editions", ""]);
+    let out = cairn("info", &[path.to_str().unwrap(), "--editions", ""]);
     assert_eq!(out.status.code(), Some(2));
-    let out = run_info(&[path.to_str().unwrap(), "--editions", "java,,bedrock"]);
+    let out = cairn(
+        "info",
+        &[path.to_str().unwrap(), "--editions", "java,,bedrock"],
+    );
     assert_eq!(out.status.code(), Some(2));
 }
 
@@ -177,7 +166,7 @@ fn info_8_file_without_requires_defaults_min_to_zero_zero() {
         "no_requires",
         "theme t:\n  slot m -> @oak_planks\n\nstruct s size=4x4\n  walls height=3 mat_slot=m\n",
     );
-    let out = run_info(&[path.to_str().unwrap(), "--format", "json"]);
+    let out = cairn("info", &[path.to_str().unwrap(), "--format", "json"]);
     assert!(out.status.success());
     let stdout = String::from_utf8(out.stdout).expect("utf-8");
     let parsed: serde_json::Value = serde_json::from_str(&stdout).expect("valid JSON");
@@ -200,7 +189,7 @@ fn info_9_requires_floor_reaches_the_registry_range_however_it_is_spaced() {
         ("right", "@requires version>= 1.21\n"),
     ] {
         let path = tempfile_with_contents(label, &format!("{header}struct s size=4x4\n"));
-        let out = run_info(&[path.to_str().unwrap(), "--format", "json"]);
+        let out = cairn("info", &[path.to_str().unwrap(), "--format", "json"]);
         assert!(
             out.status.success(),
             "{label}: stderr={}",
@@ -227,7 +216,10 @@ fn info_9b_a_floor_naming_no_release_of_an_edition_makes_none_of_it_buildable() 
         "cross_edition_floor",
         "@requires version>=1.21.4\nstruct s size=4x4\n",
     );
-    let out = run_info(&[path.to_str().unwrap(), "--editions", "java,bedrock"]);
+    let out = cairn(
+        "info",
+        &[path.to_str().unwrap(), "--editions", "java,bedrock"],
+    );
     assert!(
         out.status.success(),
         "info reports and does not refuse: stderr={}",
@@ -256,7 +248,10 @@ fn info_9c_a_scoped_floor_is_weighed_only_against_its_own_edition() {
         "scoped_floor",
         "@requires java version>=1.21.4\nstruct s size=4x4\n",
     );
-    let out = run_info(&[path.to_str().unwrap(), "--editions", "java,bedrock"]);
+    let out = cairn(
+        "info",
+        &[path.to_str().unwrap(), "--editions", "java,bedrock"],
+    );
     assert!(
         out.status.success(),
         "{}",
@@ -274,7 +269,7 @@ fn info_9c_a_scoped_floor_is_weighed_only_against_its_own_edition() {
     // And the edition-neutral row takes only the unscoped floors, so a
     // floor written in one edition's numbering does not become the file's
     // range.
-    let json = run_info(&[path.to_str().unwrap(), "--format", "json"]);
+    let json = cairn("info", &[path.to_str().unwrap(), "--format", "json"]);
     let parsed: serde_json::Value =
         serde_json::from_str(&String::from_utf8(json.stdout).expect("utf-8")).expect("valid JSON");
     assert_eq!(parsed["registry_compat"]["min"], "0.0");
@@ -293,7 +288,7 @@ fn info_9d_the_floor_note_names_the_line_that_refused() {
         "two_floors",
         "@requires version>=1.20.4\n@requires java version>=1.21.4\nstruct s size=4x4\n",
     );
-    let out = run_info(&[path.to_str().unwrap(), "--editions", "java"]);
+    let out = cairn("info", &[path.to_str().unwrap(), "--editions", "java"]);
     assert!(
         out.status.success(),
         "{}",
@@ -322,7 +317,7 @@ fn info_9e_a_scoped_only_file_says_why_the_neutral_row_is_empty() {
         "scoped_only",
         "@requires java version>=1.21.4\nstruct s size=4x4\n",
     );
-    let out = run_info(&[path.to_str().unwrap(), "--editions", "java"]);
+    let out = cairn("info", &[path.to_str().unwrap(), "--editions", "java"]);
     assert!(
         out.status.success(),
         "{}",
@@ -358,7 +353,7 @@ fn info_10_a_rejected_requirement_stops_info_in_both_formats() {
         "bad_requires",
         "@requires version<1.20\nstruct s size=4x4\n",
     );
-    let text = run_info(&[path.to_str().unwrap()]);
+    let text = cairn("info", &[path.to_str().unwrap()]);
     assert_eq!(text.status.code(), Some(1));
     assert!(
         String::from_utf8_lossy(&text.stdout).contains("E_INVALID_REQUIRES")
@@ -368,7 +363,7 @@ fn info_10_a_rejected_requirement_stops_info_in_both_formats() {
         String::from_utf8_lossy(&text.stderr),
     );
 
-    let json = run_info(&[path.to_str().unwrap(), "--format", "json"]);
+    let json = cairn("info", &[path.to_str().unwrap(), "--format", "json"]);
     assert_eq!(json.status.code(), Some(1));
     assert!(
         serde_json::from_slice::<serde_json::Value>(&json.stdout)
@@ -416,7 +411,7 @@ fn info_9_a_note_that_points_at_a_second_line_is_printed_with_its_position() {
     )
     .expect("write source");
 
-    let out = run_info(&[path.to_str().unwrap()]);
+    let out = cairn("info", &[path.to_str().unwrap()]);
     assert!(
         out.status.success(),
         "a warning must not fail info, stderr={}",
@@ -448,7 +443,7 @@ fn info_9f_the_neutral_row_reads_a_floor_a_placed_def_declares() {
          \ndef cottage size=4x4:\n  requires version>=1.21.4\n  floor mat_slot=floor\n\
          \nsite hamlet:\n  place id=a use=cottage theme=t at=origin\n",
     );
-    let out = run_info(&[path.to_str().unwrap(), "--editions", "java"]);
+    let out = cairn("info", &[path.to_str().unwrap(), "--editions", "java"]);
     assert!(
         out.status.success(),
         "{}",
@@ -488,7 +483,7 @@ fn info_9g_a_theme_bound_per_edition_is_left_out_of_the_neutral_row() {
          \ntheme shop_bedrock:\n  slot floor -> @oak_planks\n\
          \nstruct s size=4x4\n  floor mat_slot=floor\n",
     );
-    let out = run_info(&[path.to_str().unwrap(), "--editions", "bedrock"]);
+    let out = cairn("info", &[path.to_str().unwrap(), "--editions", "bedrock"]);
     assert!(
         out.status.success(),
         "{}",

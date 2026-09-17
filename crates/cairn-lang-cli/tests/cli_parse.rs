@@ -4,19 +4,10 @@
 //! "source parses" contract is enforced from the CLI surface, not just from
 //! the library API.
 
-use std::path::PathBuf;
 use std::process::Command;
 
-fn cargo_bin() -> PathBuf {
-    PathBuf::from(env!("CARGO_BIN_EXE_cairn"))
-}
-
-fn examples_dir() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("..")
-        .join("..")
-        .join("examples")
-}
+mod common;
+use common::{cargo_bin, examples_dir};
 
 fn run_parse(file: &str) -> std::process::Output {
     let path = examples_dir().join(file);
