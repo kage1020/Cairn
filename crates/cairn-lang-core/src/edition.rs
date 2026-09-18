@@ -2,11 +2,12 @@
 //!
 //! The compilation target's edition (Java / Bedrock) surfaces at three layers
 //! that must agree: the CLI's `--edition` flag, the resolver's per-edition
-//! theme-variant selection (spec versioning-editions §10.7), and the
-//! downstream backend that lowers to `.nbt` / `.mcstructure`. Keeping the
-//! marker enum here — in `cairn-lang-core`, the layer both callers depend on
-//! — avoids either a duplicated definition in `cairn-lang-formats` and
-//! `cairn-lang-cli` or a `formats → cli` dependency reversal.
+//! theme-variant selection (`spec/versioning-editions` "Java / Bedrock
+//! portability"), and the downstream backend that lowers to `.nbt` /
+//! `.mcstructure`. Keeping the marker enum here — in `cairn-lang-core`, the
+//! layer both callers depend on — avoids either a duplicated definition in
+//! `cairn-lang-formats` and `cairn-lang-cli` or a `formats → cli` dependency
+//! reversal.
 //!
 //! A third edition (Education) can slot in by adding one variant; the
 //! `Display` / `FromStr` pair keeps the CLI-facing string vocabulary
@@ -21,8 +22,8 @@ use serde::{Serialize, Serializer};
 ///
 /// The variants are ordered `Java`, `Bedrock` so the derived `Ord` matches
 /// the spec's "Java as the base, Bedrock as overriding diffs" framing
-/// (versioning-editions §10.3) — Java sorts first when the ordering is
-/// otherwise arbitrary.
+/// (`spec/versioning-editions` "Backend = data tables") — Java sorts first
+/// when the ordering is otherwise arbitrary.
 ///
 /// The [`Serialize`] impl emits the canonical lowercase string
 /// (`"java"` / `"bedrock"`) rather than the derived variant name so JSON
@@ -63,7 +64,8 @@ impl fmt::Display for Edition {
 
 /// Failure while parsing an edition string. Carries the offending value verbatim
 /// so the CLI can surface it inside the "what is wrong / what is valid /
-/// suggested fix" self-correction triple (spec versioning-editions §10.4).
+/// suggested fix" self-correction triple (`spec/versioning-editions`
+/// "Fail-loud and minimum-version inference").
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 #[error(
     "unknown edition `{input}`. Valid: java, bedrock. Fix: pass one of the supported edition names"

@@ -1,25 +1,26 @@
-//! `spec/compilation.md` §4.1 opens by promising that source "MAY be
-//! written line-oriented, flat, and order-free" because the compiler
-//! assigns every command to a phase and evaluates the phases in a fixed
-//! order — "order accidents are eliminated".
+//! `spec/compilation` "Phase evaluation" opens by promising that source
+//! "MAY be written line-oriented, flat, and order-free" because the
+//! compiler assigns every command to a phase and evaluates the phases in
+//! a fixed order — "order accidents are eliminated".
 //!
 //! Two things have to hold for that to be true of the artifact and not
 //! only of the paint order. The phase a member lands in has to be the one
-//! §4.1 names, or two members that belong to different phases end up in one
-//! bucket where the later line simply wins. And the palette has to describe
-//! the finished grid rather than the sequence of writes that produced it —
-//! both in *which* entries it holds, or the material of a member whose last
-//! cell was covered rides along into the `.nbt` and the `resolved_ir_hash`,
-//! and in what order it holds them, or two members that share no voxel at
-//! all still number the palette by which of their lines was written first.
-//! Either way, permuting two lines changes the artifact when it does not
-//! change a single voxel.
+//! that section names, or two members that belong to different phases end
+//! up in one bucket where the later line simply wins. And the palette has
+//! to describe the finished grid rather than the sequence of writes that
+//! produced it — both in *which* entries it holds, or the material of a
+//! member whose last cell was covered rides along into the `.nbt` and the
+//! `resolved_ir_hash`, and in what order it holds them, or two members
+//! that share no voxel at all still number the palette by which of their
+//! lines was written first. Either way, permuting two lines changes the
+//! artifact when it does not change a single voxel.
 //!
-//! Inside one phase §4.1 does grant last-wins, to "local overrides within
-//! the same phase". An author restating a member is what that grant is for;
-//! two footprints that happen to intersect is not, and the grid cannot tell
-//! them apart. So the resolution stays last-wins and stops being silent —
-//! `W_PHASE_CONFLICT` names both members and how many voxels changed hands.
+//! Inside one phase that section does grant last-wins, to "local overrides
+//! within the same phase". An author restating a member is what that grant
+//! is for; two footprints that happen to intersect is not, and the grid
+//! cannot tell them apart. So the resolution stays last-wins and stops
+//! being silent — `W_PHASE_CONFLICT` names both members and how many
+//! voxels changed hands.
 
 use cairn_lang_core::block_array::{BlockArray, BlockArrayIr};
 use cairn_lang_core::check::DiagnosticCode;
@@ -325,9 +326,10 @@ fn two_members_writing_the_same_block_are_not_a_conflict() {
 
 #[test]
 fn the_conflict_warning_does_not_change_which_block_wins() {
-    // §4.1 grants last-wins inside a phase; this reports it, it does not
-    // overrule it. Permuting the two lines still swaps the winner — which
-    // is exactly what the warning is there to tell the author.
+    // `spec/compilation` "Phase evaluation" grants last-wins inside a
+    // phase; this reports it, it does not overrule it. Permuting the two
+    // lines still swaps the winner — which is exactly what the warning is
+    // there to tell the author.
     let door_first = lowered(&source(
         "  door side=front at=center\n  \
          window side=front y=1 offset=3 size=1x2 mat_slot=glass\n",
@@ -373,10 +375,11 @@ fn a_conflict_between_two_fixtures_is_reported_like_any_other() {
 
 #[test]
 fn a_conflict_between_two_massing_members_is_reported_like_any_other() {
-    // The other end of the phase list. A wainscot course is the shape
-    // §4.1's local-override grant is written for, and it is reported for
-    // the same reason every other pair is: the grid cannot tell a
-    // deliberate override from two footprints that happen to meet.
+    // The other end of the phase list. A wainscot course is the shape the
+    // local-override grant in `spec/compilation` "Phase evaluation" is
+    // written for, and it is reported for the same reason every other pair
+    // is: the grid cannot tell a deliberate override from two footprints
+    // that happen to meet.
     let out = lowered(&source("  walls mat_slot=deck height=1\n"));
     let found = conflicts(&out);
     assert_eq!(found.len(), 1, "{found:#?}");
@@ -392,8 +395,8 @@ fn a_conflict_between_two_massing_members_is_reported_like_any_other() {
             .notes
             .iter()
             .any(|n| n.message.contains("If the override is deliberate")),
-        "the note has to offer the reading §4.1 permits, not only the \
-         accidental one: {:#?}",
+        "the note has to offer the reading `spec/compilation` permits, not \
+         only the accidental one: {:#?}",
         found[0].notes,
     );
 }

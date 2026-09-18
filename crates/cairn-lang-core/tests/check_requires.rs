@@ -7,10 +7,11 @@
 //! evaporates is worse than no floor, because it is still written in the
 //! file and still read by whoever opens it.
 //!
-//! Only `version>=X` is defined (spec syntax §5.3, versioning-editions
-//! §10.4). Anything else is reported rather than ignored — including the
-//! shapes an author reasonably reaches for first, since "not supported" is
-//! an answer and silence is not.
+//! Only `version>=X` is defined (`spec/syntax` "Headers" and
+//! `spec/versioning-editions` "Fail-loud and minimum-version inference").
+//! Anything else is reported rather than ignored — including the shapes an
+//! author reasonably reaches for first, since "not supported" is an answer
+//! and silence is not.
 
 use cairn_lang_core::Edition;
 use cairn_lang_core::check::DiagnosticCode;
@@ -111,7 +112,7 @@ fn whitespace_around_the_operator_does_not_change_the_floor() {
 }
 
 /// Repeating the directive composes rather than conflicts: the floors fold
-/// to the strictest. Spec syntax §5.3 exempts `@requires` from
+/// to the strictest. `spec/syntax` "Headers" exempts `@requires` from
 /// `E_DUPLICATE_HEADER` for exactly this reason.
 #[test]
 fn repeated_requirements_fold_to_the_strictest() {
@@ -186,11 +187,11 @@ fn a_component_that_is_not_a_number_is_refused() {
 }
 
 /// A snapshot, a pre-release, and a date-based label are real Minecraft
-/// versions, and `spec/versioning-editions.md` §10.1 says two of the three
-/// will be how releases are spelled. The directive accepts them: whether
-/// one can be *ordered* is the target edition's `DataVersion` table's
-/// answer, asked at the command that pins an edition, and refusing them
-/// here would pre-empt it with the wrong one.
+/// versions, and two of the three will be how releases are spelled, per
+/// `spec/versioning-editions` "The target is a compile-time parameter".
+/// The directive accepts them: whether one can be *ordered* is the target
+/// edition's `DataVersion` table's answer, asked at the command that pins
+/// an edition, and refusing them here would pre-empt it with the wrong one.
 #[test]
 fn a_label_the_spec_says_will_exist_is_not_refused_by_the_directive() {
     for (header, version) in [
@@ -230,10 +231,10 @@ fn a_component_too_large_to_compare_is_refused() {
 }
 
 /// The payload carries the failure as data, so a quick-fix does not have to
-/// take the sentence apart. `spec/lint.md` §11.2 asks for exactly that, and
-/// this one code covers several mistakes whose repairs have nothing in
-/// common — replacing `<` with `>=` is a one-character edit a tool can
-/// offer, while a snapshot label cannot be repaired at all today.
+/// take the sentence apart. `spec/lint` "Machine-readable payload" asks for
+/// exactly that, and this one code covers several mistakes whose repairs
+/// have nothing in common — replacing `<` with `>=` is a one-character edit
+/// a tool can offer, while a snapshot label cannot be repaired at all today.
 #[test]
 fn the_finding_carries_the_failure_as_data() {
     use cairn_lang_core::check::DiagnosticData;

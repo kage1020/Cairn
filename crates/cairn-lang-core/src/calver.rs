@@ -3,7 +3,7 @@
 //! Cairn versions itself by date: `YYYY.M[.PATCH]`, the scheme
 //! `CHANGELOG.md` names and [`crate::CAIRN_VERSION`] carries. A `.crn` file
 //! MAY declare the language version it was written against
-//! (`spec/syntax.md` §5.3), and that declaration is provenance — nothing
+//! (`spec/syntax` "Headers"), and that declaration is provenance — nothing
 //! branches on it, and the artifact is the same whatever it says.
 //!
 //! Provenance still has to be readable. `spec/index.md` gives the header

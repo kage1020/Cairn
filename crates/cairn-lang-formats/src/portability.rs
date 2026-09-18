@@ -1,10 +1,10 @@
 //! Per-edition palette-entry portability counters.
 //!
-//! Backs the "edition portability" axis of `cairn info`
-//! (spec versioning-editions §10.5). The counters run over a real lowered
-//! [`BlockArrayIr`] rather than over the source, so each figure counts
-//! palette entries the matching `cairn compile --edition X` emits, one for
-//! one.
+//! Backs the "edition portability" axis of `cairn info` — the "Which version
+//! is it for?" question that `spec/versioning-editions` gives three answers
+//! to. The counters run over a real lowered [`BlockArrayIr`] rather than over
+//! the source, so each figure counts palette entries the matching
+//! `cairn compile --edition X` emits, one for one.
 //!
 //! The two sides can still spell an entry differently. `info` pins no
 //! target and so takes each material's default mapping, while a build takes
@@ -39,14 +39,14 @@
 //!
 //! # Do the states survive?
 //!
-//! Java is the base edition per §10.3 ("Java as the base, Bedrock as
-//! overriding diffs"), so a palette entry Java declares always counts as
-//! portable there — the Java writer emits `properties` verbatim under the
-//! vanilla `.nbt` schema. Bedrock funnels every entry through
-//! [`crate::bedrock_state::translate_states`] — the same function the
-//! `.mcstructure` writer consumes when it emits bytes, so this half of the
-//! classification cannot drift from what a build actually does — and folds
-//! the outcome into `{portable, degraded, unsupported}`:
+//! Java is the base edition per `spec/versioning-editions` "Backend = data
+//! tables" (Java as the base, Bedrock as overriding diffs), so a palette
+//! entry Java declares always counts as portable there — the Java writer
+//! emits `properties` verbatim under the vanilla `.nbt` schema. Bedrock
+//! funnels every entry through [`crate::bedrock_state::translate_states`] —
+//! the same function the `.mcstructure` writer consumes when it emits bytes,
+//! so this half of the classification cannot drift from what a build actually
+//! does — and folds the outcome into `{portable, degraded, unsupported}`:
 //!
 //! - `Ok(StateTranslation { degraded: [], .. })` → **portable** (the intent
 //!   round-trips into Bedrock states with no loss).

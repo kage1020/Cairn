@@ -35,11 +35,12 @@ const REQUIRES: &str = "requires";
 /// Whether the body being parsed may carry `requires version>=X` lines,
 /// and what to say when it may not.
 ///
-/// `spec/versioning-editions.md` §10.4 gives the member-level floor to `def`
-/// and `theme`, the two kinds a build instantiates rather than *is*. Every
-/// body of the language passes one of these, `theme` included — the
-/// decision about which words are reserved where is written down once, and
-/// a body that did not pass through it would be a route around the rule.
+/// `spec/versioning-editions` "Fail-loud and minimum-version inference" gives
+/// the member-level floor to `def` and `theme`, the two kinds a build
+/// instantiates rather than *is*. Every body of the language passes one of
+/// these, `theme` included — the decision about which words are reserved where
+/// is written down once, and a body that did not pass through it would be a
+/// route around the rule.
 ///
 /// The two refusing variants exist because they have different repairs, and
 /// one message for both asserts something false about half the files that

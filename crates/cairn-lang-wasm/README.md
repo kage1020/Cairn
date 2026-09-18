@@ -28,8 +28,8 @@ A minimal browser-friendly surface is planned:
 |---|---|
 | `cairn_version()` | Returns the date-based Cairn release version. |
 | `compile(source, edition, target)` | Returns `{ ok, diagnostics, ir }` for the playground. |
-| `info(source, editions[])` | Mirrors `cairn info` ([versioning-editions §10.5](https://cairn.kage1020.com/spec/versioning-editions/)). |
-| `import_raw(bytes, format)` | Faithful transliteration to raw-centric `.crn` ([ecosystem-interop §12.2](https://cairn.kage1020.com/spec/ecosystem-interop/)). |
+| `info(source, editions[])` | Mirrors `cairn info` ([versioning-editions](https://cairn.kage1020.com/spec/versioning-editions/)). |
+| `import_raw(bytes, format)` | Faithful transliteration to raw-centric `.crn` ([ecosystem-interop "Reverse direction: the compiler transliterates, an LLM lifts"](https://cairn.kage1020.com/spec/ecosystem-interop/)). |
 
 Because the playground is a teaching surface as much as a compile surface, every export returns diagnostics in the same "what is wrong / valid candidates / suggested fix" shape the CLI and the LSP use ([lint](https://cairn.kage1020.com/spec/lint/)).
 

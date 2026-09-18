@@ -419,11 +419,12 @@ fn info_9_a_note_that_points_at_a_second_line_is_printed_with_its_position() {
 
 /// The `registry compatibility` row is the composite's, not the header's.
 ///
-/// `spec/versioning-editions.md` §10.4 makes the minimum version of a
-/// composite the max of its parts, so a floor a `def` declares reaches the
-/// row of every module that places it. Reading only the file's own
-/// `@requires` lines reported `0.0 .. latest` beside a `buildable targets`
-/// row that refuses versions — two true lines that disagree on their face.
+/// `spec/versioning-editions` "Fail-loud and minimum-version inference" makes
+/// the minimum version of a composite the max of its parts, so a floor a
+/// `def` declares reaches the row of every module that places it. Reading
+/// only the file's own `@requires` lines reported `0.0 .. latest` beside a
+/// `buildable targets` row that refuses versions — two true lines that
+/// disagree on their face.
 #[test]
 fn info_9f_the_neutral_row_reads_a_floor_a_placed_def_declares() {
     let path = tempfile_with_contents(

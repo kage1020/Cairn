@@ -1,12 +1,12 @@
 //! Abstract material catalog component of a [`crate::registry::RegistryPack`].
 //!
-//! Maps spec §7.2 abstract material tokens (`@floor.wood.broadleaf`) onto the
-//! canonical Minecraft block ids the block-array IR stores. The catalog
-//! itself is a flat list of `(token, block)` pairs; the surrounding tree
-//! structure suggested by the token names is *not* enforced by this layer
-//! because resolution is exact-match — the JSON shape stays cheap to
-//! validate and the surrounding tree can grow into the manifest later
-//! without churning every consumer now.
+//! Maps the abstract material tokens of `spec/materials-themes` "Canonical
+//! vocabulary" (`@floor.wood.broadleaf`) onto the canonical Minecraft block
+//! ids the block-array IR stores. The catalog itself is a flat list of
+//! `(token, block)` pairs; the surrounding tree structure suggested by the
+//! token names is *not* enforced by this layer because resolution is
+//! exact-match — the JSON shape stays cheap to validate and the surrounding
+//! tree can grow into the manifest later without churning every consumer now.
 //!
 //! The block-array lowering pass reaches this catalog through
 //! [`crate::registry::PackView`], which pairs it with the block-id table

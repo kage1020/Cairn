@@ -1,7 +1,7 @@
 //! Acceptance tests for the `positional` pass of
 //! `cairn_lang_core::check`.
 //!
-//! `spec/syntax.md` §5.1 requires `key=value` for everything after the
+//! `spec/syntax` "Lexical" requires `key=value` for everything after the
 //! command keyword and prints `window front G 2 2 2x2` as the forbidden
 //! form. Nothing enforced it: the parser appends any token that is not
 //! `key=`, `-> binding`, or `[selector]` to the statement's `positional`

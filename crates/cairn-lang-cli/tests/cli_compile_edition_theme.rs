@@ -1,4 +1,5 @@
-//! Per-edition theme fallback end-to-end (spec versioning-editions §10.7).
+//! Per-edition theme fallback end-to-end (`spec/versioning-editions`
+//! "Java / Bedrock portability").
 //!
 //! Pins ACs on `examples/edition-fallback.crn`: the same source file
 //! resolves to `oak_sign` under `--edition java` and `oak_wall_sign` under
@@ -439,8 +440,9 @@ fn check_reports_the_missing_variant_only_when_an_edition_is_pinned() {
 
 #[test]
 fn a_place_naming_the_logical_theme_builds_under_both_editions() {
-    // The spelling §10.7 prescribes was the one spelling the site path
-    // rejected, because no theme is declared under the bare logical name.
+    // The spelling `spec/versioning-editions` "Java / Bedrock portability"
+    // prescribes was the one spelling the site path rejected, because no
+    // theme is declared under the bare logical name.
     let tmp = TempDir::new().expect("tempdir");
     let src = write_source(
         tmp.path(),

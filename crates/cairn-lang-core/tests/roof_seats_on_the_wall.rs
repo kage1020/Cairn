@@ -1,12 +1,13 @@
 //! A roof's first course sits on the wall top, and a roof that is only
 //! one course tall is still a first course.
 //!
-//! `spec/compilation.md` §4.5 lays a hip roof out as the inset rectangle
-//! frame at every layer `L`, with `outer_*` corners so the diagonals
-//! close, and caps whatever the frames leave. §4.3 does the same for a
-//! gable with two slope rows per layer. A short span of 1 or 2 rises one
-//! layer, which made layer 0 the apex layer as well — and the apex
-//! branch ran instead of the frame, so a whole roof came out `half=top`.
+//! `spec/compilation` "Hip roof voxel rules" lays a hip roof out as the
+//! inset rectangle frame at every layer `L`, with `outer_*` corners so the
+//! diagonals close, and caps whatever the frames leave. That chapter's
+//! "Gable roof voxel rules" does the same for a gable with two slope rows
+//! per layer. A short span of 1 or 2 rises one layer, which made layer 0
+//! the apex layer as well — and the apex branch ran instead of the frame,
+//! so a whole roof came out `half=top`.
 //!
 //! A `half=top` stair fills the upper half of its voxel (plus the lower
 //! quarter on its facing side), so a course of them one voxel above the
@@ -226,12 +227,12 @@ fn an_even_span_gable_on_a_z_ridge_mirrors_the_outward_pair() {
 
 #[test]
 fn an_odd_span_gable_keeps_the_low_slope_facing_on_its_single_cap() {
-    // §4.3: "The apex caps with a single stair at `half=top` using the
-    // low-slope facing." A converged cap is one cell wide, so both of its
-    // faces are outer ones and a stair serves only one — the outward rule
-    // above has nothing to choose here, and the undercut it removes for a
-    // pair is unavoidable for a single. That is why this is a face of its
-    // own rather than the pair's low half.
+    // `spec/compilation` "Gable roof voxel rules": "The apex caps with a
+    // single stair at `half=top` using the low-slope facing." A converged
+    // cap is one cell wide, so both of its faces are outer ones and a stair
+    // serves only one — the outward rule above has nothing to choose here,
+    // and the undercut it removes for a pair is unavoidable for a single.
+    // That is why this is a face of its own rather than the pair's low half.
     let out = roof("7x5", "gable");
     let ba = structure(&out);
     for x in 0..7 {

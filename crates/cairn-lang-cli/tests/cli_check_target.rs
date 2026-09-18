@@ -115,8 +115,9 @@ fn without_a_target_the_same_source_still_passes() {
 fn a_renamed_id_is_judged_per_version_not_per_edition() {
     // One id, one edition, two answers. This is why the flag pins a
     // version rather than reusing `--edition`, and why checking against
-    // every version the edition ships (versioning-editions §10.4) would
-    // have said nothing here.
+    // every version the edition ships (`spec/versioning-editions`
+    // "Fail-loud and minimum-version inference") would have said nothing
+    // here.
     let tmp = tempfile::TempDir::new().expect("tempdir");
     let src = fixture(tmp.path(), RENAMED_ID);
 
@@ -159,10 +160,10 @@ fn a_renamed_id_is_judged_per_version_not_per_edition() {
 
 #[test]
 fn the_json_report_carries_the_unknown_id_payload() {
-    // `DiagnosticData::UnknownId` (spec/lint §11.2) was documented and
-    // unreachable from any CLI JSON output: `compile` prints text and
-    // `check --format json` never produced the code. This is the run that
-    // makes the documented shape observable.
+    // `DiagnosticData::UnknownId` (`spec/lint` "Machine-readable payload")
+    // was documented and unreachable from any CLI JSON output: `compile`
+    // prints text and `check --format json` never produced the code. This
+    // is the run that makes the documented shape observable.
     let tmp = tempfile::TempDir::new().expect("tempdir");
     let src = fixture(tmp.path(), UNKNOWN_ID);
     let out = cairn(
@@ -196,10 +197,10 @@ fn the_json_report_carries_the_unknown_id_payload() {
 
 #[test]
 fn target_without_edition_is_refused_as_a_usage_error() {
-    // Spec §4.2: `--target` alone is forbidden, because "1.21" names
-    // different releases on Java and Bedrock. Exit 2 is the usage-error
-    // code, not the "your file has a problem" one — the file was never
-    // read.
+    // `spec/compilation` "Target axes": `--target` alone is forbidden,
+    // because "1.21" names different releases on Java and Bedrock. Exit 2
+    // is the usage-error code, not the "your file has a problem" one — the
+    // file was never read.
     let tmp = tempfile::TempDir::new().expect("tempdir");
     let src = fixture(tmp.path(), UNKNOWN_ID);
     let out = cairn("check", &[src.to_str().unwrap(), "--target", "1.21.4"]);
@@ -266,8 +267,9 @@ fn a_target_that_does_not_resolve_still_lowers_the_file() {
         .unwrap_or_else(|| panic!("premise: the target is still refused: {stderr}"));
     assert!(finding < refusal, "the file comes first, got: {stderr}");
     // Not `E_UNKNOWN_ID`: that one is the answer a version gives, and no
-    // version was pinned. Reporting it here would be the guess §10.4 rules
-    // out, dressed as a check.
+    // version was pinned. Reporting it here would be the guess
+    // `spec/versioning-editions` "Fail-loud and minimum-version inference"
+    // rules out, dressed as a check.
     assert!(
         !stderr.contains("E_UNKNOWN_ID"),
         "no id table, so no id verdict, got: {stderr}",

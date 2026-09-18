@@ -168,10 +168,10 @@ fn ac2_cottage_bedrock_has_no_unsupported_entries() {
 
 #[test]
 fn ac3_the_java_axis_is_pure_portable_for_a_source_java_can_build() {
-    // AC3: Java is the base edition (spec versioning-editions §10.3), so
-    // no state ever degrades there and a palette of blocks Java declares
-    // classifies as portable throughout. Pin it on the two files carrying
-    // the widest block variety.
+    // AC3: Java is the base edition (`spec/versioning-editions`
+    // "Backend = data tables"), so no state ever degrades there and a
+    // palette of blocks Java declares classifies as portable throughout.
+    // Pin it on the two files carrying the widest block variety.
     //
     // "Pure portable" is a property of these sources, not of the Java
     // axis: an id Java has never had counts as unsupported on Java too,
@@ -267,8 +267,9 @@ fn ac4_unknown_edition_rejected_with_exit_two() {
     );
     let stderr = String::from_utf8_lossy(&out.stderr);
     // The message threads the offending value + the closed valid set,
-    // matching the spec §10.4 self-correction triple (what is wrong /
-    // what is valid / how to fix).
+    // matching the self-correction triple in `spec/versioning-editions`
+    // "Fail-loud and minimum-version inference" (what is wrong / what is
+    // valid / how to fix).
     assert!(
         stderr.contains("foo"),
         "stderr should name the offending value, got: {stderr}",
@@ -1022,10 +1023,11 @@ fn a_source_info_refuses_prints_no_rows_at_all() {
 
 #[test]
 fn an_unsupported_entry_is_a_figure_not_a_gate() {
-    // `info` reports; it does not refuse. Spec §10.5's own example output
-    // carries `unsupported: 1`, and a caller that wants the build to fail
-    // runs the build. Exiting non-zero here would also make the count
-    // unreadable from a shell pipeline that checks status first.
+    // `info` reports; it does not refuse. The example output in the
+    // three-answers section of `spec/versioning-editions` carries
+    // `unsupported: 1`, and a caller that wants the build to fail runs the
+    // build. Exiting non-zero here would also make the count unreadable
+    // from a shell pipeline that checks status first.
     let tmp = tempfile::TempDir::new().expect("tempdir");
     let src = one_slot_source(tmp.path(), "javaonly.crn", "oak_sign");
     let out = Command::new(cargo_bin())

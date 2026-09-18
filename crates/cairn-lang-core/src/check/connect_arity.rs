@@ -1,10 +1,10 @@
 //! `connect_arity` pass — flags every `connect` member whose positional
 //! shape is not `FROM.PORT to TO.PORT`.
 //!
-//! The surface grammar of `connect` (spec §9.3.5) is fixed at three
-//! positionals: the from-side dotted reference, the literal `to`
-//! keyword, and the to-side dotted reference. The line-based parser
-//! (`parse`'s `parse_command`) accepts any number of
+//! The surface grammar of `connect` (`spec/components-editing-sites` "Ports
+//! and `connect`") is fixed at three positionals: the from-side dotted
+//! reference, the literal `to` keyword, and the to-side dotted reference. The
+//! line-based parser (`parse`'s `parse_command`) accepts any number of
 //! positionals up to the next newline without enforcing arity, and
 //! [`crate::intent::lower`] carries them through verbatim. Without this
 //! pass, broken rows like `connect a.entry` would reach the resolver,

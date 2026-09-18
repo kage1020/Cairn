@@ -17,12 +17,12 @@
 //! The second reaches the cases a later language adds *within* the
 //! existing shapes. A whole new syntactic form does not get here at all:
 //! an unrecognised `@directive` and an unrecognised top-level item are
-//! both `E_PARSE`, and `spec/lint` §11.3 says what follows — parsing
-//! precedes every check pass, so a source that does not parse reaches
+//! both `E_PARSE`, and `spec/lint` "Error vs warning" says what follows —
+//! parsing precedes every check pass, so a source that does not parse reaches
 //! none of them. The version gap is the whole explanation there and this
 //! finding is the one thing that cannot say so.
 //!
-//! Both are warnings. `spec/lint` §11.3 makes a finding an error when
+//! Both are warnings. That same section makes a finding an error when
 //! leaving it alone yields something other than what the source asked for;
 //! neither of these changes a voxel. `@requires` is an error on the same
 //! rule read the other way — its floor reaches `cairn info`'s compatible

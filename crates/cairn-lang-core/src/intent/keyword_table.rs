@@ -5,7 +5,7 @@
 //!
 //! The roster is drawn from the surface keywords used by the four shipped
 //! examples (`cottage`, `themed-tower`, `village`, `redstone-door`) and from
-//! the phase-ordered evaluation table in `spec/compilation.md` §4.1
+//! the phase-ordered evaluation table in `spec/compilation` "Phase evaluation"
 //! (massing → envelope → openings → fixtures → logic). Any keyword outside
 //! this table is intentionally surfaced as [`MemberRole::Other`] so the
 //! lowering step never has to reject input.
@@ -244,11 +244,12 @@ impl MemberRole {
             Self::Level => &["y"],
             Self::PressurePlate => &["at", "offset", "y"],
             Self::Circuit => &["region", "void"],
-            // `spec/components-editing-sites` §9.3.2 and §9.3.3 fix this
-            // set: a name, what to instantiate, what to resolve materials
-            // against, and exactly one origin selector. §9.1 reserves
-            // parameterisation, which nothing forwards today; the day it
-            // lands this is the arm that opens.
+            // `spec/components-editing-sites` "Origin selectors" and
+            // "Cross-scope references" fix this set: a name, what to
+            // instantiate, what to resolve materials against, and exactly one
+            // origin selector. The same chapter's "`def`, the component
+            // construct" reserves parameterisation, which nothing forwards
+            // today; the day it lands this is the arm that opens.
             Self::Place => &["use", "theme", "at", "east_of", "north_of", "gap"],
             Self::Connect => &["path"],
             Self::Other(_) => return None,
@@ -271,13 +272,14 @@ impl MemberRole {
     #[must_use]
     pub fn unread_arguments(&self) -> &'static [&'static str] {
         match self {
-            // `spec/entities` §8.2 writes both on a `window` member line;
-            // `spec/components-editing-sites` §9.2 also sets `shape=`
-            // through the edit DSL. `fill_window` reads side, y, offset,
-            // size, sym, repeat and step, and consults neither of these.
+            // `spec/entities` "Anchor conventions" writes both on a `window`
+            // member line; `spec/components-editing-sites` "Editing model"
+            // also sets `shape=` through the edit DSL. `fill_window` reads
+            // side, y, offset, size, sym, repeat and step, and consults
+            // neither of these.
             Self::Window => &["shape", "anchor"],
-            // `spec/entities` §8.2, on the same `roof` line. `fill_roof`
-            // reads kind, overhang and slope_to.
+            // `spec/entities` "Anchor conventions", on the same `roof` line.
+            // `fill_roof` reads kind, overhang and slope_to.
             Self::Roof => &["footprint", "bounds"],
             Self::Floor
             | Self::Walls

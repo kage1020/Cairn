@@ -2,8 +2,8 @@
 //!
 //! Field order in [`Lockfile`] is deliberate: `serde_norway` writes structs in
 //! declaration order, so this matches the sample in
-//! `spec/versioning-editions.md` §10.6 byte-for-byte. Changing the order
-//! breaks downstream tools that grep the lockfile, so it is also
+//! `spec/versioning-editions` "Provenance and lock" byte-for-byte. Changing the
+//! order breaks downstream tools that grep the lockfile, so it is also
 //! exercised by an AC.
 
 use serde::{Deserialize, Serialize};

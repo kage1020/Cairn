@@ -29,8 +29,8 @@ Tag types covered: `Byte`, `Short`, `Int`, `Long`, `Float`, `Double`, `ByteArray
 
 ## Out of scope
 
-- SNBT parsing — Cairn never round-trips through SNBT ([overview §1.1](https://cairn.kage1020.com/spec/overview/)).
-- DataFixerUpper-style version migration. DFU is explicitly kept out of Cairn's language semantics ([versioning-editions §10.2](https://cairn.kage1020.com/spec/versioning-editions/)).
+- SNBT parsing — Cairn never round-trips through SNBT ([overview "Purpose"](https://cairn.kage1020.com/spec/overview/)).
+- DataFixerUpper-style version migration. DFU is explicitly kept out of Cairn's language semantics ([versioning-editions "Language contract: recompile, don't transcode"](https://cairn.kage1020.com/spec/versioning-editions/)).
 
 ## License
 

@@ -148,9 +148,9 @@ pub const CANDIDATES_SHOWN: usize = 4;
 /// would be a difference nobody chose.
 ///
 /// Truncating at all is a claim only about the sentence. Where a consumer
-/// needs the closed set spec `versioning-editions.md` §10.4 asks an error
-/// to return, it reads the diagnostic's `data` payload, which carries every
-/// candidate.
+/// needs the closed set an error must return per `spec/versioning-editions`
+/// "Fail-loud and minimum-version inference", it reads the diagnostic's `data`
+/// payload, which carries every candidate.
 #[must_use]
 pub fn candidate_list(candidates: &[String]) -> String {
     let listed = candidates

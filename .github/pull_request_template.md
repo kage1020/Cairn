@@ -4,7 +4,7 @@ commit message on `main` and is parsed by release-plz to decide patch releases.
 
   feat(core): add lexer
   fix(formats): correct big-endian NBT length
-  docs(spec): clarify §6.3 derivation order
+  docs(spec): clarify blockstate "waterlogged" derivation order
   feat(redstone)!: rewrite tick simulator       (breaking — see Compatibility C.3)
   build(deps): bump tower to 0.5
   refactor(nbt): split codec into modules
@@ -22,7 +22,7 @@ See CONTRIBUTING.md for the full convention.
 
 ## Linked issues / spec sections
 
-<!-- e.g. closes #123, refs spec §6.3, refs roadmap 2026.10.0 -->
+<!-- e.g. closes #123, refs spec/blockstate "waterlogged", refs roadmap 2026.10.0 -->
 
 ## Test plan
 

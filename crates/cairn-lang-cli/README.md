@@ -26,10 +26,10 @@ Prebuilt archives are attached to each [release](https://github.com/kage1020/Cai
 
 ## Targeting rules
 
-Per [compilation §4.2](https://cairn.kage1020.com/spec/compilation/):
+Per [compilation "Target axes"](https://cairn.kage1020.com/spec/compilation/):
 
 - `--edition` is **required** for any subcommand that emits voxels, and `--target` is refused without it. The same `1.21` means different things on Java and Bedrock, and Java's DataVersion is unrelated to Bedrock's `block_version`.
-- `--target` is an opaque label resolved through the pinned edition's data table, with DataVersion as the canonical ordering key ([versioning-editions §10.1](https://cairn.kage1020.com/spec/versioning-editions/)). `latest` aliases the row that table names as latest, which is not necessarily the newest row it carries.
+- `--target` is an opaque label resolved through the pinned edition's data table, with DataVersion as the canonical ordering key ([versioning-editions "The target is a compile-time parameter"](https://cairn.kage1020.com/spec/versioning-editions/)). `latest` aliases the row that table names as latest, which is not necessarily the newest row it carries.
 - `compile --target` defaults to `latest`. `check --target` has no default, so `cairn check --edition java` still runs the unpinned gate rather than refusing ids on a version nobody chose.
 
 ## Exit codes

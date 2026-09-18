@@ -26,6 +26,6 @@ struct gatehouse size=7x5
 
   circuit region=floor void=2
 
-  # spec ([redstone] §14.7): truth + bounded eventually
+  # spec/redstone "Verification": truth + bounded eventually
   assert truth(sig.step, sig.exit -> sig.open) { 00->0; 01->1; 10->1; 11->1 }
   assert always(sig.step -> eventually sig.open within 2)

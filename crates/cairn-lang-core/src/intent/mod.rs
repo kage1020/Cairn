@@ -7,10 +7,10 @@
 //! and the size header on a struct is hoisted into a dedicated field.
 //!
 //! This is what the spec calls the "rich member with invariants" layer
-//! (`architecture.md` §3.2). The current lowering produces it at semantic
-//! level [`SemanticLevel::Grouped`]; registry-backed resolution
-//! (materials, themes, per-edition blockstate) belongs to the later
-//! [`SemanticLevel::Lifted`] tier.
+//! (`spec/architecture` "The Intent IR is rich and carries invariants"). The
+//! current lowering produces it at semantic level [`SemanticLevel::Grouped`];
+//! registry-backed resolution (materials, themes, per-edition blockstate)
+//! belongs to the later [`SemanticLevel::Lifted`] tier.
 //!
 //! Each IR node carries a `span: Span` pointing at the originating byte range
 //! in the source. The `check` module relies on those spans to emit gcc-style
@@ -267,8 +267,8 @@ pub enum ScopeKind {
 /// with the footprint of its enclosing scope.
 ///
 /// Produced by [`circuit_regions`] out of a lowered [`IntentModule`] so
-/// the redstone placement pass (`spec/redstone` §14.5) has one entry
-/// point for looking up the reserved area of each scope instead of
+/// the redstone placement pass (`spec/redstone` "Place-and-route") has one
+/// entry point for looking up the reserved area of each scope instead of
 /// walking [`Member`]s and re-decoding `intent_state` at every caller.
 /// The block-array pass's [`crate::block_array`] recogniser owns the
 /// shape validation and per-shape diagnostics; this lift function

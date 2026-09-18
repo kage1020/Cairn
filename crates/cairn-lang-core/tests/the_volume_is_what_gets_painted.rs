@@ -1,13 +1,13 @@
 //! A member that paints nothing shapes nothing.
 //!
-//! `spec/compilation.md` §4.7 derives the volume from `overhang`,
-//! `wall_top` and `roof_extra`, and states the invariant the three have to
-//! keep: "every member the pass paints is one the volume was sized to
-//! hold", two readings of one list, which "is what keeps a member from
-//! painting past the end of the array it was handed". These pin the other
-//! direction — a member the pass does *not* paint must not be sized for
-//! either, whether it drops out for want of a `kind=` or for want of a
-//! material.
+//! `spec/compilation` "Level grouping and volume derivation" derives the
+//! volume from `overhang`, `wall_top` and `roof_extra`, and states the
+//! invariant the three have to keep: "every member the pass paints is one
+//! the volume was sized to hold", two readings of one list, which "is what
+//! keeps a member from painting past the end of the array it was handed".
+//! These pin the other direction — a member the pass does *not* paint must
+//! not be sized for either, whether it drops out for want of a `kind=` or
+//! for want of a material.
 //!
 //! Every dims assertion here is written against the same source with the
 //! member's line deleted rather than against a literal, because the claim

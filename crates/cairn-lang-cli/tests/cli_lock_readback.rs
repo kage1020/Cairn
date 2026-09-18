@@ -1,11 +1,11 @@
 //! AC A1–A8: `cairn compile` reads the lockfile it is about to replace.
 //!
-//! `spec/versioning-editions.md` §10.6 says a recompile for a different
-//! target "shows the difference from the verified one as a loud warning",
-//! and prints the two lines this file pins. Until now `read_from_path` had
-//! no production caller at all: the previous lockfile was overwritten
-//! without being looked at, so neither warning could exist and a stale or
-//! tampered file was discarded in silence.
+//! `spec/versioning-editions` "Provenance and lock" says a recompile for a
+//! different target "shows the difference from the verified one as a loud
+//! warning", and prints the two lines this file pins. Until now
+//! `read_from_path` had no production caller at all: the previous lockfile
+//! was overwritten without being looked at, so neither warning could exist
+//! and a stale or tampered file was discarded in silence.
 
 use std::fs;
 use std::path::Path;
@@ -57,9 +57,10 @@ fn warning_lines(stderr: &str) -> Vec<&str> {
 
 #[test]
 fn a_recompile_for_another_version_prints_the_shape_the_spec_prints() {
-    // The exact line spec §10.6 shows. The second half deliberately drops
-    // the `DataVersion` word — the spec prints `now 1.21.4/3955.` — so this
-    // pins the punctuation as well as the numbers.
+    // The exact line `spec/versioning-editions` "Provenance and lock" shows.
+    // The second half deliberately drops the `DataVersion` word — the spec
+    // prints `now 1.21.4/3955.` — so this pins the punctuation as well as
+    // the numbers.
     let (_tmp_src, src) = example_in_tempdir("cottage.crn");
     let out_dir = TempDir::new().expect("out");
     let lock = out_dir.path().join("cottage.lock");

@@ -1,10 +1,10 @@
 //! Theme names, their per-edition variants, and which of them a build binds.
 //!
-//! `spec/versioning-editions.md` §10.7 lets one logical theme be written as
-//! two per-edition variants — `shop_java` and `shop_bedrock` — and lets a
-//! reference name the logical theme rather than either variant. Which variant
-//! a build actually binds is therefore a question about a *set of names* and
-//! the pinned edition, and nothing else.
+//! `spec/versioning-editions` "Java / Bedrock portability" lets one logical
+//! theme be written as two per-edition variants — `shop_java` and
+//! `shop_bedrock` — and lets a reference name the logical theme rather than
+//! either variant. Which variant a build actually binds is therefore a
+//! question about a *set of names* and the pinned edition, and nothing else.
 //!
 //! It lives here rather than inside [`super::resolver`] because two callers
 //! now ask it. The resolver asks in order to walk a body under the right slot
@@ -41,9 +41,10 @@ pub(crate) fn strip_edition_suffix(name: &str) -> (&str, Option<Edition>) {
 ///
 /// A file with `theme shop_java` + `theme shop_bedrock` reports
 /// `Some("shop")` because both are variants of one logical theme — this
-/// keeps the auto-pick rule intact when the author uses spec §10.7
-/// variants. A file with `theme cottage` + `theme keep` reports `None`
-/// because the two names are genuinely distinct logical themes.
+/// keeps the auto-pick rule intact when the author uses the variants of
+/// `spec/versioning-editions` "Java / Bedrock portability". A file with
+/// `theme cottage` + `theme keep` reports `None` because the two names are
+/// genuinely distinct logical themes.
 pub(crate) fn single_logical_theme<'a>(
     names: impl IntoIterator<Item = &'a str>,
 ) -> Option<&'a str> {
@@ -114,11 +115,11 @@ pub(crate) fn pick_variant<'a>(
 /// reference was spelled.
 ///
 /// A reference is read as naming the *logical* theme, which is the spelling
-/// spec versioning-editions §10.7 asks the semantic layer to use, so
-/// `theme=shop` binds in a module declaring only `shop_java` and
-/// `shop_bedrock`. With no pin, nothing re-picks a variant the author named:
-/// a declared name binds verbatim, and a *suffixed* name nothing declares
-/// binds nothing rather than being swapped for a sibling.
+/// `spec/versioning-editions` "Java / Bedrock portability" asks the semantic
+/// layer to use, so `theme=shop` binds in a module declaring only `shop_java`
+/// and `shop_bedrock`. With no pin, nothing re-picks a variant the author
+/// named: a declared name binds verbatim, and a *suffixed* name nothing
+/// declares binds nothing rather than being swapped for a sibling.
 pub(crate) fn bound_theme_name<'a, I>(
     names: I,
     written: &str,

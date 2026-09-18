@@ -26,9 +26,9 @@
 //! next maturity tier's responsibility — `Member.resolved_state` is left
 //! untouched here.
 //!
-//! See `spec/materials-themes.md` §7 (slots, selectors, canonical vs.
-//! abstract tokens) and `spec/versioning-editions.md` §10.5 (the three info
-//! axes) for the rules this module enforces.
+//! See `spec/materials-themes` (slots, selectors, canonical vs. abstract
+//! tokens) and `spec/versioning-editions` (the three info axes) for the rules
+//! this module enforces.
 
 mod binding;
 mod requires_parse;

@@ -18,7 +18,8 @@ use crate::block_array::BlockArrayIr;
 const PREFIX: &str = "sha256:";
 const HEX_LEN: usize = 64;
 
-/// Hex-encoded sha256 with the spec §10.6 `sha256:` prefix.
+/// Hex-encoded sha256 with the `sha256:` prefix `spec/versioning-editions`
+/// "Provenance and lock" gives it.
 ///
 /// Newtype rather than a bare `String` so a future algorithm switch is one
 /// `impl From` away, and so a caller cannot accidentally hand an arbitrary
