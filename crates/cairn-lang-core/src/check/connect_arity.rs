@@ -214,7 +214,7 @@ fn validate_endpoint(end: ConnectEnd, value: &Value, sink: &mut DiagnosticSink) 
 }
 
 /// The single edit that turns this value into a port reference, when
-/// there is one. `spec/lint.md` asks for messages an author can act on
+/// there is one. `spec/lint` asks for messages an author can act on
 /// from the message alone; the generic example note shows the target
 /// shape but not which character to change.
 fn repair_note(value: &Value) -> Option<String> {

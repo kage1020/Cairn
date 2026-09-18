@@ -19,7 +19,8 @@
 //!
 //! This test holds three lines:
 //!
-//! 1. No `§` and no "section 11.3" survives outside the spec itself.
+//! 1. No `§`, no "section 11.3", and no `spec_11_3` buried in an identifier
+//!    survives outside the spec itself.
 //! 2. Every `spec/<chapter>` names a chapter that exists.
 //! 3. Every quoted title that follows one is a real heading in that chapter.
 //!
@@ -200,6 +201,24 @@ fn no_file_cites_the_spec_by_section_number() {
                     .collect();
                 offences.push(format!(
                     "{display}:{}: \"section {number}\"",
+                    line_of(&text, offset)
+                ));
+            }
+        }
+
+        // A coordinate hides just as well inside an identifier, where neither
+        // of the two spellings above is there to catch it: a test named
+        // `every_code_is_classified_against_spec_11_3` goes stale on exactly
+        // the same edit, and nothing renames it.
+        for (offset, _) in lowered.match_indices("spec_") {
+            let rest = &lowered[offset + "spec_".len()..];
+            if rest.starts_with(|c: char| c.is_ascii_digit()) {
+                let number: String = rest
+                    .chars()
+                    .take_while(|c| c.is_ascii_digit() || *c == '_')
+                    .collect();
+                offences.push(format!(
+                    "{display}:{}: `spec_{number}` in a name",
                     line_of(&text, offset)
                 ));
             }

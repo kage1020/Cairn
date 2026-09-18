@@ -2,7 +2,7 @@
 //! version, and says so when it cannot.
 //!
 //! The directive is provenance: nothing branches on the value and the
-//! artifact is identical whatever it says. `spec/index.md` still gives it
+//! artifact is identical whatever it says. `spec/index` still gives it
 //! a job — "so a future compiler can parse and warn correctly" — and a
 //! value no compiler can read cannot do that job. Two findings come out of
 //! reading it:

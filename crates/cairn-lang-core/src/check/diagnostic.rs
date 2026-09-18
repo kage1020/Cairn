@@ -616,10 +616,10 @@ impl DiagnosticCode {
     /// **The** severity for the code: every emission site reads it from
     /// here rather than writing a literal, so reclassifying a code is one
     /// edit and cannot leave a pass disagreeing with the ledger. Pinned by
-    /// `every_code_is_classified_against_spec_11_3` below, which partitions
-    /// the whole enum rather than whatever a corpus happens to reach — with
-    /// [`Diagnostic::severity`] reading this function there is no
-    /// per-finding value left for a fixture to disagree with, which
+    /// `every_code_is_classified_against_the_error_vs_warning_rule` below,
+    /// which partitions the whole enum rather than whatever a corpus happens
+    /// to reach — with [`Diagnostic::severity`] reading this function there is
+    /// no per-finding value left for a fixture to disagree with, which
     /// `tests/diagnostic_text.rs` records from the other side.
     ///
     /// `spec/lint` "Error vs warning" draws the line at the *build*: a finding
@@ -1394,7 +1394,7 @@ mod tests {
     }
 
     #[test]
-    fn every_code_is_classified_against_spec_11_3() {
+    fn every_code_is_classified_against_the_error_vs_warning_rule() {
         // Errors block a build; warnings are advisory. `severity` carries
         // the rule and the two borderline calls; this pins the resulting
         // partition so a reclassification is a deliberate edit here rather

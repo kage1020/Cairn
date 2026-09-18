@@ -737,9 +737,9 @@ fn theme_variant_rebound_diag(
         notes: vec![DiagnosticNote {
             span: None,
             message: format!(
-                "write `theme={logical}` — spec/versioning-editions \"Java / Bedrock \
-                 portability\" keeps the semantic layer edition-neutral and lets the variant \
-                 follow the build",
+                "write `theme={logical}` — the semantic layer stays edition-neutral and lets \
+                 the variant follow the build, per spec/versioning-editions \
+                 \"Java / Bedrock portability\"",
             ),
         }],
         data: None,

@@ -8,8 +8,8 @@
 //!
 //! ## Phase ordering
 //!
-//! `spec/compilation.md` §4.1 evaluates members in a fixed phase order
-//! independent of source order:
+//! `spec/compilation` "Phase evaluation" evaluates members in a fixed phase
+//! order independent of source order:
 //!
 //! ```text
 //! massing  (floor, walls)
@@ -18,8 +18,8 @@
 //!   → fixtures (pressure_plate)
 //! ```
 //!
-//! The current pass implements those four. §4.1 continues with the three
-//! redstone phases, which `cairn-lang-redstone` owns, and closes with
+//! The current pass implements those four. That section continues with the
+//! three redstone phases, which `cairn-lang-redstone` owns, and closes with
 //! `raw` — not a keyword the surface accepts yet, so a `raw` line is
 //! `E_UNKNOWN_KEYWORD` from the allowlist pass rather than a phase this
 //! one is missing.
@@ -96,9 +96,10 @@ const PRESSURE_PLATE_TOKEN: &str = "pressure_plate.default";
 /// Pressure plate id used when the pack cannot supply one — no registry
 /// at all, or a registry with no [`PRESSURE_PLATE_TOKEN`] row.
 ///
-/// Neither case carries an edition, and spec versioning-editions §10.3
-/// makes Java the base, so the Java spelling is the honest default. It is
-/// still checked against the pinned target before it reaches a palette.
+/// Neither case carries an edition, and `spec/versioning-editions` "Backend =
+/// data tables" makes Java the base, so the Java spelling is the honest
+/// default. It is still checked against the pinned target before it reaches a
+/// palette.
 /// Species-specific plates (spruce, dark oak, ...) still come from a
 /// `mat_slot=` binding, which is honoured verbatim — mirroring
 /// [`FLAT_BASE_ID`]'s contract, not [`STAIR_BASE_ID`]'s. A plate attaches
@@ -796,7 +797,7 @@ impl TokenSite {
             }
             Self::MemberSlot => {
                 "abstract material tokens must be declared in the pack's `materials` catalog \
-                 (see `spec/materials-themes.md` §7.2)"
+                 (see `spec/materials-themes` \"Canonical vocabulary\")"
             }
         }
     }
@@ -1281,7 +1282,7 @@ fn lower_body_to_block_array<'a>(
 }
 
 /// Paint one body's members onto a fresh canvas, phase by phase in the
-/// order `spec/compilation.md` §4.1 fixes.
+/// order `spec/compilation` "Phase evaluation" fixes.
 ///
 /// That order is the whole content of this helper: a `door` written
 /// before `walls` in the source still cuts through the resulting wall
@@ -1369,10 +1370,11 @@ struct PhaseBuckets<'a> {
     phases: Vec<Option<Phase>>,
 }
 
-/// File every member of the paint set under the phase §4.1 evaluates it in,
-/// reporting the ones no phase has a reader for.
+/// File every member of the paint set under the phase `spec/compilation`
+/// "Phase evaluation" evaluates it in, reporting the ones no phase has a
+/// reader for.
 ///
-/// Within a bucket the members keep source order, which is what §4.1's
+/// Within a bucket the members keep source order, which is what that section's
 /// last-wins grant is about; across buckets the order is the spec's, which
 /// is what makes the source order-free.
 fn bucket_members<'a>(
@@ -1398,7 +1400,7 @@ fn bucket_members<'a>(
         // phase, or `carve_door`'s `side_of` guard would false-positive
         // "missing side=". The recogniser handles the surface shape
         // here; the wired signal graph is threaded on by the future
-        // redstone lowering pipeline (spec/redstone.md §14.2).
+        // redstone lowering pipeline (`spec/redstone` "Signal binding").
         if is_actuator_patch(member) {
             recognize_actuator_patch(member, flattened, diagnostics);
             buckets.phases.push(None);
@@ -1424,10 +1426,11 @@ fn bucket_members<'a>(
             }
             // `circuit region=<label> void=<N>` reserves a routing region
             // for the future `logic_synth → logic_place → logic_route`
-            // passes (spec/redstone.md §14.5 / §14.8). Nothing lands in
-            // the block array from this member; the recognizer only checks
-            // the surface shape so a valid fixture stays quiet while a
-            // malformed one still surfaces a targeted `W_DEFERRED_MEMBER`.
+            // passes (`spec/redstone` "Place-and-route" and "Connection to
+            // the IR and phases"). Nothing lands in the block array from this
+            // member; the recognizer only checks the surface shape so a valid
+            // fixture stays quiet while a malformed one still surfaces a
+            // targeted `W_DEFERRED_MEMBER`.
             MemberDisposition::Reserves => recognize_circuit_region(member, diagnostics),
             MemberDisposition::NotLowered => diagnostics.push(diag_deferred_member(member)),
         }
@@ -1468,12 +1471,12 @@ fn run_phase(
 
 /// Two members of one phase wrote the same cell to different blocks.
 ///
-/// §4.1 settles that by source order — "last-wins applies only to local
-/// overrides within the same phase" — and this says so out loud, because an
-/// override the author meant and two footprints that happen to intersect
-/// look identical from the grid. Anchored at the member that wrote last,
-/// the way `E_LOGIC_MULTIPLE_DRIVERS` anchors at the redefinition and notes
-/// the first declaration.
+/// `spec/compilation` "Phase evaluation" settles that by source order —
+/// "last-wins applies only to local overrides within the same phase" — and
+/// this says so out loud, because an override the author meant and two
+/// footprints that happen to intersect look identical from the grid. Anchored
+/// at the member that wrote last, the way `E_LOGIC_MULTIPLE_DRIVERS` anchors
+/// at the redefinition and notes the first declaration.
 fn diag_phase_conflict(overridden: &Member, overriding: &Member, voxels: u32) -> Diagnostic {
     let cell = if voxels == 1 { "voxel" } else { "voxels" };
     Diagnostic {
@@ -1492,9 +1495,10 @@ fn diag_phase_conflict(overridden: &Member, overriding: &Member, voxels: u32) ->
             },
             DiagnosticNote {
                 span: None,
-                message: "If the override is deliberate this is §4.1's local-override \
-                          rule and the later line wins as written. If it is not, move \
-                          one of the two so their footprints do not meet."
+                message: "If the override is deliberate this is the local-override rule of \
+                          spec/compilation \"Phase evaluation\" and the later line wins as \
+                          written. If it is not, move one of the two so their footprints do \
+                          not meet."
                     .to_owned(),
             },
             DiagnosticNote {
@@ -1588,8 +1592,8 @@ fn diag_structure_too_large(body: &BodyDescriptor<'_>, dims: Dims) -> Diagnostic
 /// fall back to `(0, 0, 0)` so the per-place [`BlockArray`] still lands.
 /// `east_of` advances along `+x` past the prior placement's full inflated
 /// `dims.x` (overhang already baked in); `north_of` retreats along `-z`
-/// per the `spec/components-editing-sites.md` §9.3 front-is-`+z`
-/// convention.
+/// per the front-is-`+z` convention of `spec/components-editing-sites`
+/// "Multi-building with `site`".
 fn resolve_place_origin(
     member: &Member,
     placed: &IndexMap<String, PlacedBody>,
@@ -1699,7 +1703,7 @@ enum MemberDisposition {
     NotLowered,
 }
 
-/// Where a member's role puts it, per `spec/compilation.md` §4.1.
+/// Where a member's role puts it, per `spec/compilation` "Phase evaluation".
 ///
 /// The spec's order is `massing (shell: floor/walls/volume) → envelope
 /// (roof/exterior) → openings (door/window) → fixtures (furnishings:
@@ -1708,18 +1712,21 @@ enum MemberDisposition {
 /// alike:
 ///
 /// - `floor` / `walls` are the shell the sentence names.
-/// - `roof` is the envelope; `stair` joins it because §4.3 describes it as
-///   an *eave* stair, and an eave is exterior.
+/// - `roof` is the envelope; `stair` joins it because `spec/compilation`
+///   "Gable roof voxel rules" describes it as an *eave* stair, and an eave is
+///   exterior.
 /// - `door` / `window` are the openings the sentence names.
 /// - `pressure_plate` is a sensor, so it is a fixture. Sharing the openings
 ///   bucket with `window` meant a contested cell went to whichever line came
-///   last, which is the order accident §4.1 opens by promising away.
+///   last, which is the order accident the phase order opens by promising
+///   away.
 /// - `circuit` reserves a routing region for the redstone phases and
 ///   writes no voxel.
 /// - `place` and `connect` belong to a site body, which this pass does not
 ///   lower; `Other` is a keyword the role table does not know, which
-///   includes §4.1's `raw` — not yet a keyword at all, so it is reported
-///   as unknown by the allowlist pass on top of the deferral here.
+///   includes the `raw` of that same phase order — not yet a keyword at all,
+///   so it is reported as unknown by the allowlist pass on top of the
+///   deferral here.
 ///
 /// The four `lower_*_member` matches spell every role out with no wildcard
 /// so a role added here fails the compile there rather than reaching a
@@ -2184,13 +2191,13 @@ fn max_wall_top(painting: &[(u32, u32)]) -> u32 {
 /// stand and paint.
 ///
 /// One list behind both the volume and [`WallColumn`], because
-/// `spec/compilation.md` §4.7 makes them two readings of a single list and
-/// rests the "no member paints past the end of the array" invariant on
-/// their agreeing. Filtering one and not the other would leave the window
-/// carve writing rows the array no longer has. `max_wall_top` collapses
-/// the pairs to their maximum, which sizes the volume and seats the roof;
-/// the column keeps the spans, which is what decides whether a rectangle
-/// cut into a wall lands in masonry.
+/// `spec/compilation` "Level grouping and volume derivation" makes them two
+/// readings of a single list and rests the "no member paints past the end of
+/// the array" invariant on their agreeing. Filtering one and not the other
+/// would leave the window carve writing rows the array no longer has.
+/// `max_wall_top` collapses the pairs to their maximum, which sizes the volume
+/// and seats the roof; the column keeps the spans, which is what decides
+/// whether a rectangle cut into a wall lands in masonry.
 fn painting_walls<'a>(
     flattened: &'a [(u32, &'a Member)],
     scope: Option<&'a ScopeResolution>,
@@ -2445,13 +2452,13 @@ pub(super) fn size_value(member: &Member, key: &str) -> Option<(u32, u32)> {
 /// The voxel grid under construction, plus the two things the phase model
 /// needs to know about the writes that built it.
 ///
-/// **Who wrote each cell.** §4.1 promises that a `window` written after a
-/// `roof` still lands as an opening, and only says last-wins for "local
-/// overrides within the same phase". So a cross-phase overwrite is the
-/// model working and a within-phase one is the author's two members
-/// contesting a cell with nothing but line order to separate them. The
-/// canvas can tell the two apart because it remembers the writer, and
-/// reports the second kind rather than resolving it silently.
+/// **Who wrote each cell.** `spec/compilation` "Phase evaluation" promises
+/// that a `window` written after a `roof` still lands as an opening, and only
+/// says last-wins for "local overrides within the same phase". So a
+/// cross-phase overwrite is the model working and a within-phase one is the
+/// author's two members contesting a cell with nothing but line order to
+/// separate them. The canvas can tell the two apart because it remembers the
+/// writer, and reports the second kind rather than resolving it silently.
 ///
 /// **Which palette slots a write has named.** An entry no voxel references
 /// reaches the `.nbt`, the `resolved_ir_hash`, and `cairn info`'s per-entry
@@ -2910,10 +2917,10 @@ fn fill_roof_hip(
 ) {
     let roof_w = ctx.dims.x;
     let roof_h = ctx.dims.z;
-    // Hip and gable share the same long-axis-wins-with-x-tiebreak ridge
-    // rule (`spec/compilation.md` §4.5 falls through to §4.3). Reusing
-    // `gable_ridge_axis` keeps the two paths from drifting if the
-    // tiebreak rule ever changes.
+    // Hip and gable share the same long-axis-wins-with-x-tiebreak ridge rule
+    // (`spec/compilation` "Hip roof voxel rules" falls through to "Gable roof
+    // voxel rules"). Reusing `gable_ridge_axis` keeps the two paths from
+    // drifting if the tiebreak rule ever changes.
     let ridge_axis = gable_ridge_axis(roof_w, roof_h);
     // Intern per voxel: `palette.intern` dedupes, so each face's state
     // lands at exactly one slot, in the order [`hip_voxels`] visits the
@@ -3031,8 +3038,8 @@ fn carve_door(
     };
     let len = wall_length(side, ctx.interior_w, ctx.interior_h);
     // Three named anchors are accepted: `center` (`len / 2`, round-down
-    // on even widths — documented in spec/syntax.md §5.4), `left` (`0`,
-    // the wall-local axis origin), and `right` (`len - 1`, the far
+    // on even widths — documented in `spec/syntax` "Selectors"), `left`
+    // (`0`, the wall-local axis origin), and `right` (`len - 1`, the far
     // corner). The same vocabulary is recognised by
     // `super::walkway::door_anchor_offset` for port resolution, so the
     // openings cut and any walkway that connects to this door land at
@@ -3658,10 +3665,11 @@ fn pack_plate_default(
 /// voxels.
 ///
 /// `circuit` reserves a routing region for the future
-/// `logic_synth → logic_place → logic_route` passes (spec/redstone.md
-/// §14.5 / §14.8). Nothing lands in the block array at this stage — the
-/// physical dust / repeater / cell tiles are decided by the logic layer,
-/// which is not part of block-array lowering yet. Recognising the shape
+/// `logic_synth → logic_place → logic_route` passes (`spec/redstone`
+/// "Place-and-route" and "Connection to the IR and phases"). Nothing lands in
+/// the block array at this stage — the physical dust / repeater / cell tiles
+/// are decided by the logic layer, which is not part of block-array lowering
+/// yet. Recognising the shape
 /// here (rather than defaulting to `W_DEFERRED_MEMBER`) keeps
 /// `redstone-door.crn` from firing a per-source-line warning while the
 /// downstream passes are still under construction, mirroring how
@@ -3742,15 +3750,16 @@ const ACTUATOR_PATCH_SELECTOR_KEYS: &[&str] = &["id"];
 
 /// The only intent-state key an actuator patch recognises today. Extending
 /// this list to `lit_by` / `powered_by` / `fired_by` requires landing the
-/// matching keyword in the role table first (spec/redstone.md §14.2).
+/// matching keyword in the role table first (`spec/redstone` "Signal
+/// binding").
 const ACTUATOR_PATCH_INTENT_KEYS: &[&str] = &["opened_by"];
 
 /// A door member is an **actuator patch** when its surface line uses the
 /// selector form (`door[…] …`). The bracketed selector references an
 /// already-declared physical door by `id=`; its role in block-array
 /// lowering is pure metadata (an `opened_by=` signal binding for the
-/// future redstone lowering pipeline, `spec/redstone.md` §14.2). Routing
-/// patch lines through `carve_door` would false-positive `side_of`'s
+/// future redstone lowering pipeline, `spec/redstone` "Signal binding").
+/// Routing patch lines through `carve_door` would false-positive `side_of`'s
 /// "missing `side=`" guard, so `lower_body_to_block_array` peels them off
 /// before the phase-bucketing match. Whether the patch also carries
 /// stray `side=` / `at=` keys is checked inside the recogniser, not
@@ -3786,7 +3795,7 @@ fn is_actuator_patch(member: &Member) -> bool {
 ///   two scopes the flattener merges) defers separately with an
 ///   "ambiguous" primary so the author is never silently rebinding the
 ///   first hit.
-/// - `opened_by=` must be present. `spec/redstone.md` §14.2 also
+/// - `opened_by=` must be present. `spec/redstone` "Signal binding" also
 ///   defines `lit_by=` on lamps, `powered_by=` on pistons, and
 ///   `fired_by=` on dispensers, but those keywords are not yet in the
 ///   role table — door + `opened_by` is the only shape
@@ -3926,7 +3935,9 @@ fn recognize_actuator_patch(
         diagnostics.push(diag_deferred_member_reason(
             member,
             &format!(
-                "door actuator patch accepts only `opened_by=sig.<name>` today; unknown attribute(s): {} (spec/redstone.md §14.2 reserves `lit_by=` / `powered_by=` / `fired_by=` for future keywords)",
+                "door actuator patch accepts only `opened_by=sig.<name>` today; unknown \
+                 attribute(s): {} (spec/redstone \"Signal binding\" reserves `lit_by=` / \
+                 `powered_by=` / `fired_by=` for future keywords)",
                 unknown_intent_keys.join(", "),
             ),
         ));
@@ -4687,10 +4698,10 @@ mod tests {
     /// A split lists the first few candidates and counts the rest, and the
     /// payload keeps all of them.
     ///
-    /// The truncation is about the sentence a person reads; spec
-    /// versioning-editions §10.4 asks the error to return the closed set of
-    /// candidates, and the `data` payload is where a consumer finds it
-    /// whole.
+    /// The truncation is about the sentence a person reads;
+    /// `spec/versioning-editions` "Fail-loud and minimum-version inference"
+    /// asks the error to return the closed set of candidates, and the `data`
+    /// payload is where a consumer finds it whole.
     #[test]
     fn a_split_is_summarised_in_the_note_and_kept_whole_in_the_payload() {
         let ids: Vec<String> = (0..16)
@@ -5141,8 +5152,8 @@ mod tests {
     #[test]
     fn actuator_patch_opened_by_non_sig_dotref_defers() {
         // `opened_by=foo.bar` parses as a two-segment DotRef but the
-        // head is not `sig`, so it cannot be a signal reference under
-        // spec/redstone.md §14.2's namespace.
+        // head is not `sig`, so it cannot be a signal reference under the
+        // namespace of `spec/redstone` "Signal binding".
         let src = "theme t:\n  slot w -> @cobblestone\n\nstruct s size=5x5\n  \
                    walls mat_slot=w height=3\n  \
                    door id=front side=front at=center\n  \
@@ -5191,8 +5202,8 @@ mod tests {
         // a `powered_by=` on doors would let a later extension that
         // gives the key a meaning silently change the meaning of source
         // that shipped meanwhile. Reject the shape now with a primary
-        // that names the offending key(s) and points at
-        // spec/redstone.md §14.2.
+        // that names the offending key(s) and points at `spec/redstone`
+        // "Signal binding".
         let src = "theme t:\n  slot w -> @cobblestone\n\nstruct s size=5x5\n  \
                    walls mat_slot=w height=3\n  \
                    door id=front side=front at=center\n  \
@@ -5275,7 +5286,7 @@ mod tests {
     fn actuator_patch_three_segment_sig_defers() {
         // `opened_by=sig.a.b` — the head is `sig` but the tail has more
         // than one segment, so this is not a signal reference under
-        // spec/redstone.md §14.2. Silently accepting a
+        // `spec/redstone` "Signal binding". Silently accepting a
         // longer-than-expected DotRef would let a future guard that
         // degrades to `head() == "sig"` (dropping the segment-count
         // check) slip through unnoticed; pin the segment-count arm
@@ -5852,7 +5863,7 @@ struct s size=9x7
         // The payload is the whole reason this is an error rather than a
         // softer finding: it says where the material came from, so a
         // consumer can tell a source line from a pack mapping without
-        // parsing the sentence (`spec/lint.md` §11.2).
+        // parsing the sentence (`spec/lint` "Machine-readable payload").
         let Some(DiagnosticData::IncompatibleMaterial {
             id,
             required,
@@ -6402,8 +6413,9 @@ struct s size=9x7
     #[test]
     fn north_of_subtracts_dims_and_gap_on_z_axis() {
         // north_of retreats along -z by the prior placement's full inflated
-        // dims.z plus gap. Front-is-+z (`spec/components-editing-sites.md`
-        // §5.4 / §9.3) means north sits at the negative-z half-space.
+        // dims.z plus gap. Front-is-+z (`spec/syntax` "Selectors" and
+        // `spec/components-editing-sites` "Multi-building with `site`") means
+        // north sits at the negative-z half-space.
         let src = concat!(
             "theme t:\n",
             "  slot wall -> @cobblestone\n",
@@ -6815,7 +6827,8 @@ struct s size=9x7
 
     #[test]
     fn walkway_unknown_abstract_path_emits_e_unknown_abstract_token() {
-        // Pack supplied but does not declare `@walkway.grvl`; spec §7.2
+        // Pack supplied but does not declare `@walkway.grvl`;
+        // `spec/materials-themes` "Canonical vocabulary"
         // requires fail-loud here — the typo must surface as
         // `E_UNKNOWN_ABSTRACT_TOKEN` with the nearest declared token as a
         // suggestion note.

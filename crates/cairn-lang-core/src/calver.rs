@@ -6,7 +6,7 @@
 //! (`spec/syntax` "Headers"), and that declaration is provenance — nothing
 //! branches on it, and the artifact is the same whatever it says.
 //!
-//! Provenance still has to be readable. `spec/index.md` gives the header
+//! Provenance still has to be readable. `spec/index` gives the header
 //! its job — "so a future compiler can parse and warn correctly" — and a
 //! compiler handed `@cairn banana` has nothing to branch on when that
 //! future arrives. This module is where the value stops being a string.
@@ -21,7 +21,7 @@
 //! this a `CalVer` rather than any dotted label, and each refusal names
 //! one component with an obvious repair.
 //!
-//! **Two spellings of the month, both accepted.** `spec/index.md` and
+//! **Two spellings of the month, both accepted.** `spec/index` and
 //! every shipped `.crn` write `2026.06`, which is calver.org's `YYYY.0M`;
 //! [`crate::CAIRN_VERSION`] is `YYYY.M`, because Cargo's `version` field is
 //! semver and semver forbids a leading zero. Both are in this repository
