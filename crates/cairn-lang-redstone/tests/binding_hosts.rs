@@ -1,7 +1,8 @@
 //! A signal binding sits on the component that carries it.
 //!
-//! `spec/redstone` §14.2 does not offer `-> sig.X` and the four actuator
-//! keys as free-floating attributes: it writes each one on one component —
+//! `spec/redstone` "Signal binding" does not offer `-> sig.X` and the four
+//! actuator keys as free-floating attributes: it writes each one on one
+//! component —
 //! a sensor emits, `door ... opened_by=`, `lamp ... lit_by=`,
 //! `piston ... powered_by=`, `dispenser ... fired_by=`. The front end read
 //! only the *value*, so any member carrying a `sig.`-valued argument became
@@ -492,11 +493,12 @@ fn a_binding_on_an_unknown_keyword_is_left_to_the_keyword_finding() {
 
 #[test]
 fn an_unknown_keyword_that_matches_a_future_host_is_still_skipped() {
-    // `lamp` is the component §14.2 pairs with `lit_by=`, so its keyword
-    // string satisfies the host check on its own — but `lamp` is not a
-    // keyword the surface accepts, the member is `E_UNKNOWN_KEYWORD`, and
-    // the front end must not build a port on it. Without the role guard
-    // this line registers a live output on a member that does not exist.
+    // `lamp` is the component `spec/redstone` "Signal binding" pairs with
+    // `lit_by=`, so its keyword string satisfies the host check on its own
+    // — but `lamp` is not a keyword the surface accepts, the member is
+    // `E_UNKNOWN_KEYWORD`, and the front end must not build a port on it.
+    // Without the role guard this line registers a live output on a member
+    // that does not exist.
     let out = synth_source(&source(concat!(
         "  pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a\n",
         "  lamp id=l1 lit_by=sig.a\n",

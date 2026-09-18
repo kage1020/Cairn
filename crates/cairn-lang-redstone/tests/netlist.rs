@@ -416,9 +416,9 @@ struct beta size=5x5
 }
 
 /// A `struct` with no redstone content sits alongside a scope with
-/// bindings — the empty one is elided per `spec/redstone` §14.8's
-/// "proportional to redstone content" wording, so the netlist output
-/// still contains exactly one entry.
+/// bindings — the empty one is elided per the "proportional to redstone
+/// content" wording in `spec/redstone` "Connection to the IR and phases",
+/// so the netlist output still contains exactly one entry.
 #[test]
 fn empty_scope_is_elided_next_to_a_non_empty_one() {
     let source = r"

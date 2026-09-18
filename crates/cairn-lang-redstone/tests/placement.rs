@@ -1,7 +1,7 @@
 //! Integration tests for `cairn_lang_redstone::compile_placement`.
 //!
 //! Locks the observable behaviours of the Placement IR slice
-//! (`spec/redstone` §14.5, stage 1 of place-and-route): the
+//! (stage 1 of the pipeline `spec/redstone` "Place-and-route"): the
 //! `examples/redstone-door.crn` happy path (per edition), 1D topological
 //! coordinate assignment across a multi-cell scope, `E_ROUTE_CONGESTION`
 //! when the netlist exceeds the reservation, `E_NO_CIRCUIT_REGION` when
@@ -154,9 +154,9 @@ struct sim size=7x5
 /// AC4 — a scope whose synthesised netlist needs more area than its
 /// reservation offers fires `E_ROUTE_CONGESTION`, anchors the primary
 /// span at the `circuit region=` line, quotes the ratio in the primary
-/// prose per `spec/redstone` §14.5, carries the three-fix footer, and
-/// drops the failed scope so a downstream pass cannot consume a
-/// partially-placed layout.
+/// prose per `spec/redstone` "Place-and-route", carries the three-fix
+/// footer, and drops the failed scope so a downstream pass cannot consume
+/// a partially-placed layout.
 #[test]
 fn congestion_fires_route_congestion_and_elides_scope() {
     // 3 cells × 4 blocks each = 12 required blocks vs 3 × 3 × 1 = 9
@@ -213,8 +213,8 @@ struct tiny size=3x3
     );
     // The primary span must anchor to the `circuit region=` line so an
     // LSP quick-fix or editor jump lands on the reservation declaration,
-    // not the first cell's source offset. `spec/redstone` §14.5's
-    // example diagnostic anchors at the region.
+    // not the first cell's source offset. The example diagnostic in
+    // `spec/redstone` "Place-and-route" anchors at the region.
     let source_at_span = &source[d.span.clone()];
     assert!(
         source_at_span.starts_with("circuit region="),
@@ -225,12 +225,14 @@ struct tiny size=3x3
         .iter()
         .find(|n| n.span.is_none())
         .expect("congestion has a fix footer");
-    // Spec §14.5's canonical fix triple: increase `void`, enlarge
-    // region, or split into multiple `circuit` blocks.
+    // The canonical fix triple in `spec/redstone` "Place-and-route":
+    // increase `void`, enlarge region, or split into multiple `circuit`
+    // blocks.
     for phrase in ["increase", "void", "enlarge", "region", "split", "circuit"] {
         assert!(
             footer.message.contains(phrase),
-            "footer should carry the spec §14.5 triple (missing {phrase:?}), got {:?}",
+            "footer should carry the `spec/redstone` \"Place-and-route\" triple \
+             (missing {phrase:?}), got {:?}",
             footer.message,
         );
     }
@@ -417,10 +419,10 @@ struct simple size=5x5
 
 /// A scope whose Edition Netlist IR carries inputs and outputs but no
 /// cells — a `pressure_plate -> sig.a` bound straight to `door
-/// opened_by=sig.a`, which `spec/redstone` §14.2 permits — still has a
-/// layout: the wire from the sensor pad to the actuator pad. It used to
-/// be dropped here, and `--stage placement` onward printed `[]` at exit
-/// 0 for a scope the netlist stage had just described in full.
+/// opened_by=sig.a`, which `spec/redstone` "Signal binding" permits —
+/// still has a layout: the wire from the sensor pad to the actuator pad.
+/// It used to be dropped here, and `--stage placement` onward printed `[]`
+/// at exit 0 for a scope the netlist stage had just described in full.
 #[test]
 fn identity_wire_scope_places_its_actuator_pad() {
     let source = r"
@@ -557,7 +559,7 @@ struct beta size=7x5
     );
 }
 
-// ---- the row has to hold the cells (`spec/redstone` §14.5) ----
+// ---- the row has to hold the cells (`spec/redstone` "Place-and-route") ----
 //
 // The v1 layout stamps `x = 1 + 2i`, so the reservation's *width* is
 // the resource the cells consume — twice their count and one column
