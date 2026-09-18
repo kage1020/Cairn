@@ -94,17 +94,19 @@ enum Command {
     /// pins a version while `cairn check --edition java` — the mirror a CI
     /// job naturally writes — still runs the unpinned gate. The default is
     /// deliberately not copied here: it would refuse ids on a version
-    /// nobody chose, which is the guess spec §10.4 rules out.
+    /// nobody chose, which is the guess `spec/versioning-editions`
+    /// "Fail-loud and minimum-version inference" rules out.
     Check {
         /// Path to the .crn file to check.
         file: PathBuf,
         /// Optional edition pin. When set, per-edition theme variants
-        /// (spec versioning-editions §10.7) are resolved for the picked
-        /// edition specifically — a `mat_slot=X` reference to a slot only
-        /// the *other* variant declares fires `E_UNRESOLVED_SLOT`. When
-        /// omitted, the resolver unions slot names across both variants
-        /// of one logical theme so the file passes `check` regardless of
-        /// which edition it ends up compiling for.
+        /// (`spec/versioning-editions` "Java / Bedrock portability") are
+        /// resolved for the picked edition specifically — a `mat_slot=X`
+        /// reference to a slot only the *other* variant declares fires
+        /// `E_UNRESOLVED_SLOT`. When omitted, the resolver unions slot
+        /// names across both variants of one logical theme so the file
+        /// passes `check` regardless of which edition it ends up
+        /// compiling for.
         ///
         /// The pin also names the version table `@intended_targets` is
         /// weighed in. Without one both editions weigh it, since a floor
@@ -121,10 +123,11 @@ enum Command {
         /// row, which is not necessarily the newest row it carries (see
         /// `DataVersionTable::latest`).
         ///
-        /// Requires `--edition`, mirroring spec §4.2's rule that
-        /// `--target` alone is forbidden: "1.21" names different releases
-        /// on Java and Bedrock, and an id table belongs to one
-        /// `(edition, version)` pair rather than to a version string.
+        /// Requires `--edition`, mirroring the rule in `spec/compilation`
+        /// "Target axes" that `--target` alone is forbidden: "1.21" names
+        /// different releases on Java and Bedrock, and an id table belongs
+        /// to one `(edition, version)` pair rather than to a version
+        /// string.
         ///
         /// Setting it runs block-array lowering, so the lowering stage's
         /// findings join the report — `E_UNKNOWN_ID` above all, which
@@ -196,12 +199,13 @@ enum Command {
     Compile {
         /// Path to the .crn file to compile.
         file: PathBuf,
-        /// Target edition. Required by spec §4.2 (`--target` alone is
-        /// forbidden).
+        /// Target edition. Required by `spec/compilation` "Target axes"
+        /// (`--target` alone is forbidden).
         #[arg(long, value_enum)]
         edition: EditionArg,
         /// Minecraft version string. Resolved against the backend's data
-        /// table; opaque label per spec §10.1. `latest` aliases the
+        /// table; opaque label per `spec/versioning-editions`
+        /// "The target is a compile-time parameter". `latest` aliases the
         /// version that table names as its `latest` row, which is not
         /// necessarily the newest row it carries (see
         /// `DataVersionTable::latest`).
@@ -293,25 +297,26 @@ enum SynthStage {
     /// the IR and phases".
     Netlist,
     /// Edition Netlist IR: Edition Cell selection over the Netlist IR
-    /// against `--edition`. The middle tier of `spec/redstone` §14.6's
-    /// three-tier cell library. Still carries no delay.
+    /// against `--edition`. The middle tier of the three-tier cell library
+    /// `spec/redstone` "Edition differences" lays out. Still carries no
+    /// delay.
     Edition,
     /// Placement IR: 1D coordinate assignment over the Edition Netlist
-    /// IR against `--edition`. Stage 1 of `spec/redstone` §14.5's
-    /// place-and-route pipeline. `wire_length` and `local_delay_ticks`
+    /// IR against `--edition`. Stage 1 of the pipeline `spec/redstone`
+    /// "Place-and-route" lays out. `wire_length` and `local_delay_ticks`
     /// stay `None` at this stage; `--stage route` and `--stage delay`
     /// fill them.
     Placement,
     /// Routed Placement IR: Steiner routing over the Placement IR
-    /// against `--edition`. Stage 2 of `spec/redstone` §14.5's
-    /// place-and-route pipeline. Fills every cell's `wire_length`
+    /// against `--edition`. Stage 2 of the pipeline `spec/redstone`
+    /// "Place-and-route" lays out. Fills every cell's `wire_length`
     /// with the sum, over the nets driving it, of the routed length
     /// from that net's source into the cell; `local_delay_ticks` stays
     /// `None` until the delay-insertion pass (stage 3) runs.
     Route,
     /// Delayed Placement IR: delay insertion over the routed Placement
-    /// IR against `--edition`. Stage 3 of `spec/redstone` §14.5's
-    /// place-and-route pipeline. Fills every cell's `local_delay_ticks`
+    /// IR against `--edition`. Stage 3 of the pipeline `spec/redstone`
+    /// "Place-and-route" lays out. Fills every cell's `local_delay_ticks`
     /// with the sum (a per-cell wire cost, not an arrival time) of
     /// the cell's physical base delay
     /// ([`cairn_lang_redstone::EditionCell::base_delay_ticks`]) and
@@ -324,9 +329,9 @@ enum SynthStage {
     /// buffer chain a segment needs is longer than v1 will build.
     Delay,
     /// Legalized Placement IR: crossing legalization over the delayed
-    /// Placement IR against `--edition`. Stage 4 of `spec/redstone`
-    /// §14.5's place-and-route pipeline. Materialises the coord of
-    /// every implicit buffer repeater the delay pass counted into
+    /// Placement IR against `--edition`. Stage 4 of the pipeline
+    /// `spec/redstone` "Place-and-route" lays out. Materialises the coord
+    /// of every implicit buffer repeater the delay pass counted into
     /// every cell's `buffer_coords`, one entry per driver segment that
     /// passes through it — so a block serving several segments is
     /// named once per segment and a consumer counting blocks
@@ -365,7 +370,8 @@ enum CheckFormat {
 
 #[derive(Copy, Clone, ValueEnum)]
 enum InfoFormat {
-    /// Multi-line human report mirroring `spec/versioning-editions.md` §10.5.
+    /// Multi-line human report mirroring the three-answers section of
+    /// `spec/versioning-editions`.
     Text,
     /// Pretty JSON serialisation of `VersionAxes`, for tools.
     Json,
@@ -683,7 +689,7 @@ fn check_lowering(
     target: Option<&str>,
 ) -> CheckLowering {
     // `--target` without `--edition` cannot reach here — clap's `requires`
-    // refuses it (spec §4.2), which is what
+    // refuses it (`spec/compilation` "Target axes"), which is what
     // `target_without_edition_is_refused_as_a_usage_error` guards. Every
     // other combination can: a bare `check` and `check --edition E` both
     // take the `let else` and lower nothing, which is the ordinary
@@ -1307,12 +1313,12 @@ fn floor_keyword(floor: &VersionFloor) -> &'static str {
 /// carries the position of the line, and that line is the file's own, so a
 /// note saying "the file declares it" adds a sentence and no fact.
 ///
-/// A member-level floor is the case this exists for. `spec/versioning-editions.md`
-/// §10.4 makes the minimum version of a composite the max of its parts, and
-/// a target refused by a floor written inside a `def` in a library is not
-/// actionable as a bare version number: the reader has to be told whose
-/// floor it is and by what route this build inherited it, because the
-/// repair is at the other end of that route.
+/// A member-level floor is the case this exists for. `spec/versioning-editions`
+/// "Fail-loud and minimum-version inference" makes the minimum version of a
+/// composite the max of its parts, and a target refused by a floor written
+/// inside a `def` in a library is not actionable as a bare version number: the
+/// reader has to be told whose floor it is and by what route this build
+/// inherited it, because the repair is at the other end of that route.
 fn floor_origin_note(floor: &VersionFloor) -> Option<String> {
     // Exhaustive, and deliberately not routed through `part()`: the clause
     // is what differs between the routes, and a wildcard here would give a
@@ -1329,7 +1335,8 @@ fn floor_origin_note(floor: &VersionFloor) -> Option<String> {
 }
 
 /// One pack's version table, as the `DataVersion` ordering
-/// `spec/versioning-editions.md` §10.1 makes canonical.
+/// `spec/versioning-editions` "The target is a compile-time parameter" makes
+/// canonical.
 ///
 /// **Every** row, including the ones `--target` may not name. Ordering a
 /// floor and building for a version are different questions: the pack has
@@ -1395,9 +1402,10 @@ struct VersionVerdicts<'a> {
 /// version refuses, so none is lowered a second time to find that out.
 ///
 /// The floors are weighed by `DataVersion` through the pack's own table
-/// (`spec/versioning-editions.md` §10.1), which is why the order is built
-/// here from `pack` rather than passed in: every version in `considered`
-/// is a row of that same table, so the key lookup below cannot miss.
+/// (`spec/versioning-editions` "The target is a compile-time parameter"),
+/// which is why the order is built here from `pack` rather than passed in:
+/// every version in `considered` is a row of that same table, so the key
+/// lookup below cannot miss.
 fn weigh_versions<'a>(
     ir: &cairn_lang_core::intent::IntentModule,
     resolution: &cairn_lang_core::Resolution,
@@ -2316,7 +2324,8 @@ fn run_compile(
 }
 
 /// Compare the lockfile at `lock_path` with the target being built, and
-/// report the divergence the way `spec/versioning-editions.md` §10.6 does.
+/// report the divergence the way `spec/versioning-editions`
+/// "Provenance and lock" does.
 ///
 /// The lockfile is the record of what was verified, so a recompile for a
 /// different target is the moment that record stops describing what is on
@@ -2390,9 +2399,10 @@ fn report_previous_target(lock_path: &Path, edition: EditionArg, target: &Resolv
 /// The left half of the warning: `1.20.4/DataVersion 3700`.
 ///
 /// The integer is named here and bare on the right, which is the shape
-/// §10.6 prints. Java's is Minecraft's `DataVersion`; Bedrock's is the
-/// block palette's own `version`, and calling both `DataVersion` would name
-/// the Java concept for a number that is not one.
+/// `spec/versioning-editions` "Provenance and lock" prints. Java's is
+/// Minecraft's `DataVersion`; Bedrock's is the block palette's own
+/// `version`, and calling both `DataVersion` would name the Java concept for
+/// a number that is not one.
 fn describe_verified(target: &LockTarget, show_edition: bool) -> String {
     let field = match target.edition {
         LockEdition::Java => "DataVersion",
@@ -2492,11 +2502,12 @@ fn load_and_lower(
 /// artifact is prepared, so a refusal leaves nothing on disk.
 ///
 /// The ordering key is the target edition's `DataVersion` table
-/// ([§10.1](https://cairn-lang.dev/spec/versioning-editions)): Java and
-/// Bedrock number their releases differently, so a floor the table cannot
-/// place is refused as its own failure rather than compared by its text.
-/// Every applicable floor is weighed and the first in source order that
-/// refuses the target is reported.
+/// ([versioning-editions](https://cairn-lang.dev/spec/versioning-editions)
+/// "The target is a compile-time parameter"): Java and Bedrock number their
+/// releases differently, so a floor the table cannot place is refused as its
+/// own failure rather than compared by its text. Every applicable floor is
+/// weighed and the first in source order that refuses the target is
+/// reported.
 ///
 /// # Errors
 ///
@@ -2545,11 +2556,12 @@ fn enforce_version_floor(
     if let Some(note) = floor_origin_note(floor) {
         eprintln!("{note}");
     }
-    // `spec/versioning-editions.md` §10.4 makes the closed set of
-    // candidates valid in the target part of the message, not an extra. Naming the floor alone
-    // sends an author to `--target >=99.0`, which is a second error and no
-    // closer to a build; whether *any* supported target satisfies the floor
-    // is the fact that decides what they do next.
+    // `spec/versioning-editions` "Fail-loud and minimum-version inference"
+    // makes the closed set of candidates valid in the target part of the
+    // message, not an extra. Naming the floor alone sends an author to
+    // `--target >=99.0`, which is a second error and no closer to a build;
+    // whether *any* supported target satisfies the floor is the fact that
+    // decides what they do next.
     //
     // Every floor, not the one being reported. A candidate that clears this
     // floor and trips the next one is the same second error in a different

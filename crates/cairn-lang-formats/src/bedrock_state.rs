@@ -7,24 +7,26 @@
 //! its own typed keys (`weirdo_direction: Int`, `upside_down_bit: Byte`), and
 //! for some intents (stair `shape`) it has **no** key at all.
 //!
-//! Per spec versioning-editions §10.3 ("Java as the base, Bedrock as
-//! overriding diffs") and §10.7 (`intent_state` neutral, `resolved_state`
-//! per-edition), this module holds the hand-written Bedrock diff. It
-//! currently covers the **stair family**; further block families extend
-//! the same match dispatch additively as their lowering paths land. Any
-//! block with properties outside a covered family is a hard error rather
-//! than a silent pass-through.
+//! Per `spec/versioning-editions` "Backend = data tables" (Java as the base,
+//! Bedrock as overriding diffs) and "Java / Bedrock portability"
+//! (`intent_state` neutral, `resolved_state` per-edition), this module holds
+//! the hand-written Bedrock diff. It currently covers the **stair family**;
+//! further block families extend the same match dispatch additively as their
+//! lowering paths land. Any block with properties outside a covered family is
+//! a hard error rather than a silent pass-through.
 //!
-//! `shape` has no Bedrock equivalent (§10.7: "stairs shape — no state on
-//! Bedrock"). A non-`straight` shape is **dropped with a degradation note**
-//! (spec §10.3 `dropped_states: [shape]`, §10.7 `W_INTENT_DEGRADED`), never
-//! silently (§10.4 forbids implicit dropping). `shape=straight` is the
-//! Bedrock default, so it drops without a note.
+//! `shape` has no Bedrock equivalent — the portability section is explicit:
+//! "stairs shape — no state on Bedrock". A non-`straight` shape is **dropped
+//! with a degradation note** (`dropped_states: [shape]` per the data-table
+//! section, `W_INTENT_DEGRADED` per the portability one), never silently:
+//! `spec/versioning-editions` "Fail-loud and minimum-version inference"
+//! forbids implicit dropping. `shape=straight` is the Bedrock default, so it
+//! drops without a note.
 //!
 //! Numeric domains here are pinned against the Bedrock stair block-state
 //! listing on `minecraft.wiki` / `wiki.bedrock.dev` (`Stairs/BS`,
-//! consulted 2026-07 against Bedrock 1.21.60). The Cairn spec's §10.7
-//! illustrative example uses different `weirdo_direction` values; the
+//! consulted 2026-07 against Bedrock 1.21.60). The Cairn spec's own
+//! portability example uses different `weirdo_direction` values; the
 //! wiki listing is authoritative for the on-disk mapping.
 
 use cairn_lang_core::block_array::is_stair;
@@ -48,7 +50,8 @@ pub struct StateTranslation {
 
 /// A Java property that the Bedrock backend cannot map. Carries the
 /// self-correction triple (what is wrong / what is valid / suggested fix) so
-/// the lint loop can act on the message (spec §10.4).
+/// the lint loop can act on the message, per `spec/versioning-editions`
+/// "Fail-loud and minimum-version inference".
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum BedrockStateError {
     /// A block carries blockstate properties but is not a family this backend
@@ -181,9 +184,11 @@ fn translate_stair(
                 states.insert("upside_down_bit", Tag::Byte(upside_down_bit(id, value)?));
             }
             "shape" => {
-                // Bedrock stairs have no `shape` state (§10.7). `straight`
-                // is Bedrock's default so it drops losslessly; any corner
-                // shape drops with a degradation note (§10.3/§10.4).
+                // Bedrock stairs have no `shape` state
+                // (`spec/versioning-editions` "Java / Bedrock portability").
+                // `straight` is Bedrock's default so it drops losslessly; any
+                // corner shape drops with a degradation note ("Backend = data
+                // tables" and "Fail-loud and minimum-version inference").
                 if value != "straight" {
                     degraded.push(format!(
                         "stair `{id}` shape={value} has no Bedrock state; Bedrock stairs render \
@@ -370,9 +375,10 @@ mod tests {
             err,
             BedrockStateError::UnmappableBlock { ref id, .. } if id == "minecraft:oak_door"
         ));
-        // Self-correction triple (spec §10.4): what is wrong / what is
-        // valid / suggested fix. Each fragment is pinned so a message
-        // reword that breaks the lint loop's expectation fails here first.
+        // Self-correction triple per `spec/versioning-editions` "Fail-loud
+        // and minimum-version inference": what is wrong / what is valid /
+        // suggested fix. Each fragment is pinned so a message reword that
+        // breaks the lint loop's expectation fails here first.
         let msg = err.to_string();
         assert!(msg.contains("minecraft:oak_door"), "wrong: {msg}");
         assert!(msg.contains("facing=north"), "wrong: {msg}");
@@ -404,7 +410,8 @@ mod tests {
     fn unknown_stair_half_value_fails_loud() {
         // Mirrors the facing test to guard against a future
         // `upside_down_bit()` refactor that silently maps unknown values to
-        // `0` — a silent drop that spec §10.4 forbids.
+        // `0` — a silent drop that `spec/versioning-editions` "Fail-loud and
+        // minimum-version inference" forbids.
         let err = translate_states(
             "minecraft:oak_stairs",
             &stair_props("north", "middle", "straight"),

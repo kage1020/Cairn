@@ -252,8 +252,8 @@ fn dedent_emits_per_level_closed() {
 /// header's value is the raw source between its tokens, so a character the
 /// lexer refuses never reaches the pass that would accept it, and
 /// `@requires version>=1.21.4-rc1` died on the `-` before any check pass
-/// saw it. See `spec/versioning-editions.md` §10.1 for why that label
-/// shape has to be readable.
+/// saw it. For why that label shape has to be readable, see
+/// `spec/versioning-editions` "The target is a compile-time parameter".
 #[test]
 fn a_lone_dash_lexes_as_a_token_rather_than_failing() {
     let suffixed = kinds("@requires version>=1.21.4-rc1\n");

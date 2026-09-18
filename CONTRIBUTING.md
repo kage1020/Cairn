@@ -84,6 +84,18 @@ rg '\bM[1-6]\b|M[0-9]-PR[0-9]+|pre-M[0-9]|\bPR[0-9]+\b|\blater PR\b|\bfuture PR\
 
 An empty result is the contract.
 
+### Cite the spec by name, not by number
+
+A section number is the same kind of coordinate. `§14.5` is true only while "Place-and-route" happens to be the fifth section of the fourteenth chapter, so inserting a chapter or splitting a section turns every comment that named it into a quiet lie — and the only way to find them is to read the whole source tree. Editing the spec should not cost that. Name the chapter file and, when you mean one section, its title:
+
+> Before: ``/// Stable per `spec/lint.md` §11.3: errors are things the compiler refuses to guess at.``
+>
+> After: ``/// Stable per `spec/lint` "Error vs warning": errors are things the compiler refuses to guess at.``
+
+Write the chapter as its file stem without the extension (`spec/redstone`, `spec/versioning-editions`) and copy the section title verbatim. Cite the chapter alone when you mean the chapter, and once a comment has given the full citation, later sentences in it should refer back in prose — "that pipeline", "the phase order" — rather than repeat it.
+
+`cargo test --workspace` holds this: no `§` or "section 11.3" outside the spec, every `spec/<chapter>` names a chapter that exists, and every quoted title is a real heading in it. Renumbering the spec now touches no Rust at all. Retitling a section fails the test at each citation by file and line, which is the point — a title change is a change of meaning, and the comment that leaned on it deserves a re-read. The spec and its Japanese mirror are exempt, being where the numbers are defined, as are this file and the changelog.
+
 ### Crate READMEs
 
 Each crate's `README.md` is what crates.io shows, so it is the front page for anyone who has never seen the repository. When a stage lands, update that crate's README in the same PR — a stage is not shipped while the front page still says it is coming.

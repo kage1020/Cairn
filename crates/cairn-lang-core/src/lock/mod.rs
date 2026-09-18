@@ -6,8 +6,8 @@
 //! a different target prints the divergence by comparing fields.
 //!
 //! Note that the canonical filename for a single-source build is
-//! `build.cairn.lock` (per `spec/versioning-editions.md` §10.6), but the
-//! CLI defaults to `<source>.lock` so multi-source workspaces stay
+//! `build.cairn.lock` (per `spec/versioning-editions` "Provenance and lock"),
+//! but the CLI defaults to `<source>.lock` so multi-source workspaces stay
 //! unambiguous; the lockfile schema does not care which path it lives at.
 
 mod hash;

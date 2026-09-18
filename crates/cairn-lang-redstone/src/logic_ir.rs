@@ -4,9 +4,9 @@
 //! one below the Netlist IR that later passes will grow on top. The synth pass
 //! collects sensor bindings as [`InputPort`]s, actuator bindings as
 //! [`OutputPort`]s, and lowers every `logic sig.X = <expr>` line into a DAG
-//! of [`GateNode`]s. Delay is not carried here; per `spec/redstone` §14.4 it
-//! is determined for the first time in the Placement IR, several passes down
-//! the pipeline.
+//! of [`GateNode`]s. Delay is not carried here; per `spec/redstone`
+//! "Time model" it is determined for the first time in the Placement IR,
+//! several passes down the pipeline.
 //!
 //! The IR is `Serialize` so callers can dump it as JSON — the CLI's
 //! `synth --experimental-logic-synth` uses that path — and every field is
@@ -182,9 +182,9 @@ pub struct OutputPort {
 /// The Logic IR for one struct/def/site body.
 ///
 /// One instance per scope where `logic` / sensor / actuator bindings can
-/// legally appear (`spec/redstone` §14.2). Multi-scope files produce a
-/// [`ScopedLogicIr`] list; the CLI's `synth` subcommand walks that list to
-/// emit one entry per scope.
+/// legally appear (`spec/redstone` "Signal binding"). Multi-scope files
+/// produce a [`ScopedLogicIr`] list; the CLI's `synth` subcommand walks
+/// that list to emit one entry per scope.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct LogicIr {
     /// Sensor-emitted signals feeding this scope, in source order.

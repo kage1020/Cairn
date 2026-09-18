@@ -706,7 +706,7 @@ pub fn build_walkway_array<S: BuildHasher>(
 /// * `center` — `len / 2` (integer division, so even widths land at
 ///   the column one cell `+u` of the midpoint, matching the
 ///   convention `super::lower::carve_door` uses when cutting the
-///   opening; spec `syntax.md` §5.4 calls this "round-half-up").
+///   opening; `spec/syntax` "Selectors" calls this "round-half-up").
 /// * `left`   — `0`, the wall-local axis origin.
 /// * `right`  — `len - 1`, the far corner. The `len.saturating_sub(1)`
 ///   guard returns `0` for a hypothetical `len == 0` rather than

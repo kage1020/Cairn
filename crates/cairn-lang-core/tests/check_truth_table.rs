@@ -358,9 +358,9 @@ fn a_table_in_a_def_body_is_checked() {
 
 // -- the payload ----------------------------------------------------------
 
-/// "Write the missing rows" is the repair, and recovering the rows from
-/// the sentence is the prose-parsing `spec/lint.md` §11.2 tells consumers
-/// to avoid.
+/// "Write the missing rows" is the repair, and recovering the rows from the
+/// sentence is the prose-parsing `spec/lint` "Machine-readable payload"
+/// tells consumers to avoid.
 #[test]
 fn the_partial_finding_carries_the_rows_to_write() {
     let found = only(&table("sig.a, sig.b", "00->0"));

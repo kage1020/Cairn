@@ -1,7 +1,7 @@
 //! Integration tests for `cairn_lang_redstone::compile_delay`.
 //!
 //! Locks the observable behaviours of the delay-insertion slice
-//! (`spec/redstone` §14.5, stage 3 of place-and-route): the
+//! (stage 3 of the pipeline `spec/redstone` "Place-and-route"): the
 //! `examples/redstone-door.crn` happy path (per edition),
 //! multi-cell cascade `local_delay_ticks` attribution pinned to base delay
 //! plus implicit buffer repeaters, `E_ATTENUATION_LIMIT` when a driver

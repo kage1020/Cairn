@@ -9,11 +9,11 @@
 //! the header has something to say about the findings around it.
 //!
 //! Both codes are warnings. The value reaches no pass, no palette and no
-//! lockfile field, so `spec/lint` §11.3's error test — leaving it alone
-//! yields something other than what the source asked for — is not met: the
-//! artifact is identical either way. `@requires` is an error for the
-//! opposite reason, its floor being folded into the compatible range and
-//! the `--target` gate.
+//! lockfile field, so the error test of `spec/lint` "Error vs warning" —
+//! leaving it alone yields something other than what the source asked for —
+//! is not met: the artifact is identical either way. `@requires` is an
+//! error for the opposite reason, its floor being folded into the
+//! compatible range and the `--target` gate.
 
 use cairn_lang_core::calver::{LanguageVersion, parse_language_version};
 use cairn_lang_core::check::{DiagnosticCode, Severity};
@@ -224,8 +224,8 @@ fn each_repeated_header_is_judged_on_its_own_line() {
 
 #[test]
 fn both_codes_carry_a_payload_a_consumer_can_act_on() {
-    // AC9. `spec/lint` §11.2 tells consumers not to parse the prose, so
-    // the parts a quick-fix needs travel beside it.
+    // AC9. `spec/lint` "Machine-readable payload" tells consumers not to
+    // parse the prose, so the parts a quick-fix needs travel beside it.
     let invalid = only("@cairn 2026.13\n", DiagnosticCode::InvalidCairnVersion);
     let json = serde_json::to_value(invalid.data.expect("a payload")).expect("serialises");
     assert_eq!(json["kind"], "invalid_cairn_version");

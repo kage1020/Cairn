@@ -107,7 +107,8 @@ fn a_refused_target_writes_nothing() {
 }
 
 /// The message has to carry all three of what is needed to act: the floor,
-/// the target that missed it, and what to do — the shape spec §10.4 uses
+/// the target that missed it, and what to do — the shape
+/// `spec/versioning-editions` "Fail-loud and minimum-version inference" uses
 /// for this code.
 #[test]
 fn the_refusal_names_the_floor_the_target_and_the_fix() {
@@ -146,10 +147,10 @@ fn the_refusal_points_at_the_line_that_set_the_floor() {
 
 /// The suggestion has to be a target that exists.
 ///
-/// `spec/lint.md` §11.2 makes the candidates valid in the target part of
-/// the message. Echoing the floor back as `--target >=99.0` sends the
-/// author to an unsupported-target error, which is a second failure and no
-/// closer to a build.
+/// `spec/lint` "Machine-readable payload" makes the candidates valid in the
+/// target part of the message. Echoing the floor back as `--target >=99.0`
+/// sends the author to an unsupported-target error, which is a second
+/// failure and no closer to a build.
 #[test]
 fn an_unsatisfiable_floor_says_so_instead_of_suggesting_a_target() {
     let fixture = Fixture::new(
@@ -704,8 +705,8 @@ fn a_pre_release_floor_is_met_by_the_release_it_names() {
 /// A build placing a `def` that declares a floor is held to it, and the
 /// refusal names the part rather than only the number.
 ///
-/// The whole value of a composite floor
-/// (`spec/versioning-editions.md` §10.4) is knowing which piece of the
+/// The whole value of a composite floor (`spec/versioning-editions`
+/// "Fail-loud and minimum-version inference") is knowing which piece of the
 /// build wants it: a target refused by a floor written inside a template
 /// is not actionable as a bare version, because the repair is at the other
 /// end of the `place use=` that inherited it.

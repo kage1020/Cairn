@@ -1,7 +1,7 @@
 //! Edition Netlist IR → Placement IR lowering.
 //!
-//! Stage 1 of the five-stage place-and-route pipeline `spec/redstone`
-//! §14.5 lays out. Assigns each
+//! Stage 1 of the five-stage pipeline `spec/redstone` "Place-and-route"
+//! lays out. Assigns each
 //! [`crate::edition_netlist_ir::EditionCellNode`] a
 //! [`crate::placement_ir::CellCoord`] inside its scope's
 //! [`cairn_lang_core::CircuitRegion`] reservation, and each actuator its
@@ -294,9 +294,9 @@ fn congestion_diagnostic(reservation: &CircuitRegionReservation, required_area: 
 /// Kept apart from [`congestion_diagnostic`] because the numbers that
 /// explain it are different — a ratio of areas says nothing about a row
 /// that is three columns short — while the code stays
-/// [`DiagnosticCode::RouteCongestion`]: `spec/redstone` §14.5 asks for
-/// one fail-loud when routing does not fit the region, and names area
-/// shortage as the example rather than as the only shape.
+/// [`DiagnosticCode::RouteCongestion`]: `spec/redstone` "Place-and-route"
+/// asks for one fail-loud when routing does not fit the region, and names
+/// area shortage as the example rather than as the only shape.
 fn row_overflow_diagnostic(reservation: &CircuitRegionReservation, cell_count: u32) -> Diagnostic {
     let primary = format!(
         "synthesized netlist needs {columns} columns for a row of {cell_count} cells, a clear column beside each and one past the end of the row, but the reserved region is only {width} wide (region {width}x{depth}, void={void})",
@@ -321,8 +321,8 @@ fn row_overflow_diagnostic(reservation: &CircuitRegionReservation, cell_count: u
 /// kept apart from each other: the resource is a different one, and the
 /// numbers that explain a row with nothing beside it say nothing about
 /// a region short of volume. [`DiagnosticCode::RouteCongestion`] is
-/// shared with them, per `spec/redstone` §14.5's single fail-loud for
-/// "routing does not fit the region".
+/// shared with them, per the single fail-loud for "routing does not fit
+/// the region" in `spec/redstone` "Place-and-route".
 fn row_depth_diagnostic(reservation: &CircuitRegionReservation) -> Diagnostic {
     let primary = format!(
         "synthesized netlist needs {rows} rows for its cell row and a clear row on either side of it, but the reserved region is only {depth} deep (region {width}x{depth}, void={void})",
@@ -344,8 +344,9 @@ fn row_depth_diagnostic(reservation: &CircuitRegionReservation) -> Diagnostic {
 /// Separate from the other three because the resource is a different
 /// one again: `void` buys height, the row buys length, the rows beside
 /// the row buy the lanes, and this buys the rows the pads stand in. Sharing
-/// [`DiagnosticCode::RouteCongestion`] with them keeps `spec/redstone`
-/// §14.5's single fail-loud for "routing does not fit the region".
+/// [`DiagnosticCode::RouteCongestion`] with them keeps the single
+/// fail-loud for "routing does not fit the region" in `spec/redstone`
+/// "Place-and-route".
 fn pad_row_diagnostic(reservation: &CircuitRegionReservation, pad_rows: u32) -> Diagnostic {
     let primary = format!(
         "synthesized netlist needs {needed} rows for its I/O pads but the reserved region is only {depth} deep (region {width}x{depth}, void={void})",

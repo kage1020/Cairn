@@ -1,11 +1,11 @@
 //! The minimum version of a composite is the max of its parts.
 //!
-//! `spec/versioning-editions.md` §10.4 gives a `def` and a `theme` a
-//! `requires version>=X` line of their own, and says a composite's floor is
-//! the max over its parts. A module-level `@requires` cannot say that: it
-//! applies to the whole file rather than to the template, so a library of
-//! `def`s had no way to carry its own requirements and every consumer
-//! restated them.
+//! `spec/versioning-editions` "Fail-loud and minimum-version inference"
+//! gives a `def` and a `theme` a `requires version>=X` line of their own,
+//! and says a composite's floor is the max over its parts. A module-level
+//! `@requires` cannot say that: it applies to the whole file rather than to
+//! the template, so a library of `def`s had no way to carry its own
+//! requirements and every consumer restated them.
 //!
 //! What "its parts" means is the subject of most of this file. A part the
 //! build does not instantiate is not a part of it; a `theme` is a part of
@@ -98,12 +98,14 @@ def cottage size=5x5:
     assert!(codes(source).contains(&"W_UNUSED_DEF"));
 }
 
-/// The decision §10.4 left open: a `theme` floor applies when the theme is
-/// **bound**, not when a rule of it fires. Nothing in this module reads a
-/// slot, and the floor still applies — binding a theme is the act of taking
-/// on what it declares, and making the floor depend on which selectors
-/// matched would let one source require 1.21 on Java and nothing on Bedrock
-/// for a reason that is not about editions.
+/// The decision left open by
+/// `spec/versioning-editions` "Fail-loud and minimum-version inference":
+/// a `theme` floor applies when the theme is **bound**, not when a rule of
+/// it fires. Nothing in this module reads a slot, and the floor still
+/// applies — binding a theme is the act of taking on what it declares, and
+/// making the floor depend on which selectors matched would let one source
+/// require 1.21 on Java and nothing on Bedrock for a reason that is not
+/// about editions.
 #[test]
 fn a_bound_theme_imposes_its_floor_even_where_no_slot_is_read() {
     let source = "\

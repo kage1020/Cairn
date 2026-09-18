@@ -1,7 +1,7 @@
 //! Integration tests for `cairn_lang_redstone::compile_routing`.
 //!
 //! Locks the observable behaviours of the Steiner-routing slice
-//! (`spec/redstone` §14.5, stage 2 of place-and-route): the
+//! (stage 2 of the pipeline `spec/redstone` "Place-and-route"): the
 //! `examples/redstone-door.crn` happy path (per edition), single-cell
 //! `wire_length` attribution, multi-cell cascades whose
 //! `wire_length` values are pinned to exact routed sums,
@@ -28,7 +28,7 @@ use common::{load_example, normalize_stage_tags, placement_from_source};
 /// dust is visible. `sig.step`'s pad is at the corner a row further
 /// out, and comes in round the corner for two.
 /// `local_delay_ticks` stays `None` (routing does not insert delay per
-/// `spec/redstone` §14.4; that is stage 3).
+/// `spec/redstone` "Time model"; that is stage 3).
 #[test]
 fn redstone_door_java_fills_wire_length_from_input_pads() {
     let source = load_example("redstone-door.crn");
@@ -117,8 +117,9 @@ fn redstone_door_bedrock_matches_java_wire_length() {
 ///   and cell[2]. cell[0] has a lane taken on either side of it and
 ///   the row itself is one strand wide, so its output climbs to `y=1`
 ///   at its own doorstep, runs the length of the row up there and
-///   drops in: `6 + 2 = 8`. That is the escape §14.5 specifies, and it
-///   is why the fixture reserves `void=3`.
+///   drops in: `6 + 2 = 8`. That is the escape `spec/redstone`
+///   "Place-and-route" specifies, and it is why the fixture reserves
+///   `void=3`.
 ///
 /// `local_delay_ticks` stays `None` at every cell.
 #[test]
@@ -336,7 +337,8 @@ struct pack size=5x3
     for phrase in ["increase", "void", "enlarge", "region", "split", "circuit"] {
         assert!(
             footer.message.contains(phrase),
-            "footer should carry the spec §14.5 triple (missing {phrase:?}), got {:?}",
+            "footer should carry the `spec/redstone` \"Place-and-route\" triple \
+             (missing {phrase:?}), got {:?}",
             footer.message,
         );
     }
@@ -591,11 +593,11 @@ fn re_running_routing_pass_panics_loudly() {
 ///
 /// The router keeps two nets one step apart in one plane, and the
 /// escape that enforces it is what puts a strand a layer above
-/// another: `spec/redstone` §14.5 leaves separating *those* to the
-/// physical tile layer, because whether the upper one reads the lower
-/// depends on what is standing between them and the pseudo-2.5D model
-/// carries no answer. What this pass owes is saying which pairs carry
-/// that obligation rather than leaving it owed by nobody.
+/// another: `spec/redstone` "Place-and-route" leaves separating *those*
+/// to the physical tile layer, because whether the upper one reads the
+/// lower depends on what is standing between them and the pseudo-2.5D
+/// model carries no answer. What this pass owes is saying which pairs
+/// carry that obligation rather than leaving it owed by nobody.
 ///
 /// Advisory, so the scope is routed rather than elided — a refusal
 /// here would be the router applying a rule it cannot check. Both
@@ -650,10 +652,11 @@ fn crossbar_names_the_pairs_the_tile_layer_has_to_separate() {
                 "(1,1,1) on cell #0 stands a layer over, and one step across from, (1,0,0) on sig.a",
                 "(1,1,1) on cell #0 stands a layer over, and one step across from, (1,0,2) on sig.b",
                 "and 6 more of the same two shapes",
-                "`spec/redstone` §14.5 makes separating them the physical tile layer's obligation, \
-                 and §14.6 states it: a `bridge` coord renders as a tile that conducts to neither \
-                 another net's coord under it nor another net's coords diagonally under it — its \
-                 own net's coord under it is the climb, and has to conduct",
+                "`spec/redstone` \"Place-and-route\" makes separating them the physical tile \
+                 layer's obligation, and the same chapter's \"Edition differences\" states it: a \
+                 `bridge` coord renders as a tile that conducts to neither another net's coord \
+                 under it nor another net's coords diagonally under it — its own net's coord \
+                 under it is the climb, and has to conduct",
                 "Fix: nothing in the source is wrong — the pairs are what the escape costs, and \
                  enlarging the region is not a remedy: where a net has to climb at its own \
                  doorstep, more room only lengthens the run it then makes on the upper layer",

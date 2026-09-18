@@ -1,10 +1,10 @@
 //! Shared rectilinear-geometry helpers for the routing / delay /
-//! crossing passes (`spec/redstone` §14.5 stages 2, 3, and 4): the pad
-//! coordinate convention, the deterministic net order, and the one
-//! answer to "where does this net's dust run". A change to the axis
-//! order, the search's tie-break, or the [`NetRef`] sort key reaches
-//! every pass at once, and the byte-for-byte JSON comparisons in the
-//! integration tests catch any drift.
+//! crossing passes (stages 2, 3, and 4 of the pipeline `spec/redstone`
+//! "Place-and-route" lays out): the pad coordinate convention, the
+//! deterministic net order, and the one answer to "where does this net's
+//! dust run". A change to the axis order, the search's tie-break, or the
+//! [`NetRef`] sort key reaches every pass at once, and the byte-for-byte
+//! JSON comparisons in the integration tests catch any drift.
 //!
 //! # The reservation is not empty space
 //!
@@ -28,11 +28,11 @@
 //! Blocks; every coord of dust an earlier net occupies; and every coord
 //! [`beside`] that dust in its own plane, because two nets one step apart
 //! are one strand carrying two signals. The second net goes round, or
-//! climbs over — §14.5's escape, falling out of the same search. In its
-//! own plane only: whether dust at `y + 1` reads the dust below it is
-//! the physical tile layer's question, so [`tile_layer_pairs`] lists the
-//! strands a layer apart and [`tile_layer_clearance`] names them as an
-//! advisory rather than refusing them.
+//! climbs over — that pipeline's escape, falling out of the same search.
+//! In its own plane only: whether dust at `y + 1` reads the dust below it
+//! is the physical tile layer's question, so [`tile_layer_pairs`] lists
+//! the strands a layer apart and [`tile_layer_clearance`] names them as
+//! an advisory rather than refusing them.
 //!
 //! A tree is therefore a function of the order the nets were laid in.
 //! [`net_trees`] lays them in [`net_order`] — fanout descending, then
@@ -293,7 +293,8 @@ fn stepped(from: CellCoord, (dx, dy, dz): (i64, i64, i64)) -> Option<CellCoord> 
 /// these is one strand with the first as surely as a second net drawing
 /// on `coord` itself. Up and down are not here: whether dust at `y + 1`
 /// reads the dust below it depends on what stands between them, and
-/// `spec/redstone` §14.5 leaves that to the physical tile layer.
+/// `spec/redstone` "Place-and-route" leaves that to the physical tile
+/// layer.
 pub(crate) fn beside(coord: CellCoord) -> impl Iterator<Item = CellCoord> {
     IN_PLANE
         .into_iter()
@@ -1075,8 +1076,8 @@ where
 }
 
 /// Two strands of dust a layer apart and within one step of each
-/// other: the pair `spec/redstone` §14.5 hands to the physical tile
-/// layer.
+/// other: the pair `spec/redstone` "Place-and-route" hands to the
+/// physical tile layer.
 ///
 /// `over` is the upper coord and `under` the lower. A pair of coords
 /// is one entry rather than two — the walk that finds them looks down
@@ -1113,9 +1114,10 @@ impl TileLayerPair {
 /// Dust only, per [`Router::dust`]: a terminal is a block, and a block
 /// under a strand is what a wire climbs over rather than something two
 /// signals share — the ordinary way past a component. The obligation
-/// `spec/redstone` §14.6 puts on the tile is wider than this list, and
-/// does not need the list to enumerate it: a `bridge` tile conducts to
-/// no coord of another net below it, whether dust or block.
+/// `spec/redstone` "Edition differences" puts on the tile is wider than
+/// this list, and does not need the list to enumerate it: a `bridge`
+/// tile conducts to no coord of another net below it, whether dust or
+/// block.
 pub(crate) fn tile_layer_pairs(
     nets: &HashMap<NetRef, Vec<CellCoord>>,
     trees: &HashMap<NetRef, NetTree>,
@@ -1167,8 +1169,9 @@ const NAMED_PER_SHAPE: usize = 2;
 ///
 /// `W_ROUTE_CROSS_LAYER_CLEARANCE`, and a warning rather than a
 /// refusal: the pairs are not a fault in the layout. `spec/redstone`
-/// §14.5 keeps two nets one step apart in one plane and makes
-/// separating two a layer apart the physical tile layer's obligation,
+/// "Place-and-route" keeps two nets one step apart in one plane and
+/// makes separating two a layer apart the physical tile layer's
+/// obligation,
 /// because whether the upper strand reads the lower one depends on
 /// what is standing between them and the pseudo-2.5D model carries no
 /// answer. A rule invented here would refuse layouts for a reason
@@ -1241,7 +1244,11 @@ pub(crate) fn tile_layer_clearance(
         ));
     }
     diag = diag.with_footer(
-        "`spec/redstone` §14.5 makes separating them the physical tile layer's obligation, and §14.6 states it: a `bridge` coord renders as a tile that conducts to neither another net's coord under it nor another net's coords diagonally under it — its own net's coord under it is the climb, and has to conduct",
+        "`spec/redstone` \"Place-and-route\" makes separating them the physical tile \
+         layer's obligation, and the same chapter's \"Edition differences\" states it: a \
+         `bridge` coord renders as a tile that conducts to neither another net's coord \
+         under it nor another net's coords diagonally under it — its own net's coord \
+         under it is the climb, and has to conduct",
     );
     diag = diag.with_footer(
         "Fix: nothing in the source is wrong — the pairs are what the escape costs, and enlarging the region is not a remedy: where a net has to climb at its own doorstep, more room only lengthens the run it then makes on the upper layer",
@@ -2027,10 +2034,10 @@ mod tests {
     /// Not keeping them apart is a decision, not an oversight: whether
     /// dust at `y + 1` reads the dust below it depends on what is
     /// standing between them, and the pseudo-2.5D model carries no
-    /// answer, so `spec/redstone` §14.5 makes separating them the
-    /// physical tile layer's obligation. Recorded as a test because the
-    /// alternative is a reader finding [`IN_PLANE`] and taking four
-    /// steps for an oversight of six.
+    /// answer, so `spec/redstone` "Place-and-route" makes separating
+    /// them the physical tile layer's obligation. Recorded as a test
+    /// because the alternative is a reader finding [`IN_PLANE`] and
+    /// taking four steps for an oversight of six.
     ///
     /// What the pass owes is saying which pairs carry the obligation,
     /// and [`tile_layer_pairs`] is that list. Counted here twice over —
@@ -2258,9 +2265,9 @@ mod tests {
 
     /// With nowhere to go round, the way out is up.
     ///
-    /// `spec/redstone` §14.5 calls it an escape, and it is the search
-    /// already climbing over a block, asked the same question about a
-    /// signal. The layer is what makes the coord `Bridge`, so the
+    /// `spec/redstone` "Place-and-route" calls it an escape, and it is
+    /// the search already climbing over a block, asked the same question
+    /// about a signal. The layer is what makes the coord `Bridge`, so the
     /// assertion spells the layer rather than reading it off the
     /// height the way the constructor does.
     ///
@@ -2795,8 +2802,8 @@ mod tests {
             /// have.
             ///
             /// Up and down are not checked, because the router does
-            /// not claim them: `spec/redstone` §14.5 leaves what a
-            /// strand at `y + 1` reads to the physical tile layer.
+            /// not claim them: `spec/redstone` "Place-and-route" leaves
+            /// what a strand at `y + 1` reads to the physical tile layer.
             ///
             /// Three nets rather than two, because two only ever
             /// exercises "avoid the one before me". The third has to

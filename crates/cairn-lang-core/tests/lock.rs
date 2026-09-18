@@ -110,11 +110,12 @@ fn l5_lockfile_roundtrips_through_yaml() {
 
 #[test]
 fn l6_lockfile_yaml_key_order_matches_spec() {
-    // AC L6: top-level keys appear in the order spec §10.6 prints,
-    // `lock_schema_version` first. The AC moved deliberately: a reader that
-    // has to decide whether it understands the document at all cannot be
-    // asked to parse the rest of it first, so the version leads and the
-    // spec sample was updated to match in both languages.
+    // AC L6: top-level keys appear in the order `spec/versioning-editions`
+    // "Provenance and lock" prints, `lock_schema_version` first. The AC
+    // moved deliberately: a reader that has to decide whether it understands
+    // the document at all cannot be asked to parse the rest of it first, so
+    // the version leads and the spec sample was updated to match in both
+    // languages.
     let body = serde_norway::to_string(&sample_lockfile()).expect("encode");
     let keys: Vec<&str> = body
         .lines()

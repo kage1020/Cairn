@@ -11,9 +11,10 @@
 //!
 //! Edition is intentionally *not* in scope. Selecting Java `ComparatorAND`
 //! vs Bedrock `TorchAND` is the Edition Cell step per `spec/redstone`
-//! §14.6, which runs against a target [`cairn_lang_core::Edition`] in a
-//! later pass. The Netlist IR built here is the "Logical Cell selection"
-//! stage described by §14.8's IR diagram.
+//! "Edition differences", which runs against a target
+//! [`cairn_lang_core::Edition`] in a later pass. The Netlist IR built
+//! here is the "Logical Cell selection" stage of the IR diagram in
+//! "Connection to the IR and phases".
 //!
 //! Port ordering is canonical per cell — two-input gates emit
 //! `[A, B]`; `Not` emits `[A]`; `Mux` emits `[Sel, A, B]` — so a

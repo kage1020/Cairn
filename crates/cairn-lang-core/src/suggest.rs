@@ -4,7 +4,7 @@
 //! unknown identifier against a known set (`E_UNKNOWN_KEYWORD`,
 //! `E_UNRESOLVED_SLOT`, the `--target` resolver in `cairn-lang-formats`) call
 //! it to attach a `did you mean X?` note. The function is fail-loud's
-//! second half — `spec/glossary.md` "Fail-loud" requires errors return the
+//! second half — `spec/glossary` "Fail-loud" requires errors return the
 //! closed set of valid candidates *and* a suggested DSL fix; the existing
 //! `expected one of: ...` notes cover the former and this module covers the
 //! latter.
@@ -58,7 +58,7 @@ fn max_distance(input_len: usize) -> usize {
 ///
 /// Comparison goes through Damerau-Levenshtein character-by-character, so
 /// case differences cost one edit each. DSL identifiers are case-sensitive
-/// (spec `syntax.md`) — `Walls` is a different keyword from `walls` — but
+/// (`spec/syntax`) — `Walls` is a different keyword from `walls` — but
 /// a wrong case is exactly the typo this function is meant to catch, and
 /// the distance threshold prevents the suggestion from drifting beyond
 /// "one or two edits away."
@@ -148,9 +148,9 @@ pub const CANDIDATES_SHOWN: usize = 4;
 /// would be a difference nobody chose.
 ///
 /// Truncating at all is a claim only about the sentence. Where a consumer
-/// needs the closed set spec `versioning-editions.md` §10.4 asks an error
-/// to return, it reads the diagnostic's `data` payload, which carries every
-/// candidate.
+/// needs the closed set an error must return per `spec/versioning-editions`
+/// "Fail-loud and minimum-version inference", it reads the diagnostic's `data`
+/// payload, which carries every candidate.
 #[must_use]
 pub fn candidate_list(candidates: &[String]) -> String {
     let listed = candidates
@@ -223,7 +223,7 @@ mod tests {
 
     #[test]
     fn case_difference_is_a_one_edit_suggestion() {
-        // DSL identifiers are case-sensitive (spec/syntax.md) — `Walls` is
+        // DSL identifiers are case-sensitive (`spec/syntax`) — `Walls` is
         // a different keyword from `walls` — but wrong case is exactly the
         // typo we want to catch, so the suggestion fires (distance 1, well
         // inside the cap of 2 for a 5-char input).

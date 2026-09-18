@@ -38,10 +38,11 @@
 //! `E_MISPLACED_MEMBER` still saying the row produces no blocks.
 //!
 //! A member's material can only come from what the member itself carries
-//! today. `spec/components-editing-sites.md` §9.2's `edit ... set
-//! mat_slot=` patch DSL is not implemented — the grammar has no `edit`
-//! item and the parser refuses one — so there is no route by which a
-//! member declared bare acquires a slot later. When that lands, this pass
+//! today. The `edit ... set mat_slot=` patch DSL of
+//! `spec/components-editing-sites` "Editing model" is not implemented — the
+//! grammar has no `edit` item and the parser refuses one — so there is no
+//! route by which a member declared bare acquires a slot later. When that
+//! lands, this pass
 //! has to read the post-edit IR; it already does, in the sense that it
 //! reads whatever `intent::lower` produced, so what has to hold is that
 //! edits are applied there rather than downstream.

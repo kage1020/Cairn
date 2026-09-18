@@ -184,9 +184,9 @@ pub enum MaterialDeferred {
     /// lowering stays silent to avoid double-diagnosing the same span.
     AlreadyDiagnosed,
     /// The value resolved to a block id the pinned target does not declare.
-    /// Spec versioning-editions §10.4 makes this a hard error: writing the
-    /// id anyway produces a structure file the game loads as air, with no
-    /// diagnostic to explain the hole.
+    /// `spec/versioning-editions` "Fail-loud and minimum-version inference"
+    /// makes this a hard error: writing the id anyway produces a structure
+    /// file the game loads as air, with no diagnostic to explain the hole.
     UnknownId(UnknownId),
 }
 

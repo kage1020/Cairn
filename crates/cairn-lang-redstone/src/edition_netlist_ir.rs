@@ -7,20 +7,20 @@
 //! [`crate::netlist_ir::CellNode`] into an [`EditionCellNode`] whose
 //! [`EditionCell`] tag names the target-edition realisation of the source
 //! [`crate::netlist_ir::LogicalCell`] — the middle rung of the three-tier
-//! cell library documented in `spec/redstone` §14.6 (`Logical Cell → Edition
-//! Cell → Physical Tile`).
+//! cell library documented in `spec/redstone` "Edition differences"
+//! (`Logical Cell → Edition Cell → Physical Tile`).
 //!
 //! The pass is structural only: driver arrays, net references, input /
 //! output ports, and `signal_defs` are copied verbatim from the source
-//! Netlist IR. Delay is still not carried — per `spec/redstone` §14.4 /
-//! §14.8 delay is first determined in the Placement IR, one step further
-//! down the pipeline.
+//! Netlist IR. Delay is still not carried — per `spec/redstone`
+//! "Time model" and "Connection to the IR and phases" delay is first
+//! determined in the Placement IR, one step further down the pipeline.
 //!
-//! QC / BUD refusal (`E_NO_PORTABLE_IMPL`, §14.6) is not scaffolded here
-//! because none of the currently reachable [`crate::netlist_ir::LogicalCell`]
-//! variants (`And` / `Or` / `Not`) require update-order semantics; the
-//! diagnostic joins the pass alongside the first cell that needs it
-//! (sequential-macro or observer families).
+//! QC / BUD refusal (`E_NO_PORTABLE_IMPL`, from that same section) is not
+//! scaffolded here because none of the currently reachable
+//! [`crate::netlist_ir::LogicalCell`] variants (`And` / `Or` / `Not`)
+//! require update-order semantics; the diagnostic joins the pass alongside
+//! the first cell that needs it (sequential-macro or observer families).
 
 use cairn_lang_core::Edition;
 use cairn_lang_core::ast::DottedRef;
@@ -32,9 +32,10 @@ use crate::logic_ir::ScopeKind;
 use crate::netlist_ir::{CellPortDriver, NetRef, NetlistInput, NetlistOutput};
 
 /// Edition-specific realisation of a [`crate::netlist_ir::LogicalCell`]
-/// (`spec/redstone` §14.6). Each variant carries both a target edition
-/// and a physical implementation family, so pairing a Java AND cell with
-/// a Bedrock torch tile is a type error, not a runtime mishap.
+/// (`spec/redstone` "Edition differences"). Each variant carries both a
+/// target edition and a physical implementation family, so pairing a Java
+/// AND cell with a Bedrock torch tile is a type error, not a runtime
+/// mishap.
 ///
 /// The variant set covers *every* `(Edition, LogicalCell)` combination.
 /// The pinned pairs (`ComparatorAnd` / `TorchAnd` / `RepeaterOr` /
@@ -53,8 +54,9 @@ use crate::netlist_ir::{CellPortDriver, NetRef, NetlistInput, NetlistOutput};
 ///
 /// `#[non_exhaustive]` for the same reason [`crate::netlist_ir::LogicalCell`]
 /// carries the attribute — adding a sequential-macro cell (`latch` /
-/// `pulse` / `delay` / `edge_*` / `counter`, §14.1) later should not be a
-/// breaking change for downstream exhaustive matches.
+/// `pulse` / `delay` / `edge_*` / `counter`, from `spec/redstone`
+/// "Two tiers, and the v1 boundary") later should not be a breaking
+/// change for downstream exhaustive matches.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]
@@ -74,8 +76,9 @@ pub enum EditionCell {
     BedrockTorchOr,
     /// Java NOT — a single inverter torch. Structurally shared with
     /// Bedrock but kept edition-tagged so a later placer can pick the
-    /// correct tile orientation without re-deriving the edition (spec
-    /// §14.6 lists orientation among the edition-absorbed differences).
+    /// correct tile orientation without re-deriving the edition
+    /// (`spec/redstone` "Edition differences" lists orientation among the
+    /// edition-absorbed differences).
     JavaInverterTorch,
     /// Bedrock NOT — a single inverter torch, edition-tagged for the same
     /// reason as [`EditionCell::JavaInverterTorch`].
@@ -134,9 +137,9 @@ impl EditionCell {
     /// exclusive of any implicit buffer repeaters the delay-insertion
     /// pass adds for segments beyond the dust attenuation limit.
     ///
-    /// `spec/redstone` §14.4 ties tick counts to the cell selection
-    /// plus the routed wire length. This method exposes the first
-    /// half — the constant tick contribution of the physical tile —
+    /// `spec/redstone` "Time model" ties tick counts to the cell
+    /// selection plus the routed wire length. This method exposes the
+    /// first half — the constant tick contribution of the physical tile —
     /// so [`crate::delay::compile_delay`] can compose it with the
     /// per-net buffer count without re-deriving the edition split
     /// each time.

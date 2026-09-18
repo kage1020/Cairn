@@ -110,8 +110,8 @@ fn the_finding_names_the_version_and_the_floor_that_refuses_it() {
 
 /// Some, not all: the versions above the floor still build, so the header
 /// is a wish stated too widely rather than a file nothing can be made of.
-/// `spec/syntax.md` §5.3 calls it a hint, and a hint that is half right is
-/// not an error.
+/// `spec/syntax` "Headers" calls it a hint, and a hint that is half right
+/// is not an error.
 #[test]
 fn a_floor_above_part_of_the_list_is_a_warning() {
     assert_eq!(
@@ -135,8 +135,9 @@ fn a_file_without_a_floor_raises_nothing() {
 }
 
 /// A floor a `def` declares is a floor on every `place use=` that names it
-/// (`spec/versioning-editions.md` §10.4), so the intent it contradicts is
-/// the file's just as much as a header's would be.
+/// (`spec/versioning-editions` "Fail-loud and minimum-version inference"),
+/// so the intent it contradicts is the file's just as much as a header's
+/// would be.
 #[test]
 fn a_floor_a_placed_def_declares_reaches_the_comparison() {
     let source = "\

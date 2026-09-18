@@ -1,11 +1,11 @@
 //! Ordering Minecraft versions by `DataVersion`, per edition.
 //!
-//! `spec/versioning-editions.md` §10.1 makes `DataVersion` — the
-//! monotonically increasing integer Mojang assigns — the canonical
-//! ordering key, precisely so ordering survives the move from semver-ish
-//! (`1.21.4`) to date-based labels. This module is that key, applied to
-//! the one question `@requires` asks: does a target sit at or above the
-//! floor a source declares?
+//! `spec/versioning-editions` "The target is a compile-time parameter" makes
+//! `DataVersion` — the monotonically increasing integer Mojang assigns — the
+//! canonical ordering key, precisely so ordering survives the move from
+//! semver-ish (`1.21.4`) to date-based labels. This module is that key,
+//! applied to the one question `@requires` asks: does a target sit at or
+//! above the floor a source declares?
 //!
 //! The table it orders against ships in the registry pack
 //! (`registry-data/{java,bedrock}/data_versions.json`) and is handed in by
@@ -62,10 +62,12 @@ use super::requires_parse::{compare_versions, is_dotted_decimal};
 
 /// One edition's `(version label, DataVersion)` table, as an ordering.
 ///
-/// Holds rows in ascending key order, which is the order §10.1 defines and
-/// not necessarily the order the JSON file lists them in. Every question
-/// below is answered from the keys; the labels are consulted only for the
-/// exact lookup and for the two boundary comparisons the module doc names.
+/// Holds rows in ascending key order, which is the order
+/// `spec/versioning-editions` "The target is a compile-time parameter"
+/// defines and not necessarily the order the JSON file lists them in. Every
+/// question below is answered from the keys; the labels are consulted only
+/// for the exact lookup and for the two boundary comparisons the module doc
+/// names.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct VersionOrder {
     /// Rows, ascending by [`VersionRow::key`].
@@ -422,9 +424,10 @@ mod tests {
     }
 
     /// A label in another scheme is not compared against one in this
-    /// scheme, even to place it outside the rows. That comparison is the
-    /// one §10.1 makes `DataVersion` canonical to avoid, and trusting it
-    /// at the boundary would be trusting it everywhere the boundary moves.
+    /// scheme, even to place it outside the rows. That comparison is the one
+    /// `spec/versioning-editions` "The target is a compile-time parameter"
+    /// makes `DataVersion` canonical to avoid, and trusting it at the
+    /// boundary would be trusting it everywhere the boundary moves.
     #[test]
     fn a_label_in_another_scheme_is_not_placed_by_its_text() {
         assert_eq!(java().place("24w14a"), FloorPlacement::Unplaceable);

@@ -1,9 +1,10 @@
 //! Acceptance tests for the `connect_arity` pass of
 //! `cairn_lang_core::check`.
 //!
-//! `connect` rows have a fixed surface grammar: `connect FROM.PORT to
-//! TO.PORT [path=@MATERIAL]` (spec §9.3.5). The line-based parser
-//! accepts any number of positional values up to the next newline
+//! `connect` rows have a fixed surface grammar, `connect FROM.PORT to
+//! TO.PORT [path=@MATERIAL]`, per
+//! `spec/components-editing-sites` "Ports and `connect`". The line-based
+//! parser accepts any number of positional values up to the next newline
 //! without enforcing the arity, and `intent::lower` carries the
 //! positional list through verbatim. The resolver's `connect` arm
 //! short-circuits with no diagnostic when the row is incomplete, so a

@@ -4,7 +4,7 @@
 //! grid, a palette of [`BlockState`]s, and (eventually) block entities and
 //! entities, all neutral to file format, edition, and version. Compile diffs,
 //! `IoU` comparisons, and serialisation hang off this single shape (see
-//! `spec/architecture.md` §3.1).
+//! `spec/architecture` "The block-array IR is the universal pivot").
 //!
 //! The [`lower::lower_to_block_array`] pass handles `floor`, `walls`,
 //! `door`, `window`, `stair`, `pressure_plate`, the `level y=N` grouping,
@@ -143,9 +143,9 @@ pub struct Placement {
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct BlockArray {
     /// Voxel extents along X (east), Y (up), Z (south). Front of a struct is
-    /// `+z` (`spec/components-editing-sites.md` §5.4) so the source
-    /// `size=WxH` literal becomes `(W, _, H)` here; the Y extent is derived
-    /// from member contributions.
+    /// `+z` (`spec/syntax` "Selectors") so the source `size=WxH` literal
+    /// becomes `(W, _, H)` here; the Y extent is derived from member
+    /// contributions.
     pub dims: Dims,
     /// Block states referenced by the [`voxels`] grid. Index `0` is always
     /// [`BlockState::AIR`]; [`Palette::intern`] preserves that invariant.
@@ -317,7 +317,7 @@ impl BlockArray {
     /// and the numbering rides into the `.nbt` bytes, `cairn info`'s
     /// per-entry rows, and `resolved_ir_hash`. Calling this once the grid
     /// is finished makes all three a function of the grid alone
-    /// (`spec/compilation.md` §4.8).
+    /// (`spec/compilation` "Within-phase conflicts and the palette").
     ///
     /// A voxel naming a slot the palette does not have is left as it is
     /// rather than remapped onto air: the fields here are public, so a
@@ -413,7 +413,8 @@ impl Palette {
     /// finished grid rather than a log of the order the paints happened
     /// to run in. Two sources that differ only in the order they declare
     /// two members that share no voxel then produce the same `.nbt` bytes
-    /// and the same `resolved_ir_hash` (`spec/compilation.md` §4.8).
+    /// and the same `resolved_ir_hash` (`spec/compilation` "Within-phase
+    /// conflicts and the palette").
     ///
     /// Only the palette moves: this hands back the map rather than
     /// touching a grid it does not own, because a [`Palette`] outside a

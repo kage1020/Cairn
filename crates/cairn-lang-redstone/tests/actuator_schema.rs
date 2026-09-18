@@ -1,10 +1,11 @@
 //! The actuator and sensor tables in `synth`, held against `core`'s
 //! per-role argument vocabularies.
 //!
-//! `ACTUATOR_BINDINGS` pairs each `spec/redstone` §14.2 argument key with the
-//! component that carries it, and `MemberRole::arguments` is the vocabulary
-//! `check` refuses against. Where both know the keyword they have to agree,
-//! or `check` refuses a source the redstone front end is built to read.
+//! `ACTUATOR_BINDINGS` pairs each argument key from `spec/redstone`
+//! "Signal binding" with the component that carries it, and
+//! `MemberRole::arguments` is the vocabulary `check` refuses against.
+//! Where both know the keyword they have to agree, or `check` refuses a
+//! source the redstone front end is built to read.
 //!
 //! Asked from this crate because this is where the pairing lives, and asked
 //! against the constants themselves rather than a copy of them — a local
@@ -30,7 +31,8 @@ fn every_actuator_key_with_a_real_host_is_in_that_host_vocabulary() {
         };
         assert!(
             vocabulary.contains(key),
-            "`{host}` carries `{key}=` per spec/redstone §14.2, and `check` would refuse it",
+            "`{host}` carries `{key}=` per `spec/redstone` \"Signal binding\", and \
+             `check` would refuse it",
         );
         checked += 1;
     }
@@ -55,7 +57,8 @@ fn every_sensor_host_is_a_keyword_the_role_table_knows() {
     for host in SENSOR_HOSTS {
         assert!(
             role_of(host).arguments().is_some(),
-            "`{host}` carries a `->` tail per spec/redstone §14.2 and is not a known keyword",
+            "`{host}` carries a `->` tail per `spec/redstone` \"Signal binding\" and is \
+             not a known keyword",
         );
     }
 }

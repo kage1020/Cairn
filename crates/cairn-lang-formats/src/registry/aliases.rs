@@ -6,9 +6,10 @@
 //! catches a typo (`oak_plank` → `oak_planks`) and nothing else. A rename
 //! is not a typo — Bedrock spells Java's `light` `light_block_0` …
 //! `light_block_15`, eight edits away — so the search has no candidate to
-//! offer for the case an author is far more likely to hit, and spec
-//! versioning-editions §10.4 asks an error to return "the closed set of
-//! candidates valid in the target" rather than fall silent.
+//! offer for the case an author is far more likely to hit, and
+//! `spec/versioning-editions` "Fail-loud and minimum-version inference" asks
+//! an error to return "the closed set of candidates valid in the target"
+//! rather than fall silent.
 //!
 //! # What a row is keyed on
 //!

@@ -15,11 +15,11 @@ use crate::intent::ValueWithSpan;
 
 /// Classification of a `@TOKEN` value used as a theme slot target.
 ///
-/// Drawn from `spec/materials-themes.md` §7.2: a canonical token names a
-/// concrete Minecraft meaning (`@oak_planks`, `@oak_log[axis=x]`), an
-/// abstract token names an aesthetic choice that the theme policy may
-/// downgrade (`@floor.wood.broadleaf`). Anything else — a bare identifier,
-/// a string, a list — is `NotAToken` and surfaces as
+/// Drawn from `spec/materials-themes` "Canonical vocabulary": a canonical
+/// token names a concrete Minecraft meaning (`@oak_planks`,
+/// `@oak_log[axis=x]`), an abstract token names an aesthetic choice that the
+/// theme policy may downgrade (`@floor.wood.broadleaf`). Anything else — a
+/// bare identifier, a string, a list — is `NotAToken` and surfaces as
 /// `E_UNKNOWN_SLOT_TARGET`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum TokenKind {

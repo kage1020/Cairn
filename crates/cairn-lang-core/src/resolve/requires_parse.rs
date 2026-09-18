@@ -2,14 +2,15 @@
 //! comparison the `DataVersion` ordering falls back on.
 //!
 //! Spec context: `@requires` is a Minecraft-side capability floor (see
-//! `spec/versioning-editions.md` §10.4). Floors compose by taking the
-//! strictest across every `@requires` line, which is the
-//! registry-compatible-range lower edge `cairn info` prints and the bound
-//! `cairn compile --target` is held to.
+//! `spec/versioning-editions` "Fail-loud and minimum-version inference").
+//! Floors compose by taking the strictest across every `@requires` line,
+//! which is the registry-compatible-range lower edge `cairn info` prints and
+//! the bound `cairn compile --target` is held to.
 //!
 //! **The ordering key is `DataVersion`, and it does not live here.**
-//! §10.1 makes `DataVersion` canonical precisely so ordering survives
-//! Minecraft's move from semver-ish to date-based version labels, and
+//! The same chapter's "The target is a compile-time parameter" makes
+//! `DataVersion` canonical precisely so ordering survives Minecraft's move
+//! from semver-ish to date-based version labels, and
 //! [`super::version_order::VersionOrder`] is what does the ordering — over
 //! a table this crate cannot hold, since the table ships in the registry
 //! pack and `core` does not depend on `cairn-lang-formats`. What is left
@@ -208,7 +209,7 @@ impl fmt::Display for RequirementError {
 /// The accepted shape is an optional edition, the subject `version`, the
 /// operator `>=`, and a version label, with optional whitespace between
 /// them — `version>=1.21` and `version >= 1.21` are the same requirement.
-/// Only `>=` is defined (spec syntax §5.3): a floor composes with other
+/// Only `>=` is defined (`spec/syntax` "Headers"): a floor composes with other
 /// floors by taking the strictest, which no other operator does.
 ///
 /// The edition scope is what keeps two numbering schemes apart. Java ships
@@ -301,10 +302,11 @@ fn strip_operator(rest: &str) -> Result<&str, RequirementError> {
 /// The grammar is deliberately wider than dotted decimals and narrower
 /// than "any text": every component begins with a digit and carries only
 /// letters and digits, and an optional `-` introduces a pre-release tag of
-/// the same. That admits every label shape §10.1 says may exist — the
-/// semver-ish `1.21.4`, the pre-release `1.21.4-rc1`, a snapshot `24w14a`,
-/// and whatever a date-based scheme spells — while still refusing `1.a`
-/// and `x`, which name no version in any scheme.
+/// the same. That admits every label shape the spec says may exist
+/// (`spec/versioning-editions` "The target is a compile-time parameter") —
+/// the semver-ish `1.21.4`, the pre-release `1.21.4-rc1`, a snapshot
+/// `24w14a`, and whatever a date-based scheme spells — while still refusing
+/// `1.a` and `x`, which name no version in any scheme.
 fn validate_label(version: &str) -> Result<(), RequirementError> {
     let (core, tag) = split_prerelease(version);
     for component in core.split('.') {
@@ -508,9 +510,10 @@ fn is_zero(s: &str) -> bool {
 ///
 /// [`super::version_order`] asks this before trusting [`compare_versions`]
 /// to place a label outside a table's rows: two dotted decimals are one
-/// numbering scheme and compare meaningfully, while a dotted decimal
-/// against a date-based or snapshot label is exactly the comparison §10.1
-/// makes `DataVersion` canonical to avoid.
+/// numbering scheme and compare meaningfully, while a dotted decimal against
+/// a date-based or snapshot label is exactly the comparison
+/// `spec/versioning-editions` "The target is a compile-time parameter" makes
+/// `DataVersion` canonical to avoid.
 #[must_use]
 pub(super) fn is_dotted_decimal(label: &str) -> bool {
     split_prerelease(label).1.is_none() && label.split('.').all(is_digits)
@@ -636,7 +639,8 @@ mod tests {
         );
     }
 
-    /// The labels §10.1 says may exist are labels, not mistakes. Whether
+    /// The labels the spec says may exist (`spec/versioning-editions` "The
+    /// target is a compile-time parameter") are labels, not mistakes. Whether
     /// one can be *ordered* is the edition table's answer, and refusing
     /// them here pre-empts it with the wrong one.
     #[test]

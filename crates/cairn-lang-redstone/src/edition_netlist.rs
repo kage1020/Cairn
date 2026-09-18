@@ -5,7 +5,7 @@
 //! [`crate::netlist_ir::CellNode`] to an [`EditionCellNode`] whose
 //! [`EditionCell`] tag names the target-edition realisation of the source
 //! [`crate::netlist_ir::LogicalCell`] — the middle tier of the three-tier
-//! cell library documented in `spec/redstone` §14.6.
+//! cell library documented in `spec/redstone` "Edition differences".
 //!
 //! The pass is a single forward walk. Every [`crate::netlist_ir::CellNode`]
 //! becomes exactly one [`EditionCellNode`]; drivers, inputs, outputs, and
@@ -16,9 +16,9 @@
 //! No diagnostics are emitted: CSE / cycle / unbound-signal reporting
 //! ran in [`crate::synth::synthesize`], the Logical-Cell selection ran in
 //! [`crate::netlist::compile_netlist`], and this stage is a pure lookup.
-//! QC / BUD refusal (`E_NO_PORTABLE_IMPL`, §14.6) joins the pass
-//! alongside the first cell that needs it (sequential-macro or observer
-//! families), since none of today's reachable
+//! QC / BUD refusal (`E_NO_PORTABLE_IMPL`, from that same section) joins
+//! the pass alongside the first cell that needs it (sequential-macro or
+//! observer families), since none of today's reachable
 //! [`crate::netlist_ir::LogicalCell`] variants require update-order
 //! semantics.
 
