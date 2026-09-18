@@ -1,12 +1,11 @@
 //! Delayed Placement IR → legalized Placement IR lowering (crossing
 //! legalization).
 //!
-//! Stage 4 of the five-stage place-and-route pipeline `spec/redstone`
-//! §14.5 lays out. Rebuilds every net's Steiner tree through the same
-//! call the routing and delay passes make, and fills every cell's and
-//! actuator pad's [`crate::placement_ir::PlacedCellNode::buffer_coords`]
-//! with the coord of each implicit buffer repeater the delay pass
-//! counted.
+//! Stage 4 of the five-stage pipeline `spec/redstone` "Place-and-route"
+//! lays out. Rebuilds every net's Steiner tree through the same call the
+//! routing and delay passes make, and fills every cell's and actuator
+//! pad's [`crate::placement_ir::PlacedCellNode::buffer_coords`] with the
+//! coord of each implicit buffer repeater the delay pass counted.
 //!
 //! The wire itself needs no legalizing here: stage 2 lays each net round
 //! the dust of the nets before it and the coords beside that dust, so a

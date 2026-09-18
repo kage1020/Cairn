@@ -2072,7 +2072,8 @@ mod tests {
         // Regression: an earlier version walked `themes.values_mut()`
         // unconditionally and wrote every matching selector into
         // `selector_extras`, even when the scope's `bound_theme` was None.
-        // That violated the per-theme DI contract from §7.
+        // That violated the per-theme DI contract from
+        // `spec/materials-themes`.
         let src = "theme a:\n  walls[class=outer] -> trim=@a_trim\ntheme b:\n  walls[class=outer] -> trim=@b_trim\n\nstruct s size=4x4\n  walls class=outer height=3\n";
         let r = resolve(&ir(src), None);
         let scope = r.scopes.get("struct::s").unwrap();
@@ -2549,7 +2550,8 @@ mod tests {
     }
 
     // ------------------------------------------------------------------
-    // Per-edition theme fallback (spec versioning-editions §10.7 #2).
+    // Per-edition theme fallback (`spec/versioning-editions` "Java / Bedrock
+    // portability", #2).
     // The following tests pin the AC set that keeps the resolver honest
     // about which variant it bound and when the sibling-slot union kicks in.
     // ------------------------------------------------------------------
@@ -2764,7 +2766,8 @@ mod tests {
         // leave the scope unbound under `Some(Edition::Java)` rather than
         // silently binding the Bedrock variant, which would route
         // Bedrock-only slot values into a Java `.nbt`. The loud outcome
-        // spec §10.4 requires is `E_THEME_VARIANT_MISSING`, asserted below.
+        // `spec/versioning-editions` "Fail-loud and minimum-version
+        // inference" requires is `E_THEME_VARIANT_MISSING`, asserted below.
         let src = [
             "theme t_bedrock:",
             "  slot floor -> @dark_oak_planks",
@@ -3015,9 +3018,10 @@ mod tests {
 
     #[test]
     fn a_place_naming_the_logical_theme_binds_the_pinned_variant() {
-        // The spelling spec versioning-editions §10.7 asks for. Before the
-        // reference went through variant selection it was the one spelling
-        // that did not resolve, because no theme is named plain `shop`.
+        // The spelling `spec/versioning-editions` "Java / Bedrock
+        // portability" asks for. Before the reference went through variant
+        // selection it was the one spelling that did not resolve, because no
+        // theme is named plain `shop`.
         let src = placed_under("shop", &["_java", "_bedrock"]);
         for (edition, expected) in [
             (Edition::Java, "shop_java"),
@@ -3212,7 +3216,8 @@ mod tests {
 
     #[test]
     fn a_pin_prefers_the_unsuffixed_theme_over_the_other_editions_variant() {
-        // The §10.4 fallback order, exercised through the site path: with
+        // The fallback order of `spec/versioning-editions` "Fail-loud and
+        // minimum-version inference", exercised through the site path: with
         // `shop` and `shop_bedrock` declared, a Java build binds `shop` and
         // does not cross to `shop_bedrock`.
         let src = placed_under("shop", &["", "_bedrock"]);

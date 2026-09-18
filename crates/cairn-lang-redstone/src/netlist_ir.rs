@@ -6,7 +6,8 @@
 //! [`crate::logic_ir::ScopedLogicIrEntry`] once and rewrites each
 //! [`crate::logic_ir::GateNode`] into a [`CellNode`] tagged with a
 //! [`LogicalCell`] — the top of the three-tier cell library documented in
-//! `spec/redstone` §14.6 (`Logical Cell → Edition Cell → Physical Tile`).
+//! `spec/redstone` "Edition differences" (`Logical Cell → Edition Cell →
+//! Physical Tile`).
 //! The Java `ComparatorAND` vs Bedrock `TorchAND` split is *not* decided
 //! here; that is the Edition Cell selection a follow-up pass will run
 //! against a target [`cairn_lang_core::Edition`].
@@ -16,7 +17,8 @@
 //! deliberately mirrors the Logic IR's [`crate::logic_ir::SignalRef`]
 //! shape so a downstream simulator can share the same forward-walk
 //! skeleton across both IRs. Delay is not carried — per `spec/redstone`
-//! §14.4 / §14.8 delay is first determined in the Placement IR.
+//! "Time model" and "Connection to the IR and phases" delay is first
+//! determined in the Placement IR.
 
 use cairn_lang_core::ast::DottedRef;
 use cairn_lang_core::error::Span;
@@ -44,16 +46,17 @@ pub enum NetRef {
 
 /// Logical cell chosen for a [`CellNode`]. Edition-neutral by contract:
 /// the same [`LogicalCell::And`] value lowers to Java `ComparatorAND` or
-/// Bedrock `TorchAND` at a later pass (`spec/redstone` §14.6).
+/// Bedrock `TorchAND` at a later pass (`spec/redstone`
+/// "Edition differences").
 ///
 /// `#[non_exhaustive]` for two reasons: (1) the combinational variants
 /// `Xor` / `Nand` / `Nor` / `Mux` reserved on `GateKind` today are
 /// unreachable until a follow-up parser change teaches the surface
 /// call-expression form, and (2) the sequential-macro cells reserved by
-/// `spec/redstone` §14.1 (`latch` / `pulse` / `delay` / `edge_rising` /
-/// `edge_falling` / `counter`) will join once the synth path grows to
-/// emit them. Both add-in paths should stay non-breaking for downstream
-/// exhaust matches.
+/// `spec/redstone` "Two tiers, and the v1 boundary" (`latch` / `pulse` /
+/// `delay` / `edge_rising` / `edge_falling` / `counter`) will join once
+/// the synth path grows to emit them. Both add-in paths should stay
+/// non-breaking for downstream exhaust matches.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]

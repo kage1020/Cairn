@@ -11,8 +11,9 @@
 //!
 //! A `half=top` stair fills the upper half of its voxel (plus the lower
 //! quarter on its facing side), so a course of them one voxel above the
-//! wall leaves a half-block slit running the whole perimeter. For a hip it also drops the four `outer_*` corners
-//! and every per-edge facing: sixteen cells that should have been four
+//! wall leaves a half-block slit running the whole perimeter. For a hip it
+//! also drops the four `outer_*` corners and every per-edge facing: sixteen
+//! cells that should have been four
 //! corners and two slope rows came out as one repeated state.
 //!
 //! The even-span gable cap is the other half of the same subject. The

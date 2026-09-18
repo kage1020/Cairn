@@ -1,8 +1,8 @@
 //! Placement IR → routed Placement IR lowering (Steiner routing).
 //!
-//! Stage 2 of the five-stage place-and-route pipeline `spec/redstone`
-//! §14.5 lays out. Lays a rectilinear Steiner tree per driver net inside
-//! each scope's [`crate::placement_ir::CircuitRegionReservation`] and
+//! Stage 2 of the five-stage pipeline `spec/redstone` "Place-and-route"
+//! lays out. Lays a rectilinear Steiner tree per driver net inside each
+//! scope's [`crate::placement_ir::CircuitRegionReservation`] and
 //! rewrites every cell's and actuator pad's
 //! [`crate::placement_ir::PlacedCellNode::wire_length`] from `None` to
 //! `Some(routed length of the nets driving it, summed)`.
@@ -24,8 +24,8 @@
 //!   `wire_length` and into the delay pass's tick count.
 //! - **Cross-layer pairs.** A net that climbed runs over, or one step
 //!   across from, the net it cleared. Separating those is the physical
-//!   tile layer's obligation (§14.5), so they are named once, here, by
-//!   `W_ROUTE_CROSS_LAYER_CLEARANCE` rather than refused.
+//!   tile layer's obligation (that pipeline), so they are named once,
+//!   here, by `W_ROUTE_CROSS_LAYER_CLEARANCE` rather than refused.
 //! - **Refusals.** All `E_ROUTE_CONGESTION`, each eliding the scope so a
 //!   partial `wire_length` never reaches stage 3: a pad the reservation
 //!   cannot fit (its saturated z collapses onto a cell or another pad);
