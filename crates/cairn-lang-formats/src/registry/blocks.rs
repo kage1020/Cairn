@@ -6,13 +6,13 @@
 //! landed the check was structural only ("the id has exactly one `:`"), so
 //! `@totally_not_a_block` rode all the way into a written `.mcstructure`.
 //!
-//! The on-disk shape follows the folding rule in `spec/versioning-editions`
-//! "Backend = data tables" — "fold versions with `inherits + diffs`" —
-//! because the alternative, one full list per version, repeats a thousand
-//! shared ids three times and hides the interesting part. What a reader wants
-//! from `blocks.json` is exactly the diff: Bedrock 1.21.40 is where
-//! `stonebrick` became `stone_bricks` and `light_block` became
-//! `light_block_0` … `light_block_15`, and its `removed` list is that
+//! The on-disk shape follows the folding rule of
+//! `spec/versioning-editions` "Backend = data tables" — "fold versions with
+//! `inherits + diffs`" — because the alternative, one full list per version,
+//! repeats a thousand shared ids three times and hides the interesting part.
+//! What a reader wants from `blocks.json` is exactly the diff: Bedrock
+//! 1.21.40 is where `stonebrick` became `stone_bricks` and `light_block`
+//! became `light_block_0` … `light_block_15`, and its `removed` list is that
 //! flattening wave written out in full.
 //!
 //! Folding is validated rather than trusted. A diff that removes an id its

@@ -380,11 +380,11 @@ impl RegistryPack {
     /// Panics when the pack is not of `edition`. Both editions share the
     /// `data_version` column with different meanings, so resolving against
     /// the wrong pack would return a plausible-but-wrong integer — a
-    /// silent-substitution hazard of the kind `spec/versioning-editions`
-    /// "Fail-loud and minimum-version inference" rules out. A full `assert!`
-    /// rather than a `debug_assert!`: resolution runs once per compile, and
-    /// the guard must survive release builds once `--registry-pack` can
-    /// supply a pack.
+    /// silent-substitution hazard of the kind
+    /// `spec/versioning-editions` "Fail-loud and minimum-version inference"
+    /// rules out. A full `assert!` rather than a `debug_assert!`: resolution
+    /// runs once per compile, and the guard must survive release builds once
+    /// `--registry-pack` can supply a pack.
     ///
     /// Also panics if the pack passed [`validate_data_versions`] but its
     /// `latest` field nonetheless names no row in `versions`. That branch is

@@ -22,7 +22,7 @@
 //! the file has a selector that would syntactically match), and
 //! `E_THEME_SELECTOR_UNMATCHED` is only reported for themes that bound to
 //! at least one scope. This honours the per-theme DI contract from
-//! `spec/materials-themes.md` §7 — a selector belongs to one theme, not
+//! `spec/materials-themes` — a selector belongs to one theme, not
 //! the union of all themes in the file.
 //!
 //! Site `place` lines are followed cross-scope: each `place` is resolved
@@ -288,13 +288,13 @@ struct ResolveCtx<'a> {
 /// the same run.
 ///
 /// The `edition` argument drives per-edition theme-variant selection
-/// (spec versioning-editions §10.7 hierarchy #2): when the file declares
-/// two themes whose names share a base and differ only by an `_java` /
-/// `_bedrock` suffix, `Some(Edition::Java)` picks the `_java` variant and
-/// `Some(Edition::Bedrock)` picks the `_bedrock` variant. `None` is the
-/// "no edition has been picked yet" case (typically `cairn check` without
-/// `--edition`) — the resolver unions slot names across variants of the
-/// same logical theme so a `mat_slot=NAME` reference that only one variant
+/// (`spec/versioning-editions` "Java / Bedrock portability", hierarchy #2):
+/// when the file declares two themes whose names share a base and differ only
+/// by an `_java` / `_bedrock` suffix, `Some(Edition::Java)` picks the `_java`
+/// variant and `Some(Edition::Bedrock)` picks the `_bedrock` variant. `None`
+/// is the "no edition has been picked yet" case (typically `cairn check`
+/// without `--edition`) — the resolver unions slot names across variants of
+/// the same logical theme so a `mat_slot=NAME` reference that only one variant
 /// declares does not spuriously fire `E_UNRESOLVED_SLOT`.
 #[must_use]
 pub fn resolve(ir: &IntentModule, edition: Option<Edition>) -> Resolution {
@@ -442,10 +442,10 @@ fn build_theme_binding(theme: &ThemeIr) -> ThemeBinding {
 }
 
 /// The theme-name helpers, re-exported under the names this module used
-/// before they moved: `spec/versioning-editions.md` §10.7 variant selection
-/// is now asked by [`super::version_axes`] as well, from the surface AST
-/// where no [`ThemeBinding`] exists, so the rule lives in one place that
-/// speaks only names.
+/// before they moved: the variant selection of `spec/versioning-editions`
+/// "Java / Bedrock portability" is now asked by [`super::version_axes`] as
+/// well, from the surface AST where no [`ThemeBinding`] exists, so the rule
+/// lives in one place that speaks only names.
 use super::theme_variant::{
     bound_theme_name, pick_variant as pick_variant_by_name, strip_edition_suffix,
 };
@@ -514,11 +514,12 @@ enum Spelling {
 /// through the same variant selection the module-level auto-pick uses, so a
 /// pin means the same thing wherever the theme was chosen.
 ///
-/// A reference is read as naming the *logical* theme, which is what spec
-/// versioning-editions §10.7 asks the semantic layer to name. `theme=shop`
-/// consequently resolves in a module that declares only `shop_java` and
-/// `shop_bedrock` — before this it was `E_UNRESOLVED_THEME_REF`, so the
-/// spelling the spec prescribes was the one spelling that did not work.
+/// A reference is read as naming the *logical* theme, which is what
+/// `spec/versioning-editions` "Java / Bedrock portability" asks the semantic
+/// layer to name. `theme=shop` consequently resolves in a module that
+/// declares only `shop_java` and `shop_bedrock` — before this it was
+/// `E_UNRESOLVED_THEME_REF`, so the spelling the spec prescribes was the one
+/// spelling that did not work.
 ///
 /// Without a pin, nothing re-picks a variant the author named. A declared
 /// name binds verbatim; a *suffixed* name nothing declares is unknown, the
@@ -700,7 +701,8 @@ fn theme_variant_missing_diag(
                 span: None,
                 message: "binding the other edition's variant would route its slot values into \
                           this edition's output, which is the silent substitution \
-                          spec/versioning-editions.md §10.4 forbids"
+                          spec/versioning-editions \"Fail-loud and minimum-version inference\" \
+                          forbids"
                     .to_owned(),
             },
         ],
@@ -735,8 +737,9 @@ fn theme_variant_rebound_diag(
         notes: vec![DiagnosticNote {
             span: None,
             message: format!(
-                "write `theme={logical}` — spec/versioning-editions.md §10.7 keeps the semantic \
-                 layer edition-neutral and lets the variant follow the build",
+                "write `theme={logical}` — spec/versioning-editions \"Java / Bedrock \
+                 portability\" keeps the semantic layer edition-neutral and lets the variant \
+                 follow the build",
             ),
         }],
         data: None,
@@ -1515,9 +1518,9 @@ fn member_declares(member: &Member, key: &str) -> bool {
 /// placement, or `None` when it declares all three.
 ///
 /// `id=` names the `.nbt` the compiler writes for this placement
-/// (`spec/components-editing-sites.md` §9.3.4) and is the name `east_of=`
-/// and `connect` refer to — so it cannot be auto-assigned the way
-/// `spec/components-editing-sites.md` §9.2 auto-assigns a geometry
+/// (`spec/components-editing-sites` "Output naming") and is the name
+/// `east_of=` and `connect` refer to — so it cannot be auto-assigned the way
+/// that chapter's "Editing model" auto-assigns a geometry
 /// member's address, which derives from parent / role / side / level /
 /// offset and names nothing outside the body it sits in. `use=` names the
 /// `def` the placement instantiates and `theme=` the theme its `mat_slot=`
@@ -1553,9 +1556,10 @@ fn incomplete_place_diag(member: &Member, site_name: &str) -> Option<Diagnostic>
                 message: (*purpose).to_owned(),
             })
             .collect(),
-        // The key set is what a quick-fix needs, and `spec/lint.md` §11.2
-        // asks consumers to match on `(code, data.kind)` rather than parse
-        // the prose it is also rendered into.
+        // The key set is what a quick-fix needs, and `spec/lint`
+        // "Machine-readable payload" asks consumers to match on
+        // `(code, data.kind)` rather than parse the prose it is also rendered
+        // into.
         data: Some(DiagnosticData::IncompletePlace {
             missing: missing.iter().map(|(key, _)| (*key).to_owned()).collect(),
         }),
@@ -1698,11 +1702,12 @@ fn resolve_members(
         // 1. mat_slot resolution against the scope's applied theme.
         //    A slot the picked variant does not declare is still "known"
         //    when a sibling variant of the same logical theme declares it,
-        //    which suppresses `E_UNRESOLVED_SLOT` for spec §10.7's
-        //    edition-variant themes under `cairn check` without an
-        //    `--edition` pin. `slot_value` stays `None` in that case — the
-        //    concrete binding is edition-specific and comes into scope only
-        //    once the compile picks a variant.
+        //    which suppresses `E_UNRESOLVED_SLOT` for the edition-variant
+        //    themes of `spec/versioning-editions` "Java / Bedrock
+        //    portability" under `cairn check` without an `--edition` pin.
+        //    `slot_value` stays `None` in that case — the concrete binding is
+        //    edition-specific and comes into scope only once the compile picks
+        //    a variant.
         if let Some(slot_name) = &member.mat_slot
             && let Some((tname, slots)) = bound
         {
