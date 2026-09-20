@@ -24,7 +24,7 @@ use crate::check::DiagnosticNote;
 /// attaches, with `suggested` already spelled the way the source would
 /// write it (`@token`, `place.port`, a bare keyword).
 #[must_use]
-pub fn did_you_mean_note(suggested: &str) -> DiagnosticNote {
+pub(crate) fn did_you_mean_note(suggested: &str) -> DiagnosticNote {
     DiagnosticNote {
         span: None,
         message: format!("did you mean `{suggested}`?"),

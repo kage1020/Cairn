@@ -1107,9 +1107,9 @@ pub struct PlacedCellNode {
 /// The read-only projections of a placed node's [`PlacementPhase`],
 /// spelled once for the two node types that carry one.
 macro_rules! phase_projections {
-    ($subject:literal) => {
-        /// Wire length once routing has run. See
-        /// [`PlacementPhase::wire_length`].
+    ($subject:literal, $wire_length:literal) => {
+        #[doc = $wire_length]
+        /// See [`PlacementPhase::wire_length`].
         #[must_use]
         pub const fn wire_length(&self) -> Option<u32> {
             self.phase.wire_length()
@@ -1139,7 +1139,7 @@ macro_rules! phase_projections {
 }
 
 impl PlacedCellNode {
-    phase_projections!("cell");
+    phase_projections!("cell", "Wire length once routing has run.");
 }
 
 /// The flat wire form both placed node types share: `stage` first, so a
@@ -1150,16 +1150,17 @@ impl PlacedCellNode {
 /// Hand-written rather than derived because the derived form would tag
 /// the phase enum and reshape the flat form the integration tests lock
 /// byte-for-byte. Binary formats (bincode, postcard, msgpack) rely on the
-/// announced field count being exact, so `identity_fields` must match
-/// what `identity` writes; a new visible field on either node type, or
-/// a Stage-5 variant whose payload the JSON must expose, is added here
-/// and given a [`PlacementStage`] variant.
+/// announced field count being exact, so every write goes through a
+/// [`CountedFields`] and the count is checked against it before `end`;
+/// a new visible field on either node type, or a Stage-5 variant whose
+/// payload the JSON must expose, is added here and given a
+/// [`PlacementStage`] variant.
 fn serialize_phased<S: Serializer>(
     serializer: S,
     name: &'static str,
     phase: &PlacementPhase,
     identity_fields: usize,
-    identity: impl FnOnce(&mut S::SerializeStruct) -> Result<(), S::Error>,
+    identity: impl FnOnce(&mut CountedFields<S::SerializeStruct>) -> Result<(), S::Error>,
 ) -> Result<S::Ok, S::Error> {
     let wire_length = phase.wire_length();
     let local_delay_ticks = phase.local_delay_ticks();
@@ -1170,7 +1171,10 @@ fn serialize_phased<S: Serializer>(
         + usize::from(local_delay_ticks.is_some())
         + usize::from(!buffer_coords.is_empty());
 
-    let mut state = serializer.serialize_struct(name, field_count)?;
+    let mut state = CountedFields {
+        inner: serializer.serialize_struct(name, field_count)?,
+        written: 0,
+    };
     state.serialize_field("stage", &phase.stage())?;
     identity(&mut state)?;
     if let Some(wl) = wire_length {
@@ -1182,7 +1186,39 @@ fn serialize_phased<S: Serializer>(
     if !buffer_coords.is_empty() {
         state.serialize_field("buffer_coords", buffer_coords)?;
     }
+    debug_assert_eq!(
+        state.written, field_count,
+        "{name}: announced field_count ({field_count}) diverges from the serialize_field \
+         call count ({}); binary formats such as bincode / postcard would produce \
+         malformed output",
+        state.written,
+    );
     state.end()
+}
+
+/// A [`SerializeStruct`] that counts the fields written through it, so
+/// [`serialize_phased`] can hold the announced field count to the writes.
+struct CountedFields<T> {
+    inner: T,
+    written: usize,
+}
+
+impl<T: SerializeStruct> SerializeStruct for CountedFields<T> {
+    type Ok = T::Ok;
+    type Error = T::Error;
+
+    fn serialize_field<V: ?Sized + Serialize>(
+        &mut self,
+        key: &'static str,
+        value: &V,
+    ) -> Result<(), T::Error> {
+        self.written += 1;
+        self.inner.serialize_field(key, value)
+    }
+
+    fn end(self) -> Result<T::Ok, T::Error> {
+        self.inner.end()
+    }
 }
 
 impl Serialize for PlacedCellNode {
@@ -1257,7 +1293,10 @@ impl PlacedOutputNode {
         }
     }
 
-    phase_projections!("output");
+    phase_projections!(
+        "output",
+        "Routed length of the segment from this output's driver to its pad, once routing has run."
+    );
 }
 
 impl Serialize for PlacedOutputNode {

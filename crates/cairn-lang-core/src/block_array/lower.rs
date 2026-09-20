@@ -242,6 +242,9 @@ pub fn lower_to_block_array(
 ///
 /// Not a field on [`Placement`]: that record is hashed into
 /// `resolved_ir_hash`, and the rows a wall occupies must not move it.
+/// The lockfile's own `LockPlacement` is a named projection that would
+/// not carry them anyway, and [`WallColumn`] derives no `Serialize`, so
+/// the question would not compile before it could be decided.
 struct PlacedBody {
     placement: Placement,
     /// The rows this body's `walls` painted — the value the openings
@@ -399,11 +402,16 @@ fn lower_connects(
             let from_label = connect.from.to_string();
             let to_label = connect.to.to_string();
             let unplaceable = blamed_endpoints(connect, from_pos.is_none(), to_pos.is_none());
+            let noun = if from_pos.is_none() && to_pos.is_none() {
+                "ports"
+            } else {
+                "port"
+            };
             diagnostics.push(Diagnostic {
                 code: DiagnosticCode::DeferredMember,
                 span: connect.span.clone(),
                 primary: format!(
-                    "walkway `{from_label} ↔ {to_label}` was skipped because port {unplaceable} could not be placed",
+                    "walkway `{from_label} ↔ {to_label}` was skipped because {noun} {unplaceable} could not be placed",
                 ),
                 notes: vec![
                     DiagnosticNote {

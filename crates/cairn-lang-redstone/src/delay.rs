@@ -25,7 +25,11 @@
 //! two agree by construction through `buffer_count_for_segment`.
 //!
 //! **`local_delay_ticks` is a local wire cost, not an arrival time.** It
-//! sums the buffers on every net feeding the cell; an arrival time would
+//! sums the buffers on every net feeding the cell, and it is the number
+//! stage 4 is held to: `local_delay_ticks - base_delay_ticks` equals
+//! [`BUFFER_REPEATER_TICKS`] per block in the cell's *deduplicated*
+//! `buffer_coords` — the attribution list may name a coord twice, the
+//! count may not. An arrival time would
 //! take the max over those nets and add the arrival of each upstream
 //! driver, so the two part company whenever more than one incoming net
 //! carries a buffer or any driver is itself a cell. Nothing in this crate

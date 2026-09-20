@@ -32,22 +32,7 @@ use cairn_lang_formats::portability::{
 use cairn_lang_formats::registry::{RegistryPack, builtin_bedrock, builtin_java};
 
 mod common;
-use common::{examples as shipped_examples, supported_versions};
-
-/// Every `.crn` under `examples/`, as `(file name, source)`.
-///
-/// Refuses to return a set too small to be the shipped one. Every test here
-/// is a loop over this, and a loop over nothing passes — the guard belongs
-/// with the iteration source so no future test can forget it.
-fn examples() -> Vec<(String, String)> {
-    let found = shipped_examples();
-    assert!(
-        found.len() >= 5,
-        "found only {} examples under examples/, which is not the shipped set",
-        found.len(),
-    );
-    found
-}
+use common::{examples, supported_versions};
 
 /// The block-array IR for one source, lowered the way the named command
 /// does: `None` for `cairn info`'s range-wide pass, `Some(version)` for a

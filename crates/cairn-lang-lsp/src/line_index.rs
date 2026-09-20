@@ -113,7 +113,8 @@ impl LineIndex {
 
     /// Byte offset of the end of the line containing `byte_offset` — the
     /// first byte of its terminator, or `source.len()` for the final line.
-    fn line_end(&self, source: &str, byte_offset: usize) -> usize {
+    #[must_use]
+    pub fn line_end(&self, source: &str, byte_offset: usize) -> usize {
         let (line_idx, _) = self.line_of(source, byte_offset);
         // The last line has no terminator to stop before.
         self.line_starts

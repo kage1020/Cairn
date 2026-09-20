@@ -648,14 +648,19 @@ enum Component {
 }
 
 impl Component {
-    /// The `file` a [`RegistryError::File`] reports.
-    fn label(self) -> &'static str {
-        match self {
-            Component::Manifest => "manifest",
+    /// The error a malformed component is reported as: the manifest has
+    /// its own variant, the four files it names share one.
+    fn parse_error(self, source: serde_json::Error) -> RegistryError {
+        let file = match self {
+            Component::Manifest => return RegistryError::Manifest { source },
             Component::DataVersions => "data_versions",
             Component::Materials => "materials",
             Component::Blocks => "blocks",
             Component::Aliases => "aliases",
+        };
+        RegistryError::File {
+            file: file.to_owned(),
+            source,
         }
     }
 }
@@ -802,13 +807,7 @@ fn parse_component<T: DeserializeOwned>(
     text: &str,
     component: Component,
 ) -> Result<T, RegistryError> {
-    serde_json::from_str(text).map_err(|source| match component {
-        Component::Manifest => RegistryError::Manifest { source },
-        file => RegistryError::File {
-            file: file.label().to_owned(),
-            source,
-        },
-    })
+    serde_json::from_str(text).map_err(|source| component.parse_error(source))
 }
 
 /// Refuse an alias group none of the pack's own block tables can answer
