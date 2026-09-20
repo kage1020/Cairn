@@ -144,6 +144,40 @@
 
 ### Fixed
 
+- *(core)* A typo in a member's own `[key=value]` was silent through `check` and `compile`, and the
+  value was lost:
+
+  ```
+  struct s size=9x7
+    walls id=shell mat_slot=wall height=5
+    window[clas=outer] side=front offset=2 y=2 size=2x2 mat_slot=glass
+  ```
+
+  Both commands exited 0 with nothing to say, and the `class` never reached the member. Selector
+  attribute keys are read in exactly two places — the `door` actuator-patch recogniser in
+  `block_array::lower` and redstone's binding-key walk in `synth` — and on any other role nothing
+  consumed them and nothing judged them.
+
+  The `arguments` pass now judges a member's own selector against the same vocabulary its arguments
+  answer to: the role's keys, the universal ones, and whatever the module's `theme` selectors coin
+  for that keyword. `window[clas=outer]` is `E_UNKNOWN_ARGUMENT` with ``did you mean `class`?``,
+  the same finding `window clas=outer` has always earned, because it is the same defect written in
+  brackets. `door[id=front]` is unaffected — `id` is a universal key — and so is a word the module
+  genuinely coins.
+
+  What a member's selector *means* is a separate question and stays open: it is carried through
+  verbatim, and later passes decide whether one binds a fresh id or references an existing member.
+  This check does not need that answer. It asks whether the word is one something in this module
+  reads, and that has the same answer whichever way the meaning is settled.
+
+  One thing the fix made visible and left alone: a key in a member's own bracket does not make the
+  member *carry* the attribute, so a `theme` row selecting on it matches nothing and is
+  `E_THEME_SELECTOR_UNMATCHED`. That is the existing rule, now written down in `spec/lint`
+  "Diagnostic codes" beside the rest.
+
+  The `-> value` tail, the other half of #263, is not closed here — see that issue for the decision
+  it still holds.
+
 - *(tree-sitter)* A declaration with nothing but layout behind it to the end of the file was
   accepted by `cairn-lang-core` and refused by this grammar. It was the last position in a class
   where every other one already parsed:

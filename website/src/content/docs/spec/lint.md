@@ -45,7 +45,7 @@ compose to the strictest across every line, so a second one adds a constraint ([
 |---|---|
 | `E_PARSE` | The source did not parse. |
 | `E_UNKNOWN_KEYWORD` | The statement keyword is not in the known-keyword table. |
-| `E_UNKNOWN_ARGUMENT` | A `key=` outside the vocabulary of the member's keyword. |
+| `E_UNKNOWN_ARGUMENT` | A `key=` outside the vocabulary of the member's keyword, written as an argument or inside the member's own `[key=value]`. |
 | `W_IGNORED_ARGUMENT` | A `key=` inside that vocabulary that no pass read on the line it was written on. |
 | `E_MISPLACED_MEMBER` | The keyword is known, but the enclosing body has no reader for it. |
 | `E_UNEXPECTED_POSITIONAL` | A bare value on a line that reads none ([§5.1](syntax#51-lexical)). |
@@ -495,6 +495,15 @@ Each keyword's vocabulary is closed, and a `theme` selector widens the one it na
 The reverse direction is `E_THEME_SELECTOR_UNMATCHED`. A selector coins words; one edit away from a
 word the keyword already has is a typo written twice rather than a coinage, and is refused with the
 suggestion.
+
+A member's own `[key=value]` answers to that same vocabulary. `window[clas=outer]` is the same
+defect as `window clas=outer` — a word the author expects something to read that nothing does, with
+the `class` lost either way — so it earns the same code and the same suggestion. What the selector
+*means* is a separate question and is not settled here: a member's selector is carried through
+verbatim and later passes decide whether one binds a fresh id or references an existing member.
+This check does not need that answer, because the word is one something reads or it is not,
+whichever the answer turns out to be. Note that a key in a member's own bracket does not make the
+member *carry* the attribute, so a `theme` row selecting on it matches nothing.
 
 `W_IGNORED_ARGUMENT` is a **warning**, and covers three things. An **unreadable value**: a `key=`
 in the vocabulary whose value the pass cannot read is dropped and a default put in its place. An

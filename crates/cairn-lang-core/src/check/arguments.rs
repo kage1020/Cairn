@@ -1,6 +1,7 @@
 //! `arguments` pass — flags every `key=value` whose key is outside the
 //! vocabulary of the member's role, every key in that vocabulary no pass
-//! reads yet, and every key a sibling argument's value routed past.
+//! reads yet, and every key a sibling argument's value routed past. A
+//! member's own `[key=value]` selector answers to the same vocabulary.
 //!
 //! Walks the Intent IR beside [`super::keyword_allowlist`], which asks the
 //! same question one level up. The two do not both fire on a line: a
@@ -8,13 +9,26 @@
 //! arguments against, so this pass leaves it alone and the keyword's own
 //! finding carries the repair.
 //!
-//! Only `intent_state` is in scope, and the other three fields are covered
-//! unevenly rather than fully. `check::positional` reads positionals at
-//! every role and depth. A member's own selector (`door[id=front]`) has its
-//! keys read in two narrow places — the `door` actuator-patch recogniser in
-//! `block_array::lower` and redstone's binding-key walk — and nowhere else,
-//! so `window[clas=outer]` is silent. The `-> value` tail is refused by
-//! `synth`'s `diag_misplaced_sensor`, which only `cairn synth` reaches.
+//! Two of a member's four fields are in scope. `check::positional` reads
+//! positionals at every role and depth. The `-> value` tail is refused by
+//! `synth`'s `diag_misplaced_sensor`, which only `cairn synth` reaches, so
+//! `walls ... -> sig.a` is still silent through `check` and `compile`.
+//!
+//! A member's own selector (`door[id=front]`) is judged here, against the
+//! same vocabulary its arguments answer to. Its keys are *read* in two
+//! narrow places — the `door` actuator-patch recogniser in
+//! `block_array::lower` and redstone's binding-key walk — and nowhere
+//! else, which left `window[clas=outer]` silent through `check` and
+//! `compile` with the `class` lost.
+//!
+//! What the key means is a separate question and stays open: a member's
+//! selector is carried through verbatim, and later passes decide whether
+//! one binds a fresh id or references an existing member. This pass does
+//! not need that answer. It asks only whether the *word* is one something
+//! in this module reads, which is the same question it asks of a
+//! `key=value` on the same line and has the same answer — so `clas=` is
+//! refused with the suggestion wherever it is written, and `id=` is
+//! accepted on both sides whatever a later pass decides it means.
 //!
 //! A theme selector widens the vocabulary of the keyword it names. `theme t:
 //! window[tags=[a,b]] -> frame=@spruce_wood` makes `tags=` a key something
@@ -160,6 +174,25 @@ fn check_member(member: &Member, selected: &SelectorKeys<'_>, sink: &mut Diagnos
             }
         }
     }
+    // The member's own `[key=value]`, against the same vocabulary. Only
+    // the two branches about the *word* apply: the other two ask what a
+    // lowering rule does with a value, and a selector filters rather than
+    // supplies one.
+    for (key, value) in member.selector.iter().flatten() {
+        if !accepted.contains(&key.as_str()) {
+            sink.push(unknown_selector_attribute(
+                keyword,
+                key,
+                &value.span,
+                &accepted,
+            ));
+        } else if widened.is_some_and(|extra| extra.contains(key.as_str()))
+            && !own.contains(&key.as_str())
+            && let Some(suggested) = nearest_match(key, own.iter().copied())
+        {
+            sink.push(coined_near_miss(keyword, key, &value.span, suggested, &own));
+        }
+    }
 }
 
 /// A key in the role's vocabulary that this member's own selector routed
@@ -301,6 +334,34 @@ fn unknown_argument(
         code: DiagnosticCode::UnknownArgument,
         span: span.clone(),
         primary: format!("`{key}=` is not an argument `{keyword}` reads"),
+        notes,
+        data: None,
+    }
+}
+
+/// A key in a member's own `[key=value]` that no member of this role
+/// carries.
+///
+/// The same code and the same two notes as an unknown argument, because
+/// it is the same defect written in brackets: a word the author expects
+/// something to read, that nothing does. Only the sentence changes, so
+/// the message names the field the author has to edit.
+fn unknown_selector_attribute(
+    keyword: &str,
+    key: &str,
+    span: &crate::error::Span,
+    accepted: &[&str],
+) -> Diagnostic {
+    let mut notes = Vec::with_capacity(2);
+    notes.extend(nearest_match(key, accepted.iter().copied()).map(did_you_mean_note));
+    notes.push(DiagnosticNote {
+        span: None,
+        message: format!("expected one of: {}", accepted.join(", ")),
+    });
+    Diagnostic {
+        code: DiagnosticCode::UnknownArgument,
+        span: span.clone(),
+        primary: format!("`{key}=` is not an attribute a `{keyword}` carries"),
         notes,
         data: None,
     }
