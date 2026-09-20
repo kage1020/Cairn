@@ -49,9 +49,13 @@ dispenser  id=ds   at=..  fired_by=sig.pulse facing=south
 ```
 
 この対応は規範です。`-> sig.X` の末尾はセンサのもの、各アクチュエータキーはそれを読む 1 つのコンポー
-ネントのものです。それ以外の場所に書かれたバインディングは `E_LOGIC_MISPLACED_BINDING` です。
-`walls ... powered_by=sig.x` は何の回路も記述しておらず、受け入れればコンポーネントの無いポートがネ
-ットリストに載ります。
+ネントのものです。それ以外の場所に書かれたバインディングは何の回路も記述しておらず、受け入れればコン
+ポーネントの無いポートがネットリストに載ります。
+
+これを指摘するコードは 2 つあり、どちらになるかは所見を出すのに何が必要かで決まります。センサでない
+メンバに付いた `->` の末尾は `E_MISPLACED_BINDING` です。あるキーワードが信号を発せるかどうかはメン
+バ行についての事実なので、`check` が答え、どのコマンドもそれを報告します。それを読まないコンポーネン
+トに付いたアクチュエータキーは `E_LOGIC_MISPLACED_BINDING` で、これは synth パイプラインが出します。
 
 **上記のうち現在受け付けるのは `door` と `pressure_plate` だけです。** `lit_by=` / `powered_by=` /
 `fired_by=` にはまだホストが無く、どこに書かれても拒否されます。
@@ -61,8 +65,9 @@ dispenser  id=ds   at=..  fired_by=sig.pulse facing=south
 `E_LOGIC_INVALID_SIGNAL` になります。名前は `sig.` とその後ろのセグメント 1 つです。`opened_by=a` は
 `a` という信号への配線ではなく、`opened_by=sig.a.b` も何も指しません。
 
-値より先にホストが検査されます。`walls -> a` の誤りは 1 つで、それはホストの誤りです。値をどう書いて
-も `walls` はセンサになりません。
+値より先にホストが検査されます。`walls -> a` の誤りは 1 つで、それはホストの誤り — 上記の
+`E_MISPLACED_BINDING` — であり、センサ上なら値が受けるはずの `E_LOGIC_INVALID_SIGNAL` は付きません。
+値をどう書いても `walls` はセンサになりません。
 
 **バインディングは `[selector]` の後に書き、中には書きません。**
 `door[id=front] opened_by=sig.power` は束縛し、`door[id=front,opened_by=sig.power]` は束縛しません。

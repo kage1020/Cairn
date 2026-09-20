@@ -589,3 +589,109 @@ fn the_vocabulary_tables_are_consistent_with_each_other() {
         "an unknown keyword has no vocabulary rather than an empty one",
     );
 }
+
+// -- a member's own `[key=value]` -----------------------------------------
+//
+// The selector's keys are read in two narrow places — the `door`
+// actuator-patch recogniser and redstone's binding-key walk — and nowhere
+// else, so a typo in one was silent through `check` and `compile` and the
+// value was lost.
+
+#[test]
+fn a_selector_key_no_member_of_the_role_carries_is_refused() {
+    // The issue's own source. `clas=` is one edit from `class`, and the
+    // `class` is lost: nothing reads the key and nothing said so.
+    let d = only(
+        "struct s size=9x7\n  walls id=shell mat_slot=wall height=5\n  \
+         window[clas=outer] side=front offset=2 y=2 size=2x2 mat_slot=glass\n",
+    );
+    assert_eq!(d.code.as_str(), "E_UNKNOWN_ARGUMENT");
+    assert!(d.primary.contains("`clas=`"), "got: {}", d.primary);
+    assert!(
+        d.primary.contains("`window`"),
+        "the role is the vocabulary it answers to: {}",
+        d.primary,
+    );
+    assert!(
+        notes(&d).contains("did you mean `class`?"),
+        "got: {}",
+        notes(&d),
+    );
+}
+
+#[test]
+fn the_finding_lands_on_the_selector_attribute_that_carries_it() {
+    let src = "struct s size=9x7\n  window[clas=outer] side=front offset=2 y=2 size=2x2\n";
+    let d = only(src);
+    assert_eq!(
+        &src[d.span.clone()],
+        "outer",
+        "the span should be the value the key was written against",
+    );
+}
+
+#[test]
+fn a_selector_key_the_role_does_carry_is_accepted() {
+    // `door[id=front]` is the shipped form, and `id` is a universal key.
+    // What the selector *means* — binding a fresh id, or referencing an
+    // existing member — is still undecided, and this pass does not ask:
+    // the word is one something reads either way.
+    assert_eq!(
+        codes("struct s size=9x7\n  door[id=front] side=front at=center opened_by=sig.f\n"),
+        Vec::<&str>::new(),
+    );
+    // A key of the role's own vocabulary, likewise.
+    assert_eq!(
+        codes("struct s size=9x7\n  window[side=front] side=front offset=2 y=2 size=2x2\n"),
+        Vec::<&str>::new(),
+    );
+}
+
+#[test]
+fn a_theme_selector_widens_the_bracket_as_well_as_the_line() {
+    // The widening is about the keyword, not about which of the two fields
+    // the word appears in: a module that selects on `tags=` reads it, so
+    // writing it either way is not a mistake.
+    //
+    // The member carries `tags=` as an argument too, because that is what
+    // the theme selector matches on — a key in a member's own bracket does
+    // not make the member carry the attribute, so a theme row that found
+    // only the bracket would be `E_THEME_SELECTOR_UNMATCHED` and the
+    // widening would never happen.
+    let selected = "theme t:\n  slot glass -> @glass_pane\n  \
+                    window[tags=[a,b]] -> frame=@spruce_wood\n\n\
+                    struct s size=9x7\n  \
+                    window[tags=[a,b]] tags=[a,b] side=front offset=2 y=2 size=2x2 mat_slot=glass\n";
+    assert_eq!(codes(selected), Vec::<&str>::new());
+
+    // And a near-miss of the role's own vocabulary is a typo written
+    // twice, in the bracket exactly as on the line — so the same source
+    // earns the finding once for each place it wrote the word.
+    let near_miss = "theme t:\n  slot glass -> @glass_pane\n  \
+                     window[sied=front] -> frame=@spruce_wood\n\n\
+                     struct s size=9x7\n  \
+                     window[sied=front] sied=front side=front offset=2 y=2 size=2x2 mat_slot=glass\n";
+    let found = diagnose(near_miss);
+    assert_eq!(
+        codes(near_miss),
+        ["E_UNKNOWN_ARGUMENT", "E_UNKNOWN_ARGUMENT"],
+        "once on the line and once in the bracket",
+    );
+    for d in &found {
+        assert!(
+            notes(d).contains("did you mean `side`?"),
+            "got: {}",
+            notes(d),
+        );
+    }
+}
+
+#[test]
+fn an_unknown_keyword_answers_for_its_own_bracket() {
+    // The keyword is the repair; its selector answers to a vocabulary that
+    // does not exist, so only `E_UNKNOWN_KEYWORD` is reported.
+    assert_eq!(
+        codes("struct s size=9x7\n  windwo[clas=outer] side=front\n"),
+        ["E_UNKNOWN_KEYWORD"],
+    );
+}

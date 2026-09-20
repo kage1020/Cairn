@@ -52,9 +52,13 @@ dispenser  id=ds   at=..  fired_by=sig.pulse facing=south
 ```
 
 That pairing is normative. A `-> sig.X` tail belongs to a sensor, and each actuator key belongs to
-the one component that reads it. A binding written anywhere else is `E_LOGIC_MISPLACED_BINDING`:
-`walls ... powered_by=sig.x` describes no circuit, and accepting it would put a port in the netlist
-with no component behind it.
+the one component that reads it. A binding written anywhere else describes no circuit, and
+accepting it would put a port in the netlist with no component behind it.
+
+Two codes say so, and which one applies is decided by what the finding needs in order to be made. A
+`->` tail on a member that is not a sensor is `E_MISPLACED_BINDING`: whether a keyword may emit is a
+fact about the member line, so `check` answers it and every command reports it. An actuator key on a
+component that does not read it is `E_LOGIC_MISPLACED_BINDING`, raised by the synth pipeline.
 
 **Of the components above, only `door` and `pressure_plate` are accepted today.** `lit_by=`,
 `powered_by=`, and `fired_by=` have no host yet and are refused wherever they are written.
@@ -65,8 +69,9 @@ an actuator key's value. That is `E_LOGIC_INVALID_SIGNAL`. A name is `sig.` and 
 after it: `opened_by=a` is not a wire to a signal called `a`, and `opened_by=sig.a.b` names nothing
 either.
 
-The host is checked before the value, so `walls -> a` is one fault and it belongs to the host. No
-way of writing the value makes `walls` a sensor.
+The host is checked before the value, so `walls -> a` is one fault and it belongs to the host — the
+`E_MISPLACED_BINDING` above, and not also the `E_LOGIC_INVALID_SIGNAL` the value would earn on a
+sensor. No way of writing the value makes `walls` a sensor.
 
 **Bindings go after the `[selector]`, never inside it.** `door[id=front] opened_by=sig.power` binds;
 `door[id=front,opened_by=sig.power]` does not. The brackets pick the member the line acts on, so

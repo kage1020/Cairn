@@ -133,15 +133,35 @@ pub enum DiagnosticCode {
     MisplacedMember,
     /// A statement keyword not in the known-keyword table.
     UnknownKeyword,
-    /// A `key=value` argument whose key is outside the vocabulary of the
-    /// member's role.
+    /// A key outside the vocabulary of the member's role, written as a
+    /// `key=value` argument or inside the member's own `[key=value]`.
     ///
     /// An error for the same reason [`Self::UnknownKeyword`] is, one level
     /// down: the key names nothing, so no pass will ever read the value,
     /// and the member is built without whatever the author was asking for.
     /// A misspelling of an argument that has a default is the worst of
     /// them — the build succeeds, silently, at the default.
+    ///
+    /// One code for both fields because it is one defect: `clas=outer`
+    /// and `[clas=outer]` are each a word the author expects something to
+    /// read that nothing does, with the `class` lost either way. Only the
+    /// sentence differs, naming the field to edit.
     UnknownArgument,
+    /// A `-> value` tail on a member whose keyword cannot emit a signal.
+    ///
+    /// `spec/redstone` "Signal binding" writes an emitted signal on the
+    /// component that emits it, and [`crate::intent::SENSOR_HOSTS`] is the
+    /// set of keywords the surface accepts one on. A tail anywhere else
+    /// describes no circuit: the member is built without it and the signal
+    /// it names is driven by nothing, which is [`Self::UnknownArgument`]'s
+    /// failure in the one field that had no vocabulary to answer to.
+    ///
+    /// The host is the fault rather than the value, because no edit to the
+    /// value makes a `walls` emit. A tail on a *sensor* whose value names
+    /// no signal is the redstone pipeline's `E_LOGIC_INVALID_SIGNAL`, which
+    /// is a question about the `sig.` namespace and needs the Logic IR to
+    /// ask.
+    MisplacedBinding,
     /// A statement carrying bare positional values in a form that takes
     /// none.
     ///
@@ -563,6 +583,7 @@ impl DiagnosticCode {
             Self::MisplacedMember => "E_MISPLACED_MEMBER",
             Self::UnknownKeyword => "E_UNKNOWN_KEYWORD",
             Self::UnknownArgument => "E_UNKNOWN_ARGUMENT",
+            Self::MisplacedBinding => "E_MISPLACED_BINDING",
             Self::UnexpectedPositional => "E_UNEXPECTED_POSITIONAL",
             Self::InvalidRequires => "E_INVALID_REQUIRES",
             Self::InvalidCairnVersion => "W_INVALID_CAIRN_VERSION",
@@ -674,6 +695,7 @@ impl DiagnosticCode {
             | Self::MisplacedMember
             | Self::UnknownKeyword
             | Self::UnknownArgument
+            | Self::MisplacedBinding
             | Self::UnexpectedPositional
             | Self::InvalidRequires
             | Self::TypeMismatchLabel
@@ -1161,6 +1183,19 @@ impl LineStarts {
         }
     }
 
+    /// The byte offset each line begins at, as [`crate::lines::starts`]
+    /// computed them.
+    ///
+    /// For a caller that wants the *text* of a line rather than a position
+    /// in it, and already holds this index. Handing back the slice keeps
+    /// the line-break rule where `crate::lines` puts it: the alternative
+    /// is a second walk of the source deciding again where a line ends,
+    /// which is what that module exists to prevent.
+    #[must_use]
+    pub fn line_starts(&self) -> &[usize] {
+        &self.starts
+    }
+
     /// Resolve a byte offset into a 1-based `line:column` [`Position`].
     ///
     /// `byte_offset` must be a character boundary — every offset in this
@@ -1348,6 +1383,7 @@ mod tests {
                 "E_INVALID_PLACE_ID",
                 "E_INVALID_PLACE_ORIGIN",
                 "E_INVALID_REQUIRES",
+                "E_MISPLACED_BINDING",
                 "E_MISPLACED_MEMBER",
                 "E_MISSING_MATERIAL",
                 "E_MISSING_PATH_MATERIAL",
@@ -1418,6 +1454,7 @@ mod tests {
                 "E_INVALID_PLACE_ID",
                 "E_INVALID_PLACE_ORIGIN",
                 "E_INVALID_REQUIRES",
+                "E_MISPLACED_BINDING",
                 "E_MISPLACED_MEMBER",
                 "E_MISSING_MATERIAL",
                 "E_MISSING_PATH_MATERIAL",
@@ -1669,5 +1706,131 @@ mod tests {
                 }
             }
         }
+    }
+    /// Where the spec chapters live, in each language. The mirror is the
+    /// same catalog, so a code missing from one is missing.
+    ///
+    /// Split from the file name rather than written whole because a path
+    /// holding the chapter reads as a citation to the test that checks
+    /// them, which then looks for a section title in the rest of the
+    /// path.
+    const SPEC_DIRS: [(&str, &str); 2] = [
+        ("website/src/content/docs/spec", "Diagnostic codes"),
+        ("website/src/content/docs/ja/spec", "診断コード"),
+    ];
+
+    /// The chapter the catalog is in.
+    const LINT_CHAPTER: &str = "lint.md";
+
+    /// The catalog section of a lint chapter: the heading whose title is
+    /// `title`, up to the next `##`.
+    ///
+    /// Found by title and not by section number. `CONTRIBUTING.md`'s
+    /// "Cite the spec by name, not by number" holds for a test as much as
+    /// for a comment, and its promise — renumbering the spec touches no
+    /// Rust — would end at a `find("## 11.1")` that `expect`s its answer.
+    /// The title is translated, which is why it is carried per language
+    /// in [`SPEC_DIRS`] rather than written once. A retitle failing here
+    /// is the convention working: a title change is a change of meaning,
+    /// and the test that leaned on it deserves a re-read.
+    fn catalog_section<'a>(chapter: &'a str, title: &str) -> &'a str {
+        let mut offset = 0;
+        for line in chapter.split_inclusive('\n') {
+            if line
+                .strip_prefix("## ")
+                .is_some_and(|rest| rest.trim_end().ends_with(title))
+            {
+                let rest = &chapter[offset + "## ".len()..];
+                let end = rest.find("\n## ").map_or(rest.len(), |at| at + 1);
+                return &rest[..end];
+            }
+            offset += line.len();
+        }
+        panic!("no `## ` heading titled {title:?} in the lint chapter")
+    }
+
+    /// The codes the catalog gives a row of its own.
+    ///
+    /// A row, not a mention: a code named in the prose of a neighbouring
+    /// row, or in the payload table further down, is not what a reader
+    /// with a code in hand finds. That is the gap this looks for, and
+    /// six codes were in exactly it.
+    fn rows_of(section: &str) -> Vec<&str> {
+        section
+            .lines()
+            .filter_map(|line| line.strip_prefix("| `"))
+            .filter_map(|rest| rest.split_once("` |"))
+            .map(|(code, _)| code)
+            .filter(|code| code.starts_with("E_") || code.starts_with("W_"))
+            .collect()
+    }
+
+    #[test]
+    fn every_code_has_a_row_in_the_spec_catalog() {
+        // A code is public contract: it is the `code` field of the
+        // `--format json` payload and what a consumer branches on instead
+        // of matching the message. `spec/lint` "Diagnostic codes" is where
+        // one is looked up, so a code with no row there is a string the
+        // compiler prints and no one can read back.
+        //
+        // Only this direction. `E_VERSION_CAP`, `E_REQUIRES_UNORDERABLE`
+        // and `E_PARTIAL_BUILD` are run-level refusals raised outside this
+        // enum and have rows for the same reason, so a row without a
+        // variant is not a finding.
+        //
+        // Outside a checkout there is no spec to read and the test has
+        // nothing to say; inside one every way of reaching that branch is
+        // a bug, so the chapter is read rather than skipped once the
+        // decision to run has been made. A silent pass here is a code
+        // with no row that CI never mentions.
+        let Some(root) = workspace_root() else {
+            return;
+        };
+        for (dir, title) in SPEC_DIRS {
+            let path = root.join(dir).join(LINT_CHAPTER);
+            let text = std::fs::read_to_string(&path)
+                .unwrap_or_else(|err| panic!("{} should be readable: {err}", path.display()));
+            let rows = rows_of(catalog_section(&text, title));
+            assert!(
+                !rows.is_empty(),
+                "no code rows in {}; either the catalog moved or the row scan is broken, \
+                 and this test would otherwise pass without reading anything",
+                path.display(),
+            );
+            let missing: Vec<&'static str> = DiagnosticCode::iter()
+                .map(DiagnosticCode::as_str)
+                .filter(|code| !rows.contains(code))
+                .collect();
+            assert!(
+                missing.is_empty(),
+                "{} must give every code a row of its own; these have none: {missing:?}",
+                path.display(),
+            );
+        }
+    }
+
+    /// The repository root, or `None` when this is not running from a
+    /// checkout.
+    ///
+    /// A packaged crate unpacked into a registry directory carries its own
+    /// manifest but not the workspace one, and `cargo package` rewrites
+    /// what it ships — so the `[workspace]` table is the marker that tells
+    /// "no spec here" apart from "the spec moved".
+    ///
+    /// The marker is read strictly — a bare `[workspace]` line — so a
+    /// comment after the table header, or a leading space, answers `None`
+    /// from a real checkout. That is why the caller does not treat a
+    /// readable chapter as optional once it has decided to run: the skip
+    /// is a best-effort "not a checkout", not a guarantee.
+    fn workspace_root() -> Option<std::path::PathBuf> {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .and_then(std::path::Path::parent)?
+            .to_path_buf();
+        let manifest = std::fs::read_to_string(root.join("Cargo.toml")).ok()?;
+        manifest
+            .lines()
+            .any(|line| line.trim_end() == "[workspace]")
+            .then_some(root)
     }
 }

@@ -15,9 +15,10 @@
 //! error for the opposite reason, its floor being folded into the
 //! compatible range and the `--target` gate.
 
+use cairn_lang_core::ast::Header;
 use cairn_lang_core::calver::{LanguageVersion, parse_language_version};
-use cairn_lang_core::check::{DiagnosticCode, Severity};
-use cairn_lang_core::{CAIRN_VERSION, Diagnostic, check, lower, parse};
+use cairn_lang_core::check::{DiagnosticCode, LineStarts, Severity};
+use cairn_lang_core::{CAIRN_VERSION, Diagnostic, check, diagnose_parse_failure, lower, parse};
 
 /// The body every fixture shares, so the header is the only variable.
 const BODY: &str = "struct s size=2x2\n  floor mat_slot=f\n";
@@ -245,4 +246,222 @@ fn a_module_with_no_cairn_header_is_silent() {
     let found = codes("");
     assert!(!found.contains(&"W_INVALID_CAIRN_VERSION"), "{found:?}");
     assert!(!found.contains(&"W_FUTURE_CAIRN_VERSION"), "{found:?}");
+}
+
+// -- the file the header explains best -----------------------------------
+//
+// `run` never sees a source that does not parse, and a later language
+// adding a whole syntactic form is exactly what does not parse here. The
+// note on the parse error is what carries the version gap into that
+// report.
+
+/// The diagnostic a source that does not parse renders as.
+fn parse_failure(source: &str) -> Diagnostic {
+    let err = parse(source).expect_err("the fixture is supposed to be refused");
+    diagnose_parse_failure(source, &LineStarts::new(source), &err)
+}
+
+/// Whether the parse failure for `source` carries the version note.
+fn notes_the_version_gap(source: &str) -> bool {
+    parse_failure(source)
+        .notes
+        .iter()
+        .any(|n| n.message.contains("newer than this build"))
+}
+
+#[test]
+fn a_new_syntactic_form_under_a_future_header_says_the_gap_may_explain_it() {
+    // The two shapes a later language adds that this build cannot parse:
+    // a directive it does not have, and a top-level item it does not have.
+    for source in [
+        "@cairn 9999.12\n@materials \"x\"\n",
+        "@cairn 9999.12\nmaterials m:\n  slot a -> @b\n",
+    ] {
+        let diagnostic = parse_failure(source);
+        assert_eq!(diagnostic.code.as_str(), "E_PARSE", "{source:?}");
+        assert_eq!(
+            diagnostic.notes.len(),
+            1,
+            "one finding, one note: {:?}",
+            diagnostic.notes,
+        );
+        let note = &diagnostic.notes[0];
+        assert!(
+            note.message.contains("9999.12") && note.message.contains(CAIRN_VERSION),
+            "the note names both versions: {}",
+            note.message,
+        );
+        // At the header, not at the failure: the header is the line the
+        // reader has to weigh, and the failure already has the primary.
+        let span = note.span.clone().expect("the note points at the header");
+        assert_eq!(&source[span], "@cairn 9999.12");
+    }
+}
+
+#[test]
+fn a_source_that_does_not_even_lex_still_has_its_header_read() {
+    // The header is read out of the text rather than out of tokens, so a
+    // failure the lexer raises — before any token exists — reaches it too.
+    assert!(notes_the_version_gap(
+        "@cairn 9999.12\nstruct s size=3x3\n  floor a=%\n",
+    ));
+}
+
+#[test]
+fn a_header_this_build_can_read_adds_nothing() {
+    // Two ways there is no gap to report: the file declares this very
+    // build, or it declares nothing at all.
+    for header in [format!("@cairn {CAIRN_VERSION}\n"), String::new()] {
+        let source = format!("{header}@materials \"x\"\n");
+        assert!(
+            parse_failure(&source).notes.is_empty(),
+            "should be silent: {source:?}",
+        );
+    }
+}
+
+/// A header naming no version says so, because nothing else will.
+///
+/// `W_INVALID_CAIRN_VERSION` is the finding for this, and it is raised by
+/// a check pass — which does not run on a source that does not parse. So
+/// this is the only moment the author hears that the line meant to say
+/// which Cairn the file is written against says nothing.
+#[test]
+fn a_header_that_names_no_version_says_it_cannot_judge_the_gap() {
+    let source = "@cairn banana\n@materials \"x\"\n";
+    let diagnostic = parse_failure(source);
+    assert!(!notes_the_version_gap(source), "no gap is being claimed");
+    let note = diagnostic.notes.first().expect("the note");
+    assert!(
+        note.message
+            .contains("`@cairn banana` does not name a language version"),
+        "{}",
+        note.message,
+    );
+    let span = note.span.clone().expect("a span");
+    assert_eq!(&source[span], "@cairn banana");
+}
+
+/// The scan reads a line the way `crate::lines` does, not the way
+/// `split('\n')` would.
+///
+/// A lone `\r` is a line break Cairn accepts, and a file written with
+/// them used to be one long chunk to this scan: the `@cairn` value swept
+/// up the rest of the file and parsed as no version at all.
+#[test]
+fn a_file_broken_by_lone_carriage_returns_is_still_read() {
+    assert!(notes_the_version_gap(
+        "@cairn 9999.12\rstruct s size=3x3\r  floor a=%\r",
+    ));
+}
+
+/// A byte-order mark is skipped, the way `crate::lex` skips one.
+///
+/// It is what a Windows editor writes at the head of a file, which is the
+/// same author this note is for. Left in place it turned the first line
+/// into something that is not a directive, and the scan gave up on the
+/// whole file rather than on that line.
+#[test]
+fn a_leading_byte_order_mark_does_not_hide_the_header() {
+    assert!(notes_the_version_gap(
+        "\u{feff}@cairn 9999.12\nstruct s size=3x3\n  floor a=%\n",
+    ));
+}
+
+/// Space the lexer would have stopped on means the file declares nothing.
+///
+/// `Lexer::skip_spaces` advances over `' '` alone, so a tab between the
+/// directive and its value is `LexError::TabIndent` and `parse` built no
+/// header at all. A `str::trim` strips the tab and would have the note
+/// claim a version the file never carried — and send an author whose
+/// repair is "delete the tab" after a newer compiler instead.
+#[test]
+fn whitespace_the_lexer_refuses_declares_no_version() {
+    for source in [
+        "@cairn\t9999.12\nstruct s size=2x2\n  floor mat_slot=f\n",
+        "@cairn\u{a0}9999.12\nstruct s size=2x2\n  floor mat_slot=f\n",
+        // One token, so a second one is not part of the value either.
+        "@cairn 9999.12 spare\nstruct s size=2x2\n  floor a=%\n",
+    ] {
+        assert!(
+            parse_failure(source).notes.is_empty(),
+            "the file declares nothing here: {source:?}",
+        );
+    }
+}
+
+#[test]
+fn a_cairn_line_that_is_not_a_header_is_not_read() {
+    // `parse_module` takes headers from the run of lines at the top of the
+    // file, at column zero. A `@cairn` anywhere else is not one, and
+    // reading it would attribute a version to a file the parser never saw
+    // one in.
+    for source in [
+        // Below a declaration, where the header block has ended.
+        "struct s size=3x3\n  floor mat_slot=f\n@cairn 9999.12\n@materials \"x\"\n",
+        // Indented, which is a body row to the lexer rather than a header.
+        "  @cairn 9999.12\n@materials \"x\"\n",
+    ] {
+        assert!(
+            !notes_the_version_gap(source),
+            "should be silent: {source:?}",
+        );
+    }
+}
+
+#[test]
+fn the_header_is_read_past_the_layout_a_file_may_open_with() {
+    // Blank lines, comment lines and another directive all sit in front of
+    // `@cairn` in real sources, and a comment may end its line.
+    let source = "# what this file is\n\n@requires \">=2026.9\"\n@cairn 9999.12 # written against\n\n@materials \"x\"\n";
+    let diagnostic = parse_failure(source);
+    let note = diagnostic.notes.first().expect("the note");
+    assert!(note.message.contains("9999.12"), "{}", note.message);
+    let span = note.span.clone().expect("a span");
+    assert_eq!(&source[span], "@cairn 9999.12");
+}
+
+#[test]
+fn a_file_that_parses_reports_the_gap_through_the_pass_instead() {
+    // The note is for the report a check pass cannot reach. Where one can,
+    // `W_FUTURE_CAIRN_VERSION` is the finding, and it is not doubled.
+    let found = codes("@cairn 9999.12\n");
+    assert!(found.contains(&"W_FUTURE_CAIRN_VERSION"), "{found:?}");
+    assert!(parse(&format!("@cairn 9999.12\n{BODY}")).is_ok());
+}
+
+/// The scan and the parser read the same bytes as the header.
+///
+/// `declared_version` reads the `@cairn` line out of the text because the
+/// caller has no AST, so nothing holds the two to each other — a
+/// disagreement about where the directive begins or ends would show up
+/// as a note underlining the wrong thing, on a file nobody can parse and
+/// so nobody can compare. This compares them on a file that *does*
+/// parse, where both answers exist.
+#[test]
+fn the_note_underlines_what_the_parser_calls_the_header() {
+    for source in [
+        "@cairn 9999.12\n",
+        "# a comment first\n\n@requires \">=2026.9\"\n@cairn 9999.12 # and a trailing one\n",
+    ] {
+        let module = parse(source).expect("this half of the fixture has to parse");
+        let header = module
+            .headers
+            .iter()
+            .find(|h| matches!(h, Header::Cairn { .. }))
+            .expect("the fixture declares one");
+        // The same source with a body the lexer refuses, so the note is
+        // built for a file the parser cannot finish.
+        let unparsable = format!("{source}struct s size=3x3\n  floor a=%\n");
+        let note = parse_failure(&unparsable)
+            .notes
+            .into_iter()
+            .next()
+            .expect("the note");
+        assert_eq!(
+            note.span.expect("a span"),
+            *header.span(),
+            "the scan and the parser disagree about the header in {source:?}",
+        );
+    }
 }

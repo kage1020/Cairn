@@ -559,6 +559,73 @@ const FIXTURES: &[(&str, &str, Verdict)] = &[
         "theme a:\nstruct s size=3x3\n  floor a=1\n",
         Accept,
     ),
+    // The same shapes with nothing behind the layout at all. These were
+    // the last position in the class: with no construct to cross to, the
+    // trailing run had no token that could consume it until `_file_end`
+    // closed it.
+    (
+        "bodyless_decl_then_blank_line_at_eof",
+        "theme a:\n\n",
+        Accept,
+    ),
+    (
+        "bodyless_decl_then_comment_line_at_eof",
+        "theme a:\n# c\n",
+        Accept,
+    ),
+    (
+        "decl_whose_body_is_only_a_comment",
+        "struct s size=3x3\n  # note\n",
+        Accept,
+    ),
+    (
+        "bodyless_decl_then_blank_and_comment_lines_at_eof",
+        "theme a:\n\n# c\n\n",
+        Accept,
+    ),
+    (
+        "decl_with_body_then_comment_line_at_eof",
+        "theme a:\n  slot x -> @y\n# c\n",
+        Accept,
+    ),
+    (
+        "lone_cr_bodyless_decl_then_blank_line_at_eof",
+        "theme a:\r\r",
+        Accept,
+    ),
+    (
+        "crlf_decl_whose_body_is_only_a_comment",
+        "struct s size=3x3\r\n  # note\r\n",
+        Accept,
+    ),
+    // The same class with a member row in front of the layout, and with
+    // more than one level to close. The fixtures above all have empty
+    // bodies, so the EOF block's DEDENT loop runs at most once in them
+    // and `accepted_sources_place_every_member_at_the_same_depth`
+    // compares two empty lists; these two are what reach both.
+    (
+        "struct_member_then_comment_at_eof",
+        "struct s size=3x3\n  floor a=1\n\n# c\n",
+        Accept,
+    ),
+    (
+        "nested_body_then_comment_at_eof",
+        "struct s size=3x3\n  level y=1\n    floor a=1\n\n# c\n",
+        Accept,
+    ),
+    // A file that ends without a final break, and one whose trailing
+    // layout is spaces rather than a comment: the two other ways the
+    // scanner can arrive at the end of the file with something crossed.
+    (
+        "bodyless_decl_then_comment_with_no_final_break",
+        "theme a:\n# c",
+        Accept,
+    ),
+    (
+        "bodyless_decl_then_spaces_only_line_at_eof",
+        "theme a:\n  \n",
+        Accept,
+    ),
     // Blank and comment lines behind a declaration that *does* have a
     // body are eaten by that body instead, and still are.
     (
@@ -849,41 +916,6 @@ const KNOWN_DIVERGENCES: &[(&str, &str, Verdict)] = &[
         "integer_out_of_range",
         "struct s size=3x3\n  floor n=99999999999999999999\n",
         Accept,
-    ),
-    // -- a declaration with nothing but layout behind it --------------
-    //
-    // The blank and comment lines after a declaration are crossed on the
-    // way to the construct behind them. At the end of a file there is no
-    // such construct, nothing asks, and the layout is left over. A
-    // declaration whose body has a row absorbs it through that body's
-    // trailing `repeat1($._newline)`, and a directive through its own,
-    // which is why this is the one position where it survives —
-    // `theme empty:\n` parses, and so does a bodyless declaration with
-    // another declaration behind the blank line.
-    //
-    // "Bodyless" is not the whole of it: a header whose body holds
-    // nothing but comment lines has no row to do the absorbing either,
-    // and is left over the same way.
-    //
-    // Closing it means making trailing layout consumable with no
-    // construct behind it. The obvious shape — a `repeat($._newline)` at
-    // the end of `source_file` — is ambiguous against the one at the
-    // start, which owns the same tokens for a file that holds nothing
-    // else, and tree-sitter refuses to generate it.
-    (
-        "bodyless_decl_then_blank_line_at_eof",
-        "theme a:\n\n",
-        Reject,
-    ),
-    (
-        "bodyless_decl_then_comment_line_at_eof",
-        "theme a:\n# c\n",
-        Reject,
-    ),
-    (
-        "decl_whose_body_is_only_a_comment",
-        "struct s size=3x3\n  # note\n",
-        Reject,
     ),
     // -- a size separator with a space after it -----------------------
     //

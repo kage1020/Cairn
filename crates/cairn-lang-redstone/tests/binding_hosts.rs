@@ -22,6 +22,15 @@
 //! is reported when the host is wrong too, and the one place a
 //! well-formed binding is still in the wrong place — inside the
 //! `[selector]`.
+//!
+//! One of the two host questions is no longer asked here. A `->` tail on
+//! a member that cannot emit is `check`'s `E_MISPLACED_BINDING`, because
+//! the answer needs no Logic IR and every command should have it;
+//! `cairn-lang-core/tests/check_binding.rs` holds those assertions. What
+//! this pass still owes such a line is what it takes away: the driver
+//! comes out of the scope so nothing downstream reports the hole as a
+//! fault of its own, and the fixtures below assert that silence rather
+//! than a finding.
 
 use cairn_lang_redstone::{DiagnosticCode, SynthOutput};
 
@@ -142,23 +151,19 @@ fn a_bare_name_is_offered_its_namespace_and_a_number_is_not() {
     }
 }
 
-/// A tail on a member that cannot carry one is a host fault, whatever the
-/// value says.
+/// A tail on a member that cannot carry one draws no value-side finding,
+/// whatever the value says.
 ///
 /// No edit to the value makes `walls` emit a signal, so reporting the
-/// value first would send the author round the loop to be told about the
-/// host on the next run. One finding, and it is the one that has to be
-/// answered.
+/// value would send the author round the loop to be told about the host
+/// on the next run. The host fault itself is `check`'s, and `cairn synth`
+/// gates on `check`, so the line the author sees is the same one; what
+/// matters here is that this pass does not add a second sentence about
+/// the value under it.
 #[test]
-fn a_tail_on_the_wrong_host_is_a_host_fault_even_when_it_names_no_signal() {
+fn a_tail_on_the_wrong_host_draws_no_value_side_finding() {
     let out = synth_source(&source("  walls class=inner mat_slot=wall height=1 -> a\n"));
-    assert_eq!(codes(&out), ["E_LOGIC_MISPLACED_BINDING"]);
-    let d = only(&out, DiagnosticCode::LogicMisplacedBinding);
-    assert!(
-        d.primary.contains("`walls` cannot emit a signal"),
-        "{}",
-        d.primary,
-    );
+    assert_eq!(codes(&out), Vec::<&str>::new(), "{:#?}", out.diagnostics);
 }
 
 /// An actuator key on its own host, with a value that names no signal.
@@ -382,21 +387,28 @@ fn a_malformed_value_and_the_signal_it_leaves_unconsumed_are_both_reported() {
 
 // --- sensor tails --------------------------------------------------------
 
+/// A tail this pass will not honour registers no input port, and the
+/// `logic` line reading the signal is not told it is undefined.
+///
+/// `check::binding` is what refuses the line; the scope still has to come
+/// out of this pass without the driver *and* without a cascade, which is
+/// the half that stays here.
 #[test]
-fn a_sensor_tail_on_a_wall_is_refused_and_registers_no_input() {
+fn a_sensor_tail_on_a_wall_registers_no_input_and_no_cascade() {
     let out = synth_source(&source(concat!(
         "  walls class=inner mat_slot=wall height=1 -> sig.w\n",
         "  logic sig.x = not sig.w\n",
     )));
-    let d = only(&out, DiagnosticCode::LogicMisplacedBinding);
+    // Root cause once, and it is `E_MISPLACED_BINDING` on the `walls`
+    // line: that `sig.w` is now defined by nothing is that finding's
+    // consequence, not a second one.
+    assert_eq!(codes(&out), Vec::<&str>::new(), "{:#?}", out.diagnostics);
+    let scope = out.scoped.scopes.first().expect("one scope");
     assert!(
-        d.primary.contains("`walls` cannot emit a signal"),
-        "{}",
-        d.primary,
+        scope.ir.inputs.is_empty(),
+        "the tail is not a sensor's, so it is no input port: {:#?}",
+        scope.ir.inputs,
     );
-    // Root cause once: the `logic` line below names `sig.w`, and that it
-    // is now undefined is this finding's consequence, not a second one.
-    assert_eq!(codes(&out), ["E_LOGIC_MISPLACED_BINDING"]);
 }
 
 #[test]
@@ -663,8 +675,9 @@ fn an_assert_naming_a_signal_a_refused_binding_would_have_driven_is_not_a_second
     )));
     assert_eq!(
         codes(&out),
-        ["E_LOGIC_MISPLACED_BINDING"],
-        "{:#?}",
+        Vec::<&str>::new(),
+        "the tail is `check`'s `E_MISPLACED_BINDING`, and the `assert` over \
+         the signal it would have driven is not a second finding: {:#?}",
         out.diagnostics
     );
 }

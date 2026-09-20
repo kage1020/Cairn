@@ -151,6 +151,14 @@ const SYNTACTIC_FIXTURES: &[(&str, Source)] = &[
         Source::WithPrologue("struct s size=5x5\n  walls class=outer height=3\n"),
     ),
     (
+        // The tail belongs to a sensor; `walls` is not one, and the
+        // signal it names is emitted by nothing.
+        "E_MISPLACED_BINDING",
+        Source::WithPrologue(
+            "struct s size=5x5\n  walls class=outer mat_slot=wall height=3 -> sig.w\n",
+        ),
+    ),
+    (
         // The site half of this code. It is the half that had no reporter
         // at either stage — a geometry row among a site's placements
         // produced neither voxels nor a diagnostic — so it is the one

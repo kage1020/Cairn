@@ -144,6 +144,222 @@
 
 ### Fixed
 
+- *(core)* A `-> value` tail on a member that cannot emit a signal was silent through `check` and
+  `compile`:
+
+  ```
+  struct s size=5x5
+    walls height=3 mat_slot=wall -> sig.a
+  ```
+
+  The wall was built, the tail went nowhere, and `sig.a` was left emitted by nothing. The rule that
+  refuses this lived in `cairn-lang-redstone`, which only
+  `cairn synth --experimental-logic-synth` reaches, so the one pass that knew better was the one
+  pass an author was least likely to run.
+
+  `SENSOR_HOSTS` moves into `cairn-lang-core` beside the per-role argument tables, and a new
+  `binding` check pass reports the tail as `E_MISPLACED_BINDING`:
+
+  ```
+  s.crn:2:35: error[E_MISPLACED_BINDING]: `walls` cannot emit a signal; only a sensor carries a `-> sig.<name>` tail
+    note: move the tail onto a sensor — `pressure_plate` is the sensor keyword the surface accepts today; `spec/redstone` "Signal binding" also lists `lever`, `button`, `daylight`, and `observer`
+  ```
+
+  Only the host is asked here, because only the host can be asked without a Logic IR. Whether the
+  tail's value names a signal, and whether that signal is driven twice or by nobody, stay in the
+  redstone pipeline — so a tail on a `pressure_plate` passes this pass whatever it names. A keyword
+  the role table does not know is still left to `E_UNKNOWN_KEYWORD`, which is why `lever -> sig.a`
+  is not told its host is wrong: `lever` is a sensor the specification lists and the surface has
+  not reached.
+
+  `synth`'s `diag_misplaced_sensor` is gone rather than kept beside it. `cairn synth` gates on
+  `check`, so keeping both would print the same sentence twice on one line; what that pass still
+  does with such a tail is take the driver out of the scope, so a `logic` line reading the signal
+  is not separately told it is undefined. `cairn synth`'s emitted code for a misplaced tail
+  therefore changes from `E_LOGIC_MISPLACED_BINDING` to `E_MISPLACED_BINDING`, which is allowed:
+  the redstone pipeline is Internal tier per `spec/compatibility`. A misplaced *actuator key*
+  remains `E_LOGIC_MISPLACED_BINDING`.
+
+- *(core)* A typo in a member's own `[key=value]` was silent through `check` and `compile`, and the
+  value was lost:
+
+  ```
+  struct s size=9x7
+    walls id=shell mat_slot=wall height=5
+    window[clas=outer] side=front offset=2 y=2 size=2x2 mat_slot=glass
+  ```
+
+  Both commands exited 0 with nothing to say, and the `class` never reached the member. Selector
+  attribute keys are read in exactly two places — the `door` actuator-patch recogniser in
+  `block_array::lower` and redstone's binding-key walk in `synth` — and on any other role nothing
+  consumed them and nothing judged them.
+
+  The `arguments` pass now judges a member's own selector against the same vocabulary its arguments
+  answer to: the role's keys, the universal ones, and whatever the module's `theme` selectors coin
+  for that keyword. `window[clas=outer]` is `E_UNKNOWN_ARGUMENT` with ``did you mean `class`?``,
+  the same finding `window clas=outer` has always earned, because it is the same defect written in
+  brackets. `door[id=front]` is unaffected — `id` is a universal key — and so is a word the module
+  genuinely coins.
+
+  What a member's selector *means* is a separate question and stays open: it is carried through
+  verbatim, and later passes decide whether one binds a fresh id or references an existing member.
+  This check does not need that answer. It asks whether the word is one something in this module
+  reads, and that has the same answer whichever way the meaning is settled.
+
+  One thing the fix made visible and left alone: a key in a member's own bracket does not make the
+  member *carry* the attribute, so a `theme` row selecting on it matches nothing and is
+  `E_THEME_SELECTOR_UNMATCHED`. That is the existing rule, now written down in `spec/lint`
+  "Diagnostic codes" beside the rest.
+
+  The `-> value` tail, the other half of #263, is not closed here — see that issue for the decision
+  it still holds.
+
+- *(tree-sitter)* A declaration with nothing but layout behind it to the end of the file was
+  accepted by `cairn-lang-core` and refused by this grammar. It was the last position in a class
+  where every other one already parsed:
+
+  | source | core | grammar |
+  | --- | --- | --- |
+  | `"theme a:\n\n"` | Accept | **Reject** |
+  | `"theme a:\n# c\n"` | Accept | **Reject** |
+  | `"struct s size=3x3\n  # note\n"` | Accept | **Reject** |
+
+  "Bodyless" was not the whole of it: a header whose body holds nothing but comment lines has no
+  row to absorb the layout either.
+
+  Blank and comment lines after a declaration are crossed by the scanner on the way to the
+  construct behind them. At the end of a file there is no such construct, nothing asks, and the
+  layout was left with no token that could consume it. A declaration whose body holds a row absorbs
+  its own through that body's `repeat1($._newline)`, and a directive through its own, which is why
+  this was the one position where it survived.
+
+  A new external token, `_file_end`, closes it: `source_file` ends with an optional one, and the
+  scanner emits it where it has crossed layout and found the end of the file. A grammar-level
+  `repeat($._newline)` cannot do this. At the end of `source_file` it is ambiguous against the one
+  at the start — for a file holding nothing but line breaks the two own the same tokens, and
+  `tree-sitter generate` refuses it outright. Making the run reachable only after a declaration
+  generates, and then moves the failure: `_newline` becomes valid between a declaration's header
+  and the body it opens, which is exactly where the scanner has to cross layout rather than
+  tokenise it, and five fixtures with a blank or comment line in front of a body start failing. The
+  question is one only the scanner can answer — whether what is left is layout all the way to the
+  end of the file — so that is where it is answered.
+
+  The three entries leave `KNOWN_DIVERGENCES` and join the fixture table, with eight more shapes
+  beside them: blank and comment lines together, a comment line after a body, the lone-`\r` and
+  CRLF spellings, a member row and a nested body in front of the trailing layout, a file that ends
+  without a final break, and a trailing line of spaces. The committed differential sweep
+  (`SWEPT_LAYOUTS` in `parser_parity.rs`) finds no disagreement in the direction it can assert; it
+  found 12 before the fix. That direction is the grammar accepting what the reference parser
+  refuses, so a regression back to *refusing* trailing layout is held by the fixtures rather than
+  by the sweep — which is why they now cover the depths and the line endings rather than one shape
+  of each.
+
+  What the fix spends is the comment. The scanner crosses a trailing comment line as whitespace, so
+  it reaches no `comment` extra and becomes no node, and `queries/highlights.scm` does not colour
+  it. Declining instead would refuse all four shapes the change exists to accept — after a bodyless
+  header there is no `_newline` for the file to end on — so the trees are pinned in
+  `test/corpus/comments.txt` and the trade is written down at the arm that makes it.
+
+- *(spec)* `spec/lint` "Diagnostic codes" is titled as the catalog a consumer looks a code up in,
+  and listed 32 of the 57 codes `DiagnosticCode::as_str` can render. Twenty-five had no row, and
+  seven of those appeared on no spec page in either language — the compiler printed them and
+  nothing said what they meant.
+
+  A code is public contract: it is the `code` field of the `--format json` payload, it is what a
+  consumer branches on instead of matching the prose, and "Error vs warning" sorts codes into error
+  and warning by rules that assume the reader can find the code the rule is about. A code with no
+  row is a string nothing can read back.
+
+  The section is now exhaustive, in both languages, and says so. Four tables are new — sites and
+  placements, connections and walkways, lowering, and the theme / abstract-token rows folded into
+  materials and targets — and six codes that had been named only in the prose of a neighbouring
+  row or in the payload table further down (`E_UNKNOWN_SLOT_TARGET`,
+  `E_THEME_SELECTOR_UNMATCHED`, `W_IGNORED_ARGUMENT`, `W_DEFERRED_MEMBER`, `W_UNUSED_DEF`,
+  `W_WALKWAY_BLOCKED`) have rows of their own, since a mention in someone else's paragraph is not
+  what a reader with a code in hand finds. `E_PARTIAL_BUILD` is a seventh of the same kind, raised
+  outside `DiagnosticCode` by `cairn compile` and by a pinned `cairn check`, and it gets a row
+  too. Where a code's rule belongs to another
+  chapter the row says what the code means and links there, rather than restating the rule in two
+  places.
+
+  `E_THEME_SELECTOR_UNMATCHED` gets a sentence of its own: it is a warning despite the `E_` prefix,
+  the prefix is part of a Stable string and stays as written, and severity is read from the
+  `severity` field rather than from the first letter.
+
+  What the claim covers is what a stable command prints. The redstone pipeline's `E_LOGIC_*` /
+  `W_LOGIC_*` codes are reachable only through `cairn synth --experimental-logic-synth`, whose
+  whole surface is Internal tier, so nothing about those strings is promised and a catalog row
+  would state a contract that does not exist. The section says that rather than leaving it to be
+  discovered.
+
+  A unit test beside `every_code_renders_its_documented_string` now reads the catalog back and
+  fails on a code with no row, in either language. It looks for a table row rather than a mention,
+  which is the gap the six above were in, and it finds the section by its *title* — carried per
+  language, since the title is translated — so renumbering the spec still touches no Rust, which is
+  what `CONTRIBUTING.md` promises.
+
+- *(core)* `W_FUTURE_CAIRN_VERSION` could not fire on the file it explains best. It says a source
+  declares a language newer than the build reading it, and it is raised by a check pass — so it is
+  absent in exactly the case where the version gap is the whole explanation, because parsing
+  precedes every check pass and a source that does not parse reaches none of them.
+
+  A later language that adds a keyword or an argument lands inside the shapes this build already
+  parses, and the header's warning sits beside the resulting `E_UNKNOWN_KEYWORD` telling the author
+  to weigh it differently. A later language that adds a whole *syntactic form* does not: an
+  unrecognised `@directive` and an unrecognised top-level item are both `E_PARSE`, and the author
+  got
+
+  ```
+  bad.crn:3:1: error[E_PARSE]: unknown directive `@materials`
+  ```
+
+  with nothing about the header that would explain it.
+
+  `diagnose_parse_failure` now reads the `@cairn` line out of the source text and attaches a note
+  when it names a later version:
+
+  ```
+  bad.crn:3:1: error[E_PARSE]: unknown directive `@materials`
+  bad.crn:1:1:   note: this file declares Cairn `9999.12`, which is newer than this build (`2026.9.2`); the line this error names may be a form a later Cairn adds
+  ```
+
+  Out of the text rather than the AST because there is no AST, and rather than the token stream
+  because a source that fails to *lex* has no tokens either — `floor a=%` is the shape the note most
+  needs to reach. Only the header block is read, the run of lines at the top of the file before the
+  first that is neither blank, a comment, nor a directive at column zero, so a `@cairn` written
+  anywhere else is not mistaken for one. A note rather than a second finding, because `spec/lint`
+  "Error vs warning" makes `E_PARSE` the one finding a build that does not parse reports, and a note
+  keeps that true. In `core` rather than in either front end, so the CLI and the language server
+  both carry it.
+
+- *(cli)* `cairn parse --format json` and `cairn lower --format json` wrote nothing to stdout when
+  the source failed. The reason reached stderr as prose, so a human was told; a consumer reading
+  stdout saw an empty stream and had to guess from the exit code:
+
+  ```
+  $ cairn parse bad.crn --format json ; echo "exit=$?"
+  exit=1
+  ```
+
+  `spec/lint` "Machine-readable payload" says every command taking the flag writes exactly one JSON
+  document per input. The two fixed here are the two whose product is a dump rather than a report —
+  the AST and the block-array IR — and a failure is not either of those with a hole in it. Both now write the document `info` writes where it has no report,
+  `{"diagnostics": [ ... ]}`, told apart from the dump by its keys and by the exit code. `lower`
+  writes it for a source that does not parse *and* for one that fails a later pass, since the second
+  is the other way its stdout came out empty: it refuses to dump an IR built from a source `check`
+  rejects, and that refusal now says so on the stream the flag promised.
+
+  Under every other `--format` the findings still read as prose on stderr. `parse` defaults to
+  `--format json`, so a bare `cairn parse bad.crn` now reports on stdout as JSON; `--format debug`
+  is the prose form.
+
+  Two holes of the same kind are next door and are *not* closed here. `cairn check --format json`
+  writes a bare array rather than this document, and its `E_PARTIAL_BUILD` goes to stderr as prose,
+  so a pinned run can exit 1 with nothing of error severity in the payload. `cairn info --format
+  json` writes nothing at all to stdout on an edition-specific refusal, which "Machine-readable
+  payload" has covered since before this change. Both predate it; naming them is what stops this
+  entry reading as though every command now holds to the rule.
+
 - *(core)* A `door` asked the wall column *whether* it held any row, where a `window` asked it
   *where*. The two questions differ on one shape, and on that shape the door carved nothing and
   said nothing:

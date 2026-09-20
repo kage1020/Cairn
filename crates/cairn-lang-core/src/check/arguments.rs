@@ -1,6 +1,7 @@
 //! `arguments` pass — flags every `key=value` whose key is outside the
 //! vocabulary of the member's role, every key in that vocabulary no pass
-//! reads yet, and every key a sibling argument's value routed past.
+//! reads yet, and every key a sibling argument's value routed past. A
+//! member's own `[key=value]` selector answers to the same vocabulary.
 //!
 //! Walks the Intent IR beside [`super::keyword_allowlist`], which asks the
 //! same question one level up. The two do not both fire on a line: a
@@ -8,13 +9,26 @@
 //! arguments against, so this pass leaves it alone and the keyword's own
 //! finding carries the repair.
 //!
-//! Only `intent_state` is in scope, and the other three fields are covered
-//! unevenly rather than fully. `check::positional` reads positionals at
-//! every role and depth. A member's own selector (`door[id=front]`) has its
-//! keys read in two narrow places — the `door` actuator-patch recogniser in
-//! `block_array::lower` and redstone's binding-key walk — and nowhere else,
-//! so `window[clas=outer]` is silent. The `-> value` tail is refused by
-//! `synth`'s `diag_misplaced_sensor`, which only `cairn synth` reaches.
+//! Two of a member's four fields are in scope. `check::positional` reads
+//! positionals at every role and depth, and [`super::binding`] asks the
+//! `-> value` tail the one question that needs no Logic IR: whether the
+//! member may emit a signal at all.
+//!
+//! A member's own selector (`door[id=front]`) is judged here, against the
+//! same vocabulary its arguments answer to. Its keys are *read* in two
+//! narrow places — the `door` actuator-patch recogniser in
+//! `block_array::lower` and redstone's binding-key walk — and nowhere
+//! else, which left `window[clas=outer]` silent through `check` and
+//! `compile` with the `class` lost.
+//!
+//! What the key means is a separate question and stays open: a member's
+//! selector is carried through verbatim, and later passes decide whether
+//! one binds a fresh id or references an existing member. This pass does
+//! not need that answer. It asks only whether the *word* is one something
+//! in this module reads, which is the same question it asks of a
+//! `key=value` on the same line and has the same answer — so `clas=` is
+//! refused with the suggestion wherever it is written, and `id=` is
+//! accepted on both sides whatever a later pass decides it means.
 //!
 //! A theme selector widens the vocabulary of the keyword it names. `theme t:
 //! window[tags=[a,b]] -> frame=@spruce_wood` makes `tags=` a key something
@@ -132,7 +146,13 @@ fn check_member(member: &Member, selected: &SelectorKeys<'_>, sink: &mut Diagnos
     for (key, value) in &member.intent_state.fields {
         let coined = widened.is_some_and(|extra| extra.contains(key.as_str()));
         if !accepted.contains(&key.as_str()) {
-            sink.push(unknown_argument(keyword, key, &value.span, &accepted));
+            sink.push(unknown_key(
+                Field::Argument,
+                keyword,
+                key,
+                &value.span,
+                &accepted,
+            ));
         } else if coined && !own.contains(&key.as_str()) {
             // Widened by a selector. Legal unless it is a near-miss of a
             // word the role already has, which is a typo written twice
@@ -140,7 +160,14 @@ fn check_member(member: &Member, selected: &SelectorKeys<'_>, sink: &mut Diagnos
             // role's own vocabulary — feeding the widened set in would let
             // the key suggest itself.
             if let Some(suggested) = nearest_match(key, own.iter().copied()) {
-                sink.push(coined_near_miss(keyword, key, &value.span, suggested, &own));
+                sink.push(coined_near_miss(
+                    Field::Argument,
+                    keyword,
+                    key,
+                    &value.span,
+                    suggested,
+                    &own,
+                ));
             }
         } else if member.role.unread_arguments().contains(&key.as_str()) {
             // A key the specification defines and nothing reads — unless
@@ -158,6 +185,33 @@ fn check_member(member: &Member, selected: &SelectorKeys<'_>, sink: &mut Diagnos
             if let Some(finding) = routed_past(member, key, &value.span) {
                 sink.push(finding);
             }
+        }
+    }
+    // The member's own `[key=value]`, against the same vocabulary. Only
+    // the two branches about the *word* apply: the other two ask what a
+    // lowering rule does with a value, and a selector filters rather than
+    // supplies one.
+    for (key, value) in member.selector.iter().flatten() {
+        if !accepted.contains(&key.as_str()) {
+            sink.push(unknown_key(
+                Field::Selector,
+                keyword,
+                key,
+                &value.span,
+                &accepted,
+            ));
+        } else if widened.is_some_and(|extra| extra.contains(key.as_str()))
+            && !own.contains(&key.as_str())
+            && let Some(suggested) = nearest_match(key, own.iter().copied())
+        {
+            sink.push(coined_near_miss(
+                Field::Selector,
+                keyword,
+                key,
+                &value.span,
+                suggested,
+                &own,
+            ));
         }
     }
 }
@@ -282,7 +336,31 @@ fn routed_past_argument(
     }
 }
 
-fn unknown_argument(
+/// Which of a member's two key-bearing fields a finding is about.
+///
+/// One defect — a word the author expects something to read, that nothing
+/// does — written in two places, so the code and the notes are shared and
+/// only the sentence changes, naming the field the author has to edit.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Field {
+    /// A `key=value` written after the keyword.
+    Argument,
+    /// The member's own `[key=value]`.
+    Selector,
+}
+
+impl Field {
+    /// How a message names a key written in this field that nothing reads.
+    fn nothing_reads(self, keyword: &str, key: &str) -> String {
+        match self {
+            Self::Argument => format!("`{key}=` is not an argument `{keyword}` reads"),
+            Self::Selector => format!("`{key}=` is not an attribute a `{keyword}` carries"),
+        }
+    }
+}
+
+fn unknown_key(
+    field: Field,
     keyword: &str,
     key: &str,
     span: &crate::error::Span,
@@ -300,7 +378,7 @@ fn unknown_argument(
     Diagnostic {
         code: DiagnosticCode::UnknownArgument,
         span: span.clone(),
-        primary: format!("`{key}=` is not an argument `{keyword}` reads"),
+        primary: field.nothing_reads(keyword, key),
         notes,
         data: None,
     }
@@ -310,7 +388,14 @@ fn unknown_argument(
 ///
 /// Reported exactly as if the selector were not there, because a word a
 /// module coins is a word it chose, and this one is a word it nearly typed.
+///
+/// The middle note names the `theme` row that did the widening, in the
+/// present: that row exists, or this branch would not have been reached.
+/// Phrasing it as something the author could add read as advice to write
+/// the selector — and on a finding about the member's own bracket, advice
+/// to write the text being reported.
 fn coined_near_miss(
+    field: Field,
     keyword: &str,
     key: &str,
     span: &crate::error::Span,
@@ -320,14 +405,14 @@ fn coined_near_miss(
     Diagnostic {
         code: DiagnosticCode::UnknownArgument,
         span: span.clone(),
-        primary: format!("`{key}=` is not an argument `{keyword}` reads"),
+        primary: field.nothing_reads(keyword, key),
         notes: vec![
             did_you_mean_note(suggested),
             DiagnosticNote {
                 span: None,
                 message: format!(
-                    "a `{keyword}[{key}=...]` selector would make this a key of its own, but \
-                     one edit from `{suggested}` reads as a typo written twice",
+                    "a `{keyword}[{key}=...]` row in a `theme` is what makes this a key of its \
+                     own, but one edit from `{suggested}` reads as a typo written twice",
                 ),
             },
             DiagnosticNote {

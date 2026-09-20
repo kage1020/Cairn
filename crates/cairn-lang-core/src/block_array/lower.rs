@@ -3845,10 +3845,18 @@ fn recognize_actuator_patch(
     let Some(selector) = member.selector.as_ref() else {
         return;
     };
+    // Only keys a `door` does carry. One outside the role's vocabulary is
+    // `check::arguments`' `E_UNKNOWN_ARGUMENT`, which names it, offers the
+    // word it may be a typo for, and reaches an unpinned `cairn check`
+    // that runs no lowering at all — so repeating it here would bill one
+    // repair twice. What is left for this recogniser is the key that
+    // passes a `door`'s vocabulary and still has no reader in the patch,
+    // `door[side=front]` being the shape.
+    let vocabulary = member.role.accepted_arguments().unwrap_or_default();
     let unknown_selector_keys: Vec<&str> = selector
         .keys()
         .map(String::as_str)
-        .filter(|k| !ACTUATOR_PATCH_SELECTOR_KEYS.contains(k))
+        .filter(|k| !ACTUATOR_PATCH_SELECTOR_KEYS.contains(k) && vocabulary.contains(k))
         .collect();
     if !unknown_selector_keys.is_empty() {
         diagnostics.push(diag_deferred_member_reason(

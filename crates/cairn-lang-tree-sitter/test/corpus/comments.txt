@@ -85,3 +85,49 @@ struct keep size=5x5
             (attribute
               (identifier)
               (identifier))))))))
+
+==================
+A comment behind a bodyless declaration is spent, not a node
+==================
+
+theme a:
+# c
+
+---
+
+(source_file
+  (theme_decl
+    (identifier)))
+
+==================
+A body that is only a comment is spent the same way
+==================
+
+struct s size=3x3
+  # note
+
+---
+
+(source_file
+  (struct_decl
+    (identifier)
+    (attribute_list
+      (attribute
+        (identifier)
+        (size_literal
+          (integer)
+          (integer))))))
+
+==================
+Blank lines around that comment change nothing
+==================
+
+theme a:
+
+# c
+
+---
+
+(source_file
+  (theme_decl
+    (identifier)))

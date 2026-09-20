@@ -1,11 +1,13 @@
 //! What each refusal takes away, and what it must not take away with it.
 //!
-//! The front end refuses a binding in four ways now — a sensor tail on a
+//! The front end declines a binding in four ways now — a sensor tail on a
 //! member that cannot emit, an actuator key on the wrong component, a
 //! signal-valued key nothing reads, and a `logic` left-hand side outside
 //! the `sig.` namespace — and a member whose keyword the role table does
 //! not know is skipped without a word, because `E_UNKNOWN_KEYWORD` is
-//! already its finding.
+//! already its finding. The first of the four is declined without a word
+//! too: `check::binding` refuses the tail with `E_MISPLACED_BINDING`, and
+//! this pass only takes the driver away.
 //!
 //! Each of those takes a driver or a consumer out of the scope, and every
 //! pass downstream would then report the hole as a mistake of its own. The
@@ -95,19 +97,16 @@ fn a_misplaced_actuator_on_a_derived_signal_leaves_no_unused_warning() {
 fn an_actuator_reading_a_signal_a_refused_tail_would_have_driven_is_not_reported() {
     // The actuator path has its own unbound check, separate from the one
     // `resolve_ref` walks, and this is the fixture that reaches it: the
-    // door is well formed and reads a signal the refused `walls` tail
-    // would have emitted.
+    // door is well formed and reads a signal the declined `walls` tail
+    // would have emitted. The tail itself is `check`'s
+    // `E_MISPLACED_BINDING`, so the whole list here is what the cascade
+    // would have added, and it is empty.
     let out = synth_source(&source(concat!(
         "  walls class=inner mat_slot=wall height=1 -> sig.w\n",
         "  door id=front side=front at=center\n",
         "  door[id=front] opened_by=sig.w\n",
     )));
-    assert_eq!(
-        codes(&out),
-        ["E_LOGIC_MISPLACED_BINDING"],
-        "{:#?}",
-        out.diagnostics
-    );
+    assert_eq!(codes(&out), Vec::<&str>::new(), "{:#?}", out.diagnostics);
 }
 
 #[test]
