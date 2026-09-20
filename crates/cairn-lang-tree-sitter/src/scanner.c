@@ -8,6 +8,7 @@ enum TokenType {
   FILE_START,
   SIZE_X,
   LINE_START,
+  FILE_END,
   ERROR_SENTINEL,
 };
 
@@ -348,13 +349,21 @@ bool tree_sitter_cairn_external_scanner_scan(void *payload, TSLexer *lexer, cons
   // At EOF: synthesize the missing NEWLINE first (matches
   // cairn-lang-core::lex::scan_line_body, which emits a Newline token for a
   // final content line with no trailing line break before closing any
-  // remaining indents), then emit trailing DEDENTs.
+  // remaining indents), then emit trailing DEDENTs, and FILE_END last.
   //
   // The synthesized NEWLINE is zero-width (no `advance()` call), so it is
   // gated by `eof_newline_used`: a `repeat1($._newline)` site (blank/
   // comment lines between same-level items) would otherwise be offered an
   // endless run of these and never terminate. DEDENT resets the flag, so
   // each enclosing body still gets its own one-shot synthesized newline.
+  //
+  // FILE_END is zero-width too and needs no such gate: `source_file`
+  // offers it once, at its end, and it is what says the layout this call
+  // has just crossed ran out at the end of the file rather than in front
+  // of a construct. Tried after the other two because both are about
+  // something the file still owes — a line's terminator, an open body —
+  // and this one is about there being nothing left to owe it to. See the
+  // rule's own note in `grammar.js`.
   if (lexer->eof(lexer)) {
     if (valid_symbols[NEWLINE] && !s->eof_newline_used) {
       s->eof_newline_used = true;
@@ -364,6 +373,10 @@ bool tree_sitter_cairn_external_scanner_scan(void *payload, TSLexer *lexer, cons
     if (valid_symbols[DEDENT] && s->indent_stack.size > 1) {
       s->eof_newline_used = false;
       return emit_dedent(s, lexer);
+    }
+    if (valid_symbols[FILE_END]) {
+      lexer->result_symbol = FILE_END;
+      return true;
     }
     return false;
   }
@@ -486,6 +499,11 @@ bool tree_sitter_cairn_external_scanner_scan(void *payload, TSLexer *lexer, cons
     }
   }
 
+  // The same three answers as the EOF block above, now that the loop has
+  // crossed whatever layout stood in front of the end of the file. This
+  // is the arm FILE_END was added for: the loop lands here having skipped
+  // the blank and comment lines behind a declaration, and before it
+  // nothing could consume them.
   if (lexer->eof(lexer)) {
     if (valid_symbols[NEWLINE] && !s->eof_newline_used) {
       s->eof_newline_used = true;
@@ -495,6 +513,10 @@ bool tree_sitter_cairn_external_scanner_scan(void *payload, TSLexer *lexer, cons
     if (valid_symbols[DEDENT] && s->indent_stack.size > 1) {
       s->eof_newline_used = false;
       return emit_dedent(s, lexer);
+    }
+    if (valid_symbols[FILE_END]) {
+      lexer->result_symbol = FILE_END;
+      return true;
     }
     return false;
   }

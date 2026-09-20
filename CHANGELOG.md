@@ -144,6 +144,41 @@
 
 ### Fixed
 
+- *(tree-sitter)* A declaration with nothing but layout behind it to the end of the file was
+  accepted by `cairn-lang-core` and refused by this grammar. It was the last position in a class
+  where every other one already parsed:
+
+  | source | core | grammar |
+  | --- | --- | --- |
+  | `"theme a:\n\n"` | Accept | **Reject** |
+  | `"theme a:\n# c\n"` | Accept | **Reject** |
+  | `"struct s size=3x3\n  # note\n"` | Accept | **Reject** |
+
+  "Bodyless" was not the whole of it: a header whose body holds nothing but comment lines has no
+  row to absorb the layout either.
+
+  Blank and comment lines after a declaration are crossed by the scanner on the way to the
+  construct behind them. At the end of a file there is no such construct, nothing asks, and the
+  layout was left with no token that could consume it. A declaration whose body holds a row absorbs
+  its own through that body's `repeat1($._newline)`, and a directive through its own, which is why
+  this was the one position where it survived.
+
+  A new external token, `_file_end`, closes it: `source_file` ends with an optional one, and the
+  scanner emits it where it has crossed layout and found the end of the file. A grammar-level
+  `repeat($._newline)` cannot do this. At the end of `source_file` it is ambiguous against the one
+  at the start — for a file holding nothing but line breaks the two own the same tokens, and
+  `tree-sitter generate` refuses it outright. Making the run reachable only after a declaration
+  generates, and then moves the failure: `_newline` becomes valid between a declaration's header
+  and the body it opens, which is exactly where the scanner has to cross layout rather than
+  tokenise it, and five fixtures with a blank or comment line in front of a body start failing. The
+  question is one only the scanner can answer — whether what is left is layout all the way to the
+  end of the file — so that is where it is answered.
+
+  The three entries leave `KNOWN_DIVERGENCES` and join the fixture table, with four more shapes
+  beside them (blank and comment lines together, a comment line after a body, and the lone-`\r` and
+  CRLF spellings). A differential sweep of 200,000 random layouts finds no disagreement in either
+  direction; it found 12 before the fix.
+
 - *(spec)* `spec/lint` "Diagnostic codes" is titled as the catalog a consumer looks a code up in,
   and listed 33 of the 57 codes `DiagnosticCode::as_str` can render. Twenty-four had no row, and
   seven of those appeared on no spec page in either language — the compiler printed them and

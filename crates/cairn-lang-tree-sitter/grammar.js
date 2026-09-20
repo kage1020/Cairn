@@ -24,7 +24,7 @@ module.exports = grammar({
 
   externals: $ => [
     $._indent, $._dedent, $._newline, $._file_start, $._size_x, $._line_start,
-    $._error_sentinel,
+    $._file_end, $._error_sentinel,
   ],
 
   word: $ => $.identifier,
@@ -38,11 +38,33 @@ module.exports = grammar({
   ],
 
   rules: {
+    // `_file_end` closes the layout a file may trail off in.
+    //
+    // Blank and comment lines after a declaration are crossed by the
+    // scanner on the way to the construct behind them. At the end of a
+    // file there is no such construct, so with nothing to cross to the
+    // layout was left with no token that could consume it and a file
+    // ending that way was refused. A declaration whose body holds a row
+    // absorbs its own trailing layout through that body's
+    // `repeat1($._newline)`, and a directive through its own, which is
+    // why this was the last position in the class.
+    //
+    // An external token rather than a `repeat($._newline)` here, because
+    // the question is one only the scanner can answer. That repeat is
+    // ambiguous against the one this rule opens with — for a file
+    // holding nothing but line breaks the two own the same tokens — and
+    // making the run reachable only after a declaration moves the
+    // problem rather than solving it: `_newline` then becomes valid
+    // between a declaration's header and the body it opens, which is
+    // exactly where the scanner has to cross layout instead of tokenising
+    // it. The scanner knows what LR cannot: whether what is left is
+    // layout all the way to the end of the file.
     source_file: $ => seq(
       $._file_start,
       repeat($._newline),
       repeat(seq($._line_start, $.directive, repeat1($._newline))),
       repeat(seq($._line_start, $._top_level_decl)),
+      optional($._file_end),
     ),
 
     _top_level_decl: $ => choice(
