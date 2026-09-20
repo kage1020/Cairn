@@ -47,6 +47,7 @@ compose to the strictest across every line, so a second one adds a constraint ([
 | `E_UNKNOWN_KEYWORD` | The statement keyword is not in the known-keyword table. |
 | `E_UNKNOWN_ARGUMENT` | A `key=` outside the vocabulary of the member's keyword, written as an argument or inside the member's own `[key=value]`. |
 | `W_IGNORED_ARGUMENT` | A `key=` inside that vocabulary that no pass read on the line it was written on. |
+| `E_MISPLACED_BINDING` | A `-> value` tail on a member whose keyword cannot emit a signal ([§14.2](redstone#142-signal-binding)). |
 | `E_MISPLACED_MEMBER` | The keyword is known, but the enclosing body has no reader for it. |
 | `E_UNEXPECTED_POSITIONAL` | A bare value on a line that reads none ([§5.1](syntax#51-lexical)). |
 | `E_UNSUPPORTED_NESTING` | A member carries an indented body that nothing reads. |
@@ -544,6 +545,20 @@ check` with no `--edition` / `--target` reports neither ([§11.1](#111-diagnosti
 that is always reported is the one where the member builds. A key another key makes inert *without*
 selecting a rule is a different shape again and is not reported today: `window step=` at `repeat=1`
 is a condition on a count rather than on a rule.
+
+`E_MISPLACED_BINDING` is the fourth field of a member line asked the same question the other three
+are: is this word read by anything. A `-> value` tail is read by exactly one thing — the sensor set
+of [§14.2](redstone#142-signal-binding) — so a tail on a member that is not a sensor is carried into
+the IR and dropped, and the signal it names is emitted by nothing. It is an **error** on the same
+test `E_UNKNOWN_ARGUMENT` meets: the build differs from the source, and no edit to the value
+repairs it.
+
+Only the host is asked here, because only the host can be asked without the Logic IR. Whether the
+tail's value names a signal, and whether that signal is driven twice or by nobody, are questions the
+redstone pipeline answers ([§14.2](redstone#142-signal-binding)) — and the host is asked first, so a
+tail on a member that cannot emit earns this code and not also the value's. A member whose keyword
+is not in the known-keyword table is left to `E_UNKNOWN_KEYWORD`, which is why `lever -> sig.a` —
+a sensor this specification lists and the surface has not reached — is not told its host is wrong.
 
 ## 11.4 Constraint catalog
 

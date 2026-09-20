@@ -144,6 +144,42 @@
 
 ### Fixed
 
+- *(core)* A `-> value` tail on a member that cannot emit a signal was silent through `check` and
+  `compile`:
+
+  ```
+  struct s size=5x5
+    walls height=3 mat_slot=wall -> sig.a
+  ```
+
+  The wall was built, the tail went nowhere, and `sig.a` was left emitted by nothing. The rule that
+  refuses this lived in `cairn-lang-redstone`, which only
+  `cairn synth --experimental-logic-synth` reaches, so the one pass that knew better was the one
+  pass an author was least likely to run.
+
+  `SENSOR_HOSTS` moves into `cairn-lang-core` beside the per-role argument tables, and a new
+  `binding` check pass reports the tail as `E_MISPLACED_BINDING`:
+
+  ```
+  s.crn:2:35: error[E_MISPLACED_BINDING]: `walls` cannot emit a signal; only a sensor carries a `-> sig.<name>` tail
+    note: move the tail onto a sensor — `pressure_plate` is the sensor keyword the surface accepts today; `spec/redstone` "Signal binding" also lists `lever`, `button`, `daylight`, and `observer`
+  ```
+
+  Only the host is asked here, because only the host can be asked without a Logic IR. Whether the
+  tail's value names a signal, and whether that signal is driven twice or by nobody, stay in the
+  redstone pipeline — so a tail on a `pressure_plate` passes this pass whatever it names. A keyword
+  the role table does not know is still left to `E_UNKNOWN_KEYWORD`, which is why `lever -> sig.a`
+  is not told its host is wrong: `lever` is a sensor the specification lists and the surface has
+  not reached.
+
+  `synth`'s `diag_misplaced_sensor` is gone rather than kept beside it. `cairn synth` gates on
+  `check`, so keeping both would print the same sentence twice on one line; what that pass still
+  does with such a tail is take the driver out of the scope, so a `logic` line reading the signal
+  is not separately told it is undefined. `cairn synth`'s emitted code for a misplaced tail
+  therefore changes from `E_LOGIC_MISPLACED_BINDING` to `E_MISPLACED_BINDING`, which is allowed:
+  the redstone pipeline is Internal tier per `spec/compatibility`. A misplaced *actuator key*
+  remains `E_LOGIC_MISPLACED_BINDING`.
+
 - *(core)* A typo in a member's own `[key=value]` was silent through `check` and `compile`, and the
   value was lost:
 

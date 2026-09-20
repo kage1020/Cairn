@@ -4,7 +4,7 @@
 //! Each pass is non-fatal: passes accumulate findings into a
 //! [`DiagnosticSink`] and the top-level [`check`] runs every pass before
 //! returning. The order `duplicate` → `keyword_allowlist` → `arguments` →
-//! `material` → `member_scope` → `connect_arity` → `nesting` →
+//! `binding` → `material` → `member_scope` → `connect_arity` → `nesting` →
 //! `positional` → `requires` → `truth` → `type_mismatch` →
 //! [`crate::resolve::resolve`] is fixed so the emitted list is stable
 //! across runs, but the diagnostics themselves are sorted by source
@@ -33,6 +33,7 @@
 //! problem in a file rather than only the first one.
 
 mod arguments;
+mod binding;
 pub(crate) mod cairn_version;
 mod connect_arity;
 mod diagnostic;
@@ -88,6 +89,7 @@ pub fn check(module: &Module, ir: &IntentModule, edition: Option<Edition>) -> Ve
     duplicate::run(module, ir, &mut sink);
     keyword_allowlist::run(ir, &mut sink);
     arguments::run(ir, &mut sink);
+    binding::run(ir, &mut sink);
     material::run(ir, &mut sink);
     member_scope::run(ir, &mut sink);
     connect_arity::run(ir, &mut sink);
@@ -130,9 +132,9 @@ mod tests {
         /// from the [`crate::error::ParseError`] instead.
         Parser,
         /// `cairn_version` / `duplicate` / `keyword_allowlist` /
-        /// `arguments` / `material` / `member_scope` / `connect_arity` /
-        /// `nesting` / `positional` / `requires` / `truth` /
-        /// `type_mismatch`, run directly by [`check`].
+        /// `arguments` / `binding` / `material` / `member_scope` /
+        /// `connect_arity` / `nesting` / `positional` / `requires` /
+        /// `truth` / `type_mismatch`, run directly by [`check`].
         Syntactic,
         /// `crate::resolve::resolve`, whose diagnostics [`check`] merges in.
         Resolver,
@@ -164,6 +166,7 @@ mod tests {
             | C::MisplacedMember
             | C::UnknownKeyword
             | C::UnknownArgument
+            | C::MisplacedBinding
             | C::UnexpectedPositional
             | C::InvalidRequires
             | C::InvalidCairnVersion
@@ -243,6 +246,7 @@ mod tests {
                 "E_DUPLICATE_SIZE",
                 "E_DUPLICATE_SLOT",
                 "E_INVALID_REQUIRES",
+                "E_MISPLACED_BINDING",
                 "E_MISPLACED_MEMBER",
                 "E_MISSING_MATERIAL",
                 "E_TRUTH_TABLE_CONFLICT",

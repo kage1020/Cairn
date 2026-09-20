@@ -1,5 +1,5 @@
-//! The actuator and sensor tables in `synth`, held against `core`'s
-//! per-role argument vocabularies.
+//! The actuator table in `synth`, held against `core`'s per-role argument
+//! vocabularies.
 //!
 //! `ACTUATOR_BINDINGS` pairs each argument key from `spec/redstone`
 //! "Signal binding" with the component that carries it, and
@@ -8,12 +8,14 @@
 //! source the redstone front end is built to read.
 //!
 //! Asked from this crate because this is where the pairing lives, and asked
-//! against the constants themselves rather than a copy of them — a local
+//! against the constant itself rather than a copy of it — a local
 //! restatement would go stale on a change to `synth.rs` without failing
-//! here, which is the failure this exists to catch.
+//! here, which is the failure this exists to catch. The sensor half of the
+//! pair is `core`'s table now, and its own test sits beside it in
+//! `cairn-lang-core/tests/check_binding.rs`.
 
 use cairn_lang_core::intent::{MemberRole, role_of};
-use cairn_lang_redstone::synth::{ACTUATOR_BINDINGS, SENSOR_HOSTS};
+use cairn_lang_redstone::synth::ACTUATOR_BINDINGS;
 
 #[test]
 fn every_actuator_key_with_a_real_host_is_in_that_host_vocabulary() {
@@ -42,23 +44,4 @@ fn every_actuator_key_with_a_real_host_is_in_that_host_vocabulary() {
          should be noticed here rather than silently widening what this test \
          covers",
     );
-}
-
-#[test]
-fn every_sensor_host_is_a_keyword_the_role_table_knows() {
-    // A tail sits on the member, not on an argument, so there is no
-    // vocabulary entry to check. What must hold is that the host is a real
-    // keyword: `synth` refuses a `->` on anything else, and a host the role
-    // table has never heard of would refuse every source that uses it.
-    assert!(
-        !SENSOR_HOSTS.is_empty(),
-        "an empty host list refuses every tail"
-    );
-    for host in SENSOR_HOSTS {
-        assert!(
-            role_of(host).arguments().is_some(),
-            "`{host}` carries a `->` tail per `spec/redstone` \"Signal binding\" and is \
-             not a known keyword",
-        );
-    }
 }

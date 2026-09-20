@@ -10,9 +10,9 @@
 //! finding carries the repair.
 //!
 //! Two of a member's four fields are in scope. `check::positional` reads
-//! positionals at every role and depth. The `-> value` tail is refused by
-//! `synth`'s `diag_misplaced_sensor`, which only `cairn synth` reaches, so
-//! `walls ... -> sig.a` is still silent through `check` and `compile`.
+//! positionals at every role and depth, and [`super::binding`] asks the
+//! `-> value` tail the one question that needs no Logic IR: whether the
+//! member may emit a signal at all.
 //!
 //! A member's own selector (`door[id=front]`) is judged here, against the
 //! same vocabulary its arguments answer to. Its keys are *read* in two

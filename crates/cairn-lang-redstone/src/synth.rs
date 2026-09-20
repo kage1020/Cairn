@@ -19,8 +19,10 @@
 //! circuit, so what a line is *for* is read from the line and then held
 //! to that:
 //! - **Sensor**: a `-> value` tail on a member whose keyword is in
-//!   [`SENSOR_HOSTS`]. A follow-up recognizer for `lever` / `button` /
-//!   `daylight` / `observer` costs one entry in that table.
+//!   [`SENSOR_HOSTS`], which `cairn-lang-core` owns because the host
+//!   question needs no Logic IR to ask. A follow-up recognizer for
+//!   `lever` / `button` / `daylight` / `observer` costs one entry in that
+//!   table.
 //! - **Actuator**: one of the argument keys in [`ACTUATOR_BINDINGS`]
 //!   (`opened_by` / `powered_by` / `lit_by` / `fired_by`) on the
 //!   component that table pairs the key with.
@@ -36,7 +38,12 @@
 //! Three faults, and each is reported by the one finding the other
 //! repairs would not answer:
 //! - the **host** cannot carry this binding — `E_LOGIC_MISPLACED_BINDING`,
-//!   asked first, because no edit to the value makes `walls` carry a tail;
+//!   asked first, because no edit to the value makes `walls` carry a tail.
+//!   For a `-> value` tail that fault is `check`'s
+//!   `E_MISPLACED_BINDING`, which every command reports; this pass reads
+//!   the same table to know the tail is not a sensor's, records what it
+//!   would have driven so nothing downstream bills the hole a second
+//!   time, and says nothing;
 //! - the **key** is one nothing reads — `E_LOGIC_UNKNOWN_BINDING_KEY`,
 //!   with the nearest key it might be a typo for;
 //! - the **value** names no signal — `E_LOGIC_INVALID_SIGNAL`, the code
@@ -107,14 +114,11 @@ pub const ACTUATOR_BINDINGS: &[(&str, &str)] = &[
 
 /// The component keywords that may carry a `->` sensor tail.
 ///
-/// The sensor set in `spec/redstone` "Signal binding" is `lever` /
-/// `button` / `daylight` / `observer`, none of which the surface accepts
-/// yet; `pressure_plate` is the one sensor the role table knows, and it is
-/// the only member a tail may sit on. Without
-/// the check a `walls ... -> sig.w` registered an input port and reached
-/// placement as a pad for a signal no component emits.
-/// Public for the same reason as [`ACTUATOR_BINDINGS`].
-pub const SENSOR_HOSTS: &[&str] = &["pressure_plate"];
+/// Re-exported from `cairn-lang-core`, which owns the table: the host
+/// question is about the member line rather than about the Logic IR, so
+/// `check::binding` asks it and every command reports the answer. This
+/// pass reads the same rows to know which tails are a sensor's.
+pub use cairn_lang_core::intent::SENSOR_HOSTS;
 
 /// Successful synth output: the per-scope Logic IR plus every diagnostic
 /// collected across the module. Errors abort the containing scope's IR
@@ -366,10 +370,11 @@ fn collect_member<'a>(m: &'a Member, scope: ScopeRef<'_>, out: &mut ScopeCollect
     if let Some(binding) = &m.binding {
         let named = signal_named_by(binding);
         if unknown_keyword || !SENSOR_HOSTS.contains(&m.role.keyword()) {
-            if !unknown_keyword {
-                out.diagnostics
-                    .push(diag_misplaced_sensor(m, binding, scope));
-            }
+            // `check::binding` refuses the tail, and `cairn synth` gates on
+            // `check`, so a second finding here would be the same sentence
+            // twice on one line. What this arm still owes the rest of the
+            // pass is the driver it takes away: a `logic` line reading the
+            // signal must not be told separately that nothing defines it.
             if let Some(dr) = named {
                 out.refused_drivers.insert(dr.clone());
             }
@@ -698,36 +703,6 @@ fn diag_binding_inside_selector(
         "Fix: move `{key}=` out of the brackets, as in \
          `{keyword}[id=<label>] {key}={SIGNAL_HEAD}.<name>`.",
         keyword = member.role.keyword(),
-    ))
-}
-
-/// A `->` tail on a member that is not a sensor.
-///
-/// Whatever the tail names: the host is asked before the value, so
-/// `walls -> a` reaches here rather than the value-side refusal.
-fn diag_misplaced_sensor(member: &Member, binding: &Value, scope: ScopeRef<'_>) -> Diagnostic {
-    Diagnostic::new(
-        DiagnosticCode::LogicMisplacedBinding,
-        binding.span.clone(),
-        format!(
-            "{label} `{keyword}` cannot emit a signal; only a sensor carries a \
-             `-> {SIGNAL_HEAD}.<name>` tail",
-            label = scope.label(),
-            keyword = member.role.keyword(),
-        ),
-    )
-    .with_note(member.span.clone(), "declared here")
-    .with_footer(format!(
-        "Fix: move the tail onto a sensor. `{hosts}` {verb} the sensor {noun} the surface \
-         accepts today; `spec/redstone` \"Signal binding\" also lists `lever`, `button`, \
-         `daylight`, and `observer`.",
-        hosts = SENSOR_HOSTS.join("`, `"),
-        verb = if SENSOR_HOSTS.len() == 1 { "is" } else { "are" },
-        noun = if SENSOR_HOSTS.len() == 1 {
-            "keyword"
-        } else {
-            "keywords"
-        },
     ))
 }
 

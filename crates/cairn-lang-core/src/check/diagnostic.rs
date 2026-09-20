@@ -142,6 +142,21 @@ pub enum DiagnosticCode {
     /// A misspelling of an argument that has a default is the worst of
     /// them — the build succeeds, silently, at the default.
     UnknownArgument,
+    /// A `-> value` tail on a member whose keyword cannot emit a signal.
+    ///
+    /// `spec/redstone` "Signal binding" writes an emitted signal on the
+    /// component that emits it, and [`crate::intent::SENSOR_HOSTS`] is the
+    /// set of keywords the surface accepts one on. A tail anywhere else
+    /// describes no circuit: the member is built without it and the signal
+    /// it names is driven by nothing, which is [`Self::UnknownArgument`]'s
+    /// failure in the one field that had no vocabulary to answer to.
+    ///
+    /// The host is the fault rather than the value, because no edit to the
+    /// value makes a `walls` emit. A tail on a *sensor* whose value names
+    /// no signal is the redstone pipeline's `E_LOGIC_INVALID_SIGNAL`, which
+    /// is a question about the `sig.` namespace and needs the Logic IR to
+    /// ask.
+    MisplacedBinding,
     /// A statement carrying bare positional values in a form that takes
     /// none.
     ///
@@ -563,6 +578,7 @@ impl DiagnosticCode {
             Self::MisplacedMember => "E_MISPLACED_MEMBER",
             Self::UnknownKeyword => "E_UNKNOWN_KEYWORD",
             Self::UnknownArgument => "E_UNKNOWN_ARGUMENT",
+            Self::MisplacedBinding => "E_MISPLACED_BINDING",
             Self::UnexpectedPositional => "E_UNEXPECTED_POSITIONAL",
             Self::InvalidRequires => "E_INVALID_REQUIRES",
             Self::InvalidCairnVersion => "W_INVALID_CAIRN_VERSION",
@@ -674,6 +690,7 @@ impl DiagnosticCode {
             | Self::MisplacedMember
             | Self::UnknownKeyword
             | Self::UnknownArgument
+            | Self::MisplacedBinding
             | Self::UnexpectedPositional
             | Self::InvalidRequires
             | Self::TypeMismatchLabel
@@ -1348,6 +1365,7 @@ mod tests {
                 "E_INVALID_PLACE_ID",
                 "E_INVALID_PLACE_ORIGIN",
                 "E_INVALID_REQUIRES",
+                "E_MISPLACED_BINDING",
                 "E_MISPLACED_MEMBER",
                 "E_MISSING_MATERIAL",
                 "E_MISSING_PATH_MATERIAL",
@@ -1418,6 +1436,7 @@ mod tests {
                 "E_INVALID_PLACE_ID",
                 "E_INVALID_PLACE_ORIGIN",
                 "E_INVALID_REQUIRES",
+                "E_MISPLACED_BINDING",
                 "E_MISPLACED_MEMBER",
                 "E_MISSING_MATERIAL",
                 "E_MISSING_PATH_MATERIAL",
