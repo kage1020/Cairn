@@ -144,6 +144,34 @@
 
 ### Fixed
 
+- *(spec)* `spec/lint` "Diagnostic codes" is titled as the catalog a consumer looks a code up in,
+  and listed 33 of the 57 codes `DiagnosticCode::as_str` can render. Twenty-four had no row, and
+  seven of those appeared on no spec page in either language — the compiler printed them and
+  nothing said what they meant.
+
+  A code is public contract: it is the `code` field of the `--format json` payload, it is what a
+  consumer branches on instead of matching the prose, and "Error vs warning" sorts codes into error
+  and warning by rules that assume the reader can find the code the rule is about. A code with no
+  row is a string nothing can read back.
+
+  The section is now exhaustive, in both languages, and says so. Four tables are new — sites and
+  placements, connections and walkways, lowering, and the theme / abstract-token rows folded into
+  materials and targets — and five codes that had been described only in the prose of a
+  neighbouring row (`E_UNKNOWN_SLOT_TARGET`, `E_THEME_SELECTOR_UNMATCHED`, `W_IGNORED_ARGUMENT`,
+  `W_DEFERRED_MEMBER`, `W_UNUSED_DEF`) have rows of their own, since a mention in someone else's
+  paragraph is not what a reader with a code in hand finds. Where a code's rule belongs to another
+  chapter the row says what the code means and links there, rather than restating the rule in two
+  places.
+
+  `E_THEME_SELECTOR_UNMATCHED` gets a sentence of its own: it is a warning despite the `E_` prefix,
+  the prefix is part of a Stable string and stays as written, and severity is read from the
+  `severity` field rather than from the first letter.
+
+  A unit test beside `every_code_renders_its_documented_string` now reads the catalog back and
+  fails on a code with no row, in either language. It looks for a table row rather than a mention,
+  which is the gap the five above were in, and it finds the section by its number so a renumbering
+  costs nothing.
+
 - *(core)* `W_FUTURE_CAIRN_VERSION` could not fire on the file it explains best. It says a source
   declares a language newer than the build reading it, and it is raised by a check pass — so it is
   absent in exactly the case where the version gap is the whole explanation, because parsing

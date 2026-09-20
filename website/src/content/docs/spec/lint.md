@@ -8,6 +8,11 @@ shape is what feeds the loop in [Evaluation Framework](evaluation).
 
 ## 11.1 Diagnostic codes
 
+This section is the catalog: every code the compiler can raise has a row here, and a code with no
+row is a bug in this section rather than a code outside it. Where a code's rule belongs to another
+chapter, the row states what the code means and links there for the rule — the row is what a reader
+with a code in hand needs to find, and the chapter is where the behaviour is defined.
+
 ### Duplicates
 
 | Code | Meaning |
@@ -41,6 +46,7 @@ compose to the strictest across every line, so a second one adds a constraint ([
 | `E_PARSE` | The source did not parse. |
 | `E_UNKNOWN_KEYWORD` | The statement keyword is not in the known-keyword table. |
 | `E_UNKNOWN_ARGUMENT` | A `key=` outside the vocabulary of the member's keyword. |
+| `W_IGNORED_ARGUMENT` | A `key=` inside that vocabulary that no pass read on the line it was written on. |
 | `E_MISPLACED_MEMBER` | The keyword is known, but the enclosing body has no reader for it. |
 | `E_UNEXPECTED_POSITIONAL` | A bare value on a line that reads none ([§5.1](syntax#51-lexical)). |
 | `E_UNSUPPORTED_NESTING` | A member carries an indented body that nothing reads. |
@@ -122,8 +128,14 @@ version to compare.
 | `E_INCOMPATIBLE_MATERIAL` | A member whose geometry attaches blockstates is bound to a material that cannot carry them. |
 | `E_MISSING_MATERIAL` | A member whose only route to a block is `mat_slot=` was written without one. |
 | `E_UNRESOLVED_SLOT` | A member's `mat_slot=` names a slot the bound theme does not declare. |
+| `E_UNKNOWN_SLOT_TARGET` | A `slot NAME -> VALUE` whose value is neither a canonical nor an abstract material token ([Materials and Themes](materials-themes)). |
+| `E_THEME_SELECTOR_UNMATCHED` | A `theme` selector row that matches no member in the file. |
 | `E_THEME_VARIANT_MISSING` | The pinned edition can bind none of a theme's per-edition variants. |
 | `E_INCOMPLETE_PLACE` | A `place` row omits `id=`, `use=`, or `theme=` ([§9.3](components-editing-sites#93-multi-building-with-site)). |
+| `E_UNKNOWN_ABSTRACT_TOKEN` | A `mat_slot=` resolves to an abstract material token the offered pack's catalog does not declare ([Materials and Themes](materials-themes)). |
+| `W_ABSTRACT_TOKEN_DEFERRED` | The same token with no catalog offered at all, so there is nothing to lift it against. |
+| `W_NO_THEME_BOUND` | A scope has no theme bound to it, so every `mat_slot=` member in it lowers to air. |
+| `W_THEME_VARIANT_REBOUND` | A `place theme=` names one edition's variant and the pinned edition bound a different one ([Versioning and Editions](versioning-editions)). |
 
 `E_UNKNOWN_ID` and `E_INCOMPATIBLE_MATERIAL` are raised during block-array lowering, so only the
 commands that lower report them: `cairn compile`, `cairn lower`, `cairn info`, and `cairn check
@@ -151,6 +163,16 @@ family ([Compilation Model §4.3](compilation#43-gable-roof-voxel-rules)).
 however many scopes read it, since they all want the same edit in the same `theme` block. Every
 placement naming it is still refused. A module that declares such a theme but never reads a
 `mat_slot=` from it is not reported: the build is byte-identical with or without the pin.
+
+`E_THEME_SELECTOR_UNMATCHED` is a warning despite its prefix. A rule that matches nothing overrides
+nothing, so every member keeps the material it would have had with the rule deleted; the finding is
+about the author's intent rather than about what was built. The prefix is part of the code string,
+which is Stable ([Compatibility Tiers](compatibility)), so it stays as written — read severity from
+the `severity` field rather than from the first letter.
+
+`E_UNKNOWN_SLOT_TARGET` is an error on the opposite test: a slot bound to nothing lowers every
+`mat_slot=` pointing at it to air, so a theme whose slots are all mistyped builds a hollow shell of
+the requested extent at exit 0.
 
 `E_MISSING_MATERIAL` and `E_UNRESOLVED_SLOT` are the two halves of one split, and no member
 earns both: the key is absent for the first and present-but-unusable for the second. They have
@@ -187,6 +209,17 @@ declares more than one — or none at all — no theme binds to the def's own sc
 
 `E_INCOMPLETE_PLACE` names every key the row is short of, and the row is dropped from the build.
 
+`E_UNKNOWN_ABSTRACT_TOKEN` and `W_ABSTRACT_TOKEN_DEFERRED` differ on whether anything could have
+answered. A pack was offered and does not declare the token, so the build stops with a suggestion
+towards the closest one it does declare; no pack was offered, so nothing was asked and the cell
+degrades to air with a warning. The second is the path a library caller reaches — LSP highlighting,
+or a `cairn check` with no pack — and it is a warning for that reason: refusing there would refuse
+every source read without a pack.
+
+`W_NO_THEME_BOUND` is the same shape one level up: a `mat_slot=` that resolves against no theme at
+all has no slot map to read, so the member contributes no voxel. A module that binds no theme and
+reads no `mat_slot=` is not reported.
+
 The three `@intended_targets` codes weigh the file's stated intent against its own floor
 ([versioning-editions §10.4](versioning-editions#the-hint-is-weighed-against-the-floor)). A version
 the edition cannot build is `W_INTENDED_TARGET_UNSUPPORTED` and is not also weighed against a floor:
@@ -209,6 +242,86 @@ lines of the file however it is later built; one span carries one cap finding, a
 disagreeing about how far it reaches report the error. `W_INTENDED_TARGET_UNSUPPORTED` waits until
 exactly one edition is in scope: a version Java cannot build is routinely the Bedrock target the
 author means, so with both in scope the question has not been asked.
+
+### Sites and placements
+
+| Code | Meaning |
+|---|---|
+| `E_INVALID_PLACE_ID` | A `place id=` is empty or carries `.`, `:` or whitespace. |
+| `E_DUPLICATE_PLACE_ID` | Two `place` rows in one site share an `id=`. |
+| `E_INVALID_PLACE_ORIGIN` | A `place` carries an `at=` other than `origin`, or combines `at=` with `east_of=` / `north_of=` ([§9.3](components-editing-sites#93-multi-building-with-site)). |
+| `E_UNRESOLVED_PLACE_REF` | A `place use=`, an `east_of=` / `north_of=`, or a `connect` endpoint names a place or def that does not exist. |
+| `E_UNRESOLVED_THEME_REF` | A `place theme=` names a theme the module does not declare. |
+| `W_UNUSED_DEF` | A `def` no `place use=` references. |
+
+`E_INVALID_PLACE_ID` is about round-tripping rather than taste. The scope key
+`site::SITE::PLACE`, and every walkway key parsed back out of one, is built from those characters
+as separators, so an id carrying one cannot be read back. `id=` accepts a string literal, which is
+what let the value through.
+
+`E_DUPLICATE_PLACE_ID` names both spans. The first row wins for everything that references the id
+and the duplicate is dropped, so a reference resolving to "the other one" is not a second finding.
+
+`E_UNRESOLVED_PLACE_REF` and `E_UNRESOLVED_THEME_REF` each carry a nearest-match suggestion when
+one fits the spell cap ([did you mean](#did-you-mean)). Both are errors because substituting
+something for the name would build a site the source did not describe.
+
+### Connections and walkways
+
+| Code | Meaning |
+|---|---|
+| `E_UNRESOLVED_PORT` | A `connect A.PORT to B.PORT` names a port the referenced def does not expose. |
+| `E_AMBIGUOUS_PORT` | The port id matches more than one member of the referenced def. |
+| `E_MISSING_PATH_MATERIAL` | A `connect` row carries no `path=`, so the walkway has no material to lay. |
+| `W_DUPLICATE_WALKWAY` | A `connect` repeats a `(from, to)` pair an earlier row in the same site already laid. |
+| `W_INVALID_WALKWAY_IDENT` | A site, place or port identifier in a `connect` contains `__`. |
+| `W_DEFERRED_CONNECT` | A `connect` targets a `place` that was itself refused, so there is nothing to connect. |
+| `W_WALKWAY_BLOCKED` | Cells of the fallback path overlapped an existing structure and were dropped. |
+
+`E_UNRESOLVED_PORT` is the port half of the `place.port` shape alone; the place half is
+`E_UNRESOLVED_PLACE_REF`. `E_AMBIGUOUS_PORT` takes the first match for lowering and reports the
+collision, since the repair is to rename one of the colliding members rather than to pick for the
+author.
+
+`E_MISSING_PATH_MATERIAL` is an error where the other absent-material codes are warnings: a walkway
+that degrades to air leaves two buildings looking connected in the source and unconnected in the
+world, with nothing in the report to say so.
+
+`W_INVALID_WALKWAY_IDENT` is the same round-trip rule as `E_INVALID_PLACE_ID` on a different
+separator. `__` joins the `from` and `to` halves of a walkway's scope key, so `b__c` in one half and
+`c__home2` in the other encode to one string. The row is dropped and the finding names the segment
+to rename.
+
+`W_DEFERRED_CONNECT` follows whatever refused the `place` — an incomplete row, a mistyped key, a
+failed origin selector, an unresolved `use=` or `theme=`. It is a warning because the finding that
+has the repair is the one on the `place`, and reporting the `connect` as a second error would send
+the author to a line that is correct.
+
+### Lowering
+
+| Code | Meaning |
+|---|---|
+| `W_DEFERRED_MEMBER` | A member the block-array pass does not lower, so the scope builds without it. |
+| `W_STRUCT_NO_SIZE` | A `struct` declares no `size=WxH`, so lowering can derive no extent and skips it. |
+| `W_DEF_NO_SIZE` | The same on a `def`, so every `place use=` of it is skipped. |
+| `W_STRUCTURE_TOO_LARGE` | A scope's derived extent exceeds the volume the block-array pass will allocate for. |
+| `W_PHASE_CONFLICT` | Two members in one phase wrote one voxel to different blocks ([§4.4](compilation)). |
+
+`W_STRUCT_NO_SIZE` and `W_DEF_NO_SIZE` are one rule split by what carries it, so a filter matching
+on `code` can tell a struct that will not build from a template that will not instantiate.
+
+`W_STRUCTURE_TOO_LARGE` fires on a *combination*: `size=`, `walls height=`, `roof overhang=` and
+`level y=` are each range-checked on their own, and this is the product of them being out of reach.
+A warning rather than an error, matching the two above — the scope is skipped and the rest of the
+build is unaffected.
+
+`W_DEFERRED_MEMBER` keeps a partial build inspectable rather than failing the module: the rest of
+the scope lowers, and the finding names what is missing from it.
+
+`W_PHASE_CONFLICT` is last-wins reported rather than refused. [Compilation Model](compilation)
+grants last-wins to local overrides within one phase, which is what an author restating a member
+is; two footprints that happen to intersect is not, and the grid cannot tell the two apart. The
+resolution the spec mandates still happens — the finding says which voxel it happened at.
 
 ### Truth tables
 

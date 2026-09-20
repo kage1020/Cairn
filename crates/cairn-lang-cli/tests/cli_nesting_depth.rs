@@ -199,10 +199,9 @@ fn depth_2_the_refusal_says_what_the_limit_is() {
         let d = &parsed["diagnostics"][0];
         assert_eq!(d["code"], "E_PARSE", "{shape}: {stdout}");
         assert!(
-            d["primary"]
-                .as_str()
-                .is_some_and(|p| p.contains("nesting is limited to")
-                    && p.contains(&bound.to_string())),
+            d["primary"].as_str().is_some_and(
+                |p| p.contains("nesting is limited to") && p.contains(&bound.to_string())
+            ),
             "{shape}: the document must name the bound too; got {stdout}",
         );
         assert!(

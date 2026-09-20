@@ -139,7 +139,10 @@ fn future_diag(declared: &str, span: &Span) -> Diagnostic {
 pub(crate) fn future_version_note(source: &str) -> Option<DiagnosticNote> {
     let compiler = parse_language_version(CAIRN_VERSION).ok()?;
     let (declared, span) = declared_version(source)?;
-    if !parse_language_version(&declared).ok()?.is_newer_than(&compiler) {
+    if !parse_language_version(&declared)
+        .ok()?
+        .is_newer_than(&compiler)
+    {
         return None;
     }
     Some(DiagnosticNote {

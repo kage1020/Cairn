@@ -1670,4 +1670,101 @@ mod tests {
             }
         }
     }
+    /// Where the spec chapters live, in each language. The mirror is the
+    /// same catalog, so a code missing from one is missing.
+    ///
+    /// Split from the file name rather than written whole because a path
+    /// holding the chapter reads as a citation to the test that checks
+    /// them, which then looks for a section title in the rest of the
+    /// path.
+    const SPEC_DIRS: [&str; 2] = [
+        "website/src/content/docs/spec",
+        "website/src/content/docs/ja/spec",
+    ];
+
+    /// The chapter the catalog is in.
+    const LINT_CHAPTER: &str = "lint.md";
+
+    /// The catalog section of a lint chapter: `## 11.1` up to the next
+    /// `##`. Read by number rather than by title because the title is
+    /// translated and the number is not, and because a renumbering is the
+    /// one edit this test should not have an opinion about — it looks for
+    /// the section the codes are in, whatever it is called.
+    fn catalog_section(chapter: &str) -> &str {
+        let start = chapter
+            .find("## 11.1")
+            .expect("the lint chapter opens its catalog with `## 11.1`");
+        let rest = &chapter[start + "## 11.1".len()..];
+        let end = rest.find("\n## ").map_or(rest.len(), |at| at + 1);
+        &rest[..end]
+    }
+
+    /// The codes the catalog gives a row of its own.
+    ///
+    /// A row, not a mention: a code named in the prose of a neighbouring
+    /// row, or in the payload table further down, is not what a reader
+    /// with a code in hand finds. That is the gap this looks for, and
+    /// five codes were in exactly it.
+    fn rows_of(section: &str) -> Vec<&str> {
+        section
+            .lines()
+            .filter_map(|line| line.strip_prefix("| `"))
+            .filter_map(|rest| rest.split_once("` |"))
+            .map(|(code, _)| code)
+            .filter(|code| code.starts_with("E_") || code.starts_with("W_"))
+            .collect()
+    }
+
+    #[test]
+    fn every_code_has_a_row_in_the_spec_catalog() {
+        // A code is public contract: it is the `code` field of the
+        // `--format json` payload and what a consumer branches on instead
+        // of matching the message. `spec/lint` "Diagnostic codes" is where
+        // one is looked up, so a code with no row there is a string the
+        // compiler prints and no one can read back.
+        //
+        // Only this direction. `E_VERSION_CAP`, `E_REQUIRES_UNORDERABLE`
+        // and `E_PARTIAL_BUILD` are run-level refusals raised outside this
+        // enum and have rows for the same reason, so a row without a
+        // variant is not a finding.
+        let Some(root) = workspace_root() else {
+            return;
+        };
+        for dir in SPEC_DIRS {
+            let path = root.join(dir).join(LINT_CHAPTER);
+            let text = std::fs::read_to_string(&path)
+                .unwrap_or_else(|err| panic!("{} should be readable: {err}", path.display()));
+            let rows = rows_of(catalog_section(&text));
+            let missing: Vec<&'static str> = DiagnosticCode::iter()
+                .map(DiagnosticCode::as_str)
+                .filter(|code| !rows.contains(code))
+                .collect();
+            assert!(
+                missing.is_empty(),
+                "{} must give every code a row of its own; these have none: {missing:?}",
+                path.display(),
+            );
+        }
+    }
+
+    /// The repository root, or `None` when this is not running from a
+    /// checkout.
+    ///
+    /// A packaged crate unpacked into a registry directory carries its own
+    /// manifest but not the workspace one, and `cargo package` rewrites
+    /// what it ships — so the `[workspace]` table is the marker that tells
+    /// "no spec here" apart from "the spec moved". Inside the workspace
+    /// this never returns `None`, so a chapter that moved fails rather
+    /// than passing quietly.
+    fn workspace_root() -> Option<std::path::PathBuf> {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .and_then(std::path::Path::parent)?
+            .to_path_buf();
+        let manifest = std::fs::read_to_string(root.join("Cargo.toml")).ok()?;
+        manifest
+            .lines()
+            .any(|line| line.trim_end() == "[workspace]")
+            .then_some(root)
+    }
 }

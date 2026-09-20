@@ -8,6 +8,11 @@ title: "11. Lint と制約検証"
 
 ## 11.1 診断コード
 
+この節がカタログです。コンパイラが出しうるコードには必ずここに行があり、行の無いコードはこの節の
+バグであって、カタログの外にあるコードではありません。コードの規則が別の章にある場合、行はコードの
+意味を述べ、規則についてはそこへリンクします。コードを手にした読者が探すのは行であり、振る舞いが
+定義されているのは章の方だからです。
+
 ### 重複
 
 | コード | 意味 |
@@ -41,6 +46,7 @@ title: "11. Lint と制約検証"
 | `E_PARSE` | ソースがパースできない。 |
 | `E_UNKNOWN_KEYWORD` | 文キーワードが既知キーワード表にない。 |
 | `E_UNKNOWN_ARGUMENT` | そのメンバのキーワードの語彙に無い `key=`。 |
+| `W_IGNORED_ARGUMENT` | 語彙の中にはあるが、書かれた行でどのパスにも読まれなかった `key=`。 |
 | `E_MISPLACED_MEMBER` | キーワードは既知だが、囲んでいるボディに読み手がいない。 |
 | `E_UNEXPECTED_POSITIONAL` | 位置引数を読まない行に裸の値がある ([§5.1](/ja/spec/syntax#51-字句))。 |
 | `E_UNSUPPORTED_NESTING` | メンバが、誰も読まないインデントされたボディを持っている。 |
@@ -119,8 +125,14 @@ title: "11. Lint と制約検証"
 | `E_INCOMPATIBLE_MATERIAL` | ブロックステートを付けるジオメトリを持つメンバが、それを保持できないマテリアルに束縛されている。 |
 | `E_MISSING_MATERIAL` | ブロックへの唯一の経路が `mat_slot=` であるメンバが、それを持たずに書かれている。 |
 | `E_UNRESOLVED_SLOT` | メンバの `mat_slot=` が、束縛されたテーマの宣言していないスロットを指している。 |
+| `E_UNKNOWN_SLOT_TARGET` | `slot NAME -> VALUE` の値が、正規トークンでも抽象マテリアルトークンでもない ([マテリアルとテーマ](/ja/spec/materials-themes))。 |
+| `E_THEME_SELECTOR_UNMATCHED` | `theme` のセレクタ行が、ファイル中のどのメンバにも一致しない。 |
 | `E_THEME_VARIANT_MISSING` | 固定されたエディションが、テーマのどのエディション別バリアントも束縛できない。 |
 | `E_INCOMPLETE_PLACE` | `place` 行が `id=` / `use=` / `theme=` のいずれかを欠いている ([§9.3](/ja/spec/components-editing-sites#93-site-による複数建築))。 |
+| `E_UNKNOWN_ABSTRACT_TOKEN` | `mat_slot=` が、渡されたパックのカタログが宣言していない抽象マテリアルトークンに解決される ([マテリアルとテーマ](/ja/spec/materials-themes))。 |
+| `W_ABSTRACT_TOKEN_DEFERRED` | 同じトークンだが、そもそもカタログが渡されておらず、照合する相手がいない。 |
+| `W_NO_THEME_BOUND` | スコープにテーマが束縛されていないので、その中の `mat_slot=` メンバはすべて空気になる。 |
+| `W_THEME_VARIANT_REBOUND` | `place theme=` があるエディションのバリアントを名指したが、固定されたエディションは別のものを束縛した ([バージョンとエディション](/ja/spec/versioning-editions))。 |
 
 `E_UNKNOWN_ID` と `E_INCOMPATIBLE_MATERIAL` は block-array lowering 段で発生するので、報告するのは
 lowering を走らせるコマンド — `cairn compile`、`cairn lower`、`cairn info`、
@@ -148,6 +160,16 @@ lowering 段の指摘を見られるようにするためです。ターゲッ�
 **論理テーマごとに 1 回** 報告されます。修正すべきは同じ `theme` ブロックの同じ 1 箇所だからです。
 そのテーマを名指しする placement はすべて拒否されます。テーマを宣言しつつ `mat_slot=` を 1 つも
 読まないモジュールは報告されません。ピンの有無でビルド結果が 1 バイトも変わらないからです。
+
+`E_THEME_SELECTOR_UNMATCHED` は接頭辞に反して警告です。何にも一致しない規則は何も上書きしないので、
+どのメンバも規則を消した場合と同じマテリアルのままです。この指摘は「何が作られたか」ではなく書き手の
+意図についてのものです。接頭辞はコード文字列の一部であり、それは Stable なので
+([互換性ティア](/ja/spec/compatibility))、書かれたまま据え置きます。深刻度は先頭の 1 文字ではなく
+`severity` フィールドから読んでください。
+
+`E_UNKNOWN_SLOT_TARGET` は逆の判定でエラーです。何にも束縛されないスロットは、そこを指すすべての
+`mat_slot=` を空気に落とすので、スロットが全部打ち間違っているテーマは、要求された大きさの空洞を
+終了コード 0 で建ててしまいます。
 
 `E_MISSING_MATERIAL` と `E_UNRESOLVED_SLOT` は 1 つの切り分けの両側で、両方を受け取るメンバは
 ありません。前者はキーが無い場合、後者はキーがあって使えない場合です。修正の仕方が違うので
@@ -185,6 +207,17 @@ placement が同じテーマを束縛しながら 1 つのスロットについ�
 
 `E_INCOMPLETE_PLACE` は欠けているキーをすべて列挙し、その行はビルドから落とされます。
 
+`E_UNKNOWN_ABSTRACT_TOKEN` と `W_ABSTRACT_TOKEN_DEFERRED` は、答えられる相手がいたかどうかで分かれ
+ます。パックが渡されていてそのトークンを宣言していないなら、最も近い既知のトークンへの示唆を添えて
+ビルドを止めます。パックが渡されていないなら、そもそも問うていないので、セルは警告付きで空気に
+なります。後者はライブラリ呼び出し側が到達する経路 — LSP のハイライトや、パック無しの `cairn check`
+— であり、警告なのはそのためです。そこで拒否すると、パック無しで読まれたソースをすべて拒否すること
+になります。
+
+`W_NO_THEME_BOUND` は 1 段上の同じ形です。どのテーマにも解決されない `mat_slot=` は読むスロット表を
+持たないので、そのメンバはボクセルを 1 つも置きません。テーマを束縛せず `mat_slot=` も読まない
+モジュールは報告されません。
+
 `@intended_targets` の 3 つのコードは、ファイルが表明した意図を、そのファイル自身の下限に照らします
 ([versioning-editions §10.4](/ja/spec/versioning-editions#ヒントは下限に照らされる))。そのエディション
 がビルドできないバージョンは `W_INTENDED_TARGET_UNSUPPORTED` であって、下限には照らされません。作者が
@@ -208,6 +241,82 @@ placement が同じテーマを束縛しながら 1 つのスロットについ�
 ついて食い違った場合はエラーの方を報告します。`W_INTENDED_TARGET_UNSUPPORTED` はスコープにエディション
 がちょうど 1 つある場合にだけ答えます。Java がビルドできないバージョンは、作者が意図した Bedrock の
 ターゲットであることが普通にあるので、両方がスコープにあるうちはその問いはまだ立てられていません。
+
+### site と配置
+
+| コード | 意味 |
+|---|---|
+| `E_INVALID_PLACE_ID` | `place id=` が空、または `.` / `:` / 空白を含む。 |
+| `E_DUPLICATE_PLACE_ID` | 同じ site の 2 つの `place` 行が `id=` を共有している。 |
+| `E_INVALID_PLACE_ORIGIN` | `place` が `origin` 以外の `at=` を持つ、または `at=` と `east_of=` / `north_of=` を併用している ([§9.3](/ja/spec/components-editing-sites#93-site-による複数建築))。 |
+| `E_UNRESOLVED_PLACE_REF` | `place use=`、`east_of=` / `north_of=`、`connect` の端点が、存在しない place や def を名指している。 |
+| `E_UNRESOLVED_THEME_REF` | `place theme=` が、モジュールの宣言していないテーマを名指している。 |
+| `W_UNUSED_DEF` | どの `place use=` からも参照されていない `def`。 |
+
+`E_INVALID_PLACE_ID` は趣味の問題ではなく往復の問題です。スコープキー `site::SITE::PLACE` と、そこ
+から読み戻されるすべての walkway キーは、これらの文字を区切りとして組み立てられているので、それを
+含む id は読み戻せません。`id=` は文字列リテラルを受け取るので、値はそのまま通っていました。
+
+`E_DUPLICATE_PLACE_ID` は両方のスパンを示します。id を参照するものはすべて最初の行を採り、重複した
+方は落とされるので、「もう一方」に解決された参照が 2 つ目の指摘になることはありません。
+
+`E_UNRESOLVED_PLACE_REF` と `E_UNRESOLVED_THEME_REF` は、綴りの上限に収まる候補があれば最も近いもの
+を添えます ([did you mean](#did-you-mean))。どちらもエラーなのは、名前に何かを代入すればソースが
+書いていない site を建てることになるからです。
+
+### 接続と walkway
+
+| コード | 意味 |
+|---|---|
+| `E_UNRESOLVED_PORT` | `connect A.PORT to B.PORT` が、参照先の def が公開していないポートを名指している。 |
+| `E_AMBIGUOUS_PORT` | そのポート id が、参照先の def の複数のメンバに一致する。 |
+| `E_MISSING_PATH_MATERIAL` | `connect` 行に `path=` が無く、walkway を敷くマテリアルがない。 |
+| `W_DUPLICATE_WALKWAY` | 同じ site の先行する行が既に敷いた `(from, to)` の組を、`connect` が繰り返している。 |
+| `W_INVALID_WALKWAY_IDENT` | `connect` の site / place / port 識別子が `__` を含む。 |
+| `W_DEFERRED_CONNECT` | `connect` の対象の `place` 自身が拒否されており、繋ぐものがない。 |
+| `W_WALKWAY_BLOCKED` | フォールバック経路のセルが既存の構造物と重なり、落とされた。 |
+
+`E_UNRESOLVED_PORT` は `place.port` のうちポート側だけを指します。place 側は
+`E_UNRESOLVED_PLACE_REF` です。`E_AMBIGUOUS_PORT` は lowering では最初の一致を採り、衝突の方を報告
+します。修理は書き手の代わりに選ぶことではなく、衝突しているメンバのどちらかを改名することだから
+です。
+
+`E_MISSING_PATH_MATERIAL` は、他の「マテリアルが無い」系が警告なのに対してエラーです。空気に落ちた
+walkway は、ソース上では繋がって見える 2 棟を世界では繋がないまま残し、そのことを report の中で言う
+ものが何もありません。
+
+`W_INVALID_WALKWAY_IDENT` は `E_INVALID_PLACE_ID` と同じ往復の規則を別の区切りに適用したものです。
+`__` は walkway のスコープキーの `from` と `to` を繋ぐので、片側の `b__c` ともう片側の `c__home2` が
+同じ文字列に符号化されます。行は落とされ、指摘は改名すべき区間を名指します。
+
+`W_DEFERRED_CONNECT` は `place` を拒否したもの — 欠けた行、打ち間違えたキー、失敗した原点セレクタ、
+解決できない `use=` や `theme=` — に従います。警告なのは、修理を持つ指摘が `place` 側のものであり、
+`connect` を 2 つ目のエラーとして報告すると、正しい行へ書き手を送ることになるからです。
+
+### lowering
+
+| コード | 意味 |
+|---|---|
+| `W_DEFERRED_MEMBER` | block-array パスが lowering しないメンバ。そのスコープはそれ抜きで建つ。 |
+| `W_STRUCT_NO_SIZE` | `struct` が `size=WxH` を宣言していないので、lowering は範囲を導けず飛ばす。 |
+| `W_DEF_NO_SIZE` | `def` での同じ事象。その def を使う `place use=` がすべて飛ばされる。 |
+| `W_STRUCTURE_TOO_LARGE` | スコープの導出範囲が、block-array パスが確保する体積を超えている。 |
+| `W_PHASE_CONFLICT` | 同じフェーズの 2 つのメンバが、1 つのボクセルに異なるブロックを書いた ([§4.4](/ja/spec/compilation))。 |
+
+`W_STRUCT_NO_SIZE` と `W_DEF_NO_SIZE` は 1 つの規則を、それを担っているものによって分けたものです。
+`code` で絞り込むフィルタが、建たない struct と、実体化されないテンプレートとを区別できます。
+
+`W_STRUCTURE_TOO_LARGE` は「組み合わせ」で発火します。`size=`、`walls height=`、`roof overhang=`、
+`level y=` はそれぞれ単独で範囲検査されていて、これはその積が届かないところにある場合です。上の 2 つ
+と同じく、エラーではなく警告です。そのスコープが飛ばされるだけで、ビルドの残りには影響しません。
+
+`W_DEFERRED_MEMBER` は、モジュールごと失敗させるのではなく、部分的なビルドを見られる状態に保ちます。
+スコープの残りは lowering され、指摘は何が欠けているかを名指します。
+
+`W_PHASE_CONFLICT` は、拒否ではなく「後勝ち」を報告するものです。[コンパイルモデル](/ja/spec/compilation)
+は同一フェーズ内のローカルな上書きに後勝ちを認めていて、それは書き手がメンバを言い直した場合の話
+です。2 つのフットプリントがたまたま交差した場合はそうではありませんが、グリッドは両者を区別できま
+せん。仕様が定める解決自体は起きます — 指摘は、それがどのボクセルで起きたかを言います。
 
 ### 真理値表
 

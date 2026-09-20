@@ -970,12 +970,7 @@ fn run_info(file: &Path, editions: &[String], format: InfoFormat) -> ExitCode {
         Err(err) => {
             let lines = LineStarts::new(&source);
             let parse_failure = [diagnose_parse_failure(&source, &lines, &err)];
-            return report_failure_document(
-                file,
-                &source,
-                format.failure_report(),
-                &parse_failure,
-            );
+            return report_failure_document(file, &source, format.failure_report(), &parse_failure);
         }
     };
     let ir = lower(&module);
