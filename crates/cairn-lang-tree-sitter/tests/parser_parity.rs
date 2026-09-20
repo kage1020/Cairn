@@ -598,6 +598,34 @@ const FIXTURES: &[(&str, &str, Verdict)] = &[
         "struct s size=3x3\r\n  # note\r\n",
         Accept,
     ),
+    // The same class with a member row in front of the layout, and with
+    // more than one level to close. The fixtures above all have empty
+    // bodies, so the EOF block's DEDENT loop runs at most once in them
+    // and `accepted_sources_place_every_member_at_the_same_depth`
+    // compares two empty lists; these two are what reach both.
+    (
+        "struct_member_then_comment_at_eof",
+        "struct s size=3x3\n  floor a=1\n\n# c\n",
+        Accept,
+    ),
+    (
+        "nested_body_then_comment_at_eof",
+        "struct s size=3x3\n  level y=1\n    floor a=1\n\n# c\n",
+        Accept,
+    ),
+    // A file that ends without a final break, and one whose trailing
+    // layout is spaces rather than a comment: the two other ways the
+    // scanner can arrive at the end of the file with something crossed.
+    (
+        "bodyless_decl_then_comment_with_no_final_break",
+        "theme a:\n# c",
+        Accept,
+    ),
+    (
+        "bodyless_decl_then_spaces_only_line_at_eof",
+        "theme a:\n  \n",
+        Accept,
+    ),
     // Blank and comment lines behind a declaration that *does* have a
     // body are eaten by that body instead, and still are.
     (

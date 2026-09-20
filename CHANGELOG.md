@@ -244,13 +244,24 @@
   question is one only the scanner can answer — whether what is left is layout all the way to the
   end of the file — so that is where it is answered.
 
-  The three entries leave `KNOWN_DIVERGENCES` and join the fixture table, with four more shapes
-  beside them (blank and comment lines together, a comment line after a body, and the lone-`\r` and
-  CRLF spellings). A differential sweep of 200,000 random layouts finds no disagreement in either
-  direction; it found 12 before the fix.
+  The three entries leave `KNOWN_DIVERGENCES` and join the fixture table, with eight more shapes
+  beside them: blank and comment lines together, a comment line after a body, the lone-`\r` and
+  CRLF spellings, a member row and a nested body in front of the trailing layout, a file that ends
+  without a final break, and a trailing line of spaces. The committed differential sweep
+  (`SWEPT_LAYOUTS` in `parser_parity.rs`) finds no disagreement in the direction it can assert; it
+  found 12 before the fix. That direction is the grammar accepting what the reference parser
+  refuses, so a regression back to *refusing* trailing layout is held by the fixtures rather than
+  by the sweep — which is why they now cover the depths and the line endings rather than one shape
+  of each.
+
+  What the fix spends is the comment. The scanner crosses a trailing comment line as whitespace, so
+  it reaches no `comment` extra and becomes no node, and `queries/highlights.scm` does not colour
+  it. Declining instead would refuse all four shapes the change exists to accept — after a bodyless
+  header there is no `_newline` for the file to end on — so the trees are pinned in
+  `test/corpus/comments.txt` and the trade is written down at the arm that makes it.
 
 - *(spec)* `spec/lint` "Diagnostic codes" is titled as the catalog a consumer looks a code up in,
-  and listed 33 of the 57 codes `DiagnosticCode::as_str` can render. Twenty-four had no row, and
+  and listed 32 of the 57 codes `DiagnosticCode::as_str` can render. Twenty-five had no row, and
   seven of those appeared on no spec page in either language — the compiler printed them and
   nothing said what they meant.
 
@@ -261,10 +272,13 @@
 
   The section is now exhaustive, in both languages, and says so. Four tables are new — sites and
   placements, connections and walkways, lowering, and the theme / abstract-token rows folded into
-  materials and targets — and five codes that had been described only in the prose of a
-  neighbouring row (`E_UNKNOWN_SLOT_TARGET`, `E_THEME_SELECTOR_UNMATCHED`, `W_IGNORED_ARGUMENT`,
-  `W_DEFERRED_MEMBER`, `W_UNUSED_DEF`) have rows of their own, since a mention in someone else's
-  paragraph is not what a reader with a code in hand finds. Where a code's rule belongs to another
+  materials and targets — and six codes that had been named only in the prose of a neighbouring
+  row or in the payload table further down (`E_UNKNOWN_SLOT_TARGET`,
+  `E_THEME_SELECTOR_UNMATCHED`, `W_IGNORED_ARGUMENT`, `W_DEFERRED_MEMBER`, `W_UNUSED_DEF`,
+  `W_WALKWAY_BLOCKED`) have rows of their own, since a mention in someone else's paragraph is not
+  what a reader with a code in hand finds. `E_PARTIAL_BUILD` is a seventh of the same kind, raised
+  outside `DiagnosticCode` by `cairn compile` and by a pinned `cairn check`, and it gets a row
+  too. Where a code's rule belongs to another
   chapter the row says what the code means and links there, rather than restating the rule in two
   places.
 
@@ -272,10 +286,17 @@
   the prefix is part of a Stable string and stays as written, and severity is read from the
   `severity` field rather than from the first letter.
 
+  What the claim covers is what a stable command prints. The redstone pipeline's `E_LOGIC_*` /
+  `W_LOGIC_*` codes are reachable only through `cairn synth --experimental-logic-synth`, whose
+  whole surface is Internal tier, so nothing about those strings is promised and a catalog row
+  would state a contract that does not exist. The section says that rather than leaving it to be
+  discovered.
+
   A unit test beside `every_code_renders_its_documented_string` now reads the catalog back and
   fails on a code with no row, in either language. It looks for a table row rather than a mention,
-  which is the gap the five above were in, and it finds the section by its number so a renumbering
-  costs nothing.
+  which is the gap the six above were in, and it finds the section by its *title* — carried per
+  language, since the title is translated — so renumbering the spec still touches no Rust, which is
+  what `CONTRIBUTING.md` promises.
 
 - *(core)* `W_FUTURE_CAIRN_VERSION` could not fire on the file it explains best. It says a source
   declares a language newer than the build reading it, and it is raised by a check pass — so it is
@@ -321,9 +342,8 @@
   ```
 
   `spec/lint` "Machine-readable payload" says every command taking the flag writes exactly one JSON
-  document per input, and `check` and `info` already did. The two left out are the two whose product
-  is a dump rather than a report — the AST and the block-array IR — and a failure is not either of
-  those with a hole in it. Both now write the document `info` writes where it has no report,
+  document per input. The two fixed here are the two whose product is a dump rather than a report —
+  the AST and the block-array IR — and a failure is not either of those with a hole in it. Both now write the document `info` writes where it has no report,
   `{"diagnostics": [ ... ]}`, told apart from the dump by its keys and by the exit code. `lower`
   writes it for a source that does not parse *and* for one that fails a later pass, since the second
   is the other way its stdout came out empty: it refuses to dump an IR built from a source `check`
@@ -332,6 +352,13 @@
   Under every other `--format` the findings still read as prose on stderr. `parse` defaults to
   `--format json`, so a bare `cairn parse bad.crn` now reports on stdout as JSON; `--format debug`
   is the prose form.
+
+  Two holes of the same kind are next door and are *not* closed here. `cairn check --format json`
+  writes a bare array rather than this document, and its `E_PARTIAL_BUILD` goes to stderr as prose,
+  so a pinned run can exit 1 with nothing of error severity in the payload. `cairn info --format
+  json` writes nothing at all to stdout on an edition-specific refusal, which "Machine-readable
+  payload" has covered since before this change. Both predate it; naming them is what stops this
+  entry reading as though every command now holds to the rule.
 
 - *(core)* A `door` asked the wall column *whether* it held any row, where a `window` asked it
   *where*. The two questions differ on one shape, and on that shape the door carved nothing and

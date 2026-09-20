@@ -117,32 +117,39 @@ fn future_diag(declared: &str, span: &Span) -> Diagnostic {
     }
 }
 
-/// The note a parse failure carries when the header declares a later
-/// language than this build.
+/// The note a parse failure carries when the `@cairn` header has
+/// something to say about it.
 ///
 /// [`run`] cannot reach a file that does not parse, and a whole new
 /// syntactic form — the shape a later language most often adds — is
-/// exactly what does not parse. The header is still readable: it is one
-/// line, matched by a leading `@cairn` and read to end of line, which is
-/// what [`crate::parse`] does with it before the failure that stops the
-/// module. Without this note the author is told "I do not understand
-/// this line" where the answer is "you need a newer Cairn", which is the
-/// whole reason `@cairn` is in the file.
+/// exactly what does not parse. The header is still readable from the
+/// text, which is what [`declared_version`] reads it from. Without this
+/// note the author is told "I do not understand this line" where the
+/// answer is "you need a newer Cairn", which is the whole reason
+/// `@cairn` is in the file.
 ///
 /// A note rather than a second finding, because `spec/lint`
 /// "Error vs warning" makes a source that does not parse report `E_PARSE`
 /// alone. A note keeps that true.
 ///
-/// A malformed `@cairn` says nothing here. `W_INVALID_CAIRN_VERSION` is
-/// about the header itself, and repeating it on an unrelated parse
-/// failure would be noise.
-pub(crate) fn future_version_note(source: &str) -> Option<DiagnosticNote> {
-    let compiler = parse_language_version(CAIRN_VERSION).ok()?;
-    let (declared, span) = declared_version(source)?;
-    if !parse_language_version(&declared)
-        .ok()?
-        .is_newer_than(&compiler)
-    {
+/// Two things it says. A header naming a *later* language explains the
+/// error below it. A header naming no language version at all —
+/// `@cairn banana`, or a value the lexer could not have read — says that
+/// this build cannot tell whether the error below is a version gap, which
+/// is worth a sentence because this is the only moment the author hears
+/// it: `W_INVALID_CAIRN_VERSION` is raised by a check pass, and no check
+/// pass runs on a source that does not parse.
+pub(crate) fn future_version_note(source: &str, line_starts: &[usize]) -> Option<DiagnosticNote> {
+    let (declared, span) = declared_version(source, line_starts)?;
+    let Ok(version) = parse_language_version(&declared) else {
+        return Some(DiagnosticNote {
+            span: Some(span),
+            message: format!(
+                "`@cairn {declared}` does not name a language version, so this build cannot judge whether the error below is a form a later Cairn adds",
+            ),
+        });
+    };
+    if !version.is_newer_than(&parse_language_version(CAIRN_VERSION).ok()?) {
         return None;
     }
     Some(DiagnosticNote {
@@ -158,7 +165,11 @@ pub(crate) fn future_version_note(source: &str) -> Option<DiagnosticNote> {
 ///
 /// Text rather than the AST because the caller has none, and text rather
 /// than the lexer because a source that fails to *lex* has no tokens
-/// either — `floor a=%` is the shape this note most needs to reach.
+/// either — `floor a=%` is the shape this note most needs to reach. Both
+/// halves of that matter: `crate::parse` lexes the whole file before it
+/// reads a header, so on a lex failure it holds no header at all, and on
+/// an unknown directive above the `@cairn` it stops at that line while
+/// this scan walks past it.
 ///
 /// Only the header block is read: the run of lines before the first that
 /// is neither blank, a comment, nor a top-level `@directive`, which is
@@ -166,16 +177,39 @@ pub(crate) fn future_version_note(source: &str) -> Option<DiagnosticNote> {
 /// that, or indented under a body, is not a header, and reading one
 /// would attribute a version to a file the parser never saw one in.
 ///
+/// Where this agrees with the lexer it has to agree exactly, because the
+/// note asserts what the file *declares*. Lines come from
+/// [`crate::lines`] rather than from a `split` of this function's own,
+/// so `\r\n` and a lone `\r` end a line here the way they do everywhere
+/// else. Horizontal space is a single `' '` and nothing else, because
+/// `Lexer::skip_spaces` takes that byte alone: a tab at indentation is
+/// `LexError::TabIndent`, so `@cairn\t2099.1` declares nothing, and a
+/// `str::trim` that stripped the tab would have this note claim a
+/// version the file never carried. What survives the trim is then
+/// required to hold no space at all, which is the same rule read from
+/// the other end: a header value is one token. A leading byte-order mark is skipped
+/// for the opposite reason — the lexer skips one, so the header behind
+/// it is real.
+///
 /// The span matches the one [`Header::Cairn`] carries — the `@` to the
-/// last byte of the value — so the note points where the check pass's
-/// own finding would have.
-fn declared_version(source: &str) -> Option<(String, Span)> {
-    let mut offset = 0;
-    for line in source.split_inclusive('\n') {
-        let start = offset;
-        offset += line.len();
-        let text = line.trim_end_matches(['\n', '\r']);
-        if text.trim_start().is_empty() || text.trim_start().starts_with('#') {
+/// last byte of the value — so the note points where the check pass's own
+/// finding would have.
+fn declared_version(source: &str, line_starts: &[usize]) -> Option<(String, Span)> {
+    for (index, &start) in line_starts.iter().enumerate() {
+        let end = match line_starts.get(index + 1) {
+            Some(&next) => crate::lines::end_before(source, next),
+            None => source.len(),
+        };
+        let mut text = &source[start..end];
+        let mut base = start;
+        if index == 0
+            && let Some(behind) = text.strip_prefix('\u{feff}')
+        {
+            base += text.len() - behind.len();
+            text = behind;
+        }
+        let probe = text.trim_matches(' ');
+        if probe.is_empty() || probe.starts_with('#') {
             continue;
         }
         // Anything that is not a directive at column zero ends the
@@ -191,15 +225,22 @@ fn declared_version(source: &str) -> Option<(String, Span)> {
         // Up to the comment marker, the way the lexer reads the line: a
         // `#` ends the value wherever it sits.
         let tail = &text[1 + name_len..];
-        let tail = tail.split('#').next().unwrap_or("");
-        let declared = tail.trim();
-        if declared.is_empty() {
+        let tail = tail.split_once('#').map_or(tail, |(before, _)| before);
+        let declared = tail.trim_matches(' ');
+        // A header value is one token, so any space left inside it after
+        // the spaces around it are gone is space the lexer would have
+        // stopped on — a tab at indentation is `LexError::TabIndent`, and
+        // `@cairn 2026.06 spare` is a second token the header grammar has
+        // no room for. Either way `parse` built no header, and a note
+        // about what the file "declares" would be about a declaration
+        // that does not exist.
+        if declared.is_empty() || declared.chars().any(char::is_whitespace) {
             return None;
         }
-        let value_start = 1 + name_len + (tail.len() - tail.trim_start().len());
+        let value_start = 1 + name_len + (tail.len() - tail.trim_start_matches(' ').len());
         return Some((
             declared.to_owned(),
-            start..start + value_start + declared.len(),
+            base..base + value_start + declared.len(),
         ));
     }
     None

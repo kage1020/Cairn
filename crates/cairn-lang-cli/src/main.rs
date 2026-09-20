@@ -450,10 +450,16 @@ enum LowerFormat {
 /// document on stdout.
 ///
 /// One type rather than a branch per format enum, because the answer is
-/// the same for every command that takes `--format json` — `spec/lint`
+/// the same for every command that routes through here — `spec/lint`
 /// "Machine-readable payload" promises one JSON document on stdout for
 /// every input, and a failure is the run where that promise is easiest
 /// to break.
+///
+/// Not every command that takes `--format json` is one of them. `check`
+/// writes a bare array rather than this document and so has no
+/// `failure_report()` at all, and `synth` reads its module as
+/// [`Self::Text`] whatever it will go on to print. Both are stated where
+/// they are done rather than promised here.
 #[derive(Copy, Clone, PartialEq, Eq)]
 enum FailureReport {
     /// Findings as prose on stderr. What every format that is not JSON
@@ -1689,9 +1695,12 @@ fn run_lower(file: &Path, format: LowerFormat) -> ExitCode {
     }
 
     // Warnings on a run that still has a product keep going to stderr as
-    // text, in both formats — the rule `run_info` follows for the same
-    // reason: folding them into the dump would change a document
-    // downstream tooling already reads.
+    // text, whichever format the dump takes. For `json` the reason is
+    // `run_info`'s: folding them into the dump would change a document
+    // downstream tooling already reads. For `ascii` and `debug` there is
+    // no document to fold them into, and stdout is the product either
+    // way — a finding written among the voxels is a finding a pipe
+    // swallows.
     let lines = LineStarts::new(&source);
     report_diagnostics(file, &source, &lines, &block_ir.diagnostics);
 

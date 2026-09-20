@@ -284,3 +284,93 @@ fn a_dump_on_a_clean_source_is_still_the_dump() {
         assert!(parsed.get("diagnostics").is_none(), "{sub}: {stdout}");
     }
 }
+
+/// A run with warnings and no error still writes the dump, not the
+/// document.
+///
+/// This is the branch the failure gate now guards, and no test stood on
+/// it: `report_diagnostics` moved behind the error check, so a source
+/// whose findings are all warnings has to come out the other side with
+/// the IR on stdout, the warnings on stderr, and exit 0. A regression
+/// here writes `{"diagnostics": [...]}` for a build that succeeded.
+#[test]
+fn a_dump_with_warnings_and_no_error_is_still_the_dump() {
+    let tmp = TempDir::new().expect("tempdir");
+    // `place use=` a `def` that declares no `size=`: `W_DEF_NO_SIZE` and
+    // nothing of error severity.
+    let path = tmp.path().join("warned.crn");
+    fs::write(
+        &path,
+        "theme t:\n  slot floor -> @oak_planks\n\ndef hut:\n  floor mat_slot=floor\n\n\
+         site s:\n  place id=a use=hut theme=t at=origin\n",
+    )
+    .expect("write");
+    let out = cairn("lower", &[path.to_str().unwrap(), "--format", "json"]);
+    assert_eq!(out.status.code(), Some(0));
+    let stdout = String::from_utf8(out.stdout).expect("utf-8");
+    let stderr = String::from_utf8(out.stderr).expect("utf-8");
+    let parsed: serde_json::Value = serde_json::from_str(&stdout)
+        .unwrap_or_else(|err| panic!("stdout should be JSON, got {stdout:?}: {err}"));
+    assert!(
+        parsed.get("diagnostics").is_none(),
+        "a run with a product writes the product: {stdout}",
+    );
+    assert!(
+        parsed.get("structures").is_some(),
+        "and the product is the IR: {stdout}",
+    );
+    assert!(
+        stderr.contains("warning[W_DEF_NO_SIZE]:"),
+        "the warnings go to stderr as prose: {stderr}",
+    );
+}
+
+/// The failure document is the whole report: stderr carries no second
+/// copy of it.
+///
+/// Without this, a `report_diagnostics` call left behind beside the
+/// document would keep every other assertion in this file green while
+/// writing the same findings twice, in two shapes, to two streams.
+#[test]
+fn the_failure_document_is_not_also_prose_on_stderr() {
+    let tmp = TempDir::new().expect("tempdir");
+    let bad = unparsable(&tmp);
+    let unchecked = unresolved(&tmp);
+    let runs: [(&str, &PathBuf); 3] = [("parse", &bad), ("lower", &bad), ("lower", &unchecked)];
+    for (command, path) in runs {
+        let out = cairn(command, &[path.to_str().unwrap(), "--format", "json"]);
+        assert_eq!(out.status.code(), Some(1), "{command}");
+        let stderr = String::from_utf8(out.stderr).expect("utf-8");
+        assert!(
+            stderr.is_empty(),
+            "`{command} --format json` reports on stdout alone, got {stderr:?}",
+        );
+    }
+}
+
+/// A note reaches the document, so a consumer reading one finds it.
+///
+/// The `@cairn` version note is the only note a parse failure carries,
+/// and nothing read `diagnostics[0].notes` out of the JSON at all — the
+/// other fixtures here declare no header, so their notes are empty
+/// whatever the serialiser does with them.
+#[test]
+fn a_notes_array_reaches_the_failure_document() {
+    let tmp = TempDir::new().expect("tempdir");
+    let path = tmp.path().join("future.crn");
+    fs::write(&path, "@cairn 9999.12\nstruct s size=3x3\n  floor a=%\n").expect("write");
+    let out = cairn("parse", &[path.to_str().unwrap(), "--format", "json"]);
+    assert_eq!(out.status.code(), Some(1));
+    let stdout = String::from_utf8(out.stdout).expect("utf-8");
+    let parsed: serde_json::Value = serde_json::from_str(&stdout)
+        .unwrap_or_else(|err| panic!("stdout should be JSON, got {stdout:?}: {err}"));
+    let notes = parsed["diagnostics"][0]["notes"]
+        .as_array()
+        .unwrap_or_else(|| panic!("the failure should carry its notes: {stdout}"));
+    assert!(
+        notes.iter().any(|n| n["message"]
+            .as_str()
+            .is_some_and(|m| m.contains("newer than this build"))),
+        "the version gap the header explains: {stdout}",
+    );
+}

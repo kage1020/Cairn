@@ -133,14 +133,19 @@ pub enum DiagnosticCode {
     MisplacedMember,
     /// A statement keyword not in the known-keyword table.
     UnknownKeyword,
-    /// A `key=value` argument whose key is outside the vocabulary of the
-    /// member's role.
+    /// A key outside the vocabulary of the member's role, written as a
+    /// `key=value` argument or inside the member's own `[key=value]`.
     ///
     /// An error for the same reason [`Self::UnknownKeyword`] is, one level
     /// down: the key names nothing, so no pass will ever read the value,
     /// and the member is built without whatever the author was asking for.
     /// A misspelling of an argument that has a default is the worst of
     /// them — the build succeeds, silently, at the default.
+    ///
+    /// One code for both fields because it is one defect: `clas=outer`
+    /// and `[clas=outer]` are each a word the author expects something to
+    /// read that nothing does, with the `class` lost either way. Only the
+    /// sentence differs, naming the field to edit.
     UnknownArgument,
     /// A `-> value` tail on a member whose keyword cannot emit a signal.
     ///
@@ -1178,6 +1183,19 @@ impl LineStarts {
         }
     }
 
+    /// The byte offset each line begins at, as [`crate::lines::starts`]
+    /// computed them.
+    ///
+    /// For a caller that wants the *text* of a line rather than a position
+    /// in it, and already holds this index. Handing back the slice keeps
+    /// the line-break rule where `crate::lines` puts it: the alternative
+    /// is a second walk of the source deciding again where a line ends,
+    /// which is what that module exists to prevent.
+    #[must_use]
+    pub fn line_starts(&self) -> &[usize] {
+        &self.starts
+    }
+
     /// Resolve a byte offset into a 1-based `line:column` [`Position`].
     ///
     /// `byte_offset` must be a character boundary — every offset in this
@@ -1696,26 +1714,39 @@ mod tests {
     /// holding the chapter reads as a citation to the test that checks
     /// them, which then looks for a section title in the rest of the
     /// path.
-    const SPEC_DIRS: [&str; 2] = [
-        "website/src/content/docs/spec",
-        "website/src/content/docs/ja/spec",
+    const SPEC_DIRS: [(&str, &str); 2] = [
+        ("website/src/content/docs/spec", "Diagnostic codes"),
+        ("website/src/content/docs/ja/spec", "診断コード"),
     ];
 
     /// The chapter the catalog is in.
     const LINT_CHAPTER: &str = "lint.md";
 
-    /// The catalog section of a lint chapter: `## 11.1` up to the next
-    /// `##`. Read by number rather than by title because the title is
-    /// translated and the number is not, and because a renumbering is the
-    /// one edit this test should not have an opinion about — it looks for
-    /// the section the codes are in, whatever it is called.
-    fn catalog_section(chapter: &str) -> &str {
-        let start = chapter
-            .find("## 11.1")
-            .expect("the lint chapter opens its catalog with `## 11.1`");
-        let rest = &chapter[start + "## 11.1".len()..];
-        let end = rest.find("\n## ").map_or(rest.len(), |at| at + 1);
-        &rest[..end]
+    /// The catalog section of a lint chapter: the heading whose title is
+    /// `title`, up to the next `##`.
+    ///
+    /// Found by title and not by section number. `CONTRIBUTING.md`'s
+    /// "Cite the spec by name, not by number" holds for a test as much as
+    /// for a comment, and its promise — renumbering the spec touches no
+    /// Rust — would end at a `find("## 11.1")` that `expect`s its answer.
+    /// The title is translated, which is why it is carried per language
+    /// in [`SPEC_DIRS`] rather than written once. A retitle failing here
+    /// is the convention working: a title change is a change of meaning,
+    /// and the test that leaned on it deserves a re-read.
+    fn catalog_section<'a>(chapter: &'a str, title: &str) -> &'a str {
+        let mut offset = 0;
+        for line in chapter.split_inclusive('\n') {
+            if line
+                .strip_prefix("## ")
+                .is_some_and(|rest| rest.trim_end().ends_with(title))
+            {
+                let rest = &chapter[offset + "## ".len()..];
+                let end = rest.find("\n## ").map_or(rest.len(), |at| at + 1);
+                return &rest[..end];
+            }
+            offset += line.len();
+        }
+        panic!("no `## ` heading titled {title:?} in the lint chapter")
     }
 
     /// The codes the catalog gives a row of its own.
@@ -1723,7 +1754,7 @@ mod tests {
     /// A row, not a mention: a code named in the prose of a neighbouring
     /// row, or in the payload table further down, is not what a reader
     /// with a code in hand finds. That is the gap this looks for, and
-    /// five codes were in exactly it.
+    /// six codes were in exactly it.
     fn rows_of(section: &str) -> Vec<&str> {
         section
             .lines()
@@ -1746,14 +1777,26 @@ mod tests {
         // and `E_PARTIAL_BUILD` are run-level refusals raised outside this
         // enum and have rows for the same reason, so a row without a
         // variant is not a finding.
+        //
+        // Outside a checkout there is no spec to read and the test has
+        // nothing to say; inside one every way of reaching that branch is
+        // a bug, so the chapter is read rather than skipped once the
+        // decision to run has been made. A silent pass here is a code
+        // with no row that CI never mentions.
         let Some(root) = workspace_root() else {
             return;
         };
-        for dir in SPEC_DIRS {
+        for (dir, title) in SPEC_DIRS {
             let path = root.join(dir).join(LINT_CHAPTER);
             let text = std::fs::read_to_string(&path)
                 .unwrap_or_else(|err| panic!("{} should be readable: {err}", path.display()));
-            let rows = rows_of(catalog_section(&text));
+            let rows = rows_of(catalog_section(&text, title));
+            assert!(
+                !rows.is_empty(),
+                "no code rows in {}; either the catalog moved or the row scan is broken, \
+                 and this test would otherwise pass without reading anything",
+                path.display(),
+            );
             let missing: Vec<&'static str> = DiagnosticCode::iter()
                 .map(DiagnosticCode::as_str)
                 .filter(|code| !rows.contains(code))
@@ -1772,9 +1815,13 @@ mod tests {
     /// A packaged crate unpacked into a registry directory carries its own
     /// manifest but not the workspace one, and `cargo package` rewrites
     /// what it ships — so the `[workspace]` table is the marker that tells
-    /// "no spec here" apart from "the spec moved". Inside the workspace
-    /// this never returns `None`, so a chapter that moved fails rather
-    /// than passing quietly.
+    /// "no spec here" apart from "the spec moved".
+    ///
+    /// The marker is read strictly — a bare `[workspace]` line — so a
+    /// comment after the table header, or a leading space, answers `None`
+    /// from a real checkout. That is why the caller does not treat a
+    /// readable chapter as optional once it has decided to run: the skip
+    /// is a best-effort "not a checkout", not a guarantee.
     fn workspace_root() -> Option<std::path::PathBuf> {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .parent()

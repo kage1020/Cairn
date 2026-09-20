@@ -8,10 +8,16 @@ shape is what feeds the loop in [Evaluation Framework](evaluation).
 
 ## 11.1 Diagnostic codes
 
-This section is the catalog: every code the compiler can raise has a row here, and a code with no
-row is a bug in this section rather than a code outside it. Where a code's rule belongs to another
-chapter, the row states what the code means and links there for the rule — the row is what a reader
-with a code in hand needs to find, and the chapter is where the behaviour is defined.
+This section is the catalog: every code a stable command can raise has a row here, and a code with
+no row is a bug in this section rather than a code outside it. Where a code's rule belongs to
+another chapter, the row states what the code means and links there for the rule — the row is what a
+reader with a code in hand needs to find, and the chapter is where the behaviour is defined.
+
+The redstone pipeline's `E_LOGIC_*` / `W_LOGIC_*` codes are outside that promise. They are reachable
+only through `cairn synth --experimental-logic-synth`, which is Internal tier
+([Compatibility](compatibility)) — nothing about those strings is guaranteed, so a row here would
+state a contract that does not exist. [Redstone and Logic](redstone) names the ones its own rules
+turn on.
 
 ### Duplicates
 
@@ -307,6 +313,7 @@ the author to a line that is correct.
 | `W_DEF_NO_SIZE` | The same on a `def`, so every `place use=` of it is skipped. |
 | `W_STRUCTURE_TOO_LARGE` | A scope's derived extent exceeds the volume the block-array pass will allocate for. |
 | `W_PHASE_CONFLICT` | Two members in one phase wrote one voxel to different blocks ([§4.4](compilation)). |
+| `E_PARTIAL_BUILD` | At least one requested scope did not lower, so the run produced less than was asked for. |
 
 `W_STRUCT_NO_SIZE` and `W_DEF_NO_SIZE` are one rule split by what carries it, so a filter matching
 on `code` can tell a struct that will not build from a template that will not instantiate.
@@ -318,6 +325,11 @@ build is unaffected.
 
 `W_DEFERRED_MEMBER` keeps a partial build inspectable rather than failing the module: the rest of
 the scope lowers, and the finding names what is missing from it.
+
+`E_PARTIAL_BUILD` is the run-level counterpart, and the one error among these: a warning above says
+a scope builds without something, and this says a scope the command was asked for did not build at
+all. It is reported once for the run, naming how many of the requested scopes were lost, by
+`cairn compile` and by a `cairn check --edition E --target V` that runs the same lowering pass.
 
 `W_PHASE_CONFLICT` is last-wins reported rather than refused. [Compilation Model](compilation)
 grants last-wins to local overrides within one phase, which is what an author restating a member

@@ -146,7 +146,13 @@ fn check_member(member: &Member, selected: &SelectorKeys<'_>, sink: &mut Diagnos
     for (key, value) in &member.intent_state.fields {
         let coined = widened.is_some_and(|extra| extra.contains(key.as_str()));
         if !accepted.contains(&key.as_str()) {
-            sink.push(unknown_argument(keyword, key, &value.span, &accepted));
+            sink.push(unknown_key(
+                Field::Argument,
+                keyword,
+                key,
+                &value.span,
+                &accepted,
+            ));
         } else if coined && !own.contains(&key.as_str()) {
             // Widened by a selector. Legal unless it is a near-miss of a
             // word the role already has, which is a typo written twice
@@ -154,7 +160,14 @@ fn check_member(member: &Member, selected: &SelectorKeys<'_>, sink: &mut Diagnos
             // role's own vocabulary — feeding the widened set in would let
             // the key suggest itself.
             if let Some(suggested) = nearest_match(key, own.iter().copied()) {
-                sink.push(coined_near_miss(keyword, key, &value.span, suggested, &own));
+                sink.push(coined_near_miss(
+                    Field::Argument,
+                    keyword,
+                    key,
+                    &value.span,
+                    suggested,
+                    &own,
+                ));
             }
         } else if member.role.unread_arguments().contains(&key.as_str()) {
             // A key the specification defines and nothing reads — unless
@@ -180,7 +193,8 @@ fn check_member(member: &Member, selected: &SelectorKeys<'_>, sink: &mut Diagnos
     // supplies one.
     for (key, value) in member.selector.iter().flatten() {
         if !accepted.contains(&key.as_str()) {
-            sink.push(unknown_selector_attribute(
+            sink.push(unknown_key(
+                Field::Selector,
                 keyword,
                 key,
                 &value.span,
@@ -190,7 +204,14 @@ fn check_member(member: &Member, selected: &SelectorKeys<'_>, sink: &mut Diagnos
             && !own.contains(&key.as_str())
             && let Some(suggested) = nearest_match(key, own.iter().copied())
         {
-            sink.push(coined_near_miss(keyword, key, &value.span, suggested, &own));
+            sink.push(coined_near_miss(
+                Field::Selector,
+                keyword,
+                key,
+                &value.span,
+                suggested,
+                &own,
+            ));
         }
     }
 }
@@ -315,7 +336,31 @@ fn routed_past_argument(
     }
 }
 
-fn unknown_argument(
+/// Which of a member's two key-bearing fields a finding is about.
+///
+/// One defect — a word the author expects something to read, that nothing
+/// does — written in two places, so the code and the notes are shared and
+/// only the sentence changes, naming the field the author has to edit.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Field {
+    /// A `key=value` written after the keyword.
+    Argument,
+    /// The member's own `[key=value]`.
+    Selector,
+}
+
+impl Field {
+    /// How a message names a key written in this field that nothing reads.
+    fn nothing_reads(self, keyword: &str, key: &str) -> String {
+        match self {
+            Self::Argument => format!("`{key}=` is not an argument `{keyword}` reads"),
+            Self::Selector => format!("`{key}=` is not an attribute a `{keyword}` carries"),
+        }
+    }
+}
+
+fn unknown_key(
+    field: Field,
     keyword: &str,
     key: &str,
     span: &crate::error::Span,
@@ -333,35 +378,7 @@ fn unknown_argument(
     Diagnostic {
         code: DiagnosticCode::UnknownArgument,
         span: span.clone(),
-        primary: format!("`{key}=` is not an argument `{keyword}` reads"),
-        notes,
-        data: None,
-    }
-}
-
-/// A key in a member's own `[key=value]` that no member of this role
-/// carries.
-///
-/// The same code and the same two notes as an unknown argument, because
-/// it is the same defect written in brackets: a word the author expects
-/// something to read, that nothing does. Only the sentence changes, so
-/// the message names the field the author has to edit.
-fn unknown_selector_attribute(
-    keyword: &str,
-    key: &str,
-    span: &crate::error::Span,
-    accepted: &[&str],
-) -> Diagnostic {
-    let mut notes = Vec::with_capacity(2);
-    notes.extend(nearest_match(key, accepted.iter().copied()).map(did_you_mean_note));
-    notes.push(DiagnosticNote {
-        span: None,
-        message: format!("expected one of: {}", accepted.join(", ")),
-    });
-    Diagnostic {
-        code: DiagnosticCode::UnknownArgument,
-        span: span.clone(),
-        primary: format!("`{key}=` is not an attribute a `{keyword}` carries"),
+        primary: field.nothing_reads(keyword, key),
         notes,
         data: None,
     }
@@ -371,7 +388,14 @@ fn unknown_selector_attribute(
 ///
 /// Reported exactly as if the selector were not there, because a word a
 /// module coins is a word it chose, and this one is a word it nearly typed.
+///
+/// The middle note names the `theme` row that did the widening, in the
+/// present: that row exists, or this branch would not have been reached.
+/// Phrasing it as something the author could add read as advice to write
+/// the selector — and on a finding about the member's own bracket, advice
+/// to write the text being reported.
 fn coined_near_miss(
+    field: Field,
     keyword: &str,
     key: &str,
     span: &crate::error::Span,
@@ -381,14 +405,14 @@ fn coined_near_miss(
     Diagnostic {
         code: DiagnosticCode::UnknownArgument,
         span: span.clone(),
-        primary: format!("`{key}=` is not an argument `{keyword}` reads"),
+        primary: field.nothing_reads(keyword, key),
         notes: vec![
             did_you_mean_note(suggested),
             DiagnosticNote {
                 span: None,
                 message: format!(
-                    "a `{keyword}[{key}=...]` selector would make this a key of its own, but \
-                     one edit from `{suggested}` reads as a typo written twice",
+                    "a `{keyword}[{key}=...]` row in a `theme` is what makes this a key of its \
+                     own, but one edit from `{suggested}` reads as a typo written twice",
                 ),
             },
             DiagnosticNote {

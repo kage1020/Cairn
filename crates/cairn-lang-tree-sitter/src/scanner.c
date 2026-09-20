@@ -247,7 +247,7 @@ bool tree_sitter_cairn_external_scanner_scan(void *payload, TSLexer *lexer, cons
   // branch below reads the file's layout and half of them move the indent
   // stack, so answering there would describe a line the parse has already
   // abandoned. The generated table makes this reachable rather than
-  // theoretical: `ts_external_scanner_states[1]` marks all five tokens
+  // theoretical: `ts_external_scanner_states[1]` marks every token
   // valid, including `FILE_START`, whose branch overwrites
   // `line_start_column` with wherever it happens to be standing.
   if (valid_symbols[ERROR_SENTINEL]) return false;
@@ -504,6 +504,20 @@ bool tree_sitter_cairn_external_scanner_scan(void *payload, TSLexer *lexer, cons
   // is the arm FILE_END was added for: the loop lands here having skipped
   // the blank and comment lines behind a declaration, and before it
   // nothing could consume them.
+  //
+  // What FILE_END costs here is the comment the loop spent. Declining
+  // instead — `if (crossed_comment) return false;` before the arm below —
+  // hands the comment to the `comment` extra, and refuses all four of the
+  // shapes this token was added for: after a bodyless header no NEWLINE
+  // is valid, so there is nothing else the file can end on. Measured
+  // rather than assumed: with that line in place `parser_parity` reports
+  // `bodyless_decl_then_comment_line_at_eof`,
+  // `bodyless_decl_then_blank_and_comment_lines_at_eof`,
+  // `decl_whose_body_is_only_a_comment` and its CRLF twin as Reject
+  // against core's Accept. So a comment in that position becomes no node
+  // and `queries/highlights.scm` does not colour it; the trees are pinned
+  // in `test/corpus/comments.txt` so the loss is visible rather than
+  // discovered.
   if (lexer->eof(lexer)) {
     if (valid_symbols[NEWLINE] && !s->eof_newline_used) {
       s->eof_newline_used = true;

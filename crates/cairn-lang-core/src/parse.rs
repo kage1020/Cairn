@@ -129,7 +129,8 @@ pub fn parse(source: &str) -> Result<Module, ParseError> {
 /// one here would walk the source twice for one finding.
 ///
 /// The one note it can carry comes from the `@cairn` header, when the
-/// file declares a later language than this build. That is the finding
+/// file declares a later language than this build, or names no language
+/// version at all. That is the finding
 /// `W_FUTURE_CAIRN_VERSION` would make and cannot: it is raised by a
 /// check pass, and no check pass runs on a source that does not parse —
 /// which is exactly what a later language's new syntactic form does
@@ -146,7 +147,7 @@ pub fn diagnose_parse_failure(source: &str, lines: &LineStarts, err: &ParseError
         // the span; `ParseError`'s own `Display` prefixes it too, which is
         // why this reads `user_message` rather than `to_string`.
         primary: err.user_message(),
-        notes: crate::check::cairn_version::future_version_note(source)
+        notes: crate::check::cairn_version::future_version_note(source, lines.line_starts())
             .into_iter()
             .collect(),
         // No structured payload. A consumer that wants to branch on which
