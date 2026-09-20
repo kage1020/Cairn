@@ -480,7 +480,7 @@ fn ca_17b_to_without_target_suppresses_endpoint_findings() {
 
 /// `connect a.entry "to" b.entry` used to render as ``expected `to`
 /// ... got `to` `` because the message printed a string literal's
-/// contents verbatim. `spec/lint.md` requires messages an author can
+/// contents verbatim. `spec/lint` requires messages an author can
 /// act on without re-reading the source; a message that asks for the
 /// thing it says it received cannot be acted on at all. The quotes now
 /// survive into the message, and the bare-keyword rendering stays
@@ -520,7 +520,7 @@ connect 1 to 2 path=@gravel\n";
 /// example: a bare identifier is missing its port, a quoted reference
 /// only has to lose its quotes, and an extra dot has to go. Each is a
 /// single edit the author can apply from the message alone, which is
-/// what `spec/lint.md` asks of a diagnostic.
+/// what `spec/lint` asks of a diagnostic.
 #[test]
 fn ca_20_endpoint_notes_name_the_repair_for_the_shape_at_hand() {
     let cases = [

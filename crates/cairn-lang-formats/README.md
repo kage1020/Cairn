@@ -40,13 +40,13 @@ Because the tables are closed, a suggestion cannot name a block that does not ex
 |---|---|---|---|
 | `.nbt` (vanilla structure block) | Java | **write (done)**, read | [ecosystem-interop "Forward direction"](https://cairn.kage1020.com/spec/ecosystem-interop/) |
 | `.mcstructure` | Bedrock | **write (done)**, read | [ecosystem-interop "Forward direction"](https://cairn.kage1020.com/spec/ecosystem-interop/) |
-| `.litematic` (Litematica) | Java | read / write | [ecosystem-interop "Forward direction"](https://cairn.kage1020.com/spec/ecosystem-interop/), ["Import stamping and pitfalls"](https://cairn.kage1020.com/spec/ecosystem-interop/) |
+| `.litematic` (Litematica) | Java | read / write | [ecosystem-interop "Forward direction"](https://cairn.kage1020.com/spec/ecosystem-interop/), [ecosystem-interop "Import stamping and pitfalls"](https://cairn.kage1020.com/spec/ecosystem-interop/) |
 | `.schem` (WorldEdit / Sponge) | Java | read / write | [ecosystem-interop "Forward direction"](https://cairn.kage1020.com/spec/ecosystem-interop/) |
 
 ## Forward / reverse contract
 
 - **Forward**: block-array IR → serialize. The compile pipeline writes the IR; each backend encodes it for one format.
-- **Reverse**: deserialize → block-array IR plus a provenance stamp `(edition, version)`. The compiler performs only a *faithful transliteration* into the raw-centric DSL; semantic lifting is the LLM's job ([ecosystem-interop "Reverse direction: the compiler transliterates, an LLM lifts"](https://cairn.kage1020.com/spec/ecosystem-interop/)). Litematica's multi-region structure is preserved as `site` placement, not flattened (["Import stamping and pitfalls"](https://cairn.kage1020.com/spec/ecosystem-interop/)).
+- **Reverse**: deserialize → block-array IR plus a provenance stamp `(edition, version)`. The compiler performs only a *faithful transliteration* into the raw-centric DSL; semantic lifting is the LLM's job ([ecosystem-interop "Reverse direction: the compiler transliterates, an LLM lifts"](https://cairn.kage1020.com/spec/ecosystem-interop/)). Litematica's multi-region structure is preserved as `site` placement, not flattened ([ecosystem-interop "Import stamping and pitfalls"](https://cairn.kage1020.com/spec/ecosystem-interop/)).
 
 ## Out of scope
 

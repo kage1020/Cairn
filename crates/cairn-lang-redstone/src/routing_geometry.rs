@@ -1171,11 +1171,10 @@ const NAMED_PER_SHAPE: usize = 2;
 /// refusal: the pairs are not a fault in the layout. `spec/redstone`
 /// "Place-and-route" keeps two nets one step apart in one plane and
 /// makes separating two a layer apart the physical tile layer's
-/// obligation,
-/// because whether the upper strand reads the lower one depends on
-/// what is standing between them and the pseudo-2.5D model carries no
-/// answer. A rule invented here would refuse layouts for a reason
-/// nothing can check.
+/// obligation, because whether the upper strand reads the lower one
+/// depends on what is standing between them and the pseudo-2.5D model
+/// carries no answer. A rule invented here would refuse layouts for a
+/// reason nothing can check.
 ///
 /// What is left is that the obligation was owed by nobody a reader
 /// could see. This names the pairs that carry it, so an author reading

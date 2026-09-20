@@ -92,8 +92,8 @@ pub enum TokenKind {
     /// No construct in the language reads one. It is lexed rather than
     /// refused so a version label carrying a pre-release suffix —
     /// `@requires version>=1.21.4-rc1`, a shape `spec/versioning-editions`
-    /// "Fail-loud and minimum-version inference" (which labels a floor may
-    /// use) and `spec/syntax` "Headers" accept — survives to
+    /// "Which labels a floor may use" and `spec/syntax` "Headers" accept —
+    /// survives to
     /// the directive that knows what to do with it: a header's value is
     /// the raw source between its tokens, so a character the lexer refuses
     /// never reaches the reader that would accept it. Everywhere else the

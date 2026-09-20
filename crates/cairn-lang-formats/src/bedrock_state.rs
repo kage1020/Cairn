@@ -7,18 +7,19 @@
 //! its own typed keys (`weirdo_direction: Int`, `upside_down_bit: Byte`), and
 //! for some intents (stair `shape`) it has **no** key at all.
 //!
-//! Per `spec/versioning-editions` "Backend = data tables" (Java as the base,
-//! Bedrock as overriding diffs) and "Java / Bedrock portability"
-//! (`intent_state` neutral, `resolved_state` per-edition), this module holds
-//! the hand-written Bedrock diff. It currently covers the **stair family**;
+//! Per `spec/versioning-editions` "Folding the `(edition, version)` matrix"
+//! and "Java / Bedrock portability" — Java is the base and Bedrock the
+//! overriding diffs; `intent_state` is neutral and `resolved_state`
+//! per-edition — this module holds the hand-written Bedrock diff. It currently covers the **stair family**;
 //! further block families extend the same match dispatch additively as their
 //! lowering paths land. Any block with properties outside a covered family is
 //! a hard error rather than a silent pass-through.
 //!
-//! `shape` has no Bedrock equivalent — the portability section is explicit:
-//! "stairs shape — no state on Bedrock". A non-`straight` shape is **dropped
-//! with a degradation note** (`dropped_states: [shape]` per the data-table
-//! section, `W_INTENT_DEGRADED` per the portability one), never silently:
+//! `shape` has no Bedrock equivalent — the portability section lists "stairs
+//! `shape` (no such state on Bedrock)" among the differences the canonical
+//! vocabulary does not absorb. A non-`straight` shape is **dropped with a
+//! degradation note** (`dropped_states: [shape]` in the matrix section,
+//! `W_INTENT_DEGRADED` in the portability one), never silently:
 //! `spec/versioning-editions` "Fail-loud and minimum-version inference"
 //! forbids implicit dropping. `shape=straight` is the Bedrock default, so it
 //! drops without a note.

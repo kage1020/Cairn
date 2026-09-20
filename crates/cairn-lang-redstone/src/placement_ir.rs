@@ -63,7 +63,7 @@ use crate::netlist_ir::{CellPortDriver, NetRef, NetlistInput, PortName};
 /// at one voxel are one map key rather than two.
 /// Serialising as the enum's stable lowercase string (`plane` /
 /// `bridge` / `via`) keeps the JSON wire form small and matches the
-/// vocabulary that pipeline uses.
+/// vocabulary `spec/redstone` "Place-and-route" uses.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum RouteLayer {
     /// Ground layer — every cell coord, every pad, and every coord

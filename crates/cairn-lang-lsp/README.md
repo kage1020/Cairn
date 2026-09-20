@@ -21,7 +21,7 @@ The `cairn-lsp` binary speaks standard LSP over stdio: it negotiates full-conten
 | `textDocument/completion` over the full canonical block vocabulary, by reading the registry packs' blocks table as well as the materials catalog | [materials-themes "Canonical vocabulary"](https://cairn.kage1020.com/spec/materials-themes/) |
 | `textDocument/hover` — block primitive docs, blockstate intent vs resolved view | [blockstate "`intent_state` and `resolved_state`"](https://cairn.kage1020.com/spec/blockstate/) |
 | `textDocument/codeAction` — apply the "Suggested fix:" payloads from lint messages | [lint](https://cairn.kage1020.com/spec/lint/), [versioning-editions "Fail-loud and minimum-version inference"](https://cairn.kage1020.com/spec/versioning-editions/) |
-| `workspace/executeCommand` — `cairn.info`, `cairn.diffBlocks` | [versioning-editions](https://cairn.kage1020.com/spec/versioning-editions/), [ecosystem-interop "Reverse direction: the compiler transliterates, an LLM lifts"](https://cairn.kage1020.com/spec/ecosystem-interop/) |
+| `workspace/executeCommand` — `cairn.info`, `cairn.diffBlocks` | [versioning-editions "The `edition portability` row" and "The `buildable targets` row"](https://cairn.kage1020.com/spec/versioning-editions/), [ecosystem-interop "Reverse direction: the compiler transliterates, an LLM lifts"](https://cairn.kage1020.com/spec/ecosystem-interop/) |
 
 ## Design notes
 

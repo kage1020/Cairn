@@ -1726,14 +1726,13 @@ enum MemberDisposition {
 /// - `door` / `window` are the openings the sentence names.
 /// - `pressure_plate` is a sensor, so it is a fixture. Sharing the openings
 ///   bucket with `window` meant a contested cell went to whichever line came
-///   last, which is the order accident the phase order opens by promising
-///   away.
+///   last, which is the order accident the phase order promises away.
 /// - `circuit` reserves a routing region for the redstone phases and
 ///   writes no voxel.
 /// - `place` and `connect` belong to a site body, which this pass does not
 ///   lower; `Other` is a keyword the role table does not know, which
-///   includes the `raw` of that same phase order — not yet a keyword at all,
-///   so it is reported as unknown by the allowlist pass on top of the
+///   includes the `raw` that same phase order names — not yet a keyword at
+///   all, so it is reported as unknown by the allowlist pass on top of the
 ///   deferral here.
 ///
 /// The four `lower_*_member` matches spell every role out with no wildcard

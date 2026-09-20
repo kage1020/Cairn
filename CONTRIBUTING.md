@@ -94,7 +94,9 @@ A section number is the same kind of coordinate. `§14.5` is true only while "Pl
 
 Write the chapter as its file stem without the extension (`spec/redstone`, `spec/versioning-editions`) and copy the section title verbatim. Cite the chapter alone when you mean the chapter, and once a comment has given the full citation, later sentences in it should refer back in prose — "that pipeline", "the phase order" — rather than repeat it.
 
-`cargo test --workspace` holds this: no `§` or "section 11.3" outside the spec, every `spec/<chapter>` names a chapter that exists, and every quoted title is a real heading in it. Renumbering the spec now touches no Rust at all. Retitling a section fails the test at each citation by file and line, which is the point — a title change is a change of meaning, and the comment that leaned on it deserves a re-read. The spec and its Japanese mirror are exempt, being where the numbers are defined, as are this file and the changelog.
+`cargo test --workspace` holds this over `crates/`, `examples/` and `.github/`: no `§` or "section 11.3" in any of them, every `spec/<chapter>` names a chapter that exists, and every quoted title is a real heading in it. Renumbering the spec now touches no Rust at all. Retitling a section fails the test at each citation by file and line, which is the point — a title change is a change of meaning, and the comment that leaned on it deserves a re-read.
+
+The rest of the repository is on you. `website/` is unread because that is where the numbers are defined, and the guide pages beside the spec still link to sections by an anchor that bakes the number into the slug — untangling that belongs with a change to the headings themselves. `editors/`, this file, and the changelog are simply outside the scan.
 
 ### Crate READMEs
 

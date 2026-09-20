@@ -16,11 +16,12 @@
 //! "Time model" and "Connection to the IR and phases" delay is first
 //! determined in the Placement IR, one step further down the pipeline.
 //!
-//! QC / BUD refusal (`E_NO_PORTABLE_IMPL`, from that same section) is not
-//! scaffolded here because none of the currently reachable
-//! [`crate::netlist_ir::LogicalCell`] variants (`And` / `Or` / `Not`)
-//! require update-order semantics; the diagnostic joins the pass alongside
-//! the first cell that needs it (sequential-macro or observer families).
+//! QC / BUD refusal (`E_NO_PORTABLE_IMPL`, from `spec/redstone`
+//! "Edition differences") is not scaffolded here because none of the
+//! currently reachable [`crate::netlist_ir::LogicalCell`] variants
+//! (`And` / `Or` / `Not`) require update-order semantics; the diagnostic
+//! joins the pass alongside the first cell that needs it
+//! (sequential-macro or observer families).
 
 use cairn_lang_core::Edition;
 use cairn_lang_core::ast::DottedRef;

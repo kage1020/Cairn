@@ -1,7 +1,7 @@
 //! What `@cairn` accepts, and what it says when it cannot read the value.
 //!
 //! The directive declares the Cairn language version a file was written
-//! against. `spec/index.md` calls it "provenance only, so a future compiler
+//! against. `spec/index` calls it "provenance only, so a future compiler
 //! can parse and warn correctly" — a job that needs the value to be
 //! readable as a version, which nothing checked. `@cairn banana` and
 //! `@cairn 2026.06.1.2` compiled in silence, and so did a file declaring a

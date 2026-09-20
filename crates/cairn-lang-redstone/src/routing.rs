@@ -24,8 +24,8 @@
 //!   `wire_length` and into the delay pass's tick count.
 //! - **Cross-layer pairs.** A net that climbed runs over, or one step
 //!   across from, the net it cleared. Separating those is the physical
-//!   tile layer's obligation (that pipeline), so they are named once,
-//!   here, by `W_ROUTE_CROSS_LAYER_CLEARANCE` rather than refused.
+//!   tile layer's obligation, so they are named once, here, by
+//!   `W_ROUTE_CROSS_LAYER_CLEARANCE` rather than refused.
 //! - **Refusals.** All `E_ROUTE_CONGESTION`, each eliding the scope so a
 //!   partial `wire_length` never reaches stage 3: a pad the reservation
 //!   cannot fit (its saturated z collapses onto a cell or another pad);
