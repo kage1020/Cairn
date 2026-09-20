@@ -244,8 +244,8 @@ for 4–6, and ≤ 3 beyond. The closed-set listing (`expected one of: ...`) is 
 
 ## 11.2 Machine-readable payload
 
-`check` and `info` each write exactly one JSON document to stdout under `--format json`, for every
-input they are given. `check`'s document is an array of findings, so a source that does not parse is
+Every command that takes `--format json` — `check`, `info`, `parse` and `lower` — writes exactly one
+JSON document to stdout under it, for every input it is given. `check`'s document is an array of findings, so a source that does not parse is
 that array with one `E_PARSE` element. `info`'s is the report; where there is no report — a parse
 failure, or any error-severity finding — it writes `{"diagnostics": [ ... ]}` instead, told apart
 from a report by its keys and by the exit code. Warnings on a run that still has a report are
@@ -257,9 +257,11 @@ than findings at a span, so both are reported on stderr and by the exit code in 
 the shape `compile` gives them. The array still carries every finding the run did reach, so it is
 a report of what was checked rather than an empty document.
 
-`parse` and `lower` take the flag too and do **not** hold to that yet: their product is a dump
-rather than a report, and on a source that fails they write nothing to stdout and report the failure
-on stderr. Whether a dump owes a document where it has nothing to dump is open.
+`parse`'s product is the AST and `lower`'s is the block-array IR. A dump is not a report, so a
+failure is not the dump with a hole in it: each writes the same `{"diagnostics": [ ... ]}` document
+`info` does, told apart from the dump by its keys and by the exit code. `lower` writes it for a
+source that does not parse and for one that fails a later pass, since neither leaves an IR worth
+dumping. Under every other `--format` the findings read as prose on stderr.
 
 `--format json` renders one object per finding:
 

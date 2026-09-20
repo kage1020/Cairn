@@ -144,6 +144,28 @@
 
 ### Fixed
 
+- *(cli)* `cairn parse --format json` and `cairn lower --format json` wrote nothing to stdout when
+  the source failed. The reason reached stderr as prose, so a human was told; a consumer reading
+  stdout saw an empty stream and had to guess from the exit code:
+
+  ```
+  $ cairn parse bad.crn --format json ; echo "exit=$?"
+  exit=1
+  ```
+
+  `spec/lint` "Machine-readable payload" says every command taking the flag writes exactly one JSON
+  document per input, and `check` and `info` already did. The two left out are the two whose product
+  is a dump rather than a report — the AST and the block-array IR — and a failure is not either of
+  those with a hole in it. Both now write the document `info` writes where it has no report,
+  `{"diagnostics": [ ... ]}`, told apart from the dump by its keys and by the exit code. `lower`
+  writes it for a source that does not parse *and* for one that fails a later pass, since the second
+  is the other way its stdout came out empty: it refuses to dump an IR built from a source `check`
+  rejects, and that refusal now says so on the stream the flag promised.
+
+  Under every other `--format` the findings still read as prose on stderr. `parse` defaults to
+  `--format json`, so a bare `cairn parse bad.crn` now reports on stdout as JSON; `--format debug`
+  is the prose form.
+
 - *(core)* A `door` asked the wall column *whether* it held any row, where a `window` asked it
   *where*. The two questions differ on one shape, and on that shape the door carved nothing and
   said nothing:

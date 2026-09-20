@@ -170,22 +170,44 @@ fn depth_1_every_command_refuses_deep_nesting_instead_of_aborting() {
 
 #[test]
 fn depth_2_the_refusal_says_what_the_limit_is() {
+    // Both renderings, because `parse` defaults to `--format json` and a
+    // refusal there is the failure document on stdout, not prose. The
+    // author needs the bound and the position either way.
     let tmp = TempDir::new().expect("tempdir");
     for (shape, source) in over_limit_sources() {
         let path = write_source(tmp.path(), &format!("{shape}.crn"), &source);
-        let out = cairn_argv(&["parse", path.to_str().unwrap()]);
-        let stderr = String::from_utf8_lossy(&out.stderr).into_owned();
         let bound = if shape == "flat-or" {
             MAX_EXPR_DEPTH
         } else {
             MAX_NESTING_DEPTH
         };
+
+        let out = cairn_argv(&["parse", path.to_str().unwrap(), "--format", "debug"]);
+        let stderr = String::from_utf8_lossy(&out.stderr).into_owned();
         assert!(
             stderr.contains("nesting is limited to")
                 && stderr.contains(&bound.to_string())
                 && stderr.contains(&format!("{}:", path.display())),
             "{shape}: the message must name the bound it hit and the position so the \
              author can act on it; got {stderr}",
+        );
+
+        let out = cairn_argv(&["parse", path.to_str().unwrap()]);
+        let stdout = String::from_utf8_lossy(&out.stdout).into_owned();
+        let parsed: serde_json::Value = serde_json::from_str(&stdout)
+            .unwrap_or_else(|err| panic!("{shape}: stdout should be JSON, got {stdout:?}: {err}"));
+        let d = &parsed["diagnostics"][0];
+        assert_eq!(d["code"], "E_PARSE", "{shape}: {stdout}");
+        assert!(
+            d["primary"]
+                .as_str()
+                .is_some_and(|p| p.contains("nesting is limited to")
+                    && p.contains(&bound.to_string())),
+            "{shape}: the document must name the bound too; got {stdout}",
+        );
+        assert!(
+            d["line"].as_u64().is_some_and(|line| line >= 1),
+            "{shape}: and the position; got {stdout}",
         );
     }
 }

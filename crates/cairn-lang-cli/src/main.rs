@@ -445,6 +445,51 @@ enum LowerFormat {
     Debug,
 }
 
+/// How a command reports the findings that stopped it from producing
+/// its product: as prose on stderr, or as the `{"diagnostics": [...]}`
+/// document on stdout.
+///
+/// One type rather than a branch per format enum, because the answer is
+/// the same for every command that takes `--format json` — `spec/lint`
+/// "Machine-readable payload" promises one JSON document on stdout for
+/// every input, and a failure is the run where that promise is easiest
+/// to break.
+#[derive(Copy, Clone, PartialEq, Eq)]
+enum FailureReport {
+    /// Findings as prose on stderr. What every format that is not JSON
+    /// does, and what a command with no `--format` at all does.
+    Text,
+    /// The failure document on stdout.
+    Json,
+}
+
+impl ParseFormat {
+    fn failure_report(self) -> FailureReport {
+        match self {
+            Self::Json => FailureReport::Json,
+            Self::Debug => FailureReport::Text,
+        }
+    }
+}
+
+impl InfoFormat {
+    fn failure_report(self) -> FailureReport {
+        match self {
+            Self::Json => FailureReport::Json,
+            Self::Text => FailureReport::Text,
+        }
+    }
+}
+
+impl LowerFormat {
+    fn failure_report(self) -> FailureReport {
+        match self {
+            Self::Json => FailureReport::Json,
+            Self::Ascii | Self::Debug => FailureReport::Text,
+        }
+    }
+}
+
 fn main() -> ExitCode {
     let cli = Cli::parse();
     match cli.command {
@@ -490,7 +535,7 @@ fn builtin_pack(edition: Edition) -> &'static RegistryPack {
 }
 
 fn run_parse(file: &Path, format: ParseFormat) -> ExitCode {
-    let (_, module) = match load_module(file) {
+    let (_, module) = match load_module(file, format.failure_report()) {
         Ok(loaded) => loaded,
         Err(code) => return code,
     };
@@ -519,12 +564,20 @@ fn read_source(file: &Path) -> Result<String, ExitCode> {
     })
 }
 
-/// Read and parse a source, reporting a parse failure as text.
-fn load_module(file: &Path) -> Result<(String, cairn_lang_core::ast::Module), ExitCode> {
+/// Read and parse a source, reporting a parse failure the way the
+/// command's format asks for.
+///
+/// A command with no `--format` passes [`FailureReport::Text`], which is
+/// the prose report every subcommand has always given.
+fn load_module(
+    file: &Path,
+    report: FailureReport,
+) -> Result<(String, cairn_lang_core::ast::Module), ExitCode> {
     let source = read_source(file)?;
     let module = parse(&source).map_err(|err| {
-        report_parse_failure(file, &source, &err);
-        ExitCode::from(1)
+        let lines = LineStarts::new(&source);
+        let parse_failure = [diagnose_parse_failure(&source, &lines, &err)];
+        report_failure_document(file, &source, report, &parse_failure)
     })?;
     Ok((source, module))
 }
@@ -847,29 +900,35 @@ struct DiagnosticsDocument {
     diagnostics: Vec<RenderedDiagnostic>,
 }
 
-/// Report the findings that stopped `info` from producing a report, and
-/// give back its exit code.
+/// Report the findings that stopped a command from producing its
+/// product, and give back its exit code.
 ///
-/// `info`'s product is the `VersionAxes` document, not a diagnostics list,
-/// so a failure cannot be "the report with a hole in it". Under
-/// `--format json` it is a document of its own — `{"diagnostics": [...]}`,
-/// told apart from a report by its keys and by the exit code — which is
-/// what keeps the flag's promise of one JSON document on stdout for every
-/// input. Under `--format text` the findings read as they always have.
-fn report_info_failure(
+/// `info`'s product is the `VersionAxes` document, `parse`'s is the AST
+/// and `lower`'s is the block-array IR. None of the three is a
+/// diagnostics list, so a failure cannot be "the product with a hole in
+/// it". Under `--format json` it is a document of its own —
+/// `{"diagnostics": [ ... ]}`, told apart from a product by its keys and
+/// by the exit code — which is what keeps the flag's promise of one JSON
+/// document on stdout for every input. Every other format reads as it
+/// always has, on stderr.
+///
+/// `check` is the one command that does not come through here: its
+/// product *is* the findings, so a failure is that array with one more
+/// element in it rather than a document of another shape.
+fn report_failure_document(
     file: &Path,
     source: &str,
-    format: InfoFormat,
+    report: FailureReport,
     diagnostics: &[Diagnostic],
 ) -> ExitCode {
     let lines = LineStarts::new(source);
-    match format {
-        InfoFormat::Text => {
+    match report {
+        FailureReport::Text => {
             for d in diagnostics {
                 report_diagnostic(file, source, &lines, d);
             }
         }
-        InfoFormat::Json => {
+        FailureReport::Json => {
             let document = DiagnosticsDocument {
                 diagnostics: render_diagnostics(source, &lines, diagnostics),
             };
@@ -911,7 +970,12 @@ fn run_info(file: &Path, editions: &[String], format: InfoFormat) -> ExitCode {
         Err(err) => {
             let lines = LineStarts::new(&source);
             let parse_failure = [diagnose_parse_failure(&source, &lines, &err)];
-            return report_info_failure(file, &source, format, &parse_failure);
+            return report_failure_document(
+                file,
+                &source,
+                format.failure_report(),
+                &parse_failure,
+            );
         }
     };
     let ir = lower(&module);
@@ -952,7 +1016,7 @@ fn run_info(file: &Path, editions: &[String], format: InfoFormat) -> ExitCode {
     let lines = LineStarts::new(&source);
     let has_error = combined.iter().any(|d| d.severity() == Severity::Error);
     if has_error {
-        return report_info_failure(file, &source, format, &combined);
+        return report_failure_document(file, &source, format.failure_report(), &combined);
     }
     // Warnings on a run that still has a report keep going to stderr as
     // text, in both formats. Folding them into the report would change a
@@ -1590,7 +1654,7 @@ fn capitalise(s: &str) -> String {
 }
 
 fn run_lower(file: &Path, format: LowerFormat) -> ExitCode {
-    let (source, module) = match load_module(file) {
+    let (source, module) = match load_module(file, format.failure_report()) {
         Ok(loaded) => loaded,
         Err(code) => return code,
     };
@@ -1610,17 +1674,31 @@ fn run_lower(file: &Path, format: LowerFormat) -> ExitCode {
         std::mem::take(&mut block_ir.diagnostics),
     );
 
-    let lines = LineStarts::new(&source);
-    let has_error = report_diagnostics(file, &source, &lines, &block_ir.diagnostics);
-
     // Refuse before printing, the way `run_info` and `run_compile` do. The
     // exit code alone does not protect a redirect: `cairn lower f.crn
     // --format json > ir.json` creates the file before the process ends, so
     // emitting the IR anyway hands a pipeline a well-formed artifact built
-    // from a source `cairn check` rejects.
+    // from a source `cairn check` rejects. What goes out instead is the
+    // failure document, so the redirect holds a JSON file that says why.
+    let has_error = block_ir
+        .diagnostics
+        .iter()
+        .any(|d| d.severity() == Severity::Error);
     if has_error {
-        return ExitCode::from(1);
+        return report_failure_document(
+            file,
+            &source,
+            format.failure_report(),
+            &block_ir.diagnostics,
+        );
     }
+
+    // Warnings on a run that still has a product keep going to stderr as
+    // text, in both formats — the rule `run_info` follows for the same
+    // reason: folding them into the dump would change a document
+    // downstream tooling already reads.
+    let lines = LineStarts::new(&source);
+    report_diagnostics(file, &source, &lines, &block_ir.diagnostics);
 
     match format {
         LowerFormat::Ascii => {
@@ -1672,7 +1750,7 @@ fn run_synth(
         return ExitCode::from(2);
     }
 
-    let (source, module) = match load_module(file) {
+    let (source, module) = match load_module(file, FailureReport::Text) {
         Ok(loaded) => loaded,
         Err(code) => return code,
     };
@@ -2461,7 +2539,7 @@ fn load_and_lower(
     edition: EditionArg,
     mc_version: Option<&str>,
 ) -> Result<Lowered, ExitCode> {
-    let (source, module) = load_module(file)?;
+    let (source, module) = load_module(file, FailureReport::Text)?;
     let ir = lower(&module);
     let resolution = resolve(&ir, Some(edition.as_edition()));
     // The pack is edition-specific: an abstract `@token` resolves through
