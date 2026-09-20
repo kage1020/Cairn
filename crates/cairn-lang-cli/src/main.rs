@@ -469,6 +469,24 @@ enum FailureReport {
     Json,
 }
 
+/// Everything a pass needs to report a finding: where the source came
+/// from, the source itself, its line table, and the shape the run's
+/// refusal takes.
+///
+/// The four travel together — `file` and `lines` are only ever read to
+/// render a span in `source`, and `report` decides whether that rendering
+/// goes to stderr at all — so the pass that needs all four takes the
+/// group rather than four parameters in a fixed order. The free functions
+/// that report take them as parameters still; this is where the list grew
+/// long enough that the order was the only thing holding it together.
+#[derive(Copy, Clone)]
+struct Reporting<'a> {
+    file: &'a Path,
+    source: &'a str,
+    lines: &'a LineStarts,
+    report: FailureReport,
+}
+
 impl ParseFormat {
     fn failure_report(self) -> FailureReport {
         match self {
@@ -1028,9 +1046,20 @@ fn run_info(file: &Path, editions: &[String], format: InfoFormat) -> ExitCode {
     }
 
     report_floors_left_out_of_the_neutral_row(file, &source, &lines, &module);
-    let rows = match edition_rows(file, &source, &lines, &module, &ir, editions, &combined) {
+    let reporting = Reporting {
+        file,
+        source: &source,
+        lines: &lines,
+        report: format.failure_report(),
+    };
+    let rows = match edition_rows(&reporting, &module, &ir, editions, &combined) {
         Ok(rows) => rows,
-        Err(code) => return code,
+        // The same refusal the edition-neutral gate above gets, one pass
+        // later: which pass raised the finding is not something the caller
+        // asked about, so it cannot decide whether a document is written.
+        Err(refused) => {
+            return report_failure_document(file, &source, reporting.report, &refused);
+        }
     };
 
     let axes = compute_axes(&module, &ir, &resolution, rows);
@@ -1070,21 +1099,45 @@ fn run_info(file: &Path, editions: &[String], format: InfoFormat) -> ExitCode {
 /// `already_reported` is the edition-neutral stream the caller has
 /// printed; only diagnostics absent from it are reported, keyed by code
 /// and span.
+///
+/// The error case is the findings the failure document owes rather than
+/// an exit code, so the caller writes that document through the one place
+/// that knows what `--format json` promises. Under
+/// [`FailureReport::Json`] the errors come back here instead of printing,
+/// because the document is written once, after every edition has been
+/// walked, and a finding printed on the way would reach the caller ahead
+/// of it. Under [`FailureReport::Text`] every finding prints inline where
+/// it always has — under the note naming the edition that raised it — and
+/// the list comes back empty, which leaves stderr saying exactly what it
+/// says today.
+///
+/// An empty list is also what a refused palette gives back in either
+/// format: [`invalid_palette_report`] renders prose rather than a
+/// `Diagnostic`, since no leak it names has a span in the source or a
+/// repair the author could make. The refusal is still the document's to
+/// announce — `spec/lint` "Machine-readable payload" states it as the one
+/// `info` refusal that carries no element — so the document is written
+/// with nothing in it rather than not written at all.
 fn edition_rows(
-    file: &Path,
-    source: &str,
-    lines: &LineStarts,
+    reporting: &Reporting<'_>,
     module: &Module,
     ir: &cairn_lang_core::intent::IntentModule,
     editions: &[String],
     already_reported: &[cairn_lang_core::check::Diagnostic],
-) -> Result<Vec<EditionReport>, ExitCode> {
+) -> Result<Vec<EditionReport>, Vec<Diagnostic>> {
+    let Reporting {
+        file,
+        source,
+        lines,
+        report,
+    } = *reporting;
     let already: std::collections::HashSet<(&str, usize, usize)> = already_reported
         .iter()
         .map(|d| (d.code.as_str(), d.span.start, d.span.end))
         .collect();
     let mut rows: Vec<EditionReport> = Vec::with_capacity(editions.len());
     let mut edition_specific_error = false;
+    let mut refused: Vec<Diagnostic> = Vec::new();
 
     for e in editions {
         let edition: Edition = e.parse().expect("validated by the caller");
@@ -1104,11 +1157,26 @@ fn edition_rows(
             .filter(|d| !already.contains(&(d.code.as_str(), d.span.start, d.span.end)))
             .cloned()
             .collect();
-        if !only_here.is_empty() {
-            eprintln!("note: reported for --editions {}", edition.as_str());
-            if report_diagnostics(file, source, lines, &only_here) {
+        let mut edition_header_printed = false;
+        // The warnings stay on stderr in both formats — the split the
+        // edition-neutral pass makes, for the same reason: folding them
+        // into a document is a change to what downstream tooling already
+        // reads. The errors are the run's refusal, so under `--format
+        // json` they are held for the document, and the note above prints
+        // only when something is left for it to head.
+        for d in &only_here {
+            if d.severity() == Severity::Error {
                 edition_specific_error = true;
+                if report == FailureReport::Json {
+                    refused.push(d.clone());
+                    continue;
+                }
             }
+            if !edition_header_printed {
+                eprintln!("note: reported for --editions {}", edition.as_str());
+                edition_header_printed = true;
+            }
+            report_diagnostic(file, source, lines, d);
         }
 
         let portability = match edition {
@@ -1191,7 +1259,7 @@ fn edition_rows(
     // Every requested edition is walked before returning, so one bad edition
     // does not hide a second one's findings.
     if edition_specific_error {
-        return Err(ExitCode::from(1));
+        return Err(refused);
     }
     Ok(rows)
 }

@@ -410,6 +410,39 @@
   spellings together answers the diagnostic rather than the source, since an answer is the closed
   set and never a pick from it.
 
+- *(cli)* `cairn info --format json` wrote zero bytes to stdout when the finding that refused the
+  run came from the strict per-edition dry-run:
+
+  ```console
+  $ cairn info split.crn --editions java,bedrock --format json > out.json
+  $ echo $?
+  1
+  $ wc -c < out.json
+  0
+  ```
+
+  `run_info` has four ways to fail. Three route through `report_failure_document`, which consults
+  `--format`; the fourth returned a bare exit code from `edition_rows`, so the format was never
+  asked. Both refusals that path carries — a finding only the per-edition pass sees, and a palette
+  the pack refuses — were therefore the two a JSON consumer could not read, on the one command
+  whose job is showing where the editions diverge. The edition-neutral gate unions slot names
+  across a theme's per-edition variants, so the divergence is exactly what only the strict pass
+  finds.
+
+  `edition_rows` now gives back the findings rather than an exit code, and the caller writes the
+  same `{"diagnostics": [ ... ]}` document the other three paths write. Under `--format json` the
+  error-severity findings are held for that document, which is written after every requested
+  edition has been walked — so a second edition's finding is still not hidden behind the first —
+  and the warnings stay on stderr, which is the split the edition-neutral pass already makes.
+  `--format text` prints byte-for-byte what it printed before, each finding under the note naming
+  the edition that raised it.
+
+  A refused palette names no span in the source and no repair its author could make, so it stays
+  prose on stderr in both formats, the way `spec/lint` "Machine-readable payload" already reports a
+  run-level refusal. What changes is that the document is written at all: a run refused by nothing
+  else writes `{"diagnostics": []}` rather than an empty stdout, so `--format json`'s promise of
+  one document per input holds on every `info` exit path.
+
 ### Breaking changes
 
 - *(redstone,cli)* The per-cell figure delay insertion writes is renamed `delay_ticks` →

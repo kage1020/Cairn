@@ -381,14 +381,24 @@ Every command that takes `--format json` — `check`, `info`, `parse` and `lower
 JSON document to stdout under it, for every input it is given. `check`'s document is an array of findings, so a source that does not parse is
 that array with one `E_PARSE` element. `info`'s is the report; where there is no report — a parse
 failure, or any error-severity finding — it writes `{"diagnostics": [ ... ]}` instead, told apart
-from a report by its keys and by the exit code. Warnings on a run that still has a report are
-reported as text on stderr in both formats.
+from a report by its keys and by the exit code. Which pass raised the finding does not change that:
+the strict per-edition dry-run sees what the edition-neutral gate unions away, and a refusal it
+raises writes the same document, after every requested edition has been walked. Warnings on a run
+that still has a report are reported as text on stderr in both formats, as are the warnings the
+per-edition pass raises on a run that has none.
 
 A run-level refusal is not an element of `check`'s array: an unshipped `--target` and a lowering
 that lost a scope (`E_PARTIAL_BUILD`) are facts about the command line and about the build rather
 than findings at a span, so both are reported on stderr and by the exit code in either format —
 the shape `compile` gives them. The array still carries every finding the run did reach, so it is
 a report of what was checked rather than an empty document.
+
+One `info` refusal is a run-level refusal of the same kind: a registry pack whose palette carries a
+blockstate the pack was expected to refuse costs that edition its portability row, and names no span
+in the source and no repair its author could make. It reads as prose on stderr in both formats.
+The document is still written — the promise is one document per input, not one element per
+refusal — so a run refused by nothing else writes `{"diagnostics": []}` and says the rest with its
+exit code.
 
 `parse`'s product is the AST and `lower`'s is the block-array IR. A dump is not a report, so a
 failure is not the dump with a hole in it: each writes the same `{"diagnostics": [ ... ]}` document
