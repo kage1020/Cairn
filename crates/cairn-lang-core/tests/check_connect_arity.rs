@@ -19,23 +19,16 @@
 //! which drops it and lays no walkway. The endpoint cases below pin the
 //! diagnostic that keeps that drop from being silent.
 
-use cairn_lang_core::{Diagnostic, DiagnosticCode, Severity, check, lower, parse};
+use cairn_lang_core::{Diagnostic, DiagnosticCode, Severity};
 
-fn diagnose(source: &str) -> Vec<Diagnostic> {
-    let module = parse(source).unwrap_or_else(|e| panic!("parse failed: {e}"));
-    let ir = lower(&module);
-    check(&module, &ir, None)
-}
+mod common;
+use common::{diagnose, slice};
 
 fn arity_only(diagnostics: Vec<Diagnostic>) -> Vec<Diagnostic> {
     diagnostics
         .into_iter()
         .filter(|d| d.code == DiagnosticCode::ConnectArity)
         .collect()
-}
-
-fn slice<'a>(source: &'a str, diag: &Diagnostic) -> &'a str {
-    &source[diag.span.clone()]
 }
 
 const PROLOGUE: &str = "struct hut size=3x3\n  \

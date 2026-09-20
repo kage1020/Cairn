@@ -13,16 +13,10 @@
 //! member's line deleted rather than against a literal, because the claim
 //! is "this member contributed nothing", not "the answer is 5x4x5".
 
-use cairn_lang_core::block_array::{BlockArrayIr, lower_to_block_array};
-use cairn_lang_core::resolve::resolve;
-use cairn_lang_core::{lower, parse};
+use cairn_lang_core::block_array::BlockArrayIr;
 
-fn lower_source(source: &str) -> BlockArrayIr {
-    let module = parse(source).expect("parse");
-    let ir = lower(&module);
-    let resolution = resolve(&ir, None);
-    lower_to_block_array(&ir, &resolution, None)
-}
+mod common;
+use common::lowered;
 
 fn dims_of(out: &BlockArrayIr, key: &str) -> (u32, u32, u32) {
     let built = out
@@ -46,8 +40,8 @@ fn with_and_without(source: &str, line: &str, key: &str) -> ((u32, u32, u32), (u
     );
     let without = source.replace(line, "");
     (
-        dims_of(&lower_source(source), key),
-        dims_of(&lower_source(&without), key),
+        dims_of(&lowered(source), key),
+        dims_of(&lowered(&without), key),
     )
 }
 
@@ -70,9 +64,9 @@ fn a_roof_with_no_kind_does_not_widen_the_footprint() {
         "a roof that draws nothing must not widen the array",
     );
     assert!(
-        codes(&lower_source(&source)).contains(&"W_DEFERRED_MEMBER"),
+        codes(&lowered(&source)).contains(&"W_DEFERRED_MEMBER"),
         "the missing `kind=` is still reported: {:?}",
-        codes(&lower_source(&source)),
+        codes(&lowered(&source)),
     );
 }
 
@@ -84,7 +78,7 @@ fn a_roof_with_no_kind_and_an_unusable_overhang_reports_both_and_widens_nothing(
     let source = format!("{THEME}struct s size=5x5\n  walls mat_slot=wall height=3\n{line}");
     let (with, without) = with_and_without(&source, line, "struct::s");
     assert_eq!(with, without);
-    let out = lower_source(&source);
+    let out = lowered(&source);
     assert!(
         out.diagnostics
             .iter()
@@ -161,7 +155,7 @@ fn a_plate_outside_a_wall_names_the_overhang_a_roof_draws() {
          roof mat_slot=roof overhang=2\n  \
          pressure_plate id=p at=front.outside offset=0 y=1 mat_slot=wall\n"
     );
-    let out = lower_source(&source);
+    let out = lowered(&source);
     let reason = out
         .diagnostics
         .iter()
@@ -193,7 +187,7 @@ fn a_mixed_wall_column_keeps_only_the_courses_that_paint() {
              level id=lower y=1\n    {first}\n  \
              level id=upper y=6\n    {second}\n"
         );
-        let out = lower_source(&source);
+        let out = lowered(&source);
         let (_, y, _) = dims_of(&out, "struct::s");
         let painting_is_lower = first.contains("mat_slot=");
         let expected = if painting_is_lower { 1 + 3 } else { 1 + 8 };
@@ -216,7 +210,7 @@ fn themeless_walls_do_not_raise_the_array() {
     let (with, without) = with_and_without(&source, line, "struct::s");
     assert_eq!(with, without, "walls that paint nothing raise nothing");
     assert!(
-        codes(&lower_source(&source)).contains(&"W_NO_THEME_BOUND"),
+        codes(&lowered(&source)).contains(&"W_NO_THEME_BOUND"),
         "and the themeless scope is still reported",
     );
 }
@@ -262,7 +256,7 @@ fn a_window_in_walls_that_paint_nothing_is_deferred_and_the_array_shrinks() {
     let source = format!("struct s size=5x5\n  walls mat_slot=wall height=4\n{line}");
     let (with, without) = with_and_without(&source, line, "struct::s");
     assert_eq!(with, without, "the window shapes nothing either");
-    let out = lower_source(&source);
+    let out = lowered(&source);
     assert!(
         out.diagnostics
             .iter()
@@ -281,7 +275,7 @@ fn a_window_in_walls_that_paint_nothing_is_deferred_and_the_array_shrinks() {
 #[test]
 fn a_door_in_walls_that_paint_nothing_says_what_is_missing() {
     let source = "struct s size=5x5\n  walls mat_slot=wall height=4\n  door side=front at=center mat_slot=wall\n";
-    let out = lower_source(source);
+    let out = lowered(source);
     let reason = out
         .diagnostics
         .iter()
@@ -310,9 +304,9 @@ fn walls_whose_abstract_token_cannot_be_resolved_do_not_raise_the_array() {
     let (with, without) = with_and_without(&source, line, "struct::s");
     assert_eq!(with, without);
     assert!(
-        codes(&lower_source(&source)).contains(&"W_ABSTRACT_TOKEN_DEFERRED"),
+        codes(&lowered(&source)).contains(&"W_ABSTRACT_TOKEN_DEFERRED"),
         "the deferred token is still reported: {:?}",
-        codes(&lower_source(&source)),
+        codes(&lowered(&source)),
     );
 }
 
@@ -322,16 +316,16 @@ fn walls_whose_abstract_token_cannot_be_resolved_do_not_raise_the_array() {
 #[test]
 fn a_roof_still_draws_over_walls_that_paint_nothing() {
     let source = "struct s size=5x5\n  walls mat_slot=wall height=6\n  roof kind=gable mat_slot=roof overhang=1\n";
-    let with_walls = dims_of(&lower_source(source), "struct::s");
+    let with_walls = dims_of(&lowered(source), "struct::s");
     let without_walls = dims_of(
-        &lower_source(&source.replace("  walls mat_slot=wall height=6\n", "")),
+        &lowered(&source.replace("  walls mat_slot=wall height=6\n", "")),
         "struct::s",
     );
     assert_eq!(
         with_walls, without_walls,
         "the walls contribute nothing, so the roof seats where it would with no walls at all",
     );
-    let out = lower_source(source);
+    let out = lowered(source);
     let built = out.structures.get("struct::s").expect("it lowers");
     assert!(
         built

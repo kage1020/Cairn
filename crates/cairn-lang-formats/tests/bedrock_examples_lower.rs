@@ -11,20 +11,14 @@
 //! failing loud, so `cottage` compiles cleanly and `themed-tower` compiles
 //! with exactly the shape-drop degradation its eave corners incur.
 
-use std::path::PathBuf;
-
 use cairn_lang_core::block_array::{BlockArrayIr, lower_to_block_array};
 use cairn_lang_core::{lower, parse, resolve};
 use cairn_lang_formats::bedrock_structure::build_mcstructure_tag;
 use cairn_lang_formats::data_version::resolve_bedrock_target;
 use cairn_lang_formats::registry::builtin_bedrock;
 
-fn examples_dir() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("..")
-        .join("..")
-        .join("examples")
-}
+mod common;
+use common::examples_dir;
 
 /// Lower an example through the Bedrock materials pack, the same way
 /// `cairn compile --edition bedrock` does.

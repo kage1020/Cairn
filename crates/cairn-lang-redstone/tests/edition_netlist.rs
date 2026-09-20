@@ -9,32 +9,17 @@
 //! parser-unreachable cells (`Xor` / `Nand` / `Nor` / `Mux`), the
 //! `edition` field on the JSON wire form, and empty-scope elision.
 
-use std::path::PathBuf;
-
 use cairn_lang_core::Edition;
 use cairn_lang_core::ast::DottedRef;
 use cairn_lang_core::check::Severity;
-use cairn_lang_core::{lower, parse};
 use cairn_lang_redstone::{
     EditionCell, EditionCellNode, GateKind, GateNode, InputPort, LogicIr, NetRef, OutputPort,
     PortName, ScopeKind, ScopedLogicIr, ScopedLogicIrEntry, SignalRef, compile_edition_netlist,
-    compile_netlist, synthesize,
+    compile_netlist,
 };
 
-fn load_example(name: &str) -> String {
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("..")
-        .join("..")
-        .join("examples")
-        .join(name);
-    std::fs::read_to_string(&path).unwrap_or_else(|err| panic!("read {}: {err}", path.display()))
-}
-
-fn synth_source(source: &str) -> cairn_lang_redstone::SynthOutput {
-    let module = parse(source).expect("parse");
-    let intent = lower(&module);
-    synthesize(&intent)
-}
+mod common;
+use common::{load_example, synth_source};
 
 fn sig(name: &str) -> DottedRef {
     let mut parts = name.split('.').map(str::to_owned);

@@ -15,17 +15,8 @@
 use cairn_lang_core::block_array::TargetRegistry;
 use cairn_lang_formats::registry::{RegistryPack, builtin_bedrock, builtin_java};
 
-/// Every version the pack can build for, as the `--target` strings a user
-/// types. The `targetable` rows only — an ordering row has no block table
-/// and so declares nothing.
-fn supported_versions(pack: &RegistryPack) -> Vec<&str> {
-    pack.data_versions
-        .versions
-        .iter()
-        .filter(|e| e.targetable)
-        .map(|e| e.mc_version.as_str())
-        .collect()
-}
+mod common;
+use common::supported_versions;
 
 /// Whether either built-in pack declares `id` in any version it supports.
 fn known_to_some_edition(id: &str) -> bool {

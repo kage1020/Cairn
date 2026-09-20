@@ -9,19 +9,13 @@
 //! logic-graph signal. Line-number references are intentionally avoided
 //! so the tests survive edits to the fixture.
 
-use std::path::PathBuf;
-
 use cairn_lang_core::block_array::{BlockArrayIr, lower_to_block_array};
 use cairn_lang_core::check::DiagnosticCode;
 use cairn_lang_core::{lower, parse, resolve};
 use cairn_lang_formats::registry::{RegistryPack, builtin_bedrock, builtin_java};
 
-fn examples_dir() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("..")
-        .join("..")
-        .join("examples")
-}
+mod common;
+use common::examples_dir;
 
 fn lower_redstone_door() -> BlockArrayIr {
     lower_redstone_door_with(builtin_java(), &builtin_java().data_versions.latest)

@@ -5,9 +5,10 @@
 //! a subprocess with a deadline to observe. These pin where the bound sits
 //! and that crossing it is reported rather than silently absorbed.
 
-use cairn_lang_core::block_array::{Dims, MAX_STRUCTURE_VOLUME, lower_to_block_array};
-use cairn_lang_core::resolve::resolve;
-use cairn_lang_core::{lower, parse};
+use cairn_lang_core::block_array::{Dims, MAX_STRUCTURE_VOLUME};
+
+mod common;
+use common::lowered;
 
 /// Exactly the bound: a 256-cube.
 const EDGE: u32 = 256;
@@ -58,13 +59,6 @@ fn an_extent_whose_product_overflows_is_refused_rather_than_wrapping() {
     );
 }
 
-fn lower_source(source: &str) -> cairn_lang_core::block_array::BlockArrayIr {
-    let module = parse(source).expect("parse");
-    let ir = lower(&module);
-    let resolution = resolve(&ir, None);
-    lower_to_block_array(&ir, &resolution, None)
-}
-
 const THEME: &str = "theme t:\n  slot wall -> @cobblestone\n\n";
 
 #[test]
@@ -73,7 +67,7 @@ fn a_scope_past_the_bound_is_skipped_and_named() {
     // product is out of reach, which is why no per-key range check catches
     // this and the extent has to be checked where it is derived.
     let source = format!("{THEME}struct huge size=100000x100000\n  walls mat_slot=wall height=3\n");
-    let out = lower_source(&source);
+    let out = lowered(&source);
     assert!(
         !out.structures.contains_key("struct::huge"),
         "a scope that cannot be allocated must not appear in the IR",
@@ -111,7 +105,7 @@ fn an_ordinary_scope_is_untouched_by_the_bound() {
     // is four orders of magnitude inside the bound and still far larger
     // than any shipped example.
     let source = format!("{THEME}struct roomy size=64x64\n  walls mat_slot=wall height=64\n");
-    let out = lower_source(&source);
+    let out = lowered(&source);
     let built = out
         .structures
         .get("struct::roomy")
@@ -134,7 +128,7 @@ fn an_out_of_range_overhang_is_reported_rather_than_shrinking_the_roof() {
         "{THEME}struct t size=9x7\n  walls mat_slot=wall height=3\n\
          \x20\x20roof kind=flat mat_slot=wall overhang=4294967296\n"
     );
-    let out = lower_source(&source);
+    let out = lowered(&source);
     assert!(
         out.diagnostics.iter().any(|d| {
             d.code.as_str() == "W_IGNORED_ARGUMENT" && d.primary.contains("overhang=")
@@ -153,7 +147,7 @@ fn an_out_of_range_height_is_reported_rather_than_saturating() {
     // `2^33`, which is the outcome `nonneg_int`'s own doc gives as the
     // reason it refuses instead of clamping.
     let source = format!("{THEME}struct t size=3x3\n  walls mat_slot=wall height=5000000000\n");
-    let out = lower_source(&source);
+    let out = lowered(&source);
     assert!(
         out.diagnostics
             .iter()

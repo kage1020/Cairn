@@ -23,17 +23,10 @@
 //!   binding. Which of two *overlapping* rows wins is the cascade, and the
 //!   cascade is source order by design; only a coincidence is a duplicate.
 
-use cairn_lang_core::{Diagnostic, DiagnosticCode, Severity, check, lower, parse};
+use cairn_lang_core::{Diagnostic, DiagnosticCode, Severity};
 
-fn diagnose(source: &str) -> Vec<Diagnostic> {
-    let module = parse(source).unwrap_or_else(|e| panic!("parse failed: {e}\nsource:\n{source}"));
-    let ir = lower(&module);
-    check(&module, &ir, None)
-}
-
-fn codes(source: &str) -> Vec<&'static str> {
-    diagnose(source).iter().map(|d| d.code.as_str()).collect()
-}
+mod common;
+use common::{codes, diagnose, exactly_one, notes};
 
 fn selector_only(source: &str) -> Vec<Diagnostic> {
     diagnose(source)
@@ -43,13 +36,7 @@ fn selector_only(source: &str) -> Vec<Diagnostic> {
 }
 
 fn one(source: &str) -> Diagnostic {
-    let mut found = selector_only(source);
-    assert_eq!(found.len(), 1, "expected one finding, got {found:#?}");
-    found.remove(0)
-}
-
-fn notes(diag: &Diagnostic) -> Vec<&str> {
-    diag.notes.iter().map(|n| n.message.as_str()).collect()
+    exactly_one(selector_only(source))
 }
 
 /// The selector rows are the variable; the struct below them carries one

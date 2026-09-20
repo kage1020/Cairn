@@ -6,30 +6,15 @@
 //! the parser-unreachable `Mux`), the topological invariant carried
 //! across from the Logic IR, and empty-scope elision.
 
-use std::path::PathBuf;
-
 use cairn_lang_core::ast::DottedRef;
 use cairn_lang_core::check::Severity;
-use cairn_lang_core::{lower, parse};
 use cairn_lang_redstone::{
     CellNode, GateKind, GateNode, InputPort, LogicIr, LogicalCell, NetRef, OutputPort, PortName,
-    ScopeKind, ScopedLogicIr, ScopedLogicIrEntry, SignalRef, compile_netlist, synthesize,
+    ScopeKind, ScopedLogicIr, ScopedLogicIrEntry, SignalRef, compile_netlist,
 };
 
-fn load_example(name: &str) -> String {
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("..")
-        .join("..")
-        .join("examples")
-        .join(name);
-    std::fs::read_to_string(&path).unwrap_or_else(|err| panic!("read {}: {err}", path.display()))
-}
-
-fn synth_source(source: &str) -> cairn_lang_redstone::SynthOutput {
-    let module = parse(source).expect("parse");
-    let intent = lower(&module);
-    synthesize(&intent)
-}
+mod common;
+use common::{load_example, synth_source};
 
 fn find_cell_port(cell: &CellNode, port: PortName) -> NetRef {
     cell.drivers

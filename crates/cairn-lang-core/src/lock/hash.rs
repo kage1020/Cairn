@@ -167,3 +167,17 @@ pub fn hash_resolved_ir(ir: &BlockArrayIr) -> Result<HashHex, HashError> {
     let bytes = serde_json::to_vec(ir)?;
     Ok(HashHex::from_bytes(&bytes))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::HashHex;
+
+    #[test]
+    fn zero_is_the_prefix_and_sixty_four_hex_zeros() {
+        assert_eq!(HashHex::ZERO_STR, format!("sha256:{}", "0".repeat(64)));
+        assert_eq!(
+            HashHex::parse(HashHex::ZERO_STR).expect("the zero hash parses"),
+            HashHex::zero(),
+        );
+    }
+}

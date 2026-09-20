@@ -19,6 +19,9 @@ use cairn_lang_core::resolve::{
 };
 use cairn_lang_core::{Edition, check, lower, parse};
 
+mod common;
+use common::codes;
+
 /// `(version, origin)` for every floor a build of `edition` is held to.
 fn floors(source: &str, edition: Edition) -> Vec<(String, FloorOrigin)> {
     render(declared_version_floors(
@@ -38,16 +41,6 @@ fn render(floors: Vec<VersionFloor>) -> Vec<(String, FloorOrigin)> {
     floors
         .into_iter()
         .map(|floor| (floor.version, floor.origin))
-        .collect()
-}
-
-/// Diagnostic codes `cairn check` reports for a source.
-fn codes(source: &str) -> Vec<&'static str> {
-    let module = parse(source).expect("the fixtures all parse");
-    let ir = lower(&module);
-    check(&module, &ir, None)
-        .iter()
-        .map(|d| d.code.as_str())
         .collect()
 }
 

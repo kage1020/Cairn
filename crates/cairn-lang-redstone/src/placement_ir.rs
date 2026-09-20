@@ -41,7 +41,7 @@ use cairn_lang_core::Edition;
 use cairn_lang_core::ast::DottedRef;
 use cairn_lang_core::error::Span;
 use indexmap::IndexMap;
-use serde::ser::{SerializeMap, SerializeStruct};
+use serde::ser::SerializeStruct;
 use serde::{Serialize, Serializer};
 
 use crate::edition_netlist_ir::EditionCell;
@@ -555,7 +555,7 @@ impl PlacementPhase {
     /// a caller-side bug.
     #[track_caller]
     pub fn route(&mut self, wire_length: u32) {
-        self.route_inner(wire_length, None);
+        or_panic(self.try_route(wire_length), None);
     }
 
     /// [`Self::Unrouted`] → [`Self::Routed`], naming `context` in the
@@ -563,8 +563,7 @@ impl PlacementPhase {
     ///
     /// `#[track_caller]` alone puts the calling `.rs:line` in the
     /// backtrace but says nothing about *which* cell tripped the
-    /// guard, leaving the operator to walk back from the backtrace
-    /// into the IR. Pipeline passes pass a [`CellIdentity`]; any
+    /// guard. Pipeline passes pass a [`CellIdentity`]; any
     /// [`fmt::Display`] works.
     ///
     /// # Panics
@@ -572,7 +571,7 @@ impl PlacementPhase {
     /// Panics under exactly the conditions [`Self::route`] does.
     #[track_caller]
     pub fn route_at(&mut self, wire_length: u32, context: impl fmt::Display) {
-        self.route_inner(wire_length, Some(&context));
+        or_panic(self.try_route(wire_length), Some(&context));
     }
 
     /// [`Self::Unrouted`] → [`Self::Routed`], refusing an out-of-order
@@ -613,16 +612,6 @@ impl PlacementPhase {
         }
     }
 
-    /// The panicking forms are [`Self::try_route`] plus a panic, so the
-    /// guard itself is stated once and the two forms cannot disagree
-    /// about which transitions are legal.
-    #[track_caller]
-    fn route_inner(&mut self, wire_length: u32, context: Option<&dyn fmt::Display>) {
-        if let Err(error) = self.try_route(wire_length) {
-            transition_panic(&error, context);
-        }
-    }
-
     /// [`Self::Routed`] → [`Self::Delayed`].
     ///
     /// Carries no caller context — see [`Self::delay_at`] for the form
@@ -637,19 +626,18 @@ impl PlacementPhase {
     /// mirror.
     #[track_caller]
     pub fn delay(&mut self, local_delay_ticks: u32) {
-        self.delay_inner(local_delay_ticks, None);
+        or_panic(self.try_delay(local_delay_ticks), None);
     }
 
     /// [`Self::Routed`] → [`Self::Delayed`], naming `context` in the
-    /// panic an out-of-order call raises. See [`Self::route_at`] for
-    /// why the context is worth carrying.
+    /// panic an out-of-order call raises, as [`Self::route_at`] does.
     ///
     /// # Panics
     ///
     /// Panics under exactly the conditions [`Self::delay`] does.
     #[track_caller]
     pub fn delay_at(&mut self, local_delay_ticks: u32, context: impl fmt::Display) {
-        self.delay_inner(local_delay_ticks, Some(&context));
+        or_panic(self.try_delay(local_delay_ticks), Some(&context));
     }
 
     /// [`Self::Routed`] → [`Self::Delayed`], refusing an out-of-order
@@ -681,14 +669,6 @@ impl PlacementPhase {
         Ok(())
     }
 
-    /// See [`Self::route_inner`] for why the panicking forms delegate.
-    #[track_caller]
-    fn delay_inner(&mut self, local_delay_ticks: u32, context: Option<&dyn fmt::Display>) {
-        if let Err(error) = self.try_delay(local_delay_ticks) {
-            transition_panic(&error, context);
-        }
-    }
-
     /// [`Self::Delayed`] → [`Self::Legalized`].
     ///
     /// Carries no caller context — see [`Self::legalize_at`] for the
@@ -704,19 +684,18 @@ impl PlacementPhase {
     /// See [`Self::try_legalize`] for the fallible mirror.
     #[track_caller]
     pub fn legalize(&mut self, buffer_coords: Vec<BufferCoord>) {
-        self.legalize_inner(buffer_coords, None);
+        or_panic(self.try_legalize(buffer_coords), None);
     }
 
     /// [`Self::Delayed`] → [`Self::Legalized`], naming `context` in the
-    /// panic an out-of-order call raises. See [`Self::route_at`] for
-    /// why the context is worth carrying.
+    /// panic an out-of-order call raises, as [`Self::route_at`] does.
     ///
     /// # Panics
     ///
     /// Panics under exactly the conditions [`Self::legalize`] does.
     #[track_caller]
     pub fn legalize_at(&mut self, buffer_coords: Vec<BufferCoord>, context: impl fmt::Display) {
-        self.legalize_inner(buffer_coords, Some(&context));
+        or_panic(self.try_legalize(buffer_coords), Some(&context));
     }
 
     /// [`Self::Delayed`] → [`Self::Legalized`], refusing an
@@ -757,17 +736,15 @@ impl PlacementPhase {
         };
         Ok(())
     }
+}
 
-    /// See [`Self::route_inner`] for why the panicking forms delegate.
-    #[track_caller]
-    fn legalize_inner(
-        &mut self,
-        buffer_coords: Vec<BufferCoord>,
-        context: Option<&dyn fmt::Display>,
-    ) {
-        if let Err(error) = self.try_legalize(buffer_coords) {
-            transition_panic(&error, context);
-        }
+/// The panicking transition forms are their `try_*` mirror plus this,
+/// so the guard itself is stated once and the two forms cannot disagree
+/// about which transitions are legal.
+#[track_caller]
+fn or_panic(result: Result<(), PlacementPhaseTransitionError>, context: Option<&dyn fmt::Display>) {
+    if let Err(error) = result {
+        transition_panic(&error, context);
     }
 }
 
@@ -1127,95 +1104,130 @@ pub struct PlacedCellNode {
     pub span: Span,
 }
 
+/// The read-only projections of a placed node's [`PlacementPhase`],
+/// spelled once for the two node types that carry one.
+macro_rules! phase_projections {
+    ($subject:literal, $wire_length:literal) => {
+        #[doc = $wire_length]
+        /// See [`PlacementPhase::wire_length`].
+        #[must_use]
+        pub const fn wire_length(&self) -> Option<u32> {
+            self.phase.wire_length()
+        }
+
+        /// Local delay ticks once delay insertion has run. See
+        /// [`PlacementPhase::local_delay_ticks`].
+        #[must_use]
+        pub const fn local_delay_ticks(&self) -> Option<u32> {
+            self.phase.local_delay_ticks()
+        }
+
+        /// Buffer coordinates once crossing legalization has run. See
+        /// [`PlacementPhase::buffer_coords`].
+        #[must_use]
+        pub fn buffer_coords(&self) -> &[BufferCoord] {
+            self.phase.buffer_coords()
+        }
+
+        #[doc = concat!("Which pass last wrote to this ", $subject, ". See")]
+        /// [`PlacementPhase::stage`].
+        #[must_use]
+        pub const fn stage(&self) -> PlacementStage {
+            self.phase.stage()
+        }
+    };
+}
+
 impl PlacedCellNode {
-    /// Wire length once routing has run. See
-    /// [`PlacementPhase::wire_length`].
-    #[must_use]
-    pub const fn wire_length(&self) -> Option<u32> {
-        self.phase.wire_length()
+    phase_projections!("cell", "Wire length once routing has run.");
+}
+
+/// The flat wire form both placed node types share: `stage` first, so a
+/// truncated or eyeballed dump still says which pass produced it, then
+/// the node's own `identity_fields` (written by `identity`), then the
+/// phase's fields as far as the pipeline has filled them.
+///
+/// Hand-written rather than derived because the derived form would tag
+/// the phase enum and reshape the flat form the integration tests lock
+/// byte-for-byte. Binary formats (bincode, postcard, msgpack) rely on the
+/// announced field count being exact, so every write goes through a
+/// [`CountedFields`] and the count is checked against it before `end`;
+/// a new visible field on either node type, or a Stage-5 variant whose
+/// payload the JSON must expose, is added here and given a
+/// [`PlacementStage`] variant.
+fn serialize_phased<S: Serializer>(
+    serializer: S,
+    name: &'static str,
+    phase: &PlacementPhase,
+    identity_fields: usize,
+    identity: impl FnOnce(&mut CountedFields<S::SerializeStruct>) -> Result<(), S::Error>,
+) -> Result<S::Ok, S::Error> {
+    let wire_length = phase.wire_length();
+    let local_delay_ticks = phase.local_delay_ticks();
+    let buffer_coords = phase.buffer_coords();
+    let field_count = 1
+        + identity_fields
+        + usize::from(wire_length.is_some())
+        + usize::from(local_delay_ticks.is_some())
+        + usize::from(!buffer_coords.is_empty());
+
+    let mut state = CountedFields {
+        inner: serializer.serialize_struct(name, field_count)?,
+        written: 0,
+    };
+    state.serialize_field("stage", &phase.stage())?;
+    identity(&mut state)?;
+    if let Some(wl) = wire_length {
+        state.serialize_field("wire_length", &wl)?;
+    }
+    if let Some(dt) = local_delay_ticks {
+        state.serialize_field("local_delay_ticks", &dt)?;
+    }
+    if !buffer_coords.is_empty() {
+        state.serialize_field("buffer_coords", buffer_coords)?;
+    }
+    debug_assert_eq!(
+        state.written, field_count,
+        "{name}: announced field_count ({field_count}) diverges from the serialize_field \
+         call count ({}); binary formats such as bincode / postcard would produce \
+         malformed output",
+        state.written,
+    );
+    state.end()
+}
+
+/// A [`SerializeStruct`] that counts the fields written through it, so
+/// [`serialize_phased`] can hold the announced field count to the writes.
+struct CountedFields<T> {
+    inner: T,
+    written: usize,
+}
+
+impl<T: SerializeStruct> SerializeStruct for CountedFields<T> {
+    type Ok = T::Ok;
+    type Error = T::Error;
+
+    fn serialize_field<V: ?Sized + Serialize>(
+        &mut self,
+        key: &'static str,
+        value: &V,
+    ) -> Result<(), T::Error> {
+        self.written += 1;
+        self.inner.serialize_field(key, value)
     }
 
-    /// Local delay ticks once delay insertion has run. See
-    /// [`PlacementPhase::local_delay_ticks`].
-    #[must_use]
-    pub const fn local_delay_ticks(&self) -> Option<u32> {
-        self.phase.local_delay_ticks()
-    }
-
-    /// Buffer coordinates once crossing legalization has run. See
-    /// [`PlacementPhase::buffer_coords`].
-    #[must_use]
-    pub fn buffer_coords(&self) -> &[BufferCoord] {
-        self.phase.buffer_coords()
-    }
-
-    /// Which pass last wrote to this cell. See
-    /// [`PlacementPhase::stage`].
-    #[must_use]
-    pub const fn stage(&self) -> PlacementStage {
-        self.phase.stage()
+    fn end(self) -> Result<T::Ok, T::Error> {
+        self.inner.end()
     }
 }
 
-// If [`PlacedCellNode`] grows a new visible field — or [`PlacementPhase`]
-// gains a Stage-5 variant whose payload the JSON must expose — add it to
-// both the field-count tally and the `serialize_field` calls below, and
-// give the new stage a [`PlacementStage`] variant so the `stage` tag
-// keeps naming the pass that produced the dump.
-// `serde_json` tolerates a field-count mismatch, but binary formats
-// (bincode, postcard, msgpack) rely on the announced count being exact;
-// the `debug_assert_eq!` at the end catches a divergence in tests. Do not
-// `#[derive(Serialize)]` this type — the derived output would tag the
-// enum variant and reshape the flat wire form locked in by
-// `routing_leaves_placement_fields_byte_identical_apart_from_wire_length_and_stage`
-// et al.
 impl Serialize for PlacedCellNode {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        let wire_length = self.wire_length();
-        let local_delay_ticks = self.local_delay_ticks();
-        let buffer_coords = self.buffer_coords();
-
-        let mut field_count = 4; // stage, cell, drivers, coord
-        if wire_length.is_some() {
-            field_count += 1;
-        }
-        if local_delay_ticks.is_some() {
-            field_count += 1;
-        }
-        if !buffer_coords.is_empty() {
-            field_count += 1;
-        }
-
-        let mut state = serializer.serialize_struct("PlacedCellNode", field_count)?;
-        let mut written = 0_usize;
-        // First so a truncated or eyeballed dump still says which pass
-        // produced it, and so the tag reads ahead of the values it
-        // qualifies.
-        state.serialize_field("stage", &self.stage())?;
-        written += 1;
-        state.serialize_field("cell", &self.cell)?;
-        written += 1;
-        state.serialize_field("drivers", &self.drivers)?;
-        written += 1;
-        state.serialize_field("coord", &self.coord)?;
-        written += 1;
-        if let Some(wl) = wire_length {
-            state.serialize_field("wire_length", &wl)?;
-            written += 1;
-        }
-        if let Some(dt) = local_delay_ticks {
-            state.serialize_field("local_delay_ticks", &dt)?;
-            written += 1;
-        }
-        if !buffer_coords.is_empty() {
-            state.serialize_field("buffer_coords", buffer_coords)?;
-            written += 1;
-        }
-        debug_assert_eq!(
-            written, field_count,
-            "PlacedCellNode Serialize: announced field_count ({field_count}) diverges from serialize_field call count ({written}); binary formats such as bincode / postcard would produce malformed output",
-        );
-        state.end()
+        serialize_phased(serializer, "PlacedCellNode", &self.phase, 3, |state| {
+            state.serialize_field("cell", &self.cell)?;
+            state.serialize_field("drivers", &self.drivers)?;
+            state.serialize_field("coord", &self.coord)
+        })
     }
 }
 
@@ -1281,84 +1293,19 @@ impl PlacedOutputNode {
         }
     }
 
-    /// Routed length of the segment from this output's driver to its
-    /// pad, once routing has run. See [`PlacementPhase::wire_length`].
-    #[must_use]
-    pub const fn wire_length(&self) -> Option<u32> {
-        self.phase.wire_length()
-    }
-
-    /// Ticks the buffer repeaters on this output's segment add, once
-    /// delay insertion has run. See [`PlacementPhase::local_delay_ticks`].
-    #[must_use]
-    pub const fn local_delay_ticks(&self) -> Option<u32> {
-        self.phase.local_delay_ticks()
-    }
-
-    /// Buffer coordinates once crossing legalization has run. See
-    /// [`PlacementPhase::buffer_coords`].
-    #[must_use]
-    pub fn buffer_coords(&self) -> &[BufferCoord] {
-        self.phase.buffer_coords()
-    }
-
-    /// Which pass last wrote to this output. See
-    /// [`PlacementPhase::stage`].
-    #[must_use]
-    pub const fn stage(&self) -> PlacementStage {
-        self.phase.stage()
-    }
+    phase_projections!(
+        "output",
+        "Routed length of the segment from this output's driver to its pad, once routing has run."
+    );
 }
 
-// Hand-written for the same reasons [`PlacedCellNode`]'s is: the derived
-// form would tag the phase enum and reshape the flat wire form, and
-// binary formats rely on the announced field count being exact. Keep the
-// two impls in step — a consumer reading a dump should not have to learn
-// two shapes for "the same stage wrote this".
 impl Serialize for PlacedOutputNode {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        let wire_length = self.wire_length();
-        let local_delay_ticks = self.local_delay_ticks();
-        let buffer_coords = self.buffer_coords();
-
-        let mut field_count = 4; // stage, name, driver, pad
-        if wire_length.is_some() {
-            field_count += 1;
-        }
-        if local_delay_ticks.is_some() {
-            field_count += 1;
-        }
-        if !buffer_coords.is_empty() {
-            field_count += 1;
-        }
-
-        let mut state = serializer.serialize_struct("PlacedOutputNode", field_count)?;
-        let mut written = 0_usize;
-        state.serialize_field("stage", &self.stage())?;
-        written += 1;
-        state.serialize_field("name", &self.name)?;
-        written += 1;
-        state.serialize_field("driver", &self.driver)?;
-        written += 1;
-        state.serialize_field("pad", &self.pad)?;
-        written += 1;
-        if let Some(wl) = wire_length {
-            state.serialize_field("wire_length", &wl)?;
-            written += 1;
-        }
-        if let Some(dt) = local_delay_ticks {
-            state.serialize_field("local_delay_ticks", &dt)?;
-            written += 1;
-        }
-        if !buffer_coords.is_empty() {
-            state.serialize_field("buffer_coords", buffer_coords)?;
-            written += 1;
-        }
-        debug_assert_eq!(
-            written, field_count,
-            "PlacedOutputNode Serialize: announced field_count ({field_count}) diverges from serialize_field call count ({written}); binary formats such as bincode / postcard would produce malformed output",
-        );
-        state.end()
+        serialize_phased(serializer, "PlacedOutputNode", &self.phase, 3, |state| {
+            state.serialize_field("name", &self.name)?;
+            state.serialize_field("driver", &self.driver)?;
+            state.serialize_field("pad", &self.pad)
+        })
     }
 }
 
@@ -1404,20 +1351,9 @@ pub struct PlacementIr {
     /// IR in the pipeline.
     #[serde(
         skip_serializing_if = "IndexMap::is_empty",
-        serialize_with = "serialize_signal_defs"
+        serialize_with = "crate::logic_ir::serialize_signal_defs"
     )]
     pub signal_defs: IndexMap<DottedRef, NetRef>,
-}
-
-fn serialize_signal_defs<S: Serializer>(
-    defs: &IndexMap<DottedRef, NetRef>,
-    serializer: S,
-) -> Result<S::Ok, S::Error> {
-    let mut map = serializer.serialize_map(Some(defs.len()))?;
-    for (name, net) in defs {
-        map.serialize_entry(&name.to_string(), net)?;
-    }
-    map.end()
 }
 
 impl PlacementIr {

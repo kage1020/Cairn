@@ -2,10 +2,12 @@
 
 use std::fs;
 use std::path::PathBuf;
-use std::process::Command;
 
 use cairn_lang_core::lock::{HashHex, LockEdition, Lockfile};
 use tempfile::TempDir;
+
+mod common;
+use common::{cairn, crn_examples, example_in_tempdir, examples_dir};
 
 /// The version cargo derived for this crate from `[workspace.package]`.
 ///
@@ -15,49 +17,22 @@ use tempfile::TempDir;
 /// already wrote.
 const WORKSPACE_VERSION: &str = env!("CARGO_PKG_VERSION");
 
-fn cargo_bin() -> PathBuf {
-    PathBuf::from(env!("CARGO_BIN_EXE_cairn"))
-}
-
-fn examples_dir() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("..")
-        .join("..")
-        .join("examples")
-}
-
-fn run_compile(args: &[&str]) -> std::process::Output {
-    Command::new(cargo_bin())
-        .arg("compile")
-        .args(args)
-        .output()
-        .expect("failed to invoke cairn binary")
-}
-
-/// Copy `examples/cottage.crn` into a fresh temp dir so a test can rely on
-/// the source's parent being writable and avoid polluting the repo with
-/// lock artefacts.
-fn cottage_in_tempdir() -> (TempDir, PathBuf) {
-    let tmp = TempDir::new().expect("tempdir");
-    let src = examples_dir().join("cottage.crn");
-    let dst = tmp.path().join("cottage.crn");
-    fs::copy(&src, &dst).expect("copy cottage");
-    (tmp, dst)
-}
-
 #[test]
 fn c1_compile_cottage_with_explicit_target_exits_zero() {
-    let (_tmp_src, src) = cottage_in_tempdir();
+    let (_tmp_src, src) = example_in_tempdir("cottage.crn");
     let out_dir = TempDir::new().expect("out tempdir");
-    let result = run_compile(&[
-        src.to_str().unwrap(),
-        "--edition",
-        "java",
-        "--target",
-        "1.21.4",
-        "--out",
-        out_dir.path().to_str().unwrap(),
-    ]);
+    let result = cairn(
+        "compile",
+        &[
+            src.to_str().unwrap(),
+            "--edition",
+            "java",
+            "--target",
+            "1.21.4",
+            "--out",
+            out_dir.path().to_str().unwrap(),
+        ],
+    );
     assert!(
         result.status.success(),
         "stderr={}",
@@ -67,15 +42,18 @@ fn c1_compile_cottage_with_explicit_target_exits_zero() {
 
 #[test]
 fn c2_compile_writes_named_nbt_into_out_dir() {
-    let (_tmp_src, src) = cottage_in_tempdir();
+    let (_tmp_src, src) = example_in_tempdir("cottage.crn");
     let out_dir = TempDir::new().expect("out tempdir");
-    let result = run_compile(&[
-        src.to_str().unwrap(),
-        "--edition",
-        "java",
-        "--out",
-        out_dir.path().to_str().unwrap(),
-    ]);
+    let result = cairn(
+        "compile",
+        &[
+            src.to_str().unwrap(),
+            "--edition",
+            "java",
+            "--out",
+            out_dir.path().to_str().unwrap(),
+        ],
+    );
     assert!(result.status.success());
     let written = out_dir.path().join("cottage.nbt");
     assert!(written.exists(), "expected {} to exist", written.display());
@@ -83,15 +61,18 @@ fn c2_compile_writes_named_nbt_into_out_dir() {
 
 #[test]
 fn c3_compiled_nbt_begins_with_gzip_magic() {
-    let (_tmp_src, src) = cottage_in_tempdir();
+    let (_tmp_src, src) = example_in_tempdir("cottage.crn");
     let out_dir = TempDir::new().expect("out tempdir");
-    let result = run_compile(&[
-        src.to_str().unwrap(),
-        "--edition",
-        "java",
-        "--out",
-        out_dir.path().to_str().unwrap(),
-    ]);
+    let result = cairn(
+        "compile",
+        &[
+            src.to_str().unwrap(),
+            "--edition",
+            "java",
+            "--out",
+            out_dir.path().to_str().unwrap(),
+        ],
+    );
     assert!(result.status.success());
     let bytes = fs::read(out_dir.path().join("cottage.nbt")).expect("read nbt");
     assert!(bytes.len() >= 2);
@@ -100,15 +81,18 @@ fn c3_compiled_nbt_begins_with_gzip_magic() {
 
 #[test]
 fn c4_default_lock_is_written_beside_source() {
-    let (_tmp_src, src) = cottage_in_tempdir();
+    let (_tmp_src, src) = example_in_tempdir("cottage.crn");
     let out_dir = TempDir::new().expect("out tempdir");
-    let result = run_compile(&[
-        src.to_str().unwrap(),
-        "--edition",
-        "java",
-        "--out",
-        out_dir.path().to_str().unwrap(),
-    ]);
+    let result = cairn(
+        "compile",
+        &[
+            src.to_str().unwrap(),
+            "--edition",
+            "java",
+            "--out",
+            out_dir.path().to_str().unwrap(),
+        ],
+    );
     assert!(result.status.success());
     let mut expected_lock = src.as_os_str().to_owned();
     expected_lock.push(".lock");
@@ -121,36 +105,42 @@ fn c4_default_lock_is_written_beside_source() {
 
 #[test]
 fn c5_explicit_lock_path_is_honored() {
-    let (_tmp_src, src) = cottage_in_tempdir();
+    let (_tmp_src, src) = example_in_tempdir("cottage.crn");
     let out_dir = TempDir::new().expect("out tempdir");
     let lock_path = out_dir.path().join("explicit.lock");
-    let result = run_compile(&[
-        src.to_str().unwrap(),
-        "--edition",
-        "java",
-        "--out",
-        out_dir.path().to_str().unwrap(),
-        "--lock",
-        lock_path.to_str().unwrap(),
-    ]);
+    let result = cairn(
+        "compile",
+        &[
+            src.to_str().unwrap(),
+            "--edition",
+            "java",
+            "--out",
+            out_dir.path().to_str().unwrap(),
+            "--lock",
+            lock_path.to_str().unwrap(),
+        ],
+    );
     assert!(result.status.success());
     assert!(lock_path.exists(), "lockfile at explicit path");
 }
 
 #[test]
 fn c6_lockfile_records_cairn_version() {
-    let (_tmp_src, src) = cottage_in_tempdir();
+    let (_tmp_src, src) = example_in_tempdir("cottage.crn");
     let out_dir = TempDir::new().expect("out tempdir");
     let lock_path = out_dir.path().join("c6.lock");
-    let result = run_compile(&[
-        src.to_str().unwrap(),
-        "--edition",
-        "java",
-        "--out",
-        out_dir.path().to_str().unwrap(),
-        "--lock",
-        lock_path.to_str().unwrap(),
-    ]);
+    let result = cairn(
+        "compile",
+        &[
+            src.to_str().unwrap(),
+            "--edition",
+            "java",
+            "--out",
+            out_dir.path().to_str().unwrap(),
+            "--lock",
+            lock_path.to_str().unwrap(),
+        ],
+    );
     assert!(result.status.success());
     let lf = Lockfile::read_from_path(&lock_path).expect("read lock");
     assert_eq!(lf.cairn_version, WORKSPACE_VERSION);
@@ -158,20 +148,23 @@ fn c6_lockfile_records_cairn_version() {
 
 #[test]
 fn c7_lockfile_records_target_triple() {
-    let (_tmp_src, src) = cottage_in_tempdir();
+    let (_tmp_src, src) = example_in_tempdir("cottage.crn");
     let out_dir = TempDir::new().expect("out tempdir");
     let lock_path = out_dir.path().join("c7.lock");
-    let result = run_compile(&[
-        src.to_str().unwrap(),
-        "--edition",
-        "java",
-        "--target",
-        "1.21.4",
-        "--out",
-        out_dir.path().to_str().unwrap(),
-        "--lock",
-        lock_path.to_str().unwrap(),
-    ]);
+    let result = cairn(
+        "compile",
+        &[
+            src.to_str().unwrap(),
+            "--edition",
+            "java",
+            "--target",
+            "1.21.4",
+            "--out",
+            out_dir.path().to_str().unwrap(),
+            "--lock",
+            lock_path.to_str().unwrap(),
+        ],
+    );
     assert!(result.status.success());
     let lf = Lockfile::read_from_path(&lock_path).expect("read lock");
     assert_eq!(lf.target.edition, LockEdition::Java);
@@ -189,13 +182,16 @@ fn c8_bedrock_compiles_stateless_example_to_mcstructure() {
     let dst = tmp.path().join("roof-flat.crn");
     fs::copy(examples_dir().join("roof-flat.crn"), &dst).expect("copy roof-flat");
     let out_dir = TempDir::new().expect("out tempdir");
-    let result = run_compile(&[
-        dst.to_str().unwrap(),
-        "--edition",
-        "bedrock",
-        "--out",
-        out_dir.path().to_str().unwrap(),
-    ]);
+    let result = cairn(
+        "compile",
+        &[
+            dst.to_str().unwrap(),
+            "--edition",
+            "bedrock",
+            "--out",
+            out_dir.path().to_str().unwrap(),
+        ],
+    );
     let stderr = String::from_utf8(result.stderr).expect("utf-8");
     assert!(
         result.status.success(),
@@ -219,13 +215,16 @@ fn c8b_bedrock_mcstructure_is_uncompressed_little_endian() {
     let dst = tmp.path().join("roof-flat.crn");
     fs::copy(examples_dir().join("roof-flat.crn"), &dst).expect("copy roof-flat");
     let out_dir = TempDir::new().expect("out tempdir");
-    let result = run_compile(&[
-        dst.to_str().unwrap(),
-        "--edition",
-        "bedrock",
-        "--out",
-        out_dir.path().to_str().unwrap(),
-    ]);
+    let result = cairn(
+        "compile",
+        &[
+            dst.to_str().unwrap(),
+            "--edition",
+            "bedrock",
+            "--out",
+            out_dir.path().to_str().unwrap(),
+        ],
+    );
     assert!(result.status.success());
     let bytes = fs::read(out_dir.path().join("roof_flat.mcstructure")).expect("read mcstructure");
     assert!(bytes.len() >= 3);
@@ -240,17 +239,20 @@ fn c8c_bedrock_lockfile_records_bedrock_target_and_pack_hash() {
     fs::copy(examples_dir().join("roof-flat.crn"), &dst).expect("copy roof-flat");
     let out_dir = TempDir::new().expect("out tempdir");
     let lock_path = out_dir.path().join("c8c.lock");
-    let result = run_compile(&[
-        dst.to_str().unwrap(),
-        "--edition",
-        "bedrock",
-        "--target",
-        "1.21.60",
-        "--out",
-        out_dir.path().to_str().unwrap(),
-        "--lock",
-        lock_path.to_str().unwrap(),
-    ]);
+    let result = cairn(
+        "compile",
+        &[
+            dst.to_str().unwrap(),
+            "--edition",
+            "bedrock",
+            "--target",
+            "1.21.60",
+            "--out",
+            out_dir.path().to_str().unwrap(),
+            "--lock",
+            lock_path.to_str().unwrap(),
+        ],
+    );
     assert!(
         result.status.success(),
         "stderr={}",
@@ -278,13 +280,16 @@ fn c8d_bedrock_cottage_maps_stair_states_without_degradation() {
     let dst = tmp.path().join("cottage.crn");
     fs::copy(examples_dir().join("cottage.crn"), &dst).expect("copy cottage");
     let out_dir = TempDir::new().expect("out tempdir");
-    let result = run_compile(&[
-        dst.to_str().unwrap(),
-        "--edition",
-        "bedrock",
-        "--out",
-        out_dir.path().to_str().unwrap(),
-    ]);
+    let result = cairn(
+        "compile",
+        &[
+            dst.to_str().unwrap(),
+            "--edition",
+            "bedrock",
+            "--out",
+            out_dir.path().to_str().unwrap(),
+        ],
+    );
     let stderr = String::from_utf8(result.stderr).expect("utf-8");
     assert!(
         result.status.success(),
@@ -311,13 +316,16 @@ fn c8f_bedrock_themed_tower_degrades_stair_shape_but_compiles() {
     let dst = tmp.path().join("themed-tower.crn");
     fs::copy(examples_dir().join("themed-tower.crn"), &dst).expect("copy themed-tower");
     let out_dir = TempDir::new().expect("out tempdir");
-    let result = run_compile(&[
-        dst.to_str().unwrap(),
-        "--edition",
-        "bedrock",
-        "--out",
-        out_dir.path().to_str().unwrap(),
-    ]);
+    let result = cairn(
+        "compile",
+        &[
+            dst.to_str().unwrap(),
+            "--edition",
+            "bedrock",
+            "--out",
+            out_dir.path().to_str().unwrap(),
+        ],
+    );
     let stderr = String::from_utf8(result.stderr).expect("utf-8");
     assert!(
         result.status.success(),
@@ -339,15 +347,18 @@ fn c8e_bedrock_unknown_target_names_bedrock_versions() {
     let dst = tmp.path().join("roof-flat.crn");
     fs::copy(examples_dir().join("roof-flat.crn"), &dst).expect("copy roof-flat");
     let out_dir = TempDir::new().expect("out tempdir");
-    let result = run_compile(&[
-        dst.to_str().unwrap(),
-        "--edition",
-        "bedrock",
-        "--target",
-        "1.21.61",
-        "--out",
-        out_dir.path().to_str().unwrap(),
-    ]);
+    let result = cairn(
+        "compile",
+        &[
+            dst.to_str().unwrap(),
+            "--edition",
+            "bedrock",
+            "--target",
+            "1.21.61",
+            "--out",
+            out_dir.path().to_str().unwrap(),
+        ],
+    );
     assert_eq!(result.status.code(), Some(1));
     let stderr = String::from_utf8(result.stderr).expect("utf-8");
     assert!(
@@ -359,8 +370,8 @@ fn c8e_bedrock_unknown_target_names_bedrock_versions() {
 
 #[test]
 fn c9_missing_edition_flag_exits_two_with_usage() {
-    let (_tmp_src, src) = cottage_in_tempdir();
-    let result = run_compile(&[src.to_str().unwrap()]);
+    let (_tmp_src, src) = example_in_tempdir("cottage.crn");
+    let result = cairn("compile", &[src.to_str().unwrap()]);
     // clap reports missing required args as exit 2.
     assert_eq!(result.status.code(), Some(2));
     let stderr = String::from_utf8(result.stderr).expect("utf-8");
@@ -369,27 +380,24 @@ fn c9_missing_edition_flag_exits_two_with_usage() {
 
 #[test]
 fn c10_unknown_target_exits_one_with_supported_list() {
-    let (_tmp_src, src) = cottage_in_tempdir();
+    let (_tmp_src, src) = example_in_tempdir("cottage.crn");
     let out_dir = TempDir::new().expect("out tempdir");
-    let result = run_compile(&[
-        src.to_str().unwrap(),
-        "--edition",
-        "java",
-        "--target",
-        "0.0.0",
-        "--out",
-        out_dir.path().to_str().unwrap(),
-    ]);
+    let result = cairn(
+        "compile",
+        &[
+            src.to_str().unwrap(),
+            "--edition",
+            "java",
+            "--target",
+            "0.0.0",
+            "--out",
+            out_dir.path().to_str().unwrap(),
+        ],
+    );
     assert_eq!(result.status.code(), Some(1));
     let stderr = String::from_utf8(result.stderr).expect("utf-8");
     assert!(stderr.contains("1.20.4"));
     assert!(stderr.contains("latest"));
-}
-
-#[test]
-fn c11_missing_source_exits_two() {
-    let result = run_compile(&["definitely-not-a-file.crn", "--edition", "java"]);
-    assert_eq!(result.status.code(), Some(2));
 }
 
 #[test]
@@ -399,13 +407,16 @@ fn c12_parse_error_surfaces_file_line_col() {
     // `;;;` is not a valid Cairn token — guarantees a lex/parse failure.
     fs::write(&bad, "struct cottage size=2x2\n;;;\n").expect("write");
     let out_dir = TempDir::new().expect("out tempdir");
-    let result = run_compile(&[
-        bad.to_str().unwrap(),
-        "--edition",
-        "java",
-        "--out",
-        out_dir.path().to_str().unwrap(),
-    ]);
+    let result = cairn(
+        "compile",
+        &[
+            bad.to_str().unwrap(),
+            "--edition",
+            "java",
+            "--out",
+            out_dir.path().to_str().unwrap(),
+        ],
+    );
     assert_eq!(result.status.code(), Some(1));
     let stderr = String::from_utf8(result.stderr).expect("utf-8");
     let bad_display = bad.display().to_string();
@@ -435,8 +446,8 @@ fn c12_parse_error_surfaces_file_line_col() {
 
 #[test]
 fn c13_default_out_dir_is_source_parent() {
-    let (tmp_src, src) = cottage_in_tempdir();
-    let result = run_compile(&[src.to_str().unwrap(), "--edition", "java"]);
+    let (tmp_src, src) = example_in_tempdir("cottage.crn");
+    let result = cairn("compile", &[src.to_str().unwrap(), "--edition", "java"]);
     assert!(
         result.status.success(),
         "stderr={}",
@@ -450,18 +461,21 @@ fn c13_default_out_dir_is_source_parent() {
 fn the_lockfile_on_disk_ends_with_a_newline() {
     // The encoder is pinned in `cairn-lang-core`; this is the byte that
     // actually reaches the file, through the temp-file-and-rename writer.
-    let (_tmp_src, src) = cottage_in_tempdir();
+    let (_tmp_src, src) = example_in_tempdir("cottage.crn");
     let out_dir = TempDir::new().expect("out tempdir");
     let lock_path = out_dir.path().join("newline.lock");
-    let result = run_compile(&[
-        src.to_str().unwrap(),
-        "--edition",
-        "java",
-        "--out",
-        out_dir.path().to_str().unwrap(),
-        "--lock",
-        lock_path.to_str().unwrap(),
-    ]);
+    let result = cairn(
+        "compile",
+        &[
+            src.to_str().unwrap(),
+            "--edition",
+            "java",
+            "--out",
+            out_dir.path().to_str().unwrap(),
+            "--lock",
+            lock_path.to_str().unwrap(),
+        ],
+    );
     assert!(result.status.success());
     let bytes = fs::read(&lock_path).expect("read lock");
     assert_eq!(
@@ -484,23 +498,26 @@ fn compile_is_byte_reproducible() {
     // runs — an absolute path, an iteration order, a timestamp — is exactly
     // what a hash-only comparison cannot see, and exactly what would make a
     // committed lockfile impossible to keep.
-    let (_tmp_src, src) = cottage_in_tempdir();
+    let (_tmp_src, src) = example_in_tempdir("cottage.crn");
     let out_a = TempDir::new().expect("out a");
     let out_b = TempDir::new().expect("out b");
     let lock_a = out_a.path().join("a.lock");
     let lock_b = out_b.path().join("b.lock");
     for (out_dir, lock_path) in [(out_a.path(), &lock_a), (out_b.path(), &lock_b)] {
-        let result = run_compile(&[
-            src.to_str().unwrap(),
-            "--edition",
-            "java",
-            "--target",
-            "1.21.4",
-            "--out",
-            out_dir.to_str().unwrap(),
-            "--lock",
-            lock_path.to_str().unwrap(),
-        ]);
+        let result = cairn(
+            "compile",
+            &[
+                src.to_str().unwrap(),
+                "--edition",
+                "java",
+                "--target",
+                "1.21.4",
+                "--out",
+                out_dir.to_str().unwrap(),
+                "--lock",
+                lock_path.to_str().unwrap(),
+            ],
+        );
         assert!(result.status.success());
     }
     let bytes_a = fs::read(out_a.path().join("cottage.nbt")).expect("a");
@@ -533,19 +550,22 @@ fn compile_rolls_back_on_lockfile_failure() {
     // artifact + lock, or none). We force the failure by pointing
     // `--lock` at a directory that exists; `serde_norway::to_string` +
     // `fs::write` then fails with "is a directory".
-    let (_tmp_src, src) = cottage_in_tempdir();
+    let (_tmp_src, src) = example_in_tempdir("cottage.crn");
     let out_dir = TempDir::new().expect("out tempdir");
     let lock_as_dir = out_dir.path().join("lock-is-a-dir");
     fs::create_dir(&lock_as_dir).expect("mkdir");
-    let result = run_compile(&[
-        src.to_str().unwrap(),
-        "--edition",
-        "java",
-        "--out",
-        out_dir.path().to_str().unwrap(),
-        "--lock",
-        lock_as_dir.to_str().unwrap(),
-    ]);
+    let result = cairn(
+        "compile",
+        &[
+            src.to_str().unwrap(),
+            "--edition",
+            "java",
+            "--out",
+            out_dir.path().to_str().unwrap(),
+            "--lock",
+            lock_as_dir.to_str().unwrap(),
+        ],
+    );
     assert_eq!(result.status.code(), Some(1));
     assert!(
         !out_dir.path().join("cottage.nbt").exists(),
@@ -559,19 +579,22 @@ fn compile_does_not_print_wrote_before_lockfile_success() {
     // must announce written files only AFTER every artifact and the
     // lockfile have landed. So when the lockfile step fails (directory
     // collision above), stdout must be empty of `wrote …` lines.
-    let (_tmp_src, src) = cottage_in_tempdir();
+    let (_tmp_src, src) = example_in_tempdir("cottage.crn");
     let out_dir = TempDir::new().expect("out tempdir");
     let lock_as_dir = out_dir.path().join("lock-dir");
     fs::create_dir(&lock_as_dir).expect("mkdir");
-    let result = run_compile(&[
-        src.to_str().unwrap(),
-        "--edition",
-        "java",
-        "--out",
-        out_dir.path().to_str().unwrap(),
-        "--lock",
-        lock_as_dir.to_str().unwrap(),
-    ]);
+    let result = cairn(
+        "compile",
+        &[
+            src.to_str().unwrap(),
+            "--edition",
+            "java",
+            "--out",
+            out_dir.path().to_str().unwrap(),
+            "--lock",
+            lock_as_dir.to_str().unwrap(),
+        ],
+    );
     let stdout = String::from_utf8(result.stdout).expect("utf-8");
     assert!(
         !stdout.contains("wrote"),
@@ -587,27 +610,22 @@ fn compile_all_examples_exit_zero() {
     // lowering step, so the palette that reaches the Java backend is
     // already concrete. A non-zero exit here means a regression in either
     // the lowering pass or the abstract-id guard at the backend.
-    for name in [
-        "cottage.crn",
-        "themed-tower.crn",
-        "village.crn",
-        "redstone-door.crn",
-        "roof-shed.crn",
-        "roof-hip.crn",
-        "roof-flat.crn",
-    ] {
-        let path = examples_dir().join(name);
+    for path in crn_examples() {
+        let name = path.file_name().expect("named").to_string_lossy();
         let out_dir = TempDir::new().expect("out tempdir");
         let lock_path = out_dir.path().join(format!("{name}.lock"));
-        let result = run_compile(&[
-            path.to_str().unwrap(),
-            "--edition",
-            "java",
-            "--out",
-            out_dir.path().to_str().unwrap(),
-            "--lock",
-            lock_path.to_str().unwrap(),
-        ]);
+        let result = cairn(
+            "compile",
+            &[
+                path.to_str().unwrap(),
+                "--edition",
+                "java",
+                "--out",
+                out_dir.path().to_str().unwrap(),
+                "--lock",
+                lock_path.to_str().unwrap(),
+            ],
+        );
         assert!(
             result.status.success(),
             "{name} should compile, stderr={}",
@@ -616,80 +634,61 @@ fn compile_all_examples_exit_zero() {
     }
 }
 
+/// `(example, the artifact its one struct writes)` for every example whose
+/// members the voxel lowering covers end-to-end, so the per-member
+/// `W_DEFERRED_MEMBER` stream earlier milestones emitted must be empty.
+///
+/// - `cottage.crn`: floor, walls, door, window, gable roof with overhang.
+/// - `themed-tower.crn`: `level y=N` grouping, per-level walls, an eave
+///   `stair`, and a `repeat=/step=` window pattern — level flattening and
+///   stair voxelisation paint every `level` child.
+/// - `redstone-door.crn`: two `pressure_plate` fixtures with the compound
+///   `at=<side>.outside` / `at=inside.<side>` anchor, a `circuit
+///   region=floor void=2` routing marker, and a `door[id=front]
+///   opened_by=sig.open` actuator patch — the plate paints its voxels and
+///   the other two are surface-guards for the logic pipeline.
+/// - `roof-shed/hip/flat.crn`: the roof voxelisers of §4.4–§4.6 of the
+///   compilation spec.
+const DEFER_FREE_EXAMPLES: &[(&str, &str)] = &[
+    ("cottage.crn", "cottage.nbt"),
+    ("themed-tower.crn", "keep.nbt"),
+    ("redstone-door.crn", "gatehouse.nbt"),
+    ("roof-shed.crn", "roof_shed.nbt"),
+    ("roof-hip.crn", "roof_hip.nbt"),
+    ("roof-flat.crn", "roof_flat.nbt"),
+];
+
 #[test]
-fn c14c_roof_kind_examples_lower_without_deferred_warnings() {
-    // The shed/hip/flat fixtures exist to pin the new roof voxelisers in
-    // §4.4–§4.6 of the compilation spec: each lowers end-to-end without
-    // a single `W_DEFERRED_MEMBER`, the same contract `c14_cottage_*` pins
-    // for the gable kind.
-    for name in ["roof-shed.crn", "roof-hip.crn", "roof-flat.crn"] {
-        let path = examples_dir().join(name);
+fn c14_covered_examples_compile_without_deferred_warnings() {
+    for (name, artifact) in DEFER_FREE_EXAMPLES {
+        let (_tmp_src, src) = example_in_tempdir(name);
         let out_dir = TempDir::new().expect("out tempdir");
-        let lock_path = out_dir.path().join(format!("{name}.lock"));
-        let result = run_compile(&[
-            path.to_str().unwrap(),
-            "--edition",
-            "java",
-            "--out",
-            out_dir.path().to_str().unwrap(),
-            "--lock",
-            lock_path.to_str().unwrap(),
-        ]);
-        assert!(
-            result.status.success(),
-            "{name} should compile, stderr={}",
-            String::from_utf8_lossy(&result.stderr),
+        let result = cairn(
+            "compile",
+            &[
+                src.to_str().unwrap(),
+                "--edition",
+                "java",
+                "--out",
+                out_dir.path().to_str().unwrap(),
+            ],
         );
         let stderr = String::from_utf8(result.stderr).expect("utf-8");
+        assert!(
+            result.status.success(),
+            "{name} should compile, stderr={stderr}",
+        );
         assert_eq!(
             stderr.matches("W_DEFERRED_MEMBER").count(),
             0,
             "{name} should lower clean, stderr={stderr}",
         );
-        let nbt = out_dir
-            .path()
-            .join(name.replace('-', "_").replace(".crn", ".nbt"));
-        assert!(nbt.exists(), "expected {} to exist", nbt.display());
+        let written = out_dir.path().join(artifact);
+        assert!(
+            written.exists(),
+            "{name} should still write {artifact}, stderr={stderr}",
+        );
     }
-}
-
-#[test]
-fn c14f_redstone_door_compiles_without_deferred_warnings() {
-    // `redstone-door.crn` exercises the fixtures/actuator surface end-to-end:
-    // two `pressure_plate` fixtures with the compound `at=<side>.outside` /
-    // `at=inside.<side>` anchor, a `circuit region=floor void=2` routing
-    // marker, and a `door[id=front] opened_by=sig.open` actuator patch that
-    // binds an already-declared physical door. Each of the three roles is
-    // recognised at block-array lowering (the plate paints its voxels, the
-    // circuit region and the actuator patch are surface-guards for the
-    // future logic pipeline), so no `W_DEFERRED_MEMBER` fires on this
-    // example. This slots into the same "example transitions from deferred
-    // to clean" shape `c14` (cottage) and `c14e` (themed-tower) already use.
-    let tmp = TempDir::new().expect("tempdir");
-    let dst = tmp.path().join("redstone-door.crn");
-    fs::copy(examples_dir().join("redstone-door.crn"), &dst).expect("copy redstone-door");
-    let out_dir = TempDir::new().expect("out tempdir");
-    let result = run_compile(&[
-        dst.to_str().unwrap(),
-        "--edition",
-        "java",
-        "--out",
-        out_dir.path().to_str().unwrap(),
-    ]);
-    let stderr = String::from_utf8(result.stderr).expect("utf-8");
-    assert!(
-        result.status.success(),
-        "redstone-door should compile, stderr={stderr}",
-    );
-    assert_eq!(
-        stderr.matches("W_DEFERRED_MEMBER").count(),
-        0,
-        "redstone-door should lower clean, stderr={stderr}",
-    );
-    assert!(
-        out_dir.path().join("gatehouse.nbt").exists(),
-        "redstone-door should still write gatehouse.nbt, stderr={stderr}",
-    );
 }
 
 #[test]
@@ -697,18 +696,21 @@ fn c15_lockfile_registry_pack_hash_is_populated() {
     // The registry pack ingest replaces the hardcoded data_version table,
     // and the lockfile must pin the bytes the compile resolved against.
     // The `constraint_catalog_hash` stays zero until that catalog lands.
-    let (_tmp_src, src) = cottage_in_tempdir();
+    let (_tmp_src, src) = example_in_tempdir("cottage.crn");
     let out_dir = TempDir::new().expect("out tempdir");
     let lock_path = out_dir.path().join("c15.lock");
-    let result = run_compile(&[
-        src.to_str().unwrap(),
-        "--edition",
-        "java",
-        "--out",
-        out_dir.path().to_str().unwrap(),
-        "--lock",
-        lock_path.to_str().unwrap(),
-    ]);
+    let result = cairn(
+        "compile",
+        &[
+            src.to_str().unwrap(),
+            "--edition",
+            "java",
+            "--out",
+            out_dir.path().to_str().unwrap(),
+            "--lock",
+            lock_path.to_str().unwrap(),
+        ],
+    );
     assert!(result.status.success());
     let lf = Lockfile::read_from_path(&lock_path).expect("read lock");
     assert_ne!(
@@ -724,66 +726,6 @@ fn c15_lockfile_registry_pack_hash_is_populated() {
 }
 
 #[test]
-fn c14_cottage_compiles_without_deferred_warnings() {
-    // The current voxel lowering covers cottage.crn end-to-end (floor,
-    // walls, door, window, gable roof with overhang), so the per-member
-    // W_DEFERRED_MEMBER stream that earlier milestones emitted is now
-    // empty. The CLI must still exit 0 and produce nothing on stderr.
-    let (_tmp_src, src) = cottage_in_tempdir();
-    let out_dir = TempDir::new().expect("out tempdir");
-    let result = run_compile(&[
-        src.to_str().unwrap(),
-        "--edition",
-        "java",
-        "--out",
-        out_dir.path().to_str().unwrap(),
-    ]);
-    assert!(result.status.success());
-    let stderr = String::from_utf8(result.stderr).expect("utf-8");
-    assert_eq!(
-        stderr.matches("W_DEFERRED_MEMBER").count(),
-        0,
-        "cottage should lower clean, stderr={stderr}",
-    );
-}
-
-#[test]
-fn c14e_themed_tower_compiles_without_deferred_warnings() {
-    // themed-tower exercises `level y=N` grouping, per-level walls, an eave
-    // `stair`, and a `repeat=/step=` window pattern. Once level flattening
-    // and stair voxelisation landed together with roof/stair honouring
-    // resolved `mat_slot=` ids, every `level` child paints into the block
-    // array and no `W_DEFERRED_MEMBER` should fire on this example. This
-    // test replaces the earlier `c14b`, which pinned "at least one deferred
-    // warning" while level lowering was still absent.
-    let tmp = TempDir::new().expect("tempdir");
-    let dst = tmp.path().join("themed-tower.crn");
-    fs::copy(examples_dir().join("themed-tower.crn"), &dst).expect("copy themed-tower");
-    let out_dir = TempDir::new().expect("out tempdir");
-    let result = run_compile(&[
-        dst.to_str().unwrap(),
-        "--edition",
-        "java",
-        "--out",
-        out_dir.path().to_str().unwrap(),
-    ]);
-    let stderr = String::from_utf8(result.stderr).expect("utf-8");
-    assert!(
-        result.status.success(),
-        "themed-tower should compile clean; stderr={stderr}",
-    );
-    assert_eq!(
-        stderr.matches("W_DEFERRED_MEMBER").count(),
-        0,
-        "themed-tower should lower without deferred-member warnings, stderr={stderr}",
-    );
-    assert!(
-        out_dir.path().join("keep.nbt").exists(),
-        "themed-tower should still write keep.nbt, stderr={stderr}",
-    );
-}
-
-#[test]
 fn c16_themed_tower_compiles_with_lifted_abstract_tokens() {
     // The built-in materials catalog covers every abstract token
     // themed-tower binds, so compile must finish without
@@ -794,13 +736,16 @@ fn c16_themed_tower_compiles_with_lifted_abstract_tokens() {
     let dst = tmp.path().join("themed-tower.crn");
     fs::copy(examples_dir().join("themed-tower.crn"), &dst).expect("copy themed-tower");
     let out_dir = TempDir::new().expect("out tempdir");
-    let result = run_compile(&[
-        dst.to_str().unwrap(),
-        "--edition",
-        "java",
-        "--out",
-        out_dir.path().to_str().unwrap(),
-    ]);
+    let result = cairn(
+        "compile",
+        &[
+            dst.to_str().unwrap(),
+            "--edition",
+            "java",
+            "--out",
+            out_dir.path().to_str().unwrap(),
+        ],
+    );
     let stderr = String::from_utf8(result.stderr).expect("utf-8");
     assert!(
         result.status.success(),
@@ -841,13 +786,16 @@ fn c17_unknown_abstract_token_compile_exits_nonzero() {
     )
     .expect("write tmp .crn");
     let out_dir = TempDir::new().expect("out tempdir");
-    let result = run_compile(&[
-        src.to_str().unwrap(),
-        "--edition",
-        "java",
-        "--out",
-        out_dir.path().to_str().unwrap(),
-    ]);
+    let result = cairn(
+        "compile",
+        &[
+            src.to_str().unwrap(),
+            "--edition",
+            "java",
+            "--out",
+            out_dir.path().to_str().unwrap(),
+        ],
+    );
     let stderr = String::from_utf8(result.stderr).expect("utf-8");
     assert!(
         !result.status.success(),
@@ -867,14 +815,6 @@ fn c17_unknown_abstract_token_compile_exits_nonzero() {
 /// Mirrors `cottage_in_tempdir` but parameterised so the village / themed-tower
 /// tests can land in their own writable scratch space without polluting the
 /// repo with `.lock` artefacts.
-fn example_in_tempdir(name: &str) -> (TempDir, PathBuf) {
-    let tmp = TempDir::new().expect("tempdir");
-    let src = examples_dir().join(name);
-    let dst = tmp.path().join(name);
-    fs::copy(&src, &dst).expect("copy example");
-    (tmp, dst)
-}
-
 #[test]
 fn c18_compile_village_emits_three_nbt() {
     // village.crn used to compile to zero `.nbt` files because the lowering
@@ -884,13 +824,16 @@ fn c18_compile_village_emits_three_nbt() {
     // `connect` rows emit.
     let (_tmp_src, src) = example_in_tempdir("village.crn");
     let out_dir = TempDir::new().expect("out tempdir");
-    let result = run_compile(&[
-        src.to_str().unwrap(),
-        "--edition",
-        "java",
-        "--out",
-        out_dir.path().to_str().unwrap(),
-    ]);
+    let result = cairn(
+        "compile",
+        &[
+            src.to_str().unwrap(),
+            "--edition",
+            "java",
+            "--out",
+            out_dir.path().to_str().unwrap(),
+        ],
+    );
     let stderr = String::from_utf8(result.stderr.clone()).expect("utf-8");
     assert!(
         result.status.success(),
@@ -918,15 +861,18 @@ fn c19_village_lockfile_records_placements() {
     let (_tmp_src, src) = example_in_tempdir("village.crn");
     let out_dir = TempDir::new().expect("out tempdir");
     let lock_path = out_dir.path().join("village.lock");
-    let result = run_compile(&[
-        src.to_str().unwrap(),
-        "--edition",
-        "java",
-        "--out",
-        out_dir.path().to_str().unwrap(),
-        "--lock",
-        lock_path.to_str().unwrap(),
-    ]);
+    let result = cairn(
+        "compile",
+        &[
+            src.to_str().unwrap(),
+            "--edition",
+            "java",
+            "--out",
+            out_dir.path().to_str().unwrap(),
+            "--lock",
+            lock_path.to_str().unwrap(),
+        ],
+    );
     assert!(result.status.success());
     let lf = Lockfile::read_from_path(&lock_path).expect("read lock");
     assert_eq!(lf.placements.len(), 3, "expected one entry per place");
@@ -959,15 +905,18 @@ fn c20_village_lockfile_round_trips_through_yaml() {
     let (_tmp_src, src) = example_in_tempdir("village.crn");
     let out_dir = TempDir::new().expect("out tempdir");
     let lock_path = out_dir.path().join("rt.lock");
-    let _ = run_compile(&[
-        src.to_str().unwrap(),
-        "--edition",
-        "java",
-        "--out",
-        out_dir.path().to_str().unwrap(),
-        "--lock",
-        lock_path.to_str().unwrap(),
-    ]);
+    let _ = cairn(
+        "compile",
+        &[
+            src.to_str().unwrap(),
+            "--edition",
+            "java",
+            "--out",
+            out_dir.path().to_str().unwrap(),
+            "--lock",
+            lock_path.to_str().unwrap(),
+        ],
+    );
     let lf = Lockfile::read_from_path(&lock_path).expect("read lock");
     let rewrite = out_dir.path().join("rt.rewrite.lock");
     lf.write_to_path(&rewrite).expect("write rewritten lock");
@@ -985,13 +934,16 @@ fn c21_village_lowers_connect_rows_into_walkway_artifacts() {
     // W_WALKWAY_BLOCKED — village is a warning-free example now.
     let (_tmp_src, src) = example_in_tempdir("village.crn");
     let out_dir = TempDir::new().expect("out tempdir");
-    let result = run_compile(&[
-        src.to_str().unwrap(),
-        "--edition",
-        "java",
-        "--out",
-        out_dir.path().to_str().unwrap(),
-    ]);
+    let result = cairn(
+        "compile",
+        &[
+            src.to_str().unwrap(),
+            "--edition",
+            "java",
+            "--out",
+            out_dir.path().to_str().unwrap(),
+        ],
+    );
     assert!(result.status.success());
     let stderr = String::from_utf8(result.stderr).expect("utf-8");
     assert_eq!(
@@ -1026,14 +978,6 @@ fn c21_village_lowers_connect_rows_into_walkway_artifacts() {
     );
 }
 
-fn run_check(args: &[&str]) -> std::process::Output {
-    Command::new(cargo_bin())
-        .arg("check")
-        .args(args)
-        .output()
-        .expect("failed to invoke cairn binary")
-}
-
 #[test]
 fn c22_unknown_def_in_place_errors_with_suggestion() {
     // `use=cottag` typo → resolver fail-loud with a `did you mean
@@ -1058,7 +1002,7 @@ fn c22_unknown_def_in_place_errors_with_suggestion() {
         ),
     )
     .expect("write tmp .crn");
-    let result = run_check(&[src.to_str().unwrap()]);
+    let result = cairn("check", &[src.to_str().unwrap()]);
     let reported = String::from_utf8(result.stderr).expect("utf-8");
     assert!(
         !result.status.success(),
@@ -1096,7 +1040,7 @@ fn c23_unknown_theme_in_place_errors_with_suggestion() {
         ),
     )
     .expect("write tmp .crn");
-    let result = run_check(&[src.to_str().unwrap()]);
+    let result = cairn("check", &[src.to_str().unwrap()]);
     let reported = String::from_utf8(result.stderr).expect("utf-8");
     assert!(!result.status.success(), "reported={reported}");
     assert!(
@@ -1133,7 +1077,7 @@ fn c24_duplicate_place_id_errors() {
         ),
     )
     .expect("write tmp .crn");
-    let result = run_check(&[src.to_str().unwrap()]);
+    let result = cairn("check", &[src.to_str().unwrap()]);
     let reported = String::from_utf8(result.stderr).expect("utf-8");
     assert!(!result.status.success(), "reported={reported}");
     assert!(
@@ -1165,7 +1109,7 @@ fn c25_east_of_unknown_ref_errors_with_suggestion() {
         ),
     )
     .expect("write tmp .crn");
-    let result = run_check(&[src.to_str().unwrap()]);
+    let result = cairn("check", &[src.to_str().unwrap()]);
     let reported = String::from_utf8(result.stderr).expect("utf-8");
     assert!(!result.status.success(), "reported={reported}");
     assert!(
@@ -1202,13 +1146,16 @@ fn c26_bare_def_without_place_emits_w_unused_def_and_no_nbt() {
     )
     .expect("write tmp .crn");
     let out_dir = TempDir::new().expect("out tempdir");
-    let result = run_compile(&[
-        src.to_str().unwrap(),
-        "--edition",
-        "java",
-        "--out",
-        out_dir.path().to_str().unwrap(),
-    ]);
+    let result = cairn(
+        "compile",
+        &[
+            src.to_str().unwrap(),
+            "--edition",
+            "java",
+            "--out",
+            out_dir.path().to_str().unwrap(),
+        ],
+    );
     let stderr = String::from_utf8(result.stderr.clone()).expect("utf-8");
     assert!(
         result.status.success(),
@@ -1257,13 +1204,16 @@ fn c26b_unknown_def_in_place_compile_exits_nonzero() {
     )
     .expect("write tmp .crn");
     let out_dir = TempDir::new().expect("out tempdir");
-    let result = run_compile(&[
-        src.to_str().unwrap(),
-        "--edition",
-        "java",
-        "--out",
-        out_dir.path().to_str().unwrap(),
-    ]);
+    let result = cairn(
+        "compile",
+        &[
+            src.to_str().unwrap(),
+            "--edition",
+            "java",
+            "--out",
+            out_dir.path().to_str().unwrap(),
+        ],
+    );
     let stderr = String::from_utf8(result.stderr).expect("utf-8");
     assert!(
         !result.status.success(),
@@ -1290,15 +1240,18 @@ fn c27_home2_nbt_uses_resolved_theme_palette() {
     let (_tmp_src, src) = example_in_tempdir("village.crn");
     let out_dir = TempDir::new().expect("out tempdir");
     let lock_path = out_dir.path().join("village.lock");
-    let _ = run_compile(&[
-        src.to_str().unwrap(),
-        "--edition",
-        "java",
-        "--out",
-        out_dir.path().to_str().unwrap(),
-        "--lock",
-        lock_path.to_str().unwrap(),
-    ]);
+    let _ = cairn(
+        "compile",
+        &[
+            src.to_str().unwrap(),
+            "--edition",
+            "java",
+            "--out",
+            out_dir.path().to_str().unwrap(),
+            "--lock",
+            lock_path.to_str().unwrap(),
+        ],
+    );
     let home2 = out_dir.path().join("home2.nbt");
     let bytes = fs::read(&home2).expect("read home2.nbt");
     assert!(
@@ -1320,22 +1273,25 @@ fn compile_overwrites_existing_output() {
     // and the lockfile rather than refusing or appending. Without this,
     // an interactive workflow (edit `.crn`, rerun) would fail on every
     // iteration after the first.
-    let (_tmp_src, src) = cottage_in_tempdir();
+    let (_tmp_src, src) = example_in_tempdir("cottage.crn");
     let out_dir = TempDir::new().expect("out tempdir");
     let nbt_path = out_dir.path().join("cottage.nbt");
     fs::write(&nbt_path, b"stale bytes").expect("seed nbt");
     let lock_path = out_dir.path().join("c.lock");
     fs::write(&lock_path, "stale: true\n").expect("seed lock");
 
-    let result = run_compile(&[
-        src.to_str().unwrap(),
-        "--edition",
-        "java",
-        "--out",
-        out_dir.path().to_str().unwrap(),
-        "--lock",
-        lock_path.to_str().unwrap(),
-    ]);
+    let result = cairn(
+        "compile",
+        &[
+            src.to_str().unwrap(),
+            "--edition",
+            "java",
+            "--out",
+            out_dir.path().to_str().unwrap(),
+            "--lock",
+            lock_path.to_str().unwrap(),
+        ],
+    );
     assert!(result.status.success());
     let bytes = fs::read(&nbt_path).expect("read nbt");
     assert_ne!(bytes, b"stale bytes", "nbt should have been overwritten");
@@ -1367,15 +1323,18 @@ fn c30_a_note_that_points_at_a_second_line_is_printed_with_its_position() {
     .expect("write source");
     let out_dir = TempDir::new().expect("out tempdir");
 
-    let result = run_compile(&[
-        src.to_str().unwrap(),
-        "--edition",
-        "java",
-        "--target",
-        "1.21.4",
-        "--out",
-        out_dir.path().to_str().unwrap(),
-    ]);
+    let result = cairn(
+        "compile",
+        &[
+            src.to_str().unwrap(),
+            "--edition",
+            "java",
+            "--target",
+            "1.21.4",
+            "--out",
+            out_dir.path().to_str().unwrap(),
+        ],
+    );
     assert!(
         result.status.success(),
         "a warning must not fail the compile, stderr={}",

@@ -18,7 +18,7 @@
 //! the whole table.
 
 use crate::intent::{BodyKind, IntentModule, Member, MemberRole, known_keywords, role_of};
-use crate::suggest::nearest_match;
+use crate::suggest::{did_you_mean_note, nearest_match};
 
 use super::{Diagnostic, DiagnosticCode, DiagnosticNote, DiagnosticSink};
 
@@ -69,12 +69,7 @@ fn push_unknown_keyword(
     // Informational notes — no distinct secondary location, so renderers
     // skip the `file:L:C:` prefix and just print `note: ...`.
     let mut notes = Vec::with_capacity(2);
-    if let Some(suggested) = nearest_match(keyword, candidates.iter().copied()) {
-        notes.push(DiagnosticNote {
-            span: None,
-            message: format!("did you mean `{suggested}`?"),
-        });
-    }
+    notes.extend(nearest_match(keyword, candidates.iter().copied()).map(did_you_mean_note));
     notes.push(DiagnosticNote {
         span: None,
         message: format!("expected one of: {}", candidates.join(", ")),

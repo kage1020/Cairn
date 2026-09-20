@@ -11,22 +11,11 @@
 //! read the column the body was lowered with, so the disagreement has
 //! nowhere left to live.
 
-use cairn_lang_core::block_array::{BlockArrayIr, lower_to_block_array};
+use cairn_lang_core::block_array::BlockArrayIr;
 use cairn_lang_core::check::{Diagnostic, DiagnosticCode};
-use cairn_lang_core::{lower, parse, resolve};
 
-/// Lower a source with no registry pack, merging the resolver's
-/// diagnostics in front of the block-array pass's the way the CLI does.
-fn lowered(src: &str) -> BlockArrayIr {
-    let module = parse(src).expect("parse");
-    let ir = lower(&module);
-    let resolution = resolve(&ir, None);
-    let mut out = lower_to_block_array(&ir, &resolution, None);
-    let mut combined = resolution.diagnostics;
-    combined.append(&mut out.diagnostics);
-    out.diagnostics = combined;
-    out
-}
+mod common;
+use common::lowered_with_resolver_diagnostics;
 
 /// The `W_DEFERRED_MEMBER` a `connect` row earns when one of its ports
 /// cannot be placed, or `None` when every port landed.
@@ -103,7 +92,7 @@ site pair:
 fn a_window_over_walls_that_paint_nothing_anchors_no_port() {
     // AC1. The openings pass defers the cut; the strip used to be laid
     // to the window anyway.
-    let out = lowered(&pair("hollow", "home1.entry to home2.front"));
+    let out = lowered_with_resolver_diagnostics(&pair("hollow", "home1.entry to home2.front"));
     assert!(
         walkway_keys(&out).is_empty(),
         "no strip may reach a window that was never cut, got {:?}",
@@ -117,7 +106,7 @@ fn a_window_over_walls_that_paint_nothing_anchors_no_port() {
 fn a_door_over_walls_that_paint_nothing_anchors_no_port() {
     // AC2. The door branch consulted no column at all, so this half of
     // the disagreement predates the material axis.
-    let out = lowered(&pair("hollow", "home1.front to home2.entry"));
+    let out = lowered_with_resolver_diagnostics(&pair("hollow", "home1.front to home2.entry"));
     assert!(
         walkway_keys(&out).is_empty(),
         "no strip may reach a door that was never carved, got {:?}",
@@ -134,7 +123,7 @@ fn a_def_with_no_walls_anchors_neither_a_door_nor_a_window() {
         "home1.front to home2.entry",
         "home1.entry to home2.entry",
     ] {
-        let out = lowered(&pair("wall_less", connect));
+        let out = lowered_with_resolver_diagnostics(&pair("wall_less", connect));
         assert!(
             walkway_keys(&out).is_empty(),
             "`{connect}` laid a strip against a def with no walls",
@@ -153,7 +142,7 @@ fn a_door_in_level_scoped_walls_anchors_its_port() {
     // the same reason it anchors a window one — a gate that regressed to
     // "are there top-level walls" would refuse it and send the author to
     // move a door already in masonry.
-    let out = lowered(&pair("storeyed", "home1.entry to home2.entry"));
+    let out = lowered_with_resolver_diagnostics(&pair("storeyed", "home1.entry to home2.entry"));
     assert_eq!(
         walkway_keys(&out),
         vec!["walkway::pair::home1.entry__home2.entry".to_owned()],
@@ -167,7 +156,7 @@ fn a_window_cut_into_level_scoped_walls_anchors_its_port() {
     // because the flattened list carries the `level`'s walls. The port
     // used to refuse it, so the author was told to move a window that
     // was already in masonry.
-    let out = lowered(&pair("storeyed", "home1.entry to home2.front"));
+    let out = lowered_with_resolver_diagnostics(&pair("storeyed", "home1.entry to home2.front"));
     assert_eq!(
         walkway_keys(&out),
         vec!["walkway::pair::home1.entry__home2.front".to_owned()],
@@ -183,7 +172,7 @@ fn a_window_cut_into_level_scoped_walls_anchors_its_port() {
 #[test]
 fn the_deferral_names_only_the_endpoint_that_has_no_masonry() {
     // AC4. `home1` is `solid`; only `home2.front` is unplaceable.
-    let out = lowered(&pair("hollow", "home1.entry to home2.front"));
+    let out = lowered_with_resolver_diagnostics(&pair("hollow", "home1.entry to home2.front"));
     let defer = port_defer(&out).expect("the connect row defers");
     assert!(
         defer.primary.contains("port `home2.front`"),
@@ -202,7 +191,7 @@ fn the_deferral_states_the_masonry_contract() {
     // AC6. Four causes now, and the masonry one is the only cause whose
     // fix is not on the `connect` row — so the note has to say where it
     // is instead.
-    let out = lowered(&pair("hollow", "home1.entry to home2.front"));
+    let out = lowered_with_resolver_diagnostics(&pair("hollow", "home1.entry to home2.front"));
     let defer = port_defer(&out).expect("the connect row defers");
     let masonry = defer
         .notes
@@ -260,7 +249,7 @@ fn a_duplicate_place_id_is_judged_by_the_body_that_was_kept() {
     // AC7. `structures` and `placements` are first-write-wins, so the
     // column map has to be too — otherwise the port is checked against
     // a body that is in no artifact.
-    let out = lowered(DUPLICATE_ID);
+    let out = lowered_with_resolver_diagnostics(DUPLICATE_ID);
     assert_eq!(
         walkway_keys(&out),
         vec!["walkway::pair::home1.entry__home2.entry".to_owned()],
@@ -305,7 +294,7 @@ site pair:
 fn a_window_hanging_in_the_gap_between_two_courses_anchors_no_port() {
     // AC8, refusing half: `height=2` plus `level y=6 height=2` leaves
     // y=3..=6 open air, and a window at y=3 is in none of it.
-    let out = lowered(&two_courses(3, 6));
+    let out = lowered_with_resolver_diagnostics(&two_courses(3, 6));
     assert!(
         walkway_keys(&out).is_empty(),
         "a window in open air is not a port, got {:?}",
@@ -325,7 +314,7 @@ fn a_window_hanging_in_the_gap_between_two_courses_anchors_no_port() {
 fn a_window_crossing_the_seam_of_two_touching_courses_anchors_its_port() {
     // AC8, anchoring half: `height=2` plus `level y=2 height=2` is one
     // wall from y=1 to y=4, and a window at y=2..=3 is inside it.
-    let out = lowered(&two_courses(2, 2));
+    let out = lowered_with_resolver_diagnostics(&two_courses(2, 2));
     assert_eq!(
         walkway_keys(&out),
         vec!["walkway::pair::home1.entry__home2.front".to_owned()],

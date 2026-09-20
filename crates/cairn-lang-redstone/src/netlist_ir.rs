@@ -21,8 +21,7 @@
 use cairn_lang_core::ast::DottedRef;
 use cairn_lang_core::error::Span;
 use indexmap::IndexMap;
-use serde::ser::SerializeMap;
-use serde::{Serialize, Serializer};
+use serde::Serialize;
 
 use crate::logic_ir::ScopeKind;
 
@@ -180,27 +179,9 @@ pub struct NetlistIr {
     /// both IRs.
     #[serde(
         skip_serializing_if = "IndexMap::is_empty",
-        serialize_with = "serialize_signal_defs"
+        serialize_with = "crate::logic_ir::serialize_signal_defs"
     )]
     pub signal_defs: IndexMap<DottedRef, NetRef>,
-}
-
-/// Serialise `signal_defs` as a JSON object keyed by the dotted signal
-/// name flattened with `.`. Relies on [`DottedRef::to_string`] being
-/// injective on the value space that reaches this map — the synth pass
-/// only inserts distinct `sig.X` names (a second insert would already
-/// have surfaced `E_LOGIC_MULTIPLE_DRIVERS`), so distinct
-/// [`DottedRef`] keys map to distinct string keys and no entry is
-/// silently overwritten.
-fn serialize_signal_defs<S: Serializer>(
-    defs: &IndexMap<DottedRef, NetRef>,
-    serializer: S,
-) -> Result<S::Ok, S::Error> {
-    let mut map = serializer.serialize_map(Some(defs.len()))?;
-    for (name, net) in defs {
-        map.serialize_entry(&name.to_string(), net)?;
-    }
-    map.end()
 }
 
 impl NetlistIr {

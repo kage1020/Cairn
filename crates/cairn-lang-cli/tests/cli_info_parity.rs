@@ -11,16 +11,8 @@ use std::process::Command;
 
 use serde_json::Value;
 
-fn cargo_bin() -> PathBuf {
-    PathBuf::from(env!("CARGO_BIN_EXE_cairn"))
-}
-
-fn examples_dir() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("..")
-        .join("..")
-        .join("examples")
-}
+mod common;
+use common::{cargo_bin, examples_dir};
 
 fn info_json(file: &str, editions: &str) -> Value {
     info_json_at(&examples_dir().join(file), editions)

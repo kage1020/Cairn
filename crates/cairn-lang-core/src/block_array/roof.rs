@@ -264,14 +264,17 @@ pub enum Axis {
     Z,
 }
 
-/// One stair voxel produced by [`gable_voxels`].
+/// One stair voxel of a roof surface, tagged with the face it belongs to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct GableVoxel {
+pub struct RoofVoxel<F> {
     /// Grid position `(x, y, z)` to write the stair into.
     pub pos: (u32, u32, u32),
     /// Which face this voxel belongs to.
-    pub face: StairFace,
+    pub face: F,
 }
+
+/// One stair voxel produced by [`gable_voxels`].
+pub type GableVoxel = RoofVoxel<StairFace>;
 
 /// Vertical rise of a gable roof above its wall top.
 ///
@@ -431,13 +434,7 @@ pub enum ShedFace {
 }
 
 /// One stair voxel produced by [`shed_voxels`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct ShedVoxel {
-    /// Grid position `(x, y, z)` to write the stair into.
-    pub pos: (u32, u32, u32),
-    /// Which face this voxel belongs to.
-    pub face: ShedFace,
-}
+pub type ShedVoxel = RoofVoxel<ShedFace>;
 
 /// Vertical rise of a shed roof above its wall top.
 ///
@@ -580,23 +577,16 @@ pub enum HipFace {
 }
 
 /// One stair voxel produced by [`hip_voxels`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct HipVoxel {
-    /// Grid position `(x, y, z)` to write the stair into.
-    pub pos: (u32, u32, u32),
-    /// Which face this voxel belongs to.
-    pub face: HipFace,
-}
+pub type HipVoxel = RoofVoxel<HipFace>;
 
 /// Vertical rise of a hip roof above its wall top.
 ///
-/// Identical math to [`gable_extra_height`] — the short-axis slope
-/// reaches the ridge at `ceil(short_span / 2)`. The long-axis slope is
-/// shorter or equal and so finishes at or before the same layer.
+/// The short-axis slope reaches the ridge at `ceil(short_span / 2)`, as a
+/// gable's does. The long-axis slope is shorter or equal and so finishes
+/// at or before the same layer.
 #[must_use]
 pub fn hip_extra_height(roof_w: u32, roof_h: u32) -> u32 {
-    let short = roof_w.min(roof_h);
-    short.div_ceil(2).max(1)
+    gable_extra_height(roof_w.min(roof_h))
 }
 
 /// Build the [`BlockState`] for one face of a hip roof.

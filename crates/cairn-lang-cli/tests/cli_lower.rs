@@ -1,34 +1,15 @@
 //! End-to-end tests for `cairn lower <file>`.
 
 use std::fs;
-use std::path::PathBuf;
-use std::process::Command;
-
 use tempfile::TempDir;
 
-fn cargo_bin() -> PathBuf {
-    PathBuf::from(env!("CARGO_BIN_EXE_cairn"))
-}
-
-fn examples_dir() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("..")
-        .join("..")
-        .join("examples")
-}
-
-fn run_lower(args: &[&str]) -> std::process::Output {
-    Command::new(cargo_bin())
-        .arg("lower")
-        .args(args)
-        .output()
-        .expect("failed to invoke cairn binary")
-}
+mod common;
+use common::{cairn, crn_examples, examples_dir};
 
 #[test]
 fn lower_1_cottage_exits_zero_and_names_the_struct() {
     let path = examples_dir().join("cottage.crn");
-    let out = run_lower(&[path.to_str().unwrap()]);
+    let out = cairn("lower", &[path.to_str().unwrap()]);
     assert!(
         out.status.success(),
         "stderr={}",
@@ -51,7 +32,7 @@ fn lower_1_cottage_exits_zero_and_names_the_struct() {
 #[test]
 fn lower_2_json_format_round_trips_as_block_array_ir() {
     let path = examples_dir().join("cottage.crn");
-    let out = run_lower(&[path.to_str().unwrap(), "--format", "json"]);
+    let out = cairn("lower", &[path.to_str().unwrap(), "--format", "json"]);
     assert!(out.status.success());
     let stdout = String::from_utf8(out.stdout).expect("utf-8");
     let parsed: serde_json::Value = serde_json::from_str(&stdout).expect("valid JSON");
@@ -92,7 +73,7 @@ fn lower_3_deferred_member_warnings_print_to_stderr() {
     let tmp = TempDir::new().expect("tempdir");
     let src_path = tmp.path().join("stair-inner-left.crn");
     fs::write(&src_path, source).expect("write source");
-    let out = run_lower(&[src_path.to_str().unwrap()]);
+    let out = cairn("lower", &[src_path.to_str().unwrap()]);
     let stderr = String::from_utf8(out.stderr).expect("utf-8");
     assert!(
         stderr.contains("W_DEFERRED_MEMBER"),
@@ -105,19 +86,13 @@ fn lower_3_deferred_member_warnings_print_to_stderr() {
 }
 
 #[test]
-fn lower_4_missing_file_exits_with_code_two() {
-    let out = run_lower(&["does-not-exist.crn"]);
-    assert_eq!(out.status.code(), Some(2));
-}
-
-#[test]
 fn lower_5_themed_tower_lifts_abstract_tokens_through_builtin_materials() {
     // The built-in registry pack ships a materials catalog covering
     // every abstract token themed-tower.crn binds, so `W_ABSTRACT_TOKEN_DEFERRED`
     // must NOT appear. Level flattening and stair voxelisation now cover
     // the whole tower, so `W_DEFERRED_MEMBER` must not appear either.
     let path = examples_dir().join("themed-tower.crn");
-    let out = run_lower(&[path.to_str().unwrap()]);
+    let out = cairn("lower", &[path.to_str().unwrap()]);
     assert!(
         out.status.success(),
         "stderr={}",
@@ -171,7 +146,7 @@ fn lower_7_unknown_abstract_token_exits_nonzero() {
         ),
     )
     .expect("write tmp .crn");
-    let out = run_lower(&[src.to_str().unwrap()]);
+    let out = cairn("lower", &[src.to_str().unwrap()]);
     let stderr = String::from_utf8(out.stderr).expect("utf-8");
     assert!(
         !out.status.success(),
@@ -189,17 +164,12 @@ fn lower_7_unknown_abstract_token_exits_nonzero() {
 
 #[test]
 fn lower_6_all_examples_exit_zero() {
-    for name in [
-        "cottage.crn",
-        "themed-tower.crn",
-        "village.crn",
-        "redstone-door.crn",
-    ] {
-        let path = examples_dir().join(name);
-        let out = run_lower(&[path.to_str().unwrap()]);
+    for path in crn_examples() {
+        let out = cairn("lower", &[path.to_str().unwrap()]);
         assert!(
             out.status.success(),
-            "{name} should exit 0, stderr={}",
+            "{} should exit 0, stderr={}",
+            path.display(),
             String::from_utf8_lossy(&out.stderr),
         );
     }
@@ -230,7 +200,7 @@ fn lower_8_a_note_that_points_at_a_second_line_is_printed_with_its_position() {
     )
     .expect("write source");
 
-    let out = run_lower(&[path.to_str().unwrap()]);
+    let out = cairn("lower", &[path.to_str().unwrap()]);
     assert!(
         out.status.success(),
         "a warning must not fail the lower, stderr={}",

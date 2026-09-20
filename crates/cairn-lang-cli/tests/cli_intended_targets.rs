@@ -7,42 +7,10 @@
 //! that a file whose two version headers contradict each other stops
 //! exiting 0.
 
-use std::path::PathBuf;
 use std::process::Command;
 
-fn cargo_bin() -> PathBuf {
-    PathBuf::from(env!("CARGO_BIN_EXE_cairn"))
-}
-
-/// A source in a directory of its own, removed when the test ends.
-struct Fixture {
-    dir: PathBuf,
-}
-
-impl Fixture {
-    fn new(label: &str, headers: &str) -> Self {
-        let mut dir = std::env::temp_dir();
-        dir.push(format!("cairn-intended-{}-{label}", std::process::id()));
-        match std::fs::remove_dir_all(&dir) {
-            Ok(()) => {}
-            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
-            Err(err) => panic!("cannot clear {}: {err}", dir.display()),
-        }
-        std::fs::create_dir_all(&dir).expect("create fixture dir");
-        std::fs::write(dir.join("s.crn"), format!("{headers}{BUILD}")).expect("write source");
-        Self { dir }
-    }
-
-    fn source(&self) -> PathBuf {
-        self.dir.join("s.crn")
-    }
-}
-
-impl Drop for Fixture {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.dir);
-    }
-}
+mod common;
+use common::{Fixture, cargo_bin};
 
 /// One structure with something to paint, so nothing here is reported
 /// against an empty build.
@@ -53,6 +21,11 @@ theme t:
 struct hut size=5x5
   walls mat_slot=wall height=3
 ";
+
+/// `headers` above [`BUILD`], in a directory of its own.
+fn fixture(label: &str, headers: &str) -> Fixture {
+    Fixture::new("cairn-intended", label, &format!("{headers}{BUILD}"))
+}
 
 fn run(command: &str, fixture: &Fixture, args: &[&str]) -> (Option<i32>, String, String) {
     let out = Command::new(cargo_bin())
@@ -73,7 +46,7 @@ fn run(command: &str, fixture: &Fixture, args: &[&str]) -> (Option<i32>, String,
 /// `cairn compile --target 1.20.4` refused.
 #[test]
 fn a_floor_above_every_intended_target_stops_check_exiting_zero() {
-    let fixture = Fixture::new(
+    let fixture = fixture(
         "cap",
         "@requires version>=1.21\n@intended_targets [\"1.20.4\"]\n",
     );
@@ -95,7 +68,7 @@ fn a_floor_above_every_intended_target_stops_check_exiting_zero() {
 /// `cairn check` an author runs is where it has to show up.
 #[test]
 fn the_contradiction_needs_no_edition_pin() {
-    let fixture = Fixture::new(
+    let fixture = fixture(
         "nopin",
         "@requires version>=1.21\n@intended_targets [\"1.20.4\"]\n",
     );
@@ -110,7 +83,7 @@ fn the_contradiction_needs_no_edition_pin() {
 /// widely is not a file that cannot be built.
 #[test]
 fn part_of_the_list_below_the_floor_is_a_warning_and_exits_zero() {
-    let fixture = Fixture::new(
+    let fixture = fixture(
         "partial",
         "@requires version>=1.21\n@intended_targets [\"1.20.4\",\"1.21.4\"]\n",
     );
@@ -129,7 +102,7 @@ fn part_of_the_list_below_the_floor_is_a_warning_and_exits_zero() {
 /// mistake.
 #[test]
 fn a_version_no_target_names_is_reported_only_with_one_edition_in_scope() {
-    let fixture = Fixture::new("unsupported", "@intended_targets [\"1.19\"]\n");
+    let fixture = fixture("unsupported", "@intended_targets [\"1.19\"]\n");
     let (bare_code, _, bare_err) = run("check", &fixture, &[]);
     assert_eq!(bare_code, Some(0), "got: {bare_err}");
     assert!(
@@ -157,7 +130,7 @@ fn a_version_no_target_names_is_reported_only_with_one_edition_in_scope() {
 /// newest release and names no Bedrock release at all.
 #[test]
 fn the_pinned_edition_decides_which_table_weighs_the_list() {
-    let fixture = Fixture::new("cross", "@intended_targets [\"1.21.4\"]\n");
+    let fixture = fixture("cross", "@intended_targets [\"1.21.4\"]\n");
     let (java, _, java_err) = run("check", &fixture, &["--edition", "java"]);
     assert_eq!(java, Some(0));
     assert!(
@@ -178,7 +151,7 @@ fn the_pinned_edition_decides_which_table_weighs_the_list() {
 /// resolves it.
 #[test]
 fn compile_refuses_the_source_check_refuses() {
-    let fixture = Fixture::new(
+    let fixture = fixture(
         "compile",
         "@requires version>=1.21\n@intended_targets [\"1.20.4\"]\n",
     );
@@ -187,16 +160,16 @@ fn compile_refuses_the_source_check_refuses() {
         .arg(fixture.source())
         .args(["--edition", "java", "--target", "1.21"])
         .arg("--out")
-        .arg(fixture.dir.join("out"))
+        .arg(fixture.out())
         .arg("--lock")
-        .arg(fixture.dir.join("s.crn.lock"))
+        .arg(fixture.lock())
         .output()
         .expect("failed to invoke cairn binary");
     let stderr = String::from_utf8(out.stderr).expect("utf-8");
     assert_eq!(out.status.code(), Some(1), "got: {stderr}");
     assert!(stderr.contains("E_INTENDED_TARGET_CAP"), "got: {stderr}");
     assert!(
-        !fixture.dir.join("s.crn.lock").exists(),
+        !fixture.lock().exists(),
         "a refused source must not leave a lock reading `verified: true`",
     );
 }
@@ -206,7 +179,7 @@ fn compile_refuses_the_source_check_refuses() {
 /// that names versions was the one the report never mentioned.
 #[test]
 fn info_prints_the_declared_targets_beside_the_buildable_ones() {
-    let fixture = Fixture::new(
+    let fixture = fixture(
         "inforow",
         "@requires version>=1.20\n@intended_targets [\"1.20.4\",\"1.21.4\"]\n",
     );
@@ -227,7 +200,7 @@ fn info_prints_the_declared_targets_beside_the_buildable_ones() {
 /// second one answers the question.
 #[test]
 fn info_says_so_when_no_targets_are_declared() {
-    let fixture = Fixture::new("inforow-empty", "");
+    let fixture = fixture("inforow-empty", "");
     let (code, stdout, stderr) = run("info", &fixture, &[]);
     assert_eq!(code, Some(0), "got: {stderr}");
     assert!(
@@ -240,7 +213,7 @@ fn info_says_so_when_no_targets_are_declared() {
 /// consumer reads the declaration without parsing the text rows.
 #[test]
 fn the_json_report_carries_the_declared_targets() {
-    let fixture = Fixture::new("infojson", "@intended_targets [\"1.21.4\"]\n");
+    let fixture = fixture("infojson", "@intended_targets [\"1.21.4\"]\n");
     let (code, stdout, stderr) = run("info", &fixture, &["--format", "json"]);
     assert_eq!(code, Some(0), "got: {stderr}");
     let parsed: serde_json::Value = serde_json::from_str(&stdout).expect("valid JSON");
@@ -257,7 +230,7 @@ fn the_json_report_carries_the_declared_targets() {
 /// consumer taking the sentence apart.
 #[test]
 fn the_finding_carries_a_structured_payload() {
-    let fixture = Fixture::new(
+    let fixture = fixture(
         "json",
         "@requires version>=1.21\n@intended_targets [\"1.20.4\"]\n",
     );
@@ -286,7 +259,7 @@ fn the_finding_carries_a_structured_payload() {
 /// the floor anywhere.
 #[test]
 fn a_header_both_editions_judge_alike_is_reported_once() {
-    let fixture = Fixture::new(
+    let fixture = fixture(
         "dedup",
         "@requires version>=99.0\n@intended_targets [\"1.21\"]\n",
     );
@@ -309,7 +282,7 @@ fn a_header_both_editions_judge_alike_is_reported_once() {
 /// too weak.
 #[test]
 fn two_editions_disagreeing_about_reach_report_the_error() {
-    let fixture = Fixture::new(
+    let fixture = fixture(
         "reach",
         "@requires java version>=1.21.4\n@requires bedrock version>=1.21.60\n\
          @intended_targets [\"1.20.4\",\"1.21.4\",\"1.21.40\"]\n",
@@ -329,7 +302,7 @@ fn two_editions_disagreeing_about_reach_report_the_error() {
 /// computed, for a file Bedrock has nothing to say against.
 #[test]
 fn info_scoped_to_one_edition_is_not_refused_by_the_other() {
-    let fixture = Fixture::new(
+    let fixture = fixture(
         "scoped",
         "@requires version>=1.21\n@intended_targets [\"1.20.4\"]\n",
     );
@@ -358,7 +331,7 @@ fn info_scoped_to_one_edition_is_not_refused_by_the_other() {
 /// other's target, and nobody has said which is being asked.
 #[test]
 fn info_across_both_editions_does_not_name_an_unbuildable_version() {
-    let fixture = Fixture::new("bothscope", "@intended_targets [\"1.20.4\"]\n");
+    let fixture = fixture("bothscope", "@intended_targets [\"1.20.4\"]\n");
     let (code, _, stderr) = run("info", &fixture, &[]);
     assert_eq!(code, Some(0), "got: {stderr}");
     assert!(

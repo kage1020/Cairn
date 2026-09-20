@@ -348,6 +348,20 @@ impl Diagnostic {
     }
 }
 
+/// An Error-severity finding with one `Fix:` footer — the shape every
+/// refusal in the place-and-route passes takes. Debug-asserts the code
+/// really is an error, so a pass cannot elide a scope over a warning.
+pub(crate) fn error_with_footer(
+    code: DiagnosticCode,
+    span: Span,
+    primary: String,
+    footer: impl Into<String>,
+) -> Diagnostic {
+    let diag = Diagnostic::new(code, span, primary).with_footer(footer);
+    debug_assert_eq!(diag.severity(), Severity::Error);
+    diag
+}
+
 #[cfg(test)]
 mod tests {
     use strum::IntoEnumIterator;

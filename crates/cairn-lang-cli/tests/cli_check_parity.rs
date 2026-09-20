@@ -23,20 +23,11 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use tempfile::TempDir;
 
-fn cargo_bin() -> PathBuf {
-    PathBuf::from(env!("CARGO_BIN_EXE_cairn"))
-}
-
-fn examples_dir() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("..")
-        .join("..")
-        .join("examples")
-}
+mod common;
+use common::{cairn_argv, examples_dir};
 
 /// Shared prologue so each fixture differs only in the construct that trips
 /// its diagnostic. Named for its role rather than for the `@directive`
@@ -294,13 +285,6 @@ fn write_fixture(root: &Path, index: usize, source: &Source) -> PathBuf {
     path
 }
 
-fn run(args: &[&str]) -> std::process::Output {
-    Command::new(cargo_bin())
-        .args(args)
-        .output()
-        .expect("failed to invoke cairn binary")
-}
-
 fn exit_code(out: &std::process::Output) -> i32 {
     out.status.code().expect("process exited via a signal")
 }
@@ -312,7 +296,7 @@ type Reported = (u64, u64, String, String);
 
 /// Diagnostics from `cairn check --format json`, in emission order.
 fn check_stream(path: &Path) -> Vec<Reported> {
-    let out = run(&["check", path.to_str().unwrap(), "--format", "json"]);
+    let out = cairn_argv(&["check", path.to_str().unwrap(), "--format", "json"]);
     let stdout = String::from_utf8(out.stdout).expect("utf-8");
     let parsed: serde_json::Value = serde_json::from_str(&stdout).expect("valid JSON");
     parsed
@@ -393,7 +377,7 @@ fn parity_1_check_reports_each_fixture_code_exactly_once() {
             "{code}: fixture should trip exactly one error, got {errors:?}",
         );
         assert_eq!(errors[0].3, *code, "{code}: wrong code reported");
-        let out = run(&["check", path.to_str().unwrap()]);
+        let out = cairn_argv(&["check", path.to_str().unwrap()]);
         assert_eq!(exit_code(&out), 1, "{code}: check should exit 1");
     }
 }
@@ -418,7 +402,7 @@ fn parity_2_build_commands_replay_the_check_stream_verbatim() {
 
         for (name, args) in build_commands(path.to_str().unwrap(), out_dir.to_str().unwrap()) {
             let argv: Vec<&str> = args.iter().map(String::as_str).collect();
-            let out = run(&argv);
+            let out = cairn_argv(&argv);
             let stderr = String::from_utf8_lossy(&out.stderr).into_owned();
             let actual = stderr_stream(&stderr);
 
@@ -448,7 +432,7 @@ fn parity_3_build_commands_refuse_every_check_error() {
 
         for (name, args) in build_commands(path.to_str().unwrap(), out_dir.to_str().unwrap()) {
             let argv: Vec<&str> = args.iter().map(String::as_str).collect();
-            let out = run(&argv);
+            let out = cairn_argv(&argv);
             assert_eq!(
                 exit_code(&out),
                 1,
@@ -475,7 +459,7 @@ fn parity_4_a_refused_compile_leaves_no_artifact_and_no_lockfile() {
         let out_dir = path.parent().expect("fixture dir").join("out");
         fs::create_dir_all(&out_dir).expect("create out dir");
 
-        let out = run(&[
+        let out = cairn_argv(&[
             "compile",
             path.to_str().unwrap(),
             "--edition",
@@ -519,7 +503,7 @@ fn parity_5_a_template_only_library_compiles_to_nothing_without_complaint() {
     .expect("write library");
     let out_dir = tmp.path().join("out");
 
-    let out = run(&[
+    let out = cairn_argv(&[
         "compile",
         path.to_str().unwrap(),
         "--edition",
@@ -564,7 +548,7 @@ fn parity_6_a_partially_lowered_source_is_not_certified() {
     let out_dir = tmp.path().join("out");
     fs::create_dir_all(&out_dir).expect("create out dir");
 
-    let out = run(&[
+    let out = cairn_argv(&[
         "compile",
         path.to_str().unwrap(),
         "--edition",
@@ -610,7 +594,7 @@ fn parity_7_every_example_still_passes_all_four_commands() {
         fs::copy(&src, &work).expect("copy example");
         let path = work.to_str().unwrap();
 
-        let out = run(&["check", path]);
+        let out = cairn_argv(&["check", path]);
         assert_eq!(
             exit_code(&out),
             0,
@@ -622,7 +606,7 @@ fn parity_7_every_example_still_passes_all_four_commands() {
         let out_dir = tmp.path().join(format!("out-{}", name.to_string_lossy()));
         for (cmd, args) in build_commands(path, out_dir.to_str().unwrap()) {
             let argv: Vec<&str> = args.iter().map(String::as_str).collect();
-            let out = run(&argv);
+            let out = cairn_argv(&argv);
             let stderr = String::from_utf8_lossy(&out.stderr).into_owned();
             assert_eq!(
                 exit_code(&out),
@@ -658,7 +642,7 @@ fn parity_8_a_pinned_check_reports_exactly_what_the_compile_reports() {
         let source = path.to_str().unwrap();
         let out_dir = path.parent().expect("fixture dir").join("out");
 
-        let checked = run(&[
+        let checked = cairn_argv(&[
             "check",
             source,
             "--edition",
@@ -686,7 +670,7 @@ fn parity_8_a_pinned_check_reports_exactly_what_the_compile_reports() {
             .collect();
         assert!(!expected.is_empty(), "{code}: pinned check reports nothing");
 
-        let out = run(&[
+        let out = cairn_argv(&[
             "compile",
             source,
             "--edition",

@@ -18,16 +18,8 @@ use std::process::Command;
 
 use tempfile::TempDir;
 
-fn cargo_bin() -> PathBuf {
-    PathBuf::from(env!("CARGO_BIN_EXE_cairn"))
-}
-
-fn examples_dir() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("..")
-        .join("..")
-        .join("examples")
-}
+mod common;
+use common::{cargo_bin, examples_dir};
 
 /// Every regular file under `dir`, keyed by name, so a snapshot can be
 /// compared byte-for-byte before and after a failed run.

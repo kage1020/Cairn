@@ -38,18 +38,18 @@ pub fn compute_diagnostics(uri: &lsp_types::Uri, source: &str) -> Vec<lsp_types:
         Err(err) => {
             let lines = LineStarts::new(source);
             let diagnostic = diagnose_parse_failure(source, &lines, &err);
-            return vec![convert(uri, source, &index, &diagnostic)];
+            return vec![to_lsp_diagnostic(uri, source, &index, &diagnostic)];
         }
     };
     let ir = lower(&module);
     check(&module, &ir, None)
         .iter()
-        .map(|d| convert(uri, source, &index, d))
+        .map(|d| to_lsp_diagnostic(uri, source, &index, d))
         .collect()
 }
 
 /// Map one core [`CoreDiagnostic`] into the LSP shape.
-fn convert(
+fn to_lsp_diagnostic(
     uri: &lsp_types::Uri,
     source: &str,
     index: &LineIndex,

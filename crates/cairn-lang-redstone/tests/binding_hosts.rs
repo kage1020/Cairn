@@ -22,14 +22,10 @@
 //! well-formed binding is still in the wrong place — inside the
 //! `[selector]`.
 
-use cairn_lang_core::{lower, parse};
-use cairn_lang_redstone::{DiagnosticCode, SynthOutput, synthesize};
+use cairn_lang_redstone::{DiagnosticCode, SynthOutput};
 
-fn synth_source(source: &str) -> SynthOutput {
-    let module = parse(source).expect("parse");
-    let intent = lower(&module);
-    synthesize(&intent)
-}
+mod common;
+use common::synth_source;
 
 fn codes(out: &SynthOutput) -> Vec<&'static str> {
     out.diagnostics.iter().map(|d| d.code.as_str()).collect()

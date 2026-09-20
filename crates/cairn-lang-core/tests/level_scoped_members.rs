@@ -15,25 +15,10 @@
 //! volume of a source that never mentioned it. Anything in between is the
 //! shape of this bug.
 
-use cairn_lang_core::block_array::{BlockArray, BlockArrayIr, lower_to_block_array};
-use cairn_lang_core::{lower, parse, resolve};
+use cairn_lang_core::block_array::BlockArrayIr;
 
-fn lowered(source: &str) -> BlockArrayIr {
-    let module = parse(source).expect("parse");
-    let ir = lower(&module);
-    let resolution = resolve(&ir, None);
-    lower_to_block_array(&ir, &resolution, None)
-}
-
-/// The single structure the sources below declare.
-fn only_structure(ir: &BlockArrayIr) -> &BlockArray {
-    assert_eq!(
-        ir.structures.len(),
-        1,
-        "these sources declare exactly one struct",
-    );
-    ir.structures.values().next().expect("one structure")
-}
+mod common;
+use common::{lowered, only_structure};
 
 fn defer_reasons(ir: &BlockArrayIr) -> Vec<String> {
     ir.diagnostics.iter().map(|d| d.primary.clone()).collect()

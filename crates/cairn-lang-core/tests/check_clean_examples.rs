@@ -2,45 +2,24 @@
 //!
 //! If a future change introduces a diagnostic against `cottage.crn` (or any
 //! other example) without also updating the example to match the new rule,
-//! one of these assertions catches it before release. The shipped examples
-//! also define the "what shape of input do we promise to support" surface,
-//! so this suite doubles as the contract for that promise.
+//! this sweep catches it before release. The shipped examples also define
+//! the "what shape of input do we promise to support" surface, so this
+//! suite doubles as the contract for that promise.
+//!
+//! The sweep reads `examples/` rather than naming files, so a new example
+//! is covered the moment it lands; the guard in [`common::examples`]
+//! refuses a set too small to be the shipped one.
 
-use cairn_lang_core::{check, lower, parse};
-
-fn check_example(filename: &str) {
-    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("..")
-        .join("..")
-        .join("examples")
-        .join(filename);
-    let source =
-        std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
-    let module = parse(&source).unwrap_or_else(|e| panic!("parse {filename}: {e}"));
-    let ir = lower(&module);
-    let diagnostics = check(&module, &ir, None);
-    assert!(
-        diagnostics.is_empty(),
-        "example `{filename}` must lint clean, got: {diagnostics:#?}",
-    );
-}
+mod common;
+use common::{diagnose, examples};
 
 #[test]
-fn cottage_is_clean() {
-    check_example("cottage.crn");
-}
-
-#[test]
-fn themed_tower_is_clean() {
-    check_example("themed-tower.crn");
-}
-
-#[test]
-fn village_is_clean() {
-    check_example("village.crn");
-}
-
-#[test]
-fn redstone_door_is_clean() {
-    check_example("redstone-door.crn");
+fn every_shipped_example_is_clean() {
+    for (name, source) in examples() {
+        let diagnostics = diagnose(&source);
+        assert!(
+            diagnostics.is_empty(),
+            "example `{name}` must lint clean, got: {diagnostics:#?}",
+        );
+    }
 }

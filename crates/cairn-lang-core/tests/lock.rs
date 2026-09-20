@@ -229,12 +229,6 @@ fn lockfile_yaml_rejects_legacy_string_walkway_endpoint() {
 }
 
 #[test]
-fn l7_hash_zero_matches_canonical_string() {
-    // AC L7: zero hash is the spec-defined sentinel.
-    assert_eq!(HashHex::zero().as_str(), HashHex::ZERO_STR);
-}
-
-#[test]
 fn hash_parse_rejects_missing_prefix() {
     let err = HashHex::parse("deadbeef").expect_err("missing prefix");
     assert_eq!(err, HashParseError::MissingPrefix);

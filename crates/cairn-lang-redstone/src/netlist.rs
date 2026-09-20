@@ -24,6 +24,7 @@ use crate::netlist_ir::{
     CellNode, CellPortDriver, LogicalCell, NetRef, NetlistInput, NetlistIr, NetlistOutput,
     PortName, ScopedNetlistIr,
 };
+use crate::saturating_index;
 
 /// Lower a [`ScopedLogicIr`] to a [`ScopedNetlistIr`].
 ///
@@ -43,7 +44,7 @@ pub fn compile_netlist(scoped: &ScopedLogicIr) -> ScopedNetlistIr {
 
 fn compile_scope(ir: &LogicIr) -> NetlistIr {
     let mut netlist = NetlistIr::new();
-    let inputs_len = safe_index(ir.inputs.len());
+    let inputs_len = saturating_index(ir.inputs.len());
 
     for port in &ir.inputs {
         netlist.inputs.push(NetlistInput {
@@ -53,7 +54,7 @@ fn compile_scope(ir: &LogicIr) -> NetlistIr {
     }
 
     for (idx, node) in ir.nodes.iter().enumerate() {
-        let node_index = safe_index(idx);
+        let node_index = saturating_index(idx);
         netlist.cells.push(gate_to_cell(
             node.kind,
             node.span.clone(),
@@ -62,7 +63,7 @@ fn compile_scope(ir: &LogicIr) -> NetlistIr {
         ));
     }
 
-    let cells_len = safe_index(netlist.cells.len());
+    let cells_len = saturating_index(netlist.cells.len());
     for port in &ir.outputs {
         netlist.outputs.push(NetlistOutput {
             name: port.name.clone(),
@@ -78,14 +79,6 @@ fn compile_scope(ir: &LogicIr) -> NetlistIr {
     }
 
     netlist
-}
-
-/// Saturating `usize -> u32` matching [`crate::synth`]'s helper: a
-/// `.crn` big enough to overflow `u32` is well past any Cairn build the
-/// compiler will practically finish, so clamp rather than panic on
-/// adversarial input.
-fn safe_index(len: usize) -> u32 {
-    u32::try_from(len).unwrap_or(u32::MAX)
 }
 
 /// Rewrite one Logic IR [`SignalRef`] into a Netlist IR [`NetRef`],

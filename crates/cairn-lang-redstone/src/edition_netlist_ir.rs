@@ -26,8 +26,7 @@ use cairn_lang_core::Edition;
 use cairn_lang_core::ast::DottedRef;
 use cairn_lang_core::error::Span;
 use indexmap::IndexMap;
-use serde::ser::SerializeMap;
-use serde::{Serialize, Serializer};
+use serde::Serialize;
 
 use crate::logic_ir::ScopeKind;
 use crate::netlist_ir::{CellPortDriver, NetRef, NetlistInput, NetlistOutput};
@@ -261,20 +260,9 @@ pub struct EditionNetlistIr {
     /// consumers see a uniform shape across all three IRs.
     #[serde(
         skip_serializing_if = "IndexMap::is_empty",
-        serialize_with = "serialize_signal_defs"
+        serialize_with = "crate::logic_ir::serialize_signal_defs"
     )]
     pub signal_defs: IndexMap<DottedRef, NetRef>,
-}
-
-fn serialize_signal_defs<S: Serializer>(
-    defs: &IndexMap<DottedRef, NetRef>,
-    serializer: S,
-) -> Result<S::Ok, S::Error> {
-    let mut map = serializer.serialize_map(Some(defs.len()))?;
-    for (name, net) in defs {
-        map.serialize_entry(&name.to_string(), net)?;
-    }
-    map.end()
 }
 
 impl EditionNetlistIr {

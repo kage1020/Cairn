@@ -219,13 +219,20 @@ pub struct LogicIr {
     pub signal_defs: IndexMap<DottedRef, SignalRef>,
 }
 
-fn serialize_signal_defs<S: Serializer>(
-    defs: &IndexMap<DottedRef, SignalRef>,
+/// Serialise a `signal_defs` map as a JSON object keyed by the dotted
+/// signal name flattened with `.` — a raw [`IndexMap<DottedRef, _>`]
+/// would serialise the key as a JSON array, which is not a legal object
+/// key. Shared by every IR in the pipeline so the shape is uniform.
+/// Relies on `DottedRef::to_string` being injective on the names that
+/// reach the map: the synth pass only inserts distinct `sig.X` names (a
+/// second insert would already have raised `E_LOGIC_MULTIPLE_DRIVERS`).
+pub(crate) fn serialize_signal_defs<S: Serializer, V: Serialize>(
+    defs: &IndexMap<DottedRef, V>,
     serializer: S,
 ) -> Result<S::Ok, S::Error> {
     let mut map = serializer.serialize_map(Some(defs.len()))?;
-    for (name, sig) in defs {
-        map.serialize_entry(&name.to_string(), sig)?;
+    for (name, value) in defs {
+        map.serialize_entry(&name.to_string(), value)?;
     }
     map.end()
 }

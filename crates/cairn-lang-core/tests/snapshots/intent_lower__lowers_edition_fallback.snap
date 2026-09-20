@@ -1,0 +1,84 @@
+---
+source: crates/cairn-lang-core/tests/intent_lower.rs
+expression: lower_source(&source)
+---
+semantic_level: grouped
+headers:
+  - kind: Cairn
+    version: "2026.06"
+  - kind: Requires
+    requirement: version>=1.20
+themes:
+  - name: shop_java
+    slots:
+      floor:
+        kind: Token
+        value: floor.stone.smooth
+      wall:
+        kind: Token
+        value: wall.stone.cobble
+      floating_text:
+        kind: Token
+        value: sign.oak
+    selectors: []
+  - name: shop_bedrock
+    slots:
+      floor:
+        kind: Token
+        value: floor.stone.smooth
+      wall:
+        kind: Token
+        value: wall.stone.cobble
+      floating_text:
+        kind: Token
+        value: sign.oak_wall
+    selectors: []
+defs: []
+sites: []
+structs:
+  - name: shop
+    size:
+      w: 5
+      h: 5
+    args: {}
+    members:
+      - role:
+          kind: Floor
+        mat_slot: floor
+        intent_state: {}
+      - class: outer
+        role:
+          kind: Walls
+        mat_slot: wall
+        intent_state:
+          height:
+            kind: Int
+            value: 3
+      - role:
+          kind: Door
+        intent_state:
+          side:
+            kind: Ident
+            value: front
+          at:
+            kind: Ident
+            value: center
+      - class: display
+        role:
+          kind: Window
+        mat_slot: floating_text
+        intent_state:
+          side:
+            kind: Ident
+            value: front
+          offset:
+            kind: Int
+            value: 2
+          y:
+            kind: Int
+            value: 3
+          size:
+            kind: Size
+            value:
+              w: 1
+              h: 1

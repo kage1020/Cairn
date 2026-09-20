@@ -14,19 +14,10 @@
 //! what the later line declared, and told the author to look down the file
 //! for the definition that was above them all along.
 
-use cairn_lang_core::{lower, parse};
-use cairn_lang_redstone::{DiagnosticCode, ScopeKind, SignalRef, SynthOutput, synthesize};
+use cairn_lang_redstone::{DiagnosticCode, ScopeKind, SignalRef};
 
-fn synth_source(source: &str) -> SynthOutput {
-    let module = parse(source).expect("parse");
-    let intent = lower(&module);
-    synthesize(&intent)
-}
-
-/// 1-based line of a byte offset, counted the way the source reads.
-fn line_of(source: &str, offset: usize) -> usize {
-    source[..offset].bytes().filter(|b| *b == b'\n').count() + 1
-}
+mod common;
+use common::{line_of, synth_source};
 
 const NESTED_AFTER_TOP_LEVEL: &str = "\
 @cairn 2026.06

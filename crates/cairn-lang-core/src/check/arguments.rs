@@ -66,7 +66,7 @@ use std::collections::{BTreeSet, HashMap};
 use crate::ast::ValueKind;
 use crate::intent::{IntentModule, Member, SelectorValue};
 use crate::prose::or_list;
-use crate::suggest::nearest_match;
+use crate::suggest::{did_you_mean_note, nearest_match};
 
 use super::{Diagnostic, DiagnosticCode, DiagnosticNote, DiagnosticSink};
 
@@ -292,12 +292,7 @@ fn unknown_argument(
     // `E_UNKNOWN_KEYWORD` uses, so a reader who has seen one knows where
     // to look in the other.
     let mut notes = Vec::with_capacity(2);
-    if let Some(suggested) = nearest_match(key, accepted.iter().copied()) {
-        notes.push(DiagnosticNote {
-            span: None,
-            message: format!("did you mean `{suggested}`?"),
-        });
-    }
+    notes.extend(nearest_match(key, accepted.iter().copied()).map(did_you_mean_note));
     notes.push(DiagnosticNote {
         span: None,
         message: format!("expected one of: {}", accepted.join(", ")),
@@ -327,10 +322,7 @@ fn coined_near_miss(
         span: span.clone(),
         primary: format!("`{key}=` is not an argument `{keyword}` reads"),
         notes: vec![
-            DiagnosticNote {
-                span: None,
-                message: format!("did you mean `{suggested}`?"),
-            },
+            did_you_mean_note(suggested),
             DiagnosticNote {
                 span: None,
                 message: format!(

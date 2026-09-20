@@ -16,67 +16,15 @@
 //! time; the `cairn_lang_redstone::delay` module doc sets out the
 //! difference.
 
-use std::path::PathBuf;
-
 use cairn_lang_core::Edition;
 use cairn_lang_core::check::Severity;
-use cairn_lang_core::{lower, parse};
 use cairn_lang_redstone::{
     DiagnosticCode, MAX_ATTENUATION_SEGMENT, PlacedCellNode, ScopedPlacementIr, compile_delay,
-    compile_edition_netlist, compile_netlist, compile_placement, compile_routing, synthesize,
 };
 
 mod common;
 
-use common::normalize_stage_tags;
-
-fn load_example(name: &str) -> String {
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("..")
-        .join("..")
-        .join("examples")
-        .join(name);
-    std::fs::read_to_string(&path).unwrap_or_else(|err| panic!("read {}: {err}", path.display()))
-}
-
-fn routed_from_source(source: &str, edition: Edition) -> ScopedPlacementIr {
-    let module = parse(source).expect("parse");
-    let intent = lower(&module);
-    let synth = synthesize(&intent);
-    assert!(
-        synth
-            .diagnostics
-            .iter()
-            .all(|d| d.severity() != Severity::Error),
-        "fixture must synth cleanly: {:?}",
-        synth.diagnostics,
-    );
-    let netlist = compile_netlist(&synth.scoped);
-    let edition_netlist = compile_edition_netlist(&netlist, edition);
-    let placement = compile_placement(&edition_netlist, &intent);
-    assert!(
-        placement.diagnostics.is_empty(),
-        "fixture must place cleanly (delay tests are downstream of placement): {:?}",
-        placement.diagnostics,
-    );
-    let routing = compile_routing(&placement.scoped);
-    // One warning rides through, by code rather than by severity: a
-    // scope whose nets climbed past each other carries
-    // `W_ROUTE_CROSS_LAYER_CLEARANCE`, which names the pairs for the
-    // physical tile layer and elides nothing. A refusal would take the
-    // scope out of the IR these tests read, and a warning routing has
-    // yet to grow is worth hearing about here rather than passing
-    // unread.
-    assert!(
-        routing
-            .diagnostics
-            .iter()
-            .all(|d| d.code == DiagnosticCode::RouteCrossLayerClearance),
-        "fixture must route with nothing but the cross-layer advisory (delay tests are downstream of routing): {:?}",
-        routing.diagnostics,
-    );
-    routing.scoped
-}
+use common::{load_example, normalize_stage_tags, routed_from_source};
 
 /// AC1 — `examples/redstone-door.crn` compiled for Java: the sole
 /// `JavaRepeaterOr` cell picks up `local_delay_ticks = Some(1)` — base 1 tick
