@@ -1,8 +1,8 @@
 //! Routed Placement IR → delayed Placement IR lowering (delay insertion).
 //!
-//! Stage 3 of the five-stage place-and-route pipeline `spec/redstone`
-//! §14.5 lays out. Rebuilds every net's routed tree (the routing pass
-//! stores only the summed `wire_length`; the trees are cheap to rebuild
+//! Stage 3 of the five-stage pipeline `spec/redstone` "Place-and-route"
+//! lays out. Rebuilds every net's routed tree (the routing pass stores
+//! only the summed `wire_length`; the trees are cheap to rebuild
 //! and would bloat the JSON if stored) and rewrites every cell's
 //! [`crate::placement_ir::PlacedCellNode::local_delay_ticks`] from `None`
 //! to `Some(base delay + implicit buffer ticks)`:
@@ -34,8 +34,8 @@
 //! driver, so the two part company whenever more than one incoming net
 //! carries a buffer or any driver is itself a cell. Nothing in this crate
 //! computes an arrival time, and nothing should read this field as one —
-//! `assert latency(...)` (§14.7) is a path latency for the simulator pass
-//! to evaluate.
+//! `assert latency(...)` (`spec/redstone` "Verification") is a path
+//! latency for the simulator pass to evaluate.
 //!
 //! `E_ATTENUATION_LIMIT` fires when a single segment exceeds the v1
 //! sanity cap [`MAX_ATTENUATION_SEGMENT`]: it asks for a buffer chain
@@ -58,10 +58,11 @@ use crate::placement_ir::{
 };
 use crate::routing_geometry::{Router, sum_over_driving_nets};
 
-/// Signal-attenuation ceiling per dust segment (`spec/redstone` §14.5
-/// "signal attenuation limit of 15"). A dust source starts at strength
-/// 15 and decays one unit per block, so a segment of at most this many
-/// blocks reaches the sink at strength ≥ 1 without a buffer repeater.
+/// Signal-attenuation ceiling per dust segment (`spec/redstone`
+/// "Place-and-route" — "signal attenuation limit of 15"). A dust source
+/// starts at strength 15 and decays one unit per block, so a segment of
+/// at most this many blocks reaches the sink at strength ≥ 1 without a
+/// buffer repeater.
 pub const DUST_ATTENUATION_LIMIT: u32 = 15;
 
 /// Tick delay added by one implicit buffer repeater. Matches the

@@ -9,8 +9,9 @@ use crate::error::{Position, Span};
 /// Severity of a single [`Diagnostic`].
 ///
 /// `Error` participates in the `cairn check` exit code (any error → exit 1);
-/// `Warning` does not. Stable per `spec/lint.md` §11.3: errors are things
-/// that, left alone, cause unintended results; warnings are advisory drift.
+/// `Warning` does not. Stable per `spec/lint` "Error vs warning": errors are
+/// things that, left alone, cause unintended results; warnings are advisory
+/// drift.
 /// Both variants ship in the public enum so a new `Warning` code can land
 /// without changing the discriminant a downstream matcher already pinned.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -144,9 +145,9 @@ pub enum DiagnosticCode {
     /// A statement carrying bare positional values in a form that takes
     /// none.
     ///
-    /// Spec §5.1 requires `key=value` for everything after the command
-    /// keyword; `connect FROM.PORT to TO.PORT` is the single exception and
-    /// is checked by `E_CONNECT_ARITY` instead. The line-based parser
+    /// `spec/syntax` "Lexical" requires `key=value` for everything after the
+    /// command keyword; `connect FROM.PORT to TO.PORT` is the single exception
+    /// and is checked by `E_CONNECT_ARITY` instead. The line-based parser
     /// collects any bare token into `positional` and every reader but
     /// `connect`'s ignores that list, so a dropped `=` (`height 3`) or a
     /// spec-forbidden positional form (`window front G 2 2 2x2`) changes
@@ -159,7 +160,8 @@ pub enum DiagnosticCode {
     /// author cannot tell, because the line is still in the file. The
     /// grammar is `version>=X` and only that: a floor composes with other
     /// floors by taking the strictest, which no other operator does
-    /// (spec syntax §5.3, versioning-editions §10.4).
+    /// (`spec/syntax` "Headers", `spec/versioning-editions` "Fail-loud and
+    /// minimum-version inference").
     ///
     /// Not to be confused with `E_REQUIRES_CONFLICT`, which the spec
     /// reserves for a declared floor contradicting the registry-*inferred*
@@ -206,12 +208,13 @@ pub enum DiagnosticCode {
     /// `mat_slot=NAME` references a slot the applied theme does not declare.
     UnresolvedSlot,
     /// `slot NAME -> VALUE` whose VALUE is neither a canonical nor an
-    /// abstract material token (see `spec/materials-themes.md` §7.2).
+    /// abstract material token (see `spec/materials-themes` "Canonical
+    /// vocabulary").
     ///
     /// Error rather than advisory: the slot binds to nothing, so every
     /// `mat_slot=NAME` pointing at it lowers to air. A theme whose slots
     /// are all mistyped builds a hollow shell of the requested extent —
-    /// the "implicit dropping" `spec/lint.md` §11.3 forbids, and not
+    /// the "implicit dropping" `spec/lint` "Error vs warning" forbids, and not
     /// something the author can see in an exit code that stayed 0.
     UnknownSlotTarget,
     /// `theme` selector rule that does not match any member in the file.
@@ -221,7 +224,7 @@ pub enum DiagnosticCode {
     /// material it would have had with the rule deleted. Nothing is
     /// dropped and the build is exactly what the rest of the source
     /// asked for — the finding is about the author's intent, which is
-    /// the advisory half of `spec/lint.md` §11.3.
+    /// the advisory half of `spec/lint` "Error vs warning".
     ThemeSelectorUnmatched,
     /// A member role the block-array lowering pass does not yet handle
     /// (door/window/roof/...). Surfaces during `cairn lower` so a partial
@@ -252,7 +255,7 @@ pub enum DiagnosticCode {
     /// that fails to lower for any other reason still gets both findings,
     /// because they are then two repairs.
     ///
-    /// Where it sits against `spec/lint.md` §11.3, and why it is a
+    /// Where it sits against `spec/lint` "Error vs warning", and why it is a
     /// warning, is argued once on [`Self::severity`] rather than twice.
     IgnoredArgument,
     /// A struct/def scope has no theme bound to it, so every `mat_slot=`
@@ -267,20 +270,20 @@ pub enum DiagnosticCode {
     /// library callers (LSP highlighting, `cairn check` without a pack).
     AbstractTokenDeferred,
     /// A `mat_slot=` resolved to an abstract material token that the registry
-    /// pack's materials catalog does not declare. Fail-loud per spec §7.2:
-    /// the cell cannot lower silently to air when a pack was offered, so the
-    /// build stops with a structured suggestion towards the closest known
-    /// token.
+    /// pack's materials catalog does not declare. Fail-loud per
+    /// `spec/materials-themes` "Canonical vocabulary": the cell cannot lower
+    /// silently to air when a pack was offered, so the build stops with a
+    /// structured suggestion towards the closest known token.
     UnknownAbstractToken,
     /// A `mat_slot=` resolved to a block id the compile's target does not
-    /// declare. Fail-loud per spec versioning-editions §10.4 ("unknown IDs
-    /// ... are hard errors"): the id would otherwise be written into a
-    /// structure file the game loads as air, with nothing to explain the
-    /// hole. Distinct from `UnknownAbstractToken`, which fires one step
-    /// earlier when the abstract token itself is undeclared — this variant
-    /// fires on an id that resolved cleanly and simply does not exist in
-    /// that `(edition, version)`, whether the author or the pack's catalog
-    /// chose it.
+    /// declare. Fail-loud per `spec/versioning-editions` "Fail-loud and
+    /// minimum-version inference" ("unknown IDs ... are hard errors"): the id
+    /// would otherwise be written into a structure file the game loads as air,
+    /// with nothing to explain the hole. Distinct from `UnknownAbstractToken`,
+    /// which fires one step earlier when the abstract token itself is
+    /// undeclared — this variant fires on an id that resolved cleanly and
+    /// simply does not exist in that `(edition, version)`, whether the author
+    /// or the pack's catalog chose it.
     ///
     /// Only raised when the run pinned a target — `cairn compile --target`
     /// and `cairn check --edition E --target V`. `cairn info`, `cairn
@@ -291,17 +294,18 @@ pub enum DiagnosticCode {
     /// that cannot carry them — a sloped roof or an eave `stair` bound to
     /// something outside the stair family.
     ///
-    /// Error, and by the first clause of §11.3 rather than the last. The
-    /// pass is not the incomplete side: `gable` / `shed` / `hip` lowering
-    /// is finished, and what it is being asked for does not exist. Adopting
-    /// the id writes a blockstate no version of the game has; substituting
-    /// the fallback species builds a roof out of a material nobody asked
-    /// for. Both are the silent substitution §10.4 forbids, and a warning
-    /// does not make either loud: the lockfile still says `verified: true`,
-    /// there is no `--deny-warnings`, and the one machine-readable surface
-    /// that carries a lowering finding at all is `cairn check --target
-    /// --format json`, which an unpinned check — the invocation a CI job
-    /// writes by default — is not.
+    /// Error, and by the first clause of `spec/lint` "Error vs warning"
+    /// rather than the last. The pass is not the incomplete side: `gable` /
+    /// `shed` / `hip` lowering is finished, and what it is being asked for
+    /// does not exist. Adopting the id writes a blockstate no version of the
+    /// game has; substituting the fallback species builds a roof out of a
+    /// material nobody asked for. Both are the silent substitution
+    /// `spec/versioning-editions` "Fail-loud and minimum-version inference"
+    /// forbids, and a warning does not make either loud: the lockfile still
+    /// says `verified: true`, there is no `--deny-warnings`, and the one
+    /// machine-readable surface that carries a lowering finding at all is
+    /// `cairn check --target --format json`, which an unpinned check — the
+    /// invocation a CI job writes by default — is not.
     ///
     /// Whose mistake it is rides in `data` (`slot` and `token`), the way
     /// [`Self::UnknownId`] carries `origin` — a pack that maps a token onto
@@ -328,10 +332,12 @@ pub enum DiagnosticCode {
     /// Fail-loud because the per-place colour scheme would otherwise vanish
     /// silently; carries a nearest-match suggestion when one fits.
     UnresolvedThemeRef,
-    /// The module declares a theme, but under the pinned edition none of
-    /// its per-edition variants (spec versioning-editions §10.7) can bind.
+    /// The module declares a theme, but under the pinned edition none of its
+    /// per-edition variants (`spec/versioning-editions` "Java / Bedrock
+    /// portability") can bind.
     ///
-    /// Error, and for the reason §10.4 gives: the alternative to stopping
+    /// Error, and for the reason the same chapter's "Fail-loud and
+    /// minimum-version inference" gives: the alternative to stopping
     /// is binding the other edition's variant — which routes, say,
     /// Bedrock-only slot values into a Java `.nbt` — or binding nothing,
     /// which builds the requested extent out of air. Both are silent
@@ -344,11 +350,11 @@ pub enum DiagnosticCode {
     ///
     /// Warning, not an error: binding whichever variant the pin selects is
     /// what the author almost certainly wants — that is the pinned edition's
-    /// variant when the module has one, and the unsuffixed theme when it
-    /// does not — and §10.7 asks the semantic layer to stay edition-neutral
-    /// anyway. But an explicit name silently becoming a different name is
-    /// worth one line, and the fix — write the logical name — is the
-    /// spelling §10.7 prescribes.
+    /// variant when the module has one, and the unsuffixed theme when it does
+    /// not — and `spec/versioning-editions` "Java / Bedrock portability" asks
+    /// the semantic layer to stay edition-neutral anyway. But an explicit name
+    /// silently becoming a different name is worth one line, and the fix —
+    /// write the logical name — is the spelling that section prescribes.
     ThemeVariantRebound,
     /// A scope's derived voxel extent exceeds
     /// [`crate::block_array::MAX_STRUCTURE_VOLUME`], so the pass skips it
@@ -389,8 +395,8 @@ pub enum DiagnosticCode {
     DuplicatePlaceId,
     /// A `place` line carries either an `at=` value other than `origin` or
     /// combines `at=` with `east_of=` / `north_of=`. Origin selectors are
-    /// mutually exclusive per spec §9.3 so the placement coordinate is
-    /// unambiguous.
+    /// mutually exclusive per `spec/components-editing-sites` "Multi-building
+    /// with `site`" so the placement coordinate is unambiguous.
     InvalidPlaceOrigin,
     /// A `def NAME` is never referenced by any `place use=NAME`. The def
     /// itself lowers to no voxels (defs are templates), so this is advisory
@@ -458,8 +464,8 @@ pub enum DiagnosticCode {
     ConnectArity,
     /// Two members evaluated in the same phase wrote one voxel to different
     /// blocks, so the block the build keeps is the one whose line comes
-    /// last. `spec/compilation.md` §4.1 opens by promising that "order
-    /// accidents are eliminated" and then grants last-wins to "local
+    /// last. `spec/compilation` "Phase evaluation" opens by promising that
+    /// "order accidents are eliminated" and then grants last-wins to "local
     /// overrides within the same phase" — an author restating a member is
     /// the case that grant is for, and two footprints that happen to
     /// intersect is not, yet the grid cannot tell them apart. Warned rather
@@ -516,7 +522,7 @@ pub enum DiagnosticCode {
     /// a version floor the same file declares.
     ///
     /// A warning because the header is "a hint, not a verification record"
-    /// (`spec/syntax.md` §5.3) and the versions above the floor still
+    /// (`spec/syntax` "Headers") and the versions above the floor still
     /// build: the list reaches past the floor at one end, which is a wish
     /// stated too widely rather than a file that cannot be built. Shares
     /// its name with [`Self::IntendedTargetCap`] because it is the same
@@ -610,14 +616,14 @@ impl DiagnosticCode {
     /// **The** severity for the code: every emission site reads it from
     /// here rather than writing a literal, so reclassifying a code is one
     /// edit and cannot leave a pass disagreeing with the ledger. Pinned by
-    /// `every_code_is_classified_against_spec_11_3` below, which partitions
-    /// the whole enum rather than whatever a corpus happens to reach — with
-    /// [`Diagnostic::severity`] reading this function there is no
-    /// per-finding value left for a fixture to disagree with, which
+    /// `every_code_is_classified_against_the_error_vs_warning_rule` below,
+    /// which partitions the whole enum rather than whatever a corpus happens
+    /// to reach — with [`Diagnostic::severity`] reading this function there is
+    /// no per-finding value left for a fixture to disagree with, which
     /// `tests/diagnostic_text.rs` records from the other side.
     ///
-    /// `spec/lint.md` §11.3 draws the line at the *build*: a finding is an
-    /// error when leaving it alone yields something other than what the
+    /// `spec/lint` "Error vs warning" draws the line at the *build*: a finding
+    /// is an error when leaving it alone yields something other than what the
     /// source asked for — a concept that is absent, an id that resolves to
     /// nothing, a value outside its domain — because silent substitution
     /// and implicit dropping are forbidden. Everything else is a warning:
@@ -628,8 +634,8 @@ impl DiagnosticCode {
     /// incomplete side and `cairn compile` refuses separately rather than
     /// certifying a partial build.
     ///
-    /// `W_IGNORED_ARGUMENT` sits on the line. §11.3's error clause covers
-    /// a value dropped and a default substituted, which is the build
+    /// `W_IGNORED_ARGUMENT` sits on the line. That section's error clause
+    /// covers a value dropped and a default substituted, which is the build
     /// differing from the source — but the clause forbids *silent*
     /// substitution, and this code is the announcement, so the letter
     /// cuts both ways. It is a warning because it replaces a
@@ -638,7 +644,7 @@ impl DiagnosticCode {
     /// an argument key the compiler does not recognise waits on — those
     /// are unreported outside the actuator-patch keys, and every source
     /// carrying one builds today — and the two want one decision rather
-    /// than two. §11.3 records the same.
+    /// than two. That section records the same.
     ///
     /// Its routed-past shape lands on the warning side by a second argument
     /// as well. A key outside the vocabulary names nothing and has one
@@ -654,7 +660,8 @@ impl DiagnosticCode {
     /// `E_UNKNOWN_ABSTRACT_TOKEN` is the one lowering code that is an
     /// error: when a registry pack *was* offered but does not declare the
     /// bound token, falling back to air would hide a typo the pack author
-    /// needs to fix (spec §7.2's fail-loud rule).
+    /// needs to fix (the fail-loud rule of `spec/materials-themes` "Canonical
+    /// vocabulary").
     #[must_use]
     pub fn severity(self) -> Severity {
         match self {
@@ -762,9 +769,9 @@ pub enum DiagnosticData {
     ///
     /// Carried because "insert the missing keys" is the obvious quick-fix
     /// for this code, and recovering the set from the rendered sentence is
-    /// exactly the prose-parsing `spec/lint.md` §11.2 tells consumers to
-    /// avoid. Invariant: non-empty — a row that declares all three keys
-    /// produces no finding at all.
+    /// exactly the prose-parsing `spec/lint` "Machine-readable payload" tells
+    /// consumers to avoid. Invariant: non-empty — a row that declares all
+    /// three keys produces no finding at all.
     IncompletePlace {
         /// Missing key names (`id`, `use`, `theme`).
         missing: Vec<String>,
@@ -777,7 +784,8 @@ pub enum DiagnosticData {
     /// between them — replacing `<` with `>=` is a one-character edit a
     /// tool can offer, while a snapshot label is not repairable at all
     /// today. Telling them apart from the rendered sentence is the
-    /// prose-parsing `spec/lint.md` §11.2 tells consumers to avoid.
+    /// prose-parsing `spec/lint` "Machine-readable payload" tells consumers
+    /// to avoid.
     InvalidRequires {
         /// Stable name of the failure, from
         /// [`crate::resolve::RequirementError::kind`]:
@@ -797,8 +805,8 @@ pub enum DiagnosticData {
     /// same way so a consumer handling both version headers handles them
     /// alike: the repairs differ between a month of `13` and a
     /// four-component string, and telling them apart from the rendered
-    /// sentence is the prose-parsing `spec/lint.md` §11.2 tells consumers
-    /// to avoid.
+    /// sentence is the prose-parsing `spec/lint` "Machine-readable payload"
+    /// tells consumers to avoid.
     InvalidCairnVersion {
         /// Stable name of the failure, from
         /// [`crate::calver::LanguageVersionError::kind`]:
@@ -1386,7 +1394,7 @@ mod tests {
     }
 
     #[test]
-    fn every_code_is_classified_against_spec_11_3() {
+    fn every_code_is_classified_against_the_error_vs_warning_rule() {
         // Errors block a build; warnings are advisory. `severity` carries
         // the rule and the two borderline calls; this pins the resulting
         // partition so a reclassification is a deliberate edit here rather
@@ -1460,8 +1468,8 @@ mod tests {
             "the prefix is not the severity: `E_THEME_SELECTOR_UNMATCHED` is a \
              warning and most `W_` codes are partial-build degradations without \
              that being what the letter means, so neither shape is by itself a \
-             misclassification — but both are worth re-reading against §11.3 \
-             whenever one lands",
+             misclassification — but both are worth re-reading against \
+             spec/lint \"Error vs warning\" whenever one lands",
         );
     }
 
@@ -1503,12 +1511,12 @@ mod tests {
 
     #[test]
     fn unknown_id_payload_omits_the_halves_it_does_not_have() {
-        // `spec/lint.md` §11.2 documents both optional fields as absent
-        // rather than `null`, and the two absences mean distinct things: no
-        // `token` says the author wrote the id, no `suggestion` says the
-        // target has nothing near it. A `null` would read as "unknown" for
-        // both. `origin` is never optional — it is what separates the three
-        // cases, so a consumer always has it.
+        // `spec/lint` "Machine-readable payload" documents both optional
+        // fields as absent rather than `null`, and the two absences mean
+        // distinct things: no `token` says the author wrote the id, no
+        // `suggestion` says the target has nothing near it. A `null` would
+        // read as "unknown" for both. `origin` is never optional — it is what
+        // separates the three cases, so a consumer always has it.
         let authored = serde_json::to_value(DiagnosticData::UnknownId {
             id: "minecraft:light".to_owned(),
             registry: "bedrock 1.21.60".to_owned(),

@@ -8,7 +8,7 @@
 //! the shared [`Severity`] rendering and the `code.as_str()` convention
 //! adopted below.
 //!
-//! Message prose follows the self-correction triple from `spec/lint` §11:
+//! Message prose follows the self-correction triple from `spec/lint`:
 //! what is wrong, valid alternatives, suggested fix. The primary string
 //! carries the first clause; the alternatives and the suggestion land in
 //! [`DiagnosticNote`]s so the human-readable output still reads as three
@@ -70,21 +70,22 @@ pub enum DiagnosticCode {
     /// enclosing struct / def
     /// declared no `circuit region=<label> void=<N>` reservation (or the
     /// enclosing scope had no `size=WxH` for the reservation to sit
-    /// inside). Fail-loud per `spec/redstone` §14.5 — silently placing
-    /// cells "somewhere" would produce voxels outside the author's
+    /// inside). Fail-loud per `spec/redstone` "Place-and-route" — silently
+    /// placing cells "somewhere" would produce voxels outside the author's
     /// declared footprint. Fix: add a `circuit region=` line with a
     /// non-empty `region=` label and a `void=` of at least 1, and give
     /// the enclosing scope a `size=WxH` header. The label names the
-    /// reservation and is the author's to choose — §14.5's own example
-    /// is `region=basement`, which is not a member keyword — so it is
-    /// checked for being present and non-empty, nothing more.
+    /// reservation and is the author's to choose — that pipeline's own
+    /// example is `region=basement`, which is not a member keyword — so it
+    /// is checked for being present and non-empty, nothing more.
     NoCircuitRegion,
     /// The synthesised netlist for a scope does not fit its
-    /// `circuit region=<label> void=<N>` reservation. `spec/redstone`
-    /// §14.5's canonical failure: routing cannot be confined to the
-    /// reserved region, so the pass fails loud with the self-correction
-    /// triple ("increase `void`", "enlarge region", "split into multiple
-    /// `circuit` blocks"). Five shapes reach it — the reserved volume
+    /// `circuit region=<label> void=<N>` reservation. This is the canonical
+    /// failure of `spec/redstone` "Place-and-route": routing cannot be
+    /// confined to the reserved region, so the pass fails loud with the
+    /// self-correction triple ("increase `void`", "enlarge region", "split
+    /// into multiple `circuit` blocks"). Five shapes reach it — the
+    /// reserved volume
     /// is short of the netlist's estimated footprint; the reserved row
     /// is shorter than the spaced single-row layout needs, which is
     /// twice the cell count and one more; the reservation is too
@@ -92,9 +93,9 @@ pub enum DiagnosticCode {
     /// too shallow for the I/O pads, which stand one per row; or a sink
     /// has no route from its driver that runs through neither a
     /// component nor another net's dust — nor within one step of that
-    /// dust in its own plane. §14.5 names area shortage as the example
-    /// rather than as the only shape, so all five take this code and
-    /// differ in what they say: raising `void` fixes the first and the
+    /// dust in its own plane. That pipeline names area shortage as the
+    /// example rather than as the only shape, so all five take this code
+    /// and differ in what they say: raising `void` fixes the first and the
     /// last, and cannot fix the three in between.
     RouteCongestion,
     /// Two of a scope's nets run within one step of each other across
@@ -102,8 +103,8 @@ pub enum DiagnosticCode {
     /// step across, which is the staircase dust climbs. Advisory
     /// because it is not a fault in the layout: the routing pass keeps
     /// two nets one step apart *in one plane*, and `spec/redstone`
-    /// §14.5 makes separating two a layer apart the physical tile
-    /// layer's obligation, because whether the upper strand reads the
+    /// "Place-and-route" makes separating two a layer apart the physical
+    /// tile layer's obligation, because whether the upper strand reads the
     /// lower one depends on what is standing between them and the
     /// pseudo-2.5D model carries no answer. The escape is what makes
     /// the pairs: a net climbing to clear another lands over it, or
@@ -121,10 +122,11 @@ pub enum DiagnosticCode {
     /// output-pad coord, measured along the routed path rather than as
     /// the straight-line distance between its ends) exceeds the v1
     /// sanity cap
-    /// for implicit buffer-repeater insertion. `spec/redstone` §14.5
-    /// stage 3 lets segments longer than the 15-block dust attenuation
-    /// limit be covered by buffer repeaters silently; this code fires
-    /// only when the segment is so long that the buffer chain
+    /// for implicit buffer-repeater insertion. Stage 3 of the
+    /// `spec/redstone` "Place-and-route" pipeline lets segments longer
+    /// than the 15-block dust attenuation limit be covered by buffer
+    /// repeaters silently; this code fires only when the segment is so
+    /// long that the buffer chain
     /// materialising it would be longer than the cap
     /// [`crate::delay::MAX_ATTENUATION_SEGMENT`] sets, so the pass
     /// refuses instead of quietly counting an unrealisable chain into
@@ -150,24 +152,24 @@ pub enum DiagnosticCode {
     /// whose binding belongs after the brackets.
     ///
     /// The first is a `-> value` sensor tail, or one of the actuator
-    /// argument keys `spec/redstone` §14.2 lists, on the wrong
+    /// argument keys `spec/redstone` "Signal binding" lists, on the wrong
     /// component. Asked before the value is looked at: no edit to the
     /// value makes `walls` carry a tail, so reporting the value first
     /// would send the author round the loop.
     ///
     /// The second is `door[id=front,opened_by=sig.x]`. The brackets pick
     /// a member that already exists and the binding is written after
-    /// them, which is the shape §14.2 uses;
+    /// them, which is the shape that section uses;
     /// `block_array::recognize_actuator_patch` refuses any selector
     /// attribute but `id=` for the door patch, and this is the same
-    /// answer for every host. §14.2 pairs each binding with the
+    /// answer for every host. That section pairs each binding with the
     /// component that carries it — `opened_by=` with `door`, `lit_by=`
     /// with `lamp`, `powered_by=` with `piston`, `fired_by=` with
     /// `dispenser`, and the sensor tail with a sensor — and the front end
     /// used to read the argument's *value* only, so `walls powered_by=`
     /// and `window -> sig.x` both became live ports on members with no
-    /// component behind them. Of the components §14.2 names, only `door`
-    /// and `pressure_plate` are keywords the surface accepts today;
+    /// component behind them. Of the components that section names, only
+    /// `door` and `pressure_plate` are keywords the surface accepts today;
     /// `lever`, `button`, `daylight`, `observer`, `lamp`, `piston`, and
     /// `dispenser` are not, so the three actuator keys other than
     /// `opened_by=` have no legal host at all yet. Fix: move the binding
@@ -191,9 +193,10 @@ pub enum DiagnosticCode {
     /// adding `sig.` would repair.
     LogicInvalidSignal,
     /// An argument whose value is a `sig.`-headed reference sits under a
-    /// key that is not one of §14.2's actuator keys. The value says the
-    /// author meant to wire a signal; the key means nothing reads it, so
-    /// the actuator silently disappears and only the now-unconsumed
+    /// key that is not one of the actuator keys in `spec/redstone`
+    /// "Signal binding". The value says the author meant to wire a signal;
+    /// the key means nothing reads it, so the actuator silently disappears
+    /// and only the now-unconsumed
     /// signal is mentioned. A typo (`oepend_by=`) gets a `did you mean`
     /// note; a key from another vocabulary entirely gets the list. Fix:
     /// correct the key, or drop the argument if the member is not an

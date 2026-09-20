@@ -8,15 +8,16 @@
 //! once, looks up the scope's [`cairn_lang_core::CircuitRegion`], and
 //! assigns each [`crate::edition_netlist_ir::EditionCellNode`] an
 //! integer [`CellCoord`] inside the reservation — the first stage of
-//! the five-stage place-and-route pipeline `spec/redstone` §14.5 lays
-//! out (Placement → Steiner routing → Delay insertion → Crossing
+//! the five-stage pipeline `spec/redstone` "Place-and-route" lays out
+//! (Placement → Steiner routing → Delay insertion → Crossing
 //! legalization → Edition legalization).
 //!
 //! Delay is not carried at the placement stage itself. Per
-//! `spec/redstone` §14.4 delay is determined "for the first time in
-//! the Placement IR" once wire length is known; wire length is the
-//! output of the routing pass (Steiner routing, stage 2 of §14.5) and
-//! is folded into `local_delay_ticks` by the delay-insertion pass
+//! `spec/redstone` "Time model" delay is determined "for the first
+//! time in the Placement IR" once wire length is known; wire length is
+//! the output of the routing pass (Steiner routing, stage 2 of that
+//! pipeline) and is folded into `local_delay_ticks` by the
+//! delay-insertion pass
 //! ([`crate::delay::compile_delay`], stage 3), so
 //! [`PlacedCellNode::wire_length`] and [`PlacedCellNode::local_delay_ticks`]
 //! are reserved as `Option`s that the placement pass leaves `None`.
@@ -32,7 +33,7 @@
 //! and missing-reservation refusal (`E_NO_CIRCUIT_REGION`) fire here —
 //! this is the first pass with a physical footprint to measure against.
 //! Attenuation limits (dust segments exceeding 15 blocks) belong to
-//! [`crate::delay::compile_delay`], stage 3 of §14.5, which fires
+//! [`crate::delay::compile_delay`], stage 3 of that pipeline, which fires
 //! `E_ATTENUATION_LIMIT` against the routed segment length.
 
 use std::fmt;
@@ -48,10 +49,11 @@ use crate::edition_netlist_ir::EditionCell;
 use crate::logic_ir::ScopeKind;
 use crate::netlist_ir::{CellPortDriver, NetRef, NetlistInput, PortName};
 
-/// Which of `spec/redstone` §14.5's three pseudo-2.5D layers a
-/// coordinate lives on. `Plane` is the ground layer every cell coord
-/// and every pad sits on; `Bridge` is the horizontal escape layer
-/// above it; `Via` is the vertical tap between the two.
+/// Which of the three pseudo-2.5D layers in `spec/redstone`
+/// "Place-and-route" a coordinate lives on. `Plane` is the ground
+/// layer every cell coord and every pad sits on; `Bridge` is the
+/// horizontal escape layer above it; `Via` is the vertical tap between
+/// the two.
 ///
 /// Cell coords are `Plane` by construction — the placement pass never
 /// stamps `Bridge` / `Via` on a cell body. Everything else the
@@ -61,7 +63,7 @@ use crate::netlist_ir::{CellPortDriver, NetRef, NetlistInput, PortName};
 /// at one voxel are one map key rather than two.
 /// Serialising as the enum's stable lowercase string (`plane` /
 /// `bridge` / `via`) keeps the JSON wire form small and matches the
-/// vocabulary spec §14.5 uses.
+/// vocabulary `spec/redstone` "Place-and-route" uses.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum RouteLayer {
     /// Ground layer — every cell coord, every pad, and every coord
@@ -79,8 +81,9 @@ pub enum RouteLayer {
     /// materialises `Via` in v1: a climb is a step between two coords
     /// rather than a coord of its own, so there is no ramp to name.
     /// Kept in the enum so a downstream consumer can match exhaustively
-    /// against the full §14.5 vocabulary; a subsequent pass that grows
-    /// `Via` producers is `#[non_exhaustive]`-safe.
+    /// against the full `spec/redstone` "Place-and-route" vocabulary; a
+    /// subsequent pass that grows `Via` producers is
+    /// `#[non_exhaustive]`-safe.
     Via,
 }
 
@@ -97,8 +100,9 @@ impl RouteLayer {
     }
 
     /// Stable lowercase string form used in the JSON wire format and
-    /// matched by downstream tooling. Mirrors the vocabulary spec
-    /// §14.5 uses when it introduces the three concepts.
+    /// matched by downstream tooling. Mirrors the vocabulary
+    /// `spec/redstone` "Place-and-route" uses when it introduces the
+    /// three concepts.
     #[must_use]
     pub const fn as_str(self) -> &'static str {
         match self {
@@ -394,8 +398,8 @@ impl Serialize for PlacementStage {
 }
 
 /// Progressive state of a [`PlacedCellNode`] as it moves through the
-/// first four of the five stages of the place-and-route pipeline
-/// (`spec/redstone` §14.5 — Placement → Steiner routing → Delay
+/// first four of the five stages of the pipeline `spec/redstone`
+/// "Place-and-route" lays out (Placement → Steiner routing → Delay
 /// insertion → Crossing legalization → Edition legalization; the
 /// fifth stage is future work and does not yet have a variant).
 ///
@@ -448,8 +452,8 @@ pub enum PlacementPhase {
     Delayed {
         /// Preserved from [`Self::Routed`].
         wire_length: u32,
-        /// The owning node's base delay (`spec/redstone` §14.4; zero
-        /// for an actuator pad) plus `BUFFER_REPEATER_TICKS` per
+        /// The owning node's base delay (`spec/redstone` "Time model";
+        /// zero for an actuator pad) plus `BUFFER_REPEATER_TICKS` per
         /// implicit buffer repeater on each distinct net feeding it.
         /// A local wire cost, not an arrival time — see the
         /// [`crate::delay`] module doc.

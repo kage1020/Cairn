@@ -133,10 +133,10 @@ const FIXTURES: &[(&str, &str, Verdict)] = &[
     ("theme_no_body", "theme empty:\n", Accept),
     // -- member-level version floors ----------------------------------
     //
-    // `spec/versioning-editions.md` §10.4 gives `def` and `theme` a floor
-    // of their own. Its expression is the opaque rest-of-line slice
-    // `@requires` takes, so the grammar\'s job here is *where* the line may
-    // stand, not what is on it.
+    // `spec/versioning-editions` "Fail-loud and minimum-version inference"
+    // gives `def` and `theme` a floor of their own. Its expression is the
+    // opaque rest-of-line slice `@requires` takes, so the grammar\'s job
+    // here is *where* the line may stand, not what is on it.
     (
         "def_member_requires",
         "def d size=2x2:\n  requires version>=1.21\n",

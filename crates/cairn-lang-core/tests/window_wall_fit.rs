@@ -9,10 +9,10 @@
 //! the first course, where the rectangle carves through the floor, and
 //! the air between two `level` courses, where it hangs glass in the open.
 //!
-//! `spec/components-editing-sites.md` §9.3.5 requires the walkway port to
-//! draw the same line as the openings pass — "a window that the openings
-//! pass would defer cannot anchor a walkway either" — so the last group
-//! here asserts the two answers case by case rather than each in
+//! `spec/components-editing-sites` "Ports and `connect`" requires the
+//! walkway port to draw the same line as the openings pass — "a window that
+//! the openings pass would defer cannot anchor a walkway either" — so the
+//! last group here asserts the two answers case by case rather than each in
 //! isolation. Two checks that agree today drift apart the moment one of
 //! them is edited alone; a matrix that compares them fails when they do.
 
@@ -302,10 +302,11 @@ fn a_window_on_the_floor_plane_does_not_anchor_a_walkway() {
 
 #[test]
 fn the_port_accepts_exactly_the_rectangles_the_openings_pass_carves() {
-    // §9.3.5's requirement, asserted as an equivalence rather than as two
-    // independent lists — the failure mode it guards against is one of
-    // the two limits being edited alone, which no test of either side by
-    // itself can see.
+    // The walkway-port requirement of
+    // `spec/components-editing-sites` "Ports and `connect`", asserted as an
+    // equivalence rather than as two independent lists — the failure mode it
+    // guards against is one of the two limits being edited alone, which no
+    // test of either side by itself can see.
     //
     // Every case here declares `walls` in the def body. The two tests
     // below carry the cases that used to fall outside the equivalence —

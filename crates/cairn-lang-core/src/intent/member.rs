@@ -1,10 +1,11 @@
 //! Named member of an Intent IR.
 //!
-//! Mirrors the spec's "rich member with invariants" (see `architecture.md`
-//! §3.2): every member knows its [`MemberRole`], may carry an `id` / `class` /
-//! `mat_slot`, holds an [`IntentState`] of raw `key=value` attributes, and
-//! reserves a [`ResolvedState`] slot that the lift pass fills in once
-//! materials and themes resolve.
+//! Mirrors the spec's "rich member with invariants" (see `spec/architecture`
+//! "The Intent IR is rich and carries invariants"): every member knows its
+//! [`MemberRole`], may carry an `id` / `class` / `mat_slot`, holds an
+//! [`IntentState`] of raw `key=value` attributes, and reserves a
+//! [`ResolvedState`] slot that the lift pass fills in once materials and themes
+//! resolve.
 
 use std::ops::{Deref, DerefMut};
 
@@ -319,7 +320,7 @@ impl ConnectEnd {
 /// top level: ordinary member commands, `logic` bindings, and `assert`
 /// properties. Defined as a struct rather than a `Vec` of one big sum so a
 /// `level` block whose body mixes all three flavours lowers without losing
-/// any of them (spec lint.md §11.3 forbids silent dropping).
+/// any of them (`spec/lint` "Error vs warning" forbids silent dropping).
 #[derive(Debug, Clone, Default, PartialEq, Serialize)]
 pub struct MemberBody {
     /// Nested members in declaration order.

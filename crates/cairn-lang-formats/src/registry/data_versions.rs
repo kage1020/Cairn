@@ -6,7 +6,8 @@
 //! today. Ordering an `@requires` floor needs every *release*, because a
 //! floor may name any of them and "inside the table's span, naming no row"
 //! is only the same fact as "not a release of this edition" when the table
-//! carries them all (`spec/versioning-editions.md` §10.4).
+//! carries them all (`spec/versioning-editions` "Fail-loud and
+//! minimum-version inference").
 //!
 //! Replaces the hardcoded `JAVA_TARGETS` array that lived in
 //! [`crate::data_version`] before the registry pack ingest landed. The

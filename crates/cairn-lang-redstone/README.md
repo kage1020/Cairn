@@ -24,11 +24,11 @@ Every placed cell records which of the last four passes touched it as a `Placeme
 
 Still to come: edition legalization, the tick simulator, and the QC/BUD refusal (`E_NO_PORTABLE_IMPL`).
 
-`local_delay_ticks` is a local cost, not a path latency: that cell's base delay plus the buffer repeaters on every net that drives it, summed, which is what crossing legalization's buffer blocks are checked against. A combinational cell settles when the *last* of its inputs arrives, so an arrival time maxes over the incoming nets and walks back through the upstream cells; nothing computes it yet, since `assert latency(sig.in -> sig.out)` ([redstone §14.7](https://cairn.kage1020.com/spec/redstone/)) is neither parsed nor evaluated.
+`local_delay_ticks` is a local cost, not a path latency: that cell's base delay plus the buffer repeaters on every net that drives it, summed, which is what crossing legalization's buffer blocks are checked against. A combinational cell settles when the *last* of its inputs arrives, so an arrival time maxes over the incoming nets and walks back through the upstream cells; nothing computes it yet, since `assert latency(sig.in -> sig.out)` ([redstone "Verification"](https://cairn.kage1020.com/spec/redstone/)) is neither parsed nor evaluated.
 
 ## Pipeline
 
-Four IR layers, with the cell library sitting between them ([redstone §14.8](https://cairn.kage1020.com/spec/redstone/), [architecture §3.3](https://cairn.kage1020.com/spec/architecture/)):
+Four IR layers, with the cell library sitting between them ([redstone "Connection to the IR and phases"](https://cairn.kage1020.com/spec/redstone/), [architecture "Redstone sub-layers"](https://cairn.kage1020.com/spec/architecture/)):
 
 ```
 Intent IR        logic declarations / circuit region / signal binding
@@ -43,19 +43,19 @@ Placement IR     cell coordinates + actual wire length — delay/tick first dete
 block-array IR   voxel reality of dust/repeater/torch/comparator
 ```
 
-The cell library is three-tier (`Logical Cell → Edition Cell → Physical Tile`), which confines every Java/Bedrock difference to the library alone ([redstone §14.6](https://cairn.kage1020.com/spec/redstone/)).
+The cell library is three-tier (`Logical Cell → Edition Cell → Physical Tile`), which confines every Java/Bedrock difference to the library alone ([redstone "Edition differences"](https://cairn.kage1020.com/spec/redstone/)).
 
 ## v1 scope
 
 - **Combinational**: `and` / `or` / `not` are synthesised end to end. `xor` / `nand` / `nor` / `mux` are reserved on the Logic IR and Netlist IR enums, but no surface syntax produces them yet.
 - **Curated sequential macros**: `latch` / `pulse` / `delay` / `edge_rising` / `edge_falling` / `counter`. Named in the spec, implemented nowhere yet.
-- **Verification**: truth-table, latency, and bounded-eventually temporal assertions ([redstone §14.7](https://cairn.kage1020.com/spec/redstone/)). An `assert` is checked for shape and for signals it names that nothing defines; evaluating one waits on the simulator.
+- **Verification**: truth-table, latency, and bounded-eventually temporal assertions ([redstone "Verification"](https://cairn.kage1020.com/spec/redstone/)). An `assert` is checked for shape and for signals it names that nothing defines; evaluating one waits on the simulator.
 
-Out of scope for v1, and dropped to plain placement or `raw`: general FSMs, CPU-class clocked assignment, and quasi-connectivity / BUD / update-order sensitive circuits ([redstone §14.6](https://cairn.kage1020.com/spec/redstone/)).
+Out of scope for v1, and dropped to plain placement or `raw`: general FSMs, CPU-class clocked assignment, and quasi-connectivity / BUD / update-order sensitive circuits ([redstone "Edition differences"](https://cairn.kage1020.com/spec/redstone/)).
 
 ## Verification loop
 
-`synth → sim → diff → patch`. The patch may rewrite placement hints, routing, and buffer repeaters only; **the Logic IR is never auto-modified** ([redstone §14.7](https://cairn.kage1020.com/spec/redstone/)). The simulator is to run per target edition, so one declaration gets checked against both the Java and the Bedrock implementation. Only the synthesis half of that loop exists today.
+`synth → sim → diff → patch`. The patch may rewrite placement hints, routing, and buffer repeaters only; **the Logic IR is never auto-modified** ([redstone "Verification"](https://cairn.kage1020.com/spec/redstone/)). The simulator is to run per target edition, so one declaration gets checked against both the Java and the Bedrock implementation. Only the synthesis half of that loop exists today.
 
 ## Dependencies
 

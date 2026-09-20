@@ -91,11 +91,12 @@ impl RawRequirement {
 
 /// One `requires version>=X` line inside a `def` or `theme` body.
 ///
-/// The member-level twin of [`Header::Requires`] (`spec/versioning-editions.md`
-/// §10.4). It carries the same verbatim expression, read by the same
-/// `parse_requirement`, and differs only in what it constrains: a module-level
-/// `@requires` is a floor on the file, while this one is a floor on the part
-/// that declares it and therefore on every build that instantiates that part.
+/// The member-level twin of [`Header::Requires`] (`spec/versioning-editions`
+/// "Fail-loud and minimum-version inference"). It carries the same verbatim
+/// expression, read by the same `parse_requirement`, and differs only in what it
+/// constrains: a module-level `@requires` is a floor on the file, while this one
+/// is a floor on the part that declares it and therefore on every build that
+/// instantiates that part.
 ///
 /// Held on the item rather than in its body statements because the word is
 /// not a member keyword and must not become one. `crate::intent`'s role
@@ -364,11 +365,12 @@ impl Item {
     /// The `requires version>=X` lines this item declares.
     ///
     /// Empty for `site` and `struct`, which refuse a line that reads as a
-    /// floor — `spec/versioning-editions.md` §10.4 gives it to `def` and
-    /// `theme`, the two kinds a build instantiates rather than *is*. An
-    /// empty slice rather than an `Option`, because a caller folding
-    /// floors over every item asks the same question of all four and the
-    /// answer for the other two is "none", not "not applicable".
+    /// floor — `spec/versioning-editions` "Fail-loud and minimum-version
+    /// inference" gives it to `def` and `theme`, the two kinds a build
+    /// instantiates rather than *is*. An empty slice rather than an `Option`,
+    /// because a caller folding floors over every item asks the same question
+    /// of all four and the answer for the other two is "none", not "not
+    /// applicable".
     #[must_use]
     pub fn requires(&self) -> &[MemberRequires] {
         match self {
@@ -445,7 +447,7 @@ pub enum Statement {
         /// shape worth catching.
         ///
         /// Empty for every well-formed command but `connect <ref> to <ref>`,
-        /// the one form with a reader for it (`spec/syntax.md` §5.1).
+        /// the one form with a reader for it (`spec/syntax` "Lexical").
         #[serde(skip_serializing_if = "Vec::is_empty")]
         positional: Vec<Value>,
         /// `key=value` arguments in source order.

@@ -16,7 +16,7 @@ use super::Dims;
 
 /// Which wall of a struct an opening cuts through.
 ///
-/// Sides follow `spec/syntax.md` §5.4: `front` = `+z`, `back` = `-z`,
+/// Sides follow `spec/syntax` "Selectors": `front` = `+z`, `back` = `-z`,
 /// `left` = `-x`, `right` = `+x`. The names are world-facing (a viewer
 /// outside the structure sees the front wall as the +z face).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -173,7 +173,7 @@ const SYNTACTIC_FIXTURES: &[(&str, Source)] = &[
         Source::WithPrologue("struct s size=5x5\n  walls class=outer mat_slot=wall hieght=3\n"),
     ),
     (
-        // `spec/syntax.md` §5.1's own forbidden example.
+        // The forbidden example `spec/syntax` "Lexical" gives.
         "E_UNEXPECTED_POSITIONAL",
         Source::WithPrologue("struct s size=5x5\n  window front G 2 2 2x2 mat_slot=wall\n"),
     ),

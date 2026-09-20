@@ -10,10 +10,10 @@
 //!
 //! Both spellings are walked: the `@requires` header, which is a floor on
 //! the file, and the member-level `requires` line a `def` or a `theme` may
-//! carry (`spec/versioning-editions.md` §10.4), which is a floor on that
-//! part and on every build instantiating it. One unreadable expression is
-//! one finding whichever of the two it was written as, so they share a
-//! code, a message, and this pass.
+//! carry (`spec/versioning-editions` "Fail-loud and minimum-version
+//! inference"), which is a floor on that part and on every build instantiating
+//! it. One unreadable expression is one finding whichever of the two it was
+//! written as, so they share a code, a message, and this pass.
 //!
 //! Only the surface AST is walked: neither form survives lowering — a
 //! header is not carried into the IR, and a member-level line is lifted

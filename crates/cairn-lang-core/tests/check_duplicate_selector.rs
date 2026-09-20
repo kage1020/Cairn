@@ -367,7 +367,8 @@ fn ds_12_rows_with_different_keywords_are_not_a_pair() {
 }
 
 /// The payload carries the rebound keys, so a quick-fix does not parse the
-/// sentence back apart — what `spec/lint.md` §11.2 exists to stop.
+/// sentence back apart — what `spec/lint` "Machine-readable payload" exists
+/// to stop.
 #[test]
 fn ds_13_the_payload_lists_the_rebound_keys() {
     let src = theme_with(

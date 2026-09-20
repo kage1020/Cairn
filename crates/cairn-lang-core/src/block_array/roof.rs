@@ -10,8 +10,9 @@
 //! per-voxel `BlockState` clone in the caller.
 //!
 //! The four kinds share their wall-top and overhang convention, but each
-//! one's exact ridge / corner rule lives in `spec/compilation.md` §4.3–4.6
-//! and is mirrored by the per-kind generator below.
+//! one's exact ridge / corner rule lives in `spec/compilation` — "Gable roof
+//! voxel rules", "Shed roof voxel rules", "Hip roof voxel rules" and "Flat
+//! roof voxel rules" — and is mirrored by the per-kind generator below.
 //!
 //! ## Common geometry conventions
 //!
@@ -245,7 +246,8 @@ pub enum StairFace {
     HighSlope,
     /// The single cap on an apex row where the two slopes converge —
     /// an odd short span. Keeps the low slope's facing, which is the
-    /// facing `spec/compilation.md` §4.3 picks for it. `half=top`.
+    /// facing `spec/compilation` "Gable roof voxel rules" picks for it.
+    /// `half=top`.
     Apex,
     /// Low-side cap of an even-span apex pair, facing *away* from the
     /// ridge. `half=top`.
@@ -291,7 +293,7 @@ pub fn gable_extra_height(short_span: u32) -> u32 {
 /// Choose the ridge axis for a given roof bounding box.
 ///
 /// The ridge runs along the longer axis so the slopes stay as short as
-/// possible. Ties break to `x` (spec/compilation.md §4.3).
+/// possible. Ties break to `x` (`spec/compilation` "Gable roof voxel rules").
 #[must_use]
 pub fn gable_ridge_axis(roof_w: u32, roof_h: u32) -> Axis {
     if roof_w >= roof_h { Axis::X } else { Axis::Z }
@@ -312,9 +314,10 @@ pub fn gable_stair_state(ridge_axis: Axis, face: StairFace) -> BlockState {
     // length of the roof along both outer faces.
     //
     // A converged apex is one cell wide, so both of its faces are outer
-    // ones and a stair can only serve one. The void is unavoidable
-    // there, and §4.3 settles which side keeps it by naming the low
-    // slope's facing rather than by weighing the two.
+    // ones and a stair can only serve one. The void is unavoidable there,
+    // and `spec/compilation` "Gable roof voxel rules" settles which side
+    // keeps it by naming the low slope's facing rather than by weighing the
+    // two.
     let facing = match (ridge_axis, face) {
         // x-ridge: short axis is z. Low slope is on -z; its riser faces
         // toward +z (south) — the upper-step side ends up on the inward
@@ -374,10 +377,10 @@ pub fn gable_voxels(roof_w: u32, roof_h: u32, wall_top: u32) -> Vec<GableVoxel> 
         let is_apex = layer > 0 && layer + 1 == layers;
 
         if converged {
-            // The two slopes meet on one row, so it is emitted once. At
-            // the apex that is §4.3's single cap; on layer 0 it is a
-            // short span of 1 — one row of slope, with no ridge to
-            // straddle.
+            // The two slopes meet on one row, so it is emitted once. At the
+            // apex that is the single cap of `spec/compilation` "Gable roof
+            // voxel rules"; on layer 0 it is a short span of 1 — one row of
+            // slope, with no ridge to straddle.
             let face = if is_apex {
                 StairFace::Apex
             } else {
@@ -948,10 +951,10 @@ mod tests {
             assert_eq!(v.pos.2, 4);
         }
         // A converged cap is one cell wide, so both of its faces are outer
-        // ones and a stair serves only one. `spec/compilation.md` §4.3
-        // settles it on the low slope's facing, which is the reason it is
-        // a face of its own rather than the even-span pair's low half —
-        // the pair's outward rule has two sides to choose between and
+        // ones and a stair serves only one. `spec/compilation` "Gable roof
+        // voxel rules" settles it on the low slope's facing, which is the
+        // reason it is a face of its own rather than the even-span pair's low
+        // half — the pair's outward rule has two sides to choose between and
         // this has none to spare.
         let state = gable_stair_state(Axis::X, StairFace::Apex);
         assert_eq!(state.properties.get("half").unwrap(), "top");
@@ -1125,9 +1128,9 @@ mod tests {
         // x) × `lo_z=1..=hi_z=2` (2 cells along z). The two-row ridge
         // band must all carry `HipFace::ApexRidge` and `hip_stair_state`
         // must give every cell `facing=south, half=top`, matching the
-        // spec §4.5 single-facing rule (no opposite-facing close-up like
-        // gable's even-span apex). This pins the "open V on even short
-        // span" behaviour as deliberate.
+        // single-facing rule of `spec/compilation` "Hip roof voxel rules" (no
+        // opposite-facing close-up like gable's even-span apex). This pins the
+        // "open V on even short span" behaviour as deliberate.
         let voxels = hip_voxels(8, 4, 4);
         let apex_y = 4 + hip_extra_height(8, 4);
         assert_eq!(apex_y, 6);

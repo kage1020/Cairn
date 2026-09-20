@@ -60,9 +60,10 @@ fn an_unknown_keyword_that_would_have_consumed_a_signal_leaves_no_unused_warning
 
 #[test]
 fn an_unknown_keyword_that_would_have_driven_a_signal_leaves_no_unbound_error() {
-    // The mirror on the driver side: `lever` is §14.2's sensor and not a
-    // keyword, so the tail is skipped — and the `logic` line reading
-    // `sig.w` must not be told the signal does not exist.
+    // The mirror on the driver side: `lever` is one of the sensors in
+    // `spec/redstone` "Signal binding" and not a keyword, so the tail is
+    // skipped — and the `logic` line reading `sig.w` must not be told the
+    // signal does not exist.
     let out = synth_source(&source(concat!(
         "  lever id=v side=front offset=1 y=1 -> sig.w\n",
         "  logic sig.x = not sig.w\n",

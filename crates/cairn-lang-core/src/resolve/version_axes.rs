@@ -1,6 +1,7 @@
 //! Computation of the three version axes reported by `cairn info`.
 //!
-//! Spec source: `spec/versioning-editions.md` §10.5. The three axes are:
+//! Spec source: `spec/versioning-editions`, the section on the three answers
+//! to "which version is it for?". The three axes are:
 //!
 //! 1. **registry-compatible range** `[Vmin, Vmax]` — the intersection of
 //!    every `since/until` over the tokens/states the file actually uses.
@@ -10,7 +11,7 @@
 //!    `cairn-lang-formats::portability` on the lowered block-array IR).
 //! 3. **semantic-sensitive members** — registry-valid IDs whose meaning or
 //!    behavior shifts at a known boundary version (the catalog half of
-//!    `spec/versioning-editions.md` §10.3).
+//!    `spec/versioning-editions` "Backend = data tables").
 //!
 //! Beside them sits **buildable targets**, which is not one of the three
 //! but the answer axis (2) deliberately does not give. Portability asks of
@@ -22,12 +23,13 @@
 //!
 //! Axis (1) is computed from the module's declared version floors — its
 //! `@requires` headers and the member-level `requires` lines of every part
-//! the build instantiates (`spec/versioning-editions.md` §10.4). Axis (2) is a pure
-//! forwarding of the caller's per-edition figures — the `core` crate does
-//! not itself depend on `cairn-lang-formats`, so the concrete
-//! `translate_states` lookup happens one crate up and is handed in as a
-//! `Vec<EditionPortability>`. Axis (3) remains structurally present but
-//! empty until the semantic-sensitivity catalog lands.
+//! the build instantiates (`spec/versioning-editions` "Fail-loud and
+//! minimum-version inference"). Axis (2) is a pure forwarding of the caller's
+//! per-edition figures — the `core` crate does not itself depend on
+//! `cairn-lang-formats`, so the concrete `translate_states` lookup happens one
+//! crate up and is handed in as a `Vec<EditionPortability>`. Axis (3) remains
+//! structurally present but empty until the semantic-sensitivity catalog
+//! lands.
 
 use std::collections::HashSet;
 
@@ -400,7 +402,7 @@ fn derive_min_version(module: &Module) -> String {
 /// to, in source order.
 ///
 /// Floors compose by taking the intersection: each line adds a constraint
-/// rather than displacing the one before (spec syntax §5.3), and
+/// rather than displacing the one before (`spec/syntax` "Headers"), and
 /// `[a, ∞) ∩ [b, ∞)` is `[max(a, b), ∞)`. They are returned as a list
 /// rather than folded to that maximum here, because the fold needs an
 /// ordering and the ordering is `DataVersion` — a per-edition table this
@@ -409,14 +411,14 @@ fn derive_min_version(module: &Module) -> String {
 /// same answer without ever comparing two floors to each other.
 ///
 /// **The list is the composite's, not the file header's.**
-/// `spec/versioning-editions.md` §10.4 gives a `def` and a `theme` a floor
-/// of their own, and says the minimum version of a composite is the max of
-/// its parts. So the walk is the module's `@requires` headers plus every
-/// part the build instantiates: a `def` some `place use=` names, and a
-/// `theme` some scope binds. That is what lets a library of templates carry
-/// its own requirements instead of every consumer restating them — a
-/// module-level `@requires` cannot, because it applies to the whole file
-/// rather than to the template.
+/// `spec/versioning-editions` "Fail-loud and minimum-version inference" gives
+/// a `def` and a `theme` a floor of their own, and says the minimum version
+/// of a composite is the max of its parts. So the walk is the module's
+/// `@requires` headers plus every part the build instantiates: a `def` some
+/// `place use=` names, and a `theme` some scope binds. That is what lets a
+/// library of templates carry its own requirements instead of every consumer
+/// restating them — a module-level `@requires` cannot, because it applies to
+/// the whole file rather than to the template.
 ///
 /// A part nothing instantiates contributes nothing. A `def` no `place`
 /// names builds no voxels (and earns `W_UNUSED_DEF`), and holding a build
@@ -778,7 +780,8 @@ impl VersionFloor {
     /// "this file" for a header, and the part for a member-level floor:
     /// "this file requires ..." for a floor the file inherited from one of
     /// its parts is the reading the composite rule
-    /// (`spec/versioning-editions.md` §10.4) exists to correct.
+    /// (`spec/versioning-editions` "Fail-loud and minimum-version inference")
+    /// exists to correct.
     #[must_use]
     pub fn declarer(&self) -> String {
         self.origin.part().map_or_else(
@@ -792,8 +795,8 @@ impl VersionFloor {
 ///
 /// Every floor rather than the one a caller is reporting: a candidate that
 /// clears that floor and trips the next one is a second refusal in a
-/// different spelling, and the closed set `spec/lint.md` §11.1 asks every
-/// message to carry has to be a set that builds.
+/// different spelling, and the closed set `spec/lint` "Diagnostic codes" asks
+/// every message to carry has to be a set that builds.
 ///
 /// A floor this edition's table cannot place refuses nothing here. It is
 /// its own refusal (`E_REQUIRES_UNORDERABLE`), reported against the

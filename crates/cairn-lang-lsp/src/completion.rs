@@ -9,14 +9,15 @@
 //! the source of truth, so suggestions cannot hallucinate identifiers).
 //!
 //! Context detection is a line-local text heuristic, not a parse: Cairn is
-//! strictly line-oriented (one line = one command, spec syntax §5.1), so the
-//! line prefix up to the cursor is grammatically sufficient — and the parser
-//! stops at its first error, which a document mid-keystroke almost always
-//! contains. The one cross-line lookup (which top-level item's body the
-//! cursor line sits in — and so which member keywords have a reader there)
-//! walks upward to the nearest indent-0 line, and `mat_slot=` values are collected by
-//! scanning `slot NAME -> TARGET` lines document-wide; a drift-guard test
-//! asserts that scan agrees with the parser on every shipped example.
+//! strictly line-oriented (one line = one command, `spec/syntax` "Lexical"),
+//! so the line prefix up to the cursor is grammatically sufficient — and the
+//! parser stops at its first error, which a document mid-keystroke almost
+//! always contains. The one cross-line lookup (which top-level item's body
+//! the cursor line sits in — and so which member keywords have a reader
+//! there) walks upward to the nearest indent-0 line, and `mat_slot=` values
+//! are collected by scanning `slot NAME -> TARGET` lines document-wide; a
+//! drift-guard test asserts that scan agrees with the parser on every
+//! shipped example.
 
 use std::collections::HashSet;
 

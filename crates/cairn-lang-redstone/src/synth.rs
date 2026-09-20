@@ -3,10 +3,10 @@
 //! Walks each scope of an [`IntentModule`], collects sensor bindings as
 //! [`InputPort`]s, actuator bindings as [`OutputPort`]s, and lowers every
 //! `logic sig.X = <expr>` line into a topologically ordered DAG of
-//! [`GateNode`]s. Diagnostics fire fail-loud per `spec/lint` §11.3: an
-//! unbound signal, a duplicate driver, or a cycle stops the scope from
-//! reaching the returned [`ScopedLogicIr`]; only warnings survive alongside
-//! a well-formed IR.
+//! [`GateNode`]s. Diagnostics fire fail-loud per `spec/lint`
+//! "Error vs warning": an unbound signal, a duplicate driver, or a cycle
+//! stops the scope from reaching the returned [`ScopedLogicIr`]; only
+//! warnings survive alongside a well-formed IR.
 //!
 //! Common subexpression elimination is done inline while lowering — two
 //! `logic` lines whose RHS builds the same gate over the same operands
@@ -14,9 +14,10 @@
 //! canonicalise operand order before the CSE lookup so
 //! `sig.a or sig.b` and `sig.b or sig.a` share a node too.
 //!
-//! Detection contract. `spec/redstone` §14.2 writes each binding on one
-//! component, and a binding elsewhere describes no circuit, so what a
-//! line is *for* is read from the line and then held to that:
+//! Detection contract. `spec/redstone` "Signal binding" writes each
+//! binding on one component, and a binding elsewhere describes no
+//! circuit, so what a line is *for* is read from the line and then held
+//! to that:
 //! - **Sensor**: a `-> value` tail on a member whose keyword is in
 //!   [`SENSOR_HOSTS`]. A follow-up recognizer for `lever` / `button` /
 //!   `daylight` / `observer` costs one entry in that table.
@@ -80,12 +81,13 @@ use cairn_lang_core::intent::{
 };
 use cairn_lang_core::suggest::nearest_match;
 
-/// Each actuator argument key from `spec/redstone` §14.2, paired with the
-/// component keyword that carries it.
+/// Each actuator argument key from `spec/redstone` "Signal binding",
+/// paired with the component keyword that carries it.
 ///
-/// §14.2 does not offer these keys as free-floating attributes: it writes
-/// each one on one component (`lamp ... lit_by=`, `piston ... powered_by=`,
-/// `door ... opened_by=`, `dispenser ... fired_by=`). Reading only the
+/// That section does not offer these keys as free-floating attributes: it
+/// writes each one on one component (`lamp ... lit_by=`,
+/// `piston ... powered_by=`, `door ... opened_by=`,
+/// `dispenser ... fired_by=`). Reading only the
 /// value made every member an actuator, so `walls ... powered_by=sig.x`
 /// became a live output port on a member with no component behind it.
 ///
@@ -105,9 +107,10 @@ pub const ACTUATOR_BINDINGS: &[(&str, &str)] = &[
 
 /// The component keywords that may carry a `->` sensor tail.
 ///
-/// §14.2's sensor set is `lever` / `button` / `daylight` / `observer`, none
-/// of which the surface accepts yet; `pressure_plate` is the one sensor the
-/// role table knows, and it is the only member a tail may sit on. Without
+/// The sensor set in `spec/redstone` "Signal binding" is `lever` /
+/// `button` / `daylight` / `observer`, none of which the surface accepts
+/// yet; `pressure_plate` is the one sensor the role table knows, and it is
+/// the only member a tail may sit on. Without
 /// the check a `walls ... -> sig.w` registered an input port and reached
 /// placement as a pad for a signal no component emits.
 /// Public for the same reason as [`ACTUATOR_BINDINGS`].
@@ -382,10 +385,11 @@ fn collect_member<'a>(m: &'a Member, scope: ScopeRef<'_>, out: &mut ScopeCollect
     }
 
     // Actuator: an `opened_by=` / `powered_by=` / ... argument on the
-    // component §14.2 pairs that key with. The key claims the binding on
-    // its own — the value used to have to be a `sig.X` dotted ref for this
-    // loop to look at the field at all, which is how a well-spelled key
-    // with a malformed value went straight past it.
+    // component `spec/redstone` "Signal binding" pairs that key with. The
+    // key claims the binding on its own — the value used to have to be a
+    // `sig.X` dotted ref for this loop to look at the field at all, which
+    // is how a well-spelled key with a malformed value went straight past
+    // it.
     for (key, vspan) in &m.intent_state.fields {
         let named = signal_named_by(&vspan.value);
         let Some(claim) = binding_claim(key, named) else {
@@ -427,8 +431,8 @@ fn collect_member<'a>(m: &'a Member, scope: ScopeRef<'_>, out: &mut ScopeCollect
     }
 
     // The `[selector]` carries the same `key=value` pairs and is not a
-    // binding site: §14.2 writes the actuator patch as
-    // `door[id=front] opened_by=sig.x`, with the binding after the
+    // binding site: `spec/redstone` "Signal binding" writes the actuator
+    // patch as `door[id=front] opened_by=sig.x`, with the binding after the
     // brackets, and `block_array`'s patch recogniser already refuses any
     // selector attribute but `id=`. Walked here for the same answer in
     // this pass's vocabulary, and for every host rather than the door
@@ -500,9 +504,10 @@ fn signal_named_by(value: &Value) -> Option<&DottedRef> {
 #[derive(Debug, Clone, Copy)]
 enum BindingClaim {
     /// The key is one of [`ACTUATOR_BINDINGS`], which is a binding whatever
-    /// the value says. Carries the component §14.2 pairs the key with —
-    /// `'static` because it comes from that table and from nowhere else,
-    /// which is what the borrow says and a lifetime parameter would not.
+    /// the value says. Carries the component `spec/redstone`
+    /// "Signal binding" pairs the key with — `'static` because it comes
+    /// from that table and from nowhere else, which is what the borrow says
+    /// and a lifetime parameter would not.
     Actuator(&'static str),
     /// The key is not a binding anyone reads, and the value is a signal —
     /// so the author meant to wire something and put it under a key that
@@ -674,8 +679,8 @@ fn diag_binding_inside_selector(
         ACTUATOR_BINDINGS
             .iter()
             .any(|(k, host)| *k == key && *host == member.role.keyword()),
-        "the `Fix:` below rebuilds the line with this key on this member, \
-         which only compiles for a key §14.2 pairs with it",
+        "the `Fix:` below rebuilds the line with this key on this member, which only \
+         compiles for a key `spec/redstone` \"Signal binding\" pairs with it",
     );
     Diagnostic::new(
         DiagnosticCode::LogicMisplacedBinding,
@@ -714,8 +719,8 @@ fn diag_misplaced_sensor(member: &Member, binding: &Value, scope: ScopeRef<'_>) 
     .with_note(member.span.clone(), "declared here")
     .with_footer(format!(
         "Fix: move the tail onto a sensor. `{hosts}` {verb} the sensor {noun} the surface \
-         accepts today; `spec/redstone` §14.2 also lists `lever`, `button`, `daylight`, \
-         and `observer`.",
+         accepts today; `spec/redstone` \"Signal binding\" also lists `lever`, `button`, \
+         `daylight`, and `observer`.",
         hosts = SENSOR_HOSTS.join("`, `"),
         verb = if SENSOR_HOSTS.len() == 1 { "is" } else { "are" },
         noun = if SENSOR_HOSTS.len() == 1 {
@@ -726,8 +731,8 @@ fn diag_misplaced_sensor(member: &Member, binding: &Value, scope: ScopeRef<'_>) 
     ))
 }
 
-/// An actuator key on a member that is not the component §14.2 pairs it
-/// with.
+/// An actuator key on a member that is not the component
+/// `spec/redstone` "Signal binding" pairs it with.
 fn diag_misplaced_actuator(
     member: &Member,
     key: &str,
@@ -1224,11 +1229,11 @@ fn audit_unused_signals(
     for act in actuators {
         consumed.insert(act.driver_name.clone());
     }
-    // A property observes wires — that is what §14.7 is for — so a signal
-    // an `assert` names is read even when no actuator reads it. Checking
-    // an assert's references and then not counting them would warn that a
-    // signal is unused in the one place the author wrote down what it is
-    // for.
+    // A property observes wires — that is what `spec/redstone`
+    // "Verification" is for — so a signal an `assert` names is read even
+    // when no actuator reads it. Checking an assert's references and then
+    // not counting them would warn that a signal is unused in the one place
+    // the author wrote down what it is for.
     for assertion in asserts {
         consumed.extend(assertion.signal_refs().into_iter().cloned());
     }

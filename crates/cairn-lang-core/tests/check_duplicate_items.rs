@@ -5,7 +5,8 @@
 //! statement args, member `id=`. Two `def hut` blocks, or two `@cairn`
 //! lines, reached the resolver with no diagnostic, and one of them was
 //! discarded: the resolver binds a name once, so the loser's body never
-//! reaches an artifact. `spec/lint.md` §11.3 forbids exactly that.
+//! reaches an artifact. `spec/lint` "Error vs warning" forbids exactly
+//! that.
 //!
 //! Two invariants are pinned here:
 //!

@@ -310,8 +310,9 @@ fn c8f_bedrock_themed_tower_degrades_stair_shape_but_compiles() {
     // themed-tower.crn's eave stairs use non-straight shapes
     // (`outer_left`/`outer_right`), which Bedrock has no state for. The
     // compile still succeeds (exit 0) but surfaces a W_INTENT_DEGRADED
-    // warning per dropped shape (spec §10.3 `dropped_states:[shape]` / §10.7),
-    // and the artifact is written.
+    // warning per dropped shape (`spec/versioning-editions`
+    // "Backend = data tables" `dropped_states:[shape]` and
+    // "Java / Bedrock portability"), and the artifact is written.
     let tmp = TempDir::new().expect("tempdir");
     let dst = tmp.path().join("themed-tower.crn");
     fs::copy(examples_dir().join("themed-tower.crn"), &dst).expect("copy themed-tower");
@@ -647,8 +648,9 @@ fn compile_all_examples_exit_zero() {
 ///   region=floor void=2` routing marker, and a `door[id=front]
 ///   opened_by=sig.open` actuator patch — the plate paints its voxels and
 ///   the other two are surface-guards for the logic pipeline.
-/// - `roof-shed/hip/flat.crn`: the roof voxelisers of §4.4–§4.6 of the
-///   compilation spec.
+/// - `roof-shed/hip/flat.crn`: the roof voxelisers of `spec/compilation`
+///   ("Shed roof voxel rules", "Hip roof voxel rules" and
+///   "Flat roof voxel rules").
 const DEFER_FREE_EXAMPLES: &[(&str, &str)] = &[
     ("cottage.crn", "cottage.nbt"),
     ("themed-tower.crn", "keep.nbt"),

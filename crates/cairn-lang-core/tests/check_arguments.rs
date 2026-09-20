@@ -160,9 +160,9 @@ fn a_selector_widens_one_keyword_and_not_the_others() {
 
 #[test]
 fn an_argument_the_spec_defines_and_nothing_reads_is_reported_as_ignored() {
-    // `window shape=` is in `spec/components-editing-sites` §9.2 and no
-    // pass reads it. Refusing it would refuse the spec; accepting it in
-    // silence is the defect this whole pass is about, one door along. The
+    // `window shape=` is in `spec/components-editing-sites` "Editing model"
+    // and no pass reads it. Refusing it would refuse the spec; accepting it
+    // in silence is the defect this whole pass is about, one door along. The
     // key is the author's to write and the gap is the implementation's, so
     // it is a warning and it names the consequence.
     let d = only("struct s size=9x7\n  window side=front y=2 offset=2 size=2x2 shape=arch\n");
@@ -258,9 +258,10 @@ fn a_selector_matched_conditional_key_is_not_reported() {
 
 #[test]
 fn place_takes_the_closed_set_the_spec_fixes_and_nothing_else() {
-    // `spec/components-editing-sites` §9.3.2 / §9.3.3: a name, what to
-    // instantiate, what to resolve materials against, and exactly one
-    // origin selector. §9.1 reserves parameterisation, which nothing
+    // `spec/components-editing-sites` "Origin selectors" and "Cross-scope
+    // references": a name, what to instantiate, what to resolve materials
+    // against, and exactly one origin selector. That chapter's "`def`, the
+    // component construct" reserves parameterisation, which nothing
     // forwards today — the day it lands, this is the arm that opens.
     let src = "def hut size=3x3:\n  floor mat_slot=floor\n\n\
                theme t:\n  slot floor -> @oak_planks\n\n\
@@ -441,12 +442,12 @@ fn a_stair_reads_the_height_it_is_written_at() {
 
 #[test]
 fn every_argument_the_spec_writes_on_a_known_keyword_is_accepted_and_reported() {
-    // `spec/entities` §8.2's worked example writes four arguments no pass
-    // reads. All four sit on keywords the role table knows, so all four are
-    // accepted and reported as ignored — applying the rule to one of them
-    // and refusing the rest is the inconsistency this pins. `painting`, on
-    // the line above them in that example, is not a keyword at all, and
-    // `E_UNKNOWN_KEYWORD` owns its whole line.
+    // The worked example in `spec/entities` "Anchor conventions" writes four
+    // arguments no pass reads. All four sit on keywords the role table
+    // knows, so all four are accepted and reported as ignored — applying the
+    // rule to one of them and refusing the rest is the inconsistency this
+    // pins. `painting`, on the line above them in that example, is not a
+    // keyword at all, and `E_UNKNOWN_KEYWORD` owns its whole line.
     for (line, key) in [
         (
             "  window side=front y=2 offset=4 size=3x3 shape=arch\n",

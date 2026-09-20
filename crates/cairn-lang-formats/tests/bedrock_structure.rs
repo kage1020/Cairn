@@ -210,10 +210,11 @@ fn last_palette_states(root: &Compound) -> &Compound {
 
 #[test]
 fn m4_unmappable_stateful_entry_fails_loud() {
-    // AC8: a stateful entry outside a mapped family is a hard error (spec
-    // versioning-editions §10.4 — no silent substitution/dropping) whose
-    // message carries the self-correction triple. Stairs are now mapped, so
-    // fail-loud is pinned on a non-stair stateful block.
+    // AC8: a stateful entry outside a mapped family is a hard error
+    // (`spec/versioning-editions` "Fail-loud and minimum-version inference"
+    // — no silent substitution/dropping) whose message carries the
+    // self-correction triple. Stairs are now mapped, so fail-loud is pinned
+    // on a non-stair stateful block.
     let mut door = BlockState::bare("minecraft:oak_door");
     door.properties
         .insert("facing".to_owned(), "north".to_owned());

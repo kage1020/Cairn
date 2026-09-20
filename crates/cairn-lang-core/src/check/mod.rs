@@ -75,12 +75,12 @@ use crate::intent::IntentModule;
 /// in it, and appending duplicates every one of them.
 ///
 /// The `edition` argument threads through to the resolver so per-edition
-/// theme-variant selection (spec versioning-editions §10.7) can pin the
-/// diagnostic set for a specific target. Pass `None` when no target has
-/// been picked yet (the CLI's `cairn check` without `--edition`); the
-/// resolver then unions slot names across variants of one logical theme
-/// so `mat_slot=` references that only one variant declares don't
-/// spuriously fire `E_UNRESOLVED_SLOT`.
+/// theme-variant selection (`spec/versioning-editions` "Java / Bedrock
+/// portability") can pin the diagnostic set for a specific target. Pass `None`
+/// when no target has been picked yet (the CLI's `cairn check` without
+/// `--edition`); the resolver then unions slot names across variants of one
+/// logical theme so `mat_slot=` references that only one variant declares
+/// don't spuriously fire `E_UNRESOLVED_SLOT`.
 #[must_use]
 pub fn check(module: &Module, ir: &IntentModule, edition: Option<Edition>) -> Vec<Diagnostic> {
     let mut sink = DiagnosticSink::new();

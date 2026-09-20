@@ -27,8 +27,10 @@
 //! [`crate::bedrock_state`]: the stair family's `facing` / `half` become
 //! Bedrock's `weirdo_direction` / `upside_down_bit`, and intent Bedrock
 //! cannot express (stair `shape`) is dropped with a degradation note rather
-//! than silently (spec versioning-editions §10.3 / §10.4 / §10.7). A block
-//! with properties outside a mapped family is still a hard error.
+//! than silently, per `spec/versioning-editions` "Backend = data tables",
+//! "Fail-loud and minimum-version inference" and "Java / Bedrock
+//! portability". A block with properties outside a mapped family is still a
+//! hard error.
 
 use cairn_lang_core::block_array::BlockArray;
 pub use cairn_lang_nbt::Compound;

@@ -1,9 +1,10 @@
 //! Integration tests for `cairn_lang_redstone::compile_edition_netlist`.
 //!
 //! Locks the observable behaviours of the Edition Netlist IR slice
-//! (`spec/redstone` §14.6 `Logical Cell → Edition Cell → Physical Tile`,
-//! second tier): the `examples/redstone-door.crn` happy path, per-edition
-//! mapping for every reachable `LogicalCell` (`And` / `Or` / `Not`), the
+//! (`spec/redstone` "Edition differences", `Logical Cell → Edition Cell →
+//! Physical Tile`, second tier): the `examples/redstone-door.crn` happy
+//! path, per-edition mapping for every reachable `LogicalCell` (`And` /
+//! `Or` / `Not`), the
 //! canonical port order carried through from the Netlist IR, the
 //! per-edition `*Unpinned` placeholders that stand in for the
 //! parser-unreachable cells (`Xor` / `Nand` / `Nor` / `Mux`), the

@@ -8,11 +8,12 @@
 //! exited 0 on a site whose buildings were simply absent.
 //!
 //! The keys are required rather than auto-filled. The auto-address of
-//! `spec/components-editing-sites.md` §9.2 derives from parent / role /
-//! side / level / offset and names nothing outside the body it sits in; a
-//! `place`'s `id=` is the name `east_of=` and `connect` refer to and the
-//! name its `.nbt` is written under (§9.3.4), so an invented one would be a
-//! name the author never wrote and cannot point at.
+//! `spec/components-editing-sites` "Editing model" derives from parent /
+//! role / side / level / offset and names nothing outside the body it sits
+//! in; a `place`'s `id=` is the name `east_of=` and `connect` refer to and
+//! the name its `.nbt` is written under (that chapter's "Output naming"),
+//! so an invented one would be a name the author never wrote and cannot
+//! point at.
 
 use cairn_lang_core::block_array::lower_to_block_array;
 use cairn_lang_core::{Diagnostic, DiagnosticCode, Severity, lower, parse, resolve};
@@ -121,8 +122,8 @@ fn ip_1b_each_note_explains_the_key_it_belongs_to() {
 }
 
 /// The structured payload carries the key set, so a quick-fix does not have
-/// to parse the sentence back apart — which `spec/lint.md` §11.2 exists to
-/// stop consumers doing.
+/// to parse the sentence back apart — which is what
+/// `spec/lint` "Machine-readable payload" exists to stop consumers doing.
 #[test]
 fn ip_1c_the_payload_lists_the_missing_keys() {
     let src = site_with("place east_of=anchor gap=4");

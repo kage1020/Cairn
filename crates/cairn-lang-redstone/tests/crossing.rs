@@ -1,7 +1,7 @@
 //! Integration tests for `cairn_lang_redstone::compile_crossing`.
 //!
 //! Locks the observable behaviours of the crossing-legalization slice
-//! (`spec/redstone` §14.5, stage 4 of place-and-route): the
+//! (stage 4 of the pipeline `spec/redstone` "Place-and-route"): the
 //! `examples/redstone-door.crn` happy path (per edition), empty-module
 //! pass-through, the JSON wire form staying byte-identical to the
 //! delayed IR apart from the `stage` tag when no buffer coord landed
@@ -143,8 +143,8 @@ struct chain size=60x5
 /// pad in front of it, and the row it comes round through is the row
 /// the cell drives its actuator out along. The cell's wire therefore
 /// climbs onto the bridge layer at its own doorstep and runs the
-/// length of the region up there — the escape §14.5 specifies, in the
-/// smallest circuit the corpus has.
+/// length of the region up there — the escape `spec/redstone`
+/// "Place-and-route" specifies, in the smallest circuit the corpus has.
 #[test]
 fn redstone_door_java_carries_no_buffers() {
     let source = load_example("redstone-door.crn");
@@ -321,10 +321,11 @@ fn json_output_byte_identical_apart_from_stage_tag_on_a_scope_with_escapes() {
 /// AC — two nets that want the coords beside one cell, in a
 /// reservation with no layer above the plane to climb to.
 ///
-/// The escape §14.5 specifies is "a bridge tile or a vertical layer",
-/// and `void=1` reserves neither. So the second net has to find its way
-/// round on the plane or not at all, and this fixture is the case where
-/// it cannot. `sig.f` fans out to two doors, so its own output net is
+/// The escape `spec/redstone` "Place-and-route" specifies is "a bridge
+/// tile or a vertical layer", and `void=1` reserves neither. So the
+/// second net has to find its way round on the plane or not at all, and
+/// this fixture is the case where it cannot. `sig.f` fans out to two
+/// doors, so its own output net is
 /// laid first and takes the faces beside the cell; `sig.a`, which
 /// drives that cell, has none left to arrive through and nowhere to
 /// climb. The scope is refused rather than shorted, which is the whole

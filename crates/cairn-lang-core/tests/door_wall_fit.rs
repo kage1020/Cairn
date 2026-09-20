@@ -16,9 +16,10 @@
 //! where it does not — which keeps the opening inside the masonry it was
 //! cut from rather than running into the roof over a short wall.
 //!
-//! `spec/components-editing-sites.md` §9.3.5 requires the walkway port to
-//! draw the same line as the openings pass, so the last group here
-//! asserts the two answers case by case rather than each in isolation.
+//! `spec/components-editing-sites` "Ports and `connect`" requires the
+//! walkway port to draw the same line as the openings pass, so the last
+//! group here asserts the two answers case by case rather than each in
+//! isolation.
 
 use cairn_lang_core::block_array::{BlockArray, BlockArrayIr};
 use cairn_lang_core::check::DiagnosticCode;
@@ -259,11 +260,13 @@ fn walkway_was_laid(source: &str) -> bool {
 
 #[test]
 fn the_port_anchors_exactly_the_doorways_the_openings_pass_carves() {
-    // §9.3.5's requirement, asserted as an equivalence rather than as two
-    // independent lists — the failure mode it guards against is one of
-    // the two gates being edited alone, which no test of either side by
-    // itself can see. `level y=0` is the only level whose walls reach the
-    // row a def-body door opens at; every higher one leaves it in air.
+    // The walkway-port requirement of
+    // `spec/components-editing-sites` "Ports and `connect`", asserted as an
+    // equivalence rather than as two independent lists — the failure mode it
+    // guards against is one of the two gates being edited alone, which no
+    // test of either side by itself can see. `level y=0` is the only level
+    // whose walls reach the row a def-body door opens at; every higher one
+    // leaves it in air.
     for wall_level in 0..=3 {
         let carved = {
             let src = format!(

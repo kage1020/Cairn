@@ -3,9 +3,10 @@
 //! Palette validation used to ask only whether an id had exactly one `:`,
 //! because the registry packs carried no id table to ask anything else of.
 //! `slot wall -> @totally_not_a_block` therefore compiled at exit 0 into a
-//! structure file the game loads as air, and spec versioning-editions §10.4
-//! says the opposite: "unknown IDs ... are hard errors. Silent substitution
-//! and implicit dropping are forbidden."
+//! structure file the game loads as air, and `spec/versioning-editions`
+//! "Fail-loud and minimum-version inference" says the opposite: "unknown IDs
+//! ... are hard errors. Silent substitution and implicit dropping are
+//! forbidden."
 
 use std::process::Command;
 
@@ -410,9 +411,10 @@ fn an_unresolvable_target_is_still_reported_as_a_target_problem() {
 /// The refusal points at the `slot` line that names the material, not at
 /// the member that uses it or at the file as a whole.
 ///
-/// Spec versioning-editions §10.4's worked example is `E_UNKNOWN_ID line
-/// 12: ...` — a line the author can go and edit. The theme sits on line 2
-/// of `source_binding`, and the `@id` it resolves to starts at column 17.
+/// The worked example in `spec/versioning-editions` "Fail-loud and
+/// minimum-version inference" is `E_UNKNOWN_ID line 12: ...` — a line the
+/// author can go and edit. The theme sits on line 2 of `source_binding`, and
+/// the `@id` it resolves to starts at column 17.
 #[test]
 fn the_refusal_points_at_the_line_that_names_the_material() {
     let fixture = Fixture::new(

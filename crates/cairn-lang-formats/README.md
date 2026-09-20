@@ -2,7 +2,7 @@
 
 Readers and writers around the Cairn block-array IR for existing schematic / structure formats, plus the registry packs that say which block ids a given `(edition, version)` actually has.
 
-Each format is a serializer or deserializer around the **block-array IR**, which the specification names as the universal pivot ([architecture §3.1](https://cairn.kage1020.com/spec/architecture/)). Adding a format means adding a backend here — the parser, lint, and theme machinery in [`cairn-lang-core`](../cairn-lang-core/README.md) are untouched.
+Each format is a serializer or deserializer around the **block-array IR**, which the specification names as the universal pivot ([architecture "The block-array IR is the universal pivot"](https://cairn.kage1020.com/spec/architecture/)). Adding a format means adding a backend here — the parser, lint, and theme machinery in [`cairn-lang-core`](../cairn-lang-core/README.md) are untouched.
 
 ## Status
 
@@ -38,19 +38,19 @@ Because the tables are closed, a suggestion cannot name a block that does not ex
 
 | Format | Edition | Direction | Spec reference |
 |---|---|---|---|
-| `.nbt` (vanilla structure block) | Java | **write (done)**, read | [ecosystem-interop §12.1](https://cairn.kage1020.com/spec/ecosystem-interop/) |
-| `.mcstructure` | Bedrock | **write (done)**, read | [ecosystem-interop §12.1](https://cairn.kage1020.com/spec/ecosystem-interop/) |
-| `.litematic` (Litematica) | Java | read / write | [ecosystem-interop §12.1](https://cairn.kage1020.com/spec/ecosystem-interop/), [§12.4](https://cairn.kage1020.com/spec/ecosystem-interop/) |
-| `.schem` (WorldEdit / Sponge) | Java | read / write | [ecosystem-interop §12.1](https://cairn.kage1020.com/spec/ecosystem-interop/) |
+| `.nbt` (vanilla structure block) | Java | **write (done)**, read | [ecosystem-interop "Forward direction"](https://cairn.kage1020.com/spec/ecosystem-interop/) |
+| `.mcstructure` | Bedrock | **write (done)**, read | [ecosystem-interop "Forward direction"](https://cairn.kage1020.com/spec/ecosystem-interop/) |
+| `.litematic` (Litematica) | Java | read / write | [ecosystem-interop "Forward direction"](https://cairn.kage1020.com/spec/ecosystem-interop/), [ecosystem-interop "Import stamping and pitfalls"](https://cairn.kage1020.com/spec/ecosystem-interop/) |
+| `.schem` (WorldEdit / Sponge) | Java | read / write | [ecosystem-interop "Forward direction"](https://cairn.kage1020.com/spec/ecosystem-interop/) |
 
 ## Forward / reverse contract
 
 - **Forward**: block-array IR → serialize. The compile pipeline writes the IR; each backend encodes it for one format.
-- **Reverse**: deserialize → block-array IR plus a provenance stamp `(edition, version)`. The compiler performs only a *faithful transliteration* into the raw-centric DSL; semantic lifting is the LLM's job ([ecosystem-interop §12.2](https://cairn.kage1020.com/spec/ecosystem-interop/)). Litematica's multi-region structure is preserved as `site` placement, not flattened ([§12.4](https://cairn.kage1020.com/spec/ecosystem-interop/)).
+- **Reverse**: deserialize → block-array IR plus a provenance stamp `(edition, version)`. The compiler performs only a *faithful transliteration* into the raw-centric DSL; semantic lifting is the LLM's job ([ecosystem-interop "Reverse direction: the compiler transliterates, an LLM lifts"](https://cairn.kage1020.com/spec/ecosystem-interop/)). Litematica's multi-region structure is preserved as `site` placement, not flattened ([ecosystem-interop "Import stamping and pitfalls"](https://cairn.kage1020.com/spec/ecosystem-interop/)).
 
 ## Out of scope
 
-- Pre-1.13 legacy numeric-id `.schematic`. v1 does not support flattening ([overview §1.3](https://cairn.kage1020.com/spec/overview/), [open-issues §15.1](https://cairn.kage1020.com/spec/open-issues/)).
+- Pre-1.13 legacy numeric-id `.schematic`. v1 does not support flattening ([overview "Scope and non-goals"](https://cairn.kage1020.com/spec/overview/), [open-issues "Choices to settle at implementation time"](https://cairn.kage1020.com/spec/open-issues/)).
 - SNBT printing — Cairn does not round-trip through SNBT.
 
 ## Dependencies

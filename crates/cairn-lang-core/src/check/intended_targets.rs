@@ -13,9 +13,10 @@
 //! # Why it is not one of [`super::check`]'s passes
 //!
 //! Every question here is answered by the target edition's `DataVersion`
-//! table (`spec/versioning-editions.md` §10.1), which lives in the
-//! registry pack and reaches this crate only as a [`VersionOrder`] the
-//! caller builds. `check` takes no pack and no order, so it cannot run
+//! table (`spec/versioning-editions` "The target is a compile-time
+//! parameter"), which lives in the registry pack and reaches this crate only
+//! as a [`VersionOrder`] the caller builds. `check` takes no pack and no
+//! order, so it cannot run
 //! this pass; the CLI does, once per edition the command is about. That is
 //! the same shape `E_THEME_VARIANT_MISSING` has — a finding only a pinned
 //! edition can reach — and the alternative is worse: comparing two version
@@ -45,7 +46,7 @@
 //! file can be built for nothing it says it is for, which is the
 //! strongest reading a contradiction between two declarations gets and
 //! the one an author cannot have meant. *Some* of them is
-//! `W_INTENDED_TARGET_CAP`, because `spec/syntax.md` §5.3 calls this
+//! `W_INTENDED_TARGET_CAP`, because `spec/syntax` "Headers" calls this
 //! header "a hint, not a verification record" — a list that reaches past
 //! the floor at one end is a wish stated too widely, and the versions it
 //! names above the floor still build.
@@ -348,8 +349,8 @@ fn unsupported(
 ///
 /// Every floor, not the one being reported: a version that clears this
 /// floor and trips the next one is a second error in a different spelling,
-/// and `spec/lint.md` §11.1 makes the valid candidates part of the message
-/// rather than an extra.
+/// and `spec/lint` "Diagnostic codes" makes the valid candidates part of the
+/// message rather than an extra.
 fn candidates_note(
     edition: Edition,
     order: &VersionOrder,

@@ -18,14 +18,14 @@ The `cairn-lsp` binary speaks standard LSP over stdio: it negotiates full-conten
 | Capability | Spec reference |
 |---|---|
 | `textDocument/diagnostic` (pull) — syntax, geometry, attachment, support, fluid, version_caps, edit_stability, redstone | [lint](https://cairn.kage1020.com/spec/lint/) |
-| `textDocument/completion` over the full canonical block vocabulary, by reading the registry packs' blocks table as well as the materials catalog | [materials-themes §7.2](https://cairn.kage1020.com/spec/materials-themes/) |
-| `textDocument/hover` — block primitive docs, blockstate intent vs resolved view | [blockstate §6.2](https://cairn.kage1020.com/spec/blockstate/) |
-| `textDocument/codeAction` — apply the "Suggested fix:" payloads from lint messages | [lint](https://cairn.kage1020.com/spec/lint/), [versioning-editions §10.4](https://cairn.kage1020.com/spec/versioning-editions/) |
-| `workspace/executeCommand` — `cairn.info`, `cairn.diffBlocks` | [versioning-editions §10.5](https://cairn.kage1020.com/spec/versioning-editions/), [ecosystem-interop §12.2](https://cairn.kage1020.com/spec/ecosystem-interop/) |
+| `textDocument/completion` over the full canonical block vocabulary, by reading the registry packs' blocks table as well as the materials catalog | [materials-themes "Canonical vocabulary"](https://cairn.kage1020.com/spec/materials-themes/) |
+| `textDocument/hover` — block primitive docs, blockstate intent vs resolved view | [blockstate "`intent_state` and `resolved_state`"](https://cairn.kage1020.com/spec/blockstate/) |
+| `textDocument/codeAction` — apply the "Suggested fix:" payloads from lint messages | [lint](https://cairn.kage1020.com/spec/lint/), [versioning-editions "Fail-loud and minimum-version inference"](https://cairn.kage1020.com/spec/versioning-editions/) |
+| `workspace/executeCommand` — `cairn.info`, `cairn.diffBlocks` | [versioning-editions "The `edition portability` row" and "The `buildable targets` row"](https://cairn.kage1020.com/spec/versioning-editions/), [ecosystem-interop "Reverse direction: the compiler transliterates, an LLM lifts"](https://cairn.kage1020.com/spec/ecosystem-interop/) |
 
 ## Design notes
 
-- Lint messages are designed to feed the self-correction loop verbatim ([lint §11](https://cairn.kage1020.com/spec/lint/)). The LSP layer must preserve the "what is wrong / valid candidates / suggested fix" triple intact so a coding agent can act on it without prose paraphrasing.
+- Lint messages are designed to feed the self-correction loop verbatim ([lint](https://cairn.kage1020.com/spec/lint/)). The LSP layer must preserve the "what is wrong / valid candidates / suggested fix" triple intact so a coding agent can act on it without prose paraphrasing.
 - Autocomplete is **closed-set first** ([principles P3](https://cairn.kage1020.com/spec/principles/)): the registry table is the source of truth, not a learned vocabulary, so suggestions cannot hallucinate IDs that do not exist in the target `(edition, version)`.
 
 ## Dependencies
