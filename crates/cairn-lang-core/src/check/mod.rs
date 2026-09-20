@@ -33,7 +33,7 @@
 //! problem in a file rather than only the first one.
 
 mod arguments;
-mod cairn_version;
+pub(crate) mod cairn_version;
 mod connect_arity;
 mod diagnostic;
 mod duplicate;

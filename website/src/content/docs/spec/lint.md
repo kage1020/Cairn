@@ -97,7 +97,14 @@ a language newer than itself: a keyword or argument added after this build is re
 the version gap rather than about the lines they name. That reaches what a later language adds
 *within* the shapes this one has. A whole new syntactic form — a directive, a top-level item — is
 `E_PARSE`, and parsing precedes every check pass ([§11.3](#113-error-vs-warning)), so this finding
-does not appear at all in the case the version gap explains best.
+cannot appear in the case the version gap explains best.
+
+There the header is read out of the text — one line, matched by a leading `@cairn` and read to end
+of line — and `E_PARSE` carries a note saying the file declares a later language than the build
+reading it. A note rather than a second finding, because a source that does not parse reports
+`E_PARSE` alone and that stays true. Only a value that reads as a version earns it: a malformed one
+is `W_INVALID_CAIRN_VERSION`'s business, and repeating that on an unrelated parse failure would be
+noise.
 
 The two codes never both fire on one directive — a value that is not read as a version has no
 version to compare.

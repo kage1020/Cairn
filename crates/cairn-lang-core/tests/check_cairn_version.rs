@@ -16,8 +16,8 @@
 //! compatible range and the `--target` gate.
 
 use cairn_lang_core::calver::{LanguageVersion, parse_language_version};
-use cairn_lang_core::check::{DiagnosticCode, Severity};
-use cairn_lang_core::{CAIRN_VERSION, Diagnostic, check, lower, parse};
+use cairn_lang_core::check::{DiagnosticCode, LineStarts, Severity};
+use cairn_lang_core::{CAIRN_VERSION, Diagnostic, check, diagnose_parse_failure, lower, parse};
 
 /// The body every fixture shares, so the header is the only variable.
 const BODY: &str = "struct s size=2x2\n  floor mat_slot=f\n";
@@ -245,4 +245,122 @@ fn a_module_with_no_cairn_header_is_silent() {
     let found = codes("");
     assert!(!found.contains(&"W_INVALID_CAIRN_VERSION"), "{found:?}");
     assert!(!found.contains(&"W_FUTURE_CAIRN_VERSION"), "{found:?}");
+}
+
+// -- the file the header explains best -----------------------------------
+//
+// `run` never sees a source that does not parse, and a later language
+// adding a whole syntactic form is exactly what does not parse here. The
+// note on the parse error is what carries the version gap into that
+// report.
+
+/// The diagnostic a source that does not parse renders as.
+fn parse_failure(source: &str) -> Diagnostic {
+    let err = parse(source).expect_err("the fixture is supposed to be refused");
+    diagnose_parse_failure(source, &LineStarts::new(source), &err)
+}
+
+/// Whether the parse failure for `source` carries the version note.
+fn notes_the_version_gap(source: &str) -> bool {
+    parse_failure(source)
+        .notes
+        .iter()
+        .any(|n| n.message.contains("newer than this build"))
+}
+
+#[test]
+fn a_new_syntactic_form_under_a_future_header_says_the_gap_may_explain_it() {
+    // The two shapes a later language adds that this build cannot parse:
+    // a directive it does not have, and a top-level item it does not have.
+    for source in [
+        "@cairn 9999.12\n@materials \"x\"\n",
+        "@cairn 9999.12\nmaterials m:\n  slot a -> @b\n",
+    ] {
+        let diagnostic = parse_failure(source);
+        assert_eq!(diagnostic.code.as_str(), "E_PARSE", "{source:?}");
+        assert_eq!(
+            diagnostic.notes.len(),
+            1,
+            "one finding, one note: {:?}",
+            diagnostic.notes,
+        );
+        let note = &diagnostic.notes[0];
+        assert!(
+            note.message.contains("9999.12") && note.message.contains(CAIRN_VERSION),
+            "the note names both versions: {}",
+            note.message,
+        );
+        // At the header, not at the failure: the header is the line the
+        // reader has to weigh, and the failure already has the primary.
+        let span = note.span.clone().expect("the note points at the header");
+        assert_eq!(&source[span], "@cairn 9999.12");
+    }
+}
+
+#[test]
+fn a_source_that_does_not_even_lex_still_has_its_header_read() {
+    // The header is read out of the text rather than out of tokens, so a
+    // failure the lexer raises — before any token exists — reaches it too.
+    assert!(notes_the_version_gap(
+        "@cairn 9999.12\nstruct s size=3x3\n  floor a=%\n",
+    ));
+}
+
+#[test]
+fn a_header_this_build_can_read_adds_nothing() {
+    // Three ways there is no gap to report: the file declares this very
+    // build, it declares nothing at all, or what it declares is not a
+    // version — the last being `W_INVALID_CAIRN_VERSION`'s business, and
+    // repeating it on an unrelated failure would be noise.
+    for header in [
+        format!("@cairn {CAIRN_VERSION}\n"),
+        String::new(),
+        "@cairn banana\n".to_owned(),
+    ] {
+        let source = format!("{header}@materials \"x\"\n");
+        assert!(
+            !notes_the_version_gap(&source),
+            "should be silent: {source:?}",
+        );
+    }
+}
+
+#[test]
+fn a_cairn_line_that_is_not_a_header_is_not_read() {
+    // `parse_module` takes headers from the run of lines at the top of the
+    // file, at column zero. A `@cairn` anywhere else is not one, and
+    // reading it would attribute a version to a file the parser never saw
+    // one in.
+    for source in [
+        // Below a declaration, where the header block has ended.
+        "struct s size=3x3\n  floor mat_slot=f\n@cairn 9999.12\n@materials \"x\"\n",
+        // Indented, which is a body row to the lexer rather than a header.
+        "  @cairn 9999.12\n@materials \"x\"\n",
+    ] {
+        assert!(
+            !notes_the_version_gap(source),
+            "should be silent: {source:?}",
+        );
+    }
+}
+
+#[test]
+fn the_header_is_read_past_the_layout_a_file_may_open_with() {
+    // Blank lines, comment lines and another directive all sit in front of
+    // `@cairn` in real sources, and a comment may end its line.
+    let source = "# what this file is\n\n@requires \">=2026.9\"\n@cairn 9999.12 # written against\n\n@materials \"x\"\n";
+    let diagnostic = parse_failure(source);
+    let note = diagnostic.notes.first().expect("the note");
+    assert!(note.message.contains("9999.12"), "{}", note.message);
+    let span = note.span.clone().expect("a span");
+    assert_eq!(&source[span], "@cairn 9999.12");
+}
+
+#[test]
+fn a_file_that_parses_reports_the_gap_through_the_pass_instead() {
+    // The note is for the report a check pass cannot reach. Where one can,
+    // `W_FUTURE_CAIRN_VERSION` is the finding, and it is not doubled.
+    let found = codes("@cairn 9999.12\n");
+    assert!(found.contains(&"W_FUTURE_CAIRN_VERSION"), "{found:?}");
+    assert!(parse(&format!("@cairn 9999.12\n{BODY}")).is_ok());
 }

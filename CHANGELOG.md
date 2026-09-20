@@ -144,6 +144,40 @@
 
 ### Fixed
 
+- *(core)* `W_FUTURE_CAIRN_VERSION` could not fire on the file it explains best. It says a source
+  declares a language newer than the build reading it, and it is raised by a check pass — so it is
+  absent in exactly the case where the version gap is the whole explanation, because parsing
+  precedes every check pass and a source that does not parse reaches none of them.
+
+  A later language that adds a keyword or an argument lands inside the shapes this build already
+  parses, and the header's warning sits beside the resulting `E_UNKNOWN_KEYWORD` telling the author
+  to weigh it differently. A later language that adds a whole *syntactic form* does not: an
+  unrecognised `@directive` and an unrecognised top-level item are both `E_PARSE`, and the author
+  got
+
+  ```
+  bad.crn:3:1: error[E_PARSE]: unknown directive `@materials`
+  ```
+
+  with nothing about the header that would explain it.
+
+  `diagnose_parse_failure` now reads the `@cairn` line out of the source text and attaches a note
+  when it names a later version:
+
+  ```
+  bad.crn:3:1: error[E_PARSE]: unknown directive `@materials`
+  bad.crn:1:1:   note: this file declares Cairn `9999.12`, which is newer than this build (`2026.9.2`); the line this error names may be a form a later Cairn adds
+  ```
+
+  Out of the text rather than the AST because there is no AST, and rather than the token stream
+  because a source that fails to *lex* has no tokens either — `floor a=%` is the shape the note most
+  needs to reach. Only the header block is read, the run of lines at the top of the file before the
+  first that is neither blank, a comment, nor a directive at column zero, so a `@cairn` written
+  anywhere else is not mistaken for one. A note rather than a second finding, because `spec/lint`
+  "Error vs warning" makes `E_PARSE` the one finding a build that does not parse reports, and a note
+  keeps that true. In `core` rather than in either front end, so the CLI and the language server
+  both carry it.
+
 - *(cli)* `cairn parse --format json` and `cairn lower --format json` wrote nothing to stdout when
   the source failed. The reason reached stderr as prose, so a human was told; a consumer reading
   stdout saw an empty stream and had to guess from the exit code:

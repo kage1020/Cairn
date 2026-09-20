@@ -19,8 +19,10 @@
 //! an unrecognised `@directive` and an unrecognised top-level item are
 //! both `E_PARSE`, and `spec/lint` "Error vs warning" says what follows —
 //! parsing precedes every check pass, so a source that does not parse reaches
-//! none of them. The version gap is the whole explanation there and this
-//! finding is the one thing that cannot say so.
+//! none of them. The version gap is the whole explanation there, so
+//! [`future_version_note`] carries it to the one finding that *is*
+//! reported: the parse error itself, as a note rather than a second
+//! finding.
 //!
 //! Both are warnings. That same section makes a finding an error when
 //! leaving it alone yields something other than what the source asked for;
@@ -113,4 +115,89 @@ fn future_diag(declared: &str, span: &Span) -> Diagnostic {
             compiler: CAIRN_VERSION.to_owned(),
         }),
     }
+}
+
+/// The note a parse failure carries when the header declares a later
+/// language than this build.
+///
+/// [`run`] cannot reach a file that does not parse, and a whole new
+/// syntactic form — the shape a later language most often adds — is
+/// exactly what does not parse. The header is still readable: it is one
+/// line, matched by a leading `@cairn` and read to end of line, which is
+/// what [`crate::parse`] does with it before the failure that stops the
+/// module. Without this note the author is told "I do not understand
+/// this line" where the answer is "you need a newer Cairn", which is the
+/// whole reason `@cairn` is in the file.
+///
+/// A note rather than a second finding, because `spec/lint`
+/// "Error vs warning" makes a source that does not parse report `E_PARSE`
+/// alone. A note keeps that true.
+///
+/// A malformed `@cairn` says nothing here. `W_INVALID_CAIRN_VERSION` is
+/// about the header itself, and repeating it on an unrelated parse
+/// failure would be noise.
+pub(crate) fn future_version_note(source: &str) -> Option<DiagnosticNote> {
+    let compiler = parse_language_version(CAIRN_VERSION).ok()?;
+    let (declared, span) = declared_version(source)?;
+    if !parse_language_version(&declared).ok()?.is_newer_than(&compiler) {
+        return None;
+    }
+    Some(DiagnosticNote {
+        span: Some(span),
+        message: format!(
+            "this file declares Cairn `{declared}`, which is newer than this build (`{CAIRN_VERSION}`); the line this error names may be a form a later Cairn adds",
+        ),
+    })
+}
+
+/// The `@cairn` value a source declares and the span of the line
+/// carrying it, read from the text.
+///
+/// Text rather than the AST because the caller has none, and text rather
+/// than the lexer because a source that fails to *lex* has no tokens
+/// either — `floor a=%` is the shape this note most needs to reach.
+///
+/// Only the header block is read: the run of lines before the first that
+/// is neither blank, a comment, nor a top-level `@directive`, which is
+/// the only place [`crate::parse`] takes a header from. A `@cairn` below
+/// that, or indented under a body, is not a header, and reading one
+/// would attribute a version to a file the parser never saw one in.
+///
+/// The span matches the one [`Header::Cairn`] carries — the `@` to the
+/// last byte of the value — so the note points where the check pass's
+/// own finding would have.
+fn declared_version(source: &str) -> Option<(String, Span)> {
+    let mut offset = 0;
+    for line in source.split_inclusive('\n') {
+        let start = offset;
+        offset += line.len();
+        let text = line.trim_end_matches(['\n', '\r']);
+        if text.trim_start().is_empty() || text.trim_start().starts_with('#') {
+            continue;
+        }
+        // Anything that is not a directive at column zero ends the
+        // header block, indentation included: an indented `@cairn` is a
+        // body row to the lexer, not a header.
+        let rest = text.strip_prefix('@')?;
+        let name_len = rest
+            .find(|c: char| !c.is_ascii_alphanumeric() && c != '_')
+            .unwrap_or(rest.len());
+        if &rest[..name_len] != "cairn" {
+            continue;
+        }
+        // Up to the comment marker, the way the lexer reads the line: a
+        // `#` ends the value wherever it sits.
+        let tail = &text[1 + name_len..];
+        let tail = tail.split('#').next().unwrap_or("");
+        let declared = tail.trim();
+        if declared.is_empty() {
+            return None;
+        }
+        let value_start = 1 + name_len + (tail.len() - tail.trim_start().len());
+        return Some((
+            declared.to_owned(),
+            start..start + value_start + declared.len(),
+        ));
+    }
+    None
 }
