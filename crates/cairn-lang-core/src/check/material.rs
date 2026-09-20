@@ -136,8 +136,8 @@ enum WithoutAMaterial {
 ///
 /// One exhaustive match rather than a wildcard, because the answer is a
 /// property of that role's painter and a new role has to say which it is.
-/// `block_array::lower`'s `member_will_paint` documents the same tie from
-/// the other side: a role that grows a fallback material moves from
+/// `block_array::lower`'s `member_will_paint` is the other side of the
+/// same tie: a role that grows a fallback material moves from
 /// [`WithoutAMaterial::PaintsNothing`] to
 /// [`WithoutAMaterial::PaintsAFallback`], and
 /// `tests/check_missing_material.rs` measures the pairing against the

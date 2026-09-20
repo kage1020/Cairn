@@ -10,7 +10,10 @@
 //! wire form across every stage, and would rot silently if each binary
 //! kept its own copy.
 
-// Each test binary uses its own subset of these.
+// Every test binary compiles this module on its own and calls a subset of
+// it, so the unused-item lint would fire per binary. The workspace has no
+// other `#![allow]`; the fix that removes this one is a dev-dependency
+// helper crate, worth doing if the set keeps growing.
 #![allow(dead_code)]
 
 use std::path::PathBuf;

@@ -430,7 +430,6 @@ fn material_items(
     let mut items = Vec::new();
     let mut order = 0;
     let mut seen = HashSet::new();
-    let mut resolved_ids = Vec::new();
     for token in java.tokens().chain(bedrock.tokens()) {
         if !seen.insert(token) {
             continue;
@@ -441,7 +440,6 @@ fn material_items(
         let Some(id) = java.lookup_id(token).or_else(|| bedrock.lookup_id(token)) else {
             continue;
         };
-        resolved_ids.push(id);
         items.push(completion_item(
             index,
             source,
@@ -453,7 +451,15 @@ fn material_items(
         ));
         order += 1;
     }
+    // Each catalog's id column on its own, not one id per token: the two
+    // packs declare the same tokens and resolve some of them to different
+    // ids (`sign.oak` is `oak_sign` on Java and `standing_sign` on
+    // Bedrock), and both spellings are canonical ids an author may write.
     let mut seen_ids = HashSet::new();
+    let resolved_ids = java
+        .tokens()
+        .filter_map(|t| java.lookup_id(t))
+        .chain(bedrock.tokens().filter_map(|t| bedrock.lookup_id(t)));
     for id in resolved_ids {
         if !seen_ids.insert(id) {
             continue;
@@ -872,13 +878,21 @@ mod tests {
         let abstract_labels: BTreeSet<&str> =
             abstract_items.iter().map(|i| i.label.as_str()).collect();
         assert_eq!(abstract_labels, expected_abstract);
-        let oak_planks: Vec<_> = canonical
-            .iter()
-            .filter(|i| i.label == "oak_planks")
+        let expected_canonical: BTreeSet<&str> = java
+            .tokens()
+            .filter_map(|t| java.lookup_id(t))
+            .chain(bedrock.tokens().filter_map(|t| bedrock.lookup_id(t)))
+            .map(|id| id.strip_prefix("minecraft:").unwrap_or(id))
             .collect();
+        let canonical_labels: Vec<&str> = canonical.iter().map(|i| i.label.as_str()).collect();
         assert_eq!(
-            oak_planks.len(),
-            1,
+            canonical_labels.iter().copied().collect::<BTreeSet<_>>(),
+            expected_canonical,
+            "every id either catalog resolves to is offered, Bedrock-only ones included",
+        );
+        assert_eq!(
+            canonical_labels.len(),
+            expected_canonical.len(),
             "canonical ids are deduplicated across catalog rows",
         );
     }

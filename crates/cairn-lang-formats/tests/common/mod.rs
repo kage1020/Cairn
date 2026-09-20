@@ -3,7 +3,10 @@
 //! Every binary here reads the same `examples/` tree and walks the same
 //! built-in registry packs, so the plumbing for both lives once.
 
-// Each test binary uses its own subset of these.
+// Every test binary compiles this module on its own and calls a subset of
+// it, so the unused-item lint would fire per binary. The workspace has no
+// other `#![allow]`; the fix that removes this one is a dev-dependency
+// helper crate, worth doing if the set keeps growing.
 #![allow(dead_code)]
 
 use std::path::PathBuf;
@@ -18,7 +21,16 @@ pub fn examples_dir() -> PathBuf {
         .join("examples")
 }
 
+/// The number of `.crn` files `examples/` ships. Bump it with the next
+/// example; every sweep below refuses a smaller set, and a loop over a
+/// filtered-down set passes silently.
+pub const SHIPPED_EXAMPLES: usize = 12;
+
 /// Every `.crn` under `examples/`, as `(file name, source)`, sorted by name.
+///
+/// Refuses to return a set other than the shipped one. Every sweep is a
+/// loop over this, and a loop over nothing passes — the guard lives with
+/// the iteration source so no test can forget it.
 pub fn examples() -> Vec<(String, String)> {
     let dir = examples_dir();
     let entries = std::fs::read_dir(&dir)
@@ -40,6 +52,14 @@ pub fn examples() -> Vec<(String, String)> {
         })
         .collect();
     found.sort();
+    assert_eq!(
+        found.len(),
+        SHIPPED_EXAMPLES,
+        "found {} examples under {}, not the {SHIPPED_EXAMPLES} shipped; bump SHIPPED_EXAMPLES \
+         when adding one",
+        found.len(),
+        dir.display(),
+    );
     found
 }
 

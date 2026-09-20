@@ -609,6 +609,7 @@ fn diag_tail_names_no_signal(member: &Member, binding: &Value, scope: ScopeRef<'
     diag_names_no_signal(
         member,
         binding,
+        binding.span.clone(),
         format!(
             "{label} `{keyword}` emits into a signal, but its `->` tail is \
              {found} rather than a name in the `{SIGNAL_HEAD}.` namespace \
@@ -631,6 +632,7 @@ fn diag_argument_names_no_signal(
     diag_names_no_signal(
         member,
         &vspan.value,
+        vspan.span.clone(),
         format!(
             "{label} `{key}=` wires this `{keyword}` to a signal, but names \
              {found} rather than a name in the `{SIGNAL_HEAD}.` namespace \
@@ -643,21 +645,20 @@ fn diag_argument_names_no_signal(
     )
 }
 
-/// The two value-side refusals: reported at the value, noted at the
-/// member, and repaired by [`signal_value_fix`].
+/// The two value-side refusals: reported at `span`, noted at the member,
+/// and repaired by [`signal_value_fix`]. `span` is passed beside `value`
+/// rather than read off it because a [`ValueWithSpan`] may one day cover
+/// more than its value's own range.
 fn diag_names_no_signal(
     member: &Member,
     value: &Value,
+    span: Span,
     primary: String,
     drop_advice: &str,
 ) -> Diagnostic {
-    Diagnostic::new(
-        DiagnosticCode::LogicInvalidSignal,
-        value.span.clone(),
-        primary,
-    )
-    .with_note(member.span.clone(), "declared here")
-    .with_footer(signal_value_fix(value, drop_advice))
+    Diagnostic::new(DiagnosticCode::LogicInvalidSignal, span, primary)
+        .with_note(member.span.clone(), "declared here")
+        .with_footer(signal_value_fix(value, drop_advice))
 }
 
 /// A binding written inside the `[selector]` rather than after it.

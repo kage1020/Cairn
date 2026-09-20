@@ -19,7 +19,7 @@
 use cairn_lang_core::check::DiagnosticCode;
 
 mod common;
-use common::{lowered_with_resolver_diagnostics, read_example};
+use common::{examples, lowered_with_resolver_diagnostics, read_example};
 
 /// `(example, the one walkway key it must lower to)`.
 const WALKWAY_EXAMPLES: &[(&str, &str)] = &[
@@ -36,6 +36,23 @@ const WALKWAY_EXAMPLES: &[(&str, &str)] = &[
         "walkway::pair::home1.entry__home2.front",
     ),
 ];
+
+/// A walkway example nobody added to the table is a fixture the sweep
+/// below never reads.
+#[test]
+fn the_table_names_every_walkway_example_shipped() {
+    let on_disk: Vec<String> = examples()
+        .into_iter()
+        .map(|(name, _)| name)
+        .filter(|name| name.contains("walkway"))
+        .collect();
+    let mut in_table: Vec<String> = WALKWAY_EXAMPLES
+        .iter()
+        .map(|(example, _)| (*example).to_owned())
+        .collect();
+    in_table.sort();
+    assert_eq!(in_table, on_disk);
+}
 
 #[test]
 fn every_walkway_example_lowers_one_unblocked_walkway_under_its_key() {

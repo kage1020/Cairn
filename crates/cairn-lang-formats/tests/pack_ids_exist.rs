@@ -185,11 +185,6 @@ fn the_bedrock_pack_respells_stone_bricks_for_the_version_that_predates_it() {
 #[test]
 fn every_id_the_examples_intern_exists_in_its_target() {
     let examples = examples();
-    assert!(
-        examples.len() >= 5,
-        "found only {} examples, which is not the shipped set",
-        examples.len(),
-    );
     for (name, source) in &examples {
         for (pack, pinned_edition) in [
             (builtin_java(), Edition::Java),

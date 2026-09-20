@@ -4,7 +4,10 @@
 //! `examples/` tree; the plumbing for that lives once, so a change to
 //! where the binary or the examples are found lands in one place.
 
-// Each test binary uses its own subset of these.
+// Every test binary compiles this module on its own and calls a subset of
+// it, so the unused-item lint would fire per binary. The workspace has no
+// other `#![allow]`; the fix that removes this one is a dev-dependency
+// helper crate, worth doing if the set keeps growing.
 #![allow(dead_code)]
 
 use std::fs;
@@ -17,6 +20,11 @@ use tempfile::TempDir;
 pub fn cargo_bin() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_cairn"))
 }
+
+/// The number of `.crn` files `examples/` ships. Bump it with the next
+/// example; every sweep refuses a different count, and a loop over a
+/// filtered-down set passes silently.
+pub const SHIPPED_EXAMPLES: usize = 12;
 
 /// The repository's `examples/` directory.
 pub fn examples_dir() -> PathBuf {
@@ -76,9 +84,11 @@ pub fn crn_examples() -> Vec<PathBuf> {
         .filter(|path| path.extension().and_then(|e| e.to_str()) == Some("crn"))
         .collect();
     found.sort();
-    assert!(
-        found.len() >= 5,
-        "found only {} examples under {}, which is not the shipped set",
+    assert_eq!(
+        found.len(),
+        SHIPPED_EXAMPLES,
+        "found {} examples under {}, not the {SHIPPED_EXAMPLES} shipped; bump SHIPPED_EXAMPLES \
+         when adding one",
         found.len(),
         dir.display(),
     );
