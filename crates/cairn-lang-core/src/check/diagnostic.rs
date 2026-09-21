@@ -1119,7 +1119,7 @@ impl Diagnostic {
 /// Built via [`Diagnostic::render`]. The `code` field serialises to the same
 /// `E_*` string as the text format (see [`DiagnosticCode::as_str`]) so
 /// downstream tooling matches a single contract regardless of `--format`.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct RenderedDiagnostic {
     /// Stable code identifying the kind of finding.
     pub code: DiagnosticCode,
@@ -1148,7 +1148,7 @@ pub struct RenderedDiagnostic {
 }
 
 /// JSON-friendly rendering of a [`DiagnosticNote`].
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct RenderedNote {
     /// 1-based line of the note's source position, when the note has a
     /// distinct secondary location. Omitted for informational notes.

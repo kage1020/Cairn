@@ -643,6 +643,421 @@ fn the_versions_weighed_are_listed_in_release_order() {
     );
 }
 
+// -- why `buildable` is empty ---------------------------------------------
+
+/// Write `source` to a fresh temp dir and read its `buildable_targets` row
+/// for `edition`, with the temp dir kept alive for the caller.
+fn buildable_row(source: &str, edition: &str) -> (tempfile::TempDir, Value) {
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    let src = tmp.path().join("s.crn");
+    std::fs::write(&src, source).expect("write source");
+    let axes = info_json_at(&src, edition);
+    let row = buildable_entry(&axes, edition).clone();
+    (tmp, row)
+}
+
+/// The per-version list as `(version, refusal tag)`, in the row's order.
+///
+/// The version travels with the tag because the list is a subsequence of
+/// `considered` rather than a parallel array: a run whose answer is
+/// edition-wide leaves versions out of it, so a test reading tags by
+/// position alone would pass against the wrong releases.
+fn refusals(row: &Value) -> Vec<(String, String)> {
+    row["reason"]["versions"]
+        .as_array()
+        .unwrap_or_else(|| panic!("expected a per-version list, got {row}"))
+        .iter()
+        .map(|entry| {
+            (
+                entry["version"].as_str().expect("a version").to_owned(),
+                entry["refusal"].as_str().expect("a refusal tag").to_owned(),
+            )
+        })
+        .collect()
+}
+
+/// `(declared, line, col)` for each floor under `value`'s `key`.
+fn floors(value: &Value, key: &str) -> Vec<(String, u64, u64)> {
+    value[key]
+        .as_array()
+        .unwrap_or_else(|| panic!("`{key}` is not an array in {value}"))
+        .iter()
+        .map(|floor| {
+            (
+                floor["declared"].as_str().expect("declared").to_owned(),
+                floor["line"].as_u64().expect("line"),
+                floor["col"].as_u64().expect("col"),
+            )
+        })
+        .collect()
+}
+
+/// An empty `buildable` had four causes and named none of them: a consumer
+/// reading the JSON and discarding stderr saw `[]` and could not tell
+/// which of four different things to edit.
+///
+/// This one is the edition's rather than any release's — a floor naming no
+/// release of the edition can be weighed against none of them — so it is
+/// reported once, beside the per-version list rather than inside it.
+#[test]
+fn a_floor_this_edition_cannot_place_says_so_for_the_edition() {
+    let (_tmp, row) = buildable_row(
+        "@cairn 2026.06\n\
+         @requires bedrock version>=1.21.45\n\n\
+         theme t:\n\
+         \x20\x20slot floor -> @oak_planks\n\n\
+         struct hut size=5x5\n\
+         \x20\x20floor mat_slot=floor\n",
+        "bedrock",
+    );
+    assert!(strings(&row, "buildable").is_empty(), "{row}");
+    assert_eq!(
+        floors(&row["reason"], "unplaceable_floors"),
+        [("bedrock version>=1.21.45".to_owned(), 2, 1)],
+        "the `@requires` line, not the file: {row}",
+    );
+    assert!(
+        row["reason"]["unplaceable_floors"][0]
+            .get("declared_by")
+            .is_none(),
+        "a header floor is the file's own, and the line already says where: {row}",
+    );
+    // Nothing else is wrong with this source, so the floor is the whole
+    // answer and no release has one of its own.
+    assert!(
+        row["reason"].get("versions").is_none(),
+        "a version with nothing against it contributes no entry: {row}",
+    );
+}
+
+/// The floor an edition cannot place answers for the edition, but it is
+/// not the only thing a file can have wrong, and the release that also
+/// refuses an id has to say so in the same run. Otherwise the author
+/// repairs the floor, runs again, and meets the ids for the first time —
+/// the loop this row exists to close.
+#[test]
+fn an_unplaceable_floor_does_not_hide_what_each_version_refused() {
+    let (_tmp, row) = buildable_row(
+        "@cairn 2026.06\n\
+         @requires bedrock version>=1.21.45\n\n\
+         theme t:\n\
+         \x20\x20slot floor -> @pale_moss_block\n\n\
+         struct hut size=5x5\n\
+         \x20\x20floor mat_slot=floor\n",
+        "bedrock",
+    );
+    assert!(strings(&row, "buildable").is_empty(), "{row}");
+    assert_eq!(
+        floors(&row["reason"], "unplaceable_floors"),
+        [("bedrock version>=1.21.45".to_owned(), 2, 1)],
+        "{row}",
+    );
+    // `1.21.60` declares the block and is left out: the floor is the only
+    // thing against it, and that is already said above. This is why the
+    // list joins on `version` rather than lining up with `considered`.
+    assert_eq!(
+        refusals(&row),
+        [
+            ("1.21.0".to_owned(), "lowering_refused".to_owned()),
+            ("1.21.40".to_owned(), "lowering_refused".to_owned()),
+        ],
+        "both causes, in one run: {row}",
+    );
+    assert_eq!(
+        strings(&row, "considered"),
+        ["1.21.0", "1.21.40", "1.21.60"],
+        "{row}",
+    );
+    assert_eq!(
+        row["reason"]["versions"][0]["findings"][0]["data"]["id"], "minecraft:pale_moss_block",
+        "{row}",
+    );
+}
+
+/// The floor that *is* placeable, and refuses every release. Different
+/// news and a different repair — raise the target, or build the other
+/// edition — so it reads as a different tag.
+///
+/// Two floors at different heights, because that is the only shape in
+/// which a version's `floors` differs from the edition's: `1.21.0` is
+/// under both and the two after it only under the second. With one floor
+/// the per-version list and the edition-wide set are the same bytes, and
+/// a test using it would pass against either.
+#[test]
+fn a_floor_above_every_release_names_the_line_under_each_version() {
+    let (_tmp, row) = buildable_row(
+        "@cairn 2026.06\n\
+         @requires bedrock version>=1.21.40\n\n\
+         def cottage class=house size=9x7:\n\
+         \x20\x20requires bedrock version>=1.99\n\
+         \x20\x20floor id=floor mat_slot=floor\n\n\
+         theme t:\n\
+         \x20\x20slot floor -> @oak_planks\n\n\
+         site v:\n\
+         \x20\x20place id=h1 use=cottage theme=t at=origin\n",
+        "bedrock",
+    );
+    assert!(strings(&row, "buildable").is_empty(), "{row}");
+    assert_eq!(
+        refusals(&row),
+        [
+            ("1.21.0".to_owned(), "below_floor".to_owned()),
+            ("1.21.40".to_owned(), "below_floor".to_owned()),
+            ("1.21.60".to_owned(), "below_floor".to_owned()),
+        ],
+        "{row}",
+    );
+    // The oldest release is under both lines; the two after it are under
+    // the def's alone, and being sent to a line that does not refuse them
+    // is a repair that changes nothing.
+    assert_eq!(
+        floors(&row["reason"]["versions"][0], "floors"),
+        [
+            ("bedrock version>=1.21.40".to_owned(), 2, 1),
+            ("bedrock version>=1.99".to_owned(), 5, 3),
+        ],
+        "{row}",
+    );
+    for later in [1, 2] {
+        assert_eq!(
+            floors(&row["reason"]["versions"][later], "floors"),
+            [("bedrock version>=1.99".to_owned(), 5, 3)],
+            "only the floor that refuses this version: {row}",
+        );
+    }
+    // A floor a build inherited from a part is repaired in that part, and
+    // "this file requires ..." is the reading the composite rule exists to
+    // correct. The header floor above carries no `declared_by` at all.
+    let header = &row["reason"]["versions"][0]["floors"][0];
+    let inherited = &row["reason"]["versions"][0]["floors"][1];
+    assert!(header.get("declared_by").is_none(), "{row}");
+    assert_eq!(inherited["declared_by"]["keyword"], "def", "{row}");
+    assert_eq!(inherited["declared_by"]["name"], "cottage", "{row}");
+}
+
+/// The same two floors as prose. `report_version_notes` used to list every
+/// version some floor refused under *each* floor, so the header line read
+/// "1.21.40 is below `version>=1.21.40`" — which is not true of the
+/// version, and sends the reader to a line that does not refuse it.
+#[test]
+fn a_floor_is_credited_only_with_the_versions_it_refuses() {
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    let src = tmp.path().join("s.crn");
+    std::fs::write(
+        &src,
+        "@cairn 2026.06\n\
+         @requires bedrock version>=1.21.40\n\n\
+         def cottage class=house size=9x7:\n\
+         \x20\x20requires bedrock version>=1.99\n\
+         \x20\x20floor id=floor mat_slot=floor\n\n\
+         theme t:\n\
+         \x20\x20slot floor -> @oak_planks\n\n\
+         site v:\n\
+         \x20\x20place id=h1 use=cottage theme=t at=origin\n",
+    )
+    .expect("write source");
+    let (_code, _stdout, stderr) = info_raw(&src, "bedrock");
+    let below: Vec<&str> = stderr
+        .lines()
+        .filter(|line| line.contains("below the"))
+        .collect();
+    assert_eq!(below.len(), 2, "one note per refusing floor: {stderr}");
+    assert!(
+        below[0]
+            .ends_with("bedrock 1.21.0 is below the `bedrock version>=1.21.40` this file declares"),
+        "the header floor refuses the oldest release alone, and `is` follows: {stderr}",
+    );
+    assert!(
+        below[1].ends_with(
+            "bedrock 1.21.0, 1.21.40, 1.21.60 are below the `bedrock version>=1.99` `def cottage` \
+             declares"
+        ),
+        "{stderr}",
+    );
+}
+
+/// The third cause: a scope the source declares produced no voxels, so
+/// every version is refused before its id table is consulted. The repair
+/// is the member, and nothing about the versions would change it — so it
+/// is the edition's answer rather than a tag repeated once per release.
+#[test]
+fn a_scope_that_produced_no_voxels_names_the_scope() {
+    let (_tmp, row) = buildable_row(
+        "@cairn 2026.06\n\n\
+         theme t:\n\
+         \x20\x20slot floor -> @oak_planks\n\n\
+         struct good size=2x2\n\
+         \x20\x20floor mat_slot=floor\n\n\
+         struct bad\n\
+         \x20\x20floor mat_slot=floor\n",
+        "bedrock",
+    );
+    assert!(strings(&row, "buildable").is_empty(), "{row}");
+    assert_eq!(
+        strings(&row["reason"], "dropped_scopes"),
+        ["struct::bad"],
+        "the member that produced nothing, not the versions: {row}",
+    );
+    assert!(
+        row["reason"].get("versions").is_none(),
+        "no release has anything against it of its own: {row}",
+    );
+}
+
+/// A floor used to eat the dropped scope: both refuse every version, the
+/// payload had one slot per version, and the floor arm was reached first.
+/// So the author repaired the `@requires` line and only then learned about
+/// the member — the same one-cause-per-run loop as the unplaceable floor.
+#[test]
+fn a_floor_does_not_hide_a_scope_that_produced_no_voxels() {
+    let (_tmp, row) = buildable_row(
+        "@cairn 2026.06\n\
+         @requires bedrock version>=1.99\n\n\
+         theme t:\n\
+         \x20\x20slot floor -> @oak_planks\n\n\
+         struct good size=2x2\n\
+         \x20\x20floor mat_slot=floor\n\n\
+         struct bad\n\
+         \x20\x20floor mat_slot=floor\n",
+        "bedrock",
+    );
+    assert_eq!(
+        strings(&row["reason"], "dropped_scopes"),
+        ["struct::bad"],
+        "{row}",
+    );
+    assert_eq!(
+        refusals(&row),
+        [
+            ("1.21.0".to_owned(), "below_floor".to_owned()),
+            ("1.21.40".to_owned(), "below_floor".to_owned()),
+            ("1.21.60".to_owned(), "below_floor".to_owned()),
+        ],
+        "both causes, in one run: {row}",
+    );
+}
+
+/// The fourth: the pinned lowering raised errors, which is usually a
+/// material or an id and differs per version. The findings ride along in
+/// the shape `spec/lint` "Machine-readable payload" gives them, because
+/// naming the version without naming what it refused leaves the reader
+/// exactly where the bare `[]` did.
+#[test]
+fn a_refused_lowering_names_what_each_version_refused() {
+    let (_tmp, row) = buildable_row(
+        "theme t:\n\
+         \x20\x20slot floor -> @stonebrick\n\
+         \x20\x20slot wall  -> @pale_moss_block\n\n\
+         struct hut size=5x5\n\
+         \x20\x20floor mat_slot=floor\n\
+         \x20\x20walls class=outer mat_slot=wall height=3\n",
+        "bedrock",
+    );
+    assert!(strings(&row, "buildable").is_empty(), "{row}");
+    assert_eq!(
+        refusals(&row),
+        [
+            ("1.21.0".to_owned(), "lowering_refused".to_owned()),
+            ("1.21.40".to_owned(), "lowering_refused".to_owned()),
+            ("1.21.60".to_owned(), "lowering_refused".to_owned()),
+        ],
+        "{row}",
+    );
+    let finding = &row["reason"]["versions"][0]["findings"][0];
+    assert_eq!(finding["code"], "E_UNKNOWN_ID", "{row}");
+    assert_eq!(finding["data"]["id"], "minecraft:pale_moss_block", "{row}");
+    assert_eq!(
+        finding["data"]["registry"], "bedrock 1.21.0",
+        "the registry that refused it, so two versions' findings are not read as one: {row}",
+    );
+    // The id `1.21.0` refuses is not the id `1.21.40` refuses. One tag for
+    // the edition would have had to pick one of them to report.
+    let later = &row["reason"]["versions"][1]["findings"][0];
+    assert_eq!(later["data"]["id"], "minecraft:stonebrick", "{row}");
+}
+
+/// Two causes in one run, which is the whole reason the per-version answer
+/// is per version: the floor refuses the oldest release and an id refuses
+/// the two after it. A single tag for the edition would report one and
+/// hide the other, and a reader who fixed only that one would still have
+/// no buildable target.
+#[test]
+fn versions_refused_for_different_reasons_each_carry_their_own() {
+    let (_tmp, row) = buildable_row(
+        "@cairn 2026.06\n\
+         @requires bedrock version>=1.21.40\n\n\
+         theme t:\n\
+         \x20\x20slot floor -> @stonebrick\n\n\
+         struct hut size=5x5\n\
+         \x20\x20floor mat_slot=floor\n",
+        "bedrock",
+    );
+    assert!(strings(&row, "buildable").is_empty(), "{row}");
+    assert_eq!(
+        refusals(&row),
+        [
+            ("1.21.0".to_owned(), "below_floor".to_owned()),
+            ("1.21.40".to_owned(), "lowering_refused".to_owned()),
+            ("1.21.60".to_owned(), "lowering_refused".to_owned()),
+        ],
+        "{row}",
+    );
+    assert_eq!(
+        floors(&row["reason"]["versions"][0], "floors"),
+        [("bedrock version>=1.21.40".to_owned(), 2, 1)],
+        "{row}",
+    );
+    assert_eq!(
+        row["reason"]["versions"][1]["findings"][0]["code"], "E_UNKNOWN_ID",
+        "{row}",
+    );
+}
+
+/// The key is absent on the ordinary run, so the addition costs a
+/// consumer of a report that has a buildable target nothing at all.
+#[test]
+fn a_row_with_a_buildable_target_carries_no_reason() {
+    let axes = info_json("cottage.crn", "java,bedrock");
+    for edition in ["java", "bedrock"] {
+        let row = buildable_entry(&axes, edition);
+        assert!(
+            !strings(row, "buildable").is_empty(),
+            "premise: {edition} builds the cottage: {row}",
+        );
+        assert!(
+            row.get("reason").is_none(),
+            "a reason beside a non-empty list is a reason for something that did not happen: {row}",
+        );
+    }
+}
+
+/// `info` reports and does not refuse, whatever the row says. The reason
+/// is a payload on a successful run, not a diagnostic — naming the cause
+/// is not the same as taking a position on it.
+#[test]
+fn naming_the_reason_does_not_move_the_exit_code_or_the_text_row() {
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    let src = tmp.path().join("s.crn");
+    std::fs::write(
+        &src,
+        "@cairn 2026.06\n\
+         @requires bedrock version>=1.99\n\n\
+         theme t:\n\
+         \x20\x20slot floor -> @oak_planks\n\n\
+         struct hut size=5x5\n\
+         \x20\x20floor mat_slot=floor\n",
+    )
+    .expect("write source");
+    let (code, stdout, stderr) = info_raw(&src, "bedrock");
+    assert_eq!(code, Some(0), "info reports; the build refuses: {stderr}");
+    assert!(
+        stdout.contains(
+            "buildable targets:       Bedrock: none (1.21.0, 1.21.40, 1.21.60 all refuse)"
+        ),
+        "the text row is unchanged: {stdout}",
+    );
+}
+
 /// Every `.crn` under `examples/`, as `(file name, source)`, with a guard
 /// against a loop over nothing.
 fn examples() -> Vec<(String, String)> {

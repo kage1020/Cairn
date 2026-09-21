@@ -450,6 +450,70 @@
   input to write about — an `--editions` value that is empty or names no edition, and a file that
   cannot be read, all still exit 2 with the reason on stderr.
 
+- *(cli,core)* `cairn info --format json` said an edition could build nothing and never said why:
+
+  ```console
+  $ cairn info s.crn --editions java --format json | jq '.buildable_targets[0]'
+  {
+    "edition": "java",
+    "buildable": [],
+    "considered": ["1.20.4", "1.21", "1.21.4"]
+  }
+  ```
+
+  Four different things collapse into that empty list: a floor the edition's version table cannot
+  place, a floor every release sits below, a scope that produced no voxels, and a lowering the
+  pinned version refused. Which ones held was on stderr as prose — and `--format json` exists for
+  the consumer reading stdout, so the row it reads carried the figure and none of the answer. That
+  is the problem `unsupported: N` had before `unsupported_entries`, and it is answered the same
+  way: the row now carries a `reason` beside the list.
+
+  ```console
+  $ cairn info s.crn --editions java --format json | jq -c '.buildable_targets[0].reason'
+  {"versions":[
+    {"version":"1.20.4","refusal":"below_floor",
+     "floors":[{"declared":"java version>=1.21.5","line":2,"col":1}]},
+    {"version":"1.21","refusal":"below_floor","floors":[ ... ]},
+    {"version":"1.21.4","refusal":"below_floor","floors":[ ... ]}]}
+  ```
+
+  `reason` reports every cause that holds, not the first one found. Two of the four are facts about
+  the *edition* — identical under every release and settled before any release is weighed — so
+  `unplaceable_floors` and `dropped_scopes` are fields of their own; the other two differ between
+  releases and sit in `versions` beside them, each entry carrying a `refusal` tag of `below_floor`
+  or `lowering_refused`. A shape that had to pick one would send the author back for the next cause
+  after each repair, which is the loop this row exists to close: a file can declare a floor this
+  edition cannot place *and* use an id one of its releases has never had, and one run has to say
+  both.
+
+  Saying both meant weighing the versions even where a floor is unplaceable. That walk used to be
+  skipped outright, so such a file reported the floor and nothing else — on stdout *or* stderr —
+  and the ids surfaced only after the `@requires` line was fixed and the command run again. It now
+  runs and `buildable` is emptied afterwards: what an unplaceable floor costs is the certification,
+  not the reader's view of the ids.
+
+  `versions` is a subsequence of `considered` rather than a parallel array — a release with nothing
+  against it but an edition-wide answer contributes no entry — so a consumer joins on `version`.
+  Each tag carries the pieces of its answer rather than a rendered sentence, the way
+  `unsupported_entries` does: a floor arrives as `{declared, line, col, declared_by?}` and a
+  refused lowering as the findings themselves, in the shape `spec/lint` "Machine-readable payload"
+  already gives them. A `below_floor` entry lists only the floors that refuse *that* version, since
+  a module declaring several is a file where the repair is one line and not all of them.
+
+  The same per-floor precision fixes a `note:` that was saying something false. The stderr line
+  listed every version some floor refused under *each* refusing floor, so a file with a header
+  floor `>=1.21.40` and a `def` floor `>=1.21.60` printed "bedrock 1.21.0, 1.21.40 are below the
+  `bedrock version>=1.21.40` this file declares" — and `1.21.40` is not below `>=1.21.40`. Each
+  note now names the versions its own floor refuses.
+
+  The `reason` key is absent when a version builds, so an ordinary report is byte-for-byte what it
+  was. The exit code stays 0, because an edition that builds nothing is something `info` reports
+  rather than refuses, and the text rows are unchanged —
+  `buildable targets:       Bedrock: none (1.21.0, 1.21.40, 1.21.60 all refuse)` reads the same for
+  all four causes. `spec/versioning-editions` "The `buildable targets` row" documents the payload.
+  `spec/lint` "Machine-readable payload" is borrowed for the shape of a finding and otherwise
+  untouched: this is a row of a report `info` writes on a run it does not refuse, not a diagnostic.
+
 ### Breaking changes
 
 - *(redstone,cli)* The per-cell figure delay insertion writes is renamed `delay_ticks` →
