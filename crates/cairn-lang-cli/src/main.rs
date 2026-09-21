@@ -32,7 +32,7 @@ use cairn_lang_formats::java_structure::{
     Compound, OutputExt, build_structure_tag, output_filename, write_compound_gzip,
 };
 use cairn_lang_formats::portability::{
-    InvalidPalette, portability_for_bedrock, portability_for_java,
+    InvalidPalette, PortabilityReport, portability_for_bedrock, portability_for_java,
 };
 use cairn_lang_formats::registry::{RegistryPack, builtin_bedrock, builtin_java};
 use cairn_lang_redstone::{
@@ -467,6 +467,23 @@ enum FailureReport {
     Text,
     /// The failure document on stdout.
     Json,
+}
+
+/// The four values a pass reports a finding from: `file` and `lines` turn
+/// a byte offset into the `path:line:col` the finding prints with,
+/// `source` is what the offset is into, and `report` says whether an
+/// error-severity finding prints at all or is held for the failure
+/// document. A warning prints on stderr whatever `report` holds.
+///
+/// A bundle rather than four parameters in a fixed order, and only where
+/// the list grew long enough that the order was the only thing holding it
+/// together: the free functions that report still take them one by one.
+#[derive(Copy, Clone)]
+struct Reporting<'a> {
+    file: &'a Path,
+    source: &'a str,
+    lines: &'a LineStarts,
+    report: FailureReport,
 }
 
 impl ParseFormat {
@@ -1028,9 +1045,23 @@ fn run_info(file: &Path, editions: &[String], format: InfoFormat) -> ExitCode {
     }
 
     report_floors_left_out_of_the_neutral_row(file, &source, &lines, &module);
-    let rows = match edition_rows(file, &source, &lines, &module, &ir, editions, &combined) {
+    let reporting = Reporting {
+        file,
+        source: &source,
+        lines: &lines,
+        report: format.failure_report(),
+    };
+    let rows = match edition_rows(reporting, &module, &ir, editions, &combined) {
         Ok(rows) => rows,
-        Err(code) => return code,
+        // The same refusal the edition-neutral gate above gets, one pass
+        // later: which pass raised the finding does not decide whether a
+        // document is written. It does still decide what is in one — the
+        // gate above hands `&combined` over whole, warnings included,
+        // where this hands over the errors alone — which `spec/lint`
+        // "Machine-readable payload" states rather than this code hiding.
+        Err(refused) => {
+            return report_failure_document(file, &source, reporting.report, &refused);
+        }
     };
 
     let axes = compute_axes(&module, &ir, &resolution, rows);
@@ -1070,21 +1101,47 @@ fn run_info(file: &Path, editions: &[String], format: InfoFormat) -> ExitCode {
 /// `already_reported` is the edition-neutral stream the caller has
 /// printed; only diagnostics absent from it are reported, keyed by code
 /// and span.
+///
+/// The error case is the findings the failure document owes rather than
+/// an exit code, so the caller writes that document through the one place
+/// that knows what `--format json` promises. Under
+/// [`FailureReport::Json`] the errors come back here instead of printing,
+/// because the document is written once, after every edition has been
+/// walked, and a finding printed on the way would reach the reader ahead
+/// of it. Under [`FailureReport::Text`] every finding prints inline where
+/// it always has — under the note naming the edition that raised it — and
+/// the list comes back empty, which leaves stderr saying exactly what it
+/// says today. Warnings print on stderr either way; `spec/lint`
+/// "Machine-readable payload" states that as the contract rather than
+/// this code arguing for it.
+///
+/// A refused palette adds nothing to the list, in either format:
+/// [`invalid_palette_report`] renders prose rather than a `Diagnostic`,
+/// since no leak it names has a span in the source or a repair the author
+/// could make. So an error-severity finding from another edition can
+/// leave the list non-empty with that refusal invisible in it, and a run
+/// refused by the palette alone comes back as `Err` of an empty list —
+/// which under `--format json` is the `{"diagnostics": []}` the spec asks
+/// for, and under text is the exit code and the prose already on stderr.
 fn edition_rows(
-    file: &Path,
-    source: &str,
-    lines: &LineStarts,
+    Reporting {
+        file,
+        source,
+        lines,
+        report,
+    }: Reporting<'_>,
     module: &Module,
     ir: &cairn_lang_core::intent::IntentModule,
     editions: &[String],
-    already_reported: &[cairn_lang_core::check::Diagnostic],
-) -> Result<Vec<EditionReport>, ExitCode> {
+    already_reported: &[Diagnostic],
+) -> Result<Vec<EditionReport>, Vec<Diagnostic>> {
     let already: std::collections::HashSet<(&str, usize, usize)> = already_reported
         .iter()
         .map(|d| (d.code.as_str(), d.span.start, d.span.end))
         .collect();
     let mut rows: Vec<EditionReport> = Vec::with_capacity(editions.len());
     let mut edition_specific_error = false;
+    let mut refused: Vec<Diagnostic> = Vec::new();
 
     for e in editions {
         let edition: Edition = e.parse().expect("validated by the caller");
@@ -1104,40 +1161,41 @@ fn edition_rows(
             .filter(|d| !already.contains(&(d.code.as_str(), d.span.start, d.span.end)))
             .cloned()
             .collect();
-        if !only_here.is_empty() {
-            eprintln!("note: reported for --editions {}", edition.as_str());
-            if report_diagnostics(file, source, lines, &only_here) {
-                edition_specific_error = true;
+        edition_specific_error |= only_here.iter().any(|d| d.severity() == Severity::Error);
+        // The errors are the run's refusal, so under `--format json` they
+        // are held for the failure document. The warnings stay on stderr
+        // in both formats: they belong to a row the caller is about to
+        // discard, and a warning read beside a figure that was never
+        // printed is worse placed in the document than beside the note
+        // naming the edition that raised it. `spec/lint` "Machine-readable
+        // payload" states that, so the header prints only when something
+        // is left for it to head.
+        let mut edition_header_printed = false;
+        for d in only_here {
+            if d.severity() == Severity::Error && report == FailureReport::Json {
+                refused.push(d);
+                continue;
             }
+            if !edition_header_printed {
+                eprintln!("note: reported for --editions {}", edition.as_str());
+                edition_header_printed = true;
+            }
+            report_diagnostic(file, source, lines, &d);
         }
 
         let portability = match edition {
             Edition::Java => Ok(portability_for_java(&block_ir, &pack.blocks, &pack.aliases)),
             Edition::Bedrock => portability_for_bedrock(&block_ir, &pack.blocks, &pack.aliases),
         };
-        let portability = match portability {
-            Ok(portability) => Some(portability),
-            // A palette the pack was supposed to have refused. There is no
-            // portability figure to print over it — the counts would read
-            // as ordinary portability — so this edition contributes no row
-            // and the run exits 1.
-            //
-            // What it does not do is leave the edition. The rest of this
-            // body reads the resolution and the pinned lowerings, not the
-            // palette, so the dropped scopes and each version's refusals
-            // are findings the leak has nothing to do with — and stderr is
-            // the only place they can appear, since the report is
-            // discarded. Skipping them here would hide within one edition
-            // exactly what walking every edition exists to prevent between
-            // two.
-            Err(invalid) => {
-                for line in invalid_palette_report(edition, &invalid) {
-                    eprintln!("{line}");
-                }
-                edition_specific_error = true;
-                None
-            }
-        };
+        // What it does not do is leave the edition. The rest of this body
+        // reads the resolution and the pinned lowerings, not the palette,
+        // so the dropped scopes and each version's refusals are findings
+        // the leak has nothing to do with — and stderr is the only place
+        // they can appear, since the report is discarded. Skipping them
+        // here would hide within one edition exactly what walking every
+        // edition exists to prevent between two.
+        let portability = portability_figure(edition, portability);
+        edition_specific_error |= portability.is_none();
         if let Some(portability) = &portability {
             for note in unsupported_notes(edition, portability.unsupported()) {
                 eprintln!("{note}");
@@ -1190,10 +1248,46 @@ fn edition_rows(
 
     // Every requested edition is walked before returning, so one bad edition
     // does not hide a second one's findings.
+    //
+    // The flag is what decides this and not `refused.is_empty()`: a
+    // refused palette refuses the run and contributes no finding, so an
+    // empty list is not "nothing refused" — reading the list instead would
+    // give that run exit 0 and a report missing a row.
     if edition_specific_error {
-        return Err(ExitCode::from(1));
+        return Err(refused);
     }
     Ok(rows)
+}
+
+/// One edition's portability figure, or `None` where its palette carried
+/// blockstates a registry pack is expected to refuse.
+///
+/// There is no figure to print over such a palette — the counts would read
+/// as ordinary portability — so the edition contributes no row and the run
+/// exits 1. The refusal reports here, as prose: no leak it names has a
+/// span in the source or a repair the author could make, so it is a
+/// run-level refusal rather than a finding, the shape `spec/lint`
+/// "Machine-readable payload" gives one.
+///
+/// Split out of [`edition_rows`] because the `Err` arm is the one branch
+/// no `.crn` reaches: the lowering it needs is built inside the walk, so
+/// the only way to raise the refusal is to intern the blockstate by hand.
+/// Taking the `Result` rather than computing it is what lets
+/// `a_refused_palette_says_which_edition_lost_its_row_and_whose_bug_it_is`
+/// drive the decision with the lowering it already builds.
+fn portability_figure(
+    edition: Edition,
+    portability: Result<PortabilityReport, InvalidPalette>,
+) -> Option<PortabilityReport> {
+    match portability {
+        Ok(portability) => Some(portability),
+        Err(invalid) => {
+            for line in invalid_palette_report(edition, &invalid) {
+                eprintln!("{line}");
+            }
+            None
+        }
+    }
 }
 
 /// The notes naming the palette entries one edition has no form for, in
@@ -3562,6 +3656,19 @@ mod tests {
             .expect_err("a value outside the Java domain is not a portability figure");
 
         let lines = invalid_palette_report(Edition::Bedrock, &invalid);
+        // What the walk does with it: no figure, so no row, so
+        // `edition_specific_error` and a refusal carrying no finding —
+        // `{"diagnostics": []}` and exit 1 under `--format json`. This is
+        // the only place that decision can be asked, and it is stated as a
+        // promise in `spec/lint` "Machine-readable payload".
+        assert!(
+            portability_figure(
+                Edition::Bedrock,
+                portability_for_bedrock(&block_ir, &pack.blocks, &pack.aliases),
+            )
+            .is_none(),
+            "a refused palette costs the edition its row rather than printing counts over it",
+        );
         assert_eq!(lines.len(), 3, "header, one leak, closing note: {lines:?}");
         assert!(
             lines[0].starts_with("error: the bedrock ") && lines[0].contains("no portability"),
