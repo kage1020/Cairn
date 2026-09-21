@@ -435,7 +435,7 @@ entry is `{id, states, dropped}`:
 |---|---|
 | `id` | The palette entry's block ID, verbatim as the lowering interned it. |
 | `states` | The entry's `key=value` pairs, comma-joined, the same spelling the `states_unmapped` reason uses. |
-| `dropped` | One `{key, value}` per intent the edition has no form for. |
+| `dropped` | One `{key, value}` per intent the edition has no form for. `key` is a closed set (`shape`); a new kind of loss is a new `key` rather than a change to an existing one. |
 
 Two lists rather than one under a category tag, and `states` rather than the ID alone. Degradation
 is a fact about the *state combination*, not about the block: one ID reaches this list once per
@@ -446,8 +446,9 @@ combination that loses something, and `roof-hip`'s four entries are four spellin
 `unsupported` reasons do: a consumer that reads this should not have to parse English to learn which
 state was lost. A value the edition *can* express is not a loss and does not appear — Bedrock's
 stairs are `straight`, so `shape=straight` drops without an entry. The prose both the note and
-`W_INTENT_DEGRADED` print is written in one place, so the two cannot describe the same loss
-differently.
+`W_INTENT_DEGRADED` print is written in one place, and per `key` rather than over the pair, because
+the sentence for a dropped `shape` talks about stairs: a second block family that drops an intent
+brings its own `key` and its own sentence rather than inheriting this one.
 
 #### A blockstate the pack should have refused is not a figure
 

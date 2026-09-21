@@ -142,52 +142,6 @@
   pre-release tag is a label too, while this one names Cairn's own version, where every component
   is digits, `2026.13` is a month that does not exist and `1.2` is a semver rather than a year.
 
-- *(cli,core,formats)* `cairn info`'s `degraded` figure counted palette entries it could name and
-  did not:
-
-  ```console
-  $ cairn info examples/roof-hip.crn --editions bedrock
-  edition portability:     Bedrock: portable: 7  degraded: 4  unsupported: 0
-  ```
-
-  Which four, and what did each of them lose? The answer was in hand where the counter was raised
-  — `translate_states` returns the dropped intent and the fold read only whether the list was
-  empty — and it was dropped there. This is the shape `unsupported: N` had before
-  `unsupported_entries`, on the one figure of that row still carrying it. A build does name them,
-  as `W_INTENT_DEGRADED`, but `info` exists to be read *before* the build.
-
-  ```console
-  $ cairn info examples/roof-hip.crn --editions bedrock 2>&1 >/dev/null | head -2
-  note: what `degraded: 4` counts on bedrock:
-    note: `minecraft:spruce_stairs[facing=north,half=bottom,shape=outer_left]` — shape=outer_left has no Bedrock state; Bedrock stairs render straight, so corners show visual gaps
-  ```
-
-  Two lists rather than one under a category tag: `degraded` and `unsupported` answer different
-  questions — what was lost, against why there is no form at all — and keeping them apart is what
-  lets each be read against its own figure. `--format json` mirrors the note as
-  `edition_portability[].degraded_entries`, one element per unit of the count, in palette order,
-  the way `unsupported_entries` already is. `PortabilityReport` gained a second push site so the
-  new figure rises only beside its own entry, which is what makes the length *be* the count rather
-  than a second tally that has to agree.
-
-  An entry is `{id, states, dropped}`, and the `states` are not decoration. Degradation is a fact
-  about the state combination rather than the block: one id reaches the list once per combination
-  that loses something, and all four of `roof-hip`'s entries are `minecraft:spruce_stairs`. Keyed
-  by id alone the report would have printed the same line four times.
-
-  `dropped` carries `{key, value}` rather than the sentence about them, so a consumer reads which
-  property was lost without parsing English out of the field beside it — the rule `UnsupportedReason`
-  already states for its own variants. `StateTranslation.degraded` changes from `Vec<String>` to
-  carry those pieces, and the wording moves into `bedrock_state::degradation_detail`, which is now
-  the only place it is written: `W_INTENT_DEGRADED` composes its form from the same function, so
-  the build and the report cannot describe one loss two ways. A value the edition can express
-  never reaches the list at all — Bedrock's stairs are `straight`, so `shape=straight` drops
-  without an entry.
-
-  The figures are unchanged, the rows on stdout are unchanged, and the exit code is unchanged: the
-  names go to stderr beside every other `note:` the command prints. `spec/versioning-editions`
-  "The `edition portability` row" documents the payload, with the ja mirror.
-
 ### Fixed
 
 - *(core)* A `-> value` tail on a member that cannot emit a signal was silent through `check` and
@@ -561,6 +515,64 @@
   untouched: this is a row of a report `info` writes on a run it does not refuse, not a diagnostic.
 
 ### Breaking changes
+
+- *(cli,core,formats)* `cairn info`'s `degraded` figure counted palette entries it could name and
+  did not:
+
+  ```console
+  $ cairn info examples/roof-hip.crn --editions bedrock
+  edition portability:     Bedrock: portable: 7  degraded: 4  unsupported: 0
+  ```
+
+  Which four, and what did each of them lose? The answer was in hand where the counter was raised
+  — `translate_states` returns the dropped intent and the fold read only whether the list was
+  empty — and it was dropped there. This is the shape `unsupported: N` had before
+  `unsupported_entries`, on the one figure of that row still carrying it. A build does name them,
+  as `W_INTENT_DEGRADED`, but `info` exists to be read *before* the build.
+
+  ```console
+  $ cairn info examples/roof-hip.crn --editions bedrock 2>&1 >/dev/null | head -2
+  note: what `degraded: 4` counts on bedrock:
+    note: `minecraft:spruce_stairs[facing=north,half=bottom,shape=outer_left]` — shape=outer_left has no Bedrock state; Bedrock stairs render straight, so corners show visual gaps
+  ```
+
+  Two lists rather than one under a category tag: `degraded` and `unsupported` answer different
+  questions — what was lost, against why there is no form at all — and keeping them apart is what
+  lets each be read against its own figure. `--format json` mirrors the note as
+  `edition_portability[].degraded_entries`, one element per unit of the count, in palette order,
+  the way `unsupported_entries` already is. `PortabilityReport` gained a second push site so the
+  new figure rises only beside its own entry, which is what makes the length *be* the count rather
+  than a second tally that has to agree.
+
+  An entry is `{id, states, dropped}`, and the `states` are not decoration. Degradation is a fact
+  about the state combination rather than the block: one id reaches the list once per combination
+  that loses something, and all four of `roof-hip`'s entries are `minecraft:spruce_stairs`. Keyed
+  by id alone the report would have printed the same line four times.
+
+  `dropped` carries `{key, value}` rather than the sentence about them, so a consumer reads which
+  property was lost without parsing English out of the field beside it — the rule `UnsupportedReason`
+  already states for its own variants. `StateTranslation.degraded` changes from `Vec<String>` to
+  carry those pieces, and the wording moves into `bedrock_state::degradation_detail`, which is now
+  the only place it is written: `W_INTENT_DEGRADED` composes its form from the same function, so
+  the build and the report cannot describe one loss two ways. A value the edition can express
+  never reaches the list at all — Bedrock's stairs are `straight`, so `shape=straight` drops
+  without an entry.
+
+  The figures are unchanged, the rows on stdout are unchanged, and the exit code is unchanged: the
+  names go to stderr beside every other `note:` the command prints. `spec/versioning-editions`
+  "The `edition portability` row" documents the payload, with the ja mirror.
+
+  Three Rust API changes come with it, all of them `spec/compatibility` "Internal", where "no
+  promise. Any release may change anything." — but breaking for anyone building on the crates.
+  `PortabilityReport::into_unsupported` is replaced by `into_entries() -> PortabilityEntries`,
+  since a caller now needs both lists and each `into_` would consume the report.
+  `StateTranslation.degraded` changes from `Vec<String>` to `Vec<DroppedIntent>`, which is a
+  closed set (`DroppedIntent::Shape { value }`) rather than a `{key, value}` pair so that the
+  renderer must match on it: the sentence written for a dropped `shape` talks about stairs, and
+  the day a second block family drops an intent it must bring its own wording rather than
+  inherit one about corners. On the wire that variant is the same `{"key": "shape", "value": …}`
+  object. And `EditionPortability` / `EditionReport` gain a `degraded_entries` field; neither is
+  `#[non_exhaustive]`, so struct-literal construction of either needs the new field.
 
 - *(redstone,cli)* The per-cell figure delay insertion writes is renamed `delay_ticks` →
   `local_delay_ticks`: on the `PlacementPhase::Delayed` / `Legalized` variants, on

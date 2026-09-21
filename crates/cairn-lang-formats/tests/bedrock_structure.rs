@@ -5,7 +5,8 @@
 //! fastest axis, palette entries of `{ name, states, version }`.
 
 use cairn_lang_core::block_array::{BlockArray, BlockState, Dims, Palette, PaletteIndex};
-use cairn_lang_formats::bedrock_state::BedrockStateError;
+use cairn_lang_core::resolve::DroppedIntent;
+use cairn_lang_formats::bedrock_state::{BedrockStateError, degradation_message};
 use cairn_lang_formats::bedrock_structure::{
     BedrockStructureError, build_mcstructure_tag, write_mcstructure,
 };
@@ -274,10 +275,18 @@ fn m4c_non_straight_stair_shape_degrades() {
     let (root, notes) = build_mcstructure_tag(&ba, &target_1_21_60()).expect("build");
     assert_eq!(notes.len(), 1);
     assert_eq!(notes[0].id, "minecraft:oak_stairs");
-    assert!(
-        notes[0].message.contains("shape"),
-        "got: {}",
-        notes[0].message
+    // Against the writer rather than a literal: `cairn info`'s degraded
+    // note renders the same clause from the same function, and a literal
+    // here would let the build's wording drift away from the report's
+    // without a test noticing.
+    assert_eq!(
+        notes[0].message,
+        degradation_message(
+            "minecraft:oak_stairs",
+            &DroppedIntent::Shape {
+                value: "outer_left".to_owned(),
+            },
+        ),
     );
     // The mappable intent still lands in `states`.
     let states = last_palette_states(&root);

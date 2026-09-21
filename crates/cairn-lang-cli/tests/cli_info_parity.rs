@@ -9,6 +9,8 @@
 use std::path::PathBuf;
 use std::process::Command;
 
+use cairn_lang_core::resolve::DroppedIntent;
+use cairn_lang_formats::bedrock_state::degradation_detail;
 use serde_json::Value;
 
 mod common;
@@ -1405,6 +1407,17 @@ fn the_json_row_names_exactly_what_its_count_counts() {
             .is_empty(),
         "Java has the block, so its list is empty rather than absent: {java}",
     );
+    // The same of the figure beside it, so the two halves of the additive
+    // claim fail together: a `skip_serializing_if` added to one list would
+    // otherwise break its consumers with the other list's test still green.
+    assert_eq!(java["degraded"], 0);
+    assert!(
+        java["degraded_entries"]
+            .as_array()
+            .expect("every row carries the key")
+            .is_empty(),
+        "Java loses nothing here, so its list is empty rather than absent: {java}",
+    );
 }
 
 #[test]
@@ -1473,47 +1486,77 @@ fn the_degraded_figure_names_the_entry_and_what_it_lost() {
 }
 
 #[test]
-fn the_degraded_notes_say_what_the_build_would_say() {
+fn the_degraded_notes_and_the_build_share_one_wording() {
     // Two moments, one reader, one wording: the note here and the build's
     // `W_INTENT_DEGRADED` come off the same function, so `info` cannot
     // start describing a loss differently from the compile that hits it.
+    // Checked against that function rather than a literal, which is what
+    // makes this a claim about the seam and not about a string.
+    const HEADER: &str = "note: what `degraded: ";
     let (code, stdout, stderr) = info_raw(&examples_dir().join("roof-hip.crn"), "bedrock");
     assert_eq!(code, Some(0), "info reports; it does not refuse: {stderr}");
+    // The header carries the figure it is explaining, the way the
+    // `unsupported` block does, and every count below is read off it
+    // rather than written twice.
+    let mut lines = stderr.lines();
+    let header = lines
+        .by_ref()
+        .find(|line| line.starts_with(HEADER))
+        .unwrap_or_else(|| panic!("the block is introduced by its own header: {stderr}"));
     assert!(
-        stdout.contains("degraded: 4"),
-        "premise: the figure is the thing being explained, got: {stdout}",
+        header.ends_with(" counts on bedrock:"),
+        "the header names the edition whose figure it explains: {stderr}",
     );
-    let named: Vec<&str> = stderr
-        .lines()
-        .filter(|line| line.starts_with("  note: `minecraft:"))
-        .collect();
+    let figure: usize = header
+        .trim_start_matches(HEADER)
+        .split('`')
+        .next()
+        .and_then(|count| count.parse().ok())
+        .unwrap_or_else(|| panic!("the header carries the figure: {header}"));
+    assert!(
+        stdout.contains(&format!("degraded: {figure}")),
+        "the row and the header report one figure, got: {stdout}",
+    );
+    assert!(
+        figure > 1,
+        "premise: this example degrades more than one entry, got: {stdout}",
+    );
+    // Only the lines under that header: `unsupported_notes` writes the
+    // same `  note: ` prefix into the same stream from the same loop, so
+    // counting across the whole of stderr would let three degraded beside
+    // one unsupported pass for four.
+    let named: Vec<&str> = lines.take_while(|line| line.starts_with("  ")).collect();
     assert_eq!(
         named.len(),
-        4,
-        "one line per entry, so the lines can be counted against the figure: {stderr}",
+        figure,
+        "one line per entry, counted against the header's own figure: {stderr}",
     );
-    assert!(
-        named[0].contains("shape=outer_left has no Bedrock state"),
-        "the sentence the build prints for the same entry: {stderr}",
-    );
-    assert!(
-        named[0].contains("minecraft:spruce_stairs[facing=north,half=bottom,shape=outer_left]"),
-        "the line's subject is the palette entry, states and all: {stderr}",
-    );
-    // The header carries the figure it is explaining, the way the
-    // `unsupported` block does.
-    assert!(
-        stderr.contains("note: what `degraded: 4` counts on bedrock:"),
+    // The whole line, against the writer: `degradation_detail` is where
+    // the clause lives, and the build frames that same clause with the
+    // block named.
+    assert_eq!(
+        named[0],
+        format!(
+            "  note: `minecraft:spruce_stairs[facing=north,half=bottom,shape=outer_left]` — {}",
+            degradation_detail(&DroppedIntent::Shape {
+                value: "outer_left".to_owned(),
+            }),
+        ),
         "got: {stderr}",
     );
-    // And none of it reaches stdout, where the rows are the contract.
+    // And none of it reaches stdout, where the rows are the contract. The
+    // row count comes off a clean run rather than a literal, so the two
+    // cannot be right about different numbers of rows.
     assert!(
         !stdout.contains("spruce_stairs"),
         "the names belong on stderr with the other notes, got: {stdout}",
     );
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    let clean = one_slot_source(tmp.path(), "clean.crn", "cobblestone");
+    let (_, clean_out, _) = info_raw(&clean, "bedrock");
     assert_eq!(
         stdout_rows(&stdout).len(),
-        5,
+        stdout_rows(&clean_out).len(),
         "naming an entry must not add a row, got: {stdout}",
     );
 }

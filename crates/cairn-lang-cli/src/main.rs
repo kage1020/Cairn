@@ -1240,13 +1240,15 @@ fn edition_rows(
         // no validated pack could have produced.
         if let Some(portability) = portability {
             let refusal = buildable_refusal(source, lines, &verdicts, &considered, &dropped);
-            let counts = portability.counts();
+            // Only `portable` is taken off the counts: the other two are
+            // the lengths of the lists below, and `compute_axes` derives
+            // them there so this call cannot pair a figure with a list
+            // that disagrees.
+            let portable = portability.counts().portable;
             let entries = portability.into_entries();
             rows.push(EditionReport {
                 edition,
-                portable: counts.portable,
-                degraded: counts.degraded,
-                unsupported: counts.unsupported,
+                portable,
                 unsupported_entries: entries.unsupported,
                 degraded_entries: entries.degraded,
                 buildable: verdicts.buildable,
@@ -1312,8 +1314,9 @@ fn portability_figure(
 /// One line per entry rather than per dropped intent, so the lines can be
 /// counted against the figure, and each line carries the entry's states
 /// because one id reaches the list once per state combination. The
-/// sentence is `degradation_message`, which is the sentence the build's
-/// `W_INTENT_DEGRADED` prints for the same entry.
+/// sentence is `degradation_detail`, the one place the wording is
+/// written; the build's `W_INTENT_DEGRADED` frames that same clause with
+/// the block named, so the two tell one story rather than two.
 fn degraded_notes(edition: Edition, entries: &[DegradedEntry]) -> Vec<String> {
     if entries.is_empty() {
         return Vec::new();
@@ -3758,6 +3761,8 @@ mod tests {
     //! Unit coverage for the argument-surface invariants the
     //! end-to-end `tests/cli_*.rs` binaries can only assert
     //! circumstantially, by hard-coding both sides of a pairing.
+    use cairn_lang_core::resolve::DroppedIntent;
+
     use super::*;
 
     /// The whole note block, header included.
@@ -3804,6 +3809,51 @@ mod tests {
         // nothing, and every edition would otherwise get a block of its
         // own back to back.
         assert!(unsupported_notes(Edition::Java, &[]).is_empty());
+    }
+
+    /// The same, for the figure beside it.
+    ///
+    /// `degraded_notes` has the same header, the same guard and the same
+    /// indent, and the end-to-end tests read it the same circumstantial
+    /// way — so without this, dropping the empty guard would print
+    /// ``note: what `degraded: 0` counts on java:`` on every clean run,
+    /// twice over for `--editions java,bedrock`, and the suite would stay
+    /// green.
+    #[test]
+    fn the_degraded_notes_answer_the_figure_they_sit_under() {
+        let entries = vec![
+            DegradedEntry {
+                id: "minecraft:spruce_stairs".to_owned(),
+                states: "facing=north,shape=outer_left".to_owned(),
+                dropped: vec![DroppedIntent::Shape {
+                    value: "outer_left".to_owned(),
+                }],
+            },
+            // The same id again: it is the state combination that
+            // degrades, so the block reports it once per combination.
+            DegradedEntry {
+                id: "minecraft:spruce_stairs".to_owned(),
+                states: "facing=south,shape=inner_right".to_owned(),
+                dropped: vec![DroppedIntent::Shape {
+                    value: "inner_right".to_owned(),
+                }],
+            },
+        ];
+        assert_eq!(
+            degraded_notes(Edition::Bedrock, &entries),
+            [
+                "note: what `degraded: 2` counts on bedrock:".to_owned(),
+                format!(
+                    "  note: `minecraft:spruce_stairs[facing=north,shape=outer_left]` — {}",
+                    degradation_detail(&entries[0].dropped[0])
+                ),
+                format!(
+                    "  note: `minecraft:spruce_stairs[facing=south,shape=inner_right]` — {}",
+                    degradation_detail(&entries[1].dropped[0])
+                ),
+            ],
+        );
+        assert!(degraded_notes(Edition::Java, &[]).is_empty());
     }
 
     /// The block that stands in for a row an edition does not get.

@@ -92,7 +92,9 @@ use cairn_lang_core::suggest::nearest_namespaced_id;
 
 use thiserror::Error;
 
-use crate::bedrock_state::{BedrockStateError, join_properties, translate_states};
+use crate::bedrock_state::{
+    BedrockStateError, StateTranslation, join_properties, translate_states,
+};
 use crate::registry::{AliasIndex, BlocksIndex};
 
 /// One edition's portability answer: the counts, and the entries behind
@@ -324,18 +326,31 @@ pub fn portability_for_bedrock(
         // fourth added later must be classified here rather than joining
         // whichever bucket a `_` arm points at.
         match translate_states(&entry.id, &entry.properties) {
-            Ok(t) if t.degraded.is_empty() => {
+            // Destructured without `..` for the reason the wildcard is
+            // refused above: reading `degraded` alone would make these two
+            // arms an effective wildcard over `StateTranslation`, and a
+            // second kind of loss added to it would land in `portable`
+            // silently. `portable` has no list, so the "the figure is the
+            // length" invariant that guards the other two categories could
+            // not notice. Without `..` the compiler raises it here.
+            Ok(StateTranslation {
+                states: _,
+                degraded,
+            }) if degraded.is_empty() => {
                 report.count_portable();
             }
             // The translator's own answer, carried rather than recomputed:
             // which property it could not write is a rule that lives in
             // `bedrock_state`, and re-deriving it here would be a second
             // copy of that rule to fall out of step.
-            Ok(t) => {
+            Ok(StateTranslation {
+                states: _,
+                degraded,
+            }) => {
                 report.push_degraded(DegradedEntry {
                     id: entry.id.clone(),
                     states: join_properties(&entry.properties),
-                    dropped: t.degraded,
+                    dropped: degraded,
                 });
             }
             // The edition has the block and this backend has no mapping
@@ -1236,8 +1251,7 @@ mod tests {
             [DegradedEntry {
                 id: "minecraft:oak_stairs".to_owned(),
                 states: "facing=south,half=top,shape=outer_left".to_owned(),
-                dropped: vec![DroppedIntent {
-                    key: "shape".to_owned(),
+                dropped: vec![DroppedIntent::Shape {
                     value: "outer_left".to_owned(),
                 }],
             }],
@@ -1268,13 +1282,22 @@ mod tests {
         ]);
         let report = bedrock_report(&ir, &table(), &no_aliases());
         assert_eq!(report.counts().degraded, 2);
-        let dropped: Vec<(&str, &str)> = report
+        let dropped: Vec<&DroppedIntent> = report
             .degraded()
             .iter()
             .flat_map(|entry| entry.dropped.iter())
-            .map(|d| (d.key.as_str(), d.value.as_str()))
             .collect();
-        assert_eq!(dropped, [("shape", "outer_left"), ("shape", "inner_right")]);
+        assert_eq!(
+            dropped,
+            [
+                &DroppedIntent::Shape {
+                    value: "outer_left".to_owned(),
+                },
+                &DroppedIntent::Shape {
+                    value: "inner_right".to_owned(),
+                },
+            ],
+        );
         assert_eq!(
             report.degraded().len(),
             report.counts().degraded as usize,

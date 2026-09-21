@@ -49,7 +49,7 @@ pub struct StateTranslation {
     ///
     /// The pieces rather than the sentence, so a caller that wants to act
     /// on the dropped property does not have to parse it back out of
-    /// English. [`degradation_message`] writes the sentence, and both
+    /// English. [`degradation_detail`] writes the sentence, and both
     /// `W_INTENT_DEGRADED` and `cairn info`'s portability note come off
     /// that one function.
     pub degraded: Vec<DroppedIntent>,
@@ -184,24 +184,41 @@ pub fn translate_states(
 /// pieces so this is the only place they are put into words.
 ///
 /// Without the id because the two callers introduce the entry
-/// differently: the warning names the block mid-sentence, and the note has
-/// already printed `id[states]` as the line's subject. Composing the
-/// warning's form from this one ([`degradation_message`]) is what keeps
-/// that a matter of framing rather than of wording.
+/// differently. [`degradation_message`] makes the block the sentence's
+/// subject, because a [`ParityNote`](crate::bedrock_structure::ParityNote)
+/// has to read on its own — the CLI happens to prefix the id again when
+/// it renders one, which is that renderer's wart and not a reason for
+/// this split. `cairn info`'s note has already printed `id[states]` as
+/// its line's subject and wants the clause alone. Composing the one form
+/// from the other is what keeps that a matter of framing rather than of
+/// wording.
+///
+/// A `match` rather than a format over the pieces, because this sentence
+/// is about stairs. [`DroppedIntent`] is a closed set so that the day a
+/// second family drops an intent, this stops compiling until someone
+/// writes what *that* loss looks like — the alternative is a slab told to
+/// check its corners.
 #[must_use]
 pub fn degradation_detail(dropped: &DroppedIntent) -> String {
-    let DroppedIntent { key, value } = dropped;
-    format!(
-        "{key}={value} has no Bedrock state; Bedrock stairs render straight, so corners show \
-         visual gaps"
-    )
+    match dropped {
+        DroppedIntent::Shape { value } => format!(
+            "shape={value} has no Bedrock state; Bedrock stairs render straight, so corners show \
+             visual gaps"
+        ),
+    }
 }
 
 /// [`degradation_detail`] with the block that carried the intent, as
 /// `W_INTENT_DEGRADED` reports it.
+///
+/// The family word comes out of the same `match` for the same reason the
+/// sentence does: `stair` is true of this variant, not of the type.
 #[must_use]
 pub fn degradation_message(id: &str, dropped: &DroppedIntent) -> String {
-    format!("stair `{id}` {}", degradation_detail(dropped))
+    let family = match dropped {
+        DroppedIntent::Shape { .. } => "stair",
+    };
+    format!("{family} `{id}` {}", degradation_detail(dropped))
 }
 
 fn translate_stair(
@@ -226,8 +243,7 @@ fn translate_stair(
                 // corner shape drops with a degradation note ("Backend = data
                 // tables" and "Fail-loud and minimum-version inference").
                 if value != "straight" {
-                    degraded.push(DroppedIntent {
-                        key: key.clone(),
+                    degraded.push(DroppedIntent::Shape {
                         value: value.clone(),
                     });
                 }
@@ -370,8 +386,7 @@ mod tests {
         // parsing it back out of a sentence.
         assert_eq!(
             t.degraded,
-            [DroppedIntent {
-                key: "shape".to_owned(),
+            [DroppedIntent::Shape {
                 value: "outer_left".to_owned(),
             }],
         );
