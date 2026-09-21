@@ -3,6 +3,7 @@
 use std::num::{IntErrorKind, NonZeroU32};
 use std::ops::Range;
 
+use serde::Serialize;
 use thiserror::Error;
 
 /// Byte range into the original source text.
@@ -15,7 +16,12 @@ pub type Span = Range<usize>;
 /// that downstream code would have to special-case. `col` counts Unicode
 /// scalar values (`char`), not bytes, so the value matches what editors and
 /// `gcc`/`clang`-style tools display for the same source.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+///
+/// `Serialize` writes the two as plain numbers, so a payload embedding a
+/// position reads the same as one that spelled it `u32` by hand — what it
+/// gains is that the 1-based invariant travels with the type rather than
+/// being re-established at each producer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub struct Position {
     /// 1-based line number.
     pub line: NonZeroU32,

@@ -38,7 +38,7 @@ use serde::Serialize;
 use crate::ast::{Arg, Header, Item, ItemKind, Module, RawRequirement, Statement};
 use crate::check::RenderedDiagnostic;
 use crate::edition::Edition;
-use crate::error::Span;
+use crate::error::{Position, Span};
 use crate::intent::IntentModule;
 
 use super::requires_parse::{compare_versions, parse_min_version};
@@ -164,46 +164,69 @@ pub struct BuildableTargets {
 
 /// Why no supported version of one edition can build the source.
 ///
-/// An empty `buildable` has more than one cause and each is repaired by
-/// editing a different thing, so the bare list is a figure a reader cannot
-/// act on — the same problem `unsupported: N` had before
-/// [`UnsupportedReason`], answered the same way.
+/// An empty `buildable` has four causes and they are not all repaired by
+/// the same edit, so the bare list is a figure a reader cannot act on —
+/// the same problem `unsupported: N` had before [`UnsupportedReason`],
+/// answered the same way.
 ///
-/// Two variants rather than one per cause, because the causes are not all
-/// the same shape. An unplaceable floor is a fact about the edition: it
-/// answers before any version is weighed, and a per-version list of it
-/// would be the same sentence repeated once per release. Everything else
-/// is a fact about a version, and several can hold at once in one run —
-/// one release below the floor and the next refusing an id is an ordinary
-/// answer, and a single tag for the edition would have to pick one of them
-/// to report.
+/// A struct rather than one tag per cause, because more than one cause
+/// holds at once in ordinary files. Two of them are facts about the
+/// *edition*, identical for every release and answered before any release
+/// is weighed: a floor the version table cannot place, and a scope that
+/// produced no voxels. The other two are facts about a *version*, and a
+/// run can carry both — one release below a floor and the next refusing an
+/// id is an ordinary answer. A shape that picked one would send the reader
+/// back for the next cause after each repair, which is the loop this row
+/// exists to close: so the edition-wide answers sit beside the per-version
+/// list rather than in front of it.
 ///
-/// Every variant carries the pieces of its answer rather than a rendered
+/// Every field carries the pieces of its answer rather than a rendered
 /// sentence, as [`UnsupportedReason`] does, and for the same reason: the
 /// prose belongs to whatever is rendering.
 ///
-/// Serialized as an internally tagged union, so a consumer reads
-/// `"reason": "unplaceable_floor"` beside the fields that reason carries.
+/// Reached through `reason` on [`BuildableTargets`] rather than flattened
+/// into the row. [`UnsupportedEntry::reason`] flattens because it is a
+/// tagged union and the tag is the field's own name; this is a struct with
+/// no tag, so nesting gives the row one key that answers "is there a
+/// reason, and what is it" instead of three a consumer has to test
+/// separately.
 #[derive(Debug, Clone, PartialEq, Serialize)]
-#[serde(tag = "reason", rename_all = "snake_case")]
-pub enum BuildableRefusal {
-    /// A floor names no release of this edition, so no version was weighed
-    /// against it at all.
+pub struct BuildableRefusal {
+    /// Floors this edition's version table cannot place, in source order.
     ///
-    /// Distinct from a floor every release sits below, which is the
-    /// ordinary "build the other edition, or lower the floor" news. This
-    /// one says the floor is not in this edition's numbering, and the
-    /// repair is on the `@requires` line whatever the releases are.
-    UnplaceableFloor {
-        /// The floors the edition's version table cannot place, in source
-        /// order.
-        floors: Vec<DeclaredFloor>,
-    },
-    /// Every considered version answered for itself, and none said yes.
-    EveryVersionRefused {
-        /// One entry per version in `considered`, in the same order.
-        versions: Vec<RefusedTarget>,
-    },
+    /// An edition-wide answer: a floor naming no release of the edition
+    /// can be weighed against none of them, so no version is certified
+    /// whatever its own id table says. Distinct from a floor every release
+    /// sits below, which is the ordinary "build the other edition, or
+    /// lower the floor" news; this one says the floor is not in this
+    /// edition's numbering, and the repair is on the `@requires` line
+    /// whatever the releases are.
+    ///
+    /// The versions are still weighed and still answer for themselves in
+    /// [`Self::versions`], so fixing the floor is not a prerequisite for
+    /// learning what else the file gets wrong.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub unplaceable_floors: Vec<DeclaredFloor>,
+    /// Scopes the source declares that produced no voxels, in resolution
+    /// order.
+    ///
+    /// An edition-wide answer for the same reason: a partial build is not
+    /// certified, so this refuses every version at once and is identical
+    /// under each of them. Beside the per-version list rather than in it,
+    /// because a version below a floor is *also* refused by the scope and
+    /// a reader repairing the floor would otherwise meet the scope only on
+    /// the next run.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub dropped_scopes: Vec<String>,
+    /// The versions that refused for a reason of their own, in
+    /// `considered` order.
+    ///
+    /// A subsequence of `considered`, not a parallel array: a version with
+    /// nothing against it but an edition-wide answer above contributes no
+    /// entry, so a consumer joins on [`RefusedTarget::version`] rather
+    /// than by position.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub versions: Vec<RefusedTarget>,
 }
 
 /// One supported version that cannot build the source, and why.
@@ -218,16 +241,21 @@ pub struct RefusedTarget {
 
 /// Why one supported version cannot build the source.
 ///
-/// Three variants for three repairs: the `@requires` line, the member that
-/// produced no voxels, and whatever the pinned lowering named. They are
-/// per-version because the answer is: the release below the floor and the
-/// release that refuses an id are two different edits, and a run can need
-/// both.
+/// Two variants for two repairs: the `@requires` line, and whatever the
+/// pinned lowering named. They are the causes that differ between
+/// releases, which is what makes them per-version — the release below the
+/// floor and the release that refuses an id are two different edits, and a
+/// run can need both. The causes identical under every release are
+/// [`BuildableRefusal`]'s own fields.
+///
+/// Exclusive rather than a list, because the walk never reaches the second
+/// for a version the first refused: a floor is a relation between the
+/// source and the target and no id table changes it, so a version below
+/// one is not lowered at all.
 ///
 /// Serialized as an internally tagged union under its own key, so a
 /// consumer reading a [`RefusedTarget`] finds `"refusal": "below_floor"`
-/// beside `"version"` rather than a second `"reason"` shadowing the one on
-/// [`BuildableRefusal`].
+/// beside `"version"`.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(tag = "refusal", rename_all = "snake_case")]
 pub enum TargetRefusal {
@@ -237,14 +265,6 @@ pub enum TargetRefusal {
         /// refuse *this* version: a module declaring several floors is a
         /// file where the repair is one line rather than all of them.
         floors: Vec<DeclaredFloor>,
-    },
-    /// A scope the source declares produced no voxels, so every version is
-    /// refused before its id table is consulted — a partial build is not
-    /// certified, and this version was never lowered a second time to find
-    /// that out.
-    ScopeDidNotLower {
-        /// The scopes that produced nothing, in resolution order.
-        scopes: Vec<String>,
     },
     /// The lowering pinned to this version raised errors.
     LoweringRefused {
@@ -268,10 +288,15 @@ pub struct DeclaredFloor {
     /// The floor as the author wrote it, scope and all
     /// ([`VersionFloor::rendered`]).
     pub declared: String,
-    /// 1-based line of the `@requires` directive or `requires` line.
-    pub line: u32,
-    /// 1-based column of the same byte, in Unicode scalar values.
-    pub col: u32,
+    /// Where the `@requires` directive or `requires` line is written.
+    ///
+    /// Flattened, so the wire carries `line` and `col` beside `declared`
+    /// the way a hand-written pair would. [`Position`] rather than two
+    /// `u32`s because its components are `NonZeroU32`: the 1-based
+    /// invariant is the type's rather than something each producer has to
+    /// re-establish, and the bytes are the same either way.
+    #[serde(flatten)]
+    pub position: Position,
     /// The part that declared it, absent for a floor on the file itself.
     ///
     /// Absent rather than `"the module"`: the position above already
@@ -283,10 +308,31 @@ pub struct DeclaredFloor {
 /// The part a floor was inherited from.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct FloorDeclarer {
-    /// The surface keyword of the part's kind (`def`, `theme`).
-    pub keyword: String,
+    /// The kind of part, by its surface keyword.
+    pub keyword: FloorPart,
     /// The part's name.
     pub name: String,
+}
+
+/// The kinds of part a floor can be inherited from.
+///
+/// An enum rather than [`FloorOrigin::part`]'s `&'static str`, so that
+/// [`FloorOrigin`]'s own promise — "adding a variant should break every
+/// caller" — reaches the wire too. Flattened to a string, a fourth route
+/// would put a new value in this field without breaking anything, which is
+/// exactly the absorption that doc forbids. Narrower than [`ItemKind`] on
+/// purpose: a `site` cannot declare a floor, and a type that admits it
+/// states the invariant less precisely than one that does not.
+///
+/// The same two words [`ItemKind::keyword`] spells, pinned to it by
+/// `floor_part_spells_the_surface_keyword`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum FloorPart {
+    /// `def NAME`, inherited by every `place use=NAME`.
+    Def,
+    /// `theme NAME`, inherited by every scope that binds the theme.
+    Theme,
 }
 
 /// Registry-compatible Minecraft version range.
@@ -1262,5 +1308,39 @@ mod tests {
             synthetic_portability(&[(Edition::Java, 0, 0, 0)]),
         );
         assert!(axes.semantic_sensitive.is_empty());
+    }
+
+    /// [`FloorPart`] is the wire's copy of two words [`ItemKind`] already
+    /// spells, and a copy is a thing that falls out of step. Held to the
+    /// original from both sides: each variant serializes to its keyword,
+    /// and every [`FloorOrigin`] that names a part is one of the two — so
+    /// a fourth route added to `FloorOrigin` fails here rather than
+    /// reaching the wire as a new string.
+    #[test]
+    fn floor_part_spells_the_surface_keyword() {
+        for (part, kind) in [
+            (FloorPart::Def, ItemKind::Def),
+            (FloorPart::Theme, ItemKind::Theme),
+        ] {
+            assert_eq!(
+                serde_json::to_value(part).expect("serialize"),
+                serde_json::Value::String(kind.keyword().to_owned()),
+            );
+        }
+        for origin in [
+            FloorOrigin::Module,
+            FloorOrigin::Def("d".to_owned()),
+            FloorOrigin::Theme("t".to_owned()),
+        ] {
+            let Some((keyword, _)) = origin.part() else {
+                continue;
+            };
+            assert!(
+                [FloorPart::Def, FloorPart::Theme]
+                    .iter()
+                    .any(|part| serde_json::to_value(part).expect("serialize") == keyword),
+                "`{keyword}` can declare a floor but `FloorPart` has no variant for it",
+            );
+        }
     }
 }
