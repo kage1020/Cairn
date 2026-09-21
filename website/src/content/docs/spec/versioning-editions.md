@@ -460,6 +460,48 @@ supported version can build, because the build is the command that refuses it. E
 version's own findings are printed under that version, so an `E_UNKNOWN_ID` never stands without the
 target that raised it.
 
+#### Why the list is empty
+
+An empty `buildable` has four causes, and each is repaired by editing a different thing: the
+`@requires` line, the member that produced no voxels, or whatever the pinned lowering named. The
+list alone cannot tell them apart, so under `--format json` a `reason` accompanies it. The key is
+**absent** whenever a version builds, so an ordinary report is unchanged.
+
+`reason` is an object tagged by its own `reason` field:
+
+| `reason` | Carries | What the author edits |
+|---|---|---|
+| `unplaceable_floor` | `floors` | The `@requires` line. The floor names no release of this edition, so no version was weighed against it at all. |
+| `every_version_refused` | `versions` | One entry per version in `considered`, in the same order. |
+
+Two tags rather than one per cause, because the causes are not all the same shape. An unplaceable
+floor is a fact about the edition and answers before any version is weighed. Everything else is a
+fact about a version, and several can hold in one run — one release below the floor and the next
+refusing an ID is an ordinary answer — so a single tag for the edition would have to pick one of
+them to report.
+
+Each entry of `versions` carries its `version` and a `refusal` tag:
+
+| `refusal` | Carries | What the author edits |
+|---|---|---|
+| `below_floor` | `floors` | The `@requires` line. Only the floors that refuse *this* version: a file declaring several is a file where the repair is one line rather than all of them. |
+| `scope_did_not_lower` | `scopes` | The member that produced no voxels. Every version is refused before its ID table is consulted, since a partial build is not certified. |
+| `lowering_refused` | `findings` | Whatever the findings name, usually a material or an ID, and it differs per version. |
+
+A floor in `floors` is `{declared, line, col, declared_by?}`: the floor as the author wrote it,
+scope and all, and where it is written. `declared_by` is `{keyword, name}` for a floor a build
+inherited from a part, and is absent for a floor on the file itself — the position already points at
+the line, and the line is the file's.
+
+`findings` are rendered the way `spec/lint` "Machine-readable payload" renders a finding, and are
+the same findings the run prints under that version on stderr. That section is unchanged by this
+row: these ride inside the report rather than in the `{"diagnostics": [ ... ]}` document, and a
+report is not a refusal.
+
+The text rows say none of this. `buildable targets: Bedrock: none (1.21.0, 1.21.40, 1.21.60 all
+refuse)` is true for every one of the four causes, and the reason is already on stderr as a `note:`
+carrying the position of the line that caused it. It is the JSON that could not be read.
+
 A fifth line, `recommended test targets`, belongs to this axis and answers a different question
 again: which versions are worth testing against. No code path emits it yet.
 

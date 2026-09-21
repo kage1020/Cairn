@@ -15,7 +15,8 @@ use cairn_lang_core::lock::{
     LockWalkway, Lockfile, hash_resolved_ir, hash_source,
 };
 use cairn_lang_core::resolve::{
-    BuildableTargets, EditionReport, FloorOrigin, FloorPlacement, FloorVerdict, UnsupportedEntry,
+    BuildableRefusal, BuildableTargets, DeclaredFloor, EditionReport, FloorDeclarer, FloorOrigin,
+    FloorPlacement, FloorVerdict, RefusedTarget, TargetRefusal, UnsupportedEntry,
     UnsupportedReason, VersionAxes, VersionFloor, VersionOrder, compute_axes,
     declared_version_floors, resolve, unscoped_version_floors, versions_satisfying,
 };
@@ -1234,6 +1235,7 @@ fn edition_rows(
         // rather than the output — a row whose figures came off a palette
         // no validated pack could have produced.
         if let Some(portability) = portability {
+            let refusal = buildable_refusal(source, lines, &verdicts, &considered, &dropped);
             rows.push(EditionReport {
                 edition,
                 portable: portability.counts().portable,
@@ -1242,6 +1244,7 @@ fn edition_rows(
                 unsupported_entries: portability.into_unsupported(),
                 buildable: verdicts.buildable,
                 considered,
+                refusal,
             });
         }
     }
@@ -1534,7 +1537,23 @@ struct VersionVerdicts<'a> {
     /// Versions below the `@requires` floor, which are refused without
     /// being lowered at all — the floor is a relation between the source
     /// and the target, and no id table changes it.
-    below_floor: Vec<String>,
+    ///
+    /// Each carries the floors that put it there rather than sharing
+    /// [`Self::refusing_floors`]: a module declaring two floors may have
+    /// one release under the first and the next release under both, and
+    /// the repair a reader is sent to is the line that refuses the version
+    /// they asked about.
+    below_floor: Vec<BelowFloor<'a>>,
+    /// Versions the unlowered-scope guard refused before their id table
+    /// was consulted.
+    ///
+    /// The scopes are the same for every one of them — they are the
+    /// edition's, not the version's — so the list is versions alone and
+    /// the caller pairs them with `dropped`. Kept rather than left as the
+    /// gap between `considered` and the other three lists, because a
+    /// reader of that gap cannot tell "refused for this reason" from "the
+    /// loop never reached it".
+    unlowered: Vec<String>,
     /// The floors that put them there, in source order and without
     /// repeats.
     ///
@@ -1552,6 +1571,13 @@ struct VersionVerdicts<'a> {
     /// "this floor is not in this edition's numbering" points at the
     /// `@requires` line.
     unplaceable_floors: Vec<&'a VersionFloor>,
+}
+
+/// One version below the floors that refuse it.
+#[derive(Debug)]
+struct BelowFloor<'a> {
+    version: String,
+    floors: Vec<&'a VersionFloor>,
 }
 
 /// Weigh each supported version against the gates `run_compile` applies to
@@ -1597,8 +1623,7 @@ fn weigh_versions<'a>(
             .filter(|floor| order.verdict(&floor.version, key) == FloorVerdict::Below)
             .collect();
         if !refusing.is_empty() {
-            verdicts.below_floor.push(version.clone());
-            for floor in refusing {
+            for floor in &refusing {
                 // By span, not by text: two `@requires` lines naming the
                 // same version are two lines, and a reader sent to one of
                 // them has to be sent to the right one.
@@ -1610,9 +1635,14 @@ fn weigh_versions<'a>(
                     verdicts.refusing_floors.push(floor);
                 }
             }
+            verdicts.below_floor.push(BelowFloor {
+                version: version.clone(),
+                floors: refusing,
+            });
             continue;
         }
         if !dropped.is_empty() {
+            verdicts.unlowered.push(version.clone());
             continue;
         }
         let pinned = lower_to_block_array(ir, resolution, Some(&pack.view(Some(version))));
@@ -1635,6 +1665,102 @@ fn weigh_versions<'a>(
         }
     }
     verdicts
+}
+
+/// Why this edition's `buildable` list is empty, or `None` because it is
+/// not.
+///
+/// The same four verdicts `report_version_notes` and the per-version
+/// refusal block print as prose, in the shape a consumer reads them —
+/// `spec/versioning-editions` "The `buildable targets` row" is the
+/// contract. Built here rather than in `weigh_versions` because it needs
+/// the source and its line table to spell a floor's position, and the
+/// walk is about versions rather than about where anything is written.
+///
+/// `None` the moment one version builds: the row is then an answer on its
+/// own, and a reason beside a non-empty list would be a reason for
+/// something that did not happen.
+fn buildable_refusal(
+    source: &str,
+    lines: &LineStarts,
+    verdicts: &VersionVerdicts<'_>,
+    considered: &[String],
+    dropped: &[String],
+) -> Option<BuildableRefusal> {
+    if !verdicts.buildable.is_empty() {
+        return None;
+    }
+    // Before the per-version list, because it is not a per-version fact: a
+    // floor naming no release of this edition answers for every version at
+    // once, and `weigh_versions` returns before weighing any of them. A
+    // list would be the same floor repeated once per release.
+    if !verdicts.unplaceable_floors.is_empty() {
+        return Some(BuildableRefusal::UnplaceableFloor {
+            floors: declared_floors(source, lines, &verdicts.unplaceable_floors),
+        });
+    }
+    // In `considered` order rather than verdict order, so the list reads
+    // against the row above it. A version in none of the three lists
+    // cannot happen with an empty `buildable` — the walk puts every
+    // version it reaches in one of the four — and is left out rather than
+    // guessed at.
+    let versions: Vec<RefusedTarget> = considered
+        .iter()
+        .filter_map(|version| {
+            let refusal = if let Some(below) = verdicts
+                .below_floor
+                .iter()
+                .find(|below| &below.version == version)
+            {
+                TargetRefusal::BelowFloor {
+                    floors: declared_floors(source, lines, &below.floors),
+                }
+            } else if verdicts.unlowered.iter().any(|skipped| skipped == version) {
+                TargetRefusal::ScopeDidNotLower {
+                    scopes: dropped.to_vec(),
+                }
+            } else {
+                let (_, refusals) = verdicts
+                    .refused
+                    .iter()
+                    .find(|(refused, _)| refused == version)?;
+                TargetRefusal::LoweringRefused {
+                    findings: render_diagnostics(source, lines, refusals),
+                }
+            };
+            Some(RefusedTarget {
+                version: version.clone(),
+                refusal,
+            })
+        })
+        .collect();
+    if versions.is_empty() {
+        return None;
+    }
+    Some(BuildableRefusal::EveryVersionRefused { versions })
+}
+
+/// Floors as the wire spells them: what they say, and where.
+fn declared_floors(
+    source: &str,
+    lines: &LineStarts,
+    floors: &[&VersionFloor],
+) -> Vec<DeclaredFloor> {
+    floors
+        .iter()
+        .map(|floor| {
+            let position = lines.position(source, floor.span.start);
+            DeclaredFloor {
+                declared: floor.rendered(),
+                line: position.line.get(),
+                col: position.col.get(),
+                declared_by: floor.origin.part().map(|(keyword, name)| FloorDeclarer {
+                    keyword: keyword.to_owned(),
+                    name: name.to_owned(),
+                }),
+            }
+        })
+        .collect()
 }
 
 /// `items` joined by `separator`, or `empty` when there are none.
@@ -2947,7 +3073,12 @@ fn report_version_notes(
             file.display(),
             lines.position(source, floor.span.start),
             edition.as_str(),
-            verdicts.below_floor.join(", "),
+            verdicts
+                .below_floor
+                .iter()
+                .map(|below| below.version.as_str())
+                .collect::<Vec<_>>()
+                .join(", "),
             if verdicts.below_floor.len() == 1 {
                 "is"
             } else {

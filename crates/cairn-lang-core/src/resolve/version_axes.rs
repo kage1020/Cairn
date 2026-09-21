@@ -36,6 +36,7 @@ use std::collections::HashSet;
 use serde::Serialize;
 
 use crate::ast::{Arg, Header, Item, ItemKind, Module, RawRequirement, Statement};
+use crate::check::RenderedDiagnostic;
 use crate::edition::Edition;
 use crate::error::Span;
 use crate::intent::IntentModule;
@@ -111,6 +112,13 @@ pub struct EditionReport {
     pub buildable: Vec<String>,
     /// Every version the edition's registry pack declares.
     pub considered: Vec<String>,
+    /// Why [`Self::buildable`] is empty, when it is.
+    ///
+    /// `None` on a run with a buildable version, which is what keeps the
+    /// key off the ordinary report. The caller decides it, because every
+    /// piece of the answer — the floors, the scopes, the pinned lowerings
+    /// — is something it weighed.
+    pub refusal: Option<BuildableRefusal>,
 }
 
 /// Which supported versions of one edition can build the source.
@@ -146,6 +154,139 @@ pub struct BuildableTargets {
     /// this" and "the pack declares no versions" are different facts and
     /// the first one alone cannot tell them apart.
     pub considered: Vec<String>,
+    /// Why [`Self::buildable`] is empty, when it is.
+    ///
+    /// Omitted from the wire when a version builds, so the key appears
+    /// only on the run that needs it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reason: Option<BuildableRefusal>,
+}
+
+/// Why no supported version of one edition can build the source.
+///
+/// An empty `buildable` has more than one cause and each is repaired by
+/// editing a different thing, so the bare list is a figure a reader cannot
+/// act on — the same problem `unsupported: N` had before
+/// [`UnsupportedReason`], answered the same way.
+///
+/// Two variants rather than one per cause, because the causes are not all
+/// the same shape. An unplaceable floor is a fact about the edition: it
+/// answers before any version is weighed, and a per-version list of it
+/// would be the same sentence repeated once per release. Everything else
+/// is a fact about a version, and several can hold at once in one run —
+/// one release below the floor and the next refusing an id is an ordinary
+/// answer, and a single tag for the edition would have to pick one of them
+/// to report.
+///
+/// Every variant carries the pieces of its answer rather than a rendered
+/// sentence, as [`UnsupportedReason`] does, and for the same reason: the
+/// prose belongs to whatever is rendering.
+///
+/// Serialized as an internally tagged union, so a consumer reads
+/// `"reason": "unplaceable_floor"` beside the fields that reason carries.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(tag = "reason", rename_all = "snake_case")]
+pub enum BuildableRefusal {
+    /// A floor names no release of this edition, so no version was weighed
+    /// against it at all.
+    ///
+    /// Distinct from a floor every release sits below, which is the
+    /// ordinary "build the other edition, or lower the floor" news. This
+    /// one says the floor is not in this edition's numbering, and the
+    /// repair is on the `@requires` line whatever the releases are.
+    UnplaceableFloor {
+        /// The floors the edition's version table cannot place, in source
+        /// order.
+        floors: Vec<DeclaredFloor>,
+    },
+    /// Every considered version answered for itself, and none said yes.
+    EveryVersionRefused {
+        /// One entry per version in `considered`, in the same order.
+        versions: Vec<RefusedTarget>,
+    },
+}
+
+/// One supported version that cannot build the source, and why.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct RefusedTarget {
+    /// The version, as the registry pack spells it.
+    pub version: String,
+    /// What refused it.
+    #[serde(flatten)]
+    pub refusal: TargetRefusal,
+}
+
+/// Why one supported version cannot build the source.
+///
+/// Three variants for three repairs: the `@requires` line, the member that
+/// produced no voxels, and whatever the pinned lowering named. They are
+/// per-version because the answer is: the release below the floor and the
+/// release that refuses an id are two different edits, and a run can need
+/// both.
+///
+/// Serialized as an internally tagged union under its own key, so a
+/// consumer reading a [`RefusedTarget`] finds `"refusal": "below_floor"`
+/// beside `"version"` rather than a second `"reason"` shadowing the one on
+/// [`BuildableRefusal`].
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(tag = "refusal", rename_all = "snake_case")]
+pub enum TargetRefusal {
+    /// The version is below a floor the source declares.
+    BelowFloor {
+        /// The floors it is below, in source order. Only the ones that
+        /// refuse *this* version: a module declaring several floors is a
+        /// file where the repair is one line rather than all of them.
+        floors: Vec<DeclaredFloor>,
+    },
+    /// A scope the source declares produced no voxels, so every version is
+    /// refused before its id table is consulted — a partial build is not
+    /// certified, and this version was never lowered a second time to find
+    /// that out.
+    ScopeDidNotLower {
+        /// The scopes that produced nothing, in resolution order.
+        scopes: Vec<String>,
+    },
+    /// The lowering pinned to this version raised errors.
+    LoweringRefused {
+        /// The findings it raised, rendered as the failure document
+        /// renders them — `spec/lint` "Machine-readable payload" is the
+        /// shape, and these are the same findings the run prints under
+        /// the version on stderr.
+        findings: Vec<RenderedDiagnostic>,
+    },
+}
+
+/// A version floor as a reader has to act on it: what it says, where it is
+/// written, and which part declared it.
+///
+/// The position rather than the byte span [`VersionFloor`] carries: a
+/// consumer of this document has the file, not the source string the span
+/// indexes into, and `spec/lint` "Machine-readable payload" already spells
+/// a position that way for every finding.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct DeclaredFloor {
+    /// The floor as the author wrote it, scope and all
+    /// ([`VersionFloor::rendered`]).
+    pub declared: String,
+    /// 1-based line of the `@requires` directive or `requires` line.
+    pub line: u32,
+    /// 1-based column of the same byte, in Unicode scalar values.
+    pub col: u32,
+    /// The part that declared it, absent for a floor on the file itself.
+    ///
+    /// Absent rather than `"the module"`: the position above already
+    /// points at the line, and the line is the file's.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub declared_by: Option<FloorDeclarer>,
+}
+
+/// The part a floor was inherited from.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct FloorDeclarer {
+    /// The surface keyword of the part's kind (`def`, `theme`).
+    pub keyword: String,
+    /// The part's name.
+    pub name: String,
 }
 
 /// Registry-compatible Minecraft version range.
@@ -330,6 +471,7 @@ pub fn compute_axes(
             edition: report.edition,
             buildable: report.buildable,
             considered: report.considered,
+            reason: report.refusal,
         });
     }
     VersionAxes {
@@ -905,6 +1047,7 @@ mod tests {
                     unsupported_entries: Vec::new(),
                     buildable: Vec::new(),
                     considered: Vec::new(),
+                    refusal: None,
                 },
             )
             .collect()
@@ -972,6 +1115,7 @@ mod tests {
                     unsupported_entries: Vec::new(),
                     buildable: vec!["1.20.4".to_owned()],
                     considered: vec!["1.20.4".to_owned()],
+                    refusal: None,
                 },
                 EditionReport {
                     edition: Edition::Bedrock,
@@ -981,6 +1125,7 @@ mod tests {
                     unsupported_entries: one_entry_per_reason(),
                     buildable: vec!["1.21.0".to_owned()],
                     considered: vec!["1.21.0".to_owned(), "1.21.40".to_owned()],
+                    refusal: None,
                 },
             ],
         );

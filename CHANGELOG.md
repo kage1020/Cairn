@@ -450,6 +450,64 @@
   input to write about — an `--editions` value that is empty or names no edition, and a file that
   cannot be read, all still exit 2 with the reason on stderr.
 
+- *(cli,core)* `cairn info --format json` said an edition could build nothing and never said why:
+
+  ```console
+  $ cairn info s.crn --editions java --format json | jq '.buildable_targets[0]'
+  {
+    "edition": "java",
+    "buildable": [],
+    "considered": ["1.20.4", "1.21", "1.21.4"]
+  }
+  ```
+
+  Four different things collapse into that empty list, and each is repaired by editing something
+  else: a floor the edition's version table cannot place, a floor every release sits below, a
+  scope that produced no voxels, and a lowering the pinned version refused. Which one held was on
+  stderr as prose — and `--format json` exists for the consumer reading stdout, so the row it
+  reads carried the figure and none of the answer. That is the problem `unsupported: N` had before
+  `unsupported_entries`, and it is answered the same way: the row now carries the reason beside
+  the list.
+
+  ```console
+  $ cairn info s.crn --editions java --format json | jq '.buildable_targets[0].reason'
+  {
+    "reason": "every_version_refused",
+    "versions": [
+      { "version": "1.20.4", "refusal": "below_floor",
+        "floors": [ { "declared": "java version>=1.21.5", "line": 2, "col": 1 } ] },
+      { "version": "1.21", "refusal": "below_floor", "floors": [ ... ] },
+      { "version": "1.21.4", "refusal": "below_floor", "floors": [ ... ] }
+    ]
+  }
+  ```
+
+  Two `reason` tags rather than one per cause, because the causes are not all the same shape. An
+  unplaceable floor is a fact about the *edition* — it answers before any version is weighed, and
+  written per version it would be one sentence repeated once per release — so it is
+  `unplaceable_floor`, carrying the floors and nothing else. The other three are facts about a
+  version, and a run can hold several at once: one release below the floor and the next refusing
+  an id is an ordinary answer, and a single edition-wide tag would have to pick one of them to
+  report. They sit under `every_version_refused` as a `refusal` tag per entry of `considered`,
+  which is also what makes "every version refused" a claim the payload can support rather than
+  assert.
+
+  Each tag carries the pieces of its answer rather than a rendered sentence, the way
+  `unsupported_entries` does, because the prose belongs to whatever is rendering: a floor arrives
+  as `{declared, line, col, declared_by?}` and a refused lowering as the findings themselves, in
+  the shape `spec/lint` "Machine-readable payload" already gives them. A `below_floor` entry lists
+  only the floors that refuse *that* version, since a module declaring several is a file where the
+  repair is one line and not all of them.
+
+  The key is absent when a version builds, so an ordinary report is byte-for-byte what it was.
+  Nothing else moves either: the exit code stays 0, because an edition that builds nothing is
+  something `info` reports rather than refuses, and the text rows say none of this —
+  `buildable targets:       Java: none (1.20.4, 1.21, 1.21.4 all refuse)` is unchanged, with the
+  prose still on stderr. `spec/versioning-editions` "The `buildable targets` row" documents the
+  payload. `spec/lint` "Machine-readable payload" is borrowed for the shape of a finding and
+  otherwise untouched: this is a row of a report `info` writes on a run it does not refuse, not a
+  diagnostic.
+
 ### Breaking changes
 
 - *(redstone,cli)* The per-cell figure delay insertion writes is renamed `delay_ticks` →
