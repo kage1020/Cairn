@@ -108,6 +108,8 @@ pub struct EditionReport {
     pub unsupported: u32,
     /// The entries [`Self::unsupported`] counts, named.
     pub unsupported_entries: Vec<UnsupportedEntry>,
+    /// The entries [`Self::degraded`] counts, named.
+    pub degraded_entries: Vec<DegradedEntry>,
     /// Versions from [`Self::considered`] a build would accept.
     pub buildable: Vec<String>,
     /// Every version the edition's registry pack declares.
@@ -386,6 +388,66 @@ pub struct EditionPortability {
     /// two ways an entry can be unsupported have two different repairs and
     /// only one of them is the author's.
     pub unsupported_entries: Vec<UnsupportedEntry>,
+    /// The entries [`Self::degraded`] counts, named and with what each of
+    /// them lost.
+    ///
+    /// One element per unit of the count, in palette order, the way
+    /// [`Self::unsupported_entries`] is. The case for naming these is the
+    /// weaker half of the one that named those — there is a single reason
+    /// an entry degrades and a single repair — but "which of the N" is the
+    /// same question, and a build is the only other place it is answered.
+    /// `cairn info` exists to be read before the build.
+    pub degraded_entries: Vec<DegradedEntry>,
+}
+
+/// One palette entry that compiles into an edition and loses detail doing
+/// it.
+///
+/// Built by `cairn-lang-formats::portability` and declared here for the
+/// reason [`UnsupportedEntry`] is: beside the row it is a field of, so
+/// there is one shape rather than two with a mapping between them.
+///
+/// Separate from [`UnsupportedEntry`] rather than one list under a
+/// category tag. The two carry different answers — what was lost against
+/// why there is no form at all — and keeping them apart is what lets each
+/// list be read against its own figure. A single tagged list would have to
+/// be filtered before its length meant anything, and the invariant that
+/// the figure *is* the length is the one the producer enforces.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct DegradedEntry {
+    /// The palette entry's block id, verbatim as the lowering interned it.
+    pub id: String,
+    /// The entry's `key=value` pairs, comma-joined, the same spelling
+    /// [`UnsupportedReason::StatesUnmapped`] uses.
+    ///
+    /// Carried rather than left to the id, because degradation is a fact
+    /// about the states and one id reaches this list once per state
+    /// combination: `roof-hip`'s four degraded entries are four spellings
+    /// of `minecraft:spruce_stairs`, and a list keyed by id alone would
+    /// print the same line four times.
+    pub states: String,
+    /// What the edition had no form for, one per intent dropped.
+    pub dropped: Vec<DroppedIntent>,
+}
+
+/// One piece of intent an edition cannot represent, as the pieces rather
+/// than as the sentence about them.
+///
+/// The prose belongs to whatever is rendering, for the reason
+/// [`UnsupportedReason`] gives: a consumer that reads this should not then
+/// have to parse English to learn which property was dropped.
+/// `cairn-lang-formats::bedrock_state::degradation_message` is the one
+/// place the sentence is written, and both the build's
+/// `W_INTENT_DEGRADED` and `cairn info`'s note come off it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct DroppedIntent {
+    /// The blockstate property the edition has no state for (`shape`).
+    pub key: String,
+    /// The value that was asked for and could not be written
+    /// (`outer_left`). The value an edition *can* express drops without
+    /// reaching this list — Bedrock's stairs are `straight`, so
+    /// `shape=straight` is not a loss.
+    pub value: String,
 }
 
 /// One palette entry an edition has no form for, and why.
@@ -512,6 +574,7 @@ pub fn compute_axes(
             degraded: report.degraded,
             unsupported: report.unsupported,
             unsupported_entries: report.unsupported_entries,
+            degraded_entries: report.degraded_entries,
         });
         buildable_targets.push(BuildableTargets {
             edition: report.edition,
@@ -1091,6 +1154,7 @@ mod tests {
                     degraded,
                     unsupported,
                     unsupported_entries: Vec::new(),
+                    degraded_entries: Vec::new(),
                     buildable: Vec::new(),
                     considered: Vec::new(),
                     refusal: None,
@@ -1159,6 +1223,7 @@ mod tests {
                     degraded: 0,
                     unsupported: 0,
                     unsupported_entries: Vec::new(),
+                    degraded_entries: Vec::new(),
                     buildable: vec!["1.20.4".to_owned()],
                     considered: vec!["1.20.4".to_owned()],
                     refusal: None,
@@ -1169,6 +1234,7 @@ mod tests {
                     degraded: 1,
                     unsupported: 4,
                     unsupported_entries: one_entry_per_reason(),
+                    degraded_entries: Vec::new(),
                     buildable: vec!["1.21.0".to_owned()],
                     considered: vec!["1.21.0".to_owned(), "1.21.40".to_owned()],
                     refusal: None,

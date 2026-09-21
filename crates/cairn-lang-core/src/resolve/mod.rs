@@ -47,9 +47,10 @@ pub use resolver::{
     resolve,
 };
 pub use version_axes::{
-    BuildableRefusal, BuildableTargets, DeclaredFloor, EditionPortability, EditionReport,
-    FloorDeclarer, FloorOrigin, FloorPart, RefusedTarget, RegistryRange, SemanticSensitiveFinding,
-    TargetRefusal, UnsupportedEntry, UnsupportedReason, VersionAxes, VersionFloor, compute_axes,
-    declared_version_floors, unscoped_version_floors, versions_satisfying,
+    BuildableRefusal, BuildableTargets, DeclaredFloor, DegradedEntry, DroppedIntent,
+    EditionPortability, EditionReport, FloorDeclarer, FloorOrigin, FloorPart, RefusedTarget,
+    RegistryRange, SemanticSensitiveFinding, TargetRefusal, UnsupportedEntry, UnsupportedReason,
+    VersionAxes, VersionFloor, compute_axes, declared_version_floors, unscoped_version_floors,
+    versions_satisfying,
 };
 pub use version_order::{FloorPlacement, FloorVerdict, VersionOrder};

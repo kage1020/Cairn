@@ -31,6 +31,7 @@
 //! wiki listing is authoritative for the on-disk mapping.
 
 use cairn_lang_core::block_array::is_stair;
+use cairn_lang_core::resolve::DroppedIntent;
 use cairn_lang_nbt::Compound;
 use cairn_lang_nbt::tag::Tag;
 use indexmap::IndexMap;
@@ -43,10 +44,15 @@ pub struct StateTranslation {
     /// Typed Bedrock `states` (e.g. `weirdo_direction: Int`,
     /// `upside_down_bit: Byte`). Empty for a bare (property-free) block.
     pub states: Compound,
-    /// Human-readable degradation notes — one per intent that Bedrock cannot
-    /// express (e.g. a dropped non-`straight` stair `shape`). Surfaced by the
-    /// caller as `W_INTENT_DEGRADED`. Empty on a lossless translation.
-    pub degraded: Vec<String>,
+    /// One entry per intent Bedrock cannot express (e.g. a dropped
+    /// non-`straight` stair `shape`). Empty on a lossless translation.
+    ///
+    /// The pieces rather than the sentence, so a caller that wants to act
+    /// on the dropped property does not have to parse it back out of
+    /// English. [`degradation_message`] writes the sentence, and both
+    /// `W_INTENT_DEGRADED` and `cairn info`'s portability note come off
+    /// that one function.
+    pub degraded: Vec<DroppedIntent>,
 }
 
 /// A Java property that the Bedrock backend cannot map. Carries the
@@ -169,6 +175,35 @@ pub fn translate_states(
     }
 }
 
+/// What one dropped intent cost, without naming what carried it.
+///
+/// The single place this wording lives. `W_INTENT_DEGRADED` from the
+/// `.mcstructure` writer and the `degraded:` note `cairn info` prints are
+/// the same fact told to the same reader at two moments, and a second
+/// wording would be a thing to keep in step. [`DroppedIntent`] carries the
+/// pieces so this is the only place they are put into words.
+///
+/// Without the id because the two callers introduce the entry
+/// differently: the warning names the block mid-sentence, and the note has
+/// already printed `id[states]` as the line's subject. Composing the
+/// warning's form from this one ([`degradation_message`]) is what keeps
+/// that a matter of framing rather than of wording.
+#[must_use]
+pub fn degradation_detail(dropped: &DroppedIntent) -> String {
+    let DroppedIntent { key, value } = dropped;
+    format!(
+        "{key}={value} has no Bedrock state; Bedrock stairs render straight, so corners show \
+         visual gaps"
+    )
+}
+
+/// [`degradation_detail`] with the block that carried the intent, as
+/// `W_INTENT_DEGRADED` reports it.
+#[must_use]
+pub fn degradation_message(id: &str, dropped: &DroppedIntent) -> String {
+    format!("stair `{id}` {}", degradation_detail(dropped))
+}
+
 fn translate_stair(
     id: &str,
     properties: &IndexMap<String, String>,
@@ -191,10 +226,10 @@ fn translate_stair(
                 // corner shape drops with a degradation note ("Backend = data
                 // tables" and "Fail-loud and minimum-version inference").
                 if value != "straight" {
-                    degraded.push(format!(
-                        "stair `{id}` shape={value} has no Bedrock state; Bedrock stairs render \
-                         straight, so corners show visual gaps"
-                    ));
+                    degraded.push(DroppedIntent {
+                        key: key.clone(),
+                        value: value.clone(),
+                    });
                 }
             }
             other => {
@@ -243,7 +278,7 @@ fn upside_down_bit(id: &str, half: &str) -> Result<i8, BedrockStateError> {
     }
 }
 
-fn join_properties(properties: &IndexMap<String, String>) -> String {
+pub(crate) fn join_properties(properties: &IndexMap<String, String>) -> String {
     properties
         .iter()
         .map(|(k, v)| format!("{k}={v}"))
@@ -320,7 +355,7 @@ mod tests {
     }
 
     #[test]
-    fn non_straight_shape_drops_with_degradation_note() {
+    fn non_straight_shape_drops_as_the_property_and_the_value() {
         let t = translate_states(
             "minecraft:oak_stairs",
             &stair_props("south", "top", "outer_left"),
@@ -330,11 +365,27 @@ mod tests {
         assert_eq!(t.states.entries.get("weirdo_direction"), Some(&Tag::Int(2)));
         assert_eq!(t.states.entries.get("upside_down_bit"), Some(&Tag::Byte(1)));
         assert_eq!(t.states.entries.len(), 2);
-        // One degradation note, naming the dropped intent.
-        assert_eq!(t.degraded.len(), 1);
-        let note = &t.degraded[0];
-        assert!(note.contains("shape"), "got: {note}");
-        assert!(note.contains("Bedrock"), "got: {note}");
+        // One dropped intent, as the pieces: a consumer of
+        // `degraded_entries` reads which property was lost without
+        // parsing it back out of a sentence.
+        assert_eq!(
+            t.degraded,
+            [DroppedIntent {
+                key: "shape".to_owned(),
+                value: "outer_left".to_owned(),
+            }],
+        );
+        // The sentence is written once, from those pieces, and the
+        // warning's form is the note's with the block named.
+        let detail = degradation_detail(&t.degraded[0]);
+        assert!(
+            detail.starts_with("shape=outer_left has no Bedrock state"),
+            "got: {detail}"
+        );
+        assert_eq!(
+            degradation_message("minecraft:oak_stairs", &t.degraded[0]),
+            format!("stair `minecraft:oak_stairs` {detail}"),
+        );
 
         // `straight` produces no note.
         let straight = translate_states(

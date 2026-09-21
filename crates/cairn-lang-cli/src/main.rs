@@ -15,9 +15,9 @@ use cairn_lang_core::lock::{
     LockWalkway, Lockfile, hash_resolved_ir, hash_source,
 };
 use cairn_lang_core::resolve::{
-    BuildableRefusal, BuildableTargets, DeclaredFloor, EditionReport, FloorDeclarer, FloorOrigin,
-    FloorPart, FloorPlacement, FloorVerdict, RefusedTarget, TargetRefusal, UnsupportedEntry,
-    UnsupportedReason, VersionAxes, VersionFloor, VersionOrder, compute_axes,
+    BuildableRefusal, BuildableTargets, DeclaredFloor, DegradedEntry, EditionReport, FloorDeclarer,
+    FloorOrigin, FloorPart, FloorPlacement, FloorVerdict, RefusedTarget, TargetRefusal,
+    UnsupportedEntry, UnsupportedReason, VersionAxes, VersionFloor, VersionOrder, compute_axes,
     declared_version_floors, resolve, unscoped_version_floors, versions_satisfying,
 };
 use cairn_lang_core::suggest::candidate_list;
@@ -25,6 +25,7 @@ use cairn_lang_core::{
     Diagnostic, DiagnosticCode, Edition, Module, ParseError, Severity, check,
     diagnose_parse_failure, lower, parse,
 };
+use cairn_lang_formats::bedrock_state::degradation_detail;
 use cairn_lang_formats::bedrock_structure::{ParityNote, build_mcstructure_tag, write_mcstructure};
 use cairn_lang_formats::data_version::{
     BedrockTarget, JavaTarget, resolve_bedrock_target, resolve_java_target,
@@ -1198,6 +1199,9 @@ fn edition_rows(
         let portability = portability_figure(edition, portability);
         edition_specific_error |= portability.is_none();
         if let Some(portability) = &portability {
+            for note in degraded_notes(edition, portability.degraded()) {
+                eprintln!("{note}");
+            }
             for note in unsupported_notes(edition, portability.unsupported()) {
                 eprintln!("{note}");
             }
@@ -1236,12 +1240,15 @@ fn edition_rows(
         // no validated pack could have produced.
         if let Some(portability) = portability {
             let refusal = buildable_refusal(source, lines, &verdicts, &considered, &dropped);
+            let counts = portability.counts();
+            let entries = portability.into_entries();
             rows.push(EditionReport {
                 edition,
-                portable: portability.counts().portable,
-                degraded: portability.counts().degraded,
-                unsupported: portability.counts().unsupported,
-                unsupported_entries: portability.into_unsupported(),
+                portable: counts.portable,
+                degraded: counts.degraded,
+                unsupported: counts.unsupported,
+                unsupported_entries: entries.unsupported,
+                degraded_entries: entries.degraded,
                 buildable: verdicts.buildable,
                 considered,
                 refusal,
@@ -1291,6 +1298,44 @@ fn portability_figure(
             None
         }
     }
+}
+
+/// The notes naming the palette entries one edition builds with loss, in
+/// the order they print, under the figure that counts them.
+///
+/// Returned rather than printed, like [`unsupported_notes`], and printed
+/// before it so the two blocks read in the order the row lists their
+/// figures. The figure is `entries.len()`: [`PortabilityReport`] raises
+/// `degraded` only beside a push. These go to stderr; a consumer that
+/// wants them structured reads `edition_portability[].degraded_entries`.
+///
+/// One line per entry rather than per dropped intent, so the lines can be
+/// counted against the figure, and each line carries the entry's states
+/// because one id reaches the list once per state combination. The
+/// sentence is `degradation_message`, which is the sentence the build's
+/// `W_INTENT_DEGRADED` prints for the same entry.
+fn degraded_notes(edition: Edition, entries: &[DegradedEntry]) -> Vec<String> {
+    if entries.is_empty() {
+        return Vec::new();
+    }
+    let mut notes = vec![format!(
+        "note: what `degraded: {}` counts on {}:",
+        entries.len(),
+        edition.as_str(),
+    )];
+    notes.extend(entries.iter().map(|entry| {
+        // `dropped` is non-empty by construction — an entry is in this
+        // list because the translator handed back at least one — so the
+        // join has nothing to fall back to.
+        let detail: Vec<String> = entry.dropped.iter().map(degradation_detail).collect();
+        format!(
+            "  note: `{}[{}]` — {}",
+            entry.id,
+            entry.states,
+            detail.join("; "),
+        )
+    }));
+    notes
 }
 
 /// The notes naming the palette entries one edition has no form for, in

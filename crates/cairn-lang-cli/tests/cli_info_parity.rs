@@ -1408,6 +1408,117 @@ fn the_json_row_names_exactly_what_its_count_counts() {
 }
 
 #[test]
+fn the_degraded_figure_names_the_entry_and_what_it_lost() {
+    // The other integer over entries the command can name. `roof-hip` is
+    // a shipped example reporting `degraded: 4`, and before this the only
+    // way to find the four was to compile and read `W_INTENT_DEGRADED` —
+    // which is the run `info` exists to be read before.
+    let axes = info_json("roof-hip.crn", "bedrock");
+    let bedrock = portability_entry(&axes, "bedrock");
+    let entries = bedrock["degraded_entries"]
+        .as_array()
+        .expect("degraded_entries is a JSON array");
+    // Against the row's own figure rather than a literal, so the two
+    // cannot be right about different things.
+    assert_eq!(
+        entries.len() as u64,
+        bedrock["degraded"].as_u64().expect("a count"),
+        "the list and the figure count the same entries, got: {bedrock}",
+    );
+    assert!(
+        entries.len() > 1,
+        "premise: this example degrades more than one entry, got: {bedrock}",
+    );
+    // Every one of them is the same block, which is the case a list keyed
+    // by id alone could not report: it is the state combination that
+    // degrades, so that is what tells the entries apart.
+    let ids: std::collections::BTreeSet<&str> = entries
+        .iter()
+        .map(|entry| entry["id"].as_str().expect("an id"))
+        .collect();
+    assert_eq!(ids.len(), 1, "premise: one id, several states: {bedrock}");
+    let states: Vec<&str> = entries
+        .iter()
+        .map(|entry| entry["states"].as_str().expect("the entry's states"))
+        .collect();
+    let distinct: std::collections::BTreeSet<&&str> = states.iter().collect();
+    assert_eq!(
+        distinct.len(),
+        states.len(),
+        "each entry is a different state combination: {states:?}",
+    );
+    // The pieces, not a sentence: a consumer reads which property was
+    // dropped without parsing English out of the field beside it.
+    for entry in entries {
+        let dropped = entry["dropped"]
+            .as_array()
+            .expect("an entry carries what it lost");
+        assert!(!dropped.is_empty(), "got: {entry}");
+        for one in dropped {
+            assert_eq!(one["key"], "shape", "got: {entry}");
+            let value = one["value"].as_str().expect("the value that was asked for");
+            assert_ne!(
+                value, "straight",
+                "Bedrock can express `straight`, so it is not a loss: {entry}",
+            );
+            assert!(
+                entry["states"]
+                    .as_str()
+                    .expect("states")
+                    .contains(&format!("shape={value}")),
+                "the dropped intent is one of the entry's own states: {entry}",
+            );
+        }
+    }
+}
+
+#[test]
+fn the_degraded_notes_say_what_the_build_would_say() {
+    // Two moments, one reader, one wording: the note here and the build's
+    // `W_INTENT_DEGRADED` come off the same function, so `info` cannot
+    // start describing a loss differently from the compile that hits it.
+    let (code, stdout, stderr) = info_raw(&examples_dir().join("roof-hip.crn"), "bedrock");
+    assert_eq!(code, Some(0), "info reports; it does not refuse: {stderr}");
+    assert!(
+        stdout.contains("degraded: 4"),
+        "premise: the figure is the thing being explained, got: {stdout}",
+    );
+    let named: Vec<&str> = stderr
+        .lines()
+        .filter(|line| line.starts_with("  note: `minecraft:"))
+        .collect();
+    assert_eq!(
+        named.len(),
+        4,
+        "one line per entry, so the lines can be counted against the figure: {stderr}",
+    );
+    assert!(
+        named[0].contains("shape=outer_left has no Bedrock state"),
+        "the sentence the build prints for the same entry: {stderr}",
+    );
+    assert!(
+        named[0].contains("minecraft:spruce_stairs[facing=north,half=bottom,shape=outer_left]"),
+        "the line's subject is the palette entry, states and all: {stderr}",
+    );
+    // The header carries the figure it is explaining, the way the
+    // `unsupported` block does.
+    assert!(
+        stderr.contains("note: what `degraded: 4` counts on bedrock:"),
+        "got: {stderr}",
+    );
+    // And none of it reaches stdout, where the rows are the contract.
+    assert!(
+        !stdout.contains("spruce_stairs"),
+        "the names belong on stderr with the other notes, got: {stdout}",
+    );
+    assert_eq!(
+        stdout_rows(&stdout).len(),
+        5,
+        "naming an entry must not add a row, got: {stdout}",
+    );
+}
+
+#[test]
 fn a_source_info_refuses_prints_no_rows_at_all() {
     // The four rows are a guarantee about a run that finishes, not about
     // every invocation: a finding the strict per-edition pass raises
