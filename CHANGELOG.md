@@ -421,27 +421,34 @@
   0
   ```
 
-  `run_info` has four ways to fail. Three route through `report_failure_document`, which consults
-  `--format`; the fourth returned a bare exit code from `edition_rows`, so the format was never
-  asked. Both refusals that path carries — a finding only the per-edition pass sees, and a palette
-  the pack refuses — were therefore the two a JSON consumer could not read, on the one command
-  whose job is showing where the editions diverge. The edition-neutral gate unions slot names
-  across a theme's per-edition variants, so the divergence is exactly what only the strict pass
-  finds.
+  `run_info` refuses a source it has read in four ways. Two route through
+  `report_failure_document`, which consults `--format`; the other two returned a bare exit code
+  from `edition_rows`, so the format was never asked. Those two — a finding only the per-edition
+  pass sees, and a palette the pack refuses — were therefore the refusals a JSON consumer could
+  not read, on the one command whose job is showing where the editions diverge. The
+  edition-neutral gate unions slot names across a theme's per-edition variants, so the divergence
+  is exactly what only the strict pass finds.
 
   `edition_rows` now gives back the findings rather than an exit code, and the caller writes the
-  same `{"diagnostics": [ ... ]}` document the other three paths write. Under `--format json` the
+  same `{"diagnostics": [ ... ]}` document the other two paths write. Under `--format json` the
   error-severity findings are held for that document, which is written after every requested
-  edition has been walked — so a second edition's finding is still not hidden behind the first —
-  and the warnings stay on stderr, which is the split the edition-neutral pass already makes.
+  edition has been walked — so a second edition's finding is still not hidden behind the first.
   `--format text` prints byte-for-byte what it printed before, each finding under the note naming
   the edition that raised it.
 
+  Which pass refused still decides what the document carries, and `spec/lint` "Machine-readable
+  payload" now says so rather than leaving it to be read off the code. A neutral refusal puts its
+  warnings in the document beside the errors; a per-edition refusal carries the errors alone,
+  because the neutral warnings have already been reported as text and a per-edition warning
+  belongs to a row the run is about to discard.
+
   A refused palette names no span in the source and no repair its author could make, so it stays
-  prose on stderr in both formats, the way `spec/lint` "Machine-readable payload" already reports a
-  run-level refusal. What changes is that the document is written at all: a run refused by nothing
-  else writes `{"diagnostics": []}` rather than an empty stdout, so `--format json`'s promise of
-  one document per input holds on every `info` exit path.
+  prose on stderr in both formats, the way that section already reports a run-level refusal. What
+  changes is that the document is written at all: a run refused by the palette alone writes
+  `{"diagnostics": []}` rather than an empty stdout. The promise now holds on every path where
+  `info` refuses a source it has read. It does not reach the mistakes that exit before there is an
+  input to write about — an `--editions` value that is empty or names no edition, and a file that
+  cannot be read, all still exit 2 with the reason on stderr.
 
 ### Breaking changes
 

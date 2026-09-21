@@ -383,9 +383,14 @@ that array with one `E_PARSE` element. `info`'s is the report; where there is no
 failure, or any error-severity finding — it writes `{"diagnostics": [ ... ]}` instead, told apart
 from a report by its keys and by the exit code. Which pass raised the finding does not change that:
 the strict per-edition dry-run sees what the edition-neutral gate unions away, and a refusal it
-raises writes the same document, after every requested edition has been walked. Warnings on a run
-that still has a report are reported as text on stderr in both formats, as are the warnings the
-per-edition pass raises on a run that has none.
+raises writes the same document, after every requested edition has been walked.
+
+Which pass raised the finding does decide what the document carries, and this is the contract rather
+than an accident. Where the edition-neutral pass refuses, its warnings are elements of the document
+beside the errors. Where the per-edition pass refuses, the document carries the errors alone: the
+neutral warnings have already been reported as text, and a per-edition warning belongs to a row the
+run is about to discard, so it reads on stderr under the note naming its edition. Warnings on a run
+that still has a report are reported as text on stderr in both formats.
 
 A run-level refusal is not an element of `check`'s array: an unshipped `--target` and a lowering
 that lost a scope (`E_PARTIAL_BUILD`) are facts about the command line and about the build rather

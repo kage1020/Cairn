@@ -172,15 +172,95 @@ fn info_json_renders_an_edition_specific_failure_the_same_way() {
         .as_array()
         .unwrap_or_else(|| panic!("expected a diagnostics array, got {stdout}"));
     assert!(
-        diagnostics
-            .iter()
-            .any(|d| d["code"] == "E_UNRESOLVED_SLOT" && d["line"] == 12),
+        diagnostics.iter().any(|d| d["code"] == "E_UNRESOLVED_SLOT"
+            && d["primary"]
+                .as_str()
+                .is_some_and(|p| p.contains("theme `shop_bedrock`"))),
         "the finding only the bedrock pass sees should be in it: {stdout}",
+    );
+    // Not merely "the error is not on both streams": on an errors-only run
+    // stderr is empty, and the stronger assertion is what catches the
+    // edition header being hoisted out of the loop and printed over a
+    // walk that held everything back.
+    let stderr = String::from_utf8(out.stderr).expect("utf-8");
+    assert!(
+        stderr.is_empty(),
+        "the findings belong to the document, and nothing else had anything to say: {stderr:?}",
+    );
+}
+
+#[test]
+fn info_json_leaves_a_per_edition_warning_on_stderr() {
+    // The other half of the loop. A warning belongs to a row the caller is
+    // about to discard, so it stays prose under the note naming its
+    // edition while the error goes to the document — and the note prints
+    // for the edition that has something left to head and not for the one
+    // whose only finding was held back.
+    //
+    // `W_THEME_VARIANT_REBOUND` is raised only under a pinned edition, so
+    // `theme=shop_bedrock` on the site is a warning the java pass sees and
+    // the bedrock pass does not; the slot only `shop_java` declares is the
+    // error the bedrock pass sees. The edition-neutral gate raises neither.
+    let tmp = TempDir::new().expect("tempdir");
+    let path = tmp.path().join("rebound.crn");
+    fs::write(
+        &path,
+        "@cairn 2026.06\n\n\
+         def kiosk class=house size=5x5:\n\
+         \x20\x20walls id=walls class=outer mat_slot=wall height=3\n\n\
+         theme shop_java:\n\
+         \x20\x20slot wall           -> @wall.stone.cobble\n\
+         \x20\x20slot floating_text  -> @sign.oak\n\n\
+         theme shop_bedrock:\n\
+         \x20\x20slot wall           -> @wall.stone.cobble\n\n\
+         struct shop size=5x5\n\
+         \x20\x20walls  class=outer mat_slot=wall height=3\n\
+         \x20\x20window class=display side=front offset=2 y=2 size=1x1 mat_slot=floating_text\n\n\
+         site market:\n\
+         \x20\x20place id=stall use=kiosk theme=shop_bedrock at=origin\n",
+    )
+    .expect("write");
+    let out = cairn(
+        "info",
+        &[
+            path.to_str().unwrap(),
+            "--editions",
+            "java,bedrock",
+            "--format",
+            "json",
+        ],
+    );
+    assert_eq!(out.status.code(), Some(1));
+    let stdout = String::from_utf8(out.stdout).expect("utf-8");
+    let parsed: serde_json::Value = serde_json::from_str(&stdout)
+        .unwrap_or_else(|err| panic!("stdout should be JSON, got {stdout:?}: {err}"));
+    let codes: Vec<&str> = parsed["diagnostics"]
+        .as_array()
+        .unwrap_or_else(|| panic!("expected a diagnostics array, got {stdout}"))
+        .iter()
+        .filter_map(|d| d["code"].as_str())
+        .collect();
+    assert_eq!(
+        codes,
+        ["E_UNRESOLVED_SLOT"],
+        "the error, and only the error: {stdout}",
     );
     let stderr = String::from_utf8(out.stderr).expect("utf-8");
     assert!(
+        stderr.contains("W_THEME_VARIANT_REBOUND"),
+        "the warning still reads as prose: {stderr}",
+    );
+    assert!(
+        stderr.contains("note: reported for --editions java"),
+        "under the note naming the edition that raised it: {stderr}",
+    );
+    assert!(
+        !stderr.contains("--editions bedrock"),
+        "and no note over an edition whose only finding went to the document: {stderr}",
+    );
+    assert!(
         !stderr.contains("E_UNRESOLVED_SLOT"),
-        "the finding belongs to the document, not to both streams: {stderr:?}",
+        "the error is the document's alone: {stderr}",
     );
 }
 
@@ -269,22 +349,24 @@ fn info_text_still_reports_an_edition_specific_failure_as_prose() {
     );
 }
 
-/// Every source `info` refuses writes a document, whichever pass refused.
+/// The three refusals a `.crn` can reach, asked the one question together.
 ///
-/// The per-path tests above each pin one failure's contents; this one
-/// pins that the set has no member left over. A fifth path added later
-/// that returns a bare exit code passes every assertion above and fails
-/// here, which is the regression this file exists for.
+/// The per-path tests above each pin one failure's contents; this asks
+/// all three for a parseable document in one place, so the promise reads
+/// as a property of the command rather than three separate assertions.
+/// What it does not do is catch a fourth path: the array below is three
+/// hand-written fixtures, not an enumeration of `run_info`'s exits, and a
+/// path none of them reaches is a path this stays green on.
 ///
-/// One `info` refusal is not in the sweep and cannot be: a palette the
-/// pack refuses has no `.crn` that reaches it — `PackView::lookup`
-/// answers with a bare blockstate and the lexer refuses an authored
-/// `@id[k=v]` — so the only way to raise one is to intern the entry into
-/// a lowering, which the unit test beside `invalid_palette_report` does.
-/// It writes the document with no elements, since the leak has no span in
-/// the source and no repair the author could make.
+/// The fourth refusal is not here and cannot be: a palette the pack
+/// refuses has no `.crn` that reaches it — `PackView::lookup` answers
+/// with a bare blockstate and the lexer refuses an authored `@id[k=v]` —
+/// so the only way to raise one is to intern the entry into a lowering,
+/// which `a_refused_palette_says_which_edition_lost_its_row_and_whose_bug_it_is`
+/// does. It writes the document with no elements, since the leak has no
+/// span in the source and no repair the author could make.
 #[test]
-fn no_source_info_refuses_leaves_stdout_empty() {
+fn every_refusal_a_source_can_reach_still_writes_a_document() {
     let tmp = TempDir::new().expect("tempdir");
     let refused: [(&str, PathBuf); 3] = [
         ("a source that does not parse", unparsable(&tmp)),
