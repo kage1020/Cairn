@@ -355,8 +355,10 @@ check` pins no edition and does not ask.
 
 There is no single "for-version". `cairn info` reports three axes:
 
-1. **Registry-compatible range `[Vmin, Vmax]`**: the intersection of `since`/`until` over the used
-   tokens and states.
+1. **Declared registry range `[Vmin, Vmax]`**: the strictest version floor the file declares
+   without naming an edition, against an open upper bound. A reading of the file's own
+   `@requires` lines, not a fact derived from the blocks it uses — see
+   [the `registry compatibility` row](#the-registry-compatibility-row).
 2. **Semantic-sensitive members**: cases where the ID stays valid but meaning, behaviour, or
    appearance changes. This matters more than the range: behaviour changes far more often than IDs
    disappear, so deciding Vmax from the registry alone is dangerous. The constraint catalog carries
@@ -388,6 +390,53 @@ The five lines go to stdout; what each figure is made of goes to stderr as `note
 reading the rows sees the same five lines every time `cairn info` runs to completion. A run that
 does not complete is a different case: a finding refuses the command before any row is computed, so
 stdout is empty rather than short a line.
+
+### The `registry compatibility` row
+
+The row reads the file back; it does not compute anything from the source. `Vmin` is the strictest
+version floor the file is held to with no edition named — the `@requires version>=X` headers, plus
+the floor of every `def` and `theme` the build instantiates
+([§10.4](#a-part-may-declare-its-own-floor)) — and `0.0` when nothing feeds it. It is edition-
+agnostic, which is why it reads only the unscoped floors, for the reasons and with the stderr notes
+[§10.4](#a-floor-may-name-its-edition) gives. `Vmax` is the literal `latest`, because no registry
+pack carries `since` / `until` yet.
+
+So `0.0 .. latest` means "this file declares no floor", not "every version can build this". Those
+are different claims, and a source can make them look identical:
+
+```console
+$ cat hut.crn                                    # no `@requires` line
+@cairn 2026.06
+
+theme pale:
+  slot floor -> @pale_moss_block
+  slot wall  -> @cobblestone
+
+struct hut size=5x5
+  floor mat_slot=floor
+  walls mat_slot=wall height=3
+
+$ cairn info hut.crn --editions java,bedrock
+registry compatibility:  0.0 .. latest
+buildable targets:       Java: 1.21.4 (1.20.4, 1.21 refuse)   Bedrock: 1.21.60 (1.21.0, 1.21.40 refuse)
+```
+
+Four of the six versions the packs ship refuse that source, and axis 1 says nothing about it:
+`minecraft:pale_moss_block` arriving in Java 1.21.4 is a fact about the pack, and this row reads
+only the file.
+
+**The derivation is the `buildable targets` row.** It lowers the source once per supported version
+and reports which ones a build would accept, per edition — the answer an intersection of `since` /
+`until` was meant to approximate, reached by asking instead of by inferring. It is also the shape
+the intersection could not take: the answer is per edition, and it need not be contiguous, so a
+`[Vmin, Vmax]` pair would have to claim a gap it cannot see.
+
+The declared floor stays a row of its own because it is a different kind of fact: an **input** the
+author wrote, which bounds what `cairn compile --target` accepts and what the file promises a reader,
+where `buildable targets` is an **output** about the packs that happen to ship. `E_REQUIRES_CONFLICT`
+([§10.4](#104-fail-loud-and-minimum-version-inference)) is reserved for the day the two can be
+compared — a declared floor contradicting a registry-*inferred* range — and stays unreachable until a
+pack carries `since` / `until`.
 
 ### The `edition portability` row
 

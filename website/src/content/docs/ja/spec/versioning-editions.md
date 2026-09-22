@@ -354,7 +354,10 @@ stderr で名指されるので、バージョンを拒否する `buildable targ
 
 単一の「対応バージョン」はありません。`cairn info` は 3 つの軸を報告します。
 
-1. **レジストリ互換範囲 `[Vmin, Vmax]`**: 使用トークン/状態にわたる `since`/`until` の積。
+1. **宣言されたレジストリ範囲 `[Vmin, Vmax]`**: ファイルがエディションを名指さずに宣言した下限の
+   うち最も厳しいものと、開いた上限。使用ブロックから導出された事実ではなく、ファイル自身の
+   `@requires` 行を読み返したものです —
+   [`registry compatibility` の行](#registry-compatibility-の行)を参照。
 2. **意味的に敏感なメンバ**: ID は有効なまま、意味・挙動・見た目が変わる箇所。範囲より重要です。
    挙動の変化は ID の消滅よりはるかに頻繁なので、レジストリだけから Vmax を決めるのは危険です。制約
    カタログは `since`/`until` とは別に `semantic_sensitivity` (境界バージョン + 理由) を持ち、それを
@@ -383,6 +386,53 @@ semantic-sensitive:      yard_water(cauldron split@1.17), fence(wall conn@1.16)
 5 行は stdout、各数字の内訳は stderr の `note:` 行へ出ます。行を読むパイプラインは、`cairn info` が
 完走するかぎり毎回同じ 5 行を見ます。完走しない場合は別です。所見が行を 1 つも計算する前にコマンドを
 拒否するので、stdout は行が足りないのではなく空になります。
+
+### `registry compatibility` の行
+
+この行はファイルを読み返すだけで、ソースから何かを計算することはありません。`Vmin` は、エディション
+を名指さずにファイルが held となる下限のうち最も厳しいもの — `@requires version>=X` のヘッダと、ビル
+ドが実体化する `def` と `theme` それぞれの下限 ([§10.4](#構成要素は自身の下限を宣言できる)) — であり、
+何も寄与しなければ `0.0` です。この行はエディション非依存なので、読むのはスコープ無しの下限だけです。
+その理由と、外したものを stderr に出す note については [§10.4](#下限はエディションを名乗れる) を参照
+してください。`Vmax` はリテラルの `latest` です。`since` / `until` を持つレジストリパックがまだ存在し
+ないからです。
+
+したがって `0.0 .. latest` の意味は「このファイルは下限を宣言していない」であって、「どのバージョン
+でもビルドできる」ではありません。この 2 つは別の主張ですが、ソース次第で見分けがつかなくなります。
+
+```console
+$ cat hut.crn                                    # `@requires` 行なし
+@cairn 2026.06
+
+theme pale:
+  slot floor -> @pale_moss_block
+  slot wall  -> @cobblestone
+
+struct hut size=5x5
+  floor mat_slot=floor
+  walls mat_slot=wall height=3
+
+$ cairn info hut.crn --editions java,bedrock
+registry compatibility:  0.0 .. latest
+buildable targets:       Java: 1.21.4 (1.20.4, 1.21 refuse)   Bedrock: 1.21.60 (1.21.0, 1.21.40 refuse)
+```
+
+パックが出荷している 6 バージョンのうち 4 つがこのソースを拒否していますが、軸 1 はそれについて何も
+言いません。`minecraft:pale_moss_block` が Java 1.21.4 で登場したことはパックについての事実であり、
+この行が読むのはファイルだけだからです。
+
+**導出は `buildable targets` の行です。** この行はサポートされるバージョンごとに 1 回ずつソースを
+lowering し、どれならビルドが通るかをエディションごとに報告します。`since` / `until` の積が近似しよう
+としていた答えを、推論ではなく問い合わせで得たものです。また、積では取れない形でもあります。答えは
+エディションごとであり、連続とはかぎらないので、`[Vmin, Vmax]` の対は見えない隙間まで主張することに
+なります。
+
+宣言された下限が独立した行であり続けるのは、種類の違う事実だからです。こちらは作者が書いた **入力**
+で、`cairn compile --target` が受け入れる範囲とファイルが読み手に約束する内容を縛ります。対して
+`buildable targets` は、たまたま出荷されているパックについての **出力** です。`E_REQUIRES_CONFLICT`
+([§10.4](#104-fail-loud-と最小バージョン推定)) はこの 2 つを比較できるようになる日のために予約されて
+おり — 宣言された下限がレジストリから *推論された* 範囲と矛盾する場合 — パックが `since` / `until` を
+持つまで到達不能なままです。
 
 ### `edition portability` の行
 

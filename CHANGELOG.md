@@ -144,6 +144,39 @@
 
 ### Fixed
 
+- *(docs)* `spec/versioning-editions` described `cairn info`'s `registry compatibility` row as a
+  derivation — "the intersection of `since`/`until` over the used tokens and states" — which
+  nothing computes. The row reads the file's own unscoped `@requires` floors and reports `latest`
+  as the upper edge, and the shipped packs carry no `since` / `until` for an intersection to be
+  taken over.
+
+  The gap is visible in one run. This source declares no floor and uses a block Java gained in
+  1.21.4 and Bedrock in 1.21.60:
+
+  ```console
+  $ cairn info hut.crn --editions java,bedrock
+  registry compatibility:  0.0 .. latest
+  buildable targets:       Java: 1.21.4 (1.20.4, 1.21 refuse)   Bedrock: 1.21.60 (1.21.0, 1.21.40 refuse)
+  ```
+
+  Four of the six supported versions refuse it. A reader holding the spec to its word reads
+  `0.0 .. latest` as "every version can build this"; what it says is "this file declares no floor".
+
+  The spec now says so. Axis 1's entry in "Which version is it for?" has three answers" names the
+  declared range, and a new "The `registry compatibility` row" section sits beside the two the
+  other rows already have: what feeds `Vmin`, why `Vmax` is a literal, the run above, and why the
+  declared floor stays a row of its own rather than being folded away — it is an *input* the author
+  wrote, bounding what `cairn compile --target` accepts, where `buildable targets` is an *output*
+  about the packs that ship. `E_REQUIRES_CONFLICT` stays reserved for the day the two can be
+  compared. The ja mirror follows it.
+
+  That per-version answer is also the shape an intersection could not take: it is per edition, and
+  it need not be contiguous, so `[Vmin, Vmax]` would claim a gap it cannot see. So the derivation
+  the spec promised is already in the report — under the row below.
+
+  No behaviour changes. `info_8b_the_declared_range_is_not_an_answer_about_which_versions_build`
+  holds the claim against the shipped packs, and `RegistryRange`'s doc cites the new section.
+
 - *(core)* A `-> value` tail on a member that cannot emit a signal was silent through `check` and
   `compile`:
 

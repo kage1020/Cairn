@@ -345,12 +345,19 @@ pub enum FloorPart {
     Theme,
 }
 
-/// Registry-compatible Minecraft version range.
+/// The version range the file **declares**, per
+/// `spec/versioning-editions` "The `registry compatibility` row".
 ///
-/// `min` is derived from the **unscoped** `@requires version>=X` headers:
-/// the strictest of them, or `"0.0"` when the file declares none that feed
-/// this row. `max` is the literal string `"latest"` until the registry
-/// pack provides a real upper bound.
+/// `min` is the strictest of the **unscoped** `@requires version>=X`
+/// floors, or `"0.0"` when the file declares none that feed this row.
+/// `max` is the literal string `"latest"` until the registry pack
+/// provides a real upper bound.
+///
+/// Read back rather than computed: nothing here looks at the blocks the
+/// source uses, so `"0.0" .. "latest"` says the file declares no floor and
+/// not that every version can build it. The derived answer is
+/// [`BuildableTargets`], which lowers the source once per supported
+/// version. The spec section says why the two stay separate rows.
 ///
 /// `"0.0"` therefore has two causes — no `@requires` line at all, and only
 /// floors scoped to an edition — and the row cannot tell them apart,

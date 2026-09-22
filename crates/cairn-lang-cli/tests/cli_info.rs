@@ -494,3 +494,63 @@ fn info_9g_a_theme_bound_per_edition_is_left_out_of_the_neutral_row() {
         "`0.0` beside a floor in the file needs its reason: {stderr}",
     );
 }
+
+/// `0.0 .. latest` says the file declares no floor, not that every version
+/// can build it.
+///
+/// The claim `spec/versioning-editions` "The `registry compatibility` row"
+/// makes, held against the shipped packs rather than asserted in prose.
+/// The spec used to describe this row as an intersection of `since` /
+/// `until` over the blocks the source uses — a derivation nothing
+/// performs, and one this source would contradict: `pale_moss_block`
+/// arrives in Java 1.21.4 and Bedrock 1.21.60, so four of the six
+/// supported versions refuse it while the row reports the widest range it
+/// has.
+///
+/// A file with no floor whose *palette* is narrow is the one case where
+/// reading axis 1 as an answer about buildability gives the wrong answer,
+/// and no test read the row on one. `info_8_file_without_requires_
+/// defaults_min_to_zero_zero`, beside this, has no floor but a palette
+/// that builds everywhere, so the two rows agree and it cannot see the
+/// case; `a_source_no_supported_version_can_build_says_so` in
+/// `cli_info_parity.rs` uses such a source and asserts only the other two
+/// rows. This is the pair read against each other.
+#[test]
+fn info_8b_the_declared_range_is_not_an_answer_about_which_versions_build() {
+    let path = tempfile_with_contents(
+        "narrow_palette_no_floor",
+        "theme pale:\n  slot floor -> @pale_moss_block\n  slot wall -> @cobblestone\n\
+         \nstruct hut size=5x5\n  floor mat_slot=floor\n  walls mat_slot=wall height=3\n",
+    );
+    let out = cairn(
+        "info",
+        &[path.to_str().unwrap(), "--editions", "java,bedrock"],
+    );
+    assert!(
+        out.status.success(),
+        "the row is a report, not a refusal: {}",
+        String::from_utf8_lossy(&out.stderr),
+    );
+    let stdout = String::from_utf8(out.stdout).expect("utf-8");
+    assert!(
+        stdout.contains("registry compatibility:  0.0 .. latest"),
+        "no `@requires` line and no part declaring one, so nothing feeds the row: {stdout}",
+    );
+    // The row below is the derivation, and it disagrees — which is the
+    // point. Counted off that row rather than written here, so the two
+    // cannot be right about different sets of versions.
+    let buildable = stdout
+        .lines()
+        .find(|line| line.starts_with("buildable targets:"))
+        .unwrap_or_else(|| panic!("every completed run prints the row: {stdout}"));
+    let refused: usize = buildable
+        .split('(')
+        .skip(1)
+        .filter_map(|tail| tail.split_once(" refuse"))
+        .map(|(names, _)| names.split(',').count())
+        .sum();
+    assert!(
+        refused > 1,
+        "a range of `0.0 .. latest` sits beside versions that refuse the file: {buildable}",
+    );
+}
