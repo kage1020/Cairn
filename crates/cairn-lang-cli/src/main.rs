@@ -15,9 +15,9 @@ use cairn_lang_core::lock::{
     LockWalkway, Lockfile, hash_resolved_ir, hash_source,
 };
 use cairn_lang_core::resolve::{
-    BuildableRefusal, BuildableTargets, DeclaredFloor, EditionReport, FloorDeclarer, FloorOrigin,
-    FloorPart, FloorPlacement, FloorVerdict, RefusedTarget, TargetRefusal, UnsupportedEntry,
-    UnsupportedReason, VersionAxes, VersionFloor, VersionOrder, compute_axes,
+    BuildableRefusal, BuildableTargets, DeclaredFloor, DegradedEntry, EditionReport, FloorDeclarer,
+    FloorOrigin, FloorPart, FloorPlacement, FloorVerdict, RefusedTarget, TargetRefusal,
+    UnsupportedEntry, UnsupportedReason, VersionAxes, VersionFloor, VersionOrder, compute_axes,
     declared_version_floors, resolve, unscoped_version_floors, versions_satisfying,
 };
 use cairn_lang_core::suggest::candidate_list;
@@ -25,6 +25,7 @@ use cairn_lang_core::{
     Diagnostic, DiagnosticCode, Edition, Module, ParseError, Severity, check,
     diagnose_parse_failure, lower, parse,
 };
+use cairn_lang_formats::bedrock_state::degradation_detail;
 use cairn_lang_formats::bedrock_structure::{ParityNote, build_mcstructure_tag, write_mcstructure};
 use cairn_lang_formats::data_version::{
     BedrockTarget, JavaTarget, resolve_bedrock_target, resolve_java_target,
@@ -1198,6 +1199,9 @@ fn edition_rows(
         let portability = portability_figure(edition, portability);
         edition_specific_error |= portability.is_none();
         if let Some(portability) = &portability {
+            for note in degraded_notes(edition, portability.degraded()) {
+                eprintln!("{note}");
+            }
             for note in unsupported_notes(edition, portability.unsupported()) {
                 eprintln!("{note}");
             }
@@ -1236,12 +1240,17 @@ fn edition_rows(
         // no validated pack could have produced.
         if let Some(portability) = portability {
             let refusal = buildable_refusal(source, lines, &verdicts, &considered, &dropped);
+            // Only `portable` is taken off the counts: the other two are
+            // the lengths of the lists below, and `compute_axes` derives
+            // them there so this call cannot pair a figure with a list
+            // that disagrees.
+            let portable = portability.counts().portable;
+            let entries = portability.into_entries();
             rows.push(EditionReport {
                 edition,
-                portable: portability.counts().portable,
-                degraded: portability.counts().degraded,
-                unsupported: portability.counts().unsupported,
-                unsupported_entries: portability.into_unsupported(),
+                portable,
+                unsupported_entries: entries.unsupported,
+                degraded_entries: entries.degraded,
                 buildable: verdicts.buildable,
                 considered,
                 refusal,
@@ -1291,6 +1300,45 @@ fn portability_figure(
             None
         }
     }
+}
+
+/// The notes naming the palette entries one edition builds with loss, in
+/// the order they print, under the figure that counts them.
+///
+/// Returned rather than printed, like [`unsupported_notes`], and printed
+/// before it so the two blocks read in the order the row lists their
+/// figures. The figure is `entries.len()`: [`PortabilityReport`] raises
+/// `degraded` only beside a push. These go to stderr; a consumer that
+/// wants them structured reads `edition_portability[].degraded_entries`.
+///
+/// One line per entry rather than per dropped intent, so the lines can be
+/// counted against the figure, and each line carries the entry's states
+/// because one id reaches the list once per state combination. The
+/// sentence is `degradation_detail`, the one place the wording is
+/// written; the build's `W_INTENT_DEGRADED` frames that same clause with
+/// the block named, so the two tell one story rather than two.
+fn degraded_notes(edition: Edition, entries: &[DegradedEntry]) -> Vec<String> {
+    if entries.is_empty() {
+        return Vec::new();
+    }
+    let mut notes = vec![format!(
+        "note: what `degraded: {}` counts on {}:",
+        entries.len(),
+        edition.as_str(),
+    )];
+    notes.extend(entries.iter().map(|entry| {
+        // `dropped` is non-empty by construction — an entry is in this
+        // list because the translator handed back at least one — so the
+        // join has nothing to fall back to.
+        let detail: Vec<String> = entry.dropped.iter().map(degradation_detail).collect();
+        format!(
+            "  note: `{}[{}]` — {}",
+            entry.id,
+            entry.states,
+            detail.join("; "),
+        )
+    }));
+    notes
 }
 
 /// The notes naming the palette entries one edition has no form for, in
@@ -3713,6 +3761,8 @@ mod tests {
     //! Unit coverage for the argument-surface invariants the
     //! end-to-end `tests/cli_*.rs` binaries can only assert
     //! circumstantially, by hard-coding both sides of a pairing.
+    use cairn_lang_core::resolve::DroppedIntent;
+
     use super::*;
 
     /// The whole note block, header included.
@@ -3759,6 +3809,51 @@ mod tests {
         // nothing, and every edition would otherwise get a block of its
         // own back to back.
         assert!(unsupported_notes(Edition::Java, &[]).is_empty());
+    }
+
+    /// The same, for the figure beside it.
+    ///
+    /// `degraded_notes` has the same header, the same guard and the same
+    /// indent, and the end-to-end tests read it the same circumstantial
+    /// way — so without this, dropping the empty guard would print
+    /// ``note: what `degraded: 0` counts on java:`` on every clean run,
+    /// twice over for `--editions java,bedrock`, and the suite would stay
+    /// green.
+    #[test]
+    fn the_degraded_notes_answer_the_figure_they_sit_under() {
+        let entries = vec![
+            DegradedEntry {
+                id: "minecraft:spruce_stairs".to_owned(),
+                states: "facing=north,shape=outer_left".to_owned(),
+                dropped: vec![DroppedIntent::Shape {
+                    value: "outer_left".to_owned(),
+                }],
+            },
+            // The same id again: it is the state combination that
+            // degrades, so the block reports it once per combination.
+            DegradedEntry {
+                id: "minecraft:spruce_stairs".to_owned(),
+                states: "facing=south,shape=inner_right".to_owned(),
+                dropped: vec![DroppedIntent::Shape {
+                    value: "inner_right".to_owned(),
+                }],
+            },
+        ];
+        assert_eq!(
+            degraded_notes(Edition::Bedrock, &entries),
+            [
+                "note: what `degraded: 2` counts on bedrock:".to_owned(),
+                format!(
+                    "  note: `minecraft:spruce_stairs[facing=north,shape=outer_left]` — {}",
+                    degradation_detail(&entries[0].dropped[0])
+                ),
+                format!(
+                    "  note: `minecraft:spruce_stairs[facing=south,shape=inner_right]` — {}",
+                    degradation_detail(&entries[1].dropped[0])
+                ),
+            ],
+        );
+        assert!(degraded_notes(Edition::Java, &[]).is_empty());
     }
 
     /// The block that stands in for a row an edition does not get.

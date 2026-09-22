@@ -87,12 +87,14 @@
 //! is not a member-authored intent that could be "unsupported".
 
 use cairn_lang_core::block_array::{BlockArrayIr, BlockState};
-use cairn_lang_core::resolve::{UnsupportedEntry, UnsupportedReason};
+use cairn_lang_core::resolve::{DegradedEntry, UnsupportedEntry, UnsupportedReason};
 use cairn_lang_core::suggest::nearest_namespaced_id;
 
 use thiserror::Error;
 
-use crate::bedrock_state::{BedrockStateError, translate_states};
+use crate::bedrock_state::{
+    BedrockStateError, StateTranslation, join_properties, translate_states,
+};
 use crate::registry::{AliasIndex, BlocksIndex};
 
 /// One edition's portability answer: the counts, and the entries behind
@@ -112,7 +114,23 @@ use crate::registry::{AliasIndex, BlocksIndex};
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct PortabilityReport {
     counts: PortabilityCounts,
+    degraded: Vec<DegradedEntry>,
     unsupported: Vec<UnsupportedEntry>,
+}
+
+/// Both of a [`PortabilityReport`]'s lists, moved out together.
+///
+/// Named fields rather than a pair, because the two are the same shape at
+/// a glance — two lists of palette entries — and a tuple would make their
+/// order the only thing telling them apart.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct PortabilityEntries {
+    /// The entries [`PortabilityCounts::degraded`] counts, in palette
+    /// order.
+    pub degraded: Vec<DegradedEntry>,
+    /// The entries [`PortabilityCounts::unsupported`] counts, in palette
+    /// order.
+    pub unsupported: Vec<UnsupportedEntry>,
 }
 
 /// Palette-entry counts per portability category.
@@ -186,11 +204,25 @@ impl PortabilityReport {
         &self.unsupported
     }
 
-    /// Take the entries, for a caller that stores them rather than reading
-    /// them in place.
+    /// The entries [`PortabilityCounts::degraded`] counts, in palette
+    /// order.
     #[must_use]
-    pub fn into_unsupported(self) -> Vec<UnsupportedEntry> {
-        self.unsupported
+    pub fn degraded(&self) -> &[DegradedEntry] {
+        &self.degraded
+    }
+
+    /// Take both lists, for a caller that stores them rather than reading
+    /// them in place.
+    ///
+    /// One method rather than an `into_` per list, because each of them
+    /// would consume the report and a caller needs both. The counts are
+    /// [`Copy`], so `counts()` is still there to be read first.
+    #[must_use]
+    pub fn into_entries(self) -> PortabilityEntries {
+        PortabilityEntries {
+            degraded: self.degraded,
+            unsupported: self.unsupported,
+        }
     }
 
     /// Record an entry that compiles straight through.
@@ -198,9 +230,16 @@ impl PortabilityReport {
         self.counts.portable = self.counts.portable.saturating_add(1);
     }
 
-    /// Record an entry that compiles and loses detail.
-    fn count_degraded(&mut self) {
+    /// Record one entry that compiles and loses detail, raising the count
+    /// with it.
+    ///
+    /// The single place `degraded` is incremented, for the reason
+    /// [`Self::push_unsupported`] is the single place the other is: the
+    /// figure and the names are two views of one push rather than two
+    /// tallies that have to agree.
+    fn push_degraded(&mut self, entry: DegradedEntry) {
         self.counts.degraded = self.counts.degraded.saturating_add(1);
+        self.degraded.push(entry);
     }
 
     /// Record one entry the edition has no form for, raising the count
@@ -287,11 +326,32 @@ pub fn portability_for_bedrock(
         // fourth added later must be classified here rather than joining
         // whichever bucket a `_` arm points at.
         match translate_states(&entry.id, &entry.properties) {
-            Ok(t) if t.degraded.is_empty() => {
+            // Destructured without `..` for the reason the wildcard is
+            // refused above: reading `degraded` alone would make these two
+            // arms an effective wildcard over `StateTranslation`, and a
+            // second kind of loss added to it would land in `portable`
+            // silently. `portable` has no list, so the "the figure is the
+            // length" invariant that guards the other two categories could
+            // not notice. Without `..` the compiler raises it here.
+            Ok(StateTranslation {
+                states: _,
+                degraded,
+            }) if degraded.is_empty() => {
                 report.count_portable();
             }
-            Ok(_) => {
-                report.count_degraded();
+            // The translator's own answer, carried rather than recomputed:
+            // which property it could not write is a rule that lives in
+            // `bedrock_state`, and re-deriving it here would be a second
+            // copy of that rule to fall out of step.
+            Ok(StateTranslation {
+                states: _,
+                degraded,
+            }) => {
+                report.push_degraded(DegradedEntry {
+                    id: entry.id.clone(),
+                    states: join_properties(&entry.properties),
+                    dropped: degraded,
+                });
             }
             // The edition has the block and this backend has no mapping
             // for its states yet — `UnmappableBlock`'s own doc says "which
@@ -395,6 +455,7 @@ mod tests {
     use cairn_lang_core::block_array::{
         BlockArray, BlockArrayIr, BlockState, Dims, Palette, PaletteIndex,
     };
+    use cairn_lang_core::resolve::DroppedIntent;
     use indexmap::IndexMap;
 
     use crate::bedrock_state::stair_props;
@@ -1175,21 +1236,72 @@ mod tests {
     }
 
     #[test]
-    fn a_degraded_entry_is_counted_and_not_named() {
-        // Degraded entries have the same "which of the N" problem, and
-        // this row deliberately does not answer it: the list is what the
-        // `unsupported` figure counts, and nothing else, so a consumer can
-        // read one against the other.
+    fn a_degraded_entry_is_named_with_the_states_that_degraded_it() {
+        // The states, not the id alone: degradation is a fact about the
+        // state combination, and one id reaches this list once per
+        // combination that loses something.
         let ir = one_state_ir(vec![BlockState {
             id: "minecraft:oak_stairs".to_owned(),
             properties: stair_props("south", "top", "outer_left"),
         }]);
         let report = bedrock_report(&ir, &table(), &no_aliases());
         assert_eq!(report.counts().degraded, 1);
+        assert_eq!(
+            report.degraded(),
+            [DegradedEntry {
+                id: "minecraft:oak_stairs".to_owned(),
+                states: "facing=south,half=top,shape=outer_left".to_owned(),
+                dropped: vec![DroppedIntent::Shape {
+                    value: "outer_left".to_owned(),
+                }],
+            }],
+        );
+        // The categories stay apart: this entry builds, so it is not in
+        // the list of entries with no form at all.
         assert!(
             report.unsupported().is_empty(),
             "got {:?}",
             report.unsupported(),
+        );
+    }
+
+    #[test]
+    fn two_state_combinations_of_one_id_are_two_named_entries() {
+        // The case a list keyed by id alone cannot report, and the one
+        // `examples/roof-hip.crn` actually hits: four degraded entries,
+        // every one of them `minecraft:spruce_stairs`.
+        let ir = one_state_ir(vec![
+            BlockState {
+                id: "minecraft:oak_stairs".to_owned(),
+                properties: stair_props("south", "top", "outer_left"),
+            },
+            BlockState {
+                id: "minecraft:oak_stairs".to_owned(),
+                properties: stair_props("south", "top", "inner_right"),
+            },
+        ]);
+        let report = bedrock_report(&ir, &table(), &no_aliases());
+        assert_eq!(report.counts().degraded, 2);
+        let dropped: Vec<&DroppedIntent> = report
+            .degraded()
+            .iter()
+            .flat_map(|entry| entry.dropped.iter())
+            .collect();
+        assert_eq!(
+            dropped,
+            [
+                &DroppedIntent::Shape {
+                    value: "outer_left".to_owned(),
+                },
+                &DroppedIntent::Shape {
+                    value: "inner_right".to_owned(),
+                },
+            ],
+        );
+        assert_eq!(
+            report.degraded().len(),
+            report.counts().degraded as usize,
+            "the list and the figure count the same entries",
         );
     }
 
@@ -1232,12 +1344,26 @@ mod tests {
             named,
             ["minecraft:no_such_block_at_all", "minecraft:oak_door"]
         );
+        assert_eq!(
+            report
+                .degraded()
+                .iter()
+                .map(|e| e.id.as_str())
+                .collect::<Vec<_>>(),
+            ["minecraft:oak_stairs"],
+        );
         // The pairing invariant, asked where entries actually exist: over
         // a palette with none of them, "pushed without counting" and
-        // "counted without pushing" both read as 0 == 0.
+        // "counted without pushing" both read as 0 == 0. Asked of both
+        // lists, since each has its own push site.
         assert_eq!(
             report.unsupported().len(),
             report.counts().unsupported as usize,
+            "the list and the figure count the same entries",
+        );
+        assert_eq!(
+            report.degraded().len(),
+            report.counts().degraded as usize,
             "the list and the figure count the same entries",
         );
     }

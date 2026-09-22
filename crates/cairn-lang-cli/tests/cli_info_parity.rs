@@ -9,6 +9,8 @@
 use std::path::PathBuf;
 use std::process::Command;
 
+use cairn_lang_core::resolve::DroppedIntent;
+use cairn_lang_formats::bedrock_state::degradation_detail;
 use serde_json::Value;
 
 mod common;
@@ -1404,6 +1406,158 @@ fn the_json_row_names_exactly_what_its_count_counts() {
             .expect("every row carries the key")
             .is_empty(),
         "Java has the block, so its list is empty rather than absent: {java}",
+    );
+    // The same of the figure beside it, so the two halves of the additive
+    // claim fail together: a `skip_serializing_if` added to one list would
+    // otherwise break its consumers with the other list's test still green.
+    assert_eq!(java["degraded"], 0);
+    assert!(
+        java["degraded_entries"]
+            .as_array()
+            .expect("every row carries the key")
+            .is_empty(),
+        "Java loses nothing here, so its list is empty rather than absent: {java}",
+    );
+}
+
+#[test]
+fn the_degraded_figure_names_the_entry_and_what_it_lost() {
+    // The other integer over entries the command can name. `roof-hip` is
+    // a shipped example reporting `degraded: 4`, and before this the only
+    // way to find the four was to compile and read `W_INTENT_DEGRADED` —
+    // which is the run `info` exists to be read before.
+    let axes = info_json("roof-hip.crn", "bedrock");
+    let bedrock = portability_entry(&axes, "bedrock");
+    let entries = bedrock["degraded_entries"]
+        .as_array()
+        .expect("degraded_entries is a JSON array");
+    // Against the row's own figure rather than a literal, so the two
+    // cannot be right about different things.
+    assert_eq!(
+        entries.len() as u64,
+        bedrock["degraded"].as_u64().expect("a count"),
+        "the list and the figure count the same entries, got: {bedrock}",
+    );
+    assert!(
+        entries.len() > 1,
+        "premise: this example degrades more than one entry, got: {bedrock}",
+    );
+    // Every one of them is the same block, which is the case a list keyed
+    // by id alone could not report: it is the state combination that
+    // degrades, so that is what tells the entries apart.
+    let ids: std::collections::BTreeSet<&str> = entries
+        .iter()
+        .map(|entry| entry["id"].as_str().expect("an id"))
+        .collect();
+    assert_eq!(ids.len(), 1, "premise: one id, several states: {bedrock}");
+    let states: Vec<&str> = entries
+        .iter()
+        .map(|entry| entry["states"].as_str().expect("the entry's states"))
+        .collect();
+    let distinct: std::collections::BTreeSet<&&str> = states.iter().collect();
+    assert_eq!(
+        distinct.len(),
+        states.len(),
+        "each entry is a different state combination: {states:?}",
+    );
+    // The pieces, not a sentence: a consumer reads which property was
+    // dropped without parsing English out of the field beside it.
+    for entry in entries {
+        let dropped = entry["dropped"]
+            .as_array()
+            .expect("an entry carries what it lost");
+        assert!(!dropped.is_empty(), "got: {entry}");
+        for one in dropped {
+            assert_eq!(one["key"], "shape", "got: {entry}");
+            let value = one["value"].as_str().expect("the value that was asked for");
+            assert_ne!(
+                value, "straight",
+                "Bedrock can express `straight`, so it is not a loss: {entry}",
+            );
+            assert!(
+                entry["states"]
+                    .as_str()
+                    .expect("states")
+                    .contains(&format!("shape={value}")),
+                "the dropped intent is one of the entry's own states: {entry}",
+            );
+        }
+    }
+}
+
+#[test]
+fn the_degraded_notes_and_the_build_share_one_wording() {
+    // Two moments, one reader, one wording: the note here and the build's
+    // `W_INTENT_DEGRADED` come off the same function, so `info` cannot
+    // start describing a loss differently from the compile that hits it.
+    // Checked against that function rather than a literal, which is what
+    // makes this a claim about the seam and not about a string.
+    const HEADER: &str = "note: what `degraded: ";
+    let (code, stdout, stderr) = info_raw(&examples_dir().join("roof-hip.crn"), "bedrock");
+    assert_eq!(code, Some(0), "info reports; it does not refuse: {stderr}");
+    // The header carries the figure it is explaining, the way the
+    // `unsupported` block does, and every count below is read off it
+    // rather than written twice.
+    let mut lines = stderr.lines();
+    let header = lines
+        .by_ref()
+        .find(|line| line.starts_with(HEADER))
+        .unwrap_or_else(|| panic!("the block is introduced by its own header: {stderr}"));
+    assert!(
+        header.ends_with(" counts on bedrock:"),
+        "the header names the edition whose figure it explains: {stderr}",
+    );
+    let figure: usize = header
+        .trim_start_matches(HEADER)
+        .split('`')
+        .next()
+        .and_then(|count| count.parse().ok())
+        .unwrap_or_else(|| panic!("the header carries the figure: {header}"));
+    assert!(
+        stdout.contains(&format!("degraded: {figure}")),
+        "the row and the header report one figure, got: {stdout}",
+    );
+    assert!(
+        figure > 1,
+        "premise: this example degrades more than one entry, got: {stdout}",
+    );
+    // Only the lines under that header: `unsupported_notes` writes the
+    // same `  note: ` prefix into the same stream from the same loop, so
+    // counting across the whole of stderr would let three degraded beside
+    // one unsupported pass for four.
+    let named: Vec<&str> = lines.take_while(|line| line.starts_with("  ")).collect();
+    assert_eq!(
+        named.len(),
+        figure,
+        "one line per entry, counted against the header's own figure: {stderr}",
+    );
+    // The whole line, against the writer: `degradation_detail` is where
+    // the clause lives, and the build frames that same clause with the
+    // block named.
+    assert_eq!(
+        named[0],
+        format!(
+            "  note: `minecraft:spruce_stairs[facing=north,half=bottom,shape=outer_left]` — {}",
+            degradation_detail(&DroppedIntent::Shape {
+                value: "outer_left".to_owned(),
+            }),
+        ),
+        "got: {stderr}",
+    );
+    // And none of it reaches stdout, where the rows are the contract. The
+    // row count comes off a clean run rather than a literal, so the two
+    // cannot be right about different numbers of rows.
+    assert!(
+        !stdout.contains("spruce_stairs"),
+        "the names belong on stderr with the other notes, got: {stdout}",
+    );
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    let clean = one_slot_source(tmp.path(), "clean.crn", "cobblestone");
+    let (_, clean_out, _) = info_raw(&clean, "bedrock");
+    assert_eq!(
+        stdout_rows(&stdout).len(),
+        stdout_rows(&clean_out).len(),
+        "naming an entry must not add a row, got: {stdout}",
     );
 }
 

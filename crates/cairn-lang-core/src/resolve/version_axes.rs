@@ -101,13 +101,23 @@ pub struct EditionReport {
     /// Target edition this report describes.
     pub edition: Edition,
     /// Palette entries that compile straight through.
+    ///
+    /// A bare figure because it is the one category with no list: an
+    /// entry that compiles straight through has nothing to say about
+    /// itself beyond being counted.
     pub portable: u32,
-    /// Palette entries that compile but lose detail.
-    pub degraded: u32,
     /// Palette entries with no representable form on this edition.
-    pub unsupported: u32,
-    /// The entries [`Self::unsupported`] counts, named.
+    ///
+    /// The `unsupported` figure on the wire is this list's length, not a
+    /// number carried beside it: [`compute_axes`] derives it. An
+    /// all-`pub` struct cannot stop a caller writing `unsupported: 1`
+    /// next to an empty list, so it is not given the chance.
     pub unsupported_entries: Vec<UnsupportedEntry>,
+    /// Palette entries that compile but lose detail, and what each lost.
+    ///
+    /// The `degraded` figure on the wire is this list's length, for the
+    /// reason [`Self::unsupported_entries`] gives.
+    pub degraded_entries: Vec<DegradedEntry>,
     /// Versions from [`Self::considered`] a build would accept.
     pub buildable: Vec<String>,
     /// Every version the edition's registry pack declares.
@@ -386,6 +396,79 @@ pub struct EditionPortability {
     /// two ways an entry can be unsupported have two different repairs and
     /// only one of them is the author's.
     pub unsupported_entries: Vec<UnsupportedEntry>,
+    /// The entries [`Self::degraded`] counts, named and with what each of
+    /// them lost.
+    ///
+    /// One element per unit of the count, in palette order, the way
+    /// [`Self::unsupported_entries`] is. The case for naming these is the
+    /// weaker half of the one that named those — there is a single reason
+    /// an entry degrades and a single repair — but "which of the N" is the
+    /// same question, and a build is the only other place it is answered.
+    /// `cairn info` exists to be read before the build.
+    pub degraded_entries: Vec<DegradedEntry>,
+}
+
+/// One palette entry that compiles into an edition and loses detail doing
+/// it.
+///
+/// Built by `cairn-lang-formats::portability` and declared here for the
+/// reason [`UnsupportedEntry`] is: beside the row it is a field of, so
+/// there is one shape rather than two with a mapping between them.
+///
+/// Two lists rather than one under a category tag, and `states` rather
+/// than the id alone: `spec/versioning-editions` "The `edition
+/// portability` row" has the reasoning. What it costs here is that the
+/// figure *is* the length, which is why the producer has a push site per
+/// list and [`compute_axes`] derives both figures from them.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct DegradedEntry {
+    /// The palette entry's block id, verbatim as the lowering interned it.
+    pub id: String,
+    /// The entry's `key=value` pairs, comma-joined, the same spelling
+    /// [`UnsupportedReason::StatesUnmapped`] uses.
+    ///
+    /// Carried rather than left to the id, because degradation is a fact
+    /// about the states and one id reaches this list once per state
+    /// combination.
+    ///
+    /// Pre-joined while [`Self::dropped`] is structured, because this one
+    /// is a rendering that already exists: `join_properties` writes the
+    /// same spelling for [`UnsupportedReason::StatesUnmapped`], and
+    /// splitting it here would put two spellings of one entry's states on
+    /// the wire.
+    pub states: String,
+    /// What the edition had no form for, one per intent dropped.
+    pub dropped: Vec<DroppedIntent>,
+}
+
+/// One piece of intent an edition cannot represent, as the pieces rather
+/// than as the sentence about them.
+///
+/// The prose belongs to whatever is rendering, for the reason
+/// [`UnsupportedReason`] gives: a consumer that reads this should not then
+/// have to parse English to learn which property was dropped.
+/// `cairn-lang-formats::bedrock_state` is the one module the sentence is
+/// written in, and both the build's `W_INTENT_DEGRADED` and `cairn info`'s
+/// note come off the same function there.
+///
+/// A closed set rather than a free `{key, value}` pair, for the reason
+/// [`UnsupportedReason`] is one: the sentence written for a dropped
+/// `shape` talks about stairs, and the renderer must not be able to
+/// inherit it for a family that has no corners. Each variant serializes
+/// under its own `key`, so the wire shape is the same `{"key", "value"}`
+/// object either way and a new variant is a new `key` rather than a
+/// change to an existing one.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(tag = "key", rename_all = "snake_case")]
+pub enum DroppedIntent {
+    /// A stair `shape` the edition has no state for.
+    Shape {
+        /// The value that was asked for and could not be written
+        /// (`outer_left`). The value an edition *can* express drops
+        /// without reaching this list — Bedrock's stairs are `straight`,
+        /// so `shape=straight` is not a loss.
+        value: String,
+    },
 }
 
 /// One palette entry an edition has no form for, and why.
@@ -509,9 +592,10 @@ pub fn compute_axes(
         edition_portability.push(EditionPortability {
             edition: report.edition,
             portable: report.portable,
-            degraded: report.degraded,
-            unsupported: report.unsupported,
+            degraded: named_count(report.degraded_entries.len()),
+            unsupported: named_count(report.unsupported_entries.len()),
             unsupported_entries: report.unsupported_entries,
+            degraded_entries: report.degraded_entries,
         });
         buildable_targets.push(BuildableTargets {
             edition: report.edition,
@@ -530,6 +614,17 @@ pub fn compute_axes(
         buildable_targets,
         intended_targets: declared_intended_targets(module),
     }
+}
+
+/// One figure over a named list, as the list's own length.
+///
+/// The only place either figure is decided, so "the figure is the list's
+/// length" is a property of the code rather than of every caller. The
+/// cap is `Palette::intern`'s: a palette holds at most `u16::MAX`
+/// entries, four orders of magnitude below where this saturates, so the
+/// clamp is unreachable rather than lossy.
+fn named_count(len: usize) -> u32 {
+    u32::try_from(len).unwrap_or(u32::MAX)
 }
 
 /// The versions every `@intended_targets` header names, in source order.
@@ -1081,21 +1176,18 @@ mod tests {
     /// Used to keep the axis-1 / axis-3 tests independent of the axis-2
     /// data source; the version lists are left empty because those tests
     /// are not about them.
-    fn synthetic_portability(entries: &[(Edition, u32, u32, u32)]) -> Vec<EditionReport> {
+    fn synthetic_portability(entries: &[(Edition, u32)]) -> Vec<EditionReport> {
         entries
             .iter()
-            .map(
-                |&(edition, portable, degraded, unsupported)| EditionReport {
-                    edition,
-                    portable,
-                    degraded,
-                    unsupported,
-                    unsupported_entries: Vec::new(),
-                    buildable: Vec::new(),
-                    considered: Vec::new(),
-                    refusal: None,
-                },
-            )
+            .map(|&(edition, portable)| EditionReport {
+                edition,
+                portable,
+                unsupported_entries: Vec::new(),
+                degraded_entries: Vec::new(),
+                buildable: Vec::new(),
+                considered: Vec::new(),
+                refusal: None,
+            })
             .collect()
     }
 
@@ -1103,12 +1195,7 @@ mod tests {
     fn registry_compat_min_from_requires_header() {
         let src = "@requires version>=1.20\n\nstruct s size=4x4\n  walls mat_slot=wall height=3\n";
         let (m, i, r) = module_with(src);
-        let axes = compute_axes(
-            &m,
-            &i,
-            &r,
-            synthetic_portability(&[(Edition::Java, 0, 0, 0)]),
-        );
+        let axes = compute_axes(&m, &i, &r, synthetic_portability(&[(Edition::Java, 0)]));
         assert_eq!(axes.registry_compat.min, "1.20");
         assert_eq!(axes.registry_compat.max, "latest");
     }
@@ -1117,12 +1204,7 @@ mod tests {
     fn registry_compat_takes_max_when_multiple_requires_present() {
         let src = "@requires version>=1.20\n@requires version>=1.21\n\nstruct s size=4x4\n  walls mat_slot=wall height=3\n";
         let (m, i, r) = module_with(src);
-        let axes = compute_axes(
-            &m,
-            &i,
-            &r,
-            synthetic_portability(&[(Edition::Java, 0, 0, 0)]),
-        );
+        let axes = compute_axes(&m, &i, &r, synthetic_portability(&[(Edition::Java, 0)]));
         assert_eq!(axes.registry_compat.min, "1.21");
     }
 
@@ -1130,12 +1212,7 @@ mod tests {
     fn registry_compat_defaults_when_requires_absent() {
         let src = "struct s size=4x4\n  walls mat_slot=wall height=3\n";
         let (m, i, r) = module_with(src);
-        let axes = compute_axes(
-            &m,
-            &i,
-            &r,
-            synthetic_portability(&[(Edition::Java, 0, 0, 0)]),
-        );
+        let axes = compute_axes(&m, &i, &r, synthetic_portability(&[(Edition::Java, 0)]));
         assert_eq!(axes.registry_compat.min, "0.0");
     }
 
@@ -1156,9 +1233,8 @@ mod tests {
                 EditionReport {
                     edition: Edition::Java,
                     portable: 3,
-                    degraded: 0,
-                    unsupported: 0,
                     unsupported_entries: Vec::new(),
+                    degraded_entries: Vec::new(),
                     buildable: vec!["1.20.4".to_owned()],
                     considered: vec!["1.20.4".to_owned()],
                     refusal: None,
@@ -1166,9 +1242,14 @@ mod tests {
                 EditionReport {
                     edition: Edition::Bedrock,
                     portable: 1,
-                    degraded: 1,
-                    unsupported: 4,
                     unsupported_entries: one_entry_per_reason(),
+                    degraded_entries: vec![DegradedEntry {
+                        id: "minecraft:spruce_stairs".to_owned(),
+                        states: "facing=north,shape=outer_left".to_owned(),
+                        dropped: vec![DroppedIntent::Shape {
+                            value: "outer_left".to_owned(),
+                        }],
+                    }],
                     buildable: vec!["1.21.0".to_owned()],
                     considered: vec!["1.21.0".to_owned(), "1.21.40".to_owned()],
                     refusal: None,
@@ -1182,8 +1263,19 @@ mod tests {
         assert_eq!(axes.edition_portability[0].unsupported, 0);
         assert_eq!(axes.edition_portability[1].edition, Edition::Bedrock);
         assert_eq!(axes.edition_portability[1].portable, 1);
+        // Both figures are the lengths of the lists beside them, which is
+        // the one thing this function decides rather than forwards: the
+        // caller has no field to disagree with them from.
         assert_eq!(axes.edition_portability[1].degraded, 1);
-        assert_eq!(axes.edition_portability[1].unsupported, 4);
+        assert_eq!(axes.edition_portability[1].unsupported, 2);
+        assert_eq!(
+            axes.edition_portability[1].degraded as usize,
+            axes.edition_portability[1].degraded_entries.len(),
+        );
+        assert_eq!(
+            axes.edition_portability[1].unsupported as usize,
+            axes.edition_portability[1].unsupported_entries.len(),
+        );
         // JSON wire shape must remain unchanged so downstream consumers
         // treating `edition_portability[].edition` as a lowercase string
         // continue to work under the enum-typed field.
@@ -1301,12 +1393,7 @@ mod tests {
     fn semantic_sensitive_is_empty_without_catalog() {
         let src = "struct s size=4x4\n  walls height=3\n";
         let (m, i, r) = module_with(src);
-        let axes = compute_axes(
-            &m,
-            &i,
-            &r,
-            synthetic_portability(&[(Edition::Java, 0, 0, 0)]),
-        );
+        let axes = compute_axes(&m, &i, &r, synthetic_portability(&[(Edition::Java, 0)]));
         assert!(axes.semantic_sensitive.is_empty());
     }
 

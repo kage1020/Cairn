@@ -38,7 +38,7 @@ use cairn_lang_nbt::tag::{List, Tag};
 use cairn_lang_nbt::{NbtIoError, write_bedrock_uncompressed};
 use thiserror::Error;
 
-use crate::bedrock_state::{BedrockStateError, translate_states};
+use crate::bedrock_state::{BedrockStateError, degradation_message, translate_states};
 use crate::data_version::BedrockTarget;
 use crate::dims::dims_to_i32;
 use crate::java_structure::is_concrete_id;
@@ -144,10 +144,10 @@ pub fn build_mcstructure_tag(
             });
         }
         let translated = translate_states(&entry.id, &entry.properties)?;
-        for message in translated.degraded {
+        for dropped in &translated.degraded {
             notes.push(ParityNote {
                 id: entry.id.clone(),
-                message,
+                message: degradation_message(&entry.id, dropped),
             });
         }
         palette_states.push(translated.states);

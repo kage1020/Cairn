@@ -419,6 +419,37 @@ it is what a pinned target answers, as `E_UNKNOWN_ID` — `cairn compile --targe
 --edition E --target V` for the same answer without a build
 ([§10.4](#104-fail-loud-and-minimum-version-inference)).
 
+#### Which entries degraded, and what they lost
+
+`degraded` is the other figure over entries the command can name, and it is named the same way. The
+case is weaker than `unsupported`'s: there is one reason an entry degrades and one repair for it, so
+a reader is not choosing between repairs. What is identical is "which of the N" — `roof-hip` reports
+`degraded: 4` — and the only other place that is answered is the build, as `W_INTENT_DEGRADED`,
+which is the run this command exists to be read *before*.
+
+Each counted entry is named on stderr and carried in `--format json` as
+`edition_portability[].degraded_entries`, one element per unit of the count, in palette order. An
+entry is `{id, states, dropped}`:
+
+| Field | Carries |
+|---|---|
+| `id` | The palette entry's block ID, verbatim as the lowering interned it. |
+| `states` | The entry's `key=value` pairs, comma-joined, the same spelling the `states_unmapped` reason uses. |
+| `dropped` | One `{key, value}` per intent the edition has no form for. `key` is a closed set (`shape`); a new kind of loss is a new `key` rather than a change to an existing one. |
+
+Two lists rather than one under a category tag, and `states` rather than the ID alone. Degradation
+is a fact about the *state combination*, not about the block: one ID reaches this list once per
+combination that loses something, and `roof-hip`'s four entries are four spellings of
+`minecraft:spruce_stairs`. A list keyed by the ID alone would print the same line four times.
+
+`dropped` carries the property and the value rather than the sentence about them, for the reason the
+`unsupported` reasons do: a consumer that reads this should not have to parse English to learn which
+state was lost. A value the edition *can* express is not a loss and does not appear — Bedrock's
+stairs are `straight`, so `shape=straight` drops without an entry. The prose both the note and
+`W_INTENT_DEGRADED` print is written in one place, and per `key` rather than over the pair, because
+the sentence for a dropped `shape` talks about stairs: a second block family that drops an intent
+brings its own `key` and its own sentence rather than inheriting this one.
+
 #### A blockstate the pack should have refused is not a figure
 
 Two further failures can reach the state translator: a state value outside the Java domain
