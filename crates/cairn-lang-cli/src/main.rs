@@ -147,7 +147,7 @@ enum Command {
         #[arg(long, value_enum, default_value_t = CheckFormat::Text)]
         format: CheckFormat,
     },
-    /// Report the three version axes (registry-compatible range, edition
+    /// Report the three version axes (declared registry range, edition
     /// portability, semantic-sensitive members) for a .crn source file.
     /// Exits 0 on success; 1 on a parse failure, on any `Error`-severity
     /// diagnostic (the check passes run here, and a range derived from a
@@ -1835,11 +1835,12 @@ fn joined_or(empty: &str, separator: &str, items: impl IntoIterator<Item = Strin
 }
 
 fn print_axes_report(axes: &VersionAxes) {
-    // Axis 1: the registry-compatible range is currently edition-agnostic
-    // — `RegistryRange` holds a single `min/max` pair. The output renders
-    // it as one entry to match. Once registry-pack data makes the range
-    // per-edition, this is the line that grows a per-edition list to
-    // mirror axis 2.
+    // Axis 1 is one entry because the answer is: the row reads only the
+    // floors that name no edition, so there is nothing per-edition to
+    // render (`spec/versioning-editions` "The `registry compatibility`
+    // row"). A floor written in Java's numbering says nothing about the
+    // file's Bedrock range, and the per-edition answer is the `buildable
+    // targets` row below.
     println!(
         "registry compatibility:  {} .. {}",
         axes.registry_compat.min, axes.registry_compat.max,

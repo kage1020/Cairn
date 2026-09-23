@@ -112,10 +112,11 @@ fn info_5_all_examples_exit_zero() {
 
 #[test]
 fn info_6_registry_compatibility_renders_as_single_range_line() {
-    // The registry-compatible range is currently edition-agnostic
-    // (single `min/max` pair in `RegistryRange`). The text output must
-    // not duplicate it per edition — that misled reviewers into reading
-    // a per-edition divergence that the data does not carry.
+    // The declared range is edition-agnostic — it reads only the floors
+    // that name no edition, so a single `min/max` pair is the answer and
+    // not a placeholder. The text output must not duplicate it per
+    // edition: that misled reviewers into reading a per-edition
+    // divergence that the row does not carry.
     let path = examples_dir().join("cottage.crn");
     let out = cairn("info", &[path.to_str().unwrap()]);
     assert!(out.status.success());
@@ -495,62 +496,112 @@ fn info_9g_a_theme_bound_per_edition_is_left_out_of_the_neutral_row() {
     );
 }
 
-/// `0.0 .. latest` says the file declares no floor, not that every version
-/// can build it.
+/// `registry compatibility` reports what the file declares. It is not an
+/// answer about which versions can build the file, and the two can
+/// disagree on the same run.
 ///
 /// The claim `spec/versioning-editions` "The `registry compatibility` row"
 /// makes, held against the shipped packs rather than asserted in prose.
 /// The spec used to describe this row as an intersection of `since` /
 /// `until` over the blocks the source uses — a derivation nothing
-/// performs, and one this source would contradict: `pale_moss_block`
-/// arrives in Java 1.21.4 and Bedrock 1.21.60, so four of the six
-/// supported versions refuse it while the row reports the widest range it
-/// has.
+/// performs, and one either source here would contradict:
+/// `pale_moss_block` arrives in Java 1.21.4 and Bedrock 1.21.60.
 ///
-/// A file with no floor whose *palette* is narrow is the one case where
-/// reading axis 1 as an answer about buildability gives the wrong answer,
-/// and no test read the row on one. `info_8_file_without_requires_
-/// defaults_min_to_zero_zero`, beside this, has no floor but a palette
-/// that builds everywhere, so the two rows agree and it cannot see the
-/// case; `a_source_no_supported_version_can_build_says_so` in
-/// `cli_info_parity.rs` uses such a source and asserts only the other two
-/// rows. This is the pair read against each other.
+/// No test read the row on such a source.
+/// `info_8_file_without_requires_defaults_min_to_zero_zero` runs
+/// `--format json` with no `--editions`, so it never sees the `buildable
+/// targets` row at all; `a_source_no_supported_version_can_build_says_so`
+/// in `cli_info_parity.rs` uses a narrow palette but asserts only the
+/// portability and buildable rows.
 #[test]
 fn info_8b_the_declared_range_is_not_an_answer_about_which_versions_build() {
-    let path = tempfile_with_contents(
+    // The sharper of the two: a floor every supported version clears,
+    // beside a palette only the newest one has. `1.20.4 .. latest` reads
+    // as an authoritative answer, and the row two below disproves it —
+    // with `1.20.4` itself among the refusals.
+    let floored = tempfile_with_contents(
+        "floor_below_its_palette",
+        "@requires version>=1.20.4\n\ntheme pale:\n  slot floor -> @pale_moss_block\n\
+         \x20\x20slot wall -> @cobblestone\n\
+         \nstruct hut size=5x5\n  floor mat_slot=floor\n  walls mat_slot=wall height=3\n",
+    );
+    let stdout = info_rows(&floored, "java");
+    // The claim first, taken off both rows rather than written twice: the
+    // version the declared range opens at is one a build refuses. No
+    // reading of axis 1 as an answer about buildability survives that,
+    // and it is what fails if the edge ever starts being derived — a
+    // literal below would only report that some string moved.
+    let (edge, refused) = declared_edge_and_refusals(&stdout);
+    assert!(
+        refused.contains(&edge.as_str()),
+        "the row's own lower edge is among the versions that refuse: {stdout}",
+    );
+    // Then both rows whole, the way this file pins `1.21.4` at `:444` and
+    // the Bedrock list at `:488`.
+    assert!(
+        stdout.contains("registry compatibility:  1.20.4 .. latest"),
+        "the declared floor is the row's lower edge: {stdout}",
+    );
+    assert!(
+        stdout.contains("buildable targets:       Java: 1.21.4 (1.20.4, 1.21 refuse)"),
+        "and the derived row names what actually builds: {stdout}",
+    );
+
+    // And the case where the row has nothing to report: `0.0` is the
+    // widest range it can print, beside four refusals across two
+    // editions.
+    let floorless = tempfile_with_contents(
         "narrow_palette_no_floor",
         "theme pale:\n  slot floor -> @pale_moss_block\n  slot wall -> @cobblestone\n\
          \nstruct hut size=5x5\n  floor mat_slot=floor\n  walls mat_slot=wall height=3\n",
     );
-    let out = cairn(
-        "info",
-        &[path.to_str().unwrap(), "--editions", "java,bedrock"],
-    );
-    assert!(
-        out.status.success(),
-        "the row is a report, not a refusal: {}",
-        String::from_utf8_lossy(&out.stderr),
-    );
-    let stdout = String::from_utf8(out.stdout).expect("utf-8");
+    let stdout = info_rows(&floorless, "java,bedrock");
     assert!(
         stdout.contains("registry compatibility:  0.0 .. latest"),
         "no `@requires` line and no part declaring one, so nothing feeds the row: {stdout}",
     );
-    // The row below is the derivation, and it disagrees — which is the
-    // point. Counted off that row rather than written here, so the two
-    // cannot be right about different sets of versions.
-    let buildable = stdout
-        .lines()
-        .find(|line| line.starts_with("buildable targets:"))
-        .unwrap_or_else(|| panic!("every completed run prints the row: {stdout}"));
-    let refused: usize = buildable
+    assert!(
+        stdout.contains(
+            "buildable targets:       Java: 1.21.4 (1.20.4, 1.21 refuse)   \
+             Bedrock: 1.21.60 (1.21.0, 1.21.40 refuse)"
+        ),
+        "four of the six supported versions refuse it, on both editions: {stdout}",
+    );
+}
+
+/// `cairn info`'s stdout rows for one source, or a panic naming stderr.
+fn info_rows(path: &std::path::Path, editions: &str) -> String {
+    let out = cairn("info", &[path.to_str().unwrap(), "--editions", editions]);
+    assert!(
+        out.status.success(),
+        "the rows are a report, not a refusal: {}",
+        String::from_utf8_lossy(&out.stderr),
+    );
+    String::from_utf8(out.stdout).expect("utf-8")
+}
+
+/// The lower edge of the `registry compatibility` row, and every version
+/// the `buildable targets` row says refuses — each read off its own row,
+/// so a test comparing them is comparing the command's two answers rather
+/// than two literals it wrote.
+fn declared_edge_and_refusals(stdout: &str) -> (String, Vec<&str>) {
+    let row = |label: &str| {
+        stdout
+            .lines()
+            .find(|line| line.starts_with(label))
+            .unwrap_or_else(|| panic!("every completed run prints `{label}`: {stdout}"))
+    };
+    let edge = row("registry compatibility:")
+        .split_whitespace()
+        .nth(2)
+        .expect("`<min> .. <max>`")
+        .to_owned();
+    let refused: Vec<&str> = row("buildable targets:")
         .split('(')
         .skip(1)
         .filter_map(|tail| tail.split_once(" refuse"))
-        .map(|(names, _)| names.split(',').count())
-        .sum();
-    assert!(
-        refused > 1,
-        "a range of `0.0 .. latest` sits beside versions that refuse the file: {buildable}",
-    );
+        .flat_map(|(names, _)| names.trim_end_matches(" all").split(", "))
+        .collect();
+    assert!(!refused.is_empty(), "premise: something refuses: {stdout}");
+    (edge, refused)
 }

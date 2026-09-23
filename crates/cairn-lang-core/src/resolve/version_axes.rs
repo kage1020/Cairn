@@ -3,8 +3,12 @@
 //! Spec source: `spec/versioning-editions`, the section on the three answers
 //! to "which version is it for?". The three axes are:
 //!
-//! 1. **registry-compatible range** `[Vmin, Vmax]` — the intersection of
-//!    every `since/until` over the tokens/states the file actually uses.
+//! 1. **declared registry range** `[Vmin, Vmax]` — the strictest version
+//!    floor the file declares without naming an edition, against an open
+//!    upper edge. A reading of the file rather than a fact derived from
+//!    the blocks it uses; `spec/versioning-editions` "The `registry
+//!    compatibility` row" says why, and which row carries the derived
+//!    answer instead.
 //! 2. **edition portability** — per edition, how many members compile
 //!    portably, are degraded, or are unsupported. Data-source: the caller
 //!    (typically `cairn-lang-cli`, which runs a per-edition dry-run through
@@ -57,7 +61,7 @@ use super::version_order::{FloorVerdict, VersionOrder};
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[non_exhaustive]
 pub struct VersionAxes {
-    /// Axis 1: registry-compatible version range.
+    /// Axis 1: the version range the file declares.
     pub registry_compat: RegistryRange,
     /// Axis 2: per-edition portability counts, in the order requested by
     /// the caller (CLI honours `--editions`).
@@ -348,16 +352,21 @@ pub enum FloorPart {
 /// The version range the file **declares**, per
 /// `spec/versioning-editions` "The `registry compatibility` row".
 ///
-/// `min` is the strictest of the **unscoped** `@requires version>=X`
-/// floors, or `"0.0"` when the file declares none that feed this row.
-/// `max` is the literal string `"latest"` until the registry pack
-/// provides a real upper bound.
+/// `min` is the strictest of the **unscoped** floors — the module's
+/// `@requires version>=X` headers and the `requires version>=X` line of
+/// every `def` and `theme` the build instantiates — or `"0.0"` when none
+/// of them feed this row. "Strictest" is [`compare_versions`]' order, and
+/// [`derive_min_version`] documents where that order is arbitrary. `max`
+/// is the literal string `"latest"`: an upper edge is the half of a
+/// *derived* range, and this row carries the declaration, so a pack that
+/// grows `since` / `until` gives its answer to [`BuildableTargets`]
+/// rather than to this field.
 ///
 /// Read back rather than computed: nothing here looks at the blocks the
-/// source uses, so `"0.0" .. "latest"` says the file declares no floor and
-/// not that every version can build it. The derived answer is
-/// [`BuildableTargets`], which lowers the source once per supported
-/// version. The spec section says why the two stay separate rows.
+/// source uses, so `"0.0" .. "latest"` does not say every version can
+/// build the file. [`BuildableTargets`] carries that answer, weighed once
+/// per supported version by the caller. The spec section says why the two
+/// stay separate rows.
 ///
 /// `"0.0"` therefore has two causes — no `@requires` line at all, and only
 /// floors scoped to an edition — and the row cannot tell them apart,
@@ -369,8 +378,8 @@ pub enum FloorPart {
 pub struct RegistryRange {
     /// Lower bound (inclusive).
     pub min: String,
-    /// Upper bound (inclusive). Always `"latest"` until the registry pack
-    /// catalog supplies an explicit upper edition for the file.
+    /// Upper bound (inclusive). Always `"latest"`; see the type's own doc
+    /// for why a pack that grows an upper edge does not fill this in.
     pub max: String,
 }
 
