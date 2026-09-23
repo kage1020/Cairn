@@ -4,8 +4,9 @@
 //! Spec context: `@requires` is a Minecraft-side capability floor (see
 //! `spec/versioning-editions` "Fail-loud and minimum-version inference").
 //! Floors compose by taking the strictest across every `@requires` line,
-//! which is the registry-compatible-range lower edge `cairn info` prints and
-//! the bound `cairn compile --target` is held to.
+//! which is the lower edge of the range `cairn info` reports as declared
+//! (`spec/versioning-editions` "The `registry compatibility` row") and the
+//! bound `cairn compile --target` is held to.
 //!
 //! **The ordering key is `DataVersion`, and it does not live here.**
 //! The same chapter's "The target is a compile-time parameter" makes

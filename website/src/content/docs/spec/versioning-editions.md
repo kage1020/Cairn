@@ -325,7 +325,7 @@ built, and is resolved in that edition's table like any other. That makes `@requ
 a floor both editions can honour (Java's `1.21`, Bedrock's `1.21.0`), and makes a floor that names
 one edition's release and not the other's the error above rather than a silent pass.
 
-The `registry compatibility` row of `cairn info` ([§10.5](#105-which-version-is-it-for-has-three-answers))
+The `registry compatibility` row of `cairn info` ([§10.5](#the-registry-compatibility-row))
 reads only the unscoped floors. It is one row for a file that may be reported against both editions
 at once, and a floor in Java's numbering says nothing about the file's Bedrock range; the
 per-edition answer is the `buildable targets` row.
@@ -355,8 +355,10 @@ check` pins no edition and does not ask.
 
 There is no single "for-version". `cairn info` reports three axes:
 
-1. **Registry-compatible range `[Vmin, Vmax]`**: the intersection of `since`/`until` over the used
-   tokens and states.
+1. **Declared registry range `[Vmin, Vmax]`**: the floors the file declares without naming an
+   edition, composed, against an open upper edge. A reading of what the source and the parts it
+   instantiates declare, not a fact derived from the blocks they use — see
+   [the `registry compatibility` row](#the-registry-compatibility-row).
 2. **Semantic-sensitive members**: cases where the ID stays valid but meaning, behaviour, or
    appearance changes. This matters more than the range: behaviour changes far more often than IDs
    disappear, so deciding Vmax from the registry alone is dangerous. The constraint catalog carries
@@ -388,6 +390,73 @@ The five lines go to stdout; what each figure is made of goes to stderr as `note
 reading the rows sees the same five lines every time `cairn info` runs to completion. A run that
 does not complete is a different case: a finding refuses the command before any row is computed, so
 stdout is empty rather than short a line.
+
+### The `registry compatibility` row
+
+The row reads declarations back; it never looks at the blocks the source uses. `Vmin` is the
+strictest floor the file is bound by with no edition named — the `@requires version>=X` headers,
+plus the `requires version>=X` line of every `def` and `theme` the build instantiates
+([§10.4](#a-part-may-declare-its-own-floor)) — and `0.0` when none of them feed it. Working out
+*which* parts a build instantiates is real work over the source; reading which blocks they paint is
+not part of it.
+
+"Strictest" is a comparison of the labels, so it is exact only while they are all dotted decimals.
+A label the comparison cannot read as a number sorts above every one it can, which is fixed rather
+than meaningful: a file declaring both `version>=1.21.4` and `version>=24w14a` reports the snapshot.
+That order decides no build — every gate that does weighs each floor against the target edition's
+table separately ([§10.4](#ordering-is-by-dataversion-per-edition)).
+
+The row is edition-agnostic, which is why it reads only the unscoped floors, for the reasons and
+with the stderr notes [§10.4](#a-floor-may-name-its-edition) gives. So `0.0` has two causes — a
+file that declares no floor, and one whose every floor names an edition — and the row cannot tell
+them apart. The note on stderr can.
+
+`Vmax` is the literal `latest`. An upper edge is the half of a *derived* range and this row carries
+the declaration, so a pack that grows `since` / `until` would give its answer to `buildable targets`
+rather than fill this in.
+
+**The row is a declaration, not an answer about which versions build.** Those are easy to read as
+one thing, and a source can make them look identical. This one declares a floor every supported
+version clears, and uses a block Java gained in 1.21.4:
+
+```text
+$ cat hut.crn
+@cairn 2026.06
+@requires version>=1.20.4
+
+theme pale:
+  slot floor -> @pale_moss_block
+  slot wall  -> @cobblestone
+
+struct hut size=5x5
+  floor mat_slot=floor
+  walls mat_slot=wall height=3
+
+$ cairn info hut.crn --editions java
+registry compatibility:  1.20.4 .. latest
+edition portability:     Java: portable: 2  degraded: 0  unsupported: 0
+buildable targets:       Java: 1.21.4 (1.20.4, 1.21 refuse)
+intended targets:        (none declared)
+semantic-sensitive:      (none)
+```
+
+`1.20.4 .. latest` reads as an answer, and the row two below disproves it — with `1.20.4` itself
+in the refusal list. The declared floor is not wrong; it is answering a different question.
+`minecraft:pale_moss_block` arriving in 1.21.4 is a fact about the pack, and this row reads only
+what the file declares.
+
+**The derivation is the `buildable targets` row**, two rows down. It weighs the source against every
+supported version and reports which ones a build would accept, per edition — the answer an
+intersection of `since` / `until` was meant to approximate, reached by asking rather than by
+inferring. It is also the shape the intersection could not take: the answer is per edition, and it
+need not be contiguous, so a `[Vmin, Vmax]` pair would have to claim a gap it cannot see.
+
+The declared floor stays a row of its own because it is a different kind of fact: an **input** the
+author wrote, which bounds what `cairn compile --target` accepts and what the file promises a
+reader, where `buildable targets` is an **output** about the packs that happen to ship.
+`E_REQUIRES_CONFLICT` ([§10.4](#104-fail-loud-and-minimum-version-inference)) is reserved for the
+day the two can be compared — a declared floor contradicting a registry-*inferred* range — and
+stays unreachable until a pack carries `since` / `until`.
 
 ### The `edition portability` row
 

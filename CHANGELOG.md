@@ -144,6 +144,48 @@
 
 ### Fixed
 
+- *(docs)* `spec/versioning-editions` described `cairn info`'s `registry compatibility` row as a
+  derivation — "the intersection of `since`/`until` over the used tokens and states" — which
+  nothing computes. The row reads back the unscoped floors the file and its instantiated parts
+  declare, and reports `latest` as the upper edge; the shipped packs carry no `since` / `until` for
+  an intersection to be taken over.
+
+  The gap is visible in one run. This source declares a floor every supported version clears, and
+  uses a block Java gained in 1.21.4:
+
+  ```text
+  $ cairn info hut.crn --editions java           # `@requires version>=1.20.4`, `@pale_moss_block`
+  registry compatibility:  1.20.4 .. latest
+  edition portability:     Java: portable: 2  degraded: 0  unsupported: 0
+  buildable targets:       Java: 1.21.4 (1.20.4, 1.21 refuse)
+  intended targets:        (none declared)
+  semantic-sensitive:      (none)
+  ```
+
+  `1.20.4 .. latest` reads as an answer about which versions build, and the row two below disproves
+  it — with `1.20.4` itself among the refusals. The declared floor is not wrong; it is answering a
+  different question, and the spec said it was answering this one.
+
+  The spec now says what it does. Axis 1's entry in the section on the three answers to "which
+  version is it for?" names the declared range, and a new "The `registry compatibility` row"
+  section sits beside the two the other rows already have: what feeds `Vmin` (the `@requires`
+  headers *and* the `requires` line of every `def` and `theme` the build instantiates), where
+  "strictest" is only a comparison of labels, the two causes of `0.0`, why `Vmax` is a literal, the
+  run above, and why the declared floor stays a row of its own rather than being folded away — it
+  is an *input* the author wrote, bounding what `cairn compile --target` accepts, where `buildable
+  targets` is an *output* about the packs that ship. `E_REQUIRES_CONFLICT` stays reserved for the
+  day the two can be compared. The ja mirror follows it.
+
+  That per-version answer is also the shape an intersection could not take: it is per edition, and
+  it need not be contiguous, so `[Vmin, Vmax]` would claim a gap it cannot see. So the derivation
+  the spec promised is already in the report, two rows down.
+
+  No behaviour changes. `info_8b_the_declared_range_is_not_an_answer_about_which_versions_build`
+  holds the claim against the shipped packs — including that the row's own lower edge is among the
+  versions the build refuses — and the stale description is cleared from the places it survived
+  outside the spec: `version_axes.rs`'s module doc, which still called axis 1 the intersection, the
+  `cairn info` renderer, `--help`, and the CLI crate's README.
+
 - *(core)* A `-> value` tail on a member that cannot emit a signal was silent through `check` and
   `compile`:
 
