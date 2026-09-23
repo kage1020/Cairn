@@ -9,7 +9,7 @@ the reference system does not fracture across editing, theming, and multi-buildi
 
 Parameterization (variable size and so on) is allowed; recursion is forbidden. A `def` may declare
 `requires version>=X`, and the minimum version of a composite is the max of its parts
-([Versioning and Editions](versioning-editions)).
+([Versioning and Editions](/spec/versioning-editions/)).
 
 ```
 def cottage class=house size=9x7:
@@ -35,7 +35,7 @@ edit door[id=entry]                   set side=front at=center
 
 Editing at the level of a concept, such as "make only the second-floor windows arched", must be
 possible without breaking the whole. Edit diffs look only at `intent_state`
-([Blockstate Model](blockstate)), so a change in derived results does not harm edit stability.
+([Blockstate Model](/spec/blockstate/)), so a change in derived results does not harm edit stability.
 
 ## 9.3 Multi-building with `site`
 
@@ -55,7 +55,7 @@ past the structure block's 48³ limit are expressed as a composition of several 
 ### 9.3.1 Coordinate convention
 
 `east` advances along `+x` and `north` retreats along `-z`. This matches "front is `+z`" from
-[§5.4](syntax#54-selectors): a building whose `front` faces south sits with its facade on `+z`, and
+[§5.4](/spec/syntax/#54-selectors): a building whose `front` faces south sits with its facade on `+z`, and
 `north_of=X` puts the next placement behind it.
 
 The Y axis is unaffected by topological selectors; every placement currently lands at `y = 0`.
@@ -75,7 +75,7 @@ Combining selectors, or using `at=` with anything other than `origin`, is
 
 `gap=` belongs to the two relative selectors. An `at=origin` row is anchored absolutely and reads
 no distance, so a `gap=` written beside it is read by nothing and reported as `W_IGNORED_ARGUMENT`
-([Lint §11.3](lint#113-error-vs-warning)) — the argument is real, and which of the two the author
+([Lint §11.3](/spec/lint/#113-error-vs-warning)) — the argument is real, and which of the two the author
 meant is theirs to say.
 
 ### 9.3.3 Cross-scope references
@@ -117,7 +117,7 @@ for a future extension.
 `front` / `back` / `left` / `right` map to `+z` / `-z` / `-x` / `+x` ([§9.3.1](#931-coordinate-convention)).
 The wall-local offset comes from:
 
-- a `door`'s `at=` value of `center`, `left`, or `right` ([§5.4](syntax#54-selectors)). Numeric
+- a `door`'s `at=` value of `center`, `left`, or `right` ([§5.4](/spec/syntax/#54-selectors)). Numeric
   offsets are reserved.
 - a `window`'s geometric centre, `offset + size.w / 2`.
 

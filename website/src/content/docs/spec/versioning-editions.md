@@ -5,7 +5,7 @@ title: "10. Versioning and Edition Strategy"
 ## 10.1 The target is a compile-time parameter
 
 The target is the pair `(edition, version)`, and neither is written in the source. Only the backend
-knows them ([Compilation Model](compilation)).
+knows them ([Compilation Model](/spec/compilation/)).
 
 **Version strings are opaque labels.** A Minecraft version may be the legacy semver-ish `1.21.4` or,
 from the latest release onward, date-based. Cairn does not compare version strings; it orders by
@@ -217,7 +217,7 @@ source itself rules out.
 
 ### The hint is weighed against the floor
 
-`@intended_targets` ([§5.3](syntax#53-headers)) is a wish rather than a verification record, and the
+`@intended_targets` ([§5.3](/spec/syntax/#53-headers)) is a wish rather than a verification record, and the
 floor above it is a constraint. A file may state both in a way that cannot hold — `@requires
 version>=1.21` beside `@intended_targets ["1.20.4"]` — and before the floor was enforced that was
 two inert statements. Now one of them decides a build and the other does not, which is the worst
@@ -769,5 +769,5 @@ portability.
 The `(edition, version)` axis above covers what Cairn *emits*. The orthogonal axis is what Cairn
 promises about its own evolution: `.crn` syntax, the lockfile, the CLI flags, the Rust API. CalVer
 has no "major" axis to read those promises off, so they are spelled out in
-[Compatibility Tiers](compatibility). A `Stable` surface gives one release of `W_DEPRECATED` lead
+[Compatibility Tiers](/spec/compatibility/). A `Stable` surface gives one release of `W_DEPRECATED` lead
 time; an `Evolving` surface can change in any monthly minor; `Internal` makes no promise.

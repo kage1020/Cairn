@@ -50,19 +50,17 @@ English is the source of truth for the specification; Japanese pages are seconda
 pnpm install        # once
 pnpm dev            # astro dev at http://localhost:4321/
 pnpm check          # astro check — types in astro.config.mjs and src/
-pnpm build          # astro build → ./dist, and validates every internal link
+pnpm build          # astro build → ./dist, and resolves every internal link
 pnpm preview        # serves ./dist
 ```
 
-`pnpm check` and `pnpm build` answer different questions and CI runs both. The build does not
-type-check anything; the checker does not render a page, so it cannot see a link. Link validation is
-a build hook, which is why a dead link fails `pnpm build` rather than `pnpm check`.
+`pnpm check` and `pnpm build` answer different questions and CI runs both. The build does not type-check anything; the checker does not render a page, so it cannot see a link. Link validation is a build hook, which is why a dead link fails `pnpm build` rather than `pnpm check`.
 
 ## Editing content
 
 - Every chapter is a plain `.md` (or `.mdx` for the landing pages and playground placeholder) with Starlight YAML frontmatter. Add `title:` and an optional `description:` and you are done.
-- Internal cross-chapter links use extensionless URLs (`[overview](./overview)`) — Astro's content layer rewrites them at build time. `pnpm build` resolves every one of them, and every `#anchor` fragment, against the pages it just rendered; a link to a page or a heading that does not exist fails the build rather than shipping.
-- A heading's anchor is its slug, so renaming one breaks every link that names it — in the `ja/` tree as well as the `en` one. The slug is not always what the heading looks like: `10.4` becomes `104-`, and a `、` is dropped without leaving a hyphen.
+- Internal links are **root-absolute** and carry a trailing slash: `[Overview](/spec/overview/)`, `[概要](/ja/spec/overview/)`. Astro does not rewrite a link's href, so whatever is written is what ships, and the site canonicalises to a trailing slash — which makes a relative link a broken link. `](lint)` written in `spec/syntax.md` is served from `/spec/syntax/` and resolves to `/spec/syntax/lint`, a 404. The build refuses a relative link for that reason, and resolves every root-absolute one, and every `#anchor` fragment, against the pages it just rendered.
+- A heading's anchor is its slug, so renaming one breaks every link that names it — in the `ja/` tree as well as the `en` one. The slug is not always what the heading looks like: `10.4` becomes `104-`, and a `、` is dropped without leaving a hyphen. The build resolves these too, across pages as well as within one.
 - Japanese pages live under `src/content/docs/ja/` mirroring the English layout. The sidebar in `astro.config.mjs` uses `translations: { ja: "…" }` so a single sidebar definition serves both locales.
 
 ## Deploying

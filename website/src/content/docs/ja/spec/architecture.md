@@ -18,19 +18,19 @@ block-array IR                   ボクセル格子 + パレット + block entit
 起こります。ボクセル格子、パレット、block entities、entities を保持し、フォーマット・エディション・
 バージョンに対して中立です。
 
-順方向の出力先であり、逆方向の入力先でもあります ([エコシステム連携](ecosystem-interop))。
+順方向の出力先であり、逆方向の入力先でもあります ([エコシステム連携](/ja/spec/ecosystem-interop/))。
 
 ## 3.2 Intent IR は豊かで、不変条件を運ぶ
 
 名前付きメンバは `id` / `class` / `role` / `mat_slot` / `intent_state` / `resolved_state` を持ちます
-([ブロックステート](blockstate))。
+([ブロックステート](/ja/spec/blockstate/))。
 
 raw なインポートは有効な Intent IR を生みません。意味的なリフトを経てはじめて到達します。その途上に
 おける成果物の進捗は `semantic_level: raw | grouped | lifted` で表します。
 
 ## 3.3 レッドストーンのサブ層
 
-レッドストーンを論理的に記述すると ([レッドストーン](redstone))、Intent IR と block-array IR の間に
+レッドストーンを論理的に記述すると ([レッドストーン](/ja/spec/redstone/))、Intent IR と block-array IR の間に
 役割の異なる 3 つの IR 層が入ります。HDL と同じ分け方です。
 
 ```

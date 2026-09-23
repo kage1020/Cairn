@@ -4,7 +4,7 @@ title: "11. Lint and Constraint Validation"
 
 The compiler reports warnings and errors with line numbers. Every message MUST carry the
 self-correction triple: **what is wrong / valid candidates in the target / a suggested fix**. That
-shape is what feeds the loop in [Evaluation Framework](evaluation).
+shape is what feeds the loop in [Evaluation Framework](/spec/evaluation/).
 
 ## 11.1 Diagnostic codes
 
@@ -15,8 +15,8 @@ reader with a code in hand needs to find, and the chapter is where the behaviour
 
 The redstone pipeline's `E_LOGIC_*` / `W_LOGIC_*` codes are outside that promise. They are reachable
 only through `cairn synth --experimental-logic-synth`, which is Internal tier
-([Compatibility](compatibility)) — nothing about those strings is guaranteed, so a row here would
-state a contract that does not exist. [Redstone and Logic](redstone) names the ones its own rules
+([Compatibility](/spec/compatibility/)) — nothing about those strings is guaranteed, so a row here would
+state a contract that does not exist. [Redstone and Logic](/spec/redstone/) names the ones its own rules
 turn on.
 
 ### Duplicates
@@ -34,7 +34,7 @@ turn on.
 `E_DUPLICATE_SELECTOR` compares selectors by meaning, not by text: attribute order does not count,
 and `class=` / `id=` / `mat_slot=` compare as label text, so `small` and `"small"` are one value.
 Rows that bind *different* keys compose and are not reported. Neither are rows whose attributes
-partly overlap (see [Materials and Themes §7.1](materials-themes#71-slots-as-dependency-injection)).
+partly overlap (see [Materials and Themes §7.1](/spec/materials-themes/#71-slots-as-dependency-injection)).
 
 `E_DUPLICATE_ITEM` treats `theme` / `def` / `struct` / `site` as four separate namespaces, so one
 name may appear once in each. For the first three the first declaration resolves and the rest bind
@@ -43,7 +43,7 @@ namespace: every place with a distinct `id=` still builds, only a repeated `id=`
 `east_of=` does not reach across the blocks.
 
 `E_DUPLICATE_HEADER` covers `@cairn` and `@intended_targets`. `@requires` is excluded: its floors
-compose to the strictest across every line, so a second one adds a constraint ([§5.3](syntax#53-headers)).
+compose to the strictest across every line, so a second one adds a constraint ([§5.3](/spec/syntax/#53-headers)).
 
 ### Syntax and structure
 
@@ -53,15 +53,15 @@ compose to the strictest across every line, so a second one adds a constraint ([
 | `E_UNKNOWN_KEYWORD` | The statement keyword is not in the known-keyword table. |
 | `E_UNKNOWN_ARGUMENT` | A `key=` outside the vocabulary of the member's keyword, written as an argument or inside the member's own `[key=value]`. |
 | `W_IGNORED_ARGUMENT` | A `key=` inside that vocabulary that no pass read on the line it was written on. |
-| `E_MISPLACED_BINDING` | A `-> value` tail on a member whose keyword cannot emit a signal ([§14.2](redstone#142-signal-binding)). |
+| `E_MISPLACED_BINDING` | A `-> value` tail on a member whose keyword cannot emit a signal ([§14.2](/spec/redstone/#142-signal-binding)). |
 | `E_MISPLACED_MEMBER` | The keyword is known, but the enclosing body has no reader for it. |
-| `E_UNEXPECTED_POSITIONAL` | A bare value on a line that reads none ([§5.1](syntax#51-lexical)). |
+| `E_UNEXPECTED_POSITIONAL` | A bare value on a line that reads none ([§5.1](/spec/syntax/#51-lexical)). |
 | `E_UNSUPPORTED_NESTING` | A member carries an indented body that nothing reads. |
 | `E_TYPE_MISMATCH_LABEL` | A label-typed key's value is not an identifier or string. |
 | `E_TYPE_MISMATCH_SIZE` | A `size=` value is not a `WxH` literal. |
 | `E_CONNECT_ARITY` | A `connect` row's shape is not `FROM.PORT to TO.PORT`. |
-| `E_INVALID_REQUIRES` | A `requires` expression that is not a version floor, written as the `@requires` header or as a `def` / `theme` body line ([§5.3](syntax#53-headers)). |
-| `W_INVALID_CAIRN_VERSION` | An `@cairn` value that is not a `YYYY.M[.PATCH]` language version ([§5.3](syntax#53-headers)). |
+| `E_INVALID_REQUIRES` | A `requires` expression that is not a version floor, written as the `@requires` header or as a `def` / `theme` body line ([§5.3](/spec/syntax/#53-headers)). |
+| `W_INVALID_CAIRN_VERSION` | An `@cairn` value that is not a `YYYY.M[.PATCH]` language version ([§5.3](/spec/syntax/#53-headers)). |
 | `W_FUTURE_CAIRN_VERSION` | An `@cairn` value naming a language version later than the compiler reading it. |
 
 `E_MISPLACED_MEMBER` fires on a `place` / `connect` inside a `struct` or `def`, or a geometry
@@ -87,7 +87,7 @@ in a `u32`, a `-` with no readable pre-release tag after it, and text after the 
 *not* cover a well-formed label the target edition has no `DataVersion` for — that is
 `E_REQUIRES_UNORDERABLE`, and it is not a syntax fact. Both spellings of the floor are checked, and
 by the same rule: the `@requires` header, and the member-level `requires` line a `def` or a `theme`
-may carry ([§10.4](versioning-editions#a-part-may-declare-its-own-floor)). A part no build
+may carry ([§10.4](/spec/versioning-editions/#a-part-may-declare-its-own-floor)). A part no build
 instantiates is checked too — the mistake is in the line, not in whether anything reads it.
 
 `W_INVALID_CAIRN_VERSION`: the accepted shape is `YYYY.M` or `YYYY.M.PATCH` — a four-digit year, a
@@ -127,22 +127,22 @@ version to compare.
 | Code | Meaning |
 |---|---|
 | `E_UNKNOWN_ID` | A resolved block ID the pinned target does not declare. |
-| `E_VERSION_CAP` | `--target` is below an `@requires` floor the source declares ([versioning-editions §10.4](versioning-editions)). |
-| `E_REQUIRES_UNORDERABLE` | An `@requires` floor names a version the target edition's `DataVersion` table cannot place ([versioning-editions §10.4](versioning-editions)). |
+| `E_VERSION_CAP` | `--target` is below an `@requires` floor the source declares ([versioning-editions §10.4](/spec/versioning-editions/)). |
+| `E_REQUIRES_UNORDERABLE` | An `@requires` floor names a version the target edition's `DataVersion` table cannot place ([versioning-editions §10.4](/spec/versioning-editions/)). |
 | `E_INTENDED_TARGET_CAP` | Every version `@intended_targets` names is below a floor the same file declares. |
 | `W_INTENDED_TARGET_CAP` | Some, not all, of them are. |
 | `W_INTENDED_TARGET_UNSUPPORTED` | `@intended_targets` names a version no `--target` of the edition can build. |
 | `E_INCOMPATIBLE_MATERIAL` | A member whose geometry attaches blockstates is bound to a material that cannot carry them. |
 | `E_MISSING_MATERIAL` | A member whose only route to a block is `mat_slot=` was written without one. |
 | `E_UNRESOLVED_SLOT` | A member's `mat_slot=` names a slot the bound theme does not declare. |
-| `E_UNKNOWN_SLOT_TARGET` | A `slot NAME -> VALUE` whose value is neither a canonical nor an abstract material token ([Materials and Themes](materials-themes)). |
+| `E_UNKNOWN_SLOT_TARGET` | A `slot NAME -> VALUE` whose value is neither a canonical nor an abstract material token ([Materials and Themes](/spec/materials-themes/)). |
 | `E_THEME_SELECTOR_UNMATCHED` | A `theme` selector row that matches no member in the file. |
 | `E_THEME_VARIANT_MISSING` | The pinned edition can bind none of a theme's per-edition variants. |
-| `E_INCOMPLETE_PLACE` | A `place` row omits `id=`, `use=`, or `theme=` ([§9.3](components-editing-sites#93-multi-building-with-site)). |
-| `E_UNKNOWN_ABSTRACT_TOKEN` | A `mat_slot=` resolves to an abstract material token the offered pack's catalog does not declare ([Materials and Themes](materials-themes)). |
+| `E_INCOMPLETE_PLACE` | A `place` row omits `id=`, `use=`, or `theme=` ([§9.3](/spec/components-editing-sites/#93-multi-building-with-site)). |
+| `E_UNKNOWN_ABSTRACT_TOKEN` | A `mat_slot=` resolves to an abstract material token the offered pack's catalog does not declare ([Materials and Themes](/spec/materials-themes/)). |
 | `W_ABSTRACT_TOKEN_DEFERRED` | The same token with no catalog offered at all, so there is nothing to lift it against. |
 | `W_NO_THEME_BOUND` | A scope has no theme bound to it, so every `mat_slot=` member in it lowers to air. |
-| `W_THEME_VARIANT_REBOUND` | A `place theme=` names one edition's variant and the pinned edition bound a different one ([Versioning and Editions](versioning-editions)). |
+| `W_THEME_VARIANT_REBOUND` | A `place theme=` names one edition's variant and the pinned edition bound a different one ([Versioning and Editions](/spec/versioning-editions/)). |
 
 `E_UNKNOWN_ID` and `E_INCOMPATIBLE_MATERIAL` are raised during block-array lowering, so only the
 commands that lower report them: `cairn compile`, `cairn lower`, `cairn info`, and `cairn check
@@ -155,16 +155,16 @@ reaches neither code.
 lowering-stage findings a compile would refuse on: an id the target does not declare passed
 `check` at exit 0 and stopped `cairn compile` at exit 1, and the information that decides it — the
 one `(edition, version)` pair — was not on `check`'s command line. It requires `--edition` for the
-reason [Compilation Model §4.2](compilation#42-target-axes) refuses `--target` alone, and runs the
+reason [Compilation Model §4.2](/spec/compilation/#42-target-axes) refuses `--target` alone, and runs the
 same lowering pass against the same table `compile` does, so a lost scope earns the same
 `E_PARTIAL_BUILD`. What it does not do is anything `compile` writes: no artifact, no lockfile, and
 no `@requires` floor enforcement — a lock certifies a build, and only the command that produces
 one holds `--target` to the floors (`E_VERSION_CAP`). Leaving the flag off is unchanged behaviour,
 so no source that passes today starts failing. See
-[Versioning and Editions §10.4](versioning-editions#104-fail-loud-and-minimum-version-inference).
+[Versioning and Editions §10.4](/spec/versioning-editions/#104-fail-loud-and-minimum-version-inference).
 
 `E_INCOMPATIBLE_MATERIAL` today means a sloped roof or an eave `stair` bound outside the stair
-family ([Compilation Model §4.3](compilation#43-gable-roof-voxel-rules)).
+family ([Compilation Model §4.3](/spec/compilation/#43-gable-roof-voxel-rules)).
 
 `E_THEME_VARIANT_MISSING` fires only under `--edition`, and is reported **once per logical theme**
 however many scopes read it, since they all want the same edit in the same `theme` block. Every
@@ -174,7 +174,7 @@ placement naming it is still refused. A module that declares such a theme but ne
 `E_THEME_SELECTOR_UNMATCHED` is a warning despite its prefix. A rule that matches nothing overrides
 nothing, so every member keeps the material it would have had with the rule deleted; the finding is
 about the author's intent rather than about what was built. The prefix is part of the code string,
-which is Stable ([Compatibility Tiers](compatibility)), so it stays as written — read severity from
+which is Stable ([Compatibility Tiers](/spec/compatibility/)), so it stays as written — read severity from
 the `severity` field rather than from the first letter.
 
 `E_UNKNOWN_SLOT_TARGET` is an error on the opposite test: a slot bound to nothing lowers every
@@ -204,7 +204,7 @@ two of them can bind the same theme and still judge the slot differently.
 The difference is edition-variant softening. Without an `--edition` pin, a slot that any sibling
 variant of the picked theme declares counts as known and is not reported: the concrete binding is
 edition-specific and comes into scope only once a pin narrows the theme to one variant
-([Versioning and Editions §10.7](versioning-editions#107-java--bedrock-portability)). A
+([Versioning and Editions §10.7](/spec/versioning-editions/#107-java--bedrock-portability)). A
 `place ... theme=NAME` is softened the same way only when `NAME` names the logical theme — naming
 a variant asks about that variant's slots alone. Two placements can therefore bind one theme and
 disagree about one slot.
@@ -228,14 +228,14 @@ all has no slot map to read, so the member contributes no voxel. A module that b
 reads no `mat_slot=` is not reported.
 
 The three `@intended_targets` codes weigh the file's stated intent against its own floor
-([versioning-editions §10.4](versioning-editions#the-hint-is-weighed-against-the-floor)). A version
+([versioning-editions §10.4](/spec/versioning-editions/#the-hint-is-weighed-against-the-floor)). A version
 the edition cannot build is `W_INTENDED_TARGET_UNSUPPORTED` and is not also weighed against a floor:
 "this target does not exist here" is what the author acts on, and a cap beside it would send them to
 edit a line that is not what stops the build. The rest — the versions the edition *can* build — are
 counted among themselves: *every* one of them below a floor is `E_INTENDED_TARGET_CAP`, since the
 file can then be built for nothing it says it is for and the first `cairn compile --target` naming
 any of them is `E_VERSION_CAP`, while *some* of them is `W_INTENDED_TARGET_CAP`, because the header
-is a hint ([§5.3](syntax#53-headers)) and the versions above the floor still build. A version that
+is a hint ([§5.3](/spec/syntax/#53-headers)) and the versions above the floor still build. A version that
 was never buildable is not in that count either way: it answers for none of the list, and letting it
 would report a file nothing can build as half a problem. One header can earn a cap code and the
 unsupported code at once; the versions it names are not all wrong in the same way.
@@ -256,7 +256,7 @@ author means, so with both in scope the question has not been asked.
 |---|---|
 | `E_INVALID_PLACE_ID` | A `place id=` is empty or carries `.`, `:` or whitespace. |
 | `E_DUPLICATE_PLACE_ID` | Two `place` rows in one site share an `id=`. |
-| `E_INVALID_PLACE_ORIGIN` | A `place` carries an `at=` other than `origin`, or combines `at=` with `east_of=` / `north_of=` ([§9.3](components-editing-sites#93-multi-building-with-site)). |
+| `E_INVALID_PLACE_ORIGIN` | A `place` carries an `at=` other than `origin`, or combines `at=` with `east_of=` / `north_of=` ([§9.3](/spec/components-editing-sites/#93-multi-building-with-site)). |
 | `E_UNRESOLVED_PLACE_REF` | A `place use=`, an `east_of=` / `north_of=`, or a `connect` endpoint names a place or def that does not exist. |
 | `E_UNRESOLVED_THEME_REF` | A `place theme=` names a theme the module does not declare. |
 | `W_UNUSED_DEF` | A `def` no `place use=` references. |
@@ -312,7 +312,7 @@ the author to a line that is correct.
 | `W_STRUCT_NO_SIZE` | A `struct` declares no `size=WxH`, so lowering can derive no extent and skips it. |
 | `W_DEF_NO_SIZE` | The same on a `def`, so every `place use=` of it is skipped. |
 | `W_STRUCTURE_TOO_LARGE` | A scope's derived extent exceeds the volume the block-array pass will allocate for. |
-| `W_PHASE_CONFLICT` | Two members in one phase wrote one voxel to different blocks ([§4.4](compilation)). |
+| `W_PHASE_CONFLICT` | Two members in one phase wrote one voxel to different blocks ([§4.4](/spec/compilation/)). |
 | `E_PARTIAL_BUILD` | At least one requested scope did not lower, so the run produced less than was asked for. |
 
 `W_STRUCT_NO_SIZE` and `W_DEF_NO_SIZE` are one rule split by what carries it, so a filter matching
@@ -331,7 +331,7 @@ a scope builds without something, and this says a scope the command was asked fo
 all. It is reported once for the run, naming how many of the requested scopes were lost, by
 `cairn compile` and by a `cairn check --edition E --target V` that runs the same lowering pass.
 
-`W_PHASE_CONFLICT` is last-wins reported rather than refused. [Compilation Model](compilation)
+`W_PHASE_CONFLICT` is last-wins reported rather than refused. [Compilation Model](/spec/compilation/)
 grants last-wins to local overrides within one phase, which is what an author restating a member
 is; two footprints that happen to intersect is not, and the grid cannot tell the two apart. The
 resolution the spec mandates still happens — the finding says which voxel it happened at.
@@ -363,9 +363,9 @@ Beyond the codes above, lint covers:
 | **entity_aabb** | Entities not clipping walls or paths, not blocking a door's swing, not cramming. |
 | **support** | Hanging lanterns, torches, campfires, and gravity blocks such as gravel. |
 | **fluid** | Consistency of water source, flow, and `waterlogged`. |
-| **version_caps / parity** | Whether a state or entity schema is usable in the target ([Versioning and Editions](versioning-editions)). |
+| **version_caps / parity** | Whether a state or entity schema is usable in the target ([Versioning and Editions](/spec/versioning-editions/)). |
 | **edit_stability** | Whether an `intent_state` change ripples into an unrelated member's `resolved_state`. |
-| **redstone** | Per-tick simulation against the declared truth table and temporal assertions; timing conflicts, QC dependence, routing congestion ([Redstone](redstone)). |
+| **redstone** | Per-tick simulation against the declared truth table and temporal assertions; timing conflicts, QC dependence, routing congestion ([Redstone](/spec/redstone/)). |
 | **AABB interference** | On overlap, priority-merge or reject. Boundary blockstate re-resolution is the IR layer's job. |
 
 ### "did you mean"
@@ -460,7 +460,7 @@ names are one block, so a quick-fix may apply an alias unasked and should not ap
 It holds every ID the target declares for that block — the closed set, never a pick from it — in
 the pack's own order, and is absent when the pack names none. The rendered note prints the first
 few and counts the rest; the payload is where the whole set lives. See
-[Versioning and Editions §10.4](versioning-editions#104-fail-loud-and-minimum-version-inference).
+[Versioning and Editions §10.4](/spec/versioning-editions/#104-fail-loud-and-minimum-version-inference).
 
 `E_INCOMPATIBLE_MATERIAL` follows the same idea: `slot` is the `mat_slot=` name the member read and
 is absent when it carries no binding, and a dotted `token` (`roof.dark_wood`) means the pack's
@@ -562,7 +562,7 @@ left over. The message names both sites and picks neither.
 An arm of that axis can also be the selector's *absence*, where that is itself a rule rather than a
 mistake. `place gap=` is the case: a row with no `at=` is placed relative to another and reads the
 distance, and `at=origin` is anchored absolutely and does not, so `at=origin gap=5` is the same
-silent drop ([§9.3.2](components-editing-sites#932-origin-selectors)).
+silent drop ([§9.3.2](/spec/components-editing-sites/#932-origin-selectors)).
 
 Where the **selector** names no rule at all — a value the dispatch does not know, or, on an axis
 with no absent arm, nothing written — no finding is raised here: that member lowers to nothing and
@@ -575,14 +575,14 @@ is a condition on a count rather than on a rule.
 
 `E_MISPLACED_BINDING` is the fourth field of a member line asked the same question the other three
 are: is this word read by anything. A `-> value` tail is read by exactly one thing — the sensor set
-of [§14.2](redstone#142-signal-binding) — so a tail on a member that is not a sensor is carried into
+of [§14.2](/spec/redstone/#142-signal-binding) — so a tail on a member that is not a sensor is carried into
 the IR and dropped, and the signal it names is emitted by nothing. It is an **error** on the same
 test `E_UNKNOWN_ARGUMENT` meets: the build differs from the source, and no edit to the value
 repairs it.
 
 Only the host is asked here, because only the host can be asked without the Logic IR. Whether the
 tail's value names a signal, and whether that signal is driven twice or by nobody, are questions the
-redstone pipeline answers ([§14.2](redstone#142-signal-binding)) — and the host is asked first, so a
+redstone pipeline answers ([§14.2](/spec/redstone/#142-signal-binding)) — and the host is asked first, so a
 tail on a member that cannot emit earns this code and not also the value's. A member whose keyword
 is not in the known-keyword table is left to `E_UNKNOWN_KEYWORD`, which is why `lever -> sig.a` —
 a sensor this specification lists and the surface has not reached — is not told its host is wrong.
@@ -590,5 +590,5 @@ a sensor this specification lists and the surface has not reached — is not tol
 ## 11.4 Constraint catalog
 
 In-game constraints are cataloged and managed per version: gravity blocks, attachment conditions,
-fluid flow, and disallowed attachment combinations ([Versioning and Editions](versioning-editions)).
+fluid flow, and disallowed attachment combinations ([Versioning and Editions](/spec/versioning-editions/)).
 "A frame cannot hang on glass" lives there.

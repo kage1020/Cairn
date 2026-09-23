@@ -12,29 +12,29 @@ and aligns architectural knowledge (walls, roofs, symmetry) with the voxel world
 
 | # | Chapter | Contents |
 |---|---|---|
-| 1 | [Purpose and Scope](overview) | Purpose, scope, non-goals |
-| 2 | [Design Principles](principles) | P1–P5 |
-| 3 | [Architecture](architecture) | Three-layer IR, block-array pivot |
-| 4 | [Compilation Model](compilation) | Phase evaluation, target axes, roof lowering |
-| 5 | [Syntax](syntax) | Lexical rules, `key=value`, selectors, headers |
-| 6 | [Blockstate Model](blockstate) | Derivation and override, intent vs resolved, waterlogged |
-| 7 | [Materials and Themes](materials-themes) | Slots, canonical vocabulary, themes |
-| 8 | [Entities](entities) | Two-tier entity model, anchor conventions |
-| 9 | [Components, Editing, and Multi-building](components-editing-sites) | `def`, editing, `site` |
-| 10 | [Versioning and Editions](versioning-editions) | Target strategy, lock, portability |
-| 11 | [Lint](lint) | Diagnostic codes and constraint validation |
-| 12 | [Ecosystem Interop](ecosystem-interop) | Import, reverse conversion |
-| 13 | [Evaluation Framework](evaluation) | How the spec is iterated |
-| 14 | [Redstone](redstone) | Logic circuits |
-| 15 | [Open Issues](open-issues) | What is still undecided |
-| — | [Compatibility Tiers](compatibility) | Stable / Evolving / Internal, per public surface |
-| — | [Glossary](glossary) | Defined terms, cross-chapter |
+| 1 | [Purpose and Scope](/spec/overview/) | Purpose, scope, non-goals |
+| 2 | [Design Principles](/spec/principles/) | P1–P5 |
+| 3 | [Architecture](/spec/architecture/) | Three-layer IR, block-array pivot |
+| 4 | [Compilation Model](/spec/compilation/) | Phase evaluation, target axes, roof lowering |
+| 5 | [Syntax](/spec/syntax/) | Lexical rules, `key=value`, selectors, headers |
+| 6 | [Blockstate Model](/spec/blockstate/) | Derivation and override, intent vs resolved, waterlogged |
+| 7 | [Materials and Themes](/spec/materials-themes/) | Slots, canonical vocabulary, themes |
+| 8 | [Entities](/spec/entities/) | Two-tier entity model, anchor conventions |
+| 9 | [Components, Editing, and Multi-building](/spec/components-editing-sites/) | `def`, editing, `site` |
+| 10 | [Versioning and Editions](/spec/versioning-editions/) | Target strategy, lock, portability |
+| 11 | [Lint](/spec/lint/) | Diagnostic codes and constraint validation |
+| 12 | [Ecosystem Interop](/spec/ecosystem-interop/) | Import, reverse conversion |
+| 13 | [Evaluation Framework](/spec/evaluation/) | How the spec is iterated |
+| 14 | [Redstone](/spec/redstone/) | Logic circuits |
+| 15 | [Open Issues](/spec/open-issues/) | What is still undecided |
+| — | [Compatibility Tiers](/spec/compatibility/) | Stable / Evolving / Internal, per public surface |
+| — | [Glossary](/spec/glossary/) | Defined terms, cross-chapter |
 
 ## Conventions
 
 - Requirement words **MUST / SHOULD / MUST NOT / OPTIONAL** are used in the RFC 2119 sense.
 - The language is **Cairn**, the CLI is `cairn`, and source files use `.crn`.
-- Design principles are referenced as `P1`–`P5` (see [Design Principles](principles)).
+- Design principles are referenced as `P1`–`P5` (see [Design Principles](/spec/principles/)).
 
 ## Two version axes
 
@@ -57,4 +57,4 @@ In prose, disambiguate with a prefix: `cairn:2026.06` and `mc:1.21.4`.
 This document is **2026.6 (draft)**, superseding the former `v0.2` label. A `.crn` file MAY declare
 `@cairn 2026.06`, the language version it was written against. It is provenance only, so a future
 compiler can parse and warn correctly — which is why the value is checked to be a `CalVer` even
-though no pass branches on it. See [Syntax §5.3](syntax#53-headers).
+though no pass branches on it. See [Syntax §5.3](/spec/syntax/#53-headers).

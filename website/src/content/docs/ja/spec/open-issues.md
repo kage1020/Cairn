@@ -6,11 +6,11 @@ title: "15. 未決事項"
 
 **provenance をどこに置くか。** `.crn` のヘッダか、ロックか。暫定方針は「`.crn` はヒントである
 `@intended_targets` だけを持ち、`verified` のような記録はコンパイラがロックに書く」です
-([バージョンとエディション](versioning-editions))。
+([バージョンとエディション](/ja/spec/versioning-editions/))。
 
 **逆方向 IR の型。** 縮退できる単一の IR にするか、Intent IR と Raw Geometry IR を別の型にするか。
 暫定方針は「block-array 層は共有し、その上のメンバ層で型を分ける」です
-([アーキテクチャ](architecture))。
+([アーキテクチャ](/ja/spec/architecture/))。
 
 **レガシー `.schematic`** (1.13 以前) は v1 では未対応です。数値 ID のマッピングは、将来オプションと
 して検討する余地があります。
@@ -21,7 +21,7 @@ title: "15. 未決事項"
 `level id=floor2 y=4` のような階ごとのローカル `y=0` を導入するか。
 
 **プリミティブの昇格。** 寄棟・陸屋根・ピラミッド屋根、柱、アーチ、`repeat` などを意味プリミティブに
-昇格させるか。判断は [評価フレームワーク](evaluation) の実験データに基づきます。
+昇格させるか。判断は [評価フレームワーク](/ja/spec/evaluation/) の実験データに基づきます。
 
 **内装。** `inside.front` の接頭辞で足りるのか、より上位の `room` 概念が要るのか。また、家具を `def`
 ライブラリで賄えるのか。

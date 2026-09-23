@@ -166,11 +166,19 @@ export default defineConfig({
       },
       sidebar,
       customCss: ["./src/styles/cairn.css"],
-      // `astro build` resolves neither of these: a dead cross-chapter link
-      // and a dead `#anchor` both build green without it. The spec chapters
-      // link to each other by heading, and `ja/` mirrors `en/` page for
-      // page, so a renamed heading breaks links in two trees at once.
-      plugins: [starlightLinksValidator({ errorOnRelativeLinks: false })],
+      // `astro build` resolves no link at all: a dead cross-chapter link and
+      // a dead `#anchor` both build green without this. The spec chapters
+      // link to each other by heading, and `ja/` mirrors `en/` page for page,
+      // so a renamed heading breaks links in two trees at once.
+      //
+      // Left at its defaults, which includes erroring on a relative link.
+      // That is not a style rule here: Astro emits an extensionless relative
+      // `href` verbatim, and the site canonicalises to a trailing slash, so
+      // `](lint)` written in `spec/syntax.md` is served from `/spec/syntax/`
+      // and resolves to `/spec/syntax/lint` — a 404. A relative link on this
+      // site is a broken link, and the validator skips relative links rather
+      // than resolving them, so refusing them is what keeps the rest honest.
+      plugins: [starlightLinksValidator()],
     }),
   ],
 });

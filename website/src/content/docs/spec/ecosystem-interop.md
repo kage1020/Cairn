@@ -5,7 +5,7 @@ title: "12. Ecosystem Interop and Reverse Conversion"
 ## 12.1 Forward direction
 
 Serializing the block-array IR emits `.nbt`, `.litematic`, `.schem`, and `.mcstructure`
-([Architecture](architecture)). Each format is a serializer, and existing formats are additional
+([Architecture](/spec/architecture/)). Each format is a serializer, and existing formats are additional
 backends around the pivot.
 
 ## 12.2 Reverse direction: the compiler transliterates, an LLM lifts
@@ -55,7 +55,7 @@ window id=front_windows side=front mat_slot=glass repeat=5 ...
 
 On import, the `(edition, version)` pair and provenance are stamped onto the block-array IR —
 `.litematic` → java, `.mcstructure` → bedrock, `.schem` → java. This is what connects import to
-reproducibility ([Versioning and Editions](versioning-editions)).
+reproducibility ([Versioning and Editions](/spec/versioning-editions/)).
 
 **Never present import as "recovering author intent."** That is the biggest pitfall. Only voxels
 and some regularity can be recovered, and the CLI says so with `W_SEMANTIC_LOSS`.
@@ -67,10 +67,10 @@ Other rules:
 - Litematica's multiple regions and sub-region offsets are preserved as provenance rather than
   flattened, and regions map to a `site` or several structs.
 - For entity-bearing schematics, do not mark success on block IoU alone. Keep a separate entity
-  metric and extract only first-class entities ([Entities](entities)). Chest contents and command
+  metric and extract only first-class entities ([Entities](/spec/entities/)). Chest contents and command
   blocks are dropped.
 - Huge schematics (over 48³, or whole villages) blow up LLM context if lifted at once. They need an
   orchestration of chunk split → per-chunk L1 → per-part lift → join with `site`, over a streaming
   parse.
 - Legacy numeric-ID `.schematic` files from before 1.13 flattening are not supported in v1
-  ([Purpose and Scope](overview)).
+  ([Purpose and Scope](/spec/overview/)).

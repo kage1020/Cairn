@@ -6,13 +6,13 @@ title: "2. Design Principles"
 
 The author declares meaning; the compiler derives blockstate. Two layers, meaning and blockstate,
 do not scale to `def`, themes, and multi-building, so the model is a three-layer IR with named
-members. See [Architecture](architecture).
+members. See [Architecture](/spec/architecture/).
 
 ## P2. A phase-ordered canvas
 
 Whole-program last-wins, the "paint model", produces order-dependent accidents, so it is dropped.
 Commands are sorted into implicit phases and evaluated in a fixed order, and last-wins is restricted
-to local overrides within one phase. See [Compilation Model](compilation).
+to local overrides within one phase. See [Compilation Model](/spec/compilation/).
 
 ## P3. A small closed vocabulary, with an escape hatch
 
@@ -23,10 +23,10 @@ directives.
 ## P4. Relative, semantic positioning
 
 Position by wall selectors rather than by absolute coordinates. Blocks, block entities, and entities
-share one selector grammar. See [Syntax](syntax).
+share one selector grammar. See [Syntax](/spec/syntax/).
 
 ## P5. The lint loop is part of the spec
 
 The compiler is both a translator and an architectural linter. The form and granularity of error
 reporting are designed as first-class concerns, because precision is earned through a loop rather
-than through one-shot generation. See [Lint](lint).
+than through one-shot generation. See [Lint](/spec/lint/).

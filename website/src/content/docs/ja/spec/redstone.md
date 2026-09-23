@@ -14,7 +14,7 @@ P1 の効果が最も大きいのがここです。信号減衰、クロスト�
 ## 14.1 2 つの層と v1 の境界
 
 - **Tier 0、物理配置。** `repeater facing=north delay=2` のように部品を置き、ブロックステートは
-  導出されます。挙動はモデル化しません ([ブロックステート](blockstate))。
+  導出されます。挙動はモデル化しません ([ブロックステート](/ja/spec/blockstate/))。
 - **Tier 1、論理。** 本章です。信号グラフを宣言し、コンパイラが合成 → 配置 → 配線でボクセルにします。
 
 新しいキーワードは `logic` / `circuit` / `assert` の 3 つだけです。論理プリミティブは組み込みの
@@ -31,7 +31,7 @@ Verilog で言えば、v1 が許すのは `assign` 相当だけで、クロッ�
 ## 14.2 信号バインディング
 
 センサが信号を発し、アクチュエータが消費します。どちらも先行フェーズで配置される物理メンバです
-([コンポーネント・編集・複数建築](components-editing-sites))。
+([コンポーネント・編集・複数建築](/ja/spec/components-editing-sites/))。
 
 ```
 # センサ → 信号
@@ -275,12 +275,12 @@ Placement IR     セル座標 + 実配線長。ここでディレイが確定す
 block-array IR   ダスト・リピータ・トーチ・コンパレータのボクセル実体
 ```
 
-フェーズモデル ([コンパイルモデル](compilation)) は `fixtures` の直後を
+フェーズモデル ([コンパイルモデル](/ja/spec/compilation/)) は `fixtures` の直後を
 `logic_synth → logic_place → logic_route` に分割します。センサとアクチュエータが 3D に配置される
 まで I/O ポートの座標が確定しないからです。
 
 ## 14.9 逆方向変換
 
-schematic から取り込んだ手作りのレッドストーン ([エコシステム連携](ecosystem-interop)) は、v1 では
+schematic から取り込んだ手作りのレッドストーン ([エコシステム連携](/ja/spec/ecosystem-interop/)) は、v1 では
 Tier 0 の raw として保持します。ダストの塊から論理を逆合成することはスコープ外です。generation-first
 かつ lossy な方針と整合します。

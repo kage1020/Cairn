@@ -25,7 +25,7 @@ numbering included, and not only the voxels.
 
 `circuit` marks a routing region and writes no voxel, so it belongs to no phase. The three
 `logic_*` phases follow `fixtures` because port coordinates are not fixed until sensors and
-actuators are placed in 3D. See [Redstone](redstone).
+actuators are placed in 3D. See [Redstone](/spec/redstone/).
 
 Last-wins applies only to **local overrides within the same phase**, and `raw` always runs last. Two
 different members contesting a voxel inside a phase resolve the same way and are reported. See
@@ -43,7 +43,7 @@ door   id=entry  side=front at=center
 ## 4.2 Target axes
 
 The target is the pair `(edition, version)`. Neither is written in the source; only the backend
-knows them. See [Versioning and Editions](versioning-editions).
+knows them. See [Versioning and Editions](/spec/versioning-editions/).
 
 ```sh
 cairn compile build.crn --edition java    --target 1.21.4
@@ -60,7 +60,7 @@ Bedrock, and Java's DataVersion has nothing to do with Bedrock's block_version.
 The four roof kinds (`gable`, `shed`, `hip`, `flat`) share the overhang and wall-top conventions
 below. Their layouts are this section and the three that follow. `overhang=` is read whatever the
 kind; `slope_to=` belongs to `shed` alone, and written on any other kind it is read by nothing and
-reported as `W_IGNORED_ARGUMENT` ([Lint §11.3](lint#113-error-vs-warning)).
+reported as `W_IGNORED_ARGUMENT` ([Lint §11.3](/spec/lint/#113-error-vs-warning)).
 
 **Material.** A sloped roof takes its material from `mat_slot=` and it MUST be in the stair family
 — an id whose path ends in `_stairs`. The geometry attaches `facing`, `half`, and `shape` to
