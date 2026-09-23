@@ -17,16 +17,16 @@ Full round-trip fidelity with NBT is given up. The top priority is letting an AI
 builds accurately, which makes the language lossy by design.
 
 The reverse direction, NBT or schematic back into Cairn, is best-effort
-([Ecosystem Interop](ecosystem-interop)).
+([Ecosystem Interop](/spec/ecosystem-interop/)).
 
 The portable artifact is always the **Cairn source**. Emitted NBT and schematics are per-target
 build outputs, the equivalent of a compiled binary
-([Versioning and Editions](versioning-editions)).
+([Versioning and Editions](/spec/versioning-editions/)).
 
 ## 1.3 Scope and non-goals
 
 Redstone can be described at the logic level: declare signals, gates, and connections, and the
-compiler synthesizes, places, and routes them ([Redstone](redstone)). v1 covers combinational logic
+compiler synthesizes, places, and routes them ([Redstone](/spec/redstone/)). v1 covers combinational logic
 plus a curated set of sequential macros. General sequential synthesis of arbitrary state machines or
 CPUs is out of scope, and those drop to Tier 0 physical placement or `raw`.
 

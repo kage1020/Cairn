@@ -144,6 +144,29 @@
 
 ### Fixed
 
+- *(website)* 217 links on the documentation site were 404. Every cross-chapter link in the spec was
+  written bare-relative (`[Lint](lint)`, 255 of them), Astro emits an extensionless href verbatim,
+  and the site canonicalises to a trailing slash — so a link written in `spec/syntax.md` was served
+  from `/spec/syntax/` and resolved to `/spec/syntax/lint`. The 38 that worked were the ones on an
+  `index` page, where the file's own directory and the page's URL happen to coincide.
+
+  Every internal link is now root-absolute with a trailing slash (`/spec/lint/`, `/ja/spec/lint/`),
+  which is the only form that survives: Astro rewrites a link's href in neither direction, with or
+  without an `.md` suffix, so what is written is what ships.
+
+  Two checks now hold it, and neither existed. `starlight-links-validator` runs as a build hook,
+  after the pages exist, and resolves every link and every `#anchor` fragment — across pages as well
+  as within one — and refuses a relative link outright, because on this site a relative link is a
+  broken link. `astro check` type-checks `astro.config.mjs` and everything under `src`: the project
+  had no `check` script and no `@astrojs/check`, although the config opens with `// @ts-check` and
+  carries a `@type` annotation for the sidebar. On its first run it reported that the annotation
+  names a type the installed Starlight does not export (`@astrojs/starlight/schema` has no
+  `StarlightUserConfig`; it is `@astrojs/starlight/types`), so the sidebar had been unchecked either
+  way. Fixed in the same change.
+
+  CI runs `pnpm check` before `pnpm build`. Neither subsumes the other: the build type-checks
+  nothing, and the checker renders no page, so it cannot see a link.
+
 - *(docs)* `spec/versioning-editions` described `cairn info`'s `registry compatibility` row as a
   derivation — "the intersection of `since`/`until` over the used tokens and states" — which
   nothing computes. The row reads back the unscoped floors the file and its instantiated parts

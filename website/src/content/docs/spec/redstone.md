@@ -16,7 +16,7 @@ not carried in the language core ([§14.4](#144-time-model)).
 
 - **Tier 0, physical placement.** You write `repeater facing=north delay=2` and the like, placing
   parts yourself while the compiler derives the blockstate. Behaviour is not modeled
-  ([Blockstate Model](blockstate)).
+  ([Blockstate Model](/spec/blockstate/)).
 - **Tier 1, logic.** This chapter. You declare a signal graph and the compiler turns it into voxels
   through synthesis → placement → routing.
 
@@ -34,7 +34,7 @@ In Verilog terms, v1 allows the `assign` equivalent and no clocked assignment:
 ## 14.2 Signal binding
 
 Sensors emit signals and actuators consume them. Both are physical members
-([Components, Editing, and Multi-building](components-editing-sites)) placed in earlier phases.
+([Components, Editing, and Multi-building](/spec/components-editing-sites/)) placed in earlier phases.
 
 ```
 # sensor → signal
@@ -294,12 +294,12 @@ Placement IR     cell coordinates + actual wire length. Delay determined here
 block-array IR   the voxel reality of dust, repeater, torch, comparator
 ```
 
-The phase model ([Compilation Model](compilation)) splits the step right after `fixtures` into
+The phase model ([Compilation Model](/spec/compilation/)) splits the step right after `fixtures` into
 `logic_synth → logic_place → logic_route`, because the I/O port coordinates are not fixed until
 sensors and actuators are placed in 3D.
 
 ## 14.9 Reverse conversion
 
-Hand-built redstone imported from a schematic ([Ecosystem Interop](ecosystem-interop)) is kept as
+Hand-built redstone imported from a schematic ([Ecosystem Interop](/spec/ecosystem-interop/)) is kept as
 Tier 0 raw in v1. Reverse-synthesizing logic from a mass of dust is out of scope, consistent with
 the generation-first, lossy approach.

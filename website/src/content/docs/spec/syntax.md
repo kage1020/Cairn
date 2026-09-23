@@ -75,7 +75,7 @@ terminated only by lone `\r` highlights as one long line even though it parses c
 
 Keep nesting shallow: `struct` / `def` / `level` / `theme` / `site`. Deep nesting increases LLM
 generation errors. (`room` is not on this list; it is still open, so writing one today is
-`E_UNKNOWN_KEYWORD`. See [Open Issues](open-issues).)
+`E_UNKNOWN_KEYWORD`. See [Open Issues](/spec/open-issues/).)
 
 Inside a body, `level y=N` is the only member that groups other members, and only in a `struct` or a
 `def`. A `site` body is a flat list of `place` and `connect` rows with no grouping construct at all.
@@ -87,7 +87,7 @@ which bind materials and open nothing, so a line indented under one is a syntax 
 nesting diagnostic. So is a line indented after a directive: a directive is one line, and the line
 under it belongs to no construct.
 
-[Compilation Model §4.7](compilation#47-level-grouping-and-volume-derivation) defines what `y=N`
+[Compilation Model §4.7](/spec/compilation/#47-level-grouping-and-volume-derivation) defines what `y=N`
 means to each grouped member.
 
 **Which keywords a body accepts** follows the same split. A `struct` / `def` body describes one
@@ -142,7 +142,7 @@ The edition is there because Java releases run `1.20.4 / 1.21 / 1.21.4` and Bedr
 is dot-separated components that each begin with a digit and carry only letters and digits, with an
 optional `-` and a pre-release tag of the same — `1.21.4`, `1.21.4-rc1`, and `24w14a` are all
 labels. Which of them the *target edition* can order is not a syntax question and is not answered
-here. See [Versioning and Editions](versioning-editions).
+here. See [Versioning and Editions](/spec/versioning-editions/).
 
 **`@intended_targets`** says which Minecraft versions the file was designed for. It is not a claim
 of being verified. That record lives only in the lock.
@@ -152,7 +152,7 @@ its `@intended_targets` names that the target edition can build states an intent
 will refuse the moment anyone acts on it, and that is `E_INTENDED_TARGET_CAP`; a list only partly
 below the floor is `W_INTENDED_TARGET_CAP`, and a version the target edition cannot build at all is
 `W_INTENDED_TARGET_UNSUPPORTED`. See
-[Versioning and Editions §10.4](versioning-editions#the-hint-is-weighed-against-the-floor).
+[Versioning and Editions §10.4](/spec/versioning-editions/#the-hint-is-weighed-against-the-floor).
 
 `@cairn` and `@intended_targets` appear at most once per module, and a repeat is
 `E_DUPLICATE_HEADER`. `@requires` is the exception: its floors compose, so repeating it adds a
@@ -161,7 +161,7 @@ constraint rather than displacing one.
 A `def` or a `theme` may carry the same expression as a body line, spelled `requires` without the
 `@` — a floor on that part rather than on the file, inherited by every build that instantiates it.
 The sigil is what marks a file directive, and a part's floor is not one. See
-[Versioning and Editions](versioning-editions).
+[Versioning and Editions](/spec/versioning-editions/).
 
 ## 5.4 Selectors
 
@@ -186,7 +186,7 @@ rejected with `W_DEFERRED_MEMBER`, and only the primary is painted.
 | `at=left` | The wall-local axis origin, `u = 0`. |
 | `at=right` | The far corner, `u = wall_length - 1`. |
 
-The same column resolves both the openings cut and any `connect` walkway anchored to this door ([§9.3.5](components-editing-sites#935-ports-and-connect)).
+The same column resolves both the openings cut and any `connect` walkway anchored to this door ([§9.3.5](/spec/components-editing-sites/#935-ports-and-connect)).
 Numeric offsets (`at=N`) are reserved for a future extension.
 
 **Which rows a door opens.** A door under `level y=N` opens at row `N + 1`, the row above that
@@ -194,7 +194,7 @@ level's base plane, and takes the two rows a doorway wants, or as much of that r
 it has counting the row it opens at — so a door under a one-row course opens that one row rather
 than cutting into the roof. The row it opens at MUST be inside a course of the masonry; a door
 written against walls that do not reach it is `W_DEFERRED_MEMBER` and cuts nothing, the same finding
-the `window` on that body earns ([§9.3.5](components-editing-sites#935-ports-and-connect) states the
+the `window` on that body earns ([§9.3.5](/spec/components-editing-sites/#935-ports-and-connect) states the
 courses a `walls` paints).
 
 ## 5.5 IDs, classes, addresses
@@ -202,7 +202,7 @@ courses a `walls` paints).
 Important members MAY declare `id=`, and `class=` groups members. Members without an `id=` get a
 stable, meaning-based address assigned by the compiler, derived from parent / role / side / level /
 offset. See
-[Components, Editing, and Multi-building §9.2](components-editing-sites#92-editing-model).
+[Components, Editing, and Multi-building §9.2](/spec/components-editing-sites/#92-editing-model).
 
 A `place` row is the exception: its `id=` is required, and omitting it is `E_INCOMPLETE_PLACE`. An
 auto-address names nothing outside the body it sits in. A `place`'s `id=` is what `east_of=` and

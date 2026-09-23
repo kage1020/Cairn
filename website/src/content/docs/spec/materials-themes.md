@@ -32,20 +32,20 @@ the wider row's binding.
 
 Two rows that select the *same* members are different. Same keyword and same attributes means they
 match member for member, so a key they both bind is read by nothing on the earlier row. That is
-`E_DUPLICATE_SELECTOR` ([Lint §11.1](lint#111-diagnostic-codes)). Sameness is by meaning: attribute
+`E_DUPLICATE_SELECTOR` ([Lint §11.1](/spec/lint/#111-diagnostic-codes)). Sameness is by meaning: attribute
 order does not count, and `class=` / `id=` / `mat_slot=` values compare as label text, so
 `window[class=small]` and `window[class="small"]` are one selector. Rows that coincide but bind
 different keys are not reported. They compose, and splitting a long binding list over two lines is
 allowed.
 
 `def`, `theme`, and `site` are unified by the same slot-bearing Component mechanism
-([Components, Editing, and Multi-building](components-editing-sites)).
+([Components, Editing, and Multi-building](/spec/components-editing-sites/)).
 
 ## 7.2 Canonical vocabulary
 
 A theme binds **canonical tokens**, not raw block IDs. The backend resolves the ID, state names,
 state values, and serialization per `(edition, version)`
-([Versioning and Editions](versioning-editions)). An LLM never needs to know `pillar_axis`,
+([Versioning and Editions](/spec/versioning-editions/)). An LLM never needs to know `pillar_axis`,
 little-endian NBT, or Bedrock's `weirdo_direction`.
 
 Tokens come in two tiers:
@@ -65,7 +65,7 @@ theme exact_oak:
 ## 7.3 Mappings across version and edition
 
 A canonical token absorbs five patterns. The resolution table's structure is in
-[Versioning and Editions](versioning-editions).
+[Versioning and Editions](/spec/versioning-editions/).
 
 | Pattern | Example | Policy |
 |---|---|---|

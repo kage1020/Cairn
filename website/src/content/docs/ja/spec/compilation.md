@@ -25,7 +25,7 @@ raw         エスケープハッチ
 
 `circuit` は配線領域を確保するだけでボクセルを書かないので、どのフェーズにも属しません。3 つの
 `logic_*` フェーズが `fixtures` の後に来るのは、センサとアクチュエータが 3D に配置されるまでポート
-座標が確定しないからです ([レッドストーン](redstone))。
+座標が確定しないからです ([レッドストーン](/ja/spec/redstone/))。
 
 last-wins は **同一フェーズ内のローカル上書き** にのみ効き、`raw` は常に最後です。同一フェーズ内で別々
 のメンバが 1 つのボクセルを奪い合う場合も同じ規則で解決され、報告されます ([§4.8](#48-同一フェーズ内の衝突とパレット))。
@@ -42,7 +42,7 @@ door   id=entry  side=front at=center
 ## 4.2 ターゲット軸
 
 ターゲットは `(edition, version)` の 2 軸です。どちらもソースには書きません。知っているのはバック
-エンドだけです ([バージョンとエディション](versioning-editions))。
+エンドだけです ([バージョンとエディション](/ja/spec/versioning-editions/))。
 
 ```sh
 cairn compile build.crn --edition java    --target 1.21.4
@@ -59,7 +59,7 @@ Java の DataVersion は Bedrock の block_version とは無関係です。
 屋根の 4 種類 (`gable` / `shed` / `hip` / `flat`) は以下の overhang と壁天端の規約を共有します。
 レイアウトはこの節と、続く 3 つの節にあります。`overhang=` は kind を問わず読まれます。`slope_to=` は
 `shed` だけのもので、他の kind に書いても何も読まず、`W_IGNORED_ARGUMENT` で報告されます
-([Lint §11.3](lint#113-エラーと警告の区分))。
+([Lint §11.3](/ja/spec/lint/#113-エラーと警告の区分))。
 
 **マテリアル。** 傾斜屋根は `mat_slot=` から材質を取り、それは階段ファミリ (パスが `_stairs` で
 終わる id) でなければなりません。ジオメトリが `facing` / `half` / `shape` を塗る対象に付けるので、
