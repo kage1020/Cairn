@@ -6,11 +6,19 @@ on:
     tags: ["v*"]
     paths:
       - "crates/cairn-lang-tree-sitter/**"
+      # `packed-tarball` highlights `examples/cottage.crn` through the packed
+      # grammar, and `tests/examples.rs` parses every `examples/*.crn`, so a
+      # file added or reshaped there is this workflow's business even when the
+      # crate itself is untouched. `ci.yml` runs the cargo half on every push
+      # regardless, having no path filter at all; the tarball job is this
+      # workflow's alone.
+      - "examples/**"
       - "Cargo.toml"
       - ".github/workflows/tree-sitter.yml"
   pull_request:
     paths:
       - "crates/cairn-lang-tree-sitter/**"
+      - "examples/**"
       - "Cargo.toml"
       - ".github/workflows/tree-sitter.yml"
   workflow_dispatch:
@@ -100,7 +108,7 @@ jobs:
       - uses: actions/checkout@v6
         with:
           ref: ${{ needs.resolve-ref.outputs.ref }}
-      - uses: pnpm/action-setup@v6
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
         with:
           package_json_file: crates/cairn-lang-tree-sitter/package.json
       - uses: actions/setup-node@v6
@@ -121,7 +129,7 @@ jobs:
       - uses: actions/checkout@v6
         with:
           ref: ${{ needs.resolve-ref.outputs.ref }}
-      - uses: pnpm/action-setup@v6
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
         with:
           package_json_file: crates/cairn-lang-tree-sitter/package.json
       - uses: actions/setup-node@v6
@@ -148,7 +156,7 @@ jobs:
       - uses: actions/checkout@v6
         with:
           ref: ${{ needs.resolve-ref.outputs.ref }}
-      - uses: pnpm/action-setup@v6
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
         with:
           package_json_file: crates/cairn-lang-tree-sitter/package.json
       - uses: actions/setup-node@v6
@@ -168,7 +176,7 @@ jobs:
       - uses: actions/checkout@v6
         with:
           ref: ${{ needs.resolve-ref.outputs.ref }}
-      - uses: pnpm/action-setup@v6
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
         with:
           package_json_file: crates/cairn-lang-tree-sitter/package.json
       - uses: actions/setup-node@v6
@@ -230,7 +238,7 @@ jobs:
       - uses: actions/checkout@v6
         with:
           ref: ${{ needs.resolve-ref.outputs.ref }}
-      - uses: pnpm/action-setup@v6
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
         with:
           package_json_file: crates/cairn-lang-tree-sitter/package.json
       - uses: actions/setup-node@v6
@@ -238,14 +246,14 @@ jobs:
           node-version: 22
           cache: pnpm
           cache-dependency-path: crates/cairn-lang-tree-sitter/pnpm-lock.yaml
-      - uses: mymindstorm/setup-emsdk@v16
+      - uses: mymindstorm/setup-emsdk@4528d102f7230f0e7b276855c01ea1159be0e984 # v16
       - run: pnpm install --frozen-lockfile
       - run: pnpm exec tree-sitter build --wasm --output tree-sitter-cairn.wasm
       - name: Verify WASM artifact
         run: |
           test -s tree-sitter-cairn.wasm
           file tree-sitter-cairn.wasm | grep -q "WebAssembly"
-      - uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
         with:
           tag_name: ${{ needs.resolve-ref.outputs.tag }}
           files: crates/cairn-lang-tree-sitter/tree-sitter-cairn.wasm
