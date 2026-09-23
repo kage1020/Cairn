@@ -4,6 +4,42 @@
 
 ### Added
 
+- *(ci)* The documentation site built green through two whole classes of breakage. `astro build`
+  renders every page, so it catches a frontmatter violation and a sidebar `slug:` naming a page
+  that does not exist — and nothing else. A link to a chapter that was never written, and a link
+  to a heading that no longer exists, both shipped:
+
+  ```text
+  $ printf 'See [a page that does not exist](/spec/this-page-was-never-written/).' \
+      >> src/content/docs/introduction.md
+  $ pnpm build
+  [build] 51 page(s) built in 7.69s
+  [build] Complete!
+  $ echo $?
+  0
+  ```
+
+  That is not a hypothetical shape. Every spec chapter cross-references the others by heading, and
+  the `ja/` tree mirrors the `en` tree page for page, so one renamed heading breaks links in two
+  places at once — and a heading's slug is not always what the heading looks like, which is how a
+  `、` dropped without a hyphen left a §10.4 cross-link dead in the Japanese spec for long enough
+  that a person reading the diff found it rather than the build.
+
+  `starlight-links-validator` now runs as a build hook, after the pages exist, and resolves every
+  internal link and every `#anchor` fragment against them. Both cases above now fail `pnpm build`.
+
+  The type side had the same gap and one real error waiting in it. `website/` had no `check`
+  script and no `@astrojs/check`, so nothing type-checked `astro.config.mjs` or anything under
+  `src` — although the config opens with `// @ts-check` and carries a `@type` annotation for the
+  sidebar, which is the intent with nothing running it. Added, and on its first run it reported
+  that the annotation names a type the installed Starlight does not export
+  (`@astrojs/starlight/schema` has no `StarlightUserConfig`; it is `@astrojs/starlight/types`).
+  Fixed in the same change, since an annotation that resolves to nothing is the same as not
+  having one.
+
+  CI runs `pnpm check` before `pnpm build`. Neither subsumes the other: the build type-checks
+  nothing, and the checker renders no page, so it cannot see a link.
+
 - *(core)* An argument in a keyword's vocabulary could still be read by nothing, depending on how
   a sibling argument on the same line was written. `E_UNKNOWN_ARGUMENT` closed the case where a
   `key=` is outside the vocabulary; one level down, a key that *is* in it routed past its reader in

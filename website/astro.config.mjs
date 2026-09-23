@@ -1,10 +1,11 @@
 // @ts-check
 import { defineConfig } from "astro/config";
 import starlight from "@astrojs/starlight";
+import starlightLinksValidator from "starlight-links-validator";
 
 const githubRepo = "https://github.com/kage1020/Cairn";
 
-/** @type {import('@astrojs/starlight/schema').StarlightUserConfig['sidebar']} */
+/** @type {import('@astrojs/starlight/types').StarlightUserConfig['sidebar']} */
 const sidebar = [
   {
     label: "Start here",
@@ -165,6 +166,11 @@ export default defineConfig({
       },
       sidebar,
       customCss: ["./src/styles/cairn.css"],
+      // `astro build` resolves neither of these: a dead cross-chapter link
+      // and a dead `#anchor` both build green without it. The spec chapters
+      // link to each other by heading, and `ja/` mirrors `en/` page for
+      // page, so a renamed heading breaks links in two trees at once.
+      plugins: [starlightLinksValidator({ errorOnRelativeLinks: false })],
     }),
   ],
 });

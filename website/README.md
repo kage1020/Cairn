@@ -49,14 +49,20 @@ English is the source of truth for the specification; Japanese pages are seconda
 ```sh
 pnpm install        # once
 pnpm dev            # astro dev at http://localhost:4321/
-pnpm build          # astro build → ./dist
+pnpm check          # astro check — types in astro.config.mjs and src/
+pnpm build          # astro build → ./dist, and validates every internal link
 pnpm preview        # serves ./dist
 ```
+
+`pnpm check` and `pnpm build` answer different questions and CI runs both. The build does not
+type-check anything; the checker does not render a page, so it cannot see a link. Link validation is
+a build hook, which is why a dead link fails `pnpm build` rather than `pnpm check`.
 
 ## Editing content
 
 - Every chapter is a plain `.md` (or `.mdx` for the landing pages and playground placeholder) with Starlight YAML frontmatter. Add `title:` and an optional `description:` and you are done.
-- Internal cross-chapter links use extensionless URLs (`[overview](./overview)`) — Astro's content layer rewrites them at build time.
+- Internal cross-chapter links use extensionless URLs (`[overview](./overview)`) — Astro's content layer rewrites them at build time. `pnpm build` resolves every one of them, and every `#anchor` fragment, against the pages it just rendered; a link to a page or a heading that does not exist fails the build rather than shipping.
+- A heading's anchor is its slug, so renaming one breaks every link that names it — in the `ja/` tree as well as the `en` one. The slug is not always what the heading looks like: `10.4` becomes `104-`, and a `、` is dropped without leaving a hyphen.
 - Japanese pages live under `src/content/docs/ja/` mirroring the English layout. The sidebar in `astro.config.mjs` uses `translations: { ja: "…" }` so a single sidebar definition serves both locales.
 
 ## Deploying
@@ -74,7 +80,7 @@ Cloudflare Pages project settings:
 | Node.js version | `22` (also pinned via [`.nvmrc`](.nvmrc) and [`package.json#engines`](package.json)) |
 | Compatibility date | `2026-06-14` (in [`wrangler.jsonc`](wrangler.jsonc)) |
 
-Custom domain `cairn.kage1020.com` is wired in the Cloudflare dashboard; the default `cairn.pages.dev` URL also resolves. Deployment is Cloudflare's Git integration, not a workflow. The `Documentation site` job in [`editors-website.yml`](../.github/workflows/editors-website.yml) only builds the site on `website/**` changes, so a broken build fails a PR instead of reaching the deploy.
+Custom domain `cairn.kage1020.com` is wired in the Cloudflare dashboard; the default `cairn.pages.dev` URL also resolves. Deployment is Cloudflare's Git integration, not a workflow. The `Documentation site` job in [`editors-website.yml`](../.github/workflows/editors-website.yml) runs `pnpm check` and `pnpm build` on `website/**` changes, so a type error or a dead link fails a PR instead of reaching the deploy. Cloudflare runs the build too, so a dead link that got past review would fail the deploy rather than ship — but the type check is CI's alone.
 
 To deploy a one-off preview from the CLI:
 
