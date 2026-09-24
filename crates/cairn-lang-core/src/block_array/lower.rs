@@ -43,10 +43,11 @@
 //! member being in the list does not mean the dims read it; it means the
 //! dims and the paint pass are looking at the same members.
 //!
-//! Defs are skipped at this layer: they only concretise via a `site`
-//! `place ... use=def_name` reference, and site lowering arrives with the
-//! multi-building pass. Sites themselves are also skipped for the same
-//! reason.
+//! A `def` is not voxelised on its own: it concretises only through a
+//! `site`'s `place ... use=def_name`, and this pass walks that body once
+//! per placement, against the theme that placement bound. So a `def`'s
+//! members are reached as many times as they are placed, which is why
+//! `lower_to_block_array` ends by dropping findings that repeat.
 
 use std::collections::HashSet;
 
@@ -217,6 +218,26 @@ pub fn lower_to_block_array(
     // around. The sort is stable, so two findings on one span keep the
     // order the passes raised them in.
     diagnostics.sort_by_key(|d| (d.span.start, d.span.end));
+    // A lowering diagnostic's identity is the diagnostic. Two that agree on
+    // code, span, message, notes and data are one finding reported twice,
+    // and the second copy is an artifact of how this pass walks rather than
+    // anything the author can act on: a `def` body is voxelised once per
+    // `place` that instantiates it, so a finding about the def — or about
+    // the theme `slot` line the def reads — comes back once per placement,
+    // byte-for-byte the same. Three placements used to mean three copies of
+    // `E_INCOMPATIBLE_MATERIAL`, each anchored on the same theme line and
+    // each ending in a note saying every member reading that slot has it too.
+    //
+    // The rule holds only while every finding that is not a repeat says so
+    // in its own text, which is a live obligation on the messages here and
+    // not a property of the walk: `geometry_material_id`'s deferral names
+    // its theme for exactly this reason. `tests/def_member_lowering_diagnostics.rs`
+    // holds the cases that must stay apart, and `resolve::resolver`'s module
+    // doc says why that stage keeps ledgers instead.
+    //
+    // `retain` rather than a rebuild, so what is left keeps its order.
+    let mut said: HashSet<Diagnostic> = HashSet::new();
+    diagnostics.retain(|d| said.insert(d.clone()));
 
     BlockArrayIr {
         structures,
@@ -318,6 +339,15 @@ struct ConnectInputs<'a> {
 /// one whose endpoint paints no masonry for the opening to have been cut
 /// through. Emits a `W_DUPLICATE_WALKWAY` when the same `(from, to)`
 /// pair has already been laid in the same site.
+///
+/// Every finding raised here anchors on `ValidatedConnect::span`, which
+/// the resolver sets to one `connect` member's span, and this loop runs
+/// once per row — so two rows never share a span, and the dedup at the end
+/// of [`lower_to_block_array`] cannot reach them. That holds because
+/// `connect` is one row per pair. A block form, where several pairs sat
+/// under one header, would give them a shared span and two identical
+/// `W_WALKWAY_BLOCKED` warnings would collapse into one, `skipped` count
+/// and all.
 #[allow(clippy::too_many_lines)] // one linear resolve-route-and-lay chain per row
 fn lower_connects(
     inputs: &ConnectInputs<'_>,
@@ -2767,10 +2797,21 @@ fn geometry_material_id<'a>(
 ) -> &'a str {
     let Some(state) = resolved else {
         if member.mat_slot.is_some() {
+            // The theme is named because it is the thing the author edits,
+            // and because without it two placements under two themes write
+            // the same sentence. This is the arm sibling-variant softening
+            // reaches: with no `--edition` pin the resolver stays silent on
+            // a slot only the sibling variant declares, so lowering is the
+            // only reporter, and the member line is shared by every
+            // placement of the `def`. Two broken themes then differ in
+            // nothing at all, and fixing one of them changes no output.
+            let under = scope
+                .and_then(|scope| scope.bound_theme.as_deref())
+                .map_or_else(String::new, |theme| format!(" under theme `{theme}`"));
             diagnostics.push(diag_deferred_member_reason(
                 member,
                 &format!(
-                    "{}'s `mat_slot=` did not resolve to a block id; it falls back to `{fallback}`",
+                    "{}'s `mat_slot=` did not resolve to a block id{under}; it falls back to `{fallback}`",
                     shape.subject,
                 ),
             ));
@@ -6678,7 +6719,7 @@ struct s size=9x7
             note.contains("port `a.back` is buried"),
             "note must point at the buried port, got {note}",
         );
-        // AC4 from issue #40: the `primary` string is part of the gcc-style
+        // The `primary` string is part of the gcc-style
         // text-format contract that humans (and existing pre-payload test
         // harnesses) read; the structured `data` is meant to *augment* it,
         // not replace it. Asserting both keeps a regression that drops

@@ -144,6 +144,61 @@
 
 ### Fixed
 
+- *(core)* A `def` member's lowering diagnostics were reported once per placement. Lowering
+  voxelises a def body once for every `place` that instantiates it, and a finding about the def —
+  or about the theme `slot` line the def reads — came back on each walk, byte for byte the same:
+
+  ```
+  dup.crn:3:16: error[E_INCOMPATIBLE_MATERIAL]: `gable` roof derives `facing` / `half` / `shape` from the geometry and `minecraft:spruce_planks` is not a stair, so those states have nowhere to go
+    note: bind the slot to a `*_stairs` material — the registry pack's `roof.dark_wood`, ... all resolve to one
+    note: reached through `mat_slot=roof`, so every member reading that slot has it too
+  dup.crn:3:16: error[E_INCOMPATIBLE_MATERIAL]: ...the same three lines again...
+  ```
+
+  Three placements made three copies on one line, and the second note is the sentence that makes
+  the repetition pointless — the finding is anchored on the theme's slot value precisely because
+  every member reading that slot has the same problem for the same reason. `E_UNKNOWN_ID` under a
+  pinned `--target` multiplied identically, being about a resolved id and the target it was weighed
+  against, neither of which the placement changes.
+
+  A lowering diagnostic's identity is now the diagnostic: code, span, message, notes and data. Two
+  findings that agree on all of them are one finding reported twice, and the repeat is an artifact
+  of how the pass walks rather than anything the author can act on. The rule is stated once, where
+  the pass already decides what it reports, rather than per code — the `(member, slot, theme)`
+  triple `resolve::resolver` keys its own ledger on is a claim about one finding, and lowering has
+  two codes that would each need their own.
+
+  **This is not only about placements.** `E_INCOMPATIBLE_MATERIAL` is anchored on the theme's slot
+  value rather than on the member, so two `struct`s — or two `def`s — reading one bad slot were
+  two findings on one line and are now one. That is the anchor being taken at its word: the fix is
+  the slot line, and the finding's own note already says every member reading that slot has it too.
+  A source with no `place` in it at all can see this change.
+
+  What the rule keeps apart is what says it is the right one. Two themes binding the roof slot to a
+  non-stair are two findings, even when they bind the *same* non-stair, because they are two lines
+  to edit. A `gable` roof and an eave `stair` reading one slot are two findings on that one line,
+  because they carry their states from different places and the messages say so. Two `place` rows
+  that lost their origin earn the same warning twice — identical text, two rows to fix — kept apart
+  by their spans alone. And one `walls` row overwriting two earlier ones earns two
+  `W_PHASE_CONFLICT` warnings that agree on everything except which member each note points at.
+
+  One message had to change for the rule to hold. A `mat_slot=` that resolves to nothing now names
+  the theme it was read against:
+
+  ```
+  variants.crn:17:3: warning[W_DEFERRED_MEMBER]: `gable` roof's `mat_slot=` did not resolve to a block id under theme `alpha_java`; it falls back to `minecraft:spruce_stairs`
+  ```
+
+  Without the theme, two placements under two sibling-variant themes wrote the same sentence on the
+  `def`'s shared member line, and repairing one of them changed nothing the author could see. This
+  is the arm where the resolver stays deliberately silent — a slot only the `_bedrock` sibling
+  declares is softened until a pin picks a variant — so on an unpinned `cairn lower` this pass is
+  the only reporter.
+
+  The resolver keeps its ledgers. There the answer is not byte equality: sibling-variant softening
+  lets two resolutions of one body judge a slot differently, so a resolution that stayed silent has
+  to leave the next one free to speak.
+
 - *(website)* 217 links on the documentation site were 404. Every cross-chapter link in the spec was
   written bare-relative (`[Lint](lint)`, 255 of them), Astro emits an extensionless href verbatim,
   and the site canonicalises to a trailing slash — so a link written in `spec/syntax.md` was served

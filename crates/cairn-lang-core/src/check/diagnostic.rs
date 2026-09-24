@@ -771,7 +771,7 @@ impl Serialize for DiagnosticCode {
 /// existing variant is still breaking by itself; per-variant
 /// `#[non_exhaustive]` is added on a per-case basis when a follow-up
 /// expansion is anticipated.
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum DiagnosticData {
@@ -1003,7 +1003,7 @@ pub enum DiagnosticData {
 /// `E_UNKNOWN_KEYWORD`, for example, has no byte range distinct from the
 /// primary finding's span. Renderers should suppress the `file:L:C:`
 /// prefix for `span == None`.
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
 pub struct DiagnosticNote {
     /// Byte range the note refers to, when the note points at a distinct
     /// secondary location.
@@ -1022,7 +1022,17 @@ pub struct DiagnosticNote {
 /// In-crate sites still build the struct directly and update in step
 /// when new fields land; cross-crate consumers must route through a
 /// future builder rather than depending on the field set being frozen.
-#[derive(Debug, Clone, PartialEq, Serialize)]
+///
+/// `Eq` and `Hash` let a pass ask whether it has already said this, and
+/// every field answers: two findings that agree on all of them are one
+/// finding reported twice, because nothing outside the struct distinguishes
+/// them. `block_array::lower_to_block_array` relies on that to drop the
+/// copies a def body's per-placement walk produces.
+///
+/// A field added here therefore has to be `Eq + Hash` — no `f64`, no
+/// `serde_json::Value` — or that call stops compiling, and a field left out
+/// of the identity is not an option while the derive reads all of them.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
 #[non_exhaustive]
 pub struct Diagnostic {
     /// Stable code identifying the kind of finding.

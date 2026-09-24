@@ -58,6 +58,21 @@ const ONE_SCOPE_WITHOUT_A_SIZE: &str = concat!(
     "  floor mat_slot=floor\n",
 );
 
+/// The same unknown id, reached through a `def` three `place` rows
+/// instantiate. Lowering voxelises a def body once per placement, so this
+/// is the source that used to print the refusal three times.
+const UNKNOWN_ID_PLACED_THREE_TIMES: &str = concat!(
+    "@cairn 2026.06\n\n",
+    "theme t:\n",
+    "  slot floor -> @totally_not_a_block\n\n",
+    "def hut size=2x2:\n",
+    "  floor mat_slot=floor\n\n",
+    "site s:\n",
+    "  place id=a use=hut theme=t at=origin\n",
+    "  place id=b use=hut theme=t east_of=a gap=4\n",
+    "  place id=c use=hut theme=t east_of=b gap=4\n",
+);
+
 fn fixture(dir: &std::path::Path, source: &str) -> PathBuf {
     let path = dir.join("s.crn");
     std::fs::write(&path, source).expect("write fixture");
@@ -539,4 +554,37 @@ fn a_clean_example_passes_the_pinned_check_and_writes_nothing() {
         .collect();
     left.sort();
     assert_eq!(left, vec!["cottage.crn".to_owned()], "check writes nothing");
+}
+
+/// The pinned path reports an id the target does not declare once, however
+/// many `place` rows reach it.
+///
+/// The count is the whole point here: the three copies were byte-identical,
+/// because nothing in `E_UNKNOWN_ID` names the placement — it is about a
+/// resolved id and the target it was weighed against, and both are the same
+/// on every row. `--target` is what makes this reachable at all, which is
+/// why the case lives in this file rather than beside the lowering unit
+/// tests: without a pin there is no id table and no finding to count.
+#[test]
+fn a_pinned_target_reports_an_unknown_id_once_per_source_line() {
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    let src = fixture(tmp.path(), UNKNOWN_ID_PLACED_THREE_TIMES);
+    let out = cairn(
+        "check",
+        &[
+            src.to_str().unwrap(),
+            "--edition",
+            "java",
+            "--target",
+            "1.21.4",
+        ],
+    );
+    let stderr = String::from_utf8(out.stderr).expect("utf-8");
+    assert_eq!(out.status.code(), Some(1), "stderr={stderr}");
+    let refusals = stderr.matches("E_UNKNOWN_ID").count();
+    assert_eq!(
+        refusals, 1,
+        "three placements read one slot line and there is one id to fix; \
+         got {refusals} copies in: {stderr}",
+    );
 }
