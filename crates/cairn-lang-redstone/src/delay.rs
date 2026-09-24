@@ -56,7 +56,7 @@ use crate::pass::{
 use crate::placement_ir::{
     CellCoord, CircuitRegionReservation, PlacementIr, ScopedPlacementIr, ScopedPlacementIrEntry,
 };
-use crate::routing_geometry::{Router, sum_over_driving_nets};
+use crate::routing_geometry::sum_over_driving_nets;
 
 /// Signal-attenuation ceiling per dust segment (`spec/redstone`
 /// "Place-and-route" — "signal attenuation limit of 15"). A dust source
@@ -140,9 +140,11 @@ impl DelayOutput {
 /// has no `IntentModule` dependency.
 ///
 /// One entry per non-empty [`PlacementIr`] whose delay insertion
-/// succeeded; scopes that raise an Error-severity diagnostic (today,
-/// only `E_ATTENUATION_LIMIT`) are elided from the output so a partial
-/// `local_delay_ticks` set cannot pollute a downstream reader.
+/// succeeded; scopes that raise an Error-severity diagnostic are
+/// elided from the output so a partial `local_delay_ticks` set cannot
+/// pollute a downstream reader. This pass raises `E_ATTENUATION_LIMIT`
+/// itself, and carries the two `E_ROUTE_CONGESTION` refusals and the
+/// `E_NO_CIRCUIT_REGION` that [`crate::pass`] asks on its behalf.
 #[must_use]
 pub fn compile_delay(routed: &ScopedPlacementIr) -> DelayOutput {
     let (scoped, diagnostics) = lower_scopes(routed, |entry| {
@@ -180,10 +182,9 @@ fn delay_scope(entry: &ScopedPlacementIrEntry) -> ScopeDelay {
         Ok(scope) => scope,
     };
 
-    let router = Router::new(&region, &blocks);
     let nets = lay_nets(
         &ir,
-        &router,
+        &blocks,
         entry,
         &region,
         source_of_net(&region, &cell_coords),
