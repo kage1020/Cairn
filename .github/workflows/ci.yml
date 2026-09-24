@@ -44,13 +44,12 @@ jobs:
         run: cargo test --workspace --locked
 
   msrv:
-    name: MSRV / check at the declared floor
+    # Short and stable on purpose: a required status check is matched as
+    # a literal string, so renaming this job un-gates it silently.
+    name: MSRV
     runs-on: ubuntu-latest
-    # `rust-version` says which compiler a consumer needs. The job above
-    # builds at the pin, which is always newer, so it green-lights a
-    # change reaching for an API stabilised after the floor and the
-    # consumer is the one who finds out. Nothing else checks this
-    # direction: a pin *below* the floor is refused by cargo already.
+    # Why this job exists, and why it runs `check --locked
+    # --all-features` rather than `test`: CONTRIBUTING.md, "Toolchain".
     env:
       # Not `-D warnings`. A consumer at the floor does not build with
       # it, and an older compiler warns about things the pin has since
@@ -70,14 +69,21 @@ jobs:
         # second copy of `rust-version` with nothing comparing them, and
         # the copy is what goes stale. `--no-deps` keeps this to the
         # workspace's own crates; every one of them has to agree, so a
-        # crate that dropped `rust-version.workspace = true` and picked
-        # its own floor fails here rather than going unchecked.
+        # crate that dropped `rust-version.workspace = true` fails here
+        # rather than going unchecked.
         run: |
           set -euo pipefail
-          declared=$(cargo metadata --format-version 1 --no-deps \
-            | jq -r '[.packages[] | .rust_version // "none"] | unique | join(" ")')
-          if [ "$declared" = "none" ]; then
+          metadata=$(cargo metadata --format-version 1 --no-deps)
+          declared=$(jq -r '[.packages[] | .rust_version // empty] | unique | join(" ")' <<<"$metadata")
+          undeclared=$(jq -r '[.packages[] | select(.rust_version == null) | .name] | join(", ")' <<<"$metadata")
+          if [ -z "$declared" ]; then
             echo "::error::no workspace crate declares rust-version, so there is no floor to check"
+            exit 1
+          fi
+          # Two failures worth telling apart: one manifest to edit, or
+          # seven.
+          if [ -n "$undeclared" ]; then
+            echo "::error::these workspace crates declare no rust-version: $undeclared — give each one \`rust-version.workspace = true\` so the whole workspace shares one floor"
             exit 1
           fi
           case "$declared" in
@@ -85,6 +91,15 @@ jobs:
               echo "::error::workspace crates declare more than one floor ($declared) — this job can only check one"
               exit 1
               ;;
+          esac
+          # Cargo reads a two-component `rust-version` as `.0`, while
+          # `rustup toolchain install` resolves it to the newest patch
+          # in that series. Spell the patch level out, so the day a
+          # point release ships this job keeps checking the compiler
+          # the manifest actually promises.
+          case "$declared" in
+            *.*.*) ;;
+            *) declared="$declared.0" ;;
           esac
           echo "version=$declared" >> "$GITHUB_OUTPUT"
 
@@ -100,17 +115,5 @@ jobs:
           shared-key: msrv-${{ steps.floor.outputs.version }}
           save-if: ${{ github.ref == 'refs/heads/canary' || github.ref == 'refs/heads/main' }}
 
-      # `check`, not `test`: the floor is about compiling the crates a
-      # consumer depends on. Dev-dependencies and the test harness are
-      # free to want a newer compiler than the library does.
-      #
-      # `--all-features`, because `rust-version` is one declaration per
-      # package and cargo has no way to say "this floor, unless you
-      # enable that feature". A feature that cannot build at the floor
-      # makes the manifest wrong for whoever enables it.
-      #
-      # `--locked`, because the committed lockfile is what a consumer
-      # cloning the repo resolves to. When the failure is a dependency's
-      # own floor rather than Cairn's code, cargo names the package.
       - name: Check at the floor
         run: cargo +"${{ steps.floor.outputs.version }}" check --workspace --locked --all-features
