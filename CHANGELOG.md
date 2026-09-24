@@ -144,6 +144,34 @@
 
 ### Fixed
 
+- *(formats,docs)* `cairn-lang-formats`' README named 13 of the 36 items the crate root
+  re-exports. The `## Public API` table is what crates.io shows as the answer to "what can I
+  call", and it had been answering with about a third of it — every `registry` type, both
+  `load_builtin_*` entry points, `supported_list`, `UnsupportedTarget`, `write_compound_gzip`,
+  `OutputExt`, `Compound`, `ParityNote`, `StateTranslation`, `BedrockStateError`,
+  `InvalidPalette`, `PortabilityCounts` and `PortabilityReport` were absent. The table now names
+  all 36.
+
+  Thirteen rather than the seventeen a name-only count gives, because four of the spans were not
+  paths at all. Four rows named a second item with the module dropped
+  (`data_version::JavaTarget` / `resolve_java_target`), and one of those four —
+  `portability::portability_for_java` / `_for_bedrock` — named it with a suffix that is not a
+  symbol. Every span is now a full `module::item` path, which also split the portability pair
+  into two rows: they do not return the same type, and one sentence for both had been saying they
+  did.
+
+  **What the heading means is now written down.** The crate root's `pub use` re-exports, and
+  nothing else. An item that is only `pub` inside a module — `registry::AliasCatalog`, anything
+  under `registry::blocks` — is deliberately off the table. Both READMEs say so, and
+  `CONTRIBUTING.md` and `CONTRIBUTING.ja.md` say it beside the rule that now counts all four
+  crate-README inventories as guarded rather than two.
+
+  A test holds both tables to it in either direction, so a `pub use` added without a row fails
+  `cargo test --workspace` and names the item, as `cairn-lang-core`'s module table and
+  `cairn-lang-cli`'s subcommand table already did. `cairn-lang-nbt`'s table was exact before this
+  change and still is; it is guarded now because staying correct by memory is what the other one
+  was also doing until it stopped.
+
 - *(core)* A `def` member's lowering diagnostics were reported once per placement. Lowering
   voxelises a def body once for every `place` that instantiates it, and a finding about the def —
   or about the theme `slot` line the def reads — came back on each walk, byte for byte the same:

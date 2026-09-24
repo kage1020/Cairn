@@ -15,6 +15,8 @@ The streaming reader is still to land. It is what the reverse direction needs â€
 
 ## Public API
 
+Every item the crate root re-exports, and nothing else â€” the same rule [`cairn-lang-formats`](../cairn-lang-formats/README.md) states, held by the same test in both directions.
+
 | Item | Role |
 |---|---|
 | `tag::Tag` | Owned tag tree, one variant per NBT tag id (1..=12). |
