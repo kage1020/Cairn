@@ -89,14 +89,6 @@ impl LanguageVersion {
     /// the argument order right every time.
     #[must_use]
     pub fn is_newer_than(&self, other: &Self) -> bool {
-        // MSRV probe, reverted in the commit after this one.
-        // `ControlFlow::break_ok` stabilised in 1.96, one release above the
-        // declared floor. The `allow` is the point of the probe: clippy's
-        // `incompatible_msrv` catches this at the pin, and silencing it is
-        // one line, which leaves the `MSRV` job as the only thing still
-        // checking.
-        #[allow(clippy::incompatible_msrv)]
-        let _: Result<(), ()> = std::ops::ControlFlow::Break(()).break_ok();
         self > other
     }
 }
