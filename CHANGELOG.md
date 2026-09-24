@@ -144,6 +144,30 @@
 
 ### Fixed
 
+- *(redstone)* A reservation too shallow to hold its pad row was refused by the routing pass and
+  by neither of the two stages after it. The pad column's `z` saturates at `depth - 1`, so a
+  region one row deep lands the actuator pad on a cell body or on another pad. Routing caught
+  that in its own occupancy seed; the delay and crossing passes rebuilt the same block list, built
+  a router over it and laid nets against it without ever asking.
+
+  In a full run the asymmetry is invisible, because routing elides the scope and the later stages
+  never see one. It is reachable from anything that hands a later stage an IR directly — an
+  in-crate caller, or a resume from a dumped stage. What came out then was not a wrong diagnostic
+  but a plausible circuit: two blocks on one voxel is a net whose source and sink are the same
+  coord, so the wire length is small, the tick count is under every cap, and the dump reads as a
+  layout that works.
+
+  The refusal now sits beside the stranded-sink refusal it is the sibling of, in the routine all
+  three stages already call to lay their nets. Both findings are `E_ROUTE_CONGESTION` and only one
+  comes out, so which one is now stated rather than incidental: the pad row first, because the
+  stranded sink is a symptom of the same shortage and the shared code leaves an author nothing
+  else to tell them apart by.
+
+  The check also reads a coord the way the router keys it rather than raw. `CellCoord`'s fields
+  are public, so `(x, 1, z, Plane)` and `(x, 1, z, Bridge)` can both be written for one voxel —
+  two coords to a raw comparison, one obstacle to the router. The refusal had been on the raw side
+  of that, which is the direction that lets a real collision through.
+
 - *(formats,docs)* `cairn-lang-formats`' README named 13 of the 36 items the crate root
   re-exports. The `## Public API` table is what crates.io shows as the answer to "what can I
   call", and it had been answering with about a third of it — every `registry` type, both

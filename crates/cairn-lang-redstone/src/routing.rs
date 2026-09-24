@@ -54,9 +54,7 @@ use crate::placement::{CONGESTION_FIX, area_ratio_tenths};
 use crate::placement_ir::{
     CellCoord, CircuitRegionReservation, PlacementIr, ScopedPlacementIr, ScopedPlacementIrEntry,
 };
-use crate::routing_geometry::{
-    BlockKind, BlockSite, Router, net_order, sum_over_driving_nets, tile_layer_clearance,
-};
+use crate::routing_geometry::{net_order, sum_over_driving_nets, tile_layer_clearance};
 
 /// Per-cell footprint used by the post-routing congestion budget.
 /// Re-exports [`crate::placement::CELL_FOOTPRINT`] so this pass carries
@@ -140,25 +138,20 @@ fn route_scope(entry: &ScopedPlacementIrEntry) -> ScopeRouting {
         Ok(scope) => scope,
     };
 
-    // Occupancy seed. A pad landing on a coord already taken means the
-    // reservation cannot fit the pad row — a real overflow, not a silent
-    // misroute. Two cells cannot collide: a cell's x is derived from its
-    // topological index, so each has a column of its own.
-    let mut occupancy: HashSet<CellCoord> = HashSet::with_capacity(ir.cells.len() * 4);
-    for site in &blocks {
-        if !occupancy.insert(site.coord) && site.kind != BlockKind::Cell {
-            return Err(pad_overlap_diagnostic(entry, &region, site));
-        }
-    }
-
-    let router = Router::new(&region, &blocks);
     let nets = lay_nets(
         &ir,
-        &router,
+        &blocks,
         entry,
         &region,
         source_of_net_lenient(&region, &cell_coords),
     )?;
+
+    // Occupancy for the congestion figure below: the blocks, then the
+    // dust laid over them. The refusal a repeated coord earns is
+    // `lay_nets`', asked before any of this, so what is left here is
+    // counting.
+    let mut occupancy: HashSet<CellCoord> = HashSet::with_capacity(ir.cells.len() * 4);
+    occupancy.extend(blocks.iter().map(|site| site.coord));
     for net in net_order(&nets.sinks) {
         for coord in nets.trees[&net].wire_path() {
             occupancy.insert(coord);
@@ -197,7 +190,7 @@ fn route_scope(entry: &ScopedPlacementIrEntry) -> ScopeRouting {
     // advisory; said once, here, because this is the stage that made
     // the pairs.
     let advisories: Vec<Diagnostic> =
-        tile_layer_clearance(&nets.sinks, &nets.trees, &router, entry, &region)
+        tile_layer_clearance(&nets.sinks, &nets.trees, &nets.router, entry, &region)
             .into_iter()
             .collect();
 
@@ -229,32 +222,6 @@ fn congestion_diagnostic(
         reservation.span.clone(),
         primary,
         CONGESTION_FIX,
-    )
-}
-
-fn pad_overlap_diagnostic(
-    entry: &ScopedPlacementIrEntry,
-    reservation: &CircuitRegionReservation,
-    site: &BlockSite,
-) -> Diagnostic {
-    let primary = format!(
-        "routed netlist for {kind} `{name}` cannot fit its {pad_kind} pad #{pad_index} at ({x},{y},{z}) — the reserved area (void={void}, region {width}x{depth}) collapses I/O pads onto a cell coord or another pad",
-        kind = entry.kind.label(),
-        name = entry.name,
-        pad_kind = site.kind.as_str(),
-        pad_index = site.index,
-        x = site.coord.x,
-        y = site.coord.y,
-        z = site.coord.z,
-        void = reservation.void,
-        width = reservation.width,
-        depth = reservation.depth,
-    );
-    error_with_footer(
-        DiagnosticCode::RouteCongestion,
-        reservation.span.clone(),
-        primary,
-        "Fix: enlarge `size=WxH` so `depth >= max(inputs, outputs) + 1`, or split into multiple `circuit` blocks",
     )
 }
 

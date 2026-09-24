@@ -56,7 +56,7 @@ use crate::pass::{
 use crate::placement_ir::{
     CellCoord, CircuitRegionReservation, PlacementIr, ScopedPlacementIr, ScopedPlacementIrEntry,
 };
-use crate::routing_geometry::{Router, sum_over_driving_nets};
+use crate::routing_geometry::sum_over_driving_nets;
 
 /// Signal-attenuation ceiling per dust segment (`spec/redstone`
 /// "Place-and-route" — "signal attenuation limit of 15"). A dust source
@@ -180,10 +180,9 @@ fn delay_scope(entry: &ScopedPlacementIrEntry) -> ScopeDelay {
         Ok(scope) => scope,
     };
 
-    let router = Router::new(&region, &blocks);
     let nets = lay_nets(
         &ir,
-        &router,
+        &blocks,
         entry,
         &region,
         source_of_net(&region, &cell_coords),

@@ -50,7 +50,7 @@ use crate::placement_ir::{
     BufferCoord, BufferSegment, CellCoord, CellIdentity, PlacementIr, ScopedPlacementIr,
     ScopedPlacementIrEntry,
 };
-use crate::routing_geometry::{NetTree, Router};
+use crate::routing_geometry::NetTree;
 use crate::saturating_index;
 
 /// Output of a [`compile_crossing`] run.
@@ -146,10 +146,9 @@ fn legalize_scope(entry: &ScopedPlacementIrEntry) -> ScopeLegalization {
         Ok(scope) => scope,
     };
 
-    let router = Router::new(&region, &blocks);
     let nets = lay_nets(
         &ir,
-        &router,
+        &blocks,
         entry,
         &region,
         source_of_net(&region, &cell_coords),
@@ -405,16 +404,24 @@ mod tests {
             name: cairn_lang_core::ast::DottedRef::new("sig".into(), vec!["a".into()]),
             span: Span::default(),
         });
+        // `(1, 0, 1)` is what the placement pass stamps for the first
+        // cell of a scope. The pad column is `x = 0`, so a cell at the
+        // origin would stand on input pad #0 — which every stage now
+        // refuses, and which this fixture is not about.
         ir.cells.push(placed_cell(
             EditionCell::JavaRepeaterOr,
-            CellCoord::new(0, 0, 0),
+            CellCoord::new(1, 0, 1),
             vec![CellPortDriver {
                 port: PortName::A,
                 net: NetRef::Input(0),
             }],
         ));
         let legalized = compile_crossing(&scoped(ScopeKind::Struct, "single", ir));
-        assert!(legalized.diagnostics.is_empty());
+        assert!(
+            legalized.diagnostics.is_empty(),
+            "a two-block segment needs nothing: {:?}",
+            legalized.diagnostics,
+        );
         let cell = &legalized.scoped.scopes[0].ir.cells[0];
         assert!(
             cell.buffer_coords().is_empty(),

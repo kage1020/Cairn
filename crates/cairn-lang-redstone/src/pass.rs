@@ -16,7 +16,8 @@ use crate::placement_ir::{
     PlacementIr, PlacementPhase, ScopedPlacementIr, ScopedPlacementIrEntry,
 };
 use crate::routing_geometry::{
-    BlockSite, NetTree, Router, block_sites, collect_nets, input_pad, net_trees, unroutable,
+    BlockSite, NetTree, Router, block_sites, collapsed_block, collect_nets, input_pad, net_trees,
+    unroutable,
 };
 use crate::saturating_index;
 
@@ -140,16 +141,32 @@ pub(crate) fn source_of_net_lenient<'a>(
     }
 }
 
-/// Every net of the scope and its routed tree, or the refusal the scope
-/// earns when the reservation cannot wire one of its sinks.
+/// The router over this scope, every net and its routed tree, or the
+/// first refusal the reservation earns.
 ///
-/// Asked by all three passes: stage 2 elides an unroutable scope, but
-/// stages 3 and 4 rebuild the trees from the IR, and a stranded sink's
-/// route is one step — under every cap, worth no repeater, and
-/// indistinguishable in the dump from a circuit that works.
+/// Two refusals, and both are `E_ROUTE_CONGESTION`: a reservation too
+/// shallow to hold its pad row, and a sink no route reaches. Only one
+/// comes out, so which one is a decision rather than a race — the pad
+/// row first, because it is the cause the stranded sink is a symptom
+/// of, and the shared code leaves the author nothing else to tell them
+/// apart by.
+///
+/// Both are asked by all three passes, and for one reason. Stage 2
+/// elides the scope that earns either, so in a real run stages 3 and 4
+/// never see one — but an in-crate caller that skipped stage 2 hands
+/// them one directly, and neither failure announces itself downstream.
+/// A stranded sink's route is one step: under every cap, worth no
+/// repeater, and indistinguishable in the dump from a circuit that
+/// works. A collapsed pad makes one of the two blocks something the
+/// router routes *to* and the other a coord it routes *through*, and
+/// the dump that comes out reads as a layout.
+///
+/// The router is built here rather than by each caller, so the refusals
+/// cannot be reached around: a pass holding a [`Router`] is a pass that
+/// has been through both.
 pub(crate) fn lay_nets<F>(
     ir: &PlacementIr,
-    router: &Router,
+    blocks: &[BlockSite],
     entry: &ScopedPlacementIrEntry,
     region: &CircuitRegionReservation,
     source_of_net: F,
@@ -157,16 +174,61 @@ pub(crate) fn lay_nets<F>(
 where
     F: Fn(NetRef) -> CellCoord + Copy,
 {
+    if let Some(site) = collapsed_block(blocks) {
+        return Err(pad_overlap_diagnostic(entry, region, site));
+    }
+    let router = Router::new(region, blocks);
     let sinks = collect_nets(ir);
-    let trees = net_trees(&sinks, router, source_of_net);
+    let trees = net_trees(&sinks, &router, source_of_net);
     if let Some(diagnostic) = unroutable(&sinks, &trees, entry, region, source_of_net) {
         return Err(diagnostic);
     }
-    Ok(Nets { sinks, trees })
+    Ok(Nets {
+        router,
+        sinks,
+        trees,
+    })
 }
 
-/// The nets of one scope: driver → sinks, and driver → routed tree.
+/// Refuse a scope whose reservation collapses two blocks onto one
+/// coord, naming the block that landed second and the reservation that
+/// could not hold it.
+///
+/// `E_ROUTE_CONGESTION`, because the cause is the reserved area: the
+/// pad row wants `depth >= max(inputs, outputs) + 1` and has less.
+fn pad_overlap_diagnostic(
+    entry: &ScopedPlacementIrEntry,
+    reservation: &CircuitRegionReservation,
+    site: &BlockSite,
+) -> Diagnostic {
+    let primary = format!(
+        "routed netlist for {kind} `{name}` cannot fit its {pad_kind} pad #{pad_index} at ({x},{y},{z}) — the reserved area (void={void}, region {width}x{depth}) collapses I/O pads onto a cell coord or another pad",
+        kind = entry.kind.label(),
+        name = entry.name,
+        pad_kind = site.kind.as_str(),
+        pad_index = site.index,
+        x = site.coord.x,
+        y = site.coord.y,
+        z = site.coord.z,
+        void = reservation.void,
+        width = reservation.width,
+        depth = reservation.depth,
+    );
+    error_with_footer(
+        DiagnosticCode::RouteCongestion,
+        reservation.span.clone(),
+        primary,
+        "Fix: enlarge `size=WxH` so `depth >= max(inputs, outputs) + 1`, or split into multiple `circuit` blocks",
+    )
+}
+
+/// The nets of one scope: the router they were laid with, driver →
+/// sinks, and driver → routed tree.
 pub(crate) struct Nets {
+    /// Carried out so a caller that needs the obstacle set again — the
+    /// routing pass, for its tile-layer advisory — does not rebuild one
+    /// and get a second chance to build it differently.
+    pub(crate) router: Router,
     pub(crate) sinks: HashMap<NetRef, Vec<CellCoord>>,
     pub(crate) trees: HashMap<NetRef, NetTree>,
 }
@@ -250,4 +312,168 @@ where
         }
     }
     (scoped, diagnostics)
+}
+
+#[cfg(test)]
+mod tests {
+    //! The refusals this module owns, asked of every stage that calls
+    //! [`lay_nets`].
+
+    use cairn_lang_core::Edition;
+    use cairn_lang_core::error::Span;
+
+    use crate::diagnostic::DiagnosticCode;
+    use crate::edition_netlist_ir::EditionCell;
+    use crate::logic_ir::ScopeKind;
+    use crate::netlist_ir::{CellPortDriver, NetRef, NetlistInput, PortName};
+    use crate::placement_ir::{
+        CellCoord, PlacedCellNode, PlacementIr, PlacementPhase, ScopedPlacementIr,
+    };
+    use crate::test_fixtures::{collapsed_pad_row, reservation, scoped};
+
+    /// A reservation too shallow to hold its pad row is refused by
+    /// stage 2, stage 3 and stage 4 alike, and the scope is elided
+    /// rather than measured against a collapsed layout.
+    ///
+    /// Only the routing pass used to ask. The other two built a
+    /// `Router` over the same collapsed block list and laid nets
+    /// against it, so a caller reaching them without stage 2 — an
+    /// in-crate test, a resume from a dump — got an IR whose actuator
+    /// pad and cell body are one voxel, with a `wire_length` and a
+    /// tick count measured against it. Nothing downstream says so: the
+    /// numbers are small and plausible, and the dump reads as a
+    /// layout.
+    ///
+    /// Written per stage rather than per pass because the asymmetry
+    /// was the three stages disagreeing about one geometry; a case
+    /// that asked only the stage under test could not have failed on
+    /// two of them at once.
+    #[test]
+    fn every_stage_refuses_a_reservation_too_shallow_for_its_pad_row() {
+        type Stage = (
+            &'static str,
+            PlacementPhase,
+            fn(&ScopedPlacementIr) -> (Vec<crate::diagnostic::Diagnostic>, usize),
+        );
+
+        let stages: [Stage; 3] = [
+            ("routing", PlacementPhase::Unrouted, |scoped| {
+                let out = crate::routing::compile_routing(scoped);
+                (out.diagnostics, out.scoped.scopes.len())
+            }),
+            (
+                "delay",
+                PlacementPhase::Routed { wire_length: 0 },
+                |scoped| {
+                    let out = crate::delay::compile_delay(scoped);
+                    (out.diagnostics, out.scoped.scopes.len())
+                },
+            ),
+            (
+                "crossing",
+                PlacementPhase::Delayed {
+                    wire_length: 0,
+                    local_delay_ticks: 0,
+                },
+                |scoped| {
+                    let out = crate::crossing::compile_crossing(scoped);
+                    (out.diagnostics, out.scoped.scopes.len())
+                },
+            ),
+        ];
+
+        for (stage, phase, run) in stages {
+            let (diagnostics, kept) = run(&collapsed_pad_row(&phase));
+            let refusal = diagnostics
+                .iter()
+                .find(|d| d.code == DiagnosticCode::RouteCongestion)
+                .unwrap_or_else(|| {
+                    panic!("the {stage} pass must refuse a collapsed pad row: {diagnostics:?}")
+                });
+            assert!(
+                refusal.primary.contains("output pad #0 at (1,0,0)")
+                    && refusal.primary.contains("collapses I/O pads"),
+                "the {stage} pass names which pad could not fit, where, and why: {}",
+                refusal.primary,
+            );
+            assert_eq!(
+                kept, 0,
+                "the {stage} pass elides the refused scope rather than passing it on",
+            );
+        }
+    }
+
+    /// A scope that collapses its pad row *and* strands a sink is
+    /// refused over the pad row.
+    ///
+    /// Both findings have one cause and one edit: the reserved area is
+    /// too small. `E_ROUTE_CONGESTION` says that and names the `size=`
+    /// line; `E_ROUTE_UNROUTABLE` describes a sink the router gave up
+    /// on, which is a symptom of the same shortage and sends the
+    /// author looking at their cells. Only one comes out — the pass
+    /// returns at the first — so which one is a decision, made here by
+    /// asking the pad row before the trees are grown.
+    ///
+    /// The one-input row is the control: the same walls, the same
+    /// boxed sinks, a pad column that fits. It has to keep reporting
+    /// the stranded sink, or the rule above collapses into "always say
+    /// congestion".
+    #[test]
+    fn a_scope_that_earns_both_refusals_is_refused_over_the_pad_row() {
+        for (inputs, names, why) in [
+            (1, "cannot be reached", "a pad column that fits"),
+            (3, "input pad #2", "input #2 saturating onto input #1"),
+        ] {
+            let mut ir = PlacementIr::new(Edition::Java);
+            ir.region = Some(reservation(4, 2, 1));
+            for i in 0..inputs {
+                ir.inputs.push(NetlistInput {
+                    name: cairn_lang_core::ast::DottedRef::new("sig".into(), vec![format!("s{i}")]),
+                    span: Span::default(),
+                });
+            }
+            // Input pad #0 lands at (0,0,0). Walling the row at
+            // (1,0,0) and the course above the two sinks leaves them
+            // nothing to be fed from, and `void=1` reserves no layer
+            // to come in over.
+            for coord in [
+                CellCoord::new(1, 0, 0),
+                CellCoord::new(2, 0, 1),
+                CellCoord::new(3, 0, 1),
+            ] {
+                ir.cells.push(cell(coord, Vec::new()));
+            }
+            for coord in [CellCoord::new(2, 0, 0), CellCoord::new(3, 0, 0)] {
+                ir.cells.push(cell(
+                    coord,
+                    vec![CellPortDriver {
+                        port: PortName::A,
+                        net: NetRef::Input(0),
+                    }],
+                ));
+            }
+
+            let routed = crate::routing::compile_routing(&scoped(ScopeKind::Struct, "boxed", ir));
+            let primaries: Vec<&str> = routed
+                .diagnostics
+                .iter()
+                .map(|d| d.primary.as_str())
+                .collect();
+            assert!(
+                primaries.len() == 1 && primaries[0].contains(names),
+                "{inputs} input(s), {why}: expected the one refusal naming `{names}`, got {primaries:?}",
+            );
+        }
+    }
+
+    /// An unrouted cell at `coord`, driven by `drivers`.
+    fn cell(coord: CellCoord, drivers: Vec<CellPortDriver>) -> PlacedCellNode {
+        PlacedCellNode {
+            cell: EditionCell::JavaRepeaterOr,
+            drivers,
+            coord,
+            phase: PlacementPhase::Unrouted,
+            span: Span::default(),
+        }
+    }
 }
