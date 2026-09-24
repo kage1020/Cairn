@@ -4,35 +4,6 @@
 
 ### Added
 
-- *(ci)* Every third-party GitHub Action in `.github/workflows/` was referenced by a moving tag, so
-  what ran was whatever the tag pointed at that morning. Seven actions across six workflows, now
-  pinned to a commit with the release named beside it:
-
-  ```yaml
-  - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
-  ```
-
-  Each pin is the commit its old ref resolved to at the time of the change, so nothing about what
-  CI runs changes. Two of them were worth the look on their own. `pnpm/action-setup@v6` pointed at
-  `v6.0.10` while `v6.1.0` already existed, so the float was not even tracking the newest release.
-  And `rust-lang/crates-io-auth-action@v1` is not a tag at all — `v1` is a **branch**, so any push
-  to it changed what ran, with no tag move to notice; that action mints the crates.io publishing
-  token. `actions/checkout` and `actions/setup-node` are left on tags, being GitHub's own.
-
-  A pin nobody moves is a pin that rots, and the repository had no `.github/dependabot.yml`, so
-  nothing would have proposed a bump for any of them. Added, with a `github-actions` entry that
-  groups the week's updates into one PR: Dependabot reads the `# vX.Y.Z` comment beside each SHA
-  and moves the pair together.
-
-- *(ci)* The `tree-sitter` workflow did not run when `examples/` changed, and one of its jobs reads
-  that directory. `packed-tarball` copies `examples/cottage.crn` and highlights it through the
-  npm-packed grammar, which is the check that an editor installing from npm resolves `.crn` at all,
-  and nothing else in the repository performs it. `examples/**` is now in both path filters.
-
-  The crate's own `tests/examples.rs`, which the issue names, was already covered from the other
-  side: `ci.yml` carries no path filter, so `cargo test --workspace` runs it on every push and pull
-  request regardless. The gap was the tarball job.
-
 - *(core)* An argument in a keyword's vocabulary could still be read by nothing, depending on how
   a sibling argument on the same line was written. `E_UNKNOWN_ARGUMENT` closed the case where a
   `key=` is outside the vocabulary; one level down, a key that *is* in it routed past its reader in

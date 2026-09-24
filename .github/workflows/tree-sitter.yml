@@ -6,16 +6,22 @@ on:
     tags: ["v*"]
     paths:
       - "crates/cairn-lang-tree-sitter/**"
-      # `packed-tarball` highlights `examples/cottage.crn` through the packed
-      # grammar, and `tests/examples.rs` parses every `examples/*.crn`, so a
-      # file added or reshaped there is this workflow's business even when the
-      # crate itself is untouched. `ci.yml` runs the cargo half on every push
-      # regardless, having no path filter at all; the tarball job is this
-      # workflow's alone.
+      # Two checks read `examples/` and this workflow is the only place either
+      # of them runs, so a file added or reshaped there is its business even
+      # when the crate itself is untouched. `packed-tarball` copies
+      # `examples/cottage.crn` and highlights it through the npm-packed
+      # grammar, which is the one check that an editor installing from npm
+      # resolves `.crn` at all. And `cottage_highlight_golden_is_stable` in
+      # `tests/examples.rs` needs the `tree-sitter` CLI that `pnpm install`
+      # puts in `node_modules/.bin`; without it the test prints `skip:` and
+      # returns, asserting nothing. That is what `ci.yml` gets — it runs
+      # `cargo test --workspace` on every push with no path filter, but sets up
+      # no Node, so the golden passes there whatever `cottage.crn` says.
       - "examples/**"
       - "Cargo.toml"
       - ".github/workflows/tree-sitter.yml"
   pull_request:
+    # Mirrors the `push` filter above, reasons included; keep the two in sync.
     paths:
       - "crates/cairn-lang-tree-sitter/**"
       - "examples/**"
