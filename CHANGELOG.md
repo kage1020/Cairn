@@ -168,12 +168,32 @@
   triple `resolve::resolver` keys its own ledger on is a claim about one finding, and lowering has
   two codes that would each need their own.
 
+  **This is not only about placements.** `E_INCOMPATIBLE_MATERIAL` is anchored on the theme's slot
+  value rather than on the member, so two `struct`s — or two `def`s — reading one bad slot were
+  two findings on one line and are now one. That is the anchor being taken at its word: the fix is
+  the slot line, and the finding's own note already says every member reading that slot has it too.
+  A source with no `place` in it at all can see this change.
+
   What the rule keeps apart is what says it is the right one. Two themes binding the roof slot to a
   non-stair are two findings, even when they bind the *same* non-stair, because they are two lines
   to edit. A `gable` roof and an eave `stair` reading one slot are two findings on that one line,
-  because they carry their states from different places and the messages say so. And two `place`
-  rows that lost their origin earn the same warning twice — identical text, two rows to fix — kept
-  apart by their spans alone.
+  because they carry their states from different places and the messages say so. Two `place` rows
+  that lost their origin earn the same warning twice — identical text, two rows to fix — kept apart
+  by their spans alone. And one `walls` row overwriting two earlier ones earns two
+  `W_PHASE_CONFLICT` warnings that agree on everything except which member each note points at.
+
+  One message had to change for the rule to hold. A `mat_slot=` that resolves to nothing now names
+  the theme it was read against:
+
+  ```
+  variants.crn:17:3: warning[W_DEFERRED_MEMBER]: `gable` roof's `mat_slot=` did not resolve to a block id under theme `alpha_java`; it falls back to `minecraft:spruce_stairs`
+  ```
+
+  Without the theme, two placements under two sibling-variant themes wrote the same sentence on the
+  `def`'s shared member line, and repairing one of them changed nothing the author could see. This
+  is the arm where the resolver stays deliberately silent — a slot only the `_bedrock` sibling
+  declares is softened until a pin picks a variant — so on an unpinned `cairn lower` this pass is
+  the only reporter.
 
   The resolver keeps its ledgers. There the answer is not byte equality: sibling-variant softening
   lets two resolutions of one body judge a slot differently, so a resolution that stayed silent has

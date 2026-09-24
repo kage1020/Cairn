@@ -1022,11 +1022,16 @@ pub struct DiagnosticNote {
 /// In-crate sites still build the struct directly and update in step
 /// when new fields land; cross-crate consumers must route through a
 /// future builder rather than depending on the field set being frozen.
-// `Eq` and `Hash` so a pass can ask whether it has already said this. Every
-// field is part of that identity, `span` included: two findings that agree
-// on all of them are one finding reported twice, and nothing outside the
-// struct distinguishes them. See `block_array::lower_to_block_array`, which
-// is the one caller that needs the question asked.
+///
+/// `Eq` and `Hash` let a pass ask whether it has already said this, and
+/// every field answers: two findings that agree on all of them are one
+/// finding reported twice, because nothing outside the struct distinguishes
+/// them. `block_array::lower_to_block_array` relies on that to drop the
+/// copies a def body's per-placement walk produces.
+///
+/// A field added here therefore has to be `Eq + Hash` — no `f64`, no
+/// `serde_json::Value` — or that call stops compiling, and a field left out
+/// of the identity is not an option while the derive reads all of them.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
 #[non_exhaustive]
 pub struct Diagnostic {

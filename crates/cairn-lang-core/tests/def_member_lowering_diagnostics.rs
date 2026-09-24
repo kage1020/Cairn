@@ -41,8 +41,16 @@
 //!     kept apart by their messages, and still two after two placements;
 //!  9. a `struct` — the control. Nothing places a struct, so its count was
 //!     never inflated and must not now deflate;
-//! 10. two structs earning the same finding — two members, two findings,
-//!     because a struct body is walked once each and neither is a repeat.
+//! 10. two structs reading one bad slot — still one finding, because the
+//!     anchor is the slot line and not the member, which is the contrast
+//!     with item 9;
+//! 11. two sibling-variant themes deferring one slot — two findings, each
+//!     naming its own theme. This is the case where the message had to
+//!     change for the rule to hold;
+//! 12. two phase conflicts that differ only inside a note — both survive,
+//!     because the notes are part of the identity;
+//! 13. a sizeless def placed twice — one finding, on the `def` line that is
+//!     the one thing to fix.
 
 use cairn_lang_core::block_array::lower_to_block_array;
 use cairn_lang_core::check::{Diagnostic, DiagnosticCode};
@@ -392,6 +400,159 @@ roof kind=gable mat_slot=roof overhang=1\n"
         found.len(),
         1,
         "one slot line, one edit, whatever reads it; got {:?}",
+        primaries(&found),
+    );
+}
+
+/// Two sibling-variant themes deferring one slot report once each, naming
+/// the theme that deferred.
+///
+/// The case that made `geometry_material_id`'s message name its theme. With
+/// no `--edition` pin, a slot only the `_bedrock` sibling declares is
+/// softened at the resolver — `ResolveCtx::diagnosed`'s arm stays silent —
+/// so lowering is the only reporter, and it anchors on the `def` body's
+/// member line, which every placement shares. Before the theme was in the
+/// message the two findings were byte-identical and this rule kept one:
+/// `cairn lower` then said the same thing whether both themes were broken
+/// or only one, and fixing one of them changed no output.
+#[test]
+fn two_sibling_variant_themes_deferring_one_slot_report_both() {
+    const VARIANTS: &str = "theme alpha_java:\n  \
+slot wall -> @cobblestone\n\n\
+theme alpha_bedrock:\n  \
+slot wall -> @cobblestone\n  \
+slot rooftrim -> @spruce_stairs\n\n\
+theme beta_java:\n  \
+slot wall -> @cobblestone\n\n\
+theme beta_bedrock:\n  \
+slot wall -> @cobblestone\n  \
+slot rooftrim -> @spruce_stairs\n\n\
+def hut size=9x7:\n  \
+walls mat_slot=wall height=3\n  \
+roof kind=gable mat_slot=rooftrim overhang=1\n\n\
+site s:\n  \
+place id=a use=hut theme=alpha at=origin\n  \
+place id=b use=hut theme=beta east_of=a gap=4\n";
+
+    let deferred: Vec<Diagnostic> = of_code(VARIANTS, DiagnosticCode::DeferredMember)
+        .into_iter()
+        .filter(|d| d.primary.contains("did not resolve to a block id"))
+        .collect();
+    assert_eq!(
+        deferred.len(),
+        2,
+        "two themes deferred the slot and both have to be fixed; got {:?}",
+        primaries(&deferred),
+    );
+    assert!(
+        deferred.iter().any(|d| d.primary.contains("`alpha_java`")),
+        "the finding against `alpha_java` must survive; got {:?}",
+        primaries(&deferred),
+    );
+    assert!(
+        deferred.iter().any(|d| d.primary.contains("`beta_java`")),
+        "the finding against `beta_java` must survive; got {:?}",
+        primaries(&deferred),
+    );
+    // The premise: both sit on the one `roof` line in the `def` body, so the
+    // theme in the message is the only thing separating them.
+    assert_eq!(
+        deferred[0].span, deferred[1].span,
+        "both are anchored on the shared member line",
+    );
+
+    // And the count moves when one of the two is repaired, which is what the
+    // author needs it to do.
+    let alpha_fixed = VARIANTS.replace(
+        "theme alpha_java:\n  slot wall -> @cobblestone",
+        "theme alpha_java:\n  slot wall -> @cobblestone\n  slot rooftrim -> @spruce_stairs",
+    );
+    let after: Vec<Diagnostic> = of_code(&alpha_fixed, DiagnosticCode::DeferredMember)
+        .into_iter()
+        .filter(|d| d.primary.contains("did not resolve to a block id"))
+        .collect();
+    assert_eq!(
+        after.len(),
+        1,
+        "repairing one theme leaves the other; got {:?}",
+        primaries(&after),
+    );
+    assert!(
+        after[0].primary.contains("`beta_java`"),
+        "and the one left is the one still broken; got {:?}",
+        primaries(&after),
+    );
+}
+
+/// Two findings that agree on code, span, primary and data, and differ only
+/// inside a note, are two findings.
+///
+/// `W_PHASE_CONFLICT` fans in on the member that overrides: one `walls` row
+/// overwriting two earlier ones earns two warnings on its own line, with
+/// the same voxel count in both primaries and `data: None` on both. The
+/// only thing that separates them is `notes[0].span`, which points at the
+/// member each one is about — two different lines to move.
+///
+/// So the notes are load-bearing, and so is the code beside them. No
+/// `place` is involved: a struct body is walked once, and the pass emits
+/// both of these inside that one walk.
+#[test]
+fn two_phase_conflicts_differing_only_in_a_note_both_survive() {
+    let found = of_code(
+        "theme t:\n  \
+slot a -> @cobblestone\n  \
+slot b -> @oak_planks\n  \
+slot c -> @stone\n\n\
+struct tower size=6x6:\n  \
+walls mat_slot=a height=2\n  \
+level y=2\n    \
+walls mat_slot=b height=2\n  \
+walls mat_slot=c height=4\n",
+        DiagnosticCode::PhaseConflict,
+    );
+    assert_eq!(
+        found.len(),
+        2,
+        "the overriding member conflicts with two earlier ones, and each is \
+         a line to move; got {:?}",
+        primaries(&found),
+    );
+    // The premises, asserted rather than assumed: everything outside the
+    // notes agrees, so a rule that dropped the notes from the identity —
+    // or the code — would report one of these and lose the other.
+    assert_eq!(found[0].span, found[1].span, "same overriding member line");
+    assert_eq!(found[0].primary, found[1].primary, "same primary");
+    assert_eq!(found[0].data, found[1].data, "same payload");
+    assert_ne!(
+        found[0].notes, found[1].notes,
+        "and the notes are the whole difference: each points at the member \
+         it overwrote",
+    );
+}
+
+/// A sizeless `def` placed twice is one finding, on the `def` line.
+///
+/// The collapse case with no theme in it: `diag_def_no_size` is anchored on
+/// the def header, so every placement that fails to derive a footprint
+/// produced a copy. One header is one thing to fix. The `place` rows that
+/// lost their origin are a separate finding each, which case 7 covers.
+#[test]
+fn a_sizeless_def_placed_twice_reports_its_header_once() {
+    let found = of_code(
+        &format!(
+            "{PLAIN}\
+def nosize:\n  \
+walls mat_slot=wall height=3\n\n\
+site s:\n  \
+place id=a use=nosize theme=plain at=origin\n  \
+place id=b use=nosize theme=plain at=origin\n"
+        ),
+        DiagnosticCode::DefNoSize,
+    );
+    assert_eq!(
+        found.len(),
+        1,
+        "one `def` header is one `size=WxH` to add; got {:?}",
         primaries(&found),
     );
 }
