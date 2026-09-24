@@ -12,7 +12,7 @@ Litematica `.litematic` and WorldEdit `.schem` are still to land, and no reverse
 
 ## Public API
 
-Every item the crate root re-exports, and nothing else. An item reachable only through a module path — `portability::PortabilityEntries`, `registry::AliasCatalog`, anything under `registry::manifest` — is deliberately absent: this table answers "what can I call after `use cairn_lang_formats::*`", not "what is `pub` somewhere in the tree". A test holds it to that in both directions, so a re-export added without a row fails the build.
+Every item the crate root re-exports, and nothing else. An item reachable only through a module path — `portability::PortabilityEntries`, `registry::AliasCatalog`, anything under `registry::blocks` — is deliberately absent: this table is the names you can write unqualified after `use cairn_lang_formats::*`, not everything that is `pub` somewhere in the tree. A test holds it to that in both directions, so a re-export added without a row fails `cargo test --workspace` and names the item.
 
 | Item | Role |
 |---|---|

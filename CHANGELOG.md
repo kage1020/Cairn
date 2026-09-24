@@ -162,8 +162,9 @@
 
   **What the heading means is now written down.** The crate root's `pub use` re-exports, and
   nothing else. An item that is only `pub` inside a module — `registry::AliasCatalog`, anything
-  under `registry::manifest` — is deliberately off the table. Both READMEs say so, and
-  `CONTRIBUTING.md` says it beside the rule for the two tables that were already guarded.
+  under `registry::blocks` — is deliberately off the table. Both READMEs say so, and
+  `CONTRIBUTING.md` and `CONTRIBUTING.ja.md` say it beside the rule that now counts all four
+  crate-README inventories as guarded rather than two.
 
   A test holds both tables to it in either direction, so a `pub use` added without a row fails
   `cargo test --workspace` and names the item, as `cairn-lang-core`'s module table and
