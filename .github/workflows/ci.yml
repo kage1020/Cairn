@@ -48,8 +48,10 @@ jobs:
     # a literal string, so renaming this job un-gates it silently.
     name: MSRV
     runs-on: ubuntu-latest
-    # Why this job exists, and why it runs `check --locked
-    # --all-features` rather than `test`: CONTRIBUTING.md, "Toolchain".
+    # Why this job exists — including what it catches that
+    # `clippy::incompatible_msrv` at the pin does not — and why it runs
+    # `check --locked --all-features` rather than `test`:
+    # CONTRIBUTING.md, "Bumping the toolchain".
     env:
       # Not `-D warnings`. A consumer at the floor does not build with
       # it, and an older compiler warns about things the pin has since
