@@ -148,7 +148,9 @@ The pin is deliberately not a channel. On `stable`, a Rust release turns every o
 
 Change `channel`, run the three CI commands above (a new compiler can produce a *rustc* warning, not just a clippy lint), fix what it found in the same PR, and type the commit `ci`. A diff that is only "new compiler, plus the fixes it asked for" is one a reviewer can actually read.
 
-The pin is not the MSRV. `rust-version` in the workspace manifest is the floor a consumer needs to build Cairn, and it moves only when the code genuinely starts requiring a newer compiler. Nothing in CI builds at that floor, so a change reaching for a recently stabilised API goes green on the pin while consumers at the declared floor break. `cargo +<floor> check --workspace` is what catches it, and is worth running when you touch a new API.
+The pin is not the MSRV. `rust-version` in the workspace manifest is the floor a consumer needs to build Cairn, and the pin is always newer. A change reaching for a recently stabilised API is green at the pin and broken at the floor, and CI's `MSRV` job is what catches it: it reads `rust-version` back out of the manifest with `cargo metadata` — no second copy to go stale — installs that compiler, and runs `cargo check --workspace --locked --all-features` at it. `check` rather than `test`, because the floor is about compiling the crates a consumer depends on; dev-dependencies are free to want a newer compiler than the library does.
+
+Raising `rust-version` changes who can build the crates, so it is not a quiet manifest edit. Type the commit `build` — which cuts a patch release, so the new floor reaches crates.io — and add a `CHANGELOG.md` entry saying which compiler is now required and what needed it. A consumer pinned below the new floor learns about it from cargo either way; the entry is what tells them why.
 
 ## Versioning
 

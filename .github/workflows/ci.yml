@@ -42,3 +42,75 @@ jobs:
 
       - name: Test
         run: cargo test --workspace --locked
+
+  msrv:
+    name: MSRV / check at the declared floor
+    runs-on: ubuntu-latest
+    # `rust-version` says which compiler a consumer needs. The job above
+    # builds at the pin, which is always newer, so it green-lights a
+    # change reaching for an API stabilised after the floor and the
+    # consumer is the one who finds out. Nothing else checks this
+    # direction: a pin *below* the floor is refused by cargo already.
+    env:
+      # Not `-D warnings`. A consumer at the floor does not build with
+      # it, and an older compiler warns about things the pin has since
+      # renamed or stopped emitting — which would fail this job for a
+      # reason that is not "cannot build at the floor".
+      RUSTFLAGS: ""
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install pinned toolchain
+        run: rustup show
+
+      - name: Read the floor out of the manifest
+        id: floor
+        # One source for the version. Hard-coding it here would be a
+        # second copy of `rust-version` with nothing comparing them, and
+        # the copy is what goes stale. `--no-deps` keeps this to the
+        # workspace's own crates; every one of them has to agree, so a
+        # crate that dropped `rust-version.workspace = true` and picked
+        # its own floor fails here rather than going unchecked.
+        run: |
+          set -euo pipefail
+          declared=$(cargo metadata --format-version 1 --no-deps \
+            | jq -r '[.packages[] | .rust_version // "none"] | unique | join(" ")')
+          if [ "$declared" = "none" ]; then
+            echo "::error::no workspace crate declares rust-version, so there is no floor to check"
+            exit 1
+          fi
+          case "$declared" in
+            *\ *)
+              echo "::error::workspace crates declare more than one floor ($declared) — this job can only check one"
+              exit 1
+              ;;
+          esac
+          echo "version=$declared" >> "$GITHUB_OUTPUT"
+
+      - name: Install the floor toolchain
+        run: rustup toolchain install "${{ steps.floor.outputs.version }}" --profile minimal
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          # The floor in the key: cargo fingerprints on the rustc
+          # version anyway, but two different floors sharing one cache
+          # entry would mean each invalidating the other's work.
+          shared-key: msrv-${{ steps.floor.outputs.version }}
+          save-if: ${{ github.ref == 'refs/heads/canary' || github.ref == 'refs/heads/main' }}
+
+      # `check`, not `test`: the floor is about compiling the crates a
+      # consumer depends on. Dev-dependencies and the test harness are
+      # free to want a newer compiler than the library does.
+      #
+      # `--all-features`, because `rust-version` is one declaration per
+      # package and cargo has no way to say "this floor, unless you
+      # enable that feature". A feature that cannot build at the floor
+      # makes the manifest wrong for whoever enables it.
+      #
+      # `--locked`, because the committed lockfile is what a consumer
+      # cloning the repo resolves to. When the failure is a dependency's
+      # own floor rather than Cairn's code, cargo names the package.
+      - name: Check at the floor
+        run: cargo +"${{ steps.floor.outputs.version }}" check --workspace --locked --all-features
