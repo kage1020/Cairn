@@ -217,6 +217,31 @@ pub fn lower_to_block_array(
     // around. The sort is stable, so two findings on one span keep the
     // order the passes raised them in.
     diagnostics.sort_by_key(|d| (d.span.start, d.span.end));
+    // A lowering diagnostic's identity is the diagnostic. Two that agree on
+    // code, span, message, notes and data are one finding reported twice,
+    // and the second copy is an artifact of how this pass walks rather than
+    // anything the author can act on: a `def` body is voxelised once per
+    // `place` that instantiates it, so a finding about the def — or about
+    // the theme `slot` line the def reads — comes back once per placement,
+    // byte-for-byte the same. Three placements used to mean three copies of
+    // `E_INCOMPATIBLE_MATERIAL`, each anchored on the same theme line and
+    // each ending in a note saying every member reading that slot has it too.
+    //
+    // Stated here rather than per code, and enforced in the one place that
+    // already owns what this pass reports, because per-code identity is the
+    // thing that would have to be re-derived for every finding lowering
+    // learns to raise. A finding that genuinely is per-placement carries the
+    // placement already and survives untouched: its span is the `place` row,
+    // or its message names the id, the theme or the target the placement
+    // resolved to. `resolve::resolver` keeps its own ledgers
+    // (`ResolveCtx::diagnosed`, `reported_missing`) because there the answer
+    // is not byte equality — sibling-variant softening lets two resolutions
+    // of one body judge a slot differently — so that rule stays where it is.
+    //
+    // After the sort, so the copy that survives is the first in source
+    // order; `retain` keeps the rest in place.
+    let mut said: HashSet<Diagnostic> = HashSet::new();
+    diagnostics.retain(|d| said.insert(d.clone()));
 
     BlockArrayIr {
         structures,
