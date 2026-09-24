@@ -1,0 +1,41 @@
+# Without this file nothing proposes a bump for a SHA-pinned action, and a pin
+# with nobody moving it is a pin that silently rots. Every third-party action
+# in `.github/workflows/` is pinned to a commit, so this entry is what turns
+# those pins from frozen into maintained: Dependabot resolves each SHA to the
+# release tag pointing at it, finds the newer release, and rewrites both the
+# SHA and the `# vX.Y.Z` comment beside it. The comment is an output Dependabot
+# maintains, not an input it reads — a wrong one misleads a human reader and
+# nothing else.
+#
+# `actions/checkout` and `actions/setup-node` are deliberately left on their
+# major tags. That is accepted risk, not an absence of it: those tags are
+# mutable by design, repointed at each `v6.x.y`, and `actions/checkout` is the
+# first step of every credentialed job here — including the two that hold
+# `id-token: write`, where it runs before any pinned action sees the workspace.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      # `ci`, not `build(deps)`: this changes CI configuration and no dependency
+      # a crate ships. `release-plz.toml` skips `^ci` and releases `^build`, so
+      # a `build` prefix would be a trap for whoever adds `cargo` or `npm` here
+      # later — those bumps do touch package files, and would land a changelog
+      # entry nobody asked for.
+      prefix: ci
+    groups:
+      # Grouping collapses the number of PRs and CI round-trips, not the number
+      # of SHA diffs a reviewer reads — that stays one per action either way.
+      # Split in two so a major bump to an action that holds credentials never
+      # arrives alongside a cache patch. Dependabot puts a dependency in the
+      # first group it matches, so this one has to stay above the catch-all.
+      release-credentials:
+        patterns:
+          - "rust-lang/crates-io-auth-action"
+          - "release-plz/action"
+          - "sigstore/cosign-installer"
+          - "softprops/action-gh-release"
+      actions:
+        patterns: ["*"]
