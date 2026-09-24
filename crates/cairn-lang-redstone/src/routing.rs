@@ -260,10 +260,7 @@ mod tests {
     use crate::edition_netlist_ir::EditionCell;
     use crate::logic_ir::ScopeKind;
     use crate::netlist_ir::{CellPortDriver, NetRef, PortName};
-    use crate::placement_ir::{
-        CellCoord, CircuitRegionReservation, PlacedCellNode, PlacedOutputNode, PlacementIr,
-        PlacementPhase,
-    };
+    use crate::placement_ir::{CellCoord, PlacedCellNode, PlacementIr, PlacementPhase};
     use crate::test_fixtures::{reservation, scoped};
 
     fn placed_cell(coord: CellCoord, phase: PlacementPhase) -> PlacedCellNode {
@@ -442,118 +439,6 @@ mod tests {
         }
         for coord in dust {
             owner.insert(*coord, net);
-        }
-    }
-
-    /// A pad the reservation cannot fit is refused, and the scope is
-    /// elided rather than routed against a collapsed pad row.
-    ///
-    /// `input_pad` and `output_pad` saturate their z at `depth - 1`, so
-    /// a reservation too shallow for the pad row lands two pads on one
-    /// coord, or a pad on a cell body. Both are tested here as pure
-    /// functions elsewhere; what those functions saturate *into* is
-    /// this refusal, and nothing reached it before — a false negative
-    /// is not a missing diagnostic, it is two nets sharing a source
-    /// coord and a `wire_length` measured against it.
-    ///
-    /// Hand-built because the placement pass refuses a scope whose row
-    /// is short before routing sees it, so the shapes below are only
-    /// reachable through a caller assembling the IR itself.
-    #[test]
-    fn a_pad_row_the_reservation_cannot_fit_is_refused() {
-        /// One shallow reservation, and the pad the refusal has to
-        /// name once its z saturates onto something already there.
-        struct Row {
-            region: CircuitRegionReservation,
-            inputs: usize,
-            kind: &'static str,
-            index: usize,
-            coord: &'static str,
-        }
-
-        let rows = [
-            Row {
-                // depth 2 leaves two rows for the pad column, so
-                // input #2 saturates onto input #1.
-                region: reservation(4, 2, 1),
-                inputs: 3,
-                kind: "input",
-                index: 2,
-                coord: "(0,0,1)",
-            },
-            Row {
-                // depth 1 leaves none at all, so the actuator pad lands
-                // on the cell at the right-hand edge.
-                region: reservation(2, 1, 1),
-                inputs: 1,
-                kind: "output",
-                index: 0,
-                coord: "(1,0,0)",
-            },
-        ];
-
-        for Row {
-            region,
-            inputs,
-            kind,
-            index,
-            coord,
-        } in rows
-        {
-            let mut ir = PlacementIr::new(Edition::Java);
-            let pad = crate::routing_geometry::output_pad(0, &region);
-            ir.region = Some(region);
-            for name in 0..inputs {
-                ir.inputs.push(crate::netlist_ir::NetlistInput {
-                    name: cairn_lang_core::ast::DottedRef::new(
-                        "sig".into(),
-                        vec![format!("s{name}")],
-                    ),
-                    span: Span::default(),
-                });
-            }
-            ir.cells.push(PlacedCellNode {
-                cell: EditionCell::JavaRepeaterOr,
-                drivers: vec![CellPortDriver {
-                    port: PortName::A,
-                    net: NetRef::Input(0),
-                }],
-                coord: CellCoord::new(1, 0, 0),
-                phase: PlacementPhase::Unrouted,
-                span: Span::default(),
-            });
-            ir.outputs.push(PlacedOutputNode::new(
-                cairn_lang_core::ast::DottedRef::new("sig".into(), vec!["out".into()]),
-                NetRef::Cell(0),
-                pad,
-                Span::default(),
-            ));
-
-            let routed = compile_routing(&scoped(ScopeKind::Struct, "shallow", ir));
-            let refusal = routed
-                .diagnostics
-                .iter()
-                .find(|d| d.code == crate::DiagnosticCode::RouteCongestion)
-                .unwrap_or_else(|| {
-                    panic!(
-                        "a {kind} pad on a taken coord must refuse: {:?}",
-                        routed.diagnostics
-                    )
-                });
-            assert!(
-                refusal.primary.contains(&format!("{kind} pad #{index}")),
-                "the refusal names which pad could not fit: {}",
-                refusal.primary,
-            );
-            assert!(
-                refusal.primary.contains(coord) && refusal.primary.contains("collapses I/O pads"),
-                "and where, and why: {}",
-                refusal.primary,
-            );
-            assert!(
-                routed.scoped.scopes.is_empty(),
-                "the failed scope is elided rather than routed against a collapsed pad row",
-            );
         }
     }
 

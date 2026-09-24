@@ -150,23 +150,28 @@
   that in its own occupancy seed; the delay and crossing passes rebuilt the same block list, built
   a router over it and laid nets against it without ever asking.
 
-  In a full run the asymmetry is invisible, because routing elides the scope and the later stages
-  never see one. It is reachable from anything that hands a later stage an IR directly — an
-  in-crate caller, or a resume from a dumped stage. What came out then was not a wrong diagnostic
-  but a plausible circuit: two blocks on one voxel is a net whose source and sink are the same
-  coord, so the wire length is small, the tick count is under every cap, and the dump reads as a
-  layout that works.
+  A `cairn` run cannot see the asymmetry: routing runs first and elides the scope, so the later
+  stages never meet one. What reaches them is a caller that assembles the Placement IR itself —
+  an in-crate test, or a library consumer calling `compile_delay` or `compile_crossing`, both of
+  which the crate root re-exports. What came out then was not a wrong diagnostic but a plausible
+  circuit: two blocks on one voxel is a net whose source and sink are the same coord, so the wire
+  length is small, the tick count is under every cap, and the dump reads as a layout that works.
 
   The refusal now sits beside the stranded-sink refusal it is the sibling of, in the routine all
   three stages already call to lay their nets. Both findings are `E_ROUTE_CONGESTION` and only one
   comes out, so which one is now stated rather than incidental: the pad row first, because the
   stranded sink is a symptom of the same shortage and the shared code leaves an author nothing
-  else to tell them apart by.
+  else to tell them apart by. Its fix line also stops disagreeing with the placement pass's, which
+  refuses the same shape one stage earlier: `depth >= max(inputs, outputs)`, one row per sensor or
+  actuator, not that plus one.
 
-  The check also reads a coord the way the router keys it rather than raw. `CellCoord`'s fields
-  are public, so `(x, 1, z, Plane)` and `(x, 1, z, Bridge)` can both be written for one voxel —
-  two coords to a raw comparison, one obstacle to the router. The refusal had been on the raw side
-  of that, which is the direction that lets a real collision through.
+  **Two cells on one coord now panic** where they used to pass all three stages in silence. That
+  is the same failure — one voxel, a zero-length net, a plausible dump — but no `size=` repairs
+  it, because a cell's coord comes from its topological index rather than from the reservation.
+  It is an IR the caller built wrong, so it asserts, as this crate already does for a broken
+  topological invariant. Nothing the pipeline produces can reach it; a caller hand-building a
+  scope with two cells on one coord gets a panic naming the coord instead of a circuit that
+  looks fine.
 
 - *(formats,docs)* `cairn-lang-formats`' README named 13 of the 36 items the crate root
   re-exports. The `## Public API` table is what crates.io shows as the answer to "what can I

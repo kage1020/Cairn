@@ -94,7 +94,9 @@ impl CrossingOutput {
 ///
 /// One entry per non-empty [`PlacementIr`] whose legalization
 /// succeeded; a scope that raises [`DiagnosticCode::NoCircuitRegion`]
-/// or the routing re-check's [`DiagnosticCode::RouteCongestion`] is
+/// or either [`DiagnosticCode::RouteCongestion`] that
+/// [`crate::pass::lay_nets`] raises — a pad row the reservation cannot
+/// hold, or a sink no route reaches — is
 /// elided from the output so a partial `buffer_coords` set cannot
 /// pollute the downstream block-array voxel lowering. Every finding
 /// this pass makes refuses its scope, so there is no warning that
@@ -406,8 +408,10 @@ mod tests {
         });
         // `(1, 0, 1)` is what the placement pass stamps for the first
         // cell of a scope. The pad column is `x = 0`, so a cell at the
-        // origin would stand on input pad #0 — which every stage now
-        // refuses, and which this fixture is not about.
+        // origin stands on input pad #0 — which every stage refuses,
+        // and which this fixture is not about. It would also make the
+        // assertion below vacuous: pad and cell on one coord is a
+        // zero-length net, which needs no buffer whatever the rule is.
         ir.cells.push(placed_cell(
             EditionCell::JavaRepeaterOr,
             CellCoord::new(1, 0, 1),
@@ -1640,14 +1644,33 @@ mod tests {
         /// — which is how the invariant below could be stated in
         /// attributions and still hold.
         ///
-        /// Changing the tuple invalidates every persisted seed in
-        /// `proptest-regressions/crossing.txt`: a seed is an RNG
-        /// state, so it replays as an unrelated value under a
-        /// different shape rather than failing to load. Anything a
+        /// Duplicate `(x, z)` pairs are dropped, because two cells on
+        /// one coord is not a scope the placement pass can emit — it
+        /// derives a cell's column from its topological index — and
+        /// `collapsed_block` asserts on one. Before that assert
+        /// existed a repeated pair generated a degenerate scope, two
+        /// blocks on one voxel with a zero-length net between them,
+        /// and the invariant held over it without meaning much. The
+        /// first of each pair is kept, so at least one cell survives.
+        ///
+        /// The dedup is a `prop_map` over the same tuple rather than a
+        /// constrained strategy on purpose: changing the tuple
+        /// invalidates every persisted seed in
+        /// `proptest-regressions/crossing.txt`, because a seed is an
+        /// RNG state and replays as an unrelated value under a
+        /// different shape rather than failing to load. Mapping the
+        /// generated value leaves the draw identical, so the seeds
+        /// still replay the cases they were recorded for. Anything a
         /// retired seed was holding has to be written as a named test
-        /// before the shape changes.
+        /// before the shape itself changes.
         fn phase4_scope_strategy() -> impl Strategy<Value = Vec<(u32, u32, bool)>> {
-            prop::collection::vec((1u32..=99u32, 0u32..8u32, prop::bool::ANY), 1..=3)
+            prop::collection::vec((1u32..=99u32, 0u32..8u32, prop::bool::ANY), 1..=3).prop_map(
+                |mut cells| {
+                    let mut seen: HashSet<(u32, u32)> = HashSet::new();
+                    cells.retain(|(x, z, _)| seen.insert((*x, *z)));
+                    cells
+                },
+            )
         }
 
         proptest! {

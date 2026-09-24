@@ -140,9 +140,11 @@ impl DelayOutput {
 /// has no `IntentModule` dependency.
 ///
 /// One entry per non-empty [`PlacementIr`] whose delay insertion
-/// succeeded; scopes that raise an Error-severity diagnostic (today,
-/// only `E_ATTENUATION_LIMIT`) are elided from the output so a partial
-/// `local_delay_ticks` set cannot pollute a downstream reader.
+/// succeeded; scopes that raise an Error-severity diagnostic are
+/// elided from the output so a partial `local_delay_ticks` set cannot
+/// pollute a downstream reader. This pass raises `E_ATTENUATION_LIMIT`
+/// itself, and carries the two `E_ROUTE_CONGESTION` refusals and the
+/// `E_NO_CIRCUIT_REGION` that [`crate::pass`] asks on its behalf.
 #[must_use]
 pub fn compile_delay(routed: &ScopedPlacementIr) -> DelayOutput {
     let (scoped, diagnostics) = lower_scopes(routed, |entry| {

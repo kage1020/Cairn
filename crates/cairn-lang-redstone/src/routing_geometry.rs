@@ -101,8 +101,9 @@ pub(crate) fn coord_key(coord: CellCoord) -> (u32, u32, u32) {
 /// v1 input-pad coordinate: left edge (`x=0`), first service layer
 /// (`y=0`), z-axis increasing as the input index grows. Saturates at
 /// `depth-1` when the input count would push z past the region; the
-/// resulting overlap is caught at seeding time and surfaces as
-/// `E_ROUTE_CONGESTION` rather than a silent misroute.
+/// resulting overlap is what [`collapsed_block`] finds, and every pass
+/// that lays nets surfaces it as `E_ROUTE_CONGESTION` rather than a
+/// silent misroute.
 pub(crate) fn input_pad(i: usize, region: &CircuitRegionReservation) -> CellCoord {
     edge_pad(i, 0, region)
 }
@@ -207,10 +208,16 @@ pub(crate) struct BlockSite {
 /// pads.
 ///
 /// The one derivation of "what is already standing in the reservation".
-/// The routing pass reads it to refuse a pad row that cannot fit, all
-/// three passes hand it to [`Router::new`], and [`Router::dust`] reads
-/// it back out of a tree to tell a net's wire from its terminals. A
-/// second list built anywhere else is a second thing to keep in step.
+/// [`crate::pass::lay_nets`] reads it to refuse a pad row that cannot
+/// fit and then builds the [`Router`] from it, so all three passes get
+/// one list and one router from it; [`Router::dust`] reads it back out
+/// of a tree to tell a net's wire from its terminals. A second list
+/// built anywhere else is a second thing to keep in step.
+///
+/// The order is load-bearing for [`collapsed_block`], which asserts on
+/// the second of two cells sharing a coord and reports the second of
+/// any other pair. `block_sites_lists_cells_then_input_pads_then_output_pads`
+/// holds it.
 pub(crate) fn block_sites(ir: &PlacementIr, region: &CircuitRegionReservation) -> Vec<BlockSite> {
     let mut sites = Vec::with_capacity(ir.cells.len() + ir.inputs.len() + ir.outputs.len());
     for (index, cell) in ir.cells.iter().enumerate() {
@@ -889,35 +896,61 @@ pub(crate) fn net_order(nets: &HashMap<NetRef, Vec<CellCoord>>) -> Vec<NetRef> {
     order
 }
 
-/// The first block standing on a coord another block already holds, or
-/// `None` when every block has a coord of its own. The block it names
-/// is the one that landed second, which is always the pad:
-/// [`block_sites`] lists cells, then input pads, then output pads.
+/// The first pad standing on a coord another block already holds, or
+/// `None` when every block has a coord of its own. Panics when two
+/// cells share one.
 ///
 /// What this finds is a pad the reservation is too shallow to hold,
 /// stacked onto a cell or onto another pad: pad coords step from
 /// `z = i` and saturate at `depth - 1`, so a pad row taller than the
-/// reservation piles up on the last row. Two cells cannot collide — a
-/// cell's x is derived from its topological index, so each has a column
-/// of its own — which is why a repeat on a `Cell` is not the refusal.
+/// reservation piles up on the last row. That is a reservation an
+/// author can enlarge, so it earns a diagnostic.
 ///
-/// Asked by all three passes, for the reason [`unroutable`] is: two
-/// blocks on one coord make one of them something the router routes
-/// *to* and the other a coord it will route *through*, and the dump
-/// that comes out reads as a layout. Stage 2 elides such a scope, so in
-/// a real run stages 3 and 4 never see one; an in-crate caller that
-/// skipped stage 2 hands them one directly.
+/// Two cells on one coord is not that. It is an IR no `size=` can
+/// repair: a cell's coord comes from its topological index in the
+/// placement pass, so a repeat means the caller assembled the list
+/// itself and got it wrong. Every caller of this function has skipped
+/// that pass by construction — that is the whole reason it is asked —
+/// so "the placement pass would not do that" is not a guarantee any
+/// of them hold, and the two blocks are as silent as the pad pair:
+/// one net whose source and sink are the same coord, a wire length
+/// under every cap, a dump that reads as a layout. It asserts, the way
+/// [`collect_nets`]' callers do for a broken topological invariant.
+///
+/// So the block returned is always a pad. A repeated cell never comes
+/// back from here, and [`block_sites`] lists cells before pads, so a
+/// list carrying both faults asserts rather than reporting the pad.
+///
+/// Asked by all three passes, for the reason [`unroutable`] is: stage
+/// 2 elides such a scope, so in a real run stages 3 and 4 never see
+/// one, and a caller that assembled the IR itself hands them one
+/// directly.
 ///
 /// The coords come through [`keyed`], the way [`Router::new`] keys the
-/// same list. Comparing them raw would let a hand-built
-/// `(x, 1, z, Plane)` sit beside a `(x, 1, z, Bridge)` as two coords
-/// here and one obstacle there — which is the collision this refuses,
-/// slipping past the refusal.
+/// same list. Nothing [`block_sites`] builds needs it — every coord
+/// there is already canonical — but the fields of [`CellCoord`] are
+/// public, so a hand-built `(x, 1, z, Plane)` beside a
+/// `(x, 1, z, Bridge)` is two coords to a raw comparison and one
+/// obstacle to the router. Comparing them the router's way is what
+/// keeps this function's answer and the router's world the same.
 pub(crate) fn collapsed_block(blocks: &[BlockSite]) -> Option<&BlockSite> {
     let mut seen: HashSet<CellCoord> = HashSet::with_capacity(blocks.len());
-    blocks
-        .iter()
-        .find(|site| !seen.insert(keyed(site.coord)) && site.kind != BlockKind::Cell)
+    blocks.iter().find(|site| {
+        if seen.insert(keyed(site.coord)) {
+            return false;
+        }
+        assert!(
+            site.kind != BlockKind::Cell,
+            "two cells stand on ({x},{y},{z}) — a cell's coord is derived from its topological \
+             index by the placement pass, so a repeat is an IR the caller assembled itself rather \
+             than a reservation too small for its pad row. There is no `size=` that repairs it and \
+             so no diagnostic to raise",
+            x = site.coord.x,
+            y = site.coord.y,
+            z = site.coord.z,
+        );
+        true
+    })
 }
 
 /// The refusal a scope earns when the reservation cannot wire one of
@@ -2943,41 +2976,57 @@ mod tests {
         );
     }
 
-    /// Two cells on one coord are not this refusal, and a pad on a
-    /// cell still is.
+    /// Two cells on one coord assert rather than returning a pad
+    /// refusal or a quiet `None`.
     ///
-    /// A cell's x is derived from its topological index, so two cells
-    /// cannot share a column and a repeat on a `Cell` means a
-    /// hand-built IR rather than a reservation too small. The pad row
-    /// is what saturates, so the pad is what the refusal is about; the
-    /// second row is here so the guard cannot widen into "ignore any
-    /// repeat".
+    /// No `size=` repairs it — a cell's coord comes from its
+    /// topological index, not from the reservation — so there is no
+    /// diagnostic to raise and nothing for an author to act on. A
+    /// `None` would leave the pair standing: one net whose source and
+    /// sink are the same coord, and a dump that reads as a layout,
+    /// which is the failure the pad refusal exists to prevent.
     ///
-    /// The guard reads the *second* block of the pair, which is always
-    /// the pad: [`block_sites`] lists cells, then input pads, then
-    /// output pads, and
-    /// `block_sites_lists_cells_then_input_pads_then_output_pads`
-    /// holds it to that order.
+    /// The message names the coord, because a caller assembling a
+    /// block list by hand has nothing else to go on.
     #[test]
-    fn a_repeated_cell_coord_is_not_the_pad_refusal() {
+    #[should_panic(expected = "two cells stand on (1,0,1)")]
+    fn two_cells_on_one_coord_is_a_caller_bug_and_says_so() {
         let two_cells = [
             site(BlockKind::Cell, 0, CellCoord::new(1, 0, 1)),
             site(BlockKind::Cell, 1, CellCoord::new(1, 0, 1)),
         ];
-        assert!(
-            collapsed_block(&two_cells).is_none(),
-            "a repeated cell coord is a caller-side IR bug, not a pad row that would not fit",
-        );
+        let _ = collapsed_block(&two_cells);
+    }
 
-        let cell_then_pad = [
+    /// The cell fault is found even when a pad fault stands later in
+    /// the list.
+    ///
+    /// [`block_sites`] lists cells first, so the assert is reached
+    /// before any pad repeat. Reporting the pad instead would hand the
+    /// author a `size=` to enlarge for an IR that enlarging cannot
+    /// fix.
+    #[test]
+    #[should_panic(expected = "two cells stand on (1,0,1)")]
+    fn a_cell_fault_outranks_a_pad_fault_later_in_the_list() {
+        let both = [
             site(BlockKind::Cell, 0, CellCoord::new(1, 0, 1)),
             site(BlockKind::Cell, 1, CellCoord::new(1, 0, 1)),
+            site(BlockKind::InputPad, 0, CellCoord::new(1, 0, 1)),
+        ];
+        let _ = collapsed_block(&both);
+    }
+
+    /// One cell with a pad on it is still the pad refusal, so the
+    /// assert did not widen into "any repeat is a caller bug".
+    #[test]
+    fn a_pad_on_a_single_cell_is_still_the_pad_refusal() {
+        let cell_then_pad = [
+            site(BlockKind::Cell, 0, CellCoord::new(1, 0, 1)),
             site(BlockKind::InputPad, 0, CellCoord::new(1, 0, 1)),
         ];
         assert_eq!(
             collapsed_block(&cell_then_pad).map(|s| s.kind),
             Some(BlockKind::InputPad),
-            "and it does not swallow the pad that landed on them",
         );
     }
 

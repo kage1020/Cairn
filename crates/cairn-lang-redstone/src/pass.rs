@@ -152,9 +152,12 @@ pub(crate) fn source_of_net_lenient<'a>(
 /// apart by.
 ///
 /// Both are asked by all three passes, and for one reason. Stage 2
-/// elides the scope that earns either, so in a real run stages 3 and 4
-/// never see one — but an in-crate caller that skipped stage 2 hands
-/// them one directly, and neither failure announces itself downstream.
+/// elides the scope that earns either, and the CLI always runs it, so
+/// through `cairn` stages 3 and 4 never see one. What reaches them is
+/// a caller that assembled the IR itself: an in-crate test, or a
+/// library consumer calling [`crate::compile_delay`] or
+/// [`crate::compile_crossing`] directly, both of which the crate root
+/// re-exports. Neither failure announces itself downstream.
 /// A stranded sink's route is one step: under every cap, worth no
 /// repeater, and indistinguishable in the dump from a circuit that
 /// works. A collapsed pad makes one of the two blocks something the
@@ -195,7 +198,13 @@ where
 /// could not hold it.
 ///
 /// `E_ROUTE_CONGESTION`, because the cause is the reserved area: the
-/// pad row wants `depth >= max(inputs, outputs) + 1` and has less.
+/// pad row wants a row per sensor or actuator and has fewer.
+///
+/// `depth >= max(inputs, outputs)`, not `+ 1`. `edge_pad` saturates at
+/// `z = min(index, depth - 1)`, so N pads collide only once `N > depth`
+/// — and the placement pass guards on exactly that number
+/// (`pad_rows > reservation.depth`). Two stages under one code have to
+/// hand the author the same arithmetic.
 fn pad_overlap_diagnostic(
     entry: &ScopedPlacementIrEntry,
     reservation: &CircuitRegionReservation,
@@ -218,7 +227,7 @@ fn pad_overlap_diagnostic(
         DiagnosticCode::RouteCongestion,
         reservation.span.clone(),
         primary,
-        "Fix: enlarge `size=WxH` so `depth >= max(inputs, outputs) + 1`, or split into multiple `circuit` blocks",
+        "Fix: enlarge `size=WxH` so `depth >= max(inputs, outputs)` — one row per sensor or actuator — or split into multiple `circuit` blocks",
     )
 }
 
@@ -329,44 +338,62 @@ mod tests {
     use crate::placement_ir::{
         CellCoord, PlacedCellNode, PlacementIr, PlacementPhase, ScopedPlacementIr,
     };
-    use crate::test_fixtures::{collapsed_pad_row, reservation, scoped};
+    use crate::test_fixtures::{CollapsedRow, collapsed_pad_row, reservation, scoped};
 
     /// A reservation too shallow to hold its pad row is refused by
     /// stage 2, stage 3 and stage 4 alike, and the scope is elided
     /// rather than measured against a collapsed layout.
     ///
-    /// Only the routing pass used to ask. The other two built a
-    /// `Router` over the same collapsed block list and laid nets
-    /// against it, so a caller reaching them without stage 2 — an
-    /// in-crate test, a resume from a dump — got an IR whose actuator
-    /// pad and cell body are one voxel, with a `wire_length` and a
-    /// tick count measured against it. Nothing downstream says so: the
+    /// What the refusal prevents is an IR whose actuator pad and cell
+    /// body are one voxel carrying a `wire_length` and a tick count
+    /// measured against itself. Nothing downstream says so: the
     /// numbers are small and plausible, and the dump reads as a
-    /// layout.
+    /// layout. The stages that can be handed one without stage 2
+    /// having run are stages 3 and 4, reached by a caller that
+    /// assembled the IR itself — an in-crate test, or a library
+    /// consumer calling `compile_delay` or `compile_crossing`, which
+    /// the crate root re-exports.
     ///
-    /// Written per stage rather than per pass because the asymmetry
-    /// was the three stages disagreeing about one geometry; a case
-    /// that asked only the stage under test could not have failed on
-    /// two of them at once.
+    /// Written per stage rather than per pass because what is being
+    /// held is that the three answer one geometry the same way; a case
+    /// that asked only the stage under test could not fail on two of
+    /// them at once. Both ends of the pad column are rowed, because
+    /// they saturate onto different things — the actuator column onto
+    /// the cell row, the sensor column onto its own previous pad — and
+    /// the message names which. `input_pad` and `output_pad` are
+    /// tested as pure functions in `routing_geometry`; what their
+    /// saturation feeds into is this refusal.
+    ///
+    /// Hand-built, because the placement pass refuses a region this
+    /// small one stage earlier and the CLI always runs it. That is not
+    /// a reason to leave the shape untested: it is the shape a library
+    /// consumer reaches, and until this change two of the three stages
+    /// took it without a word.
     #[test]
     fn every_stage_refuses_a_reservation_too_shallow_for_its_pad_row() {
         type Stage = (
             &'static str,
             PlacementPhase,
-            fn(&ScopedPlacementIr) -> (Vec<crate::diagnostic::Diagnostic>, usize),
+            fn(&ScopedPlacementIr) -> (Vec<crate::diagnostic::Diagnostic>, Vec<String>),
         );
 
         let stages: [Stage; 3] = [
             ("routing", PlacementPhase::Unrouted, |scoped| {
                 let out = crate::routing::compile_routing(scoped);
-                (out.diagnostics, out.scoped.scopes.len())
+                (
+                    out.diagnostics,
+                    out.scoped.scopes.iter().map(|e| e.name.clone()).collect(),
+                )
             }),
             (
                 "delay",
                 PlacementPhase::Routed { wire_length: 0 },
                 |scoped| {
                     let out = crate::delay::compile_delay(scoped);
-                    (out.diagnostics, out.scoped.scopes.len())
+                    (
+                        out.diagnostics,
+                        out.scoped.scopes.iter().map(|e| e.name.clone()).collect(),
+                    )
                 },
             ),
             (
@@ -377,28 +404,70 @@ mod tests {
                 },
                 |scoped| {
                     let out = crate::crossing::compile_crossing(scoped);
-                    (out.diagnostics, out.scoped.scopes.len())
+                    (
+                        out.diagnostics,
+                        out.scoped.scopes.iter().map(|e| e.name.clone()).collect(),
+                    )
                 },
             ),
         ];
 
-        for (stage, phase, run) in stages {
-            let (diagnostics, kept) = run(&collapsed_pad_row(&phase));
-            let refusal = diagnostics
-                .iter()
-                .find(|d| d.code == DiagnosticCode::RouteCongestion)
-                .unwrap_or_else(|| {
-                    panic!("the {stage} pass must refuse a collapsed pad row: {diagnostics:?}")
-                });
+        let mut said: Vec<(CollapsedRow, Vec<String>)> = Vec::new();
+        for row in [CollapsedRow::OutputOntoCell, CollapsedRow::InputOntoInput] {
+            let (kind, index, coord) = row.names();
+            let mut primaries = Vec::new();
+            for (stage, phase, run) in &stages {
+                let (diagnostics, kept) = run(&collapsed_pad_row(phase, row));
+                let refusal = diagnostics
+                    .iter()
+                    .find(|d| d.code == DiagnosticCode::RouteCongestion)
+                    .unwrap_or_else(|| {
+                        panic!("the {stage} pass must refuse a collapsed pad row: {diagnostics:?}")
+                    });
+                assert!(
+                    refusal
+                        .primary
+                        .contains(&format!("{kind} pad #{index} at {coord}"))
+                        && refusal.primary.contains("collapses I/O pads"),
+                    "the {stage} pass names which pad could not fit, where, and why: {}",
+                    refusal.primary,
+                );
+                primaries.push(refusal.primary.clone());
+                assert_eq!(
+                    kept,
+                    vec!["roomy".to_owned()],
+                    "the {stage} pass elides the refused scope and only that one",
+                );
+                // The fix line and the span are what an author acts on, and
+                // nothing else in the crate asserts either. The span is the
+                // reservation's, because `size=` is the edit.
+                let footer = refusal
+                    .notes
+                    .iter()
+                    .find(|n| n.message.starts_with("Fix:"))
+                    .unwrap_or_else(|| panic!("the {stage} refusal carries a fix line"));
+                assert!(
+                    footer.message.contains("depth >= max(inputs, outputs)")
+                        && !footer.message.contains("+ 1"),
+                    "the fix line gives the same arithmetic as the placement pass: {}",
+                    footer.message,
+                );
+                assert_eq!(
+                    refusal.span,
+                    row.span(),
+                    "the {stage} refusal anchors on the `circuit region=` line, not on a cell",
+                );
+            }
+            said.push((row, primaries));
+        }
+
+        // One geometry, one sentence. A stage that refused for the
+        // right reason in different words would still leave an author
+        // comparing two messages to see they are the same finding.
+        for (row, primaries) in said {
             assert!(
-                refusal.primary.contains("output pad #0 at (1,0,0)")
-                    && refusal.primary.contains("collapses I/O pads"),
-                "the {stage} pass names which pad could not fit, where, and why: {}",
-                refusal.primary,
-            );
-            assert_eq!(
-                kept, 0,
-                "the {stage} pass elides the refused scope rather than passing it on",
+                primaries.windows(2).all(|w| w[0] == w[1]),
+                "{row:?}: the three stages word the refusal identically, got {primaries:?}",
             );
         }
     }
@@ -406,13 +475,15 @@ mod tests {
     /// A scope that collapses its pad row *and* strands a sink is
     /// refused over the pad row.
     ///
-    /// Both findings have one cause and one edit: the reserved area is
-    /// too small. `E_ROUTE_CONGESTION` says that and names the `size=`
-    /// line; `E_ROUTE_UNROUTABLE` describes a sink the router gave up
-    /// on, which is a symptom of the same shortage and sends the
-    /// author looking at their cells. Only one comes out — the pass
-    /// returns at the first — so which one is a decision, made here by
-    /// asking the pad row before the trees are grown.
+    /// Both are `E_ROUTE_CONGESTION`, so the code tells the author
+    /// nothing about which they have, and both have one cause and one
+    /// edit: the reserved area is too small. The pad-row message says
+    /// that and names the `size=` line. The stranded-sink message
+    /// describes a sink the router gave up on, which is a symptom of
+    /// the same shortage and sends the author looking at their cells.
+    /// Only one comes out — the pass returns at the first — so which
+    /// one is a decision, made here by asking the pad row before the
+    /// trees are grown.
     ///
     /// The one-input row is the control: the same walls, the same
     /// boxed sinks, a pad column that fits. It has to keep reporting
@@ -421,7 +492,11 @@ mod tests {
     #[test]
     fn a_scope_that_earns_both_refusals_is_refused_over_the_pad_row() {
         for (inputs, names, why) in [
-            (1, "cannot be reached", "a pad column that fits"),
+            // `cannot reach (x,y,z)`, not `cannot be reached`: the
+            // latter is only in the plural suffix, so a row keyed on
+            // it would pass on the count of stranded sinks rather than
+            // on the finding being the stranded-sink one.
+            (1, "cannot reach (2,0,0)", "a pad column that fits"),
             (3, "input pad #2", "input #2 saturating onto input #1"),
         ] {
             let mut ir = PlacementIr::new(Edition::Java);
@@ -462,6 +537,13 @@ mod tests {
             assert!(
                 primaries.len() == 1 && primaries[0].contains(names),
                 "{inputs} input(s), {why}: expected the one refusal naming `{names}`, got {primaries:?}",
+            );
+            // The premise of the paragraph above: one code for both, so
+            // the message is all the author has to tell them apart.
+            assert_eq!(
+                routed.diagnostics[0].code,
+                DiagnosticCode::RouteCongestion,
+                "{inputs} input(s): both refusals are E_ROUTE_CONGESTION",
             );
         }
     }

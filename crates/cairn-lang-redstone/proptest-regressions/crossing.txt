@@ -6,3 +6,7 @@
 # everyone who runs the test benefits from these saved cases.
 cc c86c04b255c5f46b2e7baf901930de0e933fb71bd270aae3bf00b78c6b49fdb8 # shrinks to xs = [(87, 2, false), (2, 0, false), (84, 5, true)]
 cc 6a9965d351585b4e36292a6384c30ff88b00ff0295da819ff2bfb84ffc6ef69e # shrinks to xs = [(13, 4, true)]
+# Two draws landing on one (x, z). Recorded when `collapsed_block`
+# learned to assert on a repeated cell coord; kept because it is the
+# case `phase4_scope_strategy`'s dedup exists for.
+cc 039865256bba38ce5f4e545660791dd29075cde264920cd883dcff2022e52f9d # shrinks to xs = [(46, 3, false), (46, 3, false)]
