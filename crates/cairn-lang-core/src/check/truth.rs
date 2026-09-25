@@ -151,7 +151,17 @@ fn check_table(assertion: &AssertIr, sink: &mut DiagnosticSink) {
         }
     }
 
-    if coverage_is_countable && let Some(finding) = unassigned_combinations(span, arity, &accepted)
+    // A table every row of which declines to assert an output is the
+    // empty table written at length, so it earns the empty table's
+    // finding — and not the coverage one beside it, which would bill the
+    // same repair twice. The rows that were dropped as overlaps cannot
+    // rescue it: a dropped row is not read, and one that was would be a
+    // `-` too, since a concrete output among them would have kept the
+    // row it answers to out of `accepted` in the first place.
+    if accepted.iter().all(|row| row.output.is_none()) {
+        sink.push(asserts_nothing(span, arity));
+    } else if coverage_is_countable
+        && let Some(finding) = unassigned_combinations(span, arity, &accepted)
     {
         sink.push(finding);
     }
@@ -217,10 +227,52 @@ fn empty_table(span: &Span, arity: u32) -> Diagnostic {
     }
 }
 
+/// What to do about a row that constrains a combination an overlapping row
+/// declines to, or the other way round.
+///
+/// Not a conflict: no circuit is being asked for two outputs, so the code
+/// stays in the duplicate-row family. But the repair is not the
+/// duplicate-row family's either — "delete either row" is what a pair
+/// saying the same thing earns, and these two do not say the same thing,
+/// so which one goes changes the table.
+const UNCONSTRAINED_FIX: &str = "Fix: delete whichever of the two you did not mean — a `-` output says the combination is \
+     deliberately unconstrained, and the other row constrains it, so the table reads differently \
+     depending on which one stays";
+
+/// A table with rows, none of which asserts an output.
+///
+/// The same code as [`empty_table`], because it is the same table: a row
+/// whose output is `-` marks its combinations as deliberately
+/// unconstrained, and a table of nothing but those constrains nothing.
+/// The sentence differs because the repair does — there are rows to
+/// change here, not rows to add.
+fn asserts_nothing(span: &Span, arity: u32) -> Diagnostic {
+    Diagnostic {
+        code: DiagnosticCode::TruthTableEmpty,
+        span: span.clone(),
+        primary: "every row of this `assert truth` has a `-` output, so it verifies nothing"
+            .to_owned(),
+        notes: vec![DiagnosticNote {
+            span: None,
+            message: format!(
+                "Fix: give at least one row a `0` or `1` output, or delete the assertion — a \
+                 `-` output says a combination is deliberately unconstrained, which is only \
+                 worth writing beside combinations that are constrained (this table has \
+                 {total} to choose from)",
+                total = total_combinations(arity),
+            ),
+        }],
+        data: None,
+    }
+}
+
 /// A row assigning a combination an earlier row already assigned.
 ///
-/// One code when the two outputs differ and another when they agree: the
-/// repairs are different work, and severity is a property of the code.
+/// One code when the two outputs contradict each other and another when
+/// they do not: the repairs are different work, and severity is a property
+/// of the code. Only two concrete outputs can contradict — a `-` asserts
+/// nothing to be contradicted, so a `-` meeting a `0` is the second code,
+/// a row written twice rather than a circuit asked for two things.
 ///
 /// The agreeing case carries three sentences rather than one, because the
 /// repair is three different edits. A row repeating an earlier pattern
@@ -230,33 +282,60 @@ fn empty_table(span: &Span, arity: u32) -> Diagnostic {
 /// crossing an earlier one — `-1` against `0-` — asserts something the
 /// earlier row does not, so deleting it would lose coverage, and the edit
 /// is to narrow one of the two.
+///
+/// A `-` output beside a concrete one is a fourth sentence and neither
+/// code's usual repair: the rows do not contradict, since a `-` asserts
+/// nothing to contradict, but they do not agree either, and deleting the
+/// wrong one changes what the table says. Splitting it off is also what
+/// lets the three sentences below name one output for both rows, which
+/// they have to, since each is about what the table already says.
 fn overlapping_row(row: &TruthRow, first: &TruthRow) -> Diagnostic {
     let pattern = &row.inputs;
     let earlier = &first.inputs;
     let shared = shared_combination(earlier, pattern);
-    if row.output != first.output {
-        return finding(
+    // Everything below the match reads one output for both rows, which is
+    // only sound once the cases where they say different things are gone.
+    let disagreement = match (row.output, first.output) {
+        (Some(later), Some(earlier_output)) if later != earlier_output => Some((
             DiagnosticCode::TruthTableConflict,
-            row,
-            first,
-            &shared,
             format!(
                 "this row assigns `{shared}` the output `{output}`, and an earlier row assigns \
                  it `{other}`",
-                output = bit(row.output),
-                other = bit(first.output),
+                output = bit(later),
+                other = bit(earlier_output),
             ),
             "Fix: decide which of the two the circuit should do and change or delete the other \
              row — no circuit produces both outputs for one input combination"
                 .to_owned(),
-        );
+        )),
+        (None, Some(assigned)) => Some((
+            DiagnosticCode::TruthTableDuplicateRow,
+            format!(
+                "this row leaves `{shared}` unconstrained, and the earlier row `{earlier}` \
+                 assigns it the output `{output}`",
+                output = bit(assigned),
+            ),
+            UNCONSTRAINED_FIX.to_owned(),
+        )),
+        (Some(assigned), None) => Some((
+            DiagnosticCode::TruthTableDuplicateRow,
+            format!(
+                "this row assigns `{shared}` the output `{output}`, and the earlier row \
+                 `{earlier}` leaves it unconstrained",
+                output = bit(assigned),
+            ),
+            UNCONSTRAINED_FIX.to_owned(),
+        )),
+        _ => None,
+    };
+    if let Some((code, primary, fix)) = disagreement {
+        return finding(code, row, first, &shared, primary, fix);
     }
     let (primary, fix) = if pattern == earlier {
         (
             format!(
-                "this row repeats an earlier one: `{pattern}` is already assigned the output \
-                 `{output}`",
-                output = bit(row.output),
+                "this row repeats an earlier one: `{pattern}` is already assigned {outcome}",
+                outcome = outcome(first.output),
             ),
             "Fix: delete either row — the table asserts the same thing without it".to_owned(),
         )
@@ -264,8 +343,8 @@ fn overlapping_row(row: &TruthRow, first: &TruthRow) -> Diagnostic {
         (
             format!(
                 "this row asserts nothing new: the earlier row `{earlier}` already assigns \
-                 `{pattern}` the output `{output}`",
-                output = bit(row.output),
+                 `{pattern}` {outcome}",
+                outcome = outcome(first.output),
             ),
             "Fix: delete this row — the earlier pattern's `-` already stands for it".to_owned(),
         )
@@ -500,4 +579,15 @@ fn total_combinations(arity: u32) -> String {
 
 fn bit(output: bool) -> char {
     if output { '1' } else { '0' }
+}
+
+/// How a row's output reads inside a sentence about what it assigns.
+///
+/// A `-` output is not a third value the circuit can produce, so it is
+/// named as the absence it is rather than rendered as a bit.
+fn outcome(output: Option<bool>) -> String {
+    match output {
+        Some(value) => format!("the output `{}`", bit(value)),
+        None => "no output, by its `-`".to_owned(),
+    }
 }

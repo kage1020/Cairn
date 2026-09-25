@@ -89,10 +89,12 @@ pub enum TokenKind {
     Arrow,
     /// `-` on its own.
     ///
-    /// Two constructs read one, and neither is an operator. A truth
-    /// row's pattern spells a don't-care input `-`, and the parser
-    /// reassembles the run of `Int` and `Minus` tokens the lexer split
-    /// it into. It is also lexed rather than refused so a version label
+    /// Two constructs read one, and neither is an operator. Both are in
+    /// a truth row: a `-` in the input pattern is a don't-care, which the
+    /// parser reassembles out of the run of `Int` and `Minus` tokens the
+    /// lexer split it into, and a `-` in the output position is the row
+    /// declining to constrain what it covers. It is also lexed rather
+    /// than refused so a version label
     /// carrying a pre-release suffix —
     /// `@requires version>=1.21.4-rc1`, a shape `spec/versioning-editions`
     /// "Which labels a floor may use" and `spec/syntax` "Headers" accept —

@@ -422,6 +422,25 @@ const FIXTURES: &[(&str, &str, Verdict)] = &[
         "struct s size=3x3\n  assert truth(a.b, c.d -> e.f) { --->1 }\n",
         Accept,
     ),
+    // A `-` on the output side. The arrow is behind the parser by then,
+    // so there is no character to share and the two spellings are one
+    // row — which is exactly what the comparison below has to see, since
+    // acceptance alone cannot tell a `-` output from a `0` one.
+    (
+        "truth_dash_output",
+        "struct s size=3x3\n  assert truth(a, b, c -> z) { 000 -> - }\n",
+        Accept,
+    ),
+    (
+        "truth_dash_output_run_together",
+        "struct s size=3x3\n  assert truth(a, b, c -> z) { 000->- }\n",
+        Accept,
+    ),
+    (
+        "truth_dash_output_under_a_dont_care_pattern",
+        "struct s size=3x3\n  assert truth(a, b, c -> z) { 00--> - }\n",
+        Accept,
+    ),
     // A pattern is the characters the source ran together, so a space
     // ends it and the `1` after it is a token the row has no place for.
     (
@@ -1197,7 +1216,7 @@ fn accepted_sources_place_every_member_at_the_same_depth() {
     assert!(wrong.is_empty(), "{}", wrong.join("\n"));
 }
 
-/// The two parsers read the same characters out of a truth row.
+/// The two parsers read the same row out of a truth row.
 ///
 /// Accept/reject parity cannot see this one. `bit_pattern` is a token, so
 /// the corpus writes it `(bit_pattern)` with no text, and a grammar that
@@ -1208,8 +1227,11 @@ fn accepted_sources_place_every_member_at_the_same_depth() {
 /// That is not a hypothetical: it is what a plain `/[01-]+/` token does,
 /// because the lexer takes the longest run it can and `-` and `->` share
 /// a character. The external scanner exists for this test.
+///
+/// The output travels with the pattern for the same reason: `-` and `0`
+/// are different rows that build the same tree shape.
 #[test]
-fn both_parsers_read_the_same_pattern_out_of_a_row() {
+fn both_parsers_read_the_same_row() {
     let mut parser = new_parser();
     let mut wrong = Vec::new();
     for (name, source, expected) in FIXTURES {
@@ -1220,11 +1242,11 @@ fn both_parsers_read_the_same_pattern_out_of_a_row() {
             continue;
         };
         let tree = parser.parse(source, None).expect("parse produced no tree");
-        let core = core_patterns(&module);
+        let core = core_rows(&module);
         if core.is_empty() {
             continue;
         }
-        let grammar = grammar_patterns(tree.root_node(), source);
+        let grammar = grammar_rows(tree.root_node(), source);
         if core != grammar {
             wrong.push(format!(
                 "{name}: the reference parser reads {core:?}, the grammar {grammar:?}\n  source: {source:?}"
@@ -1236,8 +1258,8 @@ fn both_parsers_read_the_same_pattern_out_of_a_row() {
     assert!(wrong.is_empty(), "{}", wrong.join("\n"));
 }
 
-/// Every truth row's input pattern in a module, in source order.
-fn core_patterns(module: &cairn_lang_core::ast::Module) -> Vec<String> {
+/// Every truth row in a module as `PATTERN OUTPUT`, in source order.
+fn core_rows(module: &cairn_lang_core::ast::Module) -> Vec<String> {
     use cairn_lang_core::ast::{Item, Statement};
     let mut out = Vec::new();
     for item in &module.items {
@@ -1246,7 +1268,13 @@ fn core_patterns(module: &cairn_lang_core::ast::Module) -> Vec<String> {
         };
         for statement in body {
             if let Statement::AssertTruth { rows, .. } = statement {
-                out.extend(rows.iter().map(|row| row.inputs.clone()));
+                out.extend(rows.iter().map(|row| {
+                    let output = match row.output {
+                        Some(bit) => u8::from(bit).to_string(),
+                        None => "-".to_owned(),
+                    };
+                    format!("{} {output}", row.inputs)
+                }));
             }
         }
     }
@@ -1254,14 +1282,26 @@ fn core_patterns(module: &cairn_lang_core::ast::Module) -> Vec<String> {
 }
 
 /// The same list read off the tree-sitter tree.
-fn grammar_patterns(node: tree_sitter::Node<'_>, source: &str) -> Vec<String> {
+///
+/// A `truth_row` holds the pattern and the output and nothing else, so
+/// the two are read off its fields rather than by collecting token kinds
+/// — which would also pick up the `bit` of an unrelated rule if one ever
+/// grew a use for it.
+fn grammar_rows(node: tree_sitter::Node<'_>, source: &str) -> Vec<String> {
     let mut out = Vec::new();
-    if node.kind() == "bit_pattern" {
-        out.push(node.utf8_text(source.as_bytes()).expect("utf-8").to_owned());
+    if node.kind() == "truth_row" {
+        let text = |field: &str| {
+            node.child_by_field_name(field)
+                .unwrap_or_else(|| panic!("a `truth_row` has a `{field}` field"))
+                .utf8_text(source.as_bytes())
+                .expect("utf-8")
+                .to_owned()
+        };
+        out.push(format!("{} {}", text("inputs"), text("output")));
     }
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
-        out.extend(grammar_patterns(child, source));
+        out.extend(grammar_rows(child, source));
     }
     out
 }

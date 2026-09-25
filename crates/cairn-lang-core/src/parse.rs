@@ -795,14 +795,22 @@ impl<'a> Parser<'a> {
                 });
             }
             self.expect(&TokenKind::Arrow)?;
-            let out_lex = self.expect_int_lexeme()?;
-            let output = match out_lex.as_str() {
-                "0" => false,
-                "1" => true,
-                other => {
-                    return Err(self.syntax_here(&format!(
-                        "truth-table output must be `0` or `1`, got `{other}`"
-                    )));
+            let output = if self.peek_is(&TokenKind::Minus) {
+                // A `-` output asserts nothing about this combination.
+                // The arrow has already been taken, so a lone `-` here is
+                // never the arrow's own dash.
+                self.advance();
+                None
+            } else {
+                let out_lex = self.expect_int_lexeme()?;
+                match out_lex.as_str() {
+                    "0" => Some(false),
+                    "1" => Some(true),
+                    other => {
+                        return Err(self.syntax_here(&format!(
+                            "truth-table output must be `0`, `1`, or `-`, got `{other}`"
+                        )));
+                    }
                 }
             };
             rows.push(TruthRow {

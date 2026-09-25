@@ -34,7 +34,11 @@ fn rows_of(source: &str) -> Vec<String> {
         for statement in body {
             if let Statement::AssertTruth { rows, .. } = statement {
                 for row in rows {
-                    out.push(format!("{} {}", row.inputs, u8::from(row.output)));
+                    let output = match row.output {
+                        Some(bit) => u8::from(bit).to_string(),
+                        None => "-".to_owned(),
+                    };
+                    out.push(format!("{} {}", row.inputs, output));
                 }
             }
         }
@@ -252,4 +256,44 @@ fn a_row_past_the_arity_is_refused_by_the_arity_and_not_by_a_ceiling() {
         text.contains("21 bits wide") && text.contains("20 inputs"),
         "the row should be refused for its width against the table, not for its value: {text}",
     );
+}
+
+/// A `-` on the output side says the row's combinations are deliberately
+/// unconstrained.
+///
+/// The arrow is already behind the parser here, so unlike the input side
+/// there is no character to share and no spelling to get right: `-> -`
+/// and `->-` are the same row.
+#[test]
+fn an_output_may_be_a_dash() {
+    for (rows, inputs, want) in [
+        ("00 -> -", "sig.a, sig.b", "00 -"),
+        ("00->-", "sig.a, sig.b", "00 -"),
+        ("-- -> -", "sig.a, sig.b", "-- -"),
+        ("0--> -", "sig.a, sig.b", "0- -"),
+    ] {
+        assert_eq!(rows_of(&body(rows, inputs)), vec![want.to_owned()]);
+    }
+}
+
+/// And the output alphabet is those three characters and nothing else.
+///
+/// Keyed on the message naming the character it refused rather than on
+/// `is_err()`: a `2` output and a missing output are both refusals, and
+/// only one of them is this test's subject.
+#[test]
+fn an_output_must_be_zero_one_or_a_dash() {
+    let text = refusal(&body("00->2", "sig.a, sig.b"));
+    assert!(
+        text.contains("`2`") && text.contains("`0`, `1`, or `-`"),
+        "the message should quote the output and the characters allowed: {text}",
+    );
+}
+
+/// A row whose output is missing altogether is still a refusal, so the
+/// `-` did not turn the output into an optional field.
+#[test]
+fn an_output_is_still_required() {
+    assert!(!refusal(&body("00->", "sig.a, sig.b")).is_empty());
+    assert!(!refusal(&body("00", "sig.a, sig.b")).is_empty());
 }

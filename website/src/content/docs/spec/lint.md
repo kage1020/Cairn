@@ -340,9 +340,9 @@ resolution the spec mandates still happens — the finding says which voxel it h
 
 | Code | Meaning |
 |---|---|
-| `E_TRUTH_TABLE_EMPTY` | An `assert truth(...)` with no rows. |
+| `E_TRUTH_TABLE_EMPTY` | An `assert truth(...)` with no rows, or none whose output is `0` or `1`. |
 | `E_TRUTH_TABLE_CONFLICT` | Two rows assign the same input combination different outputs. |
-| `W_TRUTH_TABLE_DUPLICATE_ROW` | Two rows assign the same input combination the same output. |
+| `W_TRUTH_TABLE_DUPLICATE_ROW` | Two rows cover the same input combination without contradicting each other. |
 | `W_TRUTH_TABLE_PARTIAL` | The rows leave input combinations unassigned. |
 
 Both codes are reported on the later row, with a note at the first row assigning that combination.
@@ -353,6 +353,14 @@ A `-` makes the same combination reachable from rows that do not look alike, so 
 about the combination rather than about the pattern: `0-` and `-1` both assign `01`. The fix
 differs with the shape. A row inside an earlier one — `01` under `0-` — is deleted. Two rows that
 merely cross are narrowed, because deleting either would lose the combinations only it assigns.
+
+A `-` **output** is the one shape that is neither a conflict nor a repeat: the row declines to
+constrain its combinations, so there is nothing for a concrete output to contradict, and nothing
+for it to agree with either. The pair is `W_TRUTH_TABLE_DUPLICATE_ROW`, and its fix names the
+asymmetry — whichever of the two rows is deleted, the table reads differently afterwards. A table
+with rows but no `0` or `1` output among them constrains nothing, which is why
+`E_TRUTH_TABLE_EMPTY` covers it too; the sentence differs from the no-rows one, because the repair
+is to change a row rather than to add one.
 
 The two warnings are warnings because every row present is still a real constraint. One table can
 earn both `W_TRUTH_TABLE_DUPLICATE_ROW` and `W_TRUTH_TABLE_PARTIAL`: a repeated row, or one inside

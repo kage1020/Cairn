@@ -122,8 +122,15 @@ module.exports = grammar({
     // can, so `/[01-]+/` reads `11--` out of `11--> 0` and leaves a bare
     // `>` this rule's arrow cannot use. The scanner chooses where the
     // token ends instead of falling into it.
-    truth_row: $ => seq(field('inputs', $.bit_pattern), '->', field('output', $.bit)),
+    truth_row: $ => seq(
+      field('inputs', $.bit_pattern),
+      '->',
+      field('output', choice($.bit, $.dont_care)),
+    ),
     bit: $ => token(/[01]/),
+    // A `-` output. The arrow has already been taken by the time this can
+    // match, so unlike the input side there is no character to share.
+    dont_care: $ => token('-'),
 
     temporal_form: $ => seq('always', '(', $.temporal_expr, ')'),
 

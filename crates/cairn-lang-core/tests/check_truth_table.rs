@@ -62,6 +62,20 @@ fn underlined(source: &str, span: &std::ops::Range<usize>) -> String {
     source[span.clone()].to_owned()
 }
 
+/// The coverage clause alone, so a test can compare two tables' counts
+/// without either assertion carrying the rest of the sentence.
+fn found_covers(found: &Diagnostic) -> String {
+    assert_eq!(found.code.as_str(), "W_TRUTH_TABLE_PARTIAL");
+    let text = found.primary.clone();
+    let start = text
+        .find("assigns")
+        .expect("the coverage sentence says `assigns`");
+    let end = text
+        .find(" combinations")
+        .expect("and `combinations` after the counts");
+    text[start..end].to_owned()
+}
+
 // -- a table that says something -----------------------------------------
 
 /// The shape every other test is a deviation from.
@@ -556,5 +570,131 @@ fn the_walk_steps_over_a_row_rather_than_through_it() {
             format!("1{}10", "0".repeat(17)),
             format!("1{}11", "0".repeat(17)),
         ],
+    );
+}
+
+// -- don't-care outputs ---------------------------------------------------
+
+/// The shape this construct exists for: a table whose author means to
+/// constrain half the combinations and to say nothing about the other
+/// half.
+///
+/// Written out of the issue that asked for it — three inputs, one of them
+/// an enable, and every combination with the enable low deliberately
+/// unconstrained. Without the `-` output the four enabled rows raise
+/// `W_TRUTH_TABLE_PARTIAL`, and the only ways to answer it were to assert
+/// four outputs the author does not mean or to leave the warning standing.
+#[test]
+fn a_dash_output_answers_the_coverage_finding() {
+    let enabled = "001 -> 0; 011 -> 1; 101 -> 1; 111 -> 1";
+    assert_eq!(
+        codes(&table("sig.a, sig.b, sig.enable", enabled)),
+        vec!["W_TRUTH_TABLE_PARTIAL"],
+    );
+    assert!(
+        codes(&table(
+            "sig.a, sig.b, sig.enable",
+            &format!("{enabled}; --0 -> -"),
+        ))
+        .is_empty(),
+    );
+}
+
+/// A `-` output covers its combinations without asserting anything about
+/// them, so it moves the coverage count and nothing else.
+#[test]
+fn a_dash_output_counts_toward_coverage_like_any_other_row() {
+    let without = only(&table("sig.a, sig.b, sig.c", "00- -> 0"));
+    let with = only(&table("sig.a, sig.b, sig.c", "00- -> 0; 01- -> -"));
+    assert_eq!(found_covers(&without), "assigns 2 of the 8");
+    assert_eq!(found_covers(&with), "assigns 4 of the 8");
+}
+
+/// A table of nothing but `-` outputs is the empty table written at
+/// length, and earns the empty table's error rather than a coverage
+/// warning it would pass.
+#[test]
+fn a_table_of_only_dash_outputs_verifies_nothing() {
+    let found = only(&table("sig.a, sig.b", "0- -> -; 1- -> -"));
+    assert_eq!(found.code.as_str(), "E_TRUTH_TABLE_EMPTY");
+    assert!(
+        rendered(&found).contains("every row")
+            && rendered(&found).contains("give at least one row a `0` or `1` output"),
+        "the sentence has to send the author to the rows, not ask for more of them: {}",
+        rendered(&found),
+    );
+}
+
+/// The table above is complete by the coverage arithmetic, which is
+/// exactly why the finding cannot be left to it.
+#[test]
+fn a_complete_table_of_dash_outputs_is_still_refused() {
+    assert_eq!(
+        codes(&table("sig.a, sig.b", "-- -> -")),
+        vec!["E_TRUTH_TABLE_EMPTY"],
+    );
+}
+
+/// A `-` asserts nothing for a concrete output to contradict, so the pair
+/// is not a circuit asked for two things — but it is not two rows saying
+/// the same thing either, and the finding has to say which.
+#[test]
+fn a_dash_output_contradicts_nothing_and_agrees_with_nothing() {
+    let source = complete_plus("00 -> 0; 00 -> -");
+    let found = only(&source);
+    assert_eq!(found.code.as_str(), "W_TRUTH_TABLE_DUPLICATE_ROW");
+    assert!(
+        rendered(&found).contains("this row leaves `00` unconstrained")
+            && rendered(&found).contains("assigns it the output `0`"),
+        "the sentence has to say which row does which: {}",
+        rendered(&found),
+    );
+    assert_eq!(underlined(&source, &found.span), "00 -> -");
+}
+
+/// And the same pair the other way round, which is the reading the fix
+/// sentence turns on: whichever row stays, the table says something
+/// different, so "delete either row" would be wrong here.
+#[test]
+fn a_row_under_an_earlier_dash_output_names_the_earlier_row_as_the_lenient_one() {
+    let source = table("sig.a, sig.b", "0- -> -; 01 -> 1; 10 -> 0; 11 -> 0");
+    let found = only(&source);
+    assert_eq!(found.code.as_str(), "W_TRUTH_TABLE_DUPLICATE_ROW");
+    assert!(
+        rendered(&found).contains("this row assigns `01` the output `1`")
+            && rendered(&found).contains("the earlier row `0-` leaves it unconstrained"),
+        "the earlier row's `-` output is what the author has to see: {}",
+        rendered(&found),
+    );
+    assert!(
+        rendered(&found).contains("delete whichever of the two you did not mean")
+            && !rendered(&found).contains("delete either row"),
+        "deleting either row changes the table, so the fix may not offer both: {}",
+        rendered(&found),
+    );
+    assert_eq!(underlined(&source, &found.span), "01 -> 1");
+}
+
+/// Two `-` rows over one combination *do* say the same thing, so that
+/// pair keeps the duplicate-row family's own repair.
+#[test]
+fn two_dash_outputs_over_one_combination_are_an_ordinary_repeat() {
+    let source = table("sig.a, sig.b", "0- -> -; 01 -> -; 10 -> 0; 11 -> 0");
+    let found = only(&source);
+    assert_eq!(found.code.as_str(), "W_TRUTH_TABLE_DUPLICATE_ROW");
+    assert!(
+        rendered(&found).contains("already assigns `01` no output, by its `-`")
+            && rendered(&found).contains("delete this row"),
+        "two rows that both decline are a line to delete: {}",
+        rendered(&found),
+    );
+}
+
+/// A `-` output does not launder a real contradiction sitting beside it.
+#[test]
+fn a_dash_output_elsewhere_leaves_a_conflict_a_conflict() {
+    assert_eq!(
+        codes(&table("sig.a, sig.b", "0- -> -; 10 -> 0; 10 -> 1; 11 -> 0")),
+        vec!["E_TRUTH_TABLE_CONFLICT"],
     );
 }

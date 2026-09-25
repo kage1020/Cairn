@@ -573,8 +573,17 @@
           "type": "FIELD",
           "name": "output",
           "content": {
-            "type": "SYMBOL",
-            "name": "bit"
+            "type": "CHOICE",
+            "members": [
+              {
+                "type": "SYMBOL",
+                "name": "bit"
+              },
+              {
+                "type": "SYMBOL",
+                "name": "dont_care"
+              }
+            ]
           }
         }
       ]
@@ -584,6 +593,13 @@
       "content": {
         "type": "PATTERN",
         "value": "[01]"
+      }
+    },
+    "dont_care": {
+      "type": "TOKEN",
+      "content": {
+        "type": "STRING",
+        "value": "-"
       }
     },
     "temporal_form": {

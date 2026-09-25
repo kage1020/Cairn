@@ -216,9 +216,9 @@ fn parses_assert_truth() {
     assert_eq!(output, &dr(&["sig", "open"]));
     assert_eq!(rows.len(), 4);
     assert_eq!(rows[0].inputs, "00");
-    assert!(!rows[0].output);
+    assert_eq!(rows[0].output, Some(false));
     assert_eq!(rows[3].inputs, "11");
-    assert!(rows[3].output);
+    assert_eq!(rows[3].output, Some(true));
 }
 
 #[test]

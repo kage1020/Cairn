@@ -51,13 +51,20 @@ input is a don't-care is therefore written `11--> 0` or `11- -> 0`; both are the
 row. Whitespace ends a pattern, so `0- 1 -> 1` is a two-wide pattern and a stray `1`, not a
 three-wide row.
 
+A row's **output** is `0`, `1`, or `-` as well, and there it means something else: the row's
+combinations are deliberately unconstrained. `--0 -> -` says the table has nothing to say about any
+combination with a low third input, which is what answers `W_TRUTH_TABLE_PARTIAL` without asserting
+four outputs the author does not mean. The arrow is already read by then, so `-> -` and `->-` are
+the same row. A table every row of which has a `-` output constrains nothing and is
+`E_TRUTH_TABLE_EMPTY`, the same as a table with no rows.
+
 The table around those rows is read the same way:
 
 | Case | Code |
 |---|---|
-| No rows at all | `E_TRUTH_TABLE_EMPTY` |
+| No rows at all, or no row with a `0` or `1` output | `E_TRUTH_TABLE_EMPTY` |
 | Two rows assign one input combination different outputs | `E_TRUTH_TABLE_CONFLICT` (on the later row) |
-| Two rows assign one input combination the same output | `W_TRUTH_TABLE_DUPLICATE_ROW` (on the later row) |
+| Two rows cover one input combination without contradicting each other | `W_TRUTH_TABLE_DUPLICATE_ROW` (on the later row) |
 | Some input combinations are unassigned | `W_TRUTH_TABLE_PARTIAL` |
 
 The last two are warnings because the rows that *are* present still assert what they say. A
