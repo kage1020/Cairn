@@ -727,8 +727,16 @@ mod tests {
             "the refusal must name the scope it belongs to, got {:?}",
             refusal.primary,
         );
+        // Which of the two checks answered. Both say "routed netlist"
+        // from this pass and both carry `E_ATTENUATION_LIMIT`, so the
+        // noun and the code tell them apart from nothing — the wording
+        // of the measurement is the only thing that does. Asserting the
+        // gate's phrase is absent as well, because a fixture that
+        // drifted into tripping the straight-line gate would satisfy
+        // every other line here while testing the wrong pass.
         assert!(
-            refusal.primary.contains("routed"),
+            refusal.primary.contains("has a driver segment of")
+                && !refusal.primary.contains("in a straight line"),
             "this is the routed-length check, not the straight-line gate, got {:?}",
             refusal.primary,
         );
