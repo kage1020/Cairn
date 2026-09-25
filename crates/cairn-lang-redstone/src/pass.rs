@@ -71,6 +71,9 @@ pub(crate) struct OpenScope {
     /// Snapshot of every cell's coord, so `ir.cells` can be borrowed
     /// mutably while a `NetRef → source coord` closure reads these.
     pub(crate) cell_coords: Vec<CellCoord>,
+    /// `ir.inputs.len()`, for the same reason and read by the same
+    /// closure: the bound `NetRef::Input(i)` is checked against.
+    pub(crate) inputs: usize,
     /// Every block standing in the reservation, per [`block_sites`].
     pub(crate) blocks: Vec<BlockSite>,
 }
@@ -85,11 +88,13 @@ pub(crate) fn open_scope(entry: &ScopedPlacementIrEntry) -> Result<OpenScope, Sk
     };
     let ir = source.clone();
     let cell_coords: Vec<CellCoord> = ir.cells.iter().map(|c| c.coord).collect();
+    let inputs = ir.inputs.len();
     let blocks = block_sites(&ir, &region);
     Ok(OpenScope {
         ir,
         region,
         cell_coords,
+        inputs,
         blocks,
     })
 }
@@ -97,17 +102,34 @@ pub(crate) fn open_scope(entry: &ScopedPlacementIrEntry) -> Result<OpenScope, Sk
 /// `NetRef → source coord`: the input pad for a sensor, the cell body
 /// for a gate.
 ///
-/// `NetRef::Cell(j)` is in range by the topological invariant carried
-/// across every prior IR stage (`j < i` inside `cells[i]`); a hand-built
-/// IR that breaks it panics rather than under-reporting what the pass
-/// writes.
+/// Both arms are in range for any IR a prior stage built. `Cell(j)` is
+/// in range by the topological invariant carried across every stage
+/// (`j < i` inside `cells[i]`), and `Input(i)` by `inputs` being copied
+/// verbatim from the netlist the nets were collected out of.
+///
+/// # Panics
+///
+/// Panics on either index out of range, which is a caller-side
+/// hand-built IR and nothing an author can edit. The alternative is a
+/// source coord the pass then lays a wire from: an out-of-range `Cell`
+/// saturated onto another cell roots the net in the wrong corridor, and
+/// an out-of-range `Input` answers with a pad coord that stands in no
+/// block [`block_sites`] emitted. Both are a layout, not a number, so
+/// they reach the author as a plausible circuit rather than as a bug.
 pub(crate) fn source_of_net<'a>(
     region: &'a CircuitRegionReservation,
     cell_coords: &'a [CellCoord],
+    inputs: usize,
 ) -> impl Fn(NetRef) -> CellCoord + Copy + 'a {
     move |net| {
         match net {
-        NetRef::Input(i) => input_pad(i as usize, region),
+        NetRef::Input(i) => {
+            assert!(
+                (i as usize) < inputs,
+                "NetRef::Input({i}) out of range (inputs.len()={inputs}) — netlist invariant broken by caller-side hand-built IR",
+            );
+            input_pad(i as usize, region)
+        }
         NetRef::Cell(j) => *cell_coords.get(j as usize).unwrap_or_else(|| {
             panic!(
                 "NetRef::Cell({j}) out of range (cells.len()={}) — topological invariant broken by caller-side hand-built IR",
@@ -115,29 +137,6 @@ pub(crate) fn source_of_net<'a>(
             )
         }),
     }
-    }
-}
-
-/// [`source_of_net`] for the routing pass, which asserts the invariant
-/// in debug builds and saturates the lookup to the last cell in release
-/// so a caller-side bug still produces deterministic output.
-pub(crate) fn source_of_net_lenient<'a>(
-    region: &'a CircuitRegionReservation,
-    cell_coords: &'a [CellCoord],
-) -> impl Fn(NetRef) -> CellCoord + Copy + 'a {
-    move |net| match net {
-        NetRef::Input(i) => input_pad(i as usize, region),
-        NetRef::Cell(j) => {
-            debug_assert!(
-                (j as usize) < cell_coords.len(),
-                "NetRef::Cell({j}) out of range (cells.len()={}) — topological invariant broken",
-                cell_coords.len(),
-            );
-            cell_coords
-                .get(j as usize)
-                .copied()
-                .unwrap_or_else(|| *cell_coords.last().expect("cells.is_empty checked above"))
-        }
     }
 }
 
@@ -338,7 +337,10 @@ mod tests {
     use crate::placement_ir::{
         CellCoord, PlacedCellNode, PlacementIr, PlacementPhase, ScopedPlacementIr,
     };
-    use crate::test_fixtures::{CollapsedRow, collapsed_pad_row, reservation, scoped};
+    use crate::test_fixtures::{
+        CollapsedRow, DanglingNet, collapsed_pad_row, dangling_net, regionless_scope, reservation,
+        scoped,
+    };
 
     /// A reservation too shallow to hold its pad row is refused by
     /// stage 2, stage 3 and stage 4 alike, and the scope is elided
@@ -371,47 +373,7 @@ mod tests {
     /// took it without a word.
     #[test]
     fn every_stage_refuses_a_reservation_too_shallow_for_its_pad_row() {
-        type Stage = (
-            &'static str,
-            PlacementPhase,
-            fn(&ScopedPlacementIr) -> (Vec<crate::diagnostic::Diagnostic>, Vec<String>),
-        );
-
-        let stages: [Stage; 3] = [
-            ("routing", PlacementPhase::Unrouted, |scoped| {
-                let out = crate::routing::compile_routing(scoped);
-                (
-                    out.diagnostics,
-                    out.scoped.scopes.iter().map(|e| e.name.clone()).collect(),
-                )
-            }),
-            (
-                "delay",
-                PlacementPhase::Routed { wire_length: 0 },
-                |scoped| {
-                    let out = crate::delay::compile_delay(scoped);
-                    (
-                        out.diagnostics,
-                        out.scoped.scopes.iter().map(|e| e.name.clone()).collect(),
-                    )
-                },
-            ),
-            (
-                "crossing",
-                PlacementPhase::Delayed {
-                    wire_length: 0,
-                    local_delay_ticks: 0,
-                },
-                |scoped| {
-                    let out = crate::crossing::compile_crossing(scoped);
-                    (
-                        out.diagnostics,
-                        out.scoped.scopes.iter().map(|e| e.name.clone()).collect(),
-                    )
-                },
-            ),
-        ];
-
+        let stages = stages();
         let mut said: Vec<(CollapsedRow, Vec<String>)> = Vec::new();
         for row in [CollapsedRow::OutputOntoCell, CollapsedRow::InputOntoInput] {
             let (kind, index, coord) = row.names();
@@ -545,6 +507,150 @@ mod tests {
                 DiagnosticCode::RouteCongestion,
                 "{inputs} input(s): both refusals are E_ROUTE_CONGESTION",
             );
+        }
+    }
+
+    /// The three stages that lay nets, each with the phase it expects
+    /// to be handed and a reader for what it produced.
+    ///
+    /// The shared shape of the cross-stage tests below: a scope's
+    /// geometry does not vary with the phase, so one fixture can be put
+    /// to all three, and a case that asked only one stage could not
+    /// fail on two of them at once — which is the whole subject here,
+    /// three passes that were answering one shape three ways.
+    type Stage = (
+        &'static str,
+        PlacementPhase,
+        fn(&ScopedPlacementIr) -> (Vec<crate::diagnostic::Diagnostic>, Vec<String>),
+    );
+
+    fn stages() -> [Stage; 3] {
+        [
+            ("routing", PlacementPhase::Unrouted, |scoped| {
+                let out = crate::routing::compile_routing(scoped);
+                (
+                    out.diagnostics,
+                    out.scoped.scopes.iter().map(|e| e.name.clone()).collect(),
+                )
+            }),
+            (
+                "delay",
+                PlacementPhase::Routed { wire_length: 0 },
+                |scoped| {
+                    let out = crate::delay::compile_delay(scoped);
+                    (
+                        out.diagnostics,
+                        out.scoped.scopes.iter().map(|e| e.name.clone()).collect(),
+                    )
+                },
+            ),
+            (
+                "crossing",
+                PlacementPhase::Delayed {
+                    wire_length: 0,
+                    local_delay_ticks: 0,
+                },
+                |scoped| {
+                    let out = crate::crossing::compile_crossing(scoped);
+                    (
+                        out.diagnostics,
+                        out.scoped.scopes.iter().map(|e| e.name.clone()).collect(),
+                    )
+                },
+            ),
+        ]
+    }
+
+    /// A scope with cells and no reservation is `E_NO_CIRCUIT_REGION`
+    /// at whichever stage meets it, and the scope is elided.
+    ///
+    /// The routing pass used to pass this through: a `debug_assert!`
+    /// that the scope was empty, and in release a scope handed on
+    /// carrying cells that were never routed. Nothing downstream said
+    /// so — the delay pass met the same scope and refused it there, one
+    /// stage later, naming its own stage. What each pass writes is
+    /// promised by the producer↔variant table on `PlacementPhase` after
+    /// its own stage, so the pass that cannot write it is the pass that
+    /// has to say why.
+    #[test]
+    fn every_stage_refuses_a_scope_with_cells_and_no_region() {
+        for (stage, phase, run) in &stages() {
+            let (diagnostics, kept) = run(&regionless_scope(phase));
+            let refusal = diagnostics
+                .iter()
+                .find(|d| d.code == DiagnosticCode::NoCircuitRegion)
+                .unwrap_or_else(|| {
+                    panic!("the {stage} pass must refuse a regionless scope: {diagnostics:?}")
+                });
+            assert!(
+                refusal.primary.contains("struct `roomless`") && refusal.primary.contains(*stage),
+                "the {stage} pass names the scope and its own stage: {}",
+                refusal.primary,
+            );
+            assert_eq!(
+                kept,
+                vec!["roomy".to_owned()],
+                "the {stage} pass elides the refused scope and only that one",
+            );
+        }
+    }
+
+    /// And a scope with no reservation *and* nothing to lay out is
+    /// still handed back, at every stage.
+    ///
+    /// The guard above fires on cells or outputs, not on the absent
+    /// region, so this is the case that says the refusal is keyed on
+    /// what the scope carries rather than on what it lacks.
+    #[test]
+    fn every_stage_passes_an_empty_regionless_scope_through() {
+        for (stage, _, run) in &stages() {
+            let (diagnostics, kept) = run(&scoped(
+                ScopeKind::Struct,
+                "harmless",
+                PlacementIr::new(Edition::Java),
+            ));
+            assert!(
+                diagnostics.is_empty(),
+                "the {stage} pass has nothing to say about an empty scope: {diagnostics:?}",
+            );
+            assert_eq!(kept, vec!["harmless".to_owned()]);
+        }
+    }
+
+    /// A driver naming a net no list can answer panics at every stage,
+    /// naming the variant, the index, and the length it ran past.
+    ///
+    /// Not a diagnostic: no edit to the source produces or repairs it,
+    /// because no source produces it. It is a caller-side hand-built IR,
+    /// and the crate's convention for one is to assert.
+    ///
+    /// Both variants, because they used to fail differently and one of
+    /// them did not fail at all. `Cell(j)` saturated onto the last cell
+    /// in the routing pass's release build, rooting the net in the wrong
+    /// corridor and laying its dust down the wrong one; `Input(i)`
+    /// answered for any index in all three, with a pad coord standing in
+    /// no block `block_sites` emitted.
+    #[test]
+    fn every_stage_panics_on_a_net_index_the_ir_cannot_answer() {
+        for which in [DanglingNet::Cell, DanglingNet::Input] {
+            for (stage, phase, run) in &stages() {
+                let fixture = dangling_net(phase, which);
+                let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    run(&fixture);
+                }))
+                .expect_err(&format!(
+                    "the {stage} pass must not answer a dangling {which:?} net with a coord",
+                ));
+                let message = panic
+                    .downcast_ref::<String>()
+                    .map(String::as_str)
+                    .or_else(|| panic.downcast_ref::<&str>().copied())
+                    .unwrap_or("<non-string panic>");
+                assert!(
+                    message.contains(which.expected()),
+                    "the {stage} pass names the index and the list it ran past, got {message:?}",
+                );
+            }
         }
     }
 

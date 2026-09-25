@@ -144,6 +144,44 @@
 
 ### Fixed
 
+- *(redstone)* The three place-and-route passes each asked one routine what coord a `NetRef`
+  names, and the routing pass answered two shapes differently from the other two. A `NetRef::Cell(j)`
+  past the end of the cell list was a `debug_assert!` there and a `panic!` in delay and crossing,
+  so a release build rooted that net at the **last** cell's coord instead — and what that costs
+  grew when routing began laying a path rather than a length, so a net rooted at the wrong coord
+  lays its dust down the wrong corridor, and the occupancy set, the crossing detection and every
+  buffer coord inherit it. It then panicked one stage later anyway, which is what the leniency
+  bought: a wrong layout and the same crash.
+
+  A scope carrying cells but no `circuit region=` reservation was the same asymmetry one screen
+  up. Routing asserted in debug and in release handed the scope on unrouted, with no diagnostic;
+  the delay pass met it next and refused it there, naming its own stage. What each pass writes is
+  promised by the producer↔variant table on `PlacementPhase` after its own stage, so the pass that
+  cannot write it is the pass that says why. All three now do, with the wording they already
+  shared:
+
+  ```
+  error[E_NO_CIRCUIT_REGION]: placed netlist for struct `s` reached routing carrying cells or output drivers but no `circuit region=<label> void=<N>` reservation — the placement pass should have elided this scope
+    note: Fix: add a `circuit region=<label> void=<N>` line to the enclosing scope, or run `--stage placement` first to see the underlying error
+  ```
+
+  **`NetRef::Input(i)` is now bounded too**, in all three. It never was: `input_pad(i, region)`
+  answers for any index, saturating `z` at `depth - 1`, so an index past the netlist's input list
+  got a coord that stands in no block the pass emitted and the router routed to it. That
+  saturation is deliberate where the index is real — more sensors than rows is a collapsed pad
+  row, which every stage refuses as `E_ROUTE_CONGESTION` — and it is the absence of a bound above
+  it that let an index the netlist never had borrow the same answer.
+
+  ```
+  NetRef::Input(1) out of range (inputs.len()=1) — netlist invariant broken by caller-side hand-built IR
+  ```
+
+  Both are asserts rather than diagnostics because no edit to a `.crn` produces them and none
+  repairs them: a `cairn` run reaches these passes only through the netlist pass, which builds
+  both lists. What reaches them otherwise is a caller assembling the Placement IR itself — an
+  in-crate test, or a library consumer calling `compile_routing`, `compile_delay` or
+  `compile_crossing`, all of which the crate root re-exports.
+
 - *(redstone)* A reservation too shallow to hold its pad row was refused by the routing pass and
   by neither of the two stages after it. The pad column's `z` saturates at `depth - 1`, so a
   region one row deep lands the actuator pad on a cell body or on another pad. Routing caught

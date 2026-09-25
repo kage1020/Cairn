@@ -48,7 +48,8 @@ use std::collections::HashSet;
 
 use crate::diagnostic::{Diagnostic, DiagnosticCode, error_with_footer};
 use crate::pass::{
-    OpenScope, Skipped, attribute_nodes, lay_nets, lower_scopes, open_scope, source_of_net_lenient,
+    OpenScope, Skipped, attribute_nodes, lay_nets, lower_scopes, missing_region_diagnostic,
+    open_scope, source_of_net,
 };
 use crate::placement::{CONGESTION_FIX, area_ratio_tenths};
 use crate::placement_ir::{
@@ -123,17 +124,17 @@ fn route_scope(entry: &ScopedPlacementIrEntry) -> ScopeRouting {
         mut ir,
         region,
         cell_coords,
+        inputs,
         blocks,
     } = match open_scope(entry) {
         Err(Skipped::Empty) => return Ok((source.clone(), Vec::new())),
+        // Refused rather than passed through: this pass writes
+        // `wire_length`, and the producer↔variant table on
+        // `PlacementPhase` promises it after this stage. The same
+        // policy the delay and crossing passes already apply — one
+        // answer for one shape, whichever stage meets it first.
         Err(Skipped::MissingRegion) => {
-            // Loud in debug so a fixture regression trips fast; a
-            // deterministic pass-through in release.
-            debug_assert!(
-                source.cells.is_empty() && source.outputs.is_empty(),
-                "route_scope received a PlacementIr with cells or pads but no region — placement should have refused it",
-            );
-            return Ok((source.clone(), Vec::new()));
+            return Err(missing_region_diagnostic(entry, "placed", "routing"));
         }
         Ok(scope) => scope,
     };
@@ -143,7 +144,7 @@ fn route_scope(entry: &ScopedPlacementIrEntry) -> ScopeRouting {
         &blocks,
         entry,
         &region,
-        source_of_net_lenient(&region, &cell_coords),
+        source_of_net(&region, &cell_coords, inputs),
     )?;
 
     // Occupancy for the congestion figure below: the blocks, then the

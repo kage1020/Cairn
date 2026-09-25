@@ -173,3 +173,111 @@ fn shallow_ir(phase: &PlacementPhase, row: CollapsedRow) -> PlacementIr {
     ir.outputs.push(output);
     ir
 }
+
+/// A scope carrying cells but no `circuit region=` reservation, beside
+/// the sound scope [`collapsed_pad_row`] uses.
+///
+/// Hand-built for the same reason: the placement pass fires
+/// `E_NO_CIRCUIT_REGION` and elides such a scope before any later
+/// stage sees it, so a caller assembling the IR itself is the only way
+/// to produce one. `phase` is what the stage under test expects to be
+/// handed, and the second scope is what distinguishes "elides the
+/// scope that earned the refusal" from "elides everything".
+pub(crate) fn regionless_scope(phase: &PlacementPhase) -> ScopedPlacementIr {
+    let mut ir = PlacementIr::new(Edition::Java);
+    ir.cells.push(PlacedCellNode {
+        cell: EditionCell::JavaRepeaterOr,
+        drivers: vec![],
+        coord: CellCoord::new(0, 0, 0),
+        phase: phase.clone(),
+        span: Span::default(),
+    });
+    let mut scoped = ScopedPlacementIr::new();
+    scoped.scopes.push(ScopedPlacementIrEntry {
+        kind: ScopeKind::Struct,
+        name: "roomless".to_owned(),
+        ir,
+    });
+    scoped.scopes.push(ScopedPlacementIrEntry {
+        kind: ScopeKind::Struct,
+        name: "roomy".to_owned(),
+        ir: roomy_ir(phase),
+    });
+    scoped
+}
+
+/// Which `NetRef` variant the fixture below points past the end of the
+/// list that answers it.
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum DanglingNet {
+    /// A driver naming a cell the IR does not have. Breaks the
+    /// topological invariant (`j < i` inside `cells[i]`) as well as the
+    /// bound, since the only cell is the one carrying the driver, and
+    /// `cells[0]` can satisfy `j < 0` for no `j` at all.
+    Cell,
+    /// A driver naming a sensor the netlist does not have.
+    Input,
+}
+
+impl DanglingNet {
+    /// Exactly one index past the end of the list that answers it,
+    /// rather than comfortably past.
+    ///
+    /// An index far past the end is answered by any bound that is
+    /// roughly right, so it cannot tell `< len` from `<= len`. The
+    /// first index the list does not have is the one that can.
+    fn net(self) -> NetRef {
+        match self {
+            Self::Cell => NetRef::Cell(1),
+            Self::Input => NetRef::Input(1),
+        }
+    }
+
+    /// The whole panic message, not a prefix of it.
+    ///
+    /// The routing pass used to carry a `debug_assert!` whose wording
+    /// was the first half of this one, so a test keyed on the index
+    /// alone would have passed against the shape being replaced — in
+    /// debug builds, and only there.
+    pub(crate) fn expected(self) -> &'static str {
+        match self {
+            Self::Cell => {
+                "NetRef::Cell(1) out of range (cells.len()=1) — topological invariant broken by \
+                 caller-side hand-built IR"
+            }
+            Self::Input => {
+                "NetRef::Input(1) out of range (inputs.len()=1) — netlist invariant broken by \
+                 caller-side hand-built IR"
+            }
+        }
+    }
+}
+
+/// One scope whose only cell is driven by a net no list can answer.
+///
+/// The reservation is roomy and the geometry sound, so nothing but the
+/// dangling index is wrong: a stage that answers this fixture at all
+/// answered it with a coord it invented.
+pub(crate) fn dangling_net(phase: &PlacementPhase, which: DanglingNet) -> ScopedPlacementIr {
+    let mut ir = PlacementIr::new(Edition::Java);
+    ir.region = Some(reservation(6, 3, 1));
+    ir.inputs.push(NetlistInput {
+        name: DottedRef::new("sig".into(), vec!["a".into()]),
+        span: Span::default(),
+    });
+    ir.cells.push(PlacedCellNode {
+        cell: EditionCell::JavaRepeaterOr,
+        drivers: vec![CellPortDriver {
+            port: PortName::A,
+            net: which.net(),
+        }],
+        coord: CellCoord::new(1, 0, 1),
+        phase: phase.clone(),
+        span: Span::default(),
+    });
+    scoped_entry(ir)
+}
+
+fn scoped_entry(ir: PlacementIr) -> ScopedPlacementIr {
+    scoped(ScopeKind::Struct, "dangling", ir)
+}

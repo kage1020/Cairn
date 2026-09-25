@@ -133,6 +133,7 @@ fn legalize_scope(entry: &ScopedPlacementIrEntry) -> ScopeLegalization {
         mut ir,
         region,
         cell_coords,
+        inputs,
         blocks,
     } = match open_scope(entry) {
         Err(Skipped::Empty) => return Ok(source.clone()),
@@ -153,7 +154,7 @@ fn legalize_scope(entry: &ScopedPlacementIrEntry) -> ScopeLegalization {
         &blocks,
         entry,
         &region,
-        source_of_net(&region, &cell_coords),
+        source_of_net(&region, &cell_coords, inputs),
     )?;
 
     // Every coord a repeater can be asked to stand on is a coord of its
