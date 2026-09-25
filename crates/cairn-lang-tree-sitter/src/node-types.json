@@ -1085,6 +1085,10 @@
           {
             "type": "bit",
             "named": true
+          },
+          {
+            "type": "dont_care",
+            "named": true
           }
         ]
       }
@@ -1244,6 +1248,10 @@
   },
   {
     "type": "directive_literal",
+    "named": true
+  },
+  {
+    "type": "dont_care",
     "named": true
   },
   {
