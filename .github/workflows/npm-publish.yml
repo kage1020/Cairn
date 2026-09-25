@@ -73,8 +73,23 @@ jobs:
         run: git diff --exit-code src/parser.c src/grammar.json src/node-types.json
       - run: pnpm test
 
+      # `actions/setup-node` with `node-version: 22` brings the npm Node 22
+      # bundles, which is 10.9.9 and carries no Trusted Publishing support at
+      # all — so this upgrade is required, not cosmetic. Trusted Publishing
+      # needs npm 11.5.1 or newer.
+      #
+      # Pinned rather than `@latest` because this is the binary that performs
+      # the OIDC token exchange under the `id-token: write` granted above and
+      # signs the provenance attestation: whoever controls what a floating tag
+      # resolves to controls the publish. Everything else in this job is
+      # already deterministic — the actions are SHA-pinned and the install is
+      # `--frozen-lockfile` — and this line was the exception.
+      #
+      # Dependabot's npm ecosystem does not watch a global install, so nothing
+      # will raise this for you. Bump it deliberately when Trusted Publishing
+      # needs a newer npm, and re-run this workflow on a tag to prove it.
       - name: Install a Trusted-Publishing-capable npm
-        run: npm install -g npm@latest
+        run: npm install -g npm@12.1.0
 
       - name: Ensure the tarball carries the tree-sitter manifest
         shell: bash
