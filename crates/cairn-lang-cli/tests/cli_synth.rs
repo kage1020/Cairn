@@ -796,12 +796,19 @@ fn cli_synth_stage_delay_inherits_upstream_congestion_failure() {
 
 #[test]
 fn cli_synth_stage_delay_attenuation_limit_exits_one() {
-    // A scope whose routed output-pad segment exceeds the v1
-    // attenuation cap must fail loud with `E_ATTENUATION_LIMIT` on
-    // stderr and exit 1. Uses a 300-block-wide region so the
-    // `sig.out` output driver spans the full x-axis to the right-edge
-    // output pad — that segment (~300 blocks) sits well past the
-    // 256-block cap.
+    // A scope whose output-pad segment exceeds the v1 attenuation cap
+    // must fail loud with `E_ATTENUATION_LIMIT` on stderr and exit 1.
+    // Uses a 300-block-wide region so the `sig.out` output driver spans
+    // the full x-axis to the right-edge output pad — that segment
+    // (~300 blocks) sits well past the 256-block cap.
+    //
+    // `--stage delay` is asked for, but the refusal now comes from the
+    // routing pass: the straight line alone is already over the cap, so
+    // stage 2's gate answers first and the CLI stops there. Hence the
+    // `placed` noun below — the cells are still `Unrouted` when it
+    // fires. The delay pass's own routed-length check is exercised by
+    // the detour fixtures in `cairn-lang-redstone`, where the straight
+    // line fits and only the route does not.
     let dir = tempfile::tempdir().expect("temp dir");
     let path = dir.path().join("wide.crn");
     let source = "@cairn 2026.06\n@requires version>=1.20\n\n\
@@ -832,8 +839,8 @@ fn cli_synth_stage_delay_attenuation_limit_exits_one() {
         "expected E_ATTENUATION_LIMIT on stderr, got: {stderr}",
     );
     assert!(
-        stderr.contains("routed netlist for struct `wide_pack`"),
-        "primary should name the delay-side origin and failed scope, got: {stderr}",
+        stderr.contains("placed netlist for struct `wide_pack`"),
+        "primary should name the stage that refused and the failed scope, got: {stderr}",
     );
 }
 
@@ -1022,10 +1029,19 @@ fn cli_synth_stage_crossing_requires_edition_flag() {
 fn cli_synth_stage_crossing_inherits_upstream_attenuation_failure() {
     // `--stage crossing` runs stages 1-4 in sequence, so an
     // Error-severity diagnostic from any prior stage (here, the
-    // delay pass's `E_ATTENUATION_LIMIT` on a 300-block-wide region)
+    // routing pass's `E_ATTENUATION_LIMIT` on a 300-block-wide region)
     // short-circuits with exit 1 before stage 4 runs. The stderr
     // still names the origin stage so a downstream reader can tell
     // which pass tripped.
+    //
+    // The origin used to be the delay pass; stage 2 now answers first
+    // for a segment whose straight line alone is over the cap, and
+    // every `.crn` that reaches this code does so by that route. A
+    // scope that passes the straight-line gate and fails only the
+    // routed-length one can no longer be written in `.crn` at all, so
+    // "crossing inherits a *delay* failure" is exercised by a
+    // hand-built two-scope fixture in `cairn-lang-redstone`'s
+    // `tests/delay.rs` rather than here.
     let dir = tempfile::tempdir().expect("temp dir");
     let path = dir.path().join("wide.crn");
     let source = "@cairn 2026.06\n@requires version>=1.20\n\n\
@@ -1154,8 +1170,14 @@ struct crossbar size=4x4
         stderr.contains("E_ROUTE_CONGESTION"),
         "expected E_ROUTE_CONGESTION on stderr, got: {stderr}",
     );
+    // `placed`, not `routed`: `--stage crossing` runs the whole pipeline
+    // and the CLI stops at the first Error-severity stage, so this scope
+    // never reaches the crossing pass — the routing pass refuses it while
+    // laying nets over a netlist whose cells are still unrouted. The noun
+    // names the netlist the refusing pass read, which is the only way to
+    // tell from the message where in the pipeline the scope died.
     assert!(
-        stderr.contains("routed netlist for struct `crossbar`")
+        stderr.contains("placed netlist for struct `crossbar`")
             && stderr.contains("another net's dust, on the coord or one step from it")
             && stderr.contains("the faces it could arrive through are taken by cell #0"),
         "the refusal names the scope, which of the three kinds of obstacle it \

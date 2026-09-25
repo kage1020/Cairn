@@ -223,6 +223,99 @@
 
 ### Fixed
 
+- *(redstone)* A `circuit region=` inside a very wide struct was routed before anything measured
+  it. The reservation takes the floor's extent, so `region=` is as wide as `size=` and the actuator
+  pad lands at `x = width - 1`; stage 2 laid a wire out to it one coord at a time, stage 3 rebuilt
+  the same trees to measure them, and stage 3 was what refused the result against the attenuation
+  cap. The answer was right and a four-million-wide floor took over a minute of a debug build to
+  give:
+
+  ```
+  struct big size=4000000x4000000
+    ...
+    circuit region=floor void=3
+  ```
+
+  The cap is on the routed segment, and the straight line between two coords is a floor on every
+  route between them — it is the router's own search heuristic, admissible for exactly that reason.
+  A sink further from its driver than the cap therefore has no route any stage would accept, and
+  the routine all three passes call to lay their nets now says so before laying one. Same code,
+  same sink named the same way, 4 ms instead of 72 s:
+
+  ```
+  s.crn:15:3: error[E_ATTENUATION_LIMIT]: placed netlist for struct `big` puts output pad #0 3999999 blocks from its driver in a straight line — exceeds the v1 attenuation limit of 256 blocks, and no route between two coords is shorter than the straight line between them
+    note: Fix: split the logic across several `circuit` blocks, or reserve a `region=` whose pad column sits within the cap of the cells it serves — a larger reservation cannot help, because the straight line between these two is already over the cap
+  ```
+
+  A floor and not the measure, so it refuses strictly less than the delay pass does and replaces
+  nothing. A route is as long as the straight line only where nothing stands in the way: a region
+  256 wide puts its pad 255 blocks from the driver and routes 257 to get there, which is over the
+  cap and not over this, and the delay pass is still what catches it. What moved is the shape whose
+  distance alone is already hopeless — those are refused at `--stage route` now rather than at
+  `--stage delay`.
+
+  The fix line differs from the delay pass's for the same reason. "Enlarge `region=`" is the repair
+  when a route is long because it had to go round something, and room to go straight shortens it.
+  Nothing shortens a straight line, and for the shape that raises this most often — a reservation
+  as wide as the `size=` it came from — enlarging is the direction that makes it worse.
+
+  **`CircuitRegionReservation::reserved_area` saturates** rather than overflowing. It is
+  `width * depth * void` in a `u64`, which holds the product of two `u32`s and not of three:
+  `u32::MAX` squared is within a rounding error of `u64::MAX`, `2^33 - 2` short of it, so any
+  `void` above 1 can carry it over. The workspace sets no `overflow-checks`, so what that cost
+  depended on the build, and the shipped profile had the worse of the two outcomes. A release
+  build wrapped silently: `size=4294967295x4294967295 void=3` wrapped to ~1.8e19, which no
+  caller distinguishes from a real reservation, and the run exited 0 printing a netlist. Where
+  the product is an exact multiple of `2^64` it wrapped to **zero** instead —
+  `size=2147483648x2147483648 void=4` is the smallest such shape — and dividing by that zero in
+  the congestion test took the process down. One stage before any of the above, and a `cairn
+  synth` away; the reason it went unnoticed is that every reservation in the corpus has a width
+  whose square fits comfortably under.
+
+  `cli_hostile_dimensions` covers the place-and-route passes now. Its existing rows run `parse`,
+  `check`, `lower`, `info` and `compile`, none of which routes, so a reservation as wide as a
+  hostile `size=` was measured by nothing; the new row puts the same widths to
+  `synth --stage route` under the suite's 30-second deadline, and it was the largest of them
+  that found the overflow above.
+
+- *(redstone)* The three place-and-route passes each asked one routine what coord a `NetRef`
+  names, and the routing pass answered two shapes differently from the other two. A `NetRef::Cell(j)`
+  past the end of the cell list was a `debug_assert!` there and a `panic!` in delay and crossing,
+  so a release build rooted that net at the **last** cell's coord instead — and what that costs
+  grew when routing began laying a path rather than a length, so a net rooted at the wrong coord
+  lays its dust down the wrong corridor, and the occupancy set, the crossing detection and every
+  buffer coord inherit it. It then panicked one stage later anyway, which is what the leniency
+  bought: a wrong layout and the same crash.
+
+  A scope carrying cells but no `circuit region=` reservation was the same asymmetry one screen
+  up. Routing asserted in debug and in release handed the scope on unrouted, with no diagnostic;
+  the delay pass met it next and refused it there, naming its own stage. What each pass writes is
+  promised by the producer↔variant table on `PlacementPhase` after its own stage, so the pass that
+  cannot write it is the pass that says why. All three now do, with the wording they already
+  shared:
+
+  ```
+  error[E_NO_CIRCUIT_REGION]: placed netlist for struct `s` reached routing carrying cells or output drivers but no `circuit region=<label> void=<N>` reservation — the placement pass should have elided this scope
+    note: Fix: add a `circuit region=<label> void=<N>` line to the enclosing scope, or run `--stage placement` first to see the underlying error
+  ```
+
+  **`NetRef::Input(i)` is now bounded too**, in all three. It never was: `input_pad(i, region)`
+  answers for any index, saturating `z` at `depth - 1`, so an index past the netlist's input list
+  got a coord that stands in no block the pass emitted and the router routed to it. That
+  saturation is deliberate where the index is real — more sensors than rows is a collapsed pad
+  row, which every stage refuses as `E_ROUTE_CONGESTION` — and it is the absence of a bound above
+  it that let an index the netlist never had borrow the same answer.
+
+  ```
+  NetRef::Input(1) out of range (inputs.len()=1) — netlist invariant broken by caller-side hand-built IR
+  ```
+
+  Both are asserts rather than diagnostics because no edit to a `.crn` produces them and none
+  repairs them: a `cairn` run reaches these passes only through the netlist pass, which builds
+  both lists. What reaches them otherwise is a caller assembling the Placement IR itself — an
+  in-crate test, or a library consumer calling `compile_routing`, `compile_delay` or
+  `compile_crossing`, all of which the crate root re-exports.
+
 - *(redstone)* A reservation too shallow to hold its pad row was refused by the routing pass and
   by neither of the two stages after it. The pad column's `z` saturates at `depth - 1`, so a
   region one row deep lands the actuator pad on a cell body or on another pad. Routing caught

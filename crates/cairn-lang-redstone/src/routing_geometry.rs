@@ -962,10 +962,16 @@ pub(crate) fn collapsed_block(blocks: &[BlockSite]) -> Option<&BlockSite> {
 /// the same every run, with the count of the rest so sizing is one
 /// decision, and naming the nets whose dust takes the sink's faces —
 /// the cause the author can act on.
+///
+/// `netlist` is the noun the caller lays nets from — `placed`,
+/// `routed`, `delayed`. It is a parameter and not a constant because
+/// all three passes route through [`crate::pass::lay_nets`], so a
+/// hardcoded noun would name the wrong stage on two of the three paths.
 pub(crate) fn unroutable<F>(
     nets: &HashMap<NetRef, Vec<CellCoord>>,
     trees: &HashMap<NetRef, NetTree>,
     entry: &ScopedPlacementIrEntry,
+    netlist: &str,
     region: &CircuitRegionReservation,
     source_of_net: F,
 ) -> Option<Diagnostic>
@@ -979,7 +985,7 @@ where
         .find_map(|net| trees[net].unreachable().first().map(|sink| (*net, *sink)))?;
     let source = source_of_net(net);
     let mut primary = format!(
-        "routed netlist for {kind} `{name}` cannot reach ({x},{y},{z}) from the driver at ({sx},{sy},{sz}) — every route between them is blocked by a cell body, an I/O pad, or another net's dust, on the coord or one step from it in the same plane, and a wire passes through none of the three",
+        "{netlist} netlist for {kind} `{name}` cannot reach ({x},{y},{z}) from the driver at ({sx},{sy},{sz}) — every route between them is blocked by a cell body, an I/O pad, or another net's dust, on the coord or one step from it in the same plane, and a wire passes through none of the three",
         kind = entry.kind.label(),
         name = entry.name,
         x = sink.x,

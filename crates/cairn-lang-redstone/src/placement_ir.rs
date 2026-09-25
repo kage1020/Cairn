@@ -32,9 +32,13 @@
 //! `circuit region=... void=N` congestion detection (`E_ROUTE_CONGESTION`)
 //! and missing-reservation refusal (`E_NO_CIRCUIT_REGION`) fire here —
 //! this is the first pass with a physical footprint to measure against.
-//! Attenuation limits (dust segments exceeding 15 blocks) belong to
-//! [`crate::delay::compile_delay`], stage 3 of that pipeline, which fires
-//! `E_ATTENUATION_LIMIT` against the routed segment length.
+//! Attenuation limits are measured later and in two places, both
+//! against [`crate::delay::MAX_ATTENUATION_SEGMENT`]:
+//! [`crate::delay::compile_delay`], stage 3, fires `E_ATTENUATION_LIMIT`
+//! against the routed segment length, and [`crate::pass::lay_nets`],
+//! which every place-and-route pass calls, fires the same code against
+//! the straight line between a driver and its sink before routing to
+//! it.
 
 use std::fmt;
 
@@ -328,12 +332,39 @@ pub struct CircuitRegionReservation {
 }
 
 impl CircuitRegionReservation {
-    /// Total blocks reserved for routing: `width * depth * void`. Uses
-    /// `u64` so a large-but-legal reservation cannot overflow when
-    /// multiplied against a large cell budget elsewhere in the pass.
+    /// Total blocks reserved for routing: `width * depth * void`,
+    /// saturating.
+    ///
+    /// `u64` holds the product of two `u32`s and not of three —
+    /// `u32::MAX` squared is already within a rounding error of
+    /// `u64::MAX`, `2^33 - 2` short of it — so a reservation taken from
+    /// a hostile `size=` can carry it over, though not every `void`
+    /// above 1 does: `2147483647x2147483647` still fits at `void=4`.
+    /// What overflowed is reachable from a `.crn` either way.
+    ///
+    /// The workspace sets no `overflow-checks`, so what that cost
+    /// depended on the build. A debug build panicked. A release build
+    /// wrapped, and wrapping is the worse of the two, because it is
+    /// silent exactly where the number is still plausible:
+    /// `size=4294967295x4294967295 void=3` wraps to ~1.8e19, which no
+    /// caller distinguishes from a real reservation, and the run exits
+    /// 0. Where the product is an exact multiple of `2^64` it wraps to
+    /// **zero** instead — `size=2147483648x2147483648 void=4` is the
+    /// smallest such shape — and a zero reservation is not merely
+    /// wrong: the congestion test it then fails divides by it in
+    /// `area_ratio_tenths`, which takes the process down.
+    ///
+    /// Saturating rather than widening, because every caller compares
+    /// this against a budget or divides into it, and `u64::MAX` is the
+    /// right answer to both: a reservation that large is not the
+    /// constraint on anything. The refusal such a scope earns comes
+    /// from the attenuation cap, which its own span and its own
+    /// sentence are about.
     #[must_use]
     pub const fn reserved_area(&self) -> u64 {
-        (self.width as u64) * (self.depth as u64) * (self.void as u64)
+        (self.width as u64)
+            .saturating_mul(self.depth as u64)
+            .saturating_mul(self.void as u64)
     }
 }
 
@@ -2275,6 +2306,46 @@ mod tests {
         assert_eq!(
             delayed_json.replace("\"stage\":\"delay\"", "\"stage\":\"crossing\""),
             legalized_json,
+        );
+    }
+
+    /// `reserved_area` saturates rather than overflowing, which is what
+    /// a reservation taken from a hostile `size=` makes it do.
+    ///
+    /// `u64` holds `u32::MAX` squared within a rounding error — `2^33 - 2`
+    /// short of `u64::MAX` — so the third factor is where this goes,
+    /// and the last row is the one that matters. A product that merely
+    /// exceeds `u64::MAX` wraps to something large and plausible, which
+    /// a release build carries all the way to a clean exit; a product
+    /// that is an exact multiple of `2^64` wraps to **zero**, and a
+    /// zero reservation divides by itself in the congestion ratio.
+    /// `2147483648^2 * 4` is exactly `2^64`, the smallest such shape a
+    /// `size=` can reach, and it is the row that fails again if anyone
+    /// puts `wrapping_mul` back on the third factor.
+    #[test]
+    fn reserved_area_saturates_on_a_reservation_no_u64_can_hold() {
+        let region = |width: u32, depth: u32, void: u32| CircuitRegionReservation {
+            label: "floor".to_owned(),
+            void,
+            width,
+            depth,
+            span: Span::default(),
+        };
+        assert_eq!(region(6, 3, 2).reserved_area(), 36, "the ordinary product");
+        assert_eq!(
+            region(u32::MAX, u32::MAX, 1).reserved_area(),
+            u64::from(u32::MAX) * u64::from(u32::MAX),
+            "two u32s fit, so this one is exact",
+        );
+        assert_eq!(
+            region(u32::MAX, u32::MAX, 3).reserved_area(),
+            u64::MAX,
+            "three do not, and the answer is the ceiling rather than a panic",
+        );
+        assert_eq!(
+            region(2_147_483_648, 2_147_483_648, 4).reserved_area(),
+            u64::MAX,
+            "exactly 2^64: the ceiling, not the zero a wrap would give",
         );
     }
 }

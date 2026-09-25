@@ -93,10 +93,12 @@ impl CrossingOutput {
 /// `IntentModule` dependency.
 ///
 /// One entry per non-empty [`PlacementIr`] whose legalization
-/// succeeded; a scope that raises [`DiagnosticCode::NoCircuitRegion`]
-/// or either [`DiagnosticCode::RouteCongestion`] that
+/// succeeded; a scope that raises [`DiagnosticCode::NoCircuitRegion`],
+/// either [`DiagnosticCode::RouteCongestion`] that
 /// [`crate::pass::lay_nets`] raises — a pad row the reservation cannot
-/// hold, or a sink no route reaches — is
+/// hold, or a sink no route reaches — or the
+/// [`DiagnosticCode::AttenuationLimit`] it raises for a sink further
+/// from its driver than the v1 cap in a straight line, is
 /// elided from the output so a partial `buffer_coords` set cannot
 /// pollute the downstream block-array voxel lowering. Every finding
 /// this pass makes refuses its scope, so there is no warning that
@@ -133,6 +135,7 @@ fn legalize_scope(entry: &ScopedPlacementIrEntry) -> ScopeLegalization {
         mut ir,
         region,
         cell_coords,
+        inputs,
         blocks,
     } = match open_scope(entry) {
         Err(Skipped::Empty) => return Ok(source.clone()),
@@ -152,8 +155,9 @@ fn legalize_scope(entry: &ScopedPlacementIrEntry) -> ScopeLegalization {
         &ir,
         &blocks,
         entry,
+        "delayed",
         &region,
-        source_of_net(&region, &cell_coords),
+        source_of_net(&region, &cell_coords, inputs),
     )?;
 
     // Every coord a repeater can be asked to stand on is a coord of its

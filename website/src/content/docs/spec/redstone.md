@@ -188,13 +188,26 @@ The internal algorithm runs five stages:
      Fix: nothing in the source is wrong — the pairs are what the escape costs, and enlarging
      the region is not a remedy.
    ```
+
+   The segment cap is tested here too, before any wire is laid. The Manhattan distance between a
+   driver and its sink is a lower bound on every route between them, so a sink already past the
+   cap in a straight line is past it however the router goes, and that scope earns
+   `E_ATTENUATION_LIMIT` at this stage rather than at stage 3. A floor and not the measure: it
+   refuses strictly less than stage 3 does and replaces nothing. A region 256 wide puts its pad
+   255 blocks from the driver and may route 257 to get there, which is over the cap and not over
+   this, and stage 3 is still what catches it. The fix line differs from stage 3's for the same
+   reason — nothing shortens a straight line, so enlarging the region is not the remedy here.
 3. **Delay insertion.** A repeater goes in as a buffer only where a segment exceeds the attenuation
    limit of 15. The segment is measured along the **routed** path from driver to sink, and the
-   buffer stands on that path, so the straight line between the two is not always wire.
+   buffer stands on that path, so the straight line between the two is not always wire. A segment
+   past the v1 cap of 256 blocks is refused rather than buffered, under the same
+   `E_ATTENUATION_LIMIT` stage 2 raises — what differs is that this pass measures the wire that
+   was actually laid.
 4. **Crossing legalization.** Assigns the coordinate of every buffer repeater stage 3 counted. The
    wire needs no legalizing by this point: a repeater stands on its own net's routed path, that
    path belongs to that net alone, and no other net runs within a step of it, so there is no
-   short to lift and no coordinate to contest.
+   short to lift and no coordinate to contest. It applies the straight-line cap as well, since it
+   lays nets of its own and a scope can reach it from a netlist an earlier stage handed over.
 5. **Edition legalization.** See [§14.6](#146-edition-differences).
 
 Routing is confined to the `circuit` region. If it does not fit, the compiler fails loud. A sink
@@ -206,6 +219,22 @@ the message says which two coordinates it could not join and which nets took the
 E_ROUTE_CONGESTION line 21 circuit=basement:
   synthesized netlist needs ~3.2x the reserved area (void=3, region 9x7).
   Fix: increase `void`, enlarge region, or split into multiple `circuit` blocks.
+```
+
+`E_ATTENUATION_LIMIT` is the other refusal these passes raise. Stages 2, 3 and 4 all lay nets, and
+all three measure them against the same cap through one shared routine, so which stage refuses a
+scope depends only on which one reached it first. The primary names the netlist that pass read —
+`placed` at stage 2, `routed` at stage 3, `delayed` at stage 4 — so the message says where in the
+pipeline the shape was measured.
+
+```text
+E_ATTENUATION_LIMIT line 13 circuit=floor:
+  placed netlist for struct `wide_pack` puts output pad #0 299 blocks from its driver in a
+  straight line — exceeds the v1 attenuation limit of 256 blocks, and no route between two coords
+  is shorter than the straight line between them.
+  Fix: split the logic across several `circuit` blocks, or reserve a `region=` whose pad column
+  sits within the cap of the cells it serves — a larger reservation cannot help, because the
+  straight line between these two is already over the cap.
 ```
 
 ## 14.6 Edition differences

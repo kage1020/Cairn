@@ -14,7 +14,7 @@ The synthesis half of the pipeline is in place; the verification half is not. No
 | Netlist | `compile_netlist(&ScopedLogicIr)` | Logical Cells and nets, still edition-neutral and delay-free |
 | Edition selection | `compile_edition_netlist(&ScopedNetlistIr, Edition)` | The target-edition realisation of each cell — Java `ComparatorAnd` / `RepeaterOr` / `InverterTorch`, Bedrock `TorchAnd` / `TorchOr` / `InverterTorch` |
 | Placement | `compile_placement(&ScopedEditionNetlistIr, &IntentModule)` | Cell coordinates inside each scope's `circuit region=` reservation |
-| Routing | `compile_routing(&ScopedPlacementIr)` | Steiner trees per net, filling each cell's `wire_length` |
+| Routing | `compile_routing(&ScopedPlacementIr)` | Steiner trees per net, filling each cell's `wire_length`; refuses with `E_ATTENUATION_LIMIT` a sink already past the v1 cap in a straight line, before routing to it |
 | Delay insertion | `compile_delay(&ScopedPlacementIr)` | Each cell's `local_delay_ticks`, base delay plus the implicit buffer repeaters on every net feeding it; refuses with `E_ATTENUATION_LIMIT` past the v1 sanity cap |
 | Crossing legalization | `compile_crossing(&ScopedPlacementIr)` | Each cell's `buffer_coords`, the repeater every driver segment passes through |
 
