@@ -89,8 +89,13 @@ pub enum TokenKind {
     Arrow,
     /// `-` on its own.
     ///
-    /// No construct in the language reads one. It is lexed rather than
-    /// refused so a version label carrying a pre-release suffix —
+    /// Two constructs read one, and neither is an operator. Both are in
+    /// a truth row: a `-` in the input pattern is a don't-care, which the
+    /// parser reassembles out of the run of `Int` and `Minus` tokens the
+    /// lexer split it into, and a `-` in the output position is the row
+    /// declining to constrain what it covers. It is also lexed rather
+    /// than refused so a version label
+    /// carrying a pre-release suffix —
     /// `@requires version>=1.21.4-rc1`, a shape `spec/versioning-editions`
     /// "Which labels a floor may use" and `spec/syntax` "Headers" accept —
     /// survives to
@@ -100,6 +105,9 @@ pub enum TokenKind {
     /// parser reports it as an unexpected token, which names the `-` it
     /// found in the position it found it rather than the character offset
     /// the lexer would have named.
+    ///
+    /// The lexer takes `->` greedily, so the last `-` of a run that ends
+    /// at a `>` is an [`TokenKind::Arrow`] and not one of these.
     Minus,
     /// `=` (key/value or `logic =`).
     Eq,

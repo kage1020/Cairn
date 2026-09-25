@@ -191,6 +191,18 @@ pub const MAX_NESTING_DEPTH: usize = 64;
 /// splits into intermediate `logic` bindings, which the diagnostic says.
 pub const MAX_EXPR_DEPTH: usize = 128;
 
+/// A truth row's input pattern, and whether the lexer's `->` could have
+/// eaten its last character.
+///
+/// The flag is only ever read to decide whether a width mismatch gets the
+/// sentence about that, so it answers one question rather than describing
+/// the run: a pattern that stopped at an adjacent `Arrow` is one whose
+/// author may have written one more `-` than came back.
+struct TruthPattern {
+    text: String,
+    ends_at_the_arrow: bool,
+}
+
 struct Parser<'a> {
     source: &'a str,
     tokens: &'a [Token],
@@ -725,7 +737,8 @@ impl<'a> Parser<'a> {
         while !self.peek_is(&TokenKind::RBrace) && !self.at_eof() {
             let pattern_position = self.position();
             let row_start_byte = self.current_byte();
-            let inputs_lex = self.expect_int_lexeme()?;
+            let pattern = self.expect_truth_pattern()?;
+            let inputs_lex = pattern.text;
             // A row assigns one bit per input signal, so the pattern is
             // checked against the list left of the arrow.
             //
@@ -742,37 +755,62 @@ impl<'a> Parser<'a> {
             //
             // A leading zero is data here rather than a numeric quirk,
             // which is why the row keeps the raw lexeme: `01` and `1` are
-            // different rows of a two-input table.
-            if let Some(bad) = inputs_lex.chars().find(|c| !matches!(c, '0' | '1')) {
+            // different rows of a two-input table. A `-` is the third
+            // character a pattern may hold, and says the row means every
+            // value of that input rather than one.
+            if let Some(bad) = inputs_lex.chars().find(|c| !matches!(c, '0' | '1' | '-')) {
                 return Err(ParseError::Syntax {
                     position: pattern_position,
                     message: format!(
-                        "truth-table input pattern `{inputs_lex}` must hold only `0` and `1`, \
-                         got `{bad}`"
+                        "truth-table input pattern `{inputs_lex}` must hold only `0`, `1` and \
+                         `-`, got `{bad}`"
                     ),
                 });
             }
-            if inputs_lex.chars().count() != inputs.len() {
+            let width = inputs_lex.chars().count();
+            if width != inputs.len() {
+                // One bit short is the shape a swallowed `-` makes, and
+                // only ever one: the lexer reads `->` greedily, so the
+                // last of a run of dashes before a `>` goes into the
+                // arrow and the rest do not. Naming that here saves the
+                // reader working out why a pattern they wrote wider came
+                // back narrower.
+                let hint = if width + 1 == inputs.len() && pattern.ends_at_the_arrow {
+                    format!(
+                        ". A `-` written immediately before `->` is read as part of the arrow, \
+                         so a row whose last input is a don't-care is written `{inputs_lex}--> \
+                         0` or `{inputs_lex}- -> 0`"
+                    )
+                } else {
+                    String::new()
+                };
                 return Err(ParseError::Syntax {
                     position: pattern_position,
                     message: format!(
-                        "truth-table input pattern `{inputs_lex}` is {got} bits wide, \
-                         but the table has {want} input{plural}",
-                        got = inputs_lex.chars().count(),
+                        "truth-table input pattern `{inputs_lex}` is {width} bits wide, \
+                         but the table has {want} input{plural}{hint}",
                         want = inputs.len(),
                         plural = if inputs.len() == 1 { "" } else { "s" },
                     ),
                 });
             }
             self.expect(&TokenKind::Arrow)?;
-            let out_lex = self.expect_int_lexeme()?;
-            let output = match out_lex.as_str() {
-                "0" => false,
-                "1" => true,
-                other => {
-                    return Err(self.syntax_here(&format!(
-                        "truth-table output must be `0` or `1`, got `{other}`"
-                    )));
+            let output = if self.peek_is(&TokenKind::Minus) {
+                // A `-` output asserts nothing about this combination.
+                // The arrow has already been taken, so a lone `-` here is
+                // never the arrow's own dash.
+                self.advance();
+                None
+            } else {
+                let out_lex = self.expect_int_lexeme()?;
+                match out_lex.as_str() {
+                    "0" => Some(false),
+                    "1" => Some(true),
+                    other => {
+                        return Err(self.syntax_here(&format!(
+                            "truth-table output must be `0`, `1`, or `-`, got `{other}`"
+                        )));
+                    }
                 }
             };
             rows.push(TruthRow {
@@ -1160,6 +1198,61 @@ impl<'a> Parser<'a> {
                 message: format!("expected integer literal, got {}", token.kind),
             })
         }
+    }
+
+    /// The pattern left of a truth row's `->`, reassembled from the
+    /// tokens the lexer split it into.
+    ///
+    /// A pattern holds one character per input signal — `0`, `1`, or `-`
+    /// for a don't-care (`spec/syntax` "Lexical") — and the lexer has no
+    /// table around it to say so: a run of digits is one `Int`, each `-`
+    /// is a `Minus`, so `0-1` arrives as three tokens. They are one
+    /// pattern exactly when the source put nothing between them, which
+    /// is what the byte spans say. `0- 1` is a one-bit-too-narrow
+    /// pattern followed by a stray `1`, not a three-wide row, and the
+    /// width check downstream is what reports it.
+    ///
+    /// The run stops at the first token that is neither — for a pattern
+    /// ending in a don't-care that is the `->` itself, since the lexer
+    /// takes `->` greedily and the last dash of `--->` goes into the
+    /// arrow. So `11--> 0` and `11- -> 0` are the same row.
+    fn expect_truth_pattern(&mut self) -> Result<TruthPattern, ParseError> {
+        let position = self.position();
+        let mut text = String::new();
+        let mut previous_end: Option<usize> = None;
+        let mut ends_at_the_arrow = false;
+        while let Some(token) = self.peek() {
+            let adjacent = previous_end.is_none_or(|end| token.span.start == end);
+            if !adjacent {
+                break;
+            }
+            let piece = match &token.kind {
+                TokenKind::Int { lexeme } => lexeme.clone(),
+                TokenKind::Minus => "-".to_owned(),
+                _ => {
+                    ends_at_the_arrow = matches!(token.kind, TokenKind::Arrow);
+                    break;
+                }
+            };
+            previous_end = Some(token.span.end);
+            text.push_str(&piece);
+            self.advance();
+        }
+        if text.is_empty() {
+            return Err(ParseError::Syntax {
+                position,
+                message: match self.peek() {
+                    Some(token) => {
+                        format!("expected a truth-table input pattern, got {}", token.kind)
+                    }
+                    None => "expected a truth-table input pattern, got end of input".to_owned(),
+                },
+            });
+        }
+        Ok(TruthPattern {
+            text,
+            ends_at_the_arrow,
+        })
     }
 
     fn syntax_here(&self, message: &str) -> ParseError {

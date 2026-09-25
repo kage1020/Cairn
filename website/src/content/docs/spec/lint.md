@@ -340,17 +340,33 @@ resolution the spec mandates still happens — the finding says which voxel it h
 
 | Code | Meaning |
 |---|---|
-| `E_TRUTH_TABLE_EMPTY` | An `assert truth(...)` with no rows. |
+| `E_TRUTH_TABLE_EMPTY` | An `assert truth(...)` with no rows, or none whose output is `0` or `1`. |
 | `E_TRUTH_TABLE_CONFLICT` | Two rows assign the same input combination different outputs. |
-| `W_TRUTH_TABLE_DUPLICATE_ROW` | A row repeats an earlier one and agrees with it. |
+| `W_TRUTH_TABLE_DUPLICATE_ROW` | Two rows cover the same input combination without contradicting each other. |
 | `W_TRUTH_TABLE_PARTIAL` | The rows leave input combinations unassigned. |
 
-`E_TRUTH_TABLE_CONFLICT` is reported on the later row, with a note at the first row carrying that
-pattern. The spec does not say which of the two an evaluator would read, because the repair is to
-decide which row is wrong.
+Both codes are reported on the later row, with a note at the first row assigning that combination.
+The spec does not say which of two conflicting rows an evaluator would read, because the repair is
+to decide which row is wrong.
+
+A `-` makes the same combination reachable from rows that do not look alike, so both codes are
+about the combination rather than about the pattern: `0-` and `-1` both assign `01`. The fix
+differs with the shape. A row inside an earlier one — `01` under `0-` — is deleted. Two rows that
+merely cross are narrowed, because deleting either would lose the combinations only it assigns.
+
+A `-` **output** is the one shape that is neither a conflict nor a repeat: the row declines to
+constrain its combinations, so there is nothing for a concrete output to contradict, and nothing
+for it to agree with either. The pair is `W_TRUTH_TABLE_DUPLICATE_ROW`, and its fix names the
+asymmetry — whichever of the two rows is deleted, the table reads differently afterwards. A table
+with rows but no `0` or `1` output among them constrains nothing, which is why
+`E_TRUTH_TABLE_EMPTY` covers it too; the sentence differs from the no-rows one, because the repair
+is to change a row rather than to add one.
 
 The two warnings are warnings because every row present is still a real constraint. One table can
-earn both: a repeated row fills no combination.
+earn both `W_TRUTH_TABLE_DUPLICATE_ROW` and `W_TRUTH_TABLE_PARTIAL`: a repeated row, or one inside
+an earlier one, fills no combination the table did not already have. Two rows that cross are the
+exception — the coverage finding is withheld there, because a count taken without the later row
+would name a combination the table does assign.
 
 ### Semantic categories
 
