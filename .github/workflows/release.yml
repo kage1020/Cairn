@@ -30,7 +30,7 @@ jobs:
     outputs:
       version: ${{ steps.calc.outputs.version }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           ref: canary
           fetch-depth: 0
@@ -71,7 +71,7 @@ jobs:
     needs: compute-version
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           ref: canary
           fetch-depth: 0
@@ -98,10 +98,10 @@ jobs:
           echo "--- Cargo.toml [workspace.package] + [workspace.dependencies] ---"
           awk '/^\[workspace\.(package|dependencies)\]/,/^$/' Cargo.toml
 
-      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
         with:
           package_json_file: crates/cairn-lang-tree-sitter/package.json
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: pnpm
@@ -170,7 +170,7 @@ jobs:
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           ref: canary
           fetch-depth: 0
