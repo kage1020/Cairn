@@ -173,3 +173,179 @@ fn shallow_ir(phase: &PlacementPhase, row: CollapsedRow) -> PlacementIr {
     ir.outputs.push(output);
     ir
 }
+
+/// A scope carrying cells but no `circuit region=` reservation, beside
+/// the sound scope [`collapsed_pad_row`] uses.
+///
+/// Hand-built for the same reason: the placement pass fires
+/// `E_NO_CIRCUIT_REGION` and elides such a scope before any later
+/// stage sees it, so a caller assembling the IR itself is the only way
+/// to produce one. `phase` is what the stage under test expects to be
+/// handed, and the second scope is what distinguishes "elides the
+/// scope that earned the refusal" from "elides everything".
+pub(crate) fn regionless_scope(phase: &PlacementPhase) -> ScopedPlacementIr {
+    let mut ir = PlacementIr::new(Edition::Java);
+    ir.cells.push(PlacedCellNode {
+        cell: EditionCell::JavaRepeaterOr,
+        drivers: vec![],
+        coord: CellCoord::new(0, 0, 0),
+        phase: phase.clone(),
+        span: Span::default(),
+    });
+    let mut scoped = ScopedPlacementIr::new();
+    scoped.scopes.push(ScopedPlacementIrEntry {
+        kind: ScopeKind::Struct,
+        name: "roomless".to_owned(),
+        ir,
+    });
+    scoped.scopes.push(ScopedPlacementIrEntry {
+        kind: ScopeKind::Struct,
+        name: "roomy".to_owned(),
+        ir: roomy_ir(phase),
+    });
+    scoped
+}
+
+/// Which `NetRef` variant the fixture below points past the end of the
+/// list that answers it.
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum DanglingNet {
+    /// A driver naming a cell the IR does not have. Breaks the
+    /// topological invariant (`j < i` inside `cells[i]`) as well as the
+    /// bound, since the only cell is the one carrying the driver, and
+    /// `cells[0]` can satisfy `j < 0` for no `j` at all.
+    Cell,
+    /// A driver naming a sensor the netlist does not have.
+    Input,
+}
+
+impl DanglingNet {
+    /// Exactly one index past the end of the list that answers it,
+    /// rather than comfortably past.
+    ///
+    /// An index far past the end is answered by any bound that is
+    /// roughly right, so it cannot tell `< len` from `<= len`. The
+    /// first index the list does not have is the one that can.
+    fn net(self) -> NetRef {
+        match self {
+            Self::Cell => NetRef::Cell(1),
+            Self::Input => NetRef::Input(1),
+        }
+    }
+
+    /// The whole panic message, not a prefix of it.
+    ///
+    /// The routing pass used to carry a `debug_assert!` whose wording
+    /// was the first half of this one, so a test keyed on the index
+    /// alone would have passed against the shape being replaced — in
+    /// debug builds, and only there.
+    pub(crate) fn expected(self) -> &'static str {
+        match self {
+            Self::Cell => {
+                "NetRef::Cell(1) out of range (cells.len()=1) — topological invariant broken by \
+                 caller-side hand-built IR"
+            }
+            Self::Input => {
+                "NetRef::Input(1) out of range (inputs.len()=1) — netlist invariant broken by \
+                 caller-side hand-built IR"
+            }
+        }
+    }
+}
+
+/// One scope whose only cell is driven by a net no list can answer.
+///
+/// The reservation is roomy and the geometry sound, so nothing but the
+/// dangling index is wrong: a stage that answers this fixture at all
+/// answered it with a coord it invented.
+pub(crate) fn dangling_net(phase: &PlacementPhase, which: DanglingNet) -> ScopedPlacementIr {
+    let mut ir = PlacementIr::new(Edition::Java);
+    ir.region = Some(reservation(6, 3, 1));
+    ir.inputs.push(NetlistInput {
+        name: DottedRef::new("sig".into(), vec!["a".into()]),
+        span: Span::default(),
+    });
+    ir.cells.push(PlacedCellNode {
+        cell: EditionCell::JavaRepeaterOr,
+        drivers: vec![CellPortDriver {
+            port: PortName::A,
+            net: which.net(),
+        }],
+        coord: CellCoord::new(1, 0, 1),
+        phase: phase.clone(),
+        span: Span::default(),
+    });
+    scoped_entry(ir)
+}
+
+fn scoped_entry(ir: PlacementIr) -> ScopedPlacementIr {
+    scoped(ScopeKind::Struct, "dangling", ir)
+}
+
+/// Which kind of sink [`far_sink`] puts at the far edge of the
+/// reservation.
+///
+/// Both arms of the attenuation walk, because they are two loops and a
+/// gate that grew only one of them would still answer the case a
+/// `.crn` produces.
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum FarSink {
+    /// A gate body driven by the sensor pad at the near edge.
+    Cell,
+    /// An actuator pad driven by the same, which is the shape a
+    /// `region=` as wide as its `size=` makes on its own.
+    OutputPad,
+}
+
+impl FarSink {
+    /// How a refusal names it, in the wording [`crate::delay`] uses for
+    /// the same sink one stage later.
+    pub(crate) fn label(self) -> &'static str {
+        match self {
+            Self::Cell => "cell #0 port #0",
+            Self::OutputPad => "output pad #0",
+        }
+    }
+}
+
+/// One scope whose only net runs the width of the reservation: a sink
+/// at `x = width - 1` driven by the sensor pad at `x = 0`.
+///
+/// Nothing stands between them, so the route is the straight line and
+/// `width - 1` is both the distance and the segment the cap is measured
+/// against. That is what lets a caller put the two sides of the cap —
+/// the straight-line floor and the routed length — on one axis by
+/// moving one number.
+pub(crate) fn far_sink(phase: &PlacementPhase, width: u32, which: FarSink) -> ScopedPlacementIr {
+    let region = reservation(width, 3, 2);
+    let far = CellCoord::new(width - 1, 0, 0);
+    let mut ir = PlacementIr::new(Edition::Java);
+    ir.region = Some(region);
+    ir.inputs.push(NetlistInput {
+        name: DottedRef::new("sig".into(), vec!["a".into()]),
+        span: Span::default(),
+    });
+    match which {
+        FarSink::Cell => ir.cells.push(PlacedCellNode {
+            cell: EditionCell::JavaRepeaterOr,
+            drivers: vec![CellPortDriver {
+                port: PortName::A,
+                net: NetRef::Input(0),
+            }],
+            coord: far,
+            phase: phase.clone(),
+            span: Span::default(),
+        }),
+        FarSink::OutputPad => {
+            let mut output = PlacedOutputNode::new(
+                DottedRef::new("sig".into(), vec!["out".into()]),
+                NetRef::Input(0),
+                far,
+                Span::default(),
+            );
+            output.phase = phase.clone();
+            ir.outputs.push(output);
+        }
+    }
+    scoped(ScopeKind::Struct, "wide", ir)
+}

@@ -26,13 +26,17 @@
 //!   across from, the net it cleared. Separating those is the physical
 //!   tile layer's obligation, so they are named once, here, by
 //!   `W_ROUTE_CROSS_LAYER_CLEARANCE` rather than refused.
-//! - **Refusals.** All `E_ROUTE_CONGESTION`, each eliding the scope so a
-//!   partial `wire_length` never reaches stage 3: a pad the reservation
-//!   cannot fit (its saturated z collapses onto a cell or another pad);
-//!   a sink with no free path; and, after every net is laid,
-//!   `cells * CELL_FOOTPRINT + wire-only coords > reserved area`. Each
-//!   primary says which, so a reader can tell the placement pass's
-//!   pessimistic cell budget from the routed layout.
+//! - **Refusals.** Each elides the scope so a partial `wire_length`
+//!   never reaches stage 3. Three are `E_ROUTE_CONGESTION`: a pad the
+//!   reservation cannot fit (its saturated z collapses onto a cell or
+//!   another pad); a sink with no free path; and, after every net is
+//!   laid, `cells * CELL_FOOTPRINT + wire-only coords > reserved area`.
+//!   Each primary says which, so a reader can tell the placement pass's
+//!   pessimistic cell budget from the routed layout. Two more codes
+//!   reach this pass through [`crate::pass::lay_nets`]:
+//!   `E_ATTENUATION_LIMIT` for a sink further from its driver than the
+//!   v1 cap in a straight line, and `E_NO_CIRCUIT_REGION` for a scope
+//!   carrying cells but no reservation to place them in.
 //! - **Attribution.** `wire_length` is summed over the distinct nets
 //!   driving a cell (two ports reading one signal are one strand), each
 //!   measured as the routed path from the net's source into the cell —
@@ -48,7 +52,8 @@ use std::collections::HashSet;
 
 use crate::diagnostic::{Diagnostic, DiagnosticCode, error_with_footer};
 use crate::pass::{
-    OpenScope, Skipped, attribute_nodes, lay_nets, lower_scopes, open_scope, source_of_net_lenient,
+    OpenScope, Skipped, attribute_nodes, lay_nets, lower_scopes, missing_region_diagnostic,
+    open_scope, source_of_net,
 };
 use crate::placement::{CONGESTION_FIX, area_ratio_tenths};
 use crate::placement_ir::{
@@ -98,9 +103,13 @@ impl RoutingOutput {
 /// dependency.
 ///
 /// One entry per non-empty [`PlacementIr`] whose routing succeeded;
-/// scopes whose routing raises an Error-severity diagnostic (today,
-/// only `E_ROUTE_CONGESTION`) are elided from the output so a partial
-/// `wire_length` cannot pollute the delay-insertion pass downstream.
+/// scopes whose routing raises an Error-severity diagnostic are elided
+/// from the output so a partial `wire_length` cannot pollute the
+/// delay-insertion pass downstream. Today those are
+/// `E_ROUTE_CONGESTION`, `E_ATTENUATION_LIMIT` for a sink the v1 cap
+/// already puts out of reach in a straight line, and
+/// `E_NO_CIRCUIT_REGION` for a scope carrying cells with no
+/// reservation.
 #[must_use]
 pub fn compile_routing(placement: &ScopedPlacementIr) -> RoutingOutput {
     let (scoped, diagnostics) = lower_scopes(placement, route_scope);
@@ -123,17 +132,17 @@ fn route_scope(entry: &ScopedPlacementIrEntry) -> ScopeRouting {
         mut ir,
         region,
         cell_coords,
+        inputs,
         blocks,
     } = match open_scope(entry) {
         Err(Skipped::Empty) => return Ok((source.clone(), Vec::new())),
+        // Refused rather than passed through: this pass writes
+        // `wire_length`, and the producer↔variant table on
+        // `PlacementPhase` promises it after this stage. The same
+        // policy the delay and crossing passes already apply — one
+        // answer for one shape, whichever stage meets it first.
         Err(Skipped::MissingRegion) => {
-            // Loud in debug so a fixture regression trips fast; a
-            // deterministic pass-through in release.
-            debug_assert!(
-                source.cells.is_empty() && source.outputs.is_empty(),
-                "route_scope received a PlacementIr with cells or pads but no region — placement should have refused it",
-            );
-            return Ok((source.clone(), Vec::new()));
+            return Err(missing_region_diagnostic(entry, "placed", "routing"));
         }
         Ok(scope) => scope,
     };
@@ -142,8 +151,9 @@ fn route_scope(entry: &ScopedPlacementIrEntry) -> ScopeRouting {
         &ir,
         &blocks,
         entry,
+        "placed",
         &region,
-        source_of_net_lenient(&region, &cell_coords),
+        source_of_net(&region, &cell_coords, inputs),
     )?;
 
     // Occupancy for the congestion figure below: the blocks, then the
@@ -559,6 +569,14 @@ mod tests {
             routed.scoped.scopes.is_empty(),
             "the failed scope is elided rather than half-attributed",
         );
+        // Everything past the opening noun has to be identical across
+        // the three; the noun itself is what tells an author which pass
+        // refused, so it is the one word that must differ.
+        let said = refusal
+            .primary
+            .strip_prefix("placed netlist for ")
+            .unwrap_or_else(|| panic!("stage 2 reads a placed netlist: {}", refusal.primary))
+            .to_owned();
 
         // The same layout handed straight to stage 3, and then to
         // stage 4, as a caller who skipped stage 2 would. Each rebuilds
@@ -574,7 +592,7 @@ mod tests {
             .iter()
             .find(|d| d.code == crate::DiagnosticCode::RouteCongestion)
             .unwrap_or_else(|| panic!("stage 3 must refuse too: {:?}", delayed.diagnostics));
-        assert_eq!(delay_refusal.primary, refusal.primary);
+        assert_eq!(delay_refusal.primary, format!("routed netlist for {said}"));
         assert!(delayed.scoped.scopes.is_empty());
 
         for cell in &mut ir.cells {
@@ -589,7 +607,10 @@ mod tests {
             .iter()
             .find(|d| d.code == crate::DiagnosticCode::RouteCongestion)
             .unwrap_or_else(|| panic!("stage 4 must refuse too: {:?}", legalized.diagnostics));
-        assert_eq!(crossing_refusal.primary, refusal.primary);
+        assert_eq!(
+            crossing_refusal.primary,
+            format!("delayed netlist for {said}")
+        );
         assert!(legalized.scoped.scopes.is_empty());
     }
 

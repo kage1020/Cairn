@@ -314,7 +314,12 @@ enum SynthStage {
     /// "Place-and-route" lays out. Fills every cell's `wire_length`
     /// with the sum, over the nets driving it, of the routed length
     /// from that net's source into the cell; `local_delay_ticks` stays
-    /// `None` until the delay-insertion pass (stage 3) runs.
+    /// `None` until the delay-insertion pass (stage 3) runs. Refuses
+    /// with `E_ATTENUATION_LIMIT` before laying a route when a sink is
+    /// further from its driver, in a straight line, than the v1 sanity
+    /// cap [`cairn_lang_redstone::MAX_ATTENUATION_SEGMENT`]: no route
+    /// is shorter than that line, so stage 3 would refuse it anyway,
+    /// after laying it.
     Route,
     /// Delayed Placement IR: delay insertion over the routed Placement
     /// IR against `--edition`. Stage 3 of the pipeline `spec/redstone`
