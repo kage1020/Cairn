@@ -26,13 +26,17 @@
 //!   across from, the net it cleared. Separating those is the physical
 //!   tile layer's obligation, so they are named once, here, by
 //!   `W_ROUTE_CROSS_LAYER_CLEARANCE` rather than refused.
-//! - **Refusals.** All `E_ROUTE_CONGESTION`, each eliding the scope so a
-//!   partial `wire_length` never reaches stage 3: a pad the reservation
-//!   cannot fit (its saturated z collapses onto a cell or another pad);
-//!   a sink with no free path; and, after every net is laid,
-//!   `cells * CELL_FOOTPRINT + wire-only coords > reserved area`. Each
-//!   primary says which, so a reader can tell the placement pass's
-//!   pessimistic cell budget from the routed layout.
+//! - **Refusals.** Each elides the scope so a partial `wire_length`
+//!   never reaches stage 3. Three are `E_ROUTE_CONGESTION`: a pad the
+//!   reservation cannot fit (its saturated z collapses onto a cell or
+//!   another pad); a sink with no free path; and, after every net is
+//!   laid, `cells * CELL_FOOTPRINT + wire-only coords > reserved area`.
+//!   Each primary says which, so a reader can tell the placement pass's
+//!   pessimistic cell budget from the routed layout. Two more codes
+//!   reach this pass through [`crate::pass::lay_nets`]:
+//!   `E_ATTENUATION_LIMIT` for a sink further from its driver than the
+//!   v1 cap in a straight line, and `E_NO_CIRCUIT_REGION` for a scope
+//!   carrying cells but no reservation to place them in.
 //! - **Attribution.** `wire_length` is summed over the distinct nets
 //!   driving a cell (two ports reading one signal are one strand), each
 //!   measured as the routed path from the net's source into the cell —
@@ -99,9 +103,13 @@ impl RoutingOutput {
 /// dependency.
 ///
 /// One entry per non-empty [`PlacementIr`] whose routing succeeded;
-/// scopes whose routing raises an Error-severity diagnostic (today,
-/// only `E_ROUTE_CONGESTION`) are elided from the output so a partial
-/// `wire_length` cannot pollute the delay-insertion pass downstream.
+/// scopes whose routing raises an Error-severity diagnostic are elided
+/// from the output so a partial `wire_length` cannot pollute the
+/// delay-insertion pass downstream. Today those are
+/// `E_ROUTE_CONGESTION`, `E_ATTENUATION_LIMIT` for a sink the v1 cap
+/// already puts out of reach in a straight line, and
+/// `E_NO_CIRCUIT_REGION` for a scope carrying cells with no
+/// reservation.
 #[must_use]
 pub fn compile_routing(placement: &ScopedPlacementIr) -> RoutingOutput {
     let (scoped, diagnostics) = lower_scopes(placement, route_scope);
@@ -143,6 +151,7 @@ fn route_scope(entry: &ScopedPlacementIrEntry) -> ScopeRouting {
         &ir,
         &blocks,
         entry,
+        "placed",
         &region,
         source_of_net(&region, &cell_coords, inputs),
     )?;

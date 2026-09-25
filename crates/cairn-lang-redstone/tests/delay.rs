@@ -206,6 +206,18 @@ struct wide_pack size=300x5
   door id=d side=front at=center mat_slot=wall opened_by=sig.out
 
   circuit region=floor void=3
+
+struct narrow_pack size=20x5
+  floor mat_slot=wall
+
+  pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a
+  pressure_plate id=q at=inside.front  offset=0 y=0 -> sig.b
+
+  logic sig.out = sig.a or sig.b
+
+  door id=d side=front at=center mat_slot=wall opened_by=sig.out
+
+  circuit region=floor void=3
 ";
     let routing = compile_routing(&placement_from_source(source, Edition::Java));
 
@@ -222,6 +234,12 @@ struct wide_pack size=300x5
     );
     let d = attenuation[0];
     assert_eq!(d.severity(), Severity::Error);
+    assert!(
+        d.primary.starts_with("placed netlist for "),
+        "primary should name the stage that refused: the routing pass sees cells that \
+         are still `Unrouted`, so the noun is `placed`, not `routed`. Got {:?}",
+        d.primary,
+    );
     assert!(
         d.primary.contains("struct `wide_pack`"),
         "primary should name the failed scope, got {:?}",
@@ -258,16 +276,27 @@ struct wide_pack size=300x5
          wide as the `size=` it came from — enlarging is the wrong direction: {:?}",
         footer.message,
     );
-    assert!(
-        routing.scoped.scopes.iter().all(|e| e.name != "wide_pack"),
-        "failed scope must be elided from the routing output",
+    let routed: Vec<_> = routing.scoped.scopes.iter().map(|e| &e.name).collect();
+    assert_eq!(
+        routed,
+        vec!["narrow_pack"],
+        "the failed scope is elided and its healthy sibling is not",
     );
-    // And nothing reaches the delay pass to be half-attributed.
+    // The sibling is what makes this say anything: it carries through to
+    // the delay pass, so "no attenuation diagnostic downstream" is a
+    // statement about a scope that is actually there to be diagnosed,
+    // rather than about an empty input.
     let delayed = compile_delay(&routing.scoped);
     assert!(
-        delayed.diagnostics.is_empty() && delayed.scoped.scopes.is_empty(),
-        "an elided scope leaves the delay pass nothing to say: {:?}",
+        delayed.diagnostics.is_empty(),
+        "the elided scope must not be half-attributed downstream: {:?}",
         delayed.diagnostics,
+    );
+    let delayed_names: Vec<_> = delayed.scoped.scopes.iter().map(|e| &e.name).collect();
+    assert_eq!(
+        delayed_names,
+        vec!["narrow_pack"],
+        "the sibling delays normally",
     );
 }
 
@@ -661,10 +690,18 @@ struct inv size=5x5
     );
 }
 
-/// AC10 — two non-empty scopes delay independently. A clean scope
-/// passes through with `local_delay_ticks` populated; a scope that trips
-/// the attenuation cap elides without poisoning the sibling. Scope
-/// order for survivors matches input order.
+/// AC10 — one scope's refusal does not disturb its sibling. A clean
+/// scope passes through with `local_delay_ticks` populated while the
+/// scope that trips the attenuation cap elides; scope order for
+/// survivors matches input order.
+///
+/// The refusal is the routing pass's now, so what this pins is the
+/// *routing* pass's independence and the delay pass's willingness to
+/// work on the survivor set it is handed. The delay pass making its own
+/// attenuation refusal without poisoning a sibling needs a scope whose
+/// straight line fits and whose route does not, which no `.crn`
+/// produces — `delay::tests::a_detour_refusal_leaves_its_sibling_alone`
+/// covers it from a hand-built IR.
 #[test]
 fn multiple_scopes_delay_independently() {
     let source = r"
@@ -727,7 +764,7 @@ struct wide_pack size=300x5
     // diagnostic without shifting alpha.
     assert!(
         delayed.scoped.scopes.iter().all(|e| e.name != "wide_pack"),
-        "wide_pack must elide because its driver segment exceeds MAX_ATTENUATION_SEGMENT",
+        "wide_pack was elided upstream, so the delay pass must not resurrect it",
     );
     let wide_attenuation = routing
         .diagnostics

@@ -171,10 +171,14 @@ fn compile_scope(
         return Err(missing_region_diagnostic(source));
     };
 
-    // On saturation `required_area` is `u32::MAX * CELL_FOOTPRINT`,
-    // which no reservation short of a saturating one can hold, so
-    // congestion still fires — and a reservation that large is not
-    // what refuses such a scope anyway.
+    // `saturating_index` only clamps when the scope holds more than
+    // `u32::MAX` cells, which no netlist this crate can be handed
+    // reaches, so the clamped branch is unreachable today. If it ever
+    // is reached, the clamp is not what refuses the scope: the row test
+    // below needs `2 * cells + 1` columns and refuses first, whatever
+    // the area test makes of `u32::MAX * CELL_FOOTPRINT` (1.7e10, a
+    // figure plenty of ordinary reservations clear — `100000x100000`
+    // with `void=2` is 2e10).
     let cell_count = saturating_index(source.cells.len());
     let required_area = u64::from(cell_count) * u64::from(CELL_FOOTPRINT);
     let reservation = CircuitRegionReservation {

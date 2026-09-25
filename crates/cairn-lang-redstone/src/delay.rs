@@ -93,11 +93,22 @@ const _: () = assert!(
     "MAX_ATTENUATION_SEGMENT must exceed DUST_ATTENUATION_LIMIT so implicit buffers have a band to cover",
 );
 
-/// v1 sanity cap on a single driver segment's *routed* length — the
-/// dust the signal travels, not the straight line between its ends. A
-/// segment longer than this asks for a buffer chain longer than v1
-/// will build, so the delay pass refuses with `E_ATTENUATION_LIMIT`
-/// rather than count a chain nothing materialises into `local_delay_ticks`.
+/// v1 sanity cap on a single driver segment. A segment longer than this
+/// asks for a buffer chain longer than v1 will build, so the pass that
+/// measures it refuses with `E_ATTENUATION_LIMIT` rather than count a
+/// chain nothing materialises into `local_delay_ticks`.
+///
+/// Two passes measure against it, and they measure different things.
+/// [`compile_delay`] applies it to the segment's *routed* length — the
+/// dust the signal travels — which is the cap proper.
+/// [`crate::pass::lay_nets`], which all three place-and-route passes
+/// call, applies it to the straight line between the segment's ends,
+/// before a route is laid. The straight line is a floor on every route
+/// between two coords — it is the router's own admissible heuristic —
+/// so a pair further apart than this has no route any pass would
+/// accept, and laying one first buys nothing but the wait. That gate
+/// therefore refuses strictly less than this one does: everything it
+/// turns away, the delay pass would have turned away after the work.
 ///
 /// 256 blocks is 17 buffer repeaters (`(256 - 1) / 15`); anything past
 /// that in a single flat segment reads as a placement mistake rather
@@ -187,6 +198,7 @@ fn delay_scope(entry: &ScopedPlacementIrEntry) -> ScopeDelay {
         &ir,
         &blocks,
         entry,
+        "routed",
         &region,
         source_of_net(&region, &cell_coords, inputs),
     )?;
@@ -591,9 +603,10 @@ mod tests {
     fn cell_driver_attenuation_primary_names_cell_and_port() {
         // Cells wide-spread inside a `size=256x3` reservation, with one
         // standing on the straight line between the other two. Only
-        // reachable by hand-built IR — the placement pass lays cells at
-        // `x = topological index`, so producing this shape from a
-        // `.crn` would need a 258-cell chain.
+        // reachable by hand-built IR — the placement pass lays cell `i`
+        // at `x = i * CELL_SPACING + 1`, two columns apart, so the span
+        // from the first cell to the `k`th is `2k` and producing this
+        // shape from a `.crn` would need a chain of about 130 cells.
         //
         // The straight line is 255 and the route round the blocker is
         // 257, so the cap is crossed by the detour and not by the
@@ -641,6 +654,98 @@ mod tests {
         assert!(
             delayed.scoped.scopes.is_empty(),
             "failed scope must be elided",
+        );
+    }
+
+    /// The delay pass's *own* attenuation refusal — the one for a route
+    /// that crosses the cap by going round something rather than by
+    /// distance — must elide its scope without disturbing a sibling.
+    ///
+    /// This shape cannot be written in `.crn`: a `size=` wide enough to
+    /// strand a sink is already wide enough for the straight-line gate
+    /// in `lay_nets` to answer first, so the integration fixture in
+    /// `tests/delay.rs` exercises the routing pass's independence
+    /// rather than this one's. Hand-built is the only way in.
+    #[test]
+    fn a_detour_refusal_leaves_its_sibling_alone() {
+        // Scope one: the detour fixture. Straight line 255, route 257,
+        // so it clears the straight-line gate and fails the routed one.
+        let mut detour = PlacementIr::new(Edition::Java);
+        detour.region = Some(reservation(256, 3, 3));
+        for x in [0, 10] {
+            detour.cells.push(placed_cell(
+                EditionCell::JavaComparatorAnd,
+                CellCoord::new(x, 0, 0),
+                vec![],
+            ));
+        }
+        detour.cells.push(placed_cell(
+            EditionCell::JavaComparatorAnd,
+            CellCoord::new(255, 0, 0),
+            vec![CellPortDriver {
+                port: PortName::A,
+                net: NetRef::Cell(0),
+            }],
+        ));
+
+        // Scope two: roomy, and nothing in it is near the cap.
+        let mut roomy = PlacementIr::new(Edition::Java);
+        roomy.region = Some(reservation(16, 3, 3));
+        roomy.cells.push(placed_cell(
+            EditionCell::JavaComparatorAnd,
+            CellCoord::new(1, 0, 0),
+            vec![],
+        ));
+        roomy.cells.push(placed_cell(
+            EditionCell::JavaComparatorAnd,
+            CellCoord::new(3, 0, 0),
+            vec![CellPortDriver {
+                port: PortName::A,
+                net: NetRef::Cell(0),
+            }],
+        ));
+
+        let mut input = scoped(ScopeKind::Struct, "detour", detour);
+        input.scopes.push(ScopedPlacementIrEntry {
+            kind: ScopeKind::Struct,
+            name: "roomy".to_owned(),
+            ir: roomy,
+        });
+
+        let delayed = compile_delay(&input);
+
+        let codes: Vec<_> = delayed.diagnostics.iter().map(|d| d.code).collect();
+        assert_eq!(
+            codes,
+            vec![DiagnosticCode::AttenuationLimit],
+            "only the detour scope is refused, and only once: {:?}",
+            delayed.diagnostics,
+        );
+        let refusal = &delayed.diagnostics[0];
+        assert!(
+            refusal.primary.contains("struct `detour`"),
+            "the refusal must name the scope it belongs to, got {:?}",
+            refusal.primary,
+        );
+        assert!(
+            refusal.primary.contains("routed"),
+            "this is the routed-length check, not the straight-line gate, got {:?}",
+            refusal.primary,
+        );
+
+        let survivors: Vec<_> = delayed.scoped.scopes.iter().map(|e| &e.name).collect();
+        assert_eq!(
+            survivors,
+            vec!["roomy"],
+            "the sibling survives the detour scope's refusal",
+        );
+        assert!(
+            delayed.scoped.scopes[0]
+                .ir
+                .cells
+                .iter()
+                .all(|c| c.local_delay_ticks().is_some()),
+            "and is delayed in full rather than half-written",
         );
     }
 

@@ -173,13 +173,24 @@ circuit region=basement void=3       # 高さ 3 のサービス層を確保し�
      Fix: nothing in the source is wrong — the pairs are what the escape costs, and enlarging
      the region is not a remedy.
    ```
+
+   セグメントの上限もここで、配線を 1 本も敷く前に測ります。ドライバとシンクのマンハッタン距離は
+   両者を結ぶあらゆる経路の下界なので、直線ですでに上限を超えているシンクは、ルータがどう回っても
+   超えます。そうしたスコープは段階 3 ではなくこの段階で `E_ATTENUATION_LIMIT` を受け取ります。
+   下界であって本測定ではありません。段階 3 より厳密に少なくしか拒否せず、何も置き換えません。
+   幅 256 の領域はパッドをドライバから 255 ブロックの位置に置き、そこへ 257 敷くことがあります。
+   それは上限超えですがこの検査には掛からず、捕まえるのは依然として段階 3 です。Fix 行が段階 3 と
+   異なるのも同じ理由です。直線を縮めるものは何もないので、ここでは領域の拡大は解決になりません。
 3. **ディレイ挿入**: 減衰限界 15 を超えるセグメントにのみバッファとしてリピータを入れます。
    セグメントはドライバからそのシンクまでの **実配線** 経路で測り、バッファはその経路上に立ちます。
-   2 点間の直線が常に配線とは限りません。
+   2 点間の直線が常に配線とは限りません。v1 の上限 256 ブロックを超えるセグメントはバッファでは
+   なく拒否で、コードは段階 2 が上げるのと同じ `E_ATTENUATION_LIMIT` です。違うのは、この
+   パスが実際に敷かれた配線を測っている点です。
 4. **交差の合法化**: 段階 3 が数えたバッファのリピータに座標を割り当てます。この時点で配線を
    合法化する必要はありません。リピータは自分のネットの実配線経路の上に立ち、その経路はその
    ネットだけのもので、他のどのネットも 1 歩以内には走っていないので、持ち上げるべきショートも、
-   奪い合う座標もありません。
+   奪い合う座標もありません。このパスも自分でネットを敷くので直線の上限を適用します。前段が
+   渡したネットリストからスコープがここへ到達することがあるためです。
 5. **エディションの合法化**: [§14.6](#146-エディション差) を参照。
 
 配線は `circuit` 領域に閉じ込められます。収まらなければ fail-loud です。ドライバからの経路がすべて
@@ -190,6 +201,22 @@ circuit region=basement void=3       # 高さ 3 のサービス層を確保し�
 E_ROUTE_CONGESTION line 21 circuit=basement:
   synthesized netlist needs ~3.2x the reserved area (void=3, region 9x7).
   Fix: increase `void`, enlarge region, or split into multiple `circuit` blocks.
+```
+
+これらのパスが上げるもう 1 つの拒否が `E_ATTENUATION_LIMIT` です。段階 2・3・4 はいずれもネットを
+敷き、いずれも共通の 1 つのルーチンで同じ上限に照らして測るので、どの段階が拒否するかは、どれが先に
+そのスコープへ到達したかだけで決まります。primary はそのパスが読んだネットリストを名乗ります
+— 段階 2 なら `placed`、段階 3 なら `routed`、段階 4 なら `delayed` — ので、パイプラインのどこで
+測られた形なのかがメッセージから読めます。
+
+```text
+E_ATTENUATION_LIMIT line 13 circuit=floor:
+  placed netlist for struct `wide_pack` puts output pad #0 299 blocks from its driver in a
+  straight line — exceeds the v1 attenuation limit of 256 blocks, and no route between two coords
+  is shorter than the straight line between them.
+  Fix: split the logic across several `circuit` blocks, or reserve a `region=` whose pad column
+  sits within the cap of the cells it serves — a larger reservation cannot help, because the
+  straight line between these two is already over the cap.
 ```
 
 ## 14.6 エディション差

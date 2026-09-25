@@ -261,16 +261,22 @@
 
   **`CircuitRegionReservation::reserved_area` saturates** rather than overflowing. It is
   `width * depth * void` in a `u64`, which holds the product of two `u32`s and not of three:
-  `u32::MAX` squared is already within 1.5% of `u64::MAX`. `size=4294967295x4294967295` with
-  `void=3` panicked with an arithmetic overflow, one stage before any of the above — a `cairn
-  synth` away, and the reason it went unnoticed is that every reservation in the corpus has a
-  width whose square fits comfortably under.
+  `u32::MAX` squared is within a rounding error of `u64::MAX`, `2^33 - 2` short of it, so any
+  `void` above 1 can carry it over. The workspace sets no `overflow-checks`, so what that cost
+  depended on the build, and the shipped profile had the worse of the two outcomes. A release
+  build wrapped silently: `size=4294967295x4294967295 void=3` wrapped to ~1.8e19, which no
+  caller distinguishes from a real reservation, and the run exited 0 printing a netlist. Where
+  the product is an exact multiple of `2^64` it wrapped to **zero** instead —
+  `size=2147483648x2147483648 void=4` is the smallest such shape — and dividing by that zero in
+  the congestion test took the process down. One stage before any of the above, and a `cairn
+  synth` away; the reason it went unnoticed is that every reservation in the corpus has a width
+  whose square fits comfortably under.
 
   `cli_hostile_dimensions` covers the place-and-route passes now. Its existing rows run `parse`,
   `check`, `lower`, `info` and `compile`, none of which routes, so a reservation as wide as a
-  hostile `size=` was measured by nothing; the three new ones put the same widths to
-  `synth --stage route`, `--stage delay` and `--stage crossing` under the suite's 30-second
-  deadline, and it was the largest of them that found the overflow above.
+  hostile `size=` was measured by nothing; the new row puts the same widths to
+  `synth --stage route` under the suite's 30-second deadline, and it was the largest of them
+  that found the overflow above.
 
 - *(redstone)* The three place-and-route passes each asked one routine what coord a `NetRef`
   names, and the routing pass answered two shapes differently from the other two. A `NetRef::Cell(j)`

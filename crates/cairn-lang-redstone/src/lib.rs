@@ -34,7 +34,10 @@
 //! `local_delay_ticks` from `None` to `Some(base delay + implicit buffer
 //! repeater ticks)` — a local wire cost, not an arrival time, as
 //! [`delay`] sets out — and refusing with `E_ATTENUATION_LIMIT`
-//! whenever a single driver segment exceeds the v1 sanity cap; and
+//! whenever a single driver segment's *routed* length exceeds the v1
+//! sanity cap, which stage 2 has already applied to the straight line
+//! between that segment's ends so the hopeless cases never get routed
+//! at all; and
 //! [`crossing::compile_crossing`] runs stage 4 (crossing legalization)
 //! over the delayed IR, filling every cell's `buffer_coords` with the
 //! coord of each implicit buffer repeater the delay pass counted. The

@@ -104,9 +104,19 @@ pub(crate) fn open_scope(entry: &ScopedPlacementIrEntry) -> Result<OpenScope, Sk
 /// for a gate.
 ///
 /// Both arms are in range for any IR a prior stage built. `Cell(j)` is
-/// in range by the topological invariant carried across every stage
-/// (`j < i` inside `cells[i]`), and `Input(i)` by `inputs` being copied
-/// verbatim from the netlist the nets were collected out of.
+/// in range because the topological invariant carried across every
+/// stage (`j < i` inside `cells[i]`) implies it, and `Input(i)` by
+/// `inputs` being copied verbatim from the netlist the nets were
+/// collected out of.
+///
+/// What is checked here is the weaker half: that the index names some
+/// cell, not that it names an *earlier* one. A closure handed a bare
+/// `NetRef` has no reading cell to compare against, and the same
+/// closure answers for output drivers, which have no index at all. So
+/// a forward reference or a cycle (`i <= j < len`) is answered rather
+/// than refused, and the ordering half stays where it is built: the
+/// `debug_assert!`s in [`crate::netlist`]. A caller assembling the IR
+/// by hand can still get a wrong-but-in-range coord out of this.
 ///
 /// # Panics
 ///
@@ -144,25 +154,44 @@ pub(crate) fn source_of_net<'a>(
 /// The router over this scope, every net and its routed tree, or the
 /// first refusal the reservation earns.
 ///
-/// Two refusals, and both are `E_ROUTE_CONGESTION`: a reservation too
-/// shallow to hold its pad row, and a sink no route reaches. Only one
-/// comes out, so which one is a decision rather than a race — the pad
-/// row first, because it is the cause the stranded sink is a symptom
-/// of, and the shared code leaves the author nothing else to tell them
-/// apart by.
+/// Three refusals under two codes. `E_ROUTE_CONGESTION` for a
+/// reservation too shallow to hold its pad row and for a sink no route
+/// reaches; `E_ATTENUATION_LIMIT` for a sink further from its driver
+/// than [`MAX_ATTENUATION_SEGMENT`] in a straight line.
 ///
-/// Both are asked by all three passes, and for one reason. Stage 2
-/// elides the scope that earns either, and the CLI always runs it, so
-/// through `cairn` stages 3 and 4 never see one. What reaches them is
-/// a caller that assembled the IR itself: an in-crate test, or a
-/// library consumer calling [`crate::compile_delay`] or
-/// [`crate::compile_crossing`] directly, both of which the crate root
+/// Only one comes out, so the order is a decision rather than a race:
+///
+/// 1. the collapsed pad row, because it is the cause the other two are
+///    symptoms of — a pad landing on a cell body strands sinks, and no
+///    distance the author changes makes it fit;
+/// 2. the over-cap sink, because its repair is the *opposite* of the
+///    stranded sink's. `E_ROUTE_CONGESTION` says to enlarge the
+///    reservation; a pair already too far apart in a straight line is
+///    not helped by room, and for the shape that raises this most often
+///    — a reservation as wide as the `size=` it came from — enlarging
+///    makes it worse. A scope carrying both faults gets the refusal
+///    whose fix line is true rather than the one that sends the author
+///    the wrong way;
+/// 3. the sink no route reaches.
+///
+/// The pad row and the stranded sink are asked by all three passes for
+/// one reason. Stage 2 elides the scope that earns either, and the CLI
+/// always runs it, so through `cairn` stages 3 and 4 never see one.
+/// What reaches them is a caller that assembled the IR itself: an
+/// in-crate test, or a library consumer calling [`crate::compile_delay`]
+/// or [`crate::compile_crossing`] directly, both of which the crate root
 /// re-exports. Neither failure announces itself downstream.
 /// A stranded sink's route is one step: under every cap, worth no
 /// repeater, and indistinguishable in the dump from a circuit that
 /// works. A collapsed pad makes one of the two blocks something the
 /// router routes *to* and the other a coord it routes *through*, and
 /// the dump that comes out reads as a layout.
+///
+/// The over-cap sink is shared for a different reason, and the argument
+/// above does not carry to it: it is the loudest thing downstream, the
+/// very refusal the delay pass exists to make. What asking here saves is
+/// not silence but time — the route would otherwise be laid coord by
+/// coord before the pass that measures it could say no.
 ///
 /// The router is built here rather than by each caller, so the refusals
 /// cannot be reached around: a pass holding a [`Router`] is a pass that
@@ -171,6 +200,7 @@ pub(crate) fn lay_nets<F>(
     ir: &PlacementIr,
     blocks: &[BlockSite],
     entry: &ScopedPlacementIrEntry,
+    netlist: &str,
     region: &CircuitRegionReservation,
     source_of_net: F,
 ) -> Result<Nets, Diagnostic>
@@ -180,7 +210,7 @@ where
     if let Some(site) = collapsed_block(blocks) {
         return Err(pad_overlap_diagnostic(entry, region, site));
     }
-    if let Some(diagnostic) = beyond_attenuation(ir, entry, region, source_of_net) {
+    if let Some(diagnostic) = beyond_attenuation(ir, entry, netlist, region, source_of_net) {
         return Err(diagnostic);
     }
     let router = Router::new(region, blocks);
@@ -216,12 +246,22 @@ where
 /// is what catches it.
 ///
 /// Walked as [`crate::delay`] walks it — every cell's drivers in index
-/// order, then every actuator pad — so the two name the same sink for
-/// the same scope and read as one finding arriving earlier, rather than
-/// as two findings about one reservation.
+/// order, then every actuator pad — so that where both would refuse,
+/// they refuse in the same order and the earlier answer reads as the
+/// later one arriving sooner rather than as a second finding about one
+/// reservation.
+///
+/// Sharing the order is not the same as naming the same sink, because
+/// the two measure different quantities. A scope holding a sink over
+/// the cap in a straight line and a *different* sink over it only once
+/// routed is refused here, naming the first; had this gate not run, the
+/// delay pass would have named whichever of the two its own walk
+/// reached first. The order makes them agree on the common case, not on
+/// every case.
 fn beyond_attenuation<F>(
     ir: &PlacementIr,
     entry: &ScopedPlacementIrEntry,
+    netlist: &str,
     region: &CircuitRegionReservation,
     source_of_net: F,
 ) -> Option<Diagnostic>
@@ -234,6 +274,7 @@ where
             if straight > MAX_ATTENUATION_SEGMENT {
                 return Some(unreachable_sink_diagnostic(
                     entry,
+                    netlist,
                     region,
                     &format!("cell #{cell_index} port #{driver_index}"),
                     straight,
@@ -246,6 +287,7 @@ where
         if straight > MAX_ATTENUATION_SEGMENT {
             return Some(unreachable_sink_diagnostic(
                 entry,
+                netlist,
                 region,
                 &format!("output pad #{output_index}"),
                 straight,
@@ -269,12 +311,13 @@ where
 /// makes it worse.
 fn unreachable_sink_diagnostic(
     entry: &ScopedPlacementIrEntry,
+    netlist: &str,
     reservation: &CircuitRegionReservation,
     sink: &str,
     straight: u32,
 ) -> Diagnostic {
     let primary = format!(
-        "routed netlist for {kind} `{name}` puts {sink} {straight} blocks from its driver in a straight line — exceeds the v1 attenuation limit of {cap} blocks, and no route between two coords is shorter than the straight line between them",
+        "{netlist} netlist for {kind} `{name}` puts {sink} {straight} blocks from its driver in a straight line — exceeds the v1 attenuation limit of {cap} blocks, and no route between two coords is shorter than the straight line between them",
         kind = entry.kind.label(),
         name = entry.name,
         cap = MAX_ATTENUATION_SEGMENT,
@@ -837,5 +880,180 @@ mod tests {
             phase: PlacementPhase::Unrouted,
             span: Span::default(),
         }
+    }
+
+    /// A scope carrying *both* an over-cap sink and a stranded one is
+    /// answered by the cap, not by congestion.
+    ///
+    /// The two repairs point opposite ways: `E_ROUTE_CONGESTION` tells
+    /// the author to enlarge the reservation, and enlarging is exactly
+    /// what cannot fix a straight line already over the cap — for the
+    /// shape that raises it most often, a `region=` as wide as the
+    /// `size=` it came from, enlarging makes it worse. So the order in
+    /// [`lay_nets`] is a decision, and this is the fixture that holds
+    /// it: the same scope minus its far sink earns the other code, so
+    /// both faults really are present and the precedence is what picks.
+    #[test]
+    fn an_over_cap_sink_outranks_a_stranded_one() {
+        // `void=1` reserves no layer to come in over the top, so
+        // walling (1,0,0) and (2,0,1) strands the sink at (2,0,0) — the
+        // shape `routing::tests` uses. The far cell at `width - 1` is
+        // the over-cap one: nothing stands between it and the pad, so
+        // its straight line is the full width.
+        let width = MAX_ATTENUATION_SEGMENT + 44;
+        let build = |with_far_sink: bool| {
+            let mut ir = PlacementIr::new(Edition::Java);
+            ir.region = Some(reservation(width, 2, 1));
+            ir.inputs.push(NetlistInput {
+                name: cairn_lang_core::ast::DottedRef::new("sig".into(), vec!["a".into()]),
+                span: Span::default(),
+            });
+            let mut push = |coord: CellCoord, drivers: Vec<CellPortDriver>| {
+                ir.cells.push(PlacedCellNode {
+                    cell: EditionCell::JavaRepeaterOr,
+                    drivers,
+                    coord,
+                    phase: PlacementPhase::Unrouted,
+                    span: Span::default(),
+                });
+            };
+            push(CellCoord::new(1, 0, 0), vec![]);
+            push(CellCoord::new(2, 0, 1), vec![]);
+            push(
+                CellCoord::new(2, 0, 0),
+                vec![CellPortDriver {
+                    port: PortName::A,
+                    net: NetRef::Input(0),
+                }],
+            );
+            if with_far_sink {
+                push(
+                    CellCoord::new(width - 1, 0, 0),
+                    vec![CellPortDriver {
+                        port: PortName::A,
+                        net: NetRef::Input(0),
+                    }],
+                );
+            }
+            scoped(ScopeKind::Struct, "both", ir)
+        };
+
+        // Without the far sink the scope is a plain congestion refusal,
+        // which is what proves the stranded sink is really stranded.
+        let stranded_only = crate::routing::compile_routing(&build(false));
+        assert_eq!(
+            stranded_only
+                .diagnostics
+                .iter()
+                .map(|d| d.code)
+                .collect::<Vec<_>>(),
+            vec![DiagnosticCode::RouteCongestion],
+            "the stranded sink alone earns congestion: {:?}",
+            stranded_only.diagnostics,
+        );
+
+        // With both faults present, the cap answers first.
+        let both = crate::routing::compile_routing(&build(true));
+        assert_eq!(
+            both.diagnostics.iter().map(|d| d.code).collect::<Vec<_>>(),
+            vec![DiagnosticCode::AttenuationLimit],
+            "the cap outranks congestion when a scope carries both: {:?}",
+            both.diagnostics,
+        );
+        let footer = both.diagnostics[0]
+            .notes
+            .iter()
+            .find(|n| n.span.is_none())
+            .expect("the cap refusal carries a fix footer");
+        assert!(
+            footer.message.contains("cannot help") && !footer.message.contains("enlarge"),
+            "and the author gets the repair that is true for a distance, got {:?}",
+            footer.message,
+        );
+    }
+
+    /// The walk names a cell before an actuator pad, and names the
+    /// cell and port it actually reached.
+    ///
+    /// Every other fixture here carries one cell or one output, so the
+    /// index in `cell #N port #M` is always `#0` and "cells before
+    /// outputs" is never put to the test: a walk that visited outputs
+    /// first, or that reported the loop counter of the enclosing scope,
+    /// would read identically. This scope carries two cells and an
+    /// output pad, all three over the cap, so only one ordering and one
+    /// pair of indices produces the sentence asserted below.
+    #[test]
+    fn the_walk_names_the_cell_it_reached_before_any_pad() {
+        let width = MAX_ATTENUATION_SEGMENT + 44;
+        let far = CellCoord::new(width - 1, 0, 0);
+        let mut ir = PlacementIr::new(Edition::Java);
+        ir.region = Some(reservation(width, 3, 2));
+        ir.inputs.push(NetlistInput {
+            name: cairn_lang_core::ast::DottedRef::new("sig".into(), vec!["a".into()]),
+            span: Span::default(),
+        });
+        // Cell #0 is under the cap from the pad (200 < 256), so the walk
+        // has to carry on past it to reach cell #1 — and it is close
+        // enough to cell #1 that driving it stays under the cap too.
+        ir.cells.push(PlacedCellNode {
+            cell: EditionCell::JavaRepeaterOr,
+            drivers: vec![CellPortDriver {
+                port: PortName::A,
+                net: NetRef::Input(0),
+            }],
+            coord: CellCoord::new(200, 0, 0),
+            phase: PlacementPhase::Unrouted,
+            span: Span::default(),
+        });
+        // Cell #1's port #1 is the first sink over the cap. Port #0 is
+        // driven by the near cell, so the port index has to be the
+        // reached one rather than the first.
+        ir.cells.push(PlacedCellNode {
+            cell: EditionCell::JavaRepeaterOr,
+            drivers: vec![
+                CellPortDriver {
+                    port: PortName::A,
+                    net: NetRef::Cell(0),
+                },
+                CellPortDriver {
+                    port: PortName::B,
+                    net: NetRef::Input(0),
+                },
+            ],
+            coord: far,
+            phase: PlacementPhase::Unrouted,
+            span: Span::default(),
+        });
+        // An output pad equally far, on its own coord so the pad-overlap
+        // check — which outranks this one — has nothing to say, and is
+        // passed over only because cells are walked first.
+        ir.outputs.push({
+            let mut output = crate::placement_ir::PlacedOutputNode::new(
+                cairn_lang_core::ast::DottedRef::new("sig".into(), vec!["out".into()]),
+                NetRef::Input(0),
+                CellCoord::new(width - 1, 0, 2),
+                Span::default(),
+            );
+            output.phase = PlacementPhase::Unrouted;
+            output
+        });
+
+        let out = crate::routing::compile_routing(&scoped(ScopeKind::Struct, "walk", ir));
+        assert_eq!(
+            out.diagnostics.iter().map(|d| d.code).collect::<Vec<_>>(),
+            vec![DiagnosticCode::AttenuationLimit],
+            "one refusal, from the cap: {:?}",
+            out.diagnostics,
+        );
+        let primary = &out.diagnostics[0].primary;
+        assert!(
+            primary.contains("cell #1 port #1"),
+            "the walk must name the cell and port it reached, not the first of each, \
+             got {primary:?}",
+        );
+        assert!(
+            !primary.contains("output pad"),
+            "cells are walked before pads, so the pad must not be what is named: {primary:?}",
+        );
     }
 }

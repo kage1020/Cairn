@@ -211,10 +211,14 @@ fn circuit(size: &str) -> String {
 /// `hostile_sources` runs `parse`, `check`, `lower`, `info` and
 /// `compile`; none of them routes, so a reservation as wide as a
 /// hostile `size=` was measured by nothing. Stage 2 laid a wire one
-/// coord at a time out to the actuator pad — millions of them, twice
-/// over, since stage 3 rebuilt the same trees — and stage 3 was what
-/// measured the result against the attenuation cap and refused it. The
-/// answer was right and took over a minute of a debug build to give.
+/// coord at a time out to the actuator pad — millions of them — and
+/// nothing at that stage measured the result, so `--stage route` spent
+/// minutes on the widest shape here and then exited 0 carrying a
+/// netlist stage 3 would have refused. Only a run that went on to
+/// stage 3 got the refusal, and only after laying the same wire again.
+///
+/// So this asks `--stage route` for the refusal: the stage that used to
+/// answer slowly and wrongly is the one worth pinning.
 fn hostile_circuits() -> Vec<(&'static str, String)> {
     vec![
         ("circuit-size-in-range", circuit("4000000x4000000")),
@@ -231,33 +235,40 @@ fn hostile_4_routing_a_giant_reservation_answers_within_the_deadline() {
         fs::create_dir_all(&dir).expect("case dir");
         let path = write(&dir, name, &body);
         let file = path.to_str().unwrap();
-        for stage in ["route", "delay", "crossing"] {
-            let (outcome, stderr) = run_bounded(
-                &dir,
-                &[
-                    "synth",
-                    file,
-                    "--stage",
-                    stage,
-                    "--edition",
-                    "java",
-                    "--experimental-logic-synth",
-                ],
-            );
-            assert!(
-                matches!(outcome, Outcome::Exited(0 | 1)),
-                "{name}: `synth --stage {stage}` ended as {outcome:?}; a reservation the \
-                 attenuation cap cannot span must be refused, not routed\nstderr={stderr}",
-            );
-            // Exiting cleanly is not enough: a run that answered by
-            // dropping the circuit would satisfy the line above while
-            // leaving the author with nothing to act on.
-            assert!(
-                stderr.contains("E_ATTENUATION_LIMIT"),
-                "{name}: `synth --stage {stage}` must name the cap it could not meet; \
-                 got {stderr:?}",
-            );
-        }
+        // Only `route` is asked. `delay` and `crossing` would exercise
+        // nothing further: routing elides the scope and the CLI stops at
+        // the first Error-severity stage, so all three spell the same
+        // routing-side refusal. That every pass asks the same question
+        // of the same shape is what `pass::tests::stages()` covers, from
+        // an IR the CLI cannot hand them.
+        let (outcome, stderr) = run_bounded(
+            &dir,
+            &[
+                "synth",
+                file,
+                "--stage",
+                "route",
+                "--edition",
+                "java",
+                "--experimental-logic-synth",
+            ],
+        );
+        // `Exited(1)` rather than `Exited(0 | 1)`: these widths must
+        // always be refused, so accepting 0 would let a regression that
+        // demotes the refusal to a warning pass unnoticed — the code
+        // string below reaches stderr either way.
+        assert!(
+            matches!(outcome, Outcome::Exited(1)),
+            "{name}: `synth --stage route` ended as {outcome:?}; a reservation the attenuation \
+             cap cannot span must be refused, not routed\nstderr={stderr}",
+        );
+        // Exiting cleanly is not enough: a run that answered by dropping
+        // the circuit would satisfy the line above while leaving the
+        // author with nothing to act on.
+        assert!(
+            stderr.contains("E_ATTENUATION_LIMIT"),
+            "{name}: `synth --stage route` must name the cap it could not meet; got {stderr:?}",
+        );
     }
 }
 
