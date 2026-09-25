@@ -589,14 +589,21 @@ mod tests {
 
     #[test]
     fn cell_driver_attenuation_primary_names_cell_and_port() {
-        // Two cells wide-spread inside a `size=300x3` reservation so
-        // the cell[1] driver from cell[0] spans a routed segment
-        // over `MAX_ATTENUATION_SEGMENT`. Only reachable by hand-built
-        // IR — the placement pass lays cells at `x = topological
-        // index`, so producing this shape from a `.crn` would need a
-        // 258-cell chain.
+        // Cells wide-spread inside a `size=256x3` reservation, with one
+        // standing on the straight line between the other two. Only
+        // reachable by hand-built IR — the placement pass lays cells at
+        // `x = topological index`, so producing this shape from a
+        // `.crn` would need a 258-cell chain.
+        //
+        // The straight line is 255 and the route round the blocker is
+        // 257, so the cap is crossed by the detour and not by the
+        // distance. That is what puts the refusal here rather than in
+        // the straight-line gate `lay_nets` runs before any route is
+        // laid: this fixture is the case that gate must let through,
+        // and a wider region — where the distance alone is over the cap
+        // — would be answered before this pass saw it.
         let mut ir = PlacementIr::new(Edition::Java);
-        ir.region = Some(reservation(300, 3, 3));
+        ir.region = Some(reservation(256, 3, 3));
         ir.cells.push(placed_cell(
             EditionCell::JavaComparatorAnd,
             CellCoord::new(0, 0, 0),
@@ -604,7 +611,12 @@ mod tests {
         ));
         ir.cells.push(placed_cell(
             EditionCell::JavaComparatorAnd,
-            CellCoord::new(299, 0, 0),
+            CellCoord::new(10, 0, 0),
+            vec![],
+        ));
+        ir.cells.push(placed_cell(
+            EditionCell::JavaComparatorAnd,
+            CellCoord::new(255, 0, 0),
             vec![CellPortDriver {
                 port: PortName::A,
                 net: NetRef::Cell(0),
@@ -617,7 +629,7 @@ mod tests {
             .find(|d| d.code == DiagnosticCode::AttenuationLimit)
             .expect("cell-driver segment past cap must fire E_ATTENUATION_LIMIT");
         assert!(
-            attenuation.primary.contains("into cell #1"),
+            attenuation.primary.contains("into cell #2"),
             "primary must name the failing cell index, got {:?}",
             attenuation.primary,
         );

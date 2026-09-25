@@ -20,11 +20,12 @@ use cairn_lang_core::Edition;
 use cairn_lang_core::check::Severity;
 use cairn_lang_redstone::{
     DiagnosticCode, MAX_ATTENUATION_SEGMENT, PlacedCellNode, ScopedPlacementIr, compile_delay,
+    compile_routing,
 };
 
 mod common;
 
-use common::{load_example, normalize_stage_tags, routed_from_source};
+use common::{load_example, normalize_stage_tags, placement_from_source, routed_from_source};
 
 /// AC1 — `examples/redstone-door.crn` compiled for Java: the sole
 /// `JavaRepeaterOr` cell picks up `local_delay_ticks = Some(1)` — base 1 tick
@@ -179,8 +180,17 @@ struct sim size=7x5
 /// The fixture uses a very wide region (width > 256) so the sole
 /// cell's output driver spans the full `x` axis to the right-edge
 /// output pad.
+///
+/// The refusal comes from the routing pass rather than the delay pass,
+/// which is what changed when the straight-line gate landed: a sink
+/// further from its driver than the cap has no route any stage would
+/// accept, and the pass that would otherwise lay a 299-block wire to
+/// find that out is the one that says so. The delay pass's own check
+/// stays, for the segment that crosses the cap by going round something
+/// rather than by distance — a shape no `.crn` produces, and one
+/// `pass.rs` covers from a hand-built IR.
 #[test]
-fn attenuation_limit_fires_and_elides_scope() {
+fn attenuation_limit_fires_at_routing_and_elides_scope() {
     let source = r"
 theme t:
   slot wall -> @oak_planks
@@ -197,10 +207,9 @@ struct wide_pack size=300x5
 
   circuit region=floor void=3
 ";
-    let routed = routed_from_source(source, Edition::Java);
-    let delayed = compile_delay(&routed);
+    let routing = compile_routing(&placement_from_source(source, Edition::Java));
 
-    let attenuation: Vec<_> = delayed
+    let attenuation: Vec<_> = routing
         .diagnostics
         .iter()
         .filter(|d| d.code == DiagnosticCode::AttenuationLimit)
@@ -209,15 +218,10 @@ struct wide_pack size=300x5
         attenuation.len(),
         1,
         "expected exactly one E_ATTENUATION_LIMIT, got {:?}",
-        delayed.diagnostics,
+        routing.diagnostics,
     );
     let d = attenuation[0];
     assert_eq!(d.severity(), Severity::Error);
-    assert!(
-        d.primary.starts_with("routed netlist for "),
-        "primary should mark the delay-side origin, got {:?}",
-        d.primary,
-    );
     assert!(
         d.primary.contains("struct `wide_pack`"),
         "primary should name the failed scope, got {:?}",
@@ -240,16 +244,30 @@ struct wide_pack size=300x5
         .iter()
         .find(|n| n.span.is_none())
         .expect("attenuation has a fix footer");
-    for phrase in ["enlarge", "region", "split", "pin"] {
+    for phrase in ["split", "region", "cannot help"] {
         assert!(
             footer.message.contains(phrase),
-            "footer should carry the self-correction triple (missing {phrase:?}), got {:?}",
+            "footer should say what repairs a distance (missing {phrase:?}), got {:?}",
             footer.message,
         );
     }
     assert!(
-        delayed.scoped.scopes.iter().all(|e| e.name != "wide_pack"),
-        "failed scope must be elided from the delay output",
+        !footer.message.contains("enlarge"),
+        "the delay pass's `enlarge region=` is the repair for a route that went round \
+         something; nothing shortens a straight line, and for this shape — a `region=` as \
+         wide as the `size=` it came from — enlarging is the wrong direction: {:?}",
+        footer.message,
+    );
+    assert!(
+        routing.scoped.scopes.iter().all(|e| e.name != "wide_pack"),
+        "failed scope must be elided from the routing output",
+    );
+    // And nothing reaches the delay pass to be half-attributed.
+    let delayed = compile_delay(&routing.scoped);
+    assert!(
+        delayed.diagnostics.is_empty() && delayed.scoped.scopes.is_empty(),
+        "an elided scope leaves the delay pass nothing to say: {:?}",
+        delayed.diagnostics,
     );
 }
 
@@ -442,17 +460,21 @@ fn max_attenuation_segment_boundary_at_257_is_exclusive() {
         logic sig.out = sig.a or sig.b\n  \
         door id=d side=front at=center mat_slot=wall opened_by=sig.out\n  \
         circuit region=floor void=3\n";
-    let routed = routed_from_source(over_cap_source, Edition::Java);
-    let delayed = compile_delay(&routed);
+    // One block over is a distance, not a detour, so the straight-line
+    // gate answers it before a route is laid. The at-cap fixture above
+    // is the other side of the same boundary and still goes all the way
+    // through the delay pass, which is what makes the pair meaningful:
+    // the gate has to let 256 through and stop 257.
+    let routing = compile_routing(&placement_from_source(over_cap_source, Edition::Java));
     assert_eq!(
-        delayed
+        routing
             .diagnostics
             .iter()
             .filter(|d| d.code == DiagnosticCode::AttenuationLimit)
             .count(),
         1,
         "segment == MAX_ATTENUATION_SEGMENT + 1 must fail: {:?}",
-        delayed.diagnostics,
+        routing.diagnostics,
     );
     // Assert `MAX_ATTENUATION_SEGMENT` reads as 256 today so the
     // boundary fixtures above stay meaningful — a future edit that
@@ -665,8 +687,25 @@ struct wide_pack size=300x5
   door id=e side=front at=center mat_slot=wall opened_by=sig.out
   circuit region=floor void=3
 ";
-    let routed = routed_from_source(source, Edition::Java);
-    let delayed = compile_delay(&routed);
+    // `wide_pack` is refused for its distance, which the routing pass
+    // now answers, so what the delay pass is handed is already the
+    // survivor set. The independence this test is about is unchanged:
+    // one scope's refusal must not shift or poison its sibling.
+    let routing = compile_routing(&placement_from_source(source, Edition::Java));
+    assert!(
+        routing
+            .diagnostics
+            .iter()
+            .any(|d| d.code == DiagnosticCode::AttenuationLimit),
+        "wide_pack must be refused for its distance: {:?}",
+        routing.diagnostics,
+    );
+    let delayed = compile_delay(&routing.scoped);
+    assert!(
+        delayed.diagnostics.is_empty(),
+        "the surviving scope delays cleanly: {:?}",
+        delayed.diagnostics,
+    );
 
     // alpha delays cleanly.
     let alpha = delayed
@@ -688,9 +727,9 @@ struct wide_pack size=300x5
     // diagnostic without shifting alpha.
     assert!(
         delayed.scoped.scopes.iter().all(|e| e.name != "wide_pack"),
-        "wide_pack must elide because a driver segment exceeds MAX_ATTENUATION_SEGMENT",
+        "wide_pack must elide because its driver segment exceeds MAX_ATTENUATION_SEGMENT",
     );
-    let wide_attenuation = delayed
+    let wide_attenuation = routing
         .diagnostics
         .iter()
         .find(|d| d.code == DiagnosticCode::AttenuationLimit)

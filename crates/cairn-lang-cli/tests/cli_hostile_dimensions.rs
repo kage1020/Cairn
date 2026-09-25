@@ -184,6 +184,83 @@ fn hostile_sources() -> Vec<(&'static str, String)> {
     ]
 }
 
+/// A `circuit region=` inside a struct whose `size=` is hostile.
+///
+/// The reservation takes the floor's extent, so `region=` is as wide as
+/// `size=` and the actuator pad lands at `x = width - 1`: the driver
+/// segment out to it is the author's `size=`. The rest of the file is
+/// the smallest circuit that reaches the place-and-route passes at all
+/// — two sensors, one gate, one actuator.
+fn circuit(size: &str) -> String {
+    let body = [
+        format!("struct big size={size}"),
+        "  floor mat_slot=floor".to_owned(),
+        "  pressure_plate id=pa at=front.outside offset=0 y=0 -> sig.a".to_owned(),
+        "  pressure_plate id=pb at=inside.front offset=0 y=0 -> sig.b".to_owned(),
+        "  logic sig.o = sig.a and sig.b".to_owned(),
+        "  door id=d side=front at=center mat_slot=wall opened_by=sig.o".to_owned(),
+        "  circuit region=floor void=3".to_owned(),
+    ]
+    .join("\n");
+    source(&format!("{body}\n"))
+}
+
+/// The same shapes put to the place-and-route passes, which the
+/// commands above never reach.
+///
+/// `hostile_sources` runs `parse`, `check`, `lower`, `info` and
+/// `compile`; none of them routes, so a reservation as wide as a
+/// hostile `size=` was measured by nothing. Stage 2 laid a wire one
+/// coord at a time out to the actuator pad — millions of them, twice
+/// over, since stage 3 rebuilt the same trees — and stage 3 was what
+/// measured the result against the attenuation cap and refused it. The
+/// answer was right and took over a minute of a debug build to give.
+fn hostile_circuits() -> Vec<(&'static str, String)> {
+    vec![
+        ("circuit-size-in-range", circuit("4000000x4000000")),
+        ("circuit-size-i32-max", circuit("2147483647x2147483647")),
+        ("circuit-size-u32-max", circuit("4294967295x4294967295")),
+    ]
+}
+
+#[test]
+fn hostile_4_routing_a_giant_reservation_answers_within_the_deadline() {
+    let tmp = TempDir::new().expect("tempdir");
+    for (name, body) in hostile_circuits() {
+        let dir = tmp.path().join(name);
+        fs::create_dir_all(&dir).expect("case dir");
+        let path = write(&dir, name, &body);
+        let file = path.to_str().unwrap();
+        for stage in ["route", "delay", "crossing"] {
+            let (outcome, stderr) = run_bounded(
+                &dir,
+                &[
+                    "synth",
+                    file,
+                    "--stage",
+                    stage,
+                    "--edition",
+                    "java",
+                    "--experimental-logic-synth",
+                ],
+            );
+            assert!(
+                matches!(outcome, Outcome::Exited(0 | 1)),
+                "{name}: `synth --stage {stage}` ended as {outcome:?}; a reservation the \
+                 attenuation cap cannot span must be refused, not routed\nstderr={stderr}",
+            );
+            // Exiting cleanly is not enough: a run that answered by
+            // dropping the circuit would satisfy the line above while
+            // leaving the author with nothing to act on.
+            assert!(
+                stderr.contains("E_ATTENUATION_LIMIT"),
+                "{name}: `synth --stage {stage}` must name the cap it could not meet; \
+                 got {stderr:?}",
+            );
+        }
+    }
+}
+
 fn write(dir: &Path, name: &str, source: &str) -> PathBuf {
     let path = dir.join(format!("{name}.crn"));
     fs::write(&path, source).expect("write source");

@@ -171,8 +171,10 @@ fn compile_scope(
         return Err(missing_region_diagnostic(source));
     };
 
-    // On saturation `required_area` exceeds any `reserved_area` (`u32^3`
-    // at most), so congestion still fires.
+    // On saturation `required_area` is `u32::MAX * CELL_FOOTPRINT`,
+    // which no reservation short of a saturating one can hold, so
+    // congestion still fires — and a reservation that large is not
+    // what refuses such a scope anyway.
     let cell_count = saturating_index(source.cells.len());
     let required_area = u64::from(cell_count) * u64::from(CELL_FOOTPRINT);
     let reservation = CircuitRegionReservation {

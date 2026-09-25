@@ -328,12 +328,26 @@ pub struct CircuitRegionReservation {
 }
 
 impl CircuitRegionReservation {
-    /// Total blocks reserved for routing: `width * depth * void`. Uses
-    /// `u64` so a large-but-legal reservation cannot overflow when
-    /// multiplied against a large cell budget elsewhere in the pass.
+    /// Total blocks reserved for routing: `width * depth * void`,
+    /// saturating.
+    ///
+    /// `u64` holds the product of two `u32`s and not of three —
+    /// `u32::MAX` squared is already within a rounding error of
+    /// `u64::MAX` — so a reservation taken from a hostile `size=` with
+    /// any `void` above 1 overflows it. `size=4294967295x4294967295`
+    /// with `void=3` is a `cairn synth` away, and used to panic here.
+    ///
+    /// Saturating rather than widening, because every caller compares
+    /// this against a budget or divides into it, and `u64::MAX` is the
+    /// right answer to both: a reservation that large is not the
+    /// constraint on anything. The refusal such a scope earns comes
+    /// from the attenuation cap, which its own span and its own
+    /// sentence are about.
     #[must_use]
     pub const fn reserved_area(&self) -> u64 {
-        (self.width as u64) * (self.depth as u64) * (self.void as u64)
+        (self.width as u64)
+            .saturating_mul(self.depth as u64)
+            .saturating_mul(self.void as u64)
     }
 }
 
@@ -2275,6 +2289,38 @@ mod tests {
         assert_eq!(
             delayed_json.replace("\"stage\":\"delay\"", "\"stage\":\"crossing\""),
             legalized_json,
+        );
+    }
+
+    /// `reserved_area` saturates rather than overflowing, which is what
+    /// a reservation taken from a hostile `size=` makes it do.
+    ///
+    /// `u64` holds `u32::MAX` squared with 1.5% to spare and nothing
+    /// beyond it, so the third factor is where this goes. A `void` of
+    /// 2 is enough; the `void=3` below is the value the reproduction in
+    /// the CLI's hostile-dimensions suite uses, and 1 is the only value
+    /// that leaves the product in range at all, which is why the
+    /// overflow went unnoticed — every reservation in the corpus has a
+    /// width the square fits comfortably under.
+    #[test]
+    fn reserved_area_saturates_on_a_reservation_no_u64_can_hold() {
+        let region = |width: u32, depth: u32, void: u32| CircuitRegionReservation {
+            label: "floor".to_owned(),
+            void,
+            width,
+            depth,
+            span: Span::default(),
+        };
+        assert_eq!(region(6, 3, 2).reserved_area(), 36, "the ordinary product");
+        assert_eq!(
+            region(u32::MAX, u32::MAX, 1).reserved_area(),
+            u64::from(u32::MAX) * u64::from(u32::MAX),
+            "two u32s fit, so this one is exact",
+        );
+        assert_eq!(
+            region(u32::MAX, u32::MAX, 3).reserved_area(),
+            u64::MAX,
+            "three do not, and the answer is the ceiling rather than a panic",
         );
     }
 }

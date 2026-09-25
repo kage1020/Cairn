@@ -281,3 +281,71 @@ pub(crate) fn dangling_net(phase: &PlacementPhase, which: DanglingNet) -> Scoped
 fn scoped_entry(ir: PlacementIr) -> ScopedPlacementIr {
     scoped(ScopeKind::Struct, "dangling", ir)
 }
+
+/// Which kind of sink [`far_sink`] puts at the far edge of the
+/// reservation.
+///
+/// Both arms of the attenuation walk, because they are two loops and a
+/// gate that grew only one of them would still answer the case a
+/// `.crn` produces.
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum FarSink {
+    /// A gate body driven by the sensor pad at the near edge.
+    Cell,
+    /// An actuator pad driven by the same, which is the shape a
+    /// `region=` as wide as its `size=` makes on its own.
+    OutputPad,
+}
+
+impl FarSink {
+    /// How a refusal names it, in the wording [`crate::delay`] uses for
+    /// the same sink one stage later.
+    pub(crate) fn label(self) -> &'static str {
+        match self {
+            Self::Cell => "cell #0 port #0",
+            Self::OutputPad => "output pad #0",
+        }
+    }
+}
+
+/// One scope whose only net runs the width of the reservation: a sink
+/// at `x = width - 1` driven by the sensor pad at `x = 0`.
+///
+/// Nothing stands between them, so the route is the straight line and
+/// `width - 1` is both the distance and the segment the cap is measured
+/// against. That is what lets a caller put the two sides of the cap —
+/// the straight-line floor and the routed length — on one axis by
+/// moving one number.
+pub(crate) fn far_sink(phase: &PlacementPhase, width: u32, which: FarSink) -> ScopedPlacementIr {
+    let region = reservation(width, 3, 2);
+    let far = CellCoord::new(width - 1, 0, 0);
+    let mut ir = PlacementIr::new(Edition::Java);
+    ir.region = Some(region);
+    ir.inputs.push(NetlistInput {
+        name: DottedRef::new("sig".into(), vec!["a".into()]),
+        span: Span::default(),
+    });
+    match which {
+        FarSink::Cell => ir.cells.push(PlacedCellNode {
+            cell: EditionCell::JavaRepeaterOr,
+            drivers: vec![CellPortDriver {
+                port: PortName::A,
+                net: NetRef::Input(0),
+            }],
+            coord: far,
+            phase: phase.clone(),
+            span: Span::default(),
+        }),
+        FarSink::OutputPad => {
+            let mut output = PlacedOutputNode::new(
+                DottedRef::new("sig".into(), vec!["out".into()]),
+                NetRef::Input(0),
+                far,
+                Span::default(),
+            );
+            output.phase = phase.clone();
+            ir.outputs.push(output);
+        }
+    }
+    scoped(ScopeKind::Struct, "wide", ir)
+}

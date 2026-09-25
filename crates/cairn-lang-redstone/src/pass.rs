@@ -9,6 +9,7 @@
 
 use std::collections::HashMap;
 
+use crate::delay::MAX_ATTENUATION_SEGMENT;
 use crate::diagnostic::{Diagnostic, DiagnosticCode, error_with_footer};
 use crate::netlist_ir::NetRef;
 use crate::placement_ir::{
@@ -16,8 +17,8 @@ use crate::placement_ir::{
     PlacementIr, PlacementPhase, ScopedPlacementIr, ScopedPlacementIrEntry,
 };
 use crate::routing_geometry::{
-    BlockSite, NetTree, Router, block_sites, collapsed_block, collect_nets, input_pad, net_trees,
-    unroutable,
+    BlockSite, NetTree, Router, block_sites, collapsed_block, collect_nets, input_pad, manhattan,
+    net_trees, unroutable,
 };
 use crate::saturating_index;
 
@@ -179,6 +180,9 @@ where
     if let Some(site) = collapsed_block(blocks) {
         return Err(pad_overlap_diagnostic(entry, region, site));
     }
+    if let Some(diagnostic) = beyond_attenuation(ir, entry, region, source_of_net) {
+        return Err(diagnostic);
+    }
     let router = Router::new(region, blocks);
     let sinks = collect_nets(ir);
     let trees = net_trees(&sinks, &router, source_of_net);
@@ -190,6 +194,97 @@ where
         sinks,
         trees,
     })
+}
+
+/// Refuse a sink the attenuation cap already puts out of reach, before
+/// a route to it is laid.
+///
+/// [`manhattan`] is a floor on every route between two coords — it is
+/// the router's own search heuristic, admissible for exactly that
+/// reason — so a pair further apart than [`MAX_ATTENUATION_SEGMENT`]
+/// has no route the delay pass would accept. Laying one first costs the
+/// search a coord of work per block of distance, and a `region=` taken
+/// from a `size=` makes that millions: a four-million-wide floor spent
+/// over a minute laying a wire out to its pad, in each of the three
+/// passes that lay nets, before stage 3 measured it and said no.
+///
+/// A floor and not the measure, so this refuses strictly less than
+/// [`crate::delay`] does and replaces nothing: a route is as long as the
+/// straight line only where nothing stands in the way. A region 256
+/// wide puts its pad 255 blocks from the driver and routes 257 to get
+/// there, which is over the cap and not over this, and stage 3's check
+/// is what catches it.
+///
+/// Walked as [`crate::delay`] walks it — every cell's drivers in index
+/// order, then every actuator pad — so the two name the same sink for
+/// the same scope and read as one finding arriving earlier, rather than
+/// as two findings about one reservation.
+fn beyond_attenuation<F>(
+    ir: &PlacementIr,
+    entry: &ScopedPlacementIrEntry,
+    region: &CircuitRegionReservation,
+    source_of_net: F,
+) -> Option<Diagnostic>
+where
+    F: Fn(NetRef) -> CellCoord,
+{
+    for (cell_index, cell) in ir.cells.iter().enumerate() {
+        for (driver_index, driver) in cell.drivers.iter().enumerate() {
+            let straight = manhattan(source_of_net(driver.net), cell.coord);
+            if straight > MAX_ATTENUATION_SEGMENT {
+                return Some(unreachable_sink_diagnostic(
+                    entry,
+                    region,
+                    &format!("cell #{cell_index} port #{driver_index}"),
+                    straight,
+                ));
+            }
+        }
+    }
+    for (output_index, output) in ir.outputs.iter().enumerate() {
+        let straight = manhattan(source_of_net(output.driver), output.pad);
+        if straight > MAX_ATTENUATION_SEGMENT {
+            return Some(unreachable_sink_diagnostic(
+                entry,
+                region,
+                &format!("output pad #{output_index}"),
+                straight,
+            ));
+        }
+    }
+    None
+}
+
+/// The refusal [`beyond_attenuation`] returns, under the cap's own code
+/// because it is the cap: what changes is which pass has to lay a wire
+/// to find out.
+///
+/// The fix line is not [`crate::delay`]'s. That one opens with
+/// "enlarge `region=`", which is the repair when a route is long
+/// because it had to go round something — room to go straight shortens
+/// it. Nothing shortens a straight line, so a larger reservation cannot
+/// answer this one, and for the shape that raises it most often — a
+/// `region=` as wide as the `size=` it was taken from, with the
+/// actuator column at `x = width - 1` — enlarging is the direction that
+/// makes it worse.
+fn unreachable_sink_diagnostic(
+    entry: &ScopedPlacementIrEntry,
+    reservation: &CircuitRegionReservation,
+    sink: &str,
+    straight: u32,
+) -> Diagnostic {
+    let primary = format!(
+        "routed netlist for {kind} `{name}` puts {sink} {straight} blocks from its driver in a straight line — exceeds the v1 attenuation limit of {cap} blocks, and no route between two coords is shorter than the straight line between them",
+        kind = entry.kind.label(),
+        name = entry.name,
+        cap = MAX_ATTENUATION_SEGMENT,
+    );
+    error_with_footer(
+        DiagnosticCode::AttenuationLimit,
+        reservation.span.clone(),
+        primary,
+        "Fix: split the logic across several `circuit` blocks, or reserve a `region=` whose pad column sits within the cap of the cells it serves — a larger reservation cannot help, because the straight line between these two is already over the cap",
+    )
 }
 
 /// Refuse a scope whose reservation collapses two blocks onto one
@@ -330,6 +425,7 @@ mod tests {
     use cairn_lang_core::Edition;
     use cairn_lang_core::error::Span;
 
+    use super::MAX_ATTENUATION_SEGMENT;
     use crate::diagnostic::DiagnosticCode;
     use crate::edition_netlist_ir::EditionCell;
     use crate::logic_ir::ScopeKind;
@@ -338,8 +434,8 @@ mod tests {
         CellCoord, PlacedCellNode, PlacementIr, PlacementPhase, ScopedPlacementIr,
     };
     use crate::test_fixtures::{
-        CollapsedRow, DanglingNet, collapsed_pad_row, dangling_net, regionless_scope, reservation,
-        scoped,
+        CollapsedRow, DanglingNet, FarSink, collapsed_pad_row, dangling_net, far_sink,
+        regionless_scope, reservation, scoped,
     };
 
     /// A reservation too shallow to hold its pad row is refused by
@@ -650,6 +746,84 @@ mod tests {
                     message.contains(which.expected()),
                     "the {stage} pass names the index and the list it ran past, got {message:?}",
                 );
+            }
+        }
+    }
+
+    /// A sink the cap already puts out of reach is refused before a
+    /// route to it is laid, at every stage that lays one.
+    ///
+    /// The cap is on the routed segment, and the straight line between
+    /// two coords is a floor on every route between them, so a sink
+    /// further away than the cap has no route any stage would accept.
+    /// Stage 3 used to be the one that said so, after stage 2 had laid
+    /// the wire and stage 3 had laid it again: a `circuit region=`
+    /// taken from a four-million-wide `size=` spent over a minute of a
+    /// debug build doing that before answering.
+    ///
+    /// Asked of all three because the check sits in the routine all
+    /// three call to lay their nets, and the reason it sits there is
+    /// that all three pay the cost.
+    #[test]
+    fn every_stage_refuses_a_sink_further_than_the_cap_can_reach() {
+        // One block past the cap, not comfortably past: the bound is
+        // `>`, and a distance far past the end cannot tell that from
+        // `>=`. `width - 1` is the pad's distance from the sensor pad.
+        let width = MAX_ATTENUATION_SEGMENT + 2;
+        for which in [FarSink::Cell, FarSink::OutputPad] {
+            for (stage, phase, run) in &stages() {
+                let (diagnostics, kept) = run(&far_sink(phase, width, which));
+                let refusal = diagnostics
+                    .iter()
+                    .find(|d| d.code == DiagnosticCode::AttenuationLimit)
+                    .unwrap_or_else(|| {
+                        panic!(
+                            "the {stage} pass must refuse a {which:?} past the cap: {diagnostics:?}"
+                        )
+                    });
+                assert!(
+                    refusal.primary.contains(which.label())
+                        && refusal.primary.contains(&format!("{} blocks", width - 1))
+                        && refusal
+                            .primary
+                            .contains(&format!("limit of {MAX_ATTENUATION_SEGMENT} blocks")),
+                    "the {stage} pass names the sink, the distance and the cap: {}",
+                    refusal.primary,
+                );
+                assert!(
+                    refusal
+                        .notes
+                        .iter()
+                        .any(|note| note.message.contains("a larger reservation cannot help")),
+                    "the fix may not send the author the way the routed-length refusal does, \
+                     since nothing shortens a straight line: {:?}",
+                    refusal.notes,
+                );
+                assert!(kept.is_empty(), "the {stage} pass elides the refused scope");
+            }
+        }
+    }
+
+    /// And a sink exactly at the cap is routed rather than refused, at
+    /// every stage.
+    ///
+    /// The boundary is the whole content of the check: one block closer
+    /// and the wire is laid, measured, and accepted. A gate that
+    /// refused here would be refusing layouts the language allows,
+    /// which is the cost of putting a cheap test in front of an exact
+    /// one.
+    #[test]
+    fn a_sink_exactly_at_the_cap_is_routed_rather_than_refused() {
+        let width = MAX_ATTENUATION_SEGMENT + 1;
+        for which in [FarSink::Cell, FarSink::OutputPad] {
+            for (stage, phase, run) in &stages() {
+                let (diagnostics, kept) = run(&far_sink(phase, width, which));
+                assert!(
+                    diagnostics.is_empty(),
+                    "the {stage} pass accepts a {which:?} at exactly \
+                     {MAX_ATTENUATION_SEGMENT}: {diagnostics:?}",
+                );
+                assert_eq!(kept, vec!["wide".to_owned()]);
             }
         }
     }
