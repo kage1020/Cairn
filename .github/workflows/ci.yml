@@ -42,3 +42,80 @@ jobs:
 
       - name: Test
         run: cargo test --workspace --locked
+
+  msrv:
+    # Short and stable on purpose: a required status check is matched as
+    # a literal string, so renaming this job un-gates it silently.
+    name: MSRV
+    runs-on: ubuntu-latest
+    # Why this job exists — including what it catches that
+    # `clippy::incompatible_msrv` at the pin does not — and why it runs
+    # `check --locked --all-features` rather than `test`:
+    # CONTRIBUTING.md, "Bumping the toolchain".
+    env:
+      # Not `-D warnings`. A consumer at the floor does not build with
+      # it, and an older compiler warns about things the pin has since
+      # renamed or stopped emitting — which would fail this job for a
+      # reason that is not "cannot build at the floor".
+      RUSTFLAGS: ""
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install pinned toolchain
+        run: rustup show
+
+      - name: Read the floor out of the manifest
+        id: floor
+        # One source for the version. Hard-coding it here would be a
+        # second copy of `rust-version` with nothing comparing them, and
+        # the copy is what goes stale. `--no-deps` keeps this to the
+        # workspace's own crates; every one of them has to agree, so a
+        # crate that dropped `rust-version.workspace = true` fails here
+        # rather than going unchecked.
+        run: |
+          set -euo pipefail
+          metadata=$(cargo metadata --format-version 1 --no-deps)
+          declared=$(jq -r '[.packages[] | .rust_version // empty] | unique | join(" ")' <<<"$metadata")
+          undeclared=$(jq -r '[.packages[] | select(.rust_version == null) | .name] | join(", ")' <<<"$metadata")
+          if [ -z "$declared" ]; then
+            echo "::error::no workspace crate declares rust-version, so there is no floor to check"
+            exit 1
+          fi
+          # Two failures worth telling apart: one manifest to edit, or
+          # seven.
+          if [ -n "$undeclared" ]; then
+            echo "::error::these workspace crates declare no rust-version: $undeclared — give each one \`rust-version.workspace = true\` so the whole workspace shares one floor"
+            exit 1
+          fi
+          case "$declared" in
+            *\ *)
+              echo "::error::workspace crates declare more than one floor ($declared) — this job can only check one"
+              exit 1
+              ;;
+          esac
+          # Cargo reads a two-component `rust-version` as `.0`, while
+          # `rustup toolchain install` resolves it to the newest patch
+          # in that series. Spell the patch level out, so the day a
+          # point release ships this job keeps checking the compiler
+          # the manifest actually promises.
+          case "$declared" in
+            *.*.*) ;;
+            *) declared="$declared.0" ;;
+          esac
+          echo "version=$declared" >> "$GITHUB_OUTPUT"
+
+      - name: Install the floor toolchain
+        run: rustup toolchain install "${{ steps.floor.outputs.version }}" --profile minimal
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          # The floor in the key: cargo fingerprints on the rustc
+          # version anyway, but two different floors sharing one cache
+          # entry would mean each invalidating the other's work.
+          shared-key: msrv-${{ steps.floor.outputs.version }}
+          save-if: ${{ github.ref == 'refs/heads/canary' || github.ref == 'refs/heads/main' }}
+
+      - name: Check at the floor
+        run: cargo +"${{ steps.floor.outputs.version }}" check --workspace --locked --all-features
