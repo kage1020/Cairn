@@ -290,8 +290,22 @@ bool tree_sitter_cairn_external_scanner_scan(void *payload, TSLexer *lexer, cons
   // with one. Nothing else is: a pattern is the characters the source
   // ran together, so `0- 1` is a two-wide pattern and a stray `1` here
   // exactly as it is there.
+  //
+  // A space and not a tab. The reference lexer's `skip_spaces` reads
+  // `b' '` alone and refuses a tab as an unexpected character, and
+  // `extras` is `/ +/`, so skipping one here would let the grammar take
+  // `{\t1 -> 0 }`, which the reference parser rejects. That is the
+  // grammar-accepts / core-refuses direction, which this crate exists
+  // not to have.
+  //
+  // Declining here returns to the internal lexer rather than falling
+  // through to the branches below, and no external token is lost by
+  // that: every one of them — FILE_START, NEWLINE, LINE_START,
+  // FILE_END, INDENT, DEDENT — is emitted at a line or file boundary,
+  // while `bit_pattern` appears only inside an `assert truth` body's
+  // `{ … }`, which the grammar gives no way to break across lines.
   if (valid_symbols[BIT_PATTERN]) {
-    while (lexer->lookahead == ' ' || lexer->lookahead == '\t') skip(lexer);
+    while (lexer->lookahead == ' ') skip(lexer);
     bool scanned = false;
     for (;;) {
       if (lexer->lookahead == '0' || lexer->lookahead == '1') {

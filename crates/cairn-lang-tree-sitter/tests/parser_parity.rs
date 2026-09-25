@@ -441,6 +441,21 @@ const FIXTURES: &[(&str, &str, Verdict)] = &[
         "struct s size=3x3\n  assert truth(a, b, c -> z) { 00--> - }\n",
         Accept,
     ),
+    // The scanner skips a leading space before a pattern and nothing
+    // else. The reference lexer's `skip_spaces` reads `b' '` alone and
+    // refuses a tab outright, so a scanner that skipped one would take
+    // a row the reference parser rejects — the silent direction this
+    // file exists to hold shut.
+    (
+        "truth_tab_before_pattern",
+        "struct s size=3x3\n  assert truth(a -> z) {\t1 -> 0 }\n",
+        Reject,
+    ),
+    (
+        "truth_tab_before_a_later_row",
+        "struct s size=3x3\n  assert truth(a -> z) { 1 -> 0;\t0 -> 1 }\n",
+        Reject,
+    ),
     // A pattern is the characters the source ran together, so a space
     // ends it and the `1` after it is a token the row has no place for.
     (

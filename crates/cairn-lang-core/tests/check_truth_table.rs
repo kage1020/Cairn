@@ -690,6 +690,48 @@ fn two_dash_outputs_over_one_combination_are_an_ordinary_repeat() {
     );
 }
 
+/// A broad `-` row written first does not make the table empty.
+///
+/// The shape every other `-`-output fixture here misses, because each
+/// pads its table with concrete rows the overlap scan keeps. Acceptance
+/// is first-come, so the row dropped for overlapping is the *later*
+/// one — write `--` first and the concrete row after it is the one that
+/// goes, leaving nothing but `-` outputs among the survivors while the
+/// author is looking at a `1` in the source.
+///
+/// `-` first with the exceptions after is the ordinary way to write a
+/// default-plus-exception table, so this is a habit rather than a
+/// contrivance.
+#[test]
+fn a_broad_dash_row_written_first_does_not_empty_the_table() {
+    assert_eq!(
+        codes(&table("sig.a, sig.b", "-- -> -; 01 -> 1")),
+        vec!["W_TRUTH_TABLE_DUPLICATE_ROW"],
+        "the overlap is the finding; the table plainly has a `1` in it",
+    );
+}
+
+/// And the coverage count stays right through it.
+///
+/// `0-` covers `00` and `01` and nothing else, so `10` and `11` really
+/// are unassigned — the overlap that drops `01` is subsumed, which is
+/// what keeps the count exact.
+#[test]
+fn a_broad_dash_row_written_first_still_earns_its_coverage_finding() {
+    let found = diagnose(&table("sig.a, sig.b", "0- -> -; 01 -> 1"));
+    assert_eq!(
+        found.iter().map(|d| d.code.as_str()).collect::<Vec<_>>(),
+        vec!["W_TRUTH_TABLE_PARTIAL", "W_TRUTH_TABLE_DUPLICATE_ROW"],
+    );
+    assert!(
+        rendered(&found[0]).contains("assigns 2 of the 4")
+            && rendered(&found[0]).contains("`10`")
+            && rendered(&found[0]).contains("`11`"),
+        "the two the `0-` row does not cover: {}",
+        rendered(&found[0]),
+    );
+}
+
 /// A `-` output does not launder a real contradiction sitting beside it.
 #[test]
 fn a_dash_output_elsewhere_leaves_a_conflict_a_conflict() {

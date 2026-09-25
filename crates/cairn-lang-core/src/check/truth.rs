@@ -57,8 +57,15 @@ const MISSING_SAMPLE: usize = 4;
 /// gives the finding up.
 ///
 /// Generous on purpose: it is a backstop against a table no one writes,
-/// not a budget any real table comes near. A row is left behind in one
-/// step, so a hundred rows cost about a hundred steps.
+/// not a budget any real table comes near.
+///
+/// A step leaves a row behind only when [`fill_free_tail`] can jump to
+/// the row's last combination, and it fills only the positions *below*
+/// the row's lowest fixed one. Don't-cares above that are re-entered one
+/// combination at a time, so the cost is nearer
+/// `rows × 2^(don't-cares above the lowest fixed position) ×
+/// MISSING_SAMPLE`. `{ --00; --01; --10 }` is three rows and sixteen
+/// steps for its four missing combinations, not three.
 const MISSING_WALK_STEPS: usize = 10_000;
 
 /// Past this many inputs the number of combinations is written `2^n`.
@@ -154,11 +161,17 @@ fn check_table(assertion: &AssertIr, sink: &mut DiagnosticSink) {
     // A table every row of which declines to assert an output is the
     // empty table written at length, so it earns the empty table's
     // finding — and not the coverage one beside it, which would bill the
-    // same repair twice. The rows that were dropped as overlaps cannot
-    // rescue it: a dropped row is not read, and one that was would be a
-    // `-` too, since a concrete output among them would have kept the
-    // row it answers to out of `accepted` in the first place.
-    if accepted.iter().all(|row| row.output.is_none()) {
+    // same repair twice.
+    //
+    // Asked of `rows` rather than of `accepted`, because acceptance is
+    // first-come: a row is dropped for overlapping an *earlier* one, so
+    // a broad `-` row written first survives and the concrete row after
+    // it is the one that goes. Reading the survivors calls the table
+    // empty while the author is looking at a `0` in it, and `-` first
+    // with the exceptions after is the ordinary way to write one. What
+    // the author wrote is what this sentence is about; that the two rows
+    // overlap is a separate finding, already raised above.
+    if rows.iter().all(|row| row.output.is_none()) {
         sink.push(asserts_nothing(span, arity));
     } else if coverage_is_countable
         && let Some(finding) = unassigned_combinations(span, arity, &accepted)
@@ -351,8 +364,8 @@ fn overlapping_row(row: &TruthRow, first: &TruthRow) -> Diagnostic {
     } else {
         (
             format!(
-                "this row and the earlier row `{earlier}` both assign `{shared}`, and nothing \
-                 orders the rows to say which one the circuit follows"
+                "this row and the earlier row `{earlier}` both stand for `{shared}`, and a \
+                 combination is covered by one row or none"
             ),
             format!(
                 "Fix: narrow one of the two so no combination is written twice — `{pattern}` \
@@ -488,10 +501,12 @@ fn pattern_size(pattern: &str) -> Option<u128> {
 /// a row standing for a million combinations costs one step rather than a
 /// million.
 ///
-/// [`MISSING_WALK_STEPS`] is the backstop. Each step either yields a
-/// missing combination or leaves one row behind, so a table written by
-/// hand finishes in about as many steps as it has rows; a table that does
-/// not is one whose sample would not help anyone read it.
+/// [`MISSING_WALK_STEPS`] is the backstop. A step either yields a missing
+/// combination or advances past one the rows cover, and only the second
+/// of those leaves a row behind for good — see the constant for what
+/// that costs a row whose don't-cares sit above its fixed positions. A
+/// table that runs the budget out is one whose sample would not help
+/// anyone read it.
 fn missing_sample(arity: u32, accepted: &[&TruthRow]) -> Option<Vec<String>> {
     let width = usize::try_from(arity).expect("an input list is bounded by the source length");
     let mut combination = vec![b'0'; width];
