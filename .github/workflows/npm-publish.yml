@@ -73,8 +73,49 @@ jobs:
         run: git diff --exit-code src/parser.c src/grammar.json src/node-types.json
       - run: pnpm test
 
+      # `actions/setup-node` with `node-version: 22` brings the npm Node 22
+      # bundles, which is 10.x and carries no Trusted Publishing support at
+      # all — so this upgrade is required, not cosmetic. Trusted Publishing
+      # needs npm 11.5.1 or newer. The major is what carries the argument; the
+      # patch moves with each v22 release and nothing here maintains it.
+      #
+      # Pinned rather than `@latest` because this is the binary that performs
+      # the OIDC token exchange under the `id-token: write` granted above and
+      # signs the provenance attestation: whoever controls what a floating tag
+      # resolves to controls the publish. The one third-party action in this
+      # job is SHA-pinned and the install is `--frozen-lockfile`; `actions/*`
+      # stays on its major tag as the accepted risk `.github/dependabot.yml`
+      # records. This line was the one moving target nothing had decided about.
+      #
+      # `.github/dependabot.yml` configures `github-actions` only, and no
+      # ecosystem watches a version inside a `run:` line — nothing will raise
+      # this for you. Bump it deliberately when Trusted Publishing needs a
+      # newer npm, and re-run this workflow on a tag to prove it.
+      #
+      # Checked rather than trusted, because the pin is only worth the binary
+      # that ends up on `PATH` and this workflow cannot be exercised from a
+      # pull request: a self-check at runtime is the only thing that ever
+      # tests it. `--engine-strict` turns an engine mismatch from an
+      # `EBADENGINE` warning into a failure at the install, where it is
+      # readable, rather than a failure later in some shape nobody can place.
+      # Both land before the tarball is built and before a token is minted,
+      # which is the direction to fail in. `hash -r` is what keeps the
+      # comparison honest: bash hashed `npm` on the install line, and a stale
+      # entry would report the version this step replaced and fail a publish
+      # for no reason.
       - name: Install a Trusted-Publishing-capable npm
-        run: npm install -g npm@latest
+        shell: bash
+        env:
+          NPM_VERSION: "12.1.0"
+        run: |
+          set -euo pipefail
+          npm install -g --engine-strict "npm@$NPM_VERSION"
+          hash -r
+          installed=$(npm --version)
+          if [ "$installed" != "$NPM_VERSION" ]; then
+            echo "npm $installed is on PATH, but this job pinned $NPM_VERSION" >&2
+            exit 1
+          fi
 
       - name: Ensure the tarball carries the tree-sitter manifest
         shell: bash
