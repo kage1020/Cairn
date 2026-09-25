@@ -1170,8 +1170,14 @@ struct crossbar size=4x4
         stderr.contains("E_ROUTE_CONGESTION"),
         "expected E_ROUTE_CONGESTION on stderr, got: {stderr}",
     );
+    // `placed`, not `routed`: `--stage crossing` runs the whole pipeline
+    // and the CLI stops at the first Error-severity stage, so this scope
+    // never reaches the crossing pass — the routing pass refuses it while
+    // laying nets over a netlist whose cells are still unrouted. The noun
+    // names the netlist the refusing pass read, which is the only way to
+    // tell from the message where in the pipeline the scope died.
     assert!(
-        stderr.contains("routed netlist for struct `crossbar`")
+        stderr.contains("placed netlist for struct `crossbar`")
             && stderr.contains("another net's dust, on the coord or one step from it")
             && stderr.contains("the faces it could arrive through are taken by cell #0"),
         "the refusal names the scope, which of the three kinds of obstacle it \

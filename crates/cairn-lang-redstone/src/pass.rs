@@ -196,6 +196,22 @@ pub(crate) fn source_of_net<'a>(
 /// The router is built here rather than by each caller, so the refusals
 /// cannot be reached around: a pass holding a [`Router`] is a pass that
 /// has been through both.
+///
+/// # The `netlist` noun
+///
+/// All three refusals open with `<netlist> netlist for ...`, and
+/// `netlist` is a parameter — `placed`, `routed`, `delayed` — because
+/// all three passes arrive here and a constant would name the wrong one
+/// on two of the three paths, the common one (`--stage route` over any
+/// `.crn`) among them.
+///
+/// It names the netlist the message is *about*, which for everything
+/// raised here is the netlist that was handed in: these are the ways a
+/// netlist cannot be wired, so the fault is in what arrived, not in
+/// what came out. An advisory about the layout the router produced
+/// names that one instead — [`crate::routing_geometry::tile_layer_clearance`]
+/// says `routed netlist` from the same pass that says `placed netlist`
+/// here, and correctly: a placed netlist has no dust to leave pairs of.
 pub(crate) fn lay_nets<F>(
     ir: &PlacementIr,
     blocks: &[BlockSite],
@@ -208,7 +224,7 @@ where
     F: Fn(NetRef) -> CellCoord + Copy,
 {
     if let Some(site) = collapsed_block(blocks) {
-        return Err(pad_overlap_diagnostic(entry, region, site));
+        return Err(pad_overlap_diagnostic(entry, netlist, region, site));
     }
     if let Some(diagnostic) = beyond_attenuation(ir, entry, netlist, region, source_of_net) {
         return Err(diagnostic);
@@ -216,7 +232,7 @@ where
     let router = Router::new(region, blocks);
     let sinks = collect_nets(ir);
     let trees = net_trees(&sinks, &router, source_of_net);
-    if let Some(diagnostic) = unroutable(&sinks, &trees, entry, region, source_of_net) {
+    if let Some(diagnostic) = unroutable(&sinks, &trees, entry, netlist, region, source_of_net) {
         return Err(diagnostic);
     }
     Ok(Nets {
@@ -344,11 +360,12 @@ fn unreachable_sink_diagnostic(
 /// hand the author the same arithmetic.
 fn pad_overlap_diagnostic(
     entry: &ScopedPlacementIrEntry,
+    netlist: &str,
     reservation: &CircuitRegionReservation,
     site: &BlockSite,
 ) -> Diagnostic {
     let primary = format!(
-        "routed netlist for {kind} `{name}` cannot fit its {pad_kind} pad #{pad_index} at ({x},{y},{z}) — the reserved area (void={void}, region {width}x{depth}) collapses I/O pads onto a cell coord or another pad",
+        "{netlist} netlist for {kind} `{name}` cannot fit its {pad_kind} pad #{pad_index} at ({x},{y},{z}) — the reserved area (void={void}, region {width}x{depth}) collapses I/O pads onto a cell coord or another pad",
         kind = entry.kind.label(),
         name = entry.name,
         pad_kind = site.kind.as_str(),
@@ -517,7 +534,7 @@ mod tests {
         for row in [CollapsedRow::OutputOntoCell, CollapsedRow::InputOntoInput] {
             let (kind, index, coord) = row.names();
             let mut primaries = Vec::new();
-            for (stage, phase, run) in &stages {
+            for (stage, netlist, phase, run) in &stages {
                 let (diagnostics, kept) = run(&collapsed_pad_row(phase, row));
                 let refusal = diagnostics
                     .iter()
@@ -533,7 +550,19 @@ mod tests {
                     "the {stage} pass names which pad could not fit, where, and why: {}",
                     refusal.primary,
                 );
-                primaries.push(refusal.primary.clone());
+                // The one word that is *meant* to differ between the
+                // three. Asserted here, and stripped before the
+                // cross-stage comparison below, so "one geometry, one
+                // sentence" is checked on the sentence rather than
+                // defeated by the noun.
+                let prefix = format!("{netlist} netlist for ");
+                let rest = refusal.primary.strip_prefix(&prefix).unwrap_or_else(|| {
+                    panic!(
+                        "the {stage} pass names the netlist it read: expected {prefix:?}, got {}",
+                        refusal.primary,
+                    )
+                });
+                primaries.push(rest.to_owned());
                 assert_eq!(
                     kept,
                     vec!["roomy".to_owned()],
@@ -568,7 +597,8 @@ mod tests {
         for (row, primaries) in said {
             assert!(
                 primaries.windows(2).all(|w| w[0] == w[1]),
-                "{row:?}: the three stages word the refusal identically, got {primaries:?}",
+                "{row:?}: the three stages word the refusal identically past the netlist \
+                 noun, got {primaries:?}",
             );
         }
     }
@@ -657,7 +687,13 @@ mod tests {
     /// to all three, and a case that asked only one stage could not
     /// fail on two of them at once — which is the whole subject here,
     /// three passes that were answering one shape three ways.
+    ///
+    /// The second field is the noun that pass's refusals name — the
+    /// netlist it read. It is carried here rather than derived from the
+    /// stage name so a test can assert the noun as part of the message
+    /// instead of stripping it off to compare the rest.
     type Stage = (
+        &'static str,
         &'static str,
         PlacementPhase,
         fn(&ScopedPlacementIr) -> (Vec<crate::diagnostic::Diagnostic>, Vec<String>),
@@ -665,7 +701,7 @@ mod tests {
 
     fn stages() -> [Stage; 3] {
         [
-            ("routing", PlacementPhase::Unrouted, |scoped| {
+            ("routing", "placed", PlacementPhase::Unrouted, |scoped| {
                 let out = crate::routing::compile_routing(scoped);
                 (
                     out.diagnostics,
@@ -674,6 +710,7 @@ mod tests {
             }),
             (
                 "delay",
+                "routed",
                 PlacementPhase::Routed { wire_length: 0 },
                 |scoped| {
                     let out = crate::delay::compile_delay(scoped);
@@ -685,6 +722,7 @@ mod tests {
             ),
             (
                 "crossing",
+                "delayed",
                 PlacementPhase::Delayed {
                     wire_length: 0,
                     local_delay_ticks: 0,
@@ -713,7 +751,7 @@ mod tests {
     /// has to say why.
     #[test]
     fn every_stage_refuses_a_scope_with_cells_and_no_region() {
-        for (stage, phase, run) in &stages() {
+        for (stage, _, phase, run) in &stages() {
             let (diagnostics, kept) = run(&regionless_scope(phase));
             let refusal = diagnostics
                 .iter()
@@ -742,7 +780,7 @@ mod tests {
     /// what the scope carries rather than on what it lacks.
     #[test]
     fn every_stage_passes_an_empty_regionless_scope_through() {
-        for (stage, _, run) in &stages() {
+        for (stage, _, _, run) in &stages() {
             let (diagnostics, kept) = run(&scoped(
                 ScopeKind::Struct,
                 "harmless",
@@ -772,7 +810,7 @@ mod tests {
     #[test]
     fn every_stage_panics_on_a_net_index_the_ir_cannot_answer() {
         for which in [DanglingNet::Cell, DanglingNet::Input] {
-            for (stage, phase, run) in &stages() {
+            for (stage, _, phase, run) in &stages() {
                 let fixture = dangling_net(phase, which);
                 let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                     run(&fixture);
@@ -814,7 +852,7 @@ mod tests {
         // `>=`. `width - 1` is the pad's distance from the sensor pad.
         let width = MAX_ATTENUATION_SEGMENT + 2;
         for which in [FarSink::Cell, FarSink::OutputPad] {
-            for (stage, phase, run) in &stages() {
+            for (stage, netlist, phase, run) in &stages() {
                 let (diagnostics, kept) = run(&far_sink(phase, width, which));
                 let refusal = diagnostics
                     .iter()
@@ -831,6 +869,17 @@ mod tests {
                             .primary
                             .contains(&format!("limit of {MAX_ATTENUATION_SEGMENT} blocks")),
                     "the {stage} pass names the sink, the distance and the cap: {}",
+                    refusal.primary,
+                );
+                // Which netlist the refusing pass read. A constant noun
+                // here would name the delay pass on the two paths that
+                // are not it, and the common one — `--stage route` over
+                // any `.crn` — is one of those two.
+                assert!(
+                    refusal
+                        .primary
+                        .starts_with(&format!("{netlist} netlist for ")),
+                    "the {stage} pass names the netlist it read: {}",
                     refusal.primary,
                 );
                 assert!(
@@ -859,7 +908,7 @@ mod tests {
     fn a_sink_exactly_at_the_cap_is_routed_rather_than_refused() {
         let width = MAX_ATTENUATION_SEGMENT + 1;
         for which in [FarSink::Cell, FarSink::OutputPad] {
-            for (stage, phase, run) in &stages() {
+            for (stage, _, phase, run) in &stages() {
                 let (diagnostics, kept) = run(&far_sink(phase, width, which));
                 assert!(
                     diagnostics.is_empty(),

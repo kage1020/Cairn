@@ -243,7 +243,7 @@
   same sink named the same way, 4 ms instead of 72 s:
 
   ```
-  s.crn:15:3: error[E_ATTENUATION_LIMIT]: routed netlist for struct `big` puts output pad #0 3999999 blocks from its driver in a straight line — exceeds the v1 attenuation limit of 256 blocks, and no route between two coords is shorter than the straight line between them
+  s.crn:15:3: error[E_ATTENUATION_LIMIT]: placed netlist for struct `big` puts output pad #0 3999999 blocks from its driver in a straight line — exceeds the v1 attenuation limit of 256 blocks, and no route between two coords is shorter than the straight line between them
     note: Fix: split the logic across several `circuit` blocks, or reserve a `region=` whose pad column sits within the cap of the cells it serves — a larger reservation cannot help, because the straight line between these two is already over the cap
   ```
 

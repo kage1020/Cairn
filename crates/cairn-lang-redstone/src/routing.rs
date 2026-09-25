@@ -569,6 +569,14 @@ mod tests {
             routed.scoped.scopes.is_empty(),
             "the failed scope is elided rather than half-attributed",
         );
+        // Everything past the opening noun has to be identical across
+        // the three; the noun itself is what tells an author which pass
+        // refused, so it is the one word that must differ.
+        let said = refusal
+            .primary
+            .strip_prefix("placed netlist for ")
+            .unwrap_or_else(|| panic!("stage 2 reads a placed netlist: {}", refusal.primary))
+            .to_owned();
 
         // The same layout handed straight to stage 3, and then to
         // stage 4, as a caller who skipped stage 2 would. Each rebuilds
@@ -584,7 +592,7 @@ mod tests {
             .iter()
             .find(|d| d.code == crate::DiagnosticCode::RouteCongestion)
             .unwrap_or_else(|| panic!("stage 3 must refuse too: {:?}", delayed.diagnostics));
-        assert_eq!(delay_refusal.primary, refusal.primary);
+        assert_eq!(delay_refusal.primary, format!("routed netlist for {said}"));
         assert!(delayed.scoped.scopes.is_empty());
 
         for cell in &mut ir.cells {
@@ -599,7 +607,10 @@ mod tests {
             .iter()
             .find(|d| d.code == crate::DiagnosticCode::RouteCongestion)
             .unwrap_or_else(|| panic!("stage 4 must refuse too: {:?}", legalized.diagnostics));
-        assert_eq!(crossing_refusal.primary, refusal.primary);
+        assert_eq!(
+            crossing_refusal.primary,
+            format!("delayed netlist for {said}")
+        );
         assert!(legalized.scoped.scopes.is_empty());
     }
 
