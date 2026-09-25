@@ -716,7 +716,10 @@ impl Value {
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[non_exhaustive]
 pub struct TruthRow {
-    /// Input bit pattern, e.g. `01` (preserved with its leading zeros).
+    /// Input pattern, one character per input signal: `0`, `1`, or `-`
+    /// for a don't-care, which stands for both values of that input.
+    /// Leading zeros are preserved, since `01` and `1` are rows of
+    /// differently sized tables.
     pub inputs: String,
     /// Output bit. The truth-table grammar permits only `0` or `1`, so the
     /// AST stores the value as a plain `bool` rather than a `u8` that could

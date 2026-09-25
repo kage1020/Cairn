@@ -579,13 +579,6 @@
         }
       ]
     },
-    "bit_pattern": {
-      "type": "TOKEN",
-      "content": {
-        "type": "PATTERN",
-        "value": "[01]+"
-      }
-    },
     "bit": {
       "type": "TOKEN",
       "content": {
@@ -1700,6 +1693,10 @@
     {
       "type": "SYMBOL",
       "name": "_file_end"
+    },
+    {
+      "type": "SYMBOL",
+      "name": "bit_pattern"
     },
     {
       "type": "SYMBOL",

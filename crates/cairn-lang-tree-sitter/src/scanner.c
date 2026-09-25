@@ -9,6 +9,7 @@ enum TokenType {
   SIZE_X,
   LINE_START,
   FILE_END,
+  BIT_PATTERN,
   ERROR_SENTINEL,
 };
 
@@ -272,6 +273,49 @@ bool tree_sitter_cairn_external_scanner_scan(void *payload, TSLexer *lexer, cons
     advance(lexer);
     lexer->result_symbol = SIZE_X;
     return true;
+  }
+
+  // A truth row's input pattern: one character per input signal, `0`,
+  // `1`, or `-` for a don't-care. External because of the last of those.
+  // `-` and `->` share a character, and no token regex can stop one
+  // short of the other — the lexer takes the longest match it can, so
+  // `/[01-]+/` reads `11--` out of `11--> 0` and leaves a bare `>` the
+  // row's arrow cannot use. Here the end of the token is chosen rather
+  // than fallen into: `mark_end` is held back from a `-` that turns out
+  // to be the arrow's, which is the one character of lookahead
+  // `cairn_lang_core::parse` gets for free by reading `->` as its own
+  // token and reassembling the pattern from what is left.
+  //
+  // Leading spaces are skipped, because a row may follow a `{` or a `;`
+  // with one. Nothing else is: a pattern is the characters the source
+  // ran together, so `0- 1` is a two-wide pattern and a stray `1` here
+  // exactly as it is there.
+  if (valid_symbols[BIT_PATTERN]) {
+    while (lexer->lookahead == ' ' || lexer->lookahead == '\t') skip(lexer);
+    bool scanned = false;
+    for (;;) {
+      if (lexer->lookahead == '0' || lexer->lookahead == '1') {
+        advance(lexer);
+        scanned = true;
+        lexer->mark_end(lexer);
+        continue;
+      }
+      if (lexer->lookahead == '-') {
+        advance(lexer);
+        // The arrow's own dash. Leaving `mark_end` where it was ends the
+        // pattern before it, and the `->` the row wants is still whole.
+        if (lexer->lookahead == '>') break;
+        scanned = true;
+        lexer->mark_end(lexer);
+        continue;
+      }
+      break;
+    }
+    if (scanned) {
+      lexer->result_symbol = BIT_PATTERN;
+      return true;
+    }
+    return false;
   }
 
   // The file's opening layout, consumed once at offset 0 by the

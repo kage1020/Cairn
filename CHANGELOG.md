@@ -4,6 +4,59 @@
 
 ### Added
 
+- *(core,tree-sitter)* A truth table that is partial on purpose had no way to say so. A table may
+  leave combinations to the circuit deliberately, and `W_TRUTH_TABLE_PARTIAL` had no sentence the
+  author could write to mean it:
+
+  ```
+  s.crn:2:3: warning[W_TRUTH_TABLE_PARTIAL]: this `assert truth` assigns 4 of the 8 combinations its 3 inputs can take
+    note: Fix: add a row for `000`, `010`, `100`, and `110`
+  ```
+
+  ```
+  assert truth(sig.a, sig.b, sig.enable -> sig.out) { 001->0; 011->1; 101->1; 111->1 }
+  ```
+
+  Every combination the warning names has `enable = 0` and is unconstrained on purpose. The only
+  ways out were to write those four rows — asserting what the author does not mean — or to leave
+  the warning standing, which spends the signal the coverage finding exists to carry.
+
+  A row now writes `-` for an input it does not constrain, and the eight rows become two:
+
+  ```
+  assert truth(sig.a, sig.b, sig.enable -> sig.out) { --0->0; --1->1 }
+  ```
+
+  `-` is shorthand for the rows it stands for rather than a construct of its own, so the rules
+  around it are the table's existing rules read through the don't-cares. Coverage counts
+  combinations rather than rows: `0--` assigns four of a three-input table's eight. Two rows may not
+  both assign one combination, which is what `E_TRUTH_TABLE_CONFLICT` already said of two rows
+  sharing a pattern and now says of `0-` and `-1`, which share `01`:
+
+  ```
+  s.crn:2:52: error[E_TRUTH_TABLE_CONFLICT]: this row assigns `01` the output `1`, and an earlier row assigns it `0`
+  s.crn:2:43:   note: first row assigning `01` here
+  ```
+
+  When two rows agree it stays `W_TRUTH_TABLE_DUPLICATE_ROW`, and the repair depends on the shape.
+  A row inside an earlier one — `01` under `0-` — is deleted. Two that merely cross are narrowed,
+  because deleting either would lose the combinations only it assigns. That case also withholds the
+  coverage finding rather than answering it with a count taken without the later row, which would
+  name a combination the table does assign.
+
+  `-` and `->` share a character and the lexer takes the arrow whenever it can, so a row whose last
+  input is a don't-care is written `11--> 0` or `11- -> 0`; both are the same row. One character
+  short of the input list is the only width a swallowed `-` can produce, so that refusal says so:
+
+  ```
+  s.crn:2:50: error[E_PARSE]: truth-table input pattern `11` is 2 bits wide, but the table has 3 inputs. A `-` written immediately before `->` is read as part of the arrow, so a row whose last input is a don't-care is written `11--> 0` or `11- -> 0`
+  ```
+
+  `bit_pattern` becomes an external token in the tree-sitter grammar for the same reason. A token
+  regex takes the longest run of `[01-]` it can, which reads `11--` out of `11--> 0` and leaves a
+  bare `>` the row's arrow cannot use — a grammar that accepts the spaced spelling, refuses the
+  run-together one, and builds a different row from the source both parsers accept.
+
 - *(core)* An argument in a keyword's vocabulary could still be read by nothing, depending on how
   a sibling argument on the same line was written. `E_UNKNOWN_ARGUMENT` closed the case where a
   `key=` is outside the vocabulary; one level down, a key that *is* in it routed past its reader in

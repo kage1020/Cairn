@@ -387,6 +387,48 @@ const FIXTURES: &[(&str, &str, Verdict)] = &[
         "struct s size=3x3\n  assert truth(a.b -> c.d) { ; 0 -> 1 }\n",
         Reject,
     ),
+    // A `-` is a don't-care input, and the character it shares with `->`
+    // is why `bit_pattern` is an external token here. The pair below is
+    // the whole reason: both spell a three-wide pattern ending in a
+    // don't-care, and a grammar that let the lexer take the longest run
+    // of `[01-]` accepts the spaced one and refuses the other.
+    (
+        "truth_dont_care_low",
+        "struct s size=3x3\n  assert truth(a.b, c.d -> e.f) { 0-->1 }\n",
+        Accept,
+    ),
+    (
+        "truth_dont_care_high",
+        "struct s size=3x3\n  assert truth(a.b, c.d -> e.f) { -0->1 }\n",
+        Accept,
+    ),
+    (
+        "truth_dont_care_between_bits",
+        "struct s size=3x3\n  assert truth(a, b, c -> z) { 0-1->1 }\n",
+        Accept,
+    ),
+    (
+        "truth_dont_care_run_together_with_the_arrow",
+        "struct s size=3x3\n  assert truth(a, b, c -> z) { 11--> 1 }\n",
+        Accept,
+    ),
+    (
+        "truth_dont_care_spaced_from_the_arrow",
+        "struct s size=3x3\n  assert truth(a, b, c -> z) { 11- -> 1 }\n",
+        Accept,
+    ),
+    (
+        "truth_all_dont_care",
+        "struct s size=3x3\n  assert truth(a.b, c.d -> e.f) { --->1 }\n",
+        Accept,
+    ),
+    // A pattern is the characters the source ran together, so a space
+    // ends it and the `1` after it is a token the row has no place for.
+    (
+        "truth_dont_care_split_by_a_space",
+        "struct s size=3x3\n  assert truth(a, b, c -> z) { 0- 1->1 }\n",
+        Reject,
+    ),
     (
         "always_within",
         "struct s size=3x3\n  assert always(a.b -> eventually c.d within 5)\n",
@@ -1153,6 +1195,75 @@ fn accepted_sources_place_every_member_at_the_same_depth() {
         }
     }
     assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+}
+
+/// The two parsers read the same characters out of a truth row.
+///
+/// Accept/reject parity cannot see this one. `bit_pattern` is a token, so
+/// the corpus writes it `(bit_pattern)` with no text, and a grammar that
+/// read `11--` where the reference parser reads `11-` builds a tree of
+/// exactly the same shape from exactly the same source — accepted on both
+/// sides, and describing a different row.
+///
+/// That is not a hypothetical: it is what a plain `/[01-]+/` token does,
+/// because the lexer takes the longest run it can and `-` and `->` share
+/// a character. The external scanner exists for this test.
+#[test]
+fn both_parsers_read_the_same_pattern_out_of_a_row() {
+    let mut parser = new_parser();
+    let mut wrong = Vec::new();
+    for (name, source, expected) in FIXTURES {
+        if *expected != Accept {
+            continue;
+        }
+        let Ok(module) = cairn_lang_core::parse::parse(source) else {
+            continue;
+        };
+        let tree = parser.parse(source, None).expect("parse produced no tree");
+        let core = core_patterns(&module);
+        if core.is_empty() {
+            continue;
+        }
+        let grammar = grammar_patterns(tree.root_node(), source);
+        if core != grammar {
+            wrong.push(format!(
+                "{name}: the reference parser reads {core:?}, the grammar {grammar:?}\n  source: {source:?}"
+            ));
+        }
+    }
+    // The fixtures that exercise this are the `truth_dont_care_*` group,
+    // so an empty comparison would pass this test while saying nothing.
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+}
+
+/// Every truth row's input pattern in a module, in source order.
+fn core_patterns(module: &cairn_lang_core::ast::Module) -> Vec<String> {
+    use cairn_lang_core::ast::{Item, Statement};
+    let mut out = Vec::new();
+    for item in &module.items {
+        let Item::Struct { body, .. } = item else {
+            continue;
+        };
+        for statement in body {
+            if let Statement::AssertTruth { rows, .. } = statement {
+                out.extend(rows.iter().map(|row| row.inputs.clone()));
+            }
+        }
+    }
+    out
+}
+
+/// The same list read off the tree-sitter tree.
+fn grammar_patterns(node: tree_sitter::Node<'_>, source: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    if node.kind() == "bit_pattern" {
+        out.push(node.utf8_text(source.as_bytes()).expect("utf-8").to_owned());
+    }
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        out.extend(grammar_patterns(child, source));
+    }
+    out
 }
 
 /// The two properties above, swept over generated layouts rather than

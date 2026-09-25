@@ -38,8 +38,18 @@ punctuation they tolerate:
 - A value list reads at most one comma between items and refuses `[a, , b]`.
 
 The one place a comma carries meaning is the input list of `assert truth(...)`, where it separates
-the signals whose count the row width is checked against. A row assigns one bit per input signal, so
-`truth(a, b -> out)` takes rows two bits wide and refuses `{ 2->0 }` or `{ 0->0 }`.
+the signals whose count the row width is checked against. A row writes one character per input
+signal — `0`, `1`, or `-` — so `truth(a, b -> out)` takes rows two characters wide and refuses
+`{ 2->0 }` or `{ 0->0 }`.
+
+`-` is a **don't-care**: the row means every value of that input, so `0- -> 1` says what `00->1` and
+`01->1` say together. It is a shorthand for those rows and not a construct of its own, which is why
+two rows may not both stand for one combination — see the table below.
+
+`-` and `->` share a character, and the lexer takes the arrow whenever it can. A row whose last
+input is a don't-care is therefore written `11--> 0` or `11- -> 0`; both are the same three-wide
+row. Whitespace ends a pattern, so `0- 1 -> 1` is a two-wide pattern and a stray `1`, not a
+three-wide row.
 
 The table around those rows is read the same way:
 
@@ -47,7 +57,7 @@ The table around those rows is read the same way:
 |---|---|
 | No rows at all | `E_TRUTH_TABLE_EMPTY` |
 | Two rows assign one input combination different outputs | `E_TRUTH_TABLE_CONFLICT` (on the later row) |
-| A row repeats an earlier one and agrees with it | `W_TRUTH_TABLE_DUPLICATE_ROW` |
+| Two rows assign one input combination the same output | `W_TRUTH_TABLE_DUPLICATE_ROW` (on the later row) |
 | Some input combinations are unassigned | `W_TRUTH_TABLE_PARTIAL` |
 
 The last two are warnings because the rows that *are* present still assert what they say. A

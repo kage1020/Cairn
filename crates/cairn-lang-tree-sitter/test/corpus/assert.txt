@@ -151,3 +151,47 @@ struct s size=3x3
           (truth_row
             (bit_pattern)
             (bit)))))))
+
+==================
+Truth table with don't-care inputs
+==================
+
+struct s size=3x3
+  assert truth(sig.a, sig.b, sig.c -> sig.out) { --0->0; 0-1->1; 11- -> 1 }
+
+---
+
+(source_file
+  (struct_decl
+    (identifier)
+    (attribute_list
+      (attribute
+        (identifier)
+        (size_literal
+          (integer)
+          (integer))))
+    (struct_body
+      (assert_stmt
+        (truth_form
+          (signal_list
+            (signal_ref
+              (identifier)
+              (identifier))
+            (signal_ref
+              (identifier)
+              (identifier))
+            (signal_ref
+              (identifier)
+              (identifier)))
+          (signal_ref
+            (identifier)
+            (identifier))
+          (truth_row
+            (bit_pattern)
+            (bit))
+          (truth_row
+            (bit_pattern)
+            (bit))
+          (truth_row
+            (bit_pattern)
+            (bit)))))))
