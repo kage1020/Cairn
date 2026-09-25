@@ -29,6 +29,10 @@ use common::cargo_bin;
 /// next to the minutes the unbounded shapes ran for.
 const DEADLINE: Duration = Duration::from_secs(30);
 
+/// The bound for a row that must be refused by arithmetic rather than by a
+/// search. Far above the few milliseconds it costs, far below [`DEADLINE`].
+const ANSWERED_WITHOUT_SEARCHING: Duration = Duration::from_secs(5);
+
 /// What a run did. `TimedOut` is a distinct outcome rather than an error so
 /// the assertion can name it: "hung" and "crashed" call for different fixes.
 #[derive(Debug, PartialEq, Eq)]
@@ -40,12 +44,17 @@ enum Outcome {
     TimedOut,
 }
 
-/// Run `cairn` with a deadline, returning what happened and its stderr.
+/// Run `cairn` with a deadline, returning what happened, its stderr, and
+/// how long it took.
+///
+/// The elapsed time is returned rather than only compared against
+/// [`DEADLINE`], because a row that must be *fast* and a row that must
+/// merely *finish* want different bounds and the deadline is shared.
 ///
 /// stderr goes to a file rather than a pipe: a pipe that fills while nobody
 /// reads it deadlocks the child, which would look exactly like the hang
 /// being tested for.
-fn run_bounded(dir: &Path, args: &[&str]) -> (Outcome, String) {
+fn run_bounded(dir: &Path, args: &[&str]) -> (Outcome, String, Duration) {
     let err_path = dir.join("stderr.txt");
     let err_file = File::create(&err_path).expect("create stderr sink");
     let mut child = Command::new(cargo_bin())
@@ -69,8 +78,9 @@ fn run_bounded(dir: &Path, args: &[&str]) -> (Outcome, String) {
             None => std::thread::sleep(Duration::from_millis(20)),
         }
     };
+    let elapsed = started.elapsed();
     let stderr = fs::read_to_string(&err_path).unwrap_or_default();
-    (outcome, stderr)
+    (outcome, stderr, elapsed)
 }
 
 const THEME: &str = "theme t:\n\
@@ -241,7 +251,7 @@ fn hostile_4_routing_a_giant_reservation_answers_within_the_deadline() {
         // routing-side refusal. That every pass asks the same question
         // of the same shape is what `pass::tests::stages()` covers, from
         // an IR the CLI cannot hand them.
-        let (outcome, stderr) = run_bounded(
+        let (outcome, stderr, elapsed) = run_bounded(
             &dir,
             &[
                 "synth",
@@ -268,6 +278,19 @@ fn hostile_4_routing_a_giant_reservation_answers_within_the_deadline() {
         assert!(
             stderr.contains("E_ATTENUATION_LIMIT"),
             "{name}: `synth --stage route` must name the cap it could not meet; got {stderr:?}",
+        );
+        // The refusal is arithmetic on the reservation, so it is answered
+        // before a single coordinate is searched — milliseconds, against
+        // the minutes `canary` spends on the widest row. `DEADLINE` alone
+        // does not say that: it is shared with the rows that only have to
+        // finish, and 30 s cannot tell 4 ms from 29 s. The bound here is
+        // three orders of magnitude above what the run costs, so it fails
+        // on a regression that starts searching rather than on a slow
+        // runner.
+        assert!(
+            elapsed < ANSWERED_WITHOUT_SEARCHING,
+            "{name}: `synth --stage route` took {elapsed:?}; refusing on the straight line is \
+             arithmetic, so anything near {ANSWERED_WITHOUT_SEARCHING:?} means a search ran",
         );
     }
 }
@@ -302,7 +325,7 @@ fn hostile_1_no_command_crashes_or_hangs() {
                 out_dir.to_str().unwrap(),
             ],
         ] {
-            let (outcome, stderr) = run_bounded(&dir, &args);
+            let (outcome, stderr, _) = run_bounded(&dir, &args);
             assert!(
                 matches!(outcome, Outcome::Exited(0 | 1)),
                 "{name}: `{}` ended as {outcome:?}; a hostile number must produce a \
@@ -323,7 +346,7 @@ fn hostile_2_lowering_says_which_member_it_gave_up_on() {
         let dir = tmp.path().join(name);
         fs::create_dir_all(&dir).expect("case dir");
         let path = write(&dir, name, &body);
-        let (outcome, stderr) = run_bounded(&dir, &["lower", path.to_str().unwrap()]);
+        let (outcome, stderr, _) = run_bounded(&dir, &["lower", path.to_str().unwrap()]);
         assert!(
             matches!(outcome, Outcome::Exited(0 | 1)),
             "{name}: ended as {outcome:?}",
@@ -346,7 +369,7 @@ fn hostile_3_compile_refuses_rather_than_certifying_the_wreckage() {
         fs::create_dir_all(&dir).expect("case dir");
         let path = write(&dir, name, &body);
         let out_dir = dir.join("out");
-        let (outcome, stderr) = run_bounded(
+        let (outcome, stderr, _) = run_bounded(
             &dir,
             &[
                 "compile",
