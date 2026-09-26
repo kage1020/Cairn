@@ -356,7 +356,7 @@ pub enum FloorPart {
 /// `@requires version>=X` headers and the `requires version>=X` line of
 /// every `def` and `theme` the build instantiates — or `"0.0"` when none
 /// of them feed this row. "Strictest" is [`compare_versions`]' order, and
-/// [`derive_min_version`] documents where that order is arbitrary. `max`
+/// `derive_min_version` documents where that order is arbitrary. `max`
 /// is the literal string `"latest"`: an upper edge is the half of a
 /// *derived* range, and this row carries the declaration, so a pack that
 /// grows `since` / `until` gives its answer to [`BuildableTargets`]
@@ -727,8 +727,8 @@ fn derive_min_version(module: &Module) -> String {
 /// `edition` says which build is asking: the floors scoped to it and the
 /// unscoped ones, since an unscoped floor is a floor on whatever is being
 /// built. It also decides which per-edition theme variant a `theme=`
-/// reference binds, through the same [`super::theme_variant`] rule the
-/// resolver uses. The edition-neutral question is a different function
+/// reference binds, through the same `theme_variant::pick_variant` rule
+/// the resolver uses. The edition-neutral question is a different function
 /// ([`unscoped_version_floors`]) rather than a `None` here, because
 /// `Option<Edition>` would then carry two opposite senses in one API — a
 /// floor's own `None` means "every edition" and the argument's would mean
@@ -757,7 +757,7 @@ pub fn declared_version_floors(module: &Module, edition: Edition) -> Vec<Version
 /// A floor a *part* declares is held to the same test, and for the part it
 /// is inherited through rather than for the words on the line. A `theme`
 /// contributes here only when both editions bind the same one — see
-/// [`InstantiatedParts::of`]. Picking a variant by the unpinned order
+/// `InstantiatedParts::of`. Picking a variant by the unpinned order
 /// instead put a floor no build is held to into this row, in both
 /// directions: `theme shop` (with a floor) beside `theme shop_bedrock`
 /// (without) reported a lower edge a Bedrock build does not have, and the

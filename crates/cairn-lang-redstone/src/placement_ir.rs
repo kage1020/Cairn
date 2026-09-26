@@ -35,7 +35,7 @@
 //! Attenuation limits are measured later and in two places, both
 //! against [`crate::delay::MAX_ATTENUATION_SEGMENT`]:
 //! [`crate::delay::compile_delay`], stage 3, fires `E_ATTENUATION_LIMIT`
-//! against the routed segment length, and [`crate::pass::lay_nets`],
+//! against the routed segment length, and `crate::pass::lay_nets`,
 //! which every place-and-route pass calls, fires the same code against
 //! the straight line between a driver and its sink before routing to
 //! it.
@@ -598,7 +598,7 @@ impl PlacementPhase {
     ///
     /// `#[track_caller]` alone puts the calling `.rs:line` in the
     /// backtrace but says nothing about *which* cell tripped the
-    /// guard. Pipeline passes pass a [`CellIdentity`]; any
+    /// guard. Pipeline passes pass a crate-internal `CellIdentity`; any
     /// [`fmt::Display`] works.
     ///
     /// # Panics
@@ -1091,7 +1091,7 @@ impl fmt::Display for CellIdentity<'_> {
 ///
 /// The progressive fields the routing, delay-insertion, and
 /// crossing-legalization passes produce (`wire_length`, `local_delay_ticks`,
-/// `buffer_coords`) live inside [`Self::phase`] as a
+/// `buffer_coords`) live inside the `phase` field as a
 /// [`PlacementPhase`] — see that enum's docstring for the four
 /// legitimate states and the transition methods each pass calls.
 /// Read-only convenience accessors [`Self::wire_length`],
@@ -1101,7 +1101,7 @@ impl fmt::Display for CellIdentity<'_> {
 /// on the phase enum; [`Self::stage`] projects the discriminant
 /// itself.
 ///
-/// The custom [`Serialize`] impl flattens [`Self::phase`] onto
+/// The custom [`Serialize`] impl flattens that `phase` field onto
 /// `{stage, cell, drivers, coord[, wire_length][, local_delay_ticks][, buffer_coords]}`.
 /// The three optionals carry the shape earlier revisions of this
 /// struct produced via `skip_serializing_if`, so the JSON dump of a

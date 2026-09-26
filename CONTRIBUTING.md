@@ -37,6 +37,13 @@ cargo build --workspace --locked
 cargo test --workspace --locked
 ```
 
+CI also builds the API docs on Linux, twice, with rustdoc's warnings fatal — clippy does not see a doc link to a private item or to a path that no longer resolves. The first run is the public surface and the only one that flags a public doc linking to a private item; the second also covers the docs only a contributor reads:
+
+```sh
+RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --locked --all-features
+RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --locked --all-features --document-private-items
+```
+
 ### The repository
 
 | Path | What lives there |
@@ -121,7 +128,7 @@ What no test reads is the prose. A row's description, a "Status" paragraph, a he
 
 Name the branch after the Conventional Commits type the work will land under: `feat/parser-lexer`, `fix/wall-corner-shape`, `docs/roadmap-2027`.
 
-**The PR title must be a [Conventional Commits](https://www.conventionalcommits.org/) line.** Squash merge is the only merge mode, so that title becomes the commit on `canary` and is what `release-plz` reads to decide whether a patch release is due. Commits on your own branch are free-form. Add `!` for a breaking change (`feat(core)!: replace lexer`); the scope names the crate or spec area (`feat(core)`, `fix(nbt)`, `docs(spec)`, `build(deps)`).
+**The PR title must be a [Conventional Commits](https://www.conventionalcommits.org/) line.** Squash merge is the only merge mode, so that title becomes the commit on `canary` and is what `release-plz` reads to decide whether a patch release is due. Commits on your own branch are free-form. The scope names the crate or spec area (`feat(core)`, `fix(nbt)`, `docs(spec)`, `build(deps)`).
 
 | Type | When | Cuts a patch release? |
 |---|---|---|
@@ -136,6 +143,10 @@ Name the branch after the Conventional Commits type the work will land under: `f
 | `chore` | Anything that doesn't ship to users | No |
 | `style` | Formatting or lint-only changes | No |
 
+**A breaking change puts `!` before the colon** — after the type, or after the scope when one is written: `feat(core)!: replace lexer`, `fix!: …`. The `!` and the changelog go together: a PR that adds an entry under `## [Unreleased]` → `### Breaking changes` in [CHANGELOG.md](CHANGELOG.md) titles itself with `!`, and a PR titled with `!` adds that entry. The hand-written entry is what [compatibility "How a break is communicated"](https://cairn.kage1020.com/spec/compatibility/) requires and what a reader of `CHANGELOG.md` sees; the `!` is the same fact in the commit `release-plz` parses. A reviewer who sees one without the other asks for the missing half before merging.
+
+The `!` does not choose the version. Semver would read it as a major bump; here the release workflow computes the next `YYYY.M.PATCH` from the date and the existing tags and writes it into `Cargo.toml` before `release-plz` runs, and `release-plz` leaves a version that already differs from the published one as it is. Nor does it decide whether a release is due — the type does, per the table above. What it changes is the generated release notes: `release-plz` prefixes the commit's line with `[**breaking**]`, and `protect_breaking_commits` keeps that line even for a type whose lines are otherwise dropped (`docs!:`, `ci!:`).
+
 Every PR you open targets `canary`; the only PR against `main` is the pipeline's own promote-to-main. One maintainer approval and green CI are required. The release PR follows the same rules — merging it publishes and fast-forwards `main`.
 
 ## Revisiting a settled decision
@@ -146,7 +157,7 @@ Some decisions are deliberately closed: `key=value` over positional arguments, p
 
 The pin is deliberately not a channel. On `stable`, a Rust release turns every open branch red at once, with findings on files the branch never touched. Pinning does not avoid new lints — it decides that they arrive as a pull request somebody chose to open.
 
-Change `channel`, run the three CI commands above (a new compiler can produce a *rustc* warning, not just a clippy lint), fix what it found in the same PR, and type the commit `ci`. A diff that is only "new compiler, plus the fixes it asked for" is one a reviewer can actually read.
+Change `channel`, run the CI commands above (a new compiler can produce a *rustc* or *rustdoc* warning, not just a clippy lint, so a pin bump can turn `Docs` red too), fix what it found in the same PR, and type the commit `ci`. A diff that is only "new compiler, plus the fixes it asked for" is one a reviewer can actually read.
 
 The pin is not the MSRV. `rust-version` in the workspace manifest is the floor a consumer needs to build Cairn, and the pin is always newer. A change reaching for a recently stabilised API is green at the pin and broken at the floor. Clippy sees some of that already — `clippy::incompatible_msrv` reads `rust-version` and refuses a *standard library* item stabilised above it, and `-D warnings` makes that fatal — but it is a lint, so one `#[allow]` silences it, and it says nothing about a **dependency** whose own `rust-version` is above ours, which is a hard cargo error nothing at the pin ever sees. CI's `MSRV` job is what compiles at the floor and so catches both: it reads `rust-version` back out of the manifest with `cargo metadata` — no second copy to go stale — installs that compiler, and runs `cargo check --workspace --locked --all-features` at it. `check` rather than `test`, because the floor is about compiling the crates a consumer depends on and dev-dependencies are free to want a newer compiler than the library does; `--all-features`, because `rust-version` is one declaration per package and cargo has no way to say "this floor, unless you enable that feature"; `--locked`, because the committed lockfile is what a consumer cloning the repo resolves to, and when the failure is a dependency's own floor rather than Cairn's code cargo names the package.
 

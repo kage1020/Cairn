@@ -101,7 +101,7 @@ const _: () = assert!(
 /// Two passes measure against it, and they measure different things.
 /// [`compile_delay`] applies it to the segment's *routed* length — the
 /// dust the signal travels — which is the cap proper.
-/// [`crate::pass::lay_nets`], which all three place-and-route passes
+/// `crate::pass::lay_nets`, which all three place-and-route passes
 /// call, applies it to the straight line between the segment's ends,
 /// before a route is laid. The straight line is a floor on every route
 /// between two coords — it is the router's own admissible heuristic —
@@ -155,7 +155,7 @@ impl DelayOutput {
 /// elided from the output so a partial `local_delay_ticks` set cannot
 /// pollute a downstream reader. This pass raises `E_ATTENUATION_LIMIT`
 /// itself, and carries the two `E_ROUTE_CONGESTION` refusals and the
-/// `E_NO_CIRCUIT_REGION` that [`crate::pass`] asks on its behalf.
+/// `E_NO_CIRCUIT_REGION` that `crate::pass` asks on its behalf.
 #[must_use]
 pub fn compile_delay(routed: &ScopedPlacementIr) -> DelayOutput {
     let (scoped, diagnostics) = lower_scopes(routed, |entry| {

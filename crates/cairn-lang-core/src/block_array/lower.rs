@@ -131,8 +131,8 @@ const DOOR_HEIGHT: u32 = 2;
 /// list. This one stays because it covers the three ids no example is
 /// obliged to reach.
 ///
-/// [`PRESSURE_PLATE_BASE_ID`] is deliberately absent: it *is* redirectable
-/// (through [`PRESSURE_PLATE_TOKEN`]), so its per-edition correctness is a
+/// `PRESSURE_PLATE_BASE_ID` is deliberately absent: it *is* redirectable
+/// (through `PRESSURE_PLATE_TOKEN`), so its per-edition correctness is a
 /// question about the packs, and the pack-side tests ask it there.
 pub const BUILTIN_BLOCK_IDS: &[&str] = &[BlockState::AIR_ID, STAIR_BASE_ID, FLAT_BASE_ID];
 
@@ -3165,6 +3165,21 @@ fn carve_door(
             ctx.interior_h,
             ctx.dims,
         ) else {
+            // INVARIANT(wall-grid-validated): `at` is below `len` by the
+            // match above, and every row the loop asks for is at most
+            // `course_top` because `door_height` is clamped to the course
+            // holding `base_row` — so the helper has nothing to reject.
+            // Reaching here means one of those two stopped agreeing with
+            // `wall_local_to_grid`'s `u < length` / `v < dims.y`. Loud in
+            // debug builds; release builds skip the cell rather than panic
+            // over one voxel.
+            debug_assert!(
+                false,
+                "door row y={v} at u={at} on the {} wall is outside the wall grid; \
+                 `at=` against `wall_length` / `door_height` against the course \
+                 stopped agreeing with `wall_local_to_grid`",
+                side_name(side),
+            );
             continue;
         };
         canvas.paint((x, y, z), || PaletteIndex::AIR);
@@ -3315,6 +3330,19 @@ fn fill_stair(
             ctx.interior_h,
             ctx.dims,
         ) else {
+            // INVARIANT(wall-grid-validated): `u` walks `0..length`, the
+            // same length the helper checks, and any `y_world >= dims.y`
+            // was refused above with a diagnostic — so the helper has
+            // nothing to reject. Reaching here means one of those stopped
+            // agreeing with `wall_local_to_grid`. Loud in debug builds;
+            // release builds skip the cell rather than panic.
+            debug_assert!(
+                false,
+                "eave stair cell u={u} y={y_world} on the {} wall is outside the wall grid; \
+                 the band's `u < wall_length` / `y_world < dims.y` checks stopped agreeing \
+                 with `wall_local_to_grid`",
+                side_name(side),
+            );
             continue;
         };
         let (x, z) = shift_outward(side, wx, wz);
@@ -3483,7 +3511,9 @@ fn fill_pressure_plate(
 /// Resolve a `pressure_plate` anchor + `offset=` + `y=` into the world
 /// voxel `(x, y, z)` the plate should paint onto, or `None` (with a
 /// diagnostic already pushed) when any of the inputs is missing / out
-/// of range / lands outside the block array.
+/// of range / lands outside the block array. The one `None` without a
+/// diagnostic is the `INVARIANT(wall-grid-validated)` arm, which the
+/// checks before it make unreachable and which asserts in debug builds.
 ///
 /// `<side>.outside` shifts one voxel toward the exterior. When the
 /// shift lands outside the struct's dims *and* `y_world == 0`, it falls
@@ -3546,15 +3576,21 @@ fn plate_voxel_position(
         ctx.interior_h,
         ctx.dims,
     ) else {
-        // Preceding bounds checks (`y_world < dims.y`, `offset < length`)
-        // already cover every rejection `wall_local_to_grid` performs
-        // today. Turning the `None` into a defer keeps the guard honest
-        // if that helper grows a new failure mode: a silent skip would
-        // let plates disappear without a diagnostic.
-        diagnostics.push(diag_deferred_member_reason(
-            member,
-            "pressure_plate anchor did not map onto the wall grid (internal invariant broken)",
-        ));
+        // INVARIANT(wall-grid-validated): the two refusals above
+        // (`y_world >= dims.y`, `offset >= length`) each pushed their own
+        // diagnostic and returned, and they are every rejection
+        // `wall_local_to_grid` performs — so it has nothing to reject.
+        // Reaching here means one of them stopped agreeing with the
+        // helper, which is a compiler bug, not something the author can
+        // act on, so it is an assertion rather than a warning. Loud in
+        // debug builds; release builds drop the plate.
+        debug_assert!(
+            false,
+            "pressure_plate cell u={offset} y={y_world} on the {} wall is outside the wall grid; \
+             the `offset < wall_length` / `y_world < dims.y` checks stopped agreeing with \
+             `wall_local_to_grid`",
+            side_name(side),
+        );
         return None;
     };
     match anchor {
@@ -3852,7 +3888,7 @@ fn is_actuator_patch(member: &Member) -> bool {
 ///   `powered_by=` implementation cannot silently change the meaning
 ///   of existing source (see [`ACTUATOR_PATCH_INTENT_KEYS`]).
 /// - The `opened_by=` value must be a two-segment `sig.<name>`
-///   `DotRef`. Non-`DotRef` values defer with a "got <kind>" primary;
+///   `DotRef`. Non-`DotRef` values defer with a "got `<kind>`" primary;
 ///   a `DotRef` whose head is not `sig` or whose segment count is not
 ///   2 defers with the offending path rendered verbatim.
 ///
@@ -4258,18 +4294,36 @@ struct WindowRect {
 fn paint_window_rect(ctx: &StructCtx<'_>, rect: WindowRect, canvas: &mut MemberCanvas<'_>) {
     for du in 0..rect.width {
         for dv in 0..rect.height {
-            let Some((x, y, z)) = wall_local_to_grid(
+            let along = rect.offset.saturating_add(du);
+            let row = rect.y_start.saturating_add(dv);
+            let Some(cell) = wall_local_to_grid(
                 rect.side,
-                rect.offset + du,
-                rect.y_start + dv,
+                along,
+                row,
                 ctx.overhang,
                 ctx.interior_w,
                 ctx.interior_h,
                 ctx.dims,
             ) else {
+                // INVARIANT(wall-grid-validated): `fill_window` refused any
+                // span past the wall (`span_end = offset + step*(repeat-1) +
+                // size.w` is at most the wall length, which also bounds the
+                // `sym=true` mirror) and any row outside a wall course before
+                // it got here — so the helper has nothing to reject. Reaching
+                // here means one of those checks stopped agreeing with
+                // `wall_local_to_grid`. Loud in debug builds; release builds
+                // skip the cell rather than panic.
+                debug_assert!(
+                    false,
+                    "window cell u={along} y={row} on the {} wall is outside the wall grid; \
+                     `fill_window`'s span check (`offset + step*(repeat-1) + size.w <= wall \
+                     length`, which also bounds the mirror) / wall-course check stopped \
+                     agreeing with `wall_local_to_grid`",
+                    side_name(rect.side),
+                );
                 continue;
             };
-            canvas.paint((x, y, z), || rect.palette_index);
+            canvas.paint(cell, || rect.palette_index);
         }
     }
 }
@@ -7574,6 +7628,20 @@ struct s size=9x7
                 .iter()
                 .any(|d| d.primary.contains("runs past the front wall")),
             "expected offset-out-of-range defer, got {:?}",
+            out.diagnostics,
+        );
+        // offset=3 is the first column past a 3-length wall: the boundary
+        // `wall_local_to_grid` refuses on, so it has to be refused here
+        // first — the arm after the helper call asserts rather than reports
+        // (`INVARIANT(wall-grid-validated)`).
+        let out = lowered(
+            "theme t:\n  slot p -> @oak_pressure_plate\n\nstruct s size=3x3\n  walls mat_slot=p height=2\n  pressure_plate at=inside.front offset=3 y=0\n",
+        );
+        assert!(
+            out.diagnostics
+                .iter()
+                .any(|d| d.primary.contains("`offset=3` runs past the front wall")),
+            "expected the boundary offset to be refused, got {:?}",
             out.diagnostics,
         );
         // y=99 past the struct's dims.y.

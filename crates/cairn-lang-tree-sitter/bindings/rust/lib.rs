@@ -1,8 +1,8 @@
 //! Rust binding for the tree-sitter Cairn grammar.
 //!
-//! Consumers use [`LANGUAGE`] as the [`tree_sitter::Language`] handle for
-//! the Cairn parser. The FFI symbol is emitted by the C parser generated
-//! from [`grammar.js`](../../grammar.js).
+//! Consumers turn [`LANGUAGE`] into a `tree_sitter::Language` (via
+//! `Into`) to drive the Cairn parser. The FFI symbol is emitted by the
+//! C parser generated from [`grammar.js`](../../grammar.js).
 
 use tree_sitter_language::LanguageFn;
 

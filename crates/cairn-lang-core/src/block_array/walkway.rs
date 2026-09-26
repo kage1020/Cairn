@@ -26,7 +26,7 @@
 //! 3. [`build_walkway_array`] turns the path into a [`BlockArray`] whose
 //!    voxel grid bounds the strip's bounding box, returning the world-
 //!    space origin so the lockfile can pin where the array lives. Cells
-//!    that overlap an existing structure ([`blocked`] in the signature)
+//!    that overlap an existing structure (`blocked` in the signature)
 //!    are skipped and counted so the caller can emit one
 //!    `W_WALKWAY_BLOCKED` warning per row — with [`route_path`] in
 //!    front, that only happens when no unobstructed route exists at all.
@@ -331,14 +331,14 @@ pub enum RoutePathError {
     /// The search exhausted the rectangle without reaching `to` — the
     /// target is fully enclosed by blocked cells.
     TargetUnreachable,
-    /// The search rectangle exceeds [`ROUTE_AREA_CAP`]; the site is too
+    /// The search rectangle exceeds `ROUTE_AREA_CAP`; the site is too
     /// spread out to route. Carries the offending area so the caller
     /// can surface both numbers.
     AreaCapExceeded {
         /// Cells the rectangle would cover (`u64::MAX` when the
         /// span product itself overflowed).
         area: u64,
-        /// The cap it exceeded, i.e. [`ROUTE_AREA_CAP`].
+        /// The cap it exceeded, i.e. `ROUTE_AREA_CAP`.
         cap: u64,
     },
     /// Inflating the search rectangle stepped past the `i32` coordinate
@@ -353,7 +353,7 @@ pub enum RoutePathError {
 /// re-scan the whole set per row, letting a large site with many
 /// colliding rows multiply one linear scan into billions of iterations
 /// — the pre-computed per-plane bounds keep the router's per-row cost
-/// bounded by [`ROUTE_AREA_CAP`] alone.
+/// bounded by `ROUTE_AREA_CAP` alone.
 pub struct BlockedIndex<'a, S: BuildHasher> {
     cells: &'a HashSet<(i32, i32, i32), S>,
     /// `y → (min_x, max_x, min_z, max_z)` over the blocked cells on
@@ -453,12 +453,12 @@ fn search_rect(
 /// The search is Dijkstra over `(cell, incoming direction)` states with
 /// the lexicographic cost `(path length, turn count)` — shortest first,
 /// and among equal-length routes the one with the fewest direction
-/// changes. Ties beyond that are broken by the fixed [`STEP_DIRS`]
+/// changes. Ties beyond that are broken by the fixed `STEP_DIRS`
 /// expansion order and a monotonic queue sequence number, never by hash
 /// iteration order, so the result is fully deterministic (a lockfile
 /// requirement).
 ///
-/// The searchable area is the [`search_rect`] rectangle: blocked cells
+/// The searchable area is the `search_rect` rectangle: blocked cells
 /// on other Y planes neither obstruct nor inflate the search. The two
 /// endpoints are expected to share a Y (ports are pinned to their
 /// placements' shared ground row); a mismatch is a caller bug and
@@ -478,7 +478,7 @@ fn search_rect(
 /// # Panics
 ///
 /// Panics when an internal search invariant breaks (state count or
-/// path length exceeding the [`ROUTE_AREA_CAP`]-derived bound, or a
+/// path length exceeding the `4 * ROUTE_AREA_CAP` bound, or a
 /// parent-chain cycle). These are algorithm bugs, not input
 /// conditions — degrading them to an `Err` would silently swap the
 /// deterministic shortest detour for the skip-and-warn fallback.

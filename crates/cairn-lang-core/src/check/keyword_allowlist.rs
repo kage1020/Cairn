@@ -7,7 +7,7 @@
 //! source of truth for "this keyword is not in the known-keyword table" on
 //! struct/def/site bodies. For theme selectors the lowering step keeps
 //! the raw keyword string, so this pass re-checks it directly via
-//! [`role_of`](crate::intent::role_of).
+//! [`role_of`].
 //!
 //! The candidate set is the enclosing body's, not the whole table. A
 //! diagnostic that offers a repair has to offer one that works: answering

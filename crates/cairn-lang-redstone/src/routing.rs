@@ -13,12 +13,12 @@
 //!   output driver a sink on its actuator's net; the source is the input
 //!   pad for `NetRef::Input` and the cell body for `NetRef::Cell`. An
 //!   unused input adds its pad to the occupancy set but no net.
-//! - **Trees.** [`crate::routing_geometry::Router`] grows each net one
+//! - **Trees.** `crate::routing_geometry::Router` grows each net one
 //!   sink at a time by the cheapest path that runs through no block and
 //!   neither over nor one step beside an earlier net's dust in its own
 //!   plane, climbing to a [`crate::placement_ir::RouteLayer::Bridge`]
 //!   layer where the plane offers no way round. Nets are laid in
-//!   [`crate::routing_geometry::net_order`], a total order, so the delay
+//!   `crate::routing_geometry::net_order`, a total order, so the delay
 //!   and crossing passes rebuild the same trees. Keeping nets apart here
 //!   rather than at stage 4 is what gets the climb measured into
 //!   `wire_length` and into the delay pass's tick count.
@@ -33,7 +33,7 @@
 //!   laid, `cells * CELL_FOOTPRINT + wire-only coords > reserved area`.
 //!   Each primary says which, so a reader can tell the placement pass's
 //!   pessimistic cell budget from the routed layout. Two more codes
-//!   reach this pass through [`crate::pass::lay_nets`]:
+//!   reach this pass through `crate::pass::lay_nets`:
 //!   `E_ATTENUATION_LIMIT` for a sink further from its driver than the
 //!   v1 cap in a straight line, and `E_NO_CIRCUIT_REGION` for a scope
 //!   carrying cells but no reservation to place them in.
