@@ -55,7 +55,7 @@ leaf integrations that nothing depends on. `cairn-lang-formats` is the only crat
 | Rust | `rust-toolchain.toml` | An exact version, not a channel. With `rustfmt` and `clippy`. |
 | Edition 2024, MSRV | `Cargo.toml` | Workspace package metadata, inherited by every crate. |
 | Formatting | `rustfmt.toml` | `max_width = 100`, Unix line endings. |
-| Lints | `[workspace.lints]` in `Cargo.toml` | `unsafe_code = forbid`, `missing_docs = warn`, `clippy::all` + `clippy::pedantic`. |
+| Lints | `[workspace.lints]` in `Cargo.toml` | `unsafe_code = deny`, `missing_docs = warn`, `clippy::all` + `clippy::pedantic`. |
 
 The Rust version is exact because CI treats every clippy finding as fatal. On a channel, a Rust
 release turns every open branch red on its own — the finding lands on a file the branch never
@@ -66,8 +66,17 @@ consumer needs, and raising the pin does not raise it. The number itself lives o
 that compiler, so a change reaching for a newly stabilised API goes red there rather than at a
 consumer's.
 
-`unsafe_code` is forbidden workspace-wide with no escape hatch. If a use case ever needs it, it goes
-through a focused PR that lifts the lint on a single module with documented invariants, never
+Every crate inherits these with `[lints] workspace = true` and writes no `[lints.*]` table of its
+own: Cargo replaces the workspace policy with a crate's table rather than merging the two, so a lint
+added to the workspace later would silently skip that crate.
+
+`unsafe_code` is denied workspace-wide, and lifted in exactly one place: the `ffi` module of the
+tree-sitter crate's Rust binding, which is the only way to reach the generated C parser. The level is
+`deny` rather than `forbid` because `forbid` refuses that module's `#![expect(unsafe_code)]` too;
+the `unsafe_code_is_confined` test in `cairn-lang-core` holds everything else to what `forbid`
+promised, failing on any other file that names the lint or any crate that stops inheriting the
+workspace lints. If another use case ever needs `unsafe`, it goes through a focused PR that lifts
+the lint on a single module with documented invariants and adds that file to the test, never
 `#[allow]` at a call site.
 
 ## Build, test, lint
