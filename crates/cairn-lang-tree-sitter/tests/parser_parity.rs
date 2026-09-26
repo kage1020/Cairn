@@ -519,6 +519,18 @@ const FIXTURES: &[(&str, &str, Verdict)] = &[
         "struct s size=9 x7\n  floor mat_slot=f\n",
         Reject,
     ),
+    // The mirror of `size_space_before_x`: a space after the separator
+    // rather than before it. Not a refusal, because the reference parser
+    // never reads a size here at all — `scan_number` stops at an `x` with
+    // no digit behind it, and `parse_command`'s argument loop takes the
+    // `x` and the `2` as positional values, the reading `size=2 x 2` gets.
+    // The separator's scanner branch looks at the character behind the
+    // `x` for the same reason, and declines where no digit stands there.
+    (
+        "size_separator_before_a_space",
+        "struct s size=3x3\n  floor size=2x 2\n",
+        Accept,
+    ),
     // A string ends at the first quote and never spans a line.
     (
         "string_escaped_quote",
@@ -555,13 +567,12 @@ const FIXTURES: &[(&str, &str, Verdict)] = &[
         Reject,
     ),
     ("tab_indent", "theme t:\n\tslot a -> @b\n", Reject),
-    // Refusals on a line the preceding break could not speak for. A break
-    // is where an illegal indent is normally refused, one line early —
-    // but a header's break is followed by an `_indent` and nothing else,
-    // so no NEWLINE is asked for at the blank line after it, and the
-    // blank line is crossed by the scanner's own blank-line loop instead.
-    // The line the loop lands on is measured where it stands: an odd
-    // count, by two routes, and a jump of more than one level.
+    // Refusals on a line reached across a blank or comment line. A
+    // header's break is followed by an `_indent` and nothing else, so no
+    // NEWLINE is asked for at the blank line after it, and the blank line
+    // is crossed by the scanner's own blank-line loop instead. The line
+    // the loop lands on is measured where it stands, as every line is: an
+    // odd count, by two routes, and a jump of more than one level.
     (
         "odd_indent_after_a_blank_line",
         "struct s size=3x3\n\n   floor a=1\n",
@@ -587,10 +598,10 @@ const FIXTURES: &[(&str, &str, Verdict)] = &[
         "struct s size=3x3\n\n\tfloor a=1\n",
         Reject,
     ),
-    // A line the break in front of it cannot speak for, because the level
-    // it asks for is legal arithmetic: one deeper than the line above.
+    // A line whose level is legal arithmetic: one deeper than the line
+    // above, so the scanner's count has nothing against it.
     // Whether a body may open there is the grammar's knowledge and not
-    // the scanner's, so the refusal comes from the line itself — the
+    // the scanner's, so the refusal comes from the grammar — the
     // token every construct starts with is withheld, and nothing else can
     // start one.
     (
@@ -993,21 +1004,6 @@ const KNOWN_DIVERGENCES: &[(&str, &str, Verdict)] = &[
         "struct s size=3x3\n  floor n=99999999999999999999\n",
         Accept,
     ),
-    // -- a size separator with a space after it -----------------------
-    //
-    // `2x 2` is two arguments to `parse_command`: `scan_number` reads the
-    // `2`, stops at the `x` because no digit follows it, and the `x` and
-    // the `2` go on as positional values. This grammar cannot stop there.
-    // The separator is an external token consulted before extras are
-    // skipped, and it commits to the `x` on sight — so `size_literal` is
-    // entered and then fails for want of an immediate height, rather than
-    // never being entered. Deciding it needs the character after the `x`,
-    // which that branch does not look at.
-    (
-        "size_separator_before_a_space",
-        "struct s size=3x3\n  floor size=2x 2\n",
-        Reject,
-    ),
 ];
 
 fn grammar_accepts(parser: &mut Parser, source: &str) -> bool {
@@ -1150,6 +1146,66 @@ fn a_tab_indented_line_does_not_close_the_body_around_it() {
             "a tab closed the body the rows after it are written in: {source:?}",
         );
     }
+}
+
+/// An illegally indented line is refused on its own row, and the lines
+/// around it keep their shape.
+///
+/// The scanner used to read one line ahead of every line break and
+/// withhold the NEWLINE when the line behind it was indented illegally.
+/// `_line_start` refuses the same lines where they stand, so that refused
+/// no file the scanner does not refuse anyway — 0 verdicts moved across
+/// 4000 random layouts — and only decided where the error sits. On the
+/// break, it took the line in front down with the one it was meant to
+/// protect. Measured on the same 4000 layouts with and without the
+/// lookahead: 219 recovery trees differ, refusing at the line keeps
+/// more declarations, directives and rows outside an `ERROR` in 24 of
+/// them, and withholding the break keeps more in 2, both of them runs of
+/// three or more illegal lines where what it kept was a header the file
+/// had indented under another.
+///
+/// Asserted here and not in `FIXTURES` because the verdict is `Reject`
+/// either way.
+#[test]
+fn a_bad_indent_errors_on_its_own_row() {
+    let mut parser = new_parser();
+
+    // The header in front of the offending line survives it. With the
+    // break withheld, the whole file was one `ERROR`.
+    let source = "theme t:\n    walls b=2\n";
+    let tree = parser.parse(source, None).expect("parse produced no tree");
+    let root = tree.root_node();
+    assert!(
+        root.has_error(),
+        "the fixture is supposed to be malformed; it no longer is"
+    );
+    let header = root.child(0).expect("source_file has a first child");
+    assert!(
+        header.kind() == "theme_decl" && !header.has_error(),
+        "the header in front of an over-indented line went down with it: {}",
+        root.to_sexp(),
+    );
+
+    // The rows behind it are read as rows. With the break withheld, the
+    // offending row's keyword and argument were folded into the row in
+    // front as two more arguments, so `walls` disappeared as a member.
+    let source = "struct s size=3x3\n  floor a=1\n      walls b=2\n  door x=1\n";
+    let tree = parser.parse(source, None).expect("parse produced no tree");
+    assert!(
+        tree.root_node().has_error(),
+        "the fixture is supposed to be malformed; it no longer is",
+    );
+    let mut placed = Vec::new();
+    grammar_members(tree.root_node(), source, 0, &mut placed);
+    assert_eq!(
+        placed,
+        vec![
+            (1usize, "floor".to_owned()),
+            (1usize, "walls".to_owned()),
+            (1usize, "door".to_owned()),
+        ],
+        "an over-indented row was folded into the row in front of it",
+    );
 }
 
 /// Every listed divergence still diverges, in the direction listed.
