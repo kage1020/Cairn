@@ -255,6 +255,53 @@
   reads `offset=` the way the cut does now. And the last step of the lookup, one block out from
   the wall, was the one sum left unchecked; it is refused as out of range like the others.
 
+- *(tree-sitter)* A size separator with no digit after it was accepted by `cairn-lang-core` and
+  refused by this grammar ([#270](https://github.com/kage1020/Cairn/issues/270)):
+
+  | source | core | grammar |
+  | --- | --- | --- |
+  | `"struct s size=3x3\n  floor size=2x 2\n"` (and its CRLF spelling) | Accept | **Reject** |
+  | `"struct s size=3x3\n  floor size=2x\n"` | Accept | **Reject** |
+  | `"struct s size=3x3\n  floor size=2x"` (end of file) | Accept | **Reject** |
+  | `"struct s size=3x3\n  floor size=2xx\n"` | Accept | **Reject** |
+  | `"struct s size=3x3\n  floor size=2x f\n"` | Accept | **Reject** |
+  | `"struct s size=3x3\n  floor a=[2x 2]\n"` | Accept | **Reject** |
+
+  All of them now parse. `floor size=2x-1` and a header's `struct s size=2x 2` stay refused by
+  both.
+
+  The reference lexer reads `2x 2` as three values — `2`, `x`, `2`, the reading `size=2 x 2`
+  gets — because `scan_number` only takes an `x` as a separator when a digit follows it. The
+  grammar's separator is an external token, and its scanner branch took the `x` on sight, so the
+  row entered `size_literal` and then failed it for want of a height. The branch now looks at the
+  character behind the `x` and declines where it is not a digit, so tree-sitter's own lexer reads
+  the `x` as an identifier and the row parses the way the reference parser parses it. The source
+  is still refused, one layer later and the same way on both sides: `cairn check` reports
+  `E_TYPE_MISMATCH_SIZE` on the bare `2` handed to `size=` and `E_UNEXPECTED_POSITIONAL` on the
+  two values behind it. `9 x 7` and `9 x7` stay refused, and `2x2y` and `2x2x9` stay listed as
+  divergences in the direction they were. The entry leaves `KNOWN_DIVERGENCES` for the fixture
+  table, with every row above beside it.
+
+- *(tree-sitter)* An over-indented line took the line in front of it down with it in an editor's
+  error recovery ([#272](https://github.com/kage1020/Cairn/issues/272)):
+
+  ```
+  "theme t:\n    walls b=2\n"
+
+  before: (source_file (ERROR (identifier) (ERROR) (identifier) (identifier) (integer) (ERROR)))
+  after:  (source_file (theme_decl name: (identifier)) (ERROR (identifier) (identifier) (integer) (ERROR)))
+  ```
+
+  The scanner read one line ahead of every line break and withheld the break when the line behind
+  it had an odd indent or jumped more than one level. `_line_start` already refuses both where
+  they stand, so the lookahead decided no verdict — across 4000 random layouts none moved — only
+  where the error went, and on the break it swallowed the header meant to be protected. It is
+  removed, and the break branch consumes the break and nothing else. On the same 4000 layouts
+  219 recovery trees change: 24 keep more declarations, directives and rows outside an `ERROR`,
+  2 keep fewer — both runs of illegal lines where what was kept was a header the file had
+  indented under another — and the rest keep the same amount in a different shape. Which files
+  are refused does not change.
+
 - *(redstone)* A `circuit region=` inside a very wide struct was routed before anything measured
   it. The reservation takes the floor's extent, so `region=` is as wide as `size=` and the actuator
   pad lands at `x = width - 1`; stage 2 laid a wire out to it one coord at a time, stage 3 rebuilt
@@ -524,6 +571,34 @@
   versions the build refuses — and the stale description is cleared from the places it survived
   outside the spec: `version_axes.rs`'s module doc, which still called axis 1 the intersection, the
   `cairn info` renderer, `--help`, and the CLI crate's README.
+
+- *(docs)* `spec/lint` "Machine-readable payload" said a run-level refusal is reported on stderr and
+  by the exit code, and stopped there. It did not say what a `cairn check --format json` consumer
+  does with that, and the run it describes looks like a pass with a bad exit code:
+
+  ```console
+  $ cairn check partial.crn --edition java --target 1.21.4 --format json
+  [ { "code": "W_STRUCT_NO_SIZE", "severity": "warning", ... } ]
+  error[E_PARTIAL_BUILD]: partial.crn: 1 of 2 requested scopes did not lower; ...
+  $ echo $?
+  1
+  ```
+
+  The question of whether a lost scope (`E_PARTIAL_BUILD`) or an unshipped `--target` should get a
+  machine-readable form is now settled in the spec, not left open: it stays prose. Neither refusal
+  is a finding at a span, and `check`'s array is a document downstream tooling already reads with
+  `line` / `col` required, which is how `info`'s palette refusal was settled too. Stderr is prose
+  for a person and not part of the contract. What the spec adds is the rule a consumer can apply
+  without it: an exit of `1` over an array with no `"severity": "error"` element is a run-level
+  refusal, down to a `[]` over a clean source. No other failure reads that way — a source that does
+  not parse is an array carrying `E_PARSE`, and a source that cannot be read writes no document at
+  all. The rule runs one way only: a refusal on a run that also has error-severity findings reads
+  like any other error failure, and the refusal is said only on stderr. The ja mirror, the CLI
+  crate's README and `cairn check --help` say the same.
+
+  No behaviour changes. One test drives both refusals over sources whose own findings are warnings
+  at most, pinning each row's array — `W_STRUCT_NO_SIZE` for the lost scope, `[]` for the unshipped
+  target — and another pins that a non-UTF-8 source exits 1 with nothing on stdout.
 
 - *(core)* A `-> value` tail on a member that cannot emit a signal was silent through `check` and
   `compile`:
