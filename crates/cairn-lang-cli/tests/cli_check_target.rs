@@ -334,6 +334,52 @@ fn the_json_report_of_an_unshipped_target_is_the_findings_and_the_exit_code() {
 }
 
 #[test]
+fn a_json_consumer_tells_a_run_level_refusal_by_the_exit_over_an_errorless_array() {
+    // The rule `spec/lint` "Machine-readable payload" gives a consumer that
+    // does not parse stderr: exit 1 over an array with no error-severity
+    // element is a run-level refusal. Both refusals are driven on a source
+    // whose own findings are warnings at most, so if either stopped failing
+    // the run, or started arriving as an error element, the rule would no
+    // longer say what the spec says it does.
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    let partial = fixture(tmp.path(), ONE_SCOPE_WITHOUT_A_SIZE);
+    let clean = tmp.path().join("clean.crn");
+    std::fs::write(
+        &clean,
+        "@cairn 2026.06\n\ntheme t:\n  slot floor -> @oak_planks\n\nstruct s size=2x2\n  floor mat_slot=floor\n",
+    )
+    .expect("write fixture");
+
+    for (src, target, refusal) in [
+        (&partial, "1.21.4", "error[E_PARTIAL_BUILD]"),
+        (&clean, "9.9.9", "unsupported java target `9.9.9`"),
+    ] {
+        let out = cairn(
+            "check",
+            &[
+                src.to_str().unwrap(),
+                "--edition",
+                "java",
+                "--target",
+                target,
+                "--format",
+                "json",
+            ],
+        );
+        let stdout = String::from_utf8(out.stdout).expect("utf-8");
+        let stderr = String::from_utf8(out.stderr).expect("utf-8");
+        assert_eq!(out.status.code(), Some(1), "{refusal}: stderr={stderr}");
+        let parsed: serde_json::Value = serde_json::from_str(&stdout).expect("one JSON document");
+        let findings = parsed.as_array().expect("an array of findings");
+        assert!(
+            findings.iter().all(|d| d["severity"] != "error"),
+            "{refusal}: the refusal is not an element, got: {stdout}",
+        );
+        assert!(stderr.contains(refusal), "got: {stderr}");
+    }
+}
+
+#[test]
 fn a_lowering_finding_that_is_not_an_id_verdict_reaches_a_pinned_check() {
     // `check_lowering`'s doc argues that filtering the lowering stream down
     // to `E_UNKNOWN_ID` — the code the flag is named for — would be the
