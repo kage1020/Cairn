@@ -136,7 +136,7 @@ rg '\bM[1-6]\b|M[0-9]-PR[0-9]+|pre-M[0-9]|\bPR[0-9]+\b|\blater PR\b|\bfuture PR\
 | `chore` | 利用者に届かないその他すべて | いいえ |
 | `style` | 整形・lint だけの変更 | いいえ |
 
-**破壊的変更はスコープの後ろに `!` を付けます** — `feat(core)!: replace lexer`、`fix(redstone)!: route each net around the dust already laid`。`!` と CHANGELOG は対になっています。[CHANGELOG.md](CHANGELOG.md) の `## [Unreleased]` → `### Breaking changes` にエントリを足す PR はタイトルに `!` を付け、タイトルに `!` を付けた PR はそのエントリを足します。手書きのエントリは[breaking はどう告知されるか](https://cairn.kage1020.com/ja/spec/compatibility/#c3-breaking-はどう告知されるか)が求めるもので、利用者が読むのはこちらです。`!` は同じ事実を `release-plz` が解析するコミットの側に書いたものです。片方だけの PR を見たレビュアーは、マージ前にもう片方を求めます。
+**破壊的変更はコロンの直前に `!` を付けます** — type の後ろ、スコープを書くときはスコープの後ろです (`feat(core)!: replace lexer`、`fix!: …`)。`!` と CHANGELOG は対になっています。[CHANGELOG.md](CHANGELOG.md) の `## [Unreleased]` → `### Breaking changes` にエントリを足す PR はタイトルに `!` を付け、タイトルに `!` を付けた PR はそのエントリを足します。手書きのエントリは [compatibility「breaking はどう告知されるか」](https://cairn.kage1020.com/ja/spec/compatibility/) が求めるもので、`CHANGELOG.md` を読む人が目にするのはこちらです。`!` は同じ事実を `release-plz` が解析するコミットの側に書いたものです。片方だけの PR を見たレビュアーは、マージ前にもう片方を求めます。
 
 `!` はバージョンを決めません。semver ならメジャーバンプと読むところですが、ここではリリースワークフローが日付と既存タグから次の `YYYY.M.PATCH` を計算して `release-plz` の実行前に `Cargo.toml` へ書き込み、`release-plz` は公開済みのものと既に異なるバージョンには手を付けません。リリースの要否も決めません — それを決めるのは上の表の type です。変わるのは生成されるリリースノートです。`release-plz` はそのコミットの行の先頭に `[**breaking**]` を付け、`protect_breaking_commits` によって、普段は行が落とされる type (`docs!:`、`ci!:`) でもその行が残ります。
 

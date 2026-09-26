@@ -1,11 +1,11 @@
 <!--
 PR title MUST be a Conventional Commits line. The title becomes the squash-merge
-commit message on `main` and is parsed by release-plz to decide patch releases.
+commit message on `canary` and is parsed by release-plz to decide patch releases.
 
   feat(core): add lexer
   fix(formats): correct big-endian NBT length
   docs(spec): clarify blockstate "`waterlogged`" derivation order
-  feat(redstone)!: rewrite tick simulator       (breaking — see Compatibility C.3)
+  feat(redstone)!: rewrite tick simulator       (breaking — see compatibility "How a break is communicated")
   build(deps): bump tower to 0.5
   refactor(nbt): split codec into modules
   ci: add windows-11-arm to publish matrix
