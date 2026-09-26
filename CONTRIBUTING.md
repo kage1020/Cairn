@@ -37,6 +37,12 @@ cargo build --workspace --locked
 cargo test --workspace --locked
 ```
 
+CI also builds the API docs once, on Linux, with rustdoc's warnings fatal — clippy does not see a doc link to a private item or to a path that no longer resolves:
+
+```sh
+RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --locked
+```
+
 ### The repository
 
 | Path | What lives there |

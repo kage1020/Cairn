@@ -88,6 +88,13 @@ CI sets `RUSTFLAGS=-D warnings`, so any new warning fails the build. To match it
 RUSTFLAGS="-D warnings" cargo build --workspace --locked
 ```
 
+CI also builds the API docs once, on Linux, with rustdoc's warnings fatal, since clippy does not
+see a doc link to a private item or to a path that no longer resolves:
+
+```sh
+RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --locked
+```
+
 `cairn-lang-wasm` builds with [`wasm-pack`](https://rustwasm.github.io/wasm-pack/) and the website
 expects the resulting `pkg/` at `website/src/wasm/`:
 

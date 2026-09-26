@@ -43,6 +43,34 @@ jobs:
       - name: Test
         run: cargo test --workspace --locked
 
+  docs:
+    # Short and stable on purpose, like `MSRV` below: a required status
+    # check is matched as a literal string.
+    name: Docs
+    # One OS is enough: rustdoc resolves intra-doc links against the same
+    # item tree everywhere, and the workspace has no platform-gated docs.
+    runs-on: ubuntu-latest
+    env:
+      # Clippy does not see rustdoc's lints, so without this a link to a
+      # private item or to a path that no longer resolves lands silently
+      # and renders as dead text for the reader who needed it.
+      RUSTDOCFLAGS: -D warnings
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Rust toolchain
+        run: rustup show
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          shared-key: docs
+          save-if: ${{ github.ref == 'refs/heads/canary' || github.ref == 'refs/heads/main' }}
+
+      - name: Rustdoc
+        run: cargo doc --workspace --no-deps --locked
+
   msrv:
     # Short and stable on purpose: a required status check is matched as
     # a literal string, so renaming this job un-gates it silently.

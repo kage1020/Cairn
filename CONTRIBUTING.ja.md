@@ -37,6 +37,12 @@ cargo build --workspace --locked
 cargo test --workspace --locked
 ```
 
+CI はこれとは別に、Linux で一度だけ rustdoc の警告を致命的にして API ドキュメントをビルドします。非公開の項目や解決できなくなったパスへのドキュメントリンクは clippy には見えないためです。
+
+```sh
+RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --locked
+```
+
 ### リポジトリの構成
 
 | パス | 中身 |

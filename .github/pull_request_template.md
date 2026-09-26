@@ -31,6 +31,7 @@ See CONTRIBUTING.md for the full convention.
 - [ ] `cargo fmt --all -- --check`
 - [ ] `cargo clippy --workspace --all-targets -- -D warnings`
 - [ ] `cargo test --workspace --locked`
+- [ ] `RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --locked`
 - [ ] (if docs) `pnpm build` in `website/`
 
 ## Compatibility

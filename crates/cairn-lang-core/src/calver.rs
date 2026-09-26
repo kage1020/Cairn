@@ -50,7 +50,7 @@ const YEAR_DIGITS: usize = 4;
 /// The calendar ranges below are [`parse_language_version`]'s guarantee
 /// about what it returns, not this type's about what it holds — nothing
 /// here refuses a month of `99`, and nothing needs to: the ordering is a
-/// sound total order over any three numbers, [`Display`] passes them
+/// sound total order over any three numbers, [`Display`](fmt::Display) passes them
 /// through, and both operands of the one comparison in the tree come from
 /// the parser. `#[non_exhaustive]` keeps [`LanguageVersion::new`] the only
 /// way in from outside the crate, so a caller cannot write a literal past
@@ -133,7 +133,7 @@ pub enum LanguageVersionError {
         /// The dot-separated component that could not be read.
         component: String,
     },
-    /// A year that is not exactly [`YEAR_DIGITS`] digits. Holds it as
+    /// A year that is not exactly four digits. Holds it as
     /// written.
     Year {
         /// The year component as written.

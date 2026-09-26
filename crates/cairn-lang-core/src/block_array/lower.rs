@@ -131,8 +131,8 @@ const DOOR_HEIGHT: u32 = 2;
 /// list. This one stays because it covers the three ids no example is
 /// obliged to reach.
 ///
-/// [`PRESSURE_PLATE_BASE_ID`] is deliberately absent: it *is* redirectable
-/// (through [`PRESSURE_PLATE_TOKEN`]), so its per-edition correctness is a
+/// `PRESSURE_PLATE_BASE_ID` is deliberately absent: it *is* redirectable
+/// (through `PRESSURE_PLATE_TOKEN`), so its per-edition correctness is a
 /// question about the packs, and the pack-side tests ask it there.
 pub const BUILTIN_BLOCK_IDS: &[&str] = &[BlockState::AIR_ID, STAIR_BASE_ID, FLAT_BASE_ID];
 

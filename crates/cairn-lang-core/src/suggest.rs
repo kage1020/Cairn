@@ -47,7 +47,7 @@ fn max_distance(input_len: usize) -> usize {
 }
 
 /// Return the candidate closest to `input` under Damerau-Levenshtein
-/// distance, subject to the length-scaled threshold from [`max_distance`].
+/// distance, subject to the length-scaled threshold from `max_distance`.
 ///
 /// Returns `None` when `input` is empty, no candidate sits within the
 /// threshold, or `input` exactly matches some candidate (an exact match is

@@ -60,7 +60,7 @@ use crate::saturating_index;
 /// pipeline. The legalized IR is a [`ScopedPlacementIr`] with every
 /// non-failed scope's `buffer_coords` populated with one entry per
 /// implicit buffer repeater the delay pass counted, each carrying the
-/// [`RouteLayer`] of the route coord it stands on. No new IR type; the
+/// [`crate::placement_ir::RouteLayer`] of the route coord it stands on. No new IR type; the
 /// crossing
 /// pass is one [`crate::placement_ir::PlacementPhase::legalize`]
 /// transition per cell, per the producer↔variant table on that enum.
@@ -88,16 +88,16 @@ impl CrossingOutput {
 /// [`ScopedPlacementIr`].
 ///
 /// Reads every cell's coord and the scope's
-/// [`CircuitRegionReservation`] out of the input IR — the Placement
+/// [`crate::placement_ir::CircuitRegionReservation`] out of the input IR — the Placement
 /// IR is self-describing by construction, so the crossing pass has no
 /// `IntentModule` dependency.
 ///
 /// One entry per non-empty [`PlacementIr`] whose legalization
-/// succeeded; a scope that raises [`DiagnosticCode::NoCircuitRegion`],
-/// either [`DiagnosticCode::RouteCongestion`] that
-/// [`crate::pass::lay_nets`] raises — a pad row the reservation cannot
+/// succeeded; a scope that raises [`crate::DiagnosticCode::NoCircuitRegion`],
+/// either [`crate::DiagnosticCode::RouteCongestion`] that
+/// `crate::pass::lay_nets` raises — a pad row the reservation cannot
 /// hold, or a sink no route reaches — or the
-/// [`DiagnosticCode::AttenuationLimit`] it raises for a sink further
+/// [`crate::DiagnosticCode::AttenuationLimit`] it raises for a sink further
 /// from its driver than the v1 cap in a straight line, is
 /// elided from the output so a partial `buffer_coords` set cannot
 /// pollute the downstream block-array voxel lowering. Every finding

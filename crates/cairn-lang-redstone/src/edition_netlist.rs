@@ -1,7 +1,7 @@
 //! Netlist IR → Edition Netlist IR lowering.
 //!
 //! Rewrites each [`crate::netlist_ir::ScopedNetlistIrEntry`] into a
-//! [`ScopedEditionNetlistIrEntry`] by mapping every
+//! [`crate::edition_netlist_ir::ScopedEditionNetlistIrEntry`] by mapping every
 //! [`crate::netlist_ir::CellNode`] to an [`EditionCellNode`] whose
 //! [`EditionCell`] tag names the target-edition realisation of the source
 //! [`crate::netlist_ir::LogicalCell`] — the middle tier of the three-tier

@@ -1,7 +1,7 @@
 //! Logic IR → Netlist IR lowering.
 //!
 //! Rewrites each [`crate::logic_ir::ScopedLogicIrEntry`] into a
-//! [`ScopedNetlistIrEntry`] by mapping every [`crate::logic_ir::GateNode`]
+//! [`crate::netlist_ir::ScopedNetlistIrEntry`] by mapping every [`crate::logic_ir::GateNode`]
 //! to a [`CellNode`] tagged with a [`LogicalCell`]. The pass is a single
 //! forward walk: the Logic IR carries a topologically ordered DAG
 //! (invariant enforced by [`crate::synth::synthesize`], which also

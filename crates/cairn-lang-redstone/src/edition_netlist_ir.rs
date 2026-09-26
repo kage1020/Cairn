@@ -157,7 +157,7 @@ impl EditionCell {
     ///
     /// The `*Unpinned` variants are parser-unreachable placeholders
     /// today (Xor / Nand / Nor / Mux); they return
-    /// [`UNPINNED_BASE_DELAY_TICKS`], a pessimistic sentinel that
+    /// `UNPINNED_BASE_DELAY_TICKS`, a pessimistic sentinel that
     /// sits **strictly above** every pinned base delay so a future
     /// pinning that lands new physics without touching this table
     /// would over-estimate rather than under-estimate — the same
