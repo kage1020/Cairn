@@ -118,14 +118,14 @@ fn window_walkway_emits_no_resolver_errors() {
 /// half of the row identified as the side that *did* place. Pins the
 /// `port_world_position` → `W_DEFERRED_MEMBER` cascade across the
 /// resolver / lower boundary: a regression that returns early from
-/// `lower_connects` on the first `None` (skipping the diagnostic
+/// `lower_connects` on the first rejection (skipping the diagnostic
 /// push) would silently drop the walkway and only fail this
 /// integration test.
 #[test]
 fn window_walkway_overflowing_window_cascades_one_deferred_member() {
     // size=3x3 → wall_length(Front) = 3. The overflow window declares
     // `offset=2 size=2x2`, so `offset + size.w = 4 > 3` and
-    // `window_center_offset` returns `None`. The peer's door port still
+    // `window_center_offset` refuses it as past the wall. The peer's door port still
     // resolves cleanly, so the cascade names the window side.
     let src = "@cairn 2026.06\n\n\
 def hut size=3x3:\n  \
@@ -169,22 +169,19 @@ connect anchor.entry to peer.overflow path=@gravel\n";
         !primary.contains("`anchor.entry` and `peer.overflow`"),
         "the door side resolves; only the window side should be reported, got: {primary}",
     );
-    // The expanded `notes` carry the door / window / reserved-role
-    // breakdown so the user sees every contract they could have hit.
+    // The note names the rule this window broke, with the numbers that
+    // broke it — not every contract a port could have hit.
     let note_messages: Vec<_> = walkway_cascades[0]
         .notes
         .iter()
         .map(|n| n.message.as_str())
         .collect();
-    assert!(
-        note_messages.iter().any(|m| m.contains("`door` port")),
-        "notes should describe the door contract, got {note_messages:#?}",
-    );
-    assert!(
-        note_messages
-            .iter()
-            .any(|m| m.contains("`window` port") && m.contains("y + size.h")),
-        "notes should describe the window contract including the vertical bound, got {note_messages:#?}",
+    assert_eq!(
+        note_messages,
+        vec![
+            "`peer.overflow` is a window that runs past the end of its wall \
+             (`offset + size.w` = 2 + 2, wall length 3); the member says so on its own line too",
+        ],
     );
     // The walkway IR must drop the row rather than lay a partial strip.
     assert!(

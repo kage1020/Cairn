@@ -223,6 +223,38 @@
 
 ### Fixed
 
+- *(core)* A `connect` row whose port could not be placed printed every contract a port has and
+  left the author to pick theirs. The port lookup answered each of its refusals with the same
+  `None`, so the row had nothing to branch on:
+
+  ```
+  hut.crn:15:3: warning[W_DEFERRED_MEMBER]: walkway `a.trim ↔ b.e` was skipped because port `a.trim` could not be placed
+    note: a `door` port requires `side=front|back|left|right` and `at=center|left|right`, with the row it opens at — ...
+    note: a `window` port requires `side=front|back|left|right`, plus `offset=` / `y=` / `size=WxH` that fit inside the wall ...
+    note: both roles are cut into masonry, so the port's `def` needs a `walls` member that paints ...
+    note: stair / roof / other member roles cannot anchor a port yet — declare the port on a door or window instead
+  ```
+
+  One of those lines was the finding — `a.trim` is a `stair` — and nothing else in the build said
+  so, because the stair itself lowers clean. The lookup now says which rule it refused on, and the
+  row prints that one, pointing at the member's line:
+
+  ```
+  hut.crn:15:3: warning[W_DEFERRED_MEMBER]: walkway `a.trim ↔ b.e` was skipped because port `a.trim` could not be placed
+  hut.crn:9:3:   note: `a.trim` is a `stair`, and only a `door` or a `window` can anchor a port (stair and roof ports are reserved) — declare the port on a door or window instead
+  ```
+
+  The other reasons carry what the author wrote or what the check measured: `side=frnt`,
+  `at=middle`, the window argument that is missing, `offset + size.w` against the wall's length,
+  the rows a window wants against the rows the walls occupy. A row with two bad ports gets a note
+  for each, in row order. Where the fault is the member's argument or masonry, the member's line
+  carries its own deferral too, which the note says, so the two findings read as one fault.
+
+  Enumerating the refusals turned up two the old list had wrong. A `window` with no `offset=` is
+  cut at offset 0, but the port refused it and dropped the strip beside a window that was there; it
+  reads `offset=` the way the cut does now. And the last step of the lookup, one block out from
+  the wall, was the one sum left unchecked; it is refused as out of range like the others.
+
 - *(redstone)* A `circuit region=` inside a very wide struct was routed before anything measured
   it. The reservation takes the floor's extent, so `region=` is as wide as `size=` and the actuator
   pad lands at `x = width - 1`; stage 2 laid a wire out to it one coord at a time, stage 3 rebuilt

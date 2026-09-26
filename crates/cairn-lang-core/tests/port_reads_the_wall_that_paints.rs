@@ -188,17 +188,23 @@ fn the_deferral_names_only_the_endpoint_that_has_no_masonry() {
 
 #[test]
 fn the_deferral_states_the_masonry_contract() {
-    // AC6. Four causes now, and the masonry one is the only cause whose
-    // fix is not on the `connect` row — so the note has to say where it
-    // is instead.
+    // AC6. The masonry cause's fix is not on the `connect` row, so the
+    // note has to say where it is instead — and, since the row now names
+    // the one cause it hit rather than every contract a port has, it is
+    // the only note there.
     let out = lowered_with_resolver_diagnostics(&pair("hollow", "home1.entry to home2.front"));
     let defer = port_defer(&out).expect("the connect row defers");
-    let masonry = defer
-        .notes
-        .iter()
-        .map(|n| n.message.as_str())
-        .find(|m| m.starts_with("both roles are cut into masonry"))
-        .expect("the deferral states the masonry contract");
+    assert_eq!(
+        defer.notes.len(),
+        1,
+        "one note for the one port: {:?}",
+        defer.notes
+    );
+    let masonry = defer.notes[0].message.as_str();
+    assert!(
+        masonry.starts_with("`home2.front` is a window with no wall to cut into"),
+        "the note names the masonry the window lacks: {masonry}",
+    );
     assert!(
         masonry.contains("`walls`") && masonry.contains("`mat_slot=` that resolves"),
         "the masonry note names what a wall needs: {masonry}",
