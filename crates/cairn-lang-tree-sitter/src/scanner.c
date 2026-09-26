@@ -240,15 +240,25 @@ bool tree_sitter_cairn_external_scanner_scan(void *payload, TSLexer *lexer, cons
   // run as a size. Committing on the `x` alone entered `size_literal` for
   // `2x 2` and then failed it for want of a height, where the reference
   // parser reads a `2`, an `x` and a `2` — three positional arguments,
-  // exactly what `2 x 2` gets. Declining after the `advance()` is safe:
-  // the token is marked at the `x`, and tree-sitter resets the lexer
-  // when the external scanner returns false, so its own lexer then reads
-  // the `x` as an identifier. The height itself is still read by the
-  // `token.immediate` in `grammar.js`; this branch only looks at its first
-  // digit, so what runs on past the height (`2x2y`) is not decided here.
+  // exactly what `2 x 2` gets. The same holds for `2x` at the end of a
+  // line or of the file (where `lookahead` is 0), `2xx` and `2x f`.
+  // Declining after the `advance()` is safe because tree-sitter resets
+  // the lexer when the external scanner returns false, so its own lexer
+  // then reads the `x` as an identifier.
+  //
+  // This branch, not the `token.immediate` on the height in `grammar.js`,
+  // is what decides adjacency on the right now: once a digit is known to
+  // stand directly behind the `x`, no extra can come between them, so the
+  // `immediate` refuses nothing on its own. It is kept as the grammar's
+  // statement of the shape; if one of the two goes, it is that one. What
+  // runs on past the height (`2x2y`) is still decided by neither.
+  //
+  // Declining loses no other external token. Outside error recovery
+  // (cut above by the `ERROR_SENTINEL` guard), the generated tables offer
+  // `_size_x` either alone or beside `_newline` only, and the NEWLINE
+  // branch answers on a `\n` or `\r`, never on an `x`.
   if (valid_symbols[SIZE_X] && lexer->lookahead == 'x') {
     advance(lexer);
-    lexer->mark_end(lexer);
     if (lexer->lookahead < '0' || lexer->lookahead > '9') return false;
     lexer->result_symbol = SIZE_X;
     return true;
@@ -421,15 +431,26 @@ bool tree_sitter_cairn_external_scanner_scan(void *payload, TSLexer *lexer, cons
   // NEWLINE handling: consume \r\n / \n / \r and emit NEWLINE.
   //
   // The break is consumed and nothing else: the line behind it is not
-  // read here. An illegal indent on that line — an odd count, or a jump
-  // of more than one level — is refused where it stands, by LINE_START
-  // (and INDENT) withholding themselves below, so the error lands on the
-  // offending row. Reading the next line from here and withholding this
-  // NEWLINE instead refuses exactly the same files, but puts the break
-  // inside the error, and the recovery around it then takes the line in
-  // front down with it: `theme t:\n    walls b=2\n` lost the `theme_decl`
-  // header that way. `a_bad_indent_errors_on_its_own_row` in
-  // `tests/parser_parity.rs` holds that shape.
+  // read here. An illegal indent on that line is refused where it
+  // stands, by the layout section below: an odd count returns before the
+  // level is compared, withholding LINE_START, INDENT and DEDENT alike,
+  // and a jump of more than one level returns inside the INDENT arm, so
+  // LINE_START is never reached either. No construct can start on the
+  // line, and the error lands on the offending row.
+  //
+  // This branch used to read the next line and withhold the NEWLINE in
+  // front of such a line instead. That refused exactly the same files,
+  // and not by sampling: `body()` and `source_file` in `grammar.js` put
+  // `_line_start` in front of every construct that starts a line, so this
+  // scanner is always consulted at a content line's start, and there the
+  // odd-count and `level != current + 1` tests read the same predicate
+  // against the same stack the lookahead read one line earlier — nothing
+  // pops in between, and blank and comment lines answered `false` there
+  // too. What moved was only where the error sits: on the break, the
+  // recovery took the line in front down as well, so
+  // `theme t:\n    walls b=2\n` lost its `theme_decl` header.
+  // `a_bad_indent_errors_on_its_own_row` in `tests/parser_parity.rs` and
+  // `test/corpus/indent_errors.txt` hold that shape.
   //
   // Whatever run of spaces stood in front of the break is already behind
   // the lexer, so a line that ends in one arrives here like any other. A

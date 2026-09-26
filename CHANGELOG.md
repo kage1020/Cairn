@@ -223,12 +223,20 @@
 
 ### Fixed
 
-- *(tree-sitter)* A size separator with a space after it was accepted by `cairn-lang-core` and
+- *(tree-sitter)* A size separator with no digit after it was accepted by `cairn-lang-core` and
   refused by this grammar ([#270](https://github.com/kage1020/Cairn/issues/270)):
 
   | source | core | grammar |
   | --- | --- | --- |
-  | `"struct s size=3x3\n  floor size=2x 2\n"` | Accept | **Reject** |
+  | `"struct s size=3x3\n  floor size=2x 2\n"` (and its CRLF spelling) | Accept | **Reject** |
+  | `"struct s size=3x3\n  floor size=2x\n"` | Accept | **Reject** |
+  | `"struct s size=3x3\n  floor size=2x"` (end of file) | Accept | **Reject** |
+  | `"struct s size=3x3\n  floor size=2xx\n"` | Accept | **Reject** |
+  | `"struct s size=3x3\n  floor size=2x f\n"` | Accept | **Reject** |
+  | `"struct s size=3x3\n  floor a=[2x 2]\n"` | Accept | **Reject** |
+
+  All of them now parse. `floor size=2x-1` and a header's `struct s size=2x 2` stay refused by
+  both.
 
   The reference lexer reads `2x 2` as three values — `2`, `x`, `2`, the reading `size=2 x 2`
   gets — because `scan_number` only takes an `x` as a separator when a digit follows it. The
@@ -240,7 +248,7 @@
   `E_TYPE_MISMATCH_SIZE` on the bare `2` handed to `size=` and `E_UNEXPECTED_POSITIONAL` on the
   two values behind it. `9 x 7` and `9 x7` stay refused, and `2x2y` and `2x2x9` stay listed as
   divergences in the direction they were. The entry leaves `KNOWN_DIVERGENCES` for the fixture
-  table.
+  table, with every row above beside it.
 
 - *(tree-sitter)* An over-indented line took the line in front of it down with it in an editor's
   error recovery ([#272](https://github.com/kage1020/Cairn/issues/272)):
