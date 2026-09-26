@@ -88,17 +88,22 @@ pub fn wall_length(side: WallSide, interior_w: u32, interior_h: u32) -> u32 {
 ///
 /// Returns `None` if `(u, v)` falls outside the wall's range.
 ///
-/// Callers that ask about a single cell (`plate_voxel_position`) turn that
-/// into a `W_DEFERRED_MEMBER` naming the member, because the cell came from
-/// an `at=` the author wrote. Callers that walk a rectangle or a band
-/// (`carve_door`, `fill_stair`, `paint_window_rect`) skip the cell instead:
-/// each already validated its extents against the wall and would otherwise
-/// report the same member once per cell it asked about. Every one of those
-/// prior checks is what makes the skip unreachable today, so a `None`
-/// reaching them means one of the checks stopped agreeing with this
-/// function — each of the three says so with a `debug_assert!` naming the
-/// check it relied on, so tests and debug builds fail loud while release
-/// builds keep skipping the cell rather than panicking over one voxel.
+/// No caller can reach that `None` today; each asks only after checking
+/// the same bounds itself. There are five callers and two dispositions:
+///
+/// - The four lowering callers in `block_array::lower` — the single-cell
+///   `plate_voxel_position` and the walks over a rectangle or a band,
+///   `carve_door`, `fill_stair` and `paint_window_rect` — validate `u` and
+///   `v` against the wall first and report any author error there, once per
+///   member. A `None` reaching them means one of those checks stopped
+///   agreeing with this function, which is a compiler bug rather than
+///   something the author can fix, so each one `debug_assert!`s with a
+///   message naming the check it relied on, then drops the cell (or the
+///   plate) in release builds rather than panicking over one voxel. The
+///   sites are tagged `INVARIANT(wall-grid-validated)`.
+/// - `walkway::window_world_xz` propagates the `None` with `?`. Its `u`
+///   comes from `window_center_offset`, already bounded by the wall, and its
+///   `v` is the ground row `0`, so that `None` is unreachable too.
 #[must_use]
 pub fn wall_local_to_grid(
     side: WallSide,
@@ -232,6 +237,42 @@ mod tests {
             wall_local_to_grid(WallSide::Front, 0, 9, 1, 9, 7, dims),
             None,
         );
+    }
+
+    #[test]
+    fn the_gate_is_exactly_the_wall_on_every_side() {
+        // The lowering callers assert rather than report a `None`, so the
+        // assertions can only catch a gate that *tightens*, and only where
+        // a test paints the cell it no longer admits. A gate that loosens
+        // never returns `None` at all, and on the back and right walls
+        // the `saturating_sub` mirror would answer a valid-looking corner
+        // cell instead. Pin both edges on all four sides: the last cell of
+        // the wall (`u = len - 1`, `v = dims.y - 1`) maps, and one past it
+        // on either axis does not.
+        let dims = dims_for(9, 7, 1, 9);
+        for (side, len, last_cell) in [
+            (WallSide::Front, 9, (9, 8, 7)),
+            (WallSide::Back, 9, (1, 8, 1)),
+            (WallSide::Left, 7, (1, 8, 7)),
+            (WallSide::Right, 7, (9, 8, 1)),
+        ] {
+            assert_eq!(wall_length(side, 9, 7), len, "{side:?}");
+            assert_eq!(
+                wall_local_to_grid(side, len - 1, dims.y - 1, 1, 9, 7, dims),
+                Some(last_cell),
+                "{side:?}: the last cell of the wall maps",
+            );
+            assert_eq!(
+                wall_local_to_grid(side, len, 0, 1, 9, 7, dims),
+                None,
+                "{side:?}: `u = len` is past the wall",
+            );
+            assert_eq!(
+                wall_local_to_grid(side, 0, dims.y, 1, 9, 7, dims),
+                None,
+                "{side:?}: `v = dims.y` is past the wall",
+            );
+        }
     }
 
     #[test]

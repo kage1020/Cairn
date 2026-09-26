@@ -74,16 +74,22 @@
 //!     loses nothing by it. The counting is pinned by
 //!     `tests/def_member_diagnostics.rs`, which the arm's
 //!     `INVARIANT(already-reported)` comment names.
-//! 11. **The openings-phase rectangle walks** — `carve_door`, `fill_stair`,
-//!     and `paint_window_rect` in `block_array::lower` skip a cell that
-//!     `openings::wall_local_to_grid` refuses. Also not in this file, for
-//!     the opposite reason from 10: the skip has no signal to pin because
-//!     it cannot be reached. Each walk validated its extents against the
-//!     wall first, and it is that prior check, not the skip, that answers
-//!     the author. What guards the arm is a `debug_assert!(false, ..)` at
-//!     each site naming the check it relied on, so an edit that breaks one
-//!     of those agreements fails every test that lowers the member, while
-//!     release builds keep the one-voxel skip rather than panic.
+//! 11. **The wall-cell walks in `block_array::lower`** — `carve_door`,
+//!     `fill_stair`, `paint_window_rect`, and the single-cell
+//!     `plate_voxel_position` ask `openings::wall_local_to_grid` for a
+//!     cell and drop it when the helper refuses. Also not in this file,
+//!     for a different reason from 10: 10's signal exists and is pinned
+//!     elsewhere, while this arm has no signal to pin because it cannot be
+//!     reached. Each caller validated its extents against the wall first,
+//!     and it is that prior check, not the drop, that answers the author.
+//!     What guards the arm is a `debug_assert!(false, ..)` at each site,
+//!     tagged `INVARIANT(wall-grid-validated)` and naming the check it
+//!     relied on. In a build with debug assertions on, an edit that breaks
+//!     one of those agreements fails every test that reaches the broken
+//!     cell — break only the back wall's mirror and the front-wall tests
+//!     stay green, which is what the per-side edge cases in `openings.rs`'s
+//!     own tests are for. Release builds keep the one-voxel drop rather
+//!     than panic.
 
 use cairn_lang_core::block_array::{BlockArrayIr, lower_to_block_array};
 use cairn_lang_core::check::{Diagnostic, DiagnosticCode, Severity};
