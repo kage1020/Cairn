@@ -90,7 +90,9 @@ enum Command {
     /// formats, never as elements of the `--format json` array: neither is
     /// a finding at a span in the file, and inventing one would put a line
     /// number on a fact that has none. This is `compile`'s shape for both,
-    /// and the exit code is what a JSON consumer reads them from.
+    /// and the exit code is what a JSON consumer reads them from: an exit
+    /// of 1 over an array with no error-severity element is one, and
+    /// stderr is prose for a person rather than something to parse.
     ///
     /// `compile`'s `--target` defaults to `latest`, so a compile always
     /// pins a version while `cairn check --edition java` — the mirror a CI

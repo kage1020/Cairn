@@ -127,7 +127,7 @@ What no test reads is the prose. A row's description, a "Status" paragraph, a he
 
 Name the branch after the Conventional Commits type the work will land under: `feat/parser-lexer`, `fix/wall-corner-shape`, `docs/roadmap-2027`.
 
-**The PR title must be a [Conventional Commits](https://www.conventionalcommits.org/) line.** Squash merge is the only merge mode, so that title becomes the commit on `canary` and is what `release-plz` reads to decide whether a patch release is due. Commits on your own branch are free-form. Add `!` for a breaking change (`feat(core)!: replace lexer`); the scope names the crate or spec area (`feat(core)`, `fix(nbt)`, `docs(spec)`, `build(deps)`).
+**The PR title must be a [Conventional Commits](https://www.conventionalcommits.org/) line.** Squash merge is the only merge mode, so that title becomes the commit on `canary` and is what `release-plz` reads to decide whether a patch release is due. Commits on your own branch are free-form. The scope names the crate or spec area (`feat(core)`, `fix(nbt)`, `docs(spec)`, `build(deps)`).
 
 | Type | When | Cuts a patch release? |
 |---|---|---|
@@ -141,6 +141,10 @@ Name the branch after the Conventional Commits type the work will land under: `f
 | `ci` | Workflows, release-plz, `rust-toolchain.toml` | No |
 | `chore` | Anything that doesn't ship to users | No |
 | `style` | Formatting or lint-only changes | No |
+
+**A breaking change puts `!` before the colon** — after the type, or after the scope when one is written: `feat(core)!: replace lexer`, `fix!: …`. The `!` and the changelog go together: a PR that adds an entry under `## [Unreleased]` → `### Breaking changes` in [CHANGELOG.md](CHANGELOG.md) titles itself with `!`, and a PR titled with `!` adds that entry. The hand-written entry is what [compatibility "How a break is communicated"](https://cairn.kage1020.com/spec/compatibility/) requires and what a reader of `CHANGELOG.md` sees; the `!` is the same fact in the commit `release-plz` parses. A reviewer who sees one without the other asks for the missing half before merging.
+
+The `!` does not choose the version. Semver would read it as a major bump; here the release workflow computes the next `YYYY.M.PATCH` from the date and the existing tags and writes it into `Cargo.toml` before `release-plz` runs, and `release-plz` leaves a version that already differs from the published one as it is. Nor does it decide whether a release is due — the type does, per the table above. What it changes is the generated release notes: `release-plz` prefixes the commit's line with `[**breaking**]`, and `protect_breaking_commits` keeps that line even for a type whose lines are otherwise dropped (`docs!:`, `ci!:`).
 
 Every PR you open targets `canary`; the only PR against `main` is the pipeline's own promote-to-main. One maintainer approval and green CI are required. The release PR follows the same rules — merging it publishes and fast-forwards `main`.
 

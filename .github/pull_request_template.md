@@ -1,11 +1,11 @@
 <!--
 PR title MUST be a Conventional Commits line. The title becomes the squash-merge
-commit message on `main` and is parsed by release-plz to decide patch releases.
+commit message on `canary` and is parsed by release-plz to decide patch releases.
 
   feat(core): add lexer
   fix(formats): correct big-endian NBT length
   docs(spec): clarify blockstate "`waterlogged`" derivation order
-  feat(redstone)!: rewrite tick simulator       (breaking — see Compatibility C.3)
+  feat(redstone)!: rewrite tick simulator       (breaking — see compatibility "How a break is communicated")
   build(deps): bump tower to 0.5
   refactor(nbt): split codec into modules
   ci: add windows-11-arm to publish matrix
@@ -40,6 +40,8 @@ See CONTRIBUTING.md for the full convention.
 If this touches a Stable surface (see spec/compatibility):
   - Did you add a `W_DEPRECATED` warning for the previous release? (link the PR)
   - Did you update CHANGELOG `Deprecations` / `Breaking changes` accordingly?
-If this is `feat!:` / `fix!:` etc., explain the migration path.
+If this is `feat!:` / `fix!:` etc., explain the migration path. A `!` title and a
+`Breaking changes` entry under CHANGELOG `[Unreleased]` come together: one without the
+other is incomplete (CONTRIBUTING.md, "Branches and pull requests").
 Delete this section if the change is purely internal.
 -->
