@@ -1,14 +1,13 @@
 //! Integration tests for `cairn_lang_redstone::compile_crossing`.
 //!
 //! Locks the observable behaviours of the crossing-legalization slice
-//! (stage 4 of the pipeline `spec/redstone` "Place-and-route"): the
-//! `examples/redstone-door.crn` happy path (per edition), empty-module
-//! pass-through, the JSON wire form staying byte-identical to the
-//! delayed IR apart from the `stage` tag when no buffer coord landed
-//! (the field serde-skips on its default), the tag itself keeping a
-//! zero-buffer legalized dump distinguishable from its delayed input,
-//! per-scope independence when a module carries more than one scope,
-//! and the loud refusal of a second run over the pass's own output.
+//! (stage 4 of the pipeline `spec/redstone` "Place-and-route"), among
+//! them the `examples/redstone-door.crn` happy path (per edition), the
+//! JSON wire form staying byte-identical to the delayed IR apart from
+//! the `stage` tag when no buffer coord landed (the field serde-skips
+//! on its default), the tag itself keeping a zero-buffer legalized dump
+//! distinguishable from its delayed input, and the loud refusal of a
+//! second run over the pass's own output.
 //!
 //! Both redstone examples make a net go round another. The pad column
 //! at `x=0` is where: the pads are packed down it by index, so the
@@ -444,13 +443,13 @@ fn crossbar_void_one_is_refused_before_any_crossing_is_computed() {
     );
 }
 
-/// AC5 — running the crossing pass twice is idempotent on a
-/// fixture that has nothing to legalize: the second run reads the
-/// same input as the first and produces the same output. Guards
-/// against a future refactor that starts mutating shared state across
-/// invocations.
+/// Two runs over the same delayed input produce the same output: the
+/// pass is deterministic and leaves its input untouched. Guards against
+/// a future refactor that starts mutating shared state across
+/// invocations. This is not idempotence — feeding the pass its own
+/// output is refused, as the next test pins.
 #[test]
-fn crossing_is_idempotent_on_clean_fixture() {
+fn two_runs_over_the_same_delayed_input_agree() {
     let source = load_example("redstone-door.crn");
     let delayed = delayed_from_source(&source, Edition::Java);
     let first = compile_crossing(&delayed);
@@ -468,8 +467,10 @@ fn crossing_is_idempotent_on_clean_fixture() {
 /// names the cell that tripped it. The unit test in `src/crossing.rs`
 /// pins the refusal over a hand-built IR; this one feeds the pass an IR
 /// that came out of `compile_delay` over a real fixture, the way the
-/// routing and delay passes' equivalents do, so a regression in how a
-/// synth-derived IR is threaded through would trip here too.
+/// routing and delay passes' equivalents do. `gatehouse` carries both
+/// cells and outputs, so the identity in the panic also pins that the
+/// cell loop runs before the output loop — which the hand-built IR,
+/// having no outputs, cannot observe.
 #[test]
 #[should_panic(
     expected = "for cell #0 at (1,0,1) in struct `gatehouse` — crossing legalization must run exactly once per delayed IR"
