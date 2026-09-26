@@ -121,7 +121,7 @@ rg '\bM[1-6]\b|M[0-9]-PR[0-9]+|pre-M[0-9]|\bPR[0-9]+\b|\blater PR\b|\bfuture PR\
 
 ブランチ名は、その作業が最終的に載る Conventional Commits の type に合わせます (`feat/parser-lexer`、`fix/wall-corner-shape`、`docs/roadmap-2027`)。
 
-**PR タイトルは [Conventional Commits](https://www.conventionalcommits.org/) の 1 行でなければなりません。** squash merge が唯一のマージ方式なので、このタイトルがそのまま `canary` 上のコミットになり、`release-plz` がパッチリリースの要否を判断するために読むのもこれです。ブランチ上の個々のコミットは自由形式で構いません。破壊的変更には `!` を付け (`feat(core)!: replace lexer`)、スコープには対象のクレートか仕様領域を書きます (`feat(core)`、`fix(nbt)`、`docs(spec)`、`build(deps)`)。
+**PR タイトルは [Conventional Commits](https://www.conventionalcommits.org/) の 1 行でなければなりません。** squash merge が唯一のマージ方式なので、このタイトルがそのまま `canary` 上のコミットになり、`release-plz` がパッチリリースの要否を判断するために読むのもこれです。ブランチ上の個々のコミットは自由形式で構いません。スコープには対象のクレートか仕様領域を書きます (`feat(core)`、`fix(nbt)`、`docs(spec)`、`build(deps)`)。
 
 | Type | 使う場面 | パッチリリースを切るか |
 |---|---|---|
@@ -135,6 +135,10 @@ rg '\bM[1-6]\b|M[0-9]-PR[0-9]+|pre-M[0-9]|\bPR[0-9]+\b|\blater PR\b|\bfuture PR\
 | `ci` | ワークフロー、release-plz、`rust-toolchain.toml` | いいえ |
 | `chore` | 利用者に届かないその他すべて | いいえ |
 | `style` | 整形・lint だけの変更 | いいえ |
+
+**破壊的変更はスコープの後ろに `!` を付けます** — `feat(core)!: replace lexer`、`fix(redstone)!: route each net around the dust already laid`。`!` と CHANGELOG は対になっています。[CHANGELOG.md](CHANGELOG.md) の `## [Unreleased]` → `### Breaking changes` にエントリを足す PR はタイトルに `!` を付け、タイトルに `!` を付けた PR はそのエントリを足します。手書きのエントリは[breaking はどう告知されるか](https://cairn.kage1020.com/ja/spec/compatibility/#c3-breaking-はどう告知されるか)が求めるもので、利用者が読むのはこちらです。`!` は同じ事実を `release-plz` が解析するコミットの側に書いたものです。片方だけの PR を見たレビュアーは、マージ前にもう片方を求めます。
+
+`!` はバージョンを決めません。semver ならメジャーバンプと読むところですが、ここではリリースワークフローが日付と既存タグから次の `YYYY.M.PATCH` を計算して `release-plz` の実行前に `Cargo.toml` へ書き込み、`release-plz` は公開済みのものと既に異なるバージョンには手を付けません。リリースの要否も決めません — それを決めるのは上の表の type です。変わるのは生成されるリリースノートです。`release-plz` はそのコミットの行の先頭に `[**breaking**]` を付け、`protect_breaking_commits` によって、普段は行が落とされる type (`docs!:`、`ci!:`) でもその行が残ります。
 
 自分で開く PR はすべて `canary` を対象にします。`main` 宛の PR はパイプラインの promote-to-main だけです。メンテナ 1 名の承認と CI のグリーンが必須です。リリース PR も同じルールで、これをマージすると公開が走り、`main` が fast-forward されます。
 
