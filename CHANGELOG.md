@@ -221,6 +221,29 @@
   pre-release tag is a label too, while this one names Cairn's own version, where every component
   is digits, `2026.13` is a month that does not exist and `1.2` is a semver rather than a year.
 
+- *(redstone)* A placed cell dumped by `cairn synth --stage <s>` can be read back. `PlacedCellNode`
+  had a hand-written `Serialize` that flattens its pipeline phase onto
+  `{stage, cell, drivers, coord[, wire_length][, local_delay_ticks][, buffer_coords]}`, and nothing
+  read that form in again, so a tool that wanted to inspect or cache a dump had to reparse it by
+  hand and re-derive which pass had written it.
+
+  It now has the matching `Deserialize`, and so do the types a cell carries (`EditionCell`,
+  `CellPortDriver`, `NetRef`, `PortName`, `CellCoord`, `RouteLayer`, `BufferCoord`,
+  `BufferSegment`, `PlacementStage`). The phase is chosen by the `stage` tag rather than by which
+  keys are present, which is the only way to tell a delayed cell from a legalized one with no
+  buffers: the two dump the same keys, because an empty `buffer_coords` is left out. A dump whose
+  keys disagree with its tag is refused rather than read as another stage:
+
+  ```
+  a cell tagged `stage: "delay"` has been through the delay stage and must carry `local_delay_ticks`
+  `buffer_coords` is written by the crossing stage, which a cell tagged `stage: "route"` has not reached
+  ```
+
+  and so are a missing `stage`, an unknown `stage` or `layer` word, and a key the wire form does not
+  have. Each is a deserialisation error, not a panic. The source span is not in the dump, so a cell
+  read back carries the empty span `0..0`; everything else reads back equal, and the round trip is
+  tested on the cells both redstone examples place at every stage.
+
 ### Fixed
 
 - *(tree-sitter)* A size separator with no digit after it was accepted by `cairn-lang-core` and
