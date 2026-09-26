@@ -7,8 +7,8 @@
 //! delayed IR apart from the `stage` tag when no buffer coord landed
 //! (the field serde-skips on its default), the tag itself keeping a
 //! zero-buffer legalized dump distinguishable from its delayed input,
-//! and per-scope independence when a module carries more than one
-//! scope.
+//! per-scope independence when a module carries more than one scope,
+//! and the loud refusal of a second run over the pass's own output.
 //!
 //! Both redstone examples make a net go round another. The pad column
 //! at `x=0` is where: the pads are packed down it by index, so the
@@ -461,6 +461,23 @@ fn crossing_is_idempotent_on_clean_fixture() {
         "two independent crossing runs on the same input must produce the same output",
     );
     assert_eq!(first.diagnostics.len(), second.diagnostics.len());
+}
+
+/// Chaining `compile_crossing(&legalized.scoped)` is forbidden by the
+/// producer↔variant table on `PlacementPhase`, and the panic it raises
+/// names the cell that tripped it. The unit test in `src/crossing.rs`
+/// pins the refusal over a hand-built IR; this one feeds the pass an IR
+/// that came out of `compile_delay` over a real fixture, the way the
+/// routing and delay passes' equivalents do, so a regression in how a
+/// synth-derived IR is threaded through would trip here too.
+#[test]
+#[should_panic(
+    expected = "for cell #0 at (1,0,1) in struct `gatehouse` — crossing legalization must run exactly once per delayed IR"
+)]
+fn re_running_crossing_pass_panics_loudly() {
+    let source = load_example("redstone-door.crn");
+    let legalized = compile_crossing(&delayed_from_source(&source, Edition::Java));
+    let _twice = compile_crossing(&legalized.scoped);
 }
 
 /// The exact-fit boundary the placement pass now allows, carried all the
