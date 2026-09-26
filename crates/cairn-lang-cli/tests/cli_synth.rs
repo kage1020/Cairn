@@ -180,49 +180,6 @@ fn cli_synth_stage_edition_bedrock_maps_or_cell_to_bedrock_torch_or() {
 }
 
 #[test]
-fn cli_synth_stage_logic_rejects_edition_flag() {
-    // The Logic IR is edition-neutral by contract, so `--edition` cannot
-    // shape its output. Rather than silently ignoring the flag (which
-    // would leave the caller believing it took effect), refuse the run
-    // with exit 2. Same policy applies to `--stage netlist`.
-    let path = examples_dir().join("redstone-door.crn");
-    let out = cairn(
-        "synth",
-        &[
-            "--experimental-logic-synth",
-            "--stage",
-            "logic",
-            "--edition",
-            "java",
-            path.to_str().unwrap(),
-        ],
-    );
-    assert_eq!(out.status.code(), Some(2));
-    let stderr = String::from_utf8(out.stderr).expect("utf-8");
-    assert!(
-        stderr.contains("--edition"),
-        "usage hint should name the stray flag, got: {stderr}",
-    );
-}
-
-#[test]
-fn cli_synth_stage_netlist_rejects_edition_flag() {
-    let path = examples_dir().join("redstone-door.crn");
-    let out = cairn(
-        "synth",
-        &[
-            "--experimental-logic-synth",
-            "--stage",
-            "netlist",
-            "--edition",
-            "bedrock",
-            path.to_str().unwrap(),
-        ],
-    );
-    assert_eq!(out.status.code(), Some(2));
-}
-
-#[test]
 fn cli_synth_stage_placement_java_places_or_cell_beside_the_pad_column() {
     // `--stage placement --edition java` runs the Edition Netlist IR
     // through the placement pass. `redstone-door.crn`'s sole cell should
@@ -608,27 +565,6 @@ fn cli_synth_stage_route_congestion_exits_one() {
         stderr.contains("routed netlist for struct `pack`"),
         "primary should name the routing origin and failed scope, got: {stderr}",
     );
-}
-
-#[test]
-fn cli_synth_stage_route_rejects_missing_edition_when_stage_neutral() {
-    // Consistency check with the existing `--stage logic` /
-    // `--stage netlist` refuse-`--edition` behaviour: passing
-    // `--edition` on `--stage netlist` still exits 2 even after
-    // `route` joins the accept list.
-    let path = examples_dir().join("redstone-door.crn");
-    let out = cairn(
-        "synth",
-        &[
-            "--experimental-logic-synth",
-            "--stage",
-            "netlist",
-            "--edition",
-            "java",
-            path.to_str().unwrap(),
-        ],
-    );
-    assert_eq!(out.status.code(), Some(2));
 }
 
 #[test]
@@ -1283,5 +1219,96 @@ fn cli_synth_missing_edition_reports_only_the_usage_error() {
     assert!(
         gated > 0,
         "no --stage value required --edition, so this test asserted nothing about the gate",
+    );
+}
+
+#[test]
+fn cli_synth_stray_edition_is_refused_on_exactly_the_edition_neutral_stages() {
+    // The other half of `--edition`'s contract from the test above: the
+    // flag is refused on the edition-neutral stages rather than silently
+    // ignored, since a caller who passed it there expected it to shape
+    // the output. Walked over every `--stage` value and both editions,
+    // so a stage landing later is covered the day it lands.
+    //
+    // Which side a stage falls on is pinned inside the binary; what this
+    // pins from the outside is that the two gates agree about it: a
+    // stage refuses `--edition` exactly when it runs clean without one,
+    // so no stage is refused both ways or accepted both ways.
+    let path = examples_dir().join("redstone-door.crn");
+    let mut refused = 0;
+    let mut accepted = 0;
+    for stage in stage_values() {
+        let without = cairn(
+            "synth",
+            &[
+                "--experimental-logic-synth",
+                "--stage",
+                &stage,
+                path.to_str().unwrap(),
+            ],
+        );
+        let neutral = match without.status.code() {
+            Some(0) => true,
+            Some(2) => false,
+            other => panic!(
+                "--stage {stage} without --edition exited {other:?}: {}",
+                String::from_utf8_lossy(&without.stderr),
+            ),
+        };
+        for edition in ["java", "bedrock"] {
+            let out = cairn(
+                "synth",
+                &[
+                    "--experimental-logic-synth",
+                    "--stage",
+                    &stage,
+                    "--edition",
+                    edition,
+                    path.to_str().unwrap(),
+                ],
+            );
+            let stderr = String::from_utf8(out.stderr).expect("utf-8");
+            if neutral {
+                refused += 1;
+                assert_eq!(
+                    out.status.code(),
+                    Some(2),
+                    "edition-neutral --stage {stage} should refuse --edition {edition}, \
+                     got stderr: {stderr}",
+                );
+                assert!(
+                    out.stdout.is_empty(),
+                    "--stage {stage} --edition {edition} must print no IR, got: {}",
+                    String::from_utf8_lossy(&out.stdout),
+                );
+                // The message lists the edition-neutral stages by bare
+                // name; the stage just refused has to be among them, or
+                // the caller is told a set the gate does not enforce.
+                assert!(
+                    stderr.contains("`--edition`")
+                        && stderr.contains("edition-neutral")
+                        && stderr.contains(&format!("`{stage}`")),
+                    "--stage {stage} --edition {edition} should be refused as a stray flag \
+                     naming `{stage}` among the edition-neutral stages, got: {stderr}",
+                );
+            } else {
+                accepted += 1;
+                assert_eq!(
+                    out.status.code(),
+                    Some(0),
+                    "edition-tagged --stage {stage} should accept --edition {edition}, \
+                     got stderr: {stderr}",
+                );
+                assert!(
+                    stderr.is_empty(),
+                    "--stage {stage} --edition {edition} should run clean, got: {stderr}",
+                );
+            }
+        }
+    }
+    assert!(
+        refused > 0 && accepted > 0,
+        "every --stage value fell on one side of the partition \
+         ({refused} refused, {accepted} accepted), so this test pinned only half of it",
     );
 }
