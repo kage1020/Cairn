@@ -163,6 +163,19 @@ The pin is not the MSRV. `rust-version` in the workspace manifest is the floor a
 
 Raising `rust-version` changes who can build the crates, so it is not a quiet manifest edit. Type the commit `build` — which cuts a patch release, so the new floor reaches crates.io — and add a `CHANGELOG.md` entry saying which compiler is now required and what needed it. A consumer pinned below the new floor learns about it from cargo either way; the entry is what tells them why.
 
+## Changing the release profile
+
+`[profile.release]` in the workspace manifest is sized for the release archives, and each setting in it records why it is there. Most of them cost only build time. `opt-level` is the exception: it trades throughput in block-array lowering and in place-and-route, which is the work a build spends its time on. Two benches measure that side, each over a source generated large enough that the passes outweigh process startup: `lowering` in `cairn-lang-core` and `place_and_route` in `cairn-lang-redstone`. Benches inherit the release profile, so what they time is the code that ships. Save a baseline, change the profile — or override one setting from the environment without editing the file — and compare:
+
+```sh
+cargo bench -p cairn-lang-core -p cairn-lang-redstone --bench lowering --bench place_and_route -- --save-baseline before
+CARGO_PROFILE_RELEASE_OPT_LEVEL=s cargo bench -p cairn-lang-core -p cairn-lang-redstone --bench lowering --bench place_and_route -- --baseline before
+```
+
+Name the two benches: without `--bench`, `cargo bench` also runs each library's unit-test harness, which refuses criterion's `--save-baseline`. Run a baseline against itself once before trusting a difference. On a shared machine the smaller benches move by several percent between identical builds.
+
+Weigh a size change on the gzipped binaries, since the release archives are `.tar.gz` and `.zip`, and put the numbers in the commit message rather than the profile comment, where they would go stale on the next dependency bump. CI runs neither bench. A timing gate on shared runners would be noise, and a profile change is a decision made once rather than a regression surface. What CI does keep is that both benches compile, through `clippy --all-targets`. `cargo test -p cairn-lang-core --bench lowering` (and the same for `place_and_route`) runs each benchmark once as a check. Each bench checks that its generated source comes through every pass without losing a scope, so a generator that stopped reaching the passes fails there rather than quietly timing less work.
+
 ## Versioning
 
 Date-based, `YYYY.M[.PATCH]`. Notable changes go in [CHANGELOG.md](CHANGELOG.md). What a bump is allowed to break is set by [Compatibility Tiers](https://cairn.kage1020.com/spec/compatibility/), not by the number itself.

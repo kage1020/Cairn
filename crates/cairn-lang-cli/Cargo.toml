@@ -17,6 +17,13 @@ path = "src/main.rs"
 cairn-lang-core = { workspace = true }
 cairn-lang-formats.workspace = true
 cairn-lang-redstone = { version = "2026.9.2", path = "../cairn-lang-redstone" }
+# clap's default features stay on deliberately; they are the obvious
+# thing to cut when shrinking the binary. `error-context` and `suggestions`
+# answer a mistyped flag with "unexpected argument '--editon' found" and
+# "a similar argument exists: '--edition'", which is the what is wrong /
+# nearest candidate shape every Cairn diagnostic takes, and `color` styles
+# `--help` and the error headings. `tests/cli_mistyped_flag.rs` fails if
+# the first two go.
 clap = { version = "4.6.1", features = ["derive"] }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.150"
