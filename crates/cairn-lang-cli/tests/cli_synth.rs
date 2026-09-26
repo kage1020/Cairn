@@ -1134,6 +1134,15 @@ struct crossbar size=4x4
     );
 }
 
+/// The number of values `--stage` accepts. Bump it with the next stage;
+/// the sweeps below refuse a different count, and a loop over a
+/// filtered-down set passes silently.
+const SYNTH_STAGES: usize = 7;
+
+/// The number of values `--edition` accepts, on the same terms as
+/// [`SYNTH_STAGES`].
+const SYNTH_EDITIONS: usize = 2;
+
 /// Every value `--stage` accepts, read back off the binary.
 ///
 /// The unit tests inside the binary walk `SynthStage` through clap's
@@ -1143,20 +1152,87 @@ struct crossbar size=4x4
 /// on one line — steadier to parse than the `--help` block, where each
 /// value carries a paragraph of prose.
 fn stage_values() -> Vec<String> {
-    let out = cairn("synth", &["--stage", "not-a-stage", "unused.crn"]);
+    possible_values("--stage", SYNTH_STAGES)
+}
+
+/// Every value `--edition` accepts, read back off the binary the same
+/// way as [`stage_values`].
+fn edition_values() -> Vec<String> {
+    possible_values("--edition", SYNTH_EDITIONS)
+}
+
+/// The `[possible values: ...]` list clap prints when `synth` is given
+/// a bogus value for `flag`, checked against the `expected` count.
+fn possible_values(flag: &str, expected: usize) -> Vec<String> {
+    let out = cairn("synth", &[flag, "not-a-value", "unused.crn"]);
     assert_eq!(
         out.status.code(),
         Some(2),
-        "an unknown --stage value should be a usage error",
+        "an unknown {flag} value should be a usage error",
     );
     let stderr = String::from_utf8(out.stderr).expect("utf-8");
     let Some((_, rest)) = stderr.split_once("[possible values: ") else {
-        panic!("clap should list --stage's values, got: {stderr}");
+        panic!("clap should list {flag}'s values, got: {stderr}");
     };
     let Some((list, _)) = rest.split_once(']') else {
         panic!("clap's value list should be closed, got: {stderr}");
     };
-    list.split(", ").map(str::to_string).collect()
+    let values: Vec<String> = list.split(", ").map(str::to_string).collect();
+    assert_eq!(
+        values.len(),
+        expected,
+        "{flag} accepts {values:?}, not the {expected} this file sweeps; bump the count \
+         alongside the new value",
+    );
+    values
+}
+
+/// Run `--stage <stage>` on `redstone-door.crn` without `--edition` and
+/// report whether the stage ran (edition-neutral) or was stopped by the
+/// missing-`--edition` usage gate (edition-tagged).
+///
+/// Exit 2 is not taken on trust: a missing fixture exits 2 as well, so
+/// the refusal has to be that gate's own — no stdout (no partial IR
+/// dump escaped) and a single stderr line naming `--stage <stage>` and
+/// `--edition`. The pipeline passes are silent on this fixture today,
+/// so the single-line check is about ordering rather than about them:
+/// the day a pass upstream of the edition-tagged stages starts emitting
+/// a diagnostic, this is what catches the usage error being buried
+/// under it.
+fn stage_is_edition_neutral(stage: &str) -> bool {
+    let path = examples_dir().join("redstone-door.crn");
+    let out = cairn(
+        "synth",
+        &[
+            "--experimental-logic-synth",
+            "--stage",
+            stage,
+            path.to_str().unwrap(),
+        ],
+    );
+    let stderr = String::from_utf8(out.stderr).expect("utf-8");
+    match out.status.code() {
+        Some(0) => true,
+        Some(2) => {
+            assert!(
+                out.stdout.is_empty(),
+                "--stage {stage} must print no IR before the usage gate, got: {}",
+                String::from_utf8_lossy(&out.stdout),
+            );
+            let lines: Vec<&str> = stderr.lines().filter(|l| !l.trim().is_empty()).collect();
+            assert_eq!(
+                lines.len(),
+                1,
+                "--stage {stage} stderr should be the usage error alone, got: {stderr}",
+            );
+            assert!(
+                lines[0].contains(&format!("--stage {stage}")) && lines[0].contains("--edition"),
+                "--stage {stage} stderr line should be the missing-edition hint, got: {stderr}",
+            );
+            false
+        }
+        other => panic!("--stage {stage} without --edition exited {other:?}: {stderr}"),
+    }
 }
 
 #[test]
@@ -1164,58 +1240,17 @@ fn cli_synth_missing_edition_reports_only_the_usage_error() {
     // The per-stage tests above each pin their own exit code and hint
     // text; what this one pins is that nothing else runs first. A
     // missing `--edition` is a usage mistake, so the gate stands ahead
-    // of every synthesis pass: stdout stays empty (no partial IR dump
-    // escaped) and stderr carries that one line and nothing else. The
-    // pipeline passes are silent on this fixture today, so the
-    // assertion is about ordering rather than about them — the day a
-    // pass upstream of the edition-tagged stages starts emitting a
-    // diagnostic, this is what catches the usage error being buried
-    // under it.
+    // of every synthesis pass: `stage_is_edition_neutral` asserts that
+    // a refused stage printed nothing and said that one line.
     //
     // Driven off every `--stage` value rather than the edition-tagged
     // ones: which side a stage falls on is the binary's own business
     // (and is pinned there), and running the neutral ones through the
     // same loop says the gate stays out of their way.
-    let path = examples_dir().join("redstone-door.crn");
-    let mut gated = 0;
-    for stage in stage_values() {
-        let out = cairn(
-            "synth",
-            &[
-                "--experimental-logic-synth",
-                "--stage",
-                &stage,
-                path.to_str().unwrap(),
-            ],
-        );
-        let stderr = String::from_utf8(out.stderr).expect("utf-8");
-        match out.status.code() {
-            Some(2) => {
-                gated += 1;
-                assert!(
-                    out.stdout.is_empty(),
-                    "--stage {stage} must print no IR before the usage gate, got: {}",
-                    String::from_utf8_lossy(&out.stdout),
-                );
-                let lines: Vec<&str> = stderr.lines().filter(|l| !l.trim().is_empty()).collect();
-                assert_eq!(
-                    lines.len(),
-                    1,
-                    "--stage {stage} stderr should be the usage error alone, got: {stderr}",
-                );
-                assert!(
-                    lines[0].contains(&format!("--stage {stage}"))
-                        && lines[0].contains("--edition"),
-                    "--stage {stage} stderr line should be the missing-edition hint, got: {stderr}",
-                );
-            }
-            Some(0) => assert!(
-                stderr.is_empty(),
-                "edition-neutral --stage {stage} should run clean without the flag, got: {stderr}",
-            ),
-            other => panic!("--stage {stage} without --edition exited {other:?}: {stderr}"),
-        }
-    }
+    let gated = stage_values()
+        .iter()
+        .filter(|stage| !stage_is_edition_neutral(stage))
+        .count();
     assert!(
         gated > 0,
         "no --stage value required --edition, so this test asserted nothing about the gate",
@@ -1224,38 +1259,34 @@ fn cli_synth_missing_edition_reports_only_the_usage_error() {
 
 #[test]
 fn cli_synth_stray_edition_is_refused_on_exactly_the_edition_neutral_stages() {
-    // The other half of `--edition`'s contract from the test above: the
-    // flag is refused on the edition-neutral stages rather than silently
-    // ignored, since a caller who passed it there expected it to shape
-    // the output. Walked over every `--stage` value and both editions,
-    // so a stage landing later is covered the day it lands.
+    // The refusing half of `--edition`'s contract, which
+    // `cli_synth_missing_edition_reports_only_the_usage_error` leaves
+    // out; why the flag is refused rather than ignored is `run_synth`'s
+    // to say. Walks every `--stage` value against every `--edition`
+    // value, so a stage or edition landing later is covered the day it
+    // lands.
     //
     // Which side a stage falls on is pinned inside the binary; what this
     // pins from the outside is that the two gates agree about it: a
     // stage refuses `--edition` exactly when it runs clean without one,
     // so no stage is refused both ways or accepted both ways.
+    //
+    // An accepted run is held to exit 0 only, not to a silent stderr:
+    // a warning-severity finding on the fixture would still exit 0 with
+    // the flag accepted, and that is a lint's business rather than this
+    // gate's.
     let path = examples_dir().join("redstone-door.crn");
+    let editions = edition_values();
     let mut refused = 0;
     let mut accepted = 0;
     for stage in stage_values() {
-        let without = cairn(
-            "synth",
-            &[
-                "--experimental-logic-synth",
-                "--stage",
-                &stage,
-                path.to_str().unwrap(),
-            ],
-        );
-        let neutral = match without.status.code() {
-            Some(0) => true,
-            Some(2) => false,
-            other => panic!(
-                "--stage {stage} without --edition exited {other:?}: {}",
-                String::from_utf8_lossy(&without.stderr),
-            ),
-        };
-        for edition in ["java", "bedrock"] {
+        let neutral = stage_is_edition_neutral(&stage);
+        if neutral {
+            refused += 1;
+        } else {
+            accepted += 1;
+        }
+        for edition in &editions {
             let out = cairn(
                 "synth",
                 &[
@@ -1269,7 +1300,6 @@ fn cli_synth_stray_edition_is_refused_on_exactly_the_edition_neutral_stages() {
             );
             let stderr = String::from_utf8(out.stderr).expect("utf-8");
             if neutral {
-                refused += 1;
                 assert_eq!(
                     out.status.code(),
                     Some(2),
@@ -1292,23 +1322,18 @@ fn cli_synth_stray_edition_is_refused_on_exactly_the_edition_neutral_stages() {
                      naming `{stage}` among the edition-neutral stages, got: {stderr}",
                 );
             } else {
-                accepted += 1;
                 assert_eq!(
                     out.status.code(),
                     Some(0),
                     "edition-tagged --stage {stage} should accept --edition {edition}, \
                      got stderr: {stderr}",
                 );
-                assert!(
-                    stderr.is_empty(),
-                    "--stage {stage} --edition {edition} should run clean, got: {stderr}",
-                );
             }
         }
     }
     assert!(
         refused > 0 && accepted > 0,
-        "every --stage value fell on one side of the partition \
-         ({refused} refused, {accepted} accepted), so this test pinned only half of it",
+        "every --stage value fell on one side of the partition ({refused} stages refused \
+         --edition, {accepted} accepted it), so this test pinned only half of it",
     );
 }
