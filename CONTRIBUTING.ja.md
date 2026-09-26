@@ -152,6 +152,19 @@ rg '\bM[1-6]\b|M[0-9]-PR[0-9]+|pre-M[0-9]|\bPR[0-9]+\b|\blater PR\b|\bfuture PR\
 
 `rust-version` を上げることは、誰が Cairn をビルドできるかを変えることなので、マニフェストを黙って書き換えて済ませません。コミットの type は `build` にし (パッチリリースが切られるので、新しい下限が crates.io まで届きます)、どのコンパイラが必要になり何がそれを要求したのかを `CHANGELOG.md` に書きます。新しい下限より下に固定している利用者は、どのみち cargo から知らされます。理由を伝えるのがこのエントリです。
 
+## リリースプロファイルの変更
+
+ワークスペースマニフェストの `[profile.release]` はリリースアーカイブのサイズに合わせて調整してあり、各設定にはそこにある理由が書いてあります。ほとんどの設定はビルド時間しか使いません。例外は `opt-level` で、これはブロック配列への lowering と配置配線 (place-and-route) のスループットと引き換えになります。どちらもビルドが時間を費やす処理です。その側を測るベンチが二つあり、どちらもプロセス起動よりパスの処理が重くなる大きさのソースを生成して使います。`cairn-lang-core` の `lowering` と、`cairn-lang-redstone` の `place_and_route` です。ベンチはリリースプロファイルを継承するので、計測されるのは実際に配布されるコードです。ベースラインを保存し、プロファイルを変えて (ファイルを編集せずに環境変数で一つだけ上書きしてもかまいません) 比較します。
+
+```sh
+cargo bench -p cairn-lang-core -p cairn-lang-redstone --bench lowering --bench place_and_route -- --save-baseline before
+CARGO_PROFILE_RELEASE_OPT_LEVEL=s cargo bench -p cairn-lang-core -p cairn-lang-redstone --bench lowering --bench place_and_route -- --baseline before
+```
+
+二つのベンチは名前で指定してください。`--bench` を付けないと、`cargo bench` は各ライブラリの単体テストハーネスも実行し、そちらは criterion の `--save-baseline` を受け付けません。差を信じる前に、一度ベースラインをそれ自身と比べてください。共有マシンでは、同一のビルドどうしでも小さいベンチは数パーセント動きます。
+
+サイズの変化は gzip 後のバイナリで比べます。リリースアーカイブが `.tar.gz` と `.zip` だからです。数値はプロファイルのコメントではなくコミットメッセージに書きます。コメントに書くと、次の依存更新で黙って古くなります。CI はどちらのベンチも実行しません。共有ランナーでの時間計測のゲートはノイズにしかならず、プロファイルの変更は回帰を監視する対象ではなく、一度下す決定だからです。CI が守っているのは、`clippy --all-targets` を通じて両ベンチがコンパイルできることです。`cargo test -p cairn-lang-core --bench lowering` (`place_and_route` も同様) は各ベンチマークを一度ずつ実行する確認になります。各ベンチは生成したソースがどのスコープも失わずに全パスを通ることを確かめるので、パスまで届かなくなった生成器は、黙って少ない処理を計測するのではなく、そこで失敗します。
+
 ## バージョニング
 
 日付ベースの `YYYY.M[.PATCH]` です。主要な変更は [CHANGELOG.md](CHANGELOG.md) に記録します。バージョンを上げるときに何を壊してよいかは番号そのものではなく、[互換性ティア](https://cairn.kage1020.com/ja/spec/compatibility/)が定めます。

@@ -88,6 +88,17 @@ CI sets `RUSTFLAGS=-D warnings`, so any new warning fails the build. To match it
 RUSTFLAGS="-D warnings" cargo build --workspace --locked
 ```
 
+Two benches time the passes a build spends its time in, over generated sources large enough that
+the passes outweigh process startup: `lowering` in `cairn-lang-core` and `place_and_route` in
+`cairn-lang-redstone`. They inherit the release profile and CI does not run them. They exist to
+measure a change to `[profile.release]`, `opt-level` above all, before it is made, and
+[CONTRIBUTING.md](https://github.com/kage1020/Cairn/blob/main/CONTRIBUTING.md) shows how to
+compare two profiles with them:
+
+```sh
+cargo bench -p cairn-lang-core -p cairn-lang-redstone --bench lowering --bench place_and_route
+```
+
 `cairn-lang-wasm` builds with [`wasm-pack`](https://rustwasm.github.io/wasm-pack/) and the website
 expects the resulting `pkg/` at `website/src/wasm/`:
 
