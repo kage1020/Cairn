@@ -27,7 +27,11 @@ cairn-lang-nbt = { version = "2026.9.2", path = "crates/cairn-lang-nbt" }
 cairn-lang-formats = { version = "2026.9.2", path = "crates/cairn-lang-formats" }
 
 [workspace.lints.rust]
-unsafe_code = "forbid"
+# `deny` rather than `forbid` only so the tree-sitter binding's FFI module can
+# lift it: `forbid` refuses every inner `allow`/`expect`, including that one.
+# `cairn-lang-core`'s `unsafe_code_is_confined` test holds the rest of the
+# workspace to what `forbid` promised.
+unsafe_code = "deny"
 missing_docs = "warn"
 
 [workspace.lints.clippy]

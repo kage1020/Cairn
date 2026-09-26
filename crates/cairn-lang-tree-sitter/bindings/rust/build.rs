@@ -6,7 +6,13 @@ fn main() {
 
     let mut cc = cc::Build::new();
     cc.include(src_dir);
+    // Both files are required: `parser.c` calls the
+    // `tree_sitter_cairn_external_scanner_*` functions that only `scanner.c`
+    // defines, so a build without the scanner cannot link. Naming it
+    // unconditionally makes a missing file a build error that names the path
+    // instead of an undefined-symbol error at link time.
     cc.file(src_dir.join("parser.c"));
+    cc.file(src_dir.join("scanner.c"));
     // Cargo watches the whole package only until a build script emits its
     // first `rerun-if-*` line, after which the script owns the list — and
     // `cc` emits `rerun-if-env-changed` for the toolchain variables it
@@ -16,11 +22,6 @@ fn main() {
     // it.
     println!("cargo::rerun-if-changed=src/parser.c");
     println!("cargo::rerun-if-changed=src/scanner.c");
-
-    let scanner = src_dir.join("scanner.c");
-    if scanner.exists() {
-        cc.file(scanner);
-    }
 
     cc.flag_if_supported("-Wno-unused-parameter");
     cc.flag_if_supported("-Wno-unused-but-set-variable");
