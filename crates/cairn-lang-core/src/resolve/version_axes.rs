@@ -727,8 +727,8 @@ fn derive_min_version(module: &Module) -> String {
 /// `edition` says which build is asking: the floors scoped to it and the
 /// unscoped ones, since an unscoped floor is a floor on whatever is being
 /// built. It also decides which per-edition theme variant a `theme=`
-/// reference binds, through the same `theme_variant` rule the
-/// resolver uses. The edition-neutral question is a different function
+/// reference binds, through the same `theme_variant::pick_variant` rule
+/// the resolver uses. The edition-neutral question is a different function
 /// ([`unscoped_version_floors`]) rather than a `None` here, because
 /// `Option<Edition>` would then carry two opposite senses in one API — a
 /// floor's own `None` means "every edition" and the argument's would mean

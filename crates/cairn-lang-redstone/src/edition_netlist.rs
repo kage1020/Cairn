@@ -1,7 +1,7 @@
 //! Netlist IR → Edition Netlist IR lowering.
 //!
 //! Rewrites each [`crate::netlist_ir::ScopedNetlistIrEntry`] into a
-//! [`crate::edition_netlist_ir::ScopedEditionNetlistIrEntry`] by mapping every
+//! [`ScopedEditionNetlistIrEntry`] by mapping every
 //! [`crate::netlist_ir::CellNode`] to an [`EditionCellNode`] whose
 //! [`EditionCell`] tag names the target-edition realisation of the source
 //! [`crate::netlist_ir::LogicalCell`] — the middle tier of the three-tier
@@ -21,6 +21,8 @@
 //! observer families), since none of today's reachable
 //! [`crate::netlist_ir::LogicalCell`] variants require update-order
 //! semantics.
+//!
+//! [`ScopedEditionNetlistIrEntry`]: crate::edition_netlist_ir::ScopedEditionNetlistIrEntry
 
 use cairn_lang_core::Edition;
 

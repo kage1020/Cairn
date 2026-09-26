@@ -3852,7 +3852,7 @@ fn is_actuator_patch(member: &Member) -> bool {
 ///   `powered_by=` implementation cannot silently change the meaning
 ///   of existing source (see [`ACTUATOR_PATCH_INTENT_KEYS`]).
 /// - The `opened_by=` value must be a two-segment `sig.<name>`
-///   `DotRef`. Non-`DotRef` values defer with a "got <kind>" primary;
+///   `DotRef`. Non-`DotRef` values defer with a "got `<kind>`" primary;
 ///   a `DotRef` whose head is not `sig` or whose segment count is not
 ///   2 defers with the offending path rendered verbatim.
 ///

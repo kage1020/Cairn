@@ -2297,8 +2297,8 @@ fn require_edition(edition: Option<EditionArg>, stage_name: &str) -> Result<Edit
 /// passes ran.
 ///
 /// [`check()`] runs the syntactic passes **and** merges the resolver's
-/// findings (see `cairn_lang_core::check::check`), so a caller must not
-/// append `Resolution::diagnostics` on top of it. Doing so printed every
+/// findings, so a caller must not append `Resolution::diagnostics` on
+/// top of it. Doing so printed every
 /// resolver finding twice, and — because [`check()`] returns span-sorted
 /// output while the resolver emits in discovery order — the second copy
 /// walked the file backwards.

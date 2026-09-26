@@ -37,10 +37,11 @@ cargo build --workspace --locked
 cargo test --workspace --locked
 ```
 
-CI also builds the API docs once, on Linux, with rustdoc's warnings fatal — clippy does not see a doc link to a private item or to a path that no longer resolves:
+CI also builds the API docs on Linux, twice, with rustdoc's warnings fatal — clippy does not see a doc link to a private item or to a path that no longer resolves. The first run is the public surface and the only one that flags a public doc linking to a private item; the second also covers the docs only a contributor reads:
 
 ```sh
-RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --locked
+RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --locked --all-features
+RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --locked --all-features --document-private-items
 ```
 
 ### The repository
@@ -156,7 +157,7 @@ Some decisions are deliberately closed: `key=value` over positional arguments, p
 
 The pin is deliberately not a channel. On `stable`, a Rust release turns every open branch red at once, with findings on files the branch never touched. Pinning does not avoid new lints — it decides that they arrive as a pull request somebody chose to open.
 
-Change `channel`, run the three CI commands above (a new compiler can produce a *rustc* warning, not just a clippy lint), fix what it found in the same PR, and type the commit `ci`. A diff that is only "new compiler, plus the fixes it asked for" is one a reviewer can actually read.
+Change `channel`, run the CI commands above (a new compiler can produce a *rustc* or *rustdoc* warning, not just a clippy lint, so a pin bump can turn `Docs` red too), fix what it found in the same PR, and type the commit `ci`. A diff that is only "new compiler, plus the fixes it asked for" is one a reviewer can actually read.
 
 The pin is not the MSRV. `rust-version` in the workspace manifest is the floor a consumer needs to build Cairn, and the pin is always newer. A change reaching for a recently stabilised API is green at the pin and broken at the floor. Clippy sees some of that already — `clippy::incompatible_msrv` reads `rust-version` and refuses a *standard library* item stabilised above it, and `-D warnings` makes that fatal — but it is a lint, so one `#[allow]` silences it, and it says nothing about a **dependency** whose own `rust-version` is above ours, which is a hard cargo error nothing at the pin ever sees. CI's `MSRV` job is what compiles at the floor and so catches both: it reads `rust-version` back out of the manifest with `cargo metadata` — no second copy to go stale — installs that compiler, and runs `cargo check --workspace --locked --all-features` at it. `check` rather than `test`, because the floor is about compiling the crates a consumer depends on and dev-dependencies are free to want a newer compiler than the library does; `--all-features`, because `rust-version` is one declaration per package and cargo has no way to say "this floor, unless you enable that feature"; `--locked`, because the committed lockfile is what a consumer cloning the repo resolves to, and when the failure is a dependency's own floor rather than Cairn's code cargo names the package.
 

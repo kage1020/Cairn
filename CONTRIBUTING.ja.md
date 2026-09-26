@@ -37,10 +37,11 @@ cargo build --workspace --locked
 cargo test --workspace --locked
 ```
 
-CI はこれとは別に、Linux で一度だけ rustdoc の警告を致命的にして API ドキュメントをビルドします。非公開の項目や解決できなくなったパスへのドキュメントリンクは clippy には見えないためです。
+CI はこれとは別に、Linux で rustdoc の警告を致命的にして API ドキュメントを 2 回ビルドします。非公開の項目や解決できなくなったパスへのドキュメントリンクは clippy には見えないためです。1 回目は公開 API が対象で、公開ドキュメントから非公開項目へのリンクを検出するのはこちらだけです。2 回目はコントリビューターだけが読むドキュメントも対象にします。
 
 ```sh
-RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --locked
+RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --locked --all-features
+RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --locked --all-features --document-private-items
 ```
 
 ### リポジトリの構成
@@ -156,7 +157,7 @@ rg '\bM[1-6]\b|M[0-9]-PR[0-9]+|pre-M[0-9]|\bPR[0-9]+\b|\blater PR\b|\bfuture PR\
 
 固定は意図的にチャンネル追従ではありません。`stable` にしていると、Rust のリリースひとつで開いているすべてのブランチが同時に赤くなります。しかもその指摘は、そのブランチが触ってもいないファイルに出ます。固定は新しい lint を避けるためのものではなく、それが「誰かが意図して開いた PR」として届くようにするためのものです。
 
-`channel` を変え、上の CI 3 コマンドを回し (新しいコンパイラは clippy の lint だけでなく *rustc* の警告も出します)、見つかったものを同じ PR で直し、コミットの type は `ci` にします。「新しいコンパイラと、それが要求した修正だけ」という差分は、レビュアーが実際に読める差分です。
+`channel` を変え、上の CI コマンドを回し (新しいコンパイラは clippy の lint だけでなく *rustc* や *rustdoc* の警告も出すので、固定の更新で `Docs` が赤くなることもあります)、見つかったものを同じ PR で直し、コミットの type は `ci` にします。「新しいコンパイラと、それが要求した修正だけ」という差分は、レビュアーが実際に読める差分です。
 
 固定は MSRV ではありません。ワークスペースマニフェストの `rust-version` は、利用者が Cairn をビルドするのに必要な下限であり、固定はつねにそれより新しいコンパイラです。安定化されたばかりの API に手を伸ばした変更は固定側では緑で、下限では壊れます。その一部は clippy が既に見ています。`clippy::incompatible_msrv` は `rust-version` を読んで、それより上で安定化された**標準ライブラリ**の項目を拒み、`-D warnings` がそれを致命的にします。ただしこれは lint なので `#[allow]` 一行で黙り、さらに**依存先**自身の `rust-version` が我々の下限より上である場合については何も言いません。後者は cargo のハードエラーで、固定側では決して現れません。両方を捕まえるのが、下限でコンパイルする CI の `MSRV` ジョブです。`cargo metadata` でマニフェストから `rust-version` を読み直し (古くなる二つ目のコピーを作らないため)、そのコンパイラを入れて `cargo check --workspace --locked --all-features` を回します。`test` ではなく `check` なのは、下限が問うているのが「利用者が依存するクレートがコンパイルできるか」だからです。dev-dependencies やテストハーネスは、ライブラリ本体より新しいコンパイラを要求してかまいません。`--all-features` を付けるのは、`rust-version` がパッケージごとに一つしか書けず、「この下限、ただしその feature を有効にした場合を除く」と cargo に伝える手段がないからです。`--locked` は、リポジトリをクローンした利用者が解決するのが、コミットされたロックファイルそのものだからで、壊れているのが Cairn のコードではなく依存先自身の下限であるとき、cargo がそのパッケージ名を挙げてくれます。
 

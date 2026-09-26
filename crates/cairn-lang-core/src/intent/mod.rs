@@ -44,7 +44,7 @@ pub use self::semantic_level::SemanticLevel;
 /// Intent IR for a whole `.crn` module.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct IntentModule {
-    /// Maturity of this IR. The current [`lower`] always returns
+    /// Maturity of this IR. The current [`lower()`] always returns
     /// [`SemanticLevel::Grouped`].
     pub semantic_level: SemanticLevel,
     /// Headers carried through verbatim from the AST.

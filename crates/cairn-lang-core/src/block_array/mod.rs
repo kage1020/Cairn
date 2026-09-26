@@ -292,7 +292,8 @@ impl Dims {
     }
 }
 
-/// Index into a [`Palette`]. `0` is reserved for [`BlockState::air()`].
+/// Index into a [`Palette`]. [`Self::AIR`] (`0`) is reserved for
+/// [`BlockState::air()`].
 ///
 /// A newtype rather than a bare `u16` so a future change of the underlying
 /// width (e.g. `u32` for very large palettes) does not ripple through every

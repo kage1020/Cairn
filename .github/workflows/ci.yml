@@ -44,8 +44,9 @@ jobs:
         run: cargo test --workspace --locked
 
   docs:
-    # Short and stable on purpose, like `MSRV` below: a required status
-    # check is matched as a literal string.
+    # Short and stable on purpose: a required status check is matched as
+    # a literal string, so renaming this job un-gates it silently. A new
+    # job gates nothing until its name is added to the branch ruleset.
     name: Docs
     # One OS is enough: rustdoc resolves intra-doc links against the same
     # item tree everywhere, and the workspace has no platform-gated docs.
@@ -68,8 +69,21 @@ jobs:
           shared-key: docs
           save-if: ${{ github.ref == 'refs/heads/canary' || github.ref == 'refs/heads/main' }}
 
-      - name: Rustdoc
-        run: cargo doc --workspace --no-deps --locked
+      # Both runs pass `--all-features`: it costs nothing today (no
+      # workspace crate has a `[features]` table or an optional
+      # dependency), and it keeps a feature-gated item's docs inside the
+      # check the day one lands.
+      #
+      # The public surface. Only this run fires
+      # `rustdoc::private_intra_doc_links`: with private items
+      # documented, a link to one is no longer a link out of the docs.
+      - name: Rustdoc (public items)
+        run: cargo doc --workspace --no-deps --locked --all-features
+
+      # Everything else: broken and ambiguous links, and malformed HTML,
+      # in docs on items only a contributor reads.
+      - name: Rustdoc (private items)
+        run: cargo doc --workspace --no-deps --locked --all-features --document-private-items
 
   msrv:
     # Short and stable on purpose: a required status check is matched as

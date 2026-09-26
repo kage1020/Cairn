@@ -7,8 +7,8 @@
 //! a file the game silently fails to load, so the API surface should not
 //! make that mistake expressible.
 //!
-//! The byte-level encoding lives in the crate-internal `writer` module, shared with the
-//! Java writer; this module only pins the byte order.
+//! The byte-level encoding lives in the crate-internal `writer` module,
+//! shared with the Java writer; this module only pins the byte order.
 
 use std::io::Write;
 

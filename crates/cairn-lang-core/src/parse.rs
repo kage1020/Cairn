@@ -1293,6 +1293,8 @@ impl<'a> Parser<'a> {
     /// Byte offset where the next un-consumed token begins, or `source.len()`
     /// at EOF. Anchors the start of a node's [`Span`] before any token is
     /// consumed in its parser arm.
+    ///
+    /// [`Span`]: crate::error::Span
     fn current_byte(&self) -> usize {
         self.peek().map_or(self.source.len(), |t| t.span.start)
     }
@@ -1301,6 +1303,8 @@ impl<'a> Parser<'a> {
     /// close a [`Span`] right after the last meaningful token for a node;
     /// callers capture this *before* `expect_newline()` so trailing layout
     /// tokens stay outside the node's span.
+    ///
+    /// [`Span`]: crate::error::Span
     fn last_byte(&self) -> usize {
         self.tokens
             .get(self.pos.wrapping_sub(1))

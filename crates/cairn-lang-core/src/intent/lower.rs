@@ -1,6 +1,6 @@
 //! AST → Intent IR lowering.
 //!
-//! Intentionally total: every AST that survives [`crate::parse`] lowers to a
+//! Intentionally total: every AST that survives [`crate::parse()`] lowers to a
 //! well-formed [`IntentModule`]. Validation lives elsewhere (the diagnostic
 //! passes in `crate::check`) so that diagnostic collection can run to
 //! completion instead of being short-circuited by the first structural

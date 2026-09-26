@@ -1,7 +1,7 @@
 //! Logic IR → Netlist IR lowering.
 //!
 //! Rewrites each [`crate::logic_ir::ScopedLogicIrEntry`] into a
-//! [`crate::netlist_ir::ScopedNetlistIrEntry`] by mapping every [`crate::logic_ir::GateNode`]
+//! [`ScopedNetlistIrEntry`] by mapping every [`crate::logic_ir::GateNode`]
 //! to a [`CellNode`] tagged with a [`LogicalCell`]. The pass is a single
 //! forward walk: the Logic IR carries a topologically ordered DAG
 //! (invariant enforced by [`crate::synth::synthesize`], which also
@@ -19,6 +19,8 @@
 //! Port ordering is canonical per cell — two-input gates emit
 //! `[A, B]`; `Not` emits `[A]`; `Mux` emits `[Sel, A, B]` — so a
 //! consumer can index by position without inspecting [`PortName`].
+//!
+//! [`ScopedNetlistIrEntry`]: crate::netlist_ir::ScopedNetlistIrEntry
 
 use crate::logic_ir::{GateKind, LogicIr, ScopedLogicIr, SignalRef};
 use crate::netlist_ir::{

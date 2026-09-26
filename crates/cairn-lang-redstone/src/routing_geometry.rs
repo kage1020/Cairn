@@ -63,6 +63,8 @@
 //! recomputed per stage rather than stored on the IR: they are a pure
 //! function of what the IR already carries, and a stored copy would put
 //! every coord of every net into every JSON dump.
+//!
+//! [`RouteLayer::Bridge`]: crate::placement_ir::RouteLayer::Bridge
 
 use std::cmp::Ordering;
 use std::collections::{BinaryHeap, HashMap, HashSet};

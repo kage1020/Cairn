@@ -60,10 +60,12 @@ use crate::saturating_index;
 /// pipeline. The legalized IR is a [`ScopedPlacementIr`] with every
 /// non-failed scope's `buffer_coords` populated with one entry per
 /// implicit buffer repeater the delay pass counted, each carrying the
-/// [`crate::placement_ir::RouteLayer`] of the route coord it stands on. No new IR type; the
-/// crossing
-/// pass is one [`crate::placement_ir::PlacementPhase::legalize`]
-/// transition per cell, per the producer↔variant table on that enum.
+/// [`RouteLayer`] of the route coord it stands on. No new IR type; the
+/// crossing pass is one [`PlacementPhase::legalize`] transition per
+/// cell, per the producer↔variant table on that enum.
+///
+/// [`RouteLayer`]: crate::placement_ir::RouteLayer
+/// [`PlacementPhase::legalize`]: crate::placement_ir::PlacementPhase::legalize
 #[derive(Debug, Clone, PartialEq, Default)]
 #[non_exhaustive]
 pub struct CrossingOutput {
@@ -88,21 +90,26 @@ impl CrossingOutput {
 /// [`ScopedPlacementIr`].
 ///
 /// Reads every cell's coord and the scope's
-/// [`crate::placement_ir::CircuitRegionReservation`] out of the input IR — the Placement
+/// [`CircuitRegionReservation`] out of the input IR — the Placement
 /// IR is self-describing by construction, so the crossing pass has no
 /// `IntentModule` dependency.
 ///
 /// One entry per non-empty [`PlacementIr`] whose legalization
-/// succeeded; a scope that raises [`crate::DiagnosticCode::NoCircuitRegion`],
-/// either [`crate::DiagnosticCode::RouteCongestion`] that
+/// succeeded; a scope that raises [`DiagnosticCode::NoCircuitRegion`],
+/// either [`DiagnosticCode::RouteCongestion`] that
 /// `crate::pass::lay_nets` raises — a pad row the reservation cannot
 /// hold, or a sink no route reaches — or the
-/// [`crate::DiagnosticCode::AttenuationLimit`] it raises for a sink further
+/// [`DiagnosticCode::AttenuationLimit`] it raises for a sink further
 /// from its driver than the v1 cap in a straight line, is
 /// elided from the output so a partial `buffer_coords` set cannot
 /// pollute the downstream block-array voxel lowering. Every finding
 /// this pass makes refuses its scope, so there is no warning that
 /// outlives one.
+///
+/// [`CircuitRegionReservation`]: crate::placement_ir::CircuitRegionReservation
+/// [`DiagnosticCode::NoCircuitRegion`]: crate::DiagnosticCode::NoCircuitRegion
+/// [`DiagnosticCode::RouteCongestion`]: crate::DiagnosticCode::RouteCongestion
+/// [`DiagnosticCode::AttenuationLimit`]: crate::DiagnosticCode::AttenuationLimit
 #[must_use]
 pub fn compile_crossing(delayed: &ScopedPlacementIr) -> CrossingOutput {
     let (scoped, diagnostics) = lower_scopes(delayed, |entry| {

@@ -6,9 +6,9 @@
 //! which matches Mojang's output — important so binary snapshots of small
 //! structures stay byte-stable when checked against samples from the game.
 //!
-//! The byte-level encoding lives in the crate-internal `writer` module, shared with the
-//! Bedrock writer; this module only pins the byte order and the gzip
-//! envelope.
+//! The byte-level encoding lives in the crate-internal `writer` module,
+//! shared with the Bedrock writer; this module only pins the byte order
+//! and the gzip envelope.
 
 use std::io::Write;
 
