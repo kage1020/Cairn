@@ -493,6 +493,34 @@
   outside the spec: `version_axes.rs`'s module doc, which still called axis 1 the intersection, the
   `cairn info` renderer, `--help`, and the CLI crate's README.
 
+- *(docs)* `spec/lint` "Machine-readable payload" said a run-level refusal is reported on stderr and
+  by the exit code, and stopped there. It did not say what a `cairn check --format json` consumer
+  does with that, and the run it describes looks like a pass with a bad exit code:
+
+  ```console
+  $ cairn check partial.crn --edition java --target 1.21.4 --format json
+  [ { "code": "W_STRUCT_NO_SIZE", "severity": "warning", ... } ]
+  error[E_PARTIAL_BUILD]: partial.crn: 1 of 2 requested scopes did not lower; ...
+  $ echo $?
+  1
+  ```
+
+  The question of whether a lost scope (`E_PARTIAL_BUILD`) or an unshipped `--target` should get a
+  machine-readable form is now settled in the spec, not left open: it stays prose. Neither refusal
+  is a finding at a span, and `check`'s array is a document downstream tooling already reads with
+  `line` / `col` required, which is how `info`'s palette refusal was settled too. Stderr is prose
+  for a person and not part of the contract. What the spec adds is the rule a consumer can apply
+  without it: an exit of `1` over an array with no `"severity": "error"` element is a run-level
+  refusal, down to a `[]` over a clean source. No other failure reads that way — a source that does
+  not parse is an array carrying `E_PARSE`, and a source that cannot be read writes no document at
+  all. The rule runs one way only: a refusal on a run that also has error-severity findings reads
+  like any other error failure, and the refusal is said only on stderr. The ja mirror, the CLI
+  crate's README and `cairn check --help` say the same.
+
+  No behaviour changes. One test drives both refusals over sources whose own findings are warnings
+  at most, pinning each row's array — `W_STRUCT_NO_SIZE` for the lost scope, `[]` for the unshipped
+  target — and another pins that a non-UTF-8 source exits 1 with nothing on stdout.
+
 - *(core)* A `-> value` tail on a member that cannot emit a signal was silent through `check` and
   `compile`:
 

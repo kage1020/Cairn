@@ -419,7 +419,10 @@ run-level refusal, and a consumer reads the verdict from the exit code. Stderr i
 in either format. It is not part of this contract, and a consumer should treat it as unstructured
 text rather than parse it. What the consumer can tell without it is *that* the run was refused at
 the run level rather than by a finding: an exit of `1` over an array that holds no element with
-`"severity": "error"` means exactly that, down to a `[]` over a source with nothing to report. No
+`"severity": "error"` means exactly that, down to a `[]` over a source with nothing to report. A
+refusal can also arrive on a run that has error-severity findings of its own, and then the array
+reads like any other error failure; that the run was *also* refused at the run level is said only
+on stderr. No
 other failure reads that way — a source that does not parse is an array carrying `E_PARSE`, and a
 file that cannot be read writes no document at all. Which of the two refusals it was, and what the
 build lost, is said only on stderr.
