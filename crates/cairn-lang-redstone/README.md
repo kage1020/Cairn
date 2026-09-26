@@ -20,7 +20,7 @@ The synthesis half of the pipeline is in place; the verification half is not. No
 
 Two nets that would merge into one strand of dust never need legalizing: routing already goes around the dust laid by earlier nets *and* around the coords beside it, since dust reads the dust one step away in its own plane. The short is not made in the first place.
 
-Every placed cell records which of the last four passes touched it as a `PlacementStage`, dumped as a `"stage"` key in the same vocabulary `cairn synth --stage <s>` accepts, so a JSON consumer reads the stage off the output rather than inferring it from which optional keys are present.
+Every placed cell records which of the last four passes touched it as a `PlacementStage`, dumped as a `"stage"` key in the same vocabulary `cairn synth --stage <s>` accepts, so a JSON consumer reads the stage off the output rather than inferring it from which optional keys are present. A dumped `PlacedCellNode` deserialises back to the cell it was written from, phase included, and a cell whose keys disagree with its `"stage"` is refused as a deserialisation error rather than read as some other stage.
 
 Still to come: edition legalization, the tick simulator, and the QC/BUD refusal (`E_NO_PORTABLE_IMPL`).
 
