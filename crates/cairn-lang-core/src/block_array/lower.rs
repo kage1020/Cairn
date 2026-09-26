@@ -3165,6 +3165,19 @@ fn carve_door(
             ctx.interior_h,
             ctx.dims,
         ) else {
+            // `at` is below `len` by the match above, and every row the
+            // loop asks for is at most `course_top` because `door_height`
+            // is clamped to the course holding `base_row` — so the helper
+            // has nothing to reject. Reaching here means `door_height` (or
+            // the wall column it reads) stopped agreeing with
+            // `wall_local_to_grid`'s `v < dims.y`. Loud in tests; release
+            // builds skip the cell rather than panic over one voxel.
+            debug_assert!(
+                false,
+                "door row y={v} at u={at} on the {} wall is outside the wall grid; \
+                 `door_height` against the course stopped agreeing with `wall_local_to_grid`",
+                side_name(side),
+            );
             continue;
         };
         canvas.paint((x, y, z), || PaletteIndex::AIR);
@@ -3315,6 +3328,17 @@ fn fill_stair(
             ctx.interior_h,
             ctx.dims,
         ) else {
+            // `u` walks `0..length`, the same length the helper checks, and
+            // `y_world < dims.y` was refused above with a diagnostic — so
+            // the helper has nothing to reject. Reaching here means that
+            // band check stopped agreeing with `wall_local_to_grid`. Loud in
+            // tests; release builds skip the cell rather than panic.
+            debug_assert!(
+                false,
+                "eave stair cell u={u} y={y_world} on the {} wall is outside the wall grid; \
+                 the band's `y_world < dims.y` check stopped agreeing with `wall_local_to_grid`",
+                side_name(side),
+            );
             continue;
         };
         let (x, z) = shift_outward(side, wx, wz);
@@ -4267,6 +4291,22 @@ fn paint_window_rect(ctx: &StructCtx<'_>, rect: WindowRect, canvas: &mut MemberC
                 ctx.interior_h,
                 ctx.dims,
             ) else {
+                // `fill_window` refused any span past the wall
+                // (`offset + size.w`, across every `repeat=` stamp and the
+                // `sym=true` mirror, is at most the wall length) and any row
+                // outside a wall course before it got here — so the helper
+                // has nothing to reject. Reaching here means one of those
+                // checks stopped agreeing with `wall_local_to_grid`. Loud in
+                // tests; release builds skip the cell rather than panic.
+                debug_assert!(
+                    false,
+                    "window cell u={} y={} on the {} wall is outside the wall grid; \
+                     the rectangle's `offset + size.w <= wall_length` / wall-course checks \
+                     stopped agreeing with `wall_local_to_grid`",
+                    rect.offset + du,
+                    rect.y_start + dv,
+                    side_name(rect.side),
+                );
                 continue;
             };
             canvas.paint((x, y, z), || rect.palette_index);

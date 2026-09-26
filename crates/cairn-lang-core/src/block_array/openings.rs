@@ -96,7 +96,9 @@ pub fn wall_length(side: WallSide, interior_w: u32, interior_h: u32) -> u32 {
 /// report the same member once per cell it asked about. Every one of those
 /// prior checks is what makes the skip unreachable today, so a `None`
 /// reaching them means one of the checks stopped agreeing with this
-/// function.
+/// function — each of the three says so with a `debug_assert!` naming the
+/// check it relied on, so tests and debug builds fail loud while release
+/// builds keep skipping the cell rather than panicking over one voxel.
 #[must_use]
 pub fn wall_local_to_grid(
     side: WallSide,
