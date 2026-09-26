@@ -19,6 +19,8 @@
 //! Port ordering is canonical per cell — two-input gates emit
 //! `[A, B]`; `Not` emits `[A]`; `Mux` emits `[Sel, A, B]` — so a
 //! consumer can index by position without inspecting [`PortName`].
+//!
+//! [`ScopedNetlistIrEntry`]: crate::netlist_ir::ScopedNetlistIrEntry
 
 use crate::logic_ir::{GateKind, LogicIr, ScopedLogicIr, SignalRef};
 use crate::netlist_ir::{

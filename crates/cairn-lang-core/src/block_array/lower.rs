@@ -131,8 +131,8 @@ const DOOR_HEIGHT: u32 = 2;
 /// list. This one stays because it covers the three ids no example is
 /// obliged to reach.
 ///
-/// [`PRESSURE_PLATE_BASE_ID`] is deliberately absent: it *is* redirectable
-/// (through [`PRESSURE_PLATE_TOKEN`]), so its per-edition correctness is a
+/// `PRESSURE_PLATE_BASE_ID` is deliberately absent: it *is* redirectable
+/// (through `PRESSURE_PLATE_TOKEN`), so its per-edition correctness is a
 /// question about the packs, and the pack-side tests ask it there.
 pub const BUILTIN_BLOCK_IDS: &[&str] = &[BlockState::AIR_ID, STAIR_BASE_ID, FLAT_BASE_ID];
 
@@ -3888,7 +3888,7 @@ fn is_actuator_patch(member: &Member) -> bool {
 ///   `powered_by=` implementation cannot silently change the meaning
 ///   of existing source (see [`ACTUATOR_PATCH_INTENT_KEYS`]).
 /// - The `opened_by=` value must be a two-segment `sig.<name>`
-///   `DotRef`. Non-`DotRef` values defer with a "got <kind>" primary;
+///   `DotRef`. Non-`DotRef` values defer with a "got `<kind>`" primary;
 ///   a `DotRef` whose head is not `sig` or whose segment count is not
 ///   2 defers with the offending path rendered verbatim.
 ///

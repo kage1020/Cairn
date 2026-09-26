@@ -21,6 +21,8 @@
 //! observer families), since none of today's reachable
 //! [`crate::netlist_ir::LogicalCell`] variants require update-order
 //! semantics.
+//!
+//! [`ScopedEditionNetlistIrEntry`]: crate::edition_netlist_ir::ScopedEditionNetlistIrEntry
 
 use cairn_lang_core::Edition;
 

@@ -72,8 +72,8 @@ through a focused PR that lifts the lint on a single module with documented inva
 
 ## Build, test, lint
 
-CI runs these four on Linux, macOS, and Windows, and checks the workspace once more at the
-declared MSRV. Run the four before opening a PR.
+CI runs these four on Linux, macOS, and Windows, checks the workspace once more at the
+declared MSRV, and builds the API docs on Linux (below). Run the four before opening a PR.
 
 ```sh
 cargo fmt --all -- --check
@@ -86,6 +86,16 @@ CI sets `RUSTFLAGS=-D warnings`, so any new warning fails the build. To match it
 
 ```sh
 RUSTFLAGS="-D warnings" cargo build --workspace --locked
+```
+
+CI also builds the API docs on Linux, twice, with rustdoc's warnings fatal, since clippy does not
+see a doc link to a private item or to a path that no longer resolves. The first run is the
+public surface and the only one that flags a public doc linking to a private item; the second
+also covers the docs only a contributor reads:
+
+```sh
+RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --locked --all-features
+RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --locked --all-features --document-private-items
 ```
 
 `cairn-lang-wasm` builds with [`wasm-pack`](https://rustwasm.github.io/wasm-pack/) and the website
