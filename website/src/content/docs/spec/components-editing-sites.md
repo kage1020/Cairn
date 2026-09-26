@@ -119,7 +119,8 @@ The wall-local offset comes from:
 
 - a `door`'s `at=` value of `center`, `left`, or `right` ([§5.4](/spec/syntax/#54-selectors)). Numeric
   offsets are reserved.
-- a `window`'s geometric centre, `offset + size.w / 2`.
+- a `window`'s geometric centre, `offset + size.w / 2`, with an absent `offset=` read as `0` the
+  way the cut reads it.
 
 The placement's overhang shifts the port out into the overhang ring beyond the outer face. A
 `window`'s authored `y=` does **not** lift the port off the ground row: the walkway is a 1-voxel
@@ -150,9 +151,13 @@ The rows a port is judged against are the rows the placement **painted**, which 
 the openings pass cut against — not a second reading of the `def`. A `walls` whose `mat_slot=` does
 not resolve paints nothing, so the cut is deferred and the port is refused with it; a `walls`
 declared inside a `level` paints its rows, so the cut happens and the port stands on it. A port
-that cannot be placed drops its row with a `W_DEFERRED_MEMBER` whose notes list the door, window,
-masonry, and reserved-role contracts in turn; when the masonry is what is missing, the member that
-could not be built says so on its own line.
+that cannot be placed drops its row with a `W_DEFERRED_MEMBER` carrying one note per refused
+endpoint, naming the one rule that endpoint broke: a role that cannot anchor a port, the `side=` or
+`at=` it was written with, the window argument it lacks, how far its rectangle runs past the wall,
+or which rows the masonry does and does not cover. The note points at the member's line; when the
+fault is an argument or the masonry rather than the role, that line carries the member's own finding
+too, since the opening was not cut either. A port pushed past the coordinate range by its `place`
+has no member line to point at and says so on the row alone.
 
 **How the path runs.** A Manhattan L, x-axis leg then z-axis leg, at the two ports' shared Y. 3D
 path search over staircases and multi-level walkways is out of scope by design.

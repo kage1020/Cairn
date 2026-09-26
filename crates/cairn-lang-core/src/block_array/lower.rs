@@ -334,11 +334,12 @@ struct ConnectInputs<'a> {
 /// Lower every resolved `connect` row into a walkway `BlockArray` and
 /// a matching [`Walkway`] metadata record.
 ///
-/// Skips a row whose port resolves to neither [`MemberRole::Door`] nor
-/// [`MemberRole::Window`] (no other role is modelled as a port yet), and
-/// one whose endpoint paints no masonry for the opening to have been cut
-/// through. Emits a `W_DUPLICATE_WALKWAY` when the same `(from, to)`
-/// pair has already been laid in the same site.
+/// Skips a row whose port [`port_world_position`] refuses — a role other
+/// than [`MemberRole::Door`] or [`MemberRole::Window`], an argument the
+/// opening cannot use, masonry the opening does not reach — with a
+/// `W_DEFERRED_MEMBER` whose note names that endpoint's
+/// [`super::walkway::PortRejection`]. Emits a `W_DUPLICATE_WALKWAY` when
+/// the same `(from, to)` pair has already been laid in the same site.
 ///
 /// Every finding raised here anchors on `ValidatedConnect::span`, which
 /// the resolver sets to one `connect` member's span, and this loop runs
@@ -421,58 +422,39 @@ fn lower_connects(
             &connect.to.port,
             &to_body.walls,
         );
-        let (Some(from_pos), Some(to_pos)) = (from_pos, to_pos) else {
-            // The resolver already validated the port id, so this miss
-            // means `port_world_position` rejected one of the member's
-            // own properties: a missing / non-cardinal `side=`, a door
-            // `at=` value outside `center | left | right`, a window
-            // whose rectangle leaves the wall on either axis, or a
-            // stair / roof role for which port support is reserved.
-            // Name the offending side so the user is not pointed at
-            // the wrong half of the row.
-            let from_label = connect.from.to_string();
-            let to_label = connect.to.to_string();
-            let unplaceable = blamed_endpoints(connect, from_pos.is_none(), to_pos.is_none());
-            let noun = if from_pos.is_none() && to_pos.is_none() {
-                "ports"
-            } else {
-                "port"
-            };
-            diagnostics.push(Diagnostic {
-                code: DiagnosticCode::DeferredMember,
-                span: connect.span.clone(),
-                primary: format!(
-                    "walkway `{from_label} ↔ {to_label}` was skipped because {noun} {unplaceable} could not be placed",
-                ),
-                notes: vec![
-                    DiagnosticNote {
-                        span: None,
-                        message:
-                            "a `door` port requires `side=front|back|left|right` and `at=center|left|right`, with the row it opens at — `y=1`, the row above the floor slab — inside one course of the masonry"
-                                .to_owned(),
-                    },
-                    DiagnosticNote {
-                        span: None,
-                        message:
-                            "a `window` port requires `side=front|back|left|right`, plus `offset=` / `y=` / `size=WxH` that fit inside the wall (`offset + size.w ≤ wall_length`, and every row `y ..= y + size.h - 1` inside one course of the masonry — `walls height=H` under `level y=N` fills rows `N + 1 ..= N + H`, and the floor slab owns row 0)"
-                                .to_owned(),
-                    },
-                    DiagnosticNote {
-                        span: None,
-                        message:
-                            "both roles are cut into masonry, so the port's `def` needs a `walls` member that paints — a positive `height=` and a `mat_slot=` that resolves — and both need to land inside one course of it: a `door` the row it opens at, a `window` every row of its rectangle; when that is what is missing, the member that cannot be built says so on its own line"
-                                .to_owned(),
-                    },
-                    DiagnosticNote {
-                        span: None,
-                        message:
-                            "stair / roof / other member roles cannot anchor a port yet — declare the port on a door or window instead"
-                                .to_owned(),
-                    },
-                ],
-                data: None,
-            });
-            continue;
+        let (from_pos, to_pos) = match (from_pos, to_pos) {
+            (Ok(from_pos), Ok(to_pos)) => (from_pos, to_pos),
+            (from_pos, to_pos) => {
+                let (from_err, to_err) = (from_pos.err(), to_pos.err());
+                let unplaceable = blamed_endpoints(connect, from_err.is_some(), to_err.is_some());
+                let noun = if from_err.is_some() && to_err.is_some() {
+                    "ports"
+                } else {
+                    "port"
+                };
+                // One note per refused endpoint, naming the reason
+                // `port_world_position` gave for it rather than every
+                // contract a port has. Where the reason is on a member,
+                // the note points at that member's line — which, for an
+                // argument or masonry fault, carries the member's own
+                // deferral too, since the opening was not cut either.
+                let notes = [(&connect.from, from_err), (&connect.to, to_err)]
+                    .into_iter()
+                    .filter_map(|(end, rejection)| Some(rejection?.note(&end.to_string())))
+                    .collect();
+                diagnostics.push(Diagnostic {
+                    code: DiagnosticCode::DeferredMember,
+                    span: connect.span.clone(),
+                    primary: format!(
+                        "walkway `{from} ↔ {to}` was skipped because {noun} {unplaceable} could not be placed",
+                        from = connect.from,
+                        to = connect.to,
+                    ),
+                    notes,
+                    data: None,
+                });
+                continue;
+            }
         };
 
         // Duplicate guard: pin on (site, from_place, from_port,

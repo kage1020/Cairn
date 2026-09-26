@@ -321,25 +321,30 @@ fn a_door_under_a_level_is_not_a_port_at_all() {
 }
 
 #[test]
-fn the_port_contract_note_states_the_rule_the_port_applies() {
-    // The note is the only place an author is told what a door port
-    // needs, and it used to name `side=` and `at=` alone — so a reader
-    // whose walls started a storey up checked the two arguments that were
-    // already right and was left with the row that was wrong.
-    let out = lowered(&site_with_door_port(6));
-    let note = out
+fn the_walkway_defer_states_the_rule_the_door_broke() {
+    // The note is where an author is told why the strip is missing, and it
+    // used to list every contract a port has — so a reader whose walls
+    // started a storey up checked `side=` and `at=`, which were already
+    // right, before reaching the row that was wrong. It names the row now,
+    // and the rows the walls occupy.
+    let src = site_with_door_port(6);
+    let out = lowered(&src);
+    let notes: Vec<_> = out
         .diagnostics
         .iter()
         .filter(|d| d.primary.contains("was skipped because port"))
         .flat_map(|d| &d.notes)
-        .map(|n| n.message.as_str())
-        .find(|m| m.starts_with("a `door` port requires"))
-        .expect("the walkway defer lists the door-port contract");
+        .collect();
+    assert_eq!(notes.len(), 2, "one note per refused port: {notes:?}");
     assert_eq!(
-        note,
-        "a `door` port requires `side=front|back|left|right` and `at=center|left|right`, \
-         with the row it opens at — `y=1`, the row above the floor slab — inside one course \
-         of the masonry",
+        notes[0].message,
+        "`a.e` is a door that opens at y=1, the row above the floor slab, which is not inside \
+         any wall course (the walls occupy y=7..=10); the member says so on its own line too",
+    );
+    let at = notes[0].span.clone().expect("the note points at the door");
+    assert!(
+        src[at].starts_with("door id=e"),
+        "the note points at the door's own line"
     );
     // …and the member that cannot be built says so on its own line, which
     // is where the note sends the author.
