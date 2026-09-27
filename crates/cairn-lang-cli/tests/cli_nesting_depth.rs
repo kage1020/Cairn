@@ -100,7 +100,7 @@ struct chain size=8x6\n\
 \x20\x20walls class=outer mat_slot=wall height=3\n\
 \x20\x20door  id=front side=front at=center mat_slot=door\n\
 \x20\x20pressure_plate id=p1 at=front.outside offset=0 y=0 -> sig.a\n\
-\x20\x20pressure_plate id=p2 at=inside.front  offset=0 y=0 -> sig.b\n";
+\x20\x20pressure_plate id=p2 at=inside.front  offset=1 y=0 -> sig.b\n";
 
 /// A `logic` chain of `stages` bindings under `prefix`, declared so that
 /// each binding references the next one to be written.

@@ -319,7 +319,7 @@ fn cli_synth_stage_placement_missing_region_exits_one() {
         struct noregion size=7x5\n  \
         floor mat_slot=wall\n  \
         pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a\n  \
-        pressure_plate id=q at=inside.front  offset=0 y=0 -> sig.b\n  \
+        pressure_plate id=q at=inside.front  offset=1 y=0 -> sig.b\n  \
         logic sig.open = sig.a or sig.b\n  \
         door id=d side=front at=center mat_slot=wall opened_by=sig.open\n";
     std::fs::write(&path, source).expect("write missing-region fixture");
@@ -355,7 +355,7 @@ fn cli_synth_stage_placement_congestion_exits_one() {
         struct tiny size=3x3\n  \
         floor mat_slot=wall\n  \
         pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a\n  \
-        pressure_plate id=q at=inside.front  offset=0 y=0 -> sig.b\n  \
+        pressure_plate id=q at=inside.front  offset=1 y=0 -> sig.b\n  \
         logic sig.and_ab   = sig.a and sig.b\n  \
         logic sig.or_ab    = sig.a or sig.b\n  \
         logic sig.combined = sig.and_ab and sig.or_ab\n  \
@@ -752,7 +752,7 @@ fn cli_synth_stage_delay_attenuation_limit_exits_one() {
         struct wide_pack size=300x5\n  \
         floor mat_slot=wall\n  \
         pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a\n  \
-        pressure_plate id=q at=inside.front  offset=0 y=0 -> sig.b\n  \
+        pressure_plate id=q at=inside.front  offset=1 y=0 -> sig.b\n  \
         logic sig.out = sig.a or sig.b\n  \
         door id=d side=front at=center mat_slot=wall opened_by=sig.out\n  \
         circuit region=floor void=3\n";
@@ -985,7 +985,7 @@ fn cli_synth_stage_crossing_inherits_upstream_attenuation_failure() {
         struct wide_pack size=300x5\n  \
         floor mat_slot=wall\n  \
         pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a\n  \
-        pressure_plate id=q at=inside.front  offset=0 y=0 -> sig.b\n  \
+        pressure_plate id=q at=inside.front  offset=1 y=0 -> sig.b\n  \
         logic sig.out = sig.a or sig.b\n  \
         door id=d side=front at=center mat_slot=wall opened_by=sig.out\n  \
         circuit region=floor void=3\n";
@@ -1077,7 +1077,7 @@ struct crossbar size=4x4
   door  id=back  side=back  at=center mat_slot=door
 
   pressure_plate id=plate1 at=front.outside offset=0 y=0 -> sig.a
-  pressure_plate id=plate2 at=inside.front  offset=0 y=0 -> sig.b
+  pressure_plate id=plate2 at=inside.front  offset=1 y=0 -> sig.b
 
   logic sig.f = sig.a and sig.b
 

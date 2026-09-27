@@ -151,7 +151,7 @@ struct chain size=60x5
   floor mat_slot=wall
 
   pressure_plate id=pa at=front.outside offset=0 y=0 -> sig.a
-  pressure_plate id=pb at=inside.front  offset=0 y=0 -> sig.b
+  pressure_plate id=pb at=inside.front  offset=1 y=0 -> sig.b
 
   logic sig.s0 = sig.a and sig.b
 ",

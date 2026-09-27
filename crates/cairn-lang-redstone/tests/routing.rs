@@ -132,7 +132,7 @@ struct sim size=7x5
   floor mat_slot=wall
 
   pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a
-  pressure_plate id=q at=inside.front  offset=0 y=0 -> sig.b
+  pressure_plate id=q at=inside.front  offset=1 y=0 -> sig.b
 
   logic sig.and_ab   = sig.a and sig.b
   logic sig.or_ab    = sig.a or sig.b
@@ -501,7 +501,7 @@ theme t:
 struct alpha size=7x5
   floor mat_slot=wall
   pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a
-  pressure_plate id=q at=inside.front  offset=0 y=0 -> sig.b
+  pressure_plate id=q at=inside.front  offset=1 y=0 -> sig.b
   logic sig.open = sig.a or sig.b
   door id=d side=front at=center mat_slot=wall opened_by=sig.open
   circuit region=floor void=2
@@ -509,7 +509,7 @@ struct alpha size=7x5
 struct beta size=8x3
   floor mat_slot=wall
   pressure_plate id=r at=front.outside offset=0 y=0 -> sig.c
-  pressure_plate id=s at=inside.front  offset=0 y=0 -> sig.d
+  pressure_plate id=s at=inside.front  offset=1 y=0 -> sig.d
   logic sig.and_cd   = sig.c and sig.d
   logic sig.or_cd    = sig.c or sig.d
   logic sig.combined = sig.and_cd and sig.or_cd

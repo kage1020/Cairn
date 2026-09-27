@@ -24,7 +24,7 @@ const NESTED_AFTER_TOP_LEVEL: &str = "\
 
 struct s size=1x1
   pressure_plate id=p1 at=front.outside offset=0 y=0 -> sig.a
-  pressure_plate id=p2 at=inside.front offset=0 y=0 -> sig.b
+  pressure_plate id=p2 at=inside.front offset=1 y=0 -> sig.b
   logic sig.dup = sig.a and sig.b
   level y=0
     logic sig.dup = sig.a or sig.b
@@ -73,7 +73,7 @@ fn a_nested_binding_above_a_top_level_one_is_the_first_declaration() {
 
 struct s size=1x1
   pressure_plate id=p1 at=front.outside offset=0 y=0 -> sig.a
-  pressure_plate id=p2 at=inside.front offset=0 y=0 -> sig.b
+  pressure_plate id=p2 at=inside.front offset=1 y=0 -> sig.b
   level y=0
     logic sig.dup = sig.a or sig.b
   logic sig.dup = sig.a and sig.b
@@ -109,7 +109,7 @@ fn permuting_a_nested_and_a_top_level_binding_swaps_which_one_is_reported() {
 
 struct s size=1x1
   pressure_plate id=p1 at=front.outside offset=0 y=0 -> sig.a
-  pressure_plate id=p2 at=inside.front offset=0 y=0 -> sig.b
+  pressure_plate id=p2 at=inside.front offset=1 y=0 -> sig.b
   logic sig.x = sig.a and sig.b
   level y=0
     logic sig.y = sig.x or sig.a
