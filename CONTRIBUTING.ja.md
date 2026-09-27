@@ -27,7 +27,7 @@ cargo run -p cairn-lang-cli -- check examples/cottage.crn --edition java --targe
 
 `check` は何も書き出しません。`compile` はソースの隣に構造ファイルとロックファイルを書くので、`examples/` にビルド成果物を残したくなければ `--out` と `--lock` をツリーの外に向けてください。
 
-PR を出す前に、CI と同じものを回してください。Linux・macOS・Windows で走るのはこの 4 コマンドで、いずれも `RUSTFLAGS=-D warnings` の下で実行されます。
+PR を出す前に、CI と同じものを回してください。Linux・macOS・Windows で走るのはこれらのコマンドで、いずれも `RUSTFLAGS=-D warnings` の下で実行されます。
 
 ```sh
 export RUSTFLAGS="-D warnings"
@@ -35,7 +35,11 @@ cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo build --workspace --locked
 cargo test --workspace --locked
+cargo test -p cairn-lang-core --bench lowering
+cargo test -p cairn-lang-redstone --bench place_and_route
 ```
+
+最後の 2 つは各ベンチを計測なしのテストとして一度ずつ実行します。`--workspace` はベンチターゲットを選びません。何を確かめているかは[リリースプロファイルの変更](#リリースプロファイルの変更)にあります。
 
 CI はこれとは別に、Linux で rustdoc の警告を致命的にして API ドキュメントを 2 回ビルドします。非公開の項目や解決できなくなったパスへのドキュメントリンクは clippy には見えないためです。1 回目は公開 API が対象で、公開ドキュメントから非公開項目へのリンクを検出するのはこちらだけです。2 回目はコントリビューターだけが読むドキュメントも対象にします。
 
@@ -165,7 +169,7 @@ rg '\bM[1-6]\b|M[0-9]-PR[0-9]+|pre-M[0-9]|\bPR[0-9]+\b|\blater PR\b|\bfuture PR\
 
 ## リリースプロファイルの変更
 
-ワークスペースマニフェストの `[profile.release]` はリリースアーカイブのサイズに合わせて調整してあり、各設定にはそこにある理由が書いてあります。ほとんどの設定はビルド時間しか使いません。例外は `opt-level` で、これはブロック配列への lowering と配置配線 (place-and-route) のスループットと引き換えになります。どちらもビルドが時間を費やす処理です。その側を測るベンチが二つあり、どちらもプロセス起動よりパスの処理が重くなる大きさのソースを生成して使います。`cairn-lang-core` の `lowering` と、`cairn-lang-redstone` の `place_and_route` です。ベンチはリリースプロファイルを継承するので、計測されるのは実際に配布されるコードです。ベースラインを保存し、プロファイルを変えて (ファイルを編集せずに環境変数で一つだけ上書きしてもかまいません) 比較します。
+ワークスペースマニフェストの `[profile.release]` はリリースアーカイブのサイズに合わせて調整してあり、その理由はコメントに書いてあります。ほとんどの設定はビルド時間しか使いません。例外は `opt-level` で、これはブロック配列への lowering と配置配線 (place-and-route) のスループットと引き換えになります。どちらもビルドが時間を費やす処理です。その側を測るベンチが二つあります。`cairn-lang-core` の `lowering` と、`cairn-lang-redstone` の `place_and_route` です。どちらもパスをプロセス内で呼び出します。例に対して CLI を計測すると、ほとんどプロセス起動を計ることになるからです。また、例ではなく生成したソースを使います。例ほど小さいソースは、変更による差をタイマーが見分けられないほど速くパスを通り抜けるからです。ベンチはリリースプロファイルの設定を受け継ぐので、`opt-level`・`lto`・`codegen-units` は配布されるとおりに計測されます。例外は `panic` で、Cargo はテストと同じく、ベンチターゲットとその依存をアンワインドありでビルドします。ベースラインを保存し、プロファイルを変えて (ファイルを編集せずに環境変数で一つだけ上書きしてもかまいません) 比較します。
 
 ```sh
 cargo bench -p cairn-lang-core -p cairn-lang-redstone --bench lowering --bench place_and_route -- --save-baseline before
@@ -174,7 +178,7 @@ CARGO_PROFILE_RELEASE_OPT_LEVEL=s cargo bench -p cairn-lang-core -p cairn-lang-r
 
 二つのベンチは名前で指定してください。`--bench` を付けないと、`cargo bench` は各ライブラリの単体テストハーネスも実行し、そちらは criterion の `--save-baseline` を受け付けません。差を信じる前に、一度ベースラインをそれ自身と比べてください。共有マシンでは、同一のビルドどうしでも小さいベンチは数パーセント動きます。
 
-サイズの変化は gzip 後のバイナリで比べます。リリースアーカイブが `.tar.gz` と `.zip` だからです。数値はプロファイルのコメントではなくコミットメッセージに書きます。コメントに書くと、次の依存更新で黙って古くなります。CI はどちらのベンチも実行しません。共有ランナーでの時間計測のゲートはノイズにしかならず、プロファイルの変更は回帰を監視する対象ではなく、一度下す決定だからです。CI が守っているのは、`clippy --all-targets` を通じて両ベンチがコンパイルできることです。`cargo test -p cairn-lang-core --bench lowering` (`place_and_route` も同様) は各ベンチマークを一度ずつ実行する確認になります。各ベンチは生成したソースがどのスコープも失わずに全パスを通ることを確かめるので、パスまで届かなくなった生成器は、黙って少ない処理を計測するのではなく、そこで失敗します。
+サイズの変化は gzip 後のバイナリで比べます。リリースアーカイブが `.tar.gz` と `.zip` だからです。数値はプロファイルのコメントではなくコミットメッセージに書きます。コメントに書くと、次の依存更新で黙って古くなります。CI はどちらのベンチも計測しません。共有ランナーでの時間計測のゲートはノイズにしかならず、プロファイルの変更は回帰を監視する対象ではなく、一度下す決定だからです。CI が実行するのは、各ベンチを計測なしのテストとして一度ずつ走らせる `cargo test -p cairn-lang-core --bench lowering` と `cargo test -p cairn-lang-redstone --bench place_and_route` です。各ベンチは計測の前に、生成したソースが想定した処理をしていることを確かめます。`lowering` はすべての配置と通路がブロック配列への lowering から出てくること、`place_and_route` はすべてのスコープが全パスを通り、ゲート一つにつき配置済みセルが一つあることです。そのため、パスまで届かなくなった生成器は、黙って少ない処理を計測するのではなく、CI で失敗します。
 
 ## バージョニング
 

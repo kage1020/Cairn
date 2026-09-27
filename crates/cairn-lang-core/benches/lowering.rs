@@ -1,8 +1,10 @@
 //! Throughput of the front end and block-array lowering over a generated
 //! site.
 //!
-//! The examples are a few dozen lines each, so a whole-pipeline run over
-//! any of them is dominated by process startup. This bench generates a
+//! Timing the CLI over an example would mostly time process startup, so
+//! the bench calls the passes in-process. An example is still too small
+//! to time that way — a few dozen lines go through a stage in less than
+//! the timer can tell apart from a change — so this bench generates a
 //! site large enough that parsing, resolution and block-array lowering do
 //! real work, and times each stage on its own input so a change to one of
 //! them — or to the release profile the bench inherits — shows up
@@ -19,7 +21,7 @@
 use std::fmt::Write as _;
 use std::hint::black_box;
 
-use cairn_lang_core::{lower, lower_to_block_array, parse, resolve};
+use cairn_lang_core::{check, lower, lower_to_block_array, parse, resolve};
 use criterion::{Criterion, criterion_group, criterion_main};
 
 /// Rows of `place`s in the generated site.
@@ -84,6 +86,13 @@ fn lowering(c: &mut Criterion) {
     let source = site_source(ROWS, COLS);
     let module = parse(&source).expect("the generated source parses");
     let intent = lower(&module);
+    // `check` is its own pass, so a misspelt optional key would get
+    // through the rest untouched and quietly change what is timed.
+    let findings = check(&module, &intent, None);
+    assert!(
+        findings.is_empty(),
+        "the generated source must check cleanly: {findings:?}",
+    );
     let resolution = resolve(&intent, None);
     assert!(
         resolution.diagnostics.is_empty(),
@@ -91,13 +100,13 @@ fn lowering(c: &mut Criterion) {
         resolution.diagnostics,
     );
     let block_ir = lower_to_block_array(&intent, &resolution, None);
-    // A finding here would mean a placement or a walkway dropped out, and
-    // the bench would be timing less than the fixture claims.
     assert!(
         block_ir.diagnostics.is_empty(),
         "the generated source must lower cleanly: {:?}",
         block_ir.diagnostics,
     );
+    // A placement or a walkway dropping out would leave the bench timing
+    // less than the fixture claims, and need not raise a finding.
     assert_eq!(block_ir.placements.len(), ROWS * COLS);
     assert_eq!(block_ir.walkways.len(), ROWS * (COLS - 1));
 

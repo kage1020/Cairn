@@ -41,7 +41,15 @@ jobs:
         run: cargo build --workspace --locked
 
       - name: Test
-        run: cargo test --workspace --locked
+        # bash, not the Windows default of pwsh: pwsh reports only the last
+        # command's exit code, so a failing first line would pass the step.
+        # The bench targets are not in `--workspace`'s test set, and their
+        # fixture checks only run in `--bench` test mode.
+        shell: bash
+        run: |
+          cargo test --workspace --locked
+          cargo test -p cairn-lang-core --bench lowering
+          cargo test -p cairn-lang-redstone --bench place_and_route
 
   docs:
     # Short and stable on purpose: a required status check is matched as

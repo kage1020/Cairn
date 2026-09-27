@@ -27,7 +27,7 @@ cargo run -p cairn-lang-cli -- check examples/cottage.crn --edition java --targe
 
 `check` writes nothing. `compile` writes structure files and a lockfile next to the source, so point it at `--out` and `--lock` outside the tree if you don't want build output in `examples/`.
 
-Before opening a PR, run what CI runs — the same four commands on Linux, macOS, and Windows, with `RUSTFLAGS=-D warnings` set for all of them:
+Before opening a PR, run what CI runs — the same commands on Linux, macOS, and Windows, with `RUSTFLAGS=-D warnings` set for all of them:
 
 ```sh
 export RUSTFLAGS="-D warnings"
@@ -35,7 +35,11 @@ cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo build --workspace --locked
 cargo test --workspace --locked
+cargo test -p cairn-lang-core --bench lowering
+cargo test -p cairn-lang-redstone --bench place_and_route
 ```
+
+The last two run each bench once as a test, untimed; `--workspace` does not select bench targets. [Changing the release profile](#changing-the-release-profile) says what they check.
 
 CI also builds the API docs on Linux, twice, with rustdoc's warnings fatal — clippy does not see a doc link to a private item or to a path that no longer resolves. The first run is the public surface and the only one that flags a public doc linking to a private item; the second also covers the docs only a contributor reads:
 
@@ -165,7 +169,7 @@ Raising `rust-version` changes who can build the crates, so it is not a quiet ma
 
 ## Changing the release profile
 
-`[profile.release]` in the workspace manifest is sized for the release archives, and each setting in it records why it is there. Most of them cost only build time. `opt-level` is the exception: it trades throughput in block-array lowering and in place-and-route, which is the work a build spends its time on. Two benches measure that side, each over a source generated large enough that the passes outweigh process startup: `lowering` in `cairn-lang-core` and `place_and_route` in `cairn-lang-redstone`. Benches inherit the release profile, so what they time is the code that ships. Save a baseline, change the profile — or override one setting from the environment without editing the file — and compare:
+`[profile.release]` in the workspace manifest is sized for the release archives, and its comments say why. Most of its settings cost only build time. `opt-level` is the exception: it trades throughput in block-array lowering and in place-and-route, which is the work a build spends its time on. Two benches measure that side: `lowering` in `cairn-lang-core` and `place_and_route` in `cairn-lang-redstone`. They call the passes in-process, since timing the CLI over an example would mostly time process startup, and they generate their sources rather than use an example, since a source that small goes through a pass faster than the timer can tell a change apart. Benches take their settings from the release profile, so `opt-level`, `lto` and `codegen-units` are timed as they ship; `panic` is the exception, because Cargo builds bench targets and their dependencies with unwinding, as it does tests. Save a baseline, change the profile — or override one setting from the environment without editing the file — and compare:
 
 ```sh
 cargo bench -p cairn-lang-core -p cairn-lang-redstone --bench lowering --bench place_and_route -- --save-baseline before
@@ -174,7 +178,7 @@ CARGO_PROFILE_RELEASE_OPT_LEVEL=s cargo bench -p cairn-lang-core -p cairn-lang-r
 
 Name the two benches: without `--bench`, `cargo bench` also runs each library's unit-test harness, which refuses criterion's `--save-baseline`. Run a baseline against itself once before trusting a difference. On a shared machine the smaller benches move by several percent between identical builds.
 
-Weigh a size change on the gzipped binaries, since the release archives are `.tar.gz` and `.zip`, and put the numbers in the commit message rather than the profile comment, where they would go stale on the next dependency bump. CI runs neither bench. A timing gate on shared runners would be noise, and a profile change is a decision made once rather than a regression surface. What CI does keep is that both benches compile, through `clippy --all-targets`. `cargo test -p cairn-lang-core --bench lowering` (and the same for `place_and_route`) runs each benchmark once as a check. Each bench checks that its generated source comes through every pass without losing a scope, so a generator that stopped reaching the passes fails there rather than quietly timing less work.
+Weigh a size change on the gzipped binaries, since the release archives are `.tar.gz` and `.zip`, and put the numbers in the commit message rather than the profile comment, where they would go stale on the next dependency bump. CI times neither bench. A timing gate on shared runners would be noise, and a profile change is a decision made once rather than a regression surface. What CI does run is each bench once as a test, untimed: `cargo test -p cairn-lang-core --bench lowering` and `cargo test -p cairn-lang-redstone --bench place_and_route`. Before it times anything, each bench checks that its generated source does the work it was built for — `lowering` that every placement and walkway comes out of block-array lowering, `place_and_route` that every scope comes through every pass with one placed cell per gate — so a generator that stopped reaching the passes fails in CI rather than quietly timing less work.
 
 ## Versioning
 
