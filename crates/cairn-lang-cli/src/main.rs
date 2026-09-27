@@ -285,7 +285,7 @@ enum Command {
         /// routed Placement IR / delayed Placement IR / legalized
         /// Placement IR. Required when `--stage edition`,
         /// `--stage placement`, `--stage route`, `--stage delay`, or
-        /// `--stage crossing` is set; refused for `logic` / `netlist`,
+        /// `--stage crossing` is set; refused for `logic` and `netlist`,
         /// which are edition-neutral by contract.
         #[arg(long, value_enum)]
         edition: Option<EditionArg>,
@@ -2030,9 +2030,9 @@ fn run_synth(
     }
 
     // Reject `--edition` on the edition-neutral stages loud instead of
-    // silently ignoring it — a caller who passed the flag on `--stage
-    // logic` or `--stage netlist` almost certainly expected it to shape
-    // the output, and swallowing the mistake would make the CLI's
+    // silently ignoring it — a caller who passed the flag on an
+    // edition-neutral stage almost certainly expected it to shape the
+    // output, and swallowing the mistake would make the CLI's
     // stage-vs-edition axis ambiguous.
     if !stage_requires_edition(stage) && edition.is_some() {
         eprintln!(
@@ -2201,8 +2201,10 @@ fn dispatch_synth_stage(
 /// composes at runtime. The four Placement IR stages read theirs from
 /// [`PlacementStage::as_str`] so the word here and the dump's `"stage"`
 /// key cannot drift; `placement_stage_names_match_clap` pins the clap
-/// derivation. The `--help` prose spells every stage by hand and is not
-/// reached from here.
+/// derivation. The `--help` prose spells every stage by hand and does
+/// not call this at runtime, but `synth_help_names_the_edition_partition`
+/// renders its expected lists through here (via `join_stages`), so
+/// renaming a stage fails that test until the help follows.
 fn stage_cli_name(stage: SynthStage) -> &'static str {
     match stage {
         SynthStage::Logic => "logic",
@@ -2222,8 +2224,19 @@ fn stage_cli_name(stage: SynthStage) -> &'static str {
 /// refuses a stray `--edition` on the `false` stages, `dispatch_synth_stage`
 /// demands it on the `true` ones, and the stray-`--edition` message renders
 /// both lists from here. The exhaustive `match` makes a new variant a
-/// compile error rather than a silent default. The `--help` prose spells
-/// the same partition by hand.
+/// compile error rather than a silent default.
+///
+/// The `--help` prose spells the same partition by hand: `synth`'s own
+/// description names the required stages and calls the rest "earlier",
+/// and `--edition`'s names both sides. Those sentences stay doc comments
+/// rather than `long_about` / `long_help` expressions so the source keeps
+/// reading as the help it renders; `synth_help_names_the_edition_partition`
+/// checks each one against this function instead, so moving a stage
+/// across fails a test until the prose follows. The check is verbatim
+/// containment of `join_stages`'s rendering, so the prose has to match
+/// its conjunction and Oxford-comma style exactly: a third
+/// edition-neutral stage makes `--edition`'s sentence read
+/// "`a`, `b`, and `c`" whatever reads best there.
 fn stage_requires_edition(stage: SynthStage) -> bool {
     match stage {
         SynthStage::Logic | SynthStage::Netlist => false,
@@ -3770,6 +3783,7 @@ mod tests {
     //! end-to-end `tests/cli_*.rs` binaries can only assert
     //! circumstantially, by hard-coding both sides of a pairing.
     use cairn_lang_core::resolve::DroppedIntent;
+    use clap::CommandFactory;
 
     use super::*;
 
@@ -4076,5 +4090,65 @@ mod tests {
              `--stage delay`, or `--stage crossing`",
         );
         assert_eq!(edition_neutral_stage_list(), "`logic` and `netlist`");
+    }
+
+    /// `--help` is what a caller reads before getting `--edition` wrong,
+    /// and it describes the partition in doc-comment prose that nothing
+    /// derives from `stage_requires_edition`. Rendering the lists from
+    /// the function and looking for them in clap's own help text is what
+    /// ties the two: a stage moved across the partition fails here
+    /// instead of leaving `--help` naming the old set.
+    ///
+    /// `synth`'s description only enumerates the required side and calls
+    /// the rest "the earlier stages", which holds only while every
+    /// edition-neutral stage precedes every edition-tagged one in
+    /// `--stage`'s order — so that ordering is pinned too.
+    #[test]
+    fn synth_help_names_the_edition_partition() {
+        let command = Cli::command();
+        let synth = command
+            .find_subcommand("synth")
+            .expect("synth is a subcommand");
+
+        let edition_help = synth
+            .get_arguments()
+            .find(|arg| arg.get_id() == "edition")
+            .and_then(|arg| arg.get_long_help().or_else(|| arg.get_help()))
+            .expect("--edition has help text")
+            .to_string();
+        let required = format!("Required when {} is set", edition_required_stage_list());
+        let refused = format!("refused for {}", edition_neutral_stage_list());
+        assert!(
+            edition_help.contains(&required) && edition_help.contains(&refused),
+            "--edition's help should say `{required}` and `{refused}`, got: {edition_help}",
+        );
+
+        let about = synth
+            .get_long_about()
+            .or_else(|| synth.get_about())
+            .expect("synth has a description")
+            .to_string();
+        let tagged = join_stages(stage_requires_edition, "and", |name| format!("`{name}`"));
+        assert!(
+            about.contains(&tagged),
+            "synth's description should name the edition-tagged stages as `{tagged}`, \
+             got: {about}",
+        );
+        assert!(
+            about.contains("earlier stages") && about.contains("edition-neutral"),
+            "synth's description should call the stages before {tagged} the earlier, \
+             edition-neutral ones, got: {about}",
+        );
+        let first_tagged = SynthStage::value_variants()
+            .iter()
+            .position(|stage| stage_requires_edition(*stage))
+            .expect("some stage requires --edition");
+        assert!(
+            SynthStage::value_variants()[first_tagged..]
+                .iter()
+                .all(|stage| stage_requires_edition(*stage)),
+            "an edition-neutral --stage follows an edition-tagged one, so `synth`'s \
+             \"earlier stages\" no longer describes the edition-neutral set",
+        );
     }
 }
