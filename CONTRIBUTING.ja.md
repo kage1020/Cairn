@@ -37,6 +37,13 @@ cargo build --workspace --locked
 cargo test --workspace --locked
 ```
 
+CI はこれとは別に、Linux で rustdoc の警告を致命的にして API ドキュメントを 2 回ビルドします。非公開の項目や解決できなくなったパスへのドキュメントリンクは clippy には見えないためです。1 回目は公開 API が対象で、公開ドキュメントから非公開項目へのリンクを検出するのはこちらだけです。2 回目はコントリビューターだけが読むドキュメントも対象にします。
+
+```sh
+RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --locked --all-features
+RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --locked --all-features --document-private-items
+```
+
 ### リポジトリの構成
 
 | パス | 中身 |
@@ -121,7 +128,7 @@ rg '\bM[1-6]\b|M[0-9]-PR[0-9]+|pre-M[0-9]|\bPR[0-9]+\b|\blater PR\b|\bfuture PR\
 
 ブランチ名は、その作業が最終的に載る Conventional Commits の type に合わせます (`feat/parser-lexer`、`fix/wall-corner-shape`、`docs/roadmap-2027`)。
 
-**PR タイトルは [Conventional Commits](https://www.conventionalcommits.org/) の 1 行でなければなりません。** squash merge が唯一のマージ方式なので、このタイトルがそのまま `canary` 上のコミットになり、`release-plz` がパッチリリースの要否を判断するために読むのもこれです。ブランチ上の個々のコミットは自由形式で構いません。破壊的変更には `!` を付け (`feat(core)!: replace lexer`)、スコープには対象のクレートか仕様領域を書きます (`feat(core)`、`fix(nbt)`、`docs(spec)`、`build(deps)`)。
+**PR タイトルは [Conventional Commits](https://www.conventionalcommits.org/) の 1 行でなければなりません。** squash merge が唯一のマージ方式なので、このタイトルがそのまま `canary` 上のコミットになり、`release-plz` がパッチリリースの要否を判断するために読むのもこれです。ブランチ上の個々のコミットは自由形式で構いません。スコープには対象のクレートか仕様領域を書きます (`feat(core)`、`fix(nbt)`、`docs(spec)`、`build(deps)`)。
 
 | Type | 使う場面 | パッチリリースを切るか |
 |---|---|---|
@@ -136,6 +143,10 @@ rg '\bM[1-6]\b|M[0-9]-PR[0-9]+|pre-M[0-9]|\bPR[0-9]+\b|\blater PR\b|\bfuture PR\
 | `chore` | 利用者に届かないその他すべて | いいえ |
 | `style` | 整形・lint だけの変更 | いいえ |
 
+**破壊的変更はコロンの直前に `!` を付けます** — type の後ろ、スコープを書くときはスコープの後ろです (`feat(core)!: replace lexer`、`fix!: …`)。`!` と CHANGELOG は対になっています。[CHANGELOG.md](CHANGELOG.md) の `## [Unreleased]` → `### Breaking changes` にエントリを足す PR はタイトルに `!` を付け、タイトルに `!` を付けた PR はそのエントリを足します。手書きのエントリは [compatibility「breaking はどう告知されるか」](https://cairn.kage1020.com/ja/spec/compatibility/) が求めるもので、`CHANGELOG.md` を読む人が目にするのはこちらです。`!` は同じ事実を `release-plz` が解析するコミットの側に書いたものです。片方だけの PR を見たレビュアーは、マージ前にもう片方を求めます。
+
+`!` はバージョンを決めません。semver ならメジャーバンプと読むところですが、ここではリリースワークフローが日付と既存タグから次の `YYYY.M.PATCH` を計算して `release-plz` の実行前に `Cargo.toml` へ書き込み、`release-plz` は公開済みのものと既に異なるバージョンには手を付けません。リリースの要否も決めません — それを決めるのは上の表の type です。変わるのは生成されるリリースノートです。`release-plz` はそのコミットの行の先頭に `[**breaking**]` を付け、`protect_breaking_commits` によって、普段は行が落とされる type (`docs!:`、`ci!:`) でもその行が残ります。
+
 自分で開く PR はすべて `canary` を対象にします。`main` 宛の PR はパイプラインの promote-to-main だけです。メンテナ 1 名の承認と CI のグリーンが必須です。リリース PR も同じルールで、これをマージすると公開が走り、`main` が fast-forward されます。
 
 ## 決着した決定を蒸し返す
@@ -146,7 +157,7 @@ rg '\bM[1-6]\b|M[0-9]-PR[0-9]+|pre-M[0-9]|\bPR[0-9]+\b|\blater PR\b|\bfuture PR\
 
 固定は意図的にチャンネル追従ではありません。`stable` にしていると、Rust のリリースひとつで開いているすべてのブランチが同時に赤くなります。しかもその指摘は、そのブランチが触ってもいないファイルに出ます。固定は新しい lint を避けるためのものではなく、それが「誰かが意図して開いた PR」として届くようにするためのものです。
 
-`channel` を変え、上の CI 3 コマンドを回し (新しいコンパイラは clippy の lint だけでなく *rustc* の警告も出します)、見つかったものを同じ PR で直し、コミットの type は `ci` にします。「新しいコンパイラと、それが要求した修正だけ」という差分は、レビュアーが実際に読める差分です。
+`channel` を変え、上の CI コマンドを回し (新しいコンパイラは clippy の lint だけでなく *rustc* や *rustdoc* の警告も出すので、固定の更新で `Docs` が赤くなることもあります)、見つかったものを同じ PR で直し、コミットの type は `ci` にします。「新しいコンパイラと、それが要求した修正だけ」という差分は、レビュアーが実際に読める差分です。
 
 固定は MSRV ではありません。ワークスペースマニフェストの `rust-version` は、利用者が Cairn をビルドするのに必要な下限であり、固定はつねにそれより新しいコンパイラです。安定化されたばかりの API に手を伸ばした変更は固定側では緑で、下限では壊れます。その一部は clippy が既に見ています。`clippy::incompatible_msrv` は `rust-version` を読んで、それより上で安定化された**標準ライブラリ**の項目を拒み、`-D warnings` がそれを致命的にします。ただしこれは lint なので `#[allow]` 一行で黙り、さらに**依存先**自身の `rust-version` が我々の下限より上である場合については何も言いません。後者は cargo のハードエラーで、固定側では決して現れません。両方を捕まえるのが、下限でコンパイルする CI の `MSRV` ジョブです。`cargo metadata` でマニフェストから `rust-version` を読み直し (古くなる二つ目のコピーを作らないため)、そのコンパイラを入れて `cargo check --workspace --locked --all-features` を回します。`test` ではなく `check` なのは、下限が問うているのが「利用者が依存するクレートがコンパイルできるか」だからです。dev-dependencies やテストハーネスは、ライブラリ本体より新しいコンパイラを要求してかまいません。`--all-features` を付けるのは、`rust-version` がパッケージごとに一つしか書けず、「この下限、ただしその feature を有効にした場合を除く」と cargo に伝える手段がないからです。`--locked` は、リポジトリをクローンした利用者が解決するのが、コミットされたロックファイルそのものだからで、壊れているのが Cairn のコードではなく依存先自身の下限であるとき、cargo がそのパッケージ名を挙げてくれます。
 

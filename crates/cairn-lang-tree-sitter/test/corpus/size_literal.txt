@@ -7,3 +7,34 @@ Space around x is not size
 struct s size=9 x 7
 
 ---
+
+==================
+A space after x leaves three values, not a size
+==================
+
+struct s size=3x3
+  floor size=2x 2
+
+---
+
+(source_file
+  (struct_decl
+    (identifier)
+    (attribute_list
+      (attribute
+        (identifier)
+        (size_literal
+          (integer)
+          (integer))))
+    (struct_body
+      (member_stmt
+        (member_keyword)
+        (command_arg_list
+          (command_arg
+            (attribute
+              (identifier)
+              (integer)))
+          (command_arg
+            (identifier))
+          (command_arg
+            (integer)))))))

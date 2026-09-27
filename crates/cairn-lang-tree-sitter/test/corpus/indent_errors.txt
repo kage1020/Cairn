@@ -126,3 +126,21 @@ struct s size=3x3
       room
 
 ---
+
+==================
+An over-indented line errors on its own row, and the header survives
+==================
+
+theme t:
+    walls b=2
+
+---
+
+(source_file
+  (theme_decl
+    (identifier))
+  (ERROR
+    (identifier)
+    (identifier)
+    (integer)
+    (UNEXPECTED '\n')))

@@ -203,42 +203,6 @@ static bool emit_dedent(Scanner *s, TSLexer *lexer) {
   return true;
 }
 
-// Whether the line following the line break the lexer has just consumed
-// is indented in a way `cairn-lang-core::lex::Lexer::scan_line_start`
-// refuses: an odd number of spaces (`LexError::OddIndent`), or a jump of
-// more than one level, which that function reports as `OddIndent` too.
-//
-// Both are checked here, one line early, so the refusal lands on the
-// break in front of the offending line rather than on the line itself.
-// LINE_START refuses both where they occur as well — it is withheld for
-// an odd count and for a level the stack cannot reach — so what this buys
-// is no longer whether a file is refused, only where the error is
-// reported and how much of the file the recovery around it keeps. Kept
-// rather than removed because that is a decision about error shape with
-// its own blast radius, not a consequence of the token that made it
-// redundant.
-//
-// Called with the token already marked (see the NEWLINE branch in
-// `scan()`), so the characters read here are lookahead: they are not part
-// of whatever token the caller goes on to produce.
-//
-// Blank and comment-only lines carry no indentation, so they answer
-// `false` and leave the verdict to the line break that follows them,
-// which puts the refusal on the break nearest the offending line. That
-// matches `scan_line_start`, which counts a blank line's leading spaces
-// like any other line's but then discards the line before comparing the
-// count to anything.
-static bool next_line_indent_is_illegal(Scanner *s, TSLexer *lexer) {
-  uint32_t spaces = 0;
-  while (lexer->lookahead == ' ') {
-    advance(lexer);
-    spaces++;
-  }
-  if (at_line_break(lexer) || lexer->lookahead == '#') return false;
-  if (spaces & 1u) return true;
-  return spaces / 2 > (uint32_t)*array_back(&s->indent_stack) + 1;
-}
-
 bool tree_sitter_cairn_external_scanner_scan(void *payload, TSLexer *lexer, const bool *valid_symbols) {
   Scanner *s = (Scanner *)payload;
 
@@ -262,15 +226,40 @@ bool tree_sitter_cairn_external_scanner_scan(void *payload, TSLexer *lexer, cons
   // back to a generic `identifier` token covering `x7`, so a plain literal
   // 'x' token can never win the match. The external scanner runs before
   // that machinery and is only ever consulted where the grammar expects
-  // this separator, so it can commit to the single `x` character directly.
+  // this separator, so it can take the single `x` character directly.
   // It is checked before any extras (spaces) are skipped, and before the
   // run of spaces the layout section below reads, which is exactly what
   // enforces immediate adjacency: `9 x 7` must not parse as one size
-  // literal. The right of the separator is held by `token.immediate` in
-  // `grammar.js`; the left is held by nothing but this branch's position,
-  // which `size_space_before_x` in `tests/parser_parity.rs` keeps here.
+  // literal. The left of the separator is held by nothing but this
+  // branch's position, which `size_space_before_x` in
+  // `tests/parser_parity.rs` keeps here.
+  //
+  // The right is held here too, by the one character behind the `x`: the
+  // separator is only taken when a digit follows it, which is the test
+  // `cairn_lang_core::lex::Lexer::scan_number` applies before it reads a
+  // run as a size. Committing on the `x` alone entered `size_literal` for
+  // `2x 2` and then failed it for want of a height, where the reference
+  // parser reads a `2`, an `x` and a `2` — three positional arguments,
+  // exactly what `2 x 2` gets. The same holds for `2x` at the end of a
+  // line or of the file (where `lookahead` is 0), `2xx` and `2x f`.
+  // Declining after the `advance()` is safe because tree-sitter resets
+  // the lexer when the external scanner returns false, so its own lexer
+  // then reads the `x` as an identifier.
+  //
+  // This branch, not the `token.immediate` on the height in `grammar.js`,
+  // is what decides adjacency on the right now: once a digit is known to
+  // stand directly behind the `x`, no extra can come between them, so the
+  // `immediate` refuses nothing on its own. It is kept as the grammar's
+  // statement of the shape; if one of the two goes, it is that one. What
+  // runs on past the height (`2x2y`) is still decided by neither.
+  //
+  // Declining loses no other external token. Outside error recovery
+  // (cut above by the `ERROR_SENTINEL` guard), the generated tables offer
+  // `_size_x` either alone or beside `_newline` only, and the NEWLINE
+  // branch answers on a `\n` or `\r`, never on an `x`.
   if (valid_symbols[SIZE_X] && lexer->lookahead == 'x') {
     advance(lexer);
+    if (lexer->lookahead < '0' || lexer->lookahead > '9') return false;
     lexer->result_symbol = SIZE_X;
     return true;
   }
@@ -441,14 +430,27 @@ bool tree_sitter_cairn_external_scanner_scan(void *payload, TSLexer *lexer, cons
 
   // NEWLINE handling: consume \r\n / \n / \r and emit NEWLINE.
   //
-  // The token is marked as soon as the break is consumed so the odd-indent
-  // check that follows reads the next line without widening it. Withholding
-  // the NEWLINE is what makes an odd-indented line an error: nothing else
-  // in the grammar can consume a line break, so the parser has no way past
-  // it. Refusing here rather than at the offending line start is the only
-  // lever available — a line that sits at the level it already sits at asks
-  // the scanner for no token at all, so at that point there is nothing left
-  // to withhold.
+  // The break is consumed and nothing else: the line behind it is not
+  // read here. An illegal indent on that line is refused where it
+  // stands, by the layout section below: an odd count returns before the
+  // level is compared, withholding LINE_START, INDENT and DEDENT alike,
+  // and a jump of more than one level returns inside the INDENT arm, so
+  // LINE_START is never reached either. No construct can start on the
+  // line, and the error lands on the offending row.
+  //
+  // This branch used to read the next line and withhold the NEWLINE in
+  // front of such a line instead. That refused exactly the same files,
+  // and not by sampling: `body()` and `source_file` in `grammar.js` put
+  // `_line_start` in front of every construct that starts a line, so this
+  // scanner is always consulted at a content line's start, and there the
+  // odd-count and `level != current + 1` tests read the same predicate
+  // against the same stack the lookahead read one line earlier — nothing
+  // pops in between, and blank and comment lines answered `false` there
+  // too. What moved was only where the error sits: on the break, the
+  // recovery took the line in front down as well, so
+  // `theme t:\n    walls b=2\n` lost its `theme_decl` header.
+  // `a_bad_indent_errors_on_its_own_row` in `tests/parser_parity.rs` and
+  // `test/corpus/indent_errors.txt` hold that shape.
   //
   // Whatever run of spaces stood in front of the break is already behind
   // the lexer, so a line that ends in one arrives here like any other. A
@@ -461,10 +463,7 @@ bool tree_sitter_cairn_external_scanner_scan(void *payload, TSLexer *lexer, cons
     } else {
       advance(lexer);
     }
-    uint32_t next_line_column = lexer->get_column(lexer);
-    lexer->mark_end(lexer);
-    if (next_line_indent_is_illegal(s, lexer)) return false;
-    s->line_start_column = next_line_column;
+    s->line_start_column = lexer->get_column(lexer);
     lexer->result_symbol = NEWLINE;
     return true;
   }

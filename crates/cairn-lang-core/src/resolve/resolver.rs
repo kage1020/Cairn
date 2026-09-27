@@ -135,7 +135,7 @@ impl std::fmt::Display for PortRef {
 /// The `path` is intentionally still a [`ValueWithSpan`] (and not a
 /// lifted `BlockState`) at this layer: per-edition material resolution
 /// is the responsibility of the next maturity tier (see
-/// [`crate::resolve`] module docs), and lifting here would invert the
+/// [`mod@crate::resolve`] module docs), and lifting here would invert the
 /// `core` → `formats` dependency edge that owns the registry pack.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct ValidatedConnect {
@@ -275,7 +275,7 @@ struct ResolveCtx<'a> {
 /// position-anchored signal. Re-pushing would report one mistake twice,
 /// and the pass that owns it can anchor on the name token, which the IR
 /// no longer carries. This is the same division of labour the silent
-/// arms in [`resolve_connect_row`] follow, and it is pinned the same
+/// arms in `resolve_connect_row` follow, and it is pinned the same
 /// way, by `tests/silent_skip_arms.rs` for the resolver-only path and
 /// `tests/check_duplicate_items.rs` for the full pipeline. A
 /// `debug_assert` on the skip is deliberately absent: the condition is
@@ -787,7 +787,7 @@ fn def_key(d: &DefIr) -> String {
 /// Embedding the site name (`site::hamlet::home1` rather than
 /// `place::home1`) lets multiple sites in one module own non-clashing place
 /// ids — the IR key shape stays unambiguous even before
-/// [`crate::block_array::output_filename`] flattens the leaf for the
+/// `cairn_lang_formats::output_filename` flattens the leaf for the
 /// per-file `.nbt` name.
 #[must_use]
 pub fn place_scope_key(site_name: &str, place_id: &str) -> String {
