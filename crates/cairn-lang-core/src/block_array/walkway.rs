@@ -629,10 +629,11 @@ pub fn l_path(from: (i32, i32, i32), to: (i32, i32, i32)) -> Vec<(i32, i32, i32)
 
     // z-axis leg: walk from (x1, z0) toward (x1, z1). The cell at
     // (x1, z0) is the corner already laid down at the end of the
-    // x-leg, so the loop steps z BEFORE pushing — every cell here
-    // is fresh and the `contains` guard is a structural safety net
-    // for callers that pass overlapping legs (e.g. a single-axis
-    // path constructed by hand) rather than a load-bearing dedup.
+    // x-leg, so the loop steps z BEFORE pushing. That order is the
+    // whole corner dedup: every x-leg cell has `z == z0` and every
+    // z-leg cell has `z != z0`, so no cell can appear twice and no
+    // lookup into `voxels` is needed. A lookup would be a linear scan
+    // per step, which makes a long north–south strip quadratic.
     let mut z = z0;
     let step_z: i32 = match z1.cmp(&z0) {
         std::cmp::Ordering::Equal => 0,
@@ -641,10 +642,7 @@ pub fn l_path(from: (i32, i32, i32), to: (i32, i32, i32)) -> Vec<(i32, i32, i32)
     };
     while z != z1 {
         z += step_z;
-        let cell = (x1, y, z);
-        if !voxels.contains(&cell) {
-            voxels.push(cell);
-        }
+        voxels.push((x1, y, z));
     }
     voxels
 }
@@ -1711,6 +1709,36 @@ mod tests {
     fn l_path_same_endpoints_yields_single_cell() {
         let path = l_path((5, 0, 5), (5, 0, 5));
         assert_eq!(path, vec![(5, 0, 5)]);
+    }
+
+    /// A path with no x leg is all z leg, and its first cell is still the
+    /// one the x leg pushed: the stepping order alone keeps it single.
+    #[test]
+    fn l_path_along_z_alone_lays_each_cell_once() {
+        let path = l_path((4, 0, 0), (4, 0, 3));
+        assert_eq!(path, vec![(4, 0, 0), (4, 0, 1), (4, 0, 2), (4, 0, 3)]);
+    }
+
+    /// A north–south strip costs time linear in its length, as an east–west
+    /// one does. A lookup into the laid cells on every z step made it
+    /// quadratic: a million-cell strip then takes on the order of an hour in
+    /// a debug build, where the linear walk takes milliseconds. The deadline
+    /// sits orders of magnitude from both, so a slow runner cannot trip it
+    /// and the quadratic walk cannot meet it; the walk runs on its own
+    /// thread so a regression fails here instead of hanging the suite.
+    #[test]
+    fn l_path_lays_a_long_z_strip_in_linear_time() {
+        const LEN: i32 = 1_000_000;
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = tx.send(l_path((0, 0, 0), (0, 0, LEN - 1)));
+        });
+        let path = rx
+            .recv_timeout(std::time::Duration::from_secs(60))
+            .expect("a million-cell z strip must be laid well inside a minute");
+        assert_eq!(path.len(), usize::try_from(LEN).expect("fits"));
+        assert_eq!(path.first(), Some(&(0, 0, 0)));
+        assert_eq!(path.last(), Some(&(0, 0, LEN - 1)));
     }
 
     fn sample_key() -> WalkwayScopeKey {
