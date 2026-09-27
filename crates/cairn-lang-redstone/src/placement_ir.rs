@@ -48,7 +48,7 @@ use cairn_lang_core::Edition;
 use cairn_lang_core::ast::DottedRef;
 use cairn_lang_core::error::Span;
 use indexmap::IndexMap;
-use serde::de::{self, MapAccess, Visitor};
+use serde::de::{self, IntoDeserializer, MapAccess, Visitor};
 use serde::ser::SerializeStruct;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
@@ -70,8 +70,12 @@ use crate::netlist_ir::{CellPortDriver, NetRef, NetlistInput, PortName};
 /// at one voxel are one map key rather than two.
 /// Serialising as the enum's stable lowercase string (`plane` /
 /// `bridge` / `via`) keeps the JSON wire form small and matches the
-/// vocabulary `spec/redstone` "Place-and-route" uses.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+/// vocabulary `spec/redstone` "Place-and-route" uses. Reading one back
+/// is derived, so it accepts exactly the variant names in snake case —
+/// the words [`Self::as_str`] writes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[cfg_attr(test, derive(strum::EnumIter))]
 pub enum RouteLayer {
     /// Ground layer — every cell coord, every pad, and every coord
     /// the router did not have to climb to sits here. Default so that
@@ -118,53 +122,12 @@ impl RouteLayer {
             Self::Via => "via",
         }
     }
-
-    /// Every variant, in [`Self::WORDS`] order — what the hand-written
-    /// [`Deserialize`] matches a wire string against.
-    const ALL: [Self; 3] = [Self::Plane, Self::Bridge, Self::Via];
-
-    /// [`Self::as_str`] of every variant in [`Self::ALL`], spelled
-    /// through `as_str` so the two directions cannot disagree on a
-    /// word, and listed in the error an unknown `layer` string earns.
-    const WORDS: &'static [&'static str] = &[
-        Self::ALL[0].as_str(),
-        Self::ALL[1].as_str(),
-        Self::ALL[2].as_str(),
-    ];
 }
 
 impl Serialize for RouteLayer {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         serializer.serialize_str(self.as_str())
     }
-}
-
-/// Reads back the [`RouteLayer::as_str`] word [`Serialize`] writes, and
-/// refuses any other string with the vocabulary it expected.
-impl<'de> Deserialize<'de> for RouteLayer {
-    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        deserialize_word(deserializer, Self::WORDS, &Self::ALL)
-    }
-}
-
-/// Read one string off `deserializer` and return the entry of `values`
-/// at the position of the matching entry of `words`.
-///
-/// The shared half of the hand-written [`Deserialize`] impls for the
-/// wire-level enums whose [`Serialize`] writes an `as_str` word: a
-/// string outside the vocabulary is refused as an unknown variant, with
-/// every word it could have been, rather than mapped to a default.
-fn deserialize_word<'de, D: Deserializer<'de>, T: Copy>(
-    deserializer: D,
-    words: &'static [&'static str],
-    values: &[T],
-) -> Result<T, D::Error> {
-    let word = String::deserialize(deserializer)?;
-    words
-        .iter()
-        .position(|w| *w == word)
-        .map(|i| values[i])
-        .ok_or_else(|| de::Error::unknown_variant(&word, words))
 }
 
 /// Coordinate inside a scope's `circuit region` reservation.
@@ -193,11 +156,16 @@ fn deserialize_word<'de, D: Deserializer<'de>, T: Copy>(
 /// earlier stages' shape apart from the `stage` tag
 /// ([`PlacementStage`]), whose value changes rather than appears.
 ///
-/// Reading a coord back takes an absent `layer` as
-/// [`RouteLayer::Plane`], the one value [`Serialize`] leaves out, and
-/// refuses a key the wire form does not have.
+/// Reading a coord back goes through [`Self::new`] too, so a read-back
+/// coord is one the pipeline could have built: an absent `layer` is the
+/// one the height gives, an explicit `layer` that agrees with it is
+/// accepted, and one that disagrees is refused rather than read as a
+/// second spelling of the voxel. That refuses every explicit `via`,
+/// deliberately: no producer writes it and [`Self::new`] cannot spell
+/// it, so the reader grows it when the rule does. A key the wire form
+/// does not have is refused as well.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[serde(try_from = "CellCoordWire")]
 pub struct CellCoord {
     /// Column along the region's x-axis. Zero at the region's origin.
     pub x: u32,
@@ -218,16 +186,46 @@ pub struct CellCoord {
     /// by the one rule [`Self::new`] holds.
     /// Serialised only when it differs from the default so a
     /// `Plane` coord's JSON omits the `layer` field.
-    #[serde(default, skip_serializing_if = "RouteLayer::is_plane")]
+    #[serde(skip_serializing_if = "RouteLayer::is_plane")]
     pub layer: RouteLayer,
+}
+
+/// [`CellCoord`]'s wire form as read, before [`CellCoord::new`] judges
+/// the `layer` against the height.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CellCoordWire {
+    x: u32,
+    y: u32,
+    z: u32,
+    #[serde(default)]
+    layer: Option<RouteLayer>,
+}
+
+impl TryFrom<CellCoordWire> for CellCoord {
+    type Error = String;
+
+    fn try_from(wire: CellCoordWire) -> Result<Self, Self::Error> {
+        let coord = Self::new(wire.x, wire.y, wire.z);
+        match wire.layer {
+            Some(layer) if layer != coord.layer => Err(format!(
+                "a coord at `y: {y}` is on the `{want}` layer, not `{got}`",
+                y = wire.y,
+                want = coord.layer.as_str(),
+                got = layer.as_str(),
+            )),
+            _ => Ok(coord),
+        }
+    }
 }
 
 impl CellCoord {
     /// The coord at `(x, y, z)`: [`RouteLayer::Plane`] on the ground
     /// layer, [`RouteLayer::Bridge`] above it.
     ///
-    /// The only constructor, so the layer is a function of the height
-    /// for everything the pipeline builds. One rule rather than one
+    /// The only constructor, and the one a coord read back from a dump
+    /// goes through, so the layer is a function of the height for
+    /// everything the pipeline builds. One rule rather than one
     /// per producer, because `(x, 1, z, Plane)` and
     /// `(x, 1, z, Bridge)` are distinct map keys and one voxel: two
     /// producers with two rules would key past each other and put two
@@ -358,25 +356,30 @@ impl Serialize for BufferSegment {
 }
 
 impl BufferSegment {
-    /// Every segment, in [`Self::WORDS`] order.
-    const ALL: [Self; 4] = [
-        Self::Port(PortName::A),
-        Self::Port(PortName::B),
-        Self::Port(PortName::Sel),
-        Self::Out,
-    ];
-
-    /// The flat wire word of every segment in [`Self::ALL`]: the
-    /// driver ports as [`PortName`] spells them, then `out`.
+    /// Every word a segment is written as — the driver ports as
+    /// [`PortName`]'s derived `Serialize` spells them, then `out` — for
+    /// the error an unknown word earns. Only the error reads it: the
+    /// acceptance set is [`PortName`]'s own, so a port added there reads
+    /// back without touching this list, and a test holds the list to
+    /// every word a segment is written as.
     const WORDS: &'static [&'static str] = &["a", "b", "sel", "out"];
 }
 
-/// Reads back the one flat string vocabulary [`Serialize`] writes, so
-/// an unknown word is refused naming all four rather than only the
-/// three [`PortName`] knows.
+/// Reads back the one flat string vocabulary [`Serialize`] writes:
+/// `out`, or any word [`PortName`]'s own `Deserialize` accepts. An
+/// unknown word is refused naming every segment word rather than only
+/// the ports.
 impl<'de> Deserialize<'de> for BufferSegment {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        deserialize_word(deserializer, Self::WORDS, &Self::ALL)
+        let word = String::deserialize(deserializer)?;
+        if word == "out" {
+            return Ok(Self::Out);
+        }
+        PortName::deserialize(IntoDeserializer::<de::value::Error>::into_deserializer(
+            word.as_str(),
+        ))
+        .map(Self::Port)
+        .map_err(|_| de::Error::unknown_variant(&word, Self::WORDS))
     }
 }
 
@@ -457,11 +460,15 @@ impl CircuitRegionReservation {
 /// accepts, so a dump names the flag that produced it and a consumer
 /// can round-trip the two. Keep them in step with the CLI's
 /// `SynthStage` value names — the CLI test suite asserts the
-/// equality per stage.
+/// equality per stage. Reading a tag back is derived, so it accepts
+/// exactly the variant names in snake case, which are the words
+/// [`Self::as_str`] writes; a test walks every variant through both.
 ///
 /// `#[non_exhaustive]` for the same reason [`PlacementPhase`] is: the
 /// fifth stage (Edition legalization) has no variant yet.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[cfg_attr(test, derive(strum::EnumIter))]
 #[non_exhaustive]
 pub enum PlacementStage {
     /// Produced by [`crate::placement::compile_placement`] — paired
@@ -493,31 +500,11 @@ impl PlacementStage {
             Self::Crossing => "crossing",
         }
     }
-
-    /// Every stage, in pipeline order and in [`Self::WORDS`] order.
-    const ALL: [Self; 4] = [Self::Placement, Self::Route, Self::Delay, Self::Crossing];
-
-    /// [`Self::as_str`] of every stage in [`Self::ALL`].
-    const WORDS: &'static [&'static str] = &[
-        Self::ALL[0].as_str(),
-        Self::ALL[1].as_str(),
-        Self::ALL[2].as_str(),
-        Self::ALL[3].as_str(),
-    ];
 }
 
 impl Serialize for PlacementStage {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         serializer.serialize_str(self.as_str())
-    }
-}
-
-/// Reads back the [`PlacementStage::as_str`] word, refusing an unknown
-/// stage rather than guessing one — the tag is what a reader picks the
-/// [`PlacementPhase`] variant by.
-impl<'de> Deserialize<'de> for PlacementStage {
-    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        deserialize_word(deserializer, Self::WORDS, &Self::ALL)
     }
 }
 
@@ -1213,10 +1200,36 @@ impl fmt::Display for CellIdentity<'_> {
 /// is missing (`local_delay_ticks` under `"delay"`). `buffer_coords`
 /// is the one payload key that may be absent at its own stage, because
 /// [`Serialize`] leaves it out when the crossing pass placed nothing.
-/// A missing `stage`, an unknown `stage` or `layer` word, and a key the
-/// wire form does not have are refused too. Every refusal is a
-/// deserializer error, not a panic. [`Self::span`] is not part of the
-/// wire form, so a cell read back carries the empty span `0..0`.
+/// A missing `stage`, an unknown `stage` or `layer` word, a `layer`
+/// that disagrees with the coord's height (see [`CellCoord`]), a buffer
+/// on a segment the cell has no driver for, and a key the wire form
+/// does not have — at any depth — are refused too. Every refusal is a
+/// deserializer error, not a panic.
+///
+/// This reader is the first way code outside this crate can build a
+/// `PlacedCellNode` at all: the struct is `#[non_exhaustive]` with a
+/// crate-private phase and has no public constructor. What it builds is
+/// a cell as its `stage`'s pass left it, so hand it to the pass *after*
+/// that stage. The phase transitions still panic on a phase they do
+/// not expect, as they do for a cell the pipeline built: the promise
+/// above that a bad dump is an error rather than a panic is this
+/// reader's, not theirs.
+///
+/// [`Self::span`] is not part of the wire form, so a cell read back
+/// carries `0..0` — which is also a real empty span at the start of a
+/// file, and `PartialEq` compares it. A round trip is therefore equal
+/// except for the span: compare against the original with its span set
+/// to `0..0`.
+///
+/// Read-back is for self-describing formats (JSON and the like). The
+/// reader takes a map; the field count of the flat form varies with the
+/// phase, from four keys to seven, so a positional encoding such as
+/// bincode or postcard cannot be read back unambiguously, and a
+/// non-map input is refused rather than guessed at. A repeated key is
+/// refused only where the deserializer hands over the map as written —
+/// `serde_json::from_str`, `from_slice`, `from_reader`. Through a
+/// `serde_json::Value` it cannot be: the `Value` has already folded the
+/// duplicates, last one winning, before this reader sees the map.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct PlacedCellNode {
@@ -1491,6 +1504,36 @@ impl PhaseFields {
     }
 }
 
+/// Refuse a buffer a cell could not carry: every [`BufferCoord`] on a
+/// cell stands on [`BufferSegment::Port`] of one of that cell's own
+/// drivers. It is the contract the crossing pass debug-asserts where it
+/// writes them, held here in every build so a dump cannot bring in what
+/// the pass itself would never emit — `out` belongs to a
+/// [`PlacedOutputNode`], and a port the cell has no driver on would
+/// group buffers under a driver that does not exist.
+fn check_buffers_stand_on_drivers<E: de::Error>(
+    phase: &PlacementPhase,
+    drivers: &[CellPortDriver],
+) -> Result<(), E> {
+    for (i, buffer) in phase.buffer_coords().iter().enumerate() {
+        match buffer.port {
+            BufferSegment::Port(port) if drivers.iter().any(|d| d.port == port) => {}
+            BufferSegment::Port(_) => {
+                return Err(E::custom(format_args!(
+                    "`buffer_coords[{i}]` stands on a port no entry of this cell's `drivers` feeds"
+                )));
+            }
+            BufferSegment::Out => {
+                return Err(E::custom(format_args!(
+                    "`buffer_coords[{i}]` stands on the `out` segment, which runs to a placed \
+                     output and is never a cell's"
+                )));
+            }
+        }
+    }
+    Ok(())
+}
+
 impl<'de> Deserialize<'de> for PlacedCellNode {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         struct CellVisitor;
@@ -1499,7 +1542,7 @@ impl<'de> Deserialize<'de> for PlacedCellNode {
             type Value = PlacedCellNode;
 
             fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-                f.write_str("a placed cell in the flat wire form `cairn synth --stage` dumps")
+                f.write_str("a placed cell in the flat Placement IR wire form")
             }
 
             fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<PlacedCellNode, A::Error> {
@@ -1525,11 +1568,14 @@ impl<'de> Deserialize<'de> for PlacedCellNode {
                         other => return Err(de::Error::unknown_field(other, PLACED_CELL_FIELDS)),
                     }
                 }
+                let drivers = drivers.ok_or_else(|| de::Error::missing_field("drivers"))?;
+                let phase = phase.into_phase()?;
+                check_buffers_stand_on_drivers(&phase, &drivers)?;
                 Ok(PlacedCellNode {
                     cell: cell.ok_or_else(|| de::Error::missing_field("cell"))?,
-                    drivers: drivers.ok_or_else(|| de::Error::missing_field("drivers"))?,
+                    drivers,
                     coord: coord.ok_or_else(|| de::Error::missing_field("coord"))?,
-                    phase: phase.into_phase()?,
+                    phase,
                     span: Span::default(),
                 })
             }
@@ -2636,8 +2682,8 @@ mod tests {
             wire_length: 20,
             local_delay_ticks: 2,
             buffer_coords: vec![
-                BufferCoord::new(BufferSegment::Port(PortName::B), CellCoord::new(4, 0, 2)),
-                BufferCoord::new(BufferSegment::Out, CellCoord::new(9, 1, 2)),
+                BufferCoord::new(BufferSegment::Port(PortName::Sel), CellCoord::new(4, 0, 2)),
+                BufferCoord::new(BufferSegment::Port(PortName::A), CellCoord::new(9, 1, 2)),
             ],
         };
         let empty = PlacementPhase::Legalized {
@@ -2685,54 +2731,105 @@ mod tests {
         }
     }
 
-    /// A stage that must carry a key and does not, or carries a key it
-    /// has not reached, is refused naming both — as an error, not a
-    /// panic.
+    /// A refusal's sentence, without the ` at line 1 column N` position
+    /// `serde_json` appends to it.
+    fn sentence(err: &str) -> &str {
+        err.split(" at line ").next().unwrap_or(err)
+    }
+
+    /// Every one of the eleven `(stage tag, payload key)` pairs the
+    /// reader holds is refused, each with the whole sentence naming the
+    /// tag, the key and the stage that writes it — so no guard in
+    /// `PhaseFields::into_phase` can go missing without a row failing.
+    ///
+    /// Each row breaks exactly one pair and is otherwise a valid dump of
+    /// its stage.
     #[test]
-    fn a_payload_key_that_disagrees_with_the_stage_is_refused() {
+    fn every_payload_key_that_disagrees_with_the_stage_is_refused() {
         let body = r#""cell":"java_repeater_or","drivers":[],"coord":{"x":0,"y":0,"z":0}"#;
-        for (payload, expected) in [
+        let early = |key: &str, writer: &str, stage: &str| {
+            format!(
+                "`{key}` is written by the {writer} stage, which a cell tagged \
+                 `stage: \"{stage}\"` has not reached"
+            )
+        };
+        let due = |key: &str, writer: &str, stage: &str| {
+            format!(
+                "a cell tagged `stage: \"{stage}\"` has been through the {writer} stage and \
+                 must carry `{key}`"
+            )
+        };
+        let rows = [
             (
-                r#""stage":"delay","wire_length":3"#,
-                "tagged `stage: \"delay\"` has been through the delay stage and must carry \
-                 `local_delay_ticks`",
+                "placement",
+                r#","wire_length":3"#,
+                early("wire_length", "route", "placement"),
             ),
             (
-                r#""stage":"route""#,
-                "tagged `stage: \"route\"` has been through the route stage and must carry \
-                 `wire_length`",
+                "placement",
+                r#","local_delay_ticks":1"#,
+                early("local_delay_ticks", "delay", "placement"),
             ),
             (
-                r#""stage":"crossing","local_delay_ticks":1"#,
-                "must carry `wire_length`",
+                "placement",
+                r#","buffer_coords":[]"#,
+                early("buffer_coords", "crossing", "placement"),
             ),
             (
-                r#""stage":"route","wire_length":3,"buffer_coords":[]"#,
-                "`buffer_coords` is written by the crossing stage, which a cell tagged \
-                 `stage: \"route\"` has not reached",
+                "route",
+                r#","wire_length":3,"local_delay_ticks":1"#,
+                early("local_delay_ticks", "delay", "route"),
             ),
             (
-                r#""stage":"placement","wire_length":3"#,
-                "`wire_length` is written by the route stage, which a cell tagged \
-                 `stage: \"placement\"` has not reached",
+                "route",
+                r#","wire_length":3,"buffer_coords":[]"#,
+                early("buffer_coords", "crossing", "route"),
+            ),
+            ("route", "", due("wire_length", "route", "route")),
+            (
+                "delay",
+                r#","wire_length":3,"local_delay_ticks":1,"buffer_coords":[]"#,
+                early("buffer_coords", "crossing", "delay"),
             ),
             (
-                r#""stage":"route","wire_length":3,"local_delay_ticks":1"#,
-                "`local_delay_ticks` is written by the delay stage",
+                "delay",
+                r#","local_delay_ticks":1"#,
+                due("wire_length", "route", "delay"),
             ),
-        ] {
-            let json = format!("{{{payload},{body}}}");
+            (
+                "delay",
+                r#","wire_length":3"#,
+                due("local_delay_ticks", "delay", "delay"),
+            ),
+            (
+                "crossing",
+                r#","local_delay_ticks":1"#,
+                due("wire_length", "route", "crossing"),
+            ),
+            (
+                "crossing",
+                r#","wire_length":3"#,
+                due("local_delay_ticks", "delay", "crossing"),
+            ),
+        ];
+        for (stage, payload, expected) in rows {
+            let json = format!(r#"{{"stage":"{stage}"{payload},{body}}}"#);
             let err = read_back(&json).expect_err(&json);
-            assert!(err.contains(expected), "{json}: {err}");
+            assert_eq!(sentence(&err), expected, "{json}");
         }
     }
 
     /// The shapes the wire form never has: no tag, an unknown tag or
-    /// layer word, an unknown or repeated key, a missing identity key.
+    /// layer word, an unknown or repeated key, a missing identity key —
+    /// and an unknown key at every nesting level a cell has, since each
+    /// nested type refuses its own.
     #[test]
     fn malformed_dumps_are_refused_rather_than_guessed_at() {
         let coord = r#""coord":{"x":0,"y":0,"z":0}"#;
         let cell = r#""cell":"java_repeater_or","drivers":[]"#;
+        let crossing =
+            r#""stage":"crossing","wire_length":1,"local_delay_ticks":1,"cell":"java_repeater_or""#;
+        let driver_a = r#"{"port":"a","net":{"kind":"input","index":0}}"#;
         for (json, expected) in [
             (format!("{{{cell},{coord}}}"), "missing field `stage`"),
             (
@@ -2748,7 +2845,7 @@ mod tests {
             ),
             (
                 format!(
-                    r#"{{"stage":"crossing","wire_length":1,"local_delay_ticks":1,"buffer_coords":[{{"port":"c","coord":{{"x":0,"y":0,"z":0}}}}],{cell},{coord}}}"#
+                    r#"{{{crossing},"drivers":[],"buffer_coords":[{{"port":"c","coord":{{"x":0,"y":0,"z":0}}}}],{coord}}}"#
                 ),
                 "unknown variant `c`, expected one of `a`, `b`, `sel`, `out`",
             ),
@@ -2764,16 +2861,129 @@ mod tests {
                 format!(r#"{{"stage":"placement","drivers":[],{coord}}}"#),
                 "missing field `cell`",
             ),
+            (
+                format!(r#"{{"stage":"placement",{cell},"coord":{{"x":0,"y":0,"z":0,"junk":7}}}}"#),
+                "unknown field `junk`",
+            ),
+            (
+                format!(
+                    r#"{{"stage":"placement","cell":"java_repeater_or","drivers":[{{"port":"a","net":{{"kind":"input","index":0}},"junk":7}}],{coord}}}"#
+                ),
+                "unknown field `junk`",
+            ),
+            (
+                format!(
+                    r#"{{"stage":"placement","cell":"java_repeater_or","drivers":[{{"port":"a","net":{{"kind":"input","index":0,"junk":7}}}}],{coord}}}"#
+                ),
+                // An adjacently tagged enum words its refusal this way.
+                r#"invalid value: string "junk", expected "kind" or "index""#,
+            ),
+            (
+                format!(
+                    r#"{{{crossing},"drivers":[{driver_a}],"buffer_coords":[{{"port":"a","coord":{{"x":0,"y":0,"z":2}},"junk":7}}],{coord}}}"#
+                ),
+                "unknown field `junk`",
+            ),
         ] {
             let err = read_back(&json).expect_err(&json);
             assert!(err.contains(expected), "{json}: {err}");
         }
     }
 
-    /// Each wire word reads back as the variant that writes it, so the
-    /// hand-kept word tables cannot drift from `as_str` / `Serialize`.
+    /// A coord reads back as the coord [`CellCoord::new`] builds at its
+    /// height: an absent `layer` is the one the height gives, an explicit
+    /// one that agrees is accepted, and one that disagrees — `via`
+    /// included, which no height gives — is refused rather than read as
+    /// a second spelling of the same voxel.
+    #[test]
+    fn a_coord_reads_back_only_on_the_layer_its_height_gives() {
+        let read = |json: &str| serde_json::from_str::<CellCoord>(json).map_err(|e| e.to_string());
+        for (json, expected) in [
+            (
+                r#"{"x":4,"y":0,"z":2}"#,
+                CellCoord::with_layer(4, 0, 2, RouteLayer::Plane),
+            ),
+            (
+                r#"{"x":4,"y":1,"z":2}"#,
+                CellCoord::with_layer(4, 1, 2, RouteLayer::Bridge),
+            ),
+            (
+                r#"{"x":4,"y":0,"z":2,"layer":"plane"}"#,
+                CellCoord::with_layer(4, 0, 2, RouteLayer::Plane),
+            ),
+            (
+                r#"{"x":4,"y":2,"z":2,"layer":"bridge"}"#,
+                CellCoord::with_layer(4, 2, 2, RouteLayer::Bridge),
+            ),
+        ] {
+            assert_eq!(read(json), Ok(expected), "{json}");
+        }
+        for (json, expected) in [
+            (
+                r#"{"x":0,"y":0,"z":1,"layer":"bridge"}"#,
+                "a coord at `y: 0` is on the `plane` layer, not `bridge`",
+            ),
+            (
+                r#"{"x":0,"y":1,"z":1,"layer":"plane"}"#,
+                "a coord at `y: 1` is on the `bridge` layer, not `plane`",
+            ),
+            (
+                r#"{"x":0,"y":0,"z":1,"layer":"via"}"#,
+                "a coord at `y: 0` is on the `plane` layer, not `via`",
+            ),
+            (
+                r#"{"x":0,"y":3,"z":1,"layer":"via"}"#,
+                "a coord at `y: 3` is on the `bridge` layer, not `via`",
+            ),
+        ] {
+            let err = read(json).expect_err(json);
+            assert_eq!(sentence(&err), expected, "{json}");
+        }
+    }
+
+    /// Every buffer a cell carries stands on one of that cell's own
+    /// driver ports — the contract the crossing pass debug-asserts when
+    /// it writes them — so a dump naming `out`, or a port the cell has
+    /// no driver on, is refused rather than read into a cell the pass
+    /// could never have produced.
+    #[test]
+    fn a_buffer_on_a_segment_the_cell_has_no_driver_for_is_refused() {
+        let head = r#""stage":"crossing","wire_length":3,"local_delay_ticks":1,"cell":"java_repeater_or","coord":{"x":0,"y":0,"z":1},"drivers":[{"port":"a","net":{"kind":"input","index":0}}]"#;
+        let on =
+            |port: &str, x: u32| format!(r#"{{"port":"{port}","coord":{{"x":{x},"y":0,"z":2}}}}"#);
+
+        let fine = format!(
+            r#"{{{head},"buffer_coords":[{},{}]}}"#,
+            on("a", 3),
+            on("a", 9)
+        );
+        let cell = read_back(&fine).expect(&fine);
+        assert_eq!(cell.buffer_coords().len(), 2, "{fine}");
+
+        for (buffers, expected) in [
+            (
+                format!("{},{}", on("a", 3), on("out", 9)),
+                "`buffer_coords[1]` stands on the `out` segment, which runs to a placed output \
+                 and is never a cell's",
+            ),
+            (
+                format!("{},{}", on("a", 3), on("sel", 9)),
+                "`buffer_coords[1]` stands on a port no entry of this cell's `drivers` feeds",
+            ),
+        ] {
+            let json = format!(r#"{{{head},"buffer_coords":[{buffers}]}}"#);
+            let err = read_back(&json).expect_err(&json);
+            assert_eq!(sentence(&err), expected, "{json}");
+        }
+    }
+
+    /// Each wire word reads back as the variant that writes it, walking
+    /// every variant through `EnumIter` rather than a list kept by hand,
+    /// so a variant added later is covered the day it lands.
     #[test]
     fn every_wire_word_reads_back_as_its_variant() {
+        use strum::IntoEnumIterator;
+
         fn round_trip<T: Serialize + for<'de> Deserialize<'de> + PartialEq + fmt::Debug>(
             value: &T,
         ) {
@@ -2781,24 +2991,32 @@ mod tests {
             let back: T = serde_json::from_str(&json).expect("reads back");
             assert_eq!(&back, value, "{json}");
         }
-        for layer in [RouteLayer::Plane, RouteLayer::Bridge, RouteLayer::Via] {
+        for layer in RouteLayer::iter() {
             round_trip(&layer);
         }
-        for stage in [
-            PlacementStage::Placement,
-            PlacementStage::Route,
-            PlacementStage::Delay,
-            PlacementStage::Crossing,
-        ] {
+        for stage in PlacementStage::iter() {
             round_trip(&stage);
         }
-        for segment in BufferSegment::ALL {
-            round_trip(&segment);
+        for port in PortName::iter() {
+            round_trip(&BufferSegment::Port(port));
         }
-        assert_eq!(
-            RouteLayer::WORDS.len(),
-            RouteLayer::ALL.len(),
-            "one word per layer"
-        );
+        round_trip(&BufferSegment::Out);
+    }
+
+    /// The word list an unknown segment's error names is every word a
+    /// segment is written as, in order: every [`PortName`], then `out`.
+    #[test]
+    fn the_segment_vocabulary_is_every_word_a_segment_is_written_as() {
+        use strum::IntoEnumIterator;
+
+        let written: Vec<String> = PortName::iter()
+            .map(BufferSegment::Port)
+            .chain([BufferSegment::Out])
+            .map(|segment| match serde_json::to_value(segment) {
+                Ok(serde_json::Value::String(word)) => word,
+                other => panic!("a segment serialises as a string: {other:?}"),
+            })
+            .collect();
+        assert_eq!(written, BufferSegment::WORDS);
     }
 }

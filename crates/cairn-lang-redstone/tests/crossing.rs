@@ -19,8 +19,6 @@
 //! sensor's. Neither example reaches this pass with anything to
 //! legalize, which is what the assertions here say.
 
-use std::fmt::Write as _;
-
 use cairn_lang_core::Edition;
 use cairn_lang_core::check::Severity;
 use cairn_lang_core::{lower, parse};
@@ -31,7 +29,10 @@ use cairn_lang_redstone::{
 
 mod common;
 
-use common::{delayed_from_source, load_example, normalize_stage_tags};
+use common::{
+    delayed_from_source, legalized_from_source, load_example, normalize_stage_tags,
+    shared_bus_source,
+};
 
 /// The Error-severity half of a pass's findings.
 ///
@@ -67,48 +68,14 @@ fn errors(
 ///
 /// Built from source rather than by hand because the claim is about
 /// what a `.crn` a user can write does, and because the shape depends
-/// on where the placement pass lays the cell row.
+/// on where the placement pass lays the cell row. The source is
+/// `common::shared_bus_source`, which the Placement IR round-trip tests
+/// read back as well.
 #[test]
 fn a_shared_bus_of_sixteen_cells_shares_its_repeaters() {
-    let mut source = String::from(
-        r"
-theme t:
-  slot wall -> @oak_planks
+    let legalized = legalized_from_source(&shared_bus_source(), Edition::Java);
 
-struct chain size=60x5
-  floor mat_slot=wall
-
-  pressure_plate id=pa at=front.outside offset=0 y=0 -> sig.a
-  pressure_plate id=pb at=inside.front  offset=0 y=0 -> sig.b
-
-  logic sig.s0 = sig.a and sig.b
-",
-    );
-    for i in 1..16 {
-        writeln!(
-            source,
-            "  logic sig.s{i} = sig.s{prev} and sig.b",
-            prev = i - 1
-        )
-        .expect("writing to a String cannot fail");
-    }
-    source.push_str(
-        r"
-  door id=d side=front at=center mat_slot=wall opened_by=sig.s15
-
-  circuit region=floor void=2
-",
-    );
-
-    let delayed = delayed_from_source(&source, Edition::Java);
-    let legalized = compile_crossing(&delayed);
-    assert!(
-        legalized.diagnostics.is_empty(),
-        "a bus every cell hangs off needs one repeater, not one per cell: {:?}",
-        legalized.diagnostics,
-    );
-
-    let cells = &legalized.scoped.scopes[0].ir.cells;
+    let cells = &legalized.scopes[0].ir.cells;
     assert_eq!(cells.len(), 16, "the fixture is the 16-cell chain");
     let blocks: std::collections::BTreeSet<(u32, u32, u32)> = cells
         .iter()

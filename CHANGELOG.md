@@ -224,8 +224,10 @@
 - *(redstone)* A placed cell dumped by `cairn synth --stage <s>` can be read back. `PlacedCellNode`
   had a hand-written `Serialize` that flattens its pipeline phase onto
   `{stage, cell, drivers, coord[, wire_length][, local_delay_ticks][, buffer_coords]}`, and nothing
-  read that form in again, so a tool that wanted to inspect or cache a dump had to reparse it by
-  hand and re-derive which pass had written it.
+  read that form in again, so a tool that wanted to inspect or cache the cells of a dump had to
+  reparse them by hand and re-derive which pass had written each one. The cells are what this
+  covers: the rest of the dump (`PlacedOutputNode`, `PlacementIr`, `ScopedPlacementIr`) still has
+  no reader, so a tool reaches the `cells` array of a scope itself and reads that.
 
   It now has the matching `Deserialize`, and so do the types a cell carries (`EditionCell`,
   `CellPortDriver`, `NetRef`, `PortName`, `CellCoord`, `RouteLayer`, `BufferCoord`,
@@ -239,10 +241,16 @@
   `buffer_coords` is written by the crossing stage, which a cell tagged `stage: "route"` has not reached
   ```
 
-  and so are a missing `stage`, an unknown `stage` or `layer` word, and a key the wire form does not
-  have. Each is a deserialisation error, not a panic. The source span is not in the dump, so a cell
-  read back carries the empty span `0..0`; everything else reads back equal, and the round trip is
-  tested on the cells both redstone examples place at every stage.
+  and so are a missing `stage`, an unknown `stage` or `layer` word, a key the wire form does not
+  have at any depth, a coord whose `layer` disagrees with its height (`"y": 0` with
+  `"layer": "bridge"`, or any `"layer": "via"`, which nothing writes), and a buffer on a segment
+  the cell has no driver for. Each is a deserialisation error, not a panic. A repeated key is
+  refused when the dump is read from its text; read through a `serde_json::Value`, the `Value` has
+  already kept the last one. The source span is not in the dump, so a cell read back carries the
+  empty span `0..0` and is equal to the original except for the span. The round trip is tested on
+  the cells both redstone examples place at every stage, and on a bus whose legalized dump carries
+  buffers. Reading back is for self-describing formats such as JSON: the flat form's key count
+  varies with the stage, so a positional encoding cannot be read back.
 
 ### Fixed
 

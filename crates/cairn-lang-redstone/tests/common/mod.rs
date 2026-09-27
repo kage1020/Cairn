@@ -16,13 +16,15 @@
 // helper crate, worth doing if the set keeps growing.
 #![allow(dead_code)]
 
+use std::fmt::Write as _;
 use std::path::PathBuf;
 
 use cairn_lang_core::check::Severity;
 use cairn_lang_core::{Edition, IntentModule, lower, parse};
 use cairn_lang_redstone::{
-    DiagnosticCode, ScopedEditionNetlistIr, ScopedPlacementIr, SynthOutput, compile_delay,
-    compile_edition_netlist, compile_netlist, compile_placement, compile_routing, synthesize,
+    DiagnosticCode, ScopedEditionNetlistIr, ScopedPlacementIr, SynthOutput, compile_crossing,
+    compile_delay, compile_edition_netlist, compile_netlist, compile_placement, compile_routing,
+    synthesize,
 };
 
 /// Load `examples/<name>` relative to the workspace root.
@@ -116,6 +118,60 @@ pub fn delayed_from_source(source: &str, edition: Edition) -> ScopedPlacementIr 
         delay.diagnostics,
     );
     delay.scoped
+}
+
+/// [`delayed_from_source`] plus crossing legalization, which must run
+/// clean.
+pub fn legalized_from_source(source: &str, edition: Edition) -> ScopedPlacementIr {
+    let legalized = compile_crossing(&delayed_from_source(source, edition));
+    assert!(
+        legalized.diagnostics.is_empty(),
+        "fixture must legalize cleanly: {:?}",
+        legalized.diagnostics,
+    );
+    legalized.scoped
+}
+
+/// A struct whose sixteen cells all read `sig.b` off one shared trunk,
+/// long enough that crossing legalization has to put buffer repeaters
+/// on it — the smallest fixture the corpus has whose legalized dump
+/// carries `buffer_coords`. Each cell also reads the one before it, so
+/// the placement pass lays them out as one row, `2 * 16` columns long.
+///
+/// Shared because more than one binary is built on what it does: the
+/// crossing tests pin where its repeaters go, and the Placement IR
+/// round-trip tests need a real dump with buffers in it to read back.
+pub fn shared_bus_source() -> String {
+    let mut source = String::from(
+        r"
+theme t:
+  slot wall -> @oak_planks
+
+struct chain size=60x5
+  floor mat_slot=wall
+
+  pressure_plate id=pa at=front.outside offset=0 y=0 -> sig.a
+  pressure_plate id=pb at=inside.front  offset=0 y=0 -> sig.b
+
+  logic sig.s0 = sig.a and sig.b
+",
+    );
+    for i in 1..16 {
+        writeln!(
+            source,
+            "  logic sig.s{i} = sig.s{prev} and sig.b",
+            prev = i - 1
+        )
+        .expect("writing to a String cannot fail");
+    }
+    source.push_str(
+        r"
+  door id=d side=front at=center mat_slot=wall opened_by=sig.s15
+
+  circuit region=floor void=2
+",
+    );
+    source
 }
 
 /// Rewrite every `"stage": "<name>"` value to a fixed placeholder so

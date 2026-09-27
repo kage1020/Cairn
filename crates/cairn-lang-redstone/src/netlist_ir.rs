@@ -35,7 +35,12 @@ use crate::logic_ir::ScopeKind;
 /// [`NetlistIr::inputs`] or [`NetlistIr::cells`] lengths — the same
 /// invariant [`crate::logic_ir::SignalRef`] carries at the Logic IR layer.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(tag = "kind", content = "index", rename_all = "snake_case")]
+#[serde(
+    tag = "kind",
+    content = "index",
+    rename_all = "snake_case",
+    deny_unknown_fields
+)]
 #[non_exhaustive]
 pub enum NetRef {
     /// Index into [`NetlistIr::inputs`].
@@ -88,6 +93,7 @@ pub enum LogicalCell {
 /// `reset` / `enable` ports) can add ports without breakage.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[cfg_attr(test, derive(strum::EnumIter))]
 #[non_exhaustive]
 pub enum PortName {
     /// First data input (`a` operand).
