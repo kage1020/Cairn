@@ -453,6 +453,28 @@ fn an_unreadable_source_is_still_told_apart_from_an_unparsable_one() {
 }
 
 #[test]
+fn a_check_of_a_source_that_cannot_be_read_writes_no_document() {
+    // `spec/lint` "Machine-readable payload" tells a run-level refusal by
+    // an exit of 1 over an array with no error element, and says no other
+    // failure reads that way. A file that exists but cannot be read is the
+    // one other exit-1 case with nothing parsed, so it has to stay apart:
+    // no document at all rather than a `[]`. A non-UTF-8 source reproduces
+    // it on every platform, where a permission bit would not.
+    let tmp = TempDir::new().expect("tempdir");
+    let path = tmp.path().join("not-utf8.crn");
+    fs::write(&path, b"@cairn 2026.06\n\xff\xfe binary\n").expect("write");
+    let out = cairn("check", &[path.to_str().unwrap(), "--format", "json"]);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert_eq!(out.status.code(), Some(1), "stderr={stderr}");
+    assert!(
+        out.stdout.is_empty(),
+        "no document, got: {}",
+        String::from_utf8_lossy(&out.stdout),
+    );
+    assert!(stderr.contains("cannot read"), "stderr={stderr}");
+}
+
+#[test]
 fn parse_json_renders_a_parse_failure_as_a_document_of_its_own() {
     // `parse`'s product is the AST, so a failure is not that dump with a
     // hole in it — it is the document `info` writes, told apart by its

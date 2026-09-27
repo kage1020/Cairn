@@ -58,6 +58,16 @@ const ONE_SCOPE_WITHOUT_A_SIZE: &str = concat!(
     "  floor mat_slot=floor\n",
 );
 
+/// A source with nothing to report: its array is `[]`, so an exit of 1
+/// over it is the refusal and nothing else.
+const NOTHING_TO_REPORT: &str = concat!(
+    "@cairn 2026.06\n\n",
+    "theme t:\n",
+    "  slot floor -> @oak_planks\n\n",
+    "struct s size=2x2\n",
+    "  floor mat_slot=floor\n",
+);
+
 /// The same unknown id, reached through a `def` three `place` rows
 /// instantiate. Lowering voxelises a def body once per placement, so this
 /// is the source that used to print the refusal three times.
@@ -331,6 +341,59 @@ fn the_json_report_of_an_unshipped_target_is_the_findings_and_the_exit_code() {
         stderr.contains("unsupported java target `9.9.9`"),
         "and the refusal is on stderr, got: {stderr}",
     );
+}
+
+#[test]
+fn a_json_consumer_tells_a_run_level_refusal_by_the_exit_over_an_errorless_array() {
+    // The rule `spec/lint` "Machine-readable payload" gives a consumer that
+    // does not parse stderr: exit 1 over an array with no error-severity
+    // element is a run-level refusal. Both refusals are driven on a source
+    // whose own findings are warnings at most, so if either stopped failing
+    // the run, or started arriving as an error element, the rule would no
+    // longer say what the spec says it does.
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    let partial = fixture(tmp.path(), ONE_SCOPE_WITHOUT_A_SIZE);
+    let clean = tmp.path().join("clean.crn");
+    std::fs::write(&clean, NOTHING_TO_REPORT).expect("write fixture");
+
+    // Each row names the codes its array carries, so each stands for its
+    // own half of the paragraph: the lost scope's array still reports what
+    // was checked, and the clean source's is the `[]` the refusal leaves.
+    let rows: [(&PathBuf, &str, &str, &[&str]); 2] = [
+        (
+            &partial,
+            "1.21.4",
+            "error[E_PARTIAL_BUILD]",
+            &["W_STRUCT_NO_SIZE"],
+        ),
+        (&clean, "9.9.9", "unsupported java target `9.9.9`", &[]),
+    ];
+    for (src, target, refusal, expected) in rows {
+        let out = cairn(
+            "check",
+            &[
+                src.to_str().unwrap(),
+                "--edition",
+                "java",
+                "--target",
+                target,
+                "--format",
+                "json",
+            ],
+        );
+        let stdout = String::from_utf8(out.stdout).expect("utf-8");
+        let stderr = String::from_utf8(out.stderr).expect("utf-8");
+        assert_eq!(out.status.code(), Some(1), "{refusal}: stderr={stderr}");
+        let parsed: serde_json::Value = serde_json::from_str(&stdout).expect("one JSON document");
+        let findings = parsed.as_array().expect("an array of findings");
+        let codes: Vec<&str> = findings.iter().filter_map(|d| d["code"].as_str()).collect();
+        assert_eq!(codes, expected, "{refusal}: got: {stdout}");
+        assert!(
+            findings.iter().all(|d| d["severity"] != "error"),
+            "{refusal}: the refusal is not an element, got: {stdout}",
+        );
+        assert!(stderr.contains(refusal), "got: {stderr}");
+    }
 }
 
 #[test]

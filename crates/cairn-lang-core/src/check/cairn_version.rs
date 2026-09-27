@@ -173,7 +173,7 @@ pub(crate) fn future_version_note(source: &str, line_starts: &[usize]) -> Option
 ///
 /// Only the header block is read: the run of lines before the first that
 /// is neither blank, a comment, nor a top-level `@directive`, which is
-/// the only place [`crate::parse`] takes a header from. A `@cairn` below
+/// the only place [`crate::parse()`] takes a header from. A `@cairn` below
 /// that, or indented under a body, is not a header, and reading one
 /// would attribute a version to a file the parser never saw one in.
 ///

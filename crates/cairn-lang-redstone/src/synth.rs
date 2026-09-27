@@ -1304,7 +1304,7 @@ struct LoweringCtx<'a> {
 
 /// Deepest `logic` lowering recursion before the pass refuses.
 ///
-/// Depth is counted in [`lower_expr`] frames, which is not the unit an
+/// Depth is counted in `lower_expr` frames, which is not the unit an
 /// author writes in:
 ///
 /// - one expression node on the path costs **one** level
@@ -1315,7 +1315,7 @@ struct LoweringCtx<'a> {
 /// bindings. The diagnostic states both, because "nested past 256 levels"
 /// on a file with 130 `logic` lines is not something an author can act on.
 ///
-/// The depth comes from declaration order, not graph size: [`lower_binding`]
+/// The depth comes from declaration order, not graph size: `lower_binding`
 /// resolves a reference by lowering the binding it names, so a chain
 /// declared in reverse recurses once per binding while the same graph in
 /// dependency order stays shallow at several thousand. Measured on a debug
