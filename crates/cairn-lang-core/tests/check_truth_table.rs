@@ -187,16 +187,16 @@ fn a_pattern_assigned_the_same_output_twice_is_a_warning() {
     );
 }
 
-/// Each repeat is judged against the *first* row carrying its pattern, so
-/// a table that flips back reports what each row does to the assignment
-/// the table opened with, and both point at the same place to look.
+/// Each repeat that agrees is judged against the *first* row carrying its
+/// pattern, so every repeat of a combination sends the author to the same
+/// place to look.
 #[test]
 fn a_repeat_is_judged_against_the_first_row_with_its_pattern() {
-    let source = complete_plus("00->0; 00->1; 00->0");
+    let source = complete_plus("00->0; 00->0; 00->0");
     let found = diagnose(&source);
     assert_eq!(
         found.iter().map(|d| d.code.as_str()).collect::<Vec<_>>(),
-        ["E_TRUTH_TABLE_CONFLICT", "W_TRUTH_TABLE_DUPLICATE_ROW"],
+        ["W_TRUTH_TABLE_DUPLICATE_ROW", "W_TRUTH_TABLE_DUPLICATE_ROW"],
     );
     let first = source.find("00->0").expect("the first row");
     for d in &found {
@@ -206,6 +206,27 @@ fn a_repeat_is_judged_against_the_first_row_with_its_pattern() {
             "every repeat should send the author to the row that set the pattern",
         );
     }
+}
+
+/// A row that flips an assignment back agrees with the first row and
+/// contradicts the one it flips back from — and a contradiction with any
+/// earlier row is a conflict, whichever row the table opened with. The
+/// note goes to the row it contradicts, since that is the pair the
+/// author has to decide between.
+#[test]
+fn a_row_that_flips_back_contradicts_the_row_it_flips_back_from() {
+    let source = complete_plus("00->0; 00->1; 00->0");
+    let found = diagnose(&source);
+    assert_eq!(
+        found.iter().map(|d| d.code.as_str()).collect::<Vec<_>>(),
+        ["E_TRUTH_TABLE_CONFLICT", "E_TRUTH_TABLE_CONFLICT"],
+    );
+    let flipped = source.find("00->1").expect("the second row");
+    assert_eq!(
+        found[1].notes[0].span.as_ref().expect("a note span").start,
+        flipped,
+        "the flip back contradicts the second row, not the first",
+    );
 }
 
 /// The other half of that rule: two rows that agree with each other and
@@ -738,5 +759,235 @@ fn a_dash_output_elsewhere_leaves_a_conflict_a_conflict() {
     assert_eq!(
         codes(&table("sig.a, sig.b", "0- -> -; 10 -> 0; 10 -> 1; 11 -> 0")),
         vec!["E_TRUTH_TABLE_CONFLICT"],
+    );
+}
+
+// -- row order ------------------------------------------------------------
+
+/// Every order of `rows`, by Heap's algorithm.
+fn permutations<'a>(rows: &[&'a str]) -> Vec<Vec<&'a str>> {
+    fn heap<'a>(k: usize, rows: &mut Vec<&'a str>, out: &mut Vec<Vec<&'a str>>) {
+        if k <= 1 {
+            out.push(rows.clone());
+            return;
+        }
+        for i in 0..k {
+            heap(k - 1, rows, out);
+            let j = if k.is_multiple_of(2) { i } else { 0 };
+            rows.swap(j, k - 1);
+        }
+    }
+    let mut rows = rows.to_vec();
+    let mut out = Vec::new();
+    heap(rows.len(), &mut rows, &mut out);
+    out
+}
+
+/// Whether a table is refused cannot depend on the order its rows are
+/// written in.
+///
+/// `0- -> 1` agrees with `00 -> 1` and contradicts `01 -> 0`. Compared
+/// with only the first earlier row it overlaps, it is refused when that
+/// row is `01` and passes when it is `00`.
+#[test]
+fn a_row_overlapping_several_earlier_rows_is_compared_with_each() {
+    let rows = ["00 -> 1", "01 -> 0", "0- -> 1", "10 -> 0", "11 -> 0"];
+    let orders = permutations(&rows);
+    assert_eq!(orders.len(), 120, "every order of five rows");
+    for order in orders {
+        let source = table("sig.a, sig.b", &order.join("; "));
+        assert!(
+            codes(&source).contains(&"E_TRUTH_TABLE_CONFLICT"),
+            "`0-` assigns `01` two outputs in every order: {source}",
+        );
+    }
+}
+
+/// A row dropped for overlapping is still a row the author wrote, and a
+/// later row contradicting it is a conflict.
+///
+/// `-0` is dropped for crossing `0-`, and `10` meets nothing else: it
+/// overlaps `-0` and nothing the table kept.
+#[test]
+fn a_row_contradicting_a_dropped_row_is_a_conflict() {
+    let rows = ["0- -> 1", "-0 -> 1", "10 -> 0", "11 -> 0"];
+    let orders = permutations(&rows);
+    assert_eq!(orders.len(), 24, "every order of four rows");
+    for order in orders {
+        let source = table("sig.a, sig.b", &order.join("; "));
+        assert!(
+            codes(&source).contains(&"E_TRUTH_TABLE_CONFLICT"),
+            "`-0` and `10` assign `10` two outputs in every order: {source}",
+        );
+    }
+}
+
+/// The conflict names the row it contradicts, and the output that row
+/// assigns, rather than the first row the later one happens to overlap.
+#[test]
+fn a_conflict_is_noted_at_the_row_it_contradicts() {
+    let source = table(
+        "sig.a, sig.b",
+        "00 -> 1; 01 -> 0; 0- -> 1; 10 -> 0; 11 -> 0",
+    );
+    let found = only(&source);
+    assert_eq!(found.code.as_str(), "E_TRUTH_TABLE_CONFLICT");
+    assert_eq!(underlined(&source, &found.span), "0- -> 1");
+    let note = &found.notes[0];
+    assert_eq!(
+        underlined(
+            &source,
+            note.span.as_ref().expect("the note carries a span")
+        ),
+        "01 -> 0",
+    );
+    assert_eq!(note.message, "first row assigning `01` the output `0` here");
+    assert!(
+        found.primary.contains("assigns `01` the output `1`"),
+        "the sentence names the combination the two disagree on: {}",
+        found.primary,
+    );
+}
+
+/// A `-` output written first does not stand between two rows that
+/// contradict each other under it: both are compared with the `-` row,
+/// which neither contradicts, and the second is compared with the first.
+#[test]
+fn a_dash_output_row_written_first_does_not_hide_a_conflict_under_it() {
+    let source = table("sig.a, sig.b", "0- -> -; 00 -> 0; 00 -> 1; 1- -> 0");
+    let found = diagnose(&source);
+    assert_eq!(
+        found.iter().map(|d| d.code.as_str()).collect::<Vec<_>>(),
+        ["W_TRUTH_TABLE_DUPLICATE_ROW", "E_TRUTH_TABLE_CONFLICT"],
+    );
+    assert_eq!(underlined(&source, &found[1].span), "00 -> 1");
+}
+
+/// A row that overlaps only a dropped row, and agrees with it, still
+/// writes that combination twice.
+#[test]
+fn a_row_repeating_a_dropped_row_is_a_duplicate() {
+    let source = table("sig.a, sig.b", "0- -> 1; -0 -> 1; 10 -> 1; 11 -> 0");
+    let found = diagnose(&source);
+    assert_eq!(
+        found.iter().map(|d| d.code.as_str()).collect::<Vec<_>>(),
+        ["W_TRUTH_TABLE_DUPLICATE_ROW", "W_TRUTH_TABLE_DUPLICATE_ROW"],
+    );
+    assert_eq!(underlined(&source, &found[1].span), "10 -> 1");
+    assert_eq!(
+        underlined(
+            &source,
+            found[1].notes[0].span.as_ref().expect("a note span")
+        ),
+        "-0 -> 1",
+    );
+}
+
+/// The combinations a pattern stands for, spelled out.
+fn combinations_of(pattern: &str) -> Vec<String> {
+    pattern
+        .chars()
+        .fold(vec![String::new()], |prefixes, digit| {
+            let choices: &[char] = match digit {
+                '-' => &['0', '1'],
+                '0' => &['0'],
+                _ => &['1'],
+            };
+            prefixes
+                .iter()
+                .flat_map(|prefix| {
+                    choices.iter().map(move |c| {
+                        let mut next = prefix.clone();
+                        next.push(*c);
+                        next
+                    })
+                })
+                .collect()
+        })
+}
+
+/// What each row should earn, worked out combination by combination
+/// rather than pattern by pattern: a conflict when some combination it
+/// assigns an earlier row assigns a different concrete output, otherwise
+/// a duplicate when some combination it assigns an earlier row assigns
+/// at all, otherwise nothing.
+fn expected_verdicts(rows: &[(String, char)]) -> Vec<Option<&'static str>> {
+    rows.iter()
+        .enumerate()
+        .map(|(index, (pattern, output))| {
+            let mine = combinations_of(pattern);
+            let mut verdict = None;
+            for (earlier, earlier_output) in &rows[..index] {
+                let theirs = combinations_of(earlier);
+                if !mine.iter().any(|c| theirs.contains(c)) {
+                    continue;
+                }
+                if *output != '-' && *earlier_output != '-' && output != earlier_output {
+                    return Some("E_TRUTH_TABLE_CONFLICT");
+                }
+                verdict = Some("W_TRUTH_TABLE_DUPLICATE_ROW");
+            }
+            verdict
+        })
+        .collect()
+}
+
+/// The overlap verdicts, compared with a combination-by-combination
+/// enumeration over tables of one to four inputs.
+///
+/// The tables are drawn from a fixed-seed generator, so a failure replays.
+/// Every row gets a verdict: which finding, if any, is reported on it.
+#[test]
+fn every_row_verdict_matches_an_enumeration_of_its_combinations() {
+    let mut state: u64 = 0x9E37_79B9_7F4A_7C15;
+    let mut next = move |bound: u64| {
+        state ^= state << 13;
+        state ^= state >> 7;
+        state ^= state << 17;
+        state % bound
+    };
+    let digit = |n: u64| ['0', '1', '-'][usize::try_from(n).expect("below three")];
+    let mut conflicting_tables = 0;
+    for _ in 0..4000 {
+        let arity = usize::try_from(next(4) + 1).expect("small");
+        let count = next(6) + 1;
+        let rows: Vec<(String, char)> = (0..count)
+            .map(|_| {
+                let pattern: String = (0..arity).map(|_| digit(next(3))).collect();
+                (pattern, digit(next(3)))
+            })
+            .collect();
+        let written: Vec<String> = rows.iter().map(|(p, o)| format!("{p} -> {o}")).collect();
+        let inputs: Vec<String> = (0..arity).map(|i| format!("sig.i{i}")).collect();
+        let source = table(&inputs.join(", "), &written.join("; "));
+        let found = diagnose(&source);
+
+        let expected = expected_verdicts(&rows);
+        if expected.contains(&Some("E_TRUTH_TABLE_CONFLICT")) {
+            conflicting_tables += 1;
+        }
+        let mut offset = source.find('{').expect("the table opens");
+        for ((text, verdict), row) in written.iter().zip(&expected).zip(&rows) {
+            let start = offset
+                + source[offset..]
+                    .find(text.as_str())
+                    .expect("each row is written");
+            offset = start + text.len();
+            let actual: Vec<&str> = found
+                .iter()
+                .filter(|d| d.span.start == start)
+                .map(|d| d.code.as_str())
+                .collect();
+            assert_eq!(
+                actual,
+                verdict.iter().copied().collect::<Vec<_>>(),
+                "row `{}` of {source}",
+                row.0,
+            );
+        }
+    }
+    assert!(
+        conflicting_tables > 400,
+        "the generator should reach conflicts often enough to mean something: {conflicting_tables}",
     );
 }

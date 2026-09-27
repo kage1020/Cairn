@@ -40,7 +40,7 @@
 
   ```
   s.crn:2:52: error[E_TRUTH_TABLE_CONFLICT]: this row assigns `01` the output `1`, and an earlier row assigns it `0`
-  s.crn:2:43:   note: first row assigning `01` here
+  s.crn:2:43:   note: first row assigning `01` the output `0` here
   ```
 
   When two rows agree it stays `W_TRUTH_TABLE_DUPLICATE_ROW`, and the repair depends on the shape.
@@ -253,6 +253,35 @@
   varies with the stage, so a positional encoding cannot be read back.
 
 ### Fixed
+
+- *(core)* Whether a truth table was refused for assigning one combination two outputs depended on
+  the order its rows were written in. A row was compared only with the first earlier row it
+  overlapped, and a row dropped for overlapping was never compared with anything after it, so a
+  row with a `-` that agreed with one earlier row and contradicted another passed `cairn check`
+  with exit 0:
+
+  ```
+  assert truth(sig.a, sig.b -> sig.o) { 00 -> 1; 01 -> 0; 0- -> 1; 10 -> 0; 11 -> 0 }
+  ```
+
+  ```
+  t.crn:2:59: warning[W_TRUTH_TABLE_DUPLICATE_ROW]: this row and the earlier row `00` both stand for `00`, and a combination is covered by one row or none
+  ```
+
+  Written with `0- -> 1` first, the same table was refused. A row is now compared with every
+  earlier row that shares a combination with it, dropped or not, and the most severe finding wins:
+
+  ```
+  t.crn:2:59: error[E_TRUTH_TABLE_CONFLICT]: this row assigns `01` the output `1`, and an earlier row assigns it `0`
+  t.crn:2:50:   note: first row assigning `01` the output `0` here
+  ```
+
+  The conflict's note now names the output the noted row assigns, and points at the first row
+  assigning the combination that output rather than at the first row the later one overlaps,
+  which may agree with it. Two consequences for tables that were already reported: a row that
+  flips an assignment back — the third row of `00->0; 00->1; 00->0` — is a conflict with the
+  second row rather than a repeat of the first, and a row that overlaps only a row dropped earlier
+  and agrees with it is now `W_TRUTH_TABLE_DUPLICATE_ROW` rather than nothing.
 
 - *(core)* A `connect` row whose port could not be placed printed every contract a port has and
   left the author to pick theirs. The port lookup answered each of its refusals with the same
