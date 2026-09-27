@@ -27,7 +27,7 @@ cargo run -p cairn-lang-cli -- check examples/cottage.crn --edition java --targe
 
 `check` writes nothing. `compile` writes structure files and a lockfile next to the source, so point it at `--out` and `--lock` outside the tree if you don't want build output in `examples/`.
 
-Before opening a PR, run what CI runs — the same four commands on Linux, macOS, and Windows, with `RUSTFLAGS=-D warnings` set for all of them:
+Before opening a PR, run what CI runs — the same commands on Linux, macOS, and Windows, with `RUSTFLAGS=-D warnings` set for all of them:
 
 ```sh
 export RUSTFLAGS="-D warnings"
@@ -35,7 +35,11 @@ cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo build --workspace --locked
 cargo test --workspace --locked
+cargo test -p cairn-lang-core --bench lowering
+cargo test -p cairn-lang-redstone --bench place_and_route
 ```
+
+The last two run each bench once as a test, untimed; `--workspace` does not select bench targets. [Changing the release profile](#changing-the-release-profile) says what they check.
 
 CI also builds the API docs on Linux, twice, with rustdoc's warnings fatal — clippy does not see a doc link to a private item or to a path that no longer resolves. The first run is the public surface and the only one that flags a public doc linking to a private item; the second also covers the docs only a contributor reads:
 
@@ -162,6 +166,19 @@ Change `channel`, run the CI commands above (a new compiler can produce a *rustc
 The pin is not the MSRV. `rust-version` in the workspace manifest is the floor a consumer needs to build Cairn, and the pin is always newer. A change reaching for a recently stabilised API is green at the pin and broken at the floor. Clippy sees some of that already — `clippy::incompatible_msrv` reads `rust-version` and refuses a *standard library* item stabilised above it, and `-D warnings` makes that fatal — but it is a lint, so one `#[allow]` silences it, and it says nothing about a **dependency** whose own `rust-version` is above ours, which is a hard cargo error nothing at the pin ever sees. CI's `MSRV` job is what compiles at the floor and so catches both: it reads `rust-version` back out of the manifest with `cargo metadata` — no second copy to go stale — installs that compiler, and runs `cargo check --workspace --locked --all-features` at it. `check` rather than `test`, because the floor is about compiling the crates a consumer depends on and dev-dependencies are free to want a newer compiler than the library does; `--all-features`, because `rust-version` is one declaration per package and cargo has no way to say "this floor, unless you enable that feature"; `--locked`, because the committed lockfile is what a consumer cloning the repo resolves to, and when the failure is a dependency's own floor rather than Cairn's code cargo names the package.
 
 Raising `rust-version` changes who can build the crates, so it is not a quiet manifest edit. Type the commit `build` — which cuts a patch release, so the new floor reaches crates.io — and add a `CHANGELOG.md` entry saying which compiler is now required and what needed it. A consumer pinned below the new floor learns about it from cargo either way; the entry is what tells them why.
+
+## Changing the release profile
+
+`[profile.release]` in the workspace manifest is sized for the release archives, and its comments say why. Most of its settings cost only build time. `opt-level` is the exception: it trades throughput in block-array lowering and in place-and-route, which is the work a build spends its time on. Two benches measure that side: `lowering` in `cairn-lang-core` and `place_and_route` in `cairn-lang-redstone`. They call the passes in-process, since timing the CLI over an example would mostly time process startup, and they generate their sources rather than use an example, since a source that small goes through a pass faster than the timer can tell a change apart. Benches take their settings from the release profile, so `opt-level`, `lto` and `codegen-units` are timed as they ship; `panic` is the exception, because Cargo builds bench targets and their dependencies with unwinding, as it does tests. Save a baseline, change the profile — or override one setting from the environment without editing the file — and compare:
+
+```sh
+cargo bench -p cairn-lang-core -p cairn-lang-redstone --bench lowering --bench place_and_route -- --save-baseline before
+CARGO_PROFILE_RELEASE_OPT_LEVEL=s cargo bench -p cairn-lang-core -p cairn-lang-redstone --bench lowering --bench place_and_route -- --baseline before
+```
+
+Name the two benches: without `--bench`, `cargo bench` also runs each library's unit-test harness, which refuses criterion's `--save-baseline`. Run a baseline against itself once before trusting a difference. On a shared machine the smaller benches move by several percent between identical builds.
+
+Weigh a size change on the gzipped binaries, since the release archives are `.tar.gz` and `.zip`, and put the numbers in the commit message rather than the profile comment, where they would go stale on the next dependency bump. CI times neither bench. A timing gate on shared runners would be noise, and a profile change is a decision made once rather than a regression surface. What CI does run is each bench once as a test, untimed: `cargo test -p cairn-lang-core --bench lowering` and `cargo test -p cairn-lang-redstone --bench place_and_route`. Before it times anything, each bench checks that its generated source does the work it was built for — `lowering` that every placement and walkway comes out of block-array lowering, `place_and_route` that every scope comes through every pass with one placed cell per gate — so a generator that stopped reaching the passes fails in CI rather than quietly timing less work.
 
 ## Versioning
 

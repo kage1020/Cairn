@@ -27,7 +27,7 @@ cargo run -p cairn-lang-cli -- check examples/cottage.crn --edition java --targe
 
 `check` は何も書き出しません。`compile` はソースの隣に構造ファイルとロックファイルを書くので、`examples/` にビルド成果物を残したくなければ `--out` と `--lock` をツリーの外に向けてください。
 
-PR を出す前に、CI と同じものを回してください。Linux・macOS・Windows で走るのはこの 4 コマンドで、いずれも `RUSTFLAGS=-D warnings` の下で実行されます。
+PR を出す前に、CI と同じものを回してください。Linux・macOS・Windows で走るのはこれらのコマンドで、いずれも `RUSTFLAGS=-D warnings` の下で実行されます。
 
 ```sh
 export RUSTFLAGS="-D warnings"
@@ -35,7 +35,11 @@ cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo build --workspace --locked
 cargo test --workspace --locked
+cargo test -p cairn-lang-core --bench lowering
+cargo test -p cairn-lang-redstone --bench place_and_route
 ```
+
+最後の 2 つは各ベンチを計測なしのテストとして一度ずつ実行します。`--workspace` はベンチターゲットを選びません。何を確かめているかは[リリースプロファイルの変更](#リリースプロファイルの変更)にあります。
 
 CI はこれとは別に、Linux で rustdoc の警告を致命的にして API ドキュメントを 2 回ビルドします。非公開の項目や解決できなくなったパスへのドキュメントリンクは clippy には見えないためです。1 回目は公開 API が対象で、公開ドキュメントから非公開項目へのリンクを検出するのはこちらだけです。2 回目はコントリビューターだけが読むドキュメントも対象にします。
 
@@ -162,6 +166,19 @@ rg '\bM[1-6]\b|M[0-9]-PR[0-9]+|pre-M[0-9]|\bPR[0-9]+\b|\blater PR\b|\bfuture PR\
 固定は MSRV ではありません。ワークスペースマニフェストの `rust-version` は、利用者が Cairn をビルドするのに必要な下限であり、固定はつねにそれより新しいコンパイラです。安定化されたばかりの API に手を伸ばした変更は固定側では緑で、下限では壊れます。その一部は clippy が既に見ています。`clippy::incompatible_msrv` は `rust-version` を読んで、それより上で安定化された**標準ライブラリ**の項目を拒み、`-D warnings` がそれを致命的にします。ただしこれは lint なので `#[allow]` 一行で黙り、さらに**依存先**自身の `rust-version` が我々の下限より上である場合については何も言いません。後者は cargo のハードエラーで、固定側では決して現れません。両方を捕まえるのが、下限でコンパイルする CI の `MSRV` ジョブです。`cargo metadata` でマニフェストから `rust-version` を読み直し (古くなる二つ目のコピーを作らないため)、そのコンパイラを入れて `cargo check --workspace --locked --all-features` を回します。`test` ではなく `check` なのは、下限が問うているのが「利用者が依存するクレートがコンパイルできるか」だからです。dev-dependencies やテストハーネスは、ライブラリ本体より新しいコンパイラを要求してかまいません。`--all-features` を付けるのは、`rust-version` がパッケージごとに一つしか書けず、「この下限、ただしその feature を有効にした場合を除く」と cargo に伝える手段がないからです。`--locked` は、リポジトリをクローンした利用者が解決するのが、コミットされたロックファイルそのものだからで、壊れているのが Cairn のコードではなく依存先自身の下限であるとき、cargo がそのパッケージ名を挙げてくれます。
 
 `rust-version` を上げることは、誰が Cairn をビルドできるかを変えることなので、マニフェストを黙って書き換えて済ませません。コミットの type は `build` にし (パッチリリースが切られるので、新しい下限が crates.io まで届きます)、どのコンパイラが必要になり何がそれを要求したのかを `CHANGELOG.md` に書きます。新しい下限より下に固定している利用者は、どのみち cargo から知らされます。理由を伝えるのがこのエントリです。
+
+## リリースプロファイルの変更
+
+ワークスペースマニフェストの `[profile.release]` はリリースアーカイブのサイズに合わせて調整してあり、その理由はコメントに書いてあります。ほとんどの設定はビルド時間しか使いません。例外は `opt-level` で、これはブロック配列への lowering と配置配線 (place-and-route) のスループットと引き換えになります。どちらもビルドが時間を費やす処理です。その側を測るベンチが二つあります。`cairn-lang-core` の `lowering` と、`cairn-lang-redstone` の `place_and_route` です。どちらもパスをプロセス内で呼び出します。例に対して CLI を計測すると、ほとんどプロセス起動を計ることになるからです。また、例ではなく生成したソースを使います。例ほど小さいソースは、変更による差をタイマーが見分けられないほど速くパスを通り抜けるからです。ベンチはリリースプロファイルの設定を受け継ぐので、`opt-level`・`lto`・`codegen-units` は配布されるとおりに計測されます。例外は `panic` で、Cargo はテストと同じく、ベンチターゲットとその依存をアンワインドありでビルドします。ベースラインを保存し、プロファイルを変えて (ファイルを編集せずに環境変数で一つだけ上書きしてもかまいません) 比較します。
+
+```sh
+cargo bench -p cairn-lang-core -p cairn-lang-redstone --bench lowering --bench place_and_route -- --save-baseline before
+CARGO_PROFILE_RELEASE_OPT_LEVEL=s cargo bench -p cairn-lang-core -p cairn-lang-redstone --bench lowering --bench place_and_route -- --baseline before
+```
+
+二つのベンチは名前で指定してください。`--bench` を付けないと、`cargo bench` は各ライブラリの単体テストハーネスも実行し、そちらは criterion の `--save-baseline` を受け付けません。差を信じる前に、一度ベースラインをそれ自身と比べてください。共有マシンでは、同一のビルドどうしでも小さいベンチは数パーセント動きます。
+
+サイズの変化は gzip 後のバイナリで比べます。リリースアーカイブが `.tar.gz` と `.zip` だからです。数値はプロファイルのコメントではなくコミットメッセージに書きます。コメントに書くと、次の依存更新で黙って古くなります。CI はどちらのベンチも計測しません。共有ランナーでの時間計測のゲートはノイズにしかならず、プロファイルの変更は回帰を監視する対象ではなく、一度下す決定だからです。CI が実行するのは、各ベンチを計測なしのテストとして一度ずつ走らせる `cargo test -p cairn-lang-core --bench lowering` と `cargo test -p cairn-lang-redstone --bench place_and_route` です。各ベンチは計測の前に、生成したソースが想定した処理をしていることを確かめます。`lowering` はすべての配置と通路がブロック配列への lowering から出てくること、`place_and_route` はすべてのスコープが全パスを通り、ゲート一つにつき配置済みセルが一つあることです。そのため、パスまで届かなくなった生成器は、黙って少ない処理を計測するのではなく、CI で失敗します。
 
 ## バージョニング
 

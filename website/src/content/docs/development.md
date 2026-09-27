@@ -83,15 +83,20 @@ that file and module to the test's `ALLOWED` list, never `#[allow]` at a call si
 
 ## Build, test, lint
 
-CI runs these four on Linux, macOS, and Windows, checks the workspace once more at the
-declared MSRV, and builds the API docs on Linux (below). Run the four before opening a PR.
+CI runs these on Linux, macOS, and Windows, checks the workspace once more at the
+declared MSRV, and builds the API docs on Linux (below). Run them before opening a PR.
 
 ```sh
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo build --workspace --locked
 cargo test --workspace --locked
+cargo test -p cairn-lang-core --bench lowering
+cargo test -p cairn-lang-redstone --bench place_and_route
 ```
+
+The last two run each bench once as a test, untimed; `--workspace` does not select bench
+targets.
 
 CI sets `RUSTFLAGS=-D warnings`, so any new warning fails the build. To match it locally:
 
@@ -107,6 +112,21 @@ also covers the docs only a contributor reads:
 ```sh
 RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --locked --all-features
 RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --locked --all-features --document-private-items
+```
+
+Two benches time the passes a build spends its time in: `lowering` in `cairn-lang-core` and
+`place_and_route` in `cairn-lang-redstone`. They call the passes in-process, since timing the CLI
+over an example would mostly time process startup, and they generate their sources, since an
+example-sized one goes through a pass faster than the timer can tell a change apart. They take
+their settings from the release profile except `panic`, which Cargo builds unwinding for benches as
+it does for tests. CI runs them once as tests, above, but never times them. They exist to measure
+a change to `[profile.release]`, `opt-level` above all, before it is made.
+[CONTRIBUTING.md](https://github.com/kage1020/Cairn/blob/main/CONTRIBUTING.md) walks through
+comparing two profiles with them from the first release that includes the benches; until then that
+section is only on `canary`. To run both:
+
+```sh
+cargo bench -p cairn-lang-core -p cairn-lang-redstone --bench lowering --bench place_and_route
 ```
 
 `cairn-lang-wasm` builds with [`wasm-pack`](https://rustwasm.github.io/wasm-pack/) and the website

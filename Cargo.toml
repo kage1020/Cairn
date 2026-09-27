@@ -49,3 +49,9 @@ strip = "symbols"
 # A panic aborts the shipped binaries instead of exiting 101. Tests are
 # unaffected: Cargo builds test targets with unwinding regardless.
 panic = "abort"
+# `opt-level` is written out at the default 3 on purpose, because it is
+# the one setting here that trades throughput: "s" and "z" shrink the
+# gzipped binaries and slow the compiler passes, place-and-route most.
+# The `lowering` and `place_and_route` benches measure that side, and
+# CONTRIBUTING.md says how to rerun them before changing this.
+opt-level = 3
