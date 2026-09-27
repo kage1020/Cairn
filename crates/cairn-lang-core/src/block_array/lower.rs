@@ -77,8 +77,9 @@ use super::roof::{
     shed_voxels, stair_state,
 };
 use super::walkway::{
-    BlockedIndex, ROUTE_AREA_CAP, RoutePathError, WalkwayLayout, build_walkway_array, l_path,
-    l_path_area, port_world_position, route_path,
+    BlockedIndex, ROUTE_AREA_CAP, RoutePathError, WalkwayLayout, WindowArgs, build_walkway_array,
+    door_anchor_offset, door_at_deferral, l_path, l_path_area, port_world_position,
+    read_window_args, route_path,
 };
 use super::wall_column::WallColumn;
 use super::{BlockArray, BlockArrayIr, BlockState, Dims, Palette, PaletteIndex};
@@ -273,6 +274,10 @@ struct PlacedBody {
     /// phase cut against. A `connect` row anchoring a port here reads
     /// it, so the port and the cut ask the wall one question.
     walls: WallColumn,
+    /// The doors and windows the openings phase cut, by member span. A
+    /// port on any other opening is refused: whatever stopped the cut, the
+    /// strip would end against the wall.
+    cut: HashSet<Span>,
 }
 
 /// World-space `(x, y, z)` of every non-air voxel on the y=0 plane of
@@ -336,9 +341,10 @@ struct ConnectInputs<'a> {
 ///
 /// Skips a row whose port [`port_world_position`] refuses — a role other
 /// than [`MemberRole::Door`] or [`MemberRole::Window`], an argument the
-/// opening cannot use, masonry the opening does not reach — with a
-/// `W_DEFERRED_MEMBER` whose note names that endpoint's
-/// [`super::walkway::PortRejection`]. Emits a `W_DUPLICATE_WALKWAY` when
+/// opening cannot use, masonry the opening does not reach, an opening the
+/// openings phase did not cut, a coordinate past `i32` — with a
+/// `W_DEFERRED_MEMBER` carrying one note per refused endpoint, each naming
+/// that endpoint's [`super::walkway::PortRejection`]. Emits a `W_DUPLICATE_WALKWAY` when
 /// the same `(from, to)` pair has already been laid in the same site.
 ///
 /// Every finding raised here anchors on `ValidatedConnect::span`, which
@@ -414,6 +420,7 @@ fn lower_connects(
             from_def,
             &connect.from.port,
             &from_body.walls,
+            &from_body.cut,
         );
         let to_pos = port_world_position(
             to_body.placement.origin,
@@ -421,27 +428,41 @@ fn lower_connects(
             to_def,
             &connect.to.port,
             &to_body.walls,
+            &to_body.cut,
         );
-        let (from_pos, to_pos) = match (from_pos, to_pos) {
-            (Ok(from_pos), Ok(to_pos)) => (from_pos, to_pos),
-            (from_pos, to_pos) => {
-                let (from_err, to_err) = (from_pos.err(), to_pos.err());
-                let unplaceable = blamed_endpoints(connect, from_err.is_some(), to_err.is_some());
-                let noun = if from_err.is_some() && to_err.is_some() {
-                    "ports"
-                } else {
-                    "port"
-                };
-                // One note per refused endpoint, naming the reason
-                // `port_world_position` gave for it rather than every
-                // contract a port has. Where the reason is on a member,
-                // the note points at that member's line — which, for an
-                // argument or masonry fault, carries the member's own
-                // deferral too, since the opening was not cut either.
-                let notes = [(&connect.from, from_err), (&connect.to, to_err)]
-                    .into_iter()
-                    .filter_map(|(end, rejection)| Some(rejection?.note(&end.to_string())))
-                    .collect();
+        // One note per refused endpoint, naming the reason
+        // `port_world_position` gave for it rather than every contract a
+        // port has. Where the reason is on a member, the note points at
+        // that member's line — which, for a side, argument or masonry
+        // fault, carries the member's own deferral too, since the opening
+        // was not cut either. Each refusing arm is spelled out and builds
+        // its notes from the `Err`s it matched, so a defer with a primary
+        // and no note under it is not a shape this can produce.
+        let refused = match (from_pos, to_pos) {
+            (Ok(from_pos), Ok(to_pos)) => Ok((from_pos, to_pos)),
+            (Err(from_err), Err(to_err)) => Err((
+                vec![
+                    from_err.note(&connect.from.to_string()),
+                    to_err.note(&connect.to.to_string()),
+                ],
+                "ports",
+                (true, true),
+            )),
+            (Err(from_err), Ok(_)) => Err((
+                vec![from_err.note(&connect.from.to_string())],
+                "port",
+                (true, false),
+            )),
+            (Ok(_), Err(to_err)) => Err((
+                vec![to_err.note(&connect.to.to_string())],
+                "port",
+                (false, true),
+            )),
+        };
+        let (from_pos, to_pos) = match refused {
+            Ok(positions) => positions,
+            Err((notes, noun, (from_refused, to_refused))) => {
+                let unplaceable = blamed_endpoints(connect, from_refused, to_refused);
                 diagnostics.push(Diagnostic {
                     code: DiagnosticCode::DeferredMember,
                     span: connect.span.clone(),
@@ -1085,7 +1106,7 @@ fn lower_site<'a>(
             continue;
         };
 
-        let Some(LoweredBody { array, walls }) = lower_body_to_block_array(
+        let Some(LoweredBody { array, walls, cut }) = lower_body_to_block_array(
             BodyDescriptor {
                 kind: VoxelSource::Place,
                 scope_label: place_id,
@@ -1118,6 +1139,7 @@ fn lower_site<'a>(
             .entry(array.source_scope.clone())
             .or_insert(PlacedBody {
                 walls,
+                cut,
                 placement: Placement {
                     site: placement_site,
                     place_id: placement_id,
@@ -1185,6 +1207,11 @@ struct BodyDescriptor<'a> {
 struct LoweredBody {
     array: BlockArray,
     walls: WallColumn,
+    /// The spans of the `door` and `window` members that painted at
+    /// least one cell — the openings the `connect` pass may anchor a port
+    /// on. Read off the canvas rather than reported by the generators, so
+    /// a new way for a cut to defer cannot forget to say so.
+    cut: HashSet<Span>,
 }
 
 /// Lower one struct or place body into voxels.
@@ -1272,6 +1299,14 @@ fn lower_body_to_block_array<'a>(
             *voxels,
         ));
     }
+    let cut: HashSet<Span> = flattened
+        .iter()
+        .zip(&canvas.wrote)
+        .filter(|((_, m), wrote)| {
+            **wrote && matches!(m.role, MemberRole::Door | MemberRole::Window)
+        })
+        .map(|((_, m), _)| m.span.clone())
+        .collect();
     let (voxels, never_painted) = prune_unreferenced(&mut palette, &canvas);
     debug_assert!(
         never_painted.is_empty(),
@@ -1298,6 +1333,7 @@ fn lower_body_to_block_array<'a>(
     Some(LoweredBody {
         array,
         walls: ctx.wall_column,
+        cut,
     })
 }
 
@@ -2512,6 +2548,10 @@ struct Canvas {
     phases: Vec<Option<Phase>>,
     /// Indexed by palette slot: `true` once a write has named that slot.
     painted: Vec<bool>,
+    /// Indexed like [`Self::phases`]: `true` once that member has written
+    /// a cell, whatever a later write did to it. How the pass knows which
+    /// openings were cut, for the `connect` rows that anchor on them.
+    wrote: Vec<bool>,
     /// `(overridden, overriding)` member pairs to the number of voxels the
     /// second took from the first. Insertion-ordered so the diagnostics
     /// come out in the order the phases discovered them, then sorted by
@@ -2525,6 +2565,7 @@ impl Canvas {
             dims,
             voxels: vec![PaletteIndex::AIR; dims.volume()],
             owners: vec![0; dims.volume()],
+            wrote: vec![false; phases.len()],
             phases,
             painted: vec![false; 1],
             conflicts: IndexMap::new(),
@@ -2612,6 +2653,9 @@ impl MemberCanvas<'_> {
             canvas.painted.resize(slot + 1, false);
         }
         canvas.painted[slot] = true;
+        if let Some(wrote) = canvas.wrote.get_mut(member as usize) {
+            *wrote = true;
+        }
         let before = canvas.voxels[i];
         canvas.voxels[i] = after;
         let previous = std::mem::replace(&mut canvas.owners[i], member + 1);
@@ -3067,36 +3111,20 @@ fn carve_door(
         return;
     };
     let len = wall_length(side, ctx.interior_w, ctx.interior_h);
-    // Three named anchors are accepted: `center` (`len / 2`, round-down
-    // on even widths — documented in `spec/syntax` "Selectors"), `left`
-    // (`0`, the wall-local axis origin), and `right` (`len - 1`, the far
-    // corner). The same vocabulary is recognised by
-    // `super::walkway::door_anchor_offset` for port resolution, so the
-    // openings cut and any walkway that connects to this door land at
-    // the same column. Numeric offsets are reserved for a future
-    // extension. `len` is at least 1 — `size=WxH` parses as `NonZeroU32`
-    // and the overhang only widens the grid — so `right` cannot
-    // underflow; the `saturating_sub` states that rather than handling a
-    // case. Asked before the wall below, the way `fill_window` reads its
-    // rectangle before asking where the masonry is, so an `at=` typo is
-    // reported as one on a body whose walls are also wrong.
-    let at = match member.ident_value("at") {
-        Some("center") => len / 2,
-        Some("left") => 0,
-        Some("right") => len.saturating_sub(1),
-        Some(other) => {
+    // `at=` is read by `super::walkway::door_anchor_offset`, the function
+    // a `connect` port on this door reads it with, and a refusal is worded
+    // by `door_at_deferral` from the same classification the port's note
+    // uses — so the cut, the walkway and both messages cannot disagree
+    // about what `at=` says. Asked before the wall below, the way
+    // `fill_window` reads its rectangle before asking where the masonry
+    // is, so an `at=` typo is reported as one on a body whose walls are
+    // also wrong.
+    let at = match door_anchor_offset(member, len) {
+        Ok(at) => at,
+        Err(written) => {
             diagnostics.push(diag_deferred_member_reason(
                 member,
-                &format!(
-                    "door `at={other}` is not yet supported (use `at=center | left | right`)",
-                ),
-            ));
-            return;
-        }
-        None => {
-            diagnostics.push(diag_deferred_member_reason(
-                member,
-                "door without `at=` is not yet supported (use `at=center | left | right`)",
+                &door_at_deferral(&written),
             ));
             return;
         }
@@ -4068,30 +4096,24 @@ fn fill_window(
     };
     // `offset=` defaults to 0 (the wall-local axis origin) when absent, so a
     // decorative repeat=N series can be authored as `window ... repeat=N
-    // step=M size=WxH` without a redundant `offset=0`. A key that is
-    // present but not a non-negative integer still defers — validation is
-    // stricter than "missing" and matches how `repeat=` and `step=` treat
-    // the same shape below.
-    let offset = match nonneg_int_or_defer(member, "offset", diagnostics) {
-        NonNegRead::Valid(v) => v,
-        NonNegRead::Absent => 0,
-        NonNegRead::Deferred => return,
-    };
-    let Some(y_start_local) = member.nonneg_u32("y") else {
-        diagnostics.push(diag_deferred_member_reason(
-            member,
-            "window without `y=` is not yet supported",
-        ));
-        return;
+    // step=M size=WxH` without a redundant `offset=0`; `y=` and `size=` are
+    // required. A key that is present but ill-shaped defers, with a reason
+    // that says so rather than calling it missing. Read by
+    // `super::walkway::read_window_args`, which a `connect` port on this
+    // window reads the same three with.
+    let WindowArgs {
+        offset,
+        y: y_start_local,
+        width: sw,
+        height: sh,
+    } = match read_window_args(member) {
+        Ok(args) => args,
+        Err(fault) => {
+            diagnostics.push(diag_deferred_member_reason(member, &fault.deferral()));
+            return;
+        }
     };
     let y_start = y_start_local.saturating_add(y_offset);
-    let Some((sw, sh)) = size_value(member, "size") else {
-        diagnostics.push(diag_deferred_member_reason(
-            member,
-            "window without `size=WxH` is not yet supported",
-        ));
-        return;
-    };
     let sym = bool_value(member, "sym").unwrap_or(false);
     // `repeat=` stamps the same rectangle multiple times along the wall,
     // separated by `step=` voxels. Both keys are optional: an absent
@@ -4171,10 +4193,16 @@ fn fill_window(
             format!(
                 "window at y={y_start} size={sw}x{sh} has no wall to cut into (this struct declares no `walls` that paints — one with a positive `height=` and a `mat_slot=` that resolves)",
             )
-        } else {
-            let last = y_start.saturating_add(sh).saturating_sub(1);
+        } else if let Some(last) = y_start.checked_add(sh.saturating_sub(1)) {
             format!(
                 "window rows y={y_start}..={last} are not all inside one wall course (size={sw}x{sh}; the walls occupy {})",
+                ctx.wall_column,
+            )
+        } else {
+            // Saturating here printed `y=4294967295..=4294967294`, a range
+            // that ends before it starts.
+            format!(
+                "window rows from y={y_start} run past the highest row a build can address (size={sw}x{sh}; the walls occupy {})",
                 ctx.wall_column,
             )
         };

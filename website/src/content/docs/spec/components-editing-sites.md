@@ -139,6 +139,11 @@ offset + size.w ≤ wall_length                    # window, horizontal
 every row of y … y + size.h - 1 in one course    # window, vertical
 ```
 
+Those are the rules a port reads for itself. It also anchors only on an opening the openings pass
+actually cut: a `window` deferred by an argument only the cut reads — `repeat=`, `step=`, `sym=` —
+or whose own `mat_slot=` resolves to no block leaves its wall standing, and its port is refused
+with it.
+
 A `walls height=H` member under `level y=N` paints world rows `N + 1 … N + H` — one above the
 level's base row, which is where that level's floor slab would go, though a level-scoped `floor` is
 deferred today and the struct's own slab owns row `0`. Courses that touch merge, so `walls height=5` plus a `level y=5 walls
@@ -153,10 +158,11 @@ not resolve paints nothing, so the cut is deferred and the port is refused with 
 declared inside a `level` paints its rows, so the cut happens and the port stands on it. A port
 that cannot be placed drops its row with a `W_DEFERRED_MEMBER` carrying one note per refused
 endpoint, naming the one rule that endpoint broke: a role that cannot anchor a port, the `side=` or
-`at=` it was written with, the window argument it lacks, how far its rectangle runs past the wall,
-or which rows the masonry does and does not cover. The note points at the member's line; when the
-fault is an argument or the masonry rather than the role, that line carries the member's own finding
-too, since the opening was not cut either. A port pushed past the coordinate range by its `place`
+`at=` it was written with, the window argument it lacks or wrote in the wrong shape, how far its
+rectangle runs past the wall, which rows the masonry does and does not cover, or that the openings
+pass did not cut it. The note points at the member's line; when the fault is `side=`, an argument or
+the masonry, that line carries the member's own finding too — worded from the same reading of the
+argument, so the two do not disagree about what was written. A port pushed past the coordinate range by its `place`
 has no member line to point at and says so on the row alone.
 
 **How the path runs.** A Manhattan L, x-axis leg then z-axis leg, at the two ports' shared Y. 3D

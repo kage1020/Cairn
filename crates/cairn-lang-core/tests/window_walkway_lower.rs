@@ -125,8 +125,8 @@ fn window_walkway_emits_no_resolver_errors() {
 fn window_walkway_overflowing_window_cascades_one_deferred_member() {
     // size=3x3 → wall_length(Front) = 3. The overflow window declares
     // `offset=2 size=2x2`, so `offset + size.w = 4 > 3` and
-    // `window_center_offset` refuses it as past the wall. The peer's door port still
-    // resolves cleanly, so the cascade names the window side.
+    // `window_center_offset` refuses it as past the wall. The peer's door
+    // port still resolves cleanly, so the cascade names the window side.
     let src = "@cairn 2026.06\n\n\
 def hut size=3x3:\n  \
 floor mat_slot=floor\n  \

@@ -341,6 +341,12 @@ fn the_walkway_defer_states_the_rule_the_door_broke() {
         "`a.e` is a door that opens at y=1, the row above the floor slab, which is not inside \
          any wall course (the walls occupy y=7..=10); the member says so on its own line too",
     );
+    // The second note is the other endpoint's, not a copy of the first.
+    assert_eq!(
+        notes[1].message,
+        "`b.e` is a door that opens at y=1, the row above the floor slab, which is not inside \
+         any wall course (the walls occupy y=7..=10); the member says so on its own line too",
+    );
     let at = notes[0].span.clone().expect("the note points at the door");
     assert!(
         src[at].starts_with("door id=e"),

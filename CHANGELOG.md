@@ -241,19 +241,49 @@
 
   ```
   hut.crn:15:3: warning[W_DEFERRED_MEMBER]: walkway `a.trim ↔ b.e` was skipped because port `a.trim` could not be placed
-  hut.crn:9:3:   note: `a.trim` is a `stair`, and only a `door` or a `window` can anchor a port (stair and roof ports are reserved) — declare the port on a door or window instead
+  hut.crn:9:3:   note: `a.trim` is a `stair`, and only a `door` or a `window` can anchor a port (`stair` ports are reserved) — declare the port on a door or window instead
   ```
 
   The other reasons carry what the author wrote or what the check measured: `side=frnt`,
-  `at=middle`, the window argument that is missing, `offset + size.w` against the wall's length,
-  the rows a window wants against the rows the walls occupy. A row with two bad ports gets a note
-  for each, in row order. Where the fault is the member's argument or masonry, the member's line
-  carries its own deferral too, which the note says, so the two findings read as one fault.
+  `at=middle`, the window argument that is missing or ill-shaped, `offset + size.w` against the
+  wall's length, the rows a window wants against the rows the walls occupy. A row with two bad
+  ports gets a note for each, in row order. Where the fault is the member's `side=`, argument or
+  masonry, the member's line carries its own deferral too, which the note says, so the two findings
+  read as one fault.
 
-  Enumerating the refusals turned up two the old list had wrong. A `window` with no `offset=` is
-  cut at offset 0, but the port refused it and dropped the strip beside a window that was there; it
-  reads `offset=` the way the cut does now. And the last step of the lookup, one block out from
-  the wall, was the one sum left unchecked; it is refused as out of range like the others.
+  The door's `at=` and the window's `offset=` / `y=` / `size=` are now read once, by the same
+  function for the cut and the port, and each refusal is worded from that one reading. Before, a
+  `door id=e side=front at=3` was told two different things about the same `at=`:
+
+  ```
+  t.crn:6:3: warning[W_DEFERRED_MEMBER]: door without `at=` is not yet supported (use `at=center | left | right`)
+  t.crn:6:3:   note: `a.e` is a door whose `at=` is not one of center, left, right (numeric offsets are reserved); the member says so on its own line too
+  ```
+
+  Now both are built from one clause:
+
+  ```
+  t.crn:6:3: warning[W_DEFERRED_MEMBER]: door has an `at=` that is not one of center, left, right (numeric offsets are reserved) — use `at=center | left | right`
+  t.crn:6:3:   note: `a.e` is a door that has an `at=` that is not one of center, left, right (numeric offsets are reserved); the member says so on its own line too
+  ```
+
+  A window's `y=abc` or `size=3` is likewise reported as ill-shaped rather than missing, on both
+  lines.
+
+  Writing the refusals down also turned up rules the port got wrong:
+
+  - A `window` with no `offset=` is cut at offset 0, but the port refused it and dropped the strip
+    beside a window that was there; it reads `offset=` the way the cut does now.
+  - A `window` the cut deferred for a reason the port does not read — `repeat=0`, `repeat=abc`,
+    stamps that run past the wall, `repeat=` with `sym=true`, or a `mat_slot=` that resolves to no
+    block — still anchored a walkway, which ended against a wall that was never opened. A port now
+    anchors only on an opening the build actually cut, and the note says the opening was not cut
+    and where the reason is.
+  - The last step of the lookup, one block out from the wall, was the one sum left unchecked; it is
+    refused as out of range like the others.
+  - A window whose last row does not fit a `u32` was described as `rows
+    y=4294967295..=4294967294`, a range that ends before it starts, on its own line and on the
+    note. Both now say its rows run past the highest row a build can address.
 
 - *(tree-sitter)* A size separator with no digit after it was accepted by `cairn-lang-core` and
   refused by this grammar ([#270](https://github.com/kage1020/Cairn/issues/270)):
