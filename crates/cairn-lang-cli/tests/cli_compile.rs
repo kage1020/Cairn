@@ -7,7 +7,7 @@ use cairn_lang_core::lock::{HashHex, LockEdition, Lockfile};
 use tempfile::TempDir;
 
 mod common;
-use common::{cairn, crn_examples, example_in_tempdir, examples_dir};
+use common::{Fixture, cairn, compile_as, crn_examples, example_in_tempdir, examples_dir};
 
 /// The version cargo derived for this crate from `[workspace.package]`.
 ///
@@ -1346,5 +1346,97 @@ fn c30_a_note_that_points_at_a_second_line_is_printed_with_its_position() {
     assert!(
         stderr.contains(":7:3:   note: overwritten member declared here"),
         "the note must carry the `door` line's position, got: {stderr}",
+    );
+}
+
+#[test]
+fn a_walkway_port_named_underscore_is_refused_rather_than_panicking_the_namer() {
+    // A port called `_` used to lower to `walkway::s::a.___b._`, which
+    // the artifact namer could not split back, so `compile` aborted on a
+    // debug assertion while `check` passed. The row is now dropped at
+    // lowering with a finding, and the build writes the two huts.
+    let fixture = Fixture::new(
+        "cli-compile",
+        "underscore-port",
+        concat!(
+            "def hut size=5x5:\n",
+            "  walls id=w mat_slot=wall height=3\n",
+            "  door  id=_ side=front at=center\n",
+            "\n",
+            "theme t:\n",
+            "  slot wall -> @cobblestone\n",
+            "\n",
+            "site s:\n",
+            "  place id=a use=hut theme=t at=origin\n",
+            "  place id=b use=hut theme=t east_of=a gap=4\n",
+            "  connect a._ to b._ path=@gravel\n",
+        ),
+    );
+    let result = compile_as(&fixture, "java", "1.21.4");
+    let stderr = String::from_utf8_lossy(&result.stderr);
+    assert!(result.status.success(), "stderr={stderr}");
+    assert!(
+        stderr.contains(
+            ":11:3: warning[W_INVALID_WALKWAY_IDENT]: walkway `a._ ↔ b._` was dropped because \
+             the port id `_` starts or ends with `_`"
+        ),
+        "stderr={stderr}",
+    );
+    assert_eq!(fixture.artifacts(), ["a.nbt", "b.nbt", "s.crn.lock"]);
+}
+
+#[test]
+fn walkway_ids_that_would_alias_across_the_separator_are_each_named() {
+    // `a.p_ → b.p` and `a.p → _b.p` used to share the scope key
+    // `walkway::s::a.p___b.p`, so the second row replaced the first and
+    // one `.nbt` was written for two rows with no finding. Each is now
+    // named on its own line, and the sound third row still writes its
+    // walkway.
+    let fixture = Fixture::new(
+        "cli-compile",
+        "edge-underscore-alias",
+        concat!(
+            "def hut size=5x5:\n",
+            "  walls id=w mat_slot=wall height=3\n",
+            "  door  id=p  side=front at=center\n",
+            "  door  id=p_ side=back  at=center\n",
+            "\n",
+            "theme t:\n",
+            "  slot wall -> @cobblestone\n",
+            "\n",
+            "site s:\n",
+            "  place id=a  use=hut theme=t at=origin\n",
+            "  place id=b  use=hut theme=t east_of=a gap=4\n",
+            "  place id=_b use=hut theme=t north_of=a gap=4\n",
+            "  connect a.p_ to b.p path=@gravel\n",
+            "  connect a.p to _b.p path=@gravel\n",
+            "  connect a.p to b.p path=@gravel\n",
+        ),
+    );
+    let result = compile_as(&fixture, "java", "1.21.4");
+    let stderr = String::from_utf8_lossy(&result.stderr);
+    assert!(result.status.success(), "stderr={stderr}");
+    for (line, from, to, role, segment) in [
+        (13, "a.p_", "b.p", "port", "p_"),
+        (14, "a.p", "_b.p", "place", "_b"),
+    ] {
+        let want = format!(
+            ":{line}:3: warning[W_INVALID_WALKWAY_IDENT]: walkway `{from} ↔ {to}` was dropped \
+             because the {role} id `{segment}` starts or ends with `_`",
+        );
+        assert!(
+            stderr.contains(&want),
+            "missing `{want}` in stderr={stderr}"
+        );
+    }
+    assert_eq!(
+        fixture.artifacts(),
+        [
+            "_b.nbt",
+            "a.nbt",
+            "b.nbt",
+            "s.crn.lock",
+            "s_walkway_a_p__b_p.nbt"
+        ],
     );
 }

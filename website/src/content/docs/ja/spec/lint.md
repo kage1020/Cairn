@@ -279,7 +279,7 @@ placement が同じテーマを束縛しながら 1 つのスロットについ�
 | `E_AMBIGUOUS_PORT` | そのポート id が、参照先の def の複数のメンバに一致する。 |
 | `E_MISSING_PATH_MATERIAL` | `connect` 行に `path=` が無く、walkway を敷くマテリアルがない。 |
 | `W_DUPLICATE_WALKWAY` | 同じ site の先行する行が既に敷いた `(from, to)` の組を、`connect` が繰り返している。 |
-| `W_INVALID_WALKWAY_IDENT` | `connect` の site / place / port 識別子が `__` を含む。 |
+| `W_INVALID_WALKWAY_IDENT` | `connect` の site / place / port 識別子が `__` を含む、または place / port 識別子が `_` で始まるか終わる。 |
 | `W_DEFERRED_CONNECT` | `connect` の対象の `place` 自身が拒否されており、繋ぐものがない。 |
 | `W_WALKWAY_BLOCKED` | フォールバック経路のセルが既存の構造物と重なり、落とされた。 |
 
@@ -294,7 +294,12 @@ walkway は、ソース上では繋がって見える 2 棟を世界では繋が
 
 `W_INVALID_WALKWAY_IDENT` は `E_INVALID_PLACE_ID` と同じ往復の規則を別の区切りに適用したものです。
 `__` は walkway のスコープキーの `from` と `to` を繋ぐので、片側の `b__c` ともう片側の `c__home2` が
-同じ文字列に符号化されます。行は落とされ、指摘は改名すべき区間を名指します。
+同じ文字列に符号化されます。place や port の端の `_` も同じようにこの区切りに溶け込みます。
+`a.p_ to b.p` と `a.p to _b.p` はどちらも `a.p___b.p` に符号化され、`_` という名前の port は、
+分け直すと port が空になるキーを残します。区切りに接するのは `from` 側 port の末尾と `to` 側 place の
+先頭だけですが、`connect` はどちら向きにも書けるので、すべての place と port の両端を拒否します。
+site は両隣と `::` で区切られるため、端の規則から外れます。行は落とされ、指摘は改名すべき区間を
+名指します。
 
 `W_DEFERRED_CONNECT` は `place` を拒否したもの — 欠けた行、打ち間違えたキー、失敗した原点セレクタ、
 解決できない `use=` や `theme=` — に従います。警告なのは、修理を持つ指摘が `place` 側のものであり、

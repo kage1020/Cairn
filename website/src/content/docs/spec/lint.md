@@ -281,7 +281,7 @@ something for the name would build a site the source did not describe.
 | `E_AMBIGUOUS_PORT` | The port id matches more than one member of the referenced def. |
 | `E_MISSING_PATH_MATERIAL` | A `connect` row carries no `path=`, so the walkway has no material to lay. |
 | `W_DUPLICATE_WALKWAY` | A `connect` repeats a `(from, to)` pair an earlier row in the same site already laid. |
-| `W_INVALID_WALKWAY_IDENT` | A site, place or port identifier in a `connect` contains `__`. |
+| `W_INVALID_WALKWAY_IDENT` | A site, place or port identifier in a `connect` contains `__`, or a place or port identifier starts or ends with `_`. |
 | `W_DEFERRED_CONNECT` | A `connect` targets a `place` that was itself refused, so there is nothing to connect. |
 | `W_WALKWAY_BLOCKED` | Cells of the fallback path overlapped an existing structure and were dropped. |
 
@@ -296,8 +296,12 @@ world, with nothing in the report to say so.
 
 `W_INVALID_WALKWAY_IDENT` is the same round-trip rule as `E_INVALID_PLACE_ID` on a different
 separator. `__` joins the `from` and `to` halves of a walkway's scope key, so `b__c` in one half and
-`c__home2` in the other encode to one string. The row is dropped and the finding names the segment
-to rename.
+`c__home2` in the other encode to one string. A `_` at the edge of a place or port merges into that
+separator the same way: `a.p_ to b.p` and `a.p to _b.p` both encode to `a.p___b.p`, and a port
+named `_` leaves a key that splits back into an empty port. Only the end of the `from` port and the
+start of the `to` place touch the separator, but a `connect` can be written in either direction, so
+both edges of every place and port are refused. The site is exempt from the edge rule, since `::`
+separates it from both neighbours. The row is dropped and the finding names the segment to rename.
 
 `W_DEFERRED_CONNECT` follows whatever refused the `place` — an incomplete row, a mistyped key, a
 failed origin selector, an unresolved `use=` or `theme=`. It is a warning because the finding that
