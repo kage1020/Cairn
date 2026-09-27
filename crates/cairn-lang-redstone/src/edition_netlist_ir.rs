@@ -27,7 +27,7 @@ use cairn_lang_core::Edition;
 use cairn_lang_core::ast::DottedRef;
 use cairn_lang_core::error::Span;
 use indexmap::IndexMap;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::logic_ir::ScopeKind;
 use crate::netlist_ir::{CellPortDriver, NetRef, NetlistInput, NetlistOutput};
@@ -58,7 +58,7 @@ use crate::netlist_ir::{CellPortDriver, NetRef, NetlistInput, NetlistOutput};
 /// `pulse` / `delay` / `edge_*` / `counter`, from `spec/redstone`
 /// "Two tiers, and the v1 boundary") later should not be a breaking
 /// change for downstream exhaustive matches.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum EditionCell {

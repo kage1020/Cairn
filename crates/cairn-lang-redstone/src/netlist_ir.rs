@@ -23,7 +23,7 @@
 use cairn_lang_core::ast::DottedRef;
 use cairn_lang_core::error::Span;
 use indexmap::IndexMap;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::logic_ir::ScopeKind;
 
@@ -34,8 +34,13 @@ use crate::logic_ir::ScopeKind;
 /// consumer can dispatch by variant without cross-checking against
 /// [`NetlistIr::inputs`] or [`NetlistIr::cells`] lengths — the same
 /// invariant [`crate::logic_ir::SignalRef`] carries at the Logic IR layer.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
-#[serde(tag = "kind", content = "index", rename_all = "snake_case")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(
+    tag = "kind",
+    content = "index",
+    rename_all = "snake_case",
+    deny_unknown_fields
+)]
 #[non_exhaustive]
 pub enum NetRef {
     /// Index into [`NetlistIr::inputs`].
@@ -86,8 +91,9 @@ pub enum LogicalCell {
 /// cell picks its subset (`Not` uses just `A`; `Mux` uses `Sel` / `A` /
 /// `B`). `#[non_exhaustive]` so future cells (e.g. a `counter` with
 /// `reset` / `enable` ports) can add ports without breakage.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[cfg_attr(test, derive(strum::EnumIter))]
 #[non_exhaustive]
 pub enum PortName {
     /// First data input (`a` operand).
@@ -101,7 +107,8 @@ pub enum PortName {
 /// One `(port name, driving net)` pair on a [`CellNode`]. Encoded as a
 /// struct rather than a tuple so the JSON wire form carries labelled
 /// fields.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct CellPortDriver {
     /// Which input port this driver feeds.
     pub port: PortName,
