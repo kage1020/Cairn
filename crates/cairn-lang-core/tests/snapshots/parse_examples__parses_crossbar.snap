@@ -133,7 +133,7 @@ items:
           - key: offset
             value:
               kind: Int
-              value: 0
+              value: 1
           - key: y
             value:
               kind: Int
