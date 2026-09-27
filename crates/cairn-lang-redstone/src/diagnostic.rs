@@ -137,6 +137,12 @@ pub enum DiagnosticCode {
     /// driver segment exceeds the cap, split the logic across multiple
     /// `circuit` blocks, or pin cell / actuator placement closer to
     /// its drivers.
+    ///
+    /// Also fires when a net has a stretch of dust past the 15-block
+    /// limit on which every coord turns, climbs or branches: a buffer
+    /// repeater carries a signal only where the wire runs straight
+    /// through it on one layer, so no chain of any length covers that
+    /// stretch.
     AttenuationLimit,
     /// Lowering a `logic` binding descended past
     /// [`crate::synth::MAX_LOWERING_DEPTH`]. A binding is lowered by descending into

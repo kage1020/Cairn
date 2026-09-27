@@ -335,7 +335,9 @@ enum SynthStage {
     /// [`cairn_lang_redstone::DUST_ATTENUATION_LIMIT`]; refuses with
     /// `E_ATTENUATION_LIMIT` when a segment exceeds the v1 sanity cap
     /// [`cairn_lang_redstone::MAX_ATTENUATION_SEGMENT`], past which the
-    /// buffer chain a segment needs is longer than v1 will build.
+    /// buffer chain a segment needs is longer than v1 will build, or
+    /// when a stretch of dust past the limit has no coord a repeater
+    /// can stand on.
     Delay,
     /// Legalized Placement IR: crossing legalization over the delayed
     /// Placement IR against `--edition`. Stage 4 of the pipeline

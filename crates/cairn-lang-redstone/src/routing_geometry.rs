@@ -58,8 +58,9 @@
 //! the source. [`NetTree::wire_path`] lists them; [`NetTree::route_to`]
 //! walks the parent links back from one sink, so a route is a subset of
 //! the wire by construction. Stage 2 drains `wire_path` into its
-//! occupancy set, stage 3 measures `route_to` to count buffer repeaters,
-//! and stage 4 walks the same route to place them. The trees are
+//! occupancy set; stages 3 and 4 place buffer repeaters on the tree and
+//! read the ones each `route_to` passes through, stage 3 to count them
+//! and stage 4 to record their coords. The trees are
 //! recomputed per stage rather than stored on the IR: they are a pure
 //! function of what the IR already carries, and a stored copy would put
 //! every coord of every net into every JSON dump.
@@ -828,6 +829,28 @@ impl NetTree {
         Some(route)
     }
 
+    /// The coord the signal reaches `coord` from: `None` for the source,
+    /// and for a coord that is not on this net.
+    pub(crate) fn parent(&self, coord: CellCoord) -> Option<CellCoord> {
+        self.parent.get(&keyed(coord)).copied()
+    }
+
+    /// A tree grown along `paths` by hand, each path starting on a coord
+    /// the tree already holds — the first one at the source.
+    ///
+    /// For the shapes a test cannot get the router to lay on demand,
+    /// such as a staircase every coord of which turns.
+    #[cfg(test)]
+    pub(crate) fn from_paths(paths: &[&[CellCoord]]) -> Self {
+        let mut tree = Self::rooted(keyed(paths[0][0]));
+        for path in paths {
+            for pair in path.windows(2) {
+                tree.attach(keyed(pair[1]), keyed(pair[0]));
+            }
+        }
+        tree
+    }
+
     /// The sinks the reservation has no clear path to, in the order
     /// they were asked for.
     ///
@@ -1078,7 +1101,7 @@ where
 /// The `input pad #i` fall-back is for a hand-built IR whose input row
 /// is shorter than the synthesis path implies; a diagnostic naming
 /// nothing is worse than one naming an index.
-fn net_label(net: NetRef, ir: &PlacementIr) -> String {
+pub(crate) fn net_label(net: NetRef, ir: &PlacementIr) -> String {
     match net {
         NetRef::Input(i) => ir
             .inputs

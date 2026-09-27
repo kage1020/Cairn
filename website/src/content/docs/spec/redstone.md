@@ -203,6 +203,16 @@ The internal algorithm runs five stages:
    past the v1 cap of 256 blocks is refused rather than buffered, under the same
    `E_ATTENUATION_LIMIT` stage 2 raises — what differs is that this pass measures the wire that
    was actually laid.
+
+   A repeater reads the block behind it and drives the one in front of it, on its own layer, so it
+   stands only where the wire runs straight through a coordinate on one layer and nothing branches
+   off there. On a straight run that is every 15 blocks. Where that coordinate turns, climbs or
+   forks, the repeater stands on the last coordinate before it that runs straight, which can leave
+   a route one repeater more than its length alone implies. Before a fork, that coordinate is on
+   the trunk, so one block serves every branch past it. Repeaters are placed on each net's routed
+   tree rather than per sink, and a sink is charged for the ones on its route. A stretch of dust
+   past the limit with no coordinate a repeater can stand on is refused with
+   `E_ATTENUATION_LIMIT`.
 4. **Crossing legalization.** Assigns the coordinate of every buffer repeater stage 3 counted. The
    wire needs no legalizing by this point: a repeater stands on its own net's routed path, that
    path belongs to that net alone, and no other net runs within a step of it, so there is no
