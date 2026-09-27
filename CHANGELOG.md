@@ -254,6 +254,36 @@
 
 ### Fixed
 
+- *(cli)* `cairn compile` refused a `--lock` that landed on one of its own artifacts only when the
+  two paths were spelled alike. `out/hut.nbt` was caught; `./out/hut.nbt`, `$PWD/out/hut.nbt`, or
+  the artifact reached through a symlinked `--out` was not, and the two files then overwrote each
+  other during the commit — destroying the previous build's artifact with no backup left, which is
+  the loss the refusal exists to prevent:
+
+  ```
+  $ cairn compile hut.crn --edition java --out out --lock ./out/hut.nbt ; echo "exit=$?"
+  warning: ./out/hut.nbt: the existing lockfile could not be read (lockfile I/O: stream did not contain valid UTF-8); replacing it
+  error: `out/hut.nbt` was written by a build that then failed, and could not be removed: No such file or directory (os error 2)
+  error: `./out/hut.nbt` could not be restored from `./out/hut.nbt.bak`: No such file or directory (os error 2)
+  error: writing lockfile `./out/hut.nbt`: No such file or directory (os error 2)
+  exit=1
+  $ ls out
+  $
+  ```
+
+  The guard now compares the directory entry each path names — its canonical parent directory and
+  its file name — so every spelling of an artifact, and of its `.tmp` and `.bak` scratch, is refused
+  before anything is staged, and the refusal names the artifact as the build spells it:
+
+  ```
+  error: lockfile path `./out/hut.nbt` collides with an artifact this build writes (`out/hut.nbt`)
+    note: pass a `--lock` outside `--out`, or rename the struct whose artifact shares the name
+  ```
+
+  On macOS and Windows, whose file systems ignore case by default, the file name is compared
+  case-folded too, so `--lock OUT/HUT.nbt` is refused there; on a case-sensitive volume of either
+  that refuses a lockfile which would have been a separate file, and loses nothing.
+
 - *(core)* A `connect` row whose port could not be placed printed every contract a port has and
   left the author to pick theirs. The port lookup answered each of its refusals with the same
   `None`, so the row had nothing to branch on:

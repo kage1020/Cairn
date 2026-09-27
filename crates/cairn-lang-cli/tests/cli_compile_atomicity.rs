@@ -393,3 +393,104 @@ fn atomic_5_a_lock_path_that_collides_with_an_artifact_is_refused() {
         );
     }
 }
+
+/// `compile` run from `cwd`, with `--out` and `--lock` passed exactly as
+/// spelled — the spellings are the point, so nothing here joins them onto a
+/// directory first.
+fn compile_in(cwd: &Path, out_dir: &str, lock: &str) -> (Option<i32>, String) {
+    let out = Command::new(cargo_bin())
+        .current_dir(cwd)
+        .args([
+            "compile",
+            "village.crn",
+            "--edition",
+            "java",
+            "--out",
+            out_dir,
+            "--lock",
+            lock,
+        ])
+        .output()
+        .expect("run cairn");
+    (
+        out.status.code(),
+        String::from_utf8_lossy(&out.stderr).into_owned(),
+    )
+}
+
+/// Rebuild with the `--out` and `--lock` that `spell` returns for the build's
+/// directory (and run from it), and assert the collision guard refuses it
+/// with the previous build left byte-identical and nothing staged.
+fn assert_lock_spelling_is_refused(spell: impl FnOnce(&Path) -> (String, String)) {
+    let build = first_successful_build();
+    let dir = build.source.parent().expect("source has a parent");
+    let (out_dir, lock) = spell(dir);
+    let before = snapshot(&build.out_dir);
+    change_the_source(&build.source);
+
+    let (code, stderr) = compile_in(dir, &out_dir, &lock);
+    assert_eq!(
+        code,
+        Some(1),
+        "`--out {out_dir} --lock {lock}` names an artifact and must be refused; stderr={stderr}",
+    );
+    // Keyed on the guard's own wording: the unguarded run also exits 1, from
+    // the failed commit, after the artifact is already gone.
+    assert!(
+        stderr.contains("collides with an artifact this build writes"),
+        "`--out {out_dir} --lock {lock}` must be refused by the collision guard, before \
+         anything is staged; got {stderr}",
+    );
+    assert_eq!(
+        snapshot(&build.out_dir),
+        before,
+        "`--out {out_dir} --lock {lock}` changed the previous build",
+    );
+}
+
+#[test]
+fn atomic_6_a_lock_spelled_differently_from_its_artifact_is_still_refused() {
+    // The guard compared paths as spelled, so only the byte-identical
+    // `out/home1.nbt` was refused. Every spelling below names that same
+    // file, and each one reached the commit and destroyed the previous
+    // artifact with no backup left.
+    for lock in ["./out/home1.nbt", "out/./home1.nbt", "out/../out/home1.nbt"] {
+        assert_lock_spelling_is_refused(|_| ("out".into(), lock.into()));
+    }
+    // A scratch name is reserved however it is spelled, too.
+    assert_lock_spelling_is_refused(|_| ("out".into(), "./out/home1.nbt.bak".into()));
+    // `$PWD/…`, the form scripts and CI write, against a relative `--out`.
+    assert_lock_spelling_is_refused(|dir| {
+        let lock = dir.join("out").join("home1.nbt");
+        ("out".into(), lock.to_str().unwrap().into())
+    });
+    // And the other way round.
+    assert_lock_spelling_is_refused(|dir| {
+        let out_dir = dir.join("out");
+        (out_dir.to_str().unwrap().into(), "out/home1.nbt".into())
+    });
+}
+
+#[cfg(unix)]
+#[test]
+fn atomic_7_a_lock_reached_through_a_symlinked_out_is_refused() {
+    // `--out` through a symlink and `--lock` through the real directory
+    // name one file, and so do the reverse; neither spelling shares a
+    // single component with the other past the directory.
+    assert_lock_spelling_is_refused(|dir| {
+        std::os::unix::fs::symlink(dir.join("out"), dir.join("link")).expect("symlink");
+        ("link".into(), "out/home1.nbt".into())
+    });
+    assert_lock_spelling_is_refused(|dir| {
+        std::os::unix::fs::symlink(dir.join("out"), dir.join("link")).expect("symlink");
+        ("out".into(), "link/home1.nbt".into())
+    });
+}
+
+#[cfg(any(target_os = "macos", windows))]
+#[test]
+fn atomic_8_a_lock_differing_only_in_case_is_refused_where_case_is_folded() {
+    // Case-insensitive by default on both platforms, so `OUT/HOME1.NBT` is
+    // the artifact's own directory entry.
+    assert_lock_spelling_is_refused(|_| ("out".into(), "OUT/HOME1.NBT".into()));
+}

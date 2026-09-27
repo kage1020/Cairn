@@ -3279,20 +3279,27 @@ fn prepare_artifacts(
 /// destroying the previous build's artifact with no copy left. The scratch
 /// names count too: `--lock out/home1.nbt.tmp` collides during staging
 /// rather than during the commit.
+///
+/// Paths are compared by the directory entry they name, not by how they are
+/// spelled: `./out/home1.nbt`, an absolute path, and one through a symlinked
+/// `--out` all name the same file as `out/home1.nbt`. See
+/// [`entry_location`].
 fn check_lock_path_is_free(
     prepared: &[(PathBuf, Compound)],
     lock_path: &Path,
 ) -> Result<(), ExitCode> {
-    let reserved_paths: std::collections::HashSet<PathBuf> = prepared
-        .iter()
-        .flat_map(|(path, _)| staging::reserved_paths(path))
-        .collect();
+    let reserved_paths: std::collections::HashMap<(PathBuf, std::ffi::OsString), PathBuf> =
+        prepared
+            .iter()
+            .flat_map(|(path, _)| staging::reserved_paths(path))
+            .map(|reserved| (entry_location(&reserved), reserved))
+            .collect();
     for reserved in staging::reserved_paths(lock_path) {
-        if reserved_paths.contains(&reserved) {
+        if let Some(artifact) = reserved_paths.get(&entry_location(&reserved)) {
             eprintln!(
                 "error: lockfile path `{}` collides with an artifact this build writes (`{}`)",
                 lock_path.display(),
-                reserved.display(),
+                artifact.display(),
             );
             eprintln!(
                 "  note: pass a `--lock` outside `--out`, or rename the struct whose artifact \
@@ -3302,6 +3309,46 @@ fn check_lock_path_is_free(
         }
     }
     Ok(())
+}
+
+/// The directory entry `path` names, as a key two spellings of one file
+/// compare equal on: the canonical parent directory and the file name.
+///
+/// Only the parent is canonicalised. The file itself usually does not exist
+/// yet, and when it is a symlink the commit renames the link rather than
+/// writing through it, so the entry — not what it points at — is what two
+/// staged files would fight over. The parent of every path this is asked
+/// about exists: `--out` has been created by the time the guard runs, and a
+/// lockfile whose directory is missing fails while staging, before anything
+/// is renamed. A parent that cannot be resolved therefore falls back to its
+/// absolute spelling, which still makes `./x` and `x` agree.
+///
+/// macOS and Windows file systems are case-insensitive by default, so there
+/// the file name is compared case-folded: `OUT/HOME1.nbt` is `out/home1.nbt`.
+/// A case-sensitive volume on either costs at most a refusal of a lockfile
+/// named like an artifact in a different case, never a lost artifact.
+fn entry_location(path: &Path) -> (PathBuf, std::ffi::OsString) {
+    let resolve = |dir: &Path| {
+        let dir = if dir.as_os_str().is_empty() {
+            Path::new(".")
+        } else {
+            dir
+        };
+        dir.canonicalize()
+            .or_else(|_| std::path::absolute(dir))
+            .unwrap_or_else(|_| dir.to_path_buf())
+    };
+    // No file name means the path ends in `..` or is a root; there is no
+    // entry to split off, so the whole path is the location.
+    let (Some(parent), Some(name)) = (path.parent(), path.file_name()) else {
+        return (resolve(path), std::ffi::OsString::new());
+    };
+    let name = if cfg!(any(target_os = "macos", windows)) {
+        name.to_string_lossy().to_lowercase().into()
+    } else {
+        name.to_os_string()
+    };
+    (resolve(parent), name)
 }
 
 /// Write the prepared structure files and the lockfile as one set: either
