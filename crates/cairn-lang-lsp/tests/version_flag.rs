@@ -1,11 +1,14 @@
 //! Contract tests for the `cairn-lsp` command-line surface.
 //!
-//! The binary is spawned by editors (no arguments — LSP over stdio) and by
-//! users on the command line for support triage. The surface it exposes to
-//! that second audience is: `--version`/`-V` → `cairn-lsp <version>` and
-//! exit 0; `--help`/`-h` → usage string and exit 0; anything else → exit 2
-//! with a message that lists the valid flags. These tests pin that contract so
-//! a refactor of `main.rs` cannot silently reshape it.
+//! The binary is spawned by editors (no arguments, or `--stdio`, which an LSP
+//! client appends when told to use the stdio transport — both mean LSP over
+//! stdio, and `lsp_stdio.rs` drives a session through each) and by users on
+//! the command line for support triage. The surface it exposes to that second
+//! audience is: `--version`/`-V` → `cairn-lsp <version>` and exit 0;
+//! `--help`/`-h` → usage string and exit 0; anything else, including a second
+//! argument after any flag, → exit 2 with a message that lists the valid
+//! flags. These tests pin that contract so a refactor of `main.rs` cannot
+//! silently reshape it.
 //!
 //! The version is compared against the number cargo derived for this crate
 //! rather than against `cairn-lang-core`'s `CAIRN_VERSION`, which is where the
@@ -73,6 +76,10 @@ fn help_flag_prints_usage_and_exits_zero() {
             stdout.contains("--version") && stdout.contains("--help"),
             "{flag} output missing flag documentation: {stdout}",
         );
+        assert!(
+            stdout.contains("--stdio"),
+            "{flag} output should document `--stdio`: {stdout}",
+        );
     }
 }
 
@@ -98,6 +105,10 @@ fn unknown_flag_exits_with_code_two_and_names_the_flag() {
         stderr.contains("--version") && stderr.contains("--help"),
         "stderr should list valid flags: {stderr}",
     );
+    assert!(
+        stderr.contains("--stdio"),
+        "stderr should list `--stdio` among the valid flags: {stderr}",
+    );
 }
 
 #[test]
@@ -112,5 +123,30 @@ fn extra_arguments_after_version_are_rejected() {
         Some(2),
         "extra args after --version should exit 2, got {:?}",
         output.status,
+    );
+}
+
+#[test]
+fn extra_arguments_after_stdio_are_rejected() {
+    // `--stdio` is accepted because it names the only transport the server
+    // speaks, not as a gate that lets anything after it through: an
+    // argument the server does not understand is refused whatever precedes
+    // it, rather than silently dropped.
+    let output = Command::new(env!("CARGO_BIN_EXE_cairn-lsp"))
+        .args(["--stdio", "--clientProcessId=1"])
+        .stdin(std::process::Stdio::null())
+        .output()
+        .expect("spawn cairn-lsp --stdio --clientProcessId=1");
+
+    assert_eq!(
+        output.status.code(),
+        Some(2),
+        "extra args after --stdio should exit 2, got {:?}",
+        output.status,
+    );
+    let stderr = String::from_utf8(output.stderr).expect("stderr is utf-8");
+    assert!(
+        stderr.contains("`--clientProcessId=1` after `--stdio`"),
+        "stderr should name the extra argument and the flag it followed: {stderr}",
     );
 }
