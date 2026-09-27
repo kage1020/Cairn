@@ -52,16 +52,21 @@ fn errors(
 }
 
 /// A shared bus of 16 cells legalizes at `void=2`, with one repeater
-/// per refresh point rather than one per cell.
+/// per refresh point on the bus rather than one per cell.
 ///
 /// Every cell reads `sig.b`. The trunk that carries it runs along the
 /// free row beside the cell row and each cell taps off it, so the
 /// routes into all of them share the trunk and the repeaters standing
 /// on it. Two coords rather than one, because the row is `2 * cells`
 /// columns long and the far half of it is past the second refresh
-/// point. The second stands at `x = 28` rather than 15 blocks past the
-/// first: `(29,0,2)` is where the trunk forks into the cell at
-/// `(29,0,1)`, and a repeater on a fork faces one branch only.
+/// point.
+///
+/// They stand 12 blocks apart rather than 15. Each cell is a Java
+/// comparator, which passes on the strength it reads rather than
+/// restoring it, so the dust from the trunk runs on through the chain
+/// of comparators after the tap, and a tap may spend less than the
+/// whole limit. The chain's own nets carry repeaters of their own for
+/// the same reason, which is why this counts the trunk's alone.
 ///
 /// That the tree reaches the far cells along a trunk beside the row
 /// and not *through* the near ones is what makes this a small number
@@ -79,21 +84,27 @@ fn a_shared_bus_of_sixteen_cells_shares_its_repeaters() {
 
     let cells = &legalized.scopes[0].ir.cells;
     assert_eq!(cells.len(), 16, "the fixture is the 16-cell chain");
-    let blocks: std::collections::BTreeSet<(u32, u32, u32)> = cells
-        .iter()
-        .flat_map(PlacedCellNode::buffer_coords)
-        .map(|b| (b.coord.x, b.coord.y, b.coord.z))
-        .collect();
+    let bus = cairn_lang_redstone::NetRef::Input(1);
+    let on_the_bus = |cell: &PlacedCellNode| -> Vec<(u32, u32, u32)> {
+        cell.buffer_coords()
+            .iter()
+            .filter(|b| {
+                cell.drivers
+                    .iter()
+                    .any(|d| d.net == bus && BufferSegment::Port(d.port) == b.port)
+            })
+            .map(|b| (b.coord.x, b.coord.y, b.coord.z))
+            .collect()
+    };
+    let blocks: std::collections::BTreeSet<(u32, u32, u32)> =
+        cells.iter().flat_map(on_the_bus).collect();
     assert_eq!(
         blocks,
-        [(14, 0, 2), (28, 0, 2)].into_iter().collect(),
-        "two blocks, on the plane, beside the row rather than over it — one \
+        [(12, 0, 2), (24, 0, 2)].into_iter().collect(),
+        "two blocks on the bus, on the plane, beside the row rather than over it — one \
          per refresh point and not one per cell",
     );
-    let attributions = cells
-        .iter()
-        .filter(|c| !c.buffer_coords().is_empty())
-        .count();
+    let attributions = cells.iter().filter(|c| !on_the_bus(c).is_empty()).count();
     assert!(
         attributions >= 2,
         "the sharing is only pinned if more than one cell names it: {attributions}",
@@ -143,6 +154,64 @@ struct s size=17x3
             "output #{index} is fed through the trunk repeater, one short of the fork at {fork:?}",
         );
         assert_eq!(output.local_delay_ticks(), Some(1), "output #{index}");
+    }
+}
+
+/// Four plates combined into one door through three cells that pass
+/// strength on, on either edition: the dust from a plate to the door is
+/// one strand, and it is buffered as one.
+///
+/// Every segment is at most 15 blocks — the one out to the door is 15
+/// exactly — so measured one at a time, as each net used to be, none
+/// needs a repeater. But a Bedrock OR is a dust merge and a Java
+/// comparator AND never outputs more than it reads, so the dust from
+/// `sig.a`'s pad through the three cells to the door is over 20 blocks
+/// with nothing restoring it, and the door never opened. The repeater
+/// goes on the wire out to the door, where there is straight wire to
+/// stand on, as early as the dust already spent upstream requires.
+#[test]
+fn cells_that_pass_strength_on_share_one_strand_with_their_inputs() {
+    for (op, edition) in [("or", Edition::Bedrock), ("and", Edition::Java)] {
+        let source = format!(
+            r"
+theme t:
+  slot wall -> @oak_planks
+  slot door -> @oak_door
+
+struct s size=20x4
+  floor mat_slot=wall
+  door id=d side=front at=center mat_slot=door
+  pressure_plate id=pa at=front.outside offset=0 y=0 -> sig.a
+  pressure_plate id=pb at=inside.front offset=1 y=0 -> sig.b
+  pressure_plate id=pc at=front.outside offset=2 y=0 -> sig.c
+  pressure_plate id=pd at=inside.front offset=2 y=0 -> sig.d
+  logic sig.open = sig.a {op} sig.b {op} sig.c {op} sig.d
+  door[id=d] opened_by=sig.open
+  circuit region=floor void=2
+"
+        );
+        let legalized = legalized_from_source(&source, edition);
+        let ir = &legalized.scopes[0].ir;
+        assert_eq!(ir.cells.len(), 3, "{op}: three two-input cells");
+        let door = &ir.outputs[0];
+        assert_eq!(
+            door.wire_length(),
+            Some(15),
+            "{op}: the door's own segment is at the limit, not past it"
+        );
+        assert_eq!(
+            door.buffer_coords()
+                .iter()
+                .map(|b| (b.coord.x, b.coord.y, b.coord.z))
+                .collect::<Vec<_>>(),
+            vec![(11, 0, 1)],
+            "{op}: one repeater on the wire out to the door",
+        );
+        assert_eq!(
+            door.local_delay_ticks(),
+            Some(1),
+            "{op}: and one tick for it"
+        );
     }
 }
 

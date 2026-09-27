@@ -363,6 +363,37 @@
   indented under another — and the rest keep the same amount in a different shape. Which files
   are refused does not change.
 
+- *(redstone)* The dust budget restarted at every cell, including the two that pass signal strength
+  through rather than restoring it. A Bedrock OR is a dust merge, and a Java comparator AND never
+  outputs more than it reads, so the dust into either of them and the dust out of it are one
+  strand. The delay pass measured each segment on its own, and four plates combined into one door
+  through three such cells were legalized with no repeater anywhere:
+
+  ```
+  logic sig.open = sig.a or sig.b or sig.c or sig.d
+  ```
+
+  ```
+  {"driver":{"kind":"cell","index":2},"pad":{"x":19,"y":0,"z":0},"wire_length":15,"local_delay_ticks":0}
+  ```
+
+  Every segment was at most 15 blocks, and the strand from `sig.a`'s pad to the door is over 20,
+  so the door never opened. `EditionCell::regenerates` now says which cells restore strength, and
+  the limit is measured along the strand: each net starts with the dust its source has already
+  spent, which is the most any one input spent on its way in, since any one of them may be the
+  only one on. Each cell that passes strength on gets a budget, the most dust it can be reached
+  over while the wire past it still reaches every sink, so a repeater the strand needs goes on
+  the wire out of the cell when there is room there and on the wire into it when there is not.
+  The door above now gets its repeater at `(11,0,1)`, on either edition:
+
+  ```
+  {"driver":{"kind":"cell","index":2},"pad":{"x":19,"y":0,"z":0},"wire_length":15,"local_delay_ticks":1,"buffer_coords":[{"port":"out","coord":{"x":11,"y":0,"z":1}}]}
+  ```
+
+  A chain of comparators sharing one sensor now takes repeaters on the wires between the cells as
+  well, and the ones on the shared trunk stand closer together than 15, because every cell it
+  feeds passes what it receives on down the chain.
+
 - *(redstone)* A buffer repeater was put on whatever coord stood 15 steps along its route, whether
   or not a repeater could work there. A repeater reads the block behind it and drives only the
   block in front of it, on its own layer, so it carries a signal only where the wire runs straight

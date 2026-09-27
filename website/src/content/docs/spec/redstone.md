@@ -213,6 +213,15 @@ The internal algorithm runs five stages:
    tree rather than per sink, and a sink is charged for the ones on its route. A stretch of dust
    past the limit with no coordinate a repeater can stand on is refused with
    `E_ATTENUATION_LIMIT`.
+
+   The limit belongs to a strand of dust, not to one segment: it runs from the last component that
+   restores strength — a sensor pad, a repeater, a torch. Two pinned cells pass on the strength
+   they receive instead: the Bedrock OR is a dust merge, and the Java comparator AND never outputs
+   more than it reads. The dust into either of them and the dust out of it are one strand, measured
+   from the input that has spent the most, since any one input may be the only one on. The
+   repeater the strand needs goes where the running total would pass 15: on the wire out of the
+   cell, or on the wire into it when the wire out has no coordinate near enough to the cell to take
+   one.
 4. **Crossing legalization.** Assigns the coordinate of every buffer repeater stage 3 counted. The
    wire needs no legalizing by this point: a repeater stands on its own net's routed path, that
    path belongs to that net alone, and no other net runs within a step of it, so there is no

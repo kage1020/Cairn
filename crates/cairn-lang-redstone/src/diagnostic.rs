@@ -142,7 +142,9 @@ pub enum DiagnosticCode {
     /// limit on which every coord turns, climbs or branches: a buffer
     /// repeater carries a signal only where the wire runs straight
     /// through it on one layer, so no chain of any length covers that
-    /// stretch.
+    /// stretch. The limit is measured along the strand, across a cell
+    /// that passes on the strength it reads, so that stretch can start
+    /// on the wire into such a cell.
     AttenuationLimit,
     /// Lowering a `logic` binding descended past
     /// [`crate::synth::MAX_LOWERING_DEPTH`]. A binding is lowered by descending into

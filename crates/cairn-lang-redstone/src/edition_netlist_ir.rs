@@ -189,6 +189,46 @@ impl EditionCell {
             | Self::BedrockMuxUnpinned => UNPINNED_BASE_DELAY_TICKS,
         }
     }
+
+    /// Whether this cell's output leaves at full strength, whatever
+    /// strength reached its inputs.
+    ///
+    /// Dust loses one unit of signal per block, so the attenuation
+    /// limit (`spec/redstone` "Place-and-route") runs from the last
+    /// component that restores strength. A torch does, and a repeater
+    /// does. Two of the pinned cells do not:
+    ///
+    /// - [`Self::BedrockTorchOr`] is a dust merge: its output is the
+    ///   strength that arrived, less the block it spends.
+    /// - [`Self::JavaComparatorAnd`] is a comparator, and a comparator
+    ///   never outputs more than its rear input carries.
+    ///
+    /// The dust before either of them and the dust after it are one
+    /// strand, and the delay pass measures them as one.
+    ///
+    /// The `*Unpinned` placeholders answer `false` for the reason
+    /// [`Self::base_delay_ticks`] answers a sentinel above every pinned
+    /// value: until a realisation is chosen, the pessimistic answer is
+    /// the one that places a repeater too many rather than one too few.
+    #[must_use]
+    pub const fn regenerates(self) -> bool {
+        match self {
+            Self::JavaRepeaterOr
+            | Self::JavaInverterTorch
+            | Self::BedrockTorchAnd
+            | Self::BedrockInverterTorch => true,
+            Self::JavaComparatorAnd
+            | Self::BedrockTorchOr
+            | Self::JavaXorUnpinned
+            | Self::JavaNandUnpinned
+            | Self::JavaNorUnpinned
+            | Self::JavaMuxUnpinned
+            | Self::BedrockXorUnpinned
+            | Self::BedrockNandUnpinned
+            | Self::BedrockNorUnpinned
+            | Self::BedrockMuxUnpinned => false,
+        }
+    }
 }
 
 /// Pessimistic base-delay sentinel returned by
