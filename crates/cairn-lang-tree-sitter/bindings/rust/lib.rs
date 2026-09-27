@@ -6,11 +6,13 @@
 
 pub use ffi::LANGUAGE;
 
-/// The one place in the workspace that lifts `unsafe_code`.
+/// The one module in the workspace allowed to lift `unsafe_code`.
 ///
-/// The workspace denies it everywhere else, and a test in `cairn-lang-core`
-/// (`unsafe_code_is_confined`) fails if any other file names the lint in an
-/// attribute. Keep this module to the declaration and the handle below.
+/// The workspace denies the lint, and `cairn-lang-core`'s
+/// `unsafe_code_is_confined` test — whose module doc states the policy —
+/// fails on an attribute lifting it anywhere outside this module, this
+/// file's crate root included. Keep this module to the declaration and the
+/// handle below.
 mod ffi {
     #![expect(
         unsafe_code,
@@ -26,9 +28,12 @@ mod ffi {
     }
 
     /// The [`tree_sitter_language::LanguageFn`] handle for the Cairn grammar.
-    // SAFETY: `tree_sitter_cairn` takes no arguments and returns a pointer to
-    // the `TSLanguage` static in `parser.c`, which is the contract
-    // `LanguageFn::from_raw` asks for.
+    // SAFETY: `from_raw` requires a language function generated from a
+    // grammar by the Tree-sitter CLI. `tree_sitter_cairn` is that: the CLI
+    // generates it from `grammar.js` into `src/parser.c`, and it returns the
+    // `TSLanguage` static there, valid for the whole program. It stays sound
+    // only while `parser.c` is regenerated with the CLI rather than edited by
+    // hand, so that its ABI matches the linked Tree-sitter runtime.
     pub const LANGUAGE: LanguageFn = unsafe { LanguageFn::from_raw(tree_sitter_cairn) };
 }
 

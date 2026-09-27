@@ -67,17 +67,19 @@ that compiler, so a change reaching for a newly stabilised API goes red there ra
 consumer's.
 
 Every crate inherits these with `[lints] workspace = true` and writes no `[lints.*]` table of its
-own: Cargo replaces the workspace policy with a crate's table rather than merging the two, so a lint
-added to the workspace later would silently skip that crate.
+own. Inheritance is opt-in per crate and all-or-nothing: a crate without that line receives none of
+the workspace lints, so a lint added to the workspace later would silently skip it.
 
-`unsafe_code` is denied workspace-wide, and lifted in exactly one place: the `ffi` module of the
-tree-sitter crate's Rust binding, which is the only way to reach the generated C parser. The level is
-`deny` rather than `forbid` because `forbid` refuses that module's `#![expect(unsafe_code)]` too;
-the `unsafe_code_is_confined` test in `cairn-lang-core` holds everything else to what `forbid`
-promised, failing on any other file that names the lint or any crate that stops inheriting the
-workspace lints. If another use case ever needs `unsafe`, it goes through a focused PR that lifts
-the lint on a single module with documented invariants and adds that file to the test, never
-`#[allow]` at a call site.
+`unsafe_code` is denied workspace-wide and lifted inside one module: `ffi` in the tree-sitter
+crate's Rust binding, which is the only way to reach the generated C parser. The level is `deny`
+rather than `forbid` because `forbid` refuses that module's `#![expect(unsafe_code)]` too. The
+`unsafe_code_is_confined` test in `cairn-lang-core` makes up the difference, over every crate
+`cargo metadata` reports as a workspace member: it fails if the workspace level is anything but
+`deny`, if a crate does not inherit the workspace lints, or if an `allow`, `expect`, `warn` or
+`cfg_attr` attribute names `unsafe_code` outside that module. Its module doc is the full statement
+of the policy and of what the test cannot see. If another use case ever needs `unsafe`, it goes
+through a focused PR that lifts the lint on a single module with documented invariants and adds
+that file and module to the test's `ALLOWED` list, never `#[allow]` at a call site.
 
 ## Build, test, lint
 
